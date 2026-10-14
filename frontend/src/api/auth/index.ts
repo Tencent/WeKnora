@@ -100,7 +100,7 @@ export interface UserPreferences {
   // 偏好；后端在 Login / RefreshToken 时校验 membership 有效后才会沿用，
   // 否则回退到 home 并清掉这个字段。传 0 给 PATCH 表示「清除偏好」。
   last_active_tenant_id?: number | null
-  // oidc_only_login 为 true 表示账号由 OIDC 自动开通且用户尚未设置已知密码。
+  // oidc_only_login 为 true 表示账号由外部身份提供商自动开通且用户尚未设置已知密码。
   oidc_only_login?: boolean
   // gallery 记录图库的个人状态：搜索激活模式与逐字段开/关（按属性 ID）。
   // 每次变更整体覆盖该块；后端会校验 mode 与 status 取值。
@@ -271,6 +271,8 @@ export interface AuthConfigResponse {
   success: boolean
   registration_mode: 'self_serve' | 'invite_register' | 'invite_only' | string
   complex_password_enabled: boolean
+  wechat_web_enabled?: boolean
+  wechat_mobile_enabled?: boolean
 }
 
 export async function getAuthConfig(): Promise<AuthConfigResponse> {
@@ -562,4 +564,11 @@ export async function registerByInvite(data: RegisterByInviteRequest): Promise<L
   } catch (error: any) {
     return { success: false, message: error.message || t('error.auth.registerFailed') }
   }
+}
+
+/** Redeem a browser-bound, one-time WeChat callback ticket. */
+export type WeChatWebCompletionResponse = Pick<LoginResponse, 'success' | 'token' | 'refresh_token'>
+
+export async function completeWeChatLogin(ticket: string): Promise<WeChatWebCompletionResponse> {
+  return await post('/api/v1/auth/wechat/complete', { ticket }) as unknown as WeChatWebCompletionResponse
 }

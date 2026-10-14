@@ -37,6 +37,9 @@
               <span class="user-management__email">{{ row.email }}</span>
             </div>
           </template>
+          <template #source="{ row }">
+            <t-tag variant="light">{{ t(`wechatSettings.sources.${row.auth_source || 'local'}`) }}</t-tag>
+          </template>
           <template #status="{ row }">
             <span class="user-management__status" :class="{ 'is-active': row.is_active }">
               <span class="user-management__status-dot" aria-hidden="true" />
@@ -140,6 +143,7 @@ const roleOptions = computed(() => [
 ])
 const columns = computed(() => [
   { colKey: 'user', title: t('system.globalSettings.userList.colUsername'), minWidth: 230 },
+  { colKey: 'source', title: t('wechatSettings.sourceColumn'), width: 100 },
   { colKey: 'role', title: t('system.globalSettings.userList.colRole'), width: 160 },
   { colKey: 'status', title: t('system.globalSettings.userList.colStatus'), width: 100 },
   { colKey: 'created', title: t('system.globalSettings.userList.colCreated'), width: 130 },

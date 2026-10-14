@@ -17,6 +17,8 @@ import (
 // 000063 knowledge multi-tags, 000093 browser authorization, 000103 message
 // artifacts.
 var versionedSQLiteTables = []string{
+	"external_identities",
+	"we_chat_login_attempts",
 	"memory_extraction_sessions",
 	"task_pending_ops",
 	"task_dead_letters",

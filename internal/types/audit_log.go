@@ -99,6 +99,9 @@ const (
 	// tenant_id=0 because the change is system-scope, not workspace-scoped.
 	AuditActionSystemSettingChanged AuditAction = "system.setting_changed"
 
+	// AuditActionWeChatAuthUpdated records a credential-redacted provider configuration change.
+	AuditActionWeChatAuthUpdated AuditAction = "system.wechat_auth_updated"
+
 	// AuditActionSystemAdminPromoted fires when a SystemAdmin grants
 	// system-administrator privileges to another user via
 	// POST /api/v1/system/admin/promote. ActorUserID is the promoter,

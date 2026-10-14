@@ -38,6 +38,7 @@ const (
 // Provides functionality for user registration, login, logout, and token management
 // through the REST API endpoints
 type AuthHandler struct {
+	weChatService    *service.WeChatAuthService
 	userService      interfaces.UserService
 	tenantService    interfaces.TenantService
 	configInfo       *config.Config
@@ -832,10 +833,16 @@ func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
 		h.configInfo,
 		h.systemSettingSvc,
 	)
+	webEnabled, mobileEnabled := false, false
+	if h.weChatService != nil {
+		webEnabled, mobileEnabled = h.weChatService.Enabled(c.Request.Context())
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success":                  true,
 		"registration_mode":        mode,
 		"complex_password_enabled": complexPasswordEnabled,
+		"wechat_web_enabled":       webEnabled,
+		"wechat_mobile_enabled":    mobileEnabled,
 	})
 }
 

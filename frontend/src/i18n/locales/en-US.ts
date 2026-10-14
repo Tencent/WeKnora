@@ -1,4 +1,33 @@
 export default {
+  wechatSettings: {
+  "title": "WeChat login",
+  "description": "Manage website and mobile WeChat login for this deployment.",
+  "source": {
+    "deployment": "Using deployment configuration",
+    "database": "Using saved configuration"
+  },
+  "priorityHint": "Saving replaces the full deployment configuration for WeChat and takes effect immediately. Disabling login preserves existing accounts.",
+  "encryptionHint": "Set a stable 32-byte SYSTEM_AES_KEY on all backend instances before storing credentials.",
+  "platformId": "Open Platform account namespace",
+  "platformHint": "Use one stable identifier only when the apps belong to the same Open Platform account. It cannot change after UnionID identities exist.",
+  "web": "Website application",
+  "mobile": "Mobile application (iOS / Android)",
+  "secretStored": "Secret configured; its value is never returned.",
+  "secretMissing": "No secret configured.",
+  "secretPlaceholder": "Leave blank to keep the current secret",
+  "clearSecret": "Clear this secret when saving",
+  "callback": "Website callback URL",
+  "callbackHint": "HTTPS, same origin as the login page, ending in /api/v1/auth/wechat/callback.",
+  "reload": "Reload saved configuration",
+  "failed": "Unable to load or save WeChat settings.",
+  "saved": "WeChat settings saved",
+  "sourceColumn": "Account source",
+  "sources": {
+    "local": "Local",
+    "oidc": "OIDC",
+    "wechat": "WeChat"
+  }
+},
   modelCatalog: {
     "title": "Model catalog",
     "description": "The model catalog defines which models are offered when adding a model, along with defaults such as context window and reasoning support. Changes here apply to all workspaces immediately.",
@@ -2663,6 +2692,8 @@ export default {
   auth: {
     login: 'Login',
     logout: 'Logout',
+    wechatLogin: 'Sign in with WeChat',
+    wechatLoginFailed: 'WeChat sign-in failed. Please retry or contact your administrator about account access.',
     oidcLogin: 'Sign in with OIDC',
     oidcLoginWithProvider: 'Sign in with {provider}',
     redirectingToOIDC: 'Redirecting to identity provider...',
@@ -4880,6 +4911,7 @@ export default {
           outcome: 'Result'
         },
         action: {
+          'system.wechat_auth_updated': 'WeChat login settings updated',
           'system.setting_changed': 'System setting changed',
           'system.admin_promoted': 'System admin granted',
           'system.api_key_created': 'Platform API key created',
@@ -7679,8 +7711,8 @@ export default {
       failed: 'Failed to change password. Check that your current password is correct.',
       policyFailed: 'New password must be 8-32 characters and include letters and numbers',
       sameAsCurrent: 'New password must differ from your current password',
-      oidcOnlyDescription: 'Your account was created via OIDC sign-in and has no known local password yet.',
-      oidcOnlyNotice: 'Ask a system administrator to reset your password, or keep signing in with OIDC. Self-service change requires your current password.',
+      oidcOnlyDescription: 'Your account was created through an external identity provider and has no known local password yet.',
+      oidcOnlyNotice: 'Ask a system administrator to reset your password, or keep signing in with an external identity provider. Self-service change requires your current password.',
     },
   },
   tenantMember: {

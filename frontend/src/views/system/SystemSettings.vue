@@ -85,7 +85,10 @@
         v-show="activeSettingsSection === 'users'" :active="activeSettingsSection === 'users'"
         @announced="saveAnnouncement = $event" />
 
-      <section id="system-settings-values" v-show="activeSettingsSection !== 'users'" role="tabpanel"
+      <WeChatSettings id="system-settings-wechat" role="tabpanel" aria-labelledby="system-settings-tab-wechat"
+        v-show="activeSettingsSection === 'wechat'" :active="activeSettingsSection === 'wechat'" />
+
+      <section id="system-settings-values" v-show="activeSettingsSection !== 'users' && activeSettingsSection !== 'wechat'" role="tabpanel"
         class="settings-section-panel" :aria-labelledby="`system-settings-tab-${activeSettingsSection}`">
         <div class="settings-group">
           <div v-for="item in activeSectionSettings" :key="item.key" class="setting-row">
@@ -252,6 +255,7 @@ import {
   type SystemSettingItem,
 } from '@/api/system'
 import UserManagement from './UserManagement.vue'
+import WeChatSettings from './WeChatSettings.vue'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { PASSWORD_SPECIAL_CHARS } from '@/utils/passwordPolicy'
 import { isSettingValueDirty, resolveCurrentSetting } from './systemSettingsEdit'
@@ -375,13 +379,13 @@ const savedKey = ref<string | null>(null)
 const saveAnnouncement = ref('')
 let savedKeyTimer: ReturnType<typeof setTimeout> | null = null
 
-type SettingsSection = 'users' | 'access' | 'tenant' | 'runtime' | 'security' | 'other'
+type SettingsSection = 'wechat' | 'users' | 'access' | 'tenant' | 'runtime' | 'security' | 'other'
 
 // Product-oriented order, rather than the registry's alphabetical key order.
 // Unknown/out-of-band rows remain visible in a conditional "Other" tab so the
 // backend's diagnostic contract is preserved when a deployment contains an
 // unexpected key.
-const SETTINGS_SECTION_KEYS: Record<Exclude<SettingsSection, 'other' | 'users'>, readonly string[]> = {
+const SETTINGS_SECTION_KEYS: Record<Exclude<SettingsSection, 'other' | 'users' | 'wechat'>, readonly string[]> = {
   access: [
     'auth.registration_mode',
     'auth.complex_password_enabled',
@@ -416,6 +420,7 @@ const sectionTabs = computed(() => {
   const tabs: { key: SettingsSection; icon: string; label: string }[] = [
     { key: 'access', icon: 'lock-on', label: t('system.globalSettings.sections.access.title') },
     { key: 'users', icon: 'usergroup', label: t('system.globalSettings.userList.rowLabel') },
+    { key: 'wechat', icon: 'logo-wechat', label: t('wechatSettings.title') },
     { key: 'tenant', icon: 'folder', label: t('system.globalSettings.sections.tenant.title') },
     { key: 'runtime', icon: 'server', label: t('system.globalSettings.sections.runtime.title') },
     { key: 'security', icon: 'secured', label: t('system.globalSettings.sections.security.title') },
@@ -449,7 +454,7 @@ watch(hasUnknownSettings, (hasUnknown) => {
 })
 
 const activeSectionSettings = computed(() => {
-  if (activeSettingsSection.value === 'users') return []
+  if (activeSettingsSection.value === 'users' || activeSettingsSection.value === 'wechat') return []
   if (activeSettingsSection.value === 'other') return unknownSettings.value
   return SETTINGS_SECTION_KEYS[activeSettingsSection.value]
     .map((key) => settingsByKey.value.get(key))
@@ -457,7 +462,8 @@ const activeSectionSettings = computed(() => {
 })
 
 const activeSectionDescription = computed(() =>
-  activeSettingsSection.value === 'users' ? t('system.globalSettings.userList.rowDesc')
+  activeSettingsSection.value === 'wechat' ? t('wechatSettings.description')
+    : activeSettingsSection.value === 'users' ? t('system.globalSettings.userList.rowDesc')
     : t(`system.globalSettings.sections.${activeSettingsSection.value}.description`),
 )
 

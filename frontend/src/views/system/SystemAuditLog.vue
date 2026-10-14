@@ -253,6 +253,7 @@ function auditActionTheme(
     case 'system.admin_promoted':
       return 'success'
     case 'system.admin_revoked':
+    case 'system.wechat_auth_updated':
     case 'system.setting_changed':
     case 'system.queue_task_retried':
     case 'system.queue_task_run_now':

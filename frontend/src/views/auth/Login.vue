@@ -225,13 +225,17 @@
                 </t-button>
               </div>
 
-              <div v-if="oidcEnabled" class="oidc-divider">
+              <div v-if="oidcEnabled || wechatEnabled" class="oidc-divider">
                 <span>{{ $t('auth.orContinueWith') }}</span>
               </div>
 
               <t-button v-if="oidcEnabled" theme="default" size="large" block :loading="oidcLoading" :disabled="loading"
                 class="oidc-button" @click="handleOIDCLogin">
                 {{ oidcLoading ? $t('auth.redirectingToOIDC') : oidcLoginText }}
+              </t-button>
+              <t-button v-if="wechatEnabled" theme="default" size="large" block :disabled="loading"
+                class="oidc-button" @click="handleWeChatLogin">
+                {{ $t('auth.wechatLogin') }}
               </t-button>
             </t-form>
 
@@ -413,6 +417,7 @@ const oidcLoading = ref(false)
 const isRegisterMode = ref(false)
 const showLanguageMenu = ref(false)
 const oidcEnabled = ref(false)
+const wechatEnabled = ref(false)
 const oidcProviderName = ref('')
 // Wait for configuration before showing a registration entry.
 const registrationMode = ref('')
@@ -615,10 +620,19 @@ const loadAuthConfig = async () => {
     const response = await getAuthConfig()
     registrationMode.value = response.success ? response.registration_mode : ''
     complexPasswordEnabled.value = response.complex_password_enabled
+    wechatEnabled.value = !!response.success && !!response.wechat_web_enabled
   } catch {
     registrationMode.value = ''
     complexPasswordEnabled.value = false
+    wechatEnabled.value = false
   }
+}
+
+const handleWeChatLogin = () => {
+  if (inviteToken.value) {
+    sessionStorage.setItem('weknora_pending_invite_token', inviteToken.value)
+  }
+  window.location.assign('/api/v1/auth/wechat/start')
 }
 
 const handleOIDCLogin = async () => {

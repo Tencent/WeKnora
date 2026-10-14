@@ -25,6 +25,7 @@ type Config struct {
 	Auth            *AuthConfig            `yaml:"auth"             json:"auth"`
 	Audit           *AuditConfig           `yaml:"audit"            json:"audit"`
 	OIDCAuth        *OIDCAuthConfig        `yaml:"oidc_auth"        json:"oidc_auth"`
+	WeChatAuth      *WeChatAuthConfig      `yaml:"wechat_auth"      json:"wechat_auth"`
 	Models          []ModelConfig          `yaml:"models"           json:"models"`
 	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"  json:"vector_database"`
 	DocReader       *DocReaderConfig       `yaml:"docreader"        json:"docreader"`
@@ -631,6 +632,7 @@ func LoadConfig() (*Config, error) {
 
 	// Validate configuration values
 	applyOIDCEnvOverrides(&cfg)
+	applyWeChatEnvOverrides(&cfg)
 	applyAgentEnvOverrides(&cfg)
 	applyKnowledgeBaseEnvOverrides(&cfg)
 	applyNetworkEnvOverrides()
@@ -666,6 +668,9 @@ func LoadConfig() (*Config, error) {
 // It checks for obviously invalid or missing values that would cause runtime failures.
 func ValidateConfig(cfg *Config) error {
 	var errs []string
+	if err := ValidateWeChatConfig(cfg.WeChatAuth); err != nil {
+		errs = append(errs, err.Error())
+	}
 
 	if cfg.OIDCAuth != nil && cfg.OIDCAuth.Enable {
 		if strings.TrimSpace(cfg.OIDCAuth.ClientID) == "" {

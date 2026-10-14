@@ -1,4 +1,33 @@
 export default {
+  wechatSettings: {
+  "title": "微信登入",
+  "description": "管理此部署的網站與行動應用程式微信登入。",
+  "source": {
+    "deployment": "目前使用部署設定",
+    "database": "目前使用已儲存的設定"
+  },
+  "priorityHint": "儲存後整組微信設定由資料庫接管並立即生效。停用登入不會刪除既有帳號。",
+  "encryptionHint": "儲存密鑰前，請在所有後端執行個體設定相同且穩定的 32 位元組 SYSTEM_AES_KEY。",
+  "platformId": "開放平台帳號識別碼",
+  "platformHint": "僅當應用程式屬於同一開放平台帳號時填寫同一個固定識別碼。已有 UnionID 關聯後無法變更。",
+  "web": "網站應用程式",
+  "mobile": "行動應用程式（iOS / Android）",
+  "secretStored": "已設定密鑰，不會顯示內容。",
+  "secretMissing": "尚未設定密鑰。",
+  "secretPlaceholder": "留空保留目前密鑰",
+  "clearSecret": "儲存時清除此密鑰",
+  "callback": "網站授權回呼網址",
+  "callbackHint": "使用 HTTPS，與登入頁同源，路徑為 /api/v1/auth/wechat/callback。",
+  "reload": "重新載入已儲存設定",
+  "failed": "無法載入或儲存微信設定。",
+  "saved": "微信設定已儲存",
+  "sourceColumn": "帳號來源",
+  "sources": {
+    "local": "本機",
+    "oidc": "OIDC",
+    "wechat": "微信"
+  }
+},
   modelCatalog: {
     "title": "模型目錄",
     "description": "模型目錄決定新增模型時可選的模型清單，以及脈絡視窗、是否支持思考等預設參數。在這裡修改後，所有空間立即生效。",
@@ -518,8 +547,8 @@ export default {
       failed: '修改密碼失敗，請檢查當前密碼是否正確',
       policyFailed: '新密碼須為 8-32 個字符，且同時包含字母和數字',
       sameAsCurrent: '新密碼不能與當前密碼相同',
-      oidcOnlyDescription: '您的帳號透過 OIDC 登入開通，尚未設定本地登入密碼。',
-      oidcOnlyNotice: '請聯絡系統管理員重設密碼，或繼續使用 OIDC 登入。自助修改密碼需要先知道當前密碼。',
+      oidcOnlyDescription: '您的帳號透過 第三方身分 登入開通，尚未設定本地登入密碼。',
+      oidcOnlyNotice: '請聯絡系統管理員重設密碼，或繼續使用 第三方身分 登入。自助修改密碼需要先知道當前密碼。',
     },
   },
   credential: {
@@ -3351,6 +3380,7 @@ export default {
           denied: '拒絕'
         },
         action: {
+          'system.wechat_auth_updated': '微信登入設定變更',
           'system.setting_changed': '系統設定變更',
           'system.admin_promoted': '授予系統管理員',
           'system.api_key_created': '建立平台 API Key',
@@ -5464,6 +5494,8 @@ export default {
   auth: {
     login: '登入',
     logout: '退出',
+    wechatLogin: '微信登入',
+    wechatLoginFailed: '微信登入失敗，請重試或聯絡管理員確認帳號存取權限',
     oidcLogin: '使用 OIDC 登入',
     oidcLoginWithProvider: '使用 {provider} 登入',
     redirectingToOIDC: '正在跳轉到身份提供商...',

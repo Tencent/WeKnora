@@ -1,4 +1,33 @@
 export default {
+  wechatSettings: {
+  "title": "WeChat 로그인",
+  "description": "이 배포의 웹 및 모바일 앱 WeChat 로그인을 관리합니다.",
+  "source": {
+    "deployment": "배포 설정 사용 중",
+    "database": "저장된 설정 사용 중"
+  },
+  "priorityHint": "저장하면 전체 WeChat 설정이 데이터베이스 설정으로 대체되어 즉시 적용됩니다. 로그인을 끄더라도 기존 계정은 삭제되지 않습니다.",
+  "encryptionHint": "자격 증명을 저장하기 전에 모든 백엔드에 동일하고 안정적인 32바이트 SYSTEM_AES_KEY를 설정하세요.",
+  "platformId": "Open Platform 계정 식별자",
+  "platformHint": "같은 Open Platform 계정에 속한 앱에만 동일한 고정 식별자를 사용하세요. UnionID 연결 후에는 변경할 수 없습니다.",
+  "web": "웹 애플리케이션",
+  "mobile": "모바일 애플리케이션 (iOS / Android)",
+  "secretStored": "시크릿이 설정되어 있으며 값은 표시되지 않습니다.",
+  "secretMissing": "시크릿이 설정되지 않았습니다.",
+  "secretPlaceholder": "현재 시크릿을 유지하려면 비워 두세요",
+  "clearSecret": "저장할 때 이 시크릿 삭제",
+  "callback": "웹 콜백 URL",
+  "callbackHint": "로그인 페이지와 동일한 출처의 HTTPS URL이며 경로는 /api/v1/auth/wechat/callback입니다.",
+  "reload": "저장된 설정 다시 불러오기",
+  "failed": "WeChat 설정을 불러오거나 저장하지 못했습니다.",
+  "saved": "WeChat 설정이 저장되었습니다",
+  "sourceColumn": "계정 출처",
+  "sources": {
+    "local": "로컬",
+    "oidc": "OIDC",
+    "wechat": "WeChat"
+  }
+},
   modelCatalog: {
     "title": "모델 카탈로그",
     "description": "모델 카탈로그는 모델 추가 시 선택할 수 있는 모델 목록과 컨텍스트 창, 추론 지원 여부 같은 기본값을 정의합니다. 여기서 변경하면 모든 워크스페이스에 즉시 적용됩니다.",
@@ -518,8 +547,8 @@ export default {
       failed: '비밀번호 변경에 실패했습니다. 현재 비밀번호를 확인해 주세요.',
       policyFailed: '새 비밀번호는 8-32자이며 문자와 숫자를 포함해야 합니다',
       sameAsCurrent: '새 비밀번호는 현재 비밀번호와 같을 수 없습니다',
-      oidcOnlyDescription: 'OIDC로 개설된 계정입니다. 로컬 로그인 비밀번호가 아직 설정되지 않았습니다.',
-      oidcOnlyNotice: '시스템 관리자에게 비밀번호 재설정을 요청하거나 OIDC로 계속 로그인하세요. 자가 변경에는 현재 비밀번호가 필요합니다.',
+      oidcOnlyDescription: '외부 인증로 개설된 계정입니다. 로컬 로그인 비밀번호가 아직 설정되지 않았습니다.',
+      oidcOnlyNotice: '시스템 관리자에게 비밀번호 재설정을 요청하거나 외부 인증로 계속 로그인하세요. 자가 변경에는 현재 비밀번호가 필요합니다.',
     },
   },
   credential: {
@@ -3349,6 +3378,7 @@ export default {
           denied: '거부'
         },
         action: {
+          'system.wechat_auth_updated': 'WeChat 로그인 설정 변경',
           'system.setting_changed': '시스템 설정 변경',
           'system.admin_promoted': '시스템 관리자 부여',
           'system.api_key_created': '플랫폼 API 키 생성',
@@ -5462,6 +5492,8 @@ export default {
   auth: {
     login: '로그인',
     logout: '로그아웃',
+    wechatLogin: 'WeChat으로 로그인',
+    wechatLoginFailed: 'WeChat 로그인에 실패했습니다. 다시 시도하거나 관리자에게 계정 접근 권한을 확인하세요.',
     oidcLogin: 'OIDC로 로그인',
     oidcLoginWithProvider: '{provider}(으)로 로그인',
     redirectingToOIDC: 'ID 공급자로 이동하는 중...',

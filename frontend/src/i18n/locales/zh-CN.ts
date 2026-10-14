@@ -1,4 +1,33 @@
 export default {
+  wechatSettings: {
+  "title": "微信登录",
+  "description": "管理此部署的网站与移动应用微信登录。",
+  "source": {
+    "deployment": "当前使用部署配置",
+    "database": "当前使用已保存的配置"
+  },
+  "priorityHint": "保存后整组微信配置由数据库接管并立即生效。关闭登录不会删除已有账号。",
+  "encryptionHint": "保存密钥前，请在所有后端实例配置相同且稳定的 32 字节 SYSTEM_AES_KEY。",
+  "platformId": "开放平台账号标识",
+  "platformHint": "仅当应用属于同一开放平台账号时填写同一个稳定标识。已有 UnionID 身份关联后不能更改。",
+  "web": "网站应用",
+  "mobile": "移动应用（iOS / Android）",
+  "secretStored": "已配置密钥，不回显内容。",
+  "secretMissing": "尚未配置密钥。",
+  "secretPlaceholder": "留空保留当前密钥",
+  "clearSecret": "保存时清除该密钥",
+  "callback": "网站授权回调地址",
+  "callbackHint": "使用 HTTPS，与登录页同源，路径为 /api/v1/auth/wechat/callback。",
+  "reload": "重新加载已保存配置",
+  "failed": "微信配置加载或保存失败。",
+  "saved": "微信配置已保存",
+  "sourceColumn": "账号来源",
+  "sources": {
+    "local": "本地",
+    "oidc": "OIDC",
+    "wechat": "微信"
+  }
+},
   modelCatalog: {
     "title": "模型目录",
     "description": "模型目录决定添加模型时可选的模型列表，以及上下文窗口、是否支持思考等默认参数。在这里修改后，所有空间立即生效。",
@@ -518,8 +547,8 @@ export default {
       failed: '修改密码失败，请检查当前密码是否正确',
       policyFailed: '新密码须为 8-32 个字符，且同时包含字母和数字',
       sameAsCurrent: '新密码不能与当前密码相同',
-      oidcOnlyDescription: '您的账号通过 OIDC 登录开通，尚未设置本地登录密码。',
-      oidcOnlyNotice: '请联系系统管理员重置密码，或继续使用 OIDC 登录。自助修改密码需要先知道当前密码。',
+      oidcOnlyDescription: '您的账号通过 第三方身份 登录开通，尚未设置本地登录密码。',
+      oidcOnlyNotice: '请联系系统管理员重置密码，或继续使用 第三方身份 登录。自助修改密码需要先知道当前密码。',
     },
   },
   credential: {
@@ -3351,6 +3380,7 @@ export default {
           denied: '拒绝'
         },
         action: {
+          'system.wechat_auth_updated': '微信登录配置变更',
           'system.setting_changed': '系统设置变更',
           'system.admin_promoted': '授予系统管理员',
           'system.api_key_created': '创建平台 API Key',
@@ -5464,6 +5494,8 @@ export default {
   auth: {
     login: '登录',
     logout: '退出',
+    wechatLogin: '微信登录',
+    wechatLoginFailed: '微信登录失败，请重试或联系管理员确认账号准入权限',
     oidcLogin: '使用 OIDC 登录',
     oidcLoginWithProvider: '使用 {provider} 登录',
     redirectingToOIDC: '正在跳转到身份提供商...',

@@ -188,13 +188,16 @@ func Logger() gin.HandlerFunc {
 			return
 		}
 
-		// Browser traffic contains credentials, page content and screenshots.
-		// Keep access metadata, but never read or buffer these request/response bodies.
-		browserTraffic := strings.HasPrefix(path, "/api/v1/local-browser/") ||
-			path == "/api/v1/me/browser" || strings.HasSuffix(path, "/local-browser")
+		// Browser traffic and WeChat authentication contain credentials. Keep
+		// access metadata, but never read or buffer their request/response bodies.
+		// This also covers malformed/truncated JSON and escaped secret field names.
+		sensitiveTraffic := strings.HasPrefix(path, "/api/v1/local-browser/") ||
+			path == "/api/v1/me/browser" || strings.HasSuffix(path, "/local-browser") ||
+			strings.HasPrefix(path, "/api/v1/auth/wechat/") || path == "/api/v1/system/admin/auth/wechat"
 		// 读取请求体（在Next之前读取，因为Next会消费body）
 		var requestBody string
-		if !browserTraffic && (c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH") {
+		if !sensitiveTraffic &&
+			(c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH") {
 			requestBody = readRequestBody(c)
 		}
 
@@ -204,7 +207,7 @@ func Logger() gin.HandlerFunc {
 			ResponseWriter: c.Writer,
 			body:           responseBody,
 		}
-		if !browserTraffic {
+		if !sensitiveTraffic {
 			c.Writer = responseWriter
 		}
 

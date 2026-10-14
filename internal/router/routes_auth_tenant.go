@@ -299,6 +299,8 @@ func RegisterSystemAdminRoutes(
 		adminRoutes.POST("/revoke", handler.RevokeSystemAdmin)
 		adminRoutes.GET("/list", handler.ListSystemAdmins)
 		adminRoutes.GET("/users", handler.ListUsers)
+		adminRoutes.GET("/auth/wechat", handler.GetWeChatSettings)
+		adminRoutes.PUT("/auth/wechat", handler.UpdateWeChatSettings)
 		adminRoutes.POST("/users/status", handler.SetUserStatus)
 		adminRoutes.POST("/users/reset-password", handler.ResetUserPassword)
 		adminRoutes.POST("/users/create", handler.CreateSystemUser)
@@ -354,4 +356,17 @@ func RegisterSystemAdminRoutes(
 				apiKeyPlatform(types.APIKeyCapabilitySystemAuditRead), auditLogHandler.ListSystemAuditLog)
 		}
 	}
+}
+
+// RegisterWeChatAuthRoutes separates native exchanges from browser callbacks.
+func RegisterWeChatAuthRoutes(r *gin.RouterGroup, h *handler.WeChatAuthHandler) {
+	if h == nil {
+		return
+	}
+	g := r.Group("/auth/wechat", middleware.PublicAuthRateLimit())
+	g.POST("/attempts", h.CreateAttempt)
+	g.POST("/exchange", h.Exchange)
+	g.POST("/complete", h.Complete)
+	g.GET("/start", h.Start)
+	g.GET("/callback", h.Callback)
 }

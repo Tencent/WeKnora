@@ -38,6 +38,7 @@ type runtimeKnowledgeCanceller interface {
 
 // SystemHandler handles system-related requests
 type SystemHandler struct {
+	weChatSettings   weChatSettingsService
 	cfg              *config.Config
 	neo4jDriver      neo4j.Driver
 	documentReader   interfaces.DocumentReader

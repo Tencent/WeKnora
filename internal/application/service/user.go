@@ -181,8 +181,13 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 		}
 	}
 
+	source := "local"
+	if req.AuthSource == "wechat" || req.AuthSource == "oidc" {
+		source = req.AuthSource
+	}
 	// Create user
 	user := &types.User{
+		AuthSource:   source,
 		ID:           uuid.New().String(),
 		Username:     req.Username,
 		Email:        req.Email,
@@ -1819,6 +1824,7 @@ func (s *userService) provisionOIDCUser(
 
 	user, err := s.Register(ctx, &types.RegisterRequest{
 		Username:           username,
+		AuthSource:         "oidc",
 		Email:              info.Email,
 		Password:           randomPassword,
 		TenantProvisioning: provisioning,

@@ -39,7 +39,10 @@ func listUsersRouter(h *SystemHandler) *gin.Engine {
 func TestListUsers_RedactedAndPaginated(t *testing.T) {
 	users := []*types.User{
 		{ID: "u1", Username: "alice", Email: "alice@example.com", IsActive: true, IsSystemAdmin: true},
-		{ID: "u2", Username: "bob", Email: "bob@example.com", IsActive: true, IsSystemAdmin: false},
+		{
+			ID: "u2", AuthSource: "wechat", Username: "bob",
+			Email: "bob@example.com", IsActive: true, IsSystemAdmin: false,
+		},
 	}
 	svc := &listUsersService{users: users, hasMore: true}
 	h := &SystemHandler{userSvc: svc}
@@ -68,6 +71,9 @@ func TestListUsers_RedactedAndPaginated(t *testing.T) {
 	}
 	if len(resp.Users) != 2 {
 		t.Fatalf("expected 2 users, got %d", len(resp.Users))
+	}
+	if resp.Users[1]["auth_source"] != "wechat" {
+		t.Fatalf("source missing from user list: %v", resp.Users[1])
 	}
 	for _, u := range resp.Users {
 		if _, ok := u["password"]; ok {

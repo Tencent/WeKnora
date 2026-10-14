@@ -130,7 +130,7 @@ func (r *userRepository) UpdateUser(ctx context.Context, user *types.User) error
 			// Keep status and the nullable tenant column out of the struct
 			// write, then explicitly store NULL for the tenant.
 			// Writing uint64(0) would violate the PostgreSQL tenant FK.
-			if err := tx.Omit("tenant_id", "is_active").Save(user).Error; err != nil {
+			if err := tx.Omit("tenant_id", "is_active", "auth_source").Save(user).Error; err != nil {
 				return err
 			}
 			return tx.Model(&types.User{}).
@@ -138,7 +138,7 @@ func (r *userRepository) UpdateUser(ctx context.Context, user *types.User) error
 				UpdateColumn("tenant_id", nil).Error
 		})
 	}
-	return r.db.WithContext(ctx).Omit("is_active").Save(user).Error
+	return r.db.WithContext(ctx).Omit("is_active", "auth_source").Save(user).Error
 }
 
 // DeleteUser deletes a user

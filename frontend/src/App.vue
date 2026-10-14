@@ -8,7 +8,7 @@ import ManualKnowledgeEditor from '@/components/manual-knowledge-editor.vue'
 import UploadConfirmHost from '@/components/UploadConfirmHost.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
-import { getCurrentUser, userInfoFromApi } from '@/api/auth'
+import { getCurrentUser, userInfoFromApi, completeWeChatLogin } from '@/api/auth'
 import { consumePendingTenantSwitchToast } from '@/utils/tenantSwitch'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
@@ -132,44 +132,51 @@ const handleGlobalOIDCCallback = async () => {
   if (!hash) return
 
   const params = new URLSearchParams(hash)
-  const oidcError = params.get('oidc_error')
-  const oidcErrorDescription = params.get('oidc_error_description')
+  const isWeChat = params.has('wechat_ticket') || params.has('wechat_error')
+  const loginFailed = isWeChat ? t('auth.wechatLoginFailed') : t('auth.oidcLoginFailed')
+  const oidcError = params.get('wechat_error') || params.get('oidc_error')
+  const oidcErrorDescription = isWeChat ? '' : params.get('oidc_error_description')
+  const wechatTicket = params.get('wechat_ticket')
   const oidcResult = params.get('oidc_result')
 
-  if (!oidcError && !oidcResult) return
+  if (!oidcError && !oidcResult && !wechatTicket) return
 
   if (oidcError) {
     clearOIDCCallbackState('/login')
     await router.replace('/login')
-    MessagePlugin.error(oidcErrorDescription || 'OIDC login failed')
+    MessagePlugin.error(oidcErrorDescription || loginFailed)
     return
   }
 
   try {
-    if (!oidcResult) {
+    if (!oidcResult && !wechatTicket) {
       clearOIDCCallbackState('/login')
       await router.replace('/login')
-      MessagePlugin.error('OIDC login failed')
+      MessagePlugin.error(loginFailed)
       return
     }
 
-    const response = decodeOIDCResult(oidcResult)
+    // Remove the short-lived ticket before asynchronous network work.
+    clearOIDCCallbackState('/')
+    const response = wechatTicket
+      ? await completeWeChatLogin(wechatTicket)
+      : decodeOIDCResult(oidcResult!)
     if (response.success) {
       clearOIDCCallbackState('/')
       await persistOIDCLoginResponse(response)
-      notifyLoginSuccess(response, t, tm, formatRole, roleIcon)
+      notifyLoginSuccess(wechatTicket ? { active_tenant: authStore.tenant, memberships: authStore.memberships } : response, t, tm, formatRole, roleIcon)
       return
     }
 
     clearOIDCCallbackState('/login')
     await router.replace('/login')
-    MessagePlugin.error(response.message || 'OIDC login failed')
+    MessagePlugin.error(response.message || loginFailed)
   } catch (error: any) {
-    console.error('Global OIDC callback handling failed:', error)
+    console.error('External login callback handling failed')
     authStore.logout()
     clearOIDCCallbackState('/login')
     await router.replace('/login')
-    MessagePlugin.error(error.message || 'OIDC login failed')
+    MessagePlugin.error(error.message || loginFailed)
   }
 }
 

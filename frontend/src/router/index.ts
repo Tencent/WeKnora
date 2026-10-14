@@ -38,7 +38,8 @@ function isSafeLiteRestoreTarget(path: string) {
 function hasPendingOIDCCallback() {
   if (typeof window === 'undefined') return false
   const hash = window.location.hash || ''
-  return hash.includes('oidc_result=') || hash.includes('oidc_error=')
+  return hash.includes('oidc_result=') || hash.includes('oidc_error=') ||
+    hash.includes('wechat_ticket=') || hash.includes('wechat_error=')
 }
 
 const router = createRouter({

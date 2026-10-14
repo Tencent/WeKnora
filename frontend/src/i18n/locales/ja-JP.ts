@@ -1,4 +1,33 @@
 export default {
+  wechatSettings: {
+  "title": "WeChat ログイン",
+  "description": "この環境の Web・モバイルアプリの WeChat ログインを管理します。",
+  "source": {
+    "deployment": "デプロイ設定を使用中",
+    "database": "保存済み設定を使用中"
+  },
+  "priorityHint": "保存すると WeChat 設定全体がデータベースの設定に置き換わり、すぐに反映されます。無効にしても既存のアカウントは削除されません。",
+  "encryptionHint": "認証情報を保存する前に、全バックエンドで同じ固定の 32 バイト SYSTEM_AES_KEY を設定してください。",
+  "platformId": "Open Platform アカウント識別子",
+  "platformHint": "同じ Open Platform アカウントに属するアプリには同じ固定識別子を指定します。UnionID の関連付け後は変更できません。",
+  "web": "Web アプリ",
+  "mobile": "モバイルアプリ（iOS / Android）",
+  "secretStored": "シークレット設定済み。値は表示されません。",
+  "secretMissing": "シークレット未設定。",
+  "secretPlaceholder": "空欄の場合は現在の値を保持",
+  "clearSecret": "保存時にシークレットを削除",
+  "callback": "Web コールバック URL",
+  "callbackHint": "ログイン画面と同じオリジンの HTTPS URL。パスは /api/v1/auth/wechat/callback。",
+  "reload": "保存済み設定を再読み込み",
+  "failed": "WeChat 設定の読み込みまたは保存に失敗しました。",
+  "saved": "WeChat 設定を保存しました",
+  "sourceColumn": "登録元",
+  "sources": {
+    "local": "ローカル",
+    "oidc": "OIDC",
+    "wechat": "WeChat"
+  }
+},
   modelCatalog: {
     "title": "モデルカタログ",
     "description": "モデルカタログは、モデル追加時に選べるモデル一覧と、コンテキスト長や思考対応などの既定値を定義します。ここでの変更はすべてのワークスペースに即時反映されます。",
@@ -2663,6 +2692,8 @@ export default {
   auth: {
     login: 'ログイン',
     logout: 'ログアウト',
+    wechatLogin: 'WeChatでログイン',
+    wechatLoginFailed: 'WeChatログインに失敗しました。再試行するか、管理者にアカウントの利用権限を確認してください。',
     oidcLogin: 'OIDCでログイン',
     oidcLoginWithProvider: '{provider}でログイン',
     redirectingToOIDC: 'IDプロバイダにリダイレクトしています...',
@@ -4880,6 +4911,7 @@ export default {
           outcome: '結果'
         },
         action: {
+          'system.wechat_auth_updated': 'WeChat ログイン設定の更新',
           'system.setting_changed': 'システム設定の変更',
           'system.admin_promoted': 'システム管理者の付与',
           'system.api_key_created': 'プラットフォームAPIキーの作成',
@@ -7679,8 +7711,8 @@ export default {
       failed: 'パスワードの変更に失敗しました。現在のパスワードが正しいか確認してください。',
       policyFailed: '新しいパスワードは8〜32文字で、英字と数字を含める必要があります',
       sameAsCurrent: '新しいパスワードは現在のパスワードと異なる必要があります',
-      oidcOnlyDescription: 'このアカウントはOIDCログインで作成されたため、ローカルパスワードが設定されていません。',
-      oidcOnlyNotice: 'システム管理者にパスワードのリセットを依頼するか、引き続きOIDCでログインしてください。セルフサービスでの変更には現在のパスワードが必要です。',
+      oidcOnlyDescription: 'このアカウントは外部認証ログインで作成されたため、ローカルパスワードが設定されていません。',
+      oidcOnlyNotice: 'システム管理者にパスワードのリセットを依頼するか、引き続き外部認証でログインしてください。セルフサービスでの変更には現在のパスワードが必要です。',
     },
   },
   tenantMember: {

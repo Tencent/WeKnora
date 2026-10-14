@@ -282,6 +282,7 @@ export function checkStorageEngine(req: StorageCheckRequest): Promise<{ data: St
 // ---- System Admin Management ----
 
 export interface SystemAdminUser {
+  auth_source: 'local' | 'oidc' | 'wechat'
   id: string
   username: string
   email: string

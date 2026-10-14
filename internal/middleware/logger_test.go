@@ -1,15 +1,70 @@
 package middleware
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/gin-gonic/gin"
 )
+
+func TestWeChatHTTPLogsOmitCredentialsAndBodies(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var logs bytes.Buffer
+	logger.SetOutput(&logs)
+	t.Cleanup(func() { logger.SetOutput(os.Stdout) })
+	r := gin.New()
+	r.Use(Logger())
+	paths := []string{
+		"/api/v1/system/admin/auth/wechat",
+		"/api/v1/auth/wechat/attempts",
+		"/api/v1/auth/wechat/exchange",
+		"/api/v1/auth/wechat/start",
+		"/api/v1/auth/wechat/callback",
+		"/api/v1/auth/wechat/complete",
+	}
+	body := `{"web":{"app\u005fsecret":"sensitive-wechat-secret"},"code":"sensitive-code",` +
+		`"code_verifier":"sensitive-verifier"}`
+	for _, path := range paths {
+		r.Any(path, func(c *gin.Context) {
+			got, err := io.ReadAll(c.Request.Body)
+			if err != nil || string(got) != body {
+				t.Fatal("logging altered the request body")
+			}
+			c.Data(http.StatusOK, "application/json", got)
+		})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(
+			http.MethodPut, path+"?code=sensitive-code&state=sensitive-state", strings.NewReader(body),
+		)
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK || w.Body.String() != body {
+			t.Fatal("logging altered the response")
+		}
+	}
+	for _, secret := range []string{
+		"sensitive-wechat-secret",
+		"sensitive-code",
+		"sensitive-state",
+		"sensitive-verifier",
+		"request_body",
+		"response_body",
+	} {
+		if strings.Contains(logs.String(), secret) {
+			t.Fatalf("credential/body appeared in access log: %s", secret)
+		}
+	}
+	if !strings.Contains(logs.String(), "/api/v1/system/admin/auth/wechat") {
+		t.Fatal("access metadata should still be logged")
+	}
+}
 
 func TestSanitizeBody(t *testing.T) {
 	cases := []struct {

@@ -45,8 +45,8 @@ type UserPreferences struct {
 	LastActiveTenantID *uint64 `json:"last_active_tenant_id,omitempty"`
 
 	// OidcOnlyLogin is set server-side when an account is auto-provisioned
-	// via OIDC with a random password the user never received. The profile
-	// UI hides self-service password rotation until the user sets a known
+	// via an external identity provider with a random password the user never
+	// received. The profile UI hides self-service password rotation until the user sets a known
 	// password via ChangePassword (which clears this flag).
 	OidcOnlyLogin *bool `json:"oidc_only_login,omitempty"`
 
@@ -107,6 +107,8 @@ func (p *UserPreferences) Scan(value interface{}) error {
 
 // User represents a user in the system
 type User struct {
+	// AuthSource records account creation origin, not the last login method.
+	AuthSource string `json:"auth_source" gorm:"type:varchar(16);not null;default:local"`
 	// Unique identifier of the user
 	ID string `json:"id"         gorm:"type:varchar(36);primaryKey"`
 	// Username of the user
@@ -212,9 +214,10 @@ type OIDCUserInfo struct {
 
 // RegisterRequest represents a registration request
 type RegisterRequest struct {
-	Username string `json:"username" binding:"required,min=2,max=50"`
-	Email    string `json:"email"    binding:"required,email"`
-	Password string `json:"password" binding:"required,min=6"`
+	AuthSource string `json:"-"` // server-only; public registration cannot select an identity provider
+	Username   string `json:"username" binding:"required,min=2,max=50"`
+	Email      string `json:"email"    binding:"required,email"`
+	Password   string `json:"password" binding:"required,min=6"`
 
 	// TenantProvisioning is server-controlled registration context. It is
 	// deliberately excluded from JSON so a public caller cannot choose its
@@ -281,6 +284,7 @@ type RegisterResponse struct {
 
 // UserInfo represents user information for API responses
 type UserInfo struct {
+	AuthSource          string          `json:"auth_source"`
 	ID                  string          `json:"id"`
 	Username            string          `json:"username"`
 	Email               string          `json:"email"`
@@ -297,6 +301,7 @@ type UserInfo struct {
 // ToUserInfo converts User to UserInfo (without sensitive data)
 func (u *User) ToUserInfo() *UserInfo {
 	return &UserInfo{
+		AuthSource:          u.AuthSource,
 		ID:                  u.ID,
 		Username:            u.Username,
 		Email:               u.Email,
