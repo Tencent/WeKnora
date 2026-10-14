@@ -176,7 +176,7 @@ Content-Type: application/json
 
 本版沿用现有会话语义：`POST /auth/logout` 撤销该用户所有会话；刷新空间依据账号的最近活跃空间，其他设备切换空间可能影响刷新结果。尚未实现设备级会话、当前设备退出、微信账号绑定 / 解绑、PersonalAgent 初始化或 iOS 客户端。移动端凭据应保存在 Keychain 等系统安全存储中。
 
-数据库迁移：PostgreSQL `000119_wechat_auth`，SQLite `000037_wechat_auth`。启用前运行常规迁移。回滚迁移会删除身份映射、已保存的微信配置和账号来源字段，因此应先关闭微信登录并按部署备份流程处理。
+数据库迁移：PostgreSQL `000120_wechat_auth`，SQLite `000038_wechat_auth`。启用前运行常规迁移。回滚迁移会删除身份映射、已保存的微信配置和账号来源字段，因此应先关闭微信登录并按部署备份流程处理。
 
 ## 官方参考
 

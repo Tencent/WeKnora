@@ -232,7 +232,7 @@ func TestWeChatSettingsPostgresMigrationRoundtrip(t *testing.T) {
 		t.Skip("set WEKNORA_WECHAT_TEST_POSTGRES_DSN for PostgreSQL migrations")
 	}
 	s := newWeChatTestService(t)
-	down, err := os.ReadFile("../../../migrations/versioned/000119_wechat_auth.down.sql")
+	down, err := os.ReadFile("../../../migrations/versioned/000120_wechat_auth.down.sql")
 	require.NoError(t, err)
 	require.NoError(t, s.db.Exec(string(down)).Error)
 	require.False(t, s.db.Migrator().HasColumn("users", "auth_source"))
@@ -244,7 +244,7 @@ func TestWeChatSettingsPostgresMigrationRoundtrip(t *testing.T) {
 VALUES ('legacy', 'legacy', 'legacy@example.com', 'hash', '{"oidc_only_login":true}')`,
 		).Error,
 	)
-	up, err := os.ReadFile("../../../migrations/versioned/000119_wechat_auth.up.sql")
+	up, err := os.ReadFile("../../../migrations/versioned/000120_wechat_auth.up.sql")
 	require.NoError(t, err)
 	require.NoError(t, s.db.Exec(string(up)).Error)
 	var user types.User

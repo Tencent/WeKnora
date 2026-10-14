@@ -75,7 +75,7 @@ func newWeChatTestService(t *testing.T) *WeChatAuthService {
 		)
 	} else {
 		require.NoError(t, db.Migrator().DropColumn(&types.User{}, "AuthSource"))
-		migration, err := os.ReadFile("../../../migrations/versioned/000119_wechat_auth.up.sql")
+		migration, err := os.ReadFile("../../../migrations/versioned/000120_wechat_auth.up.sql")
 		require.NoError(t, err)
 		require.NoError(t, db.Exec(string(migration)).Error)
 	}
