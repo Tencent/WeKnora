@@ -130,6 +130,16 @@ var protectedPatterns = []*regexp.Regexp{
 	regexp.MustCompile("(?m)[ ]*(?:\\|[^|\\n]*)+\\|[\\r\\n]+"),                                          // Table rows
 	regexp.MustCompile("(?s)```(?:\\w+)?[\\r\\n].*?```"),                                                // Fenced code blocks
 	regexp.MustCompile("`[^`\\r\\n]+`"),                                                                 // Markdown inline code
+	// HTML tables (issue #4272): merged-cell tables that NormalizeHTMLTables
+	// cannot express as GFM stay raw HTML with one <tr> per line. Protect the
+	// container lines and each row like the Markdown table rules above, so a
+	// row is never shredded by lower-priority separators (e.g. "。") and the
+	// header tracker can see "<table>" + first (header) row as one unit.
+	// Overlap resolution drops these when they sit inside fenced/inline code,
+	// which match at an earlier start.
+	regexp.MustCompile(`(?is)<table\b[^>]*>\s*(?:<thead\b[^>]*>\s*)?<tr\b[^>]*>.*?</tr\s*>`), // table open + first (header) row
+	regexp.MustCompile(`(?is)</?(?:table|thead|tbody)\b[^>]*>`),                              // container open/close tags
+	regexp.MustCompile(`(?is)<tr\b[^>]*>.*?</tr\s*>`),                                        // individual table rows
 }
 
 type span struct {
@@ -467,7 +477,15 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 		}
 		headers := ht.getHeaders()
 		headersLen := runeLen(headers)
-		if headersLen > chunkSize {
+		// A wide HTML table header (e.g. 30 columns, issue #4272) exceeds the
+		// chunk budget together with its rows; dropping it blanks out the
+		// column semantics of every following slice. The hard downstream limit
+		// is absoluteMaxSize, so carry HTML headers anyway while keeping the
+		// original discipline for Markdown headers, where a wide header means
+		// a tiny user-configured chunkSize and prepending would break the
+		// child-chunk granularity that source citation relies on.
+		wideHTMLHeader := htmlTableOpenPattern.MatchString(headers)
+		if headersLen > chunkSize && !wideHTMLHeader {
 			headers = ""
 			headersLen = 0
 		}
@@ -480,8 +498,14 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 			// Keep overlap from the end of current
 			current, curLen = computeOverlap(current, chunkOverlap, chunkSize, uLen)
 
-			// Shrink overlap further if needed to fit headers + next unit
-			if headers != "" && headersLen+uLen <= chunkSize {
+			// Shrink overlap further if needed to fit headers + next unit.
+			// Wide HTML headers (issue #4272) exceed the chunkSize budget
+			// together with the unit; as long as both fit within
+			// absoluteMaxSize the prepend path must stay reachable, so the
+			// shrink loop runs and yields an oversized but bounded chunk
+			// that still carries the header context.
+			if headers != "" && headersLen+uLen <= chunkSize ||
+				headers != "" && wideHTMLHeader && headersLen+uLen <= absoluteMaxSize {
 				for len(current) > 0 && curLen+uLen+headersLen > chunkSize {
 					curLen -= runeLen(current[0].text)
 					current = current[1:]
@@ -575,13 +599,54 @@ func headerColumnRow(header string) string {
 	return ""
 }
 
+// htmlTableOpenPattern / htmlTableClosePattern count container tags in a chunk
+// so buildChunk can detect "ends inside an HTML table". \b keeps <tablet>,
+// <tables> … out of the count.
+var (
+	htmlTableOpenPattern  = regexp.MustCompile(`(?i)<table\b`)
+	htmlTableClosePattern = regexp.MustCompile(`(?i)</table\b`)
+	htmlTheadOpenPattern  = regexp.MustCompile(`(?i)<thead\b`)
+	htmlTheadClosePattern = regexp.MustCompile(`(?i)</thead\b`)
+)
+
+// closeUnclosedHTMLTable appends the container closing tags when a chunk ends
+// inside an HTML table (issue #4272). Chunks that carry a prepended header or
+// the table opening would otherwise end mid-table and their rows would render
+// as container-less orphan text. <thead> is balanced independently: the
+// source </thead> can land in an earlier chunk than the </table>, leaving the
+// header open even when the table tag itself is already balanced. The
+// appended closers are tolerated strays when the source closes them again
+// later (renderers drop unmatched closers). Chunks without any "<table" are
+// returned untouched, which keeps Markdown tables and plain prose unaffected.
+func closeUnclosedHTMLTable(content string) string {
+	if !htmlTableOpenPattern.MatchString(content) {
+		return content
+	}
+	opens := len(htmlTableOpenPattern.FindAllString(content, -1))
+	closes := len(htmlTableClosePattern.FindAllString(content, -1))
+	theadOpens := len(htmlTheadOpenPattern.FindAllString(content, -1))
+	theadCloses := len(htmlTheadClosePattern.FindAllString(content, -1))
+	if opens <= closes && theadOpens <= theadCloses {
+		return content
+	}
+	suffix := ""
+	if theadOpens > theadCloses {
+		suffix += "</thead>"
+	}
+	if opens > closes {
+		suffix += "</table>"
+	}
+	return content + "\n" + suffix
+}
+
 func buildChunk(units []splitUnit, seq int) Chunk {
 	var sb strings.Builder
 	for _, u := range units {
 		sb.WriteString(u.text)
 	}
+	content := closeUnclosedHTMLTable(sb.String())
 	return Chunk{
-		Content: sb.String(),
+		Content: content,
 		Seq:     seq,
 		Start:   units[0].start,
 		End:     units[len(units)-1].end,
