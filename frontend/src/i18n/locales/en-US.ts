@@ -1,7 +1,6 @@
 export default {
   wechatSettings: {
   "unsaved": "Unsaved changes",
-  "discardConfirm": "Reload and discard your unsaved changes?",
   "clearConfirm": "The secret will be cleared when you save. Disable this application first, or cancel clearing, if login is still enabled.",
   "secretCleared": "Secret will be cleared on save",
   "appIdRequired": "Enter an AppID before enabling login.",
@@ -21,6 +20,9 @@ export default {
   "platformHint": "Use one stable identifier only when the apps belong to the same Open Platform account. It cannot change after UnionID identities exist.",
   "web": "Website application",
   "mobile": "Mobile application (iOS / Android)",
+  "webDesc": "Show \"Sign in with WeChat\" on the login page so users can sign in by scanning a QR code.",
+  "mobileDesc": "Lets iOS / Android clients sign in through the WeChat OpenSDK.",
+  "discard": "Discard changes",
   "secretStored": "Secret configured; its value is never returned.",
   "secretMissing": "No secret configured.",
   "secretPlaceholder": "Leave blank to keep the current secret",

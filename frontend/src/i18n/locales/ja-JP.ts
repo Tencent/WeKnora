@@ -1,7 +1,6 @@
 export default {
   wechatSettings: {
   "unsaved": "未保存の変更",
-  "discardConfirm": "再読み込みして未保存の変更を破棄しますか？",
   "clearConfirm": "保存時にシークレットを削除します。ログインが有効な場合は先に無効にするか、削除を取り消してください。",
   "secretCleared": "保存時にシークレットを削除します",
   "appIdRequired": "ログインを有効にする前に AppID を入力してください。",
@@ -21,6 +20,9 @@ export default {
   "platformHint": "同じ Open Platform アカウントに属するアプリには同じ固定識別子を指定します。UnionID の関連付け後は変更できません。",
   "web": "Web アプリ",
   "mobile": "モバイルアプリ（iOS / Android）",
+  "webDesc": "ログイン画面に「WeChat ログイン」を表示し、QR コードのスキャンでログインできるようにします。",
+  "mobileDesc": "iOS / Android クライアントが WeChat OpenSDK でログインできるようにします。",
+  "discard": "変更を破棄",
   "secretStored": "シークレット設定済み。値は表示されません。",
   "secretMissing": "シークレット未設定。",
   "secretPlaceholder": "空欄の場合は現在の値を保持",

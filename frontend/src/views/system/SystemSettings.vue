@@ -9,7 +9,8 @@
     description, and an icon tabbar with the user search alongside it.
     The settings modal supplies the outer width and padding.
 
-    General tunables auto-persist; WeChat credentials use an atomic form save. The
+    General tunables auto-persist; WeChat credentials are saved together from
+    an in-panel bar that appears only with unsaved changes. The
     commit signal differs by control type so the user isn't surprised
     by writes while they're still composing:
 
@@ -78,9 +79,7 @@
             <span>{{ tab.label }}</span>
           </button>
         </div>
-        <div id="system-users-toolbar" class="settings-toolbar" v-show="activeSettingsSection === 'users'" />
-        <div id="system-wechat-toolbar" class="settings-toolbar" v-show="activeSettingsSection === 'wechat'" />
-      </div>
+        <div id="system-users-toolbar" class="settings-toolbar" v-show="activeSettingsSection === 'users'" />      </div>
 
       <UserManagement id="system-settings-users" role="tabpanel" aria-labelledby="system-settings-tab-users"
         v-show="activeSettingsSection === 'users'" :active="activeSettingsSection === 'users'"
@@ -422,7 +421,7 @@ const sectionTabs = computed(() => {
   const tabs: { key: SettingsSection; icon: string; label: string }[] = [
     { key: 'access', icon: 'lock-on', label: t('system.globalSettings.sections.access.title') },
     { key: 'users', icon: 'usergroup', label: t('system.globalSettings.userList.rowLabel') },
-    { key: 'wechat', icon: 'logo-wechat', label: t('wechatSettings.title') },
+    { key: 'wechat', icon: 'logo-wechat-stroke', label: t('wechatSettings.title') },
     { key: 'tenant', icon: 'folder', label: t('system.globalSettings.sections.tenant.title') },
     { key: 'runtime', icon: 'server', label: t('system.globalSettings.sections.runtime.title') },
     { key: 'security', icon: 'secured', label: t('system.globalSettings.sections.security.title') },

@@ -1,7 +1,6 @@
 export default {
   wechatSettings: {
   "unsaved": "저장하지 않은 변경 사항",
-  "discardConfirm": "다시 불러오고 저장하지 않은 변경 사항을 버릴까요?",
   "clearConfirm": "저장하면 시크릿이 삭제됩니다. 로그인이 활성화되어 있으면 먼저 비활성화하거나 삭제를 취소하세요.",
   "secretCleared": "저장 시 시크릿 삭제",
   "appIdRequired": "로그인을 활성화하기 전에 AppID를 입력하세요.",
@@ -21,6 +20,9 @@ export default {
   "platformHint": "같은 Open Platform 계정에 속한 앱에만 동일한 고정 식별자를 사용하세요. UnionID 연결 후에는 변경할 수 없습니다.",
   "web": "웹 애플리케이션",
   "mobile": "모바일 애플리케이션 (iOS / Android)",
+  "webDesc": "로그인 화면에 \"WeChat 로그인\"을 표시해 QR 코드 스캔으로 로그인할 수 있게 합니다.",
+  "mobileDesc": "iOS / Android 클라이언트가 WeChat OpenSDK로 로그인할 수 있게 합니다.",
+  "discard": "변경 취소",
   "secretStored": "시크릿이 설정되어 있으며 값은 표시되지 않습니다.",
   "secretMissing": "시크릿이 설정되지 않았습니다.",
   "secretPlaceholder": "현재 시크릿을 유지하려면 비워 두세요",

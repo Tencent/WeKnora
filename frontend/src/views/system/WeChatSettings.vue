@@ -1,104 +1,103 @@
 <template>
   <section class="wechat-settings" :aria-label="t('wechatSettings.title')" :aria-busy="busy">
-    <Teleport to="#system-settings-actions">
-      <div v-show="active" class="wechat-settings__actions">
-        <span v-if="dirty" class="wechat-settings__unsaved">{{ t('wechatSettings.unsaved') }}</span>
-        <t-button variant="text" size="small" class="wechat-settings__save" :loading="saving"
-          :disabled="loading || !dirty" @click="save">
-          <template #icon><t-icon name="save" size="16px" /></template>
-          {{ t('common.save') }}
-        </t-button>
-      </div>
-    </Teleport>
-    <Teleport to="#system-wechat-toolbar">
-      <div v-show="active" class="wechat-settings__tools">
-        <t-popconfirm :visible="active && reloadConfirm" :content="t('wechatSettings.discardConfirm')"
-          :popup-props="{ trigger: 'context-menu', overlayClassName: 'wk-popover', zIndex: 3050 }"
-          placement="left" theme="warning" :confirm-btn="t('wechatSettings.reload')"
-          :cancel-btn="t('common.cancel')" @confirm="reload" @cancel="reloadConfirm = false"
-          @visible-change="(visible: boolean) => { if (!visible) reloadConfirm = false }">
-          <t-button variant="text" shape="square" :loading="loading" :disabled="busy"
-            :title="t('wechatSettings.reload')" :aria-label="t('wechatSettings.reload')" @click="requestReload">
-            <template #icon><t-icon name="refresh" size="16px" /></template>
-          </t-button>
-        </t-popconfirm>
-      </div>
-    </Teleport>
-
     <t-alert v-if="error" theme="error" :message="error" class="wechat-settings__alert" />
     <div v-if="loading && !settings" class="wechat-settings__loading">
       <t-loading :text="t('system.globalSettings.loading')" />
     </div>
+    <div v-else-if="!settings" class="wechat-settings__loading">
+      <t-button variant="outline" @click="reload">{{ t('wechatSettings.reload') }}</t-button>
+    </div>
+
     <template v-if="settings && form">
-      <div class="wechat-settings__summary">
+      <div class="wechat-settings__source">
         <t-tag variant="light" size="small">{{ t(`wechatSettings.source.${settings.source}`) }}</t-tag>
-        <p>{{ t('wechatSettings.priorityHint') }}</p>
+        <span>{{ t('wechatSettings.priorityHint') }}</span>
       </div>
       <t-alert v-if="!settings.encryption_ready" theme="warning" :message="t('wechatSettings.encryptionHint')"
         class="wechat-settings__alert" />
-      <div class="wechat-settings__row">
-        <div class="wechat-settings__info">
-          <label for="wechat-platform">{{ t('wechatSettings.platformId') }}</label>
-          <p class="desc">{{ t('wechatSettings.platformHint') }}</p>
-        </div>
-        <div class="wechat-settings__control">
-          <t-input id="wechat-platform" v-model="form.platform_id" :disabled="busy" :maxlength="128"
-            :aria-label="t('wechatSettings.platformId')" />
-        </div>
-      </div>
-      <section v-for="client in clients" :key="client" class="wechat-settings__app"
-        :aria-labelledby="`wechat-${client}-title`">
-        <div class="wechat-settings__app-header">
-          <h3 :id="`wechat-${client}-title`">{{ t(`wechatSettings.${client}`) }}</h3>
-          <t-switch v-model="form[client].enabled" :disabled="busy" :aria-label="t(`wechatSettings.${client}`)" />
-        </div>
-        <div class="wechat-settings__row">
-          <div class="wechat-settings__info"><label :for="`wechat-${client}-appid`">AppID</label></div>
-          <div class="wechat-settings__control">
-            <t-input :id="`wechat-${client}-appid`" v-model="form[client].app_id" :disabled="busy" :maxlength="128"
-              :aria-label="`${t(`wechatSettings.${client}`)} AppID`"
-              :status="fieldError(`${client}.app_id`) ? 'error' : undefined" :tips="fieldError(`${client}.app_id`)" />
-          </div>
-        </div>
+
+      <div class="wechat-settings__group">
         <div class="wechat-settings__row">
           <div class="wechat-settings__info">
-            <label :for="`wechat-${client}-secret`">AppSecret</label>
-            <p class="desc">{{ t(form[client].secret_configured ? 'wechatSettings.secretStored' : 'wechatSettings.secretMissing') }}</p>
+            <label class="setting-label" for="wechat-platform">{{ t('wechatSettings.platformId') }}</label>
+            <p class="desc">{{ t('wechatSettings.platformHint') }}</p>
           </div>
           <div class="wechat-settings__control">
-            <t-input :id="`wechat-${client}-secret`" :model-value="form[client].clearSecret ? '' : form[client].secret" type="password" autocomplete="new-password"
-              @update:model-value="(value: string | number) => updateSecret(client, value)"
-              :disabled="busy || form[client].clearSecret" :maxlength="512"
-              :aria-label="`${t(`wechatSettings.${client}`)} AppSecret`"
-              :placeholder="t(form[client].clearSecret ? 'wechatSettings.secretCleared' : form[client].secret_configured
-                ? 'wechatSettings.secretPlaceholder' : 'wechatSettings.secretMissing')"
-              :status="fieldError(`${client}.secret`) ? 'error' : undefined" :tips="fieldError(`${client}.secret`)" />
-            <div v-if="form[client].secret_configured" class="wechat-settings__credential-actions">
-              <t-button v-if="form[client].clearSecret" variant="text" size="small" :disabled="busy"
-                @click="form[client].clearSecret = false">{{ t('common.cancel') }}</t-button>
-              <t-popconfirm v-else-if="form[client].secret_configured" :visible="active && clearConfirm === client"
-                :content="t('wechatSettings.clearConfirm')" placement="left" theme="warning"
-                :popup-props="{ overlayClassName: 'wk-popover', zIndex: 3050 }"
-                :confirm-btn="{ content: t('wechatSettings.clearSecret'), theme: 'danger' }"
-                :cancel-btn="t('common.cancel')" @confirm="clearSecret(client)"
-                @visible-change="(visible: boolean) => { clearConfirm = visible ? client : null }">
-                <t-button variant="text" size="small" :disabled="busy">{{ t('wechatSettings.clearSecret') }}</t-button>
-              </t-popconfirm>
+            <t-input id="wechat-platform" v-model="form.platform_id" :disabled="busy" :maxlength="128" />
+          </div>
+        </div>
+
+        <div v-for="client in clients" :key="client" class="wechat-settings__app">
+          <div class="wechat-settings__row wechat-settings__row--toggle">
+            <div class="wechat-settings__info">
+              <span :id="`wechat-${client}-title`" class="setting-label">{{ t(`wechatSettings.${client}`) }}</span>
+              <p class="desc">{{ t(`wechatSettings.${client}Desc`) }}</p>
+            </div>
+            <div class="wechat-settings__control wechat-settings__control--switch">
+              <t-switch v-model="form[client].enabled" :disabled="busy" :aria-labelledby="`wechat-${client}-title`" />
+            </div>
+          </div>
+
+          <div v-if="form[client].enabled" class="wechat-settings__fields" role="group"
+            :aria-labelledby="`wechat-${client}-title`">
+            <div class="wechat-settings__field">
+              <label class="wechat-settings__field-label" :for="`wechat-${client}-appid`">AppID</label>
+              <div class="wechat-settings__input">
+                <t-input :id="`wechat-${client}-appid`" v-model="form[client].app_id" :disabled="busy" :maxlength="128"
+                  :status="fieldError(`${client}.app_id`) ? 'error' : undefined" />
+                <p v-if="fieldError(`${client}.app_id`)" class="wechat-settings__error">{{ fieldError(`${client}.app_id`) }}</p>
+              </div>
+            </div>
+            <div class="wechat-settings__field">
+              <div>
+                <label class="wechat-settings__field-label" :for="`wechat-${client}-secret`">AppSecret</label>
+                <p class="wechat-settings__field-desc">
+                  {{ t(form[client].secret_configured ? 'wechatSettings.secretStored' : 'wechatSettings.secretMissing') }}
+                </p>
+              </div>
+              <div class="wechat-settings__input">
+                <t-input :id="`wechat-${client}-secret`" :model-value="form[client].clearSecret ? '' : form[client].secret"
+                  type="password" autocomplete="new-password" :disabled="busy || form[client].clearSecret" :maxlength="512"
+                  :placeholder="t(form[client].clearSecret ? 'wechatSettings.secretCleared'
+                    : form[client].secret_configured ? 'wechatSettings.secretPlaceholder' : 'wechatSettings.secretMissing')"
+                  :status="fieldError(`${client}.secret`) ? 'error' : undefined"
+                  @update:model-value="(value: string | number) => updateSecret(client, value)" />
+                <p v-if="fieldError(`${client}.secret`)" class="wechat-settings__error">{{ fieldError(`${client}.secret`) }}</p>
+                <div v-if="form[client].secret_configured" class="wechat-settings__secret-actions">
+                  <t-button v-if="form[client].clearSecret" variant="text" size="small" :disabled="busy"
+                    @click="form[client].clearSecret = false">{{ t('common.cancel') }}</t-button>
+                  <t-popconfirm v-else :visible="active && clearConfirm === client"
+                    :content="t('wechatSettings.clearConfirm')" placement="left" theme="warning"
+                    :popup-props="{ overlayClassName: 'wk-popover', zIndex: 3050 }"
+                    :confirm-btn="{ content: t('wechatSettings.clearSecret'), theme: 'danger' }"
+                    :cancel-btn="t('common.cancel')" @confirm="clearSecret(client)"
+                    @visible-change="(visible: boolean) => { clearConfirm = visible ? client : null }">
+                    <t-button variant="text" size="small" :disabled="busy">{{ t('wechatSettings.clearSecret') }}</t-button>
+                  </t-popconfirm>
+                </div>
+              </div>
+            </div>
+            <div v-if="client === 'web'" class="wechat-settings__field">
+              <div>
+                <label class="wechat-settings__field-label" for="wechat-callback">{{ t('wechatSettings.callback') }}</label>
+                <p class="wechat-settings__field-desc">{{ t('wechatSettings.callbackHint') }}</p>
+              </div>
+              <div class="wechat-settings__input">
+                <t-input id="wechat-callback" v-model="form.web.callback_url" :disabled="busy" :maxlength="2048"
+                  placeholder="https://weknora.example.com/api/v1/auth/wechat/callback"
+                  :status="fieldError('web.callback_url') ? 'error' : undefined" />
+                <p v-if="fieldError('web.callback_url')" class="wechat-settings__error">{{ fieldError('web.callback_url') }}</p>
+              </div>
             </div>
           </div>
         </div>
-        <div v-if="client === 'web'" class="wechat-settings__row">
-          <div class="wechat-settings__info">
-            <label for="wechat-callback">{{ t('wechatSettings.callback') }}</label>
-            <p class="desc">{{ t('wechatSettings.callbackHint') }}</p>
-          </div>
-          <div class="wechat-settings__control">
-            <t-input id="wechat-callback" v-model="form.web.callback_url" :disabled="busy" :maxlength="2048"
-              :aria-label="t('wechatSettings.callback')" placeholder="https://weknora.example.com/api/v1/auth/wechat/callback"
-              :status="fieldError('web.callback_url') ? 'error' : undefined" :tips="fieldError('web.callback_url')" />
-          </div>
-        </div>
-      </section>
+      </div>
+
+      <div v-if="dirty || saving" class="wechat-settings__footer">
+        <span class="wechat-settings__unsaved">{{ t('wechatSettings.unsaved') }}</span>
+        <t-button variant="outline" :disabled="busy" @click="reload">{{ t('wechatSettings.discard') }}</t-button>
+        <t-button theme="primary" :loading="saving" :disabled="loading" @click="save">{{ t('common.save') }}</t-button>
+      </div>
     </template>
   </section>
 </template>
@@ -121,7 +120,6 @@ const form = ref<WeChatSettingsDraft>()
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
-const reloadConfirm = ref(false)
 const clearConfirm = ref<'web' | 'mobile' | null>(null)
 const validationAttempted = ref(false)
 const busy = computed(() => loading.value || saving.value)
@@ -141,11 +139,6 @@ function failure(err: unknown): string {
   if (e.response?.status === 409) return t('wechatSettings.conflict')
   return e.response?.data?.error || t('wechatSettings.failed')
 }
-function requestReload() {
-  if (busy.value) return
-  if (dirty.value) reloadConfirm.value = true
-  else void reload()
-}
 function updateSecret(client: 'web' | 'mobile', value: string | number) {
   if (form.value && !busy.value) form.value[client].secret = String(value)
 }
@@ -156,7 +149,6 @@ function clearSecret(client: 'web' | 'mobile') {
 }
 async function reload() {
   if (busy.value) return
-  reloadConfirm.value = false
   clearConfirm.value = null
   loading.value = true
   error.value = ''
@@ -170,14 +162,18 @@ async function reload() {
 async function save() {
   if (!form.value || !settings.value || busy.value || !dirty.value) return
   validationAttempted.value = true
-  if (Object.keys(errors.value).length) {
-    emit('announced', t(`wechatSettings.${Object.values(errors.value)[0]}`))
+  const [field, key] = Object.entries(errors.value)[0] || []
+  if (field && key) {
+    const message = t(`wechatSettings.${key}`)
+    // Fields of a disabled app are collapsed, so their errors need a visible summary.
+    const client = field.split('.')[0] as 'web' | 'mobile'
+    error.value = form.value[client]?.enabled ? '' : message
+    emit('announced', message)
     return
   }
   saving.value = true
   error.value = ''
   clearConfirm.value = null
-  reloadConfirm.value = false
   try {
     apply(await updateWeChatSettings({
       version: settings.value.version, platform_id: form.value.platform_id.trim(),
@@ -193,7 +189,7 @@ async function save() {
 }
 watch(() => props.active, active => {
   if (active && !dirty.value) void reload()
-  if (!active) { reloadConfirm.value = false; clearConfirm.value = null }
+  if (!active) clearConfirm.value = null
 }, { immediate: true })
 </script>
 
@@ -204,19 +200,22 @@ watch(() => props.active, active => {
   width: 100%;
   min-width: 0;
 
-  &__actions, &__tools { display: flex; align-items: center; gap: 8px; }
-  &__save.t-button { .settings-list-action(); gap: 6px; }
-  &__unsaved { color: var(--td-text-color-secondary); font-size: var(--app-text-sm); }
   &__alert { margin-bottom: 20px; }
   &__loading { display: flex; justify-content: center; padding: 60px 0; }
-  &__summary {
+
+  &__source {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 8px 12px;
-    margin-bottom: 24px;
-    p { margin: 0; color: var(--td-text-color-secondary); font-size: var(--app-text-md); line-height: 1.65; }
+    gap: 8px;
+    margin-bottom: 20px;
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-md);
+    line-height: 1.5;
   }
+
+  &__group { display: flex; flex-direction: column; }
+
   &__row {
     .setting-row();
     display: grid;
@@ -224,29 +223,89 @@ watch(() => props.active, active => {
     gap: 32px;
     padding: 24px 0;
   }
-  > .wechat-settings__row { padding-top: 0; border-bottom: 0; }
-  &__info { .setting-info(); max-width: none; }
+  &__group > &__row:first-child { padding-top: 0; }
+
+  &__info {
+    .setting-info();
+    max-width: none;
+    .setting-label { display: block; }
+    .desc { line-height: 1.65; max-width: 600px; }
+  }
   &__control {
     .setting-control();
     min-width: 0;
     flex-direction: column;
     align-items: stretch;
     gap: 6px;
-    :deep(.t-input) { border-radius: var(--app-radius-sm); }
+    &--switch { align-items: flex-end; }
   }
-  &__app { border-top: 1px solid var(--td-component-stroke); }
-  &__app-header {
+
+  &__app {
+    border-bottom: 1px solid var(--td-component-stroke);
+    &:last-child { border-bottom: none; }
+    .wechat-settings__row--toggle { border-bottom: none; }
+  }
+
+  &__fields {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    margin-bottom: 24px;
+    padding: 20px;
+    border-radius: var(--app-radius-md);
+    background: var(--td-bg-color-secondarycontainer);
+  }
+  &__field {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    align-items: start;
+    gap: 32px;
+  }
+  &__field-label {
+    display: block;
+    color: var(--td-text-color-primary);
+    font-size: var(--app-text-md);
+    font-weight: 500;
+    line-height: 32px;
+  }
+  &__field-desc {
+    margin: 0;
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-sm);
+    line-height: 1.5;
+  }
+  &__input { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  &__error {
+    margin: 0;
+    color: var(--td-error-color);
+    font-size: var(--app-text-sm);
+    line-height: 1.5;
+  }
+  &__secret-actions { display: flex; justify-content: flex-end; }
+
+  &__footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 24px 0 0;
-    h3 { margin: 0; color: var(--td-text-color-primary); font-size: var(--app-text-lg); font-weight: 600; }
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 12px 0;
+    border-top: 1px solid var(--td-component-stroke);
+    background: var(--td-bg-color-container);
   }
-  &__credential-actions { display: flex; justify-content: flex-end; }
+  &__unsaved {
+    margin-right: auto;
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-md);
+  }
 }
+
 @container (max-width: 700px) {
-  .wechat-settings__row { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .wechat-settings__actions { flex-wrap: wrap; justify-content: flex-end; }
+  .wechat-settings__row,
+  .wechat-settings__field { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .wechat-settings__control--switch { align-items: flex-start; }
 }
 </style>

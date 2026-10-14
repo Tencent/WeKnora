@@ -1,7 +1,6 @@
 export default {
   wechatSettings: {
   "unsaved": "有未儲存的修改",
-  "discardConfirm": "重新載入會捨棄未儲存的修改，是否繼續？",
   "clearConfirm": "儲存後將清除此密鑰。若仍啟用此應用，請先關閉登入或取消清除。",
   "secretCleared": "將在儲存時清除密鑰",
   "appIdRequired": "啟用登入前請填寫 AppID。",
@@ -21,6 +20,9 @@ export default {
   "platformHint": "僅當應用程式屬於同一開放平台帳號時填寫同一個固定識別碼。已有 UnionID 關聯後無法變更。",
   "web": "網站應用程式",
   "mobile": "行動應用程式（iOS / Android）",
+  "webDesc": "開啟後登入頁顯示「微信登入」，使用者以微信掃碼登入。",
+  "mobileDesc": "供 iOS / Android 用戶端透過微信 OpenSDK 授權登入。",
+  "discard": "放棄修改",
   "secretStored": "已設定密鑰，不會顯示內容。",
   "secretMissing": "尚未設定密鑰。",
   "secretPlaceholder": "留空保留目前密鑰",
