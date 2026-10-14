@@ -87,12 +87,12 @@ export default function Home() {
           <a className={s.textLink} href={mode.label === "Wiki" ? "#wiki" : guide(mode.link)}>了解 {mode.label} <Icon name="arrow" /></a>
         </article>)}</div>
       </section>
-      <section id="release" className={s.release} aria-labelledby="release-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><div><p className={s.eyebrow}>02 / INTRODUCING v0.8.3</p><h2 id="release-title">图文检索、原文核对与知识组织</h2><p className={s.sectionIntro}>v0.8.3 从资料中的图片出发，改进检索、阅读与知识浏览，也让每个答案更方便核对。</p></div><a className={s.textLink} href={guide("07-releases/v0.8.3")}>查看版本说明 <Icon name="arrow" /></a></div>
-        <ProductGallery id="release-gallery" label="v0.8.3" slides={releaseSlides} layout="overview" />
+      <section id="release" className={`${s.release} ${s.releaseTopic}`} aria-labelledby="release-title"><div className={s.shell}>
+        <div className={s.sectionHeading}><div><p className={s.eyebrow}>02 / INTRODUCING v0.8.3</p><h2 id="release-title">图文检索、原文核对与知识组织</h2></div><a className={s.textLink} href={guide("07-releases/v0.8.3")}>查看版本说明 <Icon name="arrow" /></a></div>
+        <ProductGallery id="release-gallery" label="v0.8.3" slides={releaseSlides} layout="compact" />
         <div className={s.releaseExtras}><span>本次更新还包括</span>{releaseExtras.map(item => <a className={s.textLink} key={item.name} href={guide(item.link)}>{item.name} <Icon name="arrow" /></a>)}</div>
       </div></section>
-      <section id="agent-workflow" className={`${s.shell} ${s.section}`} aria-labelledby="agent-workflow-title">
+      <section id="agent-workflow" className={`${s.shell} ${s.section} ${s.browserTopic}`} aria-labelledby="agent-workflow-title">
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>03 / YOUR LOCAL BROWSER</p><h2 id="agent-workflow-title">让智能体操作你自己的浏览器</h2></div><a className={s.textLink} href={guide("05-clients/09-local-browser")}>连接本机浏览器 <Icon name="arrow" /></a></div>
         <ProductGallery id="browser-gallery" label="本机浏览器" slides={browserSlides} layout="single" />
       </section>

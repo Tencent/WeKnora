@@ -272,31 +272,33 @@
 
 .ecosystemCore > :global(.wk-logo) { margin-bottom: 18px; }
 
-/* Release highlights read across the page; an enduring single topic needs no sidebar. */
-.sectionIntro { max-width: 760px; margin: 18px 0 0; color: var(--soft); font-size: 16px; line-height: 1.85; }
-.showcaseOverview, .showcaseSingle { grid-template-columns: minmax(0, 1fr); gap: 28px; }
-.showcaseOverview .showcaseList { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-top: 0; gap: 20px; }
-.showcaseOverview .showcaseItem { padding: 0; border-top: 2px solid var(--rule); border-bottom: 0; }
-.showcaseOverview .showcaseItem::before, .showcaseSingle .showcaseItem::before { display: none; }
-.showcaseOverview .showcaseItem[data-active="true"] { border-top-color: var(--gold); }
-.showcaseOverview .showcaseTitle { font-size: 17px; }
-.showcaseOverview .showcaseDetail { padding-bottom: 0; }
-.showcaseOverview .showcaseDetail p { font-size: 14px; }
+/* Keep multi-feature descriptions beside screenshots; single topics have a compact introduction. */
+.releaseTopic { padding-top: 48px; }
+.releaseTopic .sectionHeading, .browserTopic .sectionHeading { margin-bottom: 24px; }
+.releaseTopic .eyebrow, .browserTopic .eyebrow { margin-bottom: 12px; }
+.showcaseCompact { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); gap: 32px; }
+.showcaseCompact .showcaseItem h3 button { padding: 10px 0; gap: 2px; }
+.showcaseCompact .showcaseItem::before { top: 12px; bottom: 12px; }
+.showcaseCompact .showcaseTitle { font-size: 16px; }
+.showcaseCompact .showcaseDetail { padding-bottom: 14px; }
+.showcaseCompact .showcaseDetail p { font-size: 14px; line-height: 1.7; }
+.showcaseCompact .showcaseFigure { position: sticky; top: 100px; }
+.showcaseCompact .shotLayer img { max-height: calc(100svh - 240px); object-fit: contain; }
+.site .browserTopic { padding-block: 44px; }
+.showcaseSingle { grid-template-columns: minmax(0, 1fr); gap: 18px; }
 .showcaseSingle .showcaseList { border: 0; }
 .showcaseSingle .showcaseItem { border: 0; padding: 0; cursor: default; }
-.showcaseSingle .showcaseTitle { display: block; color: var(--ink); font-size: 24px; }
-.showcaseSingle .showcaseDetail { padding: 12px 0 0; }
-.showcaseSingle .showcaseDetail p { max-width: 850px; color: var(--soft); font-size: 16px; }
-.showcaseSingle .slideLinks { margin-top: 14px; }
+.showcaseSingle .showcaseItem::before { display: none; }
+.showcaseSingle .showcaseDetail { padding: 0; }
+.showcaseSingle .showcaseDetail p { max-width: 1050px; color: var(--soft); font-size: 15px; }
+.showcaseSingle .viewChips, .showcaseSingle .slideLinks { display: inline-flex; vertical-align: middle; margin: 10px 24px 0 0; }
+.showcaseSingle .showcaseFigure { width: min(100%, max(560px, calc((100svh - 300px) * 1.81818))); margin-inline: auto; }
 @media (max-width: 1100px) {
-  .showcaseOverview .showcaseList { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px 24px; }
+  .showcaseCompact { grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 24px; }
 }
 @media (max-width: 700px) {
-  .showcaseOverview .showcaseList { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-  .showcaseOverview .showcaseName { font-size: 11px; letter-spacing: 0; }
-  .showcaseOverview .showcaseTitle { font-size: 16px; }
-  .showcaseSingle .showcaseTitle { font-size: 20px; }
-}
-@media (max-width: 380px) {
-  .showcaseOverview .showcaseList { grid-template-columns: minmax(0, 1fr); }
+  .showcaseCompact { grid-template-columns: minmax(0, 1fr); }
+  .showcaseCompact .showcaseFigure { position: static; }
+  .showcaseCompact .shotLayer img { max-height: none; }
+  .showcaseSingle .showcaseFigure { width: 100%; }
 }
