@@ -97,3 +97,17 @@ func TestValidateProviderParametersSerply(t *testing.T) {
 		t.Fatal("blank Serply API key was accepted")
 	}
 }
+
+func TestValidateProviderParametersFirecrawl(t *testing.T) {
+	valid := types.WebSearchProviderParameters{APIKey: "fc-test"}
+	if err := validateProviderParameters(types.WebSearchProviderTypeFirecrawl, valid); err != nil {
+		t.Fatalf("valid Firecrawl parameters rejected: %v", err)
+	}
+	if !isValidProviderType(types.WebSearchProviderTypeFirecrawl) {
+		t.Fatal("Firecrawl provider type is not accepted")
+	}
+	blank := types.WebSearchProviderParameters{APIKey: "   "}
+	if err := validateProviderParameters(types.WebSearchProviderTypeFirecrawl, blank); err == nil {
+		t.Fatal("blank Firecrawl API key was accepted")
+	}
+}

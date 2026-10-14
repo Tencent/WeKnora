@@ -31116,7 +31116,8 @@
                 "exa",
                 "metaso",
                 "bocha",
-                "serply"
+                "serply",
+                "firecrawl"
             ],
             "x-enum-varnames": [
                 "WebSearchProviderTypeBrave",
@@ -31132,7 +31133,8 @@
                 "WebSearchProviderTypeExa",
                 "WebSearchProviderTypeMetaso",
                 "WebSearchProviderTypeBocha",
-                "WebSearchProviderTypeSerply"
+                "WebSearchProviderTypeSerply",
+                "WebSearchProviderTypeFirecrawl"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.WebSearchProviderTypeInfo": {

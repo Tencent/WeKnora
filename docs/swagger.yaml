@@ -8044,6 +8044,7 @@ definitions:
     - metaso
     - bocha
     - serply
+    - firecrawl
     type: string
     x-enum-varnames:
     - WebSearchProviderTypeBrave
@@ -8060,6 +8061,7 @@ definitions:
     - WebSearchProviderTypeMetaso
     - WebSearchProviderTypeBocha
     - WebSearchProviderTypeSerply
+    - WebSearchProviderTypeFirecrawl
   github_com_Tencent_WeKnora_internal_types.WebSearchProviderTypeInfo:
     properties:
       config_fields:
