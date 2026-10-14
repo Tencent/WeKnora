@@ -20,7 +20,7 @@ Paths below written as `public/brand/…`, `public/brands/…` and `public/produ
 
 ## Product screenshots
 
-- Release highlights also reuse `chat-source-location.png` and `chat-attachment-read.png`, copied unchanged from `../public/screenshots/` to `public/docs/_home/product/`. Five features use compact sidebar navigation beside the screenshot, expanding only the active description. The standalone browser section uses a short description, inline controls and viewport-sized task/connection screenshots.
+- Release highlights also reuse `chat-source-location.png`, copied unchanged from `../public/screenshots/` to `public/docs/_home/product/`. Four features use compact sidebar navigation beside the screenshot, with all descriptions expanded. Attachment reading is a secondary link; its screenshot remains in the documentation. The standalone browser section uses a short description, inline controls and viewport-sized task/connection screenshots.
 
 - v0.8.3 gallery: `kb-image-gallery.png` and `kb-image-vector-settings.png` are real product screenshots copied unchanged from `../public/screenshots/` to `public/docs/_home/product/`. The vector settings image shows the image-vector toggle. Replace the gallery screenshot before publication if possible: one card currently shows an image-load failure. Capture requirements are in `../README.md`.
 

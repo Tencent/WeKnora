@@ -78,7 +78,7 @@ export function ProductGallery({ id, label, slides, layout = "sidebar" }: { id: 
           <span className={s.showcaseName}><Icon name={slide.icon} />{slide.name}</span>
           <span className={s.showcaseTitle}>{slide.title}</span>
         </button></h3>}
-        <div className={s.showcaseDetail} hidden={layout === "compact" && index !== item}>
+        <div className={s.showcaseDetail}>
           <p>{slide.description}</p>
           {slide.shots.length > 1 && <div className={s.viewChips} aria-label={`${slide.name}截图`}>
             {slide.shots.map((entry, view) => {

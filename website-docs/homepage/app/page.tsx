@@ -18,6 +18,7 @@ const modes = [
   { number: "03", icon: "wiki", label: "Wiki", title: "把文档整理成 Wiki", description: "从原始文档生成相互链接的 Wiki 页面与知识图谱，支持浏览、编辑和版本回滚。", tags: ["自动组织", "知识图谱", "版本回滚"], link: "03-features/14-wiki" },
 ];
 const releaseExtras = [
+  { name: "附件按需读取", link: "03-features/18-chat-experience" },
   { name: "平台用户管理", link: "03-features/20-platform-admin" },
   { name: "Seafile 数据源", link: "03-features/25-seafile" },
   { name: "Docker 交互终端", link: "03-features/22-skills-sandbox" },
@@ -34,7 +35,6 @@ const releaseSlides = [
   { name: "多模态 Embedding", icon: "search", image: "kb-image-vector-settings", title: "文字与图片，共同检索", description: "用文字检索图片内容，找到仅靠描述和 OCR 容易遗漏的资料。支持腾讯 WeMM-Embedding、Qwen3-VL-Embedding 等模型。", alt: "多模态 Embedding：知识库图像处理中的图片向量检索开关", link: guide("03-features/02-knowledge-base") + "#multimodal-embedding" },
   { name: "Wiki 图谱", icon: "channels", image: "wiki-graph-groups", title: "知识关系，按主题展开", description: "关联页面按主题分组，在全图与分组之间切换，沿关系找到值得继续阅读的内容。", alt: "Wiki 图谱全景：主题分组、页面关系与节点类型图例", link: guide("03-features/14-wiki") + "#wiki-graph" },
   { name: "原文引用定位", icon: "trace", image: "chat-source-location", title: "从回答，回到原文", description: "点击回答中的引用，在原始文档中定位对应段落，对照上下文核对答案。", alt: "回答引用与原始文档中的对应段落高亮", link: guide("03-features/18-chat-experience") },
-  { name: "附件按需读取", icon: "file", image: "chat-attachment-read", title: "正文与图表，按需阅读", description: "上传附件后，智能体按任务需要阅读正文和文档内图片，结合两者回答问题。", alt: "智能体读取 PDF 附件正文和两张图表的过程", link: guide("03-features/18-chat-experience") },
 ].map(withAvailability);
 const browserSlides = [{
   name: "本机浏览器", icon: "browser", title: "打开网页、查询信息、填写表单",
