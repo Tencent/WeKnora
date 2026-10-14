@@ -185,9 +185,9 @@ func TestBrokerConsumeFencesOwnerAndOnlyWinsOnce(t *testing.T) {
 	require.NoError(t, b.store.Create(ctx, &types.AgentPrompt{
 		ID: "p", Status: types.AgentPromptAnswered, OwnerInstance: "new-run",
 	}))
-	require.False(t, b.Consume(ctx, "p", types.AgentPromptExecuting, "old-run"))
-	require.True(t, b.Consume(ctx, "p", types.AgentPromptExecuting, "new-run"))
-	require.False(t, b.Consume(ctx, "p", types.AgentPromptExecuting, "new-run"))
+	require.False(t, consumeWithoutError(t, b, ctx, "p", types.AgentPromptExecuting, "old-run"))
+	require.True(t, consumeWithoutError(t, b, ctx, "p", types.AgentPromptExecuting, "new-run"))
+	require.False(t, consumeWithoutError(t, b, ctx, "p", types.AgentPromptExecuting, "new-run"))
 }
 
 func TestBrokerWaiterDetachesAfterTakeoverOnSameReplica(t *testing.T) {
@@ -214,7 +214,7 @@ func TestBrokerWaiterDetachesAfterTakeoverOnSameReplica(t *testing.T) {
 	snapshot, err := b.suspensions.Get(ctx, out.Prompt.AssistantMessageID)
 	require.NoError(t, err)
 	require.NotNil(t, snapshot, "the stale waiter must not delete the new owner's state")
-	require.True(t, b.Consume(ctx, resumed.Prompt.ID, types.AgentPromptExecuting, resumed.Prompt.OwnerInstance))
+	require.True(t, consumeWithoutError(t, b, ctx, resumed.Prompt.ID, types.AgentPromptExecuting, resumed.Prompt.OwnerInstance))
 }
 
 type renewBeforeTransitionStore struct {
@@ -272,6 +272,7 @@ type flakyTransitionStore struct {
 	Store
 	failures  int
 	committed bool
+	readError bool
 }
 
 func (s *flakyTransitionStore) Transition(ctx context.Context, id string, tr types.AgentPromptTransition) (bool, error) {
@@ -285,35 +286,48 @@ func (s *flakyTransitionStore) Transition(ctx context.Context, id string, tr typ
 	return s.Store.Transition(ctx, id, tr)
 }
 
+func consumeWithoutError(t *testing.T, b *Broker, ctx context.Context, id, to, owner string) bool {
+	t.Helper()
+	ok, err := b.Consume(ctx, id, to, owner)
+	require.NoError(t, err)
+	return ok
+}
+func (s *flakyTransitionStore) Get(ctx context.Context, id string) (*types.AgentPrompt, error) {
+	if s.readError {
+		return nil, errors.New("read unavailable")
+	}
+	return s.Store.Get(ctx, id)
+}
 func TestBroker_ConsumeTellsAStoreFailureFromALostClaim(t *testing.T) {
 	saved := consumeRetryDelays
 	consumeRetryDelays = []time.Duration{0, 0}
 	t.Cleanup(func() { consumeRetryDelays = saved })
-
 	cases := map[string]struct {
-		failures  int
-		committed bool
-		rowOwner  string
-		want      bool
-		status    string
+		failures             int
+		committed, readError bool
+		rowOwner             string
+		want, wantErr        bool
+		status               string
 	}{
-		"keeps a claim that committed before its error": {failures: 1, committed: true, rowOwner: "me", want: true, status: types.AgentPromptExecuting},
-		"recovers after transient failures":             {failures: 2, rowOwner: "me", want: true, status: types.AgentPromptExecuting},
-		"keeps an owned answer through an outage":       {failures: 10, rowOwner: "me", want: true, status: types.AgentPromptAnswered},
-		"gives up an answer another owner holds":        {failures: 10, rowOwner: "other", want: false, status: types.AgentPromptAnswered},
-		"gives up without any failure when not owned":   {failures: 0, rowOwner: "other", want: false, status: types.AgentPromptAnswered},
+		"confirms a claim committed before its error":       {failures: 1, committed: true, rowOwner: "me", want: true, status: types.AgentPromptExecuting},
+		"recovers after transient failures":                 {failures: 2, rowOwner: "me", want: true, status: types.AgentPromptExecuting},
+		"does not execute through a write outage":           {failures: 10, rowOwner: "me", wantErr: true, status: types.AgentPromptAnswered},
+		"closes an unclaimed answer when storage recovers":  {failures: 3, rowOwner: "me", wantErr: true, status: types.AgentPromptFailed},
+		"does not execute through a read outage":            {failures: 10, readError: true, rowOwner: "me", wantErr: true, status: types.AgentPromptAnswered},
+		"unknown owner cannot execute or cancel a takeover": {failures: 3, readError: true, rowOwner: "other", wantErr: true, status: types.AgentPromptAnswered},
+		"gives up an answer another owner holds":            {failures: 10, rowOwner: "other", status: types.AgentPromptAnswered},
+		"gives up without any failure when not owned":       {rowOwner: "other", status: types.AgentPromptAnswered},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			ctx := t.Context()
-			store := &flakyTransitionStore{Store: NewMemoryStore(), failures: tc.failures, committed: tc.committed}
-			require.NoError(t, store.Create(ctx, &types.AgentPrompt{
-				ID: "p", Status: types.AgentPromptAnswered, OwnerInstance: tc.rowOwner,
-			}))
+			store := &flakyTransitionStore{Store: NewMemoryStore(), failures: tc.failures, committed: tc.committed, readError: tc.readError}
+			require.NoError(t, store.Create(ctx, &types.AgentPrompt{ID: "p", Status: types.AgentPromptAnswered, OwnerInstance: tc.rowOwner}))
 			b := NewBroker(store, nil)
-
-			require.Equal(t, tc.want, b.Consume(ctx, "p", types.AgentPromptExecuting, "me"))
-			row, err := store.Get(ctx, "p")
+			ok, err := b.Consume(ctx, "p", types.AgentPromptExecuting, "me")
+			require.Equal(t, tc.want, ok)
+			require.Equal(t, tc.wantErr, err != nil)
+			row, err := store.Store.Get(ctx, "p")
 			require.NoError(t, err)
 			require.Equal(t, tc.status, row.Status)
 		})

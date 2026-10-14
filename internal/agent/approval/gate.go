@@ -315,12 +315,16 @@ func (g *Gate) consumeDecision(
 	if d.Approved {
 		consumeTo = types.AgentPromptExecuting
 	}
-	if !g.broker.Consume(ctx, d.PendingID, consumeTo, d.owner) && d.answered {
+	consumed, consumeErr := g.broker.Consume(ctx, d.PendingID, consumeTo, d.owner)
+	if !consumed && d.answered {
 		d.Approved = false
 		d.ModifiedArgs = nil
 		d.Reason = "approval is no longer owned or was already consumed"
-		d.Suspended = &types.PromptSuspension{PromptID: d.PendingID, Kind: types.AgentPromptKindToolApproval, Detached: true}
-		return
+		if consumeErr == nil {
+			d.Suspended = &types.PromptSuspension{PromptID: d.PendingID, Kind: types.AgentPromptKindToolApproval, Detached: true}
+			return
+		}
+		d.Reason = "could not confirm tool approval; tool was not executed"
 	}
 	if bus == nil {
 		return
@@ -416,10 +420,13 @@ func (g *Gate) RequestOAuthAndWait(ctx context.Context, req OAuthPendingRequest)
 	}
 
 	d := oauthDecision(out)
-	if !g.broker.Consume(ctx, d.PendingID, types.AgentPromptDone, d.owner) && d.Approved {
+	consumed, consumeErr := g.broker.Consume(ctx, d.PendingID, types.AgentPromptDone, d.owner)
+	if !consumed && d.answered {
 		d.Approved = false
 		d.Reason = "authorization is no longer owned or was already consumed"
-		return d, nil
+		if consumeErr != nil {
+			d.Reason = "could not confirm authorization; tool was not retried"
+		}
 	}
 	_ = req.EventBus.Emit(context.WithoutCancel(ctx), event.Event{
 		ID:        d.PendingID + "-mcp-oauth-resolved",

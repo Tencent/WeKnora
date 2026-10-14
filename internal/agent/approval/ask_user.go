@@ -140,12 +140,16 @@ func (g *Gate) ResumeAnswer(ctx context.Context, prompt *types.AgentPrompt, bus 
 func (g *Gate) consumeAnswer(
 	ctx context.Context, a *Answer, bus *event.EventBus, sessionID, assistantMessageID, requestID string,
 ) {
-	if !g.broker.Consume(ctx, a.PromptID, types.AgentPromptDone, a.owner) && a.answered {
+	consumed, consumeErr := g.broker.Consume(ctx, a.PromptID, types.AgentPromptDone, a.owner)
+	if !consumed && a.answered {
 		a.Answered = false
 		a.Response = types.AskUserPromptResponse{}
 		a.Reason = "answer is no longer owned or was already consumed"
-		a.Suspended = &types.PromptSuspension{PromptID: a.PromptID, Kind: types.AgentPromptKindAskUser, Detached: true}
-		return
+		if consumeErr == nil {
+			a.Suspended = &types.PromptSuspension{PromptID: a.PromptID, Kind: types.AgentPromptKindAskUser, Detached: true}
+			return
+		}
+		a.Reason = "could not confirm the user answer"
 	}
 	if bus == nil {
 		return

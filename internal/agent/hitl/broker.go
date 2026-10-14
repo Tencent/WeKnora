@@ -425,40 +425,56 @@ func (b *Broker) closed(ctx context.Context, id, owner string) (Outcome, bool) {
 // AgentPromptDone otherwise. Only the winner may continue the run.
 // Prompts closed by the system are left alone.
 //
-// It reports false only when the prompt is known to have moved on: another
-// owner took it, or it was already consumed. A store failure is not a lost
-// claim; giving the run up then would strand its message, so once retries
-// run out the owner keeps the run unless the row says otherwise.
-func (b *Broker) Consume(ctx context.Context, id, to, owner string) bool {
+// A storage error is distinct from a lost claim: callers must fail the tool
+// without detaching the run, so ordinary completion can persist its message.
+// Neither outcome permits executing the authorized side effect.
+func (b *Broker) Consume(ctx context.Context, id, to, owner string) (bool, error) {
 	ctx = context.WithoutCancel(ctx)
 	transition := types.AgentPromptTransition{
 		From:          []string{types.AgentPromptAnswered},
 		To:            to,
 		ExpectedOwner: &owner,
 	}
-	var err error
+	var lastErr error
 	for attempt := 0; ; attempt++ {
-		var ok bool
-		ok, err = b.store.Transition(ctx, id, transition)
+		ok, err := b.store.Transition(ctx, id, transition)
 		if err == nil && (ok || attempt == 0) {
-			return ok
+			return ok, nil
 		}
 		if err == nil {
-			// A failed attempt may have committed before reporting its error.
+			// An earlier attempt may have committed before failing.
 			break
 		}
+		lastErr = err
 		if attempt == len(consumeRetryDelays) {
-			logger.GetLogger(ctx).Warnf("consume agent prompt %s: %v", id, err)
 			break
 		}
 		time.Sleep(consumeRetryDelays[attempt])
 	}
 	row, readErr := b.store.Get(ctx, id)
-	if readErr != nil {
-		return true
+	if readErr == nil {
+		if row == nil || row.OwnerInstance != owner {
+			return false, nil
+		}
+		if row.Status == to {
+			return true, nil
+		}
+		if row.Status != types.AgentPromptAnswered {
+			return false, nil
+		}
 	}
-	return row != nil && row.OwnerInstance == owner &&
-		(row.Status == to || (err != nil && row.Status == types.AgentPromptAnswered))
+	// We could not confirm a durable claim. Close only this owner's prompt;
+	// a concurrent takeover must not be canceled by the stale caller.
+	reason := "could not persist prompt consumption; tool was not executed"
+	_, closeErr := b.store.Transition(ctx, id, types.AgentPromptTransition{
+		From:          []string{types.AgentPromptAnswered, types.AgentPromptExecuting},
+		To:            types.AgentPromptFailed,
+		ExpectedOwner: &owner,
+		CloseReason:   &reason,
+	})
+	err := fmt.Errorf("consume agent prompt %s: %w", id, errors.Join(lastErr, readErr, closeErr))
+	logger.GetLogger(ctx).Warnf("%v", err)
+	return false, err
 }
 
 // MarkExecuted records that the side effect an answer authorized has run.

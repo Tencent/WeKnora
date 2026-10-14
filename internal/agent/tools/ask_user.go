@@ -22,7 +22,7 @@ Do not use it for anything you can look up, infer reasonably, or that you could 
 
 Shapes of a question:
 - free text: only "question";
-- choices: "options" (set "multi_select" for several, "allow_free_text" to also accept a typed answer);
+- choices: "options": ["first choice", "second choice"] — a JSON array, never an array encoded inside a string (set "multi_select" for several, "allow_free_text" to also accept a typed answer);
 - a short form: "fields" with types text, number, select or multiselect.
 
 The user may take a long time, decline, or not answer at all; then you are told so and must decide how to continue without the answer.`

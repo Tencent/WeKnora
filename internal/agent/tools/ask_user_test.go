@@ -117,3 +117,52 @@ func TestAskUserUsesCallerTenantForSharedAgent(t *testing.T) {
 	require.Len(t, asker.asked, 1)
 	require.Equal(t, uint64(1), asker.asked[0].TenantID)
 }
+
+func TestAskUserRegistryValidatesSerializedOptions(t *testing.T) {
+	malformed := `["first", "depends on "rules""]`
+	cases := []struct {
+		name    string
+		options any
+		valid   bool
+		count   int
+	}{
+		{"real array", []string{"first", `depends on "rules"`}, true, 2},
+		{"valid serialized array", `["first","second"]`, true, 2},
+		{"single text", "first", true, 1},
+		{"ordinary bracket label", []string{"[staging]"}, true, 1},
+		{"malformed serialized array", malformed, false, 0},
+		{"truncated serialized array", `["first",`, false, 0},
+		{"wrapped malformed array", []string{malformed}, false, 0},
+		{"wrapped valid array", []string{`["first","second"]`}, false, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			asker := &fakeAsker{}
+			registry := NewToolRegistry()
+			registry.RegisterTool(NewAskUserTool(asker))
+			ctx := askCtx(&ToolExecContext{Interactive: true, EventBus: event.NewEventBus()})
+			args, err := json.Marshal(map[string]any{"question": "which?", "options": tc.options})
+			require.NoError(t, err)
+			result, err := registry.ExecuteTool(ctx, ToolAskUser, args)
+			require.NoError(t, err)
+			require.Equal(t, tc.valid, result.Success, result.Error)
+			if tc.valid {
+				require.Len(t, asker.asked, 1)
+				require.Len(t, asker.asked[0].Question.Options, tc.count)
+			} else {
+				require.Empty(t, asker.asked, "invalid input must never create a prompt")
+				require.Contains(t, result.Error, "options")
+			}
+		})
+	}
+}
+
+func TestAskUserRejectsSerializedFormChoices(t *testing.T) {
+	asker := &fakeAsker{}
+	result, err := NewAskUserTool(asker).Execute(askCtx(&ToolExecContext{Interactive: true, EventBus: event.NewEventBus()}),
+		json.RawMessage(`{"question":"which?","fields":[{"name":"env","type":"select","options":["[\"dev\",\"prod\"]"]}]}`))
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.Contains(t, result.Error, "one choice per string")
+	require.Empty(t, asker.asked)
+}

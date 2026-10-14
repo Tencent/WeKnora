@@ -118,6 +118,15 @@ func validateAskUserOptions(options []string) error {
 	}
 	seen := make(map[string]bool, len(options))
 	for _, o := range options {
+		// A model may put a serialized choice list inside a one-element array.
+		// Do not display that list as a single choice, even if its JSON is valid.
+		trimmed := strings.TrimSpace(o)
+		if strings.HasPrefix(trimmed, "[") {
+			inner := strings.TrimSpace(strings.TrimPrefix(trimmed, "["))
+			if strings.HasPrefix(inner, "\"") || inner == "]" {
+				return errors.New(`options must contain one choice per string, not an encoded array; use "options": ["first choice", "second choice"]`)
+			}
+		}
 		if strings.TrimSpace(o) == "" || utf8.RuneCountInString(o) > AskUserMaxOptionLen {
 			return fmt.Errorf("options must be non-empty and at most %d characters", AskUserMaxOptionLen)
 		}

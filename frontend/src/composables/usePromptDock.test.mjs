@@ -126,7 +126,7 @@ test('Enter on a focused control keeps its native action instead of submitting t
 })
 
 test('Enter on the option just picked submits it rather than toggling it off', () => {
-  const option = { getAttribute: (name) => (name === 'role' ? 'option' : null) }
+  const option = { getAttribute: (name) => ({ role: 'option', 'aria-selected': 'true' })[name] }
   const key = {
     key: 'Enter', shiftKey: false, isComposing: false, keyCode: 13,
     target: { closest: (selector) => (selector.includes('button') ? option : null) },
@@ -149,4 +149,30 @@ test('the approval handler does not approve when Enter targets Reject', () => {
   assert.deepEqual(decisions, [])
   assert.equal(handleKey({ ...key, target: { tagName: 'SECTION', closest: () => null } }), true)
   assert.deepEqual(decisions, ['approve'])
+})
+
+
+test('Enter on an unselected option selects it instead of submitting the previous answer', () => {
+  const card = readFileSync(new URL('../views/chat/components/AskUserCard.vue', import.meta.url), 'utf8')
+  const source = card.slice(card.indexOf('const handleKey ='), card.indexOf('defineExpose'))
+  const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  for (const initial of [[], ['A']]) {
+    let selected = [...initial]
+    const submitted = []
+    const handleKey = vm.runInNewContext(compiled + '\nhandleKey', {
+      interactive: { value: true }, isSubmitKey, isTextEntry: () => false,
+      optionIndexForKey, options: { value: ['A', 'B'] },
+      submit: () => submitted.push([...selected]), toggleOption: (value) => { selected = [value] },
+    })
+    const control = { getAttribute: (name) => ({ role: 'option', 'aria-selected': String(selected.includes('B')) })[name] }
+    const key = { key: 'Enter', shiftKey: false, isComposing: false, keyCode: 13,
+      target: { closest: (selector) => selector.includes('button') ? control : null } }
+    // Returning false preserves the native button click; the dock must not
+    // preventDefault or submit A while the user's focus is on B.
+    assert.equal(handleKey(key), false)
+    assert.deepEqual(submitted, [])
+    selected = ['B'] // The button's native click selects B.
+    assert.equal(handleKey(key), true)
+    assert.deepEqual(submitted, [['B']])
+  }
 })
