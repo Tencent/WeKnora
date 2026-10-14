@@ -263,7 +263,7 @@ func (r *userRepository) SearchUsers(ctx context.Context, query string, limit in
 	// build), which has no ILIKE. The keyword is escaped either way: % and _
 	// are LIKE wildcards, so an unescaped search for "a_b" also matches "axb"
 	// and "%" returns every user.
-	isPostgres := r.db.Dialector.Name() == "postgres"
+	isPostgres := r.db.Name() == "postgres"
 	userLike := "LOWER(username) LIKE LOWER(?) ESCAPE ?"
 	mailLike := "LOWER(email) LIKE LOWER(?) ESCAPE ?"
 	if isPostgres {
