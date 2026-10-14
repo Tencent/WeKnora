@@ -1,5 +1,14 @@
 export default {
   wechatSettings: {
+  "unsaved": "有未保存的修改",
+  "discardConfirm": "重新加载会丢弃未保存的修改，是否继续？",
+  "clearConfirm": "保存后将清除该密钥。如仍启用此应用，请先关闭登录或取消清除。",
+  "secretCleared": "将在保存时清除密钥",
+  "appIdRequired": "启用登录前请填写 AppID。",
+  "secretRequired": "启用登录前请填写 AppSecret。",
+  "secretReplacementRequired": "修改 AppID 后，请填写匹配的新密钥或明确清除旧密钥。",
+  "callbackInvalid": "请输入有效的 HTTPS 回调地址，路径必须为 /api/v1/auth/wechat/callback，且不能包含账号、查询参数或片段。",
+  "conflict": "配置已被其他管理员修改。你的输入已保留，请重新加载最新配置后再编辑。",
   "title": "微信登录",
   "description": "管理此部署的网站与移动应用微信登录。",
   "source": {

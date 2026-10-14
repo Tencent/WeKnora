@@ -1,5 +1,14 @@
 export default {
   wechatSettings: {
+  "unsaved": "Unsaved changes",
+  "discardConfirm": "Reload and discard your unsaved changes?",
+  "clearConfirm": "The secret will be cleared when you save. Disable this application first, or cancel clearing, if login is still enabled.",
+  "secretCleared": "Secret will be cleared on save",
+  "appIdRequired": "Enter an AppID before enabling login.",
+  "secretRequired": "Enter an AppSecret before enabling login.",
+  "secretReplacementRequired": "When changing AppID, provide its matching secret or explicitly clear the old one.",
+  "callbackInvalid": "Enter an HTTPS callback URL with the path /api/v1/auth/wechat/callback and no credentials, query or fragment.",
+  "conflict": "Another administrator changed this configuration. Your edits are preserved; reload the latest configuration before editing again.",
   "title": "WeChat login",
   "description": "Manage website and mobile WeChat login for this deployment.",
   "source": {

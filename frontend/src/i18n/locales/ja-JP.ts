@@ -1,5 +1,14 @@
 export default {
   wechatSettings: {
+  "unsaved": "未保存の変更",
+  "discardConfirm": "再読み込みして未保存の変更を破棄しますか？",
+  "clearConfirm": "保存時にシークレットを削除します。ログインが有効な場合は先に無効にするか、削除を取り消してください。",
+  "secretCleared": "保存時にシークレットを削除します",
+  "appIdRequired": "ログインを有効にする前に AppID を入力してください。",
+  "secretRequired": "ログインを有効にする前に AppSecret を入力してください。",
+  "secretReplacementRequired": "AppID を変更する場合は対応するシークレットを入力するか、古い値を明示的に削除してください。",
+  "callbackInvalid": "HTTPS のコールバック URL を入力してください。パスは /api/v1/auth/wechat/callback とし、認証情報・クエリ・フラグメントは含めないでください。",
+  "conflict": "他の管理者が設定を変更しました。入力内容は保持されています。最新の設定を再読み込みしてから編集してください。",
   "title": "WeChat ログイン",
   "description": "この環境の Web・モバイルアプリの WeChat ログインを管理します。",
   "source": {

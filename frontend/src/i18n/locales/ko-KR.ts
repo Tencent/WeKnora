@@ -1,5 +1,14 @@
 export default {
   wechatSettings: {
+  "unsaved": "저장하지 않은 변경 사항",
+  "discardConfirm": "다시 불러오고 저장하지 않은 변경 사항을 버릴까요?",
+  "clearConfirm": "저장하면 시크릿이 삭제됩니다. 로그인이 활성화되어 있으면 먼저 비활성화하거나 삭제를 취소하세요.",
+  "secretCleared": "저장 시 시크릿 삭제",
+  "appIdRequired": "로그인을 활성화하기 전에 AppID를 입력하세요.",
+  "secretRequired": "로그인을 활성화하기 전에 AppSecret을 입력하세요.",
+  "secretReplacementRequired": "AppID를 변경할 때 해당 시크릿을 입력하거나 기존 시크릿을 명시적으로 삭제하세요.",
+  "callbackInvalid": "경로가 /api/v1/auth/wechat/callback인 HTTPS 콜백 URL을 입력하세요. 인증 정보, 쿼리, 프래그먼트는 포함할 수 없습니다.",
+  "conflict": "다른 관리자가 설정을 변경했습니다. 입력 내용은 유지됩니다. 최신 설정을 다시 불러온 후 편집하세요.",
   "title": "WeChat 로그인",
   "description": "이 배포의 웹 및 모바일 앱 WeChat 로그인을 관리합니다.",
   "source": {

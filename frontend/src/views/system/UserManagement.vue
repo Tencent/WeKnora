@@ -1,6 +1,6 @@
 <template>
   <section class="user-management" :aria-label="t('system.globalSettings.userList.rowLabel')">
-    <Teleport to="#system-users-actions">
+    <Teleport to="#system-settings-actions">
       <div v-show="active">
         <CreateUserDialog v-model:visible="createVisible" :active="active" @created="fetchPage(0)" @announced="announce">
           <t-button variant="text" size="small" class="user-management__create"

@@ -9,7 +9,7 @@
     description, and an icon tabbar with the user search alongside it.
     The settings modal supplies the outer width and padding.
 
-    UI principle: every control auto-persists, no Save button. The
+    General tunables auto-persist; WeChat credentials use an atomic form save. The
     commit signal differs by control type so the user isn't surprised
     by writes while they're still composing:
 
@@ -31,11 +31,11 @@
     <div class="section-header">
       <div class="section-header__titlewrap">
         <h2>{{ t('system.globalSettings.title') }}</h2>
-        <div id="system-users-actions" />
+        <div id="system-settings-actions" />
       </div>
       <div class="section-description">
         <p>{{ activeSectionDescription }}</p>
-        <t-popup placement="bottom-start" trigger="hover" :overlay-inner-style="{ maxWidth: '420px' }">
+        <t-popup v-if="activeSettingsSection !== 'wechat'" placement="bottom-start" trigger="hover" :overlay-inner-style="{ maxWidth: '420px' }">
           <button type="button" class="hint-trigger" :aria-label="t('system.globalSettings.priorityHint.disclosure')">
             <t-icon name="info-circle" size="16px" />
           </button>
@@ -72,13 +72,14 @@
           <button v-for="tab in sectionTabs" :id="`system-settings-tab-${tab.key}`" :key="tab.key"
             type="button" role="tab" class="settings-tab" :data-section="tab.key"
             :aria-selected="activeSettingsSection === tab.key" :tabindex="activeSettingsSection === tab.key ? 0 : -1"
-            :aria-controls="tab.key === 'users' ? 'system-settings-users' : 'system-settings-values'"
+            :aria-controls="tab.key === 'users' || tab.key === 'wechat' ? `system-settings-${tab.key}` : 'system-settings-values'"
             @click="activeSettingsSection = tab.key" @keydown="onTabKeydown($event, tab.key)">
             <t-icon :name="tab.icon" size="16px" />
             <span>{{ tab.label }}</span>
           </button>
         </div>
         <div id="system-users-toolbar" class="settings-toolbar" v-show="activeSettingsSection === 'users'" />
+        <div id="system-wechat-toolbar" class="settings-toolbar" v-show="activeSettingsSection === 'wechat'" />
       </div>
 
       <UserManagement id="system-settings-users" role="tabpanel" aria-labelledby="system-settings-tab-users"
@@ -86,7 +87,8 @@
         @announced="saveAnnouncement = $event" />
 
       <WeChatSettings id="system-settings-wechat" role="tabpanel" aria-labelledby="system-settings-tab-wechat"
-        v-show="activeSettingsSection === 'wechat'" :active="activeSettingsSection === 'wechat'" />
+        v-show="activeSettingsSection === 'wechat'" :active="activeSettingsSection === 'wechat'"
+        @announced="saveAnnouncement = $event" />
 
       <section id="system-settings-values" v-show="activeSettingsSection !== 'users' && activeSettingsSection !== 'wechat'" role="tabpanel"
         class="settings-section-panel" :aria-labelledby="`system-settings-tab-${activeSettingsSection}`">
