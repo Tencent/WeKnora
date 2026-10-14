@@ -29,6 +29,21 @@ var ErrInvalidTenantID = errors.New("invalid tenant ID")
 
 const kbTaskCleanupTimeout = 5 * time.Second
 
+// kbWikiCleanupTimeout bounds the wiki cleanup step (pages, folders,
+// revisions, issues) in the ProcessKBDelete defer. It is deliberately much
+// longer than kbTaskCleanupTimeout: the wiki DELETE statements themselves are
+// fast once unblocked (idx_wiki_pages_kb_id covers them), but the KB's wiki
+// workers may still be holding row locks at delete time. With a 5s budget the
+// statements were killed while waiting on those locks and all asynq retries
+// landed in the same lock window, leaving thousands of wiki rows orphaned
+// after MaxRetry was exhausted (see issue #4288).
+const kbWikiCleanupTimeout = 2 * time.Minute
+
+// kbDeleteTaskMaxRetry is the asynq retry budget for the KB delete task,
+// mirrored here so the defer can detect the final attempt and escalate
+// logging when the task is about to land in the dead letter queue.
+const kbDeleteTaskMaxRetry = 3
+
 // knowledgeBaseService implements the knowledge base service interface
 type knowledgeBaseService struct {
 	repo            interfaces.KnowledgeBaseRepository
@@ -891,7 +906,7 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 	}
 
 	task := asynq.NewTask(types.TypeKBDelete, payloadBytes,
-		asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(3), asynq.Timeout(2*time.Hour))
+		asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(kbDeleteTaskMaxRetry), asynq.Timeout(2*time.Hour))
 	info, err := s.asynqClient.Enqueue(task)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to enqueue KB delete task: %v", err)
@@ -923,11 +938,24 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 		// Wiki rows are independent of the vector engine. Run this on every
 		// return path — including SkipRetry — with its own timeout so a slow
 		// Redis queue scan cannot starve the SQL deletes.
-		wikiCtx, cancelWiki := context.WithTimeout(context.WithoutCancel(ctx), kbTaskCleanupTimeout)
+		//
+		// The budget is kbWikiCleanupTimeout (not the shared 5s
+		// kbTaskCleanupTimeout): the wiki DELETEs are fast once unblocked,
+		// but in-flight wiki workers may hold row locks at delete time and a
+		// 5s budget was being exhausted while waiting on them, orphaning
+		// thousands of wiki rows after retries ran out (issue #4288).
+		wikiCtx, cancelWiki := context.WithTimeout(context.WithoutCancel(ctx), kbWikiCleanupTimeout)
 		wikiErr := s.cleanupWikiForKnowledgeBase(wikiCtx, tenantID, kbID)
 		cancelWiki()
 		if wikiErr != nil {
-			logger.Warnf(ctx, "Failed to clean wiki data for KB %s: %v", kbID, wikiErr)
+			if retryCount, _ := asynq.GetRetryCount(ctx); retryCount >= kbDeleteTaskMaxRetry {
+				// Retries are exhausted; the returned error sends this task
+				// to the dead letter queue. Log at ERROR so the residual wiki
+				// rows are visible to operators instead of silently orphaned.
+				logger.Errorf(ctx, "Wiki cleanup for KB %s failed on final retry (attempt %d): %v. Wiki pages/folders/revisions/issues may be orphaned — manual cleanup required.", kbID, retryCount+1, wikiErr)
+			} else {
+				logger.Warnf(ctx, "Failed to clean wiki data for KB %s: %v", kbID, wikiErr)
+			}
 			// SkipRetry would otherwise drop the task while wiki orphans
 			// remain. Promote the wiki error so asynq retries; a later
 			// attempt that succeeds at wiki cleanup can still SkipRetry.
