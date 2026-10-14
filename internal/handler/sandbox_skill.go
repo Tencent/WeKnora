@@ -190,7 +190,7 @@ func respondSkillServiceError(c *gin.Context, err error) {
 // @Tags         SandboxConfig
 // @Produce      json
 // @Param        id   path      string  true  "Sandbox config ID"
-// @Success      200  {object}  map[string]interface{}  "Installed skills"
+// @Success      200  {object}  handler.DataResponse{data=[]handler.skillResponse}  "Installed skills"
 // @Failure      401  {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404  {object}  apperrors.AppError      "Sandbox config not found"
 // @Security     Bearer
@@ -216,7 +216,7 @@ func (h *SandboxSkillHandler) List(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      string  true  "Sandbox config ID"
 // @Param        skillId  path      string  true  "Skill ID"
-// @Success      200      {object}  map[string]interface{}  "Installed skill"
+// @Success      200      {object}  handler.DataResponse{data=handler.skillResponse}  "Installed skill"
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill not found"
 // @Security     Bearer
@@ -238,7 +238,7 @@ func (h *SandboxSkillHandler) Get(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      string  true  "Sandbox config ID"
 // @Param        skillId  path      string  true  "Skill ID"
-// @Success      200      {object}  map[string]interface{}  "Skill files"
+// @Success      200      {object}  handler.DataResponse{data=[]service.SkillFileEntry}  "Skill files"
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill or files not found"
 // @Security     Bearer
@@ -263,7 +263,7 @@ func (h *SandboxSkillHandler) ListFiles(c *gin.Context) {
 // @Param        id       path      string  true  "Sandbox config ID"
 // @Param        skillId  path      string  true  "Skill ID"
 // @Param        path     query     string  true  "Skill-root-relative file path"
-// @Success      200      {object}  map[string]interface{}  "Skill file"
+// @Success      200      {object}  handler.DataResponse{data=service.SkillFileContent}  "Skill file"
 // @Failure      400      {object}  apperrors.AppError      "Invalid path"
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill or file not found"
@@ -429,7 +429,7 @@ func (h *SandboxSkillHandler) Reinstall(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      string  true  "Sandbox config ID"
 // @Param        skillId  path      string  true  "Skill ID"
-// @Success      200      {object}  map[string]interface{}  "Stopped skill"
+// @Success      200      {object}  handler.DataResponse{data=handler.skillResponse}  "Stopped skill"
 // @Failure      400      {object}  apperrors.AppError      "Skill is not installing"
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill not found"
@@ -483,7 +483,7 @@ type skillPatchRequest struct {
 // @Param        id       path      string             true  "Sandbox config ID"
 // @Param        skillId  path      string             true  "Skill ID"
 // @Param        request  body      skillPatchRequest  true  "Fields to update"
-// @Success      200      {object}  map[string]interface{}  "Updated skill"
+// @Success      200      {object}  handler.DataResponse{data=handler.skillResponse}  "Updated skill"
 // @Failure      400      {object}  apperrors.AppError      "Invalid request"
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill not found"

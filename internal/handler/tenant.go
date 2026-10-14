@@ -532,7 +532,7 @@ func (h *TenantHandler) autoCreateTenantAPIKey(ctx context.Context) bool {
 // @Accept       json
 // @Produce      json
 // @Param        id   path      int  true  "空间ID"
-// @Success      200  {object}  map[string]interface{}  "空间详情"
+// @Success      200  {object}  handler.DataResponse{data=dto.TenantResponse}  "空间详情"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      404  {object}  errors.AppError         "空间不存在"
 // @Security     Bearer
@@ -574,7 +574,7 @@ func (h *TenantHandler) GetTenant(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      int           true  "空间ID"
 // @Param        request  body      types.Tenant  true  "空间信息"
-// @Success      200      {object}  map[string]interface{}  "更新后的空间"
+// @Success      200      {object}  handler.DataResponse{data=dto.TenantResponse}  "更新后的空间"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Router       /tenants/{id} [put]
@@ -890,7 +890,7 @@ func apiPrincipalConfigForResponse(cfg *types.APIPrincipalConfig) apiPrincipalCo
 // @Accept       json
 // @Produce      json
 // @Param        id   path      int  true  "空间ID"
-// @Success      200  {object}  map[string]interface{}  "API principal 配置"
+// @Success      200  {object}  handler.DataResponse{data=handler.apiPrincipalConfigResponse}  "API principal 配置"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      403  {object}  errors.AppError         "权限不足"
 // @Security     Bearer
@@ -925,7 +925,7 @@ func (h *TenantHandler) GetAPIPrincipalConfig(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      int                           true  "空间ID"
 // @Param        request  body      handler.apiPrincipalConfigRequest  true  "API principal 配置"
-// @Success      200      {object}  map[string]interface{}        "更新后的配置"
+// @Success      200      {object}  handler.DataResponse{data=handler.apiPrincipalConfigResponse}        "更新后的配置"
 // @Failure      400      {object}  errors.AppError               "请求参数错误"
 // @Failure      403      {object}  errors.AppError               "权限不足"
 // @Security     Bearer
@@ -1013,7 +1013,7 @@ func (h *TenantHandler) UpdateAPIPrincipalConfig(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      int                                  true  "空间ID"
 // @Param        request  body      handler.apiPrincipalTestTokenRequest true  "测试 Token 参数"
-// @Success      200      {object}  map[string]interface{}               "短期 JWT"
+// @Success 200 {object} handler.DataResponse{data=handler.apiPrincipalTestTokenResponse}               "短期 JWT"
 // @Failure      400      {object}  errors.AppError                      "请求参数错误"
 // @Failure      403      {object}  errors.AppError                      "权限不足"
 // @Security     Bearer
@@ -1116,7 +1116,7 @@ func validateAPIPrincipalExternalUserID(id string) error {
 // @Accept       json
 // @Produce      json
 // @Param        id   path      int  true  "空间ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Success      200  {object}  handler.MessageResponse  "删除成功"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Router       /tenants/{id} [delete]
@@ -1158,7 +1158,7 @@ func (h *TenantHandler) DeleteTenant(c *gin.Context) {
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "空间列表"
+// @Success      200  {object}  handler.DataResponse{data=handler.TenantListData}  "空间列表"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
 // @Router       /tenants [get]
@@ -1185,7 +1185,7 @@ func (h *TenantHandler) ListTenants(c *gin.Context) {
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "所有空间列表"
+// @Success      200  {object}  handler.DataResponse{data=handler.TenantListData}  "所有空间列表"
 // @Failure      403  {object}  errors.AppError         "权限不足"
 // @Security     Bearer
 // @Router       /tenants/all [get]
@@ -1225,8 +1225,8 @@ func (h *TenantHandler) ListAllTenants(c *gin.Context) {
 // @Param        keyword    query     string  false  "搜索关键词"
 // @Param        tenant_id  query     int     false  "空间ID筛选"
 // @Param        page       query     int     false  "页码"  default(1)
-// @Param        page_size  query     int     false  "每页数量"  default(20)
-// @Success      200        {object}  map[string]interface{}  "搜索结果"
+// @Param        page_size  query     int     false  "每页数量"  default(20)  minimum(1)  maximum(100)
+// @Success      200        {object}  handler.DataResponse{data=handler.TenantSearchData}  "搜索结果"
 // @Failure      403        {object}  errors.AppError         "权限不足"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -1445,7 +1445,7 @@ func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "网络搜索配置"
+// @Success      200  {object}  handler.DataResponse{data=types.WebSearchConfig}  "网络搜索配置"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -1597,7 +1597,7 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "提示词模板配置"
+// @Success      200  {object}  handler.DataResponse{data=config.PromptTemplatesConfig}  "提示词模板配置"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth

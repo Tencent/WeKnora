@@ -87,7 +87,7 @@ func (h *MCPServiceHandler) mcpServiceResponses(
 // @Accept       json
 // @Produce      json
 // @Param        request  body      types.MCPService  true  "MCP服务配置"
-// @Success      200      {object}  map[string]interface{}  "创建的MCP服务"
+// @Success      200      {object}  handler.DataResponse{data=dto.MCPServiceResponse}  "创建的MCP服务"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -146,7 +146,7 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 // @Produce      json
 // @Param        agent_id               query  string  false  "Agent ID; needs agent_source_tenant_id"
 // @Param        agent_source_tenant_id query  int     false  "Shared agent source workspace"
-// @Success      200  {object}  map[string]interface{}  "MCP服务列表"
+// @Success      200  {object}  handler.DataResponse{data=[]dto.MCPServiceResponse}  "MCP服务列表"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      403  {object}  errors.AppError         "无权使用该共享智能体"
 // @Security     Bearer
@@ -238,7 +238,7 @@ func (h *MCPServiceHandler) listSharedAgentMCPServices(c *gin.Context, agent *ty
 // @Accept       json
 // @Produce      json
 // @Param        id   path      string  true  "MCP服务ID"
-// @Success      200  {object}  map[string]interface{}  "MCP服务详情"
+// @Success      200  {object}  handler.DataResponse{data=dto.MCPServiceResponse}  "MCP服务详情"
 // @Failure      404  {object}  errors.AppError         "服务不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -278,7 +278,7 @@ func (h *MCPServiceHandler) GetMCPService(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      string  true  "MCP服务ID"
 // @Param        request  body      object  true  "更新字段"
-// @Success      200      {object}  map[string]interface{}  "更新后的MCP服务"
+// @Success      200      {object}  handler.DataResponse{data=dto.MCPServiceResponse}  "更新后的MCP服务"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -494,7 +494,7 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id   path      string  true  "MCP服务ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Success      200  {object}  handler.MessageResponse  "删除成功"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -530,7 +530,7 @@ func (h *MCPServiceHandler) DeleteMCPService(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id   path      string  true  "MCP服务ID"
-// @Success      200  {object}  map[string]interface{}  "测试结果"
+// @Success      200  {object}  handler.DataResponse{data=types.MCPTestResult}  "测试结果"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -575,7 +575,7 @@ func (h *MCPServiceHandler) TestMCPService(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id   path      string  true  "MCP服务ID"
-// @Success      200  {object}  map[string]interface{}  "工具列表"
+// @Success      200  {object}  handler.DataResponse{data=[]types.MCPTool}  "工具列表"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -611,7 +611,7 @@ func (h *MCPServiceHandler) GetMCPServiceTools(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id   path      string  true  "MCP服务ID"
-// @Success      200  {object}  map[string]interface{}  "资源列表"
+// @Success      200  {object}  handler.DataResponse{data=[]types.MCPResource}  "资源列表"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -685,7 +685,7 @@ type setMCPToolApprovalBody struct {
 // @Param        id         path      string                  true  "MCP 服务 ID"
 // @Param        tool_name  path      string                  true  "工具名"
 // @Param        request    body      map[string]interface{}  true  "{require_approval?: bool, enabled?: bool}"
-// @Success      200        {object}  map[string]interface{}  "更新结果"
+// @Success      200        {object}  handler.SuccessResponse  "更新结果"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Failure      404        {object}  errors.AppError         "MCP 服务或工具不存在"
 // @Security     Bearer

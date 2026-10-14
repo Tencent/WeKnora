@@ -70,7 +70,7 @@ type SkillInfoResponse struct {
 // @Param        sandbox_config_id      query  string  false  "Sandbox config ID; ignored for a shared agent"
 // @Param        agent_id               query  string  false  "Agent ID; needs agent_source_tenant_id"
 // @Param        agent_source_tenant_id query  int     false  "Shared agent source workspace"
-// @Success      200  {object}  map[string]interface{}  "Skills列表"
+// @Success      200  {object}  handler.ListSkillsResponse  "Skills列表"
 // @Failure      403  {object}  errors.AppError         "无权使用该共享智能体"
 // @Security     Bearer
 // @Security     ApiKeyAuth

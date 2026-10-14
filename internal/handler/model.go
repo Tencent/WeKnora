@@ -63,7 +63,7 @@ type CreateModelRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      CreateModelRequest  true  "模型信息"
-// @Success      201      {object}  map[string]interface{}  "创建的模型"
+// @Success      201      {object}  handler.DataResponse{data=dto.ModelResponse}  "创建的模型"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -146,7 +146,7 @@ type CopyModelRequest struct {
 // @Produce      json
 // @Param        id       path      string           true  "源模型ID"
 // @Param        request  body      CopyModelRequest true  "副本展示名"
-// @Success      201      {object}  map[string]interface{}  "复制的模型"
+// @Success      201      {object}  handler.DataResponse{data=dto.ModelResponse}  "复制的模型"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      404      {object}  errors.AppError         "模型不存在"
 // @Security     Bearer
@@ -208,7 +208,7 @@ func (h *ModelHandler) CopyModel(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id   path      string  true  "模型ID"
-// @Success      200  {object}  map[string]interface{}  "模型详情"
+// @Success      200  {object}  handler.DataResponse{data=dto.ModelResponse}  "模型详情"
 // @Failure      404  {object}  errors.AppError         "模型不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -252,7 +252,7 @@ func (h *ModelHandler) GetModel(c *gin.Context) {
 // @Tags         模型管理
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "模型列表"
+// @Success      200  {object}  handler.DataResponse{data=[]dto.ModelResponse}  "模型列表"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -741,7 +741,7 @@ type UpdateModelRequest struct {
 // @Produce      json
 // @Param        id       path      string              true  "模型ID"
 // @Param        request  body      UpdateModelRequest  true  "更新信息"
-// @Success      200      {object}  map[string]interface{}  "更新后的模型"
+// @Success      200      {object}  handler.DataResponse{data=dto.ModelResponse}  "更新后的模型"
 // @Failure      404      {object}  errors.AppError         "模型不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -874,7 +874,7 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id   path      string  true  "模型ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Success      200  {object}  handler.MessageResponse  "删除成功"
 // @Failure      400  {object}  errors.AppError         "模型仍被知识库、智能体或长期记忆引用"
 // @Failure      404  {object}  errors.AppError         "模型不存在"
 // @Security     Bearer

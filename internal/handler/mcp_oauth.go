@@ -152,7 +152,7 @@ type mcpOAuthAssertionRequest struct {
 // @Produce      json
 // @Param        id       path      string                  true  "MCP 服务 ID"
 // @Param        request  body      map[string]interface{}  true  "{assertion: string}"
-// @Success      200      {object}  map[string]interface{}  "与 oauth/status 相同"
+// @Success      200      {object}  handler.DataResponse{data=mcp.OAuthAuthorizationStatus}  "与 oauth/status 相同"
 // @Failure      400      {object}  errors.AppError         "断言无效或被授权服务器拒绝"
 // @Failure      404      {object}  errors.AppError
 // @Security     Bearer
@@ -387,7 +387,7 @@ type resolveMCPOAuthBody struct {
 // @Produce      json
 // @Param        pending_id  path  string                  true  "待授权 ID"
 // @Param        request     body  map[string]interface{}  true  "{service_id: string}"
-// @Success      200         {object}  map[string]interface{}
+// @Success      200         {object}  handler.SuccessResponse
 // @Failure      400         {object}  errors.AppError
 // @Failure      409         {object}  errors.AppError  "用户尚未完成授权"
 // @Security     Bearer
@@ -496,7 +496,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 // @Tags         MCP服务
 // @Produce      json
 // @Param        pending_id  path  string  true  "待授权 ID"
-// @Success      200         {object}  map[string]interface{}
+// @Success      200         {object}  handler.SuccessResponse
 // @Failure      404         {object}  errors.AppError
 // @Security     Bearer
 // @Router       /agent/mcp-oauth-resolutions/{pending_id}/cancel [post]

@@ -171,7 +171,7 @@ func (h *SkillHandler) InstallCatalog(c *gin.Context) {
 // @Description  Refused while any sandbox still has an installation of this skill.
 // @Tags         Skills
 // @Param        id   path  string  true  "Catalog skill ID"
-// @Success      200  {object}  map[string]interface{}
+// @Success      200  {object}  handler.SuccessResponse
 // @Router       /skills/catalog/{id} [delete]
 func (h *SkillHandler) DeleteCatalog(c *gin.Context) {
 	if h.catalog == nil {
@@ -193,7 +193,7 @@ func (h *SkillHandler) DeleteCatalog(c *gin.Context) {
 // @Tags         Skills
 // @Produce      json
 // @Param        id   path  string  true  "Catalog skill ID"
-// @Success      200  {object}  map[string]interface{}
+// @Success      200  {object}  handler.DataResponse{data=[]service.SkillFileEntry}
 // @Router       /skills/catalog/{id}/files [get]
 func (h *SkillHandler) ListCatalogFiles(c *gin.Context) {
 	if h.catalog == nil {
@@ -216,7 +216,7 @@ func (h *SkillHandler) ListCatalogFiles(c *gin.Context) {
 // @Produce      json
 // @Param        id    path   string  true  "Catalog skill ID"
 // @Param        path  query  string  true  "Skill-root-relative file path"
-// @Success      200   {object}  map[string]interface{}
+// @Success      200   {object}  handler.DataResponse{data=service.SkillFileContent}
 // @Router       /skills/catalog/{id}/files/content [get]
 func (h *SkillHandler) GetCatalogFile(c *gin.Context) {
 	if h.catalog == nil {
