@@ -18,6 +18,9 @@ const releaseTimeout = 5 * time.Second
 // ErrLockOwnershipLost means exclusive ownership can no longer be guaranteed.
 var ErrLockOwnershipLost = errors.New("redis lock ownership lost")
 
+// ErrLockBusy means another owner holds the lock; no callback was started.
+var ErrLockBusy = errors.New("redis lock already held")
+
 type ownershipContextKey struct{}
 
 var (
@@ -157,6 +160,22 @@ func WithRenewableLock(
 	lease time.Duration,
 	renewInterval time.Duration,
 	fn func(context.Context) error,
+) error {
+	return withRenewableLock(ctx, client, key, lease, renewInterval, true, fn)
+}
+
+// TryWithRenewableLock keeps renewal and token-safe release, but never waits
+// for another owner. ErrLockBusy lets queue workers defer the task instead.
+func TryWithRenewableLock(
+	ctx context.Context, client redis.UniversalClient, key string,
+	lease, renewInterval time.Duration, fn func(context.Context) error,
+) error {
+	return withRenewableLock(ctx, client, key, lease, renewInterval, false, fn)
+}
+
+func withRenewableLock(
+	ctx context.Context, client redis.UniversalClient, key string,
+	lease, renewInterval time.Duration, wait bool, fn func(context.Context) error,
 ) (resultErr error) {
 	if fn == nil {
 		return errors.New("redis lock callback is required")
@@ -169,7 +188,16 @@ func WithRenewableLock(
 	if err != nil {
 		return err
 	}
-	if err := Acquire(ctx, client, key, token, lease); err != nil {
+	if wait {
+		err = Acquire(ctx, client, key, token, lease)
+	} else {
+		var acquired bool
+		acquired, err = TryAcquire(ctx, client, key, token, lease)
+		if err == nil && !acquired {
+			err = ErrLockBusy
+		}
+	}
+	if err != nil {
 		return err
 	}
 

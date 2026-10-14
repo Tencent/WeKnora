@@ -29,7 +29,7 @@ func TestDataSourceScheduleAPIRejectsInvalidCron(t *testing.T) {
 			kbSvc := &stubKBServiceForDS{getByID: func(context.Context, string) (*types.KnowledgeBase, error) {
 				return &types.KnowledgeBase{ID: "kb-schedule", TenantID: 1}, nil
 			}}
-			svc := service.NewDataSourceService(repo, nil, nil, kbSvc, nil, nil, scheduler, nil, nil, nil)
+			svc := service.NewDataSourceService(repo, nil, nil, kbSvc, nil, nil, scheduler, nil, nil, nil, nil)
 			ds := &types.DataSource{
 				ID: "ds-schedule", KnowledgeBaseID: "kb-schedule", TenantID: 1,
 				Type: types.ConnectorTypeRSS, Status: types.DataSourceStatusActive,

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
+	"github.com/Tencent/WeKnora/internal/common/redislock"
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -21,6 +22,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
 )
 
 // DataSourceService implements the DataSourceService interface
@@ -35,6 +37,7 @@ type DataSourceService struct {
 	tenantRepo        interfaces.TenantRepository
 	tagService        interfaces.KnowledgeTagService
 	audit             interfaces.AuditLogService
+	syncCoordinator   dataSourceSyncCoordinator
 }
 
 // NewDataSourceService creates a new data source service
@@ -49,6 +52,7 @@ func NewDataSourceService(
 	tenantRepo interfaces.TenantRepository,
 	tagService interfaces.KnowledgeTagService,
 	audit interfaces.AuditLogService,
+	redisClient *redis.Client,
 ) interfaces.DataSourceService {
 	return &DataSourceService{
 		dsRepo:            dsRepo,
@@ -61,6 +65,7 @@ func NewDataSourceService(
 		tenantRepo:        tenantRepo,
 		tagService:        tagService,
 		audit:             audit,
+		syncCoordinator:   dataSourceSyncCoordinator{redis: redisClient},
 	}
 }
 
@@ -596,10 +601,33 @@ func (s *DataSourceService) GetSyncLog(ctx context.Context, syncLogID string) (*
 }
 
 // ProcessSync handles the actual sync operation (called by asynq task)
-func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) error {
+func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) (resultErr error) {
 	var payload types.DataSourceSyncPayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		logger.Errorf(ctx, "failed to unmarshal sync payload: %v", err)
+		return err
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			s.finishTerminalSyncLog(ctx, payload, fmt.Errorf("sync task panicked: %v", recovered))
+			panic(recovered)
+		}
+		s.finishTerminalSyncLog(ctx, payload, resultErr)
+	}()
+	ctx = withDataSourceSyncAttempt(ctx, task)
+	// Lock before loading the source: a queued/retried run must fetch from
+	// the cursor committed by its predecessor, not an earlier snapshot.
+	resultErr = s.syncCoordinator.run(ctx, payload.DataSourceID, func(lockCtx context.Context) error {
+		return s.processSync(lockCtx, payload)
+	})
+	if errors.Is(resultErr, redislock.ErrLockBusy) {
+		return s.deferContendedSync(ctx, task)
+	}
+	return resultErr
+}
+
+func (s *DataSourceService) processSync(ctx context.Context, payload types.DataSourceSyncPayload) error {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	ctx = payload.Initiator.Apply(ctx)
@@ -707,6 +735,11 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		logger.Infof(ctx, "incremental sync fetched %d items", len(items))
 	}
 
+	// A slow connector may return a response after this attempt has lost its
+	// lease or timed out. Never publish that stale response.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var fetchWarnings []string
 	var partialFetch *datasource.PartialFetchError
 	if errors.As(fetchErr, &partialFetch) {
@@ -766,8 +799,14 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	autoTagIDs := s.resolveAutoTagIDs(ctx, ds)
 
 	for _, item := range items {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		item := item
 		s.applyFetchedItem(withKBActivitySuppressed(ctx), ds, &item, autoTagIDs, result)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	resultJSON, _ := result.ToJSON()
@@ -1026,6 +1065,9 @@ func (h *streamSyncHandler) Emit(ctx context.Context, item types.FetchedItem) er
 // running counts into the sync log so progress survives a crash and the UI can
 // reflect a long sync mid-flight instead of jumping from 0 to done.
 func (h *streamSyncHandler) Checkpoint(ctx context.Context, cursor *types.SyncCursor) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if cursor == nil {
 		return nil
 	}
@@ -1094,7 +1136,7 @@ func (s *DataSourceService) processSyncStreaming(
 	autoTagIDs := s.resolveAutoTagIDs(ctx, ds)
 
 	forceFull := payload.ForceFull || ds.SyncMode == types.SyncModeFull
-	attempt, _ := asynq.GetRetryCount(ctx)
+	attempt := dataSourceSyncAttempt(ctx)
 	startCursor, err := streamStartCursor(ds, forceFull, attempt)
 	if err != nil {
 		logger.Errorf(ctx, "failed to parse sync cursor: %v", err)
@@ -1121,6 +1163,9 @@ func (s *DataSourceService) processSyncStreaming(
 	}
 
 	nextCursor, fetchErr := streamingFetch(ctx, sc, config, forceFull, startCursor, fullBaseline, handler)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if fetchErr != nil {
 		// Progress so far is already checkpointed onto ds.LastSyncCursor; leave
 		// it in place so the Asynq retry resumes from there. Persist counts.
@@ -1178,6 +1223,9 @@ func (s *DataSourceService) updateSyncRunResult(
 	errorMessage string,
 	wasPaused bool,
 ) {
+	if ctx.Err() != nil {
+		return
+	}
 	syncLog.ItemsTotal = result.Total
 	syncLog.ItemsCreated = result.Created
 	syncLog.ItemsUpdated = result.Updated
