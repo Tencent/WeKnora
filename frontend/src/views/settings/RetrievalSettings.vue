@@ -152,6 +152,10 @@ const loadConfig = async () => {
         rerank_top_k: cfg.rerank_top_k || defaultConfig.rerank_top_k,
         rerank_threshold: cfg.rerank_threshold ?? defaultConfig.rerank_threshold,
         rerank_model_id: cfg.rerank_model_id || '',
+        // PUT replaces the config, including RRF parameters configured via the API.
+        rrf_k: cfg.rrf_k,
+        rrf_vector_weight: cfg.rrf_vector_weight,
+        rrf_keyword_weight: cfg.rrf_keyword_weight,
       })
       initialConfig = { ...localConfig }
     }
