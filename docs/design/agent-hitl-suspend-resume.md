@@ -218,7 +218,7 @@ type PendingCall struct {
    - 短等待计时器到期：可挂起时执行 `pending → suspended` 的 CAS，同时写入 `expires_at`；不可挂起时执行 `pending → expired`。CAS 失败说明用户刚好回答，转为读取回答。
    - ctx 取消（用户停止）：执行 `pending → canceled` 的 CAS。失败同样转为读取回答。
 5. 后台每 10 秒续约 `lease_until`，续约 CAS 同时校验可续约状态和本次运行的 `owner_instance` 令牌。
-6. 拿到回答后由适配层 `Consume`，CAS 必须匹配本次运行的所有权令牌且成功后才能继续。失去所有权的等待者退出，不再落库或发布完成事件：
+6. 拿到回答后由适配层 `Consume`，CAS 必须匹配本次运行的所有权令牌且成功后才能继续。失去所有权的等待者退出，不再落库或发布完成事件。存储出错不算失去所有权：先重试；重试后仍出错，就重新读取记录，只要令牌仍是自己的、且状态是 answered 或目标状态，就继续运行（读取也失败时同样继续），避免消息因为数据库抖动卡在未完成：
    - 需要外部副作用（批准的工具调用）：CAS `answered → executing`，执行工具，再 CAS `executing → done`（`MarkExecuted`），删除快照。
    - 其他（拒绝、OAuth、提问）：CAS `answered → done`，把回答交给调用方，删除快照。
    - 挂起：返回带 `Suspend` 标记的结果（见 6.2），引擎停止本轮并结束运行。

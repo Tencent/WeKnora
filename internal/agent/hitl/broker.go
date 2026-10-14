@@ -43,6 +43,9 @@ const (
 	defaultRenewInterval = 10 * time.Second
 )
 
+// consumeRetryDelays spaces the retries of a Consume the store failed to record.
+var consumeRetryDelays = []time.Duration{100 * time.Millisecond, 400 * time.Millisecond}
+
 var (
 	// ErrPromptNotFound is returned when Resolve targets an unknown prompt,
 	// or one outside the caller's session or kind.
@@ -421,16 +424,41 @@ func (b *Broker) closed(ctx context.Context, id, owner string) (Outcome, bool) {
 // AgentPromptExecuting when the answer authorized a side effect still to run,
 // AgentPromptDone otherwise. Only the winner may continue the run.
 // Prompts closed by the system are left alone.
+//
+// It reports false only when the prompt is known to have moved on: another
+// owner took it, or it was already consumed. A store failure is not a lost
+// claim; giving the run up then would strand its message, so once retries
+// run out the owner keeps the run unless the row says otherwise.
 func (b *Broker) Consume(ctx context.Context, id, to, owner string) bool {
-	ok, err := b.store.Transition(context.WithoutCancel(ctx), id, types.AgentPromptTransition{
+	ctx = context.WithoutCancel(ctx)
+	transition := types.AgentPromptTransition{
 		From:          []string{types.AgentPromptAnswered},
 		To:            to,
 		ExpectedOwner: &owner,
-	})
-	if err != nil {
-		logger.GetLogger(ctx).Warnf("consume agent prompt %s: %v", id, err)
 	}
-	return err == nil && ok
+	var err error
+	for attempt := 0; ; attempt++ {
+		var ok bool
+		ok, err = b.store.Transition(ctx, id, transition)
+		if err == nil && (ok || attempt == 0) {
+			return ok
+		}
+		if err == nil {
+			// A failed attempt may have committed before reporting its error.
+			break
+		}
+		if attempt == len(consumeRetryDelays) {
+			logger.GetLogger(ctx).Warnf("consume agent prompt %s: %v", id, err)
+			break
+		}
+		time.Sleep(consumeRetryDelays[attempt])
+	}
+	row, readErr := b.store.Get(ctx, id)
+	if readErr != nil {
+		return true
+	}
+	return row != nil && row.OwnerInstance == owner &&
+		(row.Status == to || (err != nil && row.Status == types.AgentPromptAnswered))
 }
 
 // MarkExecuted records that the side effect an answer authorized has run.

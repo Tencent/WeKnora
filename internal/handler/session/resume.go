@@ -105,8 +105,11 @@ func (h *Handler) awaitSuspendedRunSettled(ctx context.Context, prompt *types.Ag
 				return fmt.Errorf("suspended run recovery is unavailable")
 			}
 			state, err := h.promptBroker.Suspensions().Get(ctx, prompt.AssistantMessageID)
-			if err != nil || state == nil || state.PromptID != prompt.ID {
-				return fmt.Errorf("read suspended run state: %v", err)
+			if err != nil {
+				return fmt.Errorf("read suspended run state: %w", err)
+			}
+			if state == nil || state.PromptID != prompt.ID {
+				return fmt.Errorf("no run state saved for prompt %s", prompt.ID)
 			}
 			if err := h.suspendedRuns.MarkAwaitingInput(ctx, prompt, state); err != nil {
 				return fmt.Errorf("restore suspended message: %w", err)
@@ -299,8 +302,11 @@ func (h *Handler) restoreResumeUserMessages(ctx context.Context, sessionID strin
 				continue
 			}
 			msg, err := h.messageService.GetMessage(ctx, sessionID, id)
-			if err != nil || msg == nil || msg.Role != "user" || msg.SessionID != sessionID {
-				return nil, fmt.Errorf("load steered message %s: %v", id, err)
+			if err != nil {
+				return nil, fmt.Errorf("load steered message %s: %w", id, err)
+			}
+			if msg == nil || msg.Role != "user" || msg.SessionID != sessionID {
+				return nil, fmt.Errorf("steered message %s is not a user message of this session", id)
 			}
 			snap.UserMessages[id] = msg.Content
 		}

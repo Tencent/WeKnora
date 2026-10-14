@@ -205,9 +205,11 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 						}
 					}
 					decision, waitErr = t.gate.RequestAndWait(waitCtx, approval.PendingRequest{
-						Snapshot:           snapshot,
-						SnapshotVersion:    snapshotVersion,
-						TenantID:           tenantID,
+						Snapshot:        snapshot,
+						SnapshotVersion: snapshotVersion,
+						// The user answers from their own workspace, which differs
+						// from tenantID (the agent's) when the agent is shared.
+						TenantID:           types.CallerFromContext(ctx).TenantID,
 						UserID:             meta.UserID,
 						SessionID:          meta.SessionID,
 						AssistantMessageID: meta.AssistantMessageID,

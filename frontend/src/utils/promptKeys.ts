@@ -20,7 +20,9 @@ export function isTextEntry(el: EventTarget | null): boolean {
 export function isSubmitKey(e: KeyboardEvent): boolean {
   // Let focused controls perform their own action (especially Reject/Skip).
   // The dock receives bubbled keydowns from both its cards and its header.
+  // A picked option keeps focus after the click, and Enter then submits it.
   const target = e.target as Element | null
-  if (target?.closest?.('button, a, [role="button"], [role="option"]')) return false
+  const control = target?.closest?.('button, a, [role="button"]')
+  if (control && control.getAttribute?.('role') !== 'option') return false
   return e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229
 }

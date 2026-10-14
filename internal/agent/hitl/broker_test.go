@@ -265,3 +265,57 @@ func TestReaperDoesNotTakeOverLeaseRenewedAfterScan(t *testing.T) {
 		})
 	}
 }
+
+// flakyTransitionStore fails the next failures Transition calls; with
+// committed set, each failing call still applies before reporting its error.
+type flakyTransitionStore struct {
+	Store
+	failures  int
+	committed bool
+}
+
+func (s *flakyTransitionStore) Transition(ctx context.Context, id string, tr types.AgentPromptTransition) (bool, error) {
+	if s.failures > 0 {
+		s.failures--
+		if s.committed {
+			_, _ = s.Store.Transition(ctx, id, tr)
+		}
+		return false, errors.New("database unavailable")
+	}
+	return s.Store.Transition(ctx, id, tr)
+}
+
+func TestBroker_ConsumeTellsAStoreFailureFromALostClaim(t *testing.T) {
+	saved := consumeRetryDelays
+	consumeRetryDelays = []time.Duration{0, 0}
+	t.Cleanup(func() { consumeRetryDelays = saved })
+
+	cases := map[string]struct {
+		failures  int
+		committed bool
+		rowOwner  string
+		want      bool
+		status    string
+	}{
+		"keeps a claim that committed before its error": {failures: 1, committed: true, rowOwner: "me", want: true, status: types.AgentPromptExecuting},
+		"recovers after transient failures":             {failures: 2, rowOwner: "me", want: true, status: types.AgentPromptExecuting},
+		"keeps an owned answer through an outage":       {failures: 10, rowOwner: "me", want: true, status: types.AgentPromptAnswered},
+		"gives up an answer another owner holds":        {failures: 10, rowOwner: "other", want: false, status: types.AgentPromptAnswered},
+		"gives up without any failure when not owned":   {failures: 0, rowOwner: "other", want: false, status: types.AgentPromptAnswered},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			store := &flakyTransitionStore{Store: NewMemoryStore(), failures: tc.failures, committed: tc.committed}
+			require.NoError(t, store.Create(ctx, &types.AgentPrompt{
+				ID: "p", Status: types.AgentPromptAnswered, OwnerInstance: tc.rowOwner,
+			}))
+			b := NewBroker(store, nil)
+
+			require.Equal(t, tc.want, b.Consume(ctx, "p", types.AgentPromptExecuting, "me"))
+			row, err := store.Get(ctx, "p")
+			require.NoError(t, err)
+			require.Equal(t, tc.status, row.Status)
+		})
+	}
+}

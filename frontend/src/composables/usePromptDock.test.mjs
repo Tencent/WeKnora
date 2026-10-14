@@ -116,13 +116,22 @@ test('Enter submits unless it inserts a line break or confirms an IME candidate'
 })
 
 test('Enter on a focused control keeps its native action instead of submitting the prompt', () => {
-  for (const control of ['reject', 'skip', 'option', 'args-toggle', 'dock-next']) {
+  for (const control of ['reject', 'skip', 'args-toggle', 'dock-next']) {
     const key = {
       key: 'Enter', shiftKey: false, isComposing: false, keyCode: 13,
-      target: { closest: (selector) => selector.includes('button') ? { control } : null },
+      target: { closest: (selector) => selector.includes('button') ? { control, getAttribute: () => null } : null },
     }
     assert.equal(isSubmitKey(key), false, control)
   }
+})
+
+test('Enter on the option just picked submits it rather than toggling it off', () => {
+  const option = { getAttribute: (name) => (name === 'role' ? 'option' : null) }
+  const key = {
+    key: 'Enter', shiftKey: false, isComposing: false, keyCode: 13,
+    target: { closest: (selector) => (selector.includes('button') ? option : null) },
+  }
+  assert.equal(isSubmitKey(key), true)
 })
 
 test('the approval handler does not approve when Enter targets Reject', () => {
