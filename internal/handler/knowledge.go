@@ -304,7 +304,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
 // @Param        enable_multimodel formData  bool    false  "启用多模态处理"
 // @Param        tag_ids       formData  string  false  "分类ID列表，逗号分隔"
 // @Param        process_config    formData  string  false  "处理配置JSON（KnowledgeProcessOverrides）"
-// @Success      200               {object}  map[string]interface{}  "创建的知识"
+// @Success      200               {object}  handler.DataResponse{data=types.Knowledge}  "创建的知识"
 // @Failure      400               {object}  errors.AppError         "请求参数错误"
 // @Failure      409               {object}  map[string]interface{}  "文件重复"
 // @Security     Bearer
@@ -468,7 +468,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      string  true  "知识库ID"
 // @Param        request  body      object{url=string,file_name=string,file_type=string,enable_multimodel=bool,title=string,tag_ids=[]string}  true  "URL请求"
-// @Success      201      {object}  map[string]interface{}  "创建的知识"
+// @Success      201      {object}  handler.DataResponse{data=types.Knowledge}  "创建的知识"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      409      {object}  map[string]interface{}  "URL重复"
 // @Security     Bearer
@@ -566,7 +566,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      string                       true  "知识库ID"
 // @Param        request  body      types.ManualKnowledgePayload true  "手工知识内容"
-// @Success      200      {object}  map[string]interface{}       "创建的知识"
+// @Success      200      {object}  handler.DataResponse{data=types.Knowledge}       "创建的知识"
 // @Failure      400      {object}  errors.AppError              "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -1157,7 +1157,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 // @Param        knowledge_ids query  string  false "来源文档 ID 列表（逗号分隔，最多 50 个），仅返回这些文档的图片"
 // @Param        attr_filters query    string  false "属性筛选 JSON，同一属性多值 OR、属性间 AND"
 // @Param        attr_rules  query     string  false "属性逐值裁决 JSON（off 隐藏 / on 强制显示，on 优先）"
-// @Success      200  {object}  map[string]interface{}  "图片资产分页列表"
+// @Success      200  {object}  handler.PageResponse{data=[]types.ImageAsset}  "图片资产分页列表"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -1334,7 +1334,7 @@ type imageListRequestBody struct {
 // @Produce      json
 // @Param        id    path      string              true  "知识库 ID"
 // @Param        body  body      imageListRequestBody false "筛选参数（与 GET /images 同名参数同义）"
-// @Success      200  {object}  map[string]interface{}  "图片资产分页列表"
+// @Success      200  {object}  handler.PageResponse{data=[]types.ImageAsset}  "图片资产分页列表"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -1495,7 +1495,7 @@ func (h *KnowledgeHandler) GetGalleryConfig(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id   path      string  true  "知识库ID"
-// @Success      200  {object}  map[string]interface{}  "目录树"
+// @Success      200  {object}  handler.DataResponse{data=types.KnowledgeFolderTree}  "目录树"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -1544,7 +1544,7 @@ type MoveKnowledgeToFolderRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      MoveKnowledgeToFolderRequest  true  "移动请求"
-// @Success      200      {object}  map[string]interface{}        "移动成功"
+// @Success      200      {object}  handler.DataResponse{data=handler.FolderMoveData}  "移动成功"
 // @Failure      400      {object}  errors.AppError               "请求参数错误"
 // @Failure      403      {object}  errors.AppError               "权限不足"
 // @Security     Bearer
@@ -1619,7 +1619,7 @@ type RenameKnowledgeFolderRequest struct {
 // @Produce      json
 // @Param        id       path      string                        true  "知识库ID"
 // @Param        request  body      RenameKnowledgeFolderRequest  true  "重命名请求"
-// @Success      200      {object}  map[string]interface{}        "重命名成功"
+// @Success      200      {object}  handler.DataResponse{data=handler.FolderMoveData}  "重命名成功"
 // @Failure      400      {object}  errors.AppError               "请求参数错误"
 // @Failure      403      {object}  errors.AppError               "权限不足"
 // @Security     Bearer
@@ -1810,7 +1810,7 @@ type BatchDeleteKnowledgeRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      BatchDeleteKnowledgeRequest  true  "批量删除请求"
-// @Success      200      {object}  map[string]interface{}       "删除成功"
+// @Success      200      {object}  handler.SubmittedTaskResponse  "删除成功"
 // @Failure      400      {object}  errors.AppError              "请求参数错误"
 // @Failure      403      {object}  errors.AppError              "权限不足"
 // @Security     Bearer
@@ -1904,7 +1904,7 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id   path      string  true  "知识库ID"
-// @Success      200  {object}  map[string]interface{}  "清空任务已提交"
+// @Success      200  {object}  handler.SubmittedTaskResponse  "清空任务已提交"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      403  {object}  errors.AppError         "权限不足"
 // @Security     Bearer
@@ -2079,7 +2079,7 @@ type GetKnowledgeBatchRequest struct {
 // @Param        ids       query     []string  true   "知识ID列表"
 // @Param        kb_id     query     string   false  "可选，知识库ID（用于共享知识库时指定范围）"
 // @Param        agent_id  query     string   false  "可选，共享智能体ID（用于按智能体空间批量拉取文件详情）"
-// @Success      200       {object}  map[string]interface{}  "知识列表"
+// @Success      200       {object}  handler.DataResponse{data=[]types.Knowledge}  "知识列表"
 // @Failure      400       {object}  errors.AppError        "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -2298,7 +2298,7 @@ type UpdateKnowledgeRequest struct {
 // @Produce      json
 // @Param        id       path      string                   true  "知识ID"
 // @Param        request  body      UpdateKnowledgeRequest   true  "更新字段（均可选）"
-// @Success      200      {object}  map[string]interface{}  "更新成功"
+// @Success      200      {object}  handler.UpdateKnowledgeResponse  "更新成功"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -2410,7 +2410,7 @@ func (h *KnowledgeHandler) RegenerateKnowledgeSummary(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      string                       true  "知识ID"
 // @Param        request  body      types.ManualKnowledgePayload true  "手工知识内容"
-// @Success      200      {object}  map[string]interface{}       "更新后的知识"
+// @Success      200      {object}  handler.DataResponse{data=types.Knowledge}       "更新后的知识"
 // @Failure      400      {object}  errors.AppError              "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -2593,7 +2593,7 @@ type knowledgeTagBatchRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      object  true  "标签更新请求（updates 必填，kb_id 可选）"
-// @Success      200      {object}  map[string]interface{}  "更新成功"
+// @Success      200      {object}  handler.SuccessResponse  "更新成功"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -2670,7 +2670,7 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 // @Param        id        path      string  true  "知识ID"
 // @Param        chunk_id  path      string  true  "分块ID"
 // @Param        request   body      object{image_info=string}  true  "图像信息"
-// @Success      200       {object}  map[string]interface{}     "更新成功"
+// @Success      200       {object}  handler.MessageResponse     "更新成功"
 // @Failure      400       {object}  errors.AppError            "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -2740,7 +2740,7 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 // @Param        file_types query     string  false "Comma-separated file extensions to filter (e.g., csv,xlsx)"
 // @Param        agent_id   query     string  false "Shared agent ID (search within agent's KB scope)"
 // @Param        recent     query     bool    false "Return recent files when keyword is empty"
-// @Success      200         {object}  map[string]interface{}     "Search results"
+// @Success      200         {object}  handler.KnowledgeSearchKnowledgeResponse     "Search results"
 // @Failure      400         {object}  errors.AppError            "Invalid request"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -3191,7 +3191,7 @@ type batchReparseKnowledgeRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      batchReparseKnowledgeRequest  true  "批量重解析请求"
-// @Success      200      {object}  map[string]interface{}        "任务已提交"
+// @Success      200      {object}  handler.SubmittedTaskResponse  "任务已提交"
 // @Failure      400      {object}  errors.AppError               "请求参数错误"
 // @Failure      403      {object}  errors.AppError               "权限不足"
 // @Security     Bearer
