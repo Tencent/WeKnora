@@ -178,13 +178,13 @@ docker compose up -d    # 새 이미지로 컨테이너 재생성
 
 ### v0.8.3 <sub>· 2026-10-14 · [릴리스 노트](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
 
-- **이미지 갤러리**: 문서 이미지를 모아 보고 출처, 설명, OCR 및 이미지 속성으로 필터링.
-- **멀티모달 Embedding**: 텍스트와 이미지를 같은 벡터 공간으로 인코딩하는 모델 지원. Tencent WeMM-Embedding, Qwen3-VL-Embedding 등을 사용할 수 있으며 이미지 벡터 검색과 호환 모델의 이미지 리랭킹을 선택적으로 활성화.
-- **Wiki 그래프**: 그룹 배치와 주제 설명을 개선하고 그룹 집중 보기, 그룹 전환 및 전체 그래프 복귀를 지원.
-- **원문 인용**: 답변에서 원문의 인용 부분으로 바로 이동.
-- **대화와 도구**: 샌드박스 없이 첨부 파일을 필요할 때 읽기, 읽지 않은 답변 표시, @ 검색, Docker 터미널, Lite 로컬 스킬과 MCP 호환성 개선.
-- **관리와 연동**: 플랫폼 사용자 관리, 초대 등록 모드, 관리자 모델 카탈로그, WeMM, TEI/Pinecone/Cohere, Seafile과 번체 중국어.
-- **안정성**: 검색, 파싱, 동기화, Wiki, OAuth와 CLI 수정. 등록 모드, 빈 도구 목록, DB 마이그레이션과 재색인은 [업그레이드 안내](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#upgrade-notes)를 확인하세요.
+- **[이미지 갤러리](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#images)**: 문서 이미지를 모아 보고 출처, 설명, OCR 및 이미지 속성으로 필터링.
+- **[멀티모달 Embedding](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#multimodal-embedding)**: 텍스트와 이미지를 같은 벡터 공간으로 인코딩하는 모델 지원. Tencent WeMM-Embedding, Qwen3-VL-Embedding 등을 사용할 수 있으며 이미지 벡터 검색과 호환 모델의 이미지 리랭킹을 선택적으로 활성화.
+- **[Wiki 그래프](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#wiki-graph)**: 그룹 배치와 주제 설명을 개선하고 그룹 집중 보기, 그룹 전환 및 전체 그래프 복귀를 지원.
+- **[원문 인용](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#conversation)**: 답변에서 원문의 인용 부분으로 바로 이동.
+- **[대화와 도구](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#tools)**: 샌드박스 없이 첨부 파일을 필요할 때 읽기, 읽지 않은 답변 표시, @ 검색, Docker 터미널, Lite 로컬 스킬과 MCP 호환성 개선.
+- **[관리와 연동](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#administration)**: 플랫폼 사용자 관리, 초대 등록 모드, 관리자 모델 카탈로그, WeMM, TEI/Pinecone/Cohere, Seafile과 번체 중국어.
+- **[안정성](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#other-changes)**: 검색, 파싱, 동기화, Wiki, OAuth와 CLI 수정. 등록 모드, 빈 도구 목록, DB 마이그레이션과 재색인은 [업그레이드 안내](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#upgrade-notes)를 확인하세요.
 
 ### v0.8.2 <sub>· 2026-09-24 · [릴리스 노트](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2)</sub>
 

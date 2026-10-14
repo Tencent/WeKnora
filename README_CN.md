@@ -168,13 +168,13 @@ docker compose up -d    # 用新镜像重建容器
 
 ### v0.8.3 <sub>· 2026-10-14 · [版本说明](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
 
-- **画廊**：集中浏览文档图片，按来源、描述、OCR 与图片属性筛选，查看原图和出处。
-- **多模态 Embedding**：支持将文字与图片编码到同一向量空间的多模态向量模型，例如腾讯 WeMM-Embedding、Qwen3-VL-Embedding 等；可按需开启图片向量检索，并搭配支持图片输入的重排模型。
-- **Wiki 图谱**：重新组织分组布局与主题说明，支持聚焦分组、切换分组和返回全图。
-- **原文引用**：从回答直接定位原始文档中的引用片段。
-- **对话与工具**：无需沙箱即可按需读取附件，未读回答标记、@ 全局搜索、Docker 终端、Lite 本机技能与 MCP 兼容性更新。
-- **管理与集成**：平台用户管理、仅限邀请注册、管理员模型目录、WeMM 向量、TEI/Pinecone/Cohere 重排、Seafile 数据源与繁体中文。
-- **稳定性**：集中修复检索、解析、数据源、Wiki、OAuth 和 CLI。注册模式、空工具列表、数据库迁移与向量重建要求见[升级须知](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#upgrade-notes)。
+- **[画廊](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#images)**：集中浏览文档图片，按来源、描述、OCR 与图片属性筛选，查看原图和出处。
+- **[多模态 Embedding](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#multimodal-embedding)**：支持将文字与图片编码到同一向量空间的多模态向量模型，例如腾讯 WeMM-Embedding、Qwen3-VL-Embedding 等；可按需开启图片向量检索，并搭配支持图片输入的重排模型。
+- **[Wiki 图谱](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#wiki-graph)**：重新组织分组布局与主题说明，支持聚焦分组、切换分组和返回全图。
+- **[原文引用](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#conversation)**：从回答直接定位原始文档中的引用片段。
+- **[对话与工具](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#tools)**：无需沙箱即可按需读取附件，未读回答标记、@ 全局搜索、Docker 终端、Lite 本机技能与 MCP 兼容性更新。
+- **[管理与集成](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#administration)**：平台用户管理、仅限邀请注册、管理员模型目录、WeMM 向量、TEI/Pinecone/Cohere 重排、Seafile 数据源与繁体中文。
+- **[稳定性](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#other-changes)**：集中修复检索、解析、数据源、Wiki、OAuth 和 CLI。注册模式、空工具列表、数据库迁移与向量重建要求见[升级须知](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#upgrade-notes)。
 
 ### v0.8.2 <sub>· 2026-09-24 · [版本说明](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2)</sub>
 

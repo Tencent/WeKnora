@@ -168,13 +168,13 @@ All options, hardware requirements and deployment topologies: [Installation guid
 
 ### v0.8.3 <sub>· 2026-10-14 · [release notes](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
 
-- **Image gallery**: browse document images and filter by source, caption, OCR and image attributes.
-- **Multimodal Embedding**: support for multimodal embedding models that encode text and images into a shared vector space, including Tencent WeMM-Embedding and Qwen3-VL-Embedding, with opt-in image-vector retrieval and compatible image-aware reranking.
-- **Wiki graph**: clearer group layouts and theme captions, with group focus, switching and return to the full graph.
-- **Source citations**: navigate from an answer to the cited passage in the original document.
-- **Chat and tools**: on-demand attachment reading without a sandbox, unread replies, @ mention search, Docker terminals, Lite host skills and MCP interoperability updates.
-- **Administration and integrations**: platform user management, invitation-only signup mode, administrator model catalog, WeMM embeddings, TEI/Pinecone/Cohere reranking, Seafile and Traditional Chinese.
-- **Reliability**: broad retrieval, parsing, datasource, Wiki, OAuth and CLI fixes. Review [upgrade requirements](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#upgrade-notes) for registration modes, empty tool lists, database migrations and reindexing.
+- **[Image gallery](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#images)**: browse document images and filter by source, caption, OCR and image attributes.
+- **[Multimodal Embedding](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#multimodal-embedding)**: support for multimodal embedding models that encode text and images into a shared vector space, including Tencent WeMM-Embedding and Qwen3-VL-Embedding, with opt-in image-vector retrieval and compatible image-aware reranking.
+- **[Wiki graph](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#wiki-graph)**: clearer group layouts and theme captions, with group focus, switching and return to the full graph.
+- **[Source citations](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#conversation)**: navigate from an answer to the cited passage in the original document.
+- **[Chat and tools](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#tools)**: on-demand attachment reading without a sandbox, unread replies, @ mention search, Docker terminals, Lite host skills and MCP interoperability updates.
+- **[Administration and integrations](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#administration)**: platform user management, invitation-only signup mode, administrator model catalog, WeMM embeddings, TEI/Pinecone/Cohere reranking, Seafile and Traditional Chinese.
+- **[Reliability](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#other-changes)**: broad retrieval, parsing, datasource, Wiki, OAuth and CLI fixes. Review [upgrade requirements](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#upgrade-notes) for registration modes, empty tool lists, database migrations and reindexing.
 
 ### v0.8.2 <sub>· 2026-09-24 · [release notes](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2)</sub>
 

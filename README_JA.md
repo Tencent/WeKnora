@@ -168,13 +168,13 @@ docker compose up -d    # 新しいイメージでコンテナを再作成
 
 ### v0.8.3 <sub>· 2026-10-14 · [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
 
-- **画像ギャラリー**：文書内の画像を一覧表示し、出典・説明・OCR・画像属性で絞り込み。
-- **マルチモーダル Embedding**：テキストと画像を同じベクトル空間で扱うモデルに対応。Tencent WeMM-Embedding や Qwen3-VL-Embedding などを利用でき、画像ベクトル検索と対応モデルによる画像リランキングを任意で有効化。
-- **Wiki グラフ**：グループ配置とテーマ説明を改善。グループへのフォーカス、切り替え、全体表示への復帰に対応。
-- **原文引用**：回答から原文の引用箇所へ直接移動。
-- **会話とツール**：サンドボックス不要の添付ファイルのオンデマンド読み取り、未読返信、@ 検索、Docker ターミナル、Lite ローカルスキル、MCP 互換性の改善。
-- **管理と連携**：ユーザー管理、招待による登録、管理者モデルカタログ、WeMM、TEI/Pinecone/Cohere、Seafile、繁体字中国語。
-- **安定性**：検索、解析、同期、Wiki、OAuth、CLI を修正。登録モード、空のツール一覧、DB 移行と再インデックスについては[アップグレード案内](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#upgrade-notes)を確認してください。
+- **[画像ギャラリー](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#images)**：文書内の画像を一覧表示し、出典・説明・OCR・画像属性で絞り込み。
+- **[マルチモーダル Embedding](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#multimodal-embedding)**：テキストと画像を同じベクトル空間で扱うモデルに対応。Tencent WeMM-Embedding や Qwen3-VL-Embedding などを利用でき、画像ベクトル検索と対応モデルによる画像リランキングを任意で有効化。
+- **[Wiki グラフ](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#wiki-graph)**：グループ配置とテーマ説明を改善。グループへのフォーカス、切り替え、全体表示への復帰に対応。
+- **[原文引用](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#conversation)**：回答から原文の引用箇所へ直接移動。
+- **[会話とツール](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#tools)**：サンドボックス不要の添付ファイルのオンデマンド読み取り、未読返信、@ 検索、Docker ターミナル、Lite ローカルスキル、MCP 互換性の改善。
+- **[管理と連携](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#administration)**：ユーザー管理、招待による登録、管理者モデルカタログ、WeMM、TEI/Pinecone/Cohere、Seafile、繁体字中国語。
+- **[安定性](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#other-changes)**：検索、解析、同期、Wiki、OAuth、CLI を修正。登録モード、空のツール一覧、DB 移行と再インデックスについては[アップグレード案内](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#upgrade-notes)を確認してください。
 
 ### v0.8.2 <sub>· 2026-09-24 · [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2)</sub>
 
