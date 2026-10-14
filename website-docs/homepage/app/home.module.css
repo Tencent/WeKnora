@@ -85,7 +85,7 @@
 .mcpEntry h4 { font-size: 16px; font-weight: 550; margin: 0 0 10px; }
 .mcpEntry p { font-size: 14px; line-height: 1.85; color: var(--soft); margin: 0 0 12px; }
 .release { padding-block: 93px 44px; background: var(--paper2); border-block: 1px solid var(--rule); }
-.sandboxTopic { background: var(--paper); border-top: 0; padding-bottom: 93px; }
+.sandboxTopic { background: var(--paper2); padding-bottom: 93px; }
 .artifactFigure { margin: 0; min-width: 0; background: var(--paper); border: 1px solid var(--rule); border-radius: 5px; box-shadow: 0 18px 45px -35px #101f3844; overflow: hidden; }
 .artifactHeading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 16px 20px; font-size: 13px; border-bottom: 1px solid var(--rule); }
 .artifactHeading > span { display: inline-flex; align-items: center; gap: 8px; }
@@ -271,3 +271,32 @@
 :global(.dark) .integrations img, :global(.dark) .models img { background: var(--wk-logo-ground); padding: 2px; border-radius: 3px; }
 
 .ecosystemCore > :global(.wk-logo) { margin-bottom: 18px; }
+
+/* Release highlights read across the page; an enduring single topic needs no sidebar. */
+.sectionIntro { max-width: 760px; margin: 18px 0 0; color: var(--soft); font-size: 16px; line-height: 1.85; }
+.showcaseOverview, .showcaseSingle { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+.showcaseOverview .showcaseList { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-top: 0; gap: 20px; }
+.showcaseOverview .showcaseItem { padding: 0; border-top: 2px solid var(--rule); border-bottom: 0; }
+.showcaseOverview .showcaseItem::before, .showcaseSingle .showcaseItem::before { display: none; }
+.showcaseOverview .showcaseItem[data-active="true"] { border-top-color: var(--gold); }
+.showcaseOverview .showcaseTitle { font-size: 17px; }
+.showcaseOverview .showcaseDetail { padding-bottom: 0; }
+.showcaseOverview .showcaseDetail p { font-size: 14px; }
+.showcaseSingle .showcaseList { border: 0; }
+.showcaseSingle .showcaseItem { border: 0; padding: 0; cursor: default; }
+.showcaseSingle .showcaseTitle { display: block; color: var(--ink); font-size: 24px; }
+.showcaseSingle .showcaseDetail { padding: 12px 0 0; }
+.showcaseSingle .showcaseDetail p { max-width: 850px; color: var(--soft); font-size: 16px; }
+.showcaseSingle .slideLinks { margin-top: 14px; }
+@media (max-width: 1100px) {
+  .showcaseOverview .showcaseList { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px 24px; }
+}
+@media (max-width: 700px) {
+  .showcaseOverview .showcaseList { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .showcaseOverview .showcaseName { font-size: 11px; letter-spacing: 0; }
+  .showcaseOverview .showcaseTitle { font-size: 16px; }
+  .showcaseSingle .showcaseTitle { font-size: 20px; }
+}
+@media (max-width: 380px) {
+  .showcaseOverview .showcaseList { grid-template-columns: minmax(0, 1fr); }
+}

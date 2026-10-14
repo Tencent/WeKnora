@@ -25,8 +25,8 @@ export type GallerySlide = {
 const STEP_MS = 4000;
 const AUTO_ROUNDS = 2;
 
-/** A feature list beside one large screenshot; the list doubles as the navigation. */
-export function ProductGallery({ id, label, slides }: { id: string; label: string; slides: GallerySlide[] }) {
+/** Feature navigation with a shared screenshot; single topics use a full-width figure. */
+export function ProductGallery({ id, label, slides, layout = "sidebar" }: { id: string; label: string; slides: GallerySlide[]; layout?: "sidebar" | "overview" | "single" }) {
   const root = useRef<HTMLDivElement>(null);
   const [item, setItem] = useState(0);
   const [shot, setShot] = useState(0);
@@ -71,13 +71,13 @@ export function ProductGallery({ id, label, slides }: { id: string; label: strin
     setShot(view);
   }
 
-  return <div id={id} ref={root} className={s.showcase} onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}>
+  return <div id={id} ref={root} className={`${s.showcase} ${layout === "overview" ? s.showcaseOverview : layout === "single" ? s.showcaseSingle : ""}`} data-layout={layout} onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}>
     <div className={s.showcaseList} aria-label={`${label} 功能`}>
       {slides.map((slide, index) => <div key={slide.name} className={s.showcaseItem} data-active={index === item} onClick={() => { if (index !== item) selectItem(index); }}>
-        <h3><button type="button" aria-pressed={index === item} onClick={event => { event.stopPropagation(); selectItem(index); }}>
+        <h3>{layout === "single" ? <span className={s.showcaseTitle}>{slide.title}</span> : <button type="button" aria-pressed={index === item} onClick={event => { event.stopPropagation(); selectItem(index); }}>
           <span className={s.showcaseName}><Icon name={slide.icon} />{slide.name}</span>
           <span className={s.showcaseTitle}>{slide.title}</span>
-        </button></h3>
+        </button>}</h3>
         <div className={s.showcaseDetail}>
           <p>{slide.description}</p>
           {slide.shots.length > 1 && <div className={s.viewChips} aria-label={`${slide.name}截图`}>
@@ -112,7 +112,7 @@ export function ProductGallery({ id, label, slides }: { id: string; label: strin
           const current = index === item && shotIndex === shot;
           return <div key={entry.image} className={s.shotLayer} data-active={current} aria-hidden={!current}>
             {entry.available
-              ? <Image src={`${homeAssets}/product/${entry.image}.png`} alt={entry.alt} width={3840} height={2112} sizes="(min-width: 1100px) 60vw, 100vw" />
+              ? <Image src={`${homeAssets}/product/${entry.image}.png`} alt={entry.alt} width={3840} height={2112} sizes={layout === "sidebar" ? "(min-width: 1100px) 60vw, 100vw" : "(min-width: 1712px) 1600px, 100vw"} />
               : <div className={s.shotPlaceholder} role="img" aria-label={entry.alt}><span>截图待补充</span><code>{`website-docs/homepage/public${homeAssets}/product/${entry.image}.png`}</code></div>}
           </div>;
         }))}

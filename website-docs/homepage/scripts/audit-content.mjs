@@ -22,7 +22,7 @@ for (const term of ['/docs/_home/product/wiki-browser.png', '/docs/_home/product
 }
 // Release highlights and enduring capabilities must survive independently.
 const release = html.match(/<section id="release"[\s\S]*?<\/section>/)?.[0];
-for (const term of ['画廊', '多模态 Embedding', '腾讯 WeMM-Embedding']) {
+for (const term of ['画廊', '多模态 Embedding', '腾讯 WeMM-Embedding', 'Wiki 图谱', '原文引用定位', '附件按需读取']) {
   assert.ok(release?.includes(term), `Missing release highlight: ${term}`);
 }
 const browser = html.match(/<section id="agent-workflow"[\s\S]*?<\/section>/)?.[0];

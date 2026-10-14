@@ -20,6 +20,8 @@ Paths below written as `public/brand/…`, `public/brands/…` and `public/produ
 
 ## Product screenshots
 
+- Release highlights also reuse `chat-source-location.png` and `chat-attachment-read.png`, copied unchanged from `../public/screenshots/` to `public/docs/_home/product/`. Five feature cards switch a full-width screenshot; the standalone browser section uses one description above its task/connection screenshots.
+
 - v0.8.3 gallery: `kb-image-gallery.png` and `kb-image-vector-settings.png` are real product screenshots copied unchanged from `../public/screenshots/` to `public/docs/_home/product/`. The vector settings image shows the image-vector toggle. Replace the gallery screenshot before publication if possible: one card currently shows an image-load failure. Capture requirements are in `../README.md`.
 
 - Skill catalog and sandbox terminal: copied unchanged from `../public/screenshots/skill-catalog.png` and `sandbox-panel-terminal.png` to `public/product/skill-catalog.png` and `sandbox-terminal.png`, for the skills & sandbox gallery.

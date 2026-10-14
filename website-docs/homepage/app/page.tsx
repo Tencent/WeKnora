@@ -18,9 +18,6 @@ const modes = [
   { number: "03", icon: "wiki", label: "Wiki", title: "把文档整理成 Wiki", description: "从原始文档生成相互链接的 Wiki 页面与知识图谱，支持浏览、编辑和版本回滚。", tags: ["自动组织", "知识图谱", "版本回滚"], link: "03-features/14-wiki" },
 ];
 const releaseExtras = [
-  { name: "Wiki 图谱更新", link: "03-features/14-wiki" },
-  { name: "原文引用定位", link: "03-features/18-chat-experience" },
-  { name: "附件按需读取", link: "03-features/18-chat-experience" },
   { name: "平台用户管理", link: "03-features/20-platform-admin" },
   { name: "Seafile 数据源", link: "03-features/25-seafile" },
   { name: "Docker 交互终端", link: "03-features/22-skills-sandbox" },
@@ -33,8 +30,11 @@ const withAvailability = (slide: SlideSource): GallerySlide => {
   return { name: slide.name, icon: slide.icon, title: slide.title, description: slide.description, link: slide.link, external: slide.external, shots: shots.map(shot => ({ ...shot, available: productShotExists(`${homeAssets}/product/${shot.image}.png`) })) };
 };
 const releaseSlides = [
-  { name: "画廊", icon: "monitor", image: "kb-image-gallery", title: "浏览文档中的图片和图表", description: "集中浏览文档图片，按来源、描述和图片属性筛选，查看原图与出处。", alt: "知识库画廊：图片瀑布流与来源文档筛选", link: guide("03-features/02-knowledge-base") + "#image-gallery" },
-  { name: "多模态 Embedding", icon: "search", image: "kb-image-vector-settings", title: "让文字找到相关的图片", description: "用文字检索图片内容，找到仅靠描述和 OCR 容易遗漏的资料。支持腾讯 WeMM-Embedding、Qwen3-VL-Embedding 等模型。", alt: "多模态 Embedding：知识库图像处理中的图片向量检索开关", link: guide("03-features/02-knowledge-base") + "#multimodal-embedding" },
+  { name: "画廊", icon: "monitor", image: "kb-image-gallery", title: "文档图片，集中浏览", description: "集中浏览文档图片，按来源、描述和图片属性筛选，查看原图与出处。", alt: "知识库画廊：图片瀑布流与来源文档筛选", link: guide("03-features/02-knowledge-base") + "#image-gallery" },
+  { name: "多模态 Embedding", icon: "search", image: "kb-image-vector-settings", title: "文字与图片，共同检索", description: "用文字检索图片内容，找到仅靠描述和 OCR 容易遗漏的资料。支持腾讯 WeMM-Embedding、Qwen3-VL-Embedding 等模型。", alt: "多模态 Embedding：知识库图像处理中的图片向量检索开关", link: guide("03-features/02-knowledge-base") + "#multimodal-embedding" },
+  { name: "Wiki 图谱", icon: "channels", image: "wiki-graph-groups", title: "知识关系，按主题展开", description: "关联页面按主题分组，在全图与分组之间切换，沿关系找到值得继续阅读的内容。", alt: "Wiki 图谱全景：主题分组、页面关系与节点类型图例", link: guide("03-features/14-wiki") + "#wiki-graph" },
+  { name: "原文引用定位", icon: "trace", image: "chat-source-location", title: "从回答，回到原文", description: "点击回答中的引用，在原始文档中定位对应段落，对照上下文核对答案。", alt: "回答引用与原始文档中的对应段落高亮", link: guide("03-features/18-chat-experience") },
+  { name: "附件按需读取", icon: "file", image: "chat-attachment-read", title: "正文与图表，按需阅读", description: "上传附件后，智能体按任务需要阅读正文和文档内图片，结合两者回答问题。", alt: "智能体读取 PDF 附件正文和两张图表的过程", link: guide("03-features/18-chat-experience") },
 ].map(withAvailability);
 const browserSlides = [{
   name: "本机浏览器", icon: "browser", title: "打开网页、查询信息、填写表单",
@@ -66,7 +66,7 @@ export default function Home() {
     <Header />
     <main id="main">
       <section className={`${s.shell} ${s.hero}`} aria-labelledby="hero-title">
-        <a href="#release" className={s.releaseLink}><span>v0.8.3</span> 画廊与多模态 Embedding <Icon name="arrow" /></a>
+        <a href="#release" className={s.releaseLink}><span>v0.8.3</span> 画廊 · 多模态 Embedding · Wiki 图谱 · 原文引用 <Icon name="arrow" /></a>
         <div className={s.heroGrid}>
           <h1 id="hero-title">帮你找到答案，<br /><em>并将知识付诸实践。</em></h1>
           <div className={s.heroAside}>
@@ -88,13 +88,13 @@ export default function Home() {
         </article>)}</div>
       </section>
       <section id="release" className={s.release} aria-labelledby="release-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><div><p className={s.eyebrow}>02 / INTRODUCING v0.8.3</p><h2 id="release-title">浏览文档中的图片，<br />用文字找到相关图表。</h2></div><a className={s.textLink} href={guide("07-releases/v0.8.3")}>查看版本说明 <Icon name="arrow" /></a></div>
-        <ProductGallery id="release-gallery" label="v0.8.3" slides={releaseSlides} />
+        <div className={s.sectionHeading}><div><p className={s.eyebrow}>02 / INTRODUCING v0.8.3</p><h2 id="release-title">图文检索、原文核对与知识组织</h2><p className={s.sectionIntro}>v0.8.3 从资料中的图片出发，改进检索、阅读与知识浏览，也让每个答案更方便核对。</p></div><a className={s.textLink} href={guide("07-releases/v0.8.3")}>查看版本说明 <Icon name="arrow" /></a></div>
+        <ProductGallery id="release-gallery" label="v0.8.3" slides={releaseSlides} layout="overview" />
         <div className={s.releaseExtras}><span>本次更新还包括</span>{releaseExtras.map(item => <a className={s.textLink} key={item.name} href={guide(item.link)}>{item.name} <Icon name="arrow" /></a>)}</div>
       </div></section>
       <section id="agent-workflow" className={`${s.shell} ${s.section}`} aria-labelledby="agent-workflow-title">
-        <div className={s.sectionHeading}><div><p className={s.eyebrow}>03 / YOUR LOCAL BROWSER</p><h2 id="agent-workflow-title">让智能体操作<br />你自己的浏览器。</h2></div><a className={s.textLink} href={guide("05-clients/09-local-browser")}>连接本机浏览器 <Icon name="arrow" /></a></div>
-        <ProductGallery id="browser-gallery" label="本机浏览器" slides={browserSlides} />
+        <div className={s.sectionHeading}><div><p className={s.eyebrow}>03 / YOUR LOCAL BROWSER</p><h2 id="agent-workflow-title">让智能体操作你自己的浏览器</h2></div><a className={s.textLink} href={guide("05-clients/09-local-browser")}>连接本机浏览器 <Icon name="arrow" /></a></div>
+        <ProductGallery id="browser-gallery" label="本机浏览器" slides={browserSlides} layout="single" />
       </section>
       <section id="skills-sandbox" className={`${s.release} ${s.sandboxTopic}`} aria-labelledby="skills-sandbox-title"><div className={s.shell}>
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>04 / SKILLS &amp; SANDBOX</p><h2 id="skills-sandbox-title">智能体可以运行技能，<br />也能生成文件。</h2></div><a className={s.textLink} href={guide("03-features/22-skills-sandbox")}>了解技能与沙箱 <Icon name="arrow" /></a></div>
