@@ -176,9 +176,9 @@ type Chunk struct {
 	// 父 Chunk ID，用于关联图片 Chunk 和原始文本 Chunk
 	ParentChunkID string `json:"parent_chunk_id"          gorm:"type:varchar(36);index"`
 	// 关系 Chunk ID，用于关联关系 Chunk 和原始文本 Chunk
-	RelationChunks JSON `json:"relation_chunks"          gorm:"type:json"`
+	RelationChunks JSON `json:"relation_chunks"          gorm:"type:json" swaggertype:"array,string"`
 	// 间接关系 Chunk ID，用于关联间接关系 Chunk 和原始文本 Chunk
-	IndirectRelationChunks JSON `json:"indirect_relation_chunks" gorm:"type:json"`
+	IndirectRelationChunks JSON `json:"indirect_relation_chunks" gorm:"type:json" swaggertype:"array,string"`
 	// Metadata 存储 chunk 级别的扩展信息，例如 FAQ 元数据
 	Metadata JSON `json:"metadata"                 gorm:"type:json"`
 	// ContentHash 存储内容的 hash 值，用于快速匹配（主要用于 FAQ）

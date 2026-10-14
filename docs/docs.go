@@ -21795,10 +21795,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "credentials": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object"
                 },
                 "deleted_at": {
                     "$ref": "#/definitions/gorm.DeletedAt"
@@ -21986,10 +21983,7 @@ const docTemplate = `{
                 },
                 "compat": {
                     "description": "Compat is the protocol-specific overlay for this model (flat object,\nfields depend on API). Decoded lazily by Resolve.",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object"
                 },
                 "context_window": {
                     "type": "integer"
@@ -22726,10 +22720,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "details": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object"
                 },
                 "id": {
                     "type": "integer"
@@ -23050,7 +23041,7 @@ const docTemplate = `{
                     "description": "间接关系 Chunk ID，用于关联间接关系 Chunk 和原始文本 Chunk",
                     "type": "array",
                     "items": {
-                        "type": "integer"
+                        "type": "string"
                     }
                 },
                 "is_enabled": {
@@ -23071,10 +23062,7 @@ const docTemplate = `{
                 },
                 "metadata": {
                     "description": "Metadata 存储 chunk 级别的扩展信息，例如 FAQ 元数据",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object"
                 },
                 "next_chunk_id": {
                     "description": "Next chunk ID",
@@ -23092,7 +23080,7 @@ const docTemplate = `{
                     "description": "关系 Chunk ID，用于关联关系 Chunk 和原始文本 Chunk",
                     "type": "array",
                     "items": {
-                        "type": "integer"
+                        "type": "string"
                     }
                 },
                 "seq_id": {
@@ -23789,10 +23777,7 @@ const docTemplate = `{
             "properties": {
                 "config": {
                     "description": "Encrypted configuration (API credentials, tokens, etc.)\nStored as JSON with AES-256-GCM encryption",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object"
                 },
                 "conflict_strategy": {
                     "description": "Conflict resolution strategy: overwrite or skip",
@@ -23828,17 +23813,11 @@ const docTemplate = `{
                 },
                 "last_sync_cursor": {
                     "description": "Cursor or state for incremental sync (connector-specific)",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object"
                 },
                 "last_sync_result": {
                     "description": "Summary of last sync result",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object"
                 },
                 "latest_sync_log": {
                     "description": "Latest sync log (not stored in DB, populated on query)",
@@ -25288,10 +25267,7 @@ const docTemplate = `{
                 },
                 "custom_metadata": {
                     "description": "CustomMetadata is user-authored descriptive metadata. It is deliberately\nseparate from Metadata, which contains internal ingestion state and IDs.",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object"
                 },
                 "deleted_at": {
                     "description": "Deletion time of the knowledge",
@@ -25359,17 +25335,11 @@ const docTemplate = `{
                 },
                 "last_faq_import_result": {
                     "description": "Last FAQ import result (for FAQ type knowledge only)",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object"
                 },
                 "metadata": {
                     "description": "Metadata of the knowledge",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object"
                 },
                 "parse_status": {
                     "description": "Parse status of the knowledge",
@@ -26516,10 +26486,7 @@ const docTemplate = `{
                 },
                 "inputSchema": {
                     "description": "JSON Schema for tool parameters",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object"
                 },
                 "name": {
                     "type": "string"
@@ -28239,10 +28206,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "request": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object"
                 },
                 "tool_call_id": {
                     "type": "string"
@@ -28284,10 +28248,7 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.ProviderMetadata": {
             "type": "object",
             "additionalProperties": {
-                "type": "array",
-                "items": {
-                    "type": "integer"
-                }
+                "type": "object"
             }
         },
         "github_com_Tencent_WeKnora_internal_types.QueryIntent": {
@@ -29099,10 +29060,7 @@ const docTemplate = `{
                 },
                 "chunk_metadata": {
                     "description": "ChunkMetadata stores chunk-level metadata (e.g., generated questions)",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object"
                 },
                 "chunk_type": {
                     "description": "Chunk 类型",
@@ -29980,10 +29938,7 @@ const docTemplate = `{
                 },
                 "result": {
                     "description": "Detailed sync result (JSON-encoded)",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object"
                 },
                 "started_at": {
                     "description": "Sync start time",
@@ -30048,10 +30003,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "value": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object"
                 },
                 "value_type": {
                     "description": "ValueType is one of \"int\", \"string\", \"bool\". Service layer rejects\nupdates whose payload type does not match; UI uses it to pick\nInputNumber vs Input vs Switch.",
@@ -30489,10 +30441,7 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.ToolCallMetadata": {
             "type": "object",
             "additionalProperties": {
-                "type": "array",
-                "items": {
-                    "type": "integer"
-                }
+                "type": "object"
             }
         },
         "github_com_Tencent_WeKnora_internal_types.ToolCallTarget": {
@@ -31656,10 +31605,7 @@ const docTemplate = `{
                 },
                 "page_metadata": {
                     "description": "Arbitrary metadata (tags, categories, dates, etc.)",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object"
                 },
                 "page_type": {
                     "description": "Page type: summary, entity, concept, index, synthesis, comparison",
@@ -31800,10 +31746,7 @@ const docTemplate = `{
                 },
                 "page_metadata": {
                     "description": "Arbitrary metadata (tags, categories, dates, etc.)",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object"
                 },
                 "page_type": {
                     "description": "Page type: summary, entity, concept, index, synthesis, comparison",
@@ -34927,10 +34870,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "custom_metadata": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object"
                 },
                 "description": {
                     "type": "string"

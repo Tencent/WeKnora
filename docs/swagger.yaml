@@ -681,9 +681,7 @@ definitions:
       created_at:
         type: string
       credentials:
-        items:
-          type: integer
-        type: array
+        type: object
       deleted_at:
         $ref: '#/definitions/gorm.DeletedAt'
       enabled:
@@ -814,9 +812,7 @@ definitions:
         description: |-
           Compat is the protocol-specific overlay for this model (flat object,
           fields depend on API). Decoded lazily by Resolve.
-        items:
-          type: integer
-        type: array
+        type: object
       context_window:
         type: integer
       cost:
@@ -1397,9 +1393,7 @@ definitions:
       created_at:
         type: string
       details:
-        items:
-          type: integer
-        type: array
+        type: object
       id:
         type: integer
       outcome:
@@ -1639,7 +1633,7 @@ definitions:
       indirect_relation_chunks:
         description: 间接关系 Chunk ID，用于关联间接关系 Chunk 和原始文本 Chunk
         items:
-          type: integer
+          type: string
         type: array
       is_enabled:
         description: Whether the chunk is enabled, can be used to temporarily disable
@@ -1656,9 +1650,7 @@ definitions:
         type: string
       metadata:
         description: Metadata 存储 chunk 级别的扩展信息，例如 FAQ 元数据
-        items:
-          type: integer
-        type: array
+        type: object
       next_chunk_id:
         description: Next chunk ID
         type: string
@@ -1671,7 +1663,7 @@ definitions:
       relation_chunks:
         description: 关系 Chunk ID，用于关联关系 Chunk 和原始文本 Chunk
         items:
-          type: integer
+          type: string
         type: array
       seq_id:
         description: SeqID is an auto-increment integer ID for external API usage
@@ -2342,9 +2334,7 @@ definitions:
         description: |-
           Encrypted configuration (API credentials, tokens, etc.)
           Stored as JSON with AES-256-GCM encryption
-        items:
-          type: integer
-        type: array
+        type: object
       conflict_strategy:
         description: 'Conflict resolution strategy: overwrite or skip'
         type: string
@@ -2369,14 +2359,10 @@ definitions:
         type: string
       last_sync_cursor:
         description: Cursor or state for incremental sync (connector-specific)
-        items:
-          type: integer
-        type: array
+        type: object
       last_sync_result:
         description: Summary of last sync result
-        items:
-          type: integer
-        type: array
+        type: object
       latest_sync_log:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog'
@@ -3481,9 +3467,7 @@ definitions:
         description: |-
           CustomMetadata is user-authored descriptive metadata. It is deliberately
           separate from Metadata, which contains internal ingestion state and IDs.
-        items:
-          type: integer
-        type: array
+        type: object
       deleted_at:
         allOf:
         - $ref: '#/definitions/gorm.DeletedAt'
@@ -3539,14 +3523,10 @@ definitions:
         type: string
       last_faq_import_result:
         description: Last FAQ import result (for FAQ type knowledge only)
-        items:
-          type: integer
-        type: array
+        type: object
       metadata:
         description: Metadata of the knowledge
-        items:
-          type: integer
-        type: array
+        type: object
       parse_status:
         description: Parse status of the knowledge
         type: string
@@ -4424,9 +4404,7 @@ definitions:
         type: string
       inputSchema:
         description: JSON Schema for tool parameters
-        items:
-          type: integer
-        type: array
+        type: object
       name:
         type: string
       require_approval:
@@ -5780,9 +5758,7 @@ definitions:
       kind:
         type: string
       request:
-        items:
-          type: integer
-        type: array
+        type: object
       tool_call_id:
         type: string
     type: object
@@ -5812,9 +5788,7 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.ProviderMetadata:
     additionalProperties:
-      items:
-        type: integer
-      type: array
+      type: object
     type: object
   github_com_Tencent_WeKnora_internal_types.QueryIntent:
     enum:
@@ -6443,9 +6417,7 @@ definitions:
         type: integer
       chunk_metadata:
         description: ChunkMetadata stores chunk-level metadata (e.g., generated questions)
-        items:
-          type: integer
-        type: array
+        type: object
       chunk_type:
         description: Chunk 类型
         type: string
@@ -7126,9 +7098,7 @@ definitions:
         type: integer
       result:
         description: Detailed sync result (JSON-encoded)
-        items:
-          type: integer
-        type: array
+        type: object
       started_at:
         description: Sync start time
         type: string
@@ -7192,9 +7162,7 @@ definitions:
       updated_at:
         type: string
       value:
-        items:
-          type: integer
-        type: array
+        type: object
       value_type:
         description: |-
           ValueType is one of "int", "string", "bool". Service layer rejects
@@ -7542,9 +7510,7 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.ToolCallMetadata:
     additionalProperties:
-      items:
-        type: integer
-      type: array
+      type: object
     type: object
   github_com_Tencent_WeKnora_internal_types.ToolCallTarget:
     properties:
@@ -8471,9 +8437,7 @@ definitions:
         type: array
       page_metadata:
         description: Arbitrary metadata (tags, categories, dates, etc.)
-        items:
-          type: integer
-        type: array
+        type: object
       page_type:
         description: 'Page type: summary, entity, concept, index, synthesis, comparison'
         type: string
@@ -8613,9 +8577,7 @@ definitions:
         type: array
       page_metadata:
         description: Arbitrary metadata (tags, categories, dates, etc.)
-        items:
-          type: integer
-        type: array
+        type: object
       page_type:
         description: 'Page type: summary, entity, concept, index, synthesis, comparison'
         type: string
@@ -10805,9 +10767,7 @@ definitions:
   internal_handler.UpdateKnowledgeRequest:
     properties:
       custom_metadata:
-        items:
-          type: integer
-        type: array
+        type: object
       description:
         type: string
       title:
