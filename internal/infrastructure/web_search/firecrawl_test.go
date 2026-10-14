@@ -40,7 +40,7 @@ func TestFirecrawlSearchMapsOptionsAndTrimsResults(t *testing.T) {
 			require.Equal(t, []any{"web"}, body["sources"])
 			require.Equal(t, "DE", body["country"])
 			require.Equal(t, "qdr:w", body["tbs"])
-			require.Equal(t, "weknora", body["origin"])
+			require.NotContains(t, body, "origin")
 			require.NotContains(t, body, "scrapeOptions")
 			return firecrawlOK(`{"success":true,"data":{"web":[
 			 {"title":"One","url":"https://example.com/one","description":"Snippet","position":1},
