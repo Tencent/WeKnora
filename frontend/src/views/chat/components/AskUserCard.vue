@@ -23,7 +23,7 @@
           {{ field.label || field.name }}<span v-if="field.required" class="ask-required">*</span>
         </label>
         <t-input-number v-if="field.type === 'number'" v-model="values[field.name]" :disabled="locked"
-          theme="normal" size="small" />
+          theme="normal" size="small" class="ask-number" />
         <t-select v-else-if="field.type === 'select' || field.type === 'multiselect'" v-model="values[field.name]"
           :multiple="field.type === 'multiselect'" :disabled="locked" size="small" clearable
           :placeholder="$t('agentStream.askUser.selectPlaceholder')">
@@ -32,7 +32,7 @@
         <t-input v-else v-model="values[field.name]" :disabled="locked" size="small" :maxlength="maxTextLen" />
       </div>
 
-      <t-textarea v-if="acceptsText" v-model="text" :disabled="locked" :maxlength="maxTextLen"
+      <t-textarea v-if="acceptsText" v-model="text" class="ask-text" :disabled="locked" :maxlength="maxTextLen"
         :autosize="{ minRows: 1, maxRows: 6 }"
         :placeholder="freeTextOnly ? $t('agentStream.askUser.textPlaceholder') : $t('agentStream.askUser.otherPlaceholder')" />
     </div>
@@ -61,7 +61,7 @@
       </div>
     </div>
 
-    <div v-if="answerSummary" class="interaction-args-preview">{{ answerSummary }}</div>
+    <div v-if="answerSummary" class="ask-answer">{{ answerSummary }}</div>
   </div>
 </template>
 
@@ -179,11 +179,13 @@ const submit = async (decline: boolean) => {
 <style scoped lang="less">
 @import './agent-interaction-card.less';
 
+// The question reads like the agent's other step text; the card's controls
+// stay compact so the timeline keeps its rhythm.
 .ask-question {
-  padding: 4px 0 2px;
-  font-size: var(--agent-step-summary-size, 13px);
-  line-height: 1.6;
-  color: var(--td-text-color-primary);
+  padding: 2px 0 0;
+  font-size: var(--agent-step-text-size, 14px);
+  line-height: 1.55;
+  color: var(--td-text-color-secondary);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -199,7 +201,18 @@ const submit = async (decline: boolean) => {
 .ask-options {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 12px;
+  gap: 2px 16px;
+
+  :deep(.t-radio),
+  :deep(.t-checkbox) {
+    margin-right: 0;
+    font-size: var(--agent-step-summary-size, 13px);
+  }
+
+  :deep(.t-radio__label),
+  :deep(.t-checkbox__label) {
+    color: var(--td-text-color-secondary);
+  }
 }
 
 .ask-field {
@@ -209,8 +222,34 @@ const submit = async (decline: boolean) => {
 }
 
 .ask-field-label {
-  font-size: var(--app-text-sm);
+  font-size: var(--agent-step-summary-size, 13px);
+  line-height: 1.55;
   color: var(--td-text-color-secondary);
+}
+
+.ask-number {
+  width: 100%;
+}
+
+.ask-text {
+  :deep(.t-textarea__inner) {
+    font-size: var(--agent-step-summary-size, 13px);
+  }
+
+  // The limit is far above a typical answer; the counter is noise here.
+  :deep(.t-textarea__info_wrapper),
+  :deep(.t-textarea__limit) {
+    display: none;
+  }
+}
+
+.ask-answer {
+  padding: 2px 0 0;
+  font-size: var(--agent-step-summary-size, 13px);
+  line-height: 1.55;
+  color: var(--td-text-color-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .ask-required {
