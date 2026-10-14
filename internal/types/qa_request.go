@@ -59,6 +59,21 @@ type QuestionOrigin struct {
 	KnowledgeID     string `json:"knowledge_id,omitempty"`
 }
 
+// MaxPageContextIssues bounds how many Wiki issues one page context names.
+const MaxPageContextIssues = 20
+
+// PageContext is the WeKnora page the user has open while asking: a
+// knowledge base, optionally a document, a Wiki page or Wiki issues in it.
+// It tells the agent what "this" refers to. Like QuestionOrigin it is only a
+// hint inside the turn's resolved scope: anything outside the search targets
+// is dropped, never added to them.
+type PageContext struct {
+	KnowledgeBaseID string   `json:"knowledge_base_id"`
+	KnowledgeID     string   `json:"knowledge_id,omitempty"`
+	WikiSlug        string   `json:"wiki_slug,omitempty"`
+	WikiIssueIDs    []string `json:"wiki_issue_ids,omitempty"`
+}
+
 // QARequest consolidates all parameters for KnowledgeQA and AgentQA service calls,
 // replacing the previous 14-parameter method signatures.
 // EventBus is passed separately to avoid circular dependency with the event package.
@@ -83,6 +98,7 @@ type QARequest struct {
 	QuotedContext       string             // Quoted message content from IM quote-reply (appended at LLM prompt stage, not used for retrieval)
 	Attachments         MessageAttachments // File attachments (processed and ready for prompt injection)
 	QuestionOrigin      *QuestionOrigin    // Source of a picked suggested question; a retrieval hint only
+	PageContext         *PageContext       // Page the user has open; a hint inside the resolved scope only
 	// SteerSink, when set, enables mid-run message injection for this run:
 	// the engine drains user-appended messages at every round boundary and
 	// persists accepted ones through this sink. A structural interface so

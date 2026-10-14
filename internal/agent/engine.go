@@ -44,6 +44,7 @@ type AgentEngine struct {
 	pinnedMCPServices    []*PinnedMCPServiceInfo // User @mentioned MCP services for this turn
 	pinnedSkills         []*PinnedSkillInfo      // User @mentioned skills for this turn
 	questionOrigin       *QuestionOriginInfo     // Source of a picked suggested question, if any
+	pageContext          *PageContextInfo        // Page the user has open, if any
 	sessionID            string                  // Session ID for logging and event emission
 	systemPromptTemplate string                  // System prompt template (optional, uses default if empty)
 	memoryPrompt         string                  // Long-term memory envelope appended to the system prompt
@@ -151,6 +152,12 @@ func NewAgentEngine(
 // user picked for this turn; nil clears it.
 func (e *AgentEngine) SetQuestionOrigin(origin *QuestionOriginInfo) {
 	e.questionOrigin = origin
+}
+
+// SetPageContext records the WeKnora page the user has open for this turn;
+// nil clears it.
+func (e *AgentEngine) SetPageContext(page *PageContextInfo) {
+	e.pageContext = page
 }
 
 // SetPinnedMentions sets per-turn @mention scope for MCP services and skills.

@@ -38,6 +38,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/hitl"
+	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
@@ -356,6 +357,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		cleaner.RegisterWithName("BrowserSkill", func() error { manager.Close(); return nil })
 		return manager, nil
 	}))
+	// Agent catalog operations dispatch into the router, which is built later
+	// and binds itself to this dispatcher.
+	must(container.Provide(operations.NewHandlerDispatcher))
 	must(container.Provide(service.NewAgentService))
 
 	// Session service (depends on agent service)

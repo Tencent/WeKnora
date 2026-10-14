@@ -223,6 +223,7 @@ func (h *Handler) buildResumeRequest(
 		userMessageID:       req.UserMessageID,
 		channel:             msg.Channel,
 		questionOrigin:      req.QuestionOrigin,
+		pageContext:         req.PageContext,
 		skipSSE:             true,
 		resume:              &types.AgentResume{Snapshot: state.Snapshot, Prompt: prompt},
 	}, state, nil

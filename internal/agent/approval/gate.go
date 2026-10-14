@@ -79,6 +79,16 @@ type MCPApproval interface {
 	MarkExecuted(ctx context.Context, pendingID string)
 }
 
+// BuiltinApproval confirms built-in tool calls that change user data. It has
+// no per-tool policy: every call it is asked about needs the user's answer.
+type BuiltinApproval interface {
+	RequestBuiltinApproval(ctx context.Context, req PendingRequest) (Decision, error)
+	ResumeDecision(ctx context.Context, prompt *types.AgentPrompt, bus *event.EventBus) Decision
+	MarkExecuted(ctx context.Context, pendingID string)
+}
+
+var _ BuiltinApproval = (*Gate)(nil)
+
 // OAuthPendingRequest carries everything needed to prompt the user to authorize
 // an OAuth-enabled MCP service mid-conversation and block until they do.
 type OAuthPendingRequest struct {
@@ -195,6 +205,21 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 	if g.checker == nil {
 		return Decision{Approved: true}, nil
 	}
+	return g.awaitToolApproval(ctx, req)
+}
+
+// RequestBuiltinApproval asks the user to approve a built-in tool call.
+// Unlike RequestAndWait it has no MCP policy to consult and never approves
+// on its own: without a broker or an event bus to reach the user, the call
+// is refused.
+func (g *Gate) RequestBuiltinApproval(ctx context.Context, req PendingRequest) (Decision, error) {
+	if g == nil || g.broker == nil {
+		return Decision{}, fmt.Errorf("tool approval is not available")
+	}
+	return g.awaitToolApproval(ctx, req)
+}
+
+func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decision, error) {
 	if req.EventBus == nil {
 		return Decision{}, fmt.Errorf("tool approval: EventBus is nil")
 	}

@@ -352,6 +352,7 @@ func resumableAgentRequest(ctx context.Context, req *types.QARequest) types.Resu
 		SkillNames:          req.SkillNames,
 		WebSearchEnabled:    req.WebSearchEnabled,
 		QuestionOrigin:      req.QuestionOrigin,
+		PageContext:         req.PageContext,
 		UserMessageID:       req.UserMessageID,
 		Language:            types.LanguageFromContextOrDefault(ctx),
 	}
@@ -506,8 +507,12 @@ func (s *sessionService) buildAgentConfig(
 	if !req.SharedAgentReadOnly {
 		roleEnforced := s.cfg != nil && s.cfg.Tenant.IsRBACEnforced()
 		agentConfig.WritableKBIDs = kbWritableIDs(ctx, s.kbShareService, searchTargets, roleEnforced)
+		if types.GrantsOperationCatalog(req.CustomAgent) {
+			agentConfig.OperationsAgentID = req.CustomAgent.ID
+		}
 	}
 	agentConfig.QuestionOrigin = questionOriginInTargets(ctx, req.QuestionOrigin, searchTargets)
+	agentConfig.PageContext = pageContextInTargets(ctx, req.PageContext, searchTargets)
 	// Document tags are stored in knowledge_tag_relations, so document-KB tag
 	// scopes are resolved to concrete knowledge IDs before retrieval. Preserve
 	// those resolved IDs as this turn's pinned documents as well: otherwise the
@@ -768,6 +773,48 @@ func questionOriginInTargets(
 	kept := &types.QuestionOrigin{KnowledgeBaseID: kbID}
 	if docID := strings.TrimSpace(origin.KnowledgeID); docID != "" && targetsCoverDocument(targets, kbID, docID) {
 		kept.KnowledgeID = docID
+	}
+	return kept
+}
+
+// pageContextInTargets keeps the page the user has open only when this turn's
+// search targets reach its knowledge base, and its document only when a
+// target covers it. The Wiki slug and issue IDs are kept as given (trimmed,
+// deduplicated and bounded); the agent service checks they exist in that base
+// before showing them to the model.
+func pageContextInTargets(
+	ctx context.Context, page *types.PageContext, targets types.SearchTargets,
+) *types.PageContext {
+	if page == nil {
+		return nil
+	}
+	kbID := strings.TrimSpace(page.KnowledgeBaseID)
+	if kbID == "" {
+		return nil
+	}
+	if !targets.ContainsKB(kbID) {
+		logger.Infof(ctx, "Ignoring page context: knowledge base %s is outside this turn's search targets",
+			secutils.SanitizeForLog(kbID))
+		return nil
+	}
+	kept := &types.PageContext{KnowledgeBaseID: kbID, WikiSlug: strings.TrimSpace(page.WikiSlug)}
+	if docID := strings.TrimSpace(page.KnowledgeID); docID != "" && targetsCoverDocument(targets, kbID, docID) {
+		kept.KnowledgeID = docID
+	}
+	seen := make(map[string]struct{}, len(page.WikiIssueIDs))
+	for _, id := range page.WikiIssueIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		if len(kept.WikiIssueIDs) == types.MaxPageContextIssues {
+			break
+		}
+		seen[id] = struct{}{}
+		kept.WikiIssueIDs = append(kept.WikiIssueIDs, id)
 	}
 	return kept
 }

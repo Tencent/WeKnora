@@ -64,6 +64,31 @@ type QuestionOriginInfo struct {
 	Document          *SelectedDocumentInfo // nil when only the base is known
 }
 
+// PageContextInfo is the WeKnora page the user has open, with every part
+// checked to exist in the knowledge base. Rendered into runtime_context so
+// "this document" or "these issues" resolve without the model asking.
+type PageContextInfo struct {
+	KnowledgeBaseID   string
+	KnowledgeBaseName string
+	Document          *SelectedDocumentInfo // nil unless a document is open
+	WikiPage          *PageContextWikiPage  // nil unless a Wiki page is open
+	WikiIssues        []*PageContextWikiIssue
+}
+
+// PageContextWikiPage is the Wiki page open in a page context.
+type PageContextWikiPage struct {
+	Slug  string
+	Title string
+}
+
+// PageContextWikiIssue is a Wiki issue shown on the page the user has open.
+type PageContextWikiIssue struct {
+	ID        string
+	Slug      string
+	IssueType string
+	Status    string
+}
+
 // PinnedMCPServiceInfo describes an MCP service explicitly @mentioned for this turn.
 type PinnedMCPServiceInfo struct {
 	Discoverable bool // Available through the scoped MCP directory.

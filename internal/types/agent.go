@@ -168,10 +168,19 @@ type AgentConfig struct {
 	// picked, already checked to be inside KnowledgeBases (runtime only;
 	// rendered into runtime_context as a retrieval hint).
 	QuestionOrigin *QuestionOrigin `json:"-"`
+	// PageContext is the page the user has open, already narrowed to this
+	// turn's search targets (runtime only; rendered into runtime_context).
+	PageContext *PageContext `json:"-"`
 	// SharedAgentReadOnly prevents a shared agent from mutating resources in
 	// its source workspace. It is set from the verified share relation, never
 	// inferred from a client-provided tenant ID.
 	SharedAgentReadOnly bool `json:"-"`
+	// OperationsAgentID, when set, grants this run the WeKnora operation
+	// catalog (find_operations / run_operation) and attributes its changes to
+	// that agent. It is set server-side for built-in management agents only,
+	// never read from an agent record, so a tenant cannot opt a custom agent
+	// into it. Runtime only.
+	OperationsAgentID string `json:"-"`
 	// WritableKBIDs are the SearchTargets KBs this caller may modify (its own
 	// workspace's, or shared to it as editor+). Search targets only need read
 	// access, so tools that write (wiki pages and issues) are limited to this

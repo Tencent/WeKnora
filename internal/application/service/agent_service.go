@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/attachment"
@@ -115,6 +116,7 @@ type agentService struct {
 	memoryService         interfaces.MemoryService
 	storageResolver       interfaces.StorageBackendResolver
 	toolApprovalGate      approval.MCPApproval
+	operationDispatcher   operations.Dispatcher
 	sandboxMgr            sandbox.Manager
 	sandboxResolver       sandbox.TenantSandboxResolver
 	sandboxPinner         *SessionSandboxPinner
@@ -154,8 +156,10 @@ func NewAgentService(
 	browserSkill *browserskill.Manager,
 	userRepo interfaces.UserRepository,
 	graphRepo interfaces.RetrieveGraphRepository,
+	operationDispatcher *operations.HandlerDispatcher,
 ) interfaces.AgentService {
 	svc := &agentService{
+		operationDispatcher:  operationDispatcher,
 		browserSkill:         browserSkill,
 		userRepo:             userRepo,
 		graphRepo:            graphRepo,
@@ -227,6 +231,7 @@ func (s *agentService) CreateAgentEngine(
 		return nil, fmt.Errorf("failed to register tools: %w", err)
 	}
 	s.registerMCPTools(ctx, toolRegistry, config)
+	s.registerOperationTools(ctx, toolRegistry, config)
 
 	// Register the shell first: file discovery needs a separate tool only
 	// when no shell is available. File access still follows the sandbox
@@ -262,6 +267,7 @@ func (s *agentService) CreateAgentEngine(
 		s.resolvePinnedSkillInfos(config),
 	)
 	engine.SetQuestionOrigin(s.resolveQuestionOriginInfo(ctx, config.QuestionOrigin, config.SearchTargets, kbInfos))
+	engine.SetPageContext(s.resolvePageContextInfo(ctx, config.PageContext, config.SearchTargets, kbInfos))
 
 	// Non-vision chat models use the configured VLM to describe tool images.
 	// Vision chat models receive the original images after the tool replies.
@@ -442,6 +448,35 @@ func (s *agentService) resolveKBAndDocInfos(
 // Install mode gets write_skill_file / edit_skill_file instead, which write
 // the image tree and are scoped to the one skill being installed —
 // see registerSkillFileTools.
+// registerOperationTools grants the operation catalog to built-in management
+// agents. Operations run as the signed-in user through the router, so they
+// are withheld from any run that has no such user (API key, embed, IM) and
+// from shared agents, whose runs must not mutate the source workspace.
+func (s *agentService) registerOperationTools(
+	ctx context.Context,
+	toolRegistry *tools.ToolRegistry,
+	config *types.AgentConfig,
+) {
+	if config == nil || config.OperationsAgentID == "" || config.SharedAgentReadOnly || s.operationDispatcher == nil {
+		return
+	}
+	identity, ok := tools.OperationIdentityFromContext(ctx)
+	if !ok {
+		logger.Infof(ctx, "Operation tools withheld: the run has no signed-in web user")
+		return
+	}
+	identity.Agent.AgentID = config.OperationsAgentID
+	gate, _ := s.toolApprovalGate.(approval.BuiltinApproval)
+	catalog := operations.Builtin()
+	toolRegistry.RegisterTool(tools.NewFindOperationsTool(catalog))
+	toolRegistry.RegisterTool(tools.NewRunOperationTool(tools.OperationsRuntime{
+		Catalog:    catalog,
+		Dispatcher: s.operationDispatcher,
+		Gate:       gate,
+		Identity:   identity,
+	}))
+}
+
 func (s *agentService) registerSandboxFileTools(
 	ctx context.Context,
 	toolRegistry *tools.ToolRegistry,
@@ -1539,9 +1574,7 @@ func kbRetrievalCapabilities(kb *types.KnowledgeBase) []string {
 // resolveQuestionOriginInfo turns a suggested question's origin into the
 // names the runtime context shows. It re-checks the base against this turn's
 // search targets rather than trusting the caller, and keeps a document only
-// when it belongs to that base. A base reached only through a document or tag
-// scope is not in kbInfos when other bases are selected, so its name is
-// looked up directly.
+// when it belongs to that base.
 func (s *agentService) resolveQuestionOriginInfo(
 	ctx context.Context, origin *types.QuestionOrigin, targets types.SearchTargets,
 	kbInfos []*agent.KnowledgeBaseInfo,
@@ -1549,18 +1582,9 @@ func (s *agentService) resolveQuestionOriginInfo(
 	if origin == nil || origin.KnowledgeBaseID == "" || !targets.ContainsKB(origin.KnowledgeBaseID) {
 		return nil
 	}
-	info := &agent.QuestionOriginInfo{KnowledgeBaseID: origin.KnowledgeBaseID}
-	for _, kb := range kbInfos {
-		if kb != nil && kb.ID == origin.KnowledgeBaseID {
-			info.KnowledgeBaseName = kb.Name
-			break
-		}
-	}
-	if info.KnowledgeBaseName == "" && s.knowledgeBaseService != nil {
-		kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, origin.KnowledgeBaseID)
-		if err == nil && kb != nil {
-			info.KnowledgeBaseName = kb.Name
-		}
+	info := &agent.QuestionOriginInfo{
+		KnowledgeBaseID:   origin.KnowledgeBaseID,
+		KnowledgeBaseName: s.knowledgeBaseName(ctx, origin.KnowledgeBaseID, kbInfos),
 	}
 	if origin.KnowledgeID == "" {
 		return info
@@ -1573,6 +1597,108 @@ func (s *agentService) resolveQuestionOriginInfo(
 	}
 	info.Document = docs[0]
 	return info
+}
+
+// knowledgeBaseName returns a base's display name, preferring the already
+// loaded kbInfos. A base reached only through a document or tag scope is not
+// in kbInfos when other bases are selected, so it is looked up directly.
+func (s *agentService) knowledgeBaseName(
+	ctx context.Context, kbID string, kbInfos []*agent.KnowledgeBaseInfo,
+) string {
+	for _, kb := range kbInfos {
+		if kb != nil && kb.ID == kbID {
+			return kb.Name
+		}
+	}
+	if s.knowledgeBaseService == nil {
+		return ""
+	}
+	kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil || kb == nil {
+		return ""
+	}
+	return kb.Name
+}
+
+// resolvePageContextInfo turns the page the user has open into what the
+// runtime context shows. The config's page context is already narrowed to
+// this turn's search targets; this keeps only the parts that exist in that
+// base, so the model is never pointed at a document, page or issue it cannot
+// find. Parts that fail to resolve are dropped individually.
+func (s *agentService) resolvePageContextInfo(
+	ctx context.Context, page *types.PageContext, targets types.SearchTargets,
+	kbInfos []*agent.KnowledgeBaseInfo,
+) *agent.PageContextInfo {
+	if page == nil || page.KnowledgeBaseID == "" || !targets.ContainsKB(page.KnowledgeBaseID) {
+		return nil
+	}
+	kbID := page.KnowledgeBaseID
+	info := &agent.PageContextInfo{
+		KnowledgeBaseID:   kbID,
+		KnowledgeBaseName: s.knowledgeBaseName(ctx, kbID, kbInfos),
+	}
+	if page.KnowledgeID != "" {
+		docs, err := s.getSelectedDocumentInfos(ctx, []string{page.KnowledgeID})
+		if err == nil && len(docs) == 1 && docs[0].KnowledgeBaseID == kbID {
+			info.Document = docs[0]
+		} else {
+			logger.Infof(ctx, "Page context document %s dropped: not found in knowledge base %s",
+				secutils.SanitizeForLog(page.KnowledgeID), secutils.SanitizeForLog(kbID))
+		}
+	}
+	if s.wikiPageService == nil {
+		return info
+	}
+	if page.WikiSlug != "" {
+		wikiPage, err := s.wikiPageService.GetPageBySlug(ctx, kbID, page.WikiSlug)
+		if err == nil && wikiPage != nil {
+			info.WikiPage = &agent.PageContextWikiPage{Slug: wikiPage.Slug, Title: wikiPage.Title}
+		} else {
+			logger.Infof(ctx, "Page context wiki page %s dropped: not found in knowledge base %s",
+				secutils.SanitizeForLog(page.WikiSlug), secutils.SanitizeForLog(kbID))
+		}
+	}
+	if len(page.WikiIssueIDs) > 0 {
+		info.WikiIssues = s.pageContextIssues(ctx, kbID, page.WikiIssueIDs)
+	}
+	return info
+}
+
+// pageContextIssues keeps the requested issues that exist in kbID, in the
+// order the client listed them.
+func (s *agentService) pageContextIssues(
+	ctx context.Context, kbID string, ids []string,
+) []*agent.PageContextWikiIssue {
+	issues, err := s.wikiPageService.ListIssues(ctx, kbID, "", "")
+	if err != nil {
+		logger.Warnf(ctx, "Page context issues dropped: list issues of knowledge base %s: %v",
+			secutils.SanitizeForLog(kbID), err)
+		return nil
+	}
+	byID := make(map[string]*types.WikiPageIssue, len(issues))
+	for _, issue := range issues {
+		if issue != nil && issue.KnowledgeBaseID == kbID {
+			byID[issue.ID] = issue
+		}
+	}
+	kept := make([]*agent.PageContextWikiIssue, 0, len(ids))
+	for _, id := range ids {
+		issue, ok := byID[id]
+		if !ok {
+			continue
+		}
+		kept = append(kept, &agent.PageContextWikiIssue{
+			ID:        issue.ID,
+			Slug:      issue.Slug,
+			IssueType: issue.IssueType,
+			Status:    issue.Status,
+		})
+	}
+	if len(kept) < len(ids) {
+		logger.Infof(ctx, "Page context kept %d of %d wiki issues in knowledge base %s",
+			len(kept), len(ids), secutils.SanitizeForLog(kbID))
+	}
+	return kept
 }
 
 func (s *agentService) getSelectedDocumentInfos(ctx context.Context, knowledgeIDs []string) ([]*agent.SelectedDocumentInfo, error) {

@@ -729,6 +729,7 @@ func patchEmbedChatPayload(body io.Reader, ch *types.EmbedChannel, agentMode boo
 	payload["skill_names"] = []string{}
 	delete(payload, "summary_model_id")
 	delete(payload, "question_origin")
+	delete(payload, "page_context")
 	clientWebSearch := false
 	if v, ok := payload["web_search_enabled"].(bool); ok {
 		clientWebSearch = v

@@ -28019,6 +28019,26 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.PageContext": {
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "knowledge_id": {
+                    "type": "string"
+                },
+                "wiki_issue_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "wiki_slug": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.PageResult": {
             "type": "object",
             "properties": {
@@ -35754,6 +35774,14 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/internal_handler_session.MentionedItemRequest"
                     }
+                },
+                "page_context": {
+                    "description": "PageContext is the WeKnora page the user has open (agent mode only).",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.PageContext"
+                        }
+                    ]
                 },
                 "query": {
                     "description": "Query text; may be empty only when an image or file is attached",

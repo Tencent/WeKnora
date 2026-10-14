@@ -160,6 +160,17 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 		decodedIssueIDKeys:  map[string]struct{}{"issue_id": {}},
 		encodeKnownIssueIDs: true,
 	},
+	// The operation catalog names parameters and result fields with the
+	// canonical keys below, so handles decode inside params and returned IDs
+	// come back as handles. Catalog metadata itself carries no identifiers.
+	"find_operations": {},
+	"run_operation": {
+		sourceIDKeys:        map[string]struct{}{"knowledge_base_id": {}, "knowledge_id": {}},
+		decodedIssueIDKeys:  map[string]struct{}{"issue_id": {}},
+		encodedIssueIDKeys:  map[string]struct{}{"issue_id": {}},
+		encodeKnownIssueIDs: true,
+		sourceOutput:        true,
+	},
 	// Mutation tools echo the slug they acted on and surface validation errors
 	// that can quote a durable KB or document ID. They own no source arguments,
 	// but their output must still be compacted before the model sees it.

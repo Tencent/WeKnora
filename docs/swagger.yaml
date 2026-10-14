@@ -5620,6 +5620,19 @@ definitions:
       updated_at:
         type: string
     type: object
+  github_com_Tencent_WeKnora_internal_types.PageContext:
+    properties:
+      knowledge_base_id:
+        type: string
+      knowledge_id:
+        type: string
+      wiki_issue_ids:
+        items:
+          type: string
+        type: array
+      wiki_slug:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.PageResult:
     properties:
       data:
@@ -11385,6 +11398,11 @@ definitions:
         items:
           $ref: '#/definitions/internal_handler_session.MentionedItemRequest'
         type: array
+      page_context:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.PageContext'
+        description: PageContext is the WeKnora page the user has open (agent mode
+          only).
       query:
         description: Query text; may be empty only when an image or file is attached
         type: string

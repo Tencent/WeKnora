@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -506,6 +507,48 @@ func TestSkillInstallerIsHiddenFromThePicker(t *testing.T) {
 		"the server must still be able to resolve it by ID")
 	require.NotContains(t, types.GetBuiltinAgentIDs(), types.BuiltinSkillInstallerID,
 		"it must not clutter the tenant's agent picker")
+}
+
+func TestWeKnoraAssistantIsAHiddenBuiltinWithOperations(t *testing.T) {
+	require.NoError(t, types.LoadBuiltinAgentsConfig(filepath.Join("..", "..", "..", "config")))
+
+	agent := types.GetBuiltinAgent(types.BuiltinWeKnoraAssistantID, 1)
+	require.NotNil(t, agent)
+	require.NotContains(t, types.GetBuiltinAgentIDs(), types.BuiltinWeKnoraAssistantID)
+	require.True(t, types.GrantsOperationCatalog(agent))
+	require.True(t, types.UsesFallbackChatModel(agent))
+	require.Equal(t, "weknora_assistant", agent.Config.SystemPromptID)
+	require.NotContains(t, agent.Config.AllowedTools, tools.ToolRunOperation,
+		"operations are granted by ID, never through the editable allowlist")
+	for _, def := range tools.AvailableToolDefinitions() {
+		require.NotEqual(t, tools.ToolRunOperation, def.Name)
+		require.NotEqual(t, tools.ToolFindOperations, def.Name)
+	}
+
+	stored := *agent
+	stored.IsBuiltin = false
+	require.False(t, types.GrantsOperationCatalog(&stored))
+}
+
+func TestRegisterOperationToolsRequiresGrantAndWebUser(t *testing.T) {
+	webUser := types.WithCaller(types.WithPrincipal(context.Background(),
+		types.Principal{Type: types.PrincipalWebUser, ID: "u1"}),
+		types.Caller{TenantID: 7, UserID: "u1"})
+	svc := &agentService{operationDispatcher: operations.NewHandlerDispatcher()}
+	registered := func(ctx context.Context, cfg *types.AgentConfig) []string {
+		registry := tools.NewToolRegistry()
+		svc.registerOperationTools(ctx, registry, cfg)
+		return registry.ListTools()
+	}
+
+	granted := &types.AgentConfig{OperationsAgentID: types.BuiltinWeKnoraAssistantID}
+	require.ElementsMatch(t, []string{tools.ToolFindOperations, tools.ToolRunOperation}, registered(webUser, granted))
+	require.Empty(t, registered(webUser, &types.AgentConfig{}))
+	require.Empty(t, registered(webUser, &types.AgentConfig{
+		OperationsAgentID: types.BuiltinWeKnoraAssistantID, SharedAgentReadOnly: true,
+	}))
+	apiKey := types.WithTenantAPIKeyScope(webUser, types.TenantAPIKeyScope{KeyID: 1})
+	require.Empty(t, registered(apiKey, granted))
 }
 
 func TestGetKnowledgeBaseInfos_SharedKnowledgeBaseUsesSourceTenant(t *testing.T) {

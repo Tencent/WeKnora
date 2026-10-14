@@ -30,7 +30,34 @@ const (
 	BuiltinWikiFixerID = "builtin-wiki-fixer"
 	// BuiltinSkillInstallerID is the ID for the built-in skill installer agent
 	BuiltinSkillInstallerID = "builtin-skill-installer"
+	// BuiltinWeKnoraAssistantID is the built-in assistant that manages
+	// WeKnora itself (documents, parsing, Wiki health) for the signed-in user.
+	BuiltinWeKnoraAssistantID = "builtin-weknora-assistant"
 )
+
+// GrantsOperationCatalog reports whether agent may run WeKnora management
+// operations. Only the built-in assistant does; the ID alone is not enough,
+// since it must come from the built-in registry rather than a stored record.
+func GrantsOperationCatalog(agent *CustomAgent) bool {
+	return agent != nil && agent.IsBuiltin && agent.ID == BuiltinWeKnoraAssistantID
+}
+
+// UsesFallbackChatModel reports whether a built-in agent runs without its
+// own model_id. These agents are hidden from agent management, so a user
+// cannot configure one; the run resolves the model from its knowledge base
+// or the system KnowledgeQA default.
+func UsesFallbackChatModel(agent *CustomAgent) bool {
+	return agent != nil && agent.IsBuiltin &&
+		(agent.ID == BuiltinWikiFixerID || agent.ID == BuiltinWeKnoraAssistantID)
+}
+
+// RunsInSharedKBWorkspace reports whether a built-in agent opened on one
+// shared knowledge base runs in that KB's source workspace when the caller
+// may edit it, so KB-scoped models and Wiki tools resolve there.
+func RunsInSharedKBWorkspace(agent *CustomAgent) bool {
+	return agent != nil && agent.IsBuiltin &&
+		(agent.ID == BuiltinWikiFixerID || agent.ID == BuiltinWeKnoraAssistantID)
+}
 
 // AgentMode constants for agent running mode
 const (
@@ -647,10 +674,11 @@ var BuiltinAgentRegistry = map[string]func(uint64) *CustomAgent{}
 // builtinAgentIDsOrdered defines the fixed display order of built-in agents
 // that are exposed in the user-facing agent list (ListAgents).
 //
-// NOTE: BuiltinWikiFixerID and BuiltinSkillInstallerID are intentionally
-// excluded here. Both are internal agents invoked programmatically — the wiki
-// fixer from the Wiki editor, the skill installer from the sandbox-config skill
-// upload flow — and should not clutter the tenant's agent picker. They remain
+// NOTE: BuiltinWikiFixerID, BuiltinSkillInstallerID and
+// BuiltinWeKnoraAssistantID are intentionally excluded here. They are internal
+// agents opened from a specific surface — the wiki fixer from the Wiki editor,
+// the skill installer from the sandbox-config skill upload flow, the assistant
+// from its global drawer — and should not clutter the tenant's agent picker. They remain
 // fully usable via GetAgentByID because the YAML entries still register them in
 // BuiltinAgentRegistry.
 var builtinAgentIDsOrdered = []string{

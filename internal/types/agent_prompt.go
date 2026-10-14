@@ -158,6 +158,7 @@ type ResumableAgentRequest struct {
 	SkillNames          []string        `json:"skill_names,omitempty"`
 	WebSearchEnabled    bool            `json:"web_search_enabled,omitempty"`
 	QuestionOrigin      *QuestionOrigin `json:"question_origin,omitempty"`
+	PageContext         *PageContext    `json:"page_context,omitempty"`
 	UserMessageID       string          `json:"user_message_id,omitempty"`
 	Language            string          `json:"language,omitempty"`
 }
