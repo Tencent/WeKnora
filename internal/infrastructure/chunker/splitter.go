@@ -140,7 +140,7 @@ var protectedPatterns = []*regexp.Regexp{
 	// table open + first (header) row
 	regexp.MustCompile(`(?is)<table\b[^>]*>\s*(?:<thead\b[^>]*>\s*)?<tr\b[^>]*>.*?</tr\s*>`),
 	regexp.MustCompile(`(?is)</?(?:table|thead|tbody)\b[^>]*>`), // container open/close tags
-	regexp.MustCompile(`(?is)<tr\b[^>]*>.*?</tr\s*>`), // individual table rows
+	regexp.MustCompile(`(?is)<tr\b[^>]*>.*?</tr\s*>`),           // individual table rows
 }
 
 type span struct {
