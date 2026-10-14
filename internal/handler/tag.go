@@ -79,7 +79,7 @@ func (h *TagHandler) getChunksBySeqIDs(ctx context.Context, tenantID uint64, seq
 // @Param        page       query     int     false  "页码"
 // @Param        page_size  query     int     false  "每页数量"
 // @Param        keyword    query     string  false  "关键词搜索"
-// @Success      200        {object}  map[string]interface{}  "标签列表"
+// @Success      200        {object}  handler.DataResponse{data=types.PageResult}  "标签列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -124,7 +124,7 @@ type createTagRequest struct {
 // @Produce      json
 // @Param        id       path      string  true  "知识库ID"
 // @Param        request  body      object{name=string,color=string,sort_order=int}  true  "标签信息"
-// @Success      200      {object}  map[string]interface{}  "创建的标签"
+// @Success      200      {object}  handler.DataResponse{data=types.KnowledgeTag}  "创建的标签"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -171,7 +171,7 @@ type updateTagRequest struct {
 // @Param        id       path      string  true  "知识库ID"
 // @Param        tag_id   path      string  true  "标签ID (UUID或seq_id)"
 // @Param        request  body      object  true  "标签更新信息"
-// @Success      200      {object}  map[string]interface{}  "更新后的标签"
+// @Success      200      {object}  handler.DataResponse{data=types.KnowledgeTag}  "更新后的标签"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -218,7 +218,7 @@ func (h *TagHandler) UpdateTag(c *gin.Context) {
 // @Param        force         query     bool                false  "强制删除"
 // @Param        content_only  query     bool                false  "仅删除内容，保留标签"
 // @Param        body          body      DeleteTagRequest    false  "删除选项"
-// @Success      200           {object}  map[string]interface{}  "删除成功"
+// @Success      200           {object}  handler.SuccessResponse  "删除成功"
 // @Failure      400           {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
