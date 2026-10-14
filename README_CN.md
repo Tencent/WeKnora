@@ -166,7 +166,7 @@ docker compose up -d    # 用新镜像重建容器
 
 ## 最新更新
 
-### v0.8.3 <sub>· 待发布 · [版本说明](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
+### v0.8.3 <sub>· 2026-10-14 · [版本说明](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
 
 - **画廊**：集中浏览文档图片，按来源、描述、OCR 与图片属性筛选，查看原图和出处。
 - **多模态 Embedding**：支持将文字与图片编码到同一向量空间的多模态向量模型，例如腾讯 WeMM-Embedding、Qwen3-VL-Embedding 等；可按需开启图片向量检索，并搭配支持图片输入的重排模型。

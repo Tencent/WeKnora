@@ -145,9 +145,9 @@ npm run test:integration
 
 ## v0.8.3 截图清单
 
-文档使用现有 `Screenshot` 组件：文件不存在时显示场景、拍摄提示和路径，补入真实图片后自动显示。首页也沿用已有图片占位，不使用模拟截图。建议使用演示数据，隐藏 Token、真实邮箱和内部地址。
+文档使用 `Screenshot` 组件展示真实产品截图，首页复用对应图片。维护截图时使用演示数据，隐藏 Token、真实邮箱和内部地址。
 
-当前 11 张截图已全部接入，画廊、多模态设置、Wiki 分组图谱、原文引用定位均已同步到首页。画廊截图有一张「图片加载失败」，建议重截后替换；多模态截图展示图片向量开关，Seafile 截图展示凭据配置，模型目录截图展示列表，创建用户截图展示成功结果。下表保留完整拍摄要求，未展示的操作由正文说明。
+当前 11 张截图已全部接入，画廊、多模态设置、Wiki 分组图谱、原文引用定位均已同步到首页。多模态截图展示图片向量开关，Seafile 截图展示凭据配置，模型目录截图展示列表，创建用户截图展示成功结果。下表记录截图内容与使用位置，未展示的操作由正文说明。
 
 所有文档图片放在 `website-docs/public/screenshots/`：
 
@@ -163,11 +163,11 @@ npm run test:integration
 | `system-model-catalog.png` | 模型目录、来源标记、覆盖编辑或版本历史 | 版本说明 |
 | `wiki-graph-groups.png` | 新图谱布局、主题说明与分组聚焦，保留切换分组和返回全图入口 | Wiki 功能、版本说明、首页 |
 | `datasource-seafile.png` | Seafile 数据源与资料库/目录/文件选择 | Seafile 功能 |
-| `system-admin-create-user.png` | 创建用户表单；成功页使用演示账号并隐藏密码 | 平台管理，沿用此前尚未补齐的占位 |
+| `system-admin-create-user.png` | 创建用户成功结果，使用演示账号并隐藏密码 | 平台管理 |
 
-首页复用其中的 `kb-image-gallery.png`、`kb-image-gallery-detail.png`、`kb-image-vector-settings.png`、`wiki-graph-groups.png`、`chat-source-location.png`，更新时只需替换 `website-docs/public/screenshots/` 中的源图；首页的 `prebuild` / `predev` 会自动同步已有同名副本（终端截图的旧文件名也会对应同步）。添加全新首页截图时，先在 `website-docs/homepage/public/docs/_home/product/` 建立副本。完成后运行 `npm run build`，检查输出中的待补图片列表；页面外观由维护者人工确认。
+首页复用其中的 `kb-image-gallery.png`、`kb-image-gallery-detail.png`、`kb-image-vector-settings.png`、`wiki-graph-groups.png`、`chat-source-location.png`，更新时只需替换 `website-docs/public/screenshots/` 中的源图；首页的 `prebuild` / `predev` 会自动同步已有同名副本（终端截图的旧文件名也会对应同步）。添加全新首页截图时，先在 `website-docs/homepage/public/docs/_home/product/` 建立副本。完成后运行 `npm run build`，检查图片引用与本地资源校验结果；页面外观由维护者人工确认。
 
-本次发布整理的提交清单、文档核对依据和验证记录保存在主仓库 `docs/release-v0.8.3-audit.md`，不随独立站点发布。发布日期在正式发版时填写，当前版本页和 CHANGELOG 标记为待发布。
+本次发布整理的提交清单、文档核对依据和验证记录保存在主仓库 `docs/release-v0.8.3-audit.md`，不随独立站点发布。v0.8.3 发布日期为 2026-10-14，版本页、CHANGELOG 与四种语言 README 保持一致。
 
 首页内容按两层维护：当期版本区以左侧功能导航、右侧截图展示画廊、多模态 Embedding（含腾讯 WeMM 支持）、Wiki 图谱、原文引用定位四项重点；左侧四项说明均保持展开，画廊通过「浏览图片 / 查看详情」切换两张截图；本机浏览器左侧分别展开「执行任务」「连接扩展」两种状态的说明，右侧切换对应截图，MCP Server 归入生态集成，对话追加、分叉与回滚归入 Agent 介绍。技能与沙箱、Wiki、模型生态与企业部署保留独立位置。语言新增等较小更新归入版本说明，后续换版时不要随版本区一并移除这些长期能力。
 

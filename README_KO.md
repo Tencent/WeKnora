@@ -176,7 +176,7 @@ docker compose up -d    # 새 이미지로 컨테이너 재생성
 
 ## 최신 업데이트
 
-### v0.8.3 <sub>· 릴리스 준비 중 · [릴리스 노트](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
+### v0.8.3 <sub>· 2026-10-14 · [릴리스 노트](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
 
 - **이미지 갤러리**: 문서 이미지를 모아 보고 출처, 설명, OCR 및 이미지 속성으로 필터링.
 - **멀티모달 Embedding**: 텍스트와 이미지를 같은 벡터 공간으로 인코딩하는 모델 지원. Tencent WeMM-Embedding, Qwen3-VL-Embedding 등을 사용할 수 있으며 이미지 벡터 검색과 호환 모델의 이미지 리랭킹을 선택적으로 활성화.

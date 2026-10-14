@@ -166,7 +166,7 @@ All options, hardware requirements and deployment topologies: [Installation guid
 
 ## What's New
 
-### v0.8.3 <sub>· Unreleased · [release notes](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
+### v0.8.3 <sub>· 2026-10-14 · [release notes](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
 
 - **Image gallery**: browse document images and filter by source, caption, OCR and image attributes.
 - **Multimodal Embedding**: support for multimodal embedding models that encode text and images into a shared vector space, including Tencent WeMM-Embedding and Qwen3-VL-Embedding, with opt-in image-vector retrieval and compatible image-aware reranking.

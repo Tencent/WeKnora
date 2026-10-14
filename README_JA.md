@@ -166,7 +166,7 @@ docker compose up -d    # 新しいイメージでコンテナを再作成
 
 ## 最新アップデート
 
-### v0.8.3 <sub>· リリース準備中 · [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
+### v0.8.3 <sub>· 2026-10-14 · [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
 
 - **画像ギャラリー**：文書内の画像を一覧表示し、出典・説明・OCR・画像属性で絞り込み。
 - **マルチモーダル Embedding**：テキストと画像を同じベクトル空間で扱うモデルに対応。Tencent WeMM-Embedding や Qwen3-VL-Embedding などを利用でき、画像ベクトル検索と対応モデルによる画像リランキングを任意で有効化。

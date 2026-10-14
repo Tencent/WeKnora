@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.8.3] - Unreleased
+## [0.8.3] - 2026-10-14
 
 Changes since v0.8.2, through upstream main `31c605568` (2026-10-13; 282 commits). The plugin-system series was reverted and is not part of this release. [Website release notes](./website-docs/07-releases/v0.8.3.md) · [Full commit comparison](https://github.com/Tencent/WeKnora/compare/v0.8.2...31c6055687d33f9ad7a92cf453a264ce13a1700d).
 
