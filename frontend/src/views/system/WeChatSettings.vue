@@ -13,7 +13,7 @@
     <Teleport to="#system-wechat-toolbar">
       <div v-show="active" class="wechat-settings__tools">
         <t-popconfirm :visible="active && reloadConfirm" :content="t('wechatSettings.discardConfirm')"
-          :popup-props="{ trigger: 'context-menu', overlayClassName: 'wk-popover wechat-settings-confirm-popup' }"
+          :popup-props="{ trigger: 'context-menu', overlayClassName: 'wk-popover', zIndex: 3050 }"
           placement="left" theme="warning" :confirm-btn="t('wechatSettings.reload')"
           :cancel-btn="t('common.cancel')" @confirm="reload" @cancel="reloadConfirm = false"
           @visible-change="(visible: boolean) => { if (!visible) reloadConfirm = false }">
@@ -78,7 +78,7 @@
                 @click="form[client].clearSecret = false">{{ t('common.cancel') }}</t-button>
               <t-popconfirm v-else-if="form[client].secret_configured" :visible="active && clearConfirm === client"
                 :content="t('wechatSettings.clearConfirm')" placement="left" theme="warning"
-                :popup-props="{ overlayClassName: 'wk-popover wechat-settings-confirm-popup' }"
+                :popup-props="{ overlayClassName: 'wk-popover', zIndex: 3050 }"
                 :confirm-btn="{ content: t('wechatSettings.clearSecret'), theme: 'danger' }"
                 :cancel-btn="t('common.cancel')" @confirm="clearSecret(client)"
                 @visible-change="(visible: boolean) => { clearConfirm = visible ? client : null }">
@@ -249,7 +249,4 @@ watch(() => props.active, active => {
   .wechat-settings__row { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .wechat-settings__actions { flex-wrap: wrap; justify-content: flex-end; }
 }
-</style>
-<style lang="less">
-.wechat-settings-confirm-popup { z-index: 3050 !important; }
 </style>
