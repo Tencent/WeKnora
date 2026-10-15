@@ -113,24 +113,24 @@ type KnowledgeBaseProfileStats struct {
 // stats are copied from the aggregate so readers do not have to recompute it.
 type KnowledgeBaseProfile struct {
 	// Gist is a short statement of what the knowledge base covers.
-	Gist string `json:"gist,omitempty"`
+	Gist string `json:"gist,omitempty" extensions:"x-agent"`
 	// Topics is the merged topic list (at most KnowledgeBaseProfileMaxTopics).
-	Topics []string `json:"topics,omitempty"`
+	Topics []string `json:"topics,omitempty" extensions:"x-agent"`
 	// TypicalQuestions lists questions this knowledge base can answer.
-	TypicalQuestions []string `json:"typical_questions,omitempty"`
+	TypicalQuestions []string `json:"typical_questions,omitempty" extensions:"x-agent"`
 	// Stats is the aggregate snapshot the text was generated from.
 	Stats KnowledgeBaseProfileStats `json:"stats"`
 	// AggregateHash identifies the aggregate the gist was generated from. A
 	// mismatch with the live aggregate means the text is stale.
 	AggregateHash string `json:"aggregate_hash,omitempty"`
 	// Status is one of the KnowledgeBaseProfileStatus* values.
-	Status string `json:"status,omitempty"`
+	Status string `json:"status,omitempty" extensions:"x-agent=profile_status"`
 	// Error holds the last generation error when Status is failed.
-	Error string `json:"error,omitempty"`
+	Error string `json:"error,omitempty" extensions:"x-agent=profile_error"`
 	// ModelID records which chat model produced the text.
 	ModelID string `json:"model_id,omitempty"`
 	// GeneratedAt records when the text was produced.
-	GeneratedAt *time.Time `json:"generated_at,omitempty"`
+	GeneratedAt *time.Time `json:"generated_at,omitempty" extensions:"x-agent"`
 }
 
 // Value implements driver.Valuer.

@@ -460,19 +460,35 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	})
 }
 
+// CreateKnowledgeFromURLRequest is the body of the URL import endpoint.
+type CreateKnowledgeFromURLRequest struct {
+	// Page or file URL to import.
+	URL              string `json:"url" binding:"required" extensions:"x-agent"`
+	FileName         string `json:"file_name"`
+	FileType         string `json:"file_type"`
+	EnableMultimodel *bool  `json:"enable_multimodel"`
+	// Title of the document; defaults to the fetched one.
+	Title         string                           `json:"title" extensions:"x-agent"`
+	TagIDs        []string                         `json:"tag_ids"`
+	Channel       string                           `json:"channel"`
+	ProcessConfig *types.KnowledgeProcessOverrides `json:"process_config"`
+}
+
 // CreateKnowledgeFromURL godoc
 // @Summary      从URL创建知识
 // @Description  从指定URL抓取内容并创建知识条目。当提供 file_name/file_type 或 URL 路径含已知文件扩展名时，自动切换为文件下载模式
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string  true  "知识库ID"
-// @Param        request  body      object{url=string,file_name=string,file_type=string,enable_multimodel=bool,title=string,tag_ids=[]string}  true  "URL请求"
+// @Param        id       path      string  true  "知识库ID"  extensions(x-agent=knowledge_base_id)
+// @Param        request  body      CreateKnowledgeFromURLRequest  true  "URL请求"
 // @Success      201      {object}  handler.DataResponse{data=types.Knowledge}  "创建的知识"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      409      {object}  map[string]interface{}  "URL重复"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.create_from_url","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Fetches a public web page or file into the knowledge base and parses it in the background; follow with knowledge.get_parse_progress. Only use a URL the user gave."
 // @Router       /knowledge-bases/{id}/knowledge/url [post]
 func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -493,16 +509,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	}
 
 	// Parse URL from request body
-	var req struct {
-		URL              string                           `json:"url" binding:"required"`
-		FileName         string                           `json:"file_name"`
-		FileType         string                           `json:"file_type"`
-		EnableMultimodel *bool                            `json:"enable_multimodel"`
-		Title            string                           `json:"title"`
-		TagIDs           []string                         `json:"tag_ids"`
-		Channel          string                           `json:"channel"`
-		ProcessConfig    *types.KnowledgeProcessOverrides `json:"process_config"`
-	}
+	var req CreateKnowledgeFromURLRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse URL request", err)
 		c.Error(errors.NewBadRequestError(err.Error()))
@@ -564,12 +571,14 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string                       true  "知识库ID"
+// @Param        id       path      string                       true  "知识库ID"  extensions(x-agent=knowledge_base_id)
 // @Param        request  body      types.ManualKnowledgePayload true  "手工知识内容"
 // @Success      200      {object}  handler.DataResponse{data=types.Knowledge}       "创建的知识"
 // @Failure      400      {object}  errors.AppError              "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.create_manual","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Creates a Markdown document. status=draft (the default) keeps it out of search; publish indexes it."
 // @Router       /knowledge-bases/{id}/knowledge/manual [post]
 func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1041,15 +1050,15 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 // @Param        id         path      string  true   "知识库ID"  extensions(x-agent=knowledge_base_id)
 // @Param        page       query     int     false  "页码"  minimum(1)  default(1)  extensions(x-agent,x-agent-maximum=10000)
 // @Param        page_size  query     int     false  "每页数量"  minimum(1)  maximum(1000)  default(20)  extensions(x-agent,x-agent-maximum=50)
-// @Param        tag_ids       query     string  false  "标签ID筛选，逗号分隔（OR语义）"
+// @Param        tag_ids       query     string  false  "标签ID筛选，逗号分隔（OR语义）"  extensions(x-agent)
 // @Param        keyword       query     string  false  "关键词搜索"  extensions(x-agent)
 // @Param        file_type     query     string  false  "文件类型筛选"  extensions(x-agent)
 // @Param parse_status query string false "状态" Enums(pending,processing,finalizing,completed,failed,cancelled,deleting)  extensions(x-agent)
 // @Param        source        query     string  false  "来源/渠道筛选 (web/api/feishu/notion/yuque/wechat/...，或 manual/url 按 type 过滤)"
 // @Param        start_time    query     string  false  "更新时间起点，RFC3339 格式"
 // @Param        end_time      query     string  false  "更新时间终点，RFC3339 格式"
-// @Param        folder_path      query     string  false  "文件夹路径筛选，空字符串表示知识库根目录；不传该参数则不按文件夹过滤"
-// @Param        folder_recursive query     bool    false  "为 true 时同时返回子文件夹内的文档"
+// @Param        folder_path      query     string  false  "文件夹路径筛选，空字符串表示知识库根目录；不传该参数则不按文件夹过滤"  extensions(x-agent)
+// @Param        folder_recursive query     bool    false  "为 true 时同时返回子文件夹内的文档"  extensions(x-agent)
 // @Param        sort_by      query     string  false  "排序字段" Enums(created_at,updated_at,file_name) default(created_at)  extensions(x-agent)
 // @Param        sort_order   query     string  false  "排序方向"  Enums(asc, desc)  default(desc)  extensions(x-agent)
 // @Success      200        {object}  handler.PageResponse{data=[]types.Knowledge}  "知识列表"
@@ -1531,11 +1540,13 @@ func (h *KnowledgeHandler) GetGalleryConfig(c *gin.Context) {
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "知识库ID"
+// @Param        id   path      string  true  "知识库ID"  extensions(x-agent=knowledge_base_id)
 // @Success      200  {object}  handler.DataResponse{data=types.KnowledgeFolderTree}  "目录树"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.list_folders","risk":"read","root":"data.folders"}
+// @x-agent-hint "Top-level document folders with counts. Sub-folders are not listed; filter knowledge.list by folder_path to look inside one."
 // @Router       /knowledge-bases/{id}/knowledge/folders [get]
 func (h *KnowledgeHandler) ListKnowledgeFolders(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1566,12 +1577,12 @@ func (h *KnowledgeHandler) ListKnowledgeFolders(c *gin.Context) {
 
 // MoveKnowledgeToFolderRequest is the body schema for POST /knowledge/folder.
 type MoveKnowledgeToFolderRequest struct {
-	KBID string   `json:"kb_id" binding:"required"`
-	IDs  []string `json:"knowledge_ids" binding:"required"`
-	// FolderPath is the destination folder; the empty string is the knowledge
-	// base top level. It is deliberately not `binding:"required"` so documents
-	// can be moved back out of every folder.
-	FolderPath string `json:"folder_path"`
+	// Knowledge base the documents belong to.
+	KBID string `json:"kb_id" binding:"required" extensions:"x-agent=knowledge_base_id"`
+	// Documents to move.
+	IDs []string `json:"knowledge_ids" binding:"required" extensions:"x-agent"`
+	// Target folder path; empty (allowed) means the knowledge base top level.
+	FolderPath string `json:"folder_path" extensions:"x-agent"`
 }
 
 // MoveKnowledgeToFolder godoc
@@ -1586,6 +1597,8 @@ type MoveKnowledgeToFolderRequest struct {
 // @Failure      403      {object}  errors.AppError               "权限不足"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.move_to_folder","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Files documents of one knowledge base under a folder path such as docs/spec, created on demand; an empty path moves them back to the top level. Nothing is reparsed."
 // @Router       /knowledge/folder [post]
 func (h *KnowledgeHandler) MoveKnowledgeToFolder(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1644,8 +1657,10 @@ func (h *KnowledgeHandler) MoveKnowledgeToFolder(c *gin.Context) {
 // RenameKnowledgeFolderRequest is the body schema for
 // PUT /knowledge-bases/:id/knowledge/folders.
 type RenameKnowledgeFolderRequest struct {
-	From string `json:"from" binding:"required"`
-	To   string `json:"to"   binding:"required"`
+	// Current folder path.
+	From string `json:"from" binding:"required" extensions:"x-agent=from_path"`
+	// New folder path.
+	To string `json:"to"   binding:"required" extensions:"x-agent=to_path"`
 }
 
 // RenameKnowledgeFolder godoc
@@ -1654,13 +1669,15 @@ type RenameKnowledgeFolderRequest struct {
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string                        true  "知识库ID"
+// @Param        id       path      string                        true  "知识库ID"  extensions(x-agent=knowledge_base_id)
 // @Param        request  body      RenameKnowledgeFolderRequest  true  "重命名请求"
 // @Success      200      {object}  handler.DataResponse{data=handler.FolderMoveData}  "重命名成功"
 // @Failure      400      {object}  errors.AppError               "请求参数错误"
 // @Failure      403      {object}  errors.AppError               "权限不足"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.rename_folder","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Moves a document folder and everything under it to a new path; an existing path is merged into."
 // @Router       /knowledge-bases/{id}/knowledge/folders [put]
 func (h *KnowledgeHandler) RenameKnowledgeFolder(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -2326,8 +2343,10 @@ func latestActivity(times ...time.Time) time.Time {
 // UpdateKnowledgeRequest defines the partial-update body for PUT /knowledge/:id.
 // Omitted fields are left unchanged; an explicit empty description clears the summary.
 type UpdateKnowledgeRequest struct {
-	Title          *string         `json:"title"`
-	Description    *string         `json:"description"`
+	// New title; omit to keep it.
+	Title *string `json:"title" extensions:"x-agent"`
+	// New summary; omit to keep it, empty clears it.
+	Description    *string         `json:"description" extensions:"x-agent"`
 	CustomMetadata json.RawMessage `json:"custom_metadata"`
 }
 
@@ -2337,12 +2356,14 @@ type UpdateKnowledgeRequest struct {
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string                   true  "知识ID"
+// @Param        id       path      string                   true  "知识ID"  extensions(x-agent=knowledge_id)
 // @Param        request  body      UpdateKnowledgeRequest   true  "更新字段（均可选）"
 // @Success      200      {object}  handler.UpdateKnowledgeResponse  "更新成功"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.update","risk":"write","target":"knowledge.get","label":"title"}
+// @x-agent-hint "Sets a document's title or summary; a field left out is kept."
 // @Router       /knowledge/{id} [put]
 func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -3228,8 +3249,10 @@ func parseFilterTime(raw string) (time.Time, error) {
 }
 
 type batchReparseKnowledgeRequest struct {
-	KBID          string                           `json:"kb_id" binding:"required"`
-	IDs           []string                         `json:"ids" binding:"required"`
+	// Knowledge base the documents belong to.
+	KBID string `json:"kb_id" binding:"required" extensions:"x-agent=knowledge_base_id"`
+	// Documents to reparse.
+	IDs           []string                         `json:"ids" binding:"required" extensions:"x-agent=knowledge_ids"`
 	ProcessConfig *types.KnowledgeProcessOverrides `json:"process_config,omitempty"`
 }
 
@@ -3245,6 +3268,8 @@ type batchReparseKnowledgeRequest struct {
 // @Failure      403      {object}  errors.AppError               "权限不足"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.batch_reparse","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Reparses several documents of one knowledge base in the background; check them afterwards with knowledge.list parse_status. Search results change meanwhile."
 // @Router       /knowledge/batch-reparse [post]
 func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()

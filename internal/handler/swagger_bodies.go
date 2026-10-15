@@ -4,6 +4,8 @@ package handler
 // shapes with gin.H; the structs exist so the documented JSON matches.
 
 import (
+	"time"
+
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -122,9 +124,28 @@ type SearchOrganizationsResponse struct {
 
 // ListSharedKnowledgeBasesResponse is the JSON body written by this handler.
 type ListSharedKnowledgeBasesResponse struct {
-	Total   int              `json:"total"`
-	Success bool             `json:"success" example:"true"`
-	Data    []map[string]any `json:"data"`
+	Total   int                      `json:"total" extensions:"x-agent"`
+	Success bool                     `json:"success" example:"true"`
+	Data    []SharedKnowledgeBaseRow `json:"data"`
+}
+
+// SharedKnowledgeBaseRow is the row sharedKBRow builds.
+type SharedKnowledgeBaseRow struct {
+	KnowledgeBase  KnowledgeBaseView   `json:"knowledge_base" extensions:"x-agent"`
+	ShareID        string              `json:"share_id"`
+	OrganizationID string              `json:"organization_id"`
+	OrgName        string              `json:"org_name" extensions:"x-agent"`
+	Permission     types.OrgMemberRole `json:"permission" extensions:"x-agent"`
+	SourceTenantID uint64              `json:"source_tenant_id"`
+	SharedAt       time.Time           `json:"shared_at"`
+}
+
+// TagPageResult is the page of tags the tag list writes.
+type TagPageResult struct {
+	Total    int64                         `json:"total"`
+	Page     int                           `json:"page"`
+	PageSize int                           `json:"page_size"`
+	Data     []types.KnowledgeTagWithStats `json:"data"`
 }
 
 // ListSharedAgentsResponse is the JSON body written by this handler.
@@ -225,8 +246,8 @@ type AutoFixResponse struct {
 
 // FolderMoveData is the data object of a knowledge-folder move or rename.
 type FolderMoveData struct {
-	MovedCount int    `json:"moved_count"`
-	FolderPath string `json:"folder_path"`
+	MovedCount int    `json:"moved_count" extensions:"x-agent"`
+	FolderPath string `json:"folder_path" extensions:"x-agent"`
 }
 
 // SubmittedTaskData is the data object of an async knowledge batch task.
@@ -234,7 +255,7 @@ type FolderMoveData struct {
 type SubmittedTaskData struct {
 	TaskID       string `json:"task_id,omitempty"`
 	DeletedCount int    `json:"deleted_count,omitempty"`
-	ReparseCount int    `json:"reparse_count,omitempty"`
+	ReparseCount int    `json:"reparse_count,omitempty" extensions:"x-agent"`
 }
 
 // SubmittedTaskResponse is success, message, and SubmittedTaskData.

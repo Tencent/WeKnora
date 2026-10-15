@@ -21,6 +21,9 @@ func TestBuiltinOperationsMatchRegisteredRoutes(t *testing.T) {
 	RegisterKnowledgeBaseActivityRoutes(v1, &handler.AuditLogHandler{}, g)
 	RegisterKnowledgeRoutes(v1, &handler.KnowledgeHandler{}, g)
 	RegisterWikiPageRoutes(v1, &handler.WikiPageHandler{}, g)
+	RegisterChunkRoutes(v1, &handler.ChunkHandler{}, g)
+	RegisterKnowledgeTagRoutes(v1, &handler.TagHandler{}, g)
+	RegisterOrganizationRoutes(v1, &handler.OrganizationHandler{}, g)
 
 	if missing := missingOperationRoutes(engine, operations.Builtin()); len(missing) > 0 {
 		t.Fatalf("operations without a route: %v", missing)

@@ -46,6 +46,9 @@ type agentOperation struct {
 	// "data" when the body has that envelope and the body itself otherwise.
 	Root     *string `json:"root"`
 	MaxItems int     `json:"max_items"`
+	// CatchAll names the last path segment that the router registers as a
+	// catch-all (*slug), which Swagger cannot express.
+	CatchAll string `json:"catch_all"`
 }
 
 type specDocument struct {
@@ -145,13 +148,17 @@ func (doc *specDocument) compile(method, path string, sop specOperation) (Operat
 	if err := dec.Decode(&meta); err != nil {
 		return Operation{}, fmt.Errorf("%s: %w", extAgent, err)
 	}
+	route, err := ginRoute(doc.BasePath, path, meta.CatchAll)
+	if err != nil {
+		return Operation{}, fmt.Errorf("%s: %w", extAgent, err)
+	}
 	op := Operation{
 		ID:          meta.ID,
 		Summary:     strings.TrimSpace(sop.Summary),
 		Description: strings.TrimSpace(sop.Hint),
 		Risk:        meta.Risk,
 		Method:      method,
-		Route:       ginRoute(doc.BasePath, path),
+		Route:       route,
 	}
 	if op.Description == "" {
 		op.Description = strings.TrimSpace(sop.Description)
@@ -180,14 +187,27 @@ func (doc *specDocument) compile(method, path string, sop specOperation) (Operat
 }
 
 // ginRoute turns "/knowledge/{id}" under basePath into "/api/v1/knowledge/:id".
-func ginRoute(basePath, path string) string {
+// catchAll, when set, names the last segment, which becomes "*name".
+func ginRoute(basePath, path, catchAll string) (string, error) {
 	segments := strings.Split(path, "/")
 	for i, seg := range segments {
 		if strings.HasPrefix(seg, "{") && strings.HasSuffix(seg, "}") {
-			segments[i] = ":" + seg[1:len(seg)-1]
+			name := seg[1 : len(seg)-1]
+			if name == catchAll {
+				if i != len(segments)-1 {
+					return "", fmt.Errorf("catch_all %q must be the last path segment", catchAll)
+				}
+				segments[i] = "*" + name
+				continue
+			}
+			segments[i] = ":" + name
 		}
 	}
-	return strings.TrimRight(basePath, "/") + strings.Join(segments, "/")
+	route := strings.TrimRight(basePath, "/") + strings.Join(segments, "/")
+	if catchAll != "" && !strings.HasSuffix(route, "/*"+catchAll) {
+		return "", fmt.Errorf("catch_all %q is not a path segment", catchAll)
+	}
+	return route, nil
 }
 
 // agentName reports whether ext exposes an element and under which name.

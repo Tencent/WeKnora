@@ -169,7 +169,7 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 	// come back as handles. Catalog metadata itself carries no identifiers.
 	"find_operations": {},
 	"run_operation": {
-		sourceIDKeys:        map[string]struct{}{"knowledge_base_id": {}, "knowledge_id": {}},
+		sourceIDKeys:        map[string]struct{}{"knowledge_base_id": {}, "knowledge_id": {}, "knowledge_ids": {}},
 		decodedIssueIDKeys:  map[string]struct{}{"issue_id": {}},
 		encodedIssueIDKeys:  map[string]struct{}{"issue_id": {}},
 		encodeKnownIssueIDs: true,

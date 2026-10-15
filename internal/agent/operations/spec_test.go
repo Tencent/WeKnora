@@ -185,6 +185,12 @@ func TestFromSpecRejectsBadAnnotations(t *testing.T) {
 			`"message": {"type": "string", "x-agent": true}`, `"message": {"type": "string"}`,
 		},
 		"undefined schema": {`"$ref": "#/definitions/types.Status"`, `"$ref": "#/definitions/types.Missing"`},
+		"catch-all before the last segment": {
+			`{"id": "doc.list", "risk": "read"}`, `{"id": "doc.list", "risk": "read", "catch_all": "id"}`,
+		},
+		"catch-all naming no segment": {
+			`{"id": "doc.get", "risk": "read"}`, `{"id": "doc.get", "risk": "read", "catch_all": "slug"}`,
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -193,6 +199,24 @@ func TestFromSpecRejectsBadAnnotations(t *testing.T) {
 			assert.Error(t, err)
 		})
 	}
+}
+
+func TestFromSpecMarksCatchAllSegment(t *testing.T) {
+	spec := strings.Replace(testSpec,
+		`{"id": "doc.get", "risk": "read"}`, `{"id": "doc.get", "risk": "read", "catch_all": "id"}`, 1)
+	ops, err := FromSpec([]byte(spec))
+	require.NoError(t, err)
+	catalog, err := NewCatalog(ops...)
+	require.NoError(t, err)
+
+	get, _ := catalog.Get("doc.get")
+	assert.Equal(t, "/api/v1/docs/*id", get.Route)
+	call, err := get.Build(map[string]json.RawMessage{"knowledge_id": json.RawMessage(`"a/b"`)})
+	require.NoError(t, err)
+	assert.Equal(t, "/api/v1/docs/a/b", call.Path, "a catch-all keeps its slashes")
+
+	del, _ := catalog.Get("doc.delete")
+	assert.Equal(t, "/api/v1/docs/:id", del.Route, "the mark is per operation")
 }
 
 func TestFromSpecKeepsCatalogSafetyRules(t *testing.T) {
@@ -243,6 +267,9 @@ func TestBuiltinMatchesHandlerAnnotations(t *testing.T) {
 		meta := agentOperation{ID: op.ID, Risk: op.Risk}
 		if op.Target != nil {
 			meta.Target, meta.Label = op.Target.Operation, op.Target.Label
+		}
+		if i := strings.LastIndex(op.Route, "/*"); i >= 0 {
+			meta.CatchAll = op.Route[i+2:]
 		}
 		built[op.ID] = meta
 	}

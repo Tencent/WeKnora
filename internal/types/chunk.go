@@ -131,7 +131,7 @@ type VideoInfo struct {
 // Chunks can be independently embedded as vectors and retrieved, supporting precise content localization
 type Chunk struct {
 	// Unique identifier of the chunk, using UUID format
-	ID string `json:"id"                       gorm:"type:varchar(36);primaryKey"`
+	ID string `json:"id"                       gorm:"type:varchar(36);primaryKey" extensions:"x-agent=chunk_id"`
 	// SeqID is an auto-increment integer ID for external API usage (FAQ entries)
 	SeqID int64 `json:"seq_id"                   gorm:"type:bigint;uniqueIndex;autoIncrement"`
 	// Tenant ID, used for multi-tenant isolation
@@ -143,7 +143,7 @@ type Chunk struct {
 	// Optional tag ID for categorization within a knowledge base (used for FAQ)
 	TagID string `json:"tag_id"                   gorm:"type:varchar(36);index"`
 	// Actual text content of the chunk
-	Content string `json:"content"`
+	Content string `json:"content" extensions:"x-agent"`
 	// SourceContent is the immutable parser output. Legacy rows are lazily
 	// backfilled from Content on the first manual edit.
 	SourceContent string `json:"-"`
@@ -155,24 +155,24 @@ type Chunk struct {
 	// LastEditorID records the actor that produced the current revision.
 	LastEditorID string `json:"last_editor_id" gorm:"type:varchar(64);not null;default:''"`
 	// Index position of the chunk in the original document
-	ChunkIndex int `json:"chunk_index"`
+	ChunkIndex int `json:"chunk_index" extensions:"x-agent"`
 	// Whether the chunk is enabled, can be used to temporarily disable certain chunks
-	IsEnabled bool `json:"is_enabled"               gorm:"default:true"`
+	IsEnabled bool `json:"is_enabled"               gorm:"default:true" extensions:"x-agent"`
 	// Flags 存储多个布尔状态的位标志（如推荐状态等）
 	// 默认值为 ChunkFlagRecommended (1)，表示默认可推荐
 	Flags ChunkFlags `json:"flags"                    gorm:"default:1"`
 	// Status of the chunk
 	Status int `json:"status"                   gorm:"default:0"`
 	// Starting character position in the original text
-	StartAt int `json:"start_at"`
+	StartAt int `json:"start_at" extensions:"x-agent"`
 	// Ending character position in the original text
-	EndAt int `json:"end_at"`
+	EndAt int `json:"end_at" extensions:"x-agent"`
 	// Previous chunk ID
 	PreChunkID string `json:"pre_chunk_id"`
 	// Next chunk ID
 	NextChunkID string `json:"next_chunk_id"`
 	// Chunk 类型，用于区分不同类型的 Chunk
-	ChunkType ChunkType `json:"chunk_type"               gorm:"type:varchar(20);default:'text'"`
+	ChunkType ChunkType `json:"chunk_type"               gorm:"type:varchar(20);default:'text'" extensions:"x-agent"`
 	// 父 Chunk ID，用于关联图片 Chunk 和原始文本 Chunk
 	ParentChunkID string `json:"parent_chunk_id"          gorm:"type:varchar(36);index"`
 	// 关系 Chunk ID，用于关联关系 Chunk 和原始文本 Chunk

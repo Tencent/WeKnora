@@ -584,6 +584,8 @@ func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 // @Failure      500       {object}  errors.AppError                                         "服务器错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge_base.list","risk":"read"}
+// @x-agent-hint "The workspace's own knowledge bases. Ones shared from other workspaces are in knowledge_base.list_shared."
 // @Router       /knowledge-bases [get]
 func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -890,13 +892,15 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 // @Description  基于文档画像聚合，立即重新生成知识库的 AI 描述（不覆盖手写描述）
 // @Tags         知识库
 // @Produce      json
-// @Param        id   path      string  true  "知识库ID"
+// @Param        id   path      string  true  "知识库ID"  extensions(x-agent=knowledge_base_id)
 // @Success      200  {object}  handler.DataResponse{data=types.KnowledgeBaseProfile}  "生成的知识库画像"
 // @Failure      400  {object}  errors.AppError                                       "知识库类型不支持或未配置模型"
 // @Failure      403  {object}  errors.AppError                                       "无权限"
 // @Failure      404  {object}  errors.AppError                                       "知识库不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge_base.generate_profile","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Regenerates the AI summary of what the knowledge base covers, with one model call. A description the user wrote is kept."
 // @Router       /knowledge-bases/{id}/profile/generate [post]
 func (h *KnowledgeBaseHandler) GenerateKnowledgeBaseProfile(c *gin.Context) {
 	ctx := c.Request.Context()

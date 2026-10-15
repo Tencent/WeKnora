@@ -262,6 +262,6 @@ func TestFindOperationsDescribesMatches(t *testing.T) {
 	require.Len(t, out.Operations[0].Params, 1)
 	assert.Equal(t, "knowledge_id", out.Operations[0].Params[0].Name)
 
-	res, _ = tool.Execute(context.Background(), json.RawMessage(`{"query":"no such thing"}`))
+	res, _ = tool.Execute(context.Background(), json.RawMessage(`{"query":"zzz-unmatched"}`))
 	assert.Contains(t, res.Output, "hint")
 }

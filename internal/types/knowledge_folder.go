@@ -124,13 +124,13 @@ type KnowledgeFolderCount struct {
 // TotalCount additionally counts every descendant folder's entries.
 type KnowledgeFolderNode struct {
 	// Path is the canonical folder path, e.g. "docs/spec".
-	Path string `json:"path"`
+	Path string `json:"path" extensions:"x-agent=folder_path"`
 	// Name is the last segment of Path, used as the tree row label.
-	Name string `json:"name"`
+	Name string `json:"name" extensions:"x-agent"`
 	// DocumentCount counts entries whose folder_path equals Path.
-	DocumentCount int64 `json:"document_count"`
+	DocumentCount int64 `json:"document_count" extensions:"x-agent"`
 	// TotalCount counts entries in Path and in all descendant folders.
-	TotalCount int64 `json:"total_count"`
+	TotalCount int64 `json:"total_count" extensions:"x-agent"`
 	// Children are the direct sub-folders, sorted by name.
 	Children []*KnowledgeFolderNode `json:"children,omitempty"`
 }

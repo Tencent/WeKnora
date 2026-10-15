@@ -90,14 +90,16 @@ func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 // @Tags         分块管理
 // @Accept       json
 // @Produce      json
-// @Param        knowledge_id  path      string  true   "知识ID"
-// @Param        page          query     int     false  "页码"  default(1)  minimum(1)
-// @Param        page_size     query     int     false  "每页数量"  default(10)  minimum(1)  maximum(100)
-// @Param        chunk_type    query     []string  false  "分块类型，可重复，缺省 text"  collectionFormat(multi)
+// @Param        knowledge_id  path      string  true   "知识ID"  extensions(x-agent)
+// @Param        page          query     int     false  "页码"  default(1)  minimum(1)  extensions(x-agent,x-agent-maximum=10000)
+// @Param        page_size     query     int     false  "每页数量"  default(10)  minimum(1)  maximum(100)  extensions(x-agent,x-agent-maximum=20)
+// @Param        chunk_type    query     []string  false  "分块类型，可重复，缺省 text"  collectionFormat(multi)  Enums(text,parent_text,image_ocr,image_caption,image_vector,summary,entity,relationship,faq,web_search,table_summary,table_column,wiki_page)  extensions(x-agent)
 // @Success      200           {object}  handler.PageResponse{data=[]types.Chunk}  "分块列表"
 // @Failure      400           {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"chunk.list","risk":"read"}
+// @x-agent-hint "The chunks a document was split into, in order; use it to check how a document was parsed. meta.total counts every chunk."
 // @Router       /chunks/{knowledge_id} [get]
 func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 	ctx := c.Request.Context()
