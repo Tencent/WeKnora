@@ -224,6 +224,28 @@ func TestRunOperationBatchApprovalNamesEveryItem(t *testing.T) {
 	assert.Empty(t, d.calls)
 }
 
+func TestRunOperationBatchApprovalKeepsMultilineTitlesOnOneLine(t *testing.T) {
+	for _, separator := range []string{"\n", "\r\n", "\r", "\u2028", "\u2029"} {
+		t.Run(separator, func(t *testing.T) {
+			body, err := json.Marshal(map[string]any{"data": map[string]any{"title": "First" + separator + "document"}})
+			require.NoError(t, err)
+			d := &fakeDispatcher{responses: map[string]*operations.Response{
+				"GET /api/v1/knowledge-bases/kb1": {Status: http.StatusOK, Body: []byte(`{"data":{"name":"Docs"}}`)},
+				"GET /api/v1/knowledge/k1":        {Status: http.StatusOK, Body: body},
+				"GET /api/v1/knowledge/k2":        {Status: http.StatusOK, Body: []byte(`{"data":{"title":"Second"}}`)},
+			}}
+			gate := &fakeApprover{decision: approval.Decision{Approved: false}}
+			_, err = newRunTool(d, gate).Execute(interactiveCtx(), runArgs("knowledge.batch_delete", map[string]any{
+				"knowledge_base_id": "kb1", "knowledge_ids": []string{"k1", "k2"},
+			}))
+			require.NoError(t, err)
+			require.Len(t, gate.requests, 1)
+			assert.Equal(t, "批量删除知识\nDocs\n- First document\n- Second", gate.requests[0].Description)
+			assert.Len(t, d.calls, 3, "declining never dispatches the delete")
+		})
+	}
+}
+
 func TestRunOperationDeclinedOrEditedToAnotherOperation(t *testing.T) {
 	responses := map[string]*operations.Response{
 		"GET /api/v1/knowledge/k1": {Status: http.StatusOK, Body: []byte(docBody)},

@@ -455,7 +455,9 @@ func (t *RunOperationTool) describeTarget(
 		if itemLabel == "" {
 			itemLabel = id
 		}
-		lines = append(lines, "- "+itemLabel)
+		// Titles are user content, not description delimiters. Keep each
+		// item on one line so the approval card cannot hide later items.
+		lines = append(lines, "- "+strings.Join(strings.Fields(itemLabel), " "))
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n")), nil
 }

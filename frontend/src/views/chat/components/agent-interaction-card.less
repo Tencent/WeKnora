@@ -278,10 +278,8 @@
   color: var(--td-text-color-secondary);
   white-space: pre-line;
   word-break: break-word;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  max-height: calc(1.55em * 8);
+  overflow-y: auto;
 }
 
 .prompt-desc-items {
