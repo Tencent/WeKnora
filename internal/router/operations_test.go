@@ -25,6 +25,10 @@ func registerOperationAreas(v1 *gin.RouterGroup, g *rbacGuards) {
 	RegisterKnowledgeTagRoutes(v1, &handler.TagHandler{}, g)
 	RegisterOrganizationRoutes(v1, &handler.OrganizationHandler{}, g)
 	RegisterFAQRoutes(v1, &handler.FAQHandler{}, g)
+	RegisterCustomAgentRoutes(v1, &handler.CustomAgentHandler{}, g)
+	RegisterModelRoutes(v1, &handler.ModelHandler{}, &handler.ModelCredentialsHandler{}, g)
+	RegisterMCPServiceRoutes(v1, &handler.MCPServiceHandler{}, &handler.MCPCredentialsHandler{},
+		&handler.MCPOAuthHandler{}, g)
 }
 
 // TestBuiltinOperationsMatchRegisteredRoutes requires every operation to

@@ -18,7 +18,7 @@ func TestBuiltinCatalogIsValid(t *testing.T) {
 	catalog := Builtin()
 	require.NotEmpty(t, catalog.All())
 	for _, op := range catalog.All() {
-		if op.Risk.Mutates() {
+		if op.Risk.Mutates() && op.LabelParam == "" {
 			require.NotNil(t, op.Target, op.ID)
 		}
 	}
@@ -38,16 +38,21 @@ func TestNewCatalogRejectsUnsafeDeclarations(t *testing.T) {
 		"api keys":       readOp("keys.list", "/api/v1/api-keys"),
 		"outside v1":     readOp("x.get", "/health"),
 		// Areas whose names extend a sensitive one, or that no list named.
-		"sandbox configs":     readOp("x.get", "/api/v1/sandbox-configs"),
-		"storage backends":    readOp("x.get", "/api/v1/storage-backends"),
-		"web search provider": readOp("x.get", "/api/v1/web-search-providers/types"),
-		"im channels":         readOp("x.get", "/api/v1/im-channels"),
-		"agent approvals":     readOp("x.get", "/api/v1/agent/tool-approvals"),
-		"memory":              readOp("x.get", "/api/v1/memory/items"),
-		"messages":            readOp("x.get", "/api/v1/messages/chat-history-stats"),
-		"a new area":          readOp("x.get", "/api/v1/something-new"),
-		"kb shares":           readOp("x.get", "/api/v1/knowledge-bases/:id/shares", kb),
-		"kb prefix lookalike": readOp("x.get", "/api/v1/knowledge-bases-admin"),
+		"sandbox configs":      readOp("x.get", "/api/v1/sandbox-configs"),
+		"storage backends":     readOp("x.get", "/api/v1/storage-backends"),
+		"web search provider":  readOp("x.get", "/api/v1/web-search-providers/types"),
+		"im channels":          readOp("x.get", "/api/v1/im-channels"),
+		"agent approvals":      readOp("x.get", "/api/v1/agent/tool-approvals"),
+		"memory":               readOp("x.get", "/api/v1/memory/items"),
+		"messages":             readOp("x.get", "/api/v1/messages/chat-history-stats"),
+		"a new area":           readOp("x.get", "/api/v1/something-new"),
+		"kb shares":            readOp("x.get", "/api/v1/knowledge-bases/:id/shares", kb),
+		"kb prefix lookalike":  readOp("x.get", "/api/v1/knowledge-bases-admin"),
+		"agent shares":         readOp("x.get", "/api/v1/agents/:id/shares", kb),
+		"agent embed channels": readOp("x.get", "/api/v1/agents/:id/embed-channels", kb),
+		"agent im channels":    readOp("x.get", "/api/v1/agents/:id/im-channels", kb),
+		"model credentials":    readOp("x.get", "/api/v1/models/:id/credentials", kb),
+		"mcp oauth":            readOp("x.get", "/api/v1/mcp-services/:id/oauth/status", kb),
 		"read as POST": {
 			ID: "x.get", Summary: "s", Risk: RiskRead, Method: http.MethodPost,
 			Route: "/api/v1/knowledge-bases",
@@ -96,6 +101,36 @@ func TestNewCatalogChecksTargets(t *testing.T) {
 	noParam.Params = nil
 	_, err = NewCatalog(get, noParam)
 	assert.Error(t, err, "target needs a param the mutation does not declare")
+}
+
+func TestNewCatalogChecksLabelParam(t *testing.T) {
+	name := Param{Name: "name", In: InBody, Type: TypeString, Required: true, Description: "d"}
+	create := Operation{
+		ID: "agent.create", Summary: "s", Risk: RiskWrite, Method: http.MethodPost,
+		Route: "/api/v1/agents", Params: []Param{name}, LabelParam: "name",
+	}
+	_, err := NewCatalog(create)
+	require.NoError(t, err)
+
+	cases := map[string]func(*Operation){
+		"unknown param": func(op *Operation) { op.LabelParam = "title" },
+		"optional param": func(op *Operation) {
+			op.Params = []Param{{Name: "name", In: InBody, Type: TypeString, Description: "d"}}
+		},
+		"destructive":     func(op *Operation) { op.Risk = RiskDestructive },
+		"not a POST":      func(op *Operation) { op.Method = http.MethodPut },
+		"with a target":   func(op *Operation) { op.Target = &Target{Operation: "x.get", Label: "title"} },
+		"read with label": func(op *Operation) { op.Risk, op.Method = RiskRead, http.MethodGet },
+	}
+	for name, mut := range cases {
+		t.Run(name, func(t *testing.T) {
+			op := create
+			op.Params = append([]Param(nil), create.Params...)
+			mut(&op)
+			_, err := NewCatalog(op, readOp("x.get", "/api/v1/agents"))
+			assert.Error(t, err)
+		})
+	}
 }
 
 func TestNewCatalogChecksItemTargets(t *testing.T) {

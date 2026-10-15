@@ -6113,7 +6113,7 @@ export default {
         float: 'フローティング表示にする',
       },
       welcomeTitle: '何をお手伝いしましょうか？',
-      welcomeDesc: 'WeKnora の使い方にお答えするほか、ワークスペースのドキュメント解析、ナレッジベースの履歴、Wiki の問題を確認・対応できます。変更の前に確認するかどうかは、入力欄の下の権限レベルで決まります。',
+      welcomeDesc: 'WeKnora の使い方にお答えするほか、ワークスペースのドキュメント解析、ナレッジベースの履歴、Wiki の問題を確認・対応し、エージェントの作成や設定もお手伝いできます。変更の前に確認するかどうかは、入力欄の下の権限レベルで決まります。',
       startFailed: 'アシスタントを起動できませんでした。もう一度お試しください。',
       askAboutDocument: '{name}に聞く',
       access: {
@@ -6148,7 +6148,8 @@ export default {
       failedDocuments: 'このナレッジベースで解析に失敗したドキュメントは？',
       recentActivity: 'このナレッジベースの最近の変更は？',
       formats: 'WeKnora はどのドキュメント形式に対応していますか？',
-      createWiki: 'Wiki ナレッジベースの作り方は？'
+      createWiki: 'Wiki ナレッジベースの作り方は？',
+      agents: 'どんなエージェントがあり、それぞれどのモデルを使っていますか？'
     }
   },
   assistantSettings: {

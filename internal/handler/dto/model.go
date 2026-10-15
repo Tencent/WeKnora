@@ -177,17 +177,17 @@ func HasAllSecretExtras(provider, baseURL string, extra map[string]string) bool 
 // stripped along with every other field that could leak how a particular
 // tenant configured the upstream provider.
 type ModelResponse struct {
-	ID          string             `json:"id"`
+	ID          string             `json:"id" extensions:"x-agent=model_id"`
 	TenantID    uint64             `json:"tenant_id"`
-	Name        string             `json:"name"`
-	DisplayName string             `json:"display_name"`
-	Type        types.ModelType    `json:"type"`
-	Source      types.ModelSource  `json:"source"`
-	Description string             `json:"description"`
+	Name        string             `json:"name" extensions:"x-agent"`
+	DisplayName string             `json:"display_name" extensions:"x-agent"`
+	Type        types.ModelType    `json:"type" extensions:"x-agent"`
+	Source      types.ModelSource  `json:"source" extensions:"x-agent"`
+	Description string             `json:"description" extensions:"x-agent"`
 	Parameters  ModelParametersDTO `json:"parameters"`
-	IsDefault   bool               `json:"is_default"`
-	IsBuiltin   bool               `json:"is_builtin"`
-	Status      types.ModelStatus  `json:"status"`
+	IsDefault   bool               `json:"is_default" extensions:"x-agent"`
+	IsBuiltin   bool               `json:"is_builtin" extensions:"x-agent"`
+	Status      types.ModelStatus  `json:"status" extensions:"x-agent"`
 	CreatedAt   time.Time          `json:"created_at"`
 	UpdatedAt   time.Time          `json:"updated_at"`
 	// Per-field "configured?" map. Omitted for builtin models unless the

@@ -6113,7 +6113,7 @@ export default {
         float: 'Float over the page',
       },
       welcomeTitle: 'How can I help?',
-      welcomeDesc: 'Ask how WeKnora works, or have me check and handle document parsing, knowledge base activity and Wiki issues in your workspace. Whether I ask before a change depends on the access level below the input box.',
+      welcomeDesc: 'Ask how WeKnora works, or have me check and handle document parsing, knowledge base activity and Wiki issues in your workspace, or create and configure agents. Whether I ask before a change depends on the access level below the input box.',
       startFailed: 'Failed to start the assistant. Please try again.',
       askAboutDocument: 'Ask {name}',
       access: {
@@ -6148,7 +6148,8 @@ export default {
       failedDocuments: 'Which documents in this knowledge base failed to parse?',
       recentActivity: 'What changed in this knowledge base recently?',
       formats: 'Which document formats does WeKnora support?',
-      createWiki: 'How do I create a Wiki knowledge base?'
+      createWiki: 'How do I create a Wiki knowledge base?',
+      agents: 'Which agents do I have, and which models do they use?'
     }
   },
   assistantSettings: {

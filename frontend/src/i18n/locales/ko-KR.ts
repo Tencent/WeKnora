@@ -2057,7 +2057,7 @@ export default {
       float: '떠 있는 창으로 전환',
     },
     welcomeTitle: '무엇을 도와드릴까요?',
-    welcomeDesc: 'WeKnora 사용법을 안내하고, 워크스페이스의 문서 파싱, 지식 베이스 활동, Wiki 문제를 확인하고 처리할 수 있습니다. 변경 전에 확인을 요청할지는 입력창 아래의 권한 수준에 따라 정해집니다.',
+    welcomeDesc: 'WeKnora 사용법을 안내하고, 워크스페이스의 문서 파싱, 지식 베이스 활동, Wiki 문제를 확인하고 처리하며, 에이전트를 만들고 설정할 수도 있습니다. 변경 전에 확인을 요청할지는 입력창 아래의 권한 수준에 따라 정해집니다.',
     startFailed: '어시스턴트를 시작하지 못했습니다. 다시 시도해 주세요.',
     askAboutDocument: '{name}에게 묻기',
     access: {
@@ -2092,7 +2092,8 @@ export default {
       failedDocuments: '이 지식 베이스에서 파싱에 실패한 문서는?',
       recentActivity: '이 지식 베이스에 최근 어떤 변경이 있었나요?',
       formats: 'WeKnora는 어떤 문서 형식을 지원하나요?',
-      createWiki: 'Wiki 지식 베이스는 어떻게 만드나요?'
+      createWiki: 'Wiki 지식 베이스는 어떻게 만드나요?',
+      agents: '어떤 에이전트가 있고, 각각 어떤 모델을 쓰나요?'
     }
   },
   assistantSettings: {

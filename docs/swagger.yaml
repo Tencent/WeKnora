@@ -540,24 +540,31 @@ definitions:
         type: object
       description:
         type: string
+        x-agent: true
       enabled:
         type: boolean
+        x-agent: true
       env_vars:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPEnvVars'
       headers:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPHeaders'
       id:
         type: string
+        x-agent: mcp_service_id
       is_builtin:
         type: boolean
+        x-agent: true
       name:
         type: string
+        x-agent: true
       stdio_config:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPStdioConfig'
       tenant_id:
         type: integer
       transport_type:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPTransportType'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPTransportType'
+        x-agent: true
       updated_at:
         type: string
       url:
@@ -618,26 +625,38 @@ definitions:
         type: object
       description:
         type: string
+        x-agent: true
       display_name:
         type: string
+        x-agent: true
       id:
         type: string
+        x-agent: model_id
       is_builtin:
         type: boolean
+        x-agent: true
       is_default:
         type: boolean
+        x-agent: true
       name:
         type: string
+        x-agent: true
       parameters:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.ModelParametersDTO'
       source:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSource'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSource'
+        x-agent: true
       status:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelStatus'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelStatus'
+        x-agent: true
       tenant_id:
         type: integer
       type:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelType'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelType'
+        x-agent: true
       updated_at:
         type: string
     type: object
@@ -2032,6 +2051,7 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.CustomAgentConfig'
         description: Agent configuration
+        x-agent: true
       created_at:
         description: Timestamps
         type: string
@@ -2044,28 +2064,34 @@ definitions:
           让前端列表卡片区分「我创建」与「同空间其他成员创建」。不落库，内建 agent / 老数据
           仍可能为空。
         type: string
+        x-agent: true
       deleted_at:
         $ref: '#/definitions/gorm.DeletedAt'
       description:
         description: Description of the agent
         type: string
+        x-agent: true
       id:
         description: |-
           Unique identifier of the agent (composite primary key with TenantID)
           For built-in agents, this is 'builtin-quick-answer' or 'builtin-smart-reasoning'
           For custom agents, this is a UUID
         type: string
+        x-agent: agent_id
       is_builtin:
         description: Whether this is a built-in agent (normal mode / agent mode)
         type: boolean
+        x-agent: true
       name:
         description: Name of the agent
         type: string
+        x-agent: true
       tenant_id:
         description: Tenant ID (composite primary key with ID)
         type: integer
       updated_at:
         type: string
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.CustomAgentConfig:
     properties:
@@ -2074,6 +2100,7 @@ definitions:
           ===== Basic Settings =====
           Agent mode: "quick-answer" for RAG mode, "smart-reasoning" for ReAct agent mode
         type: string
+        x-agent: true
       agent_type:
         description: |-
           AgentType is a preset category under smart-reasoning mode that pre-fills
@@ -2082,11 +2109,14 @@ definitions:
           Empty / unknown values are treated as "custom" (no preset applied).
           Ignored for quick-answer mode.
         type: string
+        x-agent: true
       allowed_tools:
         description: Allowed tools (only for agent type)
         items:
           type: string
         type: array
+        x-agent: true
+        x-agent-detail: true
       asr_model_id:
         description: ASR model ID for audio transcription (optional)
         type: string
@@ -2209,6 +2239,7 @@ definitions:
           ===== Knowledge Base Settings =====
           Knowledge base selection mode: "all" = all KBs, "selected" = specific KBs, "none" = no KB
         type: string
+        x-agent: true
       keyword_threshold:
         description: Keyword retrieval threshold
         type: number
@@ -2218,6 +2249,7 @@ definitions:
         items:
           type: string
         type: array
+        x-agent: knowledge_base_ids
       llm_call_timeout:
         description: Timeout for a single LLM call in seconds (0 = use global default)
         type: integer
@@ -2243,12 +2275,16 @@ definitions:
         description: 'MCP service selection mode: "all" = all enabled MCP services,
           "selected" = specific services, "none" = no MCP'
         type: string
+        x-agent: true
+        x-agent-detail: true
       mcp_services:
         description: Selected MCP service IDs (only used when MCPSelectionMode is
           "selected")
         items:
           type: string
         type: array
+        x-agent: mcp_service_ids
+        x-agent-detail: true
       memory_enabled:
         description: |-
           Whether this agent may read the user's long-term memory. Nil inherits
@@ -2260,11 +2296,14 @@ definitions:
           ===== Model Settings =====
           Model ID to use for conversations
         type: string
+        x-agent: true
       multi_turn_enabled:
         description: |-
           ===== Multi-turn Conversation Settings =====
           Whether multi-turn conversation is enabled
         type: boolean
+        x-agent: true
+        x-agent-detail: true
       query_understand_model_id:
         description: |-
           Dedicated chat model ID for the query-understanding (rewrite + intent) step.
@@ -2323,11 +2362,15 @@ definitions:
         items:
           type: string
         type: array
+        x-agent: true
+        x-agent-detail: true
       skills_selection_mode:
         description: |-
           ===== Skills Settings (only for smart-reasoning mode) =====
           Skills selection mode: "all" = all installed skills, "selected" = specific skills, "none" = no skills
         type: string
+        x-agent: true
+        x-agent-detail: true
       supported_file_types:
         description: |-
           ===== File Type Restriction Settings =====
@@ -2341,6 +2384,9 @@ definitions:
         description: System prompt for the agent (unified prompt, uses web_search_status
           placeholder for dynamic behavior)
         type: string
+        x-agent: true
+        x-agent-detail: true
+        x-agent-max-runes: "8000"
       system_prompt_id:
         description: |-
           SystemPromptID references a template ID in prompt_templates/ YAML files.
@@ -2372,6 +2418,8 @@ definitions:
           ===== Web Search Settings =====
           Whether web search is enabled
         type: boolean
+        x-agent: true
+        x-agent-detail: true
       web_search_max_results:
         description: Maximum web search results
         type: integer
@@ -9198,9 +9246,13 @@ definitions:
       config:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.CustomAgentConfig'
       description:
+        description: What the agent is for
         type: string
+        x-agent: true
       name:
+        description: Agent name
         type: string
+        x-agent: true
     required:
     - name
     type: object
@@ -10225,6 +10277,7 @@ definitions:
       success:
         example: true
         type: boolean
+        x-agent: true
     type: object
   internal_handler.ModelCatalogEntryDTO:
     properties:
@@ -10443,6 +10496,69 @@ definitions:
         type: boolean
       total:
         type: integer
+        x-agent: true
+    type: object
+  internal_handler.PatchAgentRequest:
+    properties:
+      description:
+        description: What the agent is for
+        type: string
+        x-agent: true
+      kb_selection_mode:
+        description: 'Knowledge bases searched: all, selected (knowledge_bases) or
+          none'
+        enum:
+        - all
+        - selected
+        - none
+        type: string
+        x-agent: true
+      knowledge_bases:
+        description: |-
+          Selected knowledge bases, replacing the current ones; without
+          kb_selection_mode it also switches the mode to selected
+        items:
+          type: string
+        type: array
+        x-agent: knowledge_base_ids
+        x-agent-maximum: "50"
+      mcp_selection_mode:
+        description: 'MCP services used: all, selected (mcp_services) or none'
+        enum:
+        - all
+        - selected
+        - none
+        type: string
+        x-agent: true
+      mcp_services:
+        description: |-
+          Selected MCP services, replacing the current ones; without
+          mcp_selection_mode it also switches the mode to selected
+        items:
+          type: string
+        type: array
+        x-agent: mcp_service_ids
+        x-agent-maximum: "50"
+      model_id:
+        description: Chat model the agent answers with
+        type: string
+        x-agent: true
+      multi_turn_enabled:
+        description: Whether earlier turns are kept in the conversation context
+        type: boolean
+        x-agent: true
+      name:
+        description: Agent name
+        type: string
+        x-agent: true
+      system_prompt:
+        description: The whole system prompt
+        type: string
+        x-agent: true
+        x-agent-max-bytes: "32000"
+      web_search_enabled:
+        description: Whether the agent may search the web
+        type: boolean
         x-agent: true
     type: object
   internal_handler.PlaceholderGroups:
@@ -11774,6 +11890,13 @@ definitions:
       agent_source_tenant_id:
         description: Optional disambiguator; backend still verifies the share relation
         type: integer
+      assistant_access:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel'
+        description: |-
+          AssistantAccess is the WeKnora assistant access level: read_only,
+          confirm or auto_write. The workspace ceiling caps it; other agents
+          ignore it.
       attachment_ids:
         description: Pre-uploaded session-scoped document IDs
         items:
@@ -12246,6 +12369,7 @@ paths:
         in: query
         name: creator
         type: string
+        x-agent: true
       produces:
       - application/json
       responses:
@@ -12263,6 +12387,12 @@ paths:
       summary: 获取智能体列表
       tags:
       - 智能体
+      x-agent:
+        id: agent.list
+        max_items: 200
+        risk: read
+      x-agent-hint: Lists the workspace's agents, built-in ones included. Built-in
+        agents are shared by everyone; only an admin can change them.
     post:
       consumes:
       - application/json
@@ -12291,6 +12421,12 @@ paths:
       summary: 创建智能体
       tags:
       - 智能体
+      x-agent:
+        id: agent.create
+        label_param: name
+        risk: write
+      x-agent-hint: Creates a quick-answer agent with default settings, owned by the
+        user. Configure it afterwards with agent.update.
   /agents/{id}:
     delete:
       consumes:
@@ -12302,6 +12438,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: agent_id
       produces:
       - application/json
       responses:
@@ -12327,6 +12464,13 @@ paths:
       summary: 删除智能体
       tags:
       - 智能体
+      x-agent:
+        id: agent.delete
+        label: name
+        risk: destructive
+        target: agent.get
+      x-agent-hint: Deletes an agent and its IM channels. Cannot be undone; built-in
+        agents cannot be deleted.
     get:
       consumes:
       - application/json
@@ -12337,6 +12481,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: agent_id
       produces:
       - application/json
       responses:
@@ -12363,6 +12508,66 @@ paths:
       summary: 获取智能体详情
       tags:
       - 智能体
+      x-agent:
+        id: agent.get
+        risk: read
+      x-agent-hint: Returns an agent's settings, including its full system prompt,
+        tools and MCP and skill scope.
+    patch:
+      consumes:
+      - application/json
+      description: |-
+        只修改请求中出现的字段（名称、描述、系统提示词、对话模型、知识库与 MCP 范围、联网搜索、多轮对话），其余配置保持不变。
+        传 knowledge_bases 或 mcp_services 而不传对应的 selection_mode 时，模式切换为 selected。
+      parameters:
+      - description: 智能体ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: agent_id
+      - description: 要修改的字段
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.PatchAgentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的智能体
+          schema:
+            $ref: '#/definitions/internal_handler.AgentWriteResponse'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 无权修改该智能体
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 智能体不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 部分更新智能体
+      tags:
+      - 智能体
+      x-agent:
+        id: agent.update
+        label: name
+        require_complete_target: true
+        risk: write
+        target: agent.get
+      x-agent-hint: Changes the listed settings of an agent; a field left out is kept.
+        system_prompt replaces the whole prompt, so start from the full prompt agent.get
+        returns. Take model_id from model.list (a KnowledgeQA model), knowledge base
+        ids from knowledge_base.list and MCP service ids from mcp_service.list. knowledge_base_ids
+        or mcp_service_ids alone also switch that scope to selected.
     put:
       consumes:
       - application/json
@@ -12411,6 +12616,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: agent_id
       produces:
       - application/json
       responses:
@@ -12437,6 +12643,12 @@ paths:
       summary: 复制智能体
       tags:
       - 智能体
+      x-agent:
+        id: agent.copy
+        label: name
+        risk: write
+        target: agent.get
+      x-agent-hint: Copies an agent, settings included; the copy belongs to the user.
   /agents/{id}/shares/{share_id}:
     delete:
       description: 从智能体的共享列表中移除指定共享关系
@@ -18684,6 +18896,13 @@ paths:
       summary: 获取MCP服务列表
       tags:
       - MCP服务
+      x-agent:
+        id: mcp_service.list
+        max_items: 200
+        risk: read
+      x-agent-hint: Lists the workspace's MCP services by name, with whether each
+        is enabled. Connection details and credentials are not shown; the user manages
+        MCP services in the settings.
     post:
       consumes:
       - application/json
@@ -18755,6 +18974,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: mcp_service_id
       produces:
       - application/json
       responses:
@@ -18777,6 +18997,9 @@ paths:
       summary: 获取MCP服务详情
       tags:
       - MCP服务
+      x-agent:
+        id: mcp_service.get
+        risk: read
     put:
       consumes:
       - application/json
@@ -20078,6 +20301,13 @@ paths:
       summary: 获取模型列表
       tags:
       - 模型管理
+      x-agent:
+        id: model.list
+        max_items: 200
+        risk: read
+      x-agent-hint: Lists the workspace's models by name and type. An agent's chat
+        model must be of type KnowledgeQA. Endpoints and keys are not shown; the user
+        manages models in the settings.
     post:
       consumes:
       - application/json
@@ -20153,6 +20383,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: model_id
       produces:
       - application/json
       responses:
@@ -20175,6 +20406,9 @@ paths:
       summary: 获取模型详情
       tags:
       - 模型管理
+      x-agent:
+        id: model.get
+        risk: read
     put:
       consumes:
       - application/json

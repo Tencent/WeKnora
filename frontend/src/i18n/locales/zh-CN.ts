@@ -2059,7 +2059,7 @@ export default {
       float: '改为悬浮',
     },
     welcomeTitle: '有什么可以帮你？',
-    welcomeDesc: '我可以解答 WeKnora 的用法，也可以查看和处理你空间里的文档解析、知识库动态和 Wiki 问题。改动前是否先请你确认，由输入框下方的权限等级决定。',
+    welcomeDesc: '我可以解答 WeKnora 的用法，也可以查看和处理你空间里的文档解析、知识库动态和 Wiki 问题，还能帮你创建和配置智能体。改动前是否先请你确认，由输入框下方的权限等级决定。',
     startFailed: '启动助手失败，请重试',
     askAboutDocument: '问 {name}',
     access: {
@@ -2094,7 +2094,8 @@ export default {
       failedDocuments: '这个知识库有哪些解析失败的文档？',
       recentActivity: '这个知识库最近有哪些变动？',
       formats: 'WeKnora 支持哪些文档格式？',
-      createWiki: '怎样创建 Wiki 知识库？'
+      createWiki: '怎样创建 Wiki 知识库？',
+      agents: '我有哪些智能体？分别用的什么模型？'
     }
   },
   assistantSettings: {

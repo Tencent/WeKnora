@@ -2059,7 +2059,7 @@ export default {
       float: '改為懸浮',
     },
     welcomeTitle: '有什麼可以幫你？',
-    welcomeDesc: '我可以解答 WeKnora 的用法，也可以檢視和處理你空間裡的文件解析、知識庫動態和 Wiki 問題。變更前是否先請你確認，由輸入框下方的權限等級決定。',
+    welcomeDesc: '我可以解答 WeKnora 的用法，也可以檢視和處理你空間裡的文件解析、知識庫動態和 Wiki 問題，還能幫你建立和設定智慧代理。變更前是否先請你確認，由輸入框下方的權限等級決定。',
     startFailed: '啟動助手失敗，請重試',
     askAboutDocument: '問 {name}',
     access: {
@@ -2094,7 +2094,8 @@ export default {
       failedDocuments: '這個知識庫有哪些解析失敗的文件？',
       recentActivity: '這個知識庫最近有哪些變動？',
       formats: 'WeKnora 支援哪些文件格式？',
-      createWiki: '怎樣建立 Wiki 知識庫？'
+      createWiki: '怎樣建立 Wiki 知識庫？',
+      agents: '我有哪些智慧代理？分別用的什麼模型？'
     }
   },
   assistantSettings: {

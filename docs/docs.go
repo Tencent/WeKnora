@@ -338,6 +338,7 @@ const docTemplate = `{
                             "others"
                         ],
                         "type": "string",
+                        "x-agent": true,
                         "description": "创建者过滤，仅 mine 与 others 生效",
                         "name": "creator",
                         "in": "query"
@@ -356,7 +357,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "agent.list",
+                    "max_items": 200,
+                    "risk": "read"
+                },
+                "x-agent-hint": "Lists the workspace's agents, built-in ones included. Built-in agents are shared by everyone; only an admin can change them."
             },
             "post": {
                 "security": [
@@ -402,7 +409,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "agent.create",
+                    "label_param": "name",
+                    "risk": "write"
+                },
+                "x-agent-hint": "Creates a quick-answer agent with default settings, owned by the user. Configure it afterwards with agent.update."
             }
         },
         "/agents/placeholders": {
@@ -561,6 +574,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "agent_id",
                         "description": "智能体ID",
                         "name": "id",
                         "in": "path",
@@ -598,7 +612,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "agent.get",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Returns an agent's settings, including its full system prompt, tools and MCP and skill scope."
             },
             "put": {
                 "security": [
@@ -682,6 +701,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "agent_id",
                         "description": "智能体ID",
                         "name": "id",
                         "in": "path",
@@ -713,7 +733,88 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "agent.delete",
+                    "label": "name",
+                    "risk": "destructive",
+                    "target": "agent.get"
+                },
+                "x-agent-hint": "Deletes an agent and its IM channels. Cannot be undone; built-in agents cannot be deleted."
+            },
+            "patch": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "只修改请求中出现的字段（名称、描述、系统提示词、对话模型、知识库与 MCP 范围、联网搜索、多轮对话），其余配置保持不变。\n传 knowledge_bases 或 mcp_services 而不传对应的 selection_mode 时，模式切换为 selected。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "智能体"
+                ],
+                "summary": "部分更新智能体",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "agent_id",
+                        "description": "智能体ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "要修改的字段",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.PatchAgentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "更新后的智能体",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.AgentWriteResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "无权修改该智能体",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "智能体不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "agent.update",
+                    "label": "name",
+                    "require_complete_target": true,
+                    "risk": "write",
+                    "target": "agent.get"
+                },
+                "x-agent-hint": "Changes the listed settings of an agent; a field left out is kept. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model), knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. knowledge_base_ids or mcp_service_ids alone also switch that scope to selected."
             }
         },
         "/agents/{id}/copy": {
@@ -740,6 +841,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "agent_id",
                         "description": "智能体ID",
                         "name": "id",
                         "in": "path",
@@ -777,7 +879,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "agent.copy",
+                    "label": "name",
+                    "risk": "write",
+                    "target": "agent.get"
+                },
+                "x-agent-hint": "Copies an agent, settings included; the copy belongs to the user."
             }
         },
         "/agents/{id}/shares/{share_id}": {
@@ -10438,7 +10547,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "mcp_service.list",
+                    "max_items": 200,
+                    "risk": "read"
+                },
+                "x-agent-hint": "Lists the workspace's MCP services by name, with whether each is enabled. Connection details and credentials are not shown; the user manages MCP services in the settings."
             },
             "post": {
                 "security": [
@@ -10557,6 +10672,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "mcp_service_id",
                         "description": "MCP服务ID",
                         "name": "id",
                         "in": "path",
@@ -10588,6 +10704,10 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "mcp_service.get",
+                    "risk": "read"
                 }
             },
             "put": {
@@ -12733,7 +12853,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "model.list",
+                    "max_items": 200,
+                    "risk": "read"
+                },
+                "x-agent-hint": "Lists the workspace's models by name and type. An agent's chat model must be of type KnowledgeQA. Endpoints and keys are not shown; the user manages models in the settings."
             },
             "post": {
                 "security": [
@@ -12966,6 +13092,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "model_id",
                         "description": "模型ID",
                         "name": "id",
                         "in": "path",
@@ -12997,6 +13124,10 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "model.get",
+                    "risk": "read"
                 }
             },
             "put": {
@@ -21966,10 +22097,12 @@ const docTemplate = `{
                     }
                 },
                 "description": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "env_vars": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPEnvVars"
@@ -21978,13 +22111,16 @@ const docTemplate = `{
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPHeaders"
                 },
                 "id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "mcp_service_id"
                 },
                 "is_builtin": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "stdio_config": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPStdioConfig"
@@ -21993,7 +22129,12 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "transport_type": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPTransportType"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPTransportType"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "updated_at": {
                     "type": "string"
@@ -22078,37 +22219,58 @@ const docTemplate = `{
                     }
                 },
                 "description": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "display_name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "model_id"
                 },
                 "is_builtin": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "is_default": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "parameters": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.ModelParametersDTO"
                 },
                 "source": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSource"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSource"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "status": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelStatus"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelStatus"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "tenant_id": {
                     "type": "integer"
                 },
                 "type": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelType"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelType"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "updated_at": {
                     "type": "string"
@@ -23899,7 +24061,8 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CustomAgentConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true
                 },
                 "created_at": {
                     "description": "Timestamps",
@@ -23911,33 +24074,39 @@ const docTemplate = `{
                 },
                 "creator_name": {
                     "description": "CreatorName 由 list handler 在返回前批量回填，作用同 KnowledgeBase.CreatorName：\n让前端列表卡片区分「我创建」与「同空间其他成员创建」。不落库，内建 agent / 老数据\n仍可能为空。",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "deleted_at": {
                     "$ref": "#/definitions/gorm.DeletedAt"
                 },
                 "description": {
                     "description": "Description of the agent",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "id": {
                     "description": "Unique identifier of the agent (composite primary key with TenantID)\nFor built-in agents, this is 'builtin-quick-answer' or 'builtin-smart-reasoning'\nFor custom agents, this is a UUID",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "agent_id"
                 },
                 "is_builtin": {
                     "description": "Whether this is a built-in agent (normal mode / agent mode)",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "name": {
                     "description": "Name of the agent",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "tenant_id": {
                     "description": "Tenant ID (composite primary key with ID)",
                     "type": "integer"
                 },
                 "updated_at": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -23946,18 +24115,22 @@ const docTemplate = `{
             "properties": {
                 "agent_mode": {
                     "description": "===== Basic Settings =====\nAgent mode: \"quick-answer\" for RAG mode, \"smart-reasoning\" for ReAct agent mode",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "agent_type": {
                     "description": "AgentType is a preset category under smart-reasoning mode that pre-fills\nsystem prompt, allowed tools and recommended KB compatibility.\nValid values: \"rag-qa\", \"wiki-qa\", \"hybrid-rag-wiki\", \"custom\".\nEmpty / unknown values are treated as \"custom\" (no preset applied).\nIgnored for quick-answer mode.",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "allowed_tools": {
                     "description": "Allowed tools (only for agent type)",
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "asr_model_id": {
                     "description": "ASR model ID for audio transcription (optional)",
@@ -24059,7 +24232,8 @@ const docTemplate = `{
                 },
                 "kb_selection_mode": {
                     "description": "===== Knowledge Base Settings =====\nKnowledge base selection mode: \"all\" = all KBs, \"selected\" = specific KBs, \"none\" = no KB",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "keyword_threshold": {
                     "description": "Keyword retrieval threshold",
@@ -24070,7 +24244,8 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": "knowledge_base_ids"
                 },
                 "llm_call_timeout": {
                     "description": "Timeout for a single LLM call in seconds (0 = use global default)",
@@ -24090,14 +24265,18 @@ const docTemplate = `{
                 },
                 "mcp_selection_mode": {
                     "description": "MCP service selection mode: \"all\" = all enabled MCP services, \"selected\" = specific services, \"none\" = no MCP",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "mcp_services": {
                     "description": "Selected MCP service IDs (only used when MCPSelectionMode is \"selected\")",
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": "mcp_service_ids",
+                    "x-agent-detail": true
                 },
                 "memory_enabled": {
                     "description": "Whether this agent may read the user's long-term memory. Nil inherits\nthe workspace setting; false opts a single agent out of memory even when\nthe workspace has it on. There is no \"on\" that overrides the workspace.",
@@ -24105,11 +24284,14 @@ const docTemplate = `{
                 },
                 "model_id": {
                     "description": "===== Model Settings =====\nModel ID to use for conversations",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "multi_turn_enabled": {
                     "description": "===== Multi-turn Conversation Settings =====\nWhether multi-turn conversation is enabled",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "query_understand_model_id": {
                     "description": "Dedicated chat model ID for the query-understanding (rewrite + intent) step.\nWhen empty, the main conversation ModelID is used as a fallback.",
@@ -24164,11 +24346,15 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "skills_selection_mode": {
                     "description": "===== Skills Settings (only for smart-reasoning mode) =====\nSkills selection mode: \"all\" = all installed skills, \"selected\" = specific skills, \"none\" = no skills",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "supported_file_types": {
                     "description": "===== File Type Restriction Settings =====\nSupported file types for this agent (e.g., [\"csv\", \"xlsx\", \"xls\"])\nEmpty means all file types are supported\nWhen set, only files with matching extensions can be used with this agent",
@@ -24179,7 +24365,10 @@ const docTemplate = `{
                 },
                 "system_prompt": {
                     "description": "System prompt for the agent (unified prompt, uses web_search_status placeholder for dynamic behavior)",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-detail": true,
+                    "x-agent-max-runes": "8000"
                 },
                 "system_prompt_id": {
                     "description": "SystemPromptID references a template ID in prompt_templates/ YAML files.\nIf set and SystemPrompt is empty, the template content is resolved at request time for saved agents.",
@@ -24211,7 +24400,9 @@ const docTemplate = `{
                 },
                 "web_search_enabled": {
                     "description": "===== Web Search Settings =====\nWhether web search is enabled",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "web_search_max_results": {
                     "description": "Maximum web search results",
@@ -32927,10 +33118,14 @@ const docTemplate = `{
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CustomAgentConfig"
                 },
                 "description": {
-                    "type": "string"
+                    "description": "What the agent is for",
+                    "type": "string",
+                    "x-agent": true
                 },
                 "name": {
-                    "type": "string"
+                    "description": "Agent name",
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -34385,6 +34580,7 @@ const docTemplate = `{
                 },
                 "success": {
                     "type": "boolean",
+                    "x-agent": true,
                     "example": true
                 }
             }
@@ -34679,6 +34875,80 @@ const docTemplate = `{
                 },
                 "total": {
                     "type": "integer",
+                    "x-agent": true
+                }
+            }
+        },
+        "internal_handler.PatchAgentRequest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "description": "What the agent is for",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "kb_selection_mode": {
+                    "description": "Knowledge bases searched: all, selected (knowledge_bases) or none",
+                    "type": "string",
+                    "enum": [
+                        "all",
+                        "selected",
+                        "none"
+                    ],
+                    "x-agent": true
+                },
+                "knowledge_bases": {
+                    "description": "Selected knowledge bases, replacing the current ones; without\nkb_selection_mode it also switches the mode to selected",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": "knowledge_base_ids",
+                    "x-agent-maximum": "50"
+                },
+                "mcp_selection_mode": {
+                    "description": "MCP services used: all, selected (mcp_services) or none",
+                    "type": "string",
+                    "enum": [
+                        "all",
+                        "selected",
+                        "none"
+                    ],
+                    "x-agent": true
+                },
+                "mcp_services": {
+                    "description": "Selected MCP services, replacing the current ones; without\nmcp_selection_mode it also switches the mode to selected",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": "mcp_service_ids",
+                    "x-agent-maximum": "50"
+                },
+                "model_id": {
+                    "description": "Chat model the agent answers with",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "multi_turn_enabled": {
+                    "description": "Whether earlier turns are kept in the conversation context",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "name": {
+                    "description": "Agent name",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "system_prompt": {
+                    "description": "The whole system prompt",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-bytes": "32000"
+                },
+                "web_search_enabled": {
+                    "description": "Whether the agent may search the web",
+                    "type": "boolean",
                     "x-agent": true
                 }
             }
@@ -36597,6 +36867,14 @@ const docTemplate = `{
                 "agent_source_tenant_id": {
                     "description": "Optional disambiguator; backend still verifies the share relation",
                     "type": "integer"
+                },
+                "assistant_access": {
+                    "description": "AssistantAccess is the WeKnora assistant access level: read_only,\nconfirm or auto_write. The workspace ceiling caps it; other agents\nignore it.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel"
+                        }
+                    ]
                 },
                 "attachment_ids": {
                     "description": "Pre-uploaded session-scoped document IDs",

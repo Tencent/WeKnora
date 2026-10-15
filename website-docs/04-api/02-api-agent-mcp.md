@@ -74,13 +74,39 @@ curl $BASE/api/v1/agents/agent-1 -H "Authorization: Bearer $TOKEN"
 
 ### PUT /api/v1/agents/:id
 
-用途：更新 Agent。权限：创建者 OR Admin+。请求体：`name/description/avatar/config`（均可选）。Agent 已分享到组织时，新加入知识库范围的知识库须是调用者可分享的（知识库创建者或 Admin+，改为 `all` 需要 Admin+），否则 403。
+用途：更新 Agent。权限：创建者 OR Admin+。请求体：`name/description/avatar/config`。`name` 必填；省略 `avatar` 保留原头像；`config` 整体替换，省略的配置项不会保留原值，只改个别设置请用 `PATCH`。Agent 已分享到组织时，新加入知识库范围的知识库须是调用者可分享的（知识库创建者或 Admin+，改为 `all` 需要 Admin+），否则 403。
 
 响应：200 `{"success":true,"data":{Agent}}`
 
 ```bash
 curl -X PUT $BASE/api/v1/agents/agent-1 -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' -d '{"description":"更新描述"}'
+  -H 'Content-Type: application/json' -d '{"name":"客服助手","description":"更新描述","config":{...}}'
+```
+
+### PATCH /api/v1/agents/:id
+
+用途：部分更新 Agent，只修改请求中出现的字段，其余配置（包括头像）保持不变。权限与 `PUT` 相同：创建者 OR Admin+；API key `manage_agents`/full。校验与 `PUT` 一致，包括上面的组织分享知识库范围规则。
+
+请求体字段（均可选）：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `name` | string | 名称，不能为空白 |
+| `description` | string | 描述 |
+| `system_prompt` | string | 完整的系统提示词（整段替换） |
+| `model_id` | string | 对话模型 ID |
+| `kb_selection_mode` | string | `all` / `selected` / `none` |
+| `knowledge_bases` | string[] | 选中的知识库 ID，整体替换；未同时传 `kb_selection_mode` 时模式切换为 `selected` |
+| `mcp_selection_mode` | string | `all` / `selected` / `none` |
+| `mcp_services` | string[] | 选中的 MCP 服务 ID，整体替换；未同时传 `mcp_selection_mode` 时模式切换为 `selected` |
+| `web_search_enabled` | bool | 是否启用联网搜索 |
+| `multi_turn_enabled` | bool | 是否启用多轮对话 |
+
+响应：200 `{"success":true,"data":{Agent}}`；selection mode 取值非法或名称为空时 400，Agent 不存在时 404。
+
+```bash
+curl -X PATCH $BASE/api/v1/agents/agent-1 -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"model_id":"model-2","knowledge_bases":["kb-1","kb-2"]}'
 ```
 
 ### DELETE /api/v1/agents/:id

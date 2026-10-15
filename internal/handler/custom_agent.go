@@ -62,10 +62,91 @@ func NewCustomAgentHandler(
 
 // CreateAgentRequest defines the request body for creating an agent
 type CreateAgentRequest struct {
-	Name        string                  `json:"name" binding:"required"`
-	Description string                  `json:"description"`
+	// Agent name
+	Name string `json:"name" binding:"required" extensions:"x-agent"`
+	// What the agent is for
+	Description string                  `json:"description" extensions:"x-agent"`
 	Avatar      string                  `json:"avatar"`
 	Config      types.CustomAgentConfig `json:"config"`
+}
+
+// PatchAgentRequest changes only the fields it carries; everything else in
+// the agent, its config included, is kept. The editor saves with PUT, which
+// replaces the whole config; this is for callers that change one setting.
+type PatchAgentRequest struct {
+	// Agent name
+	Name *string `json:"name" extensions:"x-agent"`
+	// What the agent is for
+	Description *string `json:"description" extensions:"x-agent"`
+	// The whole system prompt
+	SystemPrompt *string `json:"system_prompt" extensions:"x-agent,x-agent-max-bytes=32000"`
+	// Chat model the agent answers with
+	ModelID *string `json:"model_id" extensions:"x-agent"`
+	// Knowledge bases searched: all, selected (knowledge_bases) or none
+	KBSelectionMode *string `json:"kb_selection_mode" enums:"all,selected,none" extensions:"x-agent"`
+	// Selected knowledge bases, replacing the current ones; without
+	// kb_selection_mode it also switches the mode to selected
+	KnowledgeBases *[]string `json:"knowledge_bases" extensions:"x-agent=knowledge_base_ids,x-agent-maximum=50"`
+	// MCP services used: all, selected (mcp_services) or none
+	MCPSelectionMode *string `json:"mcp_selection_mode" enums:"all,selected,none" extensions:"x-agent"`
+	// Selected MCP services, replacing the current ones; without
+	// mcp_selection_mode it also switches the mode to selected
+	MCPServices *[]string `json:"mcp_services" extensions:"x-agent=mcp_service_ids,x-agent-maximum=50"`
+	// Whether the agent may search the web
+	WebSearchEnabled *bool `json:"web_search_enabled" extensions:"x-agent"`
+	// Whether earlier turns are kept in the conversation context
+	MultiTurnEnabled *bool `json:"multi_turn_enabled" extensions:"x-agent"`
+}
+
+// apply overlays the request onto an agent's current state, as an update
+// request that keeps the avatar.
+func (p PatchAgentRequest) apply(agent *types.CustomAgent) UpdateAgentRequest {
+	req := UpdateAgentRequest{Name: agent.Name, Description: agent.Description, Config: agent.Config}
+	if p.Name != nil {
+		req.Name = *p.Name
+	}
+	if p.Description != nil {
+		req.Description = *p.Description
+	}
+	cfg := &req.Config
+	if p.SystemPrompt != nil {
+		cfg.SystemPrompt = *p.SystemPrompt
+	}
+	if p.ModelID != nil {
+		cfg.ModelID = *p.ModelID
+	}
+	if p.KnowledgeBases != nil {
+		cfg.KnowledgeBases = append([]string{}, *p.KnowledgeBases...)
+		cfg.KBSelectionMode = "selected"
+	}
+	if p.KBSelectionMode != nil {
+		cfg.KBSelectionMode = *p.KBSelectionMode
+	}
+	if p.MCPServices != nil {
+		cfg.MCPServices = append([]string{}, *p.MCPServices...)
+		cfg.MCPSelectionMode = "selected"
+	}
+	if p.MCPSelectionMode != nil {
+		cfg.MCPSelectionMode = *p.MCPSelectionMode
+	}
+	if p.WebSearchEnabled != nil {
+		cfg.WebSearchEnabled = *p.WebSearchEnabled
+	}
+	if p.MultiTurnEnabled != nil {
+		cfg.MultiTurnEnabled = *p.MultiTurnEnabled
+	}
+	return req
+}
+
+func validSelectionMode(mode *string) bool {
+	if mode == nil {
+		return true
+	}
+	switch *mode {
+	case "all", "selected", "none":
+		return true
+	}
+	return false
 }
 
 // UpdateAgentRequest defines the request body for updating an agent
@@ -91,6 +172,8 @@ type UpdateAgentRequest struct {
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"agent.create","risk":"write","label_param":"name"}
+// @x-agent-hint "Creates a quick-answer agent with default settings, owned by the user. Configure it afterwards with agent.update."
 // @Router       /agents [post]
 func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -179,12 +262,14 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "智能体ID"
+// @Param        id   path      string  true  "智能体ID"  extensions(x-agent=agent_id)
 // @Success      200  {object}  handler.DataResponse{data=types.CustomAgent}  "智能体详情"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      404  {object}  errors.AppError         "智能体不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"agent.get","risk":"read"}
+// @x-agent-hint "Returns an agent's settings, including its full system prompt, tools and MCP and skill scope."
 // @Router       /agents/{id} [get]
 func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -230,11 +315,13 @@ func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
-// @Param        creator  query  string  false  "创建者过滤，仅 mine 与 others 生效"  Enums(mine, others)
+// @Param        creator  query  string  false  "创建者过滤，仅 mine 与 others 生效"  Enums(mine, others)  extensions(x-agent)
 // @Success      200  {object}  handler.ListAgentsResponse  "智能体列表"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"agent.list","risk":"read","max_items":200}
+// @x-agent-hint "Lists the workspace's agents, built-in ones included. Built-in agents are shared by everyone; only an admin can change them."
 // @Router       /agents [get]
 func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -384,6 +471,62 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
+	h.saveAgentUpdate(c, id, req)
+}
+
+// PatchAgent godoc
+// @Summary      部分更新智能体
+// @Description  只修改请求中出现的字段（名称、描述、系统提示词、对话模型、知识库与 MCP 范围、联网搜索、多轮对话），其余配置保持不变。
+// @Description  传 knowledge_bases 或 mcp_services 而不传对应的 selection_mode 时，模式切换为 selected。
+// @Tags         智能体
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string             true  "智能体ID"  extensions(x-agent=agent_id)
+// @Param        request  body      PatchAgentRequest  true  "要修改的字段"
+// @Success      200      {object}  handler.AgentWriteResponse  "更新后的智能体"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Failure      403      {object}  errors.AppError         "无权修改该智能体"
+// @Failure      404      {object}  errors.AppError         "智能体不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"agent.update","risk":"write","target":"agent.get","label":"name","require_complete_target":true}
+// @x-agent-hint "Changes the listed settings of an agent; a field left out is kept. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model), knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. knowledge_base_ids or mcp_service_ids alone also switch that scope to selected."
+// @Router       /agents/{id} [patch]
+func (h *CustomAgentHandler) PatchAgent(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		_ = c.Error(errors.NewBadRequestError("Agent ID cannot be empty"))
+		return
+	}
+	var patch PatchAgentRequest
+	if err := c.ShouldBindJSON(&patch); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		_ = c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	if !validSelectionMode(patch.KBSelectionMode) || !validSelectionMode(patch.MCPSelectionMode) {
+		_ = c.Error(errors.NewBadRequestError("selection mode must be all, selected or none"))
+		return
+	}
+	existing, err := h.service.GetAgentByID(ctx, id)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"agent_id": id})
+		if err == service.ErrAgentNotFound {
+			_ = c.Error(errors.NewNotFoundError("Agent not found"))
+			return
+		}
+		_ = c.Error(errors.NewInternalServerError("Failed to update agent"))
+		return
+	}
+	h.saveAgentUpdate(c, id, patch.apply(existing))
+}
+
+// saveAgentUpdate validates and stores a full update of agent id, for both
+// PUT and PATCH.
+func (h *CustomAgentHandler) saveAgentUpdate(c *gin.Context, id string, req UpdateAgentRequest) {
+	ctx := c.Request.Context()
 	if err := authorizeAgentKnowledgeScope(ctx, req.Config); err != nil {
 		c.Error(err)
 		return
@@ -484,13 +627,15 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "智能体ID"
+// @Param        id   path      string  true  "智能体ID"  extensions(x-agent=agent_id)
 // @Success      200  {object}  handler.MessageResponse  "删除成功"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      403  {object}  errors.AppError         "无法删除内置智能体"
 // @Failure      404  {object}  errors.AppError         "智能体不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"agent.delete","risk":"destructive","target":"agent.get","label":"name"}
+// @x-agent-hint "Deletes an agent and its IM channels. Cannot be undone; built-in agents cannot be deleted."
 // @Router       /agents/{id} [delete]
 func (h *CustomAgentHandler) DeleteAgent(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -555,12 +700,14 @@ func (h *CustomAgentHandler) DeleteAgent(c *gin.Context) {
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "智能体ID"
+// @Param        id   path      string  true  "智能体ID"  extensions(x-agent=agent_id)
 // @Success      201  {object}  handler.DataResponse{data=types.CustomAgent}  "复制成功"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      404  {object}  errors.AppError         "智能体不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"agent.copy","risk":"write","target":"agent.get","label":"name"}
+// @x-agent-hint "Copies an agent, settings included; the copy belongs to the user."
 // @Router       /agents/{id}/copy [post]
 func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 	ctx := c.Request.Context()

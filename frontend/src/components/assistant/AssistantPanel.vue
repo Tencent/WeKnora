@@ -165,7 +165,7 @@ const starters = computed(() => {
   if (c?.wikiSlug) return [t('assistant.starters.wikiIssues'), t('assistant.starters.wikiSummary')]
   if (c?.knowledgeId) return [t('assistant.starters.documentStatus'), t('assistant.starters.documentSummary')]
   if (c) return [t('assistant.starters.failedDocuments'), t('assistant.starters.recentActivity')]
-  return [t('assistant.starters.formats'), t('assistant.starters.createWiki')]
+  return [t('assistant.starters.agents'), t('assistant.starters.formats'), t('assistant.starters.createWiki')]
 })
 
 // The backend only honours a page context inside the run's search scope, so

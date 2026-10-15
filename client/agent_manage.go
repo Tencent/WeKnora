@@ -173,6 +173,27 @@ type UpdateAgentRequest struct {
 	Config *AgentConfig `json:"config"`
 }
 
+// PatchAgentRequest changes only the fields that are set; the rest of the
+// agent is kept. JSON field names mirror internal/handler.PatchAgentRequest.
+type PatchAgentRequest struct {
+	Name         *string `json:"name,omitempty"`
+	Description  *string `json:"description,omitempty"`
+	SystemPrompt *string `json:"system_prompt,omitempty"`
+	ModelID      *string `json:"model_id,omitempty"`
+	// KBSelectionMode is "all", "selected" or "none".
+	KBSelectionMode *string `json:"kb_selection_mode,omitempty"`
+	// KnowledgeBases replaces the selected knowledge bases; without
+	// KBSelectionMode it also switches the mode to "selected".
+	KnowledgeBases *[]string `json:"knowledge_bases,omitempty"`
+	// MCPSelectionMode is "all", "selected" or "none".
+	MCPSelectionMode *string `json:"mcp_selection_mode,omitempty"`
+	// MCPServices replaces the selected MCP services; without
+	// MCPSelectionMode it also switches the mode to "selected".
+	MCPServices      *[]string `json:"mcp_services,omitempty"`
+	WebSearchEnabled *bool     `json:"web_search_enabled,omitempty"`
+	MultiTurnEnabled *bool     `json:"multi_turn_enabled,omitempty"`
+}
+
 // AgentResponse represents the API response containing a single agent
 type AgentResponse struct {
 	Success bool  `json:"success"`
@@ -241,6 +262,23 @@ func (c *Client) GetAgent(ctx context.Context, agentID string) (*Agent, error) {
 func (c *Client) UpdateAgent(ctx context.Context, agentID string, request *UpdateAgentRequest) (*Agent, error) {
 	path := fmt.Sprintf("/api/v1/agents/%s", agentID)
 	resp, err := c.doRequest(ctx, http.MethodPut, path, request, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response AgentResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return &response.Data, nil
+}
+
+// PatchAgent changes only the fields set in request, keeping the rest of the
+// agent, unlike UpdateAgent, which replaces the whole config.
+func (c *Client) PatchAgent(ctx context.Context, agentID string, request *PatchAgentRequest) (*Agent, error) {
+	path := fmt.Sprintf("/api/v1/agents/%s", agentID)
+	resp, err := c.doRequest(ctx, http.MethodPatch, path, request, nil)
 	if err != nil {
 		return nil, err
 	}
