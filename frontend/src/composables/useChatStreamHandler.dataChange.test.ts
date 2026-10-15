@@ -80,5 +80,5 @@ test('live and restored successful built-in results restore async tracking', asy
   await handler.handleMsgList([{id:'old',role:'assistant',content:'',is_completed:true,agent_steps:[{iteration:0,tool_calls:[{
     id:'old-call',name:'run_operation',args:{},result:{success:true,output:'submitted',data:{async_tasks:descriptor}},
   }]}]}])
-  assert.equal(handler.taskEvents.mock.calls.filter(call => call.arguments[0].detail?.tasks).length, 2)
+  assert.equal(handler.taskEvents.mock.calls.filter((call: {arguments: any[]}) => call.arguments[0].detail?.tasks).length, 2)
 })
