@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -87,10 +89,30 @@ type knowledgeService struct {
 }
 
 const (
-	manualContentMaxLength = 200000
-	manualFileExtension    = ".md"
-	faqImportBatchSize     = 50 // 每批处理的FAQ条目数
+	manualFileExtension = ".md"
+	faqImportBatchSize  = 50 // 每批处理的FAQ条目数
+	// manualContentMaxLengthDefault is the character cap for manual and
+	// clipped knowledge on deployments that configure nothing.
+	manualContentMaxLengthDefault = 200000
+	// manualContentMaxLengthEnv lets an operator raise that cap without a
+	// rebuild. Clipping tools embed their images as data URLs to keep the note
+	// self-contained, and base64 inflates them by ~4/3, so two or three images
+	// already overflow 200k characters. See .env.example.
+	manualContentMaxLengthEnv = "MANUAL_CONTENT_MAX_LENGTH"
 )
+
+// manualContentMaxLength returns the character cap for manual knowledge
+// content: the env override when it parses to a positive integer, the built-in
+// default otherwise (invalid or non-positive values fall back silently so one
+// bad variable cannot reject every save).
+func manualContentMaxLength() int {
+	if raw := strings.TrimSpace(os.Getenv(manualContentMaxLengthEnv)); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			return n
+		}
+	}
+	return manualContentMaxLengthDefault
+}
 
 // NewKnowledgeService creates a new knowledge service instance
 func NewKnowledgeService(
