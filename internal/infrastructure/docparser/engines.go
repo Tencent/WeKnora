@@ -2,6 +2,7 @@ package docparser
 
 import (
 	"context"
+	"os"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser/anydoc"
@@ -27,6 +28,7 @@ const (
 	PaddleOCRVLEngineName = "paddleocr_vl"
 	// PaddleOCRVLCloudEngineName is the PaddleOCR-VL AI Studio cloud API.
 	PaddleOCRVLCloudEngineName = "paddleocr_vl_cloud"
+	HadongOCREngineName        = "hadong_ocr"
 )
 
 func init() {
@@ -39,6 +41,28 @@ func init() {
 	RegisterEngine(&mineruCloudEngine{})
 	RegisterEngine(&paddleOCRVLEngine{})
 	RegisterEngine(&paddleOCRVLCloudEngine{})
+	RegisterEngine(&hadongOCREngine{})
+}
+
+type hadongOCREngine struct{}
+
+func (e *hadongOCREngine) Name() string        { return HadongOCREngineName }
+func (e *hadongOCREngine) Description() string { return "Hadong OCR API" }
+func (e *hadongOCREngine) FileTypes(_ bool) []string {
+	return []string{"pdf", "jpg", "jpeg", "png", "tif", "tiff"}
+}
+func (e *hadongOCREngine) CheckAvailable(_ bool, overrides map[string]string) (bool, string) {
+	token := strings.TrimSpace(overrides["hadong_ocr_token"])
+	if token == "" {
+		token = strings.TrimSpace(os.Getenv("HADONG_OCR_TOKEN"))
+	}
+	if token == "" {
+		return false, "Hadong OCR token not configured"
+	}
+	return true, ""
+}
+func (e *hadongOCREngine) NewReader(_ context.Context, deps ReaderDeps) (interfaces.DocReader, error) {
+	return NewHadongOCRReader(deps.Overrides), nil
 }
 
 // preferAnydocWhenAvailable is the type-level default override: when the
