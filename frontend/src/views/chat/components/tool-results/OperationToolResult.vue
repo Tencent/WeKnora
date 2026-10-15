@@ -1,5 +1,5 @@
 <template>
-  <div class="assistant-tool-result operation-result">
+  <div class="assistant-tool-result operation-result" :aria-label="toolText(data.operation || toolArguments.operation)">
     <p v-if="success === false || data.error" class="result-error" role="alert">{{ toolText(data.error) || output || $t('agentStream.assistantTools.failed') }}</p>
     <template v-else-if="discovery && Array.isArray(data.operations)">
       <p class="result-meta">{{ $t('agentStream.assistantTools.available', { count: operations.length }) }}</p>
@@ -27,9 +27,8 @@
       </template>
     </template>
     <template v-else-if="!discovery && 'data' in result">
-      <div class="result-heading"><code>{{ data.operation || toolArguments.operation }}</code><span v-if="success === true" class="result-success">{{ $t('agentStream.assistantTools.completed') }}</span></div>
-      <p v-if="result.truncated === true" class="result-warning">{{ $t('agentStream.assistantTools.truncated') }}</p>
       <div class="result-body"><OperationValue :value="result.data" /></div>
+      <p v-if="result.truncated === true" class="result-meta">{{ $t('agentStream.assistantTools.truncated') }}</p>
       <details v-if="Object.keys(toolRecord(result.meta)).length">
         <summary>{{ $t('agentStream.assistantTools.metadata') }}</summary>
         <OperationValue :value="result.meta" />
@@ -61,7 +60,8 @@ const riskLabel = (risk: unknown) => ['read', 'write', 'destructive'].includes(t
 
 <style scoped lang="less">
 @import './assistant-tool-result.less';
-.risk { border-radius: var(--app-radius-xs); padding: 1px 6px; background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-secondary); }
+.result-heading code { color: var(--td-text-color-primary); font-size: var(--app-text-xs); }
+.risk { font-size: var(--app-text-xs); color: var(--td-text-color-placeholder); }
 .risk.write { color: var(--td-warning-color); }
 .risk.destructive { color: var(--td-error-color); }
 .parameter { border-top: 1px solid var(--td-component-stroke); padding-top: 8px; margin-top: 8px; }

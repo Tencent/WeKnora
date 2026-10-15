@@ -61,11 +61,22 @@ test('operation discovery renders risk, parameters and unavailable reasons in hi
 
 test('operation results preserve structured values, pagination metadata and truncation', async () => {
   const html = await render('run_operation', { operation: 'knowledge.list', result: { data: [{ title: '<img src=x onerror=alert(1)>', count: 0, enabled: false, answers: ['one', 'two'] }], meta: { total: 42, page: 1 }, truncated: true } }, { success: true })
-  for (const text of ['knowledge.list', 'Completed', 'Only part', 'total', '42', 'false', '>0<', 'one', 'two', '&lt;img']) assert.ok(html.includes(text), text)
+  for (const text of ['knowledge.list', 'Only part', 'total', '42', 'false', '>0<', 'one', 'two', '&lt;img']) assert.ok(html.includes(text), text)
   assert.doesNotMatch(html, /<img/)
   const historical = await render('run_operation', { operation: 'knowledge.delete', result: { data: {} } })
   assert.doesNotMatch(historical, /role="alert"|Completed/)
   assert.match(historical, /No items to display/)
+})
+
+test('named operation records use compact disclosure rows without losing failure details', async () => {
+  const html = await render('run_operation', { operation: 'knowledge.list', result: { data: [
+    { title: 'Guide.pdf', parse_status: 'completed', chunk_count: 48 },
+    { name: 'Setup.md', parse_status: 'failed', error: 'Model unavailable' },
+    { count: 0, enabled: false },
+  ] } }, { success: true })
+  assert.match(html, /<details class="value-record"/)
+  assert.doesNotMatch(html, /<details[^>]*open/)
+  for (const text of ['Guide.pdf', 'Setup.md', 'Completed', 'Failed', 'Model unavailable', '48', '>0<', 'false']) assert.ok(html.includes(text), text)
 })
 
 test('empty operation searches, declines, plain errors and truncated historical JSON remain readable', async () => {
@@ -109,6 +120,7 @@ test('document reads show outlines and continuation offsets, including error rec
   assert.match(failed, /role="alert"/)
   assert.match(failed, /Unknown anchor/)
   assert.match(failed, /Page outline/)
+  assert.match(failed, /<details[^>]*open/)
 })
 
 test('document body rendering keeps source text safe when no browser DOM is available', async (t) => {
@@ -118,10 +130,12 @@ test('document body rendering keeps source text safe when no browser DOM is avai
   try {
     const html = await render('read_weknora_doc', {
       path: 'wiki', title: 'Wiki guide', content: '# Wiki setup\n\n<script>alert(1)</script>\n\nRun the setup command.',
+      outline: [{ heading: 'Setup', anchor: 'setup' }],
     })
     assert.match(html, /doc-content/)
     assert.match(html, /Wiki setup/)
     assert.match(html, /Run the setup command/)
     assert.doesNotMatch(html, /<script>/)
+    assert.doesNotMatch(html, /<details[^>]*open/)
   } finally { log.mock.restore() }
 })
