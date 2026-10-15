@@ -102,7 +102,7 @@ var specMethods = []string{"get", "post", "put", "patch", "delete"}
 
 // FromSpec compiles the operations a Swagger 2.0 document marks with
 // x-agent. The result still has to pass NewCatalog, which owns the safety
-// rules (forbidden areas, risk versus method, approval targets).
+// rules (allowed API areas, risk versus method, approval targets).
 func FromSpec(document []byte) ([]Operation, error) {
 	var doc specDocument
 	if err := json.Unmarshal(document, &doc); err != nil {

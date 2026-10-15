@@ -43,7 +43,7 @@ const testSpec = `{
     }}
   },
   "paths": {
-    "/kbs/{id}/docs": {"get": {
+    "/knowledge-bases/{id}/docs": {"get": {
       "summary": "List documents",
       "description": "Human-facing text.",
       "x-agent": {"id": "doc.list", "risk": "read"},
@@ -62,7 +62,7 @@ const testSpec = `{
         {"type": "object", "properties": {"data": {"type": "array", "items": {"$ref": "#/definitions/types.Doc"}}}}
       ]}}}
     }},
-    "/docs/{id}": {
+    "/knowledge/{id}": {
       "get": {
         "summary": "Get a document",
         "x-agent": {"id": "doc.get", "risk": "read"},
@@ -83,7 +83,7 @@ const testSpec = `{
         }}}}
       }
     },
-    "/docs/{id}/raw": {"get": {
+    "/knowledge/{id}/raw": {"get": {
       "summary": "Not for agents",
       "parameters": [{"name": "id", "in": "path", "type": "string", "required": true}],
       "responses": {"200": {"schema": {"type": "string"}}}
@@ -107,7 +107,7 @@ func TestFromSpecCompilesAnnotatedOperations(t *testing.T) {
 	list, ok := catalog.Get("doc.list")
 	require.True(t, ok)
 	assert.Equal(t, http.MethodGet, list.Method)
-	assert.Equal(t, "/api/v1/kbs/:id/docs", list.Route)
+	assert.Equal(t, "/api/v1/knowledge-bases/:id/docs", list.Route)
 	assert.Equal(t, "List documents", list.Summary)
 	assert.Equal(t, "Model-facing text.", list.Description, "the hint replaces the human description")
 
@@ -196,11 +196,11 @@ func TestFromSpecRejectsBadAnnotations(t *testing.T) {
 }
 
 func TestFromSpecKeepsCatalogSafetyRules(t *testing.T) {
-	forbidden := strings.Replace(testSpec, `"/docs/{id}": {`, `"/api-keys/{id}": {`, 1)
+	forbidden := strings.Replace(testSpec, `"/knowledge/{id}": {`, `"/api-keys/{id}": {`, 1)
 	ops, err := FromSpec([]byte(forbidden))
 	require.NoError(t, err)
 	_, err = NewCatalog(ops...)
-	assert.ErrorContains(t, err, "forbidden area")
+	assert.ErrorContains(t, err, "outside the areas an agent may reach")
 
 	readAsDelete := strings.Replace(testSpec, `"risk": "destructive"`, `"risk": "read"`, 1)
 	ops, err = FromSpec([]byte(readAsDelete))
