@@ -322,6 +322,7 @@ var allowedRouteAreas = map[string]bool{
 	"chunks":                 true,
 	"faq":                    true,
 	"agents":                 true,
+	"skills":                 true,
 	// Model and MCP responses carry endpoints and headers next to the
 	// names; only fields tagged x-agent are projected, so annotate the
 	// identifying ones and nothing else.
@@ -339,6 +340,7 @@ var forbiddenRouteSegments = map[string]bool{
 	"im-channels":    true,
 	"credentials":    true,
 	"oauth":          true,
+	"catalog":        true,
 }
 
 var allowedMethods = map[string]bool{

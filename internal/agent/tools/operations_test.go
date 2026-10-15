@@ -592,3 +592,33 @@ func TestFindOperationsDescribesMatches(t *testing.T) {
 	res, _ = tool.Execute(context.Background(), json.RawMessage(`{"query":"zzz-unmatched"}`))
 	assert.Contains(t, res.Output, "hint")
 }
+
+func TestRunOperationAgentSkillsApproval(t *testing.T) {
+	for _, tc := range []struct {
+		mode, want string
+		names      []string
+	}{
+		{"selected", "Skills: ppt-generator, csv-analysis", []string{"ppt-generator", "csv-analysis"}},
+		{"none", "Skills: (none)", []string{}},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			body := []byte(`{"data":{"id":"a1","name":"Support","config":{}}}`)
+			d := &fakeDispatcher{responses: map[string]*operations.Response{
+				"GET /api/v1/agents/a1":   {Status: http.StatusOK, Body: body},
+				"PATCH /api/v1/agents/a1": {Status: http.StatusOK, Body: body},
+			}}
+			gate := &fakeApprover{decision: approval.Decision{Approved: true, PendingID: "p1"}}
+			res, err := newRunTool(d, gate).Execute(interactiveCtx(), runArgs("agent.update", map[string]any{
+				"agent_id": "a1", "skills_selection_mode": tc.mode, "selected_skills": tc.names,
+			}))
+			require.NoError(t, err)
+			require.True(t, res.Success, res.Error)
+			require.Len(t, gate.requests, 1)
+			assert.Contains(t, gate.requests[0].Description, "Skills scope: "+tc.mode+"\n"+tc.want)
+			require.Len(t, d.calls, 3)
+			for _, call := range d.calls {
+				assert.Equal(t, "/api/v1/agents/a1", call.call.Path, "skill names need no ID lookup")
+			}
+		})
+	}
+}

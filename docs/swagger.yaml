@@ -2357,6 +2357,8 @@ definitions:
           the indirection here is what would let credential rotation happen
           without re-pointing every agent (see the spec's §4.8).
         type: string
+        x-agent: true
+        x-agent-detail: true
       selected_skills:
         description: Selected skill names (only used when SkillsSelectionMode is "selected")
         items:
@@ -10245,6 +10247,7 @@ definitions:
         type: array
       skills_available:
         type: boolean
+        x-agent: true
       success:
         example: true
         type: boolean
@@ -10549,6 +10552,23 @@ definitions:
         x-agent: true
       name:
         description: Agent name
+        type: string
+        x-agent: true
+      selected_skills:
+        description: |-
+          Selected skill names, replacing the current ones; without
+          skills_selection_mode it also switches the mode to selected
+        items:
+          type: string
+        type: array
+        x-agent: true
+        x-agent-maximum: "50"
+      skills_selection_mode:
+        description: 'Skills used: all, selected (selected_skills) or none'
+        enum:
+        - all
+        - selected
+        - none
         type: string
         x-agent: true
       system_prompt:
@@ -11020,8 +11040,10 @@ definitions:
     properties:
       description:
         type: string
+        x-agent: true
       name:
         type: string
+        x-agent: true
     type: object
   internal_handler.StorageCheckRequest:
     properties:
@@ -12517,8 +12539,10 @@ paths:
       consumes:
       - application/json
       description: |-
-        只修改请求中出现的字段（名称、描述、系统提示词、对话模型、知识库与 MCP 范围、联网搜索、多轮对话），其余配置保持不变。
-        传 knowledge_bases 或 mcp_services 而不传对应的 selection_mode 时，模式切换为 selected。
+        只修改请求中出现的字段，其余配置保持不变。
+        支持名称、描述、系统提示词、对话模型、知识库、MCP、技能范围、联网搜索、多轮对话。
+        传 knowledge_bases、mcp_services 或 selected_skills 而不传对应模式时，切换为 selected。
+        技能模式 all/none 清空技能列表；启用技能须先在编辑器选择沙箱，selected 名称须可用，否则返回 400。
       parameters:
       - description: 智能体ID
         in: path
@@ -12566,8 +12590,10 @@ paths:
       x-agent-hint: Changes the listed settings of an agent; a field left out is kept.
         system_prompt replaces the whole prompt, so start from the full prompt agent.get
         returns. Take model_id from model.list (a KnowledgeQA model), knowledge base
-        ids from knowledge_base.list and MCP service ids from mcp_service.list. knowledge_base_ids
-        or mcp_service_ids alone also switch that scope to selected.
+        ids from knowledge_base.list and MCP service ids from mcp_service.list. Take
+        skill names exactly from skill.list with the agent's sandbox_config_id. Skills
+        only take effect in smart-reasoning mode. knowledge_base_ids, mcp_service_ids
+        or selected_skills alone also switch that scope to selected.
     put:
       consumes:
       - application/json
@@ -22845,12 +22871,16 @@ paths:
     get:
       consumes:
       - application/json
-      description: 返回指定沙箱配置镜像内、智能体实际能调用的已安装技能（ready 且启用）。不传 sandbox_config_id 时列表为空。
+      description: |-
+        返回指定沙箱配置镜像内、智能体实际能调用的已安装技能（ready 且启用）。
+        不传 sandbox_config_id 时列表为空。
       parameters:
-      - description: Sandbox config ID; ignored for a shared agent
+      - description: Sandbox config ID from agent.get; ignored for a shared agent
         in: query
         name: sandbox_config_id
         type: string
+        x-agent: true
+        x-agent-required: true
       - description: Agent ID; needs agent_source_tenant_id
         in: query
         name: agent_id
@@ -22876,6 +22906,13 @@ paths:
       summary: 获取当前沙箱配置上可执行的 Skills
       tags:
       - Skills
+      x-agent:
+        id: skill.list
+        risk: read
+      x-agent-hint: Lists usable skills, chosen by name. Pass sandbox_config_id from
+        agent.get; when the agent has none, pass host (WeKnora Lite runs skills locally).
+        An empty list means there are no usable skills there; if the agent has no
+        sandbox, tell the user to choose one in the agent editor.
   /skills/catalog:
     get:
       description: Returns every skill definition in this workspace and which sandbox

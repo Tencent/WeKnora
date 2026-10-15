@@ -181,7 +181,7 @@ type ListOrganizationSharedAgentsResponse struct {
 type ListSkillsResponse struct {
 	Success         bool                `json:"success" example:"true"`
 	Data            []SkillInfoResponse `json:"data"`
-	SkillsAvailable bool                `json:"skills_available"`
+	SkillsAvailable bool                `json:"skills_available" extensions:"x-agent"`
 }
 
 // ListResponse is the JSON body written by this handler.

@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -38,6 +39,7 @@ type CustomAgentHandler struct {
 	// sandboxConfigs validates an agent's sandbox backend selection. Optional —
 	// nil in partially-wired unit tests, where the selection is left unchecked.
 	sandboxConfigs sandboxConfigLookup
+	usableSkills   usableSkillLister
 	desktop        bool
 }
 
@@ -49,6 +51,7 @@ func NewCustomAgentHandler(
 	userService interfaces.UserService,
 	sandboxConfigs *service.TenantSandboxConfigService,
 	host service.HostSandboxManager,
+	usableSkills *service.TenantSkillService,
 ) *CustomAgentHandler {
 	return &CustomAgentHandler{
 		service:        service,
@@ -56,6 +59,7 @@ func NewCustomAgentHandler(
 		disabledRepo:   disabledRepo,
 		userService:    userService,
 		sandboxConfigs: sandboxConfigs,
+		usableSkills:   usableSkills,
 		desktop:        host.Desktop,
 	}
 }
@@ -92,6 +96,11 @@ type PatchAgentRequest struct {
 	// Selected MCP services, replacing the current ones; without
 	// mcp_selection_mode it also switches the mode to selected
 	MCPServices *[]string `json:"mcp_services" extensions:"x-agent=mcp_service_ids,x-agent-maximum=50"`
+	// Skills used: all, selected (selected_skills) or none
+	SkillsSelectionMode *string `json:"skills_selection_mode" enums:"all,selected,none" extensions:"x-agent"`
+	// Selected skill names, replacing the current ones; without
+	// skills_selection_mode it also switches the mode to selected
+	SelectedSkills *[]string `json:"selected_skills" extensions:"x-agent,x-agent-maximum=50"`
 	// Whether the agent may search the web
 	WebSearchEnabled *bool `json:"web_search_enabled" extensions:"x-agent"`
 	// Whether earlier turns are kept in the conversation context
@@ -128,6 +137,18 @@ func (p PatchAgentRequest) apply(agent *types.CustomAgent) UpdateAgentRequest {
 	}
 	if p.MCPSelectionMode != nil {
 		cfg.MCPSelectionMode = *p.MCPSelectionMode
+	}
+	if p.SelectedSkills != nil {
+		cfg.SelectedSkills = append([]string{}, *p.SelectedSkills...)
+		cfg.SkillsSelectionMode = "selected"
+	}
+	if p.SkillsSelectionMode != nil {
+		cfg.SkillsSelectionMode = *p.SkillsSelectionMode
+	}
+	if p.SelectedSkills != nil || p.SkillsSelectionMode != nil {
+		if cfg.SkillsSelectionMode == "all" || cfg.SkillsSelectionMode == "none" {
+			cfg.SelectedSkills = []string{}
+		}
 	}
 	if p.WebSearchEnabled != nil {
 		cfg.WebSearchEnabled = *p.WebSearchEnabled
@@ -476,8 +497,10 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 
 // PatchAgent godoc
 // @Summary      部分更新智能体
-// @Description  只修改请求中出现的字段（名称、描述、系统提示词、对话模型、知识库与 MCP 范围、联网搜索、多轮对话），其余配置保持不变。
-// @Description  传 knowledge_bases 或 mcp_services 而不传对应的 selection_mode 时，模式切换为 selected。
+// @Description  只修改请求中出现的字段，其余配置保持不变。
+// @Description  支持名称、描述、系统提示词、对话模型、知识库、MCP、技能范围、联网搜索、多轮对话。
+// @Description  传 knowledge_bases、mcp_services 或 selected_skills 而不传对应模式时，切换为 selected。
+// @Description  技能模式 all/none 清空技能列表；启用技能须先在编辑器选择沙箱，selected 名称须可用，否则返回 400。
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
@@ -490,7 +513,7 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"agent.update","risk":"write","target":"agent.get","label":"name","require_complete_target":true}
-// @x-agent-hint "Changes the listed settings of an agent; a field left out is kept. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model), knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. knowledge_base_ids or mcp_service_ids alone also switch that scope to selected."
+// @x-agent-hint "Changes the listed settings of an agent; a field left out is kept. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model), knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. Take skill names exactly from skill.list with the agent's sandbox_config_id. Skills only take effect in smart-reasoning mode. knowledge_base_ids, mcp_service_ids or selected_skills alone also switch that scope to selected."
 // @Router       /agents/{id} [patch]
 func (h *CustomAgentHandler) PatchAgent(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -506,7 +529,8 @@ func (h *CustomAgentHandler) PatchAgent(c *gin.Context) {
 		_ = c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
-	if !validSelectionMode(patch.KBSelectionMode) || !validSelectionMode(patch.MCPSelectionMode) {
+	if !validSelectionMode(patch.KBSelectionMode) || !validSelectionMode(patch.MCPSelectionMode) ||
+		!validSelectionMode(patch.SkillsSelectionMode) {
 		_ = c.Error(errors.NewBadRequestError("selection mode must be all, selected or none"))
 		return
 	}
@@ -520,7 +544,61 @@ func (h *CustomAgentHandler) PatchAgent(c *gin.Context) {
 		_ = c.Error(errors.NewInternalServerError("Failed to update agent"))
 		return
 	}
-	h.saveAgentUpdate(c, id, patch.apply(existing))
+	req := patch.apply(existing)
+	if patch.SelectedSkills != nil && len(*patch.SelectedSkills) > 50 {
+		_ = c.Error(errors.NewBadRequestError("selected_skills must contain at most 50 names"))
+		return
+	}
+	skillTarget := req.Config.SandboxConfigID
+	if h.desktop {
+		// Lite agents store no sandbox config; their skills run on the host.
+		skillTarget = sandbox.HostSkillTargetID
+	}
+	// Skills already saved are not re-checked: a skill uninstalled since must
+	// not block an unrelated change such as a rename.
+	if patch.SkillsSelectionMode != nil || patch.SelectedSkills != nil {
+		if (req.Config.SkillsSelectionMode == "all" || req.Config.SkillsSelectionMode == "selected") &&
+			skillTarget == "" {
+			_ = c.Error(errors.NewBadRequestError("Choose a sandbox in the agent editor before selecting skills"))
+			return
+		}
+		if err := h.validateAgentSkillNames(ctx, req.Config, skillTarget); err != nil {
+			_ = c.Error(err)
+			return
+		}
+	}
+	h.saveAgentUpdate(c, id, req)
+}
+
+func (h *CustomAgentHandler) validateAgentSkillNames(
+	ctx context.Context, cfg types.CustomAgentConfig, skillTarget string,
+) error {
+	if cfg.SkillsSelectionMode != "selected" || len(cfg.SelectedSkills) == 0 {
+		return nil
+	}
+	if h.usableSkills == nil {
+		return errors.NewInternalServerError("Failed to verify selected skills")
+	}
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return errors.NewUnauthorizedError("Missing workspace context")
+	}
+	usable := map[string]bool{}
+	for _, skill := range h.usableSkills.ListUsableSkills(ctx, tenantID, skillTarget) {
+		if skill != nil {
+			usable[skill.Name] = true
+		}
+	}
+	var unknown []string
+	for _, name := range cfg.SelectedSkills {
+		if !usable[name] {
+			unknown = append(unknown, name)
+		}
+	}
+	if len(unknown) > 0 {
+		return errors.NewBadRequestError("Unknown or unavailable skills: " + strings.Join(unknown, ", "))
+	}
+	return nil
 }
 
 // saveAgentUpdate validates and stores a full update of agent id, for both

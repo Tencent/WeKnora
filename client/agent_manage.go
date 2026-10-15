@@ -189,7 +189,12 @@ type PatchAgentRequest struct {
 	MCPSelectionMode *string `json:"mcp_selection_mode,omitempty"`
 	// MCPServices replaces the selected MCP services; without
 	// MCPSelectionMode it also switches the mode to "selected".
-	MCPServices      *[]string `json:"mcp_services,omitempty"`
+	MCPServices *[]string `json:"mcp_services,omitempty"`
+	// SkillsSelectionMode is "all", "selected" or "none"; all/none clears SelectedSkills.
+	SkillsSelectionMode *string `json:"skills_selection_mode,omitempty"`
+	// SelectedSkills replaces the selected skill names; without
+	// SkillsSelectionMode it also switches the mode to "selected".
+	SelectedSkills   *[]string `json:"selected_skills,omitempty"`
 	WebSearchEnabled *bool     `json:"web_search_enabled,omitempty"`
 	MultiTurnEnabled *bool     `json:"multi_turn_enabled,omitempty"`
 }

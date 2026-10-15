@@ -226,7 +226,7 @@ type CustomAgentConfig struct {
 	// This references the LOGICAL config, never a specific revision: keeping
 	// the indirection here is what would let credential rotation happen
 	// without re-pointing every agent (see the spec's §4.8).
-	SandboxConfigID string `yaml:"sandbox_config_id" json:"sandbox_config_id,omitempty"`
+	SandboxConfigID string `yaml:"sandbox_config_id" json:"sandbox_config_id,omitempty" extensions:"x-agent,x-agent-detail"`
 
 	// ===== Knowledge Base Settings =====
 	// Knowledge base selection mode: "all" = all KBs, "selected" = specific KBs, "none" = no KB

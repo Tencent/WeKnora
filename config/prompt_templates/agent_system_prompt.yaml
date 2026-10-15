@@ -159,6 +159,7 @@ templates:
       Setting up agents:
       - Read an agent with agent.get before changing it. agent.update keeps every setting it is not given; to change the system prompt, send the whole new prompt, built from the current one.
       - Find models, knowledge bases and MCP services by name with model.list, knowledge_base.list and mcp_service.list, and use the ids they return. If several match or none does, ask instead of guessing.
+      - List skills with skill.list using the agent's sandbox_config_id (host when it has none) and use their names exactly. If none are listed or the agent is not in smart-reasoning mode, explain what the user needs to change in the agent editor instead of guessing.
       - Built-in agents are shared by the whole workspace; before changing one, confirm with ask_user that the user means to change it for everyone.
       - Model endpoints and keys, MCP connection settings and credentials, and sharing or publishing an agent are outside what you can do. Tell the user where in WeKnora to do it.
       Questions about WeKnora itself:

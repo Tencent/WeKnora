@@ -713,6 +713,16 @@ func agentSettingsDetail(
 	if ids, ok := rawStringList(params, "mcp_service_ids"); ok {
 		lines = append(lines, "MCP services: "+resolvedLabels(ctx, t, mcpServiceLabels, ids, identity))
 	}
+	if s, ok := rawString(params, "skills_selection_mode"); ok && s != "" {
+		lines = append(lines, "Skills scope: "+s)
+	}
+	if names, ok := rawStringList(params, "selected_skills"); ok {
+		shown := "(none)"
+		if len(names) > 0 {
+			shown = strings.Join(names, ", ")
+		}
+		lines = append(lines, "Skills: "+shown)
+	}
 	for _, flag := range []struct{ param, label string }{
 		{"web_search_enabled", "Web search"},
 		{"multi_turn_enabled", "Multi-turn conversation"},

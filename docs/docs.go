@@ -751,7 +751,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "只修改请求中出现的字段（名称、描述、系统提示词、对话模型、知识库与 MCP 范围、联网搜索、多轮对话），其余配置保持不变。\n传 knowledge_bases 或 mcp_services 而不传对应的 selection_mode 时，模式切换为 selected。",
+                "description": "只修改请求中出现的字段，其余配置保持不变。\n支持名称、描述、系统提示词、对话模型、知识库、MCP、技能范围、联网搜索、多轮对话。\n传 knowledge_bases、mcp_services 或 selected_skills 而不传对应模式时，切换为 selected。\n技能模式 all/none 清空技能列表；启用技能须先在编辑器选择沙箱，selected 名称须可用，否则返回 400。",
                 "consumes": [
                     "application/json"
                 ],
@@ -814,7 +814,7 @@ const docTemplate = `{
                     "risk": "write",
                     "target": "agent.get"
                 },
-                "x-agent-hint": "Changes the listed settings of an agent; a field left out is kept. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model), knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. knowledge_base_ids or mcp_service_ids alone also switch that scope to selected."
+                "x-agent-hint": "Changes the listed settings of an agent; a field left out is kept. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model), knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. Take skill names exactly from skill.list with the agent's sandbox_config_id. Skills only take effect in smart-reasoning mode. knowledge_base_ids, mcp_service_ids or selected_skills alone also switch that scope to selected."
             }
         },
         "/agents/{id}/copy": {
@@ -16957,7 +16957,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "返回指定沙箱配置镜像内、智能体实际能调用的已安装技能（ready 且启用）。不传 sandbox_config_id 时列表为空。",
+                "description": "返回指定沙箱配置镜像内、智能体实际能调用的已安装技能（ready 且启用）。\n不传 sandbox_config_id 时列表为空。",
                 "consumes": [
                     "application/json"
                 ],
@@ -16971,7 +16971,9 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Sandbox config ID; ignored for a shared agent",
+                        "x-agent": true,
+                        "x-agent-required": true,
+                        "description": "Sandbox config ID from agent.get; ignored for a shared agent",
                         "name": "sandbox_config_id",
                         "in": "query"
                     },
@@ -17001,7 +17003,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "skill.list",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Lists usable skills, chosen by name. Pass sandbox_config_id from agent.get; when the agent has none, pass host (WeKnora Lite runs skills locally). An empty list means there are no usable skills there; if the agent has no sandbox, tell the user to choose one in the agent editor."
             }
         },
         "/skills/catalog": {
@@ -24339,7 +24346,9 @@ const docTemplate = `{
                 },
                 "sandbox_config_id": {
                     "description": "===== Sandbox Settings =====\nSandboxConfigID selects which workspace sandbox config this agent's\nskill scripts run on. Empty means sandbox execution is disabled.\n\nThis references the LOGICAL config, never a specific revision: keeping\nthe indirection here is what would let credential rotation happen\nwithout re-pointing every agent (see the spec's §4.8).",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "selected_skills": {
                     "description": "Selected skill names (only used when SkillsSelectionMode is \"selected\")",
@@ -34532,7 +34541,8 @@ const docTemplate = `{
                     }
                 },
                 "skills_available": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "success": {
                     "type": "boolean",
@@ -34938,6 +34948,25 @@ const docTemplate = `{
                 "name": {
                     "description": "Agent name",
                     "type": "string",
+                    "x-agent": true
+                },
+                "selected_skills": {
+                    "description": "Selected skill names, replacing the current ones; without\nskills_selection_mode it also switches the mode to selected",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true,
+                    "x-agent-maximum": "50"
+                },
+                "skills_selection_mode": {
+                    "description": "Skills used: all, selected (selected_skills) or none",
+                    "type": "string",
+                    "enum": [
+                        "all",
+                        "selected",
+                        "none"
+                    ],
                     "x-agent": true
                 },
                 "system_prompt": {
@@ -35613,10 +35642,12 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "description": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },

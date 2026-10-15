@@ -85,7 +85,7 @@ curl -X PUT $BASE/api/v1/agents/agent-1 -H "Authorization: Bearer $TOKEN" \
 
 ### PATCH /api/v1/agents/:id
 
-用途：部分更新 Agent，只修改请求中出现的字段，其余配置（包括头像）保持不变。权限与 `PUT` 相同：创建者 OR Admin+；API key `manage_agents`/full。校验与 `PUT` 一致，包括上面的组织分享知识库范围规则。
+用途：部分更新 Agent，只修改请求中出现的字段，其余配置（包括头像）保持不变。权限与 `PUT` 相同：创建者 OR Admin+；API key `manage_agents`/full。复用 `PUT` 校验（包括上面的组织分享知识库范围规则），并额外校验技能名称。
 
 请求体字段（均可选）：
 
@@ -99,10 +99,14 @@ curl -X PUT $BASE/api/v1/agents/agent-1 -H "Authorization: Bearer $TOKEN" \
 | `knowledge_bases` | string[] | 选中的知识库 ID，整体替换；未同时传 `kb_selection_mode` 时模式切换为 `selected` |
 | `mcp_selection_mode` | string | `all` / `selected` / `none` |
 | `mcp_services` | string[] | 选中的 MCP 服务 ID，整体替换；未同时传 `mcp_selection_mode` 时模式切换为 `selected` |
+| `skills_selection_mode` | string | `all` / `selected` / `none`；`all` 和 `none` 清空选中的技能名称 |
+| `selected_skills` | string[] | 最多 50 个技能名称（不是 ID），整体替换；未同时传 `skills_selection_mode` 时模式切换为 `selected` |
 | `web_search_enabled` | bool | 是否启用联网搜索 |
 | `multi_turn_enabled` | bool | 是否启用多轮对话 |
 
-响应：200 `{"success":true,"data":{Agent}}`；selection mode 取值非法或名称为空时 400，Agent 不存在时 404。
+技能名称来自 `GET /api/v1/skills?sandbox_config_id=<agent.config.sandbox_config_id>`，只在 `smart-reasoning` 模式生效。PATCH 后模式为 `selected` 时，所有名称必须是该工作空间、该沙箱当前可用的技能；不可用或未知名称返回 400 并列出名称。未绑定沙箱时，通过 PATCH 将技能设为 `all` 或 `selected`（包括只传 `selected_skills`）返回 400，须先在智能体编辑器选择沙箱。
+
+响应：200 `{"success":true,"data":{Agent}}`；selection mode 取值非法、名称为空、技能列表超过 50 项或上述技能校验失败时 400，Agent 不存在时 404。
 
 ```bash
 curl -X PATCH $BASE/api/v1/agents/agent-1 -H "Authorization: Bearer $TOKEN" \
