@@ -328,8 +328,11 @@ type ManualKnowledgeMetadata struct {
 type ManualKnowledgePayload struct {
 	// Document title.
 	Title string `json:"title" extensions:"x-agent"`
-	// Markdown content. The assistant may send a full document; the API limit
-	// is 200000 runes, and x-agent-max-bytes covers that in UTF-8.
+	// Markdown content. The assistant may send a full document. The service
+	// caps it at MANUAL_CONTENT_MAX_LENGTH runes, 200000 by default, while the
+	// assistant tool path caps it at 800000 bytes here (the catalog validator
+	// rejects any larger x-agent-max-bytes), so raising the env past that only
+	// lifts the HTTP limit.
 	Content string `json:"content" extensions:"x-agent,x-agent-max-bytes=800000"`
 	// draft keeps the document out of search; publish indexes it.
 	Status        string                     `json:"status" enums:"draft,publish" extensions:"x-agent"`

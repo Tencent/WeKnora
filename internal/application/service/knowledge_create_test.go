@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -371,4 +372,86 @@ func newMultipartFileHeader(t *testing.T, filename string, content string) *mult
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	require.NoError(t, req.ParseMultipartForm(1024))
 	return req.MultipartForm.File["file"][0]
+}
+
+func TestManualContentLimitPublicContract(t *testing.T) {
+	// Both literals are operator-visible: the name typed into .env.example and
+	// the cap a deployment gets when it sets nothing. Pinned by value so a
+	// rename or a nudged default fails here instead of silently disabling the
+	// knob or changing behaviour for everyone who did not opt in.
+	require.Equal(t, "MANUAL_CONTENT_MAX_LENGTH", manualContentMaxLengthEnv)
+	require.Equal(t, 200000, manualContentMaxLengthDefault)
+}
+
+func TestManualContentMaxLengthUsesEnvOverride(t *testing.T) {
+	for _, tc := range []struct {
+		env  string
+		want int
+	}{
+		{"", manualContentMaxLengthDefault},
+		{"   ", manualContentMaxLengthDefault},
+		{"300000", 300000},
+		{"  450000  ", 450000},
+		{"1", 1},
+		{"0", manualContentMaxLengthDefault},
+		{"-1", manualContentMaxLengthDefault},
+		{"200000.5", manualContentMaxLengthDefault},
+		{"abc", manualContentMaxLengthDefault},
+	} {
+		t.Run("env="+tc.env, func(t *testing.T) {
+			t.Setenv(manualContentMaxLengthEnv, tc.env)
+			require.Equal(t, tc.want, manualContentMaxLength())
+		})
+	}
+}
+
+// Both manual entry points read the cap per call, so an operator raising it
+// unblocks clipped notes without waiting for a rebuilt default.
+func TestManualContentLimitHonoursTheConfiguredCap(t *testing.T) {
+	f := newDocumentWriteFixture(t)
+	content := strings.Repeat("abcdefghij", 4) // 40 runes
+
+	t.Setenv(manualContentMaxLengthEnv, "10")
+	for _, tc := range []struct {
+		name string
+		call func() error
+	}{
+		{"create", func() error {
+			_, err := f.svc.CreateKnowledgeFromManual(f.ctx, "kb",
+				&types.ManualKnowledgePayload{Content: content}, "web")
+			return err
+		}},
+		{"update", func() error {
+			_, err := f.svc.UpdateManualKnowledge(f.ctx, "doc",
+				&types.ManualKnowledgePayload{Content: content})
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.call()
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "内容长度超出限制（最多10个字符）")
+		})
+	}
+
+	// Same content under the built-in default is not a length rejection, which
+	// is what makes the assertions above about the env value and not about a
+	// path that always fails.
+	t.Setenv(manualContentMaxLengthEnv, "")
+	for _, call := range []func() error{
+		func() error {
+			_, err := f.svc.CreateKnowledgeFromManual(f.ctx, "kb",
+				&types.ManualKnowledgePayload{Content: content}, "web")
+			return err
+		},
+		func() error {
+			_, err := f.svc.UpdateManualKnowledge(f.ctx, "doc",
+				&types.ManualKnowledgePayload{Content: content})
+			return err
+		},
+	} {
+		err := call()
+		require.True(t, err == nil || !strings.Contains(err.Error(), "内容长度超出限制"),
+			"40 runes must clear the 200000 default, got %v", err)
+	}
 }

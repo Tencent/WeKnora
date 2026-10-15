@@ -750,8 +750,8 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 	if strings.TrimSpace(cleanContent) == "" {
 		return nil, werrors.NewValidationError("内容不能为空")
 	}
-	if len([]rune(cleanContent)) > manualContentMaxLength {
-		return nil, werrors.NewValidationError(fmt.Sprintf("内容长度超出限制（最多%d个字符）", manualContentMaxLength))
+	if len([]rune(cleanContent)) > manualContentMaxLength() {
+		return nil, werrors.NewValidationError(fmt.Sprintf("内容长度超出限制（最多%d个字符）", manualContentMaxLength()))
 	}
 
 	safeTitle, ok := secutils.ValidateInput(payload.Title)
@@ -1013,8 +1013,8 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 	if strings.TrimSpace(cleanContent) == "" {
 		return nil, werrors.NewValidationError("内容不能为空")
 	}
-	if len([]rune(cleanContent)) > manualContentMaxLength {
-		return nil, werrors.NewValidationError(fmt.Sprintf("内容长度超出限制（最多%d个字符）", manualContentMaxLength))
+	if len([]rune(cleanContent)) > manualContentMaxLength() {
+		return nil, werrors.NewValidationError(fmt.Sprintf("内容长度超出限制（最多%d个字符）", manualContentMaxLength()))
 	}
 
 	safeTitle, ok := secutils.ValidateInput(payload.Title)
