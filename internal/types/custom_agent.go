@@ -49,11 +49,12 @@ func GrantsProductDocs(agent *CustomAgent) bool {
 	return agent != nil && agent.IsBuiltin && agent.ID == BuiltinWeKnoraAssistantID
 }
 
-// UsesFallbackChatModel reports whether a built-in agent runs without its
-// own model_id. These agents are hidden from agent management, so a user
-// cannot configure one; the run resolves the model from its knowledge base
-// or the system KnowledgeQA default.
-func UsesFallbackChatModel(agent *CustomAgent) bool {
+// UsesWorkspaceModelFallback reports whether a built-in agent runs without
+// its own model_id and rerank_model_id. These agents are hidden from agent
+// management, so a user cannot configure them; the run resolves the chat
+// model from its knowledge base or the system KnowledgeQA default, and the
+// rerank model from the workspace.
+func UsesWorkspaceModelFallback(agent *CustomAgent) bool {
 	return agent != nil && agent.IsBuiltin &&
 		(agent.ID == BuiltinWikiFixerID || agent.ID == BuiltinWeKnoraAssistantID)
 }
