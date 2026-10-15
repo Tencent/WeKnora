@@ -64,6 +64,10 @@ func TestReadSheetRange_SplitsTokenAndReadsValues(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "t", "expire": 7200})
 			return
 		}
+		if strings.Contains(r.URL.Path, "/sheets/v3/") {
+			_, _ = w.Write([]byte(`{"code":0,"data":{"sheet":{"grid_properties":{"row_count":3,"column_count":2}}}}`))
+			return
+		}
 		gotPath = r.URL.Path
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
 			"valueRange": map[string]any{"values": [][]any{{"名称", "数量"}, {"苹果", 3}, {"梨", nil}}},
@@ -72,11 +76,11 @@ func TestReadSheetRange_SplitsTokenAndReadsValues(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, truncated, err := c.readSheetRange(context.Background(), "sht_abc_0")
+	rows, truncated, _, err := c.readSheetRange(context.Background(), "sht_abc_0", maxTableBytes)
 	if err != nil {
 		t.Fatalf("readSheetRange: %v", err)
 	}
-	if gotPath != "/open-apis/sheets/v2/spreadsheets/sht_abc/values/0" {
+	if gotPath != "/open-apis/sheets/v2/spreadsheets/sht_abc/values/0!A1:B3" {
 		t.Errorf("path = %q", gotPath)
 	}
 	if truncated {
@@ -93,7 +97,14 @@ func TestReadSheetRange_TruncatesLargeTable(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "t", "expire": 7200})
 			return
 		}
-		values := make([][]any, 600)
+		if strings.Contains(r.URL.Path, "/sheets/v3/") {
+			_, _ = w.Write([]byte(`{"code":0,"data":{"sheet":{"grid_properties":{"row_count":600,"column_count":1}}}}`))
+			return
+		}
+		if r.URL.Path != "/open-apis/sheets/v2/spreadsheets/sht_x/values/0!A1:A500" {
+			t.Errorf("unexpected range: %s", r.URL.Path)
+		}
+		values := make([][]any, maxTableRows)
 		for i := range values {
 			values[i] = []any{i}
 		}
@@ -103,7 +114,7 @@ func TestReadSheetRange_TruncatesLargeTable(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, truncated, err := c.readSheetRange(context.Background(), "sht_x_0")
+	rows, truncated, _, err := c.readSheetRange(context.Background(), "sht_x_0", maxTableBytes)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -226,7 +237,7 @@ func TestReadBitableRecords_DateColumnUsesFormatterAndTimezone(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client(), location: resolveLocation("")}
-	rows, _, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz")
+	rows, _, _, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz", maxTableBytes)
 	if err != nil {
 		t.Fatalf("readBitableRecords: %v", err)
 	}
@@ -270,7 +281,7 @@ func TestReadBitableRecords_SplitsTokenAndBuildsTable(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, truncated, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz")
+	rows, truncated, _, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz", maxTableBytes)
 	if err != nil {
 		t.Fatalf("readBitableRecords: %v", err)
 	}
@@ -324,7 +335,7 @@ func TestReadBitableRecords_PaginatesFieldsAtMax100(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, _, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz")
+	rows, _, _, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz", maxTableBytes)
 	if err != nil {
 		t.Fatalf("readBitableRecords: %v", err)
 	}
@@ -382,7 +393,7 @@ func TestReadBitableRecords_PaginatesAndTruncatesRecords(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, truncated, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz")
+	rows, truncated, _, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz", maxTableBytes)
 	if err != nil {
 		t.Fatalf("readBitableRecords: %v", err)
 	}
@@ -417,7 +428,7 @@ func TestReadBitableRecords_Exactly500NotTruncated(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, truncated, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz")
+	rows, truncated, _, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz", maxTableBytes)
 	if err != nil {
 		t.Fatalf("readBitableRecords: %v", err)
 	}
@@ -430,8 +441,8 @@ func TestReadBitableRecords_Exactly500NotTruncated(t *testing.T) {
 }
 
 // TestReadBitableRecords_EmptyRecordPageTerminates guards the pagination
-// zero-progress break: a malformed page (empty items but has_more=true and a
-// non-empty page_token) must terminate instead of looping until the task
+// zero-progress error: a malformed page (empty items but has_more=true and a
+// non-empty page_token) must preserve partial content and stop before the task
 // deadline. A short context deadline is a safety net so a regression fails fast
 // rather than hanging the suite.
 func TestReadBitableRecords_EmptyRecordPageTerminates(t *testing.T) {
@@ -456,15 +467,15 @@ func TestReadBitableRecords_EmptyRecordPageTerminates(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, _, err := c.readBitableRecords(ctx, "bascabc_tblxyz")
-	if err != nil {
-		t.Fatalf("empty-page pagination must terminate cleanly, got err: %v", err)
+	rows, truncated, _, err := c.readBitableRecords(ctx, "bascabc_tblxyz", maxTableBytes)
+	if err != nil || !truncated {
+		t.Fatalf("empty-page pagination must report truncation: truncated=%v err=%v", truncated, err)
 	}
 	if recordCalls != 1 {
 		t.Errorf("records endpoint called %d times, want 1 (loop must break on the empty page)", recordCalls)
 	}
-	if len(rows) != 1 { // header only
-		t.Errorf("rows = %d, want 1 (header only, no records)", len(rows))
+	if len(rows) != 1 || len(rows[0]) != 1 || rows[0][0] != "col" {
+		t.Errorf("header lost after empty record page: %v", rows)
 	}
 }
 
@@ -492,7 +503,7 @@ func TestReadBitableRecords_EmptyFieldsPageTerminates(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	if _, _, err := c.readBitableRecords(ctx, "bascabc_tblxyz"); err != nil {
+	if _, _, _, err := c.readBitableRecords(ctx, "bascabc_tblxyz", maxTableBytes); err != nil {
 		t.Fatalf("empty fields page must terminate cleanly, got err: %v", err)
 	}
 	if fieldCalls != 1 {
@@ -560,7 +571,7 @@ func TestReadBitableRecords_RejectsRepeatedFieldPageToken(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	_, _, err := c.readBitableRecords(ctx, "bascabc_tblxyz")
+	_, _, _, err := c.readBitableRecords(ctx, "bascabc_tblxyz", maxTableBytes)
 	if err == nil || !strings.Contains(err.Error(), "repeated page token") {
 		t.Fatalf("expected repeated-page-token error, got %v", err)
 	}
@@ -613,7 +624,7 @@ func TestReadBitableRecords_CapsFieldPages(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, _, err := c.readBitableRecords(ctx, "bascabc_tblxyz")
+	rows, _, _, err := c.readBitableRecords(ctx, "bascabc_tblxyz", maxTableBytes)
 	if err != nil {
 		t.Fatalf("capped pagination must stop cleanly, got err: %v", err)
 	}

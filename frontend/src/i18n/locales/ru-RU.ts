@@ -1177,6 +1177,7 @@ export default {
       seafile: 'Seafile'
     },
     logDetail: {
+      incompleteItems: 'Частично прочитанные документы',
       startTime: 'Время начала',
       endTime: 'Время окончания',
       failedItems: 'Документы с ошибкой',
@@ -1234,6 +1235,7 @@ export default {
       loadNotFoundHint: 'folder_token не существует или удалён. Проверьте токен, скопированный из URL папки Feishu Drive.',
     },
     syncError: {
+      content_incomplete: 'Документ прочитан не полностью. Доступное содержимое сохранено. Подробности указаны в документе.',
       dingtalk_document_failed: 'Не удалось прочитать документ DingTalk. Проверьте права доступа и повторите синхронизацию.',
       dingtalk_resource_failed: 'Ресурс DingTalk недоступен. Проверьте права доступа и выбранные ресурсы, затем повторите попытку.',
       deletion_lookup_failed: 'Не удалось найти элемент перед удалением; подробности в журнале сервера',
@@ -2215,6 +2217,12 @@ export default {
     }
   },
   preview: {
+    pagination: 'Страницы предпросмотра Markdown',
+    firstPage: 'Первая страница',
+    previousPage: 'Предыдущая страница',
+    nextPage: 'Следующая страница',
+    lastPage: 'Последняя страница',
+    pageStatus: '{current} / {total}',
     tab: 'Предпросмотр',
     loading: 'Загрузка предпросмотра документа...',
     loadFailed: 'Не удалось загрузить предпросмотр документа',

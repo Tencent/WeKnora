@@ -6090,6 +6090,12 @@ export default {
       }
     },
     preview: {
+      pagination: 'Markdown プレビューページ',
+      firstPage: '最初のページ',
+      previousPage: '前のページ',
+      nextPage: '次のページ',
+      lastPage: '最後のページ',
+      pageStatus: '{current} / {total} ページ',
       tab: 'プレビュー',
       loading: 'ドキュメントのプレビューを読み込み中...',
       loadFailed: 'ドキュメントのプレビューの読み込みに失敗しました',
@@ -7184,6 +7190,7 @@ export default {
       items: '件数'
     },
     logDetail: {
+      incompleteItems: '一部のみ読み取られたドキュメント',
       startTime: '開始',
       endTime: '終了',
       failedItems: '失敗したドキュメント',
@@ -7353,6 +7360,7 @@ export default {
     hoursAgo: '{n}時間前',
     daysAgo: '{n}日前',
     syncError: {
+      content_incomplete: 'ドキュメントを完全には読み取れませんでした。読み取れた内容は保持されています。詳細はドキュメント内の注記を確認してください。',
       dingtalk_document_failed: 'DingTalkドキュメントを読み取れません。アクセス権限を確認して同期を再試行してください。',
       dingtalk_resource_failed: 'DingTalkリソースを利用できません。アクセス権限と選択したリソースを確認して再試行してください。',
       deletion_lookup_failed: '削除前の項目の照会に失敗しました。サーバログを確認してください',

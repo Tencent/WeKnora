@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/textproto"
 	"reflect"
@@ -953,6 +954,14 @@ func (s *DataSourceService) applyFetchedItem(
 	}
 
 	isUpdate, err := s.ingestItem(ctx, ds, item, tagIDs)
+	var duplicate *types.DuplicateKnowledgeError
+	if err == nil || errors.As(err, &duplicate) {
+		if warning := item.Metadata["content_warning"]; warning != "" {
+			recordSyncError(result, types.SyncItemError{
+				Title: item.Title, Code: "content_incomplete", Message: warning,
+			})
+		}
+	}
 	if err != nil {
 		var dupErr *types.DuplicateKnowledgeError
 		switch {
@@ -1178,6 +1187,12 @@ func (s *DataSourceService) updateSyncRunResult(
 	errorMessage string,
 	wasPaused bool,
 ) {
+	if status == types.SyncLogStatusSuccess && slices.ContainsFunc(result.Errors, func(item types.SyncItemError) bool {
+		return item.Code == "content_incomplete"
+	}) {
+		status = types.SyncLogStatusPartial
+		errorMessage = "Some documents were only partially read; see sync details"
+	}
 	syncLog.ItemsTotal = result.Total
 	syncLog.ItemsCreated = result.Created
 	syncLog.ItemsUpdated = result.Updated
@@ -1507,21 +1522,24 @@ func bytesToFileHeader(data []byte, filename string) (*multipart.FileHeader, err
 	partHeader.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, filename))
 	partHeader.Set("Content-Type", "application/octet-stream")
 
-	part, err := writer.CreatePart(partHeader)
+	_, err := writer.CreatePart(partHeader)
 	if err != nil {
 		return nil, fmt.Errorf("create multipart part: %w", err)
 	}
 
-	if _, err := part.Write(data); err != nil {
-		return nil, fmt.Errorf("write data to part: %w", err)
-	}
+	headerBytes := buf.Len()
 
 	if err := writer.Close(); err != nil {
 		return nil, fmt.Errorf("close multipart writer: %w", err)
 	}
 
 	// Parse the multipart data to get a FileHeader
-	reader := multipart.NewReader(&buf, writer.Boundary())
+	// Stream the payload between the small multipart envelope pieces instead
+	// of duplicating the entire document into a multipart buffer.
+	envelope := buf.Bytes()
+	body := io.MultiReader(bytes.NewReader(envelope[:headerBytes]), bytes.NewReader(data),
+		bytes.NewReader(envelope[headerBytes:]))
+	reader := multipart.NewReader(body, writer.Boundary())
 	form, err := reader.ReadForm(int64(len(data)) + 1024)
 	if err != nil {
 		return nil, fmt.Errorf("read multipart form: %w", err)

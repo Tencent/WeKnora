@@ -12,7 +12,7 @@ import { useI18n } from 'vue-i18n';
 import { sanitizeHTML, sanitizeMarkdownHTML } from '@/utils/security';
 import { preparePptxPreview, isCompletePptxRender } from '@/utils/pptxPreview';
 import { findMarkdownSourceRange } from '@/utils/markdownSourceLocate';
-import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown';
+import { renderDocumentPreviewMarkdown, renderDocumentPreviewPlainText } from '@/utils/documentPreviewMarkdown';
 import { buildHtmlPreview } from '@/utils/htmlPreview';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { renderMermaidToSvg } from '@/utils/mermaidShared';
@@ -84,6 +84,9 @@ const blobUrl = ref('');
 const textContent = ref('');
 const highlightedCode = ref('');
 const markdownHtml = ref('');
+const markdownPageIndex = ref(0);
+const markdownPageTotal = ref(0);
+const markdownPageLoading = ref(false);
 const excelHtml = ref('');
 const mermaidSvg = ref('');
 const htmlViewMode = ref<'render' | 'source'>('render');
@@ -105,6 +108,58 @@ const docxContainer = ref<HTMLElement | null>(null);
 const imageNaturalWidth = ref(0);
 const imageNaturalHeight = ref(0);
 let loadedForId = '';
+let loadEpoch = 0;
+
+type MarkdownWorkerPage = { source: string; plain: boolean };
+type MarkdownWorkerReply = {
+  id: number;
+  index?: number;
+  total?: number;
+  page?: MarkdownWorkerPage | null;
+  error?: string;
+};
+let markdownWorker: Worker | null = null;
+let markdownRequestId = 0;
+let markdownNavigationId = 0;
+const markdownRequests = new Map<number, {
+  resolve: (reply: MarkdownWorkerReply) => void;
+  reject: (error: Error) => void;
+}>();
+
+function stopMarkdownWorker() {
+  markdownWorker?.terminate();
+  markdownWorker = null;
+  for (const request of markdownRequests.values()) request.reject(new Error('Markdown preview closed'));
+  markdownRequests.clear();
+  markdownNavigationId++;
+}
+
+function startMarkdownWorker() {
+  stopMarkdownWorker();
+  const worker = new Worker(new URL('../utils/markdownPreview.worker.ts', import.meta.url), { type: 'module' });
+  worker.onmessage = ({ data }: MessageEvent<MarkdownWorkerReply>) => {
+    const request = markdownRequests.get(data.id);
+    if (!request) return;
+    markdownRequests.delete(data.id);
+    if (data.error) request.reject(new Error(data.error));
+    else request.resolve(data);
+  };
+  worker.onerror = (event) => {
+    const error = new Error(event.message || 'Markdown preview worker failed');
+    for (const request of markdownRequests.values()) request.reject(error);
+    markdownRequests.clear();
+  };
+  markdownWorker = worker;
+}
+
+function requestMarkdownWorker(message: Record<string, unknown>): Promise<MarkdownWorkerReply> {
+  if (!markdownWorker) return Promise.reject(new Error('Markdown preview worker is not running'));
+  const id = ++markdownRequestId;
+  return new Promise((resolve, reject) => {
+    markdownRequests.set(id, { resolve, reject });
+    markdownWorker!.postMessage({ ...message, id });
+  });
+}
 
 const isFullscreen = ref(false);
 const previewRoot = ref<HTMLElement | null>(null);
@@ -327,16 +382,49 @@ async function renderText(blob: Blob, fileType: string) {
   highlightedCode.value = auto.value;
 }
 
-async function renderMarkdown(blob: Blob) {
-  const text = await blob.text();
+function applyMarkdownWorkerPage(reply: MarkdownWorkerReply) {
+  if (!reply.page || reply.index === undefined || reply.total === undefined) {
+    throw new Error('Markdown preview worker returned an incomplete page');
+  }
+  markdownPageIndex.value = reply.index;
+  markdownPageTotal.value = reply.total;
+  markdownHtml.value = reply.page.plain
+    ? renderDocumentPreviewPlainText(reply.page.source)
+    : renderDocumentPreviewMarkdown(reply.page.source);
+}
 
-  // 校验文本内容是否有效
-  if (!text || typeof text !== 'string') {
+async function renderMarkdown(blob: Blob, epoch: number) {
+  if (!blob.size) {
     markdownHtml.value = '<p style="color: var(--td-text-color-disabled); text-align: center; padding: 20px;">文档内容为空</p>';
     return;
   }
+  startMarkdownWorker();
+  const reply = await requestMarkdownWorker({ type: 'load', blob });
+  if (epoch !== loadEpoch || !props.active) return;
+  applyMarkdownWorkerPage(reply);
+}
 
-  markdownHtml.value = renderDocumentPreviewMarkdown(text);
+async function showMarkdownPage(index: number) {
+  if (!markdownWorker || markdownPageLoading.value) return;
+  const target = Math.max(0, Math.min(index, markdownPageTotal.value - 1));
+  if (target === markdownPageIndex.value) return;
+  const navigationId = ++markdownNavigationId;
+  markdownPageLoading.value = true;
+  clearLocateMarks();
+  try {
+    const reply = await requestMarkdownWorker({ type: 'page', index: target });
+    if (navigationId !== markdownNavigationId || !props.active) return;
+    applyMarkdownWorkerPage(reply);
+    await nextTick();
+    previewContent.value?.scrollTo({ top: 0, left: 0 });
+    focusPreviewContent();
+  } catch (err: any) {
+    if (navigationId === markdownNavigationId && props.active) {
+      error.value = err?.message || t('preview.loadFailed');
+    }
+  } finally {
+    if (navigationId === markdownNavigationId) markdownPageLoading.value = false;
+  }
 }
 
 function onImageLoad(e: Event) {
@@ -413,6 +501,7 @@ async function loadPreview() {
   if (loadedForId === sourceKey) return;
 
   cleanup();
+  const epoch = loadEpoch;
   loading.value = true;
   error.value = '';
   htmlViewMode.value = allowsHtmlScriptPreview() ? 'render' : 'source';
@@ -422,6 +511,7 @@ async function loadPreview() {
 
   try {
     const rawBlob = await fetchPreviewBlob();
+    if (epoch !== loadEpoch || !props.active) return;
     let kind = resolvePreviewKind(ft);
     if (kind === 'unsupported') {
       const sample = new Uint8Array(await rawBlob.slice(0, FILE_PREVIEW_SNIFF_BYTES).arrayBuffer());
@@ -439,8 +529,10 @@ async function loadPreview() {
     const blob = ensureBlobType(rawBlob, ft);
     loadedForId = sourceKey;
 
-    loading.value = false;
-    await nextTick();
+    if (kind !== 'markdown') {
+      loading.value = false;
+      await nextTick();
+    }
 
     previewExt = ft;
     switch (kind) {
@@ -485,7 +577,10 @@ async function loadPreview() {
         break;
       }
       case 'markdown': {
-        await renderMarkdown(blob);
+        await renderMarkdown(blob, epoch);
+        if (epoch !== loadEpoch || !props.active) return;
+        loading.value = false;
+        await nextTick();
         break;
       }
       case 'pptx': {
@@ -503,14 +598,17 @@ async function loadPreview() {
     // PPTX renders asynchronously and locates from its rendered event.
     if (kind !== 'pptx') scheduleLocate();
   } catch (err: any) {
+    if (epoch !== loadEpoch) return;
     console.error('Document preview failed:', err);
-    error.value = err?.message || t('preview.loadFailed');
+    if (epoch === loadEpoch && props.active) error.value = err?.message || t('preview.loadFailed');
   } finally {
-    loading.value = false;
+    if (epoch === loadEpoch) loading.value = false;
   }
 }
 
 function cleanup() {
+  loadEpoch++;
+  stopMarkdownWorker();
   if (blobUrl.value) {
     URL.revokeObjectURL(blobUrl.value);
     blobUrl.value = '';
@@ -518,6 +616,9 @@ function cleanup() {
   textContent.value = '';
   highlightedCode.value = '';
   markdownHtml.value = '';
+  markdownPageIndex.value = 0;
+  markdownPageTotal.value = 0;
+  markdownPageLoading.value = false;
   excelHtml.value = '';
   mermaidSvg.value = '';
   htmlViewMode.value = 'render';
@@ -536,6 +637,13 @@ function cleanup() {
     docxContainer.value.innerHTML = '';
   }
 }
+
+watch(() => props.active, (active) => {
+  if (!active) {
+    cleanup();
+    loading.value = false;
+  }
+});
 
 // ── Citation locating ──
 // Each preview kind reveals a SourceLocateRequest its own way: structural
@@ -778,6 +886,31 @@ function locateMarkdown(request: SourceLocateRequest): SourceLocateResult {
   return { found: true, precise: match.exact, ...(!match.exact ? { granularity: 'block' } : {}) };
 }
 
+async function locateMarkdownAcrossPages(request: SourceLocateRequest) {
+  const navigationId = ++markdownNavigationId;
+  const candidates = [request.sentence, request.scope, ...request.quotes, request.sourceMarkdown]
+    .filter((value): value is string => !!value?.trim())
+    .filter((value, index, all) => all.indexOf(value) === index);
+  try {
+    for (const quote of candidates) {
+      const reply = await requestMarkdownWorker({ type: 'find', quote });
+      if (navigationId !== markdownNavigationId || request.token !== props.locate?.token || !props.active) return;
+      if ((reply.index ?? -1) < 0 || !reply.page) continue;
+      applyMarkdownWorkerPage(reply);
+      await nextTick();
+      if (navigationId !== markdownNavigationId || request.token !== props.locate?.token || !props.active) return;
+      const result = locateMarkdown(request);
+      emit('located', result);
+      return;
+    }
+    emit('located', NOT_FOUND);
+  } catch (err) {
+    if (navigationId !== markdownNavigationId || !props.active) return;
+    console.warn('Locating the Markdown citation failed:', err);
+    emit('located', NOT_FOUND);
+  }
+}
+
 function locateImage(request: SourceLocateRequest): SourceLocateResult {
   const boxes = request.locators
     .filter((l) => l.type === 'pdf' && l.mapping === 'exact' && !l.partial && (l.page || 1) === 1 && l.bbox?.length === 4)
@@ -832,7 +965,9 @@ function applyLocate() {
       case 'epub': result = locateEpub(request); break;
       case 'text':
       case 'html': result = locateText(request); break;
-      case 'markdown': result = locateMarkdown(request); break;
+      case 'markdown':
+        if (markdownPageTotal.value <= 1) { result = locateMarkdown(request); break; }
+        void locateMarkdownAcrossPages(request); return;
       case 'image': result = locateImage(request); break;
       case 'audio': result = locateAudio(request); break;
     }
@@ -969,8 +1104,40 @@ onUnmounted(() => {
     </div>
 
     <!-- Markdown -->
-    <div v-else-if="previewType === 'markdown' && markdownHtml" ref="previewContent" tabindex="0" :aria-label="fileName" class="preview-markdown">
-      <div class="markdown-body" v-html="markdownHtml" />
+    <div v-else-if="previewType === 'markdown' && markdownHtml" class="preview-markdown-shell">
+      <div v-if="markdownPageTotal > 1" class="markdown-pagination" :aria-label="$t('preview.pagination')">
+        <t-button theme="default" variant="text" size="small" shape="square"
+          :disabled="markdownPageLoading || markdownPageIndex === 0"
+          :title="$t('preview.firstPage')" :aria-label="$t('preview.firstPage')"
+          @click="showMarkdownPage(0)">
+          <template #icon><t-icon name="chevron-left-double" /></template>
+        </t-button>
+        <t-button theme="default" variant="text" size="small" shape="square"
+          :disabled="markdownPageLoading || markdownPageIndex === 0"
+          :title="$t('preview.previousPage')" :aria-label="$t('preview.previousPage')"
+          @click="showMarkdownPage(markdownPageIndex - 1)">
+          <template #icon><t-icon name="chevron-left" /></template>
+        </t-button>
+        <span class="markdown-page-status" aria-live="polite">
+          {{ $t('preview.pageStatus', { current: markdownPageIndex + 1, total: markdownPageTotal }) }}
+        </span>
+        <t-loading v-if="markdownPageLoading" size="small" />
+        <t-button theme="default" variant="text" size="small" shape="square"
+          :disabled="markdownPageLoading || markdownPageIndex >= markdownPageTotal - 1"
+          :title="$t('preview.nextPage')" :aria-label="$t('preview.nextPage')"
+          @click="showMarkdownPage(markdownPageIndex + 1)">
+          <template #icon><t-icon name="chevron-right" /></template>
+        </t-button>
+        <t-button theme="default" variant="text" size="small" shape="square"
+          :disabled="markdownPageLoading || markdownPageIndex >= markdownPageTotal - 1"
+          :title="$t('preview.lastPage')" :aria-label="$t('preview.lastPage')"
+          @click="showMarkdownPage(markdownPageTotal - 1)">
+          <template #icon><t-icon name="chevron-right-double" /></template>
+        </t-button>
+      </div>
+      <div :key="markdownPageIndex" ref="previewContent" tabindex="0" :aria-label="fileName" class="preview-markdown">
+        <div class="markdown-body" v-html="markdownHtml" />
+      </div>
     </div>
 
     <!-- Text / Code -->
@@ -1058,6 +1225,7 @@ onUnmounted(() => {
     .preview-docx,
     .preview-image,
     .preview-excel,
+    .preview-markdown-shell,
     .preview-markdown,
     .preview-text,
     .preview-html,
@@ -1347,9 +1515,43 @@ onUnmounted(() => {
 }
 
 // ── Markdown ──
+.preview-markdown-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.markdown-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 4px 8px;
+  border: 1px solid @border-color;
+  border-bottom: 0;
+  border-radius: @border-radius @border-radius 0 0;
+  background: @bg-white;
+}
+
+.markdown-page-status {
+  min-width: 88px;
+  color: @text-secondary;
+  font-size: var(--app-text-sm);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 .preview-markdown {
   .preview-container();
+  flex: 1;
+  min-height: 0;
   padding: 20px 24px;
+}
+
+.markdown-pagination + .preview-markdown {
+  border-radius: 0 0 @border-radius @border-radius;
 }
 
 // ── DOCX ──

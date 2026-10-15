@@ -292,8 +292,12 @@ func TestCleanImageScratchCommandShape(t *testing.T) {
 
 	// And it must parse: the command is one opaque string to the sandbox, so a
 	// quoting mistake would only surface as a runtime failure there.
-	require.NoError(t, exec.Command("sh", "-n", "-c", cmd).Run(),
-		"the emitted command must parse under /bin/sh")
+	// Feed the script on stdin: dash can execute -c even when -n is set.
+	check := exec.Command("sh", "-n")
+	check.Stdin = strings.NewReader(cmd)
+	output, err := check.CombinedOutput()
+	require.NoError(t, err, "the emitted command must parse under /bin/sh: %s", output)
+	require.Empty(t, output, "syntax checking must not execute the cleanup")
 }
 
 // The workspace half of the cleanup keeps its old failure semantics across the

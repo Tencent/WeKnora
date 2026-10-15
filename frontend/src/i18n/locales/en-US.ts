@@ -6090,6 +6090,12 @@ export default {
       }
     },
     preview: {
+      pagination: 'Markdown preview pages',
+      firstPage: 'First page',
+      previousPage: 'Previous page',
+      nextPage: 'Next page',
+      lastPage: 'Last page',
+      pageStatus: '{current} / {total}',
       tab: 'Preview',
       loading: 'Loading document preview...',
       loadFailed: 'Failed to load document preview',
@@ -7184,6 +7190,7 @@ export default {
       items: 'Items'
     },
     logDetail: {
+      incompleteItems: 'Partially read documents',
       startTime: 'Started',
       endTime: 'Finished',
       failedItems: 'Failed documents',
@@ -7353,6 +7360,7 @@ export default {
     hoursAgo: '{n}h ago',
     daysAgo: '{n}d ago',
     syncError: {
+      content_incomplete: 'Document content was only partially read; readable content was retained. See the notes in the document.',
       dingtalk_document_failed: 'DingTalk document could not be read; check access and retry the sync.',
       dingtalk_resource_failed: 'DingTalk resource is unavailable; check access and the saved selection, then retry.',
       deletion_lookup_failed: 'Failed to look up the item before deletion; see server logs',

@@ -1177,6 +1177,7 @@ export default {
       seafile: 'Seafile'
     },
     logDetail: {
+      incompleteItems: '일부만 읽은 문서',
       startTime: '시작 시간',
       endTime: '종료 시간',
       failedItems: '실패한 문서',
@@ -1234,6 +1235,7 @@ export default {
       loadNotFoundHint: "folder_token이 존재하지 않거나 삭제되었습니다. 페이슈 드라이브 폴더 URL에서 복사한 토큰이 맞는지 확인하세요.",
     },
     syncError: {
+      content_incomplete: '문서를 일부만 읽었습니다. 읽은 내용은 유지됩니다. 자세한 내용은 문서의 안내를 확인하세요.',
       dingtalk_document_failed: 'DingTalk 문서를 읽을 수 없습니다. 접근 권한을 확인하고 동기화를 다시 시도하세요.',
       dingtalk_resource_failed: 'DingTalk 리소스를 사용할 수 없습니다. 접근 권한과 선택한 리소스를 확인한 후 다시 시도하세요.',
       deletion_lookup_failed: '삭제 전 항목 조회에 실패했습니다. 서버 로그를 확인하세요',
@@ -2215,6 +2217,12 @@ export default {
     }
   },
   preview: {
+    pagination: 'Markdown 미리보기 페이지',
+    firstPage: '첫 페이지',
+    previousPage: '이전 페이지',
+    nextPage: '다음 페이지',
+    lastPage: '마지막 페이지',
+    pageStatus: '{current} / {total} 페이지',
     tab: '미리보기',
     loading: '문서 미리보기 로딩 중...',
     loadFailed: '문서 미리보기 로드 실패',

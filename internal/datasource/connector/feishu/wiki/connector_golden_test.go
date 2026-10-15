@@ -92,10 +92,16 @@ func fakeFeishuGolden(nodes []core.WikiNode, docToken string, blocks []core.Docx
 	// sheets-v2 values: sht_spread_0 → spreadsheet "sht_spread", sheet "0".
 	// Raw JSON keeps the fake honest to the real wire shape without wrestling
 	// nested anonymous-struct literals.
-	mux.HandleFunc("/open-apis/sheets/v2/spreadsheets/sht_spread/values/0", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"code":0,"msg":"","data":{"valueRange":{"values":[["名称","数量"],["苹果",3]]}}}`))
-	})
+	mux.HandleFunc("/open-apis/sheets/v3/spreadsheets/sht_spread/sheets/0",
+		func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"code":0,"data":{"sheet":{"grid_properties":{"row_count":2,"column_count":2}}}}`))
+		})
+	mux.HandleFunc("/open-apis/sheets/v2/spreadsheets/sht_spread/values/0!A1:B2",
+		func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"code":0,"msg":"","data":{"valueRange":{"values":[["名称","数量"],["苹果",3]]}}}`))
+		})
 
 	// bitable-v1 fields + records: bascApp_tblMain → app "bascApp", table "tblMain".
 	mux.HandleFunc("/open-apis/bitable/v1/apps/bascApp/tables/tblMain/fields", func(w http.ResponseWriter, r *http.Request) {
