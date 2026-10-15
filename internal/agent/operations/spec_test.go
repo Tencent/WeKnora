@@ -396,3 +396,26 @@ func TestBuiltinListAndDocumentLimits(t *testing.T) {
 	}
 	assert.Equal(t, Field{From: "content", As: "content", MaxRunes: 8000}, contentField)
 }
+
+func TestTypeParamCombinesListAndStringBounds(t *testing.T) {
+	doc := &specDocument{}
+	shape := &specSchema{Type: "array", Items: &specSchema{Type: "string"}}
+	var p Param
+	require.NoError(t, doc.typeParam(&p, shape, "2", "5"))
+	op := Operation{Method: http.MethodPost, Params: []Param{p}}
+	op.Params[0].Name = "titles"
+	op.Params[0].In = InBody
+	_, err := op.Build(map[string]json.RawMessage{"titles": raw([]string{"one", "two"})})
+	require.NoError(t, err)
+	_, err = op.Build(map[string]json.RawMessage{"titles": raw([]string{"one", "two", "three"})})
+	require.Error(t, err, "the item count remains bounded")
+	_, err = op.Build(map[string]json.RawMessage{"titles": raw([]string{"too long"})})
+	require.Error(t, err, "each string remains bounded")
+
+	for _, kind := range []string{"integer", "boolean"} {
+		assert.Error(t, doc.typeParam(&Param{}, &specSchema{Type: kind}, "", "5"))
+	}
+	for _, kind := range []string{"string", "boolean"} {
+		assert.Error(t, doc.typeParam(&Param{}, &specSchema{Type: kind}, "2", ""))
+	}
+}

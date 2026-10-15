@@ -561,8 +561,12 @@ func mutationDetail(
 	if s, ok := rawString(params, "content"); ok && s != "" {
 		lines = append(lines, fmt.Sprintf("Content (%d characters): %s", len([]rune(s)), excerpt(s)))
 	}
-	if ids, ok := rawStringList(params, "knowledge_ids"); ok && len(ids) > 0 {
-		lines = append(lines, "Documents: "+documentTitles(ctx, t, ids, identity))
+	// Item targets already resolve every document and place its title in the
+	// trailing approval list. Do not fetch or append those titles again.
+	if op.Target == nil || op.Target.Items == nil {
+		if ids, ok := rawStringList(params, "knowledge_ids"); ok && len(ids) > 0 {
+			lines = append(lines, "Documents: "+documentTitles(ctx, t, ids, identity))
+		}
 	}
 	return strings.Join(lines, "\n")
 }

@@ -101,8 +101,10 @@ func TestNewCatalogChecksTargets(t *testing.T) {
 func TestNewCatalogChecksItemTargets(t *testing.T) {
 	kb := Param{Name: "knowledge_base_id", In: InPath, Key: "id", Type: TypeString, Required: true, Description: "d"}
 	doc := Param{Name: "knowledge_id", In: InPath, Key: "id", Type: TypeString, Required: true, Description: "d"}
-	ids := Param{Name: "knowledge_ids", In: InBody, Key: "ids", Type: TypeStringList, Required: true,
-		Description: "d", MaxItems: MaxApprovalItems}
+	ids := Param{
+		Name: "knowledge_ids", In: InBody, Key: "ids", Type: TypeStringList, Required: true,
+		Description: "d", MaxItems: MaxApprovalItems,
+	}
 	getKB := readOp("knowledge_base.get", "/api/v1/knowledge-bases/:id", kb)
 	getDoc := readOp("knowledge.get", "/api/v1/knowledge/:id", doc)
 	batch := func(mut func(*Operation)) Operation {
