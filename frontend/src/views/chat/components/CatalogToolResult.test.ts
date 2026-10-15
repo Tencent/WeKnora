@@ -3,7 +3,7 @@ import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { createServer, type ViteDevServer } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import { createSSRApp, h, type Component } from 'vue'
+import { createSSRApp, defineComponent, h, type Component } from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import { createI18n } from 'vue-i18n'
 import en from '../../../i18n/locales/en-US'
@@ -43,7 +43,7 @@ async function render(props: Record<string, unknown>) {
   const app = createSSRApp({ render: () => h(Renderer, props) })
   app.use(createI18n({ legacy: false, locale: 'en-US', messages: { 'en-US': en } }))
   app.component('t-icon', { render: () => h('span') })
-  app.component('t-button', { setup(_props, { slots }) { return () => h('button', slots.default?.()) } })
+  app.component('t-button', defineComponent({ setup(_props, { slots }) { return () => h('button', slots.default?.()) } }))
   return renderToString(app)
 }
 
