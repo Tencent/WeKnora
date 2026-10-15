@@ -96,8 +96,8 @@
             </div>
             <!-- 我创建的：当前 agent 是本空间 + 非内置 + 我亲手创建，且前一张
                  要么不存在、要么不是本空间、要么是内置（builtin → mine 过渡）、
-                 要么是同事创建。与 KB 列表对齐。 -->
-            <div v-if="agent.isMine
+                 要么是同事创建。与 KB 列表对齐，Lite 隐藏该分组标题。 -->
+            <div v-if="!authStore.isLiteMode && agent.isMine
               && !agent.is_builtin
               && isMyAgent(agent)
               && (index === 0
@@ -312,8 +312,8 @@
               <t-icon class="agent-section-toggle"
                 :name="isAgentSectionCollapsed('builtin') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
-            <!-- 我创建的：第一张非内置且我亲手创建的卡片前打标题 -->
-            <div v-if="!agent.is_builtin
+            <!-- 我创建的：非 Lite 在第一张非内置且我亲手创建的卡片前打标题 -->
+            <div v-if="!authStore.isLiteMode && !agent.is_builtin
               && isMyAgent(agent)
               && (index === 0
                 || sortedMineAgents[index - 1].is_builtin
@@ -1358,7 +1358,11 @@ const tenantSectionIconName = computed(() =>
 // 思路——空 Set = 全展开，避免新增分段还得维护默认值。
 type AgentSectionKey = 'builtin' | 'mine' | 'tenantOthers' | 'sharedByMe' | 'sharedEditable' | 'sharedReadonly'
 const collapsedAgentSections = ref<Set<AgentSectionKey>>(new Set())
-const isAgentSectionCollapsed = (key: AgentSectionKey) => collapsedAgentSections.value.has(key)
+const isAgentSectionCollapsed = (key: AgentSectionKey) => {
+  // Lite 隐藏了「我创建的」折叠入口，对应卡片始终展开。
+  if (authStore.isLiteMode && key === 'mine') return false
+  return collapsedAgentSections.value.has(key)
+}
 const toggleAgentSection = (key: AgentSectionKey) => {
   const next = new Set(collapsedAgentSections.value)
   if (next.has(key)) next.delete(key)
