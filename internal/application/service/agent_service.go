@@ -227,19 +227,16 @@ func (s *agentService) CreateAgentEngine(
 			"enable the browser integration or update the input-bar selection")
 	}
 
-	kbInfos, selectedDocs := s.resolveKBAndDocInfos(ctx, config)
-	pageContext := s.resolvePageContextInfo(ctx, config.PageContext, config.SearchTargets, kbInfos)
-
 	// 2. Build tool registry
 	toolRegistry := tools.NewToolRegistry()
 	if config.MaxToolOutputChars > 0 {
 		toolRegistry.SetMaxToolOutputSize(config.MaxToolOutputChars)
 	}
-	if err := s.registerTools(ctx, toolRegistry, config, rerankModel, chatModel, sessionID, pageContext); err != nil {
+	if err := s.registerTools(ctx, toolRegistry, config, rerankModel, chatModel, sessionID); err != nil {
 		return nil, fmt.Errorf("failed to register tools: %w", err)
 	}
 	s.registerMCPTools(ctx, toolRegistry, config)
-	s.registerOperationTools(ctx, toolRegistry, config, pageContext)
+	s.registerOperationTools(ctx, toolRegistry, config)
 	registerProductDocTools(ctx, toolRegistry, config)
 
 	// Register the shell first: file discovery needs a separate tool only
@@ -253,13 +250,16 @@ func (s *agentService) CreateAgentEngine(
 	// tool definitions are published after describe, before the next model request.
 	toolRegistry.PrepareMCPTools(ctx)
 
-	// 3. Resolve system prompt template
+	// 3. Resolve knowledge base and selected document metadata
+	kbInfos, selectedDocs := s.resolveKBAndDocInfos(ctx, config)
+
+	// 4. Resolve system prompt template
 	systemPromptTemplate := ""
 	if config.UseCustomSystemPrompt || config.SystemPrompt != "" {
 		systemPromptTemplate = config.ResolveSystemPrompt(config.WebSearchEnabled)
 	}
 
-	// 4. Create engine
+	// 5. Create engine
 	engine := agent.NewAgentEngine(
 		config, chatModel, toolRegistry, eventBus,
 		kbInfos, selectedDocs, sessionID,
@@ -273,7 +273,7 @@ func (s *agentService) CreateAgentEngine(
 		s.resolvePinnedSkillInfos(config),
 	)
 	engine.SetQuestionOrigin(s.resolveQuestionOriginInfo(ctx, config.QuestionOrigin, config.SearchTargets, kbInfos))
-	engine.SetPageContext(pageContext)
+	engine.SetPageContext(s.resolvePageContextInfo(ctx, config.PageContext, config.SearchTargets, kbInfos))
 	engine.SetAssistantName(config.AssistantName)
 
 	// Non-vision chat models use the configured VLM to describe tool images.
@@ -463,7 +463,6 @@ func (s *agentService) registerOperationTools(
 	ctx context.Context,
 	toolRegistry *tools.ToolRegistry,
 	config *types.AgentConfig,
-	pageContext *agent.PageContextInfo,
 ) {
 	if config == nil || config.OperationsAgentID == "" || config.SharedAgentReadOnly || s.operationDispatcher == nil {
 		return
@@ -490,7 +489,6 @@ func (s *agentService) registerOperationTools(
 		Gate:       gate,
 		Identity:   identity,
 		Access:     operationAccess,
-		Scope:      assistantOperationScope(config.AssistantScope, pageContext),
 	}))
 }
 
@@ -1090,9 +1088,7 @@ func (s *agentService) registerTools(
 	rerankModel rerank.Reranker,
 	chatModel chat.Chat,
 	sessionID string,
-	pageContext *agent.PageContextInfo,
 ) error {
-	config, scope := assistantToolConfig(config, pageContext)
 	// Source of truth policy:
 	//   - `config.AllowedTools` is the explicit, user-editable whitelist —
 	//     populated by the agent-type preset on create and freely editable
@@ -1410,7 +1406,7 @@ func (s *agentService) registerTools(
 			if risk, writes := assistantWriteToolRisk[toolName]; writes && config.OperationsAgentID != "" {
 				gate, _ := s.toolApprovalGate.(approval.BuiltinApproval)
 				toolToRegister = tools.NewConfirmedTool(toolToRegister, risk,
-					operations.Access{Level: config.AssistantAccess}, gate).WithScope(scope, s.wikiPageService)
+					operations.Access{Level: config.AssistantAccess}, gate)
 			}
 			registry.RegisterTool(toolToRegister)
 		}
@@ -1458,11 +1454,6 @@ func withoutWikiWriteTools(allowed []string) []string {
 func (s *agentService) ValidateConfig(config *types.AgentConfig) error {
 	if config == nil {
 		return fmt.Errorf("config cannot be nil")
-	}
-
-	config.AssistantScope = config.AssistantScope.WithDefault()
-	if !config.AssistantScope.Valid() {
-		return fmt.Errorf("invalid assistant scope")
 	}
 
 	if config.MaxIterations < 0 {

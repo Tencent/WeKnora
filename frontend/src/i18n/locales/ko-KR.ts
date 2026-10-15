@@ -2084,15 +2084,6 @@ export default {
         }
       }
     },
-    scope: {
-      title: '작업 범위',
-      description: '기존 권한 내에서 어시스턴트가 작업할 수 있는 리소스를 제한합니다.',
-      page: '현재 페이지',
-      knowledge_base: '현재 지식 베이스',
-      workspace: '전체 워크스페이스',
-      agentNoKB: '에이전트 페이지에는 소속 지식 베이스가 없습니다',
-      noContext: '페이지가 첨부되지 않으면 워크스페이스 전체 조회만 가능합니다.',
-    },
     context: {
       currentPage: '현재 페이지',
       detach: '현재 페이지 포함하지 않기',

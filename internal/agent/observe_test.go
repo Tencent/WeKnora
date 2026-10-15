@@ -678,17 +678,3 @@ func TestWriteAgentPageContext(t *testing.T) {
 		})
 	}
 }
-
-func TestRuntimeContextAssistantScope(t *testing.T) {
-	engine := &AgentEngine{
-		config: &types.AgentConfig{
-			OperationsAgentID: types.BuiltinWeKnoraAssistantID,
-			AssistantScope:    types.AssistantScopePage,
-		}, modelContext: modelcontext.NewRegistry(true),
-		pageContext: &PageContextInfo{Agent: &PageContextAgent{ID: "agent-raw", Name: "Agent"}},
-	}
-	content := engine.RenderUserTurnContent("s", "question")
-	assert.Contains(t, content, `<assistant_scope level="page">`)
-	assert.Contains(t, content, "user can widen the scope")
-	assert.Contains(t, content, `<agent id="agent-raw" name="Agent" />`)
-}

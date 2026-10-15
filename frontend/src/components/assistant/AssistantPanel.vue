@@ -67,9 +67,8 @@
           :agent-id="BUILTIN_WEKNORA_ASSISTANT_ID" :embedded-mode="true" :initial-query="initialQuery"
           :host-scope="hostScope" :model-id="assistant.modelId" :default-model-id="defaultModelId"
           @update:model-id="assistant.setModel">
-          <template #composer-chips>
+          <template v-if="assistant.pageContext" #composer-chips>
             <AssistantContextChip />
-            <AssistantScopePicker />
           </template>
           <template #composer-controls>
             <AssistantAccessPicker />
@@ -101,9 +100,8 @@
             <InputField :embedded-mode="true" compact :auto-focus="assistant.visible" :model-id="assistant.modelId"
               :default-model-id="defaultModelId" @update:model-id="assistant.setModel"
               @send-msg="(query) => startConversation(query)">
-              <template #chips>
+              <template v-if="assistant.pageContext" #chips>
                 <AssistantContextChip />
-                <AssistantScopePicker />
               </template>
               <template #controls>
                 <AssistantAccessPicker />
@@ -125,7 +123,6 @@ import InputField from '@/components/Input-field.vue'
 import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
 import AssistantContextChip from './AssistantContextChip.vue'
 import AssistantAccessPicker from './AssistantAccessPicker.vue'
-import AssistantScopePicker from './AssistantScopePicker.vue'
 import { createSessions, getSessionsList, getSession, type SessionSummary } from '@/api/chat'
 import { classifyDateBucket } from '@/components/sessionGrouping'
 import { BUILTIN_WEKNORA_ASSISTANT_ID } from '@/api/agent'
@@ -221,13 +218,11 @@ const hostScope = () => {
   const focus = initialMessage.value?.sessionId === assistant.sessionId ? initialMessage.value.focus : undefined
   initialMessage.value = null
   const assistantAccess = assistant.effectiveAccessLevel
-  const assistantScope = assistant.scope
-  if (!context) return { knowledgeBaseIds: [], pageContext: null, assistantAccess, assistantScope }
+  if (!context) return { knowledgeBaseIds: [], pageContext: null, assistantAccess }
   return {
     knowledgeBaseIds: context.knowledgeBaseId ? [context.knowledgeBaseId] : [],
     pageContext: toPageContextPayload(focus ? { ...context, ...focus } : context),
     assistantAccess,
-    assistantScope,
   }
 }
 

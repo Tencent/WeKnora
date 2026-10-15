@@ -855,14 +855,6 @@ func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
 	e.registerRuntimeReferences()
 	runtimeCtx := buildRuntimeContextBlock(
 		sessionID, e.knowledgeBasesInfo, e.selectedDocs, e.questionOrigin, e.pageContext, e.assistantName)
-	if e.config != nil && e.config.OperationsAgentID != "" {
-		scope := e.config.AssistantScope.WithDefault()
-		guidance := fmt.Sprintf("  <assistant_scope level=\"%s\">"+
-			"Management operations are limited to this scope and the verified page context. "+
-			"Honor scope refusals; the user can widen the scope in the assistant panel.</assistant_scope>\n",
-			escapeXMLAttr(string(scope)))
-		runtimeCtx = strings.Replace(runtimeCtx, "</runtime_context>", guidance+"</runtime_context>", 1)
-	}
 	runtimeCtx = e.modelContext.EncodeKnownIssues(e.modelContext.CompactKnownText(runtimeCtx))
 	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
 	return composeUserTurnContent(runtimeCtx, mustUse, query)

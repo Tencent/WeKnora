@@ -369,7 +369,6 @@ func resumableAgentRequest(ctx context.Context, req *types.QARequest) types.Resu
 		QuestionOrigin:      req.QuestionOrigin,
 		PageContext:         req.PageContext,
 		AssistantAccess:     req.AssistantAccess,
-		AssistantScope:      req.AssistantScope.WithDefault(),
 		UserMessageID:       req.UserMessageID,
 		Language:            types.LanguageFromContextOrDefault(ctx),
 	}
@@ -526,7 +525,6 @@ func (s *sessionService) buildAgentConfig(
 		agentConfig.WritableKBIDs = kbWritableIDs(ctx, s.kbShareService, searchTargets, roleEnforced)
 		if types.GrantsOperationCatalog(req.CustomAgent) {
 			agentConfig.OperationsAgentID = req.CustomAgent.ID
-			agentConfig.AssistantScope = req.AssistantScope.WithDefault()
 			agentConfig.AssistantAccess = tenantInfo.AssistantConfig.EffectiveAccessLevel(req.AssistantAccess)
 			if cfg := tenantInfo.AssistantConfig; cfg != nil {
 				agentConfig.AssistantName = strings.TrimSpace(cfg.DisplayName)

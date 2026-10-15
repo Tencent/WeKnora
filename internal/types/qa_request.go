@@ -100,7 +100,6 @@ type QARequest struct {
 	// AssistantAccess is the access level the user picked for the WeKnora
 	// assistant; the workspace ceiling still caps it. Ignored by other agents.
 	AssistantAccess AssistantAccessLevel
-	AssistantScope  AssistantScope
 	// SteerSink, when set, enables mid-run message injection for this run:
 	// the engine drains user-appended messages at every round boundary and
 	// persists accepted ones through this sink. A structural interface so

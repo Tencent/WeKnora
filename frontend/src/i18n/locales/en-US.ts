@@ -6142,15 +6142,6 @@ export default {
         }
       }
     },
-    scope: {
-      title: 'Scope',
-      description: 'Limit the resources the assistant can act on, within your existing permissions.',
-      page: 'Current page',
-      knowledge_base: 'Current knowledge base',
-      workspace: 'Entire workspace',
-      agentNoKB: 'Agent pages have no containing knowledge base',
-      noContext: 'Without an attached page, only workspace-wide lookups are available.',
-    },
     context: {
       currentPage: 'Current page',
       detach: 'Don\'t include the current page',

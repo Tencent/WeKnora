@@ -53,9 +53,7 @@ async function fixture() {
       },
     },
   })
-  const saved = new Map<string, string>()
-  const storage = { getItem: (key: string) => saved.get(key) ?? null,
-    setItem: (key: string, value: string) => { saved.set(key, value) }, removeItem() {} }
+  const storage = { getItem: () => null, setItem() {}, removeItem() {} }
   const stores = evaluate(storeScript, {
     vue, pinia, './auth': { useAuthStore: () => auth }, '@/api/assistant': api,
   }, { localStorage: storage, sessionStorage: storage })
@@ -72,7 +70,6 @@ async function fixture() {
     '@/stores/auth': { useAuthStore: () => auth },
     '@/stores/assistant': stores,
     '@/api/assistant': api,
-    '@/components/assistant/AssistantScopePicker.vue': {},
   }).default
   const scope = vue.effectScope()
   const state = scope.run(() => component.setup({}, { expose() {} })) as {
@@ -82,7 +79,7 @@ async function fixture() {
   mounted()
   await flush()
   return {
-    auth, assistant, state, writes, notifications, newConfig, saved,
+    auth, assistant, state, writes, notifications, newConfig,
     resolveSave: (config: AssistantConfig) => resolveSave({ data: config }),
     rejectSave: () => rejectSave(new Error('old workspace failed')),
     close: () => { scope.stop(); pinia.disposePinia(root) },
@@ -131,21 +128,5 @@ test('a save in the current workspace updates the store and draft', async () => 
     assert.equal(f.assistant.displayName, 'A edited')
     assert.equal(f.state.draft.display_name, 'A edited')
     assert.deepEqual(f.notifications, ['success'])
-  } finally { f.close() }
-})
-
-test('personal scope changes persist without writing workspace settings', async () => {
-  const f = await fixture()
-  try {
-    assert.match(source, /<AssistantScopePicker \/>/)
-    f.assistant.setScope('knowledge_base')
-    assert.equal(f.saved.get('weknora:assistant-scope:user-a:1'), 'knowledge_base')
-    assert.equal(f.writes.length, 0)
-    f.auth.effectiveTenantId = 2
-    await flush()
-    assert.equal(f.assistant.scope, 'workspace')
-    f.auth.effectiveTenantId = 1
-    await flush()
-    assert.equal(f.assistant.scope, 'knowledge_base')
   } finally { f.close() }
 })

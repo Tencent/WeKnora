@@ -23108,19 +23108,6 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_WeKnora_internal_types.AssistantScope": {
-            "type": "string",
-            "enum": [
-                "page",
-                "knowledge_base",
-                "workspace"
-            ],
-            "x-enum-varnames": [
-                "AssistantScopePage",
-                "AssistantScopeKnowledgeBase",
-                "AssistantScopeWorkspace"
-            ]
-        },
         "github_com_Tencent_WeKnora_internal_types.AttrSpec": {
             "type": "object",
             "properties": {
@@ -36933,14 +36920,6 @@ const docTemplate = `{
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel"
-                        }
-                    ]
-                },
-                "assistant_scope": {
-                    "default": "workspace",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantScope"
                         }
                     ]
                 },

@@ -2086,15 +2086,6 @@ export default {
         }
       }
     },
-    scope: {
-      title: '操作範圍',
-      description: '限制助手可以操作的資源；不會擴大你現有的權限。',
-      page: '目前頁面',
-      knowledge_base: '目前知識庫',
-      workspace: '整個空間',
-      agentNoKB: '智慧代理頁面沒有所屬知識庫',
-      noContext: '未附加頁面時，僅可進行空間層級查詢。',
-    },
     context: {
       currentPage: '目前頁面',
       detach: '不附帶目前頁面',

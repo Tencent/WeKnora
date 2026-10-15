@@ -23,16 +23,6 @@ type MentionedItem struct {
 	KBName string `json:"kb_name"` // Display name for parent KB
 }
 
-// AssistantScope limits assistant operations to the verified page context.
-type AssistantScope string
-
-// Assistant scopes are an allowlist; omitted requests use workspace.
-const (
-	AssistantScopePage          AssistantScope = "page"
-	AssistantScopeKnowledgeBase AssistantScope = "knowledge_base"
-	AssistantScopeWorkspace     AssistantScope = "workspace"
-)
-
 // AgentQARequest agent Q&A request payload.
 type AgentQARequest struct {
 	Query            string            `json:"query"`                        // Required query text
@@ -48,8 +38,7 @@ type AgentQARequest struct {
 	Images           []ImageAttachment `json:"images,omitempty"`             // Attached images for multimodal chat
 	Channel          string            `json:"channel,omitempty"`            // Source channel: "web", "api", "im", etc.
 	QuestionOrigin   *QuestionOrigin   `json:"question_origin,omitempty"`    // Source of a picked suggested question
-	AssistantScope   AssistantScope    `json:"assistant_scope,omitempty"`
-	PageContext      *PageContext      `json:"page_context,omitempty"` // Page context verified by the server
+	PageContext      *PageContext      `json:"page_context,omitempty"`       // Page the user has open (hint only)
 }
 
 // AgentResponseType defines the type of agent response

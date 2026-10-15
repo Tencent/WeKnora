@@ -560,7 +560,7 @@ func TestRegisterOperationToolsRequiresGrantAndWebUser(t *testing.T) {
 	svc := &agentService{operationDispatcher: operations.NewHandlerDispatcher()}
 	registered := func(ctx context.Context, cfg *types.AgentConfig) []string {
 		registry := tools.NewToolRegistry()
-		svc.registerOperationTools(ctx, registry, cfg, nil)
+		svc.registerOperationTools(ctx, registry, cfg)
 		return registry.ListTools()
 	}
 
@@ -604,7 +604,7 @@ func TestRegisterOperationToolsHonorsSuperuserBypass(t *testing.T) {
 			registry := tools.NewToolRegistry()
 			svc.registerOperationTools(ctx, registry, &types.AgentConfig{
 				OperationsAgentID: types.BuiltinWeKnoraAssistantID, AssistantAccess: tc.level,
-			}, nil)
+			})
 			find, err := registry.GetTool(tools.ToolFindOperations)
 			require.NoError(t, err)
 			res, err := find.Execute(ctx, []byte(`{"query":"knowledge.delete"}`))

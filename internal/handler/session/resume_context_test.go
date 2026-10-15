@@ -58,8 +58,7 @@ func TestBuildResumeRequestRevalidatesSharedKBBuiltin(t *testing.T) {
 				b := hitl.NewBroker(nil, nil)
 				request, err := json.Marshal(types.ResumableAgentRequest{
 					AgentID: agentID, AgentTenantID: 2, KnowledgeBaseIDs: []string{"shared-kb"},
-					PageContext:    &types.PageContext{KnowledgeBaseID: "shared-kb"},
-					AssistantScope: types.AssistantScopeKnowledgeBase,
+					PageContext: &types.PageContext{KnowledgeBaseID: "shared-kb"},
 				})
 				require.NoError(t, err)
 				snapshot, err := json.Marshal(agent.RunSnapshot{Version: agent.RunSnapshotVersion, Request: request})
@@ -97,7 +96,6 @@ func TestBuildResumeRequestRevalidatesSharedKBBuiltin(t *testing.T) {
 					require.Equal(t, []string{"shared-kb"}, req.customAgent.Config.KnowledgeBases)
 					require.False(t, req.sharedAgentReadOnly)
 					require.Equal(t, "shared-kb", req.buildQARequest().PageContext.KnowledgeBaseID)
-					require.Equal(t, types.AssistantScopeKnowledgeBase, req.buildQARequest().AssistantScope)
 				}
 				require.Equal(t, "shared-kb", share.checkedKBID)
 				require.Equal(t, uint64(1), share.checkedTenantID)
@@ -171,7 +169,6 @@ func TestBuildResumeRequestKeepsTurnAndRestoresLegacySteering(t *testing.T) {
 	require.Equal(t, req.query, req.userInput)
 	require.Equal(t, "original-turn", req.requestID)
 	require.Equal(t, "original question", req.buildQARequest().Query)
-	require.Equal(t, types.AssistantScopeWorkspace, req.buildQARequest().AssistantScope)
 	snap, err := agent.DecodeRunSnapshot(req.resume.Snapshot)
 	require.NoError(t, err)
 	require.Equal(t, "use staging", snap.UserMessages["u"])

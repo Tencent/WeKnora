@@ -2086,15 +2086,6 @@ export default {
         }
       }
     },
-    scope: {
-      title: '操作范围',
-      description: '限制助手可以操作的资源；不会扩大你的现有权限。',
-      page: '当前页面',
-      knowledge_base: '当前知识库',
-      workspace: '整个空间',
-      agentNoKB: '智能体页面没有所属知识库',
-      noContext: '未附加页面时，仅可进行空间级查询。',
-    },
     context: {
       currentPage: '当前页面',
       detach: '不附带当前页面',

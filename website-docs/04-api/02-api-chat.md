@@ -397,7 +397,6 @@ Handler: `internal/handler/session/qa.go`。API key：聊天需 `chat`/full；`k
 | `question_origin` | object | 否 | 用户点选的建议问题来自哪里：`knowledge_base_id`、可选 `knowledge_id`。仅智能推理模式使用，智能体会先检索该来源；来源不在本轮检索范围内时忽略，不会扩大范围 |
 | `page_context` | object | 否 | 当前页面：`knowledge_base_id`、可选 `knowledge_id`、`wiki_slug`、`wiki_issue_ids`（最多保留 20 项），或 `agent_id`。知识库必须属于本轮检索范围；智能体独立校验，必须在当前租户可见（支持内置智能体）。无效部分丢弃，不扩大检索权限 |
 | `assistant_access` | string | 否 | WeKnora 助手权限等级：`read_only`、`confirm`、`auto_write`，默认 `confirm`，受空间上限约束 |
-| `assistant_scope` | string | 否 | WeKnora 助手操作范围：`page` 当前页面、`knowledge_base` 当前知识库、`workspace` 整个空间；默认 `workspace`，未知值返回 400。暂停审批后恢复仍沿用原范围和页面 |
 
 所选 `reasoning_effort` 会写入会话的 `last_request_state.reasoning_effort`，重新打开会话时前端据此恢复。
 
@@ -412,10 +411,6 @@ curl -N -X POST $BASE/api/v1/knowledge-chat/s-1 -H "X-API-Key: $API_KEY" \
 ### POST /api/v1/agent-chat/:session_id
 
 用途：Agent 问答（SSE 流式，含 `thinking/tool_call/tool_result/tool_approval_required/mcp_oauth_required` 等事件）。请求体同上。
-
-范围只会缩小调用者现有权限。`knowledge_base` 要求操作涉及的全部资源属于服务端验证的页面知识库；`page` 的修改目标为当前文档、Wiki 页面或智能体，知识库级页面允许修改库内资源，读取可向上查看所属知识库。智能体的模型、知识库和 MCP 绑定作为智能体配置处理。智能体页面没有所属知识库，选择 `knowledge_base` 会拒绝所有资源操作。
-
-未附加页面（包括关闭上下文标签）时，`page` / `knowledge_base` 拒绝所有资源操作，仅允许空间级列表、模型/MCP 查询和任务进度查询；无目标的创建操作只在 `workspace` 下允许。拒绝以普通工具失败返回，发生在审批和执行之前，审批卡修改参数后也会重查。直接检索和 Wiki 工具同样受限；Wiki 删除或重命名若会改写其他页面的入链正文，则在 Wiki 单页范围内拒绝。
 
 - 工具执行失败以 `tool_result` 事件返回（`data.success: false`，`data.error` 为原因），智能体会继续处理；`error` 事件只表示整轮执行失败。
 - 智能体中途接收追加消息时发出 `user_message_injected`；命令执行过程中以 `command_output` 更新工具卡片输出。

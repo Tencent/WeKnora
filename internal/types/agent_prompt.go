@@ -162,7 +162,6 @@ type ResumableAgentRequest struct {
 	// AssistantAccess is the level the user asked for; the ceiling is
 	// applied again on resume, so lowering it in between takes effect.
 	AssistantAccess AssistantAccessLevel `json:"assistant_access,omitempty"`
-	AssistantScope  AssistantScope       `json:"assistant_scope,omitempty"`
 	UserMessageID   string               `json:"user_message_id,omitempty"`
 	Language        string               `json:"language,omitempty"`
 }

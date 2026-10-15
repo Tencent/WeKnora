@@ -92,7 +92,6 @@ type CreateKnowledgeQARequest struct {
 	// confirm or auto_write. The workspace ceiling caps it; other agents
 	// ignore it.
 	AssistantAccess types.AssistantAccessLevel `json:"assistant_access,omitempty"`
-	AssistantScope  types.AssistantScope       `json:"assistant_scope,omitempty" default:"workspace"`
 
 	// ReasoningEffort overrides thinking for this request; empty inherits the agent configuration.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`

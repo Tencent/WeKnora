@@ -6142,15 +6142,6 @@ export default {
         }
       }
     },
-    scope: {
-      title: '操作範囲',
-      description: '現在の権限内で、アシスタントが操作できるリソースを制限します。',
-      page: '現在のページ',
-      knowledge_base: '現在のナレッジベース',
-      workspace: 'ワークスペース全体',
-      agentNoKB: 'エージェントのページには所属ナレッジベースがありません',
-      noContext: 'ページが未添付の場合、ワークスペース全体の一覧・参照のみ利用できます。',
-    },
     context: {
       currentPage: '現在のページ',
       detach: '現在のページを含めない',

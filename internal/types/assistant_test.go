@@ -35,15 +35,3 @@ func TestAssistantEffectiveAccessLevel(t *testing.T) {
 		})
 	}
 }
-
-func TestAssistantScopeValidationAndDefault(t *testing.T) {
-	for _, value := range []AssistantScope{"", "page", "knowledge_base", "workspace", "unknown", "WORKSPACE"} {
-		want := value == "" || value == "page" || value == "knowledge_base" || value == "workspace"
-		if value.WithDefault().Valid() != want {
-			t.Errorf("unexpected validity for %q", value)
-		}
-	}
-	if AssistantScope("").WithDefault() != AssistantScopeWorkspace {
-		t.Fatal("default must be workspace")
-	}
-}
