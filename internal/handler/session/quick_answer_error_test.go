@@ -31,6 +31,8 @@ func newQuickAnswerFailureHarness(
 	return streamCtx, messages, stream, &released
 }
 
+const testStreamError = `create chat completion: Post "https://model.example:9999/v1/chat/completions": EOF`
+
 // A failed quick-answer turn must persist the error text, complete the
 // assistant row, release the turn lease and close the SSE stream with a
 // completion event. Without this the row stayed empty and incomplete: the
@@ -43,14 +45,14 @@ func TestQuickAnswerFailurePersistsErrorAndCompletesTurn(t *testing.T) {
 	require.NoError(t, streamCtx.eventBus.Emit(context.Background(), event.Event{
 		Type: event.EventError,
 		Data: event.ErrorData{
-			Error:     `create chat completion: Post "https://model.example:9999/v1/chat/completions": EOF`,
+			Error:     testStreamError,
 			Stage:     "chat_completion_stream",
 			SessionID: "s",
 		},
 	}))
 
 	require.NotNil(t, messages.saved)
-	require.Equal(t, `create chat completion: Post "https://model.example:9999/v1/chat/completions": EOF`, messages.saved.Content)
+	require.Equal(t, testStreamError, messages.saved.Content)
 	require.True(t, messages.saved.IsCompleted)
 	require.Equal(t, uint64(1), messages.tenant)
 	require.True(t, *released)
