@@ -210,13 +210,13 @@ func TestFromSpecMarksCatchAllSegment(t *testing.T) {
 	require.NoError(t, err)
 
 	get, _ := catalog.Get("doc.get")
-	assert.Equal(t, "/api/v1/docs/*id", get.Route)
+	assert.Equal(t, "/api/v1/knowledge/*id", get.Route)
 	call, err := get.Build(map[string]json.RawMessage{"knowledge_id": json.RawMessage(`"a/b"`)})
 	require.NoError(t, err)
-	assert.Equal(t, "/api/v1/docs/a/b", call.Path, "a catch-all keeps its slashes")
+	assert.Equal(t, "/api/v1/knowledge/a/b", call.Path, "a catch-all keeps its slashes")
 
 	del, _ := catalog.Get("doc.delete")
-	assert.Equal(t, "/api/v1/docs/:id", del.Route, "the mark is per operation")
+	assert.Equal(t, "/api/v1/knowledge/:id", del.Route, "the mark is per operation")
 }
 
 func TestFromSpecKeepsCatalogSafetyRules(t *testing.T) {
@@ -292,7 +292,7 @@ func TestFromSpecProjectsNestedListMeta(t *testing.T) {
 	    }}
 	  },
 	  "paths": {
-	    "/tags/{id}": {"get": {
+	    "/knowledge-bases/{id}/tags": {"get": {
 	      "summary": "Tags",
 	      "x-agent": {"id": "tag.list", "risk": "read", "root": "data.data"},
 	      "parameters": [

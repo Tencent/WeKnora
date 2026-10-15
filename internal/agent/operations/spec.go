@@ -553,7 +553,8 @@ func fieldRunes(raw *specSchema) (int, error) {
 	}
 	n, err := strconv.Atoi(raw.AgentMaxRunes)
 	if err != nil || n < 1 || n > maxAgentFieldRunes {
-		return 0, fmt.Errorf("%s %q must be an integer from 1 to %d", extAgentMaxRunes, raw.AgentMaxRunes, maxAgentFieldRunes)
+		return 0, fmt.Errorf("%s %q must be an integer from 1 to %d",
+			extAgentMaxRunes, raw.AgentMaxRunes, maxAgentFieldRunes)
 	}
 	return n, nil
 }
