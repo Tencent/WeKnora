@@ -25,7 +25,9 @@ func (t *countingTool) Execute(_ context.Context, args json.RawMessage) (*types.
 
 func TestConfirmedToolFollowsAccessLevel(t *testing.T) {
 	args := json.RawMessage(`{"slug":"guides/setup"}`)
-	run := func(level types.AssistantAccessLevel, risk operations.Risk, ctx context.Context) (*countingTool, *fakeApprover, *types.ToolResult) {
+	run := func(
+		level types.AssistantAccessLevel, risk operations.Risk, ctx context.Context,
+	) (*countingTool, *fakeApprover, *types.ToolResult) {
 		inner := &countingTool{BaseTool: NewBaseTool(ToolWikiDeletePage, "d", json.RawMessage(`{}`))}
 		gate := &fakeApprover{decision: approval.Decision{Approved: true, PendingID: "p1"}}
 		res, err := NewConfirmedTool(inner, risk, operations.Access{Level: level}, gate).Execute(ctx, args)
@@ -71,7 +73,8 @@ func TestConfirmedToolDeclinedChangeDoesNotRun(t *testing.T) {
 func TestConfirmedToolHonorsResumedAnswerAtAnyLevel(t *testing.T) {
 	inner := &countingTool{BaseTool: NewBaseTool(ToolWikiWritePage, "d", json.RawMessage(`{}`))}
 	gate := &fakeApprover{decision: approval.Decision{Approved: false, Reason: "declined earlier"}}
-	tool := NewConfirmedTool(inner, operations.RiskWrite, operations.Access{Level: types.AssistantAccessAutoWrite}, gate)
+	tool := NewConfirmedTool(inner, operations.RiskWrite,
+		operations.Access{Level: types.AssistantAccessAutoWrite}, gate)
 	ctx := WithToolExecContext(context.Background(), &ToolExecContext{
 		EventBus: event.NewEventBus(),
 		Answered: &types.AgentPrompt{Kind: types.AgentPromptKindToolApproval},

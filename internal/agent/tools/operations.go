@@ -329,12 +329,16 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 	}
 
 	identity := t.rt.Identity
-	if meta, ok := ToolExecFromContext(ctx); ok && meta != nil {
+	meta, _ := ToolExecFromContext(ctx)
+	if meta != nil {
 		identity.Agent.SessionID = meta.SessionID
 	}
 	identity.Agent.Operation = op.ID
 
-	if t.rt.Access.NeedsApproval(op) {
+	// An answered prompt still governs its blocked call even if the workspace
+	// now allows writes without approval. Preserve declines and edited params.
+	resumed := meta != nil && meta.Answered != nil && meta.Answered.Kind == types.AgentPromptKindToolApproval
+	if resumed || t.rt.Access.NeedsApproval(op) {
 		confirmed, blocked := t.confirm(ctx, op, input, identity)
 		if blocked != nil {
 			return blocked, nil
@@ -345,7 +349,7 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 		}
 		// Waiting for the user may have used up the per-tool budget; the call
 		// itself gets a full window from the round context.
-		if meta, ok := ToolExecFromContext(ctx); ok && meta.ApprovalCtx != nil {
+		if meta != nil && meta.ApprovalCtx != nil {
 			timeout := meta.ExecTimeout
 			if timeout <= 0 {
 				timeout = defaultOperationTimeout
@@ -353,6 +357,12 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 			var cancel context.CancelFunc
 			ctx, cancel = context.WithTimeout(meta.ApprovalCtx, timeout)
 			defer cancel()
+		}
+	} else if op.Target != nil && op.Target.RequireComplete {
+		// Complete-target checks protect whole-entry replacements from losing
+		// truncated content; they apply even when no confirmation is needed.
+		if _, blocked := t.describeTarget(ctx, op, input, identity); blocked != nil {
+			return blocked, nil
 		}
 	}
 

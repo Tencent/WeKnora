@@ -73,8 +73,10 @@ func (c *AssistantConfig) EffectiveAccessLevel(requested AssistantAccessLevel) A
 	return level
 }
 
+// Value implements driver.Valuer for JSON storage.
 func (c AssistantConfig) Value() (driver.Value, error) { return json.Marshal(c) }
 
+// Scan implements sql.Scanner for JSON storage.
 func (c *AssistantConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil

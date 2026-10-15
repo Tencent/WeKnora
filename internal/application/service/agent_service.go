@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/attachment"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/browserskill"
@@ -472,19 +473,19 @@ func (s *agentService) registerOperationTools(
 	gate, _ := s.toolApprovalGate.(approval.BuiltinApproval)
 	// The router authorizes every call anyway; checking the role up front
 	// lets the model tell the user why instead of failing at the router.
-	access := operations.Access{
+	operationAccess := operations.Access{
 		Role:        types.CallerFromContext(ctx).Role,
-		EnforceRole: s.cfg != nil && s.cfg.Tenant.IsRBACEnforced(),
+		EnforceRole: s.cfg != nil && s.cfg.Tenant.IsRBACEnforced() && !access.IsCrossTenantSuperuser(ctx, s.cfg),
 		Level:       config.AssistantAccess,
 	}
 	catalog := operations.Builtin()
-	toolRegistry.RegisterTool(tools.NewFindOperationsTool(catalog, access))
+	toolRegistry.RegisterTool(tools.NewFindOperationsTool(catalog, operationAccess))
 	toolRegistry.RegisterTool(tools.NewRunOperationTool(tools.OperationsRuntime{
 		Catalog:    catalog,
 		Dispatcher: s.operationDispatcher,
 		Gate:       gate,
 		Identity:   identity,
-		Access:     access,
+		Access:     operationAccess,
 	}))
 }
 

@@ -81,21 +81,44 @@ func TestRunOperationFAQUpdateRefusesTruncatedTarget(t *testing.T) {
 		{"long answer", []string{strings.Repeat("a", 8001)}},
 		{"too many answers", make([]string, 101)},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			d := &fakeDispatcher{responses: map[string]*operations.Response{
-				"GET " + faqEntryPath: faqEntryResponse(t, tc.answers),
-			}}
-			gate := &fakeApprover{decision: approval.Decision{Approved: true}}
-			args := runArgs("faq.update_entry", faqUpdateParams("Answer"))
-			res, err := newRunTool(d, gate).Execute(interactiveCtx(), args)
-			require.NoError(t, err)
-			assert.False(t, res.Success)
-			assert.Contains(t, res.Error, "current content was truncated")
-			assert.Empty(t, gate.requests, "unsafe replacement must not even request approval")
-			require.Len(t, d.calls, 1)
-			assert.Equal(t, http.MethodGet, d.calls[0].call.Method)
-		})
+		levels := []types.AssistantAccessLevel{types.AssistantAccessConfirm, types.AssistantAccessAutoWrite}
+		for _, level := range levels {
+			t.Run(tc.name+"/"+string(level), func(t *testing.T) {
+				d := &fakeDispatcher{responses: map[string]*operations.Response{
+					"GET " + faqEntryPath: faqEntryResponse(t, tc.answers),
+				}}
+				gate := &fakeApprover{decision: approval.Decision{Approved: true}}
+				args := runArgs("faq.update_entry", faqUpdateParams("Answer"))
+				tool := newRunTool(d, gate)
+				tool.rt.Access.Level = level
+				res, err := tool.Execute(interactiveCtx(), args)
+				require.NoError(t, err)
+				assert.False(t, res.Success)
+				assert.Contains(t, res.Error, "current content was truncated")
+				assert.Empty(t, gate.requests, "unsafe replacement must not even request approval")
+				require.Len(t, d.calls, 1)
+				assert.Equal(t, http.MethodGet, d.calls[0].call.Method)
+			})
+		}
 	}
+}
+
+func TestRunOperationFAQAutoWriteChecksCompleteTarget(t *testing.T) {
+	answer := strings.Repeat("文", 8000)
+	d := &fakeDispatcher{responses: map[string]*operations.Response{
+		"GET " + faqEntryPath: faqEntryResponse(t, []string{answer}),
+		"PUT " + faqEntryPath: faqEntryResponse(t, []string{answer}),
+	}}
+	gate := &fakeApprover{}
+	tool := newRunTool(d, gate)
+	tool.rt.Access.Level = types.AssistantAccessAutoWrite
+	res, err := tool.Execute(interactiveCtx(), runArgs("faq.update_entry", faqUpdateParams(answer)))
+	require.NoError(t, err)
+	require.True(t, res.Success, res.Error)
+	require.Len(t, d.calls, 2, "read the complete target before replacing it")
+	assert.Equal(t, http.MethodGet, d.calls[0].call.Method)
+	assert.Equal(t, http.MethodPut, d.calls[1].call.Method)
+	assert.Empty(t, gate.requests, "the integrity check must not request approval")
 }
 
 func TestRunOperationFAQUpdateRechecksApprovedTarget(t *testing.T) {

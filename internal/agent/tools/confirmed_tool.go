@@ -30,8 +30,13 @@ func NewConfirmedTool(
 	return &ConfirmedTool{inner: inner, risk: risk, access: access, gate: gate}
 }
 
-func (t *ConfirmedTool) Name() string                { return t.inner.Name() }
-func (t *ConfirmedTool) Description() string         { return t.inner.Description() }
+// Name returns the wrapped tool's name.
+func (t *ConfirmedTool) Name() string { return t.inner.Name() }
+
+// Description returns the wrapped tool's description.
+func (t *ConfirmedTool) Description() string { return t.inner.Description() }
+
+// Parameters returns the wrapped tool's argument schema.
 func (t *ConfirmedTool) Parameters() json.RawMessage { return t.inner.Parameters() }
 
 // Execute runs the inner tool once the access level allows it.

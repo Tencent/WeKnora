@@ -448,6 +448,46 @@ func TestRunOperationFollowsAccessLevel(t *testing.T) {
 	})
 }
 
+func TestRunOperationAutoWriteHonorsResumedAnswer(t *testing.T) {
+	for _, approved := range []bool{false, true} {
+		name := "declined"
+		if approved {
+			name = "approved with edited parameters"
+		}
+		t.Run(name, func(t *testing.T) {
+			d := &fakeDispatcher{responses: map[string]*operations.Response{
+				"POST /api/v1/knowledge/k1/reparse": {Status: http.StatusOK, Body: []byte(docBody)},
+				"POST /api/v1/knowledge/k2/reparse": {Status: http.StatusOK, Body: []byte(docBody)},
+			}}
+			gate := &fakeApprover{decision: approval.Decision{
+				Approved: approved, PendingID: "p1", Reason: "declined earlier",
+				ModifiedArgs: runArgs("knowledge.reparse", map[string]any{"knowledge_id": "k2"}),
+			}}
+			tool := newRunTool(d, gate)
+			// The original request asked for auto_write but was capped at confirm.
+			// Raising the workspace ceiling before resume must not discard its answer.
+			tool.rt.Access.Level = types.AssistantAccessAutoWrite
+			ctx := interactiveCtx()
+			meta, _ := ToolExecFromContext(ctx)
+			meta.Interactive = false
+			meta.Answered = &types.AgentPrompt{Kind: types.AgentPromptKindToolApproval}
+			res, err := tool.Execute(ctx, runArgs("knowledge.reparse", map[string]any{"knowledge_id": "k1"}))
+			require.NoError(t, err)
+			assert.Empty(t, gate.requests, "resuming must not ask again")
+			if !approved {
+				assert.False(t, res.Success)
+				assert.Contains(t, res.Error, "declined earlier")
+				assert.Empty(t, d.calls)
+				return
+			}
+			require.True(t, res.Success, res.Error)
+			require.Len(t, d.calls, 1)
+			assert.Equal(t, "/api/v1/knowledge/k2/reparse", d.calls[0].call.Path)
+			assert.Equal(t, []string{"p1"}, gate.executed)
+		})
+	}
+}
+
 func TestFindOperationsExplainsWithheldMatches(t *testing.T) {
 	type output struct {
 		Operations  []operationView            `json:"operations"`

@@ -1915,7 +1915,7 @@ func (h *TenantHandler) GetTenantAssistantConfig(c *gin.Context) {
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
+		_ = c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 	data := types.AssistantConfig{}
@@ -1936,16 +1936,16 @@ func (h *TenantHandler) updateTenantAssistantConfigInternal(c *gin.Context) {
 	var cfg types.AssistantConfig
 	if err := c.ShouldBindJSON(&cfg); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		_ = c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
 	if cfg.MaxAccessLevel != "" && !cfg.MaxAccessLevel.Valid() {
-		c.Error(errors.NewBadRequestError("max_access_level must be read_only, confirm or auto_write"))
+		_ = c.Error(errors.NewBadRequestError("max_access_level must be read_only, confirm or auto_write"))
 		return
 	}
 	cfg.Normalize()
 	if len([]rune(cfg.DisplayName)) > types.MaxAssistantDisplayNameRunes {
-		c.Error(errors.NewBadRequestError(fmt.Sprintf(
+		_ = c.Error(errors.NewBadRequestError(fmt.Sprintf(
 			"display_name must be at most %d characters", types.MaxAssistantDisplayNameRunes)))
 		return
 	}
@@ -1953,7 +1953,7 @@ func (h *TenantHandler) updateTenantAssistantConfigInternal(c *gin.Context) {
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
+		_ = c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 
@@ -1961,10 +1961,10 @@ func (h *TenantHandler) updateTenantAssistantConfigInternal(c *gin.Context) {
 	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to update assistant config").WithDetails(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Failed to update assistant config").WithDetails(err.Error()))
 		}
 		return
 	}

@@ -117,6 +117,7 @@ import {
 const { t } = useI18n()
 const authStore = useAuthStore()
 const assistant = useAssistantStore()
+const workspaceOwner = computed(() => `${authStore.user?.id}:${authStore.effectiveTenantId}`)
 
 const canEdit = computed(() => authStore.canAccessAllTenants || authStore.hasRole('admin'))
 const assistantName = computed(() => assistant.displayName || t('assistant.title'))
@@ -142,11 +143,15 @@ const save = async () => {
   const next: AssistantConfig = { display_name: draft.display_name.trim(), max_access_level: draft.max_access_level }
   const current = assistant.workspaceConfig
   if (current && current.display_name === next.display_name && current.max_access_level === next.max_access_level) return
+  const owner = workspaceOwner.value
   try {
     const res = await updateTenantAssistantConfig(next)
+    // A save can finish after switching workspace or signing in as another user.
+    if (workspaceOwner.value !== owner) return
     assistant.setWorkspaceConfig(res?.data || next)
     MessagePlugin.success(t('assistantSettings.saved'))
   } catch (error: any) {
+    if (workspaceOwner.value !== owner) return
     syncDraft()
     MessagePlugin.error(t('assistantSettings.saveFailed', { message: error?.message || '' }))
   }

@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -571,6 +572,63 @@ func TestRegisterOperationToolsRequiresGrantAndWebUser(t *testing.T) {
 	}))
 	apiKey := types.WithTenantAPIKeyScope(webUser, types.TenantAPIKeyScope{KeyID: 1})
 	require.Empty(t, registered(apiKey, granted))
+}
+
+func TestRegisterOperationToolsHonorsSuperuserBypass(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		crossTenant bool
+		superuser   bool
+		level       types.AssistantAccessLevel
+		wantAllowed bool
+	}{
+		{"superuser", true, true, types.AssistantAccessConfirm, true},
+		{"ordinary viewer", true, false, types.AssistantAccessConfirm, false},
+		{"cross-tenant access disabled", false, true, types.AssistantAccessConfirm, false},
+		{"superuser stays read-only", true, true, types.AssistantAccessReadOnly, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			enforce := true
+			ctx := types.WithCaller(types.WithPrincipal(context.Background(),
+				types.Principal{Type: types.PrincipalWebUser, ID: "u1"}),
+				types.Caller{TenantID: 7, UserID: "u1", Role: types.TenantRoleViewer})
+			ctx = context.WithValue(ctx, types.UserContextKey, &types.User{
+				ID: "u1", CanAccessAllTenants: tc.superuser,
+			})
+			svc := &agentService{
+				cfg: &config.Config{Tenant: &config.TenantConfig{
+					EnableRBAC: &enforce, EnableCrossTenantAccess: tc.crossTenant,
+				}},
+				operationDispatcher: operations.NewHandlerDispatcher(),
+			}
+			registry := tools.NewToolRegistry()
+			svc.registerOperationTools(ctx, registry, &types.AgentConfig{
+				OperationsAgentID: types.BuiltinWeKnoraAssistantID, AssistantAccess: tc.level,
+			})
+			find, err := registry.GetTool(tools.ToolFindOperations)
+			require.NoError(t, err)
+			res, err := find.Execute(ctx, []byte(`{"query":"knowledge.delete"}`))
+			require.NoError(t, err)
+			require.True(t, res.Success)
+			if tc.wantAllowed {
+				assert.NotContains(t, res.Output, `"unavailable"`)
+			} else {
+				assert.Contains(t, res.Output, `"unavailable"`)
+			}
+			// Exercise run_operation too: an allowed call reaches the approval
+			// gate, while a withheld one is refused before requesting approval.
+			run, err := registry.GetTool(tools.ToolRunOperation)
+			require.NoError(t, err)
+			res, err = run.Execute(ctx, []byte(`{"operation":"knowledge.delete","params":{"knowledge_id":"k1"}}`))
+			require.NoError(t, err)
+			if tc.wantAllowed {
+				assert.Contains(t, res.Error, "confirmation")
+				assert.NotContains(t, res.Error, "unavailable")
+			} else {
+				assert.Contains(t, res.Error, "unavailable")
+			}
+		})
+	}
 }
 
 func TestGetKnowledgeBaseInfos_SharedKnowledgeBaseUsesSourceTenant(t *testing.T) {

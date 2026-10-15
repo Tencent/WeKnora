@@ -15,7 +15,8 @@ func TestAssistantEffectiveAccessLevel(t *testing.T) {
 		{"lower than the ceiling is kept", nil, AssistantAccessReadOnly, AssistantAccessReadOnly},
 		{
 			"a raised ceiling allows auto_write",
-			&AssistantConfig{MaxAccessLevel: AssistantAccessAutoWrite}, AssistantAccessAutoWrite, AssistantAccessAutoWrite,
+			&AssistantConfig{MaxAccessLevel: AssistantAccessAutoWrite},
+			AssistantAccessAutoWrite, AssistantAccessAutoWrite,
 		},
 		{
 			"a read-only ceiling caps the default",
