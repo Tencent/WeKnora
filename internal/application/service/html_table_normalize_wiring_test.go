@@ -89,12 +89,12 @@ func TestHTMLEmbeddedTableWiring_CallSitesPresent(t *testing.T) {
 		t.Fatalf("knowledge_create.go: %s must run before buildSplitterConfigFromChunking", call)
 	}
 
-	tempSrc, err := os.ReadFile("temporary_document.go")
+	tempSrc, err := os.ReadFile("temporary_document_parse.go")
 	if err != nil {
-		t.Fatalf("read temporary_document.go: %v", err)
+		t.Fatalf("read temporary_document_parse.go: %v", err)
 	}
 	if lastCallBefore(string(tempSrc), call, "chunker.Split(") < 0 {
-		t.Fatalf("temporary_document.go: %s must run before chunker.Split", call)
+		t.Fatalf("temporary_document_parse.go: %s must run before chunker.Split", call)
 	}
 
 	previewSrc, err := os.ReadFile("../../handler/chunker_debug.go")

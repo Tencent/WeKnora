@@ -29,6 +29,12 @@ export interface MCPService {
     // OAuth-only, non-secret configuration.
     scopes?: string[]
     auth_server_metadata_url?: string
+    // OAuth client registered with the authorization server ahead of time.
+    // Empty means dynamic client registration. Non-secret.
+    client_id?: string
+    // Secret of client_id. Like api_key it is never returned; edits go
+    // through the /credentials subresource.
+    client_secret?: string
   }
   advanced_config?: {
     timeout?: number
@@ -187,7 +193,7 @@ export async function setMCPToolEnabled(serviceId: string, toolName: string, ena
 // client reconnect server-side.
 // ----------------------------------------------------------------------------
 
-export type McpCredentialField = 'api_key' | 'token'
+export type McpCredentialField = 'api_key' | 'token' | 'client_secret'
 
 export interface CredentialFieldMetadata {
   configured: boolean
@@ -286,8 +292,22 @@ export async function revokeMCPOAuthToken(serviceId: string): Promise<void> {
 export async function resolveToolApproval(
   pendingId: string,
   body: { decision: 'approve' | 'reject'; modified_args?: Record<string, unknown>; reason?: string }
-): Promise<void> {
-  await post(`/api/v1/agent/tool-approvals/${encodeURIComponent(pendingId)}`, body)
+): Promise<{ resumed: boolean }> {
+  const res: any = await post(`/api/v1/agent/tool-approvals/${encodeURIComponent(pendingId)}`, body)
+  // resumed: the run had been suspended and now continues on the server;
+  // the client must re-attach to the message's stream.
+  return { resumed: Boolean(res?.resumed) }
+}
+
+// Answer a prompt the agent raised (ask_user, tool approval) with the kind's
+// response object.
+export async function resolveAgentPrompt(
+  promptId: string,
+  kind: string,
+  response: Record<string, unknown>,
+): Promise<{ resumed: boolean }> {
+  const res: any = await post(`/api/v1/agent/prompts/${encodeURIComponent(promptId)}`, { kind, response })
+  return { resumed: Boolean(res?.resumed) }
 }
 
 // Resume an agent run that paused on an in-conversation MCP OAuth prompt.

@@ -170,7 +170,12 @@ type SessionRewindService struct {
 	snapshots   ForkSnapshotDeleter
 	liveRuns    rewindLiveRunReader
 	busyGate    *SessionBusyGate
+	// suspendedRuns closes runs suspended on prompts before the cut.
+	suspendedRuns *SuspendedRunService
 }
+
+// SetSuspendedRuns lets rewind close the session's suspended runs.
+func (s *SessionRewindService) SetSuspendedRuns(runs *SuspendedRunService) { s.suspendedRuns = runs }
 
 // NewSessionRewindService wires the service. A nil sandbox port skips the
 // workspace reset with NO_SANDBOX, which is the correct behaviour for a
@@ -242,6 +247,13 @@ func (s *SessionRewindService) Rewind(
 	// requires an exact owner match.
 	if userID == "" || source.UserID != userID {
 		return nil, ErrRewindSessionNotFound
+	}
+	// Rewinding moves on from a prompt still waiting for an answer; its run
+	// is completed first so it does not read as a turn in progress.
+	if s.suspendedRuns != nil {
+		if _, err := s.suspendedRuns.SupersedeSession(ctx, sessionID); err != nil {
+			return nil, fmt.Errorf("session rewind: supersede suspended runs: %w", err)
+		}
 	}
 
 	rewindPoint, err := s.messages.GetMessage(ctx, sessionID, messageID)

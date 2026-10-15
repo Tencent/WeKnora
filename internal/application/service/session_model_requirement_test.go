@@ -168,7 +168,8 @@ func TestResolveChatModelIDWikiFixerFallsBackToKnowledgeBaseModel(t *testing.T) 
 	req := &types.QARequest{
 		Session: &types.Session{},
 		CustomAgent: &types.CustomAgent{
-			ID: types.BuiltinWikiFixerID,
+			ID:        types.BuiltinWikiFixerID,
+			IsBuiltin: true,
 		},
 	}
 
@@ -192,7 +193,8 @@ func TestResolveChatModelIDWikiFixerFallsBackToAvailableModel(t *testing.T) {
 	req := &types.QARequest{
 		Session: &types.Session{},
 		CustomAgent: &types.CustomAgent{
-			ID: types.BuiltinWikiFixerID,
+			ID:        types.BuiltinWikiFixerID,
+			IsBuiltin: true,
 		},
 	}
 
@@ -200,6 +202,28 @@ func TestResolveChatModelIDWikiFixerFallsBackToAvailableModel(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "system-chat", modelID)
+}
+
+func TestResolveChatModelIDFallbackIsLimitedToInternalBuiltins(t *testing.T) {
+	svc := &sessionService{
+		modelService: &stubModelService{
+			availableModels: []*types.Model{{ID: "system-chat", Type: types.ModelTypeKnowledgeQA}},
+		},
+	}
+	assistant := &types.QARequest{
+		Session:     &types.Session{},
+		CustomAgent: &types.CustomAgent{ID: types.BuiltinWeKnoraAssistantID, IsBuiltin: true},
+	}
+	modelID, err := svc.resolveChatModelID(context.Background(), assistant, nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "system-chat", modelID)
+
+	stored := &types.QARequest{
+		Session:     &types.Session{},
+		CustomAgent: &types.CustomAgent{ID: types.BuiltinWeKnoraAssistantID},
+	}
+	_, err = svc.resolveChatModelID(context.Background(), stored, nil, nil)
+	assert.Error(t, err, "an agent record that only reuses the ID gets no fallback")
 }
 
 // A shared agent executes in its owner's workspace; the override would pick

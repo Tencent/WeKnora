@@ -1050,6 +1050,45 @@
             "add_special_tokens": true
           }
         }
+      },
+      {
+        "id": "tencent/WeMM-Embedding-2B",
+        "match": "*/WeMM-Embedding-2B",
+        "type": "Embedding",
+        "compat": {
+          "api": "openai-embeddings",
+          "image_format": "messages",
+          "text_as_messages": true,
+          "batch_messages": true,
+          "accepts_truncate_prompt_tokens": false,
+          "max_image_batch_size": 5
+        }
+      },
+      {
+        "id": "tencent/WeMM-Embedding-4B",
+        "match": "*/WeMM-Embedding-4B",
+        "type": "Embedding",
+        "compat": {
+          "api": "openai-embeddings",
+          "image_format": "messages",
+          "text_as_messages": true,
+          "batch_messages": true,
+          "accepts_truncate_prompt_tokens": false,
+          "max_image_batch_size": 5
+        }
+      },
+      {
+        "id": "tencent/WeMM-Embedding-9B",
+        "match": "*/WeMM-Embedding-9B",
+        "type": "Embedding",
+        "compat": {
+          "api": "openai-embeddings",
+          "image_format": "messages",
+          "text_as_messages": true,
+          "batch_messages": true,
+          "accepts_truncate_prompt_tokens": false,
+          "max_image_batch_size": 5
+        }
       }
     ],
     "hunyuan": [

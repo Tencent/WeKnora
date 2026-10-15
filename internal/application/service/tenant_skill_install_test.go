@@ -224,8 +224,10 @@ func TestSkillTreeVerifyCommandQuotesPaths(t *testing.T) {
 func TestVerifySkillTreeIssuesOneCommandRegardlessOfScriptCount(t *testing.T) {
 	fx := newInstallFixture(t)
 	files := map[string][]byte{"SKILL.md": []byte(validSkillMD)}
-	rels := []string{"run.sh", "scripts/a.py", "scripts/b.py",
-		"scripts/c.py", "scripts/d.py", "scripts/e.py"}
+	rels := []string{
+		"run.sh", "scripts/a.py", "scripts/b.py",
+		"scripts/c.py", "scripts/d.py", "scripts/e.py",
+	}
 	for _, rel := range rels {
 		files[rel] = []byte("pass\n")
 	}
@@ -3226,6 +3228,16 @@ func (e *installAgentEngine) SetMemoryPrompt(string)                            
 func (e *installAgentEngine) SetSteerSink(sink types.SteerSink)                    { e.sink = sink }
 func (e *installAgentEngine) SetContextCheckpointSink(types.ContextCheckpointSink) {}
 
+func (e *installAgentEngine) EnableSuspension(json.RawMessage) {}
+
+func (e *installAgentEngine) SetInteractive(bool) {}
+
+func (e *installAgentEngine) Resume(context.Context, string, string, []chat.Message,
+	[]byte, *types.AgentPrompt,
+) (*types.AgentState, error) {
+	return nil, errors.New("not supported")
+}
+
 type installSessionService struct {
 	fx *installFixture
 }
@@ -3435,6 +3447,7 @@ func (s installFileService) SaveBytes(_ context.Context, data []byte, _ uint64, 
 	}
 	return "file://bundle.zip", nil
 }
+
 func (s installFileService) GetFile(_ context.Context, ref string) (io.ReadCloser, error) {
 	if s.fx != nil {
 		s.fx.getFileCalls.Add(1)

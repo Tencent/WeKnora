@@ -82,6 +82,13 @@ export async function renderEpubPreview(data: ArrayBuffer): Promise<EpubPreview>
     return url
   }
 
+  // Inline images already contain their bytes; they are not ZIP entries.
+  // The caller still sanitizes the rendered HTML before inserting it.
+  const resolveImageUrl = (chapter: string, source: string): Promise<string> => {
+    if (/^data:image\//i.test(source.trim())) return Promise.resolve(source)
+    return imageUrl(resolveEpubPath(chapter, source))
+  }
+
   const sections: string[] = []
   for (let i = 0; i < spine.length; i++) {
     const path = spine[i]
@@ -92,12 +99,12 @@ export async function renderEpubPreview(data: ArrayBuffer): Promise<EpubPreview>
     const body = doc.body || doc.documentElement
     for (const img of Array.from(body.querySelectorAll('img'))) {
       const src = img.getAttribute('src')
-      img.setAttribute('src', src ? await imageUrl(resolveEpubPath(path, src)) : '')
+      img.setAttribute('src', src ? await resolveImageUrl(path, src) : '')
     }
     for (const image of byLocalName(body as Element, 'image')) {
       const href = image.getAttribute('href') || image.getAttribute('xlink:href')
       if (href) {
-        const url = await imageUrl(resolveEpubPath(path, href))
+        const url = await resolveImageUrl(path, href)
         image.setAttribute('href', url)
         image.removeAttribute('xlink:href')
       }

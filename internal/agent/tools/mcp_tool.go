@@ -166,11 +166,21 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 		}, err
 	}
 
+	// The post-approval ctx is derived from ApprovalCtx, which does not carry
+	// the exec metadata; read it once here so the OAuth prompt still works
+	// for tools that require approval.
+	execMeta, _ := ToolExecFromContext(ctx)
+	callWindowDerived := false
+
 	// Human approval gate for dangerous tools (issue #1173)
 	if t.gate != nil {
-		if meta, ok := ToolExecFromContext(ctx); ok && meta != nil && meta.EventBus != nil {
+		if meta := execMeta; meta != nil && meta.EventBus != nil {
 			tenantID, _ := types.TenantIDFromContext(ctx)
-			if t.gate.NeedsApproval(ctx, tenantID, t.service.ID, t.mcpTool.Name) {
+			// A resumed call already holds the user's decision. It is honored
+			// even if the tool stopped requiring approval meanwhile, since the
+			// user may have edited the arguments.
+			resumed := meta.Answered != nil && meta.Answered.Kind == types.AgentPromptKindToolApproval
+			if resumed || t.gate.NeedsApproval(ctx, tenantID, t.service.ID, t.mcpTool.Name) {
 				// Use ApprovalCtx (round-level ctx WITHOUT defaultToolExecTimeout) so
 				// human approval can legitimately wait longer than the per-tool 60s.
 				// User-stop / request cancel still propagates because ApprovalCtx is a
@@ -179,25 +189,52 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 				if meta.ApprovalCtx != nil {
 					waitCtx = meta.ApprovalCtx
 				}
-				decision, waitErr := t.gate.RequestAndWait(waitCtx, approval.PendingRequest{
-					TenantID:           tenantID,
-					UserID:             meta.UserID,
-					SessionID:          meta.SessionID,
-					AssistantMessageID: meta.AssistantMessageID,
-					RequestID:          meta.RequestID,
-					EventBus:           meta.EventBus,
-					ServiceID:          t.service.ID,
-					ServiceName:        t.service.Name,
-					MCPToolName:        t.mcpTool.Name,
-					RegisteredToolName: t.Name(),
-					Description:        t.mcpTool.Description,
-					Args:               args,
-					ToolCallID:         meta.ToolCallID,
-				})
+				var decision approval.Decision
+				var waitErr error
+				if resumed {
+					decision = t.gate.ResumeDecision(waitCtx, meta.Answered, meta.EventBus)
+				} else {
+					var snapshot []byte
+					var snapshotVersion int
+					if meta.Snapshot != nil {
+						var snapErr error
+						if snapshot, snapshotVersion, snapErr = meta.Snapshot(); snapErr != nil {
+							// Without run state the approval can still block in memory.
+							logger.Warnf(ctx, "[Tool][MCPTool] capture run state for approval: %v", snapErr)
+							snapshot = nil
+						}
+					}
+					decision, waitErr = t.gate.RequestAndWait(waitCtx, approval.PendingRequest{
+						Snapshot:        snapshot,
+						SnapshotVersion: snapshotVersion,
+						// The user answers from their own workspace, which differs
+						// from tenantID (the agent's) when the agent is shared.
+						TenantID:           types.CallerFromContext(ctx).TenantID,
+						UserID:             meta.UserID,
+						SessionID:          meta.SessionID,
+						AssistantMessageID: meta.AssistantMessageID,
+						RequestID:          meta.RequestID,
+						EventBus:           meta.EventBus,
+						ServiceID:          t.service.ID,
+						ServiceName:        t.service.Name,
+						MCPToolName:        t.mcpTool.Name,
+						RegisteredToolName: t.Name(),
+						Description:        t.mcpTool.Description,
+						Args:               args,
+						ToolCallID:         meta.ToolCallID,
+					})
+				}
 				if waitErr != nil {
 					return &types.ToolResult{
 						Success: false,
 						Error:   fmt.Sprintf("Tool approval failed: %v", waitErr),
+					}, nil
+				}
+				if decision.Suspended != nil {
+					return &types.ToolResult{
+						Success: false,
+						Error:   "waiting for the user to approve this tool call",
+						Suspend: decision.Suspended,
 					}, nil
 				}
 				if !decision.Approved {
@@ -210,6 +247,7 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 						Error:   msg,
 					}, nil
 				}
+				defer t.gate.MarkExecuted(ctx, decision.PendingID)
 				if len(decision.ModifiedArgs) > 0 {
 					args = decision.ModifiedArgs
 					if err := t.ValidateArguments(args); err != nil {
@@ -235,13 +273,14 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 					freshCtx, freshCancel := context.WithTimeout(meta.ApprovalCtx, t.callToolTimeout(meta.ExecTimeout))
 					defer freshCancel()
 					ctx = freshCtx
+					callWindowDerived = true
 				}
 			}
 		}
 	}
 
 	isStdio := t.service.TransportType == types.MCPTransportStdio
-	meta, _ := ToolExecFromContext(ctx)
+	meta := execMeta
 	oauthSess := oauthSessionFromToolExec(ctx, meta).withAuthWaitTimeout(t.authWaitTimeoutSeconds)
 	toolCallID := ""
 	if meta != nil {
@@ -254,9 +293,8 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 	// with a longer timeout were silently cancelled mid-flight even though the
 	// transport layers honor the value. Re-derive the window from ApprovalCtx —
 	// the round-level parent without the per-tool deadline. Skipped on the
-	// post-approval path, which already re-derived its window above and whose
-	// swapped ctx no longer carries the exec meta.
-	if meta != nil && meta.ApprovalCtx != nil {
+	// post-approval path, which already re-derived its window above.
+	if !callWindowDerived && meta != nil && meta.ApprovalCtx != nil {
 		callCtx, callCancel := context.WithTimeout(meta.ApprovalCtx, t.callToolTimeout(meta.ExecTimeout))
 		defer callCancel()
 		ctx = callCtx

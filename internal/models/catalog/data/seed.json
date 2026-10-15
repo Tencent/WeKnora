@@ -1454,6 +1454,51 @@
           "image"
         ],
         "source": "https://huggingface.co/Qwen/Qwen3-VL-Embedding-8B"
+      },
+      {
+        "id": "tencent/WeMM-Embedding-2B",
+        "match": "*/WeMM-Embedding-2B",
+        "type": "Embedding",
+        "name": "WeMM-Embedding-2B",
+        "aliases": [
+          "WeMM-Embedding-2B"
+        ],
+        "input": [
+          "text",
+          "image"
+        ],
+        "dimension": 2048,
+        "source": "https://huggingface.co/tencent/WeMM-Embedding-2B"
+      },
+      {
+        "id": "tencent/WeMM-Embedding-4B",
+        "match": "*/WeMM-Embedding-4B",
+        "type": "Embedding",
+        "name": "WeMM-Embedding-4B",
+        "aliases": [
+          "WeMM-Embedding-4B"
+        ],
+        "input": [
+          "text",
+          "image"
+        ],
+        "dimension": 2560,
+        "source": "https://huggingface.co/tencent/WeMM-Embedding-4B"
+      },
+      {
+        "id": "tencent/WeMM-Embedding-9B",
+        "match": "*/WeMM-Embedding-9B",
+        "type": "Embedding",
+        "name": "WeMM-Embedding-9B",
+        "aliases": [
+          "WeMM-Embedding-9B"
+        ],
+        "input": [
+          "text",
+          "image"
+        ],
+        "dimension": 4096,
+        "source": "https://huggingface.co/tencent/WeMM-Embedding-9B"
       }
     ],
     "gpustack": [],
@@ -4716,6 +4761,38 @@
         "name": "GLM-ASR-2512 (at most 30 s per file)",
         "type": "ASR",
         "source": "https://docs.bigmodel.cn/api-reference/模型-api/语音转文本"
+      }
+    ],
+    "cohere": [
+      {
+        "id": "rerank-v4.0-pro",
+        "name": "rerank-v4.0-pro",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 32768,
+        "source": "https://docs.cohere.com/docs/models#rerank"
+      },
+      {
+        "id": "rerank-v4.0-fast",
+        "name": "rerank-v4.0-fast",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 32768,
+        "source": "https://docs.cohere.com/docs/models#rerank"
+      },
+      {
+        "id": "rerank-v3.5",
+        "name": "rerank-v3.5",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 4096,
+        "source": "https://docs.cohere.com/docs/models#rerank"
       }
     ]
   }

@@ -119,7 +119,7 @@ flowchart LR
 
 | 段 | 结构体 | 关键字段与默认值 |
 | --- | --- | --- |
-| `auth` | `AuthConfig` | `registration_mode`：`self_serve`（默认）/ `invite_only`（`DISABLE_REGISTRATION=true` 时强制）；`default_tenant_mode`：`create_personal`（默认）/ `tenantless` |
+| `auth` | `AuthConfig` | `registration_mode`：`self_serve`（默认，开放注册）/ `invite_register`（仅限邀请注册）/ `invite_only`（禁止注册，`DISABLE_REGISTRATION=true` 时使用）；`default_tenant_mode`：`create_personal`（默认）/ `tenantless` |
 | `audit` | `AuditConfig` | `retention_days`：审计日志保留天数，段落省略时默认 90；0 禁用清理；<0 校验报错（env `WEKNORA_AUDIT_RETENTION_DAYS`） |
 | `oidc_auth` | `OIDCAuthConfig` | `enable`、`issuer_url`、`jwks_uri`、`discovery_url`（缺省由 issuer 拼 `/.well-known/openid-configuration`）、`client_id`、`client_secret`、`authorization_endpoint`、`token_endpoint`、`user_info_endpoint`、`scopes`（默认 `openid profile email`）、`user_info_mapping.username`（默认 `name`）/`email`（默认 `email`）；全部可用 `OIDC_AUTH_*` 环境变量覆盖 |
 | `agent` | `AgentConfig` | `llm_call_timeout`：单次 LLM 调用超时秒数（默认 120，env `WEKNORA_AGENT_LLM_TIMEOUT`）；`tool_approval_timeout_seconds`：MCP 工具人工审批等待（默认 600，env `WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT`） |
@@ -225,7 +225,7 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `JWT_SECRET` | 空 | JWT 签名密钥（必填，可用 `openssl rand -hex 32` 生成）。留空或使用示例值时每次启动随机生成，重启后已登录用户需重新登录；多副本必须配置相同的值 |
 | `SYSTEM_AES_KEY` | 空 | 敏感字段落盘加密的 AES-256 主密钥，**必须 32 字节**（可用 `openssl rand -hex 16` 生成）；丢失则已加密数据（租户 API Key、模型 key、向量库凭证等）不可恢复，升级时沿用原值。v0.4.0 起取代 `TENANT_AES_KEY`/`CRYPTO_MASTER_KEY`/`CRYPTO_SALT` |
 | `SYSTEM_SIGNING_KEY` | 空（回退到 `SYSTEM_AES_KEY`） | 嵌入会话与预签名文件链接的签名密钥（可用 `openssl rand -hex 32` 生成）。未设置时使用 `SYSTEM_AES_KEY`；两者都缺失、长度不足 16 或为示例值时无法签发签名链接与嵌入会话。更换后已签发的链接失效；多副本须使用同一个值 |
-| `DISABLE_REGISTRATION` | false | true 时强制 `registration_mode=invite_only` |
+| `DISABLE_REGISTRATION` | false | true 时启动配置使用 `invite_only`（禁止密码注册，包括邀请注册）；数据库运行时设置仍优先 |
 | `WEKNORA_AUTH_DEFAULT_TENANT_MODE` | create_personal | 注册后建空间策略（`create_personal` / `tenantless`） |
 | `WEKNORA_TENANT_ENABLE_RBAC` | （默认 true） | 空间角色强制鉴权开关 |
 | `WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS` | false | 跨空间访问 |
@@ -282,6 +282,13 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | 其余 `DOCREADER_PDF_*`（词距/边栏/隐藏文本/嵌入图/图表区等 20+ 项） | 见 `docker-compose.yml` docreader 段注释 | PDF 版式与抽取精调 |
 | `DOCREADER_EXTERNAL_HTTP_PROXY` / `_HTTPS_PROXY` | 空 | docreader 出站抓取代理 |
 
+### 描述生成与出站连接
+
+| 环境变量 | 默认 | 作用 |
+| --- | --- | --- |
+| `KNOWLEDGE_BASE_PROFILE_MAX_TOKENS` | 2048 | 知识库描述生成的补全 token 预算；无效或非正值回退默认，推理模型出现 `no gist` 时可调大 |
+| `WEKNORA_OUTBOUND_DIAL_TIMEOUT` | 5s | SSRF 安全出站连接的拨号超时，使用 Go duration（如 `10s`）；不是整个请求或模型生成的总超时 |
+
 ### Agent、Skills 与附件
 
 | 名称 | 默认值 | 说明 |
@@ -290,7 +297,7 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `WEKNORA_SANDBOX_DOCKER_ENABLED` | false | Docker 沙箱后端回退开关。系统管理员也可在「设置 → 系统设置 → 网络安全」打开（DB 优先，立即生效）。默认关闭，因为本机 `docker.sock` 等同宿主机 root |
 | `WEKNORA_AGENT_LLM_TIMEOUT` | 120s | Agent 单次 LLM 调用超时（Go duration 或纯数字秒） |
 | `WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT` / `_FAIL_OPEN` | 600s / fail-close | MCP 工具人工审批等待与失败策略 |
-| `WEKNORA_CHAT_ATTACHMENT_TTL_HOURS` / `_WAIT_TIMEOUT_SEC` / `_OCR_CONCURRENCY` / `_OCR_MAX_PAGES` | 24 / 60 / 8 / 8 | 聊天附件解析保留时长、等待超时与 OCR 并发/页数上限 |
+| `WEKNORA_CHAT_ATTACHMENT_TTL_HOURS` / `_WAIT_TIMEOUT_SEC` / `_OCR_CONCURRENCY` / `_OCR_MAX_PAGES` | 24 / 60 / 8 / 8 | 未被有效会话消息引用的附件保留时长、读取解析等待超时与 OCR 并发/页数上限；已发送附件在原会话或分叉会话仍引用时不因 TTL 清理 |
 | `WEKNORA_HOUSEKEEPING_ENABLED` | 启用 | 回收卡在 processing 的脏数据 |
 | `WEKNORA_DOCUMENT_PROCESS_TIMEOUT` / `WEKNORA_DOCREADER_CALL_TIMEOUT` | 2h / 30m | 文档处理任务与单次 RPC 超时 |
 | `WEKNORA_PADDLEOCR_VL_TIMEOUT` | 1000s | 自建 PaddleOCR-VL HTTP 请求超时，支持正数 Go duration（如 `5400s`、`90m`）；空值、无效值或非正数使用默认值。外层超时需留余量，例如本项 `90m`、DocReader `100m`、文档任务 `2h` |

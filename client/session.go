@@ -218,6 +218,18 @@ type QuestionOrigin struct {
 	KnowledgeID     string `json:"knowledge_id,omitempty"`
 }
 
+// PageContext is the WeKnora page the user has open while asking an agent: a
+// knowledge base and optionally a document, a Wiki page or Wiki issues in it.
+// The agent uses it to resolve "this document" or "these issues". It is a hint
+// inside the request's retrieval scope and never widens it: a base outside the
+// scope is ignored, and parts that do not exist in the base are dropped.
+type PageContext struct {
+	KnowledgeBaseID string   `json:"knowledge_base_id"`
+	KnowledgeID     string   `json:"knowledge_id,omitempty"`
+	WikiSlug        string   `json:"wiki_slug,omitempty"`
+	WikiIssueIDs    []string `json:"wiki_issue_ids,omitempty"` // At most 20 are kept
+}
+
 // KnowledgeQARequest knowledge Q&A request
 type KnowledgeQARequest struct {
 	Query            string            `json:"query"`                     // Query text for knowledge base search
