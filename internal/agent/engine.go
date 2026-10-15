@@ -1138,11 +1138,12 @@ func (e *AgentEngine) runReActIteration(
 	*messagesPtr = e.appendToolResults(*messagesPtr, step)
 	*messagesPtr = e.appendToolImages(ctx, *messagesPtr, step)
 	if failedToolName != "" {
-		logger.Warnf(ctx, "[Agent][Round-%d] Repeated failed call to %q (%d attempts); asking the model to change strategy",
-			round, failedToolName, failedToolAttempts)
+		logger.Warnf(ctx, "[Agent][Round-%d] Repeated failed call to %q (%d attempts); "+
+			"asking the model to change strategy", round, failedToolName, failedToolAttempts)
 		guidance := fmt.Sprintf(
 			"The tool %q has failed %d consecutive times with identical arguments. "+
-				"Do not call it again with those arguments. Switch to a different tool or use another approach to complete the task.",
+				"Do not call it again with those arguments. Switch to a different tool "+
+				"or use another approach to complete the task.",
 			failedToolName, failedToolAttempts,
 		)
 		*messagesPtr = append(*messagesPtr, chat.Message{Role: "user", Content: guidance})
