@@ -28,7 +28,8 @@ const (
 	// parameter or field its value may be a string: the model-facing name.
 	extAgent = "x-agent"
 	// extAgentMaximum caps an integer parameter below what the API allows,
-	// to keep results within what the model context can use.
+	// to keep results within what the model context can use, or the length
+	// of a string list.
 	extAgentMaximum = "x-agent-maximum"
 	// extAgentMaxBytes raises the string-parameter byte cap up to
 	// maxAgentStringBytes. The default stays maxStringParamBytes.
@@ -41,6 +42,15 @@ const (
 	extAgentKeys = "x-agent-keys"
 )
 
+// agentItems is ItemTarget as written in x-agent:
+// {"param":"knowledge_ids","target":"knowledge.get","as":"knowledge_id","label":"title"}.
+type agentItems struct {
+	Param  string `json:"param"`
+	Target string `json:"target"`
+	As     string `json:"as"`
+	Label  string `json:"label"`
+}
+
 // agentOperation is the value of x-agent on an operation.
 type agentOperation struct {
 	ID   string `json:"id"`
@@ -48,6 +58,8 @@ type agentOperation struct {
 	// Target and Label declare the approval target of a mutation.
 	Target string `json:"target"`
 	Label  string `json:"label"`
+	// Items also resolves each item of a batch for the approval.
+	Items *agentItems `json:"items,omitempty"`
 	// Root overrides the projected part of the response. By default it is
 	// "data" when the body has that envelope and the body itself otherwise.
 	Root     *string `json:"root"`
@@ -177,6 +189,15 @@ func (doc *specDocument) compile(method, path string, sop specOperation) (Operat
 			return Operation{}, fmt.Errorf("%s: target and label go together", extAgent)
 		}
 		op.Target = &Target{Operation: meta.Target, Label: meta.Label}
+	}
+	if items := meta.Items; items != nil {
+		if op.Target == nil {
+			return Operation{}, fmt.Errorf("%s: items needs a target", extAgent)
+		}
+		if items.Param == "" || items.Target == "" || items.As == "" || items.Label == "" {
+			return Operation{}, fmt.Errorf("%s: items needs param, target, as and label", extAgent)
+		}
+		op.Target.Items = &ItemTarget{Param: items.Param, Operation: items.Target, As: items.As, Label: items.Label}
 	}
 
 	for _, sp := range sop.Parameters {
@@ -336,15 +357,30 @@ func (doc *specDocument) typeParam(p *Param, shape *specSchema, agentMax, agentM
 		return fmt.Errorf("unsupported type %q", shape.Type)
 	}
 	if p.Type == TypeString || p.Type == TypeStringList {
-		if agentMax != "" {
-			return fmt.Errorf("%s applies to integers only", extAgentMaximum)
+		if err := boundString(p, agentMaxBytes); err != nil {
+			return err
 		}
-		return boundString(p, agentMaxBytes)
-	}
-	if agentMaxBytes != "" {
+	} else if agentMaxBytes != "" {
 		return fmt.Errorf("%s applies to strings only", extAgentMaxBytes)
 	}
-	return boundInteger(p, shape.Minimum, shape.Maximum, agentMax)
+	switch p.Type {
+	case TypeInteger:
+		return boundInteger(p, shape.Minimum, shape.Maximum, agentMax)
+	case TypeStringList:
+		if agentMax == "" {
+			return nil
+		}
+		limit, err := strconv.Atoi(agentMax)
+		if err != nil || limit < 1 || limit > defaultMaxListItems {
+			return fmt.Errorf("%s %q must be between 1 and %d items", extAgentMaximum, agentMax, defaultMaxListItems)
+		}
+		p.MaxItems = limit
+		return nil
+	}
+	if agentMax != "" {
+		return fmt.Errorf("%s applies to integers and lists only", extAgentMaximum)
+	}
+	return nil
 }
 
 func boundString(p *Param, agentMaxBytes string) error {

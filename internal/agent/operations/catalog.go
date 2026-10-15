@@ -157,7 +157,24 @@ type Target struct {
 	Operation string
 	// Label is the result field shown to the user (e.g. "title").
 	Label string
+	// Items, for a batch mutation, also resolves every item it acts on.
+	Items *ItemTarget
 }
+
+// ItemTarget runs a read once per item of a list parameter, so the approval
+// names each item rather than showing IDs.
+type ItemTarget struct {
+	// Param is the mutation's list parameter; at most MaxApprovalItems long.
+	Param     string
+	Operation string
+	// As is the target parameter that receives each item.
+	As    string
+	Label string
+}
+
+// MaxApprovalItems bounds a batch whose items the approval resolves, so the
+// user sees every item they approve.
+const MaxApprovalItems = 20
 
 // Param returns the parameter declared under name.
 func (op Operation) Param(name string) (Param, bool) {
@@ -423,9 +440,30 @@ func (c *Catalog) validateTarget(op Operation) error {
 	if op.Target == nil {
 		return nil
 	}
-	target, ok := c.Get(op.Target.Operation)
+	if err := c.validateRead(op, op.Target.Operation, op.Target.Label, ""); err != nil {
+		return err
+	}
+	items := op.Target.Items
+	if items == nil {
+		return nil
+	}
+	list, ok := op.Param(items.Param)
+	if !ok || list.Type != TypeStringList || !list.Required {
+		return fmt.Errorf("target items %q must be a required string list", items.Param)
+	}
+	if list.MaxItems <= 0 || list.MaxItems > MaxApprovalItems {
+		return fmt.Errorf("target items %q must be capped at %d or fewer", items.Param, MaxApprovalItems)
+	}
+	return c.validateRead(op, items.Operation, items.Label, items.As)
+}
+
+// validateRead checks a target read of op: a single-object read whose
+// parameters op supplies (item, if set, is filled per item instead) and
+// whose result has label.
+func (c *Catalog) validateRead(op Operation, id, label, item string) error {
+	target, ok := c.Get(id)
 	if !ok {
-		return fmt.Errorf("target %q is not in the catalog", op.Target.Operation)
+		return fmt.Errorf("target %q is not in the catalog", id)
 	}
 	if target.Risk != RiskRead {
 		return fmt.Errorf("target %q must be a read operation", target.ID)
@@ -433,7 +471,19 @@ func (c *Catalog) validateTarget(op Operation) error {
 	if target.Result.List {
 		return fmt.Errorf("target %q must return a single object", target.ID)
 	}
+	if item != "" {
+		p, ok := target.Param(item)
+		if !ok || p.Type != TypeString || !p.Required {
+			return fmt.Errorf("target %q has no required string param %q for each item", target.ID, item)
+		}
+		if _, clash := op.Param(item); clash {
+			return fmt.Errorf("target item param %q is also a param of %q", item, op.ID)
+		}
+	}
 	for _, p := range target.Params {
+		if p.Name == item {
+			continue
+		}
 		own, ok := op.Param(p.Name)
 		if !ok || own.Type != p.Type {
 			return fmt.Errorf("target param %q is not declared with the same type", p.Name)
@@ -442,16 +492,12 @@ func (c *Catalog) validateTarget(op Operation) error {
 			return fmt.Errorf("target param %q is required by the target", p.Name)
 		}
 	}
-	labelled := false
 	for _, f := range target.Result.Fields {
-		if f.outputKey() == op.Target.Label {
-			labelled = true
+		if f.outputKey() == label {
+			return nil
 		}
 	}
-	if !labelled {
-		return fmt.Errorf("target label %q is not a result field of %q", op.Target.Label, target.ID)
-	}
-	return nil
+	return fmt.Errorf("target label %q is not a result field of %q", label, target.ID)
 }
 
 // parseRoute checks that route is a clean absolute path in an allowed area

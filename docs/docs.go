@@ -6705,6 +6705,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "源知识库 ID",
                         "name": "id",
                         "in": "path",
@@ -6757,7 +6758,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "knowledge_base.list_move_targets",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Knowledge bases the documents of this one can be moved to: same type and embedding model."
             }
         },
         "/knowledge-bases/{id}/pin": {
@@ -7668,7 +7674,20 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "knowledge.batch_delete",
+                    "items": {
+                        "as": "knowledge_id",
+                        "label": "title",
+                        "param": "knowledge_ids",
+                        "target": "knowledge.get"
+                    },
+                    "label": "name",
+                    "risk": "destructive",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Removes up to 20 documents of one knowledge base with their chunks, embeddings and graph data. Cannot be undone; the confirmation lists every document."
             }
         },
         "/knowledge/batch-reparse": {
@@ -7975,7 +7994,19 @@ const docTemplate = `{
                     "200": {
                         "description": "任务信息",
                         "schema": {
-                            "$ref": "#/definitions/internal_handler.MoveKnowledgeResponse"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.MoveKnowledgeResponse"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "400": {
@@ -7984,7 +8015,20 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "knowledge.move",
+                    "items": {
+                        "as": "knowledge_id",
+                        "label": "title",
+                        "param": "knowledge_ids",
+                        "target": "knowledge.get"
+                    },
+                    "label": "name",
+                    "risk": "write",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Moves up to 20 documents to another knowledge base of the same workspace; knowledge_base_id is the destination, from knowledge_base.list_move_targets. Runs in the background; follow with knowledge.get_move_progress."
             }
         },
         "/knowledge/move/progress/{task_id}": {
@@ -8008,6 +8052,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": true,
                         "description": "移动任务 ID",
                         "name": "task_id",
                         "in": "path",
@@ -8018,7 +8063,19 @@ const docTemplate = `{
                     "200": {
                         "description": "进度信息",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeMoveProgress"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeMoveProgress"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "404": {
@@ -8027,6 +8084,10 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "knowledge.get_move_progress",
+                    "risk": "read"
                 }
             }
         },
@@ -26303,29 +26364,39 @@ const docTemplate = `{
                 },
                 "error": {
                     "description": "错误信息",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "failed": {
                     "description": "失败数",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "message": {
                     "description": "状态消息",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "processed": {
                     "description": "已处理数",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "progress": {
                     "description": "0-100",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "source_kb_id": {
                     "type": "string"
                 },
                 "status": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KBCloneTaskStatus"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KBCloneTaskStatus"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "target_kb_id": {
                     "type": "string"
@@ -26335,7 +26406,8 @@ const docTemplate = `{
                 },
                 "total": {
                     "description": "总知识数",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "updated_at": {
                     "description": "最后更新时间",
@@ -32612,13 +32684,18 @@ const docTemplate = `{
             ],
             "properties": {
                 "ids": {
+                    "description": "Documents to delete.",
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": "knowledge_ids",
+                    "x-agent-maximum": "20"
                 },
                 "kb_id": {
-                    "type": "string"
+                    "description": "Knowledge base the documents belong to.",
+                    "type": "string",
+                    "x-agent": "knowledge_base_id"
                 }
             }
         },
@@ -34343,24 +34420,33 @@ const docTemplate = `{
             ],
             "properties": {
                 "knowledge_ids": {
+                    "description": "Documents to move.",
                     "type": "array",
                     "minItems": 1,
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true,
+                    "x-agent-maximum": "20"
                 },
                 "mode": {
+                    "description": "reuse_vectors keeps the embeddings; reparse processes the documents again.",
                     "type": "string",
                     "enum": [
                         "reuse_vectors",
                         "reparse"
-                    ]
+                    ],
+                    "x-agent": true
                 },
                 "source_kb_id": {
-                    "type": "string"
+                    "description": "Knowledge base the documents are in now.",
+                    "type": "string",
+                    "x-agent": "source_knowledge_base_id"
                 },
                 "target_kb_id": {
-                    "type": "string"
+                    "description": "Knowledge base to move them to.",
+                    "type": "string",
+                    "x-agent": "knowledge_base_id"
                 }
             }
         },
@@ -34368,7 +34454,8 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "knowledge_count": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "message": {
                     "type": "string"
@@ -34380,7 +34467,8 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "task_id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -35168,7 +35256,8 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "deleted_count": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "reparse_count": {
                     "type": "integer",

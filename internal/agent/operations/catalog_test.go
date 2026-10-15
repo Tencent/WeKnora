@@ -98,6 +98,52 @@ func TestNewCatalogChecksTargets(t *testing.T) {
 	assert.Error(t, err, "target needs a param the mutation does not declare")
 }
 
+func TestNewCatalogChecksItemTargets(t *testing.T) {
+	kb := Param{Name: "knowledge_base_id", In: InPath, Key: "id", Type: TypeString, Required: true, Description: "d"}
+	doc := Param{Name: "knowledge_id", In: InPath, Key: "id", Type: TypeString, Required: true, Description: "d"}
+	ids := Param{Name: "knowledge_ids", In: InBody, Key: "ids", Type: TypeStringList, Required: true,
+		Description: "d", MaxItems: MaxApprovalItems}
+	getKB := readOp("knowledge_base.get", "/api/v1/knowledge-bases/:id", kb)
+	getDoc := readOp("knowledge.get", "/api/v1/knowledge/:id", doc)
+	batch := func(mut func(*Operation)) Operation {
+		kbBody := kb
+		kbBody.In, kbBody.Key = InBody, "kb_id"
+		op := Operation{
+			ID: "knowledge.batch_delete", Summary: "s", Risk: RiskDestructive, Method: http.MethodPost,
+			Route: "/api/v1/knowledge/batch-delete", Params: []Param{kbBody, ids},
+			Target: &Target{Operation: "knowledge_base.get", Label: "title", Items: &ItemTarget{
+				Param: "knowledge_ids", Operation: "knowledge.get", As: "knowledge_id", Label: "title",
+			}},
+		}
+		if mut != nil {
+			mut(&op)
+		}
+		return op
+	}
+	_, err := NewCatalog(getKB, getDoc, batch(nil))
+	require.NoError(t, err)
+
+	cases := map[string]func(*Operation){
+		"uncapped list": func(op *Operation) { op.Params[1].MaxItems = 0 },
+		"list longer than an approval shows": func(op *Operation) {
+			op.Params[1].MaxItems = MaxApprovalItems + 1
+		},
+		"items param is not a list":   func(op *Operation) { op.Target.Items.Param = "knowledge_base_id" },
+		"item param the target lacks": func(op *Operation) { op.Target.Items.As = "chunk_id" },
+		"item param shadows a param": func(op *Operation) {
+			op.Params = append(op.Params, Param{Name: "knowledge_id", In: InBody, Type: TypeString, Description: "d"})
+		},
+		"item label not projected":  func(op *Operation) { op.Target.Items.Label = "name" },
+		"item target is a mutation": func(op *Operation) { op.Target.Items.Operation = "knowledge.batch_delete" },
+	}
+	for name, mut := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewCatalog(getKB, getDoc, batch(mut))
+			assert.Error(t, err)
+		})
+	}
+}
+
 func raw(v any) json.RawMessage {
 	b, _ := json.Marshal(v)
 	return b

@@ -188,6 +188,14 @@ func TestFromSpecRejectsBadAnnotations(t *testing.T) {
 		"catch-all before the last segment": {
 			`{"id": "doc.list", "risk": "read"}`, `{"id": "doc.list", "risk": "read", "catch_all": "id"}`,
 		},
+		"items without a target": {
+			`{"id": "doc.get", "risk": "read"}`,
+			`{"id": "doc.get", "risk": "read", "items": {"param": "a", "target": "b", "as": "c", "label": "d"}}`,
+		},
+		"items missing a key": {
+			`"target": "doc.get", "label": "title"`,
+			`"target": "doc.get", "label": "title", "items": {"param": "knowledge_ids", "target": "doc.get"}`,
+		},
 		"catch-all naming no segment": {
 			`{"id": "doc.get", "risk": "read"}`, `{"id": "doc.get", "risk": "read", "catch_all": "slug"}`,
 		},
@@ -267,6 +275,9 @@ func TestBuiltinMatchesHandlerAnnotations(t *testing.T) {
 		meta := agentOperation{ID: op.ID, Risk: op.Risk}
 		if op.Target != nil {
 			meta.Target, meta.Label = op.Target.Operation, op.Target.Label
+			if it := op.Target.Items; it != nil {
+				meta.Items = &agentItems{Param: it.Param, Target: it.Operation, As: it.As, Label: it.Label}
+			}
 		}
 		if i := strings.LastIndex(op.Route, "/*"); i >= 0 {
 			meta.CatchAll = op.Route[i+2:]

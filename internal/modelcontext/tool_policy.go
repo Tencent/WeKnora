@@ -45,7 +45,8 @@ var sourceKeySpaces = map[string]sourceKeySpace{
 	"source_refs":    spaceDocumentRef,
 	"knowledge_base": spaceKnowledgeBase, "knowledge_base_id": spaceKnowledgeBase,
 	"knowledge_base_ids": spaceKnowledgeBase, "kb_id": spaceKnowledgeBase, "kb_ids": spaceKnowledgeBase,
-	"url": spaceWeb, "urls": spaceWeb,
+	"source_knowledge_base_id": spaceKnowledgeBase,
+	"url":                      spaceWeb, "urls": spaceWeb,
 	"id": spaceAnySource,
 }
 
@@ -169,7 +170,7 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 	// come back as handles. Catalog metadata itself carries no identifiers.
 	"find_operations": {},
 	"run_operation": {
-		sourceIDKeys:        map[string]struct{}{"knowledge_base_id": {}, "knowledge_id": {}, "knowledge_ids": {}},
+		sourceIDKeys:        map[string]struct{}{"knowledge_base_id": {}, "source_knowledge_base_id": {}, "knowledge_id": {}, "knowledge_ids": {}},
 		decodedIssueIDKeys:  map[string]struct{}{"issue_id": {}},
 		encodedIssueIDKeys:  map[string]struct{}{"issue_id": {}},
 		encodeKnownIssueIDs: true,

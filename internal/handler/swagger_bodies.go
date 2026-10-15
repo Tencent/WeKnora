@@ -254,7 +254,7 @@ type FolderMoveData struct {
 // task_id is omitted when the knowledge base was already empty.
 type SubmittedTaskData struct {
 	TaskID       string `json:"task_id,omitempty"`
-	DeletedCount int    `json:"deleted_count,omitempty"`
+	DeletedCount int    `json:"deleted_count,omitempty" extensions:"x-agent"`
 	ReparseCount int    `json:"reparse_count,omitempty" extensions:"x-agent"`
 }
 

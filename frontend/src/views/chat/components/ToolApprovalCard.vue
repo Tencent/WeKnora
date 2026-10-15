@@ -1,7 +1,10 @@
 <template>
   <div v-if="interactive" class="prompt-panel" @click.stop>
     <div class="prompt-question">{{ $t('agentStream.toolApproval.dockQuestion', { target: targetLabel }) }}</div>
-    <div v-if="description" class="prompt-desc">{{ description }}</div>
+    <div v-if="descriptionParts.head" class="prompt-desc">{{ descriptionParts.head }}</div>
+    <ul v-if="descriptionParts.items.length" class="prompt-desc-items">
+      <li v-for="(item, i) in descriptionParts.items" :key="i">{{ item }}</li>
+    </ul>
 
     <div v-if="hasArgs" class="prompt-args">
       <button type="button" class="prompt-args-toggle" :aria-expanded="argsExpanded" @click="toggleArgs">
@@ -142,6 +145,20 @@ const interactive = computed(() => open.value && (props.variant === 'dock' || !d
 const awaitingInDock = computed(() => open.value && props.variant !== 'dock' && Boolean(dock?.isDocked(props.pendingId)))
 
 const hasArgs = computed(() => argsText.value.trim().length > 0)
+
+// A batch operation ends its description with one "- " line per item it acts
+// on; those render as a list so every item stays visible.
+const descriptionParts = computed(() => {
+  const lines = (props.description || '').split('\n')
+  const start = lines.findIndex((line) => line.startsWith('- '))
+  if (start < 0 || !lines.slice(start).every((line) => line.startsWith('- '))) {
+    return { head: (props.description || '').trim(), items: [] as string[] }
+  }
+  return {
+    head: lines.slice(0, start).join('\n').trim(),
+    items: lines.slice(start).map((line) => line.slice(2)),
+  }
+})
 
 const isJsonValid = computed(() => {
   if (!argsText.value.trim()) return true

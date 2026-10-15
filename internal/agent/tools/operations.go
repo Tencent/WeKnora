@@ -419,11 +419,60 @@ func (t *RunOperationTool) describeTarget(
 	input runOperationInput,
 	identity operations.Identity,
 ) (string, *types.ToolResult) {
-	target, ok := t.rt.Catalog.Get(op.Target.Operation)
+	items := op.Target.Items
+	var ids []string
+	if items != nil {
+		if raw, ok := input.Params[items.Param]; ok {
+			if err := json.Unmarshal(raw, &ids); err != nil {
+				return "", operationFailure(fmt.Sprintf("invalid params for %s: %s must be an array of strings",
+					op.ID, items.Param))
+			}
+		}
+		if len(ids) > operations.MaxApprovalItems {
+			return "", operationFailure(fmt.Sprintf("invalid params for %s: %s accepts at most %d items",
+				op.ID, items.Param, operations.MaxApprovalItems))
+		}
+	}
+	label, blocked := t.readLabel(ctx, op, op.Target.Operation, op.Target.Label, input.Params, identity)
+	if blocked != nil || items == nil {
+		return label, blocked
+	}
+	lines := []string{label}
+	for _, id := range ids {
+		encoded, err := json.Marshal(id)
+		if err != nil {
+			return "", operationFailure(err.Error())
+		}
+		params := make(map[string]json.RawMessage, len(input.Params)+1)
+		for k, v := range input.Params {
+			params[k] = v
+		}
+		params[items.As] = encoded
+		itemLabel, blocked := t.readLabel(ctx, op, items.Operation, items.Label, params, identity)
+		if blocked != nil {
+			return "", blocked
+		}
+		if itemLabel == "" {
+			itemLabel = id
+		}
+		lines = append(lines, "- "+itemLabel)
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n")), nil
+}
+
+// readLabel runs one target read of op and returns the label field.
+func (t *RunOperationTool) readLabel(
+	ctx context.Context,
+	op operations.Operation,
+	targetID, label string,
+	params map[string]json.RawMessage,
+	identity operations.Identity,
+) (string, *types.ToolResult) {
+	target, ok := t.rt.Catalog.Get(targetID)
 	if !ok {
 		return "", operationFailure(fmt.Sprintf("%s is misconfigured", op.ID))
 	}
-	call, err := target.Build(operations.SelectParams(target, input.Params))
+	call, err := target.Build(operations.SelectParams(target, params))
 	if err != nil {
 		return "", operationFailure(fmt.Sprintf("invalid params for %s: %v", op.ID, err))
 	}
@@ -439,7 +488,7 @@ func (t *RunOperationTool) describeTarget(
 	if err != nil {
 		return "", operationFailure(fmt.Sprintf("%s returned an unexpected response", target.ID))
 	}
-	return projected.Label(op.Target.Label), nil
+	return projected.Label(label), nil
 }
 
 func approvalDescription(op operations.Operation, label, detail string) string {

@@ -1353,7 +1353,7 @@ func validateKnowledgeBasePromptInstructions(kb *types.KnowledgeBase) error {
 // @Description  返回与源知识库 Type 一致、EmbeddingModelID 一致、非临时且不是自身的目标知识库列表
 // @Tags         知识库
 // @Produce      json
-// @Param        id   path      string                  true  "源知识库 ID"
+// @Param        id   path      string                  true  "源知识库 ID"  extensions(x-agent=knowledge_base_id)
 // @Success      200  {object}  handler.DataResponse{data=[]types.KnowledgeBase}  "可移动目标列表"
 // @Failure      400  {object}  errors.AppError                                   "请求参数错误"
 // @Failure      401  {object}  errors.AppError                                   "未认证"
@@ -1361,6 +1361,8 @@ func validateKnowledgeBasePromptInstructions(kb *types.KnowledgeBase) error {
 // @Failure      404  {object}  errors.AppError                                   "知识库不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge_base.list_move_targets","risk":"read"}
+// @x-agent-hint "Knowledge bases the documents of this one can be moved to: same type and embedding model."
 // @Router       /knowledge-bases/{id}/move-targets [get]
 func (h *KnowledgeBaseHandler) ListMoveTargets(c *gin.Context) {
 	ctx := c.Request.Context()

@@ -1857,8 +1857,10 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 
 // BatchDeleteKnowledgeRequest is the body schema for POST /knowledge/batch-delete.
 type BatchDeleteKnowledgeRequest struct {
-	KBID string   `json:"kb_id" binding:"required"`
-	IDs  []string `json:"ids"  binding:"required"`
+	// Knowledge base the documents belong to.
+	KBID string `json:"kb_id" binding:"required" extensions:"x-agent=knowledge_base_id"`
+	// Documents to delete.
+	IDs []string `json:"ids"  binding:"required" extensions:"x-agent=knowledge_ids,x-agent-maximum=20"`
 }
 
 // BatchDeleteKnowledge godoc
@@ -1873,6 +1875,8 @@ type BatchDeleteKnowledgeRequest struct {
 // @Failure      403      {object}  errors.AppError              "权限不足"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.batch_delete","risk":"destructive","target":"knowledge_base.get","label":"name","items":{"param":"knowledge_ids","target":"knowledge.get","as":"knowledge_id","label":"title"}}
+// @x-agent-hint "Removes up to 20 documents of one knowledge base with their chunks, embeddings and graph data. Cannot be undone; the confirmation lists every document."
 // @Router       /knowledge/batch-delete [post]
 func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -2957,18 +2961,22 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 
 // MoveKnowledgeRequest defines the request for moving knowledge items
 type MoveKnowledgeRequest struct {
-	KnowledgeIDs []string `json:"knowledge_ids" binding:"required,min=1"`
-	SourceKBID   string   `json:"source_kb_id"  binding:"required"`
-	TargetKBID   string   `json:"target_kb_id"  binding:"required"`
-	Mode         string   `json:"mode"          binding:"required,oneof=reuse_vectors reparse"`
+	// Documents to move.
+	KnowledgeIDs []string `json:"knowledge_ids" binding:"required,min=1" extensions:"x-agent,x-agent-maximum=20"`
+	// Knowledge base the documents are in now.
+	SourceKBID string `json:"source_kb_id"  binding:"required" extensions:"x-agent=source_knowledge_base_id"`
+	// Knowledge base to move them to.
+	TargetKBID string `json:"target_kb_id"  binding:"required" extensions:"x-agent=knowledge_base_id"`
+	// reuse_vectors keeps the embeddings; reparse processes the documents again.
+	Mode string `json:"mode"          binding:"required,oneof=reuse_vectors reparse" enums:"reuse_vectors,reparse" extensions:"x-agent"`
 }
 
 // MoveKnowledgeResponse defines the response for move knowledge
 type MoveKnowledgeResponse struct {
-	TaskID         string `json:"task_id"`
+	TaskID         string `json:"task_id" extensions:"x-agent"`
 	SourceKBID     string `json:"source_kb_id"`
 	TargetKBID     string `json:"target_kb_id"`
-	KnowledgeCount int    `json:"knowledge_count"`
+	KnowledgeCount int    `json:"knowledge_count" extensions:"x-agent"`
 	Message        string `json:"message"`
 }
 
@@ -2981,10 +2989,12 @@ type MoveKnowledgeResponse struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      handler.MoveKnowledgeRequest  true  "{source_kb_id, target_kb_id, knowledge_ids}"
-// @Success      200      {object}  handler.MoveKnowledgeResponse  "任务信息"
+// @Success      200      {object}  handler.DataResponse{data=handler.MoveKnowledgeResponse}  "任务信息"
 // @Failure      400      {object}  errors.AppError                "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.move","risk":"write","target":"knowledge_base.get","label":"name","items":{"param":"knowledge_ids","target":"knowledge.get","as":"knowledge_id","label":"title"}}
+// @x-agent-hint "Moves up to 20 documents to another knowledge base of the same workspace; knowledge_base_id is the destination, from knowledge_base.list_move_targets. Runs in the background; follow with knowledge.get_move_progress."
 // @Router       /knowledge/move [post]
 func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -3178,11 +3188,12 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 // @Description  按任务 ID 查询移动进度
 // @Tags         知识
 // @Produce      json
-// @Param        task_id  path      string                       true  "移动任务 ID"
-// @Success      200      {object}  types.KnowledgeMoveProgress  "进度信息"
+// @Param        task_id  path      string                       true  "移动任务 ID"  extensions(x-agent)
+// @Success      200      {object}  handler.DataResponse{data=types.KnowledgeMoveProgress}  "进度信息"
 // @Failure      404      {object}  errors.AppError              "任务不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.get_move_progress","risk":"read"}
 // @Router       /knowledge/move/progress/{task_id} [get]
 func (h *KnowledgeHandler) GetKnowledgeMoveProgress(c *gin.Context) {
 	ctx := c.Request.Context()

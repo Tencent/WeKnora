@@ -181,6 +181,49 @@ func TestRunOperationApprovedMutation(t *testing.T) {
 	assert.Equal(t, []string{"p1"}, gate.executed)
 }
 
+func TestRunOperationBatchApprovalNamesEveryItem(t *testing.T) {
+	responses := map[string]*operations.Response{
+		"GET /api/v1/knowledge-bases/kb1": {
+			Status: http.StatusOK, Body: []byte(`{"success":true,"data":{"id":"kb1","name":"Finance"}}`),
+		},
+		"GET /api/v1/knowledge/k1": {Status: http.StatusOK, Body: []byte(docBody)},
+		"GET /api/v1/knowledge/k2": {
+			Status: http.StatusOK, Body: []byte(`{"success":true,"data":{"id":"k2","title":"Q4 plan.docx"}}`),
+		},
+		"POST /api/v1/knowledge/batch-delete": {
+			Status: http.StatusOK, Body: []byte(`{"success":true,"data":{"task_id":"t1","deleted_count":2}}`),
+		},
+	}
+	d := &fakeDispatcher{responses: responses}
+	gate := &fakeApprover{decision: approval.Decision{Approved: true, PendingID: "p1"}}
+	params := map[string]any{"knowledge_base_id": "kb1", "knowledge_ids": []string{"k1", "k2"}}
+
+	res, _ := newRunTool(d, gate).Execute(interactiveCtx(), runArgs("knowledge.batch_delete", params))
+	require.True(t, res.Success, res.Error)
+	require.Len(t, gate.requests, 1)
+	assert.Equal(t, "批量删除知识\nFinance\n- Q3 report.pdf\n- Q4 plan.docx", gate.requests[0].Description)
+	assert.Contains(t, res.Output, `"deleted_count":2`)
+
+	d = &fakeDispatcher{responses: responses}
+	gate = &fakeApprover{decision: approval.Decision{Approved: true, PendingID: "p1"}}
+	params["knowledge_ids"] = []string{"k1", "k-other"}
+	res, _ = newRunTool(d, gate).Execute(interactiveCtx(), runArgs("knowledge.batch_delete", params))
+	assert.False(t, res.Success)
+	assert.Contains(t, res.Error, "Knowledge not found")
+	assert.Empty(t, gate.requests, "one item the user cannot see blocks the whole batch")
+
+	ids := make([]string, operations.MaxApprovalItems+1)
+	for i := range ids {
+		ids[i] = "k1"
+	}
+	params["knowledge_ids"] = ids
+	d = &fakeDispatcher{responses: responses}
+	res, _ = newRunTool(d, gate).Execute(interactiveCtx(), runArgs("knowledge.batch_delete", params))
+	assert.False(t, res.Success)
+	assert.Contains(t, res.Error, "at most 20")
+	assert.Empty(t, d.calls)
+}
+
 func TestRunOperationDeclinedOrEditedToAnotherOperation(t *testing.T) {
 	responses := map[string]*operations.Response{
 		"GET /api/v1/knowledge/k1": {Status: http.StatusOK, Body: []byte(docBody)},
@@ -290,7 +333,7 @@ func TestRunOperationApprovalNamesTheChange(t *testing.T) {
 
 func TestFindOperationsDescribesMatches(t *testing.T) {
 	tool := NewFindOperationsTool(operations.Builtin())
-	res, err := tool.Execute(context.Background(), json.RawMessage(`{"query":"delete"}`))
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"query":"knowledge.delete"}`))
 	require.NoError(t, err)
 	require.True(t, res.Success)
 	var out struct {

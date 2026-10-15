@@ -276,11 +276,23 @@
   font-size: var(--agent-step-summary-size, 13px);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
+  white-space: pre-line;
   word-break: break-word;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.prompt-desc-items {
+  margin: -4px 0 0;
+  padding-left: 18px;
+  max-height: calc(1.55em * 8);
+  overflow-y: auto;
+  font-size: var(--agent-step-summary-size, 13px);
+  line-height: 1.55;
+  color: var(--td-text-color-secondary);
+  word-break: break-word;
 }
 
 .prompt-options {
