@@ -4401,7 +4401,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "knowledge_base.create",
+                    "label_param": "name",
+                    "risk": "write"
+                },
+                "x-agent-hint": "Creates a knowledge base owned by the user. Omit type for document. Omit indexing flags for vector and keyword search. Set embedding_model_id and summary_model_id from model.list. vector_store_id can be chosen only now. A field you leave out keeps its default."
             }
         },
         "/knowledge-bases/copy": {
@@ -4721,6 +4727,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "知识库ID",
                         "name": "id",
                         "in": "path",
@@ -4752,7 +4759,99 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "knowledge_base.delete",
+                    "label": "name",
+                    "risk": "destructive",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Deletes the knowledge base and every document in it. Cannot be undone. Only the owner can delete it."
+            },
+            "patch": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "修改请求里出现的设置。未出现的字段保持不变，包括分块、索引和模型里没写到的项。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库"
+                ],
+                "summary": "部分更新知识库",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "knowledge_base_id",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "要修改的字段",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.PatchKnowledgeBaseRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "更新后的知识库",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.KnowledgeBaseView"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "无权限",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "知识库不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "knowledge_base.update",
+                    "label": "name",
+                    "risk": "write",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Changes the settings you send; a field left out is kept, including one indexing flag or one chunking field. Model ids come from model.list. embedding_model_id cannot change after documents exist. vector_store_id cannot be changed. Graph node types stay in the knowledge base editor."
             }
         },
         "/knowledge-bases/{id}/activity": {
@@ -6775,7 +6874,7 @@ const docTemplate = `{
                     "risk": "write",
                     "target": "knowledge_base.get"
                 },
-                "x-agent-hint": "Creates a Markdown document. status=draft (the default) keeps it out of search; publish indexes it."
+                "x-agent-hint": "Creates a Markdown document. Send the full content, and status draft to keep it out of search or publish to index it."
             }
         },
         "/knowledge-bases/{id}/knowledge/url": {
@@ -7397,6 +7496,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "知识库ID",
                         "name": "id",
                         "in": "path",
@@ -7408,18 +7508,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object",
-                            "properties": {
-                                "color": {
-                                    "type": "string"
-                                },
-                                "name": {
-                                    "type": "string"
-                                },
-                                "sort_order": {
-                                    "type": "integer"
-                                }
-                            }
+                            "$ref": "#/definitions/internal_handler.CreateTagRequest"
                         }
                     }
                 ],
@@ -7448,7 +7537,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "knowledge_base.create_tag",
+                    "label": "name",
+                    "risk": "write",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Creates a tag in the knowledge base. Pass the returned tag id to knowledge.set_tags."
             }
         },
         "/knowledge-bases/{id}/tags/{tag_id}": {
@@ -7475,6 +7571,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "知识库ID",
                         "name": "id",
                         "in": "path",
@@ -7482,6 +7579,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "x-agent": "tag_id",
                         "description": "标签ID (UUID或seq_id)",
                         "name": "tag_id",
                         "in": "path",
@@ -7493,7 +7591,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/internal_handler.UpdateTagRequest"
                         }
                     }
                 ],
@@ -7522,7 +7620,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "knowledge_base.update_tag",
+                    "label": "name",
+                    "risk": "write",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Renames a tag. tag_id comes from knowledge_base.list_tags. A field left out is kept."
             },
             "delete": {
                 "security": [
@@ -7547,6 +7652,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "知识库ID",
                         "name": "id",
                         "in": "path",
@@ -7554,6 +7660,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "x-agent": "tag_id",
                         "description": "标签ID (UUID或seq_id)",
                         "name": "tag_id",
                         "in": "path",
@@ -7593,7 +7700,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "knowledge_base.delete_tag",
+                    "label": "name",
+                    "risk": "destructive",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Deletes a tag that no document uses. If documents still use it, this fails; take the tag off them with knowledge.set_tags first. Documents are not deleted."
             }
         },
         "/knowledge-chat/{session_id}": {
@@ -8091,6 +8205,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_id",
                         "description": "知识ID",
                         "name": "id",
                         "in": "path",
@@ -8131,7 +8246,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "knowledge.update_manual",
+                    "label": "title",
+                    "risk": "write",
+                    "target": "knowledge.get"
+                },
+                "x-agent-hint": "Replaces the whole Markdown of a document created as manual knowledge. Send the complete content, not a diff. status draft keeps it out of search; publish indexes it. Uploaded files cannot be edited this way."
             }
         },
         "/knowledge/move": {
@@ -8355,7 +8477,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的空间解析",
+                "description": "批量更新知识条目的标签。传 updates，或传 knowledge_ids 与 tag_ids。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的空间解析",
                 "consumes": [
                     "application/json"
                 ],
@@ -8368,12 +8490,12 @@ const docTemplate = `{
                 "summary": "批量更新知识标签",
                 "parameters": [
                     {
-                        "description": "标签更新请求（updates 必填，kb_id 可选）",
+                        "description": "标签更新请求",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/internal_handler.KnowledgeTagBatchRequest"
                         }
                     }
                 ],
@@ -8390,7 +8512,20 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "knowledge.set_tags",
+                    "items": {
+                        "as": "knowledge_id",
+                        "label": "title",
+                        "param": "knowledge_ids",
+                        "target": "knowledge.get"
+                    },
+                    "label": "name",
+                    "risk": "write",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Sets the same tags on up to 20 documents in one knowledge base, replacing the tags they have now. tag_ids come from knowledge_base.list_tags; an empty tag_ids clears every tag. It does not delete documents."
             }
         },
         "/knowledge/{id}": {
@@ -22890,14 +23025,19 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "enabled": {
-                    "type": "boolean"
+                    "description": "Enabled turns speech transcription on. Also send asr_model_id.",
+                    "type": "boolean",
+                    "x-agent": "asr_enabled"
                 },
                 "language": {
-                    "description": "optional: language hint for transcription",
-                    "type": "string"
+                    "description": "Language is an optional hint for transcription, such as zh or en.",
+                    "type": "string",
+                    "x-agent": "asr_language"
                 },
                 "model_id": {
-                    "type": "string"
+                    "description": "Model that transcribes audio. model.list returns the ids.",
+                    "type": "string",
+                    "x-agent": "asr_model_id"
                 }
             }
         },
@@ -23399,17 +23539,26 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "enabled": {
-                    "type": "boolean"
+                    "description": "Enabled turns automatic tagging on. The model picks from tags that already exist.",
+                    "type": "boolean",
+                    "x-agent": "auto_tag_enabled"
                 },
                 "max_tags": {
-                    "type": "integer"
+                    "description": "MaxTags is how many tags one document may receive, from 1 to 10.",
+                    "type": "integer",
+                    "maximum": 10,
+                    "minimum": 1,
+                    "x-agent": "auto_tag_max_tags"
                 },
                 "model_id": {
-                    "type": "string"
+                    "description": "ModelID overrides the summary model. Empty uses summary_model_id.",
+                    "type": "string",
+                    "x-agent": "auto_tag_model_id"
                 },
                 "skip_if_tagged": {
-                    "description": "SkipIfTagged leaves documents that already carry tags untouched, so a\ndeliberate manual classification is not diluted by model guesses. It is\na pointer because the default is true: rows written before this field\nexisted decode to nil and must not silently flip to \"always append\".",
-                    "type": "boolean"
+                    "description": "SkipIfTagged leaves a document alone when it already has tags. Empty means yes.",
+                    "type": "boolean",
+                    "x-agent": "auto_tag_skip_if_tagged"
                 }
             }
         },
@@ -23790,30 +23939,45 @@ const docTemplate = `{
             "properties": {
                 "child_chunk_size": {
                     "description": "ChildChunkSize is the size of child chunks used for embedding (default: 384).\nOnly used when EnableParentChild is true.",
-                    "type": "integer"
+                    "type": "integer",
+                    "maximum": 10000,
+                    "minimum": 1,
+                    "x-agent": true
                 },
                 "chunk_overlap": {
-                    "description": "Chunk overlap",
-                    "type": "integer"
+                    "description": "Chunk overlap in characters.",
+                    "type": "integer",
+                    "maximum": 5000,
+                    "minimum": 0,
+                    "x-agent": true
                 },
                 "chunk_size": {
-                    "description": "Chunk size",
-                    "type": "integer"
+                    "description": "Chunk size in characters. Empty on create uses the server default.",
+                    "type": "integer",
+                    "maximum": 10000,
+                    "minimum": 100,
+                    "x-agent": true
                 },
                 "enable_parent_child": {
-                    "description": "EnableParentChild enables two-level parent-child chunking strategy.\nWhen enabled, large parent chunks provide context while small child chunks\nare used for vector matching. Retrieval matches on child but returns parent content.",
-                    "type": "boolean"
+                    "description": "EnableParentChild splits into large parent chunks and small child chunks. Search matches a child and returns its parent.",
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "languages": {
-                    "description": "Languages hints the heuristic patterns. Empty = auto-detect from content.\nExamples: [\"de\"], [\"en\", \"zh\"].",
+                    "description": "Languages hints the splitter, for example de or zh. Empty detects the language from the document.",
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true,
+                    "x-agent-maximum": "20"
                 },
                 "parent_chunk_size": {
                     "description": "ParentChunkSize is the size of parent chunks (default: 4096).\nOnly used when EnableParentChild is true.",
-                    "type": "integer"
+                    "type": "integer",
+                    "maximum": 20000,
+                    "minimum": 1,
+                    "x-agent": true
                 },
                 "parser_engine_rules": {
                     "description": "ParserEngineRules configures which parser engine to use for each file type.\nWhen empty, DefaultParserEngine is used (builtin/simple routing, except\ntypes that only a specific engine can parse: ppt/pptx fall back to\nmarkitdown). A linked anydoc binding is preferred for every type it\nconverts.",
@@ -23823,23 +23987,39 @@ const docTemplate = `{
                     }
                 },
                 "separators": {
-                    "description": "Separators",
+                    "description": "Separators, in the order they are tried.",
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true,
+                    "x-agent-maximum": "20"
                 },
                 "strategy": {
-                    "description": "Strategy selects the adaptive chunking tier. Empty / \"legacy\" preserves\nthe historical recursive splitter; \"auto\" lets a profiler pick between\nheading-aware, heuristic and recursive tiers; \"heading\" / \"heuristic\" /\n\"recursive\" pin the tier explicitly.",
-                    "type": "string"
+                    "description": "Strategy selects how documents are split: auto, heading, heuristic, recursive or legacy. Empty keeps the server default.",
+                    "type": "string",
+                    "enum": [
+                        "auto",
+                        "heading",
+                        "heuristic",
+                        "recursive",
+                        "legacy"
+                    ],
+                    "x-agent": true
                 },
                 "table_metadata_instructions": {
-                    "description": "TableMetadataInstructions contains optional business guidance used when\ngenerating searchable summaries for CSV/Excel tables. The system-owned\noutput contract remains fixed; these instructions only add domain context.",
-                    "type": "string"
+                    "description": "TableMetadataInstructions is extra guidance for CSV and Excel summaries. The output format stays fixed.",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-detail": true,
+                    "x-agent-max-bytes": "4000"
                 },
                 "token_limit": {
-                    "description": "TokenLimit caps chunk size in approximate tokens. 0 = use ChunkSize\nas a character count.",
-                    "type": "integer"
+                    "description": "TokenLimit caps chunk size in approximate tokens. 0 uses ChunkSize as a character count.",
+                    "type": "integer",
+                    "maximum": 100000,
+                    "minimum": 0,
+                    "x-agent": true
                 }
             }
         },
@@ -24732,11 +24912,16 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "custom_instructions": {
-                    "description": "CustomInstructions adds domain-specific extraction guidance while the\nsystem keeps ownership of the structured graph output protocol.",
-                    "type": "string"
+                    "description": "CustomInstructions adds domain guidance. The graph output format stays fixed.",
+                    "type": "string",
+                    "x-agent": "extract_instructions",
+                    "x-agent-detail": true,
+                    "x-agent-max-bytes": "4000"
                 },
                 "enabled": {
-                    "type": "boolean"
+                    "description": "Enabled turns graph extraction on. Node and relation types are edited in the knowledge base editor.",
+                    "type": "boolean",
+                    "x-agent": "extract_enabled"
                 },
                 "nodes": {
                     "type": "array",
@@ -24751,13 +24936,20 @@ const docTemplate = `{
                     }
                 },
                 "tags": {
+                    "description": "Tags are the entity labels extraction may use.",
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": "extract_tags",
+                    "x-agent-maximum": "50"
                 },
                 "text": {
-                    "type": "string"
+                    "description": "Text is the extraction prompt. Required when extraction is on and no text is saved yet.",
+                    "type": "string",
+                    "x-agent": "extract_text",
+                    "x-agent-detail": true,
+                    "x-agent-max-bytes": "8000"
                 }
             }
         },
@@ -24797,10 +24989,30 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "index_mode": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQIndexMode"
+                    "description": "IndexMode is question_only or question_answer.",
+                    "enum": [
+                        "question_only",
+                        "question_answer"
+                    ],
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQIndexMode"
+                        }
+                    ],
+                    "x-agent": "faq_index_mode"
                 },
                 "question_index_mode": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQQuestionIndexMode"
+                    "description": "QuestionIndexMode is combined or separate.",
+                    "enum": [
+                        "combined",
+                        "separate"
+                    ],
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQQuestionIndexMode"
+                        }
+                    ],
+                    "x-agent": "faq_question_index_mode"
                 }
             }
         },
@@ -25622,15 +25834,18 @@ const docTemplate = `{
                 },
                 "image_attrs_enabled": {
                     "description": "ImageAttrsEnabled turns the attribute-observed image pipeline on for this\nknowledge base. It is off by default on purpose, so upgrading an\nexisting deployment never changes what happens to documents already\nbeing ingested: with it off every image is described and OCR'd exactly\nas before. When on, the describe round also observes image attributes and\nthe attribute policy decides whether OCR runs for it. A single upload can\noverride it per document through\nKnowledgeProcessOverrides.ImageAttrsEnabled.",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "image_vector_enabled": {
                     "description": "ImageVectorEnabled lets a knowledge base whose embedding model takes\nimages index each image by its own vector and recall it with one. It\nis off by default on purpose: a model that takes images is also used\nfor plain text, and turning this on costs an embedding call per image\nand widens vector recall. Existing knowledge bases stay off after an\nupgrade because the stored JSON has no such key.",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "model_id": {
-                    "description": "Model ID",
-                    "type": "string"
+                    "description": "Model ID used when describing images. Empty uses the knowledge base's caption model.",
+                    "type": "string",
+                    "x-agent": "image_model_id"
                 }
             }
         },
@@ -26140,6 +26355,9 @@ const docTemplate = `{
         },
         "github_com_Tencent_WeKnora_internal_types.KnowledgeBase": {
             "type": "object",
+            "required": [
+                "name"
+            ],
             "properties": {
                 "asr_config": {
                     "description": "ASR config (Automatic Speech Recognition)",
@@ -26147,7 +26365,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "auto_tag_config": {
                     "description": "AutoTagConfig controls asynchronous association of existing tags after parsing.",
@@ -26155,12 +26375,15 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutoTagConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "chunk_count": {
                     "description": "Chunk count (not stored in database, calculated on query)",
                     "type": "integer",
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "chunking_config": {
                     "description": "Chunking configuration",
@@ -26168,7 +26391,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "created_at": {
                     "description": "Creation time of the knowledge base",
@@ -26196,8 +26421,9 @@ const docTemplate = `{
                     "x-agent": true
                 },
                 "embedding_model_id": {
-                    "description": "ID of the embedding model",
-                    "type": "string"
+                    "description": "ID of the embedding model. model.list returns the ids. Cannot change after the knowledge base has documents.",
+                    "type": "string",
+                    "x-agent": "embedding_model_id"
                 },
                 "extract_config": {
                     "description": "Extract config",
@@ -26205,7 +26431,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ExtractConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "faq_config": {
                     "description": "FAQConfig stores FAQ specific configuration such as indexing strategy",
@@ -26213,7 +26441,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "generated_profile": {
                     "description": "GeneratedProfile is the machine-generated description: a gist, merged\ntopics, typical questions and the aggregate snapshot they came from. It\nnever overwrites the user-authored Description; both are shown to agents.",
@@ -26226,7 +26456,8 @@ const docTemplate = `{
                 "id": {
                     "description": "Unique identifier of the knowledge base",
                     "type": "string",
-                    "x-agent": "knowledge_base_id"
+                    "x-agent": "knowledge_base_id",
+                    "x-agent-response": true
                 },
                 "image_processing_config": {
                     "description": "Image processing configuration",
@@ -26234,7 +26465,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ImageProcessingConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "indexing_strategy": {
                     "description": "IndexingStrategy controls which indexing pipelines are active for this knowledge base.\nPipelines: vector search, keyword search, wiki generation, knowledge graph extraction.",
@@ -26243,7 +26476,8 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.IndexingStrategy"
                         }
                     ],
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "is_pinned": {
                     "description": "IsPinned and PinnedAt are computed per-caller from user_kb_pins\n(see migration 000050). They used to be stored on the row itself,\nwhich made pinning a workspace-wide ordering decision gated behind\nthe kb-edit RBAC guard. The columns are still present in legacy\nschemas for rollback safety but are no longer read or written by\nthe application — both fields are tagged ` + "`" + `gorm:\"-\"` + "`" + ` so GORM\nignores them on every CRUD call and the list handler stamps them\nafter enriching with the caller's pin set.",
@@ -26252,7 +26486,8 @@ const docTemplate = `{
                 "is_processing": {
                     "description": "IsProcessing indicates if there is a processing import task (for FAQ type knowledge bases)",
                     "type": "boolean",
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "is_temporary": {
                     "description": "Whether this knowledge base is temporary (ephemeral) and should be hidden from UI",
@@ -26261,12 +26496,14 @@ const docTemplate = `{
                 "knowledge_count": {
                     "description": "Knowledge count (not stored in database, calculated on query)",
                     "type": "integer",
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "name": {
                     "description": "Name of the knowledge base",
                     "type": "string",
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-required": true
                 },
                 "pinned_at": {
                     "description": "PinnedAt records when the current caller pinned this knowledge\nbase; nil when they have not.",
@@ -26275,7 +26512,8 @@ const docTemplate = `{
                 "processing_count": {
                     "description": "ProcessingCount indicates the number of knowledge items being processed (for document type knowledge bases)",
                     "type": "integer",
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "profile_config": {
                     "description": "ProfileConfig controls automatic generation of the knowledge-base\ndescription from per-document profiles (document knowledge bases only).",
@@ -26283,7 +26521,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "question_generation_config": {
                     "description": "QuestionGenerationConfig stores question generation configuration for document knowledge bases",
@@ -26291,7 +26531,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "share_count": {
                     "description": "ShareCount indicates the number of organizations this knowledge base is shared with (not stored in database)",
@@ -26299,7 +26541,8 @@ const docTemplate = `{
                 },
                 "storage_backend_id": {
                     "description": "StorageBackendID binds this KB to one concrete storage instance. The\nlegacy provider field remains readable during migration only.",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "storage_backend_id"
                 },
                 "storage_config": {
                     "description": "Deprecated: legacy COS config column. Kept for backward compatibility with old data.",
@@ -26318,26 +26561,34 @@ const docTemplate = `{
                     ]
                 },
                 "summary_model_id": {
-                    "description": "Summary model ID",
-                    "type": "string"
+                    "description": "Summary model ID. model.list returns the ids. Used for summaries, and as the default for auto-tagging and the AI description.",
+                    "type": "string",
+                    "x-agent": "summary_model_id"
                 },
                 "tenant_id": {
                     "description": "Workspace ID",
                     "type": "integer"
                 },
                 "type": {
-                    "description": "Type of the knowledge base (document, faq, etc.)",
+                    "description": "Type of the knowledge base: document, faq or wiki. Empty means document.",
                     "type": "string",
+                    "enum": [
+                        "document",
+                        "faq",
+                        "wiki"
+                    ],
                     "x-agent": true
                 },
                 "updated_at": {
                     "description": "Last updated time of the knowledge base",
                     "type": "string",
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "vector_store_id": {
                     "description": "VectorStoreID references the VectorStore this knowledge base is bound to.\nWhen nil, the KB falls back to the workspace's effective engines derived from\nthe RETRIEVE_DRIVER environment variable (env store flow).\nThis field is set once at creation time and must not be modified afterwards;\nenforcement lives at the GORM layer (` + "`" + `\u003c-:create` + "`" + `) plus the service-layer\nKB update path, which omits this field from its update DTO.",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "vector_store_id"
                 },
                 "vlm_config": {
                     "description": "VLM config",
@@ -26345,7 +26596,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "wiki_config": {
                     "description": "WikiConfig stores wiki-specific configuration (only for wiki type knowledge bases)",
@@ -26353,13 +26606,23 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 }
             }
         },
         "github_com_Tencent_WeKnora_internal_types.KnowledgeBaseConfig": {
             "type": "object",
             "properties": {
+                "asr_config": {
+                    "description": "ASRConfig replaces speech-recognition settings when set. nil means no change.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig"
+                        }
+                    ]
+                },
                 "auto_tag_config": {
                     "description": "AutoTagConfig controls optional automatic association of existing KB tags.",
                     "allOf": [
@@ -26373,6 +26636,18 @@ const docTemplate = `{
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig"
+                        }
+                    ]
+                },
+                "embedding_model_id": {
+                    "description": "EmbeddingModelID changes the embedding model. nil means no change.\nA knowledge base that already has documents cannot switch models.",
+                    "type": "string"
+                },
+                "extract_config": {
+                    "description": "ExtractConfig replaces graph extraction settings when set. nil means no change.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ExtractConfig"
                         }
                     ]
                 },
@@ -26407,6 +26682,22 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileConfig"
                         }
                     ]
+                },
+                "question_generation_config": {
+                    "description": "QuestionGenerationConfig replaces generated-question settings when set. nil means no change.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig"
+                        }
+                    ]
+                },
+                "storage_backend_id": {
+                    "description": "StorageBackendID rebinds file storage. nil means no change.",
+                    "type": "string"
+                },
+                "summary_model_id": {
+                    "description": "SummaryModelID changes the summary model. nil means no change.",
+                    "type": "string"
                 },
                 "wiki_config": {
                     "description": "Wiki configuration (only for wiki-enabled knowledge bases)",
@@ -26479,15 +26770,21 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "custom_instructions": {
-                    "description": "CustomInstructions is appended to the stable system prompt, e.g. the\naudience the description should address or terms to keep.",
-                    "type": "string"
+                    "description": "CustomInstructions is extra guidance for the description, such as the audience. The format stays fixed.",
+                    "type": "string",
+                    "x-agent": "profile_instructions",
+                    "x-agent-detail": true,
+                    "x-agent-max-bytes": "4000"
                 },
                 "enabled": {
-                    "type": "boolean"
+                    "description": "Enabled turns the AI knowledge-base description on.",
+                    "type": "boolean",
+                    "x-agent": "profile_enabled"
                 },
                 "model_id": {
-                    "description": "ModelID overrides the chat model; empty falls back to the KB summary model.",
-                    "type": "string"
+                    "description": "ModelID overrides the summary model. Empty uses summary_model_id.",
+                    "type": "string",
+                    "x-agent": "profile_model_id"
                 }
             }
         },
@@ -27353,7 +27650,8 @@ const docTemplate = `{
                     "description": "Markdown content. The assistant may send a full document; the API limit\nis 200000 runes, and x-agent-max-bytes covers that in UTF-8.",
                     "type": "string",
                     "x-agent": true,
-                    "x-agent-max-bytes": "800000"
+                    "x-agent-max-bytes": "800000",
+                    "x-agent-required": true
                 },
                 "process_config": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides"
@@ -27365,7 +27663,8 @@ const docTemplate = `{
                         "draft",
                         "publish"
                     ],
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-required": true
                 },
                 "tag_ids": {
                     "type": "array",
@@ -29117,15 +29416,23 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "custom_instructions": {
-                    "description": "CustomInstructions describes the intended audience or question style.\nIt is appended to the stable system question-generation template.",
-                    "type": "string"
+                    "description": "CustomInstructions describes who the questions are for. The question format stays fixed.",
+                    "type": "string",
+                    "x-agent": "question_instructions",
+                    "x-agent-detail": true,
+                    "x-agent-max-bytes": "4000"
                 },
                 "enabled": {
-                    "type": "boolean"
+                    "description": "Enabled turns question generation on. Generated questions are indexed beside the chunk.",
+                    "type": "boolean",
+                    "x-agent": "question_generation_enabled"
                 },
                 "question_count": {
-                    "description": "Number of questions to generate per chunk (default: 3, max: 10)",
-                    "type": "integer"
+                    "description": "QuestionCount is how many questions to write per chunk, from 1 to 10.",
+                    "type": "integer",
+                    "maximum": 10,
+                    "minimum": 1,
+                    "x-agent": "question_count"
                 }
             }
         },
@@ -31574,22 +31881,30 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "custom_instructions": {
-                    "description": "CustomInstructions adds KB-specific image interpretation guidance without\nreplacing the system-owned OCR and Markdown output contract.",
-                    "type": "string"
+                    "description": "CustomInstructions adds image-reading guidance. The OCR and Markdown format stay fixed.",
+                    "type": "string",
+                    "x-agent": "vlm_instructions",
+                    "x-agent-detail": true,
+                    "x-agent-max-bytes": "4000"
                 },
                 "description_language": {
-                    "description": "DescriptionLanguage controls the language used for generated image\ncaptions. Empty means follow the document/request language.",
-                    "type": "string"
+                    "description": "DescriptionLanguage is the language of generated image captions. Empty follows the document language.",
+                    "type": "string",
+                    "x-agent": "vlm_language"
                 },
                 "enabled": {
-                    "type": "boolean"
+                    "description": "Enabled turns image captions on. Also send vlm_model_id.",
+                    "type": "boolean",
+                    "x-agent": "vlm_enabled"
                 },
                 "interface_type": {
                     "description": "Interface Type: \"ollama\" or \"openai\"",
                     "type": "string"
                 },
                 "model_id": {
-                    "type": "string"
+                    "description": "Model that writes image captions. model.list returns the ids.",
+                    "type": "string",
+                    "x-agent": "vlm_model_id"
                 },
                 "model_name": {
                     "description": "兼容老版本\nModel Name",
@@ -32043,20 +32358,32 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "content_instructions": {
-                    "description": "ContentInstructions controls tone, structure and emphasis for generated\nsummary/entity/index prose. Citation and merge rules remain system-owned.",
-                    "type": "string"
+                    "description": "ContentInstructions sets tone and emphasis for generated Wiki prose. Citations stay fixed.",
+                    "type": "string",
+                    "x-agent": "wiki_content_instructions",
+                    "x-agent-detail": true,
+                    "x-agent-max-bytes": "4000"
                 },
                 "extraction_granularity": {
-                    "description": "ExtractionGranularity controls how many candidate slugs Pass 0 extracts\nper document. Empty / unknown value is treated as WikiExtractionStandard.",
+                    "description": "ExtractionGranularity is focused, standard or exhaustive. Empty means standard.",
+                    "enum": [
+                        "focused",
+                        "standard",
+                        "exhaustive"
+                    ],
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiExtractionGranularity"
                         }
-                    ]
+                    ],
+                    "x-agent": "wiki_granularity"
                 },
                 "extraction_instructions": {
-                    "description": "ExtractionInstructions tells candidate extraction which domain concepts\nto emphasize without replacing the stable JSON/citation protocol.",
-                    "type": "string"
+                    "description": "ExtractionInstructions tells page extraction which concepts to keep. The output format stays fixed.",
+                    "type": "string",
+                    "x-agent": "wiki_extraction_instructions",
+                    "x-agent-detail": true,
+                    "x-agent-max-bytes": "4000"
                 },
                 "ingest_batch_size": {
                     "description": "IngestBatchSize controls how many pending ops a single batch claims and\nprocesses before scheduling a follow-up. 0 falls back to the hard-coded\ndefault (5). Larger batches amortize per-batch setup and let more docs\nshare the batch-internal Map/Reduce fan-out; smaller batches spread a\nKB's backlog across more concurrent batches (finer scheduling grain).",
@@ -32075,12 +32402,16 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "max_pages_per_ingest": {
-                    "description": "MaxPagesPerIngest limits pages created/updated per ingest operation (0 = no limit)",
-                    "type": "integer"
+                    "description": "MaxPagesPerIngest limits pages created or updated per ingest. 0 means no limit.",
+                    "type": "integer",
+                    "maximum": 1000,
+                    "minimum": 0,
+                    "x-agent": "wiki_max_pages"
                 },
                 "synthesis_model_id": {
-                    "description": "SynthesisModelID is the LLM model ID used for wiki page generation and updates",
-                    "type": "string"
+                    "description": "SynthesisModelID is the model that writes Wiki pages. Empty uses summary_model_id.",
+                    "type": "string",
+                    "x-agent": "wiki_synthesis_model_id"
                 }
             }
         },
@@ -33256,6 +33587,25 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.CreateTagRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "color": {
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Tag name, unique in this knowledge base",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "sort_order": {
+                    "type": "integer"
+                }
+            }
+        },
         "internal_handler.CurrentUserCapabilities": {
             "type": "object",
             "properties": {
@@ -34009,6 +34359,9 @@ const docTemplate = `{
         },
         "internal_handler.KnowledgeBaseView": {
             "type": "object",
+            "required": [
+                "name"
+            ],
             "properties": {
                 "asr_config": {
                     "description": "ASR config (Automatic Speech Recognition)",
@@ -34016,7 +34369,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "auto_tag_config": {
                     "description": "AutoTagConfig controls asynchronous association of existing tags after parsing.",
@@ -34024,7 +34379,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutoTagConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "capabilities": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KBCapabilities"
@@ -34032,7 +34389,8 @@ const docTemplate = `{
                 "chunk_count": {
                     "description": "Chunk count (not stored in database, calculated on query)",
                     "type": "integer",
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "chunking_config": {
                     "description": "Chunking configuration",
@@ -34040,7 +34398,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "created_at": {
                     "description": "Creation time of the knowledge base",
@@ -34068,8 +34428,9 @@ const docTemplate = `{
                     "x-agent": true
                 },
                 "embedding_model_id": {
-                    "description": "ID of the embedding model",
-                    "type": "string"
+                    "description": "ID of the embedding model. model.list returns the ids. Cannot change after the knowledge base has documents.",
+                    "type": "string",
+                    "x-agent": "embedding_model_id"
                 },
                 "extract_config": {
                     "description": "Extract config",
@@ -34077,7 +34438,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ExtractConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "faq_config": {
                     "description": "FAQConfig stores FAQ specific configuration such as indexing strategy",
@@ -34085,7 +34448,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "generated_profile": {
                     "description": "GeneratedProfile is the machine-generated description: a gist, merged\ntopics, typical questions and the aggregate snapshot they came from. It\nnever overwrites the user-authored Description; both are shown to agents.",
@@ -34098,7 +34463,8 @@ const docTemplate = `{
                 "id": {
                     "description": "Unique identifier of the knowledge base",
                     "type": "string",
-                    "x-agent": "knowledge_base_id"
+                    "x-agent": "knowledge_base_id",
+                    "x-agent-response": true
                 },
                 "image_processing_config": {
                     "description": "Image processing configuration",
@@ -34106,7 +34472,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ImageProcessingConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "indexing_strategy": {
                     "description": "IndexingStrategy controls which indexing pipelines are active for this knowledge base.\nPipelines: vector search, keyword search, wiki generation, knowledge graph extraction.",
@@ -34115,7 +34483,8 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.IndexingStrategy"
                         }
                     ],
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "is_pinned": {
                     "description": "IsPinned and PinnedAt are computed per-caller from user_kb_pins\n(see migration 000050). They used to be stored on the row itself,\nwhich made pinning a workspace-wide ordering decision gated behind\nthe kb-edit RBAC guard. The columns are still present in legacy\nschemas for rollback safety but are no longer read or written by\nthe application — both fields are tagged ` + "`" + `gorm:\"-\"` + "`" + ` so GORM\nignores them on every CRUD call and the list handler stamps them\nafter enriching with the caller's pin set.",
@@ -34124,7 +34493,8 @@ const docTemplate = `{
                 "is_processing": {
                     "description": "IsProcessing indicates if there is a processing import task (for FAQ type knowledge bases)",
                     "type": "boolean",
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "is_temporary": {
                     "description": "Whether this knowledge base is temporary (ephemeral) and should be hidden from UI",
@@ -34133,7 +34503,8 @@ const docTemplate = `{
                 "knowledge_count": {
                     "description": "Knowledge count (not stored in database, calculated on query)",
                     "type": "integer",
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "my_permission": {
                     "description": "MyPermission is the caller's role on a knowledge base shared from\nanother workspace; GET /knowledge-bases/{id} sets it.",
@@ -34148,7 +34519,8 @@ const docTemplate = `{
                 "name": {
                     "description": "Name of the knowledge base",
                     "type": "string",
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-required": true
                 },
                 "pinned_at": {
                     "description": "PinnedAt records when the current caller pinned this knowledge\nbase; nil when they have not.",
@@ -34157,7 +34529,8 @@ const docTemplate = `{
                 "processing_count": {
                     "description": "ProcessingCount indicates the number of knowledge items being processed (for document type knowledge bases)",
                     "type": "integer",
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "profile_config": {
                     "description": "ProfileConfig controls automatic generation of the knowledge-base\ndescription from per-document profiles (document knowledge bases only).",
@@ -34165,7 +34538,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "question_generation_config": {
                     "description": "QuestionGenerationConfig stores question generation configuration for document knowledge bases",
@@ -34173,7 +34548,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "share_count": {
                     "description": "ShareCount indicates the number of organizations this knowledge base is shared with (not stored in database)",
@@ -34181,7 +34558,8 @@ const docTemplate = `{
                 },
                 "storage_backend_id": {
                     "description": "StorageBackendID binds this KB to one concrete storage instance. The\nlegacy provider field remains readable during migration only.",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "storage_backend_id"
                 },
                 "storage_config": {
                     "description": "Deprecated: legacy COS config column. Kept for backward compatibility with old data.",
@@ -34200,29 +34578,37 @@ const docTemplate = `{
                     ]
                 },
                 "summary_model_id": {
-                    "description": "Summary model ID",
-                    "type": "string"
+                    "description": "Summary model ID. model.list returns the ids. Used for summaries, and as the default for auto-tagging and the AI description.",
+                    "type": "string",
+                    "x-agent": "summary_model_id"
                 },
                 "tenant_id": {
                     "description": "Workspace ID",
                     "type": "integer"
                 },
                 "type": {
-                    "description": "Type of the knowledge base (document, faq, etc.)",
+                    "description": "Type of the knowledge base: document, faq or wiki. Empty means document.",
                     "type": "string",
+                    "enum": [
+                        "document",
+                        "faq",
+                        "wiki"
+                    ],
                     "x-agent": true
                 },
                 "updated_at": {
                     "description": "Last updated time of the knowledge base",
                     "type": "string",
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "vector_store_engine_type": {
                     "type": "string"
                 },
                 "vector_store_id": {
                     "description": "VectorStoreID references the VectorStore this knowledge base is bound to.\nWhen nil, the KB falls back to the workspace's effective engines derived from\nthe RETRIEVE_DRIVER environment variable (env store flow).\nThis field is set once at creation time and must not be modified afterwards;\nenforcement lives at the GORM layer (` + "`" + `\u003c-:create` + "`" + `) plus the service-layer\nKB update path, which omits this field from its update DTO.",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "vector_store_id"
                 },
                 "vector_store_name": {
                     "type": "string"
@@ -34239,7 +34625,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "wiki_config": {
                     "description": "WikiConfig stores wiki-specific configuration (only for wiki type knowledge bases)",
@@ -34247,7 +34635,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 }
             }
         },
@@ -34349,6 +34739,47 @@ const docTemplate = `{
                 },
                 "trace": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SpanTreeNode"
+                }
+            }
+        },
+        "internal_handler.KnowledgeTagBatchRequest": {
+            "type": "object",
+            "properties": {
+                "kb_id": {
+                    "description": "Knowledge base the documents belong to.",
+                    "type": "string",
+                    "x-agent": "knowledge_base_id",
+                    "x-agent-required": true
+                },
+                "knowledge_ids": {
+                    "description": "Documents that receive the same tags. Mutually exclusive with updates.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true,
+                    "x-agent-maximum": "20",
+                    "x-agent-required": true
+                },
+                "tag_ids": {
+                    "description": "Tags to set on every listed document. An empty list clears them.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true,
+                    "x-agent-maximum": "50",
+                    "x-agent-required": true
+                },
+                "updates": {
+                    "description": "Map of knowledge id to the tag ids that replace its current tags.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
                 }
             }
         },
@@ -35004,6 +35435,124 @@ const docTemplate = `{
                     "description": "Whether the agent may search the web",
                     "type": "boolean",
                     "x-agent": true
+                }
+            }
+        },
+        "internal_handler.PatchKnowledgeBaseRequest": {
+            "type": "object",
+            "properties": {
+                "asr_config": {
+                    "description": "Speech transcription.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig"
+                        }
+                    ]
+                },
+                "auto_tag_config": {
+                    "description": "Automatic tagging.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutoTagConfig"
+                        }
+                    ]
+                },
+                "chunking_config": {
+                    "description": "Chunking settings. Only the fields present are changed.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig"
+                        }
+                    ]
+                },
+                "description": {
+                    "description": "New description. Omit to keep it; an empty string clears it.",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "embedding_model_id": {
+                    "description": "Embedding model. Cannot change after the knowledge base has documents.",
+                    "type": "string",
+                    "x-agent": "embedding_model_id"
+                },
+                "extract_config": {
+                    "description": "Graph extraction. Node types stay in the knowledge base editor.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ExtractConfig"
+                        }
+                    ]
+                },
+                "faq_config": {
+                    "description": "FAQ indexing. Only for an FAQ knowledge base.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQConfig"
+                        }
+                    ]
+                },
+                "image_processing_config": {
+                    "description": "Image description settings.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ImageProcessingConfig"
+                        }
+                    ]
+                },
+                "indexing_strategy": {
+                    "description": "Indexing pipelines. A flag left out stays as it is.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.IndexingStrategy"
+                        }
+                    ]
+                },
+                "name": {
+                    "description": "New name. Omit to keep the current one.",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "profile_config": {
+                    "description": "AI description of the knowledge base.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileConfig"
+                        }
+                    ]
+                },
+                "question_generation_config": {
+                    "description": "Generated questions for each chunk.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig"
+                        }
+                    ]
+                },
+                "storage_backend_id": {
+                    "description": "Storage instance to bind. Omit to keep the current one.",
+                    "type": "string",
+                    "x-agent": "storage_backend_id"
+                },
+                "summary_model_id": {
+                    "description": "Summary model. model.list returns the ids.",
+                    "type": "string",
+                    "x-agent": "summary_model_id"
+                },
+                "vlm_config": {
+                    "description": "Image captions.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig"
+                        }
+                    ]
+                },
+                "wiki_config": {
+                    "description": "Wiki page settings.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiConfig"
+                        }
+                    ]
                 }
             }
         },
@@ -36155,6 +36704,22 @@ const docTemplate = `{
             "properties": {
                 "value": {
                     "description": "Value is intentionally ` + "`" + `any` + "`" + ` (decoded as float64 / string / bool /\netc. by the JSON unmarshaller). Service.encodeForType normalises\nthese against the registry's declared type and rejects mismatches."
+                }
+            }
+        },
+        "internal_handler.UpdateTagRequest": {
+            "type": "object",
+            "properties": {
+                "color": {
+                    "type": "string"
+                },
+                "name": {
+                    "description": "New name. Omit to keep the current one.",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "sort_order": {
+                    "type": "integer"
                 }
             }
         },

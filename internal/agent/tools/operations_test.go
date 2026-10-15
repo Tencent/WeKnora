@@ -402,7 +402,7 @@ func TestRunOperationAgentApprovals(t *testing.T) {
 	res, _ := tool.Execute(interactiveCtx(), runArgs("agent.create", map[string]any{"name": "Release\nnotes"}))
 	require.True(t, res.Success, res.Error)
 	require.Len(t, gate.requests, 1)
-	assert.Equal(t, "创建智能体\nRelease notes\nName: Release notes", gate.requests[0].Description)
+	assert.Equal(t, "创建智能体\nRelease notes", gate.requests[0].Description)
 	assert.Contains(t, res.Output, `"agent_id":"a1"`)
 
 	gate.requests = nil
@@ -422,6 +422,35 @@ func TestRunOperationAgentApprovals(t *testing.T) {
 	assert.Contains(t, desc, "Web search: off")
 	assert.JSONEq(t, `{"agent_mode":"smart-reasoning","model_id":"m1","knowledge_bases":["kb1","kb-gone"],`+
 		`"system_prompt":"Answer in English.","web_search_enabled":false}`, string(d.calls[len(d.calls)-1].call.Body))
+}
+
+func TestRunOperationKnowledgeBaseCreateApproval(t *testing.T) {
+	d := &fakeDispatcher{responses: map[string]*operations.Response{
+		"GET /api/v1/models/emb": {
+			Status: http.StatusOK,
+			Body:   []byte(`{"data":{"id":"emb","name":"builtin-embedding","display_name":"builtin-embedding"}}`),
+		},
+		"GET /api/v1/models/sum": {
+			Status: http.StatusOK,
+			Body:   []byte(`{"data":{"id":"sum","name":"qwen","display_name":"Qwen"}}`),
+		},
+		"POST /api/v1/knowledge-bases": {
+			Status: http.StatusOK,
+			Body:   []byte(`{"data":{"id":"kb","name":"助手测试"}}`),
+		},
+	}}
+	gate := &fakeApprover{decision: approval.Decision{Approved: true, PendingID: "p1"}}
+	res, _ := newRunTool(d, gate).Execute(interactiveCtx(), runArgs("knowledge_base.create", map[string]any{
+		"name": "助手测试", "type": "document",
+		"embedding_model_id": "emb", "summary_model_id": "sum",
+		"vlm_model_id": "builtin-vllm", "wiki_enabled": true,
+	}))
+	require.True(t, res.Success, res.Error)
+	require.Len(t, gate.requests, 1)
+	assert.Equal(t,
+		"创建知识库\n助手测试\nType: document\nEmbedding model: builtin-embedding\n"+
+			"Summary model: Qwen\nCaption model: builtin-vllm\nIndexes: wiki on",
+		gate.requests[0].Description)
 }
 
 func TestRunOperationAgentUpdateRefusesTruncatedPrompt(t *testing.T) {

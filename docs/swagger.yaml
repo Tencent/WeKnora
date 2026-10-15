@@ -1089,12 +1089,18 @@ definitions:
   github_com_Tencent_WeKnora_internal_types.ASRConfig:
     properties:
       enabled:
+        description: Enabled turns speech transcription on. Also send asr_model_id.
         type: boolean
+        x-agent: asr_enabled
       language:
-        description: 'optional: language hint for transcription'
+        description: Language is an optional hint for transcription, such as zh or
+          en.
         type: string
+        x-agent: asr_language
       model_id:
+        description: Model that transcribes audio. model.list returns the ids.
         type: string
+        x-agent: asr_model_id
     type: object
   github_com_Tencent_WeKnora_internal_types.AdminCreateUserRequest:
     properties:
@@ -1499,18 +1505,26 @@ definitions:
   github_com_Tencent_WeKnora_internal_types.AutoTagConfig:
     properties:
       enabled:
+        description: Enabled turns automatic tagging on. The model picks from tags
+          that already exist.
         type: boolean
+        x-agent: auto_tag_enabled
       max_tags:
+        description: MaxTags is how many tags one document may receive, from 1 to
+          10.
+        maximum: 10
+        minimum: 1
         type: integer
+        x-agent: auto_tag_max_tags
       model_id:
+        description: ModelID overrides the summary model. Empty uses summary_model_id.
         type: string
+        x-agent: auto_tag_model_id
       skip_if_tagged:
-        description: |-
-          SkipIfTagged leaves documents that already carry tags untouched, so a
-          deliberate manual classification is not diluted by model guesses. It is
-          a pointer because the default is true: rows written before this field
-          existed decode to nil and must not silently flip to "always append".
+        description: SkipIfTagged leaves a document alone when it already has tags.
+          Empty means yes.
         type: boolean
+        x-agent: auto_tag_skip_if_tagged
     type: object
   github_com_Tencent_WeKnora_internal_types.COSEngineConfig:
     properties:
@@ -1806,31 +1820,43 @@ definitions:
         description: |-
           ChildChunkSize is the size of child chunks used for embedding (default: 384).
           Only used when EnableParentChild is true.
+        maximum: 10000
+        minimum: 1
         type: integer
+        x-agent: true
       chunk_overlap:
-        description: Chunk overlap
+        description: Chunk overlap in characters.
+        maximum: 5000
+        minimum: 0
         type: integer
+        x-agent: true
       chunk_size:
-        description: Chunk size
+        description: Chunk size in characters. Empty on create uses the server default.
+        maximum: 10000
+        minimum: 100
         type: integer
+        x-agent: true
       enable_parent_child:
-        description: |-
-          EnableParentChild enables two-level parent-child chunking strategy.
-          When enabled, large parent chunks provide context while small child chunks
-          are used for vector matching. Retrieval matches on child but returns parent content.
+        description: EnableParentChild splits into large parent chunks and small child
+          chunks. Search matches a child and returns its parent.
         type: boolean
+        x-agent: true
       languages:
-        description: |-
-          Languages hints the heuristic patterns. Empty = auto-detect from content.
-          Examples: ["de"], ["en", "zh"].
+        description: Languages hints the splitter, for example de or zh. Empty detects
+          the language from the document.
         items:
           type: string
         type: array
+        x-agent: true
+        x-agent-maximum: "20"
       parent_chunk_size:
         description: |-
           ParentChunkSize is the size of parent chunks (default: 4096).
           Only used when EnableParentChild is true.
+        maximum: 20000
+        minimum: 1
         type: integer
+        x-agent: true
       parser_engine_rules:
         description: |-
           ParserEngineRules configures which parser engine to use for each file type.
@@ -1842,28 +1868,37 @@ definitions:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule'
         type: array
       separators:
-        description: Separators
+        description: Separators, in the order they are tried.
         items:
           type: string
         type: array
+        x-agent: true
+        x-agent-maximum: "20"
       strategy:
-        description: |-
-          Strategy selects the adaptive chunking tier. Empty / "legacy" preserves
-          the historical recursive splitter; "auto" lets a profiler pick between
-          heading-aware, heuristic and recursive tiers; "heading" / "heuristic" /
-          "recursive" pin the tier explicitly.
+        description: 'Strategy selects how documents are split: auto, heading, heuristic,
+          recursive or legacy. Empty keeps the server default.'
+        enum:
+        - auto
+        - heading
+        - heuristic
+        - recursive
+        - legacy
         type: string
+        x-agent: true
       table_metadata_instructions:
-        description: |-
-          TableMetadataInstructions contains optional business guidance used when
-          generating searchable summaries for CSV/Excel tables. The system-owned
-          output contract remains fixed; these instructions only add domain context.
+        description: TableMetadataInstructions is extra guidance for CSV and Excel
+          summaries. The output format stays fixed.
         type: string
+        x-agent: true
+        x-agent-detail: true
+        x-agent-max-bytes: "4000"
       token_limit:
-        description: |-
-          TokenLimit caps chunk size in approximate tokens. 0 = use ChunkSize
+        description: TokenLimit caps chunk size in approximate tokens. 0 uses ChunkSize
           as a character count.
+        maximum: 100000
+        minimum: 0
         type: integer
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.ConnectionConfig:
     properties:
@@ -2673,12 +2708,17 @@ definitions:
   github_com_Tencent_WeKnora_internal_types.ExtractConfig:
     properties:
       custom_instructions:
-        description: |-
-          CustomInstructions adds domain-specific extraction guidance while the
-          system keeps ownership of the structured graph output protocol.
+        description: CustomInstructions adds domain guidance. The graph output format
+          stays fixed.
         type: string
+        x-agent: extract_instructions
+        x-agent-detail: true
+        x-agent-max-bytes: "4000"
       enabled:
+        description: Enabled turns graph extraction on. Node and relation types are
+          edited in the knowledge base editor.
         type: boolean
+        x-agent: extract_enabled
       nodes:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.GraphNode'
@@ -2688,11 +2728,19 @@ definitions:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.GraphRelation'
         type: array
       tags:
+        description: Tags are the entity labels extraction may use.
         items:
           type: string
         type: array
+        x-agent: extract_tags
+        x-agent-maximum: "50"
       text:
+        description: Text is the extraction prompt. Required when extraction is on
+          and no text is saved yet.
         type: string
+        x-agent: extract_text
+        x-agent-detail: true
+        x-agent-max-bytes: "8000"
     type: object
   github_com_Tencent_WeKnora_internal_types.FAQBatchUpsertPayload:
     properties:
@@ -2719,9 +2767,21 @@ definitions:
   github_com_Tencent_WeKnora_internal_types.FAQConfig:
     properties:
       index_mode:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FAQIndexMode'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FAQIndexMode'
+        description: IndexMode is question_only or question_answer.
+        enum:
+        - question_only
+        - question_answer
+        x-agent: faq_index_mode
       question_index_mode:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FAQQuestionIndexMode'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FAQQuestionIndexMode'
+        description: QuestionIndexMode is combined or separate.
+        enum:
+        - combined
+        - separate
+        x-agent: faq_question_index_mode
     type: object
   github_com_Tencent_WeKnora_internal_types.FAQEntry:
     properties:
@@ -3346,6 +3406,7 @@ definitions:
           override it per document through
           KnowledgeProcessOverrides.ImageAttrsEnabled.
         type: boolean
+        x-agent: true
       image_vector_enabled:
         description: |-
           ImageVectorEnabled lets a knowledge base whose embedding model takes
@@ -3355,9 +3416,12 @@ definitions:
           and widens vector recall. Existing knowledge bases stay off after an
           upgrade because the stored JSON has no such key.
         type: boolean
+        x-agent: true
       model_id:
-        description: Model ID
+        description: Model ID used when describing images. Empty uses the knowledge
+          base's caption model.
         type: string
+        x-agent: image_model_id
     type: object
   github_com_Tencent_WeKnora_internal_types.IndexConfig:
     properties:
@@ -3763,19 +3827,26 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig'
         description: ASR config (Automatic Speech Recognition)
+        x-agent: true
+        x-agent-detail: true
       auto_tag_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutoTagConfig'
         description: AutoTagConfig controls asynchronous association of existing tags
           after parsing.
+        x-agent: true
+        x-agent-detail: true
       chunk_count:
         description: Chunk count (not stored in database, calculated on query)
         type: integer
         x-agent: true
+        x-agent-response: true
       chunking_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig'
         description: Chunking configuration
+        x-agent: true
+        x-agent-detail: true
       created_at:
         description: Creation time of the knowledge base
         type: string
@@ -3802,17 +3873,23 @@ definitions:
         type: string
         x-agent: true
       embedding_model_id:
-        description: ID of the embedding model
+        description: ID of the embedding model. model.list returns the ids. Cannot
+          change after the knowledge base has documents.
         type: string
+        x-agent: embedding_model_id
       extract_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ExtractConfig'
         description: Extract config
+        x-agent: true
+        x-agent-detail: true
       faq_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FAQConfig'
         description: FAQConfig stores FAQ specific configuration such as indexing
           strategy
+        x-agent: true
+        x-agent-detail: true
       generated_profile:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfile'
@@ -3824,10 +3901,13 @@ definitions:
         description: Unique identifier of the knowledge base
         type: string
         x-agent: knowledge_base_id
+        x-agent-response: true
       image_processing_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ImageProcessingConfig'
         description: Image processing configuration
+        x-agent: true
+        x-agent-detail: true
       indexing_strategy:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.IndexingStrategy'
@@ -3835,6 +3915,7 @@ definitions:
           IndexingStrategy controls which indexing pipelines are active for this knowledge base.
           Pipelines: vector search, keyword search, wiki generation, knowledge graph extraction.
         x-agent: true
+        x-agent-response: true
       is_pinned:
         description: |-
           IsPinned and PinnedAt are computed per-caller from user_kb_pins
@@ -3851,6 +3932,7 @@ definitions:
           FAQ type knowledge bases)
         type: boolean
         x-agent: true
+        x-agent-response: true
       is_temporary:
         description: Whether this knowledge base is temporary (ephemeral) and should
           be hidden from UI
@@ -3859,10 +3941,12 @@ definitions:
         description: Knowledge count (not stored in database, calculated on query)
         type: integer
         x-agent: true
+        x-agent-response: true
       name:
         description: Name of the knowledge base
         type: string
         x-agent: true
+        x-agent-required: true
       pinned_at:
         description: |-
           PinnedAt records when the current caller pinned this knowledge
@@ -3873,17 +3957,22 @@ definitions:
           processed (for document type knowledge bases)
         type: integer
         x-agent: true
+        x-agent-response: true
       profile_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileConfig'
         description: |-
           ProfileConfig controls automatic generation of the knowledge-base
           description from per-document profiles (document knowledge bases only).
+        x-agent: true
+        x-agent-detail: true
       question_generation_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig'
         description: QuestionGenerationConfig stores question generation configuration
           for document knowledge bases
+        x-agent: true
+        x-agent-detail: true
       share_count:
         description: ShareCount indicates the number of organizations this knowledge
           base is shared with (not stored in database)
@@ -3893,6 +3982,7 @@ definitions:
           StorageBackendID binds this KB to one concrete storage instance. The
           legacy provider field remains readable during migration only.
         type: string
+        x-agent: storage_backend_id
       storage_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.StorageConfig'
@@ -3904,19 +3994,27 @@ definitions:
         description: 'Storage provider config (new): only stores provider selection;
           credentials from workspace StorageEngineConfig'
       summary_model_id:
-        description: Summary model ID
+        description: Summary model ID. model.list returns the ids. Used for summaries,
+          and as the default for auto-tagging and the AI description.
         type: string
+        x-agent: summary_model_id
       tenant_id:
         description: Workspace ID
         type: integer
       type:
-        description: Type of the knowledge base (document, faq, etc.)
+        description: 'Type of the knowledge base: document, faq or wiki. Empty means
+          document.'
+        enum:
+        - document
+        - faq
+        - wiki
         type: string
         x-agent: true
       updated_at:
         description: Last updated time of the knowledge base
         type: string
         x-agent: true
+        x-agent-response: true
       vector_store_id:
         description: |-
           VectorStoreID references the VectorStore this knowledge base is bound to.
@@ -3926,18 +4024,30 @@ definitions:
           enforcement lives at the GORM layer (`<-:create`) plus the service-layer
           KB update path, which omits this field from its update DTO.
         type: string
+        x-agent: vector_store_id
       vlm_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig'
         description: VLM config
+        x-agent: true
+        x-agent-detail: true
       wiki_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiConfig'
         description: WikiConfig stores wiki-specific configuration (only for wiki
           type knowledge bases)
+        x-agent: true
+        x-agent-detail: true
+    required:
+    - name
     type: object
   github_com_Tencent_WeKnora_internal_types.KnowledgeBaseConfig:
     properties:
+      asr_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig'
+        description: ASRConfig replaces speech-recognition settings when set. nil
+          means no change.
       auto_tag_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutoTagConfig'
@@ -3947,6 +4057,16 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig'
         description: Chunking configuration
+      embedding_model_id:
+        description: |-
+          EmbeddingModelID changes the embedding model. nil means no change.
+          A knowledge base that already has documents cannot switch models.
+        type: string
+      extract_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ExtractConfig'
+        description: ExtractConfig replaces graph extraction settings when set. nil
+          means no change.
       faq_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FAQConfig'
@@ -3975,6 +4095,17 @@ definitions:
         description: |-
           ProfileConfig controls optional automatic knowledge-base description
           generation. nil means "no change" when updating.
+      question_generation_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig'
+        description: QuestionGenerationConfig replaces generated-question settings
+          when set. nil means no change.
+      storage_backend_id:
+        description: StorageBackendID rebinds file storage. nil means no change.
+        type: string
+      summary_model_id:
+        description: SummaryModelID changes the summary model. nil means no change.
+        type: string
       wiki_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiConfig'
@@ -4026,16 +4157,20 @@ definitions:
   github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileConfig:
     properties:
       custom_instructions:
-        description: |-
-          CustomInstructions is appended to the stable system prompt, e.g. the
-          audience the description should address or terms to keep.
+        description: CustomInstructions is extra guidance for the description, such
+          as the audience. The format stays fixed.
         type: string
+        x-agent: profile_instructions
+        x-agent-detail: true
+        x-agent-max-bytes: "4000"
       enabled:
+        description: Enabled turns the AI knowledge-base description on.
         type: boolean
+        x-agent: profile_enabled
       model_id:
-        description: ModelID overrides the chat model; empty falls back to the KB
-          summary model.
+        description: ModelID overrides the summary model. Empty uses summary_model_id.
         type: string
+        x-agent: profile_model_id
     type: object
   github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileStats:
     properties:
@@ -4687,6 +4822,7 @@ definitions:
         type: string
         x-agent: true
         x-agent-max-bytes: "800000"
+        x-agent-required: true
       process_config:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides'
       status:
@@ -4696,6 +4832,7 @@ definitions:
         - publish
         type: string
         x-agent: true
+        x-agent-required: true
       tag_ids:
         items:
           type: string
@@ -6074,16 +6211,24 @@ definitions:
   github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig:
     properties:
       custom_instructions:
-        description: |-
-          CustomInstructions describes the intended audience or question style.
-          It is appended to the stable system question-generation template.
+        description: CustomInstructions describes who the questions are for. The question
+          format stays fixed.
         type: string
+        x-agent: question_instructions
+        x-agent-detail: true
+        x-agent-max-bytes: "4000"
       enabled:
+        description: Enabled turns question generation on. Generated questions are
+          indexed beside the chunk.
         type: boolean
+        x-agent: question_generation_enabled
       question_count:
-        description: 'Number of questions to generate per chunk (default: 3, max:
-          10)'
+        description: QuestionCount is how many questions to write per chunk, from
+          1 to 10.
+        maximum: 10
+        minimum: 1
         type: integer
+        x-agent: question_count
     type: object
   github_com_Tencent_WeKnora_internal_types.QuestionOrigin:
     properties:
@@ -8002,22 +8147,28 @@ definitions:
         description: Base URL
         type: string
       custom_instructions:
-        description: |-
-          CustomInstructions adds KB-specific image interpretation guidance without
-          replacing the system-owned OCR and Markdown output contract.
+        description: CustomInstructions adds image-reading guidance. The OCR and Markdown
+          format stay fixed.
         type: string
+        x-agent: vlm_instructions
+        x-agent-detail: true
+        x-agent-max-bytes: "4000"
       description_language:
-        description: |-
-          DescriptionLanguage controls the language used for generated image
-          captions. Empty means follow the document/request language.
+        description: DescriptionLanguage is the language of generated image captions.
+          Empty follows the document language.
         type: string
+        x-agent: vlm_language
       enabled:
+        description: Enabled turns image captions on. Also send vlm_model_id.
         type: boolean
+        x-agent: vlm_enabled
       interface_type:
         description: 'Interface Type: "ollama" or "openai"'
         type: string
       model_id:
+        description: Model that writes image captions. model.list returns the ids.
         type: string
+        x-agent: vlm_model_id
       model_name:
         description: |-
           兼容老版本
@@ -8373,21 +8524,29 @@ definitions:
   github_com_Tencent_WeKnora_internal_types.WikiConfig:
     properties:
       content_instructions:
-        description: |-
-          ContentInstructions controls tone, structure and emphasis for generated
-          summary/entity/index prose. Citation and merge rules remain system-owned.
+        description: ContentInstructions sets tone and emphasis for generated Wiki
+          prose. Citations stay fixed.
         type: string
+        x-agent: wiki_content_instructions
+        x-agent-detail: true
+        x-agent-max-bytes: "4000"
       extraction_granularity:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiExtractionGranularity'
-        description: |-
-          ExtractionGranularity controls how many candidate slugs Pass 0 extracts
-          per document. Empty / unknown value is treated as WikiExtractionStandard.
+        description: ExtractionGranularity is focused, standard or exhaustive. Empty
+          means standard.
+        enum:
+        - focused
+        - standard
+        - exhaustive
+        x-agent: wiki_granularity
       extraction_instructions:
-        description: |-
-          ExtractionInstructions tells candidate extraction which domain concepts
-          to emphasize without replacing the stable JSON/citation protocol.
+        description: ExtractionInstructions tells page extraction which concepts to
+          keep. The output format stays fixed.
         type: string
+        x-agent: wiki_extraction_instructions
+        x-agent-detail: true
+        x-agent-max-bytes: "4000"
       ingest_batch_size:
         description: |-
           IngestBatchSize controls how many pending ops a single batch claims and
@@ -8422,13 +8581,17 @@ definitions:
           DB connection pool size. Same multiplier caveat as IngestMapParallel.
         type: integer
       max_pages_per_ingest:
-        description: MaxPagesPerIngest limits pages created/updated per ingest operation
-          (0 = no limit)
+        description: MaxPagesPerIngest limits pages created or updated per ingest.
+          0 means no limit.
+        maximum: 1000
+        minimum: 0
         type: integer
+        x-agent: wiki_max_pages
       synthesis_model_id:
-        description: SynthesisModelID is the LLM model ID used for wiki page generation
-          and updates
+        description: SynthesisModelID is the model that writes Wiki pages. Empty uses
+          summary_model_id.
         type: string
+        x-agent: wiki_synthesis_model_id
     type: object
   github_com_Tencent_WeKnora_internal_types.WikiExtractionGranularity:
     enum:
@@ -9337,6 +9500,19 @@ definitions:
       user:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo'
     type: object
+  internal_handler.CreateTagRequest:
+    properties:
+      color:
+        type: string
+      name:
+        description: Tag name, unique in this knowledge base
+        type: string
+        x-agent: true
+      sort_order:
+        type: integer
+    required:
+    - name
+    type: object
   internal_handler.CurrentUserCapabilities:
     properties:
       auto_accept_invitation:
@@ -9851,21 +10027,28 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig'
         description: ASR config (Automatic Speech Recognition)
+        x-agent: true
+        x-agent-detail: true
       auto_tag_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutoTagConfig'
         description: AutoTagConfig controls asynchronous association of existing tags
           after parsing.
+        x-agent: true
+        x-agent-detail: true
       capabilities:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KBCapabilities'
       chunk_count:
         description: Chunk count (not stored in database, calculated on query)
         type: integer
         x-agent: true
+        x-agent-response: true
       chunking_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig'
         description: Chunking configuration
+        x-agent: true
+        x-agent-detail: true
       created_at:
         description: Creation time of the knowledge base
         type: string
@@ -9892,17 +10075,23 @@ definitions:
         type: string
         x-agent: true
       embedding_model_id:
-        description: ID of the embedding model
+        description: ID of the embedding model. model.list returns the ids. Cannot
+          change after the knowledge base has documents.
         type: string
+        x-agent: embedding_model_id
       extract_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ExtractConfig'
         description: Extract config
+        x-agent: true
+        x-agent-detail: true
       faq_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FAQConfig'
         description: FAQConfig stores FAQ specific configuration such as indexing
           strategy
+        x-agent: true
+        x-agent-detail: true
       generated_profile:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfile'
@@ -9914,10 +10103,13 @@ definitions:
         description: Unique identifier of the knowledge base
         type: string
         x-agent: knowledge_base_id
+        x-agent-response: true
       image_processing_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ImageProcessingConfig'
         description: Image processing configuration
+        x-agent: true
+        x-agent-detail: true
       indexing_strategy:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.IndexingStrategy'
@@ -9925,6 +10117,7 @@ definitions:
           IndexingStrategy controls which indexing pipelines are active for this knowledge base.
           Pipelines: vector search, keyword search, wiki generation, knowledge graph extraction.
         x-agent: true
+        x-agent-response: true
       is_pinned:
         description: |-
           IsPinned and PinnedAt are computed per-caller from user_kb_pins
@@ -9941,6 +10134,7 @@ definitions:
           FAQ type knowledge bases)
         type: boolean
         x-agent: true
+        x-agent-response: true
       is_temporary:
         description: Whether this knowledge base is temporary (ephemeral) and should
           be hidden from UI
@@ -9949,6 +10143,7 @@ definitions:
         description: Knowledge count (not stored in database, calculated on query)
         type: integer
         x-agent: true
+        x-agent-response: true
       my_permission:
         description: |-
           MyPermission is the caller's role on a knowledge base shared from
@@ -9963,6 +10158,7 @@ definitions:
         description: Name of the knowledge base
         type: string
         x-agent: true
+        x-agent-required: true
       pinned_at:
         description: |-
           PinnedAt records when the current caller pinned this knowledge
@@ -9973,17 +10169,22 @@ definitions:
           processed (for document type knowledge bases)
         type: integer
         x-agent: true
+        x-agent-response: true
       profile_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileConfig'
         description: |-
           ProfileConfig controls automatic generation of the knowledge-base
           description from per-document profiles (document knowledge bases only).
+        x-agent: true
+        x-agent-detail: true
       question_generation_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig'
         description: QuestionGenerationConfig stores question generation configuration
           for document knowledge bases
+        x-agent: true
+        x-agent-detail: true
       share_count:
         description: ShareCount indicates the number of organizations this knowledge
           base is shared with (not stored in database)
@@ -9993,6 +10194,7 @@ definitions:
           StorageBackendID binds this KB to one concrete storage instance. The
           legacy provider field remains readable during migration only.
         type: string
+        x-agent: storage_backend_id
       storage_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.StorageConfig'
@@ -10004,19 +10206,27 @@ definitions:
         description: 'Storage provider config (new): only stores provider selection;
           credentials from workspace StorageEngineConfig'
       summary_model_id:
-        description: Summary model ID
+        description: Summary model ID. model.list returns the ids. Used for summaries,
+          and as the default for auto-tagging and the AI description.
         type: string
+        x-agent: summary_model_id
       tenant_id:
         description: Workspace ID
         type: integer
       type:
-        description: Type of the knowledge base (document, faq, etc.)
+        description: 'Type of the knowledge base: document, faq or wiki. Empty means
+          document.'
+        enum:
+        - document
+        - faq
+        - wiki
         type: string
         x-agent: true
       updated_at:
         description: Last updated time of the knowledge base
         type: string
         x-agent: true
+        x-agent-response: true
       vector_store_engine_type:
         type: string
       vector_store_id:
@@ -10028,6 +10238,7 @@ definitions:
           enforcement lives at the GORM layer (`<-:create`) plus the service-layer
           KB update path, which omits this field from its update DTO.
         type: string
+        x-agent: vector_store_id
       vector_store_name:
         type: string
       vector_store_source:
@@ -10038,11 +10249,17 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig'
         description: VLM config
+        x-agent: true
+        x-agent-detail: true
       wiki_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiConfig'
         description: WikiConfig stores wiki-specific configuration (only for wiki
           type knowledge bases)
+        x-agent: true
+        x-agent-detail: true
+    required:
+    - name
     type: object
   internal_handler.KnowledgeSearchKnowledgeResponse:
     properties:
@@ -10115,6 +10332,38 @@ definitions:
         x-agent: true
       trace:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SpanTreeNode'
+    type: object
+  internal_handler.KnowledgeTagBatchRequest:
+    properties:
+      kb_id:
+        description: Knowledge base the documents belong to.
+        type: string
+        x-agent: knowledge_base_id
+        x-agent-required: true
+      knowledge_ids:
+        description: Documents that receive the same tags. Mutually exclusive with
+          updates.
+        items:
+          type: string
+        type: array
+        x-agent: true
+        x-agent-maximum: "20"
+        x-agent-required: true
+      tag_ids:
+        description: Tags to set on every listed document. An empty list clears them.
+        items:
+          type: string
+        type: array
+        x-agent: true
+        x-agent-maximum: "50"
+        x-agent-required: true
+      updates:
+        additionalProperties:
+          items:
+            type: string
+          type: array
+        description: Map of knowledge id to the tag ids that replace its current tags.
+        type: object
     type: object
   internal_handler.ListAgentsResponse:
     properties:
@@ -10595,6 +10844,73 @@ definitions:
         description: Whether the agent may search the web
         type: boolean
         x-agent: true
+    type: object
+  internal_handler.PatchKnowledgeBaseRequest:
+    properties:
+      asr_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig'
+        description: Speech transcription.
+      auto_tag_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutoTagConfig'
+        description: Automatic tagging.
+      chunking_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig'
+        description: Chunking settings. Only the fields present are changed.
+      description:
+        description: New description. Omit to keep it; an empty string clears it.
+        type: string
+        x-agent: true
+      embedding_model_id:
+        description: Embedding model. Cannot change after the knowledge base has documents.
+        type: string
+        x-agent: embedding_model_id
+      extract_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ExtractConfig'
+        description: Graph extraction. Node types stay in the knowledge base editor.
+      faq_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FAQConfig'
+        description: FAQ indexing. Only for an FAQ knowledge base.
+      image_processing_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ImageProcessingConfig'
+        description: Image description settings.
+      indexing_strategy:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.IndexingStrategy'
+        description: Indexing pipelines. A flag left out stays as it is.
+      name:
+        description: New name. Omit to keep the current one.
+        type: string
+        x-agent: true
+      profile_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileConfig'
+        description: AI description of the knowledge base.
+      question_generation_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig'
+        description: Generated questions for each chunk.
+      storage_backend_id:
+        description: Storage instance to bind. Omit to keep the current one.
+        type: string
+        x-agent: storage_backend_id
+      summary_model_id:
+        description: Summary model. model.list returns the ids.
+        type: string
+        x-agent: summary_model_id
+      vlm_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig'
+        description: Image captions.
+      wiki_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiConfig'
+        description: Wiki page settings.
     type: object
   internal_handler.PlaceholderGroups:
     properties:
@@ -11388,6 +11704,17 @@ definitions:
           Value is intentionally `any` (decoded as float64 / string / bool /
           etc. by the JSON unmarshaller). Service.encodeForType normalises
           these against the registry's declared type and rejects mismatches.
+    type: object
+  internal_handler.UpdateTagRequest:
+    properties:
+      color:
+        type: string
+      name:
+        description: New name. Omit to keep the current one.
+        type: string
+        x-agent: true
+      sort_order:
+        type: integer
     type: object
   internal_handler.ValidateTokenResponse:
     properties:
@@ -14991,6 +15318,14 @@ paths:
       summary: 创建知识库
       tags:
       - 知识库
+      x-agent:
+        id: knowledge_base.create
+        label_param: name
+        risk: write
+      x-agent-hint: Creates a knowledge base owned by the user. Omit type for document.
+        Omit indexing flags for vector and keyword search. Set embedding_model_id
+        and summary_model_id from model.list. vector_store_id can be chosen only now.
+        A field you leave out keeps its default.
   /knowledge-bases/{id}:
     delete:
       consumes:
@@ -15002,6 +15337,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: knowledge_base_id
       produces:
       - application/json
       responses:
@@ -15027,6 +15363,13 @@ paths:
       summary: 删除知识库
       tags:
       - 知识库
+      x-agent:
+        id: knowledge_base.delete
+        label: name
+        risk: destructive
+        target: knowledge_base.get
+      x-agent-hint: Deletes the knowledge base and every document in it. Cannot be
+        undone. Only the owner can delete it.
     get:
       consumes:
       - application/json
@@ -15077,6 +15420,62 @@ paths:
         risk: read
       x-agent-hint: Check which indexes are enabled (vector, keyword, Wiki, graph)
         and whether documents are processing.
+    patch:
+      consumes:
+      - application/json
+      description: 修改请求里出现的设置。未出现的字段保持不变，包括分块、索引和模型里没写到的项。
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: knowledge_base_id
+      - description: 要修改的字段
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.PatchKnowledgeBaseRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的知识库
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.KnowledgeBaseView'
+              type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 无权限
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 知识库不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 部分更新知识库
+      tags:
+      - 知识库
+      x-agent:
+        id: knowledge_base.update
+        label: name
+        risk: write
+        target: knowledge_base.get
+      x-agent-hint: Changes the settings you send; a field left out is kept, including
+        one indexing flag or one chunking field. Model ids come from model.list. embedding_model_id
+        cannot change after documents exist. vector_store_id cannot be changed. Graph
+        node types stay in the knowledge base editor.
     put:
       consumes:
       - application/json
@@ -16426,8 +16825,8 @@ paths:
         label: name
         risk: write
         target: knowledge_base.get
-      x-agent-hint: Creates a Markdown document. status=draft (the default) keeps
-        it out of search; publish indexes it.
+      x-agent-hint: Creates a Markdown document. Send the full content, and status
+        draft to keep it out of search or publish to index it.
   /knowledge-bases/{id}/knowledge/url:
     post:
       consumes:
@@ -16814,19 +17213,13 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: knowledge_base_id
       - description: 标签信息
         in: body
         name: request
         required: true
         schema:
-          properties:
-            color:
-              type: string
-            name:
-              type: string
-            sort_order:
-              type: integer
-          type: object
+          $ref: '#/definitions/internal_handler.CreateTagRequest'
       produces:
       - application/json
       responses:
@@ -16849,6 +17242,13 @@ paths:
       summary: 创建标签
       tags:
       - 标签管理
+      x-agent:
+        id: knowledge_base.create_tag
+        label: name
+        risk: write
+        target: knowledge_base.get
+      x-agent-hint: Creates a tag in the knowledge base. Pass the returned tag id
+        to knowledge.set_tags.
   /knowledge-bases/{id}/tags/{tag_id}:
     delete:
       consumes:
@@ -16860,11 +17260,13 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: knowledge_base_id
       - description: 标签ID (UUID或seq_id)
         in: path
         name: tag_id
         required: true
         type: string
+        x-agent: tag_id
       - description: 强制删除
         in: query
         name: force
@@ -16895,6 +17297,14 @@ paths:
       summary: 删除标签
       tags:
       - 标签管理
+      x-agent:
+        id: knowledge_base.delete_tag
+        label: name
+        risk: destructive
+        target: knowledge_base.get
+      x-agent-hint: Deletes a tag that no document uses. If documents still use it,
+        this fails; take the tag off them with knowledge.set_tags first. Documents
+        are not deleted.
     put:
       consumes:
       - application/json
@@ -16905,17 +17315,19 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: knowledge_base_id
       - description: 标签ID (UUID或seq_id)
         in: path
         name: tag_id
         required: true
         type: string
+        x-agent: tag_id
       - description: 标签更新信息
         in: body
         name: request
         required: true
         schema:
-          type: object
+          $ref: '#/definitions/internal_handler.UpdateTagRequest'
       produces:
       - application/json
       responses:
@@ -16938,6 +17350,13 @@ paths:
       summary: 更新标签
       tags:
       - 标签管理
+      x-agent:
+        id: knowledge_base.update_tag
+        label: name
+        risk: write
+        target: knowledge_base.get
+      x-agent-hint: Renames a tag. tag_id comes from knowledge_base.list_tags. A field
+        left out is kept.
   /knowledge-bases/copy:
     post:
       consumes:
@@ -17675,6 +18094,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: knowledge_id
       - description: 手工知识内容
         in: body
         name: request
@@ -17703,6 +18123,14 @@ paths:
       summary: 更新手工知识
       tags:
       - 知识管理
+      x-agent:
+        id: knowledge.update_manual
+        label: title
+        risk: write
+        target: knowledge.get
+      x-agent-hint: Replaces the whole Markdown of a document created as manual knowledge.
+        Send the complete content, not a diff. status draft keeps it out of search;
+        publish indexes it. Uploaded files cannot be edited this way.
   /knowledge/move:
     post:
       consumes:
@@ -17841,14 +18269,14 @@ paths:
     put:
       consumes:
       - application/json
-      description: 批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的空间解析
+      description: 批量更新知识条目的标签。传 updates，或传 knowledge_ids 与 tag_ids。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的空间解析
       parameters:
-      - description: 标签更新请求（updates 必填，kb_id 可选）
+      - description: 标签更新请求
         in: body
         name: request
         required: true
         schema:
-          type: object
+          $ref: '#/definitions/internal_handler.KnowledgeTagBatchRequest'
       produces:
       - application/json
       responses:
@@ -17866,6 +18294,19 @@ paths:
       summary: 批量更新知识标签
       tags:
       - 知识管理
+      x-agent:
+        id: knowledge.set_tags
+        items:
+          as: knowledge_id
+          label: title
+          param: knowledge_ids
+          target: knowledge.get
+        label: name
+        risk: write
+        target: knowledge_base.get
+      x-agent-hint: Sets the same tags on up to 20 documents in one knowledge base,
+        replacing the tags they have now. tag_ids come from knowledge_base.list_tags;
+        an empty tag_ids clears every tag. It does not delete documents.
   /knowledgebase/{kb_id}/wiki/auto-fix:
     post:
       description: Automatically fix fixable wiki issues (broken links, etc.)

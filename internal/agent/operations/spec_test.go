@@ -225,6 +225,76 @@ func TestFromSpecAgentRequired(t *testing.T) {
 	}
 }
 
+func TestFromSpecSkipsResponseOnlyBodyFields(t *testing.T) {
+	spec := `{
+      "paths": {
+        "/api/v1/knowledge-bases": {
+          "post": {
+            "summary": "Create",
+            "parameters": [{"name": "body", "in": "body", "required": true, "schema": {"$ref": "#/definitions/KB"}}],
+            "responses": {"201": {"schema": {"$ref": "#/definitions/KB"}}},
+            "x-agent": {"id": "knowledge_base.create", "risk": "write", "label_param": "name"},
+            "x-agent-hint": "Creates one."
+          }
+        }
+      },
+      "definitions": {
+        "KB": {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "name": {"type": "string", "description": "Name", "x-agent": true},
+            "id": {"type": "string", "description": "ID", "x-agent": "knowledge_base_id", "x-agent-response": true},
+            "indexing_strategy": {
+              "type": "object",
+              "description": "Indexing",
+              "x-agent": true,
+              "x-agent-response": true,
+              "properties": {"vector": {"type": "boolean", "description": "Vector", "x-agent": true}}
+            }
+          }
+        }
+      }
+    }`
+	ops, err := FromSpec([]byte(spec))
+	require.NoError(t, err)
+	require.Len(t, ops, 1)
+	assert.ElementsMatch(t, []string{"name", "vector"}, paramNames(ops[0]))
+	_, ok := ops[0].Param("knowledge_base_id")
+	assert.False(t, ok, "a response-only identifier is not a create parameter")
+	_, ok = ops[0].Param("indexing_strategy")
+	assert.False(t, ok, "the indexing object itself is not a parameter")
+	vector, ok := ops[0].Param("vector")
+	require.True(t, ok)
+	assert.Equal(t, "indexing_strategy.vector", vector.Key)
+	call, err := ops[0].Build(map[string]json.RawMessage{
+		"name":   json.RawMessage(`"产品文档"`),
+		"vector": json.RawMessage(`true`),
+	})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"name":"产品文档","indexing_strategy":{"vector":true}}`, string(call.Body))
+	id, ok := fieldByFrom(ops[0].Result.Fields, "id")
+	require.True(t, ok)
+	assert.Equal(t, "knowledge_base_id", id.As)
+}
+
+func paramNames(op Operation) []string {
+	names := make([]string, 0, len(op.Params))
+	for _, p := range op.Params {
+		names = append(names, p.Name)
+	}
+	return names
+}
+
+func fieldByFrom(fields []Field, from string) (Field, bool) {
+	for _, field := range fields {
+		if field.From == from {
+			return field, true
+		}
+	}
+	return Field{}, false
+}
+
 func TestFromSpecMarksCatchAllSegment(t *testing.T) {
 	spec := strings.Replace(testSpec,
 		`{"id": "doc.get", "risk": "read"}`, `{"id": "doc.get", "risk": "read", "catch_all": "id"}`, 1)

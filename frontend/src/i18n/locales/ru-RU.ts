@@ -1967,7 +1967,47 @@ export default {
       invalidJson: 'Некорректный JSON',
       submitted: 'Отправлено',
       submitFailed: 'Ошибка отправки',
-      userRejected: 'Отклонено пользователем'
+      userRejected: 'Отклонено пользователем',
+      detail: {
+        type: 'Тип',
+        embeddingModel: 'Модель эмбеддинга',
+        summaryModel: 'Модель сводки',
+        captionModel: 'Описание изображений',
+        speechModel: 'Распознавание речи',
+        storage: 'Хранилище',
+        indexes: 'Индексы',
+        name: 'Название',
+        title: 'Заголовок',
+        status: 'Статус',
+        summary: 'Описание',
+        model: 'Модель',
+        mode: 'Режим',
+        url: 'Ссылка',
+        from: 'Откуда',
+        to: 'Куда',
+        folder: 'Папка',
+        page: 'Страница',
+        version: 'Версия',
+        documents: 'Документы',
+        knowledgeBases: 'Базы знаний',
+        mcpServices: 'Сервисы MCP',
+        skills: 'Навыки',
+        webSearch: 'Веб-поиск',
+        multiTurn: 'Многоходовой диалог'
+      },
+      value: {
+        document: 'Документ',
+        faq: 'FAQ',
+        wiki: 'Wiki',
+        on: 'вкл',
+        off: 'выкл',
+        vector: 'Вектор',
+        keyword: 'Ключевые слова',
+        graph: 'Граф',
+        quickAnswer: 'Быстрый ответ',
+        smartReasoning: 'Умное рассуждение',
+        indexSep: ', '
+      }
     }
   },
   kbSettings: {

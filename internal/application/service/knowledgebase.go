@@ -619,6 +619,10 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 			profileWasEnabled = kb.ProfileConfig.IsEnabled()
 			kb.ProfileConfig = config.ProfileConfig
 		}
+		if config.ExtractConfig != nil {
+			kb.ExtractConfig = config.ExtractConfig
+			changedFields = append(changedFields, "extract_config")
+		}
 		// Update indexing strategy — syncs to ExtractConfig for backward compat
 		if config.IndexingStrategy != nil {
 			if !config.IndexingStrategy.HasAnyIndexing() {
@@ -636,6 +640,50 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 			} else if config.IndexingStrategy.GraphEnabled {
 				kb.ExtractConfig = &types.ExtractConfig{Enabled: true}
 			}
+		}
+		if config.EmbeddingModelID != nil {
+			next := strings.TrimSpace(*config.EmbeddingModelID)
+			if next != kb.EmbeddingModelID {
+				if err := s.rejectEmbeddingModelChange(ctx, kb, next); err != nil {
+					return nil, err
+				}
+				changedFields = append(changedFields, "embedding_model_id")
+				kb.EmbeddingModelID = next
+			}
+		}
+		if config.SummaryModelID != nil {
+			next := strings.TrimSpace(*config.SummaryModelID)
+			if err := s.requireModelType(ctx, next, types.ModelTypeKnowledgeQA, "summary_model_id"); err != nil {
+				return nil, err
+			}
+			if kb.SummaryModelID != next {
+				changedFields = append(changedFields, "summary_model_id")
+			}
+			kb.SummaryModelID = next
+		}
+		if config.StorageBackendID != nil {
+			id := strings.TrimSpace(*config.StorageBackendID)
+			if id == "" {
+				return nil, apperrors.NewBadRequestError("storage_backend_id cannot be empty")
+			}
+			kb.StorageBackendID = &id
+			if err := s.applyAndValidateStorageBackend(ctx, kb); err != nil {
+				return nil, err
+			}
+			changedFields = append(changedFields, "storage_backend_id")
+		}
+		if config.ASRConfig != nil {
+			if config.ASRConfig.Enabled {
+				if err := s.requireModelType(ctx, strings.TrimSpace(config.ASRConfig.ModelID), types.ModelTypeASR, "asr_model_id"); err != nil {
+					return nil, err
+				}
+			}
+			kb.ASRConfig = *config.ASRConfig
+			changedFields = append(changedFields, "asr_config")
+		}
+		if config.QuestionGenerationConfig != nil {
+			kb.QuestionGenerationConfig = config.QuestionGenerationConfig
+			changedFields = append(changedFields, "question_generation_config")
 		}
 	}
 	// Apply multimodal (vision) config only when the caller provided it,
@@ -672,6 +720,44 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 
 	logger.Infof(ctx, "Knowledge base updated successfully, ID: %s, name: %s", kb.ID, kb.Name)
 	return kb, nil
+}
+
+func (s *knowledgeBaseService) rejectEmbeddingModelChange(ctx context.Context, kb *types.KnowledgeBase, next string) error {
+	if next == "" {
+		return apperrors.NewBadRequestError("embedding_model_id cannot be empty")
+	}
+	if err := s.requireModelType(ctx, next, types.ModelTypeEmbedding, "embedding_model_id"); err != nil {
+		return err
+	}
+	if kb.EmbeddingModelID == "" {
+		return nil
+	}
+	_, total, err := s.kgRepo.ListPagedKnowledgeByKnowledgeBaseID(ctx, kb.TenantID, kb.ID,
+		&types.Pagination{Page: 1, PageSize: 1}, types.KnowledgeListFilter{})
+	if err != nil {
+		return err
+	}
+	if total > 0 {
+		return apperrors.NewBadRequestError("知识库中已有文件，无法修改Embedding模型")
+	}
+	return nil
+}
+
+func (s *knowledgeBaseService) requireModelType(ctx context.Context, id string, want types.ModelType, field string) error {
+	if strings.TrimSpace(id) == "" {
+		return apperrors.NewBadRequestError(field + " cannot be empty")
+	}
+	if s.modelService == nil {
+		return apperrors.NewInternalServerError("model service is not configured")
+	}
+	model, err := s.modelService.GetModelByID(ctx, id)
+	if err != nil || model == nil {
+		return apperrors.NewBadRequestError(field + " does not match a model")
+	}
+	if model.Type != want {
+		return apperrors.NewBadRequestError(field + " must be a " + string(want) + " model")
+	}
+	return nil
 }
 
 // TogglePinKnowledgeBase toggles whether the calling user has pinned

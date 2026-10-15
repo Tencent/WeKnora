@@ -1969,7 +1969,47 @@ export default {
       invalidJson: '參數不是合法 JSON',
       submitted: '已提交',
       submitFailed: '提交失敗',
-      userRejected: '使用者拒絕'
+      userRejected: '使用者拒絕',
+      detail: {
+        type: '類型',
+        embeddingModel: '嵌入模型',
+        summaryModel: '摘要模型',
+        captionModel: '圖片描述',
+        speechModel: '語音識別',
+        storage: '儲存',
+        indexes: '索引',
+        name: '名稱',
+        title: '標題',
+        status: '狀態',
+        summary: '簡介',
+        model: '模型',
+        mode: '模式',
+        url: '連結',
+        from: '從',
+        to: '到',
+        folder: '目錄',
+        page: '頁面',
+        version: '版本',
+        documents: '文件',
+        knowledgeBases: '知識庫',
+        mcpServices: 'MCP 服務',
+        skills: '技能',
+        webSearch: '聯網搜尋',
+        multiTurn: '多輪對話'
+      },
+      value: {
+        document: '文件',
+        faq: '問答',
+        wiki: 'Wiki',
+        on: '開',
+        off: '關',
+        vector: '向量',
+        keyword: '關鍵詞',
+        graph: '圖譜',
+        quickAnswer: '快速問答',
+        smartReasoning: '智能推理',
+        indexSep: '、'
+      }
     }
   },
   kbSettings: {

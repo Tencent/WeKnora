@@ -1969,7 +1969,47 @@ export default {
       invalidJson: '参数不是合法 JSON',
       submitted: '已提交',
       submitFailed: '提交失败',
-      userRejected: '用户拒绝'
+      userRejected: '用户拒绝',
+      detail: {
+        type: '类型',
+        embeddingModel: '嵌入模型',
+        summaryModel: '摘要模型',
+        captionModel: '图片描述',
+        speechModel: '语音识别',
+        storage: '存储',
+        indexes: '索引',
+        name: '名称',
+        title: '标题',
+        status: '状态',
+        summary: '简介',
+        model: '模型',
+        mode: '模式',
+        url: '链接',
+        from: '从',
+        to: '到',
+        folder: '目录',
+        page: '页面',
+        version: '版本',
+        documents: '文档',
+        knowledgeBases: '知识库',
+        mcpServices: 'MCP 服务',
+        skills: '技能',
+        webSearch: '联网搜索',
+        multiTurn: '多轮对话'
+      },
+      value: {
+        document: '文档',
+        faq: '问答',
+        wiki: 'Wiki',
+        on: '开',
+        off: '关',
+        vector: '向量',
+        keyword: '关键词',
+        graph: '图谱',
+        quickAnswer: '快速问答',
+        smartReasoning: '智能推理',
+        indexSep: '、'
+      }
     }
   },
   kbSettings: {

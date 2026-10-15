@@ -2,6 +2,12 @@
   <div v-if="interactive" class="prompt-panel" @click.stop>
     <div class="prompt-question">{{ $t('agentStream.toolApproval.dockQuestion', { target: targetLabel }) }}</div>
     <div v-if="descriptionParts.head" class="prompt-desc">{{ descriptionParts.head }}</div>
+    <dl v-if="descriptionParts.fields.length" class="prompt-fields">
+      <div v-for="(field, i) in descriptionParts.fields" :key="i" class="prompt-field">
+        <dt>{{ approvalFieldLabel(field.label) }}</dt>
+        <dd>{{ approvalFieldValue(field.label, field.value) }}</dd>
+      </div>
+    </dl>
     <ul v-if="descriptionParts.items.length" class="prompt-desc-items">
       <li v-for="(item, i) in descriptionParts.items" :key="i">{{ item }}</li>
     </ul>
@@ -147,17 +153,26 @@ const awaitingInDock = computed(() => open.value && props.variant !== 'dock' && 
 const hasArgs = computed(() => argsText.value.trim().length > 0)
 
 // A batch operation ends its description with one "- " line per item it acts
-// on; those render as a list so every item stays visible.
+// on; those render as a list so every item stays visible. "Label: value"
+// lines render as a definition list. A broken item list stays one block.
 const descriptionParts = computed(() => {
-  const lines = (props.description || '').split('\n')
+  const text = (props.description || '').trim()
+  const lines = text ? text.split('\n') : []
   const start = lines.findIndex((line) => line.startsWith('- '))
-  if (start < 0 || !lines.slice(start).every((line) => line.startsWith('- '))) {
-    return { head: (props.description || '').trim(), items: [] as string[] }
+  const brokenList = start >= 0 && !lines.slice(start).every((line) => line.startsWith('- '))
+  if (!text || brokenList) {
+    return { head: text, fields: [], items: [] }
   }
-  return {
-    head: lines.slice(0, start).join('\n').trim(),
-    items: lines.slice(start).map((line) => line.slice(2)),
+  const body = start < 0 ? lines : lines.slice(0, start)
+  const items = start < 0 ? [] : lines.slice(start).map((line) => line.slice(2))
+  const fields = []
+  const headLines = []
+  for (const line of body) {
+    const match = /^([^:\n]{1,48}): (.+)$/.exec(line)
+    if (match) fields.push({ label: match[1], value: match[2] })
+    else headLines.push(line)
   }
+  return { head: headLines.join('\n').trim(), fields, items }
 })
 
 const isJsonValid = computed(() => {
@@ -169,6 +184,68 @@ const isJsonValid = computed(() => {
     return false
   }
 })
+
+const approvalDetailKey: Record<string, string> = {
+  Type: 'type',
+  'Embedding model': 'embeddingModel',
+  'Summary model': 'summaryModel',
+  'Caption model': 'captionModel',
+  'Speech model': 'speechModel',
+  Storage: 'storage',
+  Indexes: 'indexes',
+  Name: 'name',
+  Title: 'title',
+  Status: 'status',
+  Summary: 'summary',
+  Model: 'model',
+  Mode: 'mode',
+  URL: 'url',
+  From: 'from',
+  To: 'to',
+  Folder: 'folder',
+  Page: 'page',
+  Version: 'version',
+  Documents: 'documents',
+  'Knowledge bases': 'knowledgeBases',
+  'MCP services': 'mcpServices',
+  Skills: 'skills',
+  'Web search': 'webSearch',
+  'Multi-turn conversation': 'multiTurn',
+}
+
+const approvalValueKey: Record<string, string> = {
+  document: 'document',
+  faq: 'faq',
+  wiki: 'wiki',
+  on: 'on',
+  off: 'off',
+  vector: 'vector',
+  keyword: 'keyword',
+  graph: 'graph',
+  'quick-answer': 'quickAnswer',
+  'smart-reasoning': 'smartReasoning',
+}
+
+function approvalFieldLabel(label: string) {
+  const key = approvalDetailKey[label]
+  return key ? t(`agentStream.toolApproval.detail.${key}`) : label
+}
+
+function approvalToken(token: string) {
+  const key = approvalValueKey[token]
+  return key ? t(`agentStream.toolApproval.value.${key}`) : token
+}
+
+function approvalFieldValue(label: string, value: string) {
+  if (label === 'Indexes') {
+    const parts = value.split(', ').map((part) => part.split(' ').map(approvalToken).join(' '))
+    return parts.join(t('agentStream.toolApproval.value.indexSep'))
+  }
+  if (label === 'Type' || label === 'Mode' || value === 'on' || value === 'off') {
+    return approvalToken(value)
+  }
+  return value
+}
 
 const argsDirty = computed(() => argsText.value.trim() !== initialArgs.trim())
 

@@ -56,6 +56,14 @@ type ChunkingConfig struct {
 	Separators   []string `json:"separators"`    // Separators
 }
 
+// IndexingStrategy selects which indexing pipelines are active.
+type IndexingStrategy struct {
+	VectorEnabled  bool `json:"vector_enabled"`
+	KeywordEnabled bool `json:"keyword_enabled"`
+	WikiEnabled    bool `json:"wiki_enabled"`
+	GraphEnabled   bool `json:"graph_enabled"`
+}
+
 // FAQConfig represents faq-specific configuration
 type FAQConfig struct {
 	IndexMode         string `json:"index_mode"`
@@ -344,6 +352,65 @@ func (c *Client) UpdateKnowledgeBase(ctx context.Context,
 ) (*KnowledgeBase, error) {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s", knowledgeBaseID)
 	resp, err := c.doRequest(ctx, http.MethodPut, path, request, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response KnowledgeBaseResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return &response.Data, nil
+}
+
+// PatchKnowledgeBaseRequest changes only the fields it carries.
+// A nil field is left unchanged. Nested objects use pointers so a false or
+// zero value can be sent without the other fields being cleared.
+type PatchKnowledgeBaseRequest struct {
+	Name             *string                `json:"name,omitempty"`
+	Description      *string                `json:"description,omitempty"`
+	EmbeddingModelID *string                `json:"embedding_model_id,omitempty"`
+	SummaryModelID   *string                `json:"summary_model_id,omitempty"`
+	StorageBackendID *string                `json:"storage_backend_id,omitempty"`
+	ChunkingConfig   *PatchChunkingConfig   `json:"chunking_config,omitempty"`
+	IndexingStrategy *PatchIndexingStrategy `json:"indexing_strategy,omitempty"`
+	VLMConfig        *PatchVLMConfig        `json:"vlm_config,omitempty"`
+	ASRConfig        *ASRConfig             `json:"asr_config,omitempty"`
+	FAQConfig        *FAQConfig             `json:"faq_config,omitempty"`
+	AutoTagConfig    *AutoTagConfig         `json:"auto_tag_config,omitempty"`
+	ImageProcessing  *ImageProcessingConfig `json:"image_processing_config,omitempty"`
+}
+
+// PatchChunkingConfig is the partial chunking update. Nil fields stay as they are.
+type PatchChunkingConfig struct {
+	ChunkSize    *int     `json:"chunk_size,omitempty"`
+	ChunkOverlap *int     `json:"chunk_overlap,omitempty"`
+	Separators   []string `json:"separators,omitempty"`
+}
+
+// PatchIndexingStrategy is the partial indexing update. Nil flags stay as they are.
+type PatchIndexingStrategy struct {
+	VectorEnabled  *bool `json:"vector_enabled,omitempty"`
+	KeywordEnabled *bool `json:"keyword_enabled,omitempty"`
+	WikiEnabled    *bool `json:"wiki_enabled,omitempty"`
+	GraphEnabled   *bool `json:"graph_enabled,omitempty"`
+}
+
+// PatchVLMConfig is the partial caption-model update.
+type PatchVLMConfig struct {
+	Enabled *bool   `json:"enabled,omitempty"`
+	ModelID *string `json:"model_id,omitempty"`
+}
+
+// PatchKnowledgeBase updates the name or description and leaves indexing,
+// models and the rest of the configuration unchanged.
+func (c *Client) PatchKnowledgeBase(ctx context.Context,
+	knowledgeBaseID string,
+	request *PatchKnowledgeBaseRequest,
+) (*KnowledgeBase, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s", knowledgeBaseID)
+	resp, err := c.doRequest(ctx, http.MethodPatch, path, request, nil)
 	if err != nil {
 		return nil, err
 	}

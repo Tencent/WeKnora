@@ -59,12 +59,12 @@ const (
 // KnowledgeBaseProfileConfig controls automatic generation of the knowledge
 // base description. It is opt-in so upgrading a deployment adds no model calls.
 type KnowledgeBaseProfileConfig struct {
-	Enabled bool `yaml:"enabled" json:"enabled"`
-	// ModelID overrides the chat model; empty falls back to the KB summary model.
-	ModelID string `yaml:"model_id,omitempty" json:"model_id,omitempty"`
-	// CustomInstructions is appended to the stable system prompt, e.g. the
-	// audience the description should address or terms to keep.
-	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty"`
+	// Enabled turns the AI knowledge-base description on.
+	Enabled bool `yaml:"enabled" json:"enabled" extensions:"x-agent=profile_enabled"`
+	// ModelID overrides the summary model. Empty uses summary_model_id.
+	ModelID string `yaml:"model_id,omitempty" json:"model_id,omitempty" extensions:"x-agent=profile_model_id"`
+	// CustomInstructions is extra guidance for the description, such as the audience. The format stays fixed.
+	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty" extensions:"x-agent=profile_instructions,x-agent-detail,x-agent-max-bytes=4000"`
 }
 
 // IsEnabled reports whether automatic generation is on for a nil-safe receiver.

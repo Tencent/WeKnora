@@ -30,6 +30,8 @@
 
 响应：201 `{"success":true,"data":{KnowledgeBase}}`
 
+`indexing_strategy` 里没写到的开关保持默认：向量和关键词开启，Wiki 和图谱关闭。显式传 `false` 才会关掉。
+
 ```bash
 curl -X POST $BASE/api/v1/knowledge-bases -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"name":"产品文档","type":"document"}'
@@ -107,6 +109,28 @@ curl $BASE/api/v1/knowledge-bases/kb-1 -H "Authorization: Bearer $TOKEN"
 
 ```bash
 curl -X PUT $BASE/api/v1/knowledge-bases/kb-1 -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"name":"产品文档 v2"}'
+```
+
+### PATCH /api/v1/knowledge-bases/:id
+
+用途：只修改请求里出现的设置，其余保持不变。这包括名称、描述、模型、存储、分块、索引开关、FAQ、Wiki、自动标签、AI 描述、图片、语音和图谱提取里的字段：嵌套对象中没写到的字段也保持原值。权限与 PUT 相同；修改嵌入模型、摘要模型、存储、多模态或语音时，共享知识库还需要管理员共享权限。`embedding_model_id` 在知识库已有文档时不能改。`vector_store_id` 只能在创建时指定。`name` 传了就不能为空；`description` 传空字符串会清空描述。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `name` | string | 否 | 新名称 |
+| `description` | string | 否 | 新描述；空字符串清空 |
+| `embedding_model_id` / `summary_model_id` / `storage_backend_id` | string | 否 | 模型或存储实例 |
+| `chunking_config` | object | 否 | 只覆盖写到的分块字段 |
+| `indexing_strategy` | object | 否 | 只覆盖写到的开关；至少保留一种索引 |
+| `vlm_config` / `asr_config` / `image_processing_config` | object | 否 | 多模态、语音、图片 |
+| `faq_config` / `wiki_config` / `auto_tag_config` / `profile_config` | object | 否 | 类型相关设置 |
+| `extract_config` / `question_generation_config` | object | 否 | 图谱提取、分块问题生成 |
+
+响应：200 `{"success":true,"data":{KnowledgeBase}}`
+
+```bash
+curl -X PATCH $BASE/api/v1/knowledge-bases/kb-1 -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"name":"产品文档 v2"}'
 ```
 
@@ -526,7 +550,7 @@ curl -X POST $BASE/api/v1/knowledge/k-1/regenerate-summary -H "Authorization: Be
 
 ### PUT /api/v1/knowledge/manual/:id
 
-用途：更新手工知识内容（`ManualKnowledgePayload` 子集：`title/content/status/...`）。权限同上。
+用途：整篇替换手工录入的 Markdown。只适用于手工知识；上传文件不能用这个接口改正文。`content` 是完整正文，空内容会被拒绝。`status` 为 `draft`（不进入检索）或 `publish`（建立索引）；不传 `status` 时按草稿保存。权限同上。
 
 响应：200 `{"success":true,"data":{Knowledge}}`
 
@@ -617,12 +641,14 @@ curl $BASE/api/v1/knowledge/move/progress/task-1 -H "Authorization: Bearer $TOKE
 
 ### PUT /api/v1/knowledge/tags
 
-用途：批量更新知识标签。权限：Contributor+；API key `ingest`/full（KB 白名单在 handler 校验）。
+用途：批量更新知识标签。权限：Contributor+；API key `ingest`/full（KB 白名单在 handler 校验）。两种写法互斥：`updates`，或 `knowledge_ids` 加 `tag_ids`。
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `updates` | map[string][]string | 是（`binding:"required,min=1"`） | knowledge_id → tag_ids |
-| `kb_id` | string | 否 | 限定 KB |
+| `updates` | map[string][]string | 与 `knowledge_ids` 二选一 | knowledge_id → tag_ids，替换该文档现有标签 |
+| `kb_id` | string | 否 | 限定知识库；不传时从第一条知识推断 |
+| `knowledge_ids` | []string | 与 `updates` 二选一 | 最多 20 篇，同一组标签 |
+| `tag_ids` | []string | 使用 `knowledge_ids` 时必填 | 最多 50 个；空数组清空标签 |
 
 响应：200 `{"success":true}`
 

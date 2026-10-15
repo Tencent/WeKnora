@@ -46,6 +46,10 @@ const (
 	// single object, so a long field (a prompt, say) does not repeat on
 	// every item of a list.
 	extAgentDetail = "x-agent-detail"
+	// extAgentResponse keeps a field in responses and out of request
+	// parameters. Identifiers and computed counts are projected when the
+	// model reads an object, and are not something it may set on create.
+	extAgentResponse = "x-agent-response"
 )
 
 // agentItems is ItemTarget as written in x-agent:
@@ -135,6 +139,8 @@ type specSchema struct {
 	AgentMaxBytes string                 `json:"x-agent-max-bytes"`
 	AgentMaxRunes string                 `json:"x-agent-max-runes"`
 	AgentDetail   bool                   `json:"x-agent-detail"`
+	// AgentResponse projects the field and does not accept it as a parameter.
+	AgentResponse bool `json:"x-agent-response"`
 	// AgentRequired makes an API-optional field mandatory for the model.
 	AgentRequired bool `json:"x-agent-required"`
 }
@@ -325,6 +331,28 @@ func (doc *specDocument) bodyParams(sp specParameter) ([]Param, error) {
 	var out []Param
 	for _, key := range sortedKeys(obj.Properties) {
 		prop := obj.Properties[key]
+		shape, err := doc.resolve(prop)
+		if err != nil {
+			return nil, err
+		}
+		// An object is not one parameter. Its tagged scalars are, and the
+		// wire key keeps the path so the request nests them again.
+		if shape != nil && shape.Type != "array" && (shape.Type == "object" || len(shape.Properties) > 0) {
+			nested, err := doc.flattenBodyObject(shape, key, sp.Required)
+			if err != nil {
+				return nil, err
+			}
+			if len(nested) > 0 {
+				out = append(out, nested...)
+				continue
+			}
+		}
+		if prop.AgentResponse {
+			if sp.Required && required[key] {
+				return nil, fmt.Errorf("body field %q is required but marked %s", key, extAgentResponse)
+			}
+			continue
+		}
 		name, exposed, err := agentName(prop.Agent, key)
 		if err != nil {
 			return nil, fmt.Errorf("body field %q: %w", key, err)
@@ -343,12 +371,65 @@ func (doc *specDocument) bodyParams(sp specParameter) ([]Param, error) {
 			AllowEmpty:  prop.AgentRequired && !required[key],
 			Description: strings.TrimSpace(prop.Description),
 		}
+		if err := doc.typeParam(&p, shape, prop.AgentMax, prop.AgentMaxBytes); err != nil {
+			return nil, fmt.Errorf("body field %q: %w", key, err)
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// flattenBodyObject turns the tagged scalars inside an object into body
+// parameters. The wire key is the dotted JSON path.
+func (doc *specDocument) flattenBodyObject(obj *specSchema, prefix string, bodyRequired bool) ([]Param, error) {
+	required := map[string]bool{}
+	for _, key := range obj.Required {
+		required[key] = true
+	}
+	var out []Param
+	for _, key := range sortedKeys(obj.Properties) {
+		prop := obj.Properties[key]
+		path := prefix + "." + key
 		shape, err := doc.resolve(prop)
 		if err != nil {
 			return nil, err
 		}
+		if shape != nil && shape.Type != "array" && (shape.Type == "object" || len(shape.Properties) > 0) {
+			nested, err := doc.flattenBodyObject(shape, path, bodyRequired)
+			if err != nil {
+				return nil, err
+			}
+			if len(nested) > 0 {
+				out = append(out, nested...)
+				continue
+			}
+		}
+		if prop.AgentResponse {
+			if bodyRequired && required[key] {
+				return nil, fmt.Errorf("body field %q is required but marked %s", path, extAgentResponse)
+			}
+			continue
+		}
+		name, exposed, err := agentName(prop.Agent, key)
+		if err != nil {
+			return nil, fmt.Errorf("body field %q: %w", path, err)
+		}
+		if !exposed {
+			if bodyRequired && required[key] {
+				return nil, fmt.Errorf("body field %q is required but not exposed with %s", path, extAgent)
+			}
+			continue
+		}
+		p := Param{
+			Name:        name,
+			In:          InBody,
+			Key:         path,
+			Required:    bodyRequired && (required[key] || prop.AgentRequired),
+			AllowEmpty:  prop.AgentRequired && !required[key],
+			Description: strings.TrimSpace(prop.Description),
+		}
 		if err := doc.typeParam(&p, shape, prop.AgentMax, prop.AgentMaxBytes); err != nil {
-			return nil, fmt.Errorf("body field %q: %w", key, err)
+			return nil, fmt.Errorf("body field %q: %w", path, err)
 		}
 		out = append(out, p)
 	}

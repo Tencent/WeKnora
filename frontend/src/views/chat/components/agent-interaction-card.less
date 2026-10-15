@@ -282,6 +282,36 @@
   overflow-y: auto;
 }
 
+.prompt-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: -2px 0 0;
+  max-height: calc(1.4em * 6 + 20px);
+  overflow-y: auto;
+}
+
+.prompt-field {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+  align-items: baseline;
+  margin: 0;
+  font-size: var(--agent-step-summary-size, 13px);
+  line-height: 1.4;
+
+  dt {
+    margin: 0;
+    color: var(--td-text-color-placeholder);
+  }
+
+  dd {
+    margin: 0;
+    color: var(--td-text-color-primary);
+    word-break: break-word;
+  }
+}
+
 .prompt-desc-items {
   margin: -4px 0 0;
   padding-left: 18px;

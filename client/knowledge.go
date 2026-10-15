@@ -858,9 +858,14 @@ type UpdateManualKnowledgeRequest struct {
 	Content string `json:"content,omitempty"`
 }
 
-// BatchUpdateKnowledgeTagsRequest contains the mapping of knowledge IDs to tag IDs.
+// BatchUpdateKnowledgeTagsRequest sets tags on documents.
+// Send Updates, or KnowledgeIDs together with TagIDs. An empty TagIDs clears
+// the tags; omitting it while KnowledgeIDs is set is rejected.
 type BatchUpdateKnowledgeTagsRequest struct {
-	Updates map[string]*string `json:"updates"` // knowledge_id -> tag_id (nil to clear)
+	Updates      map[string]*string `json:"updates,omitempty"` // knowledge_id -> tag_id (nil to clear)
+	KBID         string             `json:"kb_id,omitempty"`
+	KnowledgeIDs []string           `json:"knowledge_ids,omitempty"`
+	TagIDs       []string           `json:"tag_ids,omitempty"`
 }
 
 // CreateManualKnowledge creates a knowledge entry from manual Markdown content.

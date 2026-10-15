@@ -690,6 +690,40 @@ func mutationDetail(
 	if s, ok := rawString(params, "title"); ok && s != "" {
 		lines = append(lines, "Title: "+excerpt(s))
 	}
+	if s, ok := rawString(params, "type"); ok && s != "" {
+		lines = append(lines, "Type: "+s)
+	}
+	for _, field := range []struct{ param, label string }{
+		{"embedding_model_id", "Embedding model"},
+		{"summary_model_id", "Summary model"},
+		{"vlm_model_id", "Caption model"},
+		{"asr_model_id", "Speech model"},
+	} {
+		if s, ok := rawString(params, field.param); ok && s != "" {
+			lines = append(lines, field.label+": "+resolvedLabels(ctx, t, modelLabels, []string{s}, identity))
+		}
+	}
+	if s, ok := rawString(params, "storage_backend_id"); ok && s != "" {
+		lines = append(lines, "Storage: "+s)
+	}
+	var indexes []string
+	for _, flag := range []struct{ param, token string }{
+		{"vector_enabled", "vector"},
+		{"keyword_enabled", "keyword"},
+		{"wiki_enabled", "wiki"},
+		{"graph_enabled", "graph"},
+	} {
+		if on, ok := rawBool(params, flag.param); ok {
+			state := "off"
+			if on {
+				state = "on"
+			}
+			indexes = append(indexes, flag.token+" "+state)
+		}
+	}
+	if len(indexes) > 0 {
+		lines = append(lines, "Indexes: "+strings.Join(indexes, ", "))
+	}
 	if s, ok := rawString(params, "status"); ok && s != "" {
 		lines = append(lines, "Status: "+s)
 	}
@@ -731,20 +765,22 @@ func mutationDetail(
 			lines = append(lines, "Documents: "+resolvedLabels(ctx, t, knowledgeLabels, ids, identity))
 		}
 	}
-	lines = append(lines, agentSettingsDetail(ctx, t, params, identity)...)
+	lines = append(lines, agentSettingsDetail(ctx, t, op, params, identity)...)
 	return strings.Join(lines, "\n")
 }
 
 // agentSettingsDetail lists the agent settings a call sets, with models,
-// knowledge bases and MCP services by name.
+// knowledge bases and MCP services by name. A create already shows name as
+// the card title, so that line is not repeated.
 func agentSettingsDetail(
 	ctx context.Context,
 	t *RunOperationTool,
+	op operations.Operation,
 	params map[string]json.RawMessage,
 	identity operations.Identity,
 ) []string {
 	var lines []string
-	if s, ok := rawString(params, "name"); ok && s != "" {
+	if s, ok := rawString(params, "name"); ok && s != "" && op.LabelParam != "name" {
 		lines = append(lines, "Name: "+excerpt(s))
 	}
 	if s, ok := rawString(params, "agent_mode"); ok && s != "" {

@@ -1967,7 +1967,47 @@ export default {
       invalidJson: '유효한 JSON이 아닙니다',
       submitted: '제출됨',
       submitFailed: '제출 실패',
-      userRejected: '사용자 거부'
+      userRejected: '사용자 거부',
+      detail: {
+        type: '유형',
+        embeddingModel: '임베딩 모델',
+        summaryModel: '요약 모델',
+        captionModel: '이미지 설명',
+        speechModel: '음성 인식',
+        storage: '스토리지',
+        indexes: '인덱스',
+        name: '이름',
+        title: '제목',
+        status: '상태',
+        summary: '설명',
+        model: '모델',
+        mode: '모드',
+        url: '링크',
+        from: '출발',
+        to: '도착',
+        folder: '폴더',
+        page: '페이지',
+        version: '버전',
+        documents: '문서',
+        knowledgeBases: '지식베이스',
+        mcpServices: 'MCP 서비스',
+        skills: '스킬',
+        webSearch: '웹 검색',
+        multiTurn: '멀티턴'
+      },
+      value: {
+        document: '문서',
+        faq: 'FAQ',
+        wiki: 'Wiki',
+        on: '켜짐',
+        off: '꺼짐',
+        vector: '벡터',
+        keyword: '키워드',
+        graph: '그래프',
+        quickAnswer: '빠른 답변',
+        smartReasoning: '스마트 추론',
+        indexSep: ', '
+      }
     }
   },
   kbSettings: {

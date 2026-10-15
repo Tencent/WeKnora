@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -460,6 +461,8 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 // @Failure      500      {object}  errors.AppError                                      "服务器错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge_base.create","risk":"write","label_param":"name"}
+// @x-agent-hint "Creates a knowledge base owned by the user. Omit type for document. Omit indexing flags for vector and keyword search. Set embedding_model_id and summary_model_id from model.list. vector_store_id can be chosen only now. A field you leave out keeps its default."
 // @Router       /knowledge-bases [post]
 func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -467,12 +470,25 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	logger.Info(ctx, "Start creating knowledge base")
 
 	// Parse request body
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
 	var req types.KnowledgeBase
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		c.Error(apperrors.NewBadRequestError("name cannot be empty"))
+		return
+	}
+	// A partial indexing_strategy must not turn the omitted pipelines off.
+	// Missing flags keep the defaults: vector and keyword on, wiki and graph off.
+	fillOmittedIndexingFlags(body, &req)
 	if err := validateExtractConfig(req.ExtractConfig); err != nil {
 		logger.Error(ctx, "Invalid extract configuration", err)
 		c.Error(err)
@@ -878,8 +894,331 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "Knowledge base updated successfully, ID: %s",
-		secutils.SanitizeForLog(id))
+	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
+	})
+}
+
+// PatchKnowledgeBaseRequest changes the settings it carries. A field left
+// out stays as it is, including fields inside chunking, indexing and models.
+type PatchKnowledgeBaseRequest struct {
+	// New name. Omit to keep the current one.
+	Name *string `json:"name" extensions:"x-agent"`
+	// New description. Omit to keep it; an empty string clears it.
+	Description *string `json:"description" extensions:"x-agent"`
+	// Embedding model. Cannot change after the knowledge base has documents.
+	EmbeddingModelID *string `json:"embedding_model_id" extensions:"x-agent=embedding_model_id"`
+	// Summary model. model.list returns the ids.
+	SummaryModelID *string `json:"summary_model_id" extensions:"x-agent=summary_model_id"`
+	// Storage instance to bind. Omit to keep the current one.
+	StorageBackendID *string `json:"storage_backend_id" extensions:"x-agent=storage_backend_id"`
+	// Chunking settings. Only the fields present are changed.
+	Chunking *types.ChunkingConfig `json:"chunking_config"`
+	// Indexing pipelines. A flag left out stays as it is.
+	Indexing *types.IndexingStrategy `json:"indexing_strategy"`
+	// Image description settings.
+	Image *types.ImageProcessingConfig `json:"image_processing_config"`
+	// FAQ indexing. Only for an FAQ knowledge base.
+	FAQ *types.FAQConfig `json:"faq_config"`
+	// Wiki page settings.
+	Wiki *types.WikiConfig `json:"wiki_config"`
+	// Automatic tagging.
+	AutoTag *types.AutoTagConfig `json:"auto_tag_config"`
+	// AI description of the knowledge base.
+	Profile *types.KnowledgeBaseProfileConfig `json:"profile_config"`
+	// Image captions.
+	VLM *types.VLMConfig `json:"vlm_config"`
+	// Speech transcription.
+	ASR *types.ASRConfig `json:"asr_config"`
+	// Graph extraction. Node types stay in the knowledge base editor.
+	Extract *types.ExtractConfig `json:"extract_config"`
+	// Generated questions for each chunk.
+	Questions *types.QuestionGenerationConfig `json:"question_generation_config"`
+}
+
+// knowledgeBaseUpdate is the merged result of a partial knowledge base edit.
+type knowledgeBaseUpdate struct {
+	Name        string
+	Description string
+	Config      *types.KnowledgeBaseConfig
+	VLM         *types.VLMConfig
+}
+
+// applyKnowledgeBasePatch overlays the JSON sections that are present onto
+// the stored knowledge base. Omitted flags and nested fields stay.
+func applyKnowledgeBasePatch(kb *types.KnowledgeBase, patch PatchKnowledgeBaseRequest, sections map[string]json.RawMessage) (knowledgeBaseUpdate, error) {
+	out := knowledgeBaseUpdate{Name: kb.Name, Description: kb.Description}
+	if patch.Name != nil {
+		out.Name = strings.TrimSpace(*patch.Name)
+		if out.Name == "" {
+			return out, apperrors.NewBadRequestError("name cannot be empty")
+		}
+	}
+	if patch.Description != nil {
+		out.Description = *patch.Description
+	}
+
+	cfg := &types.KnowledgeBaseConfig{ChunkingConfig: kb.ChunkingConfig}
+	used := false
+	merge := func(key string, dest any) error {
+		raw, ok := sections[key]
+		if !ok || len(raw) == 0 || string(raw) == "null" {
+			return nil
+		}
+		if err := json.Unmarshal(raw, dest); err != nil {
+			return apperrors.NewBadRequestError("invalid " + key).WithDetails(err.Error())
+		}
+		used = true
+		return nil
+	}
+
+	chunking := kb.ChunkingConfig
+	if err := merge("chunking_config", &chunking); err != nil {
+		return out, err
+	}
+	cfg.ChunkingConfig = chunking
+
+	strategy := kb.IndexingStrategy
+	before := len(sections["indexing_strategy"])
+	if err := merge("indexing_strategy", &strategy); err != nil {
+		return out, err
+	}
+	if before > 0 && string(sections["indexing_strategy"]) != "null" {
+		cfg.IndexingStrategy = &strategy
+	}
+
+	image := kb.ImageProcessingConfig
+	if err := merge("image_processing_config", &image); err != nil {
+		return out, err
+	}
+	if _, ok := sections["image_processing_config"]; ok && string(sections["image_processing_config"]) != "null" {
+		cfg.ImageProcessingConfig = &image
+	}
+
+	faq := types.FAQConfig{}
+	if kb.FAQConfig != nil {
+		faq = *kb.FAQConfig
+	}
+	if err := merge("faq_config", &faq); err != nil {
+		return out, err
+	}
+	if _, ok := sections["faq_config"]; ok && string(sections["faq_config"]) != "null" {
+		cfg.FAQConfig = &faq
+	}
+
+	wiki := types.WikiConfig{}
+	if kb.WikiConfig != nil {
+		wiki = *kb.WikiConfig
+	}
+	if err := merge("wiki_config", &wiki); err != nil {
+		return out, err
+	}
+	if _, ok := sections["wiki_config"]; ok && string(sections["wiki_config"]) != "null" {
+		cfg.WikiConfig = &wiki
+	}
+
+	autoTag := types.AutoTagConfig{}
+	if kb.AutoTagConfig != nil {
+		autoTag = *kb.AutoTagConfig
+	}
+	if err := merge("auto_tag_config", &autoTag); err != nil {
+		return out, err
+	}
+	if _, ok := sections["auto_tag_config"]; ok && string(sections["auto_tag_config"]) != "null" {
+		cfg.AutoTagConfig = &autoTag
+	}
+
+	profile := types.KnowledgeBaseProfileConfig{}
+	if kb.ProfileConfig != nil {
+		profile = *kb.ProfileConfig
+	}
+	if err := merge("profile_config", &profile); err != nil {
+		return out, err
+	}
+	if _, ok := sections["profile_config"]; ok && string(sections["profile_config"]) != "null" {
+		cfg.ProfileConfig = &profile
+	}
+
+	asr := kb.ASRConfig
+	if err := merge("asr_config", &asr); err != nil {
+		return out, err
+	}
+	if _, ok := sections["asr_config"]; ok && string(sections["asr_config"]) != "null" {
+		cfg.ASRConfig = &asr
+	}
+
+	extract := types.ExtractConfig{}
+	if kb.ExtractConfig != nil {
+		extract = *kb.ExtractConfig
+	}
+	if err := merge("extract_config", &extract); err != nil {
+		return out, err
+	}
+	if _, ok := sections["extract_config"]; ok && string(sections["extract_config"]) != "null" {
+		if err := validateExtractConfig(&extract); err != nil {
+			return out, err
+		}
+		cfg.ExtractConfig = &extract
+	}
+
+	questions := types.QuestionGenerationConfig{}
+	if kb.QuestionGenerationConfig != nil {
+		questions = *kb.QuestionGenerationConfig
+	}
+	if err := merge("question_generation_config", &questions); err != nil {
+		return out, err
+	}
+	if _, ok := sections["question_generation_config"]; ok && string(sections["question_generation_config"]) != "null" {
+		cfg.QuestionGenerationConfig = &questions
+	}
+
+	vlm := kb.VLMConfig
+	if err := merge("vlm_config", &vlm); err != nil {
+		return out, err
+	}
+	if _, ok := sections["vlm_config"]; ok && string(sections["vlm_config"]) != "null" {
+		out.VLM = &vlm
+	}
+
+	if patch.EmbeddingModelID != nil {
+		cfg.EmbeddingModelID = patch.EmbeddingModelID
+		used = true
+	}
+	if patch.SummaryModelID != nil {
+		cfg.SummaryModelID = patch.SummaryModelID
+		used = true
+	}
+	if patch.StorageBackendID != nil {
+		cfg.StorageBackendID = patch.StorageBackendID
+		used = true
+	}
+	if used {
+		out.Config = cfg
+	}
+	return out, nil
+}
+
+func sectionPresent(sections map[string]json.RawMessage, key string) bool {
+	raw, ok := sections[key]
+	return ok && len(raw) > 0 && string(raw) != "null"
+}
+
+// fillOmittedIndexingFlags keeps DefaultIndexingStrategy for flags the
+// create body did not mention.
+func fillOmittedIndexingFlags(raw []byte, kb *types.KnowledgeBase) {
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return
+	}
+	strategyRaw, ok := body["indexing_strategy"]
+	if !ok || len(strategyRaw) == 0 || string(strategyRaw) == "null" {
+		return
+	}
+	var present map[string]json.RawMessage
+	if err := json.Unmarshal(strategyRaw, &present); err != nil {
+		return
+	}
+	defaults := types.DefaultIndexingStrategy()
+	if _, ok := present["vector_enabled"]; !ok {
+		kb.IndexingStrategy.VectorEnabled = defaults.VectorEnabled
+	}
+	if _, ok := present["keyword_enabled"]; !ok {
+		kb.IndexingStrategy.KeywordEnabled = defaults.KeywordEnabled
+	}
+	if _, ok := present["wiki_enabled"]; !ok {
+		kb.IndexingStrategy.WikiEnabled = defaults.WikiEnabled
+	}
+	if _, ok := present["graph_enabled"]; !ok {
+		kb.IndexingStrategy.GraphEnabled = defaults.GraphEnabled
+	}
+}
+
+// PatchKnowledgeBase godoc
+// @Summary      部分更新知识库
+// @Description  修改请求里出现的设置。未出现的字段保持不变，包括分块、索引和模型里没写到的项。
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                            true  "知识库ID"  extensions(x-agent=knowledge_base_id)
+// @Param        request  body      handler.PatchKnowledgeBaseRequest true  "要修改的字段"
+// @Success      200      {object}  handler.DataResponse{data=handler.KnowledgeBaseView}  "更新后的知识库"
+// @Failure      400      {object}  errors.AppError                                      "请求参数错误"
+// @Failure      403      {object}  errors.AppError                                      "无权限"
+// @Failure      404      {object}  errors.AppError                                      "知识库不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge_base.update","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Changes the settings you send; a field left out is kept, including one indexing flag or one chunking field. Model ids come from model.list. embedding_model_id cannot change after documents exist. vector_store_id cannot be changed. Graph node types stay in the knowledge base editor."
+// @Router       /knowledge-bases/{id} [patch]
+func (h *KnowledgeBaseHandler) PatchKnowledgeBase(c *gin.Context) {
+	ctx := c.Request.Context()
+	currentKB, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(apperrors.NewForbiddenError("No permission to update knowledge base"))
+		return
+	}
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	var patch PatchKnowledgeBaseRequest
+	if err := json.Unmarshal(body, &patch); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	var sections map[string]json.RawMessage
+	if err := json.Unmarshal(body, &sections); err != nil {
+		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	if patch.EmbeddingModelID != nil || patch.SummaryModelID != nil || patch.StorageBackendID != nil ||
+		sectionPresent(sections, "vlm_config") || sectionPresent(sections, "asr_config") {
+		if _, err := kbSettingsAccess(c, currentKB); err != nil {
+			_ = c.Error(err)
+			return
+		}
+	}
+	update, err := applyKnowledgeBasePatch(currentKB, patch, sections)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if update.Config != nil || update.VLM != nil {
+		probe := &types.KnowledgeBase{ChunkingConfig: currentKB.ChunkingConfig, VLMConfig: currentKB.VLMConfig}
+		if update.Config != nil {
+			probe.ChunkingConfig = update.Config.ChunkingConfig
+			probe.WikiConfig = update.Config.WikiConfig
+			probe.ProfileConfig = update.Config.ProfileConfig
+			if update.Config.ImageProcessingConfig != nil {
+				probe.ImageProcessingConfig = *update.Config.ImageProcessingConfig
+			}
+		}
+		if update.VLM != nil {
+			probe.VLMConfig = *update.VLM
+		}
+		if err := validateKnowledgeBasePromptInstructions(probe); err != nil {
+			c.Error(err)
+			return
+		}
+	}
+	kb, err := h.service.UpdateKnowledgeBase(ctx, id, update.Name, update.Description, update.Config, update.VLM)
+	if err != nil {
+		if appErr, ok := apperrors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
 	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -945,13 +1284,15 @@ const knowledgeBaseProfileRequestTimeout = 2 * time.Minute
 // @Tags         知识库
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "知识库ID"
+// @Param        id   path      string  true  "知识库ID"  extensions(x-agent=knowledge_base_id)
 // @Success      200  {object}  handler.MessageResponse  "删除成功"
 // @Failure      400  {object}  errors.AppError          "请求参数错误"
 // @Failure      403  {object}  errors.AppError          "仅所有者可删除"
 // @Failure      404  {object}  errors.AppError          "知识库不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge_base.delete","risk":"destructive","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Deletes the knowledge base and every document in it. Cannot be undone. Only the owner can delete it."
 // @Router       /knowledge-bases/{id} [delete]
 func (h *KnowledgeBaseHandler) DeleteKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
