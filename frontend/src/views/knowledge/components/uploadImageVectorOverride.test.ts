@@ -29,6 +29,24 @@ function fixture(kbInfo: any) {
       if (name === '@/stores/editorResources') return { useEditorResourcesStore: () => ({}) }
       if (name === '@/stores/ui') return { useUIStore: () => ({}) }
       if (name === '@/api/knowledge-base') return { mergeImageActions: () => ({ ocr: { on: [], on_unobserved: true } }) }
+      // UploadConfirmDialog also imports the image-pipeline helpers (merged from
+      // the image-pipeline PR). The real module is TypeScript, which node:vm
+      // cannot require, so mirror its behaviour with these minimal stubs.
+      if (name === '@/utils/imageProcessingConfig') {
+        return {
+          IMAGE_PIPELINE_DEFAULT: 'default',
+          IMAGE_PIPELINE_SMARTOCR: 'smartocr',
+          normalizeImagePipelineId: (id: string) => id,
+          buildPipelineFields: (pipelineId: string, pipelineParams: Record<string, unknown>) =>
+            pipelineId
+              ? {
+                  image_pipeline: pipelineId,
+                  ...(pipelineParams && Object.keys(pipelineParams).length > 0 ? { image_pipeline_params: pipelineParams } : {}),
+                }
+              : {},
+          resolveImagePipelineFromKb: () => 'default',
+        }
+      }
       return { default: {} }
     },
   })

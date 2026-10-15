@@ -18,6 +18,12 @@ type langfuseVLM struct {
 func (l *langfuseVLM) GetModelName() string { return l.inner.GetModelName() }
 func (l *langfuseVLM) GetModelID() string   { return l.inner.GetModelID() }
 
+func (l *langfuseVLM) PredictWithOptions(
+	ctx context.Context, imgBytes [][]byte, prompt string, opts *PredictOptions,
+) (string, error) {
+	return l.inner.PredictWithOptions(ctx, imgBytes, prompt, opts)
+}
+
 func (l *langfuseVLM) Predict(ctx context.Context, imgBytes [][]byte, prompt string) (string, error) {
 	mgr := langfuse.GetManager()
 	if !mgr.Enabled() {
