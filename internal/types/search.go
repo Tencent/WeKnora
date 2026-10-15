@@ -160,15 +160,15 @@ type SearchResult struct {
 	// CitationSources retains independently citeable bodies after context expansion.
 	CitationSources []*SearchResult `json:"-" gorm:"-"`
 	// ID
-	ID string `gorm:"column:id"              json:"id"`
+	ID string `gorm:"column:id"              json:"id" extensions:"x-agent=chunk_id"`
 	// Content
-	Content string `gorm:"column:content"         json:"content"`
+	Content string `gorm:"column:content"         json:"content" extensions:"x-agent"`
 	// Knowledge ID
-	KnowledgeID string `gorm:"column:knowledge_id"    json:"knowledge_id"`
+	KnowledgeID string `gorm:"column:knowledge_id"    json:"knowledge_id" extensions:"x-agent"`
 	// Chunk index
 	ChunkIndex int `gorm:"column:chunk_index"     json:"chunk_index"`
 	// Knowledge title
-	KnowledgeTitle string `gorm:"column:knowledge_title" json:"knowledge_title"`
+	KnowledgeTitle string `gorm:"column:knowledge_title" json:"knowledge_title" extensions:"x-agent"`
 	// Start at
 	StartAt int `gorm:"column:start_at"        json:"start_at"`
 	// End at
@@ -176,13 +176,13 @@ type SearchResult struct {
 	// Seq
 	Seq int `gorm:"column:seq"             json:"seq"`
 	// Score
-	Score float64 `                              json:"score"`
+	Score float64 `                              json:"score" extensions:"x-agent"`
 	// VectorScore is the engine's own similarity of a vector hit, before
 	// fusion replaced Score with a rank-based one; 0 for other hits. See
 	// IndexWithScore.VectorScore.
 	VectorScore float64 `json:"-"`
 	// Match type
-	MatchType MatchType `                              json:"match_type"`
+	MatchType MatchType `                              json:"match_type" extensions:"x-agent"`
 	// SubChunkIndex
 	SubChunkID []string `                              json:"sub_chunk_id"`
 	// Metadata

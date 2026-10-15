@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sort"
 	"sync"
 	"time"
 
@@ -74,7 +75,7 @@ func (e *evaluationMemoryStorage) register(params *types.EvaluationDetail) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	logger.Infof(context.Background(), "Registering evaluation task: %s", params.Task.ID)
-	e.store[params.Task.ID] = params
+	e.store[params.Task.ID] = cloneEvaluationDetail(params)
 }
 
 func (e *evaluationMemoryStorage) get(taskID string) (*types.EvaluationDetail, error) {
@@ -85,7 +86,24 @@ func (e *evaluationMemoryStorage) get(taskID string) (*types.EvaluationDetail, e
 	if !ok {
 		return nil, errors.New("task not found")
 	}
-	return res, nil
+	return cloneEvaluationDetail(res), nil
+}
+
+// Snapshots must not share mutable task/metric state with background workers.
+func cloneEvaluationDetail(in *types.EvaluationDetail) *types.EvaluationDetail {
+	out := *in
+	if in.Task != nil {
+		task := *in.Task
+		out.Task = &task
+	}
+	if in.Params != nil {
+		out.Params = in.Params.Clone()
+	}
+	if in.Metric != nil {
+		metric := *in.Metric
+		out.Metric = &metric
+	}
+	return &out
 }
 
 func (e *evaluationMemoryStorage) update(taskID string, fn func(params *types.EvaluationDetail)) error {
@@ -204,6 +222,14 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 		logger.Infof(ctx, "Created new knowledge base with ID: %s based on existing one", knowledgeBaseID)
 	}
 
+	// Until the worker takes ownership, initialization failures must also clean up.
+	workerStarted := false
+	defer func() {
+		if !workerStarted {
+			e.cleanupEvaluationKB(ctx, knowledgeBaseID)
+		}
+	}()
+
 	// Set default values for optional parameters
 	if datasetID == "" {
 		datasetID = "default"
@@ -300,38 +326,70 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 	logger.Info(ctx, "Registering evaluation task")
 	e.evaluationMemoryStorage.register(detail)
 
+	// Assistant evaluations use a fixed sample budget and bounded lifetime.
+	sampleLimit := 0
+	if _, internal := types.InternalDispatchFromContext(ctx); internal {
+		sampleLimit = 20
+	}
+
 	// Start evaluation in background goroutine
 	logger.Info(ctx, "Starting evaluation in background")
+	workerStarted = true
 	go func() {
 		// Create new context with logger for background task
 		newCtx := logger.CloneContext(ctx)
+		if sampleLimit > 0 {
+			var cancel context.CancelFunc
+			newCtx, cancel = context.WithTimeout(newCtx, 10*time.Minute)
+			defer cancel()
+		}
+		defer func() {
+			if recover() != nil {
+				_ = e.evaluationMemoryStorage.update(taskID, func(d *types.EvaluationDetail) {
+					d.Task.Status = types.EvaluationStatueFailed
+					d.Task.ErrMsg = "evaluation failed unexpectedly"
+				})
+			}
+		}()
 		logger.Infof(newCtx, "Background evaluation started for task ID: %s", taskID)
 
 		// Update task status to running
-		detail.Task.Status = types.EvaluationStatueRunning
+		_ = e.evaluationMemoryStorage.update(taskID, func(d *types.EvaluationDetail) {
+			d.Task.Status = types.EvaluationStatueRunning
+		})
 		logger.Info(newCtx, "Evaluation task status set to running")
 
 		// Execute actual evaluation
-		if err := e.EvalDataset(newCtx, detail, knowledgeBaseID); err != nil {
-			detail.Task.Status = types.EvaluationStatueFailed
-			detail.Task.ErrMsg = err.Error()
+		if err := e.EvalDataset(newCtx, detail, knowledgeBaseID, sampleLimit); err != nil {
+			_ = e.evaluationMemoryStorage.update(taskID, func(d *types.EvaluationDetail) {
+				d.Task.Status = types.EvaluationStatueFailed
+				d.Task.ErrMsg = err.Error()
+			})
 			logger.Errorf(newCtx, "Evaluation task failed: %v, task ID: %s", err, taskID)
 			return
 		}
 
 		// Mark task as completed successfully
 		logger.Infof(newCtx, "Evaluation task completed successfully, task ID: %s", taskID)
-		detail.Task.Status = types.EvaluationStatueSuccess
+		_ = e.evaluationMemoryStorage.update(taskID, func(d *types.EvaluationDetail) {
+			d.Task.Status = types.EvaluationStatueSuccess
+		})
 	}()
 
 	logger.Infof(ctx, "Evaluation task created successfully, task ID: %s", taskID)
-	return detail, nil
+	return e.evaluationMemoryStorage.get(taskID)
 }
 
 // EvalDataset performs the actual evaluation of a dataset
 // Processes each QA pair in parallel and records metrics
-func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.EvaluationDetail, knowledgeBaseID string) error {
+func (e *EvaluationService) EvalDataset(
+	ctx context.Context, detail *types.EvaluationDetail, knowledgeBaseID string, sampleLimit ...int,
+) error {
 	logger.Info(ctx, "Start evaluating dataset")
+	// The KB passed here is created exclusively for this evaluation. Clean it
+	// even if loading the dataset or indexing fails, using a fresh cleanup budget.
+	defer e.cleanupEvaluationKB(ctx, knowledgeBaseID)
+
 	logger.Infof(ctx, "Task ID: %s, Dataset ID: %s", detail.Task.ID, detail.Task.DatasetID)
 
 	// Retrieve dataset from storage
@@ -340,6 +398,16 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 		logger.Errorf(ctx, "Failed to get dataset: %v", err)
 		return err
 	}
+	var passages []string
+	if len(sampleLimit) > 0 && sampleLimit[0] > 0 {
+		dataset, passages, err = boundedEvaluationSample(dataset, sampleLimit[0])
+		if err != nil {
+			return err
+		}
+	} else {
+		passages = getPassageList(dataset)
+	}
+
 	logger.Infof(ctx, "Dataset retrieved successfully with %d QA pairs", len(dataset))
 
 	// Update total QA pairs count in task details
@@ -349,7 +417,6 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 	})
 
 	// Extract and organize passages from dataset
-	passages := getPassageList(dataset)
 	logger.Infof(ctx, "Creating knowledge from %d passages", len(passages))
 
 	// Create knowledge base from passages (sync: wait for indexing to complete before querying)
@@ -368,15 +435,6 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 			knowledgeBaseID,
 			[]string{knowledge.ID}); err != nil {
 			logger.Errorf(ctx, "Failed to delete knowledge: %v, knowledge ID: %s", err, knowledge.ID)
-		}
-
-		logger.Infof(ctx, "Cleaning up resources - deleting knowledge base: %s", knowledgeBaseID)
-		if err := e.knowledgeBaseService.DeleteKnowledgeBase(ctx, knowledgeBaseID); err != nil {
-			logger.Errorf(
-				ctx,
-				"Failed to delete knowledge base: %v, knowledge base ID: %s",
-				err, knowledgeBaseID,
-			)
 		}
 	}()
 
@@ -412,7 +470,7 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 
 			// Execute knowledge QA pipeline
 			logger.Infof(ctx, "Running knowledge QA for question: %s", qaPair.Question)
-			err = e.sessionService.KnowledgeQAByEvent(ctx, chatManage, types.Pipline["rag"])
+			err := e.sessionService.KnowledgeQAByEvent(ctx, chatManage, types.Pipline["rag"])
 			if err != nil {
 				logger.Errorf(ctx, "Failed to process question %d: %v", i, err)
 				return err
@@ -431,12 +489,13 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 			mu.Lock()
 			finished += 1
 			metricResult := metricHook.MetricResult()
-			mu.Unlock()
+			completed := finished
 			e.evaluationMemoryStorage.update(detail.Task.ID, func(params *types.EvaluationDetail) {
 				params.Metric = metricResult
-				params.Task.Finished = finished
-				logger.Infof(ctx, "Updated task progress: %d/%d completed", finished, params.Task.Total)
+				params.Task.Finished = completed
+				logger.Infof(ctx, "Updated task progress: %d/%d completed", completed, params.Task.Total)
 			})
+			mu.Unlock()
 			return nil
 		})
 	}
@@ -476,4 +535,47 @@ func getPassageList(dataset []*types.QAPair) []string {
 		}
 	}
 	return passages
+}
+
+// Bound indexing as well as model calls. Sparse source IDs must not allocate
+// an enormous mostly-empty passage slice for a small sample.
+func boundedEvaluationSample(input []*types.QAPair, limit int) ([]*types.QAPair, []string, error) {
+	rows := append([]*types.QAPair(nil), input...)
+	for _, row := range rows {
+		if row == nil {
+			return nil, nil, fmt.Errorf("invalid evaluation dataset")
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].QID < rows[j].QID })
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	seen := map[int]bool{}
+	var passages []string
+	totalBytes := 0
+	for _, row := range rows {
+		if len(row.PIDs) != len(row.Passages) {
+			return nil, nil, fmt.Errorf("invalid evaluation passages")
+		}
+		for i, id := range row.PIDs {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			totalBytes += len(row.Passages[i])
+			if totalBytes > 2<<20 || len(passages) >= 200 {
+				return nil, nil, fmt.Errorf("evaluation sample exceeds indexing budget")
+			}
+			passages = append(passages, row.Passages[i])
+		}
+	}
+	return rows, passages, nil
+}
+
+func (e *EvaluationService) cleanupEvaluationKB(ctx context.Context, knowledgeBaseID string) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := e.knowledgeBaseService.DeleteKnowledgeBase(cleanupCtx, knowledgeBaseID); err != nil {
+		logger.Warnf(cleanupCtx, "Failed to clean evaluation knowledge base: %v", err)
+	}
 }

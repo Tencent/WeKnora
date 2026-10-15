@@ -46,8 +46,10 @@ const previewTimeout = 5 * time.Second
 // Text is checked manually below so we can return a friendlier error than
 // gin's default "Field validation for 'Text' failed on the 'required' tag".
 type PreviewChunkingRequest struct {
-	Text           string                 `json:"text"`
-	ChunkingConfig PreviewChunkingPayload `json:"chunking_config"`
+	// Text to split, at most 32000 bytes.
+	Text string `json:"text" extensions:"x-agent,x-agent-required,x-agent-max-bytes=32000"`
+	// Chunking parameters for this preview only.
+	ChunkingConfig PreviewChunkingPayload `json:"chunking_config" extensions:"x-agent"`
 }
 
 // PreviewChunkingPayload mirrors the snake_case JSON the rest of the API
@@ -55,26 +57,32 @@ type PreviewChunkingRequest struct {
 // directly because it carries unrelated parser rules and table-processing
 // metadata that the preview path does not use.
 type PreviewChunkingPayload struct {
-	ChunkSize         int      `json:"chunk_size"`
-	ChunkOverlap      int      `json:"chunk_overlap"`
-	Separators        []string `json:"separators"`
-	EnableParentChild bool     `json:"enable_parent_child"`
-	ParentChunkSize   int      `json:"parent_chunk_size"`
-	ChildChunkSize    int      `json:"child_chunk_size"`
-	Strategy          string   `json:"strategy"`
-	TokenLimit        int      `json:"token_limit"`
-	Languages         []string `json:"languages"`
+	// Target chunk size in characters.
+	ChunkSize int `json:"chunk_size" extensions:"x-agent"`
+	// Overlap in characters between chunks.
+	ChunkOverlap int      `json:"chunk_overlap" extensions:"x-agent"`
+	Separators   []string `json:"separators"`
+	// Enable parent-child chunking.
+	EnableParentChild bool `json:"enable_parent_child" extensions:"x-agent"`
+	// Parent chunk size in characters.
+	ParentChunkSize int `json:"parent_chunk_size" extensions:"x-agent"`
+	// Child chunk size in characters.
+	ChildChunkSize int `json:"child_chunk_size" extensions:"x-agent"`
+	// Chunking strategy: auto, heading, heuristic, recursive or legacy.
+	Strategy   string   `json:"strategy" extensions:"x-agent"`
+	TokenLimit int      `json:"token_limit"`
+	Languages  []string `json:"languages"`
 }
 
 // PreviewChunkResult describes one chunk emitted during preview.
 type PreviewChunkResult struct {
-	Seq              int    `json:"seq"`
-	Start            int    `json:"start"`
-	End              int    `json:"end"`
-	SizeChars        int    `json:"size_chars"`
+	Seq              int    `json:"seq" extensions:"x-agent"`
+	Start            int    `json:"start" extensions:"x-agent"`
+	End              int    `json:"end" extensions:"x-agent"`
+	SizeChars        int    `json:"size_chars" extensions:"x-agent"`
 	SizeTokensApprox int    `json:"size_tokens_approx"`
 	ContextHeader    string `json:"context_header,omitempty"`
-	Content          string `json:"content"`
+	Content          string `json:"content" extensions:"x-agent"`
 }
 
 // PreviewChunkingStats summarizes chunk-size distribution. Computed over
@@ -82,24 +90,24 @@ type PreviewChunkResult struct {
 // items, so avg/min/max/stddev reflect the real distribution, not just
 // the first N.
 type PreviewChunkingStats struct {
-	Count       int `json:"count"`
-	AvgChars    int `json:"avg_chars"`
-	MinChars    int `json:"min_chars"`
-	MaxChars    int `json:"max_chars"`
+	Count       int `json:"count" extensions:"x-agent"`
+	AvgChars    int `json:"avg_chars" extensions:"x-agent"`
+	MinChars    int `json:"min_chars" extensions:"x-agent"`
+	MaxChars    int `json:"max_chars" extensions:"x-agent"`
 	StddevChars int `json:"stddev_chars"`
 	// TruncatedTo, when set, is the original chunk count before the
 	// response was truncated to previewMaxChunks for transport.
-	TruncatedTo int `json:"truncated_to,omitempty"`
+	TruncatedTo int `json:"truncated_to,omitempty" extensions:"x-agent"`
 }
 
 // PreviewChunkingResponse is the body returned by /chunker/preview.
 type PreviewChunkingResponse struct {
-	SelectedTier chunker.StrategyTier    `json:"selected_tier"`
+	SelectedTier chunker.StrategyTier    `json:"selected_tier" extensions:"x-agent"`
 	TierChain    []chunker.StrategyTier  `json:"tier_chain"`
 	Rejected     []chunker.TierRejection `json:"rejected"`
 	Profile      *chunker.DocProfile     `json:"profile"`
 	Chunks       []PreviewChunkResult    `json:"chunks"`
-	Stats        PreviewChunkingStats    `json:"stats"`
+	Stats        PreviewChunkingStats    `json:"stats" extensions:"x-agent"`
 }
 
 // PreviewChunking handles POST /chunker/preview. It runs the supplied text
@@ -120,6 +128,8 @@ type PreviewChunkingResponse struct {
 // @Failure      504      {object}  map[string]interface{}           "分块超时"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent {"id":"chunk.preview","risk":"read","root":"chunks","max_items":50}
+// @x-agent-hint "Preview chunk boundaries without storing text or calling an embedding model. The stats describe the full split even when chunks are truncated."
 // @Router       /chunker/preview [post]
 func PreviewChunking(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), previewTimeout)

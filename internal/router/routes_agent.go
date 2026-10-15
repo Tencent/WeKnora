@@ -46,6 +46,7 @@ func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomA
 		agentsWrite.PUT("/:id", g.OwnedAgentOrAdmin(), agentHandler.UpdateAgent)
 		// Partially update agent — same guard as PUT
 		agentsWrite.PATCH("/:id", g.OwnedAgentOrAdmin(), agentHandler.PatchAgent)
+		agentsWrite.POST("/:id/trial", g.OwnedAgentOrAdmin(), agentHandler.TrialAgent)
 		// Delete agent — creator OR Admin+
 		agentsWrite.DELETE("/:id", g.OwnedAgentOrAdmin(), agentHandler.DeleteAgent)
 		// Copy agent — Contributor+ (copy is owned by the caller)

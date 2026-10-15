@@ -23,10 +23,10 @@ func NewEvaluationHandler(evaluationService interfaces.EvaluationService) *Evalu
 
 // EvaluationRequest contains parameters for evaluation request
 type EvaluationRequest struct {
-	DatasetID       string `json:"dataset_id"`        // ID of dataset to evaluate
-	KnowledgeBaseID string `json:"knowledge_base_id"` // ID of knowledge base to use
-	ChatModelID     string `json:"chat_id"`           // ID of chat model to use
-	RerankModelID   string `json:"rerank_id"`         // ID of rerank model to use
+	DatasetID       string `json:"dataset_id"`                                              // ID of dataset to evaluate
+	KnowledgeBaseID string `json:"knowledge_base_id" extensions:"x-agent,x-agent-required"` // ID of knowledge base to use
+	ChatModelID     string `json:"chat_id" extensions:"x-agent=model_id"`                   // ID of chat model to use
+	RerankModelID   string `json:"rerank_id" extensions:"x-agent=rerank_model_id"`          // ID of rerank model to use
 }
 
 // Evaluation godoc
@@ -40,7 +40,9 @@ type EvaluationRequest struct {
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /evaluation/ [post]
+// @x-agent {"id":"evaluation.start","risk":"destructive","role":"admin","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Run the built-in sample evaluation against a temporary knowledge base based on the selected KB configuration. Uses model calls and may take minutes. Assistant runs use at most 20 examples and 10 minutes. Poll evaluation.get; accepted is not completed. Dataset files must be installed by an operator."
+// @Router       /evaluation [post]
 func (e *EvaluationHandler) Evaluation(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -98,12 +100,13 @@ type GetEvaluationRequest struct {
 // @Tags         评估
 // @Accept       json
 // @Produce      json
-// @Param        task_id  query     string  true  "评估任务ID"
+// @Param        task_id  query     string  true  "评估任务ID"  extensions(x-agent)
 // @Success      200      {object}  handler.DataResponse{data=types.EvaluationDetail}  "评估结果"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /evaluation/ [get]
+// @x-agent {"id":"evaluation.get","risk":"read"}
+// @Router       /evaluation [get]
 func (e *EvaluationHandler) GetEvaluationResult(c *gin.Context) {
 	ctx := c.Request.Context()
 

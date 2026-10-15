@@ -2724,6 +2724,7 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MetricResult'
         description: Evaluation metrics
+        x-agent: true
       params:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ChatManage'
@@ -2732,6 +2733,7 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationTask'
         description: Evaluation task info
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.EvaluationStatue:
     enum:
@@ -2766,9 +2768,11 @@ definitions:
       finished:
         description: Completed items count
         type: integer
+        x-agent: true
       id:
         description: Unique task ID
         type: string
+        x-agent: task_id
       start_time:
         description: Task start time
         type: string
@@ -2776,12 +2780,14 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationStatue'
         description: Current task status
+        x-agent: true
       tenant_id:
         description: Tenant/Organization ID
         type: integer
       total:
         description: Total items to evaluate
         type: integer
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.ExtractConfig:
     properties:
@@ -3321,21 +3327,27 @@ definitions:
       bleu1:
         description: BLEU-1 score
         type: number
+        x-agent: true
       bleu2:
         description: BLEU-2 score
         type: number
+        x-agent: true
       bleu4:
         description: BLEU-4 score
         type: number
+        x-agent: true
       rouge1:
         description: ROUGE-1 score
         type: number
+        x-agent: true
       rouge2:
         description: ROUGE-2 score
         type: number
+        x-agent: true
       rougel:
         description: ROUGE-L score
         type: number
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.GraphNode:
     properties:
@@ -5517,10 +5529,12 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.GenerationMetrics'
         description: Text generation quality metrics
+        x-agent: true
       retrieval_metrics:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.RetrievalMetrics'
         description: Retrieval performance metrics
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.MinIOEngineConfig:
     properties:
@@ -6590,21 +6604,27 @@ definitions:
       map:
         description: Mean Average Precision
         type: number
+        x-agent: true
       mrr:
         description: Mean Reciprocal Rank
         type: number
+        x-agent: true
       ndcg3:
         description: Normalized Discounted Cumulative Gain at 3
         type: number
+        x-agent: true
       ndcg10:
         description: Normalized Discounted Cumulative Gain at 10
         type: number
+        x-agent: true
       precision:
         description: Precision score
         type: number
+        x-agent: true
       recall:
         description: Recall score
         type: number
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.RetrieverEngineParams:
     properties:
@@ -6910,12 +6930,14 @@ definitions:
       content:
         description: Content
         type: string
+        x-agent: true
       end_at:
         description: End at
         type: integer
       id:
         description: ID
         type: string
+        x-agent: chunk_id
       image_info:
         description: 图片信息 (JSON 格式)
         type: string
@@ -6942,6 +6964,7 @@ definitions:
       knowledge_id:
         description: Knowledge ID
         type: string
+        x-agent: true
       knowledge_source:
         description: |-
           Knowledge source
@@ -6950,10 +6973,12 @@ definitions:
       knowledge_title:
         description: Knowledge title
         type: string
+        x-agent: true
       match_type:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MatchType'
         description: Match type
+        x-agent: true
       matched_content:
         description: |-
           MatchedContent is the actual content that was matched in vector search
@@ -6977,6 +7002,7 @@ definitions:
       score:
         description: Score
         type: number
+        x-agent: true
       seq:
         description: Seq
         type: integer
@@ -9408,6 +9434,27 @@ definitions:
       type:
         type: string
     type: object
+  internal_handler.AgentTrialRequest:
+    properties:
+      prompt:
+        description: Example user message for the saved system prompt.
+        maxLength: 4000
+        type: string
+        x-agent: true
+        x-agent-max-bytes: "16000"
+    required:
+    - prompt
+    type: object
+  internal_handler.AgentTrialResponse:
+    properties:
+      answer:
+        type: string
+        x-agent: true
+        x-agent-max-runes: "8000"
+      mode:
+        type: string
+        x-agent: true
+    type: object
   internal_handler.AgentWriteResponse:
     properties:
       allowed_tools_warnings:
@@ -9733,15 +9780,19 @@ definitions:
       chat_id:
         description: ID of chat model to use
         type: string
+        x-agent: model_id
       dataset_id:
         description: ID of dataset to evaluate
         type: string
       knowledge_base_id:
         description: ID of knowledge base to use
         type: string
+        x-agent: true
+        x-agent-required: true
       rerank_id:
         description: ID of rerank model to use
         type: string
+        x-agent: rerank_model_id
     type: object
   internal_handler.ExportResponse:
     properties:
@@ -10882,6 +10933,14 @@ definitions:
         - smart-reasoning
         type: string
         x-agent: true
+      allowed_tools:
+        description: Built-in tools from agent.tools; switch-managed tools still follow
+          their own settings.
+        items:
+          type: string
+        type: array
+        x-agent: true
+        x-agent-maximum: "50"
       description:
         description: What the agent is for
         type: string
@@ -10931,6 +10990,11 @@ definitions:
         x-agent: true
       name:
         description: Agent name
+        type: string
+        x-agent: true
+      sandbox_config_id:
+        description: Workspace sandbox from sandbox.list; empty selects the deployment
+          default.
         type: string
         x-agent: true
       selected_skills:
@@ -11067,50 +11131,74 @@ definitions:
     properties:
       content:
         type: string
+        x-agent: true
       context_header:
         type: string
       end:
         type: integer
+        x-agent: true
       seq:
         type: integer
+        x-agent: true
       size_chars:
         type: integer
+        x-agent: true
       size_tokens_approx:
         type: integer
       start:
         type: integer
+        x-agent: true
     type: object
   internal_handler.PreviewChunkingPayload:
     properties:
       child_chunk_size:
+        description: Child chunk size in characters.
         type: integer
+        x-agent: true
       chunk_overlap:
+        description: Overlap in characters between chunks.
         type: integer
+        x-agent: true
       chunk_size:
+        description: Target chunk size in characters.
         type: integer
+        x-agent: true
       enable_parent_child:
+        description: Enable parent-child chunking.
         type: boolean
+        x-agent: true
       languages:
         items:
           type: string
         type: array
       parent_chunk_size:
+        description: Parent chunk size in characters.
         type: integer
+        x-agent: true
       separators:
         items:
           type: string
         type: array
       strategy:
+        description: 'Chunking strategy: auto, heading, heuristic, recursive or legacy.'
         type: string
+        x-agent: true
       token_limit:
         type: integer
     type: object
   internal_handler.PreviewChunkingRequest:
     properties:
       chunking_config:
-        $ref: '#/definitions/internal_handler.PreviewChunkingPayload'
+        allOf:
+        - $ref: '#/definitions/internal_handler.PreviewChunkingPayload'
+        description: Chunking parameters for this preview only.
+        x-agent: true
       text:
+        description: Text to split, at most 32000 bytes.
         type: string
+        x-agent: true
+        x-agent-max-bytes: "32000"
+        x-agent-required: true
     type: object
   internal_handler.PreviewChunkingResponse:
     properties:
@@ -11125,9 +11213,13 @@ definitions:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.TierRejection'
         type: array
       selected_tier:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.StrategyTier'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.StrategyTier'
+        x-agent: true
       stats:
-        $ref: '#/definitions/internal_handler.PreviewChunkingStats'
+        allOf:
+        - $ref: '#/definitions/internal_handler.PreviewChunkingStats'
+        x-agent: true
       tier_chain:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.StrategyTier'
@@ -11137,12 +11229,16 @@ definitions:
     properties:
       avg_chars:
         type: integer
+        x-agent: true
       count:
         type: integer
+        x-agent: true
       max_chars:
         type: integer
+        x-agent: true
       min_chars:
         type: integer
+        x-agent: true
       stddev_chars:
         type: integer
       truncated_to:
@@ -11150,6 +11246,7 @@ definitions:
           TruncatedTo, when set, is the original chunk count before the
           response was truncated to previewMaxChunks for transport.
         type: integer
+        x-agent: true
     type: object
   internal_handler.PromoteUserToSystemAdminRequest:
     properties:
@@ -11269,6 +11366,33 @@ definitions:
     properties:
       message:
         type: string
+    type: object
+  internal_handler.RetrievalPreviewRequest:
+    properties:
+      limit:
+        description: Maximum candidates to return, from 1 to 20; default 10.
+        maximum: 20
+        minimum: 1
+        type: integer
+        x-agent: true
+        x-agent-maximum: "20"
+      mode:
+        description: Retrieval mode to inspect.
+        enum:
+        - hybrid
+        - keyword
+        - vector
+        type: string
+        x-agent: true
+      query:
+        description: Search query to compare across retrieval modes.
+        maxLength: 2000
+        type: string
+        x-agent: true
+        x-agent-max-bytes: "8000"
+    required:
+    - mode
+    - query
     type: object
   internal_handler.RevokeSystemAdminRequest:
     properties:
@@ -13230,6 +13354,47 @@ paths:
       summary: 获取推荐问题
       tags:
       - 智能体
+  /agents/{id}/trial:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: agent_id
+      - description: Example prompt
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.AgentTrialRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.AgentTrialResponse'
+              type: object
+      summary: Test an agent's prompt and model with one example
+      tags:
+      - 智能体
+      x-agent:
+        id: agent.trial
+        label: name
+        risk: destructive
+        target: agent.get
+      x-agent-hint: 'One model call, at most 2048 output tokens and 45 seconds. Tests
+        the saved system prompt and model only: no tools, MCP, skills, retrieval,
+        memory or history. Costs model usage; never treats a successful response as
+        validation of those disabled capabilities.'
   /agents/placeholders:
     get:
       consumes:
@@ -13870,6 +14035,13 @@ paths:
       summary: 预览分块结果
       tags:
       - 分块
+      x-agent:
+        id: chunk.preview
+        max_items: 50
+        risk: read
+        root: chunks
+      x-agent-hint: Preview chunk boundaries without storing text or calling an embedding
+        model. The stats describe the full split even when chunks are truncated.
   /chunks/{knowledge_id}:
     delete:
       consumes:
@@ -14585,7 +14757,7 @@ paths:
       summary: Test connection with raw credentials (no persistence)
       tags:
       - DataSource
-  /evaluation/:
+  /evaluation:
     get:
       consumes:
       - application/json
@@ -14596,6 +14768,7 @@ paths:
         name: task_id
         required: true
         type: string
+        x-agent: true
       produces:
       - application/json
       responses:
@@ -14618,6 +14791,9 @@ paths:
       summary: 获取评估结果
       tags:
       - 评估
+      x-agent:
+        id: evaluation.get
+        risk: read
     post:
       consumes:
       - application/json
@@ -14651,6 +14827,16 @@ paths:
       summary: 执行评估
       tags:
       - 评估
+      x-agent:
+        id: evaluation.start
+        label: name
+        risk: destructive
+        role: admin
+        target: knowledge_base.get
+      x-agent-hint: Run the built-in sample evaluation against a temporary knowledge
+        base based on the selected KB configuration. Uses model calls and may take
+        minutes. Assistant runs use at most 20 examples and 10 minutes. Poll evaluation.get;
+        accepted is not completed. Dataset files must be installed by an operator.
   /faq/import/progress/{task_id}:
     get:
       consumes:
@@ -17187,6 +17373,41 @@ paths:
         target: knowledge_base.get
       x-agent-hint: Regenerates the AI summary of what the knowledge base covers,
         with one model call. A description the user wrote is kept.
+  /knowledge-bases/{id}/retrieval-preview:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: knowledge_base_id
+      - description: Bounded retrieval query
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.RetrievalPreviewRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.HybridSearchResponse'
+      summary: Diagnose keyword, vector or hybrid retrieval
+      tags:
+      - 知识库
+      x-agent:
+        id: knowledge_base.preview_retrieval
+        max_items: 20
+        risk: read
+      x-agent-hint: Compare keyword, vector and hybrid candidates, scores and source
+        documents for one query. Does not generate an answer or change index settings.
+        Vector/hybrid may incur embedding usage; scores from different modes are not
+        directly comparable.
   /knowledge-bases/{id}/shares:
     get:
       description: 获取知识库的所有共享记录

@@ -35,6 +35,8 @@ func registerOperationAreas(v1 *gin.RouterGroup, g *rbacGuards) {
 	RegisterStorageBackendRoutes(v1, &handler.StorageBackendHandler{}, g)
 	RegisterVectorStoreRoutes(v1, &handler.VectorStoreHandler{}, g)
 	RegisterDataSourceRoutes(v1, &handler.DataSourceHandler{}, &handler.DataSourceCredentialsHandler{}, g)
+	RegisterEvaluationRoutes(v1, &handler.EvaluationHandler{}, g)
+	RegisterChunkerDebugRoutes(v1, g)
 }
 
 // TestBuiltinOperationsMatchRegisteredRoutes requires every operation to

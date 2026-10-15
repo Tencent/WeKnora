@@ -368,6 +368,13 @@ var additionalOperationRoutes = map[string]string{
 	"/api/v1/datasource/:id/sync":           http.MethodPost,
 	"/api/v1/datasource/:id/pause":          http.MethodPost,
 	"/api/v1/datasource/:id/resume":         http.MethodPost,
+	"/api/v1/chunker/preview":               http.MethodPost,
+}
+
+// These reviewed POSTs compute a preview and never mutate stored content.
+var readOnlyPostRoutes = map[string]bool{
+	"/api/v1/chunker/preview":                       true,
+	"/api/v1/knowledge-bases/:id/retrieval-preview": true,
 }
 
 // Catalog is an immutable, validated set of operations.
@@ -489,7 +496,11 @@ func validateOperation(op Operation) error {
 	if method, limited := additionalOperationRoutes[op.Route]; limited && method != op.Method {
 		return fmt.Errorf("route %q only permits %s", op.Route, method)
 	}
-	if op.Risk == RiskRead && op.Method != http.MethodGet {
+	if op.Route == "/api/v1/evaluation" && op.Method != http.MethodGet && op.Method != http.MethodPost {
+		return fmt.Errorf("evaluation only permits GET and POST")
+	}
+	if op.Risk == RiskRead && op.Method != http.MethodGet &&
+		(op.Method != http.MethodPost || !readOnlyPostRoutes[op.Route]) {
 		return fmt.Errorf("read operations must use GET")
 	}
 	if op.Risk != RiskRead && op.Method == http.MethodGet {
@@ -681,7 +692,7 @@ func parseRoute(route string) (map[string]bool, error) {
 		return nil, fmt.Errorf("route %q must be under /api/v1", route)
 	}
 	area, _, _ := strings.Cut(strings.TrimPrefix(route, base), "/")
-	if !allowedRouteAreas[area] && additionalOperationRoutes[route] == "" {
+	if !allowedRouteAreas[area] && additionalOperationRoutes[route] == "" && route != "/api/v1/evaluation" {
 		return nil, fmt.Errorf("route %q is outside the areas an agent may reach", route)
 	}
 	params := map[string]bool{}

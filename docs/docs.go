@@ -1033,6 +1033,66 @@ const docTemplate = `{
                 }
             }
         },
+        "/agents/{id}/trial": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "智能体"
+                ],
+                "summary": "Test an agent's prompt and model with one example",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "agent_id",
+                        "description": "Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Example prompt",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.AgentTrialRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.AgentTrialResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "agent.trial",
+                    "label": "name",
+                    "risk": "destructive",
+                    "target": "agent.get"
+                },
+                "x-agent-hint": "One model call, at most 2048 output tokens and 45 seconds. Tests the saved system prompt and model only: no tools, MCP, skills, retrieval, memory or history. Costs model usage; never treats a successful response as validation of those disabled capabilities."
+            }
+        },
         "/artifacts": {
             "get": {
                 "security": [
@@ -1898,7 +1958,14 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "chunk.preview",
+                    "max_items": 50,
+                    "risk": "read",
+                    "root": "chunks"
+                },
+                "x-agent-hint": "Preview chunk boundaries without storing text or calling an embedding model. The stats describe the full split even when chunks are truncated."
             }
         },
         "/chunks/by-id/{id}": {
@@ -2968,7 +3035,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/evaluation/": {
+        "/evaluation": {
             "get": {
                 "security": [
                     {
@@ -2992,6 +3059,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": true,
                         "description": "评估任务ID",
                         "name": "task_id",
                         "in": "query",
@@ -3023,6 +3091,10 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "evaluation.get",
+                    "risk": "read"
                 }
             },
             "post": {
@@ -3081,7 +3153,15 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "evaluation.start",
+                    "label": "name",
+                    "risk": "destructive",
+                    "role": "admin",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Run the built-in sample evaluation against a temporary knowledge base based on the selected KB configuration. Uses model calls and may take minutes. Assistant runs use at most 20 examples and 10 minutes. Poll evaluation.get; accepted is not completed. Dataset files must be installed by an operator."
             }
         },
         "/faq/import/progress/{task_id}": {
@@ -7234,6 +7314,53 @@ const docTemplate = `{
                     "target": "knowledge_base.get"
                 },
                 "x-agent-hint": "Regenerates the AI summary of what the knowledge base covers, with one model call. A description the user wrote is kept."
+            }
+        },
+        "/knowledge-bases/{id}/retrieval-preview": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库"
+                ],
+                "summary": "Diagnose keyword, vector or hybrid retrieval",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "knowledge_base_id",
+                        "description": "Knowledge base ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Bounded retrieval query",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.RetrievalPreviewRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.HybridSearchResponse"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "knowledge_base.preview_retrieval",
+                    "max_items": 20,
+                    "risk": "read"
+                },
+                "x-agent-hint": "Compare keyword, vector and hybrid candidates, scores and source documents for one query. Does not generate an answer or change index settings. Vector/hybrid may incur embedding usage; scores from different modes are not directly comparable."
             }
         },
         "/knowledge-bases/{id}/shares": {
@@ -25095,7 +25222,8 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MetricResult"
                         }
-                    ]
+                    ],
+                    "x-agent": true
                 },
                 "params": {
                     "description": "Evaluation parameters",
@@ -25111,7 +25239,8 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationTask"
                         }
-                    ]
+                    ],
+                    "x-agent": true
                 }
             }
         },
@@ -25155,11 +25284,13 @@ const docTemplate = `{
                 },
                 "finished": {
                     "description": "Completed items count",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "id": {
                     "description": "Unique task ID",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "task_id"
                 },
                 "start_time": {
                     "description": "Task start time",
@@ -25171,7 +25302,8 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationStatue"
                         }
-                    ]
+                    ],
+                    "x-agent": true
                 },
                 "tenant_id": {
                     "description": "Tenant/Organization ID",
@@ -25179,7 +25311,8 @@ const docTemplate = `{
                 },
                 "total": {
                     "description": "Total items to evaluate",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 }
             }
         },
@@ -25917,27 +26050,33 @@ const docTemplate = `{
             "properties": {
                 "bleu1": {
                     "description": "BLEU-1 score",
-                    "type": "number"
+                    "type": "number",
+                    "x-agent": true
                 },
                 "bleu2": {
                     "description": "BLEU-2 score",
-                    "type": "number"
+                    "type": "number",
+                    "x-agent": true
                 },
                 "bleu4": {
                     "description": "BLEU-4 score",
-                    "type": "number"
+                    "type": "number",
+                    "x-agent": true
                 },
                 "rouge1": {
                     "description": "ROUGE-1 score",
-                    "type": "number"
+                    "type": "number",
+                    "x-agent": true
                 },
                 "rouge2": {
                     "description": "ROUGE-2 score",
-                    "type": "number"
+                    "type": "number",
+                    "x-agent": true
                 },
                 "rougel": {
                     "description": "ROUGE-L score",
-                    "type": "number"
+                    "type": "number",
+                    "x-agent": true
                 }
             }
         },
@@ -28663,7 +28802,8 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GenerationMetrics"
                         }
-                    ]
+                    ],
+                    "x-agent": true
                 },
                 "retrieval_metrics": {
                     "description": "Retrieval performance metrics",
@@ -28671,7 +28811,8 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrievalMetrics"
                         }
-                    ]
+                    ],
+                    "x-agent": true
                 }
             }
         },
@@ -30069,27 +30210,33 @@ const docTemplate = `{
             "properties": {
                 "map": {
                     "description": "Mean Average Precision",
-                    "type": "number"
+                    "type": "number",
+                    "x-agent": true
                 },
                 "mrr": {
                     "description": "Mean Reciprocal Rank",
-                    "type": "number"
+                    "type": "number",
+                    "x-agent": true
                 },
                 "ndcg10": {
                     "description": "Normalized Discounted Cumulative Gain at 10",
-                    "type": "number"
+                    "type": "number",
+                    "x-agent": true
                 },
                 "ndcg3": {
                     "description": "Normalized Discounted Cumulative Gain at 3",
-                    "type": "number"
+                    "type": "number",
+                    "x-agent": true
                 },
                 "precision": {
                     "description": "Precision score",
-                    "type": "number"
+                    "type": "number",
+                    "x-agent": true
                 },
                 "recall": {
                     "description": "Recall score",
-                    "type": "number"
+                    "type": "number",
+                    "x-agent": true
                 }
             }
         },
@@ -30490,7 +30637,8 @@ const docTemplate = `{
                 },
                 "content": {
                     "description": "Content",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "end_at": {
                     "description": "End at",
@@ -30498,7 +30646,8 @@ const docTemplate = `{
                 },
                 "id": {
                     "description": "ID",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "chunk_id"
                 },
                 "image_info": {
                     "description": "图片信息 (JSON 格式)",
@@ -30526,7 +30675,8 @@ const docTemplate = `{
                 },
                 "knowledge_id": {
                     "description": "Knowledge ID",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "knowledge_source": {
                     "description": "Knowledge source\nUsed to indicate the source of the knowledge, such as \"url\"",
@@ -30534,7 +30684,8 @@ const docTemplate = `{
                 },
                 "knowledge_title": {
                     "description": "Knowledge title",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "match_type": {
                     "description": "Match type",
@@ -30542,7 +30693,8 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MatchType"
                         }
-                    ]
+                    ],
+                    "x-agent": true
                 },
                 "matched_content": {
                     "description": "MatchedContent is the actual content that was matched in vector search\nFor FAQ: this is the matched question text (standard or similar question)",
@@ -30568,7 +30720,8 @@ const docTemplate = `{
                 },
                 "score": {
                     "description": "Score",
-                    "type": "number"
+                    "type": "number",
+                    "x-agent": true
                 },
                 "seq": {
                     "description": "Seq",
@@ -33603,6 +33756,35 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.AgentTrialRequest": {
+            "type": "object",
+            "required": [
+                "prompt"
+            ],
+            "properties": {
+                "prompt": {
+                    "description": "Example user message for the saved system prompt.",
+                    "type": "string",
+                    "maxLength": 4000,
+                    "x-agent": true,
+                    "x-agent-max-bytes": "16000"
+                }
+            }
+        },
+        "internal_handler.AgentTrialResponse": {
+            "type": "object",
+            "properties": {
+                "answer": {
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-runes": "8000"
+                },
+                "mode": {
+                    "type": "string",
+                    "x-agent": true
+                }
+            }
+        },
         "internal_handler.AgentWriteResponse": {
             "type": "object",
             "properties": {
@@ -34081,7 +34263,8 @@ const docTemplate = `{
             "properties": {
                 "chat_id": {
                     "description": "ID of chat model to use",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "model_id"
                 },
                 "dataset_id": {
                     "description": "ID of dataset to evaluate",
@@ -34089,11 +34272,14 @@ const docTemplate = `{
                 },
                 "knowledge_base_id": {
                     "description": "ID of knowledge base to use",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-required": true
                 },
                 "rerank_id": {
                     "description": "ID of rerank model to use",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "rerank_model_id"
                 }
             }
         },
@@ -35660,6 +35846,15 @@ const docTemplate = `{
                     ],
                     "x-agent": true
                 },
+                "allowed_tools": {
+                    "description": "Built-in tools from agent.tools; switch-managed tools still follow their own settings.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true,
+                    "x-agent-maximum": "50"
+                },
                 "description": {
                     "description": "What the agent is for",
                     "type": "string",
@@ -35715,6 +35910,11 @@ const docTemplate = `{
                 },
                 "name": {
                     "description": "Agent name",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "sandbox_config_id": {
+                    "description": "Workspace sandbox from sandbox.list; empty selects the deployment default.",
                     "type": "string",
                     "x-agent": true
                 },
@@ -35927,25 +36127,30 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "content": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "context_header": {
                     "type": "string"
                 },
                 "end": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "seq": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "size_chars": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "size_tokens_approx": {
                     "type": "integer"
                 },
                 "start": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 }
             }
         },
@@ -35953,16 +36158,24 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "child_chunk_size": {
-                    "type": "integer"
+                    "description": "Child chunk size in characters.",
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "chunk_overlap": {
-                    "type": "integer"
+                    "description": "Overlap in characters between chunks.",
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "chunk_size": {
-                    "type": "integer"
+                    "description": "Target chunk size in characters.",
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "enable_parent_child": {
-                    "type": "boolean"
+                    "description": "Enable parent-child chunking.",
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "languages": {
                     "type": "array",
@@ -35971,7 +36184,9 @@ const docTemplate = `{
                     }
                 },
                 "parent_chunk_size": {
-                    "type": "integer"
+                    "description": "Parent chunk size in characters.",
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "separators": {
                     "type": "array",
@@ -35980,7 +36195,9 @@ const docTemplate = `{
                     }
                 },
                 "strategy": {
-                    "type": "string"
+                    "description": "Chunking strategy: auto, heading, heuristic, recursive or legacy.",
+                    "type": "string",
+                    "x-agent": true
                 },
                 "token_limit": {
                     "type": "integer"
@@ -35991,10 +36208,20 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "chunking_config": {
-                    "$ref": "#/definitions/internal_handler.PreviewChunkingPayload"
+                    "description": "Chunking parameters for this preview only.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/internal_handler.PreviewChunkingPayload"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "text": {
-                    "type": "string"
+                    "description": "Text to split, at most 32000 bytes.",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-bytes": "32000",
+                    "x-agent-required": true
                 }
             }
         },
@@ -36017,10 +36244,20 @@ const docTemplate = `{
                     }
                 },
                 "selected_tier": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.StrategyTier"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.StrategyTier"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "stats": {
-                    "$ref": "#/definitions/internal_handler.PreviewChunkingStats"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/internal_handler.PreviewChunkingStats"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "tier_chain": {
                     "type": "array",
@@ -36034,23 +36271,28 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "avg_chars": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "count": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "max_chars": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "min_chars": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "stddev_chars": {
                     "type": "integer"
                 },
                 "truncated_to": {
                     "description": "TruncatedTo, when set, is the original chunk count before the\nresponse was truncated to previewMaxChunks for transport.",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 }
             }
         },
@@ -36217,6 +36459,40 @@ const docTemplate = `{
             "properties": {
                 "message": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_handler.RetrievalPreviewRequest": {
+            "type": "object",
+            "required": [
+                "mode",
+                "query"
+            ],
+            "properties": {
+                "limit": {
+                    "description": "Maximum candidates to return, from 1 to 20; default 10.",
+                    "type": "integer",
+                    "maximum": 20,
+                    "minimum": 1,
+                    "x-agent": true,
+                    "x-agent-maximum": "20"
+                },
+                "mode": {
+                    "description": "Retrieval mode to inspect.",
+                    "type": "string",
+                    "enum": [
+                        "hybrid",
+                        "keyword",
+                        "vector"
+                    ],
+                    "x-agent": true
+                },
+                "query": {
+                    "description": "Search query to compare across retrieval modes.",
+                    "type": "string",
+                    "maxLength": 2000,
+                    "x-agent": true,
+                    "x-agent-max-bytes": "8000"
                 }
             }
         },

@@ -41,6 +41,7 @@ type CustomAgentHandler struct {
 	sandboxConfigs sandboxConfigLookup
 	usableSkills   usableSkillLister
 	desktop        bool
+	models         interfaces.ModelService
 }
 
 // NewCustomAgentHandler creates a new custom agent handler instance
@@ -52,6 +53,7 @@ func NewCustomAgentHandler(
 	sandboxConfigs *service.TenantSandboxConfigService,
 	host service.HostSandboxManager,
 	usableSkills *service.TenantSkillService,
+	models interfaces.ModelService,
 ) *CustomAgentHandler {
 	return &CustomAgentHandler{
 		service:        service,
@@ -61,6 +63,7 @@ func NewCustomAgentHandler(
 		sandboxConfigs: sandboxConfigs,
 		usableSkills:   usableSkills,
 		desktop:        host.Desktop,
+		models:         models,
 	}
 }
 
@@ -107,6 +110,10 @@ type PatchAgentRequest struct {
 	WebSearchEnabled *bool `json:"web_search_enabled" extensions:"x-agent"`
 	// Whether earlier turns are kept in the conversation context
 	MultiTurnEnabled *bool `json:"multi_turn_enabled" extensions:"x-agent"`
+	// Built-in tools from agent.tools; switch-managed tools still follow their own settings.
+	AllowedTools *[]string `json:"allowed_tools" extensions:"x-agent,x-agent-maximum=50"`
+	// Workspace sandbox from sandbox.list; empty selects the deployment default.
+	SandboxConfigID *string `json:"sandbox_config_id" extensions:"x-agent"`
 }
 
 // apply overlays the request onto an agent's current state, as an update
@@ -160,6 +167,12 @@ func (p PatchAgentRequest) apply(agent *types.CustomAgent) UpdateAgentRequest {
 	}
 	if p.MultiTurnEnabled != nil {
 		cfg.MultiTurnEnabled = *p.MultiTurnEnabled
+	}
+	if p.AllowedTools != nil {
+		cfg.AllowedTools = append([]string{}, *p.AllowedTools...)
+	}
+	if p.SandboxConfigID != nil {
+		cfg.SandboxConfigID = strings.TrimSpace(*p.SandboxConfigID)
 	}
 	return req
 }
@@ -577,7 +590,7 @@ func (h *CustomAgentHandler) PatchAgent(c *gin.Context) {
 	}
 	// Skills already saved are not re-checked: a skill uninstalled since must
 	// not block an unrelated change such as a rename.
-	if patch.SkillsSelectionMode != nil || patch.SelectedSkills != nil {
+	if patch.SkillsSelectionMode != nil || patch.SelectedSkills != nil || patch.SandboxConfigID != nil {
 		if (req.Config.SkillsSelectionMode == "all" || req.Config.SkillsSelectionMode == "selected") &&
 			skillTarget == "" {
 			_ = c.Error(errors.NewBadRequestError("Choose a sandbox in the agent editor before selecting skills"))

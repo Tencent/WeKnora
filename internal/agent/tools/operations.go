@@ -412,7 +412,7 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 // Status codes and projected state are sufficient here; raw errors stay in logs.
 func infrastructureOperation(op operations.Operation) bool {
 	switch op.Domain() {
-	case "system", "sandbox", "storage", "vector_store", "data_source":
+	case "system", "sandbox", "storage", "vector_store", "data_source", "evaluation":
 		return true
 	default:
 		return false
