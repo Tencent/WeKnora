@@ -36,6 +36,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 	"gorm.io/gorm"
 )
 
@@ -540,13 +541,17 @@ func (t *spanTracker) FailSpan(ctx context.Context, span *Span, errorCode, error
 	// in StageDependencies (those are siblings, not descendants).
 	if span.Kind == types.SpanKindStage {
 		t.cascadeDependentStages(ctx, span, reason)
-		// Any failure in a MAIN pipeline stage means the attempt is
-		// done — the parse cannot succeed past this point. Close the
-		// root span as failed so the UI doesn't show "进行中" forever.
-		// Optional downstream stages (summary/question/wiki/graph) do
-		// not poison the attempt: they can fail without invalidating
-		// the parsed document.
-		if isMainPipelineStage(span.Name) {
+		// A failure in a MAIN pipeline stage closes the attempt as failed so
+		// the UI doesn't show "进行中" forever, but only once the task runner
+		// has no retry left. asynq retries reuse the same payload and so
+		// record onto the same attempt: closing the root on retry 0/3 leaves
+		// it failed even when the next retry completes every child span and
+		// the document itself reaches completed (#4326).
+		//
+		// Optional downstream stages (summary/question/wiki/graph) do not
+		// poison the attempt: they can fail without invalidating the parsed
+		// document.
+		if isMainPipelineStage(span.Name) && !attemptStillHasRetry(ctx) {
 			t.FinalizeAttempt(ctx, span.KnowledgeID, span.Attempt,
 				types.SpanStatusFailed, nil, errorCode, errorMessage)
 		}
@@ -725,12 +730,29 @@ func contains(haystack []string, needle string) bool {
 	return false
 }
 
+// attemptStillHasRetry reports whether the task runner will run this attempt
+// again after a failure. It reads the same counters ProcessDocument uses for
+// its own isLastRetry: the Lite executor's injected metadata wins, otherwise
+// the asynq counters. Outside a task runner (a synchronous reparse, a test
+// harness) neither is present and the failure is final.
+func attemptStillHasRetry(ctx context.Context) bool {
+	if retried, limit, ok := types.TaskRetryMetadataFromContext(ctx); ok {
+		return retried < limit
+	}
+	retryCount, ok := asynq.GetRetryCount(ctx)
+	if !ok {
+		return false
+	}
+	maxRetry, ok := asynq.GetMaxRetry(ctx)
+	return ok && retryCount < maxRetry
+}
+
 // isMainPipelineStage reports whether stage is one of the 5 mandatory
 // pipeline stages (docreader / chunking / embedding / multimodal /
-// postprocess). A failure in any of these terminally invalidates the
-// attempt and must close the root as failed. Optional downstream stages
-// added later (summary, question, wiki, graph) do NOT match — those
-// can fail individually without poisoning the parse result.
+// postprocess). A failure in any of these ends the attempt once no retry is
+// left (see attemptStillHasRetry) and must close the root as failed. Optional
+// downstream stages added later (summary, question, wiki, graph) do NOT match
+// — those can fail individually without poisoning the parse result.
 func isMainPipelineStage(name string) bool {
 	for _, s := range types.AllStages {
 		if s == name {
