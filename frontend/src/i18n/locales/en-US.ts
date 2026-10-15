@@ -2955,6 +2955,8 @@ export default {
     notConfigured: 'Not configured',
     sharedAgentModelLabel: 'Model from shared agent',
     noModel: 'No available models',
+    modelAuto: 'Auto',
+    modelAutoHint: 'Uses the current knowledge base\'s chat model, or the system default if it has none',
     stopGeneration: 'Stop Generation',
     send: 'Send',
     steerCurrent: 'Supplement current task',

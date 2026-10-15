@@ -171,6 +171,7 @@
                         @stop-confirmed="handleStopConfirmed"
                         @stop-failed="handleStopFailed" :isReplying="isReplying" :composer-locked="composerLocked" :sessionId="session_id"
                         :assistantMessageId="currentAssistantMessageId" :embeddedMode="embeddedMode"
+                        :model-id="modelId" @update:model-id="(id) => emit('update:modelId', id)"
                         :queuedSteers="steerQueue.filter(item => item.delivery === 'after')" :canSteer="isAgentStreamSession()">
                         <template v-if="$slots['composer-chips']" #chips><slot name="composer-chips" /></template>
                     </InputField>
@@ -267,7 +268,11 @@ const props = defineProps({
     // Embedded only: returns { knowledgeBaseIds, pageContext } for each send,
     // read at send time so the host can follow the page the user is on.
     hostScope: { type: Function, default: null },
+    // Embedded only: the host's model choice (v-model:model-id), '' for the
+    // agent's own.
+    modelId: { type: String, default: '' },
 });
+const emit = defineEmits(['update:modelId']);
 
 const usemenuStore = useMenuStore();
 const useSettingsStoreInstance = useSettingsStore();
@@ -1753,7 +1758,7 @@ onMounted(async () => {
     if (props.embeddedMode && props.initialQuery) {
         scrollLock.value = true;
         historyLoading.value = false;
-        sendMsg(props.initialQuery);
+        sendMsg(props.initialQuery, props.modelId);
     } else if (!props.embeddedMode && firstQuery.value) {
         scrollLock.value = true;
         historyLoading.value = false;

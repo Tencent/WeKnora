@@ -2955,6 +2955,8 @@ export default {
     notConfigured: '未設定',
     sharedAgentModelLabel: '共有エージェントのモデル',
     noModel: '利用可能なモデルがありません',
+    modelAuto: '自動',
+    modelAutoHint: '現在のナレッジベースのチャットモデルを使用し、未設定の場合はシステムの既定モデルを使用します',
     stopGeneration: '生成を停止',
     send: '送信',
     steerCurrent: '現在のタスクに追加',

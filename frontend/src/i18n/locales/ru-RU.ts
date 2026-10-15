@@ -5245,6 +5245,8 @@ export default {
     notConfigured: 'Не настроено',
     sharedAgentModelLabel: 'Модель из общего агента',
     noModel: 'Нет доступных моделей',
+    modelAuto: 'Авто',
+    modelAutoHint: 'Используется модель чата текущей базы знаний, а если она не задана — модель по умолчанию',
     stopGeneration: 'Остановить генерацию',
     send: 'Отправить',
     steerCurrent: 'Дополнить текущую задачу',

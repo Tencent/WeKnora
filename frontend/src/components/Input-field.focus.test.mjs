@@ -11,6 +11,7 @@ const sendCode = source.slice(source.indexOf('const createSession ='), source.in
 for (const mode of ['normal', 'embedded', 'after', 'inject']) {
   test(`${mode} send clears the draft and restores focus after the DOM update`, async () => {
     const effects = [], ticks = []
+    let sentModel
     const textarea = {
       isConnected: true,
       focus: options => effects.push(['focus', options.preventScroll]),
@@ -20,11 +21,15 @@ for (const mode of ['normal', 'embedded', 'after', 'inject']) {
       props: { isReplying: ['after', 'inject'].includes(mode), canSteer: true, embeddedMode: mode === 'embedded' },
       uploadedAttachments: { value: [] }, uploadedImages: { value: [] },
       allSelectedItems: { value: [] }, selectedModelId: { value: 'model' },
+      composerModelId: { value: 'host-model' },
       selectedAgent: { value: { config: {} } },
       settingsStore: {}, chatResources: { isLoaded: () => true },
       collectAgentNotReadyReasons: () => ({ keys: [], labels: [] }),
       attachmentUploadRef: { value: null },
-      emit: name => effects.push([name]),
+      emit: (name, _query, model) => {
+        effects.push([name])
+        if (name === 'send-msg') sentModel = model
+      },
       clearvalue: () => effects.push(['clear']),
       getTextareaEl: () => textarea,
       nextTick: () => new Promise(resolve => ticks.push(resolve)),
@@ -32,6 +37,9 @@ for (const mode of ['normal', 'embedded', 'after', 'inject']) {
     const send = vm.runInNewContext(ts.transpile(`${focusCode}\n${sendCode}\ncreateSession`), context)
     await send('hello', mode === 'inject' ? 'inject' : 'after')
     assert.deepEqual(effects, [[context.props.isReplying ? 'steer-msg' : 'send-msg'], ['clear']])
+    // Embedded, the host's model goes out, never the main chat's pick.
+    if (mode === 'embedded') assert.equal(sentModel, 'host-model')
+    if (mode === 'normal') assert.equal(sentModel, 'model')
     for (const resolve of ticks) resolve()
     await new Promise(setImmediate)
     assert.deepEqual(effects.at(-1), ['focus', true])
@@ -78,7 +86,7 @@ test('new-session focus survives consumption of the first query and runs on chil
     firstQuery: { value: 'main draft' }, props: { embeddedMode: true, initialQuery: '' },
   }), false)
   assert.match(page, /:auto-focus="focusComposerOnMount"/)
-  const mountStart = source.slice(source.indexOf('onMounted(() => {'), source.indexOf('// Embed 渠道'))
+  const mountStart = source.slice(source.indexOf('onMounted(() => {'), source.indexOf('// 嵌入时 agent/KB 由宿主注入，只需'))
   let mounted, focused = false
   vm.runInNewContext(`${mountStart}\n});`, {
     props: { autoFocus }, onMounted: fn => { mounted = fn }, focusInput: () => { focused = true },

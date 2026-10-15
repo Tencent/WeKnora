@@ -5245,6 +5245,8 @@ export default {
     notConfigured: '구성되지 않음',
     sharedAgentModelLabel: '공유 에이전트에 구성된 모델',
     noModel: '사용 가능한 모델 없음',
+    modelAuto: '자동',
+    modelAutoHint: '현재 지식 베이스의 대화 모델을 사용하고, 설정되지 않은 경우 시스템 기본 모델을 사용합니다',
     stopGeneration: '생성 중지',
     send: '전송',
     steerCurrent: '현재 작업에 추가',

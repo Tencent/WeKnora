@@ -22,6 +22,7 @@ export interface AssistantOpenRequest {
 }
 
 const SESSION_KEY_PREFIX = 'weknora:assistant-session'
+const MODEL_KEY_PREFIX = 'weknora:assistant-model'
 
 export function toPageContextPayload(context: AssistantPageContext): PageContextPayload {
   return {
@@ -57,33 +58,49 @@ export const useAssistantStore = defineStore('assistant', () => {
   })
   const contextAttached = computed(() => !!pageContext.value && dismissedKey.value !== contextKey(pageContext.value))
 
-  // The conversation survives reloads within the tab, scoped like the
-  // command palette's history so another user or workspace never inherits it.
-  const storageKey = (): string => {
+  // '' leaves the choice to the run: the knowledge base's chat model, then
+  // the system default.
+  const modelId = ref('')
+
+  // The conversation survives reloads within the tab and the model choice
+  // persists, both scoped like the command palette's history so another user
+  // or workspace never inherits them.
+  const storageKey = (prefix: string): string => {
     const auth = useAuthStore()
-    return `${SESSION_KEY_PREFIX}:${auth.user?.id || 'anon'}:${auth.effectiveTenantId ?? 'none'}`
+    return `${prefix}:${auth.user?.id || 'anon'}:${auth.effectiveTenantId ?? 'none'}`
   }
-  const restoreSession = () => {
+  const restore = () => {
     try {
-      sessionId.value = sessionStorage.getItem(storageKey()) || ''
+      sessionId.value = sessionStorage.getItem(storageKey(SESSION_KEY_PREFIX)) || ''
+      modelId.value = localStorage.getItem(storageKey(MODEL_KEY_PREFIX)) || ''
     } catch {
       sessionId.value = ''
+      modelId.value = ''
     }
   }
   const setSession = (id: string) => {
     sessionId.value = id
     try {
-      if (id) sessionStorage.setItem(storageKey(), id)
-      else sessionStorage.removeItem(storageKey())
+      if (id) sessionStorage.setItem(storageKey(SESSION_KEY_PREFIX), id)
+      else sessionStorage.removeItem(storageKey(SESSION_KEY_PREFIX))
     } catch {
-      // sessionStorage can throw in private mode; the in-memory session still works.
+      // Storage can throw in private mode; the in-memory value still works.
     }
   }
-  restoreSession()
+  const setModel = (id: string) => {
+    modelId.value = id
+    try {
+      if (id) localStorage.setItem(storageKey(MODEL_KEY_PREFIX), id)
+      else localStorage.removeItem(storageKey(MODEL_KEY_PREFIX))
+    } catch {
+      // See setSession.
+    }
+  }
+  restore()
   watch(() => {
     const auth = useAuthStore()
     return `${auth.user?.id}:${auth.effectiveTenantId}`
-  }, restoreSession)
+  }, restore)
 
   const open = (request?: AssistantOpenRequest) => {
     if (request?.query) {
@@ -125,6 +142,7 @@ export const useAssistantStore = defineStore('assistant', () => {
   return {
     visible,
     sessionId,
+    modelId,
     pendingRequest,
     pageContext,
     contextAttached,
@@ -132,6 +150,7 @@ export const useAssistantStore = defineStore('assistant', () => {
     close,
     toggle,
     setSession,
+    setModel,
     startNewConversation,
     takePendingRequest,
     publishPageContext,

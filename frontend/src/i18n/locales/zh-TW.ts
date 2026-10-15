@@ -5247,6 +5247,8 @@ export default {
     notConfigured: '未設定',
     sharedAgentModelLabel: '共享智慧代理設定的模型',
     noModel: '暫無可用模型',
+    modelAuto: '自動',
+    modelAutoHint: '使用目前知識庫設定的對話模型，未設定時使用系統預設模型',
     stopGeneration: '停止生成',
     send: '傳送',
     steerCurrent: '補充當前任務',

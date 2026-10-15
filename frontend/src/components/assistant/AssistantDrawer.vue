@@ -19,7 +19,7 @@
 
     <ChatView v-if="assistant.sessionId" :key="assistant.sessionId" :session_id="assistant.sessionId"
       :agent-id="BUILTIN_WEKNORA_ASSISTANT_ID" :embedded-mode="true" :initial-query="initialQuery"
-      :host-scope="hostScope">
+      :host-scope="hostScope" :model-id="assistant.modelId" @update:model-id="assistant.setModel">
       <template v-if="assistant.pageContext" #composer-chips>
         <AssistantContextChip />
       </template>
@@ -40,8 +40,8 @@
         </div>
       </div>
       <div class="assistant-welcome-composer">
-        <InputField :embedded-mode="true" :auto-focus="assistant.visible"
-          @send-msg="(query) => startConversation(query)">
+        <InputField :embedded-mode="true" :auto-focus="assistant.visible" :model-id="assistant.modelId"
+          @update:model-id="assistant.setModel" @send-msg="(query) => startConversation(query)">
           <template v-if="assistant.pageContext" #chips>
             <AssistantContextChip />
           </template>
