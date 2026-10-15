@@ -134,11 +134,13 @@ func (s *sessionService) AgentQA(
 			// the workspace's; search_knowledge keeps retrieval order without one.
 			models, listErr := s.modelService.ListModels(ctx)
 			if listErr != nil {
-				logger.Warnf(ctx, "Failed to list models for internal agent %s rerank fallback: %v", req.CustomAgent.ID, listErr)
+				logger.Warnf(ctx, "Failed to list models for internal agent %s rerank fallback: %v",
+					req.CustomAgent.ID, listErr)
 			}
 			rerankModelID = pickWorkspaceRerankModelID(models)
 			if rerankModelID == "" {
-				logger.Infof(ctx, "No rerank model in the workspace, internal agent %s searches without reranking", req.CustomAgent.ID)
+				logger.Infof(ctx, "No rerank model in the workspace, internal agent %s searches without reranking",
+					req.CustomAgent.ID)
 			}
 		} else if rerankModelID == "" {
 			logger.Warnf(ctx, "No rerank model configured for custom agent %s, but knowledge_search tool is enabled", req.CustomAgent.ID)
