@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -508,6 +509,48 @@ func TestSkillInstallerIsHiddenFromThePicker(t *testing.T) {
 		"it must not clutter the tenant's agent picker")
 }
 
+func TestWeKnoraAssistantIsAHiddenBuiltinWithOperations(t *testing.T) {
+	require.NoError(t, types.LoadBuiltinAgentsConfig(filepath.Join("..", "..", "..", "config")))
+
+	agent := types.GetBuiltinAgent(types.BuiltinWeKnoraAssistantID, 1)
+	require.NotNil(t, agent)
+	require.NotContains(t, types.GetBuiltinAgentIDs(), types.BuiltinWeKnoraAssistantID)
+	require.True(t, types.GrantsOperationCatalog(agent))
+	require.True(t, types.UsesFallbackChatModel(agent))
+	require.Equal(t, "weknora_assistant", agent.Config.SystemPromptID)
+	require.NotContains(t, agent.Config.AllowedTools, tools.ToolRunOperation,
+		"operations are granted by ID, never through the editable allowlist")
+	for _, def := range tools.AvailableToolDefinitions() {
+		require.NotEqual(t, tools.ToolRunOperation, def.Name)
+		require.NotEqual(t, tools.ToolFindOperations, def.Name)
+	}
+
+	stored := *agent
+	stored.IsBuiltin = false
+	require.False(t, types.GrantsOperationCatalog(&stored))
+}
+
+func TestRegisterOperationToolsRequiresGrantAndWebUser(t *testing.T) {
+	webUser := types.WithCaller(types.WithPrincipal(context.Background(),
+		types.Principal{Type: types.PrincipalWebUser, ID: "u1"}),
+		types.Caller{TenantID: 7, UserID: "u1"})
+	svc := &agentService{operationDispatcher: operations.NewHandlerDispatcher()}
+	registered := func(ctx context.Context, cfg *types.AgentConfig) []string {
+		registry := tools.NewToolRegistry()
+		svc.registerOperationTools(ctx, registry, cfg)
+		return registry.ListTools()
+	}
+
+	granted := &types.AgentConfig{OperationsAgentID: types.BuiltinWeKnoraAssistantID}
+	require.ElementsMatch(t, []string{tools.ToolFindOperations, tools.ToolRunOperation}, registered(webUser, granted))
+	require.Empty(t, registered(webUser, &types.AgentConfig{}))
+	require.Empty(t, registered(webUser, &types.AgentConfig{
+		OperationsAgentID: types.BuiltinWeKnoraAssistantID, SharedAgentReadOnly: true,
+	}))
+	apiKey := types.WithTenantAPIKeyScope(webUser, types.TenantAPIKeyScope{KeyID: 1})
+	require.Empty(t, registered(apiKey, granted))
+}
+
 func TestGetKnowledgeBaseInfos_SharedKnowledgeBaseUsesSourceTenant(t *testing.T) {
 	const (
 		receiverTenantID = uint64(7)
@@ -780,4 +823,30 @@ func TestValidInstallDirUsesTheHostVersionsRoot(t *testing.T) {
 	noRoot := &agentService{}
 	_, ok = noRoot.validInstallDir(host)
 	require.False(t, ok)
+}
+
+// TestSwitchManagedToolsIgnoreTheAllowlist pins tools.SwitchManagedTools to
+// what registerTools does: with every switch off, naming those tools in the
+// allowlist must not offer any of them. The agent editor relies on this list
+// to tell users that such stored entries have no effect. It covers the
+// allowlist path only: registering a listed tool from the allowlist, or no
+// longer stripping a web or memory tool, fails it. The code that registers
+// sandbox, skill and MCP tools from their own settings is tested elsewhere.
+func TestSwitchManagedToolsIgnoreTheAllowlist(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	allowed := []string{tools.ToolThinking}
+	allowed = append(allowed, tools.SwitchManagedTools()...)
+	chatModel := &fakeAgentChatModel{}
+	config := &types.AgentConfig{AllowedTools: allowed}
+
+	engine, err := (&agentService{}).CreateAgentEngine(ctx, config, chatModel, nil, nil, "sess-1", "msg-1")
+	require.NoError(t, err)
+	_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
+	require.NoError(t, err)
+
+	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolThinking), "the run must have offered tools at all")
+	for _, managed := range tools.SwitchManagedTools() {
+		require.False(t, toolOffered(chatModel.lastToolNames, managed),
+			"%s follows another agent setting, not the allowlist", managed)
+	}
 }

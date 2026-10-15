@@ -604,6 +604,7 @@ func buildRuntimeContextBlock(
 	kbs []*KnowledgeBaseInfo,
 	docs []*SelectedDocumentInfo,
 	origin *QuestionOriginInfo,
+	page *PageContextInfo,
 ) string {
 	var sb strings.Builder
 	sb.WriteString("<runtime_context scope=\"this_turn\">\n")
@@ -647,6 +648,7 @@ func buildRuntimeContextBlock(
 	}
 
 	writeQuestionOrigin(&sb, origin)
+	writePageContext(&sb, page)
 
 	sb.WriteString("</runtime_context>")
 	return sb.String()
@@ -678,6 +680,43 @@ func writeQuestionOrigin(sb *strings.Builder, origin *QuestionOriginInfo) {
 		"Search it before answering: the question refers to that content even when it reads like " +
 		"general knowledge.</note>\n")
 	sb.WriteString("  </question_origin>\n")
+}
+
+// writePageContext tells the model which WeKnora page the user is looking at,
+// so "this document", "this page" or "these issues" need no clarifying
+// question. It names what is open; it does not ask for any action.
+func writePageContext(sb *strings.Builder, page *PageContextInfo) {
+	if page == nil || page.KnowledgeBaseID == "" {
+		return
+	}
+	fmt.Fprintf(sb, "  <page_context knowledge_base_id=\"%s\"", escapeXMLAttr(page.KnowledgeBaseID))
+	if page.KnowledgeBaseName != "" {
+		fmt.Fprintf(sb, " name=\"%s\"", escapeXMLAttr(page.KnowledgeBaseName))
+	}
+	sb.WriteString(">\n")
+	if d := page.Document; d != nil && d.KnowledgeID != "" {
+		title := d.Title
+		if title == "" {
+			title = d.FileName
+		}
+		fmt.Fprintf(sb, "    <document knowledge_id=\"%s\" title=\"%s\" />\n",
+			escapeXMLAttr(d.KnowledgeID), escapeXMLAttr(title))
+	}
+	if w := page.WikiPage; w != nil && w.Slug != "" {
+		fmt.Fprintf(sb, "    <wiki_page slug=\"%s\" title=\"%s\" />\n",
+			escapeXMLAttr(w.Slug), escapeXMLAttr(w.Title))
+	}
+	for _, issue := range page.WikiIssues {
+		if issue == nil || issue.ID == "" {
+			continue
+		}
+		fmt.Fprintf(sb, "    <wiki_issue issue_id=\"%s\" slug=\"%s\" type=\"%s\" status=\"%s\" />\n",
+			escapeXMLAttr(issue.ID), escapeXMLAttr(issue.Slug),
+			escapeXMLAttr(issue.IssueType), escapeXMLAttr(issue.Status))
+	}
+	sb.WriteString("    <note>This is the page the user has open. When they say \"this\" without " +
+		"naming something, they mean what is listed here.</note>\n")
+	sb.WriteString("  </page_context>\n")
 }
 
 // buildMustUseBlock emits a short per-turn hint when the user @mentioned MCP/Skill.
@@ -802,8 +841,9 @@ func commonStringPrefix(a, b string) string {
 // not written to rendered_content / history.
 func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
 	e.registerRuntimeReferences()
-	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs, e.questionOrigin)
-	runtimeCtx = e.modelContext.CompactKnownText(runtimeCtx)
+	runtimeCtx := buildRuntimeContextBlock(
+		sessionID, e.knowledgeBasesInfo, e.selectedDocs, e.questionOrigin, e.pageContext)
+	runtimeCtx = e.modelContext.EncodeKnownIssues(e.modelContext.CompactKnownText(runtimeCtx))
 	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
 	return composeUserTurnContent(runtimeCtx, mustUse, query)
 }
@@ -847,6 +887,17 @@ func (e *AgentEngine) registerRuntimeReferences() {
 		e.modelContext.RegisterKnowledgeBase(origin.KnowledgeBaseID)
 		if origin.Document != nil {
 			e.modelContext.RegisterDocument(origin.Document.KnowledgeID)
+		}
+	}
+	if page := e.pageContext; page != nil {
+		e.modelContext.RegisterKnowledgeBase(page.KnowledgeBaseID)
+		if page.Document != nil {
+			e.modelContext.RegisterDocument(page.Document.KnowledgeID)
+		}
+		for _, issue := range page.WikiIssues {
+			if issue != nil {
+				e.modelContext.RegisterIssue(issue.ID)
+			}
 		}
 	}
 }

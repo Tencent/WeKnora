@@ -36,19 +36,22 @@ var versionedSQLiteTables = []string{
 	"tenant_skill_snapshots",
 	"tenant_skill_catalog",
 	"tenant_user_env_vars",
+	"agent_prompts",
+	"agent_run_suspensions",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
 // versioned migrations add and the SQLite baseline was missing.
 var versionedSQLiteColumns = map[string][]string{
-	"model_catalog_configs": {"version", "overlay", "history", "updated_by", "updated_at"},        // 000031
-	"memory_subjects":       {"extraction_state"},                                                 // 000094
-	"memory_items":          {"replaces_id"},                                                      // 000094
-	"tenants":               {"api_principal_config"},                                             // 000064
-	"users":                 {"is_system_admin"},                                                  // 000053
-	"knowledges":            {"pending_subtasks_count", "profile"},                                // 000056, 000101
-	"knowledge_bases":       {"profile_config", "generated_profile"},                              // 000101
-	"messages":              {"attachments", "usage", "sandbox_checkpoint", "context_checkpoint"}, // 000034/085/097/105
+	"model_catalog_configs": {"version", "overlay", "history", "updated_by", "updated_at"}, // 000031
+	"memory_subjects":       {"extraction_state"},                                          // 000094
+	"memory_items":          {"replaces_id"},                                               // 000094
+	"tenants":               {"api_principal_config"},                                      // 000064
+	"users":                 {"is_system_admin"},                                           // 000053
+	"knowledges":            {"pending_subtasks_count", "profile"},                         // 000056, 000101
+	"knowledge_bases":       {"profile_config", "generated_profile"},                       // 000101
+	// 000034/085/097/105/119
+	"messages": {"attachments", "usage", "sandbox_checkpoint", "context_checkpoint", "run_state"},
 	"sessions": {
 		"parent_session_id", "forked_from_message_id", "fork_bootstrap", // 000097
 		"sandbox_config_tenant_id", // 000027
@@ -71,7 +74,7 @@ var versionedSQLiteColumns = map[string][]string{
 	}, // 000028
 }
 
-const expectedSQLiteMigrationVersion = 34
+const expectedSQLiteMigrationVersion = 37
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -102,6 +105,8 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 
 	require.True(t, sqliteIndexExists(t, db, "idx_messages_session_created_id"),
 		"SQLite migrations must add the session/created_at index") // 000106
+	require.True(t, sqliteIndexExists(t, db, "idx_messages_live_attachments"),
+		"SQLite migrations must index live user message references")
 	assertSQLiteAgentHistoryQueriesUseTheIndex(t, db)
 
 	var catalogVersion int

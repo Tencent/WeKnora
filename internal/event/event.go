@@ -61,6 +61,11 @@ const (
 	EventToolApprovalRequired EventType = "tool_approval_required"
 	EventToolApprovalResolved EventType = "tool_approval_resolved"
 
+	// EventAgentPromptRequired requests user input (ask_user). The request and answer travel as the
+	// prompt kind's JSON, so a new kind needs no new event.
+	EventAgentPromptRequired EventType = "agent_prompt_required"
+	EventAgentPromptResolved EventType = "agent_prompt_resolved"
+
 	// MCP OAuth in-conversation authorization prompt: emitted when an
 	// OAuth-enabled MCP service is invoked but the current user has not
 	// authorized it yet. The agent pauses until the user authorizes (or the

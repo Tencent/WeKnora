@@ -261,10 +261,22 @@ const (
 	// The UI shows a toolbar placeholder until ResponseTypeComplete carries
 	// the file list.
 	ResponseTypeArtifactsPending ResponseType = "artifacts_pending"
+	// ResponseTypeRunSuspended precedes complete when the run ended waiting
+	// on a user prompt; the message stays incomplete until it is answered.
+	ResponseTypeRunSuspended ResponseType = "run_suspended"
+	// ResponseTypeRunResumed opens the stream of a suspended run resumed
+	// after its prompt was answered. Steps saved before the suspension are
+	// not replayed; the client keeps the ones it already shows.
+	ResponseTypeRunResumed ResponseType = "run_resumed"
 	// ToolApprovalRequired: MCP tool marked dangerous — UI must collect user approval before execution continues
 	ResponseTypeToolApprovalRequired ResponseType = "tool_approval_required"
 	// ToolApprovalResolved: user approved/rejected (or timeout); informational for UI replay
 	ResponseTypeToolApprovalResolved ResponseType = "tool_approval_resolved"
+	// ResponseTypeAgentPromptRequired indicates that the agent asks the user something (ask_user);
+	// data carries the prompt kind and its request JSON.
+	ResponseTypeAgentPromptRequired ResponseType = "agent_prompt_required"
+	// ResponseTypeAgentPromptResolved indicates an answered, declined, timed out or canceled prompt.
+	ResponseTypeAgentPromptResolved ResponseType = "agent_prompt_resolved"
 	// MCPOAuthRequired: an OAuth-enabled MCP service was invoked but the user
 	// has not authorized it — UI must surface an "Authorize" prompt and the
 	// agent pauses until authorization completes (or the wait times out).

@@ -324,6 +324,7 @@ export default {
   },
   menu: {
     sessionInProgress: '会話中',
+    sessionUnread: '新しい回答',
     knowledgeBase: 'ナレッジベース',
     agents: 'エージェント',
     artifacts: '成果物',
@@ -1828,6 +1829,7 @@ export default {
       skillTranscriptLive: 'インストールログ',
       skillTranscriptLiveHint: 'インストール中 — クリックで表示',
       skillTranscriptTitle: 'インストールの実行内容',
+      skillTranscriptPrompt: 'インストール指示',
       skillTranscriptHide: 'インストールの実行内容を非表示',
       skillGuidance: {
         placeholder: '必要な CLI、インストール手順、環境の制約などを入力',
@@ -1946,6 +1948,7 @@ export default {
       installedCount: '{count}個のサンドボックスにインストール済み',
       installPanelGroup: 'インストール済み',
       installPanelAvailable: '未インストール',
+      installAction: 'インストール',
       viewInstallProgress: '進捗を表示',
       manageOnSandbox: 'サンドボックス「{name}」でこのスキルを管理',
       manageDrawerDesc: 'サンドボックス「{name}」での有効化、変数、アンインストールを管理します。',
@@ -2560,6 +2563,15 @@ export default {
     }
   },
   retrievalSettings: {
+    recallTab: '検索候補',
+    rerankTab: '再ランキング',
+    rrfTitle: '結果の統合（RRF）',
+    rrfKLabel: 'RRF 平滑化定数 (K)',
+    rrfKDescription: '値が大きいほど上位の検索結果の優位性が小さくなります。既定値は 60。0 は既定値を使用します。',
+    rrfVectorWeightLabel: 'RRF ベクトル重み',
+    rrfVectorWeightDescription: '統合結果に対するベクトル検索の影響を調整します。既定値は 0.7。0 は既定値を使用します。重みの合計を 1 にする必要はありません。',
+    rrfKeywordWeightLabel: 'RRF キーワード重み',
+    rrfKeywordWeightDescription: '統合結果に対するキーワード検索の影響を調整します。既定値は 0.3。0 は既定値を使用します。重みの合計を 1 にする必要はありません。',
     title: '検索設定',
     description: 'ナレッジベース検索とメッセージ検索に共通する検索パラメータを設定します',
     embeddingTopKLabel: 'ベクトル検索のTop K',
@@ -2804,7 +2816,13 @@ export default {
     mcpStale: '再同期が必要',
     belongsToKb: 'ナレッジベース: ',
     belongsToOrg: '共有スペース: ',
-    noCompatibleKbForAgent: 'このエージェントのツールはスコープ内のナレッジベースの機能と一致しないため、参照できるナレッジベースがありません。'
+    noCompatibleKbForAgent: 'このエージェントのツールはスコープ内のナレッジベースの機能と一致しないため、参照できるナレッジベースがありません。',
+    tag: 'タグ',
+    searchPlaceholder: 'ナレッジ・ファイル等を検索',
+    searchInGroup: '{group}内を検索…',
+    typeToSearch: "{'@'} の後に入力して検索…",
+    viewAll: 'すべて表示',
+    back: '戻る'
   },
   file: {
     upload: 'ファイルをアップロード'
@@ -3527,6 +3545,17 @@ export default {
         viewerClose: '閉じる (Esc)',
         prev: '前へ (←)',
         next: '次へ (→)',
+        sourceFilter: 'ドキュメントで絞り込み',
+        sourceFilterTitle: 'ソースドキュメントで絞り込み',
+        sourceFilterSearch: 'ドキュメント名を検索',
+        sourceFilterEmpty: '一致するドキュメントがありません',
+        sourceFilterSubtitle: '選択したドキュメントの画像のみを表示し、キャプションと OCR 結果を一つずつ確認できます',
+        sourceFilterSelected: '{count} 件のドキュメントを選択中',
+        sourceFilterClear: '選択をクリア',
+        sourceFilterTooMany: '選択できるのは最大 1000 件です',
+        sourceFilterSelectAll: 'すべて選択 / 選択解除（全ヒット対象）',
+        sourceFilterOverflowRecent: 'ドキュメントが多いため、最新 {cap} 件のみ表示しています。キーワードで絞り込んでください',
+        sourceFilterOverflowHits: '{total} 件がヒットしました。先頭 {cap} 件のみ表示中です。全選択前にキーワードを絞り込んでください',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).
@@ -4074,6 +4103,7 @@ export default {
     truncatedHint: 'モデルの1回あたりの出力上限で回答が途中で打ち切られました。上記は打ち切り前に生成された内容です。',
     rewind: {
       tooltip: 'ここに巻き戻す',
+      confirmTitle: 'ここに巻き戻しますか？',
       confirmBody: 'これより後の会話を削除します。質問から巻き戻すとその質問自体も消え、入力欄に戻します。チェックポイントがあればワークスペースも戻します。この操作は元に戻せません。',
       confirmButton: '巻き戻す',
       cancelButton: 'キャンセル',
@@ -5631,6 +5661,9 @@ export default {
     "serverDocumentation": "サーバーの元の説明",
     "noServerDocumentation": "この MCP サーバーの initialize に instructions / serverInfo.description はありません（どちらも任意）。ツールの説明は下の各 description にあります。",
     "policyHint": "ツールの有効化と承認設定は即時保存され、一覧の更新後も維持されます。",
+    "columnTool": "ツール",
+    "columnEnabled": "有効",
+    "columnApproval": "承認",
     "failed": "ツール一覧を読み込めませんでした",
     "setupProgress": "MCP 設定の手順",
     "connection": "接続設定",
@@ -5673,6 +5706,9 @@ export default {
     authTypeApiKey: 'APIキー／トークン',
     authTypeOAuth: 'OAuth 2.0（初回接続時に認可）',
     oauthScopes: 'スコープ（任意、スペース区切り）',
+    oauthClientId: 'クライアント ID（任意）',
+    oauthClientIdDesc: '認可サーバーに事前登録したクライアントを指定します。空欄の場合は動的クライアント登録で自動登録します。クライアント ID を変更する場合はシークレットも更新してください。',
+    oauthClientSecret: 'クライアントシークレット（任意）',
     oauthAuthorization: '認可状態',
     oauthAuthorized: '認可済み',
     oauthRefreshable: 'トークンの有効期限が切れています。次回利用時に自動的に更新されます',
@@ -6121,7 +6157,8 @@ export default {
     getDocumentInfo: 'ドキュメント情報の取得',
     queryKnowledgeGraph: 'ナレッジグラフの照会',
     think: '深い思考',
-    todoWrite: '計画の作成'
+    todoWrite: '計画の作成',
+    askUser: 'ユーザーに質問'
   },
   vectorStoreBadge: {
     systemDefault: 'システムデフォルト',
@@ -6219,10 +6256,37 @@ export default {
     }
   },
   agentStream: {
+    askUser: {
+      title: 'あなたへの質問',
+      selectPlaceholder: '選択してください',
+      textPlaceholder: '回答を入力',
+      otherPlaceholder: 'その他（任意）',
+      decline: '回答しない',
+      submit: '送信',
+      declinedTag: '回答を辞退しました',
+      submitted: '送信済み',
+      answeredTag: '回答済み',
+      timedOutTag: '時間内に回答なし',
+      canceledTag: 'キャンセル済み',
+      unansweredTag: '未回答',
+      submitFailed: '送信に失敗しました',
+    },
+    promptDock: {
+      approvalTitle: '承認が必要です',
+      oauthTitle: '認可が必要です',
+      waiting: 'あなたの対応待ち',
+      handle: '対応する',
+      pager: '{current} / {total}',
+      previous: '前へ',
+      next: '次へ',
+      collapse: '折りたたむ',
+      expand: '展開'
+    },
     toolApproval: {
       waiting: '承認待ち · {target}',
       waitingStatus: '承認待ち',
       targetWithTool: '{service} › {tool}',
+      dockQuestion: '{target} の実行を許可しますか？',
       titleWithTarget: '承認 · {service} › {tool}',
       argsLabel: '引数',
       argsModified: '変更あり',
@@ -6231,6 +6295,9 @@ export default {
       reject: '拒否',
       approvedTag: '承認済み',
       rejectedTag: '拒否済み',
+      parked: 'バックグラウンドで待機中。後で対応できます',
+      parkedUntil: 'バックグラウンドで待機中。{time} までに対応してください',
+      abandonedTag: '破棄済み',
       invalidJson: '引数は有効なJSONである必要があります',
       submitted: '送信しました',
       submitFailed: '送信に失敗しました',
@@ -6240,6 +6307,7 @@ export default {
       waiting: '認可待ち · {target}',
       waitingStatus: '認可待ち',
       targetWithTool: '{service} › {tool}',
+      dockQuestion: '続行するには {target} を認可してください',
       titleWithService: 'OAuth · {service}',
       titleWithTool: 'OAuth · {service} › {tool}',
       desc: '認可すると、サインイン用の新しいウィンドウが開きます。認可が成功すると、ツール呼び出しは自動的に再開されます。',
@@ -6267,6 +6335,7 @@ export default {
       readDocument: 'ドキュメントを読む',
       listDocuments: 'ドキュメント一覧',
       todoWrite: '計画管理',
+      askUser: 'ユーザーに質問',
       knowledgeGraphExtract: 'ナレッジグラフ抽出',
       thinking: '思考',
       attachmentParsing: '添付ファイルを解析',
@@ -6289,6 +6358,22 @@ export default {
       heading: 'スキルファイル',
       script: 'スクリプト',
       instructions: 'スキル説明'
+    },
+    attachmentTarget: {
+      list: 'すべての添付ファイル',
+      file: '添付ファイル',
+      images: '{name} の画像',
+      imagesUnnamed: '添付ファイルの画像',
+      image: '{name} の画像 {n}',
+      imageUnnamed: '添付ファイルの画像 {n}'
+    },
+    imageView: {
+      summary: '「{file}」の画像 {numbers} を確認しました（全 {total} 枚）',
+      single: '画像「{file}」を確認しました',
+      descriptionsHeading: 'ビジョンモデルによる画像の説明',
+      imageLabel: '画像 #{n}',
+      noDescription: '説明を生成できませんでした',
+      remaining: '未確認の画像があと {count} 枚あります'
     },
     sandboxFiles: {
       found: '{count}件のファイルが見つかりました',
@@ -6544,6 +6629,8 @@ export default {
       thinkingDesc: '動的かつ内省的に問題を解決する思考ツール',
       todoWrite: '計画',
       todoWriteDesc: '構造化された調査計画を作成します',
+      askUser: 'ユーザーに質問',
+      askUserDesc: '必要な情報が不足しているときにユーザーへ質問し、回答を待ってから続行します',
       searchKnowledge: 'ナレッジベースを検索',
       searchKnowledgeDesc: 'セマンティック・キーワード・ハイブリッド検索でナレッジベースのチャンクを検索します',
       readDocument: 'ドキュメントを読む',
@@ -6603,6 +6690,13 @@ export default {
       kbMetricRag: 'RAGナレッジベース',
       kbMetricWiki: 'Wikiナレッジベース',
       statusInactive: '選択済みの{count}個のツールは、現在の設定では有効になりません',
+      searchConversations: '過去の会話を検索',
+      searchConversationsDesc: 'ユーザー自身の過去の会話から以前話した内容を探します',
+      groupStored: '保存済み（ここでは提供されていません）',
+      switchManagedDesc: 'このリストではなくエージェントの他の設定で制御されるため、ここでチェックしても有効になりません。チェックを外すと削除されます。',
+      unrecognizedDesc: 'このバージョンにはないツールのため、エージェントは呼び出せません。チェックを外すと削除されます。',
+      keptUnknownWarning: '保存しました。次の保存済みツールはこのバージョンにはないため残しましたが、エージェントは呼び出せません：{names}',
+      droppedWarning: '保存しました。次のツールはエージェントの他の設定で制御されるため、ツールリストから削除しました：{names}',
       effectiveLabel: '有効なツール',
       effectiveDesc: '現在の設定から算出された、エージェントが実際に呼び出せるツールです',
       effectiveEmpty: '利用可能なツールがありません。エージェントは通常のモデル対話にフォールバックします'

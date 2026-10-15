@@ -514,7 +514,7 @@ func urlQueryEscape(value string) string {
 // @Tags         认证
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "登出成功"
+// @Success      200  {object}  handler.MessageResponse  "登出成功"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Router       /auth/logout [post]
@@ -567,7 +567,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      object{refreshToken=string}  true  "刷新令牌"
-// @Success      200      {object}  map[string]interface{}       "新令牌"
+// @Success      200      {object}  handler.RefreshTokenResponse       "新令牌"
 // @Failure      401      {object}  errors.AppError              "令牌无效"
 // @Router       /auth/refresh [post]
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
@@ -610,7 +610,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 // @Tags         认证
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "用户信息"
+// @Success      200  {object}  handler.DataResponse{data=handler.CurrentUserData}  "用户信息"
 // @Failure      401  {object}  errors.AppError         "未授权"
 // @Security     Bearer
 // @Router       /auth/me [get]
@@ -696,7 +696,7 @@ type updateMyPreferencesRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      updateMyPreferencesRequest  true  "Preferences patch"
-// @Success      200      {object}  map[string]interface{}      "更新后的偏好"
+// @Success      200      {object}  handler.DataResponse{data=types.UserPreferences}      "更新后的偏好"
 // @Failure      400      {object}  errors.AppError             "请求参数错误"
 // @Failure      401      {object}  errors.AppError             "未授权"
 // @Security     Bearer
@@ -743,7 +743,7 @@ func (h *AuthHandler) UpdateMyPreferences(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      object{old_password=string,new_password=string}  true  "密码修改请求"
-// @Success      200      {object}  map[string]interface{}                           "修改成功"
+// @Success      200      {object}  handler.MessageResponse                           "修改成功"
 // @Failure      400      {object}  errors.AppError                                  "请求参数错误"
 // @Security     Bearer
 // @Router       /auth/change-password [post]
@@ -815,7 +815,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 // @Tags         认证
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "认证配置"
+// @Success      200  {object}  handler.GetAuthConfigResponse  "认证配置"
 // @Router       /auth/config [get]
 //
 // GetAuthConfig is intentionally a no-auth endpoint: the frontend reads
@@ -987,7 +987,7 @@ func tenantNameOrEmpty(t *types.Tenant) string {
 // @Tags         认证
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "令牌有效"
+// @Success      200  {object}  handler.ValidateTokenResponse  "令牌有效"
 // @Failure      401  {object}  errors.AppError         "令牌无效"
 // @Security     Bearer
 // @Router       /auth/validate [get]

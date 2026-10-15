@@ -56,7 +56,7 @@ var sensitiveFieldRegex = regexp.MustCompile(
 		`refresh[_-]?token|next[_-]?token|device[_-]?token|pending[_-]?token|pairing[_-]?link|` +
 		`id[_-]?token|authorization|auth[_-]?token|api[_-]?key|` +
 		`api[_-]?secret|secret[_-]?key|client[_-]?secret|private[_-]?key|secret|` +
-		`authorization[_-]?url|authorization[_-]?attempt)")\s*:\s*"[^"]*"`,
+		`authorization[_-]?url|authorization[_-]?attempt|assertion)")\s*:\s*"[^"]*"`,
 )
 
 // sanitizeBody 清理敏感信息

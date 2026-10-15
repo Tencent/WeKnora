@@ -733,29 +733,29 @@ type WikiGraphEdge struct {
 
 // WikiStats provides aggregate statistics about the wiki
 type WikiStats struct {
-	TotalPages    int64            `json:"total_pages"`
+	TotalPages    int64            `json:"total_pages" extensions:"x-agent"`
 	PagesByType   map[string]int64 `json:"pages_by_type"`
-	TotalLinks    int64            `json:"total_links"`
-	OrphanCount   int64            `json:"orphan_count"`   // pages with no inbound links
-	RecentUpdates []*WikiPage      `json:"recent_updates"` // last N updated pages
-	PendingTasks  int64            `json:"pending_tasks"`  // number of documents waiting to be ingested
-	PendingIssues int64            `json:"pending_issues"` // number of pending wiki issues
-	IsActive      bool             `json:"is_active"`      // whether wiki ingestion is currently running
+	TotalLinks    int64            `json:"total_links" extensions:"x-agent"`
+	OrphanCount   int64            `json:"orphan_count" extensions:"x-agent"`   // pages with no inbound links
+	RecentUpdates []*WikiPage      `json:"recent_updates"`                      // last N updated pages
+	PendingTasks  int64            `json:"pending_tasks" extensions:"x-agent"`  // number of documents waiting to be ingested
+	PendingIssues int64            `json:"pending_issues" extensions:"x-agent"` // number of pending wiki issues
+	IsActive      bool             `json:"is_active" extensions:"x-agent"`      // whether wiki ingestion is currently running
 }
 
 // WikiPageIssue represents an issue flagged on a specific wiki page.
 // These issues are typically identified by agents or linters and stored for review.
 type WikiPageIssue struct {
-	ID                    string         `json:"id" gorm:"type:varchar(36);primaryKey"`
+	ID                    string         `json:"id" gorm:"type:varchar(36);primaryKey" extensions:"x-agent=issue_id"`
 	TenantID              uint64         `json:"tenant_id" gorm:"index"`
 	KnowledgeBaseID       string         `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
-	Slug                  string         `json:"slug" gorm:"type:varchar(255);index"`
-	IssueType             string         `json:"issue_type" gorm:"type:varchar(50)"`
-	Description           string         `json:"description" gorm:"type:text"`
-	SuspectedKnowledgeIDs StringArray    `json:"suspected_knowledge_ids" gorm:"type:json"`
-	Status                string         `json:"status" gorm:"type:varchar(20);default:'pending';index"`
-	ReportedBy            string         `json:"reported_by" gorm:"type:varchar(100)"`
-	CreatedAt             time.Time      `json:"created_at"`
+	Slug                  string         `json:"slug" gorm:"type:varchar(255);index" extensions:"x-agent"`
+	IssueType             string         `json:"issue_type" gorm:"type:varchar(50)" extensions:"x-agent"`
+	Description           string         `json:"description" gorm:"type:text" extensions:"x-agent"`
+	SuspectedKnowledgeIDs StringArray    `json:"suspected_knowledge_ids" gorm:"type:json" extensions:"x-agent=knowledge_ids"`
+	Status                string         `json:"status" gorm:"type:varchar(20);default:'pending';index" extensions:"x-agent"`
+	ReportedBy            string         `json:"reported_by" gorm:"type:varchar(100)" extensions:"x-agent"`
+	CreatedAt             time.Time      `json:"created_at" extensions:"x-agent"`
 	UpdatedAt             time.Time      `json:"updated_at"`
 	DeletedAt             gorm.DeletedAt `json:"deleted_at" gorm:"index"`
 }

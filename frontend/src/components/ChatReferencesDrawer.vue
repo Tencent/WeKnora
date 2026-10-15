@@ -287,7 +287,7 @@ function backToList() {
 }
 
 function onSourceUnavailable() {
-  // No original file to show (manual entry, FAQ, deleted file): fall back
+  // No original document to show (FAQ or unsupported source): fall back
   // to the list with the cited card highlighted.
   backToList()
 }

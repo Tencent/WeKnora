@@ -30,7 +30,7 @@ type ModelProviderDTO struct {
 	Description  string            `json:"description"`
 	Descriptions map[string]string `json:"descriptions,omitempty"`
 	Website      string            `json:"website,omitempty"`
-	// Icon is a data: URI (image/svg+xml;base64) ready for <img src>.
+	// Icon is an SVG or PNG data URI ready for <img src>.
 	Icon         string                 `json:"icon,omitempty"`
 	API          api.API                `json:"api"`
 	Auth         providers.AuthStyle    `json:"auth"`
@@ -195,7 +195,7 @@ func providerDTO(v *modelruntime.Provider, modelType types.ModelType, includeMod
 // @Accept       json
 // @Produce      json
 // @Param        model_type  query     string  false  "模型类型 (chat, embedding, rerank, vllm, asr)"
-// @Success      200         {object}  map[string]interface{}  "厂商列表"
+// @Success      200         {object}  handler.DataResponse{data=[]handler.ModelProviderDTO}  "厂商列表"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /models/providers [get]

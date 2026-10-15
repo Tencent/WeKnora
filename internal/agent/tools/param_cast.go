@@ -85,6 +85,11 @@ func castValue(val interface{}, targetType string) (interface{}, bool) {
 			if err := json.Unmarshal([]byte(s), &parsed); err == nil {
 				return parsed, true
 			}
+			// An attempted array with invalid JSON must reach validation as an
+			// error, not silently become one option/path/query containing the list.
+			if strings.HasPrefix(strings.TrimSpace(s), "[") {
+				return val, false
+			}
 			// Fall back: single string → string array
 			return []string{s}, true
 		}

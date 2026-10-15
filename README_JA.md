@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://weknora.weixin.qq.com"><img alt="公式サイト" src="https://img.shields.io/badge/website-weknora.weixin.qq.com-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="https://weknora.weixin.qq.com/docs/"><img alt="ドキュメント" src="https://img.shields.io/badge/docs-中国語-b8863b?style=flat-square&labelColor=101f38"></a>
-  <a href="./CHANGELOG.md"><img alt="リリース" src="https://img.shields.io/badge/release-v0.8.2-b8863b?style=flat-square&labelColor=101f38"></a>
+  <a href="./CHANGELOG.md"><img alt="リリース" src="https://img.shields.io/badge/release-v0.8.3-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="./LICENSE"><img alt="ライセンス" src="https://img.shields.io/badge/license-MIT-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="https://github.com/Tencent/WeKnora/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/Tencent/WeKnora?style=flat-square&labelColor=101f38&color=b8863b"></a>
   <br/>
@@ -138,13 +138,13 @@ docker compose down     # サービスを停止
 既存のデプロイがあり、新しい release をダウンロードした場合：
 
 ```bash
-# .env の WEKNORA_VERSION を対象バージョン（例: 0.8.2）に設定、または latest のまま
+# .env の WEKNORA_VERSION を対象バージョン（例: 0.8.3）に設定、または latest のまま
 docker compose pull     # WEKNORA_VERSION に一致するイメージを取得
 docker compose up -d    # 新しいイメージでコンテナを再作成
 ```
 
 > [!NOTE]
-> `docker compose up -d` のみではローカルキャッシュのイメージが再利用され、Web UI の表示バージョンがダウンロードした release と一致しない場合があります。v0.8.0 からアップグレードする前に[アップグレードの注意事項](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#upgrade-notes)を確認してください。
+> `docker compose up -d` のみではローカルキャッシュのイメージが再利用され、Web UI の表示バージョンがダウンロードした release と一致しない場合があります。アップグレードする前に[アップグレードの注意事項](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#upgrade-notes)を確認してください。
 
 ### その他のデプロイ方法
 
@@ -165,6 +165,16 @@ docker compose up -d    # 新しいイメージでコンテナを再作成
 > - セキュリティパッチと改善のため、定期的に最新バージョンに更新する
 
 ## 最新アップデート
+
+### v0.8.3 <sub>· 2026-10-14 · [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
+
+- **[画像ギャラリー](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#images)**：文書内の画像を一覧表示し、出典・説明・OCR・画像属性で絞り込み。
+- **[マルチモーダル Embedding](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#multimodal-embedding)**：テキストと画像を同じベクトル空間で扱うモデルに対応。Tencent WeMM-Embedding や Qwen3-VL-Embedding などを利用でき、画像ベクトル検索と対応モデルによる画像リランキングを任意で有効化。
+- **[Wiki グラフ](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#wiki-graph)**：グループ配置とテーマ説明を改善。グループへのフォーカス、切り替え、全体表示への復帰に対応。
+- **[原文引用](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#conversation)**：回答から原文の引用箇所へ直接移動。
+- **[会話とツール](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#tools)**：サンドボックス不要の添付ファイルのオンデマンド読み取り、未読返信、@ 検索、Docker ターミナル、Lite ローカルスキル、MCP 互換性の改善。
+- **[管理と連携](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#administration)**：ユーザー管理、招待による登録、管理者モデルカタログ、WeMM、TEI/Pinecone/Cohere、Seafile、繁体字中国語。
+- **[安定性](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#other-changes)**：検索、解析、同期、Wiki、OAuth、CLI を修正。登録モード、空のツール一覧、DB 移行と再インデックスについては[アップグレード案内](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#upgrade-notes)を確認してください。
 
 ### v0.8.2 <sub>· 2026-09-24 · [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2)</sub>
 
@@ -364,7 +374,7 @@ weknora chat "設計ドキュメントを要約して"
 | [設定](https://weknora.weixin.qq.com/docs/01-getting-started/04-configuration) | 環境変数とモデル設定 |
 | [トラブルシューティング](https://weknora.weixin.qq.com/docs/01-getting-started/05-troubleshooting) | よくある問題と解決方法 |
 | [API ドキュメント](https://weknora.weixin.qq.com/docs/04-api/01-api-overview) | REST API の概要 |
-| [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2) | 各バージョンの変更点 |
+| [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3) | 各バージョンの変更点 |
 
 ## 開発ガイド
 

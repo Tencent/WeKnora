@@ -56,16 +56,18 @@ type MCPCatalogSummary struct {
 	SyncedAt  time.Time `json:"synced_at"`
 }
 
-// MCPAuthConfigResponse intentionally has no APIKey or Token fields. Their
-// presence is signalled via MCPServiceResponse.Credentials. AuthType, Scopes
-// and AuthServerMetadataURL are non-secret OAuth configuration and are safe to
-// echo back so the UI can render the current strategy.
+// MCPAuthConfigResponse intentionally has no APIKey, Token or ClientSecret
+// fields. Their presence is signalled via MCPServiceResponse.Credentials.
+// AuthType, Scopes, AuthServerMetadataURL and ClientID are non-secret OAuth
+// configuration and are safe to echo back so the UI can render the current
+// strategy.
 type MCPAuthConfigResponse struct {
 	AuthType              types.MCPAuthType `json:"auth_type,omitempty"`
 	APIKeyHeader          string            `json:"api_key_header,omitempty"`
 	CustomHeaders         map[string]string `json:"custom_headers,omitempty"`
 	Scopes                []string          `json:"scopes,omitempty"`
 	AuthServerMetadataURL string            `json:"auth_server_metadata_url,omitempty"`
+	ClientID              string            `json:"client_id,omitempty"`
 }
 
 // CredentialFieldMetadata reports whether a credential field has a value
@@ -116,6 +118,7 @@ func NewMCPServiceResponse(ctx context.Context, svc *types.MCPService) *MCPServi
 			CustomHeaders:         svc.AuthConfig.CustomHeaders,
 			Scopes:                svc.AuthConfig.Scopes,
 			AuthServerMetadataURL: svc.AuthConfig.AuthServerMetadataURL,
+			ClientID:              svc.AuthConfig.ClientID,
 		}
 		if !includeDetail {
 			auth.CustomHeaders = nil
@@ -132,8 +135,9 @@ func NewMCPServiceResponse(ctx context.Context, svc *types.MCPService) *MCPServi
 		resp.AuthConfig = nil
 	} else {
 		resp.Credentials = map[string]CredentialFieldMetadata{
-			"api_key": {Configured: svc.AuthConfig != nil && svc.AuthConfig.APIKey != ""},
-			"token":   {Configured: svc.AuthConfig != nil && svc.AuthConfig.Token != ""},
+			"api_key":       {Configured: svc.AuthConfig != nil && svc.AuthConfig.APIKey != ""},
+			"token":         {Configured: svc.AuthConfig != nil && svc.AuthConfig.Token != ""},
+			"client_secret": {Configured: svc.AuthConfig != nil && svc.AuthConfig.ClientSecret != ""},
 		}
 	}
 	return resp

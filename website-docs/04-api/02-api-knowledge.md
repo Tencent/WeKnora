@@ -247,7 +247,7 @@ multipart/form-data 字段：
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `file` | file | 是 | 上传文件 |
-| `fileName` | string | 否 | 覆盖显示名 |
+| `fileName` | string | 否 | 自定义文件名或包含目录的相对路径，如 `docs/spec/design.md`；目录部分用于归类，最后一段作为文件名 |
 | `metadata` | JSON 字符串 | 否 | 自定义元数据 |
 | `enable_multimodel` | bool | 否 | 多模态处理开关 |
 | `tag_ids` | string | 否 | 逗号分隔标签 ID |
@@ -272,6 +272,21 @@ multipart/form-data 字段：
 curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/file \
   -H "X-API-Key: $API_KEY" -F 'file=@./manual.pdf' -F 'enable_multimodel=true'
 ```
+
+**上传到指定文件夹：** 在 `fileName` 中传入相对于知识库根目录的路径，使用 `/` 分隔目录，并保留文件名及扩展名。上传接口不单独接收 `folder_path` 字段。
+
+```bash
+curl -X POST "$BASE/api/v1/knowledge-bases/kb-1/knowledge/file" \
+  -H "X-API-Key: $API_KEY" \
+  -F 'file=@./design.md' \
+  -F 'fileName=docs/spec/design.md'
+```
+
+上述请求将文档归类到 `docs/spec`，返回的 Knowledge 中 `folder_path` 为 `docs/spec`、`file_name` 为 `design.md`。`file=@./design.md` 指定本地文件，`fileName` 指定知识库中的归类路径。省略 `fileName` 或仅传文件名时，文档位于知识库根目录。
+
+文档知识库的目录由文档的 `folder_path` 推导，无需预先创建：上传到新路径后，目录及其中间层级会出现在目录树中。当前不支持独立创建、保留没有任何文档或子目录文档的空文件夹。Wiki 的创建目录接口管理的是 Wiki 目录，不用于文档知识库。
+
+上传后可用本页的 `GET /api/v1/knowledge-bases/:id/knowledge/folders` 查看目录树。已有文档可通过 `POST /api/v1/knowledge/folder` 移到新路径，无需重新上传；该移动接口才使用 `folder_path` 请求字段。
 
 ### POST /api/v1/knowledge-bases/:id/knowledge/url
 
@@ -367,7 +382,33 @@ curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/batch-download \
 
 用途：获取知识库的文件夹目录树。整目录上传时目录结构会被保留（migration `000079` 起存在 `knowledges.folder_path` 列，历史 `file_name` 中的路径已回填到该字段）。权限：Viewer+ + KBAccessRead。
 
-响应：200 `{"success":true,"data":[{FolderNode}]}`
+目录树由知识条目的 `folder_path` 汇总生成；没有直接文档但包含子目录文档的中间目录也会返回。目录下最后一份文档及所有子目录文档移走后，该目录不再出现在树中。
+
+响应：200。示例（仅有上述上传的 `docs/spec/design.md`）：
+
+```json
+{
+  "success": true,
+  "data": {
+    "root_document_count": 0,
+    "total_document_count": 1,
+    "folders": [{
+      "path": "docs",
+      "name": "docs",
+      "document_count": 0,
+      "total_count": 1,
+      "children": [{
+        "path": "docs/spec",
+        "name": "spec",
+        "document_count": 1,
+        "total_count": 1
+      }]
+    }]
+  }
+}
+```
+
+`root_document_count` 为知识库根目录中的文档数，`total_document_count` 为知识库总文档数；目录节点的 `document_count` 仅统计直接文档，`total_count` 包含所有子目录文档。
 
 ```bash
 curl $BASE/api/v1/knowledge-bases/kb-1/knowledge/folders -H "Authorization: Bearer $TOKEN"
@@ -631,7 +672,7 @@ curl -X POST $BASE/api/v1/knowledge/batch-delete -H "Authorization: Bearer $TOKE
 | --- | --- | --- | --- |
 | `kb_id` | string | 是 | 知识库 ID |
 | `knowledge_ids` | []string | 是 | 待移动的文档 |
-| `folder_path` | string | 否 | 目标文件夹；空字符串表示移回知识库根目录 |
+| `folder_path` | string | 否 | 相对于知识库根目录的目标文件夹路径，如 `docs/spec`；新路径无需预先创建，空字符串表示移回知识库根目录 |
 
 响应：200 `{"success":true}`
 
@@ -659,6 +700,42 @@ curl -X POST $BASE/api/v1/knowledge/move -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"knowledge_ids":["k-1"],"source_kb_id":"kb-1","target_kb_id":"kb-2","mode":"reuse_vectors"}'
 ```
+
+## 画廊与图片属性 {#image-gallery-api}
+
+画廊读取要求 Viewer+、目标知识库可读；API Key 需 `retrieve` 或 full，并遵守知识库范围。画廊与图片向量开关独立，列表返回已提取图片的描述、OCR 和来源。
+
+### GET /api/v1/knowledge-bases/:id/gallery-config
+
+返回 `{"success":true,"data":{"attribute_sources":[...],"attributes":[...],"mode":"...","status":{...}}}`。客户端据返回的属性定义和使用策略构造搜索、筛选与排序；不要硬编码可用属性。属性 ID 带来源前缀，例如 `builtin:caption`、`system:contain.text`。
+
+### GET /api/v1/knowledge-bases/:id/images
+
+| 查询参数 | 说明 |
+| --- | --- |
+| `page` / `page_size` | 默认 1 / 20，page_size 最大 1000 |
+| `keyword` / `search_in` | 忽略大小写的子串搜索；search_in 为逗号分隔的可搜索属性 ID，默认描述与 OCR |
+| `sort_by` / `sort_order` | 可排序属性 ID，默认 created_at / desc；兼容 created_at、updated_at、caption 旧值 |
+| `knowledge_ids` | 逗号分隔的来源文档 ID；GET 只取前 50 个，更多文档请使用 POST |
+| `is_enabled` | true / false，按所属分块启用状态筛选 |
+| `attr_filters` | JSON 对象，属性 ID → 允许值数组，同属性 OR、不同属性 AND |
+| `attr_rules` | JSON 对象，属性 ID → 值 → on/off；on 强制显示优先于 off，未命中规则的图片保留 |
+
+只接受 gallery-config 声明适用的搜索、筛选、排序字段，不适用字段会被剔除。响应 `{"success":true,"data":[ImageAsset],"total":N,"page":1,"page_size":20}`。每项包含 `id`、`chunk_id`、`knowledge_id`、`source_name`、`url`、`original_url`、`caption`、`ocr_text`、`attrs`、`is_enabled`、`status` 与时间戳。
+
+### POST /api/v1/knowledge-bases/:id/images
+
+与 GET 相同的只读查询，参数改放 JSON body；`knowledge_ids`、`search_in` 用字符串数组，`attr_filters` / `attr_rules` 直接传对象。来源文档最多 1000 个，超出返回 400，适合来源筛选全选，避免 URL 过长。
+
+```bash
+curl -X POST "$BASE/api/v1/knowledge-bases/kb-1/images" -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"page":1,"page_size":20,"knowledge_ids":["k-1","k-2"],"keyword":"架构"}'
+```
+
+### GET /api/v1/image-attrs/schema
+
+全局只读的图片观察属性注册表，需 Viewer+，API Key 需 retrieve/full，无路径知识库。知识库编辑器用它配置图片观察与 OCR 条件；画廊的实际搜索/筛选用法仍以每个知识库的 gallery-config 为准。
 
 ## 实现参考
 

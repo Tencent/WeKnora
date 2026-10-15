@@ -244,6 +244,24 @@ func (r *Registry) RegisterKnowledgeBase(id string) string {
 	return r.sources.RegisterKnowledgeBase(id)
 }
 
+// RegisterIssue allocates the iN handle the Wiki issue tools accept for id.
+func (r *Registry) RegisterIssue(id string) string {
+	if r == nil || r.issues == nil || strings.TrimSpace(id) == "" {
+		return ""
+	}
+	return r.issues.Register(id)
+}
+
+// EncodeKnownIssues replaces registered Wiki issue IDs with their handles.
+// CompactKnownText leaves them alone because tools opt into issue encoding
+// per policy; runtime context the engine renders opts in explicitly.
+func (r *Registry) EncodeKnownIssues(text string) string {
+	if r == nil || r.issues == nil {
+		return text
+	}
+	return r.issues.EncodeKnownText(text)
+}
+
 func (r *Registry) RegisterWeb(rawURL, title string) string {
 	if r == nil || r.sources == nil {
 		return ""

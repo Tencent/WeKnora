@@ -111,6 +111,8 @@ type TaskInitiator struct {
 	Role       TenantRole `json:"role,omitempty"`
 	APIKeyID   uint64     `json:"api_key_id,omitempty"`
 	APIKeyName string     `json:"api_key_name,omitempty"`
+	// Agent is set when the task was submitted by an agent acting for UserID.
+	Agent *AuditAgentAction `json:"agent,omitempty"`
 }
 
 // AuditAPIKey is the display identity of the API key that initiated work.
@@ -152,6 +154,9 @@ func TaskInitiatorFromContext(ctx context.Context) TaskInitiator {
 		initiator.APIKeyID = scope.KeyID
 		initiator.APIKeyName = scope.Name
 	}
+	if agent, ok := AuditAgentActionFromContext(ctx); ok {
+		initiator.Agent = &agent
+	}
 	userID, ok := UserIDFromContext(ctx)
 	if !ok || IsSyntheticUserID(userID) {
 		return initiator
@@ -173,6 +178,9 @@ func (i TaskInitiator) Apply(ctx context.Context) context.Context {
 	}
 	if i.APIKeyID > 0 || i.APIKeyName != "" {
 		ctx = WithAuditAPIKey(ctx, AuditAPIKey{ID: i.APIKeyID, Name: i.APIKeyName})
+	}
+	if i.Agent != nil {
+		ctx = WithAuditAgentAction(ctx, *i.Agent)
 	}
 	return ctx
 }

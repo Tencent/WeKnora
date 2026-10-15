@@ -43,6 +43,9 @@ type AgentStreamHandler struct {
 	assistantMessage   *types.Message
 	streamManager      interfaces.StreamManager
 	completionEvent    *interfaces.StreamEvent // Published only after the final message is persisted.
+	// suspension is set when the run ended waiting on a user prompt. The
+	// message then stays incomplete and the run is resumed later.
+	suspension *types.PromptSuspension
 
 	eventBus *event.EventBus
 
@@ -155,6 +158,31 @@ func (h *AgentStreamHandler) Subscribe() {
 	h.eventBus.On(event.EventToolApprovalResolved, h.handleToolApprovalResolved)
 	h.eventBus.On(event.EventMCPOAuthRequired, h.handleMCPOAuthRequired)
 	h.eventBus.On(event.EventMCPOAuthResolved, h.handleMCPOAuthResolved)
+	h.eventBus.On(event.EventAgentPromptRequired, h.handleAgentPromptEvent)
+	h.eventBus.On(event.EventAgentPromptResolved, h.handleAgentPromptEvent)
+}
+
+// handleAgentPromptEvent forwards generic prompt events to the SSE stream.
+func (h *AgentStreamHandler) handleAgentPromptEvent(_ context.Context, evt event.Event) error {
+	var responseType types.ResponseType
+	switch evt.Data.(type) {
+	case event.AgentPromptRequiredData:
+		responseType = types.ResponseTypeAgentPromptRequired
+	case event.AgentPromptResolvedData:
+		responseType = types.ResponseTypeAgentPromptResolved
+	default:
+		return nil
+	}
+	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+		ID:        evt.ID,
+		Type:      responseType,
+		Done:      true,
+		Timestamp: time.Now(),
+		Data:      toolApprovalDataToMap(evt.Data),
+	}); err != nil {
+		logger.GetLogger(h.ctx).Error("Append agent prompt event failed", "error", err)
+	}
+	return nil
 }
 
 // handleThought handles agent thought events
@@ -719,10 +747,21 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	suspended, _ := data.Suspended.(*types.PromptSuspension)
+	h.suspension = suspended
+	if suspended != nil && suspended.Detached {
+		return nil
+	}
+
 	// Update assistant message with final data
 	if data.MessageID == h.assistantMessageID {
 		// h.assistantMessage.Content = data.FinalAnswer
-		h.assistantMessage.IsCompleted = true
+		if suspended != nil {
+			h.assistantMessage.RunState = types.MessageRunStateAwaitingInput
+		} else {
+			h.assistantMessage.RunState = ""
+			h.assistantMessage.IsCompleted = true
+		}
 		h.assistantMessage.AgentDurationMs = data.TotalDurationMs
 
 		// Update knowledge references if provided
@@ -776,12 +815,13 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		// persisted without artifacts. Collect is a no-op when either the
 		// collector wasn't wired in, no sandbox is bound, or no files were
 		// produced — those cases must not disturb the completion path.
+		// A suspended run collects when its resumed run completes.
 		//
 		// Layouts without a separate output tree must not be collected
 		// (scanning Root would upload the whole project). Remote backends keep
 		// skills.ArtifactOutputDir(), or layout.OutputDir when advertised.
 		var previous types.MessageArtifacts
-		if h.artifactCollector != nil {
+		if h.artifactCollector != nil && suspended == nil {
 			collectCtx := context.WithoutCancel(h.ctx)
 			var artifacts types.MessageArtifacts
 			if collectDir, skip := h.artifactCollector.CollectTarget(collectCtx, h.sessionID); !skip {
@@ -851,7 +891,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	// Fallback: if no answer events were streamed but we have a final answer,
 	// emit it as answer events so the frontend can render it properly.
 	// This guards against edge cases where the LLM stops without calling final_answer.
-	if h.finalAnswer == "" && data.FinalAnswer != "" {
+	if suspended == nil && h.finalAnswer == "" && data.FinalAnswer != "" {
 		logger.GetLogger(h.ctx).Warnf(
 			"No answer events were streamed, emitting fallback answer (len=%d). "+
 				"This typically happens when: (1) model stopped naturally and content was sent as thought events, "+
@@ -911,6 +951,13 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	if turnUsage != nil {
 		completeData["usage"] = turnUsage
 	}
+	// The chat model that produced the usage, so a consumer can price it.
+	if data.ModelID != "" {
+		completeData["model_id"] = data.ModelID
+	}
+	if suspended != nil {
+		completeData["suspended"] = suspended
+	}
 	h.completionEvent = &interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeComplete,
@@ -933,11 +980,33 @@ func (h *AgentStreamHandler) publishCompletion(ctx context.Context) error {
 	if h.completionEvent == nil {
 		return nil
 	}
+	if s := h.suspension; s != nil {
+		if err := h.streamManager.AppendEvent(ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+			ID:        "suspended-" + s.PromptID,
+			Type:      types.ResponseTypeRunSuspended,
+			Timestamp: time.Now(),
+			Data: map[string]interface{}{
+				"pending_id": s.PromptID,
+				"kind":       s.Kind,
+				"expires_at": s.ExpiresAt,
+			},
+		}); err != nil {
+			return err
+		}
+	}
 	if err := h.streamManager.AppendEvent(ctx, h.sessionID, h.assistantMessageID, *h.completionEvent); err != nil {
 		return err
 	}
 	h.completionEvent = nil
 	return nil
+}
+
+// Suspension reports the prompt the run ended waiting on, or nil when the
+// run finished.
+func (h *AgentStreamHandler) Suspension() *types.PromptSuspension {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.suspension
 }
 
 // emitArtifactsPending tells the live UI that sandbox files exist and are

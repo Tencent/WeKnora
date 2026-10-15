@@ -13,6 +13,7 @@ import { updateMyPreferences } from '@/api/auth'
 import EmptyState from '@/components/EmptyState.vue'
 import { galleryImageRequest } from './galleryImageSrc'
 import GalleryViewer, { type GalleryAttrRow } from './GalleryViewer.vue'
+import GallerySourcePicker from './GallerySourcePicker.vue'
 
 const props = defineProps<{
   knowledgeBaseId: string
@@ -49,6 +50,12 @@ const loadMoreEl = ref<HTMLElement | null>(null)
 const imageRatios = ref<Record<string, number>>({})
 let cardObserver: ResizeObserver | undefined
 let scrollObserver: ResizeObserver | undefined
+
+// Source-document restriction (the "filter by document" picker). An empty
+// array means every document of the KB; otherwise only images whose owning
+// document is listed are fetched. Edited from the toolbar's source panel.
+const sourceDocIds = ref<string[]>([])
+const sourcePickerVisible = ref(false)
 
 // Attribute selections for free-text ("keywords") attributes: namespaced attr
 // id -> literal values (OR within the attribute, AND across attributes).
@@ -309,7 +316,8 @@ const isNarrowed = computed(
   () =>
     !!keyword.value.trim() ||
     Object.keys(activeRules.value).length > 0 ||
-    Object.keys(activeSelections.value).length > 0,
+    Object.keys(activeSelections.value).length > 0 ||
+    sourceDocIds.value.length > 0,
 )
 
 function verdictOf(attrId: string, value: string): Verdict {
@@ -355,10 +363,20 @@ function clearFilters(): void {
   reload()
 }
 
-/** The empty state's way back: forget the keyword as well. */
+/** The empty state's way back: forget the keyword and source documents as well. */
 function clearAll(): void {
+  if (sourceTimer) clearTimeout(sourceTimer)
   keyword.value = ''
+  sourceDocIds.value = []
   clearFilters()
+}
+
+/** Ticked in the source panel: restrict the listing to these documents. */
+let sourceTimer: ReturnType<typeof setTimeout> | undefined
+function onSourceDocsChange(ids: string[]): void {
+  sourceDocIds.value = ids
+  if (sourceTimer) clearTimeout(sourceTimer)
+  sourceTimer = setTimeout(() => reload(), 300)
 }
 
 // ---------------------------------------------------------------------------
@@ -429,6 +447,7 @@ function buildParams(): ImageListParams {
     sortOrder: sortOrder.value,
     attrFilters: Object.keys(selections).length ? selections : undefined,
     attrRules: Object.keys(rules).length ? rules : undefined,
+    knowledgeIds: sourceDocIds.value.length ? sourceDocIds.value : undefined,
     pageSize,
   }
 }
@@ -560,6 +579,7 @@ function sourceLabel(img: ImageAsset): string {
 // ---------------------------------------------------------------------------
 onBeforeUnmount(() => {
   if (searchTimer) clearTimeout(searchTimer)
+  if (sourceTimer) clearTimeout(sourceTimer)
   // Orphan any in-flight listing so it cannot map new blobs after unmount.
   listToken++
   initToken++
@@ -581,11 +601,14 @@ async function initGallery() {
   const token = ++initToken
   resetResults()
   if (searchTimer) clearTimeout(searchTimer)
+  if (sourceTimer) clearTimeout(sourceTimer)
   error.value = ''
   keyword.value = ''
   sortBy.value = ''
   attrSelections.value = {}
   attrVerdicts.value = {}
+  sourceDocIds.value = []
+  sourcePickerVisible.value = false
   releaseBlobs()
   configLoaded.value = false
   config.value = { attribute_sources: [], attributes: [], mode: 'all', status: {} }
@@ -655,6 +678,33 @@ watch(
         >
           <template #prefix-icon><t-icon name="search" size="16px" /></template>
         </t-input>
+
+        <t-popup
+          v-model:visible="sourcePickerVisible"
+          trigger="click"
+          placement="bottom-right"
+          overlay-class-name="gallery-toolbar-popup"
+          :overlay-inner-style="{ padding: 0 }"
+        >
+          <button
+            type="button"
+            class="ig-tool-btn"
+            :class="{ active: sourcePickerVisible || sourceDocIds.length > 0 }"
+            :aria-expanded="sourcePickerVisible"
+          >
+            <t-icon name="file" size="16px" />
+            {{ t(`${NS}.sourceFilter`) }}
+            <span v-if="sourceDocIds.length" class="ig-tool-btn__count">{{ sourceDocIds.length }}</span>
+          </button>
+          <template #content>
+            <GallerySourcePicker
+              :kb-id="props.knowledgeBaseId"
+              :visible="sourcePickerVisible"
+              :selected="sourceDocIds"
+              @update:selected="onSourceDocsChange"
+            />
+          </template>
+        </t-popup>
 
         <t-popup
           v-model:visible="filterPanelVisible"
@@ -861,7 +911,7 @@ watch(
                 {{ img.caption || t(`${NS}.noCaption`) }}
               </div>
               <div class="ig-card__source" :title="sourceLabel(img)">
-                <t-icon name="file" size="12px" />
+                <t-icon name="file" size="14px" />
                 <span>{{ sourceLabel(img) }}</span>
               </div>
             </div>
@@ -1347,6 +1397,8 @@ watch(
     min-width: 0;
     color: var(--td-text-color-placeholder);
     font-size: var(--app-text-sm);
+
+    .t-icon { flex-shrink: 0; }
 
     span {
       min-width: 0;

@@ -1272,9 +1272,14 @@ const updateModelDropdownPosition = () => {
 
 // Mention Logic
 let lastMentionQuery = '';
+// 关键词变化时旧请求可能晚于新请求返回；只采纳最新一次加载的结果
+let mentionLoadSeq = 0;
 const loadMentionItems = async (q: string, resetIndex = true, append = false) => {
   console.log('[Mention] loadMentionItems called with query:', q, 'append:', append);
 
+  const seq = append ? mentionLoadSeq : ++mentionLoadSeq;
+  const isStale = () => seq !== mentionLoadSeq;
+  const nextGroupCounts: Partial<Record<MentionItemType, number>> = append ? mentionGroupCounts.value : {};
   if (!append) {
     mentionOffset.value = 0;
   }
@@ -1392,7 +1397,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         orgName: kb.org_name || sharedAgentOrgName.value || undefined
       };
     }));
-    mentionGroupCounts.value.kb = kbItems.length;
+    nextGroupCounts.kb = kbItems.length;
 
     const tagKeyword = q.trim();
     const tagSources = availableKbs;
@@ -1410,7 +1415,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         }));
       }));
       tagItems = tagResults.flat();
-      mentionGroupCounts.value.tag = tagItems.length;
+      nextGroupCounts.tag = tagItems.length;
     } catch (e) {
       console.error('[Mention] listKnowledgeTags error:', e);
       tagItems = [];
@@ -1488,6 +1493,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         fileTypesParam,
         searchOptions
       );
+      if (isStale()) return;
       console.log('[Mention] searchKnowledge response:', res);
       if (res.data && Array.isArray(res.data)) {
         let files = res.data;
@@ -1528,24 +1534,28 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         if (!append) {
           const clientFiltered = !!mentionAllowedKbIds.value && fileItems.length < apiPageSize;
           if (!clientFiltered && rawTotal != null) {
-            mentionGroupCounts.value.file = rawTotal;
+            nextGroupCounts.file = rawTotal;
           } else {
-            delete mentionGroupCounts.value.file;
+            delete nextGroupCounts.file;
           }
         }
       }
       mentionHasMore.value = res.has_more || false;
       mentionOffset.value += fileItems.length;
     } catch (e) {
+      if (isStale()) return;
       console.error('[Mention] searchKnowledge error:', e);
       mentionHasMore.value = false;
     } finally {
-      mentionLoading.value = false;
+      if (!isStale()) mentionLoading.value = false;
     }
   } else {
+    if (isStale()) return;
     mentionHasMore.value = false;
   }
 
+  if (isStale()) return;
+  if (!append) mentionGroupCounts.value = nextGroupCounts;
   if (append) {
     // Append file items to existing list
     mentionItems.value = [...mentionItems.value, ...fileItems];
@@ -1569,6 +1579,21 @@ const loadMoreMentionItems = () => {
   if (mentionHasMore.value && !mentionLoading.value) {
     loadMentionItems(lastMentionQuery, false, true);
   }
+};
+
+let mentionSearchTimer: ReturnType<typeof setTimeout> | null = null;
+const onMentionSearchInput = (q: string) => {
+  mentionQuery.value = q;
+  if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
+  mentionSearchTimer = setTimeout(() => {
+    mentionSearchTimer = null;
+    loadMentionItems(q, true);
+  }, 180);
+};
+
+const closeMentionFromPopup = () => {
+  showMention.value = false;
+  void focusInput();
 };
 
 const getTextareaEl = () => {
@@ -1631,10 +1656,8 @@ const onInput = (val: string | InputEvent) => {
       showMention.value = false;
       return;
     }
-    // Only reload if query changed
     if (q !== mentionQuery.value) {
-      mentionQuery.value = q;
-      loadMentionItems(q, true); // Reset index when query changes
+      onMentionSearchInput(q);
     }
   } else {
     if (textBeforeCursor.endsWith('@')) {
@@ -1655,7 +1678,7 @@ const onInput = (val: string | InputEvent) => {
       const rect = rectToCssPx(textarea.getBoundingClientRect(), zoom);
       const { width: vw, height: vh } = cssViewportSize(zoom);
       const scrollTop = textarea.scrollTop;
-      const menuHeight = 320; // 预估最大高度
+      const menuHeight = 380; // 预估最大高度
 
       let left = rect.left + coords.left;
       // Prevent menu from going off-screen horizontally
@@ -1688,6 +1711,7 @@ const onInput = (val: string | InputEvent) => {
         };
       }
 
+      if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
       loadMentionItems("");
     }
   }
@@ -1734,7 +1758,7 @@ const triggerMention = () => {
   const zoom = getRootZoom();
   const rect = rectToCssPx(textarea.getBoundingClientRect(), zoom);
   const { height: vh } = cssViewportSize(zoom);
-  const menuHeight = 320;
+  const menuHeight = 380;
 
   // 判断输入框上方空间
   const spaceAbove = rect.top;
@@ -1757,6 +1781,7 @@ const triggerMention = () => {
     };
   }
 
+  if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
   loadMentionItems("");
 };
 
@@ -1967,6 +1992,7 @@ onUnmounted(() => {
   document.removeEventListener('click', closeAgentModeSelector);
   document.removeEventListener('click', closeModelSelector);
   document.removeEventListener('click', closeMentionSelector);
+  if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
   if (resizeHandler) {
     window.removeEventListener('resize', resizeHandler);
   }
@@ -2400,6 +2426,10 @@ const onKeydown = (val: string, event: { e: KeyboardEvent }) => {
     if (event.e.keyCode === 13) { // Enter
       event.e.preventDefault();
       mentionSelectorRef.value?.confirmActive();
+      return;
+    }
+    if (event.e.keyCode === 9 && !event.e.shiftKey) { // Tab
+      if (mentionSelectorRef.value?.enterActiveGroup()) event.e.preventDefault();
       return;
     }
     if (event.e.keyCode === 27) { // Esc
@@ -3010,7 +3040,9 @@ defineExpose({
     <!-- Mention Selector -->
     <Teleport to="body">
       <MentionSelector ref="mentionSelectorRef" :visible="showMention" :style="mentionStyle" :items="mentionItems" :hasMore="mentionHasMore"
-        :loading="mentionLoading" :emptyHint="mentionEmptyHint" :query="mentionQuery" :group-counts="mentionGroupCounts" v-model:activeIndex="mentionActiveIndex"
+        :loading="mentionLoading" :emptyHint="mentionEmptyHint" :query="mentionQuery" :searchable="isMentionTriggeredByButton"
+        :group-counts="mentionGroupCounts" v-model:activeIndex="mentionActiveIndex"
+        @update:query="onMentionSearchInput" @close="closeMentionFromPopup"
         @select="onMentionSelect" @loadMore="loadMoreMentionItems" />
     </Teleport>
 

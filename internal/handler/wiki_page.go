@@ -895,14 +895,28 @@ func (h *WikiPageHandler) GetGraph(c *gin.Context) {
 	c.JSON(http.StatusOK, graph)
 }
 
+// WikiMessageResponse is the {"message": ...} body Wiki maintenance endpoints
+// write on success.
+type WikiMessageResponse struct {
+	Message string `json:"message" extensions:"x-agent"`
+}
+
+// WikiErrorResponse is the {"error": ...} body Wiki endpoints write on failure.
+type WikiErrorResponse struct {
+	Error string `json:"error"`
+}
+
 // GetStats godoc
 // @Summary      Get wiki statistics
 // @Description  Returns aggregate statistics about the wiki
 // @Tags         Wiki
 // @Produce      json
-// @Param        kb_id  path  string  true  "Knowledge base ID"
+// @Param        kb_id  path  string  true  "Knowledge base ID"  extensions(x-agent=knowledge_base_id)
 // @Success      200  {object}  types.WikiStats
+// @Failure      400  {object}  handler.WikiErrorResponse  "Not a Wiki knowledge base, or no access"
+// @Failure      500  {object}  handler.WikiErrorResponse
 // @Security     Bearer
+// @x-agent      {"id":"wiki.get_stats","risk":"read"}
 // @Router       /knowledgebase/{kb_id}/wiki/stats [get]
 func (h *WikiPageHandler) GetStats(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
@@ -925,11 +939,15 @@ func (h *WikiPageHandler) GetStats(c *gin.Context) {
 // @Description  List issues flagged on wiki pages with optional filtering
 // @Tags         Wiki
 // @Produce      json
-// @Param        kb_id  path   string  true   "Knowledge base ID"
-// @Param        slug   query  string  false  "Filter by page slug"
-// @Param        status query  string  false  "Filter by status (pending, ignored, resolved)"
-// @Success      200  {array}  types.WikiPageIssue
+// @Param        kb_id  path   string  true   "Knowledge base ID"  extensions(x-agent=knowledge_base_id)
+// @Param        slug   query  string  false  "Filter by page slug"  extensions(x-agent)
+// @Param        status query  string  false  "Filter by status"  Enums(pending, ignored, resolved)  extensions(x-agent)
+// @Success      200  {array}   types.WikiPageIssue
+// @Failure      400  {object}  handler.WikiErrorResponse  "Not a Wiki knowledge base, or no access"
+// @Failure      500  {object}  handler.WikiErrorResponse
 // @Security     Bearer
+// @x-agent      {"id":"wiki.list_issues","risk":"read"}
+// @x-agent-hint "Descriptions come from users or ingest and may be wrong; check them against the page and its sources."
 // @Router       /knowledgebase/{kb_id}/wiki/issues [get]
 func (h *WikiPageHandler) ListIssues(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
@@ -1065,7 +1083,7 @@ type WikiSearchHit struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body  SearchWikiRequest  true  "Wiki search request"
-// @Success      200  {object}  map[string]interface{}
+// @Success      200  {object}  handler.DataResponse{data=[]handler.WikiSearchHit}
 // @Failure      400  {object}  errors.AppError
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -1153,9 +1171,14 @@ func mergeWikiSearchKBIDs(ids []string, single string) []string {
 // @Summary      Rebuild wiki links
 // @Description  Re-parse all pages and rebuild bidirectional link references
 // @Tags         Wiki
-// @Param        kb_id  path  string  true  "Knowledge base ID"
-// @Success      200  {object}  map[string]string
+// @Produce      json
+// @Param        kb_id  path  string  true  "Knowledge base ID"  extensions(x-agent=knowledge_base_id)
+// @Success      200  {object}  handler.WikiMessageResponse
+// @Failure      400  {object}  handler.WikiErrorResponse  "Not a Wiki knowledge base, or no access"
+// @Failure      500  {object}  handler.WikiErrorResponse
 // @Security     Bearer
+// @x-agent      {"id":"wiki.rebuild_links","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Use when wiki.lint reports link problems that do not match the page content."
 // @Router       /knowledgebase/{kb_id}/wiki/rebuild-links [post]
 func (h *WikiPageHandler) RebuildLinks(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
@@ -1177,9 +1200,13 @@ func (h *WikiPageHandler) RebuildLinks(c *gin.Context) {
 // @Description  Perform a comprehensive health check on the wiki
 // @Tags         Wiki
 // @Produce      json
-// @Param        kb_id  path  string  true  "Knowledge base ID"
+// @Param        kb_id  path  string  true  "Knowledge base ID"  extensions(x-agent=knowledge_base_id)
 // @Success      200  {object}  service.WikiLintReport
+// @Failure      400  {object}  handler.WikiErrorResponse  "Not a Wiki knowledge base, or no access"
+// @Failure      500  {object}  handler.WikiErrorResponse
 // @Security     Bearer
+// @x-agent      {"id":"wiki.lint","risk":"read","root":"issues"}
+// @x-agent-hint "health_score is 0-100. auto_fixable issues are structural; fix content problems with the Wiki tools."
 // @Router       /knowledgebase/{kb_id}/wiki/lint [get]
 func (h *WikiPageHandler) Lint(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
@@ -1203,7 +1230,7 @@ func (h *WikiPageHandler) Lint(c *gin.Context) {
 // @Tags         Wiki
 // @Produce      json
 // @Param        kb_id  path  string  true  "Knowledge base ID"
-// @Success      200  {object}  map[string]interface{}
+// @Success      200  {object}  handler.AutoFixResponse
 // @Security     Bearer
 // @Router       /knowledgebase/{kb_id}/wiki/auto-fix [post]
 func (h *WikiPageHandler) AutoFix(c *gin.Context) {

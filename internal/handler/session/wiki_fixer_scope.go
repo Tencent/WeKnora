@@ -42,7 +42,7 @@ func resolveBuiltinWikiFixerTenantScope(
 	kbLookup wikiFixerKBLookup,
 	kbShare wikiFixerKBSharePermission,
 ) (*types.CustomAgent, uint64) {
-	if agent == nil || agent.ID != types.BuiltinWikiFixerID {
+	if !types.RunsInSharedKBWorkspace(agent) {
 		return agent, 0
 	}
 	if currentTenantID == 0 || len(kbIDs) != 1 || kbLookup == nil || kbShare == nil {
@@ -80,7 +80,7 @@ func resolveBuiltinWikiFixerTenantScope(
 	// (an "all" KB or MCP scope, skills, sandbox, models) would reach the
 	// owner's other resources, so start from the built-in defaults and pin
 	// the config to this one KB. Models fall back to the KB's own.
-	if builtin := types.GetBuiltinAgent(types.BuiltinWikiFixerID, kb.TenantID); builtin != nil {
+	if builtin := types.GetBuiltinAgent(agent.ID, kb.TenantID); builtin != nil {
 		scopedAgent.Config = builtin.Config
 	}
 	scopedAgent.Config.KBSelectionMode = "selected"

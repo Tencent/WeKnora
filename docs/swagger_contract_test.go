@@ -3,6 +3,7 @@ package docs_test
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	docs "github.com/Tencent/WeKnora/docs"
@@ -59,6 +60,55 @@ func TestKnowledgeSearchRouteContract(t *testing.T) {
 	for _, tt := range swaggerDocuments() {
 		t.Run(tt.name, func(t *testing.T) {
 			assertKnowledgeSearchRouteContract(t, tt.loadSpec(t), tt.parse)
+		})
+	}
+}
+
+func TestReleaseAPIContracts(t *testing.T) {
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				BasePath    string                    `json:"basePath" yaml:"basePath"`
+				Paths       map[string]map[string]any `json:"paths" yaml:"paths"`
+				Definitions map[string]struct {
+					Properties map[string]struct {
+						Type string `json:"type" yaml:"type"`
+					} `json:"properties" yaml:"properties"`
+				} `json:"definitions" yaml:"definitions"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatal(err)
+			}
+			if spec.BasePath != "/api/v1" {
+				t.Fatalf("unexpected API base path %q", spec.BasePath)
+			}
+			for path := range spec.Paths {
+				if strings.HasPrefix(path, spec.BasePath+"/") {
+					t.Errorf("route %s repeats the API base path", path)
+				}
+			}
+			for path, methods := range map[string][]string{
+				"/knowledge/{id}/spans":               {"get"},
+				"/knowledge-bases/{id}/images":        {"get", "post"},
+				"/wiki-search":                        {"post"},
+				"/agents/tools":                       {"get"},
+				"/system/admin/users":                 {"get"},
+				"/system/admin/users/status":          {"post"},
+				"/system/admin/model-catalog":         {"get", "put"},
+				"/system/admin/model-catalog/preview": {"post"},
+			} {
+				for _, method := range methods {
+					if _, ok := spec.Paths[path][method]; !ok {
+						t.Errorf("missing %s %s", method, path)
+					}
+				}
+			}
+			for _, name := range []string{"CatalogUpdate", "CatalogState", "CatalogRevision"} {
+				definition := "github_com_Tencent_WeKnora_internal_application_service." + name
+				if spec.Definitions[definition].Properties["overlay"].Type != "object" {
+					t.Errorf("%s.overlay must be a JSON object", name)
+				}
+			}
 		})
 	}
 }

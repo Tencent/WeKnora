@@ -74,7 +74,7 @@ docker compose ps                 # 等所有服务变成 healthy/running
 > 如果数据库仍为 ParadeDB `v0.22.2-pg17`，先按 [ParadeDB 升级说明](06-paradedb-upgrade.md) 停止写入、备份、保留数据卷更换镜像并完成 `pg_search` 扩展升级，再恢复应用。仅替换镜像不会更新已有数据库的扩展 SQL；迁移 `000099` 会处理 WeKnora 库中符合条件的 `0.22.2–0.22.5`，其他数据库仍需单独检查。
 
 ```bash
-# 在 .env 中将 WEKNORA_VERSION 设为目标版本（如 0.7.0），或保持 latest
+# 在 .env 中将 WEKNORA_VERSION 设为目标版本（如 0.8.3），或保持 latest
 docker compose pull
 docker compose up -d
 ```
@@ -190,7 +190,7 @@ PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST=https://your-playwright-mirror.example.com \
 
 ## 六、Helm 部署（helm/）
 
-`helm/Chart.yaml`：apiVersion v2，chart 名 `weknora`，appVersion 跟随版本（如 v0.8.2），要求 Kubernetes >= 1.25.0。
+`helm/Chart.yaml`：apiVersion v2，chart 名 `weknora`，appVersion 跟随版本（如 v0.8.3），要求 Kubernetes >= 1.25.0。
 
 Chart 内包含五个组件：`app`（`wechatopenai/weknora-app`）、`frontend`（`wechatopenai/weknora-ui`）、`docreader`、`postgresql`（ParadeDB 镜像，chart 默认 `paradedb/paradedb:v0.18.9-pg17`，与 Compose 的版本不同）、`redis`（`redis:7-alpine`），并可选启用 `minio` 与 `neo4j`。
 
