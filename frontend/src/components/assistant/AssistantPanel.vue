@@ -344,8 +344,13 @@ async function validateSession(id: string) {
     return
   }
   try {
-    await getSession(id)
-    if (owner === conversationOwner.value && id === assistant.sessionId) readySessionId.value = id
+    const res: any = await getSession(id)
+    if (owner !== conversationOwner.value || id !== assistant.sessionId) return
+    if (res?.data?.kind !== 'assistant') {
+      startNewConversation()
+      return
+    }
+    readySessionId.value = id
   } catch (error: any) {
     if (owner !== conversationOwner.value || id !== assistant.sessionId) return
     const status = error?.$httpStatus ?? error?.response?.status ?? error?.status

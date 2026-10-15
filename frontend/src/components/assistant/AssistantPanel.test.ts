@@ -98,7 +98,7 @@ async function fixture(
     './AssistantAccessPicker.vue': emptyComponent,
     '@/api/chat': {
       createSessions: createSession,
-      getSession: api.getSession || (async () => ({ success: true, data: {} })),
+      getSession: api.getSession || (async () => ({ success: true, data: { kind: 'assistant' } })),
       getSessionsList: async (...args: any[]) => {
         listCalls.push(args)
         return api.getSessionsList ? api.getSessionsList(...args) : { success: true, data: [], total: 0 }
@@ -327,6 +327,19 @@ for (const status of [403, 404, 500]) {
     } finally { f.close() }
   })
 }
+
+test('stored ordinary session is rejected instead of mounting it as assistant history', async () => {
+  const f = await fixture(undefined, undefined, {
+    getSession: async () => ({ success: true, data: { id: 'workspace-b-session', kind: '' } }),
+  })
+  try {
+    f.auth.effectiveTenantId = 2
+    await flush()
+    assert.equal(f.assistant.sessionId, '')
+    assert.equal(f.sessionStorage.getItem('weknora:assistant-session:user-a:2'), null)
+    assert.equal(f.mounted.length, 0)
+  } finally { f.close() }
+})
 
 test('history distinguishes empty and failed loads and retries the same page', async () => {
   let failed = true
