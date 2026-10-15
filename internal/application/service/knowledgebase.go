@@ -674,7 +674,8 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		}
 		if config.ASRConfig != nil {
 			if config.ASRConfig.Enabled {
-				if err := s.requireModelType(ctx, strings.TrimSpace(config.ASRConfig.ModelID), types.ModelTypeASR, "asr_model_id"); err != nil {
+				modelID := strings.TrimSpace(config.ASRConfig.ModelID)
+				if err := s.requireModelType(ctx, modelID, types.ModelTypeASR, "asr_model_id"); err != nil {
 					return nil, err
 				}
 			}
@@ -722,7 +723,9 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	return kb, nil
 }
 
-func (s *knowledgeBaseService) rejectEmbeddingModelChange(ctx context.Context, kb *types.KnowledgeBase, next string) error {
+func (s *knowledgeBaseService) rejectEmbeddingModelChange(
+	ctx context.Context, kb *types.KnowledgeBase, next string,
+) error {
 	if next == "" {
 		return apperrors.NewBadRequestError("embedding_model_id cannot be empty")
 	}
@@ -743,7 +746,9 @@ func (s *knowledgeBaseService) rejectEmbeddingModelChange(ctx context.Context, k
 	return nil
 }
 
-func (s *knowledgeBaseService) requireModelType(ctx context.Context, id string, want types.ModelType, field string) error {
+func (s *knowledgeBaseService) requireModelType(
+	ctx context.Context, id string, want types.ModelType, field string,
+) error {
 	if strings.TrimSpace(id) == "" {
 		return apperrors.NewBadRequestError(field + " cannot be empty")
 	}

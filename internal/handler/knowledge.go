@@ -2746,7 +2746,7 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 		return
 	}
 	if err := applyKnowledgeTagBatch(&req); err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	// Resolve effective tenant and the authorized KB scope.

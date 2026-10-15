@@ -81,7 +81,8 @@ type KnowledgeBase struct {
 	ImageProcessingConfig ImageProcessingConfig `yaml:"image_processing_config" json:"image_processing_config" gorm:"type:json" extensions:"x-agent,x-agent-detail"`
 	// ID of the embedding model. model.list returns the ids. Cannot change after the knowledge base has documents.
 	EmbeddingModelID string `yaml:"embedding_model_id"      json:"embedding_model_id" extensions:"x-agent=embedding_model_id"`
-	// Summary model ID. model.list returns the ids. Used for summaries, and as the default for auto-tagging and the AI description.
+	// Summary model ID. model.list returns the ids. Used for summaries, and as
+	// the default for auto-tagging and the AI description.
 	SummaryModelID string `yaml:"summary_model_id"        json:"summary_model_id" extensions:"x-agent=summary_model_id"`
 	// VLM config
 	VLMConfig VLMConfig `yaml:"vlm_config"              json:"vlm_config"              gorm:"type:json" extensions:"x-agent,x-agent-detail"`
@@ -284,7 +285,8 @@ type ChunkingConfig struct {
 	// markitdown). A linked anydoc binding is preferred for every type it
 	// converts.
 	ParserEngineRules []ParserEngineRule `yaml:"parser_engine_rules,omitempty" json:"parser_engine_rules,omitempty"`
-	// EnableParentChild splits into large parent chunks and small child chunks. Search matches a child and returns its parent.
+	// EnableParentChild splits into large parent chunks and small child chunks.
+	// Search matches a child and returns its parent.
 	EnableParentChild bool `yaml:"enable_parent_child,omitempty" json:"enable_parent_child,omitempty" extensions:"x-agent"`
 	// ParentChunkSize is the size of parent chunks (default: 4096).
 	// Only used when EnableParentChild is true.
@@ -292,7 +294,8 @@ type ChunkingConfig struct {
 	// ChildChunkSize is the size of child chunks used for embedding (default: 384).
 	// Only used when EnableParentChild is true.
 	ChildChunkSize int `yaml:"child_chunk_size,omitempty" json:"child_chunk_size,omitempty" minimum:"1" maximum:"10000" extensions:"x-agent"`
-	// Strategy selects how documents are split: auto, heading, heuristic, recursive or legacy. Empty keeps the server default.
+	// Strategy selects how documents are split: auto, heading, heuristic,
+	// recursive or legacy. Empty keeps the server default.
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty" enums:"auto,heading,heuristic,recursive,legacy" extensions:"x-agent"`
 	// TokenLimit caps chunk size in approximate tokens. 0 uses ChunkSize as a character count.
 	TokenLimit int `yaml:"token_limit,omitempty" json:"token_limit,omitempty" minimum:"0" maximum:"100000" extensions:"x-agent"`

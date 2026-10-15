@@ -62,7 +62,8 @@ func TestFillOmittedIndexingFlagsKeepsDefaults(t *testing.T) {
 	assert.True(t, kb.IndexingStrategy.WikiEnabled)
 	assert.False(t, kb.IndexingStrategy.GraphEnabled)
 
-	raw = []byte(`{"indexing_strategy":{"vector_enabled":false,"keyword_enabled":false,"wiki_enabled":false,"graph_enabled":true}}`)
+	raw = []byte(`{"indexing_strategy":{"vector_enabled":false,"keyword_enabled":false,` +
+		`"wiki_enabled":false,"graph_enabled":true}}`)
 	explicit := &types.KnowledgeBase{}
 	require.NoError(t, json.Unmarshal(raw, explicit))
 	fillOmittedIndexingFlags(raw, explicit)

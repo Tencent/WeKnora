@@ -112,6 +112,7 @@ func (h *TagHandler) ListTags(c *gin.Context) {
 	})
 }
 
+// CreateTagRequest is the body of POST /knowledge-bases/{id}/tags.
 type CreateTagRequest struct {
 	// Tag name, unique in this knowledge base
 	Name      string `json:"name"       binding:"required" extensions:"x-agent"`
@@ -161,6 +162,7 @@ func (h *TagHandler) CreateTag(c *gin.Context) {
 	})
 }
 
+// UpdateTagRequest is the body of PUT /knowledge-bases/{id}/tags/{tag_id}.
 type UpdateTagRequest struct {
 	// New name. Omit to keep the current one.
 	Name      *string `json:"name" extensions:"x-agent"`

@@ -472,18 +472,18 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	// Parse request body
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 	var req types.KnowledgeBase
 	if err := json.Unmarshal(body, &req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
-		c.Error(apperrors.NewBadRequestError("name cannot be empty"))
+		_ = c.Error(apperrors.NewBadRequestError("name cannot be empty"))
 		return
 	}
 	// A partial indexing_strategy must not turn the omitted pipelines off.
@@ -948,7 +948,9 @@ type knowledgeBaseUpdate struct {
 
 // applyKnowledgeBasePatch overlays the JSON sections that are present onto
 // the stored knowledge base. Omitted flags and nested fields stay.
-func applyKnowledgeBasePatch(kb *types.KnowledgeBase, patch PatchKnowledgeBaseRequest, sections map[string]json.RawMessage) (knowledgeBaseUpdate, error) {
+func applyKnowledgeBasePatch(
+	kb *types.KnowledgeBase, patch PatchKnowledgeBaseRequest, sections map[string]json.RawMessage,
+) (knowledgeBaseUpdate, error) {
 	out := knowledgeBaseUpdate{Name: kb.Name, Description: kb.Description}
 	if patch.Name != nil {
 		out.Name = strings.TrimSpace(*patch.Name)
@@ -1156,27 +1158,27 @@ func (h *KnowledgeBaseHandler) PatchKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
 	currentKB, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
-		c.Error(apperrors.NewForbiddenError("No permission to update knowledge base"))
+		_ = c.Error(apperrors.NewForbiddenError("No permission to update knowledge base"))
 		return
 	}
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 	var patch PatchKnowledgeBaseRequest
 	if err := json.Unmarshal(body, &patch); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 	var sections map[string]json.RawMessage
 	if err := json.Unmarshal(body, &sections); err != nil {
-		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 	if patch.EmbeddingModelID != nil || patch.SummaryModelID != nil || patch.StorageBackendID != nil ||
@@ -1188,7 +1190,7 @@ func (h *KnowledgeBaseHandler) PatchKnowledgeBase(c *gin.Context) {
 	}
 	update, err := applyKnowledgeBasePatch(currentKB, patch, sections)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	if update.Config != nil || update.VLM != nil {
@@ -1205,7 +1207,7 @@ func (h *KnowledgeBaseHandler) PatchKnowledgeBase(c *gin.Context) {
 			probe.VLMConfig = *update.VLM
 		}
 		if err := validateKnowledgeBasePromptInstructions(probe); err != nil {
-			c.Error(err)
+			_ = c.Error(err)
 			return
 		}
 	}
@@ -1216,7 +1218,7 @@ func (h *KnowledgeBaseHandler) PatchKnowledgeBase(c *gin.Context) {
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(apperrors.NewInternalServerError(err.Error()))
+		_ = c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}
 	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
