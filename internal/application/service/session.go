@@ -244,6 +244,9 @@ func (s *sessionService) CreateSession(ctx context.Context, session *types.Sessi
 
 	logger.Infof(ctx, "Creating session, tenant ID: %d", session.TenantID)
 
+	// Owner type and source are server facts, never client input.
+	types.StampSessionOwnerSource(ctx, session)
+
 	// Create session in repository
 	createdSession, err := s.sessionRepo.Create(ctx, session)
 	if err != nil {

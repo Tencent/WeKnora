@@ -205,6 +205,7 @@ func (s *Server) resolveAskSession(
 		return nil, fmt.Errorf("failed to bind session: %w", err)
 	}
 	created.UserID = ownerID
+	created.OwnerAuthSource = types.AuthSourceForBoundOwnerID(ownerID)
 	return created, nil
 }
 

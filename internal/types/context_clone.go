@@ -34,7 +34,10 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	UserContextKey:             true,
 	UserIDContextKey:           true,
 	PrincipalContextKey:        true,
-	SystemAdminContextKey:      true,
+	// How the principal was authenticated. Background work that creates a
+	// session (SSE clone) must stamp the same source the request had.
+	PrincipalAuthSourceContextKey: true,
+	SystemAdminContextKey:         true,
 	// TenantRoleContextKey: the caller's resolved role in the active tenant
 	// (PR 2 #1303). Must survive for the same reason as TenantIDContextKey —
 	// any handler that does `ctx := logger.CloneContext(c.Request.Context())`
