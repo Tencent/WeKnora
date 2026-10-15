@@ -192,8 +192,10 @@ func TestBuildIntegerPathAndList(t *testing.T) {
 	del := Operation{
 		ID: "faq.delete_entries", Summary: "s", Risk: RiskDestructive, Method: http.MethodDelete,
 		Route: "/api/v1/knowledge-bases/:id/faq/entries",
-		Params: []Param{kb, {Name: "entry_ids", In: InBody, Key: "ids", Type: TypeIntegerList, Required: true,
-			Description: "d", MaxItems: 2}},
+		Params: []Param{kb, {
+			Name: "entry_ids", In: InBody, Key: "ids", Type: TypeIntegerList, Required: true,
+			Description: "d", MaxItems: 2,
+		}},
 		Target: &Target{Operation: "knowledge_base.get", Label: "title", Items: &ItemTarget{
 			Param: "entry_ids", Operation: "faq.get_entry", As: "entry_id", Label: "title",
 		}},

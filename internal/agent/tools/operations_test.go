@@ -252,7 +252,8 @@ func TestRunOperationFAQDeleteNamesEveryQuestion(t *testing.T) {
 			Status: http.StatusOK, Body: []byte(`{"success":true,"data":{"id":"kb1","name":"Support"}}`),
 		},
 		"GET /api/v1/knowledge-bases/kb1/faq/entries/7": {
-			Status: http.StatusOK, Body: []byte(`{"success":true,"data":{"id":7,"standard_question":"How do I reset?"}}`),
+			Status: http.StatusOK,
+			Body:   []byte(`{"success":true,"data":{"id":7,"standard_question":"How do I reset?"}}`),
 		},
 		"DELETE /api/v1/knowledge-bases/kb1/faq/entries": {Status: http.StatusOK, Body: []byte(`{"success":true}`)},
 	}}

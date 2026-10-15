@@ -40,9 +40,6 @@ const (
 	// extAgentKeys lists the keys of a free-form object field that are
 	// projected, separated by "|".
 	extAgentKeys = "x-agent-keys"
-	// extAgentRequired makes the model send a parameter the API treats as
-	// optional, where omitting it would clear stored data (a full replace).
-	extAgentRequired = "x-agent-required"
 )
 
 // agentItems is ItemTarget as written in x-agent:
@@ -101,7 +98,8 @@ type specParameter struct {
 	Agent         any         `json:"x-agent"`
 	AgentMax      string      `json:"x-agent-maximum"`
 	AgentMaxBytes string      `json:"x-agent-max-bytes"`
-	AgentRequired bool        `json:"x-agent-required"`
+	// AgentRequired makes an API-optional field mandatory for the model.
+	AgentRequired bool `json:"x-agent-required"`
 }
 
 type specResponse struct {
@@ -124,7 +122,8 @@ type specSchema struct {
 	AgentMax      string                 `json:"x-agent-maximum"`
 	AgentMaxBytes string                 `json:"x-agent-max-bytes"`
 	AgentMaxRunes string                 `json:"x-agent-max-runes"`
-	AgentRequired bool                   `json:"x-agent-required"`
+	// AgentRequired makes an API-optional field mandatory for the model.
+	AgentRequired bool `json:"x-agent-required"`
 }
 
 var specMethods = []string{"get", "post", "put", "patch", "delete"}
