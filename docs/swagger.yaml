@@ -3098,6 +3098,7 @@ definitions:
       failed_count:
         description: 失败的条目数
         type: integer
+        x-agent: true
       failed_entries:
         description: 失败条目详情（少量时直接返回）
         items:
@@ -3137,25 +3138,31 @@ definitions:
       partial_failed_count:
         description: 部分失败的条目数（相似问/反例被移除）
         type: integer
+        x-agent: true
       processed:
         description: Entries processed so far
         type: integer
+        x-agent: true
       processing_time:
         description: 处理耗时（毫秒）
         type: integer
       progress:
         description: 0-100 percentage
         type: integer
+        x-agent: true
       skipped_count:
         description: 跳过的条目数（如重复等）
         type: integer
+        x-agent: true
       status:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FAQImportTaskStatus'
         description: Task status
+        x-agent: true
       success_count:
         description: 完全成功的条目数（不包含部分成功/部分失败）
         type: integer
+        x-agent: true
       success_entries:
         description: 成功条目简单信息（少量时直接返回）
         items:
@@ -3164,9 +3171,11 @@ definitions:
       task_id:
         description: UUID for the import task
         type: string
+        x-agent: true
       total:
         description: Total entries to import
         type: integer
+        x-agent: true
       updated_at:
         description: Last update timestamp
         type: integer
@@ -8815,11 +8824,17 @@ definitions:
   github_com_Tencent_WeKnora_internal_types.WikiFolderUpdateRequest:
     properties:
       move_parent:
+        description: Apply parent_id to move the whole subtree.
         type: boolean
+        x-agent: true
       name:
+        description: New folder name; omitted leaves it unchanged.
         type: string
+        x-agent: true
       parent_id:
+        description: Destination folder; empty means root when move_parent is true.
         type: string
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.WikiGraphData:
     properties:
@@ -9485,6 +9500,27 @@ definitions:
       quota_gb:
         type: integer
     type: object
+  internal_handler.AssistantAttachment:
+    properties:
+      attachment_id:
+        type: string
+        x-agent: true
+      file_name:
+        type: string
+        x-agent: true
+      file_size:
+        type: integer
+        x-agent: true
+      file_type:
+        type: string
+        x-agent: true
+      session_id:
+        type: string
+        x-agent: true
+      status:
+        type: string
+        x-agent: true
+    type: object
   internal_handler.AssistantCapability:
     properties:
       name:
@@ -9820,6 +9856,46 @@ definitions:
         type: integer
       total:
         type: integer
+    type: object
+  internal_handler.FAQExportArtifact:
+    properties:
+      file_name:
+        type: string
+        x-agent: true
+      format:
+        type: string
+        x-agent: true
+      knowledge_base_id:
+        type: string
+        x-agent: true
+    type: object
+  internal_handler.FAQSelectedFieldsRequest:
+    properties:
+      entry_ids:
+        description: Explicit entry sequence IDs, at most 20; never selects an entire
+          tag.
+        items:
+          type: integer
+        maxItems: 20
+        minItems: 1
+        type: array
+        x-agent: true
+        x-agent-maximum: "20"
+      is_enabled:
+        description: Whether the selected entries participate in retrieval.
+        type: boolean
+        x-agent: true
+      is_recommended:
+        description: Whether the selected entries are recommended.
+        type: boolean
+        x-agent: true
+      tag_id:
+        description: Existing tag sequence ID; zero clears the tag.
+        minimum: 0
+        type: integer
+        x-agent: tag_seq_id
+    required:
+    - entry_ids
     type: object
   internal_handler.FabriTagResponse:
     properties:
@@ -11564,6 +11640,15 @@ definitions:
         type: string
     required:
     - query
+    type: object
+  internal_handler.SelectedAttachmentRequest:
+    properties:
+      attachment_id:
+        description: ID of a file the user attached to this conversation.
+        type: string
+        x-agent: true
+    required:
+    - attachment_id
     type: object
   internal_handler.SetUserStatusRequest:
     properties:
@@ -13545,6 +13630,58 @@ paths:
       summary: 列出我的产物
       tags:
       - 会话
+  /assistant/attachments:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/internal_handler.AssistantAttachment'
+                  type: array
+              type: object
+      summary: List the user's attachments in this conversation
+      x-agent:
+        id: attachment.list
+        max_items: 50
+        risk: read
+      x-agent-hint: Only files the user attached to the current conversation. Use
+        these attachment_id values for import or download; unavailable/expired files
+        must be uploaded again.
+  /assistant/attachments/{attachment_id}:
+    get:
+      parameters:
+      - description: Attachment ID from attachment.list
+        in: path
+        name: attachment_id
+        required: true
+        type: string
+        x-agent: true
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.AssistantAttachment'
+              type: object
+      summary: Prepare an authenticated attachment download
+      x-agent:
+        id: attachment.download
+        risk: read
+      x-agent-hint: Shows a download button for an attachment in this conversation.
+        Download rechecks session ownership and attachment access; never returns a
+        storage URL.
   /auth/auto-setup:
     post:
       consumes:
@@ -14848,6 +14985,7 @@ paths:
         name: task_id
         required: true
         type: string
+        x-agent: true
       produces:
       - application/json
       responses:
@@ -14870,6 +15008,9 @@ paths:
       summary: 获取FAQ导入进度
       tags:
       - FAQ管理
+      x-agent:
+        id: faq.get_import_progress
+        risk: read
   /im-channels/{id}:
     delete:
       description: 删除指定 IM 渠道
@@ -16472,6 +16613,43 @@ paths:
         target: knowledge_base.get
       x-agent-hint: Adds one FAQ entry. Questions already used by another entry are
         refused.
+  /knowledge-bases/{id}/faq/export-artifact:
+    get:
+      parameters:
+      - description: FAQ knowledge base ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: knowledge_base_id
+      - default: json
+        description: Export format
+        enum:
+        - json
+        - csv
+        in: query
+        name: format
+        type: string
+        x-agent: true
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.FAQExportArtifact'
+              type: object
+      summary: Prepare an authenticated FAQ export
+      x-agent:
+        id: faq.export
+        risk: read
+      x-agent-hint: Shows an authenticated download button. Exports the current FAQ
+        entries when clicked, rechecking KB access then. JSON can be reimported with
+        faq.import_selected; no public sharing link is created.
   /knowledge-bases/{id}/faq/import/last-result/display:
     put:
       consumes:
@@ -16551,6 +16729,84 @@ paths:
       summary: 搜索FAQ
       tags:
       - FAQ管理
+  /knowledge-bases/{id}/faq/selected-import:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Destination FAQ knowledge base ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: knowledge_base_id
+      - description: JSON attachment from attachment.list
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.SelectedAttachmentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.TaskIDData'
+              type: object
+      summary: Append FAQ entries from a selected JSON attachment
+      x-agent:
+        id: faq.import_selected
+        label: name
+        risk: destructive
+        target: knowledge_base.get
+      x-agent-hint: Append a JSON array in FAQ export format, at most 200 entries
+        and 1 MiB. Exported IDs are ignored; duplicates follow existing import validation.
+        Never replaces the whole knowledge base. Poll faq.get_import_progress.
+  /knowledge-bases/{id}/faq/selected/fields:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: knowledge_base_id
+      - description: Selected entries and fields
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.FAQSelectedFieldsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.SuccessResponse'
+      summary: Update selected FAQ flags and tags
+      tags:
+      - FAQ管理
+      x-agent:
+        id: faq.update_selected_fields
+        items:
+          as: entry_id
+          label: standard_question
+          param: entry_ids
+          target: faq.get_entry
+        label: name
+        risk: write
+        target: knowledge_base.get
+      x-agent-hint: Changes only supplied fields on up to 20 explicit entries. Supports
+        is_enabled, is_recommended and tag_seq_id (0 removes tag); leaves questions
+        and answers intact.
   /knowledge-bases/{id}/hybrid-search:
     get:
       consumes:
@@ -17408,6 +17664,44 @@ paths:
         documents for one query. Does not generate an answer or change index settings.
         Vector/hybrid may incur embedding usage; scores from different modes are not
         directly comparable.
+  /knowledge-bases/{id}/selected-attachment:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Destination knowledge base ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: knowledge_base_id
+      - description: Selected attachment
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.SelectedAttachmentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge'
+              type: object
+      summary: Import a selected conversation attachment into a knowledge base
+      x-agent:
+        id: knowledge.create_from_attachment
+        label: name
+        risk: write
+        target: knowledge_base.get
+      x-agent-hint: Imports the original bytes of one user-selected conversation attachment,
+        at most 20 MiB. Creates a document using the existing upload and duplicate
+        checks, then parses in the background. No arbitrary paths or URLs.
   /knowledge-bases/{id}/shares:
     get:
       description: 获取知识库的所有共享记录
@@ -18810,11 +19104,13 @@ paths:
         name: kb_id
         required: true
         type: string
+        x-agent: knowledge_base_id
       - description: Folder ID
         in: path
         name: folder_id
         required: true
         type: string
+        x-agent: folder_id
       responses:
         "204":
           description: No Content
@@ -18831,6 +19127,40 @@ paths:
       summary: Delete an empty wiki folder
       tags:
       - Wiki
+      x-agent:
+        id: wiki.delete_folder
+        label: name
+        risk: destructive
+        target: wiki.get_folder
+      x-agent-hint: Deletes an empty folder only. Non-empty folders are refused; never
+        recursively removes pages or children.
+    get:
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+        x-agent: knowledge_base_id
+      - description: Folder ID
+        in: path
+        name: folder_id
+        required: true
+        type: string
+        x-agent: true
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolder'
+      summary: Read a Wiki folder
+      tags:
+      - Wiki
+      x-agent:
+        id: wiki.get_folder
+        risk: read
     put:
       consumes:
       - application/json
@@ -18842,11 +19172,13 @@ paths:
         name: kb_id
         required: true
         type: string
+        x-agent: knowledge_base_id
       - description: Folder ID
         in: path
         name: folder_id
         required: true
         type: string
+        x-agent: folder_id
       - description: Folder update
         in: body
         name: folder
@@ -18877,6 +19209,14 @@ paths:
       summary: Rename or move a wiki folder
       tags:
       - Wiki
+      x-agent:
+        id: wiki.update_folder
+        label: name
+        risk: destructive
+        target: wiki.get_folder
+      x-agent-hint: Rename and/or move a folder and its subtree. Set move_parent=true
+        to apply parent_id (empty means root). Existing page paths change; cycles
+        and sibling-name conflicts are refused.
   /knowledgebase/{kb_id}/wiki/graph:
     get:
       description: |-

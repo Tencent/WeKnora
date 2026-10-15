@@ -543,6 +543,9 @@ func (doc *specDocument) result(responses map[string]specResponse, meta agentOpe
 		}
 	}
 	if body == nil {
+		if _, ok := responses["204"]; ok {
+			return Result{NoContent: true}, nil
+		}
 		return Result{}, fmt.Errorf("no success response schema")
 	}
 	top, err := doc.resolve(body)

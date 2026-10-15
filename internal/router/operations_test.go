@@ -25,6 +25,7 @@ func registerOperationAreas(v1 *gin.RouterGroup, g *rbacGuards) {
 	RegisterKnowledgeTagRoutes(v1, &handler.TagHandler{}, g)
 	RegisterOrganizationRoutes(v1, &handler.OrganizationHandler{}, g)
 	RegisterFAQRoutes(v1, &handler.FAQHandler{}, g)
+	RegisterAssistantResourceRoutes(v1, &handler.AssistantResourceHandler{}, g)
 	RegisterCustomAgentRoutes(v1, &handler.CustomAgentHandler{}, g)
 	RegisterSkillRoutes(v1, &handler.SkillHandler{}, g)
 	RegisterModelRoutes(v1, &handler.ModelHandler{}, &handler.ModelCredentialsHandler{}, g)

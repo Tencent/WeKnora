@@ -60,6 +60,10 @@
       </div>
       <p v-if="resultEmpty" class="catalog-empty">{{ $t('agentStream.operations.emptyResult') }}</p>
       <CatalogValue v-else :value="run.data" />
+      <t-button v-if="download && success !== false" size="small" variant="outline" :loading="downloading" @click="downloadResult">
+        {{ $t('common.download') }} · {{ download.fileName }}
+      </t-button>
+      <p v-if="downloadFailed" role="alert">{{ $t('agentStream.operations.failed') }}</p>
       <div v-if="hasMeta" class="catalog-meta">
         <div class="catalog-summary">{{ $t('agentStream.operations.meta') }}</div>
         <CatalogValue :value="run.meta" />
@@ -69,7 +73,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   isEmptyCatalogValue,
@@ -79,6 +83,7 @@ import {
   unavailableOperationRows,
 } from '@/utils/catalogToolDisplay'
 import CatalogValue from './CatalogValue.vue'
+import { operationDownload } from '@/utils/operationDownload'
 
 const props = withDefaults(defineProps<{
   mode: 'find' | 'run'
@@ -92,6 +97,25 @@ const payload = computed(() => parseCatalogPayload(props.output, props.data))
 const operations = computed(() => operationRows(payload.value))
 const unavailable = computed(() => unavailableOperationRows(payload.value))
 const run = computed(() => runOperationView(payload.value))
+const download = computed(() => operationDownload(run.value.operation, run.value.data))
+const downloading = ref(false)
+const downloadFailed = ref(false)
+async function downloadResult() {
+  const descriptor = download.value
+  if (!descriptor || downloading.value) return
+  downloading.value = true; downloadFailed.value = false
+  try {
+    const { getDown } = await import('@/utils/request')
+    const blob = await getDown(descriptor.path)
+    if (!(blob instanceof Blob)) throw new Error('Download unavailable')
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url; link.download = descriptor.fileName
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch { downloadFailed.value = true }
+  finally { downloading.value = false }
+}
 const resultEmpty = computed(() => isEmptyCatalogValue(run.value.data))
 const hasMeta = computed(() => !isEmptyCatalogValue(run.value.meta))
 const plainError = computed(() => {

@@ -28,6 +28,9 @@ type Projected struct {
 
 // Project extracts the declared fields from a JSON response body.
 func (op Operation) Project(body []byte) (Projected, error) {
+	if op.Result.NoContent && len(bytes.TrimSpace(body)) == 0 {
+		return Projected{Data: map[string]any{}}, nil
+	}
 	var doc any
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.UseNumber()

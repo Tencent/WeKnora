@@ -219,14 +219,16 @@ func (h *WikiPageHandler) CreateFolder(c *gin.Context) {
 // @Tags         Wiki
 // @Accept       json
 // @Produce      json
-// @Param        kb_id     path  string                        true  "Knowledge base ID"
-// @Param        folder_id path  string                        true  "Folder ID"
+// @Param        kb_id     path  string                        true  "Knowledge base ID" extensions(x-agent=knowledge_base_id)
+// @Param        folder_id path  string                        true  "Folder ID" extensions(x-agent=folder_id)
 // @Param        folder    body  types.WikiFolderUpdateRequest true  "Folder update"
 // @Success      200  {object}  types.WikiFolder
 // @Failure      400  {object}  errors.AppError
 // @Failure      404  {object}  errors.AppError
 // @Failure      409  {object}  errors.AppError
 // @Security     Bearer
+// @x-agent {"id":"wiki.update_folder","risk":"destructive","target":"wiki.get_folder","label":"name"}
+// @x-agent-hint "Rename and/or move a folder and its subtree. Set move_parent=true to apply parent_id (empty means root). Existing page paths change; cycles and sibling-name conflicts are refused."
 // @Router       /knowledgebase/{kb_id}/wiki/folders/{folder_id} [put]
 func (h *WikiPageHandler) UpdateFolder(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
@@ -257,12 +259,14 @@ func (h *WikiPageHandler) UpdateFolder(c *gin.Context) {
 // @Summary      Delete an empty wiki folder
 // @Description  Delete a folder that has no pages and no child folders
 // @Tags         Wiki
-// @Param        kb_id     path  string  true  "Knowledge base ID"
-// @Param        folder_id path  string  true  "Folder ID"
+// @Param        kb_id     path  string  true  "Knowledge base ID" extensions(x-agent=knowledge_base_id)
+// @Param        folder_id path  string  true  "Folder ID" extensions(x-agent=folder_id)
 // @Success      204
 // @Failure      400  {object}  errors.AppError
 // @Failure      404  {object}  errors.AppError
 // @Security     Bearer
+// @x-agent {"id":"wiki.delete_folder","risk":"destructive","target":"wiki.get_folder","label":"name"}
+// @x-agent-hint "Deletes an empty folder only. Non-empty folders are refused; never recursively removes pages or children."
 // @Router       /knowledgebase/{kb_id}/wiki/folders/{folder_id} [delete]
 func (h *WikiPageHandler) DeleteFolder(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
@@ -1296,4 +1300,27 @@ func (h *WikiPageHandler) AutoFix(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"fixed": fixed, "message": fmt.Sprintf("Auto-fixed %d issues", fixed)})
+}
+
+// GetFolder godoc
+// @Summary Read a Wiki folder
+// @Tags Wiki
+// @Produce json
+// @Param kb_id path string true "Knowledge base ID" extensions(x-agent=knowledge_base_id)
+// @Param folder_id path string true "Folder ID" extensions(x-agent)
+// @Success 200 {object} types.WikiFolder
+// @x-agent {"id":"wiki.get_folder","risk":"read"}
+// @Router /knowledgebase/{kb_id}/wiki/folders/{folder_id} [get]
+func (h *WikiPageHandler) GetFolder(c *gin.Context) {
+	kbID, _, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	folder, err := h.wikiService.GetFolder(c.Request.Context(), kbID, c.Param("folder_id"))
+	if err != nil {
+		writeWikiFolderError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, folder)
 }

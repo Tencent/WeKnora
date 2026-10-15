@@ -431,30 +431,30 @@ const (
 // FAQImportProgress represents the progress of an FAQ import task stored in Redis
 // When Status is "completed", the result fields (SkippedCount, ImportMode, ImportedAt, DisplayStatus, ProcessingTime) are populated.
 type FAQImportProgress struct {
-	TaskID             string              `json:"task_id"`                        // UUID for the import task
-	KBID               string              `json:"kb_id"`                          // Knowledge Base ID
-	KnowledgeID        string              `json:"knowledge_id"`                   // FAQ Knowledge ID
-	Status             FAQImportTaskStatus `json:"status"`                         // Task status
-	Progress           int                 `json:"progress"`                       // 0-100 percentage
-	Total              int                 `json:"total"`                          // Total entries to import
-	Processed          int                 `json:"processed"`                      // Entries processed so far
-	SuccessCount       int                 `json:"success_count"`                  // 完全成功的条目数（不包含部分成功/部分失败）
-	FailedCount        int                 `json:"failed_count"`                   // 失败的条目数
-	PartialFailedCount int                 `json:"partial_failed_count,omitempty"` // 部分失败的条目数（相似问/反例被移除）
-	SkippedCount       int                 `json:"skipped_count,omitempty"`        // 跳过的条目数（如重复等）
-	FailedEntries      []FAQFailedEntry    `json:"failed_entries,omitempty"`       // 失败条目详情（少量时直接返回）
-	FailedEntriesURL   string              `json:"failed_entries_url,omitempty"`   // 失败条目CSV下载URL（大量时返回URL）
-	SuccessEntries     []FAQSuccessEntry   `json:"success_entries,omitempty"`      // 成功条目简单信息（少量时直接返回）
-	ValidEntryIndices  []int               `json:"valid_entry_indices,omitempty"`  // 验证通过的条目索引（用于重试时跳过验证）
-	MergeEntryIndices  []int               `json:"merge_entry_indices,omitempty"`  // 需要合并的条目索引（内部使用，用于重试时跳过识别）
-	MergedCount        int                 `json:"merged_count,omitempty"`         // 合并更新的条目数
-	AddedCount         int                 `json:"added_count,omitempty"`          // 新增的条目数
-	MergeDetails       []FAQMergeDetail    `json:"merge_details,omitempty"`        // 合并详情
-	Message            string              `json:"message"`                        // Status message
-	Error              string              `json:"error"`                          // Error message if failed
-	CreatedAt          int64               `json:"created_at"`                     // Task creation timestamp
-	UpdatedAt          int64               `json:"updated_at"`                     // Last update timestamp
-	DryRun             bool                `json:"dry_run,omitempty"`              // 是否为 dry run 模式
+	TaskID             string              `json:"task_id" extensions:"x-agent"`                        // UUID for the import task
+	KBID               string              `json:"kb_id"`                                               // Knowledge Base ID
+	KnowledgeID        string              `json:"knowledge_id"`                                        // FAQ Knowledge ID
+	Status             FAQImportTaskStatus `json:"status" extensions:"x-agent"`                         // Task status
+	Progress           int                 `json:"progress" extensions:"x-agent"`                       // 0-100 percentage
+	Total              int                 `json:"total" extensions:"x-agent"`                          // Total entries to import
+	Processed          int                 `json:"processed" extensions:"x-agent"`                      // Entries processed so far
+	SuccessCount       int                 `json:"success_count" extensions:"x-agent"`                  // 完全成功的条目数（不包含部分成功/部分失败）
+	FailedCount        int                 `json:"failed_count" extensions:"x-agent"`                   // 失败的条目数
+	PartialFailedCount int                 `json:"partial_failed_count,omitempty" extensions:"x-agent"` // 部分失败的条目数（相似问/反例被移除）
+	SkippedCount       int                 `json:"skipped_count,omitempty" extensions:"x-agent"`        // 跳过的条目数（如重复等）
+	FailedEntries      []FAQFailedEntry    `json:"failed_entries,omitempty"`                            // 失败条目详情（少量时直接返回）
+	FailedEntriesURL   string              `json:"failed_entries_url,omitempty"`                        // 失败条目CSV下载URL（大量时返回URL）
+	SuccessEntries     []FAQSuccessEntry   `json:"success_entries,omitempty"`                           // 成功条目简单信息（少量时直接返回）
+	ValidEntryIndices  []int               `json:"valid_entry_indices,omitempty"`                       // 验证通过的条目索引（用于重试时跳过验证）
+	MergeEntryIndices  []int               `json:"merge_entry_indices,omitempty"`                       // 需要合并的条目索引（内部使用，用于重试时跳过识别）
+	MergedCount        int                 `json:"merged_count,omitempty"`                              // 合并更新的条目数
+	AddedCount         int                 `json:"added_count,omitempty"`                               // 新增的条目数
+	MergeDetails       []FAQMergeDetail    `json:"merge_details,omitempty"`                             // 合并详情
+	Message            string              `json:"message"`                                             // Status message
+	Error              string              `json:"error"`                                               // Error message if failed
+	CreatedAt          int64               `json:"created_at"`                                          // Task creation timestamp
+	UpdatedAt          int64               `json:"updated_at"`                                          // Last update timestamp
+	DryRun             bool                `json:"dry_run,omitempty"`                                   // 是否为 dry run 模式
 
 	// Result fields (populated when Status == "completed")
 	ImportMode     string    `json:"import_mode,omitempty"`     // 导入模式：append 或 replace

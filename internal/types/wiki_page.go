@@ -472,9 +472,12 @@ type WikiFolderCreateRequest struct {
 // applied only when MoveParent is true so a pure rename doesn't have to
 // re-send the (possibly root "") parent and risk an accidental move.
 type WikiFolderUpdateRequest struct {
-	Name       string `json:"name,omitempty"`
-	ParentID   string `json:"parent_id,omitempty"`
-	MoveParent bool   `json:"move_parent,omitempty"`
+	// New folder name; omitted leaves it unchanged.
+	Name string `json:"name,omitempty" extensions:"x-agent"`
+	// Destination folder; empty means root when move_parent is true.
+	ParentID string `json:"parent_id,omitempty" extensions:"x-agent"`
+	// Apply parent_id to move the whole subtree.
+	MoveParent bool `json:"move_parent,omitempty" extensions:"x-agent"`
 }
 
 // WikiPageMoveRequest relocates the page identified by Slug into FolderID

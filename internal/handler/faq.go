@@ -509,11 +509,12 @@ func (h *FAQHandler) GetEntry(c *gin.Context) {
 // @Tags         FAQ管理
 // @Accept       json
 // @Produce      json
-// @Param        task_id  path      string  true  "任务ID"
+// @Param        task_id  path      string  true  "任务ID" extensions(x-agent)
 // @Success      200      {object}  handler.DataResponse{data=types.FAQImportProgress}  "导入进度"
 // @Failure      404      {object}  errors.AppError         "任务不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent {"id":"faq.get_import_progress","risk":"read"}
 // @Router       /faq/import/progress/{task_id} [get]
 func (h *FAQHandler) GetImportProgress(c *gin.Context) {
 	ctx := c.Request.Context()

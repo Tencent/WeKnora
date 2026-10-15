@@ -124,6 +124,8 @@ func (f Field) outputKey() string {
 // dropped, so new fields added to a handler never reach the model unless
 // they are added here.
 type Result struct {
+	// NoContent accepts the documented HTTP 204 success response.
+	NoContent bool
 	// Root is a dotted path to the object or array to project, relative to
 	// the response body. Empty means the body itself.
 	Root string
@@ -354,21 +356,23 @@ var allowedMethods = map[string]bool{
 // Infrastructure is exposed route by route, never as an entire API area.
 // Credential, policy, configuration and platform administration remain closed.
 var additionalOperationRoutes = map[string]string{
-	"/api/v1/system/info":                   http.MethodGet,
-	"/api/v1/system/assistant-capabilities": http.MethodGet,
-	"/api/v1/system/parser-engines":         http.MethodGet,
-	"/api/v1/system/storage-engine-status":  http.MethodGet,
-	"/api/v1/sandbox-configs":               http.MethodGet,
-	"/api/v1/storage-backends":              http.MethodGet,
-	"/api/v1/vector-stores":                 http.MethodGet,
-	"/api/v1/datasource":                    http.MethodGet,
-	"/api/v1/datasource/:id":                http.MethodGet,
-	"/api/v1/datasource/:id/logs":           http.MethodGet,
-	"/api/v1/datasource/logs/:log_id":       http.MethodGet,
-	"/api/v1/datasource/:id/sync":           http.MethodPost,
-	"/api/v1/datasource/:id/pause":          http.MethodPost,
-	"/api/v1/datasource/:id/resume":         http.MethodPost,
-	"/api/v1/chunker/preview":               http.MethodPost,
+	"/api/v1/assistant/attachments":                http.MethodGet,
+	"/api/v1/assistant/attachments/:attachment_id": http.MethodGet,
+	"/api/v1/system/info":                          http.MethodGet,
+	"/api/v1/system/assistant-capabilities":        http.MethodGet,
+	"/api/v1/system/parser-engines":                http.MethodGet,
+	"/api/v1/system/storage-engine-status":         http.MethodGet,
+	"/api/v1/sandbox-configs":                      http.MethodGet,
+	"/api/v1/storage-backends":                     http.MethodGet,
+	"/api/v1/vector-stores":                        http.MethodGet,
+	"/api/v1/datasource":                           http.MethodGet,
+	"/api/v1/datasource/:id":                       http.MethodGet,
+	"/api/v1/datasource/:id/logs":                  http.MethodGet,
+	"/api/v1/datasource/logs/:log_id":              http.MethodGet,
+	"/api/v1/datasource/:id/sync":                  http.MethodPost,
+	"/api/v1/datasource/:id/pause":                 http.MethodPost,
+	"/api/v1/datasource/:id/resume":                http.MethodPost,
+	"/api/v1/chunker/preview":                      http.MethodPost,
 }
 
 // These reviewed POSTs compute a preview and never mutate stored content.

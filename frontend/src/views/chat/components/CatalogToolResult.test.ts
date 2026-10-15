@@ -43,6 +43,7 @@ async function render(props: Record<string, unknown>) {
   const app = createSSRApp({ render: () => h(Renderer, props) })
   app.use(createI18n({ legacy: false, locale: 'en-US', messages: { 'en-US': en } }))
   app.component('t-icon', { render: () => h('span') })
+  app.component('t-button', { setup(_props, { slots }) { return () => h('button', slots.default?.()) } })
   return renderToString(app)
 }
 
@@ -129,4 +130,13 @@ test('product docs render pages, sections, and markdown instead of raw JSON', as
   assert.match(read, /Open in docs/)
   assert.match(read, /The page continues/)
   assert.doesNotMatch(read, /fallback-output|"content"/)
+})
+
+test('authenticated export descriptor renders a download button without a public URL', async () => {
+  const output = JSON.stringify({operation:'faq.export',result:{data:{knowledge_base_id:'kb',format:'json',file_name:'faq_export.json'}}})
+  const html = await render({displayType:'run_operation',success:true,output})
+  assert.match(html, /<button[^>]*>.*Download.*faq_export.json/)
+  assert.doesNotMatch(html, /href=/)
+  const failed = await render({displayType:'run_operation',success:false,output})
+  assert.doesNotMatch(failed, /<button/)
 })

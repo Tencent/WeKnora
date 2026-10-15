@@ -1200,6 +1200,86 @@
                 }
             }
         },
+        "/assistant/attachments": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "List the user's attachments in this conversation",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/internal_handler.AssistantAttachment"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "attachment.list",
+                    "max_items": 50,
+                    "risk": "read"
+                },
+                "x-agent-hint": "Only files the user attached to the current conversation. Use these attachment_id values for import or download; unavailable/expired files must be uploaded again."
+            }
+        },
+        "/assistant/attachments/{attachment_id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Prepare an authenticated attachment download",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": true,
+                        "description": "Attachment ID from attachment.list",
+                        "name": "attachment_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.AssistantAttachment"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "attachment.download",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Shows a download button for an attachment in this conversation. Download rechecks session ownership and attachment access; never returns a storage URL."
+            }
+        },
         "/auth/auto-setup": {
             "post": {
                 "description": "Lite 版专用：首次启动时自动创建默认用户和空间并返回令牌，首次及后续启动均须通过桌面原生凭据认证，免除手动注册/登录流程",
@@ -3181,6 +3261,7 @@
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": true,
                         "description": "任务ID",
                         "name": "task_id",
                         "in": "path",
@@ -3212,6 +3293,10 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "faq.get_import_progress",
+                    "risk": "read"
                 }
             }
         },
@@ -5894,6 +5979,61 @@
                 "x-agent-hint": "Adds one FAQ entry. Questions already used by another entry are refused."
             }
         },
+        "/knowledge-bases/{id}/faq/export-artifact": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Prepare an authenticated FAQ export",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "knowledge_base_id",
+                        "description": "FAQ knowledge base ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "json",
+                            "csv"
+                        ],
+                        "type": "string",
+                        "default": "json",
+                        "x-agent": true,
+                        "description": "Export format",
+                        "name": "format",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.FAQExportArtifact"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "faq.export",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Shows an authenticated download button. Exports the current FAQ entries when clicked, rechecking KB access then. JSON can be reimported with faq.import_selected; no public sharing link is created."
+            }
+        },
         "/knowledge-bases/{id}/faq/import/last-result/display": {
             "put": {
                 "security": [
@@ -6023,6 +6163,117 @@
                         }
                     }
                 }
+            }
+        },
+        "/knowledge-bases/{id}/faq/selected-import": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Append FAQ entries from a selected JSON attachment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "knowledge_base_id",
+                        "description": "Destination FAQ knowledge base ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "JSON attachment from attachment.list",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.SelectedAttachmentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.TaskIDData"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "faq.import_selected",
+                    "label": "name",
+                    "risk": "destructive",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Append a JSON array in FAQ export format, at most 200 entries and 1 MiB. Exported IDs are ignored; duplicates follow existing import validation. Never replaces the whole knowledge base. Poll faq.get_import_progress."
+            }
+        },
+        "/knowledge-bases/{id}/faq/selected/fields": {
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "FAQ管理"
+                ],
+                "summary": "Update selected FAQ flags and tags",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "knowledge_base_id",
+                        "description": "Knowledge base ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Selected entries and fields",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.FAQSelectedFieldsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.SuccessResponse"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "faq.update_selected_fields",
+                    "items": {
+                        "as": "entry_id",
+                        "label": "standard_question",
+                        "param": "entry_ids",
+                        "target": "faq.get_entry"
+                    },
+                    "label": "name",
+                    "risk": "write",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Changes only supplied fields on up to 20 explicit entries. Supports is_enabled, is_recommended and tag_seq_id (0 removes tag); leaves questions and answers intact."
             }
         },
         "/knowledge-bases/{id}/hybrid-search": {
@@ -7354,6 +7605,63 @@
                     "risk": "read"
                 },
                 "x-agent-hint": "Compare keyword, vector and hybrid candidates, scores and source documents for one query. Does not generate an answer or change index settings. Vector/hybrid may incur embedding usage; scores from different modes are not directly comparable."
+            }
+        },
+        "/knowledge-bases/{id}/selected-attachment": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Import a selected conversation attachment into a knowledge base",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "knowledge_base_id",
+                        "description": "Destination knowledge base ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Selected attachment",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.SelectedAttachmentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "knowledge.create_from_attachment",
+                    "label": "name",
+                    "risk": "write",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Imports the original bytes of one user-selected conversation attachment, at most 20 MiB. Creates a document using the existing upload and duplicate checks, then parses in the background. No arbitrary paths or URLs."
             }
         },
         "/knowledge-bases/{id}/shares": {
@@ -9399,6 +9707,45 @@
             }
         },
         "/knowledgebase/{kb_id}/wiki/folders/{folder_id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Read a Wiki folder",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "knowledge_base_id",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "x-agent": true,
+                        "description": "Folder ID",
+                        "name": "folder_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolder"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "wiki.get_folder",
+                    "risk": "read"
+                }
+            },
             "put": {
                 "security": [
                     {
@@ -9419,6 +9766,7 @@
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "Knowledge base ID",
                         "name": "kb_id",
                         "in": "path",
@@ -9426,6 +9774,7 @@
                     },
                     {
                         "type": "string",
+                        "x-agent": "folder_id",
                         "description": "Folder ID",
                         "name": "folder_id",
                         "in": "path",
@@ -9466,7 +9815,14 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "wiki.update_folder",
+                    "label": "name",
+                    "risk": "destructive",
+                    "target": "wiki.get_folder"
+                },
+                "x-agent-hint": "Rename and/or move a folder and its subtree. Set move_parent=true to apply parent_id (empty means root). Existing page paths change; cycles and sibling-name conflicts are refused."
             },
             "delete": {
                 "security": [
@@ -9482,6 +9838,7 @@
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "Knowledge base ID",
                         "name": "kb_id",
                         "in": "path",
@@ -9489,6 +9846,7 @@
                     },
                     {
                         "type": "string",
+                        "x-agent": "folder_id",
                         "description": "Folder ID",
                         "name": "folder_id",
                         "in": "path",
@@ -9511,7 +9869,14 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "wiki.delete_folder",
+                    "label": "name",
+                    "risk": "destructive",
+                    "target": "wiki.get_folder"
+                },
+                "x-agent-hint": "Deletes an empty folder only. Non-empty folders are refused; never recursively removes pages or children."
             }
         },
         "/knowledgebase/{kb_id}/wiki/graph": {
@@ -25729,7 +26094,8 @@
                 },
                 "failed_count": {
                     "description": "失败的条目数",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "failed_entries": {
                     "description": "失败条目详情（少量时直接返回）",
@@ -25782,11 +26148,13 @@
                 },
                 "partial_failed_count": {
                     "description": "部分失败的条目数（相似问/反例被移除）",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "processed": {
                     "description": "Entries processed so far",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "processing_time": {
                     "description": "处理耗时（毫秒）",
@@ -25794,11 +26162,13 @@
                 },
                 "progress": {
                     "description": "0-100 percentage",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "skipped_count": {
                     "description": "跳过的条目数（如重复等）",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "status": {
                     "description": "Task status",
@@ -25806,11 +26176,13 @@
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQImportTaskStatus"
                         }
-                    ]
+                    ],
+                    "x-agent": true
                 },
                 "success_count": {
                     "description": "完全成功的条目数（不包含部分成功/部分失败）",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "success_entries": {
                     "description": "成功条目简单信息（少量时直接返回）",
@@ -25821,11 +26193,13 @@
                 },
                 "task_id": {
                     "description": "UUID for the import task",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "total": {
                     "description": "Total entries to import",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "updated_at": {
                     "description": "Last update timestamp",
@@ -32994,13 +33368,19 @@
             "type": "object",
             "properties": {
                 "move_parent": {
-                    "type": "boolean"
+                    "description": "Apply parent_id to move the whole subtree.",
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "name": {
-                    "type": "string"
+                    "description": "New folder name; omitted leaves it unchanged.",
+                    "type": "string",
+                    "x-agent": true
                 },
                 "parent_id": {
-                    "type": "string"
+                    "description": "Destination folder; empty means root when move_parent is true.",
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -33824,6 +34204,35 @@
                 }
             }
         },
+        "internal_handler.AssistantAttachment": {
+            "type": "object",
+            "properties": {
+                "attachment_id": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "file_name": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "file_size": {
+                    "type": "integer",
+                    "x-agent": true
+                },
+                "file_type": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "session_id": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "status": {
+                    "type": "string",
+                    "x-agent": true
+                }
+            }
+        },
         "internal_handler.AssistantCapability": {
             "type": "object",
             "properties": {
@@ -34314,6 +34723,58 @@
                 },
                 "total": {
                     "type": "integer"
+                }
+            }
+        },
+        "internal_handler.FAQExportArtifact": {
+            "type": "object",
+            "properties": {
+                "file_name": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "format": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "knowledge_base_id": {
+                    "type": "string",
+                    "x-agent": true
+                }
+            }
+        },
+        "internal_handler.FAQSelectedFieldsRequest": {
+            "type": "object",
+            "required": [
+                "entry_ids"
+            ],
+            "properties": {
+                "entry_ids": {
+                    "description": "Explicit entry sequence IDs, at most 20; never selects an entire tag.",
+                    "type": "array",
+                    "maxItems": 20,
+                    "minItems": 1,
+                    "items": {
+                        "type": "integer"
+                    },
+                    "x-agent": true,
+                    "x-agent-maximum": "20"
+                },
+                "is_enabled": {
+                    "description": "Whether the selected entries participate in retrieval.",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "is_recommended": {
+                    "description": "Whether the selected entries are recommended.",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "tag_id": {
+                    "description": "Existing tag sequence ID; zero clears the tag.",
+                    "type": "integer",
+                    "minimum": 0,
+                    "x-agent": "tag_seq_id"
                 }
             }
         },
@@ -36724,6 +37185,19 @@
                 },
                 "query": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_handler.SelectedAttachmentRequest": {
+            "type": "object",
+            "required": [
+                "attachment_id"
+            ],
+            "properties": {
+                "attachment_id": {
+                    "description": "ID of a file the user attached to this conversation.",
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
