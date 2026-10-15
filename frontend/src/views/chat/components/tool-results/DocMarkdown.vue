@@ -123,7 +123,7 @@ function inline(token: MdToken): MdToken[] {
   border-radius: var(--app-radius-xs);
   background: var(--td-bg-color-secondarycontainer);
   font-family: var(--app-font-family-mono, monospace);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 .doc-md :deep(.doc-code) {
   margin: 0 0 8px;
@@ -132,7 +132,7 @@ function inline(token: MdToken): MdToken[] {
   overflow: auto;
   background: var(--td-bg-color-secondarycontainer);
   border-radius: var(--app-radius-sm);
-  font: 12px/1.55 var(--app-font-family-mono, monospace);
+  font: var(--app-text-sm)/1.55 var(--app-font-family-mono, monospace);
   white-space: pre-wrap;
 }
 .doc-md :deep(.doc-code code) { padding: 0; background: transparent; }

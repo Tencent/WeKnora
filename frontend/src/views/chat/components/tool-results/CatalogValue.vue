@@ -126,7 +126,7 @@ function isEmpty(value: unknown): boolean {
   overflow: auto;
   background: var(--td-bg-color-secondarycontainer);
   border-radius: var(--app-radius-sm);
-  font: 12px/1.55 var(--app-font-family-mono, monospace);
+  font: var(--app-text-sm)/1.55 var(--app-font-family-mono, monospace);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -164,7 +164,7 @@ function isEmpty(value: unknown): boolean {
 .cv-row dt {
   margin: 0;
   color: var(--td-text-color-placeholder);
-  font: 12px/1.5 var(--app-font-family-mono, monospace);
+  font: var(--app-text-sm)/1.5 var(--app-font-family-mono, monospace);
   overflow-wrap: anywhere;
 }
 .cv-row dd { margin: 0; min-width: 0; }

@@ -407,8 +407,9 @@ func TestRunOperationAgentApprovals(t *testing.T) {
 
 	gate.requests = nil
 	res, _ = tool.Execute(interactiveCtx(), runArgs("agent.update", map[string]any{
-		"agent_id": "a1", "agent_mode": "smart-reasoning", "model_id": "m1", "knowledge_base_ids": []string{"kb1", "kb-gone"},
-		"system_prompt": "Answer in English.", "web_search_enabled": false,
+		"agent_id": "a1", "agent_mode": "smart-reasoning", "model_id": "m1",
+		"knowledge_base_ids": []string{"kb1", "kb-gone"},
+		"system_prompt":      "Answer in English.", "web_search_enabled": false,
 	}))
 	require.True(t, res.Success, res.Error)
 	require.Len(t, gate.requests, 1)

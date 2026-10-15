@@ -151,7 +151,7 @@ function riskLabel(risk: string) {
 .catalog-item__name {
   flex-shrink: 0;
   max-width: 46%;
-  font: 12px/1.5 var(--app-font-family-mono, monospace);
+  font: var(--app-text-sm)/1.5 var(--app-font-family-mono, monospace);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
