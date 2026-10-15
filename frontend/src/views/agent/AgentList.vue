@@ -755,6 +755,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useMenuStore } from '@/stores/menu'
 import type { SharedAgentInfo, OrganizationSharedAgentItem } from '@/api/organization'
 import AgentEditorModal from './AgentEditorModal.vue'
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import ContextualGuide from '@/components/ContextualGuide.vue'
 import TenantModelsGuide from '@/components/TenantModelsGuide.vue'
 import { focusAgentEditorSection, markContextualGuideDone } from '@/config/contextualGuides'
@@ -1037,6 +1038,12 @@ const sharedAgentMcpScopeText = computed(() => {
 const editorVisible = ref(false)
 const editorMode = ref<'create' | 'edit'>('create')
 const editingAgent = ref<CustomAgent | null>(null)
+useAssistantPageContext(() => {
+  const agent = editingAgent.value
+  if (!editorVisible.value || editorMode.value !== 'edit' || !agent) return null
+  if (!agents.value.some(own => own.id === agent.id && own.tenant_id === agent.tenant_id)) return null
+  return { agentId: agent.id, agentName: agent.name }
+})
 const editorInitialSection = ref<string>('basic')
 const editorInitialHighlightField = ref<string>('')
 /** 当前打开三点菜单的卡片 agent.id（用于受控弹出层，避免 computed 项无持久引用导致菜单不响应） */

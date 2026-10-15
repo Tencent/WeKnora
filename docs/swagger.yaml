@@ -1260,6 +1260,16 @@ definitions:
           MaxAccessLevel is the highest level a member may pick; empty means
           AssistantAccessConfirm.
     type: object
+  github_com_Tencent_WeKnora_internal_types.AssistantScope:
+    enum:
+    - page
+    - knowledge_base
+    - workspace
+    type: string
+    x-enum-varnames:
+    - AssistantScopePage
+    - AssistantScopeKnowledgeBase
+    - AssistantScopeWorkspace
   github_com_Tencent_WeKnora_internal_types.AttrSpec:
     properties:
       consumers:
@@ -5880,6 +5890,8 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.PageContext:
     properties:
+      agent_id:
+        type: string
       knowledge_base_id:
         type: string
       knowledge_id:
@@ -6832,6 +6844,9 @@ definitions:
         description: IsPinned indicates whether the session is pinned in the list.
         type: boolean
       kind:
+        description: |-
+          Kind is empty for ordinary chats and SessionKindAssistant for assistant
+          conversations; it is set at creation and never updated.
         type: string
       last_request_state:
         allOf:
@@ -11921,6 +11936,10 @@ definitions:
           AssistantAccess is the WeKnora assistant access level: read_only,
           confirm or auto_write. The workspace ceiling caps it; other agents
           ignore it.
+      assistant_scope:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantScope'
+        default: workspace
       attachment_ids:
         description: Pre-uploaded session-scoped document IDs
         items:

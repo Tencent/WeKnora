@@ -131,6 +131,7 @@ type OperationsRuntime struct {
 	// Catalog is the full catalog, so a withheld operation is refused with
 	// its reason rather than reported unknown.
 	Access operations.Access
+	Scope  operations.Scope
 }
 
 // OperationIdentityFromContext returns the identity catalog operations may
@@ -337,6 +338,9 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 		identity.Agent.SessionID = meta.SessionID
 	}
 	identity.Agent.Operation = op.ID
+	if blocked := t.checkScope(ctx, op, input.Params, identity); blocked != nil {
+		return blocked, nil
+	}
 
 	// An answered prompt still governs its blocked call even if the workspace
 	// now allows writes without approval. Preserve declines and edited params.
@@ -547,17 +551,19 @@ func (t *RunOperationTool) confirm(
 		confirmed.call = &call
 		confirmed.params = edited.Params
 	}
-	// Recheck after approval, including resumed runs and edited arguments:
-	// the target can have changed while the user was deciding.
+	// Approval can outlive the per-tool budget; scope and target reads get a
+	// bounded window from the round context, including on resumed runs.
+	timeout := meta.ExecTimeout
+	if timeout <= 0 {
+		timeout = defaultOperationTimeout
+	}
+	checkCtx, cancel := context.WithTimeout(waitCtx, timeout)
+	defer cancel()
+	if blocked := t.checkScope(checkCtx, op, confirmedInput.Params, identity); blocked != nil {
+		t.rt.Gate.MarkExecuted(ctx, decision.PendingID)
+		return confirmedCall{}, blocked
+	}
 	if op.Target != nil && op.Target.RequireComplete {
-		// Approval may outlive the original per-tool budget, just as it can
-		// for the mutation itself. Bound the read using the round context.
-		timeout := meta.ExecTimeout
-		if timeout <= 0 {
-			timeout = defaultOperationTimeout
-		}
-		checkCtx, cancel := context.WithTimeout(waitCtx, timeout)
-		defer cancel()
 		if _, blocked := t.describeTarget(checkCtx, op, confirmedInput, identity); blocked != nil {
 			t.rt.Gate.MarkExecuted(ctx, decision.PendingID)
 			return confirmedCall{}, blocked

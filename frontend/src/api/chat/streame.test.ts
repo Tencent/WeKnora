@@ -80,3 +80,27 @@ for (const selected of [true, false, undefined]) {
     } finally { stream.stopStream() }
   })
 }
+
+for (const scope of ['page', 'knowledge_base', 'workspace'] as const) {
+  test(`SSE body carries assistant scope ${scope} and agent-only context`, async () => {
+    let stream!: ReturnType<typeof useStream>
+    await renderToString(createSSRApp({ setup() { stream = useStream(); return () => null } }))
+    try {
+      await stream.startStream({
+        session_id: 'session', query: 'Check', method: 'POST', url: '/api/v1/agent-chat',
+        agent_enabled: true, assistant_scope: scope, page_context: { agent_id: 'agent-a' },
+      })
+      assert.equal(stream.error.value, null)
+      let body = JSON.parse(transport.requests.at(-1)!.options.body)
+      assert.equal(body.assistant_scope, scope)
+      assert.deepEqual(body.page_context, { agent_id: 'agent-a' })
+      await stream.startStream({
+        session_id: 'session', query: 'List', method: 'POST', url: '/api/v1/agent-chat',
+        agent_enabled: true, assistant_scope: scope,
+      })
+      body = JSON.parse(transport.requests.at(-1)!.options.body)
+      assert.equal(body.assistant_scope, scope)
+      assert.equal(body.page_context, undefined)
+    } finally { stream.stopStream() }
+  })
+}

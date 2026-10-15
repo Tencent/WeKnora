@@ -184,6 +184,7 @@ type AgentConfig struct {
 	// AssistantAccess is how far an OperationsAgentID run may act without
 	// asking, already capped by the workspace. Runtime only.
 	AssistantAccess AssistantAccessLevel `json:"-"`
+	AssistantScope  AssistantScope       `json:"-"`
 	// AssistantName is what the workspace calls the assistant; empty keeps
 	// the system prompt's. Runtime only.
 	AssistantName string `json:"-"`

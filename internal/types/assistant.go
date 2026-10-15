@@ -21,6 +21,29 @@ const (
 	AssistantAccessAutoWrite AssistantAccessLevel = "auto_write"
 )
 
+// AssistantScope limits the resources an assistant turn may act on.
+type AssistantScope string
+
+// Assistant scopes are an allowlist; omitted requests use workspace.
+const (
+	AssistantScopePage          AssistantScope = "page"
+	AssistantScopeKnowledgeBase AssistantScope = "knowledge_base"
+	AssistantScopeWorkspace     AssistantScope = "workspace"
+)
+
+// Valid excludes empty; request normalization supplies the default.
+func (s AssistantScope) Valid() bool {
+	return s == AssistantScopePage || s == AssistantScopeKnowledgeBase || s == AssistantScopeWorkspace
+}
+
+// WithDefault preserves unknown values so validation can reject them.
+func (s AssistantScope) WithDefault() AssistantScope {
+	if s == "" {
+		return AssistantScopeWorkspace
+	}
+	return s
+}
+
 // MaxAssistantDisplayNameRunes bounds the workspace's assistant name.
 const MaxAssistantDisplayNameRunes = 24
 

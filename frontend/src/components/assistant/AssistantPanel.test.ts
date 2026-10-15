@@ -63,6 +63,7 @@ async function fixture(
   pinia.setActivePinia(storeRoot)
   const assistant = stores.useAssistantStore()
   const mounted: Array<{ sessionId: string; query: string }> = []
+  const hostScopes: Array<() => any> = []
   const sent: Array<{ sessionId: string; query: string; scope: any }> = []
   const menuEntries: unknown[] = []
   const errors: string[] = []
@@ -75,6 +76,7 @@ async function fixture(
     props: ['session_id', 'initialQuery', 'hostScope'],
     setup(props) {
       vue.onMounted(() => {
+        hostScopes.push(props.hostScope)
         mounted.push({ sessionId: props.session_id, query: props.initialQuery })
         // ChatView sends initialQuery on mount and reads hostScope during send.
         if (props.initialQuery) {
@@ -96,6 +98,7 @@ async function fixture(
     '@/components/PanelResizeHandle.vue': emptyComponent,
     './AssistantContextChip.vue': emptyComponent,
     './AssistantAccessPicker.vue': emptyComponent,
+    './AssistantScopePicker.vue': emptyComponent,
     '@/api/chat': {
       createSessions: createSession,
       getSession: api.getSession || (async () => ({ success: true, data: {} })),
@@ -161,7 +164,7 @@ async function fixture(
     await flush()
   }
   await flush()
-  return { auth, assistant, mounted, sent, menuEntries, sessionStorage, localStorage, findAll, click, listCalls, deleted, dialogs, errors, close: () => app.unmount() }
+  return { auth, assistant, mounted, sent, hostScopes, menuEntries, sessionStorage, localStorage, findAll, click, listCalls, deleted, dialogs, errors, close: () => app.unmount() }
 }
 
 test('layout and width persist, with the width kept within bounds', async () => {
@@ -393,5 +396,64 @@ test('a pending delete confirmation cannot delete a session after switching work
     await f.dialogs[0].onConfirm()
     assert.deepEqual(f.deleted, [])
     assert.equal(f.assistant.sessionId, 'workspace-b-session')
+  } finally { f.close() }
+})
+
+test('agent layers merge, dismissal follows the agent id, and the payload has no KB', async () => {
+  const f = await fixture()
+  try {
+    const owner = Symbol()
+    const nested = Symbol()
+    f.assistant.publishPageContext(owner, { agentId: 'agent-a', agentName: 'A' })
+    f.assistant.publishPageContext(nested, { agentName: 'Edited' })
+    assert.equal(f.assistant.pageContext.agentName, 'Edited')
+    f.assistant.retractPageContext(nested)
+    assert.equal(f.assistant.pageContext.agentName, 'A')
+    f.assistant.dismissPageContext()
+    assert.equal(f.assistant.contextAttached, false)
+    f.assistant.publishPageContext(owner, { agentId: 'agent-b', agentName: 'B' })
+    assert.equal(f.assistant.contextAttached, true)
+    f.assistant.open({ query: 'Check this agent' })
+    await flush()
+    assert.equal(f.sent[0].scope.pageContext.agent_id, 'agent-b')
+    assert.equal(f.sent[0].scope.knowledgeBaseIds.length, 0)
+    assert.equal(f.sent[0].scope.pageContext.knowledge_base_id, undefined)
+    f.assistant.publishPageContext(nested, { knowledgeBaseId: 'kb-a' })
+    assert.equal(f.assistant.pageContext.agentId, 'agent-b')
+    assert.equal(f.assistant.pageContext.knowledgeBaseId, 'kb-a')
+    f.assistant.retractPageContext(owner)
+    assert.equal(f.assistant.pageContext.knowledgeBaseId, 'kb-a')
+    f.assistant.retractPageContext(nested)
+    assert.equal(f.assistant.pageContext, null)
+  } finally { f.close() }
+})
+
+test('scope persists per user and workspace and is sent even with a dismissed context', async () => {
+  const f = await fixture()
+  try {
+    assert.equal(f.assistant.scope, 'workspace')
+    f.assistant.setScope('page')
+    assert.equal(f.localStorage.getItem('weknora:assistant-scope:user-a:1'), 'page')
+    f.assistant.publishPageContext(Symbol(), { agentId: 'agent-a' })
+    f.assistant.open({ query: 'Check it' })
+    await flush()
+    assert.equal(f.sent[0].scope.assistantScope, 'page')
+    f.assistant.dismissPageContext()
+    assert.equal(f.hostScopes.at(-1)!().pageContext, null)
+    assert.equal(f.hostScopes.at(-1)!().assistantScope, 'page')
+    f.auth.effectiveTenantId = 2
+    await flush()
+    assert.equal(f.assistant.scope, 'workspace')
+    f.assistant.setScope('knowledge_base')
+    f.auth.effectiveTenantId = 1
+    await flush()
+    assert.equal(f.assistant.scope, 'page')
+    f.auth.user = { id: 'user-b' }
+    await flush()
+    assert.equal(f.assistant.scope, 'workspace')
+    f.localStorage.setItem('weknora:assistant-scope:user-a:1', 'invalid')
+    f.auth.user = { id: 'user-a' }
+    await flush()
+    assert.equal(f.assistant.scope, 'workspace')
   } finally { f.close() }
 })

@@ -6120,6 +6120,7 @@ export default {
         float: 'Float over the page',
       },
       welcomeTitle: 'How can I help?',
+      agentWelcomeDesc: 'Check this agent’s configuration, change its model or see which knowledge bases it can search.',
       welcomeDesc: 'Ask how WeKnora works, or have me check and handle document parsing, knowledge base activity and Wiki issues in your workspace, or create and configure agents. Whether I ask before a change depends on the access level below the input box.',
       startFailed: 'Failed to start the assistant. Please try again.',
       askAboutDocument: 'Ask {name}',
@@ -6141,6 +6142,15 @@ export default {
         }
       }
     },
+    scope: {
+      title: 'Scope',
+      description: 'Limit the resources the assistant can act on, within your existing permissions.',
+      page: 'Current page',
+      knowledge_base: 'Current knowledge base',
+      workspace: 'Entire workspace',
+      agentNoKB: 'Agent pages have no containing knowledge base',
+      noContext: 'Without an attached page, only workspace-wide lookups are available.',
+    },
     context: {
       currentPage: 'Current page',
       detach: 'Don\'t include the current page',
@@ -6148,6 +6158,9 @@ export default {
       detachedTip: 'Click to include the current page: {path}'
     },
     starters: {
+      agentConfig: 'Check this agent’s configuration',
+      agentModel: 'Change its model',
+      agentKnowledge: 'Which knowledge bases can it search?',
       wikiIssues: 'What issues are open on this page?',
       wikiSummary: 'Summarize this Wiki page',
       documentStatus: 'How did this document parse?',

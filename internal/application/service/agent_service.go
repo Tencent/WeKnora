@@ -118,6 +118,7 @@ type agentService struct {
 	memoryService         interfaces.MemoryService
 	storageResolver       interfaces.StorageBackendResolver
 	toolApprovalGate      approval.MCPApproval
+	customAgentService    interfaces.CustomAgentService
 	operationDispatcher   operations.Dispatcher
 	sandboxMgr            sandbox.Manager
 	sandboxResolver       sandbox.TenantSandboxResolver
@@ -159,8 +160,10 @@ func NewAgentService(
 	userRepo interfaces.UserRepository,
 	graphRepo interfaces.RetrieveGraphRepository,
 	operationDispatcher *operations.HandlerDispatcher,
+	customAgentService interfaces.CustomAgentService,
 ) interfaces.AgentService {
 	svc := &agentService{
+		customAgentService:   customAgentService,
 		operationDispatcher:  operationDispatcher,
 		browserSkill:         browserSkill,
 		userRepo:             userRepo,
@@ -224,16 +227,19 @@ func (s *agentService) CreateAgentEngine(
 			"enable the browser integration or update the input-bar selection")
 	}
 
+	kbInfos, selectedDocs := s.resolveKBAndDocInfos(ctx, config)
+	pageContext := s.resolvePageContextInfo(ctx, config.PageContext, config.SearchTargets, kbInfos)
+
 	// 2. Build tool registry
 	toolRegistry := tools.NewToolRegistry()
 	if config.MaxToolOutputChars > 0 {
 		toolRegistry.SetMaxToolOutputSize(config.MaxToolOutputChars)
 	}
-	if err := s.registerTools(ctx, toolRegistry, config, rerankModel, chatModel, sessionID); err != nil {
+	if err := s.registerTools(ctx, toolRegistry, config, rerankModel, chatModel, sessionID, pageContext); err != nil {
 		return nil, fmt.Errorf("failed to register tools: %w", err)
 	}
 	s.registerMCPTools(ctx, toolRegistry, config)
-	s.registerOperationTools(ctx, toolRegistry, config)
+	s.registerOperationTools(ctx, toolRegistry, config, pageContext)
 	registerProductDocTools(ctx, toolRegistry, config)
 
 	// Register the shell first: file discovery needs a separate tool only
@@ -247,16 +253,13 @@ func (s *agentService) CreateAgentEngine(
 	// tool definitions are published after describe, before the next model request.
 	toolRegistry.PrepareMCPTools(ctx)
 
-	// 3. Resolve knowledge base and selected document metadata
-	kbInfos, selectedDocs := s.resolveKBAndDocInfos(ctx, config)
-
-	// 4. Resolve system prompt template
+	// 3. Resolve system prompt template
 	systemPromptTemplate := ""
 	if config.UseCustomSystemPrompt || config.SystemPrompt != "" {
 		systemPromptTemplate = config.ResolveSystemPrompt(config.WebSearchEnabled)
 	}
 
-	// 5. Create engine
+	// 4. Create engine
 	engine := agent.NewAgentEngine(
 		config, chatModel, toolRegistry, eventBus,
 		kbInfos, selectedDocs, sessionID,
@@ -270,7 +273,7 @@ func (s *agentService) CreateAgentEngine(
 		s.resolvePinnedSkillInfos(config),
 	)
 	engine.SetQuestionOrigin(s.resolveQuestionOriginInfo(ctx, config.QuestionOrigin, config.SearchTargets, kbInfos))
-	engine.SetPageContext(s.resolvePageContextInfo(ctx, config.PageContext, config.SearchTargets, kbInfos))
+	engine.SetPageContext(pageContext)
 	engine.SetAssistantName(config.AssistantName)
 
 	// Non-vision chat models use the configured VLM to describe tool images.
@@ -460,6 +463,7 @@ func (s *agentService) registerOperationTools(
 	ctx context.Context,
 	toolRegistry *tools.ToolRegistry,
 	config *types.AgentConfig,
+	pageContext *agent.PageContextInfo,
 ) {
 	if config == nil || config.OperationsAgentID == "" || config.SharedAgentReadOnly || s.operationDispatcher == nil {
 		return
@@ -486,6 +490,7 @@ func (s *agentService) registerOperationTools(
 		Gate:       gate,
 		Identity:   identity,
 		Access:     operationAccess,
+		Scope:      assistantOperationScope(config.AssistantScope, pageContext),
 	}))
 }
 
@@ -1085,7 +1090,9 @@ func (s *agentService) registerTools(
 	rerankModel rerank.Reranker,
 	chatModel chat.Chat,
 	sessionID string,
+	pageContext *agent.PageContextInfo,
 ) error {
+	config, scope := assistantToolConfig(config, pageContext)
 	// Source of truth policy:
 	//   - `config.AllowedTools` is the explicit, user-editable whitelist —
 	//     populated by the agent-type preset on create and freely editable
@@ -1403,7 +1410,7 @@ func (s *agentService) registerTools(
 			if risk, writes := assistantWriteToolRisk[toolName]; writes && config.OperationsAgentID != "" {
 				gate, _ := s.toolApprovalGate.(approval.BuiltinApproval)
 				toolToRegister = tools.NewConfirmedTool(toolToRegister, risk,
-					operations.Access{Level: config.AssistantAccess}, gate)
+					operations.Access{Level: config.AssistantAccess}, gate).WithScope(scope, s.wikiPageService)
 			}
 			registry.RegisterTool(toolToRegister)
 		}
@@ -1451,6 +1458,11 @@ func withoutWikiWriteTools(allowed []string) []string {
 func (s *agentService) ValidateConfig(config *types.AgentConfig) error {
 	if config == nil {
 		return fmt.Errorf("config cannot be nil")
+	}
+
+	config.AssistantScope = config.AssistantScope.WithDefault()
+	if !config.AssistantScope.Valid() {
+		return fmt.Errorf("invalid assistant scope")
 	}
 
 	if config.MaxIterations < 0 {
@@ -1677,14 +1689,28 @@ func (s *agentService) resolvePageContextInfo(
 	ctx context.Context, page *types.PageContext, targets types.SearchTargets,
 	kbInfos []*agent.KnowledgeBaseInfo,
 ) *agent.PageContextInfo {
-	if page == nil || page.KnowledgeBaseID == "" || !targets.ContainsKB(page.KnowledgeBaseID) {
+	if page == nil {
 		return nil
 	}
-	kbID := page.KnowledgeBaseID
-	info := &agent.PageContextInfo{
-		KnowledgeBaseID:   kbID,
-		KnowledgeBaseName: s.knowledgeBaseName(ctx, kbID, kbInfos),
+	info := &agent.PageContextInfo{}
+	if page.AgentID != "" && s.customAgentService != nil {
+		agentCtx := ctx
+		if tenantID := types.CallerFromContext(ctx).TenantID; tenantID != 0 {
+			agentCtx = types.WithExecutionTenant(ctx, tenantID)
+		}
+		if a, err := s.customAgentService.GetAgentByID(agentCtx, page.AgentID); err == nil && a != nil {
+			info.Agent = &agent.PageContextAgent{ID: a.ID, Name: a.Name}
+		}
 	}
+	kbID := page.KnowledgeBaseID
+	if kbID == "" || !targets.ContainsKB(kbID) {
+		if info.Agent == nil {
+			return nil
+		}
+		return info
+	}
+	info.KnowledgeBaseID = kbID
+	info.KnowledgeBaseName = s.knowledgeBaseName(ctx, kbID, kbInfos)
 	if page.KnowledgeID != "" {
 		docs, err := s.getSelectedDocumentInfos(ctx, []string{page.KnowledgeID})
 		if err == nil && len(docs) == 1 && docs[0].KnowledgeBaseID == kbID {

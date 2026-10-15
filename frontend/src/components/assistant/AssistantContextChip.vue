@@ -32,15 +32,16 @@ const assistant = useAssistantStore()
 const context = computed(() => assistant.pageContext)
 
 const icon = computed(() => {
+  if (context.value?.agentId) return 'robot'
   if (context.value?.wikiSlug) return 'book-open'
   if (context.value?.knowledgeId) return 'file'
   return 'folder'
 })
 
-// Knowledge base first, then the document or Wiki page open inside it.
 const segments = computed(() => {
   const c = context.value
   if (!c) return []
+  if (c.agentId) return [c.agentName || c.agentId]
   const leaf = c.wikiTitle || c.wikiSlug || c.knowledgeTitle
   const path = [c.knowledgeBaseName, leaf].filter((s): s is string => !!s)
   return path.length ? path : [t('assistant.context.currentPage')]

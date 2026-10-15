@@ -67,8 +67,9 @@
           :agent-id="BUILTIN_WEKNORA_ASSISTANT_ID" :embedded-mode="true" :initial-query="initialQuery"
           :host-scope="hostScope" :model-id="assistant.modelId" :default-model-id="defaultModelId"
           @update:model-id="assistant.setModel">
-          <template v-if="assistant.pageContext" #composer-chips>
+          <template #composer-chips>
             <AssistantContextChip />
+            <AssistantScopePicker />
           </template>
           <template #composer-controls>
             <AssistantAccessPicker />
@@ -88,7 +89,7 @@
               <t-icon name="compass" size="22px" />
             </div>
             <h3 class="assistant-welcome-title">{{ t('assistant.welcomeTitle') }}</h3>
-            <p class="assistant-welcome-desc">{{ t('assistant.welcomeDesc') }}</p>
+            <p class="assistant-welcome-desc">{{ welcomeDescription }}</p>
             <div class="assistant-starters">
               <button v-for="starter in starters" :key="starter" type="button" class="assistant-starter"
                 :disabled="starting" @click="startConversation(starter)">
@@ -100,8 +101,9 @@
             <InputField :embedded-mode="true" compact :auto-focus="assistant.visible" :model-id="assistant.modelId"
               :default-model-id="defaultModelId" @update:model-id="assistant.setModel"
               @send-msg="(query) => startConversation(query)">
-              <template v-if="assistant.pageContext" #chips>
+              <template #chips>
                 <AssistantContextChip />
+                <AssistantScopePicker />
               </template>
               <template #controls>
                 <AssistantAccessPicker />
@@ -123,6 +125,7 @@ import InputField from '@/components/Input-field.vue'
 import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
 import AssistantContextChip from './AssistantContextChip.vue'
 import AssistantAccessPicker from './AssistantAccessPicker.vue'
+import AssistantScopePicker from './AssistantScopePicker.vue'
 import { createSessions, getSessionsList, getSession, type SessionSummary } from '@/api/chat'
 import { classifyDateBucket } from '@/components/sessionGrouping'
 import { BUILTIN_WEKNORA_ASSISTANT_ID } from '@/api/agent'
@@ -197,8 +200,14 @@ const initialMessage = ref<{
 const initialQuery = computed(() => initialMessage.value?.sessionId === assistant.sessionId
   ? initialMessage.value.query : '')
 
+const welcomeDescription = computed(() => t(assistant.contextAttached && assistant.pageContext?.agentId
+  ? 'assistant.agentWelcomeDesc' : 'assistant.welcomeDesc'))
+
 const starters = computed(() => {
   const c = assistant.contextAttached ? assistant.pageContext : null
+  if (c?.agentId) return [
+    t('assistant.starters.agentConfig'), t('assistant.starters.agentModel'), t('assistant.starters.agentKnowledge'),
+  ]
   if (c?.wikiSlug) return [t('assistant.starters.wikiIssues'), t('assistant.starters.wikiSummary')]
   if (c?.knowledgeId) return [t('assistant.starters.documentStatus'), t('assistant.starters.documentSummary')]
   if (c) return [t('assistant.starters.failedDocuments'), t('assistant.starters.recentActivity')]
@@ -212,11 +221,13 @@ const hostScope = () => {
   const focus = initialMessage.value?.sessionId === assistant.sessionId ? initialMessage.value.focus : undefined
   initialMessage.value = null
   const assistantAccess = assistant.effectiveAccessLevel
-  if (!context) return { knowledgeBaseIds: [], pageContext: null, assistantAccess }
+  const assistantScope = assistant.scope
+  if (!context) return { knowledgeBaseIds: [], pageContext: null, assistantAccess, assistantScope }
   return {
-    knowledgeBaseIds: [context.knowledgeBaseId],
+    knowledgeBaseIds: context.knowledgeBaseId ? [context.knowledgeBaseId] : [],
     pageContext: toPageContextPayload(focus ? { ...context, ...focus } : context),
     assistantAccess,
+    assistantScope,
   }
 }
 

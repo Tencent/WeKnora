@@ -2062,6 +2062,7 @@ export default {
       float: '떠 있는 창으로 전환',
     },
     welcomeTitle: '무엇을 도와드릴까요?',
+    agentWelcomeDesc: '이 에이전트의 설정을 확인하고, 모델을 변경하거나 검색할 수 있는 지식 베이스를 확인할 수 있습니다.',
     welcomeDesc: 'WeKnora 사용법을 안내하고, 워크스페이스의 문서 파싱, 지식 베이스 활동, Wiki 문제를 확인하고 처리하며, 에이전트를 만들고 설정할 수도 있습니다. 변경 전에 확인을 요청할지는 입력창 아래의 권한 수준에 따라 정해집니다.',
     startFailed: '어시스턴트를 시작하지 못했습니다. 다시 시도해 주세요.',
     askAboutDocument: '{name}에게 묻기',
@@ -2083,6 +2084,15 @@ export default {
         }
       }
     },
+    scope: {
+      title: '작업 범위',
+      description: '기존 권한 내에서 어시스턴트가 작업할 수 있는 리소스를 제한합니다.',
+      page: '현재 페이지',
+      knowledge_base: '현재 지식 베이스',
+      workspace: '전체 워크스페이스',
+      agentNoKB: '에이전트 페이지에는 소속 지식 베이스가 없습니다',
+      noContext: '페이지가 첨부되지 않으면 워크스페이스 전체 조회만 가능합니다.',
+    },
     context: {
       currentPage: '현재 페이지',
       detach: '현재 페이지 포함하지 않기',
@@ -2090,6 +2100,9 @@ export default {
       detachedTip: '클릭하여 현재 페이지 포함: {path}'
     },
     starters: {
+      agentConfig: '이 에이전트의 설정 확인하기',
+      agentModel: '모델 변경하기',
+      agentKnowledge: '어떤 지식 베이스를 검색할 수 있나요?',
       wikiIssues: '이 페이지에 처리할 문제가 있나요?',
       wikiSummary: '이 Wiki 페이지를 요약해 줘',
       documentStatus: '이 문서의 파싱 상태는 어떤가요?',

@@ -692,14 +692,20 @@ func writeQuestionOrigin(sb *strings.Builder, origin *QuestionOriginInfo) {
 // so "this document", "this page" or "these issues" need no clarifying
 // question. It names what is open; it does not ask for any action.
 func writePageContext(sb *strings.Builder, page *PageContextInfo) {
-	if page == nil || page.KnowledgeBaseID == "" {
+	if page == nil || (page.KnowledgeBaseID == "" && page.Agent == nil) {
 		return
 	}
-	fmt.Fprintf(sb, "  <page_context knowledge_base_id=\"%s\"", escapeXMLAttr(page.KnowledgeBaseID))
-	if page.KnowledgeBaseName != "" {
-		fmt.Fprintf(sb, " name=\"%s\"", escapeXMLAttr(page.KnowledgeBaseName))
+	sb.WriteString("  <page_context")
+	if page.KnowledgeBaseID != "" {
+		fmt.Fprintf(sb, " knowledge_base_id=\"%s\"", escapeXMLAttr(page.KnowledgeBaseID))
+		if page.KnowledgeBaseName != "" {
+			fmt.Fprintf(sb, " name=\"%s\"", escapeXMLAttr(page.KnowledgeBaseName))
+		}
 	}
 	sb.WriteString(">\n")
+	if a := page.Agent; a != nil {
+		fmt.Fprintf(sb, "    <agent id=\"%s\" name=\"%s\" />\n", escapeXMLAttr(a.ID), escapeXMLAttr(a.Name))
+	}
 	if d := page.Document; d != nil && d.KnowledgeID != "" {
 		title := d.Title
 		if title == "" {
@@ -721,7 +727,7 @@ func writePageContext(sb *strings.Builder, page *PageContextInfo) {
 			escapeXMLAttr(issue.IssueType), escapeXMLAttr(issue.Status))
 	}
 	sb.WriteString("    <note>This is the page the user has open. When they say \"this\" without " +
-		"naming something, they mean what is listed here.</note>\n")
+		"naming something, they mean the agent, knowledge base, document or Wiki page listed here.</note>\n")
 	sb.WriteString("  </page_context>\n")
 }
 
@@ -849,6 +855,14 @@ func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
 	e.registerRuntimeReferences()
 	runtimeCtx := buildRuntimeContextBlock(
 		sessionID, e.knowledgeBasesInfo, e.selectedDocs, e.questionOrigin, e.pageContext, e.assistantName)
+	if e.config != nil && e.config.OperationsAgentID != "" {
+		scope := e.config.AssistantScope.WithDefault()
+		guidance := fmt.Sprintf("  <assistant_scope level=\"%s\">"+
+			"Management operations are limited to this scope and the verified page context. "+
+			"Honor scope refusals; the user can widen the scope in the assistant panel.</assistant_scope>\n",
+			escapeXMLAttr(string(scope)))
+		runtimeCtx = strings.Replace(runtimeCtx, "</runtime_context>", guidance+"</runtime_context>", 1)
+	}
 	runtimeCtx = e.modelContext.EncodeKnownIssues(e.modelContext.CompactKnownText(runtimeCtx))
 	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
 	return composeUserTurnContent(runtimeCtx, mustUse, query)

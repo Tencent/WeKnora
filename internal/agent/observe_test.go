@@ -656,3 +656,39 @@ func TestMCPDiscoveryCompactionNeverReturnsPartialSchema(t *testing.T) {
 	require.NotContains(t, compacted.Content, "required")
 	require.Contains(t, compacted.Content, "partial schema")
 }
+
+func TestWriteAgentPageContext(t *testing.T) {
+	for _, kb := range []string{"", "kb-1"} {
+		t.Run(kb, func(t *testing.T) {
+			page := &PageContextInfo{KnowledgeBaseID: kb, Agent: &PageContextAgent{ID: "agent-1", Name: `A <B> "C"`}}
+			if kb == "" {
+				page.KnowledgeBaseName = "must not be rendered"
+			}
+			var out strings.Builder
+			writePageContext(&out, page)
+			opening := "  <page_context>\n"
+			if kb != "" {
+				opening = "  <page_context knowledge_base_id=\"kb-1\">\n"
+			}
+			assert.Equal(t, opening+
+				"    <agent id=\"agent-1\" name=\"A &lt;B&gt; &quot;C&quot;\" />\n"+
+				"    <note>This is the page the user has open. When they say \"this\" without "+
+				"naming something, they mean the agent, knowledge base, document or Wiki page listed here.</note>\n"+
+				"  </page_context>\n", out.String())
+		})
+	}
+}
+
+func TestRuntimeContextAssistantScope(t *testing.T) {
+	engine := &AgentEngine{
+		config: &types.AgentConfig{
+			OperationsAgentID: types.BuiltinWeKnoraAssistantID,
+			AssistantScope:    types.AssistantScopePage,
+		}, modelContext: modelcontext.NewRegistry(true),
+		pageContext: &PageContextInfo{Agent: &PageContextAgent{ID: "agent-raw", Name: "Agent"}},
+	}
+	content := engine.RenderUserTurnContent("s", "question")
+	assert.Contains(t, content, `<assistant_scope level="page">`)
+	assert.Contains(t, content, "user can widen the scope")
+	assert.Contains(t, content, `<agent id="agent-raw" name="Agent" />`)
+}

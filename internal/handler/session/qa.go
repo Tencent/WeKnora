@@ -73,6 +73,7 @@ type qaRequestContext struct {
 	questionOrigin        *types.QuestionOrigin
 	pageContext           *types.PageContext
 	assistantAccess       types.AssistantAccessLevel
+	assistantScope        types.AssistantScope
 	// resourceRewriter turns internal storage references in the outbound stream
 	// into directly loadable URLs when the caller asks for `resource_urls=public`.
 	// Disabled (a pass-through) in the default handle mode.
@@ -141,6 +142,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		QuestionOrigin:      rc.questionOrigin,
 		PageContext:         rc.pageContext,
 		AssistantAccess:     rc.assistantAccess,
+		AssistantScope:      rc.assistantScope.WithDefault(),
 		TurnLeaseHeld:       rc.turnLeaseHeld,
 		// Only a caller that can answer the prompt later may leave the run
 		// suspended; an API-key caller would get a turn with no answer.
@@ -193,6 +195,11 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	if err := c.ShouldBindJSON(&request); err != nil {
 		logger.Error(ctx, "Failed to parse request data", err)
 		return nil, nil, errors.NewBadRequestError(err.Error())
+	}
+
+	request.AssistantScope = request.AssistantScope.WithDefault()
+	if !request.AssistantScope.Valid() {
+		return nil, nil, errors.NewBadRequestError("assistant_scope must be page, knowledge_base or workspace")
 	}
 
 	level, validEffort := api.ParseReasoningEffort(request.ReasoningEffort)
@@ -504,6 +511,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		questionOrigin:        request.QuestionOrigin,
 		pageContext:           request.PageContext,
 		assistantAccess:       request.AssistantAccess,
+		assistantScope:        request.AssistantScope,
 		reqAgentEnabled:       request.AgentEnabled,
 		reqAgentID:            request.AgentID,
 		resourceRewriter:      resourceRewriter,

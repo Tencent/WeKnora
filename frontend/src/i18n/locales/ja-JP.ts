@@ -6120,6 +6120,7 @@ export default {
         float: 'フローティング表示にする',
       },
       welcomeTitle: '何をお手伝いしましょうか？',
+      agentWelcomeDesc: 'このエージェントの設定を確認したり、モデルを変更したり、検索可能なナレッジベースを確認できます。',
       welcomeDesc: 'WeKnora の使い方にお答えするほか、ワークスペースのドキュメント解析、ナレッジベースの履歴、Wiki の問題を確認・対応し、エージェントの作成や設定もお手伝いできます。変更の前に確認するかどうかは、入力欄の下の権限レベルで決まります。',
       startFailed: 'アシスタントを起動できませんでした。もう一度お試しください。',
       askAboutDocument: '{name}に聞く',
@@ -6141,6 +6142,15 @@ export default {
         }
       }
     },
+    scope: {
+      title: '操作範囲',
+      description: '現在の権限内で、アシスタントが操作できるリソースを制限します。',
+      page: '現在のページ',
+      knowledge_base: '現在のナレッジベース',
+      workspace: 'ワークスペース全体',
+      agentNoKB: 'エージェントのページには所属ナレッジベースがありません',
+      noContext: 'ページが未添付の場合、ワークスペース全体の一覧・参照のみ利用できます。',
+    },
     context: {
       currentPage: '現在のページ',
       detach: '現在のページを含めない',
@@ -6148,6 +6158,9 @@ export default {
       detachedTip: 'クリックして現在のページを含める：{path}'
     },
     starters: {
+      agentConfig: 'このエージェントの設定を確認して',
+      agentModel: 'モデルを変更して',
+      agentKnowledge: 'どのナレッジベースを検索できる？',
       wikiIssues: 'このページの未対応の問題は？',
       wikiSummary: 'この Wiki ページを要約して',
       documentStatus: 'このドキュメントの解析状況は？',

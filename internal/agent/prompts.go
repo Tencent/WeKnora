@@ -64,10 +64,15 @@ type QuestionOriginInfo struct {
 	Document          *SelectedDocumentInfo // nil when only the base is known
 }
 
-// PageContextInfo is the WeKnora page the user has open, with every part
-// checked to exist in the knowledge base. Rendered into runtime_context so
-// "this document" or "these issues" resolve without the model asking.
+// PageContextAgent is a tenant-visible agent; IDs remain raw in model context.
+type PageContextAgent struct {
+	ID   string
+	Name string
+}
+
+// PageContextInfo contains only resources verified as visible in this turn.
 type PageContextInfo struct {
+	Agent             *PageContextAgent
 	KnowledgeBaseID   string
 	KnowledgeBaseName string
 	Document          *SelectedDocumentInfo // nil unless a document is open

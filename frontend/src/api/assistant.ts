@@ -3,6 +3,12 @@ import { get, put } from '@/utils/request'
 // Mirrors internal/types/assistant.go.
 export type AssistantAccessLevel = 'read_only' | 'confirm' | 'auto_write'
 
+export type AssistantScope = 'page' | 'knowledge_base' | 'workspace'
+export const ASSISTANT_SCOPES: AssistantScope[] = ['page', 'knowledge_base', 'workspace']
+export function isAssistantScope(value: unknown): value is AssistantScope {
+  return typeof value === 'string' && (ASSISTANT_SCOPES as string[]).includes(value)
+}
+
 export const ASSISTANT_ACCESS_LEVELS: AssistantAccessLevel[] = ['read_only', 'confirm', 'auto_write']
 
 export const DEFAULT_ASSISTANT_ACCESS_LEVEL: AssistantAccessLevel = 'confirm'

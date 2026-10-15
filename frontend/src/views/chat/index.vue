@@ -1583,6 +1583,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         question_origin: options?.questionOrigin,
         page_context: agentEnabled ? (hostScope?.pageContext || undefined) : undefined,
         assistant_access: agentEnabled ? (hostScope?.assistantAccess || undefined) : undefined,
+        assistant_scope: agentEnabled ? (hostScope?.assistantScope || undefined) : undefined,
         method: 'POST',
         url: endpoint,
     });

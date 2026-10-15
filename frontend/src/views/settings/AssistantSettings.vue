@@ -38,6 +38,14 @@
 
       <div class="setting-row">
         <div class="setting-info">
+          <label>{{ t('assistant.scope.title') }}</label>
+          <p class="desc">{{ t('assistant.scope.description') }}</p>
+        </div>
+        <div class="setting-control"><AssistantScopePicker /></div>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-info">
           <label>{{ t('assistantSettings.entryLabel') }}</label>
           <p class="desc">{{ t('assistantSettings.entryDescription', { shortcut: `${modKey}K` }) }}</p>
         </div>
@@ -101,6 +109,7 @@
 import { computed, onMounted, reactive, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import AssistantScopePicker from '@/components/assistant/AssistantScopePicker.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useAssistantStore, type AssistantEntry, type AssistantLayout } from '@/stores/assistant'
 import {

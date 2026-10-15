@@ -17,10 +17,11 @@ import (
 // level covers its direct tools too. A call resumed with the user's answer
 // is honored whatever the level is now: the user may have edited it.
 type ConfirmedTool struct {
-	inner  types.Tool
-	risk   operations.Risk
-	access operations.Access
-	gate   approval.BuiltinApproval
+	inner      types.Tool
+	risk       operations.Risk
+	access     operations.Access
+	gate       approval.BuiltinApproval
+	scopeCheck func(context.Context, json.RawMessage) *types.ToolResult
 }
 
 // NewConfirmedTool wraps inner, whose calls carry risk.
@@ -41,6 +42,11 @@ func (t *ConfirmedTool) Parameters() json.RawMessage { return t.inner.Parameters
 
 // Execute runs the inner tool once the access level allows it.
 func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if t.scopeCheck != nil {
+		if blocked := t.scopeCheck(ctx, args); blocked != nil {
+			return blocked, nil
+		}
+	}
 	meta, _ := ToolExecFromContext(ctx)
 	resumed := meta != nil && meta.Answered != nil && meta.Answered.Kind == types.AgentPromptKindToolApproval
 	if !resumed && !t.access.NeedsApprovalFor(t.risk) {
@@ -118,6 +124,11 @@ func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(WithToolExecContext(meta.ApprovalCtx, meta), timeout)
 		defer cancel()
+	}
+	if t.scopeCheck != nil {
+		if blocked := t.scopeCheck(ctx, args); blocked != nil {
+			return blocked, nil
+		}
 	}
 	return t.inner.Execute(ctx, args)
 }

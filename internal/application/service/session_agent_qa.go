@@ -369,6 +369,7 @@ func resumableAgentRequest(ctx context.Context, req *types.QARequest) types.Resu
 		QuestionOrigin:      req.QuestionOrigin,
 		PageContext:         req.PageContext,
 		AssistantAccess:     req.AssistantAccess,
+		AssistantScope:      req.AssistantScope.WithDefault(),
 		UserMessageID:       req.UserMessageID,
 		Language:            types.LanguageFromContextOrDefault(ctx),
 	}
@@ -525,6 +526,7 @@ func (s *sessionService) buildAgentConfig(
 		agentConfig.WritableKBIDs = kbWritableIDs(ctx, s.kbShareService, searchTargets, roleEnforced)
 		if types.GrantsOperationCatalog(req.CustomAgent) {
 			agentConfig.OperationsAgentID = req.CustomAgent.ID
+			agentConfig.AssistantScope = req.AssistantScope.WithDefault()
 			agentConfig.AssistantAccess = tenantInfo.AssistantConfig.EffectiveAccessLevel(req.AssistantAccess)
 			if cfg := tenantInfo.AssistantConfig; cfg != nil {
 				agentConfig.AssistantName = strings.TrimSpace(cfg.DisplayName)
@@ -813,16 +815,20 @@ func pageContextInTargets(
 	if page == nil {
 		return nil
 	}
+	kept := &types.PageContext{AgentID: strings.TrimSpace(page.AgentID)}
 	kbID := strings.TrimSpace(page.KnowledgeBaseID)
-	if kbID == "" {
-		return nil
+	if kbID == "" || !targets.ContainsKB(kbID) {
+		if kbID != "" {
+			logger.Infof(ctx, "Ignoring page context: knowledge base %s is outside this turn's search targets",
+				secutils.SanitizeForLog(kbID))
+		}
+		if kept.AgentID == "" {
+			return nil
+		}
+		return kept
 	}
-	if !targets.ContainsKB(kbID) {
-		logger.Infof(ctx, "Ignoring page context: knowledge base %s is outside this turn's search targets",
-			secutils.SanitizeForLog(kbID))
-		return nil
-	}
-	kept := &types.PageContext{KnowledgeBaseID: kbID, WikiSlug: strings.TrimSpace(page.WikiSlug)}
+	kept.KnowledgeBaseID = kbID
+	kept.WikiSlug = strings.TrimSpace(page.WikiSlug)
 	if docID := strings.TrimSpace(page.KnowledgeID); docID != "" && targetsCoverDocument(targets, kbID, docID) {
 		kept.KnowledgeID = docID
 	}

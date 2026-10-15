@@ -186,10 +186,7 @@ func decodeParam(p Param, raw json.RawMessage) (any, error) {
 		if err := json.Unmarshal(raw, &list); err != nil {
 			return nil, paramErr(p.Name, "must be an array of strings")
 		}
-		limit := p.MaxItems
-		if limit <= 0 {
-			limit = defaultMaxListItems
-		}
+		limit := p.ListLimit()
 		if len(list) > limit {
 			return nil, paramErr(p.Name, "accepts at most %d items", limit)
 		}
@@ -213,10 +210,7 @@ func decodeParam(p Param, raw json.RawMessage) (any, error) {
 		if err := json.Unmarshal(raw, &list); err != nil {
 			return nil, paramErr(p.Name, "must be an array of integers")
 		}
-		limit := p.MaxItems
-		if limit <= 0 {
-			limit = defaultMaxListItems
-		}
+		limit := p.ListLimit()
 		if len(list) > limit {
 			return nil, paramErr(p.Name, "accepts at most %d items", limit)
 		}

@@ -23108,6 +23108,19 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.AssistantScope": {
+            "type": "string",
+            "enum": [
+                "page",
+                "knowledge_base",
+                "workspace"
+            ],
+            "x-enum-varnames": [
+                "AssistantScopePage",
+                "AssistantScopeKnowledgeBase",
+                "AssistantScopeWorkspace"
+            ]
+        },
         "github_com_Tencent_WeKnora_internal_types.AttrSpec": {
             "type": "object",
             "properties": {
@@ -28856,6 +28869,9 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.PageContext": {
             "type": "object",
             "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
                 "knowledge_base_id": {
                     "type": "string"
                 },
@@ -30077,6 +30093,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "kind": {
+                    "description": "Kind is empty for ordinary chats and SessionKindAssistant for assistant\nconversations; it is set at creation and never updated.",
                     "type": "string"
                 },
                 "last_request_state": {
@@ -36916,6 +36933,14 @@ const docTemplate = `{
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel"
+                        }
+                    ]
+                },
+                "assistant_scope": {
+                    "default": "workspace",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantScope"
                         }
                     ]
                 },

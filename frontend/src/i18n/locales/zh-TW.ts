@@ -2064,6 +2064,7 @@ export default {
       float: '改為懸浮',
     },
     welcomeTitle: '有什麼可以幫你？',
+    agentWelcomeDesc: '可以檢查這個智慧代理的設定、調整模型或查看它能檢索的知識庫。',
     welcomeDesc: '我可以解答 WeKnora 的用法，也可以檢視和處理你空間裡的文件解析、知識庫動態和 Wiki 問題，還能幫你建立和設定智慧代理。變更前是否先請你確認，由輸入框下方的權限等級決定。',
     startFailed: '啟動助手失敗，請重試',
     askAboutDocument: '問 {name}',
@@ -2085,6 +2086,15 @@ export default {
         }
       }
     },
+    scope: {
+      title: '操作範圍',
+      description: '限制助手可以操作的資源；不會擴大你現有的權限。',
+      page: '目前頁面',
+      knowledge_base: '目前知識庫',
+      workspace: '整個空間',
+      agentNoKB: '智慧代理頁面沒有所屬知識庫',
+      noContext: '未附加頁面時，僅可進行空間層級查詢。',
+    },
     context: {
       currentPage: '目前頁面',
       detach: '不附帶目前頁面',
@@ -2092,6 +2102,9 @@ export default {
       detachedTip: '點擊附帶目前頁面：{path}'
     },
     starters: {
+      agentConfig: '檢查這個智慧代理的設定',
+      agentModel: '幫它換個模型',
+      agentKnowledge: '它能檢索哪些知識庫？',
       wikiIssues: '這個頁面有哪些待處理的問題？',
       wikiSummary: '總結一下這個 Wiki 頁面',
       documentStatus: '這個文件的解析狀態如何？',

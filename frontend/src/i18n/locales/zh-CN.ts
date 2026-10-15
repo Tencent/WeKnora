@@ -2064,6 +2064,7 @@ export default {
       float: '改为悬浮',
     },
     welcomeTitle: '有什么可以帮你？',
+    agentWelcomeDesc: '可以检查这个智能体的配置、调整模型或查看它能检索的知识库。',
     welcomeDesc: '我可以解答 WeKnora 的用法，也可以查看和处理你空间里的文档解析、知识库动态和 Wiki 问题，还能帮你创建和配置智能体。改动前是否先请你确认，由输入框下方的权限等级决定。',
     startFailed: '启动助手失败，请重试',
     askAboutDocument: '问 {name}',
@@ -2085,6 +2086,15 @@ export default {
         }
       }
     },
+    scope: {
+      title: '操作范围',
+      description: '限制助手可以操作的资源；不会扩大你的现有权限。',
+      page: '当前页面',
+      knowledge_base: '当前知识库',
+      workspace: '整个空间',
+      agentNoKB: '智能体页面没有所属知识库',
+      noContext: '未附加页面时，仅可进行空间级查询。',
+    },
     context: {
       currentPage: '当前页面',
       detach: '不附带当前页面',
@@ -2092,6 +2102,9 @@ export default {
       detachedTip: '点击附带当前页面：{path}'
     },
     starters: {
+      agentConfig: '检查这个智能体的配置',
+      agentModel: '给它换个模型',
+      agentKnowledge: '它能检索哪些知识库？',
       wikiIssues: '这个页面有哪些待处理的问题？',
       wikiSummary: '总结一下这个 Wiki 页面',
       documentStatus: '这个文档的解析状态怎么样？',
