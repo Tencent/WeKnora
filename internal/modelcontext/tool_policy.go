@@ -171,7 +171,8 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 	"find_operations": {},
 	"run_operation": {
 		sourceIDKeys: map[string]struct{}{
-			"knowledge_base_id": {}, "source_knowledge_base_id": {}, "knowledge_id": {}, "knowledge_ids": {},
+			"knowledge_base_id": {}, "knowledge_base_ids": {}, "source_knowledge_base_id": {},
+			"knowledge_id": {}, "knowledge_ids": {},
 		},
 		decodedIssueIDKeys:  map[string]struct{}{"issue_id": {}},
 		encodedIssueIDKeys:  map[string]struct{}{"issue_id": {}},

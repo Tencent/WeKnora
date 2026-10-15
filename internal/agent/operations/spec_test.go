@@ -288,7 +288,7 @@ func TestBuiltinMatchesHandlerAnnotations(t *testing.T) {
 
 	built := map[string]agentOperation{}
 	for _, op := range Builtin().All() {
-		meta := agentOperation{ID: op.ID, Risk: op.Risk}
+		meta := agentOperation{ID: op.ID, Risk: op.Risk, LabelParam: op.LabelParam}
 		if op.Target != nil {
 			meta.Target, meta.Label = op.Target.Operation, op.Target.Label
 			meta.RequireCompleteTarget = op.Target.RequireComplete
@@ -309,6 +309,46 @@ func TestBuiltinMatchesHandlerAnnotations(t *testing.T) {
 		declared[id] = meta
 	}
 	assert.Equal(t, declared, built, "docs/swagger.json is stale; run make docs")
+}
+
+func TestFromSpecDropsDetailFieldsFromLists(t *testing.T) {
+	const spec = `{
+	  "basePath": "/api/v1",
+	  "definitions": {
+	    "Agent": {"type": "object", "properties": {
+	      "id": {"type": "string", "x-agent": "agent_id"},
+	      "config": {"type": "object", "x-agent": true, "properties": {
+	        "mode": {"type": "string", "x-agent": true},
+	        "prompt": {"type": "string", "x-agent": true, "x-agent-detail": true}
+	      }}
+	    }}
+	  },
+	  "paths": {
+	    "/agents": {"get": {"summary": "list", "x-agent": {"id": "agent.list", "risk": "read"},
+	      "responses": {"200": {"schema": {"type": "object", "properties": {
+	        "data": {"type": "array", "items": {"$ref": "#/definitions/Agent"}}}}}}}},
+	    "/agents/{id}": {"get": {"summary": "get", "x-agent": {"id": "agent.get", "risk": "read"},
+	      "parameters": [{"name": "id", "in": "path", "type": "string", "required": true,
+	        "description": "d", "x-agent": "agent_id"}],
+	      "responses": {"200": {"schema": {"type": "object", "properties": {
+	        "data": {"$ref": "#/definitions/Agent"}}}}}}}
+	  }
+	}`
+	ops, err := FromSpec([]byte(spec))
+	require.NoError(t, err)
+	fields := map[string][]string{}
+	for _, op := range ops {
+		for _, f := range op.Result.Fields {
+			fields[op.ID] = append(fields[op.ID], f.outputKey())
+		}
+	}
+	assert.ElementsMatch(t, []string{"agent_id", "mode"}, fields["agent.list"])
+	assert.ElementsMatch(t, []string{"agent_id", "mode", "prompt"}, fields["agent.get"])
+
+	const exposed = `"prompt": {"type": "string", "x-agent": true,`
+	unexposed := strings.Replace(spec, exposed, `"prompt": {"type": "string",`, 1)
+	_, err = FromSpec([]byte(unexposed))
+	assert.ErrorContains(t, err, "x-agent-detail needs x-agent")
 }
 
 func TestFromSpecProjectsNestedListMeta(t *testing.T) {

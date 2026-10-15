@@ -812,6 +812,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import { ref, computed, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useSettingsStore } from '@/stores/settings'
@@ -5073,6 +5074,13 @@ watch(() => route.query.slug, (newSlug) => {
     }
   }
 })
+
+useAssistantDataChange((changes) => {
+  if (!changes.some(change => change.ids.knowledgeBaseIds.includes(props.knowledgeBaseId))) return
+  void loadPages()
+  void refreshSelectedPage()
+  void loadStats()
+}, { areas: ['wiki'] })
 
 onMounted(() => {
   loadPages()

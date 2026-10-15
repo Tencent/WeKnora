@@ -207,11 +207,12 @@ func (h *ModelHandler) CopyModel(c *gin.Context) {
 // @Tags         模型管理
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "模型ID"
+// @Param        id   path      string  true  "模型ID"  extensions(x-agent=model_id)
 // @Success      200  {object}  handler.DataResponse{data=dto.ModelResponse}  "模型详情"
 // @Failure      404  {object}  errors.AppError         "模型不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"model.get","risk":"read"}
 // @Router       /models/{id} [get]
 func (h *ModelHandler) GetModel(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -256,6 +257,8 @@ func (h *ModelHandler) GetModel(c *gin.Context) {
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"model.list","risk":"read","max_items":200}
+// @x-agent-hint "Lists the workspace's models by name and type. An agent's chat model must be of type KnowledgeQA. Endpoints and keys are not shown; the user manages models in the settings."
 // @Router       /models [get]
 func (h *ModelHandler) ListModels(c *gin.Context) {
 	ctx := c.Request.Context()

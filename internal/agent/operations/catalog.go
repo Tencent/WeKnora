@@ -155,6 +155,10 @@ type Operation struct {
 	// and its result labels the approval prompt. Its parameters must be a
 	// subset of this operation's.
 	Target *Target
+	// LabelParam, for a creation with nothing existing to act on, names the
+	// required string parameter (the new name) that labels the approval in
+	// place of a Target.
+	LabelParam string
 	// Role is the lowest workspace role the route's guards let through;
 	// empty takes the default for Risk. It only decides what a caller is
 	// offered: the router still authorizes every call, and a router test
@@ -304,7 +308,8 @@ var (
 )
 
 // allowedRouteAreas are the first path segments under /api/v1 an operation
-// may live in: the user's knowledge content. Every other area is refused,
+// may live in: the user's knowledge content, their agents, and the models
+// and MCP services an agent can be bound to. Every other area is refused,
 // so an API added later (credentials, integrations, identity, the agent's
 // own approval and prompt endpoints) stays unreachable until it is listed
 // here on purpose. Catalog construction fails otherwise, so a careless
@@ -316,13 +321,26 @@ var allowedRouteAreas = map[string]bool{
 	"knowledgebase":          true, // Wiki
 	"chunks":                 true,
 	"faq":                    true,
+	"agents":                 true,
+	"skills":                 true,
+	// Model and MCP responses carry endpoints and headers next to the
+	// names; only fields tagged x-agent are projected, so annotate the
+	// identifying ones and nothing else.
+	"models":       true,
+	"mcp-services": true,
 }
 
 // forbiddenRouteSegments are refused anywhere inside an allowed area:
-// sharing changes who can reach a knowledge base, which the user does
+// sharing and publishing change who can reach a knowledge base or agent,
+// and credentials never pass through the model; the user handles these
 // themselves.
 var forbiddenRouteSegments = map[string]bool{
-	"shares": true,
+	"shares":         true,
+	"embed-channels": true,
+	"im-channels":    true,
+	"credentials":    true,
+	"oauth":          true,
+	"catalog":        true,
 }
 
 var allowedMethods = map[string]bool{
@@ -455,8 +473,17 @@ func validateOperation(op Operation) error {
 	if op.Method == http.MethodDelete && op.Risk != RiskDestructive {
 		return fmt.Errorf("DELETE operations must be destructive")
 	}
-	if op.Risk.Mutates() && op.Target == nil {
+	if op.Risk.Mutates() && op.Target == nil && op.LabelParam == "" {
 		return fmt.Errorf("mutating operations must declare a target")
+	}
+	if op.LabelParam != "" {
+		if op.Target != nil || op.Risk != RiskWrite || op.Method != http.MethodPost {
+			return fmt.Errorf("label_param is for a POST write without a target")
+		}
+		p, ok := op.Param(op.LabelParam)
+		if !ok || p.Type != TypeString || !p.Required {
+			return fmt.Errorf("label_param %q must be a required string param", op.LabelParam)
+		}
 	}
 	if !op.Role.IsValid() {
 		return fmt.Errorf("invalid role %q", op.Role)

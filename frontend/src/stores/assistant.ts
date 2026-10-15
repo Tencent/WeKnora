@@ -13,7 +13,9 @@ import { useAuthStore } from './auth'
 
 /** What the user has open, as published by the pages that know it. */
 export interface AssistantPageContext {
-  knowledgeBaseId: string
+  agentId?: string
+  agentName?: string
+  knowledgeBaseId?: string
   knowledgeBaseName?: string
   /** The knowledge base's chat model, the assistant's default on this page. */
   chatModelId?: string
@@ -81,7 +83,8 @@ function readWidth(): number {
 
 export function toPageContextPayload(context: AssistantPageContext): PageContextPayload {
   return {
-    knowledge_base_id: context.knowledgeBaseId,
+    agent_id: context.agentId || undefined,
+    knowledge_base_id: context.knowledgeBaseId || undefined,
     knowledge_id: context.knowledgeId || undefined,
     wiki_slug: context.wikiSlug || undefined,
     wiki_issue_ids: context.wikiIssueIds?.length ? [...context.wikiIssueIds] : undefined,
@@ -90,7 +93,7 @@ export function toPageContextPayload(context: AssistantPageContext): PageContext
 
 function contextKey(context: AssistantPageContext | null): string {
   if (!context) return ''
-  return [context.knowledgeBaseId, context.knowledgeId || '', context.wikiSlug || ''].join('|')
+  return [context.agentId || '', context.knowledgeBaseId || '', context.knowledgeId || '', context.wikiSlug || ''].join('|')
 }
 
 /**
@@ -109,7 +112,7 @@ export const useAssistantStore = defineStore('assistant', () => {
   const pageContext = computed<AssistantPageContext | null>(() => {
     const merged: Partial<AssistantPageContext> = {}
     for (const layer of layers.values()) Object.assign(merged, layer)
-    return merged.knowledgeBaseId ? (merged as AssistantPageContext) : null
+    return merged.knowledgeBaseId || merged.agentId ? merged : null
   })
   const contextAttached = computed(() => !!pageContext.value && dismissedKey.value !== contextKey(pageContext.value))
 

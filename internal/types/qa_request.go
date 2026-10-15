@@ -62,13 +62,11 @@ type QuestionOrigin struct {
 // MaxPageContextIssues bounds how many Wiki issues one page context names.
 const MaxPageContextIssues = 20
 
-// PageContext is the WeKnora page the user has open while asking: a
-// knowledge base, optionally a document, a Wiki page or Wiki issues in it.
-// It tells the agent what "this" refers to. Like QuestionOrigin it is only a
-// hint inside the turn's resolved scope: anything outside the search targets
-// is dropped, never added to them.
+// PageContext identifies the open page. Knowledge-base resources must be in
+// the resolved search targets; agents are checked independently in the current tenant.
 type PageContext struct {
-	KnowledgeBaseID string   `json:"knowledge_base_id"`
+	AgentID         string   `json:"agent_id,omitempty"`
+	KnowledgeBaseID string   `json:"knowledge_base_id,omitempty"`
 	KnowledgeID     string   `json:"knowledge_id,omitempty"`
 	WikiSlug        string   `json:"wiki_slug,omitempty"`
 	WikiIssueIDs    []string `json:"wiki_issue_ids,omitempty"`

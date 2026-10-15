@@ -405,7 +405,7 @@ func (e *AgentEngine) emitToolOutcome(
 			Success:    result.Success,
 			Duration:   toolCall.Duration,
 			Iteration:  iteration,
-			Data:       agenttools.SanitizeToolDataForPersist(toolCall.Name, result.Data),
+			Data:       agenttools.SanitizeToolDataForClient(toolCall.Name, result.Data),
 		},
 	})
 

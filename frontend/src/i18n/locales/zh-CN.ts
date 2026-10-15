@@ -1832,7 +1832,11 @@ export default {
       shellExec: '执行沙箱命令',
       dataAnalysis: '数据分析',
       dataSchema: '数据结构',
-      databaseQuery: '数据库查询'
+      databaseQuery: '数据库查询',
+      findOperations: '查找操作',
+      runOperation: '执行操作',
+      searchWeKnoraDocs: '搜索产品文档',
+      readWeKnoraDoc: '阅读产品文档'
     },
     skillFiles: {
       heading: '技能文件',
@@ -1873,6 +1877,35 @@ export default {
       truncated: '输出已截断',
       killed: '已超时终止',
       binarySuppressed: '二进制输出已省略，请将文件写入产物目录后下载'
+    },
+    operations: {
+      found: '{count} 个可执行操作',
+      unavailableCount: '{count} 个当前不可用',
+      empty: '没有匹配的操作',
+      unavailableHeading: '当前不可用',
+      parameters: '参数',
+      required: '必填',
+      enum: '可选值',
+      range: '范围 {min}–{max}',
+      risk: {
+        read: '只读',
+        write: '写入',
+        destructive: '不可恢复'
+      },
+      truncated: '结果已截断',
+      emptyResult: '没有返回数据',
+      failed: '操作失败',
+      meta: '附加信息'
+    },
+    weknoraDocs: {
+      pages: '{count} 篇文档',
+      hits: '匹配 {count} 个章节',
+      empty: '没有匹配的文档',
+      outline: '目录',
+      content: '正文',
+      truncated: '正文未读完，可以继续读取',
+      failed: '读取失败',
+      openDoc: '在文档站打开'
     },
     mcpOAuth: {
       waiting: '等待授权 · {target}',
@@ -2055,13 +2088,19 @@ export default {
   assistant: {
     title: 'WeKnora 助手',
     newConversation: '新对话',
+    history: '历史对话',
+    untitledConversation: '未命名对话',
+    historyEmpty: '暂无历史对话',
+    historyFailed: '加载历史对话失败',
+    loadMore: '加载更多',
     resize: '调整助手宽度',
     layout: {
       dock: '固定在右侧',
       float: '改为悬浮',
     },
     welcomeTitle: '有什么可以帮你？',
-    welcomeDesc: '我可以解答 WeKnora 的用法，也可以查看和处理你空间里的文档解析、知识库动态和 Wiki 问题。改动前是否先请你确认，由输入框下方的权限等级决定。',
+    agentWelcomeDesc: '可以检查这个智能体的配置、调整模型或查看它能检索的知识库。',
+    welcomeDesc: '我可以解答 WeKnora 的用法，也可以查看和处理你空间里的文档解析、知识库动态和 Wiki 问题，还能帮你创建和配置智能体。改动前是否先请你确认，由输入框下方的权限等级决定。',
     startFailed: '启动助手失败，请重试',
     askAboutDocument: '问 {name}',
     access: {
@@ -2089,6 +2128,9 @@ export default {
       detachedTip: '点击附带当前页面：{path}'
     },
     starters: {
+      agentConfig: '检查这个智能体的配置',
+      agentModel: '给它换个模型',
+      agentKnowledge: '它能检索哪些知识库？',
       wikiIssues: '这个页面有哪些待处理的问题？',
       wikiSummary: '总结一下这个 Wiki 页面',
       documentStatus: '这个文档的解析状态怎么样？',
@@ -2096,7 +2138,8 @@ export default {
       failedDocuments: '这个知识库有哪些解析失败的文档？',
       recentActivity: '这个知识库最近有哪些变动？',
       formats: 'WeKnora 支持哪些文档格式？',
-      createWiki: '怎样创建 Wiki 知识库？'
+      createWiki: '怎样创建 Wiki 知识库？',
+      agents: '我有哪些智能体？分别用的什么模型？'
     }
   },
   assistantSettings: {
@@ -6877,6 +6920,8 @@ export default {
       capabilityUnconfigured: '未配置'
     },
     editor: {
+      assistantChanged: '助手已修改此智能体，请重新打开以查看最新设置。',
+      assistantDeleted: '助手已删除此智能体。',
       reasoningEffortUnsupported: '当前所选模型不支持思考，除「关闭」外的选项将被忽略。',
       reasoningEffortAlwaysOn: '当前所选模型始终开启思考，无法关闭，只能调整思考强度。',
       createTitle: '创建智能体',

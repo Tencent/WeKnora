@@ -331,6 +331,7 @@
                             "others"
                         ],
                         "type": "string",
+                        "x-agent": true,
                         "description": "创建者过滤，仅 mine 与 others 生效",
                         "name": "creator",
                         "in": "query"
@@ -349,7 +350,13 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "agent.list",
+                    "max_items": 200,
+                    "risk": "read"
+                },
+                "x-agent-hint": "Lists the workspace's agents, built-in ones included. Built-in agents are shared by everyone; only an admin can change them."
             },
             "post": {
                 "security": [
@@ -395,7 +402,13 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "agent.create",
+                    "label_param": "name",
+                    "risk": "write"
+                },
+                "x-agent-hint": "Creates a smart-reasoning agent with default settings, owned by the user. It can call MCP services and skills. Configure it afterwards with agent.update."
             }
         },
         "/agents/placeholders": {
@@ -554,6 +567,7 @@
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "agent_id",
                         "description": "智能体ID",
                         "name": "id",
                         "in": "path",
@@ -591,7 +605,12 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "agent.get",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Returns an agent's settings, including its full system prompt, tools and MCP and skill scope."
             },
             "put": {
                 "security": [
@@ -675,6 +694,7 @@
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "agent_id",
                         "description": "智能体ID",
                         "name": "id",
                         "in": "path",
@@ -706,7 +726,88 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "agent.delete",
+                    "label": "name",
+                    "risk": "destructive",
+                    "target": "agent.get"
+                },
+                "x-agent-hint": "Deletes an agent and its IM channels. Cannot be undone; built-in agents cannot be deleted."
+            },
+            "patch": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "只修改请求中出现的字段，其余配置保持不变。\n支持名称、描述、运行模式、系统提示词、对话模型、知识库、MCP、技能范围、联网搜索、多轮对话。\nagent_mode 取 quick-answer 或 smart-reasoning。MCP 与技能只在 smart-reasoning 下运行，切到该模式会打开多轮对话。\n传 knowledge_bases、mcp_services 或 selected_skills 而不传对应模式时，切换为 selected。\n技能模式 all/none 清空技能列表；启用技能须先在编辑器选择沙箱，selected 名称须可用，否则返回 400。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "智能体"
+                ],
+                "summary": "部分更新智能体",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "agent_id",
+                        "description": "智能体ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "要修改的字段",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.PatchAgentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "更新后的智能体",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.AgentWriteResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "无权修改该智能体",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "智能体不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "agent.update",
+                    "label": "name",
+                    "require_complete_target": true,
+                    "risk": "write",
+                    "target": "agent.get"
+                },
+                "x-agent-hint": "Changes the listed settings of an agent; a field left out is kept. agent_mode is quick-answer or smart-reasoning; MCP services and skills only run in smart-reasoning, and switching to it turns multi-turn on. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model), knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. Take skill names exactly from skill.list with the agent's sandbox_config_id. knowledge_base_ids, mcp_service_ids or selected_skills alone also switch that scope to selected."
             }
         },
         "/agents/{id}/copy": {
@@ -733,6 +834,7 @@
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "agent_id",
                         "description": "智能体ID",
                         "name": "id",
                         "in": "path",
@@ -770,7 +872,14 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "agent.copy",
+                    "label": "name",
+                    "risk": "write",
+                    "target": "agent.get"
+                },
+                "x-agent-hint": "Copies an agent, settings included; the copy belongs to the user."
             }
         },
         "/agents/{id}/shares/{share_id}": {
@@ -10431,7 +10540,13 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "mcp_service.list",
+                    "max_items": 200,
+                    "risk": "read"
+                },
+                "x-agent-hint": "Lists the workspace's MCP services by name, with whether each is enabled. Connection details and credentials are not shown; the user manages MCP services in the settings."
             },
             "post": {
                 "security": [
@@ -10550,6 +10665,7 @@
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "mcp_service_id",
                         "description": "MCP服务ID",
                         "name": "id",
                         "in": "path",
@@ -10581,6 +10697,10 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "mcp_service.get",
+                    "risk": "read"
                 }
             },
             "put": {
@@ -12726,7 +12846,13 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "model.list",
+                    "max_items": 200,
+                    "risk": "read"
+                },
+                "x-agent-hint": "Lists the workspace's models by name and type. An agent's chat model must be of type KnowledgeQA. Endpoints and keys are not shown; the user manages models in the settings."
             },
             "post": {
                 "security": [
@@ -12959,6 +13085,7 @@
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "model_id",
                         "description": "模型ID",
                         "name": "id",
                         "in": "path",
@@ -12990,6 +13117,10 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "model.get",
+                    "risk": "read"
                 }
             },
             "put": {
@@ -15477,6 +15608,15 @@
                         "in": "query"
                     },
                     {
+                        "enum": [
+                            "assistant"
+                        ],
+                        "type": "string",
+                        "description": "会话类型：空值仅普通会话；assistant 仅当前用户的助手会话",
+                        "name": "kind",
+                        "in": "query"
+                    },
+                    {
                         "type": "string",
                         "description": "标题模糊搜索",
                         "name": "keyword",
@@ -15520,7 +15660,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "创建新的对话会话",
+                "description": "创建新的对话会话。\nkind 为空时为普通会话，assistant 为助手会话。",
                 "consumes": [
                     "application/json"
                 ],
@@ -16819,7 +16959,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "返回指定沙箱配置镜像内、智能体实际能调用的已安装技能（ready 且启用）。不传 sandbox_config_id 时列表为空。",
+                "description": "返回指定沙箱配置镜像内、智能体实际能调用的已安装技能（ready 且启用）。\n不传 sandbox_config_id 时列表为空。",
                 "consumes": [
                     "application/json"
                 ],
@@ -16833,7 +16973,9 @@
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Sandbox config ID; ignored for a shared agent",
+                        "x-agent": true,
+                        "x-agent-required": true,
+                        "description": "Sandbox config ID from agent.get; ignored for a shared agent",
                         "name": "sandbox_config_id",
                         "in": "query"
                     },
@@ -16863,7 +17005,12 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "skill.list",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Lists usable skills, chosen by name. Pass sandbox_config_id from agent.get; when the agent has none, pass host (WeKnora Lite runs skills locally). An empty list means there are no usable skills there; if the agent has no sandbox, tell the user to choose one in the agent editor."
             }
         },
         "/skills/catalog": {
@@ -21959,10 +22106,12 @@
                     }
                 },
                 "description": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "env_vars": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPEnvVars"
@@ -21971,13 +22120,16 @@
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPHeaders"
                 },
                 "id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "mcp_service_id"
                 },
                 "is_builtin": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "stdio_config": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPStdioConfig"
@@ -21986,7 +22138,12 @@
                     "type": "integer"
                 },
                 "transport_type": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPTransportType"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPTransportType"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "updated_at": {
                     "type": "string"
@@ -22071,37 +22228,58 @@
                     }
                 },
                 "description": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "display_name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "model_id"
                 },
                 "is_builtin": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "is_default": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "parameters": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.ModelParametersDTO"
                 },
                 "source": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSource"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSource"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "status": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelStatus"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelStatus"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "tenant_id": {
                     "type": "integer"
                 },
                 "type": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelType"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelType"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "updated_at": {
                     "type": "string"
@@ -23892,7 +24070,8 @@
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CustomAgentConfig"
                         }
-                    ]
+                    ],
+                    "x-agent": true
                 },
                 "created_at": {
                     "description": "Timestamps",
@@ -23904,33 +24083,39 @@
                 },
                 "creator_name": {
                     "description": "CreatorName 由 list handler 在返回前批量回填，作用同 KnowledgeBase.CreatorName：\n让前端列表卡片区分「我创建」与「同空间其他成员创建」。不落库，内建 agent / 老数据\n仍可能为空。",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "deleted_at": {
                     "$ref": "#/definitions/gorm.DeletedAt"
                 },
                 "description": {
                     "description": "Description of the agent",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "id": {
                     "description": "Unique identifier of the agent (composite primary key with TenantID)\nFor built-in agents, this is 'builtin-quick-answer' or 'builtin-smart-reasoning'\nFor custom agents, this is a UUID",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "agent_id"
                 },
                 "is_builtin": {
                     "description": "Whether this is a built-in agent (normal mode / agent mode)",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "name": {
                     "description": "Name of the agent",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "tenant_id": {
                     "description": "Tenant ID (composite primary key with ID)",
                     "type": "integer"
                 },
                 "updated_at": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -23939,18 +24124,22 @@
             "properties": {
                 "agent_mode": {
                     "description": "===== Basic Settings =====\nAgent mode: \"quick-answer\" for RAG mode, \"smart-reasoning\" for ReAct agent mode",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "agent_type": {
                     "description": "AgentType is a preset category under smart-reasoning mode that pre-fills\nsystem prompt, allowed tools and recommended KB compatibility.\nValid values: \"rag-qa\", \"wiki-qa\", \"hybrid-rag-wiki\", \"custom\".\nEmpty / unknown values are treated as \"custom\" (no preset applied).\nIgnored for quick-answer mode.",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "allowed_tools": {
                     "description": "Allowed tools (only for agent type)",
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "asr_model_id": {
                     "description": "ASR model ID for audio transcription (optional)",
@@ -24052,7 +24241,8 @@
                 },
                 "kb_selection_mode": {
                     "description": "===== Knowledge Base Settings =====\nKnowledge base selection mode: \"all\" = all KBs, \"selected\" = specific KBs, \"none\" = no KB",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "keyword_threshold": {
                     "description": "Keyword retrieval threshold",
@@ -24063,7 +24253,8 @@
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": "knowledge_base_ids"
                 },
                 "llm_call_timeout": {
                     "description": "Timeout for a single LLM call in seconds (0 = use global default)",
@@ -24083,14 +24274,18 @@
                 },
                 "mcp_selection_mode": {
                     "description": "MCP service selection mode: \"all\" = all enabled MCP services, \"selected\" = specific services, \"none\" = no MCP",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "mcp_services": {
                     "description": "Selected MCP service IDs (only used when MCPSelectionMode is \"selected\")",
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": "mcp_service_ids",
+                    "x-agent-detail": true
                 },
                 "memory_enabled": {
                     "description": "Whether this agent may read the user's long-term memory. Nil inherits\nthe workspace setting; false opts a single agent out of memory even when\nthe workspace has it on. There is no \"on\" that overrides the workspace.",
@@ -24098,11 +24293,14 @@
                 },
                 "model_id": {
                     "description": "===== Model Settings =====\nModel ID to use for conversations",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "multi_turn_enabled": {
                     "description": "===== Multi-turn Conversation Settings =====\nWhether multi-turn conversation is enabled",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "query_understand_model_id": {
                     "description": "Dedicated chat model ID for the query-understanding (rewrite + intent) step.\nWhen empty, the main conversation ModelID is used as a fallback.",
@@ -24150,18 +24348,24 @@
                 },
                 "sandbox_config_id": {
                     "description": "===== Sandbox Settings =====\nSandboxConfigID selects which workspace sandbox config this agent's\nskill scripts run on. Empty means sandbox execution is disabled.\n\nThis references the LOGICAL config, never a specific revision: keeping\nthe indirection here is what would let credential rotation happen\nwithout re-pointing every agent (see the spec's §4.8).",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "selected_skills": {
                     "description": "Selected skill names (only used when SkillsSelectionMode is \"selected\")",
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "skills_selection_mode": {
                     "description": "===== Skills Settings (only for smart-reasoning mode) =====\nSkills selection mode: \"all\" = all installed skills, \"selected\" = specific skills, \"none\" = no skills",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "supported_file_types": {
                     "description": "===== File Type Restriction Settings =====\nSupported file types for this agent (e.g., [\"csv\", \"xlsx\", \"xls\"])\nEmpty means all file types are supported\nWhen set, only files with matching extensions can be used with this agent",
@@ -24172,7 +24376,10 @@
                 },
                 "system_prompt": {
                     "description": "System prompt for the agent (unified prompt, uses web_search_status placeholder for dynamic behavior)",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-detail": true,
+                    "x-agent-max-runes": "8000"
                 },
                 "system_prompt_id": {
                     "description": "SystemPromptID references a template ID in prompt_templates/ YAML files.\nIf set and SystemPrompt is empty, the template content is resolved at request time for saved agents.",
@@ -24204,7 +24411,9 @@
                 },
                 "web_search_enabled": {
                     "description": "===== Web Search Settings =====\nWhether web search is enabled",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "web_search_max_results": {
                     "description": "Maximum web search results",
@@ -28640,6 +28849,9 @@
         "github_com_Tencent_WeKnora_internal_types.PageContext": {
             "type": "object",
             "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
                 "knowledge_base_id": {
                     "type": "string"
                 },
@@ -29859,6 +30071,10 @@
                 "is_pinned": {
                     "description": "IsPinned indicates whether the session is pinned in the list.",
                     "type": "boolean"
+                },
+                "kind": {
+                    "description": "Kind is empty for ordinary chats and SessionKindAssistant for assistant\nconversations; it is set at creation and never updated.",
+                    "type": "string"
                 },
                 "last_request_state": {
                     "description": "LastRequestState records the input-bar state used the last time this\nsession sent a question (agent, model, KB scope, web search, MCPs).\nPersisted on every successful POST to /knowledge-chat or /agent-chat so\nthat reopening the session can restore the original request context to\nthe chat UI. Stored in the legacy sessions.agent_config JSONB column to\navoid a new migration; the shape used today is `SessionLastRequestState`.",
@@ -32920,10 +33136,14 @@
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CustomAgentConfig"
                 },
                 "description": {
-                    "type": "string"
+                    "description": "What the agent is for",
+                    "type": "string",
+                    "x-agent": true
                 },
                 "name": {
-                    "type": "string"
+                    "description": "Agent name",
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -34330,7 +34550,8 @@
                     }
                 },
                 "skills_available": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "success": {
                     "type": "boolean",
@@ -34378,6 +34599,7 @@
                 },
                 "success": {
                     "type": "boolean",
+                    "x-agent": true,
                     "example": true
                 }
             }
@@ -34672,6 +34894,108 @@
                 },
                 "total": {
                     "type": "integer",
+                    "x-agent": true
+                }
+            }
+        },
+        "internal_handler.PatchAgentRequest": {
+            "type": "object",
+            "properties": {
+                "agent_mode": {
+                    "description": "Running mode: quick-answer is RAG; smart-reasoning calls tools, MCP and skills",
+                    "type": "string",
+                    "enum": [
+                        "quick-answer",
+                        "smart-reasoning"
+                    ],
+                    "x-agent": true
+                },
+                "description": {
+                    "description": "What the agent is for",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "kb_selection_mode": {
+                    "description": "Knowledge bases searched: all, selected (knowledge_bases) or none",
+                    "type": "string",
+                    "enum": [
+                        "all",
+                        "selected",
+                        "none"
+                    ],
+                    "x-agent": true
+                },
+                "knowledge_bases": {
+                    "description": "Selected knowledge bases, replacing the current ones; without\nkb_selection_mode it also switches the mode to selected",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": "knowledge_base_ids",
+                    "x-agent-maximum": "50"
+                },
+                "mcp_selection_mode": {
+                    "description": "MCP services used: all, selected (mcp_services) or none",
+                    "type": "string",
+                    "enum": [
+                        "all",
+                        "selected",
+                        "none"
+                    ],
+                    "x-agent": true
+                },
+                "mcp_services": {
+                    "description": "Selected MCP services, replacing the current ones; without\nmcp_selection_mode it also switches the mode to selected",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": "mcp_service_ids",
+                    "x-agent-maximum": "50"
+                },
+                "model_id": {
+                    "description": "Chat model the agent answers with",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "multi_turn_enabled": {
+                    "description": "Whether earlier turns are kept in the conversation context",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "name": {
+                    "description": "Agent name",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "selected_skills": {
+                    "description": "Selected skill names, replacing the current ones; without\nskills_selection_mode it also switches the mode to selected",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true,
+                    "x-agent-maximum": "50"
+                },
+                "skills_selection_mode": {
+                    "description": "Skills used: all, selected (selected_skills) or none",
+                    "type": "string",
+                    "enum": [
+                        "all",
+                        "selected",
+                        "none"
+                    ],
+                    "x-agent": true
+                },
+                "system_prompt": {
+                    "description": "The whole system prompt",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-bytes": "32000"
+                },
+                "web_search_enabled": {
+                    "description": "Whether the agent may search the web",
+                    "type": "boolean",
                     "x-agent": true
                 }
             }
@@ -35336,10 +35660,12 @@
             "type": "object",
             "properties": {
                 "description": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -36591,6 +36917,14 @@
                     "description": "Optional disambiguator; backend still verifies the share relation",
                     "type": "integer"
                 },
+                "assistant_access": {
+                    "description": "AssistantAccess is the WeKnora assistant access level: read_only,\nconfirm or auto_write. The workspace ceiling caps it; other agents\nignore it.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel"
+                        }
+                    ]
+                },
                 "attachment_ids": {
                     "description": "Pre-uploaded session-scoped document IDs",
                     "type": "array",
@@ -36709,6 +37043,13 @@
                 "description": {
                     "description": "Description for the session (optional)",
                     "type": "string"
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "",
+                        "assistant"
+                    ]
                 },
                 "project_dir": {
                     "description": "ProjectDir is an optional Lite host-sandbox binding. When set it must\nbe an absolute path already present in the user-approved ProjectDirs\nlist. Empty means the session gets an auto-allocated workspace.",

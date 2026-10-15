@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
@@ -228,6 +230,46 @@ func TestResolvePageContextWikiScope(t *testing.T) {
 			} else {
 				require.Nil(t, info.WikiPage, "out-of-scope page metadata must not enter the model context")
 				require.Empty(t, info.WikiIssues, "issue references must obey the same page scope")
+			}
+		})
+	}
+}
+
+func TestPageContextInTargetsKeepsAgent(t *testing.T) {
+	for _, page := range []*types.PageContext{
+		{AgentID: " agent-a "},
+		{AgentID: "agent-a", KnowledgeBaseID: "outside", KnowledgeID: "doc"},
+	} {
+		assert.Equal(t, &types.PageContext{AgentID: "agent-a"}, pageContextInTargets(context.Background(), page, nil))
+	}
+}
+
+type pageContextAgentRepo struct {
+	interfaces.CustomAgentRepository
+}
+
+func (*pageContextAgentRepo) GetAgentByID(_ context.Context, id string, tenantID uint64) (*types.CustomAgent, error) {
+	if (id == "own" && tenantID == 1) || (id == "foreign" && tenantID == 2) {
+		return &types.CustomAgent{ID: id, TenantID: tenantID, Name: "My agent"}, nil
+	}
+	return nil, repository.ErrCustomAgentNotFound
+}
+
+func TestResolveAgentPageContext(t *testing.T) {
+	require.NoError(t, types.LoadBuiltinAgentsConfig(filepath.Join("..", "..", "..", "config")))
+	svc := &agentService{customAgentService: &customAgentService{repo: &pageContextAgentRepo{}}}
+	ctx := types.WithCaller(context.Background(), types.Caller{TenantID: 1, UserID: "u1"})
+	ctx = types.WithExecutionTenant(ctx, 2)
+	for _, id := range []string{"own", "unknown", "foreign", types.BuiltinSmartReasoningID} {
+		t.Run(id, func(t *testing.T) {
+			info := svc.resolvePageContextInfo(ctx, &types.PageContext{AgentID: id}, nil, nil)
+			if id == "own" || id == types.BuiltinSmartReasoningID {
+				require.NotNil(t, info)
+				require.NotNil(t, info.Agent)
+				assert.Equal(t, id, info.Agent.ID)
+				assert.NotEmpty(t, info.Agent.Name)
+			} else {
+				assert.Nil(t, info)
 			}
 		})
 	}

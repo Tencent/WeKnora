@@ -76,3 +76,22 @@ func TestAgentStreamHandlerInternalErrorKeepsErrorType(t *testing.T) {
 	require.Equal(t, types.ResponseTypeError, evt.Type)
 	require.True(t, evt.Done)
 }
+
+func TestAgentStreamHandlerForwardsOperationDataChange(t *testing.T) {
+	streams := &capturingStreamManager{}
+	h := NewAgentStreamHandler(
+		context.Background(), "sess-1", "msg-1", "req-1", 1, time.Now(),
+		&types.Message{}, streams, nil, nil, nil, nil,
+	)
+	marker := map[string]any{"operation": "agent.delete", "area": "agent"}
+	err := h.handleToolResult(context.Background(), event.Event{
+		Type: event.EventAgentToolResult,
+		Data: event.AgentToolResultData{
+			ToolName: "run_operation", Success: true, Data: map[string]any{"data_change": marker},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, streams.events, 1)
+	require.Equal(t, types.ResponseTypeToolResult, streams.events[0].Type)
+	require.Equal(t, marker, streams.events[0].Data["data_change"])
+}

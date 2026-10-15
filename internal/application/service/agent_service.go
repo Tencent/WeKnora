@@ -118,6 +118,7 @@ type agentService struct {
 	memoryService         interfaces.MemoryService
 	storageResolver       interfaces.StorageBackendResolver
 	toolApprovalGate      approval.MCPApproval
+	customAgentService    interfaces.CustomAgentService
 	operationDispatcher   operations.Dispatcher
 	sandboxMgr            sandbox.Manager
 	sandboxResolver       sandbox.TenantSandboxResolver
@@ -159,8 +160,10 @@ func NewAgentService(
 	userRepo interfaces.UserRepository,
 	graphRepo interfaces.RetrieveGraphRepository,
 	operationDispatcher *operations.HandlerDispatcher,
+	customAgentService interfaces.CustomAgentService,
 ) interfaces.AgentService {
 	svc := &agentService{
+		customAgentService:   customAgentService,
 		operationDispatcher:  operationDispatcher,
 		browserSkill:         browserSkill,
 		userRepo:             userRepo,
@@ -1677,14 +1680,28 @@ func (s *agentService) resolvePageContextInfo(
 	ctx context.Context, page *types.PageContext, targets types.SearchTargets,
 	kbInfos []*agent.KnowledgeBaseInfo,
 ) *agent.PageContextInfo {
-	if page == nil || page.KnowledgeBaseID == "" || !targets.ContainsKB(page.KnowledgeBaseID) {
+	if page == nil {
 		return nil
 	}
-	kbID := page.KnowledgeBaseID
-	info := &agent.PageContextInfo{
-		KnowledgeBaseID:   kbID,
-		KnowledgeBaseName: s.knowledgeBaseName(ctx, kbID, kbInfos),
+	info := &agent.PageContextInfo{}
+	if page.AgentID != "" && s.customAgentService != nil {
+		agentCtx := ctx
+		if tenantID := types.CallerFromContext(ctx).TenantID; tenantID != 0 {
+			agentCtx = types.WithExecutionTenant(ctx, tenantID)
+		}
+		if a, err := s.customAgentService.GetAgentByID(agentCtx, page.AgentID); err == nil && a != nil {
+			info.Agent = &agent.PageContextAgent{ID: a.ID, Name: a.Name}
+		}
 	}
+	kbID := page.KnowledgeBaseID
+	if kbID == "" || !targets.ContainsKB(kbID) {
+		if info.Agent == nil {
+			return nil
+		}
+		return info
+	}
+	info.KnowledgeBaseID = kbID
+	info.KnowledgeBaseName = s.knowledgeBaseName(ctx, kbID, kbInfos)
 	if page.KnowledgeID != "" {
 		docs, err := s.getSelectedDocumentInfos(ctx, []string{page.KnowledgeID})
 		if err == nil && len(docs) == 1 && docs[0].KnowledgeBaseID == kbID {

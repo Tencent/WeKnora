@@ -151,6 +151,8 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 // @Failure      403  {object}  errors.AppError         "无权使用该共享智能体"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"mcp_service.list","risk":"read","max_items":200}
+// @x-agent-hint "Lists the workspace's MCP services by name, with whether each is enabled. Connection details and credentials are not shown; the user manages MCP services in the settings."
 // @Router       /mcp-services [get]
 func (h *MCPServiceHandler) ListMCPServices(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -237,11 +239,12 @@ func (h *MCPServiceHandler) listSharedAgentMCPServices(c *gin.Context, agent *ty
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "MCP服务ID"
+// @Param        id   path      string  true  "MCP服务ID"  extensions(x-agent=mcp_service_id)
 // @Success      200  {object}  handler.DataResponse{data=dto.MCPServiceResponse}  "MCP服务详情"
 // @Failure      404  {object}  errors.AppError         "服务不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"mcp_service.get","risk":"read"}
 // @Router       /mcp-services/{id} [get]
 func (h *MCPServiceHandler) GetMCPService(c *gin.Context) {
 	ctx := c.Request.Context()

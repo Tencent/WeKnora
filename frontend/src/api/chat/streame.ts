@@ -17,7 +17,8 @@ import {
 
 /** The WeKnora page the user has open; agent-chat only. */
 export interface PageContextPayload {
-  knowledge_base_id: string
+  agent_id?: string
+  knowledge_base_id?: string
   knowledge_id?: string
   wiki_slug?: string
   wiki_issue_ids?: string[]

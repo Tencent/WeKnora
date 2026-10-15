@@ -1,3 +1,4 @@
+import { emitAssistantDataChange } from '@/utils/assistantDataChange'
 import { applyFinalArtifactContent } from '@/utils/finalArtifactContent'
 import { markRaw, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -1006,6 +1007,9 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           const toolCallId = dataPayload.tool_call_id as string | undefined
           const toolName = dataPayload.tool_name as string | undefined
           const success = responseType !== 'error' && dataPayload.success !== false
+          if (responseType === 'tool_result' && dataPayload.success === true && toolName === 'run_operation') {
+            emitAssistantDataChange(dataPayload.data_change)
+          }
           log('[Tool Result]', {
             tool_call_id: toolCallId,
             tool_name: toolName,

@@ -1316,6 +1316,8 @@ export default {
       enabled: 'Agent enabled'
     },
     editor: {
+      assistantChanged: 'The assistant changed this agent. Reopen it to see the latest settings.',
+      assistantDeleted: 'The assistant deleted this agent.',
       reasoningEffortUnsupported: 'The selected model cannot think; every option except "Off" is ignored.',
       reasoningEffortAlwaysOn: 'The selected model always reasons and cannot be switched off; only the effort level can be changed.',
       createTitle: 'Create Agent',
@@ -6113,13 +6115,19 @@ export default {
     assistant: {
       title: 'WeKnora Assistant',
       newConversation: 'New conversation',
+      history: 'Conversation history',
+      untitledConversation: 'Untitled conversation',
+      historyEmpty: 'No conversations yet',
+      historyFailed: 'Failed to load conversation history',
+      loadMore: 'Load more',
       resize: 'Resize assistant',
       layout: {
         dock: 'Dock to the side',
         float: 'Float over the page',
       },
       welcomeTitle: 'How can I help?',
-      welcomeDesc: 'Ask how WeKnora works, or have me check and handle document parsing, knowledge base activity and Wiki issues in your workspace. Whether I ask before a change depends on the access level below the input box.',
+      agentWelcomeDesc: 'Check this agent’s configuration, change its model or see which knowledge bases it can search.',
+      welcomeDesc: 'Ask how WeKnora works, or have me check and handle document parsing, knowledge base activity and Wiki issues in your workspace, or create and configure agents. Whether I ask before a change depends on the access level below the input box.',
       startFailed: 'Failed to start the assistant. Please try again.',
       askAboutDocument: 'Ask {name}',
       access: {
@@ -6147,6 +6155,9 @@ export default {
       detachedTip: 'Click to include the current page: {path}'
     },
     starters: {
+      agentConfig: 'Check this agent’s configuration',
+      agentModel: 'Change its model',
+      agentKnowledge: 'Which knowledge bases can it search?',
       wikiIssues: 'What issues are open on this page?',
       wikiSummary: 'Summarize this Wiki page',
       documentStatus: 'How did this document parse?',
@@ -6154,7 +6165,8 @@ export default {
       failedDocuments: 'Which documents in this knowledge base failed to parse?',
       recentActivity: 'What changed in this knowledge base recently?',
       formats: 'Which document formats does WeKnora support?',
-      createWiki: 'How do I create a Wiki knowledge base?'
+      createWiki: 'How do I create a Wiki knowledge base?',
+      agents: 'Which agents do I have, and which models do they use?'
     }
   },
   assistantSettings: {
@@ -6441,7 +6453,11 @@ export default {
       shellExec: 'Run sandbox command',
       dataAnalysis: 'Data Analysis',
       dataSchema: 'Data Schema',
-      databaseQuery: 'Database Query'
+      databaseQuery: 'Database Query',
+      findOperations: 'Find operations',
+      runOperation: 'Run operation',
+      searchWeKnoraDocs: 'Search product docs',
+      readWeKnoraDoc: 'Read product doc'
     },
     skillFiles: {
       heading: 'Skill files',
@@ -6482,6 +6498,35 @@ export default {
       truncated: 'Output truncated',
       killed: 'Timed out',
       binarySuppressed: 'Binary output omitted. Write files to the artifact directory to download them.'
+    },
+    operations: {
+      found: '{count} available',
+      unavailableCount: '{count} unavailable',
+      empty: 'No matching operations',
+      unavailableHeading: 'Unavailable',
+      parameters: 'Parameters',
+      required: 'Required',
+      enum: 'Values',
+      range: 'Range {min}–{max}',
+      risk: {
+        read: 'Read',
+        write: 'Write',
+        destructive: 'Destructive'
+      },
+      truncated: 'Result truncated',
+      emptyResult: 'No data returned',
+      failed: 'Operation failed',
+      meta: 'Details'
+    },
+    weknoraDocs: {
+      pages: '{count} pages',
+      hits: '{count} matching sections',
+      empty: 'No matching documentation',
+      outline: 'Outline',
+      content: 'Content',
+      truncated: 'The page continues',
+      failed: 'Could not read the page',
+      openDoc: 'Open in docs'
     },
     citation: {
       notFound: 'Content not found',

@@ -718,6 +718,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
@@ -1191,6 +1192,8 @@ watch(spaceSelection, (val) => {
 watch(creatorFilter, () => {
   fetchList(true)
 })
+
+useAssistantDataChange(() => { void fetchList(true) }, { areas: ['knowledge_base'] })
 
 onMounted(() => {
   fetchList().then(() => {

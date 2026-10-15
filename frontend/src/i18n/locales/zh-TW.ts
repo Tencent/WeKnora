@@ -1832,7 +1832,11 @@ export default {
       shellExec: '執行沙箱命令',
       dataAnalysis: '資料分析',
       dataSchema: '資料結構',
-      databaseQuery: '資料庫查詢'
+      databaseQuery: '資料庫查詢',
+      findOperations: '查找操作',
+      runOperation: '執行操作',
+      searchWeKnoraDocs: '搜尋產品文件',
+      readWeKnoraDoc: '閱讀產品文件'
     },
     skillFiles: {
       heading: '技能檔案',
@@ -1873,6 +1877,35 @@ export default {
       truncated: '輸出已截斷',
       killed: '已超時終止',
       binarySuppressed: '二進位輸出已省略，請將檔案寫入產物目錄後下載'
+    },
+    operations: {
+      found: '{count} 個可執行操作',
+      unavailableCount: '{count} 個目前不可用',
+      empty: '沒有符合的操作',
+      unavailableHeading: '目前不可用',
+      parameters: '參數',
+      required: '必填',
+      enum: '可選值',
+      range: '範圍 {min}–{max}',
+      risk: {
+        read: '唯讀',
+        write: '寫入',
+        destructive: '不可恢復'
+      },
+      truncated: '結果已截斷',
+      emptyResult: '沒有傳回資料',
+      failed: '操作失敗',
+      meta: '附加資訊'
+    },
+    weknoraDocs: {
+      pages: '{count} 篇文件',
+      hits: '符合 {count} 個章節',
+      empty: '沒有符合的文件',
+      outline: '目錄',
+      content: '正文',
+      truncated: '正文未讀完，可以繼續讀取',
+      failed: '讀取失敗',
+      openDoc: '在文件站開啟'
     },
     mcpOAuth: {
       waiting: '等待授權 · {target}',
@@ -2055,13 +2088,19 @@ export default {
   assistant: {
     title: 'WeKnora 助手',
     newConversation: '新對話',
+    history: '歷史對話',
+    untitledConversation: '未命名對話',
+    historyEmpty: '尚無歷史對話',
+    historyFailed: '無法載入歷史對話',
+    loadMore: '載入更多',
     resize: '調整助手寬度',
     layout: {
       dock: '固定在右側',
       float: '改為懸浮',
     },
     welcomeTitle: '有什麼可以幫你？',
-    welcomeDesc: '我可以解答 WeKnora 的用法，也可以檢視和處理你空間裡的文件解析、知識庫動態和 Wiki 問題。變更前是否先請你確認，由輸入框下方的權限等級決定。',
+    agentWelcomeDesc: '可以檢查這個智慧代理的設定、調整模型或查看它能檢索的知識庫。',
+    welcomeDesc: '我可以解答 WeKnora 的用法，也可以檢視和處理你空間裡的文件解析、知識庫動態和 Wiki 問題，還能幫你建立和設定智慧代理。變更前是否先請你確認，由輸入框下方的權限等級決定。',
     startFailed: '啟動助手失敗，請重試',
     askAboutDocument: '問 {name}',
     access: {
@@ -2089,6 +2128,9 @@ export default {
       detachedTip: '點擊附帶目前頁面：{path}'
     },
     starters: {
+      agentConfig: '檢查這個智慧代理的設定',
+      agentModel: '幫它換個模型',
+      agentKnowledge: '它能檢索哪些知識庫？',
       wikiIssues: '這個頁面有哪些待處理的問題？',
       wikiSummary: '總結一下這個 Wiki 頁面',
       documentStatus: '這個文件的解析狀態如何？',
@@ -2096,7 +2138,8 @@ export default {
       failedDocuments: '這個知識庫有哪些解析失敗的文件？',
       recentActivity: '這個知識庫最近有哪些變動？',
       formats: 'WeKnora 支援哪些文件格式？',
-      createWiki: '怎樣建立 Wiki 知識庫？'
+      createWiki: '怎樣建立 Wiki 知識庫？',
+      agents: '我有哪些智慧代理？分別用的什麼模型？'
     }
   },
   assistantSettings: {
@@ -6877,6 +6920,8 @@ export default {
       capabilityUnconfigured: '未設定'
     },
     editor: {
+      assistantChanged: '助手已修改此智慧代理，請重新開啟以查看最新設定。',
+      assistantDeleted: '助手已刪除此智慧代理。',
       reasoningEffortUnsupported: '當前所選模型不支持思考，除「關閉」外的選項將被忽略。',
       reasoningEffortAlwaysOn: '當前所選模型始終開啟思考，無法關閉，只能調整思考強度。',
       createTitle: '建立智慧代理',

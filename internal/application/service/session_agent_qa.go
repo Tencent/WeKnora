@@ -813,16 +813,20 @@ func pageContextInTargets(
 	if page == nil {
 		return nil
 	}
+	kept := &types.PageContext{AgentID: strings.TrimSpace(page.AgentID)}
 	kbID := strings.TrimSpace(page.KnowledgeBaseID)
-	if kbID == "" {
-		return nil
+	if kbID == "" || !targets.ContainsKB(kbID) {
+		if kbID != "" {
+			logger.Infof(ctx, "Ignoring page context: knowledge base %s is outside this turn's search targets",
+				secutils.SanitizeForLog(kbID))
+		}
+		if kept.AgentID == "" {
+			return nil
+		}
+		return kept
 	}
-	if !targets.ContainsKB(kbID) {
-		logger.Infof(ctx, "Ignoring page context: knowledge base %s is outside this turn's search targets",
-			secutils.SanitizeForLog(kbID))
-		return nil
-	}
-	kept := &types.PageContext{KnowledgeBaseID: kbID, WikiSlug: strings.TrimSpace(page.WikiSlug)}
+	kept.KnowledgeBaseID = kbID
+	kept.WikiSlug = strings.TrimSpace(page.WikiSlug)
 	if docID := strings.TrimSpace(page.KnowledgeID); docID != "" && targetsCoverDocument(targets, kbID, docID) {
 		kept.KnowledgeID = docID
 	}

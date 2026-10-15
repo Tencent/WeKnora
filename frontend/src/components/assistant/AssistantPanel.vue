@@ -14,8 +14,14 @@
       <span class="assistant-panel__title">{{ assistantName }}</span>
       <t-tooltip :content="t('assistant.newConversation')" placement="bottom">
         <button type="button" class="assistant-panel__action" :disabled="!assistant.sessionId || starting"
-          :aria-label="t('assistant.newConversation')" @click="assistant.startNewConversation()">
+          :aria-label="t('assistant.newConversation')" @click="startNewConversation">
           <t-icon name="chat-add" size="16px" />
+        </button>
+      </t-tooltip>
+      <t-tooltip :content="t('assistant.history')" placement="bottom">
+        <button type="button" class="assistant-panel__action" :aria-label="t('assistant.history')"
+          :aria-pressed="showHistory" @click="toggleHistory">
+          <t-icon name="history" size="16px" />
         </button>
       </t-tooltip>
       <t-tooltip v-if="canDock" :content="layoutToggleLabel" placement="bottom">
@@ -33,43 +39,75 @@
     </header>
 
     <div class="assistant-panel__body">
-      <ChatView v-if="assistant.sessionId" :key="assistant.sessionId" :session_id="assistant.sessionId"
-        :agent-id="BUILTIN_WEKNORA_ASSISTANT_ID" :embedded-mode="true" :initial-query="initialQuery"
-        :host-scope="hostScope" :model-id="assistant.modelId" :default-model-id="defaultModelId"
-        @update:model-id="assistant.setModel">
-        <template v-if="assistant.pageContext" #composer-chips>
-          <AssistantContextChip />
-        </template>
-        <template #composer-controls>
-          <AssistantAccessPicker />
-        </template>
-      </ChatView>
-
-      <div v-else class="assistant-welcome">
-        <div class="assistant-welcome-body">
-          <div class="assistant-welcome-icon">
-            <t-icon name="compass" size="22px" />
-          </div>
-          <h3 class="assistant-welcome-title">{{ t('assistant.welcomeTitle') }}</h3>
-          <p class="assistant-welcome-desc">{{ t('assistant.welcomeDesc') }}</p>
-          <div class="assistant-starters">
-            <button v-for="starter in starters" :key="starter" type="button" class="assistant-starter"
-              :disabled="starting" @click="startConversation(starter)">
-              {{ starter }}
+      <div v-if="showHistory" class="assistant-history">
+        <div v-for="session in history" :key="session.id" class="assistant-history__row"
+          :class="{ 'is-current': session.id === assistant.sessionId }">
+          <button type="button" class="assistant-history__select" @click="selectSession(session.id)">
+            <span>{{ session.title || t('assistant.untitledConversation') }}</span>
+            <small>{{ t(`time.${classifyDateBucket(session.updated_at || session.created_at)}`) }}</small>
+          </button>
+          <t-tooltip :content="t('common.delete')">
+            <button type="button" class="assistant-panel__action" :aria-label="t('common.delete')"
+              :disabled="deleting === session.id" @click="confirmDelete(session.id)">
+              <t-icon name="delete" size="16px" />
             </button>
-          </div>
+          </t-tooltip>
         </div>
-        <div class="assistant-welcome-composer">
-          <InputField :embedded-mode="true" compact :auto-focus="assistant.visible" :model-id="assistant.modelId"
-            :default-model-id="defaultModelId" @update:model-id="assistant.setModel"
-            @send-msg="(query) => startConversation(query)">
-            <template v-if="assistant.pageContext" #chips>
-              <AssistantContextChip />
-            </template>
-            <template #controls>
-              <AssistantAccessPicker />
-            </template>
-          </InputField>
+        <p v-if="historyError" role="alert">{{ t('assistant.historyFailed') }}</p>
+        <p v-else-if="!historyLoading && !history.length">{{ t('assistant.historyEmpty') }}</p>
+        <t-button v-if="historyError || history.length < historyTotal" variant="text" block
+          :loading="historyLoading" @click="loadHistory()">
+          {{ historyError ? t('common.retry') : t('assistant.loadMore') }}
+        </t-button>
+        <t-loading v-else-if="historyLoading" size="small" />
+      </div>
+      <div v-show="!showHistory" class="assistant-panel__conversation">
+        <ChatView v-if="assistant.sessionId && readySessionId === assistant.sessionId"
+          :key="assistant.sessionId" :session_id="assistant.sessionId"
+          :agent-id="BUILTIN_WEKNORA_ASSISTANT_ID" :embedded-mode="true" :initial-query="initialQuery"
+          :host-scope="hostScope" :model-id="assistant.modelId" :default-model-id="defaultModelId"
+          @update:model-id="assistant.setModel">
+          <template v-if="assistant.pageContext" #composer-chips>
+            <AssistantContextChip />
+          </template>
+          <template #composer-controls>
+            <AssistantAccessPicker />
+          </template>
+        </ChatView>
+
+        <div v-else-if="assistant.sessionId" class="assistant-history">
+          <template v-if="sessionLoadError">
+            <p role="alert">{{ t('assistant.historyFailed') }}</p>
+            <t-button variant="text" @click="validateSession(assistant.sessionId)">{{ t('common.retry') }}</t-button>
+          </template>
+          <t-loading v-else size="small" />
+        </div>
+        <div v-else class="assistant-welcome">
+          <div class="assistant-welcome-body">
+            <div class="assistant-welcome-icon">
+              <t-icon name="compass" size="22px" />
+            </div>
+            <h3 class="assistant-welcome-title">{{ t('assistant.welcomeTitle') }}</h3>
+            <p class="assistant-welcome-desc">{{ welcomeDescription }}</p>
+            <div class="assistant-starters">
+              <button v-for="starter in starters" :key="starter" type="button" class="assistant-starter"
+                :disabled="starting" @click="startConversation(starter)">
+                {{ starter }}
+              </button>
+            </div>
+          </div>
+          <div class="assistant-welcome-composer">
+            <InputField :embedded-mode="true" compact :auto-focus="assistant.visible" :model-id="assistant.modelId"
+              :default-model-id="defaultModelId" @update:model-id="assistant.setModel"
+              @send-msg="(query) => startConversation(query)">
+              <template v-if="assistant.pageContext" #chips>
+                <AssistantContextChip />
+              </template>
+              <template #controls>
+                <AssistantAccessPicker />
+              </template>
+            </InputField>
+          </div>
         </div>
       </div>
     </div>
@@ -79,15 +117,15 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import ChatView from '@/views/chat/index.vue'
 import InputField from '@/components/Input-field.vue'
 import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
 import AssistantContextChip from './AssistantContextChip.vue'
 import AssistantAccessPicker from './AssistantAccessPicker.vue'
-import { createSessions } from '@/api/chat'
+import { createSessions, getSessionsList, getSession, type SessionSummary } from '@/api/chat'
+import { classifyDateBucket } from '@/components/sessionGrouping'
 import { BUILTIN_WEKNORA_ASSISTANT_ID } from '@/api/agent'
-import { useMenuStore } from '@/stores/menu'
 import { useAuthStore } from '@/stores/auth'
 import {
   ASSISTANT_PANEL_MAX_WIDTH,
@@ -96,11 +134,10 @@ import {
   useAssistantStore,
   type AssistantOpenRequest,
 } from '@/stores/assistant'
-import { SESSION_MUTATION_EVENT, type SessionMutationDetail } from '@/components/sessionMutations'
+import { removeSession, SESSION_MUTATION_EVENT, type SessionMutationDetail } from '@/components/sessionMutations'
 
 const { t } = useI18n()
 const assistant = useAssistantStore()
-const menuStore = useMenuStore()
 const auth = useAuthStore()
 const conversationOwner = computed(() => `${auth.user?.id}:${auth.effectiveTenantId}`)
 const assistantName = computed(() => assistant.displayName || t('assistant.title'))
@@ -160,12 +197,18 @@ const initialMessage = ref<{
 const initialQuery = computed(() => initialMessage.value?.sessionId === assistant.sessionId
   ? initialMessage.value.query : '')
 
+const welcomeDescription = computed(() => t(assistant.contextAttached && assistant.pageContext?.agentId
+  ? 'assistant.agentWelcomeDesc' : 'assistant.welcomeDesc'))
+
 const starters = computed(() => {
   const c = assistant.contextAttached ? assistant.pageContext : null
+  if (c?.agentId) return [
+    t('assistant.starters.agentConfig'), t('assistant.starters.agentModel'), t('assistant.starters.agentKnowledge'),
+  ]
   if (c?.wikiSlug) return [t('assistant.starters.wikiIssues'), t('assistant.starters.wikiSummary')]
   if (c?.knowledgeId) return [t('assistant.starters.documentStatus'), t('assistant.starters.documentSummary')]
   if (c) return [t('assistant.starters.failedDocuments'), t('assistant.starters.recentActivity')]
-  return [t('assistant.starters.formats'), t('assistant.starters.createWiki')]
+  return [t('assistant.starters.agents'), t('assistant.starters.formats'), t('assistant.starters.createWiki')]
 })
 
 // The backend only honours a page context inside the run's search scope, so
@@ -177,7 +220,7 @@ const hostScope = () => {
   const assistantAccess = assistant.effectiveAccessLevel
   if (!context) return { knowledgeBaseIds: [], pageContext: null, assistantAccess }
   return {
-    knowledgeBaseIds: [context.knowledgeBaseId],
+    knowledgeBaseIds: context.knowledgeBaseId ? [context.knowledgeBaseId] : [],
     pageContext: toPageContextPayload(focus ? { ...context, ...focus } : context),
     assistantAccess,
   }
@@ -189,22 +232,13 @@ async function startConversation(query: string, focus?: AssistantOpenRequest['fo
   const owner = conversationOwner.value
   starting.value = true
   try {
-    const res: any = await createSessions({})
+    const res: any = await createSessions({ kind: 'assistant' })
     // A workspace switch can complete while session creation is in flight.
     if (conversationOwner.value !== owner) return
     const sessionId = res?.data?.id
     if (!sessionId) throw new Error('missing session id')
-    const now = new Date().toISOString()
-    menuStore.updataMenuChildren({
-      title: assistantName.value,
-      path: `chat/${sessionId}`,
-      id: sessionId,
-      isMore: false,
-      isNoTitle: true,
-      created_at: now,
-      updated_at: now,
-    })
     initialMessage.value = { sessionId, query: text, focus }
+    showHistory.value = false
     assistant.setSession(sessionId)
   } catch (e) {
     console.error('[Assistant] Failed to start a conversation', e)
@@ -221,13 +255,123 @@ watch(() => [assistant.visible, assistant.pendingRequest] as const, ([visible, r
   if (query) void startConversation(query, focus)
 }, { immediate: true })
 
+const showHistory = ref(false)
+const history = ref<SessionSummary[]>([])
+const historyPage = ref(0)
+const historyTotal = ref(0)
+const historyLoading = ref(false)
+const historyError = ref(false)
+const deleting = ref('')
+const readySessionId = ref('')
+const sessionLoadError = ref(false)
+let historyGeneration = 0
+
+async function loadHistory(reset = false) {
+  if (historyLoading.value && !reset) return
+  const generation = reset ? ++historyGeneration : historyGeneration
+  const owner = conversationOwner.value
+  if (reset) {
+    history.value = []
+    historyPage.value = 0
+    historyTotal.value = 0
+  }
+  historyLoading.value = true
+  historyError.value = false
+  try {
+    const res: any = await getSessionsList(historyPage.value + 1, 20, undefined, 'assistant')
+    if (generation !== historyGeneration || owner !== conversationOwner.value) return
+    if (!res?.success) throw new Error('session list failed')
+    const seen = new Set(history.value.map(session => session.id))
+    history.value.push(...(res.data as SessionSummary[]).filter(session => !seen.has(session.id)))
+    historyTotal.value = res.total
+    historyPage.value++
+  } catch {
+    if (generation === historyGeneration && owner === conversationOwner.value) historyError.value = true
+  } finally {
+    if (generation === historyGeneration && owner === conversationOwner.value) historyLoading.value = false
+  }
+}
+
+function toggleHistory() {
+  showHistory.value = !showHistory.value
+  if (showHistory.value) void loadHistory(true)
+}
+
+function startNewConversation() {
+  showHistory.value = false
+  assistant.startNewConversation()
+}
+
+function selectSession(id: string) {
+  assistant.setSession(id)
+  showHistory.value = false
+}
+
+function confirmDelete(id: string) {
+  const owner = conversationOwner.value
+  const dialog = DialogPlugin.confirm({
+    header: t('chatHeader.deleteConfirmTitle'),
+    body: t('chatHeader.deleteConfirmBody'),
+    confirmBtn: { content: t('common.delete'), theme: 'danger' },
+    cancelBtn: t('common.cancel'),
+    theme: 'warning',
+    onConfirm: async () => {
+      if (deleting.value || owner !== conversationOwner.value) return
+      deleting.value = id
+      try {
+        await removeSession(id)
+        if (owner !== conversationOwner.value) return
+        if (id === assistant.sessionId) startNewConversation()
+        if (showHistory.value) await loadHistory(true)
+        dialog.destroy()
+      } catch {
+        if (owner === conversationOwner.value) MessagePlugin.error(t('chat.deleteSessionFailed'))
+      } finally {
+        deleting.value = ''
+      }
+    },
+    onClose: () => dialog.destroy(),
+  })
+}
+
+async function validateSession(id: string) {
+  const owner = conversationOwner.value
+  readySessionId.value = ''
+  sessionLoadError.value = false
+  if (!id) return
+  if (id === initialMessage.value?.sessionId) {
+    readySessionId.value = id
+    return
+  }
+  try {
+    await getSession(id)
+    if (owner === conversationOwner.value && id === assistant.sessionId) readySessionId.value = id
+  } catch (error: any) {
+    if (owner !== conversationOwner.value || id !== assistant.sessionId) return
+    const status = error?.$httpStatus ?? error?.response?.status ?? error?.status
+    if (status === 403 || status === 404) startNewConversation()
+    else sessionLoadError.value = true
+  }
+}
+
 watch(() => assistant.sessionId, (id) => {
   if (id !== initialMessage.value?.sessionId) initialMessage.value = null
+  void validateSession(id)
+}, { immediate: true })
+
+watch(conversationOwner, () => {
+  ++historyGeneration
+  history.value = []
+  historyTotal.value = 0
+  historyPage.value = 0
+  historyLoading.value = false
+  historyError.value = false
+  showHistory.value = false
 })
 
 const handleSessionMutation = (event: Event) => {
   const detail = (event as CustomEvent<SessionMutationDetail>).detail
-  if (detail?.removed && detail.sessionId === assistant.sessionId) assistant.startNewConversation()
+  if (detail?.removed && detail.sessionId === assistant.sessionId) startNewConversation()
 }
 onMounted(() => {
   window.addEventListener(SESSION_MUTATION_EVENT, handleSessionMutation)
@@ -374,6 +518,58 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.assistant-panel__conversation {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.assistant-history {
+  overflow-y: auto;
+  padding: 12px;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+}
+
+.assistant-history__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--app-radius-md);
+
+  &:hover, &.is-current {
+    background: var(--td-bg-color-container-hover);
+  }
+
+  &.is-current {
+    color: var(--td-brand-color);
+  }
+}
+
+.assistant-history__select {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  span, small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  small {
+    margin-top: 4px;
+    color: var(--td-text-color-placeholder);
+  }
 }
 
 .assistant-welcome {
