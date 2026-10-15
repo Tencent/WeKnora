@@ -161,6 +161,13 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 		}
 	}
 
+	// The image settings have to survive the same check the settings panel
+	// makes: a pipeline whose every action switch is off would process images
+	// by ignoring them.
+	if err := s.validateImagePipelineConfig(ctx, kb); err != nil {
+		return nil, err
+	}
+
 	logger.Infof(ctx, "Creating knowledge base, ID: %s, tenant ID: %d, name: %s", kb.ID, kb.TenantID, kb.Name)
 
 	if err := s.repo.CreateKnowledgeBase(ctx, kb); err != nil {
@@ -604,6 +611,11 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		// know about the image settings cannot wipe them.
 		if config.ImageProcessingConfig != nil {
 			kb.ImageProcessingConfig = *config.ImageProcessingConfig
+			// Same rule as on create: the update lands only if the pipeline the
+			// request names can actually run what it declares.
+			if err := s.validateImagePipelineConfig(ctx, kb); err != nil {
+				return nil, err
+			}
 		}
 		if config.FAQConfig != nil {
 			kb.FAQConfig = config.FAQConfig
