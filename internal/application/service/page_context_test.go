@@ -142,3 +142,93 @@ func TestResolvePageContextInfo(t *testing.T) {
 		"a base outside the search targets must be dropped")
 	assert.Nil(t, svc.resolvePageContextInfo(ctx, nil, targets, kbInfos))
 }
+
+type pageContextKnowledgeService struct {
+	interfaces.KnowledgeService
+	tags map[string][]*types.KnowledgeTag
+	err  error
+}
+
+func (s *pageContextKnowledgeService) GetKnowledgeTags(
+	context.Context, []string,
+) (map[string][]*types.KnowledgeTag, error) {
+	return s.tags, s.err
+}
+
+func TestResolvePageContextWikiScope(t *testing.T) {
+	document := &types.SearchTarget{
+		Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb", KnowledgeIDs: []string{"selected"},
+	}
+	tag := &types.SearchTarget{
+		Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb", TagIDs: []string{"tag"},
+	}
+	whole := &types.SearchTarget{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb"}
+	for _, tc := range []struct {
+		name      string
+		targets   types.SearchTargets
+		source    string
+		pageType  string
+		tagErr    error
+		issueOnly bool
+		want      bool
+	}{
+		{name: "selected document", targets: types.SearchTargets{document}, source: "selected", want: true},
+		{name: "other document", targets: types.SearchTargets{document}, source: "other"},
+		{name: "selected tag", targets: types.SearchTargets{tag}, source: "tagged", want: true},
+		{name: "other tag", targets: types.SearchTargets{tag}, source: "other"},
+		{
+			name: "tag lookup failure", targets: types.SearchTargets{tag},
+			source: "tagged", tagErr: errors.New("lookup failed"),
+		},
+		{name: "document and tag union", targets: types.SearchTargets{document, tag}, source: "tagged", want: true},
+		{
+			name: "whole base supersedes document", targets: types.SearchTargets{document, whole},
+			source: "other", want: true,
+		},
+		{name: "uncited page", targets: types.SearchTargets{document}},
+		{
+			name: "structural page", targets: types.SearchTargets{document},
+			source: "selected", pageType: types.WikiPageTypeIndex,
+		},
+		{
+			name: "issue only in scope", targets: types.SearchTargets{document},
+			source: "selected", issueOnly: true, want: true,
+		},
+		{name: "issue only outside scope", targets: types.SearchTargets{document}, source: "other", issueOnly: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			page := &types.WikiPage{KnowledgeBaseID: "kb", Slug: "entity/acme", Title: "Acme", PageType: tc.pageType}
+			if tc.source != "" {
+				page.SourceRefs = types.StringArray{tc.source + "|Source"}
+			}
+			svc := &agentService{
+				knowledgeService: &pageContextKnowledgeService{tags: map[string][]*types.KnowledgeTag{
+					"tagged": {{ID: "tag"}},
+				}, err: tc.tagErr},
+				wikiPageService: &pageContextWikiService{
+					pages:  map[string]*types.WikiPage{"kb/entity/acme": page},
+					issues: []*types.WikiPageIssue{{ID: "issue", KnowledgeBaseID: "kb", Slug: page.Slug}},
+				},
+			}
+			pageContext := &types.PageContext{
+				KnowledgeBaseID: "kb", WikiSlug: page.Slug, WikiIssueIDs: []string{"issue"},
+			}
+			if tc.issueOnly {
+				pageContext.WikiSlug = ""
+			}
+			info := svc.resolvePageContextInfo(context.Background(), pageContext,
+				tc.targets, []*agent.KnowledgeBaseInfo{{ID: "kb", Name: "Handbook"}})
+			require.NotNil(t, info)
+			if tc.want {
+				if !tc.issueOnly {
+					require.NotNil(t, info.WikiPage)
+					require.Equal(t, page.Title, info.WikiPage.Title)
+				}
+				require.Len(t, info.WikiIssues, 1)
+			} else {
+				require.Nil(t, info.WikiPage, "out-of-scope page metadata must not enter the model context")
+				require.Empty(t, info.WikiIssues, "issue references must obey the same page scope")
+			}
+		})
+	}
+}

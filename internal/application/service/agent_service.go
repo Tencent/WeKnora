@@ -1649,17 +1649,52 @@ func (s *agentService) resolvePageContextInfo(
 	if s.wikiPageService == nil {
 		return info
 	}
+	scopes := tools.NewWikiScopesFromSearchTargets(targets, []string{kbID})
+	if len(scopes) == 0 {
+		return info
+	}
+	scope := scopes[0]
+	// Cache page lookups because the open page and several issue references
+	// can name the same slug. Failed or out-of-scope lookups stay excluded.
+	pages := make(map[string]*types.WikiPage)
+	pageInScope := func(slug string) *types.WikiPage {
+		if page, ok := pages[slug]; ok {
+			return page
+		}
+		pages[slug] = nil
+		page, err := s.wikiPageService.GetPageBySlug(ctx, kbID, slug)
+		if err != nil || page == nil {
+			return nil
+		}
+		allowed, err := tools.WikiPageInScope(ctx, page, scope, s.knowledgeService)
+		if err != nil {
+			logger.Warnf(ctx, "Page context wiki scope check failed: %v", err)
+			return nil
+		}
+		if allowed {
+			pages[slug] = page
+		}
+		return pages[slug]
+	}
 	if page.WikiSlug != "" {
-		wikiPage, err := s.wikiPageService.GetPageBySlug(ctx, kbID, page.WikiSlug)
-		if err == nil && wikiPage != nil {
+		if wikiPage := pageInScope(page.WikiSlug); wikiPage != nil {
 			info.WikiPage = &agent.PageContextWikiPage{Slug: wikiPage.Slug, Title: wikiPage.Title}
 		} else {
-			logger.Infof(ctx, "Page context wiki page %s dropped: not found in knowledge base %s",
+			logger.Infof(ctx, "Page context wiki page %s dropped: unavailable in scope of knowledge base %s",
 				secutils.SanitizeForLog(page.WikiSlug), secutils.SanitizeForLog(kbID))
 		}
 	}
 	if len(page.WikiIssueIDs) > 0 {
 		info.WikiIssues = s.pageContextIssues(ctx, kbID, page.WikiIssueIDs)
+		if len(scope.KnowledgeIDs) > 0 || len(scope.TagIDs) > 0 {
+			kept := info.WikiIssues[:0]
+			for _, issue := range info.WikiIssues {
+				if pageInScope(issue.Slug) != nil {
+					kept = append(kept, issue)
+				}
+			}
+			info.WikiIssues = kept
+		}
 	}
 	return info
 }

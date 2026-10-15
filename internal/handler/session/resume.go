@@ -181,6 +181,18 @@ func (h *Handler) buildResumeRequest(
 	if customAgent == nil {
 		return nil, state, fmt.Errorf("agent %s is no longer available", req.AgentID)
 	}
+	if types.RunsInSharedKBWorkspace(customAgent) {
+		// The saved tenant is the KB's execution workspace, not an agent
+		// share. Resolve the local built-in again and recheck the current
+		// caller's KB permission before borrowing that workspace's resources.
+		customAgent, effectiveTenantID = h.resolveWikiFixerTenantScope(
+			ctx, customAgent, session.TenantID, types.TenantRoleFromContext(ctx), req.KnowledgeBaseIDs,
+		)
+	}
+	if types.IsBuiltinAgentID(req.AgentID) && req.AgentTenantID != 0 &&
+		req.AgentTenantID != session.TenantID && effectiveTenantID != req.AgentTenantID {
+		return nil, state, fmt.Errorf("shared KB workspace is no longer available for agent %s", req.AgentID)
+	}
 
 	// Mark the message as generating again before the run publishes itself
 	// as live: an awaiting message is not treated as a live run.
@@ -232,7 +244,9 @@ func (h *Handler) buildResumeRequest(
 // sharedSourceTenant is the workspace to resolve a shared agent from, or 0
 // for the session's own agents.
 func sharedSourceTenant(session *types.Session, req types.ResumableAgentRequest) uint64 {
-	if req.AgentTenantID == 0 || req.AgentTenantID == session.TenantID {
+	// Built-ins are never shared agents. A different tenant can only be the
+	// execution scope of a shared KB, which must be revalidated separately.
+	if types.IsBuiltinAgentID(req.AgentID) || req.AgentTenantID == 0 || req.AgentTenantID == session.TenantID {
 		return 0
 	}
 	return req.AgentTenantID
