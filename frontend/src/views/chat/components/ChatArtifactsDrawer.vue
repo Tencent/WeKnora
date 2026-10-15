@@ -602,6 +602,8 @@ onUnmounted(() => {
     bottom: 0;
     width: 12px;
     margin-left: -6px;
+    // Its inline right is the drawer width; a docked assistant panel adds to it.
+    margin-right: var(--assistant-dock-width, 0px);
     z-index: 2002;
     cursor: col-resize;
     display: flex;

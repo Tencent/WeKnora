@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // Swagger extensions that put an operation in the catalog. They are written
@@ -68,6 +70,9 @@ type agentOperation struct {
 	// CatchAll names the last path segment that the router registers as a
 	// catch-all (*slug), which Swagger cannot express.
 	CatchAll string `json:"catch_all"`
+	// Role is the lowest workspace role the route accepts, when it differs
+	// from the default for the risk.
+	Role types.TenantRole `json:"role,omitempty"`
 }
 
 type specDocument struct {
@@ -185,6 +190,7 @@ func (doc *specDocument) compile(method, path string, sop specOperation) (Operat
 		Risk:        meta.Risk,
 		Method:      method,
 		Route:       route,
+		Role:        meta.Role,
 	}
 	if op.Description == "" {
 		op.Description = strings.TrimSpace(sop.Description)

@@ -282,7 +282,8 @@ const isOwner = computed(() => {
   // those as tenant-owned so the role gate applies (Admin+ can manage,
   // Viewer cannot).
   if (!creatorId) return false;
-  return creatorId === userId;
+  // A creator demoted to Viewer no longer manages it (access.CreatorRoleFloor).
+  return creatorId === userId && authStore.hasRole('contributor');
 });
 
 // Current KB's shared record (when accessed via organization share)
@@ -313,7 +314,7 @@ const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value
 // the KB. The backend's RBAC middleware authorizes based on the active
 // tenant, not on creator_id, so a creator viewing their own KB from a
 // different tenant context will be 403'd on write. Otherwise: KB creator
-// (any role) or tenant Admin+ in the home tenant.
+// (Contributor+) or tenant Admin+ in the home tenant.
 //
 // A resolved cross-tenant permission (org share or shared-agent visibility,
 // already capped server-side by effective = min(share, org_role, tenant_role))
@@ -440,6 +441,7 @@ useAssistantPageContext(() => {
   return {
     knowledgeBaseId: kbId.value,
     knowledgeBaseName: kbInfo.value?.id === kbId.value ? kbInfo.value?.name : undefined,
+    chatModelId: kbInfo.value?.id === kbId.value ? kbInfo.value?.summary_model_id || undefined : undefined,
     knowledgeId: docOpen ? details.id : undefined,
     knowledgeTitle: docOpen ? details.title : undefined,
   };

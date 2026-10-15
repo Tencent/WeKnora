@@ -4739,7 +4739,8 @@ const docTemplate = `{
                 },
                 "x-agent": {
                     "id": "knowledge_base.list_activity",
-                    "risk": "read"
+                    "risk": "read",
+                    "role": "contributor"
                 },
                 "x-agent-hint": "Newest first; only the creator or a workspace admin may read it. Assistant actions carry via=agent."
             }
@@ -22117,6 +22118,9 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_handler_dto.TenantResponse": {
             "type": "object",
             "properties": {
+                "assistant_config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantConfig"
+                },
                 "business": {
                     "type": "string"
                 },
@@ -22895,6 +22899,36 @@ const docTemplate = `{
                 "AnswerStrategyAll",
                 "AnswerStrategyRandom"
             ]
+        },
+        "github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel": {
+            "type": "string",
+            "enum": [
+                "read_only",
+                "confirm",
+                "auto_write"
+            ],
+            "x-enum-varnames": [
+                "AssistantAccessReadOnly",
+                "AssistantAccessConfirm",
+                "AssistantAccessAutoWrite"
+            ]
+        },
+        "github_com_Tencent_WeKnora_internal_types.AssistantConfig": {
+            "type": "object",
+            "properties": {
+                "display_name": {
+                    "description": "DisplayName replaces the product name in the assistant UI; empty keeps\nthe default.",
+                    "type": "string"
+                },
+                "max_access_level": {
+                    "description": "MaxAccessLevel is the highest level a member may pick; empty means\nAssistantAccessConfirm.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel"
+                        }
+                    ]
+                }
+            }
         },
         "github_com_Tencent_WeKnora_internal_types.AttrSpec": {
             "type": "object",
@@ -30634,6 +30668,14 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.Tenant": {
             "type": "object",
             "properties": {
+                "assistant_config": {
+                    "description": "Assistant config: display name and access ceiling of the WeKnora assistant",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantConfig"
+                        }
+                    ]
+                },
                 "business": {
                     "description": "Business",
                     "type": "string"

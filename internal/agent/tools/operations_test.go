@@ -382,8 +382,106 @@ func TestRunOperationApprovalNamesTheChange(t *testing.T) {
 	assert.NotContains(t, desc, "k1")
 }
 
+func TestRunOperationFollowsAccessLevel(t *testing.T) {
+	responses := map[string]*operations.Response{
+		"GET /api/v1/knowledge/k1":          {Status: http.StatusOK, Body: []byte(docBody)},
+		"POST /api/v1/knowledge/k1/reparse": {Status: http.StatusOK, Body: []byte(docBody)},
+		"DELETE /api/v1/knowledge/k1": {
+			Status: http.StatusOK, Body: []byte(`{"success":true,"data":{"task_id":"t1"}}`),
+		},
+	}
+	newTool := func(level types.AssistantAccessLevel, d *fakeDispatcher, gate *fakeApprover) *RunOperationTool {
+		access := operations.Access{Level: level}
+		return NewRunOperationTool(OperationsRuntime{
+			Catalog:    operations.Builtin(),
+			Dispatcher: d,
+			Gate:       gate,
+			Identity:   operations.Identity{UserID: "u1", TenantID: 7},
+			Access:     access,
+		})
+	}
+	reparse := runArgs("knowledge.reparse", map[string]any{"knowledge_id": "k1"})
+	remove := runArgs("knowledge.delete", map[string]any{"knowledge_id": "k1"})
+
+	t.Run("auto_write runs writes without asking but still asks before deleting", func(t *testing.T) {
+		d := &fakeDispatcher{responses: responses}
+		gate := &fakeApprover{decision: approval.Decision{Approved: true, PendingID: "p1"}}
+		tool := newTool(types.AssistantAccessAutoWrite, d, gate)
+
+		res, _ := tool.Execute(interactiveCtx(), reparse)
+		require.True(t, res.Success, res.Error)
+		assert.Empty(t, gate.requests)
+
+		res, _ = tool.Execute(interactiveCtx(), remove)
+		require.True(t, res.Success, res.Error)
+		assert.Len(t, gate.requests, 1)
+	})
+
+	t.Run("read_only refuses every change", func(t *testing.T) {
+		d := &fakeDispatcher{responses: responses}
+		gate := &fakeApprover{decision: approval.Decision{Approved: true, PendingID: "p1"}}
+		tool := newTool(types.AssistantAccessReadOnly, d, gate)
+
+		for _, args := range []json.RawMessage{reparse, remove} {
+			res, _ := tool.Execute(interactiveCtx(), args)
+			assert.False(t, res.Success)
+			assert.Contains(t, res.Error, "read-only", "the refusal says why")
+			assert.NotContains(t, res.Error, "unknown operation")
+		}
+		assert.Empty(t, d.calls)
+		assert.Empty(t, gate.requests)
+		assert.Contains(t, tool.Description(), "read-only")
+	})
+
+	t.Run("a role below the operation's is refused with the role it needs", func(t *testing.T) {
+		d := &fakeDispatcher{responses: responses}
+		tool := NewRunOperationTool(OperationsRuntime{
+			Catalog:    operations.Builtin(),
+			Dispatcher: d,
+			Gate:       &fakeApprover{decision: approval.Decision{Approved: true, PendingID: "p1"}},
+			Access:     operations.Access{Role: types.TenantRoleViewer, EnforceRole: true},
+		})
+		res, _ := tool.Execute(interactiveCtx(), remove)
+		assert.False(t, res.Success)
+		assert.Contains(t, res.Error, "contributor")
+		assert.Empty(t, d.calls)
+	})
+}
+
+func TestFindOperationsExplainsWithheldMatches(t *testing.T) {
+	type output struct {
+		Operations  []operationView            `json:"operations"`
+		Unavailable []unavailableOperationView `json:"unavailable"`
+		Hint        string                     `json:"hint"`
+	}
+	find := func(access operations.Access, query string) output {
+		res, err := NewFindOperationsTool(operations.Builtin(), access).
+			Execute(context.Background(), json.RawMessage(`{"query":"`+query+`"}`))
+		require.NoError(t, err)
+		require.True(t, res.Success)
+		var out output
+		require.NoError(t, json.Unmarshal([]byte(res.Output), &out))
+		return out
+	}
+
+	viewer := find(operations.Access{Role: types.TenantRoleViewer, EnforceRole: true}, "knowledge.delete")
+	assert.Empty(t, viewer.Operations)
+	require.Len(t, viewer.Unavailable, 1)
+	assert.Equal(t, "knowledge.delete", viewer.Unavailable[0].ID)
+	assert.Contains(t, viewer.Unavailable[0].Reason, "contributor")
+	assert.Contains(t, viewer.Hint, "instead of searching again")
+
+	readOnly := find(operations.Access{Level: types.AssistantAccessReadOnly}, "knowledge.delete")
+	require.Len(t, readOnly.Unavailable, 1)
+	assert.Contains(t, readOnly.Unavailable[0].Reason, "assistant settings")
+
+	contributor := find(operations.Access{Role: types.TenantRoleContributor, EnforceRole: true}, "knowledge.delete")
+	require.Len(t, contributor.Operations, 1)
+	assert.Empty(t, contributor.Unavailable)
+}
+
 func TestFindOperationsDescribesMatches(t *testing.T) {
-	tool := NewFindOperationsTool(operations.Builtin())
+	tool := NewFindOperationsTool(operations.Builtin(), operations.Access{Level: types.AssistantAccessConfirm})
 	res, err := tool.Execute(context.Background(), json.RawMessage(`{"query":"knowledge.delete"}`))
 	require.NoError(t, err)
 	require.True(t, res.Success)

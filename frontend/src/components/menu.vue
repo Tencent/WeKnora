@@ -7,9 +7,9 @@
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
             </div>
             <div class="logo_actions">
-                <t-tooltip :content="t('assistant.title')" placement="bottom">
+                <t-tooltip v-if="assistantStore.entry === 'sidebar'" :content="assistantName" placement="bottom">
                     <div class="header-icon-btn" :class="{ 'is-active': assistantStore.visible }"
-                        :aria-label="t('assistant.title')" @click="assistantStore.toggle()">
+                        :aria-label="assistantName" @click="assistantStore.toggle()">
                         <t-icon name="compass" size="18px" />
                     </div>
                 </t-tooltip>
@@ -83,9 +83,9 @@
                         </div>
                     </div>
                 </t-tooltip>
-                <t-tooltip :content="t('assistant.title')" placement="right">
+                <t-tooltip v-if="assistantStore.entry === 'sidebar'" :content="assistantName" placement="right">
                     <div class="menu_item menu_item--cmdk" :class="{ 'menu_item_active': assistantStore.visible }"
-                        :aria-label="t('assistant.title')" @click="assistantStore.toggle()">
+                        :aria-label="assistantName" @click="assistantStore.toggle()">
                         <div class="menu_item-box">
                             <div class="menu_icon">
                                 <t-icon name="compass" size="18px" />
@@ -351,6 +351,7 @@ watch(() => uiStore.sidebarBrowserStatus && toolboxPreview.value.some((tool) => 
 }, { immediate: true });
 const commandPaletteStore = useCommandPaletteStore();
 const assistantStore = useAssistantStore();
+const assistantName = computed(() => assistantStore.displayName || t('assistant.title'));
 
 // Platform-aware label for the ⌘K hint. navigator.platform is deprecated but
 // the alternatives (userAgentData.platform) aren't universally available yet;

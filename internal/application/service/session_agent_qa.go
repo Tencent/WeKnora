@@ -368,6 +368,7 @@ func resumableAgentRequest(ctx context.Context, req *types.QARequest) types.Resu
 		WebSearchEnabled:    req.WebSearchEnabled,
 		QuestionOrigin:      req.QuestionOrigin,
 		PageContext:         req.PageContext,
+		AssistantAccess:     req.AssistantAccess,
 		UserMessageID:       req.UserMessageID,
 		Language:            types.LanguageFromContextOrDefault(ctx),
 	}
@@ -524,6 +525,14 @@ func (s *sessionService) buildAgentConfig(
 		agentConfig.WritableKBIDs = kbWritableIDs(ctx, s.kbShareService, searchTargets, roleEnforced)
 		if types.GrantsOperationCatalog(req.CustomAgent) {
 			agentConfig.OperationsAgentID = req.CustomAgent.ID
+			agentConfig.AssistantAccess = tenantInfo.AssistantConfig.EffectiveAccessLevel(req.AssistantAccess)
+			if cfg := tenantInfo.AssistantConfig; cfg != nil {
+				agentConfig.AssistantName = strings.TrimSpace(cfg.DisplayName)
+			}
+			if agentConfig.AssistantAccess == types.AssistantAccessReadOnly {
+				// Wiki tools write outside the catalog; read-only covers them too.
+				agentConfig.WritableKBIDs = nil
+			}
 		}
 	}
 	agentConfig.QuestionOrigin = questionOriginInTargets(ctx, req.QuestionOrigin, searchTargets)

@@ -605,11 +605,17 @@ func buildRuntimeContextBlock(
 	docs []*SelectedDocumentInfo,
 	origin *QuestionOriginInfo,
 	page *PageContextInfo,
+	assistantName string,
 ) string {
 	var sb strings.Builder
 	sb.WriteString("<runtime_context scope=\"this_turn\">\n")
 	fmt.Fprintf(&sb, "  <current_time>%s</current_time>\n", time.Now().Format("2006-01-02"))
 	fmt.Fprintf(&sb, "  <session>%s</session>\n", escapeXMLAttr(sessionID))
+	if assistantName != "" {
+		// The workspace renamed the assistant; it is a label, not an instruction.
+		fmt.Fprintf(&sb, "  <assistant_name note=\"what this workspace calls you; use it when you refer to yourself\">"+
+			"%s</assistant_name>\n", escapeXMLAttr(assistantName))
+	}
 
 	if len(kbs) > 0 {
 		// Render the full bound-KB detail (capabilities + recent docs) so the
@@ -842,7 +848,7 @@ func commonStringPrefix(a, b string) string {
 func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
 	e.registerRuntimeReferences()
 	runtimeCtx := buildRuntimeContextBlock(
-		sessionID, e.knowledgeBasesInfo, e.selectedDocs, e.questionOrigin, e.pageContext)
+		sessionID, e.knowledgeBasesInfo, e.selectedDocs, e.questionOrigin, e.pageContext, e.assistantName)
 	runtimeCtx = e.modelContext.EncodeKnownIssues(e.modelContext.CompactKnownText(runtimeCtx))
 	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
 	return composeUserTurnContent(runtimeCtx, mustUse, query)

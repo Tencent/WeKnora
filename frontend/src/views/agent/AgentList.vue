@@ -1295,7 +1295,8 @@ const handleEdit = (agent: AgentWithUI) => {
 function canManageAgent(agent: AgentWithUI): boolean {
   const userId = authStore.user?.id || ''
   const creatorId = (agent as any).created_by || ''
-  if (creatorId && userId && creatorId === userId) return true
+  // A creator demoted to Viewer no longer manages it (access.CreatorRoleFloor).
+  if (creatorId && userId && creatorId === userId && authStore.hasRole('contributor')) return true
   return authStore.hasRole('admin')
 }
 

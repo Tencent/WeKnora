@@ -2,13 +2,22 @@
   <t-tooltip v-if="context" :content="tooltip" placement="top">
     <span v-if="assistant.contextAttached" class="assistant-context-chip">
       <t-icon :name="icon" class="assistant-context-chip__icon" />
-      <span class="assistant-context-chip__name">{{ label }}</span>
+      <span class="assistant-context-chip__path">
+        <template v-for="(segment, index) in segments" :key="index">
+          <span v-if="index > 0" class="assistant-context-chip__sep" aria-hidden="true">/</span>
+          <span class="assistant-context-chip__segment" :class="{ 'is-leaf': index === segments.length - 1 }">
+            {{ segment }}
+          </span>
+        </template>
+      </span>
       <span class="assistant-context-chip__remove" role="button" :aria-label="t('assistant.context.detach')"
         @click.stop="assistant.dismissPageContext()">×</span>
     </span>
     <button v-else type="button" class="assistant-context-chip is-detached" @click="assistant.restorePageContext()">
       <t-icon name="add" class="assistant-context-chip__icon" />
-      <span class="assistant-context-chip__name">{{ label }}</span>
+      <span class="assistant-context-chip__path">
+        <span class="assistant-context-chip__segment is-leaf">{{ segments[segments.length - 1] }}</span>
+      </span>
     </button>
   </t-tooltip>
 </template>
@@ -28,16 +37,17 @@ const icon = computed(() => {
   return 'folder'
 })
 
-const label = computed(() => {
+// Knowledge base first, then the document or Wiki page open inside it.
+const segments = computed(() => {
   const c = context.value
-  if (!c) return ''
-  return c.wikiTitle || c.wikiSlug || c.knowledgeTitle || c.knowledgeBaseName || t('assistant.context.currentPage')
+  if (!c) return []
+  const leaf = c.wikiTitle || c.wikiSlug || c.knowledgeTitle
+  const path = [c.knowledgeBaseName, leaf].filter((s): s is string => !!s)
+  return path.length ? path : [t('assistant.context.currentPage')]
 })
 
 const tooltip = computed(() => {
-  const c = context.value
-  if (!c) return ''
-  const path = [c.knowledgeBaseName, c.knowledgeTitle, c.wikiTitle || c.wikiSlug].filter(Boolean).join(' / ')
+  const path = segments.value.join(' / ')
   return assistant.contextAttached
     ? t('assistant.context.attachedTip', { path })
     : t('assistant.context.detachedTip', { path })
@@ -54,7 +64,8 @@ const tooltip = computed(() => {
   align-items: center;
   gap: 5px;
   min-height: 26px;
-  max-width: 260px;
+  max-width: 100%;
+  min-width: 0;
   padding: 3px 6px;
   border-radius: var(--td-radius-medium);
   box-sizing: border-box;
@@ -87,10 +98,34 @@ const tooltip = computed(() => {
   }
 }
 
-.assistant-context-chip__name {
+.assistant-context-chip__path {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.assistant-context-chip__segment {
+  min-width: 0;
+  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--td-text-color-secondary);
+  font-weight: 400;
+
+  &.is-leaf {
+    flex-shrink: 0.5;
+    max-width: 240px;
+    color: inherit;
+    font-weight: 500;
+  }
+}
+
+.assistant-context-chip__sep {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+  font-weight: 400;
 }
 
 .assistant-context-chip__remove {

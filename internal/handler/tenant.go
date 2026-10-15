@@ -1335,6 +1335,9 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	case "memory-config":
 		h.GetTenantMemoryConfig(c)
 		return
+	case "assistant-config":
+		h.GetTenantAssistantConfig(c)
+		return
 	default:
 		logger.Info(ctx, "KV key not supported", "key", key)
 		c.Error(errors.NewBadRequestError("unsupported key"))
@@ -1385,6 +1388,9 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 		return
 	case "memory-config":
 		h.updateTenantMemoryConfigInternal(c)
+		return
+	case "assistant-config":
+		h.updateTenantAssistantConfigInternal(c)
 		return
 	default:
 		logger.Info(ctx, "KV key not supported", "key", key)
@@ -1899,6 +1905,73 @@ func (h *TenantHandler) updateTenantMemoryConfigInternal(c *gin.Context) {
 		"success": true,
 		"data":    updatedTenant.MemoryConfig,
 		"message": "Memory configuration updated successfully",
+	})
+}
+
+// GetTenantAssistantConfig returns the workspace assistant name and access
+// ceiling. Members read it to label the assistant and bound their own level.
+func (h *TenantHandler) GetTenantAssistantConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenant, _ := types.TenantInfoFromContext(ctx)
+	if tenant == nil {
+		logger.Error(ctx, "Workspace is empty")
+		c.Error(errors.NewBadRequestError("Workspace is empty"))
+		return
+	}
+	data := types.AssistantConfig{}
+	if tenant.AssistantConfig != nil {
+		data = *tenant.AssistantConfig
+	}
+	data.Normalize()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    data,
+	})
+}
+
+// updateTenantAssistantConfigInternal updates the workspace assistant config.
+func (h *TenantHandler) updateTenantAssistantConfigInternal(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var cfg types.AssistantConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	if cfg.MaxAccessLevel != "" && !cfg.MaxAccessLevel.Valid() {
+		c.Error(errors.NewBadRequestError("max_access_level must be read_only, confirm or auto_write"))
+		return
+	}
+	cfg.Normalize()
+	if len([]rune(cfg.DisplayName)) > types.MaxAssistantDisplayNameRunes {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf(
+			"display_name must be at most %d characters", types.MaxAssistantDisplayNameRunes)))
+		return
+	}
+
+	tenant, _ := types.TenantInfoFromContext(ctx)
+	if tenant == nil {
+		logger.Error(ctx, "Workspace is empty")
+		c.Error(errors.NewBadRequestError("Workspace is empty"))
+		return
+	}
+
+	tenant.AssistantConfig = &cfg
+	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+		} else {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError("Failed to update assistant config").WithDetails(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    updatedTenant.AssistantConfig,
+		"message": "Assistant configuration updated successfully",
 	})
 }
 

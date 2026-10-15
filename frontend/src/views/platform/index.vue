@@ -4,6 +4,10 @@
         <div v-if="isRouterAlive" class="platform-route-outlet">
             <RouterView />
         </div>
+        <!-- WeKnora 助手：停靠时作为布局右栏挤压页面，悬浮时浮在页面上；都不加遮罩，
+             跨页面保留会话，从侧栏、右侧边缘按钮或命令面板唤出（设置里可选） -->
+        <AssistantPanel />
+        <AssistantLauncher />
         <div class="upload-mask" v-show="ismask">
             <UploadMask></UploadMask>
         </div>
@@ -11,8 +15,6 @@
         <Settings />
         <!-- 全局命令面板 (⌘K)，随 platform 路由存活 -->
         <GlobalCommandPalette />
-        <!-- WeKnora 助手抽屉：跨页面保留会话，从侧栏或命令面板唤出 -->
-        <AssistantDrawer />
         <!-- 全局右上角"待处理邀请"铃铛。固定定位，z-index 低于抽屉，业务页面
              右侧抽屉弹出时会自然覆盖；仅在有待处理邀请时渲染。 -->
         <GlobalInvitationBell />
@@ -29,7 +31,8 @@ import { useRoute, useRouter } from 'vue-router'
 import UploadMask from '@/components/upload-mask.vue'
 import Settings from '@/views/settings/Settings.vue'
 import GlobalCommandPalette from '@/components/GlobalCommandPalette.vue'
-import AssistantDrawer from '@/components/assistant/AssistantDrawer.vue'
+import AssistantPanel from '@/components/assistant/AssistantPanel.vue'
+import AssistantLauncher from '@/components/assistant/AssistantLauncher.vue'
 import GlobalInvitationBell from '@/components/GlobalInvitationBell.vue'
 import UploadTasksPanel from '@/components/upload-tasks/UploadTasksPanel.vue'
 import NewUserGuide from '@/components/NewUserGuide.vue'

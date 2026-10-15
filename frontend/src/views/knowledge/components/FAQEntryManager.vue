@@ -851,7 +851,8 @@ const isOwner = computed(() => {
   const creatorId = (kbInfo.value as any).creator_id || ''
   const userId = authStore.user?.id || ''
   if (!creatorId) return false
-  return creatorId === userId
+  // A creator demoted to Viewer no longer manages it (access.CreatorRoleFloor).
+  return creatorId === userId && authStore.hasRole('contributor')
 })
 
 // Current KB's shared record (when accessed via organization share)
@@ -871,7 +872,7 @@ const isViaShare = computed(() => !!currentSharedKb.value)
 // the KB. The backend's RBAC middleware authorizes based on the active
 // tenant, not on creator_id, so a creator viewing their own KB from a
 // different tenant context will be 403'd on write. Otherwise: KB creator
-// (any role) or tenant Admin+ in the home tenant.
+// (Contributor+) or tenant Admin+ in the home tenant.
 const canEdit = computed(() => {
   if (isViaShare.value) return orgStore.canEditKB(props.kbId, false)
   if (isOwner.value) return true

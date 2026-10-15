@@ -12,6 +12,7 @@ const filename = fileURLToPath(new URL('./AssistantPanel.vue', import.meta.url))
 const { descriptor } = parse(readFileSync(filename, 'utf8'), { filename })
 const panelScript = compileScript(descriptor, { id: 'assistant-panel-test', inlineTemplate: true }).content
 const storeScript = readFileSync(new URL('../../stores/assistant.ts', import.meta.url), 'utf8')
+const assistantApiScript = readFileSync(new URL('../../api/assistant.ts', import.meta.url), 'utf8')
 
 function evaluate(source: string, dependencies: Record<string, unknown>, globals = {}) {
   const exports: any = {}
@@ -41,14 +42,20 @@ const flush = async () => {
   await vue.nextTick()
 }
 
-async function fixture(createSession = async () => ({ data: { id: 'new-session' } })) {
+async function fixture(
+  createSession = async () => ({ data: { id: 'new-session' } }),
+  workspaceConfig = { display_name: '', max_access_level: 'confirm' },
+) {
   const auth = vue.reactive({ user: { id: 'user-a' }, effectiveTenantId: 1 })
+  const assistantApi = evaluate(assistantApiScript, {
+    '@/utils/request': { get: async () => ({ success: true, data: workspaceConfig }), put: assert.fail },
+  })
   const sessionStorage = storage()
   sessionStorage.setItem('weknora:assistant-session:user-a:2', 'workspace-b-session')
   sessionStorage.setItem('weknora:assistant-session:user-b:1', 'user-b-session')
   const localStorage = storage()
   const stores = evaluate(storeScript, {
-    vue, pinia, './auth': { useAuthStore: () => auth },
+    vue, pinia, './auth': { useAuthStore: () => auth }, '@/api/assistant': assistantApi,
   }, { sessionStorage, localStorage })
   const storeRoot = pinia.createPinia()
   pinia.setActivePinia(storeRoot)
@@ -79,6 +86,7 @@ async function fixture(createSession = async () => ({ data: { id: 'new-session' 
     '@/components/Input-field.vue': emptyComponent,
     '@/components/PanelResizeHandle.vue': emptyComponent,
     './AssistantContextChip.vue': emptyComponent,
+    './AssistantAccessPicker.vue': emptyComponent,
     '@/api/chat': { createSessions: createSession },
     '@/api/agent': { BUILTIN_WEKNORA_ASSISTANT_ID: 'builtin-weknora-assistant' },
     '@/stores/menu': { useMenuStore: () => ({ updataMenuChildren: (entry: unknown) => menuEntries.push(entry) }) },
@@ -124,6 +132,20 @@ test('layout and width persist, with the width kept within bounds', async () => 
     f.assistant.setWidth(12)
     assert.equal(f.assistant.width, 360)
     assert.equal(f.localStorage.getItem('weknora:assistant-width'), '360')
+  } finally { f.close() }
+})
+
+test('a run asks for the chosen access level, capped by the workspace ceiling', async () => {
+  const f = await fixture(undefined, { display_name: ' Kora ', max_access_level: 'confirm' })
+  try {
+    assert.equal(f.assistant.displayName, 'Kora')
+    f.assistant.setAccessLevel('auto_write')
+    assert.equal(f.assistant.effectiveAccessLevel, 'confirm')
+    f.assistant.open({ query: 'Clean up the wiki' })
+    await flush()
+    assert.equal(f.sent[0].scope.assistantAccess, 'confirm')
+    f.assistant.setWorkspaceConfig({ display_name: '', max_access_level: 'auto_write' })
+    assert.equal(f.assistant.effectiveAccessLevel, 'auto_write', 'raising the ceiling restores the choice')
   } finally { f.close() }
 })
 

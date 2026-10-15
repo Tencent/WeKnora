@@ -1273,7 +1273,8 @@ function canManageKBCard(kb: KB): boolean {
   // admin/creator fallbacks either.
   if ((kb as any).isMine === false) return false
   const userId = authStore.user?.id || ''
-  if (kb.creator_id && userId && kb.creator_id === userId) return true
+  // A creator demoted to Viewer no longer manages it (access.CreatorRoleFloor).
+  if (kb.creator_id && userId && kb.creator_id === userId && authStore.hasRole('contributor')) return true
   return authStore.hasRole('admin')
 }
 

@@ -1,7 +1,7 @@
 <template>
   <!-- Hidden with a class, not v-if, so a reply keeps streaming while closed. -->
   <aside class="assistant-panel" :class="[`is-${effectiveLayout}`, { 'is-open': assistant.visible, 'is-resizing': resizing }]"
-    :style="{ width: `${panelWidth}px` }" role="complementary" :aria-label="t('assistant.title')"
+    :style="{ width: `${panelWidth}px` }" role="complementary" :aria-label="assistantName"
     :aria-hidden="!assistant.visible">
     <PanelResizeHandle edge="left" :label="t('assistant.resize')" :value="panelWidth"
       :min="ASSISTANT_PANEL_MIN_WIDTH" :max="ASSISTANT_PANEL_MAX_WIDTH"
@@ -11,7 +11,7 @@
       <span class="assistant-panel__header-icon" aria-hidden="true">
         <t-icon name="compass" />
       </span>
-      <span class="assistant-panel__title">{{ t('assistant.title') }}</span>
+      <span class="assistant-panel__title">{{ assistantName }}</span>
       <t-tooltip :content="t('assistant.newConversation')" placement="bottom">
         <button type="button" class="assistant-panel__action" :disabled="!assistant.sessionId || starting"
           :aria-label="t('assistant.newConversation')" @click="assistant.startNewConversation()">
@@ -40,6 +40,9 @@
         <template v-if="assistant.pageContext" #composer-chips>
           <AssistantContextChip />
         </template>
+        <template #composer-controls>
+          <AssistantAccessPicker />
+        </template>
       </ChatView>
 
       <div v-else class="assistant-welcome">
@@ -63,6 +66,9 @@
             <template v-if="assistant.pageContext" #chips>
               <AssistantContextChip />
             </template>
+            <template #controls>
+              <AssistantAccessPicker />
+            </template>
           </InputField>
         </div>
       </div>
@@ -78,6 +84,7 @@ import ChatView from '@/views/chat/index.vue'
 import InputField from '@/components/Input-field.vue'
 import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
 import AssistantContextChip from './AssistantContextChip.vue'
+import AssistantAccessPicker from './AssistantAccessPicker.vue'
 import { createSessions } from '@/api/chat'
 import { BUILTIN_WEKNORA_ASSISTANT_ID } from '@/api/agent'
 import { useMenuStore } from '@/stores/menu'
@@ -96,6 +103,7 @@ const assistant = useAssistantStore()
 const menuStore = useMenuStore()
 const auth = useAuthStore()
 const conversationOwner = computed(() => `${auth.user?.id}:${auth.effectiveTenantId}`)
+const assistantName = computed(() => assistant.displayName || t('assistant.title'))
 
 // Below this the page would be too cramped beside a docked panel, so the
 // panel floats instead whatever the preference.
@@ -166,10 +174,12 @@ const hostScope = () => {
   const context = assistant.contextAttached ? assistant.pageContext : null
   const focus = initialMessage.value?.sessionId === assistant.sessionId ? initialMessage.value.focus : undefined
   initialMessage.value = null
-  if (!context) return { knowledgeBaseIds: [], pageContext: null }
+  const assistantAccess = assistant.effectiveAccessLevel
+  if (!context) return { knowledgeBaseIds: [], pageContext: null, assistantAccess }
   return {
     knowledgeBaseIds: [context.knowledgeBaseId],
     pageContext: toPageContextPayload(focus ? { ...context, ...focus } : context),
+    assistantAccess,
   }
 }
 
@@ -186,7 +196,7 @@ async function startConversation(query: string, focus?: AssistantOpenRequest['fo
     if (!sessionId) throw new Error('missing session id')
     const now = new Date().toISOString()
     menuStore.updataMenuChildren({
-      title: t('assistant.title'),
+      title: assistantName.value,
       path: `chat/${sessionId}`,
       id: sessionId,
       isMore: false,

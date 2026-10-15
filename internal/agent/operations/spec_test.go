@@ -299,6 +299,9 @@ func TestBuiltinMatchesHandlerAnnotations(t *testing.T) {
 		if i := strings.LastIndex(op.Route, "/*"); i >= 0 {
 			meta.CatchAll = op.Route[i+2:]
 		}
+		if op.Role != defaultRole(op.Risk) {
+			meta.Role = op.Role
+		}
 		built[op.ID] = meta
 	}
 	for id, meta := range declared {

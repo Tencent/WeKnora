@@ -643,6 +643,8 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_handler_dto.TenantResponse:
     properties:
+      assistant_config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantConfig'
       business:
         type: string
       chat_history_config:
@@ -1215,6 +1217,30 @@ definitions:
     x-enum-varnames:
     - AnswerStrategyAll
     - AnswerStrategyRandom
+  github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel:
+    enum:
+    - read_only
+    - confirm
+    - auto_write
+    type: string
+    x-enum-varnames:
+    - AssistantAccessReadOnly
+    - AssistantAccessConfirm
+    - AssistantAccessAutoWrite
+  github_com_Tencent_WeKnora_internal_types.AssistantConfig:
+    properties:
+      display_name:
+        description: |-
+          DisplayName replaces the product name in the assistant UI; empty keeps
+          the default.
+        type: string
+      max_access_level:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel'
+        description: |-
+          MaxAccessLevel is the highest level a member may pick; empty means
+          AssistantAccessConfirm.
+    type: object
   github_com_Tencent_WeKnora_internal_types.AttrSpec:
     properties:
       consumers:
@@ -7372,6 +7398,11 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.Tenant:
     properties:
+      assistant_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantConfig'
+        description: 'Assistant config: display name and access ceiling of the WeKnora
+          assistant'
       business:
         description: Business
         type: string
@@ -14901,6 +14932,7 @@ paths:
       x-agent:
         id: knowledge_base.list_activity
         risk: read
+        role: contributor
       x-agent-hint: Newest first; only the creator or a workspace admin may read it.
         Assistant actions carry via=agent.
   /knowledge-bases/{id}/duplicate:

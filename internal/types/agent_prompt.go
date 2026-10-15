@@ -159,8 +159,11 @@ type ResumableAgentRequest struct {
 	WebSearchEnabled    bool            `json:"web_search_enabled,omitempty"`
 	QuestionOrigin      *QuestionOrigin `json:"question_origin,omitempty"`
 	PageContext         *PageContext    `json:"page_context,omitempty"`
-	UserMessageID       string          `json:"user_message_id,omitempty"`
-	Language            string          `json:"language,omitempty"`
+	// AssistantAccess is the level the user asked for; the ceiling is
+	// applied again on resume, so lowering it in between takes effect.
+	AssistantAccess AssistantAccessLevel `json:"assistant_access,omitempty"`
+	UserMessageID   string               `json:"user_message_id,omitempty"`
+	Language        string               `json:"language,omitempty"`
 }
 
 // ToolApprovalPromptRequest is the Request of an AgentPromptKindToolApproval.

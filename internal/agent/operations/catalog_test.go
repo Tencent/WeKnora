@@ -349,3 +349,40 @@ func TestDispatchRejectsOversizedResponses(t *testing.T) {
 	)
 	assert.ErrorIs(t, err, ErrResponseTooLarge)
 }
+
+func TestCatalogForFiltersByRoleAndLevel(t *testing.T) {
+	id := Param{Name: "knowledge_id", In: InPath, Key: "id", Type: TypeString, Required: true, Description: "d"}
+	get := readOp("knowledge.get", "/api/v1/knowledge/:id", id)
+	audit := readOp("knowledge.audit", "/api/v1/knowledge/:id/audit", id)
+	audit.Role = types.TenantRoleAdmin
+	write := func(opID, route string, target string) Operation {
+		return Operation{
+			ID: opID, Summary: "s", Risk: RiskWrite, Method: http.MethodPost, Route: route, Params: []Param{id},
+			Target: &Target{Operation: target, Label: "title"},
+			Result: Result{Root: "data", Fields: []Field{{From: "title"}}},
+		}
+	}
+	catalog, err := NewCatalog(
+		get, audit,
+		write("knowledge.reparse", "/api/v1/knowledge/:id/reparse", "knowledge.get"),
+		write("knowledge.seal", "/api/v1/knowledge/:id/seal", "knowledge.audit"),
+	)
+	require.NoError(t, err)
+	ids := func(c *Catalog) []string {
+		var out []string
+		for _, op := range c.All() {
+			out = append(out, op.ID)
+		}
+		return out
+	}
+
+	assert.Equal(t, []string{"knowledge.get"},
+		ids(catalog.For(Access{Role: types.TenantRoleViewer, EnforceRole: true})))
+	assert.Equal(t, []string{"knowledge.get", "knowledge.reparse"},
+		ids(catalog.For(Access{Role: types.TenantRoleContributor, EnforceRole: true})),
+		"a mutation is dropped with the target it could not show")
+	assert.Equal(t, ids(catalog),
+		ids(catalog.For(Access{Role: types.TenantRoleViewer})), "roles filter only when RBAC is enforced")
+	assert.Equal(t, []string{"knowledge.audit", "knowledge.get"},
+		ids(catalog.For(Access{Role: types.TenantRoleOwner, EnforceRole: true, Level: types.AssistantAccessReadOnly})))
+}

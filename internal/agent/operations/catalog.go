@@ -17,6 +17,8 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // Risk classifies an operation by its effect on user data.
@@ -153,6 +155,101 @@ type Operation struct {
 	// and its result labels the approval prompt. Its parameters must be a
 	// subset of this operation's.
 	Target *Target
+	// Role is the lowest workspace role the route's guards let through;
+	// empty takes the default for Risk. It only decides what a caller is
+	// offered: the router still authorizes every call, and a router test
+	// keeps the two in step.
+	Role types.TenantRole
+}
+
+// defaultRole is the role the route guards usually ask of an operation:
+// reading needs a viewer, changing content a contributor.
+func defaultRole(risk Risk) types.TenantRole {
+	if risk == RiskRead {
+		return types.TenantRoleViewer
+	}
+	return types.TenantRoleContributor
+}
+
+// Access is what one run may do with the catalog.
+type Access struct {
+	// Role is the caller's workspace role. It filters only when EnforceRole
+	// is set, matching the router, which skips role checks otherwise.
+	Role        types.TenantRole
+	EnforceRole bool
+	// Level is the user's assistant access level.
+	Level types.AssistantAccessLevel
+}
+
+// NeedsApproval reports whether running op must wait for the user.
+func (a Access) NeedsApproval(op Operation) bool {
+	return a.NeedsApprovalFor(op.Risk)
+}
+
+// NeedsApprovalFor reports whether a change of the given risk must wait for
+// the user; it also covers tools outside the catalog.
+func (a Access) NeedsApprovalFor(risk Risk) bool {
+	switch risk {
+	case RiskRead:
+		return false
+	case RiskWrite:
+		return a.Level != types.AssistantAccessAutoWrite
+	default:
+		return true
+	}
+}
+
+// Withholding says why an access leaves an operation out.
+type Withholding struct {
+	// ReadOnly: the user set the assistant to read-only.
+	ReadOnly bool
+	// Role is the workspace role the operation needs when the caller's falls
+	// short.
+	Role types.TenantRole
+}
+
+// Withheld reports why a leaves op out of c, if it does. A mutation whose
+// approval target is withheld is withheld for the same reason, so every
+// offered mutation can still show the user what it acts on.
+func (c *Catalog) Withheld(a Access, op Operation) (Withholding, bool) {
+	if a.Level == types.AssistantAccessReadOnly && op.Risk.Mutates() {
+		return Withholding{ReadOnly: true}, true
+	}
+	if a.EnforceRole && !a.Role.HasPermission(op.Role) {
+		return Withholding{Role: op.Role}, true
+	}
+	if t := op.Target; t != nil {
+		targets := []string{t.Operation}
+		if t.Items != nil {
+			targets = append(targets, t.Items.Operation)
+		}
+		for _, id := range targets {
+			target, ok := c.Get(id)
+			if !ok {
+				return Withholding{}, true
+			}
+			if w, withheld := c.Withheld(a, target); withheld {
+				return w, true
+			}
+		}
+	}
+	return Withholding{}, false
+}
+
+// For returns the operations a allows; see Withheld.
+func (c *Catalog) For(a Access) *Catalog {
+	if c == nil {
+		return nil
+	}
+	out := &Catalog{byID: map[string]int{}}
+	for _, op := range c.ops {
+		if _, withheld := c.Withheld(a, op); withheld {
+			continue
+		}
+		out.byID[op.ID] = len(out.ops)
+		out.ops = append(out.ops, op)
+	}
+	return out
 }
 
 // Target names the read operation that describes a mutation's subject.
@@ -243,6 +340,11 @@ type Catalog struct {
 func NewCatalog(ops ...Operation) (*Catalog, error) {
 	c := &Catalog{ops: append([]Operation(nil), ops...), byID: make(map[string]int, len(ops))}
 	sort.Slice(c.ops, func(i, j int) bool { return c.ops[i].ID < c.ops[j].ID })
+	for i := range c.ops {
+		if c.ops[i].Role == "" {
+			c.ops[i].Role = defaultRole(c.ops[i].Risk)
+		}
+	}
 	for i, op := range c.ops {
 		if _, dup := c.byID[op.ID]; dup {
 			return nil, fmt.Errorf("operation %q declared twice", op.ID)
@@ -355,6 +457,9 @@ func validateOperation(op Operation) error {
 	}
 	if op.Risk.Mutates() && op.Target == nil {
 		return fmt.Errorf("mutating operations must declare a target")
+	}
+	if !op.Role.IsValid() {
+		return fmt.Errorf("invalid role %q", op.Role)
 	}
 	routeParams, err := parseRoute(op.Route)
 	if err != nil {

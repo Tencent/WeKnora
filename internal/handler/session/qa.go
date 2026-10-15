@@ -72,6 +72,7 @@ type qaRequestContext struct {
 	suggestionAttribution *types.SuggestionAttribution
 	questionOrigin        *types.QuestionOrigin
 	pageContext           *types.PageContext
+	assistantAccess       types.AssistantAccessLevel
 	// resourceRewriter turns internal storage references in the outbound stream
 	// into directly loadable URLs when the caller asks for `resource_urls=public`.
 	// Disabled (a pass-through) in the default handle mode.
@@ -139,6 +140,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		Attachments:         rc.attachments,
 		QuestionOrigin:      rc.questionOrigin,
 		PageContext:         rc.pageContext,
+		AssistantAccess:     rc.assistantAccess,
 		TurnLeaseHeld:       rc.turnLeaseHeld,
 		// Only a caller that can answer the prompt later may leave the run
 		// suspended; an API-key caller would get a turn with no answer.
@@ -501,6 +503,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		suggestionAttribution: request.SuggestionAttribution,
 		questionOrigin:        request.QuestionOrigin,
 		pageContext:           request.PageContext,
+		assistantAccess:       request.AssistantAccess,
 		reqAgentEnabled:       request.AgentEnabled,
 		reqAgentID:            request.AgentID,
 		resourceRewriter:      resourceRewriter,
