@@ -925,6 +925,7 @@ func (h *CustomAgentHandler) GetAgentTypePresets(c *gin.Context) {
 // @Success      200  {object}  handler.DataResponse{data=tools.AgentToolCatalog}  "工具目录"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent {"id":"agent.tools","risk":"read","root":"data.tools","max_items":500}
 // @Router       /agents/tools [get]
 func (h *CustomAgentHandler) GetAgentTools(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{

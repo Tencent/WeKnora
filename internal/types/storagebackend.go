@@ -27,13 +27,13 @@ const (
 // register multiple instances of the same provider and bind each knowledge base
 // to a different instance.
 type StorageBackend struct {
-	ID          string               `json:"id" gorm:"type:varchar(36);primaryKey"`
+	ID          string               `json:"id" gorm:"type:varchar(36);primaryKey" extensions:"x-agent=storage_backend_id"`
 	TenantID    uint64               `json:"tenant_id" gorm:"not null;index"`
-	Name        string               `json:"name" gorm:"type:varchar(255);not null"`
-	Provider    string               `json:"provider" gorm:"type:varchar(32);not null;index"`
+	Name        string               `json:"name" gorm:"type:varchar(255);not null" extensions:"x-agent"`
+	Provider    string               `json:"provider" gorm:"type:varchar(32);not null;index" extensions:"x-agent"`
 	Config      StorageBackendConfig `json:"config" gorm:"type:json"`
 	Source      string               `json:"source" gorm:"type:varchar(16);not null;default:'user'"`
-	Status      string               `json:"status" gorm:"type:varchar(16);not null;default:'active'"`
+	Status      string               `json:"status" gorm:"type:varchar(16);not null;default:'active'" extensions:"x-agent"`
 	LegacyAlias bool                 `json:"legacy_alias" gorm:"not null;default:false"`
 	CreatedAt   time.Time            `json:"created_at"`
 	UpdatedAt   time.Time            `json:"updated_at"`

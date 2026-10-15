@@ -38,13 +38,13 @@ type EnvLookupFunc func(string) string
 // to support multi-store scenarios (e.g., ES-hot + ES-warm clusters).
 type VectorStore struct {
 	// Unique identifier (UUID, auto-generated)
-	ID string `yaml:"id" json:"id" gorm:"type:varchar(36);primaryKey"`
+	ID string `yaml:"id" json:"id" gorm:"type:varchar(36);primaryKey" extensions:"x-agent=vector_store_id"`
 	// Workspace ID for scoping
 	TenantID uint64 `yaml:"tenant_id" json:"tenant_id"`
 	// User-friendly name, e.g., "elasticsearch-hot"
-	Name string `yaml:"name" json:"name" gorm:"type:varchar(255);not null"`
+	Name string `yaml:"name" json:"name" gorm:"type:varchar(255);not null" extensions:"x-agent"`
 	// Engine type: postgres, elasticsearch, qdrant, milvus, weaviate, sqlite
-	EngineType RetrieverEngineType `yaml:"engine_type" json:"engine_type" gorm:"type:varchar(50);not null"`
+	EngineType RetrieverEngineType `yaml:"engine_type" json:"engine_type" gorm:"type:varchar(50);not null" extensions:"x-agent"`
 	// Driver-specific connection parameters (sensitive fields encrypted with AES-GCM)
 	ConnectionConfig ConnectionConfig `yaml:"connection_config" json:"connection_config" gorm:"type:json"`
 	// Optional index/collection configuration (engine-specific defaults if empty)

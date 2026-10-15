@@ -46,10 +46,11 @@ func storageTenantID(c *gin.Context) uint64 { return c.GetUint64(types.TenantIDC
 // @Description  List all storage backend instances for the current workspace, with credentials masked. The workspace default backend id is returned alongside the list.
 // @Tags         StorageBackend
 // @Produce      json
-// @Success      200  {object}  handler.ListResponse   "List of storage backends and default_storage_backend_id"
+// @Success 200 {object} handler.DataResponse{data=[]types.StorageBackend}
 // @Failure      401  {object}  map[string]interface{}   "Unauthorized"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent {"id":"storage.list","risk":"read","max_items":500}
 // @Router       /storage-backends [get]
 func (h *StorageBackendHandler) List(c *gin.Context) {
 	tenantID := storageTenantID(c)

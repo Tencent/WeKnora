@@ -94,10 +94,10 @@ const (
 // AvailableTool describes a tool an agent's allowed_tools list may select.
 // The agent editor renders its tool checkboxes from these definitions.
 type AvailableTool struct {
-	Name        string `json:"name"`
+	Name        string `json:"name" extensions:"x-agent"`
 	Label       string `json:"label"`
-	Description string `json:"description"`
-	Group       string `json:"group"`
+	Description string `json:"description" extensions:"x-agent"`
+	Group       string `json:"group" extensions:"x-agent"`
 	// Danger marks tools that modify content, which the editor highlights.
 	Danger bool `json:"danger,omitempty"`
 }

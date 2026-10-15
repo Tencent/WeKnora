@@ -46,10 +46,10 @@ type ImageRef struct {
 
 // ParserEngineInfo describes a registered parser engine.
 type ParserEngineInfo struct {
-	Name              string
+	Name              string `json:"Name" extensions:"x-agent=name"`
 	Description       string
-	FileTypes         []string
-	Available         bool
+	FileTypes         []string `json:"FileTypes" extensions:"x-agent=file_types"`
+	Available         bool     `json:"Available" extensions:"x-agent=available"`
 	UnavailableReason string
 }
 

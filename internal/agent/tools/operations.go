@@ -376,9 +376,16 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 	resp, err := t.rt.Dispatcher.Dispatch(ctx, identity, call)
 	if err != nil {
 		logger.Warnf(ctx, "[Tool][RunOperation] %s dispatch failed: %v", op.ID, err)
+		if infrastructureOperation(op) {
+			return operationFailure(op.ID + " could not be run; inspect the service status in Settings."), nil
+		}
 		return operationFailure(fmt.Sprintf("%s could not be run: %v", op.ID, err)), nil
 	}
 	if resp.Status < 200 || resp.Status >= 300 {
+		if infrastructureOperation(op) {
+			return operationFailure(fmt.Sprintf("%s failed (HTTP %d); inspect the service status in Settings.",
+				op.ID, resp.Status)), nil
+		}
 		return operationFailure(fmt.Sprintf("%s failed (HTTP %d): %s",
 			op.ID, resp.Status, operationErrorMessage(resp.Status, resp.Body))), nil
 	}
@@ -399,6 +406,17 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 		result.Data = map[string]any{"data_change": operationDataChange(op, input.Params, projected)}
 	}
 	return result, nil
+}
+
+// Infrastructure errors may contain connection strings or upstream credentials.
+// Status codes and projected state are sufficient here; raw errors stay in logs.
+func infrastructureOperation(op operations.Operation) bool {
+	switch op.Domain() {
+	case "system", "sandbox", "storage", "vector_store", "data_source":
+		return true
+	default:
+		return false
+	}
 }
 
 func operationDataChange(
@@ -639,9 +657,15 @@ func (t *RunOperationTool) readLabel(
 	}
 	resp, err := t.rt.Dispatcher.Dispatch(ctx, identity, call)
 	if err != nil {
+		if infrastructureOperation(target) {
+			return "", operationFailure(op.ID + " target is unavailable; inspect its status in Settings.")
+		}
 		return "", operationFailure(fmt.Sprintf("%s could not be run: %v", op.ID, err))
 	}
 	if resp.Status < 200 || resp.Status >= 300 {
+		if infrastructureOperation(target) {
+			return "", operationFailure(fmt.Sprintf("%s target is unavailable (HTTP %d).", op.ID, resp.Status))
+		}
 		return "", operationFailure(fmt.Sprintf("%s failed (HTTP %d): %s",
 			op.ID, resp.Status, operationErrorMessage(resp.Status, resp.Body)))
 	}

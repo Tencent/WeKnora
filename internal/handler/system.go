@@ -281,16 +281,16 @@ func (h *SystemHandler) emitAdminAudit(
 
 // GetSystemInfoResponse defines the response structure for system info
 type GetSystemInfoResponse struct {
-	Version             string `json:"version"`
-	Edition             string `json:"edition"`
+	Version             string `json:"version" extensions:"x-agent"`
+	Edition             string `json:"edition" extensions:"x-agent"`
 	CommitID            string `json:"commit_id,omitempty"`
 	BuildTime           string `json:"build_time,omitempty"`
 	GoVersion           string `json:"go_version,omitempty"`
-	KeywordIndexEngine  string `json:"keyword_index_engine,omitempty"`
-	VectorStoreEngine   string `json:"vector_store_engine,omitempty"`
-	GraphDatabaseEngine string `json:"graph_database_engine,omitempty"`
-	MinioEnabled        bool   `json:"minio_enabled,omitempty"`
-	DBVersion           string `json:"db_version,omitempty"`
+	KeywordIndexEngine  string `json:"keyword_index_engine,omitempty" extensions:"x-agent"`
+	VectorStoreEngine   string `json:"vector_store_engine,omitempty" extensions:"x-agent"`
+	GraphDatabaseEngine string `json:"graph_database_engine,omitempty" extensions:"x-agent"`
+	MinioEnabled        bool   `json:"minio_enabled,omitempty" extensions:"x-agent"`
+	DBVersion           string `json:"db_version,omitempty" extensions:"x-agent"`
 	// DBMigrationError carries the human-readable error message recorded when
 	// the most recent startup migration attempt failed. Empty when migrations
 	// succeeded; non-empty values let the frontend surface a troubleshooting
@@ -299,7 +299,7 @@ type GetSystemInfoResponse struct {
 	// StartedAt is the server process boot time (RFC3339, UTC).
 	StartedAt string `json:"started_at,omitempty"`
 	// UptimeSeconds is seconds elapsed since process start.
-	UptimeSeconds int64 `json:"uptime_seconds,omitempty"`
+	UptimeSeconds int64 `json:"uptime_seconds,omitempty" extensions:"x-agent"`
 }
 
 // 编译时注入的版本信息
@@ -317,7 +317,8 @@ var (
 // @Tags         系统
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  GetSystemInfoResponse  "系统信息"
+// @Success 200 {object} handler.DataResponse{data=handler.GetSystemInfoResponse}
+// @x-agent {"id":"system.info","risk":"read","root":"data"}
 // @Router       /system/info [get]
 func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
@@ -399,6 +400,7 @@ func (h *SystemHandler) getDocReaderConnInfo() (addr, transport string) {
 // @Tags         系统
 // @Produce      json
 // @Success      200  {object}  handler.ListParserEnginesResponse  "解析引擎列表"
+// @x-agent {"id":"system.parsers","risk":"read"}
 // @Router       /system/parser-engines [get]
 func (h *SystemHandler) ListParserEngines(c *gin.Context) {
 	var overrides map[string]string
@@ -777,10 +779,10 @@ func (h *SystemHandler) isOBSEnvAvailable() bool {
 
 // StorageEngineStatusItem describes one storage engine's availability and description.
 type StorageEngineStatusItem struct {
-	Name        string `json:"name"` // "local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"
-	Allowed     bool   `json:"allowed"`
-	Available   bool   `json:"available"`   // whether the engine can be used
-	Description string `json:"description"` // short description for UI
+	Name        string `json:"name" extensions:"x-agent"` // "local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"
+	Allowed     bool   `json:"allowed" extensions:"x-agent"`
+	Available   bool   `json:"available" extensions:"x-agent"` // whether the engine can be used
+	Description string `json:"description"`                    // short description for UI
 }
 
 // GetStorageEngineStatusResponse is the response for GET /system/storage-engine-status.
@@ -795,7 +797,8 @@ type GetStorageEngineStatusResponse struct {
 // @Description  返回 Local、MinIO、COS 各存储引擎的可用状态及说明，供全局设置与知识库选择使用
 // @Tags         系统
 // @Produce      json
-// @Success      200  {object}  GetStorageEngineStatusResponse
+// @Success 200 {object} handler.DataResponse{data=handler.GetStorageEngineStatusResponse}
+// @x-agent {"id":"system.storage_status","risk":"read","root":"data.engines"}
 // @Router       /system/storage-engine-status [get]
 func (h *SystemHandler) GetStorageEngineStatus(c *gin.Context) {
 	// Providers that already have an active multi-instance backend registered

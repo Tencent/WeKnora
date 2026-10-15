@@ -351,6 +351,25 @@ var allowedMethods = map[string]bool{
 	http.MethodPatch: true, http.MethodDelete: true,
 }
 
+// Infrastructure is exposed route by route, never as an entire API area.
+// Credential, policy, configuration and platform administration remain closed.
+var additionalOperationRoutes = map[string]string{
+	"/api/v1/system/info":                   http.MethodGet,
+	"/api/v1/system/assistant-capabilities": http.MethodGet,
+	"/api/v1/system/parser-engines":         http.MethodGet,
+	"/api/v1/system/storage-engine-status":  http.MethodGet,
+	"/api/v1/sandbox-configs":               http.MethodGet,
+	"/api/v1/storage-backends":              http.MethodGet,
+	"/api/v1/vector-stores":                 http.MethodGet,
+	"/api/v1/datasource":                    http.MethodGet,
+	"/api/v1/datasource/:id":                http.MethodGet,
+	"/api/v1/datasource/:id/logs":           http.MethodGet,
+	"/api/v1/datasource/logs/:log_id":       http.MethodGet,
+	"/api/v1/datasource/:id/sync":           http.MethodPost,
+	"/api/v1/datasource/:id/pause":          http.MethodPost,
+	"/api/v1/datasource/:id/resume":         http.MethodPost,
+}
+
 // Catalog is an immutable, validated set of operations.
 type Catalog struct {
 	ops  []Operation
@@ -466,6 +485,9 @@ func validateOperation(op Operation) error {
 	}
 	if !allowedMethods[op.Method] {
 		return fmt.Errorf("unsupported method %q", op.Method)
+	}
+	if method, limited := additionalOperationRoutes[op.Route]; limited && method != op.Method {
+		return fmt.Errorf("route %q only permits %s", op.Route, method)
 	}
 	if op.Risk == RiskRead && op.Method != http.MethodGet {
 		return fmt.Errorf("read operations must use GET")
@@ -659,7 +681,7 @@ func parseRoute(route string) (map[string]bool, error) {
 		return nil, fmt.Errorf("route %q must be under /api/v1", route)
 	}
 	area, _, _ := strings.Cut(strings.TrimPrefix(route, base), "/")
-	if !allowedRouteAreas[area] {
+	if !allowedRouteAreas[area] && additionalOperationRoutes[route] == "" {
 		return nil, fmt.Errorf("route %q is outside the areas an agent may reach", route)
 	}
 	params := map[string]bool{}

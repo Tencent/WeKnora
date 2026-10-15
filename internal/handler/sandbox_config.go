@@ -110,10 +110,10 @@ type sandboxConfigRequest struct {
 // sandboxConfigResponse is the only outward projection of stored configs, so a
 // new read path cannot accidentally return decrypted credentials.
 type sandboxConfigResponse struct {
-	ID          string                     `json:"id"`
-	Name        string                     `json:"name"`
+	ID          string                     `json:"id" extensions:"x-agent=sandbox_config_id"`
+	Name        string                     `json:"name" extensions:"x-agent"`
 	Description string                     `json:"description,omitempty"`
-	SandboxType string                     `json:"sandbox_type"`
+	SandboxType string                     `json:"sandbox_type" extensions:"x-agent"`
 	Config      *types.TenantSandboxConfig `json:"config"`
 	CreatedAt   time.Time                  `json:"created_at"`
 	UpdatedAt   time.Time                  `json:"updated_at"`
@@ -244,10 +244,11 @@ func respondSandboxConfigServiceError(c *gin.Context, err error) {
 // @Description  List workspace sandbox backend configs with credentials masked.
 // @Tags         SandboxConfig
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}   "Sandbox configs and defaults"
+// @Success 200 {object} handler.DataResponse{data=[]handler.sandboxConfigResponse}
 // @Failure      401  {object}  map[string]interface{}   "Unauthorized"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent {"id":"sandbox.list","risk":"read","max_items":500}
 // @Router       /sandbox-configs [get]
 func (h *SandboxConfigHandler) List(c *gin.Context) {
 	if h.liteHidden(c, true) {

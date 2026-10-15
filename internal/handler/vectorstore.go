@@ -136,6 +136,7 @@ func (h *VectorStoreHandler) CreateStore(c *gin.Context) {
 // @Failure      401  {object}  map[string]interface{}   "Unauthorized"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent {"id":"vector_store.list","risk":"read","max_items":500}
 // @Router       /vector-stores [get]
 func (h *VectorStoreHandler) ListStores(c *gin.Context) {
 	ctx := c.Request.Context()

@@ -126,9 +126,10 @@ func (h *DataSourceHandler) CreateDataSource(c *gin.Context) {
 // @Description Retrieve a data source configuration by ID
 // @Tags DataSource
 // @Produce json
-// @Param id path string true "Data source ID"
-// @Success 200 {object} types.DataSource
+// @Param id path string true "Data source ID"  extensions(x-agent=data_source_id)
+// @Success 200 {object} dto.DataSourceResponse
 // @Failure 404 {object} map[string]string
+// @x-agent {"id":"data_source.get","risk":"read"}
 // @Router /datasource/{id} [get]
 func (h *DataSourceHandler) GetDataSource(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -154,9 +155,10 @@ func (h *DataSourceHandler) GetDataSource(c *gin.Context) {
 // @Description List all data sources for a specific knowledge base
 // @Tags DataSource
 // @Produce json
-// @Param kb_id query string true "Knowledge base ID"
-// @Success 200 {object} []types.DataSource
+// @Param kb_id query string true "Knowledge base ID"  extensions(x-agent=knowledge_base_id)
+// @Success 200 {object} []dto.DataSourceResponse
 // @Failure 400 {object} map[string]string
+// @x-agent {"id":"data_source.list","risk":"read"}
 // @Router /datasource [get]
 func (h *DataSourceHandler) ListDataSources(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -420,9 +422,11 @@ type resolveAncestorsRequest struct {
 // @Summary Trigger immediate sync
 // @Description Trigger an immediate sync for a data source
 // @Tags DataSource
-// @Param id path string true "Data source ID"
+// @Param id path string true "Data source ID"  extensions(x-agent=data_source_id)
 // @Success 200 {object} types.SyncLog
 // @Failure 400 {object} map[string]string
+// @x-agent {"id":"data_source.sync","risk":"destructive","role":"admin","target":"data_source.get","label":"name"}
+// @x-agent-hint "Uses existing connector configuration. Sync may replace or delete knowledge. Check data_source.logs afterwards; accepted does not mean completed."
 // @Router /datasource/{id}/sync [post]
 func (h *DataSourceHandler) ManualSync(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -452,9 +456,11 @@ func (h *DataSourceHandler) ManualSync(c *gin.Context) {
 // @Summary Pause data source
 // @Description Pause a data source's scheduled syncs
 // @Tags DataSource
-// @Param id path string true "Data source ID"
-// @Success 200 {object} map[string]string
+// @Param id path string true "Data source ID"  extensions(x-agent=data_source_id)
+// @Success 200 {object} handler.DataSourceStateResponse
 // @Failure 400 {object} map[string]string
+// @x-agent {"id":"data_source.pause","risk":"write","role":"admin","target":"data_source.get","label":"name"}
+// @x-agent-hint "Uses existing connector configuration. Sync may replace or delete knowledge. Check data_source.logs afterwards; accepted does not mean completed."
 // @Router /datasource/{id}/pause [post]
 func (h *DataSourceHandler) PauseDataSource(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -483,9 +489,11 @@ func (h *DataSourceHandler) PauseDataSource(c *gin.Context) {
 // @Summary Resume data source
 // @Description Resume a paused data source
 // @Tags DataSource
-// @Param id path string true "Data source ID"
-// @Success 200 {object} map[string]string
+// @Param id path string true "Data source ID"  extensions(x-agent=data_source_id)
+// @Success 200 {object} handler.DataSourceStateResponse
 // @Failure 400 {object} map[string]string
+// @x-agent {"id":"data_source.resume","risk":"destructive","role":"admin","target":"data_source.get","label":"name"}
+// @x-agent-hint "Uses existing connector configuration. Sync may replace or delete knowledge. Check data_source.logs afterwards; accepted does not mean completed."
 // @Router /datasource/{id}/resume [post]
 func (h *DataSourceHandler) ResumeDataSource(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -515,11 +523,12 @@ func (h *DataSourceHandler) ResumeDataSource(c *gin.Context) {
 // @Description Retrieve sync history for a data source
 // @Tags DataSource
 // @Produce json
-// @Param id path string true "Data source ID"
-// @Param limit query int false "Limit (default: 10)"
-// @Param offset query int false "Offset (default: 0)"
+// @Param id path string true "Data source ID"  extensions(x-agent=data_source_id)
+// @Param limit query int false "Limit (default: 10)"  extensions(x-agent,x-agent-maximum=50)
+// @Param offset query int false "Offset (default: 0)"  extensions(x-agent)
 // @Success 200 {object} []types.SyncLog
 // @Failure 400 {object} map[string]string
+// @x-agent {"id":"data_source.logs","risk":"read"}
 // @Router /datasource/{id}/logs [get]
 func (h *DataSourceHandler) GetSyncLogs(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -571,9 +580,10 @@ func (h *DataSourceHandler) GetSyncLogs(c *gin.Context) {
 // @Description Retrieve a specific sync log entry
 // @Tags DataSource
 // @Produce json
-// @Param log_id path string true "Sync log ID"
+// @Param log_id path string true "Sync log ID"  extensions(x-agent=sync_log_id)
 // @Success 200 {object} types.SyncLog
 // @Failure 404 {object} map[string]string
+// @x-agent {"id":"data_source.log","risk":"read"}
 // @Router /datasource/logs/{log_id} [get]
 func (h *DataSourceHandler) GetSyncLog(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -609,4 +619,9 @@ func (h *DataSourceHandler) GetSyncLog(c *gin.Context) {
 func (h *DataSourceHandler) GetAvailableConnectors(c *gin.Context) {
 	connectors := datasource.ListAvailableConnectors()
 	c.JSON(http.StatusOK, connectors)
+}
+
+// DataSourceStateResponse describes the safe state returned by pause/resume.
+type DataSourceStateResponse struct {
+	Status string `json:"status" extensions:"x-agent"`
 }

@@ -28,12 +28,15 @@ definitions:
         type: boolean
       description:
         type: string
+        x-agent: true
       group:
         type: string
+        x-agent: true
       label:
         type: string
       name:
         type: string
+        x-agent: true
       requirement:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_agent_tools.AgentToolRequirement'
     type: object
@@ -485,6 +488,77 @@ definitions:
         additionalProperties:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.CredentialFieldMetadata'
         type: object
+    type: object
+  github_com_Tencent_WeKnora_internal_handler_dto.DataSourceConfigDTO:
+    properties:
+      resource_ids:
+        items:
+          type: string
+        type: array
+      settings:
+        additionalProperties: true
+        type: object
+      type:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse:
+    properties:
+      config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceConfigDTO'
+      conflict_strategy:
+        type: string
+      created_at:
+        type: string
+      credentials:
+        additionalProperties:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.CredentialFieldMetadata'
+        description: |-
+          Single logical credential field — DataSource credentials are a
+          per-connector atomic map, so "configured?" applies to the whole set.
+        type: object
+      error_message:
+        type: string
+      id:
+        type: string
+        x-agent: data_source_id
+      knowledge_base_id:
+        type: string
+        x-agent: true
+      last_sync_at:
+        type: string
+        x-agent: true
+      last_sync_cursor:
+        type: object
+      last_sync_result:
+        type: object
+      latest_sync_log:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog'
+      name:
+        type: string
+        x-agent: true
+      status:
+        type: string
+        x-agent: true
+      sync_deletions:
+        type: boolean
+      sync_log_retention_days:
+        type: integer
+      sync_mode:
+        type: string
+        x-agent: true
+      sync_schedule:
+        type: string
+        x-agent: true
+      tenant_id:
+        type: integer
+      total_items_synced:
+        type: integer
+        x-agent: true
+      type:
+        type: string
+        x-agent: true
+      updated_at:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_handler_dto.MCPAuthConfigResponse:
     properties:
@@ -6121,15 +6195,18 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.ParserEngineInfo:
     properties:
-      available:
+      Available:
         type: boolean
-      description:
-        type: string
-      fileTypes:
+        x-agent: available
+      FileTypes:
         items:
           type: string
         type: array
-      name:
+        x-agent: file_types
+      Name:
+        type: string
+        x-agent: name
+      description:
         type: string
       unavailableReason:
         type: string
@@ -7270,16 +7347,20 @@ definitions:
         $ref: '#/definitions/gorm.DeletedAt'
       id:
         type: string
+        x-agent: storage_backend_id
       legacy_alias:
         type: boolean
       name:
         type: string
+        x-agent: true
       provider:
         type: string
+        x-agent: true
       source:
         type: string
       status:
         type: string
+        x-agent: true
       tenant_id:
         type: integer
       updated_at:
@@ -7483,42 +7564,52 @@ definitions:
       data_source_id:
         description: Reference to the data source
         type: string
+        x-agent: true
       error_message:
         description: Error details if status is "failed"
         type: string
       finished_at:
         description: Sync completion time
         type: string
+        x-agent: true
       id:
         description: Unique identifier
         type: string
+        x-agent: sync_log_id
       items_created:
         description: New items created in knowledge base
         type: integer
+        x-agent: true
       items_deleted:
         description: Items deleted from knowledge base
         type: integer
+        x-agent: true
       items_failed:
         description: Items that failed to sync
         type: integer
+        x-agent: true
       items_skipped:
         description: Items skipped (no changes detected)
         type: integer
       items_total:
         description: Total items fetched from source
         type: integer
+        x-agent: true
       items_updated:
         description: Existing items updated
         type: integer
+        x-agent: true
       result:
         description: Detailed sync result (JSON-encoded)
         type: object
       started_at:
         description: Sync start time
         type: string
+        x-agent: true
       status:
         description: 'Sync status: running, success, partial, failed, canceled'
         type: string
+        x-agent: true
       tenant_id:
         description: Workspace ID
         type: integer
@@ -8236,9 +8327,11 @@ definitions:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverEngineType'
         description: 'Engine type: postgres, elasticsearch, qdrant, milvus, weaviate,
           sqlite'
+        x-agent: true
       id:
         description: Unique identifier (UUID, auto-generated)
         type: string
+        x-agent: vector_store_id
       index_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.IndexConfig'
@@ -8247,6 +8340,7 @@ definitions:
       name:
         description: User-friendly name, e.g., "elasticsearch-hot"
         type: string
+        x-agent: true
       readonly:
         description: env stores are read-only
         type: boolean
@@ -9344,6 +9438,18 @@ definitions:
       quota_gb:
         type: integer
     type: object
+  internal_handler.AssistantCapability:
+    properties:
+      name:
+        type: string
+        x-agent: true
+      reason:
+        type: string
+        x-agent: true
+      supported:
+        type: boolean
+        x-agent: true
+    type: object
   internal_handler.AutoFixResponse:
     properties:
       fixed:
@@ -9558,6 +9664,12 @@ definitions:
         example: true
         type: boolean
     type: object
+  internal_handler.DataSourceStateResponse:
+    properties:
+      status:
+        type: string
+        x-agent: true
+    type: object
   internal_handler.DeleteTagRequest:
     properties:
       exclude_ids:
@@ -9737,26 +9849,34 @@ definitions:
         type: string
       db_version:
         type: string
+        x-agent: true
       edition:
         type: string
+        x-agent: true
       go_version:
         type: string
       graph_database_engine:
         type: string
+        x-agent: true
       keyword_index_engine:
         type: string
+        x-agent: true
       minio_enabled:
         type: boolean
+        x-agent: true
       started_at:
         description: StartedAt is the server process boot time (RFC3339, UTC).
         type: string
       uptime_seconds:
         description: UptimeSeconds is seconds elapsed since process start.
         type: integer
+        x-agent: true
       vector_store_engine:
         type: string
+        x-agent: true
       version:
         type: string
+        x-agent: true
     type: object
   internal_handler.HybridSearchResponse:
     properties:
@@ -10453,6 +10573,7 @@ definitions:
         type: integer
       connected:
         type: boolean
+        x-agent: true
       data:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineInfo'
@@ -10463,18 +10584,6 @@ definitions:
         type: string
       msg:
         type: string
-    type: object
-  internal_handler.ListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.StorageBackend'
-        type: array
-      default_storage_backend_id:
-        type: string
-      success:
-        example: true
-        type: boolean
     type: object
   internal_handler.ListSharedAgentsResponse:
     properties:
@@ -11415,15 +11524,18 @@ definitions:
     properties:
       allowed:
         type: boolean
+        x-agent: true
       available:
         description: whether the engine can be used
         type: boolean
+        x-agent: true
       description:
         description: short description for UI
         type: string
       name:
         description: '"local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"'
         type: string
+        x-agent: true
     type: object
   internal_handler.SubmittedTaskData:
     properties:
@@ -12049,10 +12161,13 @@ definitions:
         type: string
       id:
         type: string
+        x-agent: sandbox_config_id
       name:
         type: string
+        x-agent: true
       sandbox_type:
         type: string
+        x-agent: true
       updated_at:
         type: string
     type: object
@@ -13161,6 +13276,11 @@ paths:
       summary: 获取智能体可选工具
       tags:
       - 智能体
+      x-agent:
+        id: agent.tools
+        max_items: 500
+        risk: read
+        root: data.tools
   /agents/type-presets:
     get:
       consumes:
@@ -14026,6 +14146,7 @@ paths:
         name: kb_id
         required: true
         type: string
+        x-agent: knowledge_base_id
       produces:
       - application/json
       responses:
@@ -14033,7 +14154,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
+              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse'
             type: array
         "400":
           description: Bad Request
@@ -14044,6 +14165,9 @@ paths:
       summary: List data sources for a knowledge base
       tags:
       - DataSource
+      x-agent:
+        id: data_source.list
+        risk: read
     post:
       consumes:
       - application/json
@@ -14100,13 +14224,14 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: data_source_id
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse'
         "404":
           description: Not Found
           schema:
@@ -14116,6 +14241,9 @@ paths:
       summary: Get a data source by ID
       tags:
       - DataSource
+      x-agent:
+        id: data_source.get
+        risk: read
     put:
       consumes:
       - application/json
@@ -14157,14 +14285,18 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: data_source_id
       - description: 'Limit (default: 10)'
         in: query
         name: limit
         type: integer
+        x-agent: true
+        x-agent-maximum: "50"
       - description: 'Offset (default: 0)'
         in: query
         name: offset
         type: integer
+        x-agent: true
       produces:
       - application/json
       responses:
@@ -14183,6 +14315,9 @@ paths:
       summary: Get sync logs
       tags:
       - DataSource
+      x-agent:
+        id: data_source.logs
+        risk: read
   /datasource/{id}/pause:
     post:
       description: Pause a data source's scheduled syncs
@@ -14192,13 +14327,12 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: data_source_id
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/internal_handler.DataSourceStateResponse'
         "400":
           description: Bad Request
           schema:
@@ -14208,6 +14342,14 @@ paths:
       summary: Pause data source
       tags:
       - DataSource
+      x-agent:
+        id: data_source.pause
+        label: name
+        risk: write
+        role: admin
+        target: data_source.get
+      x-agent-hint: Uses existing connector configuration. Sync may replace or delete
+        knowledge. Check data_source.logs afterwards; accepted does not mean completed.
   /datasource/{id}/resource-ancestors:
     post:
       consumes:
@@ -14289,13 +14431,12 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: data_source_id
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/internal_handler.DataSourceStateResponse'
         "400":
           description: Bad Request
           schema:
@@ -14305,6 +14446,14 @@ paths:
       summary: Resume data source
       tags:
       - DataSource
+      x-agent:
+        id: data_source.resume
+        label: name
+        risk: destructive
+        role: admin
+        target: data_source.get
+      x-agent-hint: Uses existing connector configuration. Sync may replace or delete
+        knowledge. Check data_source.logs afterwards; accepted does not mean completed.
   /datasource/{id}/sync:
     post:
       description: Trigger an immediate sync for a data source
@@ -14314,6 +14463,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: data_source_id
       responses:
         "200":
           description: OK
@@ -14328,6 +14478,14 @@ paths:
       summary: Trigger immediate sync
       tags:
       - DataSource
+      x-agent:
+        id: data_source.sync
+        label: name
+        risk: destructive
+        role: admin
+        target: data_source.get
+      x-agent-hint: Uses existing connector configuration. Sync may replace or delete
+        knowledge. Check data_source.logs afterwards; accepted does not mean completed.
   /datasource/{id}/validate:
     post:
       description: Validate the connection to an external data source
@@ -14362,6 +14520,7 @@ paths:
         name: log_id
         required: true
         type: string
+        x-agent: sync_log_id
       produces:
       - application/json
       responses:
@@ -14378,6 +14537,9 @@ paths:
       summary: Get specific sync log
       tags:
       - DataSource
+      x-agent:
+        id: data_source.log
+        risk: read
   /datasource/types:
     get:
       description: Get list of available data source connectors
@@ -21771,10 +21933,16 @@ paths:
       - application/json
       responses:
         "200":
-          description: Sandbox configs and defaults
+          description: OK
           schema:
-            additionalProperties: true
-            type: object
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/internal_handler.sandboxConfigResponse'
+                  type: array
+              type: object
         "401":
           description: Unauthorized
           schema:
@@ -21786,6 +21954,10 @@ paths:
       summary: List sandbox configs
       tags:
       - SandboxConfig
+      x-agent:
+        id: sandbox.list
+        max_items: 500
+        risk: read
     post:
       consumes:
       - application/json
@@ -23529,9 +23701,16 @@ paths:
       - application/json
       responses:
         "200":
-          description: List of storage backends and default_storage_backend_id
+          description: OK
           schema:
-            $ref: '#/definitions/internal_handler.ListResponse'
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.StorageBackend'
+                  type: array
+              type: object
         "401":
           description: Unauthorized
           schema:
@@ -23543,6 +23722,10 @@ paths:
       summary: List storage backends
       tags:
       - StorageBackend
+      x-agent:
+        id: storage.list
+        max_items: 500
+        risk: read
     post:
       consumes:
       - application/json
@@ -24592,6 +24775,29 @@ paths:
       summary: Enable or disable a user account
       tags:
       - System Admin
+  /system/assistant-capabilities:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/internal_handler.AssistantCapability'
+                  type: array
+              type: object
+      summary: List deployment capabilities for the assistant
+      tags:
+      - 系统
+      x-agent:
+        id: system.capabilities
+        max_items: 100
+        risk: read
   /system/capabilities:
     get:
       description: 返回当前部署版本及实际注册的后端路由所对应的功能能力；仅 supported=false 表示入口应隐藏
@@ -24633,12 +24839,21 @@ paths:
       - application/json
       responses:
         "200":
-          description: 系统信息
+          description: OK
           schema:
-            $ref: '#/definitions/internal_handler.GetSystemInfoResponse'
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.GetSystemInfoResponse'
+              type: object
       summary: 获取系统信息
       tags:
       - 系统
+      x-agent:
+        id: system.info
+        risk: read
+        root: data
   /system/parser-engines:
     get:
       produces:
@@ -24651,6 +24866,9 @@ paths:
       summary: 列出可用的文档解析引擎
       tags:
       - 系统
+      x-agent:
+        id: system.parsers
+        risk: read
   /system/parser-engines/check:
     post:
       consumes:
@@ -24723,10 +24941,19 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_handler.GetStorageEngineStatusResponse'
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.GetStorageEngineStatusResponse'
+              type: object
       summary: 获取存储引擎状态
       tags:
       - 系统
+      x-agent:
+        id: system.storage_status
+        risk: read
+        root: data.engines
   /tenants:
     get:
       consumes:
@@ -25609,6 +25836,10 @@ paths:
       summary: List vector stores
       tags:
       - VectorStore
+      x-agent:
+        id: vector_store.list
+        max_items: 500
+        risk: read
     post:
       consumes:
       - application/json

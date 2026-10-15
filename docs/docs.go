@@ -501,6 +501,12 @@ const docTemplate = `{
                             ]
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "agent.tools",
+                    "max_items": 500,
+                    "risk": "read",
+                    "root": "data.tools"
                 }
             }
         },
@@ -2321,6 +2327,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "Knowledge base ID",
                         "name": "kb_id",
                         "in": "query",
@@ -2333,7 +2340,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse"
                             }
                         }
                     },
@@ -2346,6 +2353,10 @@ const docTemplate = `{
                             }
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "data_source.list",
+                    "risk": "read"
                 }
             },
             "post": {
@@ -2403,6 +2414,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "sync_log_id",
                         "description": "Sync log ID",
                         "name": "log_id",
                         "in": "path",
@@ -2425,6 +2437,10 @@ const docTemplate = `{
                             }
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "data_source.log",
+                    "risk": "read"
                 }
             }
         },
@@ -2510,6 +2526,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "data_source_id",
                         "description": "Data source ID",
                         "name": "id",
                         "in": "path",
@@ -2520,7 +2537,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse"
                         }
                     },
                     "404": {
@@ -2532,6 +2549,10 @@ const docTemplate = `{
                             }
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "data_source.get",
+                    "risk": "read"
                 }
             },
             "put": {
@@ -2626,6 +2647,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "data_source_id",
                         "description": "Data source ID",
                         "name": "id",
                         "in": "path",
@@ -2633,12 +2655,15 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
+                        "x-agent": true,
+                        "x-agent-maximum": "50",
                         "description": "Limit (default: 10)",
                         "name": "limit",
                         "in": "query"
                     },
                     {
                         "type": "integer",
+                        "x-agent": true,
                         "description": "Offset (default: 0)",
                         "name": "offset",
                         "in": "query"
@@ -2663,6 +2688,10 @@ const docTemplate = `{
                             }
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "data_source.logs",
+                    "risk": "read"
                 }
             }
         },
@@ -2676,6 +2705,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "data_source_id",
                         "description": "Data source ID",
                         "name": "id",
                         "in": "path",
@@ -2686,10 +2716,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/internal_handler.DataSourceStateResponse"
                         }
                     },
                     "400": {
@@ -2701,7 +2728,15 @@ const docTemplate = `{
                             }
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "data_source.pause",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "admin",
+                    "target": "data_source.get"
+                },
+                "x-agent-hint": "Uses existing connector configuration. Sync may replace or delete knowledge. Check data_source.logs afterwards; accepted does not mean completed."
             }
         },
         "/datasource/{id}/resource-ancestors": {
@@ -2817,6 +2852,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "data_source_id",
                         "description": "Data source ID",
                         "name": "id",
                         "in": "path",
@@ -2827,10 +2863,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/internal_handler.DataSourceStateResponse"
                         }
                     },
                     "400": {
@@ -2842,7 +2875,15 @@ const docTemplate = `{
                             }
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "data_source.resume",
+                    "label": "name",
+                    "risk": "destructive",
+                    "role": "admin",
+                    "target": "data_source.get"
+                },
+                "x-agent-hint": "Uses existing connector configuration. Sync may replace or delete knowledge. Check data_source.logs afterwards; accepted does not mean completed."
             }
         },
         "/datasource/{id}/sync": {
@@ -2855,6 +2896,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "data_source_id",
                         "description": "Data source ID",
                         "name": "id",
                         "in": "path",
@@ -2877,7 +2919,15 @@ const docTemplate = `{
                             }
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "data_source.sync",
+                    "label": "name",
+                    "risk": "destructive",
+                    "role": "admin",
+                    "target": "data_source.get"
+                },
+                "x-agent-hint": "Uses existing connector configuration. Sync may replace or delete knowledge. Check data_source.logs afterwards; accepted does not mean completed."
             }
         },
         "/datasource/{id}/validate": {
@@ -14608,10 +14658,24 @@ const docTemplate = `{
                 "summary": "List sandbox configs",
                 "responses": {
                     "200": {
-                        "description": "Sandbox configs and defaults",
+                        "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/internal_handler.sandboxConfigResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "401": {
@@ -14621,6 +14685,11 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "sandbox.list",
+                    "max_items": 500,
+                    "risk": "read"
                 }
             },
             "post": {
@@ -17377,9 +17446,24 @@ const docTemplate = `{
                 "summary": "List storage backends",
                 "responses": {
                     "200": {
-                        "description": "List of storage backends and default_storage_backend_id",
+                        "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_handler.ListResponse"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.StorageBackend"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "401": {
@@ -17389,6 +17473,11 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "storage.list",
+                    "max_items": 500,
+                    "risk": "read"
                 }
             },
             "post": {
@@ -18924,6 +19013,45 @@ const docTemplate = `{
                 }
             }
         },
+        "/system/assistant-capabilities": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "系统"
+                ],
+                "summary": "List deployment capabilities for the assistant",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/internal_handler.AssistantCapability"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "system.capabilities",
+                    "max_items": 100,
+                    "risk": "read"
+                }
+            }
+        },
         "/system/capabilities": {
             "get": {
                 "description": "返回当前部署版本及实际注册的后端路由所对应的功能能力；仅 supported=false 表示入口应隐藏",
@@ -18989,11 +19117,28 @@ const docTemplate = `{
                 "summary": "获取系统信息",
                 "responses": {
                     "200": {
-                        "description": "系统信息",
+                        "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_handler.GetSystemInfoResponse"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.GetSystemInfoResponse"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "system.info",
+                    "risk": "read",
+                    "root": "data"
                 }
             }
         },
@@ -19013,6 +19158,10 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_handler.ListParserEnginesResponse"
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "system.parsers",
+                    "risk": "read"
                 }
             }
         },
@@ -19128,9 +19277,26 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_handler.GetStorageEngineStatusResponse"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.GetStorageEngineStatusResponse"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "system.storage_status",
+                    "risk": "read",
+                    "root": "data.engines"
                 }
             }
         },
@@ -20567,6 +20733,11 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "vector_store.list",
+                    "max_items": 500,
+                    "risk": "read"
                 }
             },
             "post": {
@@ -21539,16 +21710,19 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "description": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "group": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "label": {
                     "type": "string"
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "requirement": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_agent_tools.AgentToolRequirement"
@@ -22174,6 +22348,105 @@ const docTemplate = `{
                     "additionalProperties": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.CredentialFieldMetadata"
                     }
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_handler_dto.DataSourceConfigDTO": {
+            "type": "object",
+            "properties": {
+                "resource_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "settings": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceConfigDTO"
+                },
+                "conflict_strategy": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "credentials": {
+                    "description": "Single logical credential field — DataSource credentials are a\nper-connector atomic map, so \"configured?\" applies to the whole set.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.CredentialFieldMetadata"
+                    }
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "x-agent": "data_source_id"
+                },
+                "knowledge_base_id": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "last_sync_at": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "last_sync_cursor": {
+                    "type": "object"
+                },
+                "last_sync_result": {
+                    "type": "object"
+                },
+                "latest_sync_log": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog"
+                },
+                "name": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "status": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "sync_deletions": {
+                    "type": "boolean"
+                },
+                "sync_log_retention_days": {
+                    "type": "integer"
+                },
+                "sync_mode": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "sync_schedule": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "total_items_synced": {
+                    "type": "integer",
+                    "x-agent": true
+                },
+                "type": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "updated_at": {
+                    "type": "string"
                 }
             }
         },
@@ -29290,19 +29563,22 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.ParserEngineInfo": {
             "type": "object",
             "properties": {
-                "available": {
-                    "type": "boolean"
+                "Available": {
+                    "type": "boolean",
+                    "x-agent": "available"
                 },
-                "description": {
-                    "type": "string"
-                },
-                "fileTypes": {
+                "FileTypes": {
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": "file_types"
                 },
-                "name": {
+                "Name": {
+                    "type": "string",
+                    "x-agent": "name"
+                },
+                "description": {
                     "type": "string"
                 },
                 "unavailableReason": {
@@ -30742,22 +31018,26 @@ const docTemplate = `{
                     "$ref": "#/definitions/gorm.DeletedAt"
                 },
                 "id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "storage_backend_id"
                 },
                 "legacy_alias": {
                     "type": "boolean"
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "provider": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "source": {
                     "type": "string"
                 },
                 "status": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "tenant_id": {
                     "type": "integer"
@@ -31048,7 +31328,8 @@ const docTemplate = `{
                 },
                 "data_source_id": {
                     "description": "Reference to the data source",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "error_message": {
                     "description": "Error details if status is \"failed\"",
@@ -31056,23 +31337,28 @@ const docTemplate = `{
                 },
                 "finished_at": {
                     "description": "Sync completion time",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "id": {
                     "description": "Unique identifier",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "sync_log_id"
                 },
                 "items_created": {
                     "description": "New items created in knowledge base",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "items_deleted": {
                     "description": "Items deleted from knowledge base",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "items_failed": {
                     "description": "Items that failed to sync",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "items_skipped": {
                     "description": "Items skipped (no changes detected)",
@@ -31080,11 +31366,13 @@ const docTemplate = `{
                 },
                 "items_total": {
                     "description": "Total items fetched from source",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "items_updated": {
                     "description": "Existing items updated",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "result": {
                     "description": "Detailed sync result (JSON-encoded)",
@@ -31092,11 +31380,13 @@ const docTemplate = `{
                 },
                 "started_at": {
                     "description": "Sync start time",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "status": {
                     "description": "Sync status: running, success, partial, failed, canceled",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "tenant_id": {
                     "description": "Workspace ID",
@@ -31978,11 +32268,13 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverEngineType"
                         }
-                    ]
+                    ],
+                    "x-agent": true
                 },
                 "id": {
                     "description": "Unique identifier (UUID, auto-generated)",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "vector_store_id"
                 },
                 "index_config": {
                     "description": "Optional index/collection configuration (engine-specific defaults if empty)",
@@ -31994,7 +32286,8 @@ const docTemplate = `{
                 },
                 "name": {
                     "description": "User-friendly name, e.g., \"elasticsearch-hot\"",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "readonly": {
                     "description": "env stores are read-only",
@@ -33356,6 +33649,23 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.AssistantCapability": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "reason": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "supported": {
+                    "type": "boolean",
+                    "x-agent": true
+                }
+            }
+        },
         "internal_handler.AutoFixResponse": {
             "type": "object",
             "properties": {
@@ -33668,6 +33978,15 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.DataSourceStateResponse": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "x-agent": true
+                }
+            }
+        },
         "internal_handler.DeleteTagRequest": {
             "type": "object",
             "properties": {
@@ -33931,22 +34250,27 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "db_version": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "edition": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "go_version": {
                     "type": "string"
                 },
                 "graph_database_engine": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "keyword_index_engine": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "minio_enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "started_at": {
                     "description": "StartedAt is the server process boot time (RFC3339, UTC).",
@@ -33954,13 +34278,16 @@ const docTemplate = `{
                 },
                 "uptime_seconds": {
                     "description": "UptimeSeconds is seconds elapsed since process start.",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "vector_store_engine": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "version": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -34906,7 +35233,8 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "connected": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "data": {
                     "type": "array",
@@ -34922,24 +35250,6 @@ const docTemplate = `{
                 },
                 "msg": {
                     "type": "string"
-                }
-            }
-        },
-        "internal_handler.ListResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.StorageBackend"
-                    }
-                },
-                "default_storage_backend_id": {
-                    "type": "string"
-                },
-                "success": {
-                    "type": "boolean",
-                    "example": true
                 }
             }
         },
@@ -36275,11 +36585,13 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "allowed": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "available": {
                     "description": "whether the engine can be used",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "description": {
                     "description": "short description for UI",
@@ -36287,7 +36599,8 @@ const docTemplate = `{
                 },
                 "name": {
                     "description": "\"local\", \"minio\", \"cos\", \"tos\", \"s3\", \"oss\", \"ks3\", \"obs\"",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -37201,13 +37514,16 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "sandbox_config_id"
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "sandbox_type": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "updated_at": {
                     "type": "string"

@@ -30,6 +30,11 @@ func registerOperationAreas(v1 *gin.RouterGroup, g *rbacGuards) {
 	RegisterModelRoutes(v1, &handler.ModelHandler{}, &handler.ModelCredentialsHandler{}, g)
 	RegisterMCPServiceRoutes(v1, &handler.MCPServiceHandler{}, &handler.MCPCredentialsHandler{},
 		&handler.MCPOAuthHandler{}, g)
+	RegisterSystemRoutes(v1, &handler.SystemHandler{}, g)
+	RegisterSandboxConfigRoutes(v1, &handler.SandboxConfigHandler{}, &handler.SandboxSkillHandler{}, g)
+	RegisterStorageBackendRoutes(v1, &handler.StorageBackendHandler{}, g)
+	RegisterVectorStoreRoutes(v1, &handler.VectorStoreHandler{}, g)
+	RegisterDataSourceRoutes(v1, &handler.DataSourceHandler{}, &handler.DataSourceCredentialsHandler{}, g)
 }
 
 // TestBuiltinOperationsMatchRegisteredRoutes requires every operation to

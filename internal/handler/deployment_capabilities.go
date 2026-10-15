@@ -2,11 +2,38 @@ package handler
 
 import (
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/gin-gonic/gin"
 )
+
+// AssistantCapability exposes feature availability without deployment settings.
+type AssistantCapability struct {
+	Name      string `json:"name" extensions:"x-agent"`
+	Supported bool   `json:"supported" extensions:"x-agent"`
+	Reason    string `json:"reason,omitempty" extensions:"x-agent"`
+}
+
+// GetAssistantCapabilities godoc
+// @Summary List deployment capabilities for the assistant
+// @Tags 系统
+// @Produce json
+// @Success 200 {object} handler.DataResponse{data=[]handler.AssistantCapability}
+// @x-agent {"id":"system.capabilities","risk":"read","max_items":100}
+// @Router /system/assistant-capabilities [get]
+func (h *SystemHandler) GetAssistantCapabilities(c *gin.Context) {
+	snapshot := overlayLiveDockerSandboxCapability(h.deploymentCapabilities)
+	items := make([]AssistantCapability, 0, len(snapshot.Capabilities))
+	for name, capability := range snapshot.Capabilities {
+		items = append(items, AssistantCapability{
+			Name: name, Supported: capability.Supported, Reason: capability.Reason,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+	c.JSON(http.StatusOK, gin.H{"data": items})
+}
 
 // DeploymentCapabilityKeys is the canonical capability key list shared with
 // frontend/src/config/deploymentCapabilities.ts — keep both in sync.

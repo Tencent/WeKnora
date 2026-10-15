@@ -200,7 +200,7 @@ type SuccessErrorResponse struct {
 // ListParserEnginesResponse is the JSON body written by this handler.
 type ListParserEnginesResponse struct {
 	DocreaderTransport string                   `json:"docreader_transport"`
-	Connected          bool                     `json:"connected"`
+	Connected          bool                     `json:"connected" extensions:"x-agent"`
 	Code               int                      `json:"code"`
 	Msg                string                   `json:"msg"`
 	Data               []types.ParserEngineInfo `json:"data"`
