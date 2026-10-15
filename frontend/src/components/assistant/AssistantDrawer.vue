@@ -61,17 +61,25 @@ import AssistantContextChip from './AssistantContextChip.vue'
 import { createSessions } from '@/api/chat'
 import { BUILTIN_WEKNORA_ASSISTANT_ID } from '@/api/agent'
 import { useMenuStore } from '@/stores/menu'
+import { useAuthStore } from '@/stores/auth'
 import { toPageContextPayload, useAssistantStore, type AssistantOpenRequest } from '@/stores/assistant'
 import { SESSION_MUTATION_EVENT, type SessionMutationDetail } from '@/components/sessionMutations'
 
 const { t } = useI18n()
 const assistant = useAssistantStore()
 const menuStore = useMenuStore()
+const auth = useAuthStore()
+const conversationOwner = computed(() => `${auth.user?.id}:${auth.effectiveTenantId}`)
 
 const starting = ref(false)
-const initialQuery = ref('')
-// Applies to the first message of a conversation opened with a focus.
-let pendingFocus: AssistantOpenRequest['focus'] | null = null
+// A first message belongs to the session we created, never a restored one.
+const initialMessage = ref<{
+  sessionId: string
+  query: string
+  focus?: AssistantOpenRequest['focus']
+} | null>(null)
+const initialQuery = computed(() => initialMessage.value?.sessionId === assistant.sessionId
+  ? initialMessage.value.query : '')
 
 const starters = computed(() => {
   const c = assistant.contextAttached ? assistant.pageContext : null
@@ -85,8 +93,8 @@ const starters = computed(() => {
 // the page's knowledge base travels with it.
 const hostScope = () => {
   const context = assistant.contextAttached ? assistant.pageContext : null
-  const focus = pendingFocus
-  pendingFocus = null
+  const focus = initialMessage.value?.sessionId === assistant.sessionId ? initialMessage.value.focus : undefined
+  initialMessage.value = null
   if (!context) return { knowledgeBaseIds: [], pageContext: null }
   return {
     knowledgeBaseIds: [context.knowledgeBaseId],
@@ -97,9 +105,12 @@ const hostScope = () => {
 async function startConversation(query: string, focus?: AssistantOpenRequest['focus']) {
   const text = query.trim()
   if (!text || starting.value) return
+  const owner = conversationOwner.value
   starting.value = true
   try {
     const res: any = await createSessions({})
+    // A workspace switch can complete while session creation is in flight.
+    if (conversationOwner.value !== owner) return
     const sessionId = res?.data?.id
     if (!sessionId) throw new Error('missing session id')
     const now = new Date().toISOString()
@@ -112,8 +123,7 @@ async function startConversation(query: string, focus?: AssistantOpenRequest['fo
       created_at: now,
       updated_at: now,
     })
-    pendingFocus = focus || null
-    initialQuery.value = text
+    initialMessage.value = { sessionId, query: text, focus }
     assistant.setSession(sessionId)
   } catch (e) {
     console.error('[Assistant] Failed to start a conversation', e)
@@ -131,7 +141,7 @@ watch(() => [assistant.visible, assistant.pendingRequest] as const, ([visible, r
 }, { immediate: true })
 
 watch(() => assistant.sessionId, (id) => {
-  if (!id) initialQuery.value = ''
+  if (id !== initialMessage.value?.sessionId) initialMessage.value = null
 })
 
 const handleSessionMutation = (event: Event) => {

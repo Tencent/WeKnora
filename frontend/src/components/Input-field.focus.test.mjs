@@ -59,6 +59,35 @@ test('a queued focus does not focus a textarea removed during navigation', async
   assert.equal(focused, false)
 })
 
+for (const embeddedMode of [false, true]) {
+  for (const delivery of ['after', 'inject']) {
+    test(`${embeddedMode ? 'embedded' : 'main'} ${delivery} steer respects the composer's resource scope`, async () => {
+      const selected = [
+        { id: 'main-kb', name: 'Main KB', type: 'kb' },
+        { id: 'main-file', name: 'Main file', type: 'file', kbId: 'main-kb' },
+        { id: 'main-tag', name: 'Main tag', type: 'tag', kbId: 'main-kb' },
+        { id: 'main-mcp', name: 'Main MCP', type: 'mcp' },
+        { id: 'main-skill', name: 'Main skill', type: 'skill', skillName: 'main-skill' },
+      ]
+      let emitted
+      const send = vm.runInNewContext(ts.transpile(`${sendCode}\ncreateSession`), {
+        props: { embeddedMode, isReplying: true, canSteer: true },
+        uploadedAttachments: { value: [] }, uploadedImages: { value: [] },
+        allSelectedItems: { value: selected },
+        emit: (...args) => { emitted = args },
+        clearvalue() {}, focusInput: async () => {},
+      })
+      await send(' continue ', delivery)
+      const [event, query, mentions, mode] = emitted
+      assert.equal(event, 'steer-msg')
+      assert.equal(query, 'continue')
+      assert.equal(mode, delivery)
+      assert.deepEqual(Array.from(mentions, item => item.id), embeddedMode ? [] : selected.map(item => item.id))
+      assert.equal(selected.length, 5, 'sending must not clear the main composer selection')
+    })
+  }
+}
+
 test('teardown blurs the active textarea before it is detached', () => {
   const code = source.slice(source.indexOf('onBeforeUnmount(() =>'), source.indexOf('onUnmounted(() =>'))
   let teardown, blurred = false

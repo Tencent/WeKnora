@@ -2107,7 +2107,8 @@ const createSession = async (
       MessagePlugin.warning(t('input.messages.steerHasAttachments'));
       return;
     }
-    const steerMentions: MentionRequestItem[] = allSelectedItems.value.map(item => ({
+    // Embedded scope belongs to the host, including queued and injected turns.
+    const steerMentions: MentionRequestItem[] = (props.embeddedMode ? [] : allSelectedItems.value).map(item => ({
       id: item.id,
       name: item.name,
       type: item.type,
