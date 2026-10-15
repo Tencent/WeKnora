@@ -270,7 +270,7 @@ func TestReadSheetRange_EmptyFirstPageRendersLaterRows(t *testing.T) {
 	c := &Client{
 		baseURL: srv.URL, httpClient: srv.Client(), tokenCache: "t", tokenExpAt: time.Now().Add(time.Hour),
 	}
-	got, exhausted := inlineTable(context.Background(), c, "sht_0", "sheet", maxTableBytes)
+	got, exhausted, _ := inlineTable(context.Background(), c, "sht_0", "sheet", maxTableBytes)
 	if exhausted {
 		t.Fatal("full table budget was reported as exhausted")
 	}
@@ -280,11 +280,12 @@ func TestReadSheetRange_EmptyFirstPageRendersLaterRows(t *testing.T) {
 }
 
 func TestEmbeddedTable_CumulativeContentBudget(t *testing.T) {
+	const budget = 2 << 20
 	for _, kind := range []string{"sheet", "bitable"} {
 		t.Run(kind, func(t *testing.T) {
 			calls := 0
 			// Each page fits the response cap; their accumulated content does not.
-			cell := strings.Repeat("|", 3<<20)
+			cell := strings.Repeat("|", 3<<17)
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if strings.Contains(r.URL.Path, "/sheets/v3/") {
 					_, _ = fmt.Fprint(w,
@@ -328,15 +329,15 @@ func TestEmbeddedTable_CumulativeContentBudget(t *testing.T) {
 			var truncated bool
 			var err error
 			if kind == "sheet" {
-				rows, truncated, _, err = c.readSheetRange(ctx, "sht_0", maxTableBytes)
+				rows, truncated, _, err = c.readSheetRange(ctx, "sht_0", budget)
 			} else {
-				rows, truncated, _, err = c.readBitableRecords(ctx, "app_table", maxTableBytes)
+				rows, truncated, _, err = c.readBitableRecords(ctx, "app_table", budget)
 			}
 			if err != nil || !truncated || len(rows) < 1 {
 				t.Fatalf("rows=%d truncated=%v err=%v", len(rows), truncated, err)
 			}
 			rendered := markdownTable(rows)
-			if len(rendered) > maxTableBytes {
+			if len(rendered) > budget {
 				t.Fatalf("retained table exceeds budget: %d bytes", len(rendered))
 			}
 			if calls > 12 {

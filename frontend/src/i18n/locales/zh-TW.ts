@@ -1179,6 +1179,7 @@ export default {
       seafile: 'Seafile'
     },
     logDetail: {
+      incompleteItems: '未完整讀取的文件',
       startTime: '開始時間',
       endTime: '結束時間',
       failedItems: '失敗文件',
@@ -1236,6 +1237,7 @@ export default {
       loadNotFoundHint: "folder_token 不存在或已刪除，請確認從飛書雲盤資料夾 URL 複製的 token 正確。",
     },
     syncError: {
+      content_incomplete: '文件內容未完整讀取，已保留可讀取內容；具體原因請參閱文件中的提示',
       dingtalk_document_failed: '無法讀取釘釘文件，請檢查存取權限後重試同步。',
       dingtalk_resource_failed: '釘釘資源不可用，請檢查存取權限和已選資源後重試。',
       deletion_lookup_failed: '刪除前尋找文件失敗，請查看伺服器日誌',
@@ -2174,6 +2176,12 @@ export default {
     }
   },
   preview: {
+    pagination: 'Markdown 預覽分頁',
+    firstPage: '第一頁',
+    previousPage: '上一頁',
+    nextPage: '下一頁',
+    lastPage: '最後一頁',
+    pageStatus: '第 {current} / {total} 頁',
     tab: '預覽',
     loading: '正在載入文件預覽...',
     loadFailed: '載入文件預覽失敗',

@@ -168,7 +168,7 @@ const maxTableRows = 500
 // maxTableBytes bounds accumulated Markdown content per embedded table, including
 // escaping and empty cells. The response cap separately bounds each decoded page.
 // This is a content budget, not a bound on the Go heap or the whole document.
-const maxTableBytes = maxJSONResponseBytes
+const maxTableBytes = 32 << 20
 
 // appendTableRow checks the rendered size before retaining a row or allocating
 // padding. Rows remain unescaped here; markdownTable escapes them exactly once.

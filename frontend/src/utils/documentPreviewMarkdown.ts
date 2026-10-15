@@ -1,9 +1,8 @@
 import hljs from 'highlight.js'
-import { Marked, Renderer } from 'marked'
-import markedKatex from 'marked-katex-extension'
+import { Renderer } from 'marked'
 
 import { domPurifyAllowedUriRegexp } from './markdownDomPurify.ts'
-import { literalSingleTildeExtension } from './markedLiteralTilde.ts'
+import { createPreviewMarkdownParser, preprocessMathDelimiters } from './documentPreviewMarkdownParser.ts'
 import { escapeHTML, safeMarkdownToHTML, sanitizeDocumentPreviewHTML } from './security.ts'
 
 const PREVIEW_IMAGE_ATTRIBUTES = 'loading="lazy" decoding="async" fetchpriority="low"'
@@ -17,15 +16,13 @@ export function isSafePreviewImageHref(href: unknown): href is string {
 }
 
 function highlightPreviewCode(source: string, lang?: string): string {
+  if (source.length > HIGHLIGHT_AUTO_MAX_CHARS) return escapeHTML(source)
   if (lang && hljs.getLanguage(lang)) {
     try {
       return hljs.highlight(source, { language: lang }).value
     } catch {
       // Fall through to auto-detect or plain text.
     }
-  }
-  if (source.length > HIGHLIGHT_AUTO_MAX_CHARS) {
-    return escapeHTML(source)
   }
   return hljs.highlightAuto(source).value
 }
@@ -45,20 +42,9 @@ function createPreviewMarkdownRenderer(): Renderer {
   return renderer
 }
 
-const previewMarked = new Marked({
-  breaks: true,
-  gfm: true,
+const previewMarked = createPreviewMarkdownParser({
   renderer: createPreviewMarkdownRenderer(),
 })
-previewMarked.use(markedKatex({ throwOnError: false, nonStandard: true }))
-previewMarked.use(literalSingleTildeExtension)
-
-function preprocessMathDelimiters(rawText: string): string {
-  if (!rawText || typeof rawText !== 'string') return ''
-  return rawText
-    .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
-    .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$')
-}
 
 export function renderDocumentPreviewMarkdown(
   markdown: string,
@@ -66,4 +52,11 @@ export function renderDocumentPreviewMarkdown(
 ): string {
   const mathSafe = preprocessMathDelimiters(markdown)
   return sanitize(previewMarked.parse(safeMarkdownToHTML(mathSafe)) as string)
+}
+
+export function renderDocumentPreviewPlainText(
+  text: string,
+  sanitize: (html: string) => string = sanitizeDocumentPreviewHTML,
+): string {
+  return sanitize(`<pre><code>${escapeHTML(text)}</code></pre>`)
 }

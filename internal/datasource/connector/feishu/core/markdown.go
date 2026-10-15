@@ -14,9 +14,9 @@ type sheetReader interface {
 }
 
 // maxDocumentMarkdownBytes bounds the complete rendered document, including
-// ordinary blocks, native tables, and all embedded tables. Keeping this equal
-// to the response-body cap restores a single-document boundary after paging.
-const maxDocumentMarkdownBytes = maxJSONResponseBytes
+// ordinary blocks, native tables, and all embedded tables. This aggregate
+// content budget is independent of the per-response and per-table limits.
+const maxDocumentMarkdownBytes = 64 << 20
 
 const documentTruncatedNote = "> [文档内容未完整读取，已保留可读取内容]"
 
@@ -30,18 +30,20 @@ type pendingAttachment struct {
 // blocksToMarkdown renders a flat docx block array to Markdown, inlining
 // embedded spreadsheet/bitable tables (Task 5) and collecting downloadable
 // attachments. client may be nil when the block set has no downdrill blocks.
-func blocksToMarkdown(ctx context.Context, client sheetReader, blocks []DocxBlock) ([]byte, []pendingAttachment, error) {
+func blocksToMarkdown(
+	ctx context.Context, client sheetReader, blocks []DocxBlock,
+) ([]byte, []pendingAttachment, bool, error) {
 	return blocksToMarkdownWithin(ctx, client, blocks, maxDocumentMarkdownBytes)
 }
 
 func blocksToMarkdownWithin(
 	ctx context.Context, client sheetReader, blocks []DocxBlock, maxBytes int,
-) ([]byte, []pendingAttachment, error) {
+) ([]byte, []pendingAttachment, bool, error) {
 	// Reserve the final note before rendering so an over-limit document can never
 	// consume the bytes needed to explain why its tail is absent.
 	contentLimit := maxBytes - len(documentTruncatedNote) - 2
 	if contentLimit <= 0 {
-		return nil, nil, fmt.Errorf("document Markdown budget %d is too small", maxBytes)
+		return nil, nil, false, fmt.Errorf("document Markdown budget %d is too small", maxBytes)
 	}
 	byID := make(map[string]DocxBlock, len(blocks))
 	for _, b := range blocks {
@@ -55,6 +57,7 @@ func blocksToMarkdownWithin(
 	var sb strings.Builder
 	var atts []pendingAttachment
 	truncated := false
+	incomplete := false
 	for _, b := range blocks {
 		if consumed[b.BlockID] {
 			continue
@@ -90,16 +93,22 @@ func blocksToMarkdownWithin(
 			continue // rendered by its parent table (also covered by `consumed`)
 		case BlockTypeSheet:
 			if b.Sheet != nil {
-				var exhausted bool
-				paragraph, exhausted = inlineTable(ctx, client, b.Sheet.Token, "sheet", contentLimit-sb.Len()-2)
+				var exhausted, partial bool
+				paragraph, exhausted, partial = inlineTable(
+					ctx, client, b.Sheet.Token, "sheet", contentLimit-sb.Len()-2,
+				)
+				incomplete = incomplete || partial
 				if exhausted {
 					truncated = true
 				}
 			}
 		case BlockTypeBitable:
 			if b.Bitable != nil {
-				var exhausted bool
-				paragraph, exhausted = inlineTable(ctx, client, b.Bitable.Token, "bitable", contentLimit-sb.Len()-2)
+				var exhausted, partial bool
+				paragraph, exhausted, partial = inlineTable(
+					ctx, client, b.Bitable.Token, "bitable", contentLimit-sb.Len()-2,
+				)
+				incomplete = incomplete || partial
 				if exhausted {
 					truncated = true
 				}
@@ -146,7 +155,7 @@ func blocksToMarkdownWithin(
 	if out != "" {
 		out += "\n"
 	}
-	return []byte(out), atts, nil
+	return []byte(out), atts, incomplete || truncated, nil
 }
 
 func writeParaWithin(sb *strings.Builder, s string, maxBytes int) bool {
@@ -340,9 +349,9 @@ func escapePipes(row []string) []string {
 // table. Read/permission errors degrade to an inline note rather than failing
 // the whole document (partial content beats no content). A reader-reported
 // truncation appends a note.
-func inlineTable(ctx context.Context, client sheetReader, token, kind string, maxBytes int) (string, bool) {
+func inlineTable(ctx context.Context, client sheetReader, token, kind string, maxBytes int) (string, bool, bool) {
 	if client == nil {
-		return "", false
+		return "", false, false
 	}
 	var (
 		rows      [][]string
@@ -358,13 +367,13 @@ func inlineTable(ctx context.Context, client sheetReader, token, kind string, ma
 	}
 	note := fmt.Sprintf("> [%s未完整读取，已保留可读取内容]", noun)
 	if maxBytes < len(note) {
-		return "", true
+		return "", true, true
 	}
 	// Reserve room for a table-level truncation note. The reader can then stop
 	// before retaining rows that the complete document cannot accommodate.
 	readerBudget := min(maxTableBytes, maxBytes-len(note)-2)
 	if readerBudget <= 0 {
-		return note, false
+		return note, false, true
 	}
 	if kind == "sheet" {
 		rows, truncated, exhausted, err = client.readSheetRange(ctx, token, readerBudget)
@@ -374,25 +383,27 @@ func inlineTable(ctx context.Context, client sheetReader, token, kind string, ma
 	if err != nil {
 		failure := fmt.Sprintf("> [无法读取%s]", noun)
 		if len(failure) <= maxBytes {
-			return failure, false
+			return failure, false, true
 		}
-		return "", true
+		return "", true, true
 	}
+	// A table hitting its own limit must not suppress later document blocks.
+	documentExhausted := exhausted && readerBudget < maxTableBytes
 	table := markdownTable(rows)
 	if truncated {
 		// A byte budget or incomplete pagination can stop before the row cap,
 		// including before the first row. Never hide that behind an empty table.
 		if table == "" {
-			return note, exhausted
+			return note, documentExhausted, true
 		}
 		result := table + "\n\n" + note
 		if len(result) <= maxBytes {
-			return result, exhausted
+			return result, documentExhausted, true
 		}
-		return note, exhausted
+		return note, documentExhausted, true
 	}
 	if len(table) > maxBytes {
-		return note, false
+		return note, false, true
 	}
-	return table, false
+	return table, false, false
 }

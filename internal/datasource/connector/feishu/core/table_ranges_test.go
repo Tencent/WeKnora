@@ -333,6 +333,7 @@ func TestEmbeddedTableReaders_RespectDocumentRemainder(t *testing.T) {
 }
 
 func TestEmbeddedTable_UnrenderableBudgetStillShowsNote(t *testing.T) {
+	const budget = 1 << 20
 	for _, mode := range []string{"wide grid", "escaped first row", "bitable header"} {
 		t.Run(mode, func(t *testing.T) {
 			recordCalls := 0
@@ -343,20 +344,20 @@ func TestEmbeddedTable_UnrenderableBudgetStillShowsNote(t *testing.T) {
 				case strings.Contains(r.URL.Path, "/sheets/v3/"):
 					columns := 1
 					if mode == "wide grid" {
-						columns = maxTableBytes
+						columns = budget
 					}
 					_, _ = fmt.Fprintf(w,
 						`{"data":{"sheet":{"grid_properties":{"row_count":1,"column_count":%d}}}}`, columns)
 				case strings.HasSuffix(r.URL.Path, "/fields"):
 					_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
-						"items": []any{map[string]any{"field_name": strings.Repeat("|", maxTableBytes/2)}},
+						"items": []any{map[string]any{"field_name": strings.Repeat("|", budget/2)}},
 					}})
 				case strings.HasSuffix(r.URL.Path, "/records/search"):
 					recordCalls++
 				default:
 					cell := "value"
 					if mode == "escaped first row" {
-						cell = strings.Repeat("|", maxTableBytes/2)
+						cell = strings.Repeat("|", budget/2)
 					}
 					_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
 						"valueRange": map[string]any{"values": [][]string{{cell}}},
@@ -369,7 +370,7 @@ func TestEmbeddedTable_UnrenderableBudgetStillShowsNote(t *testing.T) {
 			if mode == "bitable header" {
 				kind = "bitable"
 			}
-			got, exhausted := inlineTable(context.Background(), c, "token_0", kind, maxTableBytes)
+			got, exhausted, _ := inlineTable(context.Background(), c, "token_0", kind, budget)
 			if !exhausted {
 				t.Fatal("unrenderable table budget was not reported as exhausted")
 			}

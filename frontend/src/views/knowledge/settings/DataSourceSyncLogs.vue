@@ -136,7 +136,11 @@ function hasPills(log: SyncLog) {
 const FAILED_ITEMS_CAP = 50
 
 function failedItems(log: SyncLog): SyncItemError[] {
-  return (log.result?.errors || []).slice(0, FAILED_ITEMS_CAP)
+  return (log.result?.errors || []).filter(item => item.code !== 'content_incomplete').slice(0, FAILED_ITEMS_CAP)
+}
+
+function incompleteItems(log: SyncLog): SyncItemError[] {
+  return (log.result?.errors || []).filter(item => item.code === 'content_incomplete').slice(0, FAILED_ITEMS_CAP)
 }
 
 // Render one failure sample. The backend sends a stable i18n `code` (+ params)
@@ -284,6 +288,13 @@ const groupedLogs = computed(() => {
                 </div>
                 <div v-else-if="log.error_message" class="tl-error">
                   {{ log.error_message }}
+                </div>
+
+                <div v-if="incompleteItems(log).length" class="tl-failed">
+                  <div class="tl-failed-title">{{ t('datasource.logDetail.incompleteItems') }}</div>
+                  <div v-for="(item, i) in incompleteItems(log)" :key="i" class="tl-failed-item" :title="formatSyncError(item)">
+                    {{ formatSyncError(item) }}
+                  </div>
                 </div>
 
                 <!-- Per-item failures: which documents failed and why.

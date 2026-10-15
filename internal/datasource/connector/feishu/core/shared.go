@@ -345,7 +345,7 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 		return []*types.FetchedItem{item}, nil
 	}
 
-	md, atts, err := blocksToMarkdown(ctx, client, blocks)
+	md, atts, incomplete, err := blocksToMarkdown(ctx, client, blocks)
 	if err != nil {
 		return nil, fmt.Errorf("convert blocks %s: %w", in.Title, err)
 	}
@@ -372,6 +372,14 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 		SourceResourceID: in.ResourceID,
 		Metadata:         in.BaseMeta,
 		ReplacesSubtree:  true, // sweep stale attachment sub-items on re-sync
+	}
+	if incomplete {
+		main.Metadata = maps.Clone(in.BaseMeta)
+		if main.Metadata == nil {
+			main.Metadata = make(map[string]string)
+		}
+		main.Metadata["content_warning"] = "Document content was only partially read; " +
+			"see the incomplete-read notes in the document"
 	}
 	items := []*types.FetchedItem{main}
 

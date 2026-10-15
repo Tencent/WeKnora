@@ -50,7 +50,7 @@ func TestBlocksToMarkdown_EmbeddedSheetAndFile(t *testing.T) {
 		{BlockID: "f", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "file_t", Name: "报表.pdf"}},
 	}
 	fr := fakeReader{sheet: [][]string{{"名称", "数量"}, {"苹果", "3"}}}
-	md, atts, err := blocksToMarkdown(context.Background(), fr, blocks)
+	md, atts, _, err := blocksToMarkdown(context.Background(), fr, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestBlocksToMarkdown_SheetReadBoundaryNote(t *testing.T) {
 		{BlockID: "s", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_a_0"}},
 	}
 	fr := fakeReader{sheet: [][]string{{"h"}, {"1"}}, sheetTruncated: true}
-	md, _, err := blocksToMarkdown(context.Background(), fr, blocks)
+	md, _, _, err := blocksToMarkdown(context.Background(), fr, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestBlocksToMarkdown_SheetPermissionDegrades(t *testing.T) {
 		{BlockID: "s", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_a_0"}},
 	}
 	fr := fakeReader{sheetErr: fmt.Errorf("code=99991672 permission denied")}
-	md, _, err := blocksToMarkdown(context.Background(), fr, blocks)
+	md, _, _, err := blocksToMarkdown(context.Background(), fr, blocks)
 	if err != nil {
 		t.Fatalf("should not fail on permission error, got %v", err)
 	}
@@ -107,7 +107,7 @@ func TestBlocksToMarkdown_BitableInlinedAndDegrades(t *testing.T) {
 			{BlockID: "root", BlockType: BlockTypePage},
 			{BlockID: "bt", BlockType: BlockTypeBitable, Bitable: &BlockTokenRef{Token: "bascabc_tblxyz"}},
 		}
-		md, _, err := blocksToMarkdown(context.Background(), fr, blocks)
+		md, _, _, err := blocksToMarkdown(context.Background(), fr, blocks)
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -136,7 +136,7 @@ func TestBlocksToMarkdown_NativeTableFromCellChildren(t *testing.T) {
 		cellTextBlk("c1", "姓名"), cellTextBlk("c2", "分数"),
 		cellTextBlk("c3", "张三"), cellTextBlk("c4", "95"),
 	}
-	md, _, err := blocksToMarkdown(context.Background(), nil, blocks)
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestBlocksToMarkdown_AttachmentInsideTableCellStillCollected(t *testing.T) 
 		{BlockID: "c1", BlockType: BlockTypeTableCell, Children: []string{"f1"}},
 		{BlockID: "f1", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "tok-in-cell", Name: "内嵌.pdf"}},
 	}
-	_, atts, err := blocksToMarkdown(context.Background(), nil, blocks)
+	_, atts, _, err := blocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestBlocksToMarkdown_UnrenderableTablePreservesCellText(t *testing.T) {
 		{BlockID: "c1", BlockType: BlockTypeTableCell, Children: []string{"c1_txt"}},
 		cellTextBlk("c1", "重要内容"),
 	}
-	md, _, err := blocksToMarkdown(context.Background(), nil, blocks)
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestBlocksToMarkdown_TextConstructs(t *testing.T) {
 		{BlockID: "p", BlockType: BlockTypeText, Text: txt("一段正文")},
 		{BlockID: "b", BlockType: BlockTypeBullet, Bullet: txt("要点")},
 	}
-	md, atts, err := blocksToMarkdown(context.Background(), nil, blocks)
+	md, atts, _, err := blocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
 		t.Fatalf("blocksToMarkdown: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestBlocksToMarkdown_BlankDocRendersEmpty(t *testing.T) {
 		{BlockID: "root", BlockType: BlockTypePage, Children: []string{"p"}},
 		{BlockID: "p", BlockType: BlockTypeText, Text: txt("")},
 	}
-	md, atts, err := blocksToMarkdown(context.Background(), nil, blocks)
+	md, atts, _, err := blocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
 		t.Fatalf("blocksToMarkdown: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestBlocksToMarkdown_TodoAndCallout(t *testing.T) {
 		{BlockID: "t", BlockType: BlockTypeTodo, Todo: txt("买牛奶")},
 		{BlockID: "c", BlockType: BlockTypeCallout, Callout: txt("注意事项")},
 	}
-	md, _, err := blocksToMarkdown(context.Background(), nil, blocks)
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestBlocksToMarkdown_CalloutContainerNoOp(t *testing.T) {
 		{BlockID: "root", BlockType: BlockTypePage},
 		{BlockID: "c", BlockType: BlockTypeCallout},
 	}
-	md, _, err := blocksToMarkdown(context.Background(), nil, blocks)
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestBlocksToMarkdown_CalloutContainerNoOp(t *testing.T) {
 func TestInlineTable_TruncationBeforeFirstRowIsVisible(t *testing.T) {
 	for _, kind := range []string{"sheet", "bitable"} {
 		reader := fakeReader{sheetTruncated: true, bitableTruncated: true}
-		got, exhausted := inlineTable(context.Background(), reader, "token", kind, maxTableBytes)
+		got, exhausted, _ := inlineTable(context.Background(), reader, "token", kind, maxTableBytes)
 		if exhausted {
 			t.Fatal("full table budget was reported as exhausted")
 		}
@@ -338,7 +338,7 @@ func TestBlocksToMarkdown_DocumentBudgetStopsFurtherTableReads(t *testing.T) {
 		{BlockID: "file", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "file_t", Name: "report.pdf"}},
 	}
 
-	md, atts, err := blocksToMarkdownWithin(context.Background(), reader, blocks, budget)
+	md, atts, _, err := blocksToMarkdownWithin(context.Background(), reader, blocks, budget)
 	if err != nil {
 		t.Fatalf("blocksToMarkdownWithin: %v", err)
 	}
@@ -370,7 +370,7 @@ func TestBlocksToMarkdown_DocumentBudgetBoundary(t *testing.T) {
 				{BlockID: "text", BlockType: BlockTypeText, Text: txt(strings.Repeat("x", textBytes))},
 			}
 
-			md, _, err := blocksToMarkdownWithin(context.Background(), nil, blocks, budget)
+			md, _, _, err := blocksToMarkdownWithin(context.Background(), nil, blocks, budget)
 			if err != nil {
 				t.Fatalf("blocksToMarkdownWithin: %v", err)
 			}
@@ -400,7 +400,7 @@ func TestBlocksToMarkdown_EmbeddedTablesShareDocumentBudget(t *testing.T) {
 		{BlockID: "bitable", BlockType: BlockTypeBitable, Bitable: &BlockTokenRef{Token: "app_table"}},
 	}
 
-	md, _, err := blocksToMarkdownWithin(context.Background(), reader, blocks, budget)
+	md, _, _, err := blocksToMarkdownWithin(context.Background(), reader, blocks, budget)
 	if err != nil {
 		t.Fatalf("blocksToMarkdownWithin: %v", err)
 	}
@@ -429,7 +429,7 @@ func TestBlocksToMarkdown_NoRoomForTableNoteMarksDocumentTruncated(t *testing.T)
 		{BlockID: "sheet", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_0"}},
 	}
 
-	md, _, err := blocksToMarkdownWithin(context.Background(), reader, blocks, budget)
+	md, _, _, err := blocksToMarkdownWithin(context.Background(), reader, blocks, budget)
 	if err != nil {
 		t.Fatalf("blocksToMarkdownWithin: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestBlocksToMarkdown_TableBudgetExhaustionMarksDocumentTruncated(t *testing
 		{BlockID: "later", BlockType: BlockTypeText, Text: txt("must not render")},
 	}
 
-	md, _, err := blocksToMarkdownWithin(context.Background(), reader, blocks, 512)
+	md, _, _, err := blocksToMarkdownWithin(context.Background(), reader, blocks, 512)
 	if err != nil {
 		t.Fatalf("blocksToMarkdownWithin: %v", err)
 	}
@@ -481,7 +481,7 @@ func TestBlocksToMarkdown_DocumentBudgetsAreIndependent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results[i], _, errs[i] = blocksToMarkdownWithin(context.Background(), nil, blocks, budget)
+			results[i], _, _, errs[i] = blocksToMarkdownWithin(context.Background(), nil, blocks, budget)
 		}()
 	}
 	wg.Wait()
@@ -494,5 +494,29 @@ func TestBlocksToMarkdown_DocumentBudgetsAreIndependent(t *testing.T) {
 			t.Fatalf("document %d crossed or lost its independent budget: bytes=%d output=%q",
 				i, len(results[i]), results[i])
 		}
+	}
+}
+
+func TestBlocksToMarkdown_TableLimitDoesNotDiscardFollowingContent(t *testing.T) {
+	reader := fakeReader{
+		sheet: [][]string{{"header"}, {"retained"}}, sheetTruncated: true, sheetExhausted: true,
+		bitable: [][]string{{"header"}, {"later record"}},
+	}
+	blocks := []DocxBlock{
+		{BlockID: "sheet", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_0"}},
+		{BlockID: "bitable", BlockType: BlockTypeBitable, Bitable: &BlockTokenRef{Token: "app_table"}},
+		{BlockID: "tail", BlockType: BlockTypeText, Text: txt("document tail")},
+	}
+	md, _, _, err := blocksToMarkdownWithin(context.Background(), reader, blocks, 2*maxTableBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"retained", "未完整读取", "later record", "document tail"} {
+		if !strings.Contains(string(md), want) {
+			t.Errorf("missing %q after single-table truncation", want)
+		}
+	}
+	if strings.Contains(string(md), documentTruncatedNote) {
+		t.Error("single table exhaustion incorrectly marked the document exhausted")
 	}
 }
