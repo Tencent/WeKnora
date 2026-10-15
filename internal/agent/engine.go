@@ -544,9 +544,8 @@ func (e *AgentEngine) withinIterationBudget(round int) bool {
 }
 
 // loopGuards is the per-turn state the ReAct loop uses to notice it is not
-// making progress. All three counters exist because a model can keep the loop
-// spinning without ever finishing: empty answers, the same answer repeated,
-// and rounds cut off at the completion-token cap.
+// making progress. The counters cover empty answers, repeated answers,
+// completion-token cutoffs, and identical failed tool calls.
 type loopGuards struct {
 	// emptyRetries counts nudges sent after a stop with no content.
 	emptyRetries         int
@@ -563,6 +562,48 @@ type loopGuards struct {
 	// consecutiveLength counts rounds in a row that the provider cut off at
 	// the completion-token cap.
 	consecutiveLength int
+	// failedToolCallSignature and consecutiveFailedToolCalls track identical
+	// failed calls across rounds. A single guidance message is sent per streak.
+	failedToolCallSignature    string
+	consecutiveFailedToolCalls int
+	failedToolCallNudged       bool
+}
+
+// recordFailedToolCall tracks consecutive failures of the same model-facing
+// tool name and arguments. A successful or different call breaks the streak.
+func (g *loopGuards) recordFailedToolCall(call types.ToolCall) (string, int, bool) {
+	if call.Result != nil && call.Result.Success {
+		g.resetFailedToolCallStreak()
+		return "", 0, false
+	}
+	if call.Name == "" {
+		g.resetFailedToolCallStreak()
+		return "", 0, false
+	}
+	args, err := json.Marshal(call.Args)
+	if err != nil {
+		g.resetFailedToolCallStreak()
+		return "", 0, false
+	}
+	signature := call.Name + "\x00" + string(args)
+	if signature != g.failedToolCallSignature {
+		g.failedToolCallSignature = signature
+		g.consecutiveFailedToolCalls = 1
+		g.failedToolCallNudged = false
+	} else {
+		g.consecutiveFailedToolCalls++
+	}
+	if g.consecutiveFailedToolCalls >= maxConsecutiveFailedToolCalls && !g.failedToolCallNudged {
+		g.failedToolCallNudged = true
+		return call.Name, g.consecutiveFailedToolCalls, true
+	}
+	return "", g.consecutiveFailedToolCalls, false
+}
+
+func (g *loopGuards) resetFailedToolCallStreak() {
+	g.failedToolCallSignature = ""
+	g.consecutiveFailedToolCalls = 0
+	g.failedToolCallNudged = false
 }
 
 // closeAnswerStream emits the Done:true marker for an answer that is actually
@@ -1018,6 +1059,7 @@ func (e *AgentEngine) runReActIteration(
 	// round, which used to land in the else branch and reset the counter, so
 	// the guard could never fire on the one shape that needs it most (#3446).
 	if len(response.ToolCalls) == 0 {
+		guards.resetFailedToolCallStreak()
 		if guards.sawPlainRound && response.Content == guards.lastResponseContent {
 			guards.consecutiveSameContent++
 		} else {
@@ -1328,9 +1370,30 @@ func (e *AgentEngine) runReActIteration(
 	toolCallCount = len(step.ToolCalls)
 
 	// 4. Observe: Add tool results to messages and write to context
+	var (
+		failedToolName     string
+		failedToolAttempts int
+	)
+	for _, toolCall := range step.ToolCalls {
+		if name, attempts, shouldNudge := guards.recordFailedToolCall(toolCall); shouldNudge {
+			failedToolName = name
+			failedToolAttempts = attempts
+		}
+	}
+
 	state.RoundSteps = append(state.RoundSteps, step)
 	*messagesPtr = e.appendToolResults(*messagesPtr, step)
 	*messagesPtr = e.appendToolImages(ctx, *messagesPtr, step)
+	if failedToolName != "" {
+		logger.Warnf(ctx, "[Agent][Round-%d] Repeated failed call to %q (%d attempts); asking the model to change strategy",
+			round, failedToolName, failedToolAttempts)
+		guidance := fmt.Sprintf(
+			"The tool %q has failed %d consecutive times with identical arguments. "+
+				"Do not call it again with those arguments. Switch to a different tool or use another approach to complete the task.",
+			failedToolName, failedToolAttempts,
+		)
+		*messagesPtr = append(*messagesPtr, chat.Message{Role: "user", Content: guidance})
+	}
 	common.PipelineInfo(ctx, "Agent", "round_end", map[string]interface{}{
 		"iteration":   state.CurrentRound,
 		"round":       round,
