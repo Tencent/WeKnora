@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/golang-migrate/migrate/v4"
+	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,6 +45,8 @@ var versionedSQLiteTables = []string{
 	"automations",
 	"automation_runs",
 	"notifications",
+	"session_sandbox_assignments",
+	"sandbox_user_machines",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
@@ -64,14 +68,15 @@ var versionedSQLiteColumns = map[string][]string{
 		"host_workspace_dir",       // 000029
 		"owner_auth_source",        // 000046
 	},
-	"tenant_invitations": {"token", "accepted_count"},          // 000054
-	"embed_channels":     {"allow_memory"},                     // 000060
-	"im_channels":        {"locale"},                           // 000030
-	"chunks":             {"source_locators"},                  // 000033
-	"mcp_oauth_tokens":   {"principal_type", "principal_id"},   // 000064
-	"mcp_tool_approvals": {"enabled", "risk", "observed_risk"}, // 000091, 000126
-	"mcp_services":       {"usage_instructions"},               // 000092
-	"message_artifacts":  {"deleted_at"},                       // 000107
+	"session_sandbox_assignments": {"released_at", "cleanup_due_at"},    // 000047
+	"tenant_invitations":          {"token", "accepted_count"},          // 000054
+	"embed_channels":              {"allow_memory"},                     // 000060
+	"im_channels":                 {"locale"},                           // 000030
+	"chunks":                      {"source_locators"},                  // 000033
+	"mcp_oauth_tokens":            {"principal_type", "principal_id"},   // 000064
+	"mcp_tool_approvals":          {"enabled", "risk", "observed_risk"}, // 000091, 000126
+	"mcp_services":                {"usage_instructions"},               // 000092
+	"message_artifacts":           {"deleted_at"},                       // 000107
 	"tenant_skills": {
 		"envs", "served", "catalog_id", "install_session_id", "install_message_id",
 	}, // 000028
@@ -81,7 +86,7 @@ var versionedSQLiteColumns = map[string][]string{
 	}, // 000028
 }
 
-const expectedSQLiteMigrationVersion = 46
+const expectedSQLiteMigrationVersion = 47
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -225,6 +230,55 @@ func TestSQLiteMigrationsUpgradeV16AddsSessionForkColumns(t *testing.T) {
 		)
 	}
 	require.True(t, sqliteColumnExists(t, db, "messages", "sandbox_checkpoint"))
+}
+
+// The allocation migration must come back off cleanly: both tables disappear,
+// and applying it again restores them including the partial indexes.
+func TestSQLiteSandboxAllocationMigrationRollsBack(t *testing.T) {
+	repoRoot := sqliteRepoRoot(t)
+	chdirAndRestore(t, repoRoot)
+
+	dbPath := filepath.Join(t.TempDir(), "down.db")
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+
+	db := openSQLiteDB(t, dbPath)
+	version, dirty := sqliteMigrationState(t, db)
+	require.Equal(t, expectedSQLiteMigrationVersion, version)
+	require.False(t, dirty)
+	for _, table := range []string{"session_sandbox_assignments", "sandbox_user_machines"} {
+		require.Truef(t, sqliteTableExists(t, db, table), "up must create %s", table)
+	}
+	require.True(t, sqliteIndexExists(t, db, "idx_session_sandbox_assignments_live_machine"))
+	require.True(t, sqliteIndexExists(t, db, "idx_session_sandbox_assignments_cleanup_due"))
+	require.True(t, sqliteIndexExists(t, db, "idx_sandbox_user_machines_empty"))
+	require.NoError(t, db.Close())
+
+	sqlDB, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	driver, err := sqlite3migrate.WithInstance(sqlDB, &sqlite3migrate.Config{})
+	require.NoError(t, err)
+	m, err := migrate.NewWithDatabaseInstance("file://migrations/sqlite", "sqlite3", driver)
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = m.Close() })
+
+	require.NoError(t, m.Steps(-1))
+	version, dirty = sqliteMigrationState(t, sqlDB)
+	require.Equal(t, expectedSQLiteMigrationVersion-1, version)
+	require.False(t, dirty)
+	for _, table := range []string{"session_sandbox_assignments", "sandbox_user_machines"} {
+		require.Falsef(t, sqliteTableExists(t, sqlDB, table), "down must drop %s", table)
+	}
+	require.True(t, sqliteColumnExists(t, sqlDB, "sessions", "owner_auth_source"),
+		"rolling back the allocation tables keeps the owner source of 000034")
+
+	require.NoError(t, m.Steps(1))
+	version, dirty = sqliteMigrationState(t, sqlDB)
+	require.Equal(t, expectedSQLiteMigrationVersion, version)
+	require.False(t, dirty)
+	require.True(t, sqliteTableExists(t, sqlDB, "session_sandbox_assignments"))
+	require.True(t, sqliteTableExists(t, sqlDB, "sandbox_user_machines"))
+	require.True(t, sqliteIndexExists(t, sqlDB, "idx_session_sandbox_assignments_live_machine"))
 }
 
 func sqliteRepoRoot(t *testing.T) string {
