@@ -738,6 +738,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
@@ -1193,6 +1194,8 @@ watch(spaceSelection, (val) => {
 watch(creatorFilter, () => {
   fetchList(true)
 })
+
+useAssistantDataChange(() => { void fetchList(true) }, { areas: ['agent'] })
 
 onMounted(() => {
   fetchList()

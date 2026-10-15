@@ -1316,6 +1316,8 @@ export default {
       enabled: 'エージェントを有効化しました'
     },
     editor: {
+      assistantChanged: 'アシスタントがこのエージェントを変更しました。最新の設定を確認するには、開き直してください。',
+      assistantDeleted: 'アシスタントがこのエージェントを削除しました。',
       reasoningEffortUnsupported: '選択中のモデルは思考に対応していません。「オフ」以外は無視されます。',
       reasoningEffortAlwaysOn: '選択中のモデルは常に思考します。オフにはできず、強度のみ調整できます。',
       createTitle: 'エージェントを作成',

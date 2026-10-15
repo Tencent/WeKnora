@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAssistantDataChange } from '@/utils/assistantDataChange';
 import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick } from "vue";
 import { MessagePlugin } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
@@ -1503,6 +1504,33 @@ const updateStatus = (analyzeList: KnowledgeCard[], delay = 1500) => {
 const closeDoc = () => {
   isCardDetails.value = false;
 };
+
+useAssistantDataChange((changes) => {
+  const targetKbId = kbId.value;
+  if (!targetKbId) return;
+  const relevant = changes.filter(change => change.ids.knowledgeBaseIds.includes(targetKbId)
+    || (change.area === 'knowledge' && change.ids.knowledgeIds.some(id =>
+      cardList.value.some(item => item.id === id) || (isCardDetails.value && details.id === id)))
+    // ID-only operations may affect a document outside the loaded folder or page.
+    || (change.area === 'knowledge' && change.ids.knowledgeBaseIds.length === 0));
+  if (!relevant.length) return;
+  if (isCardDetails.value && relevant.some(change => change.ids.knowledgeIds.includes(details.id))) {
+    if (relevant.some(change => change.ids.knowledgeIds.includes(details.id)
+      && ['knowledge.delete', 'knowledge.batch_delete'].includes(change.operation))) {
+      closeDoc();
+    } else {
+      getCardDetails({ id: details.id });
+    }
+  }
+  resetPage();
+  if (relevant.some(change => change.area === 'knowledge_base')) {
+    void loadKnowledgeBaseInfo(targetKbId, true);
+  } else {
+    void loadKnowledgeFiles(targetKbId);
+    void loadFolderTree(targetKbId);
+  }
+}, { areas: ['knowledge_base', 'knowledge'] });
+
 const openCardDetails = (item: KnowledgeCard) => {
   isCardDetails.value = true;
   getCardDetails(item);

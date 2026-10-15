@@ -757,6 +757,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import { ref, reactive, watch, onMounted, computed, nextTick, onUnmounted, h } from 'vue'
 import KnowledgeTagFilter from './KnowledgeTagFilter.vue'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
@@ -2587,6 +2588,12 @@ const handleResize = () => {
     resizeTimer = null
   }, 150)
 }
+
+useAssistantDataChange((changes) => {
+  if (!changes.some(change => change.ids.knowledgeBaseIds.includes(props.kbId))) return
+  void loadEntries()
+  void loadTags(true)
+}, { areas: ['faq'] })
 
 onMounted(async () => {
   // Ensure shared knowledge bases are loaded before loading the knowledge list

@@ -6873,6 +6873,8 @@ export default {
       capabilityUnconfigured: 'Not set'
     },
     editor: {
+      assistantChanged: 'Ассистент изменил этого агента. Откройте его заново, чтобы увидеть актуальные настройки.',
+      assistantDeleted: 'Ассистент удалил этого агента.',
       reasoningEffortUnsupported: 'Выбранная модель не поддерживает размышления; все варианты, кроме «Выкл», игнорируются.',
       reasoningEffortAlwaysOn: 'Выбранная модель всегда размышляет, её нельзя отключить — можно менять только уровень усилий.',
       createTitle: 'Create Agent',

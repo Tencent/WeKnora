@@ -6875,6 +6875,8 @@ export default {
       capabilityUnconfigured: '未設定'
     },
     editor: {
+      assistantChanged: '助手已修改此智慧代理，請重新開啟以查看最新設定。',
+      assistantDeleted: '助手已刪除此智慧代理。',
       reasoningEffortUnsupported: '當前所選模型不支持思考，除「關閉」外的選項將被忽略。',
       reasoningEffortAlwaysOn: '當前所選模型始終開啟思考，無法關閉，只能調整思考強度。',
       createTitle: '建立智慧代理',

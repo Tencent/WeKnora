@@ -16,6 +16,8 @@ const renderer = vue.createRenderer<any, any>({
 
 function fixture() {
   const dialogs: any[] = []
+  const warnings: string[] = []
+  const window = Object.assign(new EventTarget(), { setInterval, clearInterval })
   const errors: unknown[][] = []
   const ui = vue.reactive({ showSettingsModal: false })
   const resources = {
@@ -40,7 +42,7 @@ function fixture() {
     pinia: { storeToRefs: vue.toRefs },
     'tdesign-vue-next': {
       DialogPlugin: { confirm: (options: any) => { dialogs.push(options); return { destroy() {} } } },
-      MessagePlugin: { success() {}, error() {}, warning() {} },
+      MessagePlugin: { success() {}, error() {}, warning(message: string) { warnings.push(message) } },
     },
     '@/stores/ui': { useUIStore: () => ui },
     '@/stores/auth': { useAuthStore: () => ({ hasRole: () => true }) },
@@ -62,9 +64,9 @@ function fixture() {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     }).outputText
     runInNewContext(compiled, {
-      exports, setTimeout, clearTimeout,
+      exports, setTimeout, clearTimeout, CustomEvent,
       console: { ...console, error: (...args: unknown[]) => errors.push(args) },
-      window: { addEventListener() {}, removeEventListener() {}, setInterval, clearInterval },
+      window,
       require(name: string) {
         if (modules[name]) return modules[name]
         if (name.endsWith('.vue')) return { default: {} }
@@ -75,6 +77,7 @@ function fixture() {
     return exports
   }
   modules['@/composables/useModalShell'] = evaluate(readFileSync(new URL('./useModalShell.ts', import.meta.url), 'utf8'))
+  modules['@/utils/assistantDataChange'] = evaluate(readFileSync(new URL('../utils/assistantDataChange.ts', import.meta.url), 'utf8'))
   function mount(path: string, props: Record<string, any>) {
     const { descriptor } = parse(readFileSync(new URL(path, import.meta.url), 'utf8'))
     const script = compileScript(descriptor, { id: 'dirty-test' }).content
@@ -87,7 +90,7 @@ function fixture() {
     app.mount({})
     return { vm: instance.value, unmount: () => { app.unmount(); assert.deepEqual(errors, []) } }
   }
-  return { mount, dialogs, resources, ui }
+  return { mount, dialogs, resources, ui, warnings, emit: modules['@/utils/assistantDataChange'].emitAssistantDataChange }
 }
 
 async function settle() {
@@ -200,3 +203,37 @@ for (const savedRules of [[], [{ file_types: ['xlsx'], engine: 'builtin', xlsx_f
     } finally { unmount() }
   })
 }
+
+test('assistant changes warn without overwriting unsaved agent settings', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = fixture()
+  const props = vue.reactive({
+    visible: false, mode: 'edit',
+    agent: { id: 'agent', name: 'Original', config: { model_id: 'model' } },
+  })
+  const { vm, unmount } = f.mount('../views/agent/AgentEditorModal.vue', props)
+  t.after(unmount)
+  props.visible = true
+  await settle()
+  vm.formData.name = 'unsaved draft'
+  const emit = (operation: string, agentIds: string[]) => f.emit({
+    operation, area: 'agent', ids: { agent_id: agentIds },
+  })
+  emit('agent.update', ['other'])
+  emit('agent.copy', ['agent', 'copy'])
+  t.mock.timers.tick(300)
+  assert.deepEqual(f.warnings, [])
+  emit('agent.update', ['agent'])
+  t.mock.timers.tick(300)
+  assert.deepEqual(f.warnings, ['agent.editor.assistantChanged'])
+  emit('agent.delete', ['agent'])
+  t.mock.timers.tick(300)
+  assert.deepEqual(f.warnings, ['agent.editor.assistantChanged', 'agent.editor.assistantDeleted'])
+  assert.equal(vm.formData.name, 'unsaved draft')
+  assert.equal(vm.modalShell.isDirty(), true)
+  props.visible = false
+  await settle()
+  emit('agent.update', ['agent'])
+  t.mock.timers.tick(300)
+  assert.equal(f.warnings.length, 2)
+})

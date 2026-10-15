@@ -1316,6 +1316,8 @@ export default {
       enabled: 'Agent enabled'
     },
     editor: {
+      assistantChanged: 'The assistant changed this agent. Reopen it to see the latest settings.',
+      assistantDeleted: 'The assistant deleted this agent.',
       reasoningEffortUnsupported: 'The selected model cannot think; every option except "Off" is ignored.',
       reasoningEffortAlwaysOn: 'The selected model always reasons and cannot be switched off; only the effort level can be changed.',
       createTitle: 'Create Agent',

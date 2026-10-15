@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -348,6 +349,7 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 		defer t.rt.Gate.MarkExecuted(ctx, confirmed.pendingID)
 		if confirmed.call != nil {
 			call = *confirmed.call
+			input.Params = confirmed.params
 		}
 		// Waiting for the user may have used up the per-tool budget; the call
 		// itself gets a full window from the round context.
@@ -389,7 +391,55 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 	if err != nil {
 		return operationFailure(err.Error()), nil
 	}
-	return &types.ToolResult{Success: true, Output: string(out)}, nil
+	result := &types.ToolResult{Success: true, Output: string(out)}
+	if op.Risk.Mutates() {
+		result.Data = map[string]any{"data_change": operationDataChange(op, input.Params, projected)}
+	}
+	return result, nil
+}
+
+func operationDataChange(
+	op operations.Operation, params map[string]json.RawMessage, projected operations.Projected,
+) map[string]any {
+	ids := map[string][]string{}
+	add := func(key, id string) {
+		id = strings.TrimSpace(id)
+		if id != "" && !slices.Contains(ids[key], id) {
+			ids[key] = append(ids[key], id)
+		}
+	}
+	for _, param := range op.Params {
+		key := param.Name
+		switch key {
+		case "source_knowledge_base_id":
+			key = "knowledge_base_id"
+		case "knowledge_ids":
+			key = "knowledge_id"
+		case "knowledge_base_id", "knowledge_id", "agent_id":
+		default:
+			continue
+		}
+		var id string
+		var list []string
+		if json.Unmarshal(params[param.Name], &id) == nil {
+			add(key, id)
+		} else if json.Unmarshal(params[param.Name], &list) == nil {
+			for _, id := range list {
+				add(key, id)
+			}
+		}
+	}
+	area, action, _ := strings.Cut(op.ID, ".")
+	if action == "copy" || strings.HasPrefix(action, "create") {
+		for _, key := range []string{"knowledge_base_id", "knowledge_id", "agent_id"} {
+			add(key, projected.Label(key))
+		}
+	}
+	change := map[string]any{"operation": op.ID, "area": area}
+	if len(ids) > 0 {
+		change["ids"] = ids
+	}
+	return change
 }
 
 // confirmedCall is an approved mutation. call replaces the original when the
@@ -397,6 +447,7 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 type confirmedCall struct {
 	pendingID string
 	call      *operations.Call
+	params    map[string]json.RawMessage
 }
 
 // confirm obtains the user's approval for a mutating call, or returns a result
@@ -494,6 +545,7 @@ func (t *RunOperationTool) confirm(
 		}
 		confirmedInput = edited
 		confirmed.call = &call
+		confirmed.params = edited.Params
 	}
 	// Recheck after approval, including resumed runs and edited arguments:
 	// the target can have changed while the user was deciding.

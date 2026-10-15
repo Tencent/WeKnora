@@ -9,6 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -103,6 +104,7 @@ func TestRunOperationReadProjectsResult(t *testing.T) {
 	res, err := tool.Execute(interactiveCtx(), runArgs("knowledge.get", map[string]any{"knowledge_id": "k1"}))
 	require.NoError(t, err)
 	require.True(t, res.Success, res.Error)
+	assert.Empty(t, res.Data)
 	assert.NotContains(t, res.Output, "local://secret", "undeclared fields never reach the model")
 	assert.Contains(t, res.Output, `"error_message":"encrypted pdf"`)
 	require.Len(t, d.calls, 1)
@@ -537,6 +539,10 @@ func TestRunOperationAutoWriteHonorsResumedAnswer(t *testing.T) {
 			require.True(t, res.Success, res.Error)
 			require.Len(t, d.calls, 1)
 			assert.Equal(t, "/api/v1/knowledge/k2/reparse", d.calls[0].call.Path)
+			assert.Equal(t, map[string]any{
+				"operation": "knowledge.reparse", "area": "knowledge",
+				"ids": map[string][]string{"knowledge_id": {"k2"}},
+			}, res.Data["data_change"])
 			assert.Equal(t, []string{"p1"}, gate.executed)
 		})
 	}
@@ -621,4 +627,84 @@ func TestRunOperationAgentSkillsApproval(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRunOperationDataChangeDecodedIDs(t *testing.T) {
+	registry := modelcontext.NewRegistry(true)
+	kb := registry.RegisterKnowledgeBase("real-kb")
+	doc := registry.RegisterDocument("real-doc")
+	calls := []types.LLMToolCall{{Function: types.FunctionCall{
+		Name: ToolRunOperation,
+		Arguments: string(runArgs("knowledge.move_to_folder", map[string]any{
+			"knowledge_base_id": kb, "knowledge_ids": []string{doc}, "folder_path": "docs",
+		})),
+	}}}
+	registry.DecodeToolCalls(calls)
+	d := &fakeDispatcher{responses: map[string]*operations.Response{}}
+	op, ok := operations.Builtin().Get("knowledge.move_to_folder")
+	require.True(t, ok)
+	input, err := parseRunOperationInput(json.RawMessage(calls[0].Function.Arguments))
+	require.NoError(t, err)
+	call, err := op.Build(input.Params)
+	require.NoError(t, err)
+	d.responses[call.Method+" "+call.Path] = &operations.Response{
+		Status: http.StatusOK, Body: []byte(`{"success":true}`),
+	}
+	tool := newRunTool(d, nil)
+	tool.rt.Access.Level = types.AssistantAccessAutoWrite
+	result, err := tool.Execute(context.Background(), json.RawMessage(calls[0].Function.Arguments))
+	require.NoError(t, err)
+	require.True(t, result.Success, result.Error)
+	require.Len(t, d.calls, 1)
+	assert.Contains(t, string(d.calls[0].call.Body), "real-kb")
+	assert.Contains(t, string(d.calls[0].call.Body), "real-doc")
+	assert.Equal(t, map[string]any{
+		"operation": op.ID, "area": "knowledge",
+		"ids": map[string][]string{"knowledge_base_id": {"real-kb"}, "knowledge_id": {"real-doc"}},
+	}, result.Data["data_change"])
+	assert.NotContains(t, result.Output, "data_change")
+	assert.NotContains(t, registry.ModelToolResultForTool(ToolRunOperation, result), "data_change")
+}
+
+func TestRunOperationDataChangeCreatedIDsAndFailures(t *testing.T) {
+	for _, status := range []int{http.StatusCreated, http.StatusForbidden, http.StatusInternalServerError} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			d := &fakeDispatcher{responses: map[string]*operations.Response{
+				"POST /api/v1/agents": {Status: status, Body: []byte(`{"data":{"id":"created-agent"}}`)},
+			}}
+			tool := newRunTool(d, nil)
+			tool.rt.Access.Level = types.AssistantAccessAutoWrite
+			result, err := tool.Execute(context.Background(), runArgs("agent.create", map[string]any{"name": "Agent"}))
+			require.NoError(t, err)
+			if status != http.StatusCreated {
+				require.False(t, result.Success)
+				assert.Empty(t, result.Data)
+				return
+			}
+			require.True(t, result.Success, result.Error)
+			assert.Equal(t, map[string]any{
+				"operation": "agent.create", "area": "agent",
+				"ids": map[string][]string{"agent_id": {"created-agent"}},
+			}, result.Data["data_change"])
+		})
+	}
+}
+
+func TestOperationDataChangeSelectsOnlyResourceIDs(t *testing.T) {
+	op, ok := operations.Builtin().Get("knowledge.move")
+	require.True(t, ok)
+	input, err := parseRunOperationInput(runArgs(op.ID, map[string]any{
+		"knowledge_base_id": " destination ", "source_knowledge_base_id": "source",
+		"knowledge_ids": []string{"doc", "doc"}, "mode": "reuse_vectors",
+	}))
+	require.NoError(t, err)
+	_, err = op.Build(input.Params)
+	require.NoError(t, err)
+	change := operationDataChange(op, input.Params, operations.Projected{})
+	assert.Equal(t, map[string][]string{
+		"knowledge_base_id": {"source", "destination"}, "knowledge_id": {"doc"},
+	}, change["ids"])
+	create, ok := operations.Builtin().Get("agent.create")
+	require.True(t, ok)
+	assert.NotContains(t, operationDataChange(create, nil, operations.Projected{}), "ids")
 }
