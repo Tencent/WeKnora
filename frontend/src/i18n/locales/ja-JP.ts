@@ -6107,6 +6107,7 @@ export default {
       videoNotSupported: 'お使いのブラウザは動画再生に対応していません'
     },
     assistant: {
+      tasks: {"title": "バックグラウンドタスク（{count}）", "running": "実行中", "completed": "完了", "partial": "一部失敗", "failed": "失敗", "cancelled": "キャンセル済み", "unknown": "状態不明", "lifetime": "ページを開いている間に追跡します。再試行は状態の確認のみです。"},
       title: 'WeKnora アシスタント',
       newConversation: '新しい会話',
       history: '会話履歴',

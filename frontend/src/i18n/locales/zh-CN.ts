@@ -2124,6 +2124,7 @@ export default {
     askUser: '向用户提问'
   },
   assistant: {
+    tasks: {"title": "后台任务（{count}）", "running": "进行中", "completed": "已完成", "partial": "部分失败", "failed": "失败", "cancelled": "已取消", "unknown": "状态未知", "lifetime": "页面保持打开时跟踪；重试只查询状态，不会重新执行。"},
     title: 'WeKnora 助手',
     newConversation: '新对话',
     history: '历史对话',

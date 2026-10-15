@@ -2122,6 +2122,7 @@ export default {
     askUser: '사용자에게 질문'
   },
   assistant: {
+    tasks: {"title": "백그라운드 작업 ({count})", "running": "진행 중", "completed": "완료", "partial": "일부 실패", "failed": "실패", "cancelled": "취소됨", "unknown": "상태 알 수 없음", "lifetime": "페이지가 열려 있는 동안 추적합니다. 재시도는 상태만 확인합니다."},
     title: 'WeKnora 어시스턴트',
     newConversation: '새 대화',
     history: '대화 기록',

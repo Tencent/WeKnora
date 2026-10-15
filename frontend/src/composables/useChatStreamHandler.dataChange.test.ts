@@ -10,6 +10,9 @@ import { change, fixture } from '../test-utils/vueFixture.ts'
 
 function setup(t: TestContext) {
   const f = fixture(t)
+  const taskEvents = t.mock.fn()
+  f.window.addEventListener('weknora:assistant-task', taskEvents)
+  const taskModule = f.evaluate(readFileSync(new URL('../utils/assistantTasks.ts', import.meta.url), 'utf8'), {})
   const listener = t.mock.fn()
   f.window.addEventListener(f.dataChange.ASSISTANT_DATA_CHANGE_EVENT, listener)
   const { useChatStreamHandler } = f.evaluate(readFileSync(new URL('./useChatStreamHandler.ts', import.meta.url), 'utf8'), {
@@ -19,6 +22,7 @@ function setup(t: TestContext) {
     '@/utils/messageTimestamp': timestamps,
     '@/utils/steerStreamFork': steering,
     '@/utils/assistantDataChange': f.dataChange,
+    '@/utils/assistantTasks': taskModule,
   })
   const handler = useChatStreamHandler({
     messagesList: vue.reactive([]), loading: vue.ref(false), isReplying: vue.ref(false),
@@ -27,7 +31,7 @@ function setup(t: TestContext) {
   })
   handler.processStreamChunk({ response_type: 'agent_query', id: 'r1', assistant_message_id: 'a1' })
   handler.processStreamChunk({ response_type: 'tool_call', id: 'r1', data: { tool_call_id: 'call', tool_name: 'run_operation' } })
-  return { ...handler, listener }
+  return { ...handler, listener, taskEvents }
 }
 
 test('emits the normalized marker from a successful live SSE tool result', t => {
@@ -66,4 +70,15 @@ test('does not emit when loading history even if a legacy stored result contains
     }] }],
   }])
   assert.equal(handler.listener.mock.callCount(), 0)
+})
+
+test('live and restored successful built-in results restore async tracking', async t => {
+  const handler = setup(t)
+  const descriptor = {user_id:'u',tenant_id:1,session_id:'s',tasks:[{kind:'move',id:'t'}]}
+  handler.processStreamChunk({response_type:'tool_result',id:'r1',data:{tool_name:'run_operation',success:true,async_tasks:descriptor}})
+  assert.deepEqual(handler.taskEvents.mock.calls[0].arguments[0].detail, descriptor)
+  await handler.handleMsgList([{id:'old',role:'assistant',content:'',is_completed:true,agent_steps:[{iteration:0,tool_calls:[{
+    id:'old-call',name:'run_operation',args:{},result:{success:true,output:'submitted',data:{async_tasks:descriptor}},
+  }]}]}])
+  assert.equal(handler.taskEvents.mock.calls.filter(call => call.arguments[0].detail?.tasks).length, 2)
 })

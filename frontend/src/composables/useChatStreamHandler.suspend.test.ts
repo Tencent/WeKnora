@@ -8,6 +8,7 @@ import * as finalContent from '../utils/finalArtifactContent.ts'
 import * as history from '../utils/rag-pipeline-history.ts'
 import * as timestamps from '../utils/messageTimestamp.ts'
 import * as steering from '../utils/steerStreamFork.ts'
+import * as assistantTasks from '../utils/assistantTasks.ts'
 import * as dataChange from '../utils/assistantDataChange.ts'
 import type { useChatStreamHandler as StreamHandler } from './useChatStreamHandler.ts'
 
@@ -22,6 +23,7 @@ const modules: Record<string, unknown> = {
   '@/utils/messageTimestamp': timestamps,
   '@/utils/steerStreamFork': steering,
   '@/utils/assistantDataChange': dataChange,
+  '@/utils/assistantTasks': assistantTasks,
 }
 const exports: { useChatStreamHandler?: typeof StreamHandler } = {}
 vm.runInNewContext(compiled, {

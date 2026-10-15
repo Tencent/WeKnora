@@ -404,6 +404,16 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 	result := &types.ToolResult{Success: true, Output: string(out)}
 	if op.Risk.Mutates() {
 		result.Data = map[string]any{"data_change": operationDataChange(op, input.Params, projected)}
+		if tasks := operationTasks(op, input.Params, projected); len(tasks) > 0 {
+			if meta, ok := ToolExecFromContext(ctx); ok && meta.SessionID != "" {
+				result.Data["async_tasks"] = map[string]any{
+					"tasks": tasks, "session_id": meta.SessionID, "started_at": time.Now().UnixMilli(),
+					"call_id": meta.ToolCallID,
+					"user_id": identity.UserID, "tenant_id": identity.TenantID,
+					"change": operationDataChange(op, input.Params, projected),
+				}
+			}
+		}
 	}
 	return result, nil
 }

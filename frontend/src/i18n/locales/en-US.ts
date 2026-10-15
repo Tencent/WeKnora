@@ -6107,6 +6107,7 @@ export default {
       videoNotSupported: 'Your browser does not support video playback'
     },
     assistant: {
+      tasks: {"title": "Background tasks ({count})", "running": "Running", "completed": "Completed", "partial": "Partially failed", "failed": "Failed", "cancelled": "Cancelled", "unknown": "Status unknown", "lifetime": "Tracked while this page stays open. Retry checks status only."},
       title: 'WeKnora Assistant',
       newConversation: 'New conversation',
       history: 'Conversation history',

@@ -85,6 +85,7 @@ async function fixture(
     },
   })
   const component = evaluate(panelScript, {
+    '@/composables/useAssistantTasks': { useAssistantTasks: () => ({tasks: vue.ref([]), retry() {}}) },
     vue,
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
     'tdesign-vue-next': {

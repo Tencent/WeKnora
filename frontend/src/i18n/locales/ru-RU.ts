@@ -2122,6 +2122,7 @@ export default {
     askUser: 'Вопрос пользователю'
   },
   assistant: {
+    tasks: {"title": "Фоновые задачи ({count})", "running": "Выполняется", "completed": "Завершено", "partial": "Частичная ошибка", "failed": "Ошибка", "cancelled": "Отменено", "unknown": "Статус неизвестен", "lifetime": "Отслеживание, пока страница открыта. Повтор проверяет только статус."},
     title: 'Ассистент WeKnora',
     newConversation: 'Новый диалог',
     history: 'История диалогов',

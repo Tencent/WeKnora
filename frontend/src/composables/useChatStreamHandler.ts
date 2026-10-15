@@ -1,3 +1,4 @@
+import { emitAssistantTasks } from '@/utils/assistantTasks'
 import { emitAssistantDataChange } from '@/utils/assistantDataChange'
 import { applyFinalArtifactContent } from '@/utils/finalArtifactContent'
 import { markRaw, nextTick, type Ref } from 'vue'
@@ -454,6 +455,9 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
             if (toolCall.name === 'final_answer') return
             const result = toolCall.result as ChatMessage | undefined
             const resultData = result?.data as ChatMessage | undefined
+            if (toolCall.name === 'run_operation' && result?.success === true) {
+              emitAssistantTasks(resultData?.async_tasks)
+            }
             const target = toolCall.target as ChatMessage | undefined
             if (resultData?.display_type === 'ask_user') {
               events.push(askUserHistoryCard(String(toolCall.id || ''), resultData))
@@ -1009,6 +1013,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           const success = responseType !== 'error' && dataPayload.success !== false
           if (responseType === 'tool_result' && dataPayload.success === true && toolName === 'run_operation') {
             emitAssistantDataChange(dataPayload.data_change)
+            emitAssistantTasks(dataPayload.async_tasks)
           }
           log('[Tool Result]', {
             tool_call_id: toolCallId,

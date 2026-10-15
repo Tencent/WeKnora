@@ -38,6 +38,16 @@
       </t-tooltip>
     </header>
 
+    <div v-if="asyncTasks.length" class="assistant-panel__tasks" aria-live="polite">
+      <details>
+        <summary>{{ t('assistant.tasks.title', {count: asyncTasks.length}) }}</summary>
+        <div v-for="task in asyncTasks" :key="`${task.callId}:${task.kind}:${task.id}`">
+          <span>{{ task.operation }} · {{ t(`assistant.tasks.${task.state}`) }}</span>
+          <button v-if="task.state === 'unknown' && task.kind !== 'unknown'" type="button" @click="retryTask(task)">{{ t('common.retry') }}</button>
+        </div>
+        <small>{{ t('assistant.tasks.lifetime') }}</small>
+      </details>
+    </div>
     <div class="assistant-panel__body">
       <div v-if="showHistory" class="assistant-history">
         <div v-for="session in history" :key="session.id" class="assistant-history__row"
@@ -115,6 +125,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAssistantTasks } from '@/composables/useAssistantTasks'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
@@ -140,6 +151,7 @@ const { t } = useI18n()
 const assistant = useAssistantStore()
 const auth = useAuthStore()
 const conversationOwner = computed(() => `${auth.user?.id}:${auth.effectiveTenantId}`)
+const { tasks: asyncTasks, retry: retryTask } = useAssistantTasks(conversationOwner, computed(() => assistant.sessionId || ''))
 const assistantName = computed(() => assistant.displayName || t('assistant.title'))
 
 // Below this the page would be too cramped beside a docked panel, so the
@@ -672,4 +684,10 @@ html.has-assistant-dock {
     right: var(--assistant-dock-width);
   }
 }
+</style>
+
+<style scoped>
+.assistant-panel__tasks { padding: 8px 16px; border-bottom: 1px solid var(--td-component-border); font-size: 12px; max-height: 180px; overflow: auto; }
+.assistant-panel__tasks details > div { display: flex; gap: 8px; justify-content: space-between; padding-top: 6px; }
+.assistant-panel__tasks small { color: var(--td-text-color-secondary); }
 </style>

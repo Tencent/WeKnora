@@ -21,7 +21,7 @@ export function fixture(t: TestContext) {
   const window = Object.assign(new EventTarget(), { innerHeight: 900, innerWidth: 1200, setTimeout, clearTimeout })
   const storage = { getItem: () => null, setItem() {}, removeItem() {} }
   const globals = {
-    window, CustomEvent, setTimeout, clearTimeout, setInterval, clearInterval,
+    window, CustomEvent, AbortController, setTimeout, clearTimeout, setInterval, clearInterval,
     localStorage: storage, sessionStorage: storage,
     requestAnimationFrame: (callback: () => void) => setTimeout(callback, 16),
     document: { documentElement: { clientHeight: 900 }, querySelector: () => null },
