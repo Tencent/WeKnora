@@ -280,6 +280,50 @@ func assertFAQEnabledFilterContract(t *testing.T, data []byte, parse func([]byte
 	t.Fatal("GET FAQ entries does not document the is_enabled query parameter")
 }
 
+func TestManualKnowledgeContentCapContract(t *testing.T) {
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			assertManualKnowledgeContentCapContract(t, tt.loadSpec(t), tt.parse)
+		})
+	}
+}
+
+// The manual payload documents two different caps: the service-side rune limit
+// an operator can raise, and the assistant tool path's own byte ceiling. Both
+// must stay named in the published description, otherwise the advertised
+// contract contradicts what a deployment configured through
+// MANUAL_CONTENT_MAX_LENGTH actually accepts.
+func assertManualKnowledgeContentCapContract(
+	t *testing.T, data []byte, parse func([]byte, any) error,
+) {
+	t.Helper()
+	var spec struct {
+		Definitions map[string]struct {
+			Properties map[string]struct {
+				Description   string `json:"description" yaml:"description"`
+				AgentMaxBytes string `json:"x-agent-max-bytes" yaml:"x-agent-max-bytes"`
+			} `json:"properties" yaml:"properties"`
+		} `json:"definitions" yaml:"definitions"`
+	}
+	if err := parse(data, &spec); err != nil {
+		t.Fatalf("parse generated Swagger document: %v", err)
+	}
+
+	const manualPayloadDef = "github_com_Tencent_WeKnora_internal_types.ManualKnowledgePayload"
+	content, ok := spec.Definitions[manualPayloadDef].Properties["content"]
+	if !ok {
+		t.Fatal("generated Swagger omits the manual payload content field")
+	}
+	if content.AgentMaxBytes != "800000" {
+		t.Fatalf("content must keep the assistant byte cap, got %q", content.AgentMaxBytes)
+	}
+	for _, want := range []string{"MANUAL_CONTENT_MAX_LENGTH", "800000"} {
+		if !strings.Contains(content.Description, want) {
+			t.Errorf("content description must name %q, got %q", want, content.Description)
+		}
+	}
+}
+
 func swaggerInteger(value any) int {
 	switch number := value.(type) {
 	case int:
