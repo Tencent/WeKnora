@@ -132,6 +132,74 @@ func TestReadWeKnoraDocBoundsLongPagesAndSections(t *testing.T) {
 	assert.Equal(t, true, out["truncated"])
 	assert.LessOrEqual(t, len([]rune(out["content"].(string))), maxDocReadRunes)
 	assert.Len(t, out["outline"].([]any), 2, "the outline lists the cut section's own subsections")
+	assert.EqualValues(t, maxDocReadRunes, out["next_offset"])
+}
+
+// A long section with no subsections, such as a reference table, must be
+// readable to its end by following next_offset, each piece ending at a line.
+func TestReadWeKnoraDocPagesThroughALeafSection(t *testing.T) {
+	var rows strings.Builder
+	rows.WriteString("| 字段 | 说明 |\n| --- | --- |")
+	for i := 0; rows.Len() < 4*maxDocReadRunes; i++ {
+		rows.WriteString("\n| field_" + strings.Repeat("x", i%7) + " | 一行说明文字，用来把表格撑长。 |")
+	}
+	table := rows.String()
+	lib, err := productdocs.Load(fstest.MapFS{
+		"03-features/06-models.md": {Data: []byte("# 模型\n\n## 字段参考\n\n" + table + "\n")},
+	})
+	require.NoError(t, err)
+	tool := NewReadWeKnoraDocTool(lib)
+
+	var got []string
+	offset := 0
+	for reads := 0; ; reads++ {
+		require.Less(t, reads, 10)
+		args, _ := json.Marshal(map[string]any{"path": "03-features/06-models", "anchor": "字段参考", "offset": offset})
+		res, err := tool.Execute(context.Background(), args)
+		require.NoError(t, err)
+		require.True(t, res.Success, res.Error)
+		out := decodeDocsOutput(t, res.Output)
+		content := out["content"].(string)
+		assert.LessOrEqual(t, len([]rune(content)), maxDocReadRunes)
+		got = append(got, content)
+		next, ok := out["next_offset"].(float64)
+		if !ok {
+			break
+		}
+		assert.True(t, strings.HasSuffix(content, "|\n"), "a cut ends at a whole table row")
+		assert.NotContains(t, out, "outline", "a leaf section has no subsections to offer")
+		offset = int(next)
+	}
+	require.Greater(t, len(got), 1)
+	assert.Equal(t, "## 字段参考\n\n"+table, strings.Join(got, ""))
+
+	res, err := tool.Execute(context.Background(),
+		json.RawMessage(`{"path":"03-features/06-models","anchor":"字段参考","offset":999999}`))
+	require.NoError(t, err)
+	assert.False(t, res.Success)
+}
+
+func TestReadWeKnoraDocFollowsTheOutputBudget(t *testing.T) {
+	tool := NewReadWeKnoraDocTool(testDocsLibrary(t))
+	ctx := WithOutputBudget(context.Background(), 2500)
+	res, err := tool.Execute(ctx, json.RawMessage(`{"path":"01-getting-started/04-configuration","anchor":"很长的一节"}`))
+	require.NoError(t, err)
+	out := decodeDocsOutput(t, res.Output)
+	assert.Len(t, []rune(out["content"].(string)), 2000)
+	assert.EqualValues(t, 2000, out["next_offset"])
+}
+
+func TestReadWeKnoraDocAcceptsPercentEncodedAnchors(t *testing.T) {
+	tool := NewReadWeKnoraDocTool(testDocsLibrary(t))
+	for _, args := range []string{
+		`{"path":"03-features/14-wiki","anchor":"%E6%80%8E%E4%B9%88%E5%BC%80%E5%90%AF"}`,
+		`{"path":"` + productdocs.PublicBaseURL + `03-features/14-wiki#%E6%80%8E%E4%B9%88%E5%BC%80%E5%90%AF"}`,
+	} {
+		res, err := tool.Execute(context.Background(), json.RawMessage(args))
+		require.NoError(t, err)
+		require.True(t, res.Success, args)
+		assert.Equal(t, "怎么开启", decodeDocsOutput(t, res.Output)["anchor"], args)
+	}
 }
 
 func TestReadWeKnoraDocRejectsUnknownTargets(t *testing.T) {

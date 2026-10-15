@@ -480,15 +480,19 @@ func (s *agentService) registerOperationTools(
 }
 
 // registerProductDocTools gives a granted run the documentation bundled with
-// the server. A failure to load it withholds the tools rather than the run.
+// the server. Pages that fail to load are left out; only a library with no
+// pages at all withholds the tools, and never the run.
 func registerProductDocTools(ctx context.Context, toolRegistry *tools.ToolRegistry, config *types.AgentConfig) {
 	if config == nil || !config.ProductDocs {
 		return
 	}
 	lib, err := productdocs.Default()
-	if err != nil {
+	if lib == nil {
 		logger.Warnf(ctx, "WeKnora documentation tools withheld: %v", err)
 		return
+	}
+	if err != nil {
+		logger.Warnf(ctx, "WeKnora documentation pages left out: %v", err)
 	}
 	toolRegistry.RegisterTool(tools.NewSearchWeKnoraDocsTool(lib))
 	toolRegistry.RegisterTool(tools.NewReadWeKnoraDocTool(lib))

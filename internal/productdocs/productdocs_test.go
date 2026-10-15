@@ -147,9 +147,31 @@ func TestNormalizeRefAcceptsSiteForms(t *testing.T) {
 		assert.Equal(t, "03-features/14-wiki", p, ref)
 		assert.Empty(t, anchor, ref)
 	}
-	p, anchor := normalizeRef(PublicBaseURL + "03-features/14-wiki#抽取粒度")
-	assert.Equal(t, "03-features/14-wiki", p)
-	assert.Equal(t, "抽取粒度", anchor)
+	for _, ref := range []string{
+		PublicBaseURL + "03-features/14-wiki#抽取粒度",
+		PublicBaseURL + "03-features/14-wiki#%E6%8A%BD%E5%8F%96%E7%B2%92%E5%BA%A6",
+		"http://weknora.weixin.qq.com/docs/03-features/14-wiki#抽取粒度",
+	} {
+		p, anchor := normalizeRef(ref)
+		assert.Equal(t, "03-features/14-wiki", p, ref)
+		assert.Equal(t, "抽取粒度", anchor, ref)
+	}
+}
+
+func TestLoadLeavesOutBrokenPages(t *testing.T) {
+	lib, err := Load(fstest.MapFS{
+		"03-features/14-wiki.md":   {Data: []byte(samplePage)},
+		"03-features/99-broken.md": {Data: []byte("# 坏页\n\n```go\nunterminated\n")},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "99-broken.md")
+	require.NotNil(t, lib, "the pages that parse stay available")
+	assert.Len(t, lib.Docs(""), 1)
+	assert.NotEmpty(t, lib.Search("抽取粒度", "", 1))
+
+	lib, err = Load(fstest.MapFS{"03-features/99-broken.md": {Data: []byte("no title\n")}})
+	assert.Error(t, err)
+	assert.Nil(t, lib)
 }
 
 func TestLoadAndSearch(t *testing.T) {

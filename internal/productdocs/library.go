@@ -4,9 +4,11 @@
 package productdocs
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"math"
+	"net/url"
 	"path"
 	"sort"
 	"strings"
@@ -73,14 +75,19 @@ var (
 )
 
 // Default returns the library built from the pages embedded in the binary.
+// As with Load, a non-nil library may come with an error naming the pages
+// left out.
 func Default() (*Library, error) {
 	defaultOnce.Do(func() { defaultLib, defaultErr = Load(websitedocs.Pages) })
 	return defaultLib, defaultErr
 }
 
-// Load parses every category's pages in fsys.
+// Load parses every category's pages in fsys. A page that cannot be read or
+// parsed is left out and reported in the error, alongside a library of the
+// remaining pages, so one broken page does not take the others with it.
 func Load(fsys fs.FS) (*Library, error) {
 	lib := &Library{byPath: map[string]*Doc{}, df: map[string]int{}}
+	var pageErrs []error
 	for _, cat := range Categories {
 		names, err := fs.Glob(fsys, cat.Dir+"/*.md")
 		if err != nil {
@@ -90,24 +97,26 @@ func Load(fsys fs.FS) (*Library, error) {
 		for _, name := range names {
 			raw, err := fs.ReadFile(fsys, name)
 			if err != nil {
-				return nil, err
+				pageErrs = append(pageErrs, err)
+				continue
 			}
 			doc, err := parseDoc(name, cat.Label, string(raw))
 			if err != nil {
-				return nil, err
+				pageErrs = append(pageErrs, err)
+				continue
 			}
 			lib.add(doc)
 		}
 	}
 	if len(lib.docs) == 0 {
-		return nil, fmt.Errorf("no documentation pages found")
+		return nil, errors.Join(append(pageErrs, fmt.Errorf("no documentation pages found"))...)
 	}
 	total := 0
 	for _, s := range lib.sections {
 		total += s.length
 	}
 	lib.avgLen = float64(total) / float64(len(lib.sections))
-	return lib, nil
+	return lib, errors.Join(pageErrs...)
 }
 
 func (l *Library) add(doc *Doc) {
@@ -195,16 +204,26 @@ func inCategory(d *Doc, category string) bool {
 
 // normalizeRef accepts "03-features/14-wiki", "03-features/14-wiki.md",
 // "/docs/03-features/14-wiki" or the public URL, each with an optional
-// "#anchor".
+// "#anchor" that may be percent-encoded as a browser copies it.
 func normalizeRef(ref string) (string, string) {
 	ref = strings.TrimSpace(ref)
 	ref, anchor, _ := strings.Cut(ref, "#")
 	ref = strings.TrimPrefix(ref, PublicBaseURL)
+	ref = strings.TrimPrefix(ref, "http://"+strings.TrimPrefix(PublicBaseURL, "https://"))
 	ref = strings.TrimPrefix(ref, "/")
 	ref = strings.TrimPrefix(ref, "docs/")
 	ref = strings.TrimSuffix(strings.TrimSuffix(ref, "/"), ".md")
 	ref = strings.TrimSuffix(ref, ".html")
-	return path.Clean(ref), anchor
+	return path.Clean(ref), UnescapeAnchor(anchor)
+}
+
+// UnescapeAnchor decodes a percent-encoded anchor, leaving one that is not
+// valid encoding as given.
+func UnescapeAnchor(anchor string) string {
+	if decoded, err := url.PathUnescape(anchor); err == nil {
+		return decoded
+	}
+	return anchor
 }
 
 // tokenize lowercases text into words: runs of letters and digits, kept
