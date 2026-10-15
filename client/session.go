@@ -37,12 +37,14 @@ type SummaryConfig struct {
 // Sessions are now knowledge-base-independent and serve as conversation containers.
 // All configuration comes from custom agent at query time.
 type CreateSessionRequest struct {
+	Kind        string `json:"kind,omitempty"`
 	Title       string `json:"title"`       // Session title (optional)
 	Description string `json:"description"` // Session description (optional)
 }
 
 // Session session information
 type Session struct {
+	Kind        string `json:"kind"`
 	ID          string `json:"id"`
 	TenantID    uint64 `json:"tenant_id"`
 	Title       string `json:"title"`
@@ -97,11 +99,21 @@ func (c *Client) GetSession(ctx context.Context, sessionID string) (*Session, er
 	return &response.Data, nil
 }
 
-// GetSessionsByTenant gets all sessions for a tenant
-func (c *Client) GetSessionsByTenant(ctx context.Context, page int, pageSize int) ([]Session, int, error) {
+// SessionListOptions keeps assistant history opt-in for existing callers.
+type SessionListOptions struct {
+	Kind string
+}
+
+// GetSessionsByTenant gets normal sessions unless an explicit kind is requested.
+func (c *Client) GetSessionsByTenant(
+	ctx context.Context, page int, pageSize int, opts ...SessionListOptions,
+) ([]Session, int, error) {
 	queryParams := url.Values{}
 	queryParams.Add("page", strconv.Itoa(page))
 	queryParams.Add("page_size", strconv.Itoa(pageSize))
+	if len(opts) > 0 {
+		queryParams.Set("kind", opts[0].Kind)
+	}
 	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/sessions", nil, queryParams)
 	if err != nil {
 		return nil, 0, err

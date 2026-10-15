@@ -6107,6 +6107,11 @@ export default {
     assistant: {
       title: 'WeKnora Assistant',
       newConversation: 'New conversation',
+      history: 'Conversation history',
+      untitledConversation: 'Untitled conversation',
+      historyEmpty: 'No conversations yet',
+      historyFailed: 'Failed to load conversation history',
+      loadMore: 'Load more',
       resize: 'Resize assistant',
       layout: {
         dock: 'Dock to the side',

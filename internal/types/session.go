@@ -74,6 +74,14 @@ type ContextConfig struct {
 	SummarizeThreshold int `json:"summarize_threshold"`
 }
 
+// SessionKindAssistant keeps assistant conversations out of ordinary chat listings.
+const SessionKindAssistant = "assistant"
+
+// IsValidSessionKind restricts API kinds to ordinary chats (empty) and assistant history.
+func IsValidSessionKind(kind string) bool {
+	return kind == "" || kind == SessionKindAssistant
+}
+
 // Session represents the session
 type Session struct {
 	// ID
@@ -84,6 +92,9 @@ type Session struct {
 	Description string `json:"description"`
 	// Workspace ID
 	TenantID uint64 `json:"tenant_id"   gorm:"index"`
+	// Kind is empty for ordinary chats and SessionKindAssistant for assistant
+	// conversations; it is set at creation and never updated.
+	Kind string `json:"kind" gorm:"column:kind;type:varchar(32);not null;default:''"`
 	// UserID is the owner scope for this session. WeKnora user UUIDs, API
 	// external-user principals, and embed visitor principals all use this column.
 	UserID string `json:"user_id,omitempty" gorm:"type:varchar(512);index"`
@@ -267,6 +278,7 @@ func SanitizeClientSessionDescription(incoming, existing string) string {
 // (e.g. "feishu", "wechat"). IM and embed sources are also Admin+ only.
 // AgentID currently only filters sessions that have an IM channel mapping.
 type SessionListQuery struct {
+	Kind     string
 	TenantID uint64
 	UserID   string
 	Keyword  string

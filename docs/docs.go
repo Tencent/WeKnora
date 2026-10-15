@@ -15615,6 +15615,15 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "enum": [
+                            "assistant"
+                        ],
+                        "type": "string",
+                        "description": "会话类型：空值仅普通会话；assistant 仅当前用户的助手会话",
+                        "name": "kind",
+                        "in": "query"
+                    },
+                    {
                         "type": "string",
                         "description": "标题模糊搜索",
                         "name": "keyword",
@@ -15658,7 +15667,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "创建新的对话会话",
+                "description": "创建新的对话会话。\nkind 为空时为普通会话，assistant 为助手会话。",
                 "consumes": [
                     "application/json"
                 ],
@@ -30067,6 +30076,9 @@ const docTemplate = `{
                     "description": "IsPinned indicates whether the session is pinned in the list.",
                     "type": "boolean"
                 },
+                "kind": {
+                    "type": "string"
+                },
                 "last_request_state": {
                     "description": "LastRequestState records the input-bar state used the last time this\nsession sent a question (agent, model, KB scope, web search, MCPs).\nPersisted on every successful POST to /knowledge-chat or /agent-chat so\nthat reopening the session can restore the original request context to\nthe chat UI. Stored in the legacy sessions.agent_config JSONB column to\navoid a new migration; the shape used today is ` + "`" + `SessionLastRequestState` + "`" + `.",
                     "allOf": [
@@ -37025,6 +37037,13 @@ const docTemplate = `{
                 "description": {
                     "description": "Description for the session (optional)",
                     "type": "string"
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "",
+                        "assistant"
+                    ]
                 },
                 "project_dir": {
                     "description": "ProjectDir is an optional Lite host-sandbox binding. When set it must\nbe an absolute path already present in the user-approved ProjectDirs\nlist. Empty means the session gets an auto-allocated workspace.",

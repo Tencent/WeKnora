@@ -6831,6 +6831,8 @@ definitions:
       is_pinned:
         description: IsPinned indicates whether the session is pinned in the list.
         type: boolean
+      kind:
+        type: string
       last_request_state:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SessionLastRequestState'
@@ -12004,6 +12006,11 @@ definitions:
     properties:
       description:
         description: Description for the session (optional)
+        type: string
+      kind:
+        enum:
+        - ""
+        - assistant
         type: string
       project_dir:
         description: |-
@@ -22031,6 +22038,12 @@ paths:
         in: query
         name: page_size
         type: integer
+      - description: 会话类型：空值仅普通会话；assistant 仅当前用户的助手会话
+        enum:
+        - assistant
+        in: query
+        name: kind
+        type: string
       - description: 标题模糊搜索
         in: query
         name: keyword
@@ -22065,7 +22078,9 @@ paths:
     post:
       consumes:
       - application/json
-      description: 创建新的对话会话
+      description: |-
+        创建新的对话会话。
+        kind 为空时为普通会话，assistant 为助手会话。
       parameters:
       - description: 会话创建请求
         in: body

@@ -6107,6 +6107,11 @@ export default {
     assistant: {
       title: 'WeKnora アシスタント',
       newConversation: '新しい会話',
+      history: '会話履歴',
+      untitledConversation: '無題の会話',
+      historyEmpty: '会話履歴はありません',
+      historyFailed: '会話履歴を読み込めませんでした',
+      loadMore: 'さらに読み込む',
       resize: 'アシスタントの幅を調整',
       layout: {
         dock: '右側に固定',

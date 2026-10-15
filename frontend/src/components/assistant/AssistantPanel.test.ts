@@ -12,6 +12,7 @@ const filename = fileURLToPath(new URL('./AssistantPanel.vue', import.meta.url))
 const { descriptor } = parse(readFileSync(filename, 'utf8'), { filename })
 const panelScript = compileScript(descriptor, { id: 'assistant-panel-test', inlineTemplate: true }).content
 const storeScript = readFileSync(new URL('../../stores/assistant.ts', import.meta.url), 'utf8')
+const groupingScript = readFileSync(new URL('../sessionGrouping.ts', import.meta.url), 'utf8')
 const assistantApiScript = readFileSync(new URL('../../api/assistant.ts', import.meta.url), 'utf8')
 
 function evaluate(source: string, dependencies: Record<string, unknown>, globals = {}) {
@@ -43,8 +44,9 @@ const flush = async () => {
 }
 
 async function fixture(
-  createSession = async () => ({ data: { id: 'new-session' } }),
+  createSession: (data?: any) => Promise<any> = async () => ({ data: { id: 'new-session' } }),
   workspaceConfig = { display_name: '', max_access_level: 'confirm' },
+  api: Record<string, (...args: any[]) => Promise<any>> = {},
 ) {
   const auth = vue.reactive({ user: { id: 'user-a' }, effectiveTenantId: 1 })
   const assistantApi = evaluate(assistantApiScript, {
@@ -63,6 +65,10 @@ async function fixture(
   const mounted: Array<{ sessionId: string; query: string }> = []
   const sent: Array<{ sessionId: string; query: string; scope: any }> = []
   const menuEntries: unknown[] = []
+  const errors: string[] = []
+  const dialogs: any[] = []
+  const listCalls: any[][] = []
+  const deleted: string[] = []
   const emptyComponent = vue.defineComponent({ inheritAttrs: false, render: () => null })
   const ChatView = vue.defineComponent({
     inheritAttrs: false,
@@ -81,21 +87,38 @@ async function fixture(
   const component = evaluate(panelScript, {
     vue,
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
-    'tdesign-vue-next': { MessagePlugin: { error: assert.fail } },
+    'tdesign-vue-next': {
+      MessagePlugin: { error: (message: string) => errors.push(message) },
+      DialogPlugin: { confirm: (options: any) => { dialogs.push(options); return { destroy() {} } } },
+    },
     '@/views/chat/index.vue': ChatView,
     '@/components/Input-field.vue': emptyComponent,
     '@/components/PanelResizeHandle.vue': emptyComponent,
     './AssistantContextChip.vue': emptyComponent,
     './AssistantAccessPicker.vue': emptyComponent,
-    '@/api/chat': { createSessions: createSession },
+    '@/api/chat': {
+      createSessions: createSession,
+      getSession: api.getSession || (async () => ({ success: true, data: {} })),
+      getSessionsList: async (...args: any[]) => {
+        listCalls.push(args)
+        return api.getSessionsList ? api.getSessionsList(...args) : { success: true, data: [], total: 0 }
+      },
+    },
+    '@/components/sessionGrouping': evaluate(groupingScript, {}),
     '@/api/agent': { BUILTIN_WEKNORA_ASSISTANT_ID: 'builtin-weknora-assistant' },
     '@/stores/menu': { useMenuStore: () => ({ updataMenuChildren: (entry: unknown) => menuEntries.push(entry) }) },
     '@/stores/auth': { useAuthStore: () => auth },
     '@/stores/assistant': stores,
-    '@/components/sessionMutations': { SESSION_MUTATION_EVENT: 'session-mutation' },
+    '@/components/sessionMutations': {
+      SESSION_MUTATION_EVENT: 'session-mutation',
+      removeSession: async (id: string) => {
+        if (api.removeSession) await api.removeSession(id)
+        deleted.push(id)
+      },
+    },
   }, { window: { addEventListener() {}, removeEventListener() {} } }).default
-  type HostNode = { children: HostNode[]; parent?: HostNode }
-  const node = (): HostNode => ({ children: [] })
+  type HostNode = { children: HostNode[]; parent?: HostNode; tag?: string; props: Record<string, any>; style: Record<string, any>; text?: string }
+  const node = (tag?: string): HostNode => ({ children: [], tag, props: {}, style: {} })
   const remove = (child: HostNode) => {
     if (child.parent) child.parent.children.splice(child.parent.children.indexOf(child), 1)
     child.parent = undefined
@@ -108,17 +131,37 @@ async function fixture(
       parent.children.splice(index < 0 ? parent.children.length : index, 0, child)
       child.parent = parent
     },
-    remove, setElementText() {}, setText() {}, patchProp() {},
+    remove, setElementText(node, text) { node.text = text }, setText(node, text) { node.text = text },
+    patchProp(node, key, _prev, next) { node.props[key] = next },
     parentNode: child => child.parent ?? null,
     nextSibling: child => child.parent?.children[child.parent.children.indexOf(child) + 1] ?? null,
   })
   const app = renderer.createApp(component)
   app.use(storeRoot)
   // The panel keeps its content mounted while hidden, which is essential to this regression.
-  for (const name of ['t-tooltip', 't-icon']) app.component(name, emptyComponent)
-  app.mount(node())
+  app.component('t-icon', emptyComponent)
+  app.component('t-loading', emptyComponent)
+  app.component('t-tooltip', vue.defineComponent({ inheritAttrs: false, setup: (_, { slots }) => () => slots.default?.() }))
+  app.component('t-button', vue.defineComponent({ setup: (_, { slots }) => () => vue.h('button', slots.default?.()) }))
+  const root = node()
+  app.mount(root)
+  const findAll = (predicate: (node: HostNode) => boolean): HostNode[] => {
+    const found: HostNode[] = []
+    const walk = (node: HostNode) => {
+      if (predicate(node)) found.push(node)
+      node.children.forEach(walk)
+    }
+    walk(root)
+    return found
+  }
+  const click = async (label: string) => {
+    const button = findAll(node => node.props['aria-label'] === label)[0]
+    assert.ok(button, `missing button ${label}`)
+    button.props.onClick()
+    await flush()
+  }
   await flush()
-  return { auth, assistant, mounted, sent, menuEntries, sessionStorage, localStorage, close: () => app.unmount() }
+  return { auth, assistant, mounted, sent, menuEntries, sessionStorage, localStorage, findAll, click, listCalls, deleted, dialogs, errors, close: () => app.unmount() }
 }
 
 test('layout and width persist, with the width kept within bounds', async () => {
@@ -201,5 +244,154 @@ test('session creation finishing after a workspace switch cannot replace the res
     assert.equal(f.sessionStorage.getItem('weknora:assistant-session:user-a:2'), 'workspace-b-session')
     assert.equal(f.sent.length, 0)
     assert.equal(f.menuEntries.length, 0)
+  } finally { f.close() }
+})
+
+test('assistant creation marks the kind and never inserts a sidebar entry', async () => {
+  const requests: any[] = []
+  const f = await fixture(async body => {
+    requests.push(body)
+    return { data: { id: 'assistant-session' } }
+  })
+  try {
+    f.assistant.open({ query: 'Help me' })
+    await flush()
+    assert.equal(requests.length, 1)
+    assert.equal(requests[0].kind, 'assistant')
+    assert.equal(f.menuEntries.length, 0)
+    assert.equal(f.sent[0].sessionId, 'assistant-session')
+  } finally { f.close() }
+})
+
+test('history loads, paginates, highlights and switches the current session', async () => {
+  const f = await fixture(undefined, undefined, {
+    getSessionsList: async page => ({
+      success: true, total: 21,
+      data: Array.from({ length: page === 1 ? 20 : 1 }, (_, i) => ({
+        id: `history-${(page - 1) * 20 + i}`, title: '', updated_at: new Date().toISOString(),
+      })),
+    }),
+  })
+  try {
+    f.assistant.setSession('history-0')
+    await flush()
+    await f.click('assistant.history')
+    assert.deepEqual(f.listCalls[0], [1, 20, undefined, 'assistant'])
+    assert.equal(f.mounted.length, 1, 'history keeps the current transcript mounted')
+    assert.equal(f.findAll(n => n.props.class?.includes('is-current')).length, 1)
+    assert.equal(f.findAll(n => n.text === 'assistant.untitledConversation').length, 20)
+    const loadMore = f.findAll(n => n.tag === 'button' && n.props.onClick && n.props.variant === 'text')[0]
+    loadMore.props.onClick()
+    await flush()
+    assert.deepEqual(f.listCalls[1], [2, 20, undefined, 'assistant'])
+    const rows = f.findAll(n => n.props.class === 'assistant-history__select')
+    assert.equal(rows.length, 21)
+    rows[20].props.onClick()
+    await flush()
+    assert.equal(f.assistant.sessionId, 'history-20')
+    assert.equal(f.mounted.at(-1)?.sessionId, 'history-20')
+    assert.equal(f.sent.length, 0)
+  } finally { f.close() }
+})
+
+test('deleting the current history session requires confirmation and returns to welcome', async () => {
+  const f = await fixture(undefined, undefined, {
+    getSessionsList: async () => ({ success: true, total: 1, data: [{ id: 'current', title: 'Current' }] }),
+  })
+  try {
+    f.assistant.setSession('current')
+    await flush()
+    await f.click('assistant.history')
+    await f.click('common.delete')
+    assert.equal(f.deleted.length, 0)
+    await f.dialogs[0].onConfirm()
+    await flush()
+    assert.deepEqual(f.deleted, ['current'])
+    assert.equal(f.assistant.sessionId, '')
+    assert.equal(f.sessionStorage.getItem('weknora:assistant-session:user-a:1'), null)
+    assert.equal(f.findAll(n => n.props.class === 'assistant-welcome').length, 1)
+  } finally { f.close() }
+})
+
+for (const status of [403, 404, 500]) {
+  test(`stored session load with HTTP ${status} handles stale ids without mounting a transcript`, async () => {
+    const f = await fixture(undefined, undefined, {
+      getSession: async () => { throw { $httpStatus: status } },
+    })
+    try {
+      f.auth.effectiveTenantId = 2
+      await flush()
+      assert.equal(f.assistant.sessionId, status === 500 ? 'workspace-b-session' : '')
+      assert.equal(f.mounted.length, 0)
+      if (status === 500) assert.equal(f.findAll(n => n.props.role === 'alert').length, 1)
+    } finally { f.close() }
+  })
+}
+
+test('history distinguishes empty and failed loads and retries the same page', async () => {
+  let failed = true
+  const f = await fixture(undefined, undefined, {
+    getSessionsList: async () => {
+      if (failed) throw new Error('offline')
+      return { success: true, total: 0, data: [] }
+    },
+  })
+  try {
+    await f.click('assistant.history')
+    assert.equal(f.findAll(n => n.props.role === 'alert').length, 1)
+    failed = false
+    f.findAll(n => n.tag === 'button' && n.props.variant === 'text')[0].props.onClick()
+    await flush()
+    assert.equal(f.listCalls[1][0], 1)
+    assert.equal(f.findAll(n => n.text === 'assistant.historyEmpty').length, 1)
+  } finally { f.close() }
+})
+
+test('a history response from the previous workspace is discarded', async () => {
+  let resolve!: (value: any) => void
+  const f = await fixture(undefined, undefined, {
+    getSessionsList: () => new Promise(done => { resolve = done }),
+  })
+  try {
+    await f.click('assistant.history')
+    f.auth.effectiveTenantId = 2
+    await flush()
+    resolve({ success: true, total: 1, data: [{ id: 'private' }] })
+    await flush()
+    assert.equal(f.findAll(n => n.props.class === 'assistant-history__select').length, 0)
+    assert.equal(f.assistant.sessionId, 'workspace-b-session')
+  } finally { f.close() }
+})
+
+test('failed history deletion retains the conversation and reports the error', async () => {
+  const f = await fixture(undefined, undefined, {
+    getSessionsList: async () => ({ success: true, total: 1, data: [{ id: 'current' }] }),
+    removeSession: async () => { throw new Error('offline') },
+  })
+  try {
+    f.assistant.setSession('current')
+    await flush()
+    await f.click('assistant.history')
+    await f.click('common.delete')
+    await f.dialogs[0].onConfirm()
+    await flush()
+    assert.equal(f.assistant.sessionId, 'current')
+    assert.deepEqual(f.errors, ['chat.deleteSessionFailed'])
+    assert.equal(f.findAll(n => n.props.class === 'assistant-history__select').length, 1)
+  } finally { f.close() }
+})
+
+test('a pending delete confirmation cannot delete a session after switching workspaces', async () => {
+  const f = await fixture(undefined, undefined, {
+    getSessionsList: async () => ({ success: true, total: 1, data: [{ id: 'old' }] }),
+  })
+  try {
+    await f.click('assistant.history')
+    await f.click('common.delete')
+    f.auth.effectiveTenantId = 2
+    await flush()
+    await f.dialogs[0].onConfirm()
+    assert.deepEqual(f.deleted, [])
+    assert.equal(f.assistant.sessionId, 'workspace-b-session')
   } finally { f.close() }
 })

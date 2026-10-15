@@ -13,10 +13,11 @@
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `title` | string | 否 | 标题 |
+| `kind` | string | 否 | 空值（默认）为普通会话；`assistant` 为 WeKnora 助手会话；其他值返回 400 |
 | `description` | string | 否 | 描述 |
 | `project_dir` | string | 否 | 仅桌面版：把会话绑定到用户已批准的本机项目目录（绝对路径，须与批准列表完全一致），否则返回 400 |
 
-响应：201 `{"success":true,"data":{Session}}`（`id,title,description,tenant_id,user_id,is_pinned,last_request_state,created_at,...`）
+响应：201 `{"success":true,"data":{Session}}`（`id,kind,title,description,tenant_id,user_id,is_pinned,last_request_state,created_at,...`）
 
 ```bash
 curl -X POST $BASE/api/v1/sessions -H "X-API-Key: $API_KEY" \
@@ -31,6 +32,7 @@ curl -X POST $BASE/api/v1/sessions -H "X-API-Key: $API_KEY" \
 | --- | --- | --- | --- |
 | `page` / `page_size` | int | 否 | 分页 |
 | `keyword` | string | 否 | 标题模糊搜索 |
+| `kind` | string | 否 | 缺省或空值仅返回普通会话，适用于所有来源；`assistant` 仅返回调用者本人的助手会话（管理员也不能跨用户），按 `updated_at DESC` 排序；其他值返回 400 |
 | `source` | string | 否 | 来源过滤（web/embed/api/feishu/wechat/slack/...） |
 | `agent_id` | string | 否 | 按 Agent 过滤（IM 会话） |
 
@@ -73,7 +75,7 @@ curl -X DELETE $BASE/api/v1/sessions/s-1 -H "Authorization: Bearer $TOKEN"
 
 ### DELETE /api/v1/sessions/batch
 
-用途：批量删除会话。请求体：`{"ids":["s-1"],"delete_all":false}`（二选一：`ids` 或 `delete_all:true`）。
+用途：批量删除会话。`delete_all:true` 保留助手会话；指定 ID 删除仍按原有归属规则处理。请求体：`{"ids":["s-1"],"delete_all":false}`（二选一：`ids` 或 `delete_all:true`）。
 
 响应：200 `{"success":true,"message":"Sessions deleted successfully"}`
 

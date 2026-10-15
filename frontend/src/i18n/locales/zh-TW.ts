@@ -2053,6 +2053,11 @@ export default {
   assistant: {
     title: 'WeKnora 助手',
     newConversation: '新對話',
+    history: '歷史對話',
+    untitledConversation: '未命名對話',
+    historyEmpty: '尚無歷史對話',
+    historyFailed: '無法載入歷史對話',
+    loadMore: '載入更多',
     resize: '調整助手寬度',
     layout: {
       dock: '固定在右側',

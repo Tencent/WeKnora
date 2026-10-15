@@ -387,7 +387,7 @@ func (r *messageRepository) SearchMessagesByKeyword(
 		Table("messages").
 		Select("messages.*, sessions.title as session_title").
 		Joins("INNER JOIN sessions ON sessions.id = messages.session_id AND sessions.deleted_at IS NULL").
-		Where("sessions.tenant_id = ?", tenantID).
+		Where("sessions.tenant_id = ? AND sessions.kind = ''", tenantID).
 		Where("messages.deleted_at IS NULL").
 		Where(contentLikeExpr, "%"+escapeLikeKeyword(keyword)+"%", likeEscapeChar)
 
@@ -427,7 +427,7 @@ func (r *messageRepository) OwnedSessionIDs(
 	query := r.db.WithContext(ctx).
 		Table("sessions").
 		Select("id").
-		Where("tenant_id = ?", tenantID).
+		Where("tenant_id = ? AND kind = ''", tenantID).
 		Where("deleted_at IS NULL").
 		Where("id IN ?", sessionIDs)
 	if ownerID != "" {

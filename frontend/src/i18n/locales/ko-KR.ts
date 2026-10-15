@@ -2051,6 +2051,11 @@ export default {
   assistant: {
     title: 'WeKnora 어시스턴트',
     newConversation: '새 대화',
+    history: '대화 기록',
+    untitledConversation: '제목 없는 대화',
+    historyEmpty: '아직 대화 기록이 없습니다',
+    historyFailed: '대화 기록을 불러오지 못했습니다',
+    loadMore: '더 불러오기',
     resize: '어시스턴트 너비 조정',
     layout: {
       dock: '오른쪽에 고정',

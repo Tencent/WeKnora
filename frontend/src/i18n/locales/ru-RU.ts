@@ -2051,6 +2051,11 @@ export default {
   assistant: {
     title: 'Ассистент WeKnora',
     newConversation: 'Новый диалог',
+    history: 'История диалогов',
+    untitledConversation: 'Диалог без названия',
+    historyEmpty: 'Диалогов пока нет',
+    historyFailed: 'Не удалось загрузить историю диалогов',
+    loadMore: 'Загрузить ещё',
     resize: 'Изменить ширину ассистента',
     layout: {
       dock: 'Закрепить справа',
