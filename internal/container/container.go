@@ -56,6 +56,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/memory"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/application/service/sandboxalloc"
 	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -203,6 +204,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMemoryRepository))
 	must(container.Provide(repository.NewTaskPendingOpsRepository))
 	must(container.Provide(repository.NewTaskDeadLetterRepository))
+	must(container.Provide(repository.NewSandboxAllocationRepository))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
@@ -546,6 +548,17 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// it), but Invoke constructs the whole chain. SessionService needs
 	// *chatpipeline.EventManager, which only exists after the pipeline
 	// block above — starting the reaper any earlier panics.
+	must(container.Provide(func(
+		repo interfaces.SandboxAllocationRepository,
+		configs repository.TenantSandboxConfigRepository,
+		sessions interfaces.SessionRepository,
+	) *sandboxalloc.Service {
+		return sandboxalloc.New(repo, configs, sessions, sandboxRedisNamespace())
+	}))
+	must(container.Invoke(func(p *service.SessionSandboxPinner, skills *service.TenantSkillService, a *sandboxalloc.Service) {
+		p.WithPlacer(a)
+		skills.WithPlacer(a)
+	}))
 	must(container.Invoke(startTenantSkillReaper))
 	logger.Debugf(ctx, "[Container] Tenant skill reaper registered")
 	must(
