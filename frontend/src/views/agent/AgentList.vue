@@ -1,5 +1,5 @@
 <template>
-  <div class="agent-list-container">
+  <div class="agent-list-container" :class="{ 'is-lite': authStore.isLiteMode }">
     <div class="agent-list-content">
       <div class="header" style="--wails-draggable: drag">
         <div class="header-title" style="--wails-draggable: drag">
@@ -8,7 +8,8 @@
               <ResourceIcon type="agent" :size="24" />
               {{ $t('agent.title') }}
             </h2>
-            <div class="header-actions" style="--wails-draggable: no-drag">
+            <div class="header-actions" :class="{ 'header-actions-lite': authStore.isLiteMode }" style="--wails-draggable: no-drag">
+              <ResourceListToolbar v-if="authStore.isLiteMode" hide-scopes v-model="spaceSelection" v-model:query="keyword" />
               <ResourceSortControl v-model="selectedResourceSort" />
               <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('agent.createAgent')" placement="bottom">
                 <t-button variant="text" theme="default" size="small" class="header-action-btn"
@@ -40,7 +41,7 @@
           <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('agent.subtitle') }}</p>
         </div>
       </div>
-      <ResourceListToolbar :hide-scopes="authStore.isLiteMode" v-model="spaceSelection" v-model:query="keyword" :count-all="allAgentsCount"
+      <ResourceListToolbar v-if="!authStore.isLiteMode" v-model="spaceSelection" v-model:query="keyword" :count-all="allAgentsCount"
       :count-mine="agents.length" :count-by-org="effectiveSharedCountByOrg" :count-favorites="agentFavoritesCount"
       :count-recents="agentRecentsCount" />
       <div class="agent-list-main">
@@ -95,8 +96,8 @@
             </div>
             <!-- 我创建的：当前 agent 是本空间 + 非内置 + 我亲手创建，且前一张
                  要么不存在、要么不是本空间、要么是内置（builtin → mine 过渡）、
-                 要么是同事创建。与 KB 列表对齐。 -->
-            <div v-if="agent.isMine
+                 要么是同事创建。与 KB 列表对齐，Lite 隐藏该分组标题。 -->
+            <div v-if="!authStore.isLiteMode && agent.isMine
               && !agent.is_builtin
               && isMyAgent(agent)
               && (index === 0
@@ -311,8 +312,8 @@
               <t-icon class="agent-section-toggle"
                 :name="isAgentSectionCollapsed('builtin') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
-            <!-- 我创建的：第一张非内置且我亲手创建的卡片前打标题 -->
-            <div v-if="!agent.is_builtin
+            <!-- 我创建的：非 Lite 在第一张非内置且我亲手创建的卡片前打标题 -->
+            <div v-if="!authStore.isLiteMode && !agent.is_builtin
               && isMyAgent(agent)
               && (index === 0
                 || sortedMineAgents[index - 1].is_builtin
@@ -1357,7 +1358,11 @@ const tenantSectionIconName = computed(() =>
 // 思路——空 Set = 全展开，避免新增分段还得维护默认值。
 type AgentSectionKey = 'builtin' | 'mine' | 'tenantOthers' | 'sharedByMe' | 'sharedEditable' | 'sharedReadonly'
 const collapsedAgentSections = ref<Set<AgentSectionKey>>(new Set())
-const isAgentSectionCollapsed = (key: AgentSectionKey) => collapsedAgentSections.value.has(key)
+const isAgentSectionCollapsed = (key: AgentSectionKey) => {
+  // Lite 隐藏了「我创建的」折叠入口，对应卡片始终展开。
+  if (authStore.isLiteMode && key === 'mine') return false
+  return collapsedAgentSections.value.has(key)
+}
 const toggleAgentSection = (key: AgentSectionKey) => {
   const next = new Set(collapsedAgentSections.value)
   if (next.has(key)) next.delete(key)
@@ -1680,6 +1685,10 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
 }
 
 // 共享给我 · 可编辑 / 仅查看 分组标题，与 KB 列表 .kb-section-header 对齐。
+.is-lite .agent-card.is-builtin + .agent-card:not(.is-builtin) {
+  grid-column-start: 1;
+}
+
 .agent-section-header {
   .resource-section-header();
 }

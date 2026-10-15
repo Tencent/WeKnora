@@ -82,6 +82,7 @@ import {
 } from './documentSorting';
 import { useI18n } from 'vue-i18n';
 import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext';
 import type { ParserEngineInfo } from '@/api/system';
 const route = useRoute();
 const { t } = useI18n();
@@ -433,6 +434,16 @@ const onCardMoreVisibleChange = (visible: boolean, item: KnowledgeCard) => {
   }
 };
 let isCardDetails = ref(false);
+useAssistantPageContext(() => {
+  if (!kbId.value) return null;
+  const docOpen = isCardDetails.value && !!details.id;
+  return {
+    knowledgeBaseId: kbId.value,
+    knowledgeBaseName: kbInfo.value?.id === kbId.value ? kbInfo.value?.name : undefined,
+    knowledgeId: docOpen ? details.id : undefined,
+    knowledgeTitle: docOpen ? details.title : undefined,
+  };
+});
 let timeout: ReturnType<typeof setTimeout> | null = null;
 let knowledgeScroll = ref()
 let page = 1;

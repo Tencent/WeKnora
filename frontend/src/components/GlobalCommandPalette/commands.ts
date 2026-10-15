@@ -1,6 +1,7 @@
 import type { Router } from 'vue-router'
 import type { Composer } from 'vue-i18n'
 import { openNewUserGuide } from '@/config/contextualGuides'
+import { useAssistantStore } from '@/stores/assistant'
 
 /**
  * A single command that can be searched and invoked from the palette.
@@ -33,6 +34,16 @@ export interface CommandContext {
 export function buildCommands(ctx: CommandContext): CmdkCommand[] {
   const { router, t, close } = ctx
   return [
+    {
+      id: 'open-assistant',
+      label: t('commandPalette.quick.assistant'),
+      icon: 'compass',
+      keywords: ['assistant', 'help', 'weknora', '助手', '帮助', 'ассистент'],
+      run: () => {
+        close()
+        useAssistantStore().open()
+      },
+    },
     {
       id: 'new-chat',
       label: t('commandPalette.quick.newChat'),

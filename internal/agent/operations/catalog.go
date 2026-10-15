@@ -184,36 +184,26 @@ var (
 	routeParamPattern  = regexp.MustCompile(`^[:*][A-Za-z_][A-Za-z0-9_]*$`)
 )
 
-// forbiddenRoutePrefixes are API areas that must never be reachable from an
-// agent: credentials, sessions, identity, tenancy administration and the
-// agent surfaces themselves. Catalog construction fails if an entry points
-// into one, so a careless addition is caught by tests rather than review.
-var forbiddenRoutePrefixes = []string{
-	"/api/v1/auth",
-	"/api/v1/tenants",
-	"/api/v1/users",
-	"/api/v1/me",
-	"/api/v1/system",
-	"/api/v1/initialization",
-	"/api/v1/organizations",
-	"/api/v1/api-keys",
-	"/api/v1/models",
-	"/api/v1/model-credentials",
-	"/api/v1/mcp-services",
-	"/api/v1/mcp-endpoints",
-	"/api/v1/sandbox",
-	"/api/v1/skills",
-	"/api/v1/im",
-	"/api/v1/embed",
-	"/api/v1/agents",
-	"/api/v1/agent-chat",
-	"/api/v1/knowledge-chat",
-	"/api/v1/sessions",
-	"/api/v1/datasource",
-	"/api/v1/web-search",
-	"/api/v1/storage",
-	"/api/v1/vector-stores",
-	"/api/v1/evaluation",
+// allowedRouteAreas are the first path segments under /api/v1 an operation
+// may live in: the user's knowledge content. Every other area is refused,
+// so an API added later (credentials, integrations, identity, the agent's
+// own approval and prompt endpoints) stays unreachable until it is listed
+// here on purpose. Catalog construction fails otherwise, so a careless
+// annotation is caught by tests rather than review.
+var allowedRouteAreas = map[string]bool{
+	"knowledge-bases":        true,
+	"shared-knowledge-bases": true,
+	"knowledge":              true,
+	"knowledgebase":          true, // Wiki
+	"chunks":                 true,
+	"faq":                    true,
+}
+
+// forbiddenRouteSegments are refused anywhere inside an allowed area:
+// sharing changes who can reach a knowledge base, which the user does
+// themselves.
+var forbiddenRouteSegments = map[string]bool{
+	"shares": true,
 }
 
 var allowedMethods = map[string]bool{
@@ -464,22 +454,25 @@ func (c *Catalog) validateTarget(op Operation) error {
 	return nil
 }
 
-// parseRoute checks that route is a clean absolute path under /api/v1 and
-// outside the forbidden areas, returning its parameter segment names.
+// parseRoute checks that route is a clean absolute path in an allowed area
+// under /api/v1, returning its parameter segment names.
 func parseRoute(route string) (map[string]bool, error) {
-	if !strings.HasPrefix(route, "/api/v1/") {
+	const base = "/api/v1/"
+	if !strings.HasPrefix(route, base) {
 		return nil, fmt.Errorf("route %q must be under /api/v1", route)
 	}
-	for _, prefix := range forbiddenRoutePrefixes {
-		if route == prefix || strings.HasPrefix(route, prefix+"/") {
-			return nil, fmt.Errorf("route %q is in a forbidden area", route)
-		}
+	area, _, _ := strings.Cut(strings.TrimPrefix(route, base), "/")
+	if !allowedRouteAreas[area] {
+		return nil, fmt.Errorf("route %q is outside the areas an agent may reach", route)
 	}
 	params := map[string]bool{}
 	segments := strings.Split(strings.TrimPrefix(route, "/"), "/")
 	for i, seg := range segments {
 		if seg == "" {
 			return nil, fmt.Errorf("route %q has an empty segment", route)
+		}
+		if forbiddenRouteSegments[seg] {
+			return nil, fmt.Errorf("route %q reaches %q, which an agent may not", route, seg)
 		}
 		if seg[0] == ':' || seg[0] == '*' {
 			if !routeParamPattern.MatchString(seg) {

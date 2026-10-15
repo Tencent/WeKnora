@@ -2048,6 +2048,30 @@ export default {
     todoWrite: 'Составить план',
     askUser: 'Вопрос пользователю'
   },
+  assistant: {
+    title: 'Ассистент WeKnora',
+    newConversation: 'Новый диалог',
+    welcomeTitle: 'Чем помочь?',
+    welcomeDesc: 'Я отвечаю на вопросы о WeKnora, а также проверяю и обрабатываю разбор документов, активность баз знаний и проблемы Wiki в вашем пространстве. Перед удалением и подобными действиями я спрошу подтверждение.',
+    startFailed: 'Не удалось запустить ассистента. Попробуйте ещё раз.',
+    askAboutDocument: 'Спросить ассистента WeKnora',
+    context: {
+      currentPage: 'Текущая страница',
+      detach: 'Не прикладывать текущую страницу',
+      attachedTip: 'Приложена текущая страница: {path}',
+      detachedTip: 'Нажмите, чтобы приложить текущую страницу: {path}'
+    },
+    starters: {
+      wikiIssues: 'Какие открытые проблемы есть на этой странице?',
+      wikiSummary: 'Кратко изложи эту страницу Wiki',
+      documentStatus: 'Как прошёл разбор этого документа?',
+      documentSummary: 'Кратко изложи этот документ',
+      failedDocuments: 'Какие документы этой базы знаний не удалось разобрать?',
+      recentActivity: 'Что недавно менялось в этой базе знаний?',
+      formats: 'Какие форматы документов поддерживает WeKnora?',
+      createWiki: 'Как создать базу знаний Wiki?'
+    }
+  },
   commandPalette: {
     placeholder: 'Поиск по базам знаний, файлам, диалогам…',
     clearRecent: 'Очистить',
@@ -2071,7 +2095,8 @@ export default {
       agents: 'Открыть агенты',
       organizations: 'Открыть общие пространства',
       settings: 'Открыть настройки',
-      productTour: 'Обучение'
+      productTour: 'Обучение',
+      assistant: 'Открыть ассистента WeKnora'
     },
     match: {
       vector: 'Вектор',
@@ -4762,12 +4787,10 @@ export default {
       globalIssuesEmpty: 'Нет ожидающих проблем содержимого',
       issuePagePrefix: 'Страница: ',
       issueGoFix: 'Исправить',
-      fixAssistantTitle: 'Wiki Умный помощник исправления',
       issueFixSuggestions: 'Предложения по оптимизации ({count})',
       issueFixSingle: 'Исправить',
-      fixStartError: 'Не удалось запустить помощник исправления',
-      issueFixPromptSingle: 'Пожалуйста, исправьте проблему (ID: {id}) на странице [[{slug}]].',
-      issueFixPromptAutoStart: 'Пожалуйста, исправьте следующие проблемы на странице [[{slug}]]:'
+      issueFixPromptSingle: 'Исправь эту проблему Wiki: {description}',
+      issueFixPromptAll: 'Исправь {count} открытых проблем на этой странице'
     },
     indexing: {
       title: 'Стратегия индексации',
@@ -4877,6 +4900,7 @@ export default {
       systemActor: 'Система',
       actorWithAPIKey: '{actor} · API Key · {name}',
       actorAPIKey: 'API Key · {name}',
+      viaAssistant: 'Через ассистента WeKnora',
       knowledgeBase: 'База знаний',
       countItems: '{count} элем.',
       titleWithCount: '{title} и ещё {count}',
@@ -4982,6 +5006,8 @@ export default {
         actorId: 'ID инициатора',
         apiKeyName: 'Имя API-ключа',
         apiKeyId: 'ID API-ключа',
+        agentSessionId: 'ID диалога ассистента',
+        agentOperation: 'Операция ассистента',
         details: 'Подробности'
       },
       columns: {
@@ -5219,6 +5245,8 @@ export default {
     notConfigured: 'Не настроено',
     sharedAgentModelLabel: 'Модель из общего агента',
     noModel: 'Нет доступных моделей',
+    modelAuto: 'Авто',
+    modelAutoHint: 'Используется модель чата текущей базы знаний, а если она не задана — модель по умолчанию',
     stopGeneration: 'Остановить генерацию',
     send: 'Отправить',
     steerCurrent: 'Дополнить текущую задачу',

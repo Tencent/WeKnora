@@ -2048,6 +2048,30 @@ export default {
     todoWrite: '계획 수립',
     askUser: '사용자에게 질문'
   },
+  assistant: {
+    title: 'WeKnora 어시스턴트',
+    newConversation: '새 대화',
+    welcomeTitle: '무엇을 도와드릴까요?',
+    welcomeDesc: 'WeKnora 사용법을 안내하고, 워크스페이스의 문서 파싱, 지식 베이스 활동, Wiki 문제를 확인하고 처리할 수 있습니다. 삭제 같은 작업은 먼저 확인을 요청합니다.',
+    startFailed: '어시스턴트를 시작하지 못했습니다. 다시 시도해 주세요.',
+    askAboutDocument: 'WeKnora 어시스턴트에게 묻기',
+    context: {
+      currentPage: '현재 페이지',
+      detach: '현재 페이지 포함하지 않기',
+      attachedTip: '현재 페이지 포함됨: {path}',
+      detachedTip: '클릭하여 현재 페이지 포함: {path}'
+    },
+    starters: {
+      wikiIssues: '이 페이지에 처리할 문제가 있나요?',
+      wikiSummary: '이 Wiki 페이지를 요약해 줘',
+      documentStatus: '이 문서의 파싱 상태는 어떤가요?',
+      documentSummary: '이 문서를 요약해 줘',
+      failedDocuments: '이 지식 베이스에서 파싱에 실패한 문서는?',
+      recentActivity: '이 지식 베이스에 최근 어떤 변경이 있었나요?',
+      formats: 'WeKnora는 어떤 문서 형식을 지원하나요?',
+      createWiki: 'Wiki 지식 베이스는 어떻게 만드나요?'
+    }
+  },
   commandPalette: {
     placeholder: '지식베이스, 파일, 대화 검색…',
     clearRecent: '지우기',
@@ -2071,7 +2095,8 @@ export default {
       agents: '에이전트 열기',
       organizations: '공유 공간 열기',
       settings: '설정 열기',
-      productTour: '사용 가이드'
+      productTour: '사용 가이드',
+      assistant: 'WeKnora 어시스턴트 열기'
     },
     match: {
       vector: '벡터',
@@ -4762,12 +4787,10 @@ export default {
       globalIssuesEmpty: '보류 중인 콘텐츠 문제가 없습니다',
       issuePagePrefix: '페이지: ',
       issueGoFix: '수정하러 가기',
-      fixAssistantTitle: 'Wiki 스마트 수정 도우미',
       issueFixSuggestions: '콘텐츠 최적화 제안 ({count})',
       issueFixSingle: '수정',
-      fixStartError: '수정 도우미 시작 실패',
-      issueFixPromptSingle: '페이지 [[{slug}]] 의 문제(ID: {id})를 수정해 주세요.',
-      issueFixPromptAutoStart: '페이지 [[{slug}]] 의 다음 문제들을 수정해 주세요:'
+      issueFixPromptSingle: '이 Wiki 문제를 수정해 줘: {description}',
+      issueFixPromptAll: '이 페이지의 처리할 문제 {count}개를 수정해 줘'
     },
     indexing: {
       title: '인덱싱 전략',
@@ -4877,6 +4900,7 @@ export default {
       systemActor: '시스템',
       actorWithAPIKey: '{actor} · API Key · {name}',
       actorAPIKey: 'API Key · {name}',
+      viaAssistant: 'WeKnora 어시스턴트 경유',
       knowledgeBase: '지식 베이스',
       countItems: '{count}개 항목',
       titleWithCount: '{title} 외 {count}개',
@@ -4982,6 +5006,8 @@ export default {
         actorId: '시작자 ID',
         apiKeyName: 'API 키 이름',
         apiKeyId: 'API 키 ID',
+        agentSessionId: '어시스턴트 대화 ID',
+        agentOperation: '어시스턴트 작업',
         details: '상세'
       },
       columns: {
@@ -5219,6 +5245,8 @@ export default {
     notConfigured: '구성되지 않음',
     sharedAgentModelLabel: '공유 에이전트에 구성된 모델',
     noModel: '사용 가능한 모델 없음',
+    modelAuto: '자동',
+    modelAutoHint: '현재 지식 베이스의 대화 모델을 사용하고, 설정되지 않은 경우 시스템 기본 모델을 사용합니다',
     stopGeneration: '생성 중지',
     send: '전송',
     steerCurrent: '현재 작업에 추가',

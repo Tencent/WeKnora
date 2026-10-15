@@ -171,7 +171,10 @@
                         @stop-confirmed="handleStopConfirmed"
                         @stop-failed="handleStopFailed" :isReplying="isReplying" :composer-locked="composerLocked" :sessionId="session_id"
                         :assistantMessageId="currentAssistantMessageId" :embeddedMode="embeddedMode"
-                        :queuedSteers="steerQueue.filter(item => item.delivery === 'after')" :canSteer="isAgentStreamSession()"></InputField>
+                        :model-id="modelId" @update:model-id="(id) => emit('update:modelId', id)"
+                        :queuedSteers="steerQueue.filter(item => item.delivery === 'after')" :canSteer="isAgentStreamSession()">
+                        <template v-if="$slots['composer-chips']" #chips><slot name="composer-chips" /></template>
+                    </InputField>
                 </div>
             </div>
             <div v-if="!embeddedMode" class="chat_overlays">
@@ -181,7 +184,7 @@
             </div>
         </div>
     </div>
-    <KnowledgeBaseEditorModal :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
+    <KnowledgeBaseEditorModal v-if="!embeddedMode" :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
         :kb-id="uiStore.currentKBId || undefined" :initial-type="uiStore.kbEditorType"
         @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
     <ChatReferencesDrawer />
@@ -258,9 +261,18 @@ const { visible: referencesDrawerVisible, panelWidth: referencesPanelWidth } = r
 const props = defineProps({
     session_id: { type: String, default: '' },
     agentId: { type: String, default: '' },
-    kbIds: { type: Array, default: () => [] },
     embeddedMode: { type: Boolean, default: false },
+    // Embedded only: sent once on mount, instead of the menu store's firstQuery
+    // that belongs to the main chat.
+    initialQuery: { type: String, default: '' },
+    // Embedded only: returns { knowledgeBaseIds, pageContext } for each send,
+    // read at send time so the host can follow the page the user is on.
+    hostScope: { type: Function, default: null },
+    // Embedded only: the host's model choice (v-model:model-id), '' for the
+    // agent's own.
+    modelId: { type: String, default: '' },
 });
+const emit = defineEmits(['update:modelId']);
 
 const usemenuStore = useMenuStore();
 const useSettingsStoreInstance = useSettingsStore();
@@ -278,7 +290,7 @@ const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
 const { t } = useI18n();
 const { firstQuery, firstMentionedItems, firstModelId, firstImageFiles, firstAttachmentFiles, firstQuestionOrigin } = storeToRefs(usemenuStore);
 // Capture before the initial send consumes firstQuery; the child focuses after mounting.
-const focusComposerOnMount = Boolean(firstQuery.value);
+const focusComposerOnMount = Boolean(props.embeddedMode ? props.initialQuery : firstQuery.value);
 const { onChunk, error, isStreaming, startStream, stopStream, lastStreamRequest } = useStream();
 /** Snapshot of the in-flight HTTP request for attaching to the next assistant message. */
 const pendingStreamDebug = ref(null);
@@ -804,6 +816,8 @@ const getUserQuery = (index) => {
 };
 
 watch([() => route.params], async (newvalue) => {
+    // The host owns an embedded view's session; the route belongs to the page behind it.
+    if (props.embeddedMode) return;
     isFirstEnter.value = true;
     if (newvalue[0].chatid) {
         if (!firstQuery.value) {
@@ -1513,7 +1527,8 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
 
     // Get knowledge_base_ids from settings store (selected by user via KnowledgeBaseSelector)
     // Merge @mentioned KB/file IDs so retrieval uses the same targets user @mentioned (including shared KBs)
-    const sidebarKbIds = props.embeddedMode ? props.kbIds : (useSettingsStoreInstance.settings.selectedKnowledgeBases || []);
+    const hostScope = props.embeddedMode && props.hostScope ? props.hostScope() : null;
+    const sidebarKbIds = props.embeddedMode ? (hostScope?.knowledgeBaseIds || []) : (useSettingsStoreInstance.settings.selectedKnowledgeBases || []);
     const sidebarFileIds = props.embeddedMode ? [] : (useSettingsStoreInstance.settings.selectedFiles || []);
     const kbIdSet = new Set(sidebarKbIds);
     const fileIdSet = new Set(sidebarFileIds);
@@ -1563,6 +1578,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         query: value,
         suggestion_attribution: suggestionAttribution || undefined,
         question_origin: options?.questionOrigin,
+        page_context: agentEnabled ? (hostScope?.pageContext || undefined) : undefined,
         method: 'POST',
         url: endpoint,
     });
@@ -1715,17 +1731,15 @@ const handleSessionMutation = (event) => {
 };
 
 onBeforeMount(async () => {
+    // 嵌入式的 agent / 知识库由宿主随请求传入，不能写进主对话的 settings store。
+    if (props.embeddedMode) return;
     // 若从智能体列表点击共享智能体进入，URL 带 agent_id 与 source_tenant_id，同步到 store
-    const agentIdFromQuery = props.agentId || (route.query.agent_id && String(route.query.agent_id));
+    const agentIdFromQuery = route.query.agent_id && String(route.query.agent_id);
     const sourceTenantIdFromQuery = route.query.source_tenant_id && String(route.query.source_tenant_id);
     if (agentIdFromQuery && sourceTenantIdFromQuery) {
         useSettingsStoreInstance.selectAgent(agentIdFromQuery, sourceTenantIdFromQuery);
     } else if (agentIdFromQuery) {
         useSettingsStoreInstance.selectAgent(agentIdFromQuery, null);
-    }
-
-    if (props.kbIds && props.kbIds.length > 0) {
-        useSettingsStoreInstance.selectKnowledgeBases(props.kbIds);
     }
 
     // 必须在 Input-field onMounted 之前完成：按 session.last_request_state 恢复输入栏
@@ -1741,7 +1755,11 @@ onMounted(async () => {
     loading.value = false;
     isReplying.value = false;
 
-    if (firstQuery.value) {
+    if (props.embeddedMode && props.initialQuery) {
+        scrollLock.value = true;
+        historyLoading.value = false;
+        sendMsg(props.initialQuery, props.modelId);
+    } else if (!props.embeddedMode && firstQuery.value) {
         scrollLock.value = true;
         historyLoading.value = false;
         if (firstModelId.value) {
@@ -1782,13 +1800,17 @@ onUnmounted(() => {
     window.removeEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
     if (recoverPollTimer) { clearTimeout(recoverPollTimer); recoverPollTimer = null; }
 });
+// An embedded view outlives the page behind it: a route change must not stop
+// its stream or restore the main chat's defaults.
 onBeforeRouteLeave((to, from, next) => {
+    if (props.embeddedMode) return next()
     clearData()
     // 离开聊天会话 → 还原"用户全局默认"，避免旧会话的请求态泄漏到新建对话。
     useSettingsStoreInstance.restoreDefaultsIfSnapshotted();
     next()
 })
 onBeforeRouteUpdate((to, from, next) => {
+    if (props.embeddedMode) return next()
     clearData()
     // 仅"会话 → 会话"会落到这里；跨会话覆盖的还原放到 route.params 的 watch 里，
     // 因为新会话的 getSession 也在那边触发，便于保证 restore→snapshot→apply 顺序。

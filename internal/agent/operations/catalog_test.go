@@ -37,6 +37,17 @@ func TestNewCatalogRejectsUnsafeDeclarations(t *testing.T) {
 		"forbidden area": readOp("auth.get", "/api/v1/auth/me"),
 		"api keys":       readOp("keys.list", "/api/v1/api-keys"),
 		"outside v1":     readOp("x.get", "/health"),
+		// Areas whose names extend a sensitive one, or that no list named.
+		"sandbox configs":     readOp("x.get", "/api/v1/sandbox-configs"),
+		"storage backends":    readOp("x.get", "/api/v1/storage-backends"),
+		"web search provider": readOp("x.get", "/api/v1/web-search-providers/types"),
+		"im channels":         readOp("x.get", "/api/v1/im-channels"),
+		"agent approvals":     readOp("x.get", "/api/v1/agent/tool-approvals"),
+		"memory":              readOp("x.get", "/api/v1/memory/items"),
+		"messages":            readOp("x.get", "/api/v1/messages/chat-history-stats"),
+		"a new area":          readOp("x.get", "/api/v1/something-new"),
+		"kb shares":           readOp("x.get", "/api/v1/knowledge-bases/:id/shares", kb),
+		"kb prefix lookalike": readOp("x.get", "/api/v1/knowledge-bases-admin"),
 		"read as POST": {
 			ID: "x.get", Summary: "s", Risk: RiskRead, Method: http.MethodPost,
 			Route: "/api/v1/knowledge-bases",

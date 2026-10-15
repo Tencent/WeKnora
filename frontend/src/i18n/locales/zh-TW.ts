@@ -2050,6 +2050,30 @@ export default {
     todoWrite: '制定計劃',
     askUser: '向使用者提問'
   },
+  assistant: {
+    title: 'WeKnora 助手',
+    newConversation: '新對話',
+    welcomeTitle: '有什麼可以幫你？',
+    welcomeDesc: '我可以解答 WeKnora 的用法，也可以檢視和處理你空間裡的文件解析、知識庫動態和 Wiki 問題。刪除等操作會先請你確認。',
+    startFailed: '啟動助手失敗，請重試',
+    askAboutDocument: '問 WeKnora 助手',
+    context: {
+      currentPage: '目前頁面',
+      detach: '不附帶目前頁面',
+      attachedTip: '已附帶目前頁面：{path}',
+      detachedTip: '點擊附帶目前頁面：{path}'
+    },
+    starters: {
+      wikiIssues: '這個頁面有哪些待處理的問題？',
+      wikiSummary: '總結一下這個 Wiki 頁面',
+      documentStatus: '這個文件的解析狀態如何？',
+      documentSummary: '總結一下這個文件',
+      failedDocuments: '這個知識庫有哪些解析失敗的文件？',
+      recentActivity: '這個知識庫最近有哪些變動？',
+      formats: 'WeKnora 支援哪些文件格式？',
+      createWiki: '怎樣建立 Wiki 知識庫？'
+    }
+  },
   commandPalette: {
     placeholder: '搜尋知識庫、檔案、對話…',
     clearRecent: '清除',
@@ -2073,7 +2097,8 @@ export default {
       agents: '打開智慧代理',
       organizations: '打開共享空間',
       settings: '打開設定',
-      productTour: '新手引導'
+      productTour: '新手引導',
+      assistant: '開啟 WeKnora 助手'
     },
     match: {
       vector: '向量',
@@ -4764,12 +4789,10 @@ export default {
       globalIssuesEmpty: '暫無待處理的內容問題',
       issuePagePrefix: '頁面: ',
       issueGoFix: '去處理',
-      fixAssistantTitle: 'Wiki 智慧修復助手',
       issueFixSuggestions: '內容最佳化建議 ({count})',
       issueFixSingle: '修復',
-      fixStartError: '啟動修復助手失敗',
-      issueFixPromptSingle: '請修復頁面 [[{slug}]] 上的問題 (ID: {id})。',
-      issueFixPromptAutoStart: '請修復頁面 [[{slug}]] 上的以下問題：'
+      issueFixPromptSingle: '修復這個 Wiki 問題：{description}',
+      issueFixPromptAll: '修復目前頁面的 {count} 個待處理問題'
     },
     indexing: {
       title: '索引策略',
@@ -4879,6 +4902,7 @@ export default {
       systemActor: '系統觸發',
       actorWithAPIKey: '{actor} · API Key · {name}',
       actorAPIKey: 'API Key · {name}',
+      viaAssistant: '經 WeKnora 助手',
       knowledgeBase: '知識庫',
       countItems: '共 {count} 項',
       titleWithCount: '{title} 等 {count} 項',
@@ -4984,6 +5008,8 @@ export default {
         actorId: '發起人 ID',
         apiKeyName: 'API Key 名稱',
         apiKeyId: 'API Key ID',
+        agentSessionId: '助手對話 ID',
+        agentOperation: '助手操作',
         details: '詳情'
       },
       columns: {
@@ -5221,6 +5247,8 @@ export default {
     notConfigured: '未設定',
     sharedAgentModelLabel: '共享智慧代理設定的模型',
     noModel: '暫無可用模型',
+    modelAuto: '自動',
+    modelAutoHint: '使用目前知識庫設定的對話模型，未設定時使用系統預設模型',
     stopGeneration: '停止生成',
     send: '傳送',
     steerCurrent: '補充當前任務',

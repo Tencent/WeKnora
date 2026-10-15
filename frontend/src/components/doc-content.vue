@@ -22,6 +22,7 @@ import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { diffWikiLines, type WikiDiffLine } from '@/utils/wikiLineDiff';
 import { useI18n } from 'vue-i18n';
 import { useAuthStore } from '@/stores/auth';
+import { useAssistantStore } from '@/stores/assistant';
 import DocumentPreview from '@/components/document-preview.vue';
 import DocumentFileIcon from '@/views/knowledge/components/DocumentFileIcon.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
@@ -241,6 +242,7 @@ mermaid.initialize({
 });
 const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "canDownloadKB", "parse_status", "kbId"]);
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted", "summaryStateChange"]);
+const assistant = useAssistantStore();
 
 const applySummaryState = (summaryStatus?: string, description?: string) => {
   if (typeof summaryStatus === 'string' && summaryStatus) {
@@ -1601,6 +1603,12 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
               variant="text" shape="square" :theme="traceEntryTheme" :title="traceEntryTitle" @click="openTimeline">
               <template #icon>
                 <t-icon name="chart-line" size="16px" />
+              </template>
+            </t-button>
+            <t-button v-if="details.id" class="header-action-btn" size="small" variant="text" shape="square"
+              theme="default" :title="$t('assistant.askAboutDocument')" @click="assistant.open()">
+              <template #icon>
+                <t-icon name="compass" size="16px" />
               </template>
             </t-button>
           </div>
