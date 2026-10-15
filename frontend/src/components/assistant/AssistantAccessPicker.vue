@@ -50,6 +50,7 @@ const LEVEL_ICONS: Record<AssistantAccessLevel, string> = {
   read_only: 'browse',
   confirm: 'secured',
   auto_write: 'edit',
+  full_auto: 'play-circle',
 }
 
 const { t } = useI18n()
@@ -89,7 +90,7 @@ function pick(level: AssistantAccessLevel) {
   }
 
   // The level that acts without asking stands out, so it is never on by accident.
-  &.is-auto_write {
+  &.is-auto_write, &.is-full_auto {
     color: var(--td-warning-color);
   }
 }

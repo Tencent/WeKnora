@@ -20,7 +20,7 @@
           <label>{{ t('assistantSettings.accessLabel') }}</label>
           <p class="desc">{{ t('assistantSettings.accessDescription') }}</p>
           <p class="desc hint">{{ t(`assistant.access.levels.${assistant.effectiveAccessLevel}.desc`) }}</p>
-          <p v-if="assistant.accessCeiling !== 'auto_write'" class="desc hint">
+          <p v-if="assistant.accessCeiling !== 'full_auto'" class="desc hint">
             {{ t('assistantSettings.accessCeilingHint', {
               level: t(`assistant.access.levels.${assistant.accessCeiling}.label`),
             }) }}

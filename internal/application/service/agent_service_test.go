@@ -519,6 +519,7 @@ func TestWeKnoraAssistantIsAHiddenBuiltinWithOperations(t *testing.T) {
 	require.True(t, types.GrantsOperationCatalog(agent))
 	require.True(t, types.UsesWorkspaceModelFallback(agent))
 	require.Equal(t, "weknora_assistant", agent.Config.SystemPromptID)
+	require.Equal(t, "none", agent.Config.MCPSelectionMode)
 	require.NotContains(t, agent.Config.AllowedTools, tools.ToolRunOperation,
 		"operations are granted by ID, never through the editable allowlist")
 	for _, def := range tools.AvailableToolDefinitions() {

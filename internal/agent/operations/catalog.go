@@ -193,6 +193,9 @@ func (a Access) NeedsApproval(op Operation) bool {
 // NeedsApprovalFor reports whether a change of the given risk must wait for
 // the user; it also covers tools outside the catalog.
 func (a Access) NeedsApprovalFor(risk Risk) bool {
+	if a.Level == types.AssistantAccessFullAuto {
+		return false
+	}
 	switch risk {
 	case RiskRead:
 		return false

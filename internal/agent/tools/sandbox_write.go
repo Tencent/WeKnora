@@ -19,7 +19,9 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"path"
 	"strings"
 
@@ -90,6 +92,13 @@ type SandboxFileSink interface {
 	StatSessionFile(ctx context.Context, sessionID, filePath string) (*sandbox.RemoteStatEntry, error)
 	ReadSessionFile(ctx context.Context, sessionID, filePath string) ([]byte, error)
 	WriteSessionWorkspaceFile(ctx context.Context, sessionID, filePath string, content []byte) error
+}
+
+// SandboxFileCreator must atomically create a new file, refusing existing paths
+// with fs.ErrExist and never modifying their contents. Backends without this
+// capability cannot safely auto-create on behalf of the assistant.
+type SandboxFileCreator interface {
+	CreateSessionWorkspaceFile(ctx context.Context, sessionID, filePath string, content []byte) error
 }
 
 // writeSandboxFileDescription carries one %s, filled with the size guidance
@@ -207,6 +216,12 @@ func writeSizeGuidance(maxBytes int) string {
 
 // Execute writes the requested file into the current session's sandbox.
 func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	return t.execute(ctx, args, false)
+}
+
+func (t *WriteSandboxFileTool) execute(
+	ctx context.Context, args json.RawMessage, createOnly bool,
+) (*types.ToolResult, error) {
 	logger.Infof(ctx, "[Tool][WriteSandboxFile] Execute started")
 
 	var input WriteSandboxFileInput
@@ -293,6 +308,14 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 	if modeErr != "" {
 		return &types.ToolResult{Success: false, Error: modeErr}, nil
 	}
+	write := t.sink.WriteSessionWorkspaceFile
+	if createOnly {
+		creator, ok := t.sink.(SandboxFileCreator)
+		if !ok || mode != writeModeOverwrite {
+			return nil, errFileApprovalRequired
+		}
+		write = creator.CreateSessionWorkspaceFile
+	}
 
 	// Held across the read and the write: an append that reads its base while
 	// a sibling call is mid-write appends to bytes that no longer exist.
@@ -318,7 +341,10 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 		content = append(content, chunk...)
 	}
 
-	if err := t.sink.WriteSessionWorkspaceFile(ctx, sessionID, clean, content); err != nil {
+	if err := write(ctx, sessionID, clean, content); err != nil {
+		if createOnly && errors.Is(err, fs.ErrExist) {
+			return nil, errFileApprovalRequired
+		}
 		logger.Warnf(ctx, "[Tool][WriteSandboxFile] write failed: session=%s path=%s err=%v",
 			sessionID, clean, err)
 		return &types.ToolResult{

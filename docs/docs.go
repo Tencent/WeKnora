@@ -8250,7 +8250,7 @@ const docTemplate = `{
                 "x-agent": {
                     "id": "knowledge.update_manual",
                     "label": "title",
-                    "risk": "write",
+                    "risk": "destructive",
                     "target": "knowledge.get"
                 },
                 "x-agent-hint": "Replaces the whole Markdown of a document created as manual knowledge. Send the complete content, not a diff. status draft keeps it out of search; publish indexes it. Uploaded files cannot be edited this way."
@@ -23223,12 +23223,14 @@ const docTemplate = `{
             "enum": [
                 "read_only",
                 "confirm",
-                "auto_write"
+                "auto_write",
+                "full_auto"
             ],
             "x-enum-varnames": [
                 "AssistantAccessReadOnly",
                 "AssistantAccessConfirm",
-                "AssistantAccessAutoWrite"
+                "AssistantAccessAutoWrite",
+                "AssistantAccessFullAuto"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.AssistantConfig": {
@@ -23959,7 +23961,7 @@ const docTemplate = `{
                     "x-agent": true
                 },
                 "enable_parent_child": {
-                    "description": "EnableParentChild splits into large parent chunks and small child chunks. Search matches a child and returns its parent.",
+                    "description": "EnableParentChild splits into large parent chunks and small child chunks.\nSearch matches a child and returns its parent.",
                     "type": "boolean",
                     "x-agent": true
                 },
@@ -23996,7 +23998,7 @@ const docTemplate = `{
                     "x-agent-maximum": "20"
                 },
                 "strategy": {
-                    "description": "Strategy selects how documents are split: auto, heading, heuristic, recursive or legacy. Empty keeps the server default.",
+                    "description": "Strategy selects how documents are split: auto, heading, heuristic,\nrecursive or legacy. Empty keeps the server default.",
                     "type": "string",
                     "enum": [
                         "auto",
@@ -26561,7 +26563,7 @@ const docTemplate = `{
                     ]
                 },
                 "summary_model_id": {
-                    "description": "Summary model ID. model.list returns the ids. Used for summaries, and as the default for auto-tagging and the AI description.",
+                    "description": "Summary model ID. model.list returns the ids. Used for summaries, and as\nthe default for auto-tagging and the AI description.",
                     "type": "string",
                     "x-agent": "summary_model_id"
                 },
@@ -34578,7 +34580,7 @@ const docTemplate = `{
                     ]
                 },
                 "summary_model_id": {
-                    "description": "Summary model ID. model.list returns the ids. Used for summaries, and as the default for auto-tagging and the AI description.",
+                    "description": "Summary model ID. model.list returns the ids. Used for summaries, and as\nthe default for auto-tagging and the AI description.",
                     "type": "string",
                     "x-agent": "summary_model_id"
                 },
@@ -37490,7 +37492,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "assistant_access": {
-                    "description": "AssistantAccess is the WeKnora assistant access level: read_only,\nconfirm or auto_write. The workspace ceiling caps it; other agents\nignore it.",
+                    "description": "AssistantAccess is the WeKnora assistant access level: read_only,\nconfirm, auto_write or full_auto. The workspace ceiling caps it; other agents\nignore it.",
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel"

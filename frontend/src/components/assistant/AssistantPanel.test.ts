@@ -437,3 +437,19 @@ test('agent layers merge, dismissal follows the agent id, and the payload has no
     assert.equal(f.assistant.pageContext, null)
   } finally { f.close() }
 })
+
+for (const ceiling of ['auto_write', 'full_auto'] as const) {
+  test(`full auto is sent only within the ${ceiling} workspace ceiling`, async () => {
+    const f = await fixture(undefined, { display_name: '', max_access_level: ceiling })
+    try {
+      assert.equal(f.assistant.effectiveAccessLevel, 'confirm', 'a higher ceiling never upgrades the default')
+      f.assistant.setAccessLevel('full_auto')
+      assert.equal(f.assistant.effectiveAccessLevel, ceiling)
+      f.assistant.open({ query: 'Apply the requested changes' })
+      await flush()
+      assert.equal(f.sent[0].scope.assistantAccess, ceiling)
+      f.assistant.setWorkspaceConfig({ display_name: '', max_access_level: 'read_only' })
+      assert.equal(f.assistant.effectiveAccessLevel, 'read_only', 'lowering the ceiling takes effect immediately')
+    } finally { f.close() }
+  })
+}

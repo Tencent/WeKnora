@@ -2147,15 +2147,19 @@ export default {
       levels: {
         read_only: {
           label: '只读',
-          desc: '只查看，不做任何修改'
+          desc: '只查看；禁用外部工具、命令和文件写入'
         },
         confirm: {
           label: '修改前确认',
           desc: '每次修改或删除前都先请你确认'
         },
         auto_write: {
-          label: '自动执行',
-          desc: '可恢复的修改直接执行，删除仍需确认'
+          label: '安全自动',
+          desc: '可恢复的修改自动执行；删除、无备份文件修改、外部工具和命令需确认'
+        },
+        full_auto: {
+          label: '完全自动',
+          desc: '授权范围内全部免确认，包括覆盖、删除、外部工具和命令'
         }
       }
     },

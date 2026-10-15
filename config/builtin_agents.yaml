@@ -306,6 +306,8 @@ builtin_agents:
       # read_weknora_doc are not listed: they are granted to this agent by ID
       # at run time (types.GrantsOperationCatalog, types.GrantsProductDocs) and
       # can never be selected on a tenant-editable agent.
+      # External services require an explicit selection; no legacy all-services fallback.
+      mcp_selection_mode: "none"
       allowed_tools:
         - "ask_user"
         - "todo_write"

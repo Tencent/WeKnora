@@ -12,8 +12,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func (g *PathGuard) writeRel(root, rel, orig string, data []byte, perm os.FileMode) error {
-	fd, err := walkOpen(root, rel, true, unix.O_WRONLY|unix.O_CREAT|unix.O_TRUNC, uint32(perm.Perm()))
+func (g *PathGuard) writeRel(root, rel, orig string, data []byte, perm os.FileMode, exclusive bool) error {
+	flags := unix.O_WRONLY | unix.O_CREAT | unix.O_TRUNC
+	if exclusive {
+		flags = unix.O_WRONLY | unix.O_CREAT | unix.O_EXCL
+	}
+	fd, err := walkOpen(root, rel, true, flags, uint32(perm.Perm()))
 	if err != nil {
 		return mapWalkErr(orig, err)
 	}

@@ -12,6 +12,27 @@ func TestAssistantEffectiveAccessLevel(t *testing.T) {
 		{"unset asks before changes", nil, "", AssistantAccessConfirm},
 		{"unknown falls back to the default", nil, "root", AssistantAccessConfirm},
 		{"no config caps auto_write", nil, AssistantAccessAutoWrite, AssistantAccessConfirm},
+		{"no config caps full_auto", nil, AssistantAccessFullAuto, AssistantAccessConfirm},
+		{
+			"safe auto ceiling caps full auto",
+			&AssistantConfig{MaxAccessLevel: AssistantAccessAutoWrite},
+			AssistantAccessFullAuto, AssistantAccessAutoWrite,
+		},
+		{
+			"full auto requires explicit ceiling and selection",
+			&AssistantConfig{MaxAccessLevel: AssistantAccessFullAuto},
+			AssistantAccessFullAuto, AssistantAccessFullAuto,
+		},
+		{
+			"raising ceiling does not upgrade default",
+			&AssistantConfig{MaxAccessLevel: AssistantAccessFullAuto},
+			"", AssistantAccessConfirm,
+		},
+		{
+			"raising ceiling does not upgrade safe auto",
+			&AssistantConfig{MaxAccessLevel: AssistantAccessFullAuto},
+			AssistantAccessAutoWrite, AssistantAccessAutoWrite,
+		},
 		{"lower than the ceiling is kept", nil, AssistantAccessReadOnly, AssistantAccessReadOnly},
 		{
 			"a raised ceiling allows auto_write",

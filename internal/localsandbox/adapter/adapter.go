@@ -279,6 +279,20 @@ func (a *Adapter) WriteSessionWorkspaceFile(
 	return nil
 }
 
+// CreateSessionWorkspaceFile creates a new file without replacing any existing
+// path, including when another process creates the target concurrently.
+func (a *Adapter) CreateSessionWorkspaceFile(
+	ctx context.Context, sessionID, p string, content []byte,
+) error {
+	guard, ws, err := a.guard(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	unlock := a.svc.LockRoot(ws.Root)
+	defer unlock()
+	return guard.CreateFile(absoluteIn(ws.Root, p), content, 0o644)
+}
+
 // WriteSessionWorkspaceFiles writes each file in turn, stopping at the first error.
 func (a *Adapter) WriteSessionWorkspaceFiles(
 	ctx context.Context, sessionID string, files []sandbox.SessionWorkspaceFile,

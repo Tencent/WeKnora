@@ -1940,7 +1940,7 @@ func (h *TenantHandler) updateTenantAssistantConfigInternal(c *gin.Context) {
 		return
 	}
 	if cfg.MaxAccessLevel != "" && !cfg.MaxAccessLevel.Valid() {
-		_ = c.Error(errors.NewBadRequestError("max_access_level must be read_only, confirm or auto_write"))
+		_ = c.Error(errors.NewBadRequestError("max_access_level must be read_only, confirm, auto_write or full_auto"))
 		return
 	}
 	cfg.Normalize()

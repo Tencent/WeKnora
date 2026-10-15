@@ -63,6 +63,7 @@ func (t *MCPRegisteredTool) Execute(ctx context.Context, args json.RawMessage) (
 			current.authWaitTimeoutSeconds,
 		)
 		target.registeredName = t.Name()
+		target.assistantAccess = current.assistantAccess
 		return target.Execute(ctx, args)
 	}
 	return mcpDiscoveryFailure(
@@ -288,6 +289,7 @@ func (r *ToolRegistry) RefreshMCPTools(ctx context.Context) {
 			bound := NewMCPTool(tool.service, tool.mcpTool, tool.mcpManager, tool.gate, tool.authWaitTimeoutSeconds)
 			bound.registeredName = mcpRegisteredName(tool)
 			bound.serverInstructions = tool.serverInstructions
+			bound.assistantAccess = tool.assistantAccess
 			r.RegisterTool(&MCPRegisteredTool{MCPTool: bound, catalog: c, ref: mcpToolRef(tool)})
 			r.deferred[ToolCallMCPTool] = false
 		}

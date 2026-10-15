@@ -14,8 +14,8 @@ import (
 
 // ConfirmedTool asks the user before running a tool that changes data, the
 // way run_operation does for catalog operations, so the assistant's access
-// level covers its direct tools too. A call resumed with the user's answer
-// is honored whatever the level is now: the user may have edited it.
+// level covers its direct tools too. A resumed answer preserves declines and
+// edited arguments, but cannot override a read-only access level.
 type ConfirmedTool struct {
 	inner  types.Tool
 	risk   operations.Risk
@@ -41,6 +41,10 @@ func (t *ConfirmedTool) Parameters() json.RawMessage { return t.inner.Parameters
 
 // Execute runs the inner tool once the access level allows it.
 func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	// A prior approval cannot override the access level of the resumed run.
+	if t.access.Level == types.AssistantAccessReadOnly && t.risk.Mutates() {
+		return operationFailure("The assistant is read-only; this tool cannot change data."), nil
+	}
 	meta, _ := ToolExecFromContext(ctx)
 	resumed := meta != nil && meta.Answered != nil && meta.Answered.Kind == types.AgentPromptKindToolApproval
 	if !resumed && !t.access.NeedsApprovalFor(t.risk) {
@@ -107,6 +111,9 @@ func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	defer t.gate.MarkExecuted(ctx, decision.PendingID)
 	if len(decision.ModifiedArgs) > 0 {
 		args = decision.ModifiedArgs
+		if errs := ValidateParams(args, t.inner.Parameters()); len(errs) > 0 {
+			return operationFailure("Invalid modified_args after approval: " + FormatValidationErrors(errs)), nil
+		}
 	}
 	// Waiting for the user may have used up the per-tool budget; the call
 	// itself gets a full window from the round context.
@@ -125,12 +132,14 @@ func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 // confirmedToolSummaries name each wrapped tool on the confirmation card, in
 // Chinese and English.
 var confirmedToolSummaries = map[string][2]string{
-	ToolWikiWritePage:   {"写入 Wiki 页面", "Write a Wiki page"},
-	ToolWikiReplaceText: {"修改 Wiki 页面内容", "Edit Wiki page text"},
-	ToolWikiRenamePage:  {"重命名 Wiki 页面", "Rename a Wiki page"},
-	ToolWikiDeletePage:  {"删除 Wiki 页面", "Delete a Wiki page"},
-	ToolWikiFlagIssue:   {"登记 Wiki 问题", "Flag a Wiki issue"},
-	ToolWikiUpdateIssue: {"更新 Wiki 问题状态", "Update a Wiki issue"},
+	ToolWriteSandboxFile: {"写入文件", "Write a file"},
+	ToolEditSandboxFile:  {"编辑文件", "Edit a file"},
+	ToolWikiWritePage:    {"写入 Wiki 页面", "Write a Wiki page"},
+	ToolWikiReplaceText:  {"修改 Wiki 页面内容", "Edit Wiki page text"},
+	ToolWikiRenamePage:   {"重命名 Wiki 页面", "Rename a Wiki page"},
+	ToolWikiDeletePage:   {"删除 Wiki 页面", "Delete a Wiki page"},
+	ToolWikiFlagIssue:    {"登记 Wiki 问题", "Flag a Wiki issue"},
+	ToolWikiUpdateIssue:  {"更新 Wiki 问题状态", "Update a Wiki issue"},
 }
 
 func confirmedToolSummary(ctx context.Context, name string, args json.RawMessage) string {
@@ -142,6 +151,7 @@ func confirmedToolSummary(ctx context.Context, name string, args json.RawMessage
 		}
 	}
 	var fields struct {
+		Path    string `json:"path"`
 		Slug    string `json:"slug"`
 		NewSlug string `json:"new_slug"`
 		Status  string `json:"status"`
@@ -149,7 +159,9 @@ func confirmedToolSummary(ctx context.Context, name string, args json.RawMessage
 	if json.Unmarshal(args, &fields) != nil {
 		return summary
 	}
-	if fields.Slug != "" {
+	if fields.Path != "" {
+		summary += ": " + fields.Path
+	} else if fields.Slug != "" {
 		summary += ": " + fields.Slug
 		if fields.NewSlug != "" {
 			summary += " → " + fields.NewSlug

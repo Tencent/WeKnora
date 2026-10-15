@@ -6130,15 +6130,19 @@ export default {
         levels: {
         read_only: {
           label: 'Read only',
-          desc: 'Looks, never changes anything'
+          desc: 'Reads only; external tools, commands and file writes are disabled'
         },
         confirm: {
           label: 'Ask first',
           desc: 'Asks you before every change or deletion'
         },
         auto_write: {
-          label: 'Auto',
-          desc: 'Makes recoverable changes directly; still asks before deleting'
+          label: 'Safe auto',
+          desc: 'Runs recoverable changes automatically; deletions, file changes without backups, external tools and commands need confirmation'
+        },
+        full_auto: {
+          label: 'Fully automatic',
+          desc: 'No confirmation within your permissions, including overwrites, deletions, external tools and commands'
         }
       }
     },

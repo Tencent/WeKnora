@@ -229,6 +229,10 @@ func (s *agentService) CreateAgentEngine(
 
 	// 2. Build tool registry
 	toolRegistry := tools.NewToolRegistry()
+	if config.OperationsAgentID != "" {
+		gate, _ := s.toolApprovalGate.(approval.BuiltinApproval)
+		toolRegistry.SetAssistantAccess(config.AssistantAccess, gate)
+	}
 	if config.MaxToolOutputChars > 0 {
 		toolRegistry.SetMaxToolOutputSize(config.MaxToolOutputChars)
 	}
@@ -352,6 +356,12 @@ func (s *agentService) registerMCPTools(
 	}
 
 	mcpMode := config.MCPSelectionMode
+	if config.OperationsAgentID != "" && (config.AssistantAccess == types.AssistantAccessReadOnly ||
+		(mcpMode != "all" && mcpMode != "selected")) {
+		// Old persisted assistants must not inherit the general agent's
+		// empty-means-all default, or discover/launch external services in read-only mode.
+		return
+	}
 	if mcpMode == "" {
 		mcpMode = "all"
 	}
@@ -1403,29 +1413,12 @@ func (s *agentService) registerTools(
 			if toolToRegister.Name() != toolName {
 				logger.Warnf(ctx, "Tool name mismatch: expected %s, got %s", toolName, toolToRegister.Name())
 			}
-			if risk, writes := assistantWriteToolRisk[toolName]; writes && config.OperationsAgentID != "" {
-				gate, _ := s.toolApprovalGate.(approval.BuiltinApproval)
-				toolToRegister = tools.NewConfirmedTool(toolToRegister, risk,
-					operations.Access{Level: config.AssistantAccess}, gate)
-			}
 			registry.RegisterTool(toolToRegister)
 		}
 	}
 
 	logger.Infof(ctx, "Registered %d tools", len(registry.ListTools()))
 	return nil
-}
-
-// assistantWriteToolRisk are the direct tools of the WeKnora assistant that
-// change data outside the operation catalog. Its access level decides which
-// of them ask the user first, as it does for catalog operations.
-var assistantWriteToolRisk = map[string]operations.Risk{
-	tools.ToolWikiWritePage:   operations.RiskWrite,
-	tools.ToolWikiReplaceText: operations.RiskWrite,
-	tools.ToolWikiRenamePage:  operations.RiskWrite,
-	tools.ToolWikiFlagIssue:   operations.RiskWrite,
-	tools.ToolWikiUpdateIssue: operations.RiskWrite,
-	tools.ToolWikiDeletePage:  operations.RiskDestructive,
 }
 
 // withoutWikiWriteTools drops the tools that write Wiki state. They execute

@@ -504,6 +504,24 @@ func TestRunOperationFollowsAccessLevel(t *testing.T) {
 		assert.Len(t, gate.requests, 1)
 	})
 
+	t.Run("full_auto runs writes and deletions without an approval broker", func(t *testing.T) {
+		d := &fakeDispatcher{responses: responses}
+		tool := newTool(types.AssistantAccessFullAuto, d, nil)
+		for _, args := range []json.RawMessage{reparse, remove} {
+			res, err := tool.Execute(context.Background(), args)
+			require.NoError(t, err)
+			require.True(t, res.Success, res.Error)
+		}
+		require.Len(t, d.calls, 2)
+		require.Contains(t, tool.Description(), "without confirmation")
+		tool.rt.Access.Role, tool.rt.Access.EnforceRole = types.TenantRoleViewer, true
+		res, err := tool.Execute(context.Background(), remove)
+		require.NoError(t, err)
+		require.False(t, res.Success)
+		require.Contains(t, res.Error, "contributor")
+		require.Len(t, d.calls, 2)
+	})
+
 	t.Run("read_only refuses every change", func(t *testing.T) {
 		d := &fakeDispatcher{responses: responses}
 		gate := &fakeApprover{decision: approval.Decision{Approved: true, PendingID: "p1"}}

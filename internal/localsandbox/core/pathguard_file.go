@@ -100,6 +100,16 @@ func (g *PathGuard) allowRead(path string) (root, rel string, err error) {
 // WriteFile creates or replaces path after walking from a writable root
 // without following symlinks.
 func (g *PathGuard) WriteFile(path string, data []byte, perm os.FileMode) error {
+	return g.writeFile(path, data, perm, false)
+}
+
+// CreateFile atomically refuses existing paths with os.ErrExist. It uses the
+// same path guard as WriteFile but never truncates an existing file.
+func (g *PathGuard) CreateFile(path string, data []byte, perm os.FileMode) error {
+	return g.writeFile(path, data, perm, true)
+}
+
+func (g *PathGuard) writeFile(path string, data []byte, perm os.FileMode, exclusive bool) error {
 	root, rel, err := g.allowWrite(path)
 	if err != nil {
 		return err
@@ -107,7 +117,7 @@ func (g *PathGuard) WriteFile(path string, data []byte, perm os.FileMode) error 
 	if rel == "." {
 		return fmt.Errorf("%w: %q", ErrPathDenied, path)
 	}
-	return g.writeRel(root, rel, path, data, perm)
+	return g.writeRel(root, rel, path, data, perm, exclusive)
 }
 
 // ReadFile reads path after walking from an allowed root without following

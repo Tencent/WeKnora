@@ -1,9 +1,9 @@
 import { get, put } from '@/utils/request'
 
 // Mirrors internal/types/assistant.go.
-export type AssistantAccessLevel = 'read_only' | 'confirm' | 'auto_write'
+export type AssistantAccessLevel = 'read_only' | 'confirm' | 'auto_write' | 'full_auto'
 
-export const ASSISTANT_ACCESS_LEVELS: AssistantAccessLevel[] = ['read_only', 'confirm', 'auto_write']
+export const ASSISTANT_ACCESS_LEVELS: AssistantAccessLevel[] = ['read_only', 'confirm', 'auto_write', 'full_auto']
 
 export const DEFAULT_ASSISTANT_ACCESS_LEVEL: AssistantAccessLevel = 'confirm'
 

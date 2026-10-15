@@ -19,6 +19,9 @@ const (
 	// AssistantAccessAutoWrite runs recoverable changes without asking; a
 	// destructive change still asks.
 	AssistantAccessAutoWrite AssistantAccessLevel = "auto_write"
+	// AssistantAccessFullAuto skips operation confirmations, including destructive
+	// changes, within the caller's permissions and enabled tool scopes.
+	AssistantAccessFullAuto AssistantAccessLevel = "full_auto"
 )
 
 // MaxAssistantDisplayNameRunes bounds the workspace's assistant name.
@@ -28,6 +31,7 @@ var assistantAccessRank = map[AssistantAccessLevel]int{
 	AssistantAccessReadOnly:  0,
 	AssistantAccessConfirm:   1,
 	AssistantAccessAutoWrite: 2,
+	AssistantAccessFullAuto:  3,
 }
 
 // Valid reports whether l is a known level.

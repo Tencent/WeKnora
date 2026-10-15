@@ -89,7 +89,7 @@ type CreateKnowledgeQARequest struct {
 	// PageContext is the WeKnora page the user has open (agent mode only).
 	PageContext *types.PageContext `json:"page_context,omitempty"`
 	// AssistantAccess is the WeKnora assistant access level: read_only,
-	// confirm or auto_write. The workspace ceiling caps it; other agents
+	// confirm, auto_write or full_auto. The workspace ceiling caps it; other agents
 	// ignore it.
 	AssistantAccess types.AssistantAccessLevel `json:"assistant_access,omitempty"`
 

@@ -139,3 +139,31 @@ func TestPathGuardCheckDirDoesNotFollowReplacedParent(t *testing.T) {
 	_, err = g.CheckDir(inner)
 	require.ErrorIs(t, err, ErrPathDenied)
 }
+
+func TestPathGuardCreateFileNeverOverwrites(t *testing.T) {
+	root, g := guardFixture(t)
+	target := filepath.Join(root, "new.txt")
+	const writers = 16
+	results := make(chan error, writers)
+	for i := 0; i < writers; i++ {
+		go func() { results <- g.CreateFile(target, []byte("original"), 0o644) }()
+	}
+	successes := 0
+	for i := 0; i < writers; i++ {
+		if err := <-results; err == nil {
+			successes++
+		} else {
+			require.ErrorIs(t, err, os.ErrExist)
+		}
+	}
+	require.Equal(t, 1, successes)
+	require.ErrorIs(t, g.CreateFile(target, nil, 0o644), os.ErrExist)
+	data, err := os.ReadFile(target)
+	require.NoError(t, err)
+	require.Equal(t, "original", string(data))
+	require.NoError(t, os.Symlink(target, filepath.Join(root, "link")))
+	require.Error(t, g.CreateFile(filepath.Join(root, "link"), nil, 0o644))
+	data, err = os.ReadFile(target)
+	require.NoError(t, err)
+	require.Equal(t, "original", string(data))
+}

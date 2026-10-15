@@ -74,6 +74,9 @@ func approvalPolicy(level types.AssistantAccessLevel) string {
 		return approvalPolicyReadOnly
 	case types.AssistantAccessAutoWrite:
 		return approvalPolicyAutoWrite
+	case types.AssistantAccessFullAuto:
+		return "All available operations run without confirmation, including destructive changes. " +
+			"Workspace roles, enabled capabilities and requested scope still apply."
 	default:
 		return approvalPolicyConfirm
 	}

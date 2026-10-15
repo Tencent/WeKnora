@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 )
 
-func (g *PathGuard) writeRel(root, rel, orig string, data []byte, perm os.FileMode) error {
+func (g *PathGuard) writeRel(root, rel, orig string, data []byte, perm os.FileMode, exclusive bool) error {
 	target, err := joinNoFollow(root, rel, orig)
 	if err != nil {
 		return err
@@ -16,7 +16,20 @@ func (g *PathGuard) writeRel(root, rel, orig string, data []byte, perm os.FileMo
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(target, data, perm)
+	flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	if exclusive {
+		flags = os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	}
+	f, err := os.OpenFile(target, flags, perm)
+	if err != nil {
+		return err
+	}
+	_, writeErr := f.Write(data)
+	closeErr := f.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	return closeErr
 }
 
 func (g *PathGuard) readRel(root, rel, orig string) ([]byte, error) {

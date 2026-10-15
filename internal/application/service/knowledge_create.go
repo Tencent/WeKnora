@@ -1001,6 +1001,8 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 // UpdateManualKnowledge updates manual Markdown knowledge content.
 // For publish status, the heavy operations (cleanup old indexes, re-chunking,
 // re-embedding) are offloaded to an Asynq task so the HTTP response returns quickly.
+// Version is a counter, not a recoverable snapshot. The agent catalog therefore
+// treats this whole-body replacement as destructive until reliable backups exist.
 func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 	knowledgeID string, payload *types.ManualKnowledgePayload,
 ) (*types.Knowledge, error) {

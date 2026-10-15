@@ -16,6 +16,7 @@ import (
 
 // ToolRegistry manages the registration and retrieval of tools
 type ToolRegistry struct {
+	assistantAccess   *assistantToolAccess
 	tools             map[string]types.Tool
 	deferred          map[string]bool
 	mcpDirect         bool // Full exposure is an explicit compatibility path.
@@ -67,10 +68,19 @@ func (r *ToolRegistry) RegisterDeferredTool(tool types.Tool) {
 
 func (r *ToolRegistry) registerTool(tool types.Tool, deferred bool) {
 	name := tool.Name()
+	if r.assistantAccess.blocks(name) {
+		return
+	}
 	if _, exists := r.tools[name]; exists {
 		logger.Warnf(context.Background(),
 			"[ToolRegistry] Duplicate tool registration rejected: %s (first-wins policy)", name)
 		return
+	}
+	switch mcpTool := tool.(type) {
+	case *MCPTool:
+		mcpTool.assistantAccess = r.assistantAccess
+	case *MCPRegisteredTool:
+		mcpTool.assistantAccess = r.assistantAccess
 	}
 	r.tools[name] = tool
 	if r.deferred == nil {
@@ -201,6 +211,9 @@ func (r *ToolRegistry) ExecuteTool(
 // must validate the target schema and retain the original result, not just
 // validate its outer arguments or bypass the execution pipeline.
 func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.RawMessage) (*types.ToolResult, error) {
+	if r.assistantAccess.blocks(tool.Name()) {
+		return operationFailure("The assistant is read-only; this tool may change data and cannot run."), nil
+	}
 	if err := ctx.Err(); err != nil {
 		return &types.ToolResult{Success: false, Error: err.Error()}, err
 	}
@@ -248,7 +261,7 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 			maxOutput = toolLimit
 		}
 	}
-	result, execErr := executeRecovered(WithOutputBudget(ctx, maxOutput), tool, args)
+	result, execErr := executeRecovered(WithOutputBudget(ctx, maxOutput), r.assistantExecutionTool(tool), args)
 	if result == nil {
 		result = &types.ToolResult{Success: false, Error: "tool returned no result"}
 	}

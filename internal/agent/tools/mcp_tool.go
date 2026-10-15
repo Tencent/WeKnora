@@ -21,10 +21,11 @@ type MCPInput = map[string]any
 
 // MCPTool wraps an MCP service tool to implement the Tool interface
 type MCPTool struct {
-	service    *types.MCPService
-	mcpTool    *types.MCPTool
-	mcpManager *mcp.MCPManager
-	gate       approval.MCPApproval // optional human approval before CallTool (issue #1173)
+	service         *types.MCPService
+	mcpTool         *types.MCPTool
+	mcpManager      *mcp.MCPManager
+	gate            approval.MCPApproval // optional human approval before CallTool (issue #1173)
+	assistantAccess *assistantToolAccess
 	// authWaitTimeoutSeconds carries the agent-level, user-configured OAuth wait
 	// timeout (seconds) applied when a tool call triggers in-conversation auth.
 	// <=0 uses the gate's configured default.
@@ -140,6 +141,23 @@ func (t *MCPTool) callToolTimeout(engineTimeout time.Duration) time.Duration {
 
 // Execute executes the MCP tool
 func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if t.assistantAccess.blocks(t.Name()) {
+		return operationFailure("The assistant is read-only; external MCP calls cannot run."), nil
+	}
+	// MCP metadata is supplied by the external server, so even a claimed
+	// read-only tool has unknown effects. Only explicit full_auto skips approval.
+	assistantApproval := t.assistantAccess != nil && t.assistantAccess.Level != types.AssistantAccessFullAuto
+	if t.assistantAccess != nil {
+		meta, _ := ToolExecFromContext(ctx)
+		resumed := meta != nil && meta.Answered != nil && meta.Answered.Kind == types.AgentPromptKindToolApproval
+		if t.gate == nil {
+			return disabledMCPToolResult(nil), nil
+		}
+		if (assistantApproval || resumed) && (t.assistantAccess.gate == nil || meta == nil || meta.EventBus == nil ||
+			(!meta.Interactive && !resumed)) {
+			return operationFailure("External MCP calls need the user's confirmation, which cannot be shown here."), nil
+		}
+	}
 	logger.GetLogger(ctx).Infof("Executing MCP tool: %s from service: %s", t.mcpTool.Name, t.service.Name)
 
 	// Re-check the policy at call time as well as during registration. An agent
@@ -180,7 +198,8 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 			// even if the tool stopped requiring approval meanwhile, since the
 			// user may have edited the arguments.
 			resumed := meta.Answered != nil && meta.Answered.Kind == types.AgentPromptKindToolApproval
-			if resumed || t.gate.NeedsApproval(ctx, tenantID, t.service.ID, t.mcpTool.Name) {
+			if resumed || assistantApproval ||
+				(t.assistantAccess == nil && t.gate.NeedsApproval(ctx, tenantID, t.service.ID, t.mcpTool.Name)) {
 				// Use ApprovalCtx (round-level ctx WITHOUT defaultToolExecTimeout) so
 				// human approval can legitimately wait longer than the per-tool 60s.
 				// User-stop / request cancel still propagates because ApprovalCtx is a
@@ -192,7 +211,11 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 				var decision approval.Decision
 				var waitErr error
 				if resumed {
-					decision = t.gate.ResumeDecision(waitCtx, meta.Answered, meta.EventBus)
+					if t.assistantAccess != nil {
+						decision = t.assistantAccess.gate.ResumeDecision(waitCtx, meta.Answered, meta.EventBus)
+					} else {
+						decision = t.gate.ResumeDecision(waitCtx, meta.Answered, meta.EventBus)
+					}
 				} else {
 					var snapshot []byte
 					var snapshotVersion int
@@ -204,7 +227,7 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 							snapshot = nil
 						}
 					}
-					decision, waitErr = t.gate.RequestAndWait(waitCtx, approval.PendingRequest{
+					pending := approval.PendingRequest{
 						Snapshot:        snapshot,
 						SnapshotVersion: snapshotVersion,
 						// The user answers from their own workspace, which differs
@@ -222,7 +245,14 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 						Description:        t.mcpTool.Description,
 						Args:               args,
 						ToolCallID:         meta.ToolCallID,
-					})
+					}
+					if t.assistantAccess != nil {
+						// Unlike the optional MCP gate, this never auto-approves
+						// when the per-tool policy store is absent.
+						decision, waitErr = t.assistantAccess.gate.RequestBuiltinApproval(waitCtx, pending)
+					} else {
+						decision, waitErr = t.gate.RequestAndWait(waitCtx, pending)
+					}
 				}
 				if waitErr != nil {
 					return &types.ToolResult{
@@ -247,7 +277,11 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 						Error:   msg,
 					}, nil
 				}
-				defer t.gate.MarkExecuted(ctx, decision.PendingID)
+				if t.assistantAccess != nil {
+					defer t.assistantAccess.gate.MarkExecuted(ctx, decision.PendingID)
+				} else {
+					defer t.gate.MarkExecuted(ctx, decision.PendingID)
+				}
 				if len(decision.ModifiedArgs) > 0 {
 					args = decision.ModifiedArgs
 					if err := t.ValidateArguments(args); err != nil {
@@ -662,6 +696,9 @@ func RegisterMCPTools(
 	lookup MCPServiceLookup,
 	metadata *MCPMetadataIO,
 ) (int, error) {
+	if registry.assistantAccess.blocks(ToolCallMCPTool) {
+		return 0, nil
+	}
 	catalog := newMCPCatalog(
 		ctx,
 		services,
@@ -683,6 +720,7 @@ func RegisterMCPTools(
 				}
 				seen[definition.Name] = true
 				tool := NewMCPTool(service, definition, mcpManager, gate, authWaitTimeoutSeconds)
+				tool.assistantAccess = registry.assistantAccess
 				tool.serverInstructions = instructions
 				tools = append(tools, tool)
 			}
