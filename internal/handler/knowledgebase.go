@@ -855,13 +855,9 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
-	// The VLM model is a KB setting: like PUT /initialization/config, only the
-	// owner workspace or an admin share may change it, not a share editor.
-	if req.VLMConfig != nil {
-		if _, err := kbSettingsAccess(c, currentKB); err != nil {
-			_ = c.Error(err)
-			return
-		}
+	if err := validateKnowledgeBaseSettingsUpdate(c, currentKB, req.Config, req.VLMConfig); err != nil {
+		_ = c.Error(err)
+		return
 	}
 	if req.Config != nil {
 		probe := &types.KnowledgeBase{
@@ -899,6 +895,28 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		"success": true,
 		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
 	})
+}
+
+// validateKnowledgeBaseSettingsUpdate applies the same settings permissions to
+// PUT and PATCH. Shared editors may edit content, while model settings require
+// an admin share. Only the owner workspace may change the storage binding.
+func validateKnowledgeBaseSettingsUpdate(
+	c *gin.Context, kb *types.KnowledgeBase, cfg *types.KnowledgeBaseConfig, vlm *types.VLMConfig,
+) error {
+	settings := vlm != nil || cfg != nil && (cfg.EmbeddingModelID != nil || cfg.SummaryModelID != nil ||
+		cfg.StorageBackendID != nil || cfg.ASRConfig != nil)
+	if !settings {
+		return nil
+	}
+	ownWorkspace, err := kbSettingsAccess(c, kb)
+	if err != nil {
+		return err
+	}
+	if !ownWorkspace && cfg != nil && cfg.StorageBackendID != nil &&
+		kbStorageBindingChanged(kb, *cfg.StorageBackendID, "") {
+		return apperrors.NewForbiddenError("只有知识库所属空间可以修改存储配置")
+	}
+	return nil
 }
 
 // PatchKnowledgeBaseRequest changes the settings it carries. A field left
@@ -1102,11 +1120,6 @@ func applyKnowledgeBasePatch(
 	return out, nil
 }
 
-func sectionPresent(sections map[string]json.RawMessage, key string) bool {
-	raw, ok := sections[key]
-	return ok && len(raw) > 0 && string(raw) != "null"
-}
-
 // fillOmittedIndexingFlags keeps DefaultIndexingStrategy for flags the
 // create body did not mention.
 func fillOmittedIndexingFlags(raw []byte, kb *types.KnowledgeBase) {
@@ -1181,15 +1194,12 @@ func (h *KnowledgeBaseHandler) PatchKnowledgeBase(c *gin.Context) {
 		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
-	if patch.EmbeddingModelID != nil || patch.SummaryModelID != nil || patch.StorageBackendID != nil ||
-		sectionPresent(sections, "vlm_config") || sectionPresent(sections, "asr_config") {
-		if _, err := kbSettingsAccess(c, currentKB); err != nil {
-			_ = c.Error(err)
-			return
-		}
-	}
 	update, err := applyKnowledgeBasePatch(currentKB, patch, sections)
 	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	if err := validateKnowledgeBaseSettingsUpdate(c, currentKB, update.Config, update.VLM); err != nil {
 		_ = c.Error(err)
 		return
 	}

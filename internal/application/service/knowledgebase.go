@@ -662,15 +662,13 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 			kb.SummaryModelID = next
 		}
 		if config.StorageBackendID != nil {
-			id := strings.TrimSpace(*config.StorageBackendID)
-			if id == "" {
-				return nil, apperrors.NewBadRequestError("storage_backend_id cannot be empty")
-			}
-			kb.StorageBackendID = &id
-			if err := s.applyAndValidateStorageBackend(ctx, kb); err != nil {
+			changed, err := s.updateStorageBackend(ctx, kb, *config.StorageBackendID)
+			if err != nil {
 				return nil, err
 			}
-			changedFields = append(changedFields, "storage_backend_id")
+			if changed {
+				changedFields = append(changedFields, "storage_backend_id")
+			}
 		}
 		if config.ASRConfig != nil {
 			if config.ASRConfig.Enabled {
@@ -721,6 +719,39 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 
 	logger.Infof(ctx, "Knowledge base updated successfully, ID: %s, name: %s", kb.ID, kb.Name)
 	return kb, nil
+}
+
+// updateStorageBackend preserves existing file locations. Echoing a binding is
+// a no-op, including for shared KBs whose storage belongs to another workspace.
+func (s *knowledgeBaseService) updateStorageBackend(
+	ctx context.Context, kb *types.KnowledgeBase, id string,
+) (bool, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false, apperrors.NewBadRequestError("storage_backend_id cannot be empty")
+	}
+	if kb.StorageBackendID != nil && strings.TrimSpace(*kb.StorageBackendID) == id {
+		return false, nil
+	}
+	if types.CallerFromContext(ctx).TenantID != kb.TenantID {
+		return false, apperrors.NewForbiddenError("只有知识库所属空间可以修改存储配置")
+	}
+	total, err := s.kgRepo.CountKnowledgeByKnowledgeBaseID(ctx, kb.TenantID, kb.ID)
+	if err != nil {
+		return false, fmt.Errorf("check files before changing storage backend: %w", err)
+	}
+	if total > 0 {
+		return false, apperrors.NewBadRequestError(
+			"Storage backend cannot be changed while the knowledge base contains files; migrate storage first")
+	}
+	next := *kb
+	next.StorageBackendID = &id
+	if err := s.applyAndValidateStorageBackend(ctx, &next); err != nil {
+		return false, err
+	}
+	kb.StorageBackendID = next.StorageBackendID
+	kb.StorageProviderConfig = next.StorageProviderConfig
+	return true, nil
 }
 
 func (s *knowledgeBaseService) rejectEmbeddingModelChange(

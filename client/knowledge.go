@@ -865,7 +865,8 @@ type BatchUpdateKnowledgeTagsRequest struct {
 	Updates      map[string]*string `json:"updates,omitempty"` // knowledge_id -> tag_id (nil to clear)
 	KBID         string             `json:"kb_id,omitempty"`
 	KnowledgeIDs []string           `json:"knowledge_ids,omitempty"`
-	TagIDs       []string           `json:"tag_ids,omitempty"`
+	// Keep an explicit empty array on the wire; nil remains null and is rejected in the list form.
+	TagIDs []string `json:"tag_ids"`
 }
 
 // CreateManualKnowledge creates a knowledge entry from manual Markdown content.

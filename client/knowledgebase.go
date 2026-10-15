@@ -368,25 +368,25 @@ func (c *Client) UpdateKnowledgeBase(ctx context.Context,
 // A nil field is left unchanged. Nested objects use pointers so a false or
 // zero value can be sent without the other fields being cleared.
 type PatchKnowledgeBaseRequest struct {
-	Name             *string                `json:"name,omitempty"`
-	Description      *string                `json:"description,omitempty"`
-	EmbeddingModelID *string                `json:"embedding_model_id,omitempty"`
-	SummaryModelID   *string                `json:"summary_model_id,omitempty"`
-	StorageBackendID *string                `json:"storage_backend_id,omitempty"`
-	ChunkingConfig   *PatchChunkingConfig   `json:"chunking_config,omitempty"`
-	IndexingStrategy *PatchIndexingStrategy `json:"indexing_strategy,omitempty"`
-	VLMConfig        *PatchVLMConfig        `json:"vlm_config,omitempty"`
-	ASRConfig        *ASRConfig             `json:"asr_config,omitempty"`
-	FAQConfig        *FAQConfig             `json:"faq_config,omitempty"`
-	AutoTagConfig    *AutoTagConfig         `json:"auto_tag_config,omitempty"`
-	ImageProcessing  *ImageProcessingConfig `json:"image_processing_config,omitempty"`
+	Name             *string                     `json:"name,omitempty"`
+	Description      *string                     `json:"description,omitempty"`
+	EmbeddingModelID *string                     `json:"embedding_model_id,omitempty"`
+	SummaryModelID   *string                     `json:"summary_model_id,omitempty"`
+	StorageBackendID *string                     `json:"storage_backend_id,omitempty"`
+	ChunkingConfig   *PatchChunkingConfig        `json:"chunking_config,omitempty"`
+	IndexingStrategy *PatchIndexingStrategy      `json:"indexing_strategy,omitempty"`
+	VLMConfig        *PatchVLMConfig             `json:"vlm_config,omitempty"`
+	ASRConfig        *PatchASRConfig             `json:"asr_config,omitempty"`
+	FAQConfig        *PatchFAQConfig             `json:"faq_config,omitempty"`
+	AutoTagConfig    *PatchAutoTagConfig         `json:"auto_tag_config,omitempty"`
+	ImageProcessing  *PatchImageProcessingConfig `json:"image_processing_config,omitempty"`
 }
 
 // PatchChunkingConfig is the partial chunking update. Nil fields stay as they are.
 type PatchChunkingConfig struct {
-	ChunkSize    *int     `json:"chunk_size,omitempty"`
-	ChunkOverlap *int     `json:"chunk_overlap,omitempty"`
-	Separators   []string `json:"separators,omitempty"`
+	ChunkSize    *int      `json:"chunk_size,omitempty"`
+	ChunkOverlap *int      `json:"chunk_overlap,omitempty"`
+	Separators   *[]string `json:"separators,omitempty"`
 }
 
 // PatchIndexingStrategy is the partial indexing update. Nil flags stay as they are.
@@ -403,8 +403,33 @@ type PatchVLMConfig struct {
 	ModelID *string `json:"model_id,omitempty"`
 }
 
-// PatchKnowledgeBase updates the name or description and leaves indexing,
-// models and the rest of the configuration unchanged.
+// PatchASRConfig changes only the speech-recognition fields provided.
+type PatchASRConfig struct {
+	Enabled  *bool   `json:"enabled,omitempty"`
+	ModelID  *string `json:"model_id,omitempty"`
+	Language *string `json:"language,omitempty"`
+}
+
+// PatchFAQConfig changes only the FAQ indexing fields provided.
+type PatchFAQConfig struct {
+	IndexMode         *string `json:"index_mode,omitempty"`
+	QuestionIndexMode *string `json:"question_index_mode,omitempty"`
+}
+
+// PatchAutoTagConfig changes only the automatic tagging fields provided.
+type PatchAutoTagConfig struct {
+	Enabled      *bool   `json:"enabled,omitempty"`
+	ModelID      *string `json:"model_id,omitempty"`
+	MaxTags      *int    `json:"max_tags,omitempty"`
+	SkipIfTagged *bool   `json:"skip_if_tagged,omitempty"`
+}
+
+// PatchImageProcessingConfig changes only the image settings provided.
+type PatchImageProcessingConfig struct {
+	ModelID *string `json:"model_id,omitempty"`
+}
+
+// PatchKnowledgeBase changes the supplied settings and preserves omitted fields.
 func (c *Client) PatchKnowledgeBase(ctx context.Context,
 	knowledgeBaseID string,
 	request *PatchKnowledgeBaseRequest,
