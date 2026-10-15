@@ -279,3 +279,109 @@ func TestBuiltinMatchesHandlerAnnotations(t *testing.T) {
 	}
 	assert.Equal(t, declared, built, "docs/swagger.json is stale; run make docs")
 }
+
+func TestFromSpecProjectsNestedListMeta(t *testing.T) {
+	const spec = `{
+	  "basePath": "/api/v1",
+	  "definitions": {
+	    "Page": {"type": "object", "properties": {
+	      "total": {"type": "integer", "x-agent": true},
+	      "data": {"type": "array", "items": {"type": "object", "properties": {
+	        "name": {"type": "string", "x-agent": true}
+	      }}}
+	    }}
+	  },
+	  "paths": {
+	    "/tags/{id}": {"get": {
+	      "summary": "Tags",
+	      "x-agent": {"id": "tag.list", "risk": "read", "root": "data.data"},
+	      "parameters": [
+	        {"name": "id", "in": "path", "type": "string", "required": true, "description": "KB",
+	         "x-agent": "knowledge_base_id"}
+	      ],
+	      "responses": {"200": {"schema": {"type": "object", "properties": {
+	        "success": {"type": "boolean"},
+	        "data": {"$ref": "#/definitions/Page"}
+	      }}}}
+	    }}
+	  }
+	}`
+	ops, err := FromSpec([]byte(spec))
+	require.NoError(t, err)
+	catalog, err := NewCatalog(ops...)
+	require.NoError(t, err)
+	list, _ := catalog.Get("tag.list")
+	assert.Equal(t, []Field{{From: "data.total", As: "total"}}, list.Result.Meta)
+
+	projected, err := list.Project([]byte(`{"success":true,"data":{"total":3,"page":1,"data":[{"name":"a"}]}}`))
+	require.NoError(t, err)
+	out, _ := json.Marshal(projected)
+	assert.JSONEq(t, `{"data":[{"name":"a"}],"meta":{"total":3}}`, string(out))
+}
+
+func TestBuildAllowsDeclaredLongStrings(t *testing.T) {
+	op := Operation{
+		Method: http.MethodPost,
+		Params: []Param{{
+			Name: "content", In: InBody, Key: "content", Type: TypeString,
+			Description: "body", MaxBytes: maxAgentStringBytes,
+		}},
+	}
+	body := strings.Repeat("文", 5000)
+	raw, err := json.Marshal(body)
+	require.NoError(t, err)
+	call, err := op.Build(map[string]json.RawMessage{"content": raw})
+	require.NoError(t, err)
+	assert.Greater(t, len(call.Body), maxStringParamBytes)
+
+	op.Params[0].MaxBytes = 0
+	_, err = op.Build(map[string]json.RawMessage{"content": raw})
+	assert.Error(t, err)
+}
+
+func TestBuiltinListAndDocumentLimits(t *testing.T) {
+	catalog := Builtin()
+
+	manual, ok := catalog.Get("knowledge.create_manual")
+	require.True(t, ok)
+	content, ok := manual.Param("content")
+	require.True(t, ok)
+	assert.Equal(t, maxAgentStringBytes, content.MaxBytes)
+
+	list, ok := catalog.Get("knowledge_base.list")
+	require.True(t, ok)
+	assert.Equal(t, 200, list.Result.MaxItems)
+	shared, _ := catalog.Get("knowledge_base.list_shared")
+	assert.Equal(t, 200, shared.Result.MaxItems)
+	folders, _ := catalog.Get("knowledge.list_folders")
+	assert.Equal(t, 200, folders.Result.MaxItems)
+	assert.Contains(t, folders.Result.Meta, Field{From: "data.root_document_count", As: "root_document_count"})
+	wikiFolders, _ := catalog.Get("wiki.list_folders")
+	assert.Equal(t, 200, wikiFolders.Result.MaxItems)
+
+	tags, ok := catalog.Get("knowledge_base.list_tags")
+	require.True(t, ok)
+	assert.Equal(t, 50, tags.Result.MaxItems)
+	pageSize, ok := tags.Param("page_size")
+	require.True(t, ok)
+	assert.Equal(t, 50, pageSize.Maximum)
+	assert.Contains(t, tags.Result.Meta, Field{From: "data.total", As: "total"})
+
+	revisions, ok := catalog.Get("wiki.list_revisions")
+	require.True(t, ok)
+	version, ok := revisions.Param("content_version")
+	require.True(t, ok)
+	assert.Equal(t, 1, version.Minimum)
+	revert, ok := catalog.Get("wiki.revert")
+	require.True(t, ok)
+	revertVersion, ok := revert.Param("version")
+	require.True(t, ok)
+	assert.Equal(t, 1, revertVersion.Minimum)
+	var contentField Field
+	for _, f := range revisions.Result.Fields {
+		if f.As == "content" {
+			contentField = f
+		}
+	}
+	assert.Equal(t, Field{From: "content", As: "content", MaxRunes: 8000}, contentField)
+}

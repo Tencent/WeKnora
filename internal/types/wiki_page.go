@@ -331,7 +331,7 @@ type WikiPageRevision struct {
 	Title           string      `json:"title" gorm:"type:varchar(512)" extensions:"x-agent"`
 	PageType        string      `json:"page_type" gorm:"type:varchar(32)"`
 	Status          string      `json:"status" gorm:"type:varchar(32)"`
-	Content         string      `json:"content,omitempty" gorm:"type:text"`
+	Content         string      `json:"content,omitempty" gorm:"type:text" extensions:"x-agent,x-agent-max-runes=8000"`
 	Summary         string      `json:"summary" gorm:"type:text" extensions:"x-agent"`
 	Aliases         StringArray `json:"aliases" gorm:"type:json"`
 	// Author of THIS version (same semantics as WikiPage.LastEditSource).
@@ -412,8 +412,8 @@ type WikiPageRevisionListResponse struct {
 type WikiPageRevertRequest struct {
 	// Slug of the page to revert.
 	Slug string `json:"slug" binding:"required" extensions:"x-agent"`
-	// Revision to restore.
-	Version int `json:"version" binding:"required" extensions:"x-agent"`
+	// Revision to restore. Versions start at 1.
+	Version int `json:"version" binding:"required" minimum:"1" extensions:"x-agent"`
 }
 
 // WikiFolderRootID is the sentinel parent/folder id meaning "the wiki root"

@@ -247,6 +247,47 @@ func TestOperationIdentityOnlyForSignedInWebUsers(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestRunOperationApprovalNamesTheChange(t *testing.T) {
+	kb := `{"success":true,"data":{"id":"kb1","name":"Specs"}}`
+	d := &fakeDispatcher{responses: map[string]*operations.Response{
+		"GET /api/v1/knowledge-bases/kb1": {Status: http.StatusOK, Body: []byte(kb)},
+		"GET /api/v1/knowledge/k1":        {Status: http.StatusOK, Body: []byte(docBody)},
+		"POST /api/v1/knowledge-bases/kb1/knowledge/url": {
+			Status: http.StatusCreated,
+			Body:   []byte(`{"success":true,"data":{"id":"k9","title":"Imported"}}`),
+		},
+		"POST /api/v1/knowledge/folder": {
+			Status: http.StatusOK,
+			Body:   []byte(`{"success":true,"data":{"moved_count":1,"folder_path":"docs/spec"}}`),
+		},
+	}}
+	gate := &fakeApprover{decision: approval.Decision{Approved: true, PendingID: "p1"}}
+	tool := newRunTool(d, gate)
+
+	res, _ := tool.Execute(interactiveCtx(), runArgs("knowledge.create_from_url", map[string]any{
+		"knowledge_base_id": "kb1",
+		"url":               "https://example.com/spec",
+	}))
+	require.True(t, res.Success, res.Error)
+	require.NotEmpty(t, gate.requests)
+	assert.Contains(t, gate.requests[0].Description, "Specs")
+	assert.Contains(t, gate.requests[0].Description, "https://example.com/spec")
+
+	gate.requests = nil
+	res, _ = tool.Execute(interactiveCtx(), runArgs("knowledge.move_to_folder", map[string]any{
+		"knowledge_base_id": "kb1",
+		"knowledge_ids":     []string{"k1"},
+		"folder_path":       "docs/spec",
+	}))
+	require.True(t, res.Success, res.Error)
+	require.NotEmpty(t, gate.requests)
+	desc := gate.requests[len(gate.requests)-1].Description
+	assert.Contains(t, desc, "Specs")
+	assert.Contains(t, desc, "docs/spec")
+	assert.Contains(t, desc, "Q3 report.pdf")
+	assert.NotContains(t, desc, "k1")
+}
+
 func TestFindOperationsDescribesMatches(t *testing.T) {
 	tool := NewFindOperationsTool(operations.Builtin())
 	res, err := tool.Execute(context.Background(), json.RawMessage(`{"query":"delete"}`))

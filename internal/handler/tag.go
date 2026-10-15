@@ -76,15 +76,15 @@ func (h *TagHandler) getChunksBySeqIDs(ctx context.Context, tenantID uint64, seq
 // @Accept       json
 // @Produce      json
 // @Param        id         path      string  true   "知识库ID"  extensions(x-agent=knowledge_base_id)
-// @Param        page       query     int     false  "页码"  extensions(x-agent,x-agent-maximum=10000)
-// @Param        page_size  query     int     false  "每页数量"  extensions(x-agent,x-agent-maximum=100)
+// @Param        page       query     int     false  "页码"  minimum(1)  extensions(x-agent,x-agent-maximum=10000)
+// @Param        page_size  query     int     false  "每页数量"  minimum(1)  extensions(x-agent,x-agent-maximum=50)
 // @Param        keyword    query     string  false  "关键词搜索"  extensions(x-agent)
 // @Success      200        {object}  handler.DataResponse{data=handler.TagPageResult}  "标签列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @x-agent      {"id":"knowledge_base.list_tags","risk":"read","root":"data.data"}
-// @x-agent-hint "Tags of a knowledge base with how many documents use each; pass tag ids to knowledge.list tag_ids to filter by them."
+// @x-agent      {"id":"knowledge_base.list_tags","risk":"read","root":"data.data","max_items":50}
+// @x-agent-hint "Tags of a knowledge base with how many documents use each. meta.total is the full count; pass tag ids to knowledge.list tag_ids. Ask for at most 50 per page."
 // @Router       /knowledge-bases/{id}/tags [get]
 func (h *TagHandler) ListTags(c *gin.Context) {
 	ctx := c.Request.Context()

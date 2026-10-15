@@ -342,6 +342,7 @@ func (t *RunOperationTool) confirm(
 		if blocked != nil {
 			return confirmedCall{}, blocked
 		}
+		detail := mutationDetail(ctx, t, op, input.Params, identity)
 		approvalArgs, err := json.Marshal(input)
 		if err != nil {
 			return confirmedCall{}, operationFailure(err.Error())
@@ -367,7 +368,7 @@ func (t *RunOperationTool) confirm(
 			ServiceName:        operationApprovalService,
 			MCPToolName:        op.ID,
 			RegisteredToolName: ToolRunOperation,
-			Description:        approvalDescription(op, label),
+			Description:        approvalDescription(op, label, detail),
 			Args:               approvalArgs,
 			ToolCallID:         meta.ToolCallID,
 		})
@@ -441,11 +442,160 @@ func (t *RunOperationTool) describeTarget(
 	return projected.Label(op.Target.Label), nil
 }
 
-func approvalDescription(op operations.Operation, label string) string {
-	if label == "" {
-		return op.Summary
+func approvalDescription(op operations.Operation, label, detail string) string {
+	parts := make([]string, 0, 3)
+	if summary := strings.TrimSpace(op.Summary); summary != "" {
+		parts = append(parts, summary)
 	}
-	return op.Summary + "\n" + label
+	if label = strings.TrimSpace(label); label != "" {
+		parts = append(parts, label)
+	}
+	if detail = strings.TrimSpace(detail); detail != "" {
+		parts = append(parts, detail)
+	}
+	return strings.Join(parts, "\n")
+}
+
+const (
+	maxApprovalDocumentTitles = 8
+	maxApprovalExcerptRunes   = 160
+)
+
+// mutationDetail puts the change itself on the confirmation card: the URL,
+// the folder path, the revision, and the document titles. Those used to live
+// only in the collapsed argument JSON, often as raw ids.
+func mutationDetail(
+	ctx context.Context,
+	t *RunOperationTool,
+	op operations.Operation,
+	params map[string]json.RawMessage,
+	identity operations.Identity,
+) string {
+	var lines []string
+	if s, ok := rawString(params, "url"); ok && s != "" {
+		lines = append(lines, "URL: "+s)
+	}
+	if s, ok := rawString(params, "title"); ok && s != "" {
+		lines = append(lines, "Title: "+excerpt(s))
+	}
+	if s, ok := rawString(params, "status"); ok && s != "" {
+		lines = append(lines, "Status: "+s)
+	}
+	if _, ok := params["description"]; ok {
+		s, _ := rawString(params, "description")
+		if s == "" {
+			lines = append(lines, "Summary: (cleared)")
+		} else {
+			lines = append(lines, "Summary: "+excerpt(s))
+		}
+	}
+	if s, ok := rawString(params, "from_path"); ok && s != "" {
+		lines = append(lines, "From: "+s)
+	}
+	if s, ok := rawString(params, "to_path"); ok && s != "" {
+		lines = append(lines, "To: "+s)
+	}
+	if op.ID == "knowledge.move_to_folder" {
+		s, _ := rawString(params, "folder_path")
+		if s == "" {
+			lines = append(lines, "Folder: (top level)")
+		} else {
+			lines = append(lines, "Folder: "+s)
+		}
+	}
+	if s, ok := rawString(params, "slug"); ok && s != "" {
+		lines = append(lines, "Page: "+s)
+	}
+	if n, ok := rawInt(params, "version"); ok {
+		lines = append(lines, fmt.Sprintf("Version: %d", n))
+	}
+	if s, ok := rawString(params, "content"); ok && s != "" {
+		lines = append(lines, fmt.Sprintf("Content (%d characters): %s", len([]rune(s)), excerpt(s)))
+	}
+	if ids, ok := rawStringList(params, "knowledge_ids"); ok && len(ids) > 0 {
+		lines = append(lines, "Documents: "+documentTitles(ctx, t, ids, identity))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func documentTitles(
+	ctx context.Context,
+	t *RunOperationTool,
+	ids []string,
+	identity operations.Identity,
+) string {
+	get, ok := t.rt.Catalog.Get("knowledge.get")
+	titles := make([]string, 0, min(len(ids), maxApprovalDocumentTitles))
+	for i, id := range ids {
+		if i == maxApprovalDocumentTitles {
+			break
+		}
+		title := id
+		if ok {
+			raw, err := json.Marshal(id)
+			if err == nil {
+				if call, err := get.Build(map[string]json.RawMessage{"knowledge_id": raw}); err == nil {
+					if resp, err := t.rt.Dispatcher.Dispatch(ctx, identity, call); err == nil &&
+						resp.Status >= 200 && resp.Status < 300 {
+						if projected, err := get.Project(resp.Body); err == nil && projected.Label("title") != "" {
+							title = projected.Label("title")
+						}
+					}
+				}
+			}
+		}
+		titles = append(titles, title)
+	}
+	shown := strings.Join(titles, ", ")
+	if len(ids) > len(titles) {
+		return fmt.Sprintf("%s (+%d more)", shown, len(ids)-len(titles))
+	}
+	return shown
+}
+
+func rawString(params map[string]json.RawMessage, name string) (string, bool) {
+	raw, ok := params[name]
+	if !ok {
+		return "", false
+	}
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return "", false
+	}
+	return s, true
+}
+
+func rawInt(params map[string]json.RawMessage, name string) (int64, bool) {
+	raw, ok := params[name]
+	if !ok {
+		return 0, false
+	}
+	var n int64
+	if json.Unmarshal(raw, &n) != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+func rawStringList(params map[string]json.RawMessage, name string) ([]string, bool) {
+	raw, ok := params[name]
+	if !ok {
+		return nil, false
+	}
+	var list []string
+	if json.Unmarshal(raw, &list) != nil {
+		return nil, false
+	}
+	return list, true
+}
+
+func excerpt(s string) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
+	r := []rune(s)
+	if len(r) <= maxApprovalExcerptRunes {
+		return s
+	}
+	return string(r[:maxApprovalExcerptRunes]) + "…"
 }
 
 func operationFailure(msg string) *types.ToolResult {

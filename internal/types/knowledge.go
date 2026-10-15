@@ -328,8 +328,9 @@ type ManualKnowledgeMetadata struct {
 type ManualKnowledgePayload struct {
 	// Document title.
 	Title string `json:"title" extensions:"x-agent"`
-	// Markdown content.
-	Content string `json:"content" extensions:"x-agent"`
+	// Markdown content. The assistant may send a full document; the API limit
+	// is 200000 runes, and x-agent-max-bytes covers that in UTF-8.
+	Content string `json:"content" extensions:"x-agent,x-agent-max-bytes=800000"`
 	// draft keeps the document out of search; publish indexes it.
 	Status        string                     `json:"status" enums:"draft,publish" extensions:"x-agent"`
 	TagIDs        []string                   `json:"tag_ids"`

@@ -1545,8 +1545,8 @@ func (h *KnowledgeHandler) GetGalleryConfig(c *gin.Context) {
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @x-agent      {"id":"knowledge.list_folders","risk":"read","root":"data.folders"}
-// @x-agent-hint "Top-level document folders with counts. Sub-folders are not listed; filter knowledge.list by folder_path to look inside one."
+// @x-agent      {"id":"knowledge.list_folders","risk":"read","root":"data.folders","max_items":200}
+// @x-agent-hint "Top-level document folders, up to 200. meta.root_document_count is documents with no folder and meta.total_document_count is every document. Sub-folders are not listed; filter knowledge.list by folder_path to look inside one."
 // @Router       /knowledge-bases/{id}/knowledge/folders [get]
 func (h *KnowledgeHandler) ListKnowledgeFolders(c *gin.Context) {
 	ctx := c.Request.Context()

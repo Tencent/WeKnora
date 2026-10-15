@@ -142,9 +142,9 @@ type SharedKnowledgeBaseRow struct {
 
 // TagPageResult is the page of tags the tag list writes.
 type TagPageResult struct {
-	Total    int64                         `json:"total"`
-	Page     int                           `json:"page"`
-	PageSize int                           `json:"page_size"`
+	Total    int64                         `json:"total" extensions:"x-agent"`
+	Page     int                           `json:"page" extensions:"x-agent"`
+	PageSize int                           `json:"page_size" extensions:"x-agent"`
 	Data     []types.KnowledgeTagWithStats `json:"data"`
 }
 

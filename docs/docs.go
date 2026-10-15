@@ -4225,9 +4225,10 @@ const docTemplate = `{
                 },
                 "x-agent": {
                     "id": "knowledge_base.list",
+                    "max_items": 200,
                     "risk": "read"
                 },
-                "x-agent-hint": "The workspace's own knowledge bases. Ones shared from other workspaces are in knowledge_base.list_shared."
+                "x-agent-hint": "The workspace's own knowledge bases, up to 200. Ones shared from other workspaces are in knowledge_base.list_shared."
             },
             "post": {
                 "security": [
@@ -6440,10 +6441,11 @@ const docTemplate = `{
                 },
                 "x-agent": {
                     "id": "knowledge.list_folders",
+                    "max_items": 200,
                     "risk": "read",
                     "root": "data.folders"
                 },
-                "x-agent-hint": "Top-level document folders with counts. Sub-folders are not listed; filter knowledge.list by folder_path to look inside one."
+                "x-agent-hint": "Top-level document folders, up to 200. meta.root_document_count is documents with no folder and meta.total_document_count is every document. Sub-folders are not listed; filter knowledge.list by folder_path to look inside one."
             },
             "put": {
                 "security": [
@@ -7131,6 +7133,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
+                        "minimum": 1,
                         "type": "integer",
                         "x-agent": true,
                         "x-agent-maximum": "10000",
@@ -7139,9 +7142,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "minimum": 1,
                         "type": "integer",
                         "x-agent": true,
-                        "x-agent-maximum": "100",
+                        "x-agent-maximum": "50",
                         "description": "每页数量",
                         "name": "page_size",
                         "in": "query"
@@ -7182,10 +7186,11 @@ const docTemplate = `{
                 },
                 "x-agent": {
                     "id": "knowledge_base.list_tags",
+                    "max_items": 50,
                     "risk": "read",
                     "root": "data.data"
                 },
-                "x-agent-hint": "Tags of a knowledge base with how many documents use each; pass tag ids to knowledge.list tag_ids to filter by them."
+                "x-agent-hint": "Tags of a knowledge base with how many documents use each. meta.total is the full count; pass tag ids to knowledge.list tag_ids. Ask for at most 50 per page."
             },
             "post": {
                 "security": [
@@ -8780,10 +8785,11 @@ const docTemplate = `{
                 },
                 "x-agent": {
                     "id": "wiki.list_folders",
+                    "max_items": 200,
                     "risk": "read",
                     "root": "folders"
                 },
-                "x-agent-hint": "Direct child folders of parent_id (omit it for the top level), with page counts; has_children tells whether to look deeper."
+                "x-agent-hint": "Direct child folders of parent_id (omit it for the top level), up to 200, with page counts; has_children tells whether to look deeper."
             },
             "post": {
                 "security": [
@@ -9749,7 +9755,7 @@ const docTemplate = `{
                     "risk": "write",
                     "target": "wiki.get_page"
                 },
-                "x-agent-hint": "Restores a Wiki page to a version from wiki.list_revisions. It is saved as a new version, so it can be undone the same way."
+                "x-agent-hint": "Restores a Wiki page to a version from wiki.list_revisions. Read that version with content_version first. The restore is saved as a new version, so it can be undone the same way."
             }
         },
         "/knowledgebase/{kb_id}/wiki/revisions/{slug}": {
@@ -9759,7 +9765,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "Returns the stored historical snapshots for a page, newest\nfirst (content omitted), plus the current version. Passing\n` + "`" + `version` + "`" + ` returns that single snapshot with full content.",
+                "description": "Returns the stored historical snapshots for a page, newest\nfirst (content omitted), plus the current version. Passing\n` + "`" + `version` + "`" + ` returns that single snapshot with full content.\n` + "`" + `content_version` + "`" + ` keeps this list envelope and includes that\none revision's content.",
                 "produces": [
                     "application/json"
                 ],
@@ -9788,6 +9794,14 @@ const docTemplate = `{
                         "type": "integer",
                         "description": "Return this single revision with content",
                         "name": "version",
+                        "in": "query"
+                    },
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "x-agent": true,
+                        "description": "Include this stored revision's content in the list envelope",
+                        "name": "content_version",
                         "in": "query"
                     },
                     {
@@ -9827,7 +9841,7 @@ const docTemplate = `{
                     "risk": "read",
                     "root": "revisions"
                 },
-                "x-agent-hint": "Earlier versions of a Wiki page, newest first, with who made each edit; wiki.revert restores one."
+                "x-agent-hint": "Earlier versions of a Wiki page, newest first. Pass content_version to read one stored revision's content before wiki.revert. The current page is not in this list."
             }
         },
         "/knowledgebase/{kb_id}/wiki/search": {
@@ -16668,9 +16682,10 @@ const docTemplate = `{
                 },
                 "x-agent": {
                     "id": "knowledge_base.list_shared",
+                    "max_items": 200,
                     "risk": "read"
                 },
-                "x-agent-hint": "Knowledge bases other workspaces share with the user, with the organization and the user's permission on each."
+                "x-agent-hint": "Knowledge bases other workspaces share with the user, up to 200, with the organization and the user's permission on each."
             }
         },
         "/skills": {
@@ -26269,11 +26284,13 @@ const docTemplate = `{
                 },
                 "root_document_count": {
                     "description": "RootDocumentCount counts entries that live at the knowledge base root\n(folder_path = \"\"), i.e. documents that were not uploaded as part of a\nfolder.",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "total_document_count": {
                     "description": "TotalDocumentCount counts every entry in the knowledge base, matching\nthe unfiltered document list total.",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 }
             }
         },
@@ -26898,9 +26915,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "content": {
-                    "description": "Markdown content.",
+                    "description": "Markdown content. The assistant may send a full document; the API limit\nis 200000 runes, and x-agent-max-bytes covers that in UTF-8.",
                     "type": "string",
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-max-bytes": "800000"
                 },
                 "process_config": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides"
@@ -32338,8 +32356,9 @@ const docTemplate = `{
                     "x-agent": true
                 },
                 "version": {
-                    "description": "Revision to restore.",
+                    "description": "Revision to restore. Versions start at 1.",
                     "type": "integer",
+                    "minimum": 1,
                     "x-agent": true
                 }
             }
@@ -32354,7 +32373,9 @@ const docTemplate = `{
                     }
                 },
                 "content": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-runes": "8000"
                 },
                 "created_at": {
                     "type": "string"
@@ -35233,13 +35254,16 @@ const docTemplate = `{
                     }
                 },
                 "page": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "page_size": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "total": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 }
             }
         },

@@ -12,7 +12,13 @@ import (
 	"unicode/utf8"
 )
 
-const maxStringParamBytes = 4096
+const (
+	// maxStringParamBytes is the default cap for a string parameter. Document
+	// bodies opt into maxAgentStringBytes instead; that matches the manual
+	// knowledge API limit of 200000 runes at the longest UTF-8 encoding.
+	maxStringParamBytes = 4096
+	maxAgentStringBytes = 200000 * 4
+)
 
 // Call is a fully validated HTTP request for one operation.
 type Call struct {
@@ -223,7 +229,11 @@ func decodeParam(p Param, raw json.RawMessage) (any, error) {
 }
 
 func validateString(p Param, s string) error {
-	if len(s) > maxStringParamBytes {
+	limit := p.MaxBytes
+	if limit <= 0 {
+		limit = maxStringParamBytes
+	}
+	if len(s) > limit {
 		return paramErr(p.Name, "is too long")
 	}
 	if !utf8.ValidString(s) {

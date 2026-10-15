@@ -8,7 +8,13 @@ import (
 	"unicode/utf8"
 )
 
-const maxProjectedStringRunes = 2000
+const (
+	maxProjectedStringRunes = 2000
+	// maxAgentFieldRunes is the largest x-agent-max-runes value. Revision
+	// content uses it so a revert can be read; ordinary fields stay at
+	// maxProjectedStringRunes.
+	maxAgentFieldRunes = 8000
+)
 
 // Projected is the model-visible slice of a response.
 type Projected struct {
@@ -93,7 +99,11 @@ func projectObject(obj map[string]any, fields []Field) map[string]any {
 		if !ok {
 			continue
 		}
-		if bounded := boundValue(v); bounded != nil {
+		limit := f.MaxRunes
+		if limit <= 0 {
+			limit = maxProjectedStringRunes
+		}
+		if bounded := boundValue(v, limit); bounded != nil {
 			out[f.outputKey()] = bounded
 		}
 	}
@@ -120,10 +130,10 @@ func lookup(doc any, path string) (any, bool) {
 // boundValue keeps scalar fields, and lists of scalars, within a size the
 // model context can afford. Nested objects are not projected implicitly;
 // declare their fields instead.
-func boundValue(v any) any {
+func boundValue(v any, maxRunes int) any {
 	switch t := v.(type) {
 	case string:
-		return truncateRunes(t, maxProjectedStringRunes)
+		return truncateRunes(t, maxRunes)
 	case []any:
 		out := make([]any, 0, min(len(t), defaultMaxListItems))
 		for _, item := range t {
@@ -132,7 +142,7 @@ func boundValue(v any) any {
 			}
 			switch s := item.(type) {
 			case string:
-				out = append(out, truncateRunes(s, maxProjectedStringRunes))
+				out = append(out, truncateRunes(s, maxRunes))
 			case json.Number, bool:
 				out = append(out, s)
 			}

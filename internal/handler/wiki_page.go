@@ -150,8 +150,8 @@ func (h *WikiPageHandler) ListPages(c *gin.Context) {
 // @Success      200  {object}  types.WikiFolderListResponse
 // @Failure      400  {object}  errors.AppError
 // @Security     Bearer
-// @x-agent      {"id":"wiki.list_folders","risk":"read","root":"folders"}
-// @x-agent-hint "Direct child folders of parent_id (omit it for the top level), with page counts; has_children tells whether to look deeper."
+// @x-agent      {"id":"wiki.list_folders","risk":"read","root":"folders","max_items":200}
+// @x-agent-hint "Direct child folders of parent_id (omit it for the top level), up to 200, with page counts; has_children tells whether to look deeper."
 // @Router       /knowledgebase/{kb_id}/wiki/folders [get]
 func (h *WikiPageHandler) ListFolders(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
@@ -577,18 +577,21 @@ func (h *WikiPageHandler) UpdatePage(c *gin.Context) {
 // @Description  Returns the stored historical snapshots for a page, newest
 // @Description  first (content omitted), plus the current version. Passing
 // @Description  `version` returns that single snapshot with full content.
+// @Description  `content_version` keeps this list envelope and includes that
+// @Description  one revision's content.
 // @Tags         Wiki
 // @Produce      json
 // @Param        kb_id    path   string  true   "Knowledge base ID"  extensions(x-agent=knowledge_base_id)
 // @Param        slug     path   string  true   "Page slug"  extensions(x-agent)
-// @Param        version  query  int     false  "Return this single revision with content"
+// @Param        version         query  int  false  "Return this single revision with content"
+// @Param        content_version query  int  false  "Include this stored revision's content in the list envelope"  minimum(1)  extensions(x-agent)
 // @Param        limit    query  int     false  "Page size (default 50, max 200)"  extensions(x-agent,x-agent-maximum=50)
 // @Param        offset   query  int     false  "Offset into the newest-first list"  extensions(x-agent,x-agent-maximum=10000)
 // @Success      200  {object}  types.WikiPageRevisionListResponse
 // @Failure      404  {object}  errors.AppError
 // @Security     Bearer
 // @x-agent      {"id":"wiki.list_revisions","risk":"read","root":"revisions","catch_all":"slug"}
-// @x-agent-hint "Earlier versions of a Wiki page, newest first, with who made each edit; wiki.revert restores one."
+// @x-agent-hint "Earlier versions of a Wiki page, newest first. Pass content_version to read one stored revision's content before wiki.revert. The current page is not in this list."
 // @Router       /knowledgebase/{kb_id}/wiki/revisions/{slug} [get]
 func (h *WikiPageHandler) ListRevisions(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
@@ -604,6 +607,40 @@ func (h *WikiPageHandler) ListRevisions(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
+
+	// content_version keeps the list envelope so the assistant can read one
+	// revision without the bare-object response that `version` returns.
+	if raw := strings.TrimSpace(c.Query("content_version")); raw != "" {
+		version, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || version < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid version"})
+			return
+		}
+		page, err := h.wikiService.GetPageBySlug(ctx, kbID, slug)
+		if err != nil {
+			if stderrors.Is(err, repository.ErrWikiPageNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Wiki page not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		rev, err := h.wikiService.GetRevision(ctx, kbID, slug, version)
+		if err != nil {
+			if stderrors.Is(err, repository.ErrWikiPageNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Wiki page revision not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, types.WikiPageRevisionListResponse{
+			Revisions:      []*types.WikiPageRevision{rev},
+			Total:          1,
+			CurrentVersion: page.Version,
+		})
+		return
+	}
 
 	if raw := c.Query("version"); raw != "" {
 		version, parseErr := strconv.Atoi(raw)
@@ -665,7 +702,7 @@ func (h *WikiPageHandler) ListRevisions(c *gin.Context) {
 // @Failure      409  {object}  errors.AppError
 // @Security     Bearer
 // @x-agent      {"id":"wiki.revert","risk":"write","target":"wiki.get_page","label":"title"}
-// @x-agent-hint "Restores a Wiki page to a version from wiki.list_revisions. It is saved as a new version, so it can be undone the same way."
+// @x-agent-hint "Restores a Wiki page to a version from wiki.list_revisions. Read that version with content_version first. The restore is saved as a new version, so it can be undone the same way."
 // @Router       /knowledgebase/{kb_id}/wiki/revert [post]
 func (h *WikiPageHandler) RevertPage(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)

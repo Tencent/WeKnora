@@ -80,6 +80,9 @@ type Param struct {
 	Maximum int
 	// MaxItems bounds string lists; defaults to defaultMaxListItems.
 	MaxItems int
+	// MaxBytes overrides maxStringParamBytes for this string. Zero keeps the
+	// default. It cannot exceed maxAgentStringBytes.
+	MaxBytes int
 }
 
 func (p Param) wireKey() string {
@@ -97,6 +100,9 @@ type Field struct {
 	// should be renamed to the canonical handle keys so the model-context
 	// policy turns them into handles.
 	As string
+	// MaxRunes overrides the projected string length for this field. Zero
+	// keeps maxProjectedStringRunes.
+	MaxRunes int
 }
 
 func (f Field) outputKey() string {
@@ -166,6 +172,10 @@ func (op Operation) Param(name string) (Param, bool) {
 const (
 	defaultMaxListItems   = 100
 	defaultMaxResultItems = 50
+	// maxDeclaredResultItems is the largest max_items an operation may
+	// declare. Unpaginated lists raise their cap explicitly; anything larger
+	// belongs behind a page parameter.
+	maxDeclaredResultItems = 500
 )
 
 var (
@@ -364,6 +374,10 @@ func validateOperation(op Operation) error {
 		if p.Maximum > 0 && (p.Type != TypeInteger || p.Minimum > p.Maximum) {
 			return fmt.Errorf("param %q: invalid integer bounds", p.Name)
 		}
+		if p.MaxBytes != 0 && (p.Type != TypeString && p.Type != TypeStringList ||
+			p.MaxBytes < 1 || p.MaxBytes > maxAgentStringBytes) {
+			return fmt.Errorf("param %q: invalid string length", p.Name)
+		}
 		switch p.In {
 		case InPath:
 			if p.Type != TypeString || !p.Required {
@@ -395,6 +409,9 @@ func validateOperation(op Operation) error {
 		}
 	}
 
+	if op.Result.MaxItems < 0 || op.Result.MaxItems > maxDeclaredResultItems {
+		return fmt.Errorf("max_items must be between 0 and %d", maxDeclaredResultItems)
+	}
 	if op.Result.List && op.Result.Root == "" && len(op.Result.Meta) > 0 {
 		return fmt.Errorf("a list result at the body root cannot have meta fields")
 	}

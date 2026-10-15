@@ -584,8 +584,8 @@ func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 // @Failure      500       {object}  errors.AppError                                         "服务器错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @x-agent      {"id":"knowledge_base.list","risk":"read"}
-// @x-agent-hint "The workspace's own knowledge bases. Ones shared from other workspaces are in knowledge_base.list_shared."
+// @x-agent      {"id":"knowledge_base.list","risk":"read","max_items":200}
+// @x-agent-hint "The workspace's own knowledge bases, up to 200. Ones shared from other workspaces are in knowledge_base.list_shared."
 // @Router       /knowledge-bases [get]
 func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 	ctx := c.Request.Context()

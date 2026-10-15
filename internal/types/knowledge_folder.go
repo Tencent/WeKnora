@@ -140,10 +140,10 @@ type KnowledgeFolderTree struct {
 	// RootDocumentCount counts entries that live at the knowledge base root
 	// (folder_path = ""), i.e. documents that were not uploaded as part of a
 	// folder.
-	RootDocumentCount int64 `json:"root_document_count"`
+	RootDocumentCount int64 `json:"root_document_count" extensions:"x-agent"`
 	// TotalDocumentCount counts every entry in the knowledge base, matching
 	// the unfiltered document list total.
-	TotalDocumentCount int64 `json:"total_document_count"`
+	TotalDocumentCount int64 `json:"total_document_count" extensions:"x-agent"`
 	// Folders are the top-level folders, sorted by name.
 	Folders []*KnowledgeFolderNode `json:"folders"`
 }
