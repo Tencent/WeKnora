@@ -8,7 +8,8 @@
               <ResourceIcon type="agent" :size="24" />
               {{ $t('agent.title') }}
             </h2>
-            <div class="header-actions" style="--wails-draggable: no-drag">
+            <div class="header-actions" :class="{ 'header-actions-lite': authStore.isLiteMode }" style="--wails-draggable: no-drag">
+              <ResourceListToolbar v-if="authStore.isLiteMode" hide-scopes v-model="spaceSelection" v-model:query="keyword" />
               <ResourceSortControl v-model="selectedResourceSort" />
               <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('agent.createAgent')" placement="bottom">
                 <t-button variant="text" theme="default" size="small" class="header-action-btn"
@@ -40,7 +41,7 @@
           <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('agent.subtitle') }}</p>
         </div>
       </div>
-      <ResourceListToolbar :hide-scopes="authStore.isLiteMode" v-model="spaceSelection" v-model:query="keyword" :count-all="allAgentsCount"
+      <ResourceListToolbar v-if="!authStore.isLiteMode" v-model="spaceSelection" v-model:query="keyword" :count-all="allAgentsCount"
       :count-mine="agents.length" :count-by-org="effectiveSharedCountByOrg" :count-favorites="agentFavoritesCount"
       :count-recents="agentRecentsCount" />
       <div class="agent-list-main">

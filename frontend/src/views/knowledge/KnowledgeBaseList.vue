@@ -8,7 +8,8 @@
               <ResourceIcon type="knowledge" :size="24" />
               {{ $t('knowledgeBase.title') }}
             </h2>
-            <div class="header-actions" style="--wails-draggable: no-drag">
+            <div class="header-actions" :class="{ 'header-actions-lite': authStore.isLiteMode }" style="--wails-draggable: no-drag">
+              <ResourceListToolbar v-if="authStore.isLiteMode" hide-scopes v-model="spaceSelection" v-model:query="keyword" />
               <ResourceSortControl v-model="selectedResourceSort" />
               <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('knowledgeList.create')" placement="bottom">
                  <t-button variant="text" theme="default" size="small" class="header-action-btn"
@@ -22,7 +23,7 @@
           <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('knowledgeList.subtitle') }}</p>
         </div>
       </div>
-      <ResourceListToolbar :hide-scopes="authStore.isLiteMode" v-model="spaceSelection" v-model:query="keyword" :count-all="allKnowledgeBases"
+      <ResourceListToolbar v-if="!authStore.isLiteMode" v-model="spaceSelection" v-model:query="keyword" :count-all="allKnowledgeBases"
       :count-mine="kbs.length" :count-by-org="effectiveSharedCountByOrg" :count-favorites="kbFavoritesCount"
       :count-recents="kbRecentsCount" />
       <div class="kb-list-main">
