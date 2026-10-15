@@ -1,5 +1,5 @@
 <template>
-  <div class="agent-list-container">
+  <div class="agent-list-container" :class="{ 'is-lite': authStore.isLiteMode }">
     <div class="agent-list-content">
       <div class="header" style="--wails-draggable: drag">
         <div class="header-title" style="--wails-draggable: drag">
@@ -1685,6 +1685,10 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
 }
 
 // 共享给我 · 可编辑 / 仅查看 分组标题，与 KB 列表 .kb-section-header 对齐。
+.is-lite .agent-card.is-builtin + .agent-card:not(.is-builtin) {
+  grid-column-start: 1;
+}
+
 .agent-section-header {
   .resource-section-header();
 }
