@@ -692,10 +692,14 @@ func writeQuestionOrigin(sb *strings.Builder, origin *QuestionOriginInfo) {
 // so "this document", "this page" or "these issues" need no clarifying
 // question. It names what is open; it does not ask for any action.
 func writePageContext(sb *strings.Builder, page *PageContextInfo) {
-	if page == nil || (page.KnowledgeBaseID == "" && page.Agent == nil) {
+	if page == nil || (page.KnowledgeBaseID == "" && page.Agent == nil &&
+		page.Model == nil && page.DataSource == nil && page.PageType == "") {
 		return
 	}
 	sb.WriteString("  <page_context")
+	if page.PageType != "" {
+		fmt.Fprintf(sb, " page_type=\"%s\"", escapeXMLAttr(page.PageType))
+	}
 	if page.KnowledgeBaseID != "" {
 		fmt.Fprintf(sb, " knowledge_base_id=\"%s\"", escapeXMLAttr(page.KnowledgeBaseID))
 		if page.KnowledgeBaseName != "" {
@@ -703,6 +707,30 @@ func writePageContext(sb *strings.Builder, page *PageContextInfo) {
 		}
 	}
 	sb.WriteString(">\n")
+	if page.SelectionTruncated {
+		sb.WriteString("    <selection_limit>Only the first 20 selected resources are included. " +
+			"Ask the user to narrow the selection before a bulk change; " +
+			"do not treat this as the full selection.</selection_limit>\n")
+	}
+	for _, resource := range []struct {
+		kind  string
+		value *PageContextResource
+	}{
+		{"model", page.Model}, {"data_source", page.DataSource},
+	} {
+		if r := resource.value; r != nil {
+			fmt.Fprintf(sb, "    <%s id=\"%s\" name=\"%s\" />\n",
+				resource.kind, escapeXMLAttr(r.ID), escapeXMLAttr(r.Name))
+		}
+	}
+	for _, entry := range page.FAQEntries {
+		fmt.Fprintf(sb, "    <faq_entry entry_id=\"%s\" question=\"%s\" />\n",
+			escapeXMLAttr(entry.ID), escapeXMLAttr(entry.Name))
+	}
+	for _, doc := range page.SelectedDocuments {
+		fmt.Fprintf(sb, "    <selected_document knowledge_id=\"%s\" title=\"%s\" />\n",
+			escapeXMLAttr(doc.KnowledgeID), escapeXMLAttr(doc.Title))
+	}
 	if a := page.Agent; a != nil {
 		fmt.Fprintf(sb, "    <agent id=\"%s\" name=\"%s\" />\n", escapeXMLAttr(a.ID), escapeXMLAttr(a.Name))
 	}
@@ -727,7 +755,8 @@ func writePageContext(sb *strings.Builder, page *PageContextInfo) {
 			escapeXMLAttr(issue.IssueType), escapeXMLAttr(issue.Status))
 	}
 	sb.WriteString("    <note>This is the page the user has open. When they say \"this\" without " +
-		"naming something, they mean the agent, knowledge base, document or Wiki page listed here.</note>\n")
+		"naming something, they mean the resources listed here. Selected resources identify the explicit selection; " +
+		"they never grant permission or imply approval to change it.</note>\n")
 	sb.WriteString("  </page_context>\n")
 }
 

@@ -813,19 +813,47 @@ func pageContextInTargets(
 	if page == nil {
 		return nil
 	}
-	kept := &types.PageContext{AgentID: strings.TrimSpace(page.AgentID)}
+	kept := &types.PageContext{
+		PageType: recognizedPageType(page.PageType), AgentID: strings.TrimSpace(page.AgentID),
+		ModelID:      strings.TrimSpace(page.ModelID),
+		DataSourceID: strings.TrimSpace(page.DataSourceID),
+	}
 	kbID := strings.TrimSpace(page.KnowledgeBaseID)
 	if kbID == "" || !targets.ContainsKB(kbID) {
 		if kbID != "" {
 			logger.Infof(ctx, "Ignoring page context: knowledge base %s is outside this turn's search targets",
 				secutils.SanitizeForLog(kbID))
 		}
-		if kept.AgentID == "" {
+		if kept.AgentID == "" && kept.ModelID == "" && kept.DataSourceID == "" && kept.PageType == "" {
 			return nil
 		}
 		return kept
 	}
 	kept.KnowledgeBaseID = kbID
+	kept.SelectionTruncated = page.SelectionTruncated ||
+		len(page.FAQEntryIDs) > 20 || len(page.SelectedKnowledgeIDs) > 20
+
+	for _, id := range page.SelectedKnowledgeIDs {
+		id = strings.TrimSpace(id)
+		if id != "" && targetsCoverDocument(targets, kbID, id) && !slices.Contains(kept.SelectedKnowledgeIDs, id) {
+			kept.SelectedKnowledgeIDs = append(kept.SelectedKnowledgeIDs, id)
+			if len(kept.SelectedKnowledgeIDs) == 20 {
+				break
+			}
+		}
+	}
+	// FAQ entry scope cannot be inferred from a document or tag selection.
+	// Only an unfiltered whole-KB target may provide entry-level page hints.
+	if targetsCoverWholeKB(targets, kbID) {
+		for _, id := range page.FAQEntryIDs {
+			if id > 0 && !slices.Contains(kept.FAQEntryIDs, id) {
+				kept.FAQEntryIDs = append(kept.FAQEntryIDs, id)
+			}
+			if len(kept.FAQEntryIDs) == 20 {
+				break
+			}
+		}
+	}
 	kept.WikiSlug = strings.TrimSpace(page.WikiSlug)
 	if docID := strings.TrimSpace(page.KnowledgeID); docID != "" && targetsCoverDocument(targets, kbID, docID) {
 		kept.KnowledgeID = docID
@@ -865,6 +893,16 @@ func targetsCoverDocument(targets types.SearchTargets, kbID, docID string) bool 
 			if slices.Contains(t.KnowledgeIDs, docID) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func targetsCoverWholeKB(targets types.SearchTargets, kbID string) bool {
+	for _, target := range targets {
+		if target != nil && target.KnowledgeBaseID == kbID &&
+			target.Type == types.SearchTargetTypeKnowledgeBase && len(target.TagIDs) == 0 {
+			return true
 		}
 	}
 	return false

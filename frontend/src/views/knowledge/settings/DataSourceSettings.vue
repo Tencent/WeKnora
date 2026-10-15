@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -34,6 +36,12 @@ const logsVisible = ref(false)
 const logsDsId = ref('')
 const logsDsName = ref('')
 const pollTimer = ref<number | null>(null)
+useAssistantPageContext(() => {
+  const id = logsVisible.value ? logsDsId.value : editorVisible.value ? editingDs.value?.id : undefined
+  const name = logsVisible.value ? logsDsName.value : editingDs.value?.name
+  return {pageType: 'data_sources', knowledgeBaseId: props.kbId, dataSourceId: id, dataSourceName: id ? name : undefined}
+})
+useAssistantDataChange(() => { void loadList(true) }, {areas: ['data_source']})
 
 function stopPolling() {
   if (pollTimer.value !== null) {

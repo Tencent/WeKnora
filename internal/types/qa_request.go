@@ -65,11 +65,17 @@ const MaxPageContextIssues = 20
 // PageContext identifies the open page. Knowledge-base resources must be in
 // the resolved search targets; agents are checked independently in the current tenant.
 type PageContext struct {
-	AgentID         string   `json:"agent_id,omitempty"`
-	KnowledgeBaseID string   `json:"knowledge_base_id,omitempty"`
-	KnowledgeID     string   `json:"knowledge_id,omitempty"`
-	WikiSlug        string   `json:"wiki_slug,omitempty"`
-	WikiIssueIDs    []string `json:"wiki_issue_ids,omitempty"`
+	SelectionTruncated   bool     `json:"selection_truncated,omitempty"`
+	PageType             string   `json:"page_type,omitempty"`
+	ModelID              string   `json:"model_id,omitempty"`
+	DataSourceID         string   `json:"data_source_id,omitempty"`
+	FAQEntryIDs          []int64  `json:"faq_entry_ids,omitempty"`
+	SelectedKnowledgeIDs []string `json:"selected_knowledge_ids,omitempty"`
+	AgentID              string   `json:"agent_id,omitempty"`
+	KnowledgeBaseID      string   `json:"knowledge_base_id,omitempty"`
+	KnowledgeID          string   `json:"knowledge_id,omitempty"`
+	WikiSlug             string   `json:"wiki_slug,omitempty"`
+	WikiIssueIDs         []string `json:"wiki_issue_ids,omitempty"`
 }
 
 // QARequest consolidates all parameters for KnowledgeQA and AgentQA service calls,

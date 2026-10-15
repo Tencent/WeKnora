@@ -454,3 +454,21 @@ for (const ceiling of ['auto_write', 'full_auto'] as const) {
     } finally { f.close() }
   })
 }
+
+test('model and selected-resource page context sends IDs only and marks a partial selection', async () => {
+  let next = 0
+  const f = await fixture(async () => ({data: {id: `session-${++next}`}}))
+  try {
+    const layer = Symbol()
+    f.assistant.publishPageContext(layer, {pageType:'models', modelId:'model', modelName:'Visible model'})
+    f.assistant.open({query:'Inspect this model'})
+    await flush(); await flush()
+    assert.equal(f.sent[0].scope.pageContext.model_id,'model')
+    assert.equal(f.sent[0].scope.pageContext.modelName,undefined)
+    f.assistant.publishPageContext(layer, {knowledgeBaseId:'kb',faqEntryIds:Array.from({length:25},(_,i)=>i+1)})
+    f.assistant.open({query:'Inspect these entries'})
+    await flush(); await flush()
+    assert.equal(f.sent.at(-1)!.scope.pageContext.faq_entry_ids.length,20)
+    assert.equal(f.sent.at(-1)!.scope.pageContext.selection_truncated,true)
+  } finally { f.close() }
+})

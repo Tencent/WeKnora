@@ -2163,6 +2163,9 @@ export default {
       }
     },
     context: {
+      selectionLimit: '{count}개 선택됨 (최대 20개)',
+      pages: {"models": "모델", "data_sources": "데이터 소스", "faq": "FAQ"},
+      selectedCount: '{count}개 선택됨',
       currentPage: '현재 페이지',
       detach: '현재 페이지 포함하지 않기',
       attachedTip: '현재 페이지 포함됨: {path}',

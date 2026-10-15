@@ -8,9 +8,11 @@ import { change, fixture, flush } from '../../test-utils/vueFixture.ts'
 
 test('refreshes the FAQ entries and tags once per burst for its own KB only', async t => {
   const f = fixture(t)
+  let contextSource: (() => any) | undefined
   const listFAQEntries = t.mock.fn(async (_id: string, _params: unknown) => ({ data: { data: [], total: 1 } }))
   const listKnowledgeTags = t.mock.fn(async (_id: string, _params: unknown) => ({ data: { data: [], total: 0 } }))
-  f.component(new URL('./components/FAQEntryManager.vue', import.meta.url), {
+  const { vm } = f.component(new URL('./components/FAQEntryManager.vue', import.meta.url), {
+    '@/composables/useAssistantPageContext': {useAssistantPageContext(source: () => any) {contextSource = source}},
     'vue-router': { useRouter: () => ({}) },
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
     'tdesign-vue-next': { MessagePlugin: { error: assert.fail } },
@@ -26,6 +28,11 @@ test('refreshes the FAQ entries and tags once per burst for its own KB only', as
     xlsx: {}, papaparse: {},
   }, { kbId: 'kb' })
   await flush()
+  vm.selectedRowKeys = [11, 12]
+  assert.deepEqual(Array.from(contextSource!().faqEntryIds), [11, 12])
+  vm.currentEntryId = 13; vm.editorVisible = true
+  assert.deepEqual(Array.from(contextSource!().faqEntryIds), [13])
+  vm.editorVisible = false
   listFAQEntries.mock.resetCalls()
   listKnowledgeTags.mock.resetCalls()
   f.emit(change('faq.update_entry', { knowledge_base_id: ['other'] }))

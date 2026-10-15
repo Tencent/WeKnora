@@ -2165,6 +2165,9 @@ export default {
       }
     },
     context: {
+      selectionLimit: '已选 {count} 项（最多接入 20 项）',
+      pages: {"models": "模型", "data_sources": "数据源", "faq": "FAQ"},
+      selectedCount: '已选 {count} 项',
       currentPage: '当前页面',
       detach: '不附带当前页面',
       attachedTip: '已附带当前页面：{path}',

@@ -29941,11 +29941,35 @@
                 "agent_id": {
                     "type": "string"
                 },
+                "data_source_id": {
+                    "type": "string"
+                },
+                "faq_entry_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
                 "knowledge_base_id": {
                     "type": "string"
                 },
                 "knowledge_id": {
                     "type": "string"
+                },
+                "model_id": {
+                    "type": "string"
+                },
+                "page_type": {
+                    "type": "string"
+                },
+                "selected_knowledge_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "selection_truncated": {
+                    "type": "boolean"
                 },
                 "wiki_issue_ids": {
                     "type": "array",

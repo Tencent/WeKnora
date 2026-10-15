@@ -435,6 +435,8 @@ const onCardMoreVisibleChange = (visible: boolean, item: KnowledgeCard) => {
     probeTraceAvailable(item);
   }
 };
+// Multi-select state is shared between grid/list views and the assistant context.
+const selectedIds = ref<Set<string>>(new Set());
 let isCardDetails = ref(false);
 useAssistantPageContext(() => {
   if (!kbId.value) return null;
@@ -444,6 +446,7 @@ useAssistantPageContext(() => {
     knowledgeBaseName: kbInfo.value?.id === kbId.value ? kbInfo.value?.name : undefined,
     chatModelId: kbInfo.value?.id === kbId.value ? kbInfo.value?.summary_model_id || undefined : undefined,
     knowledgeId: docOpen ? details.id : undefined,
+    selectedKnowledgeIds: docOpen ? [] : [...selectedIds.value],
     knowledgeTitle: docOpen ? details.title : undefined,
   };
 });
@@ -478,9 +481,6 @@ watch(viewMode, (v) => {
   try { localStorage.setItem(VIEW_MODE_KEY, v); } catch { /* ignore */ }
 });
 
-// Multi-select state — shared between grid and list views.
-// Vue 3.5 tracks Set#add/delete natively, so direct mutation is reactive.
-const selectedIds = ref<Set<string>>(new Set());
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
 const batchReparsing = ref(false);

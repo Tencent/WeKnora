@@ -6148,6 +6148,9 @@ export default {
       }
     },
     context: {
+      selectionLimit: '{count} 件選択（上限20件）',
+      pages: {"models": "モデル", "data_sources": "データソース", "faq": "FAQ"},
+      selectedCount: '{count} 件を選択',
       currentPage: '現在のページ',
       detach: '現在のページを含めない',
       attachedTip: '現在のページを含めています：{path}',

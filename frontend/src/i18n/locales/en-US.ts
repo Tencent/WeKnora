@@ -6148,6 +6148,9 @@ export default {
       }
     },
     context: {
+      selectionLimit: '{count} selected (20-item limit)',
+      pages: {"models": "Models", "data_sources": "Data sources", "faq": "FAQ"},
+      selectedCount: '{count} selected',
       currentPage: 'Current page',
       detach: 'Don\'t include the current page',
       attachedTip: 'Including the current page: {path}',

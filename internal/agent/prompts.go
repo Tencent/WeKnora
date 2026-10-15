@@ -70,14 +70,26 @@ type PageContextAgent struct {
 	Name string
 }
 
+// PageContextResource holds identifying metadata only, never configurations.
+type PageContextResource struct {
+	ID   string
+	Name string
+}
+
 // PageContextInfo contains only resources verified as visible in this turn.
 type PageContextInfo struct {
-	Agent             *PageContextAgent
-	KnowledgeBaseID   string
-	KnowledgeBaseName string
-	Document          *SelectedDocumentInfo // nil unless a document is open
-	WikiPage          *PageContextWikiPage  // nil unless a Wiki page is open
-	WikiIssues        []*PageContextWikiIssue
+	SelectionTruncated bool
+	PageType           string
+	Model              *PageContextResource
+	DataSource         *PageContextResource
+	FAQEntries         []*PageContextResource
+	SelectedDocuments  []*SelectedDocumentInfo
+	Agent              *PageContextAgent
+	KnowledgeBaseID    string
+	KnowledgeBaseName  string
+	Document           *SelectedDocumentInfo // nil unless a document is open
+	WikiPage           *PageContextWikiPage  // nil unless a Wiki page is open
+	WikiIssues         []*PageContextWikiIssue
 }
 
 // PageContextWikiPage is the Wiki page open in a page context.

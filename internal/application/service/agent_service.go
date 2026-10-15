@@ -1676,7 +1676,8 @@ func (s *agentService) resolvePageContextInfo(
 	if page == nil {
 		return nil
 	}
-	info := &agent.PageContextInfo{}
+	info := &agent.PageContextInfo{PageType: recognizedPageType(page.PageType)}
+	s.resolveResourcePageContext(ctx, page, info)
 	if page.AgentID != "" && s.customAgentService != nil {
 		agentCtx := ctx
 		if tenantID := types.CallerFromContext(ctx).TenantID; tenantID != 0 {
@@ -1688,13 +1689,30 @@ func (s *agentService) resolvePageContextInfo(
 	}
 	kbID := page.KnowledgeBaseID
 	if kbID == "" || !targets.ContainsKB(kbID) {
-		if info.Agent == nil {
+		if info.Agent == nil && info.Model == nil && info.DataSource == nil && info.PageType == "" {
 			return nil
 		}
 		return info
 	}
 	info.KnowledgeBaseID = kbID
 	info.KnowledgeBaseName = s.knowledgeBaseName(ctx, kbID, kbInfos)
+
+	// Reapply the bounds here as well: this method also has callers with raw context.
+	bounded := pageContextInTargets(ctx, page, targets)
+	if bounded != nil {
+		info.SelectionTruncated = bounded.SelectionTruncated
+		if len(bounded.SelectedKnowledgeIDs) > 0 && s.knowledgeService != nil {
+			docs, err := s.getSelectedDocumentInfos(ctx, bounded.SelectedKnowledgeIDs)
+			if err == nil {
+				for _, doc := range docs {
+					if doc.KnowledgeBaseID == kbID {
+						info.SelectedDocuments = append(info.SelectedDocuments, doc)
+					}
+				}
+			}
+		}
+		s.resolveFAQPageContext(ctx, bounded, info)
+	}
 	if page.KnowledgeID != "" {
 		docs, err := s.getSelectedDocumentInfos(ctx, []string{page.KnowledgeID})
 		if err == nil && len(docs) == 1 && docs[0].KnowledgeBaseID == kbID {

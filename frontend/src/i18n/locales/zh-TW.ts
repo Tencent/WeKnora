@@ -2165,6 +2165,9 @@ export default {
       }
     },
     context: {
+      selectionLimit: '已選 {count} 項（最多接入 20 項）',
+      pages: {"models": "模型", "data_sources": "資料來源", "faq": "FAQ"},
+      selectedCount: '已選 {count} 項',
       currentPage: '目前頁面',
       detach: '不附帶目前頁面',
       attachedTip: '已附帶目前頁面：{path}',

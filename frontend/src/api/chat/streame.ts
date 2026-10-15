@@ -17,6 +17,12 @@ import {
 
 /** The WeKnora page the user has open; agent-chat only. */
 export interface PageContextPayload {
+  selection_truncated?: boolean
+  page_type?: 'models' | 'data_sources' | 'faq'
+  model_id?: string
+  data_source_id?: string
+  faq_entry_ids?: number[]
+  selected_knowledge_ids?: string[]
   agent_id?: string
   knowledge_base_id?: string
   knowledge_id?: string

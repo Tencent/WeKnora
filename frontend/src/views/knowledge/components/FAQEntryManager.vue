@@ -757,6 +757,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import { ref, reactive, watch, onMounted, computed, nextTick, onUnmounted, h } from 'vue'
 import KnowledgeTagFilter from './KnowledgeTagFilter.vue'
@@ -1041,6 +1042,13 @@ const loadKnowledgeList = async () => {
 const editorVisible = ref(false)
 const editorMode = ref<'create' | 'edit'>('create')
 const currentEntryId = ref<number | null>(null)
+useAssistantPageContext(() => props.kbId ? {
+  pageType: 'faq',
+  knowledgeBaseId: props.kbId,
+  knowledgeBaseName: kbInfo.value?.name,
+  faqEntryIds: editorVisible.value && currentEntryId.value ? [currentEntryId.value] : [...selectedRowKeys.value],
+} : null)
+
 const editorForm = reactive<FAQEntryPayload>({
   standard_question: '',
   similar_questions: [],

@@ -310,6 +310,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon, PlayCircleIcon } from 'tdesign-icons-vue-next'
@@ -363,6 +364,10 @@ const usageConflict = ref<ModelUsageDetails | null>(null)
 const usageConflictModelName = ref('')
 const currentModelType = ref<ModelType>('chat')
 const editingModel = ref<any>(null)
+useAssistantPageContext(() => showDialog.value && editingModel.value?.id ? {
+  pageType: 'models', modelId: editingModel.value.id, modelName: editingModel.value.name,
+} : {pageType: 'models'})
+
 const loading = ref(true)
 const activeTypeFilter = ref<FilterType>('all')
 const modelQuery = ref('')

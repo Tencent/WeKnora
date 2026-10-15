@@ -2163,6 +2163,9 @@ export default {
       }
     },
     context: {
+      selectionLimit: 'Выбрано: {count} (лимит 20)',
+      pages: {"models": "Модели", "data_sources": "Источники данных", "faq": "FAQ"},
+      selectedCount: 'Выбрано: {count}',
       currentPage: 'Текущая страница',
       detach: 'Не прикладывать текущую страницу',
       attachedTip: 'Приложена текущая страница: {path}',

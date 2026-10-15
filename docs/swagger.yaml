@@ -6121,10 +6121,26 @@ definitions:
     properties:
       agent_id:
         type: string
+      data_source_id:
+        type: string
+      faq_entry_ids:
+        items:
+          type: integer
+        type: array
       knowledge_base_id:
         type: string
       knowledge_id:
         type: string
+      model_id:
+        type: string
+      page_type:
+        type: string
+      selected_knowledge_ids:
+        items:
+          type: string
+        type: array
+      selection_truncated:
+        type: boolean
       wiki_issue_ids:
         items:
           type: string

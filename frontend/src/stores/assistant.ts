@@ -13,6 +13,13 @@ import { useAuthStore } from './auth'
 
 /** What the user has open, as published by the pages that know it. */
 export interface AssistantPageContext {
+  pageType?: 'models' | 'data_sources' | 'faq'
+  modelId?: string
+  modelName?: string
+  dataSourceId?: string
+  dataSourceName?: string
+  faqEntryIds?: number[]
+  selectedKnowledgeIds?: string[]
   agentId?: string
   agentName?: string
   knowledgeBaseId?: string
@@ -30,7 +37,7 @@ export interface AssistantOpenRequest {
   /** Sent as the first message of a new conversation. */
   query?: string
   /** Narrows the page context for that first message only. */
-  focus?: Pick<AssistantPageContext, 'wikiIssueIds'>
+  focus?: Pick<AssistantPageContext, 'wikiIssueIds' | 'faqEntryIds' | 'selectedKnowledgeIds'>
 }
 
 const SESSION_KEY_PREFIX = 'weknora:assistant-session'
@@ -83,7 +90,13 @@ function readWidth(): number {
 
 export function toPageContextPayload(context: AssistantPageContext): PageContextPayload {
   return {
+    selection_truncated: (context.faqEntryIds?.length || 0) > 20 || (context.selectedKnowledgeIds?.length || 0) > 20 || undefined,
+    page_type: context.pageType || undefined,
     agent_id: context.agentId || undefined,
+    model_id: context.modelId || undefined,
+    data_source_id: context.dataSourceId || undefined,
+    faq_entry_ids: context.faqEntryIds?.length ? [...new Set(context.faqEntryIds)].slice(0, 20) : undefined,
+    selected_knowledge_ids: context.selectedKnowledgeIds?.length ? [...new Set(context.selectedKnowledgeIds)].slice(0, 20) : undefined,
     knowledge_base_id: context.knowledgeBaseId || undefined,
     knowledge_id: context.knowledgeId || undefined,
     wiki_slug: context.wikiSlug || undefined,
@@ -93,7 +106,8 @@ export function toPageContextPayload(context: AssistantPageContext): PageContext
 
 function contextKey(context: AssistantPageContext | null): string {
   if (!context) return ''
-  return [context.agentId || '', context.knowledgeBaseId || '', context.knowledgeId || '', context.wikiSlug || ''].join('|')
+  return [context.pageType, context.agentId, context.modelId, context.dataSourceId, context.knowledgeBaseId, context.knowledgeId,
+    context.wikiSlug, context.faqEntryIds?.join(','), context.selectedKnowledgeIds?.join(',')].join('|')
 }
 
 /**
@@ -112,7 +126,7 @@ export const useAssistantStore = defineStore('assistant', () => {
   const pageContext = computed<AssistantPageContext | null>(() => {
     const merged: Partial<AssistantPageContext> = {}
     for (const layer of layers.values()) Object.assign(merged, layer)
-    return merged.knowledgeBaseId || merged.agentId ? merged : null
+    return merged.knowledgeBaseId || merged.agentId || merged.modelId || merged.dataSourceId || merged.pageType ? merged : null
   })
   const contextAttached = computed(() => !!pageContext.value && dismissedKey.value !== contextKey(pageContext.value))
 

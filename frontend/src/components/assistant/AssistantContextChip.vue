@@ -33,6 +33,9 @@ const context = computed(() => assistant.pageContext)
 
 const icon = computed(() => {
   if (context.value?.agentId) return 'robot'
+  if (context.value?.modelId) return 'cpu'
+  if (context.value?.dataSourceId) return 'link'
+  if (context.value?.faqEntryIds?.length) return 'help-circle'
   if (context.value?.wikiSlug) return 'book-open'
   if (context.value?.knowledgeId) return 'file'
   return 'folder'
@@ -42,9 +45,13 @@ const segments = computed(() => {
   const c = context.value
   if (!c) return []
   if (c.agentId) return [c.agentName || c.agentId]
+  if (c.modelId) return [c.modelName || c.modelId]
+  if (c.dataSourceId) return [c.knowledgeBaseName, c.dataSourceName || c.dataSourceId].filter((s): s is string => !!s)
+  const selectedCount = c.faqEntryIds?.length || c.selectedKnowledgeIds?.length || 0
+  if (selectedCount) return [c.knowledgeBaseName, t(selectedCount > 20 ? 'assistant.context.selectionLimit' : 'assistant.context.selectedCount', {count: selectedCount})].filter((s): s is string => !!s)
   const leaf = c.wikiTitle || c.wikiSlug || c.knowledgeTitle
   const path = [c.knowledgeBaseName, leaf].filter((s): s is string => !!s)
-  return path.length ? path : [t('assistant.context.currentPage')]
+  return path.length ? path : [c.pageType ? t(`assistant.context.pages.${c.pageType}`) : t('assistant.context.currentPage')]
 })
 
 const tooltip = computed(() => {
