@@ -104,6 +104,43 @@ func TestConnector_ListResources_Aggregates(t *testing.T) {
 	}
 }
 
+// Resource libraries (资源库) are knowledge bases too, and must reach the picker
+// carrying a type the UI can tell apart from a document knowledge base.
+func TestConnector_ListResources_ResourceLibrary(t *testing.T) {
+	f := newFakeYuque()
+	defer f.Close()
+	f.mux = http.NewServeMux()
+	f.server.Config.Handler = f.mux
+	f.handleJSON("/api/v2/user", 200, v2UserResponse{Data: v2User{ID: 1, Login: "alice"}})
+	f.handleJSON("/api/v2/users/alice/repos", 200, v2RepoListResponse{Data: []v2Repo{
+		{ID: 10, Slug: "docs", Name: "Docs", Type: "Book", Namespace: "alice/docs"},
+		{ID: 40, Slug: "assets", Name: "Assets", Type: "Resource", Namespace: "alice/assets"},
+	}})
+	// Yuque answers 404 (not an empty list) when the user is in no team.
+	f.handleJSON("/api/v2/users/1/groups", 404, map[string]string{"message": "not found"})
+
+	resources, err := NewConnector().ListResources(context.Background(), makeDSConfig(f, nil), "")
+	if err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
+	byName := make(map[string]types.Resource, len(resources))
+	for _, r := range resources {
+		byName[r.Name] = r
+	}
+	if len(resources) != 2 {
+		t.Fatalf("len = %d, want 2: %+v", len(resources), resources)
+	}
+	if got := byName["Docs"].Type; got != "book" {
+		t.Errorf("Docs.Type = %q, want book", got)
+	}
+	if got := byName["Assets"].Type; got != "resource" {
+		t.Errorf("Assets.Type = %q, want resource", got)
+	}
+	if got := byName["Assets"].Metadata["book_type"]; got != "Resource" {
+		t.Errorf("Assets metadata book_type = %v, want Resource", got)
+	}
+}
+
 func TestConnector_ListResources_DedupByID(t *testing.T) {
 	f := newFakeYuque()
 	defer f.Close()

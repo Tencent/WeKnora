@@ -1322,9 +1322,9 @@ const selectedResourceCount = computed(() => {
 const hasExpandableNodes = computed(() => resources.value.some(r => r.has_children))
 
 function resourceIconName(r: Resource): string {
-  // Seafile libraries expand like folders but are the top-level unit a data
-  // source binds to, so they keep the root icon.
-  if (r.type === 'library') return 'root-list'
+  // Seafile libraries and Yuque resource libraries expand like folders but are
+  // the top-level unit a data source binds to, so they keep the root icon.
+  if (r.type === 'library' || r.type === 'resource') return 'root-list'
   if (r.has_children) return 'folder'
   switch (r.type) {
     case 'wiki_space':
@@ -1355,6 +1355,7 @@ const resourceTypeLabelMap: Record<string, string> = {
   wiki_space: 'datasource.resourceType.wikiSpace',
   doc_category: 'datasource.resourceType.docCategory',
   book: 'datasource.resourceType.book',
+  resource: 'datasource.resourceType.resource',
   library: 'datasource.resourceType.library',
 }
 

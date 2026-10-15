@@ -125,7 +125,7 @@ func (c *Connector) ListResources(
 		out = append(out, types.Resource{
 			ExternalID:  strconv.FormatInt(r.ID, 10),
 			Name:        r.Name,
-			Type:        "book",
+			Type:        resourceType(r.Type),
 			URL:         cfg.GetBaseURL() + "/" + r.Namespace,
 			Description: r.Namespace,
 			ModifiedAt:  parseContentUpdatedAt(r.UpdatedAt),
@@ -138,6 +138,17 @@ func (c *Connector) ListResources(
 	// Stable, deterministic order for UI rendering and response-body caching.
 	sort.Slice(out, func(i, j int) bool { return out[i].ExternalID < out[j].ExternalID })
 	return out, nil
+}
+
+// resourceType maps a Yuque repo type to the resource type the picker renders.
+// listRepos only lets Book and Resource through, so anything else — including
+// an empty type, which older API responses omit — falls back to "book" rather
+// than producing a row the frontend has no icon or label for.
+func resourceType(repoType string) string {
+	if repoType == repoTypeResource {
+		return "resource"
+	}
+	return "book"
 }
 
 // FetchAll performs a full sync of all books specified in resourceIDs.
@@ -362,6 +373,18 @@ func (c *Connector) walk(
 			"not_in_toc_sample={%s}",
 			bookID, len(docs), kept, skippedType, skippedDraft, skippedNotInTOC, tocOK,
 			sampleSkipType, sampleSkipDraft, sampleSkipNotInTOC)
+
+		// A book that admits nothing is almost always a 资源库: the API lists its
+		// documents only, and the uploaded files that make up most of such a
+		// library never appear at all. Say so at WARN — a silent empty result
+		// leaves the user unable to tell "nothing to sync" from "sync is broken".
+		if kept == 0 {
+			logger.Warnf(ctx, "[Yuque] book %d: nothing to sync — %d document(s) listed, "+
+				"%d skipped (non_doc=%d draft=%d not_in_toc=%d). If this is a resource library "+
+				"(资源库), its uploaded files are not supported yet; only its document entries sync.",
+				bookID, len(docs), skippedType+skippedDraft+skippedNotInTOC,
+				skippedType, skippedDraft, skippedNotInTOC)
+		}
 
 		// Deletion detection (incremental only): previous doc IDs not in current → IsDeleted=true
 		if incremental && prev != nil && prev.BookDocTimes != nil {

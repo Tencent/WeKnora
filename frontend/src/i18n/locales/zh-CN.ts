@@ -1037,7 +1037,7 @@ export default {
     prereqStep1Brief_yuque: '创建语雀个人 Token',
     prereqStep1Desc_yuque: '登录语雀 → 个人头像 → 设置 → Token → 新建 Token',
     prereqStep2Brief_yuque: '为 Token 勾选所需权限',
-    prereqStep2Desc_yuque: '至少勾选 repo:read 和 doc:read（读取知识库和文档内容）',
+    prereqStep2Desc_yuque: '至少勾选 repo:read 和 doc:read（读取知识库、资源库和文档内容）',
     prereqStep3Brief_yuque: '（可选）企业版填写 Base URL',
     prereqStep3Desc_yuque: '公有云用户无需填写；语雀企业版或私有部署请填写企业域名',
     prereqOpenConsole_yuque: '前往语雀 Token 设置',
@@ -1113,6 +1113,7 @@ export default {
       wikiSpace: '知识库空间',
       docCategory: '文档标签',
       book: '语雀知识库',
+      resource: '语雀资源库',
       library: 'Seafile 资料库'
     },
     scheduleHuman: {

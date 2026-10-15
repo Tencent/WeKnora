@@ -12,6 +12,8 @@
 //
 // Known limitations (v1):
 //   - Only syncs type=Doc (Sheet/Thread/Board/Table skipped)
+//   - 资源库 (Resource repos) are listed and selectable, but the uploaded files
+//     they hold are not ingested; only document entries inside one would be
 //   - Only syncs status="1" (published), drafts skipped
 //   - Private-book images (CDN URLs with auth) may fail to load
 //   - Lake editor may leave non-standard markdown (anchors, sized image attrs)

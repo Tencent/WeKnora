@@ -314,15 +314,22 @@ func TestClient_ListUserGroups(t *testing.T) {
 	}
 }
 
-func TestClient_ListUserRepos_FiltersType(t *testing.T) {
+// The listing must go out unfiltered: the API rejects type=Resource ("type
+// invalid") even though Resource repos are returned when no type is sent, so a
+// server-side filter would hide every 资源库. Filtering happens in listRepos.
+func TestClient_ListUserRepos_FiltersToBookAndResource(t *testing.T) {
 	f := newFakeYuque()
 	defer f.Close()
-	var gotQuery string
+
+	var queries []string
 	f.mux.HandleFunc("/api/v2/users/alice/repos", func(w http.ResponseWriter, r *http.Request) {
-		gotQuery = r.URL.RawQuery
+		queries = append(queries, r.URL.RawQuery)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(v2RepoListResponse{Data: []v2Repo{
 			{ID: 9, Slug: "book1", Name: "Book 1", Type: "Book", Namespace: "alice/book1"},
+			{ID: 20, Slug: "assets", Name: "Assets", Type: "Resource", Namespace: "alice/assets"},
+			{ID: 30, Slug: "boards", Name: "Boards", Type: "Design", Namespace: "alice/boards"},
+			{ID: 40, Slug: "legacy", Name: "Legacy", Type: "", Namespace: "alice/legacy"},
 		}})
 	})
 
@@ -331,17 +338,40 @@ func TestClient_ListUserRepos_FiltersType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListUserRepos: %v", err)
 	}
-	if !strings.Contains(gotQuery, "type=Book") {
-		t.Errorf("expected type=Book in query, got %q", gotQuery)
+
+	if len(queries) != 1 {
+		t.Fatalf("expected a single unfiltered request, got %d: %v", len(queries), queries)
 	}
-	if !strings.Contains(gotQuery, "offset=0") {
-		t.Errorf("expected offset=0 in query, got %q", gotQuery)
+	if strings.Contains(queries[0], "type=") {
+		t.Errorf("the listing must not carry a type filter, got %q", queries[0])
 	}
-	if !strings.Contains(gotQuery, "limit=100") {
-		t.Errorf("expected limit=100 in query, got %q", gotQuery)
+	if !strings.Contains(queries[0], "offset=0") || !strings.Contains(queries[0], "limit=100") {
+		t.Errorf("expected offset/limit in query, got %q", queries[0])
 	}
-	if len(repos) != 1 || repos[0].Namespace != "alice/book1" {
-		t.Errorf("got %+v", repos)
+
+	ids := make([]int64, len(repos))
+	for i, r := range repos {
+		ids[i] = r.ID
+	}
+	// The Design repo is dropped; a repo with no type is kept rather than hidden.
+	if len(repos) != 3 || ids[0] != 9 || ids[1] != 20 || ids[2] != 40 {
+		t.Errorf("expected [9 20 40], got %v (%+v)", ids, repos)
+	}
+}
+
+// A failed listing is returned, not swallowed: an empty result would be
+// indistinguishable from "this account has no knowledge bases".
+func TestClient_ListUserRepos_ListingFailureFails(t *testing.T) {
+	f := newFakeYuque()
+	defer f.Close()
+	f.mux.HandleFunc("/api/v2/users/alice/repos", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"message":"nope"}`)
+	})
+
+	c := newClient(f.cfg())
+	if _, err := c.ListUserRepos(context.Background(), "alice"); err == nil {
+		t.Fatal("expected an error when the listing fails")
 	}
 }
 

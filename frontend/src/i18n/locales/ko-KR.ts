@@ -1035,7 +1035,7 @@ export default {
     prereqStep1Brief_yuque: 'Yuque 개인 Token 생성',
     prereqStep1Desc_yuque: 'Yuque 로그인 → 프로필 아이콘 → 설정 → Token → 새 Token 만들기',
     prereqStep2Brief_yuque: 'Token에 필요한 권한 부여',
-    prereqStep2Desc_yuque: '최소한 repo:read 와 doc:read 를 선택하세요 (지식베이스 및 문서 콘텐츠 읽기)',
+    prereqStep2Desc_yuque: '최소한 repo:read 와 doc:read 를 선택하세요 (지식베이스, 리소스 라이브러리 및 문서 콘텐츠 읽기)',
     prereqStep3Brief_yuque: '(선택) Enterprise 사용 시 Base URL 입력',
     prereqStep3Desc_yuque: '퍼블릭 클라우드 사용자는 입력하지 않아도 됩니다. Yuque Enterprise 또는 사설 배포 시 기업 도메인을 입력하세요',
     prereqStep1Brief_feishu: "Feishu 커스텀 앱 생성",
@@ -1111,6 +1111,7 @@ export default {
       wikiSpace: '위키 공간',
       docCategory: '문서 태그',
       book: 'Yuque 지식베이스',
+      resource: 'Yuque 리소스 라이브러리',
       library: 'Seafile 라이브러리'
     },
     scheduleHuman: {

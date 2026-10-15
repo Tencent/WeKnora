@@ -1035,7 +1035,7 @@ export default {
     prereqStep1Brief_yuque: 'Создайте персональный Yuque Token',
     prereqStep1Desc_yuque: 'Войдите в Yuque → значок профиля → Настройки → Token → Создать новый Token',
     prereqStep2Brief_yuque: 'Назначьте Token необходимые права',
-    prereqStep2Desc_yuque: 'Выберите как минимум repo:read и doc:read (чтение баз знаний и содержимого документов)',
+    prereqStep2Desc_yuque: 'Выберите как минимум repo:read и doc:read (чтение баз знаний, библиотек ресурсов и содержимого документов)',
     prereqStep3Brief_yuque: '(Опционально) Для Enterprise укажите Base URL',
     prereqStep3Desc_yuque: 'Пользователям публичного облака указывать не нужно. Для Yuque Enterprise или приватного развёртывания укажите корпоративный домен',
     prereqOpenConsole_yuque: 'Перейти к настройкам Yuque Token',
@@ -1111,6 +1111,7 @@ export default {
       wikiSpace: 'Пространство вики',
       docCategory: 'Тег документа',
       book: 'База знаний Yuque',
+      resource: 'Библиотека ресурсов Yuque',
       library: 'Библиотека Seafile'
     },
     scheduleHuman: {

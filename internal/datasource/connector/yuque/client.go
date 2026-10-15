@@ -258,24 +258,57 @@ func (c *client) ListUserGroups(ctx context.Context, userID int64) ([]v2Group, e
 	return resp.Data, nil
 }
 
-// ListUserRepos returns document-type (Book) repos owned by the given user login.
+// repoTypeBook and repoTypeResource are the Yuque knowledge-base kinds this
+// connector lists. The API reports the type of every repo; Resource is the
+// 资源库 (resource library), which holds uploaded files rather than documents.
+const (
+	repoTypeBook     = "Book"
+	repoTypeResource = "Resource"
+)
+
+// ListUserRepos returns the given user's repos of every listable type.
 func (c *client) ListUserRepos(ctx context.Context, login string) ([]v2Repo, error) {
-	return c.listReposPaginated(ctx, fmt.Sprintf("/api/v2/users/%s/repos", login))
+	return c.listRepos(ctx, fmt.Sprintf("/api/v2/users/%s/repos", login))
 }
 
-// ListGroupRepos returns document-type (Book) repos owned by the given group login.
+// ListGroupRepos returns the given group's repos of every listable type.
 func (c *client) ListGroupRepos(ctx context.Context, login string) ([]v2Repo, error) {
-	return c.listReposPaginated(ctx, fmt.Sprintf("/api/v2/groups/%s/repos", login))
+	return c.listRepos(ctx, fmt.Sprintf("/api/v2/groups/%s/repos", login))
+}
+
+// listRepos returns the repos of every listable type from a listing endpoint.
+//
+// The `type` query parameter is deliberately not sent. Server-side filtering
+// only accepts Book and Design, and answers "type invalid" for Resource — so
+// asking for 资源库 by filter returns an error even though the same repos come
+// back fine when the listing is unfiltered (verified against www.yuque.com).
+// Filtering here instead keeps 资源库 reachable and works regardless of which
+// types a given server version knows about.
+func (c *client) listRepos(ctx context.Context, basePath string) ([]v2Repo, error) {
+	repos, err := c.listReposPaginated(ctx, basePath)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]v2Repo, 0, len(repos))
+	for _, r := range repos {
+		// Book and Resource are the kinds the picker offers. Design and Sheet
+		// (画板/表格知识库) hold nothing the walk can ingest. An absent type is
+		// kept: older responses omit the field, and hiding a repo we cannot
+		// classify is worse than showing it.
+		switch r.Type {
+		case "", repoTypeBook, repoTypeResource:
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 
 // listReposPaginated walks the pagination for a repo listing endpoint.
-// Filters to type=Book (document-type knowledge bases only; design/sheet/resource skipped).
 func (c *client) listReposPaginated(ctx context.Context, basePath string) ([]v2Repo, error) {
 	var all []v2Repo
 	offset := 0
 	for {
 		q := buildQuery(map[string]string{
-			"type":   "Book",
 			"offset": fmt.Sprintf("%d", offset),
 			"limit":  fmt.Sprintf("%d", defaultPageSize),
 		})

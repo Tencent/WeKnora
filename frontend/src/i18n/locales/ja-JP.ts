@@ -7139,7 +7139,7 @@ export default {
     prereqStep1Brief_yuque: 'Yuqueのパーソナルトークンを作成',
     prereqStep1Desc_yuque: 'Yuqueにログイン → アバター → 設定 → トークン → 新しいトークン',
     prereqStep2Brief_yuque: 'トークンに必要な権限を付与',
-    prereqStep2Desc_yuque: '少なくともrepo:readとdoc:read（ナレッジベースとドキュメント内容の読み取り）にチェックを入れます',
+    prereqStep2Desc_yuque: '少なくともrepo:readとdoc:read（ナレッジベース・リソースライブラリ・ドキュメント内容の読み取り）にチェックを入れます',
     prereqStep3Brief_yuque: '（任意）エンタープライズ導入の場合はベースURLを入力',
     prereqStep3Desc_yuque: 'パブリッククラウドの場合は空欄のままにします。Yuque Enterpriseやセルフホストの場合は、自社のドメインを入力してください。',
     prereqStep1Brief_feishu: 'Feishuのカスタムアプリを作成',
@@ -7217,6 +7217,7 @@ export default {
       wikiSpace: 'Wikiスペース',
       docCategory: 'ドキュメントタグ',
       book: 'Yuqueナレッジベース',
+      resource: 'Yuqueリソースライブラリ',
       library: 'Seafileライブラリ'
     },
     neverSynced: '未同期',

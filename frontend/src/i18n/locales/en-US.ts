@@ -7139,7 +7139,7 @@ export default {
     prereqStep1Brief_yuque: 'Create a Yuque personal token',
     prereqStep1Desc_yuque: 'Sign in to Yuque → avatar → Settings → Token → New Token',
     prereqStep2Brief_yuque: 'Grant the token required permissions',
-    prereqStep2Desc_yuque: 'Check at least repo:read and doc:read (read knowledge base and document content)',
+    prereqStep2Desc_yuque: 'Check at least repo:read and doc:read (read knowledge bases, resource libraries and document content)',
     prereqStep3Brief_yuque: '(Optional) Enter Base URL for enterprise deployments',
     prereqStep3Desc_yuque: 'Leave empty for public cloud; for Yuque Enterprise or self-hosted, enter your company domain.',
     prereqStep1Brief_feishu: 'Create Feishu custom app',
@@ -7217,6 +7217,7 @@ export default {
       wikiSpace: 'Wiki Space',
       docCategory: 'Document Tag',
       book: 'Yuque Book',
+      resource: 'Yuque Resource Library',
       library: 'Seafile Library'
     },
     neverSynced: 'Never synced',
