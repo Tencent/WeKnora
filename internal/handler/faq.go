@@ -239,8 +239,8 @@ func (h *FAQHandler) CreateEntry(c *gin.Context) {
 // @Failure      400       {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @x-agent      {"id":"faq.update_entry","risk":"write","target":"faq.get_entry","label":"standard_question"}
-// @x-agent-hint "Replaces the whole entry. Read it with faq.get_entry first and send every field, changed or not, or the rest is lost. To only add phrasings, use faq.add_similar_questions."
+// @x-agent      {"id":"faq.update_entry","risk":"write","require_complete_target":true,"target":"faq.get_entry","label":"standard_question"}
+// @x-agent-hint "Replaces the whole entry. Read it with faq.get_entry first and send every field, changed or not, or the rest is lost. Updates are refused if the current entry is truncated; use the FAQ editor for entries beyond the complete-read limits. To only add phrasings, use faq.add_similar_questions."
 // @Router       /knowledge-bases/{id}/faq/entries/{entry_id} [put]
 func (h *FAQHandler) UpdateEntry(c *gin.Context) {
 	ctx := c.Request.Context()

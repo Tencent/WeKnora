@@ -392,6 +392,7 @@ func (t *RunOperationTool) confirm(
 		return confirmedCall{}, operationFailure(fmt.Sprintf("%s was not run: %s", op.ID, reason))
 	}
 	confirmed := confirmedCall{pendingID: decision.PendingID}
+	confirmedInput := input
 	if len(decision.ModifiedArgs) > 0 {
 		edited, err := parseRunOperationInput(decision.ModifiedArgs)
 		if err == nil && edited.Operation != op.ID {
@@ -405,7 +406,24 @@ func (t *RunOperationTool) confirm(
 			t.rt.Gate.MarkExecuted(ctx, decision.PendingID)
 			return confirmedCall{}, operationFailure(fmt.Sprintf("edited params for %s are invalid: %v", op.ID, err))
 		}
+		confirmedInput = edited
 		confirmed.call = &call
+	}
+	// Recheck after approval, including resumed runs and edited arguments:
+	// the target can have changed while the user was deciding.
+	if op.Target.RequireComplete {
+		// Approval may outlive the original per-tool budget, just as it can
+		// for the mutation itself. Bound the read using the round context.
+		timeout := meta.ExecTimeout
+		if timeout <= 0 {
+			timeout = defaultOperationTimeout
+		}
+		checkCtx, cancel := context.WithTimeout(waitCtx, timeout)
+		defer cancel()
+		if _, blocked := t.describeTarget(checkCtx, op, confirmedInput, identity); blocked != nil {
+			t.rt.Gate.MarkExecuted(ctx, decision.PendingID)
+			return confirmedCall{}, blocked
+		}
 	}
 	return confirmed, nil
 }
@@ -485,6 +503,11 @@ func (t *RunOperationTool) readLabel(
 	projected, err := target.Project(resp.Body)
 	if err != nil {
 		return "", operationFailure(fmt.Sprintf("%s returned an unexpected response", target.ID))
+	}
+	if op.Target.RequireComplete && projected.Truncated {
+		return "", operationFailure(fmt.Sprintf(
+			"%s cannot safely replace this entry because its current content was truncated. "+
+				"Use the application editor to preserve the full content.", op.ID))
 	}
 	return projected.Label(label), nil
 }

@@ -71,9 +71,11 @@ type Param struct {
 	In   Location
 	// Key is the wire name: the route segment, query key or body field.
 	// Defaults to Name.
-	Key         string
-	Type        ParamType
-	Required    bool
+	Key      string
+	Type     ParamType
+	Required bool
+	// AllowEmpty separates an agent-required field from an API nonempty constraint.
+	AllowEmpty  bool
 	Description string
 	Enum        []string
 	// Minimum and Maximum bound integers when Maximum > 0.
@@ -160,6 +162,8 @@ type Target struct {
 	Label string
 	// Items, for a batch mutation, also resolves every item it acts on.
 	Items *ItemTarget
+	// RequireComplete blocks a full replacement when the target read loses data.
+	RequireComplete bool
 }
 
 // ItemTarget runs a read once per item of a list parameter, so the approval

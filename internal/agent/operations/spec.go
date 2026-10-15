@@ -56,8 +56,9 @@ type agentOperation struct {
 	ID   string `json:"id"`
 	Risk Risk   `json:"risk"`
 	// Target and Label declare the approval target of a mutation.
-	Target string `json:"target"`
-	Label  string `json:"label"`
+	Target                string `json:"target"`
+	Label                 string `json:"label"`
+	RequireCompleteTarget bool   `json:"require_complete_target,omitempty"`
 	// Items also resolves each item of a batch for the approval.
 	Items *agentItems `json:"items,omitempty"`
 	// Root overrides the projected part of the response. By default it is
@@ -188,11 +189,11 @@ func (doc *specDocument) compile(method, path string, sop specOperation) (Operat
 	if op.Description == "" {
 		op.Description = strings.TrimSpace(sop.Description)
 	}
-	if meta.Target != "" || meta.Label != "" {
+	if meta.Target != "" || meta.Label != "" || meta.RequireCompleteTarget {
 		if meta.Target == "" || meta.Label == "" {
 			return Operation{}, fmt.Errorf("%s: target and label go together", extAgent)
 		}
-		op.Target = &Target{Operation: meta.Target, Label: meta.Label}
+		op.Target = &Target{Operation: meta.Target, Label: meta.Label, RequireComplete: meta.RequireCompleteTarget}
 	}
 	if items := meta.Items; items != nil {
 		if op.Target == nil {
@@ -283,6 +284,7 @@ func (doc *specDocument) params(sp specParameter) ([]Param, error) {
 		In:          Location(sp.In),
 		Key:         sp.Name,
 		Required:    sp.Required || sp.AgentRequired,
+		AllowEmpty:  sp.AgentRequired && !sp.Required,
 		Description: strings.TrimSpace(sp.Description),
 	}
 	shape := &specSchema{Type: sp.Type, Items: sp.Items, Enum: sp.Enum, Minimum: sp.Minimum, Maximum: sp.Maximum}
@@ -324,6 +326,7 @@ func (doc *specDocument) bodyParams(sp specParameter) ([]Param, error) {
 			In:          InBody,
 			Key:         key,
 			Required:    sp.Required && (required[key] || prop.AgentRequired),
+			AllowEmpty:  prop.AgentRequired && !required[key],
 			Description: strings.TrimSpace(prop.Description),
 		}
 		shape, err := doc.resolve(prop)

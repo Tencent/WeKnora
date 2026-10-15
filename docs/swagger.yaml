@@ -2658,6 +2658,7 @@ definitions:
           type: string
         type: array
         x-agent: true
+        x-agent-max-runes: "8000"
       chunk_id:
         type: string
       chunk_type:
@@ -2691,6 +2692,7 @@ definitions:
           type: string
         type: array
         x-agent: true
+        x-agent-max-runes: "8000"
       score:
         type: number
       similar_questions:
@@ -2698,9 +2700,11 @@ definitions:
           type: string
         type: array
         x-agent: true
+        x-agent-max-runes: "8000"
       standard_question:
         type: string
         x-agent: true
+        x-agent-max-runes: "8000"
       tag_id:
         type: integer
         x-agent: tag_seq_id
@@ -2755,6 +2759,7 @@ definitions:
           type: string
         type: array
         x-agent: true
+        x-agent-max-bytes: "32000"
         x-agent-required: true
       id:
         description: ID 可选，用于数据迁移时指定 seq_id（必须小于自增起始值 100000000）
@@ -2775,6 +2780,7 @@ definitions:
           type: string
         type: array
         x-agent: true
+        x-agent-max-bytes: "32000"
         x-agent-required: true
       similar_questions:
         description: Other phrasings that should match; [] for none.
@@ -2782,11 +2788,13 @@ definitions:
           type: string
         type: array
         x-agent: true
+        x-agent-max-bytes: "32000"
         x-agent-required: true
       standard_question:
         description: The question the entry answers.
         type: string
         x-agent: true
+        x-agent-max-bytes: "32000"
       tag_id:
         description: Tag seq id (tag_seq_id from knowledge_base.list_tags); 0 for
           none.
@@ -15207,11 +15215,13 @@ paths:
       x-agent:
         id: faq.update_entry
         label: standard_question
+        require_complete_target: true
         risk: write
         target: faq.get_entry
       x-agent-hint: Replaces the whole entry. Read it with faq.get_entry first and
-        send every field, changed or not, or the rest is lost. To only add phrasings,
-        use faq.add_similar_questions.
+        send every field, changed or not, or the rest is lost. Updates are refused
+        if the current entry is truncated; use the FAQ editor for entries beyond the
+        complete-read limits. To only add phrasings, use faq.add_similar_questions.
   /knowledge-bases/{id}/faq/entries/{entry_id}/similar-questions:
     post:
       consumes:

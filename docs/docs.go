@@ -5391,10 +5391,11 @@ const docTemplate = `{
                 "x-agent": {
                     "id": "faq.update_entry",
                     "label": "standard_question",
+                    "require_complete_target": true,
                     "risk": "write",
                     "target": "faq.get_entry"
                 },
-                "x-agent-hint": "Replaces the whole entry. Read it with faq.get_entry first and send every field, changed or not, or the rest is lost. To only add phrasings, use faq.add_similar_questions."
+                "x-agent-hint": "Replaces the whole entry. Read it with faq.get_entry first and send every field, changed or not, or the rest is lost. Updates are refused if the current entry is truncated; use the FAQ editor for entries beyond the complete-read limits. To only add phrasings, use faq.add_similar_questions."
             }
         },
         "/knowledge-bases/{id}/faq/entries/{entry_id}/similar-questions": {
@@ -24576,7 +24577,8 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     },
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-max-runes": "8000"
                 },
                 "chunk_id": {
                     "type": "string"
@@ -24620,7 +24622,8 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     },
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-max-runes": "8000"
                 },
                 "score": {
                     "type": "number"
@@ -24630,11 +24633,13 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     },
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-max-runes": "8000"
                 },
                 "standard_question": {
                     "type": "string",
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-max-runes": "8000"
                 },
                 "tag_id": {
                     "type": "integer",
@@ -24717,6 +24722,7 @@ const docTemplate = `{
                         "type": "string"
                     },
                     "x-agent": true,
+                    "x-agent-max-bytes": "32000",
                     "x-agent-required": true
                 },
                 "id": {
@@ -24740,6 +24746,7 @@ const docTemplate = `{
                         "type": "string"
                     },
                     "x-agent": true,
+                    "x-agent-max-bytes": "32000",
                     "x-agent-required": true
                 },
                 "similar_questions": {
@@ -24749,12 +24756,14 @@ const docTemplate = `{
                         "type": "string"
                     },
                     "x-agent": true,
+                    "x-agent-max-bytes": "32000",
                     "x-agent-required": true
                 },
                 "standard_question": {
                     "description": "The question the entry answers.",
                     "type": "string",
-                    "x-agent": true
+                    "x-agent": true,
+                    "x-agent-max-bytes": "32000"
                 },
                 "tag_id": {
                     "description": "Tag seq id (tag_seq_id from knowledge_base.list_tags); 0 for none.",

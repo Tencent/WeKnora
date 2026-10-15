@@ -25,10 +25,13 @@ type fakeDispatcher struct {
 }
 
 func (d *fakeDispatcher) Dispatch(
-	_ context.Context,
+	ctx context.Context,
 	id operations.Identity,
 	call operations.Call,
 ) (*operations.Response, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	d.calls = append(d.calls, recordedDispatch{identity: id, call: call})
 	if resp, ok := d.responses[call.Method+" "+call.Path]; ok {
 		return resp, nil
@@ -40,9 +43,10 @@ func (d *fakeDispatcher) Dispatch(
 }
 
 type fakeApprover struct {
-	decision approval.Decision
-	requests []approval.PendingRequest
-	executed []string
+	decision  approval.Decision
+	requests  []approval.PendingRequest
+	executed  []string
+	onRequest func()
 }
 
 func (a *fakeApprover) RequestBuiltinApproval(
@@ -50,6 +54,9 @@ func (a *fakeApprover) RequestBuiltinApproval(
 	req approval.PendingRequest,
 ) (approval.Decision, error) {
 	a.requests = append(a.requests, req)
+	if a.onRequest != nil {
+		a.onRequest()
+	}
 	return a.decision, nil
 }
 

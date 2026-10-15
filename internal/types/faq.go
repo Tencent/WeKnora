@@ -267,10 +267,10 @@ type FAQEntry struct {
 	TagName           string         `json:"tag_name" extensions:"x-agent"`
 	IsEnabled         bool           `json:"is_enabled" extensions:"x-agent"`
 	IsRecommended     bool           `json:"is_recommended" extensions:"x-agent"`
-	StandardQuestion  string         `json:"standard_question" extensions:"x-agent"`
-	SimilarQuestions  []string       `json:"similar_questions" extensions:"x-agent"`
-	NegativeQuestions []string       `json:"negative_questions" extensions:"x-agent"`
-	Answers           []string       `json:"answers" extensions:"x-agent"`
+	StandardQuestion  string         `json:"standard_question" extensions:"x-agent,x-agent-max-runes=8000"`
+	SimilarQuestions  []string       `json:"similar_questions" extensions:"x-agent,x-agent-max-runes=8000"`
+	NegativeQuestions []string       `json:"negative_questions" extensions:"x-agent,x-agent-max-runes=8000"`
+	Answers           []string       `json:"answers" extensions:"x-agent,x-agent-max-runes=8000"`
 	AnswerStrategy    AnswerStrategy `json:"answer_strategy" extensions:"x-agent"`
 	IndexMode         FAQIndexMode   `json:"index_mode"`
 	UpdatedAt         time.Time      `json:"updated_at" extensions:"x-agent"`
@@ -303,13 +303,13 @@ type FAQEntryPayload struct {
 	// ID 可选，用于数据迁移时指定 seq_id（必须小于自增起始值 100000000）
 	ID *int64 `json:"id,omitempty"`
 	// The question the entry answers.
-	StandardQuestion string `json:"standard_question"    binding:"required" extensions:"x-agent"`
+	StandardQuestion string `json:"standard_question"    binding:"required" extensions:"x-agent-max-bytes=32000,x-agent"`
 	// Other phrasings that should match; [] for none.
-	SimilarQuestions []string `json:"similar_questions" extensions:"x-agent,x-agent-required"`
+	SimilarQuestions []string `json:"similar_questions" extensions:"x-agent-max-bytes=32000,x-agent,x-agent-required"`
 	// Phrasings that must not match; [] for none.
-	NegativeQuestions []string `json:"negative_questions" extensions:"x-agent,x-agent-required"`
+	NegativeQuestions []string `json:"negative_questions" extensions:"x-agent-max-bytes=32000,x-agent,x-agent-required"`
 	// Answers; one is picked by answer_strategy.
-	Answers []string `json:"answers" extensions:"x-agent,x-agent-required"`
+	Answers []string `json:"answers" extensions:"x-agent-max-bytes=32000,x-agent,x-agent-required"`
 	// all returns every answer; random returns one.
 	AnswerStrategy *AnswerStrategy `json:"answer_strategy,omitempty" enums:"all,random" extensions:"x-agent,x-agent-required"`
 	// Tag seq id (tag_seq_id from knowledge_base.list_tags); 0 for none.

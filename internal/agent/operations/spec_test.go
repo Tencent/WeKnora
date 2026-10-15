@@ -291,6 +291,7 @@ func TestBuiltinMatchesHandlerAnnotations(t *testing.T) {
 		meta := agentOperation{ID: op.ID, Risk: op.Risk}
 		if op.Target != nil {
 			meta.Target, meta.Label = op.Target.Operation, op.Target.Label
+			meta.RequireCompleteTarget = op.Target.RequireComplete
 			if it := op.Target.Items; it != nil {
 				meta.Items = &agentItems{Param: it.Param, Target: it.Operation, As: it.As, Label: it.Label}
 			}

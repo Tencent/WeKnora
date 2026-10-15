@@ -177,7 +177,7 @@ func decodeParam(p Param, raw json.RawMessage) (any, error) {
 		if err := validateString(p, s); err != nil {
 			return nil, err
 		}
-		if s == "" && p.Required {
+		if s == "" && p.Required && !p.AllowEmpty {
 			return nil, paramErr(p.Name, "must not be empty")
 		}
 		return s, nil
@@ -193,7 +193,7 @@ func decodeParam(p Param, raw json.RawMessage) (any, error) {
 		if len(list) > limit {
 			return nil, paramErr(p.Name, "accepts at most %d items", limit)
 		}
-		if p.Required && len(list) == 0 {
+		if p.Required && !p.AllowEmpty && len(list) == 0 {
 			return nil, paramErr(p.Name, "must not be empty")
 		}
 		out := make([]string, 0, len(list))
@@ -220,7 +220,7 @@ func decodeParam(p Param, raw json.RawMessage) (any, error) {
 		if len(list) > limit {
 			return nil, paramErr(p.Name, "accepts at most %d items", limit)
 		}
-		if p.Required && len(list) == 0 {
+		if p.Required && !p.AllowEmpty && len(list) == 0 {
 			return nil, paramErr(p.Name, "must not be empty")
 		}
 		out := make([]int64, 0, len(list))
