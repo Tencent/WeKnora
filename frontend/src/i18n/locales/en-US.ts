@@ -3226,6 +3226,8 @@ export default {
         actorId: 'Initiator ID',
         apiKeyName: 'API key name',
         apiKeyId: 'API key ID',
+        agentSessionId: 'Assistant conversation ID',
+        agentOperation: 'Assistant operation',
         details: 'Details'
       },
       drawer: {
@@ -3237,6 +3239,7 @@ export default {
       systemActor: 'System',
       actorWithAPIKey: '{actor} · API Key · {name}',
       actorAPIKey: 'API Key · {name}',
+      viaAssistant: 'Via WeKnora Assistant',
       knowledgeBase: 'Knowledge base',
       countItems: '{count} items',
       titleWithCount: '{title} and {count} more',
@@ -3684,12 +3687,10 @@ export default {
       globalIssuesEmpty: 'No pending content issues',
       issuePagePrefix: 'Page: ',
       issueGoFix: 'Go to fix',
-      fixAssistantTitle: 'Wiki Smart Fix Assistant',
       issueFixSuggestions: 'Content Optimization Suggestions ({count})',
       issueFixSingle: 'Fix',
-      fixStartError: 'Failed to start fix assistant',
-      issueFixPromptSingle: 'Please fix the issue (ID: {id}) on page [[{slug}]].',
-      issueFixPromptAutoStart: 'Please fix the following issues on page [[{slug}]]:'
+      issueFixPromptSingle: 'Fix this Wiki issue: {description}',
+      issueFixPromptAll: 'Fix the {count} open issues on this page'
     },
     buttons: {
       create: 'Create Knowledge Base',
@@ -6100,6 +6101,30 @@ export default {
     audioNotSupported: 'Your browser does not support audio playback',
     videoNotSupported: 'Your browser does not support video playback'
   },
+  assistant: {
+    title: 'WeKnora Assistant',
+    newConversation: 'New conversation',
+    welcomeTitle: 'How can I help?',
+    welcomeDesc: 'Ask how WeKnora works, or have me check and handle document parsing, knowledge base activity and Wiki issues in your workspace. I ask before anything like a deletion.',
+    startFailed: 'Failed to start the assistant. Please try again.',
+    askAboutDocument: 'Ask WeKnora Assistant',
+    context: {
+      currentPage: 'Current page',
+      detach: 'Don\'t include the current page',
+      attachedTip: 'Including the current page: {path}',
+      detachedTip: 'Click to include the current page: {path}'
+    },
+    starters: {
+      wikiIssues: 'What issues are open on this page?',
+      wikiSummary: 'Summarize this Wiki page',
+      documentStatus: 'How did this document parse?',
+      documentSummary: 'Summarize this document',
+      failedDocuments: 'Which documents in this knowledge base failed to parse?',
+      recentActivity: 'What changed in this knowledge base recently?',
+      formats: 'Which document formats does WeKnora support?',
+      createWiki: 'How do I create a Wiki knowledge base?'
+    }
+  },
   commandPalette: {
     placeholder: 'Search knowledge bases, files, conversations…',
     clearRecent: 'Clear',
@@ -6129,7 +6154,8 @@ export default {
       agents: 'Open agents',
       organizations: 'Open shared spaces',
       settings: 'Open settings',
-      productTour: 'Product tour'
+      productTour: 'Product tour',
+      assistant: 'Open WeKnora Assistant'
     },
     empty: {
       noResults: 'No matches found',

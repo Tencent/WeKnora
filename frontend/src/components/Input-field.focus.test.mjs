@@ -67,8 +67,16 @@ test('new-session focus survives consumption of the first query and runs on chil
   const page = readFileSync(new URL('../views/chat/index.vue', import.meta.url), 'utf8')
   const snapshot = page.match(/const focusComposerOnMount = [^;]+;/)[0]
   const firstQuery = { value: 'initial question' }
-  const autoFocus = vm.runInNewContext(`${snapshot}\nfirstQuery.value = ''; focusComposerOnMount`, { firstQuery })
+  const autoFocus = vm.runInNewContext(`${snapshot}\nfirstQuery.value = ''; focusComposerOnMount`, {
+    firstQuery, props: { embeddedMode: false, initialQuery: '' },
+  })
   assert.equal(autoFocus, true)
+  // An embedded host passes its own first message; the main chat's draft is not its.
+  const embedded = { embeddedMode: true, initialQuery: 'host question' }
+  assert.equal(vm.runInNewContext(`${snapshot}\nfocusComposerOnMount`, { firstQuery, props: embedded }), true)
+  assert.equal(vm.runInNewContext(`${snapshot}\nfocusComposerOnMount`, {
+    firstQuery: { value: 'main draft' }, props: { embeddedMode: true, initialQuery: '' },
+  }), false)
   assert.match(page, /:auto-focus="focusComposerOnMount"/)
   const mountStart = source.slice(source.indexOf('onMounted(() => {'), source.indexOf('// Embed 渠道'))
   let mounted, focused = false

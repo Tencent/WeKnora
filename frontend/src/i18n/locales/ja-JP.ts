@@ -3226,6 +3226,8 @@ export default {
         actorId: '実行者ID',
         apiKeyName: 'APIキー名',
         apiKeyId: 'APIキーID',
+        agentSessionId: 'アシスタント会話 ID',
+        agentOperation: 'アシスタントの操作',
         details: '詳細'
       },
       drawer: {
@@ -3237,6 +3239,7 @@ export default {
       systemActor: 'システム',
       actorWithAPIKey: '{actor} · API Key · {name}',
       actorAPIKey: 'API Key · {name}',
+      viaAssistant: 'WeKnora アシスタント経由',
       knowledgeBase: 'ナレッジベース',
       countItems: '{count}件',
       titleWithCount: '{title}ほか{count}件',
@@ -3684,12 +3687,10 @@ export default {
       globalIssuesEmpty: '未処理のコンテンツ問題はありません',
       issuePagePrefix: 'ページ: ',
       issueGoFix: '修正に移動',
-      fixAssistantTitle: 'Wikiスマート修正アシスタント',
       issueFixSuggestions: 'コンテンツ最適化の提案（{count}）',
       issueFixSingle: '修正',
-      fixStartError: '修正アシスタントの起動に失敗しました',
-      issueFixPromptSingle: 'ページ [[{slug}]] の問題（ID: {id}）を修正してください。',
-      issueFixPromptAutoStart: 'ページ [[{slug}]] の次の問題を修正してください:'
+      issueFixPromptSingle: 'この Wiki の問題を修正して：{description}',
+      issueFixPromptAll: 'このページの未対応の問題 {count} 件を修正して'
     },
     buttons: {
       create: 'ナレッジベースを作成',
@@ -6100,6 +6101,30 @@ export default {
     audioNotSupported: 'お使いのブラウザは音声再生に対応していません',
     videoNotSupported: 'お使いのブラウザは動画再生に対応していません'
   },
+  assistant: {
+    title: 'WeKnora アシスタント',
+    newConversation: '新しい会話',
+    welcomeTitle: '何をお手伝いしましょうか？',
+    welcomeDesc: 'WeKnora の使い方にお答えするほか、ワークスペースのドキュメント解析、ナレッジベースの履歴、Wiki の問題を確認・対応できます。削除などの操作は事前に確認します。',
+    startFailed: 'アシスタントを起動できませんでした。もう一度お試しください。',
+    askAboutDocument: 'WeKnora アシスタントに聞く',
+    context: {
+      currentPage: '現在のページ',
+      detach: '現在のページを含めない',
+      attachedTip: '現在のページを含めています：{path}',
+      detachedTip: 'クリックして現在のページを含める：{path}'
+    },
+    starters: {
+      wikiIssues: 'このページの未対応の問題は？',
+      wikiSummary: 'この Wiki ページを要約して',
+      documentStatus: 'このドキュメントの解析状況は？',
+      documentSummary: 'このドキュメントを要約して',
+      failedDocuments: 'このナレッジベースで解析に失敗したドキュメントは？',
+      recentActivity: 'このナレッジベースの最近の変更は？',
+      formats: 'WeKnora はどのドキュメント形式に対応していますか？',
+      createWiki: 'Wiki ナレッジベースの作り方は？'
+    }
+  },
   commandPalette: {
     placeholder: 'ナレッジベース、ファイル、会話を検索…',
     clearRecent: 'クリア',
@@ -6129,7 +6154,8 @@ export default {
       agents: 'エージェントを開く',
       organizations: '共有スペースを開く',
       settings: '設定を開く',
-      productTour: 'プロダクトツアー'
+      productTour: 'プロダクトツアー',
+      assistant: 'WeKnora アシスタントを開く'
     },
     empty: {
       noResults: '一致する項目がありません',

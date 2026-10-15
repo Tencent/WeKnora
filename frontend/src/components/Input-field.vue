@@ -248,7 +248,7 @@ const sharedAgentKbList = ref<Array<{ id: string; name: string; type?: string; k
 // 知识库：用新智能体配置的列表替换当前选中，使已选与可@列表一致（含共享智能体）
 watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId, newAgentKbs, newKbMode], [oldAgentId]) => {
   if (settingsStore._isApplyingSessionState) return;
-  if (newAgentId !== oldAgentId && oldAgentId !== undefined) {
+  if (newAgentId !== oldAgentId && oldAgentId !== undefined && !props.embeddedMode) {
     if (newKbMode === 'none') {
       settingsStore.selectKnowledgeBases([]);
     } else {
@@ -312,6 +312,8 @@ const isKnowledgeBaseDisabledByAgent = computed(() => {
   return agentKBSelectionMode.value === 'none';
 });
 const isMentionDisabled = computed(() => {
+  // The host pins the scope; @-mentions would edit the main chat's selection.
+  if (props.embeddedMode) return true;
   if (settingsStore.isAgentStreamMode && isKnowledgeBaseDisabledByAgent.value) {
     return agentMCPSelectionMode.value === 'none' && agentSkillsSelectionMode.value === 'none';
   }
@@ -379,7 +381,7 @@ const isSkillAllowedByAgent = (skillName: string) => {
 
 // 切换智能体时清理不允许的 MCP / Skill @mention
 watch([selectedAgentId, agentMCPSelectionMode, agentSkillsSelectionMode], ([newAgentId], [oldAgentId]) => {
-  if (settingsStore._isApplyingSessionState) return;
+  if (props.embeddedMode || settingsStore._isApplyingSessionState) return;
   if (newAgentId === oldAgentId || oldAgentId === undefined) return;
 
   const mcpMode = agentMCPSelectionMode.value;
@@ -1036,7 +1038,7 @@ const ensureModelSelection = () => {
 watch(
   [selectedAgentId, () => settingsStore.selectedAgentSourceTenantId, agentModelId],
   ([, sourceTenantId, newModelId]) => {
-    if (!newModelId || newModelId.trim() === '') return;
+    if (props.embeddedMode || !newModelId || newModelId.trim() === '') return;
 
     const lastPick = readLastChatModelID();
     const isSharedAgent = !!sourceTenantId;
@@ -2003,6 +2005,7 @@ onUnmounted(() => {
 
 // 监听路由变化
 watch(() => route.params.kbId, (newKbId) => {
+  if (props.embeddedMode) return;
   if (newKbId && typeof newKbId === 'string' && !selectedKbIds.value.includes(newKbId)) {
     settingsStore.addKnowledgeBase(newKbId);
   }
@@ -2100,9 +2103,10 @@ const createSession = async (
     return;
   }
 
-  // Embed 渠道由后端绑定 agent/KB，勿走平台侧 agent 列表与就绪校验
+  // Embed 渠道由后端绑定 agent/KB，勿走平台侧 agent 列表与就绪校验。
+  // 宿主没有模型选择器，不能把主对话里选的模型带进来，交给智能体自己的模型。
   if (props.embeddedMode) {
-    emit('send-msg', val, selectedModelId.value || '', [], [], [], options);
+    emit('send-msg', val, '', [], [], [], options);
     clearvalue();
     void focusInput();
     return;
@@ -2763,8 +2767,9 @@ defineExpose({
         @update:files="uploadedAttachments = $event" />
 
       <!-- 选中的知识库和文件标签（显示在输入框内顶部） -->
-      <div v-if="allSelectedItems.length > 0" class="selected-tags-inline">
-        <span v-for="item in allSelectedItems" :key="`${item.type}:${item.id}`" class="mention-chip" :class="[
+      <div v-if="$slots.chips || (!embeddedMode && allSelectedItems.length > 0)" class="selected-tags-inline">
+        <slot name="chips" />
+        <span v-for="item in (embeddedMode ? [] : allSelectedItems)" :key="`${item.type}:${item.id}`" class="mention-chip" :class="[
           getMentionChipClass(item),
           { 'mention-chip--agent': item.isAgentConfigured }
         ]">
