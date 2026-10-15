@@ -6339,6 +6339,29 @@ export default {
     }
   },
   agentStream: {
+    assistantTools: {
+      findOperations: "操作を検索",
+      runOperation: "操作を実行",
+      searchDocs: "WeKnora ドキュメントを検索",
+      readDoc: "WeKnora ドキュメントを読む",
+      available: "利用可能な操作：{count} 件",
+      unavailable: "利用できない操作：{count} 件",
+      details: "説明とパラメータ",
+      required: "必須",
+      completed: "完了",
+      metadata: "結果の追加情報",
+      documents: "ドキュメント：{count} 件",
+      outline: "ページの目次",
+      continueAt: "{offset} 文字目から続行",
+      truncated: "結果の一部のみ表示しています。",
+      empty: "表示する項目がありません",
+      failed: "ツールの呼び出しに失敗しました",
+      risk: {
+        read: "読み取り",
+        write: "書き込み",
+        destructive: "破壊的操作",
+      },
+    },
     askUser: {
       title: 'あなたへの質問',
       selectPlaceholder: '選択してください',

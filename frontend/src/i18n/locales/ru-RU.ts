@@ -1680,6 +1680,29 @@ export default {
     }
   },
   agentStream: {
+    assistantTools: {
+      findOperations: "Найти операции",
+      runOperation: "Выполнить операцию",
+      searchDocs: "Поиск в документации WeKnora",
+      readDoc: "Читать документацию WeKnora",
+      available: "Доступные операции: {count}",
+      unavailable: "Недоступные операции: {count}",
+      details: "Описание и параметры",
+      required: "Обязательно",
+      completed: "Завершено",
+      metadata: "Дополнительные сведения",
+      documents: "Документы: {count}",
+      outline: "Содержание страницы",
+      continueAt: "Продолжить с символа {offset}",
+      truncated: "Показана только часть результата.",
+      empty: "Нет элементов для отображения",
+      failed: "Ошибка вызова инструмента",
+      risk: {
+        read: "Чтение",
+        write: "Запись",
+        destructive: "Разрушительная операция",
+      },
+    },
     saveToKb: {
       emptyContent: 'Текущий ответ пуст, сохранение в базу знаний невозможно',
       editorOpened: 'Редактор открыт, выберите базу знаний и сохраните'

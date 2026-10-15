@@ -3,6 +3,9 @@ export function getAgentToolIconName(
   toolName: string,
   searchSource?: 'knowledge' | 'web' | 'mixed',
 ): string {
+  if (toolName === 'find_operations' || toolName === 'search_weknora_docs') return 'search'
+  if (toolName === 'run_operation') return 'tools'
+  if (toolName === 'read_weknora_doc') return 'file-search'
   if (toolName === 'local_browser') return 'internet'
   if (toolName === 'thinking') {
     return 'ai-search'

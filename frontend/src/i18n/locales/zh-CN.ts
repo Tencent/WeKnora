@@ -1682,6 +1682,29 @@ export default {
     }
   },
   agentStream: {
+    assistantTools: {
+      findOperations: "查找操作",
+      runOperation: "执行操作",
+      searchDocs: "搜索 WeKnora 文档",
+      readDoc: "阅读 WeKnora 文档",
+      available: "可用操作：{count} 项",
+      unavailable: "不可用操作：{count} 项",
+      details: "说明与参数",
+      required: "必填",
+      completed: "已完成",
+      metadata: "结果附加信息",
+      documents: "文档：{count} 项",
+      outline: "页面目录",
+      continueAt: "从第 {offset} 个字符继续",
+      truncated: "当前仅显示部分结果。",
+      empty: "没有可显示的条目",
+      failed: "工具调用失败",
+      risk: {
+        read: "读取",
+        write: "写入",
+        destructive: "破坏性操作",
+      },
+    },
     saveToKb: {
       emptyContent: '当前回答为空，无法保存到知识库',
       editorOpened: '已打开编辑器，请选择知识库后保存'

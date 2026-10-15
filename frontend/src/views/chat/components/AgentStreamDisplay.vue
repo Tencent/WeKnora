@@ -231,7 +231,7 @@
                     <BrowserToolDetails v-if="event.tool_name === 'local_browser'" :event="event" />
                     <div v-else-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
                       <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
-                        :output="mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
+                        :output="getAssistantToolDisplayType(event.tool_name) ? (event.output || event.error) : mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
                     </div>
                     <div v-else-if="event.output" class="tool-output-wrapper">
                       <div class="fallback-header">
@@ -569,7 +569,7 @@
                   <BrowserToolDetails v-if="event.tool_name === 'local_browser'" :event="event" />
                     <div v-else-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
                     <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
-                      :output="mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
+                      :output="getAssistantToolDisplayType(event.tool_name) ? (event.output || event.error) : mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
                   </div>
 
                   <div v-else-if="event.output" class="tool-output-wrapper">
@@ -703,6 +703,7 @@ import {
 import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
+import { getAssistantToolDisplayType, getAssistantToolTitle } from '@/utils/assistantToolDisplay';
 import { getMcpToolDisplayType, getMcpToolTitle, mcpToolResultOutput } from '@/utils/mcpToolDisplay';
 import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
 import {
@@ -759,6 +760,10 @@ const { t } = useI18n();
 ensureMermaidInitialized();
 
 const TOOL_NAME_KEYS: Record<string, string> = {
+  find_operations: 'agentStream.assistantTools.findOperations',
+  run_operation: 'agentStream.assistantTools.runOperation',
+  search_weknora_docs: 'agentStream.assistantTools.searchDocs',
+  read_weknora_doc: 'agentStream.assistantTools.readDoc',
   discover_mcp_tools: 'agentStream.mcp.discoverTools',
   call_mcp_tool: 'agentStream.mcp.callTool',
   search_knowledge: 'agentStream.tools.searchKnowledge',
@@ -1225,6 +1230,8 @@ const formatToolResultContent = (value: unknown): string => {
 const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').startsWith('mcp_');
 
 const resolveToolDisplayType = (event: any): DisplayType | undefined => {
+  const assistantType = getAssistantToolDisplayType(event?.tool_name)
+  if (assistantType) return assistantType
   const mcpType = getMcpToolDisplayType(event?.tool_name)
   if (mcpType) return mcpType
   if (event?.display_type) return event.display_type as DisplayType
@@ -2883,6 +2890,8 @@ const getSandboxToolDetail = (event: any): string => {
 
 // Get tool title - prefer summary over description, add query for search tools
 const getToolTitle = (event: any): string => {
+  const assistantTitle = getAssistantToolTitle(t, event)
+  if (assistantTitle) return assistantTitle
   if (event.tool_name === 'local_browser') return browserToolTitle(t, event);
   const mcpTitle = getMcpToolTitle(t, event)
   if (mcpTitle) return mcpTitle

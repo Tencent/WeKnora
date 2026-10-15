@@ -6339,6 +6339,29 @@ export default {
     }
   },
   agentStream: {
+    assistantTools: {
+      findOperations: "Find operations",
+      runOperation: "Run operation",
+      searchDocs: "Search WeKnora docs",
+      readDoc: "Read WeKnora doc",
+      available: "Available operations: {count}",
+      unavailable: "Unavailable operations: {count}",
+      details: "Description and parameters",
+      required: "Required",
+      completed: "Completed",
+      metadata: "Result metadata",
+      documents: "Documents: {count}",
+      outline: "Page outline",
+      continueAt: "Continue at character {offset}",
+      truncated: "Only part of the result is shown.",
+      empty: "No items to display",
+      failed: "The tool call failed",
+      risk: {
+        read: "Read",
+        write: "Write",
+        destructive: "Destructive",
+      },
+    },
     askUser: {
       title: 'Question for you',
       selectPlaceholder: 'Select',

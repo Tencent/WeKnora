@@ -1682,6 +1682,29 @@ export default {
     }
   },
   agentStream: {
+    assistantTools: {
+      findOperations: "尋找操作",
+      runOperation: "執行操作",
+      searchDocs: "搜尋 WeKnora 文件",
+      readDoc: "閱讀 WeKnora 文件",
+      available: "可用操作：{count} 項",
+      unavailable: "不可用操作：{count} 項",
+      details: "說明與參數",
+      required: "必填",
+      completed: "已完成",
+      metadata: "結果附加資訊",
+      documents: "文件：{count} 項",
+      outline: "頁面目錄",
+      continueAt: "從第 {offset} 個字元繼續",
+      truncated: "目前僅顯示部分結果。",
+      empty: "沒有可顯示的項目",
+      failed: "工具呼叫失敗",
+      risk: {
+        read: "讀取",
+        write: "寫入",
+        destructive: "破壞性操作",
+      },
+    },
     saveToKb: {
       emptyContent: '當前回答為空，無法儲存到知識庫',
       editorOpened: '已打開編輯器，請選擇知識庫後儲存'

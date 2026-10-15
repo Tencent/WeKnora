@@ -79,6 +79,17 @@
       :output="output" :arguments="toolArguments" :success="success"
     />
 
+    <OperationToolResult
+      v-else-if="displayType === 'find_operations' || displayType === 'run_operation'"
+      :discovery="displayType === 'find_operations'" :data="toolData"
+      :output="output" :arguments="toolArguments" :success="success"
+    />
+    <WeKnoraDocResult
+      v-else-if="displayType === 'search_weknora_docs' || displayType === 'read_weknora_doc'"
+      :search="displayType === 'search_weknora_docs'" :data="toolData"
+      :output="output" :success="success"
+    />
+
     <!-- Fallback: Display raw output -->
     <div v-else class="fallback-output">
       <div class="fallback-header">
@@ -136,6 +147,8 @@ import WriteSandboxFileResult from './tool-results/WriteSandboxFileResult.vue';
 import ReadSkillResult from './tool-results/ReadSkillResult.vue';
 import McpToolResult from './tool-results/McpToolResult.vue';
 import ImageViewResult from './tool-results/ImageViewResult.vue';
+import OperationToolResult from './tool-results/OperationToolResult.vue';
+import WeKnoraDocResult from './tool-results/WeKnoraDocResult.vue';
 
 interface Props {
   success?: boolean;

@@ -1680,6 +1680,29 @@ export default {
     }
   },
   agentStream: {
+    assistantTools: {
+      findOperations: "작업 찾기",
+      runOperation: "작업 실행",
+      searchDocs: "WeKnora 문서 검색",
+      readDoc: "WeKnora 문서 읽기",
+      available: "사용 가능한 작업: {count}개",
+      unavailable: "사용할 수 없는 작업: {count}개",
+      details: "설명 및 매개변수",
+      required: "필수",
+      completed: "완료",
+      metadata: "결과 추가 정보",
+      documents: "문서: {count}개",
+      outline: "페이지 목차",
+      continueAt: "{offset}번째 문자부터 계속",
+      truncated: "결과의 일부만 표시됩니다.",
+      empty: "표시할 항목이 없습니다",
+      failed: "도구 호출 실패",
+      risk: {
+        read: "읽기",
+        write: "쓰기",
+        destructive: "파괴적 작업",
+      },
+    },
     saveToKb: {
       emptyContent: '현재 응답이 비어 있어 지식베이스에 저장할 수 없습니다',
       editorOpened: '편집기가 열렸습니다. 지식베이스를 선택한 후 저장하세요'
