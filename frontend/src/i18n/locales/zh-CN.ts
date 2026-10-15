@@ -1830,7 +1830,11 @@ export default {
       shellExec: '执行沙箱命令',
       dataAnalysis: '数据分析',
       dataSchema: '数据结构',
-      databaseQuery: '数据库查询'
+      databaseQuery: '数据库查询',
+      findOperations: '查找操作',
+      runOperation: '执行操作',
+      searchWeKnoraDocs: '搜索产品文档',
+      readWeKnoraDoc: '阅读产品文档'
     },
     skillFiles: {
       heading: '技能文件',
@@ -1871,6 +1875,35 @@ export default {
       truncated: '输出已截断',
       killed: '已超时终止',
       binarySuppressed: '二进制输出已省略，请将文件写入产物目录后下载'
+    },
+    operations: {
+      found: '{count} 个可执行操作',
+      unavailableCount: '{count} 个当前不可用',
+      empty: '没有匹配的操作',
+      unavailableHeading: '当前不可用',
+      parameters: '参数',
+      required: '必填',
+      enum: '可选值',
+      range: '范围 {min}–{max}',
+      risk: {
+        read: '只读',
+        write: '写入',
+        destructive: '不可恢复'
+      },
+      truncated: '结果已截断',
+      emptyResult: '没有返回数据',
+      failed: '操作失败',
+      meta: '附加信息'
+    },
+    weknoraDocs: {
+      pages: '{count} 篇文档',
+      hits: '匹配 {count} 个章节',
+      empty: '没有匹配的文档',
+      outline: '目录',
+      content: '正文',
+      truncated: '正文未读完，可以继续读取',
+      failed: '读取失败',
+      openDoc: '在文档站打开'
     },
     mcpOAuth: {
       waiting: '等待授权 · {target}',

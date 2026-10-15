@@ -1828,7 +1828,11 @@ export default {
       shellExec: 'Выполнение команды в песочнице',
       dataAnalysis: 'Анализ данных',
       dataSchema: 'Структура данных',
-      databaseQuery: 'Запрос к базе данных'
+      databaseQuery: 'Запрос к базе данных',
+      findOperations: 'Поиск операций',
+      runOperation: 'Выполнение операции',
+      searchWeKnoraDocs: 'Поиск в документации',
+      readWeKnoraDoc: 'Чтение документации'
     },
     skillFiles: {
       heading: 'Файлы навыка',
@@ -1869,6 +1873,35 @@ export default {
       truncated: 'Вывод обрезан',
       killed: 'Прервано по таймауту',
       binarySuppressed: 'Двоичный вывод опущен. Сохраните файлы в каталог артефактов и скачайте их.'
+    },
+    operations: {
+      found: 'Доступно операций: {count}',
+      unavailableCount: 'Недоступно: {count}',
+      empty: 'Подходящих операций нет',
+      unavailableHeading: 'Сейчас недоступно',
+      parameters: 'Параметры',
+      required: 'Обязательно',
+      enum: 'Значения',
+      range: 'Диапазон {min}–{max}',
+      risk: {
+        read: 'Чтение',
+        write: 'Запись',
+        destructive: 'Необратимо'
+      },
+      truncated: 'Результат обрезан',
+      emptyResult: 'Данные не вернулись',
+      failed: 'Операция не выполнена',
+      meta: 'Дополнительно'
+    },
+    weknoraDocs: {
+      pages: 'Страниц: {count}',
+      hits: 'Совпавших разделов: {count}',
+      empty: 'Подходящей документации нет',
+      outline: 'Оглавление',
+      content: 'Текст',
+      truncated: 'Текст продолжается',
+      failed: 'Не удалось прочитать страницу',
+      openDoc: 'Открыть в документации'
     },
     mcpOAuth: {
       waiting: 'Ожидание авторизации · {target}',

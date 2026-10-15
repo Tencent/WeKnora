@@ -231,7 +231,7 @@
                     <BrowserToolDetails v-if="event.tool_name === 'local_browser'" :event="event" />
                     <div v-else-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
                       <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
-                        :output="mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
+                        :output="toolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
                     </div>
                     <div v-else-if="event.output" class="tool-output-wrapper">
                       <div class="fallback-header">
@@ -569,7 +569,7 @@
                   <BrowserToolDetails v-if="event.tool_name === 'local_browser'" :event="event" />
                     <div v-else-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
                     <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
-                      :output="mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
+                      :output="toolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
                   </div>
 
                   <div v-else-if="event.output" class="tool-output-wrapper">
@@ -704,6 +704,7 @@ import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
 import { getMcpToolDisplayType, getMcpToolTitle, mcpToolResultOutput } from '@/utils/mcpToolDisplay';
+import { getCatalogToolDisplayType, getCatalogToolTitle } from '@/utils/catalogToolDisplay';
 import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
 import {
   formatToolTitleWithDetail,
@@ -803,6 +804,10 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   data_analysis: 'agentStream.tools.dataAnalysis',
   data_schema: 'agentStream.tools.dataSchema',
   database_query: 'agentStream.tools.databaseQuery',
+  find_operations: 'agentStream.tools.findOperations',
+  run_operation: 'agentStream.tools.runOperation',
+  search_weknora_docs: 'agentStream.tools.searchWeKnoraDocs',
+  read_weknora_doc: 'agentStream.tools.readWeKnoraDoc',
 };
 
 const getLocalizedToolName = (toolName?: string | null): string => {
@@ -1224,9 +1229,18 @@ const formatToolResultContent = (value: unknown): string => {
 
 const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').startsWith('mcp_');
 
+const toolResultOutput = (event: any): string | undefined => {
+  if (getMcpToolDisplayType(event?.tool_name) || getCatalogToolDisplayType(event?.tool_name)) {
+    return event?.output || event?.error
+  }
+  return mcpToolResultOutput(event)
+}
+
 const resolveToolDisplayType = (event: any): DisplayType | undefined => {
   const mcpType = getMcpToolDisplayType(event?.tool_name)
   if (mcpType) return mcpType
+  const catalogType = getCatalogToolDisplayType(event?.tool_name)
+  if (catalogType) return catalogType
   if (event?.display_type) return event.display_type as DisplayType
   if (event?.tool_name === 'shell_exec' || event?.tool_name === 'execute_skill_script') {
     return 'shell_exec'
@@ -2886,6 +2900,8 @@ const getToolTitle = (event: any): string => {
   if (event.tool_name === 'local_browser') return browserToolTitle(t, event);
   const mcpTitle = getMcpToolTitle(t, event)
   if (mcpTitle) return mcpTitle
+  const catalogTitle = getCatalogToolTitle(t, event)
+  if (catalogTitle) return catalogTitle
   if (event.pending) {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');

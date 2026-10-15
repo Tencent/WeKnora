@@ -1830,7 +1830,11 @@ export default {
       shellExec: '執行沙箱命令',
       dataAnalysis: '資料分析',
       dataSchema: '資料結構',
-      databaseQuery: '資料庫查詢'
+      databaseQuery: '資料庫查詢',
+      findOperations: '查找操作',
+      runOperation: '執行操作',
+      searchWeKnoraDocs: '搜尋產品文件',
+      readWeKnoraDoc: '閱讀產品文件'
     },
     skillFiles: {
       heading: '技能檔案',
@@ -1871,6 +1875,35 @@ export default {
       truncated: '輸出已截斷',
       killed: '已超時終止',
       binarySuppressed: '二進位輸出已省略，請將檔案寫入產物目錄後下載'
+    },
+    operations: {
+      found: '{count} 個可執行操作',
+      unavailableCount: '{count} 個目前不可用',
+      empty: '沒有符合的操作',
+      unavailableHeading: '目前不可用',
+      parameters: '參數',
+      required: '必填',
+      enum: '可選值',
+      range: '範圍 {min}–{max}',
+      risk: {
+        read: '唯讀',
+        write: '寫入',
+        destructive: '不可恢復'
+      },
+      truncated: '結果已截斷',
+      emptyResult: '沒有傳回資料',
+      failed: '操作失敗',
+      meta: '附加資訊'
+    },
+    weknoraDocs: {
+      pages: '{count} 篇文件',
+      hits: '符合 {count} 個章節',
+      empty: '沒有符合的文件',
+      outline: '目錄',
+      content: '正文',
+      truncated: '正文未讀完，可以繼續讀取',
+      failed: '讀取失敗',
+      openDoc: '在文件站開啟'
     },
     mcpOAuth: {
       waiting: '等待授權 · {target}',

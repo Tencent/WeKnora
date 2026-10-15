@@ -62,5 +62,17 @@ export function getAgentToolIconName(
   if (toolName === 'execute_skill_script') {
     return 'code'
   }
+  if (toolName === 'find_operations') {
+    return 'task'
+  }
+  if (toolName === 'run_operation') {
+    return 'terminal'
+  }
+  if (toolName === 'search_weknora_docs') {
+    return 'search'
+  }
+  if (toolName === 'read_weknora_doc') {
+    return 'file'
+  }
   return 'file-paste'
 }

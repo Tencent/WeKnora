@@ -6447,7 +6447,11 @@ export default {
       shellExec: 'サンドボックスコマンドを実行',
       dataAnalysis: 'データ分析',
       dataSchema: 'データスキーマ',
-      databaseQuery: 'データベース照会'
+      databaseQuery: 'データベース照会',
+      findOperations: '操作を検索',
+      runOperation: '操作を実行',
+      searchWeKnoraDocs: '製品ドキュメントを検索',
+      readWeKnoraDoc: '製品ドキュメントを読む'
     },
     skillFiles: {
       heading: 'スキルファイル',
@@ -6488,6 +6492,35 @@ export default {
       truncated: '出力は省略されています',
       killed: 'タイムアウトにより終了しました',
       binarySuppressed: 'バイナリ出力は省略されました。ダウンロードするには、成果物ディレクトリにファイルを書き込んでください。'
+    },
+    operations: {
+      found: '実行できる操作 {count} 件',
+      unavailableCount: '現在使えない操作 {count} 件',
+      empty: '一致する操作はありません',
+      unavailableHeading: '現在使えません',
+      parameters: 'パラメータ',
+      required: '必須',
+      enum: '選択肢',
+      range: '範囲 {min}–{max}',
+      risk: {
+        read: '読み取り',
+        write: '書き込み',
+        destructive: '取り消し不可'
+      },
+      truncated: '結果は省略されています',
+      emptyResult: 'データはありません',
+      failed: '操作に失敗しました',
+      meta: '補足'
+    },
+    weknoraDocs: {
+      pages: 'ドキュメント {count} 件',
+      hits: '一致した節 {count} 件',
+      empty: '一致するドキュメントはありません',
+      outline: '目次',
+      content: '本文',
+      truncated: '本文は続きます',
+      failed: '読み取れませんでした',
+      openDoc: 'ドキュメントサイトで開く'
     },
     citation: {
       notFound: 'コンテンツが見つかりません',

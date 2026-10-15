@@ -6447,7 +6447,11 @@ export default {
       shellExec: 'Run sandbox command',
       dataAnalysis: 'Data Analysis',
       dataSchema: 'Data Schema',
-      databaseQuery: 'Database Query'
+      databaseQuery: 'Database Query',
+      findOperations: 'Find operations',
+      runOperation: 'Run operation',
+      searchWeKnoraDocs: 'Search product docs',
+      readWeKnoraDoc: 'Read product doc'
     },
     skillFiles: {
       heading: 'Skill files',
@@ -6488,6 +6492,35 @@ export default {
       truncated: 'Output truncated',
       killed: 'Timed out',
       binarySuppressed: 'Binary output omitted. Write files to the artifact directory to download them.'
+    },
+    operations: {
+      found: '{count} available',
+      unavailableCount: '{count} unavailable',
+      empty: 'No matching operations',
+      unavailableHeading: 'Unavailable',
+      parameters: 'Parameters',
+      required: 'Required',
+      enum: 'Values',
+      range: 'Range {min}–{max}',
+      risk: {
+        read: 'Read',
+        write: 'Write',
+        destructive: 'Destructive'
+      },
+      truncated: 'Result truncated',
+      emptyResult: 'No data returned',
+      failed: 'Operation failed',
+      meta: 'Details'
+    },
+    weknoraDocs: {
+      pages: '{count} pages',
+      hits: '{count} matching sections',
+      empty: 'No matching documentation',
+      outline: 'Outline',
+      content: 'Content',
+      truncated: 'The page continues',
+      failed: 'Could not read the page',
+      openDoc: 'Open in docs'
     },
     citation: {
       notFound: 'Content not found',

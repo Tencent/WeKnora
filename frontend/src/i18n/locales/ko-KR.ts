@@ -1828,7 +1828,11 @@ export default {
       shellExec: '샌드박스 명령 실행',
       dataAnalysis: '데이터 분석',
       dataSchema: '데이터 구조',
-      databaseQuery: '데이터베이스 조회'
+      databaseQuery: '데이터베이스 조회',
+      findOperations: '작업 찾기',
+      runOperation: '작업 실행',
+      searchWeKnoraDocs: '제품 문서 검색',
+      readWeKnoraDoc: '제품 문서 읽기'
     },
     skillFiles: {
       heading: '스킬 파일',
@@ -1869,6 +1873,35 @@ export default {
       truncated: '출력이 잘림',
       killed: '시간 초과로 종료됨',
       binarySuppressed: '바이너리 출력은 생략되었습니다. 파일은 산출물 디렉터리에 저장한 뒤 다운로드하세요.'
+    },
+    operations: {
+      found: '실행 가능 {count}개',
+      unavailableCount: '현재 사용 불가 {count}개',
+      empty: '일치하는 작업이 없습니다',
+      unavailableHeading: '현재 사용 불가',
+      parameters: '매개변수',
+      required: '필수',
+      enum: '허용 값',
+      range: '범위 {min}–{max}',
+      risk: {
+        read: '읽기',
+        write: '쓰기',
+        destructive: '되돌릴 수 없음'
+      },
+      truncated: '결과가 잘렸습니다',
+      emptyResult: '반환된 데이터가 없습니다',
+      failed: '작업 실패',
+      meta: '추가 정보'
+    },
+    weknoraDocs: {
+      pages: '문서 {count}편',
+      hits: '일치하는 섹션 {count}개',
+      empty: '일치하는 문서가 없습니다',
+      outline: '목차',
+      content: '본문',
+      truncated: '본문이 이어집니다',
+      failed: '읽기 실패',
+      openDoc: '문서 사이트에서 열기'
     },
     mcpOAuth: {
       waiting: '인증 대기 · {target}',
