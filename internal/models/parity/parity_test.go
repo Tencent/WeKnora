@@ -19,8 +19,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -36,13 +39,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestMain whitelists the loopback host: several vendors ship a placeholder
-// default URL (self-hosted runtimes) or a templated one (Azure), which the
-// SSRF guard rejects before any request is built. Those cases are re-pointed
-// at 127.0.0.1 by reachableBaseURL.
+// Request-shape tests keep catalog URLs because the host can select a protocol,
+// but must not depend on public DNS. Allow those hosts only in this test process;
+// actual transport tests use loopback, and SSRF behavior is tested in utils.
 func TestMain(m *testing.M) {
-	secutils.SetSSRFWhitelistFromRaw("127.0.0.1")
-	defer secutils.ResetSSRFWhitelistForTest()
+	hosts := []string{"127.0.0.1"}
+	for _, vendor := range modelruntime.List() {
+		for _, baseURL := range vendor.DefaultBaseURLs {
+			parsed, err := url.Parse(reachableBaseURL(baseURL))
+			if err != nil {
+				panic(err)
+			}
+			if host := parsed.Hostname(); host != "" {
+				hosts = append(hosts, host)
+			}
+		}
+	}
+	secutils.SetSSRFWhitelistFromRaw(strings.Join(hosts, ","))
+	net.DefaultResolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(_ context.Context, network, address string) (net.Conn, error) {
+			return nil, fmt.Errorf("unexpected DNS lookup in request-shape tests: %s %s", network, address)
+		},
+	}
 	os.Exit(m.Run())
 }
 
