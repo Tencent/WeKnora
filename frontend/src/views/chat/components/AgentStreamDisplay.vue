@@ -399,6 +399,15 @@
               </div>
             </div>
 
+            <!-- Terminal error (a failed turn keeps its timeline; the error entry
+                 closes it). Show only the message text — no answer toolbar, no
+                 follow-up affordances. -->
+            <div v-else-if="event.type === 'error'" class="agent-error-event">
+              <div v-if="event.content && event.content.trim()" class="agent-error-content markdown-content">
+                <div v-stable-html="renderMarkdownContent(event.content)"></div>
+              </div>
+            </div>
+
             <!-- Answer Event -->
             <div v-else-if="event.type === 'answer' && (event.done || (event.content && event.content.trim()))"
               class="answer-event">
@@ -2090,7 +2099,7 @@ const intermediateEvents = computed(() => {
   const result = buildFullEventList(stream);
   const hidden = hiddenThinkingEventIds.value;
   return result.filter((e: any) => {
-    if (e.type === 'answer' || e.type === 'agent_complete') return false;
+    if (e.type === 'answer' || e.type === 'agent_complete' || e.type === 'error') return false;
     // Mid-run injected user messages render as normal user bubbles in the
     // message list, not inside the steps tree — the tree template has no
     // branch for this type and would otherwise emit an empty node.
@@ -2120,9 +2129,10 @@ const displayEvents = computed(() => {
   );
 
   // Quick-answer RAG: pipeline steps (including attachment prep) live in
-  // RagPipelineProgress; this component only renders the answer stream.
+  // RagPipelineProgress; this component only renders the answer stream (and
+  // a terminal error entry that closes a failed turn).
   if (props.ragMode) {
-    return result.filter((e: any) => e.type === 'answer');
+    return result.filter((e: any) => e.type === 'answer' || e.type === 'error');
   }
 
   // Keep the active reasoning event inline with tool activity. It uses the same
@@ -2132,7 +2142,11 @@ const displayEvents = computed(() => {
   }
 
   // Done: the steps live in the collapsed tree; show only the answer here.
-  const answerEvents = result.filter((e: any) => e.type === 'answer');
+  // A terminal error entry stays visible too, so a failed agent turn reads as
+  // steps + error rather than vanishing into the tree.
+  const answerEvents = result.filter(
+    (e: any) => e.type === 'answer' || e.type === 'error'
+  );
   if (answerEvents.length > 0) {
     return answerEvents;
   }
@@ -3409,6 +3423,24 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
   .answer-toolbar {
     margin-top: 10px;
+  }
+}
+
+// Terminal error entry — a failed turn keeps its timeline and closes with
+// this card instead of an answer.
+.agent-error-event {
+  animation: fadeInUp 0.25s ease-out;
+  border: 1px solid var(--td-error-color, #e34d59);
+  border-radius: var(--td-radius-default, 6px);
+  background-color: color-mix(in srgb, var(--td-error-color, #e34d59) 6%, transparent);
+  padding: 10px 12px;
+
+  .agent-error-content {
+    color: var(--td-error-color, #e34d59);
+
+    &.markdown-content {
+      .chat-markdown-typography();
+    }
   }
 }
 
