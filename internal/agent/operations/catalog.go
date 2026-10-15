@@ -53,10 +53,11 @@ type ParamType string
 
 // Parameter types.
 const (
-	TypeString     ParamType = "string"
-	TypeInteger    ParamType = "integer"
-	TypeBoolean    ParamType = "boolean"
-	TypeStringList ParamType = "string_list"
+	TypeString      ParamType = "string"
+	TypeInteger     ParamType = "integer"
+	TypeBoolean     ParamType = "boolean"
+	TypeStringList  ParamType = "string_list"
+	TypeIntegerList ParamType = "integer_list"
 )
 
 // Param is one model-facing parameter.
@@ -78,7 +79,7 @@ type Param struct {
 	// Minimum and Maximum bound integers when Maximum > 0.
 	Minimum int
 	Maximum int
-	// MaxItems bounds string lists; defaults to defaultMaxListItems.
+	// MaxItems bounds lists; defaults to defaultMaxListItems.
 	MaxItems int
 	// MaxBytes overrides maxStringParamBytes for this string. Zero keeps the
 	// default. It cannot exceed maxAgentStringBytes.
@@ -371,7 +372,7 @@ func validateOperation(op Operation) error {
 			return fmt.Errorf("param %q: description is required", p.Name)
 		}
 		switch p.Type {
-		case TypeString, TypeInteger, TypeBoolean, TypeStringList:
+		case TypeString, TypeInteger, TypeBoolean, TypeStringList, TypeIntegerList:
 		default:
 			return fmt.Errorf("param %q: invalid type %q", p.Name, p.Type)
 		}
@@ -387,8 +388,11 @@ func validateOperation(op Operation) error {
 		}
 		switch p.In {
 		case InPath:
-			if p.Type != TypeString || !p.Required {
-				return fmt.Errorf("path param %q must be a required string", p.Name)
+			if (p.Type != TypeString && p.Type != TypeInteger) || !p.Required {
+				return fmt.Errorf("path param %q must be a required string or integer", p.Name)
+			}
+			if p.Type == TypeInteger && strings.HasSuffix(op.Route, "/*"+p.wireKey()) {
+				return fmt.Errorf("path param %q: a catch-all must be a string", p.Name)
 			}
 			if _, ok := routeParams[p.wireKey()]; !ok {
 				return fmt.Errorf("path param %q has no route segment %q", p.Name, p.wireKey())
@@ -396,7 +400,7 @@ func validateOperation(op Operation) error {
 			pathParams[p.wireKey()] = true
 		case InQuery:
 		case InBody:
-			if op.Method == http.MethodGet || op.Method == http.MethodDelete {
+			if op.Method == http.MethodGet {
 				return fmt.Errorf("param %q: %s requests carry no body", p.Name, op.Method)
 			}
 		default:
@@ -440,7 +444,7 @@ func (c *Catalog) validateTarget(op Operation) error {
 	if op.Target == nil {
 		return nil
 	}
-	if err := c.validateRead(op, op.Target.Operation, op.Target.Label, ""); err != nil {
+	if err := c.validateRead(op, op.Target.Operation, op.Target.Label, "", ""); err != nil {
 		return err
 	}
 	items := op.Target.Items
@@ -448,19 +452,27 @@ func (c *Catalog) validateTarget(op Operation) error {
 		return nil
 	}
 	list, ok := op.Param(items.Param)
-	if !ok || list.Type != TypeStringList || !list.Required {
-		return fmt.Errorf("target items %q must be a required string list", items.Param)
+	if !ok || !list.Required || (list.Type != TypeStringList && list.Type != TypeIntegerList) {
+		return fmt.Errorf("target items %q must be a required list", items.Param)
 	}
 	if list.MaxItems <= 0 || list.MaxItems > MaxApprovalItems {
 		return fmt.Errorf("target items %q must be capped at %d or fewer", items.Param, MaxApprovalItems)
 	}
-	return c.validateRead(op, items.Operation, items.Label, items.As)
+	return c.validateRead(op, items.Operation, items.Label, items.As, list.itemType())
+}
+
+// itemType is the type of one element of a list param.
+func (p Param) itemType() ParamType {
+	if p.Type == TypeIntegerList {
+		return TypeInteger
+	}
+	return TypeString
 }
 
 // validateRead checks a target read of op: a single-object read whose
-// parameters op supplies (item, if set, is filled per item instead) and
-// whose result has label.
-func (c *Catalog) validateRead(op Operation, id, label, item string) error {
+// parameters op supplies (item, if set, is filled per item instead, with
+// itemType) and whose result has label.
+func (c *Catalog) validateRead(op Operation, id, label, item string, itemType ParamType) error {
 	target, ok := c.Get(id)
 	if !ok {
 		return fmt.Errorf("target %q is not in the catalog", id)
@@ -473,8 +485,8 @@ func (c *Catalog) validateRead(op Operation, id, label, item string) error {
 	}
 	if item != "" {
 		p, ok := target.Param(item)
-		if !ok || p.Type != TypeString || !p.Required {
-			return fmt.Errorf("target %q has no required string param %q for each item", target.ID, item)
+		if !ok || p.Type != itemType || !p.Required {
+			return fmt.Errorf("target %q has no required %s param %q for each item", target.ID, itemType, item)
 		}
 		if _, clash := op.Param(item); clash {
 			return fmt.Errorf("target item param %q is also a param of %q", item, op.ID)

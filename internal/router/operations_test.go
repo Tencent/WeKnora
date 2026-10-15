@@ -24,6 +24,7 @@ func TestBuiltinOperationsMatchRegisteredRoutes(t *testing.T) {
 	RegisterChunkRoutes(v1, &handler.ChunkHandler{}, g)
 	RegisterKnowledgeTagRoutes(v1, &handler.TagHandler{}, g)
 	RegisterOrganizationRoutes(v1, &handler.OrganizationHandler{}, g)
+	RegisterFAQRoutes(v1, &handler.FAQHandler{}, g)
 
 	if missing := missingOperationRoutes(engine, operations.Builtin()); len(missing) > 0 {
 		t.Fatalf("operations without a route: %v", missing)

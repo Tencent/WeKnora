@@ -185,6 +185,46 @@ func TestBuildValidatesAndEscapes(t *testing.T) {
 	assert.Equal(t, "/api/v1/knowledge-bases/kb%201%25/knowledge", call.Path)
 }
 
+func TestBuildIntegerPathAndList(t *testing.T) {
+	kb := Param{Name: "knowledge_base_id", In: InPath, Key: "id", Type: TypeString, Required: true, Description: "d"}
+	entry := Param{Name: "entry_id", In: InPath, Type: TypeInteger, Required: true, Description: "d"}
+	get := readOp("faq.get_entry", "/api/v1/knowledge-bases/:id/faq/entries/:entry_id", kb, entry)
+	del := Operation{
+		ID: "faq.delete_entries", Summary: "s", Risk: RiskDestructive, Method: http.MethodDelete,
+		Route: "/api/v1/knowledge-bases/:id/faq/entries",
+		Params: []Param{kb, {Name: "entry_ids", In: InBody, Key: "ids", Type: TypeIntegerList, Required: true,
+			Description: "d", MaxItems: 2}},
+		Target: &Target{Operation: "knowledge_base.get", Label: "title", Items: &ItemTarget{
+			Param: "entry_ids", Operation: "faq.get_entry", As: "entry_id", Label: "title",
+		}},
+	}
+	getKB := readOp("knowledge_base.get", "/api/v1/knowledge-bases/:id", kb)
+	_, err := NewCatalog(getKB, get, del)
+	require.NoError(t, err, "a DELETE may carry a body, and integer items resolve an integer param")
+
+	call, err := get.Build(map[string]json.RawMessage{"knowledge_base_id": raw("kb"), "entry_id": raw(42)})
+	require.NoError(t, err)
+	assert.Equal(t, "/api/v1/knowledge-bases/kb/faq/entries/42", call.Path)
+	_, err = get.Build(map[string]json.RawMessage{"knowledge_base_id": raw("kb"), "entry_id": raw("42/../x")})
+	assert.Error(t, err, "an integer path param takes integers only")
+
+	call, err = del.Build(map[string]json.RawMessage{"knowledge_base_id": raw("kb"), "entry_ids": raw([]int{1, 2})})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"ids":[1,2]}`, string(call.Body))
+	for _, bad := range []any{[]int{1, 2, 3}, []string{"1"}, []float64{1.5}, []int{}} {
+		_, err = del.Build(map[string]json.RawMessage{"knowledge_base_id": raw("kb"), "entry_ids": raw(bad)})
+		assert.Error(t, err, bad)
+	}
+
+	stringItem := del
+	stringItem.Target = &Target{Operation: "knowledge_base.get", Label: "title", Items: &ItemTarget{
+		Param: "entry_ids", Operation: "knowledge.get", As: "knowledge_id", Label: "title",
+	}}
+	doc := Param{Name: "knowledge_id", In: InPath, Key: "id", Type: TypeString, Required: true, Description: "d"}
+	_, err = NewCatalog(getKB, get, readOp("knowledge.get", "/api/v1/knowledge/:id", doc), stringItem)
+	assert.Error(t, err, "integer items cannot fill a string param")
+}
+
 func TestBuildCatchAllPath(t *testing.T) {
 	slug := Param{Name: "slug", In: InPath, Type: TypeString, Required: true, Description: "d"}
 	op := readOp(

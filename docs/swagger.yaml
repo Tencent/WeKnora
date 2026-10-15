@@ -2650,11 +2650,14 @@ definitions:
   github_com_Tencent_WeKnora_internal_types.FAQEntry:
     properties:
       answer_strategy:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AnswerStrategy'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AnswerStrategy'
+        x-agent: true
       answers:
         items:
           type: string
         type: array
+        x-agent: true
       chunk_id:
         type: string
       chunk_type:
@@ -2663,12 +2666,15 @@ definitions:
         type: string
       id:
         type: integer
+        x-agent: entry_id
       index_mode:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FAQIndexMode'
       is_enabled:
         type: boolean
+        x-agent: true
       is_recommended:
         type: boolean
+        x-agent: true
       knowledge_base_id:
         type: string
       knowledge_id:
@@ -2684,20 +2690,26 @@ definitions:
         items:
           type: string
         type: array
+        x-agent: true
       score:
         type: number
       similar_questions:
         items:
           type: string
         type: array
+        x-agent: true
       standard_question:
         type: string
+        x-agent: true
       tag_id:
         type: integer
+        x-agent: tag_seq_id
       tag_name:
         type: string
+        x-agent: true
       updated_at:
         type: string
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.FAQEntryFieldsBatchUpdate:
     properties:
@@ -2729,30 +2741,58 @@ definitions:
   github_com_Tencent_WeKnora_internal_types.FAQEntryPayload:
     properties:
       answer_strategy:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AnswerStrategy'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AnswerStrategy'
+        description: all returns every answer; random returns one.
+        enum:
+        - all
+        - random
+        x-agent: true
+        x-agent-required: true
       answers:
+        description: Answers; one is picked by answer_strategy.
         items:
           type: string
         type: array
+        x-agent: true
+        x-agent-required: true
       id:
         description: ID 可选，用于数据迁移时指定 seq_id（必须小于自增起始值 100000000）
         type: integer
       is_enabled:
+        description: Whether the entry is served; omit to keep the current or default
+          value.
         type: boolean
+        x-agent: true
       is_recommended:
+        description: Whether the entry is recommended; omit to keep the current or
+          default value.
         type: boolean
+        x-agent: true
       negative_questions:
+        description: Phrasings that must not match; [] for none.
         items:
           type: string
         type: array
+        x-agent: true
+        x-agent-required: true
       similar_questions:
+        description: Other phrasings that should match; [] for none.
         items:
           type: string
         type: array
+        x-agent: true
+        x-agent-required: true
       standard_question:
+        description: The question the entry answers.
         type: string
+        x-agent: true
       tag_id:
+        description: Tag seq id (tag_seq_id from knowledge_base.list_tags); 0 for
+          none.
         type: integer
+        x-agent: tag_seq_id
+        x-agent-required: true
       tag_name:
         type: string
     required:
@@ -4210,6 +4250,7 @@ definitions:
       seq_id:
         description: SeqID is an auto-increment integer ID for external API usage
         type: integer
+        x-agent: tag_seq_id
       sort_order:
         description: Sort order within the same knowledge base
         type: integer
@@ -4247,6 +4288,7 @@ definitions:
       seq_id:
         description: SeqID is an auto-increment integer ID for external API usage
         type: integer
+        x-agent: tag_seq_id
       sort_order:
         description: Sort order within the same knowledge base
         type: integer
@@ -5764,20 +5806,6 @@ definitions:
         type: array
       wiki_slug:
         type: string
-    type: object
-  github_com_Tencent_WeKnora_internal_types.PageResult:
-    properties:
-      data:
-        description: Data
-      page:
-        description: Current page number
-        type: integer
-      page_size:
-        description: Page size
-        type: integer
-      total:
-        description: Total number of records
-        type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.ParserEngineConfig:
     properties:
@@ -9336,6 +9364,19 @@ definitions:
       truncated:
         type: boolean
     type: object
+  internal_handler.FAQEntryPage:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FAQEntry'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
   internal_handler.FabriTagResponse:
     properties:
       tags:
@@ -10904,6 +10945,7 @@ definitions:
       success:
         example: true
         type: boolean
+        x-agent: true
     type: object
   internal_handler.SuggestedQuestionsData:
     properties:
@@ -11217,10 +11259,12 @@ definitions:
   internal_handler.addSimilarQuestionsRequest:
     properties:
       similar_questions:
+        description: Phrasings to add to the entry.
         items:
           type: string
         minItems: 1
         type: array
+        x-agent: true
     required:
     - similar_questions
     type: object
@@ -11337,6 +11381,19 @@ definitions:
         type: string
     required:
     - name
+    type: object
+  internal_handler.faqDeleteRequest:
+    properties:
+      ids:
+        description: Entries to delete (entry_id).
+        items:
+          type: integer
+        minItems: 1
+        type: array
+        x-agent: entry_ids
+        x-agent-maximum: "20"
+    required:
+    - ids
     type: object
   internal_handler.imageListRequestBody:
     properties:
@@ -14889,17 +14946,13 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: knowledge_base_id
       - description: 要删除的FAQ ID列表(seq_id)
         in: body
         name: request
         required: true
         schema:
-          properties:
-            ids:
-              items:
-                type: integer
-              type: array
-          type: object
+          $ref: '#/definitions/internal_handler.faqDeleteRequest'
       produces:
       - application/json
       responses:
@@ -14917,6 +14970,18 @@ paths:
       summary: 批量删除FAQ条目
       tags:
       - FAQ管理
+      x-agent:
+        id: faq.delete_entries
+        items:
+          as: entry_id
+          label: standard_question
+          param: entry_ids
+          target: faq.get_entry
+        label: name
+        risk: destructive
+        target: knowledge_base.get
+      x-agent-hint: Removes up to 20 FAQ entries. Cannot be undone; the confirmation
+        lists every question.
     get:
       consumes:
       - application/json
@@ -14927,14 +14992,22 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: knowledge_base_id
       - description: 页码
         in: query
+        minimum: 1
         name: page
         type: integer
+        x-agent: true
+        x-agent-maximum: "10000"
       - description: 每页数量
         in: query
+        maximum: 1000
+        minimum: 1
         name: page_size
         type: integer
+        x-agent: true
+        x-agent-maximum: "50"
       - description: 标签ID筛选(seq_id)，兼容旧版单标签
         in: query
         name: tag_id
@@ -14943,23 +15016,33 @@ paths:
         in: query
         name: tag_ids
         type: string
+        x-agent: true
       - description: 关键词搜索
         in: query
         name: keyword
         type: string
-      - description: '搜索字段: standard_question(标准问题), similar_questions(相似问法), answers(答案),
-          默认搜索全部'
+        x-agent: true
+      - description: 搜索字段，默认搜索全部
+        enum:
+        - standard_question
+        - similar_questions
+        - answers
         in: query
         name: search_field
         type: string
+        x-agent: true
       - description: '排序方式: asc(按更新时间正序), 默认按更新时间倒序'
+        enum:
+        - asc
         in: query
         name: sort_order
         type: string
+        x-agent: true
       - description: 启用状态筛选；不传时返回全部
         in: query
         name: is_enabled
         type: boolean
+        x-agent: true
       produces:
       - application/json
       responses:
@@ -14970,7 +15053,7 @@ paths:
             - $ref: '#/definitions/internal_handler.DataResponse'
             - properties:
                 data:
-                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.PageResult'
+                  $ref: '#/definitions/internal_handler.FAQEntryPage'
               type: object
         "400":
           description: 请求参数错误
@@ -14982,6 +15065,12 @@ paths:
       summary: 获取FAQ条目列表
       tags:
       - FAQ管理
+      x-agent:
+        id: faq.list_entries
+        risk: read
+        root: data.data
+      x-agent-hint: FAQ entries of an FAQ knowledge base, newest first; keyword searches
+        questions and answers.
     post:
       consumes:
       - application/json
@@ -15034,11 +15123,13 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: knowledge_base_id
       - description: FAQ条目ID(seq_id)
         in: path
         name: entry_id
         required: true
         type: integer
+        x-agent: true
       produces:
       - application/json
       responses:
@@ -15065,6 +15156,9 @@ paths:
       summary: 获取FAQ条目详情
       tags:
       - FAQ管理
+      x-agent:
+        id: faq.get_entry
+        risk: read
     put:
       consumes:
       - application/json
@@ -15075,11 +15169,13 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: knowledge_base_id
       - description: FAQ条目ID(seq_id)
         in: path
         name: entry_id
         required: true
         type: integer
+        x-agent: true
       - description: FAQ条目
         in: body
         name: request
@@ -15108,6 +15204,14 @@ paths:
       summary: 更新FAQ条目
       tags:
       - FAQ管理
+      x-agent:
+        id: faq.update_entry
+        label: standard_question
+        risk: write
+        target: faq.get_entry
+      x-agent-hint: Replaces the whole entry. Read it with faq.get_entry first and
+        send every field, changed or not, or the rest is lost. To only add phrasings,
+        use faq.add_similar_questions.
   /knowledge-bases/{id}/faq/entries/{entry_id}/similar-questions:
     post:
       consumes:
@@ -15119,11 +15223,13 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: knowledge_base_id
       - description: FAQ条目ID(seq_id)
         in: path
         name: entry_id
         required: true
         type: integer
+        x-agent: true
       - description: 相似问列表
         in: body
         name: request
@@ -15156,6 +15262,12 @@ paths:
       summary: 添加相似问
       tags:
       - FAQ管理
+      x-agent:
+        id: faq.add_similar_questions
+        label: standard_question
+        risk: write
+        target: faq.get_entry
+      x-agent-hint: Adds phrasings to an entry and keeps everything else.
   /knowledge-bases/{id}/faq/entries/export:
     get:
       consumes:
@@ -15268,6 +15380,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: knowledge_base_id
       - description: FAQ条目
         in: body
         name: request
@@ -15296,6 +15409,13 @@ paths:
       summary: 创建单个FAQ条目
       tags:
       - FAQ管理
+      x-agent:
+        id: faq.create_entry
+        label: name
+        risk: write
+        target: knowledge_base.get
+      x-agent-hint: Adds one FAQ entry. Questions already used by another entry are
+        refused.
   /knowledge-bases/{id}/faq/import/last-result/display:
     put:
       consumes:

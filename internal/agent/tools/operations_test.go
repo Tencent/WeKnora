@@ -246,6 +246,27 @@ func TestRunOperationBatchApprovalKeepsMultilineTitlesOnOneLine(t *testing.T) {
 	}
 }
 
+func TestRunOperationFAQDeleteNamesEveryQuestion(t *testing.T) {
+	d := &fakeDispatcher{responses: map[string]*operations.Response{
+		"GET /api/v1/knowledge-bases/kb1": {
+			Status: http.StatusOK, Body: []byte(`{"success":true,"data":{"id":"kb1","name":"Support"}}`),
+		},
+		"GET /api/v1/knowledge-bases/kb1/faq/entries/7": {
+			Status: http.StatusOK, Body: []byte(`{"success":true,"data":{"id":7,"standard_question":"How do I reset?"}}`),
+		},
+		"DELETE /api/v1/knowledge-bases/kb1/faq/entries": {Status: http.StatusOK, Body: []byte(`{"success":true}`)},
+	}}
+	gate := &fakeApprover{decision: approval.Decision{Approved: true, PendingID: "p1"}}
+
+	res, _ := newRunTool(d, gate).Execute(interactiveCtx(), runArgs("faq.delete_entries",
+		map[string]any{"knowledge_base_id": "kb1", "entry_ids": []int{7}}))
+	require.True(t, res.Success, res.Error)
+	require.Len(t, gate.requests, 1)
+	assert.Equal(t, "批量删除FAQ条目\nSupport\n- How do I reset?", gate.requests[0].Description)
+	require.Len(t, d.calls, 3)
+	assert.JSONEq(t, `{"ids":[7]}`, string(d.calls[2].call.Body))
+}
+
 func TestRunOperationDeclinedOrEditedToAnotherOperation(t *testing.T) {
 	responses := map[string]*operations.Response{
 		"GET /api/v1/knowledge/k1": {Status: http.StatusOK, Body: []byte(docBody)},

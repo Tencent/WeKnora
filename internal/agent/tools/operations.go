@@ -420,11 +420,11 @@ func (t *RunOperationTool) describeTarget(
 	identity operations.Identity,
 ) (string, *types.ToolResult) {
 	items := op.Target.Items
-	var ids []string
+	var ids []json.RawMessage
 	if items != nil {
 		if raw, ok := input.Params[items.Param]; ok {
 			if err := json.Unmarshal(raw, &ids); err != nil {
-				return "", operationFailure(fmt.Sprintf("invalid params for %s: %s must be an array of strings",
+				return "", operationFailure(fmt.Sprintf("invalid params for %s: %s must be an array",
 					op.ID, items.Param))
 			}
 		}
@@ -439,21 +439,17 @@ func (t *RunOperationTool) describeTarget(
 	}
 	lines := []string{label}
 	for _, id := range ids {
-		encoded, err := json.Marshal(id)
-		if err != nil {
-			return "", operationFailure(err.Error())
-		}
 		params := make(map[string]json.RawMessage, len(input.Params)+1)
 		for k, v := range input.Params {
 			params[k] = v
 		}
-		params[items.As] = encoded
+		params[items.As] = id
 		itemLabel, blocked := t.readLabel(ctx, op, items.Operation, items.Label, params, identity)
 		if blocked != nil {
 			return "", blocked
 		}
 		if itemLabel == "" {
-			itemLabel = id
+			itemLabel = strings.Trim(string(id), `"`)
 		}
 		// Titles are user content, not description delimiters. Keep each
 		// item on one line so the approval card cannot hide later items.

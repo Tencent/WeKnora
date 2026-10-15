@@ -85,6 +85,10 @@ func (op Operation) Build(params map[string]json.RawMessage) (Call, error) {
 		}
 		switch p.In {
 		case InPath:
+			if n, ok := value.(int64); ok {
+				pathValues[p.wireKey()] = strconv.FormatInt(n, 10)
+				break
+			}
 			s := value.(string)
 			if err := validatePathValue(p, s, strings.HasSuffix(op.Route, "/*"+p.wireKey())); err != nil {
 				return Call{}, err
@@ -95,6 +99,10 @@ func (op Operation) Build(params map[string]json.RawMessage) (Call, error) {
 			case []string:
 				for _, item := range v {
 					query.Add(p.wireKey(), item)
+				}
+			case []int64:
+				for _, item := range v {
+					query.Add(p.wireKey(), strconv.FormatInt(item, 10))
 				}
 			case string:
 				query.Set(p.wireKey(), v)
@@ -200,24 +208,32 @@ func decodeParam(p Param, raw json.RawMessage) (any, error) {
 			out = append(out, item)
 		}
 		return out, nil
+	case TypeIntegerList:
+		var list []json.RawMessage
+		if err := json.Unmarshal(raw, &list); err != nil {
+			return nil, paramErr(p.Name, "must be an array of integers")
+		}
+		limit := p.MaxItems
+		if limit <= 0 {
+			limit = defaultMaxListItems
+		}
+		if len(list) > limit {
+			return nil, paramErr(p.Name, "accepts at most %d items", limit)
+		}
+		if p.Required && len(list) == 0 {
+			return nil, paramErr(p.Name, "must not be empty")
+		}
+		out := make([]int64, 0, len(list))
+		for _, item := range list {
+			v, err := decodeInteger(p, item)
+			if err != nil {
+				return nil, paramErr(p.Name, "must be an array of integers")
+			}
+			out = append(out, v)
+		}
+		return out, nil
 	case TypeInteger:
-		if trimmed := bytes.TrimSpace(raw); len(trimmed) == 0 || trimmed[0] == '"' {
-			return nil, paramErr(p.Name, "must be an integer")
-		}
-		var n json.Number
-		dec := json.NewDecoder(bytes.NewReader(raw))
-		dec.UseNumber()
-		if err := dec.Decode(&n); err != nil {
-			return nil, paramErr(p.Name, "must be an integer")
-		}
-		v, err := n.Int64()
-		if err != nil {
-			return nil, paramErr(p.Name, "must be an integer")
-		}
-		if p.Maximum > 0 && (v < int64(p.Minimum) || v > int64(p.Maximum)) {
-			return nil, paramErr(p.Name, "must be between %d and %d", p.Minimum, p.Maximum)
-		}
-		return v, nil
+		return decodeInteger(p, raw)
 	case TypeBoolean:
 		var b bool
 		if err := json.Unmarshal(raw, &b); err != nil {
@@ -226,6 +242,26 @@ func decodeParam(p Param, raw json.RawMessage) (any, error) {
 		return b, nil
 	}
 	return nil, paramErr(p.Name, "unsupported type")
+}
+
+func decodeInteger(p Param, raw json.RawMessage) (int64, error) {
+	if trimmed := bytes.TrimSpace(raw); len(trimmed) == 0 || trimmed[0] == '"' {
+		return 0, paramErr(p.Name, "must be an integer")
+	}
+	var n json.Number
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&n); err != nil {
+		return 0, paramErr(p.Name, "must be an integer")
+	}
+	v, err := n.Int64()
+	if err != nil {
+		return 0, paramErr(p.Name, "must be an integer")
+	}
+	if p.Maximum > 0 && (v < int64(p.Minimum) || v > int64(p.Maximum)) {
+		return 0, paramErr(p.Name, "must be between %d and %d", p.Minimum, p.Maximum)
+	}
+	return v, nil
 }
 
 func validateString(p Param, s string) error {

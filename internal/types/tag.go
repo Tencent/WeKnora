@@ -13,7 +13,7 @@ type KnowledgeTag struct {
 	// Unique identifier of the tag (UUID)
 	ID string `json:"id"                gorm:"type:varchar(36);primaryKey" extensions:"x-agent=tag_id"`
 	// SeqID is an auto-increment integer ID for external API usage
-	SeqID int64 `json:"seq_id"            gorm:"type:bigint;uniqueIndex;autoIncrement"`
+	SeqID int64 `json:"seq_id"            gorm:"type:bigint;uniqueIndex;autoIncrement" extensions:"x-agent=tag_seq_id"`
 	// Workspace ID
 	TenantID uint64 `json:"tenant_id"`
 	// Knowledge base ID that this tag belongs to

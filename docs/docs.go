@@ -4835,19 +4835,27 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "知识库ID",
                         "name": "id",
                         "in": "path",
                         "required": true
                     },
                     {
+                        "minimum": 1,
                         "type": "integer",
+                        "x-agent": true,
+                        "x-agent-maximum": "10000",
                         "description": "页码",
                         "name": "page",
                         "in": "query"
                     },
                     {
+                        "maximum": 1000,
+                        "minimum": 1,
                         "type": "integer",
+                        "x-agent": true,
+                        "x-agent-maximum": "50",
                         "description": "每页数量",
                         "name": "page_size",
                         "in": "query"
@@ -4860,30 +4868,43 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "x-agent": true,
                         "description": "标签UUID筛选，逗号分隔（OR语义）",
                         "name": "tag_ids",
                         "in": "query"
                     },
                     {
                         "type": "string",
+                        "x-agent": true,
                         "description": "关键词搜索",
                         "name": "keyword",
                         "in": "query"
                     },
                     {
+                        "enum": [
+                            "standard_question",
+                            "similar_questions",
+                            "answers"
+                        ],
                         "type": "string",
-                        "description": "搜索字段: standard_question(标准问题), similar_questions(相似问法), answers(答案), 默认搜索全部",
+                        "x-agent": true,
+                        "description": "搜索字段，默认搜索全部",
                         "name": "search_field",
                         "in": "query"
                     },
                     {
+                        "enum": [
+                            "asc"
+                        ],
                         "type": "string",
+                        "x-agent": true,
                         "description": "排序方式: asc(按更新时间正序), 默认按更新时间倒序",
                         "name": "sort_order",
                         "in": "query"
                     },
                     {
                         "type": "boolean",
+                        "x-agent": true,
                         "description": "启用状态筛选；不传时返回全部",
                         "name": "is_enabled",
                         "in": "query"
@@ -4901,7 +4922,7 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.PageResult"
+                                            "$ref": "#/definitions/internal_handler.FAQEntryPage"
                                         }
                                     }
                                 }
@@ -4914,7 +4935,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "faq.list_entries",
+                    "risk": "read",
+                    "root": "data.data"
+                },
+                "x-agent-hint": "FAQ entries of an FAQ knowledge base, newest first; keyword searches questions and answers."
             },
             "post": {
                 "security": [
@@ -5004,6 +5031,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "知识库ID",
                         "name": "id",
                         "in": "path",
@@ -5015,15 +5043,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object",
-                            "properties": {
-                                "ids": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "integer"
-                                    }
-                                }
-                            }
+                            "$ref": "#/definitions/internal_handler.faqDeleteRequest"
                         }
                     }
                 ],
@@ -5040,7 +5060,20 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "faq.delete_entries",
+                    "items": {
+                        "as": "entry_id",
+                        "label": "standard_question",
+                        "param": "entry_ids",
+                        "target": "faq.get_entry"
+                    },
+                    "label": "name",
+                    "risk": "destructive",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Removes up to 20 FAQ entries. Cannot be undone; the confirmation lists every question."
             }
         },
         "/knowledge-bases/{id}/faq/entries/export": {
@@ -5230,6 +5263,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "知识库ID",
                         "name": "id",
                         "in": "path",
@@ -5237,6 +5271,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
+                        "x-agent": true,
                         "description": "FAQ条目ID(seq_id)",
                         "name": "entry_id",
                         "in": "path",
@@ -5274,6 +5309,10 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "faq.get_entry",
+                    "risk": "read"
                 }
             },
             "put": {
@@ -5299,6 +5338,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "知识库ID",
                         "name": "id",
                         "in": "path",
@@ -5306,6 +5346,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
+                        "x-agent": true,
                         "description": "FAQ条目ID(seq_id)",
                         "name": "entry_id",
                         "in": "path",
@@ -5346,7 +5387,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "faq.update_entry",
+                    "label": "standard_question",
+                    "risk": "write",
+                    "target": "faq.get_entry"
+                },
+                "x-agent-hint": "Replaces the whole entry. Read it with faq.get_entry first and send every field, changed or not, or the rest is lost. To only add phrasings, use faq.add_similar_questions."
             }
         },
         "/knowledge-bases/{id}/faq/entries/{entry_id}/similar-questions": {
@@ -5373,6 +5421,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "知识库ID",
                         "name": "id",
                         "in": "path",
@@ -5380,6 +5429,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
+                        "x-agent": true,
                         "description": "FAQ条目ID(seq_id)",
                         "name": "entry_id",
                         "in": "path",
@@ -5426,7 +5476,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "faq.add_similar_questions",
+                    "label": "standard_question",
+                    "risk": "write",
+                    "target": "faq.get_entry"
+                },
+                "x-agent-hint": "Adds phrasings to an entry and keeps everything else."
             }
         },
         "/knowledge-bases/{id}/faq/entry": {
@@ -5453,6 +5510,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "知识库ID",
                         "name": "id",
                         "in": "path",
@@ -5493,7 +5551,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "faq.create_entry",
+                    "label": "name",
+                    "risk": "write",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Adds one FAQ entry. Questions already used by another entry are refused."
             }
         },
         "/knowledge-bases/{id}/faq/import/last-result/display": {
@@ -24499,13 +24564,19 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "answer_strategy": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AnswerStrategy"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AnswerStrategy"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "answers": {
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true
                 },
                 "chunk_id": {
                     "type": "string"
@@ -24517,16 +24588,19 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": "entry_id"
                 },
                 "index_mode": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQIndexMode"
                 },
                 "is_enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "is_recommended": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "knowledge_base_id": {
                     "type": "string"
@@ -24545,7 +24619,8 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true
                 },
                 "score": {
                     "type": "number"
@@ -24554,19 +24629,24 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true
                 },
                 "standard_question": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "tag_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": "tag_seq_id"
                 },
                 "tag_name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "updated_at": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -24617,41 +24697,70 @@ const docTemplate = `{
             ],
             "properties": {
                 "answer_strategy": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AnswerStrategy"
+                    "description": "all returns every answer; random returns one.",
+                    "enum": [
+                        "all",
+                        "random"
+                    ],
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AnswerStrategy"
+                        }
+                    ],
+                    "x-agent": true,
+                    "x-agent-required": true
                 },
                 "answers": {
+                    "description": "Answers; one is picked by answer_strategy.",
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true,
+                    "x-agent-required": true
                 },
                 "id": {
                     "description": "ID 可选，用于数据迁移时指定 seq_id（必须小于自增起始值 100000000）",
                     "type": "integer"
                 },
                 "is_enabled": {
-                    "type": "boolean"
+                    "description": "Whether the entry is served; omit to keep the current or default value.",
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "is_recommended": {
-                    "type": "boolean"
+                    "description": "Whether the entry is recommended; omit to keep the current or default value.",
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "negative_questions": {
+                    "description": "Phrasings that must not match; [] for none.",
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true,
+                    "x-agent-required": true
                 },
                 "similar_questions": {
+                    "description": "Other phrasings that should match; [] for none.",
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true,
+                    "x-agent-required": true
                 },
                 "standard_question": {
-                    "type": "string"
+                    "description": "The question the entry answers.",
+                    "type": "string",
+                    "x-agent": true
                 },
                 "tag_id": {
-                    "type": "integer"
+                    "description": "Tag seq id (tag_seq_id from knowledge_base.list_tags); 0 for none.",
+                    "type": "integer",
+                    "x-agent": "tag_seq_id",
+                    "x-agent-required": true
                 },
                 "tag_name": {
                     "type": "string"
@@ -26525,7 +26634,8 @@ const docTemplate = `{
                 },
                 "seq_id": {
                     "description": "SeqID is an auto-increment integer ID for external API usage",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": "tag_seq_id"
                 },
                 "sort_order": {
                     "description": "Sort order within the same knowledge base",
@@ -26575,7 +26685,8 @@ const docTemplate = `{
                 },
                 "seq_id": {
                     "description": "SeqID is an auto-increment integer ID for external API usage",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": "tag_seq_id"
                 },
                 "sort_order": {
                     "description": "Sort order within the same knowledge base",
@@ -28507,26 +28618,6 @@ const docTemplate = `{
                 },
                 "wiki_slug": {
                     "type": "string"
-                }
-            }
-        },
-        "github_com_Tencent_WeKnora_internal_types.PageResult": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "description": "Data"
-                },
-                "page": {
-                    "description": "Current page number",
-                    "type": "integer"
-                },
-                "page_size": {
-                    "description": "Page size",
-                    "type": "integer"
-                },
-                "total": {
-                    "description": "Total number of records",
-                    "type": "integer"
                 }
             }
         },
@@ -33085,6 +33176,26 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.FAQEntryPage": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQEntry"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
         "internal_handler.FabriTagResponse": {
             "type": "object",
             "properties": {
@@ -35300,6 +35411,7 @@ const docTemplate = `{
             "properties": {
                 "success": {
                     "type": "boolean",
+                    "x-agent": true,
                     "example": true
                 }
             }
@@ -35766,11 +35878,13 @@ const docTemplate = `{
             ],
             "properties": {
                 "similar_questions": {
+                    "description": "Phrasings to add to the entry.",
                     "type": "array",
                     "minItems": 1,
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true
                 }
             }
         },
@@ -35936,6 +36050,24 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 128,
                     "minLength": 1
+                }
+            }
+        },
+        "internal_handler.faqDeleteRequest": {
+            "type": "object",
+            "required": [
+                "ids"
+            ],
+            "properties": {
+                "ids": {
+                    "description": "Entries to delete (entry_id).",
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "integer"
+                    },
+                    "x-agent": "entry_ids",
+                    "x-agent-maximum": "20"
                 }
             }
         },

@@ -40,6 +40,9 @@ const (
 	// extAgentKeys lists the keys of a free-form object field that are
 	// projected, separated by "|".
 	extAgentKeys = "x-agent-keys"
+	// extAgentRequired makes the model send a parameter the API treats as
+	// optional, where omitting it would clear stored data (a full replace).
+	extAgentRequired = "x-agent-required"
 )
 
 // agentItems is ItemTarget as written in x-agent:
@@ -98,6 +101,7 @@ type specParameter struct {
 	Agent         any         `json:"x-agent"`
 	AgentMax      string      `json:"x-agent-maximum"`
 	AgentMaxBytes string      `json:"x-agent-max-bytes"`
+	AgentRequired bool        `json:"x-agent-required"`
 }
 
 type specResponse struct {
@@ -120,6 +124,7 @@ type specSchema struct {
 	AgentMax      string                 `json:"x-agent-maximum"`
 	AgentMaxBytes string                 `json:"x-agent-max-bytes"`
 	AgentMaxRunes string                 `json:"x-agent-max-runes"`
+	AgentRequired bool                   `json:"x-agent-required"`
 }
 
 var specMethods = []string{"get", "post", "put", "patch", "delete"}
@@ -278,7 +283,7 @@ func (doc *specDocument) params(sp specParameter) ([]Param, error) {
 		Name:        name,
 		In:          Location(sp.In),
 		Key:         sp.Name,
-		Required:    sp.Required,
+		Required:    sp.Required || sp.AgentRequired,
 		Description: strings.TrimSpace(sp.Description),
 	}
 	shape := &specSchema{Type: sp.Type, Items: sp.Items, Enum: sp.Enum, Minimum: sp.Minimum, Maximum: sp.Maximum}
@@ -319,7 +324,7 @@ func (doc *specDocument) bodyParams(sp specParameter) ([]Param, error) {
 			Name:        name,
 			In:          InBody,
 			Key:         key,
-			Required:    sp.Required && required[key],
+			Required:    sp.Required && (required[key] || prop.AgentRequired),
 			Description: strings.TrimSpace(prop.Description),
 		}
 		shape, err := doc.resolve(prop)
@@ -348,11 +353,15 @@ func (doc *specDocument) typeParam(p *Param, shape *specSchema, agentMax, agentM
 		if err != nil {
 			return err
 		}
-		if items == nil || items.Type != "string" {
-			return fmt.Errorf("only arrays of strings are supported")
+		switch {
+		case items != nil && items.Type == "string":
+			p.Type = TypeStringList
+			p.Enum = enumStrings(items.Enum)
+		case items != nil && items.Type == "integer":
+			p.Type = TypeIntegerList
+		default:
+			return fmt.Errorf("only arrays of strings or integers are supported")
 		}
-		p.Type = TypeStringList
-		p.Enum = enumStrings(items.Enum)
 	default:
 		return fmt.Errorf("unsupported type %q", shape.Type)
 	}
@@ -366,7 +375,7 @@ func (doc *specDocument) typeParam(p *Param, shape *specSchema, agentMax, agentM
 	switch p.Type {
 	case TypeInteger:
 		return boundInteger(p, shape.Minimum, shape.Maximum, agentMax)
-	case TypeStringList:
+	case TypeStringList, TypeIntegerList:
 		if agentMax == "" {
 			return nil
 		}

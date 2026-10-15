@@ -57,7 +57,7 @@ type GetDeploymentCapabilitiesResponse struct {
 
 // SuccessResponse is the JSON body written by this handler.
 type SuccessResponse struct {
-	Success bool `json:"success" example:"true"`
+	Success bool `json:"success" example:"true" extensions:"x-agent"`
 }
 
 // UpdateIMChannelResponse is the JSON body written by this handler.
@@ -138,6 +138,14 @@ type SharedKnowledgeBaseRow struct {
 	Permission     types.OrgMemberRole `json:"permission" extensions:"x-agent"`
 	SourceTenantID uint64              `json:"source_tenant_id"`
 	SharedAt       time.Time           `json:"shared_at"`
+}
+
+// FAQEntryPage is the page of entries the FAQ list writes.
+type FAQEntryPage struct {
+	Total    int64            `json:"total"`
+	Page     int              `json:"page"`
+	PageSize int              `json:"page_size"`
+	Data     []types.FAQEntry `json:"data"`
 }
 
 // TagPageResult is the page of tags the tag list writes.
