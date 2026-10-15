@@ -43,7 +43,7 @@ curl $BASE/api/v1/agents/type-presets -H "Authorization: Bearer $TOKEN"
 | `avatar` | string | 否 | 头像/emoji |
 | `config` | object | 否 | Agent 配置（`types.CustomAgentConfig`，见下） |
 
-`config` 主要字段：`agent_mode`（`quick-answer`/`smart-reasoning`）、`agent_type`（`rag-qa/wiki-qa/hybrid-rag-wiki/data-analysis/custom`）、`system_prompt`、`model_id`、`temperature`（0-2，非法返回 code 2103）、`max_iterations`（1-20，非法返回 code 2102）、`allowed_tools`（未设置/null 使用默认工具，显式 `[]` 不选内置工具；联网、记忆、MCP 与沙箱按独立配置注册）、`mcp_selection_mode`/`mcp_services`、`skills_selection_mode`、`kb_selection_mode`/`knowledge_bases`、`web_search_enabled`、`question_suggestions` 等（完整定义见 `internal/types/custom_agent.go`）。
+`config` 主要字段：`agent_mode`（`quick-answer`/`smart-reasoning`，省略时默认为 `smart-reasoning`）、`agent_type`（`rag-qa/wiki-qa/hybrid-rag-wiki/data-analysis/custom`）、`system_prompt`、`model_id`、`temperature`（0-2，非法返回 code 2103）、`max_iterations`（1-20，非法返回 code 2102）、`allowed_tools`（未设置/null 使用默认工具，显式 `[]` 不选内置工具；联网、记忆、MCP 与沙箱按独立配置注册）、`mcp_selection_mode`/`mcp_services`、`skills_selection_mode`、`kb_selection_mode`/`knowledge_bases`、`web_search_enabled`、`question_suggestions` 等（完整定义见 `internal/types/custom_agent.go`）。
 
 响应：201 `{"success":true,"data":{id,name,description,avatar,is_builtin,created_by,config,creator_name,...}}`
 
@@ -93,6 +93,7 @@ curl -X PUT $BASE/api/v1/agents/agent-1 -H "Authorization: Bearer $TOKEN" \
 |------|------|------|
 | `name` | string | 名称，不能为空白 |
 | `description` | string | 描述 |
+| `agent_mode` | string | `quick-answer` / `smart-reasoning`。MCP 与技能只在 `smart-reasoning` 下运行；切到该模式会打开多轮对话 |
 | `system_prompt` | string | 完整的系统提示词（整段替换） |
 | `model_id` | string | 对话模型 ID |
 | `kb_selection_mode` | string | `all` / `selected` / `none` |
@@ -106,7 +107,7 @@ curl -X PUT $BASE/api/v1/agents/agent-1 -H "Authorization: Bearer $TOKEN" \
 
 技能名称来自 `GET /api/v1/skills?sandbox_config_id=<agent.config.sandbox_config_id>`，只在 `smart-reasoning` 模式生效。PATCH 后模式为 `selected` 时，所有名称必须是该工作空间、该沙箱当前可用的技能；不可用或未知名称返回 400 并列出名称。未绑定沙箱时，通过 PATCH 将技能设为 `all` 或 `selected`（包括只传 `selected_skills`）返回 400，须先在智能体编辑器选择沙箱。
 
-响应：200 `{"success":true,"data":{Agent}}`；selection mode 取值非法、名称为空、技能列表超过 50 项或上述技能校验失败时 400，Agent 不存在时 404。
+响应：200 `{"success":true,"data":{Agent}}`；`agent_mode` 或 selection mode 取值非法、名称为空、技能列表超过 50 项或上述技能校验失败时 400，Agent 不存在时 404。
 
 ```bash
 curl -X PATCH $BASE/api/v1/agents/agent-1 -H "Authorization: Bearer $TOKEN" \

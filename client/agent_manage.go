@@ -176,8 +176,11 @@ type UpdateAgentRequest struct {
 // PatchAgentRequest changes only the fields that are set; the rest of the
 // agent is kept. JSON field names mirror internal/handler.PatchAgentRequest.
 type PatchAgentRequest struct {
-	Name         *string `json:"name,omitempty"`
-	Description  *string `json:"description,omitempty"`
+	Name        *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+	// AgentMode is "quick-answer" or "smart-reasoning". MCP and skills only
+	// run in smart-reasoning, and switching to it turns multi-turn on.
+	AgentMode    *string `json:"agent_mode,omitempty"`
 	SystemPrompt *string `json:"system_prompt,omitempty"`
 	ModelID      *string `json:"model_id,omitempty"`
 	// KBSelectionMode is "all", "selected" or "none".

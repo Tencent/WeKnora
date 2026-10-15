@@ -82,6 +82,8 @@ type PatchAgentRequest struct {
 	Name *string `json:"name" extensions:"x-agent"`
 	// What the agent is for
 	Description *string `json:"description" extensions:"x-agent"`
+	// Running mode: quick-answer is RAG; smart-reasoning calls tools, MCP and skills
+	AgentMode *string `json:"agent_mode" enums:"quick-answer,smart-reasoning" extensions:"x-agent"`
 	// The whole system prompt
 	SystemPrompt *string `json:"system_prompt" extensions:"x-agent,x-agent-max-bytes=32000"`
 	// Chat model the agent answers with
@@ -118,6 +120,9 @@ func (p PatchAgentRequest) apply(agent *types.CustomAgent) UpdateAgentRequest {
 		req.Description = *p.Description
 	}
 	cfg := &req.Config
+	if p.AgentMode != nil {
+		cfg.AgentMode = strings.TrimSpace(*p.AgentMode)
+	}
 	if p.SystemPrompt != nil {
 		cfg.SystemPrompt = *p.SystemPrompt
 	}
@@ -159,6 +164,17 @@ func (p PatchAgentRequest) apply(agent *types.CustomAgent) UpdateAgentRequest {
 	return req
 }
 
+func validAgentMode(mode *string) bool {
+	if mode == nil {
+		return true
+	}
+	switch strings.TrimSpace(*mode) {
+	case types.AgentModeQuickAnswer, types.AgentModeSmartReasoning:
+		return true
+	}
+	return false
+}
+
 func validSelectionMode(mode *string) bool {
 	if mode == nil {
 		return true
@@ -194,7 +210,7 @@ type UpdateAgentRequest struct {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"agent.create","risk":"write","label_param":"name"}
-// @x-agent-hint "Creates a quick-answer agent with default settings, owned by the user. Configure it afterwards with agent.update."
+// @x-agent-hint "Creates a smart-reasoning agent with default settings, owned by the user. It can call MCP services and skills. Configure it afterwards with agent.update."
 // @Router       /agents [post]
 func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -498,7 +514,8 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 // PatchAgent godoc
 // @Summary      部分更新智能体
 // @Description  只修改请求中出现的字段，其余配置保持不变。
-// @Description  支持名称、描述、系统提示词、对话模型、知识库、MCP、技能范围、联网搜索、多轮对话。
+// @Description  支持名称、描述、运行模式、系统提示词、对话模型、知识库、MCP、技能范围、联网搜索、多轮对话。
+// @Description  agent_mode 取 quick-answer 或 smart-reasoning。MCP 与技能只在 smart-reasoning 下运行，切到该模式会打开多轮对话。
 // @Description  传 knowledge_bases、mcp_services 或 selected_skills 而不传对应模式时，切换为 selected。
 // @Description  技能模式 all/none 清空技能列表；启用技能须先在编辑器选择沙箱，selected 名称须可用，否则返回 400。
 // @Tags         智能体
@@ -513,7 +530,7 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"agent.update","risk":"write","target":"agent.get","label":"name","require_complete_target":true}
-// @x-agent-hint "Changes the listed settings of an agent; a field left out is kept. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model), knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. Take skill names exactly from skill.list with the agent's sandbox_config_id. Skills only take effect in smart-reasoning mode. knowledge_base_ids, mcp_service_ids or selected_skills alone also switch that scope to selected."
+// @x-agent-hint "Changes the listed settings of an agent; a field left out is kept. agent_mode is quick-answer or smart-reasoning; MCP services and skills only run in smart-reasoning, and switching to it turns multi-turn on. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model), knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. Take skill names exactly from skill.list with the agent's sandbox_config_id. knowledge_base_ids, mcp_service_ids or selected_skills alone also switch that scope to selected."
 // @Router       /agents/{id} [patch]
 func (h *CustomAgentHandler) PatchAgent(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -527,6 +544,10 @@ func (h *CustomAgentHandler) PatchAgent(c *gin.Context) {
 	if err := c.ShouldBindJSON(&patch); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		_ = c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	if !validAgentMode(patch.AgentMode) {
+		_ = c.Error(errors.NewBadRequestError("agent_mode must be quick-answer or smart-reasoning"))
 		return
 	}
 	if !validSelectionMode(patch.KBSelectionMode) || !validSelectionMode(patch.MCPSelectionMode) ||

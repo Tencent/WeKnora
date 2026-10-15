@@ -77,6 +77,7 @@ func TestPatchAgentKeepsFieldsItDoesNotCarry(t *testing.T) {
 	assert.Equal(t, []string{"kb-1"}, got.Config.KnowledgeBases)
 	assert.Equal(t, 0.3, got.Config.Temperature)
 	assert.True(t, got.Config.WebSearchEnabled)
+	assert.Equal(t, types.AgentModeQuickAnswer, got.Config.AgentMode)
 }
 
 func TestPatchAgentSelectionLists(t *testing.T) {
@@ -100,9 +101,10 @@ func TestPatchAgentSelectionLists(t *testing.T) {
 
 func TestPatchAgentRejectsBadInput(t *testing.T) {
 	for name, body := range map[string]string{
-		"unknown mode": `{"kb_selection_mode":"some"}`,
-		"blank name":   `{"name":"  "}`,
-		"not json":     `{`,
+		"unknown mode":  `{"kb_selection_mode":"some"}`,
+		"unknown agent": `{"agent_mode":"agent"}`,
+		"blank name":    `{"name":"  "}`,
+		"not json":      `{`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			repo := &agentAvatarRepository{agent: patchTestAgent()}
@@ -111,6 +113,21 @@ func TestPatchAgentRejectsBadInput(t *testing.T) {
 			assert.Zero(t, repo.writes)
 		})
 	}
+}
+
+func TestPatchAgentMode(t *testing.T) {
+	repo := &agentAvatarRepository{agent: patchTestAgent()}
+	rec := servePatch(t, repo, `{"agent_mode":" smart-reasoning "}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, types.AgentModeSmartReasoning, repo.agent.Config.AgentMode)
+	assert.True(t, repo.agent.Config.MultiTurnEnabled, "smart-reasoning keeps earlier turns")
+	assert.Equal(t, "Be brief.", repo.agent.Config.SystemPrompt)
+	assert.Equal(t, "Support", repo.agent.Name)
+
+	rec = servePatch(t, repo, `{"agent_mode":"quick-answer"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, types.AgentModeQuickAnswer, repo.agent.Config.AgentMode)
+	assert.True(t, repo.agent.Config.MultiTurnEnabled, "leaving smart-reasoning does not turn multi-turn off")
 }
 
 func TestPatchAgentNotFound(t *testing.T) {

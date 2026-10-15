@@ -408,7 +408,7 @@
                     "label_param": "name",
                     "risk": "write"
                 },
-                "x-agent-hint": "Creates a quick-answer agent with default settings, owned by the user. Configure it afterwards with agent.update."
+                "x-agent-hint": "Creates a smart-reasoning agent with default settings, owned by the user. It can call MCP services and skills. Configure it afterwards with agent.update."
             }
         },
         "/agents/placeholders": {
@@ -744,7 +744,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "只修改请求中出现的字段，其余配置保持不变。\n支持名称、描述、系统提示词、对话模型、知识库、MCP、技能范围、联网搜索、多轮对话。\n传 knowledge_bases、mcp_services 或 selected_skills 而不传对应模式时，切换为 selected。\n技能模式 all/none 清空技能列表；启用技能须先在编辑器选择沙箱，selected 名称须可用，否则返回 400。",
+                "description": "只修改请求中出现的字段，其余配置保持不变。\n支持名称、描述、运行模式、系统提示词、对话模型、知识库、MCP、技能范围、联网搜索、多轮对话。\nagent_mode 取 quick-answer 或 smart-reasoning。MCP 与技能只在 smart-reasoning 下运行，切到该模式会打开多轮对话。\n传 knowledge_bases、mcp_services 或 selected_skills 而不传对应模式时，切换为 selected。\n技能模式 all/none 清空技能列表；启用技能须先在编辑器选择沙箱，selected 名称须可用，否则返回 400。",
                 "consumes": [
                     "application/json"
                 ],
@@ -807,7 +807,7 @@
                     "risk": "write",
                     "target": "agent.get"
                 },
-                "x-agent-hint": "Changes the listed settings of an agent; a field left out is kept. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model), knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. Take skill names exactly from skill.list with the agent's sandbox_config_id. Skills only take effect in smart-reasoning mode. knowledge_base_ids, mcp_service_ids or selected_skills alone also switch that scope to selected."
+                "x-agent-hint": "Changes the listed settings of an agent; a field left out is kept. agent_mode is quick-answer or smart-reasoning; MCP services and skills only run in smart-reasoning, and switching to it turns multi-turn on. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model), knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. Take skill names exactly from skill.list with the agent's sandbox_config_id. knowledge_base_ids, mcp_service_ids or selected_skills alone also switch that scope to selected."
             }
         },
         "/agents/{id}/copy": {
@@ -34901,6 +34901,15 @@
         "internal_handler.PatchAgentRequest": {
             "type": "object",
             "properties": {
+                "agent_mode": {
+                    "description": "Running mode: quick-answer is RAG; smart-reasoning calls tools, MCP and skills",
+                    "type": "string",
+                    "enum": [
+                        "quick-answer",
+                        "smart-reasoning"
+                    ],
+                    "x-agent": true
+                },
                 "description": {
                     "description": "What the agent is for",
                     "type": "string",

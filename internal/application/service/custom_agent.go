@@ -101,9 +101,10 @@ func (s *customAgentService) CreateAgent(ctx context.Context, agent *types.Custo
 	agent.CreatedAt = time.Now()
 	agent.UpdatedAt = time.Now()
 
-	// Ensure agent mode is set for user-created agents
+	// An omitted mode follows the editor: smart-reasoning, so MCP and skills
+	// work. An explicit quick-answer is kept.
 	if agent.Config.AgentMode == "" {
-		agent.Config.AgentMode = types.AgentModeQuickAnswer
+		agent.Config.AgentMode = types.AgentModeSmartReasoning
 	}
 
 	// Cannot create built-in agents

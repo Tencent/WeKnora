@@ -747,6 +747,9 @@ func agentSettingsDetail(
 	if s, ok := rawString(params, "name"); ok && s != "" {
 		lines = append(lines, "Name: "+excerpt(s))
 	}
+	if s, ok := rawString(params, "agent_mode"); ok && s != "" {
+		lines = append(lines, "Mode: "+s)
+	}
 	if s, ok := rawString(params, "system_prompt"); ok {
 		lines = append(lines, fmt.Sprintf("System prompt (%d characters): %s", len([]rune(s)), excerpt(s)))
 	}

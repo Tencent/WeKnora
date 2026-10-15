@@ -407,18 +407,19 @@ func TestRunOperationAgentApprovals(t *testing.T) {
 
 	gate.requests = nil
 	res, _ = tool.Execute(interactiveCtx(), runArgs("agent.update", map[string]any{
-		"agent_id": "a1", "model_id": "m1", "knowledge_base_ids": []string{"kb1", "kb-gone"},
+		"agent_id": "a1", "agent_mode": "smart-reasoning", "model_id": "m1", "knowledge_base_ids": []string{"kb1", "kb-gone"},
 		"system_prompt": "Answer in English.", "web_search_enabled": false,
 	}))
 	require.True(t, res.Success, res.Error)
 	require.Len(t, gate.requests, 1)
 	desc := gate.requests[0].Description
 	assert.Contains(t, desc, "Support")
+	assert.Contains(t, desc, "Mode: smart-reasoning")
 	assert.Contains(t, desc, "Model: Qwen3 Max")
 	assert.Contains(t, desc, "Knowledge bases: Specs, kb-gone", "an unreadable id is shown as is")
 	assert.Contains(t, desc, "System prompt (18 characters): Answer in English.")
 	assert.Contains(t, desc, "Web search: off")
-	assert.JSONEq(t, `{"model_id":"m1","knowledge_bases":["kb1","kb-gone"],`+
+	assert.JSONEq(t, `{"agent_mode":"smart-reasoning","model_id":"m1","knowledge_bases":["kb1","kb-gone"],`+
 		`"system_prompt":"Answer in English.","web_search_enabled":false}`, string(d.calls[len(d.calls)-1].call.Body))
 }
 
