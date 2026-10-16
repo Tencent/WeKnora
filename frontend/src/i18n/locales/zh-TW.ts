@@ -972,6 +972,12 @@ export default {
     pauseFailed: '暫停失敗',
     logs: '日誌',
     syncModeLabel: '同步模式',
+    parseMode: {
+      blocks: '塊級解析（預設）',
+      export: '導出解析（docx）',
+    },
+    parseModeHint: '飛書雲文档的解析方式。塊級解析更快並保留文档內附件；導出解析將文档導出為 docx 後解析，圖片與文档的關聯更完整。',
+    parseModeLabel: '解析模式',
     createTitle: '新增資料源',
     editTitle: '編輯資料源',
     nameLabel: '名稱',
