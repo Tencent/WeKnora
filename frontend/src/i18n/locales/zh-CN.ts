@@ -1908,6 +1908,16 @@ export default {
     },
     operations: {
       names: {
+        data_source: {
+          list: "获取数据源列表",
+          get: "获取数据源详情",
+          test: "测试数据源连接",
+          sync: "同步数据源",
+          pause: "暂停数据源同步",
+          resume: "恢复数据源同步",
+          list_sync_logs: "获取数据源同步记录",
+          get_sync_log: "获取数据源同步进度",
+        },
         agent: {
           list: "获取智能体列表",
           create: "创建智能体",
@@ -1917,9 +1927,16 @@ export default {
           copy: "复制智能体",
         },
         chunk: {
+          get: "获取分块详情",
+          update: "更新分块",
+          list_revisions: "获取分块历史版本",
+          revert: "恢复分块历史版本",
           list: "获取知识分块列表",
         },
         knowledge_base: {
+          copy: "复制知识库内容",
+          duplicate: "复制知识库设置",
+          get_copy_progress: "获取知识库复制进度",
           list: "获取知识库列表",
           create: "创建知识库",
           get: "获取知识库详情",

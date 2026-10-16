@@ -602,15 +602,15 @@ const (
 
 // KBCloneProgress represents the progress of a knowledge base clone task
 type KBCloneProgress struct {
-	TaskID    string            `json:"task_id"`
-	SourceID  string            `json:"source_id"`
-	TargetID  string            `json:"target_id"`
-	Status    KBCloneTaskStatus `json:"status"`
-	Progress  int               `json:"progress"`   // 0-100
-	Total     int               `json:"total"`      // 总知识数
-	Processed int               `json:"processed"`  // 已处理数
-	Message   string            `json:"message"`    // 状态消息
-	Error     string            `json:"error"`      // 错误信息
-	CreatedAt int64             `json:"created_at"` // 任务创建时间
-	UpdatedAt int64             `json:"updated_at"` // 最后更新时间
+	TaskID    string            `json:"task_id" extensions:"x-agent"`
+	SourceID  string            `json:"source_id" extensions:"x-agent=source_knowledge_base_id"`
+	TargetID  string            `json:"target_id" extensions:"x-agent=knowledge_base_id"`
+	Status    KBCloneTaskStatus `json:"status" extensions:"x-agent"`
+	Progress  int               `json:"progress" extensions:"x-agent"`  // 0-100
+	Total     int               `json:"total" extensions:"x-agent"`     // 总知识数
+	Processed int               `json:"processed" extensions:"x-agent"` // 已处理数
+	Message   string            `json:"message" extensions:"x-agent"`   // 状态消息
+	Error     string            `json:"error" extensions:"x-agent"`     // 错误信息
+	CreatedAt int64             `json:"created_at"`                     // 任务创建时间
+	UpdatedAt int64             `json:"updated_at"`                     // 最后更新时间
 }

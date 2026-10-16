@@ -1908,6 +1908,16 @@ export default {
     },
     operations: {
       names: {
+        data_source: {
+          list: "取得資料來源清單",
+          get: "取得資料來源詳情",
+          test: "測試資料來源連線",
+          sync: "同步資料來源",
+          pause: "暫停資料來源同步",
+          resume: "恢復資料來源同步",
+          list_sync_logs: "取得資料來源同步紀錄",
+          get_sync_log: "取得資料來源同步進度",
+        },
         agent: {
           list: "取得智慧體清單",
           create: "建立智慧體",
@@ -1917,9 +1927,16 @@ export default {
           copy: "複製智慧體",
         },
         chunk: {
+          get: "取得分塊詳情",
+          update: "更新分塊",
+          list_revisions: "取得分塊歷史版本",
+          revert: "還原分塊歷史版本",
           list: "取得知識分塊清單",
         },
         knowledge_base: {
+          copy: "複製知識庫內容",
+          duplicate: "複製知識庫設定",
+          get_copy_progress: "取得知識庫複製進度",
           list: "取得知識庫清單",
           create: "建立知識庫",
           get: "取得知識庫詳細資訊",

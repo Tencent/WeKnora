@@ -337,9 +337,9 @@ type HybridSearchResponse struct {
 
 // DuplicateKnowledgeBaseData is the data object of POST /knowledge-bases/{id}/duplicate.
 type DuplicateKnowledgeBaseData struct {
-	SourceID      string            `json:"source_id"`
-	TargetID      string            `json:"target_id"`
-	Message       string            `json:"message"`
+	SourceID      string            `json:"source_id" extensions:"x-agent=source_knowledge_base_id"`
+	TargetID      string            `json:"target_id" extensions:"x-agent=knowledge_base_id"`
+	Message       string            `json:"message" extensions:"x-agent"`
 	KnowledgeBase KnowledgeBaseView `json:"knowledge_base"`
 }
 
@@ -1346,17 +1346,18 @@ func (h *KnowledgeBaseHandler) DeleteKnowledgeBase(c *gin.Context) {
 }
 
 type CopyKnowledgeBaseRequest struct {
-	TaskID   string `json:"task_id"`
-	SourceID string `json:"source_id" binding:"required"`
+	TaskID string `json:"task_id"`
+	// Source knowledge base ID; the assistant always copies to a new knowledge base.
+	SourceID string `json:"source_id" binding:"required" extensions:"x-agent=knowledge_base_id"`
 	TargetID string `json:"target_id"`
 }
 
 // CopyKnowledgeBaseResponse defines the response for copy knowledge base
 type CopyKnowledgeBaseResponse struct {
-	TaskID   string `json:"task_id"`
-	SourceID string `json:"source_id"`
-	TargetID string `json:"target_id"`
-	Message  string `json:"message"`
+	TaskID   string `json:"task_id" extensions:"x-agent"`
+	SourceID string `json:"source_id" extensions:"x-agent=source_knowledge_base_id"`
+	TargetID string `json:"target_id" extensions:"x-agent=knowledge_base_id"`
+	Message  string `json:"message" extensions:"x-agent"`
 }
 
 type DuplicateKnowledgeBaseResponse struct {
@@ -1379,6 +1380,8 @@ type DuplicateKnowledgeBaseResponse struct {
 // @Failure      403      {object}  errors.AppError                                              "无权限"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent {"id":"knowledge_base.copy","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Copy content into a NEW knowledge base in the same workspace. Starts a background job; follow knowledge_base.get_copy_progress until completed before claiming success. Existing destination replacement is not supported."
 // @Router       /knowledge-bases/copy [post]
 func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1526,12 +1529,14 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 // @Tags         知识库
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string                  true  "源知识库 ID"
+// @Param        id       path      string                  true  "源知识库 ID" extensions(x-agent=knowledge_base_id)
 // @Success      201      {object}  handler.DataResponse{data=handler.DuplicateKnowledgeBaseData}  "创建后的知识库副本"
 // @Failure      400      {object}  errors.AppError                                               "请求参数错误"
 // @Failure      403      {object}  errors.AppError                                               "无权限"
 // @Failure      404      {object}  errors.AppError                                               "知识库不存在"
 // @Security     Bearer
+// @x-agent {"id":"knowledge_base.duplicate","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Create an empty knowledge base with the source settings only. Does NOT copy documents, FAQ, chunks, indexes, wiki, sharing or pins. To copy content use knowledge_base.copy instead. Rename the new knowledge_base_id with knowledge_base.update if needed."
 // @Router       /knowledge-bases/{id}/duplicate [post]
 func (h *KnowledgeBaseHandler) DuplicateKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1594,12 +1599,14 @@ func (h *KnowledgeBaseHandler) DuplicateKnowledgeBase(c *gin.Context) {
 // @Tags         知识库
 // @Accept       json
 // @Produce      json
-// @Param        task_id  path      string  true  "任务ID"
+// @Param        task_id  path      string  true  "任务ID" extensions(x-agent)
 // @Success      200      {object}  handler.DataResponse{data=types.KBCloneProgress}  "进度信息"
 // @Failure      400      {object}  errors.AppError                                  "请求参数错误"
 // @Failure      404      {object}  errors.AppError                                  "任务不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent {"id":"knowledge_base.get_copy_progress","risk":"read"}
+// @x-agent-hint "Read a task_id from knowledge_base.copy; distinguish queued/running work from a completed or failed copy."
 // @Router       /knowledge-bases/copy/progress/{task_id} [get]
 func (h *KnowledgeBaseHandler) GetKBCloneProgress(c *gin.Context) {
 	ctx := c.Request.Context()

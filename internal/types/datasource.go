@@ -145,43 +145,43 @@ func (d *DataSource) BeforeCreate(tx *gorm.DB) error {
 // SyncLog records the execution of a sync task
 type SyncLog struct {
 	// Unique identifier
-	ID string `json:"id" gorm:"type:varchar(36);primaryKey"`
+	ID string `json:"id" gorm:"type:varchar(36);primaryKey" extensions:"x-agent=sync_log_id"`
 
 	// Reference to the data source
-	DataSourceID string `json:"data_source_id" gorm:"index"`
+	DataSourceID string `json:"data_source_id" gorm:"index" extensions:"x-agent"`
 
 	// Workspace ID
 	TenantID uint64 `json:"tenant_id" gorm:"index"`
 
 	// Sync status: running, success, partial, failed, canceled
-	Status string `json:"status" gorm:"type:varchar(32);index"`
+	Status string `json:"status" gorm:"type:varchar(32);index" extensions:"x-agent"`
 
 	// Sync start time
-	StartedAt time.Time `json:"started_at"`
+	StartedAt time.Time `json:"started_at" extensions:"x-agent"`
 
 	// Sync completion time
-	FinishedAt *time.Time `json:"finished_at"`
+	FinishedAt *time.Time `json:"finished_at" extensions:"x-agent"`
 
 	// Total items fetched from source
-	ItemsTotal int `json:"items_total"`
+	ItemsTotal int `json:"items_total" extensions:"x-agent"`
 
 	// New items created in knowledge base
-	ItemsCreated int `json:"items_created"`
+	ItemsCreated int `json:"items_created" extensions:"x-agent"`
 
 	// Existing items updated
-	ItemsUpdated int `json:"items_updated"`
+	ItemsUpdated int `json:"items_updated" extensions:"x-agent"`
 
 	// Items deleted from knowledge base
-	ItemsDeleted int `json:"items_deleted"`
+	ItemsDeleted int `json:"items_deleted" extensions:"x-agent"`
 
 	// Items skipped (no changes detected)
-	ItemsSkipped int `json:"items_skipped"`
+	ItemsSkipped int `json:"items_skipped" extensions:"x-agent"`
 
 	// Items that failed to sync
-	ItemsFailed int `json:"items_failed"`
+	ItemsFailed int `json:"items_failed" extensions:"x-agent"`
 
 	// Error details if status is "failed"
-	ErrorMessage string `json:"error_message"`
+	ErrorMessage string `json:"error_message" extensions:"x-agent"`
 
 	// Detailed sync result (JSON-encoded)
 	Result JSON `json:"result" gorm:"type:jsonb"`

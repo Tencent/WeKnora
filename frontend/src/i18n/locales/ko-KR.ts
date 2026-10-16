@@ -1906,6 +1906,16 @@ export default {
     },
     operations: {
       names: {
+        data_source: {
+          list: "데이터 소스 목록 조회",
+          get: "데이터 소스 상세 조회",
+          test: "데이터 소스 연결 테스트",
+          sync: "데이터 소스 동기화",
+          pause: "데이터 소스 동기화 일시 중지",
+          resume: "데이터 소스 동기화 재개",
+          list_sync_logs: "데이터 소스 동기화 이력 조회",
+          get_sync_log: "데이터 소스 동기화 진행 상황 조회",
+        },
         agent: {
           list: "에이전트 목록 조회",
           create: "에이전트 생성",
@@ -1915,9 +1925,16 @@ export default {
           copy: "에이전트 복사",
         },
         chunk: {
+          get: "청크 상세 조회",
+          update: "청크 수정",
+          list_revisions: "청크 변경 이력 조회",
+          revert: "청크 이전 버전 복원",
           list: "지식 청크 목록 조회",
         },
         knowledge_base: {
+          copy: "지식베이스 내용 복사",
+          duplicate: "지식베이스 설정 복사",
+          get_copy_progress: "지식베이스 복사 진행 상황 조회",
           list: "지식 베이스 목록 조회",
           create: "지식 베이스 생성",
           get: "지식 베이스 상세 조회",

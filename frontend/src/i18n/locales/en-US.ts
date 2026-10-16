@@ -6652,6 +6652,16 @@ export default {
     },
     operations: {
       names: {
+        data_source: {
+          list: "List data sources",
+          get: "Get data source details",
+          test: "Test data source connection",
+          sync: "Sync data source",
+          pause: "Pause data source sync",
+          resume: "Resume data source sync",
+          list_sync_logs: "List data source sync logs",
+          get_sync_log: "Get data source sync progress",
+        },
         agent: {
           list: "List agents",
           create: "Create agent",
@@ -6661,9 +6671,16 @@ export default {
           copy: "Copy agent",
         },
         chunk: {
+          get: "Get chunk details",
+          update: "Update chunk",
+          list_revisions: "List chunk revisions",
+          revert: "Restore chunk revision",
           list: "List knowledge chunks",
         },
         knowledge_base: {
+          copy: "Copy knowledge base content",
+          duplicate: "Copy knowledge base settings",
+          get_copy_progress: "Get knowledge base copy progress",
           list: "List knowledge bases",
           create: "Create knowledge base",
           get: "Get knowledge base details",

@@ -341,6 +341,8 @@ var allowedRouteAreas = map[string]bool{
 	// identifying ones and nothing else.
 	"models":       true,
 	"mcp-services": true,
+	// Saved data sources: status, connection tests and sync control only.
+	"datasource": true,
 	// Sandbox configs hold provider credentials; see sandboxSkillsRoute.
 	"sandbox-configs": true,
 	// The caller's own conversations, read-only; see readOnlyRouteAreas.
@@ -363,14 +365,15 @@ var readOnlyRouteAreas = map[string]bool{
 // conversation (its guidance, transcript and event stream) belongs to the
 // user watching it; the user handles these themselves.
 var forbiddenRouteSegments = map[string]bool{
-	"shares":         true,
-	"embed-channels": true,
-	"im-channels":    true,
-	"credentials":    true,
-	"oauth":          true,
-	"guidance":       true,
-	"transcript":     true,
-	"install-events": true,
+	"shares":               true,
+	"embed-channels":       true,
+	"im-channels":          true,
+	"credentials":          true,
+	"validate-credentials": true,
+	"oauth":                true,
+	"guidance":             true,
+	"transcript":           true,
+	"install-events":       true,
 }
 
 // sandboxSkillsRoute reports whether a route in the sandbox-configs area

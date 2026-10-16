@@ -546,6 +546,80 @@ definitions:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.CredentialFieldMetadata'
         type: object
     type: object
+  github_com_Tencent_WeKnora_internal_handler_dto.DataSourceConfigDTO:
+    properties:
+      resource_ids:
+        items:
+          type: string
+        type: array
+      settings:
+        additionalProperties: true
+        type: object
+      type:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse:
+    properties:
+      config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceConfigDTO'
+      conflict_strategy:
+        type: string
+        x-agent: true
+      created_at:
+        type: string
+      credentials:
+        additionalProperties:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.CredentialFieldMetadata'
+        description: |-
+          Single logical credential field — DataSource credentials are a
+          per-connector atomic map, so "configured?" applies to the whole set.
+        type: object
+      error_message:
+        type: string
+        x-agent: true
+      id:
+        type: string
+        x-agent: data_source_id
+      knowledge_base_id:
+        type: string
+        x-agent: true
+      last_sync_at:
+        type: string
+        x-agent: true
+      last_sync_cursor:
+        type: object
+      last_sync_result:
+        type: object
+      latest_sync_log:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog'
+      name:
+        type: string
+        x-agent: true
+      status:
+        type: string
+        x-agent: true
+      sync_deletions:
+        type: boolean
+        x-agent: true
+      sync_log_retention_days:
+        type: integer
+      sync_mode:
+        type: string
+        x-agent: true
+      sync_schedule:
+        type: string
+        x-agent: true
+      tenant_id:
+        type: integer
+      total_items_synced:
+        type: integer
+        x-agent: true
+      type:
+        type: string
+        x-agent: true
+      updated_at:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_handler_dto.MCPAuthConfigResponse:
     properties:
       api_key_header:
@@ -1772,6 +1846,7 @@ definitions:
       content_revision:
         description: ContentRevision is incremented for every user edit or rollback.
         type: integer
+        x-agent: true
       created_at:
         description: Chunk creation time
         type: string
@@ -1801,6 +1876,7 @@ definitions:
           IndexStatus reports whether the current content is reflected in the
           retrieval stores: ready | processing | failed.
         type: string
+        x-agent: true
       indirect_relation_chunks:
         description: 间接关系 Chunk ID，用于关联间接关系 Chunk 和原始文本 Chunk
         items:
@@ -1814,9 +1890,11 @@ definitions:
       knowledge_base_id:
         description: ID of the knowledge base, for quick location
         type: string
+        x-agent: true
       knowledge_id:
         description: ID of the parent knowledge, associated with the Knowledge model
         type: string
+        x-agent: true
       last_editor_id:
         description: LastEditorID records the actor that produced the current revision.
         type: string
@@ -1873,6 +1951,39 @@ definitions:
     type: integer
     x-enum-varnames:
     - ChunkFlagRecommended
+  github_com_Tencent_WeKnora_internal_types.ChunkRevision:
+    properties:
+      chunk_id:
+        type: string
+        x-agent: true
+      content:
+        type: string
+        x-agent: true
+      created_at:
+        type: string
+      edit_source:
+        type: string
+        x-agent: true
+      edited_at:
+        type: string
+        x-agent: true
+      editor_id:
+        type: string
+      id:
+        type: string
+      is_enabled:
+        type: boolean
+        x-agent: true
+      knowledge_base_id:
+        type: string
+      knowledge_id:
+        type: string
+      revision:
+        type: integer
+        x-agent: true
+      tenant_id:
+        type: integer
+    type: object
   github_com_Tencent_WeKnora_internal_types.ChunkType:
     enum:
     - text
@@ -3475,6 +3586,18 @@ definitions:
           to answer every attribute line.
         type: boolean
     type: object
+  github_com_Tencent_WeKnora_internal_types.ImagePipelineID:
+    enum:
+    - smartocr
+    - default
+    - ob_cap_ocr
+    - caption_ocr
+    type: string
+    x-enum-varnames:
+    - ImagePipelineSmartOCR
+    - ImagePipelineDefault
+    - ImagePipelineLegacyObCapOCR
+    - ImagePipelineLegacyCaptionOCR
   github_com_Tencent_WeKnora_internal_types.ImageProcessingConfig:
     properties:
       image_actions:
@@ -3496,6 +3619,22 @@ definitions:
           KnowledgeProcessOverrides.ImageAttrsEnabled.
         type: boolean
         x-agent: true
+      image_pipeline:
+        description: |-
+          ImagePipelineID selects the image pipeline by id, so the choice the
+          settings panel offers is the choice the backend runs. It is unset on
+          knowledge bases configured before the field existed; those follow
+          ImageAttrsEnabled — see ResolveImagePipelineID. An explicit id always
+          wins over the switch.
+        type: string
+      image_pipeline_params:
+        additionalProperties: {}
+        description: |-
+          ImagePipelineParams holds the tunables of ImagePipelineID, keyed by the
+          field's own key. The map travels whole: a key a pipeline no longer
+          declares is dropped when the run reads it, so an old stored config stays
+          loadable rather than being rewritten on save.
+        type: object
       image_vector_enabled:
         description: |-
           ImageVectorEnabled lets a knowledge base whose embedding model takes
@@ -3711,26 +3850,36 @@ definitions:
       error:
         description: 错误信息
         type: string
+        x-agent: true
       message:
         description: 状态消息
         type: string
+        x-agent: true
       processed:
         description: 已处理数
         type: integer
+        x-agent: true
       progress:
         description: 0-100
         type: integer
+        x-agent: true
       source_id:
         type: string
+        x-agent: source_knowledge_base_id
       status:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KBCloneTaskStatus'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KBCloneTaskStatus'
+        x-agent: true
       target_id:
         type: string
+        x-agent: knowledge_base_id
       task_id:
         type: string
+        x-agent: true
       total:
         description: 总知识数
         type: integer
+        x-agent: true
       updated_at:
         description: 最后更新时间
         type: integer
@@ -4494,6 +4643,20 @@ definitions:
           pipeline switch for this one document. nil keeps the knowledge base's
           setting.
         type: boolean
+      image_pipeline:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ImagePipelineID'
+        description: |-
+          ImagePipelineID overrides which image pipeline runs for this one
+          document. nil keeps the knowledge base's resolved pipeline. When set,
+          ImagePipelineParams travels with it: the params of one pipeline are
+          meaningless to another, so the pair is replaced as a unit.
+      image_pipeline_params:
+        additionalProperties: {}
+        description: |-
+          ImagePipelineParams are the overridden pipeline's private tunables. They
+          are only applied together with ImagePipelineID.
+        type: object
       image_vector_enabled:
         description: |-
           ImageVectorEnabled overrides image vector indexing for this document.
@@ -7685,42 +7848,54 @@ definitions:
       data_source_id:
         description: Reference to the data source
         type: string
+        x-agent: true
       error_message:
         description: Error details if status is "failed"
         type: string
+        x-agent: true
       finished_at:
         description: Sync completion time
         type: string
+        x-agent: true
       id:
         description: Unique identifier
         type: string
+        x-agent: sync_log_id
       items_created:
         description: New items created in knowledge base
         type: integer
+        x-agent: true
       items_deleted:
         description: Items deleted from knowledge base
         type: integer
+        x-agent: true
       items_failed:
         description: Items that failed to sync
         type: integer
+        x-agent: true
       items_skipped:
         description: Items skipped (no changes detected)
         type: integer
+        x-agent: true
       items_total:
         description: Total items fetched from source
         type: integer
+        x-agent: true
       items_updated:
         description: Existing items updated
         type: integer
+        x-agent: true
       result:
         description: Detailed sync result (JSON-encoded)
         type: object
       started_at:
         description: Sync start time
         type: string
+        x-agent: true
       status:
         description: 'Sync status: running, success, partial, failed, canceled'
         type: string
+        x-agent: true
       tenant_id:
         description: Workspace ID
         type: integer
@@ -9516,6 +9691,126 @@ definitions:
       type:
         type: string
     type: object
+  internal_handler.AgentChunkDetail:
+    properties:
+      chunk_index:
+        description: Index position of the chunk in the original document
+        type: integer
+        x-agent: true
+      chunk_type:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkType'
+        description: Chunk 类型，用于区分不同类型的 Chunk
+        x-agent: true
+      content:
+        type: string
+        x-agent: true
+        x-agent-max-runes: "8000"
+      content_hash:
+        description: ContentHash 存储内容的 hash 值，用于快速匹配（主要用于 FAQ）
+        type: string
+      content_revision:
+        description: ContentRevision is incremented for every user edit or rollback.
+        type: integer
+        x-agent: true
+      created_at:
+        description: Chunk creation time
+        type: string
+      deleted_at:
+        allOf:
+        - $ref: '#/definitions/gorm.DeletedAt'
+        description: Soft delete marker, supports data recovery
+      end_at:
+        description: Ending character position in the original text
+        type: integer
+        x-agent: true
+      flags:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkFlags'
+        description: |-
+          Flags 存储多个布尔状态的位标志（如推荐状态等）
+          默认值为 ChunkFlagRecommended (1)，表示默认可推荐
+      id:
+        description: Unique identifier of the chunk, using UUID format
+        type: string
+        x-agent: chunk_id
+      image_info:
+        description: 图片信息，存储为 JSON
+        type: string
+      index_status:
+        description: |-
+          IndexStatus reports whether the current content is reflected in the
+          retrieval stores: ready | processing | failed.
+        type: string
+        x-agent: true
+      indirect_relation_chunks:
+        description: 间接关系 Chunk ID，用于关联间接关系 Chunk 和原始文本 Chunk
+        items:
+          type: string
+        type: array
+      is_enabled:
+        description: Whether the chunk is enabled, can be used to temporarily disable
+          certain chunks
+        type: boolean
+        x-agent: true
+      knowledge_base_id:
+        description: ID of the knowledge base, for quick location
+        type: string
+        x-agent: true
+      knowledge_id:
+        description: ID of the parent knowledge, associated with the Knowledge model
+        type: string
+        x-agent: true
+      last_editor_id:
+        description: LastEditorID records the actor that produced the current revision.
+        type: string
+      metadata:
+        description: Metadata 存储 chunk 级别的扩展信息，例如 FAQ 元数据
+        type: object
+      next_chunk_id:
+        description: Next chunk ID
+        type: string
+      parent_chunk_id:
+        description: 父 Chunk ID，用于关联图片 Chunk 和原始文本 Chunk
+        type: string
+      pre_chunk_id:
+        description: Previous chunk ID
+        type: string
+      relation_chunks:
+        description: 关系 Chunk ID，用于关联关系 Chunk 和原始文本 Chunk
+        items:
+          type: string
+        type: array
+      seq_id:
+        description: SeqID is an auto-increment integer ID for external API usage
+          (FAQ entries)
+        type: integer
+      source_locators:
+        description: |-
+          SourceLocators point back into the original file (page and region,
+          slide, sheet rows, ...) so citations can open the file at this chunk.
+          Empty when the parser reported no positions.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SourceLocator'
+        type: array
+      start_at:
+        description: Starting character position in the original text
+        type: integer
+        x-agent: true
+      status:
+        description: Status of the chunk
+        type: integer
+      tag_id:
+        description: Optional tag ID for categorization within a knowledge base (used
+          for FAQ)
+        type: string
+      tenant_id:
+        description: Tenant ID, used for multi-tenant isolation
+        type: integer
+      updated_at:
+        description: Chunk last update time
+        type: string
+    type: object
   internal_handler.AgentWriteResponse:
     properties:
       allowed_tools_warnings:
@@ -9592,7 +9887,10 @@ definitions:
   internal_handler.CopyKnowledgeBaseRequest:
     properties:
       source_id:
+        description: Source knowledge base ID; the assistant always copies to a new
+          knowledge base.
         type: string
+        x-agent: knowledge_base_id
       target_id:
         type: string
       task_id:
@@ -9604,12 +9902,16 @@ definitions:
     properties:
       message:
         type: string
+        x-agent: true
       source_id:
         type: string
+        x-agent: source_knowledge_base_id
       target_id:
         type: string
+        x-agent: knowledge_base_id
       task_id:
         type: string
+        x-agent: true
     type: object
   internal_handler.CopyModelRequest:
     properties:
@@ -9799,6 +10101,12 @@ definitions:
         example: true
         type: boolean
     type: object
+  internal_handler.DataSourceStatusResponse:
+    properties:
+      status:
+        type: string
+        x-agent: true
+    type: object
   internal_handler.DeleteTagRequest:
     properties:
       exclude_ids:
@@ -9847,10 +10155,13 @@ definitions:
         $ref: '#/definitions/internal_handler.KnowledgeBaseView'
       message:
         type: string
+        x-agent: true
       source_id:
         type: string
+        x-agent: source_knowledge_base_id
       target_id:
         type: string
+        x-agent: knowledge_base_id
     type: object
   internal_handler.EnsureMessageSuggestionsRequest:
     properties:
@@ -11479,6 +11790,23 @@ definitions:
       message:
         type: string
     type: object
+  internal_handler.RevertChunkRequest:
+    properties:
+      expected_revision:
+        description: Current content_revision from chunk.get; a stale value fails
+          with HTTP 409.
+        minimum: 0
+        type: integer
+        x-agent: true
+        x-agent-required: true
+      revision:
+        description: Historical revision number from chunk.list_revisions to restore.
+        minimum: 0
+        type: integer
+        x-agent: true
+    required:
+    - revision
+    type: object
   internal_handler.RevokeSystemAdminRequest:
     properties:
       user_id:
@@ -11928,11 +12256,22 @@ definitions:
   internal_handler.UpdateChunkRequest:
     properties:
       content:
+        description: Complete replacement content; omitted keeps the existing content.
         type: string
+        x-agent: true
+        x-agent-max-bytes: "32000"
       expected_revision:
+        description: Current content_revision from chunk.get; a stale value fails
+          with HTTP 409.
+        minimum: 0
         type: integer
+        x-agent: true
+        x-agent-required: true
       is_enabled:
+        description: Whether this chunk participates in retrieval; omitted keeps its
+          state.
         type: boolean
+        x-agent: true
     type: object
   internal_handler.UpdateChunkResponse:
     properties:
@@ -14361,11 +14700,13 @@ paths:
         name: knowledge_id
         required: true
         type: string
+        x-agent: true
       - description: 分块ID
         in: path
         name: id
         required: true
         type: string
+        x-agent: chunk_id
       - description: 更新请求
         in: body
         name: request
@@ -14393,6 +14734,108 @@ paths:
       summary: 更新分块
       tags:
       - 分块管理
+      x-agent:
+        id: chunk.update
+        label: chunk_id
+        require_complete_target: true
+        risk: write
+        target: chunk.get
+      x-agent-hint: Edit the complete content of a document chunk or set is_enabled;
+        omitted fields stay unchanged. Read chunk.get first and pass its content_revision
+        as expected_revision. Do not edit truncated content. A conflict requires rereading
+        and reconciling edits. Reindexes affected content and preserves revision history;
+        FAQ and wiki chunks use their own editors.
+  /chunks/{knowledge_id}/{id}/revert:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 知识ID
+        in: path
+        name: knowledge_id
+        required: true
+        type: string
+        x-agent: true
+      - description: 分块ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: chunk_id
+      - description: 恢复请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.RevertChunkRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Chunk'
+              type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 恢复分块历史版本
+      tags:
+      - 分块管理
+      x-agent:
+        id: chunk.revert
+        label: chunk_id
+        risk: write
+        target: chunk.get
+      x-agent-hint: Restore content and enabled state from a saved revision, creating
+        a new revision and reindexing. Get revision from chunk.list_revisions and
+        expected_revision from chunk.get; on conflict reread before retrying.
+  /chunks/{knowledge_id}/{id}/revisions:
+    get:
+      consumes:
+      - application/json
+      parameters:
+      - description: 知识ID
+        in: path
+        name: knowledge_id
+        required: true
+        type: string
+        x-agent: true
+      - description: 分块ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: chunk_id
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkRevision'
+                  type: array
+              type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取分块历史版本
+      tags:
+      - 分块管理
+      x-agent:
+        id: chunk.list_revisions
+        risk: read
+      x-agent-hint: Read saved earlier revisions of a document chunk. Current revision
+        is returned by chunk.get.
   /chunks/by-id/{id}:
     get:
       consumes:
@@ -14404,6 +14847,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: chunk_id
       produces:
       - application/json
       responses:
@@ -14414,7 +14858,7 @@ paths:
             - $ref: '#/definitions/internal_handler.DataResponse'
             - properties:
                 data:
-                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Chunk'
+                  $ref: '#/definitions/internal_handler.AgentChunkDetail'
               type: object
         "400":
           description: 请求参数错误
@@ -14430,6 +14874,12 @@ paths:
       summary: 通过ID获取分块
       tags:
       - 分块管理
+      x-agent:
+        id: chunk.get
+        risk: read
+      x-agent-hint: Read a chunk before editing. knowledge_id identifies its parent
+        document; content_revision is required as expected_revision for changes. If
+        truncated, do not reconstruct missing content.
   /chunks/by-id/{id}/questions:
     delete:
       consumes:
@@ -14480,6 +14930,7 @@ paths:
         name: kb_id
         required: true
         type: string
+        x-agent: knowledge_base_id
       produces:
       - application/json
       responses:
@@ -14487,7 +14938,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
+              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse'
             type: array
         "400":
           description: Bad Request
@@ -14495,9 +14946,14 @@ paths:
             additionalProperties:
               type: string
             type: object
-      summary: List data sources for a knowledge base
+      summary: 获取数据源列表
       tags:
       - DataSource
+      x-agent:
+        id: data_source.list
+        risk: read
+      x-agent-hint: List configured data sources for a knowledge base; use the returned
+        data_source_id for sync control.
     post:
       consumes:
       - application/json
@@ -14554,22 +15010,28 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: data_source_id
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse'
         "404":
           description: Not Found
           schema:
             additionalProperties:
               type: string
             type: object
-      summary: Get a data source by ID
+      summary: 获取数据源详情
       tags:
       - DataSource
+      x-agent:
+        id: data_source.get
+        risk: read
+      x-agent-hint: Read a configured data source and its sync state; credentials
+        and connector configuration are not returned.
     put:
       consumes:
       - application/json
@@ -14611,14 +15073,22 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: data_source_id
       - description: 'Limit (default: 10)'
         in: query
+        maximum: 100
+        minimum: 1
         name: limit
         type: integer
+        x-agent: true
+        x-agent-maximum: "50"
       - description: 'Offset (default: 0)'
         in: query
+        minimum: 0
         name: offset
         type: integer
+        x-agent: true
+        x-agent-maximum: "10000"
       produces:
       - application/json
       responses:
@@ -14634,9 +15104,14 @@ paths:
             additionalProperties:
               type: string
             type: object
-      summary: Get sync logs
+      summary: 获取数据源同步记录
       tags:
       - DataSource
+      x-agent:
+        id: data_source.list_sync_logs
+        risk: read
+      x-agent-hint: Read recent sync results, counts and errors. Use limit and offset
+        for older records.
   /datasource/{id}/pause:
     post:
       description: Pause a data source's scheduled syncs
@@ -14646,22 +15121,29 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: data_source_id
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/internal_handler.DataSourceStatusResponse'
         "400":
           description: Bad Request
           schema:
             additionalProperties:
               type: string
             type: object
-      summary: Pause data source
+      summary: 暂停数据源同步
       tags:
       - DataSource
+      x-agent:
+        id: data_source.pause
+        label: name
+        risk: write
+        role: admin
+        target: data_source.get
+      x-agent-hint: Pause scheduled syncs. Does not cancel a sync that is already
+        running.
   /datasource/{id}/resource-ancestors:
     post:
       consumes:
@@ -14743,22 +15225,28 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: data_source_id
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/internal_handler.DataSourceStatusResponse'
         "400":
           description: Bad Request
           schema:
             additionalProperties:
               type: string
             type: object
-      summary: Resume data source
+      summary: 恢复数据源同步
       tags:
       - DataSource
+      x-agent:
+        id: data_source.resume
+        label: name
+        risk: write
+        role: admin
+        target: data_source.get
+      x-agent-hint: Resume scheduled syncs using the saved schedule and deletion policy.
   /datasource/{id}/sync:
     post:
       description: Trigger an immediate sync for a data source
@@ -14768,6 +15256,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: data_source_id
       responses:
         "200":
           description: OK
@@ -14779,9 +15268,19 @@ paths:
             additionalProperties:
               type: string
             type: object
-      summary: Trigger immediate sync
+      summary: 同步数据源
       tags:
       - DataSource
+      x-agent:
+        id: data_source.sync
+        label: name
+        risk: destructive
+        role: admin
+        target: data_source.get
+      x-agent-hint: Start a background sync using the saved settings. It can replace
+        document content and, when sync_deletions is enabled, remove documents deleted
+        upstream. Always asks for confirmation. Follow with data_source.get_sync_log
+        using sync_log_id.
   /datasource/{id}/validate:
     post:
       description: Validate the connection to an external data source
@@ -14791,22 +15290,27 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: data_source_id
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/internal_handler.DataSourceStatusResponse'
         "400":
           description: Bad Request
           schema:
             additionalProperties:
               type: string
             type: object
-      summary: Test data source connection
+      summary: 测试数据源连接
       tags:
       - DataSource
+      x-agent:
+        id: data_source.test
+        risk: probe
+        role: admin
+      x-agent-hint: Test a saved data source using its stored credentials; no credentials
+        are accepted or returned.
   /datasource/logs/{log_id}:
     get:
       description: Retrieve a specific sync log entry
@@ -14816,6 +15320,7 @@ paths:
         name: log_id
         required: true
         type: string
+        x-agent: sync_log_id
       produces:
       - application/json
       responses:
@@ -14829,9 +15334,15 @@ paths:
             additionalProperties:
               type: string
             type: object
-      summary: Get specific sync log
+      summary: 获取数据源同步进度
       tags:
       - DataSource
+      x-agent:
+        id: data_source.get_sync_log
+        risk: read
+      x-agent-hint: Read the current status, counts and errors of a sync_log_id returned
+        by data_source.sync or data_source.list_sync_logs. A started job is not a
+        completed sync.
   /datasource/types:
     get:
       description: Get list of available data source connectors
@@ -16066,6 +16577,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: knowledge_base_id
       produces:
       - application/json
       responses:
@@ -16095,6 +16607,15 @@ paths:
       summary: 创建知识库副本
       tags:
       - 知识库
+      x-agent:
+        id: knowledge_base.duplicate
+        label: name
+        risk: write
+        target: knowledge_base.get
+      x-agent-hint: Create an empty knowledge base with the source settings only.
+        Does NOT copy documents, FAQ, chunks, indexes, wiki, sharing or pins. To copy
+        content use knowledge_base.copy instead. Rename the new knowledge_base_id
+        with knowledge_base.update if needed.
   /knowledge-bases/{id}/faq/entries:
     delete:
       consumes:
@@ -17885,6 +18406,14 @@ paths:
       summary: 复制知识库
       tags:
       - 知识库
+      x-agent:
+        id: knowledge_base.copy
+        label: name
+        risk: write
+        target: knowledge_base.get
+      x-agent-hint: Copy content into a NEW knowledge base in the same workspace.
+        Starts a background job; follow knowledge_base.get_copy_progress until completed
+        before claiming success. Existing destination replacement is not supported.
   /knowledge-bases/copy/progress/{task_id}:
     get:
       consumes:
@@ -17896,6 +18425,7 @@ paths:
         name: task_id
         required: true
         type: string
+        x-agent: true
       produces:
       - application/json
       responses:
@@ -17922,6 +18452,11 @@ paths:
       summary: 获取知识库复制进度
       tags:
       - 知识库
+      x-agent:
+        id: knowledge_base.get_copy_progress
+        risk: read
+      x-agent-hint: Read a task_id from knowledge_base.copy; distinguish queued/running
+        work from a completed or failed copy.
   /knowledge-chat/{session_id}:
     post:
       consumes:

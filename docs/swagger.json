@@ -1912,6 +1912,7 @@
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "chunk_id",
                         "description": "分块ID",
                         "name": "id",
                         "in": "path",
@@ -1930,7 +1931,7 @@
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Chunk"
+                                            "$ref": "#/definitions/internal_handler.AgentChunkDetail"
                                         }
                                     }
                                 }
@@ -1949,7 +1950,12 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "chunk.get",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Read a chunk before editing. knowledge_id identifies its parent document; content_revision is required as expected_revision for changes. If truncated, do not reconstruct missing content."
             }
         },
         "/chunks/by-id/{id}/questions": {
@@ -2200,6 +2206,7 @@
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": true,
                         "description": "知识ID",
                         "name": "knowledge_id",
                         "in": "path",
@@ -2207,6 +2214,7 @@
                     },
                     {
                         "type": "string",
+                        "x-agent": "chunk_id",
                         "description": "分块ID",
                         "name": "id",
                         "in": "path",
@@ -2241,7 +2249,15 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "chunk.update",
+                    "label": "chunk_id",
+                    "require_complete_target": true,
+                    "risk": "write",
+                    "target": "chunk.get"
+                },
+                "x-agent-hint": "Edit the complete content of a document chunk or set is_enabled; omitted fields stay unchanged. Read chunk.get first and pass its content_revision as expected_revision. Do not edit truncated content. A conflict requires rereading and reconciling edits. Reindexes affected content and preserves revision history; FAQ and wiki chunks use their own editors."
             },
             "delete": {
                 "security": [
@@ -2301,6 +2317,150 @@
                 }
             }
         },
+        "/chunks/{knowledge_id}/{id}/revert": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "分块管理"
+                ],
+                "summary": "恢复分块历史版本",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": true,
+                        "description": "知识ID",
+                        "name": "knowledge_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "x-agent": "chunk_id",
+                        "description": "分块ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "恢复请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.RevertChunkRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Chunk"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "chunk.revert",
+                    "label": "chunk_id",
+                    "risk": "write",
+                    "target": "chunk.get"
+                },
+                "x-agent-hint": "Restore content and enabled state from a saved revision, creating a new revision and reindexing. Get revision from chunk.list_revisions and expected_revision from chunk.get; on conflict reread before retrying."
+            }
+        },
+        "/chunks/{knowledge_id}/{id}/revisions": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "分块管理"
+                ],
+                "summary": "获取分块历史版本",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": true,
+                        "description": "知识ID",
+                        "name": "knowledge_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "x-agent": "chunk_id",
+                        "description": "分块ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkRevision"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "chunk.list_revisions",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Read saved earlier revisions of a document chunk. Current revision is returned by chunk.get."
+            }
+        },
         "/datasource": {
             "get": {
                 "description": "List all data sources for a specific knowledge base",
@@ -2310,10 +2470,11 @@
                 "tags": [
                     "DataSource"
                 ],
-                "summary": "List data sources for a knowledge base",
+                "summary": "获取数据源列表",
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "Knowledge base ID",
                         "name": "kb_id",
                         "in": "query",
@@ -2326,7 +2487,7 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse"
                             }
                         }
                     },
@@ -2339,7 +2500,12 @@
                             }
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "data_source.list",
+                    "risk": "read"
+                },
+                "x-agent-hint": "List configured data sources for a knowledge base; use the returned data_source_id for sync control."
             },
             "post": {
                 "description": "Create a new data source configuration for a knowledge base",
@@ -2392,10 +2558,11 @@
                 "tags": [
                     "DataSource"
                 ],
-                "summary": "Get specific sync log",
+                "summary": "获取数据源同步进度",
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "sync_log_id",
                         "description": "Sync log ID",
                         "name": "log_id",
                         "in": "path",
@@ -2418,7 +2585,12 @@
                             }
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "data_source.get_sync_log",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Read the current status, counts and errors of a sync_log_id returned by data_source.sync or data_source.list_sync_logs. A started job is not a completed sync."
             }
         },
         "/datasource/types": {
@@ -2499,10 +2671,11 @@
                 "tags": [
                     "DataSource"
                 ],
-                "summary": "Get a data source by ID",
+                "summary": "获取数据源详情",
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "data_source_id",
                         "description": "Data source ID",
                         "name": "id",
                         "in": "path",
@@ -2513,7 +2686,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse"
                         }
                     },
                     "404": {
@@ -2525,7 +2698,12 @@
                             }
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "data_source.get",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Read a configured data source and its sync state; credentials and connector configuration are not returned."
             },
             "put": {
                 "description": "Update an existing data source configuration",
@@ -2615,23 +2793,31 @@
                 "tags": [
                     "DataSource"
                 ],
-                "summary": "Get sync logs",
+                "summary": "获取数据源同步记录",
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "data_source_id",
                         "description": "Data source ID",
                         "name": "id",
                         "in": "path",
                         "required": true
                     },
                     {
+                        "maximum": 100,
+                        "minimum": 1,
                         "type": "integer",
+                        "x-agent": true,
+                        "x-agent-maximum": "50",
                         "description": "Limit (default: 10)",
                         "name": "limit",
                         "in": "query"
                     },
                     {
+                        "minimum": 0,
                         "type": "integer",
+                        "x-agent": true,
+                        "x-agent-maximum": "10000",
                         "description": "Offset (default: 0)",
                         "name": "offset",
                         "in": "query"
@@ -2656,7 +2842,12 @@
                             }
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "data_source.list_sync_logs",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Read recent sync results, counts and errors. Use limit and offset for older records."
             }
         },
         "/datasource/{id}/pause": {
@@ -2665,10 +2856,11 @@
                 "tags": [
                     "DataSource"
                 ],
-                "summary": "Pause data source",
+                "summary": "暂停数据源同步",
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "data_source_id",
                         "description": "Data source ID",
                         "name": "id",
                         "in": "path",
@@ -2679,10 +2871,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/internal_handler.DataSourceStatusResponse"
                         }
                     },
                     "400": {
@@ -2694,7 +2883,15 @@
                             }
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "data_source.pause",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "admin",
+                    "target": "data_source.get"
+                },
+                "x-agent-hint": "Pause scheduled syncs. Does not cancel a sync that is already running."
             }
         },
         "/datasource/{id}/resource-ancestors": {
@@ -2806,10 +3003,11 @@
                 "tags": [
                     "DataSource"
                 ],
-                "summary": "Resume data source",
+                "summary": "恢复数据源同步",
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "data_source_id",
                         "description": "Data source ID",
                         "name": "id",
                         "in": "path",
@@ -2820,10 +3018,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/internal_handler.DataSourceStatusResponse"
                         }
                     },
                     "400": {
@@ -2835,7 +3030,15 @@
                             }
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "data_source.resume",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "admin",
+                    "target": "data_source.get"
+                },
+                "x-agent-hint": "Resume scheduled syncs using the saved schedule and deletion policy."
             }
         },
         "/datasource/{id}/sync": {
@@ -2844,10 +3047,11 @@
                 "tags": [
                     "DataSource"
                 ],
-                "summary": "Trigger immediate sync",
+                "summary": "同步数据源",
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "data_source_id",
                         "description": "Data source ID",
                         "name": "id",
                         "in": "path",
@@ -2870,7 +3074,15 @@
                             }
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "data_source.sync",
+                    "label": "name",
+                    "risk": "destructive",
+                    "role": "admin",
+                    "target": "data_source.get"
+                },
+                "x-agent-hint": "Start a background sync using the saved settings. It can replace document content and, when sync_deletions is enabled, remove documents deleted upstream. Always asks for confirmation. Follow with data_source.get_sync_log using sync_log_id."
             }
         },
         "/datasource/{id}/validate": {
@@ -2879,10 +3091,11 @@
                 "tags": [
                     "DataSource"
                 ],
-                "summary": "Test data source connection",
+                "summary": "测试数据源连接",
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "data_source_id",
                         "description": "Data source ID",
                         "name": "id",
                         "in": "path",
@@ -2893,10 +3106,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/internal_handler.DataSourceStatusResponse"
                         }
                     },
                     "400": {
@@ -2908,7 +3118,13 @@
                             }
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "data_source.test",
+                    "risk": "probe",
+                    "role": "admin"
+                },
+                "x-agent-hint": "Test a saved data source using its stored credentials; no credentials are accepted or returned."
             }
         },
         "/evaluation/": {
@@ -4472,7 +4688,14 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "knowledge_base.copy",
+                    "label": "name",
+                    "risk": "write",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Copy content into a NEW knowledge base in the same workspace. Starts a background job; follow knowledge_base.get_copy_progress until completed before claiming success. Existing destination replacement is not supported."
             }
         },
         "/knowledge-bases/copy/progress/{task_id}": {
@@ -4499,6 +4722,7 @@
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": true,
                         "description": "任务ID",
                         "name": "task_id",
                         "in": "path",
@@ -4536,7 +4760,12 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "knowledge_base.get_copy_progress",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Read a task_id from knowledge_base.copy; distinguish queued/running work from a completed or failed copy."
             }
         },
         "/knowledge-bases/{id}": {
@@ -4967,6 +5196,7 @@
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "源知识库 ID",
                         "name": "id",
                         "in": "path",
@@ -5010,7 +5240,14 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "knowledge_base.duplicate",
+                    "label": "name",
+                    "risk": "write",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Create an empty knowledge base with the source settings only. Does NOT copy documents, FAQ, chunks, indexes, wiki, sharing or pins. To copy content use knowledge_base.copy instead. Rename the new knowledge_base_id with knowledge_base.update if needed."
             }
         },
         "/knowledge-bases/{id}/faq/entries": {
@@ -22719,6 +22956,108 @@
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_handler_dto.DataSourceConfigDTO": {
+            "type": "object",
+            "properties": {
+                "resource_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "settings": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceConfigDTO"
+                },
+                "conflict_strategy": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "credentials": {
+                    "description": "Single logical credential field — DataSource credentials are a\nper-connector atomic map, so \"configured?\" applies to the whole set.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.CredentialFieldMetadata"
+                    }
+                },
+                "error_message": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "id": {
+                    "type": "string",
+                    "x-agent": "data_source_id"
+                },
+                "knowledge_base_id": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "last_sync_at": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "last_sync_cursor": {
+                    "type": "object"
+                },
+                "last_sync_result": {
+                    "type": "object"
+                },
+                "latest_sync_log": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog"
+                },
+                "name": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "status": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "sync_deletions": {
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "sync_log_retention_days": {
+                    "type": "integer"
+                },
+                "sync_mode": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "sync_schedule": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "total_items_synced": {
+                    "type": "integer",
+                    "x-agent": true
+                },
+                "type": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_handler_dto.MCPAuthConfigResponse": {
             "type": "object",
             "properties": {
@@ -24352,7 +24691,8 @@
                 },
                 "content_revision": {
                     "description": "ContentRevision is incremented for every user edit or rollback.",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "created_at": {
                     "description": "Chunk creation time",
@@ -24390,7 +24730,8 @@
                 },
                 "index_status": {
                     "description": "IndexStatus reports whether the current content is reflected in the\nretrieval stores: ready | processing | failed.",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "indirect_relation_chunks": {
                     "description": "间接关系 Chunk ID，用于关联间接关系 Chunk 和原始文本 Chunk",
@@ -24406,11 +24747,13 @@
                 },
                 "knowledge_base_id": {
                     "description": "ID of the knowledge base, for quick location",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "knowledge_id": {
                     "description": "ID of the parent knowledge, associated with the Knowledge model",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "last_editor_id": {
                     "description": "LastEditorID records the actor that produced the current revision.",
@@ -24481,6 +24824,53 @@
             "x-enum-varnames": [
                 "ChunkFlagRecommended"
             ]
+        },
+        "github_com_Tencent_WeKnora_internal_types.ChunkRevision": {
+            "type": "object",
+            "properties": {
+                "chunk_id": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "content": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "edit_source": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "edited_at": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "editor_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_enabled": {
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "knowledge_id": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "integer",
+                    "x-agent": true
+                },
+                "tenant_id": {
+                    "type": "integer"
+                }
+            }
         },
         "github_com_Tencent_WeKnora_internal_types.ChunkType": {
             "type": "string",
@@ -26400,6 +26790,21 @@
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.ImagePipelineID": {
+            "type": "string",
+            "enum": [
+                "smartocr",
+                "default",
+                "ob_cap_ocr",
+                "caption_ocr"
+            ],
+            "x-enum-varnames": [
+                "ImagePipelineSmartOCR",
+                "ImagePipelineDefault",
+                "ImagePipelineLegacyObCapOCR",
+                "ImagePipelineLegacyCaptionOCR"
+            ]
+        },
         "github_com_Tencent_WeKnora_internal_types.ImageProcessingConfig": {
             "type": "object",
             "properties": {
@@ -26415,6 +26820,15 @@
                     "description": "ImageAttrsEnabled turns the attribute-observed image pipeline on for this\nknowledge base. It is off by default on purpose, so upgrading an\nexisting deployment never changes what happens to documents already\nbeing ingested: with it off every image is described and OCR'd exactly\nas before. When on, the describe round also observes image attributes and\nthe attribute policy decides whether OCR runs for it. A single upload can\noverride it per document through\nKnowledgeProcessOverrides.ImageAttrsEnabled.",
                     "type": "boolean",
                     "x-agent": true
+                },
+                "image_pipeline": {
+                    "description": "ImagePipelineID selects the image pipeline by id, so the choice the\nsettings panel offers is the choice the backend runs. It is unset on\nknowledge bases configured before the field existed; those follow\nImageAttrsEnabled — see ResolveImagePipelineID. An explicit id always\nwins over the switch.",
+                    "type": "string"
+                },
+                "image_pipeline_params": {
+                    "description": "ImagePipelineParams holds the tunables of ImagePipelineID, keyed by the\nfield's own key. The map travels whole: a key a pipeline no longer\ndeclares is dropped when the run reads it, so an old stored config stays\nloadable rather than being rewritten on save.",
+                    "type": "object",
+                    "additionalProperties": {}
                 },
                 "image_vector_enabled": {
                     "description": "ImageVectorEnabled lets a knowledge base whose embedding model takes\nimages index each image by its own vector and recall it with one. It\nis off by default on purpose: a model that takes images is also used\nfor plain text, and turning this on costs an embedding call per image\nand widens vector recall. Existing knowledge bases stay off after an\nupgrade because the stored JSON has no such key.",
@@ -26690,35 +27104,48 @@
                 },
                 "error": {
                     "description": "错误信息",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "message": {
                     "description": "状态消息",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "processed": {
                     "description": "已处理数",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "progress": {
                     "description": "0-100",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "source_id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "source_knowledge_base_id"
                 },
                 "status": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KBCloneTaskStatus"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KBCloneTaskStatus"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "target_id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "knowledge_base_id"
                 },
                 "task_id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "total": {
                     "description": "总知识数",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "updated_at": {
                     "description": "最后更新时间",
@@ -27682,6 +28109,19 @@
                 "image_attrs_enabled": {
                     "description": "ImageAttrsEnabled overrides the knowledge base's attribute-observed image\npipeline switch for this one document. nil keeps the knowledge base's\nsetting.",
                     "type": "boolean"
+                },
+                "image_pipeline": {
+                    "description": "ImagePipelineID overrides which image pipeline runs for this one\ndocument. nil keeps the knowledge base's resolved pipeline. When set,\nImagePipelineParams travels with it: the params of one pipeline are\nmeaningless to another, so the pair is replaced as a unit.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ImagePipelineID"
+                        }
+                    ]
+                },
+                "image_pipeline_params": {
+                    "description": "ImagePipelineParams are the overridden pipeline's private tunables. They\nare only applied together with ImagePipelineID.",
+                    "type": "object",
+                    "additionalProperties": {}
                 },
                 "image_vector_enabled": {
                     "description": "ImageVectorEnabled overrides image vector indexing for this document.\nIt does not change the KB-wide retrieval setting or embedding model.",
@@ -31729,43 +32169,53 @@
                 },
                 "data_source_id": {
                     "description": "Reference to the data source",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "error_message": {
                     "description": "Error details if status is \"failed\"",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "finished_at": {
                     "description": "Sync completion time",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "id": {
                     "description": "Unique identifier",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "sync_log_id"
                 },
                 "items_created": {
                     "description": "New items created in knowledge base",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "items_deleted": {
                     "description": "Items deleted from knowledge base",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "items_failed": {
                     "description": "Items that failed to sync",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "items_skipped": {
                     "description": "Items skipped (no changes detected)",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "items_total": {
                     "description": "Total items fetched from source",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "items_updated": {
                     "description": "Existing items updated",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "result": {
                     "description": "Detailed sync result (JSON-encoded)",
@@ -31773,11 +32223,13 @@
                 },
                 "started_at": {
                     "description": "Sync start time",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "status": {
                     "description": "Sync status: running, success, partial, failed, canceled",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "tenant_id": {
                     "description": "Workspace ID",
@@ -33991,6 +34443,159 @@
                 }
             }
         },
+        "internal_handler.AgentChunkDetail": {
+            "type": "object",
+            "properties": {
+                "chunk_index": {
+                    "description": "Index position of the chunk in the original document",
+                    "type": "integer",
+                    "x-agent": true
+                },
+                "chunk_type": {
+                    "description": "Chunk 类型，用于区分不同类型的 Chunk",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkType"
+                        }
+                    ],
+                    "x-agent": true
+                },
+                "content": {
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-runes": "8000"
+                },
+                "content_hash": {
+                    "description": "ContentHash 存储内容的 hash 值，用于快速匹配（主要用于 FAQ）",
+                    "type": "string"
+                },
+                "content_revision": {
+                    "description": "ContentRevision is incremented for every user edit or rollback.",
+                    "type": "integer",
+                    "x-agent": true
+                },
+                "created_at": {
+                    "description": "Chunk creation time",
+                    "type": "string"
+                },
+                "deleted_at": {
+                    "description": "Soft delete marker, supports data recovery",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/gorm.DeletedAt"
+                        }
+                    ]
+                },
+                "end_at": {
+                    "description": "Ending character position in the original text",
+                    "type": "integer",
+                    "x-agent": true
+                },
+                "flags": {
+                    "description": "Flags 存储多个布尔状态的位标志（如推荐状态等）\n默认值为 ChunkFlagRecommended (1)，表示默认可推荐",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkFlags"
+                        }
+                    ]
+                },
+                "id": {
+                    "description": "Unique identifier of the chunk, using UUID format",
+                    "type": "string",
+                    "x-agent": "chunk_id"
+                },
+                "image_info": {
+                    "description": "图片信息，存储为 JSON",
+                    "type": "string"
+                },
+                "index_status": {
+                    "description": "IndexStatus reports whether the current content is reflected in the\nretrieval stores: ready | processing | failed.",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "indirect_relation_chunks": {
+                    "description": "间接关系 Chunk ID，用于关联间接关系 Chunk 和原始文本 Chunk",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "is_enabled": {
+                    "description": "Whether the chunk is enabled, can be used to temporarily disable certain chunks",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "knowledge_base_id": {
+                    "description": "ID of the knowledge base, for quick location",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "knowledge_id": {
+                    "description": "ID of the parent knowledge, associated with the Knowledge model",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "last_editor_id": {
+                    "description": "LastEditorID records the actor that produced the current revision.",
+                    "type": "string"
+                },
+                "metadata": {
+                    "description": "Metadata 存储 chunk 级别的扩展信息，例如 FAQ 元数据",
+                    "type": "object"
+                },
+                "next_chunk_id": {
+                    "description": "Next chunk ID",
+                    "type": "string"
+                },
+                "parent_chunk_id": {
+                    "description": "父 Chunk ID，用于关联图片 Chunk 和原始文本 Chunk",
+                    "type": "string"
+                },
+                "pre_chunk_id": {
+                    "description": "Previous chunk ID",
+                    "type": "string"
+                },
+                "relation_chunks": {
+                    "description": "关系 Chunk ID，用于关联关系 Chunk 和原始文本 Chunk",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "seq_id": {
+                    "description": "SeqID is an auto-increment integer ID for external API usage (FAQ entries)",
+                    "type": "integer"
+                },
+                "source_locators": {
+                    "description": "SourceLocators point back into the original file (page and region,\nslide, sheet rows, ...) so citations can open the file at this chunk.\nEmpty when the parser reported no positions.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SourceLocator"
+                    }
+                },
+                "start_at": {
+                    "description": "Starting character position in the original text",
+                    "type": "integer",
+                    "x-agent": true
+                },
+                "status": {
+                    "description": "Status of the chunk",
+                    "type": "integer"
+                },
+                "tag_id": {
+                    "description": "Optional tag ID for categorization within a knowledge base (used for FAQ)",
+                    "type": "string"
+                },
+                "tenant_id": {
+                    "description": "Tenant ID, used for multi-tenant isolation",
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "description": "Chunk last update time",
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.AgentWriteResponse": {
             "type": "object",
             "properties": {
@@ -34106,7 +34711,9 @@
             ],
             "properties": {
                 "source_id": {
-                    "type": "string"
+                    "description": "Source knowledge base ID; the assistant always copies to a new knowledge base.",
+                    "type": "string",
+                    "x-agent": "knowledge_base_id"
                 },
                 "target_id": {
                     "type": "string"
@@ -34120,16 +34727,20 @@
             "type": "object",
             "properties": {
                 "message": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "source_id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "source_knowledge_base_id"
                 },
                 "target_id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "knowledge_base_id"
                 },
                 "task_id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -34402,6 +35013,15 @@
                 }
             }
         },
+        "internal_handler.DataSourceStatusResponse": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "x-agent": true
+                }
+            }
+        },
         "internal_handler.DeleteTagRequest": {
             "type": "object",
             "properties": {
@@ -34473,13 +35093,16 @@
                     "$ref": "#/definitions/internal_handler.KnowledgeBaseView"
                 },
                 "message": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "source_id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "source_knowledge_base_id"
                 },
                 "target_id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "knowledge_base_id"
                 }
             }
         },
@@ -36748,6 +37371,27 @@
                 }
             }
         },
+        "internal_handler.RevertChunkRequest": {
+            "type": "object",
+            "required": [
+                "revision"
+            ],
+            "properties": {
+                "expected_revision": {
+                    "description": "Current content_revision from chunk.get; a stale value fails with HTTP 409.",
+                    "type": "integer",
+                    "minimum": 0,
+                    "x-agent": true,
+                    "x-agent-required": true
+                },
+                "revision": {
+                    "description": "Historical revision number from chunk.list_revisions to restore.",
+                    "type": "integer",
+                    "minimum": 0,
+                    "x-agent": true
+                }
+            }
+        },
         "internal_handler.RevokeSystemAdminRequest": {
             "type": "object",
             "required": [
@@ -37398,13 +38042,22 @@
             "type": "object",
             "properties": {
                 "content": {
-                    "type": "string"
+                    "description": "Complete replacement content; omitted keeps the existing content.",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-bytes": "32000"
                 },
                 "expected_revision": {
-                    "type": "integer"
+                    "description": "Current content_revision from chunk.get; a stale value fails with HTTP 409.",
+                    "type": "integer",
+                    "minimum": 0,
+                    "x-agent": true,
+                    "x-agent-required": true
                 },
                 "is_enabled": {
-                    "type": "boolean"
+                    "description": "Whether this chunk participates in retrieval; omitted keeps its state.",
+                    "type": "boolean",
+                    "x-agent": true
                 }
             }
         },

@@ -45,7 +45,9 @@ const findOperationsDescription = "" +
 	"inspecting knowledge bases and documents, diagnosing and retrying document parsing, " +
 	"deleting documents, checking Wiki health, creating and configuring agents, managing the " +
 	"workspace's models, MCP services and skills (adding, renaming, enabling, removing, installing a " +
-	"skill from a hub), and checking that they work (testing an MCP connection, trying a retrieval). " +
+	"skill from a hub), copying knowledge bases, editing or restoring document chunks, " +
+	"inspecting data sources and sync logs, pausing/resuming sync schedules, triggering syncs, " +
+	"and checking connections and retrieval. " +
 	"Returns each operation's id, risk and parameters. " +
 	"Call with no arguments to see every operation, or narrow with query (words matched " +
 	"against ids and summaries) or domain. Operation ids must come from this tool; never guess them. " +
@@ -416,6 +418,12 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 	result := &types.ToolResult{Success: true, Output: string(out)}
 	if op.Risk.Mutates() {
 		result.Data = map[string]any{"data_change": operationDataChange(op, input.Params, projected)}
+	} else if op.ID == "knowledge_base.get_copy_progress" &&
+		(projected.Label("status") == "completed" || projected.Label("status") == "failed") {
+		// The destination is created by the worker, after the initial copy
+		// event. Refresh when its terminal state is observed, including a
+		// partial destination left by a failed job.
+		result.Data = map[string]any{"data_change": operationDataChange(op, input.Params, projected)}
 	}
 	return result, nil
 }
@@ -452,7 +460,7 @@ func operationDataChange(
 		}
 	}
 	area, action, _ := strings.Cut(op.ID, ".")
-	if action == "copy" || strings.HasPrefix(action, "create") {
+	if action == "copy" || action == "duplicate" || action == "get_copy_progress" || strings.HasPrefix(action, "create") {
 		for _, key := range []string{"knowledge_base_id", "knowledge_id", "agent_id"} {
 			add(key, projected.Label(key))
 		}
@@ -862,6 +870,30 @@ func mutationDetail(
 	}
 	if n, ok := rawInt(params, "version"); ok {
 		lines = append(lines, fmt.Sprintf("Version: %d", n))
+	}
+	if strings.HasPrefix(op.ID, "chunk.") {
+		if id, ok := rawString(params, "knowledge_id"); ok {
+			lines = append(lines, "Document: "+resolvedLabels(ctx, t, knowledgeLabels, []string{id}, identity))
+		}
+		for _, field := range []struct{ param, label string }{
+			{"revision", "Restore revision"}, {"expected_revision", "Current revision"},
+		} {
+			if n, ok := rawInt(params, field.param); ok {
+				lines = append(lines, fmt.Sprintf("%s: %d", field.label, n))
+			}
+		}
+		if enabled, ok := rawBool(params, "is_enabled"); ok {
+			lines = append(lines, fmt.Sprintf("Enabled: %t", enabled))
+		}
+	}
+	if op.ID == "knowledge_base.copy" {
+		lines = append(lines, "Copies content into a new knowledge base in the background.")
+	}
+	if op.ID == "knowledge_base.duplicate" {
+		lines = append(lines, "Copies settings only; the new knowledge base starts empty.")
+	}
+	if op.ID == "data_source.sync" {
+		lines = append(lines, "Uses the saved sync settings; may replace content and remove documents deleted upstream when deletion sync is enabled.")
 	}
 	if s, ok := rawString(params, "content"); ok && s != "" {
 		lines = append(lines, fmt.Sprintf("Content (%d characters): %s", len([]rune(s)), excerpt(s)))

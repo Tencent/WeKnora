@@ -6652,6 +6652,16 @@ export default {
     },
     operations: {
       names: {
+        data_source: {
+          list: "データソース一覧を取得",
+          get: "データソース詳細を取得",
+          test: "データソースの接続をテスト",
+          sync: "データソースを同期",
+          pause: "データソースの同期を一時停止",
+          resume: "データソースの同期を再開",
+          list_sync_logs: "データソースの同期履歴を取得",
+          get_sync_log: "データソースの同期進捗を取得",
+        },
         agent: {
           list: "エージェント一覧を取得",
           create: "エージェントを作成",
@@ -6661,9 +6671,16 @@ export default {
           copy: "エージェントをコピー",
         },
         chunk: {
+          get: "チャンク詳細を取得",
+          update: "チャンクを更新",
+          list_revisions: "チャンクの変更履歴を取得",
+          revert: "チャンクの過去の版を復元",
           list: "ナレッジチャンク一覧を取得",
         },
         knowledge_base: {
+          copy: "ナレッジベースの内容をコピー",
+          duplicate: "ナレッジベースの設定をコピー",
+          get_copy_progress: "ナレッジベースのコピー進捗を取得",
           list: "ナレッジベース一覧を取得",
           create: "ナレッジベースを作成",
           get: "ナレッジベースの詳細を取得",
