@@ -558,3 +558,45 @@ func TestListSandboxFilesScopeErrorNamesResolvedDefaultDir(t *testing.T) {
 	require.Contains(t, result.Error, "/Users/dev/My Project")
 	require.NotContains(t, result.Error, `path ""`)
 }
+
+func TestSharedLayoutClampsInspectAndWorkDir(t *testing.T) {
+	l, err := sandbox.UserWorkspaceLayout("0f8fad5b-d9cb-469f-a165-70867728950e")
+	require.NoError(t, err)
+	_, ok := inspectRoot(l, "/workspace/sessions/7c9e6679-7425-40de-944b-e07fc1f90ae7/a.md")
+	require.False(t, ok, "a shared machine must not read a sibling session through the tools")
+	root, ok := inspectRoot(l, sandbox.SkillsImageRoot+"/pdf/SKILL.md")
+	require.True(t, ok)
+	require.Equal(t, sandbox.SkillsImageRoot, root)
+
+	tool := &ShellExecTool{}
+	require.Equal(t, l.WorkDirRoots, tool.workDirRootsFor(l))
+	require.Equal(t, []string{"/"}, tool.workDirRootsFor(sandbox.RemoteWorkspaceLayout()))
+}
+
+func TestSharedLayoutToolCopyKeepsSessionPathsIntact(t *testing.T) {
+	l, err := sandbox.UserWorkspaceLayout("0f8fad5b-d9cb-469f-a165-70867728950e")
+	require.NoError(t, err)
+	text := shellExecDescription(l)
+	require.Contains(t, text, l.InputDir)
+	require.Contains(t, text, l.OutputDir)
+	require.Contains(t, text, l.Root)
+	require.NotContains(t, text, l.Root+"/sessions/", "substituting /workspace must not rewrite a path that already names the session")
+}
+
+func TestSharedLayoutShellDescriptionStatesTheWorkDirRestriction(t *testing.T) {
+	l, err := sandbox.UserWorkspaceLayout("0f8fad5b-d9cb-469f-a165-70867728950e")
+	require.NoError(t, err)
+	text := shellExecDescription(l)
+	require.Contains(t, text, "shared with the owner's other sessions")
+	require.Contains(t, text, "this session's files are only under "+l.Root)
+	require.Contains(t, text, "work_dir must be that directory, /tmp, or the skills root ("+sandbox.SkillsImageRoot+")")
+	require.Contains(t, text, "other paths are rejected")
+	require.Contains(t, text, "Deleting this session removes its directory, not the machine")
+	require.Contains(t, text, "skill_name")
+	require.Contains(t, text, l.InputDir)
+	require.Contains(t, text, l.OutputDir)
+	require.Contains(t, text, "no nohup")
+	require.NotContains(t, text, "belongs to this session alone")
+	require.NotContains(t, text, "any directory")
+	require.Contains(t, shellExecDescription(sandbox.RemoteWorkspaceLayout()), "belongs to this session alone")
+}

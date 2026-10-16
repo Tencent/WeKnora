@@ -151,14 +151,14 @@ func inspectableRootIn(l sandbox.WorkspaceLayout, clean string) (string, bool) {
 	return "", false
 }
 
-// inspectRoot reports the metadata root for a read/list. Remote sandboxes
-// label misses as "/" and still inspect (tmp, installed skills). Host
-// layouts refuse anything outside ReadRoots.
+// inspectRoot reports the metadata root for a read/list. A session-owned
+// remote sandbox labels misses as "/" and still inspects (tmp, installed
+// skills). Host layouts and shared remote machines allow ReadRoots only.
 func inspectRoot(l sandbox.WorkspaceLayout, clean string) (string, bool) {
 	if root, ok := inspectableRootIn(l, clean); ok {
 		return root, true
 	}
-	if l.IsHost() {
+	if l.IsHost() || l.IsSharedRemote() {
 		return "", false
 	}
 	return "/", true
@@ -267,13 +267,23 @@ func layoutDefaultListDir(l sandbox.WorkspaceLayout) string {
 // rewriteRemoteWorkspaceCopy replaces the remote /workspace constants in
 // tool copy with the session layout's model-safe wording. Longer paths
 // are substituted first so /workspace/input is not split into Hint+"/input".
+// Placeholders keep a session directory that still starts with /workspace
+// from being rewritten again when the root itself is replaced.
 func rewriteRemoteWorkspaceCopy(text string, l sandbox.WorkspaceLayout) string {
 	hint := layoutHintOrRemote(l)
 	input := modelSafeLayoutPath(l.InputDir, hint)
 	output := modelSafeLayoutPath(l.OutputDir, hint)
-	text = strings.ReplaceAll(text, sandbox.SessionInputRoot, input)
-	text = strings.ReplaceAll(text, sandbox.SessionOutputRoot, output)
-	return strings.ReplaceAll(text, sandbox.SessionWorkspaceRoot, hint)
+	const (
+		inputSlot  = "\x00weknora-input\x00"
+		outputSlot = "\x00weknora-output\x00"
+		rootSlot   = "\x00weknora-root\x00"
+	)
+	text = strings.ReplaceAll(text, sandbox.SessionInputRoot, inputSlot)
+	text = strings.ReplaceAll(text, sandbox.SessionOutputRoot, outputSlot)
+	text = strings.ReplaceAll(text, sandbox.SessionWorkspaceRoot, rootSlot)
+	text = strings.ReplaceAll(text, inputSlot, input)
+	text = strings.ReplaceAll(text, outputSlot, output)
+	return strings.ReplaceAll(text, rootSlot, hint)
 }
 
 func schemaForLayout(schema json.RawMessage, l sandbox.WorkspaceLayout) json.RawMessage {

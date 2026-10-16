@@ -193,6 +193,17 @@ func (a *PinnedSessionSandbox) DeleteForkSnapshot(
 	return errors.New("sandbox: fork snapshot delete is not supported")
 }
 
+// SessionWorkspaceLayout forwards the pinned manager's layout. manager does
+// not return the lookup error (it degrades to nil), so a missing pin keeps
+// the /workspace contract instead of failing the checkpoint closed.
+func (a *PinnedSessionSandbox) SessionWorkspaceLayout(ctx context.Context, sessionID string) (sandbox.WorkspaceLayout, error) {
+	mgr := a.manager(ctx, sessionID)
+	if provider, ok := mgr.(sandbox.SessionWorkspaceLayoutProvider); ok && provider != nil {
+		return provider.SessionWorkspaceLayout(ctx, sessionID)
+	}
+	return sandbox.RemoteWorkspaceLayout(), nil
+}
+
 // VersionsWorkspace reports whether this session's backend keeps a git history
 // of the sandbox workspace. Host sessions return false: the workspace is a
 // real directory, often shared across sessions, and must not be auto-committed
@@ -218,6 +229,8 @@ var _ SessionForkSandboxPort = (*PinnedSessionSandbox)(nil)
 var _ SessionRewindSandboxPort = (*PinnedSessionSandbox)(nil)
 
 var _ WorkspaceVersioning = (*PinnedSessionSandbox)(nil)
+
+var _ sandbox.SessionWorkspaceLayoutProvider = (*PinnedSessionSandbox)(nil)
 
 var _ SessionForkSandboxPort = (*sandbox.SessionBoundManager)(nil)
 
