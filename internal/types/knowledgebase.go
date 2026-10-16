@@ -549,7 +549,10 @@ type ImageProcessingConfig struct {
 	ModelID string `yaml:"model_id" json:"model_id" extensions:"x-agent=image_model_id"`
 	// ImageActions overrides the built-in attribute→work table (see
 	// DefaultImageActions). A nil value keeps the conservative default: run OCR
-	// for block text, data visuals, and unobserved images.
+	// for block text and data visuals. What to do about an image whose
+	// attributes were NOT observed is deliberately not part of this table — it
+	// is a scheduling decision, so it belongs to the pipeline that observes
+	// (`ocr_on_unobserved` in that pipeline's slot).
 	ImageActions *ImageActionsConfig `yaml:"image_actions,omitempty" json:"image_actions,omitempty"`
 	// ImageAttrsEnabled turns the attribute-observed image pipeline on for this
 	// knowledge base. It is off by default on purpose, so upgrading an
@@ -578,26 +581,26 @@ type ImageProcessingConfig struct {
 	// and widens vector recall. Existing knowledge bases stay off after an
 	// upgrade because the stored JSON has no such key.
 	ImageVectorEnabled bool `yaml:"image_vector_enabled,omitempty" json:"image_vector_enabled,omitempty" extensions:"x-agent"` //nolint:lll // one-line struct tag
-	// PreprocessMode controls the page-straightening step that runs before OCR:
-	//
-	//	auto   (default) the describe round also observes the page's geometry
-	//	       (layout.margin / layout.upright) and the page is straightened
-	//	       and cropped only when those say it is worth it;
-	//	off    never preprocess, and leave the describe prompt exactly as it was
-	//	       before this feature existed;
-	//	always preprocess every readable page without asking, and likewise leave
-	//	       the describe prompt untouched.
-	//
-	// Only auto changes the describe prompt; off and force cannot disturb an
-	// observation pipeline that is already tuned.
-	PreprocessMode string `yaml:"preprocess_mode,omitempty" json:"preprocess_mode,omitempty"`
 }
 
-// Preprocess modes accepted by ImageProcessingConfig.PreprocessMode.
+// The modes the preprocessing action's own switch accepts, and what each means:
+//
+//	auto   (default) the describe round also observes the page's geometry
+//	       (layout.margin / layout.upright) and the page is straightened
+//	       and cropped only when those say it is worth it;
+//	off    never preprocess, and leave the describe prompt exactly as it was
+//	       before this feature existed;
+//	always preprocess every readable page without asking, and likewise leave
+//	       the describe prompt untouched.
+//
+// Only auto changes the describe prompt; off and always cannot disturb an
+// observation pipeline that is already tuned. The switch is declared by the
+// preprocessing action (types.ImageActionPreprocess) and stored in the slot of
+// the pipeline that offers it, like every other pipeline setting.
 //
 // A mode is a SETTING — what the knowledge base asked for. What actually
 // happened to an image is a different question with a different vocabulary, and
-// it is recorded on the trace as the run's preprocess_status.
+// it is recorded on the trace as preprocess.result.
 const (
 	PreprocessModeOff    = "off"
 	PreprocessModeAuto   = "auto"
@@ -607,9 +610,9 @@ const (
 // SlotKey namespaces a pipeline-private key with the pipeline that owns it. A key
 // already carrying this pipeline's own namespace — an action scoped to one
 // pipeline, whose id is "<pipeline>.<action>" — is left alone, so the pipeline id
-// is never doubled. The runtime lookup in the image service and the config
-// resolution here both go through it, so a stored key is read the way it was
-// written.
+// is never doubled. The runtime lookup in the image service and the settings
+// panel, through its own mirror, both go through it, so a stored key is read the
+// way it was written.
 func SlotKey(pipelineID, key string) string {
 	if pipelineID == "" || strings.HasPrefix(key, pipelineID+".") {
 		return key
@@ -617,92 +620,33 @@ func SlotKey(pipelineID, key string) string {
 	return pipelineID + "." + key
 }
 
-// ImagePipelineParam reads one pipeline-private setting out of a params map: the
-// running pipeline's slot first, then the bare key, which is how configs written
-// before the slots existed keep working. The caller decides what a missing or nil
-// value means.
+// ImagePipelineParam reads one pipeline setting out of a params map. The key is
+// the running pipeline's slot and nothing else: a params map with no such entry
+// means the setting was never stored, and the caller falls back to what the
+// field declares — which is the same answer the panel draws.
 func ImagePipelineParam(params map[string]any, pipelineID, key string) (any, bool) {
 	if params == nil {
 		return nil, false
 	}
-	if pipelineID != "" {
-		if v, ok := params[SlotKey(pipelineID, key)]; ok && v != nil {
-			return v, true
-		}
-	}
-	if pipelineID != "" && SlotKey(pipelineID, key) == key {
-		// The key already carries this pipeline's namespace; the bare lookup below
-		// would read the same entry twice.
+	v, ok := params[SlotKey(pipelineID, key)]
+	if !ok || v == nil {
 		return nil, false
 	}
-	if v, ok := params[key]; ok && v != nil {
-		return v, true
-	}
-	return nil, false
+	return v, true
 }
 
 // PreprocessModeKey is the preprocessing action's tunable, as the panel declares
 // it. The setting lives in the pipeline's slot under this key.
 const PreprocessModeKey = "preprocess.mode"
 
-// SetImagePipelineParam returns a copy of params with one pipeline-private
-// setting set, under the slot's key. It copies rather than writing in place: the
-// map it is given usually belongs to a loaded knowledge base, and a resolved
-// value — the one thing a run needs that the stored config may not literally
-// contain — must not be written back into the stored object.
-func SetImagePipelineParam(params map[string]any, pipelineID, key string, value any) map[string]any {
-	out := make(map[string]any, len(params)+1)
-	for k, v := range params {
-		out[k] = v
-	}
-	out[SlotKey(pipelineID, key)] = value
-	return out
-}
-
-// ResolvePreprocessMode returns the effective preprocess mode: the running
-// pipeline's slot first, then the knowledge base field that predates the slot,
-// and auto when neither says anything the run would understand. Auto is the mode
-// the panel offers first and the only one that observes geometry before deciding.
-func ResolvePreprocessMode(cfg *ImageProcessingConfig) string {
-	if cfg == nil {
-		return PreprocessModeAuto
-	}
-	mode := ""
-	slot, ok := ImagePipelineParam(
-		cfg.ImagePipelineParams, string(ResolveImagePipelineID(cfg)), PreprocessModeKey,
-	)
-	if ok {
-		mode = valueAsString(slot)
-	}
-	if strings.TrimSpace(mode) == "" {
-		// Configs written before the switch moved into the pipeline slot carry it
-		// here; it is read, never written back, and can go once no such config
-		// is left in the field.
-		mode = cfg.PreprocessMode
-	}
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case PreprocessModeOff:
-		return PreprocessModeOff
-	case PreprocessModeAlways:
-		return PreprocessModeAlways
-	default:
-		return PreprocessModeAuto
-	}
-}
-
-// valueAsString reads a stored config value the way JSON hands it over: a string
-// stays a string, anything else is nothing this resolver understands.
-func valueAsString(v any) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return ""
-}
-
 // PreprocessObservesGeometry reports whether the describe round should ask the
 // geometry attributes; PreprocessRunsUnconditionally reports whether the page is
 // straightened without consulting them. The three modes are mutually exclusive,
 // so a caller reads exactly one of these.
+//
+// An empty mode answers false to both, which is the honest answer for a caller
+// that read a switch nobody offers: a pipeline that does not declare the setting
+// has no reason to ask the model about geometry it could not use.
 func PreprocessObservesGeometry(mode string) bool { return mode == PreprocessModeAuto }
 
 // PreprocessRunsUnconditionally is the other half of the pair above: the mode

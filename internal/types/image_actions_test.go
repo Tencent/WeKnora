@@ -14,9 +14,6 @@ func TestActionParamNamespacesByOwner(t *testing.T) {
 	if got := ActionParam(ImageActionOCR, ImageActionParamThinking); got != "ocr.thinking_enabled" {
 		t.Errorf("ActionParam(ocr, thinking) = %q, want ocr.thinking_enabled", got)
 	}
-	if got := ActionParam(ImageActionOCR, ImageActionParamOnUnobserved); got != "ocr.on_unobserved" {
-		t.Errorf("ActionParam(ocr, on_unobserved) = %q, want ocr.on_unobserved", got)
-	}
 	// The two "thinking"s are different keys, which is the whole point.
 	if ActionParam(ImageActionCaption, ImageActionParamThinking) ==
 		ActionParam(ImageActionOCR, ImageActionParamThinking) {
@@ -58,9 +55,11 @@ func TestActionFieldFindsWhatWasDeclared(t *testing.T) {
 	if _, ok := ActionField(ImageActionCaption, "mode"); ok {
 		t.Error("ActionField found a tunable the caption action never declares")
 	}
-	// The OCR fallback clause is a pipeline's decision about whether to schedule
-	// the OCR action, not the action's own tunable, so no action declares it.
-	if _, ok := ActionField(ImageActionOCR, ImageActionParamOnUnobserved); ok {
+	// Whether to read an image whose attributes were not observed is a
+	// pipeline's decision about scheduling the OCR action, not a tunable of the
+	// action itself, so no action declares it — and with no action declaring it
+	// there is no bare name for one to declare either.
+	if _, ok := ActionField(ImageActionOCR, "on_unobserved"); ok {
 		t.Error("the OCR fallback clause must not be an action-level field")
 	}
 }

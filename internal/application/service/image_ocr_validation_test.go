@@ -76,8 +76,8 @@ func TestImageOCRRejectsInvalidContentBeforePersistence(t *testing.T) {
 				err := svc.processImage(context.Background(), &types.ImageMultimodalPayload{
 					ImageURL: "local://test.png",
 					ImagePipelineParams: map[string]any{
-						captionFieldKeyCaptionEnabled: caption,
-						captionFieldKeyOCREnabled:     true,
+						manualCaptionKey: caption,
+						manualOCRKey:     true,
 					},
 					Attempt: 1,
 				}, model, types.VLMConfig{}, tracker, out)

@@ -612,7 +612,6 @@ import {
 } from '@/api/knowledge-base'
 import {
   buildImageProcessingConfig,
-  pipelineParamsFromKb,
   resolveImagePipelineFromKb as resolveKbImagePipeline,
   IMAGE_PIPELINE_DEFAULT,
   IMAGE_PIPELINE_SMARTOCR,
@@ -957,13 +956,11 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       descriptionLanguage: '',
       customInstructions: ''
     },
-    // 图片解析方案：方案选择与各方案的私有参数由 ImagePipelineSettings
-    // 编辑，参数按「方案槽位」存放（见 pipelineParamKey），所以切走再切回不会
-    // 丢设置；其余配置（model_id 等）按加载时的快照原样回传，避免把 API 侧写入
-    // 的设置洗掉。新建模式也必须用完整默认动作初始化——imageActions.ocr
-    // .on 直接被面板渲染，缺省会让面板读空列表。旧库把预处理开关存在知识库
-    // 顶层，读取时折进槽位（pipelineParamsFromKb），否则面板会显示默认值、
-    // 一保存就把它盖上。
+    // 图片解析方案：方案选择与各方案的设置由 ImagePipelineSettings 编辑，每条
+    // 设置都存在声明它的那个方案的槽位里（见 pipelineParamKey），所以切走再切回
+    // 不会丢设置；其余配置（model_id 等）按加载时的快照原样回传，避免把 API 侧
+    // 写入的设置洗掉。新建模式也必须用完整默认动作初始化——imageActions.ocr
+    // .on 直接被面板渲染，缺省会让面板读空列表。
     imageAttrsEnabled: false,
     // 图片向量默认关闭：能处理图片的向量模型也常只用来编码文本。
     imageVectorEnabled: false,
@@ -1136,7 +1133,13 @@ const loadKBData = async (
       imageActions: mergeImageActions(
         (kb as Record<string, any>).image_processing_config?.image_actions,
       ),
-      imagePipelineParams: pipelineParamsFromKb(kb),
+      // 方案的设置原样带过来：面板读槽位，运行时也读槽位，两侧看的是同一份。
+      // 槽位里没有的字段由面板按声明取默认值——和运行时一致。
+      imagePipelineParams:
+        ((kb as Record<string, any>).image_processing_config?.image_pipeline_params as Record<
+          string,
+          unknown
+        >) ?? {},
       imageProcessingConfigSnapshot:
         (kb as Record<string, any>).image_processing_config || null,
       asrConfig: {
@@ -1555,15 +1558,14 @@ const buildSubmitData = () => {
   }
 
   // 图片属性观察配置：后端是整体替换语义（payload 不带该字段 = 保持不变）。
-  // 面板编辑的是所选方案的槽位参数；知识库自己的 on_unobserved 是各方案共同
-  // 的起点值，原样回传（面板上的那个开关改的是方案槽位，不是这里）。快照里用
-  // API 自定义过的 on 原样保留，没有自定义时才取注册表默认值。合并规则见
+  // 面板编辑的是所选方案的槽位参数；属性表只装触发条件，未观察到怎么办是方案
+  // 自己的设置（ocr_on_unobserved），随槽位一同回传。快照里用 API 自定义过的
+  // on 原样保留，没有自定义时才取注册表默认值。合并规则见
   // buildImageProcessingConfig。
   {
     const built = buildImageProcessingConfig(formData.value.imageProcessingConfigSnapshot, {
       imageAttrsEnabled: formData.value.imageAttrsEnabled,
       imageVectorEnabled: formData.value.imageVectorEnabled,
-      onUnobserved: formData.value.imageActions.ocr.on_unobserved,
       defaultOn: displaySchema.value.default_actions.ocr.on,
       // 多模态开关决定是否处理图片：关闭时不写流水线字段（buildImageProcessingConfig
       // 对空 pipelineId 的处理是删掉这两个字段），配置里只留下观察开关的语义。

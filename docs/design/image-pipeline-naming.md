@@ -21,7 +21,9 @@
 
 **点号只出现在"归属边界"**（一层），名字内部只用下划线；**段内不得再出现点号**（否则路径拆分歧义，见 §8）。
 
-槽位是**存放处**，不是第二种归属：一个参数写在谁名下，就存在谁的槽位里（`types.SlotKey` 生成，`types.ImagePipelineParam` 读回）。KB 顶层字段（`preprocess_mode`、`image_actions.ocr.on_unobserved`）是这些设置**迁移前**的存放处：运行时仍按"槽位优先、旧字段兜底"读取（`types.ResolvePreprocessMode`、`service.resolveImageActions`），但面板只写槽位。前端镜像同一规则（`pipelineParamKey` / `readPipelineParam`），并在读取 KB 时把旧字段折进槽位（`pipelineParamsFromKb`），否则面板会显示字段默认值、下一次保存就把真实取值盖上。
+槽位是**存放处**，不是第二种归属：一个设置写在谁名下，就存在谁的槽位里（`types.SlotKey` 生成，`types.ImagePipelineParam` 读回），**而且只存在那里**——没有第二种拼法兜底，读不到就是"没存过"，两侧都回落到字段声明的默认值。
+
+这条同样适用于 `preprocess.mode` 与 `ocr_on_unobserved`：它们一度放在知识库顶层（`preprocess_mode`、`image_actions.ocr.on_unobserved`），移进槽位时**不保留兼容读取**——两个键都从未进入 main，没有存量数据值得迁就，旧值一律丢弃、按新默认重设即可（"用户上传或重新解析时一定会过一遍配置面板"是这次敢丢的前提）。前端镜像同一规则（`pipelineParamKey` / `readPipelineParam`）；两侧读法一致，是"面板显示的就是运行时用的"的前提。
 
 ## 2. 归属判据：一个调优项该挂"动作"还是"流水线"
 
@@ -81,7 +83,7 @@
 3. **前端**：设置面板的 i18n 文案路径（`imagePipeline.<pipeline>.<field.key>.<label|description>`，缺文案自动回落后端 Label）；处理时间线的 `error_code` 文案
 4. **测试**：golden 序列测试、属性决策测试、错误码测试
 5. **文档**：本文件与相关接口的 doc comment
-6. **前端槽位镜像**：`frontend/src/utils/imageProcessingConfig.ts` 的 `pipelineParamKey` / `readPipelineParam`（对应 `types.SlotKey` / `types.ImagePipelineParam`）、`PREPROCESS_MODE_KEY`、`OCR_ON_UNOBSERVED_KEY` —— 两侧拼法必须一致，否则面板写进去的值运行时读不到
+6. **前端槽位镜像**：`frontend/src/utils/imageProcessingConfig.ts` 的 `pipelineParamKey` / `readPipelineParam`（对应 `types.SlotKey` / `types.ImagePipelineParam`）—— 两侧拼法必须一致，否则面板写进去的值运行时读不到。前端**不认字段名**：它渲染注册表给的字段、按槽位读写，所以增删或改名一个字段不需要动前端
 
 ## 7. 由哪些测试钉住
 
@@ -90,14 +92,14 @@
 | 动作声明的键必须以自己的动作 id 为前缀，裸名不含点 | `TestDeclaredActionFieldsAreNamespaced`（`internal/types`）|
 | 流水线只能携带动作声明的带点键，不得自造 | `TestPipelineFieldKeysAreOwned` |
 | 同一 owner 内键唯一 | `TestPipelineFieldsArePrivate`、`TestFieldDeclarationOrder` |
-| 参数按流水线隔离（含裸键兼容与默认值回落）| `TestParamIsIsolatedPerPipeline` |
+| 参数按流水线隔离、无槽位的键不算值、默认值回落 | `TestParamIsIsolatedPerPipeline`、`TestParamReadsOnlyItsOwnNamespace` |
 | 流水线声明的字段分三段（常设 / 高级 / 说明）且顺序即面板顺序 | `TestFieldDeclarationOrder` |
 | 实际执行的动作序列 | `TestImagePipelineActionSequences` |
 | **设置不得与结果同形**（末段不得是 `result`/`chars`/`bytes`…）| `TestNoSettingIsNamedLikeAResult` |
 | **`<action>.result` 由动作 id 拼出**，键前缀必须是已注册动作 | `TestActionResultKeysAreNamedAfterTheirAction`、`TestEveryActionTraceKeyCarriesAnActionNamespace` |
 | **每个 result 取值都在词表内**（含只在一个分支里写的值）| `TestTraceResultsStayInTheirVocabulary` |
-| 槽位拼接不重复前缀、先槽位后裸键、nil 槽位视作未设置 | `TestSlotKeyDoesNotDoubleThePipelineID`、`TestImagePipelineParamReadsSlotThenBareKey` |
-| 预处理模式：槽位优先、旧字段兜底、无法识别取 auto | `TestResolvePreprocessModePrefersTheSlot` |
+| 槽位拼接不重复前缀、只认槽位、nil 槽位视作未设置 | `TestSlotKeyDoesNotDoubleThePipelineID`、`TestImagePipelineParamReadsOnlyTheSlot` |
+| **运行读到的设置 = 轨迹回显的设置** | `TestTheRunReadsTheSettingItsTraceEchoes` |
 | 前端写入的键与读取的键一致，且切换方案不丢参数 | `ImagePipelineSettings.test.ts`、`imageProcessingConfig.test.ts` |
 
 ## 8. 已知约束

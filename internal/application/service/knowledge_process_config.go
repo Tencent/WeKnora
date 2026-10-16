@@ -37,50 +37,6 @@ func normalizeParserFileType(fileType string) string {
 }
 
 // ResolveProcessConfig merges KB defaults with per-upload overrides for the parse pipeline.
-// resolveImageActions resolves the attribute policy and then lets the pipeline's
-// slot override the clause the panel exposes. The clause decides whether OCR is
-// scheduled when the observation did not answer — orchestration, so it belongs to
-// the pipeline that does the scheduling, while the knowledge base field it falls
-// back to is the default every pipeline starts from.
-func resolveImageActions(imageCfg types.ImageProcessingConfig) types.ImageActionsConfig {
-	actions := types.ResolveImageActions(imageCfg.ImageActions)
-	if v, ok := types.ImagePipelineParam(
-		imageCfg.ImagePipelineParams, string(types.ResolveImagePipelineID(&imageCfg)), ImagePipelineKeyOCROnUnobserved,
-	); ok {
-		if b, isBool := v.(bool); isBool {
-			actions.OCR.OnUnobserved = b
-			return actions
-		}
-		if s, isString := v.(string); isString {
-			actions.OCR.OnUnobserved = s == "true" || s == "1" || s == "on"
-		}
-	}
-	return actions
-}
-
-// ImagePipelineKeyOCROnUnobserved is the OCR fallback clause as a pipeline setting:
-// "read an image whose attributes could not be observed". Declared by the pipeline
-// that observes (it is that pipeline's scheduling decision) and kept here so the
-// config resolution and the panel agree on the name.
-const ImagePipelineKeyOCROnUnobserved = "ocr_on_unobserved"
-
-// applySlotResidentSettings folds the running pipeline's own slot into the two
-// settings that live inside it: the page-straightening mode and the OCR fallback
-// clause. Neither is touched when the slot says nothing about it — the caller has
-// already resolved both from the knowledge base, and an override that does not
-// mention a setting must not quietly reset it to the default.
-func applySlotResidentSettings(cfg types.ImageProcessingConfig, eff *types.EffectiveProcessConfig) {
-	pipelineID := string(types.ResolveImagePipelineID(&cfg))
-	if _, ok := types.ImagePipelineParam(cfg.ImagePipelineParams, pipelineID, types.PreprocessModeKey); ok {
-		eff.PreprocessMode = types.ResolvePreprocessMode(&cfg)
-	}
-	if _, ok := types.ImagePipelineParam(
-		cfg.ImagePipelineParams, pipelineID, ImagePipelineKeyOCROnUnobserved,
-	); ok {
-		eff.ImageActions = resolveImageActions(cfg)
-	}
-}
-
 func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgeProcessOverrides) types.EffectiveProcessConfig {
 	imageCfg := kb.ImageProcessingConfig
 	eff := types.EffectiveProcessConfig{
@@ -94,20 +50,12 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 		ExtractConfig:            derefExtractConfig(kb.ExtractConfig),
 		ImageAttrsEnabled:        imageCfg.ImageAttrsEnabled,
 		ImageVectorEnabled:       imageCfg.ImageVectorEnabled,
-		ImageActions:             resolveImageActions(imageCfg),
+		ImageActions:             types.ResolveImageActions(imageCfg.ImageActions),
 		ImagePipelineID:          types.ResolveImagePipelineID(&imageCfg),
 		ImagePipelineParams:      imageCfg.ImagePipelineParams,
-		PreprocessMode:           types.ResolvePreprocessMode(&imageCfg),
 	}
 	if overrides == nil {
-		return foldResolvedSlotSettings(eff)
-	}
-	if overrides.PreprocessMode != nil && strings.TrimSpace(*overrides.PreprocessMode) != "" {
-		// Normalized through the same resolver the knowledge base path uses, so
-		// an override cannot introduce a value the run would not understand.
-		eff.PreprocessMode = types.ResolvePreprocessMode(&types.ImageProcessingConfig{
-			PreprocessMode: *overrides.PreprocessMode,
-		})
+		return eff
 	}
 	if overrides.SummaryEnabled != nil {
 		eff.SummaryEnabled = *overrides.SummaryEnabled
@@ -160,21 +108,14 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	if overrides.ImagePipelineID != nil {
 		// The pick and its params travel as one unit: params keyed for one
 		// pipeline say nothing to another, so an id without its params would
-		// silently run the new pipeline on the old pipeline's switches.
+		// silently run the new pipeline on the old pipeline's switches — and
+		// the params are also where every setting of that pipeline lives,
+		// including the ones the run reads from this layer.
 		eff.ImagePipelineID = types.NormalizeImagePipelineID(*overrides.ImagePipelineID)
 		eff.ImagePipelineParams = overrides.ImagePipelineParams
 		// The explicit pick also decides the legacy switch, so the fallback
 		// path and the run agree on which pipeline this document asked for.
 		eff.ImageAttrsEnabled = eff.ImagePipelineID == types.ImagePipelineSmartOCR
-		// Two settings live inside the pipeline's own slot, and both were read
-		// above from the knowledge base's slot — which the override has just
-		// replaced. Read them again from the slot that will actually run, or a
-		// dialog offering these controls would be offering the operator a knob
-		// the run ignores.
-		overridden := imageCfg
-		overridden.ImagePipelineID = string(eff.ImagePipelineID)
-		overridden.ImagePipelineParams = eff.ImagePipelineParams
-		applySlotResidentSettings(overridden, &eff)
 	}
 	if overrides.ImageVectorEnabled != nil {
 		eff.ImageVectorEnabled = *overrides.ImageVectorEnabled
@@ -197,58 +138,7 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	// Match KnowledgeBase.IsGraphEnabled: graph fan-out requires extract to be on.
 	eff.GraphEnabled = eff.GraphEnabled && eff.ExtractConfig.Enabled
 
-	return foldResolvedSlotSettings(eff)
-}
-
-// foldResolvedSlotSettings gives the running pipeline's slot the settings this
-// task will actually run with, so that one map answers for all of them: the run
-// reads that map, and the trace echoes it. Without this, a task could run with a
-// mode the map did not contain, and its trace would report the field's declared
-// default instead of the mode that was used — a trace that cannot be read back
-// against the settings that produced it.
-//
-// The preprocess mode is the case it exists for: it is stored in the pipeline's
-// slot, but a knowledge base that predates the slot keeps it in the field beside
-// it, and a per-task override may set it flat.
-//
-// Nothing is written when leaving the map alone would report the same value —
-// an unset key already reports the default the field declares, and a key that
-// already holds the mode needs no help. Only a pipeline that declares the setting
-// is given it, and the map is copied rather than written through: it usually
-// belongs to a loaded knowledge base, and nothing resolved for one task may land
-// in the stored config.
-func foldResolvedSlotSettings(eff types.EffectiveProcessConfig) types.EffectiveProcessConfig {
-	pipeline := resolveImagePipeline(eff.ImagePipelineID, eff.ImageAttrsEnabled)
-	if pipeline == nil {
-		return eff
-	}
-	declared, ok := fieldOf(pipeline, types.PreprocessModeKey)
-	if !ok {
-		return eff
-	}
-	reported := declared.Default
-	if v, ok := types.ImagePipelineParam(
-		eff.ImagePipelineParams, string(eff.ImagePipelineID), declared.Key,
-	); ok {
-		reported = v
-	}
-	if reported == eff.PreprocessMode {
-		return eff
-	}
-	eff.ImagePipelineParams = types.SetImagePipelineParam(
-		eff.ImagePipelineParams, string(eff.ImagePipelineID), declared.Key, eff.PreprocessMode,
-	)
 	return eff
-}
-
-// fieldOf returns the field a pipeline declares under a key.
-func fieldOf(pipeline imagePipeline, key string) (types.ImageFieldDef, bool) {
-	for _, field := range pipeline.Fields() {
-		if field.Key == key {
-			return field, true
-		}
-	}
-	return types.ImageFieldDef{}, false
 }
 
 // validateDefaultFileImportRequirements enforces the VLM/ASR prerequisites that

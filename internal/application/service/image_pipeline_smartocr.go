@@ -131,11 +131,12 @@ func (smartOcrPipeline) Run(ctx context.Context, r *runContext) error {
 		return err
 	}
 
-	// The policy reads the attributes the action above just wrote. The decision
-	// itself is recorded as ocr.result below — done means it was taken, a
-	// skipped_* value says why it was not — so there is no separate decision key
-	// to keep in step with it.
-	want := DecideOCR(r.imageInfo.Attrs, r.payload.ImageActions)
+	// The policy reads the attributes the action above just wrote, and the
+	// clause beside it answers for an image the observation could not describe.
+	// The decision itself is recorded as ocr.result below — done means it was
+	// taken, a skipped_* value says why it was not — so there is no separate
+	// decision key to keep in step with it.
+	want := DecideOCR(r.imageInfo.Attrs, r.payload.ImageActions, r.ocrOnUnobserved())
 	r.out[keyImageAttrs] = r.imageInfo.Attrs.Attrs
 	if !want {
 		// WHY the policy said no: an observation that did not answer leaves no

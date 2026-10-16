@@ -16,13 +16,6 @@ export interface ImageProcessingEdits {
   imageAttrsEnabled: boolean
   /** Index and recall images by their own vectors (off unless opted in). */
   imageVectorEnabled: boolean
-  /**
-   * The knowledge base's own OCR fallback clause. It is the value every
-   * pipeline starts from, no longer a control: the panel edits the selected
-   * pipeline's own copy in that pipeline's slot, and this field is carried
-   * over so a base that customised it through the API keeps it.
-   */
-  onUnobserved: boolean
   /** The registry's current default OCR conditions (GET /image-attrs/schema). */
   defaultOn: ImageAttrConditionLike[]
   /** The pipeline picked in the panel; empty means multimodal is off and the fields go away. */
@@ -35,46 +28,8 @@ export interface ImageProcessingEdits {
   pipelineParams: Record<string, unknown>
 }
 
-/** The preprocess switch's values, mirroring the backend's constants. */
-export const PREPROCESS_MODE_OFF = 'off'
-export const PREPROCESS_MODE_AUTO = 'auto'
-export const PREPROCESS_MODE_ALWAYS = 'always'
-
 /**
- * The key the preprocessing action declares its page-straightening switch
- * under. The action owns the key; a pipeline that schedules the action offers
- * the control, and the value is stored in that pipeline's slot. Mirrors
- * types.PreprocessModeKey on the backend.
- */
-export const PREPROCESS_MODE_KEY = 'preprocess.mode'
-
-/**
- * The key the smart pipeline declares its OCR fallback clause under. Pipeline
- * private: it decides whether OCR is scheduled at all, which is that
- * pipeline's own orchestration decision. Mirrors
- * service.ImagePipelineKeyOCROnUnobserved.
- */
-export const OCR_ON_UNOBSERVED_KEY = 'ocr_on_unobserved'
-
-/**
- * Maps a stored preprocess mode onto the one the panel offers. Anything
- * unrecognised — including the empty string a knowledge base saved before the
- * field existed carries — resolves to auto, the backend's own default, so the
- * panel never shows a blank choice.
- */
-export function normalizePreprocessMode(mode: string | null | undefined): string {
-  switch ((mode || '').trim().toLowerCase()) {
-    case PREPROCESS_MODE_OFF:
-      return PREPROCESS_MODE_OFF
-    case PREPROCESS_MODE_ALWAYS:
-      return PREPROCESS_MODE_ALWAYS
-    default:
-      return PREPROCESS_MODE_AUTO
-  }
-}
-
-/**
- * The key one pipeline-private setting is stored under. Mirrors the backend's
+ * The key one pipeline setting is stored under. Mirrors the backend's
  * types.SlotKey: the pipeline that owns the setting namespaces it, unless the
  * key already carries that namespace (an action scoped to one pipeline, whose
  * id is "<pipeline>.<action>"), in which case it is left alone so the id is
@@ -90,11 +45,11 @@ export function pipelineParamKey(pipelineId: string, key: string): string {
 }
 
 /**
- * Reads one pipeline-private setting the way the backend's
- * types.ImagePipelineParam does: the running pipeline's slot first, then the
- * bare key, which is how a config written before the slots existed still
- * reads. `undefined` means neither carries a value, and the caller falls back
- * to the field's declared default.
+ * Reads one pipeline setting the way the backend's types.ImagePipelineParam
+ * does: out of the running pipeline's slot, and out of nowhere else.
+ * `undefined` means the setting was never stored, and the caller falls back to
+ * the field's declared default — which is the answer the run gives for the same
+ * config, because it falls back the same way.
  */
 export function readPipelineParam(
   params: Record<string, unknown> | null | undefined,
@@ -102,16 +57,8 @@ export function readPipelineParam(
   key: string,
 ): unknown {
   if (!params) return undefined
-  if (pipelineId) {
-    const slot = pipelineParamKey(pipelineId, key)
-    const own = params[slot]
-    if (own !== undefined && own !== null) return own
-    // The key already carries this pipeline's namespace; the bare lookup below
-    // would read the same entry twice.
-    if (slot === key) return undefined
-  }
-  const bare = params[key]
-  return bare === undefined || bare === null ? undefined : bare
+  const stored = params[pipelineParamKey(pipelineId, key)]
+  return stored === undefined || stored === null ? undefined : stored
 }
 
 /** The pipeline fields an overrides payload carries, with the empties dropped. */
@@ -161,14 +108,15 @@ export function buildPipelineFields(
  * changed. The backend replaces the whole object, so every field the editor
  * does not own (model_id, ...) is carried over from the snapshot.
  *
- * The editor edits the observation switch, the pick and its parameters. The
- * OCR clause travels with a non-empty `on`: the backend adopts a custom clause
- * only when `on` is set. A knowledge base whose `on` was customised through the
- * API keeps it; one without a custom list gets the registry's current default,
- * so it still follows the default as it evolves. The fallback clause beside it
- * is carried over rather than recomputed — the panel edits the selected
- * pipeline's own copy in that pipeline's slot now, so this key stays the
- * default every pipeline starts from.
+ * The editor owns the observation switch, the pick and its parameters. The
+ * condition list travels with a non-empty `on`: the backend adopts a custom
+ * list only when `on` is set, and a knowledge base without one gets the
+ * registry's current default so it still follows the default as it evolves.
+ *
+ * The OCR clause is rebuilt as the condition list alone. What to do about an
+ * image whose attributes were NOT observed is a setting of the pipeline that
+ * schedules OCR now, so a `on_unobserved` left in this table by an older client
+ * is dropped rather than carried forward as a key nothing reads.
  *
  * The pipeline and its parameters are written as one unit. image_vector_enabled
  * is written only when it is on or was already stored: a knowledge base that
@@ -188,7 +136,7 @@ export function buildImageProcessingConfig(
     image_attrs_enabled: edits.imageAttrsEnabled,
     image_actions: {
       ...(snap.image_actions as Record<string, unknown> | undefined),
-      ocr: { ...storedOCR, on, on_unobserved: edits.onUnobserved },
+      ocr: { on },
     },
   }
   // The pick carries the panel's own answer, so it replaces whatever the
@@ -202,38 +150,6 @@ export function buildImageProcessingConfig(
     built.image_vector_enabled = edits.imageVectorEnabled
   }
   return JSON.stringify(built) === JSON.stringify(snap) ? null : built
-}
-
-/**
- * The pipeline parameters a stored config amounts to, with the two settings
- * that predate the slots folded in from where they used to live.
- *
- * This is a read-time migration, not a rewrite: the backend resolves the same
- * way (types.ResolvePreprocessMode, service.resolveImageActions), so a
- * knowledge base that stored the straightening mode or the OCR fallback clause
- * before they moved into the pipeline's slot shows the value it actually runs
- * with. Without it the panel would draw those controls at their declared
- * default, and the next save would write that default into the slot and shadow
- * the setting the base was using.
- */
-export function pipelineParamsFromKb(
-  kb: Record<string, any> | null | undefined,
-): Record<string, unknown> {
-  const cfg = kb?.image_processing_config
-  const params = { ...((cfg?.image_pipeline_params as Record<string, unknown>) ?? {}) }
-  const pipelineId = resolveImagePipelineFromKb(kb)
-  if (!pipelineId) return params
-  if (readPipelineParam(params, pipelineId, PREPROCESS_MODE_KEY) === undefined && cfg?.preprocess_mode != null) {
-    params[pipelineParamKey(pipelineId, PREPROCESS_MODE_KEY)] = normalizePreprocessMode(cfg.preprocess_mode)
-  }
-  const legacyUnobserved = cfg?.image_actions?.ocr?.on_unobserved
-  if (
-    typeof legacyUnobserved === 'boolean' &&
-    readPipelineParam(params, pipelineId, OCR_ON_UNOBSERVED_KEY) === undefined
-  ) {
-    params[pipelineParamKey(pipelineId, OCR_ON_UNOBSERVED_KEY)] = legacyUnobserved
-  }
-  return params
 }
 
 /**

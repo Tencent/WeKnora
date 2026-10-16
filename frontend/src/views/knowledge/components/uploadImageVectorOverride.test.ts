@@ -29,7 +29,7 @@ function fixture(kbInfo: any) {
       if (name === '@/stores/chatResources') return { useChatResourcesStore: () => ({}) }
       if (name === '@/stores/editorResources') return { useEditorResourcesStore: () => ({}) }
       if (name === '@/stores/ui') return { useUIStore: () => ({}) }
-      if (name === '@/api/knowledge-base') return { mergeImageActions: () => ({ ocr: { on: [], on_unobserved: true } }) }
+      if (name === '@/api/knowledge-base') return { mergeImageActions: () => ({ ocr: { on: [] } }) }
       if (name === '@/utils/imageProcessingConfig') return imageProcessingConfig
       return { default: {} }
     },
