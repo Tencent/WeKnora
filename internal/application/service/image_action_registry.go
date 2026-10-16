@@ -347,13 +347,9 @@ type runContext struct {
 	// preprocessor straightens the page before OCR. Nil when the document
 	// service is not wired into this build — see imagePreprocessor.
 	preprocessor imagePreprocessor
-	// preprocessMode is the resolved off/auto/always setting for this run. It
-	// decides both whether the describe round asks the geometry attributes and
-	// whether the page is straightened at all.
-	preprocessMode string
-	imageBytes     []byte
-	vlmCfg         types.VLMConfig
-	imageInfo      *types.ImageInfo
+	imageBytes   []byte
+	vlmCfg       types.VLMConfig
+	imageInfo    *types.ImageInfo
 	// out is the per-image trace record. Keys follow
 	// docs/design/image-pipeline-naming.md — see the note above imagePipeline.
 	out types.JSONMap
@@ -409,11 +405,11 @@ type runContext struct {
 // is deliberate: a stored knowledge base may carry parameters for a pipeline
 // this build no longer has, and the run must not fail over a stale key.
 //
-// Pipeline-private keys are looked up under the running pipeline's namespace
-// first ("<pipeline>.<key>"), so two pipelines may one day declare the same
-// field key without one reading the other's stored value; a bare key still
-// answers, which keeps stored configs written before namespacing readable.
-// Action-level keys ("action.key") are stored bare and hit the exact lookup.
+// Every key is read under the running pipeline's namespace first
+// ("<pipeline>.<key>"), so two pipelines may one day declare the same field key
+// without one reading the other's stored value. There is no second place a
+// value is looked for: a params map holds the settings of the pipelines that
+// wrote them, and the run only ever wants its own.
 func (r *runContext) Param(key string) any {
 	if v, ok := types.ImagePipelineParam(r.params, r.pipelineID, key); ok {
 		return v
@@ -446,6 +442,32 @@ func (r *runContext) BoolParamOr(key string, def bool) bool {
 		return v == "true" || v == "1" || v == "on"
 	}
 	return def
+}
+
+// ocrOnUnobserved is the scheduling clause of the pipeline that observed: "read
+// an image whose attributes could not be observed". It decides whether OCR is
+// worth a pass when the observation came back empty or incomplete — that is
+// orchestration, so it is a setting of the pipeline doing the scheduling rather
+// than of the OCR action, even though OCR is what it is about.
+//
+// It is read here, at the decision, from the same slot the trace echoes; the
+// declared default (on) answers a knowledge base that never touched it, so a
+// missed block of text costs one extra call instead of being lost.
+func (r *runContext) ocrOnUnobserved() bool {
+	return r.BoolParamOr(smartFieldKeyOCROnUnobserved, true)
+}
+
+// preprocessMode is this run's page-straightening setting: the mode the running
+// pipeline declares, or "" when it declares none.
+//
+// Read rather than resolved into a field of its own, so the answer the actions
+// act on and the answer the trace echoes are one lookup — see
+// types.PreprocessModeKey. An empty answer is not a mode, and neither predicate
+// below accepts it: a pipeline that does not offer the switch has no reason to
+// ask the model about geometry it could not use.
+func (r *runContext) preprocessMode() string {
+	mode, _ := r.Param(types.PreprocessModeKey).(string)
+	return mode
 }
 
 // recordConfig writes the settings this run actually used, under the same
@@ -610,7 +632,7 @@ func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 		r.tracker.EndSpan(ctx, obsSpan, types.JSONMap{"status": "succeeded"})
 	}
 	raw, err := r.predictCaption(ctx,
-		buildImageAttrsPrompt(ctx, r.vlmCfg, types.PreprocessObservesGeometry(r.preprocessMode)),
+		buildImageAttrsPrompt(ctx, r.vlmCfg, types.PreprocessObservesGeometry(r.preprocessMode())),
 		"image_observation")
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Describe and observe failed for %s: %v", r.payload.ImageURL, err)
@@ -637,9 +659,9 @@ func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 	// How much of what was asked came back. The list comes from the same
 	// function the prompt was built from, so "asked everything" and "answered
 	// everything" are comparable instead of guessed. Nothing is invented to fill
-	// a gap: an unanswered attribute stays absent, and the OCR policy falls back
-	// to its conservative OnUnobserved clause for it.
-	asked := types.InjectedImageAttrNames(types.PreprocessObservesGeometry(r.preprocessMode))
+	// a gap: an unanswered attribute stays absent, and the pipeline's
+	// ocr_on_unobserved setting decides what that means for OCR.
+	asked := types.InjectedImageAttrNames(types.PreprocessObservesGeometry(r.preprocessMode()))
 	answered := 0
 	for _, name := range asked {
 		if _, present := obs.Attrs.Attrs[name]; present {
@@ -666,22 +688,24 @@ func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 // path. That is deliberate — a page cropper that cannot decide must not be able
 // to make the run worse than not having run it at all.
 func runPreprocessAction(ctx context.Context, r *runContext) error {
-	// What was asked for and what happened are two different questions: "always"
-	// and an auto run that hit both attributes produce the same status, and the
-	// mode is what tells them apart afterwards. Both go on the trace.
+	// The mode is this pipeline's own setting, read here and echoed by the
+	// trace from the same slot — "what was asked for" is the config, and what
+	// happened is result; a trace that repeats the first under the second's
+	// name is how a reader comes to think always and a lucky auto run differ.
+	mode := r.preprocessMode()
 	if r.preprocessor == nil {
 		r.out[keyPreprocessResult] = "skipped_no_capability"
 		return nil
 	}
 	// Off means off: the describe round did not even ask for the geometry
 	// attributes, so there is nothing to consult and nothing to do.
-	if r.preprocessMode == types.PreprocessModeOff {
+	if mode == types.PreprocessModeOff {
 		r.out[keyPreprocessResult] = "skipped_off"
 		return nil
 	}
-	// Force skips the question entirely — it exists precisely for the case
+	// Always skips the question entirely — it exists precisely for the case
 	// where an operator does not trust the observation to make this call.
-	if !types.PreprocessRunsUnconditionally(r.preprocessMode) {
+	if !types.PreprocessRunsUnconditionally(mode) {
 		// Auto: the same signal the OCR policy reads (contain.text) says whether
 		// there is a page at all, and the geometry attributes say whether
 		// straightening it is worth the pass. Their vocabularies are owned by

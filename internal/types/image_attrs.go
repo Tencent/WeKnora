@@ -183,9 +183,9 @@ var ImageAttrRegistry = []AttrSpec{
 // ImageAttrSchemaVersion marks the shape and the semantics of
 // ImageAttrs.Attrs. It is attrs/2 since an unobserved attribute stopped being
 // written as a conservative default: an absent key now means "the observation
-// did not answer for this attribute" and is read through the OCR policy's
-// OnUnobserved clause, so a consumer of stored observations must not assume
-// every registered key is present. Bump it when an attribute's semantics
+// did not answer for this attribute" and is read through the pipeline's
+// ocr_on_unobserved setting, so a consumer of stored observations must not
+// assume every registered key is present. Bump it when an attribute's semantics
 // change, not when one is merely added.
 const ImageAttrSchemaVersion = "attrs/2"
 
@@ -286,8 +286,13 @@ func (a ImageAttrs) DataVisual() bool {
 
 // ImageActionsConfig is the attribute -> work policy. It is keyed by downstream
 // action (today only "ocr"); each action lists the attribute conditions that
-// turn it on, plus the conservative value to use when the driving attribute was
-// not observed.
+// turn it on.
+//
+// What to do when a driving attribute was NOT observed is not part of this table
+// — that is a scheduling decision and lives with the pipeline that does the
+// scheduling, as its own `ocr_on_unobserved` setting. The consequence for a
+// stored config is deliberate: a `on_unobserved` written into this table before
+// that move is ignored rather than honoured from two places.
 type ImageActionsConfig struct {
 	OCR ImageOCRAction `json:"ocr"`
 }
@@ -297,14 +302,6 @@ type ImageOCRAction struct {
 	// On is the list of attribute conditions that enable OCR. Matching any one
 	// turns OCR on.
 	On []ImageAttrCondition `json:"on"`
-	// OnUnobserved is the OCR decision used when the observation does not
-	// answer for one of the attributes the policy reads — the attribute is
-	// absent because the model skipped the line, or because the value it wrote
-	// was not one of the allowed ones. The default is true: an incomplete
-	// observation keeps extracting, so a missed block of text costs one extra
-	// call instead of being lost. Turn it off only with a model reliable enough
-	// to answer every attribute line.
-	OnUnobserved bool `json:"on_unobserved"`
 }
 
 // ImageAttrCondition is one attribute match: attr Prop equals Is.
@@ -313,12 +310,11 @@ type ImageAttrCondition struct {
 	Is   string `json:"is"`
 }
 
-// DefaultImageActions is the built-in attribute -> work table. It is deliberately
-// conservative: OCR runs when contain.text is "block", or contain.data_visual is
-// true, or the observation did not answer for an attribute the policy reads (the
-// OnUnobserved clause). It is equivalent to the old class table: decorative /
-// logo / photo (text reliably absent or captured by the description) skip OCR;
-// text_screenshot / table / chart / other run OCR.
+// DefaultImageActions is the built-in attribute -> work table: OCR runs when
+// contain.text is "block" or contain.data_visual is true. It is equivalent to
+// the old class table: decorative / logo / photo (text reliably absent or
+// captured by the description) skip OCR; text_screenshot / table / chart /
+// other run OCR.
 func DefaultImageActions() ImageActionsConfig {
 	return ImageActionsConfig{
 		OCR: ImageOCRAction{
@@ -326,7 +322,6 @@ func DefaultImageActions() ImageActionsConfig {
 				{Prop: "contain.text", Is: "block"},
 				{Prop: "contain.data_visual", Is: "true"},
 			},
-			OnUnobserved: true,
 		},
 	}
 }
@@ -388,9 +383,8 @@ type AttrObservation struct {
 // line, or because the value it wrote is not one of the allowed ones — is
 // simply absent from Attrs. Nothing is invented in its place: writing a
 // conservative default there would make an unanswered question look like a
-// confident "block", and would leave the OCR policy's OnUnobserved clause
-// unreachable. The absence is what DecideOCR turns into the conservative
-// decision instead.
+// confident "block", and would leave the ocr_on_unobserved setting unreachable.
+// The absence is what DecideOCR turns into the conservative decision instead.
 func ParseImageAttrsResponse(raw string) (AttrObservation, bool) {
 	obs := AttrObservation{
 		Attrs: ImageAttrs{
@@ -406,8 +400,8 @@ func ParseImageAttrsResponse(raw string) (AttrObservation, bool) {
 		if key, val, ok := cutAttrLine(trimmed); ok {
 			if spec, found := lookupAttrSpec(key); found {
 				// Unusable values are dropped rather than defaulted, so the
-				// attribute stays absent and the policy's OnUnobserved clause
-				// decides what to do about it.
+				// attribute stays absent and the pipeline's ocr_on_unobserved
+				// setting decides what to do about it.
 				if v, usable := coerceAttrValue(spec, val); usable {
 					obs.Attrs.Attrs[spec.Name] = v
 					seen[spec.Name] = true

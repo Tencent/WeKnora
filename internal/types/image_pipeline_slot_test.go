@@ -14,6 +14,7 @@ func TestSlotKeyDoesNotDoubleThePipelineID(t *testing.T) {
 	}{
 		{"smartocr", "ocr_on_unobserved", "smartocr.ocr_on_unobserved"},
 		{"smartocr", "preprocess.mode", "smartocr.preprocess.mode"},
+		{"smartocr", "ocr.thinking_enabled", "smartocr.ocr.thinking_enabled"},
 		{"default", "caption_enabled", "default.caption_enabled"},
 		// Already namespaced: left alone.
 		{"smartocr", "smartocr.ocr_on_unobserved", "smartocr.ocr_on_unobserved"},
@@ -27,33 +28,36 @@ func TestSlotKeyDoesNotDoubleThePipelineID(t *testing.T) {
 	}
 }
 
-// TestImagePipelineParamReadsSlotThenBareKey pins the lookup order the whole
-// migration rests on: the running pipeline's slot first, then the bare key a
-// config written before the slots existed carries. The slot winning is what lets
-// an operator override a setting without the old spelling coming back to life.
-func TestImagePipelineParamReadsSlotThenBareKey(t *testing.T) {
+// TestImagePipelineParamReadsOnlyTheSlot pins the lookup as the single-home
+// rule it is: a pipeline reads its own slot, another pipeline's slot says
+// nothing to it, and a key spelled without a slot is not a second home a stored
+// value could hide in. "Not found" is the answer that lets the caller fall back
+// to the default the field declares — the same answer the panel draws.
+func TestImagePipelineParamReadsOnlyTheSlot(t *testing.T) {
 	params := map[string]any{
-		"caption_enabled":             true,  // written before namespacing
-		"default.caption_enabled":     false, // written since
+		"default.caption_enabled":     false,
 		"smartocr.ocr_on_unobserved":  true,
 		"smartocr.preprocess.mode":    "always",
 		"smartocr.ocr_enabled":        nil, // stored as nothing: not a value
 		"an_unrelated_pipeline.value": "x",
+		"caption_enabled":             true, // no slot: not a home
 	}
 
 	if v, ok := ImagePipelineParam(params, "default", "caption_enabled"); !ok || v != false {
-		t.Errorf("the slot must win over the bare key: got (%v, %v)", v, ok)
+		t.Errorf("the pipeline's own slot did not answer: (%v, %v)", v, ok)
 	}
-	// Another pipeline's slot says nothing to this one, and neither does a key
-	// spelled for somebody else.
+	// Another pipeline's slot says nothing to this one.
 	if v, ok := ImagePipelineParam(params, "default", "ocr_on_unobserved"); ok {
 		t.Errorf("a pipeline read another pipeline's setting: %v", v)
 	}
 	if v, ok := ImagePipelineParam(params, "smartocr", "ocr_on_unobserved"); !ok || v != true {
 		t.Errorf("the pipeline's own slot did not answer: (%v, %v)", v, ok)
 	}
-	// A nil value is "nothing stored"; falling through to the bare key is the
-	// behaviour a caller depends on to reach a config written before slots.
+	// A key with no slot is not a value, even when the map carries it.
+	if v, ok := ImagePipelineParam(params, "smartocr", "caption_enabled"); ok {
+		t.Errorf("a slotless key answered as %v", v)
+	}
+	// A nil slot entry is "nothing stored", not a stored nothing.
 	if v, ok := ImagePipelineParam(params, "smartocr", "ocr_enabled"); ok {
 		t.Errorf("a nil slot entry answered as %v", v)
 	}
@@ -62,64 +66,5 @@ func TestImagePipelineParamReadsSlotThenBareKey(t *testing.T) {
 	}
 	if _, ok := ImagePipelineParam(nil, "default", "caption_enabled"); ok {
 		t.Error("a nil params map reported a value")
-	}
-}
-
-// TestResolvePreprocessModePrefersTheSlot is the round trip of the setting that
-// moved into the pipeline slot: a value the panel wrote under the running
-// pipeline's slot is what the run reads, the knowledge base field it lived in
-// before is the fallback, and nothing usable in either means auto.
-func TestResolvePreprocessModePrefersTheSlot(t *testing.T) {
-	cases := []struct {
-		name string
-		cfg  ImageProcessingConfig
-		want string
-	}{
-		{
-			"the slot answers for the pipeline that runs",
-			ImageProcessingConfig{
-				ImagePipelineID:     string(ImagePipelineSmartOCR),
-				PreprocessMode:      PreprocessModeOff,
-				ImagePipelineParams: map[string]any{"smartocr.preprocess.mode": PreprocessModeAlways},
-			},
-			PreprocessModeAlways,
-		},
-		{
-			"another pipeline's slot is not this run's setting",
-			ImageProcessingConfig{
-				ImagePipelineID:     string(ImagePipelineSmartOCR),
-				ImagePipelineParams: map[string]any{"default.preprocess.mode": PreprocessModeOff},
-			},
-			PreprocessModeAuto,
-		},
-		{
-			"a config written before the slot falls back to the field",
-			ImageProcessingConfig{
-				ImagePipelineID: string(ImagePipelineSmartOCR),
-				PreprocessMode:  PreprocessModeOff,
-			},
-			PreprocessModeOff,
-		},
-		{
-			"nothing stored anywhere means auto, the mode the panel offers first",
-			ImageProcessingConfig{ImagePipelineID: string(ImagePipelineSmartOCR)},
-			PreprocessModeAuto,
-		},
-		{
-			"a value the run would not understand means auto",
-			ImageProcessingConfig{
-				ImagePipelineID:     string(ImagePipelineSmartOCR),
-				ImagePipelineParams: map[string]any{"smartocr.preprocess.mode": "sometimes"},
-			},
-			PreprocessModeAuto,
-		},
-	}
-	for _, tc := range cases {
-		if got := ResolvePreprocessMode(&tc.cfg); got != tc.want {
-			t.Errorf("%s: ResolvePreprocessMode = %q, want %q", tc.name, got, tc.want)
-		}
-	}
-	if got := ResolvePreprocessMode(nil); got != PreprocessModeAuto {
-		t.Errorf("a nil config resolved to %q, want auto", got)
 	}
 }

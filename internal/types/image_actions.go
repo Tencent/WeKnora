@@ -75,12 +75,10 @@ type ImageActionSpec struct {
 	Fields []ImageFieldDef
 }
 
-// Bare names of the tunables the shared actions declare. The action id is added
-// by ActionParam, so the same name in two actions stays two distinct keys.
-const (
-	ImageActionParamThinking     = "thinking_enabled"
-	ImageActionParamOnUnobserved = "on_unobserved"
-)
+// ImageActionParamThinking is the bare name of the thinking switch every shared
+// action declares. The action id is added by ActionParam, so the same name in two
+// actions stays two distinct keys.
+const ImageActionParamThinking = "thinking_enabled"
 
 // ActionParam namespaces one of an action's own tunables: the caption action
 // declares a "thinking" switch and the key it is stored and traced under is

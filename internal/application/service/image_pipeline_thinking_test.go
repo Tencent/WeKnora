@@ -66,7 +66,12 @@ func runThinkingPipeline(t *testing.T, attrsEnabled bool, params map[string]any)
 		t.Fatalf("no pipeline registered for attrsEnabled=%v", attrsEnabled)
 	}
 	r := &runContext{
-		payload:    payload,
+		payload: payload,
+		// The pipeline id is what namespaces every param lookup; leaving it
+		// empty would make the run read bare keys nothing writes and fall back
+		// to the declared defaults, so a test about a stored switch would be
+		// asserting that the default is off.
+		pipelineID: string(pipeline.ID()),
 		params:     params,
 		declared:   pipeline.Fields(),
 		model:      model,
@@ -88,8 +93,8 @@ func runThinkingPipeline(t *testing.T, attrsEnabled bool, params map[string]any)
 // thinking is off unless somebody asked for it, per action.
 func TestThinkingDefaultsToOff(t *testing.T) {
 	r, model := runThinkingPipeline(t, false, map[string]any{
-		captionFieldKeyCaptionEnabled: true,
-		captionFieldKeyOCREnabled:     true,
+		manualCaptionKey: true,
+		manualOCRKey:     true,
 	})
 	if len(model.calls) != 2 {
 		t.Fatalf("VLM calls = %d (%v), want 2", len(model.calls), model.calls)
@@ -114,9 +119,9 @@ func TestThinkingDefaultsToOff(t *testing.T) {
 // the model, and the switch is honoured for exactly the action that asked.
 func TestThinkingFollowsTheStoredSwitch(t *testing.T) {
 	r, model := runThinkingPipeline(t, false, map[string]any{
-		captionFieldKeyCaptionEnabled: true,
-		captionFieldKeyOCREnabled:     true,
-		captionThinkingField.Key:      true,
+		manualCaptionKey:      true,
+		manualOCRKey:          true,
+		manualCaptionThinkKey: true,
 	})
 	if len(model.calls) != 2 {
 		t.Fatalf("VLM calls = %d (%v), want 2", len(model.calls), model.calls)
@@ -142,14 +147,15 @@ func TestThinkingFollowsTheStoredSwitch(t *testing.T) {
 // records the same action keys.
 func TestObservationPipelineThinkingKeys(t *testing.T) {
 	r, model := runThinkingPipeline(t, true, map[string]any{
-		keyObservationCaptionEnabled: true,
+		observeCaptionKey: true,
 		// Stale keys from before the action-level unification: present in a
 		// stored config, honoured by nothing.
 		"describe_thinking": true,
 		"text_thinking":     true,
-		// The action-level switches this pipeline declares.
-		observationThinkingField.Key: false,
-		ocrThinkingField.Key:         true,
+		// The action-level switches this pipeline declares, stored the way the
+		// panel stores them: under the slot of the pipeline that offers them.
+		types.SlotKey(string(types.ImagePipelineSmartOCR), observationThinkingField.Key): false,
+		types.SlotKey(string(types.ImagePipelineSmartOCR), ocrThinkingField.Key):         true,
 	})
 	if len(model.calls) != 2 {
 		t.Fatalf("VLM calls = %d (%v), want 2", len(model.calls), model.calls)

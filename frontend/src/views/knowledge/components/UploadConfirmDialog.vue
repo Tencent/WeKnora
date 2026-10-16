@@ -682,10 +682,6 @@ import KbUploadSourceDropdown from './KbUploadSourceDropdown.vue'
 import ImagePipelineSettings from '../ImagePipelineSettings.vue'
 import {
   buildPipelineFields,
-  normalizePreprocessMode,
-  pipelineParamKey,
-  pipelineParamsFromKb,
-  PREPROCESS_MODE_KEY,
   resolveImagePipelineFromKb,
   normalizeImagePipelineId,
   IMAGE_PIPELINE_DEFAULT,
@@ -1292,10 +1288,11 @@ function initFromKbInfo(kb: any) {
       customInstructions: kb.vlm_config?.custom_instructions || '',
     },
     // 默认跟随知识库的图片解析方案；用户可对本次任务单独覆盖。旧库（没有
-    // image_pipeline 的）按与后端一致的规则解析出一个具体方案；预处理开关等
-    // 旧字段折进所选方案的槽位，否则面板显示的是默认值而不是知识库的取值。
+    // image_pipeline 的）按与后端一致的规则解析出一个具体方案。方案的设置就
+    // 存在它自己的槽位里，原样带过来即可：面板读槽位，运行时也读槽位。
     imagePipeline: resolveImagePipelineFromKb(kb),
-    imagePipelineParams: pipelineParamsFromKb(kb),
+    imagePipelineParams:
+      (kb.image_processing_config?.image_pipeline_params as Record<string, unknown>) ?? {},
     imageVectorEnabled: !!kb.image_processing_config?.image_vector_enabled,
     imageActions: mergeImageActions(kb.image_processing_config?.image_actions),
     asrConfig: {
@@ -1354,8 +1351,10 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
       ocr: {
         // The KB's own conditions (mergeImageActions keeps a custom list), so
         // an upload never swaps an API-customised table for the default one.
+        // The table is the conditions and nothing else: what to do about an
+        // unobserved image is a setting of the pipeline, and it travels in
+        // image_pipeline_params with the rest of that pipeline's settings.
         on: state.imageActions.ocr.on,
-        on_unobserved: state.imageActions.ocr.on_unobserved,
       },
     },
     vlm_config: {
@@ -1438,15 +1437,6 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
     const pipeline = o.image_attrs_enabled ? IMAGE_PIPELINE_SMARTOCR : IMAGE_PIPELINE_DEFAULT
     if (pipeline !== s.imagePipeline) s.imagePipelineParams = {}
     s.imagePipeline = pipeline
-  }
-  // 存量覆盖里的预处理开关存在顶层（它是槽位出现之前的位置），折叠进所选方案
-  // 的槽位，控件才显示这次任务真正会用的取值。
-  if (o.preprocess_mode != null && s.imagePipeline) {
-    s.imagePipelineParams = {
-      ...s.imagePipelineParams,
-      [pipelineParamKey(s.imagePipeline, PREPROCESS_MODE_KEY)]:
-        normalizePreprocessMode(o.preprocess_mode),
-    }
   }
   if (o.image_vector_enabled != null) s.imageVectorEnabled = o.image_vector_enabled
   if (o.image_actions) s.imageActions = mergeImageActions(o.image_actions)

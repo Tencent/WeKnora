@@ -82,6 +82,18 @@ func runImagePipeline(
 	return r, model
 }
 
+// The switch keys as they are stored: each under the slot of the pipeline that
+// declares it (types.SlotKey). Tests build configs the way the settings panel
+// builds them — a bare key is a spelling no client produces, so a test that used
+// one was asserting against a config that cannot be saved.
+var (
+	manualCaptionKey      = types.SlotKey(string(types.ImagePipelineDefault), captionFieldKeyCaptionEnabled)
+	manualOCRKey          = types.SlotKey(string(types.ImagePipelineDefault), captionFieldKeyOCREnabled)
+	manualCaptionThinkKey = types.SlotKey(string(types.ImagePipelineDefault), captionThinkingField.Key)
+	manualOCRThinkKey     = types.SlotKey(string(types.ImagePipelineDefault), ocrThinkingField.Key)
+	observeCaptionKey     = types.SlotKey(string(types.ImagePipelineSmartOCR), keyObservationCaptionEnabled)
+)
+
 // TestImagePipelineActionSequences pins how the private switches of each
 // pipeline map onto the actions that run. The sequence is the per-image answer to
 // "what did this image go through", so it is what a reader of a trace replays
@@ -156,16 +168,17 @@ func TestImagePipelineActionSequences(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			params := map[string]any{
-				keyObservationCaptionEnabled:  tc.caption,
-				captionFieldKeyCaptionEnabled: tc.caption,
-				captionFieldKeyOCREnabled:     tc.ocr,
+				observeCaptionKey: tc.caption,
+				manualCaptionKey:  tc.caption,
+				manualOCRKey:      tc.ocr,
 			}
 			if !tc.attrs {
-				// The observed pipeline ignores the default pipeline's keys and
-				// vice versa; each row only sets the ones its pipeline declares.
+				// Each pipeline reads its own slot and nothing else, so a row
+				// sets the keys its pipeline declares and the other pipeline's
+				// keys cannot leak in.
 				params = map[string]any{
-					captionFieldKeyCaptionEnabled: tc.caption,
-					captionFieldKeyOCREnabled:     tc.ocr,
+					manualCaptionKey: tc.caption,
+					manualOCRKey:     tc.ocr,
 				}
 			}
 			var r *runContext
@@ -270,7 +283,10 @@ func TestListImagePipelinesMatchesRegistration(t *testing.T) {
 // an unset map would otherwise silently mean "off" for every switch.
 func TestParamFallsBackToDeclaredDefault(t *testing.T) {
 	pipeline := imagePipelineRegistry[types.ImagePipelineDefault]
-	r := &runContext{out: types.JSONMap{}, imageInfo: &types.ImageInfo{}, declared: pipeline.Fields()}
+	r := &runContext{
+		out: types.JSONMap{}, imageInfo: &types.ImageInfo{},
+		pipelineID: string(types.ImagePipelineDefault), declared: pipeline.Fields(),
+	}
 	if got := r.BoolParam(captionFieldKeyOCREnabled); got != true {
 		t.Errorf("BoolParam(%q) with no params = %v, want true (the declared default)",
 			captionFieldKeyOCREnabled, got)
@@ -295,11 +311,16 @@ func TestObservationPipelineDeclaresNoActionControls(t *testing.T) {
 				field.Key)
 		}
 	}
-	r := &runContext{out: types.JSONMap{}, imageInfo: &types.ImageInfo{}, declared: pipeline.Fields()}
+	r := &runContext{
+		out: types.JSONMap{}, imageInfo: &types.ImageInfo{},
+		pipelineID: string(types.ImagePipelineSmartOCR), declared: pipeline.Fields(),
+	}
 	if !r.BoolParamOr(smartFieldKeyOCROnUnobserved, true) {
 		t.Error("the fallback clause with no params must default to true")
 	}
-	r.params = map[string]any{smartFieldKeyOCROnUnobserved: false}
+	r.params = map[string]any{
+		types.SlotKey(string(types.ImagePipelineSmartOCR), smartFieldKeyOCROnUnobserved): false,
+	}
 	if r.BoolParamOr(smartFieldKeyOCROnUnobserved, true) {
 		t.Error("an explicit clause=false must override the pinned default")
 	}
@@ -383,9 +404,9 @@ func TestSmartPipelineDeclaresNoRules(t *testing.T) {
 // must not leak into the trace snapshot nor change the run.
 func TestUnknownPipelineFieldIsIgnored(t *testing.T) {
 	r, model := runOneImagePipeline(t, false, map[string]any{
-		captionFieldKeyCaptionEnabled: true,
-		captionFieldKeyOCREnabled:     true,
-		"removed_by_a_later_release":  true,
+		manualCaptionKey:             true,
+		manualOCRKey:                 true,
+		"removed_by_a_later_release": true,
 	})
 	if len(model.prompts) != 2 {
 		t.Fatalf("VLM calls = %d (%v), want 2", len(model.prompts), model.prompts)
@@ -400,7 +421,7 @@ func TestUnknownPipelineFieldIsIgnored(t *testing.T) {
 // model request, and the standalone caption action is never scheduled.
 func TestObservationCaptionSharesOneCall(t *testing.T) {
 	r, model := runImagePipeline(t, true, map[string]any{
-		keyObservationCaptionEnabled: true,
+		observeCaptionKey: true,
 	}, policyDecliningOCR())
 	if len(model.prompts) != 1 {
 		t.Fatalf("VLM calls = %d (%v), want 1 — observation and caption must share a request",
@@ -425,7 +446,7 @@ func TestObservationCaptionSharesOneCall(t *testing.T) {
 // the attribute policy, which is the case image_info alone cannot explain.
 func TestObservationPipelineTrace(t *testing.T) {
 	r, _ := runImagePipeline(t, true, map[string]any{
-		keyObservationCaptionEnabled: true,
+		observeCaptionKey: true,
 	}, policyDecliningOCR())
 	if got := r.out[keyOCRResult]; got != "skipped_attr_policy" {
 		t.Errorf(`out[keyOCRResult] = %v, want "skipped_attr_policy"`, got)
@@ -439,8 +460,8 @@ func TestObservationPipelineTrace(t *testing.T) {
 // field is invented, because there is nothing to decide from.
 func TestDefaultPipelineTrace(t *testing.T) {
 	r, _ := runOneImagePipeline(t, false, map[string]any{
-		captionFieldKeyCaptionEnabled: true,
-		captionFieldKeyOCREnabled:     true,
+		manualCaptionKey: true,
+		manualOCRKey:     true,
 	})
 	if r.imageInfo.Caption == "" {
 		t.Error("caption slot is empty after the caption action")
@@ -521,26 +542,28 @@ func policyDecliningOCR() types.ImageActionsConfig {
 	}}
 }
 
-// TestParamPrefersPipelineNamespace pins the future-proofing in Param: a
-// pipeline-private key stored under the running pipeline's namespace
-// ("<pipeline>.<key>") wins over a bare key, and another pipeline never reads
-// a namespace that is not its own. Writes are bare today — no two pipelines
-// declare the same private key — so this only guards the day one appears.
-func TestParamPrefersPipelineNamespace(t *testing.T) {
+// TestParamReadsOnlyItsOwnNamespace pins the isolation Param is built on: the
+// switches a pipeline reads are the ones stored under its own slot, another
+// pipeline's slot says nothing to it, and the declared default answers when the
+// slot is empty. A key stored without a slot is not a second home — nothing
+// writes one, and reading it would let a stored value mean two different things
+// depending on which pipeline happened to run.
+func TestParamReadsOnlyItsOwnNamespace(t *testing.T) {
 	r := &runContext{
 		out:        types.JSONMap{},
 		imageInfo:  &types.ImageInfo{},
-		pipelineID: "smartocr",
+		declared:   imagePipelineRegistry[types.ImagePipelineSmartOCR].Fields(),
+		pipelineID: string(types.ImagePipelineSmartOCR),
 		params: map[string]any{
-			"smartocr.ocr_on_unobserved": false,
-			"ocr_on_unobserved":          true,
+			types.SlotKey(string(types.ImagePipelineSmartOCR), smartFieldKeyOCROnUnobserved): false,
+			"ocr_on_unobserved": true,
 		},
 	}
 	if got := r.BoolParamOr(smartFieldKeyOCROnUnobserved, true); got != false {
-		t.Errorf("the namespaced key lost to the bare legacy key: got %v, want false", got)
+		t.Errorf("the pipeline's own slot was not read: got %v, want false", got)
 	}
-	r.pipelineID = "default"
+	r.pipelineID = string(types.ImagePipelineDefault)
 	if got := r.BoolParamOr(smartFieldKeyOCROnUnobserved, true); got != true {
-		t.Errorf("another pipeline read smartocr's namespace: got %v, want true (bare legacy)", got)
+		t.Errorf("another pipeline read smartocr's slot: got %v, want true (declared default)", got)
 	}
 }

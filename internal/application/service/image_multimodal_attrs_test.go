@@ -276,31 +276,27 @@ func TestDecideOCR(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := DecideOCR(tc.attrs, def); got != tc.want {
+			if got := DecideOCR(tc.attrs, def, true); got != tc.want {
 				t.Errorf("DecideOCR = %v, want %v", got, tc.want)
 			}
 		})
 	}
 
-	// A policy that does not OCR on an unobserved attribute flips the
-	// conservative path for both of the incomplete cases above.
-	strict := types.ImageActionsConfig{
-		OCR: types.ImageOCRAction{
-			On: []types.ImageAttrCondition{
-				{Prop: "contain.text", Is: "block"},
-				{Prop: "contain.data_visual", Is: "true"},
-			},
-			OnUnobserved: false,
-		},
-	}
+	// The same table with the clause turned off flips the conservative path for
+	// all three incomplete cases above: the clause is an argument, not part of
+	// the policy.
 	for _, attrs := range []types.ImageAttrs{
 		{Attrs: map[string]any{"contain.data_visual": false}},
 		{Attrs: map[string]any{"contain.text": "none"}},
 		{},
 	} {
-		if DecideOCR(attrs, strict) {
-			t.Errorf("with OnUnobserved=false an incomplete observation (%v) must not trigger OCR", attrs.Attrs)
+		if DecideOCR(attrs, def, false) {
+			t.Errorf("with the clause off an incomplete observation (%v) must not trigger OCR", attrs.Attrs)
 		}
+	}
+	// A condition that matches still decides on its own, clause or no clause.
+	if !DecideOCR(types.ImageAttrs{Attrs: map[string]any{"contain.text": "block"}}, def, false) {
+		t.Error("an observed block of text must run OCR even with the clause off")
 	}
 }
 
@@ -333,7 +329,7 @@ func TestProcessImageObservesAndDescribes(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			keyObservationCaptionEnabled: true,
+			observeCaptionKey: true,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
@@ -383,9 +379,10 @@ func TestProcessImageObservesAndDescribes(t *testing.T) {
 // model answers in prose and ignores the attribute protocol (e.g. a user
 // custom instruction derails the format), the pipeline must flag
 // observation_failed in the trace instead of passing an empty attribute table
-// off as a confident read. Nothing is invented to fill the table, so the OCR
-// policy falls back to its conservative OnUnobserved clause (OCR on) and the
-// image is not lost — only the observation is recorded as having failed.
+// off as a confident read. Nothing is invented to fill the table, so the
+// pipeline's ocr_on_unobserved setting carries the decision (OCR on, its
+// declared default) and the image is not lost — only the observation is
+// recorded as having failed.
 func TestProcessImageMarksObservationFailed(t *testing.T) {
 	t.Parallel()
 
@@ -409,7 +406,7 @@ func TestProcessImageMarksObservationFailed(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			keyObservationCaptionEnabled: true,
+			observeCaptionKey: true,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
@@ -464,7 +461,7 @@ func TestProcessImageSkipsOCRForQuietAttr(t *testing.T) {
 		ChunkID:         "chunk-a",
 		// The ceiling stays on; the observation is what vetoes.
 		ImagePipelineParams: map[string]any{
-			keyObservationCaptionEnabled: true,
+			observeCaptionKey: true,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
@@ -516,7 +513,7 @@ func TestProcessImageKeepsAttrsButDropsCaptionWhenCaptionsAreOff(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			keyObservationCaptionEnabled: false,
+			observeCaptionKey: false,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
@@ -576,7 +573,7 @@ func TestProcessImageProseAnswerIsStillCaptionedAndOCRed(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			keyObservationCaptionEnabled: true,
+			observeCaptionKey: true,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
@@ -641,7 +638,7 @@ func TestProcessImageLabelOnlyAnswerKeepsAttrsWithoutCaption(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			keyObservationCaptionEnabled: true,
+			observeCaptionKey: true,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
@@ -694,8 +691,8 @@ func TestProcessImageCaptionOCRPipeline(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			captionFieldKeyCaptionEnabled: true,
-			captionFieldKeyOCREnabled:     true,
+			manualCaptionKey: true,
+			manualOCRKey:     true,
 		},
 		ImageAttrsEnabled: false,
 		// An action table is present but must be ignored: caption+OCR mode has
@@ -744,7 +741,7 @@ func TestProcessImageReturnsUnreadableImageError(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			keyObservationCaptionEnabled: true,
+			observeCaptionKey: true,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
