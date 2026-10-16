@@ -64,12 +64,13 @@ async function undo() {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 560px;
+  box-sizing: border-box;
+  width: 360px;
+  max-width: 100%;
   margin-top: 8px;
-  padding: 12px 14px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: var(--td-radius-large);
-  background: var(--td-bg-color-container);
+  padding: 8px 10px 10px 8px;
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-secondarycontainer);
   cursor: default;
 }
 
@@ -85,12 +86,12 @@ async function undo() {
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--td-radius-medium);
-  background: var(--td-brand-color-light);
+  width: 36px;
+  height: 36px;
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-container);
   color: var(--td-brand-color);
-  font-size: var(--app-text-xl);
+  font-size: 18px;
 }
 
 .page-edit-card__heading {
@@ -113,9 +114,9 @@ async function undo() {
 
 .page-edit-card__title {
   color: var(--td-text-color-primary);
-  font-size: var(--app-text-sm);
-  font-weight: 600;
-  line-height: 22px;
+  font-size: var(--app-text-md);
+  font-weight: 500;
+  line-height: 1.35;
 }
 
 .page-edit-card__action {
@@ -127,7 +128,7 @@ async function undo() {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin: 0;
+  margin: 0 0 0 2px;
   padding: 0;
   list-style: none;
   font-size: var(--app-text-sm);
@@ -160,7 +161,8 @@ async function undo() {
   align-items: flex-start;
   gap: 4px;
   padding-top: 8px;
-  border-top: 1px dashed var(--td-component-stroke);
+  margin-left: 2px;
+  border-top: 1px solid var(--td-component-stroke);
   color: var(--td-text-color-placeholder);
   font-size: var(--app-text-xs, 12px);
   line-height: 18px;

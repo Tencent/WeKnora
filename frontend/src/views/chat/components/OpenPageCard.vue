@@ -1,34 +1,30 @@
 <template>
   <div class="open-page-card" @click.stop @keydown.stop>
-    <div class="open-page-card__header">
+    <button type="button" class="open-page-card__main" :disabled="!location" :title="actionLabel" @click="open">
       <span class="open-page-card__icon" aria-hidden="true"><t-icon :name="icon" /></span>
-      <div class="open-page-card__heading">
-        <div v-if="link.navigated" class="open-page-card__eyebrow">
-          {{ t('agentStream.openPage.opened') }} · {{ link.label }}
-        </div>
-        <div v-else-if="link.detail" class="open-page-card__eyebrow">{{ link.label }}</div>
-        <div class="open-page-card__title">{{ link.detail || link.label }}</div>
-      </div>
-      <t-button v-if="returnPath" class="open-page-card__action" size="small" variant="text"
-        @click="goBack">
-        <template #icon><t-icon name="rollback" /></template>
-        {{ t('agentStream.openPage.back') }}
-      </t-button>
-      <t-button class="open-page-card__action" size="small" theme="primary" variant="outline"
-        :disabled="!location" @click="open">
-        {{ draft ? t('agentStream.openPage.openForm') : t('agentStream.openPage.open') }}
-        <template #suffix><t-icon name="chevron-right" /></template>
-      </t-button>
-    </div>
-    <p v-if="link.note" class="open-page-card__note">{{ link.note }}</p>
-    <div v-if="endpoint || draft" class="open-page-card__footer">
-      <span v-if="endpoint" class="open-page-card__endpoint">
+      <span class="open-page-card__body">
+        <span class="open-page-card__title">{{ link.detail || link.label }}</span>
+        <span v-if="meta" class="open-page-card__meta">
+          <t-icon v-if="link.navigated" name="check-circle-filled" class="open-page-card__opened" />{{ meta }}
+        </span>
+      </span>
+      <span class="open-page-card__go">
+        <span v-if="draft" class="open-page-card__go-label">{{ actionLabel }}</span>
+        <t-icon name="chevron-right" />
+      </span>
+    </button>
+    <div v-if="link.note || endpoint || draft || returnPath" class="open-page-card__extra">
+      <p v-if="link.note" class="open-page-card__note">{{ link.note }}</p>
+      <div v-if="endpoint" class="open-page-card__endpoint">
         <span class="open-page-card__endpoint-label">{{ t('agentStream.openPage.endpoint') }}</span>
         <code>{{ endpoint }}</code>
-      </span>
-      <span v-if="draft" class="open-page-card__hint">
+      </div>
+      <div v-if="draft" class="open-page-card__hint">
         <t-icon name="info-circle" />{{ t('agentStream.openPage.draftHint') }}
-      </span>
+      </div>
+      <button v-if="returnPath" type="button" class="open-page-card__back" @click="goBack">
+        <t-icon name="rollback" />{{ t('agentStream.openPage.back') }}
+      </button>
     </div>
   </div>
 </template>
@@ -56,6 +52,13 @@ const location = computed(() => pageLinkLocation(props.link))
 const draft = computed(() => pageLinkDraft(props.link))
 const endpoint = computed(() => pageLinkEndpoint(props.link))
 const returnPath = computed(() => pageLinkReturnPath(props.link))
+const actionLabel = computed(() => draft.value ? t('agentStream.openPage.openForm') : t('agentStream.openPage.open'))
+
+const meta = computed(() => {
+  const parent = props.link.detail ? props.link.label : ''
+  if (!props.link.navigated) return parent
+  return [t('agentStream.openPage.opened'), parent].filter(Boolean).join(' · ')
+})
 
 const icon = computed(() => {
   switch (props.link.page) {
@@ -86,26 +89,53 @@ function goBack() {
 .open-page-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-width: 560px;
+  box-sizing: border-box;
+  width: 360px;
+  max-width: 100%;
   margin-top: 8px;
-  padding: 12px 14px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: var(--td-radius-large);
-  background: var(--td-bg-color-container);
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-secondarycontainer);
   cursor: default;
-  transition: border-color var(--app-motion-fast) ease;
-
-  &:hover {
-    border-color: var(--td-component-border);
-  }
 }
 
-.open-page-card__header {
+.open-page-card__main {
+  appearance: none;
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
   min-width: 0;
+  margin: 0;
+  padding: 8px 10px 8px 8px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  transition: background var(--app-motion-fast) ease;
+
+  &:hover:not(:disabled) {
+    background: var(--td-bg-color-secondarycontainer-hover);
+
+    .open-page-card__go {
+      color: var(--td-text-color-secondary);
+    }
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color-focus);
+    outline-offset: -2px;
+  }
+
+  &:disabled {
+    cursor: default;
+
+    .open-page-card__go {
+      visibility: hidden;
+    }
+  }
 }
 
 .open-page-card__icon {
@@ -113,75 +143,90 @@ function goBack() {
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--td-radius-medium);
-  background: var(--td-brand-color-light);
+  width: 36px;
+  height: 36px;
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-container);
   color: var(--td-brand-color);
-  font-size: var(--app-text-xl);
+  font-size: 18px;
 }
 
-.open-page-card__heading {
+.open-page-card__body {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-width: 0;
 }
 
-.open-page-card__eyebrow,
-.open-page-card__title {
+.open-page-card__title,
+.open-page-card__meta {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.open-page-card__eyebrow {
-  color: var(--td-text-color-placeholder);
-  font-size: var(--app-text-xs, 12px);
-  line-height: 18px;
-}
-
 .open-page-card__title {
   color: var(--td-text-color-primary);
-  font-size: var(--app-text-sm);
-  font-weight: 600;
-  line-height: 22px;
+  font-size: var(--app-text-md);
+  font-weight: 500;
+  line-height: 1.35;
 }
 
-.open-page-card__action {
+.open-page-card__meta {
+  margin-top: 2px;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-sm);
+  line-height: 1.3;
+}
+
+.open-page-card__opened {
+  margin-right: 4px;
+  color: var(--td-success-color);
+  vertical-align: -2px;
+}
+
+.open-page-card__go {
+  display: inline-flex;
   flex-shrink: 0;
-  border-radius: var(--td-radius-medium);
+  align-items: center;
+  gap: 2px;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-sm);
+  transition: color var(--app-motion-fast) ease;
+
+  .t-icon {
+    font-size: 16px;
+  }
+}
+
+.open-page-card__extra {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 10px;
+  padding: 8px 0 10px;
+  border-top: 1px solid var(--td-component-stroke);
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
 }
 
 .open-page-card__note {
   margin: 0;
   color: var(--td-text-color-secondary);
-  font-size: var(--app-text-sm);
-  line-height: 1.6;
   overflow-wrap: anywhere;
-}
-
-.open-page-card__footer {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--td-component-stroke);
-  font-size: var(--app-text-xs, 12px);
-  line-height: 18px;
 }
 
 .open-page-card__endpoint {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  color: var(--td-text-color-secondary);
+  align-items: baseline;
+  gap: 4px;
+  max-width: 100%;
+  color: var(--td-text-color-placeholder);
 
   code {
     min-width: 0;
-    padding: 1px 6px;
-    border-radius: var(--td-radius-small);
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-primary);
+    color: var(--td-text-color-secondary);
     font-family: var(--app-font-family-mono);
     overflow-wrap: anywhere;
   }
@@ -199,7 +244,25 @@ function goBack() {
 
   .t-icon {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: 3px;
+  }
+}
+
+.open-page-card__back {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: var(--td-text-color-placeholder);
+  cursor: pointer;
+  transition: color var(--app-motion-fast) ease;
+
+  &:hover {
+    color: var(--td-text-color-secondary);
   }
 }
 </style>
