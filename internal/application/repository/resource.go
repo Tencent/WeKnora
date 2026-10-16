@@ -62,6 +62,32 @@ func (r *resourceRepository) GetByTenantLocation(
 	return &resource, err
 }
 
+// GetActiveByContentHash resolves identical bytes already registered under any
+// physical location. The content hash is not unique — duplicates written before
+// this lookup existed may share it — so the oldest live row is returned to keep
+// the choice stable between calls.
+func (r *resourceRepository) GetActiveByContentHash(
+	ctx context.Context,
+	tenantID uint64,
+	contentHash string,
+) (*types.StoredResource, error) {
+	var resource types.StoredResource
+	err := r.db.WithContext(ctx).
+		Where(
+			"tenant_id = ? AND content_hash = ? AND content_hash <> '' "+
+				"AND state = ? AND deleted_at IS NULL",
+			tenantID,
+			contentHash,
+			types.ResourceStateActive,
+		).
+		Order("created_at ASC, id ASC").
+		First(&resource).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &resource, err
+}
+
 func (r *resourceRepository) MarkDeleted(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Model(&types.StoredResource{}).Where("id = ?", id).
 		Updates(map[string]interface{}{"state": types.ResourceStateDeleted, "deleted_at": time.Now()}).Error
