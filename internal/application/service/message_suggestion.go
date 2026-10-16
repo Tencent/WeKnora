@@ -17,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -254,7 +255,7 @@ func (s *messageSuggestionService) ValidateAttribution(
 	return nil
 }
 
-const hostContextQueryMarker = "[Host context]\n"
+const hostContextQueryMarker = utils.HostContextQueryMarker
 
 // queryMatchesSuggestionText reports whether query is the clicked suggestion.
 // Embed chat may prefix a host-context envelope. Context values may contain

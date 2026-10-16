@@ -17,7 +17,7 @@ import {
   stopEmbedSession,
 } from '@/api/embed'
 import { embedToast } from '@/utils/embedToast'
-import { buildQueryWithHostContext } from '@/utils/embedContext'
+import { buildQueryWithHostContext, stripHostContextEnvelope } from '@/utils/embedContext'
 import { fileToDataURI } from '@/utils/embedFile'
 import { useI18n } from 'vue-i18n'
 import { useChatStreamHandler, isPromptCard } from '@/composables/useChatStreamHandler'
@@ -78,7 +78,9 @@ export function useEmbedChatSession(options: {
     if (index <= 0) return ''
     const previous = messagesList[index - 1]
     if (previous && previous.role === 'user') {
-      return String(previous.content || '')
+      // History carries the host-context envelope the visitor never typed;
+      // surface the clean question to whatever derives from it downstream.
+      return stripHostContextEnvelope(String(previous.content || ''))
     }
     return ''
   }

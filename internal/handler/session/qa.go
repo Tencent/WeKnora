@@ -460,7 +460,13 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 
 	executionContext.LocalBrowserEnabled = request.LocalBrowserEnabled
 
-	// Build request context
+	// Build request context.
+	//
+	// query and userInput diverge for embed turns: the widget folds the
+	// host-injected context into the visitor's question, so modelQuery is what
+	// the model must read while userInput is the text a visitor actually typed.
+	// Storing the composed string would render internal fields (userId, page
+	// path) in the chat bubble and in conversation history.
 	reqCtx := &qaRequestContext{
 		ctx:         ctx,
 		c:           c,
@@ -468,7 +474,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		requestID:   requestID,
 		receivedAt:  receivedAt,
 		query:       modelQuery,
-		userInput:   request.Query,
+		userInput:   secutils.StripHostContextEnvelope(request.Query),
 		session:     session,
 		customAgent: customAgent,
 		assistantMessage: &types.Message{
