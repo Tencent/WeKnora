@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -324,11 +323,11 @@ func (c *MinerUReader) callFileParse(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return "", nil, nil, fmt.Errorf("MinerU API status %d: %s", resp.StatusCode, string(respBody))
+		preview := readErrorPreview(resp.Body)
+		return "", nil, nil, fmt.Errorf("MinerU API status %d: %s", resp.StatusCode, preview)
 	}
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := readCapped(resp.Body, maxResultResponseBytes)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("read response body: %w", err)
 	}
