@@ -19,6 +19,32 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
+const (
+	// defaultMessagesPageSize is the page size used when a client omits the
+	// limit or sends a non-positive one.
+	defaultMessagesPageSize = 20
+	// maxMessagesPageSize bounds the client-supplied page size of the message
+	// read endpoints. Without an upper bound a single request can ask for an
+	// arbitrarily large page; the search path additionally multiplies the
+	// forwarded value for a bounded over-fetch.
+	maxMessagesPageSize = 200
+)
+
+// clampMessagesPageSize bounds a client-supplied page size to
+// [1, maxMessagesPageSize], substituting defaultMessagesPageSize for
+// non-positive input. Callers must clamp at the edge: the repository only
+// guards `limit <= 0` upstream and GORM omits the LIMIT clause entirely for
+// negative values, so an unclamped -1 reads the whole table.
+func clampMessagesPageSize(limit int) int {
+	if limit < 1 {
+		return defaultMessagesPageSize
+	}
+	if limit > maxMessagesPageSize {
+		return maxMessagesPageSize
+	}
+	return limit
+}
+
 // MessageHandler handles HTTP requests related to messages within chat sessions
 // It provides endpoints for loading and managing message history
 type MessageHandler struct {
@@ -132,7 +158,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 
 	// Get path parameters and query parameters
 	sessionID := secutils.SanitizeForLog(c.Param("session_id"))
-	limit := secutils.SanitizeForLog(c.DefaultQuery("limit", "20"))
+	limit := secutils.SanitizeForLog(c.DefaultQuery("limit", strconv.Itoa(defaultMessagesPageSize)))
 	beforeTimeStr := secutils.SanitizeForLog(c.DefaultQuery("before_time", ""))
 
 	logger.Infof(ctx, "Loading messages params, session ID: %s, limit: %s, before time: %s",
@@ -145,12 +171,18 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 		return
 	}
 
-	// Parse limit parameter with fallback to default
+	// Parse limit parameter with fallback to default, then clamp it. A
+	// non-positive value must not reach the repository: GORM only emits a
+	// LIMIT clause for `limit >= 0`, so `limit=-1` would load the entire
+	// session history (and attach artifacts for every row) in one request.
 	limitInt, convErr := strconv.Atoi(limit)
 	if convErr != nil {
-		logger.Warnf(ctx, "Invalid limit value, using default value 20, input: %s", limit)
-		limitInt = 20
+		// Note: on out-of-range input Atoi returns the boundary value rather
+		// than zero, so the default has to be assigned explicitly here.
+		logger.Warnf(ctx, "Invalid limit value, using default value %d, input: %s", defaultMessagesPageSize, limit)
+		limitInt = defaultMessagesPageSize
 	}
+	limitInt = clampMessagesPageSize(limitInt)
 
 	// If no beforeTime is provided, retrieve the most recent messages
 	if beforeTimeStr == "" {
@@ -308,6 +340,14 @@ func (h *MessageHandler) SearchMessages(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Query content cannot be empty"))
 		return
 	}
+
+	// Clamp the requested page size before it reaches the service. The
+	// service later applies a bounded over-fetch (limit*3) to the keyword
+	// search so it has enough candidates to rank; that multiplier is
+	// intentional and is left untouched, so the SQL LIMIT is at most
+	// 3*maxMessagesPageSize. Without this clamp an unbounded request would
+	// inflate the query by the same factor.
+	request.Limit = clampMessagesPageSize(request.Limit)
 
 	params := &types.MessageSearchParams{
 		Query:      secutils.SanitizeForLog(request.Query),
