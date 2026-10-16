@@ -661,12 +661,6 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		return err
 	}
 
-	// One-time legacy upgrade (feishu deep adaptation): feishu/lark data
-	// sources predating the per-source parse_mode setting carry a
-	// resync_required marker stamped by migration 000122 (sqlite 000040).
-	// resyncRequired(config) below upgrades their next sync (even an
-	// incremental one) to a full pass and clears it on success.
-
 	// Parse configuration
 	config, err := ds.ParseConfig()
 	if err != nil {
@@ -1148,11 +1142,9 @@ func (s *DataSourceService) processSyncStreaming(
 
 	forceFull := payload.ForceFull || ds.SyncMode == types.SyncModeFull
 	if resyncRequired(config) {
-		// One-shot legacy upgrade (design §7): a data source tagged
-		// resync_required upgrades this sync — even a scheduled incremental one —
-		// to a full pass so existing documents re-ingest under the current
-		// parse mode. The marker is cleared only after the run succeeds below;
-		// a failure keeps it so the retry upgrades again from scratch.
+		// One-shot legacy upgrade (design §7). The marker is cleared only
+		// after the run succeeds below; a failure keeps it so the retry
+		// upgrades again from scratch.
 		forceFull = true
 	}
 	attempt, _ := asynq.GetRetryCount(ctx)

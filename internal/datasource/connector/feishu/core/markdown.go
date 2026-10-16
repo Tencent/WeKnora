@@ -97,7 +97,7 @@ func imageMarkerNonce(seed string) string {
 }
 
 // blocksToMarkdown renders a flat docx block array to Markdown, inlining
-// embedded spreadsheet/bitable tables (Task 5), collecting downloadable
+// embedded spreadsheet/bitable tables, collecting downloadable
 // attachments, and numbering image/board blocks as weknora-img://N markers.
 // docURL is the parent document's web URL used in non-whitelisted attachment
 // placeholders (empty → placeholder without link). client may be nil when the

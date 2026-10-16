@@ -56,11 +56,10 @@ func (c *Client) downloadBoardAsImage(ctx context.Context, boardToken string) ([
 
 // trimBoardImage crops near-uniform blank borders from a board export (PNG or
 // JPEG; anything undecodable or in another format returns unchanged). The
-// bottom-right pixel seeds the background color; border rows/columns entirely
-// within blankTolerance of it are trimmed, keeping trimMargin pixels around
-// the content. The background color is the majority of the four corner
-// pixels (>=3 must agree); on a split vote content reaches the corners and
-// the image passes through untrimmed.
+// background color is the majority of the four corner pixels (>=3 must
+// agree); on a split vote content reaches the corners and the image passes
+// through untrimmed. Border rows/columns entirely within blankTolerance of
+// the background are trimmed, keeping trimMargin pixels around the content.
 func trimBoardImage(data []byte) []byte {
 	img, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil || (format != "png" && format != "jpeg") {

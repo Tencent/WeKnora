@@ -397,9 +397,10 @@ type DocxFetchInput struct {
 func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput) ([]*types.FetchedItem, error) {
 	// The parse mode comes from the data source's Settings["parse_mode"],
 	// resolved by ParseFeishuConfig and threaded in via DocxFetchInput.ParseMode.
-	// The blocks path (default) fans images/boards/attachments out into
-	// sub-items wired to the parent via weknora-img://N markers and image_map /  (stale-marker)
-	// attachment_ids metadata. The export path yields a .docx that docreader
+	// The blocks path (default) inlines images/boards into the parent
+	// Markdown as base64 data URIs (via weknora-img://N markers) and fans
+	// attachments out into sub-items wired to the parent via attachment_ids
+	// metadata. The export path yields a .docx that docreader
 	// parses inline, so images are bound to the parent document via
 	// parent_chunk_id (same as a regular docx upload) — kept as the per-data-
 	// source escape hatch.

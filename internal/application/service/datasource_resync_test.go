@@ -67,7 +67,7 @@ func (c *resyncStreamConnector) FetchStream(
 	return &types.SyncCursor{ConnectorCursor: map[string]interface{}{"space_node_times": map[string]interface{}{}}}, nil
 }
 
-// resyncDSRepo captures Config-writing Update calls (backfill + marker clear).
+// resyncDSRepo captures Config-writing Update calls (marker clear).
 type resyncDSRepo struct {
 	kbDeleteDSRepo
 	updates    int
