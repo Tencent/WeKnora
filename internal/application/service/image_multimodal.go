@@ -347,7 +347,7 @@ func (s *ImageMultimodalService) processImage(
 	imgBytes, readErr := s.readImageBytes(ctx, *payload)
 	if readErr != nil {
 		logger.Errorf(ctx, "[ImageMultimodal] Skip unreadable image %s: %v", payload.ImageURL, readErr)
-		out[keyOutcome] = "skipped_unreadable_image"
+		out[keyOutcome] = outcomeUnreadable
 		out[keyReadError] = readErr.Error()
 		handleErr = fmt.Errorf("read source image: %w", readErr)
 		return handleErr
@@ -393,18 +393,18 @@ func (s *ImageMultimodalService) processImage(
 		// base: a task already enqueued must run the mode it was enqueued
 		// under, exactly like the pipeline id next to it. An empty value (a
 		// payload from before this field existed) resolves to auto.
-		preprocessMode: types.ResolvePreprocessMode(&types.ImageProcessingConfig{PreprocessMode: payload.PreprocessMode}),
+		preprocessMode: types.ResolvePreprocessMode(
+			&types.ImageProcessingConfig{PreprocessMode: payload.PreprocessMode},
+		),
 	}
 	// Recorded here rather than inside a pipeline's Run: a run that returns early
 	// with an error still did the actions it did, and "what ran before it failed"
 	// is exactly what a trace is for.
-	if rc != nil {
-		defer func() {
-			if ids := rc.actionIDs(); len(ids) > 0 {
-				out[keyActions] = ids
-			}
-		}()
-	}
+	defer func() {
+		if ids := rc.actionIDs(); len(ids) > 0 {
+			out[keyActions] = ids
+		}
+	}()
 	if err := pipeline.Run(ctx, rc); err != nil {
 		// Surface the pipeline failure on this image's span instead of
 		// letting the deferred finalize misread it as success. Without
@@ -472,7 +472,7 @@ func (s *ImageMultimodalService) processImage(
 		out[keyOCRResult] == "failed" ||
 		out[keyOCRResult] == "skipped_observation_failed"
 	if len(newChunks) == 0 && extractionFailed {
-		out[keyOutcome] = "failed"
+		out[keyOutcome] = outcomeFailed
 		if ctx.Err() != nil {
 			handleErr = fmt.Errorf("image processing cancelled with no content produced: %w", ctx.Err())
 			return handleErr
@@ -493,14 +493,14 @@ func (s *ImageMultimodalService) processImage(
 		// Some content exists (a valid caption was persisted) — the failure
 		// is recorded on the .ocr subspan and the outcome, and the image
 		// stays a success at the task level (#4132).
-		out[keyOutcome] = "partial_failure"
+		out[keyOutcome] = outcomePartialFailure
 	}
 
 	if len(newChunks) == 0 {
 		// Deferred finalize will count this image on success. A genuine
 		// blank (OCR answered no_text) or a policy-declined image keeps its
 		// trace-level skip.
-		out[keyOutcome] = "skipped_no_content"
+		out[keyOutcome] = outcomeNoContent
 		return nil
 	}
 
@@ -522,7 +522,7 @@ func (s *ImageMultimodalService) processImage(
 	// above, and overwriting it would hide the failure behind the content that
 	// did survive.
 	if _, decided := out[keyOutcome]; !decided {
-		out[keyOutcome] = "done"
+		out[keyOutcome] = outcomeDone
 	}
 
 	return nil

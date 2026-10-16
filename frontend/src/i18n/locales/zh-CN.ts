@@ -4906,9 +4906,6 @@ export default {
         imagePipelineLabel: '选择解析方案',
         advancedSettingsLabel: '高级设置',
         notesLabel: '附加说明',
-        preprocessModeAuto: '自动',
-        preprocessModeOff: '关闭',
-        preprocessModeAlways: '总是',
         imagePipelinePlaceholder: '请选择解析方案',
         imagePipelineLoading: '正在读取流水线…',
         imagePipelineLoadError: '读取流水线失败',
@@ -8740,52 +8737,60 @@ export default {
           '两项各自开关：关掉识别，图片仍会被描述；关掉描述，文字仍会被识别。只有两个都关掉时这张图才不会被处理 —— 所以面板不允许这种组合。',
       },
       description: '用户根据任务需要手动选择解析动作开关。',
-      enable_caption: {
+      caption_enabled: {
         label: '图片描述',
         description: '让模型为每张图片生成一句内容描述，作为图片的说明文字。'
       },
-      enable_ocr: {
+      ocr_enabled: {
         label: '文字识别',
         description: '提取图片中出现的文字。'
       },
       caption: {
-        thinking: {
+        thinking_enabled: {
           label: '图片描述时开启思考',
           description: '让模型在写描述前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '文字识别时开启思考',
           description: '让模型在提取文字前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。',
         },
       }
     },
     smartocr: {
+      ocr_on_unobserved: {
+        label: '图片属性观察失败时仍执行 OCR',
+        description:
+          '当模型未能正确观察到图片属性时，默认仍执行 OCR 兜底，以免漏掉正文文字；关闭则跳过。（采用 4B 等小参数视觉模型，或自定义的图片解析提示词与系统提示词冲突时，可能造成观察失败；8B 及以上模型的失败概率很低，不建议关闭）',
+      },
       name: '智能模式',
       note_flow: {
         label: '由观察结果决定',
         description:
           '先描述图片并观察属性，由属性决定是否值得再为它花一次 OCR。属性显示页面需要摆正时，会先摆正并裁掉周围环境再识别；若该步骤不可用或判定不适用，则直接用原图，绝不会比不启用更差。',
       },
-      preprocess_mode: {
-        label: '文档预处理',
-        description:
-          '在 OCR 之前把拍摄的页面摆正并裁掉周围环境。自动：由描述轮判断页面是否需要；关闭：从不处理；总是：无条件处理。',
+      preprocess: {
+        mode: {
+          label: '文档预处理',
+          description:
+            '在 OCR 之前把拍摄的页面摆正并裁掉周围环境。自动：由描述轮判断页面是否需要；关闭：从不处理；总是：无条件处理。',
+          options: {
+            auto: '自动',
+            off: '关闭',
+            always: '总是',
+          },
+        },
       },
-      caption: {
-        thinking: {
+      observation: {
+        thinking_enabled: {
           label: '描述时开启思考',
           description: '让模型在描述图片并观察属性前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。',
         },
       },
       ocr: {
-        on_unobserved: {
-          label: '图片属性观察失败时仍执行 OCR',
-          description:
-            '当模型未能正确观察到图片属性时，默认仍执行 OCR 兜底，以免漏掉正文文字；关闭则跳过。（采用 4B 等小参数视觉模型，或自定义的图片解析提示词与系统提示词冲突时，可能造成观察失败；8B 及以上模型的失败概率很低，不建议关闭）',
-        },
-        thinking: {
+
+        thinking_enabled: {
           label: '文字识别时开启思考',
           description: '让模型在提取文字前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。',
         },

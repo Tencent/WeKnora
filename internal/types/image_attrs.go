@@ -145,7 +145,10 @@ var ImageAttrRegistry = []AttrSpec{
 		Values: []AttrValue{
 			{Value: "none", Label: "None", Description: "the text reaches the edges; almost no background"},
 			{Value: "small", Label: "Small", Description: "a thin band of background or whitespace"},
-			{Value: "large", Label: "Large", Description: "plenty of non-text area: a desk, a room, a mostly empty page"},
+			{
+				Value: "large", Label: "Large",
+				Description: "plenty of non-text area: a desk, a room, a mostly empty page",
+			},
 		},
 		Question: "How much of the frame is NOT the document itself — background, desk, or empty " +
 			"space around the text? Answer exactly one of: none (text reaches the edges), " +

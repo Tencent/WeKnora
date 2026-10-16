@@ -460,11 +460,7 @@
                           <ImagePipelineSettings
                             v-model:params="uiState.imagePipelineParams"
                             :pipeline-id="uiState.imagePipeline"
-                            :preprocess-mode="uiState.preprocessMode"
-                            :on-unobserved="uiState.imageActions.ocr.on_unobserved"
                             @update:pipeline-id="uiState.imagePipeline = $event"
-                            @update:preprocess-mode="uiState.preprocessMode = $event"
-                            @update:on-unobserved="uiState.imageActions.ocr.on_unobserved = $event"
                             @update:invalid="imagePipelineInvalid = $event"
                           >
                             <!-- 观察属性说明：收进面板的「附加说明」折叠区。属性字典来自后端注册表，
@@ -686,10 +682,11 @@ import KbUploadSourceDropdown from './KbUploadSourceDropdown.vue'
 import ImagePipelineSettings from '../ImagePipelineSettings.vue'
 import {
   buildPipelineFields,
-  PREPROCESS_MODE_AUTO,
   normalizePreprocessMode,
+  pipelineParamKey,
+  pipelineParamsFromKb,
+  PREPROCESS_MODE_KEY,
   resolveImagePipelineFromKb,
-  resolvePreprocessModeFromKb,
   normalizeImagePipelineId,
   IMAGE_PIPELINE_DEFAULT,
   IMAGE_PIPELINE_SMARTOCR,
@@ -751,7 +748,6 @@ interface UploadUIState {
   // derived at write time rather than stored.
   imagePipeline: string
   imagePipelineParams: Record<string, unknown>
-  preprocessMode: string
   imageVectorEnabled: boolean
   imageActions: ImageActionsConfig
   asrConfig: { enabled: boolean; modelId: string; language: string }
@@ -1251,7 +1247,6 @@ function createDefaultUIState(): UploadUIState {
     multimodalConfig: { enabled: false, vllmModelId: '', descriptionLanguage: '', customInstructions: '' },
     imagePipeline: IMAGE_PIPELINE_DEFAULT,
     imagePipelineParams: {},
-    preprocessMode: PREPROCESS_MODE_AUTO,
     imageVectorEnabled: false,
     imageActions: mergeImageActions(),
     asrConfig: { enabled: false, modelId: '', language: '' },
@@ -1297,11 +1292,10 @@ function initFromKbInfo(kb: any) {
       customInstructions: kb.vlm_config?.custom_instructions || '',
     },
     // 默认跟随知识库的图片解析方案；用户可对本次任务单独覆盖。旧库（没有
-    // image_pipeline 的）按与后端一致的规则解析出一个具体方案。
-    preprocessMode: resolvePreprocessModeFromKb(kb),
+    // image_pipeline 的）按与后端一致的规则解析出一个具体方案；预处理开关等
+    // 旧字段折进所选方案的槽位，否则面板显示的是默认值而不是知识库的取值。
     imagePipeline: resolveImagePipelineFromKb(kb),
-    imagePipelineParams:
-      (kb.image_processing_config?.image_pipeline_params as Record<string, unknown>) ?? {},
+    imagePipelineParams: pipelineParamsFromKb(kb),
     imageVectorEnabled: !!kb.image_processing_config?.image_vector_enabled,
     imageActions: mergeImageActions(kb.image_processing_config?.image_actions),
     asrConfig: {
@@ -1402,7 +1396,6 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
     buildPipelineFields(
       state.multimodalConfig.enabled ? state.imagePipeline : '',
       state.imagePipelineParams,
-      state.preprocessMode,
     ),
   )
 
@@ -1446,7 +1439,15 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
     if (pipeline !== s.imagePipeline) s.imagePipelineParams = {}
     s.imagePipeline = pipeline
   }
-  if (o.preprocess_mode != null) s.preprocessMode = normalizePreprocessMode(o.preprocess_mode)
+  // 存量覆盖里的预处理开关存在顶层（它是槽位出现之前的位置），折叠进所选方案
+  // 的槽位，控件才显示这次任务真正会用的取值。
+  if (o.preprocess_mode != null && s.imagePipeline) {
+    s.imagePipelineParams = {
+      ...s.imagePipelineParams,
+      [pipelineParamKey(s.imagePipeline, PREPROCESS_MODE_KEY)]:
+        normalizePreprocessMode(o.preprocess_mode),
+    }
+  }
   if (o.image_vector_enabled != null) s.imageVectorEnabled = o.image_vector_enabled
   if (o.image_actions) s.imageActions = mergeImageActions(o.image_actions)
   if (o.vlm_config) {

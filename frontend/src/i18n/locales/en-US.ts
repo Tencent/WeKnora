@@ -4285,9 +4285,6 @@ export default {
         imagePipelineLabel: 'Scheme',
         advancedSettingsLabel: 'Advanced settings',
         notesLabel: 'Additional notes',
-        preprocessModeAuto: 'Auto',
-        preprocessModeOff: 'Off',
-        preprocessModeAlways: 'Always',
         imagePipelinePlaceholder: 'Select a scheme',
         imagePipelineLoading: 'Loading pipelines…',
         imagePipelineLoadError: 'Could not load pipelines',
@@ -8746,52 +8743,60 @@ export default {
           'Each can be switched separately: with OCR off the image is still described, with caption off its text is still read. Only switching both off leaves an image untouched, which is why the panel refuses that combination.',
       },
       description: 'Turn the parsing actions on or off to fit the task.',
-      enable_caption: {
+      caption_enabled: {
         label: 'Image caption',
         description: 'Ask the model for a one-line description of every image and store it as the caption.'
       },
-      enable_ocr: {
+      ocr_enabled: {
         label: 'OCR',
         description: 'Extract the text that appears in the image.'
       },
       caption: {
-        thinking: {
+        thinking_enabled: {
           label: 'Caption with thinking',
           description: 'Let the model think before it writes the caption. In general you do not need thinking; enabling it makes parsing slower and may make the model overthink, so overly long reasoning can run past the limit and truncate the caption, failing the task. Only enable it when you have confirmed it is necessary.',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: 'OCR with thinking',
           description: 'Let the model think before it transcribes the text. In general you do not need thinking; enabling it makes parsing slower and may make the model overthink, so overly long reasoning can run past the limit and truncate the transcribed text, failing the task. Only enable it when you have confirmed it is necessary.',
         },
       }
     },
     smartocr: {
+      ocr_on_unobserved: {
+        label: 'Run OCR when image-attribute observation fails',
+        description:
+          'When the model fails to observe the image attributes correctly, OCR runs by default so body text is never lost; turn off to skip. (A small vision model such as 4B, or custom image-instruction prompts that conflict with the system prompt, can cause the observation to fail; 8B and above rarely fail, so leaving this on is recommended)',
+      },
       name: 'Smart',
       note_flow: {
         label: 'The observation decides',
         description:
           'The image is described and observed first, and the attributes that come back decide whether OCR is worth a second pass. When they say the page needs straightening, it is straightened and its surroundings cropped before reading; when that step is unavailable or declines, the original photograph is read instead — never something worse.',
       },
-      preprocess_mode: {
-        label: 'Document preprocessing',
-        description:
-          'Straighten and crop a photographed page before OCR reads it. Auto asks the describe round whether the page needs it; Off never does; Force always does.',
+      preprocess: {
+        mode: {
+          label: 'Document preprocessing',
+          description:
+            'Straighten and crop a photographed page before OCR reads it. Auto asks the describe round whether the page needs it; Off never does; Always does it unconditionally.',
+          options: {
+            auto: 'Auto',
+            off: 'Off',
+            always: 'Always',
+          },
+        },
       },
-      caption: {
-        thinking: {
+      observation: {
+        thinking_enabled: {
           label: 'Describe with thinking',
           description: 'Let the model think before it describes the image and reports its attributes. In general you do not need thinking; enabling it makes parsing slower and may make the model overthink, so overly long reasoning can run past the limit and truncate the description, failing the task. Only enable it when you have confirmed it is necessary.',
         },
       },
       ocr: {
-        on_unobserved: {
-          label: 'Run OCR when image-attribute observation fails',
-          description:
-            'When the model fails to observe the image attributes correctly, OCR runs by default so body text is never lost; turn off to skip. (A small vision model such as 4B, or custom image-instruction prompts that conflict with the system prompt, can cause the observation to fail; 8B and above rarely fail, so leaving this on is recommended)',
-        },
-        thinking: {
+
+        thinking_enabled: {
           label: 'Text recognition with thinking',
           description: 'Let the model think before it transcribes the text. In general you do not need thinking; enabling it makes parsing slower and may make the model overthink, so overly long reasoning can run past the limit and truncate the transcribed text, failing the task. Only enable it when you have confirmed it is necessary.',
         },

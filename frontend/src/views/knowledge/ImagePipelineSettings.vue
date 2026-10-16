@@ -25,39 +25,22 @@ import {
 const props = defineProps<{
   /** The selected pipeline id. */
   pipelineId: string
-  /** That pipeline's private tunables; a missing key reads the field default. */
+  /**
+   * Every pipeline's private tunables, stored under the slot of the pipeline
+   * that owns each one. A missing key reads the field's declared default, so a
+   * pipeline the operator has never configured still renders real switches.
+   */
   params: Record<string, unknown>
-  /**
-   * Page-straightening switch: 'auto' | 'off' | 'always'. Optional because it
-   * is a knowledge-base setting: the upload dialog's per-task overrides have no
-   * such field, and a host that does not manage it simply shows the default.
-   */
-  preprocessMode?: string
-  /**
-   * The OCR policy's unobserved clause: whether an image whose attributes could
-   * not be observed is still read. Optional for the same reason as the switch
-   * above — it is a knowledge-base setting, and a host that does not manage it
-   * shows the default, which is to read the image.
-   */
-  onUnobserved?: boolean
 }>()
 
 const emit = defineEmits<{
   'update:pipelineId': [value: string]
   'update:params': [value: Record<string, unknown>]
-  'update:preprocessMode': [value: string]
-  'update:onUnobserved': [value: boolean]
   /** Turned on while the current pick is configured to do nothing at all. */
   'update:invalid': [value: boolean]
 }>()
 
-import {
-  OCR_ON_UNOBSERVED_FIELD_KEY,
-  PREPROCESS_MODE_AUTO,
-  PREPROCESS_MODE_FIELD_KEY,
-  PREPROCESS_MODE_ALWAYS,
-  PREPROCESS_MODE_OFF,
-} from '@/utils/imageProcessingConfig'
+import { pipelineParamKey, readPipelineParam } from '@/utils/imageProcessingConfig'
 
 const { t, te } = useI18n()
 
@@ -100,40 +83,13 @@ const slots = useSlots()
 const hasNotesSlot = computed(() => Boolean(slots.notes))
 
 /**
- * Whether this field is the page-straightening switch, whose value lives on the
- * knowledge base rather than in the pipeline's params. The key is declared by
- * the pipeline that owns the setting (its Fields()), which is also what decides
- * where in the panel it appears — this helper only decides the binding.
+ * The wording of one value of an enum field. A pipeline that wants its options
+ * read as words declares them under the field's own overlay path, so a fourth
+ * mode needs no frontend change; without one the stored value is shown as it is.
  */
-function isPreprocessModeField(field: ImagePipelineField): boolean {
-  return field.key === PREPROCESS_MODE_FIELD_KEY
-}
-
-/**
- * Whether this field is the OCR policy's unobserved clause, whose value is the
- * knowledge base's OCR action setting rather than a pipeline param. Declared by
- * the pipeline that observes attributes — see smartOcrPipeline.Fields.
- */
-function isOnUnobservedField(field: ImagePipelineField): boolean {
-  return field.key === OCR_ON_UNOBSERVED_FIELD_KEY
-}
-
-/**
- * The wording of one preprocess mode. The modes themselves are whatever the
- * declaring pipeline lists in the field's Options, so a fourth one would appear
- * without a frontend change; naming it is the only part that needs a
- * translation, and an unnamed mode falls back to its own value rather than to
- * a blank.
- */
-const PREPROCESS_MODE_LABEL_KEYS: Record<string, string> = {
-  [PREPROCESS_MODE_AUTO]: 'knowledgeEditor.advanced.multimodal.preprocessModeAuto',
-  [PREPROCESS_MODE_OFF]: 'knowledgeEditor.advanced.multimodal.preprocessModeOff',
-  [PREPROCESS_MODE_ALWAYS]: 'knowledgeEditor.advanced.multimodal.preprocessModeAlways',
-}
-
-function preprocessModeLabel(mode: string): string {
-  const key = PREPROCESS_MODE_LABEL_KEYS[mode]
-  return key ? t(key) : mode
+function enumOptionLabel(field: ImagePipelineField, option: string): string {
+  const key = `${fieldKey(field, 'options')}.${option}`
+  return te(key) ? t(key) : option
 }
 
 // Every rule the selected pipeline breaks, reported by the backend and in the
@@ -205,12 +161,12 @@ function defaultValue(field: ImagePipelineField): unknown {
 }
 
 function paramValue(field: ImagePipelineField): unknown {
-  const own = props.params?.[field.key]
+  const own = readPipelineParam(props.params, current.value?.id ?? '', field.key)
   return own === undefined || own === null ? defaultValue(field) : own
 }
 
 /** i18n overlay key for one field of one pipeline. */
-function fieldKey(field: ImagePipelineField, part: 'label' | 'description'): string {
+function fieldKey(field: ImagePipelineField, part: 'label' | 'description' | 'options'): string {
   return `imagePipeline.${current.value?.id ?? ''}.${field.key}.${part}`
 }
 
@@ -236,26 +192,15 @@ function pipelineDescription(pipeline: ImagePipelineSpec): string {
 }
 
 function onPipelineChange(value: string) {
+  // The parameters stay: they are stored per pipeline, so switching back finds
+  // the choice that was made here last time. Clearing them used to lose it.
   emit('update:pipelineId', value)
-  // A pipeline's parameters are only meaningful to that pipeline. Switching one
-  // drops the other's, rather than carrying a stale key across that it silently
-  // ignores.
-  emit('update:params', {})
-}
-
-// The preprocess switch is deliberately independent of the pipeline pick: the
-// step only exists inside the smartocr pipeline, but a knowledge base moving
-// between pipelines must not silently lose the choice it made here.
-function onPreprocessModeChange(value: string) {
-  emit('update:preprocessMode', value)
-}
-
-function onOnUnobservedChange(value: boolean) {
-  emit('update:onUnobserved', value)
 }
 
 function onParamChange(key: string, value: unknown) {
-  emit('update:params', { ...props.params, [key]: value })
+  // Stored under the pipeline's own slot, so two pipelines that declare the same
+  // field key never read each other's value, and switching back keeps both.
+  emit('update:params', { ...props.params, [pipelineParamKey(current.value?.id ?? '', key)]: value })
 }
 
 async function load() {
@@ -345,38 +290,18 @@ watch(() => props.pipelineId, () => {
            order looks wrong, fix the declaration. See the Fields() doc on the
            imagePipeline interface for the full contract.
            =================================================================== -->
-      <!-- Two of the fields a pipeline may declare hold knowledge-base
-           settings rather than pipeline params — the straightening switch and
-           the OCR policy's unobserved clause — so their controls are bound to
-           those settings. Where they sit and what they are called still come
-           from the pipeline that declared them; only the binding differs. -->
+      <!-- Every declared field is a setting of the selected pipeline, stored in
+           that pipeline's own slot — including the ones the pipeline carries in
+           from the action that owns them. There is no field this panel reads
+           from somewhere else, which is what keeps the value it draws and the
+           value the run reads the same value. -->
       <div v-if="standingFields.length" class="image-pipeline-section">
         <div v-for="field in standingFields" :key="field.key" class="image-pipeline-row">
           <div class="image-pipeline-info">
             <label>{{ fieldLabel(field) }}</label>
             <p v-if="fieldDescription(field)" class="desc">{{ fieldDescription(field) }}</p>
           </div>
-          <div v-if="isPreprocessModeField(field)" class="image-pipeline-control">
-            <t-select
-              :value="preprocessMode || PREPROCESS_MODE_AUTO"
-              @change="onPreprocessModeChange"
-            >
-              <t-option
-                v-for="mode in field.options ?? []"
-                :key="mode"
-                :value="mode"
-                :label="preprocessModeLabel(mode)"
-              />
-            </t-select>
-          </div>
-          <div v-else-if="isOnUnobservedField(field)" class="image-pipeline-control">
-            <t-switch
-              :value="onUnobserved !== false"
-              size="medium"
-              @change="onOnUnobservedChange"
-            />
-          </div>
-          <div v-else class="image-pipeline-control">
+          <div class="image-pipeline-control">
             <t-switch
               v-if="field.type === 'bool'"
               :value="Boolean(paramValue(field))"
@@ -389,7 +314,7 @@ watch(() => props.pipelineId, () => {
               clearable
               @change="(value: string) => onParamChange(field.key, value)"
             >
-              <t-option v-for="opt in field.options ?? []" :key="opt" :value="opt" :label="opt" />
+              <t-option v-for="opt in field.options ?? []" :key="opt" :value="opt" :label="enumOptionLabel(field, opt)" />
             </t-select>
             <t-input
               v-else
@@ -414,27 +339,7 @@ watch(() => props.pipelineId, () => {
                 <label>{{ fieldLabel(field) }}</label>
                 <p v-if="fieldDescription(field)" class="desc">{{ fieldDescription(field) }}</p>
               </div>
-              <div v-if="isPreprocessModeField(field)" class="image-pipeline-control">
-                <t-select
-                  :value="preprocessMode || PREPROCESS_MODE_AUTO"
-                  @change="onPreprocessModeChange"
-                >
-                  <t-option
-                    v-for="mode in field.options ?? []"
-                    :key="mode"
-                    :value="mode"
-                    :label="preprocessModeLabel(mode)"
-                  />
-                </t-select>
-              </div>
-              <div v-else-if="isOnUnobservedField(field)" class="image-pipeline-control">
-                <t-switch
-                  :value="onUnobserved !== false"
-                  size="medium"
-                  @change="onOnUnobservedChange"
-                />
-              </div>
-              <div v-else class="image-pipeline-control">
+              <div class="image-pipeline-control">
                 <t-switch
                   v-if="field.type === 'bool'"
                   :value="Boolean(paramValue(field))"
@@ -447,7 +352,7 @@ watch(() => props.pipelineId, () => {
                   clearable
                   @change="(value: string) => onParamChange(field.key, value)"
                 >
-                  <t-option v-for="opt in field.options ?? []" :key="opt" :value="opt" :label="opt" />
+                  <t-option v-for="opt in field.options ?? []" :key="opt" :value="opt" :label="enumOptionLabel(field, opt)" />
                 </t-select>
                 <t-input
                   v-else

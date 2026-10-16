@@ -16,18 +16,23 @@ export interface ImageProcessingEdits {
   imageAttrsEnabled: boolean
   /** Index and recall images by their own vectors (off unless opted in). */
   imageVectorEnabled: boolean
+  /**
+   * The knowledge base's own OCR fallback clause. It is the value every
+   * pipeline starts from, no longer a control: the panel edits the selected
+   * pipeline's own copy in that pipeline's slot, and this field is carried
+   * over so a base that customised it through the API keeps it.
+   */
   onUnobserved: boolean
   /** The registry's current default OCR conditions (GET /image-attrs/schema). */
   defaultOn: ImageAttrConditionLike[]
   /** The pipeline picked in the panel; empty means multimodal is off and the fields go away. */
   pipelineId: string
-  /** That pipeline's private tunables, keyed by field. */
-  pipelineParams: Record<string, unknown>
   /**
-   * The page-straightening switch: 'auto' (observe geometry, then decide),
-   * 'off' (never) or 'always' (unconditional). Mirrors backend preprocess modes.
+   * Every pipeline's private tunables, each stored under the slot of the
+   * pipeline that owns it — see pipelineParamKey. Switching the pick therefore
+   * finds the other pipeline's own answers rather than inheriting this one's.
    */
-  preprocessMode: string
+  pipelineParams: Record<string, unknown>
 }
 
 /** The preprocess switch's values, mirroring the backend's constants. */
@@ -36,22 +41,20 @@ export const PREPROCESS_MODE_AUTO = 'auto'
 export const PREPROCESS_MODE_ALWAYS = 'always'
 
 /**
- * The field key the smart pipeline declares for the page-straightening switch.
- * It is declared as a field so the panel draws it at the point that pipeline's
- * run uses it, but its value is not a pipeline param: the panel binds it to the
- * knowledge base's preprocess mode instead of to params. Mirrors
- * smartFieldKeyPreprocessMode on the backend — the two must agree, or the
- * switch silently becomes an ordinary, ignored param.
+ * The key the preprocessing action declares its page-straightening switch
+ * under. The action owns the key; a pipeline that schedules the action offers
+ * the control, and the value is stored in that pipeline's slot. Mirrors
+ * types.PreprocessModeKey on the backend.
  */
-export const PREPROCESS_MODE_FIELD_KEY = 'preprocess_mode'
+export const PREPROCESS_MODE_KEY = 'preprocess.mode'
 
 /**
- * The field key the smart pipeline declares for the OCR policy's unobserved
- * clause. Like PREPROCESS_MODE_FIELD_KEY, its value is a knowledge base setting
- * rather than a pipeline param, and the two must agree with the backend's
- * imageFieldKeyOCROnUnobserved.
+ * The key the smart pipeline declares its OCR fallback clause under. Pipeline
+ * private: it decides whether OCR is scheduled at all, which is that
+ * pipeline's own orchestration decision. Mirrors
+ * service.ImagePipelineKeyOCROnUnobserved.
  */
-export const OCR_ON_UNOBSERVED_FIELD_KEY = 'ocr.on_unobserved'
+export const OCR_ON_UNOBSERVED_KEY = 'ocr_on_unobserved'
 
 /**
  * Maps a stored preprocess mode onto the one the panel offers. Anything
@@ -70,16 +73,51 @@ export function normalizePreprocessMode(mode: string | null | undefined): string
   }
 }
 
+/**
+ * The key one pipeline-private setting is stored under. Mirrors the backend's
+ * types.SlotKey: the pipeline that owns the setting namespaces it, unless the
+ * key already carries that namespace (an action scoped to one pipeline, whose
+ * id is "<pipeline>.<action>"), in which case it is left alone so the id is
+ * never doubled.
+ *
+ * Panel and run must agree on this or a saved switch is never read back, which
+ * is the whole reason it is a function here and in Go rather than a spelling
+ * both sides repeat.
+ */
+export function pipelineParamKey(pipelineId: string, key: string): string {
+  if (!pipelineId || key.startsWith(`${pipelineId}.`)) return key
+  return `${pipelineId}.${key}`
+}
+
+/**
+ * Reads one pipeline-private setting the way the backend's
+ * types.ImagePipelineParam does: the running pipeline's slot first, then the
+ * bare key, which is how a config written before the slots existed still
+ * reads. `undefined` means neither carries a value, and the caller falls back
+ * to the field's declared default.
+ */
+export function readPipelineParam(
+  params: Record<string, unknown> | null | undefined,
+  pipelineId: string,
+  key: string,
+): unknown {
+  if (!params) return undefined
+  if (pipelineId) {
+    const slot = pipelineParamKey(pipelineId, key)
+    const own = params[slot]
+    if (own !== undefined && own !== null) return own
+    // The key already carries this pipeline's namespace; the bare lookup below
+    // would read the same entry twice.
+    if (slot === key) return undefined
+  }
+  const bare = params[key]
+  return bare === undefined || bare === null ? undefined : bare
+}
+
 /** The pipeline fields an overrides payload carries, with the empties dropped. */
 export interface PipelineFields {
   image_pipeline?: string
   image_pipeline_params?: Record<string, unknown>
-  /**
-   * Per-task override of the page-straightening switch. Only sent when it
-   * differs from the knowledge base's own value, so an untouched dialog does
-   * not pin a document to a setting the KB may later change.
-   */
-  preprocess_mode?: string
 }
 
 /**
@@ -109,20 +147,12 @@ export function normalizeImagePipelineId(id: string | null | undefined): string 
 export function buildPipelineFields(
   pipelineId: string,
   pipelineParams: Record<string, unknown> | null | undefined,
-  preprocessMode?: string | null,
 ): PipelineFields {
   if (!pipelineId) return {}
-  const fields: PipelineFields = {}
-  if (pipelineId) fields.image_pipeline = pipelineId
+  const fields: PipelineFields = { image_pipeline: pipelineId }
   if (pipelineParams && Object.keys(pipelineParams).length > 0) {
     fields.image_pipeline_params = pipelineParams
   }
-  // The preprocess switch follows the same rule as the pick above: what the
-  // dialog shows is what it sends, so the document is re-parsed with the
-  // settings the operator just looked at. How a document's own setting and the
-  // knowledge base's default interact is decided elsewhere (see
-  // applyOverridesToState), not here.
-  if (preprocessMode) fields.preprocess_mode = normalizePreprocessMode(preprocessMode)
   return fields
 }
 
@@ -131,34 +161,34 @@ export function buildPipelineFields(
  * changed. The backend replaces the whole object, so every field the editor
  * does not own (model_id, ...) is carried over from the snapshot.
  *
- * The editor only edits the observation switch and on_unobserved, but
- * on_unobserved must travel with a non-empty `on`: the backend adopts a custom
- * OCR clause only when `on` is set. A knowledge base whose `on` was customised
- * through the API keeps it; one without a custom list gets the registry's
- * current default, so it still follows the default as it evolves.
+ * The editor edits the observation switch, the pick and its parameters. The
+ * OCR clause travels with a non-empty `on`: the backend adopts a custom clause
+ * only when `on` is set. A knowledge base whose `on` was customised through the
+ * API keeps it; one without a custom list gets the registry's current default,
+ * so it still follows the default as it evolves. The fallback clause beside it
+ * is carried over rather than recomputed — the panel edits the selected
+ * pipeline's own copy in that pipeline's slot now, so this key stays the
+ * default every pipeline starts from.
  *
- * The pipeline and its parameters are written too. They are the panel's own
- * settings; the observation switch is kept in step with the pick so a base that
- * was edited through the UI still reads the same way through the older switch.
- * image_vector_enabled is written only when it is on or was already stored:
- * a knowledge base that never touched the switch reads as off on the
- * backend, so writing `false` into it would be a change for nothing.
+ * The pipeline and its parameters are written as one unit. image_vector_enabled
+ * is written only when it is on or was already stored: a knowledge base that
+ * never touched the switch reads as off on the backend, so writing `false` into
+ * it would be a change for nothing.
  */
 export function buildImageProcessingConfig(
   snapshot: Record<string, unknown> | null | undefined,
   edits: ImageProcessingEdits,
 ): Record<string, unknown> | null {
   const snap = snapshot || {}
-  const storedOn = (snap.image_actions as { ocr?: { on?: unknown } } | undefined)?.ocr?.on
+  const storedOCR = (snap.image_actions as { ocr?: Record<string, unknown> } | undefined)?.ocr
+  const storedOn = storedOCR?.on
   const on = Array.isArray(storedOn) && storedOn.length > 0 ? storedOn : edits.defaultOn
   const built: Record<string, unknown> = {
     ...snap,
     image_attrs_enabled: edits.imageAttrsEnabled,
     image_actions: {
-      ocr: {
-        on,
-        on_unobserved: edits.onUnobserved,
-      },
+      ...(snap.image_actions as Record<string, unknown> | undefined),
+      ocr: { ...storedOCR, on, on_unobserved: edits.onUnobserved },
     },
   }
   // The pick carries the panel's own answer, so it replaces whatever the
@@ -171,25 +201,39 @@ export function buildImageProcessingConfig(
   if (edits.imageVectorEnabled || 'image_vector_enabled' in snap) {
     built.image_vector_enabled = edits.imageVectorEnabled
   }
-  // Same reasoning as the vector switch: auto is what the backend already
-  // assumes, so a knowledge base that never touched this select reads the same
-  // way whether the key is absent or says "auto". Writing it only when it
-  // carries information keeps an untouched base's stored config untouched.
-  const preprocessMode = normalizePreprocessMode(edits.preprocessMode)
-  if (preprocessMode !== PREPROCESS_MODE_AUTO || 'preprocess_mode' in snap) {
-    built.preprocess_mode = preprocessMode
-  }
   return JSON.stringify(built) === JSON.stringify(snap) ? null : built
 }
 
 /**
- * Reads the preprocess switch out of a stored config, normalized the way the
- * panel shows it. Absent means auto.
+ * The pipeline parameters a stored config amounts to, with the two settings
+ * that predate the slots folded in from where they used to live.
+ *
+ * This is a read-time migration, not a rewrite: the backend resolves the same
+ * way (types.ResolvePreprocessMode, service.resolveImageActions), so a
+ * knowledge base that stored the straightening mode or the OCR fallback clause
+ * before they moved into the pipeline's slot shows the value it actually runs
+ * with. Without it the panel would draw those controls at their declared
+ * default, and the next save would write that default into the slot and shadow
+ * the setting the base was using.
  */
-export function resolvePreprocessModeFromKb(
+export function pipelineParamsFromKb(
   kb: Record<string, any> | null | undefined,
-): string {
-  return normalizePreprocessMode(kb?.image_processing_config?.preprocess_mode)
+): Record<string, unknown> {
+  const cfg = kb?.image_processing_config
+  const params = { ...((cfg?.image_pipeline_params as Record<string, unknown>) ?? {}) }
+  const pipelineId = resolveImagePipelineFromKb(kb)
+  if (!pipelineId) return params
+  if (readPipelineParam(params, pipelineId, PREPROCESS_MODE_KEY) === undefined && cfg?.preprocess_mode != null) {
+    params[pipelineParamKey(pipelineId, PREPROCESS_MODE_KEY)] = normalizePreprocessMode(cfg.preprocess_mode)
+  }
+  const legacyUnobserved = cfg?.image_actions?.ocr?.on_unobserved
+  if (
+    typeof legacyUnobserved === 'boolean' &&
+    readPipelineParam(params, pipelineId, OCR_ON_UNOBSERVED_KEY) === undefined
+  ) {
+    params[pipelineParamKey(pipelineId, OCR_ON_UNOBSERVED_KEY)] = legacyUnobserved
+  }
+  return params
 }
 
 /**
