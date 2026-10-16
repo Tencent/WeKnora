@@ -567,6 +567,25 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	config *types.KnowledgeBaseConfig,
 	vlmConfig *types.VLMConfig,
 ) (*types.KnowledgeBase, error) {
+	// Model validation, the chunk-count guard and configuration persistence
+	// share the publisher's KB lock. Even updates omitting model settings save
+	// the loaded model ID. Acquire it before reading configuration so
+	// replacement's temporary empty-chunk interval cannot allow a model change.
+	if id != "" && s.wikiRepo != nil {
+		var result *types.KnowledgeBase
+		err := s.wikiRepo.WithPageWriteLock(ctx, id, "", func() error {
+			var err error
+			result, err = s.updateKnowledgeBase(ctx, id, name, description, config, vlmConfig)
+			return err
+		})
+		return result, err
+	}
+	return s.updateKnowledgeBase(ctx, id, name, description, config, vlmConfig)
+}
+
+func (s *knowledgeBaseService) updateKnowledgeBase(ctx context.Context,
+	id, name, description string, config *types.KnowledgeBaseConfig, vlmConfig *types.VLMConfig,
+) (*types.KnowledgeBase, error) {
 	if id == "" {
 		logger.Error(ctx, "Knowledge base ID is empty")
 		return nil, errors.New("knowledge base ID cannot be empty")

@@ -9,7 +9,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	sqliteretriever "github.com/Tencent/WeKnora/internal/application/repository/retriever/sqlite"
@@ -102,15 +104,19 @@ func (m *embedder) BatchEmbedWithPool(ctx context.Context, _ embedding.Embedder,
 
 type models struct {
 	interfaces.ModelService
-	embedder *embedder
+	embedder      *embedder
+	beforeResolve func()
 }
 
 func (m models) GetEmbeddingModel(context.Context, string) (embedding.Embedder, error) {
+	if m.beforeResolve != nil {
+		m.beforeResolve()
+	}
 	return m.embedder, nil
 }
 
-func (m models) GetEmbeddingModelForTenant(context.Context, string, uint64) (embedding.Embedder, error) {
-	return m.embedder, nil
+func (m models) GetEmbeddingModelForTenant(ctx context.Context, id string, _ uint64) (embedding.Embedder, error) {
+	return m.GetEmbeddingModel(ctx, id)
 }
 
 func (m models) GetModelByID(_ context.Context, id string) (*types.Model, error) {
@@ -125,7 +131,10 @@ type tenants struct {
 func (t tenants) GetTenantByID(context.Context, uint64) (*types.Tenant, error) { return t.tenant, nil }
 
 func TestWikiIndexLifecycleHTTP(t *testing.T) {
-	for _, mode := range []string{"retry_embedding", "retry_storage", "model_change"} {
+	for _, mode := range []string{
+		"retry_embedding", "retry_storage", "model_change",
+		"model_change_overlap_same", "model_change_overlap_different",
+	} {
 		t.Run(mode, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			sqlitevec.Auto()
@@ -150,7 +159,17 @@ func TestWikiIndexLifecycleHTTP(t *testing.T) {
 				sqliteretriever.NewSQLiteRetrieveEngineRepository(db), types.SQLiteRetrieverEngineType,
 			)}
 			model := &embedder{}
-			modelService := models{embedder: model}
+			var pause atomic.Bool
+			entered, release := make(chan struct{}), make(chan struct{})
+			var releaseOnce, enterOnce sync.Once
+			unblock := func() { releaseOnce.Do(func() { close(release) }) }
+			t.Cleanup(unblock)
+			modelService := models{embedder: model, beforeResolve: func() {
+				if pause.Load() {
+					enterOnce.Do(func() { close(entered) })
+					<-release
+				}
+			}}
 			reg := registry{backend: engine}
 			ownership := owner{storeID: storeID}
 			tenant := &types.Tenant{ID: 7}
@@ -193,7 +212,7 @@ func TestWikiIndexLifecycleHTTP(t *testing.T) {
 			model.fail = mode == "retry_embedding"
 			engine.fail = mode == "retry_storage"
 			created := perform(createURL, requestBody)
-			if mode != "model_change" {
+			if strings.HasPrefix(mode, "retry_") {
 				require.Equal(t, http.StatusInternalServerError, created.Code)
 				persisted, err := wikiRepo.GetBySlug(context.Background(), kb.ID, "concept/validation-4372")
 				require.NoError(t, err)
@@ -214,6 +233,58 @@ func TestWikiIndexLifecycleHTTP(t *testing.T) {
 			}
 			require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
 			ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+			if strings.HasPrefix(mode, "model_change_overlap_") {
+				pause.Store(true)
+				indexed := make(chan *httptest.ResponseRecorder, 1)
+				go func() { indexed <- perform(createURL, requestBody) }()
+				select {
+				case <-entered:
+				case <-time.After(5 * time.Second):
+					t.Fatal("publication did not reach embedding resolution after purge")
+				}
+				count, err := chunkRepo.CountChunksByKnowledgeBaseID(ctx, 7, kb.ID)
+				require.NoError(t, err)
+				require.Zero(t, count, "pause must occur in the actual chunk replacement gap")
+				next := "same-dimension-other-model"
+				if mode == "model_change_overlap_different" {
+					next = "different-dimension-model"
+				}
+				started, updated := make(chan struct{}), make(chan error, 1)
+				go func() {
+					close(started)
+					_, err := kbService.UpdateKnowledgeBase(ctx, kb.ID, kb.Name, "",
+						&types.KnowledgeBaseConfig{EmbeddingModelID: &next}, nil)
+					updated <- err
+				}()
+				<-started
+				var updateErr error
+				completed := false
+				select {
+				case updateErr = <-updated:
+					completed = true
+				case <-time.After(100 * time.Millisecond):
+				}
+				unblock()
+				select {
+				case response := <-indexed:
+					require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+				case <-time.After(5 * time.Second):
+					t.Fatal("publication did not finish after release")
+				}
+				if !completed {
+					select {
+					case updateErr = <-updated:
+					case <-time.After(5 * time.Second):
+						t.Fatal("model update did not resume after publication")
+					}
+				}
+				pause.Store(false)
+				require.False(t, completed, "model update must wait while publication has no chunks")
+				require.Error(t, updateErr, "published Wiki vectors must reject model replacement")
+				saved, err := kbRepo.GetKnowledgeBaseByID(ctx, kb.ID)
+				require.NoError(t, err)
+				require.Equal(t, "embedding-model", saved.EmbeddingModelID)
+			}
 			if mode == "model_change" {
 				for _, next := range []string{"same-dimension-other-model", "different-dimension-model"} {
 					_, err := kbService.UpdateKnowledgeBase(ctx, kb.ID, kb.Name, "",
@@ -246,7 +317,7 @@ func TestWikiIndexLifecycleHTTP(t *testing.T) {
 				_, err := kbService.UpdateKnowledgeBase(ctx, kb.ID, kb.Name, "",
 					&types.KnowledgeBaseConfig{EmbeddingModelID: &next}, nil)
 				require.NoError(t, err, "cleared Wiki indexes must not permanently lock an empty KB")
-			} else {
+			} else if strings.HasPrefix(mode, "retry_") {
 				page, err := wikiRepo.GetBySlug(ctx, kb.ID, "concept/validation-4372")
 				require.NoError(t, err)
 				page.Status = types.WikiPageStatusArchived

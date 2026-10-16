@@ -249,8 +249,8 @@ type WikiPageService interface {
 
 // WikiPageRepository defines the wiki page data persistence interface.
 type WikiPageRepository interface {
-	// WithPageWriteLock serializes page persistence and retrieval replacement
-	// across service instances (and across workers with PostgreSQL).
+	// WithPageWriteLock serializes page persistence, retrieval replacement and embedding configuration
+	// within a KB across service instances (and across workers with PostgreSQL).
 	WithPageWriteLock(ctx context.Context, kbID, slug string, fn func() error) error
 	// UpdateDerivedMeta writes only link or placement caches, never lifecycle status.
 	UpdateDerivedMeta(ctx context.Context, page *types.WikiPage, placement bool) error

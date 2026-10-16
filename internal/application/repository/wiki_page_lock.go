@@ -11,7 +11,7 @@ import (
 )
 
 // Lite runs in one process. Bounded, process-wide stripes cover separate
-// repository/service instances without retaining one mutex per deleted page.
+// repository/service instances without retaining one mutex per deleted knowledge base.
 var wikiPageWriteLocks = func() [256]chan struct{} {
 	var locks [256]chan struct{}
 	for i := range locks {
@@ -20,13 +20,14 @@ var wikiPageWriteLocks = func() [256]chan struct{} {
 	return locks
 }()
 
-// WithPageWriteLock holds a page lock through BOTH the SQL write and external
-// index replacement. A lease expiring during a slow embedding request must not
+// WithPageWriteLock serializes page writes and embedding configuration within
+// a knowledge base through BOTH the SQL write and external index replacement.
+// A lease expiring during a slow embedding request must not
 // let archive/delete race a still-running publisher, so PostgreSQL uses a
 // session advisory lock rather than an expiring Redis lease.
-func (r *wikiPageRepository) WithPageWriteLock(ctx context.Context, kbID, slug string, fn func() error) error {
+func (r *wikiPageRepository) WithPageWriteLock(ctx context.Context, kbID, _ string, fn func() error) error {
 	hash := fnv.New64a()
-	_, _ = hash.Write([]byte("wiki-page:" + kbID + "\x00" + slug))
+	_, _ = hash.Write([]byte("wiki-index-kb:" + kbID))
 	key := hash.Sum64()
 	lock := wikiPageWriteLocks[key%uint64(len(wikiPageWriteLocks))]
 	select {

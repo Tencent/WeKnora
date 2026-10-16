@@ -305,7 +305,7 @@ func TestWikiPageIndexPostgresExternalWriterLock(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = conn.Close() }()
 	hash := fnv.New64a()
-	_, _ = hash.Write([]byte("wiki-page:" + page.KnowledgeBaseID + "\x00" + page.Slug))
+	_, _ = hash.Write([]byte("wiki-index-kb:" + page.KnowledgeBaseID))
 	key := int64(hash.Sum64())
 	_, err = conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key)
 	require.NoError(t, err)
