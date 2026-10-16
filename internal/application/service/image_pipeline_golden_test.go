@@ -67,6 +67,7 @@ func runImagePipeline(
 	}
 	r := &runContext{
 		payload:    payload,
+		pipelineID: string(pipeline.ID()),
 		params:     params,
 		declared:   pipeline.Fields(),
 		model:      model,

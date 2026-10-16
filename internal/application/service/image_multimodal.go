@@ -389,13 +389,15 @@ func (s *ImageMultimodalService) processImage(
 		// The preprocess action asks this to straighten the page. Nil is fine:
 		// the action reports "unavailable" and OCR reads the original bytes.
 		preprocessor: s.docReader,
-		// The mode travels in the payload, not read live from the knowledge
-		// base: a task already enqueued must run the mode it was enqueued
-		// under, exactly like the pipeline id next to it. An empty value (a
-		// payload from before this field existed) resolves to auto.
-		preprocessMode: types.ResolvePreprocessMode(
-			&types.ImageProcessingConfig{PreprocessMode: payload.PreprocessMode},
-		),
+		// The mode is read the way every other setting of this pipeline is: out
+		// of the slot, which is where the task was enqueued with it — see
+		// foldResolvedSlotSettings. The payload's own field is the fallback, for
+		// a task that was already in the queue when the mode moved into the slot.
+		preprocessMode: types.ResolvePreprocessMode(&types.ImageProcessingConfig{
+			ImagePipelineID:     string(payload.ImagePipelineID),
+			ImagePipelineParams: payload.ImagePipelineParams,
+			PreprocessMode:      payload.PreprocessMode,
+		}),
 	}
 	// Recorded here rather than inside a pipeline's Run: a run that returns early
 	// with an error still did the actions it did, and "what ran before it failed"

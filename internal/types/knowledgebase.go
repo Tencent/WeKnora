@@ -645,6 +645,20 @@ func ImagePipelineParam(params map[string]any, pipelineID, key string) (any, boo
 // it. The setting lives in the pipeline's slot under this key.
 const PreprocessModeKey = "preprocess.mode"
 
+// SetImagePipelineParam returns a copy of params with one pipeline-private
+// setting set, under the slot's key. It copies rather than writing in place: the
+// map it is given usually belongs to a loaded knowledge base, and a resolved
+// value — the one thing a run needs that the stored config may not literally
+// contain — must not be written back into the stored object.
+func SetImagePipelineParam(params map[string]any, pipelineID, key string, value any) map[string]any {
+	out := make(map[string]any, len(params)+1)
+	for k, v := range params {
+		out[k] = v
+	}
+	out[SlotKey(pipelineID, key)] = value
+	return out
+}
+
 // ResolvePreprocessMode returns the effective preprocess mode: the running
 // pipeline's slot first, then the knowledge base field that predates the slot,
 // and auto when neither says anything the run would understand. Auto is the mode

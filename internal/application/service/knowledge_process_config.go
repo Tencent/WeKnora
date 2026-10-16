@@ -100,7 +100,7 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 		PreprocessMode:           types.ResolvePreprocessMode(&imageCfg),
 	}
 	if overrides == nil {
-		return eff
+		return foldResolvedSlotSettings(eff)
 	}
 	if overrides.PreprocessMode != nil && strings.TrimSpace(*overrides.PreprocessMode) != "" {
 		// Normalized through the same resolver the knowledge base path uses, so
@@ -197,7 +197,58 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	// Match KnowledgeBase.IsGraphEnabled: graph fan-out requires extract to be on.
 	eff.GraphEnabled = eff.GraphEnabled && eff.ExtractConfig.Enabled
 
+	return foldResolvedSlotSettings(eff)
+}
+
+// foldResolvedSlotSettings gives the running pipeline's slot the settings this
+// task will actually run with, so that one map answers for all of them: the run
+// reads that map, and the trace echoes it. Without this, a task could run with a
+// mode the map did not contain, and its trace would report the field's declared
+// default instead of the mode that was used — a trace that cannot be read back
+// against the settings that produced it.
+//
+// The preprocess mode is the case it exists for: it is stored in the pipeline's
+// slot, but a knowledge base that predates the slot keeps it in the field beside
+// it, and a per-task override may set it flat.
+//
+// Nothing is written when leaving the map alone would report the same value —
+// an unset key already reports the default the field declares, and a key that
+// already holds the mode needs no help. Only a pipeline that declares the setting
+// is given it, and the map is copied rather than written through: it usually
+// belongs to a loaded knowledge base, and nothing resolved for one task may land
+// in the stored config.
+func foldResolvedSlotSettings(eff types.EffectiveProcessConfig) types.EffectiveProcessConfig {
+	pipeline := resolveImagePipeline(eff.ImagePipelineID, eff.ImageAttrsEnabled)
+	if pipeline == nil {
+		return eff
+	}
+	declared, ok := fieldOf(pipeline, types.PreprocessModeKey)
+	if !ok {
+		return eff
+	}
+	reported := declared.Default
+	if v, ok := types.ImagePipelineParam(
+		eff.ImagePipelineParams, string(eff.ImagePipelineID), declared.Key,
+	); ok {
+		reported = v
+	}
+	if reported == eff.PreprocessMode {
+		return eff
+	}
+	eff.ImagePipelineParams = types.SetImagePipelineParam(
+		eff.ImagePipelineParams, string(eff.ImagePipelineID), declared.Key, eff.PreprocessMode,
+	)
 	return eff
+}
+
+// fieldOf returns the field a pipeline declares under a key.
+func fieldOf(pipeline imagePipeline, key string) (types.ImageFieldDef, bool) {
+	for _, field := range pipeline.Fields() {
+		if field.Key == key {
+			return field, true
+		}
+	}
+	return types.ImageFieldDef{}, false
 }
 
 // validateDefaultFileImportRequirements enforces the VLM/ASR prerequisites that
