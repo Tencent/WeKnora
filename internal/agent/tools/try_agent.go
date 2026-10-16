@@ -80,8 +80,10 @@ const tryAgentDescription = "" +
 	"and the documents it cited. Use it after creating or changing an agent to check that it " +
 	"finds what it should, before telling the user it is ready. " +
 	"The agent runs with its saved configuration, and its own tools run for real: an agent that " +
-	"can write to a Wiki may write during the trial. Tools that would ask the user for " +
-	"confirmation are refused instead. The trial runs in a separate conversation that the user " +
+	"can write to a Wiki may write during the trial. Nobody can answer its prompts, so a tool that " +
+	"needs the user's approval is refused and an MCP service that needs OAuth authorization fails, " +
+	"each with an error saying so; tell the user those steps were not covered and need a real " +
+	"conversation or the service's authorization first. The trial runs in a separate conversation that the user " +
 	"never sees, removed afterwards, and it costs model calls like any chat. " +
 	"The assistant itself and agents that manage WeKnora cannot be tried. " +
 	"At most 3 trials per turn: pick questions whose answers you can judge from the knowledge you know is there."

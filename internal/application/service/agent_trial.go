@@ -131,6 +131,9 @@ func (r *AgentTrialRunner) run(
 	ctx context.Context, sessions interfaces.SessionService, session *types.Session,
 	agent *types.CustomAgent, question string,
 ) *tools.AgentTrial {
+	// Nobody sees the trial's conversation, so its approvals and OAuth
+	// prompts are refused at once rather than holding it to the timeout.
+	ctx = types.WithMCPOAuthNonInteractive(types.WithUnattendedRun(ctx))
 	ctx, cancel := context.WithTimeout(ctx, agentTrialTimeout)
 	defer cancel()
 

@@ -63,9 +63,9 @@ func TestBuiltinInfrastructureWrites(t *testing.T) {
 	assert.True(t, toggle.Required, "a toggle without enabled would be an env write")
 }
 
-func TestBuiltinSkillInstallsAlwaysAsk(t *testing.T) {
+func TestBuiltinInstallsAlwaysAsk(t *testing.T) {
 	catalog := Builtin()
-	for _, id := range []string{"skill.install", "skill.install_catalog"} {
+	for _, id := range []string{"skill.install", "skill.install_catalog", "mcp_service.create"} {
 		op, ok := catalog.Get(id)
 		require.True(t, ok, id)
 		assert.True(t, op.AlwaysConfirm, id)
