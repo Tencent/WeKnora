@@ -37,6 +37,45 @@ curl -X POST $BASE/api/v1/knowledge-bases -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"name":"产品文档","type":"document"}'
 ```
 
+### POST /api/v1/knowledge-bases/:id/graph-search {#graph-search}
+
+独立的只读 JSON 图谱查询。按 `query` 对实体名称做**区分大小写的子串匹配**，返回匹配实体、其一跳邻居、定向关系和来源分块；也返回没有关系的匹配实体。无需把 Agent 对话输出重新解析成结构化数据。
+
+权限：Viewer+ 且对该 KB 有 read 权限（自有、组织共享或共享 Agent）。API key 需 `retrieve`/full，并受 KB 白名单约束。共享 Agent 可带 `agent_id` / `agent_source_tenant_id`，授权规则与 KB 详情一致。
+
+本接口不调用 Chat、Embedding 或 Rerank 模型，不修改数据，也不改变 `knowledge-search` / `hybrid-search` 的默认行为。自然语言实体抽取、跨库搜索、多跳遍历不在此接口范围内。
+
+| JSON 字段 | 默认值 | 上限 / 含义 |
+| --- | --- | --- |
+| `query` | 必填 | 去除首尾空白后 1–512 字符；不是 Cypher |
+| `max_nodes` | 50 | 100，包含匹配实体和邻居 |
+| `max_relations` | 100 | 200 |
+| `max_source_chunks` | 20 | 50，来源按 ID 去重 |
+
+上限字段 `0` 使用默认值；负数或超过上限返回 400。请求体最多 8 KiB，仅接收一个 JSON 对象，未知字段会被拒绝。
+
+```bash
+curl -X POST "$BASE/api/v1/knowledge-bases/$KB_ID/graph-search" \
+  -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
+  -d '{"query":"Acme","max_nodes":50,"max_relations":100,"max_source_chunks":20}'
+```
+
+响应：200 `{"success":true,"data":{...}}`。`data` 字段：
+
+- `knowledge_base_id`、`query`：本次作用域和规范化查询。
+- `entities`：`id`、`name`、`knowledge_id`、`attributes`、`source_chunk_ids`。ID 是不透明的文档实体身份，不暴露 Neo4j element ID；同名但不同文档的实体不会合并。名称/所属文档不变时，重建图存储不会改变公共 ID。
+- `relationships`：`id`、`source_id`、`target_id`、`type`、`source_chunk_ids`。方向为存储方向，不随查询命中哪一端而反转；两端必须实际出现在 `entities`。来源列表是两端实体来源的并集，不表示每个分块都直接陈述该关系。
+- `source_chunks`：`id`、`knowledge_id`、`title`、`content`、`chunk_index`、`start_at`、`end_at`、`content_truncated`、`title_truncated`。正文最多 2000 字符，标题最多 512 字符；截断时保留原始位置字段，不伪装成完整正文。无匹配结果时三个列表均为 `[]`。
+- `meta`：`truncated`、`truncation_reasons` 和本次生效的三个上限。它不是全图总量统计，也不提供分页游标；需要更完整的结果时应缩小实体名范围。
+
+为限制模糊查询成本，内部最多检查 100 个名称匹配种子、512 条一跳关系和 512 个来源分块；查询执行最多 10 秒。候选种子按名称完全匹配优先、名称长度、名称、文档身份排序。属性最多 20 项，每项最多 1000 字符。
+
+`truncation_reasons` 的值包括 `candidate_seeds`、`candidate_relations`、`candidate_source_chunks`、`max_nodes`、`max_relations`、`max_source_chunks`、`entity_fields`、`relation_fields`、`source_fields`。只有实际触达的上限才标注，不推测被省略结果的精确数量。
+
+来源校验采用保守规则：实体引用的**所有**分块都必须属于当前授权 KB 的该文档，且文档/分块未删除、未禁用，文档不在删除中、分块当前索引就绪；任一来源失效即省略该实体及相关关系。关系两端还必须属于同一文档。无法校验或因预算未检查的图谱事实不会作为已验证结果返回。这可能降低部分旧图谱的召回率；查询不会自动重建图谱，也不能保证模型抽取的事实本身正确。
+
+状态：400 参数错误；401 未认证；403 无读取权限/超出 key 范围；404 KB 不存在；409 KB 未开启图谱；500 来源数据库校验失败；503 图谱未配置、连接失败或查询超时。错误不附带部分图谱结果。部署配置见[知识图谱](../03-features/09-knowledge-graph.md)。
+
 ### 自动标签与 AI 描述配置
 
 创建知识库时 `auto_tag_config`、`profile_config` 位于顶层；更新时放在 `config.auto_tag_config`、`config.profile_config`。两者仅 document 知识库支持，默认 enabled=false。
