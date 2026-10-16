@@ -102,7 +102,7 @@ func BrokenImagePipelineRules(
 	if pipeline == nil {
 		return nil
 	}
-	return EvaluateImagePipelineRules(pipeline.Rules(), pipeline.Fields(), params)
+	return EvaluateImagePipelineRules(pipeline.ID(), pipeline.Rules(), pipeline.Fields(), params)
 }
 
 // ListImagePipelines renders every registered pipeline as the settings panel

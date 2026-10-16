@@ -1,10 +1,12 @@
 package service
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/require"
 )
 
 // TestManualPipelineRejectsEveryActionOff covers the rule the manual pipeline
@@ -102,5 +104,55 @@ func TestValidationGoesThroughTheSavedPipeline(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "noActionEnabled") {
 		t.Errorf("Validate(manual, both off) = %v, want the noActionEnabled message key", err)
+	}
+}
+
+// Exercise the public validation path and the actual model calls, including
+// legacy IDs, so accepted configurations cannot silently execute no actions.
+func TestImagePipelineValidationMatchesExecution(t *testing.T) {
+	cases := []struct {
+		name      string
+		params    map[string]any
+		wantCalls int
+	}{
+		{"defaults", nil, 2},
+		{"namespace overrides bare keys", map[string]any{"enable_caption": true, "enable_ocr": true, "default.enable_caption": false, "default.enable_ocr": false}, 0},
+		{"namespace only", map[string]any{"default.enable_caption": false, "default.enable_ocr": false}, 0},
+		{"namespace enables caption", map[string]any{"enable_caption": false, "enable_ocr": false, "default.enable_caption": true}, 1},
+		{"other namespace ignored", map[string]any{"smartocr.enable_caption": false, "smartocr.enable_ocr": false}, 2},
+		{"null uses declared default", map[string]any{"enable_caption": nil, "enable_ocr": false}, 1},
+		{"null namespace falls through to bare key", map[string]any{"default.enable_caption": nil, "enable_caption": false, "enable_ocr": false}, 0},
+		{"string true", map[string]any{"enable_caption": "true", "enable_ocr": false}, 1},
+		{"string on", map[string]any{"enable_caption": "on", "enable_ocr": false}, 1},
+		{"string one", map[string]any{"enable_caption": "1", "enable_ocr": false}, 1},
+		{"string false", map[string]any{"enable_caption": "false", "enable_ocr": false}, 0},
+		{"numeric values are not boolean switches", map[string]any{"enable_caption": float64(1), "enable_ocr": false}, 0},
+	}
+	for _, id := range []types.ImagePipelineID{types.ImagePipelineDefault, types.ImagePipelineLegacyCaptionOCR, ""} {
+		for _, tc := range cases {
+			t.Run(string(id)+"/"+tc.name, func(t *testing.T) {
+				enabled := true
+				overrides := &types.KnowledgeProcessOverrides{EnableMultimodel: &enabled, ImagePipelineID: &id, ImagePipelineParams: tc.params}
+				validationErr := ValidateProcessOverrides(context.Background(), &types.KnowledgeBase{}, overrides, []string{"pdf"})
+				pipelineErr := defaultPipeline{}.Validate(tc.params)
+				if tc.wantCalls == 0 {
+					require.ErrorContains(t, validationErr, "noActionEnabled")
+					require.ErrorContains(t, pipelineErr, "noActionEnabled")
+					return
+				}
+				require.NoError(t, validationErr)
+				require.NoError(t, pipelineErr)
+				repo := &attrsChunkRepo{}
+				svc := newAttrsTestService(&attrsFileService{body: testPNG(t)}, repo)
+				model := &stubVLM{}
+				out := types.JSONMap{}
+				err := svc.processImage(context.Background(), &types.ImageMultimodalPayload{
+					ImageURL: "local://test.png", ImagePipelineID: id, ImagePipelineParams: tc.params,
+				}, model, types.VLMConfig{}, noopSpanTracker{}, out)
+				require.NoError(t, err)
+				require.Len(t, model.prompts, tc.wantCalls)
+				require.Len(t, repo.created, tc.wantCalls)
+			})
+		}
 	}
 }

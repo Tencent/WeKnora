@@ -1436,11 +1436,13 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
   if (o.image_pipeline != null) {
     // 存量覆盖里可能是更名前的 caption_ocr / ob_cap_ocr，交给共享助手归一。
     s.imagePipeline = normalizeImagePipelineId(o.image_pipeline) || IMAGE_PIPELINE_DEFAULT
-  }
-  if (o.image_pipeline_params != null) s.imagePipelineParams = o.image_pipeline_params
-  else if (o.image_attrs_enabled != null && o.image_pipeline == null) {
-    // 旧版覆盖只带观察开关：按同一规则还原出方案选择。
-    s.imagePipeline = o.image_attrs_enabled ? IMAGE_PIPELINE_SMARTOCR : IMAGE_PIPELINE_DEFAULT
+    // 与后端 ResolveProcessConfig 一致：显式方案和参数整体替换，缺省参数使用方案默认值。
+    s.imagePipelineParams = o.image_pipeline_params ?? {}
+  } else if (o.image_attrs_enabled != null) {
+    // 旧版观察开关只在切换方案时丢弃原参数；同一方案继续继承知识库设置。
+    const pipeline = o.image_attrs_enabled ? IMAGE_PIPELINE_SMARTOCR : IMAGE_PIPELINE_DEFAULT
+    if (pipeline !== s.imagePipeline) s.imagePipelineParams = {}
+    s.imagePipeline = pipeline
   }
   if (o.image_vector_enabled != null) s.imageVectorEnabled = o.image_vector_enabled
   if (o.image_actions) s.imageActions = mergeImageActions(o.image_actions)

@@ -8,7 +8,7 @@
  * A field is rendered by its declared type, and its label falls back to the
  * backend's own wording when this locale has nothing for it.
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   fetchImagePipelines,
@@ -61,13 +61,23 @@ watch(invalid, (value) => emit('update:invalid', value), { immediate: true })
 
 /** The debounce keeps a dribbled change from posting on every keystroke. */
 let validationTimer: ReturnType<typeof setTimeout> | undefined
+let validationGeneration = 0
+let disposed = false
 
 function scheduleValidation() {
+  if (disposed) return
+  // Invalidate in-flight responses as soon as the inputs change, including
+  // the interval before the next debounced request starts.
+  validationGeneration++
+  violations.value = []
+  validationFailed.value = false
   if (validationTimer) clearTimeout(validationTimer)
   validationTimer = setTimeout(() => void validate(), 300)
 }
 
 async function validate() {
+  if (disposed) return
+  const generation = ++validationGeneration
   const spec = current.value
   if (!spec) {
     violations.value = []
@@ -75,9 +85,11 @@ async function validate() {
   }
   try {
     const result = await validateImagePipelines(spec.id, props.params ?? {})
+    if (generation !== validationGeneration) return
     violations.value = result.violations ?? []
     validationFailed.value = false
   } catch (error) {
+    if (generation !== validationGeneration) return
     // An unreachable check is not a verdict. The panel must not block saving on
     // a network hiccup, and the save path asks the backend again anyway.
     violations.value = []
@@ -87,6 +99,12 @@ async function validate() {
 }
 
 watch(() => [props.pipelineId, props.params], scheduleValidation)
+
+onBeforeUnmount(() => {
+  disposed = true
+  validationGeneration++
+  if (validationTimer) clearTimeout(validationTimer)
+})
 
 /**
  * A field's declared default. The backend sends JSON, so an unset key arrives

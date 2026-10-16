@@ -1,10 +1,10 @@
 // The rules a pipeline declares over its own tunables, evaluated from the
-// values a knowledge base resolved. The panel runs the same evaluation on the
-// frontend so it can warn before the user commits, and the save path runs it
+// values a knowledge base resolved. The panel requests this evaluation so it
+// can warn before the user commits, and the save path runs it
 // again on the backend so that a caller which never showed the panel cannot
 // store something the pipeline would not run. Both sides read the same rules
 // out of the spec, so a rule added here shows up in the UI with no frontend
-// change; the frontend's own copy of this evaluation is tested against these.
+// change.
 
 package service
 
@@ -31,10 +31,14 @@ import (
 // way the run does: a knowledge base saved before a field existed is not told
 // that it switched something off by never mentioning it.
 func EvaluateImagePipelineRules(
+	pipelineID types.ImagePipelineID,
 	rules []types.ImagePipelineRules,
 	fields []types.ImageFieldDef,
 	params map[string]any,
 ) []*types.ImagePipelineValidationError {
+	// Use the execution-time resolver for namespace precedence, defaults and
+	// boolean coercion. A separate interpretation can accept a no-op pipeline.
+	r := &runContext{pipelineID: string(pipelineID), declared: fields, params: params}
 	broken := make([]*types.ImagePipelineValidationError, 0, len(rules))
 	for _, rule := range rules {
 		if len(rule.AtLeastOne) == 0 || rule.MessageKey == "" {
@@ -42,7 +46,7 @@ func EvaluateImagePipelineRules(
 		}
 		satisfied := false
 		for _, key := range rule.AtLeastOne {
-			if imagePipelineBoolValue(key, fields, params) {
+			if r.BoolParam(key) {
 				satisfied = true
 				break
 			}
@@ -92,42 +96,4 @@ func (s *knowledgeBaseService) validateImagePipelineConfig(
 			pipelineID, kb.ID, err)
 	}
 	return err
-}
-
-// imagePipelineBoolValue reads one tunable as a boolean, falling back to the
-// field's declared default for a key the parameters never carried.
-func imagePipelineBoolValue(key string, fields []types.ImageFieldDef, params map[string]any) bool {
-	raw, carried := params[key]
-	if !carried {
-		for _, field := range fields {
-			if field.Key == key {
-				raw = field.Default
-				break
-			}
-		}
-	}
-	return asBoolParam(raw)
-}
-
-// asBoolParam reads a tunable's stored value. JSON gives a boolean as a bool
-// or, when it went through a map[string]any, as one of the numeric or string
-// spellings a form may have written.
-func asBoolParam(value any) bool {
-	switch typed := value.(type) {
-	case nil:
-		return false
-	case bool:
-		return typed
-	case string:
-		return typed == "true"
-	case float64:
-		return typed != 0
-	case float32:
-		return typed != 0
-	case int:
-		return typed != 0
-	case int64:
-		return typed != 0
-	}
-	return false
 }

@@ -357,7 +357,7 @@ func (s *ImageMultimodalService) processImage(
 	// outcome summary, without failing or retrying the whole image).
 	rc := &runContext{
 		payload:    payload,
-		pipelineID: string(payload.ImagePipelineID),
+		pipelineID: string(pipeline.ID()),
 		params:     payload.ImagePipelineParams,
 		declared:   pipeline.Fields(),
 		model:      vlmModel,
