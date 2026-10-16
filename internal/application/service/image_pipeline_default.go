@@ -63,8 +63,10 @@ func (defaultPipeline) Fields() []types.ImageFieldDef {
 			Default:       true,
 			DecidesAction: true,
 		},
-		imageActionThinkingFields[0],
-		imageActionThinkingFields[1],
+		// The thinking switches are action-level fields, declared once by the
+		// actions themselves and carried in here by reference.
+		captionThinkingField,
+		ocrThinkingField,
 		{
 			Key:   captionFieldKeyNoteActions,
 			Type:  types.ImageFieldTypeNote,
