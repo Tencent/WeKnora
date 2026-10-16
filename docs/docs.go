@@ -18913,18 +18913,25 @@ const docTemplate = `{
                 "tags": [
                     "System Admin"
                 ],
-                "summary": "List all system administrators",
+                "summary": "查询系统管理员（List system administrators）",
                 "parameters": [
                     {
+                        "minimum": 0,
                         "type": "integer",
                         "default": 0,
+                        "x-agent": true,
+                        "x-agent-maximum": "1000000",
                         "description": "Page offset",
                         "name": "offset",
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
                         "default": 50,
+                        "x-agent": true,
+                        "x-agent-maximum": "50",
                         "description": "Page size (max 200)",
                         "name": "limit",
                         "in": "query"
@@ -18944,7 +18951,15 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "system_admin.list_admins",
+                    "max_items": 50,
+                    "risk": "read",
+                    "root": "admins",
+                    "system_admin": true
+                },
+                "x-agent-hint": "Lists platform system administrators across workspaces. Paginate with offset/limit until total is covered. These privileges differ from workspace roles."
             }
         },
         "/system/admin/model-catalog": {
@@ -19266,7 +19281,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_handler.RuntimeQueuesResponse"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "system_admin.get_queues",
+                    "risk": "read",
+                    "system_admin": true
+                },
+                "x-agent-hint": "Reads platform-wide queue depth, worker pools and model concurrency. available false means unsupported, not healthy or empty. Check queues_error, workers_error and models_error before interpreting counts. failed is today's counter; retry/archived are current depths. Pool concurrency is per instance; cluster_capacity and active reflect live worker heartbeats. Does not control workers or retry tasks."
             }
         },
         "/system/admin/runtime/queues/{queue}/archived": {
@@ -19305,10 +19326,11 @@ const docTemplate = `{
                 "tags": [
                     "System Admin"
                 ],
-                "summary": "List runtime queue tasks by state",
+                "summary": "查询队列任务与失败记录（List runtime queue tasks）",
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": true,
                         "description": "Queue name",
                         "name": "queue",
                         "in": "path",
@@ -19324,6 +19346,7 @@ const docTemplate = `{
                             "completed"
                         ],
                         "type": "string",
+                        "x-agent": true,
                         "description": "Task state",
                         "name": "state",
                         "in": "query",
@@ -19331,13 +19354,18 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "x-agent": true,
                         "description": "Opaque continuation cursor",
                         "name": "cursor",
                         "in": "query"
                     },
                     {
+                        "maximum": 100,
+                        "minimum": 1,
                         "type": "integer",
                         "default": 20,
+                        "x-agent": true,
+                        "x-agent-maximum": "50",
                         "description": "Page size",
                         "name": "page_size",
                         "in": "query"
@@ -19350,7 +19378,15 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_handler.RuntimeTasksResponse"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "system_admin.list_tasks",
+                    "max_items": 50,
+                    "risk": "read",
+                    "root": "tasks",
+                    "system_admin": true
+                },
+                "x-agent-hint": "Lists platform-wide tasks in one queue and state. Choose queue from system_admin.get_queues, never guess. For failures inspect retry and archived; active/pending help diagnose backlog. available false means unsupported. Continue with next_cursor while has_more; on expired cursor restart from the first page. error_category is a heuristic, not the full cause; unknown needs the operator task page/logs. Raw errors, payloads, results and worker addresses are omitted. This operation cannot retry, cancel or delete tasks."
             }
         },
         "/system/admin/runtime/queues/{queue}/tasks/{task_id}/actions/{action}": {
@@ -19401,6 +19437,45 @@ const docTemplate = `{
                         }
                     }
                 }
+            }
+        },
+        "/system/admin/settings-summary": {
+            "get": {
+                "description": "返回已注册的系统设置及脱敏值，可按完整设置键过滤",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "查询系统设置",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": true,
+                        "description": "完整设置键；省略返回所有已注册设置",
+                        "name": "key",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SystemSettingSummary"
+                            }
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "system_admin.list_settings",
+                    "max_items": 100,
+                    "risk": "read",
+                    "system_admin": true
+                },
+                "x-agent-hint": "Reads registered platform settings, optionally selecting an exact key from this list. value_json encodes the settings page value, including service fallbacks; it is not proof that a running process has reloaded a restart-required change. value_hidden means secret, invalid or oversized and never means empty/default. Unknown out-of-band database rows are excluded. Read-only: cannot change or reset settings."
             }
         },
         "/system/admin/settings/{key}": {
@@ -19573,18 +19648,25 @@ const docTemplate = `{
                 "tags": [
                     "System Admin"
                 ],
-                "summary": "List all platform users",
+                "summary": "查询平台用户（List platform users）",
                 "parameters": [
                     {
+                        "minimum": 0,
                         "type": "integer",
                         "default": 0,
+                        "x-agent": true,
+                        "x-agent-maximum": "1000000",
                         "description": "Page offset",
                         "name": "offset",
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
                         "default": 50,
+                        "x-agent": true,
+                        "x-agent-maximum": "50",
                         "description": "Page size (max 200)",
                         "name": "limit",
                         "in": "query"
@@ -19604,7 +19686,15 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "system_admin.list_users",
+                    "max_items": 50,
+                    "risk": "read",
+                    "root": "users",
+                    "system_admin": true
+                },
+                "x-agent-hint": "Lists platform users across workspaces, including account enabled state and system administrator flag. Follow has_more using offset + limit. tenant_id is the home workspace, not a list of memberships. No search or role filter is supported: paginate before drawing conclusions."
             }
         },
         "/system/admin/users/create": {
@@ -24275,19 +24365,24 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "active": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "limit": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "model_id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "waiting": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 }
             }
         },
@@ -31076,56 +31171,70 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "active": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "archived": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "completed": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "failed": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "latency_ms": {
                     "description": "LatencyMs is the age of the oldest pending task, in milliseconds.",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "memory_usage_bytes": {
                     "description": "MemoryUsageBytes is the approximate Redis memory the queue occupies.",
                     "type": "integer"
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "paused": {
                     "description": "Paused reports whether the queue is paused (tasks not consumed).",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "pending": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "pool": {
                     "description": "Pool is the independent worker pool that drains this queue.",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "processed": {
                     "description": "Processed / Failed are today's counters (reset daily).",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "retry": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "scheduled": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "size": {
                     "description": "Size is the total number of tasks in the queue (pending + active +\nscheduled + retry + aggregating + archived).",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "weight": {
                     "description": "Weight is the queue's scheduling weight inside its pool.",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 }
             }
         },
@@ -31562,49 +31671,67 @@ const docTemplate = `{
                     }
                 },
                 "completed_at": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "data_source_id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "deadline": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "enqueued_at": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
+                },
+                "error_category": {
+                    "description": "ErrorCategory is a heuristic summary; raw upstream errors are not sent to the assistant.",
+                    "type": "string",
+                    "x-agent": true
                 },
                 "id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "is_orphaned": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "knowledge_base_id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "knowledge_count": {
                     "type": "integer"
                 },
                 "knowledge_id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "last_error": {
                     "type": "string"
                 },
                 "last_failed_at": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "max_retry": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "next_process_at": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "queue": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "retried": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "source_id": {
                     "type": "string"
@@ -31613,13 +31740,20 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "started_at": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "state": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskState"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskState"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "sync_log_id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "target_id": {
                     "type": "string"
@@ -31628,13 +31762,16 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "task_id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "tenant_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "type": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "worker": {
                     "type": "string"
@@ -32924,6 +33061,47 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.SystemSettingSummary": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "description": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "enum": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true
+                },
+                "key": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "requires_restart": {
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "value_hidden": {
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "value_json": {
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-runes": "4096"
+                },
+                "value_type": {
+                    "type": "string",
+                    "x-agent": true
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.TOSEngineConfig": {
             "type": "object",
             "properties": {
@@ -33617,31 +33795,38 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "created_at": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "email": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "is_active": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "is_system_admin": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "preferences": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UserPreferences"
                 },
                 "tenant_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "updated_at": {
                     "type": "string"
                 },
                 "username": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -36912,13 +37097,16 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "has_more": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "limit": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "offset": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "users": {
                     "type": "array",
@@ -37111,7 +37299,8 @@ const docTemplate = `{
                     }
                 },
                 "total": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 }
             }
         },
@@ -38267,16 +38456,23 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "available": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "model_limiter_available": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "models": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_models_limiter.RuntimeStat"
-                    }
+                    },
+                    "x-agent": true
+                },
+                "models_error": {
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "parse_concurrency": {
                     "description": "compatibility alias for upstream_concurrency",
@@ -38286,23 +38482,35 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/internal_handler.RuntimeWorkerPool"
-                    }
+                    },
+                    "x-agent": true
                 },
                 "queues": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.QueueStat"
-                    }
+                    },
+                    "x-agent": true
+                },
+                "queues_error": {
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "timestamp": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "upstream_concurrency": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "wiki_concurrency": {
                     "description": "compatibility field",
                     "type": "integer"
+                },
+                "workers_error": {
+                    "type": "boolean",
+                    "x-agent": true
                 }
             }
         },
@@ -38310,16 +38518,20 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "available": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "has_more": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "next_cursor": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "page_size": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "tasks": {
                     "type": "array",
@@ -38335,29 +38547,36 @@ const docTemplate = `{
             "properties": {
                 "active": {
                     "description": "live workers assigned to this pool",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "cluster_capacity": {
                     "description": "sum of live server concurrency",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "concurrency": {
                     "description": "configured per instance",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "instances": {
                     "description": "live asynq server heartbeats",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "queue_count": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "utilization": {
                     "description": "Active / ClusterCapacity",
-                    "type": "number"
+                    "type": "number",
+                    "x-agent": true
                 }
             }
         },

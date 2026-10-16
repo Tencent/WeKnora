@@ -1140,14 +1140,19 @@ definitions:
     properties:
       active:
         type: integer
+        x-agent: true
       limit:
         type: integer
+        x-agent: true
       model_id:
         type: string
+        x-agent: true
       name:
         type: string
+        x-agent: true
       waiting:
         type: integer
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_models_providers.AuthStyle:
     enum:
@@ -6583,43 +6588,57 @@ definitions:
     properties:
       active:
         type: integer
+        x-agent: true
       archived:
         type: integer
+        x-agent: true
       completed:
         type: integer
+        x-agent: true
       failed:
         type: integer
+        x-agent: true
       latency_ms:
         description: LatencyMs is the age of the oldest pending task, in milliseconds.
         type: integer
+        x-agent: true
       memory_usage_bytes:
         description: MemoryUsageBytes is the approximate Redis memory the queue occupies.
         type: integer
       name:
         type: string
+        x-agent: true
       paused:
         description: Paused reports whether the queue is paused (tasks not consumed).
         type: boolean
+        x-agent: true
       pending:
         type: integer
+        x-agent: true
       pool:
         description: Pool is the independent worker pool that drains this queue.
         type: string
+        x-agent: true
       processed:
         description: Processed / Failed are today's counters (reset daily).
         type: integer
+        x-agent: true
       retry:
         type: integer
+        x-agent: true
       scheduled:
         type: integer
+        x-agent: true
       size:
         description: |-
           Size is the total number of tasks in the queue (pending + active +
           scheduled + retry + aggregating + archived).
         type: integer
+        x-agent: true
       weight:
         description: Weight is the queue's scheduling weight inside its pool.
         type: integer
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.RegisterRequest:
     properties:
@@ -6958,54 +6977,79 @@ definitions:
         type: array
       completed_at:
         type: string
+        x-agent: true
       data_source_id:
         type: string
+        x-agent: true
       deadline:
         type: string
+        x-agent: true
       enqueued_at:
         type: string
+        x-agent: true
+      error_category:
+        description: ErrorCategory is a heuristic summary; raw upstream errors are
+          not sent to the assistant.
+        type: string
+        x-agent: true
       id:
         type: string
+        x-agent: true
       is_orphaned:
         type: boolean
+        x-agent: true
       knowledge_base_id:
         type: string
+        x-agent: true
       knowledge_count:
         type: integer
       knowledge_id:
         type: string
+        x-agent: true
       last_error:
         type: string
       last_failed_at:
         type: string
+        x-agent: true
       max_retry:
         type: integer
+        x-agent: true
       next_process_at:
         type: string
+        x-agent: true
       queue:
         type: string
+        x-agent: true
       retried:
         type: integer
+        x-agent: true
       source_id:
         type: string
       source_kb_id:
         type: string
       started_at:
         type: string
+        x-agent: true
       state:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskState'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskState'
+        x-agent: true
       sync_log_id:
         type: string
+        x-agent: true
       target_id:
         type: string
       target_kb_id:
         type: string
       task_id:
         type: string
+        x-agent: true
       tenant_id:
         type: integer
+        x-agent: true
       type:
         type: string
+        x-agent: true
       worker:
         type: string
     type: object
@@ -8070,6 +8114,36 @@ definitions:
           InputNumber vs Input vs Switch.
         type: string
     type: object
+  github_com_Tencent_WeKnora_internal_types.SystemSettingSummary:
+    properties:
+      category:
+        type: string
+        x-agent: true
+      description:
+        type: string
+        x-agent: true
+      enum:
+        items:
+          type: string
+        type: array
+        x-agent: true
+      key:
+        type: string
+        x-agent: true
+      requires_restart:
+        type: boolean
+        x-agent: true
+      value_hidden:
+        type: boolean
+        x-agent: true
+      value_json:
+        type: string
+        x-agent: true
+        x-agent-max-runes: "4096"
+      value_type:
+        type: string
+        x-agent: true
+    type: object
   github_com_Tencent_WeKnora_internal_types.TOSEngineConfig:
     properties:
       access_key:
@@ -8592,22 +8666,29 @@ definitions:
         type: boolean
       created_at:
         type: string
+        x-agent: true
       email:
         type: string
+        x-agent: true
       id:
         type: string
+        x-agent: true
       is_active:
         type: boolean
+        x-agent: true
       is_system_admin:
         type: boolean
+        x-agent: true
       preferences:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UserPreferences'
       tenant_id:
         type: integer
+        x-agent: true
       updated_at:
         type: string
       username:
         type: string
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.UserPreferences:
     properties:
@@ -11142,10 +11223,13 @@ definitions:
     properties:
       has_more:
         type: boolean
+        x-agent: true
       limit:
         type: integer
+        x-agent: true
       offset:
         type: integer
+        x-agent: true
       users:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo'
@@ -11275,6 +11359,7 @@ definitions:
         type: array
       total:
         type: integer
+        x-agent: true
     type: object
   internal_handler.ListTopicsResponse:
     properties:
@@ -12115,12 +12200,18 @@ definitions:
     properties:
       available:
         type: boolean
+        x-agent: true
       model_limiter_available:
         type: boolean
+        x-agent: true
       models:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_models_limiter.RuntimeStat'
         type: array
+        x-agent: true
+      models_error:
+        type: boolean
+        x-agent: true
       parse_concurrency:
         description: compatibility alias for upstream_concurrency
         type: integer
@@ -12128,28 +12219,42 @@ definitions:
         items:
           $ref: '#/definitions/internal_handler.RuntimeWorkerPool'
         type: array
+        x-agent: true
       queues:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.QueueStat'
         type: array
+        x-agent: true
+      queues_error:
+        type: boolean
+        x-agent: true
       timestamp:
         type: integer
+        x-agent: true
       upstream_concurrency:
         type: integer
+        x-agent: true
       wiki_concurrency:
         description: compatibility field
         type: integer
+      workers_error:
+        type: boolean
+        x-agent: true
     type: object
   internal_handler.RuntimeTasksResponse:
     properties:
       available:
         type: boolean
+        x-agent: true
       has_more:
         type: boolean
+        x-agent: true
       next_cursor:
         type: string
+        x-agent: true
       page_size:
         type: integer
+        x-agent: true
       tasks:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskInfo'
@@ -12162,22 +12267,29 @@ definitions:
       active:
         description: live workers assigned to this pool
         type: integer
+        x-agent: true
       cluster_capacity:
         description: sum of live server concurrency
         type: integer
+        x-agent: true
       concurrency:
         description: configured per instance
         type: integer
+        x-agent: true
       instances:
         description: live asynq server heartbeats
         type: integer
+        x-agent: true
       name:
         type: string
+        x-agent: true
       queue_count:
         type: integer
+        x-agent: true
       utilization:
         description: Active / ClusterCapacity
         type: number
+        x-agent: true
     type: object
   internal_handler.SandboxCheckItem:
     properties:
@@ -25852,13 +25964,20 @@ paths:
       - default: 0
         description: Page offset
         in: query
+        minimum: 0
         name: offset
         type: integer
+        x-agent: true
+        x-agent-maximum: "1000000"
       - default: 50
         description: Page size (max 200)
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
+        x-agent: true
+        x-agent-maximum: "50"
       produces:
       - application/json
       responses:
@@ -25871,9 +25990,18 @@ paths:
           schema:
             additionalProperties: true
             type: object
-      summary: List all system administrators
+      summary: 查询系统管理员（List system administrators）
       tags:
       - System Admin
+      x-agent:
+        id: system_admin.list_admins
+        max_items: 50
+        risk: read
+        root: admins
+        system_admin: true
+      x-agent-hint: Lists platform system administrators across workspaces. Paginate
+        with offset/limit until total is covered. These privileges differ from workspace
+        roles.
   /system/admin/model-catalog:
     get:
       description: |-
@@ -26104,6 +26232,16 @@ paths:
       summary: 获取解析任务队列运行时状态
       tags:
       - 系统管理
+      x-agent:
+        id: system_admin.get_queues
+        risk: read
+        system_admin: true
+      x-agent-hint: Reads platform-wide queue depth, worker pools and model concurrency.
+        available false means unsupported, not healthy or empty. Check queues_error,
+        workers_error and models_error before interpreting counts. failed is today's
+        counter; retry/archived are current depths. Pool concurrency is per instance;
+        cluster_capacity and active reflect live worker heartbeats. Does not control
+        workers or retry tasks.
   /system/admin/runtime/queues/{queue}/archived:
     delete:
       parameters:
@@ -26130,6 +26268,7 @@ paths:
         name: queue
         required: true
         type: string
+        x-agent: true
       - description: Task state
         enum:
         - pending
@@ -26142,15 +26281,21 @@ paths:
         name: state
         required: true
         type: string
+        x-agent: true
       - description: Opaque continuation cursor
         in: query
         name: cursor
         type: string
+        x-agent: true
       - default: 20
         description: Page size
         in: query
+        maximum: 100
+        minimum: 1
         name: page_size
         type: integer
+        x-agent: true
+        x-agent-maximum: "50"
       produces:
       - application/json
       responses:
@@ -26158,9 +26303,22 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/internal_handler.RuntimeTasksResponse'
-      summary: List runtime queue tasks by state
+      summary: 查询队列任务与失败记录（List runtime queue tasks）
       tags:
       - System Admin
+      x-agent:
+        id: system_admin.list_tasks
+        max_items: 50
+        risk: read
+        root: tasks
+        system_admin: true
+      x-agent-hint: Lists platform-wide tasks in one queue and state. Choose queue
+        from system_admin.get_queues, never guess. For failures inspect retry and
+        archived; active/pending help diagnose backlog. available false means unsupported.
+        Continue with next_cursor while has_more; on expired cursor restart from the
+        first page. error_category is a heuristic, not the full cause; unknown needs
+        the operator task page/logs. Raw errors, payloads, results and worker addresses
+        are omitted. This operation cannot retry, cancel or delete tasks.
   /system/admin/runtime/queues/{queue}/tasks/{task_id}/actions/{action}:
     post:
       parameters:
@@ -26195,6 +26353,38 @@ paths:
       summary: Run a safe runtime task action
       tags:
       - System Admin
+  /system/admin/settings-summary:
+    get:
+      description: 返回已注册的系统设置及脱敏值，可按完整设置键过滤
+      parameters:
+      - description: 完整设置键；省略返回所有已注册设置
+        in: query
+        name: key
+        type: string
+        x-agent: true
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SystemSettingSummary'
+            type: array
+      summary: 查询系统设置
+      tags:
+      - System Admin
+      x-agent:
+        id: system_admin.list_settings
+        max_items: 100
+        risk: read
+        system_admin: true
+      x-agent-hint: 'Reads registered platform settings, optionally selecting an exact
+        key from this list. value_json encodes the settings page value, including
+        service fallbacks; it is not proof that a running process has reloaded a restart-required
+        change. value_hidden means secret, invalid or oversized and never means empty/default.
+        Unknown out-of-band database rows are excluded. Read-only: cannot change or
+        reset settings.'
   /system/admin/settings/{key}:
     delete:
       description: |-
@@ -26330,13 +26520,20 @@ paths:
       - default: 0
         description: Page offset
         in: query
+        minimum: 0
         name: offset
         type: integer
+        x-agent: true
+        x-agent-maximum: "1000000"
       - default: 50
         description: Page size (max 200)
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
+        x-agent: true
+        x-agent-maximum: "50"
       produces:
       - application/json
       responses:
@@ -26349,9 +26546,19 @@ paths:
           schema:
             additionalProperties: true
             type: object
-      summary: List all platform users
+      summary: 查询平台用户（List platform users）
       tags:
       - System Admin
+      x-agent:
+        id: system_admin.list_users
+        max_items: 50
+        risk: read
+        root: users
+        system_admin: true
+      x-agent-hint: 'Lists platform users across workspaces, including account enabled
+        state and system administrator flag. Follow has_more using offset + limit.
+        tenant_id is the home workspace, not a list of memberships. No search or role
+        filter is supported: paginate before drawing conclusions.'
   /system/admin/users/create:
     post:
       consumes:

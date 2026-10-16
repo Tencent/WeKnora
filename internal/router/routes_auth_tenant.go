@@ -313,6 +313,8 @@ func RegisterSystemAdminRoutes(
 		adminRoutes.POST("/api-keys", handler.CreatePlatformAPIKey)
 		adminRoutes.DELETE("/api-keys/:key_id", handler.DeletePlatformAPIKey)
 
+		adminRoutes.GET("/settings-summary", handler.ListSystemSettingSummaries)
+
 		// P1: platform-wide system settings (DB-backed runtime tunables).
 		// Reads return raw model rows / arrays (no `gin.H{"data":...}`
 		// wrapping), matching the project's axios interceptor convention

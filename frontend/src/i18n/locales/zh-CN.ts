@@ -1996,6 +1996,13 @@ export default {
           list_revisions: "获取 Wiki 页面版本列表",
           get_stats: "获取 Wiki 统计信息",
         },
+        system_admin: {
+          list_admins: "查询系统管理员",
+          list_users: "查询平台用户",
+          list_settings: "查询系统设置",
+          get_queues: "查询任务队列运行状态",
+          list_tasks: "查询队列任务",
+        },
         workspace: {
           get: "查询当前空间信息",
           update: "修改当前空间基本信息",

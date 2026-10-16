@@ -1994,6 +1994,13 @@ export default {
           list_revisions: "Wiki 페이지 버전 목록 조회",
           get_stats: "Wiki 통계 조회",
         },
+        system_admin: {
+          list_admins: "시스템 관리자 조회",
+          list_users: "플랫폼 사용자 조회",
+          list_settings: "시스템 설정 조회",
+          get_queues: "작업 큐 실행 상태 조회",
+          list_tasks: "큐 작업 조회",
+        },
         workspace: {
           get: "현재 워크스페이스 정보 조회",
           update: "현재 워크스페이스 기본 정보 수정",

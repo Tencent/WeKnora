@@ -49,7 +49,8 @@ const findOperationsDescription = "" +
 	"inspecting data sources and sync logs, pausing/resuming sync schedules, triggering syncs, " +
 	"configuring document parsing, chunking, OCR and generated questions, " +
 	"batch updating FAQ enabled/recommended states and tags, reading and refreshing saved MCP tool directories, " +
-	"managing saved web search providers and data source sync settings, and checking connections and retrieval. " +
+	"managing saved web search providers and data source sync settings, checking connections and retrieval, " +
+	"reading current workspace/member/version information, and querying platform users, settings and runtime tasks as a system administrator. " +
 	"Returns each operation's id, risk and parameters. " +
 	"Call with no arguments to see every operation, or narrow with query (words matched " +
 	"against ids and summaries) or domain. Operation ids must come from this tool; never guess them. " +
@@ -75,6 +76,8 @@ func withheldReason(w operations.Withholding, access operations.Access) string {
 	switch {
 	case w.ReadOnly:
 		return "The user set the assistant to read-only; they can allow changes in the assistant settings."
+	case w.SystemAdmin:
+		return "Requires system administrator permission; workspace owner/admin roles and cross-workspace access do not grant it."
 	case w.Role != "":
 		return fmt.Sprintf("Needs the %s workspace role or above; the user is %s. "+
 			"A workspace admin can change their role.", w.Role, access.Role)

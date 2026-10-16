@@ -6740,6 +6740,13 @@ export default {
           list_revisions: "Wiki ページの版一覧を取得",
           get_stats: "Wiki の統計を取得",
         },
+        system_admin: {
+          list_admins: "システム管理者を取得",
+          list_users: "プラットフォームユーザーを取得",
+          list_settings: "システム設定を取得",
+          get_queues: "タスクキューの稼働状況を取得",
+          list_tasks: "キューのタスクを取得",
+        },
         workspace: {
           get: "現在のワークスペース情報を取得",
           update: "現在のワークスペース情報を変更",

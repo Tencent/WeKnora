@@ -6740,6 +6740,13 @@ export default {
           list_revisions: "List Wiki page revisions",
           get_stats: "Get Wiki statistics",
         },
+        system_admin: {
+          list_admins: "List system administrators",
+          list_users: "List platform users",
+          list_settings: "Read system settings",
+          get_queues: "Read runtime queue status",
+          list_tasks: "List queue tasks",
+        },
         workspace: {
           get: "Get current workspace information",
           update: "Update current workspace profile",
