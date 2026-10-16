@@ -284,6 +284,9 @@ type ToolApprovalRequiredData struct {
 	RequestedAtUnix int64  `json:"requested_at"`
 	ToolCallID      string `json:"tool_call_id"`
 	RequestID       string `json:"request_id,omitempty"`
+	// Kind is empty for MCP approvals and "host_command" for Lite host commands.
+	Kind string               `json:"kind,omitempty"`
+	Host *HostApprovalPayload `json:"host,omitempty"`
 }
 
 // ToolApprovalResolvedData confirms the user decision (or timeout/cancel).
@@ -293,6 +296,22 @@ type ToolApprovalResolvedData struct {
 	Reason    string `json:"reason,omitempty"`
 	TimedOut  bool   `json:"timed_out,omitempty"`
 	Canceled  bool   `json:"canceled,omitempty"`
+	// Scope is "once" or "session" for host approvals.
+	Scope string `json:"scope,omitempty"`
+}
+
+// HostApprovalPayload describes a Lite host command waiting for the user.
+type HostApprovalPayload struct {
+	Reason          string `json:"reason"`
+	Command         string `json:"command,omitempty"`
+	Cwd             string `json:"cwd,omitempty"`
+	GrantPath       string `json:"grant_path,omitempty"`
+	GrantAccess     string `json:"grant_access,omitempty"`
+	DenialSnippet   string `json:"denial_snippet,omitempty"`
+	FirstAttemptRan bool   `json:"first_attempt_ran,omitempty"`
+	AllowSession    bool   `json:"allow_session"`
+	// SessionRules is what "allow for this session" remembers for a delete.
+	SessionRules []string `json:"session_rules,omitempty"`
 }
 
 // AgentPromptRequiredData asks the user a question of the given kind.

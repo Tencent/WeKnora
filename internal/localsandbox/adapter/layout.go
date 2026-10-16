@@ -10,17 +10,27 @@ import (
 )
 
 // LayoutFor maps a resolved workspace onto the layout the agent tools consume.
+// Session grants the user approved are added so the tool-layer scope checks
+// agree with the policy the sandbox enforces.
 //
 // The tools enforce this as a convention (what the model is told, and what the
 // scope errors say). The real enforcement for host file operations is
 // PathGuard inside the adapter's SessionFileStore, so a mistake here cannot
 // widen actual access.
-func LayoutFor(ws localsandbox.Workspace) sandbox.WorkspaceLayout {
+func LayoutFor(ws localsandbox.Workspace, grants ...localsandbox.Grant) sandbox.WorkspaceLayout {
+	writeRoots := []string{ws.Root}
+	readRoots := []string{ws.Root}
+	for _, g := range grants {
+		if g.Access == localsandbox.AccessWrite {
+			writeRoots = append(writeRoots, g.Path)
+		}
+		readRoots = append(readRoots, g.Path)
+	}
 	return sandbox.WorkspaceLayout{
 		Origin:     sandbox.WorkspaceOriginHost,
 		Root:       ws.Root,
-		WriteRoots: []string{ws.Root},
-		ReadRoots:  []string{ws.Root},
+		WriteRoots: writeRoots,
+		ReadRoots:  readRoots,
 		Hint:       ws.Root,
 	}
 }
