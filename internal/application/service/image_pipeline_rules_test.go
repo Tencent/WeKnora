@@ -133,7 +133,11 @@ func TestImagePipelineValidationMatchesExecution(t *testing.T) {
 			},
 			1,
 		},
-		{"other namespace ignored", map[string]any{"smartocr.caption_enabled": false, "smartocr.ocr_enabled": false}, 2},
+		{
+			"other namespace ignored",
+			map[string]any{"smartocr.caption_enabled": false, "smartocr.ocr_enabled": false},
+			2,
+		},
 		{"null uses declared default", map[string]any{"caption_enabled": nil, "ocr_enabled": false}, 1},
 		{
 			"null namespace falls through to bare key",
