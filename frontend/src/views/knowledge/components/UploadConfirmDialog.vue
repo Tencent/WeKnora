@@ -460,7 +460,9 @@
                           <ImagePipelineSettings
                             v-model:params="uiState.imagePipelineParams"
                             :pipeline-id="uiState.imagePipeline"
+                            :preprocess-mode="uiState.preprocessMode"
                             @update:pipeline-id="uiState.imagePipeline = $event"
+                            @update:preprocess-mode="uiState.preprocessMode = $event"
                             @update:invalid="imagePipelineInvalid = $event"
                           />
                         </div>
@@ -691,7 +693,9 @@ import KbUploadSourceDropdown from './KbUploadSourceDropdown.vue'
 import ImagePipelineSettings from '../ImagePipelineSettings.vue'
 import {
   buildPipelineFields,
+  PREPROCESS_MODE_AUTO,
   resolveImagePipelineFromKb,
+  resolvePreprocessModeFromKb,
   normalizeImagePipelineId,
   IMAGE_PIPELINE_DEFAULT,
   IMAGE_PIPELINE_SMARTOCR,
@@ -753,6 +757,7 @@ interface UploadUIState {
   // derived at write time rather than stored.
   imagePipeline: string
   imagePipelineParams: Record<string, unknown>
+  preprocessMode: string
   imageVectorEnabled: boolean
   imageActions: ImageActionsConfig
   asrConfig: { enabled: boolean; modelId: string; language: string }
@@ -1252,6 +1257,7 @@ function createDefaultUIState(): UploadUIState {
     multimodalConfig: { enabled: false, vllmModelId: '', descriptionLanguage: '', customInstructions: '' },
     imagePipeline: IMAGE_PIPELINE_DEFAULT,
     imagePipelineParams: {},
+    preprocessMode: PREPROCESS_MODE_AUTO,
     imageVectorEnabled: false,
     imageActions: mergeImageActions(),
     asrConfig: { enabled: false, modelId: '', language: '' },
@@ -1298,6 +1304,7 @@ function initFromKbInfo(kb: any) {
     },
     // 默认跟随知识库的图片解析方案；用户可对本次任务单独覆盖。旧库（没有
     // image_pipeline 的）按与后端一致的规则解析出一个具体方案。
+    preprocessMode: resolvePreprocessModeFromKb(kb),
     imagePipeline: resolveImagePipelineFromKb(kb),
     imagePipelineParams:
       (kb.image_processing_config?.image_pipeline_params as Record<string, unknown>) ?? {},
@@ -1401,6 +1408,8 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
     buildPipelineFields(
       state.multimodalConfig.enabled ? state.imagePipeline : '',
       state.imagePipelineParams,
+      state.preprocessMode,
+      resolvePreprocessModeFromKb(props.kbInfo),
     ),
   )
 

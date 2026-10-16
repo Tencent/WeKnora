@@ -4908,6 +4908,12 @@ export default {
         imagePipelineSectionLabel: '圖片解析方案',
         imagePipelineSectionDescription: '多模態解析開啟後，可以根據需要選擇圖片的解析方案',
         imagePipelineLabel: '選擇解析方案',
+        preprocessLabel: '文件預處理',
+        preprocessDescription:
+          '在 OCR 之前把拍攝的頁面擺正並裁掉周圍環境。自動：由描述輪判斷頁面是否需要；關閉：從不處理；強制：總是處理。',
+        preprocessModeAuto: '自動',
+        preprocessModeOff: '關閉',
+        preprocessModeForce: '強制',
         imagePipelinePlaceholder: '請選擇解析方案',
         imagePipelineLoading: '正在讀取流水線…',
         imagePipelineLoadError: '讀取流水線失敗',
