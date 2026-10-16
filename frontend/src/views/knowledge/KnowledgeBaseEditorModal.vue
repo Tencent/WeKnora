@@ -935,6 +935,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       enableParentChild: true,
       parentChunkSize: 4096,
       childChunkSize: 384,
+      childChunkOverlap: Math.floor(384 / 5),
       // New KBs default to the adaptive auto-strategy. User can change in the UI.
       strategy: 'auto' as string,
       tokenLimit: 0,
@@ -1092,6 +1093,7 @@ const loadKBData = async (
         enableParentChild: kb.chunking_config?.enable_parent_child || false,
         parentChunkSize: kb.chunking_config?.parent_chunk_size || 4096,
         childChunkSize: kb.chunking_config?.child_chunk_size || 384,
+        childChunkOverlap: kb.chunking_config?.child_chunk_overlap ?? Math.floor((kb.chunking_config?.child_chunk_size || 384) / 5),
         // Existing KBs without strategy field render as empty (= legacy behavior).
         // The user has to actively pick a value to opt in to the new tiers.
         strategy: kb.chunking_config?.strategy || '',
@@ -1465,6 +1467,7 @@ const buildSubmitData = () => {
       enable_parent_child: formData.value.chunkingConfig.enableParentChild,
       parent_chunk_size: formData.value.chunkingConfig.parentChunkSize,
       child_chunk_size: formData.value.chunkingConfig.childChunkSize,
+      child_chunk_overlap: formData.value.chunkingConfig.childChunkOverlap,
       // Adaptive chunking fields are always sent (empty/zero values
       // included) so the user can clear them — backend uses pointer DTOs
       // to distinguish "not in payload" from "explicitly empty".
@@ -1726,6 +1729,7 @@ const doSubmit = async () => {
           enableParentChild: data.chunking_config.enable_parent_child || false,
           parentChunkSize: data.chunking_config.parent_chunk_size || 4096,
           childChunkSize: data.chunking_config.child_chunk_size || 384,
+          childChunkOverlap: data.chunking_config.child_chunk_overlap ?? Math.floor((data.chunking_config.child_chunk_size || 384) / 5),
           // Always send strategy / tokenLimit / languages — backend treats
           // empty/0/[] as a valid clear, so we must include them in the
           // payload to let users reset back to defaults.

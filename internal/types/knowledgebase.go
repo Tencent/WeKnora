@@ -294,6 +294,10 @@ type ChunkingConfig struct {
 	// ChildChunkSize is the size of child chunks used for embedding (default: 384).
 	// Only used when EnableParentChild is true.
 	ChildChunkSize int `yaml:"child_chunk_size,omitempty" json:"child_chunk_size,omitempty" minimum:"1" maximum:"10000" extensions:"x-agent"`
+	// ChildChunkOverlap controls overlap between embedded child chunks. Nil
+	// preserves the historical child-size/5 default; a pointer allows callers
+	// to explicitly configure zero overlap.
+	ChildChunkOverlap *int `yaml:"child_chunk_overlap,omitempty" json:"child_chunk_overlap,omitempty" minimum:"0" maximum:"5000" extensions:"x-agent"`
 	// Strategy selects how documents are split: auto, heading, heuristic,
 	// recursive or legacy. Empty keeps the server default.
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty" enums:"auto,heading,heuristic,recursive,legacy" extensions:"x-agent"`

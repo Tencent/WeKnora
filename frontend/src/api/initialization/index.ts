@@ -130,6 +130,7 @@ export interface KBModelConfigRequest {
         enableParentChild?: boolean
         parentChunkSize?: number
         childChunkSize?: number
+        childChunkOverlap?: number
         // Adaptive chunking strategy ("auto" | "heading" | "heuristic" | "legacy").
         // The backend uses pointer-based DTOs for these three fields:
         // - undefined / not set in payload → no change on server

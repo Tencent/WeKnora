@@ -23937,6 +23937,13 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.ChunkingConfig": {
             "type": "object",
             "properties": {
+                "child_chunk_overlap": {
+                    "description": "ChildChunkOverlap controls overlap between embedded child chunks. Nil\npreserves the historical child-size/5 default; a pointer allows callers\nto explicitly configure zero overlap.",
+                    "type": "integer",
+                    "maximum": 5000,
+                    "minimum": 0,
+                    "x-agent": true
+                },
                 "child_chunk_size": {
                     "description": "ChildChunkSize is the size of child chunks used for embedding (default: 384).\nOnly used when EnableParentChild is true.",
                     "type": "integer",
@@ -23959,7 +23966,7 @@ const docTemplate = `{
                     "x-agent": true
                 },
                 "enable_parent_child": {
-                    "description": "EnableParentChild splits into large parent chunks and small child chunks. Search matches a child and returns its parent.",
+                    "description": "EnableParentChild splits into large parent chunks and small child chunks.\nSearch matches a child and returns its parent.",
                     "type": "boolean",
                     "x-agent": true
                 },
@@ -23996,7 +24003,7 @@ const docTemplate = `{
                     "x-agent-maximum": "20"
                 },
                 "strategy": {
-                    "description": "Strategy selects how documents are split: auto, heading, heuristic, recursive or legacy. Empty keeps the server default.",
+                    "description": "Strategy selects how documents are split: auto, heading, heuristic,\nrecursive or legacy. Empty keeps the server default.",
                     "type": "string",
                     "enum": [
                         "auto",
@@ -26561,7 +26568,7 @@ const docTemplate = `{
                     ]
                 },
                 "summary_model_id": {
-                    "description": "Summary model ID. model.list returns the ids. Used for summaries, and as the default for auto-tagging and the AI description.",
+                    "description": "Summary model ID. model.list returns the ids. Used for summaries, and as\nthe default for auto-tagging and the AI description.",
                     "type": "string",
                     "x-agent": "summary_model_id"
                 },
@@ -34236,6 +34243,9 @@ const docTemplate = `{
                     "description": "文档分块配置",
                     "type": "object",
                     "properties": {
+                        "childChunkOverlap": {
+                            "type": "integer"
+                        },
                         "childChunkSize": {
                             "type": "integer"
                         },
@@ -34578,7 +34588,7 @@ const docTemplate = `{
                     ]
                 },
                 "summary_model_id": {
-                    "description": "Summary model ID. model.list returns the ids. Used for summaries, and as the default for auto-tagging and the AI description.",
+                    "description": "Summary model ID. model.list returns the ids. Used for summaries, and as\nthe default for auto-tagging and the AI description.",
                     "type": "string",
                     "x-agent": "summary_model_id"
                 },
@@ -35640,6 +35650,9 @@ const docTemplate = `{
         "internal_handler.PreviewChunkingPayload": {
             "type": "object",
             "properties": {
+                "child_chunk_overlap": {
+                    "type": "integer"
+                },
                 "child_chunk_size": {
                     "type": "integer"
                 },

@@ -1816,6 +1816,15 @@ definitions:
     - ChunkTypeWikiPage
   github_com_Tencent_WeKnora_internal_types.ChunkingConfig:
     properties:
+      child_chunk_overlap:
+        description: |-
+          ChildChunkOverlap controls overlap between embedded child chunks. Nil
+          preserves the historical child-size/5 default; a pointer allows callers
+          to explicitly configure zero overlap.
+        maximum: 5000
+        minimum: 0
+        type: integer
+        x-agent: true
       child_chunk_size:
         description: |-
           ChildChunkSize is the size of child chunks used for embedding (default: 384).
@@ -1837,8 +1846,9 @@ definitions:
         type: integer
         x-agent: true
       enable_parent_child:
-        description: EnableParentChild splits into large parent chunks and small child
-          chunks. Search matches a child and returns its parent.
+        description: |-
+          EnableParentChild splits into large parent chunks and small child chunks.
+          Search matches a child and returns its parent.
         type: boolean
         x-agent: true
       languages:
@@ -1875,8 +1885,9 @@ definitions:
         x-agent: true
         x-agent-maximum: "20"
       strategy:
-        description: 'Strategy selects how documents are split: auto, heading, heuristic,
-          recursive or legacy. Empty keeps the server default.'
+        description: |-
+          Strategy selects how documents are split: auto, heading, heuristic,
+          recursive or legacy. Empty keeps the server default.
         enum:
         - auto
         - heading
@@ -3994,8 +4005,9 @@ definitions:
         description: 'Storage provider config (new): only stores provider selection;
           credentials from workspace StorageEngineConfig'
       summary_model_id:
-        description: Summary model ID. model.list returns the ids. Used for summaries,
-          and as the default for auto-tagging and the AI description.
+        description: |-
+          Summary model ID. model.list returns the ids. Used for summaries, and as
+          the default for auto-tagging and the AI description.
         type: string
         x-agent: summary_model_id
       tenant_id:
@@ -9933,6 +9945,8 @@ definitions:
       documentSplitting:
         description: 文档分块配置
         properties:
+          childChunkOverlap:
+            type: integer
           childChunkSize:
             type: integer
           chunkOverlap:
@@ -10206,8 +10220,9 @@ definitions:
         description: 'Storage provider config (new): only stores provider selection;
           credentials from workspace StorageEngineConfig'
       summary_model_id:
-        description: Summary model ID. model.list returns the ids. Used for summaries,
-          and as the default for auto-tagging and the AI description.
+        description: |-
+          Summary model ID. model.list returns the ids. Used for summaries, and as
+          the default for auto-tagging and the AI description.
         type: string
         x-agent: summary_model_id
       tenant_id:
@@ -10967,6 +10982,8 @@ definitions:
     type: object
   internal_handler.PreviewChunkingPayload:
     properties:
+      child_chunk_overlap:
+        type: integer
       child_chunk_size:
         type: integer
       chunk_overlap:

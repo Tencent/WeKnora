@@ -189,7 +189,7 @@ func NormalizeSplitterConfig(cfg SplitterConfig) SplitterConfig {
 	if cfg.ChunkSize <= 0 {
 		cfg.ChunkSize = DefaultChunkSize
 	}
-	if cfg.ChunkOverlap <= 0 {
+	if cfg.ChunkOverlap <= 0 && !cfg.ChunkOverlapExplicit {
 		cfg.ChunkOverlap = DefaultChunkOverlap
 	}
 	if len(cfg.Separators) == 0 {
@@ -215,12 +215,19 @@ func NormalizeLineEndings(text string) string {
 // and ingestion remain in lockstep as the parent-child defaults evolve.
 // Languages are copied to both levels so parent and child splitters use the same boundary rules.
 // TokenLimit is copied only to children because parents keep the configured context window.
-func DeriveParentChildConfigs(base SplitterConfig, parentSize, childSize int) (parent, child SplitterConfig) {
+func DeriveParentChildConfigs(base SplitterConfig, parentSize, childSize int, childOverlap ...*int) (parent, child SplitterConfig) {
 	if parentSize <= 0 {
 		parentSize = 4096
 	}
 	if childSize <= 0 {
 		childSize = 384
+	}
+	childOverlapSize := childSize / 5
+	if len(childOverlap) > 0 && childOverlap[0] != nil {
+		childOverlapSize = *childOverlap[0]
+	}
+	if childOverlapSize < 0 {
+		childOverlapSize = 0
 	}
 	parent = SplitterConfig{
 		ChunkSize:    parentSize,
@@ -231,11 +238,14 @@ func DeriveParentChildConfigs(base SplitterConfig, parentSize, childSize int) (p
 	}
 	child = SplitterConfig{
 		ChunkSize:    childSize,
-		ChunkOverlap: childSize / 5,
-		Separators:   base.Separators,
-		Strategy:     base.Strategy,
-		TokenLimit:   base.TokenLimit,
-		Languages:    base.Languages,
+		ChunkOverlap: childOverlapSize,
+		// The child overlap is derived or explicitly configured here, so zero
+		// is meaningful and must not be replaced by the generic default.
+		ChunkOverlapExplicit: true,
+		Separators:           base.Separators,
+		Strategy:             base.Strategy,
+		TokenLimit:           base.TokenLimit,
+		Languages:            base.Languages,
 	}
 	return
 }
@@ -322,7 +332,7 @@ func ensureDefaults(cfg SplitterConfig) SplitterConfig {
 	if cfg.ChunkSize <= 0 {
 		cfg.ChunkSize = DefaultChunkSize
 	}
-	if cfg.ChunkOverlap <= 0 {
+	if cfg.ChunkOverlap <= 0 && !cfg.ChunkOverlapExplicit {
 		cfg.ChunkOverlap = DefaultChunkOverlap
 	}
 	if len(cfg.Separators) == 0 {

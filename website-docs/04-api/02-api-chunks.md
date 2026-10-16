@@ -209,6 +209,7 @@ curl -X DELETE $BASE/api/v1/knowledge-bases/kb-1/tags/t-1 -H "Authorization: Bea
 | `chunking_config.languages` | []string | 否 | 语言提示 |
 | `chunking_config.enable_parent_child` | bool | 否 | 按父子分块试切，返回的是子块（与检索粒度一致） |
 | `chunking_config.parent_chunk_size` / `child_chunk_size` | int | 否 | 父/子块大小，缺省 4096 / 384 |
+| `chunking_config.child_chunk_overlap` | int | 否 | 子块重叠字符数；省略时使用子块大小的 20%，传 `0` 可关闭重叠 |
 
 样例文本中的内联 HTML `<table>` 会先转换为 Markdown 表格，与入库时的处理一致。
 
