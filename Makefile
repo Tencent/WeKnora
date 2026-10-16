@@ -110,6 +110,7 @@ run: build
 
 # Run tests
 test:
+	bash scripts/docker-entrypoint_test.sh
 	go test -v ./...
 
 # Generate reviewed metadata + protocol overrides, then verify every model.
