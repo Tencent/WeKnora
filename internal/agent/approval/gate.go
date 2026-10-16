@@ -150,6 +150,10 @@ var (
 	ErrInvalidDecision = hitl.ErrInvalidResponse
 )
 
+// UnattendedApprovalReason is the refusal of a tool approval raised in a run
+// nobody watches (types.WithUnattendedRun).
+const UnattendedApprovalReason = "it needs the user's approval, which nobody can give in this run"
+
 // NewGate builds a gate. checker may be nil (disables gating). cfg may be nil
 // (defaults apply). broker may be nil (process-local prompts, single replica).
 func NewGate(cfg *config.Config, checker Checker, broker *hitl.Broker) *Gate {
@@ -276,6 +280,9 @@ func (g *Gate) allowedInSession(ctx context.Context, req PendingRequest) bool {
 }
 
 func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decision, error) {
+	if types.IsUnattendedRun(ctx) {
+		return Decision{Reason: UnattendedApprovalReason}, nil
+	}
 	if req.EventBus == nil {
 		return Decision{}, fmt.Errorf("tool approval: EventBus is nil")
 	}
