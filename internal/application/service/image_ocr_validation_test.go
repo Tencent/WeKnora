@@ -42,6 +42,28 @@ func TestImageOCRRejectsInvalidContentBeforePersistence(t *testing.T) {
 		{name: "recorded empty cells", raw: strings.Repeat("|  ", 2500), status: "failed", code: "OCR_INVALID_OUTPUT"},
 		{name: "repeated words", raw: strings.Repeat("传球按钮 ", 200), status: "failed", code: "OCR_INVALID_OUTPUT"},
 		{
+			name: "repeated phrase with changing rows",
+			raw: func() string {
+				var output strings.Builder
+				for row := 1; row <= 200; row++ {
+					fmt.Fprintf(&output, "**Input** - Input is a table of data from the image. Row %d\n", row)
+				}
+				return output.String()
+			}(),
+			status: "failed", code: "OCR_INVALID_OUTPUT",
+		},
+		{
+			name: "advancing counter with stuck value",
+			raw: func() string {
+				var output strings.Builder
+				for counter := 2017; counter < 2817; counter++ {
+					fmt.Fprintf(&output, "%d 13.6\n", counter)
+				}
+				return output.String()
+			}(),
+			status: "failed", code: "OCR_INVALID_OUTPUT",
+		},
+		{
 			name: "split delimiter loops", raw: strings.Repeat("|  ", 1250) + "传球\n" + strings.Repeat("|  ", 1250),
 			status: "failed", code: "OCR_INVALID_OUTPUT",
 		},
@@ -107,4 +129,55 @@ func TestImageOCRRejectsInvalidContentBeforePersistence(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestImageCaptionRejectsRepetitiveContentBeforePersistence(t *testing.T) {
+	repo := &attrsChunkRepo{}
+	svc := newAttrsTestService(&attrsFileService{body: testPNG(t)}, repo)
+	model := &attrsFakeVLM{reply: func(prompt string, _ int) (string, error) {
+		if prompt == vlmOCRPrompt {
+			return "No text content.", nil
+		}
+		return strings.Repeat("中国财政部 ", 800), nil
+	}}
+
+	out := types.JSONMap{}
+	err := svc.processImage(context.Background(), &types.ImageMultimodalPayload{
+		ImageURL: "local://test.png", EnableOCR: true, EnableCaption: true, Attempt: 1,
+	}, model, types.VLMConfig{}, &noopSpanTracker{}, out)
+
+	require.NoError(t, err)
+	require.Empty(t, repo.created)
+	require.Equal(t, "CAPTION_INVALID_OUTPUT", out["caption_error_code"])
+	require.Equal(t, "repetitive_content", out["caption_rejection_reason"])
+}
+
+func TestImageObservationRejectsRepetitiveCaptionBeforePersistence(t *testing.T) {
+	repo := &attrsChunkRepo{}
+	svc := newAttrsTestService(&attrsFileService{body: testPNG(t)}, repo)
+	model := &attrsFakeVLM{reply: func(prompt string, _ int) (string, error) {
+		if prompt == vlmOCRPrompt {
+			return "Valid invoice text", nil
+		}
+		return "contain.text: block\ncontain.data_visual: false\nDESCRIPTION: " +
+			strings.Repeat("中国财政部 ", 800), nil
+	}}
+	payload := &types.ImageMultimodalPayload{
+		ImageURL:          "local://test.png",
+		EnableOCR:         true,
+		EnableCaption:     true,
+		ImageAttrsEnabled: true,
+		ImageActions:      types.DefaultImageActions(),
+		Attempt:           1,
+	}
+	out := types.JSONMap{}
+
+	err := svc.processImage(context.Background(), payload, model, types.VLMConfig{}, &noopSpanTracker{}, out)
+
+	require.NoError(t, err)
+	require.Len(t, repo.created, 1)
+	require.Equal(t, types.ChunkTypeImageOCR, repo.created[0].ChunkType)
+	require.Equal(t, "Valid invoice text", repo.created[0].Content)
+	require.Equal(t, "CAPTION_INVALID_OUTPUT", out["caption_error_code"])
+	require.Equal(t, "repetitive_content", out["caption_rejection_reason"])
 }

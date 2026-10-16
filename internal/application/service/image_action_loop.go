@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
@@ -111,11 +110,7 @@ func (s *ImageMultimodalService) executeActionRound(
 			out["caption_error"] = capErr.Error()
 			return
 		}
-		if text := strings.TrimSpace(raw); text != "" {
-			imageInfo.Caption = text
-			out["caption_chars"] = len([]rune(text))
-			out["caption_preview"] = previewText(text, 200)
-		}
+		applyCaptionText(imageInfo, out, raw)
 		return
 	}
 	if round.Contains(types.ActionOCR) {

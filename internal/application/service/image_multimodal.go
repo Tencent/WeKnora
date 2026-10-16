@@ -504,9 +504,29 @@ func applyImageObservation(
 		out["caption_skipped"] = "disabled"
 		return
 	}
-	imageInfo.Caption = description
-	out["caption_chars"] = len([]rune(description))
-	out["caption_preview"] = previewText(description, 200)
+	applyCaptionText(imageInfo, out, description)
+}
+
+// applyCaptionText validates generated descriptions before they become
+// searchable image_caption chunks. Invalid output is recorded on the task and
+// omitted while OCR or image-attribute processing can still succeed.
+func applyCaptionText(imageInfo *types.ImageInfo, out types.JSONMap, raw string) {
+	text, err := validateCaptionText(raw)
+	if err != nil {
+		out["caption_error"] = err.Error()
+		out["caption_error_code"] = "CAPTION_INVALID_OUTPUT"
+		var invalid *captionValidationError
+		if errors.As(err, &invalid) {
+			out["caption_rejection_reason"] = invalid.reason
+		}
+		return
+	}
+	if text == "" {
+		return
+	}
+	imageInfo.Caption = text
+	out["caption_chars"] = len([]rune(text))
+	out["caption_preview"] = previewText(text, 200)
 }
 
 // runImageOCR runs the second pipeline round: text extraction at full
