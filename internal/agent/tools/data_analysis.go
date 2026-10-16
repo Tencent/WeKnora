@@ -601,7 +601,8 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 
 	if hasLegacyXLSContainer(filename) {
 		logger.Warnf(ctx,
-			"[Tool][DataAnalysis] Rejecting legacy binary .xls workbook '%s' (session=%s): DuckDB can only read the ZIP-based .xlsx container",
+			"[Tool][DataAnalysis] Rejecting legacy binary .xls workbook '%s' (session=%s): "+
+				"DuckDB can only read the ZIP-based .xlsx container",
 			filename, t.sessionID,
 		)
 		return nil, errLegacyBinaryXLS()
