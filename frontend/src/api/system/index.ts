@@ -630,6 +630,26 @@ export interface ModelRuntimeStat {
   limit: number
 }
 
+export interface IMRuntimeStatus {
+  available: boolean
+  workers: number
+  queue_limit: number
+  pending: number
+  active: number
+  rejected: number
+  timed_out: number
+}
+export interface OperationsStatus {
+  available: boolean
+  stale: boolean
+  collected_at?: number
+  host?: { cpu_count?: number; load_1m?: number; memory_total_bytes?: number; memory_available_bytes?: number }
+  disks?: { name: string; available: boolean; used_percent?: number; available_bytes?: number; total_bytes?: number }[]
+  backups?: { name: string; available: boolean; snapshot_count: number; completed_at?: number; stale: boolean }[]
+  logs?: { name: string; bytes?: number; max_size?: string; max_files?: string; status?: string; health?: string }[]
+  services?: { name: string; available: boolean; result?: string; active?: string; exit_status?: number; running_required: boolean }[]
+}
+
 /**
  * Runtime queue dashboard payload. `available` is false in Lite mode
  * (no Redis/asynq) — render an "unavailable in this deployment" state
@@ -638,6 +658,8 @@ export interface ModelRuntimeStat {
  * server heartbeats.
  */
 export interface RuntimeQueuesResponse {
+  operations?: OperationsStatus
+  im?: IMRuntimeStatus
   available: boolean
   upstream_concurrency: number
   parse_concurrency: number

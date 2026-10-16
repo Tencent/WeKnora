@@ -31,6 +31,8 @@
       </div>
     </header>
 
+    <OperationsOverview v-if="loadedOnce && !error" :status="operations" :im="imStatus" />
+
     <div v-if="loading && !loadedOnce" class="rq-loading" aria-live="polite">
       <div class="rq-loading-metrics">
         <t-skeleton
@@ -510,6 +512,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
+import OperationsOverview from './OperationsOverview.vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { mergeRuntimeTaskPage } from './runtimeTaskPagination'
 import {
@@ -518,6 +521,8 @@ import {
   mutateRuntimeTask,
   purgeArchivedRuntimeTasks,
   type ModelRuntimeStat,
+  type OperationsStatus,
+  type IMRuntimeStatus,
   type QueueStat,
   type RuntimeTask,
   type RuntimeTaskAction,
@@ -529,6 +534,8 @@ const { t, te, locale } = useI18n()
 
 const POLL_INTERVAL_MS = 5000
 
+const operations = ref<OperationsStatus>()
+const imStatus = ref<IMRuntimeStatus>()
 const queues = ref<QueueStat[]>([])
 const pools = ref<RuntimeWorkerPool[]>([])
 const models = ref<ModelRuntimeStat[]>([])
@@ -901,6 +908,8 @@ async function load(showSpinner: boolean) {
   if (showSpinner) loading.value = true
   try {
     const resp = await getRuntimeQueues()
+    operations.value = resp.operations
+    imStatus.value = resp.im
     available.value = resp.available
     pools.value = resp.pools || []
     queues.value = resp.queues || []
