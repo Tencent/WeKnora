@@ -1960,6 +1960,7 @@ export default {
       titleWithTarget: '人工審核 · {service} › {tool}',
       argsLabel: '呼叫參數',
       argsModified: '已修改',
+      allowInSession: '本會話內同類操作都允許',
       countdownShort: '{seconds}s',
       approve: '透過並執行',
       reject: '拒絕',

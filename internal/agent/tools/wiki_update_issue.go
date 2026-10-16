@@ -76,3 +76,8 @@ func (t *wikiUpdateIssueTool) Execute(ctx context.Context, args json.RawMessage)
 		Output:  fmt.Sprintf("Successfully updated issue %s to status '%s'", params.IssueID, params.Status),
 	}, nil
 }
+
+// ApprovalGrant scopes a session-wide approval to the run's knowledge bases.
+func (t *wikiUpdateIssueTool) ApprovalGrant(ctx context.Context, _ json.RawMessage) (string, string) {
+	return wikiApprovalGrant(ctx, t.Name(), t.kbIDs)
+}

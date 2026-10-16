@@ -6385,6 +6385,7 @@ export default {
       titleWithTarget: '承認 · {service} › {tool}',
       argsLabel: '引数',
       argsModified: '変更あり',
+      allowInSession: 'この会話では同様の操作をすべて許可',
       countdownShort: '{seconds}秒',
       approve: '承認して実行',
       reject: '拒否',

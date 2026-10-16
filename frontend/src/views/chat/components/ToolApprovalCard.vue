@@ -28,6 +28,11 @@
         :autosize="{ minRows: 2, maxRows: 10 }" placeholder="{}" />
     </div>
 
+    <t-checkbox v-if="grantScope" v-model="allowInSession" class="prompt-grant">
+      {{ $t('agentStream.toolApproval.allowInSession') }}
+      <span class="prompt-grant-scope">{{ grantScope }}</span>
+    </t-checkbox>
+
     <div class="prompt-footer">
       <div class="prompt-footer-meta">
         <span v-if="parked" class="action-timer">{{ parkedText }}</span>
@@ -98,6 +103,9 @@ const props = defineProps<{
   mcpToolName: string
   description?: string
   argsJson?: string
+  // grantScope, when set, offers to approve calls like this one for the
+  // rest of the session and says which calls that covers.
+  grantScope?: string
   timeoutSeconds?: number
   requestedAt?: number
   resolved?: boolean
@@ -141,6 +149,7 @@ function formatJson(raw: string): string {
 const initialArgs = formatJson(props.argsJson || '{}')
 const argsText = ref(initialArgs)
 const argsExpanded = ref(false)
+const allowInSession = ref(false)
 const submitting = ref(false)
 const { parked, secondsLeft, timerClass, countdownText, parkedText } = usePromptCountdown(props)
 
@@ -286,6 +295,10 @@ function toggleArgs() {
   argsExpanded.value = !argsExpanded.value
 }
 
+const allowForSession = (decision: 'approve' | 'reject') => (
+  decision === 'approve' && Boolean(props.grantScope) && allowInSession.value ? true : undefined
+)
+
 const submit = async (decision: 'approve' | 'reject') => {
   if (!open.value || submitting.value) return
   submitting.value = true
@@ -312,12 +325,14 @@ const submit = async (decision: 'approve' | 'reject') => {
           decision,
           modified_args: decision === 'approve' ? modified : undefined,
           reason: decision === 'reject' ? t('agentStream.toolApproval.userRejected') : undefined,
+          allow_in_session: allowForSession(decision),
         },
       )
       : resolveToolApproval(props.pendingId, {
         decision,
         modified_args: decision === 'approve' ? modified : undefined,
         reason: decision === 'reject' ? t('agentStream.toolApproval.userRejected') : undefined,
+        allow_in_session: allowForSession(decision),
       }))
     markPromptSubmitted(props.pendingId, { approved: decision === 'approve' })
     MessagePlugin.success(t('agentStream.toolApproval.submitted'))

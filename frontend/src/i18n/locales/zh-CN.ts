@@ -1960,6 +1960,7 @@ export default {
       titleWithTarget: '人工审核 · {service} › {tool}',
       argsLabel: '调用参数',
       argsModified: '已修改',
+      allowInSession: '本会话内同类操作都允许',
       countdownShort: '{seconds}s',
       approve: '通过并执行',
       reject: '拒绝',

@@ -1958,6 +1958,7 @@ export default {
       titleWithTarget: '검토 · {service} › {tool}',
       argsLabel: '인수',
       argsModified: '수정됨',
+      allowInSession: '이 대화에서 같은 작업은 모두 허용',
       countdownShort: '{seconds}초',
       approve: '승인 후 실행',
       reject: '거부',

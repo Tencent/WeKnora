@@ -54,7 +54,9 @@ const findOperationsDescription = "" +
 // Approval policy sentences, one per assistant access level, appended to
 // both tool descriptions.
 const (
-	approvalPolicyConfirm   = "Operations with risk write or destructive ask the user to confirm before they run."
+	approvalPolicyConfirm = "Operations with risk write or destructive ask the user to confirm before they run. " +
+		"When confirming a write, the user may allow the same operation on the same knowledge base or agent " +
+		"for the rest of the conversation; such calls then run without asking. Deletions always ask."
 	approvalPolicyAutoWrite = "Operations with risk write run right away; destructive ones ask the user " +
 		"to confirm before they run."
 	approvalPolicyReadOnly = "The user set the assistant to read-only, so only read and probe operations can run. " +
@@ -383,7 +385,7 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 	} else if op.Target != nil && op.Target.RequireComplete {
 		// Complete-target checks protect whole-entry replacements from losing
 		// truncated content; they apply even when no confirmation is needed.
-		if _, blocked := t.describeTarget(ctx, op, input, identity); blocked != nil {
+		if _, _, blocked := t.describeTarget(ctx, op, input, identity); blocked != nil {
 			return blocked, nil
 		}
 	}
@@ -493,11 +495,12 @@ func (t *RunOperationTool) confirm(
 	if resumed {
 		decision = t.rt.Gate.ResumeDecision(waitCtx, meta.Answered, meta.EventBus)
 	} else {
-		label, blocked := t.describeTarget(ctx, op, input, identity)
+		label, target, blocked := t.describeTarget(ctx, op, input, identity)
 		if blocked != nil {
 			return confirmedCall{}, blocked
 		}
 		detail := mutationDetail(ctx, t, op, input.Params, identity)
+		grant, grantScope := approvalGrant(ctx, op, input.Params, target)
 		approvalArgs, err := json.Marshal(input)
 		if err != nil {
 			return confirmedCall{}, operationFailure(err.Error())
@@ -526,6 +529,8 @@ func (t *RunOperationTool) confirm(
 			Description:        approvalDescription(op, label, detail),
 			Args:               approvalArgs,
 			ToolCallID:         meta.ToolCallID,
+			Grant:              grant,
+			GrantScope:         grantScope,
 		})
 		if err != nil {
 			msg := fmt.Sprintf("could not ask the user to confirm %s: %v", op.ID, err)
@@ -576,7 +581,7 @@ func (t *RunOperationTool) confirm(
 		}
 		checkCtx, cancel := context.WithTimeout(waitCtx, timeout)
 		defer cancel()
-		if _, blocked := t.describeTarget(checkCtx, op, confirmedInput, identity); blocked != nil {
+		if _, _, blocked := t.describeTarget(checkCtx, op, confirmedInput, identity); blocked != nil {
 			t.rt.Gate.MarkExecuted(ctx, decision.PendingID)
 			return confirmedCall{}, blocked
 		}
@@ -585,35 +590,40 @@ func (t *RunOperationTool) confirm(
 }
 
 // describeTarget runs the operation's target read so the approval names what
-// it acts on. The read goes through the same authorization as the mutation,
-// so a target the user cannot see is refused here, before any prompt.
+// it acts on, and returns that read. The read goes through the same
+// authorization as the mutation, so a target the user cannot see is refused
+// here, before any prompt.
 func (t *RunOperationTool) describeTarget(
 	ctx context.Context,
 	op operations.Operation,
 	input runOperationInput,
 	identity operations.Identity,
-) (string, *types.ToolResult) {
+) (string, operations.Projected, *types.ToolResult) {
 	if op.Target == nil {
 		label, _ := rawString(input.Params, op.LabelParam)
-		return strings.Join(strings.Fields(label), " "), nil
+		return strings.Join(strings.Fields(label), " "), operations.Projected{}, nil
 	}
 	items := op.Target.Items
 	var ids []json.RawMessage
 	if items != nil {
 		if raw, ok := input.Params[items.Param]; ok {
 			if err := json.Unmarshal(raw, &ids); err != nil {
-				return "", operationFailure(fmt.Sprintf("invalid params for %s: %s must be an array",
-					op.ID, items.Param))
+				return "", operations.Projected{}, operationFailure(fmt.Sprintf(
+					"invalid params for %s: %s must be an array", op.ID, items.Param))
 			}
 		}
 		if len(ids) > operations.MaxApprovalItems {
-			return "", operationFailure(fmt.Sprintf("invalid params for %s: %s accepts at most %d items",
-				op.ID, items.Param, operations.MaxApprovalItems))
+			return "", operations.Projected{}, operationFailure(fmt.Sprintf(
+				"invalid params for %s: %s accepts at most %d items", op.ID, items.Param, operations.MaxApprovalItems))
 		}
 	}
-	label, blocked := t.readLabel(ctx, op, op.Target.Operation, op.Target.Label, input.Params, identity)
-	if blocked != nil || items == nil {
-		return label, blocked
+	target, blocked := t.readTarget(ctx, op, op.Target.Operation, input.Params, identity)
+	if blocked != nil {
+		return "", operations.Projected{}, blocked
+	}
+	label := target.Label(op.Target.Label)
+	if items == nil {
+		return label, target, nil
 	}
 	lines := []string{label}
 	for _, id := range ids {
@@ -622,10 +632,11 @@ func (t *RunOperationTool) describeTarget(
 			params[k] = v
 		}
 		params[items.As] = id
-		itemLabel, blocked := t.readLabel(ctx, op, items.Operation, items.Label, params, identity)
+		item, blocked := t.readTarget(ctx, op, items.Operation, params, identity)
 		if blocked != nil {
-			return "", blocked
+			return "", operations.Projected{}, blocked
 		}
+		itemLabel := item.Label(items.Label)
 		if itemLabel == "" {
 			itemLabel = strings.Trim(string(id), `"`)
 		}
@@ -633,43 +644,120 @@ func (t *RunOperationTool) describeTarget(
 		// item on one line so the approval card cannot hide later items.
 		lines = append(lines, "- "+strings.Join(strings.Fields(itemLabel), " "))
 	}
-	return strings.TrimSpace(strings.Join(lines, "\n")), nil
+	return strings.TrimSpace(strings.Join(lines, "\n")), target, nil
 }
 
-// readLabel runs one target read of op and returns the label field.
-func (t *RunOperationTool) readLabel(
+// readTarget runs one target read of op.
+func (t *RunOperationTool) readTarget(
 	ctx context.Context,
 	op operations.Operation,
-	targetID, label string,
+	targetID string,
 	params map[string]json.RawMessage,
 	identity operations.Identity,
-) (string, *types.ToolResult) {
+) (operations.Projected, *types.ToolResult) {
 	target, ok := t.rt.Catalog.Get(targetID)
 	if !ok {
-		return "", operationFailure(fmt.Sprintf("%s is misconfigured", op.ID))
+		return operations.Projected{}, operationFailure(fmt.Sprintf("%s is misconfigured", op.ID))
 	}
 	call, err := target.Build(operations.SelectParams(target, params))
 	if err != nil {
-		return "", operationFailure(fmt.Sprintf("invalid params for %s: %v", op.ID, err))
+		return operations.Projected{}, operationFailure(fmt.Sprintf("invalid params for %s: %v", op.ID, err))
 	}
 	resp, err := t.rt.Dispatcher.Dispatch(ctx, identity, call)
 	if err != nil {
-		return "", operationFailure(fmt.Sprintf("%s could not be run: %v", op.ID, err))
+		return operations.Projected{}, operationFailure(fmt.Sprintf("%s could not be run: %v", op.ID, err))
 	}
 	if resp.Status < 200 || resp.Status >= 300 {
-		return "", operationFailure(fmt.Sprintf("%s failed (HTTP %d): %s",
+		return operations.Projected{}, operationFailure(fmt.Sprintf("%s failed (HTTP %d): %s",
 			op.ID, resp.Status, operationErrorMessage(resp.Status, resp.Body)))
 	}
 	projected, err := target.Project(resp.Body)
 	if err != nil {
-		return "", operationFailure(fmt.Sprintf("%s returned an unexpected response", target.ID))
+		return operations.Projected{}, operationFailure(fmt.Sprintf("%s returned an unexpected response", target.ID))
 	}
 	if op.Target != nil && op.Target.RequireComplete && projected.Truncated {
-		return "", operationFailure(fmt.Sprintf(
+		return operations.Projected{}, operationFailure(fmt.Sprintf(
 			"%s cannot safely replace this entry because its current content was truncated. "+
 				"Use the application editor to preserve the full content.", op.ID))
 	}
-	return projected.Label(label), nil
+	return projected, nil
+}
+
+// approvalGrant is what approving this call may allow for the rest of the
+// session: the same operation on the same knowledge bases, or on the same
+// agent. A document's knowledge base comes from the target read, not from
+// the model. Deletions, and operations with no such scope (creating a
+// knowledge base or an agent), always ask.
+func approvalGrant(
+	ctx context.Context, op operations.Operation, params map[string]json.RawMessage, target operations.Projected,
+) (grant, scope string) {
+	if op.Risk != operations.RiskWrite {
+		return "", ""
+	}
+	declared := func(name string) string {
+		if _, ok := op.Param(name); !ok {
+			return ""
+		}
+		id, _ := rawString(params, name)
+		return strings.TrimSpace(id)
+	}
+	targetOp := ""
+	if op.Target != nil {
+		targetOp = op.Target.Operation
+	}
+	var kbIDs []string
+	for _, name := range []string{"knowledge_base_id", "source_knowledge_base_id"} {
+		if id := declared(name); id != "" && !slices.Contains(kbIDs, id) {
+			kbIDs = append(kbIDs, id)
+		}
+	}
+	agentID := declared("agent_id")
+	if len(kbIDs) == 0 && agentID == "" && declared("knowledge_id") != "" && targetOp == "knowledge.get" {
+		if id := target.Label("knowledge_base_id"); id != "" {
+			kbIDs = append(kbIDs, id)
+		}
+	}
+	summary := strings.TrimSpace(op.Summary)
+	if summary == "" {
+		summary = op.ID
+	}
+	zh := strings.HasPrefix(types.LanguageFromContextOrDefault(ctx), "zh")
+	switch {
+	case len(kbIDs) > 0:
+		name := ""
+		if len(kbIDs) == 1 && targetOp == "knowledge_base.get" {
+			name = excerpt(target.Label("name"))
+		}
+		slices.Sort(kbIDs)
+		grant = op.ID + " knowledge_base:" + strings.Join(kbIDs, ",")
+		switch {
+		case name != "" && zh:
+			return grant, fmt.Sprintf("%s（仅限知识库「%s」）", summary, name)
+		case name != "":
+			return grant, fmt.Sprintf("%s (only in knowledge base %q)", summary, name)
+		case zh:
+			return grant, summary + "（仅限这次涉及的知识库）"
+		default:
+			return grant, summary + " (only in the knowledge bases this call touches)"
+		}
+	case agentID != "":
+		name := ""
+		if targetOp == "agent.get" {
+			name = excerpt(target.Label("name"))
+		}
+		grant = op.ID + " agent:" + agentID
+		switch {
+		case name != "" && zh:
+			return grant, fmt.Sprintf("%s（仅限智能体「%s」）", summary, name)
+		case name != "":
+			return grant, fmt.Sprintf("%s (only for agent %q)", summary, name)
+		case zh:
+			return grant, summary + "（仅限这个智能体）"
+		default:
+			return grant, summary + " (only for this agent)"
+		}
+	}
+	return "", ""
 }
 
 func approvalDescription(op operations.Operation, label, detail string) string {

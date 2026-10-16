@@ -1958,6 +1958,7 @@ export default {
       titleWithTarget: 'Проверка · {service} › {tool}',
       argsLabel: 'Аргументы',
       argsModified: 'Изменено',
+      allowInSession: 'Разрешать такие действия до конца беседы',
       countdownShort: '{seconds} с',
       approve: 'Подтвердить и выполнить',
       reject: 'Отклонить',

@@ -6385,6 +6385,7 @@ export default {
       titleWithTarget: 'Review · {service} › {tool}',
       argsLabel: 'Arguments',
       argsModified: 'Modified',
+      allowInSession: 'Allow this for the rest of the conversation',
       countdownShort: '{seconds}s',
       approve: 'Approve & run',
       reject: 'Reject',

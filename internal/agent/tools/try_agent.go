@@ -165,6 +165,23 @@ func (t *TryAgentTool) ApprovalDescription(ctx context.Context, args json.RawMes
 	return fmt.Sprintf("Try agent %q: %s", name, question)
 }
 
+// ApprovalGrant lets the user allow further trials of the same agent for the
+// rest of the session; the per-turn trial limit still applies.
+func (t *TryAgentTool) ApprovalGrant(ctx context.Context, args json.RawMessage) (string, string) {
+	input, err := parseTryAgentInput(args)
+	if err != nil {
+		return "", ""
+	}
+	name, err := t.runner.AgentName(ctx, input.AgentID)
+	if err != nil || name == "" {
+		return "", ""
+	}
+	if strings.HasPrefix(types.LanguageFromContextOrDefault(ctx), "zh") {
+		return ToolTryAgent + " agent:" + input.AgentID, fmt.Sprintf("试跑智能体「%s」", name)
+	}
+	return ToolTryAgent + " agent:" + input.AgentID, fmt.Sprintf("Try agent %q", name)
+}
+
 func trimAgentTrial(trial *AgentTrial) *AgentTrial {
 	out := *trial
 	if utf8.RuneCountInString(out.Answer) > maxTrialAnswerRunes {

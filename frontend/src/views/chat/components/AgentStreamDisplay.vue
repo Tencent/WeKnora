@@ -115,7 +115,7 @@
               <div v-else-if="event.type === 'tool_approval_required'" class="tool-event">
                 <ToolApprovalCard :pending-id="event.pending_id" :service-name="event.service_name || ''"
                   :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description"
-                  :args-json="event.args_json" :timeout-seconds="event.timeout_seconds"
+                  :args-json="event.args_json" :grant-scope="event.grant_scope" :timeout-seconds="event.timeout_seconds"
                   :requested-at="event.requested_at" :resolved="event.resolved" :approved="event.approved"
                   :resolve-reason="event.resolve_reason" :suspendable="event.suspendable"
                   :hot-wait-seconds="event.hot_wait_seconds" :suspended="event.suspended"
@@ -352,7 +352,7 @@
             <div v-else-if="event.type === 'tool_approval_required'" class="tool-event">
               <ToolApprovalCard :pending-id="event.pending_id" :service-name="event.service_name || ''"
                 :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description" :args-json="event.args_json"
-                :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
+                :grant-scope="event.grant_scope" :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
                 :approved="event.approved" :resolve-reason="event.resolve_reason" :suspendable="event.suspendable"
                 :hot-wait-seconds="event.hot_wait_seconds" :suspended="event.suspended" :expires-at="event.expires_at"
                 :abandoned="event.abandoned" v-bind="embedAuthProps" />

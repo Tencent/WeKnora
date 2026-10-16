@@ -175,3 +175,8 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 		},
 	}, nil
 }
+
+// ApprovalGrant scopes a session-wide approval to the run's knowledge bases.
+func (t *wikiRenamePageTool) ApprovalGrant(ctx context.Context, _ json.RawMessage) (string, string) {
+	return wikiApprovalGrant(ctx, t.Name(), t.kbIDs)
+}

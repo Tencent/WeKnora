@@ -739,6 +739,9 @@ type resolveToolApprovalBody struct {
 	Decision     string          `json:"decision" binding:"required"` // approve | reject
 	ModifiedArgs json.RawMessage `json:"modified_args"`
 	Reason       string          `json:"reason"`
+	// AllowInSession, on approve, also allows later calls of the same kind
+	// in the session, when the prompt offered that.
+	AllowInSession bool `json:"allow_in_session"`
 }
 
 // ResolveToolApproval completes a pending MCP tool approval (agent execution resumes).
@@ -750,7 +753,7 @@ type resolveToolApprovalBody struct {
 // @Accept       json
 // @Produce      json
 // @Param        pending_id  path      string                  true  "待审批记录 ID"
-// @Param        request     body      map[string]interface{}  true  "{decision: \"approve\"|\"reject\", reason?: string, modified_args?: object}"
+// @Param        request     body      map[string]interface{}  true  "{decision: \"approve\"|\"reject\", reason?: string, modified_args?: object, allow_in_session?: bool}"
 // @Success      200         {object}  map[string]interface{}  "审批结果"
 // @Failure      400         {object}  errors.AppError         "请求参数错误"
 // @Failure      404         {object}  errors.AppError         "待审批记录不存在"
@@ -790,6 +793,7 @@ func (h *MCPServiceHandler) ResolveToolApproval(c *gin.Context) {
 			}
 			dec.ModifiedArgs = body.ModifiedArgs
 		}
+		dec.AllowInSession = body.AllowInSession
 	case "reject":
 		dec.Approved = false
 	default:
@@ -859,7 +863,7 @@ type resolveAgentPromptBody struct {
 // @Description  回答 Agent 运行中发起的交互（ask_user 提问或工具审批）。
 // @Description  kind 须与交互一致，response 为该类型的回答 JSON（不接受未知字段）：
 // @Description  ask_user 为 {selected?, values?, text?, declined?}；
-// @Description  tool_approval 为 {approved: bool, modified_args?: object, reason?: string}。
+// @Description  tool_approval 为 {approved: bool, modified_args?: object, reason?: string, allow_in_session?: bool}。
 // @Description  返回 resumed=true 表示运行已挂起并在本次回答后恢复，客户端需重新接入该消息的事件流
 // @Tags         Agent
 // @Accept       json

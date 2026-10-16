@@ -275,3 +275,8 @@ func normalizeAndValidateWikiSlug(raw string) (string, error) {
 func isSummaryNamespace(slug string) bool {
 	return strings.HasPrefix(slug, types.WikiPageTypeSummary+"/")
 }
+
+// ApprovalGrant scopes a session-wide approval to the run's knowledge bases.
+func (t *wikiWritePageTool) ApprovalGrant(ctx context.Context, _ json.RawMessage) (string, string) {
+	return wikiApprovalGrant(ctx, t.Name(), t.kbIDs)
+}
