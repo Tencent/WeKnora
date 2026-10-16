@@ -240,9 +240,9 @@ type runContext struct {
 	// service is not wired into this build — see imagePreprocessor.
 	preprocessor imagePreprocessor
 	imageBytes   []byte
-	vlmCfg     types.VLMConfig
-	imageInfo  *types.ImageInfo
-	out        types.JSONMap
+	vlmCfg       types.VLMConfig
+	imageInfo    *types.ImageInfo
+	out          types.JSONMap
 	// pipelineID is the pipeline serving this run, used to namespace
 	// pipeline-private param lookups ("<pipeline>.<key>"). Empty in tests
 	// that build a runContext by hand, which then read bare keys only.
