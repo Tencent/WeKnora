@@ -4625,7 +4625,6 @@ export default {
         imagePipelineSectionLabel: '图片解析方案',
         imagePipelineSectionDescription: '多模态解析开启后，可以根据需要选择图片的解析方案',
         imagePipelineLabel: '选择解析方案',
-        imagePipelineHelpSummary: '字段说明',
         preprocessLabel: '文档预处理',
         preprocessDescription:
           '在 OCR 之前把拍摄的页面摆正并裁掉周围环境。自动：由描述轮判断页面是否需要；关闭：从不处理；强制：总是处理。',
@@ -8396,6 +8395,25 @@ export default {
         'true': { label: '是', description: '是 —— 图表、曲线或示意图' },
         'false': { label: '否', description: '否 —— 照片、插画、图标或装饰图' }
       }
+    },
+    layout_margin: {
+      label: '版面留白',
+      description:
+        '文字内容之外的部分（桌面、背景、空白）占整张画面的比例。留白大意味着可以在 OCR 之前把页面裁得更紧。',
+      values: {
+        'none': { label: '无留白', description: '文字几乎铺满画面' },
+        'small': { label: '少量留白', description: '边缘只有一条窄边' },
+        'large': { label: '大片留白', description: '有大片非文字区域 —— 桌面、房间，或拍进来的周边环境' }
+      }
+    },
+    layout_upright: {
+      label: '文字朝向',
+      description:
+        '图中文字是否正立。歪斜或倒置的页面，值得在 OCR 之前摆正。',
+      values: {
+        'true': { label: '正立', description: '文字方向正常' },
+        'false': { label: '非正立', description: '文字被旋转、倾斜拍摄或倒置' }
+      }
     }
   },
   // 流水线选择面板的覆盖文案：按流水线 id 与字段 key 索引（后端注册表给出
@@ -8405,25 +8423,6 @@ export default {
     errors: {
       noActionEnabled: '至少开启一个解析动作，否则多模态不会处理任何内容。',
     },
-      layout_margin: {
-        label: '版面留白',
-        description:
-          '文字内容之外的部分（桌面、背景、空白）占整张画面的比例。留白大意味着可以在 OCR 之前把页面裁得更紧。',
-        values: {
-          'none': { label: '无留白', description: '文字几乎铺满画面' },
-          'small': { label: '少量留白', description: '边缘只有一条窄边' },
-          'large': { label: '大片留白', description: '有大片非文字区域 —— 桌面、房间，或拍进来的周边环境' }
-        }
-      },
-      layout_upright: {
-        label: '文字朝向',
-        description:
-          '图中文字是否正立。歪斜或倒置的页面，值得在 OCR 之前摆正。',
-        values: {
-          'true': { label: '正立', description: '文字方向正常' },
-          'false': { label: '非正立', description: '文字被旋转、倾斜拍摄或倒置' }
-        }
-      },
     default: {
       name: '传统',
       description: '用户根据任务需要手动选择解析动作开关。',

@@ -466,18 +466,42 @@
                             @update:invalid="imagePipelineInvalid = $event"
                           />
                         </div>
+                        <!-- 观察失败兜底：开关，归在开关区（说明随开关就地显示）。此前它
+                             嵌在 setting-row-vertical 里，而垂直行的后代选择器会把
+                             .setting-info / .setting-control 都撑成 100% 宽，水平排布必然
+                             溢出、开关被顶到容器右缘之外，所以它与其它开关行同级。 -->
                         <div
                           v-if="uiState.multimodalConfig.enabled && uiState.imagePipeline === IMAGE_PIPELINE_SMARTOCR"
-                          class="setting-row setting-row-vertical"
+                          class="setting-row"
                         >
                           <div class="setting-info">
-                            <label>{{ t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaLabel') }}</label>
-                            <!-- 实现说明（不放 UI）：面板完全由后端属性注册表驱动 —— 属性名、说明、
-                                 每个取值的含义都随 schema 端点下发，前端只按属性名覆盖翻译。所以新增
-                                 属性仍是「后端加一行 / 前端自动跟随」，属性集合随版本演进无需改这里。 -->
-                            <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaDescription') }}</p>
+                            <label>{{ t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobserved') }}</label>
+                            <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobservedDesc') }}</p>
                           </div>
-                          <div class="image-attr-panel">
+                          <div class="setting-control">
+                            <t-switch v-model="uiState.imageActions.ocr.on_unobserved" size="medium" />
+                          </div>
+                        </div>
+                        <div
+                          v-if="uiState.multimodalConfig.enabled && uiState.imagePipeline === IMAGE_PIPELINE_SMARTOCR"
+                          class="image-pipeline-kb-note"
+                        >
+                          {{ t('knowledgeEditor.advanced.multimodal.imagePipelineKbNote') }}
+                        </div>
+
+                        <!-- ③ 观察属性说明（只属于智能流水线）：默认折叠，点击展开。
+                             与上一段之间用分割线分开；段内不再画线。
+                             实现说明（不放 UI）：内容完全由后端属性注册表驱动 —— 属性名、说明、
+                             每个取值的含义都随 schema 端点下发，前端只按属性名覆盖翻译。 -->
+                        <div
+                          v-if="uiState.multimodalConfig.enabled && uiState.imagePipeline === IMAGE_PIPELINE_SMARTOCR"
+                          class="setting-row setting-row-vertical image-attr-block"
+                        >
+                          <details class="image-attr-panel">
+                            <summary class="image-attr-summary">
+                              <label>{{ t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaLabel') }}</label>
+                              <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaDescription') }}</p>
+                            </summary>
                             <ul v-if="imageAttrDisplays.length" class="image-attr-list">
                               <li v-for="attr in imageAttrDisplays" :key="attr.name" class="image-attr-row">
                                 <div class="image-attr-head">
@@ -505,28 +529,8 @@
                                 </li>
                               </ul>
                             </div>
-                          </div>
+                          </details>
                         </div>
-
-                        <!-- 观察失败兜底：真正与上方属性面板行同级。此前它嵌在
-                             setting-row-vertical 里，而垂直行的后代选择器把所有
-                             .setting-info / .setting-control 都撑成 100% 宽，水平
-                             排布必然溢出，开关被顶到容器右缘之外。挪出来后与其它
-                             开关行共用同一套排版，右缘与「图片属性观察」对齐 -->
-                        <template v-if="uiState.multimodalConfig.enabled && uiState.imagePipeline === IMAGE_PIPELINE_SMARTOCR">
-                          <div class="setting-row">
-                            <div class="setting-info">
-                              <label>{{ t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobserved') }}</label>
-                              <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobservedDesc') }}</p>
-                            </div>
-                            <div class="setting-control">
-                              <t-switch v-model="uiState.imageActions.ocr.on_unobserved" size="medium" />
-                            </div>
-                          </div>
-                          <div class="image-pipeline-kb-note">
-                            {{ t('knowledgeEditor.advanced.multimodal.imagePipelineKbNote') }}
-                          </div>
-                        </template>
                       </div>
                     </div>
                   </div>
@@ -1698,6 +1702,29 @@ const handleConfirm = () => {
 // 图片属性面板（可观察属性 / OCR 触发条件 / 观察失败兜底）
 // 文案全部来自后端属性注册表（人话名 + 每个取值的含义），前端只做翻译覆盖，
 // 因此新增属性无需改这里。与知识库编辑器同款：铺在所在设置区里、不套独立底色块。
+// 第三段（观察属性说明）与上方开关区之间的分割线：分段之间才画线。
+.image-attr-block {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--td-component-border);
+}
+// 折叠标题：收起时仍读得到这一段是什么。
+.image-attr-summary {
+  cursor: pointer;
+  user-select: none;
+
+  label {
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+  }
+
+  .desc {
+    margin: 2px 0 0;
+    font-size: var(--app-text-sm);
+    line-height: 20px;
+    color: var(--td-text-color-secondary);
+  }
+}
 .image-attr-panel {
   margin-top: 4px;
 }
@@ -1708,10 +1735,9 @@ const handleConfirm = () => {
   padding: 0;
   list-style: none;
 }
+// 属性之间只留间距，不画线 —— 分割线只用在分段之间。
 .image-attr-row + .image-attr-row {
   margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--td-component-border);
 }
 .image-attr-head {
   display: flex;

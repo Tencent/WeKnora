@@ -4035,7 +4035,6 @@ export default {
         imagePipelineSectionDescription:
           'With multimodal parsing on, pick how images are parsed.',
         imagePipelineLabel: 'Scheme',
-        imagePipelineHelpSummary: 'Field help',
         preprocessLabel: 'Document preprocessing',
         preprocessDescription:
           'Straighten and crop a photographed page before OCR reads it. Auto asks the describe round whether the page needs it; Off never does; Force always does.',
@@ -8401,6 +8400,25 @@ export default {
         'true': { label: 'Yes', description: 'a chart, graph or diagram with plotted values' },
         'false': { label: 'No', description: 'a photo, drawing, icon or decoration' }
       }
+    },
+    layout_margin: {
+      label: 'Non-text area',
+      description:
+        'How much background surrounds the content. Large margins mean the page can be cropped tighter before OCR reads it.',
+      values: {
+        'none': { label: 'None', description: 'the text reaches the edges' },
+        'small': { label: 'Small', description: 'a thin band of background' },
+        'large': { label: 'Large', description: 'plenty of non-text area: a desk, a room, a mostly empty page' }
+      }
+    },
+    layout_upright: {
+      label: 'Text orientation',
+      description:
+        'Whether the text reads the right way up. A rotated or upside-down page is worth straightening before OCR reads it.',
+      values: {
+        'true': { label: 'Upright', description: 'text reads in its normal orientation' },
+        'false': { label: 'Rotated', description: 'text is turned, tilted or upside down' }
+      }
     }
   },
   // Overlay wording for the pipeline panel, indexed by pipeline id and field
@@ -8411,25 +8429,6 @@ export default {
     errors: {
       noActionEnabled: 'Turn on at least one parsing action, otherwise nothing will be processed.',
     },
-      layout_margin: {
-        label: 'Non-text area',
-        description:
-          'How much background surrounds the content. Large margins mean the page can be cropped tighter before OCR reads it.',
-        values: {
-          'none': { label: 'None', description: 'the text reaches the edges' },
-          'small': { label: 'Small', description: 'a thin band of background' },
-          'large': { label: 'Large', description: 'plenty of non-text area: a desk, a room, a mostly empty page' }
-        }
-      },
-      layout_upright: {
-        label: 'Text orientation',
-        description:
-          'Whether the text reads the right way up. A rotated or upside-down page is worth straightening before OCR reads it.',
-        values: {
-          'true': { label: 'Upright', description: 'text reads in its normal orientation' },
-          'false': { label: 'Rotated', description: 'text is turned, tilted or upside down' }
-        }
-      },
     default: {
       name: 'Manual',
       description: 'Turn the parsing actions on or off to fit the task.',

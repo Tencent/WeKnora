@@ -4624,7 +4624,6 @@ export default {
         imagePipelineSectionDescription:
           '멀티모달 분석이 켜져 있으면 이미지의 분석 방식을 필요에 따라 선택할 수 있습니다.',
         imagePipelineLabel: '분석 방식',
-        imagePipelineHelpSummary: '필드 설명',
         preprocessLabel: '문서 전처리',
         preprocessDescription:
           'OCR 전에 촬영한 페이지를 반듯하게 펴고 주변을 잘라냅니다. 자동: 설명 단계에서 필요 여부를 판단 / 끄기: 항상 사용 안 함 / 강제: 항상 사용.',
@@ -8395,6 +8394,25 @@ export default {
         'true': { label: '예', description: '예 —— 차트, 그래프, 도표' },
         'false': { label: '아니오', description: '아니오 —— 사진, 삽화, 아이콘, 장식' }
       }
+    },
+    layout_margin: {
+      label: '여백',
+      description:
+        '내용 바깥(책상, 배경, 여백)이 화면 전체에서 차지하는 비율. 여백이 크면 OCR 전에 페이지를 더 타이트하게 잘라낼 수 있습니다.',
+      values: {
+        'none': { label: '없음', description: '글자가 화면을 거의 채움' },
+        'small': { label: '적음', description: '가장자리에 얇은 띠' },
+        'large': { label: '많음', description: '비텍스트 영역이 넓음 — 책상, 방, 거의 빈 페이지' }
+      }
+    },
+    layout_upright: {
+      label: '글자 방향',
+      description:
+        '이미지 속 글자가 똑바로 서 있는지. 기울거나 뒤집힌 페이지는 OCR 전에 바르게 펴는 것이 좋습니다.',
+      values: {
+        'true': { label: '정립', description: '글자가 정상 방향' },
+        'false': { label: '비정립', description: '회전·기울임 촬영·뒤집힘' }
+      }
     }
   },
   // 파이프라인 패널의 오버레이 문구: 파이프라인 id와 필드 key로 색인합니다
@@ -8405,25 +8423,6 @@ export default {
     errors: {
       noActionEnabled: '분석 동작을 하나 이상 켜세요. 모두 꺼져 있으면 아무것도 처리되지 않습니다.',
     },
-      layout_margin: {
-        label: '여백',
-        description:
-          '내용 바깥(책상, 배경, 여백)이 화면 전체에서 차지하는 비율. 여백이 크면 OCR 전에 페이지를 더 타이트하게 잘라낼 수 있습니다.',
-        values: {
-          'none': { label: '없음', description: '글자가 화면을 거의 채움' },
-          'small': { label: '적음', description: '가장자리에 얇은 띠' },
-          'large': { label: '많음', description: '비텍스트 영역이 넓음 — 책상, 방, 거의 빈 페이지' }
-        }
-      },
-      layout_upright: {
-        label: '글자 방향',
-        description:
-          '이미지 속 글자가 똑바로 서 있는지. 기울거나 뒤집힌 페이지는 OCR 전에 바르게 펴는 것이 좋습니다.',
-        values: {
-          'true': { label: '정립', description: '글자가 정상 방향' },
-          'false': { label: '비정립', description: '회전·기울임 촬영·뒤집힘' }
-        }
-      },
     default: {
       name: '수동',
       description: '작업에 맞게 분석 동작 스위치를 직접 켜거나 끕니다.',
