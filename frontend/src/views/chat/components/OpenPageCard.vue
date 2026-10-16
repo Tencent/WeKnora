@@ -148,7 +148,7 @@ function goBack() {
   border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   color: var(--td-brand-color);
-  font-size: 18px;
+  font-size: var(--app-text-2xl);
 }
 
 .open-page-card__body {
@@ -195,7 +195,7 @@ function goBack() {
   transition: color var(--app-motion-fast) ease;
 
   .t-icon {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
   }
 }
 

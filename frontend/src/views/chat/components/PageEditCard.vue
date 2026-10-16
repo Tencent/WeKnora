@@ -91,7 +91,7 @@ async function undo() {
   border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   color: var(--td-brand-color);
-  font-size: 18px;
+  font-size: var(--app-text-2xl);
 }
 
 .page-edit-card__heading {
