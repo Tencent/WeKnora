@@ -222,12 +222,12 @@ func (doc *specDocument) compileOperation(
 		return Operation{}, fmt.Errorf("%s: %w", extAgent, err)
 	}
 	op := Operation{
-		ID:          meta.ID,
-		Summary:     strings.TrimSpace(sop.Summary),
-		Description: strings.TrimSpace(sop.Hint),
-		Risk:        meta.Risk,
-		Method:      method,
-		Route:       route,
+		ID:            meta.ID,
+		Summary:       strings.TrimSpace(sop.Summary),
+		Description:   strings.TrimSpace(sop.Hint),
+		Risk:          meta.Risk,
+		Method:        method,
+		Route:         route,
 		Role:          meta.Role,
 		LabelParam:    meta.LabelParam,
 		AlwaysConfirm: meta.AlwaysConfirm,

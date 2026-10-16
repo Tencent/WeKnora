@@ -425,7 +425,8 @@ func TestProjectModelEndpointAndCatalog(t *testing.T) {
 
 	models, ok := Builtin().Get("model.list")
 	require.True(t, ok)
-	projected, err = models.Project([]byte(`{"data":[` + strings.TrimSuffix(strings.TrimPrefix(string(model), `{"data":`), `}`) + `]}`))
+	modelObject := strings.TrimSuffix(strings.TrimPrefix(string(model), `{"data":`), `}`)
+	projected, err = models.Project([]byte(`{"data":[` + modelObject + `]}`))
 	require.NoError(t, err)
 	row := projected.Data.([]any)[0].(map[string]any)
 	assert.Equal(t, "magpie", row["provider"])

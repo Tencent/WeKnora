@@ -94,9 +94,13 @@ const openPageSchema = `{
         "source": {"type": "string", "enum": ["remote", "local"]},
         "provider": {
           "type": "string",
-          "description": "Provider id from model.list_providers, e.g. openai, aliyun, generic. Prefer the catalog provider over generic."
+          "description": "Provider id from model.list_providers, e.g. openai, aliyun, generic. ` +
+	`Prefer the catalog provider over generic."
         },
-        "model_name": {"type": "string", "description": "The model name the provider expects: a model_name from model.get_provider when it lists one."},
+        "model_name": {
+          "type": "string",
+          "description": "The model name the provider expects: a model_name from model.get_provider when it lists one."
+        },
         "display_name": {"type": "string"},
         "base_url": {"type": "string", "description": "http(s) endpoint, when the provider needs one."}
       },

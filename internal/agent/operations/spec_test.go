@@ -179,11 +179,13 @@ func TestFromSpecRejectsBadAnnotations(t *testing.T) {
 		},
 		"list of objects without exposed fields": {
 			`"tags": {"type": "array", "items": {"type": "string"}, "x-agent": true}`,
-			`"tags": {"type": "array", "items": {"type": "object", "properties": {"secret": {"type": "string"}}}, "x-agent": true}`,
+			`"tags": {"type": "array", "items": {"type": "object", ` +
+				`"properties": {"secret": {"type": "string"}}}, "x-agent": true}`,
 		},
 		"length cap on a list of objects": {
 			`"tags": {"type": "array", "items": {"type": "string"}, "x-agent": true}`,
-			`"tags": {"type": "array", "items": {"$ref": "#/definitions/types.Strategy"}, "x-agent": true, "x-agent-max-runes": "10"}`,
+			`"tags": {"type": "array", "items": {"$ref": "#/definitions/types.Strategy"}, ` +
+				`"x-agent": true, "x-agent-max-runes": "10"}`,
 		},
 		"nothing exposed": {
 			`"message": {"type": "string", "x-agent": true}`, `"message": {"type": "string"}`,
@@ -551,7 +553,8 @@ func TestFromSpecProjectsListsOfObjects(t *testing.T) {
 	assert.ErrorContains(t, err, "cannot hold lists of objects")
 
 	bare := strings.Replace(spec, `"id": {"type": "string", "x-agent": "tag_id"},`, `"id": {"type": "string"},`, 1)
-	bare = strings.Replace(bare, `"note": {"type": "string", "x-agent": true, "x-agent-detail": true}`, `"note": {"type": "string"}`, 1)
+	bare = strings.Replace(bare,
+		`"note": {"type": "string", "x-agent": true, "x-agent-detail": true}`, `"note": {"type": "string"}`, 1)
 	_, err = FromSpec([]byte(bare))
 	assert.ErrorContains(t, err, "list items expose no fields")
 }
