@@ -1,7 +1,7 @@
 <template>
   <div class="page-edit-card" @click.stop @keydown.stop>
     <div class="page-edit-card__header">
-      <span class="page-edit-card__icon" aria-hidden="true"><t-icon name="edit-1" /></span>
+      <span class="page-edit-card__icon" aria-hidden="true"><t-icon name="edit-1" size="18px" /></span>
       <div class="page-edit-card__heading">
         <div v-if="fill.location" class="page-edit-card__eyebrow">{{ fill.location }}</div>
         <div class="page-edit-card__title">
@@ -91,7 +91,6 @@ async function undo() {
   border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   color: var(--td-brand-color);
-  font-size: 18px;
 }
 
 .page-edit-card__heading {

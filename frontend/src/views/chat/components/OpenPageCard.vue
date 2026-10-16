@@ -1,7 +1,7 @@
 <template>
   <div class="open-page-card" @click.stop @keydown.stop>
     <button type="button" class="open-page-card__main" :disabled="!location" :title="actionLabel" @click="open">
-      <span class="open-page-card__icon" aria-hidden="true"><t-icon :name="icon" /></span>
+      <span class="open-page-card__icon" aria-hidden="true"><t-icon :name="icon" size="18px" /></span>
       <span class="open-page-card__body">
         <span class="open-page-card__title">{{ link.detail || link.label }}</span>
         <span v-if="meta" class="open-page-card__meta">
@@ -10,7 +10,7 @@
       </span>
       <span class="open-page-card__go">
         <span v-if="draft" class="open-page-card__go-label">{{ actionLabel }}</span>
-        <t-icon name="chevron-right" />
+        <t-icon name="chevron-right" size="16px" />
       </span>
     </button>
     <div v-if="link.note || endpoint || draft || returnPath" class="open-page-card__extra">
@@ -148,7 +148,6 @@ function goBack() {
   border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   color: var(--td-brand-color);
-  font-size: 18px;
 }
 
 .open-page-card__body {
@@ -193,10 +192,6 @@ function goBack() {
   color: var(--td-text-color-placeholder);
   font-size: var(--app-text-sm);
   transition: color var(--app-motion-fast) ease;
-
-  .t-icon {
-    font-size: 16px;
-  }
 }
 
 .open-page-card__extra {

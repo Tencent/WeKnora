@@ -182,8 +182,14 @@ func TestOpenPageRefuses(t *testing.T) {
 			"section for page settings must be one of",
 		},
 		{"agent tab on the toolbox", `{"page":"toolbox","section":"tools"}`, "section for page toolbox must be one of"},
-		{"panel outside system settings", `{"page":"settings","section":"members","panel":"users"}`, "panel applies only"},
-		{"unknown system settings tab", `{"page":"settings","section":"system-global","panel":"billing"}`, "panel must be"},
+		{
+			"panel outside system settings", `{"page":"settings","section":"members","panel":"users"}`,
+			"panel applies only",
+		},
+		{
+			"unknown system settings tab", `{"page":"settings","section":"system-global","panel":"billing"}`,
+			"panel must be",
+		},
 		{"panel on a list page", `{"page":"agents","panel":"users"}`, "does not apply"},
 		{"field of a list page", `{"page":"agents","agent_id":"agent-1"}`, "does not apply"},
 	} {

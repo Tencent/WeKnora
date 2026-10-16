@@ -345,7 +345,8 @@ func requestPageAction(
 	}
 	if res.Response.Declined {
 		return res, operationFailure("the user turned off page access for the assistant. Do not call " +
-			"read_page, select_tab or fill_page again in this conversation; ask the user to describe or paste what you need.")
+			"read_page, select_tab or fill_page again in this conversation; " +
+			"ask the user to describe or paste what you need.")
 	}
 	return res, nil
 }
