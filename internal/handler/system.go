@@ -615,6 +615,10 @@ func (h *SystemHandler) getGraphDatabaseEngine() string {
 	if h.neo4jDriver == nil {
 		return "Not Enabled"
 	}
+	engine := strings.ToLower(strings.TrimSpace(os.Getenv("GRAPH_DATABASE_ENGINE")))
+	if engine == "memgraph" {
+		return "Memgraph"
+	}
 	return "Neo4j"
 }
 

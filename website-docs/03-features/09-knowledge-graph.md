@@ -4,7 +4,7 @@
 
 该功能适用于人物、组织、产品或条款之间关系较多的资料。启用后会增加入库阶段的模型调用，并需要部署 Neo4j。
 
-图谱存储使用 Neo4j，并依赖 APOC 插件。
+图谱存储支持 Neo4j 与 Memgraph，通过 Bolt/Cypher 连接。Neo4j 仍使用 APOC（写入 `apoc.merge.node` / `apoc.merge.relationship`，删除 `apoc.periodic.iterate`）；Memgraph 没有 APOC，改用两者共有的 Cypher，删除在应用侧分批、每批单独提交。引擎由 `GRAPH_DATABASE_ENGINE` 选择，标签、检索与结果解析两者共用。
 
 ## 开启配置
 
@@ -20,10 +20,31 @@
 | `NEO4J_URI` | string | `bolt://neo4j:7687` | Neo4j 连接地址 |
 | `NEO4J_USERNAME` | string | `neo4j` | 用户名 |
 | `NEO4J_PASSWORD` | string | `password` | 密码 |
+| `GRAPH_DATABASE_ENGINE` | string | `neo4j` | 图数据库类型：`neo4j` 或 `memgraph`。`NEO4J_ENABLE` 仍是图谱功能开关，旧部署无需修改 |
 
-`initNeo4jClient` 启动时最多重试 30 次（间隔 2s）建立并验证连接；未启用时返回 `nil` driver，此时 `Neo4jRepository` 的所有方法降级为 no-op（日志 `NOT SUPPORT RETRIEVE GRAPH`）。`GET /system` 信息接口通过 `getGraphDatabaseEngine()` 报告 `"Neo4j"` 或 `"Not Enabled"`（`internal/handler/system.go`）。
+`initNeo4jClient` 启动时最多重试 30 次（间隔 2s）建立并验证连接；未启用时返回 `nil` driver，此时 `Neo4jRepository` 的所有方法降级为 no-op（日志 `NOT SUPPORT RETRIEVE GRAPH`）。`GET /system` 信息接口通过 `getGraphDatabaseEngine()` 报告 `"Neo4j"`、`"Memgraph"` 或 `"Not Enabled"`（`internal/handler/system.go`）。
 
-docker-compose 的 `neo4j` 服务预装 APOC：`NEO4JLABS_PLUGINS=["apoc"]`（图谱写入依赖 `apoc.merge.node` / `apoc.merge.relationship`，删除依赖 `apoc.periodic.iterate`）。
+docker-compose 的 `neo4j` 服务预装 APOC：`NEO4JLABS_PLUGINS=["apoc"]`（图谱写入依赖 `apoc.merge.node` /
+`apoc.merge.relationship`，删除依赖 `apoc.periodic.iterate`）。Memgraph 不需要插件。
+
+Docker Compose 另有可选的 `memgraph` profile，Neo4j 仍是默认引擎。切到 Memgraph 时在 `.env` 里设置：
+
+```bash
+# .env
+NEO4J_ENABLE=true
+GRAPH_DATABASE_ENGINE=memgraph
+NEO4J_URI=bolt://memgraph:7687
+NEO4J_USERNAME=weknora        # 在 Memgraph 里用 CREATE USER 建的用户
+NEO4J_PASSWORD=<密码>
+```
+
+```bash
+docker compose --profile memgraph up -d
+```
+
+Memgraph 默认不建用户、不启用认证。Compose 的 app 服务总会传 `NEO4J_USERNAME` / `NEO4J_PASSWORD`
+（未设置时取上表的 Neo4j 默认值），所以走 Compose 时请在 Memgraph 里 `CREATE USER` 建一个与之对应的用户。
+不经 Compose 跑 app（见开发指南）时两项都留空，即以无认证方式连接。对外暴露 Bolt 端口前应配置访问控制。
 
 ### 知识库级开关：IndexingStrategy + ExtractConfig {#_2-知识库级开关-indexingstrategy-extractconfig}
 
