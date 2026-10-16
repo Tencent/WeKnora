@@ -45,19 +45,20 @@ func (s Scope) valid() bool { return s.Tenant != 0 && s.User != "" }
 
 // Status describes the connection and current conversation task.
 type Status struct {
-	Action          string `json:"action,omitempty"`
-	ActionElapsedMS int64  `json:"action_elapsed_ms"`
-	PageURL         string `json:"page_url,omitempty"`
-	LastError       string `json:"last_error,omitempty"`
-	Stopping        bool   `json:"stopping"`
-	HelpPrompt      string `json:"help_prompt,omitempty"`
-	Idle            bool   `json:"idle"` // Between turns; does not imply debugger release.
-	NeedsHelp       bool   `json:"needs_help"`
-	Enabled         bool   `json:"enabled"`
-	Selected        bool   `json:"selected"`
-	Connected       bool   `json:"connected"`
-	Paused          bool   `json:"paused"`
-	SessionID       string `json:"task_id,omitempty"`
+	Action           string `json:"action,omitempty"`
+	ActionElapsedMS  int64  `json:"action_elapsed_ms"`
+	PageURL          string `json:"page_url,omitempty"`
+	LastError        string `json:"last_error,omitempty"`
+	Stopping         bool   `json:"stopping"`
+	HelpPrompt       string `json:"help_prompt,omitempty"`
+	Idle             bool   `json:"idle"` // Between turns; does not imply debugger release.
+	NeedsHelp        bool   `json:"needs_help"`
+	Enabled          bool   `json:"enabled"`
+	Selected         bool   `json:"selected"`
+	Connected        bool   `json:"connected"`
+	ExtensionVersion string `json:"extension_version,omitempty"`
+	Paused           bool   `json:"paused"`
+	SessionID        string `json:"task_id,omitempty"`
 }
 type task struct {
 	action                        string
@@ -81,18 +82,19 @@ type task struct {
 	nextCall                      uint64
 }
 type device struct {
-	writeMu    sync.Mutex
-	uiCalls    map[string]chan uiReply
-	mu         sync.Mutex
-	runtime    *daemon
-	browserID  string
-	upstream   *websocket.Conn
-	conn       *websocket.Conn
-	ready      bool
-	generation uint64
-	tasks      map[string]*task
-	expires    time.Time
-	recordID   string
+	writeMu          sync.Mutex
+	uiCalls          map[string]chan uiReply
+	mu               sync.Mutex
+	runtime          *daemon
+	browserID        string
+	extensionVersion string
+	upstream         *websocket.Conn
+	conn             *websocket.Conn
+	ready            bool
+	generation       uint64
+	tasks            map[string]*task
+	expires          time.Time
+	recordID         string
 	// connecting counts extension handshakes holding this device against
 	// eviction; attaching excludes a second handshake while dialing unlocked.
 	connecting int
@@ -163,6 +165,9 @@ func (m *Manager) Status(s Scope, session string) Status {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	result.Connected = d.conn != nil && d.ready && time.Now().Before(d.expires)
+	if result.Connected {
+		result.ExtensionVersion = d.extensionVersion
+	}
 	if t := d.tasks[session]; t != nil {
 		result.Selected = t.selected
 		result.Paused = t.paused
@@ -317,6 +322,7 @@ func disconnectDeviceLocked(d *device) {
 	d.conn, d.upstream = nil, nil
 	d.ready = false
 	d.browserID = ""
+	d.extensionVersion = ""
 	d.generation++
 	for _, t := range d.tasks {
 		t.id = ""
@@ -443,6 +449,7 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	d.upstream = up
 	d.ready = false
 	// The lease identity is assigned by the authenticated gateway, never the extension.
+	d.extensionVersion = ""
 	d.browserID = leaseKey
 	browserID := d.browserID
 	d.generation++
@@ -464,7 +471,7 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	up.SetReadLimit(maxFrame)
 	// Complete and verify the first handshake before publishing readiness.
 	// This keeps identity assignment out of the generic frame forwarding path.
-	reply, err := relayHandshake(conn, up, browserID)
+	reply, extensionVersion, err := relayHandshake(conn, up, browserID)
 	if err != nil {
 		return
 	}
@@ -474,6 +481,7 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.ready = true
+	d.extensionVersion = extensionVersion
 	d.mu.Unlock()
 	_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	if conn.WriteMessage(websocket.TextMessage, reply) != nil {
@@ -549,7 +557,7 @@ func (m *Manager) attach(
 	return up, conn, nil
 }
 
-func relayHandshake(conn, up *websocket.Conn, browserID string) ([]byte, error) {
+func relayHandshake(conn, up *websocket.Conn, browserID string) ([]byte, string, error) {
 	deadline := time.Now().Add(5 * time.Second)
 	_ = conn.SetReadDeadline(deadline)
 	_ = up.SetReadDeadline(deadline)
@@ -560,27 +568,27 @@ func relayHandshake(conn, up *websocket.Conn, browserID string) ([]byte, error) 
 	}()
 	typ, data, err := conn.ReadMessage()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var frame map[string]json.RawMessage
 	if typ != websocket.TextMessage || json.Unmarshal(data, &frame) != nil {
-		return nil, errors.New("invalid browser handshake")
+		return nil, "", errors.New("invalid browser handshake")
 	}
 	var method, id string
 	var params map[string]json.RawMessage
 	if json.Unmarshal(frame["method"], &method) != nil || method != "system.handshake" ||
 		json.Unmarshal(frame["id"], &id) != nil || id == "" ||
 		json.Unmarshal(frame["params"], &params) != nil || params == nil {
-		return nil, errors.New("expected browser handshake")
+		return nil, "", errors.New("expected browser handshake")
 	}
 	params["instance_id"], _ = json.Marshal(browserID)
 	frame["params"], _ = json.Marshal(params)
 	if err := up.WriteJSON(frame); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	typ, reply, err := up.ReadMessage()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var response struct {
 		ID     string `json:"id"`
@@ -592,9 +600,14 @@ func relayHandshake(conn, up *websocket.Conn, browserID string) ([]byte, error) 
 	if typ != websocket.TextMessage || json.Unmarshal(reply, &response) != nil ||
 		response.ID != id || response.Result.Protocol == "" ||
 		(len(response.Error) != 0 && string(response.Error) != "null") {
-		return nil, errors.New("BrowserSkill handshake failed")
+		return nil, "", errors.New("BrowserSkill handshake failed")
 	}
-	return reply, nil
+	// This is the extension's version, not browser.version or protocol_version.
+	var version string
+	if json.Unmarshal(params["version"], &version) != nil || len(version) > 64 {
+		version = ""
+	}
+	return reply, strings.TrimSpace(version), nil
 }
 
 func validExtensionOrigin(origin string) bool {

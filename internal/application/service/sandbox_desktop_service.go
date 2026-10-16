@@ -171,6 +171,7 @@ func (s *SandboxDesktopService) resolveRunningManager(
 	mgr, _, err = resolveSandboxForExecution(
 		ctx, t.resolver, t.fallback, t.pinner,
 		provision.TenantOr(sessionTenantID), sessionID, provision.ConfigID, t.policy,
+		withLiteDesktop(t.desktop),
 	)
 	if err != nil {
 		return nil, err

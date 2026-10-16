@@ -33,6 +33,8 @@ type SandboxTerminalService struct {
 	resolver sandbox.TenantSandboxResolver
 	fallback sandbox.Manager
 	policy   WorkspaceSandboxPolicy
+	// desktop is Lite: remote pins and configs are never resolved there.
+	desktop bool
 }
 
 // NewSandboxTerminalService wires the terminal service. All dependencies
@@ -43,12 +45,14 @@ func NewSandboxTerminalService(
 	resolver sandbox.TenantSandboxResolver,
 	fallback sandbox.Manager,
 	policy WorkspaceSandboxPolicy,
+	host HostSandboxManager,
 ) *SandboxTerminalService {
 	return &SandboxTerminalService{
 		pinner:   pinner,
 		resolver: resolver,
 		fallback: fallback,
 		policy:   policy,
+		desktop:  host.Desktop,
 	}
 }
 
@@ -90,7 +94,7 @@ func (s *SandboxTerminalService) resolveSessionManager(
 	ctx context.Context,
 	sessionID string,
 ) (sandbox.Manager, SandboxPin, error) {
-	if s.pinner == nil {
+	if s.pinner == nil || s.desktop {
 		return nil, SandboxPin{}, sandbox.ErrNoLiveSessionSandbox
 	}
 	pin, err := s.pinner.Read(ctx, sessionID)
@@ -177,6 +181,7 @@ func (s *SandboxTerminalService) EnsureSessionTerminal(
 	mgr, _, err = resolveSandboxForExecution(
 		ctx, s.resolver, s.fallback, s.pinner,
 		provision.TenantOr(sessionTenantID), sessionID, provision.ConfigID, s.policy,
+		withLiteDesktop(s.desktop),
 	)
 	if err != nil {
 		return nil, err

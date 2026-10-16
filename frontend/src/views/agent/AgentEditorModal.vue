@@ -1171,8 +1171,31 @@
                           </span>
                         </div>
                         <span v-if="tool.description" class="tool-card-desc">{{ tool.description }}</span>
-                        <span v-if="tool.disabled && tool.disabledReason" class="tool-card-hint">
+                        <span v-if="tool.unmet && tool.disabledReason" class="tool-card-hint">
                           {{ tool.disabledReason }}
+                        </span>
+                      </div>
+                    </t-checkbox>
+                  </div>
+                </section>
+                <section v-if="storedExtras.length > 0" class="tool-group tool-group--stored">
+                  <header class="tool-group-header">
+                    <span class="tool-group-bar" />
+                    <span class="tool-group-title">{{ $t('agentEditor.tools.groupStored') }}</span>
+                    <span class="tool-group-count">{{ storedExtras.length }}</span>
+                  </header>
+                  <div class="tool-grid">
+                    <t-checkbox v-for="extra in storedExtras" :key="extra.value" :value="extra.value"
+                      :disabled="extra.disabled"
+                      :class="['tool-card', { 'tool-card--disabled': extra.disabled }]">
+                      <div class="tool-card-body">
+                        <div class="tool-card-head">
+                          <span class="tool-card-name">{{ extra.value }}</span>
+                        </div>
+                        <span class="tool-card-desc">
+                          {{ extra.kind === 'switch_managed'
+                            ? $t('agentEditor.tools.switchManagedDesc')
+                            : $t('agentEditor.tools.unrecognizedDesc') }}
                         </span>
                       </div>
                     </t-checkbox>
@@ -1265,11 +1288,11 @@
       <div v-show="currentSection === 'skills' && isAgentMode" class="section">
         <div class="section-header">
           <h2>{{ $t('agent.editor.skillsConfig') }}</h2>
-          <p class="section-description">{{ $t('agent.editor.skillsConfigDesc') }}</p>
+          <p class="section-description">{{ hostOnly ? $t('agent.editor.hostSkillsConfigDesc') : $t('agent.editor.skillsConfigDesc') }}</p>
         </div>
 
         <div class="settings-group">
-          <div class="setting-row">
+          <div v-if="!hostOnly" class="setting-row">
             <div class="setting-info">
               <label>{{ $t('agent.editor.sandboxBackend') }}</label>
               <p class="desc">{{ $t('agent.editor.sandboxBackendHint') }}</p>
@@ -1424,7 +1447,7 @@
                       variant="text"
                       theme="primary"
                       :loading="installingCatalogId === skill.id"
-                      :title="installsAnUpgrade(skill) ? $t('agent.editor.upgradeOnThisSandbox') : $t('agent.editor.installToThisSandbox')"
+                      :title="installsAnUpgrade(skill) ? (hostOnly ? $t('agent.editor.hostUpgradeOnThisComputer') : $t('agent.editor.upgradeOnThisSandbox')) : (hostOnly ? $t('agent.editor.hostInstallToThisComputer') : $t('agent.editor.installToThisSandbox'))"
                       @click.stop="installCatalogToCurrent(skill)"
                     >
                       {{ installsAnUpgrade(skill) ? $t('settings.skills.upgrade') : $t('agent.editor.installShort') }}
@@ -1435,7 +1458,7 @@
                       variant="text"
                       theme="primary"
                       :loading="installingCatalogId === skill.id"
-                      :title="$t('agent.editor.upgradeOnThisSandbox')"
+                      :title="hostOnly ? $t('agent.editor.hostUpgradeOnThisComputer') : $t('agent.editor.upgradeOnThisSandbox')"
                       @click.stop="installCatalogToCurrent(skill)"
                     >
                       {{ $t('settings.skills.upgrade') }}
@@ -1637,8 +1660,9 @@
         </div>
       </div>
 
-      <!-- 检索策略（仅在有知识库能力时显示） -->
-      <div v-show="currentSection === 'retrieval' && hasKnowledgeBase" class="section">
+      <!-- 检索策略（仅普通模式且有知识库能力时显示；Agent 模式的 search_knowledge
+           使用全局检索配置，这里的设置对它不生效） -->
+      <div v-show="currentSection === 'retrieval' && hasKnowledgeBase && !isAgentMode" class="section">
         <div class="section-header">
           <h2>{{ $t('agent.editor.retrievalStrategy') }}</h2>
           <p class="section-description">{{ $t('agentEditor.desc.retrievalSection') }}</p>
@@ -1825,6 +1849,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAssistantDataChange } from '@/utils/assistantDataChange';
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import AgentCreateContextualGuide from '@/components/AgentCreateContextualGuide.vue';
@@ -1846,6 +1871,8 @@ import {
   type CustomAgent,
   type PlaceholderDefinition,
   type AgentTypePreset,
+  type AgentToolCatalog,
+  type AllowedToolsWarnings,
   type AgentType,
   type AgentTypeKBFilter,
   type KBCapabilities,
@@ -1867,6 +1894,8 @@ import { useUIStore } from '@/stores/ui';
 import { useAuthStore } from '@/stores/auth';
 import { useOrganizationStore } from '@/stores/organization';
 import { useChatResourcesStore } from '@/stores/chatResources';
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
+import { HOST_SKILL_TARGET_ID, hostSkillTargetRecord, hostSkillsOnly } from '@/utils/skillTarget';
 import { useEditorResourcesStore } from '@/stores/editorResources';
 import AgentAvatar from '@/components/AgentAvatar.vue';
 import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
@@ -1879,12 +1908,20 @@ import { SKILL_ICON } from '@/types/mention';
 import { listEmbedChannels } from '@/api/embed';
 import { getRootZoom, rectToCssPx } from '@/utils/zoom';
 import { integrationSectionKey } from '@/config/settingsRoute';
+import { toolboxLocation } from '@/config/toolbox';
 import {
-  evaluateToolRequirement,
   deriveKbFilterFromTools,
   type RequirementMissKind,
   type ScopeCapabilities,
 } from '@/utils/tool-capabilities';
+import {
+  allowedToolsToSave as allowedToolsForSave,
+  buildToolOptions,
+  effectiveToolSelection,
+  resolveLoadedAllowedTools,
+  storedExtraTools,
+  type ToolText,
+} from '@/utils/agent-tool-list';
 import {
   clampLevel,
   levelDescriptionKey,
@@ -1906,6 +1943,7 @@ const CHAT_PARSER_EXTENSIONS = [
 
 const uiStore = useUIStore();
 const authStore = useAuthStore();
+const deploymentCapabilities = useDeploymentCapabilitiesStore();
 const router = useRouter();
 const orgStore = useOrganizationStore();
 const chatResources = useChatResourcesStore();
@@ -1937,6 +1975,17 @@ const savedAgent = ref<CustomAgent | null>(null);
 const editorMode = computed(() => (savedAgent.value ? 'edit' : props.mode));
 const editorAgent = computed(() => savedAgent.value ?? props.agent ?? null);
 const isPostCreateSession = computed(() => !!savedAgent.value);
+
+useAssistantDataChange((changes) => {
+  const agentId = editorAgent.value?.id;
+  if (!props.visible || !agentId) return;
+  const relevant = changes.filter(change => change.ids.agentIds.includes(agentId)
+    && change.operation !== 'agent.copy');
+  if (!relevant.length) return;
+  const deleted = relevant.some(change => change.operation === 'agent.delete');
+  MessagePlugin.warning(t(deleted ? 'agent.editor.assistantDeleted' : 'agent.editor.assistantChanged'));
+}, { areas: ['agent'] });
+
 const saveButtonLabel = computed(() =>
   editorMode.value === 'create'
     ? t('agent.editor.buttons.create')
@@ -2092,9 +2141,17 @@ const skillCatalog = ref<SkillCatalogItem[]>([]);
 const catalogReady = ref(false);
 const installingCatalogId = ref('');
 const skillsSelectionMode = ref<'all' | 'selected' | 'none'>('none');
-const hasSandboxSelected = computed(() => !!formData.value.config.sandbox_config_id);
+const hostOnly = computed(() => hostSkillsOnly(
+  deploymentCapabilities.isSupported('settings.sandbox.remote'),
+  deploymentCapabilities.isSupported('settings.sandbox.host'),
+));
+// Where this agent's skills install and run.
+const skillTargetId = computed(() =>
+  hostOnly.value ? HOST_SKILL_TARGET_ID : (formData.value.config.sandbox_config_id || ''),
+);
+const hasSandboxSelected = computed(() => !!skillTargetId.value);
 const canEnableSkills = computed(() =>
-  hasSandboxSelected.value || namedSandboxConfigs().length === 1,
+  hostOnly.value || hasSandboxSelected.value || namedSandboxConfigs().length === 1,
 );
 const canInstallSkills = computed(() => authStore.hasRole('admin'));
 
@@ -2112,7 +2169,7 @@ type CatalogSkillRow = SkillCatalogItem & {
 }
 
 const catalogSkillRows = computed<CatalogSkillRow[]>(() => {
-  const sandboxId = formData.value.config.sandbox_config_id || ''
+  const sandboxId = skillTargetId.value
   return skillCatalog.value.map((item) => {
     const inst = sandboxId
       ? (item.installations || []).find((row) => row.sandbox_config_id === sandboxId)
@@ -2137,6 +2194,11 @@ const showCatalogSkillList = computed(() =>
 )
 
 const skillsSelectionHint = computed(() => {
+  if (hostOnly.value) {
+    if (skillsSelectionMode.value === 'all') return t('agent.editor.hostSkillsAllListHint')
+    if (skillsSelectionMode.value === 'selected') return t('agent.editor.hostSelectSkillsDesc')
+    return t('agent.editor.hostSkillsSelectionDesc')
+  }
   if (skillsSelectionMode.value === 'all') return t('agent.editor.skillsAllListHint')
   if (skillsSelectionMode.value === 'selected') return t('agent.editor.selectSkillsDesc')
   return t('agent.editor.skillsSelectionDesc')
@@ -2169,7 +2231,7 @@ function skillStatusHint(skill: CatalogSkillRow): string {
   if (skill.installStatus === 'failed') return t('settings.sandbox.skillStatusFailed')
   if (skill.installStatus === 'removing') return t('settings.sandbox.skillStatusRemoving')
   if (skill.installStatus === 'ready' && !skill.installEnabled) {
-    return t('agent.editor.skillDisabledOnSandbox')
+    return hostOnly.value ? t('agent.editor.hostSkillDisabled') : t('agent.editor.skillDisabledOnSandbox')
   }
   return t('agent.editor.skillNotReady')
 }
@@ -2215,6 +2277,7 @@ function namedSandboxConfigs(): SandboxConfigRecord[] {
 }
 
 function autoBindSoleSandbox() {
+  if (hostOnly.value) return
   if (skillsSelectionMode.value === 'none') return
   if (formData.value.config.sandbox_config_id) return
   const configs = namedSandboxConfigs()
@@ -2224,8 +2287,10 @@ function autoBindSoleSandbox() {
 }
 
 function openSkillSettings() {
-  const configId = formData.value.config.sandbox_config_id || ''
-  uiStore.openSettings('skills', configId || undefined)
+  const configId = skillTargetId.value
+  modalShell.requestClose(() => {
+    void router.push(toolboxLocation('skills', configId || undefined))
+  })
 }
 
 const showSkillProgress = ref(false)
@@ -2239,6 +2304,7 @@ const skillProgressDesc = computed(() => {
 })
 
 function sandboxRecordById(configId: string): SandboxConfigRecord | undefined {
+  if (hostOnly.value && configId === HOST_SKILL_TARGET_ID) return hostSkillTargetRecord(t('settings.skills.hostTarget'))
   return chatResources.sandboxConfigs.find((cfg) => cfg.id === configId)
 }
 
@@ -2247,7 +2313,7 @@ function installOnCurrentSandbox(skill: CatalogSkillRow, configId: string) {
 }
 
 async function openSkillInstallProgress(skill: CatalogSkillRow) {
-  const configId = formData.value.config.sandbox_config_id || ''
+  const configId = skillTargetId.value
   const record = sandboxRecordById(configId)
   if (!record) {
     openSkillSettings()
@@ -2293,7 +2359,7 @@ function pruneSelectedSkills() {
 
 async function syncInstalledSkills(force = false) {
   autoBindSoleSandbox()
-  const configId = formData.value.config.sandbox_config_id || ''
+  const configId = skillTargetId.value
   // The editor only edits this workspace's agents, so the sandbox config is
   // local and needs no source-workspace scope.
   await editorResources.ensureSkills(configId, undefined, force)
@@ -2308,7 +2374,7 @@ async function syncInstalledSkills(force = false) {
 }
 
 async function installCatalogToCurrent(skill: CatalogSkillRow) {
-  const configId = formData.value.config.sandbox_config_id || ''
+  const configId = skillTargetId.value
   if (!configId || installingCatalogId.value) return
   installingCatalogId.value = skill.id
   const upgrading = installsAnUpgrade(skill)
@@ -2427,38 +2493,38 @@ const kbSelectionMode = ref<'all' | 'selected' | 'none'>('none');
 // MCP 服务选择模式：all=全部, selected=指定, none=不使用
 const mcpSelectionMode = ref<'all' | 'selected' | 'none'>('none');
 
-// 可用工具列表（与后台 internal/agent/tools/definitions.go 保持一致）
-// group 决定 UI 分组：base / rag / wiki_read / wiki_edit / wiki_issue / data
-// danger: 写类破坏性工具，UI 上给出显著提示
-// 工具的 KB 能力依赖关系统一在 `@/utils/tool-capabilities` 声明，
-// `availableTools` 通过 `evaluateToolRequirement` 读取，不在这里重复维护。
-const allTools = computed(() => [
-  // 基础思考类
-  { value: 'thinking', label: t('agentEditor.tools.thinking'), description: t('agentEditor.tools.thinkingDesc'), group: 'base' },
-  { value: 'todo_write', label: t('agentEditor.tools.todoWrite'), description: t('agentEditor.tools.todoWriteDesc'), group: 'base' },
-  // 知识库检索 / 文档阅读（旧的 grep_chunks / knowledge_search / list_knowledge_chunks /
-  // get_document_info 已合并，旧配置加载时由 normalizeLegacyToolNames 映射到新名字）
-  { value: 'search_knowledge', label: t('agentEditor.tools.searchKnowledge'), description: t('agentEditor.tools.searchKnowledgeDesc'), group: 'rag' },
-  { value: 'read_document', label: t('agentEditor.tools.readDocument'), description: t('agentEditor.tools.readDocumentDesc'), group: 'rag' },
-  { value: 'list_documents', label: t('agentEditor.tools.listDocuments'), description: t('agentEditor.tools.listDocumentsDesc'), group: 'rag' },
-  { value: 'query_knowledge_graph', label: t('agentEditor.tools.queryGraph'), description: t('agentEditor.tools.queryGraphDesc'), group: 'rag' },
-  { value: 'database_query', label: t('agentEditor.tools.dbQuery'), description: t('agentEditor.tools.dbQueryDesc'), group: 'rag' },
-  // Wiki 读取类（阅读、搜索、标记问题）
-  { value: 'wiki_search', label: t('agentEditor.tools.wikiSearch'), description: t('agentEditor.tools.wikiSearchDesc'), group: 'wiki_read' },
-  { value: 'wiki_read_page', label: t('agentEditor.tools.wikiReadPage'), description: t('agentEditor.tools.wikiReadPageDesc'), group: 'wiki_read' },
-  { value: 'wiki_flag_issue', label: t('agentEditor.tools.wikiFlagIssue'), description: t('agentEditor.tools.wikiFlagIssueDesc'), group: 'wiki_read' },
-  // Wiki 编辑类（会直接修改 Wiki 内容）
-  { value: 'wiki_write_page', label: t('agentEditor.tools.wikiWritePage'), description: t('agentEditor.tools.wikiWritePageDesc'), group: 'wiki_edit', danger: true },
-  { value: 'wiki_replace_text', label: t('agentEditor.tools.wikiReplaceText'), description: t('agentEditor.tools.wikiReplaceTextDesc'), group: 'wiki_edit', danger: true },
-  { value: 'wiki_rename_page', label: t('agentEditor.tools.wikiRenamePage'), description: t('agentEditor.tools.wikiRenamePageDesc'), group: 'wiki_edit', danger: true },
-  { value: 'wiki_delete_page', label: t('agentEditor.tools.wikiDeletePage'), description: t('agentEditor.tools.wikiDeletePageDesc'), group: 'wiki_edit', danger: true },
-  // Wiki 巡检类
-  { value: 'wiki_read_issue', label: t('agentEditor.tools.wikiReadIssue'), description: t('agentEditor.tools.wikiReadIssueDesc'), group: 'wiki_issue' },
-  { value: 'wiki_update_issue', label: t('agentEditor.tools.wikiUpdateIssue'), description: t('agentEditor.tools.wikiUpdateIssueDesc'), group: 'wiki_issue' },
-  // 数据分析
-  { value: 'data_analysis', label: t('agentEditor.tools.dataAnalysis'), description: t('agentEditor.tools.dataAnalysisDesc'), group: 'data' },
-  { value: 'data_schema', label: t('agentEditor.tools.dataSchema'), description: t('agentEditor.tools.dataSchemaDesc'), group: 'data' },
-]);
+// 可选工具来自后端工具目录（GET /api/v1/agents/tools）：工具本身、分组、danger 标记
+// 和知识库能力要求都以后端为准，前端不再维护工具清单。这里只提供翻译文案；
+// 没有翻译的工具（例如后端新增的工具）直接使用目录里的名称和描述，不会被隐藏。
+const agentToolCatalog = ref<AgentToolCatalog | null>(null);
+// 打开编辑器时已保存的 allowed_tools，用来在取消勾选后继续展示目录之外的保存值。
+const storedToolNames = ref<string[]>([]);
+// allowed_tools 未设置（null）表示使用后端默认工具，空列表表示不使用内置工具。
+// 加载时无法显式写入默认工具（工具目录不可用，或不是智能推理模式）时保持未设置，
+// 列表未被修改则保存时原样发送 null。
+const keepAllowedToolsUnset = ref(false);
+const toolTexts = computed<Record<string, ToolText>>(() => ({
+  thinking: { label: t('agentEditor.tools.thinking'), description: t('agentEditor.tools.thinkingDesc') },
+  todo_write: { label: t('agentEditor.tools.todoWrite'), description: t('agentEditor.tools.todoWriteDesc') },
+  ask_user: { label: t('agentEditor.tools.askUser'), description: t('agentEditor.tools.askUserDesc') },
+  search_conversations: { label: t('agentEditor.tools.searchConversations'), description: t('agentEditor.tools.searchConversationsDesc') },
+  search_knowledge: { label: t('agentEditor.tools.searchKnowledge'), description: t('agentEditor.tools.searchKnowledgeDesc') },
+  read_document: { label: t('agentEditor.tools.readDocument'), description: t('agentEditor.tools.readDocumentDesc') },
+  list_documents: { label: t('agentEditor.tools.listDocuments'), description: t('agentEditor.tools.listDocumentsDesc') },
+  query_knowledge_graph: { label: t('agentEditor.tools.queryGraph'), description: t('agentEditor.tools.queryGraphDesc') },
+  database_query: { label: t('agentEditor.tools.dbQuery'), description: t('agentEditor.tools.dbQueryDesc') },
+  wiki_search: { label: t('agentEditor.tools.wikiSearch'), description: t('agentEditor.tools.wikiSearchDesc') },
+  wiki_read_page: { label: t('agentEditor.tools.wikiReadPage'), description: t('agentEditor.tools.wikiReadPageDesc') },
+  wiki_flag_issue: { label: t('agentEditor.tools.wikiFlagIssue'), description: t('agentEditor.tools.wikiFlagIssueDesc') },
+  wiki_write_page: { label: t('agentEditor.tools.wikiWritePage'), description: t('agentEditor.tools.wikiWritePageDesc') },
+  wiki_replace_text: { label: t('agentEditor.tools.wikiReplaceText'), description: t('agentEditor.tools.wikiReplaceTextDesc') },
+  wiki_rename_page: { label: t('agentEditor.tools.wikiRenamePage'), description: t('agentEditor.tools.wikiRenamePageDesc') },
+  wiki_delete_page: { label: t('agentEditor.tools.wikiDeletePage'), description: t('agentEditor.tools.wikiDeletePageDesc') },
+  wiki_read_issue: { label: t('agentEditor.tools.wikiReadIssue'), description: t('agentEditor.tools.wikiReadIssueDesc') },
+  wiki_update_issue: { label: t('agentEditor.tools.wikiUpdateIssue'), description: t('agentEditor.tools.wikiUpdateIssueDesc') },
+  data_analysis: { label: t('agentEditor.tools.dataAnalysis'), description: t('agentEditor.tools.dataAnalysisDesc') },
+  data_schema: { label: t('agentEditor.tools.dataSchema'), description: t('agentEditor.tools.dataSchemaDesc') },
+}));
 
 // 工具分组元信息
 const toolGroups = computed(() => [
@@ -2557,18 +2623,32 @@ const missKindToReason = (kind: RequirementMissKind): string | undefined => {
   }
 };
 
+// 保存时的 allowed_tools：保持未设置的列表在未被修改时以 null 发送。
+const allowedToolsToSave = (): string[] | null =>
+  allowedToolsForSave(formData.value.config.allowed_tools || [], keepAllowedToolsUnset.value);
+
+// 能力不满足时只禁止新勾选；已勾选的工具保持可点击，以便取消勾选（并显示原因）。
 const availableTools = computed(() => {
-  const scope = scopeCapabilities.value;
-  const hasAnyKb = hasKnowledgeBase.value;
-  return allTools.value.map(tool => {
-    const { ok, missKind } = evaluateToolRequirement(tool.value, scope, hasAnyKb);
-    return {
-      ...tool,
-      disabled: !ok,
-      disabledReason: ok ? undefined : missKindToReason(missKind),
-    };
-  });
+  const options = buildToolOptions(
+    agentToolCatalog.value,
+    formData.value.config.allowed_tools || [],
+    scopeCapabilities.value,
+    hasKnowledgeBase.value,
+    (name) => toolTexts.value[name],
+  );
+  return options.map(tool => ({
+    ...tool,
+    disabledReason: tool.unmet ? missKindToReason(tool.missKind) : undefined,
+  }));
 });
+
+// 已保存但目录未提供的工具：开关控制的工具或无法识别的名称。
+// 勾选状态展示出来以便移除，取消勾选后不能再勾回。
+const storedExtras = computed(() => storedExtraTools(
+  agentToolCatalog.value,
+  [...storedToolNames.value, ...(formData.value.config.allowed_tools || [])],
+  formData.value.config.allowed_tools || [],
+));
 
 // 按分组切片后的工具列表，用于模板分组渲染
 const groupedAvailableTools = computed(() => {
@@ -2578,7 +2658,12 @@ const groupedAvailableTools = computed(() => {
     if (!map[g]) map[g] = [];
     map[g].push(tool);
   }
-  return toolGroups.value
+  // 后端新增的分组没有文案时以分组名显示，不隐藏其中的工具
+  const known = new Set(toolGroups.value.map(g => g.key));
+  const extraGroups = Object.keys(map)
+    .filter(key => !known.has(key))
+    .map(key => ({ key, label: key }));
+  return [...toolGroups.value, ...extraGroups]
     .map(g => ({
       ...g,
       tools: map[g.key] || [],
@@ -2587,21 +2672,28 @@ const groupedAvailableTools = computed(() => {
 });
 
 // ==================== 有效工具预览 ====================
-// 最终运行时智能体实际能使用的工具集合（仅做预览展示）
-// 规则：基于 allowed_tools 过滤
-//   1) 勾选但缺失对应能力（无 KB / 无 Wiki 能力 KB）的工具会被灰显/隐藏
-//   2) 无论是否勾选，web_search / web_fetch 随 web_search_enabled 出现
-//   3) 当 kb_selection_mode === 'none' 时，RAG/Wiki 工具都视为不可用
+// 最终运行时智能体实际能使用的工具集合（仅做预览展示），与运行时注册规则一致：
+//   1) allowed_tools 未设置（null）时，运行时使用目录中的默认工具（default_tools），
+//      空列表则不注册任何内置工具；
+//   2) 勾选但缺失对应能力（无 KB / 无 Wiki 能力 KB）的工具不会生效，灰显展示；
+//   3) 目录之外的保存值（开关控制的工具、无法识别的名称）自身不会注册任何工具；
+//   4) 无论是否勾选，web_search / web_fetch 随 web_search_enabled 出现。
+const effectiveSelection = computed(() => effectiveToolSelection(
+  agentToolCatalog.value,
+  allowedToolsToSave(),
+  scopeCapabilities.value,
+  hasKnowledgeBase.value,
+));
 const effectiveTools = computed(() => {
-  const chosen = new Set(formData.value.config.allowed_tools || []);
+  const active = new Set(effectiveSelection.value.names);
+  const inactive = new Set(effectiveSelection.value.inactive);
   const items: Array<{ value: string; label: string; reason?: string; active: boolean }> = [];
+  // 按工具目录顺序展示
   for (const tool of availableTools.value) {
-    const picked = chosen.has(tool.value);
-    if (!picked) continue;
-    if (tool.disabled) {
-      items.push({ value: tool.value, label: tool.label, active: false, reason: tool.disabledReason });
-    } else {
+    if (active.has(tool.value)) {
       items.push({ value: tool.value, label: tool.label, active: true });
+    } else if (inactive.has(tool.value)) {
+      items.push({ value: tool.value, label: tool.label, active: false, reason: tool.disabledReason });
     }
   }
   if (formData.value.config.web_search_enabled) {
@@ -2720,7 +2812,9 @@ const navItems = computed(() => {
   items.push({ key: 'conversation', icon: 'chat', label: t('agent.editor.conversationSettings') });
   // 知识库与检索
   items.push({ key: 'knowledge', icon: 'folder', label: t('agent.editor.knowledgeConfig') });
-  if (hasKnowledgeBase.value) {
+  // 检索策略只作用于普通模式的问答流程；Agent 模式的检索工具不读这些设置，
+  // 显示出来只会让用户调了参数却没有任何效果。
+  if (hasKnowledgeBase.value && !isAgentMode.value) {
     items.push({ key: 'retrieval', icon: 'search', label: t('agent.editor.retrievalStrategy') });
   }
   items.push({ key: 'websearch', icon: 'internet', label: t('agent.editor.webSearchConfig') });
@@ -3432,7 +3526,7 @@ const reasoningEffortLevel = computed<ReasoningLevel>({
 // 只在模型真正解析出来之后才夹：模型列表异步加载期间 capabilities 还是 undefined，
 // 此时的通用梯度会把已保存的 max/xhigh 误降级成 auto。
 const clampReasoningEffortToModel = () => {
-  if (editorInitializing.value || !selectedChatModel.value) return;
+  if (!selectedChatModel.value) return;
   const clamped = clampLevel(reasoningEffortLevel.value, reasoningEffortOptions.value);
   if (clamped !== reasoningEffortLevel.value) reasoningEffortLevel.value = clamped;
 };
@@ -3442,7 +3536,9 @@ watch(
     formData.value.config.model_id,
     reasoningEffortOptions.value.join(','),
   ].join('|'),
-  () => clampReasoningEffortToModel(),
+  () => {
+    if (!editorInitializing.value) clampReasoningEffortToModel();
+  },
   { immediate: true },
 );
 
@@ -3482,6 +3578,7 @@ let editorInitializationGeneration = 0;
 watch(() => props.visible, async (val) => {
   const generation = ++editorInitializationGeneration;
   if (val) {
+    void deploymentCapabilities.ensureLoaded();
     editorInitializing.value = true;
     try {
     savedAgent.value = null;
@@ -3526,8 +3623,9 @@ watch(() => props.visible, async (val) => {
       if (!agentData.config.knowledge_bases) agentData.config.knowledge_bases = [];
       // 旧配置里可能还带着已合并的工具名（knowledge_search / grep_chunks /
       // list_knowledge_chunks / get_document_info / wiki_read_source_doc），
-      // 映射到新名字并去重，否则复选框对不上 allTools。
-      agentData.config.allowed_tools = normalizeLegacyToolNames(agentData.config.allowed_tools);
+      // 映射到新名字并去重，否则复选框对不上工具目录。
+      const storedAllowedTools = agentData.config.allowed_tools;
+      agentData.config.allowed_tools = normalizeLegacyToolNames(storedAllowedTools);
       if (!agentData.config.mcp_services) agentData.config.mcp_services = [];
       // 授权等待超时：旧数据缺省时用默认 600 秒
       if (agentData.config.mcp_auth_wait_timeout == null || agentData.config.mcp_auth_wait_timeout <= 0) {
@@ -3549,6 +3647,17 @@ watch(() => props.visible, async (val) => {
         const isAgent = agentData.config.max_iterations < 0 || agentData.config.max_iterations > 1 || (agentData.config.allowed_tools && agentData.config.allowed_tools.length > 0);
         agentData.config.agent_mode = isAgent ? 'smart-reasoning' : 'quick-answer';
       }
+      // 从未设置工具列表（null）的智能推理智能体使用后端默认工具：把默认工具显式写入并勾选，
+      // 否则空列表一经保存就变成"不使用内置工具"，悄悄改变行为。无法写入时保持未设置。
+      // 放在模式推断之后，旧数据推断出的智能推理模式同样适用。
+      const loadedTools = resolveLoadedAllowedTools(
+        storedAllowedTools == null ? null : agentData.config.allowed_tools,
+        agentData.config.agent_mode,
+        agentToolCatalog.value,
+      );
+      agentData.config.allowed_tools = loadedTools.tools;
+      keepAllowedToolsUnset.value = loadedTools.keepUnset;
+      storedToolNames.value = [...loadedTools.tools];
 
       // 设置初始化标志，防止 watch 自动添加工具
       isInitializing.value = true;
@@ -3570,6 +3679,8 @@ watch(() => props.visible, async (val) => {
       void loadAgentIntegrationCounts(agentData.id);
     } else {
       // 创建新智能体，使用系统默认值
+      storedToolNames.value = [];
+      keepAllowedToolsUnset.value = false;
       const newFormData = JSON.parse(JSON.stringify(defaultFormData));
       // 应用系统默认检索参数
       newFormData.config.embedding_top_k = defaultEmbeddingTopK.value;
@@ -3645,8 +3756,13 @@ watch(() => props.visible, async (val) => {
       console.error('Failed to initialize agent editor', error);
     } finally {
       if (generation === editorInitializationGeneration && props.visible) {
-        editorInitializing.value = false;
+        // Model normalization and queued form watchers belong to initialization,
+        // so capture the baseline only after they have settled.
+        clampReasoningEffortToModel();
+        await nextTick();
+        if (generation !== editorInitializationGeneration || !props.visible) return;
         modalShell.markClean();
+        editorInitializing.value = false;
       }
     }
   } else {
@@ -3815,8 +3931,11 @@ watch(agentMode, (val, _oldVal) => {
     // 切换到 Agent 模式，根据知识库配置启用工具。
     // 注意：默认不注入 thinking / todo_write —— 它们用于显式反思或多步计划，
     // 会显著增加 token 消耗，用户按需手动勾选。
-    if (formData.value.config.allowed_tools.length === 0) {
-      const tools: string[] = [];
+    // 加载智能体时不补工具：空列表表示"不使用内置工具"，是保存的值而不是待填的空白。
+    // 用户主动切换模式后列表即为显式选择，不再保持未设置。
+    if (!isInitializing.value) keepAllowedToolsUnset.value = false;
+    if (!isInitializing.value && formData.value.config.allowed_tools.length === 0) {
+      const tools: string[] = ['ask_user'];
       if (hasRagKnowledgeBase.value) {
         tools.push(...knowledgeBaseTools);
       }
@@ -3867,8 +3986,8 @@ watch(agentMode, (val, _oldVal) => {
 
 // 监听知识库启用状态变化：
 //   - 从"无"变"有"：自动补齐 RAG 基础工具，方便用户开箱即用（仅 seed 行为）；
-//   - 从"有"变"无"：**不再**自动擦工具，依赖不满足时由 `availableTools` 灰显
-//     + 运行时工具注册器过滤。`allowed_tools` 代表用户意图，只应在用户显式操作
+//   - 从"有"变"无"：**不再**自动擦工具，依赖不满足时由 `availableTools` 标注原因
+//     （未勾选的工具禁止勾选）+ 运行时工具注册器过滤。`allowed_tools` 代表用户意图，只应在用户显式操作
 //     （切 agent_type / 切 agent_mode / 手勾工具）时变更。
 // 历史背景：旧版本在 KB 能力消失时会擦除 KB/Wiki 工具，导致用户切换
 // `kb_selection_mode` 到 "selected"、但尚未勾具体 KB 的过渡期里静默丢失工具，
@@ -3882,7 +4001,8 @@ watch(hasKnowledgeBase, (hasKB, oldHasKB) => {
   // 初始化期间或非 Agent 模式下不自动调整工具
   if (isInitializing.value || !isAgentMode.value) return;
 
-  if (hasKB && !oldHasKB) {
+  // 保持未设置（使用默认工具）时不补工具，否则保存后会丢掉默认工具。
+  if (hasKB && !oldHasKB && !keepAllowedToolsUnset.value) {
     // 从无知识库变为有知识库，seed 默认的 RAG 工具（仅补齐未勾的）
     const currentTools = formData.value.config.allowed_tools || [];
     const toolsToAdd = knowledgeBaseTools.filter((tool: string) => !currentTools.includes(tool));
@@ -3892,8 +4012,8 @@ watch(hasKnowledgeBase, (hasKB, oldHasKB) => {
 
 // 监听运行模式变化，自动切换页面
 watch(isAgentMode, (isAgent) => {
-  // 如果当前在高级设置页面但切换到了Agent模式，切换到基础设置
-  if (isAgent && currentSection.value === 'advanced') {
+  // 如果当前在高级设置或检索策略页面但切换到了Agent模式，切换到基础设置
+  if (isAgent && (currentSection.value === 'advanced' || currentSection.value === 'retrieval')) {
     currentSection.value = 'basic';
   }
   if (!isAgent && (currentSection.value === 'skills' || currentSection.value === 'sandbox')) {
@@ -3976,6 +4096,16 @@ const applyPromptTemplateDefaults = (cfg: PromptTemplatesConfig | null) => {
   }
 };
 
+// 保存成功但后端调整了工具列表时提示用户（保留了无法识别的名称，或移除了由其他设置控制的工具）
+const notifyAllowedToolsWarnings = (warnings?: AllowedToolsWarnings) => {
+  if (warnings?.kept_unknown?.length) {
+    MessagePlugin.warning(t('agentEditor.tools.keptUnknownWarning', { names: warnings.kept_unknown.join(', ') }));
+  }
+  if (warnings?.dropped?.length) {
+    MessagePlugin.warning(t('agentEditor.tools.droppedWarning', { names: warnings.dropped.join(', ') }));
+  }
+};
+
 // 加载依赖数据（复用空间级缓存，避免重复请求）
 const loadDependencies = async () => {
   try {
@@ -3999,6 +4129,7 @@ const loadDependencies = async () => {
     kbOptions.value = [...myKbs, ...sharedKbs];
 
     agentTypePresets.value = editorResources.agentTypePresets as AgentTypePreset[];
+    agentToolCatalog.value = editorResources.agentTools as AgentToolCatalog | null;
     applyPromptTemplateDefaults(editorResources.promptTemplates);
 
     storageEngineStatus.value = editorResources.storageStatus;
@@ -4037,6 +4168,7 @@ const handleClose = () => {
 
 const modalShell = useModalShell({
   visible: () => props.visible,
+  loading: () => editorInitializing.value,
   close: handleClose,
   snapshot: () => formData.value,
   ignoreEscape: () =>
@@ -4923,7 +5055,9 @@ const handleSave = async () => {
 
   pruneSelectedSkills()
 
-  const payload = { ...formData.value, config: serializeAgentPrompts(formData.value.config, promptTemplates.value) };
+  if (hostOnly.value) formData.value.config.sandbox_config_id = ''
+
+  const payload = { ...formData.value, config: serializeAgentPrompts({ ...formData.value.config, allowed_tools: allowedToolsToSave() }, promptTemplates.value) };
   saving.value = true;
   try {
     if (editorMode.value === 'create') {
@@ -4934,17 +5068,26 @@ const handleSave = async () => {
       }
       savedAgent.value = created;
       formData.value.id = created.id;
+      // 后端可能改写了工具列表（旧名称映射、移除由其他设置控制的工具），与之同步，
+      // 避免再次保存时重复提示。
+      if (Array.isArray(created.config?.allowed_tools)) {
+        formData.value.config.allowed_tools = normalizeLegacyToolNames(created.config.allowed_tools);
+        storedToolNames.value = [...formData.value.config.allowed_tools];
+        keepAllowedToolsUnset.value = false;
+      }
       modalShell.markClean();
       markContextualGuideDone('agentCreate')
       currentSection.value = 'basic';
       void loadAgentIntegrationCounts(created.id);
       MessagePlugin.success(t('agent.messages.created'));
+      notifyAllowedToolsWarnings(result?.allowed_tools_warnings);
       emit('success', created);
     } else {
-      await updateAgent(formData.value.id, payload);
+      const updated: any = await updateAgent(formData.value.id, payload);
       MessagePlugin.success(t('agent.messages.updated'));
       emit('success');
       handleClose();
+      notifyAllowedToolsWarnings(updated?.allowed_tools_warnings);
     }
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('agent.messages.saveFailed'));

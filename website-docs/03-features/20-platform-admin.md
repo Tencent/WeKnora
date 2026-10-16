@@ -16,7 +16,7 @@
 <Screenshot
   src="/screenshots/settings-system-admin.png"
   caption="平台控制台：系统设置、任务队列、平台 API Key 与系统审计日志"
-  hint="以系统管理员身份打开「设置」，展示侧栏底部四个仅系统管理员可见的分区，正文可用系统设置页。" />
+  hint="以系统管理员身份打开「设置」，展示侧栏的系统设置、模型目录、任务队列、平台 API Key、系统审计日志五个仅系统管理员可见的分区，正文可用系统设置页。" />
 
 ## 设置首个系统管理员 {#_1-第一个系统管理员怎么来}
 
@@ -32,11 +32,12 @@
 
 ## 使用平台控制台 {#_2-控制台能做什么}
 
-系统管理员可在「设置」侧栏查看四个管理分区：
+系统管理员可在「设置」侧栏查看以下管理分区：
 
 | 分区 | 作用 | 接口 |
 | --- | --- | --- |
 | 系统设置 | 全局运行时开关（注册模式、空间策略、并发、SSRF 白名单等），按设置项的生效规则应用，见下方设置表 | `GET/PUT/DELETE /system/admin/settings[/:key]` |
+| 模型目录 | 查看目录模型及其来源，编辑、添加模型或用 JSON 批量修改（保存即生效），按版本历史恢复；详见[模型目录管理](06-models.md#系统管理员维护模型目录) | `/system/admin/model-catalog*` |
 | 任务队列 | 查看 asynq 各队列实时积压、逐个任务的重试/归档/删除、批量清空归档任务；Lite 模式返回 `available=false` | `/system/admin/runtime/queues*` |
 | 平台 API Key | 面向控制面自动化的 platform 作用域 Key，能力包括 `system_tenants_read/manage`、`system_settings_read/manage`、`system_runtime_read/manage`、`system_audit_read` | `/system/admin/api-keys` |
 | 系统审计日志 | `tenant_id = 0` 的平台级事件（改设置、提升/撤销管理员、队列操作等）。空间级审计接口按 tenant 过滤，看不到这些行 | `GET /system/admin/audit-log` |
@@ -46,11 +47,24 @@
 - **重置用户密码**（`POST /system/admin/users/reset-password`）：替换目标用户的本地密码并吊销其全部会话。**不能给自己重置**——自助改密码仍要求提供旧密码；
 - **批量套用默认存储配额**（`POST /system/admin/tenants/apply-default-storage-quota`）：把当前的默认配额写到所有已存在的空间上。该操作更新已有空间的配额数据。
 
+### 管理平台用户
+
+「设置 → 系统设置 → 用户管理」集中展示整个部署的用户，可创建账号、启用或停用账号、重置密码，以及授予或撤销系统管理员身份。停用账号会立即吊销其登录会话；不能停用自己或最后一位仍启用的系统管理员。用户列表不包含密码或密码哈希。
+
+<Screenshot src="/screenshots/system-user-management.png" caption="系统设置：平台用户管理" hint="展示用户列表、启用状态、管理员标记与操作菜单；隐藏真实邮箱，保留创建用户和分页入口。" />
+
+注册模式分为开放注册、仅限邀请注册、禁止注册三档；`invite_only` 对应禁止注册，需凭邀请新建账号时选择 `invite_register`。OIDC 与管理员创建账号不受密码注册档位限制。
+
 ### 创建用户
 
-系统管理员可在系统设置中创建本地账号，填写用户名、邮箱，并选择自动生成密码或指定符合策略的密码。空间分配遵循 `auth.default_tenant_mode`：`create_personal` 创建个人空间，`tenantless` 等待用户加入空间。
+自 v0.8.2 起，系统管理员可在「设置 → 系统设置 → 用户管理」中点击「创建用户」开通本地账号：填写用户名（2–50 字符）和邮箱，保持「自动生成随机密码」开启，或关闭后手动填写符合密码策略的密码。适用于关闭公开注册后由管理员统一开户的场景。空间分配遵循 `auth.default_tenant_mode`：`create_personal` 创建个人空间，`tenantless` 等待用户加入空间。
 
-自动生成的密码仅在本次创建结果显示，应当场复制完整账号信息；关闭结果后不能再次查询明文。重复身份返回已有用户，不改密码；邮箱和用户名分别指向不同用户时拒绝创建。接口见[系统 API](../04-api/02-api-system.md)。
+<Screenshot
+  src="/screenshots/system-admin-create-user.png"
+  caption="用户创建成功：复制账号信息并保存一次性密码"
+  hint="「设置 → 系统设置 → 用户管理」下打开「创建用户」对话框，展示用户名、邮箱与「自动生成随机密码」开关；可另附创建成功后显示一次性密码和「复制账号信息」按钮的结果页。" />
+
+自动生成的密码仅在本次创建结果显示，应当场复制完整账号信息；确认前对话框不能关闭，关闭后不能再次查询明文。每次创建都会写入系统审计日志（`system.user_created`）。重复身份返回已有用户，不改密码；邮箱和用户名分别指向不同用户时拒绝创建。接口见[系统 API](../04-api/02-api-system.md)。
 
 创建用户与首个管理员引导是不同操作：bootstrap 仍只提升已存在用户，不负责创建账号。
 
@@ -60,7 +74,7 @@
 
 | 键 | 类型 | 默认 | 生效时机 |
 | --- | --- | --- | --- |
-| `auth.registration_mode` | `self_serve` / `invite_only` | `self_serve` | 立即 |
+| `auth.registration_mode` | `self_serve` / `invite_register` / `invite_only` | `self_serve` | 立即 |
 | `auth.default_tenant_mode` | `create_personal` / `tenantless` | `create_personal` | 只影响之后注册的新用户 |
 | `tenant.self_service_creation_enabled` | bool | `true` | 立即 |
 | `tenant.max_owned_per_user` | int | `10`（0 = 用内置默认，负数 = 关闭限额） | 每次建空间时读取 |

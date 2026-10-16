@@ -123,13 +123,6 @@ func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, fmt.Errorf("failed to get file information: %w", err)
 	}
 
-	// Create the HTTP request
-	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/file", knowledgeBaseID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
 	// Create a multipart form writer
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
@@ -191,11 +184,15 @@ func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, fmt.Errorf("failed to close writer: %w", err)
 	}
 
+	// Construct the request with its completed buffer so net/http can replay it
+	// after an authentication refresh or a redirect.
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/file", knowledgeBaseID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	c.applyAuthHeaders(ctx, req)
-
-	// Set the request body
-	req.Body = io.NopCloser(body)
 
 	// Send the request
 	resp, err := c.httpClient.Do(req)
@@ -861,9 +858,15 @@ type UpdateManualKnowledgeRequest struct {
 	Content string `json:"content,omitempty"`
 }
 
-// BatchUpdateKnowledgeTagsRequest contains the mapping of knowledge IDs to tag IDs.
+// BatchUpdateKnowledgeTagsRequest sets tags on documents.
+// Send Updates, or KnowledgeIDs together with TagIDs. An empty TagIDs clears
+// the tags; omitting it while KnowledgeIDs is set is rejected.
 type BatchUpdateKnowledgeTagsRequest struct {
-	Updates map[string]*string `json:"updates"` // knowledge_id -> tag_id (nil to clear)
+	Updates      map[string]*string `json:"updates,omitempty"` // knowledge_id -> tag_id (nil to clear)
+	KBID         string             `json:"kb_id,omitempty"`
+	KnowledgeIDs []string           `json:"knowledge_ids,omitempty"`
+	// Keep an explicit empty array on the wire; nil remains null and is rejected in the list form.
+	TagIDs []string `json:"tag_ids"`
 }
 
 // CreateManualKnowledge creates a knowledge entry from manual Markdown content.

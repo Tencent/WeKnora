@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -24,7 +23,7 @@ func newTestClient(t *testing.T, baseURL string, mutate func(*Config)) *Client {
 			ModelID: "model-123",
 			Auth:    api.HeaderAuth("x-goog-api-key", "test-key"),
 		},
-		Settings:  catalog.DefaultGoogleGenerativeAI(),
+		Settings:  api.DefaultGoogleGenerativeAI(),
 		Reasoning: true,
 	}
 	if mutate != nil {
@@ -196,7 +195,7 @@ func TestBuildRequestBodyGolden(t *testing.T) {
 		{
 			name: "level mode",
 			mutate: func(c *Config) {
-				c.Settings.ThinkingMode = catalog.GoogleThinkingLevel
+				c.Settings.ThinkingMode = api.GoogleThinkingLevel
 				c.ThinkingLevels = api.ThinkingLevelMap{api.ReasoningHigh: api.StringPtr("high")}
 			},
 			thinking: `{"thinkingLevel": "high", "includeThoughts": true}`,
@@ -253,26 +252,26 @@ func TestThinkingConfigVariants(t *testing.T) {
 		},
 		{
 			name:   "mode none",
-			mutate: func(c *Config) { c.Settings.ThinkingMode = catalog.GoogleThinkingNone },
+			mutate: func(c *Config) { c.Settings.ThinkingMode = api.GoogleThinkingNone },
 			opts:   &api.Options{ReasoningEffort: api.ReasoningHigh},
 			want:   "",
 		},
 		{
 			name:   "level off unmapped",
-			mutate: func(c *Config) { c.Settings.ThinkingMode = catalog.GoogleThinkingLevel },
+			mutate: func(c *Config) { c.Settings.ThinkingMode = api.GoogleThinkingLevel },
 			opts:   &api.Options{ReasoningEffort: api.ReasoningOff},
 			want:   "",
 		},
 		{
 			name:   "level auto",
-			mutate: func(c *Config) { c.Settings.ThinkingMode = catalog.GoogleThinkingLevel },
+			mutate: func(c *Config) { c.Settings.ThinkingMode = api.GoogleThinkingLevel },
 			opts:   &api.Options{ReasoningEffort: api.ReasoningAuto},
 			want:   `{"includeThoughts": true}`,
 		},
 		{
 			name: "level clamps unsupported rung",
 			mutate: func(c *Config) {
-				c.Settings.ThinkingMode = catalog.GoogleThinkingLevel
+				c.Settings.ThinkingMode = api.GoogleThinkingLevel
 				c.ThinkingLevels = api.ThinkingLevelMap{
 					api.ReasoningMedium: nil,
 					api.ReasoningHigh:   api.StringPtr("high"),
@@ -696,5 +695,37 @@ func TestChatStreamSurfacesPromptFeedbackBlock(t *testing.T) {
 	}
 	if !sawError {
 		t.Fatal("blocked prompt did not produce an error chunk")
+	}
+}
+
+// Gemini streams end on EOF; the last candidate of a finished message carries
+// a finishReason, so a body that stops without one was cut mid-answer.
+func TestChatStreamEOFWithoutFinishReasonIsIncomplete(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{"cut off", `{"candidates":[{"content":{"parts":[{"text":"Hel"}]}}]}`, types.FinishReasonIncomplete},
+		{"finished", `{"candidates":[{"content":{"parts":[{"text":"Hello"}]},"finishReason":"STOP"}]}`, "stop"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte("data: " + tc.body + "\n\n"))
+			}))
+			defer srv.Close()
+
+			client := newTestClient(t, srv.URL, nil)
+			ch, err := client.ChatStream(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var last types.StreamResponse
+			for ev := range ch {
+				last = ev
+			}
+			if last.ResponseType != types.ResponseTypeAnswer || !last.Done || last.FinishReason != tc.want {
+				t.Fatalf("last event = %+v, want finish reason %q", last, tc.want)
+			}
+		})
 	}
 }

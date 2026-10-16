@@ -10,19 +10,24 @@ import (
 )
 
 // filterHistoryResults retrieves history references and filters them by
-// textual similarity to the current query. Only references that are above
-// a Jaccard similarity threshold are kept, and their scores are discounted
-// to reflect that they were not directly retrieved for the current query.
-// Results already present in currentResults (by chunk ID) are excluded.
+// how much of the current query they cover. Only references whose token
+// overlap with the query reaches a threshold are kept, and their scores are
+// discounted to reflect that they were not directly retrieved for the
+// current query. Results already present in currentResults (by chunk ID)
+// are excluded.
+//
+// Overlap is measured against the smaller token set (in practice the query).
+// Jaccard divided by the union, so a query of about 8 terms against a chunk of
+// a few hundred never passed 0.05 and the 0.15 threshold kept nothing.
 func filterHistoryResults(
 	ctx context.Context,
 	chatManage *types.ChatManage,
 	currentResults []*types.SearchResult,
 ) []*types.SearchResult {
 	const (
-		// minSimilarity is the minimum Jaccard similarity between the current
-		// query and a history chunk's content for it to be injected.
-		minSimilarity = 0.15
+		// minSimilarity is the minimum share of query terms (overlap
+		// coefficient) a history chunk must contain to be injected.
+		minSimilarity = 0.3
 		// historyScoreDiscount reduces the original score of history results
 		// to rank them below freshly-retrieved results of similar relevance.
 		historyScoreDiscount = 0.6
@@ -56,7 +61,7 @@ func filterHistoryResults(
 			continue
 		}
 		contentTokens := searchutil.TokenizeSimple(r.Content)
-		sim := searchutil.Jaccard(queryTokens, contentTokens)
+		sim := searchutil.TokenOverlapRatio(queryTokens, contentTokens)
 		if sim < minSimilarity {
 			pipelineInfo(ctx, "Merge", "history_filter_drop", map[string]interface{}{
 				"chunk_id":   r.ID,
@@ -66,7 +71,9 @@ func filterHistoryResults(
 		}
 		r.MatchType = types.MatchTypeHistory
 		r.Score = r.Score * historyScoreDiscount
-		r.Metadata = ensureMetadata(r.Metadata)
+		if r.Metadata == nil {
+			r.Metadata = make(map[string]string)
+		}
 		r.Metadata["history_similarity"] = strings.TrimRight(strings.TrimRight(
 			fmt.Sprintf("%.4f", sim), "0"), ".")
 		filtered = append(filtered, r)

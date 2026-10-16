@@ -1,12 +1,13 @@
 # BrowserSkill upstream integration
 
-The extension and daemon are based on official `main` commit
-`3da449e9ff2a1f25adc7170fb41d5ed7a82d84d5` (after `ext-v0.3.0`, including the
-merged upstream PRs #291, #296, #297 and #318). Both still report version `0.3.0`;
-the exact source baseline is recorded in `scripts/browserskill-release.json`.
-The daemon is built with `cargo build --locked --release -p bsk` from the same
-commit. The published CLI 0.3.0 binary and the published 0.3.0 extension ZIP
-predate this baseline and are not equivalent replacements. Native builds
+The extension and daemon are based on the official `ext-v0.3.1` tag, commit
+`da6bf4eed2dd7256567e152df8c903c87f6598c3` (including the upstream PRs #291,
+#296, #297 and #318 that WeKnora previously pinned from `main`). Both report
+version `0.3.1`; the exact source baseline is recorded in
+`scripts/browserskill-release.json`. The daemon is built with
+`cargo build --locked --release -p bsk` from the same commit because upstream
+has not published a matching CLI 0.3.1 binary. The store builds of extension
+0.3.1 match this baseline. Native builds
 require Rust/Cargo and a C compiler (plus CMake on Linux). Docker builds on the
 target architecture.
 
@@ -46,7 +47,7 @@ stops preview polling in WeKnora. Completed tasks use native session stop.
 
 The preview and focus side channel is now the official optional UI channel
 documented in the upstream
-[remote connection contract](https://github.com/Tencent/BrowserSkill/blob/3da449e9ff2a1f25adc7170fb41d5ed7a82d84d5/docs/remote-extension-connection.md#optional-ui-channel).
+[remote connection contract](https://github.com/Tencent/BrowserSkill/blob/da6bf4eed2dd7256567e152df8c903c87f6598c3/docs/remote-extension-connection.md#optional-ui-channel).
 Only authenticated remote sockets handle these request frames; they bypass the
 native automation queue and never start a session:
 
@@ -64,10 +65,10 @@ native automation queue and never start a session:
 Errors use the native envelope with typed codes (`not_found`, `timeout`,
 `cancelled`, `cdp_failed`) and an optional `data.reason`. WeKnora maps every
 error except `unknown_method` to a transient preview failure. Extensions built
-before PR #296, including the published 0.3.0 ZIP, answer `unknown_method`;
+before PR #296 answer `unknown_method`;
 WeKnora then disables preview polling and reports the extension as outdated.
 
-## Intentional behavior changes versus the published 0.3.0 extension
+## Behavior of the 0.3.1 extension
 
 - Remote tasks use official dedicated Agent Windows. No `tabGroups` permission.
 - Popup attribution follows upstream PR #297: only a main-frame navigation
@@ -91,9 +92,9 @@ WeKnora then disables preview polling and reports the extension as outdated.
 - Human help follows the upstream focus/confirmation behavior.
 - Remote upload/download remain unsupported, as defined upstream.
 
-Even though the version remains 0.3.0, users must install the rebuilt ZIP.
-Upgrade users by replacing the existing unpacked extension directory and
-reloading it after ending active tasks. Keeping the extension ID preserves the
+Users need extension 0.3.1 or later, from the Chrome Web Store, Edge Add-ons or
+the bundled ZIP. Upgrade unpacked installs by replacing the existing extension
+directory and reloading it after ending active tasks. Keeping the extension ID preserves the
 migrated credentials; installing under a new ID requires pairing again.
 
 ## Validation

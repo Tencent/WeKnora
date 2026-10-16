@@ -1,23 +1,24 @@
-import { computed, onMounted, ref, watch } from 'vue'
-import { useUIStore } from '@/stores/ui'
+import { computed, onMounted, ref } from 'vue'
 import { useChatResourcesStore } from '@/stores/chatResources'
-import {
-  evaluateTenantModelReadiness,
-  type TenantModelReadiness,
-} from '@/utils/tenantModelReadiness'
+import { evaluateTenantModelReadiness } from '@/utils/tenantModelReadiness'
 
+/**
+ * 当前空间是否已配置好创建知识库 / 智能体所需的模型。
+ *
+ * 直接从 chatResources 的模型快照推导：设置页增删模型后会 `replaceModels`，
+ * 这里的 computed 随之更新，不需要再监听「设置弹窗关闭」之类的间接信号去重拉。
+ */
 export function useTenantModelReadiness() {
-  const uiStore = useUIStore()
   const chatResources = useChatResourcesStore()
-  const readiness = ref<TenantModelReadiness | null>(null)
   const loaded = ref(false)
   const loading = ref(false)
+
+  const readiness = computed(() => evaluateTenantModelReadiness(chatResources.allModels))
 
   const refresh = async (force = false) => {
     loading.value = true
     try {
       await chatResources.ensureModels(force)
-      readiness.value = evaluateTenantModelReadiness(chatResources.allModels)
     } finally {
       loading.value = false
       loaded.value = true
@@ -28,22 +29,11 @@ export function useTenantModelReadiness() {
     refresh()
   })
 
-  watch(
-    () => uiStore.showSettingsModal,
-    (open, wasOpen) => {
-      if (wasOpen && !open) {
-        refresh(true)
-      }
-    },
-  )
+  const isReadyForDocumentKb = computed(() => readiness.value.isReadyForDocumentKb)
 
-  const isReadyForDocumentKb = computed(
-    () => readiness.value?.isReadyForDocumentKb ?? false,
-  )
+  const isReadyForAgent = computed(() => readiness.value.isReadyForAgent)
 
-  const isReadyForAgent = computed(() => readiness.value?.isReadyForAgent ?? false)
-
-  const hasChat = computed(() => readiness.value?.hasChat ?? false)
+  const hasChat = computed(() => readiness.value.hasChat)
 
   return {
     readiness,

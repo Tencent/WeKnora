@@ -69,6 +69,9 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 	if ds == nil {
 		return nil, datasource.ErrDataSourceInvalid
 	}
+	if err := datasource.ValidateSyncSchedule(ds.SyncSchedule); err != nil {
+		return nil, err
+	}
 
 	// Validate knowledge base exists
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, ds.KnowledgeBaseID)
@@ -168,6 +171,9 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 	}
 	if ds.TenantID != existing.TenantID {
 		return nil, datasource.ErrDataSourceInvalid
+	}
+	if err := datasource.ValidateSyncSchedule(ds.SyncSchedule); err != nil {
+		return nil, err
 	}
 
 	// Credentials NEVER flow through this endpoint — they live behind the
@@ -549,6 +555,9 @@ func (s *DataSourceService) ResumeDataSource(ctx context.Context, id string) err
 	if err != nil {
 		return err
 	}
+	if err := datasource.ValidateSyncSchedule(ds.SyncSchedule); err != nil {
+		return err
+	}
 
 	ds.Status = types.DataSourceStatusActive
 	if err := s.dsRepo.Update(ctx, ds); err != nil {
@@ -654,7 +663,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 
 	// One-time legacy upgrade (feishu deep adaptation): feishu/lark data
 	// sources predating the per-source parse_mode setting carry a
-	// resync_required marker stamped by migration 000110 (sqlite 000030).
+	// resync_required marker stamped by migration 000122 (sqlite 000040).
 	// resyncRequired(config) below upgrades their next sync (even an
 	// incremental one) to a full pass and clears it on success.
 
@@ -982,12 +991,12 @@ func streamStartCursor(ds *types.DataSource, forceFull bool, attempt int) (*type
 }
 
 // feishuSettingResyncRequired is the one-shot upgrade marker key. Legacy
-// feishu/lark data sources are stamped by migration 000110 (sqlite 000030).
+// feishu/lark data sources are stamped by migration 000122 (sqlite 000040).
 const feishuSettingResyncRequired = "resync_required"
 
 // resyncRequired reads the one-shot upgrade marker out of parsed config
 // Settings. Tolerates both bool and string encodings. The marker is stamped
-// onto legacy feishu/lark data sources by migration 000110 (sqlite 000030)
+// onto legacy feishu/lark data sources by migration 000122 (sqlite 000040)
 // when the per-source parse_mode shipped; it upgrades their next sync — even
 // a scheduled incremental one — to a full pass so existing documents re-ingest
 // with folder paths and block-level parsing.
@@ -1466,7 +1475,13 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 				return isUpdate, fmt.Errorf("marshal datasource metadata: %w", mErr)
 			}
 			created.Metadata = types.JSON(metadataBytes)
-			if uErr := s.knowledgeService.GetRepository().UpdateKnowledge(ctx, created); uErr != nil {
+			// Only the metadata column: the processing task is already
+			// queued, and a full-row save of this snapshot could put
+			// parse_status back to "pending" under a worker that has moved
+			// it on, which then skips post-process and strands the row.
+			if uErr := s.knowledgeService.GetRepository().UpdateKnowledgeColumn(
+				ctx, created.ID, "metadata", created.Metadata,
+			); uErr != nil {
 				return isUpdate, fmt.Errorf("attach datasource metadata: %w", uErr)
 			}
 		}

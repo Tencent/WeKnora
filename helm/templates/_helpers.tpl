@@ -33,6 +33,19 @@ Create a default fully qualified app name.
 {{- end }}
 
 {{/*
+Resolve a component Service name while preserving names used by existing releases.
+Usage: include "weknora.serviceName" (dict "component" "postgresql" "context" .)
+*/}}
+{{- define "weknora.serviceName" -}}
+{{- $service := (index .context.Values .component).service | default dict -}}
+{{- $legacyName := .component -}}
+{{- if eq .component "postgresql" -}}
+{{- $legacyName = "postgres" -}}
+{{- end -}}
+{{- default $legacyName $service.name -}}
+{{- end -}}
+
+{{/*
 Create chart name and version as used by the chart label.
 Ref: https://helm.sh/docs/chart_best_practices/labels/
 */}}
@@ -114,16 +127,20 @@ Defaults to Chart.appVersion if tag is not specified.
 
 {{/*
 Return the frontend image with tag.
+Defaults to Chart.appVersion if tag is not specified.
 */}}
 {{- define "weknora.frontend.image" -}}
-{{- printf "%s:%s" .Values.frontend.image.repository .Values.frontend.image.tag }}
+{{- $tag := default .Chart.AppVersion .Values.frontend.image.tag }}
+{{- printf "%s:%s" .Values.frontend.image.repository $tag }}
 {{- end }}
 
 {{/*
 Return the docreader image with tag.
+Defaults to Chart.appVersion if tag is not specified.
 */}}
 {{- define "weknora.docreader.image" -}}
-{{- printf "%s:%s" .Values.docreader.image.repository .Values.docreader.image.tag }}
+{{- $tag := default .Chart.AppVersion .Values.docreader.image.tag }}
+{{- printf "%s:%s" .Values.docreader.image.repository $tag }}
 {{- end }}
 
 {{/*

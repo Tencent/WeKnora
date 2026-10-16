@@ -165,6 +165,46 @@ func ToDocument(data []byte, format *Format) (*Document, error) {
 	return decodeDocument(raw)
 }
 
+// ToDocumentWithAssetLinks parses once and returns both the original model
+// (including asset IDs and bytes) and Markdown with embedded image links.
+// PDF has no document model; use ToMarkdownBytes for it.
+func ToDocumentWithAssetLinks(data []byte, format *Format) (*Document, string, error) {
+	if len(data) == 0 {
+		return nil, "", &ConvertError{Kind: "unsupported", Detail: "empty input"}
+	}
+	tag := C.int(C.ANYDOC_FORMAT_NONE)
+	if format != nil {
+		tag = formatToTag(*format)
+		if tag == C.int(C.ANYDOC_FORMAT_NONE) {
+			return nil, "", &ConvertError{Kind: "unknown_format", Detail: "unknown format: " + string(*format)}
+		}
+	}
+	var buf *C.uint8_t
+	var bufLen C.uintptr_t
+	if err := call(func() C.int {
+		return C.anydoc_to_document_with_asset_links(
+			(*C.uint8_t)(unsafe.Pointer(&data[0])), C.uintptr_t(len(data)), tag, &buf, &bufLen,
+		)
+	}); err != nil {
+		return nil, "", err
+	}
+	defer C.anydoc_buffer_free(buf, bufLen)
+	raw, err := cGoBytes(unsafe.Pointer(buf), bufLen)
+	if err != nil {
+		return nil, "", err
+	}
+	d := &decoder{buf: raw}
+	document, err := d.document()
+	if err != nil {
+		return nil, "", err
+	}
+	markdown, err := d.str()
+	if err != nil {
+		return nil, "", err
+	}
+	return document, markdown, nil
+}
+
 // cStringN reads a length-prefixed C buffer as a Go string. The bytes are
 // copied, so the caller may free the C buffer immediately after.
 func cStringN(s *C.char, n C.uintptr_t) (string, error) {

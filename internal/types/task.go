@@ -478,15 +478,15 @@ type KnowledgeMoveProgress struct {
 	TaskID     string            `json:"task_id"`
 	SourceKBID string            `json:"source_kb_id"`
 	TargetKBID string            `json:"target_kb_id"`
-	Status     KBCloneTaskStatus `json:"status"`
-	Progress   int               `json:"progress"`   // 0-100
-	Total      int               `json:"total"`      // 总知识数
-	Processed  int               `json:"processed"`  // 已处理数
-	Failed     int               `json:"failed"`     // 失败数
-	Message    string            `json:"message"`    // 状态消息
-	Error      string            `json:"error"`      // 错误信息
-	CreatedAt  int64             `json:"created_at"` // 任务创建时间
-	UpdatedAt  int64             `json:"updated_at"` // 最后更新时间
+	Status     KBCloneTaskStatus `json:"status" extensions:"x-agent"`
+	Progress   int               `json:"progress" extensions:"x-agent"`  // 0-100
+	Total      int               `json:"total" extensions:"x-agent"`     // 总知识数
+	Processed  int               `json:"processed" extensions:"x-agent"` // 已处理数
+	Failed     int               `json:"failed" extensions:"x-agent"`    // 失败数
+	Message    string            `json:"message" extensions:"x-agent"`   // 状态消息
+	Error      string            `json:"error" extensions:"x-agent"`     // 错误信息
+	CreatedAt  int64             `json:"created_at"`                     // 任务创建时间
+	UpdatedAt  int64             `json:"updated_at"`                     // 最后更新时间
 }
 
 // ManualProcessPayload represents the manual knowledge processing task payload.
@@ -510,6 +510,10 @@ type ImageMultimodalPayload struct {
 	ChunkID         string `json:"chunk_id"`         // parent text chunk
 	ImageURL        string `json:"image_url"`        // provider:// URL (e.g. local://..., minio://...)
 	ImageLocalPath  string `json:"image_local_path"` // deprecated: kept for backward compat with in-flight tasks
+	// EnableOCR and EnableCaption are whole-task switches applied on top of the
+	// image-action policy: a step runs only when both this switch and the
+	// policy allow it. Normal parsing leaves both true and lets the observed
+	// attributes decide.
 	EnableOCR       bool   `json:"enable_ocr"`
 	EnableCaption   bool   `json:"enable_caption"`
 	Language        string `json:"language,omitempty"`          // Request locale for {{language}} in prompt templates
@@ -522,6 +526,26 @@ type ImageMultimodalPayload struct {
 	// parent's image set. Used as the subspan name suffix
 	// ("multimodal.image[3]") so the timeline preserves order.
 	ImageIndex int `json:"image_index,omitempty"`
+	// ImageAttrsEnabled selects which image pipeline the task runs — see
+	// PipelineModeFor and the PipelineMode constants. True is the
+	// attribute-observed pipeline: the describe round also observes image
+	// attributes, and the attribute policy decides whether OCR runs for it.
+	// False is the upstream behaviour: a plain caption, then OCR, no attribute
+	// observation. In flight tasks enqueued before the field existed read
+	// false, which is what they were enqueued for — the reason the flag travels
+	// in the payload rather than being re-read from the knowledge base at handle
+	// time.
+	ImageAttrsEnabled bool `json:"image_attrs_enabled,omitempty"`
+	// ImageVectorEnabled is resolved at enqueue time. nil preserves the KB
+	// fallback for tasks queued before per-document indexing overrides existed.
+	ImageVectorEnabled *bool `json:"image_vector_enabled,omitempty"`
+	// ImageActions is the attribute→work table, resolved from the KB config at
+	// enqueue time. A task without it — one already in flight when attribute
+	// observation shipped — falls back to the conservative policy: run OCR.
+	ImageActions ImageActionsConfig `json:"image_actions,omitempty"`
+	// SourceLocators place the image in the original file; copied onto the
+	// OCR and caption chunks built from it.
+	SourceLocators SourceLocators `json:"source_locators,omitempty"`
 }
 
 // KnowledgePostProcessPayload represents the knowledge post process task payload.

@@ -1,13 +1,13 @@
 <template>
   <div class="integrations-settings">
-    <div class="integrations-settings__body" :class="{ 'integrations-settings__body--landing': isLandingSection }">
+    <div class="integrations-settings__body">
       <div v-if="tab === 'im'" class="section">
         <div class="section-header">
           <h2>{{ $t('agentEditor.im.title') }}</h2>
           <p class="section-description">
             {{ $t('agentEditor.im.description') }}
             <a
-              href="https://github.com/Tencent/WeKnora/blob/main/website-docs/03-features/12-im-integration.md"
+              :href="docsUrl('imIntegration')"
               target="_blank"
               rel="noopener noreferrer"
               class="doc-link"
@@ -52,7 +52,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import IMChannelPanel from '@/components/IMChannelPanel.vue'
 import AgentEmbedChannelPanel from '@/components/AgentEmbedChannelPanel.vue'
@@ -62,18 +62,15 @@ import ChromeExtensionLanding from '@/views/integrations/ChromeExtensionLanding.
 import ClawSkillLanding from '@/views/integrations/ClawSkillLanding.vue'
 import CliIntegrationLanding from '@/views/integrations/CliIntegrationLanding.vue'
 import type { IntegrationTab } from '@/config/integrations'
+import { docsUrl } from '@/utils/docsUrl'
 
 const filterAgentId = ref('')
 
-const props = defineProps<{
+defineProps<{
   tab: IntegrationTab
 }>()
 
 const route = useRoute()
-
-const isLandingSection = computed(
-  () => props.tab === 'chrome' || props.tab === 'claw' || props.tab === 'cli',
-)
 
 function applyAgentFilterFromRoute() {
   filterAgentId.value = (route.query.agentId as string) || ''
@@ -96,10 +93,6 @@ watch(
 
 .integrations-settings__body {
   min-width: 0;
-}
-
-.integrations-settings__body--landing {
-  max-width: 760px;
 }
 
 .section-header {

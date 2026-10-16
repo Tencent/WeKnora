@@ -11,13 +11,12 @@ import (
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 )
 
-// Config is everything the client needs, already resolved by the catalog.
+// Config is everything the client needs, already resolved by the api.
 type Config struct {
 	Endpoint api.Endpoint
-	Settings catalog.RerankSettings
+	Settings api.RerankSettings
 }
 
 // Client talks DashScope's native rerank to one endpoint.

@@ -80,10 +80,10 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 	mergedChunks := p.groupAndMergeCurrentContent(ctx, searchResult)
 
 	// Step 6: Populate FAQ answers
-	mergedChunks = p.populateFAQAnswers(ctx, chatManage, mergedChunks)
+	mergedChunks = p.populateFAQAnswers(ctx, mergedChunks)
 
 	// Step 7: Expand short contexts
-	mergedChunks = p.expandShortContextWithNeighbors(ctx, chatManage, mergedChunks)
+	mergedChunks = p.expandShortContextWithNeighbors(ctx, mergedChunks)
 
 	// Step 7.5: Re-merge overlapping ranges introduced by expansion
 	mergedChunks = p.groupAndMergeCurrentContent(ctx, mergedChunks)
@@ -92,22 +92,47 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 	mergedChunks = p.dedup(ctx, "final_dedup", mergedChunks)
 	mergedChunks = removePartialOverlaps(ctx, mergedChunks)
 
+	p.attachCitationSources(ctx, mergedChunks)
 	chatManage.MergeResult = mergedChunks
 	return next()
 }
 
 // selectInputResults picks rerank results if available, falling back to search
-// results sorted by score descending.
+// results sorted by score descending and cut to RerankTopK. Without the cut,
+// a turn whose rerank did not run (no model, model unavailable, API error)
+// resolved parents, FAQ answers and neighbors for every search hit — up to
+// hundreds with query expansion and per-document targets — before top-k
+// dropped most of them.
 func (p *PluginMerge) selectInputResults(ctx context.Context, chatManage *types.ChatManage) []*types.SearchResult {
 	if len(chatManage.RerankResult) > 0 {
 		return chatManage.RerankResult
 	}
-	pipelineWarn(ctx, "Merge", "fallback", map[string]interface{}{
-		"reason": "empty_rerank_result",
-	})
 	result := chatManage.SearchResult
-	sort.Slice(result, func(i, j int) bool {
+	sort.SliceStable(result, func(i, j int) bool {
 		return result[i].Score > result[j].Score
+	})
+	if k := chatManage.RerankTopK; k > 0 && len(result) > k {
+		// Graph hits have no retrieval score (0) and would always fall
+		// below the cut; entity search already bounds how many it adds.
+		kept := result[:k:k]
+		for _, r := range result[k:] {
+			if r.MatchType == types.MatchTypeGraph {
+				kept = append(kept, r)
+			}
+		}
+		// This cut already hides candidates from the prompt, so record it
+		// here: with rerank skipped there is nothing left for FILTER_TOP_K to
+		// cut, and without the record the model would read a subset as the
+		// complete result set.
+		if len(kept) < len(result) {
+			chatManage.RecordRetrievalCut(types.RetrievalStageMerge, len(result))
+		}
+		result = kept
+	}
+	pipelineWarn(ctx, "Merge", "fallback", map[string]interface{}{
+		"reason":    "empty_rerank_result",
+		"input_cnt": len(chatManage.SearchResult),
+		"kept_cnt":  len(result),
 	})
 	return result
 }
@@ -264,7 +289,7 @@ func (p *PluginMerge) resolveParentChunks(
 	// without using editable StartAt/EndAt coordinates.
 	imageTextParentIDs := make(map[string]struct{})
 	for _, r := range results {
-		if r.ChunkType == string(types.ChunkTypeImageOCR) || r.ChunkType == string(types.ChunkTypeImageCaption) {
+		if types.IsImageChildChunkType(r.ChunkType) {
 			imageTextParentIDs[r.ParentChunkID] = struct{}{}
 		}
 	}
@@ -310,6 +335,7 @@ func (p *PluginMerge) resolveParentChunks(
 	}
 
 	for _, r := range results {
+		searchutil.CaptureImageEvidence(r)
 		if r.ParentChunkID == "" {
 			continue
 		}
@@ -338,7 +364,7 @@ func (p *PluginMerge) resolveParentChunks(
 				r.SubChunkID = append(r.SubChunkID, r.ID)
 			}
 
-		case string(types.ChunkTypeImageOCR), string(types.ChunkTypeImageCaption):
+		case string(types.ChunkTypeImageOCR), string(types.ChunkTypeImageCaption), string(types.ChunkTypeImageVector):
 			textParent, ok := parentMap[r.ParentChunkID]
 			if !ok || textParent.Content == "" || textParent.ChunkType != types.ChunkTypeText {
 				continue
@@ -418,7 +444,7 @@ func collectScopedTextChildIDs(
 			}
 			seen[r.ID] = struct{}{}
 			ids = append(ids, r.ID)
-		case string(types.ChunkTypeImageOCR), string(types.ChunkTypeImageCaption):
+		case string(types.ChunkTypeImageOCR), string(types.ChunkTypeImageCaption), string(types.ChunkTypeImageVector):
 			if _, ok := seen[r.ParentChunkID]; ok {
 				continue
 			}

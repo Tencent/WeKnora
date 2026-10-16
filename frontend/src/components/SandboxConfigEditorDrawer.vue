@@ -765,6 +765,7 @@ import { useI18n } from 'vue-i18n'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
+import { docsUrl } from '@/utils/docsUrl'
 import {
   checkSandboxConfig,
   createSandboxConfig,
@@ -816,7 +817,7 @@ const isMaskedSecret = (value?: string) => value === secretPlaceholder
 // the sandbox account cannot write.
 const defaultDockerImage = 'wechatopenai/weknora-sandbox:main'
 
-const clusterGuideUrl = 'https://github.com/Tencent/WeKnora/blob/main/website-docs/06-development/04-sandbox-deployment.md'
+const clusterGuideUrl = docsUrl('sandboxDeployment')
 const e2bApiKeysUrl = 'https://e2b.dev/dashboard?tab=keys'
 
 const backendOptions = computed(() => {

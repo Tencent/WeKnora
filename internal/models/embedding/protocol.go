@@ -11,7 +11,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api/dashscopeembeddings"
 	"github.com/Tencent/WeKnora/internal/models/api/googleembeddings"
 	"github.com/Tencent/WeKnora/internal/models/api/openaiembeddings"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
+	"github.com/Tencent/WeKnora/internal/models/imageprep"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -26,12 +27,13 @@ func newRemoteEmbedder(config Config, pooler EmbedderPooler) (Embedder, error) {
 	if strings.TrimSpace(config.ModelName) == "" {
 		return nil, fmt.Errorf("model name is required")
 	}
-	resolved, err := catalog.Resolve(catalog.Ref{
+	resolved, err := modelruntime.Resolve(modelruntime.Ref{
 		Provider:             config.Provider,
 		Model:                config.ModelName,
 		BaseURL:              config.BaseURL,
 		ModelType:            types.ModelTypeEmbedding,
 		Extra:                config.ExtraConfig,
+		Override:             config.Spec,
 		TruncatePromptTokens: config.TruncatePromptTokens,
 	})
 	if err != nil {
@@ -42,53 +44,22 @@ func newRemoteEmbedder(config Config, pooler EmbedderPooler) (Embedder, error) {
 	}
 
 	vendor := resolved.Vendor
-	creds := catalog.Credentials{APIKey: config.APIKey, AppID: config.AppID, AppSecret: config.AppSecret}
-	if creds.APIKey == "" {
-		creds.APIKey = vendor.DefaultAPIKey
+	endpoint, err := resolved.Endpoint(types.ModelTypeEmbedding, modelruntime.Connection{
+		ModelID:     config.ModelID,
+		Credentials: api.Credentials{APIKey: config.APIKey, AppID: config.AppID, AppSecret: config.AppSecret},
+		Headers:     config.CustomHeaders,
+		Extra:       config.ExtraConfig,
+		Client:      newEmbeddingHTTPClient(time.Duration(resolved.Embeddings.RequestTimeout) * time.Second),
+	})
+	if err != nil {
+		return nil, err
 	}
-	// A signing vendor with no identity pair would otherwise send unsigned
-	// requests and fail at the far end, which is a worse error than this one.
-	if vendor.Auth == catalog.AuthSigned {
-		if creds.AppID == "" {
-			return nil, fmt.Errorf("%s embedding: AppID is required", vendor.Name)
+	if endpoint.URL != "" {
+		if err := validateEmbeddingBaseURL(endpoint.URL); err != nil {
+			return nil, err
 		}
-		if creds.AppSecret == "" {
-			return nil, fmt.Errorf("%s embedding: AppSecret is required", vendor.Name)
-		}
-	}
-	// Vendor headers first so a user header cannot silently replace a vendor
-	// beta flag, matching chat.NewRemoteChat.
-	headers := make(map[string]string, len(vendor.Headers)+len(config.CustomHeaders))
-	for k, v := range vendor.Headers {
-		headers[k] = v
-	}
-	for k, v := range config.CustomHeaders {
-		headers[k] = v
 	}
 	settings := resolved.Embeddings
-	endpoint := api.Endpoint{
-		BaseURL: resolved.BaseURL,
-		Model:   resolved.RemoteModel,
-		ModelID: config.ModelID,
-		Auth:    vendor.AuthFunc(vendor.API, creds),
-		Headers: headers,
-		Client:  newEmbeddingHTTPClient(time.Duration(settings.RequestTimeout) * time.Second),
-	}
-	if vendor.Endpoint != nil {
-		if url, query := vendor.Endpoint(catalog.EndpointRequest{
-			BaseURL:      resolved.BaseURL,
-			Model:        resolved.RemoteModel,
-			ModelType:    types.ModelTypeEmbedding,
-			API:          vendor.API,
-			EmbeddingAPI: resolved.EmbeddingAPI,
-			Extra:        config.ExtraConfig,
-		}); url != "" {
-			if err := validateEmbeddingBaseURL(url); err != nil {
-				return nil, err
-			}
-			endpoint.URL, endpoint.Query = url, query
-		}
-	}
 
 	// The width is the vendor's field but the operator's decision: a row
 	// that did not opt in keeps the model's native width even where the
@@ -121,8 +92,16 @@ func newRemoteEmbedder(config Config, pooler EmbedderPooler) (Embedder, error) {
 		return nil, fmt.Errorf("unsupported embedding api %q for provider %s", resolved.EmbeddingAPI, vendor.ID)
 	}
 
+	// Images need both halves: the catalog saying the model maps them into
+	// its text space, and a protocol that can carry one to this vendor.
+	var images api.ImageEmbedder
+	if ie, ok := client.(api.ImageEmbedder); ok && ie.AcceptsImages() && resolved.Spec.AcceptsImages() {
+		images = ie
+	}
+
 	return &protocolEmbedder{
 		inner:          client,
+		images:         images,
 		settings:       settings,
 		modelName:      config.ModelName,
 		modelID:        config.ModelID,
@@ -136,8 +115,10 @@ func newRemoteEmbedder(config Config, pooler EmbedderPooler) (Embedder, error) {
 // itself: splitting a batch that exceeds the documented per-request ceiling,
 // and telling the vendor which side of a search a text is on.
 type protocolEmbedder struct {
-	inner      api.Embedder
-	settings   catalog.EmbeddingsSettings
+	inner api.Embedder
+	// images is nil unless the model and the endpoint both take images.
+	images     api.ImageEmbedder
+	settings   api.EmbeddingsSettings
 	modelName  string
 	modelID    string
 	dimensions int
@@ -184,6 +165,51 @@ func (e *protocolEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]
 			)
 		}
 		copy(out[batch.Start:], vectors)
+	}
+	return out, nil
+}
+
+func (e *protocolEmbedder) AcceptsImages() bool { return e.images != nil }
+
+func (e *protocolEmbedder) ImageLimits() ImageLimits {
+	return imageprep.LimitsOf(e.settings.ImageInput)
+}
+
+// BatchEmbedImages checks every image against the documented limits before
+// sending any, so a batch never half-succeeds on an image the vendor was
+// always going to refuse, then splits it at the documented images per
+// request.
+func (e *protocolEmbedder) BatchEmbedImages(ctx context.Context, images []Image) ([][]float32, error) {
+	if e.images == nil {
+		return nil, fmt.Errorf("%s: %w", e.modelName, ErrImagesUnsupported)
+	}
+	if len(images) == 0 {
+		return nil, nil
+	}
+	for i, img := range images {
+		if err := e.settings.CheckImage(img); err != nil {
+			return nil, fmt.Errorf("%s embedding: image %d: %w", e.modelName, i, err)
+		}
+	}
+	kind := api.EmbedDocument
+	if types.IsEmbedQuery(ctx) {
+		kind = api.EmbedQuery
+	}
+	limit := e.settings.ImageBatchLimit()
+	out := make([][]float32, len(images))
+	// Serial for the same reason as BatchEmbed.
+	for start := 0; start < len(images); start += limit {
+		batch := images[start:min(start+limit, len(images))]
+		vectors, err := e.images.EmbedImages(ctx, batch, kind)
+		if err != nil {
+			return nil, err
+		}
+		if len(vectors) != len(batch) {
+			return nil, fmt.Errorf(
+				"%s embedding: %d vectors for %d images", e.modelName, len(vectors), len(batch),
+			)
+		}
+		copy(out[start:], vectors)
 	}
 	return out, nil
 }

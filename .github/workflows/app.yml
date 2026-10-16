@@ -19,11 +19,17 @@ on:
       - "migrations/**"
       - "skills/preloaded/**"
       - "testdata/**"
+      - "website-docs/0*/**"
+      - "website-docs/.vitepress/config.mts"
       - "docker/Dockerfile.app"
       - "LICENSE"
       - "THIRD_PARTY_NOTICES.md"
       - "licenses/**"
       - "internal/textconv/data/**"
+      - "internal/models/catalog/data/**"
+      - "internal/models/parity/testdata/**"
+      - "internal/models/providers/assets/**"
+      - "scripts/model-catalog/**"
       - "scripts/*license*.sh"
       - "scripts/git-hooks/**"
       - "scripts/test-git-hooks.sh"
@@ -43,11 +49,17 @@ on:
       - "migrations/**"
       - "skills/preloaded/**"
       - "testdata/**"
+      - "website-docs/0*/**"
+      - "website-docs/.vitepress/config.mts"
       - "docker/Dockerfile.app"
       - "LICENSE"
       - "THIRD_PARTY_NOTICES.md"
       - "licenses/**"
       - "internal/textconv/data/**"
+      - "internal/models/catalog/data/**"
+      - "internal/models/parity/testdata/**"
+      - "internal/models/providers/assets/**"
+      - "scripts/model-catalog/**"
       - "scripts/*license*.sh"
       - "scripts/git-hooks/**"
       - "scripts/test-git-hooks.sh"
@@ -116,6 +128,9 @@ jobs:
             echo "$unformatted"
             exit 1
           fi
+
+      - name: Verify generated model catalog
+        run: python3 scripts/model-catalog/generate.py --check
 
       - name: Verify Git hook test coverage
         run: bash ./scripts/test-git-hooks.sh

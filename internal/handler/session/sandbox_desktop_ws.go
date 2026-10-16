@@ -450,7 +450,9 @@ func (h *Handler) acquireDesktopSlot(
 
 	hold, cancelHold := context.WithCancelCause(context.Background())
 	renewCtx, stopRenew := context.WithCancel(context.WithoutCancel(ctx))
-	go renewDesktopSlot(renewCtx, cancelHold, h.redis, key, token)
+	// The timing is read here, before the goroutine starts, so the renew loop
+	// never reads the package-level settings concurrently with a writer.
+	go renewDesktopSlot(renewCtx, cancelHold, h.redis, key, token, desktopSlotRenew, desktopSlotLease)
 
 	var once sync.Once
 	return func() {
@@ -469,8 +471,9 @@ func renewDesktopSlot(
 	cancelHold context.CancelCauseFunc,
 	client redis.UniversalClient,
 	key, token string,
+	renewEvery, lease time.Duration,
 ) {
-	ticker := time.NewTicker(desktopSlotRenew)
+	ticker := time.NewTicker(renewEvery)
 	defer ticker.Stop()
 	lastOK := time.Now()
 	for {
@@ -478,13 +481,13 @@ func renewDesktopSlot(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			ok, rerr := redislock.Renew(ctx, client, key, token, desktopSlotLease)
+			ok, rerr := redislock.Renew(ctx, client, key, token, lease)
 			if rerr != nil {
 				if stderrors.Is(rerr, context.Canceled) && ctx.Err() != nil {
 					return
 				}
 				logger.Warnf(ctx, "[sandbox-desktop] slot renew failed key=%s: %v", key, rerr)
-				if time.Since(lastOK) >= desktopSlotLease {
+				if time.Since(lastOK) >= lease {
 					cancelHold(rerr)
 					return
 				}

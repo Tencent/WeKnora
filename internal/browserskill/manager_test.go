@@ -165,6 +165,9 @@ func TestNativeDaemonRelay(t *testing.T) {
 	if handshake["error"] != nil {
 		t.Fatalf("handshake: %v", handshake)
 	}
+	if version := m.Status(scope, "").ExtensionVersion; version != "0.2.1" {
+		t.Fatalf("extension version = %q, want 0.2.1", version)
+	}
 	calls := make(chan map[string]any, 20)
 	var starts atomic.Int32
 	go func() {

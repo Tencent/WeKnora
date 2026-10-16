@@ -72,7 +72,7 @@ func TestExpandShortContextKeepsSourceCoordinates(t *testing.T) {
 		Content: "edited base body", StartAt: 100, EndAt: 120,
 	}
 
-	got := plugin.expandShortContextWithNeighbors(ctx, &types.ChatManage{}, []*types.SearchResult{result})
+	got := plugin.expandShortContextWithNeighbors(ctx, []*types.SearchResult{result})
 	if len(got) != 1 {
 		t.Fatalf("result count = %d, want 1", len(got))
 	}

@@ -8,7 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/catalog"
+	"github.com/Tencent/WeKnora/internal/models/providers"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
@@ -43,16 +44,16 @@ const (
 
 func registerSecretExtraVendor(t *testing.T) {
 	t.Helper()
-	catalog.Register(&catalog.Vendor{
+	modelruntime.Register(&providers.Definition{
 		ID:         secretExtraProvider,
 		Name:       "Secret Extra Vendor",
 		ModelTypes: []types.ModelType{types.ModelTypeRerank},
-		ExtraFields: []catalog.ExtraField{
+		ExtraFields: []providers.ExtraField{
 			{Key: "secret_key", Label: "Secret Key", Type: "password", Secret: true},
 			{Key: "region", Label: "Region", Type: "string"},
 		},
 	})
-	catalog.Register(&catalog.Vendor{
+	modelruntime.Register(&providers.Definition{
 		ID:         plainExtraProvider,
 		Name:       "Plain Extra Vendor",
 		ModelTypes: []types.ModelType{types.ModelTypeRerank},

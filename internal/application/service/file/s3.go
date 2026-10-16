@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -27,6 +28,23 @@ type s3FileService struct {
 	client     *s3.Client
 	bucketName string
 	pathPrefix string
+}
+
+// s3UsePathStyle reports whether the S3 client should use path-style
+// addressing. S3-compatible services default to path-style; AWS and Tencent
+// COS use virtual-hosted style, since COS rejects path-style for buckets
+// created from 2024-01-01 (#3134). force_path_style always wins.
+func s3UsePathStyle(endpoint string, forcePathStyle bool) bool {
+	if forcePathStyle {
+		return true
+	}
+	if strings.Contains(endpoint, "amazonaws.com") {
+		return false
+	}
+	if u, err := url.Parse(endpoint); err == nil && strings.HasSuffix(strings.ToLower(u.Hostname()), ".myqcloud.com") {
+		return false
+	}
+	return true
 }
 
 // newS3Client creates a bare s3FileService with just the SDK client initialised.
@@ -56,15 +74,12 @@ func newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix 
 	}
 
 	// Create S3 client with custom endpoint if provided.
-	// For S3-compatible services (non-AWS), use path-style addressing
-	// (endpoint/bucket/key) instead of virtual-hosted style (bucket.endpoint/key).
 	httpClient := objectStorageHTTPClient()
 	var client *s3.Client
 	if endpoint != "" {
-		usePathStyle := forcePathStyle || !strings.Contains(endpoint, "amazonaws.com")
 		client = s3.NewFromConfig(cfg, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(endpoint)
-			o.UsePathStyle = usePathStyle
+			o.UsePathStyle = s3UsePathStyle(endpoint, forcePathStyle)
 			if !strings.Contains(endpoint, "amazonaws.com") {
 				// S3-compatible services commonly reject the SDK's default
 				// trailing checksum negotiation. Only relax this for explicit
@@ -199,9 +214,13 @@ func CheckS3ConnectivityWithOptions(ctx context.Context, endpoint, accessKey, se
 }
 
 // parseS3FilePath extracts the object name from a provider scheme: s3://{bucket}/{objectKey}
+// Canonical storage://<backend-id>/s3://{bucket}/{objectKey} paths are accepted
+// too: the wrapper is stripped so services reached bare (global env storage,
+// legacy tenants) can resolve catalog-produced paths (#3151).
 func (s *s3FileService) parseS3FilePath(filePath string) (string, error) {
 	// Provider scheme format: s3://{bucket}/{objectKey}
 	const prefix = "s3://"
+	filePath = storageBackendInnerPath(filePath)
 	if !strings.HasPrefix(filePath, prefix) {
 		return "", fmt.Errorf("invalid S3 file path: %s", filePath)
 	}

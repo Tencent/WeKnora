@@ -27,6 +27,8 @@ export interface WikiPage {
   sort_order?: number;
   source_refs: string[];
   in_links: string[];
+  // Present on page detail responses; list and mutation responses omit it.
+  in_link_titles?: Record<string, string>;
   out_links: string[];
   page_metadata: Record<string, any>;
   version: number;
@@ -324,7 +326,15 @@ export function getWikiGraph(kbId: string, params?: WikiGraphQueryParams) {
     }
   }
   const qs = query.toString();
-  return get(`/api/v1/knowledgebase/${kbId}/wiki/graph${qs ? '?' + qs : ''}`);
+  return get(`/api/v1/knowledgebase/${kbId}/wiki/graph${qs ? '?' + qs : ''}`).then((res: any) => {
+    // Older backends serialize an edgeless subgraph as `"edges": null`.
+    const graph = res?.data || res;
+    if (graph && typeof graph === 'object') {
+      graph.nodes ??= [];
+      graph.edges ??= [];
+    }
+    return res;
+  });
 }
 
 export function getWikiStats(kbId: string) {

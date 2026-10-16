@@ -2,6 +2,7 @@ package yuque
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -511,5 +512,174 @@ func TestConnector_FetchAll_FileNamePolicy(t *testing.T) {
 				t.Fatalf("title = %q, filename = %q; want %q, %q", items[0].Title, items[0].FileName, tt.title, tt.want)
 			}
 		})
+	}
+}
+
+// Regression for Tencent/WeKnora#3690: when an existing doc's detail fetch
+// fails after its content changed, the incremental cursor must keep the doc's
+// previously synced version instead of acknowledging the new one — otherwise
+// every later sync sees the doc as unchanged and never retries the fetch.
+func TestConnector_FetchIncremental_DetailFailureDoesNotAckVersion(t *testing.T) {
+	// First sync: docs 1 and 2, both at t0.
+	f1 := newFakeYuque()
+	f1.handleJSON("/api/v2/repos/12/docs", 200, v2DocListResponse{Data: []v2Doc{
+		{ID: 1, Type: "Doc", Status: "1", Title: "A", Slug: "a", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+		{ID: 2, Type: "Doc", Status: "1", Title: "B", Slug: "b", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+	}})
+	f1.handleJSON("/api/v2/repos/docs/1", 200, v2DocDetailResponse{Data: v2DocDetail{
+		ID: 1, Title: "A", Body: "a", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z",
+	}})
+	f1.handleJSON("/api/v2/repos/docs/2", 200, v2DocDetailResponse{Data: v2DocDetail{
+		ID: 2, Title: "B", Body: "b", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z",
+	}})
+
+	_, cursor1, err := NewConnector().FetchIncremental(context.Background(), makeDSConfig(f1, []string{"12"}), nil)
+	if err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+	f1.Close()
+
+	// Second sync: doc 2 changed to t1 but its detail endpoint fails (mixed
+	// success/failure — doc 1 is unchanged, so the batch is not all-failed).
+	f2 := newFakeYuque()
+	f2.handleJSON("/api/v2/repos/12/docs", 200, v2DocListResponse{Data: []v2Doc{
+		{ID: 1, Type: "Doc", Status: "1", Title: "A", Slug: "a", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+		{ID: 2, Type: "Doc", Status: "1", Title: "B2", Slug: "b", ContentUpdatedAt: "2026-04-20T12:00:00Z"},
+	}})
+	f2.mux.HandleFunc("/api/v2/repos/docs/2", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest) // 4xx is non-retriable, bubbles up as an error
+		_, _ = w.Write([]byte(`{"message":"broken"}`))
+	})
+
+	items2, cursor2, err := NewConnector().FetchIncremental(
+		context.Background(), makeDSConfig(f2, []string{"12"}), cursor1)
+	if err != nil {
+		t.Fatalf("second sync must not fail on a single detail error, got %v", err)
+	}
+	f2.Close()
+
+	var placeholder *types.FetchedItem
+	for i := range items2 {
+		if items2[i].Metadata["error"] != "" && items2[i].ExternalID == "2" {
+			placeholder = &items2[i]
+		}
+	}
+	if placeholder == nil {
+		t.Fatalf("expected an error placeholder for doc 2, got %+v", items2)
+	}
+
+	// The cursor must still hold doc 2's previously synced version (t0), not
+	// the failed t1: acknowledging t1 hid the doc from all future syncs (#3690).
+	var cur2 yuqueCursor
+	if b, merr := json.Marshal(cursor2.ConnectorCursor); merr != nil {
+		t.Fatalf("encode cursor: %v", merr)
+	} else if uerr := json.Unmarshal(b, &cur2); uerr != nil {
+		t.Fatalf("decode cursor: %v", uerr)
+	}
+	if got := cur2.BookDocTimes["12"]["2"]; got != "2026-04-20T10:00:00Z" {
+		t.Fatalf("cursor must keep doc 2's previous version after a failed detail fetch, got %q", got)
+	}
+
+	// Third sync, endpoint recovered: doc 2 must be re-fetched because its
+	// cursor entry (t0) still differs from the listing (t1).
+	f3 := newFakeYuque()
+	defer f3.Close()
+	f3.handleJSON("/api/v2/repos/12/docs", 200, v2DocListResponse{Data: []v2Doc{
+		{ID: 1, Type: "Doc", Status: "1", Title: "A", Slug: "a", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+		{ID: 2, Type: "Doc", Status: "1", Title: "B2", Slug: "b", ContentUpdatedAt: "2026-04-20T12:00:00Z"},
+	}})
+	f3.handleJSON("/api/v2/repos/docs/2", 200, v2DocDetailResponse{Data: v2DocDetail{
+		ID: 2, Title: "B2", Body: "b2 recovered", Status: "1", ContentUpdatedAt: "2026-04-20T12:00:00Z",
+	}})
+
+	items3, _, err := NewConnector().FetchIncremental(context.Background(), makeDSConfig(f3, []string{"12"}), cursor2)
+	if err != nil {
+		t.Fatalf("third sync: %v", err)
+	}
+	if len(items3) != 1 || items3[0].ExternalID != "2" {
+		t.Fatalf("expected recovered doc 2 to be re-fetched, got %+v", items3)
+	}
+	if string(items3[0].Content) != "b2 recovered" {
+		t.Errorf("expected recovered body, got %q", string(items3[0].Content))
+	}
+}
+
+// Regression for Tencent/WeKnora#3690 (new-doc variant): a newly listed doc
+// whose detail fetch fails must not enter the cursor at all, so the next sync
+// still treats it as new and ingests it.
+func TestConnector_FetchIncremental_NewDocDetailFailureNotAcknowledged(t *testing.T) {
+	// First sync: doc 1 only.
+	f1 := newFakeYuque()
+	f1.handleJSON("/api/v2/repos/13/docs", 200, v2DocListResponse{Data: []v2Doc{
+		{ID: 1, Type: "Doc", Status: "1", Title: "A", Slug: "a", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+	}})
+	f1.handleJSON("/api/v2/repos/docs/1", 200, v2DocDetailResponse{Data: v2DocDetail{
+		ID: 1, Title: "A", Body: "a", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z",
+	}})
+
+	_, cursor1, err := NewConnector().FetchIncremental(context.Background(), makeDSConfig(f1, []string{"13"}), nil)
+	if err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+	f1.Close()
+
+	// Second sync: new doc 2 appears (t1) but its detail fetch fails.
+	f2 := newFakeYuque()
+	f2.handleJSON("/api/v2/repos/13/docs", 200, v2DocListResponse{Data: []v2Doc{
+		{ID: 1, Type: "Doc", Status: "1", Title: "A", Slug: "a", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+		{ID: 2, Type: "Doc", Status: "1", Title: "New", Slug: "new", ContentUpdatedAt: "2026-04-20T12:00:00Z"},
+	}})
+	f2.mux.HandleFunc("/api/v2/repos/docs/2", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest) // 4xx is non-retriable, bubbles up as an error
+		_, _ = w.Write([]byte(`{"message":"broken"}`))
+	})
+
+	items2, cursor2, err := NewConnector().FetchIncremental(
+		context.Background(), makeDSConfig(f2, []string{"13"}), cursor1)
+	if err != nil {
+		t.Fatalf("second sync must not fail on a single detail error, got %v", err)
+	}
+	f2.Close()
+
+	found := false
+	for _, it := range items2 {
+		if it.Metadata["error"] != "" && it.ExternalID == "2" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected an error placeholder for doc 2, got %+v", items2)
+	}
+
+	var cur2 yuqueCursor
+	if b, merr := json.Marshal(cursor2.ConnectorCursor); merr != nil {
+		t.Fatalf("encode cursor: %v", merr)
+	} else if uerr := json.Unmarshal(b, &cur2); uerr != nil {
+		t.Fatalf("decode cursor: %v", uerr)
+	}
+	if _, exists := cur2.BookDocTimes["13"]["2"]; exists {
+		t.Fatal("failed new doc must not be acknowledged into the cursor")
+	}
+	if got := cur2.BookDocTimes["13"]["1"]; got != "2026-04-20T10:00:00Z" {
+		t.Errorf("unchanged doc 1 cursor entry must be untouched, got %q", got)
+	}
+
+	// Third sync, endpoint recovered: doc 2 is ingested as a new item.
+	f3 := newFakeYuque()
+	defer f3.Close()
+	f3.handleJSON("/api/v2/repos/13/docs", 200, v2DocListResponse{Data: []v2Doc{
+		{ID: 1, Type: "Doc", Status: "1", Title: "A", Slug: "a", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+		{ID: 2, Type: "Doc", Status: "1", Title: "New", Slug: "new", ContentUpdatedAt: "2026-04-20T12:00:00Z"},
+	}})
+	f3.handleJSON("/api/v2/repos/docs/2", 200, v2DocDetailResponse{Data: v2DocDetail{
+		ID: 2, Title: "New", Body: "new content", Status: "1", ContentUpdatedAt: "2026-04-20T12:00:00Z",
+	}})
+
+	items3, _, err := NewConnector().FetchIncremental(context.Background(), makeDSConfig(f3, []string{"13"}), cursor2)
+	if err != nil {
+		t.Fatalf("third sync: %v", err)
+	}
+	if len(items3) != 1 || items3[0].ExternalID != "2" {
+		t.Fatalf("expected new doc 2 to be ingested after recovery, got %+v", items3)
 	}
 }

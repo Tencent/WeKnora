@@ -1,3 +1,4 @@
+// Package rerank adapts rerank protocols to application batching and score semantics.
 package rerank
 
 import (
@@ -11,12 +12,14 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api/cohererank"
 	"github.com/Tencent/WeKnora/internal/models/api/dashscoperank"
 	"github.com/Tencent/WeKnora/internal/models/api/nimrerank"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
-	// catalog.Resolve answers from the vendor catalog, which is empty until
+	"github.com/Tencent/WeKnora/internal/models/api/pineconerank"
+	"github.com/Tencent/WeKnora/internal/models/api/teirank"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
+
+	// modelruntime.Resolve answers from the vendor catalog, which is empty until
 	// the vendor packages have run their init. Without this import every row
 	// resolves to the generic vendor: LKEAP and Volcengine would lose their
 	// signed clients and Aliyun its native protocol.
-	_ "github.com/Tencent/WeKnora/internal/models/vendors"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -30,6 +33,26 @@ type Reranker interface {
 
 	// GetModelID returns the model ID
 	GetModelID() string
+}
+
+// PassageLimiter is implemented by rerankers whose vendor documents how large
+// a document may be. The rerank stage builds its passages itself (title,
+// chunk body, captions, OCR text, generated questions), so it can fit them to
+// the limit instead of letting one oversized candidate fail the whole
+// request, which the protocol layer rightly refuses to truncate on its own.
+type PassageLimiter interface {
+	// MaxPassageRunes returns the longest document, in runes, one request
+	// can carry beside query. 0 means no documented limit.
+	MaxPassageRunes(query string) int
+}
+
+// MaxPassageRunes reports r's passage limit for query, or 0 when r documents
+// none.
+func MaxPassageRunes(r Reranker, query string) int {
+	if limiter, ok := r.(PassageLimiter); ok {
+		return limiter.MaxPassageRunes(query)
+	}
+	return 0
 }
 
 type RankResult struct {
@@ -94,7 +117,8 @@ type RerankerConfig struct {
 	ModelName   string
 	Source      types.ModelSource
 	ModelID     string
-	Provider    string // Provider identifier: openai, aliyun, zhipu, siliconflow, jina, generic
+	Provider    string                   // Provider identifier: openai, aliyun, zhipu, siliconflow, jina, generic
+	Spec        *types.ModelSpecOverride `json:"spec,omitempty"`
 	ExtraConfig map[string]string
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string
@@ -116,6 +140,7 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *RerankerConfig {
 		ModelName:     m.Name,
 		Source:        m.Source,
 		Provider:      m.Parameters.Provider,
+		Spec:          m.Parameters.Spec,
 		ExtraConfig:   m.Parameters.ExtraConfig,
 		CustomHeaders: m.Parameters.CustomHeaders,
 		AppID:         appID,
@@ -143,12 +168,13 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 	if config == nil {
 		return nil, fmt.Errorf("rerank config is nil")
 	}
-	resolved, err := catalog.Resolve(catalog.Ref{
+	resolved, err := modelruntime.Resolve(modelruntime.Ref{
 		Provider:  config.Provider,
 		Model:     config.ModelName,
 		BaseURL:   config.BaseURL,
 		ModelType: types.ModelTypeRerank,
 		Extra:     config.ExtraConfig,
+		Override:  config.Spec,
 	})
 	if err != nil {
 		return nil, err
@@ -158,50 +184,15 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 	}
 
 	vendor := resolved.Vendor
-	creds := catalog.Credentials{APIKey: config.APIKey, AppID: config.AppID, AppSecret: config.AppSecret}
-	if creds.APIKey == "" {
-		creds.APIKey = vendor.DefaultAPIKey
-	}
-	// A signing vendor with no identity pair would otherwise send unsigned
-	// requests and fail at the far end, which is a worse error than this one.
-	if vendor.Auth == catalog.AuthSigned {
-		if creds.AppID == "" {
-			return nil, fmt.Errorf("%s rerank: AppID is required", vendor.Name)
-		}
-		if creds.AppSecret == "" {
-			return nil, fmt.Errorf("%s rerank: AppSecret is required", vendor.Name)
-		}
-	}
-	// Vendor headers first so a user header cannot silently replace a vendor
-	// beta flag, matching chat.NewRemoteChat.
-	headers := make(map[string]string, len(vendor.Headers)+len(config.CustomHeaders))
-	for k, v := range vendor.Headers {
-		headers[k] = v
-	}
-	for k, v := range config.CustomHeaders {
-		headers[k] = v
-	}
-	endpoint := api.Endpoint{
-		BaseURL: resolved.BaseURL,
-		Model:   resolved.RemoteModel,
-		ModelID: config.ModelID,
-		Auth:    vendor.AuthFunc(vendor.API, creds),
-		Headers: headers,
-		// Most vendors have always run without a client deadline here and let
-		// the caller's context govern; the ones that declare a timeout get it.
-		Client: newRerankHTTPClient(
-			time.Duration(resolved.Rerank.RequestTimeout) * time.Second,
-		),
-	}
-	if vendor.Endpoint != nil {
-		if url, query := vendor.Endpoint(catalog.EndpointRequest{
-			BaseURL:   resolved.BaseURL,
-			Model:     resolved.RemoteModel,
-			ModelType: types.ModelTypeRerank,
-			Extra:     config.ExtraConfig,
-		}); url != "" {
-			endpoint.URL, endpoint.Query = url, query
-		}
+	endpoint, err := resolved.Endpoint(types.ModelTypeRerank, modelruntime.Connection{
+		ModelID:     config.ModelID,
+		Credentials: api.Credentials{APIKey: config.APIKey, AppID: config.AppID, AppSecret: config.AppSecret},
+		Headers:     config.CustomHeaders,
+		Extra:       config.ExtraConfig,
+		Client:      newRerankHTTPClient(time.Duration(resolved.Rerank.RequestTimeout) * time.Second),
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	var client api.Reranker
@@ -212,6 +203,10 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 		client = dashscoperank.New(dashscoperank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankNIM:
 		client = nimrerank.New(nimrerank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
+	case api.RerankPinecone:
+		client = pineconerank.New(pineconerank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
+	case api.RerankTEI:
+		client = teirank.New(teirank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankTencentLKEAP:
 		client, err = newLKEAPClient(config, resolved)
 	case api.RerankVolcengineKnowledge:
@@ -223,8 +218,16 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 		return nil, err
 	}
 
+	// Images need both halves: the catalog saying the model scores them, and
+	// a protocol that can carry one to this vendor.
+	var images api.ImageReranker
+	if ir, ok := client.(api.ImageReranker); ok && ir.AcceptsImages() && resolved.Spec.AcceptsImages() {
+		images = ir
+	}
+
 	return &protocolReranker{
 		inner:     client,
+		images:    images,
 		settings:  resolved.Rerank,
 		endpoint:  resolved.BaseURL,
 		modelName: config.ModelName,

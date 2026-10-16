@@ -11,6 +11,10 @@ type weaviateRepository struct {
 	collectionBaseName string
 	replicationFactor  int // 0 = use Weaviate server default
 	desiredShardCount  int // 0 = use Weaviate server default
+	// copyQueryLimit caps the rows one CopyIndices source query may return.
+	// 0 = defaultCopyQueryLimit. Tests lower it to drive the truncation and
+	// batch-splitting paths with small fixtures.
+	copyQueryLimit int
 	// Cache for initialized collections (dimension -> true)
 	initializedCollections sync.Map
 }

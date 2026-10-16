@@ -17,7 +17,7 @@ type EmbedChannel struct {
 	Name                   string         `json:"name"                gorm:"type:varchar(255);not null;default:''"`
 	Enabled                bool           `json:"enabled"             gorm:"not null;default:true"`
 	PublishToken           string         `json:"-"                   gorm:"type:varchar(64);not null;default:''"`
-	AllowedOrigins         JSON           `json:"allowed_origins"     gorm:"type:jsonb;not null;default:'[]'"`
+	AllowedOrigins         JSON           `json:"allowed_origins"     gorm:"type:jsonb;not null;default:'[]'" swaggertype:"array,string"`
 	WelcomeMessage         string         `json:"welcome_message"      gorm:"type:text;not null;default:''"`
 	RateLimitPerMinute     int            `json:"rate_limit_per_minute" gorm:"not null;default:30"`
 	RateLimitPerDay        int            `json:"rate_limit_per_day"    gorm:"not null;default:10000"`
@@ -126,23 +126,10 @@ type EmbedChannelPublicConfig struct {
 	DefaultLocale           string `json:"default_locale,omitempty"`
 }
 
-// Supported embed UI locales.
-var supportedEmbedLocales = map[string]struct{}{
-	"zh-CN": {},
-	"en-US": {},
-	"ko-KR": {},
-	"ja-JP": {},
-	"ru-RU": {},
-}
-
 // NormalizeEmbedDefaultLocale returns a supported locale tag or empty string
 // (meaning follow browser / host widget locale).
 func NormalizeEmbedDefaultLocale(locale string) string {
-	locale = strings.TrimSpace(locale)
-	if _, ok := supportedEmbedLocales[locale]; ok {
-		return locale
-	}
-	return ""
+	return NormalizeSupportedLocale(locale)
 }
 
 // EmbedSessionMarkerPrefix tags sessions created through an embed channel.

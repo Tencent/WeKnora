@@ -305,12 +305,12 @@ func (c *Client) processStream(
 	reader := api.NewSSEReader(body)
 	var reasoningDetails []json.RawMessage
 
-	finish := func() {
+	finish := func(end func(chan<- types.StreamResponse)) {
 		if len(reasoningDetails) > 0 {
 			merged, _ := json.Marshal(reasoningDetails)
 			assembler.ReasoningMetadata = types.ProviderMetadata{metadataReasoningDetails: merged}
 		}
-		assembler.End(ch)
+		end(ch)
 	}
 
 	for {
@@ -322,7 +322,7 @@ func (c *Client) processStream(
 		event, err := reader.ReadEvent()
 		if err != nil {
 			if err == io.EOF {
-				finish()
+				finish(assembler.EndAtEOF)
 			} else {
 				assembler.Fail(ch, err)
 			}
@@ -332,7 +332,7 @@ func (c *Client) processStream(
 			continue
 		}
 		if event.Done {
-			finish()
+			finish(assembler.End)
 			return
 		}
 		if len(event.Data) == 0 {

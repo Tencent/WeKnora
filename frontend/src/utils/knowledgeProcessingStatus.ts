@@ -4,6 +4,11 @@ export type TimelineStatusInput = {
   isLatestAttempt: boolean
 }
 
+/** A failed attempt remains actionable while the queue waits to retry it. */
+export function shouldShowProcessingError(hasError: boolean, parseStatus?: string, traceStatus?: string): boolean {
+  return hasError && (parseStatus === 'failed' || traceStatus === 'failed')
+}
+
 /**
  * Convert the knowledge-level parse status to the span status vocabulary used
  * by the processing timeline.

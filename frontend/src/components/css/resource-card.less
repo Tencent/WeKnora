@@ -72,6 +72,8 @@
     font-size: var(--app-text-sm);
     line-height: 18px;
     overflow: hidden;
+
+    &.is-empty { color: var(--td-text-color-placeholder); }
   }
   .card-bottom {
     display: flex;
@@ -135,6 +137,8 @@
   padding: 0 5px;
   box-sizing: border-box;
   border-radius: 5px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
   font-size: var(--app-text-xs);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
@@ -172,9 +176,10 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  margin: 0 16px 0 0;
+  margin: 0;
   padding: 20px 28px 0;
-  @media (max-width: 720px) { margin: 0; padding: var(--app-space-4) var(--app-space-4) 0; }
+  html.wails-desktop & { padding-top: 42px; }
+  @media (max-width: 720px) { padding: var(--app-space-4) var(--app-space-4) 0; }
 }
 .resource-list-main() {
   flex: 1;
@@ -192,12 +197,21 @@
     .header-title { width: 100%; gap: 4px; }
     .title-row { flex-wrap: wrap; gap: 12px; }
     h2 { margin-right: auto; }
+    .header-actions-lite {
+      max-width: 100%;
+      flex-wrap: wrap;
+      @media (max-width: 720px) {
+        width: 100%;
+        .resource-toolbar { width: 100%; }
+      }
+    }
     .header-subtitle { color: var(--td-text-color-secondary); font-size: var(--app-text-base); }
     .header-action-btn {
       width: auto;
       min-height: 32px;
       padding: 0 12px;
       gap: 6px;
+      font-size: var(--app-text-md);
       box-shadow: none;
       color: var(--td-text-color-primary);
       background: var(--td-bg-color-container);

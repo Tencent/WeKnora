@@ -279,6 +279,19 @@ func (a *StreamAssembler) End(ch chan<- types.StreamResponse) {
 	})
 }
 
+// EndAtEOF closes a stream whose body simply ran out. A vendor that finished
+// the message has reported a finish reason by then; without one the
+// connection was most likely cut by a proxy or load balancer, and the answer
+// is marked incomplete, as the Anthropic loop already does, instead of reaching
+// the caller as a clean stop.
+func (a *StreamAssembler) EndAtEOF(ch chan<- types.StreamResponse) {
+	if a.LastFinishReason == "" {
+		logger.Warnf(a.ctx, "Stream ended without a finish reason; marking the response incomplete")
+		a.LastFinishReason = types.FinishReasonIncomplete
+	}
+	a.End(ch)
+}
+
 // Fail emits the error chunk for a broken stream.
 func (a *StreamAssembler) Fail(ch chan<- types.StreamResponse, err error) {
 	logger.Errorf(a.ctx, "Stream read error: %v (tool_calls_assembled=%d)", err, len(a.toolCallMap))

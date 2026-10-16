@@ -56,6 +56,14 @@ type ChunkingConfig struct {
 	Separators   []string `json:"separators"`    // Separators
 }
 
+// IndexingStrategy selects which indexing pipelines are active.
+type IndexingStrategy struct {
+	VectorEnabled  bool `json:"vector_enabled"`
+	KeywordEnabled bool `json:"keyword_enabled"`
+	WikiEnabled    bool `json:"wiki_enabled"`
+	GraphEnabled   bool `json:"graph_enabled"`
+}
+
 // FAQConfig represents faq-specific configuration
 type FAQConfig struct {
 	IndexMode         string `json:"index_mode"`
@@ -244,6 +252,8 @@ type SearchResult struct {
 type HybridSearchResponse struct {
 	Success bool            `json:"success"`
 	Data    []*SearchResult `json:"data"`
+	// Meta is present when the request carried a rerank object.
+	Meta *RetrievalMeta `json:"meta,omitempty"`
 }
 
 type CopyKnowledgeBaseRequest struct {
@@ -354,6 +364,90 @@ func (c *Client) UpdateKnowledgeBase(ctx context.Context,
 	return &response.Data, nil
 }
 
+// PatchKnowledgeBaseRequest changes only the fields it carries.
+// A nil field is left unchanged. Nested objects use pointers so a false or
+// zero value can be sent without the other fields being cleared.
+type PatchKnowledgeBaseRequest struct {
+	Name             *string                     `json:"name,omitempty"`
+	Description      *string                     `json:"description,omitempty"`
+	EmbeddingModelID *string                     `json:"embedding_model_id,omitempty"`
+	SummaryModelID   *string                     `json:"summary_model_id,omitempty"`
+	StorageBackendID *string                     `json:"storage_backend_id,omitempty"`
+	ChunkingConfig   *PatchChunkingConfig        `json:"chunking_config,omitempty"`
+	IndexingStrategy *PatchIndexingStrategy      `json:"indexing_strategy,omitempty"`
+	VLMConfig        *PatchVLMConfig             `json:"vlm_config,omitempty"`
+	ASRConfig        *PatchASRConfig             `json:"asr_config,omitempty"`
+	FAQConfig        *PatchFAQConfig             `json:"faq_config,omitempty"`
+	AutoTagConfig    *PatchAutoTagConfig         `json:"auto_tag_config,omitempty"`
+	ImageProcessing  *PatchImageProcessingConfig `json:"image_processing_config,omitempty"`
+}
+
+// PatchChunkingConfig is the partial chunking update. Nil fields stay as they are.
+type PatchChunkingConfig struct {
+	ChunkSize    *int      `json:"chunk_size,omitempty"`
+	ChunkOverlap *int      `json:"chunk_overlap,omitempty"`
+	Separators   *[]string `json:"separators,omitempty"`
+}
+
+// PatchIndexingStrategy is the partial indexing update. Nil flags stay as they are.
+type PatchIndexingStrategy struct {
+	VectorEnabled  *bool `json:"vector_enabled,omitempty"`
+	KeywordEnabled *bool `json:"keyword_enabled,omitempty"`
+	WikiEnabled    *bool `json:"wiki_enabled,omitempty"`
+	GraphEnabled   *bool `json:"graph_enabled,omitempty"`
+}
+
+// PatchVLMConfig is the partial caption-model update.
+type PatchVLMConfig struct {
+	Enabled *bool   `json:"enabled,omitempty"`
+	ModelID *string `json:"model_id,omitempty"`
+}
+
+// PatchASRConfig changes only the speech-recognition fields provided.
+type PatchASRConfig struct {
+	Enabled  *bool   `json:"enabled,omitempty"`
+	ModelID  *string `json:"model_id,omitempty"`
+	Language *string `json:"language,omitempty"`
+}
+
+// PatchFAQConfig changes only the FAQ indexing fields provided.
+type PatchFAQConfig struct {
+	IndexMode         *string `json:"index_mode,omitempty"`
+	QuestionIndexMode *string `json:"question_index_mode,omitempty"`
+}
+
+// PatchAutoTagConfig changes only the automatic tagging fields provided.
+type PatchAutoTagConfig struct {
+	Enabled      *bool   `json:"enabled,omitempty"`
+	ModelID      *string `json:"model_id,omitempty"`
+	MaxTags      *int    `json:"max_tags,omitempty"`
+	SkipIfTagged *bool   `json:"skip_if_tagged,omitempty"`
+}
+
+// PatchImageProcessingConfig changes only the image settings provided.
+type PatchImageProcessingConfig struct {
+	ModelID *string `json:"model_id,omitempty"`
+}
+
+// PatchKnowledgeBase changes the supplied settings and preserves omitted fields.
+func (c *Client) PatchKnowledgeBase(ctx context.Context,
+	knowledgeBaseID string,
+	request *PatchKnowledgeBaseRequest,
+) (*KnowledgeBase, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s", knowledgeBaseID)
+	resp, err := c.doRequest(ctx, http.MethodPatch, path, request, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response KnowledgeBaseResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return &response.Data, nil
+}
+
 // DeleteKnowledgeBase deletes a knowledge base
 func (c *Client) DeleteKnowledgeBase(ctx context.Context, knowledgeBaseID string) error {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s", knowledgeBaseID)
@@ -405,6 +499,16 @@ type SearchParams struct {
 	MatchCount           int     `json:"match_count"`
 	DisableKeywordsMatch bool    `json:"disable_keywords_match"`
 	DisableVectorMatch   bool    `json:"disable_vector_match"`
+	// KnowledgeBaseIDs searches several knowledge bases that share one
+	// embedding model; the path ID must be one of them.
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids,omitempty"`
+	// KnowledgeIDs limits the search to these documents.
+	KnowledgeIDs []string `json:"knowledge_ids,omitempty"`
+	// TagIDs limits the search to these tags.
+	TagIDs []string `json:"tag_ids,omitempty"`
+	// Rerank, when set and enabled, reranks the candidates before cutting to
+	// MatchCount. Nil keeps the raw retrieval order.
+	Rerank *RerankOptions `json:"rerank,omitempty"`
 }
 
 // HybridSearch performs hybrid search.
@@ -415,6 +519,21 @@ func (c *Client) HybridSearch(
 	params *SearchParams,
 	opts ...ResourceURLOptions,
 ) ([]*SearchResult, error) {
+	response, err := c.HybridSearchDetailed(ctx, knowledgeBaseID, params, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return response.Data, nil
+}
+
+// HybridSearchDetailed performs hybrid search and returns the whole
+// response, including the rerank diagnostics in Meta.
+func (c *Client) HybridSearchDetailed(
+	ctx context.Context,
+	knowledgeBaseID string,
+	params *SearchParams,
+	opts ...ResourceURLOptions,
+) (*HybridSearchResponse, error) {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/hybrid-search", knowledgeBaseID)
 
 	queryParams := url.Values{}
@@ -432,7 +551,7 @@ func (c *Client) HybridSearch(
 		return nil, err
 	}
 
-	return response.Data, nil
+	return &response, nil
 }
 
 // TogglePinKnowledgeBase toggles the pin status of a knowledge base.

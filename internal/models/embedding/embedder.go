@@ -2,16 +2,14 @@ package embedding
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/models/imageprep"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
-	// catalog.Resolve answers from the vendor catalog, which is empty until
-	// the vendor packages have run their init. Without this import every row
-	// resolves to the generic vendor — silently, and only in builds that do
-	// not already link the container (leaf tests, future tools).
-	_ "github.com/Tencent/WeKnora/internal/models/vendors"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -36,6 +34,57 @@ type Embedder interface {
 	EmbedderPooler
 }
 
+// Image is one image to embed: its bytes and MIME type.
+type Image = api.EmbedImage
+
+// ErrImagesUnsupported is returned when an embedder is asked for an image
+// vector its model or endpoint cannot produce.
+var ErrImagesUnsupported = errors.New("embedding model does not accept images")
+
+// ImageEmbedder is the image side of an Embedder whose model maps images into
+// the same space as its text vectors, so that a text query can find an image.
+// It is a separate interface because most embedders have no image side; use
+// AsImageEmbedder rather than a type assertion, since every decorator
+// implements it whether or not the model underneath does.
+type ImageEmbedder interface {
+	// AcceptsImages reports whether both the model and its endpoint take
+	// images.
+	AcceptsImages() bool
+	// ImageLimits are the vendor's documented per-image limits. The caller
+	// shrinks or converts an image to fit; an image outside them is refused.
+	ImageLimits() ImageLimits
+	// BatchEmbedImages converts images to vectors comparable with Embed's.
+	BatchEmbedImages(ctx context.Context, images []Image) ([][]float32, error)
+}
+
+// ImageLimits describes what one image may be; see imageprep.Limits.
+type ImageLimits = imageprep.Limits
+
+// AsImageEmbedder returns e's image side when its model accepts images.
+func AsImageEmbedder(e Embedder) (ImageEmbedder, bool) {
+	ie, ok := e.(ImageEmbedder)
+	if !ok || !ie.AcceptsImages() {
+		return nil, false
+	}
+	return ie, true
+}
+
+// imageSide is AsImageEmbedder for decorators, which must fail a call their
+// inner embedder cannot serve.
+func imageSide(e Embedder) (ImageEmbedder, error) {
+	if ie, ok := AsImageEmbedder(e); ok {
+		return ie, nil
+	}
+	return nil, fmt.Errorf("%s: %w", e.GetModelName(), ErrImagesUnsupported)
+}
+
+func imageLimitsOf(e Embedder) ImageLimits {
+	if ie, ok := AsImageEmbedder(e); ok {
+		return ie.ImageLimits()
+	}
+	return ImageLimits{}
+}
+
 type EmbedderPooler interface {
 	BatchEmbedWithPool(ctx context.Context, model Embedder, texts []string) ([][]float32, error)
 }
@@ -56,8 +105,9 @@ type Config struct {
 	Provider                  string            `json:"provider"`
 	// MaxConcurrency caps concurrent background calls to this model; 0 falls
 	// back to the process-wide default (see limiter.GateN).
-	MaxConcurrency int               `json:"max_concurrency"`
-	ExtraConfig    map[string]string `json:"extra_config"`
+	MaxConcurrency int                      `json:"max_concurrency"`
+	Spec           *types.ModelSpecOverride `json:"spec,omitempty"`
+	ExtraConfig    map[string]string        `json:"extra_config"`
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string `json:"custom_headers"`
 	AppID         string
@@ -82,6 +132,7 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) Config {
 		TruncatePromptTokens:      m.Parameters.EmbeddingParameters.TruncatePromptTokens,
 		Provider:                  m.Parameters.Provider,
 		MaxConcurrency:            m.Parameters.MaxConcurrency,
+		Spec:                      m.Parameters.Spec,
 		ExtraConfig:               m.Parameters.ExtraConfig,
 		CustomHeaders:             m.Parameters.CustomHeaders,
 		AppID:                     appID,

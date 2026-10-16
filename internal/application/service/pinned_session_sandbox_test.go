@@ -181,7 +181,7 @@ func TestPinnedSessionSandboxVersionsWorkspaceFalseWhenHostResolved(t *testing.T
 		stubPinReader{},
 		&stubTenantSandboxResolver{mgr: &stubPinnedManager{id: "sbx-1", ok: true}},
 		nil,
-		NewHostSessionResolver(stubPinReader{}, host),
+		NewHostSessionResolver(stubPinReader{}, host, false),
 	)
 
 	require.False(t, access.VersionsWorkspace(context.Background(), "sess-1"))
@@ -212,26 +212,26 @@ func TestPinnedSessionSandboxVersionsWorkspaceFalseWhenManagerTypeIsHost(t *test
 
 func TestHostManagerForReturnsHostWhenSessionHasNoNamedConfig(t *testing.T) {
 	host := stubHostManager{}
-	r := NewHostSessionResolver(stubPinReader{}, host)
+	r := NewHostSessionResolver(stubPinReader{}, host, false)
 
 	require.Equal(t, host, r.HostManagerFor(context.Background(), "s1"))
 }
 
 func TestHostManagerForNilWhenSessionHasNamedConfig(t *testing.T) {
-	r := NewHostSessionResolver(stubPinReader{configID: "cfg-1"}, stubHostManager{})
+	r := NewHostSessionResolver(stubPinReader{configID: "cfg-1"}, stubHostManager{}, false)
 
 	require.Nil(t, r.HostManagerFor(context.Background(), "s1"))
 }
 
 func TestHostManagerForNilWhenHostMissing(t *testing.T) {
-	r := NewHostSessionResolver(stubPinReader{}, nil)
+	r := NewHostSessionResolver(stubPinReader{}, nil, false)
 
 	require.Nil(t, r.HostManagerFor(context.Background(), "s1"))
 }
 
 func TestHostManagerForTreatsGlobalDefaultAsUnnamed(t *testing.T) {
 	host := stubHostManager{}
-	r := NewHostSessionResolver(stubPinReader{configID: types.SandboxConfigIDGlobalDefault}, host)
+	r := NewHostSessionResolver(stubPinReader{configID: types.SandboxConfigIDGlobalDefault}, host, false)
 
 	require.Equal(t, host, r.HostManagerFor(context.Background(), "s1"))
 }

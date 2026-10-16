@@ -9,6 +9,7 @@
               {{ $t('organization.title') }}
             </h2>
             <div class="header-actions" style="--wails-draggable: no-drag">
+              <ResourceSortControl v-model="selectedResourceSort" />
               <t-tooltip :content="canManageOrg ? $t('organization.joinOrg') : noPermissionTip" placement="bottom">
                 <t-button variant="text" theme="default" size="small" class="header-action-btn"
                   style="--wails-draggable: no-drag" :disabled="!canManageOrg" @click="handleJoinOrganization">
@@ -122,7 +123,7 @@
 
             <!-- 卡片内容 -->
             <div class="card-content">
-              <div class="card-description" :title="org.description || $t('organization.noDescription')">
+              <div class="card-description" :class="{ 'is-empty': !org.description }" :title="org.description || $t('organization.noDescription')">
                   {{ org.description || $t('organization.noDescription') }}
               </div>
             </div>
@@ -446,7 +447,14 @@ import OrganizationSettingsModal from './OrganizationSettingsModal.vue'
 import SpaceAvatar from '@/components/SpaceAvatar.vue'
 import ResourceListToolbar from '@/components/ResourceListToolbar.vue'
 import { matchesResourceQuery } from '@/utils/resourceListSearch'
+import ResourceSortControl from '@/components/ResourceSortControl.vue'
 import { shouldShowOrgRelationTag } from '@/utils/card-list-badge'
+import {
+  DEFAULT_RESOURCE_SORT,
+  sortResourcesWithinGroups,
+  type ResourceSortAccessors,
+  type ResourceSortValue,
+} from '@/utils/resourceSorting'
 
 type OrgWithUI = Organization
 
@@ -455,6 +463,13 @@ const route = useRoute()
 const router = useRouter()
 const orgStore = useOrganizationStore()
 const authStore = useAuthStore()
+const selectedResourceSort = ref<ResourceSortValue>(DEFAULT_RESOURCE_SORT)
+
+const organizationSortAccessors: ResourceSortAccessors<OrgWithUI> = {
+  getName: organization => organization.name,
+  getUpdatedAt: organization => organization.updated_at,
+  getCreatedAt: organization => organization.created_at,
+}
 
 // 后端 /api/v1/organizations 下的写操作（创建、加入、申请加入、邀请、审批、改设置等）
 // 在路由层都要求当前空间角色 ≥ admin。前端只用于 UI 渲染，安全边界仍在服务端。
@@ -666,14 +681,20 @@ const createdCount = computed(() => organizations.value.filter(o => o.is_owner).
 const joinedCount = computed(() => organizations.value.filter(o => !o.is_owner).length)
 
 const unsearchedFilteredOrganizations = computed(() => {
-  if (spaceSelection.value === 'created') return organizations.value.filter(o => o.is_owner)
-  if (spaceSelection.value === 'joined') return organizations.value.filter(o => !o.is_owner)
-  // 「全部」视图下把我创建的 owner 排在前面、我加入的排在后面，方便上面的
-  // 分组标题在过渡处一次性打出来——和 KB / Agent 列表口径一致。
-  return [...organizations.value].sort((a, b) => {
-    if (a.is_owner === b.is_owner) return 0
-    return a.is_owner ? -1 : 1
-  })
+  const visibleOrganizations = spaceSelection.value === 'created'
+    ? organizations.value.filter(organization => organization.is_owner)
+    : spaceSelection.value === 'joined'
+      ? organizations.value.filter(organization => !organization.is_owner)
+      : organizations.value
+
+  // 「全部」仍保持“我创建的 → 我加入的”两段，只在各段内部应用用户选择的顺序。
+  return sortResourcesWithinGroups(
+    visibleOrganizations,
+    selectedResourceSort.value,
+    organization => organization.is_owner ? 'created' : 'joined',
+    ['created', 'joined'],
+    organizationSortAccessors,
+  )
 })
 const filteredOrganizations = computed(() => unsearchedFilteredOrganizations.value.filter(item => matchesResourceQuery(item, keyword.value)))
 
@@ -1228,47 +1249,14 @@ watch(keyword, () => { collapsedOrgSections.value = new Set() })
     line-height: 1;
   }
 
-  &.stat-member {
-    background: color-mix(in srgb, var(--td-text-color-secondary) 8%, transparent);
-    color: var(--td-text-color-secondary);
+  &.stat-kb .t-icon { color: var(--td-brand-color); }
 
-    .t-icon {
-      color: var(--td-text-color-secondary);
-    }
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-text-color-secondary) 12%, transparent);
-    }
-  }
-
-  &.stat-kb {
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-secondary);
-
-    .t-icon {
-      color: var(--td-text-color-secondary);
-    }
-
-    &:hover {
-      background: var(--td-bg-color-container-hover);
-    }
-  }
-
-  &.stat-agent {
-    background: color-mix(in srgb, var(--app-accent-purple) 8%, transparent);
-    color: var(--td-brand-color);
-
-    .stat-agent-icon {
-      width: 14px;
-      height: 14px;
-      flex-shrink: 0;
-      /* 将绿色 icon 着色为紫色，与标签统一 */
-      filter: brightness(0) saturate(100%) invert(48%) sepia(79%) saturate(2476%) hue-rotate(236deg);
-    }
-
-    &:hover {
-      background: color-mix(in srgb, var(--app-accent-purple) 12%, transparent);
-    }
+  .stat-agent-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    /* 将绿色 icon 着色为紫色，与智能体能力色一致 */
+    filter: brightness(0) saturate(100%) invert(48%) sepia(79%) saturate(2476%) hue-rotate(236deg);
   }
 }
 

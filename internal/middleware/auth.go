@@ -143,6 +143,16 @@ func Auth(
 			return
 		}
 
+		// In-process dispatch (agent operations): the identity lives on the Go
+		// context, which no inbound request can carry, and is re-validated
+		// against the database exactly like a JWT session.
+		if dispatch, ok := types.InternalDispatchFromContext(c.Request.Context()); ok {
+			if authenticateInternalDispatch(c, tenantService, userService, memberService, cfg, dispatch) {
+				c.Next()
+			}
+			return
+		}
+
 		// 尝试JWT Token认证
 		bearerPresented := false
 		if token, ok := bearerToken(c); ok {
@@ -178,6 +188,34 @@ func Auth(
 		}
 		c.Abort()
 	}
+}
+
+// authenticateInternalDispatch authenticates a request the server dispatched
+// to itself on behalf of a signed-in user. The user is reloaded so a disabled
+// account or revoked membership takes effect immediately, and tenant/role
+// resolution goes through the same path as a JWT session pinned to the
+// dispatch tenant. Credential headers are ignored: the dispatcher never sets
+// them, and honoring them here would let a caller switch identities.
+func authenticateInternalDispatch(
+	c *gin.Context,
+	tenantService interfaces.TenantService,
+	userService interfaces.UserService,
+	memberService interfaces.TenantMemberService,
+	cfg *config.Config,
+	dispatch types.InternalDispatch,
+) bool {
+	ctx := c.Request.Context()
+	user, err := userService.GetUserByID(ctx, dispatch.UserID)
+	if err != nil || user == nil || !user.IsActive {
+		logger.Warnf(ctx, "[auth] internal dispatch rejected: user=%s err=%v", dispatch.UserID, err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: invalid dispatch identity"})
+		c.Abort()
+		return false
+	}
+	c.Request.Header.Del("Authorization")
+	c.Request.Header.Del("X-API-Key")
+	c.Request.Header.Set("X-Tenant-ID", strconv.FormatUint(dispatch.TenantID, 10))
+	return authenticateJWTUser(c, tenantService, memberService, cfg, user, dispatch.TenantID)
 }
 
 // bearerToken extracts the Bearer token from the Authorization header.

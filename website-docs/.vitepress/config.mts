@@ -1,19 +1,34 @@
 import { readFileSync, readdirSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { defineConfig, type DefaultTheme } from 'vitepress'
 import { withMermaid } from 'vitepress-plugin-mermaid'
 import './theme-config.d.ts'
 import { repoVersionLabel } from './version'
+import { readScreenshotSizes } from './screenshot-sizes.mjs'
 
 const root = resolve(import.meta.dirname, '..')
+const require = createRequire(import.meta.url)
 
-const sections: { dir: string; label: string }[] = [
+/** 当前安装能解析到该模块时返回 true。缺失的包不能写进 optimizeDeps.include。 */
+function installedDep(id: string): boolean {
+  try {
+    require.resolve(id)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const sections: { dir: string; label: string; newestFirst?: boolean }[] = [
   { dir: '01-getting-started', label: '快速开始' },
   { dir: '02-architecture', label: '架构' },
   { dir: '03-features', label: '功能模块' },
   { dir: '04-api', label: 'API 参考' },
   { dir: '05-clients', label: '客户端' },
   { dir: '06-development', label: '开发指南' },
+  // 每个版本一页（v0.8.2.md），最新版本排在最前
+  { dir: '07-releases', label: '版本发布', newestFirst: true },
 ]
 
 /** 侧边栏条目文字：取正文一级标题，去掉冗余前后缀 */
@@ -27,10 +42,19 @@ function itemText(dir: string, file: string): string {
     .trim()
 }
 
-function itemsOf(dir: string): DefaultTheme.SidebarItem[] {
-  return readdirSync(resolve(root, dir))
-    .filter((f) => f.endsWith('.md'))
-    .sort()
+/** 版本号按数字比较，v0.10.0 排在 v0.9.0 之后 */
+function compareVersions(a: string, b: string): number {
+  const parts = (f: string) => f.replace(/^v|\.md$/g, '').split('.').map(Number)
+  const [x, y] = [parts(a), parts(b)]
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) - (y[i] ?? 0)
+  }
+  return 0
+}
+
+function itemsOf(dir: string, newestFirst = false): DefaultTheme.SidebarItem[] {
+  const files = readdirSync(resolve(root, dir)).filter((f) => f.endsWith('.md'))
+  return (newestFirst ? files.sort(compareVersions).reverse() : files.sort())
     .map((f) => ({
       text: itemText(dir, f),
       link: `/${dir}/${f.replace(/\.md$/, '')}`,
@@ -40,7 +64,7 @@ function itemsOf(dir: string): DefaultTheme.SidebarItem[] {
 const sidebar: DefaultTheme.SidebarItem[] = sections.map((s) => ({
   text: s.label,
   collapsed: false,
-  items: itemsOf(s.dir),
+  items: itemsOf(s.dir, s.newestFirst),
 }))
 
 /** 本地搜索默认按空白分词，中文整段会被当作一个词，这里退化为字粒度切分 */
@@ -110,6 +134,7 @@ export default withMermaid(
       nav: [],
 
       weknoraVersion: repoVersionLabel,
+      weknoraScreenshotSizes: readScreenshotSizes(resolve(root, 'public/screenshots')),
 
       sidebar,
 
@@ -165,6 +190,16 @@ export default withMermaid(
       footer: {
         message: `基于 WeKnora ${repoVersionLabel} 源码整理 · MIT License`,
         copyright: '© Tencent WeKnora',
+      },
+    },
+
+    // mermaid >= 11.17 会动态 import UMD 包 fastdom。Vite 启动时扫不到这次导入，
+    // 浏览器直接加载原始 fastdom.js，报 does not provide an export named 'default'
+    //（vitepress-plugin-mermaid#98）。只在能解析到这两个包时才预构建：lockfile 里的
+    // mermaid 11.16.0 没有 fastdom，无条件 include 会报 Failed to resolve dependency。
+    vite: {
+      optimizeDeps: {
+        include: ['fastdom', 'fastdom/extensions/fastdom-promised.js'].filter(installedDep),
       },
     },
 

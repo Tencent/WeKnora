@@ -297,6 +297,14 @@ func TestTokenStatusDoesNotTreatExpiredRowAsAuthorized(t *testing.T) {
 	require.Equal(t, oauthStateReauthNeeded, status.State)
 }
 
+func TestTokenStatusReportsExpiryInUTC(t *testing.T) {
+	expiresAt := time.Now().Add(time.Hour).In(time.FixedZone("UTC+9", 9*60*60))
+	status := tokenStatus(&types.MCPOAuthToken{AccessToken: "access", ExpiresAt: expiresAt}, time.Now())
+	require.NotNil(t, status.ExpiresAt)
+	require.True(t, status.ExpiresAt.Equal(expiresAt))
+	require.Equal(t, time.UTC, status.ExpiresAt.Location())
+}
+
 func TestOAuthRuntimeDoesNotExpireNonRefreshableTokenEarly(t *testing.T) {
 	repo := newLockedOAuthRepo()
 	principal := types.Principal{Type: types.PrincipalWebUser, ID: "user-1"}

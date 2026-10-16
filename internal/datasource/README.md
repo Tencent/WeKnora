@@ -234,11 +234,66 @@ GET    /api/v1/datasource/types             # Available connectors
 5. **Multi-tenant**: All operations are tenant-isolated
 6. **Channel Tracking**: Knowledge.Channel field tracks data source type for origin tracking
 
+## Feishu request pacing and rate-limit retries
+
+Feishu export creation, export status polling, export downloads, and Wiki node
+listing each use a separate request budget. Clients using the same API host and
+App ID share these budgets within one backend process, including concurrent data
+sources and task retries. Document tokens, export tickets, and query parameters
+do not create additional budgets.
+
+| Environment variable | Default | Behavior |
+| --- | --- | --- |
+| `FEISHU_API_REQUESTS_PER_MINUTE` | `80` | Positive integer; requests to each paced API are evenly spaced (750 ms by default), without accumulating burst capacity. |
+| `FEISHU_RATE_LIMIT_RETRY_WAIT` | `10s` | Positive Go duration used when the response supplies no valid reset/retry hint. |
+| `FEISHU_RATE_LIMIT_MAX_WAIT` | `5m` | Positive Go duration capping each cooldown, including response-header hints and the fallback. |
+| `FEISHU_EXPORT_MAX_POLLS` | `30` | Positive integer bounding status polls of the same export task; API retries do not consume additional polls. |
+| `FEISHU_EXPORT_POLL_INTERVAL` | `2s` | Positive Go duration between status polls while the export is still processing. |
+
+Invalid values use the defaults. Other Feishu APIs retain their existing request
+frequency, with reactive cooldowns scoped to the HTTP method and normalized API
+path template. Document tokens, table IDs, sheet ranges, and query parameters do
+not split a known API's cooldown. Media downloads, file downloads, docx blocks,
+raw content, bitable fields/record searches, sheet values, folder metadata, Wiki
+space listing, and Wiki node lookup use independent cooldowns. Unknown endpoints
+use their service/version/resource prefix. Check the application's actual API
+quotas before increasing the configured budget.
+
+JSON requests retry HTTP 429 and HTTP 400/200 responses containing Feishu error
+code `99991400`. Downloads retry HTTP 429 and HTTP 400 with that error code.
+The wait is the longer valid value from `x-ogw-ratelimit-reset` and `Retry-After`;
+`Retry-After` also accepts an HTTP date. All hints are clamped to the configured
+maximum so an unreasonable gateway header cannot indefinitely block later syncs.
+Without a valid hint, a rate-limit response imposes a 10-second cooldown by
+default. The three retries add a nominal 30 seconds of cooldown; shared pacing
+or further rate-limit responses from other clients can extend the total wait.
+This replaces the original 2/4/8-second backoff with a shared cooldown scoped
+to the affected API.
+Only callers of the same API share that cooldown. Requests retain the existing
+limit of three retries. Even when retries are exhausted, subsequent documents and other
+clients sharing that API wait for the cooldown. Waiting honors task cancellation.
+Ordinary permission/validation errors still fail immediately, and download error
+bodies retain their existing size bounds.
+
+Export polling uses a bounded number of polls rather than a 60-second wall-clock
+deadline. Shared pacing and cooldown waits therefore do not cause false export
+timeouts or create replacement tasks within the operation. With the defaults,
+an export that remains processing is checked up to 30 times, with 2 seconds
+between polls. The caller's context bounds total elapsed time, including waits
+and retries. Exhausting the poll budget retains the `feishu_timeout` failure
+classification. Tokens are checked again after gate waits; requests needing a
+token refresh rejoin the gate afterwards, so both JSON requests and downloads
+remain paced and honor any cooldown imposed during the refresh.
+
+These budgets are process-local. Multiple backend instances or other applications
+using the same Feishu credentials may still hit the upstream quota; configure
+their combined traffic accordingly.
+
 ## Future Enhancements
 
 1. **Webhook Support**: Real-time push from platforms that support webhooks
 2. **Conflict Resolution**: Advanced merge/conflict strategies for overlapping content
-3. **Rate Limiting**: Per-connector rate limiting and backoff strategies
+3. **Rate Limiting**: Extend request pacing to other connectors and coordinate quotas across backend instances
 4. **Scheduling**: Full cron scheduler with time zone support
 5. **Monitoring**: Metrics, alerting, and sync health dashboards
 6. **Filtering**: User-defined filters for selective syncing (by title, date, tags, etc)

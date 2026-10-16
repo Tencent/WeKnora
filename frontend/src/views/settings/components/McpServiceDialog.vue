@@ -2,7 +2,8 @@
   <SettingDrawer
     :visible="dialogVisible"
     :title="mode === 'add' ? t('mcpServiceDialog.addTitle') : t('mcpServiceDialog.editTitle')"
-    :class="`mcp-drawer mcp-drawer--${formData.transport_type}`"
+    class="mcp-drawer"
+    icon="tools"
     :confirm-loading="submitting"
     :confirm-disabled="metadataBusy || generatingUsage || (step === 1 && !toolsSynced)"
     :confirm-text="t(step === 0 ? 'mcpMetadata.saveNext' : 'common.save')"
@@ -14,25 +15,18 @@
     @confirm="step === 0 ? handleNext() : handleSubmit()"
     @cancel="handleClose"
   >
-    <!--
-      Header icon — 抽屉通过 transport 类型区分连接配置：
-      transport_type 决定图标和容器配色。SSE 绿、HTTP-Streamable 蓝。
-      非 scoped 块 .mcp-drawer--{transport} 注入背景与文字色，currentColor
-      让 t-icon 跟着染色。
-    -->
-    <template #headerIcon>
-      <t-icon :name="transportIcon" />
-    </template>
-
-    <!-- 副标题：transport 类型名 + 启用状态 mini chip -->
+    <!-- 副标题：编辑时显示已保存服务的 transport 与启用状态；新建时还没有状态可展示 -->
     <template #subtitle>
-      <span>{{ transportLabel }}</span>
-      <span
-        class="subtitle-tag"
-        :class="formData.enabled ? 'subtitle-tag--ok' : 'subtitle-tag--muted'"
-      >
-        {{ formData.enabled ? t('mcpSettings.enabled', '已启用') : t('mcpSettings.disabled', '已禁用') }}
-      </span>
+      <template v-if="mode === 'edit'">
+        <span>{{ transportLabel }}</span>
+        <span
+          class="subtitle-tag"
+          :class="formData.enabled ? 'subtitle-tag--ok' : 'subtitle-tag--muted'"
+        >
+          {{ formData.enabled ? t('mcpSettings.enabled', '已启用') : t('mcpSettings.disabled', '已禁用') }}
+        </span>
+      </template>
+      <template v-else>{{ t('mcpServiceDialog.addDesc') }}</template>
     </template>
 
     <template #header-extra>
@@ -198,11 +192,33 @@
           </div>
         </div>
 
-        <!-- OAuth 2.0：零配置（自动发现 + 动态客户端注册），按用户授权 -->
+        <!-- OAuth 2.0：默认零配置（自动发现 + 动态客户端注册），也可填写预注册客户端；按用户授权 -->
         <template v-if="isOAuth">
           <div class="form-item">
             <label class="form-label">{{ t('mcpServiceDialog.oauthScopes', 'Scopes（可选，空格分隔）') }}</label>
             <t-input v-model="oauthScopesText" :placeholder="t('mcpServiceDialog.optional')" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">{{ t('mcpServiceDialog.oauthClientId', 'Client ID（可选）') }}</label>
+            <t-input v-model="formData.auth_config.client_id" :placeholder="t('mcpServiceDialog.optional')" />
+            <p class="form-desc">{{ t('mcpServiceDialog.oauthClientIdDesc', '填写在授权服务器预先注册的客户端；留空则自动进行动态客户端注册。更换 Client ID 时请同时更新 Client Secret。') }}</p>
+          </div>
+          <div class="form-item">
+            <label class="form-label">{{ t('mcpServiceDialog.oauthClientSecret', 'Client Secret（可选）') }}</label>
+            <CredentialResource
+              v-if="mode === 'edit' && currentService?.id"
+              :api="credentialApi"
+              :fields="credentialFields"
+              :meta="credentialMeta"
+            />
+            <t-input
+              v-else
+              v-model="formData.auth_config.client_secret"
+              type="password"
+              :placeholder="t('mcpServiceDialog.optional')"
+            >
+              <template #prefix-icon><t-icon name="lock-on" /></template>
+            </t-input>
           </div>
           <div class="form-item">
             <label class="form-label">{{ t('mcpServiceDialog.oauthAuthorization', '授权状态') }}</label>
@@ -341,16 +357,18 @@
           <div class="form-item">
             <div class="usage-heading">
               <label class="form-label required">{{ t('mcpMetadata.usageInstructions') }}</label>
-              <t-button variant="text" theme="primary" size="small" :loading="generatingUsage"
-                :disabled="!toolsSynced || metadataBusy || submitting" @click="handleGenerateUsage">
-                <template #icon><t-icon name="lightbulb" /></template>
-                {{ t('mcpMetadata.generateUsage') }}
-              </t-button>
+              <t-tooltip :content="t('mcpMetadata.generateHint')" placement="top-right"
+                :overlay-inner-style="{ maxWidth: '300px', whiteSpace: 'normal' }">
+                <t-button variant="text" theme="primary" size="small" :loading="generatingUsage"
+                  :disabled="!toolsSynced || metadataBusy || submitting" @click="handleGenerateUsage">
+                  <template #icon><t-icon name="lightbulb" /></template>
+                  {{ t('mcpMetadata.generateUsage') }}
+                </t-button>
+              </t-tooltip>
             </div>
-            <t-textarea v-model="formData.usage_instructions" :maxlength="16000" :autosize="{ minRows: 3, maxRows: 8 }"
+            <t-textarea v-model="formData.usage_instructions" class="usage-textarea" :maxlength="16000" :autosize="{ minRows: 3, maxRows: 8 }"
               :disabled="generatingUsage || submitting"
               :placeholder="t('mcpMetadata.instructionsPlaceholder')" />
-            <p class="form-desc">{{ t('mcpMetadata.generateHint') }}</p>
           </div>
         </section>
         <McpMetadataPanel v-if="currentService?.id" :key="currentService.id" :service-id="currentService.id"
@@ -445,6 +463,10 @@ const formData = ref({
     // OAuth-only, non-secret config.
     scopes: [] as string[],
     auth_server_metadata_url: '',
+    // Pre-registered OAuth client; empty means dynamic client registration.
+    client_id: '',
+    // Only used in add-mode; in edit-mode the CredentialResource owns it.
+    client_secret: '',
   },
   advanced_config: {
     timeout: 30,
@@ -526,6 +548,8 @@ function applyServerConfig(name: string, cfg: Record<string, unknown>) {
   formData.value.auth_config.api_key = apiKey
   formData.value.auth_config.api_key_header = apiKeyHeader
   formData.value.auth_config.scopes = []
+  formData.value.auth_config.client_id = ''
+  formData.value.auth_config.client_secret = ''
 
   return true
 }
@@ -703,10 +727,6 @@ async function handleRevokeOAuth() {
 
 // Header icon name + transport label, mirrored from McpSettings list cards
 // so the list-card → drawer hand-off stays visually continuous.
-const transportIcon = computed(() => {
-  return formData.value.transport_type === 'http-streamable' ? 'link' : 'cast'
-})
-
 const transportLabel = computed(() => {
   return formData.value.transport_type === 'http-streamable' ? 'HTTP Streamable' : 'SSE'
 })
@@ -715,11 +735,14 @@ const transportLabel = computed(() => {
 // MCP so other resources don't accidentally inherit "API Key" / "Bearer
 // Token" labels via the shared component.
 // The unified credential strategy stores its secret in the api_key field
-// (placed verbatim into the configured header). None / OAuth carry no static
-// secret, so the credential card is only shown for the api_key strategy.
+// (placed verbatim into the configured header). OAuth's only static secret is
+// the optional secret of a pre-registered client; none carries no secret.
 const credentialFields = computed<CredentialFieldDef<McpCredentialField>[]>(() => {
   if (formData.value.auth_config.auth_type === 'api_key') {
     return [{ key: 'api_key', label: t('mcpServiceDialog.credentialValue', '密钥值 / Token') }]
+  }
+  if (isOAuth.value) {
+    return [{ key: 'client_secret', label: t('mcpServiceDialog.oauthClientSecret', 'Client Secret（可选）') }]
   }
   return []
 })
@@ -746,6 +769,7 @@ const credentialApi = computed<CredentialResourceApi<McpCredentialField>>(() => 
 const credentialMeta = computed(() => currentService.value?.credentials ?? {
   api_key: { configured: false },
   token: { configured: false },
+  client_secret: { configured: false },
 })
 
 const rules: Record<string, FormRule[]> = {
@@ -827,7 +851,10 @@ const resetForm = () => {
     transport_type: 'sse',
     url: '',
     headers: [],
-    auth_config: { auth_type: '', api_key: '', api_key_header: '', token: '', scopes: [], auth_server_metadata_url: '' },
+    auth_config: {
+      auth_type: '', api_key: '', api_key_header: '', token: '', scopes: [], auth_server_metadata_url: '',
+      client_id: '', client_secret: '',
+    },
     advanced_config: { timeout: 30, retry_count: 3, retry_delay: 1 },
   }
   formRef.value?.clearValidate()
@@ -875,6 +902,8 @@ watch(
           token: '',
           scopes: service.auth_config?.scopes ? [...service.auth_config.scopes] : [],
           auth_server_metadata_url: service.auth_config?.auth_server_metadata_url || '',
+          client_id: service.auth_config?.client_id || '',
+          client_secret: '',
         },
         advanced_config: {
           timeout: service.advanced_config?.timeout || 30,
@@ -925,6 +954,12 @@ function buildPayload(asCreate: boolean): Partial<MCPService> {
     auth.scopes = formData.value.auth_config.scopes
     if (formData.value.auth_config.auth_server_metadata_url) {
       auth.auth_server_metadata_url = formData.value.auth_config.auth_server_metadata_url
+    }
+    // Always sent so clearing the field returns the service to dynamic
+    // client registration.
+    auth.client_id = formData.value.auth_config.client_id.trim()
+    if (asCreate && formData.value.auth_config.client_secret) {
+      auth.client_secret = formData.value.auth_config.client_secret
     }
   }
   if (asCreate && !isOAuth.value) {
@@ -1013,6 +1048,20 @@ const handleClose = () => {
   gap: 12px;
 
   .form-label { margin-bottom: 0; }
+}
+
+.usage-textarea {
+  :deep(.t-textarea__inner) {
+    font-size: var(--app-text-md);
+    line-height: 1.65;
+    padding: 8px 10px;
+  }
+
+  :deep(.t-textarea__info_wrapper),
+  :deep(.t-textarea__limit) {
+    font-size: var(--app-text-xs);
+    color: var(--td-text-color-placeholder);
+  }
 }
 
 .mcp-steps {
@@ -1416,14 +1465,5 @@ const handleClose = () => {
 
   .setting-drawer__section-title { margin: 0; }
   &:last-child { border-bottom: 0; padding-bottom: 0; }
-}
-.mcp-drawer--sse .setting-drawer__header-icon {
-  background: rgba(17, 128, 83, 0.12);
-  color: #118053;
-}
-
-.mcp-drawer--http-streamable .setting-drawer__header-icon {
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052D9;
 }
 </style>

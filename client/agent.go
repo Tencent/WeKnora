@@ -38,6 +38,7 @@ type AgentQARequest struct {
 	Images           []ImageAttachment `json:"images,omitempty"`             // Attached images for multimodal chat
 	Channel          string            `json:"channel,omitempty"`            // Source channel: "web", "api", "im", etc.
 	QuestionOrigin   *QuestionOrigin   `json:"question_origin,omitempty"`    // Source of a picked suggested question
+	PageContext      *PageContext      `json:"page_context,omitempty"`       // Page the user has open (hint only)
 }
 
 // AgentResponseType defines the type of agent response
@@ -137,9 +138,11 @@ func (c *Client) processAgentSSEStream(reader io.Reader, callback AgentEventCall
 
 		// Empty line indicates the end of an event
 		if line == "" {
-			if dataBuffer != "" {
+			// A bare `data:` frame carries no payload; skip it rather than
+			// failing the stream on an empty JSON document.
+			if data := completeSSEData(dataBuffer); data != "" {
 				var streamResponse AgentStreamResponse
-				if err := json.Unmarshal([]byte(dataBuffer), &streamResponse); err != nil {
+				if err := json.Unmarshal([]byte(data), &streamResponse); err != nil {
 					return fmt.Errorf("failed to parse SSE data: %w", err)
 				}
 
@@ -153,8 +156,8 @@ func (c *Client) processAgentSSEStream(reader io.Reader, callback AgentEventCall
 				if streamResponse.ResponseType == AgentResponseTypeError && streamResponse.Done {
 					return NewSSEStreamError(streamResponse.Content)
 				}
-				dataBuffer = ""
 			}
+			dataBuffer = ""
 			continue
 		}
 
@@ -167,7 +170,7 @@ func (c *Client) processAgentSSEStream(reader io.Reader, callback AgentEventCall
 
 		// Process lines with data: prefix
 		if strings.HasPrefix(line, "data:") {
-			dataBuffer = strings.TrimSpace(line[5:]) // Remove "data:" prefix
+			dataBuffer = appendSSEDataLine(dataBuffer, line)
 		}
 	}
 

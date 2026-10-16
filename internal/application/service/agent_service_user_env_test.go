@@ -85,3 +85,11 @@ func TestAgentServiceSkillEnvCaptureBuiltWithConfigAndDB(t *testing.T) {
 
 	require.NotNil(t, s.skillEnvCapture(&types.AgentConfig{SandboxConfigID: "cfg-1"}))
 }
+
+// Lite agents carry no sandbox config, yet the env resolver reads the host
+// target; capture must write there too.
+func TestAgentServiceSkillEnvCaptureBuiltOnLiteWithoutAConfig(t *testing.T) {
+	s := &agentService{db: &gorm.DB{}, hostDesktop: true}
+
+	require.NotNil(t, s.skillEnvCapture(&types.AgentConfig{}))
+}

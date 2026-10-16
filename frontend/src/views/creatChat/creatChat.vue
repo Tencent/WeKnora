@@ -7,7 +7,7 @@
             <!-- 推荐问题 -->
             <div ref="sqContainerRef" class="suggested-questions-container">
                 <!-- 骨架屏占位 -->
-                <div v-if="sqLoading && suggestedQuestions.length === 0" class="suggested-questions-inner">
+                <div v-if="sqInitialLoad && suggestedQuestions.length === 0" class="suggested-questions-inner">
                     <div class="suggested-questions-title"><t-skeleton animation="gradient"
                             :row-col="[{ width: '120px', height: '14px' }]" /></div>
                     <div class="suggested-questions-grid">
@@ -25,7 +25,7 @@
                                 <span class="suggested-questions-title">{{ $t('chat.suggestedQuestions') }}</span>
                                 <button type="button" class="suggested-questions-refresh" :disabled="sqLoading"
                                     :title="$t('chat.refreshSuggestedQuestions')"
-                                    :aria-label="$t('chat.refreshSuggestedQuestions')" @click="fetchSuggestedQuestions">
+                                    :aria-label="$t('chat.refreshSuggestedQuestions')" @click="fetchSuggestedQuestions(true)">
                                     <t-icon :name="sqLoading ? 'loading' : 'refresh'"
                                         :class="{ 'sq-refresh-spin': sqLoading }" />
                                 </button>
@@ -43,7 +43,22 @@
                     </div>
                 </transition>
             </div>
-            <InputField ref="inputFieldRef" @send-msg="sendMsg"></InputField>
+            <div class="create-chat-composer">
+                <div v-if="hostSandboxEnabled" class="project-dir-bar">
+                    <button type="button" class="project-dir-bar__btn"
+                        :class="{ 'is-bound': !!selectedProjectDir, 'is-picking': pickingProjectDir }"
+                        :disabled="pickingProjectDir" :title="selectedProjectDir || $t('createChat.openProject')"
+                        @click="openProjectDir">
+                        <t-icon :name="pickingProjectDir ? 'loading' : 'folder'" />
+                        <span class="project-dir-bar__name">{{
+                            selectedProjectDir ? projectDirBasename(selectedProjectDir) : $t('createChat.openProject')
+                        }}</span>
+                    </button>
+                    <button v-if="selectedProjectDir" type="button" class="project-dir-bar__clear"
+                        :aria-label="$t('createChat.clearProject')" @click="clearProjectDir">×</button>
+                </div>
+                <InputField ref="inputFieldRef" @send-msg="sendMsg"></InputField>
+            </div>
         </div>
     </div>
 
@@ -59,13 +74,16 @@ import { ref, watch, onMounted, nextTick, computed } from 'vue';
 import ContextualGuide from '@/components/ContextualGuide.vue';
 import InputField from '@/components/Input-field.vue';
 import { createSessions } from "@/api/chat/index";
+import { pickHostProjectDir } from '@/utils/desktopProjectDir';
+import { projectDirBasename, shouldRenderHostProjectSettings, withOptionalProjectDir } from '@/utils/hostWorkspace';
 import { getSuggestedQuestions } from "@/api/agent/index";
 import type { SuggestedQuestion } from "@/api/agent/index";
 import { questionOriginFromSuggestion, type SendMessageOptions } from '@/utils/questionOrigin';
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
-import { useRoute, useRouter } from 'vue-router';
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import KnowledgeBaseEditorModal from '@/views/knowledge/KnowledgeBaseEditorModal.vue';
@@ -75,9 +93,23 @@ const router = useRouter();
 const route = useRoute();
 const usemenuStore = useMenuStore();
 const settingsStore = useSettingsStore();
+onBeforeRouteLeave((to) => {
+    // The first send carries the draft into its new session; abandoning the
+    // composer must not make this a default for the next conversation.
+    if (!to.path.startsWith('/platform/chat/') || !usemenuStore.isFirstSession) {
+        settingsStore.reasoningEffortOverride = '';
+    }
+});
 const uiStore = useUIStore();
+const deploymentCapabilities = useDeploymentCapabilitiesStore();
 const { t } = useI18n();
 const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
+
+const hostSandboxEnabled = computed(() =>
+    shouldRenderHostProjectSettings(deploymentCapabilities.isSupported('settings.sandbox.host')),
+);
+const selectedProjectDir = ref('');
+const pickingProjectDir = ref(false);
 
 const showChatContextualGuide = computed(() => {
     return route.name === 'globalCreatChat' || route.name === 'kbCreatChat';
@@ -86,11 +118,19 @@ const showChatContextualGuide = computed(() => {
 // ===== 推荐问题 =====
 const suggestedQuestions = ref<SuggestedQuestion[]>([]);
 const sqLoading = ref(true);
+// The skeleton reserves space only until the first answer arrives. Later
+// refetches keep the current content in place, so the composer below does not
+// jump each time the agent or @mention selection changes.
+const sqInitialLoad = ref(true);
 const sqCardsRevealed = ref(false);
 const sqRenderKey = ref(0);
 const sqContainerRef = ref<HTMLElement | null>(null);
 let suggestedQuestionsFetchId = 0;
+let lastSuggestedQuestionsKey = '';
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+const sameSuggestedQuestions = (a: SuggestedQuestion[], b: SuggestedQuestion[]) =>
+    a.length === b.length && a.every((item, i) => item.question === b[i].question && item.source === b[i].source);
 
 // --- 高度平滑过渡钩子 ---
 const onBeforeLeave = () => {
@@ -134,26 +174,39 @@ const onQuestionsEntered = () => {
     nextTick(() => { sqCardsRevealed.value = true; });
 };
 
-const fetchSuggestedQuestions = async () => {
+const fetchSuggestedQuestions = async (force = false) => {
+    const agentId = settingsStore.selectedAgentId;
+    const params = settingsStore.getSuggestedQuestionsParams();
+    const requestKey = JSON.stringify([agentId, params]);
+    if (!force && requestKey === lastSuggestedQuestionsKey) return;
+    lastSuggestedQuestionsKey = requestKey;
+
     const fetchId = ++suggestedQuestionsFetchId;
     sqLoading.value = true;
     try {
-        const agentId = settingsStore.selectedAgentId;
-        if (!agentId) return;
-        const res = await getSuggestedQuestions(agentId, settingsStore.getSuggestedQuestionsParams());
+        if (!agentId) {
+            suggestedQuestions.value = [];
+            return;
+        }
+        const res = await getSuggestedQuestions(agentId, params);
         if (fetchId === suggestedQuestionsFetchId) {
-            sqCardsRevealed.value = false;
-            sqRenderKey.value++;
-            suggestedQuestions.value = res?.data?.questions || [];
+            const next = res?.data?.questions || [];
+            if (!sameSuggestedQuestions(suggestedQuestions.value, next)) {
+                sqCardsRevealed.value = false;
+                sqRenderKey.value++;
+                suggestedQuestions.value = next;
+            }
         }
     } catch (err) {
         console.warn('[SuggestedQuestions] Failed to fetch:', err);
         if (fetchId === suggestedQuestionsFetchId) {
+            lastSuggestedQuestionsKey = '';
             suggestedQuestions.value = [];
         }
     } finally {
         if (fetchId === suggestedQuestionsFetchId) {
             sqLoading.value = false;
+            sqInitialLoad.value = false;
         }
     }
 };
@@ -164,21 +217,21 @@ const debouncedFetch = () => {
     debounceTimer = setTimeout(() => { fetchSuggestedQuestions(); }, 300);
 };
 
-// 监听 Agent / 知识库 / 文件 / 标签 / MCP / Skill @mention
+// 监听 Agent / 知识库 / 文件 / 标签 @mention；MCP 与 Skill 不影响推荐范围
 watch(
     () => ({
         agentId: settingsStore.selectedAgentId,
         kbs: settingsStore.settings.selectedKnowledgeBases,
         files: settingsStore.settings.selectedFiles,
         tags: settingsStore.settings.selectedTags,
-        mcps: settingsStore.settings.selectedMCPServices,
-        skills: settingsStore.settings.selectedSkills,
     }),
     debouncedFetch,
     { deep: true },
 );
 
-onMounted(() => { fetchSuggestedQuestions(); });
+onMounted(() => {
+    fetchSuggestedQuestions();
+});
 
 const inputFieldRef = ref();
 
@@ -210,7 +263,7 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
     };
 
     try {
-        const res = await createSessions(sessionData);
+        const res = await createSessions(withOptionalProjectDir(sessionData, selectedProjectDir.value));
         if (res.data && res.data.id) {
             await navigateToSession(res.data.id, value, modelId, mentionedItems, imageFiles, attachmentFiles, options);
         } else {
@@ -244,6 +297,23 @@ const handleKBEditorSuccess = (kbId: string) => {
     navigateToKnowledgeBaseList(kbId)
 }
 
+function clearProjectDir() {
+    selectedProjectDir.value = '';
+}
+
+async function openProjectDir() {
+    if (pickingProjectDir.value) return;
+    pickingProjectDir.value = true;
+    try {
+        const picked = await pickHostProjectDir();
+        if (picked) selectedProjectDir.value = picked;
+    } catch (e: any) {
+        MessagePlugin.error(e?.message || t('createChat.pickFailed'));
+    } finally {
+        pickingProjectDir.value = false;
+    }
+}
+
 </script>
 <style lang="less" scoped>
 .dialogue-wrap {
@@ -266,6 +336,67 @@ const handleKBEditorSuccess = (kbId: string) => {
         position: static;
         transform: translateX(0);
     }
+}
+
+.create-chat-composer {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    width: 100%;
+}
+
+.project-dir-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    max-width: 960px;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+.project-dir-bar__btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    height: 28px;
+    padding: 0 10px;
+    border: 0.5px solid var(--td-component-border);
+    border-radius: var(--app-radius-md);
+    background: var(--td-bg-color-container);
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-sm);
+    cursor: pointer;
+}
+
+.project-dir-bar__btn.is-bound {
+    color: var(--td-text-color-primary);
+}
+
+.project-dir-bar__btn.is-picking,
+.project-dir-bar__btn:disabled {
+    cursor: default;
+    opacity: 0.75;
+}
+
+.project-dir-bar__name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.project-dir-bar__clear {
+    flex: 0 0 auto;
+    border: none;
+    background: transparent;
+    padding: 0 4px;
+    color: var(--td-text-color-placeholder);
+    font-size: var(--app-text-base);
+    line-height: 1;
+    cursor: pointer;
 }
 
 .dialogue-title {

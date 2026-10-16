@@ -69,6 +69,25 @@ func WikiEditSourceFromContext(ctx context.Context) string {
 	return NormalizeWikiEditSource(v)
 }
 
+// WithWikiShrinkAllowed marks ctx so ONE wiki page write may drop table rows
+// the stored page still carries.
+//
+// UpdatePage refuses such a write by default, because a model asked to re-emit
+// a whole page silently returns it with rows missing and the page then shrinks
+// with no trace. Callers that are removing content on purpose — a retraction
+// after a source document was deleted, an exact-text replacement that deletes
+// rows — say so here, and only for the write that does it.
+func WithWikiShrinkAllowed(ctx context.Context) context.Context {
+	return context.WithValue(ctx, WikiShrinkAllowedContextKey, true)
+}
+
+// WikiShrinkAllowedFromContext reports whether ctx was marked with
+// WithWikiShrinkAllowed.
+func WikiShrinkAllowedFromContext(ctx context.Context) bool {
+	v, _ := ctx.Value(WikiShrinkAllowedContextKey).(bool)
+	return v
+}
+
 // WithEmbedQuery marks ctx as embedding a search query rather than content
 // being indexed. Asymmetric retrieval models encode the two sides differently
 // and lose accuracy when a query is embedded as a passage; the embedding
@@ -92,6 +111,8 @@ type TaskInitiator struct {
 	Role       TenantRole `json:"role,omitempty"`
 	APIKeyID   uint64     `json:"api_key_id,omitempty"`
 	APIKeyName string     `json:"api_key_name,omitempty"`
+	// Agent is set when the task was submitted by an agent acting for UserID.
+	Agent *AuditAgentAction `json:"agent,omitempty"`
 }
 
 // AuditAPIKey is the display identity of the API key that initiated work.
@@ -133,6 +154,9 @@ func TaskInitiatorFromContext(ctx context.Context) TaskInitiator {
 		initiator.APIKeyID = scope.KeyID
 		initiator.APIKeyName = scope.Name
 	}
+	if agent, ok := AuditAgentActionFromContext(ctx); ok {
+		initiator.Agent = &agent
+	}
 	userID, ok := UserIDFromContext(ctx)
 	if !ok || IsSyntheticUserID(userID) {
 		return initiator
@@ -154,6 +178,9 @@ func (i TaskInitiator) Apply(ctx context.Context) context.Context {
 	}
 	if i.APIKeyID > 0 || i.APIKeyName != "" {
 		ctx = WithAuditAPIKey(ctx, AuditAPIKey{ID: i.APIKeyID, Name: i.APIKeyName})
+	}
+	if i.Agent != nil {
+		ctx = WithAuditAgentAction(ctx, *i.Agent)
 	}
 	return ctx
 }

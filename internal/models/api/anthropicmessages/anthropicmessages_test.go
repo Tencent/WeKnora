@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,7 +22,7 @@ func newClient(t *testing.T, baseURL string, mutate func(*Config)) *Client {
 			Auth:    api.HeaderAuth("x-api-key", "test-key"),
 			Headers: map[string]string{"anthropic-beta": "test-beta"},
 		},
-		Settings:       catalog.DefaultAnthropicMessages(),
+		Settings:       api.DefaultAnthropicMessages(),
 		ThinkingLevels: api.ThinkingLevelMap{},
 		Reasoning:      true,
 	}
@@ -98,7 +97,7 @@ func TestBuildRequestBody_BudgetThinkingAndTools(t *testing.T) {
 
 func TestBuildRequestBody_AdaptiveEffort(t *testing.T) {
 	c := newClient(t, "https://api.anthropic.com/v1", func(cfg *Config) {
-		cfg.Settings.ThinkingMode = catalog.AnthropicThinkingAdaptive
+		cfg.Settings.ThinkingMode = api.AnthropicThinkingAdaptive
 		cfg.Settings.SupportsEffort = true
 		cfg.ThinkingLevels = api.ThinkingLevelMap{api.ReasoningXHigh: api.StringPtr("max")}
 	})
@@ -113,6 +112,23 @@ func TestBuildRequestBody_AdaptiveEffort(t *testing.T) {
 	assert.Equal(t, map[string]any{"type": "disabled"}, off["thinking"])
 	_, hasEffort := off["output_config"]
 	assert.False(t, hasEffort)
+}
+
+func TestBuildRequestBody_ThinkingOffType(t *testing.T) {
+	c := newClient(t, "https://api.anthropic.com/v1", func(cfg *Config) {
+		cfg.Settings.ThinkingMode = api.AnthropicThinkingAdaptive
+		cfg.Settings.SupportsEffort = true
+		cfg.Settings.ThinkingOffType = "between_tools"
+	})
+	off := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
+		&api.Options{ReasoningEffort: api.ReasoningOff}, false)
+	assert.Equal(t, map[string]any{"type": "between_tools"}, off["thinking"])
+	_, hasEffort := off["output_config"]
+	assert.False(t, hasEffort)
+
+	on := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
+		&api.Options{ReasoningEffort: api.ReasoningHigh}, false)
+	assert.Equal(t, map[string]any{"type": "adaptive"}, on["thinking"])
 }
 
 func TestBuildRequestBody_NoThinkingKeepsSampling(t *testing.T) {
@@ -133,6 +149,7 @@ func TestURLResolution(t *testing.T) {
 		"https://api.anthropic.com":              "https://api.anthropic.com/v1/messages",
 		"https://api.anthropic.com/v1":           "https://api.anthropic.com/v1/messages",
 		"https://api.minimaxi.com/anthropic":     "https://api.minimaxi.com/anthropic/v1/messages",
+		"https://api.minimax.cn/anthropic":       "https://api.minimax.cn/anthropic/v1/messages",
 		"https://open.bigmodel.cn/api/anthropic": "https://open.bigmodel.cn/api/anthropic/v1/messages",
 		"https://proxy.example.com/v1/messages":  "https://proxy.example.com/v1/messages",
 	}

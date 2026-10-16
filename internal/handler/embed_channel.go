@@ -394,7 +394,9 @@ func (h *EmbedChannelHandler) GetEmbedSuggestedQuestions(c *gin.Context) {
 
 func (h *EmbedChannelHandler) CreateEmbedSession(c *gin.Context) {
 	if len(secutils.SystemHMACKey()) == 0 {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "embed session signing key is not configured"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "embed session signing key is not configured: set SYSTEM_SIGNING_KEY on the server",
+		})
 		return
 	}
 	ctx := c.Request.Context()
@@ -544,6 +546,18 @@ func (h *EmbedChannelHandler) EmbedResolveToolApproval(c *gin.Context) {
 		return
 	}
 	h.mcpServiceHandler.ResolveToolApproval(c)
+}
+
+// EmbedResolveAgentPrompt answers a prompt raised in the visitor's session.
+func (h *EmbedChannelHandler) EmbedResolveAgentPrompt(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	if h.mcpServiceHandler == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "agent prompt handler unavailable"})
+		return
+	}
+	h.mcpServiceHandler.ResolveAgentPrompt(c)
 }
 
 type embedWebhookEventRequest struct {
@@ -715,6 +729,7 @@ func patchEmbedChatPayload(body io.Reader, ch *types.EmbedChannel, agentMode boo
 	payload["skill_names"] = []string{}
 	delete(payload, "summary_model_id")
 	delete(payload, "question_origin")
+	delete(payload, "page_context")
 	clientWebSearch := false
 	if v, ok := payload["web_search_enabled"].(bool); ok {
 		clientWebSearch = v

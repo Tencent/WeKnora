@@ -265,6 +265,11 @@ func (f *Fetcher) pinnedDialContext() func(context.Context, string, string) (net
 		if utils.IsSystemProxy(address) || utils.IsSSRFWhitelisted(host) {
 			return (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext(ctx, network, address)
 		}
+		// Whitelist-only mode refuses a non-whitelisted name before the
+		// lookup (#3378).
+		if err := utils.CheckDialWhitelistOnly(host); err != nil {
+			return nil, fmt.Errorf("connection blocked: %w", err)
+		}
 		ips, err := f.resolveIPs(ctx, host)
 		if err != nil {
 			return nil, fmt.Errorf("DNS resolution failed for %s: %w", host, err)
@@ -304,6 +309,11 @@ func (f *Fetcher) resolvePinnedTarget(ctx context.Context, rawURL string) (pinne
 		if parsedURL.Scheme == "http" {
 			port = "80"
 		}
+	}
+	// Whitelist-only mode refuses a host outside the whitelist before the
+	// lookup (#3378); a whitelisted one is still resolved to pin the render.
+	if err := utils.CheckSSRFWhitelistOnly(parsedURL.Hostname()); err != nil {
+		return pinnedTarget{}, newFetchError(ErrorSSRFRejected, false, "%w", err)
 	}
 	ips, err := f.resolveIPs(ctx, parsedURL.Hostname())
 	if err != nil {

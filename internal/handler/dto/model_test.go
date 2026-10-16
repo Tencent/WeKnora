@@ -3,10 +3,12 @@ package dto
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/catalog"
+	"github.com/Tencent/WeKnora/internal/models/providers"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -122,12 +124,12 @@ func TestModelResponse_ViewerStripsIntegrationDetail(t *testing.T) {
 func registerSecretExtraVendor(t *testing.T) string {
 	t.Helper()
 	id := "dto-secret-extra-vendor"
-	catalog.Register(&catalog.Vendor{
+	modelruntime.Register(&providers.Definition{
 		ID:          id,
 		Name:        "Secret Extra Vendor",
 		ModelTypes:  []types.ModelType{types.ModelTypeRerank},
 		URLPatterns: []string{"secret-extra-vendor.example.com"},
-		ExtraFields: []catalog.ExtraField{
+		ExtraFields: []providers.ExtraField{
 			{Key: "secret_key", Label: "Secret Key", Type: "password", Secret: true},
 			{Key: "region", Label: "Region", Type: "string"},
 		},
@@ -336,5 +338,40 @@ func TestNewModelResponseStripsSpecFromNonAdmins(t *testing.T) {
 	// The stored model is shared; stripping must not mutate it.
 	if model.Parameters.Spec == nil {
 		t.Errorf("NewModelResponse must not clear the stored spec")
+	}
+}
+
+func TestNewModelResponseReportsEmbeddingInputModalities(t *testing.T) {
+	// Whether an embedding model maps images into the same space as text is
+	// what decides if a knowledge base can store image vectors. The catalog
+	// knows it for listed models; a row can declare it through spec.input.
+	declare := func(input ...string) *types.ModelSpecOverride { return &types.ModelSpecOverride{Input: input} }
+	embedding := func(provider, name string, spec *types.ModelSpecOverride) *types.Model {
+		return &types.Model{
+			ID: "e1", Name: name, Type: types.ModelTypeEmbedding, Source: types.ModelSourceRemote,
+			Parameters: types.ModelParameters{Provider: provider, Spec: spec},
+		}
+	}
+	viewer := context.WithValue(context.Background(), types.TenantRoleContextKey, types.TenantRoleViewer)
+	cases := []struct {
+		name  string
+		model *types.Model
+		image bool
+	}{
+		{"catalog multimodal", embedding("volcengine", "doubao-embedding-vision-251215", nil), true},
+		{"catalog pattern", embedding("aliyun", "qwen3-vl-embedding", nil), true},
+		{"catalog text only", embedding("openai", "text-embedding-3-small", nil), false},
+		{"row declares image", embedding("openai", "my-clip", declare("text", "image")), true},
+		{"row narrows catalog", embedding("jina", "jina-embeddings-v4", declare("text")), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// A viewer never sees spec, but the capability it implies is
+			// not configuration and stays visible.
+			caps := NewModelResponse(viewer, tc.model).Capabilities
+			require.NotNil(t, caps)
+			assert.Equal(t, tc.image, slices.Contains(caps.Input, "image"), "input=%v", caps.Input)
+			assert.Empty(t, caps.ThinkingLevels, "an embedding model does not think")
+		})
 	}
 }

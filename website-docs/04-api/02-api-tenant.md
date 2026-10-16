@@ -90,7 +90,7 @@ curl -X PUT $BASE/api/v1/tenants/1 -H "Authorization: Bearer $TOKEN" \
 
 ### DELETE /api/v1/tenants/:id
 
-用途：删除空间。权限：Owner；平台 key 需 `system_tenants_manage`。Handler: `internal/handler/tenant.go`
+用途：删除空间。权限：Owner；平台 key 需 `system_tenants_manage`。空间记录与全部成员关系被软删除，成员随即失去访问；空间内的知识库、模型等数据不会被立即物理清除，已删除空间排队中的 Wiki 任务不再调用模型。Handler: `internal/handler/tenant.go`
 
 响应：200 `{"success":true,"message":"Workspace deleted successfully"}`
 
@@ -100,7 +100,9 @@ curl -X DELETE $BASE/api/v1/tenants/1 -H "Authorization: Bearer $TOKEN"
 
 ## 空间 KV 配置
 
-`:key` 为配置键而非空间 ID（空间取自认证上下文），可选值：`web-search-config`、`prompt-templates`、`parser-engine-config`、`storage-engine-config`、`chat-history-config`、`retrieval-config`、`memory-config`。
+`:key` 为配置键而非空间 ID（空间取自认证上下文），可选值：`web-search-config`、`prompt-templates`、`parser-engine-config`、`storage-engine-config`、`chat-history-config`、`retrieval-config`、`memory-config`、`assistant-config`。
+
+`assistant-config` 是 WeKnora 助手的空间设置：`display_name`（界面上的助手名称，最多 24 字，空表示默认名称）和 `max_access_level`（成员可选的最高权限等级：`read_only` 只读、`confirm` 修改前确认、`auto_write` 可恢复的修改直接执行，删除类仍需确认；默认 `confirm`）。成员在对话请求里用 `assistant_access` 选择自己的等级，服务端按空间上限截断。
 
 ### GET /api/v1/tenants/kv/:key
 
@@ -382,4 +384,4 @@ curl $BASE/api/v1/knowledge-bases/kb-1/activity -H "Authorization: Bearer $TOKEN
 
 ## 实现参考
 
-路由注册：`internal/router/router.go` 的 `RegisterTenantRoutes`。Handler：`internal/handler/tenant.go`、`internal/handler/tenant_member.go`、`internal/handler/tenant_invitation.go`、`internal/handler/tenant_invite_link.go`、`internal/handler/audit_log.go`。
+路由注册：`internal/router/routes_auth_tenant.go` 的 `RegisterTenantRoutes`。Handler：`internal/handler/tenant.go`、`internal/handler/tenant_member.go`、`internal/handler/tenant_invitation.go`、`internal/handler/tenant_invite_link.go`、`internal/handler/audit_log.go`。

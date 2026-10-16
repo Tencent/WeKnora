@@ -65,9 +65,11 @@ test('offers rewind on user and assistant messages unless outgoing work or an in
   const messages = [
     { id: 'u1', role: 'user' },
     { id: 'a1', role: 'assistant', is_completed: true },
+    { id: 'u2', role: 'user' },
   ]
   assert.equal(resolveRewindAffordance(messages, 'u1').canRewind, true)
   assert.equal(resolveRewindAffordance(messages, 'a1').canRewind, true)
+  assert.equal(resolveRewindAffordance(messages, 'u2').canRewind, true)
   assert.equal(resolveRewindAffordance(messages, 'u1', { embeddedMode: true }).canRewind, false)
   assert.equal(resolveRewindAffordance(messages, 'u1', { outgoingWork: true }).canRewind, false)
   assert.equal(
@@ -96,10 +98,11 @@ test('resolves every rewindable id in a single pass', () => {
   const messages = [
     { id: 'u1', role: 'user' },
     { id: 'a1', role: 'assistant', is_completed: true },
+    { id: 'u2', role: 'user' },
     { id: 'sys', role: 'system' },
     { id: '', role: 'user' },
   ]
-  assert.deepEqual([...rewindableMessageIds(messages)], ['u1', 'a1'])
+  assert.deepEqual([...rewindableMessageIds(messages)], ['u1', 'a1', 'u2'])
   assert.deepEqual([...rewindableMessageIds(messages, { embeddedMode: true })], [])
   assert.deepEqual([...rewindableMessageIds(messages, { outgoingWork: true })], [])
   assert.deepEqual(
@@ -107,4 +110,15 @@ test('resolves every rewindable id in a single pass', () => {
     [],
     'an unfinished turn withdraws the control from the whole transcript',
   )
+})
+
+test('withholds rewind from the newest assistant answer', () => {
+  const messages = [
+    { id: 'u1', role: 'user' },
+    { id: 'a1', role: 'assistant', is_completed: true },
+    { id: 'u2', role: 'user' },
+    { id: 'a2', role: 'assistant', is_completed: true },
+    { id: 'sys', role: 'system' },
+  ]
+  assert.deepEqual([...rewindableMessageIds(messages)], ['u1', 'a1', 'u2'])
 })

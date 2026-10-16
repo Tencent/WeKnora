@@ -12,10 +12,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/api/openaichataudio"
 	"github.com/Tencent/WeKnora/internal/models/api/openaitranscriptions"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
-	// catalog.Resolve answers from the vendor catalog, which is empty until
-	// the vendor packages have run their init.
-	_ "github.com/Tencent/WeKnora/internal/models/vendors"
+	"github.com/Tencent/WeKnora/internal/models/providers"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -36,12 +34,13 @@ func newASR(config *Config) (ASR, error) {
 	if strings.TrimSpace(config.ModelName) == "" {
 		return nil, fmt.Errorf("model name is required")
 	}
-	resolved, err := catalog.Resolve(catalog.Ref{
+	resolved, err := modelruntime.Resolve(modelruntime.Ref{
 		Provider:  config.Provider,
 		Model:     config.ModelName,
 		BaseURL:   config.BaseURL,
 		ModelType: types.ModelTypeASR,
 		Extra:     config.ExtraConfig,
+		Override:  config.Spec,
 	})
 	if err != nil {
 		return nil, err
@@ -55,12 +54,13 @@ func newASR(config *Config) (ASR, error) {
 		if strings.TrimSpace(config.Provider) != "" {
 			return nil, fmt.Errorf("%s does not offer speech recognition in this build", resolved.Vendor.Name)
 		}
-		resolved, err = catalog.Resolve(catalog.Ref{
-			Provider:  catalog.GenericID,
+		resolved, err = modelruntime.Resolve(modelruntime.Ref{
+			Provider:  providers.GenericID,
 			Model:     config.ModelName,
 			BaseURL:   config.BaseURL,
 			ModelType: types.ModelTypeASR,
 			Extra:     config.ExtraConfig,
+			Override:  config.Spec,
 		})
 		if err != nil {
 			return nil, err
@@ -71,42 +71,22 @@ func newASR(config *Config) (ASR, error) {
 	}
 
 	vendor := resolved.Vendor
-	creds := catalog.Credentials{APIKey: config.APIKey}
-	if creds.APIKey == "" {
-		creds.APIKey = vendor.DefaultAPIKey
+	endpoint, err := resolved.Endpoint(types.ModelTypeASR, modelruntime.Connection{
+		ModelID:     config.ModelID,
+		Credentials: api.Credentials{APIKey: config.APIKey},
+		Headers:     config.CustomHeaders,
+		Extra:       config.ExtraConfig,
+		Client:      newASRHTTPClient(time.Duration(resolved.Transcriptions.RequestTimeout) * time.Second),
+	})
+	if err != nil {
+		return nil, err
 	}
-	// Vendor headers first so a user header cannot silently replace a vendor
-	// beta flag, matching chat.NewRemoteChat.
-	headers := make(map[string]string, len(vendor.Headers)+len(config.CustomHeaders))
-	for k, v := range vendor.Headers {
-		headers[k] = v
-	}
-	for k, v := range config.CustomHeaders {
-		headers[k] = v
-	}
-	settings := resolved.Transcriptions
-	endpoint := api.Endpoint{
-		BaseURL: resolved.BaseURL,
-		Model:   resolved.RemoteModel,
-		ModelID: config.ModelID,
-		Auth:    vendor.AuthFunc(vendor.API, creds),
-		Headers: headers,
-		Client:  newASRHTTPClient(time.Duration(settings.RequestTimeout) * time.Second),
-	}
-	if vendor.Endpoint != nil {
-		if url, query := vendor.Endpoint(catalog.EndpointRequest{
-			BaseURL:   resolved.BaseURL,
-			Model:     resolved.RemoteModel,
-			ModelType: types.ModelTypeASR,
-			API:       vendor.API,
-			Extra:     config.ExtraConfig,
-		}); url != "" {
-			if err := validateASRBaseURL(url); err != nil {
-				return nil, err
-			}
-			endpoint.URL, endpoint.Query = url, query
+	if endpoint.URL != "" {
+		if err := validateASRBaseURL(endpoint.URL); err != nil {
+			return nil, err
 		}
 	}
+	settings := resolved.Transcriptions
 
 	var client api.Transcriber
 	switch resolved.TranscriptionAPI {
@@ -136,7 +116,7 @@ func newASR(config *Config) (ASR, error) {
 // upload the vendor has documented it will not take, before sending it.
 type protocolASR struct {
 	inner     api.Transcriber
-	settings  catalog.TranscriptionsSettings
+	settings  api.TranscriptionsSettings
 	vendor    string
 	endpoint  string
 	modelName string

@@ -8,14 +8,21 @@ import knowledgeIcon from '@/assets/img/zhishiku.svg'
 import agentIcon from '@/assets/img/agent.svg'
 import artifactIcon from '@/assets/img/artifact.svg'
 import organizationIcon from '@/assets/img/organization.svg'
+import toolboxIcon from '@/assets/img/toolbox.svg'
 
 const props = withDefaults(defineProps<{
-  type: 'knowledge' | 'agent' | 'artifact' | 'organization'
+  type: 'knowledge' | 'agent' | 'artifact' | 'organization' | 'toolbox'
   size?: number
 }>(), { size: 20 })
 
 // Reuse the navigation assets while inheriting the surrounding theme color.
-const icons = { knowledge: knowledgeIcon, agent: agentIcon, artifact: artifactIcon, organization: organizationIcon }
+const icons = {
+  knowledge: knowledgeIcon,
+  agent: agentIcon,
+  artifact: artifactIcon,
+  organization: organizationIcon,
+  toolbox: toolboxIcon,
+}
 const iconStyle = computed(() => ({
   width: `${props.size}px`,
   height: `${props.size}px`,

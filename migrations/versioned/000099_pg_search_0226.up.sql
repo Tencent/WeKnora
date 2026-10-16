@@ -21,6 +21,15 @@ BEGIN
         SELECT 1 FROM pg_available_extension_versions
         WHERE name = 'pg_search' AND version = '0.22.6'
     ) THEN
+        -- Newer images only ship the latest install script; 000115 upgrades
+        -- them directly. Updating the catalog to 0.22.6 there would mismatch
+        -- the shared library.
+        IF EXISTS (
+            SELECT 1 FROM pg_available_extension_versions
+            WHERE name = 'pg_search' AND version = '0.25.11'
+        ) THEN
+            RETURN;
+        END IF;
         RAISE NOTICE 'pg_search 0.22.6 is not available; update the server image and run ALTER EXTENSION pg_search UPDATE TO ''0.22.6'' manually';
         RETURN;
     END IF;

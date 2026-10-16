@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	_ "github.com/Tencent/WeKnora/internal/models/vendors"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 

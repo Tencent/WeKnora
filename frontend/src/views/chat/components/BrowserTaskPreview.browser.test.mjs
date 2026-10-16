@@ -30,17 +30,18 @@ test('human handoff expands, stays reachable on narrow screens, focuses the brow
           export async function get() { return {data:{...window.fixtureStatus}} }
           export async function post(_, {action}) {
             window.fixtureActions.push(action);
-            return {data: action === 'preview' ? {image_base64:'',format:'jpeg'} : {...window.fixtureStatus}};
+            return {data: action === 'preview' ? {image_base64:window.fixtureFrame || '',format:'png'} : {...window.fixtureStatus}};
           }`
         if (id === '\0/fixture-entry.js') return `
           import {createApp} from 'vue'; import {createPinia} from 'pinia';
           import {createI18n} from 'vue-i18n'; import TDesign from 'tdesign-vue-next';
+          import {createRouter, createMemoryHistory} from 'vue-router';
           import 'tdesign-vue-next/es/style/index.css';
           import Preview from '/src/views/chat/components/BrowserTaskPreview.vue';
           import zh from '/src/i18n/locales/zh-CN.ts';
           window.fixtureActions=[];
           window.fixtureStatus={enabled:true,selected:true,connected:true,task_id:'fixture',needs_help:false};
-          createApp(Preview,{sessionId:'fixture'}).use(createPinia()).use(TDesign).use(createI18n({legacy:false,locale:'zh-CN',messages:{'zh-CN':zh}})).mount('#app');`
+          createApp(Preview,{sessionId:'fixture'}).use(createPinia()).use(createRouter({history:createMemoryHistory(),routes:[{path:'/:p(.*)*',component:{render:()=>null}}]})).use(TDesign).use(createI18n({legacy:false,locale:'zh-CN',messages:{'zh-CN':zh}})).mount('#app');`
       },
     }], resolve: {alias: {'@': root+'/src'}}, server: {host:'127.0.0.1',port:0},
   })
@@ -55,7 +56,23 @@ test('human handoff expands, stays reachable on narrow screens, focuses the brow
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/fixture`)
     const card = page.locator('.browser-task-preview')
     await card.waitFor()
-    assert.equal(Math.round((await card.boundingBox()).width),240)
+    assert.equal(Math.round((await card.boundingBox()).width),320)
+    // A new frame can change aspect ratio when the source browser is resized.
+    for (const [width, height] of [[1200, 600], [600, 900]]) {
+      await page.evaluate(([width, height]) => {
+        const canvas = document.createElement('canvas')
+        canvas.width = width; canvas.height = height
+        window.fixtureFrame = canvas.toDataURL('image/png').split(',')[1]
+      }, [width, height])
+      await page.waitForFunction(([width, height]) => {
+        const image = document.querySelector('.preview-image img')
+        return image?.naturalWidth === width && image?.naturalHeight === height
+      }, [width, height])
+      const image = await page.locator('.preview-image img').boundingBox()
+      const frame = await page.locator('.preview-image').boundingBox()
+      assert.ok(Math.abs(image.width / image.height - width / height) < 0.01, 'preserve source aspect ratio')
+      assert.ok(Math.abs(frame.height - image.height) <= 2, 'frame follows image without a fixed-height gap')
+    }
     await page.evaluate(() => {
       window.fixtureStatus.needs_help=true
       window.fixtureStatus.help_prompt='请在浏览器中扫码登录，完成后确认。'.repeat(18)
@@ -80,6 +97,6 @@ test('human handoff expands, stays reachable on narrow screens, focuses the brow
     await page.evaluate(() => { window.fixtureStatus.needs_help=false; window.fixtureStatus.help_prompt='' })
     await page.waitForFunction(() => !document.querySelector('.needs-help'))
     assert.equal(await page.locator('.preview-handoff').count(),0)
-    assert.equal(Math.round((await card.boundingBox()).width),200)
+    assert.equal(Math.round((await card.boundingBox()).width),280)
   } finally { await browser?.close(); await server.close() }
 })

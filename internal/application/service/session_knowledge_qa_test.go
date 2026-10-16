@@ -85,6 +85,10 @@ func (s *stubModelService) CreateModel(context.Context, *types.Model) error {
 	return nil
 }
 
+func (s *stubModelService) CopyModel(context.Context, string, string) (*types.Model, error) {
+	return nil, nil
+}
+
 func (s *stubModelService) GetModelByID(_ context.Context, id string) (*types.Model, error) {
 	return s.modelsByID[id], nil
 }

@@ -12,6 +12,7 @@ export const DEPLOYMENT_CAPABILITY_KEYS = [
   'settings.sandbox',
   'settings.sandbox.docker',
   'settings.sandbox.host',
+  'settings.sandbox.remote',
 ] as const
 
 export type DeploymentCapabilityKey = typeof DEPLOYMENT_CAPABILITY_KEYS[number]
@@ -43,7 +44,12 @@ export function isDeploymentCapabilitySupported(
   // missing or failed capability probes must not leave the picker visible.
   // Host sandbox is Lite-desktop-only; keep the same fail-closed gate so a
   // missed probe does not show the new-session open-project UI on other deployments.
-  if (key === 'settings.sandbox.docker' || key === 'settings.sandbox.host') {
+  // Remote sandbox is unavailable on Lite desktop; fail closed like docker/host.
+  if (
+    key === 'settings.sandbox.docker'
+    || key === 'settings.sandbox.host'
+    || key === 'settings.sandbox.remote'
+  ) {
     return capabilities[key]?.supported === true
   }
   return capabilities[key]?.supported !== false
@@ -53,7 +59,7 @@ export const SETTINGS_SECTION_CAPABILITY: Partial<Record<string, DeploymentCapab
   websearch: 'settings.websearch',
   vectorstore: 'settings.vectorstore',
   storage: 'settings.storage',
-  sandbox: 'settings.sandbox',
+  sandbox: 'settings.sandbox.remote',
   // Skills are baked into a sandbox image. Hide the catalog when the
   // deployment has no sandbox support, same as personal skill credentials.
   skills: 'settings.sandbox',
@@ -62,4 +68,14 @@ export const SETTINGS_SECTION_CAPABILITY: Partial<Record<string, DeploymentCapab
   // nowhere to inject them, so the page would only ever show its empty state.
   envvars: 'settings.sandbox',
   mcp: 'settings.mcp',
+}
+
+/**
+ * Skills and skill credentials need somewhere to run: a remote sandbox, or
+ * Lite's host sandbox.
+ */
+export function skillSettingsSupported(capabilities: DeploymentCapabilityMap): boolean {
+  if (capabilities['settings.sandbox']?.supported === false) return false
+  return capabilities['settings.sandbox.remote']?.supported === true
+    || capabilities['settings.sandbox.host']?.supported === true
 }

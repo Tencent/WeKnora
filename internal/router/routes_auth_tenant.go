@@ -288,10 +288,18 @@ func RegisterSystemAdminRoutes(
 	// the guard, so adding new endpoints can't accidentally drop the gate.
 	adminRoutes := r.Group("/system/admin", g.SystemAdmin())
 	{
+		// Catalog mutation is reserved to authenticated system-admin users.
+		// API keys remain default-denied by the API-key gate.
+		adminRoutes.GET("/model-catalog", handler.GetModelCatalog)
+		adminRoutes.POST("/model-catalog/preview", handler.PreviewModelCatalog)
+		adminRoutes.PUT("/model-catalog", handler.PublishModelCatalog)
+
 		// P0: SystemAdmin role management
 		adminRoutes.POST("/promote", handler.PromoteUserToSystemAdmin)
 		adminRoutes.POST("/revoke", handler.RevokeSystemAdmin)
 		adminRoutes.GET("/list", handler.ListSystemAdmins)
+		adminRoutes.GET("/users", handler.ListUsers)
+		adminRoutes.POST("/users/status", handler.SetUserStatus)
 		adminRoutes.POST("/users/reset-password", handler.ResetUserPassword)
 		adminRoutes.POST("/users/create", handler.CreateSystemUser)
 		adminRoutes.GET("/api-keys", handler.ListPlatformAPIKeys)

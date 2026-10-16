@@ -1,115 +1,146 @@
 <template>
   <div class="retrieval-settings">
-    <div class="section-header">
-      <h2>{{ t('retrievalSettings.title') }}</h2>
-      <p class="section-description">{{ t('retrievalSettings.description') }}</p>
+    <h2 class="settings-title">{{ t('retrievalSettings.title') }}</h2>
+    <div class="settings-tabs" role="tablist" :aria-label="t('retrievalSettings.title')">
+      <button v-for="(tab, index) in tabs" :id="`retrieval-tab-${tab.key}`" :key="tab.key"
+        type="button" class="settings-tab" :class="{ 'is-active': activeTab === tab.key }"
+        role="tab" :aria-selected="activeTab === tab.key" :aria-controls="`retrieval-panel-${tab.key}`"
+        :tabindex="activeTab === tab.key ? 0 : -1" @click="activeTab = tab.key"
+        @keydown.right.prevent="moveTab(index, 1, $event)" @keydown.left.prevent="moveTab(index, -1, $event)">
+        {{ tab.label }}
+      </button>
     </div>
-
-    <div class="settings-group">
-      <!-- Rerank Model -->
-      <div class="setting-item">
-        <div class="setting-label">
-          <span>{{ t('retrievalSettings.rerankModelLabel') }} <span class="required-mark">*</span></span>
-        </div>
-        <p class="setting-desc">{{ t('retrievalSettings.rerankModelDescription') }}</p>
-        <p v-if="!localConfig.rerank_model_id" class="setting-desc warning-text">
-          {{ t('retrievalSettings.rerankModelRequired') }}
-        </p>
-        <div class="setting-control-full">
-          <ModelSelector
-            model-type="Rerank"
-            :selected-model-id="localConfig.rerank_model_id"
+    <div v-show="activeTab === 'recall'" id="retrieval-panel-recall" role="tabpanel" aria-labelledby="retrieval-tab-recall">
+      <div class="settings-group">
+        <!-- Embedding Top K -->
+        <div class="setting-item">
+          <div class="setting-label-row">
+            <span>{{ t('retrievalSettings.embeddingTopKLabel') }}</span>
+            <span class="value-display">{{ localConfig.embedding_top_k }}</span>
+          </div>
+          <t-slider
+            v-model="localConfig.embedding_top_k"
+            :min="1"
+            :max="100"
+            :step="1"
             :disabled="!canEdit"
-            @update:selected-model-id="handleModelChange"
+            @change="handleParamChange"
+          />
+        </div>
+
+        <!-- Vector Threshold -->
+        <div class="setting-item">
+          <div class="setting-label-row">
+            <span>{{ t('retrievalSettings.vectorThresholdLabel') }}</span>
+            <span class="value-display">{{ localConfig.vector_threshold.toFixed(2) }}</span>
+          </div>
+          <t-slider
+            v-model="localConfig.vector_threshold"
+            :min="0"
+            :max="1"
+            :step="0.05"
+            :disabled="!canEdit"
+            @change="handleParamChange"
+          />
+        </div>
+
+        <!-- Keyword Threshold -->
+        <div class="setting-item">
+          <div class="setting-label-row">
+            <span>{{ t('retrievalSettings.keywordThresholdLabel') }}</span>
+            <span class="value-display">{{ localConfig.keyword_threshold.toFixed(2) }}</span>
+          </div>
+          <t-slider
+            v-model="localConfig.keyword_threshold"
+            :min="0"
+            :max="1"
+            :step="0.05"
+            :disabled="!canEdit"
+            @change="handleParamChange"
           />
         </div>
       </div>
-
-      <!-- Embedding Top K -->
-      <div class="setting-item">
-        <div class="setting-label-row">
-          <span>{{ t('retrievalSettings.embeddingTopKLabel') }}</span>
-          <span class="value-display">{{ localConfig.embedding_top_k }}</span>
+    </div>
+    <div v-show="activeTab === 'rrf'" id="retrieval-panel-rrf" role="tabpanel" aria-labelledby="retrieval-tab-rrf">
+      <div class="settings-group rrf-settings">
+        <div v-for="field in rrfFields" :key="field.key" class="rrf-row">
+          <div class="rrf-label">
+            <label :for="field.key">{{ field.label }}</label>
+            <t-tooltip :content="field.description" placement="top" :overlay-style="{ maxWidth: '280px' }">
+              <button type="button" class="rrf-help" :aria-label="field.description">
+                <t-icon name="help-circle" size="14px" />
+              </button>
+            </t-tooltip>
+          </div>
+          <t-input-number
+            theme="column"
+            :value="localConfig[field.key] ?? field.defaultValue"
+            :min="0" :step="field.step" :decimal-places="field.key === 'rrf_k' ? 0 : undefined"
+            :disabled="!canEdit" :input-props="{ id: field.key, 'aria-label': field.label }"
+            @change="handleRrfChange(field.key, $event)"
+          />
         </div>
-        <t-slider
-          v-model="localConfig.embedding_top_k"
-          :min="1"
-          :max="100"
-          :step="1"
-          :disabled="!canEdit"
-          @change="handleParamChange"
-        />
       </div>
-
-      <!-- Vector Threshold -->
-      <div class="setting-item">
-        <div class="setting-label-row">
-          <span>{{ t('retrievalSettings.vectorThresholdLabel') }}</span>
-          <span class="value-display">{{ localConfig.vector_threshold.toFixed(2) }}</span>
+    </div>
+    <div v-show="activeTab === 'rerank'" id="retrieval-panel-rerank" role="tabpanel" aria-labelledby="retrieval-tab-rerank">
+      <div class="settings-group">
+        <!-- Rerank Model -->
+        <div class="setting-item">
+          <div class="setting-label">
+            <span>{{ t('retrievalSettings.rerankModelLabel') }} <span class="required-mark">*</span></span>
+          </div>
+          <p class="setting-desc">{{ t('retrievalSettings.rerankModelDescription') }}</p>
+          <p v-if="!localConfig.rerank_model_id" class="setting-desc warning-text">
+            {{ t('retrievalSettings.rerankModelRequired') }}
+          </p>
+          <div class="setting-control-full">
+            <ModelSelector
+              model-type="Rerank"
+              :selected-model-id="localConfig.rerank_model_id"
+              :disabled="!canEdit"
+              @update:selected-model-id="handleModelChange"
+            />
+          </div>
         </div>
-        <t-slider
-          v-model="localConfig.vector_threshold"
-          :min="0"
-          :max="1"
-          :step="0.05"
-          :disabled="!canEdit"
-          @change="handleParamChange"
-        />
-      </div>
 
-      <!-- Keyword Threshold -->
-      <div class="setting-item">
-        <div class="setting-label-row">
-          <span>{{ t('retrievalSettings.keywordThresholdLabel') }}</span>
-          <span class="value-display">{{ localConfig.keyword_threshold.toFixed(2) }}</span>
+        <!-- Rerank Top K -->
+        <div class="setting-item">
+          <div class="setting-label-row">
+            <span>{{ t('retrievalSettings.rerankTopKLabel') }}</span>
+            <span class="value-display">{{ localConfig.rerank_top_k }}</span>
+          </div>
+          <t-slider
+            v-model="localConfig.rerank_top_k"
+            :min="1"
+            :max="100"
+            :step="1"
+            :disabled="!canEdit"
+            @change="handleParamChange"
+          />
         </div>
-        <t-slider
-          v-model="localConfig.keyword_threshold"
-          :min="0"
-          :max="1"
-          :step="0.05"
-          :disabled="!canEdit"
-          @change="handleParamChange"
-        />
-      </div>
 
-      <!-- Rerank Top K -->
-      <div class="setting-item">
-        <div class="setting-label-row">
-          <span>{{ t('retrievalSettings.rerankTopKLabel') }}</span>
-          <span class="value-display">{{ localConfig.rerank_top_k }}</span>
+        <!-- Rerank Threshold -->
+        <div class="setting-item">
+          <div class="setting-label-row">
+            <span>{{ t('retrievalSettings.rerankThresholdLabel') }}</span>
+            <span class="value-display">{{ localConfig.rerank_threshold.toFixed(2) }}</span>
+          </div>
+          <t-slider
+            v-model="localConfig.rerank_threshold"
+            :min="-10"
+            :max="10"
+            :step="0.1"
+            :disabled="!canEdit"
+            @change="handleParamChange"
+          />
         </div>
-        <t-slider
-          v-model="localConfig.rerank_top_k"
-          :min="1"
-          :max="100"
-          :step="1"
-          :disabled="!canEdit"
-          @change="handleParamChange"
-        />
-      </div>
-
-      <!-- Rerank Threshold -->
-      <div class="setting-item">
-        <div class="setting-label-row">
-          <span>{{ t('retrievalSettings.rerankThresholdLabel') }}</span>
-          <span class="value-display">{{ localConfig.rerank_threshold.toFixed(2) }}</span>
-        </div>
-        <t-slider
-          v-model="localConfig.rerank_threshold"
-          :min="-10"
-          :max="10"
-          :step="0.1"
-          :disabled="!canEdit"
-          @change="handleParamChange"
-        />
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, computed, onMounted, nextTick } from 'vue'
+import { reactive, computed, onMounted, nextTick, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelSelector from '@/components/ModelSelector.vue'
@@ -122,6 +153,18 @@ import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
+const activeTab = ref('recall')
+const tabs = computed(() => [
+  { key: 'recall', label: t('retrievalSettings.recallTab') },
+  { key: 'rrf', label: t('retrievalSettings.rrfTitle') },
+  { key: 'rerank', label: t('retrievalSettings.rerankTab') },
+])
+const moveTab = (index: number, direction: number, event: KeyboardEvent) => {
+  const next = (index + direction + tabs.value.length) % tabs.value.length
+  activeTab.value = tabs.value[next]!.key
+  const buttons = (event.currentTarget as HTMLElement).parentElement?.querySelectorAll('button')
+  buttons?.[next]?.focus()
+}
 // PUT /tenants/kv/retrieval-config requires Admin+ on the server. Hide the
 // banner + lock all controls for non-Admins so they can read the
 // configuration without tripping a 403 mid-edit.
@@ -135,6 +178,13 @@ const defaultConfig: RetrievalConfig = {
   rerank_threshold: 0.2,
   rerank_model_id: '',
 }
+
+type RrfField = 'rrf_k' | 'rrf_vector_weight' | 'rrf_keyword_weight'
+const rrfFields = computed<{ key: RrfField; label: string; description: string; defaultValue: number; step: number }[]>(() => [
+  { key: 'rrf_k', label: t('retrievalSettings.rrfKLabel'), description: t('retrievalSettings.rrfKDescription'), defaultValue: 60, step: 1 },
+  { key: 'rrf_vector_weight', label: t('retrievalSettings.rrfVectorWeightLabel'), description: t('retrievalSettings.rrfVectorWeightDescription'), defaultValue: 0.7, step: 0.1 },
+  { key: 'rrf_keyword_weight', label: t('retrievalSettings.rrfKeywordWeightLabel'), description: t('retrievalSettings.rrfKeywordWeightDescription'), defaultValue: 0.3, step: 0.1 },
+])
 
 const localConfig = reactive<RetrievalConfig>({ ...defaultConfig })
 let initialConfig: RetrievalConfig = { ...defaultConfig }
@@ -152,6 +202,9 @@ const loadConfig = async () => {
         rerank_top_k: cfg.rerank_top_k || defaultConfig.rerank_top_k,
         rerank_threshold: cfg.rerank_threshold ?? defaultConfig.rerank_threshold,
         rerank_model_id: cfg.rerank_model_id || '',
+        rrf_k: cfg.rrf_k,
+        rrf_vector_weight: cfg.rrf_vector_weight,
+        rrf_keyword_weight: cfg.rrf_keyword_weight,
       })
       initialConfig = { ...localConfig }
     }
@@ -193,6 +246,13 @@ const debouncedSave = () => {
 }
 
 const handleParamChange = () => debouncedSave()
+const handleRrfChange = (field: RrfField, value: number | string) => {
+  // Ignore cleared inputs; zero explicitly selects the server default.
+  if (!canEdit.value || typeof value !== 'number' || !Number.isFinite(value) || value < 0) return
+  if (field === 'rrf_k' && !Number.isSafeInteger(value)) return
+  localConfig[field] = value
+  debouncedSave()
+}
 const handleModelChange = (modelId: string) => {
   localConfig.rerank_model_id = modelId
   debouncedSave()
@@ -211,14 +271,48 @@ onMounted(async () => {
   width: 100%;
 }
 
-.section-header {
-  .settings-section-header();
+.settings-title {
+  margin: 0 28px 12px 0;
+  font-size: var(--app-text-lg);
+  font-weight: 600;
+  line-height: 24px;
+  color: var(--td-text-color-primary);
+}
+
+.settings-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  margin-right: 24px;
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-secondarycontainer);
+}
+.settings-tab {
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  font: inherit;
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  &:hover { color: var(--td-text-color-primary); }
+  &:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: 2px; }
+  &.is-active {
+    color: var(--td-text-color-primary);
+    font-weight: 500;
+    background: var(--td-bg-color-container);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  }
 }
 
 .settings-group {
   display: flex;
   flex-direction: column;
   gap: 0;
+  margin-top: 4px;
+  :deep(.t-input) { border-radius: var(--app-radius-md); }
 }
 
 .setting-item {
@@ -231,7 +325,7 @@ onMounted(async () => {
 }
 
 .setting-label {
-  font-size: var(--app-text-base);
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
   margin-bottom: 4px;
@@ -241,7 +335,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: var(--app-text-base);
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
   margin-bottom: 10px;
@@ -268,8 +362,21 @@ onMounted(async () => {
 
 .value-display {
   font-size: var(--app-text-md);
-  font-weight: 600;
-  color: var(--td-brand-color);
-  font-family: var(--app-font-family-mono);
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+  font-variant-numeric: tabular-nums;
 }
+.rrf-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--td-component-stroke);
+  &:last-child { border-bottom: none; }
+  :deep(.t-input-number) { width: 112px; flex-shrink: 0; }
+  :deep(input) { font-variant-numeric: tabular-nums; }
+}
+.rrf-label { display: flex; align-items: center; gap: 4px; font-size: var(--app-text-md); font-weight: 500; }
+.rrf-help { .settings-title-help(); }
 </style>

@@ -20,6 +20,41 @@ class TestSSRFValidation(unittest.TestCase):
         self._env_patch.stop()
         reset_ssrf_whitelist_cache_for_test()
 
+    def _whitelist_only(self, whitelist: str, only: str) -> None:
+        patcher = patch.dict(
+            os.environ,
+            {"SSRF_WHITELIST": whitelist, "SSRF_WHITELIST_EXTRA": "", "SSRF_DNS_WHITELIST_ONLY": only},
+            clear=False,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        reset_ssrf_whitelist_cache_for_test()
+        self.addCleanup(reset_ssrf_whitelist_cache_for_test)
+
+    def test_whitelist_only_refuses_before_dns(self):
+        self._whitelist_only("docs.internal", "true")
+        safe, reason = is_ssrf_safe_url("https://outside.invalid/page")
+        self.assertFalse(safe)
+        self.assertIn("not in the SSRF whitelist", reason)
+        self.assertNotIn("DNS resolution failed", reason)
+
+    def test_whitelist_only_admits_whitelisted_host(self):
+        self._whitelist_only("docs.internal", "true")
+        safe, reason = is_ssrf_safe_url("https://docs.internal/page")
+        self.assertTrue(safe, reason)
+
+    def test_whitelist_only_off_leaves_validation_alone(self):
+        self._whitelist_only("docs.internal", "false")
+        safe, reason = is_ssrf_safe_url("http://127.0.0.1:8080/page")
+        self.assertFalse(safe)
+        self.assertNotIn("not in the SSRF whitelist", reason)
+
+    def test_whitelist_only_unparsable_value_enables_it(self):
+        self._whitelist_only("docs.internal", "yes")
+        safe, reason = is_ssrf_safe_url("https://outside.invalid/page")
+        self.assertFalse(safe)
+        self.assertIn("not in the SSRF whitelist", reason)
+
     def test_blocks_loopback_ip(self):
         safe, reason = is_ssrf_safe_url("http://127.0.0.1:8080/page")
         self.assertFalse(safe)

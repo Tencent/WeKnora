@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -14,6 +15,7 @@ import (
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -23,39 +25,23 @@ import (
 // unknownFileType is returned by getFileType when a name carries no extension.
 const unknownFileType = "unknown"
 
-// supportedImportFileExtensions is the single source of truth for extensions
-// accepted by every knowledge import path: direct upload, file-URL download,
-// and the worker's post-download re-check. Keeping one set avoids the drift
-// that let direct upload accept xlsx while URL import rejected it (#2447).
-var supportedImportFileExtensions = map[string]struct{}{
-	"pdf": {}, "txt": {}, "docx": {}, "doc": {}, "epub": {},
-	"html": {}, "htm": {}, "mhtml": {}, "md": {}, "markdown": {},
-	"xmind": {},
-	"png":   {}, "jpg": {}, "jpeg": {}, "gif": {},
-	"csv": {}, "xlsx": {}, "xls": {}, "pptx": {}, "ppt": {}, "json": {},
-	"mp3": {}, "wav": {}, "m4a": {}, "flac": {}, "ogg": {},
-}
-
 // dataTableFileExtensions are the spreadsheet formats that get an extra
 // table-summary task after their document-process task.
 var dataTableFileExtensions = map[string]struct{}{
 	"csv": {}, "xlsx": {}, "xls": {},
 }
 
-// normalizeFileExtension lowercases an extension and strips a leading dot so
-// callers can pass either "xlsx", ".XLSX", or a raw user-supplied file_type.
+// normalizeFileExtension delegates to the shared helper; kept so the many
+// package-private call sites stay untouched.
 func normalizeFileExtension(ext string) string {
-	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
+	return secutils.NormalizeImportExtension(ext)
 }
 
-// isSupportedImportExtension reports whether a bare extension can be imported.
+// isSupportedImportExtension delegates to the shared set in internal/utils so
+// data source connectors filter on the same extensions as direct upload and
+// URL import. The "unknown" sentinel from getFileType is not in the set.
 func isSupportedImportExtension(ext string) bool {
-	ext = normalizeFileExtension(ext)
-	if ext == "" || ext == unknownFileType {
-		return false
-	}
-	_, ok := supportedImportFileExtensions[ext]
-	return ok
+	return secutils.IsSupportedImportExtension(ext)
 }
 
 // isValidFileType checks if a filename's extension is supported for import.
@@ -101,6 +87,44 @@ func isValidURL(url string) bool {
 		return true
 	}
 	return false
+}
+
+// readMultipartFileContent reads the full upload payload. Each Open() returns a
+// fresh reader, so callers that hash or SaveFile later open again themselves.
+func readMultipartFileContent(file *multipart.FileHeader) ([]byte, error) {
+	f, err := file.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	return io.ReadAll(f)
+}
+
+// ValidateJSONUploadContent rejects malformed .json uploads before they are
+// stored and queued. Shares the same validity gate as the simple JSON reader.
+// Call this from HTTP upload / replace handlers only — CreateKnowledgeFromFile
+// itself must not, so datasource sync and IM can still create a knowledge row
+// that fails in async parse (delete-then-create must not leave a gap).
+func ValidateJSONUploadContent(fileName string, file *multipart.FileHeader) error {
+	if normalizeFileExtension(getFileType(fileName)) != "json" {
+		return nil
+	}
+	data, err := readMultipartFileContent(file)
+	if err != nil {
+		return err
+	}
+	// The upload queue shows this message verbatim, so localize it here rather
+	// than in docparser, whose error text is shared with the async JSON reader.
+	switch err := docparser.ValidateJSONContent(data); {
+	case err == nil:
+		return nil
+	case errors.Is(err, docparser.ErrEmptyJSONContent):
+		return werrors.NewBadRequestError("JSON 文件内容为空")
+	case errors.Is(err, docparser.ErrInvalidJSONContent):
+		return werrors.NewBadRequestError("JSON 文件内容无效，请检查格式")
+	default:
+		return werrors.NewBadRequestError(err.Error())
+	}
 }
 
 // calculateFileHash calculates MD5 hash of a file

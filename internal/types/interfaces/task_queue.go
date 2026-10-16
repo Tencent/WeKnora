@@ -86,6 +86,13 @@ type TaskPendingOpsRepository interface {
 	DeleteByDedupKey(ctx context.Context, taskType, scope, scopeID, dedupKey, op string) error
 }
 
+// TaskPendingOpsClaimableCounter counts the distinct keys ClaimBatch can
+// claim, excluding every key with a fresh claim (including late siblings).
+// PendingCount remains the count of all rows for crash-recovery consumers.
+type TaskPendingOpsClaimableCounter interface {
+	ClaimableCount(ctx context.Context, taskType, scope, scopeID string, staleBefore time.Time) (int64, error)
+}
+
 // TaskPendingOpsScopeCleaner is an optional extension for callers that need
 // to discard every durable pending operation owned by a deleted scope. It is
 // intentionally separate from TaskPendingOpsRepository so alternate queue
@@ -112,6 +119,16 @@ type TaskPendingOpsDrainer interface {
 // recreate durable work after the deletion scrub has finished.
 type TaskPendingOpsKnowledgeBaseGuard interface {
 	EnqueueIfKnowledgeBaseActive(ctx context.Context, op *types.TaskPendingOp) (accepted bool, err error)
+}
+
+// TaskPendingOpsTenantLiveness reports whether a tenant is still alive (not
+// soft-deleted). Wiki task consumers use it to guarantee a deleted tenant
+// never triggers new model requests: the check runs at task entry (ingest
+// and finalize) and inside the guarded enqueue, alongside the KB-active
+// check — tenant soft-deletion removes the workspace without touching its
+// knowledge bases or durable pending ops.
+type TaskPendingOpsTenantLiveness interface {
+	HasActiveTenant(ctx context.Context, tenantID uint64) (bool, error)
 }
 
 // TaskPendingOpsFinalizingSeeder atomically hands a processing knowledge row

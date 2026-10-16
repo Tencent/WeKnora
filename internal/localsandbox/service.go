@@ -127,22 +127,46 @@ func (s *Service) GuardForSession(
 
 // Run executes one shell command inside the session's workspace.
 func (s *Service) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
-	if err := s.backend.Available(); err != nil {
-		logger.Errorf(ctx, "[LocalSandbox] backend unavailable: %v", err)
+	if err := s.ensureBackend(ctx); err != nil {
 		return nil, err
-	}
-	if err := s.backend.EnsureReady(ctx); err != nil {
-		logger.Errorf(ctx, "[LocalSandbox] backend not ready: %v", err)
-		return nil, fmt.Errorf("ensure sandbox ready: %w", err)
 	}
 	ws, policy, err := s.workspaceFor(ctx, req.SessionID)
 	if err != nil {
 		return nil, err
 	}
-	unlock := s.LockRoot(ws.Root)
+	return s.runPolicy(ctx, ws.Root, policy, req)
+}
+
+// RunWithPolicy runs one command under a policy the caller built. Skill
+// installs use it: their policy belongs to an install directory, not to a
+// chat session's workspace.
+func (s *Service) RunWithPolicy(ctx context.Context, policy Policy, req RunRequest) (*RunResult, error) {
+	if err := s.ensureBackend(ctx); err != nil {
+		return nil, err
+	}
+	if err := policy.Validate(); err != nil {
+		return nil, err
+	}
+	return s.runPolicy(ctx, policy.Cwd, policy, req)
+}
+
+func (s *Service) ensureBackend(ctx context.Context) error {
+	if err := s.backend.Available(); err != nil {
+		logger.Errorf(ctx, "[LocalSandbox] backend unavailable: %v", err)
+		return err
+	}
+	if err := s.backend.EnsureReady(ctx); err != nil {
+		logger.Errorf(ctx, "[LocalSandbox] backend not ready: %v", err)
+		return fmt.Errorf("ensure sandbox ready: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) runPolicy(ctx context.Context, lockRoot string, policy Policy, req RunRequest) (*RunResult, error) {
+	unlock := s.LockRoot(lockRoot)
 	defer unlock()
 
-	cwd := ws.Root
+	cwd := policy.Cwd
 	if req.WorkDir != "" {
 		// work_dir is a convenience for the model, not a privilege boundary;
 		// it is checked against the same guard the file tools use.

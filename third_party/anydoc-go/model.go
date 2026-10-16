@@ -24,7 +24,7 @@ type Document struct {
 // which of the optional fields is populated; the rest are nil.
 type Block struct {
 	// "heading", "paragraph", "list", "table", "block_quote", "code_block",
-	// or "rule".
+	// "rule", or "math".
 	Kind    string
 	Level   *uint8   // heading: 1-based outline depth
 	Anchor  *string  // heading: stable anchor id when the document targets it
@@ -33,15 +33,15 @@ type Block struct {
 	Table   *Table   // table
 	Blocks  []Block  // block_quote
 	Lang    *string  // code_block
-	Text    *string  // code_block
+	Text    *string  // code_block, math
 }
 
 // Inline is one span of inline content. The Kind field selects which optional
 // fields are populated.
 type Inline struct {
-	// "text", "link", "image", "anchor", "note_ref", or "line_break".
+	// "text", "link", "image", "anchor", "note_ref", "line_break", "math", or "checkbox".
 	Kind    string
-	Text    *string      // text
+	Text    *string      // text, math
 	Style   *Style       // text
 	Content []Inline     // link
 	Target  *LinkTarget  // link
@@ -49,6 +49,7 @@ type Inline struct {
 	Source  *ImageSource // image
 	Anchor  *string      // anchor: the anchor id
 	NoteID  *string      // note_ref: the id of the note in Document.Notes
+	Checked *bool        // checkbox
 }
 
 // Style is a fully resolved character style.
@@ -92,7 +93,7 @@ type List struct {
 // further lists.
 type ListItem struct {
 	Blocks      []Block
-	Checked     *bool   // task-list state, when the item carries a checkbox
+	Checked     *bool   // Deprecated: always nil since 0.2.3; read Inline.Checked.
 	MarkerLabel *string // literal marker text overriding the level marker
 }
 
@@ -156,6 +157,10 @@ type decoder struct {
 
 func decodeDocument(raw []byte) (*Document, error) {
 	d := &decoder{buf: raw}
+	return d.document()
+}
+
+func (d *decoder) document() (*Document, error) {
 	doc := &Document{}
 	var err error
 	if doc.Blocks, err = d.blocks(); err != nil {
@@ -356,6 +361,12 @@ func (d *decoder) block() (Block, error) {
 			return Block{}, err
 		}
 		return Block{Kind: "code_block", Lang: lang, Text: &text}, nil
+	case C.BLOCK_MATH:
+		text, err := d.str()
+		if err != nil {
+			return Block{}, err
+		}
+		return Block{Kind: "math", Text: &text}, nil
 	case C.BLOCK_RULE:
 		return Block{Kind: "rule"}, nil
 	default:
@@ -427,6 +438,18 @@ func (d *decoder) inline() (Inline, error) {
 			return Inline{}, err
 		}
 		return Inline{Kind: "note_ref", NoteID: &id}, nil
+	case C.INLINE_MATH:
+		text, err := d.str()
+		if err != nil {
+			return Inline{}, err
+		}
+		return Inline{Kind: "math", Text: &text}, nil
+	case C.INLINE_CHECKBOX:
+		checked, err := d.bool()
+		if err != nil {
+			return Inline{}, err
+		}
+		return Inline{Kind: "checkbox", Checked: &checked}, nil
 	case C.INLINE_LINEBREAK:
 		return Inline{Kind: "line_break"}, nil
 	default:

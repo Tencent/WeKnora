@@ -24,6 +24,7 @@ var DeploymentCapabilityKeys = []string{
 	"settings.sandbox",
 	"settings.sandbox.docker",
 	"settings.sandbox.host",
+	"settings.sandbox.remote",
 }
 
 // DeploymentCapability describes whether a deployment exposes a feature route.
@@ -53,6 +54,7 @@ type DeploymentFeatureAvailability struct {
 	Sandbox       bool
 	SandboxDocker bool
 	SandboxHost   bool
+	SandboxRemote bool
 }
 
 func supportedDeploymentCapability(supported bool) DeploymentCapability {
@@ -92,6 +94,13 @@ func BuildDeploymentCapabilities(
 		sandboxHost.Reason = "route_not_registered"
 	}
 
+	sandboxRemote := DeploymentCapability{Supported: available.Sandbox && available.SandboxRemote}
+	if available.Sandbox && !available.SandboxRemote {
+		sandboxRemote.Reason = "not_supported_in_lite"
+	} else if !available.Sandbox {
+		sandboxRemote.Reason = "route_not_registered"
+	}
+
 	return DeploymentCapabilitiesData{
 		Edition: edition,
 		Capabilities: map[string]DeploymentCapability{
@@ -108,6 +117,7 @@ func BuildDeploymentCapabilities(
 			"settings.sandbox":        supportedDeploymentCapability(available.Sandbox),
 			"settings.sandbox.docker": sandboxDocker,
 			"settings.sandbox.host":   sandboxHost,
+			"settings.sandbox.remote": sandboxRemote,
 		},
 	}
 }
@@ -122,7 +132,7 @@ func (h *SystemHandler) BindDeploymentCapabilities(data DeploymentCapabilitiesDa
 // @Description  返回当前部署版本及实际注册的后端路由所对应的功能能力；仅 supported=false 表示入口应隐藏
 // @Tags         系统
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "标准 code/msg/data 包装，data 为 DeploymentCapabilitiesData"
+// @Success 200 {object} handler.GetDeploymentCapabilitiesResponse
 // @Router       /system/capabilities [get]
 func (h *SystemHandler) GetDeploymentCapabilities(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{

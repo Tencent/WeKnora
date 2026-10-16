@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -40,12 +39,44 @@ const jinaResponse = `{
   "usage": {"total_tokens": 32}
 }`
 
-func newClient(t *testing.T, url string, settings catalog.RerankSettings) *Client {
+func newClient(t *testing.T, url string, settings api.RerankSettings) *Client {
 	t.Helper()
 	return New(Config{
 		Endpoint: api.Endpoint{BaseURL: url, Model: "rerank", Auth: api.BearerAuth("k")},
 		Settings: settings,
 	})
+}
+
+// Cohere's v2 reference response, preserving every field and value:
+// https://docs.cohere.com/v2/reference/rerank (2026-10-09).
+// Unlike the other fixtures, it contains no echoed document.
+const cohereV2Response = `{
+  "results": [
+    {"index": 3, "relevance_score": 0.999071},
+    {"index": 4, "relevance_score": 0.7867867},
+    {"index": 0, "relevance_score": 0.32713068}
+  ],
+  "id": "07734bd2-2473-4f07-94e1-0d9f0e6843cf",
+  "meta": {
+    "api_version": {"version": "2", "is_experimental": false},
+    "billed_units": {"search_units": 1}
+  }
+}`
+
+func TestDecodesCohereV2ReferenceResponse(t *testing.T) {
+	server, path, _ := serve(t, cohereV2Response)
+	defer server.Close()
+	c := newClient(t, server.URL+"/v2", api.RerankSettings{})
+	// Only the response is the documented fixture; these five placeholder
+	// documents supply its index range, not the reference's example texts.
+	got, err := c.Rerank(context.Background(), "q", []string{"a", "b", "c", "d", "e"})
+	require.NoError(t, err)
+	assert.Equal(t, "/v2/rerank", *path)
+	assert.Equal(t, []api.RerankResult{
+		{Index: 3, Score: 0.999071},
+		{Index: 4, Score: 0.7867867},
+		{Index: 0, Score: 0.32713068},
+	}, got)
 }
 
 func serve(t *testing.T, payload string) (*httptest.Server, *string, *map[string]any) {
@@ -63,7 +94,7 @@ func serve(t *testing.T, payload string) (*httptest.Server, *string, *map[string
 }
 
 func TestRequestBodyCarriesOnlyWhatTheVendorDeclares(t *testing.T) {
-	c := newClient(t, "https://example.invalid/v1", catalog.RerankSettings{})
+	c := newClient(t, "https://example.invalid/v1", api.RerankSettings{})
 	body, err := c.BuildRequestBody("上海天气", []string{"上海气候", "北京美食"})
 	require.NoError(t, err)
 
@@ -76,7 +107,7 @@ func TestRequestBodyCarriesOnlyWhatTheVendorDeclares(t *testing.T) {
 
 func TestRequestBodyAddsTheOptionalFieldsAVendorDeclares(t *testing.T) {
 	c := newClient(t, "https://example.invalid/v1",
-		catalog.RerankSettings{SendTopN: true, SendReturnDocs: true})
+		api.RerankSettings{SendTopN: true, SendReturnDocs: true})
 	body, err := c.BuildRequestBody("q", []string{"a", "b", "c"})
 	require.NoError(t, err)
 
@@ -88,7 +119,7 @@ func TestDecodesAStringDocument(t *testing.T) {
 	server, _, _ := serve(t, zhipuResponse)
 	defer server.Close()
 
-	c := newClient(t, server.URL, catalog.RerankSettings{})
+	c := newClient(t, server.URL, api.RerankSettings{})
 	got, err := c.Rerank(context.Background(), "上海天气", []string{"北京美食", "上海气候"})
 	require.NoError(t, err)
 
@@ -102,7 +133,7 @@ func TestDecodesAnObjectDocument(t *testing.T) {
 	server, _, _ := serve(t, jinaResponse)
 	defer server.Close()
 
-	c := newClient(t, server.URL, catalog.RerankSettings{})
+	c := newClient(t, server.URL, api.RerankSettings{})
 	got, err := c.Rerank(context.Background(), "上海天气", []string{"上海气候", "北京美食"})
 	require.NoError(t, err)
 
@@ -118,7 +149,7 @@ func TestDecodesTheScoreAlias(t *testing.T) {
 	server, _, _ := serve(t, `{"results":[{"index":0,"score":0.42}]}`)
 	defer server.Close()
 
-	c := newClient(t, server.URL, catalog.RerankSettings{})
+	c := newClient(t, server.URL, api.RerankSettings{})
 	got, err := c.Rerank(context.Background(), "q", []string{"d"})
 	require.NoError(t, err)
 	require.Len(t, got, 1)
@@ -129,7 +160,7 @@ func TestAppendsTheRerankPathToABareBaseURL(t *testing.T) {
 	server, path, _ := serve(t, `{"results":[]}`)
 	defer server.Close()
 
-	c := newClient(t, server.URL+"/v1", catalog.RerankSettings{})
+	c := newClient(t, server.URL+"/v1", api.RerankSettings{})
 	_, err := c.Rerank(context.Background(), "q", []string{"d"})
 	require.NoError(t, err)
 	assert.Equal(t, "/v1/rerank", *path)
@@ -141,7 +172,7 @@ func TestDoesNotDoubleTheRerankPath(t *testing.T) {
 	server, path, _ := serve(t, `{"results":[]}`)
 	defer server.Close()
 
-	c := newClient(t, server.URL+"/api/paas/v4/rerank", catalog.RerankSettings{})
+	c := newClient(t, server.URL+"/api/paas/v4/rerank", api.RerankSettings{})
 	_, err := c.Rerank(context.Background(), "q", []string{"d"})
 	require.NoError(t, err)
 	assert.Equal(t, "/api/paas/v4/rerank", *path)
@@ -152,7 +183,7 @@ func TestHonoursAVendorDeclaredPath(t *testing.T) {
 	server, path, _ := serve(t, `{"results":[]}`)
 	defer server.Close()
 
-	c := newClient(t, server.URL, catalog.RerankSettings{Path: "/api/v1/rerank"})
+	c := newClient(t, server.URL, api.RerankSettings{Path: "/api/v1/rerank"})
 	_, err := c.Rerank(context.Background(), "q", []string{"d"})
 	require.NoError(t, err)
 	assert.Equal(t, "/api/v1/rerank", *path)
@@ -162,7 +193,7 @@ func TestRejectsAnOutOfRangeIndex(t *testing.T) {
 	server, _, _ := serve(t, `{"results":[{"index":9,"relevance_score":0.5}]}`)
 	defer server.Close()
 
-	c := newClient(t, server.URL, catalog.RerankSettings{})
+	c := newClient(t, server.URL, api.RerankSettings{})
 	_, err := c.Rerank(context.Background(), "q", []string{"d"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
@@ -176,7 +207,7 @@ func TestSurfacesTheVendorErrorBody(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := newClient(t, server.URL, catalog.RerankSettings{})
+	c := newClient(t, server.URL, api.RerankSettings{})
 	_, err := c.Rerank(context.Background(), "q", []string{"d"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "documents exceeds the limit")
@@ -187,14 +218,14 @@ func TestSurfacesTheVendorErrorBody(t *testing.T) {
 // and the operator opted in, and never by default — sending it unasked is how
 // an undocumented field ends up on every request to every gateway.
 func TestTruncatePromptTokensIsAbsentByDefault(t *testing.T) {
-	c := newClient(t, "https://example.invalid/v1", catalog.RerankSettings{})
+	c := newClient(t, "https://example.invalid/v1", api.RerankSettings{})
 	body, err := c.BuildRequestBody("q", []string{"d"})
 	require.NoError(t, err)
 	assert.NotContains(t, body, "truncate_prompt_tokens")
 }
 
 func TestTruncatePromptTokensIsSentWhenTheRowOptedIn(t *testing.T) {
-	c := newClient(t, "https://example.invalid/v1", catalog.RerankSettings{
+	c := newClient(t, "https://example.invalid/v1", api.RerankSettings{
 		AcceptsTruncatePromptTokens: true, TruncatePromptTokens: 512,
 	})
 	body, err := c.BuildRequestBody("q", []string{"d"})

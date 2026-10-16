@@ -2,9 +2,13 @@ package weaviate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
+	"net/http"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -13,6 +17,7 @@ import (
 	"github.com/go-openapi/strfmt"
 	"github.com/google/uuid"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
+	"github.com/weaviate/weaviate-go-client/v5/weaviate/fault"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/filters"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/graphql"
 	"github.com/weaviate/weaviate/entities/models"
@@ -31,6 +36,17 @@ const (
 	fieldEmbedding        = "embedding"
 	fieldIsEnabled        = "is_enabled"
 	fieldID               = "id"
+
+	// defaultCopyQueryLimit is the row limit CopyIndices reads source vectors
+	// with. Weaviate caps a single query at QUERY_MAXIMUM_RESULTS, 10000 by
+	// default in v1.37.3 (weaviate/usecases/config.DefaultQueryMaximumResults),
+	// and refuses anything above it with "query maximum results exceeded".
+	// Without an explicit limit a GraphQL Get would instead fall back to
+	// QUERY_DEFAULTS_LIMIT_GRAPHQL (100) and truncate silently. The setting is not
+	// exposed to clients - /v1/meta reports only version, hostname and modules
+	// - so ask for the default and, if the server refuses, take the value it
+	// names in the refusal.
+	defaultCopyQueryLimit = 10000
 )
 
 // NewWeaviateRetrieveEngineRepository creates and initializes a new Weaviate repository.
@@ -149,13 +165,33 @@ func (w *weaviateRepository) ensureCollection(ctx context.Context, dimension int
 		}
 		//创建collection
 		if err = w.client.Schema().ClassCreator().WithClass(&classObj).Do(ctx); err != nil {
-			log.Errorf("[Weaviate] Failed to create collection: %v", err)
-			return fmt.Errorf("failed to create collection: %w", err)
+			// The first batches written at a new dimension are saved by several
+			// workers at once, so another one (or another replica) may have
+			// created the class since our check. Weaviate refuses the losing
+			// create with 422, worded differently depending on where it lost,
+			// so look again rather than parse the message. The class is
+			// created whole, so if it exists there is nothing left to do.
+			if isUnprocessableEntity(err) {
+				exists, _ = w.client.Schema().ClassExistenceChecker().WithClassName(collectionName).Do(ctx)
+			}
+			if !exists {
+				log.Errorf("[Weaviate] Failed to create collection: %v", err)
+				return fmt.Errorf("failed to create collection: %w", err)
+			}
+			log.Infof("[Weaviate] Collection %s was created concurrently", collectionName)
+		} else {
+			log.Infof("[Weaviate] Successfully created collection %s", collectionName)
 		}
-		log.Infof("[Weaviate] Successfully created collection %s", collectionName)
 	}
 	w.initializedCollections.Store(dimension, true)
 	return nil
+}
+
+// isUnprocessableEntity reports whether err is Weaviate answering 422, which is
+// how it refuses a schema change it cannot apply.
+func isUnprocessableEntity(err error) bool {
+	var clientErr *fault.WeaviateClientError
+	return errors.As(err, &clientErr) && clientErr.StatusCode == http.StatusUnprocessableEntity
 }
 
 func (w *weaviateRepository) EngineType() types.RetrieverEngineType {
@@ -561,7 +597,13 @@ func (w *weaviateRepository) VectorRetrieve(ctx context.Context,
 
 	where := w.getBaseFilter(params)
 	limit := params.TopK
-	scoreThreshold := float32(params.Threshold)
+	// Weaviate's certainty is (1 + cos) / 2; callers pass a cosine
+	// similarity threshold, the scale every other engine uses. A zero
+	// threshold means no filtering, so it stays 0 rather than becoming 0.5.
+	var scoreThreshold float32
+	if params.Threshold > 0 {
+		scoreThreshold = float32((1 + params.Threshold) / 2)
+	}
 	fields := getEmbeddingFields()
 	result, err := w.client.GraphQL().Get().WithClassName(collectionName).
 		WithWhere(where).
@@ -690,35 +732,31 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 	}
 
 	collectionName := w.getCollectionName(dimension)
-	batchSize := 64
-	var lastID string
+	reader := newCopySourceReader(w, collectionName, getVectorFields())
 	totalCopied := 0
-	fields := getVectorFields()
 
-	for {
-		result, err := w.client.GraphQL().Get().
-			WithClassName(collectionName).
-			WithWhere(filters.Where().
-				WithPath([]string{fieldKnowledgeBaseID}).
-				WithOperator(filters.Equal).
-				WithValueString(sourceKnowledgeBaseID)).
-			WithLimit(batchSize).
-			WithFields(fields...).
-			WithAfter(lastID).
-			Do(ctx)
+	// Read the rows the mapping names, in batches of source chunk IDs. The
+	// mapping is the set of chunks this copy has to move, so a predicate over
+	// it makes every read self-contained.
+	//
+	// The cursor walk this replaces could not be made correct: Weaviate refuses
+	// `after` together with `where` and `limit` ("where cannot be set with
+	// after and limit parameters"), and anywhere a cursor is accepted it is a
+	// position in a result order the data node never promised to keep between
+	// requests. Every request still succeeds, which is how such a walk reports
+	// an incomplete target as a finished copy. A mapping predicate has no
+	// cursor that can drift.
+	sourceChunkIDs := slices.Sorted(maps.Keys(sourceToTargetChunkIDMap))
+	const chunkBatchSize = 64
+	for chunkBatch := range slices.Chunk(sourceChunkIDs, chunkBatchSize) {
+		objects, err := reader.readBatch(ctx, sourceKnowledgeBaseID, chunkBatch)
 		if err != nil {
-			log.Errorf("[Weaviate] Failed to query source points: %v", err)
 			return err
 		}
-
-		objects, ok := result.Data["Get"].(map[string]interface{})[collectionName].([]interface{})
-		if !ok || len(objects) == 0 {
-			break
+		if len(objects) == 0 {
+			continue
 		}
 		log.Infof("[Weaviate] Found %d source points in batch", len(objects))
-
-		batcher := w.client.Batch().ObjectsBatcher()
-		currentBatchCount := 0
 
 		targetObjects := make([]*models.Object, 0, len(objects))
 		for _, obj := range objects {
@@ -731,7 +769,12 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 				continue
 			}
 
-			lastID = additional["id"].(string)
+			// The id is no longer a cursor, but a row whose id cannot be read
+			// is still a response this copy does not understand; it must not be
+			// counted towards a copy reported as complete.
+			if id, ok := additional["id"].(string); !ok || id == "" {
+				return fmt.Errorf("weaviate: copy indices source object has no id")
+			}
 
 			sourceChunkID, ok := data[fieldChunkID].(string)
 			if !ok {
@@ -794,10 +837,10 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 				Vector: vector,
 			}
 			targetObjects = append(targetObjects, newObj)
-			currentBatchCount++
 		}
+
 		if len(targetObjects) > 0 {
-			resp, err := batcher.WithObjects(targetObjects...).Do(ctx)
+			resp, err := w.client.Batch().ObjectsBatcher().WithObjects(targetObjects...).Do(ctx)
 			if err != nil {
 				return fmt.Errorf("batch upsert failed: %w", err)
 			}
@@ -812,6 +855,160 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 	}
 	log.Infof("[Weaviate] Index copy completed, total copied: %d", totalCopied)
 	return nil
+}
+
+// copySourceReader reads the source vectors a copy needs, one batch of source
+// chunk IDs at a time.
+//
+// A chunk is not one vector: it is stored as a row for its own content plus one
+// row per generated question, all sharing the same chunk_id. A batch of n chunk
+// IDs therefore says nothing about how many rows come back, and the only reads
+// that can be trusted as complete are the ones that returned fewer rows than
+// the limit they asked for. A batch that comes back full is split and re-read;
+// a single chunk that still fills the limit cannot be read completely, and the
+// copy reports that instead of returning success on a partial index.
+type copySourceReader struct {
+	repo           *weaviateRepository
+	collectionName string
+	fields         []graphql.Field
+	// limit is the row limit every query asks for. It starts at the server's
+	// documented default and is lowered to the value the server names if it
+	// refuses a query for exceeding QUERY_MAXIMUM_RESULTS.
+	limit int
+}
+
+func newCopySourceReader(repo *weaviateRepository, collectionName string, fields []graphql.Field) *copySourceReader {
+	limit := repo.copyQueryLimit
+	if limit <= 0 {
+		limit = defaultCopyQueryLimit
+	}
+	return &copySourceReader{
+		repo:           repo,
+		collectionName: collectionName,
+		fields:         fields,
+		limit:          limit,
+	}
+}
+
+// readBatch returns every source vector whose chunk_id is in chunkIDs.
+func (r *copySourceReader) readBatch(ctx context.Context,
+	sourceKnowledgeBaseID string, chunkIDs []string,
+) ([]interface{}, error) {
+	if len(chunkIDs) == 0 {
+		return nil, nil
+	}
+
+	objects, err := r.query(ctx, sourceKnowledgeBaseID, chunkIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(objects) < r.limit {
+		return objects, nil
+	}
+
+	// The batch filled the limit, so it may have been cut off. A batch of one
+	// chunk that does so cannot be split any further.
+	if len(chunkIDs) == 1 {
+		return nil, fmt.Errorf(
+			"weaviate: source chunk %q returned a full query page of %d vectors, "+
+				"which reaches the server's query limit (QUERY_MAXIMUM_RESULTS); "+
+				"the chunk cannot be read completely and the copy was stopped",
+			chunkIDs[0], r.limit)
+	}
+
+	middle := len(chunkIDs) / 2
+	front, err := r.readBatch(ctx, sourceKnowledgeBaseID, chunkIDs[:middle])
+	if err != nil {
+		return nil, err
+	}
+	back, err := r.readBatch(ctx, sourceKnowledgeBaseID, chunkIDs[middle:])
+	if err != nil {
+		return nil, err
+	}
+	return append(front, back...), nil
+}
+
+// query runs one chunk_id-bounded Get. Weaviate answers a query it could not
+// run with HTTP 200, an errors array and no data, so a failed query has to be
+// read as a failure here - reading it as "the source has no more rows" is how
+// a failed copy gets reported as a finished one.
+func (r *copySourceReader) query(ctx context.Context,
+	sourceKnowledgeBaseID string, chunkIDs []string,
+) ([]interface{}, error) {
+	log := logger.GetLogger(ctx)
+	result, err := r.repo.client.GraphQL().Get().
+		WithClassName(r.collectionName).
+		WithWhere(filters.Where().
+			WithOperator(filters.And).
+			WithOperands([]*filters.WhereBuilder{
+				filters.Where().
+					WithPath([]string{fieldKnowledgeBaseID}).
+					WithOperator(filters.Equal).
+					WithValueString(sourceKnowledgeBaseID),
+				filters.Where().
+					WithPath([]string{fieldChunkID}).
+					WithOperator(filters.ContainsAny).
+					WithValueText(chunkIDs...),
+			})).
+		WithLimit(r.limit).
+		WithFields(r.fields...).
+		Do(ctx)
+
+	var queryError string
+	switch {
+	case err != nil:
+		queryError = err.Error()
+	case len(result.Errors) > 0:
+		queryError = result.Errors[0].Message
+	}
+	if queryError != "" {
+		if serverLimit, ok := queryMaximumResults(queryError); ok && serverLimit < r.limit {
+			// QUERY_MAXIMUM_RESULTS is a server setting with no client-facing
+			// API, so the refusal is the only place it can be read. Retry the
+			// same read under the limit the server actually enforces; the
+			// completeness check above uses the lowered limit from here on.
+			log.Warnf("[Weaviate] Source query limit %d exceeds the server's "+
+				"QUERY_MAXIMUM_RESULTS %d; retrying with %d",
+				r.limit, serverLimit, serverLimit)
+			r.limit = serverLimit
+			return r.query(ctx, sourceKnowledgeBaseID, chunkIDs)
+		}
+		log.Errorf("[Weaviate] Failed to query source points: %s", queryError)
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("weaviate: copy indices query failed: %s", queryError)
+	}
+
+	get, ok := result.Data["Get"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("weaviate: copy indices invalid response")
+	}
+	objects, ok := get[r.collectionName].([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("weaviate: copy indices invalid response for collection %s", r.collectionName)
+	}
+	return objects, nil
+}
+
+// queryMaximumResultsPattern matches the refusal Weaviate returns for a query
+// that asks for more rows than QUERY_MAXIMUM_RESULTS allows, e.g. "query
+// maximum results exceeded: ... exceeds the configured value for
+// QUERY_MAXIMUM_RESULTS '10000'" (weaviate/adapters/repos/db/search.go).
+var queryMaximumResultsPattern = regexp.MustCompile(`QUERY_MAXIMUM_RESULTS '(\d+)'`)
+
+// queryMaximumResults returns the row cap the server names in a refusal, if
+// message is one.
+func queryMaximumResults(message string) (int, bool) {
+	match := queryMaximumResultsPattern.FindStringSubmatch(message)
+	if match == nil {
+		return 0, false
+	}
+	limit, err := strconv.Atoi(match[1])
+	if err != nil || limit <= 0 {
+		return 0, false
+	}
+	return limit, true
 }
 
 func (w *weaviateRepository) ListCollections(ctx context.Context) ([]string, error) {
@@ -928,7 +1125,9 @@ func parseGraphQLResponse(items []interface{}, collectionName string, matchType 
 			if matchType == types.MatchTypeKeywords {
 				score = 1.0
 			} else {
-				score = s
+				// certainty = (1 + cos) / 2; report cosine similarity so
+				// scores compare with the other engines and thresholds.
+				score = 2*s - 1
 			}
 		}
 
