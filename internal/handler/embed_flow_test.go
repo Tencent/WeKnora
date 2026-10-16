@@ -352,3 +352,7 @@ func TestPatchEmbedChatPayloadInvalidBody(t *testing.T) {
 type badReader struct{}
 
 func (badReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+
+func (s *flowTenantSvc) UpdateTenantProfile(context.Context, uint64, *string, *string) (*types.Tenant, error) {
+	panic("unexpected UpdateTenantProfile call")
+}

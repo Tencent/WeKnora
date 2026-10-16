@@ -445,3 +445,7 @@ func TestFormatModelInUseMessage(t *testing.T) {
 		formatModelInUseMessage(0, 0, true),
 	)
 }
+
+func (s *stubTenantServiceForModelDelete) UpdateTenantProfile(context.Context, uint64, *string, *string) (*types.Tenant, error) {
+	panic("unexpected UpdateTenantProfile call")
+}

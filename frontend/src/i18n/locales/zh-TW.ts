@@ -1996,6 +1996,14 @@ export default {
           list_revisions: "取得 Wiki 頁面版本清單",
           get_stats: "取得 Wiki 統計資訊",
         },
+        workspace: {
+          get: "查詢目前空間資訊",
+          update: "修改目前空間基本資訊",
+          list_members: "查詢目前空間成員",
+        },
+        system: {
+          get_info: "查詢版本與系統資訊",
+        },
         web_search_provider: {
           list: "取得網路搜尋服務列表",
           get: "取得網路搜尋服務詳情",

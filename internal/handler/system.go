@@ -281,25 +281,26 @@ func (h *SystemHandler) emitAdminAudit(
 
 // GetSystemInfoResponse defines the response structure for system info
 type GetSystemInfoResponse struct {
-	Version             string `json:"version"`
-	Edition             string `json:"edition"`
-	CommitID            string `json:"commit_id,omitempty"`
-	BuildTime           string `json:"build_time,omitempty"`
-	GoVersion           string `json:"go_version,omitempty"`
-	KeywordIndexEngine  string `json:"keyword_index_engine,omitempty"`
-	VectorStoreEngine   string `json:"vector_store_engine,omitempty"`
-	GraphDatabaseEngine string `json:"graph_database_engine,omitempty"`
-	MinioEnabled        bool   `json:"minio_enabled,omitempty"`
-	DBVersion           string `json:"db_version,omitempty"`
+	Version             string `json:"version" extensions:"x-agent"`
+	Edition             string `json:"edition" extensions:"x-agent"`
+	CommitID            string `json:"commit_id,omitempty" extensions:"x-agent"`
+	BuildTime           string `json:"build_time,omitempty" extensions:"x-agent"`
+	GoVersion           string `json:"go_version,omitempty" extensions:"x-agent"`
+	KeywordIndexEngine  string `json:"keyword_index_engine,omitempty" extensions:"x-agent"`
+	VectorStoreEngine   string `json:"vector_store_engine,omitempty" extensions:"x-agent"`
+	GraphDatabaseEngine string `json:"graph_database_engine,omitempty" extensions:"x-agent"`
+	MinioEnabled        bool   `json:"minio_enabled,omitempty" extensions:"x-agent"`
+	DBVersion           string `json:"db_version,omitempty" extensions:"x-agent"`
+	DBMigrationFailed   bool   `json:"db_migration_failed" extensions:"x-agent"`
 	// DBMigrationError carries the human-readable error message recorded when
 	// the most recent startup migration attempt failed. Empty when migrations
 	// succeeded; non-empty values let the frontend surface a troubleshooting
 	// banner instead of silently hiding the DB version row (see issue #1319).
 	DBMigrationError string `json:"db_migration_error,omitempty"`
 	// StartedAt is the server process boot time (RFC3339, UTC).
-	StartedAt string `json:"started_at,omitempty"`
+	StartedAt string `json:"started_at,omitempty" extensions:"x-agent"`
 	// UptimeSeconds is seconds elapsed since process start.
-	UptimeSeconds int64 `json:"uptime_seconds,omitempty"`
+	UptimeSeconds int64 `json:"uptime_seconds,omitempty" extensions:"x-agent"`
 }
 
 // 编译时注入的版本信息
@@ -317,7 +318,9 @@ var (
 // @Tags         系统
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  GetSystemInfoResponse  "系统信息"
+// @Success      200  {object}  DataResponse{data=GetSystemInfoResponse}  "系统信息"
+// @x-agent {"id":"system.get_info","risk":"read"}
+// @x-agent-hint "Reads the backend version, edition, build, runtime, database migration status and configured engines. Empty or unknown means unavailable information. Engine configuration does not prove connectivity. Raw migration errors are omitted. Frontend build/version is separate and is not reported by this API; do not infer frontend/backend version agreement or available upgrades."
 // @Router       /system/info [get]
 func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
@@ -370,6 +373,7 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 		MinioEnabled:        minioEnabled,
 		DBVersion:           dbVersion,
 		DBMigrationError:    dbMigrationErr,
+		DBMigrationFailed:   dbMigrationErr != "",
 		StartedAt:           startedAt,
 		UptimeSeconds:       uptimeSec,
 	}

@@ -1994,6 +1994,14 @@ export default {
           list_revisions: "Wiki 페이지 버전 목록 조회",
           get_stats: "Wiki 통계 조회",
         },
+        workspace: {
+          get: "현재 워크스페이스 정보 조회",
+          update: "현재 워크스페이스 기본 정보 수정",
+          list_members: "현재 워크스페이스 구성원 조회",
+        },
+        system: {
+          get_info: "버전 및 시스템 정보 조회",
+        },
         web_search_provider: {
           list: "웹 검색 서비스 목록 조회",
           get: "웹 검색 서비스 상세 조회",

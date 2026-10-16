@@ -6740,6 +6740,14 @@ export default {
           list_revisions: "List Wiki page revisions",
           get_stats: "Get Wiki statistics",
         },
+        workspace: {
+          get: "Get current workspace information",
+          update: "Update current workspace profile",
+          list_members: "List current workspace members",
+        },
+        system: {
+          get_info: "Get version and system information",
+        },
         web_search_provider: {
           list: "List web search providers",
           get: "Get web search provider",

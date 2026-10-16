@@ -897,6 +897,9 @@ func mutationDetail(
 	if op.ID == "model.copy" {
 		lines = append(lines, "Copies the saved configuration and credentials on the backend. The copy is not the default and does not change existing model bindings. An unfinished local model will start a background download.")
 	}
+	if op.ID == "workspace.update" {
+		lines = append(lines, "Updates the current workspace profile for all its members. Quota, permissions and other settings stay unchanged.")
+	}
 	if op.ID == "mcp_service.refresh_metadata" {
 		lines = append(lines, "Connects to the MCP server and replaces the saved tool directory without executing tools. OAuth updates only your directory; shared directories require an administrator.")
 	}

@@ -134,6 +134,7 @@ import { createSessions, getSessionsList, getSession, type SessionSummary } from
 import { classifyDateBucket } from '@/components/sessionGrouping'
 import { BUILTIN_WEKNORA_ASSISTANT_ID } from '@/api/agent'
 import { useAuthStore } from '@/stores/auth'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import {
   ASSISTANT_PANEL_MAX_WIDTH,
   ASSISTANT_PANEL_MIN_WIDTH,
@@ -148,6 +149,7 @@ import type { PageContextPayload } from '@/api/chat/streame'
 const { t } = useI18n()
 const assistant = useAssistantStore()
 const auth = useAuthStore()
+useAssistantDataChange(() => { void auth.refreshFromAuthMe() }, { areas: ['workspace'] })
 const conversationOwner = computed(() => `${auth.user?.id}:${auth.effectiveTenantId}`)
 const assistantName = computed(() => assistant.displayName || t('assistant.title'))
 

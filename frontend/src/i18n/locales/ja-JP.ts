@@ -6740,6 +6740,14 @@ export default {
           list_revisions: "Wiki ページの版一覧を取得",
           get_stats: "Wiki の統計を取得",
         },
+        workspace: {
+          get: "現在のワークスペース情報を取得",
+          update: "現在のワークスペース情報を変更",
+          list_members: "現在のワークスペースのメンバーを取得",
+        },
+        system: {
+          get_info: "バージョンとシステム情報を取得",
+        },
         web_search_provider: {
           list: "ウェブ検索サービス一覧を取得",
           get: "ウェブ検索サービス詳細を取得",

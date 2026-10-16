@@ -21,7 +21,7 @@ func TestParserEngineDiscoveryUsesActualWireCaseAndHidesConnectionDetails(t *tes
 	assert.Contains(t, out, `"file_types":["pdf"]`)
 	assert.NotContains(t, out, "private")
 	assert.NotContains(t, out, "docreader_addr")
-	for _, route := range []string{"/api/v1/system/info", "/api/v1/system/parser-engines/check", "/api/v1/system/admin/settings/key"} {
+	for _, route := range []string{"/api/v1/system/parser-engines/check", "/api/v1/system/admin/settings/key"} {
 		_, err := NewCatalog(readOp("system.get", route))
 		require.Error(t, err, route)
 	}

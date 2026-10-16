@@ -19845,10 +19845,27 @@ const docTemplate = `{
                     "200": {
                         "description": "系统信息",
                         "schema": {
-                            "$ref": "#/definitions/internal_handler.GetSystemInfoResponse"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.GetSystemInfoResponse"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "system.get_info",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Reads the backend version, edition, build, runtime, database migration status and configured engines. Empty or unknown means unavailable information. Engine configuration does not prove connectivity. Raw migration errors are omitted. Frontend build/version is separate and is not reported by this API; do not infer frontend/backend version agreement or available upgrades."
             }
         },
         "/system/parser-engines": {
@@ -20127,6 +20144,152 @@ const docTemplate = `{
                         }
                     }
                 }
+            }
+        },
+        "/tenants/current": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "空间管理"
+                ],
+                "summary": "查询当前空间信息",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.WorkspaceResponse"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "workspace.get",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Reads the authenticated current workspace only: name, description, status and storage quota/usage in bytes. Does not switch workspaces. Credentials and internal configuration are not returned."
+            },
+            "patch": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "空间管理"
+                ],
+                "summary": "修改当前空间基本信息",
+                "parameters": [
+                    {
+                        "description": "需要修改的名称或描述",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.updateTenantRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.WorkspaceResponse"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "workspace.update",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "owner",
+                    "target": "workspace.get"
+                },
+                "x-agent-hint": "Changes only the current workspace name and/or description, visible to all its members. Requires workspace owner. At least one field is required; omitted fields are preserved, empty description clears it. Does not change quota, status, members, permissions or credentials."
+            }
+        },
+        "/tenants/current/members": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "空间成员"
+                ],
+                "summary": "查询当前空间成员",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": true,
+                        "description": "按邮箱或用户名筛选",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 1,
+                        "x-agent": true,
+                        "x-agent-maximum": "10000",
+                        "description": "页码，从 1 开始",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 20,
+                        "x-agent": true,
+                        "x-agent-maximum": "50",
+                        "description": "每页成员数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.WorkspaceMembersResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "workspace.list_members",
+                    "max_items": 50,
+                    "risk": "read",
+                    "root": "data.members"
+                },
+                "x-agent-hint": "Lists active members of the current workspace with username, email and workspace role. q filters username/email, not role; to find all owners/admins paginate until meta.total is covered and filter role. Workspace owner/admin roles do not imply system administrator status. Does not include pending invitations or change membership."
             }
         },
         "/tenants/kv/prompt-templates": {
@@ -20496,12 +20659,12 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "空间信息",
+                        "description": "空间名称或描述",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Tenant"
+                            "$ref": "#/definitions/internal_handler.updateTenantRequest"
                         }
                     }
                 ],
@@ -23674,7 +23837,8 @@ const docTemplate = `{
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ContextConfig"
                 },
                 "created_at": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "credentials": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CredentialsConfig"
@@ -23683,16 +23847,19 @@ const docTemplate = `{
                     "$ref": "#/definitions/gorm.DeletedAt"
                 },
                 "description": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": "workspace_id"
                 },
                 "memory_config": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MemoryConfig"
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "parser_engine_config": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineConfig"
@@ -23704,19 +23871,23 @@ const docTemplate = `{
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverEngines"
                 },
                 "status": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "storage_engine_config": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.StorageEngineConfig"
                 },
                 "storage_quota": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "storage_used": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "updated_at": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "web_search_config": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchConfig"
@@ -33017,6 +33188,62 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.TenantMemberResponse": {
+            "type": "object",
+            "properties": {
+                "avatar": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "invited_by": {
+                    "type": "string"
+                },
+                "joined_at": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "role": {
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TenantRole"
+                        }
+                    ],
+                    "x-agent": true
+                },
+                "status": {
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TenantMemberStatus"
+                        }
+                    ],
+                    "x-agent": true
+                },
+                "user_id": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "username": {
+                    "type": "string",
+                    "x-agent": true
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.TenantMemberStatus": {
+            "type": "string",
+            "enum": [
+                "active",
+                "invited",
+                "suspended"
+            ],
+            "x-enum-varnames": [
+                "TenantMemberStatusActive",
+                "TenantMemberStatusInvited",
+                "TenantMemberStatusSuspended"
+            ]
+        },
         "github_com_Tencent_WeKnora_internal_types.TenantRole": {
             "type": "string",
             "enum": [
@@ -35780,46 +36007,62 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "build_time": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "commit_id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "db_migration_error": {
                     "description": "DBMigrationError carries the human-readable error message recorded when\nthe most recent startup migration attempt failed. Empty when migrations\nsucceeded; non-empty values let the frontend surface a troubleshooting\nbanner instead of silently hiding the DB version row (see issue #1319).",
                     "type": "string"
                 },
+                "db_migration_failed": {
+                    "type": "boolean",
+                    "x-agent": true
+                },
                 "db_version": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "edition": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "go_version": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "graph_database_engine": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "keyword_index_engine": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "minio_enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "started_at": {
                     "description": "StartedAt is the server process boot time (RFC3339, UTC).",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "uptime_seconds": {
                     "description": "UptimeSeconds is seconds elapsed since process start.",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "vector_store_engine": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "version": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -38964,6 +39207,40 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.WorkspaceMembersResponse": {
+            "type": "object",
+            "properties": {
+                "members": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TenantMemberResponse"
+                    }
+                },
+                "page": {
+                    "type": "integer",
+                    "x-agent": true
+                },
+                "page_size": {
+                    "type": "integer",
+                    "x-agent": true
+                },
+                "total": {
+                    "type": "integer",
+                    "x-agent": true
+                }
+            }
+        },
+        "internal_handler.WorkspaceResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.TenantResponse"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
         "internal_handler.acceptInvitationByTokenRequest": {
             "type": "object",
             "required": [
@@ -39731,6 +40008,24 @@ const docTemplate = `{
                 "last_active_tenant_id": {
                     "description": "LastActiveTenantID lets clients persist \"after a fresh login,\ndrop me back into this workspace\" across devices. The SPA sends\nthis after every tenant switch; POST /auth/switch-tenant records\nthe same preference server-side. Send a positive workspace id to\nset / replace, or 0 to clear. Membership is validated at next\nlogin, not here. Nil = field omitted from the PATCH and stays\nuntouched.",
                     "type": "integer"
+                }
+            }
+        },
+        "internal_handler.updateTenantRequest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "description": "New description, at most 512 characters; empty clears it. Omission preserves it.",
+                    "type": "string",
+                    "maxLength": 512,
+                    "x-agent": true
+                },
+                "name": {
+                    "description": "New workspace name; cannot be blank, at most 128 characters.",
+                    "type": "string",
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "x-agent": true
                 }
             }
         },

@@ -361,7 +361,7 @@ var allowedRouteAreas = map[string]bool{
 var readOnlyRouteAreas = map[string]bool{
 	"sessions": true,
 	"messages": true,
-	"system":   true, // Only the parser-engines route is reachable; see parseRoute.
+	"system":   true, // Only info and parser-engines are reachable; see parseRoute.
 }
 
 // forbiddenRouteSegments are refused anywhere inside an allowed area:
@@ -551,6 +551,10 @@ func validateOperation(op Operation) error {
 	if readOnlyRouteAreas[area] && op.Risk.Mutates() {
 		return fmt.Errorf("route %q is in an area an agent may only read", op.Route)
 	}
+	if area == "tenants" && op.Method != http.MethodGet &&
+		!(op.Route == "/api/v1/tenants/current" && op.Method == http.MethodPatch && op.Risk == RiskWrite) {
+		return fmt.Errorf("route %q only permits current workspace reads and profile patches", op.Route)
+	}
 
 	seenNames := map[string]bool{}
 	seenWire := map[Location]map[string]bool{}
@@ -737,7 +741,8 @@ func parseRoute(route string) (map[string]bool, string, error) {
 	}
 	rest := strings.TrimPrefix(route, base)
 	area, _, _ := strings.Cut(rest, "/")
-	if (!allowedRouteAreas[area] && rest != "system/parser-engines") || (area == "sandbox-configs" && !sandboxSkillsRoute(rest)) {
+	currentWorkspace := rest == "tenants/current" || rest == "tenants/current/members"
+	if (!allowedRouteAreas[area] && rest != "system/parser-engines" && rest != "system/info" && !currentWorkspace) || (area == "sandbox-configs" && !sandboxSkillsRoute(rest)) {
 		return nil, "", fmt.Errorf("route %q is outside the areas an agent may reach", route)
 	}
 	params := map[string]bool{}
