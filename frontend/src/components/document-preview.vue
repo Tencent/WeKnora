@@ -1504,7 +1504,7 @@ onUnmounted(() => {
     height: 14px;
     margin-right: 6px;
     border: 1px solid @border-color;
-    border-radius: 3px;
+    border-radius: var(--app-radius-xs);
     vertical-align: -2px;
     position: relative;
     &.checked {
