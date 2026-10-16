@@ -484,10 +484,27 @@ curl -X POST $BASE/api/v1/messages/search -H "Authorization: Bearer $TOKEN" \
 
 用途：聊天历史索引统计。权限：Viewer+；API key `message_history`/full。
 
-响应：200 `{"success":true,"data":{indexed_message_count,knowledge_base_size,last_indexed_at,...}}`
+响应：200 `{"success":true,"data":{enabled,embedding_model_id,knowledge_base_id,knowledge_base_name,indexed_message_count,has_indexed_messages}}`。
+
+`embedding_model_id`、`knowledge_base_id`、`knowledge_base_name` 为空时省略。关闭消息索引不会删除已有索引，统计仍包含保留的条目（包括清理未完成的条目）；统计失败不会作为“索引为空”处理。
 
 ```bash
 curl $BASE/api/v1/messages/chat-history-stats -H "Authorization: Bearer $TOKEN"
+```
+
+### POST /api/v1/messages/chat-history-index/clear
+
+用途：清空**当前空间所有成员**的历史消息检索索引。权限：Admin+；API Key 需要 `manage_tenant_settings` 或 full-access。`message_history` 或 `chat` 能力不授予此权限。无请求参数，不能指定其他空间或知识库。
+
+先暂停该空间的自动消息索引，再同步删除历史索引的知识条目、分块和检索向量。不会删除原始消息或会话，也不影响普通知识库。操作不可撤销；关键词历史搜索仍可使用保留的消息内容。
+
+成功返回 200，`data` 与统计接口结构一致：`enabled=false`、`indexed_message_count=0`、`has_indexed_messages=false`，不再包含旧 `knowledge_base_id`。此时可更换 Embedding 模型并重新启用索引；重新启用会创建新索引，仅后续对话被自动索引，不会自动重建旧消息的索引。
+
+如果暂停已保存而后续清理失败，索引保持暂停，旧知识库绑定保留以便重试。请重新获取配置和统计，再重试此接口；不要把超时或失败响应当作清理完成。仍有索引时，即使已关闭索引，配置接口也会拒绝更换模型（409）。接口同步执行，服务端超时为 5 分钟；反向代理和客户端也需要允许相应的等待时间。重复调用不会删除原始消息。
+
+```bash
+curl -X POST $BASE/api/v1/messages/chat-history-index/clear \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ### GET /api/v1/messages/:session_id/load

@@ -21,6 +21,9 @@ type TenantService interface {
 	ListTenants(ctx context.Context) ([]*types.Tenant, error)
 	// UpdateTenant updates a tenant
 	UpdateTenant(ctx context.Context, tenant *types.Tenant) (*types.Tenant, error)
+	// SetChatHistoryConfig persists only this setting. MessageService serializes
+	// calls with history indexing/cleanup; generic tenant updates must not write it.
+	SetChatHistoryConfig(ctx context.Context, tenantID uint64, config *types.ChatHistoryConfig) error
 	// DeleteTenant deletes a tenant
 	DeleteTenant(ctx context.Context, id uint64) error
 	// ListAllTenants lists all tenants (for users with cross-tenant access permission)
@@ -54,6 +57,8 @@ type TenantRepository interface {
 	SearchTenants(ctx context.Context, keyword string, tenantID uint64, page, pageSize int) ([]*types.Tenant, int64, error)
 	// UpdateTenant updates a tenant
 	UpdateTenant(ctx context.Context, tenant *types.Tenant) error
+	// SetChatHistoryConfig is the only update path for the managed history config.
+	SetChatHistoryConfig(ctx context.Context, tenantID uint64, config *types.ChatHistoryConfig) error
 	// DeleteTenant deletes a tenant
 	DeleteTenant(ctx context.Context, id uint64) error
 	// AdjustStorageUsed adjusts the storage used for a tenant

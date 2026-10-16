@@ -116,6 +116,15 @@
 
 侧栏「搜索」可跨会话查找历史消息。空间管理员在「系统设置 → 空间 → 消息管理」启用消息索引并选择 Embedding 模型后，搜索会同时使用语义匹配；未启用时按关键词匹配。
 
+已有消息索引时，Embedding 模型不可直接更换，关闭索引开关也不会删除已有数据。需要更换模型时，空间管理员可在同一页面点击「清空索引」并确认：操作会暂停自动索引，清除**当前空间所有成员**的历史消息检索索引，保留原始消息和会话，不影响普通知识库或基于原消息的关键词搜索。该操作不可撤销。
+
+清理成功后再选择模型、重新启用索引，后续对话将写入新索引；旧消息不会自动重新索引。如果清理失败或超时，请先查看刷新后的配置和统计再重试，不能认为旧索引已经清空。
+
+<Screenshot
+  src="/screenshots/chat-history-clear.png"
+  caption="清空消息索引前，确认影响范围和数据保留规则"
+  hint="消息管理页的确认对话框说明：操作影响当前空间所有成员，暂停索引，保留原始会话和消息，不会自动重建旧消息索引；管理员可以取消或确认清空。" />
+
 ## 查看渠道会话
 
 IM、网页嵌入和 API 调用产生的会话，分别按 IM 身份、访客或 API Key 隔离。普通会话列表默认只展示当前调用者自己的会话。
@@ -171,6 +180,8 @@ IM、网页嵌入和 API 调用产生的会话，分别按 IM 身份、访客或
 智能体的 `citation_enabled` 控制回答正文中的引用角标，省略时默认开启；引用面板不受该字段影响。
 
 历史搜索使用 `POST /api/v1/messages/search`，索引统计使用 `GET /api/v1/messages/chat-history-stats`，两者要求 Viewer+，API Key 需 `message_history` 能力或 full-access。读取会话历史使用 `GET /api/v1/messages/:session_id/load`，要求 Viewer+；API Key 需 `chat` 能力，并受会话归属校验。
+
+清空索引使用 `POST /api/v1/messages/chat-history-index/clear`，要求 Admin+；API Key 需 `manage_tenant_settings` 能力或 full-access。接口同步清理，仅成功后才可认为当前空间的消息索引已清空，详细语义见[会话与聊天 API](../04-api/02-api-chat.md)。
 
 会话列表的 `source` 为空或 `web` 时查询自己的会话；显式查询 `api`、`im` 或 `embed` 的空间视图要求 Admin+，权限不足返回 403。
 

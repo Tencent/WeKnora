@@ -25,12 +25,13 @@ import (
 // Provides functionality for creating, retrieving, updating, and deleting tenants
 // through the REST API endpoints
 type TenantHandler struct {
-	service       interfaces.TenantService
-	apiKeyService interfaces.TenantAPIKeyService
-	userService   interfaces.UserService
-	memberService interfaces.TenantMemberService
-	kbService     interfaces.KnowledgeBaseService
-	config        *config.Config
+	service        interfaces.TenantService
+	apiKeyService  interfaces.TenantAPIKeyService
+	userService    interfaces.UserService
+	memberService  interfaces.TenantMemberService
+	kbService      interfaces.KnowledgeBaseService
+	messageService interfaces.MessageService
+	config         *config.Config
 	// systemSettingSvc resolves runtime tenant policies and limits.
 	// Reading goes DB > ENV >
 	// in-code default, so a SystemAdmin's UI override applies on the
@@ -61,6 +62,7 @@ func NewTenantHandler(
 	userService interfaces.UserService,
 	memberService interfaces.TenantMemberService,
 	kbService interfaces.KnowledgeBaseService,
+	messageService interfaces.MessageService,
 	config *config.Config,
 	systemSettingSvc interfaces.SystemSettingService,
 ) *TenantHandler {
@@ -70,6 +72,7 @@ func NewTenantHandler(
 		userService:      userService,
 		memberService:    memberService,
 		kbService:        kbService,
+		messageService:   messageService,
 		config:           config,
 		systemSettingSvc: systemSettingSvc,
 	}
@@ -1671,54 +1674,7 @@ func (h *TenantHandler) updateTenantChatHistoryConfigInternal(c *gin.Context) {
 		return
 	}
 
-	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil {
-		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
-		return
-	}
-
-	existing := tenant.ChatHistoryConfig
-
-	// Build the new config, preserving the internally-managed knowledge_base_id
-	cfg := &types.ChatHistoryConfig{
-		Enabled:          req.Enabled,
-		EmbeddingModelID: req.EmbeddingModelID,
-		KnowledgeBaseID:  "", // will be set below
-	}
-
-	// Carry over existing KB ID if the embedding model hasn't changed
-	if existing != nil && existing.KnowledgeBaseID != "" {
-		if existing.EmbeddingModelID == req.EmbeddingModelID {
-			cfg.KnowledgeBaseID = existing.KnowledgeBaseID
-		} else {
-			// Embedding model changed — the old KB is incompatible.
-			// We'll create a new one below. The old KB remains but is orphaned (can be cleaned up later).
-			logger.Infof(ctx, "Embedding model changed from %s to %s, will create new chat history KB", existing.EmbeddingModelID, req.EmbeddingModelID)
-		}
-	}
-
-	// Auto-create hidden KB if enabled + model set + no KB yet
-	if cfg.Enabled && cfg.EmbeddingModelID != "" && cfg.KnowledgeBaseID == "" {
-		kb := &types.KnowledgeBase{
-			Name:             "__chat_history__",
-			Type:             types.KnowledgeBaseTypeDocument,
-			IsTemporary:      true,
-			Description:      "Auto-managed knowledge base for chat history message indexing",
-			EmbeddingModelID: cfg.EmbeddingModelID,
-		}
-		createdKB, err := h.kbService.CreateKnowledgeBase(ctx, kb)
-		if err != nil {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to create chat history knowledge base").WithDetails(err.Error()))
-			return
-		}
-		cfg.KnowledgeBaseID = createdKB.ID
-		logger.Infof(ctx, "Auto-created chat history KB: id=%s, embedding_model=%s", createdKB.ID, cfg.EmbeddingModelID)
-	}
-
-	tenant.ChatHistoryConfig = cfg
-	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
+	cfg, err := h.messageService.UpdateChatHistoryConfig(ctx, &req)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			c.Error(appErr)
@@ -1730,7 +1686,7 @@ func (h *TenantHandler) updateTenantChatHistoryConfigInternal(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    updatedTenant.ChatHistoryConfig,
+		"data":    cfg,
 		"message": "Chat history configuration updated successfully",
 	})
 }
