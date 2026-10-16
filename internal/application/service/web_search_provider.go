@@ -56,15 +56,15 @@ func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider 
 		return fmt.Errorf("invalid provider type: %s", provider.Provider)
 	}
 
-	if provider.IsDefault {
-		if err := s.repo.ClearDefault(ctx, provider.TenantID, provider.ID); err != nil {
-			logger.Warnf(ctx, "Failed to clear default providers: %v", err)
-		}
-	}
-
 	if provider.Provider != "" {
 		if err := validateProviderParameters(provider.Provider, provider.Parameters); err != nil {
 			return err
+		}
+	}
+
+	if provider.IsDefault {
+		if err := s.repo.ClearDefault(ctx, provider.TenantID, provider.ID); err != nil {
+			logger.Warnf(ctx, "Failed to clear default providers: %v", err)
 		}
 	}
 

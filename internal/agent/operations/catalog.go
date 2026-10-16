@@ -342,9 +342,10 @@ var allowedRouteAreas = map[string]bool{
 	// Model and MCP responses carry endpoints and headers next to the
 	// names; only fields tagged x-agent are projected, so annotate the
 	// identifying ones and nothing else.
-	"models":       true,
-	"mcp-services": true,
-	// Saved data sources: status, connection tests and sync control only.
+	"models":               true,
+	"mcp-services":         true,
+	"web-search-providers": true,
+	// Saved data sources: status, connection tests, sync settings and control.
 	"datasource": true,
 	// Sandbox configs hold provider credentials; see sandboxSkillsRoute.
 	"sandbox-configs": true,

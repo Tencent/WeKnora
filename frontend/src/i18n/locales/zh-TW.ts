@@ -1917,6 +1917,8 @@ export default {
           resume: "恢復資料來源同步",
           list_sync_logs: "取得資料來源同步紀錄",
           get_sync_log: "取得資料來源同步進度",
+          list_resources: "查詢資料來源可同步資源",
+          update_sync: "修改資料來源同步設定",
         },
         agent: {
           list: "取得智慧體清單",
@@ -1993,6 +1995,14 @@ export default {
           revert: "還原 Wiki 頁面版本",
           list_revisions: "取得 Wiki 頁面版本清單",
           get_stats: "取得 Wiki 統計資訊",
+        },
+        web_search_provider: {
+          list: "取得網路搜尋服務列表",
+          get: "取得網路搜尋服務詳情",
+          list_types: "取得網路搜尋服務類型",
+          test: "測試網路搜尋連線",
+          update: "修改網路搜尋服務",
+          delete: "刪除網路搜尋服務",
         },
         mcp_service: {
           list: "取得 MCP 服務清單",

@@ -41,7 +41,7 @@ func TestNewCatalogRejectsUnsafeDeclarations(t *testing.T) {
 		// Areas whose names extend a sensitive one, or that no list named.
 		"sandbox configs":         readOp("x.get", "/api/v1/sandbox-configs"),
 		"storage backends":        readOp("x.get", "/api/v1/storage-backends"),
-		"web search provider":     readOp("x.get", "/api/v1/web-search-providers/types"),
+		"web search credentials":  readOp("x.get", "/api/v1/web-search-providers/:id/credentials", kb),
 		"im channels":             readOp("x.get", "/api/v1/im-channels"),
 		"agent approvals":         readOp("x.get", "/api/v1/agent/tool-approvals"),
 		"memory":                  readOp("x.get", "/api/v1/memory/items"),

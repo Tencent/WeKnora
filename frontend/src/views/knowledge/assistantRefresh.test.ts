@@ -23,6 +23,7 @@ test('refreshes data source controls after assistant changes and stops on unmoun
   assert.equal(listDataSources.mock.callCount(), 0)
   f.emit(change('data_source.pause'))
   f.emit(change('data_source.sync'))
+  f.emit(change('data_source.update_sync'))
   t.mock.timers.tick(300)
   await flush()
   assert.equal(listDataSources.mock.callCount(), 1)

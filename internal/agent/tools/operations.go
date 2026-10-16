@@ -49,7 +49,7 @@ const findOperationsDescription = "" +
 	"inspecting data sources and sync logs, pausing/resuming sync schedules, triggering syncs, " +
 	"configuring document parsing, chunking, OCR and generated questions, " +
 	"batch updating FAQ enabled/recommended states and tags, reading and refreshing saved MCP tool directories, " +
-	"and checking connections and retrieval. " +
+	"managing saved web search providers and data source sync settings, and checking connections and retrieval. " +
 	"Returns each operation's id, risk and parameters. " +
 	"Call with no arguments to see every operation, or narrow with query (words matched " +
 	"against ids and summaries) or domain. Operation ids must come from this tool; never guess them. " +
@@ -912,6 +912,7 @@ func mutationDetail(
 	}
 	lines = append(lines, agentSettingsDetail(ctx, t, op, params, identity)...)
 	lines = append(lines, parsingAndFAQDetail(op, params)...)
+	lines = append(lines, syncAndSearchDetail(op, params)...)
 	lines = append(lines, serviceSettingsDetail(op, params)...)
 	return strings.Join(lines, "\n")
 }
@@ -978,6 +979,13 @@ func agentSettingsDetail(
 	}
 	if s, ok := rawString(params, "system_prompt"); ok {
 		lines = append(lines, fmt.Sprintf("System prompt (%d characters): %s", len([]rune(s)), excerpt(s)))
+	}
+	if s, ok := rawString(params, "web_search_provider_id"); ok && strings.HasPrefix(op.ID, "agent.") {
+		if s == "" {
+			lines = append(lines, "Web search provider: workspace default")
+		} else {
+			lines = append(lines, "Web search provider: "+resolvedLabels(ctx, t, labelSource{"web_search_provider.get", "web_search_provider_id", []string{"name"}}, []string{s}, identity))
+		}
 	}
 	if s, ok := rawString(params, "model_id"); ok && s != "" {
 		lines = append(lines, "Model: "+resolvedLabels(ctx, t, modelLabels, []string{s}, identity))

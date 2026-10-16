@@ -6661,6 +6661,8 @@ export default {
           resume: "データソースの同期を再開",
           list_sync_logs: "データソースの同期履歴を取得",
           get_sync_log: "データソースの同期進捗を取得",
+          list_resources: "同期可能なリソースを取得",
+          update_sync: "データソースの同期設定を更新",
         },
         agent: {
           list: "エージェント一覧を取得",
@@ -6737,6 +6739,14 @@ export default {
           revert: "Wiki ページの版を復元",
           list_revisions: "Wiki ページの版一覧を取得",
           get_stats: "Wiki の統計を取得",
+        },
+        web_search_provider: {
+          list: "ウェブ検索サービス一覧を取得",
+          get: "ウェブ検索サービス詳細を取得",
+          list_types: "ウェブ検索サービスの種類を取得",
+          test: "ウェブ検索接続をテスト",
+          update: "ウェブ検索サービスを更新",
+          delete: "ウェブ検索サービスを削除",
         },
         mcp_service: {
           list: "MCP サービス一覧を取得",

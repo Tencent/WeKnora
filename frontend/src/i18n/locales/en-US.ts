@@ -6661,6 +6661,8 @@ export default {
           resume: "Resume data source sync",
           list_sync_logs: "List data source sync logs",
           get_sync_log: "Get data source sync progress",
+          list_resources: "List syncable data source resources",
+          update_sync: "Update data source sync settings",
         },
         agent: {
           list: "List agents",
@@ -6737,6 +6739,14 @@ export default {
           revert: "Revert Wiki page revision",
           list_revisions: "List Wiki page revisions",
           get_stats: "Get Wiki statistics",
+        },
+        web_search_provider: {
+          list: "List web search providers",
+          get: "Get web search provider",
+          list_types: "List web search provider types",
+          test: "Test web search connection",
+          update: "Update web search provider",
+          delete: "Delete web search provider",
         },
         mcp_service: {
           list: "List MCP services",

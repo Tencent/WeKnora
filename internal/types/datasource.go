@@ -275,16 +275,16 @@ func (d *DataSourceConfig) StripNonSecretCredentials(connectorType string) {
 // Resource represents a syncable resource (document, folder, space) from external system
 type Resource struct {
 	// Unique identifier in the external system
-	ExternalID string `json:"external_id"`
+	ExternalID string `json:"external_id" extensions:"x-agent"`
 
 	// Display name
-	Name string `json:"name"`
+	Name string `json:"name" extensions:"x-agent"`
 
 	// Resource type (document, folder, space, page, etc.)
-	Type string `json:"type"`
+	Type string `json:"type" extensions:"x-agent"`
 
 	// Optional description
-	Description string `json:"description"`
+	Description string `json:"description" extensions:"x-agent"`
 
 	// URL to access in external system
 	URL string `json:"url"`
@@ -293,10 +293,10 @@ type Resource struct {
 	ModifiedAt time.Time `json:"modified_at"`
 
 	// For hierarchical resources (parent ID if applicable)
-	ParentID string `json:"parent_id,omitempty"`
+	ParentID string `json:"parent_id,omitempty" extensions:"x-agent"`
 
 	// Whether this resource has children that can be expanded
-	HasChildren bool `json:"has_children,omitempty"`
+	HasChildren bool `json:"has_children,omitempty" extensions:"x-agent"`
 
 	// Additional metadata
 	Metadata map[string]interface{} `json:"metadata,omitempty"`

@@ -1915,6 +1915,8 @@ export default {
           resume: "데이터 소스 동기화 재개",
           list_sync_logs: "데이터 소스 동기화 이력 조회",
           get_sync_log: "데이터 소스 동기화 진행 상황 조회",
+          list_resources: "동기화 가능한 리소스 조회",
+          update_sync: "데이터 소스 동기화 설정 수정",
         },
         agent: {
           list: "에이전트 목록 조회",
@@ -1991,6 +1993,14 @@ export default {
           revert: "Wiki 페이지 버전 복원",
           list_revisions: "Wiki 페이지 버전 목록 조회",
           get_stats: "Wiki 통계 조회",
+        },
+        web_search_provider: {
+          list: "웹 검색 서비스 목록 조회",
+          get: "웹 검색 서비스 상세 조회",
+          list_types: "웹 검색 서비스 유형 조회",
+          test: "웹 검색 연결 테스트",
+          update: "웹 검색 서비스 수정",
+          delete: "웹 검색 서비스 삭제",
         },
         mcp_service: {
           list: "MCP 서비스 목록 조회",

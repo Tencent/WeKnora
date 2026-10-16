@@ -1917,6 +1917,8 @@ export default {
           resume: "恢复数据源同步",
           list_sync_logs: "获取数据源同步记录",
           get_sync_log: "获取数据源同步进度",
+          list_resources: "查询数据源可同步资源",
+          update_sync: "修改数据源同步配置",
         },
         agent: {
           list: "获取智能体列表",
@@ -1993,6 +1995,14 @@ export default {
           revert: "还原 Wiki 页面版本",
           list_revisions: "获取 Wiki 页面版本列表",
           get_stats: "获取 Wiki 统计信息",
+        },
+        web_search_provider: {
+          list: "获取网络搜索服务列表",
+          get: "获取网络搜索服务详情",
+          list_types: "获取网络搜索服务类型",
+          test: "测试网络搜索连接",
+          update: "修改网络搜索服务",
+          delete: "删除网络搜索服务",
         },
         mcp_service: {
           list: "获取 MCP 服务列表",

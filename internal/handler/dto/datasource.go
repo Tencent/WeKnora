@@ -24,7 +24,7 @@ type DataSourceResponse struct {
 	KnowledgeBaseID      string               `json:"knowledge_base_id" extensions:"x-agent"`
 	Name                 string               `json:"name" extensions:"x-agent"`
 	Type                 string               `json:"type" extensions:"x-agent"`
-	Config               *DataSourceConfigDTO `json:"config,omitempty"`
+	Config               *DataSourceConfigDTO `json:"config,omitempty" extensions:"x-agent"`
 	SyncSchedule         string               `json:"sync_schedule" extensions:"x-agent"`
 	SyncMode             string               `json:"sync_mode" extensions:"x-agent"`
 	Status               string               `json:"status" extensions:"x-agent"`
@@ -48,7 +48,7 @@ type DataSourceResponse struct {
 // removed by construction. Type, ResourceIDs and Settings remain visible.
 type DataSourceConfigDTO struct {
 	Type        string                 `json:"type"`
-	ResourceIDs []string               `json:"resource_ids,omitempty"`
+	ResourceIDs []string               `json:"resource_ids,omitempty" extensions:"x-agent"`
 	Settings    map[string]interface{} `json:"settings,omitempty"`
 }
 

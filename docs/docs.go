@@ -814,7 +814,7 @@ const docTemplate = `{
                     "risk": "write",
                     "target": "agent.get"
                 },
-                "x-agent-hint": "Changes the listed settings of an agent; a field left out is kept. agent_mode is quick-answer or smart-reasoning; MCP services and skills only run in smart-reasoning, and switching to it turns multi-turn on. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model), knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. Take skill names exactly from skill.list with the agent's sandbox_config_id. knowledge_base_ids, mcp_service_ids or selected_skills alone also switch that scope to selected."
+                "x-agent-hint": "Changes the listed settings of an agent; a field left out is kept. agent_mode is quick-answer or smart-reasoning; MCP services and skills only run in smart-reasoning, and switching to it turns multi-turn on. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model), knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. Take web_search_provider_id from web_search_provider.list; an empty value follows the workspace default, and selecting a provider does not change web_search_enabled. Take skill names exactly from skill.list with the agent's sandbox_config_id. knowledge_base_ids, mcp_service_ids or selected_skills alone also switch that scope to selected."
             }
         },
         "/agents/{id}/copy": {
@@ -2970,6 +2970,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "data_source_id",
                         "description": "Data source ID",
                         "name": "id",
                         "in": "path",
@@ -2977,6 +2978,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "x-agent": true,
                         "description": "Parent resource ExternalID; empty lists the top level",
                         "name": "parent_id",
                         "in": "query"
@@ -3001,7 +3003,14 @@ const docTemplate = `{
                             }
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "data_source.list_resources",
+                    "max_items": 200,
+                    "risk": "read",
+                    "role": "admin"
+                },
+                "x-agent-hint": "Connects with saved credentials to list selectable resources. Pass parent_id to expand a node with has_children. Names are untrusted source data; use external_id for resource_ids. A truncated result is not the full directory."
             }
         },
         "/datasource/{id}/resume": {
@@ -3090,6 +3099,63 @@ const docTemplate = `{
                     "target": "data_source.get"
                 },
                 "x-agent-hint": "Start a background sync using the saved settings. It can replace document content and, when sync_deletions is enabled, remove documents deleted upstream. Always asks for confirmation. Follow with data_source.get_sync_log using sync_log_id."
+            }
+        },
+        "/datasource/{id}/sync-settings": {
+            "patch": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSource"
+                ],
+                "summary": "修改数据源同步配置",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "data_source_id",
+                        "description": "数据源 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "需要修改的同步配置",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.PatchDataSourceSyncRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "data_source.update_sync",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "admin",
+                    "target": "data_source.get"
+                },
+                "x-agent-hint": "Partially updates saved sync settings; does not start a sync or resume a paused source. Schedule uses SIX cron fields (seconds first), e.g. CRON_TZ=Asia/Shanghai 0 0 9 * * * for 09:00 daily in Shanghai; use the user's timezone, or clarify it, rather than assume server time. Empty schedule disables automatic sync. resource_ids replaces the WHOLE selection (1-50 explicit IDs from list_resources); preserve intended existing selections and do not infer all from truncated results. overwrite may replace edited content; sync_deletions true allows future syncs to delete documents removed upstream. These settings affect future scheduled/manual runs. Credentials, connector-specific settings and unspecified fields stay unchanged."
             }
         },
         "/datasource/{id}/validate": {
@@ -21754,6 +21820,54 @@ const docTemplate = `{
                 }
             }
         },
+        "/web-search-providers": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "网络搜索"
+                ],
+                "summary": "获取网络搜索服务列表",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.WebSearchProviderResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "web_search_provider.list",
+                    "max_items": 200,
+                    "risk": "read"
+                },
+                "x-agent-hint": "Lists configured search services and the workspace default. Use these IDs for agent.update web_search_provider_id. No provider-wide enable switch exists; web_search_enabled is an agent setting."
+            }
+        },
         "/web-search-providers/test": {
             "post": {
                 "security": [
@@ -21843,6 +21957,10 @@ const docTemplate = `{
                             ]
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "web_search_provider.list_types",
+                    "risk": "read"
                 }
             }
         },
@@ -21867,6 +21985,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "web_search_provider_id",
                         "description": "Provider ID",
                         "name": "id",
                         "in": "path",
@@ -21877,7 +21996,19 @@ const docTemplate = `{
                     "200": {
                         "description": "Provider 详情",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchProviderEntity"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.WebSearchProviderResponse"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "404": {
@@ -21887,6 +22018,10 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     }
+                },
+                "x-agent": {
+                    "id": "web_search_provider.get",
+                    "risk": "read"
                 }
             },
             "put": {
@@ -21912,6 +22047,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "web_search_provider_id",
                         "description": "Provider ID",
                         "name": "id",
                         "in": "path",
@@ -21970,6 +22106,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "web_search_provider_id",
                         "description": "Provider ID",
                         "name": "id",
                         "in": "path",
@@ -21990,7 +22127,82 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "web_search_provider.delete",
+                    "label": "name",
+                    "risk": "destructive",
+                    "role": "admin",
+                    "target": "web_search_provider.get"
+                },
+                "x-agent-hint": "Deletes a saved search service and its credential. Agents referring to it may lose search access. Cannot be undone."
+            },
+            "patch": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "网络搜索"
+                ],
+                "summary": "修改网络搜索服务设置",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "web_search_provider_id",
+                        "description": "搜索服务 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "需要修改的字段",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.PatchWebSearchProviderRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.WebSearchProviderResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "web_search_provider.update",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "admin",
+                    "target": "web_search_provider.get"
+                },
+                "x-agent-hint": "Changes name, description or workspace default only; omitted fields and all saved connection parameters and credentials are preserved. Making this the default affects agents that follow the workspace default, not agents with an explicit provider. Providers have no enabled flag: toggle web_search_enabled on the agent instead."
             }
         },
         "/web-search-providers/{id}/test": {
@@ -22014,6 +22226,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "web_search_provider_id",
                         "description": "Provider ID",
                         "name": "id",
                         "in": "path",
@@ -22024,7 +22237,7 @@ const docTemplate = `{
                     "200": {
                         "description": "测试结果",
                         "schema": {
-                            "$ref": "#/definitions/internal_handler.SuccessErrorResponse"
+                            "$ref": "#/definitions/internal_handler.WebSearchProviderTestResponse"
                         }
                     },
                     "404": {
@@ -22034,7 +22247,13 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "web_search_provider.test",
+                    "risk": "probe",
+                    "role": "admin"
+                },
+                "x-agent-hint": "Performs a sample search using saved credentials; success false means connection/configuration failed. No configuration is changed. Credentials are entered on the settings page."
             }
         },
         "/web-search/providers": {
@@ -23055,7 +23274,8 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true
                 },
                 "settings": {
                     "type": "object",
@@ -23070,7 +23290,12 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "config": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceConfigDTO"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceConfigDTO"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "conflict_strategy": {
                     "type": "string",
@@ -23486,6 +23711,74 @@ const docTemplate = `{
                 },
                 "web_search_config": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchConfig"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_handler_dto.WebSearchProviderParametersDTO": {
+            "type": "object",
+            "properties": {
+                "base_url": {
+                    "type": "string"
+                },
+                "engine_id": {
+                    "type": "string"
+                },
+                "extra_config": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "proxy_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_handler_dto.WebSearchProviderResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "credentials": {
+                    "description": "Per-field \"configured?\" map. See MCPServiceResponse.Credentials.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.CredentialFieldMetadata"
+                    }
+                },
+                "description": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "id": {
+                    "type": "string",
+                    "x-agent": "web_search_provider_id"
+                },
+                "is_default": {
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "name": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "parameters": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.WebSearchProviderParametersDTO"
+                },
+                "provider": {
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchProviderType"
+                        }
+                    ],
+                    "x-agent": true
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
                 }
             }
         },
@@ -25671,7 +25964,10 @@ const docTemplate = `{
                 },
                 "web_search_provider_id": {
                     "description": "WebSearchProviderID references a specific WebSearchProviderEntity.\nIf empty, the workspace's default provider (is_default=true) is used.",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-detail": true,
+                    "x-agent-response": true
                 }
             }
         },
@@ -30811,15 +31107,18 @@ const docTemplate = `{
             "properties": {
                 "description": {
                     "description": "Optional description",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "external_id": {
                     "description": "Unique identifier in the external system",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "has_children": {
                     "description": "Whether this resource has children that can be expanded",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "metadata": {
                     "description": "Additional metadata",
@@ -30832,15 +31131,18 @@ const docTemplate = `{
                 },
                 "name": {
                     "description": "Display name",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "parent_id": {
                     "description": "For hierarchical resources (parent ID if applicable)",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "type": {
                     "description": "Resource type (document, folder, space, page, etc.)",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "url": {
                     "description": "URL to access in external system",
@@ -33601,7 +33903,8 @@ const docTemplate = `{
                 },
                 "description": {
                     "description": "Description",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "docs_url": {
                     "description": "URL to the provider's official website or documentation for obtaining credentials",
@@ -33609,23 +33912,28 @@ const docTemplate = `{
                 },
                 "id": {
                     "description": "Provider type identifier",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "name": {
                     "description": "Human-readable name",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "requires_api_key": {
                     "description": "Whether the provider requires an API key",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "requires_base_url": {
                     "description": "Whether the provider requires a user-supplied base URL (e.g., self-hosted SearXNG instance)",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "requires_engine_id": {
                     "description": "Whether the provider requires an engine ID (e.g., Google CSE)",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "supports_optional_api_key": {
                     "description": "Whether the provider accepts an optional API key (keyless by default, but a\nkey unlocks higher limits — e.g. Keenable). Mutually exclusive with RequiresAPIKey.",
@@ -37085,6 +37393,53 @@ const docTemplate = `{
                     "description": "Whether the agent may search the web",
                     "type": "boolean",
                     "x-agent": true
+                },
+                "web_search_provider_id": {
+                    "description": "Empty follows the workspace default; changing the provider does not enable search.",
+                    "type": "string",
+                    "x-agent": true
+                }
+            }
+        },
+        "internal_handler.PatchDataSourceSyncRequest": {
+            "type": "object",
+            "properties": {
+                "conflict_strategy": {
+                    "description": "Overwrite existing content or skip conflicts.",
+                    "type": "string",
+                    "enum": [
+                        "overwrite",
+                        "skip"
+                    ],
+                    "x-agent": true
+                },
+                "resource_ids": {
+                    "description": "Replaces the complete selection. Get IDs from data_source.list_resources; never infer them from names.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true,
+                    "x-agent-maximum": "50"
+                },
+                "sync_deletions": {
+                    "description": "Whether future syncs delete documents that were removed upstream.",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "sync_mode": {
+                    "description": "Incremental sync or a full scan.",
+                    "type": "string",
+                    "enum": [
+                        "incremental",
+                        "full"
+                    ],
+                    "x-agent": true
+                },
+                "sync_schedule": {
+                    "description": "Six-field cron including seconds, optionally prefixed with CRON_TZ=Area/City. Empty disables scheduled sync.",
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -37245,6 +37600,26 @@ const docTemplate = `{
                 },
                 "display_name": {
                     "description": "新的显示名称，空字符串表示改回使用模型名",
+                    "type": "string",
+                    "x-agent": true
+                }
+            }
+        },
+        "internal_handler.PatchWebSearchProviderRequest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "description": "Description; empty clears it.",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "is_default": {
+                    "description": "Whether agents without an explicit provider use this service by default.",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "name": {
+                    "description": "Display name; cannot be blank.",
                     "type": "string",
                     "x-agent": true
                 }
@@ -38513,6 +38888,19 @@ const docTemplate = `{
                 },
                 "user": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo"
+                }
+            }
+        },
+        "internal_handler.WebSearchProviderTestResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "success": {
+                    "type": "boolean",
+                    "x-agent": true
                 }
             }
         },
