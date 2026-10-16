@@ -253,6 +253,8 @@ return proposed
 	// corresponding pages, so pruning any earlier can invalidate in-flight
 	// folder assignments.
 	wikiFinalizeOpFolderPrune = "folder_prune"
+	// Index retries remain independent of whether link decoration changes text.
+	wikiFinalizeOpIndexRetry = "index_retry"
 
 	wikiFinalizeAdded   = "added"
 	wikiFinalizeRemoved = "removed"
@@ -916,11 +918,12 @@ func (s *wikiIngestService) scheduleFinalize(ctx context.Context, payload WikiIn
 	}
 }
 
-// scheduleFinalizeRetry is used when folder pruning is waiting for ingest
-// rows to drain. It deliberately has no stable TaskID: the currently-running
+// scheduleFinalizeRetry is used for durable work remaining after a pass,
+// including index recovery and folders waiting for ingest rows to drain.
+// It deliberately has no stable TaskID: the currently-running
 // finalize task still owns that ID until it returns, so reusing it here would
 // coalesce the only retry away. Duplicate retries are harmless because the
-// durable prune row is deleted exactly once and an empty lane is a no-op.
+// durable work is acknowledged under its write lock and an empty lane is a no-op.
 func (s *wikiIngestService) scheduleFinalizeRetry(ctx context.Context, payload WikiIngestPayload) {
 	langfuse.InjectTracing(ctx, &payload)
 	b, _ := json.Marshal(payload)
@@ -931,7 +934,7 @@ func (s *wikiIngestService) scheduleFinalizeRetry(ctx context.Context, payload W
 		asynq.ProcessIn(wikiFolderPruneRetryDelay),
 	)
 	if _, err := s.task.Enqueue(t); err != nil {
-		logger.Warnf(ctx, "wiki finalize: schedule deferred folder prune failed: %v", err)
+		logger.Warnf(ctx, "wiki finalize: schedule deferred work failed: %v", err)
 	}
 }
 

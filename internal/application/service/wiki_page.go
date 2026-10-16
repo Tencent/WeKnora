@@ -422,6 +422,12 @@ func (s *wikiPageService) updateAutoLinkedContent(ctx context.Context, page *typ
 		return fmt.Errorf("get existing page: %w", err)
 	}
 
+	// Commit the retry obligation before changing the body or hiding old hits.
+	// Successful synchronization acknowledges it under the same KB write lock.
+	if err := s.enqueuePageIndexRetry(ctx, existing); err != nil {
+		return err
+	}
+
 	oldOutLinks := existing.OutLinks
 
 	existing.Content = stripWikiInlineChunkCitations(page.Content)
@@ -435,7 +441,71 @@ func (s *wikiPageService) updateAutoLinkedContent(ctx context.Context, page *typ
 	s.removeInLinks(ctx, existing.KnowledgeBaseID, existing.Slug, oldOutLinks)
 	s.updateInLinks(ctx, existing.KnowledgeBaseID, existing.Slug, existing.OutLinks)
 
-	return s.syncPageIndex(ctx, existing)
+	if err := s.syncPageIndex(ctx, existing); err != nil {
+		return err
+	}
+	return s.clearPageIndexRetry(ctx, existing.KnowledgeBaseID, existing.Slug)
+}
+
+// RefreshPageIndex never rewrites content or publishes a draft. Re-read and
+// acknowledge under the write lock so a later failed edit retains its own row.
+func (s *wikiPageService) RefreshPageIndex(ctx context.Context, kbID, slug string) error {
+	return s.withPageWriteLock(ctx, kbID, slug, func() error {
+		page, err := s.repo.GetBySlug(ctx, kbID, slug)
+		if errors.Is(err, repository.ErrWikiPageNotFound) {
+			return s.clearPageIndexRetry(ctx, kbID, slug)
+		}
+		if err != nil {
+			return err
+		}
+		if err := s.enqueuePageIndexRetry(ctx, page); err != nil {
+			return err
+		}
+		if err := s.syncPageIndex(ctx, page); err != nil {
+			return err
+		}
+		return s.clearPageIndexRetry(ctx, kbID, slug)
+	})
+}
+
+func (s *wikiPageService) enqueuePageIndexRetry(ctx context.Context, page *types.WikiPage) error {
+	if s.pageIndex == nil || s.taskPendingRepo == nil {
+		return nil
+	}
+	payload, err := json.Marshal(wikiFinalizeRow{Slug: page.Slug})
+	if err != nil {
+		return err
+	}
+	op := &types.TaskPendingOp{
+		TenantID: page.TenantID, TaskType: wikiFinalizeTaskType, Scope: wikiTaskScope,
+		ScopeID: page.KnowledgeBaseID, Op: wikiFinalizeOpIndexRetry,
+		DedupKey: wikiPageIndexRetryKey(page.Slug), Payload: payload,
+	}
+	if guarded, ok := s.taskPendingRepo.(interfaces.TaskPendingOpsKnowledgeBaseGuard); ok {
+		accepted, err := guarded.EnqueueIfKnowledgeBaseActive(ctx, op)
+		if err != nil {
+			return err
+		}
+		if !accepted {
+			return repository.ErrKnowledgeBaseNotFound
+		}
+		return nil
+	}
+	return s.taskPendingRepo.Enqueue(ctx, op)
+}
+
+// Queue deduplication keys are shorter than the maximum Wiki slug.
+func wikiPageIndexRetryKey(slug string) string {
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("wiki-index-retry:"+slug)).String()
+}
+
+func (s *wikiPageService) clearPageIndexRetry(ctx context.Context, kbID, slug string) error {
+	if s.pageIndex == nil || s.taskPendingRepo == nil {
+		return nil
+	}
+	return s.taskPendingRepo.DeleteByDedupKey(
+		ctx, wikiFinalizeTaskType, wikiTaskScope, kbID, wikiPageIndexRetryKey(slug), wikiFinalizeOpIndexRetry,
+	)
 }
 
 // revisionFromPage builds the immutable snapshot row for the given page

@@ -36,6 +36,9 @@ type WikiPageService interface {
 	// surfacing a version bump to end users is misleading.
 	UpdateAutoLinkedContent(ctx context.Context, page *types.WikiPage) error
 
+	// RefreshPageIndex retries retrieval synchronization from the current stored page.
+	RefreshPageIndex(ctx context.Context, kbID, slug string) error
+
 	// GetPageBySlug retrieves a wiki page by its slug within a knowledge base.
 	GetPageBySlug(ctx context.Context, kbID string, slug string) (*types.WikiPage, error)
 

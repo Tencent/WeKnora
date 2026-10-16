@@ -1151,6 +1151,8 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 	pruneRowIDs := make([]int64, 0)
 	affectedSet := make(map[string]struct{}, len(rows))
 	var affectedSlugs []string
+	var indexRetrySlugs []string
+	indexRetrySet := make(map[string]struct{})
 	var freshRefs []linkRef
 	var folderPruneIDs []string
 	var changeDesc strings.Builder
@@ -1165,6 +1167,15 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		var row wikiFinalizeRow
 		if err := json.Unmarshal(r.Payload, &row); err != nil {
 			logger.Warnf(ctx, "wiki finalize: unmarshal row id=%d failed: %v", r.ID, err)
+			continue
+		}
+		if r.Op == wikiFinalizeOpIndexRetry {
+			if row.Slug != "" {
+				if _, seen := indexRetrySet[row.Slug]; !seen {
+					indexRetrySet[row.Slug] = struct{}{}
+					indexRetrySlugs = append(indexRetrySlugs, row.Slug)
+				}
+			}
 			continue
 		}
 		if r.Op == wikiFinalizeOpFolderPrune {
@@ -1236,6 +1247,14 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		s.injectCrossLinks(ctx, payload.KnowledgeBaseID, affectedSlugs, freshRefs, batchCtx)
 	}
 
+	// These durable rows survive a failed automatic rewrite's index sync. They
+	// must run even when linkifyContent no longer has any text change to make.
+	for _, slug := range indexRetrySlugs {
+		if err := s.wikiService.RefreshPageIndex(ctx, payload.KnowledgeBaseID, slug); err != nil {
+			return fmt.Errorf("wiki finalize: retry page index %s: %w", slug, err)
+		}
+	}
+
 	// A retract may leave one or more generated folders empty. Do not prune
 	// while any ingest row for this KB is queued or claimed: taxonomy planning
 	// creates folders before reduce writes pages, so an apparently-empty folder
@@ -1294,7 +1313,7 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 	}
 	if n, cErr := s.pendingRepo.PendingCount(ctx, wikiFinalizeTaskType, wikiTaskScope, payload.KnowledgeBaseID); cErr == nil && n > 0 {
 		if !pruneDeferred {
-			s.scheduleFinalize(ctx, payload)
+			s.scheduleFinalizeRetry(ctx, payload)
 		}
 		rescheduled = true
 	}
