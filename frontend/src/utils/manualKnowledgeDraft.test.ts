@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildManualDraft, deriveManualTitle } from './manualKnowledgeDraft'
+import {
+  buildManualDraft,
+  collectManualDraftPreferredKbIds,
+  deriveManualTitle,
+  resolveManualDraftKnowledgeBaseId,
+  resolvePreferredKnowledgeBaseId,
+  type ManualDraftReference,
+} from './manualKnowledgeDraft'
 
 const labels = { emptyAnswer: '（无内容）', sourcesHeading: '参考来源' }
 
@@ -64,4 +71,84 @@ test('a long question with no boundary is cut at the limit', () => {
 test('an English question is cut on a word boundary', () => {
   const title = deriveManualTitle('How does a binary view of technology hurt diversity?', '对话摘录')
   assert.equal(title, 'How does a binary view of')
+})
+
+// Soft preference for the chat "add to knowledge base" action: collect cited
+// KB ids in order, then resolve against the editor's writable candidate list.
+
+test('cited answers collect preferred knowledge-base ids in reference order', () => {
+  assert.deepEqual(
+    collectManualDraftPreferredKbIds([
+      { knowledge_base_id: '441ee604-a04d-4c9a-a4bd-1c4e198e6226' },
+    ]),
+    ['441ee604-a04d-4c9a-a4bd-1c4e198e6226'],
+  )
+  const refs = [
+    { knowledge_base_id: 'kb-first' },
+    { knowledge_base_id: 'kb-second' },
+  ]
+  assert.deepEqual(collectManualDraftPreferredKbIds(refs), ['kb-first', 'kb-second'])
+  assert.deepEqual(collectManualDraftPreferredKbIds([...refs].reverse()), [
+    'kb-second',
+    'kb-first',
+  ])
+})
+
+test('blank references are skipped and do not mask a later usable one', () => {
+  assert.deepEqual(collectManualDraftPreferredKbIds([]), [])
+  assert.deepEqual(collectManualDraftPreferredKbIds(undefined), [])
+  assert.deepEqual(collectManualDraftPreferredKbIds(null), [])
+  assert.deepEqual(collectManualDraftPreferredKbIds([{}]), [])
+  assert.deepEqual(collectManualDraftPreferredKbIds([{ knowledge_base_id: '' }]), [])
+  assert.deepEqual(collectManualDraftPreferredKbIds([{ knowledge_base_id: '   ' }]), [])
+  // A web-only reference carries no knowledge_base_id field.
+  const webOnly: ManualDraftReference = {}
+  assert.deepEqual(collectManualDraftPreferredKbIds([webOnly]), [])
+  assert.deepEqual(
+    collectManualDraftPreferredKbIds([
+      { knowledge_base_id: '' },
+      { knowledge_base_id: 'kb-real' },
+    ]),
+    ['kb-real'],
+  )
+  // Duplicates stay once, in first-seen order.
+  assert.deepEqual(
+    collectManualDraftPreferredKbIds([
+      { knowledge_base_id: 'kb-a' },
+      { knowledge_base_id: 'kb-a' },
+      { knowledge_base_id: 'kb-b' },
+    ]),
+    ['kb-a', 'kb-b'],
+  )
+})
+
+test('resolveManualDraftKnowledgeBaseId still returns the first preferred id', () => {
+  assert.equal(
+    resolveManualDraftKnowledgeBaseId([{ knowledge_base_id: 'kb-first' }]),
+    'kb-first',
+  )
+  assert.equal(resolveManualDraftKnowledgeBaseId([]), null)
+})
+
+test('a rejected preference falls through to a later eligible reference', () => {
+  // Viewer-only / FAQ / unknown first citation must not win over a writable later one.
+  assert.equal(
+    resolvePreferredKnowledgeBaseId(['viewer-only', 'writable-doc'], ['writable-doc', 'other']),
+    'writable-doc',
+  )
+})
+
+test('when no preferred target matches, keep the first-option fallback', () => {
+  assert.equal(
+    resolvePreferredKnowledgeBaseId(['viewer-only', 'faq-kb'], ['my-doc', 'shared-doc']),
+    'my-doc',
+  )
+  assert.equal(resolvePreferredKnowledgeBaseId(['missing'], ['only']), 'only')
+})
+
+test('an empty candidate list yields an empty selection', () => {
+  assert.equal(resolvePreferredKnowledgeBaseId(['kb-a'], []), '')
+  assert.equal(resolvePreferredKnowledgeBaseId([], []), '')
+  assert.equal(resolvePreferredKnowledgeBaseId(undefined, []), '')
+  assert.equal(resolvePreferredKnowledgeBaseId(null, ['x']), 'x')
 })
