@@ -46,6 +46,14 @@ export const PREPROCESS_MODE_FORCE = 'force'
 export const PREPROCESS_MODE_FIELD_KEY = 'preprocess_mode'
 
 /**
+ * The field key the smart pipeline declares for the OCR policy's unobserved
+ * clause. Like PREPROCESS_MODE_FIELD_KEY, its value is a knowledge base setting
+ * rather than a pipeline param, and the two must agree with the backend's
+ * imageFieldKeyOCROnUnobserved.
+ */
+export const OCR_ON_UNOBSERVED_FIELD_KEY = 'ocr.on_unobserved'
+
+/**
  * Maps a stored preprocess mode onto the one the panel offers. Anything
  * unrecognised — including the empty string a knowledge base saved before the
  * field existed carries — resolves to auto, the backend's own default, so the

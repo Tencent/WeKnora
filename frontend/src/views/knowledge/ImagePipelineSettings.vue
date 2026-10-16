@@ -33,17 +33,26 @@ const props = defineProps<{
    * such field, and a host that does not manage it simply shows the default.
    */
   preprocessMode?: string
+  /**
+   * The OCR policy's unobserved clause: whether an image whose attributes could
+   * not be observed is still read. Optional for the same reason as the switch
+   * above — it is a knowledge-base setting, and a host that does not manage it
+   * shows the default, which is to read the image.
+   */
+  onUnobserved?: boolean
 }>()
 
 const emit = defineEmits<{
   'update:pipelineId': [value: string]
   'update:params': [value: Record<string, unknown>]
   'update:preprocessMode': [value: string]
+  'update:onUnobserved': [value: boolean]
   /** Turned on while the current pick is configured to do nothing at all. */
   'update:invalid': [value: boolean]
 }>()
 
 import {
+  OCR_ON_UNOBSERVED_FIELD_KEY,
   PREPROCESS_MODE_AUTO,
   PREPROCESS_MODE_FIELD_KEY,
   PREPROCESS_MODE_FORCE,
@@ -92,6 +101,15 @@ const notesOpen = ref(false)
  */
 function isPreprocessModeField(field: ImagePipelineField): boolean {
   return field.key === PREPROCESS_MODE_FIELD_KEY
+}
+
+/**
+ * Whether this field is the OCR policy's unobserved clause, whose value is the
+ * knowledge base's OCR action setting rather than a pipeline param. Declared by
+ * the pipeline that observes attributes — see smartOcrPipeline.Fields.
+ */
+function isOnUnobservedField(field: ImagePipelineField): boolean {
+  return field.key === OCR_ON_UNOBSERVED_FIELD_KEY
 }
 
 /**
@@ -226,6 +244,10 @@ function onPreprocessModeChange(value: string) {
   emit('update:preprocessMode', value)
 }
 
+function onOnUnobservedChange(value: boolean) {
+  emit('update:onUnobserved', value)
+}
+
 function onParamChange(key: string, value: unknown) {
   emit('update:params', { ...props.params, [key]: value })
 }
@@ -317,12 +339,75 @@ watch(() => props.pipelineId, () => {
            order looks wrong, fix the declaration. See the Fields() doc on the
            imagePipeline interface for the full contract.
            =================================================================== -->
+      <!-- Two of the fields a pipeline may declare hold knowledge-base
+           settings rather than pipeline params — the straightening switch and
+           the OCR policy's unobserved clause — so their controls are bound to
+           those settings. Where they sit and what they are called still come
+           from the pipeline that declared them; only the binding differs. -->
       <div v-if="standingFields.length" class="image-pipeline-section">
-      <div v-for="field in standingFields" :key="field.key" class="image-pipeline-row">
-        <div class="image-pipeline-info">
-          <label>{{ fieldLabel(field) }}</label>
-          <p v-if="fieldDescription(field)" class="desc">{{ fieldDescription(field) }}</p>
+        <div v-for="field in standingFields" :key="field.key" class="image-pipeline-row">
+          <div class="image-pipeline-info">
+            <label>{{ fieldLabel(field) }}</label>
+            <p v-if="fieldDescription(field)" class="desc">{{ fieldDescription(field) }}</p>
+          </div>
+          <div v-if="isPreprocessModeField(field)" class="image-pipeline-control">
+            <t-select
+              :value="preprocessMode || PREPROCESS_MODE_AUTO"
+              @change="onPreprocessModeChange"
+            >
+              <t-option
+                v-for="mode in field.options ?? []"
+                :key="mode"
+                :value="mode"
+                :label="preprocessModeLabel(mode)"
+              />
+            </t-select>
+          </div>
+          <div v-else-if="isOnUnobservedField(field)" class="image-pipeline-control">
+            <t-switch
+              :value="onUnobserved !== false"
+              size="medium"
+              @change="onOnUnobservedChange"
+            />
+          </div>
+          <div v-else class="image-pipeline-control">
+            <t-switch
+              v-if="field.type === 'bool'"
+              :value="Boolean(paramValue(field))"
+              size="medium"
+              @change="(value: boolean) => onParamChange(field.key, value)"
+            />
+            <t-select
+              v-else-if="field.type === 'enum'"
+              :value="String(paramValue(field) ?? '')"
+              clearable
+              @change="(value: string) => onParamChange(field.key, value)"
+            >
+              <t-option v-for="opt in field.options ?? []" :key="opt" :value="opt" :label="opt" />
+            </t-select>
+            <t-input
+              v-else
+              :value="String(paramValue(field) ?? '')"
+              @change="(value: string) => onParamChange(field.key, value)"
+            />
+          </div>
         </div>
+      </div>
+
+      <!-- The advanced switches, folded away. The toggle is a real button, so
+           the title opens it as well as the arrow. -->
+      <template v-if="advancedFields.length">
+        <div class="image-pipeline-section">
+          <button type="button" class="advanced-toggle" @click="advancedOpen = !advancedOpen">
+            <t-icon name="chevron-right" class="toggle-arrow" :class="{ open: advancedOpen }" />
+            <span>{{ $t('knowledgeEditor.advanced.multimodal.advancedSettingsLabel') }}</span>
+          </button>
+          <div v-if="advancedOpen" class="advanced-section">
+            <div v-for="field in advancedFields" :key="field.key" class="image-pipeline-row">
+              <div class="image-pipeline-info">
+                <label>{{ fieldLabel(field) }}</label>
+                <p v-if="fieldDescription(field)" class="desc">{{ fieldDescription(field) }}</p>
+              </div>
               <div v-if="isPreprocessModeField(field)" class="image-pipeline-control">
                 <t-select
                   :value="preprocessMode || PREPROCESS_MODE_AUTO"
@@ -335,6 +420,13 @@ watch(() => props.pipelineId, () => {
                     :label="preprocessModeLabel(mode)"
                   />
                 </t-select>
+              </div>
+              <div v-else-if="isOnUnobservedField(field)" class="image-pipeline-control">
+                <t-switch
+                  :value="onUnobserved !== false"
+                  size="medium"
+                  @change="onOnUnobservedChange"
+                />
               </div>
               <div v-else class="image-pipeline-control">
                 <t-switch
@@ -357,66 +449,13 @@ watch(() => props.pipelineId, () => {
                   @change="(value: string) => onParamChange(field.key, value)"
                 />
               </div>
-      </div>
-      </div>
-
-      <!-- The advanced switches, folded away. The toggle is a real button, so
-           the title opens it as well as the arrow. -->
-      <template v-if="advancedFields.length">
-        <div class="image-pipeline-divider" />
-        <div class="image-pipeline-section">
-          <button type="button" class="advanced-toggle" @click="advancedOpen = !advancedOpen">
-            <t-icon name="chevron-right" class="toggle-arrow" :class="{ open: advancedOpen }" />
-            <span>{{ $t('knowledgeEditor.advanced.multimodal.advancedSettingsLabel') }}</span>
-          </button>
-          <div v-if="advancedOpen" class="advanced-section">
-          <div v-for="field in advancedFields" :key="field.key" class="image-pipeline-row">
-            <div class="image-pipeline-info">
-              <label>{{ fieldLabel(field) }}</label>
-              <p v-if="fieldDescription(field)" class="desc">{{ fieldDescription(field) }}</p>
             </div>
-                  <div v-if="isPreprocessModeField(field)" class="image-pipeline-control">
-                    <t-select
-                      :value="preprocessMode || PREPROCESS_MODE_AUTO"
-                      @change="onPreprocessModeChange"
-                    >
-                      <t-option
-                        v-for="mode in field.options ?? []"
-                        :key="mode"
-                        :value="mode"
-                        :label="preprocessModeLabel(mode)"
-                      />
-                    </t-select>
-                  </div>
-                  <div v-else class="image-pipeline-control">
-                    <t-switch
-                      v-if="field.type === 'bool'"
-                      :value="Boolean(paramValue(field))"
-                      size="medium"
-                      @change="(value: boolean) => onParamChange(field.key, value)"
-                    />
-                    <t-select
-                      v-else-if="field.type === 'enum'"
-                      :value="String(paramValue(field) ?? '')"
-                      clearable
-                      @change="(value: string) => onParamChange(field.key, value)"
-                    >
-                      <t-option v-for="opt in field.options ?? []" :key="opt" :value="opt" :label="opt" />
-                    </t-select>
-                    <t-input
-                      v-else
-                      :value="String(paramValue(field) ?? '')"
-                      @change="(value: string) => onParamChange(field.key, value)"
-                    />
-                  </div>
-          </div>
           </div>
         </div>
       </template>
 
       <!-- What the pipeline wants said about itself, folded away with it. -->
       <template v-if="noteFields.length">
-        <div class="image-pipeline-divider" />
         <div class="image-pipeline-section">
           <button type="button" class="advanced-toggle" @click="notesOpen = !notesOpen">
             <t-icon name="chevron-right" class="toggle-arrow" :class="{ open: notesOpen }" />

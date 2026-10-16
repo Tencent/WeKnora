@@ -73,8 +73,9 @@ var smartPreprocessField = types.ImageFieldDef{
 // observation call rather than through a caption action of its own. A knowledge
 // base that never touched these switches still behaves as it always did.
 //
-// Declared in the three runs the panel renders: the standing switch (the
-// straightening choice, which is this pipeline's whole reason to exist), then
+// Declared in the three runs the panel renders: the standing switches (the
+// straightening choice, which is this pipeline's whole reason to exist, and the
+// clause that decides what happens when the observation does not answer), then
 // the advanced thinking switches, then the note. The straightening switch lives
 // here rather than in the manual pipeline's list because the manual pipeline
 // has no observation round to drive it — nothing there could answer "does this
@@ -82,6 +83,7 @@ var smartPreprocessField = types.ImageFieldDef{
 func (smartOcrPipeline) Fields() []types.ImageFieldDef {
 	return []types.ImageFieldDef{
 		smartPreprocessField,
+		imageActionOnUnobservedField,
 		// The thinking switches are action-level fields, declared once at the
 		// action layer and carried in here.
 		imageActionThinkingFields[0],

@@ -461,26 +461,12 @@
                             v-model:params="uiState.imagePipelineParams"
                             :pipeline-id="uiState.imagePipeline"
                             :preprocess-mode="uiState.preprocessMode"
+                            :on-unobserved="uiState.imageActions.ocr.on_unobserved"
                             @update:pipeline-id="uiState.imagePipeline = $event"
                             @update:preprocess-mode="uiState.preprocessMode = $event"
+                            @update:on-unobserved="uiState.imageActions.ocr.on_unobserved = $event"
                             @update:invalid="imagePipelineInvalid = $event"
                           />
-                        </div>
-                        <!-- 观察失败兜底：开关，归在开关区（说明随开关就地显示）。此前它
-                             嵌在 setting-row-vertical 里，而垂直行的后代选择器会把
-                             .setting-info / .setting-control 都撑成 100% 宽，水平排布必然
-                             溢出、开关被顶到容器右缘之外，所以它与其它开关行同级。 -->
-                        <div
-                          v-if="uiState.multimodalConfig.enabled && uiState.imagePipeline === IMAGE_PIPELINE_SMARTOCR"
-                          class="setting-row image-panel-flush"
-                        >
-                          <div class="setting-info">
-                            <label>{{ t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobserved') }}</label>
-                            <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobservedDesc') }}</p>
-                          </div>
-                          <div class="setting-control">
-                            <t-switch v-model="uiState.imageActions.ocr.on_unobserved" size="medium" />
-                          </div>
                         </div>
                         <div
                           v-if="uiState.multimodalConfig.enabled && uiState.imagePipeline === IMAGE_PIPELINE_SMARTOCR"
