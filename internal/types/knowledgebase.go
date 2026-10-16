@@ -581,7 +581,7 @@ type ImageProcessingConfig struct {
 	// PreprocessMode controls the page-straightening step that runs before OCR:
 	//
 	//	auto   (default) the describe round also observes the page's geometry
-	//	       (contain.margin / contain.upright) and the page is straightened
+	//	       (layout.margin / layout.upright) and the page is straightened
 	//	       and cropped only when those say it is worth it;
 	//	off    never preprocess, and leave the describe prompt exactly as it was
 	//	       before this feature existed;
