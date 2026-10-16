@@ -93,13 +93,13 @@ func TestImageOCRRejectsInvalidContentBeforePersistence(t *testing.T) {
 					// OCR answered no_text: a genuine blank, not a failure.
 					require.NoError(t, err)
 				}
-				require.Equal(t, tc.status, out["ocr_status"])
-				require.Equal(t, 0, out["ocr_chars"])
+				require.Equal(t, tc.status, out[keyOCRResult])
+				require.Equal(t, 0, out[keyOCRChars])
 				require.NotContains(t, out, "ocr_preview")
 				require.Equal(t, tc.code, tracker.failed["multimodal.image[0].ocr"])
 				if tc.code != "" {
-					require.Equal(t, tc.code, out["ocr_error_code"])
-					require.NotEmpty(t, out["ocr_error"])
+					require.Equal(t, tc.code, out[keyOCRErrorCode])
+					require.NotEmpty(t, out[keyOCRError])
 					require.NotContains(t, tracker.outputs, "multimodal.image[0].ocr",
 						"failed OCR must not be marked done")
 					if caption {
@@ -109,8 +109,8 @@ func TestImageOCRRejectsInvalidContentBeforePersistence(t *testing.T) {
 					}
 				} else {
 					require.Empty(t, tracker.failed)
-					require.NotContains(t, out, "ocr_error")
-					require.NotContains(t, out, "ocr_error_code")
+					require.NotContains(t, out, keyOCRError)
+					require.NotContains(t, out, keyOCRErrorCode)
 					// Every image states its end state now, so "no text" is a
 					// verdict rather than an absent key: nothing was extracted
 					// when there was no caption to keep, and the run is a plain

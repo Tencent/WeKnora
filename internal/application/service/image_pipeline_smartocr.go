@@ -162,11 +162,11 @@ func (smartOcrPipeline) Run(ctx context.Context, r *runContext) error {
 		if observationFailed {
 			logger.Infof(ctx, "[ImageMultimodal] Skipping OCR for %s (observation failed, attrs=%v)",
 				r.payload.ImageURL, r.imageInfo.Attrs.Attrs)
-			r.out["ocr_status"] = "skipped_observation_failed"
+			r.out[keyOCRResult] = "skipped_observation_failed"
 		} else {
 			logger.Infof(ctx, "[ImageMultimodal] Skipping OCR for %s (attrs=%v)",
 				r.payload.ImageURL, r.imageInfo.Attrs.Attrs)
-			r.out["ocr_status"] = "skipped_attr_policy"
+			r.out[keyOCRResult] = "skipped_attr_policy"
 		}
 		return nil
 	}
