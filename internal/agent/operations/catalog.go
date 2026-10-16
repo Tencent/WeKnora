@@ -320,8 +320,9 @@ var (
 )
 
 // allowedRouteAreas are the first path segments under /api/v1 an operation
-// may live in: the user's knowledge content, their agents, and the models
-// and MCP services an agent can be bound to. Every other area is refused,
+// may live in: the user's knowledge content, their agents, the models and
+// MCP services an agent can be bound to, and their own conversations. Every
+// other area is refused,
 // so an API added later (credentials, integrations, identity, the agent's
 // own approval and prompt endpoints) stays unreachable until it is listed
 // here on purpose. Catalog construction fails otherwise, so a careless
@@ -342,6 +343,18 @@ var allowedRouteAreas = map[string]bool{
 	"mcp-services": true,
 	// Sandbox configs hold provider credentials; see sandboxSkillsRoute.
 	"sandbox-configs": true,
+	// The caller's own conversations, read-only; see readOnlyRouteAreas.
+	"sessions": true,
+	"messages": true,
+}
+
+// readOnlyRouteAreas admit only operations that change nothing. Deleting,
+// stopping, rewinding or steering a conversation is the user's to do in the
+// chat itself, and content the assistant reads (documents, past answers)
+// must never be able to talk it into erasing history.
+var readOnlyRouteAreas = map[string]bool{
+	"sessions": true,
+	"messages": true,
 }
 
 // forbiddenRouteSegments are refused anywhere inside an allowed area:
@@ -523,9 +536,12 @@ func validateOperation(op Operation) error {
 	if !op.Role.IsValid() {
 		return fmt.Errorf("invalid role %q", op.Role)
 	}
-	routeParams, err := parseRoute(op.Route)
+	routeParams, area, err := parseRoute(op.Route)
 	if err != nil {
 		return err
+	}
+	if readOnlyRouteAreas[area] && op.Risk.Mutates() {
+		return fmt.Errorf("route %q is in an area an agent may only read", op.Route)
 	}
 
 	seenNames := map[string]bool{}
@@ -705,41 +721,41 @@ func (c *Catalog) validateRead(op Operation, id, label, item string, itemType Pa
 }
 
 // parseRoute checks that route is a clean absolute path in an allowed area
-// under /api/v1, returning its parameter segment names.
-func parseRoute(route string) (map[string]bool, error) {
+// under /api/v1, returning its parameter segment names and its area.
+func parseRoute(route string) (map[string]bool, string, error) {
 	const base = "/api/v1/"
 	if !strings.HasPrefix(route, base) {
-		return nil, fmt.Errorf("route %q must be under /api/v1", route)
+		return nil, "", fmt.Errorf("route %q must be under /api/v1", route)
 	}
 	rest := strings.TrimPrefix(route, base)
 	area, _, _ := strings.Cut(rest, "/")
 	if !allowedRouteAreas[area] || (area == "sandbox-configs" && !sandboxSkillsRoute(rest)) {
-		return nil, fmt.Errorf("route %q is outside the areas an agent may reach", route)
+		return nil, "", fmt.Errorf("route %q is outside the areas an agent may reach", route)
 	}
 	params := map[string]bool{}
 	segments := strings.Split(strings.TrimPrefix(route, "/"), "/")
 	for i, seg := range segments {
 		if seg == "" {
-			return nil, fmt.Errorf("route %q has an empty segment", route)
+			return nil, "", fmt.Errorf("route %q has an empty segment", route)
 		}
 		if forbiddenRouteSegments[seg] {
-			return nil, fmt.Errorf("route %q reaches %q, which an agent may not", route, seg)
+			return nil, "", fmt.Errorf("route %q reaches %q, which an agent may not", route, seg)
 		}
 		if seg[0] == ':' || seg[0] == '*' {
 			if !routeParamPattern.MatchString(seg) {
-				return nil, fmt.Errorf("route %q has an invalid parameter %q", route, seg)
+				return nil, "", fmt.Errorf("route %q has an invalid parameter %q", route, seg)
 			}
 			if seg[0] == '*' && i != len(segments)-1 {
-				return nil, fmt.Errorf("route %q: catch-all must be last", route)
+				return nil, "", fmt.Errorf("route %q: catch-all must be last", route)
 			}
 			params[seg[1:]] = true
 			continue
 		}
 		for _, r := range seg {
 			if !unicode.IsLower(r) && !unicode.IsDigit(r) && r != '-' && r != '_' {
-				return nil, fmt.Errorf("route %q has an invalid segment %q", route, seg)
+				return nil, "", fmt.Errorf("route %q has an invalid segment %q", route, seg)
 			}
 		}
 	}
-	return params, nil
+	return params, area, nil
 }

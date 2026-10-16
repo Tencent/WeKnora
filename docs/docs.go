@@ -12793,7 +12793,12 @@ const docTemplate = `{
                             ]
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "message.chat_history_stats",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Whether the workspace indexes conversations for search by meaning, and how many messages are indexed. When it is off, message.search only matches exact words; the setting is under settings section chathistory."
             }
         },
         "/messages/search": {
@@ -12853,7 +12858,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "message.search",
+                    "max_items": 20,
+                    "risk": "probe",
+                    "root": "data.items"
+                },
+                "x-agent-hint": "Finds exchanges in the user's own past conversations by what was said, each with its session_id. Matching is by meaning only when message indexing is on (see message.chat_history_stats); otherwise words must appear verbatim, so retry with the user's exact wording before concluding nothing matches."
             }
         },
         "/messages/{session_id}/load": {
@@ -12880,20 +12892,25 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": true,
                         "description": "会话ID",
                         "name": "session_id",
                         "in": "path",
                         "required": true
                     },
                     {
+                        "minimum": 1,
                         "type": "integer",
                         "default": 20,
+                        "x-agent": true,
+                        "x-agent-maximum": "20",
                         "description": "返回数量",
                         "name": "limit",
                         "in": "query"
                     },
                     {
                         "type": "string",
+                        "x-agent": true,
                         "description": "在此时间之前的消息（RFC3339Nano格式）",
                         "name": "before_time",
                         "in": "query"
@@ -12938,7 +12955,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "message.list",
+                    "risk": "read"
+                },
+                "x-agent-hint": "The latest messages of one of the user's conversations, oldest first. For earlier ones, pass the created_at of the first message as before_time."
             }
         },
         "/messages/{session_id}/{id}": {
@@ -16060,13 +16082,20 @@ const docTemplate = `{
                 "summary": "获取会话列表",
                 "parameters": [
                     {
+                        "minimum": 1,
                         "type": "integer",
+                        "x-agent": true,
+                        "x-agent-maximum": "10000",
                         "description": "页码",
                         "name": "page",
                         "in": "query"
                     },
                     {
+                        "maximum": 1000,
+                        "minimum": 1,
                         "type": "integer",
+                        "x-agent": true,
+                        "x-agent-maximum": "20",
                         "description": "每页数量",
                         "name": "page_size",
                         "in": "query"
@@ -16076,12 +16105,14 @@ const docTemplate = `{
                             "assistant"
                         ],
                         "type": "string",
+                        "x-agent": true,
                         "description": "会话类型：空值仅普通会话；assistant 仅当前用户的助手会话",
                         "name": "kind",
                         "in": "query"
                     },
                     {
                         "type": "string",
+                        "x-agent": true,
                         "description": "标题模糊搜索",
                         "name": "keyword",
                         "in": "query"
@@ -16103,8 +16134,7 @@ const docTemplate = `{
                     "200": {
                         "description": "会话列表",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/internal_handler_session.sessionListResponse"
                         }
                     },
                     "400": {
@@ -16113,7 +16143,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "session.list",
+                    "risk": "read"
+                },
+                "x-agent-hint": "The user's own conversations, pinned ones first, then most recently active. keyword matches titles only, which are often auto-generated; to find a conversation by what was said, use message.search. Read one with message.list."
             },
             "post": {
                 "security": [
@@ -24161,11 +24196,13 @@ const docTemplate = `{
             "properties": {
                 "embedding_model_id": {
                     "description": "ID of the embedding model used",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "enabled": {
                     "description": "Whether the chat history KB is configured and enabled",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "has_indexed_messages": {
                     "description": "Whether there are any indexed messages (used by frontend to lock embedding model)",
@@ -24173,7 +24210,8 @@ const docTemplate = `{
                 },
                 "indexed_message_count": {
                     "description": "Number of indexed message entries (Knowledge count)",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "knowledge_base_id": {
                     "description": "ID of the knowledge base used for chat history",
@@ -28490,11 +28528,16 @@ const docTemplate = `{
                 },
                 "content": {
                     "description": "Message text content",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-runes": "1500",
+                    "x-agent-response": true
                 },
                 "created_at": {
                     "description": "Message creation timestamp",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "deleted_at": {
                     "description": "Soft delete timestamp",
@@ -28506,7 +28549,9 @@ const docTemplate = `{
                 },
                 "id": {
                     "description": "Unique identifier for the message",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "message_id",
+                    "x-agent-response": true
                 },
                 "images": {
                     "description": "Attached images with OCR/Caption text (for user messages)",
@@ -28555,11 +28600,15 @@ const docTemplate = `{
                 },
                 "request_id": {
                     "description": "Request identifier for tracking API requests",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "role": {
                     "description": "Message role: \"user\", \"assistant\", \"system\"",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "run_state": {
                     "description": "RunState refines an incomplete message: MessageRunStateAwaitingInput\nmeans the run ended suspended on a prompt instead of still generating.\nEmpty means IsCompleted alone describes the message.",
@@ -28704,23 +28753,30 @@ const docTemplate = `{
             "properties": {
                 "answer_content": {
                     "description": "Assistant answer content (role=assistant), may be empty if only Q matched",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-runes": "1000"
                 },
                 "created_at": {
                     "description": "Timestamp of the earliest message in the group",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "match_type": {
                     "description": "How this result was matched: \"keyword\", \"vector\", or \"hybrid\"",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "query_content": {
                     "description": "User query content (role=user)",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-runes": "600"
                 },
                 "request_id": {
                     "description": "The request_id that groups Q\u0026A together",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "score": {
                     "description": "Best score among the matched messages in this group",
@@ -28728,10 +28784,12 @@ const docTemplate = `{
                 },
                 "session_id": {
                     "description": "Session info",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "session_title": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -28747,7 +28805,8 @@ const docTemplate = `{
                 },
                 "total": {
                     "description": "Total number of results",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 }
             }
         },
@@ -30880,7 +30939,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "created_at": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "deleted_at": {
                     "$ref": "#/definitions/gorm.DeletedAt"
@@ -30899,7 +30960,9 @@ const docTemplate = `{
                 },
                 "id": {
                     "description": "ID",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "session_id",
+                    "x-agent-response": true
                 },
                 "im_platform": {
                     "description": "IMPlatform is the originating IM platform (e.g. \"feishu\", \"wecom\") when\nthis session is bound to an IM channel. It is not stored on the sessions\ntable (it lives in im_channel_sessions) and is populated on read so the\nWeb console can classify a session's origin folder without a list query.",
@@ -30907,7 +30970,9 @@ const docTemplate = `{
                 },
                 "is_pinned": {
                     "description": "IsPinned indicates whether the session is pinned in the list.",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "kind": {
                     "description": "Kind is empty for ordinary chats and SessionKindAssistant for assistant\nconversations; it is set at creation and never updated.",
@@ -30939,10 +31004,14 @@ const docTemplate = `{
                 },
                 "title": {
                     "description": "Title",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "updated_at": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "user_id": {
                     "description": "UserID is the owner scope for this session. WeKnora user UUIDs, API\nexternal-user principals, and embed visitor principals all use this column.",
@@ -31006,6 +31075,104 @@ const docTemplate = `{
                 },
                 "web_search_enabled": {
                     "type": "boolean"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.SessionListItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "deleted_at": {
+                    "$ref": "#/definitions/gorm.DeletedAt"
+                },
+                "description": {
+                    "description": "Description",
+                    "type": "string"
+                },
+                "forked_from_message_id": {
+                    "description": "ForkedFromMessageID is the user or assistant message, IN THE PARENT\nSESSION, that the fork branched at. For a user point, messages strictly\nbefore it were copied here. For an assistant point, that answer is\nincluded so the branch continues after it.",
+                    "type": "string"
+                },
+                "host_workspace_dir": {
+                    "description": "HostWorkspaceDir is the user-selected project directory this session\noperates in, for the WeKnora Lite host sandbox only. Empty means the session\ngets an auto-allocated workspace instead.\n\nWritten once at creation and never updated: re-pointing a live session\nat a different directory would leave its transcript describing files\nthat are no longer there. Standard edition never writes it.",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "ID",
+                    "type": "string",
+                    "x-agent": "session_id",
+                    "x-agent-response": true
+                },
+                "im_agent_id": {
+                    "type": "string"
+                },
+                "im_channel_id": {
+                    "type": "string"
+                },
+                "im_chat_id": {
+                    "type": "string"
+                },
+                "im_platform": {
+                    "type": "string"
+                },
+                "im_thread_id": {
+                    "type": "string"
+                },
+                "im_user_id": {
+                    "type": "string"
+                },
+                "is_pinned": {
+                    "description": "IsPinned indicates whether the session is pinned in the list.",
+                    "type": "boolean",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "kind": {
+                    "description": "Kind is empty for ordinary chats and SessionKindAssistant for assistant\nconversations; it is set at creation and never updated.",
+                    "type": "string"
+                },
+                "last_request_state": {
+                    "description": "LastRequestState records the input-bar state used the last time this\nsession sent a question (agent, model, KB scope, web search, MCPs).\nPersisted on every successful POST to /knowledge-chat or /agent-chat so\nthat reopening the session can restore the original request context to\nthe chat UI. Stored in the legacy sessions.agent_config JSONB column to\navoid a new migration; the shape used today is ` + "`" + `SessionLastRequestState` + "`" + `.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SessionLastRequestState"
+                        }
+                    ]
+                },
+                "parent_session_id": {
+                    "description": "ParentSessionID names the session this one was forked from. Empty for\nordinary sessions. Deliberately not a foreign key: the parent may be\ndeleted while the branch lives on, and a branch must not cascade away\nwith it. A dangling value simply renders as an ordinary session.",
+                    "type": "string"
+                },
+                "pinned_at": {
+                    "description": "PinnedAt records when the session was pinned; nil when not pinned.",
+                    "type": "string"
+                },
+                "sandbox_config_id": {
+                    "description": "SandboxConfigID pins which sandbox config this session's CURRENT live\nsandbox was created on. Empty means no live sandbox;\nSandboxConfigIDGlobalDefault means the deployment-wide default config.\n\nThis is an ephemeral pin that dies with the sandbox, not a permanent\nowner: sessions outlive sandboxes by months, so treating it as\npermanent would make \"no session references this config\" never true.",
+                    "type": "string"
+                },
+                "tenant_id": {
+                    "description": "Workspace ID",
+                    "type": "integer"
+                },
+                "title": {
+                    "description": "Title",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "updated_at": {
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "user_id": {
+                    "description": "UserID is the owner scope for this session. WeKnora user UUIDs, API\nexternal-user principals, and embed visitor principals all use this column.",
+                    "type": "string"
                 }
             }
         },
@@ -36766,7 +36933,10 @@ const docTemplate = `{
             "properties": {
                 "limit": {
                     "description": "Maximum number of results to return (default: 20)",
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 1,
+                    "x-agent": true,
+                    "x-agent-maximum": "20"
                 },
                 "mode": {
                     "description": "Search mode: \"keyword\", \"vector\", \"hybrid\" (default: \"hybrid\")",
@@ -36774,7 +36944,8 @@ const docTemplate = `{
                 },
                 "query": {
                     "description": "Query text for search",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "session_ids": {
                     "description": "Filter by specific session IDs (optional)",
@@ -38683,6 +38854,32 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "internal_handler_session.sessionListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SessionListItem"
+                    }
+                },
+                "page": {
+                    "type": "integer",
+                    "x-agent": true
+                },
+                "page_size": {
+                    "type": "integer",
+                    "x-agent": true
+                },
+                "success": {
+                    "type": "boolean"
+                },
+                "total": {
+                    "type": "integer",
+                    "x-agent": true
                 }
             }
         }

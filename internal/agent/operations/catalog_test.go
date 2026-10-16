@@ -45,7 +45,6 @@ func TestNewCatalogRejectsUnsafeDeclarations(t *testing.T) {
 		"im channels":          readOp("x.get", "/api/v1/im-channels"),
 		"agent approvals":      readOp("x.get", "/api/v1/agent/tool-approvals"),
 		"memory":               readOp("x.get", "/api/v1/memory/items"),
-		"messages":             readOp("x.get", "/api/v1/messages/chat-history-stats"),
 		"a new area":           readOp("x.get", "/api/v1/something-new"),
 		"kb shares":            readOp("x.get", "/api/v1/knowledge-bases/:id/shares", kb),
 		"kb prefix lookalike":  readOp("x.get", "/api/v1/knowledge-bases-admin"),
@@ -84,10 +83,31 @@ func TestNewCatalogRejectsUnsafeDeclarations(t *testing.T) {
 			ID: "x.check", Summary: "s", Risk: RiskProbe, Method: http.MethodPost,
 			Route: "/api/v1/knowledge-bases", Target: &Target{Operation: "x.get", Label: "title"},
 		},
+		// Conversations are read-only: no deleting, stopping or rewinding.
+		"delete a session": {
+			ID: "session.delete", Summary: "s", Risk: RiskDestructive, Method: http.MethodDelete,
+			Route: "/api/v1/sessions/:id", Params: routeParams("/api/v1/sessions/:id"),
+			Target: &Target{Operation: "session.get", Label: "title"},
+		},
+		"stop a session": {
+			ID: "session.stop", Summary: "s", Risk: RiskWrite, Method: http.MethodPost,
+			Route: "/api/v1/sessions/:session_id/stop", Params: routeParams("/api/v1/sessions/:session_id/stop"),
+			Target: &Target{Operation: "session.get", Label: "title"},
+		},
+		"delete a message": {
+			ID: "message.delete", Summary: "s", Risk: RiskDestructive, Method: http.MethodDelete,
+			Route:  "/api/v1/messages/:session_id/:id",
+			Params: routeParams("/api/v1/messages/:session_id/:id"),
+			Target: &Target{Operation: "session.get", Label: "title"},
+		},
+	}
+	reasons := map[string]string{
+		"delete a session": "may only read",
+		"stop a session":   "may only read",
+		"delete a message": "may only read",
 	}
 	// A sandbox config is reachable only for its installed skills, and never
 	// the installer conversation a user is watching.
-	reasons := map[string]string{}
 	for _, route := range []struct{ method, path, reason string }{
 		{http.MethodGet, "/api/v1/sandbox-configs/:id", "outside the areas"},
 		{http.MethodPut, "/api/v1/sandbox-configs/:id", "outside the areas"},

@@ -1650,9 +1650,11 @@ definitions:
       embedding_model_id:
         description: ID of the embedding model used
         type: string
+        x-agent: true
       enabled:
         description: Whether the chat history KB is configured and enabled
         type: boolean
+        x-agent: true
       has_indexed_messages:
         description: Whether there are any indexed messages (used by frontend to lock
           embedding model)
@@ -1660,6 +1662,7 @@ definitions:
       indexed_message_count:
         description: Number of indexed message entries (Knowledge count)
         type: integer
+        x-agent: true
       knowledge_base_id:
         description: ID of the knowledge base used for chat history
         type: string
@@ -5176,9 +5179,14 @@ definitions:
       content:
         description: Message text content
         type: string
+        x-agent: true
+        x-agent-max-runes: "1500"
+        x-agent-response: true
       created_at:
         description: Message creation timestamp
         type: string
+        x-agent: true
+        x-agent-response: true
       deleted_at:
         allOf:
         - $ref: '#/definitions/gorm.DeletedAt'
@@ -5186,6 +5194,8 @@ definitions:
       id:
         description: Unique identifier for the message
         type: string
+        x-agent: message_id
+        x-agent-response: true
       images:
         description: Attached images with OCR/Caption text (for user messages)
         items:
@@ -5229,9 +5239,13 @@ definitions:
       request_id:
         description: Request identifier for tracking API requests
         type: string
+        x-agent: true
+        x-agent-response: true
       role:
         description: 'Message role: "user", "assistant", "system"'
         type: string
+        x-agent: true
+        x-agent-response: true
       run_state:
         description: |-
           RunState refines an incomplete message: MessageRunStateAwaitingInput
@@ -5356,26 +5370,35 @@ definitions:
         description: Assistant answer content (role=assistant), may be empty if only
           Q matched
         type: string
+        x-agent: true
+        x-agent-max-runes: "1000"
       created_at:
         description: Timestamp of the earliest message in the group
         type: string
+        x-agent: true
       match_type:
         description: 'How this result was matched: "keyword", "vector", or "hybrid"'
         type: string
+        x-agent: true
       query_content:
         description: User query content (role=user)
         type: string
+        x-agent: true
+        x-agent-max-runes: "600"
       request_id:
         description: The request_id that groups Q&A together
         type: string
+        x-agent: true
       score:
         description: Best score among the matched messages in this group
         type: number
       session_id:
         description: Session info
         type: string
+        x-agent: true
       session_title:
         type: string
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.MessageSearchResult:
     properties:
@@ -5387,6 +5410,7 @@ definitions:
       total:
         description: Total number of results
         type: integer
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.MessageSuggestionSet:
     properties:
@@ -7013,6 +7037,8 @@ definitions:
     properties:
       created_at:
         type: string
+        x-agent: true
+        x-agent-response: true
       deleted_at:
         $ref: '#/definitions/gorm.DeletedAt'
       description:
@@ -7038,6 +7064,8 @@ definitions:
       id:
         description: ID
         type: string
+        x-agent: session_id
+        x-agent-response: true
       im_platform:
         description: |-
           IMPlatform is the originating IM platform (e.g. "feishu", "wecom") when
@@ -7048,6 +7076,8 @@ definitions:
       is_pinned:
         description: IsPinned indicates whether the session is pinned in the list.
         type: boolean
+        x-agent: true
+        x-agent-response: true
       kind:
         description: |-
           Kind is empty for ordinary chats and SessionKindAssistant for assistant
@@ -7089,8 +7119,12 @@ definitions:
       title:
         description: Title
         type: string
+        x-agent: true
+        x-agent-response: true
       updated_at:
         type: string
+        x-agent: true
+        x-agent-response: true
       user_id:
         description: |-
           UserID is the owner scope for this session. WeKnora user UUIDs, API
@@ -7135,6 +7169,109 @@ definitions:
         type: array
       web_search_enabled:
         type: boolean
+    type: object
+  github_com_Tencent_WeKnora_internal_types.SessionListItem:
+    properties:
+      created_at:
+        type: string
+        x-agent: true
+        x-agent-response: true
+      deleted_at:
+        $ref: '#/definitions/gorm.DeletedAt'
+      description:
+        description: Description
+        type: string
+      forked_from_message_id:
+        description: |-
+          ForkedFromMessageID is the user or assistant message, IN THE PARENT
+          SESSION, that the fork branched at. For a user point, messages strictly
+          before it were copied here. For an assistant point, that answer is
+          included so the branch continues after it.
+        type: string
+      host_workspace_dir:
+        description: |-
+          HostWorkspaceDir is the user-selected project directory this session
+          operates in, for the WeKnora Lite host sandbox only. Empty means the session
+          gets an auto-allocated workspace instead.
+
+          Written once at creation and never updated: re-pointing a live session
+          at a different directory would leave its transcript describing files
+          that are no longer there. Standard edition never writes it.
+        type: string
+      id:
+        description: ID
+        type: string
+        x-agent: session_id
+        x-agent-response: true
+      im_agent_id:
+        type: string
+      im_channel_id:
+        type: string
+      im_chat_id:
+        type: string
+      im_platform:
+        type: string
+      im_thread_id:
+        type: string
+      im_user_id:
+        type: string
+      is_pinned:
+        description: IsPinned indicates whether the session is pinned in the list.
+        type: boolean
+        x-agent: true
+        x-agent-response: true
+      kind:
+        description: |-
+          Kind is empty for ordinary chats and SessionKindAssistant for assistant
+          conversations; it is set at creation and never updated.
+        type: string
+      last_request_state:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SessionLastRequestState'
+        description: |-
+          LastRequestState records the input-bar state used the last time this
+          session sent a question (agent, model, KB scope, web search, MCPs).
+          Persisted on every successful POST to /knowledge-chat or /agent-chat so
+          that reopening the session can restore the original request context to
+          the chat UI. Stored in the legacy sessions.agent_config JSONB column to
+          avoid a new migration; the shape used today is `SessionLastRequestState`.
+      parent_session_id:
+        description: |-
+          ParentSessionID names the session this one was forked from. Empty for
+          ordinary sessions. Deliberately not a foreign key: the parent may be
+          deleted while the branch lives on, and a branch must not cascade away
+          with it. A dangling value simply renders as an ordinary session.
+        type: string
+      pinned_at:
+        description: PinnedAt records when the session was pinned; nil when not pinned.
+        type: string
+      sandbox_config_id:
+        description: |-
+          SandboxConfigID pins which sandbox config this session's CURRENT live
+          sandbox was created on. Empty means no live sandbox;
+          SandboxConfigIDGlobalDefault means the deployment-wide default config.
+
+          This is an ephemeral pin that dies with the sandbox, not a permanent
+          owner: sessions outlive sandboxes by months, so treating it as
+          permanent would make "no session references this config" never true.
+        type: string
+      tenant_id:
+        description: Workspace ID
+        type: integer
+      title:
+        description: Title
+        type: string
+        x-agent: true
+        x-agent-response: true
+      updated_at:
+        type: string
+        x-agent: true
+        x-agent-response: true
+      user_id:
+        description: |-
+          UserID is the owner scope for this session. WeKnora user UUIDs, API
+          external-user principals, and embed visitor principals all use this column.
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.ShareKnowledgeBaseRequest:
     properties:
@@ -11471,13 +11608,17 @@ definitions:
     properties:
       limit:
         description: 'Maximum number of results to return (default: 20)'
+        minimum: 1
         type: integer
+        x-agent: true
+        x-agent-maximum: "20"
       mode:
         description: 'Search mode: "keyword", "vector", "hybrid" (default: "hybrid")'
         type: string
       query:
         description: Query text for search
         type: string
+        x-agent: true
       session_ids:
         description: Filter by specific session IDs (optional)
         items:
@@ -12824,6 +12965,24 @@ definitions:
         items:
           type: string
         type: array
+    type: object
+  internal_handler_session.sessionListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SessionListItem'
+        type: array
+      page:
+        type: integer
+        x-agent: true
+      page_size:
+        type: integer
+        x-agent: true
+      success:
+        type: boolean
+      total:
+        type: integer
+        x-agent: true
     type: object
 info:
   contact:
@@ -21042,15 +21201,20 @@ paths:
         name: session_id
         required: true
         type: string
+        x-agent: true
       - default: 20
         description: 返回数量
         in: query
+        minimum: 1
         name: limit
         type: integer
+        x-agent: true
+        x-agent-maximum: "20"
       - description: 在此时间之前的消息（RFC3339Nano格式）
         in: query
         name: before_time
         type: string
+        x-agent: true
       - default: handle
         description: 文件引用形式，public 返回可加载直链
         enum:
@@ -21083,6 +21247,11 @@ paths:
       summary: 加载消息历史
       tags:
       - 消息
+      x-agent:
+        id: message.list
+        risk: read
+      x-agent-hint: The latest messages of one of the user's conversations, oldest
+        first. For earlier ones, pass the created_at of the first message as before_time.
   /messages/chat-history-stats:
     get:
       consumes:
@@ -21106,6 +21275,12 @@ paths:
       summary: 获取聊天历史知识库统计
       tags:
       - 消息
+      x-agent:
+        id: message.chat_history_stats
+        risk: read
+      x-agent-hint: Whether the workspace indexes conversations for search by meaning,
+        and how many messages are indexed. When it is off, message.search only matches
+        exact words; the setting is under settings section chathistory.
   /messages/search:
     post:
       consumes:
@@ -21140,6 +21315,15 @@ paths:
       summary: 搜索历史对话
       tags:
       - 消息
+      x-agent:
+        id: message.search
+        max_items: 20
+        risk: probe
+        root: data.items
+      x-agent-hint: Finds exchanges in the user's own past conversations by what was
+        said, each with its session_id. Matching is by meaning only when message indexing
+        is on (see message.chat_history_stats); otherwise words must appear verbatim,
+        so retry with the user's exact wording before concluding nothing matches.
   /models:
     get:
       consumes:
@@ -23077,22 +23261,31 @@ paths:
       parameters:
       - description: 页码
         in: query
+        minimum: 1
         name: page
         type: integer
+        x-agent: true
+        x-agent-maximum: "10000"
       - description: 每页数量
         in: query
+        maximum: 1000
+        minimum: 1
         name: page_size
         type: integer
+        x-agent: true
+        x-agent-maximum: "20"
       - description: 会话类型：空值仅普通会话；assistant 仅当前用户的助手会话
         enum:
         - assistant
         in: query
         name: kind
         type: string
+        x-agent: true
       - description: 标题模糊搜索
         in: query
         name: keyword
         type: string
+        x-agent: true
       - description: 来源过滤：web / embed / api / feishu / wechat / slack / ...（api、embed、IM
           渠道需 Admin+）
         in: query
@@ -23108,8 +23301,7 @@ paths:
         "200":
           description: 会话列表
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/internal_handler_session.sessionListResponse'
         "400":
           description: 请求参数错误
           schema:
@@ -23120,6 +23312,12 @@ paths:
       summary: 获取会话列表
       tags:
       - 会话
+      x-agent:
+        id: session.list
+        risk: read
+      x-agent-hint: The user's own conversations, pinned ones first, then most recently
+        active. keyword matches titles only, which are often auto-generated; to find
+        a conversation by what was said, use message.search. Read one with message.list.
     post:
       consumes:
       - application/json
