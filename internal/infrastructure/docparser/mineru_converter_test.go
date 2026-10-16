@@ -158,10 +158,22 @@ func TestMinerULegacyMultipartRequest(t *testing.T) {
 		{name: "fallback from path-only name", fileName: "/", fileType: "pdf", want: "document.pdf"},
 		{name: "legacy fallback without metadata", want: "document"},
 		{name: "reject unsafe fallback type", fileType: "../pdf", want: "document"},
-		{name: "hybrid high effort", fileName: "report.pdf", want: "report.pdf", backend: "hybrid-auto-engine", effort: " HIGH ", wantEffort: "high"},
-		{name: "hybrid medium effort", fileName: "report.pdf", want: "report.pdf", backend: "hybrid-auto-engine", effort: "medium", wantEffort: "medium"},
-		{name: "non-hybrid ignores effort", fileName: "report.pdf", want: "report.pdf", backend: "pipeline", effort: "high"},
-		{name: "invalid effort is omitted", fileName: "report.pdf", want: "report.pdf", backend: "hybrid-auto-engine", effort: "invalid"},
+		{
+			name: "hybrid high effort", fileName: "report.pdf", want: "report.pdf",
+			backend: "hybrid-auto-engine", effort: " HIGH ", wantEffort: "high",
+		},
+		{
+			name: "hybrid medium effort", fileName: "report.pdf", want: "report.pdf",
+			backend: "hybrid-auto-engine", effort: "medium", wantEffort: "medium",
+		},
+		{
+			name: "non-hybrid ignores effort", fileName: "report.pdf", want: "report.pdf",
+			backend: "pipeline", effort: "high",
+		},
+		{
+			name: "invalid effort is omitted", fileName: "report.pdf", want: "report.pdf",
+			backend: "hybrid-auto-engine", effort: "invalid",
+		},
 	}
 
 	for _, tt := range tests {
@@ -250,7 +262,8 @@ func TestMinerULegacyMultipartRequest(t *testing.T) {
 				t.Errorf("multipart content = %q, want %q", request.content, fileContent)
 			}
 			if request.effort != tt.wantEffort || request.hasEffort != (tt.wantEffort != "") {
-				t.Errorf("multipart effort = %q (present=%v), want %q", request.effort, request.hasEffort, tt.wantEffort)
+				t.Errorf("multipart effort = %q (present=%v), want %q",
+					request.effort, request.hasEffort, tt.wantEffort)
 			}
 		})
 	}
