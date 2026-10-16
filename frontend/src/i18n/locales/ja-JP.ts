@@ -4284,7 +4284,7 @@ export default {
           'マルチモーダル解析が有効な場合、画像の解析方式を選択できます。',
         imagePipelineLabel: '解析方式',
         advancedSettingsLabel: '詳細設定',
-        notesLabel: '説明',
+        notesLabel: '補足説明',
         preprocessModeAuto: '自動',
         preprocessModeOff: 'オフ',
         preprocessModeForce: '強制',
@@ -4294,8 +4294,6 @@ export default {
           imagePipelineValidateError: '現在の設定を検証できませんでした。保存時にバックエンドが再度检查します。',
         imageAttrsOcrConditions: '観察した属性条件に基づいて OCR を実行',
         imageAttrsOcrConditionsDesc: '観察した属性が以下の条件を満たす場合、その画像に OCR を実行します',
-        imageAttrsOcrOnUnobserved: '画像属性の観察に失敗した場合も OCR を実行',
-        imageAttrsOcrOnUnobservedDesc: 'モデルが画像属性を正しく観察できなかった場合、本文テキストを逃さないようデフォルトで OCR を実行します。オフにするとスキップします。（4B など小規模な視覚モデルを使う場合や、カスタムの画像指示がシステムプロンプトと衝突する場合に観察が失敗することがあります。8B 以上は失敗の可能性が低く、オフは推奨しません）',
         imagePipelineKbNote: 'デフォルトはナレッジベースの設定に従い、今回のタスク向けに調整できます'
       }
     }
@@ -8782,6 +8780,11 @@ export default {
         },
       },
       ocr: {
+        on_unobserved: {
+          label: '画像属性の観察に失敗した場合も OCR を実行',
+          description:
+            'モデルが画像属性を正しく観察できなかった場合、本文テキストを逃さないようデフォルトで OCR を実行します。オフにするとスキップします。（4B など小規模な視覚モデルを使う場合や、カスタムの画像指示がシステムプロンプトと衝突する場合に観察が失敗することがあります。8B 以上は失敗の可能性が低く、オフは推奨しません）',
+        },
         thinking: {
           label: '文字認識時に思考を有効',
           description: 'テキストを抽出する前にモデルに考えさせます。基本的に思考は必要ありません。有効にすると解析が遅くなるだけでなく、思考が長くなりすぎて本文が切り詰められ、タスクが失敗する可能性があります。必要だと判断した場合のみ有効にしてください。',

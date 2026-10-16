@@ -4284,7 +4284,7 @@ export default {
           'With multimodal parsing on, pick how images are parsed.',
         imagePipelineLabel: 'Scheme',
         advancedSettingsLabel: 'Advanced settings',
-        notesLabel: 'Notes',
+        notesLabel: 'Additional notes',
         preprocessModeAuto: 'Auto',
         preprocessModeOff: 'Off',
         preprocessModeForce: 'Force',
@@ -4294,8 +4294,6 @@ export default {
           imagePipelineValidateError: 'The current settings could not be checked; the backend re-checks them on save.',
         imageAttrsOcrConditions: 'Trigger OCR based on the observed attribute conditions',
         imageAttrsOcrConditionsDesc: 'When the observed attributes match the conditions below, OCR runs on the image',
-        imageAttrsOcrOnUnobserved: 'Run OCR when image-attribute observation fails',
-        imageAttrsOcrOnUnobservedDesc: 'When the model fails to observe the image attributes correctly, OCR runs by default so body text is never lost; turn off to skip. (A small vision model such as 4B, or custom image-instruction prompts that conflict with the system prompt, can cause the observation to fail; 8B and above rarely fail, so leaving this on is recommended)',
         imagePipelineKbNote: 'Defaults follow the knowledge base settings; adjust them for this task'
       }
     }
@@ -8788,6 +8786,11 @@ export default {
         },
       },
       ocr: {
+        on_unobserved: {
+          label: 'Run OCR when image-attribute observation fails',
+          description:
+            'When the model fails to observe the image attributes correctly, OCR runs by default so body text is never lost; turn off to skip. (A small vision model such as 4B, or custom image-instruction prompts that conflict with the system prompt, can cause the observation to fail; 8B and above rarely fail, so leaving this on is recommended)',
+        },
         thinking: {
           label: 'Text recognition with thinking',
           description: 'Let the model think before it transcribes the text. In general you do not need thinking; enabling it makes parsing slower and may make the model overthink, so overly long reasoning can run past the limit and truncate the transcribed text, failing the task. Only enable it when you have confirmed it is necessary.',

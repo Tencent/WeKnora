@@ -4904,7 +4904,7 @@ export default {
           '멀티모달 분석이 켜져 있으면 이미지의 분석 방식을 필요에 따라 선택할 수 있습니다.',
         imagePipelineLabel: '분석 방식',
         advancedSettingsLabel: '고급 설정',
-        notesLabel: '설명',
+        notesLabel: '추가 설명',
         preprocessModeAuto: '자동',
         preprocessModeOff: '끄기',
         preprocessModeForce: '강제',
@@ -4914,8 +4914,6 @@ export default {
           imagePipelineValidateError: '현재 설정을 검증할 수 없습니다. 저장 시 백엔드가 다시 검사합니다.',
         imageAttrsOcrConditions: '관찰된 속성 조건에 따라 OCR 실행',
         imageAttrsOcrConditionsDesc: '관찰된 속성이 아래 조건을 충족하면 해당 이미지에 OCR을 실행합니다',
-        imageAttrsOcrOnUnobserved: '이미지 속성 관찰에 실패해도 OCR 실행',
-        imageAttrsOcrOnUnobservedDesc: '모델이 이미지 속성을 올바르게 관찰하지 못하면 본문 텍스트 손실을 막기 위해 기본적으로 OCR을 실행합니다. 끄면 건너뜁니다. (4B 등 소형 비전 모델을 쓰거나, 사용자 지정 이미지 지시문이 시스템 프롬프트와 충돌할 때 관찰에 실패할 수 있습니다. 8B 이상은 실패 가능성이 낮아 끄지 않는 것을 권장합니다)',
         imagePipelineKbNote: '기본값은 지식베이스 설정을 따르며 이번 작업에 맞게 조정할 수 있습니다'
       },
       tableMetadataInstructions: {
@@ -8782,6 +8780,11 @@ export default {
         },
       },
       ocr: {
+        on_unobserved: {
+          label: '이미지 속성 관찰에 실패해도 OCR 실행',
+          description:
+            '모델이 이미지 속성을 올바르게 관찰하지 못하면 본문 텍스트 손실을 막기 위해 기본적으로 OCR을 실행합니다. 끄면 건너뜁니다. (4B 등 소형 비전 모델을 쓰거나, 사용자 지정 이미지 지시문이 시스템 프롬프트와 충돌할 때 관찰에 실패할 수 있습니다. 8B 이상은 실패 가능성이 낮아 끄지 않는 것을 권장합니다)',
+        },
         thinking: {
           label: '문자 인식 시 사고 사용',
           description: '텍스트를 추출하기 전에 모델이 먼저 추론하도록 합니다. 일반적으로 사고는 필요하지 않습니다. 켜면 분석이 느려질 뿐 아니라 사고가 너무 길어져 본문이 잘려서 작업이 실패할 수 있습니다. 꼭 필요하다고 판단될 때만 켜세요.',

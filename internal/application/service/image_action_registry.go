@@ -212,6 +212,7 @@ func init() {
 const (
 	imageFieldKeyCaptionThinking = "caption.thinking"
 	imageFieldKeyOCRThinking     = "ocr.thinking"
+	imageFieldKeyOCROnUnobserved = "ocr.on_unobserved"
 )
 
 // imageActionThinkingFields are the thinking switches DECLARED ONCE here, at
@@ -250,6 +251,23 @@ var imageActionThinkingFields = []types.ImageFieldDef{
 		Default: false,
 		// Same reasoning: an image with no text still yields no OCR.
 	},
+}
+
+// imageActionOnUnobservedField is the OCR policy's fallback clause as a panel
+// control: whether an image whose attributes could not be observed is still
+// read. It is declared here, at the action layer, because it tunes the OCR
+// action — and offered by the smart pipeline alone, because only a pipeline
+// that observes attributes can fail to observe them. Like the straightening
+// switch it is not a pipeline param: the value is the knowledge base's
+// image_actions setting, and the panel binds it there.
+var imageActionOnUnobservedField = types.ImageFieldDef{
+	Key:   imageFieldKeyOCROnUnobserved,
+	Type:  types.ImageFieldTypeBool,
+	Label: "OCR after an unobserved image",
+	Description: "Still read an image whose attributes could not be observed, so a missed " +
+		"block of text costs one extra call instead of being lost. Turn it off only with a " +
+		"model reliable enough to answer every attribute line.",
+	Default: true,
 }
 
 // runContext is the only framework entry point a pipeline or an action gets. It

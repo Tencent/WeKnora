@@ -4905,7 +4905,7 @@ export default {
         imagePipelineSectionDescription: '多模态解析开启后，可以根据需要选择图片的解析方案',
         imagePipelineLabel: '选择解析方案',
         advancedSettingsLabel: '高级设置',
-        notesLabel: '说明信息',
+        notesLabel: '附加说明',
         preprocessModeAuto: '自动',
         preprocessModeOff: '关闭',
         preprocessModeForce: '强制',
@@ -4915,8 +4915,6 @@ export default {
           imagePipelineValidateError: '无法校验当前设置，保存时后端会再次检查。',
         imageAttrsOcrConditions: '根据观察到的属性条件触发 OCR',
         imageAttrsOcrConditionsDesc: '当观察到的属性满足以下条件时，对图片进行 OCR',
-        imageAttrsOcrOnUnobserved: '图片属性观察失败时仍执行 OCR',
-        imageAttrsOcrOnUnobservedDesc: '当模型未能正确观察到图片属性时，默认仍执行 OCR 兜底，以免漏掉正文文字；关闭则跳过。（采用 4B 等小参数视觉模型，或自定义的图片解析提示词与系统提示词冲突时，可能造成观察失败；8B 及以上模型的失败概率很低，不建议关闭）',
         imagePipelineKbNote: '默认跟随知识库设置，可针对本次任务调整'
       },
       tableMetadataInstructions: {
@@ -8782,6 +8780,11 @@ export default {
         },
       },
       ocr: {
+        on_unobserved: {
+          label: '图片属性观察失败时仍执行 OCR',
+          description:
+            '当模型未能正确观察到图片属性时，默认仍执行 OCR 兜底，以免漏掉正文文字；关闭则跳过。（采用 4B 等小参数视觉模型，或自定义的图片解析提示词与系统提示词冲突时，可能造成观察失败；8B 及以上模型的失败概率很低，不建议关闭）',
+        },
         thinking: {
           label: '文字识别时开启思考',
           description: '让模型在提取文字前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。',

@@ -417,24 +417,12 @@
                 v-model:params="formData.imagePipelineParams"
                 :pipeline-id="formData.imagePipeline"
                 :preprocess-mode="formData.preprocessMode"
+                :on-unobserved="formData.imageActions.ocr.on_unobserved"
                 @update:pipeline-id="onPipelineChange"
                 @update:preprocess-mode="formData.preprocessMode = $event"
+                @update:on-unobserved="formData.imageActions.ocr.on_unobserved = $event"
                 @update:invalid="onPipelineInvalidChange"
               />
-            </div>
-
-            <!-- 观察失败兜底：开关，归在开关区（说明随开关就地显示）。 -->
-            <div
-              v-if="formData.multimodalConfig.enabled && formData.imageAttrsEnabled"
-              class="setting-row image-panel-flush"
-            >
-              <div class="setting-info">
-                <label>{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobserved') }}</label>
-                <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobservedDesc') }}</p>
-              </div>
-              <div class="setting-control">
-                <t-switch v-model="formData.imageActions.ocr.on_unobserved" size="medium" />
-              </div>
             </div>
 
             <!-- ③ 观察属性说明（只属于智能流水线）：默认折叠，点击展开。
