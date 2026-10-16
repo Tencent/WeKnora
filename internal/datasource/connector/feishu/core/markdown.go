@@ -738,7 +738,7 @@ func tableDescendants(blocks []DocxBlock, byID map[string]DocxBlock) map[string]
 // single predicate shared by the consume pass and the render pass so the two
 // never disagree about which tables are handled by the table renderer.
 func tableRenderable(b DocxBlock) bool {
-	return b.Table != nil && b.Table.Property != nil && b.Table.Property.ColumnSize > 0
+	return b.Table != nil && b.Table.Property != nil && b.Table.Property.ColumnSize > 0 && len(b.Table.Cells) > 0
 }
 
 // textBearingField returns the inline-text payload for whichever type-named
@@ -792,7 +792,9 @@ func renderNativeTable(b DocxBlock, byID map[string]DocxBlock) string {
 	if !tableRenderable(b) {
 		return ""
 	}
-	cols := b.Table.Property.ColumnSize
+	// Remote metadata must not allocate more columns than the supplied cells.
+	// A truncated or malformed table can declare an arbitrarily large width.
+	cols := min(b.Table.Property.ColumnSize, len(b.Table.Cells))
 	var cells []string
 	aligns := make([]int, cols)
 	for i, cid := range b.Table.Cells {
@@ -821,29 +823,37 @@ func renderNativeTable(b DocxBlock, byID map[string]DocxBlock) string {
 // ignored. (Embedded sheet merge ranges come from the v3 metadata API instead —
 // see fillSheetMerges; bitable has no merge concept.)
 func fillMergedCells(rows [][]string, cols int, merge []BlockTableMergeInfo) {
-	if len(merge) == 0 || len(rows) == 0 {
+	if cols <= 0 || len(merge) == 0 || len(rows) == 0 {
 		return
 	}
-	cellAt := func(r, c int) string {
-		if r < 0 || r >= len(rows) || c < 0 || c >= len(rows[r]) {
-			return ""
-		}
-		return rows[r][c]
+
+	// Valid merged regions do not overlap. Bound total visits too, so repeated
+	// or overlapping malformed regions cannot turn the work quadratic.
+	remaining := 0
+	for _, row := range rows {
+		remaining += len(row)
 	}
 	for i, mi := range merge {
 		if mi.RowSpan <= 1 && mi.ColSpan <= 1 {
 			continue
 		}
 		r0, c0 := i/cols, i%cols
-		v := cellAt(r0, c0)
-		for dr := range mi.RowSpan {
-			for dc := range mi.ColSpan {
-				if dr == 0 && dc == 0 {
-					continue
+		if r0 >= len(rows) || c0 >= len(rows[r0]) {
+			continue
+		}
+		v := rows[r0][c0]
+		// Bound work before iterating or adding spans, not inside the loops:
+		// oversized metadata must neither overflow indices nor consume CPU
+		// proportional to cells that are not present in the rendered table.
+		for dr := range min(mi.RowSpan, len(rows)-r0) {
+			rr := r0 + dr
+			for dc := range min(mi.ColSpan, len(rows[rr])-c0) {
+				if remaining == 0 {
+					return
 				}
-				rr, cc := r0+dr, c0+dc
-				if rr < len(rows) && cc < len(rows[rr]) {
-					rows[rr][cc] = v
+				remaining--
+				if dr != 0 || dc != 0 {
+					rows[rr][c0+dc] = v
 				}
 			}
 		}
