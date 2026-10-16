@@ -20,6 +20,9 @@ const (
 	LintIssueMissingCrossRef WikiLintIssueType = "missing_cross_ref"
 	LintIssueEmptyContent    WikiLintIssueType = "empty_content"
 	LintIssueDuplicateSlug   WikiLintIssueType = "duplicate_slug"
+	// LintIssueContentDrift reports a page that no longer carries table rows
+	// its source chunks still contain. See wiki_lint_content_drift.go.
+	LintIssueContentDrift WikiLintIssueType = "content_drift"
 )
 
 // WikiLintIssueSeverity defines the severity of a lint issue
@@ -58,6 +61,8 @@ type WikiLintService struct {
 	wikiService      interfaces.WikiPageService
 	kbService        interfaces.KnowledgeBaseService
 	knowledgeService interfaces.KnowledgeService
+	// chunkRepo resolves a page's source chunks for the content-drift check.
+	chunkRepo interfaces.ChunkRepository
 }
 
 // NewWikiLintService creates a new wiki lint service
@@ -65,11 +70,13 @@ func NewWikiLintService(
 	wikiService interfaces.WikiPageService,
 	kbService interfaces.KnowledgeBaseService,
 	knowledgeService interfaces.KnowledgeService,
+	chunkRepo interfaces.ChunkRepository,
 ) *WikiLintService {
 	return &WikiLintService{
 		wikiService:      wikiService,
 		kbService:        kbService,
 		knowledgeService: knowledgeService,
+		chunkRepo:        chunkRepo,
 	}
 }
 
@@ -143,6 +150,13 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 		if len(pages) == 0 {
 			break
 		}
+
+		// Content-drift check: compare each page's table rows against the rows
+		// of the chunks it cites. Chunk refs are a page's precise sources, so a
+		// page without them (summary pages are document-level) is skipped. The
+		// window's refs are resolved in one batch by the helper.
+		issues = append(issues, s.wikiLintContentDriftIssues(ctx, kb.TenantID, pages)...)
+
 		for _, page := range pages {
 			// Track entity/concept titles for the second pass.
 			if page.PageType == types.WikiPageTypeEntity || page.PageType == types.WikiPageTypeConcept {
