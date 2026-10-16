@@ -81,9 +81,9 @@ func (defaultPipeline) Rules() []types.ImagePipelineRules {
 
 // Validate is the rule above, enforced where it cannot be argued with.
 func (defaultPipeline) Validate(params map[string]any) error {
-	return firstImagePipelineError(
-		EvaluateImagePipelineRules(defaultPipeline{}.ID(), defaultPipeline{}.Rules(), defaultPipeline{}.Fields(), params),
-	)
+	return firstImagePipelineError(EvaluateImagePipelineRules(
+		defaultPipeline{}.ID(), defaultPipeline{}.Rules(), defaultPipeline{}.Fields(), params,
+	))
 }
 
 func (defaultPipeline) Run(ctx context.Context, r *runContext) error {

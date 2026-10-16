@@ -28,7 +28,8 @@ func TestResolveProcessConfig_LegacyOverrideSelectsImagePipeline(t *testing.T) {
 				if base == override {
 					require.Equal(t, kb.ImageProcessingConfig.ImagePipelineParams, eff.ImagePipelineParams)
 				} else {
-					require.Empty(t, eff.ImagePipelineParams, "a different pipeline must not inherit the old parameters")
+					require.Empty(t, eff.ImagePipelineParams,
+						"a different pipeline must not inherit the old parameters")
 				}
 			}
 		}
@@ -55,7 +56,8 @@ func TestProcessOverrides_ValidateImagePipelineBeforePersistence(t *testing.T) {
 			}
 			knowledge := &types.Knowledge{}
 			_, uploadErr := resolveFileImportProcessConfig(context.Background(), kb, "pdf", overrides, nil)
-			_, reparseErr := ApplyKnowledgeProcessOverrides(context.Background(), kb, knowledge, overrides, []string{"pdf"}, nil)
+			_, reparseErr := ApplyKnowledgeProcessOverrides(
+				context.Background(), kb, knowledge, overrides, []string{"pdf"}, nil)
 			validationErr := ValidateProcessOverrides(context.Background(), kb, overrides, []string{"pdf"})
 			for _, err := range []error{uploadErr, reparseErr, validationErr} {
 				if enabled && !caption {
@@ -85,6 +87,7 @@ func TestProcessOverrides_ValidateLegacyMultimodalFlag(t *testing.T) {
 	enabled := true
 	_, err := resolveFileImportProcessConfig(context.Background(), &types.KnowledgeBase{}, "pdf", overrides, &enabled)
 	require.ErrorContains(t, err, "noActionEnabled")
-	_, err = ApplyKnowledgeProcessOverrides(context.Background(), &types.KnowledgeBase{}, &types.Knowledge{}, overrides, []string{"pdf"}, &enabled)
+	_, err = ApplyKnowledgeProcessOverrides(
+		context.Background(), &types.KnowledgeBase{}, &types.Knowledge{}, overrides, []string{"pdf"}, &enabled)
 	require.ErrorContains(t, err, "noActionEnabled")
 }

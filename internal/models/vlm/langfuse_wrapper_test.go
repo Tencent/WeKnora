@@ -27,14 +27,19 @@ func (m *tracingTestVLM) GetModelID() string   { return "test-id" }
 func (m *tracingTestVLM) Predict(ctx context.Context, images [][]byte, prompt string) (string, error) {
 	return m.PredictWithOptions(ctx, images, prompt, nil)
 }
-func (m *tracingTestVLM) PredictWithOptions(ctx context.Context, _ [][]byte, _ string, opts *PredictOptions) (string, error) {
+
+func (m *tracingTestVLM) PredictWithOptions(
+	ctx context.Context, _ [][]byte, _ string, opts *PredictOptions,
+) (string, error) {
 	m.spanID = trace.SpanContextFromContext(ctx).SpanID()
 	m.opts = opts
 	return "caption text", m.err
 }
 
 func TestVLMLangfuseRecordsBothPredictionMethods(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
 	defer server.Close()
 	manager, err := langfuse.Init(langfuse.Config{
 		Enabled: true, Host: server.URL, PublicKey: "test", SecretKey: "test",

@@ -116,24 +116,53 @@ func TestImagePipelineValidationMatchesExecution(t *testing.T) {
 		wantCalls int
 	}{
 		{"defaults", nil, 2},
-		{"namespace overrides bare keys", map[string]any{"enable_caption": true, "enable_ocr": true, "default.enable_caption": false, "default.enable_ocr": false}, 0},
+		{
+			"namespace overrides bare keys",
+			map[string]any{
+				"enable_caption": true, "enable_ocr": true,
+				"default.enable_caption": false, "default.enable_ocr": false,
+			},
+			0,
+		},
 		{"namespace only", map[string]any{"default.enable_caption": false, "default.enable_ocr": false}, 0},
-		{"namespace enables caption", map[string]any{"enable_caption": false, "enable_ocr": false, "default.enable_caption": true}, 1},
+		{
+			"namespace enables caption",
+			map[string]any{
+				"enable_caption": false, "enable_ocr": false,
+				"default.enable_caption": true,
+			},
+			1,
+		},
 		{"other namespace ignored", map[string]any{"smartocr.enable_caption": false, "smartocr.enable_ocr": false}, 2},
 		{"null uses declared default", map[string]any{"enable_caption": nil, "enable_ocr": false}, 1},
-		{"null namespace falls through to bare key", map[string]any{"default.enable_caption": nil, "enable_caption": false, "enable_ocr": false}, 0},
+		{
+			"null namespace falls through to bare key",
+			map[string]any{
+				"default.enable_caption": nil, "enable_caption": false,
+				"enable_ocr": false,
+			},
+			0,
+		},
 		{"string true", map[string]any{"enable_caption": "true", "enable_ocr": false}, 1},
 		{"string on", map[string]any{"enable_caption": "on", "enable_ocr": false}, 1},
 		{"string one", map[string]any{"enable_caption": "1", "enable_ocr": false}, 1},
 		{"string false", map[string]any{"enable_caption": "false", "enable_ocr": false}, 0},
-		{"numeric values are not boolean switches", map[string]any{"enable_caption": float64(1), "enable_ocr": false}, 0},
+		{
+			"numeric values are not boolean switches",
+			map[string]any{"enable_caption": float64(1), "enable_ocr": false},
+			0,
+		},
 	}
 	for _, id := range []types.ImagePipelineID{types.ImagePipelineDefault, types.ImagePipelineLegacyCaptionOCR, ""} {
 		for _, tc := range cases {
 			t.Run(string(id)+"/"+tc.name, func(t *testing.T) {
 				enabled := true
-				overrides := &types.KnowledgeProcessOverrides{EnableMultimodel: &enabled, ImagePipelineID: &id, ImagePipelineParams: tc.params}
-				validationErr := ValidateProcessOverrides(context.Background(), &types.KnowledgeBase{}, overrides, []string{"pdf"})
+				overrides := &types.KnowledgeProcessOverrides{
+					EnableMultimodel: &enabled, ImagePipelineID: &id,
+					ImagePipelineParams: tc.params,
+				}
+				validationErr := ValidateProcessOverrides(
+					context.Background(), &types.KnowledgeBase{}, overrides, []string{"pdf"})
 				pipelineErr := defaultPipeline{}.Validate(tc.params)
 				if tc.wantCalls == 0 {
 					require.ErrorContains(t, validationErr, "noActionEnabled")
