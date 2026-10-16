@@ -423,19 +423,33 @@
               />
             </div>
 
-            <div v-if="formData.multimodalConfig.enabled && formData.imageAttrsEnabled"
-              class="setting-row setting-row-vertical">
+            <!-- 观察失败兜底：开关，归在开关区（说明随开关就地显示）。 -->
+            <div
+              v-if="formData.multimodalConfig.enabled && formData.imageAttrsEnabled"
+              class="setting-row"
+            >
               <div class="setting-info">
-                <label>{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaLabel') }}</label>
-                <!-- 实现说明（不放 UI）：面板完全由后端属性注册表驱动 —— 属性名、说明、每个取值的
-                     含义都随 schema 端点下发，前端只按属性名覆盖翻译。所以新增属性仍是
-                     「后端加一行 / 前端自动跟随」，属性集合随版本演进不需要改这里。 -->
-                <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaDescription') }}</p>
+                <label>{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobserved') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobservedDesc') }}</p>
               </div>
-              <!-- 属性字典默认折叠：属性会随版本增加，平铺会把面板撑得很长。 -->
+              <div class="setting-control">
+                <t-switch v-model="formData.imageActions.ocr.on_unobserved" size="medium" />
+              </div>
+            </div>
+
+            <!-- ③ 观察属性说明（只属于智能流水线）：默认折叠，点击展开。
+                 与上一段之间用分割线分开；段内不再画线。
+                 实现说明（不放 UI）：内容完全由后端属性注册表驱动 —— 属性名、说明、每个
+                 取值的含义都随 schema 端点下发，前端只按属性名覆盖翻译。所以新增属性仍是
+                 「后端加一行 / 前端自动跟随」，属性集合随版本演进不需要改这里。 -->
+            <div
+              v-if="formData.multimodalConfig.enabled && formData.imageAttrsEnabled"
+              class="setting-row setting-row-vertical image-attr-block"
+            >
               <details class="image-attr-panel">
                 <summary class="image-attr-summary">
-                  {{ $t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaLabel') }}
+                  <label>{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaLabel') }}</label>
+                  <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaDescription') }}</p>
                 </summary>
                 <ul v-if="imageAttrDisplays.length" class="image-attr-list">
                   <li v-for="attr in imageAttrDisplays" :key="attr.name" class="image-attr-row">
@@ -465,19 +479,6 @@
                   </ul>
                 </div>
               </details>
-
-              <!-- 观察失败兜底：与上方整块开关同级（不再嵌在属性面板里）。
-                   开关仍包在 setting-control 里，与其它开关行共用同一套
-                   右对齐 / 垂直居中 / 预留右列的排版，避免顶到行首 -->
-              <div class="setting-row">
-                <div class="setting-info">
-                  <label>{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobserved') }}</label>
-                  <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobservedDesc') }}</p>
-                </div>
-                <div class="setting-control">
-                  <t-switch v-model="formData.imageActions.ocr.on_unobserved" size="medium" />
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -1992,10 +1993,28 @@ watch(() => chatResources.allModels, (list) => {
 // 图片属性面板（可观察属性 / OCR 触发条件 / 观察失败兜底）
 // 文案全部来自后端属性注册表（人话名 + 每个取值的含义），前端只做翻译覆盖，
 // 因此新增属性无需改这里。铺在所在设置区里、不套独立底色块（与整体风格一致）。
+// 第三段（观察属性说明）与上方开关区之间的分割线：段与段之间才画线。
+.image-attr-block {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--td-component-border);
+}
+// 折叠标题：收起时仍能读到这一段是什么、为什么有它。
 .image-attr-summary {
   cursor: pointer;
   user-select: none;
-  font-weight: 500;
+
+  label {
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+  }
+
+  .desc {
+    margin: 2px 0 0;
+    font-size: var(--app-text-sm);
+    line-height: 20px;
+    color: var(--td-text-color-secondary);
+  }
 }
 .image-attr-panel {
   margin-top: 4px;
@@ -2007,10 +2026,9 @@ watch(() => chatResources.allModels, (list) => {
   padding: 0;
   list-style: none;
 }
+// 属性之间只留间距，不画线 —— 分割线只用在分段之间。
 .image-attr-row + .image-attr-row {
   margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--td-component-border);
 }
 .image-attr-head {
   display: flex;
