@@ -113,8 +113,8 @@
 
 - **认证**（`core/client.go`）：`POST /open-apis/auth/v3/tenant_access_token/internal` 换取 tenant_access_token，带互斥锁缓存与过期刷新。
 - **资源列举**（`ListResources`）：三级懒加载——`parentID==""` 列 Wiki 空间；`parentID==spaceID` 列空间顶层节点；`parentID=="spaceID:nodeToken"` 列该节点子节点。早期版本会预先递归整棵树，大 Wiki 会超时（issue #1672），现在递归只发生在同步时。`ResolveResourceAncestors` 通过 `GetWikiNode` 的 `parent_node_token` 逐级上溯，O(depth) 回显深层勾选。
-- **目录映射**：同步时按 Wiki 节点树 / Drive 文件夹树在知识库内重建同名目录（`knowledges.folder_path`，目录名中的 `/` 等非法字符替换为 `_`）。**选中的同步根本身也镜像为顶层文件夹**——Wiki 空间以其名称建目录（如同步知识库「飞书知识库同步测试」→ 顶层出现 `飞书知识库同步测试/`），Drive 文件夹同理（如同步「测试1」→ 顶层出现 `测试1/`），因此一个知识库同时链接多个飞书数据源时可以一眼区分来源；根名解析失败时退回根不落目录的旧行为，同步不失败。Wiki 侧节点改名/移动会更新节点编辑时间，下一次增量同步文档自动落到新目录；Drive 侧目录改名/文件移动不改变文件修改时间，增量同步不感知，需手动全量同步刷新目录结构；节点删除时文档跟随删除（彻底删除，不可恢复，可在数据源关闭"同步删除"）。Wiki 快捷方式节点按其指向的实体去重，不重复入库。存量数据源升级后会在下一次同步（含增量）自动按全量执行一次完成目录收敛，无需手动操作。
-- **docx 解析模式**（数据源编辑页 → 解析模式，配置存于数据源级 `settings.parse_mode`，默认 `blocks`）：
+- **目录映射**：同步时按 Wiki 节点树 / Drive 文件夹树在知识库内重建同名目录（`knowledges.folder_path`，目录名中的 `/` 等非法字符替换为 `_`）。**选中的同步根本身也镜像为顶层文件夹**——Wiki 空间以其名称建目录（如同步知识库「飞书知识库同步测试」→ 顶层出现 `飞书知识库同步测试/`），Drive 文件夹同理（如同步「测试1」→ 顶层出现 `测试1/`），因此一个知识库同时链接多个飞书数据源时可以一眼区分来源；根名解析失败时退回根不落目录的旧行为，同步不失败。Wiki 侧通过节点时间和目标路径指纹识别改名/移动，祖先目录变化也会触发后代文档重新归档；Drive 侧目录改名/文件移动不改变文件修改时间，增量同步不感知，需手动全量同步刷新目录结构；节点删除时文档跟随删除（彻底删除，不可恢复，可在数据源关闭"同步删除"）。Wiki 快捷方式仅在同一次完整列举中包含独立的原节点子树时去重；原节点不在同步范围内或列举不完整时保留快捷方式及其子节点。存量数据源升级后会在下一次同步（含增量）自动按全量执行一次完成目录收敛，无需手动操作。
+- **docx 解析模式**（数据源编辑页 → 解析模式，配置存于数据源级 `settings.parse_mode`，新建默认 `blocks`）：旧数据源未显式设置时显示“使用服务器配置”，保存其他设置不会改变其解析方式；也可选择该选项恢复服务器回退配置。
   - `blocks`（默认）→ blocks API 逐块读取并转为 GFM Markdown（`core/blocks.go`/`markdown.go`），保留代码块语言、LaTeX 公式（`$...$`）、原生表格（**合并单元格拆分为独立单元格并填充左上值**，列对齐随源文档）、任务列表、分栏、高亮块等；文档内嵌的电子表格/多维表格块直接转为文档内 Markdown 表格（合并单元格同样以左上值填充）；文档小组件中的时间轴转为 Markdown 列表；覆盖不到的块类型（会话卡片、OKR、议程等无公开内容 API 的少数类型）降级为占位标记，不影响文档其余部分；
   - `export` → 异步导出 API（`POST /drive/v1/export_tasks`）导出 `.docx` 走通用文档解析。
   - `doc`（旧版文档）/`sheet`/`bitable` 不受此开关影响，仍走导出通道。
@@ -133,7 +133,7 @@
   - `sheet`/`bitable` → 导出 `.xlsx`；
   - `file` → drive 原文件下载（PDF/Word/图片等）；
   - `mindnote`/`slides` → **跳过**（无内容读取 API），并通过 `fetchTally` 统计输出 `discovered/fetched/failed/skipped_unsupported by_type` 摘要日志，解释"发现 13 篇为何只同步了 3 篇"（issue #2136）。
-- **增量逻辑**：游标 `FeishuCursor.SpaceNodeTimes`（`resourceID → nodeToken → editTime`）。变更判定用 `obj_edit_time`（文档内容编辑时间），而**不是** `node_edit_time`（只反映改标题/挪位置）。抓取失败的节点**不推进游标**（保留旧 editTime，下次必然 prev != current 而重试），避免瞬时导出失败导致文档被永久跳过。
+- **增量逻辑**：Wiki 游标 `FeishuCursor.SpaceNodeTimes` 保存 `resourceID → nodeToken → 变更键`，由 `obj_edit_time`、`node_edit_time` 的较新值与目标路径指纹组成，同时识别内容编辑和祖先目录改名/移动；文档源更新时间仍保留内容编辑时间。旧时间戳游标会刷新一次以升级格式。抓取失败的节点**不推进游标**（保留旧变更键，下次重试），避免瞬时导出失败导致文档被永久跳过。
 - **FetchStream**：统一全量/增量路径（cursor==nil 即全量），每处理 `FeishuStreamCheckpointInterval = 50` 个节点、或距上次 checkpoint 超过 `FeishuStreamCheckpointMaxInterval = 30s` 就落盘一次游标——后者兜底"少量文档但每篇导出都极慢（被限流）"导致 2 小时超时前从未 checkpoint 的场景。
 - **错误分类**（`feishuFailure`）：把原始错误归类为稳定 i18n code（`feishu_auth_or_permission` / `feishu_rate_limited` / `feishu_timeout` / `feishu_server_unavailable` / `feishu_api_error`(+code) / `sync_failed`），前端本地化展示；原始 status/body/log_id 只留在服务端日志。
 
