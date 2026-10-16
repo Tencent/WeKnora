@@ -4624,6 +4624,12 @@ export default {
         imagePipelineSectionDescription:
           '멀티모달 분석이 켜져 있으면 이미지의 분석 방식을 필요에 따라 선택할 수 있습니다.',
         imagePipelineLabel: '분석 방식',
+        preprocessLabel: '문서 전처리',
+        preprocessDescription:
+          'OCR 전에 촬영한 페이지를 반듯하게 펴고 주변을 잘라냅니다. 자동: 설명 단계에서 필요 여부를 판단 / 끄기: 항상 사용 안 함 / 강제: 항상 사용.',
+        preprocessModeAuto: '자동',
+        preprocessModeOff: '끄기',
+        preprocessModeForce: '강제',
         imagePipelinePlaceholder: '분석 방식 선택',
         imagePipelineLoading: '파이프라인을 불러오는 중…',
         imagePipelineLoadError: '파이프라인을 불러오지 못했습니다',

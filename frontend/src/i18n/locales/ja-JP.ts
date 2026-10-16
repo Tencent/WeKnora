@@ -4035,6 +4035,12 @@ export default {
         imagePipelineSectionDescription:
           'マルチモーダル解析が有効な場合、画像の解析方式を選択できます。',
         imagePipelineLabel: '解析方式',
+        preprocessLabel: '文書の前処理',
+        preprocessDescription:
+          'OCR の前に、撮影したページを傾き補正して周囲を切り落とします。自動：説明ラウンドが要否を判断／オフ：常に無効／強制：常に有効。',
+        preprocessModeAuto: '自動',
+        preprocessModeOff: 'オフ',
+        preprocessModeForce: '強制',
         imagePipelinePlaceholder: '解析方式を選択',
         imagePipelineLoading: 'パイプラインを読み込み中…',
         imagePipelineLoadError: 'パイプラインの読み込みに失敗しました',

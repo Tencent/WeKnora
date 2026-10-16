@@ -23,14 +23,23 @@ const props = defineProps<{
   pipelineId: string
   /** That pipeline's private tunables; a missing key reads the field default. */
   params: Record<string, unknown>
+  /**
+   * Page-straightening switch: 'auto' | 'off' | 'force'. Optional because it
+   * is a knowledge-base setting: the upload dialog's per-task overrides have no
+   * such field, and a host that does not manage it simply shows the default.
+   */
+  preprocessMode?: string
 }>()
 
 const emit = defineEmits<{
   'update:pipelineId': [value: string]
   'update:params': [value: Record<string, unknown>]
+  'update:preprocessMode': [value: string]
   /** Turned on while the current pick is configured to do nothing at all. */
   'update:invalid': [value: boolean]
 }>()
+
+import { PREPROCESS_MODE_AUTO } from '@/utils/imageProcessingConfig'
 
 const { t, te } = useI18n()
 
@@ -153,6 +162,13 @@ function onPipelineChange(value: string) {
   emit('update:params', {})
 }
 
+// The preprocess switch is deliberately independent of the pipeline pick: the
+// step only exists inside the smartocr pipeline, but a knowledge base moving
+// between pipelines must not silently lose the choice it made here.
+function onPreprocessModeChange(value: string) {
+  emit('update:preprocessMode', value)
+}
+
 function onParamChange(key: string, value: unknown) {
   emit('update:params', { ...props.params, [key]: value })
 }
@@ -211,6 +227,33 @@ watch(() => props.pipelineId, () => {
         </div>
       </div>
       <p v-if="current" class="image-pipeline-desc">{{ pipelineDescription(current) }}</p>
+
+      <!-- Page straightening. Offered next to the pick because it is part of
+           what the pipeline does to an image, but framed as its own decision:
+           the three states trade a pass over the page against reading it as
+           photographed, and an operator may reasonably want either. -->
+      <div class="image-pipeline-row">
+        <div class="image-pipeline-info">
+          <label>{{ $t('knowledgeEditor.advanced.multimodal.preprocessLabel') }}</label>
+          <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.preprocessDescription') }}</p>
+        </div>
+        <div class="image-pipeline-control">
+          <t-select :value="preprocessMode || PREPROCESS_MODE_AUTO" @change="onPreprocessModeChange">
+            <t-option
+              value="auto"
+              :label="$t('knowledgeEditor.advanced.multimodal.preprocessModeAuto')"
+            />
+            <t-option
+              value="off"
+              :label="$t('knowledgeEditor.advanced.multimodal.preprocessModeOff')"
+            />
+            <t-option
+              value="force"
+              :label="$t('knowledgeEditor.advanced.multimodal.preprocessModeForce')"
+            />
+          </t-select>
+        </div>
+      </div>
 
       <!-- One row per field the running pipeline declares. A pipeline with no
            fields shows nothing here, which is the honest rendering of "nothing

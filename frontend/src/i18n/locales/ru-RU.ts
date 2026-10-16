@@ -4624,6 +4624,12 @@ export default {
         imagePipelineSectionDescription:
           'Когда включён мультимодальный разбор, можно выбрать способ разбора изображений.',
         imagePipelineLabel: 'Способ разбора',
+        preprocessLabel: 'Предобработка документа',
+        preprocessDescription:
+          'Выравнивает и обрезает сфотографированную страницу перед OCR. Авто: описание решает, нужно ли это; Выкл.: никогда; Принудительно: всегда.',
+        preprocessModeAuto: 'Авто',
+        preprocessModeOff: 'Выкл.',
+        preprocessModeForce: 'Принудительно',
         imagePipelinePlaceholder: 'Выберите способ разбора',
         imagePipelineLoading: 'Загрузка пайплайнов…',
         imagePipelineLoadError: 'Не удалось загрузить пайплайны',

@@ -58,6 +58,13 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	if overrides == nil {
 		return eff
 	}
+	if overrides.PreprocessMode != nil && strings.TrimSpace(*overrides.PreprocessMode) != "" {
+		// Normalized through the same resolver the knowledge base path uses, so
+		// an override cannot introduce a value the run would not understand.
+		eff.PreprocessMode = types.ResolvePreprocessMode(&types.ImageProcessingConfig{
+			PreprocessMode: *overrides.PreprocessMode,
+		})
+	}
 	if overrides.SummaryEnabled != nil {
 		eff.SummaryEnabled = *overrides.SummaryEnabled
 	}

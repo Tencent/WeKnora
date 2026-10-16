@@ -4035,6 +4035,12 @@ export default {
         imagePipelineSectionDescription:
           'With multimodal parsing on, pick how images are parsed.',
         imagePipelineLabel: 'Scheme',
+        preprocessLabel: 'Document preprocessing',
+        preprocessDescription:
+          'Straighten and crop a photographed page before OCR reads it. Auto asks the describe round whether the page needs it; Off never does; Force always does.',
+        preprocessModeAuto: 'Auto',
+        preprocessModeOff: 'Off',
+        preprocessModeForce: 'Force',
         imagePipelinePlaceholder: 'Select a scheme',
         imagePipelineLoading: 'Loading pipelines…',
         imagePipelineLoadError: 'Could not load pipelines',

@@ -23,12 +23,45 @@ export interface ImageProcessingEdits {
   pipelineId: string
   /** That pipeline's private tunables, keyed by field. */
   pipelineParams: Record<string, unknown>
+  /**
+   * The page-straightening switch: 'auto' (observe geometry, then decide),
+   * 'off' (never) or 'force' (always). Mirrors backend preprocess modes.
+   */
+  preprocessMode: string
+}
+
+/** The preprocess switch's values, mirroring the backend's constants. */
+export const PREPROCESS_MODE_OFF = 'off'
+export const PREPROCESS_MODE_AUTO = 'auto'
+export const PREPROCESS_MODE_FORCE = 'force'
+
+/**
+ * Maps a stored preprocess mode onto the one the panel offers. Anything
+ * unrecognised — including the empty string a knowledge base saved before the
+ * field existed carries — resolves to auto, the backend's own default, so the
+ * panel never shows a blank choice.
+ */
+export function normalizePreprocessMode(mode: string | null | undefined): string {
+  switch ((mode || '').trim().toLowerCase()) {
+    case PREPROCESS_MODE_OFF:
+      return PREPROCESS_MODE_OFF
+    case PREPROCESS_MODE_FORCE:
+      return PREPROCESS_MODE_FORCE
+    default:
+      return PREPROCESS_MODE_AUTO
+  }
 }
 
 /** The pipeline fields an overrides payload carries, with the empties dropped. */
 export interface PipelineFields {
   image_pipeline?: string
   image_pipeline_params?: Record<string, unknown>
+  /**
+   * Per-task override of the page-straightening switch. Only sent when it
+   * differs from the knowledge base's own value, so an untouched dialog does
+   * not pin a document to a setting the KB may later change.
+   */
+  preprocess_mode?: string
 }
 
 /**
@@ -58,12 +91,20 @@ export function normalizeImagePipelineId(id: string | null | undefined): string 
 export function buildPipelineFields(
   pipelineId: string,
   pipelineParams: Record<string, unknown> | null | undefined,
+  preprocessMode?: string | null,
+  kbPreprocessMode?: string | null,
 ): PipelineFields {
   if (!pipelineId) return {}
   const fields: PipelineFields = {}
   if (pipelineId) fields.image_pipeline = pipelineId
   if (pipelineParams && Object.keys(pipelineParams).length > 0) {
     fields.image_pipeline_params = pipelineParams
+  }
+  // Ditto for the preprocess switch: the dialogs open showing the knowledge
+  // base's value, and only a deliberate change is worth overriding with.
+  const mode = normalizePreprocessMode(preprocessMode)
+  if (preprocessMode && mode !== normalizePreprocessMode(kbPreprocessMode)) {
+    fields.preprocess_mode = mode
   }
   return fields
 }
@@ -113,7 +154,25 @@ export function buildImageProcessingConfig(
   if (edits.imageVectorEnabled || 'image_vector_enabled' in snap) {
     built.image_vector_enabled = edits.imageVectorEnabled
   }
+  // Same reasoning as the vector switch: auto is what the backend already
+  // assumes, so a knowledge base that never touched this select reads the same
+  // way whether the key is absent or says "auto". Writing it only when it
+  // carries information keeps an untouched base's stored config untouched.
+  const preprocessMode = normalizePreprocessMode(edits.preprocessMode)
+  if (preprocessMode !== PREPROCESS_MODE_AUTO || 'preprocess_mode' in snap) {
+    built.preprocess_mode = preprocessMode
+  }
   return JSON.stringify(built) === JSON.stringify(snap) ? null : built
+}
+
+/**
+ * Reads the preprocess switch out of a stored config, normalized the way the
+ * panel shows it. Absent means auto.
+ */
+export function resolvePreprocessModeFromKb(
+  kb: Record<string, any> | null | undefined,
+): string {
+  return normalizePreprocessMode(kb?.image_processing_config?.preprocess_mode)
 }
 
 /**

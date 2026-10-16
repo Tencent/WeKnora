@@ -416,7 +416,9 @@
               <ImagePipelineSettings
                 v-model:params="formData.imagePipelineParams"
                 :pipeline-id="formData.imagePipeline"
+                :preprocess-mode="formData.preprocessMode"
                 @update:pipeline-id="onPipelineChange"
+                @update:preprocess-mode="formData.preprocessMode = $event"
                 @update:invalid="onPipelineInvalidChange"
               />
             </div>
@@ -622,6 +624,8 @@ import {
 } from '@/api/knowledge-base'
 import {
   buildImageProcessingConfig,
+  PREPROCESS_MODE_AUTO,
+  resolvePreprocessModeFromKb,
   resolveImagePipelineFromKb as resolveKbImagePipeline,
   IMAGE_PIPELINE_DEFAULT,
   IMAGE_PIPELINE_SMARTOCR,
@@ -979,6 +983,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     // 方案决定旧观察开关的取值（见 onPipelineChange）。
     imagePipeline: IMAGE_PIPELINE_DEFAULT,
     imagePipelineParams: {} as Record<string, unknown>,
+    preprocessMode: PREPROCESS_MODE_AUTO,
     imageProcessingConfigSnapshot: null as Record<string, unknown> | null,
     asrConfig: {
       enabled: false,
@@ -1147,6 +1152,7 @@ const loadKBData = async (
           string,
           unknown
         >) ?? {},
+      preprocessMode: resolvePreprocessModeFromKb(kb),
       imageProcessingConfigSnapshot:
         (kb as Record<string, any>).image_processing_config || null,
       asrConfig: {
@@ -1577,6 +1583,7 @@ const buildSubmitData = () => {
       // 对空 pipelineId 的处理是删掉这两个字段），配置里只留下观察开关的语义。
       pipelineId: formData.value.multimodalConfig.enabled ? formData.value.imagePipeline : '',
       pipelineParams: formData.value.imagePipelineParams,
+      preprocessMode: formData.value.preprocessMode,
     })
     if (built) {
       data.image_processing_config = built

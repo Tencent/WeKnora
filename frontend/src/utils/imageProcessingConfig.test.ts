@@ -26,6 +26,7 @@ function editsWith(overrides: Partial<ImageProcessingEdits> = {}): ImageProcessi
     defaultOn: DEFAULT_ON,
     pipelineId: IMAGE_PIPELINE_SMARTOCR,
     pipelineParams: {},
+    preprocessMode: 'auto',
     ...overrides,
   }
 }
