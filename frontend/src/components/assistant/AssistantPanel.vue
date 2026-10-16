@@ -67,9 +67,11 @@
           :agent-id="BUILTIN_WEKNORA_ASSISTANT_ID" :embedded-mode="true" :initial-query="initialQuery"
           :host-scope="hostScope" :model-id="assistant.modelId" :default-model-id="defaultModelId"
           @update:model-id="assistant.setModel">
-          <template v-if="hasComposerChips" #composer-chips>
-            <AssistantContextChip />
-            <AssistantSelectionChip />
+          <template #composer-chips>
+            <div class="assistant-composer-context">
+              <AssistantContextChip />
+              <AssistantSelectionChip />
+            </div>
           </template>
           <template #composer-controls>
             <AssistantAccessPicker />
@@ -101,9 +103,11 @@
             <InputField ref="welcomeInput" :embedded-mode="true" compact :auto-focus="assistant.visible"
               :model-id="assistant.modelId" :default-model-id="defaultModelId" @update:model-id="assistant.setModel"
               @send-msg="(query) => startConversation(query)">
-              <template v-if="hasComposerChips" #chips>
-                <AssistantContextChip />
-                <AssistantSelectionChip />
+              <template #chips>
+                <div class="assistant-composer-context">
+                  <AssistantContextChip />
+                  <AssistantSelectionChip />
+                </div>
               </template>
               <template #controls>
                 <AssistantAccessPicker />
@@ -220,9 +224,6 @@ const starters = computed(() => {
   if (c) return [t('assistant.starters.failedDocuments'), t('assistant.starters.recentActivity')]
   return [t('assistant.starters.agents'), t('assistant.starters.formats'), t('assistant.starters.createWiki')]
 })
-
-const hasComposerChips = computed(() =>
-  !!(assistant.pageContext || assistant.pageTitle || assistant.pageView || assistant.pageSelection))
 
 // The backend only honours a page context inside the run's search scope, so
 // the page's knowledge base travels with it.
@@ -474,6 +475,22 @@ onUnmounted(() => {
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+.assistant-composer-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  flex: 0 0 100%;
+
+  :deep(.assistant-selection-chip) {
+    flex: 0 1 auto;
+    max-width: 42%;
+    height: 26px;
   }
 }
 

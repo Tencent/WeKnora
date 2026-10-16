@@ -418,7 +418,7 @@
                 <PageEditCard v-for="edit in pinnedPageEdits" :key="edit.tool_call_id" :fill="edit.tool_data"
                   :tool-call-id="edit.tool_call_id" />
               </div>
-              <div v-if="answerFullyRendered && event.done && event.content && event.content.trim() && !embeddedMode"
+              <div v-if="answerFullyRendered && event.done && event.content && event.content.trim()"
                 class="answer-toolbar">
                 <t-tooltip v-if="canFork" :content="forkTooltip">
                   <t-button size="small" variant="outline" shape="round" @click.stop="emitFork">
@@ -446,10 +446,10 @@
                   </t-tooltip>
                 </t-popconfirm>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
-                  :title="$t('agent.copy')">
+                  :title="$t('agent.copy')" :aria-label="$t('agent.copy')">
                   <t-icon name="copy" />
                 </t-button>
-                <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge(event)"
+                <t-button v-if="!embeddedMode" size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge(event)"
                   :title="$t('agent.addToKnowledgeBase')">
                   <t-icon name="bookmark-add" />
                 </t-button>
@@ -457,7 +457,7 @@
                      assistant message recorded any generated files. Agent
                      mode is the primary path for skills, so this is where
                      the button is most likely to appear. -->
-                <span v-if="hasArtifacts || artifactsCollecting" class="answer-toolbar__artifact"
+                <span v-if="!embeddedMode && (hasArtifacts || artifactsCollecting)" class="answer-toolbar__artifact"
                   :class="{ 'is-collecting': artifactButtonCollecting, 'is-arrived': artifactArrived }"
                   @animationend="onArtifactArriveEnd">
                   <t-button size="small" variant="outline" shape="round"
@@ -469,12 +469,12 @@
                   </t-button>
                   <span v-if="hasArtifacts" class="answer-toolbar__artifact-count" aria-hidden="true">{{ artifactCount }}</span>
                 </span>
-                <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
+                <t-tooltip v-if="!embeddedMode && event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
                     <t-icon name="info-circle" />
                   </t-button>
                 </t-tooltip>
-                <t-tooltip v-if="event.truncated" :content="$t('chat.truncatedHint')" placement="top">
+                <t-tooltip v-if="!embeddedMode && event.truncated" :content="$t('chat.truncatedHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
                     <t-icon name="info-circle" />
                   </t-button>
@@ -482,7 +482,7 @@
                 <ChatRequestInfoButton v-if="showRequestInfo && isConversationDone" :session="session"
                   :session-id="sessionId" />
                 <transition name="follow-up-toolbar-loading">
-                  <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
+                  <span v-if="!embeddedMode && followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
                     aria-live="polite">
                     <t-icon name="lightbulb" />
                     <span class="answer-toolbar__follow-up-label">{{ t('chat.followUpQuestionsLoading') }}</span>
