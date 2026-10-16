@@ -13,8 +13,9 @@ from openpyxl.chart import BarChart, Reference
 
 from docreader.parser.excel_convert import detect_excel_format, engine_for_format
 from docreader.parser.excel_parser import ExcelParser
+from docreader.parser.markitdown_parser import StdMarkitdownParser
 from docreader.parser.xlsx_merge import fill_merged_cells_xlsx
-from docreader.parser.xlsx_repair import repair_xlsx_bytes
+from docreader.parser.xlsx_repair import repair_xlsx_bytes, strip_unreadable_ranges_xlsx
 
 
 def _xlsx_with_phantom_shared_strings() -> bytes:
@@ -50,6 +51,37 @@ def _xlsx_with_phantom_shared_strings() -> bytes:
                     zout.write(path, arc)
         return out.getvalue()
 
+
+
+def _xlsx_with_sheet_fragment(fragment: str) -> bytes:
+    """A two-row workbook with ``fragment`` spliced into sheet1 before pageMargins,
+    which is where OOXML puts data validations and scenarios."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws["A1"], ws["B1"] = "name", "qty"
+    ws["A2"], ws["B2"] = "apple", 3
+    bio = io.BytesIO()
+    wb.save(bio)
+
+    out = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(bio.getvalue()), "r") as zin, zipfile.ZipFile(
+        out, "w", zipfile.ZIP_DEFLATED
+    ) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if info.filename == "xl/worksheets/sheet1.xml":
+                sheet = data.decode("utf-8")
+                at = sheet.index("<pageMargins")
+                data = (sheet[:at] + fragment + sheet[at:]).encode("utf-8")
+            zout.writestr(info, data)
+    return out.getvalue()
+
+
+def _validation(sqref: str, formula: str = '"a,b"') -> str:
+    return (
+        f'<dataValidation type="list" allowBlank="1" sqref="{sqref}">'
+        f"<formula1>{formula}</formula1></dataValidation>"
+    )
 
 class ExcelFormatDetectionTest(unittest.TestCase):
     def test_detect_xlsx_and_engine(self):
@@ -98,6 +130,83 @@ class ExcelFormatDetectionTest(unittest.TestCase):
             xls_bytes
         )
         self.assertIn("legacy", document.content)
+
+
+
+class XlsxUnreadableRangesTest(unittest.TestCase):
+    """#3599: a range openpyxl cannot parse must not cost the whole document."""
+
+    def test_whole_column_validation_aborts_openpyxl_without_the_fix(self):
+        broken = _xlsx_with_sheet_fragment(
+            f'<dataValidations count="1">{_validation("C:C")}</dataValidations>'
+        )
+        with self.assertRaisesRegex(TypeError, "MultiCellRange"):
+            openpyxl.load_workbook(io.BytesIO(broken), data_only=True)
+        with self.assertRaisesRegex(TypeError, "MultiCellRange"):
+            pd.read_excel(io.BytesIO(broken), engine="openpyxl")
+
+    def test_drops_each_range_spelling_openpyxl_rejects(self):
+        # Measured on openpyxl 3.1.5; every one of these raised the reported
+        # TypeError before the fix.
+        for sqref in ("C:C", "1:1", "A1:B2,C3", "#REF!", "A1:XFD1048577"):
+            with self.subTest(sqref=sqref):
+                broken = _xlsx_with_sheet_fragment(
+                    f'<dataValidations count="1">{_validation(sqref)}</dataValidations>'
+                )
+                fixed = strip_unreadable_ranges_xlsx(broken)
+                self.assertIsNotNone(fixed)
+                df = pd.read_excel(io.BytesIO(fixed), header=None, engine="openpyxl")
+                self.assertEqual(df.values.tolist(), [["name", "qty"], ["apple", 3]])
+
+    def test_drops_a_scenario_list_with_an_unreadable_range(self):
+        broken = _xlsx_with_sheet_fragment(
+            # The range belongs to the list, not to each scenario.
+            '<scenarios sqref="A:A"><scenario name="s" count="1">'
+            '<inputCells r="A1" val="1"/></scenario></scenarios>'
+        )
+        with self.assertRaisesRegex(TypeError, "MultiCellRange"):
+            openpyxl.load_workbook(io.BytesIO(broken), data_only=True)
+        fixed = strip_unreadable_ranges_xlsx(broken)
+        self.assertIsNotNone(fixed)
+        openpyxl.load_workbook(io.BytesIO(fixed), data_only=True)
+
+    def test_keeps_a_readable_validation_next_to_an_unreadable_one(self):
+        broken = _xlsx_with_sheet_fragment(
+            '<dataValidations count="2">'
+            f'{_validation("C:C")}{_validation("D2:D10", chr(34) + "keep" + chr(34))}'
+            "</dataValidations>"
+        )
+        fixed = strip_unreadable_ranges_xlsx(broken)
+        self.assertIsNotNone(fixed)
+        ws = openpyxl.load_workbook(io.BytesIO(fixed)).active
+        self.assertEqual(
+            [str(dv.sqref) for dv in ws.data_validations.dataValidation], ["D2:D10"]
+        )
+
+    def test_leaves_a_readable_workbook_untouched(self):
+        fine = _xlsx_with_sheet_fragment(
+            f'<dataValidations count="1">{_validation("C2:C10")}</dataValidations>'
+        )
+        self.assertIsNone(strip_unreadable_ranges_xlsx(fine))
+        self.assertIsNone(strip_unreadable_ranges_xlsx(b"not a zip"))
+
+    def test_excel_parser_reads_a_workbook_with_a_whole_column_validation(self):
+        broken = _xlsx_with_sheet_fragment(
+            f'<dataValidations count="1">{_validation("C:C")}</dataValidations>'
+        )
+        document = ExcelParser(file_name="feishu.xlsx", file_type="xlsx").parse_into_text(
+            broken
+        )
+        self.assertIn("apple", document.content)
+
+    def test_markitdown_parser_reads_a_workbook_with_a_whole_column_validation(self):
+        broken = _xlsx_with_sheet_fragment(
+            f'<dataValidations count="1">{_validation("C:C")}</dataValidations>'
+        )
+        document = StdMarkitdownParser(
+            file_name="feishu.xlsx", file_type="xlsx"
+        ).parse_into_text(broken)
+        self.assertIn("apple", document.content)
 
 
 class XlsxRepairTest(unittest.TestCase):

@@ -324,6 +324,7 @@ export default {
   },
   menu: {
     sessionInProgress: '会話中',
+    sessionUnread: '新しい回答',
     knowledgeBase: 'ナレッジベース',
     agents: 'エージェント',
     artifacts: '成果物',
@@ -810,6 +811,7 @@ export default {
     channelConfluence: 'Confluence',
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
+    channelSeafile: 'Seafile',
     channelIma: 'Tencent IMA',
     channelUpload: 'アップロード',
     channelManual: '手動作成',
@@ -972,8 +974,8 @@ export default {
     statusDraft: '下書き',
     noDescription: '説明なし',
     emptyKnowledgeDragDrop: 'ナレッジがありません。ドラッグ＆ドロップでアップロードできます',
-    pdfDocFormat: 'pdf、doc形式のファイル、最大10M',
-    textMarkdownFormat: 'text、markdown形式のファイル、最大200K',
+    pdfDocFormat: 'pdf、doc形式のファイル、最大{size}MB',
+    textMarkdownFormat: 'text、markdown形式のファイル、最大{size}MB',
     dragFileNotText: 'テキストやリンクではなくファイルをドラッグしてください',
     searchPlaceholder: 'ナレッジベースを検索...',
     docSearchPlaceholder: 'ドキュメント名を検索...',
@@ -1008,6 +1010,11 @@ export default {
     chunkLoadFailed: 'チャンクの読み込みに失敗しました'
   },
   uploadConfirm: {
+    imageEmbeddingModel: "画像インデックス用 Embedding モデル",
+    imageIndexInherited: "画像インデックスにはナレッジベースの Embedding モデルを使用します。変更はナレッジベース設定で行ってください。",
+    imageVectorIndex: "今回の画像ベクトル索引",
+    imageVectorIndexHint: "今回のアップロードまたは再解析で画像ベクトルを生成します。ナレッジベースの既定設定は変更しません。検索への利用は画像ベクトル検索設定に従います。",
+    imageVectorRequiresIndex: "先にナレッジベース設定でベクトル索引を有効にしてください。",
     documentSummary: "ドキュメントの要約",
     documentSummaryDescription: "今回インポートするドキュメントの要約を自動生成するか選択します。",
     generateSummary: "ドキュメントの要約を生成",
@@ -1168,6 +1175,12 @@ export default {
       cancelled: 'キャンセル済み'
     },
     errorCode: {
+      DOCREADER_UNAVAILABLE: "文書解析サービスを利用できません",
+      DOCREADER_UNAVAILABLE_SUGGESTION: "DocReader に接続できないか、接続が切断されました。サービスの稼働状態、再起動の繰り返し、ネットワークを確認し、復旧後に再試行してください。再アップロードは不要です。",
+      DOCREADER_TIMEOUT: "文書解析がタイムアウトしました",
+      DOCREADER_TIMEOUT_SUGGESTION: "DocReader の稼働状態と負荷を確認してから再試行してください。必要に応じて大きなファイルを分割してください。",
+      DOCREADER_PARSE_FAILED: "文書解析に失敗しました",
+      DOCREADER_PARSE_FAILED_SUGGESTION: "ファイル形式を確認し、管理者に今回の DocReader ログの確認を依頼してください。",
       TASK_STALLED: '進捗がないため自動停止しました',
       TASK_STALLED_SUGGESTION: 'しきい値を超えても進捗がなく、キューにも対応するタスクがないため失敗としてマークされました。「再試行」を押してください。繰り返し発生する場合は、この段階が依存するサービス（文書解析、モデル、ベクトルストア）を確認してください。',
       UNKNOWN_SUGGESTION: '詳細はアプリケーションログを確認してください。'
@@ -1303,6 +1316,8 @@ export default {
       enabled: 'エージェントを有効化しました'
     },
     editor: {
+      assistantChanged: 'アシスタントがこのエージェントを変更しました。最新の設定を確認するには、開き直してください。',
+      assistantDeleted: 'アシスタントがこのエージェントを削除しました。',
       reasoningEffortUnsupported: '選択中のモデルは思考に対応していません。「オフ」以外は無視されます。',
       reasoningEffortAlwaysOn: '選択中のモデルは常に思考します。オフにはできず、強度のみ調整できます。',
       createTitle: 'エージェントを作成',
@@ -1816,6 +1831,7 @@ export default {
       skillTranscriptLive: 'インストールログ',
       skillTranscriptLiveHint: 'インストール中 — クリックで表示',
       skillTranscriptTitle: 'インストールの実行内容',
+      skillTranscriptPrompt: 'インストール指示',
       skillTranscriptHide: 'インストールの実行内容を非表示',
       skillGuidance: {
         placeholder: '必要な CLI、インストール手順、環境の制約などを入力',
@@ -1934,6 +1950,7 @@ export default {
       installedCount: '{count}個のサンドボックスにインストール済み',
       installPanelGroup: 'インストール済み',
       installPanelAvailable: '未インストール',
+      installAction: 'インストール',
       viewInstallProgress: '進捗を表示',
       manageOnSandbox: 'サンドボックス「{name}」でこのスキルを管理',
       manageDrawerDesc: 'サンドボックス「{name}」での有効化、変数、アンインストールを管理します。',
@@ -2548,6 +2565,15 @@ export default {
     }
   },
   retrievalSettings: {
+    recallTab: '検索候補',
+    rerankTab: '再ランキング',
+    rrfTitle: '結果の統合（RRF）',
+    rrfKLabel: 'RRF 平滑化定数 (K)',
+    rrfKDescription: '値が大きいほど上位の検索結果の優位性が小さくなります。既定値は 60。0 は既定値を使用します。',
+    rrfVectorWeightLabel: 'RRF ベクトル重み',
+    rrfVectorWeightDescription: '統合結果に対するベクトル検索の影響を調整します。既定値は 0.7。0 は既定値を使用します。重みの合計を 1 にする必要はありません。',
+    rrfKeywordWeightLabel: 'RRF キーワード重み',
+    rrfKeywordWeightDescription: '統合結果に対するキーワード検索の影響を調整します。既定値は 0.3。0 は既定値を使用します。重みの合計を 1 にする必要はありません。',
     title: '検索設定',
     description: 'ナレッジベース検索とメッセージ検索に共通する検索パラメータを設定します',
     embeddingTopKLabel: 'ベクトル検索のTop K',
@@ -2792,7 +2818,13 @@ export default {
     mcpStale: '再同期が必要',
     belongsToKb: 'ナレッジベース: ',
     belongsToOrg: '共有スペース: ',
-    noCompatibleKbForAgent: 'このエージェントのツールはスコープ内のナレッジベースの機能と一致しないため、参照できるナレッジベースがありません。'
+    noCompatibleKbForAgent: 'このエージェントのツールはスコープ内のナレッジベースの機能と一致しないため、参照できるナレッジベースがありません。',
+    tag: 'タグ',
+    searchPlaceholder: 'ナレッジ・ファイル等を検索',
+    searchInGroup: '{group}内を検索…',
+    typeToSearch: "{'@'} の後に入力して検索…",
+    viewAll: 'すべて表示',
+    back: '戻る'
   },
   file: {
     upload: 'ファイルをアップロード'
@@ -2925,6 +2957,9 @@ export default {
     notConfigured: '未設定',
     sharedAgentModelLabel: '共有エージェントのモデル',
     noModel: '利用可能なモデルがありません',
+    modelAuto: '既定',
+    modelFollowDefault: '既定に従う',
+    modelAutoHint: '現在のナレッジベースのチャットモデル。ナレッジベース外や未設定の場合は、最初に利用可能なチャットモデルを使用します',
     stopGeneration: '生成を停止',
     send: '送信',
     steerCurrent: '現在のタスクに追加',
@@ -3196,6 +3231,8 @@ export default {
         actorId: '実行者ID',
         apiKeyName: 'APIキー名',
         apiKeyId: 'APIキーID',
+        agentSessionId: 'アシスタント会話 ID',
+        agentOperation: 'アシスタントの操作',
         details: '詳細'
       },
       drawer: {
@@ -3207,6 +3244,7 @@ export default {
       systemActor: 'システム',
       actorWithAPIKey: '{actor} · API Key · {name}',
       actorAPIKey: 'API Key · {name}',
+      viaAssistant: 'WeKnora アシスタント経由',
       knowledgeBase: 'ナレッジベース',
       countItems: '{count}件',
       titleWithCount: '{title}ほか{count}件',
@@ -3495,11 +3533,11 @@ export default {
         imageLoadError: '画像の読み込みに失敗しました',
         noCaption: '説明なし',
         noOcr: '文字は認識されませんでした',
-        caption: '説明',
-        ocr: '画像内の文字（OCR）',
-        attributes: '属性',
+        caption: '画像の説明',
+        ocr: '画像内の文字',
+        attributes: '画像の属性',
         source: '元のドキュメント',
-        details: '詳細',
+        details: '基本情報',
         dimensions: 'サイズ',
         status: '状態',
         openSource: '元のドキュメントを開く',
@@ -3515,6 +3553,17 @@ export default {
         viewerClose: '閉じる (Esc)',
         prev: '前へ (←)',
         next: '次へ (→)',
+        sourceFilter: 'ドキュメントで絞り込み',
+        sourceFilterTitle: 'ソースドキュメントで絞り込み',
+        sourceFilterSearch: 'ドキュメント名を検索',
+        sourceFilterEmpty: '一致するドキュメントがありません',
+        sourceFilterSubtitle: '選択したドキュメントの画像のみを表示し、キャプションと OCR 結果を一つずつ確認できます',
+        sourceFilterSelected: '{count} 件のドキュメントを選択中',
+        sourceFilterClear: '選択をクリア',
+        sourceFilterTooMany: '選択できるのは最大 1000 件です',
+        sourceFilterSelectAll: 'すべて選択 / 選択解除（全ヒット対象）',
+        sourceFilterOverflowRecent: 'ドキュメントが多いため、最新 {cap} 件のみ表示しています。キーワードで絞り込んでください',
+        sourceFilterOverflowHits: '{total} 件がヒットしました。先頭 {cap} 件のみ表示中です。全選択前にキーワードを絞り込んでください',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).
@@ -3614,6 +3663,16 @@ export default {
       helpZoomDesc: 'キャンバスを拡大・縮小',
       neighborsProgress: '{total}個の隣接ノードのうち{visible}個を表示中（{hidden}個は未読み込み）',
       neighborsAllShown: '{total}個の隣接ノードはすべてキャンバス上にあります（「隣接ノードを展開」でこのノードのサブグラフに焦点を当てられます）',
+      graphNavigationHint: '背景をドラッグして移動 · スクロールでズーム',
+      focusGroup: 'このグループを表示',
+      focusGroupViewing: '表示中：{name}',
+      focusGroupBack: '全体に戻る',
+      focusGroupSwitch: '別のグループに切り替え',
+      unlinkedHidden: 'リンクのないページを {count} 件非表示',
+      unlinkedSection: 'リンクのないページ · {count}',
+      offscreenSection: '現在の表示内に接続なし（リンクあり）· {count}',
+      hideUnlinked: 'リンクのないページを非表示（{count}）',
+      showUnlinked: 'リンクのないページを表示（{count}）',
       neighborsNone: 'このページにリンクされた隣接ノードはありません',
       neighborsCenterUnreachable: '{total}個の隣接ノードのうち{visible}個を表示中（{hidden}個は到達不可: リンク切れ、フィルタ対象外、または削除済み）',
       neighborsOverviewHidden: '{total}個の隣接ノードのうち{visible}個を表示中（{hidden}個は概要の範囲外です。「展開」をクリックするとここを起点に表示できます）',
@@ -3633,12 +3692,10 @@ export default {
       globalIssuesEmpty: '未処理のコンテンツ問題はありません',
       issuePagePrefix: 'ページ: ',
       issueGoFix: '修正に移動',
-      fixAssistantTitle: 'Wikiスマート修正アシスタント',
       issueFixSuggestions: 'コンテンツ最適化の提案（{count}）',
       issueFixSingle: '修正',
-      fixStartError: '修正アシスタントの起動に失敗しました',
-      issueFixPromptSingle: 'ページ [[{slug}]] の問題（ID: {id}）を修正してください。',
-      issueFixPromptAutoStart: 'ページ [[{slug}]] の次の問題を修正してください:'
+      issueFixPromptSingle: 'この Wiki の問題を修正して：{description}',
+      issueFixPromptAll: 'このページの未対応の問題 {count} 件を修正して'
     },
     buttons: {
       create: 'ナレッジベースを作成',
@@ -3953,6 +4010,9 @@ export default {
         customInstructionsPlaceholder: '例: 銘板、型番、アラームコード、表の単位を優先する…',
         imageAttrsLabel: '画像属性の観察',
         imageAttrsDescription: 'オンにすると各画像を先に「属性観察＋説明」し、その属性で画像内テキストへの OCR 実行可否を決定します。オフは基本モード：全画像を1枚ずつ説明し全て OCR します',
+        imageVectorLabel: '画像ベクトル検索',
+        imageVectorDescription: 'オンにすると、画像の説明を生成した後に埋め込みモデルで画像そのものもエンコードし、説明に書かれていない内容でも画像を検索できるようにします。画像入力に対応した埋め込みモデルが必要で、画像ごとに埋め込み呼び出しが1回増え、ベクトル検索の候補範囲も広がります。以降に取り込み・再解析した文書にのみ適用され、スキャン PDF のページは対象外です',
+        imageVectorModelUnsupported: '現在の埋め込みモデルは画像入力を宣言していないため、画像ベクトルは生成も検索もされません',
         imageAttrsSchemaLabel: '観察可能な画像属性',
         imageAttrsSchemaDescription: 'モデルは以下の属性（バックエンドのレジストリで定義）を観察して OCR ポリシーを決めます',
         imageAttrsOcrConditions: '観察した属性条件に基づいて OCR を実行',
@@ -4025,6 +4085,7 @@ export default {
         desktopRetry: 'Reconnect',
         notStarted: 'ターミナルはまだ起動していません。起動するとこの会話のサンドボックスに接続し、存在しないか一時停止中の場合は作成または再開します。',
         paused: 'この会話のサンドボックスは一時停止中です。ターミナルを起動すると再開します。',
+        stopped: 'この会話のサンドボックスは実行されていません。停止したか、長時間アイドル状態だったため回収された可能性があります。ターミナルを起動すると再起動します。回収済みの場合は新しいサンドボックスが作成され、以前のファイルやインストールしたソフトウェアは保持されません。',
         start: 'ターミナルを起動',
         connecting: 'サンドボックスに接続中…',
         needsProvision: 'この会話には実行中のサンドボックスがありません。作成すると新しいサンドボックスが起動し、ワークスペースの設定に従って課金されます。',
@@ -4035,6 +4096,8 @@ export default {
         retry: '再接続',
         sessionEnded: 'ターミナルセッションが終了しました',
         idleDisconnected: 'アイドル状態のためターミナルが切断されました。サンドボックスは自身のTTLで一時停止します。再接続できます。',
+        idleDisconnectedNewShell: 'アイドル状態のためターミナルが切断され、シェルは終了しました（nohup で起動したバックグラウンドジョブは影響を受けません）。再接続すると新しいシェルが開きます。',
+        disconnectedNewShell: '接続が切断され、ターミナルのシェルは終了しました（nohup で起動したバックグラウンドジョブは影響を受けません）。再接続すると新しいシェルが開きます。',
         authRevoked: 'ログイン状態が無効になったため、ターミナルが切断されました。再度サインインしてから接続してください。',
     },
     questionMinimapTitle: 'Q&A',
@@ -4046,6 +4109,7 @@ export default {
     truncatedHint: 'モデルの1回あたりの出力上限で回答が途中で打ち切られました。上記は打ち切り前に生成された内容です。',
     rewind: {
       tooltip: 'ここに巻き戻す',
+      confirmTitle: 'ここに巻き戻しますか？',
       confirmBody: 'これより後の会話を削除します。質問から巻き戻すとその質問自体も消え、入力欄に戻します。チェックポイントがあればワークスペースも戻します。この操作は元に戻せません。',
       confirmButton: '巻き戻す',
       cancelButton: 'キャンセル',
@@ -4075,6 +4139,13 @@ export default {
     referenceSourceView: '原文を表示',
     referenceSourceRelocate: '再度位置を特定',
     referenceSourceLocating: '引用箇所を特定しています…',
+    referenceSourceExact: "原文の該当箇所を特定しました",
+    referenceSourcePartial: "確認できた原文を強調表示しています。引用の一部は未照合です",
+    referenceSourceBlock: "原文の領域を表示しています。文字の完全一致は未確認です",
+    referenceSourceAmbiguous: "一致する箇所が複数あり、特定できません",
+    referenceSourceStale: "原文または内容が更新され、引用箇所を特定できません",
+    referenceSourcePrevious: "前の引用箇所",
+    referenceSourceNext: "次の引用箇所",
     referenceSourceFoundPage: '{page} ページで見つかりました',
     referenceSourceNotFound: '引用箇所を特定できなかったため、原文を開きました',
     referenceSourceOpenWeb: '元の Web ページで該当箇所を開く',
@@ -4368,35 +4439,26 @@ export default {
       },
       sections: {
         access: {
-          tab: 'アカウントとアクセス{count}',
-          title: 'アカウントとアクセス',
-          description: 'システム管理者、公開登録、ワークスペース作成のルールを管理します。'
+          title: '登録とアクセス',
+          description: '登録方法、パスワード要件、ワークスペース作成のルールを管理します。'
         },
         tenant: {
-          tab: 'ワークスペースのデフォルト値{count}',
           title: 'ワークスペースのデフォルト値',
           description: '既存のワークスペースを変更せずに、新規ワークスペースの初期クォータと互換動作を設定します。'
         },
         runtime: {
-          tab: 'ランタイムと並列実行{count}',
           title: 'ランタイムと並列実行',
           description: 'バックグラウンドのワーカプールとモデルサービスの並列実行数を設定します。',
           restartHint: 'ワーカ設定の変更には再起動が必要です'
         },
         security: {
-          tab: 'ネットワークセキュリティ{count}',
           title: 'ネットワークセキュリティ',
           description: 'SSRF許可リストと、Dockerサンドボックスの利用可否を管理します（ローカルのdocker.sockはホストのroot権限に相当します）。'
         },
         other: {
-          tab: 'その他{count}',
           title: 'その他の設定',
           description: 'このデプロイ環境に存在する、標準の製品グループに属さない設定です。'
         }
-      },
-      runtimeTable: {
-        setting: '設定と用途',
-        value: '現在の値'
       },
       runtime: {
         title: 'タスクキューのランタイム',
@@ -4607,7 +4669,7 @@ export default {
       },
       keyLabels: {
         auth: {
-          registration_mode: 'セルフサービス登録モード',
+          registration_mode: '登録モード',
           default_tenant_mode: 'デフォルトのワークスペース作成方式',
           complex_password_enabled: '複雑なパスワードを必須にする'
         },
@@ -4638,7 +4700,7 @@ export default {
       },
       keyDescriptions: {
         auth: {
-          registration_mode: 'セルフサービス登録のモードです。self_serveは誰でもアカウントを登録でき、invite_onlyは公開登録を無効にし、オーナー/管理者による招待のみを許可します。保存後すぐに反映されますが、self_serveはインターネットからのスパム登録を招くため慎重に利用してください。',
+          registration_mode: '登録モード。公開登録では誰でもアカウントを作成できます。招待登録には有効な招待リンクが必要です。登録禁止でも既存アカウントは招待を承諾できます。保存後すぐに反映されます。',
           default_tenant_mode: '公開登録後のワークスペース作成方式です。create_personalはオーナー権限のワークスペースを作成し、tenantlessはアカウントのみを作成して、ユーザが招待を承諾するかワークスペースを作成するまで待ちます。新規ユーザにのみ適用されます。',
           complex_password_enabled: '複雑なパスワードを必須にするかどうかです。有効にすると、パスワードに大文字・小文字・数字・特殊文字を含める必要があります。変更はすぐに反映され、新規登録ユーザおよび新たなパスワード変更・リセットにのみ適用されます。特殊文字は{specialChars}です'
         },
@@ -4671,7 +4733,8 @@ export default {
         auth: {
           registration_mode: {
             self_serve: 'セルフサービス（誰でも登録可能）',
-            invite_only: '招待のみ（公開登録は無効）'
+            invite_register: '招待リンクでのみ登録可能',
+            invite_only: '登録禁止（既存アカウントは招待を承諾可能）'
           },
           default_tenant_mode: {
             create_personal: '個人ワークスペースを作成',
@@ -4715,34 +4778,45 @@ export default {
         success: 'デフォルト値にリセットしました',
         failed: 'リセットに失敗しました'
       },
-      admins: {
-        label: 'システム管理者',
-        description: 'プラットフォームレベルの権限を持つユーザです。メールアドレスを入力してEnterキーを押すと権限を付与でき、タグの×をクリックすると取り消せます。あなた自身も管理者ですが一覧には表示されず、自分の権限を取り消すことはできません。',
-        placeholder: 'ユーザのメールアドレスを入力してEnterキーを押してください',
-        loadFailed: 'システム管理者の読み込みに失敗しました',
-        saveSuccess: 'システム管理者を更新しました',
-        saveFailed: 'システム管理者の更新に失敗しました',
-        confirm: {
-          promote: {
-            header: 'システム管理者に昇格',
-            body: '{email}をシステム管理者に昇格しますか？このユーザはプラットフォームレベルの権限（すべてのワークスペース、システム設定、管理者一覧へのアクセス）を得ます。',
-            confirmBtn: '昇格'
-          },
-          revoke: {
-            header: 'システム管理者権限を解除',
-            body: '{email}のシステム管理者権限を解除しますか？すべてのシステムレベルの機能にアクセスできなくなります。',
-            confirmBtn: '解除'
-          }
-        }
+      userList: {
+        title: 'プラットフォームユーザー一覧',
+        rowLabel: 'ユーザー管理',
+        rowDesc: 'ワークスペース横断の登録ユーザーを、ページ送りとユーザー名/メール絞り込み付きで表示します。',
+        searchPlaceholder: 'ユーザー名またはメールで絞り込み（現在ページ）',
+        refresh: '更新',
+        active: '有効',
+        inactive: '無効',
+        colUsername: 'ユーザー名',
+        colStatus: '状態',
+        colRole: 'ロール',
+        colCreated: '作成日',
+        colAction: '操作',
+        prev: '前へ',
+        next: '次へ',
+        pageCount: '{shown} 件表示 / ページ内 {total}',
+        enable: '有効化',
+        disable: '無効化',
+        resetPassword: 'パスワードリセット',
+        confirmDisable: 'アカウント {name} を無効化しますか？有効なセッションは即時に失効します。',
+        confirmEnable: 'アカウント {name} を有効化しますか？',
+        enabledMsg: '{name} を有効化しました',
+        disabledMsg: '{name} を無効化しました',
+        actionFailed: '操作に失敗しました',
+        loadFailed: 'ユーザー一覧の読み込みに失敗しました',
+        roleAdmin: 'システム管理者',
+        roleUser: '一般ユーザー',
+        confirmRevoke: '{name} のシステム管理者権限を取り消しますか？',
+        confirmPromote: '{name} をシステム管理者に昇格させますか？',
+        revokeBtn: '取り消す',
+        promoteBtn: '昇格',
+        revokedMsg: '{name} の管理者権限を取り消しました',
+        promotedMsg: '{name} をシステム管理者に昇格しました',
+        roleFailed: 'ロールの変更に失敗しました',
       },
       passwordReset: {
-        label: 'ユーザのパスワードをリセット',
-        description: 'ログインできない他のユーザに新しいパスワードを設定します。リセットに成功すると、そのユーザの現在のセッションはすべて無効になり、新しいパスワードで再度ログインする必要があります。',
-        action: 'パスワードをリセット',
         dialogTitle: '他のユーザのパスワードをリセット',
         warning: 'これは高リスクの操作です。ユーザのメールアドレスをよく確認してください。ここで自分のパスワードをリセットすることはできません。',
         emailLabel: 'ユーザのメールアドレス',
-        emailPlaceholder: 'リセット対象ユーザのメールアドレスを入力してください',
         newPasswordLabel: '新しいパスワード',
         newPasswordPlaceholder: '新しいパスワードを入力してください',
         confirmPasswordLabel: '新しいパスワード（確認）',
@@ -4752,8 +4826,6 @@ export default {
         failed: 'パスワードのリセットに失敗しました',
       },
       createUser: {
-        label: 'ユーザを作成',
-        description: 'ローカルユーザアカウントを新規に作成します。プラットフォームのデフォルトのワークスペースモードが「個人ワークスペースを作成」の場合、自分で登録したユーザと同様に個人ワークスペースが作成されます。',
         action: 'ユーザを作成',
         dialogTitle: '新しいユーザを作成',
         warning: 'これは高リスクの操作です。ユーザ名とメールアドレスをよく確認してください。これらは新しいユーザのログインに使用されます。',
@@ -4776,10 +4848,6 @@ export default {
           usernameLength: 'ユーザ名は2〜50文字で入力してください',
           emailRequired: 'メールアドレスを入力してください',
           emailInvalid: '有効なメールアドレスを入力してください',
-          passwordRequired: '新しいパスワードを入力してください',
-          passwordLength: 'パスワードは8〜32文字で入力してください',
-          passwordLetter: 'パスワードには英字を含めてください',
-          passwordNumber: 'パスワードには数字を含めてください',
           confirmRequired: '新しいパスワードをもう一度入力してください',
           passwordMismatch: 'パスワードが一致しません'
         },
@@ -4933,1095 +5001,1200 @@ export default {
   model: {
     reasoning: {
       levels: {
-        off: 'オフ',
-        auto: '自動',
-        minimal: '最小',
-        low: '低',
-        medium: '中',
-        high: '高',
-        xhigh: '超高',
-        max: '最大',
-      },
-      levelDescriptions: {
-        off: '思考を無効化し、思考パラメータを送信しません',
-        auto: 'ベンダー既定の強度。思考量はモデルが決めます',
-        minimal: '最小限の思考、最速の応答',
-        low: '軽い思考',
-        medium: '中程度の思考',
-        high: '深い思考、応答は遅くなります',
-        xhigh: '超高の思考予算（一部モデルのみ）',
-        max: '最大の思考予算（一部モデルのみ）',
-      },
-    },
-    modelName: 'モデル名',
-    defaultTag: 'デフォルト',
-    addModelInSettings: 'モデルを追加するにはシステム設定を開いてください',
-    loadFailed: 'モデル一覧の読み込みに失敗しました',
-    selectModelPlaceholder: 'モデルを選択',
-    searchPlaceholder: 'モデルを検索...',
-    editor: {
-      maxOutputTokensLabel: '最大出力トークン',
-      maxOutputTokensPlaceholder: '空欄でカタログ既定値',
-      maxOutputTokensDesc: '1 回の応答の出力上限。空欄ならこのモデルのカタログ既定値を使用します。',
-      catalog: {
-        reasoning: '推論',
-        vision: '画像',
-        hint: 'ベンダーのカタログから選ぶか、カスタムのモデル名を入力できます。',
-      },
-      resolved: {
-        title: '実際の呼び出し方',
-        empty: 'ベンダーとモデル名を入力すると、このモデルの呼び出し方を表示します',
-        failed: '解決に失敗',
-        protocol: 'リクエストプロトコル',
-        catalog: '能力の取得元',
-        catalogedYes: '内蔵モデルプロファイル',
-        catalogedNo: 'ベンダー既定（カタログ未収録）',
-        endpoint: 'リクエスト先',
-        thinkingFormat: '思考切替の送り方',
-        thinkingLevels: '選択できる思考強度',
-        noThinking: 'このモデルは思考できません',
-      },
-      advanced: {
-        toggle: '詳細設定',
-        api: {
-          label: 'プロトコル上書き',
-          auto: '自動（ベンダー / URL から推定）',
-          desc: 'リクエストプロトコルを強制します。通常は変更不要です。',
+          off: 'オフ',
+          auto: '自動',
+          minimal: '最小',
+          low: '低',
+          medium: '中',
+          high: '高',
+          xhigh: '超高',
+          max: '最大',
         },
-        remoteModelName: {
-          label: 'リモートモデル名',
-          placeholder: '空欄でモデル名と同じ',
-          desc: '上のモデル名と異なる場合に、実際にベンダーへ送るモデル ID。',
-        },
-        legacyThinking: {
-          label: '思考パラメータ形式（旧設定）',
-          catalog: 'カタログ既定に従う（推奨）',
-          none: '思考パラメータを送信しない',
-          desc: 'このモデルには旧版の thinking_control 設定が残っています。「カタログ既定に従う」を選ぶとカタログが決定します。',
-        },
-        compat: {
-          label: 'プロトコル互換上書き（JSON）',
-          placeholder: "{'{'} \"max_tokens_field\": \"max_tokens\" {'}'}",
-          desc: 'エンドポイントの挙動がカタログ既定値と異なる場合のみ、変更するフィールドだけを記入します。空欄で上書きなし。',
-          docLink: 'フィールドの説明',
-          invalid: 'JSON が不正です',
-          mustBeObject: 'JSON オブジェクトが必要です',
+        levelDescriptions: {
+          off: '思考を無効化し、思考パラメータを送信しません',
+          auto: 'ベンダー既定の強度。思考量はモデルが決めます',
+          minimal: '最小限の思考、最速の応答',
+          low: '軽い思考',
+          medium: '中程度の思考',
+          high: '深い思考、応答は遅くなります',
+          xhigh: '超高の思考予算（一部モデルのみ）',
+          max: '最大の思考予算（一部モデルのみ）',
         },
       },
-      addTitle: 'モデルを追加',
-      editTitle: 'モデルを編集',
-      sectionType: 'モデルタイプ',
-      typeLabel: 'モデルタイプ',
-      sectionSource: 'ソース',
-      sectionProvider: 'プロバイダ設定',
-      sectionAdvanced: '詳細オプション',
-      sourceLabel: 'モデルのソース',
-      sourceLocal: 'Ollama',
-      sourceRemote: 'API',
-      description: {
-        chat: '会話用の大規模言語モデルを設定します',
-        embedding: 'テキストのベクトル化に使う埋め込みモデルを設定します',
-        rerank: '検索結果のリランクに使うモデルを設定します',
-        vllm: 'マルチモーダル理解に使う視覚言語モデルを設定します',
-        asr: '音声の文字起こしに使う音声認識モデルを設定します',
-        default: 'モデル情報を設定します'
+      modelName: 'モデル名',
+      defaultTag: 'デフォルト',
+      addModelInSettings: 'モデルを追加するにはシステム設定を開いてください',
+      loadFailed: 'モデル一覧の読み込みに失敗しました',
+      selectModelPlaceholder: 'モデルを選択',
+      searchPlaceholder: 'モデルを検索...',
+      editor: {
+        maxOutputTokensLabel: '最大出力トークン',
+        maxOutputTokensPlaceholder: '空欄でカタログ既定値',
+        maxOutputTokensDesc: '1 回の応答の出力上限。空欄ならこのモデルのカタログ既定値を使用します。',
+        catalog: {
+          reasoning: '推論',
+          vision: '画像',
+          hint: 'ベンダーのカタログから選ぶか、カスタムのモデル名を入力できます。',
+        },
+        resolved: {
+          title: '実際の呼び出し方',
+          empty: 'ベンダーとモデル名を入力すると、このモデルの呼び出し方を表示します',
+          failed: '解決に失敗',
+          protocol: 'リクエストプロトコル',
+          catalog: '能力の取得元',
+          catalogedYes: '内蔵モデルプロファイル',
+          catalogedNo: 'ベンダー既定（カタログ未収録）',
+          endpoint: 'リクエスト先',
+          thinkingFormat: '思考切替の送り方',
+          thinkingLevels: '選択できる思考強度',
+          noThinking: 'このモデルは思考できません',
+        },
+        advanced: {
+          toggle: '詳細設定',
+          api: {
+            label: 'プロトコル上書き',
+            auto: '自動（ベンダー / URL から推定）',
+            desc: 'リクエストプロトコルを強制します。通常は変更不要です。',
+          },
+          remoteModelName: {
+            label: 'リモートモデル名',
+            placeholder: '空欄でモデル名と同じ',
+            desc: '上のモデル名と異なる場合に、実際にベンダーへ送るモデル ID。',
+          },
+          legacyThinking: {
+            label: '思考パラメータ形式（旧設定）',
+            catalog: 'カタログ既定に従う（推奨）',
+            none: '思考パラメータを送信しない',
+            desc: 'このモデルには旧版の thinking_control 設定が残っています。「カタログ既定に従う」を選ぶとカタログが決定します。',
+          },
+          compat: {
+            label: 'プロトコル互換上書き（JSON）',
+            placeholder: "{'{'} \"max_tokens_field\": \"max_tokens\" {'}'}",
+            desc: 'エンドポイントの挙動がカタログ既定値と異なる場合のみ、変更するフィールドだけを記入します。空欄で上書きなし。',
+            docLink: 'フィールドの説明',
+            invalid: 'JSON が不正です',
+            mustBeObject: 'JSON オブジェクトが必要です',
+          },
+        },
+        addTitle: 'モデルを追加',
+        editTitle: 'モデルを編集',
+        sectionType: 'モデルタイプ',
+        typeLabel: 'モデルタイプ',
+        sectionSource: 'ソース',
+        sectionProvider: 'プロバイダ設定',
+        sectionAdvanced: '詳細オプション',
+        sourceLabel: 'モデルのソース',
+        sourceLocal: 'Ollama',
+        sourceRemote: 'API',
+        description: {
+          chat: '会話用の大規模言語モデルを設定します',
+          embedding: 'テキストのベクトル化に使う埋め込みモデルを設定します',
+          rerank: '検索結果のリランクに使うモデルを設定します',
+          vllm: 'マルチモーダル理解に使う視覚言語モデルを設定します',
+          asr: '音声の文字起こしに使う音声認識モデルを設定します',
+          default: 'モデル情報を設定します'
+        },
+        modelNamePlaceholder: {
+          local: '例: llama2:latest',
+          remote: '例: gpt-4, claude-3-opus',
+          localVllm: '例: llava:latest',
+          remoteVllm: '例: gpt-4-vision-preview',
+          remoteAsr: '例: whisper-1'
+        },
+        baseUrlLabel: 'ベースURL',
+        displayNameLabel: '表示名（任意）',
+        displayNamePlaceholder: '例: サポートQA用モデル',
+        displayNameDesc: 'UIでの表示にのみ使用されます。実行時の呼び出しには上のモデル名が使われます。',
+        baseUrlPlaceholder: '例: https://api.openai.com/v1',
+        baseUrlPlaceholderVllm: '例: http://localhost:11434/v1',
+        baseUrlPlaceholderAsr: '例: https://api.openai.com/v1',
+        apiKeyOptional: 'APIキー（任意）',
+        apiKeyPlaceholder: 'APIキーを入力してください',
+        customHeadersLabel: 'カスタムリクエストヘッダー（任意）',
+        customHeadersDesc: 'リモートモデルAPIへのリクエストに追加するHTTPヘッダーです（企業ゲートウェイの認証やトレースなどに利用）。Authorization / Content-Typeなどの予約ヘッダーは無視されます。',
+        customHeadersAdd: 'ヘッダーを追加',
+        customHeadersKeyPlaceholder: 'ヘッダー名',
+        customHeadersValuePlaceholder: 'ヘッダーの値',
+        testing: 'テスト中...',
+        testConnection: '接続をテスト',
+        downloadLabel: 'ダウンロード: {keyword}',
+        refreshList: '一覧を更新',
+        dimensionLabel: 'ベクトル次元数',
+        dimensionPlaceholder: '例: 1536',
+        checkDimension: '次元数を検出',
+        dimensionDetected: '検出に成功しました。ベクトル次元数: {value}',
+        dimensionFailed: '検出に失敗しました。次元数を手動で入力してください',
+        remoteDimensionDetected: '検出したベクトル次元数: {value}',
+        dimensionOverrideLabel: '出力次元数のカスタマイズ',
+        dimensionOverrideDesc: 'プロバイダのドキュメントでこのモデルがdimensionsパラメータに対応していると記載されている場合にのみ有効にしてください。デフォルトでは検出された実際の次元数のみを使用します。',
+        supportsVisionLabel: '視覚・マルチモーダルに対応',
+        supportsVisionDesc: 'モデルが画像やマルチモーダル入力を受け付けるかどうか',
+        embeddingImageInputLabel: '画像入力',
+        embeddingImageInputDesc: 'モデルが画像をテキストと同じベクトル空間に埋め込めるかどうか。カタログ内のモデルは自動判定され、カスタムモデルは手動で宣言します',
+        contextWindowLabel: 'コンテキストウィンドウ',
+        contextWindowPlaceholder: 'デフォルト値{value}',
+        contextWindowDesc: '1回のリクエストでこのモデルが受け付けられるトークン数です。エージェントの履歴圧縮はこの上限を基準にします。空欄の場合はデフォルト値の200000（200K）が使われます。プロバイダの実際のウィンドウサイズを指定してください。大きすぎる値を指定すると圧縮が働かず、プロバイダにリクエストを拒否されます。',
+        contextWindowDefaultHint: '未設定のためデフォルト値{value}を使用',
+        contextWindowTokens: '{count}トークン',
+        maxConcurrencyLabel: 'バックグラウンドの並列実行上限',
+        maxConcurrencyPlaceholder: '0 = グローバルのデフォルト値を使用',
+        maxConcurrencyDesc: 'このモデルへのバックグラウンド（取り込み・エンリッチメント）呼び出しの並列数を制限します。モデルごとにすべてのレプリカで共有されます。0または空欄の場合はグローバルのデフォルト値が使われます。対話型のチャットには影響しません。',
+        dimensionHint: 'モデルを選択しました。「次元数を検出」をクリックするとベクトル次元数を自動取得できます。',
+        loadModelListFailed: 'モデル一覧の読み込みに失敗しました',
+        listRefreshed: '一覧を更新しました',
+        fillModelAndUrl: '先にモデル識別子とベースURLを入力してください',
+        remoteBaseUrlRequired: 'リモートAPIタイプではベースURLが必要です',
+        unsupportedModelType: '未対応のモデルタイプです',
+        saveAndClose: '保存して閉じる',
+        testDraftHint: '保存せずに、現在入力されている接続設定をテストします。',
+        testDraftEditHint: '現在の接続設定と、個別に保存された API キーを使用してテストします。',
+        testStale: '設定が変更されました。もう一度テストしてください。',
+        connectionSuccess: '接続に成功しました',
+        connectionFailed: '接続に失敗しました',
+        connectionConfigError: '接続に失敗しました。設定を確認してください',
+        downloadStarted: '{name}のダウンロードを開始しました',
+        downloadCompleted: '{name}のダウンロードが完了しました',
+        downloadFailed: '{name}のダウンロードに失敗しました',
+        downloadStartFailed: 'ダウンロードの開始に失敗しました',
+        ollamaUnavailable: 'Ollamaサービスを利用できないため、ローカルモデルを選択できません',
+        ollamaNotSupportRerank: 'Ollamaはリランクモデルに対応していません。リモートAPIを使用してください',
+        goToOllamaSettings: '設定を開く',
+        validation: {
+          extraFieldRequired: '{name} を入力してください',
+          modelNameRequired: 'モデル名を入力してください',
+          modelNameEmpty: 'モデル名は空にできません',
+          modelNameMax: 'モデル名は100文字以内で入力してください',
+          baseUrlRequired: 'ベースURLを入力してください',
+          baseUrlEmpty: 'ベースURLは空にできません',
+          baseUrlInvalid: 'ベースURLが無効です。有効なURLを入力してください'
+        },
+        providerLabel: 'プロバイダ',
+        providerPlaceholder: 'モデルプロバイダを選択',
+        providerDocs: '{provider} のモデルドキュメントを見る',
       },
-      modelNamePlaceholder: {
-        local: '例: llama2:latest',
-        remote: '例: gpt-4, claude-3-opus',
-        localVllm: '例: llava:latest',
-        remoteVllm: '例: gpt-4-vision-preview',
-        remoteAsr: '例: whisper-1'
+      builtinTag: '組み込み'
+    },
+    language: {
+      zhCN: '简体中文',
+      zhTW: '繁体字中国語',
+      enUS: 'English',
+      ruRU: 'Русский',
+      koKR: '한국어',
+      jaJP: '日本語',
+      selectLanguage: '言語を選択',
+      language: '言語',
+      languageDescription: 'インターフェースの表示言語を選択します',
+      languageSaved: '言語設定を保存しました'
+    },
+    general: {
+      title: '一般設定',
+      allSettings: 'すべての設定',
+      personalSettings: '個人設定',
+      helpAndDocs: 'ヘルプとドキュメント',
+      description: '言語や外観などの基本オプションを設定します',
+      settings: '設定',
+      close: '設定を閉じる'
+    },
+    theme: {
+      theme: 'テーマ',
+      themeDescription: 'インターフェースの表示テーマを選択します。システム設定に合わせた自動切り替えにも対応しています',
+      light: 'ライト',
+      dark: 'ダーク',
+      system: 'システムに従う',
+      selectTheme: 'テーマを選択'
+    },
+    font: {
+      uiFont: 'インターフェースフォント',
+      uiFontDescription: 'メニュー、本文、ボタンなど、ほとんどのUIテキストに使用されるフォントです',
+      monoFont: 'コードフォント',
+      monoFontDescription: 'コードブロック、ターミナルコマンド、APIキー、ファイルパスなどの技術的なテキストに使用されます。すべての文字が同じ幅のため、0とO、1とlを見分けやすくなります。',
+      selectFont: 'フォントを選択',
+      sansPreview: 'サンプルSample書体Font — Aa Gg Oo 0123',
+      monoPreview: 'const msg = \'Hello\'; // 0O1l',
+      sans: {
+        system: 'システムデフォルト',
+        pingfang: 'PingFang SC',
+        georgia: 'Georgia（セリフ）',
+        yahei: 'Microsoft YaHei',
+        times: 'Times New Roman（セリフ）',
+        'noto-cjk': 'Noto Sans CJK',
+        'dejavu-serif': 'DejaVu Serif（セリフ）',
+        'sans-serif': '汎用サンセリフ'
       },
-      baseUrlLabel: 'ベースURL',
-      displayNameLabel: '表示名（任意）',
-      displayNamePlaceholder: '例: サポートQA用モデル',
-      displayNameDesc: 'UIでの表示にのみ使用されます。実行時の呼び出しには上のモデル名が使われます。',
-      baseUrlPlaceholder: '例: https://api.openai.com/v1',
-      baseUrlPlaceholderVllm: '例: http://localhost:11434/v1',
-      baseUrlPlaceholderAsr: '例: https://api.openai.com/v1',
-      apiKeyOptional: 'APIキー（任意）',
-      apiKeyPlaceholder: 'APIキーを入力してください',
-      customHeadersLabel: 'カスタムリクエストヘッダー（任意）',
-      customHeadersDesc: 'リモートモデルAPIへのリクエストに追加するHTTPヘッダーです（企業ゲートウェイの認証やトレースなどに利用）。Authorization / Content-Typeなどの予約ヘッダーは無視されます。',
-      customHeadersAdd: 'ヘッダーを追加',
-      customHeadersKeyPlaceholder: 'ヘッダー名',
-      customHeadersValuePlaceholder: 'ヘッダーの値',
-      testing: 'テスト中...',
-      testConnection: '接続をテスト',
-      downloadLabel: 'ダウンロード: {keyword}',
-      refreshList: '一覧を更新',
-      dimensionLabel: 'ベクトル次元数',
-      dimensionPlaceholder: '例: 1536',
-      checkDimension: '次元数を検出',
-      dimensionDetected: '検出に成功しました。ベクトル次元数: {value}',
-      dimensionFailed: '検出に失敗しました。次元数を手動で入力してください',
-      remoteDimensionDetected: '検出したベクトル次元数: {value}',
-      dimensionOverrideLabel: '出力次元数のカスタマイズ',
-      dimensionOverrideDesc: 'プロバイダのドキュメントでこのモデルがdimensionsパラメータに対応していると記載されている場合にのみ有効にしてください。デフォルトでは検出された実際の次元数のみを使用します。',
-      supportsVisionLabel: '視覚・マルチモーダルに対応',
-      supportsVisionDesc: 'モデルが画像やマルチモーダル入力を受け付けるかどうか',
-      contextWindowLabel: 'コンテキストウィンドウ',
-      contextWindowPlaceholder: 'デフォルト値{value}',
-      contextWindowDesc: '1回のリクエストでこのモデルが受け付けられるトークン数です。エージェントの履歴圧縮はこの上限を基準にします。空欄の場合はデフォルト値の200000（200K）が使われます。プロバイダの実際のウィンドウサイズを指定してください。大きすぎる値を指定すると圧縮が働かず、プロバイダにリクエストを拒否されます。',
-      contextWindowDefaultHint: '未設定のためデフォルト値{value}を使用',
-      contextWindowTokens: '{count}トークン',
-      maxConcurrencyLabel: 'バックグラウンドの並列実行上限',
-      maxConcurrencyPlaceholder: '0 = グローバルのデフォルト値を使用',
-      maxConcurrencyDesc: 'このモデルへのバックグラウンド（取り込み・エンリッチメント）呼び出しの並列数を制限します。モデルごとにすべてのレプリカで共有されます。0または空欄の場合はグローバルのデフォルト値が使われます。対話型のチャットには影響しません。',
-      dimensionHint: 'モデルを選択しました。「次元数を検出」をクリックするとベクトル次元数を自動取得できます。',
-      loadModelListFailed: 'モデル一覧の読み込みに失敗しました',
-      listRefreshed: '一覧を更新しました',
-      fillModelAndUrl: '先にモデル識別子とベースURLを入力してください',
-      remoteBaseUrlRequired: 'リモートAPIタイプではベースURLが必要です',
-      unsupportedModelType: '未対応のモデルタイプです',
-      saveAndClose: '保存して閉じる',
-      testDraftHint: '保存せずに、現在入力されている接続設定をテストします。',
-      testDraftEditHint: '現在の接続設定と、個別に保存された API キーを使用してテストします。',
-      testStale: '設定が変更されました。もう一度テストしてください。',
-      connectionSuccess: '接続に成功しました',
-      connectionFailed: '接続に失敗しました',
-      connectionConfigError: '接続に失敗しました。設定を確認してください',
-      downloadStarted: '{name}のダウンロードを開始しました',
-      downloadCompleted: '{name}のダウンロードが完了しました',
-      downloadFailed: '{name}のダウンロードに失敗しました',
-      downloadStartFailed: 'ダウンロードの開始に失敗しました',
-      ollamaUnavailable: 'Ollamaサービスを利用できないため、ローカルモデルを選択できません',
-      ollamaNotSupportRerank: 'Ollamaはリランクモデルに対応していません。リモートAPIを使用してください',
-      goToOllamaSettings: '設定を開く',
-      validation: {
-        extraFieldRequired: '{name} を入力してください',
-        modelNameRequired: 'モデル名を入力してください',
-        modelNameEmpty: 'モデル名は空にできません',
-        modelNameMax: 'モデル名は100文字以内で入力してください',
-        baseUrlRequired: 'ベースURLを入力してください',
-        baseUrlEmpty: 'ベースURLは空にできません',
-        baseUrlInvalid: 'ベースURLが無効です。有効なURLを入力してください'
+      mono: {
+        system: 'システムデフォルト',
+        menlo: 'Menlo',
+        monaco: 'Monaco',
+        consolas: 'Consolas',
+        cascadia: 'Cascadia Code',
+        'dejavu-mono': 'DejaVu Sans Mono',
+        'liberation-mono': 'Liberation Mono',
+        monospace: '汎用等幅'
       },
-      providerLabel: 'プロバイダ',
-      providerPlaceholder: 'モデルプロバイダを選択',
-      providerDocs: '{provider} のモデルドキュメントを見る',
-    },
-    builtinTag: '組み込み'
-  },
-  language: {
-    zhCN: '简体中文',
-    enUS: 'English',
-    ruRU: 'Русский',
-    koKR: '한국어',
-    jaJP: '日本語',
-    selectLanguage: '言語を選択',
-    language: '言語',
-    languageDescription: 'インターフェースの表示言語を選択します',
-    languageSaved: '言語設定を保存しました'
-  },
-  general: {
-    title: '一般設定',
-    allSettings: 'すべての設定',
-    personalSettings: '個人設定',
-    helpAndDocs: 'ヘルプとドキュメント',
-    description: '言語や外観などの基本オプションを設定します',
-    settings: '設定',
-    close: '設定を閉じる'
-  },
-  theme: {
-    theme: 'テーマ',
-    themeDescription: 'インターフェースの表示テーマを選択します。システム設定に合わせた自動切り替えにも対応しています',
-    light: 'ライト',
-    dark: 'ダーク',
-    system: 'システムに従う',
-    selectTheme: 'テーマを選択'
-  },
-  font: {
-    uiFont: 'インターフェースフォント',
-    uiFontDescription: 'メニュー、本文、ボタンなど、ほとんどのUIテキストに使用されるフォントです',
-    monoFont: 'コードフォント',
-    monoFontDescription: 'コードブロック、ターミナルコマンド、APIキー、ファイルパスなどの技術的なテキストに使用されます。すべての文字が同じ幅のため、0とO、1とlを見分けやすくなります。',
-    selectFont: 'フォントを選択',
-    sansPreview: 'サンプルSample書体Font — Aa Gg Oo 0123',
-    monoPreview: 'const msg = \'Hello\'; // 0O1l',
-    sans: {
-      system: 'システムデフォルト',
-      pingfang: 'PingFang SC',
-      georgia: 'Georgia（セリフ）',
-      yahei: 'Microsoft YaHei',
-      times: 'Times New Roman（セリフ）',
-      'noto-cjk': 'Noto Sans CJK',
-      'dejavu-serif': 'DejaVu Serif（セリフ）',
-      'sans-serif': '汎用サンセリフ'
-    },
-    mono: {
-      system: 'システムデフォルト',
-      menlo: 'Menlo',
-      monaco: 'Monaco',
-      consolas: 'Consolas',
-      cascadia: 'Cascadia Code',
-      'dejavu-mono': 'DejaVu Sans Mono',
-      'liberation-mono': 'Liberation Mono',
-      monospace: '汎用等幅'
-    },
-    fontSize: 'フォントサイズ',
-    fontSizeDescription: 'インターフェース全体（文字、アイコン、余白）を拡大縮小し、すぐに反映されます',
-    size: {
-      small: '小',
-      normal: '標準',
-      large: '大'
-    }
-  },
-  platform: {
-    subtitle: 'LLM駆動のエンタープライズ向けナレッジフレームワーク',
-    description: 'RAG検索、エージェント推論、Wikiナレッジベースにより、ドキュメントを本当に理解し活用できます',
-    rag: 'RAG拡張生成',
-    agent: 'ReActエージェント',
-    wiki: 'Wikiナレッジベース',
-    hybridSearch: 'ハイブリッド検索',
-    multimodalParsing: 'マルチモーダルドキュメント解析',
-    hybridSearchEngine: 'ハイブリッド検索 + ナレッジグラフ',
-    ragQandA: 'ReActエージェントQ&A',
-    independentTenant: '独立したワークスペース',
-    fullApiAccess: 'フルAPIアクセス',
-    knowledgeBaseManagement: 'ナレッジベース管理',
-    carousel: {
-      agenticRagTitle: 'エージェンティックRAG',
-      agenticRagDesc: 'ReAct推論 + ツール呼び出し + 多段階の思考',
-      hybridSearchTitle: 'ハイブリッド検索戦略',
-      hybridSearchDesc: 'BM25 + ベクトル + ナレッジグラフ',
-      wikiTitle: 'Wikiナレッジベース',
-      wikiDesc: 'ドキュメントを構造化され相互にリンクしたナレッジへ凝縮します',
-      smartDocRetrievalTitle: 'インテリジェントなドキュメント検索',
-      smartDocRetrievalDesc: 'PDF/Word/画像のマルチフォーマット解析'
-    }
-  },
-  time: {
-    today: '今日',
-    yesterday: '昨日',
-    last7Days: '過去7日間',
-    last30Days: '過去30日間',
-    lastYear: '過去1年',
-    earlier: 'それ以前',
-    pinned: 'ピン留め'
-  },
-  upload: {
-    uploadDocument: 'ドキュメントをアップロード',
-    uploadFolder: 'フォルダをアップロード',
-    onlineEdit: 'オンライン編集',
-    deleteRecord: '記録を削除'
-  },
-  uploadTasks: {
-    panelLabel: 'アップロード',
-    titleUploading: 'アップロード中 {done}/{total}',
-    titleParsing: '解析中 {done}/{total}',
-    titleDone: 'すべて完了',
-    titleDoneWithIssues: '{ok}件完了、{bad}件未完了',
-    titleCancelled: 'アップロードをキャンセルしました',
-    destination: 'アップロード先：{name}',
-    destinationMany: 'アップロード先：{count}件のナレッジベース',
-    remaining: '残り約{time}',
-    eta: {
-      seconds: '{n}秒',
-      minutes: '{n}分',
-      hours: '{n}時間'
-    },
-    hintUploading: 'アップロードが完了するまでページを閉じたり再読み込みしたりしないでください',
-    hintParsing: 'すべてのファイルをアップロードしました。解析はバックグラウンドで続くため、このページを離れても問題ありません',
-    legend: {
-      ready: '検索可能',
-      active: '処理中',
-      waiting: '待機中',
-      failed: '失敗',
-      duplicate: '既存'
-    },
-    filterAll: 'すべて',
-    filterIssues: '未完了',
-    phaseWaiting: 'アップロード待ち',
-    phaseSaving: '保存中…',
-    phasePending: '解析待ち',
-    phaseParsing: '解析中',
-    phaseFinalizing: '検索可能・バックグラウンドで最適化中',
-    phaseReady: '完了',
-    phaseUploadFailed: 'アップロード失敗',
-    phaseParseFailed: '解析失敗',
-    phaseDuplicate: '同じファイルが既にあります',
-    phaseCancelled: 'キャンセル済み',
-    phaseDeleted: '削除済み',
-    cancel: 'キャンセル',
-    cancelAll: 'すべてキャンセル',
-    retry: '再試行',
-    retryFailed: '{count}件を再試行',
-    open: '開く',
-    collapse: '折りたたむ',
-    expand: '展開',
-    close: '閉じる',
-    closeConfirm: '閉じると、残り{count}件のアップロードがキャンセルされます',
-    closeConfirmOk: 'アップロードをキャンセル',
-    closeConfirmKeep: 'アップロードを続ける'
-  },
-  agentSettings: {
-    modelRecommendation: {
-      title: '推奨モデル'
-    },
-    maxIterations: {
-      desc: '1つのタスクで実行できる推論ステップ数の上限です。無制限の場合、モデルが自ら停止するか手動で停止するまで実行を続けます。'
-    },
-    thinkingModel: {
-      desc: 'エージェントの推論と計画に使用するLLM'
-    },
-    rerankModel: {
-      desc: '検索結果をリランクし、関連度スコアを正規化します'
-    },
-    temperature: {
-      desc: '出力のランダム性を制御します。0が最も決定的で、1が最もランダムです'
-    },
-    allowedTools: {
-      desc: '現在エージェントで有効になっているツール'
-    },
-    systemPrompt: {
-      desc: 'エージェントのシステムプロンプトを設定します。プレースホルダは実行時に実際の内容へ自動的に置き換えられます。'
-    }
-  },
-  conversationSettings: {
-    models: {
-      chatGroupLabel: '思考／チャットモデル'
-    },
-    maxRounds: {
-      desc: 'コンテキストとクエリリライトのために保持する会話ターン数'
-    },
-    embeddingTopK: {
-      desc: 'ベクトル検索後に保持するドキュメント数'
-    },
-    keywordThreshold: {
-      desc: 'キーワード検索の最小スコア'
-    },
-    vectorThreshold: {
-      desc: 'ベクトル検索の最小類似度'
-    },
-    rerankTopK: {
-      desc: 'リランク後に保持するドキュメント数'
-    },
-    rerankThreshold: {
-      desc: 'リランク後に必要な最小スコア'
-    },
-    enableRewrite: {
-      desc: 'マルチターンのクエリを自動的にリライトし、リコールを向上させます'
-    },
-    enableQueryExpansion: {
-      desc: 'リコールが低い場合に推論モデルを呼び出して拡張クエリを生成します（レイテンシとコストが増加します）'
-    },
-    fallbackStrategy: {
-      desc: '関連するドキュメントが見つからない場合の応答方法'
-    },
-    fallbackResponse: {
-      desc: '固定フォールバック戦略を使用する場合に返すテキスト'
-    },
-    fallbackPrompt: {
-      desc: 'フォールバック戦略が「モデル」の場合に使用するプロンプト'
-    },
-    rewritePrompt: {
-      desc: 'クエリリライト時に使用するシステムプロンプト'
-    },
-    chatModel: {
-      desc: '要約や概要の生成に使用する大規模言語モデル'
-    },
-    rerankModel: {
-      desc: '検索結果のリランクに使用するモデル（任意）'
-    },
-    contextTemplate: {
-      desc: '通常モードで検索結果に基づき回答を生成するためのプロンプトテンプレート'
-    },
-    systemPrompt: {
-      desc: '通常モードの会話で使用するシステムレベルのプロンプト'
-    },
-    temperature: {
-      desc: '出力のランダム性を制御します。0が最も決定的で、1が最もランダムです'
-    },
-    maxTokens: {
-      desc: '応答で生成するトークンの最大数'
-    }
-  },
-  mcpSettings: {
-    addUsageInstructions: "使用方法を追加",
-    noUsageInstructions: "使用方法は未入力です",
-    title: 'MCPサービス',
-    description: 'エージェントモードでツールやリソースを利用するための外部MCP（Model Context Protocol）サービスを管理します',
-    enabled: '有効',
-    disabled: '無効',
-    configuredServices: '設定済みサービス',
-    manageAndTest: 'MCPサービスの接続を管理・テストします',
-    addService: 'サービスを追加',
-    empty: 'MCPサービスがありません',
-    actions: {
-      test: '接続テスト'
-    },
-    toasts: {
-      loadFailed: 'MCPサービスの読み込みに失敗しました',
-      enabled: 'MCPサービスを有効化しました',
-      disabled: 'MCPサービスを無効化しました',
-      updateStateFailed: 'MCPサービスのステータス更新に失敗しました',
-      testing: '{name}をテスト中...',
-      noResponse: 'テストに失敗しました: サーバから応答がありません',
-      testFailed: 'MCPサービスのテストに失敗しました',
-      deleted: 'MCPサービスを削除しました',
-      deleteFailed: 'MCPサービスの削除に失敗しました'
-    },
-    deleteConfirmBody: 'MCPサービス「{name}」を削除しますか？この操作は取り消せません。',
-    unnamed: '名称未設定',
-    builtin: '組み込み',
-    toolCount: '{count} 個のツール',
-    toolsNotSynced: 'ツール未同期',
-    toolsStale: '再同期が必要'
-  },
-  modelSettings: {
-    title: 'モデル設定',
-    description: 'ローカルのOllamaやリモートAPIなど、さまざまな種類のAIモデルを管理します',
-    typeShort: {
-      chat: 'チャット',
-      embedding: '埋め込み',
-      rerank: 'リランク',
-      vllm: '視覚',
-      asr: '音声'
-    },
-    actions: {
-      addModel: 'モデルを追加',
-      debugModel: 'モデルテスト'
-    },
-    source: {
-      remote: 'リモート',
-      openaiCompatible: 'OpenAI互換',
-      custom: 'カスタム'
-    },
-    chat: {
-      title: 'チャットモデル',
-      desc: '会話に使用する大規模言語モデルを設定します',
-      empty: 'チャットモデルがありません'
-    },
-    embedding: {
-      title: '埋め込みモデル',
-      desc: 'テキストのベクトル化に使用する埋め込みモデルを設定します',
-      empty: '埋め込みモデルがありません'
-    },
-    rerank: {
-      title: 'リランクモデル',
-      desc: '結果のリランクに使用するモデルを設定します',
-      empty: 'リランクモデルがありません'
-    },
-    vllm: {
-      title: 'VLLM視覚モデル',
-      desc: 'マルチモーダル理解に使用する視覚言語モデルを設定します',
-      empty: 'VLLMモデルがありません'
-    },
-    asr: {
-      title: 'ASR音声モデル',
-      desc: '音声の文字起こしに使用する音声認識モデルを設定します（例: OpenAI Whisper）',
-      empty: 'ASRモデルがありません'
-    },
-    toasts: {
-      nameRequired: 'モデル名を入力してください',
-      nameTooLong: 'モデル名は100文字以内で入力してください',
-      displayNameTooLong: '表示名は100文字以内で入力してください',
-      baseUrlRequired: 'リモートAPIにはBase URLが必要です',
-      baseUrlInvalid: 'Base URLが正しくありません。有効なURLを入力してください',
-      dimensionInvalid: '埋め込み次元数は128〜4096の範囲で指定してください',
-      updated: 'モデルを更新しました',
-      added: 'モデルを追加しました',
-      saveFailed: 'モデルの保存に失敗しました',
-      deleted: 'モデルを削除しました',
-      deleteFailed: 'モデルの削除に失敗しました',
-      builtinCannotEdit: '組み込みモデルは編集できません',
-      builtinCannotDelete: '組み込みモデルは削除できません',
-      builtinCannotCopy: '組み込みモデルはコピーできません',
-      copied: 'モデルをコピーしました',
-      copyFailed: 'モデルのコピーに失敗しました'
-    },
-    copySuffix: ' のコピー',
-    builtinModels: {
-      title: '組み込みモデル',
-      description: '組み込みモデルはすべてのワークスペースに表示されます。機密情報は非表示で、編集や削除はできません。',
-      descriptionAdmin: '組み込みモデルはすべてのワークスペースに表示されます。システム管理者は設定と認証情報を編集できますが、削除はデプロイ側で管理されます。',
-      viewGuide: '組み込みモデルのガイドを見る'
-    },
-    builtinTag: '組み込み',
-    confirmDelete: 'モデル「{name}」を削除しますか？',
-    usage: {
-      title: 'モデルを削除できません',
-      description: 'モデル「{name}」は次の設定から参照されています。削除する前に各設定を開き、別のモデルを選択してください。',
-      knowledgeBases: 'ナレッジベース（{count}）',
-      agents: 'エージェント（{count}）',
-      longTermMemory: '長期メモリ',
-      openConfiguration: '設定を開く',
-      truncated: '{total}件中の最初の{shown}件を表示',
-      bindings: {
-        embedding_model: '埋め込みモデル',
-        summary_model: '要約モデル',
-        image_processing_model: '画像処理モデル',
-        vlm_model: '視覚モデル',
-        asr_model: '音声認識モデル',
-        wiki_synthesis_model: 'Wiki生成モデル',
-        auto_tag_model: '自動タグ付けモデル',
-        chat_model: 'チャットモデル',
-        rerank_model: 'リランクモデル',
-        query_understand_model: 'クエリ理解モデル',
-        follow_up_model: 'フォローアップモデル',
-        extract_model: 'メモリ抽出モデル',
-        unknown: 'その他のモデル設定'
+      fontSize: 'フォントサイズ',
+      fontSizeDescription: 'インターフェース全体（文字、アイコン、余白）を拡大縮小し、すぐに反映されます',
+      size: {
+        small: '小',
+        normal: '標準',
+        large: '大'
       }
     },
-    debug: {
-      reasoningEffort: '思考強度',
-      reasoningEffortDesc: 'モデルカタログが報告するレベルで reasoning_effort を送信します',
-      title: 'モデルテスト',
-      description: '保存済みのモデル設定でリクエストを送信します。編集中の変更は保存後に反映されます。',
-      groupModel: 'モデルを選択',
-      groupInput: 'テスト入力',
-      groupResult: '結果',
-      modelType: 'モデルの種類',
-      model: 'モデル',
-      modelPlaceholder: 'テストするモデルを選択',
-      noModelsForType: 'この種類の保存済みモデルはありません',
-      query: '入力',
-      queryPlaceholder: 'モデルに送信するテキストを入力してください',
-      embeddingInput: '埋め込み対象のテキスト',
-      embeddingPlaceholder: '埋め込みを生成するテキストを入力してください',
-      vlmPrompt: '画像プロンプト',
-      vlmPromptPlaceholder: '例: この画像を詳しく説明してください',
-      documents: '候補ドキュメント',
-      documentsPlaceholder: '候補ドキュメントを1行に1件ずつ入力してください',
-      documentsHint: '空でない各行が個別のドキュメントとしてリランクモデルに送信されます',
-      imageFile: '画像ファイル',
-      audioFile: '音声ファイル',
-      chooseFile: 'ファイルを選択',
-      parameters: 'リクエストパラメータ',
-      systemPrompt: 'システムプロンプト',
-      systemPromptPlaceholder: 'システムプロンプト（任意）',
-      run: 'テストを実行',
-      copyResult: '結果をコピー',
-      history: '履歴',
-      runLabel: '実行 #{n}',
-      success: 'リクエストに成功しました',
-      failed: 'リクエストに失敗しました',
-      rawResponse: '応答',
-      requestPreview: 'リクエストのプレビュー',
-      requestFailed: 'モデルテストのリクエストに失敗しました',
-      metrics: {
-        api: 'プロトコル',
-        thinkingFormat: '思考形式',
-        requestedReasoningEffort: '要求した強度',
-        dimension: '次元数',
-        resultCount: '結果件数',
-        answerChars: '回答文字数',
-        reasoningChars: '推論文字数',
-        reasoningReturned: '推論内容の返却',
-        textChars: '文字起こし文字数',
-        segmentCount: 'セグメント数'
+    platform: {
+      subtitle: 'LLM駆動のエンタープライズ向けナレッジフレームワーク',
+      description: 'RAG検索、エージェント推論、Wikiナレッジベースにより、ドキュメントを本当に理解し活用できます',
+      rag: 'RAG拡張生成',
+      agent: 'ReActエージェント',
+      wiki: 'Wikiナレッジベース',
+      hybridSearch: 'ハイブリッド検索',
+      multimodalParsing: 'マルチモーダルドキュメント解析',
+      hybridSearchEngine: 'ハイブリッド検索 + ナレッジグラフ',
+      ragQandA: 'ReActエージェントQ&A',
+      independentTenant: '独立したワークスペース',
+      fullApiAccess: 'フルAPIアクセス',
+      knowledgeBaseManagement: 'ナレッジベース管理',
+      carousel: {
+        agenticRagTitle: 'エージェンティックRAG',
+        agenticRagDesc: 'ReAct推論 + ツール呼び出し + 多段階の思考',
+        hybridSearchTitle: 'ハイブリッド検索戦略',
+        hybridSearchDesc: 'BM25 + ベクトル + ナレッジグラフ',
+        wikiTitle: 'Wikiナレッジベース',
+        wikiDesc: 'ドキュメントを構造化され相互にリンクしたナレッジへ凝縮します',
+        smartDocRetrievalTitle: 'インテリジェントなドキュメント検索',
+        smartDocRetrievalDesc: 'PDF/Word/画像のマルチフォーマット解析'
       }
-    }
-  },
-  ollamaSettings: {
-    title: 'Ollama設定',
-    description: 'ローカルのOllamaサービスを管理し、モデルの確認やダウンロードを行います',
-    status: {
-      label: 'Ollamaサービスのステータス',
-      desc: 'ローカルのOllamaサービスが利用可能かを自動検出します。サービスが停止しているかURLが誤っている場合は「利用不可」と表示されます。',
-      testing: 'テスト中',
-      available: '利用可能',
-      unavailable: '利用不可',
-      untested: '未テスト',
-      retest: '再テスト'
     },
-    address: {
-      label: 'サービスURL',
-      desc: 'ローカルのOllamaサービスのAPIアドレスです。システムが自動検出します。変更するには.envファイルで設定してください。',
-      placeholder: 'http://localhost:11434',
-      failed: '接続に失敗しました。Ollamaが起動しているか、URLが正しいか確認してください'
+    time: {
+      today: '今日',
+      yesterday: '昨日',
+      last7Days: '過去7日間',
+      last30Days: '過去30日間',
+      lastYear: '過去1年',
+      earlier: 'それ以前',
+      pinned: 'ピン留め'
     },
-    download: {
-      title: 'モデルをダウンロード',
-      descPrefix: 'ダウンロードするモデル名を入力するか、',
-      browse: 'Ollamaモデルライブラリを見る',
-      placeholder: '例: qwen2.5:0.5b',
-      download: 'ダウンロード',
-      downloading: 'ダウンロード中: {name}'
+    upload: {
+      uploadDocument: 'ドキュメントをアップロード',
+      uploadFolder: 'フォルダをアップロード',
+      onlineEdit: 'オンライン編集',
+      deleteRecord: '記録を削除'
     },
-    installed: {
-      title: 'インストール済みモデル',
-      desc: 'Ollamaにインストールされているモデル',
-      empty: 'インストール済みモデルがありません'
+    uploadTasks: {
+      panelLabel: 'アップロード',
+      titleUploading: 'アップロード中 {done}/{total}',
+      titleParsing: '解析中 {done}/{total}',
+      titleDone: 'すべて完了',
+      titleDoneWithIssues: '{ok}件完了、{bad}件未完了',
+      titleCancelled: 'アップロードをキャンセルしました',
+      destination: 'アップロード先：{name}',
+      destinationMany: 'アップロード先：{count}件のナレッジベース',
+      remaining: '残り約{time}',
+      eta: {
+        seconds: '{n}秒',
+        minutes: '{n}分',
+        hours: '{n}時間'
+      },
+      hintUploading: 'アップロードが完了するまでページを閉じたり再読み込みしたりしないでください',
+      hintParsing: 'すべてのファイルをアップロードしました。解析はバックグラウンドで続くため、このページを離れても問題ありません',
+      legend: {
+        ready: '検索可能',
+        active: '処理中',
+        waiting: '待機中',
+        failed: '失敗',
+        duplicate: '既存'
+      },
+      filterAll: 'すべて',
+      filterIssues: '未完了',
+      phaseWaiting: 'アップロード待ち',
+      phaseSaving: '保存中…',
+      phasePending: '解析待ち',
+      phaseParsing: '解析中',
+      phaseFinalizing: '検索可能・バックグラウンドで最適化中',
+      phaseReady: '完了',
+      phaseUploadFailed: 'アップロード失敗',
+      phaseParseFailed: '解析失敗',
+      phaseDuplicate: '同じファイルが既にあります',
+      phaseCancelled: 'キャンセル済み',
+      phaseDeleted: '削除済み',
+      cancel: 'キャンセル',
+      cancelAll: 'すべてキャンセル',
+      retry: '再試行',
+      retryFailed: '{count}件を再試行',
+      open: '開く',
+      collapse: '折りたたむ',
+      expand: '展開',
+      close: '閉じる',
+      closeConfirm: '閉じると、残り{count}件のアップロードがキャンセルされます',
+      closeConfirmOk: 'アップロードをキャンセル',
+      closeConfirmKeep: 'アップロードを続ける'
     },
-    toasts: {
-      connected: '接続しました',
-      connectFailed: '接続に失敗しました。Ollamaが起動しているか確認してください',
-      listFailed: 'モデル一覧の取得に失敗しました',
-      downloadFailed: 'ダウンロードに失敗しました。しばらくしてから再試行してください',
-      downloadStarted: 'モデル{name}のダウンロードを開始しました',
-      downloadCompleted: 'モデル{name}のダウンロードが完了しました',
-      progressFailed: 'ダウンロード進捗の取得に失敗しました'
-    }
-  },
-  mcpMetadata: {
-    "searchTools": "ツール名や説明を検索",
-    "retry": "再試行",
-    "details": "詳細",
-    "description": "説明",
-    "parameters": "パラメーター",
-    "required": "必須",
-    "fullSchema": "完全な定義",
-    "noDescription": "説明はありません",
-    "noParameters": "パラメータ定義はありません",
-    "enabled": "有効",
-    "approval": "承認が必要",
-    "noTools": "該当するツールはありません",
-    "next": "次へ",
-    "policyLoadFailed": "ツール設定を読み込めません。編集前に再試行してください。",
-    "policySaveFailed": "ツール設定を保存できませんでした",
-
-    "tools": "Tools 一覧",
-    "cacheHint": "未同期の場合はこの手順で自動接続して保存します。以降は更新時のみ MCP サーバーに接続します。",
-    "refresh": "Tools を更新",
-    "fetch": "再取得",
-    "fetching": "接続して Tools を取得しています…",
-    "toolCount": "{count} 件のツール",
-    "stale": "接続または認証設定が変更されました。モデルで使用する前に一覧を更新してください。",
-    "notSynced": "未同期です。取得すると説明とパラメーター定義が保存されます。",
-    "syncRequired": "先に接続して Tools を取得してください。モデルは同期済みの一覧のみ使用できます。",
-    "needsRefresh": "更新が必要",
-    "saved": "保存済み",
-    "syncedAt": "同期日時：",
-    "serverDocumentation": "サーバーの元の説明",
-    "noServerDocumentation": "この MCP サーバーの initialize に instructions / serverInfo.description はありません（どちらも任意）。ツールの説明は下の各 description にあります。",
-    "policyHint": "ツールの有効化と承認設定は即時保存され、一覧の更新後も維持されます。",
-    "failed": "ツール一覧を読み込めませんでした",
-    "setupProgress": "MCP 設定の手順",
-    "connection": "接続設定",
-    "toolsAndUsage": "ツールと用途",
-    "previous": "戻る",
-    "usage": "サービスの用途",
-    "usageHint": "モデルはこの概要を読んでから必要なツールを読み込みます。更新しても入力内容は保持されます。",
-    "summary": "用途の概要",
-    "summaryPlaceholder": "例：注文状況、配送状況、返金履歴を確認する。",
-    "usageInstructions": "使用方法",
-    "instructionsPlaceholder": "サービスの用途、利用場面、重要な制約を簡潔に記載してください。",
-    "generateUsage": "AI で生成",
-    "generateHint": "同期済みの有効なツールから簡潔な説明を生成します。編集して保存すると反映されます。",
-    "instructionsRequired": "使用方法を入力してください",
-    "generated": "生成しました。内容を確認して保存してください。",
-    "generateFailed": "生成に失敗しました。ツールの同期と利用可能なチャットモデルの設定を確認して再試行してください。",
-    "saveNext": "保存して次へ"
-},
-  mcpServiceDialog: {
-    addTitle: 'MCPサービスを追加',
-    addDesc: '外部の MCP サービスを接続すると、エージェントがそのツールを呼び出せます。',
-    editTitle: 'MCPサービスを編集',
-    basicSection: '基本',
-    connectionSection: '接続',
-    enableServiceDesc: 'オフの場合、このサービスは呼び出されません',
-    testAfterSaveHint: '接続をテストするには、先に保存してください',
-    unitSecond: '秒',
-    unitTimes: '回',
-    name: 'サービス名',
-    namePlaceholder: 'サービス名を入力してください',
-    description: '説明',
-    descriptionPlaceholder: 'サービスの説明を入力してください',
-    transportType: 'トランスポート種別',
-    serviceUrl: 'サービスURL',
-    serviceUrlPlaceholder: 'https://example.com/mcp',
-    enableService: 'サービスを有効化',
-    authConfig: '認証',
-    authType: '認証方式',
-    authTypeNone: 'なし／カスタムヘッダー',
-    authTypeApiKey: 'APIキー／トークン',
-    authTypeOAuth: 'OAuth 2.0（初回接続時に認可）',
-    oauthScopes: 'スコープ（任意、スペース区切り）',
-    oauthAuthorization: '認可状態',
-    oauthAuthorized: '認可済み',
-    oauthRefreshable: 'トークンの有効期限が切れています。次回利用時に自動的に更新されます',
-    oauthUnauthorized: '未認可',
-    oauthAuthorize: '認可',
-    oauthReauthorize: '再認可',
-    oauthRevoke: '認可を取り消す',
-    oauthAuthorizeHint: '「認可」をクリックすると現在の設定を保存してから認可を開始します（ユーザごとに個別に認可します）。',
-    apiKeyHeader: 'ヘッダー名',
-    apiKeyHeaderDesc: '未入力の場合はX-API-Keyが使われます。Bearerの場合はAuthorizationを指定し、下の値に「Bearer <token>」を入力してください。生トークンを使うサービスではAuthorizationに生トークンを設定します。',
-    credentialValue: 'シークレット／トークン',
-    optional: '任意',
-    advancedConfig: '詳細設定',
-    timeoutSec: 'タイムアウト（秒）',
-    retryCount: '再試行回数',
-    retryDelaySec: '再試行の間隔（秒）',
-    rules: {
-      nameRequired: 'サービス名を入力してください',
-      transportRequired: 'トランスポート種別を選択してください',
-      urlRequired: 'サービスURLを入力してください',
-      urlInvalid: '有効なURLを入力してください'
+    agentSettings: {
+      modelRecommendation: {
+        title: '推奨モデル'
+      },
+      maxIterations: {
+        desc: '1つのタスクで実行できる推論ステップ数の上限です。無制限の場合、モデルが自ら停止するか手動で停止するまで実行を続けます。'
+      },
+      thinkingModel: {
+        desc: 'エージェントの推論と計画に使用するLLM'
+      },
+      rerankModel: {
+        desc: '検索結果をリランクし、関連度スコアを正規化します'
+      },
+      temperature: {
+        desc: '出力のランダム性を制御します。0が最も決定的で、1が最もランダムです'
+      },
+      allowedTools: {
+        desc: '現在エージェントで有効になっているツール'
+      },
+      systemPrompt: {
+        desc: 'エージェントのシステムプロンプトを設定します。プレースホルダは実行時に実際の内容へ自動的に置き換えられます。'
+      }
     },
-    toasts: {
-      created: 'MCPサービスを作成しました',
-      updated: 'MCPサービスを更新しました',
-      createFailed: 'MCPサービスの作成に失敗しました',
-      updateFailed: 'MCPサービスの更新に失敗しました',
-      oauthRequired: 'このサーバはOAuthが必要です。OAuth 2.0に切り替えました。保存してから「認可」をクリックしてください。',
-      authorized: '認可が完了しました',
-      authorizeFailed: '認可の開始に失敗しました',
-      revoked: '認可を取り消しました',
-      revokeFailed: '認可の取り消しに失敗しました'
+    conversationSettings: {
+      models: {
+        chatGroupLabel: '思考／チャットモデル'
+      },
+      maxRounds: {
+        desc: 'コンテキストとクエリリライトのために保持する会話ターン数'
+      },
+      embeddingTopK: {
+        desc: 'ベクトル検索後に保持するドキュメント数'
+      },
+      keywordThreshold: {
+        desc: 'キーワード検索の最小スコア'
+      },
+      vectorThreshold: {
+        desc: 'ベクトル検索の最小類似度'
+      },
+      rerankTopK: {
+        desc: 'リランク後に保持するドキュメント数'
+      },
+      rerankThreshold: {
+        desc: 'リランク後に必要な最小スコア'
+      },
+      enableRewrite: {
+        desc: 'マルチターンのクエリを自動的にリライトし、リコールを向上させます'
+      },
+      enableQueryExpansion: {
+        desc: 'リコールが低い場合に推論モデルを呼び出して拡張クエリを生成します（レイテンシとコストが増加します）'
+      },
+      fallbackStrategy: {
+        desc: '関連するドキュメントが見つからない場合の応答方法'
+      },
+      fallbackResponse: {
+        desc: '固定フォールバック戦略を使用する場合に返すテキスト'
+      },
+      fallbackPrompt: {
+        desc: 'フォールバック戦略が「モデル」の場合に使用するプロンプト'
+      },
+      rewritePrompt: {
+        desc: 'クエリリライト時に使用するシステムプロンプト'
+      },
+      chatModel: {
+        desc: '要約や概要の生成に使用する大規模言語モデル'
+      },
+      rerankModel: {
+        desc: '検索結果のリランクに使用するモデル（任意）'
+      },
+      contextTemplate: {
+        desc: '通常モードで検索結果に基づき回答を生成するためのプロンプトテンプレート'
+      },
+      systemPrompt: {
+        desc: '通常モードの会話で使用するシステムレベルのプロンプト'
+      },
+      temperature: {
+        desc: '出力のランダム性を制御します。0が最も決定的で、1が最もランダムです'
+      },
+      maxTokens: {
+        desc: '応答で生成するトークンの最大数'
+      }
     },
-    customHeaders: {
-      label: 'カスタムヘッダー（任意）',
-      desc: 'すべてのMCPリクエストに付与されるHTTPヘッダーです。企業向けゲートウェイの認証やトレースなどに利用します。',
-      add: 'ヘッダーを追加',
-      keyPlaceholder: 'ヘッダー名',
-      valuePlaceholder: 'ヘッダーの値'
-    },
-    codeImport: {
-      toggle: 'コードからインポート',
-      hint: '標準のmcpServers JSON設定を貼り付けるとフォームに自動入力されます',
-      parse: '解析して入力',
-      editOverwriteHint: 'インポートすると現在のフォームが上書きされます（保存済みの認証情報は影響を受けません。適用するには保存をクリックしてください）',
-      errors: {
-        empty: '先に設定を貼り付けてください',
-        invalidJson: '解析できません。JSONの形式を確認してください',
-        noServer: 'MCPサービスの設定が見つかりません',
-        missingUrl: '設定にurlがありません',
-        stdioUnsupported: 'stdio（command/args）の設定には対応していません。urlを含むリモート設定を使用してください'
+    mcpSettings: {
+      addUsageInstructions: "使用方法を追加",
+      noUsageInstructions: "使用方法は未入力です",
+      title: 'MCPサービス',
+      description: 'エージェントモードでツールやリソースを利用するための外部MCP（Model Context Protocol）サービスを管理します',
+      enabled: '有効',
+      disabled: '無効',
+      configuredServices: '設定済みサービス',
+      manageAndTest: 'MCPサービスの接続を管理・テストします',
+      addService: 'サービスを追加',
+      empty: 'MCPサービスがありません',
+      actions: {
+        test: '接続テスト'
       },
       toasts: {
-        filled: 'フォームに入力しました。内容を確認して保存してください',
-        multipleServers: '複数のサービスが見つかったため、最初の1件をインポートしました: {name}'
-      }
-    }
-  },
-  promptTemplate: {
-    noTemplates: '利用できるテンプレートがありません',
-    selectTemplate: 'テンプレートを選択',
-    useTemplate: 'テンプレートを使用',
-    resetDefault: 'デフォルトに戻す',
-    default: 'デフォルト',
-    withKnowledgeBase: 'ナレッジベース',
-    withWebSearch: 'Web検索'
-  },
-  organization: {
-    title: '共有スペース',
-    subtitle: '共有スペースを作成したり参加したりすることで、複数のワークスペースがナレッジベースやエージェントを共有して協働できます',
-    createOrg: '共有スペースを作成',
-    joinOrg: '共有スペースに参加',
-    name: '共有スペース名',
-    namePlaceholder: '共有スペース名を入力してください',
-    nameRequired: '共有スペース名を入力してください',
-    avatar: '共有スペースのアバター',
-    avatarClear: 'クリア',
-    avatarPickerHint: '共有スペースのアバターとして絵文字を選択します',
-    description: '共有スペースの説明',
-    descriptionPlaceholder: '共有スペースの説明を入力してください（任意）',
-    noDescription: '説明なし',
-    memberCount: 'メンバー数',
-    owner: '作成者',
-    inviteCode: '招待コード',
-    inviteCodePlaceholder: '招待コードを入力してください',
-    inviteCodeRequired: '招待コードを入力してください',
-    refreshInviteCode: '招待コードを更新',
-    inviteCodeRefreshed: '招待コードを更新しました',
-    inviteCodeRefreshFailed: '招待コードの更新に失敗しました',
-    rbac: {
-      needTenantAdminTip: 'この操作には、現在のワークスペースで管理者以上のロールが必要です。ワークスペースのオーナーにお問い合わせください。',
-      cannotCreate: 'このワークスペースでのロールでは権限が不足しているため、共有スペースを作成できません',
-      cannotJoin: 'このワークスペースでのロールでは権限が不足しているため、共有スペースへの参加や参加申請ができません',
-      cannotManage: 'このワークスペースでのロールでは権限が不足しているため、この共有スペースを管理できません'
-    },
-    join: {
-      title: '共有スペースに参加',
-      joining: '共有スペースに参加しています...',
-      success: '共有スペースに参加しました！',
-      failed: '共有スペースへの参加に失敗しました',
-      noCode: '招待コードが見つかりません',
-      goToOrganizations: '共有スペース一覧へ移動',
-      confirmTitle: '共有スペースへの参加を確認',
-      confirm: '参加',
-      preview: 'プレビューして参加',
-      memberCount: 'メンバー{count}人',
-      shareCount: '共有ナレッジベース{count}件',
-      agentShareCount: 'エージェント{count}件',
-      alreadyMember: 'すでにこの共有スペースのメンバーです',
-      invalidCode: '招待コードが無効です',
-      byInviteCode: '招待コードを入力',
-      searchSpaces: '共有スペースを検索',
-      searchSpacesDesc: '公開されている共有スペースを閲覧・検索できます。招待コードなしで参加できます',
-      searchSpacesPlaceholder: '共有スペース名、説明、IDで検索',
-      spaceId: '共有スペースID',
-      noSearchResult: '該当する共有スペースがありません',
-      noSearchableSpaces: '公開されている共有スペースはまだありません。検索してみてください',
-      memberLimitReached: '満員',
-      backToSearch: '検索に戻る'
-    },
-    invite: {
-      loading: '読み込み中...',
-      previewTitle: '共有スペースに参加',
-      inputDesc: '招待コードを入力（または招待リンクから貼り付け）すると、共有スペースを確認して参加できます',
-      previewAction: '表示',
-      primaryJoin: '参加',
-      invalidCode: '招待コードが無効か、有効期限が切れています',
-      previewFailed: 'プレビューに失敗しました。再試行してください',
-      knowledgeBases: 'ナレッジベース',
-      agents: 'エージェント',
-      alreadyMember: 'すでにこの共有スペースのメンバーです',
-      submitRequest: '参加を申請',
-      requireApprovalTip: 'この共有スペースへの参加には管理者の承認が必要です',
-      approvalLabel: '参加方法',
-      needApproval: '承認が必要',
-      noApproval: '承認不要',
-      defaultRoleAfterJoin: '参加後のデフォルトロール: {role}',
-      requestRole: '申請するロール',
-      selectRole: 'ロールを選択',
-      messagePlaceholder: '任意: メッセージ（自己紹介や参加理由など）',
-      applicationNote: '申請メモ（任意）',
-      joinSuccess: '共有スペースに参加しました！',
-      joinFailed: '参加に失敗しました。再試行してください',
-      requestSubmitted: '申請を送信しました。管理者の承認をお待ちください',
-      requestFailed: '申請の送信に失敗しました。再試行してください',
-      viewOrganization: '共有スペースを表示'
-    },
-    leave: '共有スペースから退出',
-    leaveConfirmTitle: '共有スペースから退出',
-    leaveConfirmMessage: '共有スペース「{name}」から退出してもよろしいですか？この共有スペースで共有されているナレッジベースにアクセスできなくなります。',
-    leaveSuccess: '共有スペースから退出しました',
-    leaveFailed: '共有スペースからの退出に失敗しました',
-    deleteConfirmTitle: '共有スペースを削除',
-    deleteConfirmMessage: '共有スペース「{name}」を削除してもよろしいですか？すべてのメンバーがこの共有スペースから除外されます。この操作は取り消せません。',
-    deleteSuccess: '共有スペースを削除しました',
-    deleteFailed: '共有スペースの削除に失敗しました',
-    createSuccess: '共有スペースを作成しました',
-    createFailed: '共有スペースの作成に失敗しました',
-    joinSuccess: '共有スペースに参加しました',
-    joinFailed: '共有スペースへの参加に失敗しました',
-    manageMembers: 'メンバーを管理',
-    noMembers: 'メンバーがいません',
-    members: {
-      listTitle: '共有スペースのメンバー',
-      searchPlaceholder: 'メンバーを検索…',
-      loading: 'メンバーを読み込み中…',
-      emptySearch: '「{q}」に一致するメンバーがありません',
-      columns: {
-        member: 'メンバー',
-        role: 'ロール',
-        joinedAt: '参加日',
-        operations: '操作'
-      }
-    },
-    joinRequests: {
-      listTitle: '保留中の申請',
-      searchPlaceholder: '申請者を検索…',
-      loading: '申請を読み込み中…',
-      emptySearch: '「{q}」に一致する申請がありません',
-      typeJoin: '参加',
-      typeUpgrade: '昇格',
-      rejectConfirm: 'この申請を却下しますか？',
-      approveTitle: '申請を承認',
-      approveDesc: '承認後に「{name}」へ割り当てるロールを選択してください',
-      columns: {
-        applicant: '申請者',
-        type: '種別',
-        requestedRole: '申請ロール',
-        message: 'メモ',
-        appliedAt: '申請日'
-      }
-    },
-    sharedResources: {
-      kbListTitle: '共有ナレッジベース',
-      agentListTitle: '共有エージェント',
-      loading: '読み込み中…',
-      columns: {
-        name: '名前',
-        sharedBy: '共有者',
-        sharedAt: '共有日',
-        permission: '権限'
-      }
-    },
-    roleUpdated: 'ロールを更新しました',
-    roleUpdateFailed: 'ロールの更新に失敗しました',
-    memberRemoved: 'メンバーを削除しました',
-    memberRemoveFailed: 'メンバーの削除に失敗しました',
-    empty: 'まだ共有スペースに参加していません',
-    emptyDesc: '共有スペースを作成するか、招待コードで既存の共有スペースに参加してください',
-    createdByMe: '自分が作成',
-    joinedByMe: '自分が参加',
-    emptyCreated: 'まだ共有スペースを作成していません',
-    emptyCreatedDesc: '「共有スペースを作成」をクリックして新規作成してください',
-    emptyJoined: 'まだ共有スペースに参加していません',
-    emptyJoinedDesc: '招待コードで既存の共有スペースに参加してください',
-    role: {
-      admin: '管理者',
-      editor: '編集者',
-      viewer: '閲覧者'
-    },
-    detail: {
-      removeMemberConfirm: 'メンバー「{name}」を共有スペースから除外してもよろしいですか？',
-      removeMember: 'メンバーを削除'
-    },
-    settings: {
-      editTitle: '共有スペース設定',
-      membersDesc: '共有スペースのメンバーとロールを確認・管理します。各メンバーは1つのワークスペースを表し、同じワークスペースのすべてのユーザがこの共有スペースへのアクセスを共有します。',
-      permissionsIconHint: 'ロールの権限を表示',
-      sharedDesc: 'この共有スペースに共有されているすべてのナレッジベースを表示します',
-      noSharedKB: '共有されているナレッジベースはまだありません',
-      noSharedKBTip: 'ナレッジベースの所有者は、ナレッジベース設定から自分のナレッジベースをこの共有スペースに共有できます',
-      sharedAgents: '共有エージェント',
-      noSharedAgents: '共有されているエージェントはまだありません',
-      sharedAgentsDesc: 'この共有スペースに共有されているエージェントです。メンバーはチャットで利用できます',
-      sharedAgentsKbHint: 'エージェントに紐づくナレッジベースは、メンバーが会話でそのエージェントを利用する場合（{\'@\'}経由）にのみ読み取り専用で利用できます。ナレッジベース一覧には表示されません。メンバーが一覧でナレッジベースを閲覧・編集できるようにするには、そのナレッジベースを個別にこの共有スペースへ共有してください。',
-      sharedAgentsKbHintShort: 'エージェントに紐づくナレッジはチャット内で読み取り専用です。メンバーが一覧で閲覧・編集できるようにするには、ナレッジベースをこの共有スペースに共有してください。',
-      noSharedAgentsTip: '管理者はエージェント設定からエージェントをこの共有スペースへ共有できます',
-      sharePermissionLabel: '共有スペースの権限',
-      myPermissionLabel: '実効権限',
-      permissionCalcFormula: '共有スペースの権限は共有時に設定します。実効権限は、その権限と共有スペースでのロールのうち低い方になります',
-      permissionCalcTip: '実効権限は共有スペースの権限とここでのロールのうち低い方です。閲覧者はこのナレッジベースに対して最大でも読み取り専用となります。',
-      inviteMembers: 'メンバーを招待',
-      inviteMembersDesc: '招待コードまたはリンクで他のユーザを共有スペースに招待します',
-      inviteLink: '招待リンク',
-      inviteLinkValidity: '招待リンクの有効期間',
-      inviteLinkValidityDesc: '新しく生成する招待リンクの有効期間',
-      validity1Day: '1日',
-      validity7Days: '7日',
-      validity30Days: '30日',
-      validityNever: '無期限',
-      remainingValidity: '残り{n}日',
-      remainingValidityNever: '無期限',
-      remainingValidityExpired: '期限切れ',
-      removeShareFromOrg: '共有スペースへの共有を解除',
-      removeShareConfirm: 'この共有スペースから「{name}」の共有を解除しますか？メンバーはこのナレッジベースにアクセスできなくなります。',
-      removeAgentShareConfirm: 'この共有スペースから「{name}」の共有を解除しますか？メンバーはこのエージェントにアクセスできなくなります。',
-      removeShareSuccess: '共有スペースへの共有を解除しました',
-      removeShareFailed: '削除に失敗しました。再試行してください',
-      requireApproval: '承認を必須にする',
-      requireApprovalDesc: '有効にすると、新しいメンバーの参加に管理者の承認が必要になります',
-      searchable: '検索を許可',
-      searchableDesc: '有効にすると、この共有スペースが「共有スペースに参加」の検索一覧に表示され、他のユーザが招待コードなしで検索して参加申請できるようになります',
-      memberLimit: 'メンバー上限',
-      memberLimitDesc: '上限に達すると新しいメンバーを追加できません。0を指定すると無制限になります',
-      memberLimitPlaceholder: '0 = 無制限',
-      memberLimitHint: '現在のメンバー数: {count}',
-      joinRequests: '参加申請',
-      joinRequestsDesc: '共有スペースへの保留中の参加申請を確認します',
-      noPendingRequests: '保留中の申請はありません',
-      pendingJoinRequestsBadge: '確認が必要な参加申請があります',
-      pendingReview: '保留中',
-      assignRole: 'ロールを割り当て',
-      approve: '承認',
-      reject: '却下',
-      approveSuccess: '申請を承認しました',
-      rejectSuccess: '申請を却下しました',
-      reviewFailed: '操作に失敗しました。再試行してください'
-    },
-    navGroups: {
-      basic: '基本',
-      management: 'メンバーとコラボレーション',
-      resources: '共有リソース'
-    },
-    editor: {
-      navBasic: '基本情報',
-      navPermissions: '権限',
-      navJoin: '共有スペースに参加',
-      basicTitle: '基本情報',
-      basicDesc: '識別しやすいように共有スペースの名前と説明を設定します',
-      nameTip: 'チーム名やプロジェクト名にすると、メンバーが識別しやすくなります',
-      descriptionTip: 'メンバーが理解しやすいよう、共有スペースの目的や目標を記載してください',
-      permissionsTitle: 'メンバーの権限',
-      permissionsDesc: '共有スペース内のナレッジベースとエージェントに対する、各ロールの権限範囲を確認します',
-      permissionFeature: '権限項目',
-      fullAccess: 'フルアクセス',
-      editAccess: '編集可能',
-      viewAccess: '閲覧のみ',
-      adminPerm1: '共有スペースの設定、メンバー、ナレッジベースとエージェントの共有を管理',
-      adminPerm2: 'ナレッジベースとエージェントの共有と管理',
-      adminPerm3: '共有ナレッジベースの内容を編集',
-      adminPerm4: 'ナレッジベースの閲覧と検索',
-      useSharedAgentsPerm: '共有エージェントの利用',
-      shareKBPerm: 'ナレッジベースを共有スペースへ共有',
-      editorPerm1: '共有ナレッジベースの内容を編集',
-      editorPerm2: 'ナレッジベースの閲覧と検索',
-      editorPerm3: '共有スペースの設定とメンバーの管理',
-      viewerPerm1: 'ナレッジベースの閲覧と検索',
-      viewerPerm2: 'ナレッジベースの内容を編集',
-      viewerPerm3: '共有スペースの設定を管理',
-      ownerNote: '共有スペースの作成者として、自動的にすべての権限を持つ管理者になります。',
-      joinTitle: '共有スペースに参加',
-      joinDesc: '招待コードで既存の共有スペースに参加し、共有されているナレッジベースとエージェントを利用します',
-      joinIllustration: '共有スペースの管理者から提供された招待コードを入力して参加してください',
-      inviteCodeTip: '招待コードは共有スペースの管理者が生成します。管理者にお問い合わせください',
-      howToGetCode: '招待コードの入手方法',
-      step1: '参加したい共有スペースの管理者に連絡します',
-      step2: '共有スペースの招待コードを共有してもらいます',
-      step3: '上の入力欄に招待コードを貼り付けます'
-    },
-    upgrade: {
-      requestUpgrade: '昇格を申請',
-      pending: '承認待ち',
-      dialogTitle: '昇格を申請',
-      dialogDesc: '共有スペースの管理者が承認するとロールが更新されます。',
-      currentRole: '現在のロール',
-      selectRole: '申請するロール',
-      reason: '理由（任意）',
-      reasonPlaceholder: 'より高い権限が必要な理由を簡潔に入力してください...',
-      submitBtn: '申請を送信',
-      submitSuccess: '昇格申請を送信しました。管理者の承認をお待ちください',
-      submitFailed: '申請の送信に失敗しました'
-    },
-    addMember: {
-      button: 'メンバーを追加',
-      dialogTitle: 'メンバーを追加',
-      tipTenant: 'メンバーの単位はワークスペースです。ワークスペースが参加すると、そのすべてのユーザがこの共有スペースへのアクセス権を持ちます。以下の検索結果はワークスペース単位で重複を除いています。',
-      searchTenant: 'ワークスペース ID',
-      searchTenantPlaceholder: '完全なワークスペース ID を入力',
-      searchTenantHint: '完全なワークスペース ID で検索するか、招待リンクを共有してください。',
-      selectRole: 'ロールを割り当て',
-      confirmBtn: '追加',
-      success: 'メンバーを追加しました',
-      failed: 'メンバーの追加に失敗しました'
-    },
-    share: {
-      title: '共有スペースへ共有',
-      selectOrg: '共有スペースを選択',
-      selectOrgPlaceholder: '共有先の共有スペースを選択',
-      permission: '権限',
-      permissionTip: '編集可能な権限ではメンバーがナレッジベースの内容を変更できます。読み取り専用の権限では検索と質問応答のみ行えます',
-      shareSuccess: 'ナレッジベースを共有しました',
-      shareFailed: '共有に失敗しました',
-      unshareSuccess: '共有を解除しました',
-      unshareFailed: '共有の解除に失敗しました',
-      sharedTo: '共有先',
-      noShares: 'まだどの共有スペースにも共有されていません',
-      searchPlaceholder: '共有スペースを検索…',
-      loading: '読み込み中…',
-      emptySearch: '「{q}」に一致する共有スペースがありません',
-      addShareDialogTitle: '共有スペースへ共有',
-      unshareAction: '共有を解除',
-      columns: {
-        space: '共有スペース',
-        permission: '権限',
-        sharedAt: '共有日',
-        operations: '操作'
+        loadFailed: 'MCPサービスの読み込みに失敗しました',
+        enabled: 'MCPサービスを有効化しました',
+        disabled: 'MCPサービスを無効化しました',
+        updateStateFailed: 'MCPサービスのステータス更新に失敗しました',
+        testing: '{name}をテスト中...',
+        noResponse: 'テストに失敗しました: サーバから応答がありません',
+        testFailed: 'MCPサービスのテストに失敗しました',
+        deleted: 'MCPサービスを削除しました',
+        deleteFailed: 'MCPサービスの削除に失敗しました'
       },
-      sharedKnowledgeBase: '共有ナレッジベース',
-      agentShareDesc: 'このエージェントを共有スペースへ共有し、メンバーが利用できるようにします',
-      sharedFrom: '共有元',
-      permissionReadonly: '読み取り専用',
-      permissionEditable: '編集可能'
+      deleteConfirmBody: 'MCPサービス「{name}」を削除しますか？この操作は取り消せません。',
+      unnamed: '名称未設定',
+      builtin: '組み込み',
+      toolCount: '{count} 個のツール',
+      toolsNotSynced: 'ツール未同期',
+      toolsStale: '再同期が必要'
+    },
+    modelSettings: {
+      title: 'モデル設定',
+      description: 'ローカルのOllamaやリモートAPIなど、さまざまな種類のAIモデルを管理します',
+      typeShort: {
+        chat: 'チャット',
+        embedding: '埋め込み',
+        rerank: 'リランク',
+        vllm: '視覚',
+        asr: '音声'
+      },
+      actions: {
+        addModel: 'モデルを追加',
+        debugModel: 'モデルテスト'
+      },
+      source: {
+        remote: 'リモート',
+        openaiCompatible: 'OpenAI互換',
+        custom: 'カスタム'
+      },
+      chat: {
+        title: 'チャットモデル',
+        desc: '会話に使用する大規模言語モデルを設定します',
+        empty: 'チャットモデルがありません'
+      },
+      embedding: {
+        title: '埋め込みモデル',
+        desc: 'テキストのベクトル化に使用する埋め込みモデルを設定します',
+        empty: '埋め込みモデルがありません'
+      },
+      rerank: {
+        title: 'リランクモデル',
+        desc: '結果のリランクに使用するモデルを設定します',
+        empty: 'リランクモデルがありません'
+      },
+      vllm: {
+        title: 'VLLM視覚モデル',
+        desc: 'マルチモーダル理解に使用する視覚言語モデルを設定します',
+        empty: 'VLLMモデルがありません'
+      },
+      asr: {
+        title: 'ASR音声モデル',
+        desc: '音声の文字起こしに使用する音声認識モデルを設定します（例: OpenAI Whisper）',
+        empty: 'ASRモデルがありません'
+      },
+      toasts: {
+        nameRequired: 'モデル名を入力してください',
+        nameTooLong: 'モデル名は100文字以内で入力してください',
+        displayNameTooLong: '表示名は100文字以内で入力してください',
+        baseUrlRequired: 'リモートAPIにはBase URLが必要です',
+        baseUrlInvalid: 'Base URLが正しくありません。有効なURLを入力してください',
+        dimensionInvalid: '埋め込み次元数は128〜4096の範囲で指定してください',
+        updated: 'モデルを更新しました',
+        added: 'モデルを追加しました',
+        saveFailed: 'モデルの保存に失敗しました',
+        deleted: 'モデルを削除しました',
+        deleteFailed: 'モデルの削除に失敗しました',
+        builtinCannotEdit: '組み込みモデルは編集できません',
+        builtinCannotDelete: '組み込みモデルは削除できません',
+        builtinCannotCopy: '組み込みモデルはコピーできません',
+        copied: 'モデルをコピーしました',
+        copyFailed: 'モデルのコピーに失敗しました'
+      },
+      copySuffix: ' のコピー',
+      builtinModels: {
+        title: '組み込みモデル',
+        description: '組み込みモデルはすべてのワークスペースに表示されます。機密情報は非表示で、編集や削除はできません。',
+        descriptionAdmin: '組み込みモデルはすべてのワークスペースに表示されます。システム管理者は設定と認証情報を編集できますが、削除はデプロイ側で管理されます。',
+        viewGuide: '組み込みモデルのガイドを見る'
+      },
+      builtinTag: '組み込み',
+      confirmDelete: 'モデル「{name}」を削除しますか？',
+      usage: {
+        title: 'モデルを削除できません',
+        description: 'モデル「{name}」は次の設定から参照されています。削除する前に各設定を開き、別のモデルを選択してください。',
+        knowledgeBases: 'ナレッジベース（{count}）',
+        agents: 'エージェント（{count}）',
+        longTermMemory: '長期メモリ',
+        openConfiguration: '設定を開く',
+        truncated: '{total}件中の最初の{shown}件を表示',
+        bindings: {
+          embedding_model: '埋め込みモデル',
+          summary_model: '要約モデル',
+          image_processing_model: '画像処理モデル',
+          vlm_model: '視覚モデル',
+          asr_model: '音声認識モデル',
+          wiki_synthesis_model: 'Wiki生成モデル',
+          auto_tag_model: '自動タグ付けモデル',
+          chat_model: 'チャットモデル',
+          rerank_model: 'リランクモデル',
+          query_understand_model: 'クエリ理解モデル',
+          follow_up_model: 'フォローアップモデル',
+          extract_model: 'メモリ抽出モデル',
+          unknown: 'その他のモデル設定'
+        }
+      },
+      debug: {
+        reasoningEffort: '思考強度',
+        reasoningEffortDesc: 'モデルカタログが報告するレベルで reasoning_effort を送信します',
+        title: 'モデルテスト',
+        description: '保存済みのモデル設定でリクエストを送信します。編集中の変更は保存後に反映されます。',
+        groupModel: 'モデルを選択',
+        groupInput: 'テスト入力',
+        groupResult: '結果',
+        modelType: 'モデルの種類',
+        model: 'モデル',
+        modelPlaceholder: 'テストするモデルを選択',
+        noModelsForType: 'この種類の保存済みモデルはありません',
+        query: '入力',
+        queryPlaceholder: 'モデルに送信するテキストを入力してください',
+        embeddingInput: '埋め込み対象のテキスト',
+        embeddingPlaceholder: '埋め込みを生成するテキストを入力してください',
+        vlmPrompt: '画像プロンプト',
+        vlmPromptPlaceholder: '例: この画像を詳しく説明してください',
+        documents: '候補ドキュメント',
+        documentsPlaceholder: '候補ドキュメントを1行に1件ずつ入力してください',
+        documentsHint: '空でない各行が個別のドキュメントとしてリランクモデルに送信されます',
+        imageFile: '画像ファイル',
+        similarityMode: '類似度',
+        similarityQuery: 'クエリ',
+        similarityQueryPlaceholder: 'クエリを入力（例：芝生を走る犬）',
+        similarityCandidates: '候補テキスト',
+        similarityCandidatesPlaceholder: '候補テキストを1行に1件ずつ入力してください',
+        similarityHint: 'クエリは検索クエリとして、候補はドキュメントとしてベクトル化されます（実際の検索と同じ）。結果はコサイン類似度の高い順に並びます',
+        similarityImage: '候補画像（任意）',
+        similarityImageCandidate: '画像',
+        audioFile: '音声ファイル',
+        chooseFile: 'ファイルを選択',
+        parameters: 'リクエストパラメータ',
+        systemPrompt: 'システムプロンプト',
+        systemPromptPlaceholder: 'システムプロンプト（任意）',
+        run: 'テストを実行',
+        copyResult: '結果をコピー',
+        history: '履歴',
+        runLabel: '実行 #{n}',
+        success: 'リクエストに成功しました',
+        failed: 'リクエストに失敗しました',
+        rawResponse: '応答',
+        requestPreview: 'リクエストのプレビュー',
+        requestFailed: 'モデルテストのリクエストに失敗しました',
+        metrics: {
+          api: 'プロトコル',
+          thinkingFormat: '思考形式',
+          requestedReasoningEffort: '要求した強度',
+          dimension: '次元数',
+          resultCount: '結果件数',
+          answerChars: '回答文字数',
+          reasoningChars: '推論文字数',
+          reasoningReturned: '推論内容の返却',
+          textChars: '文字起こし文字数',
+          segmentCount: 'セグメント数'
+        }
+      }
+    },
+    ollamaSettings: {
+      title: 'Ollama設定',
+      description: 'ローカルのOllamaサービスを管理し、モデルの確認やダウンロードを行います',
+      status: {
+        label: 'Ollamaサービスのステータス',
+        desc: 'ローカルのOllamaサービスが利用可能かを自動検出します。サービスが停止しているかURLが誤っている場合は「利用不可」と表示されます。',
+        testing: 'テスト中',
+        available: '利用可能',
+        unavailable: '利用不可',
+        untested: '未テスト',
+        retest: '再テスト'
+      },
+      address: {
+        label: 'サービスURL',
+        desc: 'ローカルのOllamaサービスのAPIアドレスです。システムが自動検出します。変更するには.envファイルで設定してください。',
+        placeholder: 'http://localhost:11434',
+        failed: '接続に失敗しました。Ollamaが起動しているか、URLが正しいか確認してください'
+      },
+      download: {
+        title: 'モデルをダウンロード',
+        descPrefix: 'ダウンロードするモデル名を入力するか、',
+        browse: 'Ollamaモデルライブラリを見る',
+        placeholder: '例: qwen2.5:0.5b',
+        download: 'ダウンロード',
+        downloading: 'ダウンロード中: {name}'
+      },
+      installed: {
+        title: 'インストール済みモデル',
+        desc: 'Ollamaにインストールされているモデル',
+        empty: 'インストール済みモデルがありません'
+      },
+      toasts: {
+        connected: '接続しました',
+        connectFailed: '接続に失敗しました。Ollamaが起動しているか確認してください',
+        listFailed: 'モデル一覧の取得に失敗しました',
+        downloadFailed: 'ダウンロードに失敗しました。しばらくしてから再試行してください',
+        downloadStarted: 'モデル{name}のダウンロードを開始しました',
+        downloadCompleted: 'モデル{name}のダウンロードが完了しました',
+        progressFailed: 'ダウンロード進捗の取得に失敗しました'
+      }
+    },
+    mcpMetadata: {
+      "searchTools": "ツール名や説明を検索",
+      "retry": "再試行",
+      "details": "詳細",
+      "description": "説明",
+      "parameters": "パラメーター",
+      "required": "必須",
+      "fullSchema": "完全な定義",
+      "noDescription": "説明はありません",
+      "noParameters": "パラメータ定義はありません",
+      "enabled": "有効",
+      "approval": "承認が必要",
+      "noTools": "該当するツールはありません",
+      "next": "次へ",
+      "policyLoadFailed": "ツール設定を読み込めません。編集前に再試行してください。",
+      "policySaveFailed": "ツール設定を保存できませんでした",
+
+      "tools": "Tools 一覧",
+      "cacheHint": "未同期の場合はこの手順で自動接続して保存します。以降は更新時のみ MCP サーバーに接続します。",
+      "refresh": "Tools を更新",
+      "fetch": "再取得",
+      "fetching": "接続して Tools を取得しています…",
+      "toolCount": "{count} 件のツール",
+      "stale": "接続または認証設定が変更されました。モデルで使用する前に一覧を更新してください。",
+      "notSynced": "未同期です。取得すると説明とパラメーター定義が保存されます。",
+      "syncRequired": "先に接続して Tools を取得してください。モデルは同期済みの一覧のみ使用できます。",
+      "needsRefresh": "更新が必要",
+      "saved": "保存済み",
+      "syncedAt": "同期日時：",
+      "serverDocumentation": "サーバーの元の説明",
+      "noServerDocumentation": "この MCP サーバーの initialize に instructions / serverInfo.description はありません（どちらも任意）。ツールの説明は下の各 description にあります。",
+      "policyHint": "ツールの有効化と承認設定は即時保存され、一覧の更新後も維持されます。",
+      "columnTool": "ツール",
+      "columnEnabled": "有効",
+      "columnApproval": "承認",
+      "failed": "ツール一覧を読み込めませんでした",
+      "setupProgress": "MCP 設定の手順",
+      "connection": "接続設定",
+      "toolsAndUsage": "ツールと用途",
+      "previous": "戻る",
+      "usage": "サービスの用途",
+      "usageHint": "モデルはこの概要を読んでから必要なツールを読み込みます。更新しても入力内容は保持されます。",
+      "summary": "用途の概要",
+      "summaryPlaceholder": "例：注文状況、配送状況、返金履歴を確認する。",
+      "usageInstructions": "使用方法",
+      "instructionsPlaceholder": "サービスの用途、利用場面、重要な制約を簡潔に記載してください。",
+      "generateUsage": "AI で生成",
+      "generateHint": "同期済みの有効なツールから簡潔な説明を生成します。編集して保存すると反映されます。",
+      "instructionsRequired": "使用方法を入力してください",
+      "generated": "生成しました。内容を確認して保存してください。",
+      "generateFailed": "生成に失敗しました。ツールの同期と利用可能なチャットモデルの設定を確認して再試行してください。",
+      "saveNext": "保存して次へ"
+  },
+    mcpServiceDialog: {
+      addTitle: 'MCPサービスを追加',
+      addDesc: '外部の MCP サービスを接続すると、エージェントがそのツールを呼び出せます。',
+      editTitle: 'MCPサービスを編集',
+      basicSection: '基本',
+      connectionSection: '接続',
+      enableServiceDesc: 'オフの場合、このサービスは呼び出されません',
+      testAfterSaveHint: '接続をテストするには、先に保存してください',
+      unitSecond: '秒',
+      unitTimes: '回',
+      name: 'サービス名',
+      namePlaceholder: 'サービス名を入力してください',
+      description: '説明',
+      descriptionPlaceholder: 'サービスの説明を入力してください',
+      transportType: 'トランスポート種別',
+      serviceUrl: 'サービスURL',
+      serviceUrlPlaceholder: 'https://example.com/mcp',
+      enableService: 'サービスを有効化',
+      authConfig: '認証',
+      authType: '認証方式',
+      authTypeNone: 'なし／カスタムヘッダー',
+      authTypeApiKey: 'APIキー／トークン',
+      authTypeOAuth: 'OAuth 2.0（初回接続時に認可）',
+      oauthScopes: 'スコープ（任意、スペース区切り）',
+      oauthClientId: 'クライアント ID（任意）',
+      oauthClientIdDesc: '認可サーバーに事前登録したクライアントを指定します。空欄の場合は動的クライアント登録で自動登録します。クライアント ID を変更する場合はシークレットも更新してください。',
+      oauthClientSecret: 'クライアントシークレット（任意）',
+      oauthAuthorization: '認可状態',
+      oauthAuthorized: '認可済み',
+      oauthRefreshable: 'トークンの有効期限が切れています。次回利用時に自動的に更新されます',
+      oauthUnauthorized: '未認可',
+      oauthAuthorize: '認可',
+      oauthReauthorize: '再認可',
+      oauthRevoke: '認可を取り消す',
+      oauthAuthorizeHint: '「認可」をクリックすると現在の設定を保存してから認可を開始します（ユーザごとに個別に認可します）。',
+      apiKeyHeader: 'ヘッダー名',
+      apiKeyHeaderDesc: '未入力の場合はX-API-Keyが使われます。Bearerの場合はAuthorizationを指定し、下の値に「Bearer <token>」を入力してください。生トークンを使うサービスではAuthorizationに生トークンを設定します。',
+      credentialValue: 'シークレット／トークン',
+      optional: '任意',
+      advancedConfig: '詳細設定',
+      timeoutSec: 'タイムアウト（秒）',
+      retryCount: '再試行回数',
+      retryDelaySec: '再試行の間隔（秒）',
+      rules: {
+        nameRequired: 'サービス名を入力してください',
+        transportRequired: 'トランスポート種別を選択してください',
+        urlRequired: 'サービスURLを入力してください',
+        urlInvalid: '有効なURLを入力してください'
+      },
+      toasts: {
+        created: 'MCPサービスを作成しました',
+        updated: 'MCPサービスを更新しました',
+        createFailed: 'MCPサービスの作成に失敗しました',
+        updateFailed: 'MCPサービスの更新に失敗しました',
+        oauthRequired: 'このサーバはOAuthが必要です。OAuth 2.0に切り替えました。保存してから「認可」をクリックしてください。',
+        authorized: '認可が完了しました',
+        authorizeFailed: '認可の開始に失敗しました',
+        revoked: '認可を取り消しました',
+        revokeFailed: '認可の取り消しに失敗しました'
+      },
+      customHeaders: {
+        label: 'カスタムヘッダー（任意）',
+        desc: 'すべてのMCPリクエストに付与されるHTTPヘッダーです。企業向けゲートウェイの認証やトレースなどに利用します。',
+        add: 'ヘッダーを追加',
+        keyPlaceholder: 'ヘッダー名',
+        valuePlaceholder: 'ヘッダーの値'
+      },
+      codeImport: {
+        toggle: 'コードからインポート',
+        hint: '標準のmcpServers JSON設定を貼り付けるとフォームに自動入力されます',
+        parse: '解析して入力',
+        editOverwriteHint: 'インポートすると現在のフォームが上書きされます（保存済みの認証情報は影響を受けません。適用するには保存をクリックしてください）',
+        errors: {
+          empty: '先に設定を貼り付けてください',
+          invalidJson: '解析できません。JSONの形式を確認してください',
+          noServer: 'MCPサービスの設定が見つかりません',
+          missingUrl: '設定にurlがありません',
+          stdioUnsupported: 'stdio（command/args）の設定には対応していません。urlを含むリモート設定を使用してください'
+        },
+        toasts: {
+          filled: 'フォームに入力しました。内容を確認して保存してください',
+          multipleServers: '複数のサービスが見つかったため、最初の1件をインポートしました: {name}'
+        }
+      }
+    },
+    promptTemplate: {
+      noTemplates: '利用できるテンプレートがありません',
+      selectTemplate: 'テンプレートを選択',
+      useTemplate: 'テンプレートを使用',
+      resetDefault: 'デフォルトに戻す',
+      default: 'デフォルト',
+      withKnowledgeBase: 'ナレッジベース',
+      withWebSearch: 'Web検索'
+    },
+    organization: {
+      title: '共有スペース',
+      subtitle: '共有スペースを作成したり参加したりすることで、複数のワークスペースがナレッジベースやエージェントを共有して協働できます',
+      createOrg: '共有スペースを作成',
+      joinOrg: '共有スペースに参加',
+      name: '共有スペース名',
+      namePlaceholder: '共有スペース名を入力してください',
+      nameRequired: '共有スペース名を入力してください',
+      avatar: '共有スペースのアバター',
+      avatarClear: 'クリア',
+      avatarPickerHint: '共有スペースのアバターとして絵文字を選択します',
+      description: '共有スペースの説明',
+      descriptionPlaceholder: '共有スペースの説明を入力してください（任意）',
+      noDescription: '説明なし',
+      memberCount: 'メンバー数',
+      owner: '作成者',
+      inviteCode: '招待コード',
+      inviteCodePlaceholder: '招待コードを入力してください',
+      inviteCodeRequired: '招待コードを入力してください',
+      refreshInviteCode: '招待コードを更新',
+      inviteCodeRefreshed: '招待コードを更新しました',
+      inviteCodeRefreshFailed: '招待コードの更新に失敗しました',
+      rbac: {
+        needTenantAdminTip: 'この操作には、現在のワークスペースで管理者以上のロールが必要です。ワークスペースのオーナーにお問い合わせください。',
+        cannotCreate: 'このワークスペースでのロールでは権限が不足しているため、共有スペースを作成できません',
+        cannotJoin: 'このワークスペースでのロールでは権限が不足しているため、共有スペースへの参加や参加申請ができません',
+        cannotManage: 'このワークスペースでのロールでは権限が不足しているため、この共有スペースを管理できません'
+      },
+      join: {
+        title: '共有スペースに参加',
+        joining: '共有スペースに参加しています...',
+        success: '共有スペースに参加しました！',
+        failed: '共有スペースへの参加に失敗しました',
+        noCode: '招待コードが見つかりません',
+        goToOrganizations: '共有スペース一覧へ移動',
+        confirmTitle: '共有スペースへの参加を確認',
+        confirm: '参加',
+        preview: 'プレビューして参加',
+        memberCount: 'メンバー{count}人',
+        shareCount: '共有ナレッジベース{count}件',
+        agentShareCount: 'エージェント{count}件',
+        alreadyMember: 'すでにこの共有スペースのメンバーです',
+        invalidCode: '招待コードが無効です',
+        byInviteCode: '招待コードを入力',
+        searchSpaces: '共有スペースを検索',
+        searchSpacesDesc: '公開されている共有スペースを閲覧・検索できます。招待コードなしで参加できます',
+        searchSpacesPlaceholder: '共有スペース名、説明、IDで検索',
+        spaceId: '共有スペースID',
+        noSearchResult: '該当する共有スペースがありません',
+        noSearchableSpaces: '公開されている共有スペースはまだありません。検索してみてください',
+        memberLimitReached: '満員',
+        backToSearch: '検索に戻る'
+      },
+      invite: {
+        loading: '読み込み中...',
+        previewTitle: '共有スペースに参加',
+        inputDesc: '招待コードを入力（または招待リンクから貼り付け）すると、共有スペースを確認して参加できます',
+        previewAction: '表示',
+        primaryJoin: '参加',
+        invalidCode: '招待コードが無効か、有効期限が切れています',
+        previewFailed: 'プレビューに失敗しました。再試行してください',
+        knowledgeBases: 'ナレッジベース',
+        agents: 'エージェント',
+        alreadyMember: 'すでにこの共有スペースのメンバーです',
+        submitRequest: '参加を申請',
+        requireApprovalTip: 'この共有スペースへの参加には管理者の承認が必要です',
+        approvalLabel: '参加方法',
+        needApproval: '承認が必要',
+        noApproval: '承認不要',
+        defaultRoleAfterJoin: '参加後のデフォルトロール: {role}',
+        requestRole: '申請するロール',
+        selectRole: 'ロールを選択',
+        messagePlaceholder: '任意: メッセージ（自己紹介や参加理由など）',
+        applicationNote: '申請メモ（任意）',
+        joinSuccess: '共有スペースに参加しました！',
+        joinFailed: '参加に失敗しました。再試行してください',
+        requestSubmitted: '申請を送信しました。管理者の承認をお待ちください',
+        requestFailed: '申請の送信に失敗しました。再試行してください',
+        viewOrganization: '共有スペースを表示'
+      },
+      leave: '共有スペースから退出',
+      leaveConfirmTitle: '共有スペースから退出',
+      leaveConfirmMessage: '共有スペース「{name}」から退出してもよろしいですか？この共有スペースで共有されているナレッジベースにアクセスできなくなります。',
+      leaveSuccess: '共有スペースから退出しました',
+      leaveFailed: '共有スペースからの退出に失敗しました',
+      deleteConfirmTitle: '共有スペースを削除',
+      deleteConfirmMessage: '共有スペース「{name}」を削除してもよろしいですか？すべてのメンバーがこの共有スペースから除外されます。この操作は取り消せません。',
+      deleteSuccess: '共有スペースを削除しました',
+      deleteFailed: '共有スペースの削除に失敗しました',
+      createSuccess: '共有スペースを作成しました',
+      createFailed: '共有スペースの作成に失敗しました',
+      joinSuccess: '共有スペースに参加しました',
+      joinFailed: '共有スペースへの参加に失敗しました',
+      manageMembers: 'メンバーを管理',
+      noMembers: 'メンバーがいません',
+      members: {
+        listTitle: '共有スペースのメンバー',
+        searchPlaceholder: 'メンバーを検索…',
+        loading: 'メンバーを読み込み中…',
+        emptySearch: '「{q}」に一致するメンバーがありません',
+        columns: {
+          member: 'メンバー',
+          role: 'ロール',
+          joinedAt: '参加日',
+          operations: '操作'
+        }
+      },
+      joinRequests: {
+        listTitle: '保留中の申請',
+        searchPlaceholder: '申請者を検索…',
+        loading: '申請を読み込み中…',
+        emptySearch: '「{q}」に一致する申請がありません',
+        typeJoin: '参加',
+        typeUpgrade: '昇格',
+        rejectConfirm: 'この申請を却下しますか？',
+        approveTitle: '申請を承認',
+        approveDesc: '承認後に「{name}」へ割り当てるロールを選択してください',
+        columns: {
+          applicant: '申請者',
+          type: '種別',
+          requestedRole: '申請ロール',
+          message: 'メモ',
+          appliedAt: '申請日'
+        }
+      },
+      sharedResources: {
+        kbListTitle: '共有ナレッジベース',
+        agentListTitle: '共有エージェント',
+        loading: '読み込み中…',
+        columns: {
+          name: '名前',
+          sharedBy: '共有者',
+          sharedAt: '共有日',
+          permission: '権限'
+        }
+      },
+      roleUpdated: 'ロールを更新しました',
+      roleUpdateFailed: 'ロールの更新に失敗しました',
+      memberRemoved: 'メンバーを削除しました',
+      memberRemoveFailed: 'メンバーの削除に失敗しました',
+      empty: 'まだ共有スペースに参加していません',
+      emptyDesc: '共有スペースを作成するか、招待コードで既存の共有スペースに参加してください',
+      createdByMe: '自分が作成',
+      joinedByMe: '自分が参加',
+      emptyCreated: 'まだ共有スペースを作成していません',
+      emptyCreatedDesc: '「共有スペースを作成」をクリックして新規作成してください',
+      emptyJoined: 'まだ共有スペースに参加していません',
+      emptyJoinedDesc: '招待コードで既存の共有スペースに参加してください',
+      role: {
+        admin: '管理者',
+        editor: '編集者',
+        viewer: '閲覧者'
+      },
+      detail: {
+        removeMemberConfirm: 'メンバー「{name}」を共有スペースから除外してもよろしいですか？',
+        removeMember: 'メンバーを削除'
+      },
+      settings: {
+        editTitle: '共有スペース設定',
+        membersDesc: '共有スペースのメンバーとロールを確認・管理します。各メンバーは1つのワークスペースを表し、同じワークスペースのすべてのユーザがこの共有スペースへのアクセスを共有します。',
+        permissionsIconHint: 'ロールの権限を表示',
+        sharedDesc: 'この共有スペースに共有されているすべてのナレッジベースを表示します',
+        noSharedKB: '共有されているナレッジベースはまだありません',
+        noSharedKBTip: 'ナレッジベースの所有者は、ナレッジベース設定から自分のナレッジベースをこの共有スペースに共有できます',
+        sharedAgents: '共有エージェント',
+        noSharedAgents: '共有されているエージェントはまだありません',
+        sharedAgentsDesc: 'この共有スペースに共有されているエージェントです。メンバーはチャットで利用できます',
+        sharedAgentsKbHint: 'エージェントに紐づくナレッジベースは、メンバーが会話でそのエージェントを利用する場合（{\'@\'}経由）にのみ読み取り専用で利用できます。ナレッジベース一覧には表示されません。メンバーが一覧でナレッジベースを閲覧・編集できるようにするには、そのナレッジベースを個別にこの共有スペースへ共有してください。',
+        sharedAgentsKbHintShort: 'エージェントに紐づくナレッジはチャット内で読み取り専用です。メンバーが一覧で閲覧・編集できるようにするには、ナレッジベースをこの共有スペースに共有してください。',
+        noSharedAgentsTip: '管理者はエージェント設定からエージェントをこの共有スペースへ共有できます',
+        sharePermissionLabel: '共有スペースの権限',
+        myPermissionLabel: '実効権限',
+        permissionCalcFormula: '共有スペースの権限は共有時に設定します。実効権限は、その権限と共有スペースでのロールのうち低い方になります',
+        permissionCalcTip: '実効権限は共有スペースの権限とここでのロールのうち低い方です。閲覧者はこのナレッジベースに対して最大でも読み取り専用となります。',
+        inviteMembers: 'メンバーを招待',
+        inviteMembersDesc: '招待コードまたはリンクで他のユーザを共有スペースに招待します',
+        inviteLink: '招待リンク',
+        inviteLinkValidity: '招待リンクの有効期間',
+        inviteLinkValidityDesc: '新しく生成する招待リンクの有効期間',
+        validity1Day: '1日',
+        validity7Days: '7日',
+        validity30Days: '30日',
+        validityNever: '無期限',
+        remainingValidity: '残り{n}日',
+        remainingValidityNever: '無期限',
+        remainingValidityExpired: '期限切れ',
+        removeShareFromOrg: '共有スペースへの共有を解除',
+        removeShareConfirm: 'この共有スペースから「{name}」の共有を解除しますか？メンバーはこのナレッジベースにアクセスできなくなります。',
+        removeAgentShareConfirm: 'この共有スペースから「{name}」の共有を解除しますか？メンバーはこのエージェントにアクセスできなくなります。',
+        removeShareSuccess: '共有スペースへの共有を解除しました',
+        removeShareFailed: '削除に失敗しました。再試行してください',
+        requireApproval: '承認を必須にする',
+        requireApprovalDesc: '有効にすると、新しいメンバーの参加に管理者の承認が必要になります',
+        searchable: '検索を許可',
+        searchableDesc: '有効にすると、この共有スペースが「共有スペースに参加」の検索一覧に表示され、他のユーザが招待コードなしで検索して参加申請できるようになります',
+        memberLimit: 'メンバー上限',
+        memberLimitDesc: '上限に達すると新しいメンバーを追加できません。0を指定すると無制限になります',
+        memberLimitPlaceholder: '0 = 無制限',
+        memberLimitHint: '現在のメンバー数: {count}',
+        joinRequests: '参加申請',
+        joinRequestsDesc: '共有スペースへの保留中の参加申請を確認します',
+        noPendingRequests: '保留中の申請はありません',
+        pendingJoinRequestsBadge: '確認が必要な参加申請があります',
+        pendingReview: '保留中',
+        assignRole: 'ロールを割り当て',
+        approve: '承認',
+        reject: '却下',
+        approveSuccess: '申請を承認しました',
+        rejectSuccess: '申請を却下しました',
+        reviewFailed: '操作に失敗しました。再試行してください'
+      },
+      navGroups: {
+        basic: '基本',
+        management: 'メンバーとコラボレーション',
+        resources: '共有リソース'
+      },
+      editor: {
+        navBasic: '基本情報',
+        navPermissions: '権限',
+        navJoin: '共有スペースに参加',
+        basicTitle: '基本情報',
+        basicDesc: '識別しやすいように共有スペースの名前と説明を設定します',
+        nameTip: 'チーム名やプロジェクト名にすると、メンバーが識別しやすくなります',
+        descriptionTip: 'メンバーが理解しやすいよう、共有スペースの目的や目標を記載してください',
+        permissionsTitle: 'メンバーの権限',
+        permissionsDesc: '共有スペース内のナレッジベースとエージェントに対する、各ロールの権限範囲を確認します',
+        permissionFeature: '権限項目',
+        fullAccess: 'フルアクセス',
+        editAccess: '編集可能',
+        viewAccess: '閲覧のみ',
+        adminPerm1: '共有スペースの設定、メンバー、ナレッジベースとエージェントの共有を管理',
+        adminPerm2: 'ナレッジベースとエージェントの共有と管理',
+        adminPerm3: '共有ナレッジベースの内容を編集',
+        adminPerm4: 'ナレッジベースの閲覧と検索',
+        useSharedAgentsPerm: '共有エージェントの利用',
+        shareKBPerm: 'ナレッジベースを共有スペースへ共有',
+        editorPerm1: '共有ナレッジベースの内容を編集',
+        editorPerm2: 'ナレッジベースの閲覧と検索',
+        editorPerm3: '共有スペースの設定とメンバーの管理',
+        viewerPerm1: 'ナレッジベースの閲覧と検索',
+        viewerPerm2: 'ナレッジベースの内容を編集',
+        viewerPerm3: '共有スペースの設定を管理',
+        ownerNote: '共有スペースの作成者として、自動的にすべての権限を持つ管理者になります。',
+        joinTitle: '共有スペースに参加',
+        joinDesc: '招待コードで既存の共有スペースに参加し、共有されているナレッジベースとエージェントを利用します',
+        joinIllustration: '共有スペースの管理者から提供された招待コードを入力して参加してください',
+        inviteCodeTip: '招待コードは共有スペースの管理者が生成します。管理者にお問い合わせください',
+        howToGetCode: '招待コードの入手方法',
+        step1: '参加したい共有スペースの管理者に連絡します',
+        step2: '共有スペースの招待コードを共有してもらいます',
+        step3: '上の入力欄に招待コードを貼り付けます'
+      },
+      upgrade: {
+        requestUpgrade: '昇格を申請',
+        pending: '承認待ち',
+        dialogTitle: '昇格を申請',
+        dialogDesc: '共有スペースの管理者が承認するとロールが更新されます。',
+        currentRole: '現在のロール',
+        selectRole: '申請するロール',
+        reason: '理由（任意）',
+        reasonPlaceholder: 'より高い権限が必要な理由を簡潔に入力してください...',
+        submitBtn: '申請を送信',
+        submitSuccess: '昇格申請を送信しました。管理者の承認をお待ちください',
+        submitFailed: '申請の送信に失敗しました'
+      },
+      addMember: {
+        button: 'メンバーを追加',
+        dialogTitle: 'メンバーを追加',
+        tipTenant: 'メンバーの単位はワークスペースです。ワークスペースが参加すると、そのすべてのユーザがこの共有スペースへのアクセス権を持ちます。以下の検索結果はワークスペース単位で重複を除いています。',
+        searchTenant: 'ワークスペース ID',
+        searchTenantPlaceholder: '完全なワークスペース ID を入力',
+        searchTenantHint: '完全なワークスペース ID で検索するか、招待リンクを共有してください。',
+        selectRole: 'ロールを割り当て',
+        confirmBtn: '追加',
+        success: 'メンバーを追加しました',
+        failed: 'メンバーの追加に失敗しました'
+      },
+      share: {
+        title: '共有スペースへ共有',
+        selectOrg: '共有スペースを選択',
+        selectOrgPlaceholder: '共有先の共有スペースを選択',
+        permission: '権限',
+        permissionTip: '編集可能な権限ではメンバーがナレッジベースの内容を変更できます。読み取り専用の権限では検索と質問応答のみ行えます',
+        shareSuccess: 'ナレッジベースを共有しました',
+        shareFailed: '共有に失敗しました',
+        unshareSuccess: '共有を解除しました',
+        unshareFailed: '共有の解除に失敗しました',
+        sharedTo: '共有先',
+        noShares: 'まだどの共有スペースにも共有されていません',
+        searchPlaceholder: '共有スペースを検索…',
+        loading: '読み込み中…',
+        emptySearch: '「{q}」に一致する共有スペースがありません',
+        addShareDialogTitle: '共有スペースへ共有',
+        unshareAction: '共有を解除',
+        columns: {
+          space: '共有スペース',
+          permission: '権限',
+          sharedAt: '共有日',
+          operations: '操作'
+        },
+        sharedKnowledgeBase: '共有ナレッジベース',
+        agentShareDesc: 'このエージェントを共有スペースへ共有し、メンバーが利用できるようにします',
+        sharedFrom: '共有元',
+        permissionReadonly: '読み取り専用',
+        permissionEditable: '編集可能'
+      }
+    },
+    preview: {
+      tooLarge: 'このスプレッドシートは安全にプレビューできないサイズです',
+      tooLargeHint: 'ダウンロードボタンを使い、ローカルの表計算アプリで開いてください',
+      tab: 'プレビュー',
+      loading: 'ドキュメントのプレビューを読み込み中...',
+      loadFailed: 'ドキュメントのプレビューの読み込みに失敗しました',
+      retry: '再試行',
+      unsupported: 'このファイル形式はオンラインプレビューに対応していません',
+      unsupportedHint: 'ダウンロードして、ローカルのアプリケーションで開いてください',
+      zoomIn: '拡大',
+      zoomOut: '縮小',
+      fullscreen: '全画面表示',
+      exitFullscreen: '全画面表示を終了',
+      htmlRendered: 'レンダリング表示',
+      htmlSource: 'ソースを表示',
+      audioLoading: '音声を読み込み中…',
+      audioNotSupported: 'お使いのブラウザは音声再生に対応していません',
+      videoNotSupported: 'お使いのブラウザは動画再生に対応していません'
+    },
+    assistant: {
+      title: 'WeKnora アシスタント',
+      newConversation: '新しい会話',
+      history: '会話履歴',
+      untitledConversation: '無題の会話',
+      historyEmpty: '会話履歴はありません',
+      historyFailed: '会話履歴を読み込めませんでした',
+      loadMore: 'さらに読み込む',
+      resize: 'アシスタントの幅を調整',
+      layout: {
+        dock: '右側に固定',
+        float: 'フローティング表示にする',
+      },
+      welcomeTitle: '何をお手伝いしましょうか？',
+      agentWelcomeDesc: 'このエージェントの設定を確認したり、モデルを変更したり、検索可能なナレッジベースを確認できます。',
+      welcomeDesc: 'WeKnora の使い方にお答えするほか、ワークスペースのドキュメント解析、ナレッジベースの履歴、Wiki の問題を確認・対応し、エージェントの作成や設定もお手伝いできます。変更の前に確認するかどうかは、入力欄の下の権限レベルで決まります。',
+      startFailed: 'アシスタントを起動できませんでした。もう一度お試しください。',
+      askAboutDocument: '{name}に聞く',
+      access: {
+        title: '権限レベル',
+        capped: 'ワークスペース管理者が許可していません',
+        levels: {
+        read_only: {
+          label: '読み取り専用',
+          desc: '確認だけで、何も変更しません'
+        },
+        confirm: {
+          label: '変更前に確認',
+          desc: '変更や削除のたびに事前に確認します'
+        },
+        auto_write: {
+          label: '自動実行',
+          desc: '元に戻せる変更はそのまま実行し、削除は確認します'
+        }
+      }
+    },
+    context: {
+      currentPage: '現在のページ',
+      detach: '現在のページを含めない',
+      attachedTip: '現在のページを含めています：{path}',
+      detachedTip: 'クリックして現在のページを含める：{path}'
+    },
+    starters: {
+      agentConfig: 'このエージェントの設定を確認して',
+      agentModel: 'モデルを変更して',
+      agentKnowledge: 'どのナレッジベースを検索できる？',
+      wikiIssues: 'このページの未対応の問題は？',
+      wikiSummary: 'この Wiki ページを要約して',
+      documentStatus: 'このドキュメントの解析状況は？',
+      documentSummary: 'このドキュメントを要約して',
+      failedDocuments: 'このナレッジベースで解析に失敗したドキュメントは？',
+      recentActivity: 'このナレッジベースの最近の変更は？',
+      formats: 'WeKnora はどのドキュメント形式に対応していますか？',
+      createWiki: 'Wiki ナレッジベースの作り方は？',
+      agents: 'どんなエージェントがあり、それぞれどのモデルを使っていますか？'
     }
   },
-  preview: {
-    tab: 'プレビュー',
-    loading: 'ドキュメントのプレビューを読み込み中...',
-    loadFailed: 'ドキュメントのプレビューの読み込みに失敗しました',
-    retry: '再試行',
-    unsupported: 'このファイル形式はオンラインプレビューに対応していません',
-    unsupportedHint: 'ダウンロードして、ローカルのアプリケーションで開いてください',
-    tooLarge: 'このスプレッドシートは安全にプレビューできないサイズです',
-    tooLargeHint: 'ダウンロードボタンを使い、ローカルの表計算アプリで開いてください',
-    zoomIn: '拡大',
-    zoomOut: '縮小',
-    fullscreen: '全画面表示',
-    exitFullscreen: '全画面表示を終了',
-    htmlRendered: 'レンダリング表示',
-    htmlSource: 'ソースを表示',
-    audioLoading: '音声を読み込み中…',
-    audioNotSupported: 'お使いのブラウザは音声再生に対応していません',
-    videoNotSupported: 'お使いのブラウザは動画再生に対応していません'
+  assistantSettings: {
+    title: 'アシスタント',
+    description: '{name}の入口、開き方、権限レベルを設定します。',
+    introTitle: 'アシスタントはあなたに許可された操作しかできません',
+    introDescription: 'アシスタントはあなたとして操作するため、見られる範囲と変更できる範囲はワークスペースでのロールと同じです。権限レベルはそれをさらに絞るだけで、広げることはありません。',
+    personalGroup: '個人設定',
+    accessLabel: '権限レベル',
+    accessDescription: 'アシスタントが変更する前に確認するかどうか。アシスタントの入力欄の下でもいつでも切り替えられます。',
+    accessCeilingHint: 'ワークスペース管理者が上限を「{level}」に設定しています。',
+    entryLabel: '入口',
+    entryDescription: 'どれを選んでも、コマンドパレット（{shortcut}）からアシスタントを開けます。',
+    entries: {
+      sidebar: 'サイドバー',
+      launcher: '画面の右端',
+      palette: 'コマンドパレットのみ'
+    },
+    layoutLabel: '開き方',
+    layoutDescription: '右側に固定するとページが狭まり、フローティングではページの上に重なります。ウィンドウが狭いときは常にフローティングです。',
+    layouts: {
+      docked: '右側に固定',
+      floating: 'フローティング'
+    },
+    workspaceGroup: 'ワークスペース',
+    adminOnly: '管理者のみ変更できます',
+    nameLabel: 'アシスタント名',
+    nameDescription: 'ワークスペースの全メンバーに表示される名前です。空欄なら既定の名前を使います。',
+    ceilingLabel: '最高権限レベル',
+    ceilingDescription: 'メンバーが選べる最高レベルです。「読み取り専用」にすると、このワークスペースでアシスタントは何も変更しません。',
+    saved: '保存しました',
+    saveFailed: '保存できませんでした：{message}'
   },
   commandPalette: {
     placeholder: 'ナレッジベース、ファイル、会話を検索…',
@@ -6052,7 +6225,8 @@ export default {
       agents: 'エージェントを開く',
       organizations: '共有スペースを開く',
       settings: '設定を開く',
-      productTour: 'プロダクトツアー'
+      productTour: 'プロダクトツアー',
+      assistant: '{name}を開く'
     },
     empty: {
       noResults: '一致する項目がありません',
@@ -6080,7 +6254,8 @@ export default {
     getDocumentInfo: 'ドキュメント情報の取得',
     queryKnowledgeGraph: 'ナレッジグラフの照会',
     think: '深い思考',
-    todoWrite: '計画の作成'
+    todoWrite: '計画の作成',
+    askUser: 'ユーザーに質問'
   },
   vectorStoreBadge: {
     systemDefault: 'システムデフォルト',
@@ -6178,10 +6353,37 @@ export default {
     }
   },
   agentStream: {
+    askUser: {
+      title: 'あなたへの質問',
+      selectPlaceholder: '選択してください',
+      textPlaceholder: '回答を入力',
+      otherPlaceholder: 'その他（任意）',
+      decline: '回答しない',
+      submit: '送信',
+      declinedTag: '回答を辞退しました',
+      submitted: '送信済み',
+      answeredTag: '回答済み',
+      timedOutTag: '時間内に回答なし',
+      canceledTag: 'キャンセル済み',
+      unansweredTag: '未回答',
+      submitFailed: '送信に失敗しました',
+    },
+    promptDock: {
+      approvalTitle: '承認が必要です',
+      oauthTitle: '認可が必要です',
+      waiting: 'あなたの対応待ち',
+      handle: '対応する',
+      pager: '{current} / {total}',
+      previous: '前へ',
+      next: '次へ',
+      collapse: '折りたたむ',
+      expand: '展開'
+    },
     toolApproval: {
       waiting: '承認待ち · {target}',
       waitingStatus: '承認待ち',
       targetWithTool: '{service} › {tool}',
+      dockQuestion: '{target} の実行を許可しますか？',
       titleWithTarget: '承認 · {service} › {tool}',
       argsLabel: '引数',
       argsModified: '変更あり',
@@ -6190,15 +6392,59 @@ export default {
       reject: '拒否',
       approvedTag: '承認済み',
       rejectedTag: '拒否済み',
+      parked: 'バックグラウンドで待機中。後で対応できます',
+      parkedUntil: 'バックグラウンドで待機中。{time} までに対応してください',
+      abandonedTag: '破棄済み',
       invalidJson: '引数は有効なJSONである必要があります',
       submitted: '送信しました',
       submitFailed: '送信に失敗しました',
-      userRejected: 'ユーザが拒否しました'
+      userRejected: 'ユーザが拒否しました',
+      detail: {
+        type: '種類',
+        embeddingModel: '埋め込みモデル',
+        summaryModel: '要約モデル',
+        captionModel: '画像説明',
+        speechModel: '音声認識',
+        storage: 'ストレージ',
+        indexes: 'インデックス',
+        name: '名前',
+        title: 'タイトル',
+        status: '状態',
+        summary: '説明',
+        model: 'モデル',
+        mode: 'モード',
+        url: 'リンク',
+        from: '移動元',
+        to: '移動先',
+        folder: 'フォルダ',
+        page: 'ページ',
+        version: 'バージョン',
+        documents: 'ドキュメント',
+        knowledgeBases: 'ナレッジベース',
+        mcpServices: 'MCP サービス',
+        skills: 'スキル',
+        webSearch: 'ウェブ検索',
+        multiTurn: 'マルチターン'
+      },
+      value: {
+        document: 'ドキュメント',
+        faq: 'FAQ',
+        wiki: 'Wiki',
+        on: 'オン',
+        off: 'オフ',
+        vector: 'ベクトル',
+        keyword: 'キーワード',
+        graph: 'グラフ',
+        quickAnswer: 'クイック回答',
+        smartReasoning: 'スマート推論',
+        indexSep: '、'
+      }
     },
     mcpOAuth: {
       waiting: '認可待ち · {target}',
       waitingStatus: '認可待ち',
       targetWithTool: '{service} › {tool}',
+      dockQuestion: '続行するには {target} を認可してください',
       titleWithService: 'OAuth · {service}',
       titleWithTool: 'OAuth · {service} › {tool}',
       desc: '認可すると、サインイン用の新しいウィンドウが開きます。認可が成功すると、ツール呼び出しは自動的に再開されます。',
@@ -6226,6 +6472,7 @@ export default {
       readDocument: 'ドキュメントを読む',
       listDocuments: 'ドキュメント一覧',
       todoWrite: '計画管理',
+      askUser: 'ユーザーに質問',
       knowledgeGraphExtract: 'ナレッジグラフ抽出',
       thinking: '思考',
       attachmentParsing: '添付ファイルを解析',
@@ -6242,12 +6489,32 @@ export default {
       shellExec: 'サンドボックスコマンドを実行',
       dataAnalysis: 'データ分析',
       dataSchema: 'データスキーマ',
-      databaseQuery: 'データベース照会'
+      databaseQuery: 'データベース照会',
+      findOperations: '操作を検索',
+      runOperation: '操作を実行',
+      searchWeKnoraDocs: '製品ドキュメントを検索',
+      readWeKnoraDoc: '製品ドキュメントを読む'
     },
     skillFiles: {
       heading: 'スキルファイル',
       script: 'スクリプト',
       instructions: 'スキル説明'
+    },
+    attachmentTarget: {
+      list: 'すべての添付ファイル',
+      file: '添付ファイル',
+      images: '{name} の画像',
+      imagesUnnamed: '添付ファイルの画像',
+      image: '{name} の画像 {n}',
+      imageUnnamed: '添付ファイルの画像 {n}'
+    },
+    imageView: {
+      summary: '「{file}」の画像 {numbers} を確認しました（全 {total} 枚）',
+      single: '画像「{file}」を確認しました',
+      descriptionsHeading: 'ビジョンモデルによる画像の説明',
+      imageLabel: '画像 #{n}',
+      noDescription: '説明を生成できませんでした',
+      remaining: '未確認の画像があと {count} 枚あります'
     },
     sandboxFiles: {
       found: '{count}件のファイルが見つかりました',
@@ -6267,6 +6534,35 @@ export default {
       truncated: '出力は省略されています',
       killed: 'タイムアウトにより終了しました',
       binarySuppressed: 'バイナリ出力は省略されました。ダウンロードするには、成果物ディレクトリにファイルを書き込んでください。'
+    },
+    operations: {
+      found: '実行できる操作 {count} 件',
+      unavailableCount: '現在使えない操作 {count} 件',
+      empty: '一致する操作はありません',
+      unavailableHeading: '現在使えません',
+      parameters: 'パラメータ',
+      required: '必須',
+      enum: '選択肢',
+      range: '範囲 {min}–{max}',
+      risk: {
+        read: '読み取り',
+        write: '書き込み',
+        destructive: '取り消し不可'
+      },
+      truncated: '結果は省略されています',
+      emptyResult: 'データはありません',
+      failed: '操作に失敗しました',
+      meta: '補足'
+    },
+    weknoraDocs: {
+      pages: 'ドキュメント {count} 件',
+      hits: '一致した節 {count} 件',
+      empty: '一致するドキュメントはありません',
+      outline: '目次',
+      content: '本文',
+      truncated: '本文は続きます',
+      failed: '読み取れませんでした',
+      openDoc: 'ドキュメントサイトで開く'
     },
     citation: {
       notFound: 'コンテンツが見つかりません',
@@ -6503,6 +6799,8 @@ export default {
       thinkingDesc: '動的かつ内省的に問題を解決する思考ツール',
       todoWrite: '計画',
       todoWriteDesc: '構造化された調査計画を作成します',
+      askUser: 'ユーザーに質問',
+      askUserDesc: '必要な情報が不足しているときにユーザーへ質問し、回答を待ってから続行します',
       searchKnowledge: 'ナレッジベースを検索',
       searchKnowledgeDesc: 'セマンティック・キーワード・ハイブリッド検索でナレッジベースのチャンクを検索します',
       readDocument: 'ドキュメントを読む',
@@ -6562,6 +6860,13 @@ export default {
       kbMetricRag: 'RAGナレッジベース',
       kbMetricWiki: 'Wikiナレッジベース',
       statusInactive: '選択済みの{count}個のツールは、現在の設定では有効になりません',
+      searchConversations: '過去の会話を検索',
+      searchConversationsDesc: 'ユーザー自身の過去の会話から以前話した内容を探します',
+      groupStored: '保存済み（ここでは提供されていません）',
+      switchManagedDesc: 'このリストではなくエージェントの他の設定で制御されるため、ここでチェックしても有効になりません。チェックを外すと削除されます。',
+      unrecognizedDesc: 'このバージョンにはないツールのため、エージェントは呼び出せません。チェックを外すと削除されます。',
+      keptUnknownWarning: '保存しました。次の保存済みツールはこのバージョンにはないため残しましたが、エージェントは呼び出せません：{names}',
+      droppedWarning: '保存しました。次のツールはエージェントの他の設定で制御されるため、ツールリストから削除しました：{names}',
       effectiveLabel: '有効なツール',
       effectiveDesc: '現在の設定から算出された、エージェントが実際に呼び出せるツールです',
       effectiveEmpty: '利用可能なツールがありません。エージェントは通常のモデル対話にフォールバックします'
@@ -6857,6 +7162,12 @@ export default {
       paths: 'ディレクトリ', pathsPlaceholder: '1行に1つのディレクトリを入力します。空欄の場合はプロジェクト全体を同期します',
       addProject: 'プロジェクトを追加', projectRequired: 'GitLabプロジェクトを1つ以上追加してください',
     },
+    seafile: {
+      baseUrl: 'Seafile URL', apiToken: 'APIトークン',
+      apiTokenHint: 'Seafileの「設定 → Web APIトークン」で生成します。アカウントに選択したライブラリの読み取り権限があれば十分で、トークンはファイルのダウンロード要求には送信されません。',
+      singleLibraryOnly: '1つのデータソースは1つのライブラリのみ同期できます。別のライブラリを選ぶ前に現在の選択を解除してください。',
+      selectionRequired: 'ライブラリ、フォルダまたはファイルを1つ以上選択してください',
+    },
     resourceHint: '同期するスペースまたはフォルダを選択してください',
     untitled: '無題',
     resourceLoadFailed: 'リソースの読み込みに失敗しました',
@@ -6870,6 +7181,10 @@ export default {
     guideStep1_notion: '同期したいページまたはデータベースをNotionで開きます',
     guideStep2_notion: '右上の「···」メニューをクリックし、「Connect to」または「Add connections」を選択します',
     guideStep3_notion: '作成したIntegrationアプリを検索して選択し、戻って「再試行」をクリックします',
+    noResourcesDesc_seafile: 'このトークンでアクセスできるライブラリがないか、すべて暗号化ライブラリです（暗号化ライブラリは同期できません）',
+    guideStep1_seafile: 'Seafileにサインインし、アカウントが暗号化されていないライブラリを1つ以上読めることを確認します',
+    guideStep2_seafile: '「設定 → Web APIトークン」でトークンを生成または再生成します',
+    guideStep3_seafile: 'ここに戻って新しいトークンを入力し、「再試行」をクリックします',
     permissionDocLink: 'FeishuのWiki権限ドキュメントを見る',
     syncScheduleLabel: '同期スケジュール',
     conflictLabel: '競合時の処理',
@@ -6928,7 +7243,8 @@ export default {
       dingtalk: 'DingTalkドキュメント',
       rss: 'RSS / Atomフィード',
       ima: 'Tencent IMA',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      seafile: 'Seafile'
     },
     connectorDesc: {
       feishu: 'Feishu Wikiからドキュメント、スプレッドシート、ファイルを同期します',
@@ -6941,7 +7257,8 @@ export default {
       dingtalk: 'DingTalkナレッジベースのオンラインドキュメントを同期',
       rss: 'RSS / Atomフィードから記事を同期します',
       ima: 'Tencent IMAのナレッジベースからドキュメント、ノート、ファイルを同期します（AIセッションと動画の解析は非対応）',
-      gitlab: 'GitLabプロジェクトからファイルを同期します'
+      gitlab: 'GitLabプロジェクトからファイルを同期します',
+      seafile: 'Seafileライブラリのフォルダとファイルを同期します'
     },
     drive: {
       folderTokenLabel: 'Driveフォルダトークン',
@@ -6981,6 +7298,9 @@ export default {
       authHeaders: 'カスタムヘッダー（任意）',
       authHeadersHint: '非公開フィード用です。1行に1つ「名前: 値」の形式で入力します（例: Authorization: Bearer xxxx）'
     },
+    confluence: {
+      cloudFolderLimitation: 'Confluence Cloud では、スペース直下のフォルダーなどコンテナ配下のページをここに一覧できません。スペース全体を選択すれば同期されます。'
+    },
     comingSoon: '近日対応予定',
     docHint: '認証情報の取得先:',
     openDoc: 'ドキュメントを開く',
@@ -7017,6 +7337,15 @@ export default {
     prereqStep3Brief_lark_drive: 'アプリの権限を設定',
     prereqStep3Desc_lark_drive: 'drive:drive:readonly、drive:export:readonly、docx:document:readonlyの権限を有効にします',
     prereqOpenConsole_yuque: 'Yuqueのトークン設定を開く',
+    yuqueFolderModeLabel: 'フォルダ構成',
+    yuqueFolderModeToc: 'Yuqueの目次どおりに階層化',
+    yuqueFolderModeNone: 'ルートに平置き',
+    yuqueFolderModeHint: 'Yuqueの目次階層に従って文書を配置します。なお、その後ナレッジベース上で手動で移動したフォルダは、次回その文書を同期したときにYuqueの構成へ上書きされます。',
+    yuqueTOCOnly: 'Yuqueの目次に表示される文書だけ同期',
+    yuqueTOCOnlyHint: '「Yuqueの目次どおりに階層化」を選ぶと有効になります。すでにナレッジベースにある文書はそのまま残り、Yuqueの目次にない文書は新たに追加されなくなるだけで、削除はされません。',
+    dingtalkIngestLabel: 'DingTalk の取り込み範囲',
+    dingtalkIncludeUploadedFiles: 'アップロードファイル（docx / pptx / xlsx / pdf）を取り込む',
+    dingtalkIncludeUploadedFilesHint: '既定ではオフです。オンにすると、選択範囲にアップロードされた Word / PowerPoint / Excel / PDF ファイルをダウンロードして解析し、ナレッジベースに取り込みます（1 ファイルあたり 64 MiB まで）。本文はストレージと埋め込みのコストに算入されます。オフの場合は単にスキップされ、同期ログにスイッチが無効である旨が記録されます。既にナレッジベースにあるコピーは削除されません。',
     prereqBarText_dingtalk: '初めての利用ですか？DingTalkアプリの設定ガイドを確認',
     prereqStep1Brief_dingtalk: '企業内部アプリを作成',
     prereqStep1Desc_dingtalk: 'DingTalk開発者プラットフォームで企業内部アプリを作成し、Client IDとClient Secretを取得します。',
@@ -7057,7 +7386,8 @@ export default {
     resourceType: {
       wikiSpace: 'Wikiスペース',
       docCategory: 'ドキュメントタグ',
-      book: 'Yuqueナレッジベース'
+      book: 'Yuqueナレッジベース',
+      library: 'Seafileライブラリ'
     },
     neverSynced: '未同期',
     justNow: 'たった今',
@@ -7069,7 +7399,15 @@ export default {
       dingtalk_resource_failed: 'DingTalkリソースを利用できません。アクセス権限と選択したリソースを確認して再試行してください。',
       deletion_lookup_failed: '削除前の項目の照会に失敗しました。サーバログを確認してください',
       deletion_failed: '削除に失敗しました。サーバログを確認してください',
-      ingest_failed: '取り込みに失敗しました。サーバログを確認してください'
+      ingest_failed: '取り込みに失敗しました。サーバログを確認してください',
+      seafile_permission_denied: 'Seafileファイルへのアクセスが拒否されました。トークン所有者のライブラリ権限を確認してください。',
+      seafile_not_found: 'Seafileファイルが存在しないか移動されました。次回の同期で再試行します。',
+      seafile_file_too_large: 'Seafileファイルがサイズ上限を超えています。MAX_FILE_SIZE_MBを引き上げるかファイルを小さくしてください。',
+      seafile_empty_file: 'Seafileファイルが空のためスキップしました。',
+      seafile_source_changed: '取得中にSeafileファイルが変更されました。次回の同期で再試行します。',
+      seafile_invalid_response: 'Seafileから解析できない応答が返されました。サーバのバージョンとリバースプロキシを確認してください。',
+      seafile_ssrf_blocked: 'SeafileのダウンロードURLがSSRFポリシーでブロックされました。fileserverのホストをSSRF_WHITELISTに追加してください。',
+      seafile_fetch_failed: 'Seafileからファイルを取得できませんでした。次回の同期で再試行します。'
     }
   },
   integrations: {

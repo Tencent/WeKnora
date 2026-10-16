@@ -47,7 +47,8 @@ export function continueListOnEnter({ value, start, end }: EditorState): EditorP
   if (!match) return null
 
   const [, indent, marker, checkbox, content] = match
-  if (!content.trim()) {
+  const remainingContent = value.slice(start, lineEndAt(value, start))
+  if (!content.trim() && !remainingContent.trim()) {
     // Empty item: drop the marker and leave the caret on a clean line.
     const nextValue = value.slice(0, lineStart) + value.slice(start)
     return { value: nextValue, start: lineStart, end: lineStart }
@@ -70,12 +71,16 @@ function mapSelectedLines(
   transform: (line: string) => string,
 ): EditorState {
   const blockStart = lineStartAt(value, start)
-  const blockEnd = lineEndAt(value, end)
+  // Textarea selections exclude `end`: a selection ending just after a
+  // newline does not include the following line. Keep that newline selected
+  // after rewriting so another Tab still operates on the same block.
+  const endsAtLineStart = end > start && value[end - 1] === '\n'
+  const blockEnd = lineEndAt(value, endsAtLineStart ? end - 1 : end)
   const rewritten = value.slice(blockStart, blockEnd).split('\n').map(transform).join('\n')
   return {
     value: value.slice(0, blockStart) + rewritten + value.slice(blockEnd),
     start: blockStart,
-    end: blockStart + rewritten.length,
+    end: blockStart + rewritten.length + (endsAtLineStart ? 1 : 0),
   }
 }
 
@@ -94,7 +99,12 @@ export function indentOnTab(state: EditorState, outdent: boolean): EditorPatch {
   if (!multiLine && !inList) return null
 
   if (outdent) {
-    return mapSelectedLines(state, (line) => line.replace(/^(?: {1,2}|\t)/, ''))
+    const outdented = mapSelectedLines(state, (line) => line.replace(/^(?: {1,2}|\t)/, ''))
+    if (start !== end) return outdented
+    // A caret must stay collapsed so the next keystroke does not replace the item.
+    const removedIndent = value.length - outdented.value.length
+    const caret = Math.max(lineStart, start - removedIndent)
+    return { ...outdented, start: caret, end: caret }
   }
   if (multiLine) {
     return mapSelectedLines(state, (line) => (line.trim() ? INDENT + line : line))

@@ -992,6 +992,12 @@ export default {
       paths: '디렉터리', pathsPlaceholder: '한 줄에 하나씩 입력하세요. 비워 두면 전체 프로젝트를 동기화합니다',
       addProject: '프로젝트 추가', projectRequired: 'GitLab 프로젝트를 하나 이상 추가하세요',
     },
+    seafile: {
+      baseUrl: 'Seafile URL', apiToken: 'API 토큰',
+      apiTokenHint: 'Seafile의 \'설정 → Web API 토큰\'에서 생성하세요. 계정에 선택한 라이브러리의 읽기 권한만 있으면 되며 토큰은 파일 다운로드 요청에 전송되지 않습니다.',
+      singleLibraryOnly: '데이터 소스 하나는 라이브러리 하나만 동기화합니다. 다른 라이브러리를 선택하기 전에 현재 선택을 해제하세요.',
+      selectionRequired: '라이브러리, 폴더 또는 파일을 하나 이상 선택하세요',
+    },
     resourceHint: '동기화할 공간/폴더를 선택하세요',
     untitled: '제목 없음',
     resourceLoadFailed: '리소스 목록 로드 실패',
@@ -1005,6 +1011,10 @@ export default {
     guideStep1_notion: 'Notion에서 동기화하려는 페이지나 데이터베이스를 엽니다',
     guideStep2_notion: '오른쪽 상단의 \'···\' 메뉴를 클릭하고 \'Connect to\' 또는 \'Add connections\'를 선택합니다',
     guideStep3_notion: 'Integration 앱을 검색하여 선택한 후, 돌아와서 다시 시도를 클릭하세요',
+    noResourcesDesc_seafile: '이 토큰으로 접근할 수 있는 라이브러리가 없거나 모두 암호화 라이브러리입니다(암호화 라이브러리는 동기화할 수 없음)',
+    guideStep1_seafile: 'Seafile에 로그인하여 계정이 암호화되지 않은 라이브러리를 하나 이상 읽을 수 있는지 확인하세요',
+    guideStep2_seafile: '\'설정 → Web API 토큰\'에서 토큰을 생성하거나 다시 생성하세요',
+    guideStep3_seafile: '여기로 돌아와 새 토큰을 입력하고 다시 시도를 클릭하세요',
     permissionDocLink: '페이슈 위키 권한 설정 문서 보기',
     syncScheduleLabel: '동기화 주기',
     conflictLabel: '충돌 전략',
@@ -1053,6 +1063,15 @@ export default {
     prereqStep3Brief_lark_drive: "앱 권한 구성",
     prereqStep3Desc_lark_drive: "drive:drive:readonly, drive:export:readonly, docx:document:readonly 권한 활성화",
     prereqOpenConsole_yuque: 'Yuque Token 설정으로 이동',
+    yuqueFolderModeLabel: '폴더 구조',
+    yuqueFolderModeToc: 'Yuque 목차대로 계층 구성',
+    yuqueFolderModeNone: '루트에 평면 배치',
+    yuqueFolderModeHint: 'Yuque 목차 계층에 따라 문서를 배치합니다. 참고: 이후 지식베이스에서 직접 옮긴 폴더는 해당 문서가 다음에 동기화될 때 Yuque 구조로 덮어써집니다.',
+    yuqueTOCOnly: 'Yuque 목차에 표시되는 문서만 동기화',
+    yuqueTOCOnlyHint: '"Yuque 목차대로 계층 구성"을 선택해야 동작합니다. 이미 지식베이스에 있는 문서는 그대로 유지되며, Yuque 목차에 없는 문서는 새로 추가되지 않을 뿐 삭제되지 않습니다.',
+    dingtalkIngestLabel: 'DingTalk 수집 범위',
+    dingtalkIncludeUploadedFiles: '업로드 파일(docx / pptx / xlsx / pdf) 수집',
+    dingtalkIncludeUploadedFilesHint: '기본값은 꺼짐입니다. 켜면 선택한 범위에 업로드된 Word / PowerPoint / Excel / PDF 파일을 내려받아 파싱해 지식베이스에 넣습니다(파일당 최대 64 MiB). 본문은 저장소와 임베딩 비용에 포함됩니다. 꺼져 있으면 해당 파일은 건너뛰고 동기화 로그에 스위치가 꺼져 있다고 기록되며, 이미 지식베이스에 있는 사본은 삭제되지 않습니다.',
     prereqBarText_dingtalk: '처음 사용하시나요? 클릭하여 DingTalk 앱 설정 가이드를 확인하세요',
     prereqStep1Brief_dingtalk: '기업 내부 앱 생성',
     prereqStep1Desc_dingtalk: 'DingTalk Open Platform에서 기업 내부 앱을 생성하고 Client ID와 Client Secret을 복사하세요.',
@@ -1091,7 +1110,8 @@ export default {
     resourceType: {
       wikiSpace: '위키 공간',
       docCategory: '문서 태그',
-      book: 'Yuque 지식베이스'
+      book: 'Yuque 지식베이스',
+      library: 'Seafile 라이브러리'
     },
     scheduleHuman: {
       '30min': '30분마다',
@@ -1125,6 +1145,9 @@ export default {
       authHeaders: '사용자 지정 헤더 (선택)',
       authHeadersHint: '비공개 피드 접근용. 한 줄에 하나씩 「이름: 값」 형식으로 입력하세요. 예: Authorization: Bearer xxxx'
     },
+    confluence: {
+      cloudFolderLimitation: 'Confluence Cloud는 아직 스페이스 최상위 폴더 등 컨테이너 아래의 페이지를 여기에 나열할 수 없습니다. 스페이스 전체를 선택하면 함께 동기화됩니다.'
+    },
     connectorDesc: {
       feishu: '페이슈 위키에서 문서, 스프레드시트, 파일 동기화',
       lark: 'Lark 위키에서 문서, 스프레드시트, 파일 동기화',
@@ -1136,7 +1159,8 @@ export default {
       dingtalk: 'DingTalk 지식베이스의 온라인 문서 동기화',
       ima: 'Tencent IMA 지식베이스에서 문서, 노트 및 파일 동기화 (AI 세션과 동영상 분석은 지원되지 않음)',
       rss: 'RSS / Atom 피드에서 글 동기화',
-      gitlab: 'GitLab 프로젝트의 파일 동기화'
+      gitlab: 'GitLab 프로젝트의 파일 동기화',
+      seafile: 'Seafile 라이브러리의 폴더와 파일 동기화'
     },
     connector: {
       feishu: '페이슈 (Feishu)',
@@ -1149,7 +1173,8 @@ export default {
       dingtalk: 'DingTalk 문서',
       ima: 'Tencent IMA',
       rss: 'RSS / Atom 피드',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      seafile: 'Seafile'
     },
     logDetail: {
       startTime: '시작 시간',
@@ -1213,7 +1238,15 @@ export default {
       dingtalk_resource_failed: 'DingTalk 리소스를 사용할 수 없습니다. 접근 권한과 선택한 리소스를 확인한 후 다시 시도하세요.',
       deletion_lookup_failed: '삭제 전 항목 조회에 실패했습니다. 서버 로그를 확인하세요',
       deletion_failed: '삭제에 실패했습니다. 서버 로그를 확인하세요',
-      ingest_failed: '가져오기에 실패했습니다. 서버 로그를 확인하세요'
+      ingest_failed: '가져오기에 실패했습니다. 서버 로그를 확인하세요',
+      seafile_permission_denied: 'Seafile 파일에 접근할 수 없습니다. 토큰 소유자의 라이브러리 권한을 확인하세요.',
+      seafile_not_found: 'Seafile 파일이 존재하지 않거나 이동되었습니다. 다음 동기화에서 다시 시도합니다.',
+      seafile_file_too_large: 'Seafile 파일이 크기 제한을 초과합니다. MAX_FILE_SIZE_MB를 늘리거나 파일을 줄이세요.',
+      seafile_empty_file: 'Seafile 파일이 비어 있어 건너뛰었습니다.',
+      seafile_source_changed: '가져오는 동안 Seafile 파일이 변경되었습니다. 다음 동기화에서 다시 시도합니다.',
+      seafile_invalid_response: 'Seafile이 해석할 수 없는 응답을 반환했습니다. 서버 버전과 리버스 프록시 설정을 확인하세요.',
+      seafile_ssrf_blocked: 'Seafile 다운로드 URL이 SSRF 정책에 의해 차단되었습니다. fileserver 호스트를 SSRF_WHITELIST에 추가하세요.',
+      seafile_fetch_failed: 'Seafile에서 파일을 가져오지 못했습니다. 다음 동기화에서 다시 시도합니다.'
     },
   },
   ollama: {
@@ -1464,6 +1497,8 @@ export default {
       thinkingDesc: '동적이고 반성적인 문제 해결 사고 도구',
       todoWrite: '계획 수립',
       todoWriteDesc: '구조화된 연구 계획 생성',
+      askUser: '사용자에게 질문',
+      askUserDesc: '필요한 정보가 부족할 때 사용자에게 질문하고 답변을 기다린 후 계속합니다',
       searchKnowledge: '지식베이스 검색',
       searchKnowledgeDesc: '의미, 키워드 또는 하이브리드 방식으로 지식베이스 청크 검색',
       readDocument: '문서 읽기',
@@ -1523,6 +1558,13 @@ export default {
       kbMetricRag: 'RAG 지식베이스',
       kbMetricWiki: 'Wiki 지식베이스',
       statusInactive: '{count}개의 체크된 도구가 현재 설정에서는 작동하지 않습니다',
+      searchConversations: '이전 대화 검색',
+      searchConversationsDesc: '사용자 본인의 이전 대화에서 나눴던 내용을 찾습니다',
+      groupStored: '저장되었지만 여기서 제공하지 않는 도구',
+      switchManagedDesc: '이 목록이 아니라 에이전트의 다른 설정으로 제어되는 도구라, 여기서 체크해도 켜지지 않습니다. 체크를 해제하면 삭제됩니다.',
+      unrecognizedDesc: '이 버전에 없는 도구라 에이전트가 호출할 수 없습니다. 체크를 해제하면 삭제됩니다.',
+      keptUnknownWarning: '저장했습니다. 다음 도구는 이 버전에 없어 그대로 남겨 두었지만, 에이전트가 호출할 수 없습니다: {names}',
+      droppedWarning: '저장했습니다. 다음 도구는 에이전트의 다른 설정으로 제어되므로 도구 목록에서 뺐습니다: {names}',
       effectiveLabel: '최종 활성 도구',
       effectiveDesc: '현재 설정 기준 저장 시 에이전트가 실제 호출할 수 있는 도구 집합',
       effectiveEmpty: '사용 가능한 도구가 없어 일반 모델 대화로 동작합니다'
@@ -1769,6 +1811,7 @@ export default {
       readDocument: '문서 읽기',
       listDocuments: '문서 목록 보기',
       todoWrite: '계획 관리',
+      askUser: '사용자에게 질문',
       knowledgeGraphExtract: '지식 그래프 추출',
       thinking: '사고',
       attachmentParsing: '첨부 파일 파싱',
@@ -1785,12 +1828,32 @@ export default {
       shellExec: '샌드박스 명령 실행',
       dataAnalysis: '데이터 분석',
       dataSchema: '데이터 구조',
-      databaseQuery: '데이터베이스 조회'
+      databaseQuery: '데이터베이스 조회',
+      findOperations: '작업 찾기',
+      runOperation: '작업 실행',
+      searchWeKnoraDocs: '제품 문서 검색',
+      readWeKnoraDoc: '제품 문서 읽기'
     },
     skillFiles: {
       heading: '스킬 파일',
       script: '스크립트',
       instructions: '스킬 안내'
+    },
+    attachmentTarget: {
+      list: '모든 첨부 파일',
+      file: '첨부 파일',
+      images: '{name}의 이미지',
+      imagesUnnamed: '첨부 파일 이미지',
+      image: '{name}의 이미지 {n}',
+      imageUnnamed: '첨부 파일 이미지 {n}'
+    },
+    imageView: {
+      summary: '"{file}"의 이미지 {numbers}을(를) 확인했습니다 (총 {total}장)',
+      single: '이미지 "{file}"을(를) 확인했습니다',
+      descriptionsHeading: '비전 모델의 이미지 설명',
+      imageLabel: '이미지 #{n}',
+      noDescription: '설명을 생성하지 못했습니다',
+      remaining: '확인하지 않은 이미지 {count}장 남음'
     },
     sandboxFiles: {
       found: '파일 {count}개 발견',
@@ -1811,10 +1874,40 @@ export default {
       killed: '시간 초과로 종료됨',
       binarySuppressed: '바이너리 출력은 생략되었습니다. 파일은 산출물 디렉터리에 저장한 뒤 다운로드하세요.'
     },
+    operations: {
+      found: '실행 가능 {count}개',
+      unavailableCount: '현재 사용 불가 {count}개',
+      empty: '일치하는 작업이 없습니다',
+      unavailableHeading: '현재 사용 불가',
+      parameters: '매개변수',
+      required: '필수',
+      enum: '허용 값',
+      range: '범위 {min}–{max}',
+      risk: {
+        read: '읽기',
+        write: '쓰기',
+        destructive: '되돌릴 수 없음'
+      },
+      truncated: '결과가 잘렸습니다',
+      emptyResult: '반환된 데이터가 없습니다',
+      failed: '작업 실패',
+      meta: '추가 정보'
+    },
+    weknoraDocs: {
+      pages: '문서 {count}편',
+      hits: '일치하는 섹션 {count}개',
+      empty: '일치하는 문서가 없습니다',
+      outline: '목차',
+      content: '본문',
+      truncated: '본문이 이어집니다',
+      failed: '읽기 실패',
+      openDoc: '문서 사이트에서 열기'
+    },
     mcpOAuth: {
       waiting: '인증 대기 · {target}',
       waitingStatus: '인증 대기',
       targetWithTool: '{service} › {tool}',
+      dockQuestion: '계속하려면 {target} 인증이 필요합니다',
       titleWithService: 'OAuth · {service}',
       titleWithTool: 'OAuth · {service} › {tool}',
       desc: '인증을 누르면 새 창에서 로그인합니다. 인증이 완료되면 이 도구 호출이 자동으로 계속됩니다.',
@@ -1829,10 +1922,37 @@ export default {
       resumeFailed: '실행 재개 실패, 다시 시도하세요',
       skipFailed: '건너뛰기 실패, 다시 시도하세요'
     },
+    askUser: {
+      title: '질문이 있습니다',
+      selectPlaceholder: '선택하세요',
+      textPlaceholder: '답변을 입력하세요',
+      otherPlaceholder: '기타(선택)',
+      decline: '답변 안 함',
+      submit: '제출',
+      declinedTag: '답변 거절함',
+      submitted: '제출됨',
+      answeredTag: '답변함',
+      timedOutTag: '시간 내 답변 없음',
+      canceledTag: '취소됨',
+      unansweredTag: '답변 없음',
+      submitFailed: '제출 실패',
+    },
+    promptDock: {
+      approvalTitle: '검토가 필요합니다',
+      oauthTitle: '인증이 필요합니다',
+      waiting: '응답 대기 중',
+      handle: '응답하기',
+      pager: '{current} / {total}',
+      previous: '이전',
+      next: '다음',
+      collapse: '접기',
+      expand: '펼치기'
+    },
     toolApproval: {
       waiting: '승인 대기 · {target}',
       waitingStatus: '승인 대기',
       targetWithTool: '{service} › {tool}',
+      dockQuestion: '{target} 실행을 허용할까요?',
       titleWithTarget: '검토 · {service} › {tool}',
       argsLabel: '인수',
       argsModified: '수정됨',
@@ -1841,10 +1961,53 @@ export default {
       reject: '거부',
       approvedTag: '승인됨',
       rejectedTag: '거부됨',
+      parked: '백그라운드에서 대기 중 — 나중에 처리할 수 있습니다',
+      parkedUntil: '백그라운드에서 대기 중 — {time} 전에 처리하세요',
+      abandonedTag: '포기됨',
       invalidJson: '유효한 JSON이 아닙니다',
       submitted: '제출됨',
       submitFailed: '제출 실패',
-      userRejected: '사용자 거부'
+      userRejected: '사용자 거부',
+      detail: {
+        type: '유형',
+        embeddingModel: '임베딩 모델',
+        summaryModel: '요약 모델',
+        captionModel: '이미지 설명',
+        speechModel: '음성 인식',
+        storage: '스토리지',
+        indexes: '인덱스',
+        name: '이름',
+        title: '제목',
+        status: '상태',
+        summary: '설명',
+        model: '모델',
+        mode: '모드',
+        url: '링크',
+        from: '출발',
+        to: '도착',
+        folder: '폴더',
+        page: '페이지',
+        version: '버전',
+        documents: '문서',
+        knowledgeBases: '지식베이스',
+        mcpServices: 'MCP 서비스',
+        skills: '스킬',
+        webSearch: '웹 검색',
+        multiTurn: '멀티턴'
+      },
+      value: {
+        document: '문서',
+        faq: 'FAQ',
+        wiki: 'Wiki',
+        on: '켜짐',
+        off: '꺼짐',
+        vector: '벡터',
+        keyword: '키워드',
+        graph: '그래프',
+        quickAnswer: '빠른 답변',
+        smartReasoning: '스마트 추론',
+        indexSep: ', '
+      }
     }
   },
   kbSettings: {
@@ -1955,7 +2118,96 @@ export default {
     getDocumentInfo: '문서 정보 조회',
     queryKnowledgeGraph: '지식 그래프 쿼리',
     think: '깊이 생각하기',
-    todoWrite: '계획 수립'
+    todoWrite: '계획 수립',
+    askUser: '사용자에게 질문'
+  },
+  assistant: {
+    title: 'WeKnora 어시스턴트',
+    newConversation: '새 대화',
+    history: '대화 기록',
+    untitledConversation: '제목 없는 대화',
+    historyEmpty: '아직 대화 기록이 없습니다',
+    historyFailed: '대화 기록을 불러오지 못했습니다',
+    loadMore: '더 불러오기',
+    resize: '어시스턴트 너비 조정',
+    layout: {
+      dock: '오른쪽에 고정',
+      float: '떠 있는 창으로 전환',
+    },
+    welcomeTitle: '무엇을 도와드릴까요?',
+    agentWelcomeDesc: '이 에이전트의 설정을 확인하고, 모델을 변경하거나 검색할 수 있는 지식 베이스를 확인할 수 있습니다.',
+    welcomeDesc: 'WeKnora 사용법을 안내하고, 워크스페이스의 문서 파싱, 지식 베이스 활동, Wiki 문제를 확인하고 처리하며, 에이전트를 만들고 설정할 수도 있습니다. 변경 전에 확인을 요청할지는 입력창 아래의 권한 수준에 따라 정해집니다.',
+    startFailed: '어시스턴트를 시작하지 못했습니다. 다시 시도해 주세요.',
+    askAboutDocument: '{name}에게 묻기',
+    access: {
+      title: '권한 수준',
+      capped: '워크스페이스 관리자가 허용하지 않았습니다',
+      levels: {
+        read_only: {
+          label: '읽기 전용',
+          desc: '확인만 하고 아무것도 변경하지 않습니다'
+        },
+        confirm: {
+          label: '변경 전 확인',
+          desc: '변경하거나 삭제할 때마다 먼저 확인을 요청합니다'
+        },
+        auto_write: {
+          label: '자동 실행',
+          desc: '되돌릴 수 있는 변경은 바로 실행하고, 삭제는 여전히 확인합니다'
+        }
+      }
+    },
+    context: {
+      currentPage: '현재 페이지',
+      detach: '현재 페이지 포함하지 않기',
+      attachedTip: '현재 페이지 포함됨: {path}',
+      detachedTip: '클릭하여 현재 페이지 포함: {path}'
+    },
+    starters: {
+      agentConfig: '이 에이전트의 설정 확인하기',
+      agentModel: '모델 변경하기',
+      agentKnowledge: '어떤 지식 베이스를 검색할 수 있나요?',
+      wikiIssues: '이 페이지에 처리할 문제가 있나요?',
+      wikiSummary: '이 Wiki 페이지를 요약해 줘',
+      documentStatus: '이 문서의 파싱 상태는 어떤가요?',
+      documentSummary: '이 문서를 요약해 줘',
+      failedDocuments: '이 지식 베이스에서 파싱에 실패한 문서는?',
+      recentActivity: '이 지식 베이스에 최근 어떤 변경이 있었나요?',
+      formats: 'WeKnora는 어떤 문서 형식을 지원하나요?',
+      createWiki: 'Wiki 지식 베이스는 어떻게 만드나요?',
+      agents: '어떤 에이전트가 있고, 각각 어떤 모델을 쓰나요?'
+    }
+  },
+  assistantSettings: {
+    title: '어시스턴트',
+    description: '{name}의 진입점, 열기 방식, 권한 수준을 설정합니다.',
+    introTitle: '어시스턴트는 내가 할 수 있는 일만 합니다',
+    introDescription: '어시스턴트는 내 계정으로 동작하므로, 볼 수 있고 변경할 수 있는 범위가 워크스페이스 역할과 같습니다. 권한 수준은 이 범위를 더 좁힐 뿐 넓히지 않습니다.',
+    personalGroup: '개인 설정',
+    accessLabel: '권한 수준',
+    accessDescription: '어시스턴트가 무언가를 변경하기 전에 확인을 요청할지 정합니다. 어시스턴트 입력창 아래에서도 언제든 바꿀 수 있습니다.',
+    accessCeilingHint: '워크스페이스 관리자가 최고 수준을 "{level}"(으)로 제한했습니다.',
+    entryLabel: '진입점',
+    entryDescription: '어느 것을 선택해도 명령 팔레트({shortcut})에서 어시스턴트를 열 수 있습니다.',
+    entries: {
+      sidebar: '사이드바',
+      launcher: '화면 오른쪽',
+      palette: '명령 팔레트만'
+    },
+    layoutLabel: '열기 방식',
+    layoutDescription: '오른쪽에 고정하면 페이지가 좁아지고, 플로팅이면 페이지 위에 겹쳐 표시됩니다. 창이 좁으면 항상 플로팅으로 열립니다.',
+    layouts: {
+      docked: '오른쪽에 고정',
+      floating: '플로팅'
+    },
+    workspaceGroup: '워크스페이스',
+    adminOnly: '관리자만 변경할 수 있습니다',
+    nameLabel: '어시스턴트 이름',
+    nameDescription: '워크스페이스의 모든 멤버에게 보이는 이름입니다. 비워 두면 기본 이름을 사용합니다.',
+    ceilingLabel: '최고 권한 수준',
+    ceilingDescription: '멤버가 선택할 수 있는 최고 수준입니다. "읽기 전용"으로 설정하면 이 워크스페이스에서 어시스턴트는 아무것도 변경하지 않습니다.',
+    saved: '저장했습니다',
+    saveFailed: '저장하지 못했습니다: {message}'
   },
   commandPalette: {
     placeholder: '지식베이스, 파일, 대화 검색…',
@@ -1980,7 +2232,8 @@ export default {
       agents: '에이전트 열기',
       organizations: '공유 공간 열기',
       settings: '설정 열기',
-      productTour: '사용 가이드'
+      productTour: '사용 가이드',
+      assistant: '{name} 열기'
     },
     match: {
       vector: '벡터',
@@ -2368,6 +2621,9 @@ export default {
     "serverDocumentation": "서버 원본 설명",
     "noServerDocumentation": "이 MCP 서버의 initialize 응답에 instructions / serverInfo.description이 없습니다(둘 다 선택 필드). 도구 설명은 아래 각 도구의 description에 있습니다.",
     "policyHint": "도구 활성화 및 승인 설정은 즉시 저장되며 목록을 새로 고쳐도 유지됩니다.",
+    "columnTool": "도구",
+    "columnEnabled": "활성화",
+    "columnApproval": "승인",
     "failed": "도구 목록을 불러오지 못했습니다",
     "setupProgress": "MCP 설정 단계",
     "connection": "연결 설정",
@@ -2410,6 +2666,9 @@ export default {
     authTypeApiKey: 'API Key / Token',
     authTypeOAuth: 'OAuth 2.0(최초 연결 시 인증)',
     oauthScopes: '스코프(선택, 공백으로 구분)',
+    oauthClientId: '클라이언트 ID(선택)',
+    oauthClientIdDesc: '인가 서버에 미리 등록한 클라이언트입니다. 비워 두면 동적 클라이언트 등록으로 자동 등록합니다. 클라이언트 ID를 바꾸면 시크릿도 함께 바꿔 주세요.',
+    oauthClientSecret: '클라이언트 시크릿(선택)',
     oauthAuthorization: '인증 상태',
     oauthAuthorized: '인증됨',
     oauthRefreshable: '토큰이 만료되었습니다. 다음 사용 시 자동으로 갱신됩니다',
@@ -2561,6 +2820,14 @@ export default {
       documentsPlaceholder: '후보 문서를 한 줄에 하나씩 입력하세요',
       documentsHint: '비어 있지 않은 각 줄은 ReRank 모델에 별도 문서로 전송됩니다',
       imageFile: '이미지 파일',
+      similarityMode: '유사도',
+      similarityQuery: '쿼리',
+      similarityQueryPlaceholder: '쿼리를 입력하세요. 예: 잔디 위를 달리는 개',
+      similarityCandidates: '후보 텍스트',
+      similarityCandidatesPlaceholder: '한 줄에 하나의 후보 텍스트를 입력하세요',
+      similarityHint: '쿼리는 검색 쿼리로, 후보는 문서로 벡터화됩니다(실제 검색과 동일). 결과는 코사인 유사도가 높은 순으로 정렬됩니다',
+      similarityImage: '후보 이미지(선택)',
+      similarityImageCandidate: '이미지',
       audioFile: '오디오 파일',
       chooseFile: '파일 선택',
       parameters: '요청 매개변수',
@@ -2911,6 +3178,7 @@ export default {
   },
   language: {
     zhCN: '简体中文',
+    zhTW: '번체 중국어',
     enUS: 'English',
     ruRU: 'Русский',
     koKR: '한국어',
@@ -3037,6 +3305,8 @@ export default {
       dimensionOverrideDesc: '제공자 문서에서 이 모델이 dimensions 매개변수를 지원한다고 확인한 경우에만 켜세요.',
       supportsVisionLabel: '비전/멀티모달 지원',
       supportsVisionDesc: '모델의 이미지 등 멀티모달 입력 지원 여부',
+      embeddingImageInputLabel: '이미지 입력',
+      embeddingImageInputDesc: '모델이 이미지를 텍스트와 같은 벡터 공간에 임베딩할 수 있는지 여부. 카탈로그 모델은 자동으로 인식되며, 사용자 정의 모델은 직접 선언합니다',
       contextWindowLabel: '컨텍스트 창',
       contextWindowPlaceholder: '기본값 {value}',
       contextWindowDesc: '모델이 한 요청에 수용할 수 있는 토큰 수입니다. 에이전트 대화 압축이 이 한도를 사용합니다. 비워 두면 기본값 200000(200K)을 사용합니다. 공급자 문서의 실제 값을 입력하세요. 더 크게 설정하면 압축이 발생하지 않고 요청이 거부될 수 있습니다.',
@@ -3279,14 +3549,45 @@ export default {
         success: '{count}개 워크스페이스의 저장 용량을 {gb} GB로 갱신했습니다',
         failed: '모든 워크스페이스에 적용 실패'
       },
+      userList: {
+        title: '플랫폼 사용자 목록',
+        rowLabel: '사용자 관리',
+        rowDesc: '워크스페이스 전체의 등록 사용자를 페이지네이션 및 사용자 이름/이메일 필터와 함께 표시합니다.',
+        searchPlaceholder: '사용자 이름 또는 이메일로 필터링(현재 페이지)',
+        refresh: '새로고침',
+        active: '활성',
+        inactive: '비활성',
+        colUsername: '사용자 이름',
+        colStatus: '상태',
+        colRole: '역할',
+        colCreated: '생성일',
+        colAction: '작업',
+        prev: '이전',
+        next: '다음',
+        pageCount: '{shown}개 표시 / 페이지 내 {total}',
+        enable: '활성화',
+        disable: '비활성화',
+        resetPassword: '비밀번호 재설정',
+        confirmDisable: '{name} 계정을 비활성화할까요? 활성 세션이 즉시 취소됩니다.',
+        confirmEnable: '{name} 계정을 활성화할까요?',
+        enabledMsg: '{name} 활성화됨',
+        disabledMsg: '{name} 비활성화됨',
+        actionFailed: '작업 실패',
+        loadFailed: '사용자 목록을 불러오지 못했습니다',
+        roleAdmin: '시스템 관리자',
+        roleUser: '일반 사용자',
+        confirmRevoke: '{name}의 시스템 관리자 권한을 취소할까요?',
+        confirmPromote: '{name}을(를) 시스템 관리자로 승격할까요?',
+        revokeBtn: '취소',
+        promoteBtn: '승격',
+        revokedMsg: '{name}의 관리자 권한을 취소했습니다',
+        promotedMsg: '{name}을(를) 시스템 관리자로 승격했습니다',
+        roleFailed: '역할 변경 실패',
+      },
       passwordReset: {
-        label: '사용자 비밀번호 재설정',
-        description: '로그인할 수 없는 다른 사용자의 새 비밀번호를 설정합니다. 재설정하면 해당 사용자의 현재 로그인 세션이 모두 만료되며 새 비밀번호로 다시 로그인해야 합니다.',
-        action: '비밀번호 재설정',
         dialogTitle: '다른 사용자의 비밀번호 재설정',
         warning: '보안에 민감한 작업입니다. 사용자 이메일을 반드시 확인하세요. 여기서는 자신의 비밀번호를 재설정할 수 없습니다.',
         emailLabel: '사용자 이메일',
-        emailPlaceholder: '비밀번호를 재설정할 사용자의 이메일 입력',
         newPasswordLabel: '새 비밀번호',
         newPasswordPlaceholder: '새 비밀번호 입력',
         confirmPasswordLabel: '새 비밀번호 확인',
@@ -3296,8 +3597,6 @@ export default {
         failed: '비밀번호 재설정 실패',
       },
       createUser: {
-        label: '사용자 생성',
-        description: '새 로컬 사용자 계정을 개설합니다. 플랫폼의 기본 공간 모드가 "개인 공간 자동 생성"으로 설정된 경우, 스스로 가입한 사용자와 마찬가지로 개인 공간도 함께 만들어집니다.',
         action: '사용자 생성',
         dialogTitle: '새 사용자 생성',
         warning: '보안에 민감한 작업입니다. 새 사용자가 로그인할 때 사용할 사용자 이름과 이메일을 신중히 확인하세요.',
@@ -3320,10 +3619,6 @@ export default {
           usernameLength: '사용자 이름은 2~50자여야 합니다',
           emailRequired: '이메일을 입력하세요',
           emailInvalid: '올바른 이메일 주소를 입력하세요',
-          passwordRequired: '새 비밀번호를 입력하세요',
-          passwordLength: '비밀번호는 8~32자여야 합니다',
-          passwordLetter: '비밀번호에 문자가 포함되어야 합니다',
-          passwordNumber: '비밀번호에 숫자가 포함되어야 합니다',
           confirmRequired: '새 비밀번호를 다시 입력하세요',
           passwordMismatch: '비밀번호가 일치하지 않습니다'
         },
@@ -3336,26 +3631,6 @@ export default {
           copyBtn: '계정 정보 복사',
           copySuccess: '계정 정보가 클립보드에 복사되었습니다',
           acknowledgeBtn: '비밀번호를 저장했습니다'
-        }
-      },
-      admins: {
-        label: '시스템 관리자',
-        description: '플랫폼 수준 권한을 가진 사용자입니다. 오른쪽에 이메일을 입력하고 엔터를 누르면 해당 사용자를 관리자로 승격하고, 태그의 ×를 누르면 권한을 회수합니다. 본인은 관리자이지만 목록에 표시되지 않으며 자신의 권한을 회수할 수 없습니다.',
-        placeholder: '사용자 이메일을 입력하고 엔터를 누르세요',
-        loadFailed: '시스템 관리자 정보를 불러오지 못했습니다',
-        saveSuccess: '시스템 관리자가 업데이트되었습니다',
-        saveFailed: '시스템 관리자 업데이트 실패',
-        confirm: {
-          revoke: {
-            header: '시스템 관리자 권한 회수',
-            body: '{email} 사용자의 시스템 관리자 권한을 회수하시겠습니까? 회수 후에는 시스템 수준 기능에 더 이상 접근할 수 없습니다.',
-            confirmBtn: '회수 확인'
-          },
-          promote: {
-            header: '시스템 관리자로 승격',
-            body: '{email} 사용자를 시스템 관리자로 승격하시겠습니까? 이 사용자는 모든 워크스페이스 접근, 시스템 설정 변경, 관리자 명단 관리 등 플랫폼 수준의 권한을 갖게 됩니다.',
-            confirmBtn: '승격 확인'
-          }
         }
       },
       reset: {
@@ -3402,7 +3677,8 @@ export default {
           },
           registration_mode: {
             self_serve: '셀프 가입 (누구나 가입 가능)',
-            invite_only: '초대 전용 (공개 가입 비활성)'
+            invite_register: '초대 가입 (유효한 링크 필요)',
+            invite_only: '가입 금지 (기존 계정은 초대 수락 가능)'
           }
         }
       },
@@ -3432,7 +3708,7 @@ export default {
           docker_enabled: 'Docker 샌드박스 백엔드를 허용할지 설정합니다. 로컬 docker.sock은 호스트 root와 같으므로 기본값은 꺼짐입니다. 시스템 관리자만 켤 수 있으며 저장 즉시 적용됩니다. 데몬 소켓을 마운트했거나 TLS가 있는 원격 tcp:// 를 쓰는 프라이빗 단일 노드에서만 켜세요.'
         },
         auth: {
-          registration_mode: '셀프 가입 모드입니다. self_serve = 누구나 계정을 만들 수 있음; invite_only = 공개 가입을 끄고 Owner/Admin만 초대 가능. 저장 즉시 적용되며, self_serve는 스팸 가입이 들어올 수 있으니 신중히 사용하세요.',
+          registration_mode: '가입 모드입니다. 공개 가입은 누구나 계정을 만들 수 있고, 초대 가입은 유효한 초대 링크가 필요합니다. 가입 금지 상태에서도 기존 계정은 초대를 수락할 수 있습니다. 저장 즉시 적용됩니다.',
           default_tenant_mode: '공개 가입 후 공간 초기화 정책입니다. create_personal은 개인 공간을 만들고 Owner를 부여하며, tenantless는 초대 수락 또는 직접 공간 생성 전까지 계정만 만듭니다.',
           complex_password_enabled: '복잡한 비밀번호를 사용할지 여부입니다. 활성화하면 비밀번호에 대문자, 소문자, 숫자 및 특수 문자가 포함되어야 합니다. 변경 사항은 즉시 적용되며, 새로 가입하는 사용자 또는 비밀번호를 새로 변경하거나 재설정하는 경우에만 적용됩니다. 특수 문자는 다음을 포함합니다: {specialChars}'
         }
@@ -3463,7 +3739,7 @@ export default {
           docker_enabled: 'Docker 샌드박스 사용'
         },
         auth: {
-          registration_mode: '셀프 가입 모드',
+          registration_mode: '가입 모드',
           default_tenant_mode: '기본 공간 프로비저닝',
           complex_password_enabled: '복잡한 비밀번호 사용'
         }
@@ -3675,36 +3951,27 @@ export default {
           generic: '큐 상태를 불러오지 못했습니다'
         }
       },
-      runtimeTable: {
-        setting: '설정 및 용도',
-        value: '현재 값'
-      },
       sections: {
         other: {
-          tab: '기타 {count}',
           title: '기타 설정',
           description: '표준 제품 그룹에 포함되지 않은 현재 배포의 설정입니다.'
         },
         security: {
-          tab: '네트워크 보안 {count}',
           title: '네트워크 보안',
           description: 'SSRF 허용 목록과 Docker 샌드박스 허용 여부(로컬 docker.sock은 호스트 root와 같음)를 관리합니다.'
         },
         runtime: {
-          tab: '런타임 및 동시성 {count}',
           title: '런타임 및 동시성',
           description: '백그라운드 워커 풀과 모델 서비스의 동시 처리 용량을 설정합니다.',
           restartHint: '워커 설정은 재시작 후 적용'
         },
         tenant: {
-          tab: '워크스페이스 기본값 {count}',
           title: '워크스페이스 기본값',
           description: '기존 워크스페이스를 변경하지 않고 신규 워크스페이스의 초기 할당량과 호환 동작을 설정합니다.'
         },
         access: {
-          tab: '계정 및 액세스 {count}',
-          title: '계정 및 액세스',
-          description: '시스템 관리자, 공개 가입, 공간 생성 규칙을 관리합니다.'
+          title: '가입 및 액세스',
+          description: '가입 방식, 비밀번호 요구 사항, 공간 생성 규칙을 관리합니다.'
         }
       },
       priorityHint: {
@@ -3906,6 +4173,7 @@ export default {
         desktopRetry: 'Reconnect',
         notStarted: '터미널이 아직 실행되지 않았습니다. 시작하면 이 대화의 샌드박스에 연결하며, 샌드박스가 없거나 일시 중지된 경우 생성하거나 다시 시작합니다.',
         paused: '이 대화의 샌드박스가 일시 중지되었습니다. 터미널을 시작하면 다시 시작됩니다.',
+        stopped: '이 대화의 샌드박스가 실행 중이 아닙니다. 중지되었거나 오랫동안 유휴 상태여서 회수되었을 수 있습니다. 터미널을 시작하면 다시 시작되며, 이미 회수된 경우 새 샌드박스가 만들어지고 이전 파일과 설치한 소프트웨어는 유지되지 않습니다.',
         start: '터미널 시작',
         connecting: '샌드박스에 연결하는 중…',
         needsProvision: '이 대화에는 실행 중인 샌드박스가 없습니다. 생성하고 시작하면 새 샌드박스가 만들어지며 워크스페이스 설정에 따라 요금이 부과됩니다.',
@@ -3916,6 +4184,8 @@ export default {
         retry: '다시 연결',
         sessionEnded: '터미널 세션이 종료되었습니다',
         idleDisconnected: '터미널이 유휴 상태로 연결이 끊어졌습니다. 샌드박스는 TTL에 따라 일시 중지됩니다. 다시 연결할 수 있습니다.',
+        idleDisconnectedNewShell: '터미널이 유휴 상태로 연결이 끊어져 셸이 종료되었습니다(nohup으로 시작한 백그라운드 작업은 영향을 받지 않습니다). 다시 연결하면 새 셸이 열립니다.',
+        disconnectedNewShell: '연결이 끊어져 터미널의 셸이 종료되었습니다(nohup으로 시작한 백그라운드 작업은 영향을 받지 않습니다). 다시 연결하면 새 셸이 열립니다.',
         authRevoked: '로그인 상태가 더 이상 유효하지 않아 터미널 연결이 끊어졌습니다. 다시 로그인한 뒤 재연결하세요.',
     },
     questionMinimapTitle: '질문',
@@ -3927,6 +4197,7 @@ export default {
     truncatedHint: '모델의 응답당 출력 한도에서 답변이 잘렸습니다. 위 내용은 잘리기 전까지 생성된 부분입니다.',
     rewind: {
       tooltip: '여기로 되돌리기',
+      confirmTitle: '여기로 되돌릴까요?',
       confirmBody: '이 메시지 이후의 대화를 삭제합니다. 질문에서 되돌리면 해당 질문도 지워지고 입력창에 다시 채워집니다. 체크포인트가 있으면 작업 영역도 되돌립니다. 이 작업은 취소할 수 없습니다.',
       confirmButton: '되돌리기',
       cancelButton: '취소',
@@ -3956,6 +4227,13 @@ export default {
     referenceSourceView: '원문 보기',
     referenceSourceRelocate: '다시 찾기',
     referenceSourceLocating: '인용 위치를 찾는 중…',
+    referenceSourceExact: "원문 구절을 정확히 찾았습니다",
+    referenceSourcePartial: "확인된 원문을 강조했습니다. 인용 일부는 아직 일치하지 않습니다",
+    referenceSourceBlock: "원문 영역을 찾았습니다. 정확한 텍스트 일치는 확인되지 않았습니다",
+    referenceSourceAmbiguous: "일치하는 구절이 여러 개여서 위치를 특정할 수 없습니다",
+    referenceSourceStale: "원문 또는 내용이 변경되어 정확히 찾을 수 없습니다",
+    referenceSourcePrevious: "이전 인용 위치",
+    referenceSourceNext: "다음 인용 위치",
     referenceSourceFoundPage: '{page}페이지에서 찾았습니다',
     referenceSourceNotFound: '인용 위치를 정확히 찾지 못해 원문을 열었습니다',
     referenceSourceOpenWeb: '원본 웹페이지에서 해당 위치 열기',
@@ -4081,6 +4359,9 @@ export default {
         customInstructionsPlaceholder: '예: 명판, 모델 번호, 경고 코드 및 표 단위를 중점적으로 인식…',
         imageAttrsLabel: '이미지 속성 관찰',
         imageAttrsDescription: '켜면 각 이미지를 먼저 속성 관찰+설명한 뒤, 속성에 따라 이미지 내 텍스트에 OCR을 실행할지 결정합니다. 끄면 기본 모드: 모든 이미지를 하나씩 설명하고 모두 OCR합니다',
+        imageVectorLabel: '이미지 벡터 검색',
+        imageVectorDescription: '켜면 이미지 설명을 생성한 뒤 임베딩 모델로 이미지 자체도 인코딩하여, 설명에 없는 내용으로도 이미지를 검색할 수 있습니다. 이미지 입력을 지원하는 임베딩 모델이 필요하며, 이미지마다 임베딩 호출이 한 번 늘고 벡터 검색 후보 범위도 넓어집니다. 이후 수집하거나 다시 파싱한 문서에만 적용되며, 스캔 PDF 페이지는 제외됩니다',
+        imageVectorModelUnsupported: '현재 임베딩 모델은 이미지 입력을 선언하지 않아 이미지 벡터가 생성되거나 검색되지 않습니다',
         imageAttrsSchemaLabel: '관찰 가능한 이미지 속성',
         imageAttrsSchemaDescription: '모델은 아래 속성(백엔드 레지스트리 정의)을 관찰해 OCR 정책을 결정합니다',
         imageAttrsOcrConditions: '관찰된 속성 조건에 따라 OCR 실행',
@@ -4486,11 +4767,11 @@ export default {
         imageLoadError: '이미지를 불러오지 못했습니다',
         noCaption: '설명 없음',
         noOcr: '인식된 텍스트 없음',
-        caption: '설명',
-        ocr: '이미지 속 텍스트(OCR)',
-        attributes: '속성',
+        caption: '이미지 설명',
+        ocr: '이미지 속 텍스트',
+        attributes: '이미지 속성',
         source: '원본 문서',
-        details: '상세 정보',
+        details: '기본 정보',
         dimensions: '크기',
         status: '상태',
         openSource: '원본 문서 열기',
@@ -4506,6 +4787,17 @@ export default {
         viewerClose: '닫기 (Esc)',
         prev: '이전 (←)',
         next: '다음 (→)',
+        sourceFilter: '문서별 필터',
+        sourceFilterTitle: '원본 문서로 필터',
+        sourceFilterSearch: '문서 이름 검색',
+        sourceFilterEmpty: '일치하는 문서가 없습니다',
+        sourceFilterSubtitle: '선택한 문서의 이미지만 표시하여 캡션과 OCR 결과를 하나씩 확인할 수 있습니다',
+        sourceFilterSelected: '{count}개 문서 선택됨',
+        sourceFilterClear: '선택 지우기',
+        sourceFilterTooMany: '최대 1000개 문서까지 선택할 수 있습니다',
+        sourceFilterSelectAll: '전체 선택 / 해제 (모든 검색 결과 대상)',
+        sourceFilterOverflowRecent: '문서가 많아 최근 {cap}개만 표시합니다. 키워드로 좁혀 주세요',
+        sourceFilterOverflowHits: '{total}개 문서가 일치했습니다. 처음 {cap}개만 표시 중입니다. 전체 선택 전 키워드를 좁혀 주세요',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).
@@ -4605,6 +4897,16 @@ export default {
       helpZoomDesc: '캔버스 확대/축소',
       neighborsProgress: '이웃 {visible}/{total} 표시됨 ({hidden}개 미로딩)',
       neighborsAllShown: '모든 {total}개 이웃이 이미 캔버스에 있습니다 (확장을 클릭하여 이 노드의 서브그래프에 집중)',
+      graphNavigationHint: '빈 공간을 드래그하여 이동 · 스크롤하여 확대/축소',
+      focusGroup: '이 그룹에 초점 맞추기',
+      focusGroupViewing: '보는 중: {name}',
+      focusGroupBack: '전체 그래프로 돌아가기',
+      focusGroupSwitch: '다른 그룹으로 전환',
+      unlinkedHidden: '연결 없는 페이지 {count}개 숨김',
+      unlinkedSection: '연결 없는 페이지 · {count}',
+      offscreenSection: '현재 화면에 연결 없음 (링크 있음) · {count}',
+      hideUnlinked: '연결 없는 페이지 숨기기 ({count})',
+      showUnlinked: '연결 없는 페이지 표시 ({count})',
       neighborsNone: '이 페이지에는 연결된 이웃이 없습니다',
       neighborsCenterUnreachable: '이웃 {visible}/{total} 표시됨 ({hidden}개 연결 불가: 끊긴 링크, 필터됨 또는 삭제됨)',
       neighborsOverviewHidden: '이웃 {visible}/{total} 표시됨 ({hidden}개는 개요 범위 밖 — 확장을 클릭하여 이곳으로 전환)',
@@ -4624,12 +4926,10 @@ export default {
       globalIssuesEmpty: '보류 중인 콘텐츠 문제가 없습니다',
       issuePagePrefix: '페이지: ',
       issueGoFix: '수정하러 가기',
-      fixAssistantTitle: 'Wiki 스마트 수정 도우미',
       issueFixSuggestions: '콘텐츠 최적화 제안 ({count})',
       issueFixSingle: '수정',
-      fixStartError: '수정 도우미 시작 실패',
-      issueFixPromptSingle: '페이지 [[{slug}]] 의 문제(ID: {id})를 수정해 주세요.',
-      issueFixPromptAutoStart: '페이지 [[{slug}]] 의 다음 문제들을 수정해 주세요:'
+      issueFixPromptSingle: '이 Wiki 문제를 수정해 줘: {description}',
+      issueFixPromptAll: '이 페이지의 처리할 문제 {count}개를 수정해 줘'
     },
     indexing: {
       title: '인덱싱 전략',
@@ -4739,6 +5039,7 @@ export default {
       systemActor: '시스템',
       actorWithAPIKey: '{actor} · API Key · {name}',
       actorAPIKey: 'API Key · {name}',
+      viaAssistant: 'WeKnora 어시스턴트 경유',
       knowledgeBase: '지식 베이스',
       countItems: '{count}개 항목',
       titleWithCount: '{title} 외 {count}개',
@@ -4844,6 +5145,8 @@ export default {
         actorId: '시작자 ID',
         apiKeyName: 'API 키 이름',
         apiKeyId: 'API 키 ID',
+        agentSessionId: '어시스턴트 대화 ID',
+        agentOperation: '어시스턴트 작업',
         details: '상세'
       },
       columns: {
@@ -5081,6 +5384,9 @@ export default {
     notConfigured: '구성되지 않음',
     sharedAgentModelLabel: '공유 에이전트에 구성된 모델',
     noModel: '사용 가능한 모델 없음',
+    modelAuto: '기본',
+    modelFollowDefault: '기본값 따르기',
+    modelAutoHint: '현재 지식 베이스의 대화 모델을 사용하며, 지식 베이스 밖이거나 설정되지 않은 경우 첫 번째로 사용 가능한 대화 모델을 사용합니다',
     stopGeneration: '생성 중지',
     send: '전송',
     steerCurrent: '현재 작업에 추가',
@@ -5239,7 +5545,13 @@ export default {
     mcpStale: '다시 동기화 필요',
     belongsToKb: '지식베이스: ',
     belongsToOrg: '스페이스: ',
-    noCompatibleKbForAgent: '현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.'
+    noCompatibleKbForAgent: '현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.',
+    tag: '태그',
+    searchPlaceholder: '지식베이스, 파일 등 검색',
+    searchInGroup: '{group}에서 검색…',
+    typeToSearch: "{'@'} 뒤에 계속 입력하여 검색…",
+    viewAll: '모두 보기',
+    back: '뒤로'
   },
   common: {
     add: '추가',
@@ -5358,7 +5670,7 @@ export default {
     usernameRequired: '사용자명을 입력해주세요',
     usernameMinLength: '사용자명은 최소 2자여야 합니다',
     usernameMaxLength: '사용자명은 20자를 초과할 수 없습니다',
-    usernameInvalid: '사용자명은 문자, 숫자, 밑줄, 한글만 포함할 수 있습니다',
+    usernameInvalid: '사용자명은 영문자, 숫자, 밑줄(_), 한자만 포함할 수 있습니다',
     confirmPasswordRequired: '비밀번호를 확인해주세요',
     passwordMismatch: '두 비밀번호가 일치하지 않습니다',
     loginError: '로그인 오류, 이메일 또는 비밀번호를 확인해주세요',
@@ -5462,6 +5774,15 @@ export default {
     howToEnable: '지식 그래프를 활성화하는 방법?'
   },
   retrievalSettings: {
+    recallTab: '검색 후보',
+    rerankTab: '재순위 지정',
+    rrfTitle: '결과 통합 (RRF)',
+    rrfKLabel: 'RRF 평활 상수 (K)',
+    rrfKDescription: '값이 클수록 상위 검색 결과의 우위가 줄어듭니다. 기본값은 60이며, 0은 기본값을 사용합니다.',
+    rrfVectorWeightLabel: 'RRF 벡터 가중치',
+    rrfVectorWeightDescription: '통합 결과에 대한 벡터 검색의 영향을 조정합니다. 기본값은 0.7이며, 0은 기본값을 사용합니다. 가중치의 합이 1일 필요는 없습니다.',
+    rrfKeywordWeightLabel: 'RRF 키워드 가중치',
+    rrfKeywordWeightDescription: '통합 결과에 대한 키워드 검색의 영향을 조정합니다. 기본값은 0.3이며, 0은 기본값을 사용합니다. 가중치의 합이 1일 필요는 없습니다.',
     title: '검색 설정',
     description: '전역 검색 파라미터를 설정합니다. 지식베이스 검색과 메시지 검색이 이 설정을 공유합니다',
     embeddingTopKLabel: '벡터 검색 Top K',
@@ -6160,6 +6481,7 @@ export default {
       skillTranscriptLive: '설치 과정',
       skillTranscriptLiveHint: '설치 중입니다. 클릭해서 과정을 보세요',
       skillTranscriptTitle: '설치 과정',
+      skillTranscriptPrompt: '설치 지시',
       skillTranscriptHide: 'Hide install run',
       skillGuidance: {
         placeholder: '필요한 CLI, 설치 문서, 환경 제약 등 설치 안내를 추가하세요',
@@ -6278,6 +6600,7 @@ export default {
       installedCount: '{count}개 샌드박스에 설치됨',
       installPanelGroup: '설치됨',
       installPanelAvailable: '미설치',
+      installAction: '설치',
       viewInstallProgress: '진행 상황',
       manageOnSandbox: '「{name}」 샌드박스에서 관리',
       manageDrawerDesc: '샌드박스 「{name}」에서 사용 여부, 변수, 제거를 관리합니다.',
@@ -6629,6 +6952,8 @@ export default {
       capabilityUnconfigured: '미구성'
     },
     editor: {
+      assistantChanged: '어시스턴트가 이 에이전트를 변경했습니다. 최신 설정을 보려면 다시 여세요.',
+      assistantDeleted: '어시스턴트가 이 에이전트를 삭제했습니다.',
       reasoningEffortUnsupported: '선택한 모델은 사고를 지원하지 않습니다. "끄기" 외의 옵션은 무시됩니다.',
       reasoningEffortAlwaysOn: '선택한 모델은 항상 사고하며 끌 수 없습니다. 강도만 조정할 수 있습니다.',
       createTitle: '에이전트 만들기',
@@ -6885,6 +7210,12 @@ export default {
     noActivity: '파싱 활동 없음',
     totalDuration: '총 소요시간: {d}',
     errorCode: {
+      DOCREADER_UNAVAILABLE: "문서 분석 서비스를 사용할 수 없습니다",
+      DOCREADER_UNAVAILABLE_SUGGESTION: "DocReader에 연결할 수 없거나 연결이 끊겼습니다. 서비스 상태, 반복 재시작, 네트워크를 확인한 후 다시 시도하세요. 파일을 다시 업로드할 필요는 없습니다.",
+      DOCREADER_TIMEOUT: "문서 분석 시간 초과",
+      DOCREADER_TIMEOUT_SUGGESTION: "DocReader 상태와 부하를 확인한 후 다시 시도하세요. 필요한 경우 큰 파일을 나누세요.",
+      DOCREADER_PARSE_FAILED: "문서 분석 실패",
+      DOCREADER_PARSE_FAILED_SUGGESTION: "파일 형식을 확인하고 관리자에게 이번 DocReader 로그 확인을 요청하세요.",
       TASK_STALLED: '진행이 없어 자동 중단됨',
       TASK_STALLED_SUGGESTION: '임계 시간을 넘도록 진행이 없고 대기열에도 해당 작업이 없어 실패로 표시되었습니다. 「다시 시도」를 누르세요. 반복되면 이 단계가 의존하는 서비스(문서 파싱, 모델, 벡터 저장소)를 확인하세요.',
       UNKNOWN_SUGGESTION: '자세한 내용은 애플리케이션 로그를 확인하세요.'
@@ -6958,6 +7289,11 @@ export default {
     }
   },
   uploadConfirm: {
+    imageEmbeddingModel: "이미지 인덱싱 Embedding 모델",
+    imageIndexInherited: "이미지 인덱싱에는 지식 베이스에 연결된 Embedding 모델을 사용합니다. 변경하려면 지식 베이스 설정으로 이동하세요.",
+    imageVectorIndex: "이번 가져오기의 이미지 벡터 인덱싱",
+    imageVectorIndexHint: "이번 업로드 또는 재분석에서 이미지 벡터를 생성하며 지식 베이스 기본 설정은 변경하지 않습니다. 검색 사용 여부는 지식 베이스의 이미지 벡터 검색 설정을 따릅니다.",
+    imageVectorRequiresIndex: "먼저 지식 베이스 설정에서 벡터 인덱싱을 활성화하세요.",
     documentSummary: "문서 요약",
     documentSummaryDescription: "이번에 가져오는 문서의 요약을 자동으로 생성할지 선택합니다.",
     generateSummary: "문서 요약 생성",
@@ -7143,6 +7479,7 @@ export default {
     channelConfluence: 'Confluence',
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
+    channelSeafile: 'Seafile',
     channelIma: 'Tencent IMA',
     channelUpload: '업로드',
     channelManual: '수동',
@@ -7303,10 +7640,10 @@ export default {
     statusFailed: '실패',
     statusCancelled: '취소됨',
     statusDraft: '초안',
-    noDescription: '설명 없음',
+    noDescription: '아직 설명이 없습니다',
     emptyKnowledgeDragDrop: '지식이 비어 있음, 드래그 앤 드롭으로 업로드',
-    pdfDocFormat: 'pdf, doc 형식 파일, 최대 10MB',
-    textMarkdownFormat: 'text, markdown 형식 파일, 최대 200KB',
+    pdfDocFormat: 'pdf, doc 형식 파일, 최대 {size}MB',
+    textMarkdownFormat: 'text, markdown 형식 파일, 최대 {size}MB',
     dragFileNotText: '텍스트나 링크가 아닌 파일을 드래그하세요',
     searchPlaceholder: '지식베이스 검색...',
     docSearchPlaceholder: '문서 이름 검색...',
@@ -7722,6 +8059,7 @@ export default {
   },
   menu: {
     sessionInProgress: '대화 진행 중',
+    sessionUnread: '새 답변',
     knowledgeBase: '지식베이스',
     agents: '에이전트',
     artifacts: '산출물',

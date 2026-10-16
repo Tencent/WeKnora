@@ -110,7 +110,14 @@ func getOrCreateMCPClientWithOAuthRetry(
 	}
 	defer cancel()
 
-	_ = mcpManager.CloseClient(service.ID)
+	// The callback that completed the authorization may have been handled by
+	// another replica, so this one recycles its own connections: this user's,
+	// and any built with a replaced OAuth client registration. Other users'
+	// in-flight calls continue.
+	tenantID, _ := types.TenantIDFromContext(retryCtx)
+	_ = mcpManager.CloseClientsAfterAuthorization(
+		retryCtx, tenantID, service.ID, types.MCPOAuthPrincipalFromContext(retryCtx),
+	)
 	return mcpManager.GetOrCreateClient(retryCtx, service)
 }
 
@@ -158,7 +165,9 @@ func waitForMCPOAuthAuthorization(
 	}
 
 	decision, waitErr := ow.RequestOAuthAndWait(waitCtx, approval.OAuthPendingRequest{
-		TenantID:           tenantID,
+		// The user answers from their own workspace, which differs from
+		// tenantID (the agent's) when the agent is shared.
+		TenantID:           types.CallerFromContext(ctx).TenantID,
 		UserID:             userID,
 		SessionID:          sess.SessionID,
 		AssistantMessageID: sess.AssistantMessageID,

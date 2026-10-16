@@ -243,7 +243,7 @@ func (s *messageSuggestionService) ValidateAttribution(
 	}
 	found := false
 	for _, question := range set.Questions {
-		if question.ID == attribution.QuestionID && strings.TrimSpace(question.Text) == strings.TrimSpace(query) {
+		if question.ID == attribution.QuestionID && queryMatchesSuggestionText(query, question.Text) {
 			found = true
 			break
 		}
@@ -252,6 +252,35 @@ func (s *messageSuggestionService) ValidateAttribution(
 		return errors.New("invalid suggestion attribution")
 	}
 	return nil
+}
+
+const hostContextQueryMarker = "[Host context]\n"
+
+// queryMatchesSuggestionText reports whether query is the clicked suggestion.
+// Embed chat may prefix a host-context envelope. Context values may contain
+// newlines; the question after the envelope must still be the suggestion text.
+func queryMatchesSuggestionText(query, suggestion string) bool {
+	q := strings.TrimSpace(query)
+	s := strings.TrimSpace(suggestion)
+	if q == s {
+		return true
+	}
+	return s != "" && queryHasHostContextEnvelope(q, s)
+}
+
+// queryHasHostContextEnvelope matches the embed prefix from buildQueryWithHostContext.
+// Context values may contain newlines, so the suggestion text anchors the split:
+// the envelope must end immediately before that text.
+func queryHasHostContextEnvelope(query, suggestion string) bool {
+	rest, ok := strings.CutPrefix(query, hostContextQueryMarker)
+	if !ok || !strings.HasSuffix(rest, suggestion) {
+		return false
+	}
+	head := strings.TrimRight(strings.TrimSuffix(rest, suggestion), " \t")
+	if !strings.HasSuffix(head, "\n\n") {
+		return false
+	}
+	return strings.TrimSpace(strings.TrimSuffix(head, "\n\n")) != ""
 }
 
 func (s *messageSuggestionService) generate(

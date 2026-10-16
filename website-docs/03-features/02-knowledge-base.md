@@ -54,6 +54,24 @@
   caption="解析时间线：各阶段耗时、失败原因与卡住提示"
   hint="展示文档解析时间线抽屉：阶段瀑布图（文档解析/分块/向量化/多模态/后处理）、失败时的错误卡片（阶段名、错误码、后端原因与重试按钮），以及「已 N 分钟没有进展」的提示条和停止解析按钮。" />
 
+## 浏览画廊 {#image-gallery}
+
+文档知识库的「画廊」页签汇总从文档提取的图片，以瀑布流持续加载。可搜索图片描述和 OCR 文字，按系统提供的图片属性、来源文档等筛选；点击图片可查看大图、描述、OCR 与来源。来源文档筛选支持多选，便于核对某批文件的解析结果。
+
+画廊展示已有图片资源，不要求开启图片向量检索。
+
+<Screenshot src="/screenshots/kb-image-gallery.png" caption="知识库画廊：图片瀑布流与来源文档筛选" hint="展示画廊页签、搜索和来源文档筛选弹层，放入含照片、图表的多份文档；另一张详情可展示 OCR、描述与来源链接。" />
+
+<Screenshot src="/screenshots/kb-image-gallery-detail.png" caption="画廊详情：查看原图、图片描述、识别文字与来源文档" />
+
+## 多模态 Embedding 与图片检索 {#multimodal-embedding}
+
+支持图片输入的 Embedding 模型将文本与原图编码到同一向量空间，使文字问题能够召回相关图片。已支持的模型包括腾讯 WeMM-Embedding、Qwen3-VL-Embedding 等，接入时需匹配图片输入能力与请求协议；WeMM 的服务部署与接入见[模型配置](06-models.md#wemm-embedding)。
+
+在知识库设置中开启多模态处理和「图片向量检索」，并选用支持图片输入的向量模型。图片向量默认关闭，已有文档需要重新解析才会补建图片向量，扫描 PDF 页不生成图片向量。详细参数与限制见下文「图片向量」。
+
+<Screenshot src="/screenshots/kb-image-vector-settings.png" caption="多模态 Embedding：开启图片向量检索" hint="选择支持图片输入的向量模型，开启多模态处理，展示「图片向量检索」开关及说明；腾讯 WeMM-Embedding 可作为示例。" />
+
 ## 整理文件夹与标签
 
 文件夹用于按目录归档，一篇文档只属于一个文件夹。上传整个目录可保留层级结构；在文件夹树中重命名或移动时，子目录路径会一并更新，目标目录已存在时合并内容。文档在同一知识库内移动文件夹只调整归类，不重新解析。
@@ -184,13 +202,14 @@ graph TB
 
 **ASRConfig**：`enabled` / `model_id` / `language`（语言提示，可选）。
 
-**ImageProcessingConfig（图片属性观察与条件 OCR）**：
+**ImageProcessingConfig（图片属性观察、条件 OCR 与图片向量）**：
 
 | 字段 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
 | `model_id` | string | - | 图片理解使用的 VLM 模型 ID（参与模型用量追踪） |
 | `image_attrs_enabled` | bool | false | 图片属性观察管线开关。关闭（默认）＝历史行为：每张图片各发一次描述请求、各发一次 OCR 请求，不做属性观察；开启后第一轮「属性观察＋描述」，再由代码纯函数按观察结果决定该图是否值得再跑一轮 OCR |
 | `image_actions` | object | 见下 | OCR 触发条件：`{ ocr: { on: ImageAttrCondition[], on_unobserved: bool } }`。`on` 为「属性=值」触发条件列表；`on_unobserved` 为属性未被模型观察时的保守兜底（默认 true＝仍 OCR） |
+| `image_vector_enabled` | bool | false | 图片向量开关。开启且知识库的向量模型能处理图片（模型「图片输入」能力）时，生成图片描述之后再用向量模型直接对图片编码、存一条图片向量，检索时一并召回；见下文「图片向量」 |
 
 开启 `image_attrs_enabled` 后，模型**不再对图片分类**，只逐项「观察」属性并产出描述。本期激活两个观察项（完整注册表见 `GET /api/v1/image-attrs/schema`，只读、需 Viewer 权限；该注册表是全局的，不随知识库变化）：
 
@@ -205,11 +224,25 @@ OCR 决策是代码纯函数 `DecideOCR`（`internal/application/service/image_a
 - 策略读取到的属性**缺键**（模型漏答该行，或答了非法取值）→ 按 `on_unobserved` 兜底（默认仍 OCR）；
 - 全部属性都被观察到、且都不命中 → 跳过 OCR。
 
-模型答非所问 / 属性缺失一律按兜底策略处理，观察失误只多花一次调用、不会丢内容。注意**属性缺键是正常结果**：观察失败时不会写入保守默认值（schema 版本 `attrs/2`），因此 `image_attrs` 可能为空对象，读取方需区分「未观察到」与「观察到了负值」。
+模型答非所问或属性缺失时按 `on_unobserved` 策略处理，默认继续 OCR；若将其设为 `false`，未观察到属性的图片也会跳过 OCR。完整的负值观察结果可能使 OCR 被跳过，因此仍需抽查模型判断与文字提取结果。注意**属性缺键是正常结果**：观察失败时不会写入保守默认值（schema 版本 `attrs/2`），因此 `image_attrs` 可能为空对象，读取方需区分「未观察到」与「观察到了负值」。
 
 管线与观察结果记录在每张图的处理轨迹子 span 上，便于核对与排查：input `pipeline` = `observation_driven`（本开关开启）或 `caption_ocr`（关闭，历史行为）；output `attr_policy`（本轮 OCR 决策）、`image_attrs`（观察到的属性）、`ocr_skipped`（`attr_policy`＝被策略跳过 / `disabled`＝OCR 总开关关闭）、`observation_failed`（未形成有效观察）、`chunks_created`。
 
+OCR 会在入库前拒绝空响应、只有分隔符的内容，以及占据输出主体的长串重复内容；正常短标签、数字和表格仍可保留。OpenAI 兼容 VLM 返回 `finish_reason=length` 时，非空的截断输出也按失败处理。普通图片提示词按可见文字转录，截图中的按钮和标签逐行输出，仅真实表格使用 Markdown 表格；扫描 PDF 使用专用文档布局提示词。
+
+每次执行 OCR 都有独立的 `multimodal.image[i].ocr` 处理子 span；Langfuse 中对应 `image.ocr`，包含模型调用和输出校验。失败时记录 `ocr_status=failed`、`ocr_error_code`（`OCR_INVALID_OUTPUT` / `OCR_TRUNCATED` / `OCR_REQUEST_FAILED`）和错误原因，不创建或索引该次 OCR 分块。正常的图片描述仍可保留，整张图的 output 用 `outcome=partial_failure` 表明部分失败，不因无效 OCR 重试整个图片任务。明确回答没有文字时记为 `ocr_status=no_text`，与异常区分；正常提取记为 `succeeded`。已有异常分块不会被自动清除，需要重新解析相应文档。
+
+可通过 `WEKNORA_OCR_TEST_FIXTURE` 指定本地 JSON 文件（`{"model": <模型配置>, "image_paths": [<本地图片路径>]}`），运行 `go test ./internal/application/service -run '^TestLiveImageOCRValidation$' -v -count=1` 验证实际模型。私有端点需配置 `SSRF_WHITELIST`。该测试使用内存分块仓库，不写业务数据库；带凭证的配置和原图应放在版本控制之外。
+
 单次上传 / 重新解析可在请求体的 `process_config`（`KnowledgeProcessOverrides`）里按文档覆盖 `image_attrs_enabled` 与 `image_actions`；未传的项沿用知识库设置。`image_actions` 按 action key 合并（`on` 整体替换）。接口字段见[知识库 API](../04-api/02-api-knowledge.md)，管线细节见[文档解析](03-document-parsing.md)。
+
+**图片向量（`image_vector_enabled`）**：默认关闭，升级后已有知识库也保持关闭（库里存的配置没有这个键，读出来就是 false），需要在知识库设置「图像处理配置 → 图片向量检索」里（开启多模态后出现）或通过 API 显式开启。只有**开关打开且向量模型能处理图片**时才生效，两者缺一则入库不生成图片向量、检索也不召回图片向量。之所以不随模型能力自动开启：能处理图片的向量模型常常只是被用来编码文本，自动开启会给这些知识库凭空增加每张图片一次的向量调用，并改变检索行为——开启后文档向量检索的候选池放大 1.5 倍，图片命中按 `min(VectorThreshold, 0.1)` 的单独阈值过滤。
+
+- 图片向量在多模态任务里生成，所以还需要开启多模态（VLM）：图片向量的 `Content` 复用图片描述（没有描述时用 OCR 文本）；扫描件 PDF 页不生成；
+- 开关只影响此后入库或重新解析的文档；已有文档要补图片向量需重新解析；
+- 开关关闭时，已有的图片向量（关闭前生成的，或文档从开启了图片向量的知识库**移动**过来时随文档带来的）连同其分块会保留，但检索时一律丢弃，不再召回；删除或重新解析文档、删除知识库时随文档一起清除；重新开启开关后，这些保留的图片向量恢复召回。**复制**文档到未开启的知识库则不会复制图片向量；
+- 多知识库联合检索时按知识库各自的开关判断，未开启的知识库不召回图片向量；
+- 检索引擎无法按来源类型过滤，不召回的图片行（未开启知识库的图片向量命中，以及关键词检索命中的任何图片行）只能在结果返回后丢弃。为免它们占满候选池、把文本挤出去，文档向量池或关键词池打满且含这类图片行时，会把 TopK 翻倍重新检索，直到凑够不需丢弃的候选（文本命中，以及开启了图片向量的知识库的图片命中）、索引耗尽或到达 500 条候选上限（以默认的 50 条池计，每个池最多多 4 次查询）。因此含图片行的 store 组可能多出几次检索查询；排在文本前面的图片行超过约 500 条时，文本命中仍可能被漏掉。补检失败或只部分返回时保留上一轮的完整结果。
 
 **QuestionGenerationConfig（问题生成）**：`enabled`；`question_count` 每分块生成问题数（默认 3，上限 10）；`custom_instructions` 目标受众 / 风格说明。
 

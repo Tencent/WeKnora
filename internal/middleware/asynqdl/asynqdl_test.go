@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
@@ -168,6 +170,24 @@ func TestMiddleware_LongErrorTruncated(t *testing.T) {
 	const suffix = "...(truncated)"
 	if got := row.LastError[len(row.LastError)-len(suffix):]; got != suffix {
 		t.Errorf("expected truncation suffix %q, got %q", suffix, got)
+	}
+}
+
+func TestMiddleware_LongMultiByteErrorStaysValidUTF8(t *testing.T) {
+	repo := &fakeRepo{}
+	// Each CJK rune is 3 bytes; the leading "E" shifts the 8178-byte cut
+	// (8192 minus the suffix) into the middle of one.
+	long := "E" + strings.Repeat("解析失败", 1000)
+	_ = runMiddleware(repo, "any", []byte("{}"), errors.New(long))
+	row := repo.captureRow(0)
+	if got := len(row.LastError); got > 8192 {
+		t.Errorf("expected last_error truncated to <=8192 bytes, got %d", got)
+	}
+	if !utf8.ValidString(row.LastError) {
+		t.Errorf("expected last_error to be valid UTF-8, got trailing bytes %q", row.LastError[len(row.LastError)-20:])
+	}
+	if !strings.HasSuffix(row.LastError, "...(truncated)") {
+		t.Errorf("expected truncation suffix, got %q", row.LastError[len(row.LastError)-20:])
 	}
 }
 

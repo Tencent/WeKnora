@@ -38,14 +38,8 @@
               ? $t('knowledgeEditor.models.embeddingWikiOptionalDesc')
               : $t('knowledgeEditor.models.embeddingDesc') }}
           </p>
-          <t-alert
-            v-if="ragEnabled && hasFiles"
-            theme="warning"
-            :message="$t('knowledgeEditor.models.embeddingLocked')"
-            style="margin-top: 8px;"
-          />
         </div>
-        <div class="setting-control">
+        <div class="setting-control setting-control--stacked">
           <ModelSelector
             ref="embeddingSelectorRef"
             model-type="Embedding"
@@ -57,6 +51,10 @@
             @add-model="handleAddModel('embedding')"
             :placeholder="$t('knowledgeEditor.models.embeddingPlaceholder')"
           />
+          <p v-if="ragEnabled && hasFiles" class="locked-hint">
+            <t-icon name="lock-on" class="locked-hint-icon" />
+            <span>{{ $t('knowledgeEditor.models.embeddingLocked') }}</span>
+          </p>
         </div>
       </div>
 
@@ -222,6 +220,29 @@ const handleAddModel = (subSection: string) => {
   display: flex;
   justify-content: flex-end;
   align-items: flex-start;
+
+  &--stacked {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+}
+
+.locked-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--app-text-sm);
+  line-height: 18px;
+  color: var(--td-text-color-secondary);
+
+  .locked-hint-icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+    font-size: var(--app-text-base);
+    color: var(--td-text-color-placeholder);
+  }
 }
 </style>
 

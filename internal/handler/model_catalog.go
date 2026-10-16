@@ -104,6 +104,9 @@ func providerDTO(v *modelruntime.Provider, modelType types.ModelType, includeMod
 	modelTypes := make([]string, 0, len(v.ModelTypes))
 	for _, mt := range v.ModelTypes {
 		modelTypes = append(modelTypes, modelTypeToFrontend(mt))
+		// Use the same fallback as runtime resolution. Several ASR vendors
+		// share their chat base URL without declaring a separate ASR entry.
+		defaultURLs[modelTypeToFrontend(mt)] = v.GetDefaultURL(mt)
 	}
 	dto := ModelProviderDTO{
 		Value:        v.ID,
@@ -187,7 +190,7 @@ func providerDTO(v *modelruntime.Provider, modelType types.ModelType, includeMod
 // @Accept       json
 // @Produce      json
 // @Param        model_type  query     string  false  "模型类型 (chat, embedding, rerank, vllm, asr)"
-// @Success      200         {object}  map[string]interface{}  "厂商列表"
+// @Success      200         {object}  handler.DataResponse{data=[]handler.ModelProviderDTO}  "厂商列表"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /models/providers [get]

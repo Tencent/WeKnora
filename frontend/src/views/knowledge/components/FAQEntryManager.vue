@@ -757,6 +757,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import { ref, reactive, watch, onMounted, computed, nextTick, onUnmounted, h } from 'vue'
 import KnowledgeTagFilter from './KnowledgeTagFilter.vue'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
@@ -766,6 +767,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useOrganizationStore } from '@/stores/organization'
+import { useChatResourcesStore } from '@/stores/chatResources'
 import {
   listFAQEntries,
   upsertFAQEntries,
@@ -778,7 +780,6 @@ import {
   listKnowledgeTags,
   updateFAQEntryTagBatch,
   getKnowledgeBaseById,
-  listKnowledgeBases,
   getFAQImportProgress,
   updateFAQImportResultDisplayStatus,
 } from '@/api/knowledge-base'
@@ -835,6 +836,7 @@ const router = useRouter()
 const uiStore = useUIStore()
 const authStore = useAuthStore()
 const orgStore = useOrganizationStore()
+const chatResources = useChatResourcesStore()
 
 // Permission control: check if current user owns this KB or has edit/manage permission.
 //
@@ -850,7 +852,8 @@ const isOwner = computed(() => {
   const creatorId = (kbInfo.value as any).creator_id || ''
   const userId = authStore.user?.id || ''
   if (!creatorId) return false
-  return creatorId === userId
+  // A creator demoted to Viewer no longer manages it (access.CreatorRoleFloor).
+  return creatorId === userId && authStore.hasRole('contributor')
 })
 
 // Current KB's shared record (when accessed via organization share)
@@ -870,7 +873,7 @@ const isViaShare = computed(() => !!currentSharedKb.value)
 // the KB. The backend's RBAC middleware authorizes based on the active
 // tenant, not on creator_id, so a creator viewing their own KB from a
 // different tenant context will be 403'd on write. Otherwise: KB creator
-// (any role) or tenant Admin+ in the home tenant.
+// (Contributor+) or tenant Admin+ in the home tenant.
 const canEdit = computed(() => {
   if (isViaShare.value) return orgStore.canEditKB(props.kbId, false)
   if (isOwner.value) return true
@@ -1009,8 +1012,8 @@ const loadKnowledgeInfo = async (kbId: string) => {
 
 const loadKnowledgeList = async () => {
   try {
-    const res: any = await listKnowledgeBases()
-    const myKbs: typeof knowledgeList.value = (res?.data || []).map((item: any) => ({
+    await chatResources.ensureKnowledgeBases()
+    const myKbs: typeof knowledgeList.value = chatResources.rawKnowledgeBases.map((item: any) => ({
       id: String(item.id),
       name: item.name,
       type: item.type,
@@ -2585,6 +2588,12 @@ const handleResize = () => {
     resizeTimer = null
   }, 150)
 }
+
+useAssistantDataChange((changes) => {
+  if (!changes.some(change => change.ids.knowledgeBaseIds.includes(props.kbId))) return
+  void loadEntries()
+  void loadTags(true)
+}, { areas: ['faq'] })
 
 onMounted(async () => {
   // Ensure shared knowledge bases are loaded before loading the knowledge list

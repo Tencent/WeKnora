@@ -122,7 +122,8 @@ function showBadge(item: SettingsModalNavItem): boolean {
 <style lang="less">
 .settings-modal-shell.settings-overlay {
   position: fixed;
-  inset: 0;
+  // Stops at a docked assistant panel.
+  inset: 0 var(--assistant-dock-width, 0px) 0 0;
   background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;

@@ -27,7 +27,7 @@ import (
 // @Param        session_id     path      string  true   "会话ID"
 // @Param        message_id     query     string  true   "消息ID"
 // @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
-// @Success      200            {object}  map[string]interface{}  "流式响应"
+// @Success      200            {string}  string  "SSE 事件流"
 // @Failure      404         {object}  errors.AppError         "会话或消息不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth

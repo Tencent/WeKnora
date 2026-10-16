@@ -33,7 +33,7 @@ func TestManagerConcurrentStartupCancellationAndConfigReplacement(t *testing.T) 
 			Method string `json:"method"`
 		}
 		_ = json.Unmarshal(body, &request)
-		if request.Method == "initialize" {
+		if request.Method == "initialize" || request.Method == "server/discover" {
 			if r.URL.Path == "/slow" {
 				slowInitializations.Add(1)
 				startOnce.Do(func() { close(started) })

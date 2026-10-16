@@ -104,8 +104,13 @@ func (s *knowledgeService) syncFAQChunkStatusBatch(
 			metadataIDs = append(metadataIDs, dst.ID)
 		}
 	}
-	if len(rows) > 0 {
-		if err := s.chunkRepo.UpdateChunks(ctx, rows); err != nil {
+	for _, row := range rows {
+		// These are status-only snapshots. UpdateChunks also writes content and
+		// indexing status, which are absent here and must remain unchanged.
+		fields := map[string]interface{}{
+			"is_enabled": row.IsEnabled, "flags": int(row.Flags), "tag_id": row.TagID,
+		}
+		if err := s.chunkRepo.UpdateChunkFieldsByIDs(ctx, tenantID, []string{row.ID}, fields); err != nil {
 			return err
 		}
 	}
@@ -149,7 +154,7 @@ func (s *knowledgeService) syncFAQChunkStatusBatch(
 	}
 	if len(recommendedUpdates) > 0 {
 		// Vector-store recommended flag sync is not yet available on all backends in
-		// this branch; DB flags were already updated via UpdateChunks above.
+		// this branch; DB flags were already updated above.
 		logger.Warnf(ctx, "FAQ clone sync: skipped vector recommended update for %d chunks (DB flags updated)", len(recommendedUpdates))
 	}
 	return nil

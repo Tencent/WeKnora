@@ -4,7 +4,10 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 function run(dir, script) {
-  const result = spawnSync('npm', ['run', script], { cwd: resolve(root, dir), stdio: 'inherit' });
+  const npmCLI = process.env.npm_execpath;
+  if (!npmCLI) throw new Error('Run the site build through npm so npm_execpath is available.');
+  const result = spawnSync(process.execPath, [npmCLI, 'run', script], { cwd: resolve(root, dir), stdio: 'inherit' });
+  if (result.error) throw new Error(`Could not run npm ${script}: ${result.error.message}`);
   if (result.status !== 0) process.exit(result.status || 1);
 }
 for (const dir of ['homepage', '.']) {
@@ -24,6 +27,10 @@ for (const entry of readdirSync(output)) {
   if (!['index.html', '404.html', 'docs'].includes(entry)) rmSync(resolve(output, entry), { recursive: true, force: true });
 }
 cpSync(resolve(root, '.vitepress/dist'), resolve(output, 'docs'), { recursive: true });
+// The leaderboard is a homepage JSX page exported to /docs/models/. Keep a
+// sibling .html file so /docs/models resolves without a trailing slash.
+const modelsIndex = resolve(output, 'docs/models/index.html');
+if (existsSync(modelsIndex)) cpSync(modelsIndex, resolve(output, 'docs/models.html'));
 run('homepage', 'audit:content');
 const check = spawnSync(process.execPath, ['scripts/check-site.mjs', output], { cwd: root, stdio: 'inherit' });
 if (check.status !== 0) process.exit(check.status || 1);

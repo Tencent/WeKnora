@@ -112,7 +112,7 @@ type platformAPIKeyCreateRequest struct {
 // @Description  Lists non-workspace API keys. Full tokens are always masked. Human SystemAdmin only.
 // @Tags         System Admin
 // @Produce      json
-// @Success      200 {object} map[string]interface{}
+// @Success      200 {object} handler.DataResponse{data=[]handler.tenantAPIKeyResponse}
 // @Security     Bearer
 // @Router       /system/admin/api-keys [get]
 func (h *SystemHandler) ListPlatformAPIKeys(c *gin.Context) {
@@ -137,7 +137,7 @@ func (h *SystemHandler) ListPlatformAPIKeys(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        request body platformAPIKeyCreateRequest true "Platform API key"
-// @Success      201 {object} map[string]interface{}
+// @Success      201 {object} handler.DataResponse{data=handler.tenantAPIKeyCreateResponse}
 // @Security     Bearer
 // @Router       /system/admin/api-keys [post]
 func (h *SystemHandler) CreatePlatformAPIKey(c *gin.Context) {
@@ -189,7 +189,7 @@ func (h *SystemHandler) CreatePlatformAPIKey(c *gin.Context) {
 // @Tags         System Admin
 // @Produce      json
 // @Param        key_id path int true "API key ID"
-// @Success      200 {object} map[string]interface{}
+// @Success      200 {object} handler.SuccessResponse
 // @Security     Bearer
 // @Router       /system/admin/api-keys/{key_id} [delete]
 func (h *SystemHandler) DeletePlatformAPIKey(c *gin.Context) {
@@ -398,7 +398,7 @@ func (h *SystemHandler) getDocReaderConnInfo() (addr, transport string) {
 // @Summary      列出可用的文档解析引擎
 // @Tags         系统
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "解析引擎列表"
+// @Success      200  {object}  handler.ListParserEnginesResponse  "解析引擎列表"
 // @Router       /system/parser-engines [get]
 func (h *SystemHandler) ListParserEngines(c *gin.Context) {
 	var overrides map[string]string
@@ -1523,6 +1523,117 @@ func (h *SystemHandler) ListSystemAdmins(c *gin.Context) {
 	})
 }
 
+// ListAllUsersResponse is the paginated payload for the platform user list.
+// Unlike the system-admin list there is no total COUNT; HasMore tells the UI
+// whether a next page exists (derived by fetching limit+1 rows).
+type ListAllUsersResponse struct {
+	Users   []*types.UserInfo `json:"users"`
+	Offset  int               `json:"offset"`
+	Limit   int               `json:"limit"`
+	HasMore bool              `json:"has_more"`
+}
+
+// ListUsers godoc
+// @Summary      List all platform users
+// @Description  Retrieve a paginated list of every user across tenants (SystemAdmin only).
+// @Description  Supports `offset` (default 0) and `limit` (default 50, max 200).
+// @Description  Password/hashes are never serialised — only the redacted UserInfo shape.
+// @Tags         System Admin
+// @Produce      json
+// @Param        offset query int false "Page offset" default(0)
+// @Param        limit  query int false "Page size (max 200)" default(50)
+// @Success      200  {object}  ListAllUsersResponse  "Users retrieved successfully"
+// @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
+// @Router       /system/admin/users [get]
+func (h *SystemHandler) ListUsers(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+
+	offset := 0
+	limit := 50
+	if v := c.Query("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	users, hasMore, err := h.userSvc.ListAllUsers(ctx, offset, limit)
+	if err != nil {
+		logger.Errorf(ctx, "Error listing users: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list users"})
+		return
+	}
+
+	infos := make([]*types.UserInfo, 0, len(users))
+	for _, u := range users {
+		infos = append(infos, u.ToUserInfo())
+	}
+
+	c.JSON(http.StatusOK, ListAllUsersResponse{
+		Users:   infos,
+		Offset:  offset,
+		Limit:   limit,
+		HasMore: hasMore,
+	})
+}
+
+// SetUserStatusRequest toggles a user account enabled/disabled (SystemAdmin only).
+type SetUserStatusRequest struct {
+	UserID   string `json:"user_id" binding:"required"`
+	IsActive *bool  `json:"is_active" binding:"required"`
+}
+
+// SetUserStatus godoc
+// @Summary      Enable or disable a user account
+// @Description  Disable revokes the target's active sessions immediately.
+// @Description  Self-disable and disabling the last active system administrator are rejected.
+// @Tags         System Admin
+// @Accept       json
+// @Produce      json
+// @Param        request body SetUserStatusRequest true "Account status request"
+// @Success      200  {object}  handler.SetUserStatusResponse  "Status updated"
+// @Failure      400  {object}  map[string]interface{}  "Self-disable / last-admin guard"
+// @Failure      404  {object}  map[string]interface{}  "User not found"
+// @Router       /system/admin/users/status [post]
+func (h *SystemHandler) SetUserStatus(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+
+	var req SetUserStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	callerID, _ := types.UserIDFromContext(ctx)
+	user, err := h.userSvc.SetUserActive(ctx, strings.TrimSpace(req.UserID), callerID, *req.IsActive)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrUserNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		case errors.Is(err, service.ErrCannotDisableSelf),
+			errors.Is(err, service.ErrCannotDisableLastAdmin):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			logger.Errorf(ctx, "Error setting user status: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user status"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "User status updated",
+		"user":      user.ToUserInfo(),
+		"is_active": user.IsActive,
+	})
+}
+
 // ResetUserPasswordRequest defines the system-administrator password-reset
 // payload. Email is intentionally the only user-facing identifier: the UI is
 // an operator tool and emails are easier to verify than UUIDs. The password is
@@ -1540,7 +1651,7 @@ type ResetUserPasswordRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request body ResetUserPasswordRequest true "Password reset request"
-// @Success      200  {object}  map[string]interface{}  "Password reset successfully"
+// @Success      200  {object}  handler.ResetUserPasswordResponse  "Password reset successfully"
 // @Failure      400  {object}  map[string]interface{}  "Invalid request, weak password, or self reset"
 // @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
 // @Failure      404  {object}  map[string]interface{}  "User not found"
@@ -2130,7 +2241,7 @@ func (h *SystemHandler) MutateRuntimeTask(c *gin.Context) {
 // @Tags         System Admin
 // @Produce      json
 // @Param        queue path string true "Queue name"
-// @Success      200 {object} map[string]interface{}
+// @Success      200 {object} handler.PurgeArchivedRuntimeTasksResponse
 // @Router       /system/admin/runtime/queues/{queue}/archived [delete]
 func (h *SystemHandler) PurgeArchivedRuntimeTasks(c *gin.Context) {
 	queue := c.Param("queue")
@@ -2314,7 +2425,7 @@ func (h *SystemHandler) UpdateSystemSetting(c *gin.Context) {
 // @Description  Idempotent — running twice with the same setting is a no-op.
 // @Tags         System Admin
 // @Produce      json
-// @Success      200 {object} map[string]interface{} "{ affected: int64, quota_bytes: int64 }"
+// @Success 200 {object} handler.ApplyDefaultStorageQuotaToAllTenantsResponse "{ affected: int64, quota_bytes: int64 }"
 // @Failure      500 {object} map[string]interface{} "DB write failed"
 // @Router       /system/admin/tenants/apply-default-storage-quota [post]
 func (h *SystemHandler) ApplyDefaultStorageQuotaToAllTenants(c *gin.Context) {
@@ -2377,7 +2488,7 @@ func (h *SystemHandler) ApplyDefaultStorageQuotaToAllTenants(c *gin.Context) {
 // @Description  that was never persisted returns 200.
 // @Tags         System Admin
 // @Param        key path string true "Setting key"
-// @Success      200 {object} map[string]interface{} "Reset acknowledged"
+// @Success      200 {object} handler.SuccessResponse "Reset acknowledged"
 // @Failure      400 {object} map[string]interface{} "Unknown key"
 // @Failure      500 {object} map[string]interface{} "DB write failed"
 // @Router       /system/admin/settings/{key} [delete]

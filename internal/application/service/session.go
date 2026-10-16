@@ -23,6 +23,38 @@ func sessionUserIDFromContext(ctx context.Context) string {
 	return types.SessionOwnerIDFromContext(ctx)
 }
 
+// loadSessionForManage preserves owner-scoped access and permits Web console
+// admins to manage other owners' channel sessions within the same tenant.
+func loadSessionForManage(
+	ctx context.Context,
+	repo interfaces.SessionRepository,
+	tenantID uint64,
+	ownerID, sessionID string,
+) (*types.Session, error) {
+	session, err := repo.Get(ctx, tenantID, ownerID, sessionID)
+	if err == nil || !stderrors.Is(err, apperrors.ErrSessionNotFound) {
+		return session, err
+	}
+	principal, ok := types.PrincipalFromContext(ctx)
+	if !ok || principal.Type != types.PrincipalWebUser ||
+		!types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
+		return nil, apperrors.ErrSessionNotFound
+	}
+
+	session, err = repo.GetByID(ctx, tenantID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	imPlatform, err := repo.GetIMPlatform(ctx, tenantID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !types.SessionRequiresAdminConsoleRead(session, imPlatform) {
+		return nil, apperrors.ErrSessionNotFound
+	}
+	return session, nil
+}
+
 // runtimeMayBypassAdminConsoleRead reports whether a non-admin caller on the
 // owner-scoped read path may open a channel-managed session. Admin console reads
 // use the GetByID fallback in loadSessionForRead and never call this helper.
@@ -58,7 +90,7 @@ func runtimeMayBypassAdminConsoleRead(
 // an Admin+ fallback that additionally permits reading tenant channel sessions
 // (API-key, IM, and embed) from the Web console. Non-admin callers must not
 // open channel-managed rows even when legacy empty user_id scope would match.
-// Write paths keep the strict scope and must not use this helper.
+// Chat runtime writes keep the strict owner scope and must not use this helper.
 func loadSessionForRead(
 	ctx context.Context,
 	repo interfaces.SessionRepository,
@@ -350,12 +382,17 @@ func (s *sessionService) ListSessions(
 	if query == nil {
 		query = &types.SessionListQuery{}
 	}
+	if !types.IsValidSessionKind(query.Kind) {
+		return nil, apperrors.NewBadRequestError("invalid session kind")
+	}
 	query.TenantID = types.MustTenantIDFromContext(ctx)
 	// API / IM / embed source filters are tenant-wide admin views over channel
 	// traffic. Gate them behind Admin+ and drop the per-user owner scope so an
 	// Owner/admin can observe sessions that are otherwise isolated per key,
 	// visitor, or IM identity; everyone else stays scoped to their own principal.
-	if types.SessionListSourceRequiresAdmin(query.Source) {
+	if query.Kind == types.SessionKindAssistant {
+		query.UserID = types.SessionOwnerIDFromContext(ctx)
+	} else if types.SessionListSourceRequiresAdmin(query.Source) {
 		if !types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
 			return nil, apperrors.NewForbiddenError(
 				"listing channel sessions requires tenant admin or owner role",
@@ -392,7 +429,9 @@ func (s *sessionService) CountSessionsBySource(
 		query = &types.SessionListQuery{}
 	}
 	query.TenantID = types.MustTenantIDFromContext(ctx)
-	if types.SessionListSourceRequiresAdmin(query.Source) {
+	if query.Kind == types.SessionKindAssistant {
+		query.UserID = types.SessionOwnerIDFromContext(ctx)
+	} else if types.SessionListSourceRequiresAdmin(query.Source) {
 		query.UserID = ""
 	} else if uid := types.SessionOwnerIDFromContext(ctx); uid != "" {
 		query.UserID = uid
@@ -433,7 +472,7 @@ func (s *sessionService) UpdateSession(ctx context.Context, session *types.Sessi
 
 	// Update session in repository
 	userID := sessionUserIDFromContext(ctx)
-	existing, err := s.sessionRepo.Get(ctx, session.TenantID, userID, session.ID)
+	existing, err := loadSessionForManage(ctx, s.sessionRepo, session.TenantID, userID, session.ID)
 	if err != nil {
 		return err
 	}
@@ -442,7 +481,7 @@ func (s *sessionService) UpdateSession(ctx context.Context, session *types.Sessi
 			session.Description, existing.Description)
 	}
 
-	_, err = s.sessionRepo.Update(ctx, session, userID)
+	_, err = s.sessionRepo.Update(ctx, session, existing.UserID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": session.ID,
@@ -494,7 +533,7 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	tenantID := types.MustTenantIDFromContext(ctx)
 	userID := sessionUserIDFromContext(ctx)
 
-	session, err := s.sessionRepo.Get(ctx, tenantID, userID, id)
+	session, err := loadSessionForManage(ctx, s.sessionRepo, tenantID, userID, id)
 	if err != nil {
 		return err
 	}
@@ -537,7 +576,7 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 
 	s.destroyBoundSandbox(ctx, id)
 	// Delete session from repository
-	rows, err := s.sessionRepo.Delete(ctx, tenantID, userID, id)
+	rows, err := s.sessionRepo.Delete(ctx, tenantID, session.UserID, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": id,
@@ -566,11 +605,13 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 
 	visible := make([]*types.Session, 0, len(ids))
 	visibleIDs := make([]string, 0, len(ids))
+	idsByOwner := make(map[string][]string)
 	for _, id := range ids {
-		session, err := s.sessionRepo.Get(ctx, tenantID, userID, id)
+		session, err := loadSessionForManage(ctx, s.sessionRepo, tenantID, userID, id)
 		if err == nil {
 			visible = append(visible, session)
 			visibleIDs = append(visibleIDs, id)
+			idsByOwner[session.UserID] = append(idsByOwner[session.UserID], id)
 		} else if !stderrors.Is(err, apperrors.ErrSessionNotFound) {
 			return err
 		}
@@ -609,12 +650,14 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 	}
 
 	// Batch delete sessions from repository
-	if _, err := s.sessionRepo.BatchDelete(ctx, tenantID, userID, visibleIDs); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"session_ids": visibleIDs,
-			"tenant_id":   tenantID,
-		})
-		return err
+	for ownerID, ownerIDs := range idsByOwner {
+		if _, err := s.sessionRepo.BatchDelete(ctx, tenantID, ownerID, ownerIDs); err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"session_ids": ownerIDs,
+				"tenant_id":   tenantID,
+			})
+			return err
+		}
 	}
 	if s.suggestionRepo != nil {
 		for _, id := range visibleIDs {

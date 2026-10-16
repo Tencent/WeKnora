@@ -196,7 +196,7 @@ func (h *IMHandler) ListAllIMChannels(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      string                  true  "渠道 ID"
 // @Param        request  body      map[string]interface{}  true  "更新字段（含 locale）"
-// @Success      200      {object}  map[string]interface{}  "更新后的渠道"
+// @Success      200      {object}  handler.UpdateIMChannelResponse  "更新后的渠道"
 // @Failure      400      {object}  map[string]interface{}  "请求参数错误"
 // @Failure      404      {object}  map[string]interface{}  "渠道不存在"
 // @Security     Bearer
@@ -302,7 +302,7 @@ func normalizeIMLocale(locale string) (string, error) {
 	if normalized := types.NormalizeSupportedLocale(locale); normalized != "" {
 		return normalized, nil
 	}
-	return "", errors.New("locale must be one of: 'en-US', 'ja-JP', 'ko-KR', 'ru-RU', 'zh-CN'")
+	return "", errors.New("locale must be one of: 'en-US', 'ja-JP', 'ko-KR', 'ru-RU', 'zh-CN', 'zh-TW'")
 }
 
 // DeleteIMChannel deletes an IM channel.
@@ -313,7 +313,7 @@ func normalizeIMLocale(locale string) (string, error) {
 // @Tags         IM 渠道
 // @Produce      json
 // @Param        id   path      string                  true  "渠道 ID"
-// @Success      200  {object}  map[string]interface{}  "success: true"
+// @Success      200  {object}  handler.SuccessResponse  "success: true"
 // @Failure      400  {object}  map[string]interface{}  "请求参数错误"
 // @Failure      404  {object}  map[string]interface{}  "渠道不存在"
 // @Security     Bearer
@@ -348,7 +348,7 @@ func (h *IMHandler) DeleteIMChannel(c *gin.Context) {
 // @Tags         IM 渠道
 // @Produce      json
 // @Param        id   path      string                  true  "渠道 ID"
-// @Success      200  {object}  map[string]interface{}  "更新后的渠道"
+// @Success      200  {object}  handler.UpdateIMChannelResponse  "更新后的渠道"
 // @Failure      400  {object}  map[string]interface{}  "请求参数错误"
 // @Failure      404  {object}  map[string]interface{}  "渠道不存在"
 // @Security     Bearer

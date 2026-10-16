@@ -827,6 +827,35 @@ func SSRFSafeGRPCDialer(ctx context.Context, addr string) (net.Conn, error) {
 	return SSRFSafeDialContext(ctx, "tcp", addr)
 }
 
+// outboundDialTimeoutNanos caps how long SSRFSafeDialContext may spend
+// establishing a TCP connection to an outbound (SSRF-validated) endpoint before
+// giving up. A black-holed or otherwise unreachable endpoint should fail fast —
+// if a dial takes longer than this, the remote service is effectively
+// unavailable and the caller (e.g. the VLM/LLM client) can surface the error
+// immediately instead of letting the UI show a misleading "thinking" state.
+// Defaults to 5s and is tuned via WEKNORA_OUTBOUND_DIAL_TIMEOUT in
+// config.LoadConfig. Stored as nanoseconds so it can be swapped atomically.
+var outboundDialTimeoutNanos atomic.Int64
+
+func init() {
+	outboundDialTimeoutNanos.Store(int64(5 * time.Second))
+}
+
+// SetOutboundDialTimeout overrides the per-connection dial timeout used by
+// SSRFSafeDialContext. It is called once at startup from config.LoadConfig and
+// is safe to call concurrently. Non-positive values are ignored.
+func SetOutboundDialTimeout(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	outboundDialTimeoutNanos.Store(int64(d))
+}
+
+// OutboundDialTimeout returns the current per-connection dial timeout.
+func OutboundDialTimeout() time.Duration {
+	return time.Duration(outboundDialTimeoutNanos.Load())
+}
+
 // SSRFSafeDialContext is a custom dial function that validates the resolved IP addresses
 // before establishing a connection. This provides an additional layer of SSRF protection
 // against DNS rebinding attacks during the connection phase.
@@ -843,7 +872,7 @@ func SSRFSafeDialContext(ctx context.Context, network, addr string) (net.Conn, e
 	// hosts. Admins must ensure whitelisted domains are under their control.
 	if IsSystemProxy(addr) || IsSSRFWhitelisted(host) {
 		dialer := &net.Dialer{
-			Timeout:   30 * time.Second,
+			Timeout:   OutboundDialTimeout(),
 			KeepAlive: 30 * time.Second,
 		}
 		return dialer.DialContext(ctx, network, addr)
@@ -892,7 +921,7 @@ func SSRFSafeDialContext(ctx context.Context, network, addr string) (net.Conn, e
 	// If we get here, all IPs are safe. Pin the connection to the validated DNS
 	// answers; TLS still uses the request hostname for SNI/certificate checks.
 	dialer := &net.Dialer{
-		Timeout:   30 * time.Second,
+		Timeout:   OutboundDialTimeout(),
 		KeepAlive: 30 * time.Second,
 	}
 	var lastErr error

@@ -5,11 +5,8 @@ import {
   findInText,
   findNormalized,
   locatorPages,
-  narrowTextLines,
-  ngramOverlap,
   normalizeForMatch,
   parseSourceLocators,
-  pickBestTexts,
   selectLocatorsForSentence,
   selectQuoteForSentence,
   textFragmentUrl,
@@ -19,8 +16,8 @@ import { resolveReferenceSource } from './referenceSources.ts'
 import { resolveEpubPath } from './epubPreview.ts'
 import { resolvePreviewKind } from './filePreview.ts'
 
-test('normalization keeps letters and digits only, folding width and case', () => {
-  assert.equal(normalizeForMatch('８.１４ 索夹，Ｈello!'), '814索夹hello')
+test('normalization preserves numeric symbols while folding width and case', () => {
+  assert.equal(normalizeForMatch('８.１４ 索夹，Ｈello!'), '8.14索夹hello')
 })
 
 test('findInText maps a normalized match back to the raw text', () => {
@@ -30,7 +27,7 @@ test('findInText maps a normalized match back to the raw text', () => {
   assert.equal(text.slice(hit.start, hit.end), '在满足施工需要的前提下，应减小猫道面层开孔面积')
 })
 
-test('findNormalized tolerates a differing opening via mid and tail anchors', () => {
+test('findNormalized tolerates only an omitted leading list label', () => {
   const hay = normalizeForMatch('前文。紧固同一索夹的螺栓时，各螺栓受力应均匀，并应按规定顺序施拧。后文')
   const m = findNormalized(hay, '（二）紧固同一索夹的螺栓时，各螺栓受力应均匀，并应按规定顺序施拧')
   assert.ok(m)
@@ -38,10 +35,7 @@ test('findNormalized tolerates a differing opening via mid and tail anchors', ()
   assert.equal(findNormalized(hay, '完全无关的一段内容不应该被匹配到这里来吧'), null)
 })
 
-test('ngramOverlap scores shared bigrams', () => {
-  assert.equal(ngramOverlap('abcd', 'xxabcdxx'), 1)
-  assert.equal(ngramOverlap('abcd', 'wxyz'), 0)
-})
+
 
 test('selectLocatorsForSentence narrows to the locator that supports the sentence', () => {
   const locs = [
@@ -58,8 +52,8 @@ test('selectLocatorsForSentence narrows to the locator that supports the sentenc
 test('selectQuoteForSentence prefers the supporting sentence of the chunk', () => {
   const content = '索夹在主缆上定位后，应紧固螺栓。吊运物体时，作业人员不得沿主缆顶面行走。'
   const [first] = selectQuoteForSentence(content, '吊运物体时作业人员不得沿主缆顶面行走')
-  assert.equal(first, '吊运物体时，作业人员不得沿主缆顶面行走。')
-  assert.equal(selectQuoteForSentence(content, '')[0], '索夹在主缆上定位后，应紧固螺栓。')
+  assert.equal(first, '吊运物体时，作业人员不得沿主缆顶面行走')
+  assert.equal(selectQuoteForSentence(content, '')[0], content)
 })
 
 test('parseSourceLocators and locatorPages', () => {
@@ -78,20 +72,9 @@ test('textFragmentUrl builds a scroll-to-text link', () => {
   assert.match(long, /#:~:text=x+,.*y+$/)
 })
 
-test('pickBestTexts narrows a slide or sheet to the cited line', () => {
-  const bullets = ['风险与对策', '台风季可能影响高空作业：已准备应急停工预案', '钢材价格上涨8%：已锁定四季度采购价']
-  assert.deepEqual(pickBestTexts(bullets, '应对措施：已准备应急停工预案。依据：'), [1])
-  const rows = ['液压拉伸器 HT-300 6 张工 在用', '超声波轴力计 UB-20 2 李工 送检', '缆索吊机 CL-500 1 赵工 维修中']
-  assert.deepEqual(pickBestTexts(rows, '状态：维修中 负责人：赵工 依据：'), [2])
-  assert.deepEqual(pickBestTexts(bullets, '完全无关的一句话内容'), [])
-})
 
-test('narrowTextLines keeps the cited lines of a text range', () => {
-  const text = '一、安全方面\n上周共排查隐患17项，剩余2项为临边防护网破损。\n二、进度方面\n主缆猫道铺设滞后1天。'
-  const [[start, end]] = narrowTextLines(text, [[0, Array.from(text).length]], '临边防护网破损需要在周五前整改')
-  assert.equal(Array.from(text).slice(start, end).join(''), '上周共排查隐患17项，剩余2项为临边防护网破损。')
-  assert.deepEqual(narrowTextLines(text, [[0, 5]], '完全无关的内容句子'), [])
-})
+
+
 
 test('lastSentence keeps the cited sentence and extends short ones', () => {
   assert.equal(lastSentence('第一句很长很长的内容。第二句也是完整的句子。'), '第二句也是完整的句子。')

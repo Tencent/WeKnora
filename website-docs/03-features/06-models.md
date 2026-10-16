@@ -46,6 +46,7 @@
 | 向量维度 / 自定义输出维度 | 向量 | 维度需与索引一致。只有确认模型支持指定维度时才开启「自定义输出维度」 |
 | 上下文窗口 | 对话、视觉 | 留空使用默认 200000。按厂商文档填写真实值；填得过大会导致智能体历史压缩不触发，上游直接拒绝请求 |
 | 支持视觉/多模态 | 对话 | 模型是否接受图片输入 |
+| 图片输入 | 向量 | 模型能否把图片编码到与文本相同的向量空间。开启且厂商协议支持传图时，**开启了「图片向量检索」的知识库**在生成图片描述之后还会为每张图片存一条图片向量，按图片内容召回描述没写到的信息（扫描件 PDF 页除外）；知识库的这个开关默认关闭，只声明模型能力不会改变已有知识库的行为。目录中的模型自动识别，只在与目录不一致时才保存到该模型；目录里没有的模型需手动声明 |
 | 最大输出 tokens | 对话、视觉 | 单次回复的输出上限，留空沿用目录中该模型的默认值 |
 | 后台并发上限 | 对话、视觉、向量 | 限制文档入库、富化等后台任务对该模型的并发数；0 或留空使用全局默认，不影响交互式对话 |
 | 高级 → 协议覆盖 | 对话、视觉 | 强制使用某种请求协议，一般保持「自动」 |
@@ -88,8 +89,51 @@
 | 需要附带厂商私有参数，如阿里云联网搜索 | `{"extra_body": {"enable_search": true}}` |
 | 多轮对话回传思考内容时报错 | `{"replay_reasoning_content": false}` |
 | 自建向量服务一次请求只接受 16 条 | `{"max_batch_size": 16}` |
+| vLLM 部署的多模态向量模型（VLM2Vec、GME 等） | 打开「图片输入」即可，自定义厂商默认按 vLLM 的 `messages` 格式发图片；模板需要指令时加 `{"image_prompt": "Represent the given image."}`；文本也必须经过对话模板才和图片同空间时加 `{"text_as_messages": true}` |
+| vLLM 部署的 Qwen3-VL-Embedding | 无需填写：自定义厂商下模型名含 `qwen3-vl-embedding` 时已内置图片输入与 `{"text_as_messages": true, "extra_body": {"add_special_tokens": true}}`。文本走普通 `input` 会绕过对话模板，与图片不在同一空间；不加 `add_special_tokens` 时末尾缺少模型取向量用的 `<\|endoftext\|>`，与[模型卡](https://huggingface.co/Qwen/Qwen3-VL-Embedding-8B)结果不符。已用该模型建立的索引需重建向量 |
+| SGLang 部署的多模态向量模型 | 打开「图片输入」，并填 `{"image_format": "object", "image_field": "image"}` |
 | 向量或重排服务响应慢，需要更长的超时 | `{"request_timeout_seconds": 120}` |
 | 自建重排服务返回的是未归一化分数（logit） | `{"score_scale": "logit"}` |
+
+#### WeMM-Embedding
+
+自定义厂商（`generic`）的向量模型列表已内置以下预设，选择后会自动识别图片输入和原生向量维度：
+
+| 模型名称 | 原生维度 |
+| --- | --- |
+| `tencent/WeMM-Embedding-2B` | 2048 |
+| `tencent/WeMM-Embedding-4B` | 2560 |
+| `tencent/WeMM-Embedding-9B` | 4096 |
+
+可选择官方 vLLM 部署，或使用本仓库的 [Transformers 部署脚本](../06-development/06-wemm-transformers.md)在 CUDA、MPS 或 CPU 上提供同一 Embedding 接口。MPS 是可选计算设备，服务也可以部署在独立服务器上。
+
+按[官方部署说明](https://github.com/Tencent/WeMM-Embedding#serving)使用 vLLM `0.27.0`，并加载模型目录中的 `embedding_chat_template.jinja`。例如部署 2B，并通过 `--served-model-name` 让服务名称与预设一致：
+
+```bash
+MODEL_PATH=/path/to/WeMM-Embedding-2B
+vllm serve "$MODEL_PATH" \
+  --runner pooling \
+  --chat-template "$MODEL_PATH/embedding_chat_template.jinja" \
+  --served-model-name tencent/WeMM-Embedding-2B
+```
+
+4B、9B 分别替换模型路径与服务名称。在 WeKnora 中选择「自定义」厂商，Base URL 填写服务的 `http://主机:端口/v1`，选择对应向量模型，初次接入保持「自定义输出维度」关闭。若服务没有设置 `--served-model-name`，模型名称须填写服务实际返回的本地路径；短名称 `WeMM-Embedding-2B` 及以 `/WeMM-Embedding-2B` 结尾的路径也能识别预设，4B、9B 同理。任意自定义别名需要另行配置模型能力和协议覆盖。
+
+预设让文本和图片都通过 `messages` 进入模型模板，由模板追加取向量所需的 `<embedding>` 标记；启用 `batch_messages`，将同一批内的独立 conversations 合并请求，每条仍返回各自的向量。图片批量调用最多每批 5 张，超出自动拆分；这是 WeKnora 选择的批量大小，与现有 Qwen3-VL-Embedding 预设一致，不代表模型或 vLLM 的官方上限，可用 `max_image_batch_size` 按服务承载能力调整。当前知识库图片索引任务仍逐张调用，不会因该配置自动合并多个任务。不发送历史默认的 `truncate_prompt_tokens: 511`；超出服务上下文上限时由服务报错，不会静默截断。无需额外填写兼容 JSON 或图片提示词。若此前用普通文本 `input` 为该模型建立过索引，需要重建向量。
+
+WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_tokens: false`、`add_generation_prompt: false` 默认行为，不要照搬 Qwen3-VL-Embedding 预设的 `add_special_tokens: true`。vLLM 的 Embedding 默认使用末尾 token 并做 L2 归一化，无需额外发送 `normalize` 或关闭 `use_activation`。
+
+需要降维时，开启「自定义输出维度」并选择模型配置中的合法维度，WeKnora 会给文本和图片请求发送相同的 `dimensions`；vLLM 会先截取对应维度，再归一化：
+
+| 模型 | 可选维度 |
+| --- | --- |
+| 2B | 64、128、256、512、1024、2048 |
+| 4B | 64、128、256、512、1024、2560 |
+| 9B | 64、128、256、512、1024、2048、4096 |
+
+这些值来自[官方模型配置与说明](https://github.com/Tencent/WeMM-Embedding#model-zoo)，vLLM 会拒绝列表之外的维度。更换输出维度后需重建已有向量索引。超时、并发与图片大小限制保持现有默认值，按实际服务性能调整。
+
+知识库还需开启图片向量索引才能直接检索图片内容。当前预设接入文本和图片；视频、任意图文交错输入及扫描 PDF 整页向量化不在当前业务链路的支持范围内。
 
 #### 字段参考
 
@@ -146,6 +190,7 @@
 | 字段 | 类型 | 协议默认 | 说明 |
 | --- | --- | --- | --- |
 | `thinking_mode` | string | `budget` | `budget` 按预算开启思考；`adaptive` 由模型自行决定，强度通过 `output_config.effort` 传递 |
+| `thinking_off_type` | string | `disabled` | `adaptive` 模式下关闭思考时发送的 `thinking.type`；Claude Sonnet 5.5 不接受 `disabled`，使用 `between_tools` |
 | `supports_effort` | bool | false | 是否发送思考强度 |
 | `thinking_budgets` | object | minimal 1024、low 2048、medium 8192、high 16384、xhigh 32768、max 63999 | 各思考强度对应的 `budget_tokens`，键为 `minimal`/`low`/`medium`/`high`/`xhigh`/`max` |
 | `default_max_tokens` | int | 4096 | 未设置输出上限时使用的 `max_tokens`（该协议必填） |
@@ -190,6 +235,13 @@
 | `accepts_truncate_prompt_tokens` | bool | false | 服务是否支持 vLLM 的 `truncate_prompt_tokens` |
 | `request_timeout_seconds` | int | 60 | 单次请求超时（秒） |
 | `extra_body` | object | 空 | 附加到每次请求的字段 |
+| `image_field` | string | 空 | 仅 `openai-embeddings`：`input` 里承载图片的对象键名（Jina、SGLang 为 `image`）。留空且 `image_format` 不是 `messages` 时表示该端点不收图片 |
+| `image_format` | string | 空（自定义厂商为 `messages`） | 仅 `openai-embeddings`：图片的发送方式。`object` 把 `{image_field: 图片}` 放进 `input`；`messages` 把图片作为一轮对话放进 `messages`（vLLM 的多模态向量接口），每张图一个请求。留空时有 `image_field` 即按 `object` 处理 |
+| `image_prompt` | string | 空 | 仅 `messages` 格式：随图片一起发送的文字，部分模型的对话模板需要（如 VLM2Vec 的 `Represent the given image.`） |
+| `text_as_messages` | bool | false | 仅 `openai-embeddings`：文本也按 `messages` 格式发送，每条一个请求。适用于必须经过对话模板、文本和图片才在同一向量空间的模型（自定义厂商下的 Qwen3-VL-Embedding 已内置）；已有索引的模型改动后需要重建向量 |
+| `max_image_batch_size` | int | 1 | 单次请求的最大图片数，超出自动分批 |
+| `max_image_bytes` | int | 0（不限） | 单张图片的字节上限，超出的图片直接拒绝、不发请求 |
+| `image_mime_types` | array | 空（不限） | 厂商接受的图片格式，如 `["image/png", "image/jpeg"]` |
 
 **重排模型**
 
@@ -200,11 +252,20 @@
 | `send_return_documents` | bool | false | 是否要求服务端回传文档原文 |
 | `score_scale` | string | `probability` | 分数含义：`probability`（0～1）或 `logit`（未归一化）。填错会让相关度阈值失效 |
 | `truncate` | string | 空 | 服务端截断设置（如 NIM 的 `END`） |
-| `max_documents` / `max_query_chars` / `max_document_chars` / `max_request_chars` | int | 0（不限） | 单次请求的文档数、查询长度、单篇长度与总长度上限，超出自动分批 |
+| `max_documents` | int | 0（不限） | 单次请求的文档数上限，超出自动分批 |
+| `max_query_chars` | int | 0（不限） | 查询长度上限，超出按调用失败处理（查询在每个请求里都会重复，拆分文档无法让它变短） |
+| `max_document_chars` | int | 0（不限） | 单篇文档长度上限，超出按调用失败处理 |
+| `max_request_chars` | int | 0（不限） | 单次请求（查询 + 全部文档）的总长度上限，超出自动分批，与 `max_documents` 同时生效，哪个先到就按哪个拆；单篇文档加上查询就已超出时按调用失败处理 |
 | `max_concurrency` | int | 0（使用默认） | 分批后同时发出的请求数 |
 | `accepts_truncate_prompt_tokens` | bool | false | 服务是否支持 vLLM 的 `truncate_prompt_tokens` |
 | `request_timeout_seconds` | int | 0（默认 60 秒） | 单次请求超时（秒）；超时按调用失败处理，检索回退为召回顺序 |
 | `extra_body` | object | 空 | 附加到每次请求的字段 |
+| `image_field` | string | 空 | 仅 `cohere-rerank`：图片文档对象的键名（Jina 为 `image`）。留空表示该端点只收文本。NIM 协议的图片段落格式由协议固定，不需要填 |
+| `max_image_batch_size` | int | 1 | 单次请求的最大图片数；图片与文本分开请求，超出自动分批 |
+| `max_image_bytes` | int | 0（不限） | 单张图片的字节上限，超出的图片直接拒绝、不发请求 |
+| `image_mime_types` | array | 空（不限） | 厂商接受的图片格式 |
+
+只有模型能力 `input` 含 `image` 的重排模型（目录里是 `jina-reranker-m0` 与 `nvidia/llama-nemotron-rerank-vl-1b-v2`）会收到图片文档。
 
 **语音识别模型**
 
@@ -220,7 +281,7 @@
 
 ## 内置厂商
 
-内置 27 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
+内置 30 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
 
 | 厂商 | ID | 对话 | 向量 | 重排 | 视觉 | 语音 |
 | --- | --- | :-: | :-: | :-: | :-: | :-: |
@@ -251,10 +312,39 @@
 | NVIDIA | `nvidia` | ✓ | ✓ | ✓ | ✓ | |
 | Novita AI | `novita` | ✓ | ✓ | ✓ | ✓ | |
 | GPUStack | `gpustack` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Hugging Face TEI | `huggingface_tei` | | | ✓ | | |
+| Pinecone | `pinecone` | | | ✓ | | |
+| Cohere | `cohere` | | | ✓ | | |
 
 表中的「视觉」指可在视觉模型类型下选择该厂商；对话模型本身是否接受图片，以模型目录和「支持视觉/多模态」开关为准。WeKnora 云服务需先在设置中保存云服务凭证，模型名称可选 `chat`、`embedding`、`rerank`、`vlm`。
 
 厂商列表、默认地址和模型目录由服务端下发（`GET /api/v1/models/providers`），运维可以通过[部署叠加](#部署叠加-config-models-json)修改或新增厂商。
+
+### Cohere 重排
+
+新增远程重排模型时，选择 **Cohere**，填写 Cohere API Key，并选择
+`rerank-v4.0-pro`、`rerank-v4.0-fast` 或 `rerank-v3.5`。默认地址为
+`https://api.cohere.com/v2`，也可填写完整的 `/v2/rerank` 地址。
+
+通过 `POST /api/v1/models` 创建时，请求体示例：
+
+```json
+{
+  "name": "rerank-v4.0-pro",
+  "type": "Rerank",
+  "source": "remote",
+  "parameters": {
+    "provider": "cohere",
+    "base_url": "https://api.cohere.com/v2",
+    "api_key": "your-cohere-api-key"
+  }
+}
+```
+
+请求仅发送文本查询和文档，按响应索引恢复原文。WeKnora 遵循
+[Cohere API 建议](https://docs.cohere.com/v2/reference/rerank)，将超过 1000 篇的候选集
+拆成多个请求；1000 是采用的推荐批次大小。省略 `top_n` 以获取全部候选的分数，
+超长文档沿用服务端默认截断行为。本接入仅提供 Cohere 文本重排。
 
 ## 查看引用与调整配置
 
@@ -466,7 +556,7 @@ builtin_models:
 
 | 层 | 位置 | 职责 |
 |----|------|------|
-| 协议层 | `internal/models/api/<protocol>` | 一个 wire 协议一个包。对话：`openaicompletions`、`openairesponses`、`anthropicmessages`、`googlegenai`；重排：`cohererank`、`dashscoperank`、`nimrerank`、`tencentlkeap`、`volcengineknowledge`；向量：`openaiembeddings`、`dashscopeembeddings`、`arkembeddings`、`googleembeddings`；语音：`openaitranscriptions`、`openaichataudio`。各自持有请求/响应结构与解析，不依赖厂商定义或模型目录 |
+| 协议层 | `internal/models/api/<protocol>` | 一个 wire 协议一个包。对话：`openaicompletions`、`openairesponses`、`anthropicmessages`、`googlegenai`；重排：`cohererank`、`dashscoperank`、`nimrerank`、`tencentlkeap`、`volcengineknowledge`、`teirank`、`pineconerank`；向量：`openaiembeddings`、`dashscopeembeddings`、`arkembeddings`、`googleembeddings`；语音：`openaitranscriptions`、`openaichataudio`。各自持有请求/响应结构与解析，不依赖厂商定义或模型目录 |
 | 厂商层 | `internal/models/providers/<id>.go` | 一个厂商一份定义，声明支持的模型类型、各类型默认地址、鉴权方式、额外字段、协议兼容默认值与特殊端点钩子；图标放 `providers/assets/`，在 `builtin.go` 的 `Builtins()` 显式列出 |
 | 目录层 | `internal/models/catalog` | 加载生成的模型目录 `catalog/data/models.generated.json`，按类型和模型名查询条目；不含厂商行为 |
 | 运行时 | `internal/models/runtime` | 组合厂商定义与目录、应用部署叠加（`overlay.go`），合并单个模型配置、选择协议、组装认证和端点，隔离旧字段推断 |

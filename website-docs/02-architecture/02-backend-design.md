@@ -119,10 +119,10 @@ flowchart TD
     H --> I["systemSettingSvc.SubscribeRedis(ctx)<br/>订阅 system_settings 变更 (Lite 模式 no-op)"]
     I --> J["signal.Notify(shutdownSignals) + server.Serve(listener)"]
     J --> K{"收到第一个信号?"}
-    K -->|是| L["listener.Close() 立即释放端口<br/>server.Shutdown(ctx, ShutdownTimeout 默认 30s) 优雅排空"]
+    K -->|是| L["server.Shutdown 先关 listener 再排空<br/>排空预算 = ShutdownTimeout − 5s"]
     L --> M{"排空期间收到第二个信号?"}
     M -->|是| N["server.Close() 强制断开所有连接"]
-    M -->|否| O["resourceCleaner.Cleanup(ctx)<br/>ants 池 / Langfuse / 调度器逐个析构"]
+    M -->|否| O["resourceCleaner.Cleanup<br/>BrowserSkill 最先执行；到期不跳过后续钩子"]
     N --> O
     O --> P["进程退出"]
 ```
@@ -130,7 +130,7 @@ flowchart TD
 要点：
 
 - **引导失败不阻断启动**：`bootstrap.go` 对失败记录 `logger.Warnf`。系统管理员引导仅在部署尚无系统管理员时生效，重启不会恢复已撤销的权限；
-- **两段式优雅退出**：第一个 SIGTERM/SIGINT 先关 listener（新进程可立即绑定端口）再 `Shutdown` 排空存量连接；第二个信号强制 `Close`；
+- **两段式优雅退出**：第一个 SIGTERM/SIGINT 调用 `server.Shutdown`（它会先关闭 listener，端口随即可被新进程绑定），在 `ShutdownTimeout` 里为资源清理预留 5s，其余时间排空存量连接。不要在 `Shutdown` 之前手动 `listener.Close()`：`Serve` 会返回 `use of closed network connection` 而不是 `ErrServerClosed`，`logger.Fatalf` 会在清理前把进程杀掉。第二个信号强制 `Close`；
 - **端口占用重试**：`listenWithRetry` 以 300ms 起步指数退避重试 10 次（滚动重启场景旧进程尚未释放端口时避免直接失败）。
 
 ## 路由组织与 RBAC 装配（internal/router） {#_4-路由组织与-rbac-装配-internal-router}

@@ -8,7 +8,8 @@
               <ResourceIcon type="knowledge" :size="24" />
               {{ $t('knowledgeBase.title') }}
             </h2>
-            <div class="header-actions" style="--wails-draggable: no-drag">
+            <div class="header-actions" :class="{ 'header-actions-lite': authStore.isLiteMode }" style="--wails-draggable: no-drag">
+              <ResourceListToolbar v-if="authStore.isLiteMode" hide-scopes v-model="spaceSelection" v-model:query="keyword" />
               <ResourceSortControl v-model="selectedResourceSort" />
               <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('knowledgeList.create')" placement="bottom">
                  <t-button variant="text" theme="default" size="small" class="header-action-btn"
@@ -22,7 +23,7 @@
           <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('knowledgeList.subtitle') }}</p>
         </div>
       </div>
-      <ResourceListToolbar :hide-scopes="authStore.isLiteMode" v-model="spaceSelection" v-model:query="keyword" :count-all="allKnowledgeBases"
+      <ResourceListToolbar v-if="!authStore.isLiteMode" v-model="spaceSelection" v-model:query="keyword" :count-all="allKnowledgeBases"
       :count-mine="kbs.length" :count-by-org="effectiveSharedCountByOrg" :count-favorites="kbFavoritesCount"
       :count-recents="kbRecentsCount" />
       <div class="kb-list-main">
@@ -83,9 +84,8 @@
                仅查看 / 共享给我）各自打自己的标题；原本的「其他」过渡标题
                在 per-user 置顶模型下已无意义，删除以免和具体子段标题叠加。 -->
           <template v-for="(kb, index) in filteredKnowledgeBases" :key="kb.id">
-            <!-- 我创建的：第一张「我创建」非置顶卡片前打标题，
-                 对所有角色显示，不受上方是否存在「已置顶」分组影响。 -->
-            <div v-if="kb.isMine
+            <!-- Lite 无需区分创建者；其他版本在第一张非置顶的我创建卡片前显示分组。 -->
+            <div v-if="!authStore.isLiteMode && kb.isMine
               && isMyKb(kb as KB)
               && !kb.is_pinned
               && (index === 0
@@ -165,8 +165,8 @@
               </button>
               <!-- 卡片头部 -->
               <div class="card-header">
+                <KbTypeAvatar :type="kb.type" />
                 <span class="card-title" :title="kb.name">
-                  <KbWikiBadge v-if="isWikiKb(kb)" />
                   <span class="card-title-text">{{ kb.name }}</span>
                 </span>
                 <!-- The card menu always exists when the card is visible: pin
@@ -206,7 +206,7 @@
 
               <!-- 卡片内容 -->
               <div class="card-content">
-                <div class="card-description" :title="kb.description || $t('knowledgeBase.noDescription')">
+                <div class="card-description" :class="{ 'is-empty': !kb.description }" :title="kb.description || $t('knowledgeBase.noDescription')">
                   {{ kb.description || $t('knowledgeBase.noDescription') }}
                 </div>
               </div>
@@ -226,6 +226,9 @@
                         <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
                       </div>
                     </t-tooltip>
+                    <div v-if="isWikiKb(kb)" class="feature-badge wiki">
+                      <KbWikiBadge />
+                    </div>
                     <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
                       placement="top">
                       <div class="feature-badge kg">
@@ -269,8 +272,8 @@
               </button>
               <!-- 卡片头部 -->
               <div class="card-header">
+                <KbTypeAvatar :type="kb.type" />
                 <span class="card-title" :title="kb.name">
-                  <KbWikiBadge v-if="isWikiKb(kb)" />
                   <span class="card-title-text">{{ kb.name }}</span>
                 </span>
                 <t-tooltip :content="$t('knowledgeList.menu.viewDetails')" placement="top">
@@ -283,7 +286,7 @@
 
               <!-- 卡片内容 -->
               <div class="card-content">
-                <div class="card-description" :title="kb.description || $t('knowledgeBase.noDescription')">
+                <div class="card-description" :class="{ 'is-empty': !kb.description }" :title="kb.description || $t('knowledgeBase.noDescription')">
                   {{ kb.description || $t('knowledgeBase.noDescription') }}
                 </div>
               </div>
@@ -303,6 +306,9 @@
                         }}</span>
                       </div>
                     </t-tooltip>
+                    <div v-if="isWikiKb(kb)" class="feature-badge wiki">
+                      <KbWikiBadge />
+                    </div>
                     <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
                       placement="top">
                       <div class="feature-badge kg">
@@ -353,10 +359,8 @@
           <!-- 我的知识库。「已置顶」由顶部 header 接管；其余各分段各打各的
                标题——见「全部」tab 同处注释。 -->
           <template v-for="(kb, index) in sortedMineKbs" :key="kb.id">
-            <!-- 我创建的：第一张非置顶的我创建卡片前打标题，无论上方是否
-                 有「已置顶」段都要显示，和「本空间 · 仅查看」对齐——见
-                 「全部」tab 同处注释。 -->
-            <div v-if="isMyKb(kb)
+            <!-- Lite 无需区分创建者；其他版本与「全部」视图保持一致。 -->
+            <div v-if="!authStore.isLiteMode && isMyKb(kb)
               && !kb.is_pinned
               && (index === 0 || sortedMineKbs[index - 1].is_pinned)" class="kb-section-header" role="button"
               tabindex="0" :aria-expanded="!isKbSectionCollapsed('mine')" @click="toggleKbSection('mine')"
@@ -398,8 +402,8 @@
               </button>
               <!-- 卡片头部 -->
               <div class="card-header">
+                <KbTypeAvatar :type="kb.type" />
                 <span class="card-title" :title="kb.name">
-                  <KbWikiBadge v-if="isWikiKb(kb)" />
                   <span class="card-title-text">{{ kb.name }}</span>
                 </span>
                 <!-- See the matching block in the "all" tab template for why
@@ -437,7 +441,7 @@
 
               <!-- 卡片内容 -->
               <div class="card-content">
-                <div class="card-description" :title="kb.description || $t('knowledgeBase.noDescription')">
+                <div class="card-description" :class="{ 'is-empty': !kb.description }" :title="kb.description || $t('knowledgeBase.noDescription')">
                   {{ kb.description || $t('knowledgeBase.noDescription') }}
                 </div>
               </div>
@@ -457,6 +461,9 @@
                         <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
                       </div>
                     </t-tooltip>
+                    <div v-if="isWikiKb(kb)" class="feature-badge wiki">
+                      <KbWikiBadge />
+                    </div>
                     <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
                       placement="top">
                       <div class="feature-badge kg">
@@ -549,8 +556,8 @@
             }" role="link" tabindex="0" @keydown.enter.self.prevent="handleSharedKbClick(shared)" @keydown.space.self.prevent="handleSharedKbClick(shared)" @click="handleSharedKbClick(shared)">
               <!-- 卡片头部 -->
               <div class="card-header">
+                <KbTypeAvatar :type="shared.knowledge_base.type" />
                 <span class="card-title" :title="shared.knowledge_base.name">
-                  <KbWikiBadge v-if="isWikiKb(shared.knowledge_base)" />
                   <span class="card-title-text">{{ shared.knowledge_base.name }}</span>
                 </span>
                 <t-tooltip v-if="!shared.is_mine" :content="$t('knowledgeList.menu.viewDetails')" placement="top">
@@ -563,7 +570,7 @@
 
               <!-- 卡片内容 -->
               <div class="card-content">
-                <div class="card-description" :title="shared.knowledge_base.description || $t('knowledgeBase.noDescription')">
+                <div class="card-description" :class="{ 'is-empty': !shared.knowledge_base.description }" :title="shared.knowledge_base.description || $t('knowledgeBase.noDescription')">
                   {{ shared.knowledge_base.description || $t('knowledgeBase.noDescription') }}
                 </div>
               </div>
@@ -584,6 +591,9 @@
                             '-') : (shared.knowledge_base.knowledge_count ?? '-') }}</span>
                       </div>
                     </t-tooltip>
+                    <div v-if="isWikiKb(shared.knowledge_base)" class="feature-badge wiki">
+                      <KbWikiBadge />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -708,6 +718,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
@@ -724,6 +735,7 @@ import { listOrganizationSharedKnowledgeBases, type SharedKnowledgeBase, type Or
 import { mergeAllScopeKnowledgeBases, type OwnedKnowledgeBase, type SharedKnowledgeBaseLike } from './kbListMerge'
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
 import KbWikiBadge from './components/KbWikiBadge.vue'
+import KbTypeAvatar from './components/KbTypeAvatar.vue'
 import ResourceListToolbar from '@/components/ResourceListToolbar.vue'
 import { matchesResourceQuery } from '@/utils/resourceListSearch'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
@@ -1001,7 +1013,11 @@ const tenantSectionIconName = computed(() =>
 // 即表示初始的全展开状态，避免每次新加分段还得回头维护默认值。
 type KbSectionKey = 'pinned' | 'mine' | 'tenantOthers' | 'sharedByMe' | 'sharedEditable' | 'sharedReadonly'
 const collapsedKbSections = ref<Set<KbSectionKey>>(new Set())
-const isKbSectionCollapsed = (key: KbSectionKey) => collapsedKbSections.value.has(key)
+const isKbSectionCollapsed = (key: KbSectionKey) => {
+  // Lite 隐藏了「我创建的」折叠入口，对应卡片始终展开。
+  if (authStore.isLiteMode && key === 'mine') return false
+  return collapsedKbSections.value.has(key)
+}
 const toggleKbSection = (key: KbSectionKey) => {
   // 重新赋一个新的 Set 是为了让 ref 的 .value 身份变化触发模板重渲染；
   // 直接 .add/.delete 在 Vue 3 的 reactive Set 里也能 work，但 ref(Set) 的
@@ -1177,6 +1193,8 @@ watch(creatorFilter, () => {
   fetchList(true)
 })
 
+useAssistantDataChange(() => { void fetchList(true) }, { areas: ['knowledge_base'] })
+
 onMounted(() => {
   fetchList().then(() => {
     // 检查路由参数中是否有需要高亮的知识库ID
@@ -1258,7 +1276,8 @@ function canManageKBCard(kb: KB): boolean {
   // admin/creator fallbacks either.
   if ((kb as any).isMine === false) return false
   const userId = authStore.user?.id || ''
-  if (kb.creator_id && userId && kb.creator_id === userId) return true
+  // A creator demoted to Viewer no longer manages it (access.CreatorRoleFloor).
+  if (kb.creator_id && userId && kb.creator_id === userId && authStore.hasRole('contributor')) return true
   return authStore.hasRole('admin')
 }
 
@@ -1809,40 +1828,15 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
     }
   }
 
-  &.kg {
-    background: color-mix(in srgb, var(--app-accent-purple) 8%, transparent);
-    color: var(--td-brand-color);
+  &.kg { color: var(--app-accent-purple); }
+  &.multimodal { color: var(--td-warning-color); }
+  &.question { color: var(--app-accent-blue); }
+  &.shared { color: var(--td-brand-color); }
+  &.wiki :deep(.kb-wiki-badge) { color: var(--app-accent-teal); }
 
-    &:hover {
-      background: color-mix(in srgb, var(--app-accent-purple) 12%, transparent);
-    }
-  }
-
-  &.multimodal {
-    background: color-mix(in srgb, var(--td-warning-color) 8%, transparent);
-    color: var(--td-warning-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-warning-color) 12%, transparent);
-    }
-  }
-
-  &.question {
-    background: color-mix(in srgb, var(--td-success-color) 8%, transparent);
-    color: var(--td-success-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-success-color) 12%, transparent);
-    }
-  }
-
-  &.shared {
-    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-    color: var(--td-brand-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-    }
+  :deep(.kb-wiki-badge svg) {
+    width: 14px;
+    height: 14px;
   }
 
   &.role-admin {

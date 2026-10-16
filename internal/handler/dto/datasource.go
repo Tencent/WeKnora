@@ -122,10 +122,19 @@ func enrichRSSFeedURLsInSettings(dsType string, parsed *types.DataSourceConfig, 
 	cfgDTO.Settings["feed_urls"] = feedURLs
 }
 
+// NewDataSourceResponses converts a list of entities for the list endpoint.
+// The sync cursor is stripped from every element: the settings page polls
+// the list every few seconds during a sync, cursors can grow to megabytes,
+// and no list consumer reads them. Detail, create and update responses
+// still carry the cursor through NewDataSourceResponse.
 func NewDataSourceResponses(dss []*types.DataSource) []*DataSourceResponse {
 	out := make([]*DataSourceResponse, 0, len(dss))
 	for _, d := range dss {
-		out = append(out, NewDataSourceResponse(d))
+		resp := NewDataSourceResponse(d)
+		if resp != nil {
+			resp.LastSyncCursor = nil
+		}
+		out = append(out, resp)
 	}
 	return out
 }

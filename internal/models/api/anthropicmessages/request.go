@@ -142,7 +142,11 @@ func (c *Client) planThinking(opts *api.Options) thinkingPlan {
 	}
 	if !level.Enabled() {
 		if levels.Supports(api.ReasoningOff) && s.ThinkingMode == api.AnthropicThinkingAdaptive {
-			return thinkingPlan{body: map[string]any{"type": "disabled"}}
+			offType := s.ThinkingOffType
+			if offType == "" {
+				offType = "disabled"
+			}
+			return thinkingPlan{body: map[string]any{"type": offType}}
 		}
 		// Budget mode: omitting the thinking object disables it.
 		return thinkingPlan{}

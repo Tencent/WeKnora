@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://weknora.weixin.qq.com"><img alt="官方网站" src="https://img.shields.io/badge/官网-weknora.weixin.qq.com-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="https://weknora.weixin.qq.com/docs/"><img alt="产品文档" src="https://img.shields.io/badge/文档-阅读-b8863b?style=flat-square&labelColor=101f38"></a>
-  <a href="./CHANGELOG.md"><img alt="版本" src="https://img.shields.io/badge/release-v0.8.2-b8863b?style=flat-square&labelColor=101f38"></a>
+  <a href="./CHANGELOG.md"><img alt="版本" src="https://img.shields.io/badge/release-v0.8.3-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="./LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="https://github.com/Tencent/WeKnora/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/Tencent/WeKnora?style=flat-square&labelColor=101f38&color=b8863b"></a>
   <br/>
@@ -58,9 +58,9 @@ https://github.com/user-attachments/assets/5722b10d-d04d-49ed-a6cc-635a8c77d91f
 除此之外：
 
 - **记忆与知识整理**：跨会话长期记忆保存用户确认过的个人信息、偏好与事实；文件夹上传保留原始目录结构；检索分块可以编辑、比对与回滚。
-- **数据源与格式**：飞书知识库 / 飞书云盘 / Confluence / GitLab / 腾讯 IMA / Notion / 语雀 / 钉钉文档 / RSS 自动同步，更多数据源持续接入中；覆盖 PDF、Word、图片、Excel、XMind 等十余种格式，Office 文档由 anydoc 在 Go 进程内解析。
+- **数据源与格式**：飞书知识库 / 飞书云盘 / Confluence / GitLab / 腾讯 IMA / Notion / 语雀 / 钉钉文档 / Seafile / RSS 自动同步，更多数据源持续接入中；覆盖 PDF、Word、图片、Excel、XMind 等十余种格式，Office 文档由 anydoc 在 Go 进程内解析。
 - **渠道与集成**：企业微信、飞书、Slack、Telegram 等 IM 频道内直接问答；网站嵌入 Widget 把智能体发布到外部站点；内置 MCP Server 供 Cursor、Claude 等 AI 工具连接；权限范围 API Key 与 Principal 模型用于程序化集成。
-- **模型**：内置 27 家模型厂商与自动生成的模型目录，兼容 OpenAI、DeepSeek、Qwen（阿里云）、智谱、混元、Gemini、MiniMax、NVIDIA、LiteLLM、Ollama 等。
+- **模型**：内置 29 家模型厂商与自动生成的模型目录，兼容 OpenAI、DeepSeek、Qwen（阿里云）、智谱、混元、Gemini、MiniMax、NVIDIA、LiteLLM、Ollama 等。
 - **权限与运维**：多空间 RBAC（四级角色、资源归属、空间审计日志）、每空间多实例存储后端、运行时任务队列面板与 Worker 池治理，并通过 Langfuse 追踪 Agent 步骤、Token 用量与任务流水线。
 - **部署**：大模型、向量数据库、存储后端均可替换，支持本地与私有云部署，数据留在你自己的环境中。
 
@@ -138,13 +138,13 @@ docker compose down     # 停止服务
 若已有部署并下载了更新的 release：
 
 ```bash
-# 在 .env 中将 WEKNORA_VERSION 设为目标版本（如 0.8.2），或保持 latest
+# 在 .env 中将 WEKNORA_VERSION 设为目标版本（如 0.8.3），或保持 latest
 docker compose pull     # 拉取与 WEKNORA_VERSION 匹配的镜像
 docker compose up -d    # 用新镜像重建容器
 ```
 
 > [!NOTE]
-> 仅执行 `docker compose up -d` 会复用本地缓存镜像，可能导致 Web UI 显示版本与下载的 release 不一致。从 v0.8.0 升级前请先阅读[升级须知](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#upgrade-notes)。
+> 仅执行 `docker compose up -d` 会复用本地缓存镜像，可能导致 Web UI 显示版本与下载的 release 不一致。升级前请先阅读[升级须知](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#upgrade-notes)。
 
 ### 其他部署方式
 
@@ -165,6 +165,16 @@ docker compose up -d    # 用新镜像重建容器
 > - 定期更新到最新版本以获取安全补丁和改进。
 
 ## 最新更新
+
+### v0.8.3 <sub>· 2026-10-14 · [版本说明](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
+
+- **[画廊](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#images)**：集中浏览文档图片，按来源、描述、OCR 与图片属性筛选，查看原图和出处。
+- **[多模态 Embedding](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#multimodal-embedding)**：支持将文字与图片编码到同一向量空间的多模态向量模型，例如腾讯 WeMM-Embedding、Qwen3-VL-Embedding 等；可按需开启图片向量检索，并搭配支持图片输入的重排模型。
+- **[Wiki 图谱](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#wiki-graph)**：重新组织分组布局与主题说明，支持聚焦分组、切换分组和返回全图。
+- **[原文引用](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#conversation)**：从回答直接定位原始文档中的引用片段。
+- **[对话与工具](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#tools)**：无需沙箱即可按需读取附件，未读回答标记、@ 全局搜索、Docker 终端、Lite 本机技能与 MCP 兼容性更新。
+- **[管理与集成](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#administration)**：平台用户管理、仅限邀请注册、管理员模型目录、WeMM 向量、TEI/Pinecone/Cohere 重排、Seafile 数据源与繁体中文。
+- **[稳定性](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#other-changes)**：集中修复检索、解析、数据源、Wiki、OAuth 和 CLI。注册模式、空工具列表、数据库迁移与向量重建要求见[升级须知](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#upgrade-notes)。
 
 ### v0.8.2 <sub>· 2026-09-24 · [版本说明](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2)</sub>
 
@@ -313,12 +323,12 @@ docker compose up -d    # 用新镜像重建容器
 
 | 组件 | 可选项 |
 |------|--------|
-| [模型厂商](https://weknora.weixin.qq.com/docs/03-features/06-models) | 内置 27 家，包括 OpenAI / Azure OpenAI / Anthropic / DeepSeek / Qwen（阿里云）/ 智谱 / 混元 / 豆包（火山引擎）/ Gemini / MiniMax / NVIDIA / SiliconFlow / OpenRouter / LiteLLM / Ollama |
+| [模型厂商](https://weknora.weixin.qq.com/docs/03-features/06-models) | 内置 29 家，包括 OpenAI / Azure OpenAI / Anthropic / DeepSeek / Qwen（阿里云）/ 智谱 / 混元 / 豆包（火山引擎）/ Gemini / MiniMax / NVIDIA / SiliconFlow / OpenRouter / LiteLLM / Ollama |
 | Embedding | Ollama / BGE / GTE / 智谱 / OpenAI 兼容接口 |
 | 向量数据库 | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / 腾讯云 VectorDB |
 | [对象存储](https://weknora.weixin.qq.com/docs/03-features/19-storage-backends) | 本地 / 腾讯云 COS / MinIO / AWS S3 / 火山引擎 TOS / 阿里云 OSS / 金山云 KS3 / 华为云 OBS |
 | [文档格式](https://weknora.weixin.qq.com/docs/03-features/03-document-parsing) | PDF / Word / PPT / Excel / CSV / TXT / Markdown / HTML / EPUB / MHTML / JSON / XMind / 图片 |
-| [数据源](https://weknora.weixin.qq.com/docs/03-features/10-datasource) | 飞书知识库 / 飞书云盘 / Lark / Confluence / GitLab / 腾讯 IMA / Notion / 语雀 / 钉钉文档 / RSS |
+| [数据源](https://weknora.weixin.qq.com/docs/03-features/10-datasource) | 飞书知识库 / 飞书云盘 / Lark / Confluence / GitLab / 腾讯 IMA / Notion / 语雀 / 钉钉文档 / Seafile / RSS |
 | [IM 渠道](https://weknora.weixin.qq.com/docs/03-features/12-im-integration) | 企业微信 / 飞书 / Lark / QQBot / Slack / Telegram / 钉钉 / Mattermost / 微信 / 云之家 |
 | [网络搜索](https://weknora.weixin.qq.com/docs/03-features/11-web-search) | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG / Keenable / 智谱 AI / Exa / Metaso / 博查 / Serply |
 | 部署 | Docker Compose / Kubernetes (Helm) / Lite 单二进制 / 桌面版；支持离线与私有云部署；界面支持中文、英文、日文、韩文、俄文 |
@@ -364,7 +374,7 @@ weknora chat "总结一下设计文档"
 | [配置说明](https://weknora.weixin.qq.com/docs/01-getting-started/04-configuration) | 环境变量与模型配置 |
 | [常见问题排查](https://weknora.weixin.qq.com/docs/01-getting-started/05-troubleshooting) | 常见问题与解决办法 |
 | [API 文档](https://weknora.weixin.qq.com/docs/04-api/01-api-overview) | REST API 总览 |
-| [版本说明](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2) | 各版本变更详解 |
+| [版本说明](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3) | 各版本变更详解 |
 
 ## 开发指南
 

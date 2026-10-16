@@ -19,7 +19,11 @@ func TestStorageBackendInnerPath(t *testing.T) {
 		{"canonical s3 path", "storage://be-1/s3://weknora/data/a.jpg", "s3://weknora/data/a.jpg"},
 		{"canonical minio path", "storage://be-1/minio://weknora/data/a.jpg", "minio://weknora/data/a.jpg"},
 		{"bare provider path unchanged", "s3://weknora/data/a.jpg", "s3://weknora/data/a.jpg"},
-		{"legacy URL unchanged", "https://bucket.cos.region.myqcloud.com/a.jpg", "https://bucket.cos.region.myqcloud.com/a.jpg"},
+		{
+			"legacy URL unchanged",
+			"https://bucket.cos.region.myqcloud.com/a.jpg",
+			"https://bucket.cos.region.myqcloud.com/a.jpg",
+		},
 		{"resource handle unchanged", "resource://abc123", "resource://abc123"},
 	}
 	for _, tc := range cases {

@@ -30,6 +30,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/robfig/cron/v3"
@@ -67,6 +68,19 @@ type HousekeepingService struct {
 // queuedProbeTTL bounds how often QueuedWork rescans the queue; clients poll
 // far more often than a backlog changes.
 const queuedProbeTTL = time.Minute
+
+// openSpanStatuses are the span states meaning "this span never finished".
+var openSpanStatuses = []string{types.SpanStatusPending, types.SpanStatusRunning}
+
+// terminalParseStatuses are knowledge states in which no pipeline can still be
+// advancing, so any open span left on the row is orphaned by definition.
+var terminalParseStatuses = []string{
+	types.ParseStatusCompleted, types.ParseStatusFailed, types.ParseStatusCancelled,
+}
+
+// terminalSpanMessage is the fallback explanation for a span Sweep D closes on
+// a row that carries no error message of its own.
+const terminalSpanMessage = "row reached a terminal state without closing its trace spans"
 
 // NewHousekeepingService constructs a HousekeepingService. It does NOT start
 // the cron — call Start in the application bootstrap so a misconfigured
@@ -119,13 +133,20 @@ func (h *HousekeepingService) Start(ctx context.Context) error {
 
 // Stop halts the cron and waits for in-flight sweeps to finish.
 func (h *HousekeepingService) Stop() {
+	h.StopWithin(0)
+}
+
+// StopWithin is Stop with a bound. timeout <= 0 waits for the in-flight sweep.
+func (h *HousekeepingService) StopWithin(timeout time.Duration) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if !h.started {
 		return
 	}
-	c := h.cron.Stop()
-	<-c.Done()
+	if !runtime.WaitFor(h.cron.Stop().Done(), timeout) {
+		logger.Warnf(context.Background(),
+			"[Housekeeping] in-flight sweep still running after %s; continuing shutdown", timeout)
+	}
 	h.started = false
 }
 
@@ -281,6 +302,8 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 			}
 		}
 	}
+	// Sweep D: terminal rows still carrying open spans.
+	h.reapTerminalSpans(ctx)
 }
 
 // wikiHoldLimit bounds how long a durable Wiki ingest op keeps its row out of
@@ -815,6 +838,62 @@ func (h *HousekeepingService) rearmWikiTriggers(
 	}
 	if rearmed > 0 {
 		logger.Infof(ctx, "[Housekeeping] re-armed wiki ingest trigger for %d knowledge base(s)", rearmed)
+	}
+}
+
+// reapTerminalSpans closes spans still open on rows that already reached a
+// terminal state.
+//
+// Sweep A only selects pending/processing/finalizing, so a row marked terminal
+// by a path that forgets to close its attempt is never revisited: its spans stay
+// "running" and the timeline shows a permanent "进行中". Closing them here makes
+// that whole class of leak self-healing, instead of depending on every failure
+// path remembering to finalize, and it also retires rows stranded by older
+// releases. The row's own error_message is carried over so
+// the timeline still names the real cause rather than a generic stall.
+func (h *HousekeepingService) reapTerminalSpans(ctx context.Context) {
+	type openRow struct {
+		ID           int64   `gorm:"column:id"`
+		ErrorMessage *string `gorm:"column:error_message"`
+	}
+	var rows []openRow
+	if err := h.db.WithContext(ctx).
+		Table("knowledge_processing_spans AS s").
+		Select("s.id AS id", "k.error_message AS error_message").
+		Joins("JOIN knowledges k ON k.id = s.knowledge_id").
+		Where("s.status IN ?", openSpanStatuses).
+		Where("k.parse_status IN ?", terminalParseStatuses).
+		Find(&rows).Error; err != nil {
+		logger.Warnf(ctx, "[Housekeeping] terminal span scan failed: %v", err)
+		return
+	}
+	now := time.Now()
+	var closed int64
+	for _, r := range rows {
+		msg := terminalSpanMessage
+		if r.ErrorMessage != nil && strings.TrimSpace(*r.ErrorMessage) != "" {
+			msg = strings.TrimSpace(*r.ErrorMessage)
+		}
+		if len(msg) > 1024 {
+			msg = msg[:1024]
+		}
+		res := h.db.WithContext(ctx).Model(&types.KnowledgeProcessingSpan{}).
+			Where("id = ? AND status IN ?", r.ID, openSpanStatuses).
+			Updates(map[string]any{
+				"status":        types.SpanStatusCancelled,
+				"error_code":    werrors.ErrCodeTaskStalled,
+				"error_message": msg,
+				"finished_at":   now,
+				"updated_at":    now,
+			})
+		if res.Error != nil {
+			logger.Warnf(ctx, "[Housekeeping] close terminal span %d failed: %v", r.ID, res.Error)
+			continue
+		}
+		closed += res.RowsAffected
+	}
+	if closed > 0 {
+		logger.Infof(ctx, "[Housekeeping] closed %d orphaned span(s) on terminal row(s)", closed)
 	}
 }
 

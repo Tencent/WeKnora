@@ -170,12 +170,12 @@ function buildWebItem(item: KnowledgeReferenceLike, index: number): ReferenceLis
 }
 
 function buildDocumentItem(item: KnowledgeReferenceLike, index: number): ReferenceListItem {
-  const chunkId = item.id || `${item.knowledge_id || 'doc'}-${item.chunk_index ?? index}`
+  const chunkId = item.id !== item.knowledge_id ? item.id : item.chunk_ids?.[0]
   const title = item.knowledge_title || item.knowledge_filename || item.knowledge_id || 'Document'
   const documentKey =
     item.knowledge_id ||
     [item.knowledge_base_id, item.knowledge_title || item.knowledge_filename].filter(Boolean).join(':') ||
-    chunkId
+    chunkId || `doc-${index}`
   return {
     key: `doc:${documentKey}`,
     kind: 'document',
@@ -216,13 +216,13 @@ function getDocumentGroupKey(item: KnowledgeReferenceLike, index: number): strin
   )
 }
 
-function mergeDocumentReferences(refs: KnowledgeReferenceLike[]): KnowledgeReferenceLike[] {
+export function mergeDocumentReferences(refs: KnowledgeReferenceLike[]): KnowledgeReferenceLike[] {
   const groups = new Map<string, KnowledgeReferenceLike & { content_parts?: string[] }>()
 
   refs.forEach((item, index) => {
     const key = getDocumentGroupKey(item, index)
     const content = String(item.content || '').trim()
-    const chunkIds = Array.from(new Set([...(item.chunk_ids || []), ...(item.id ? [item.id] : [])]))
+    const chunkIds = Array.from(new Set([...(item.chunk_ids || []), ...(item.id && item.id !== item.knowledge_id ? [item.id] : [])]))
     const located = item.id && item.source_locators?.length ? item.id : undefined
     const existing = groups.get(key)
 
@@ -343,7 +343,8 @@ export type ReferenceHighlightTarget = {
 
 /** A cited chunk to show inside its original document. */
 export type ReferenceSourceTarget = {
-  chunkId: string
+  /** Absent when opening a document card without a cited passage. */
+  chunkId?: string
   knowledgeId: string
   knowledgeBaseId?: string
   title?: string
@@ -379,7 +380,7 @@ export function resolveReferenceSource(
   return {
     chunkId,
     knowledgeId: ref.knowledge_id,
-    knowledgeBaseId: ref.knowledge_base_id,
+    knowledgeBaseId: ref.knowledge_base_id || target?.knowledgeBaseId,
     title: ref.knowledge_title,
     fileName: ref.knowledge_filename,
     knowledgeSource: ref.knowledge_source,
@@ -431,10 +432,11 @@ export function resolveReferenceHighlightKey(
       (item) => item.kind === 'document' && item.title.trim().toLowerCase() === title,
     )
     const scoped = target.knowledgeBaseId
-      ? candidates.find((item) => item.knowledgeBaseId === target.knowledgeBaseId)
-      : undefined
-    if (scoped) return scoped.key
-    if (candidates.length === 1) return candidates[0].key
+      // Legacy read_document results omitted the KB id. Accept only one
+      // candidate; loadChunk still verifies its knowledge_id before locating.
+      ? candidates.filter((item) => !item.knowledgeBaseId || item.knowledgeBaseId === target.knowledgeBaseId)
+      : candidates
+    if (scoped.length === 1) return scoped[0]!.key
   }
 
   return null

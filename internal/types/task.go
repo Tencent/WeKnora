@@ -478,15 +478,15 @@ type KnowledgeMoveProgress struct {
 	TaskID     string            `json:"task_id"`
 	SourceKBID string            `json:"source_kb_id"`
 	TargetKBID string            `json:"target_kb_id"`
-	Status     KBCloneTaskStatus `json:"status"`
-	Progress   int               `json:"progress"`   // 0-100
-	Total      int               `json:"total"`      // 总知识数
-	Processed  int               `json:"processed"`  // 已处理数
-	Failed     int               `json:"failed"`     // 失败数
-	Message    string            `json:"message"`    // 状态消息
-	Error      string            `json:"error"`      // 错误信息
-	CreatedAt  int64             `json:"created_at"` // 任务创建时间
-	UpdatedAt  int64             `json:"updated_at"` // 最后更新时间
+	Status     KBCloneTaskStatus `json:"status" extensions:"x-agent"`
+	Progress   int               `json:"progress" extensions:"x-agent"`  // 0-100
+	Total      int               `json:"total" extensions:"x-agent"`     // 总知识数
+	Processed  int               `json:"processed" extensions:"x-agent"` // 已处理数
+	Failed     int               `json:"failed" extensions:"x-agent"`    // 失败数
+	Message    string            `json:"message" extensions:"x-agent"`   // 状态消息
+	Error      string            `json:"error" extensions:"x-agent"`     // 错误信息
+	CreatedAt  int64             `json:"created_at"`                     // 任务创建时间
+	UpdatedAt  int64             `json:"updated_at"`                     // 最后更新时间
 }
 
 // ManualProcessPayload represents the manual knowledge processing task payload.
@@ -536,6 +536,9 @@ type ImageMultimodalPayload struct {
 	// in the payload rather than being re-read from the knowledge base at handle
 	// time.
 	ImageAttrsEnabled bool `json:"image_attrs_enabled,omitempty"`
+	// ImageVectorEnabled is resolved at enqueue time. nil preserves the KB
+	// fallback for tasks queued before per-document indexing overrides existed.
+	ImageVectorEnabled *bool `json:"image_vector_enabled,omitempty"`
 	// ImageActions is the attribute→work table, resolved from the KB config at
 	// enqueue time. A task without it — one already in flight when attribute
 	// observation shipped — falls back to the conservative policy: run OCR.

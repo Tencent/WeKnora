@@ -568,6 +568,10 @@ func (s *chunkService) UpdateDocumentChunk(
 		chunk.SourceContent = chunk.Content
 	}
 	bodyChanged := newContent != chunk.Content
+	if bodyChanged {
+		// Edited evidence no longer maps to the uploaded original.
+		chunk.SourceLocators = nil
+	}
 	chunk.Content = newContent
 	chunk.IsEnabled = newEnabled
 	chunk.ContentRevision++
@@ -646,7 +650,7 @@ func (s *chunkService) syncEditedChunkImages(ctx context.Context, chunk *types.C
 	}
 	contentURLs := searchutil.ImageURLsInContent(chunk.Content)
 	for _, child := range children {
-		if child.ChunkType != types.ChunkTypeImageOCR && child.ChunkType != types.ChunkTypeImageCaption {
+		if !types.IsImageChildChunkType(child.ChunkType) {
 			continue
 		}
 		desiredEnabled := chunk.IsEnabled && imageChildMatchesContent(child, contentURLs)
@@ -747,6 +751,7 @@ func (s *chunkService) rebuildParentContent(ctx context.Context, edited *types.C
 	for _, repl := range replacements {
 		baseRunes = append(append(append([]rune{}, baseRunes[:repl.start]...), []rune(repl.content)...), baseRunes[repl.end:]...)
 	}
+	parent.SourceLocators = nil // Child edits invalidate the original parent evidence.
 	parent.Content = string(baseRunes)
 	for _, conflict := range conflicts {
 		parent.Content = searchutil.JoinChunkContent(parent.Content, conflict.content, "\n\n")
@@ -770,6 +775,11 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 	engine, err := retriever.CreateRetrieveEngineForKB(ctx, s.retrieveEngine, s.ownership, chunk.TenantID, kb.VectorStoreID)
 	if err != nil {
 		return err
+	}
+	if chunk.ChunkType == types.ChunkTypeImageVector {
+		// Its index row holds the image's own vector; re-embedding Content
+		// would replace it with the caption's. Only the enabled flag follows.
+		return engine.BatchUpdateChunkEnabledStatus(ctx, map[string]bool{chunk.ID: chunk.IsEnabled})
 	}
 	if err := engine.DeleteByChunkIDList(ctx, []string{chunk.ID}, embedder.GetDimensions(), kb.Type); err != nil {
 		return err

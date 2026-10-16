@@ -93,7 +93,7 @@ func (s *processSyncKBService) ListKnowledgeBasesByTenantID(context.Context, uin
 }
 
 func (s *processSyncKBService) UpdateKnowledgeBase(
-	context.Context, string, string, string, *types.KnowledgeBaseConfig,
+	context.Context, string, string, string, *types.KnowledgeBaseConfig, *types.VLMConfig,
 ) (*types.KnowledgeBase, error) {
 	return nil, nil
 }
@@ -111,6 +111,10 @@ func (s *processSyncKBService) HybridSearchWithRerank(
 ) (*types.RetrievalResult, error) {
 	results, err := s.HybridSearch(ctx, id, params)
 	return &types.RetrievalResult{Results: results}, err
+}
+
+func (s *processSyncKBService) ReadChunkImage(context.Context, *types.SearchResult) ([]byte, error) {
+	return nil, nil
 }
 
 func (s *processSyncKBService) GetQueryEmbedding(context.Context, string, string) ([]float32, error) {

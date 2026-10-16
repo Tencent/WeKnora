@@ -39,6 +39,12 @@ type KnowledgeSpanRepository interface {
 	// running — a tree walk that stops at terminal parents would miss
 	// those orphan leaves.
 	CancelAllOpenSpans(ctx context.Context, knowledgeID string, attempt int, errorCode, reason string) (int64, error)
+	// CancelOpenSpansBeforeAttempt flips every pending/running span belonging to
+	// an attempt strictly older than `attempt` to cancelled. Reparse calls it so a
+	// superseded attempt cannot leave a "running" root behind.
+	CancelOpenSpansBeforeAttempt(
+		ctx context.Context, knowledgeID string, attempt int, errorCode, reason string,
+	) (int64, error)
 	// CancelOpenSpansByName flips pending/running rows with the given span
 	// name for (knowledgeID, attempt). Used before re-opening a subspan
 	// after asynq retry or server restart so the trace tree does not
@@ -241,6 +247,33 @@ func (r *knowledgeSpanRepository) CancelAllOpenSpans(
 			knowledgeID, attempt,
 			[]string{types.SpanStatusPending, types.SpanStatusRunning}).
 		Updates(updates)
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
+}
+
+// CancelOpenSpansBeforeAttempt is CancelAllOpenSpans widened to every attempt
+// older than `attempt`. A reparse allocates attempt N+1 while attempt N may
+// still hold open spans (its worker died, or the row was failed without
+// finalizing); those would otherwise live forever.
+func (r *knowledgeSpanRepository) CancelOpenSpansBeforeAttempt(
+	ctx context.Context, knowledgeID string, attempt int, errorCode, reason string,
+) (int64, error) {
+	errorCode = common.CleanInvalidUTF8(errorCode)
+	reason = common.CleanInvalidUTF8(reason)
+	now := time.Now()
+	res := r.db.WithContext(ctx).Model(&types.KnowledgeProcessingSpan{}).
+		Where("knowledge_id = ? AND attempt < ? AND status IN ?",
+			knowledgeID, attempt,
+			[]string{types.SpanStatusPending, types.SpanStatusRunning}).
+		Updates(map[string]any{
+			"status":        types.SpanStatusCancelled,
+			"error_code":    errorCode,
+			"error_message": reason,
+			"finished_at":   now,
+			"updated_at":    now,
+		})
 	if res.Error != nil {
 		return 0, res.Error
 	}

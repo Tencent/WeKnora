@@ -145,6 +145,9 @@ func (e *AgentEngine) emitCompletionEvent(
 	ctx context.Context, state *types.AgentState, sessionID, messageID string, startTime time.Time,
 ) {
 	steps := state.RoundSteps
+	if state.SuspendedStep != nil {
+		steps = append(append([]types.AgentStep(nil), steps...), *state.SuspendedStep)
+	}
 	if len(state.PendingSteerMessages) > 0 {
 		// A stop or model failure can arrive after delivery but before the next
 		// response exists. Preserve that boundary without inventing an answer.
@@ -158,19 +161,30 @@ func (e *AgentEngine) emitCompletionEvent(
 		knowledgeRefsInterface = append(knowledgeRefsInterface, ref)
 	}
 
+	data := event.AgentCompleteData{
+		FinalAnswer:     state.FinalAnswer,
+		KnowledgeRefs:   knowledgeRefsInterface,
+		AgentSteps:      steps,
+		Usage:           turnUsage(state),
+		TotalSteps:      len(state.RoundSteps),
+		TotalDurationMs: time.Since(startTime).Milliseconds(),
+		MessageID:       messageID, // Include message ID for proper message update
+	}
+	// The turn's usage is aggregated only from calls made through this chat
+	// model (each round and the final answer), so it is the model the usage
+	// belongs to. The message row keeps the requested binding, which can differ
+	// when a request override falls back to the agent's model.
+	if e.chatModel != nil {
+		data.ModelID = e.chatModel.GetModelID()
+	}
+	if state.Suspended != nil {
+		data.Suspended = state.Suspended
+	}
 	e.eventBus.Emit(ctx, event.Event{
 		ID:        generateEventID("complete"),
 		Type:      event.EventAgentComplete,
 		SessionID: sessionID,
-		Data: event.AgentCompleteData{
-			FinalAnswer:     state.FinalAnswer,
-			KnowledgeRefs:   knowledgeRefsInterface,
-			AgentSteps:      steps,
-			Usage:           turnUsage(state),
-			TotalSteps:      len(state.RoundSteps),
-			TotalDurationMs: time.Since(startTime).Milliseconds(),
-			MessageID:       messageID, // Include message ID for proper message update
-		},
+		Data:      data,
 	})
 
 	logger.Infof(ctx, "Agent execution completed in %d rounds", state.CurrentRound)

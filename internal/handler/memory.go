@@ -33,7 +33,7 @@ func NewMemoryHandler(memoryService interfaces.MemoryService) *MemoryHandler {
 // @Description  返回合并后的记忆开关状态（空间级 + 个人级）与记忆条数
 // @Tags         长期记忆
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "记忆设置"
+// @Success      200  {object}  handler.DataResponse{data=types.MemorySettings}  "记忆设置"
 // @Security     Bearer
 // @Router       /memory/settings [get]
 func (h *MemoryHandler) GetSettings(c *gin.Context) {
@@ -57,7 +57,7 @@ type updateMemorySettingsRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      object  true  "设置"
-// @Success      200      {object}  map[string]interface{}  "更新后的设置"
+// @Success      200      {object}  handler.DataResponse{data=types.MemorySettings}  "更新后的设置"
 // @Security     Bearer
 // @Router       /memory/settings [put]
 func (h *MemoryHandler) UpdateSettings(c *gin.Context) {
@@ -91,7 +91,7 @@ func (h *MemoryHandler) UpdateSettings(c *gin.Context) {
 // @Param        status  query     string  false  "状态过滤"  Enums(active, superseded, archived, pending)
 // @Param        limit   query     int     false  "每页条数"  default(50)
 // @Param        offset  query     int     false  "偏移量"
-// @Success      200     {object}  map[string]interface{}  "记忆列表"
+// @Success      200     {object}  handler.ListItemsResponse  "记忆列表"
 // @Security     Bearer
 // @Router       /memory/items [get]
 func (h *MemoryHandler) ListItems(c *gin.Context) {
@@ -145,7 +145,7 @@ func memoryListPaging(c *gin.Context) (limit, offset int) {
 // @Produce      json
 // @Param        limit   query     int  false  "每页条数"  default(50)
 // @Param        offset  query     int  false  "偏移量"
-// @Success      200     {object}  map[string]interface{}  "主题列表"
+// @Success      200     {object}  handler.ListTopicsResponse  "主题列表"
 // @Security     Bearer
 // @Router       /memory/topics [get]
 func (h *MemoryHandler) ListTopics(c *gin.Context) {
@@ -169,7 +169,7 @@ func (h *MemoryHandler) ListTopics(c *gin.Context) {
 // @Tags         长期记忆
 // @Produce      json
 // @Param        id   path      string  true  "主题 ID"
-// @Success      200  {object}  map[string]interface{}  "新增的记忆"
+// @Success      200  {object}  handler.DataResponse{data=types.MemoryItem}  "新增的记忆"
 // @Security     Bearer
 // @Router       /memory/topics/{id}/promote [post]
 func (h *MemoryHandler) PromoteTopic(c *gin.Context) {
@@ -188,7 +188,7 @@ func (h *MemoryHandler) PromoteTopic(c *gin.Context) {
 // @Tags         长期记忆
 // @Produce      json
 // @Param        id   path      string  true  "主题 ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Success      200  {object}  handler.SuccessResponse  "删除成功"
 // @Security     Bearer
 // @Router       /memory/topics/{id} [delete]
 func (h *MemoryHandler) DeleteTopic(c *gin.Context) {
@@ -207,7 +207,7 @@ func (h *MemoryHandler) DeleteTopic(c *gin.Context) {
 // @Produce      json
 // @Param        limit   query     int  false  "每页条数"  default(50)
 // @Param        offset  query     int  false  "偏移量"
-// @Success      200     {object}  map[string]interface{}  "文档列表"
+// @Success      200     {object}  handler.ListDocumentsResponse  "文档列表"
 // @Security     Bearer
 // @Router       /memory/documents [get]
 func (h *MemoryHandler) ListDocuments(c *gin.Context) {
@@ -231,7 +231,7 @@ func (h *MemoryHandler) ListDocuments(c *gin.Context) {
 // @Tags         长期记忆
 // @Produce      json
 // @Param        id   path      string  true  "亲和度 ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Success      200  {object}  handler.SuccessResponse  "删除成功"
 // @Security     Bearer
 // @Router       /memory/documents/{id} [delete]
 func (h *MemoryHandler) DeleteDocument(c *gin.Context) {
@@ -256,7 +256,7 @@ type createMemoryItemRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      object  true  "记忆内容"
-// @Success      200      {object}  map[string]interface{}  "新增的记忆"
+// @Success      200      {object}  handler.DataResponse{data=types.MemoryItem}  "新增的记忆"
 // @Security     Bearer
 // @Router       /memory/items [post]
 func (h *MemoryHandler) CreateItem(c *gin.Context) {
@@ -287,7 +287,7 @@ type updateMemoryItemRequest struct {
 // @Produce      json
 // @Param        id       path      string  true  "记忆ID"
 // @Param        request  body      object  true  "记忆内容"
-// @Success      200      {object}  map[string]interface{}  "更新后的记忆"
+// @Success      200      {object}  handler.DataResponse{data=types.MemoryItem}  "更新后的记忆"
 // @Security     Bearer
 // @Router       /memory/items/{id} [put]
 func (h *MemoryHandler) UpdateItem(c *gin.Context) {
@@ -311,7 +311,7 @@ func (h *MemoryHandler) UpdateItem(c *gin.Context) {
 // @Tags         长期记忆
 // @Produce      json
 // @Param        id  path      string  true  "记忆ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Success      200  {object}  handler.SuccessResponse  "删除成功"
 // @Security     Bearer
 // @Router       /memory/items/{id} [delete]
 func (h *MemoryHandler) DeleteItem(c *gin.Context) {
@@ -329,7 +329,7 @@ func (h *MemoryHandler) DeleteItem(c *gin.Context) {
 // @Tags         长期记忆
 // @Produce      json
 // @Param        id   path      string  true  "记忆 ID"
-// @Success      200  {object}  map[string]interface{}  "确认成功"
+// @Success      200  {object}  handler.DataResponse{data=types.MemoryItem}  "确认成功"
 // @Security     Bearer
 // @Router       /memory/items/{id}/confirm [post]
 //
@@ -351,7 +351,7 @@ func (h *MemoryHandler) ConfirmItem(c *gin.Context) {
 // @Tags         长期记忆
 // @Produce      json
 // @Param        id   path      string  true  "记忆 ID"
-// @Success      200  {object}  map[string]interface{}  "否决成功"
+// @Success      200  {object}  handler.SuccessResponse  "否决成功"
 // @Security     Bearer
 // @Router       /memory/items/{id}/reject [post]
 func (h *MemoryHandler) RejectItem(c *gin.Context) {
@@ -368,7 +368,7 @@ func (h *MemoryHandler) RejectItem(c *gin.Context) {
 // @Description  永久删除当前用户的全部记忆
 // @Tags         长期记忆
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "清空成功"
+// @Success      200  {object}  handler.ClearResponse  "清空成功"
 // @Security     Bearer
 // @Router       /memory/items [delete]
 func (h *MemoryHandler) Clear(c *gin.Context) {
@@ -386,7 +386,7 @@ func (h *MemoryHandler) Clear(c *gin.Context) {
 // @Description  以 JSON 导出当前用户的全部记忆
 // @Tags         长期记忆
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "记忆导出"
+// @Success      200  {object}  handler.ExportResponse  "记忆导出"
 // @Security     Bearer
 // @Router       /memory/export [get]
 func (h *MemoryHandler) Export(c *gin.Context) {
@@ -431,7 +431,7 @@ func (h *MemoryHandler) Export(c *gin.Context) {
 // @Description  合并意思接近的条目、归档到期事项，不等待每日后台整理
 // @Tags         长期记忆
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "整理结果"
+// @Success      200  {object}  handler.DataResponse{data=types.MemoryConsolidationResult}  "整理结果"
 // @Security     Bearer
 // @Router       /memory/consolidate [post]
 func (h *MemoryHandler) Consolidate(c *gin.Context) {

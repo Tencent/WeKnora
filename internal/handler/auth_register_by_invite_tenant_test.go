@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
@@ -42,9 +43,13 @@ func (s *invitedRegistrationUserService) GenerateTokens(context.Context, *types.
 type invitedRegistrationInvitationService struct {
 	interfaces.TenantInvitationService
 	acceptErr error
+	lookupErr error
 }
 
 func (s *invitedRegistrationInvitationService) LookupByToken(context.Context, string) (*types.TenantInvitation, error) {
+	if s.lookupErr != nil {
+		return nil, s.lookupErr
+	}
 	return &types.TenantInvitation{TenantID: 42, Role: types.TenantRoleViewer}, nil
 }
 
@@ -145,5 +150,51 @@ func TestRegisterByInviteRejectsSimplePasswordWhenComplexEnabled(t *testing.T) {
 	}
 	if users.registeredMode != "" {
 		t.Fatalf("Register was called with mode=%q", users.registeredMode)
+	}
+}
+
+func TestRegisterByInviteRegistrationModes(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		mode      string
+		lookupErr error
+		want      int
+	}{
+		{"open", config.AuthRegistrationModeSelfServe, nil, http.StatusCreated},
+		{"invited", config.AuthRegistrationModeInviteRegister, nil, http.StatusCreated},
+		{"disabled", config.AuthRegistrationModeInviteOnly, nil, http.StatusForbidden},
+		{"unknown mode", "invalid", nil, http.StatusForbidden},
+		{"invalid invitation", config.AuthRegistrationModeInviteRegister, errors.New("invalid"), http.StatusGone},
+		{"expired invitation", config.AuthRegistrationModeInviteRegister, errors.New("expired"), http.StatusGone},
+		{"revoked invitation", config.AuthRegistrationModeInviteRegister, errors.New("revoked"), http.StatusGone},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			users := &invitedRegistrationUserService{}
+			h := &AuthHandler{
+				configInfo:    &config.Config{Auth: &config.AuthConfig{RegistrationMode: tc.mode}},
+				userService:   users,
+				tenantService: &invitedRegistrationTenantService{},
+				invitationSvc: &invitedRegistrationInvitationService{lookupErr: tc.lookupErr},
+			}
+			r := gin.New()
+			r.Use(errorCapture())
+			r.POST("/auth/register-by-invite", h.RegisterByInvite)
+			req := httptest.NewRequest(http.MethodPost, "/auth/register-by-invite", bytes.NewBufferString(
+				`{"token":"invite-token","email":"alice@example.com","username":"alice","password":"supersecret1"}`))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			if w.Code != tc.want {
+				t.Fatalf("status=%d, want %d body=%s", w.Code, tc.want, w.Body.String())
+			}
+			if tc.want == http.StatusCreated {
+				if users.registeredMode != types.TenantProvisioningTenantless || users.updatedTenant != 42 {
+					t.Fatalf("expected account in invited tenant only: mode=%q tenant=%d",
+						users.registeredMode, users.updatedTenant)
+				}
+			} else if users.registeredMode != "" {
+				t.Fatal("rejected registration must not create an account")
+			}
+		})
 	}
 }

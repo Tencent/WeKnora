@@ -281,6 +281,18 @@ curl $BASE/api/v1/system/admin/audit-log -H "Authorization: Bearer $TOKEN"
 路由注册：`internal/router/routes_auth_tenant.go` 的 `RegisterSystemAdminRoutes` 与 `RegisterSystemRoutes`。Handler：`internal/handler/system.go`、`internal/handler/audit_log.go`。
 
 
+## 平台用户管理
+
+以下接口仅系统管理员的用户会话可访问，API Key 不开放。
+
+### GET /api/v1/system/admin/users
+
+分页列出整个部署的用户。查询参数 `offset` 默认 0；`limit` 默认 50，最大 200。响应为未包装对象 `{"users":[UserInfo],"offset":0,"limit":50,"has_more":false}`，不返回密码或哈希。
+
+### POST /api/v1/system/admin/users/status
+
+请求体 `{"user_id":"目标用户 ID","is_active":false}`，两个字段都必填。停用会吊销目标用户的已有会话；不能停用自己或最后一位启用的系统管理员（400），用户不存在返回 404。成功返回 `{"message":"User status updated","user":UserInfo,"is_active":false}`。创建账号与重置密码仍使用上文的 `/users/create`、`/users/reset-password`。
+
 ## 模型目录（/api/v1/system/admin/model-catalog）
 
 仅系统管理员用户会话可访问，API Key 不开放此组接口。

@@ -158,6 +158,7 @@ func TestAgentReadRoutesDeclareReadAgentsCapability(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/v1/agents/placeholders"},
 		{http.MethodGet, "/api/v1/agents/type-presets"},
+		{http.MethodGet, "/api/v1/agents/tools"},
 		{http.MethodGet, "/api/v1/agents"},
 		{http.MethodGet, "/api/v1/agents/:id"},
 		{http.MethodGet, "/api/v1/agents/:id/suggested-questions"},
@@ -228,6 +229,7 @@ func TestKnowledgeBaseManagementRoutesDeclareManageKBsCapability(t *testing.T) {
 		path   string
 	}{
 		{http.MethodPut, "/api/v1/knowledge-bases/:id"},
+		{http.MethodPatch, "/api/v1/knowledge-bases/:id"},
 		{http.MethodDelete, "/api/v1/knowledge-bases/:id"},
 		{http.MethodPost, "/api/v1/initialization/initialize/:kbId"},
 		{http.MethodPut, "/api/v1/initialization/config/:kbId"},
@@ -313,6 +315,7 @@ func TestKnowledgeReadRoutesDeclareRetrieveCapability(t *testing.T) {
 		{http.MethodPost, "/api/v1/knowledge-bases/:id/faq/search"},
 		{http.MethodGet, "/api/v1/knowledge-bases/:id/tags"},
 		{http.MethodPost, "/api/v1/knowledge-search"},
+		{http.MethodPost, "/api/v1/wiki-search"},
 		{http.MethodGet, "/api/v1/initialization/config/:kbId"},
 		{http.MethodGet, "/api/v1/knowledgebase/:kb_id/wiki/pages"},
 	}
@@ -362,6 +365,7 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 		{http.MethodGet, "/api/v1/tenants", types.APIKeyCapabilityManageTenantSettings},
 		{http.MethodGet, "/api/v1/models", types.APIKeyCapabilityManageModels},
 		{http.MethodDelete, "/api/v1/models/:id", types.APIKeyCapabilityManageModels},
+		{http.MethodPost, "/api/v1/models/:id/copy", types.APIKeyCapabilityManageModels},
 		{http.MethodPost, "/api/v1/evaluation", types.APIKeyCapabilityRunEvaluations},
 		{http.MethodGet, "/api/v1/system/info", types.APIKeyCapabilityManageVectorStores},
 		{http.MethodGet, "/api/v1/mcp-services", types.APIKeyCapabilityManageMCPServices},
@@ -369,6 +373,7 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 			http.MethodPost, "/api/v1/mcp-services/:id/usage-instructions/generate",
 			types.APIKeyCapabilityManageMCPServices,
 		},
+		{http.MethodPost, "/api/v1/mcp-services/:id/oauth/assertion", types.APIKeyCapabilityManageMCPServices},
 		{http.MethodGet, "/api/v1/web-search-providers", types.APIKeyCapabilityManageWebSearch},
 		{http.MethodGet, "/api/v1/vector-stores", types.APIKeyCapabilityManageVectorStores},
 		{http.MethodGet, "/api/v1/storage-backends", types.APIKeyCapabilityManageStorageBackends},

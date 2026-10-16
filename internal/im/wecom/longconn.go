@@ -646,7 +646,11 @@ func (c *LongConnClient) handleCallback(ctx context.Context, conn *ws.Conn, fram
 }
 
 // convertMixedMessage converts a WeCom mixed (text+image) message.
-// Extracts all text content for QA; if there's only images, treat as image message.
+// When the message contains both text and images, the first image is kept as
+// the QA attachment and the text is preserved as its caption — the IM service
+// treats a captioned image exactly like a standalone image message, so the
+// model sees the image and the user's question together. Text-only and
+// image-only messages keep their previous behavior.
 func (c *LongConnClient) convertMixedMessage(msg *botMessage, chatID string, chatType im.ChatType, reqID string) *im.IncomingMessage {
 	isGroup := chatType == im.ChatTypeGroup
 	var textParts []string
@@ -671,7 +675,30 @@ func (c *LongConnClient) convertMixedMessage(msg *botMessage, chatID string, cha
 		}
 	}
 
-	// If there's text content, treat as text message (QA query)
+	// Text plus image(s): image as attachment, text as caption. Downstream,
+	// prepareIMAttachments downloads the image and fileMessageQAContent keeps
+	// msg.Content as the query, so dropping the image here would silently
+	// blind the model for the most common mixed-message shape ("这是什么？" + screenshot).
+	if firstImageURL != "" {
+		incoming := &im.IncomingMessage{
+			Platform:    im.PlatformWeCom,
+			MessageType: im.MessageTypeImage,
+			UserID:      msg.From.UserID,
+			UserName:    msg.From.UserID,
+			ChatID:      chatID,
+			ChatType:    chatType,
+			MessageID:   msg.MsgID,
+			FileKey:     firstImageURL,
+			FileName:    msg.MsgID + ".png",
+			Extra:       map[string]string{"req_id": reqID, "aes_key": firstImageAESKey},
+		}
+		if len(textParts) > 0 {
+			incoming.Content = strings.Join(textParts, "\n")
+		}
+		return incoming
+	}
+
+	// Text only, treat as text message (QA query)
 	if len(textParts) > 0 {
 		return &im.IncomingMessage{
 			Platform:    im.PlatformWeCom,
@@ -683,22 +710,6 @@ func (c *LongConnClient) convertMixedMessage(msg *botMessage, chatID string, cha
 			Content:     strings.Join(textParts, "\n"),
 			MessageID:   msg.MsgID,
 			Extra:       map[string]string{"req_id": reqID},
-		}
-	}
-
-	// Only images, treat as image message (save to KB)
-	if firstImageURL != "" {
-		return &im.IncomingMessage{
-			Platform:    im.PlatformWeCom,
-			MessageType: im.MessageTypeImage,
-			UserID:      msg.From.UserID,
-			UserName:    msg.From.UserID,
-			ChatID:      chatID,
-			ChatType:    chatType,
-			MessageID:   msg.MsgID,
-			FileKey:     firstImageURL,
-			FileName:    msg.MsgID + ".png",
-			Extra:       map[string]string{"req_id": reqID, "aes_key": firstImageAESKey},
 		}
 	}
 

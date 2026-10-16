@@ -303,7 +303,7 @@ func (h *SandboxConfigHandler) SetWorkspacePolicy(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      sandboxConfigRequest    true  "Sandbox backend config"
-// @Success      201      {object}  map[string]interface{}  "Created sandbox config"
+// @Success      201      {object}  handler.DataResponse{data=handler.sandboxConfigResponse}  "Created sandbox config"
 // @Failure      400      {object}  apperrors.AppError      "Invalid request or validation failure"
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Security     Bearer
@@ -337,7 +337,7 @@ func (h *SandboxConfigHandler) Create(c *gin.Context) {
 // @Tags         SandboxConfig
 // @Produce      json
 // @Param        id   path      string  true  "Sandbox config ID"
-// @Success      200  {object}  map[string]interface{}   "Sandbox config"
+// @Success      200  {object}  handler.DataResponse{data=handler.sandboxConfigResponse}   "Sandbox config"
 // @Failure      401  {object}  map[string]interface{}   "Unauthorized"
 // @Failure      404  {object}  apperrors.AppError       "Sandbox config not found"
 // @Security     Bearer
@@ -367,7 +367,7 @@ func (h *SandboxConfigHandler) Get(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      string                true  "Sandbox config ID"
 // @Param        request  body      sandboxConfigRequest  true  "Updated sandbox config"
-// @Success      200      {object}  map[string]interface{}  "Updated sandbox config"
+// @Success      200      {object}  handler.DataResponse{data=handler.sandboxConfigResponse}  "Updated sandbox config"
 // @Failure      400      {object}  apperrors.AppError      "Invalid request or validation failure"
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Sandbox config not found"
@@ -412,7 +412,7 @@ func (h *SandboxConfigHandler) Update(c *gin.Context) {
 // @Produce      json
 // @Param        id     path   string  true   "Sandbox config ID"
 // @Param        force  query  bool    false  "Force delete when inventory is unverifiable"
-// @Success      200    {object}  map[string]interface{}  "Deletion success"
+// @Success      200    {object}  handler.SuccessResponse  "Deletion success"
 // @Failure      401    {object}  map[string]interface{}  "Unauthorized"
 // @Failure      409    {object}  map[string]interface{}  "Live sandboxes or unverifiable inventory"
 // @Security     Bearer
@@ -439,7 +439,7 @@ func (h *SandboxConfigHandler) Delete(c *gin.Context) {
 // @Tags         SandboxConfig
 // @Produce      json
 // @Param        id   path      string  true  "Sandbox config ID"
-// @Success      200  {object}  map[string]interface{}  "Sandbox inventory"
+// @Success      200  {object}  handler.DataResponse{data=service.SandboxInventory}  "Sandbox inventory"
 // @Failure      401  {object}  map[string]interface{}  "Unauthorized"
 // @Security     Bearer
 // @Security     ApiKeyAuth

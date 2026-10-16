@@ -254,3 +254,266 @@
   font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
+
+// The answerable form of a prompt, rendered in the dock above the composer.
+.prompt-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.prompt-question {
+  font-size: var(--app-text-base, 14px);
+  line-height: 1.55;
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.prompt-desc {
+  margin-top: -4px;
+  font-size: var(--agent-step-summary-size, 13px);
+  line-height: 1.55;
+  color: var(--td-text-color-secondary);
+  white-space: pre-line;
+  word-break: break-word;
+  max-height: calc(1.55em * 8);
+  overflow-y: auto;
+}
+
+.prompt-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: -2px 0 0;
+  max-height: calc(1.4em * 6 + 20px);
+  overflow-y: auto;
+}
+
+.prompt-field {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+  align-items: baseline;
+  margin: 0;
+  font-size: var(--agent-step-summary-size, 13px);
+  line-height: 1.4;
+
+  dt {
+    margin: 0;
+    color: var(--td-text-color-placeholder);
+  }
+
+  dd {
+    margin: 0;
+    color: var(--td-text-color-primary);
+    word-break: break-word;
+  }
+}
+
+.prompt-desc-items {
+  margin: -4px 0 0;
+  padding-left: 18px;
+  max-height: calc(1.55em * 8);
+  overflow-y: auto;
+  font-size: var(--agent-step-summary-size, 13px);
+  line-height: 1.55;
+  color: var(--td-text-color-secondary);
+  word-break: break-word;
+}
+
+.prompt-options {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 -8px;
+}
+
+.prompt-option {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--app-radius-md);
+  background: transparent;
+  font: inherit;
+  font-size: var(--app-text-base, 14px);
+  line-height: 1.5;
+  text-align: left;
+  color: var(--td-text-color-primary);
+  cursor: pointer;
+  transition: background var(--app-motion-fast) ease;
+
+  &:hover:not(:disabled),
+  &:focus-visible {
+    background: var(--td-bg-color-container-hover);
+    outline: none;
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  &.is-selected {
+    background: var(--td-bg-color-container-hover);
+
+    .prompt-option-key {
+      background: var(--td-brand-color);
+      color: var(--td-text-color-anti);
+    }
+  }
+}
+
+.prompt-option-key {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-secondarycontainer);
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+  color: var(--td-text-color-secondary);
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+}
+
+.prompt-option-label {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.prompt-option-check {
+  flex-shrink: 0;
+  color: var(--td-brand-color);
+}
+
+.prompt-args {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.prompt-args-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--agent-step-summary-size, 13px);
+  line-height: 1.55;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+
+  &:hover {
+    color: var(--td-text-color-primary);
+  }
+
+  .args-status {
+    margin-left: 6px;
+  }
+}
+
+.prompt-args-input {
+  :deep(.t-textarea__inner) {
+    font-family: var(--app-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: var(--agent-step-summary-size, 13px);
+    line-height: 1.55;
+    background: var(--td-bg-color-secondarycontainer);
+    border-color: transparent;
+    border-radius: var(--app-radius-md);
+    color: var(--td-text-color-secondary);
+  }
+}
+
+.prompt-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.prompt-footer-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+
+  .action-timer {
+    font-size: var(--app-text-sm);
+    line-height: 1.55;
+    font-variant-numeric: tabular-nums;
+    color: var(--td-text-color-placeholder);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    &.timer-warning {
+      color: var(--td-warning-color);
+    }
+
+    &.timer-critical {
+      color: var(--td-error-color);
+    }
+  }
+}
+
+.prompt-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.prompt-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--app-radius-md);
+  background: transparent;
+  font: inherit;
+  font-size: var(--agent-step-summary-size, 13px);
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+
+  &:hover:not(:disabled) {
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
+  }
+
+  &.is-primary {
+    background: var(--td-brand-color);
+    color: var(--td-text-color-anti);
+
+    &:hover:not(:disabled) {
+      background: var(--td-brand-color-hover);
+      color: var(--td-text-color-anti);
+    }
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+.prompt-btn-key {
+  margin-left: 6px;
+  font-size: var(--app-text-sm);
+  opacity: 0.75;
+}

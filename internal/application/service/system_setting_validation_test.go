@@ -1,6 +1,12 @@
 package service
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+)
 
 func TestValidateWorkerConcurrencyMinimums(t *testing.T) {
 	tests := []struct {
@@ -29,5 +35,36 @@ func TestValidateWorkerConcurrencyMinimums(t *testing.T) {
 				t.Fatalf("unexpected validation error: %v", err)
 			}
 		})
+	}
+}
+
+type registrationSettingRepo struct {
+	interfaces.SystemSettingRepository
+	row *types.SystemSetting
+}
+
+func (r *registrationSettingRepo) Get(context.Context, string) (*types.SystemSetting, error) {
+	return r.row, nil
+}
+
+func (r *registrationSettingRepo) Upsert(_ context.Context, row *types.SystemSetting) error {
+	r.row = row
+	return nil
+}
+
+func TestValidateRegistrationModes(t *testing.T) {
+	svc := &systemSettingService{repo: &registrationSettingRepo{}, cache: make(map[string]*types.SystemSetting)}
+	ctx := context.WithValue(context.Background(), types.UserIDContextKey, "system-admin")
+	for _, mode := range []string{"self_serve", "invite_register", "invite_only"} {
+		row, err := svc.Update(ctx, "auth.registration_mode", mode)
+		if err != nil {
+			t.Fatalf("mode %q rejected: %v", mode, err)
+		}
+		if len(row.Enum) != 3 || svc.GetString(ctx, "auth.registration_mode", "", "") != mode {
+			t.Fatalf("saved mode %q must be effective and expose all three choices", mode)
+		}
+	}
+	if _, err := svc.Update(ctx, "auth.registration_mode", "unknown"); err == nil {
+		t.Fatal("unknown registration mode accepted")
 	}
 }

@@ -366,3 +366,25 @@ func TestCompactToolOutputForHistory_editSandboxFileIncludesDiffStat(t *testing.
 		t.Fatalf("history should include +/- and replacements, got %q", history)
 	}
 }
+
+func TestOperationDataChangeIsClientOnly(t *testing.T) {
+	result := &types.ToolResult{
+		Success: true, Output: "ok",
+		Data: map[string]any{"data_change": map[string]any{"operation": "agent.create", "area": "agent"}},
+	}
+	if SanitizeToolResultForClient(ToolRunOperation, result)["data_change"] == nil {
+		t.Fatal("live operation results must retain the marker")
+	}
+	if SanitizeToolResultForClient("other_tool", result)["data_change"] != nil {
+		t.Fatal("other tools must not emit operation change markers")
+	}
+	stored := SanitizeAgentStepsForStorage([]types.AgentStep{{ToolCalls: []types.ToolCall{{
+		Name: ToolRunOperation, Result: result,
+	}}}})
+	if stored[0].ToolCalls[0].Result.Data["data_change"] != nil {
+		t.Fatal("history must not retain change markers")
+	}
+	if result.Data["data_change"] == nil {
+		t.Fatal("storage sanitization must not mutate the live result")
+	}
+}

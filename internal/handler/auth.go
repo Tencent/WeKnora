@@ -181,16 +181,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	logger.Info(ctx, "Start user registration")
 
-	// 当 auth.registration_mode=invite_only 时，public 注册被关闭。
-	// 优先级：DB system_settings > cfg.Auth.RegistrationMode > "self_serve"。
-	// SystemAdmin 通过「全局设置」UI 实时切换 self_serve / invite_only，立即
-	// 生效，不需要重启服务。历史变量 DISABLE_REGISTRATION=true 仍在 config
-	// 启动阶段被等价提升为 invite_only（applyAuthAndTenantDefaults），
-	// 作为 cfg-default 进入 resolveRegistrationMode。
-	if h.resolveRegistrationMode(ctx) == config.AuthRegistrationModeInviteOnly {
-		logger.Warn(ctx, "Registration rejected: auth.registration_mode=invite_only")
-		appErr := errors.NewForbiddenError("Registration is invite-only")
-		c.Error(appErr)
+	// Only self_serve permits registration without an invitation. Resolve
+	// each request so system-settings changes take effect immediately.
+	if h.resolveRegistrationMode(ctx) != config.AuthRegistrationModeSelfServe {
+		logger.Warn(ctx, "Public registration rejected by auth.registration_mode")
+		_ = c.Error(errors.NewForbiddenError("Public registration is disabled"))
 		return
 	}
 
@@ -519,7 +514,7 @@ func urlQueryEscape(value string) string {
 // @Tags         认证
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "登出成功"
+// @Success      200  {object}  handler.MessageResponse  "登出成功"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Router       /auth/logout [post]
@@ -572,7 +567,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      object{refreshToken=string}  true  "刷新令牌"
-// @Success      200      {object}  map[string]interface{}       "新令牌"
+// @Success      200      {object}  handler.RefreshTokenResponse       "新令牌"
 // @Failure      401      {object}  errors.AppError              "令牌无效"
 // @Router       /auth/refresh [post]
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
@@ -615,7 +610,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 // @Tags         认证
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "用户信息"
+// @Success      200  {object}  handler.DataResponse{data=handler.CurrentUserData}  "用户信息"
 // @Failure      401  {object}  errors.AppError         "未授权"
 // @Security     Bearer
 // @Router       /auth/me [get]
@@ -701,7 +696,7 @@ type updateMyPreferencesRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      updateMyPreferencesRequest  true  "Preferences patch"
-// @Success      200      {object}  map[string]interface{}      "更新后的偏好"
+// @Success      200      {object}  handler.DataResponse{data=types.UserPreferences}      "更新后的偏好"
 // @Failure      400      {object}  errors.AppError             "请求参数错误"
 // @Failure      401      {object}  errors.AppError             "未授权"
 // @Security     Bearer
@@ -748,7 +743,7 @@ func (h *AuthHandler) UpdateMyPreferences(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      object{old_password=string,new_password=string}  true  "密码修改请求"
-// @Success      200      {object}  map[string]interface{}                           "修改成功"
+// @Success      200      {object}  handler.MessageResponse                           "修改成功"
 // @Failure      400      {object}  errors.AppError                                  "请求参数错误"
 // @Security     Bearer
 // @Router       /auth/change-password [post]
@@ -820,7 +815,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 // @Tags         认证
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "认证配置"
+// @Success      200  {object}  handler.GetAuthConfigResponse  "认证配置"
 // @Router       /auth/config [get]
 //
 // GetAuthConfig is intentionally a no-auth endpoint: the frontend reads
@@ -992,7 +987,7 @@ func tenantNameOrEmpty(t *types.Tenant) string {
 // @Tags         认证
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "令牌有效"
+// @Success      200  {object}  handler.ValidateTokenResponse  "令牌有效"
 // @Failure      401  {object}  errors.AppError         "令牌无效"
 // @Security     Bearer
 // @Router       /auth/validate [get]

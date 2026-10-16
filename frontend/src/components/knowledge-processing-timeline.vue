@@ -10,7 +10,7 @@ import {
   summarizePostprocessTasks,
   type KnowledgeTraceNode,
 } from '@/utils/knowledgeTrace'
-import { resolveTimelineHeaderStatus } from '@/utils/knowledgeProcessingStatus'
+import { resolveTimelineHeaderStatus, shouldShowProcessingError } from '@/utils/knowledgeProcessingStatus'
 import { shownStall, stalledMinutes, STALLED_POLL_INTERVAL_MS } from '@/utils/knowledgeProcessingStall'
 import { axisGridStepPct, buildAxisTicks, computeTraceAxis } from '@/utils/traceAxis'
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
@@ -1237,7 +1237,7 @@ const headerStatusTheme = computed(() => {
 })
 
 const showLastError = computed(() =>
-  Boolean(data.value?.last_error && data.value?.parse_status === 'failed'),
+  shouldShowProcessingError(Boolean(data.value?.last_error), data.value?.parse_status, data.value?.trace?.status),
 )
 
 const failedStage = computed<SpanNode | null>(
@@ -1695,7 +1695,7 @@ const processConfigLines = computed<string[]>(() => {
             <div v-if="localizedErrorSuggestion(data.last_error.error_code)" class="kp-err-hint">
               {{ localizedErrorSuggestion(data.last_error.error_code) }}
             </div>
-            <div class="kp-err-actions">
+            <div v-if="data.parse_status === 'failed'" class="kp-err-actions">
               <button type="button" class="kp-err-btn" @click="onRetry">
                 <t-icon name="refresh" size="14px" />
                 <span>{{ t('knowledgeStages.retry') }}</span>

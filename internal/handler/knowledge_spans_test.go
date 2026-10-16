@@ -134,9 +134,9 @@ func TestKnowledgeSpansLastError_PrefersSpanFailure(t *testing.T) {
 
 	got := knowledgeSpansLastError(2, 2, types.ParseStatusFailed, "recovery blew up", now, spanFail)
 	a := assert.New(t)
-	a.Equal(types.StageDocReader, got["name"])
-	a.Equal("DOCREADER_TIMEOUT", got["error_code"])
-	a.Equal("slow", got["error_message"])
+	a.Equal(types.StageDocReader, got.Name)
+	a.Equal("DOCREADER_TIMEOUT", got.ErrorCode)
+	a.Equal("slow", got.ErrorMessage)
 }
 
 func TestKnowledgeSpansLastError_RecoveryFallbackUsesKnowledgeMessage(t *testing.T) {
@@ -144,10 +144,10 @@ func TestKnowledgeSpansLastError_RecoveryFallbackUsesKnowledgeMessage(t *testing
 	got := knowledgeSpansLastError(2, 2, types.ParseStatusFailed, "wiki ingest timed out", now, nil)
 	a := assert.New(t)
 	a.NotNil(got)
-	a.Equal("knowledge_processing", got["name"])
-	a.Equal("UNKNOWN", got["error_code"])
-	a.Equal("wiki ingest timed out", got["error_message"])
-	a.Equal(now, got["finished_at"])
+	a.Equal("knowledge_processing", got.Name)
+	a.Equal("UNKNOWN", got.ErrorCode)
+	a.Equal("wiki ingest timed out", got.ErrorMessage)
+	a.Equal(&now, got.FinishedAt)
 }
 
 func TestKnowledgeSpansLastError_ClassifiesServerRestart(t *testing.T) {
@@ -156,8 +156,8 @@ func TestKnowledgeSpansLastError_ClassifiesServerRestart(t *testing.T) {
 		"Task interrupted due to application restart", now, nil)
 	a := assert.New(t)
 	a.NotNil(got)
-	a.Equal("SERVER_RESTART", got["error_code"])
-	a.Equal("SERVER_RESTART", got["code"])
+	a.Equal("SERVER_RESTART", got.ErrorCode)
+	a.Equal("SERVER_RESTART", got.Code)
 }
 
 func TestKnowledgeSpansLastError_SkipsRecoveryFallbackForHistoricalAttempt(t *testing.T) {
@@ -190,9 +190,22 @@ func TestBuildSpanTree_MissingStagesAroundRealFailure(t *testing.T) {
 	now := time.Now()
 	finished := now.Add(2 * time.Second)
 	rows := []types.KnowledgeProcessingSpan{
-		{KnowledgeID: "kid", Attempt: 1, SpanID: "root", Name: "knowledge_processing", Kind: types.SpanKindRoot, Status: types.SpanStatusFailed, StartedAt: &now, FinishedAt: &finished},
-		{KnowledgeID: "kid", Attempt: 1, SpanID: "chunk", ParentSpanID: "root", Name: types.StageChunking, Kind: types.SpanKindStage, Status: types.SpanStatusDone, StartedAt: &now, FinishedAt: &finished},
-		{KnowledgeID: "kid", Attempt: 1, SpanID: "emb", ParentSpanID: "root", Name: types.StageEmbedding, Kind: types.SpanKindStage, Status: types.SpanStatusFailed, ErrorCode: "EMBED_UNREACHABLE", StartedAt: &now, FinishedAt: &finished},
+		{
+			KnowledgeID: "kid", Attempt: 1, SpanID: "root",
+			Name: "knowledge_processing", Kind: types.SpanKindRoot,
+			Status: types.SpanStatusFailed, StartedAt: &now, FinishedAt: &finished,
+		},
+		{
+			KnowledgeID: "kid", Attempt: 1, SpanID: "chunk", ParentSpanID: "root",
+			Name: types.StageChunking, Kind: types.SpanKindStage,
+			Status: types.SpanStatusDone, StartedAt: &now, FinishedAt: &finished,
+		},
+		{
+			KnowledgeID: "kid", Attempt: 1, SpanID: "emb", ParentSpanID: "root",
+			Name: types.StageEmbedding, Kind: types.SpanKindStage,
+			Status: types.SpanStatusFailed, ErrorCode: "EMBED_UNREACHABLE",
+			StartedAt: &now, FinishedAt: &finished,
+		},
 	}
 
 	tree, _, lastFail := buildSpanTree("kid", 1, rows, types.ParseStatusFailed)
@@ -226,8 +239,16 @@ func TestBuildSpanTree_MissingStagesAroundRealFailure(t *testing.T) {
 func TestBuildSpanTree_MissingStagesWithoutFailureKeepFallback(t *testing.T) {
 	now := time.Now()
 	rows := []types.KnowledgeProcessingSpan{
-		{KnowledgeID: "kid", Attempt: 1, SpanID: "root", Name: "knowledge_processing", Kind: types.SpanKindRoot, Status: types.SpanStatusRunning, StartedAt: &now},
-		{KnowledgeID: "kid", Attempt: 1, SpanID: "doc", ParentSpanID: "root", Name: types.StageDocReader, Kind: types.SpanKindStage, Status: types.SpanStatusDone, StartedAt: &now},
+		{
+			KnowledgeID: "kid", Attempt: 1, SpanID: "root",
+			Name: "knowledge_processing", Kind: types.SpanKindRoot,
+			Status: types.SpanStatusRunning, StartedAt: &now,
+		},
+		{
+			KnowledgeID: "kid", Attempt: 1, SpanID: "doc", ParentSpanID: "root",
+			Name: types.StageDocReader, Kind: types.SpanKindStage,
+			Status: types.SpanStatusDone, StartedAt: &now,
+		},
 	}
 
 	tree, _, _ := buildSpanTree("kid", 1, rows, types.ParseStatusProcessing)
@@ -255,15 +276,27 @@ func TestBuildSpanTree_CancelledParseRendersCancelled(t *testing.T) {
 func TestBuildSpanTree_DocReaderFailureCancelsEverythingAfter(t *testing.T) {
 	now := time.Now()
 	rows := []types.KnowledgeProcessingSpan{
-		{KnowledgeID: "kid", Attempt: 1, SpanID: "root", Name: "knowledge_processing", Kind: types.SpanKindRoot, Status: types.SpanStatusFailed, StartedAt: &now},
-		{KnowledgeID: "kid", Attempt: 1, SpanID: "doc", ParentSpanID: "root", Name: types.StageDocReader, Kind: types.SpanKindStage, Status: types.SpanStatusFailed, ErrorCode: "DOCREADER_TIMEOUT", StartedAt: &now},
+		{
+			KnowledgeID: "kid", Attempt: 1, SpanID: "root",
+			Name: "knowledge_processing", Kind: types.SpanKindRoot,
+			Status: types.SpanStatusFailed, StartedAt: &now,
+		},
+		{
+			KnowledgeID: "kid", Attempt: 1, SpanID: "doc", ParentSpanID: "root",
+			Name: types.StageDocReader, Kind: types.SpanKindStage,
+			Status: types.SpanStatusFailed, ErrorCode: "DOCREADER_TIMEOUT",
+			StartedAt: &now,
+		},
 	}
 
 	tree, _, _ := buildSpanTree("kid", 1, rows, types.ParseStatusFailed)
 	got := stageStatuses(t, tree)
 	a := assert.New(t)
 	a.Equal(types.SpanStatusFailed, got[types.StageDocReader])
-	for _, name := range []string{types.StageChunking, types.StageEmbedding, types.StageMultimodal, types.StagePostProcess} {
+	for _, name := range []string{
+		types.StageChunking, types.StageEmbedding,
+		types.StageMultimodal, types.StagePostProcess,
+	} {
 		a.Equal(types.SpanStatusCancelled, got[name],
 			"%s follows the failed docreader and never ran", name)
 	}

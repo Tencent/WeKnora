@@ -17,6 +17,7 @@ self-sufficient using pypdfium2 + the Go-side OCR that already exists.
 """
 
 import base64
+from collections import Counter
 import io
 import logging
 import os
@@ -647,7 +648,14 @@ def _page_chars(textpage, page, raw, loose: bool = False) -> tuple:
     n = textpage.count_chars()
     if n <= 0:
         return [], 0.0
-    width, height = page.get_size()
+    # Glyph coordinates are unrotated PDF user space. get_size() reports
+    # rotated dimensions and would discard valid text on cropped/rotated pages.
+    try:
+        crop_left, crop_bottom, crop_right, crop_top = page.get_cropbox()
+    except Exception:
+        width, height = page.get_size()
+        crop_left, crop_bottom, crop_right, crop_top = 0, 0, width, height
+    width = crop_right - crop_left
     invisible = _collect_invisible_boxes(page, raw) if FILTER_HIDDEN_TEXT else []
 
     chars: list = []
@@ -662,7 +670,7 @@ def _page_chars(textpage, page, raw, loose: bool = False) -> tuple:
         x0, x1 = (left, right) if left <= right else (right, left)
         y0, y1 = (bottom, top) if bottom <= top else (top, bottom)
         if FILTER_HIDDEN_TEXT:
-            if x1 < 0 or x0 > width or y1 < 0 or y0 > height:
+            if x1 < crop_left or x0 > crop_right or y1 < crop_bottom or y0 > crop_top:
                 continue  # off-page glyph
             if invisible and _point_in_boxes((x0 + x1) / 2, (y0 + y1) / 2, invisible):
                 continue  # covered by an invisible text object
@@ -947,6 +955,11 @@ def _should_prefer_plain(plain: str, layout: str) -> bool:
         return True
     if not plain:
         return False
+    # Geometry must never change numeric evidence (1.5 -> 1 5, -5 -> 5).
+    # Compare a multiset so legitimate column reordering is still allowed.
+    numbers = re.compile(r"[+−-]?\d+(?:[.,:/]\d+)*(?:[%‰])?")
+    if Counter(numbers.findall(plain)) != Counter(numbers.findall(layout)):
+        return True
     n, single, punct_only = _layout_line_stats(layout)
     if n == 0:
         return True
@@ -1489,7 +1502,7 @@ class PDFScannedParser(BaseParser):
                     {
                         "start": offset,
                         "end": offset + len(line),
-                        "locator": {"type": "pdf", "page": i + 1},
+                        "locator": {"type": "pdf", "page": i + 1, "mapping": "exact"},
                     }
                 )
                 offset += len(line)
@@ -1694,7 +1707,7 @@ class PDFParser(BaseParser):
             return start
 
         for i in range(page_count):
-            page_only = {"type": "pdf", "page": i + 1}
+            page_only = {"type": "pdf", "page": i + 1, "mapping": "exact"}
             if classes[i] == "scanned":
                 page_filename = f"{base_name}_page_{i+1}.jpg"
                 part = f"![{page_filename}](images/{page_filename})"

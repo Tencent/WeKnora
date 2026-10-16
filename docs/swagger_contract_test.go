@@ -3,6 +3,7 @@ package docs_test
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	docs "github.com/Tencent/WeKnora/docs"
@@ -63,6 +64,55 @@ func TestKnowledgeSearchRouteContract(t *testing.T) {
 	}
 }
 
+func TestReleaseAPIContracts(t *testing.T) {
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				BasePath    string                    `json:"basePath" yaml:"basePath"`
+				Paths       map[string]map[string]any `json:"paths" yaml:"paths"`
+				Definitions map[string]struct {
+					Properties map[string]struct {
+						Type string `json:"type" yaml:"type"`
+					} `json:"properties" yaml:"properties"`
+				} `json:"definitions" yaml:"definitions"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatal(err)
+			}
+			if spec.BasePath != "/api/v1" {
+				t.Fatalf("unexpected API base path %q", spec.BasePath)
+			}
+			for path := range spec.Paths {
+				if strings.HasPrefix(path, spec.BasePath+"/") {
+					t.Errorf("route %s repeats the API base path", path)
+				}
+			}
+			for path, methods := range map[string][]string{
+				"/knowledge/{id}/spans":               {"get"},
+				"/knowledge-bases/{id}/images":        {"get", "post"},
+				"/wiki-search":                        {"post"},
+				"/agents/tools":                       {"get"},
+				"/system/admin/users":                 {"get"},
+				"/system/admin/users/status":          {"post"},
+				"/system/admin/model-catalog":         {"get", "put"},
+				"/system/admin/model-catalog/preview": {"post"},
+			} {
+				for _, method := range methods {
+					if _, ok := spec.Paths[path][method]; !ok {
+						t.Errorf("missing %s %s", method, path)
+					}
+				}
+			}
+			for _, name := range []string{"CatalogUpdate", "CatalogState", "CatalogRevision"} {
+				definition := "github_com_Tencent_WeKnora_internal_application_service." + name
+				if spec.Definitions[definition].Properties["overlay"].Type != "object" {
+					t.Errorf("%s.overlay must be a JSON object", name)
+				}
+			}
+		})
+	}
+}
+
 func TestModelDeleteUsageContract(t *testing.T) {
 	for _, tt := range swaggerDocuments() {
 		t.Run(tt.name, func(t *testing.T) {
@@ -75,6 +125,47 @@ func TestFAQEnabledFilterContract(t *testing.T) {
 	for _, tt := range swaggerDocuments() {
 		t.Run(tt.name, func(t *testing.T) {
 			assertFAQEnabledFilterContract(t, tt.loadSpec(t), tt.parse)
+		})
+	}
+}
+
+func TestWikiPageBacklinkTitlesContract(t *testing.T) {
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				Paths map[string]map[string]struct {
+					Responses map[string]struct {
+						Schema struct {
+							Ref string `json:"$ref" yaml:"$ref"`
+						} `json:"schema" yaml:"schema"`
+					} `json:"responses" yaml:"responses"`
+				} `json:"paths" yaml:"paths"`
+				Definitions map[string]struct {
+					Properties map[string]map[string]any `json:"properties" yaml:"properties"`
+				} `json:"definitions" yaml:"definitions"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatal(err)
+			}
+			const detail = "github_com_Tencent_WeKnora_internal_types.WikiPageDetail"
+			get := spec.Paths["/knowledgebase/{kb_id}/wiki/pages/{slug}"]["get"]
+			if get.Responses["200"].Schema.Ref != "#/definitions/"+detail {
+				t.Fatal("page detail response must expose backlink titles")
+			}
+			properties := spec.Definitions[detail].Properties
+			titles := properties["in_link_titles"]
+			values, ok := titles["additionalProperties"].(map[string]any)
+			if titles["type"] != "object" || !ok || values["type"] != "string" {
+				t.Fatal("in_link_titles must be a string-valued map")
+			}
+			for field := range spec.Definitions["github_com_Tencent_WeKnora_internal_types.WikiPage"].Properties {
+				if _, ok := properties[field]; !ok {
+					t.Errorf("page detail dropped existing field %s", field)
+				}
+			}
+			if _, ok := spec.Paths["/knowledgebase/{kb_id}/wiki/page-titles"]; ok {
+				t.Fatal("obsolete standalone title endpoint remains documented")
+			}
 		})
 	}
 }

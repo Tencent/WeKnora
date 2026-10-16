@@ -166,6 +166,10 @@ func PDFNeedsOCR(err error) bool {
 	if err == nil {
 		return false
 	}
+	var ocrError interface{ NeedsOCR() bool }
+	if errors.As(err, &ocrError) && ocrError.NeedsOCR() {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "ocr is required") ||
 		strings.Contains(msg, "no extractable text")

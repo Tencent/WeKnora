@@ -17,19 +17,29 @@ import (
 )
 
 const (
-	maxJSONResponseBytes  int64 = 20 << 20
-	requestAttempts             = 4
-	maxErrorResponseRunes       = 1000
-	maxRetryDelay               = 60 * time.Second
-	maxPaginationHops           = 10000
+	maxJSONResponseBytes         int64 = 20 << 20
+	maxImageBytes                int64 = 10 << 20
+	maxImageRedirects                  = 10
+	requestAttempts                    = 4
+	maxErrorResponseRunes              = 1000
+	maxRetryDelay                      = 60 * time.Second
+	maxPaginationHops                  = 10000
+	maxTraversalNodes                  = 100000
+	maxTransparentTraversalNodes       = 10000
+	maxTransparentTraversalDepth       = 32
 	// maxEmptyServerPages bounds how far a Server/Data Center page listing
-	// follows _links.next through empty pages. Some builds keep returning
-	// next past the end of a space (#3596); permission filtering can also
-	// empty one page mid-listing, so a single empty page is not the end.
+	// follows _links.next through empty pages.
 	maxEmptyServerPages = 3
-	// maxDeletionProbes caps how many unlisted pages one sync looks up
-	// individually after a cut-short listing; the rest wait for the next run.
-	maxDeletionProbes = 200
+	maxDeletionProbes   = 200
+)
+
+var (
+	errImageTooLarge        = errors.New("confluence image exceeds size limit")
+	errImageNonImageContent = errors.New("confluence image response is not an image")
+	// errImageRedirectOffOrigin fires whenever a redirect target leaves the base
+	// URL boundary resolveEndpoint enforces — a different origin, or the same host
+	// but a path outside the configured context path (e.g. /wiki → /other-app).
+	errImageRedirectOffOrigin = errors.New("confluence image redirect left the configured base URL")
 )
 
 type apiError struct {
@@ -232,6 +242,121 @@ func (c *client) resourceURL(link string) string {
 	return resolved
 }
 
+// sameOrigin reports whether u shares scheme and host with the configured base
+// URL. Only same-origin URLs may carry Confluence credentials.
+func (c *client) sameOrigin(u *url.URL) bool {
+	if u == nil {
+		return false
+	}
+	base, err := url.Parse(c.cfg.baseURL)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(base.Scheme, u.Scheme) && strings.EqualFold(base.Host, u.Host)
+}
+
+// withinImageScope reports whether u stays inside the boundary resolveEndpoint
+// enforces for the initial image URL: the same origin AND a path inside the
+// configured context path. Redirect targets are validated with this same rule,
+// not merely sameOrigin, because Go forwards Basic Auth on a same-host redirect —
+// so a hop like /wiki/download → /other-app/image must fail closed too.
+func (c *client) withinImageScope(u *url.URL) bool {
+	if u == nil {
+		return false
+	}
+	_, err := c.resolveEndpoint(u.String())
+	return err == nil
+}
+
+// downloadImage fetches a same-origin private image using the connector's
+// credentials. It streams with a hard size cap, fails closed if a redirect left
+// the Confluence origin, and validates the response really is an image. It is a
+// best-effort single attempt: a failed image degrades to keeping its original
+// URL rather than retrying or failing the page.
+func (c *client) downloadImage(ctx context.Context, absURL string) ([]byte, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, absURL, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	req.SetBasicAuth(c.cfg.username, c.cfg.secret)
+	req.Header.Set("Accept", "image/*,*/*;q=0.8")
+	resp, err := c.imageHTTPClient().Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	// Backstop for the redirect policy: imageHTTPClient's CheckRedirect already
+	// refuses any hop that leaves the base before it is followed, so this only
+	// re-verifies the final URL when the transport populated resp.Request. A custom
+	// RoundTripper may leave it nil, in which case there is no followed redirect to
+	// re-check and the download is allowed to proceed.
+	if resp.Request != nil && !c.withinImageScope(resp.Request.URL) {
+		return nil, "", errImageRedirectOffOrigin
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, "", &apiError{endpoint: "image", status: resp.StatusCode}
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxImageBytes+1))
+	if err != nil {
+		return nil, "", err
+	}
+	if int64(len(body)) > maxImageBytes {
+		return nil, "", errImageTooLarge
+	}
+	mime, ok := imageContentType(resp.Header.Get("Content-Type"), body)
+	if !ok {
+		return nil, "", errImageNonImageContent
+	}
+	return body, mime, nil
+}
+
+// imageHTTPClient reuses the connector's SSRF-safe transport and timeout but
+// pins redirects to the configured Confluence base, so a private-image fetch can
+// never be bounced to a third party or to another app on the same host. The
+// redirect check fails closed: any hop that resolveEndpoint would reject — a
+// foreign origin, or a same-host path outside the context path (which Go would
+// still send Basic Auth to) — is refused outright rather than merely stripped of
+// credentials.
+func (c *client) imageHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: c.http.Transport,
+		Timeout:   c.http.Timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxImageRedirects {
+				return errors.New("confluence image stopped after too many redirects")
+			}
+			if !c.withinImageScope(req.URL) {
+				return errImageRedirectOffOrigin
+			}
+			return nil
+		},
+	}
+}
+
+// imageContentType normalizes a response Content-Type to an image MIME type. An
+// empty or generic binary type falls back to content sniffing; any explicit
+// non-image type (for example the text/html login page Confluence returns when a
+// token expired) is rejected so it is never stored as an image.
+func imageContentType(header string, body []byte) (string, bool) {
+	ct := strings.ToLower(strings.TrimSpace(header))
+	if i := strings.Index(ct, ";"); i >= 0 {
+		ct = strings.TrimSpace(ct[:i])
+	}
+	switch {
+	case strings.HasPrefix(ct, "image/"):
+		return ct, true
+	case ct != "" && ct != "application/octet-stream":
+		return "", false
+	}
+	if sniff := strings.ToLower(http.DetectContentType(body)); strings.HasPrefix(sniff, "image/") {
+		if i := strings.Index(sniff, ";"); i >= 0 {
+			sniff = strings.TrimSpace(sniff[:i])
+		}
+		return sniff, true
+	}
+	return "", false
+}
+
 func (c *client) ping(ctx context.Context) error {
 	if c.cfg.cloud() {
 		return c.get(ctx, "/api/v2/spaces?limit=1", nil)
@@ -308,10 +433,6 @@ func withCloudPageQuery(next string) string {
 	return parsed.String()
 }
 
-// pages lists every current page in a space. complete is false when a Server
-// listing was cut short after maxEmptyServerPages empty pages that still
-// linked onward; the caller must not treat pages missing from such a listing
-// as deleted.
 func (c *client) pages(ctx context.Context, s space) (pages []page, complete bool, err error) {
 	if c.cfg.cloud() {
 		var all []page
@@ -371,10 +492,6 @@ func (c *client) pages(ctx context.Context, s space) (pages []page, complete boo
 	return all, complete, err
 }
 
-// pageInSpace reports whether a Server page is still a current page of the
-// space. Confluence answers 404 for a page that was deleted or moved to the
-// trash; a page that is no longer current or now belongs to another space is
-// gone from this one too, matching what a complete listing would omit.
 func (c *client) pageInSpace(ctx context.Context, id, spaceKey string) (bool, error) {
 	var result struct {
 		Status string `json:"status"`
@@ -405,4 +522,350 @@ func (c *client) body(ctx context.Context, id string) (pageBody, error) {
 	var result pageBody
 	err := c.get(ctx, "/rest/api/content/"+url.PathEscape(id)+"?expand=body.view,version,space", &result)
 	return result, err
+}
+
+// pageDetail obtains identity, ownership, and version without requiring a
+// rendered body. Scope enumeration must remain complete when a body is
+// temporarily unavailable, otherwise a transient content error would be
+// indistinguishable from a missing page during deletion reconciliation.
+func (c *client) pageDetail(ctx context.Context, id string) (page, error) {
+	var result page
+	if c.cfg.cloud() {
+		err := c.get(ctx, "/api/v2/pages/"+url.PathEscape(id), &result)
+		return result, err
+	}
+	err := c.get(ctx, "/rest/api/content/"+url.PathEscape(id)+"?expand=version,space", &result)
+	return result, err
+}
+
+// validatePageOwnership performs the constant-cost check required before a
+// picker expansion. Ancestors are deliberately not fetched here: they are only
+// needed by ResolveResourceAncestors and buildSyncPlan.
+func (c *client) validatePageOwnership(ctx context.Context, s space, pageID string) error {
+	full, err := c.pageDetail(ctx, pageID)
+	if err != nil {
+		return err
+	}
+	if c.cfg.cloud() {
+		if full.SpaceID != s.ID {
+			return fmt.Errorf("page %s belongs to space %s, not %s", pageID, full.SpaceID, s.ID)
+		}
+		return nil
+	}
+	if full.Space.Key == "" || full.Space.Key != s.Key {
+		return fmt.Errorf("page %s does not belong to space %s", pageID, s.ID)
+	}
+	return nil
+}
+
+func serverChildPagesEndpoint(pageID string) string {
+	query := url.Values{"expand": []string{serverPageExpand}, "limit": []string{"100"}}
+	return "/rest/api/content/" + url.PathEscape(pageID) + "/child/page?" + query.Encode()
+}
+
+func serverTopLevelPagesEndpoint(spaceKey string) string {
+	query := url.Values{"depth": []string{"root"}, "expand": []string{serverPageExpand}, "limit": []string{"100"}}
+	return "/rest/api/space/" + url.PathEscape(spaceKey) + "/content/page?" + query.Encode()
+}
+
+func (c *client) listServerPages(ctx context.Context, endpoint string) ([]page, error) {
+	start, _ := url.Parse(endpoint)
+	startQuery := start.Query()
+	var all []page
+	err := c.paginate(ctx, endpoint, func(pageURL string) (string, error) {
+		var result pageList
+		if err := c.get(ctx, pageURL, &result); err != nil {
+			return "", err
+		}
+		all = append(all, result.Results...)
+		next := result.Links.Next
+		if next != "" {
+			next = withServerListQuery(next, startQuery)
+		}
+		return next, nil
+	})
+	return all, err
+}
+
+// Server pagination links commonly retain only start/limit. Restore the query
+// that defines the listing scope (notably depth=root) as well as expand.
+func withServerListQuery(next string, required url.Values) string {
+	parsed, err := url.Parse(next)
+	if err != nil {
+		return next
+	}
+	query := parsed.Query()
+	for key, values := range required {
+		if query.Get(key) == "" && len(values) > 0 {
+			query[key] = values
+		}
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+func (c *client) listCloudHierarchy(ctx context.Context, endpoint string) ([]page, error) {
+	var all []page
+	err := c.paginate(ctx, endpoint, func(pageURL string) (string, error) {
+		var result cloudHierarchyList
+		if err := c.get(ctx, pageURL, &result); err != nil {
+			return "", err
+		}
+		for _, item := range result.Results {
+			all = append(
+				all,
+				page{
+					ID:      item.ID,
+					Title:   item.Title,
+					Status:  item.Status,
+					Kind:    item.Type,
+					SpaceID: item.SpaceID,
+					Links:   item.Links,
+				},
+			)
+		}
+		return result.Links.Next, nil
+	})
+	return all, err
+}
+
+// topLevelPages retrieves one level only. The Server/DC depth=root endpoint
+// is paginated by the server; it deliberately never falls back to scanning all
+// pages because that would defeat lazy selection for large spaces.
+//
+// Cloud applies the same lazy contract: depth=0 returns only root-level pages,
+// and Cloud exposes no endpoint to enumerate a space's top-level folders
+// (CONFCLOUD-84275), so pages nested directly under those containers stay
+// unselectable in the picker for now. Recovering them would require a
+// whole-space scan per expand, which is exactly what lazy loading forbids;
+// selecting the whole space still syncs them. The connector flags this
+// limitation through resource metadata so the picker can surface it.
+func (c *client) topLevelPages(ctx context.Context, s space) ([]page, error) {
+	var pages []page
+	var err error
+	if c.cfg.cloud() {
+		pages, err = c.listCloudHierarchy(
+			ctx,
+			"/api/v2/spaces/"+url.PathEscape(s.ID)+"/pages?status=current&depth=0&limit=250",
+		)
+		if err == nil {
+			visible := pages[:0]
+			for _, page := range pages {
+				if page.Kind == "" || page.Kind == "page" {
+					visible = append(visible, page)
+				}
+			}
+			pages = visible
+		}
+	} else {
+		pages, err = c.listServerPages(ctx, serverTopLevelPagesEndpoint(s.Key))
+	}
+	if err == nil {
+		return pages, nil
+	}
+	// The depth=root navigation hint is Server/DC-specific; a Cloud 400/404 has
+	// different causes and must surface the raw API error for diagnosis.
+	if !c.cfg.cloud() {
+		var api *apiError
+		if errors.As(err, &api) && (api.status == http.StatusBadRequest || api.status == http.StatusNotFound) {
+			return nil, fmt.Errorf(
+				"confluence server does not support complete top-level page navigation for this space; "+
+					"select the Space to sync all pages: %w",
+				err,
+			)
+		}
+	}
+	return nil, err
+}
+
+func (c *client) directChildPages(ctx context.Context, _ space, pageID string) ([]page, error) {
+	if c.cfg.cloud() {
+		return c.visibleCloudPageChildren(ctx, pageID)
+	}
+	return c.listServerPages(ctx, serverChildPagesEndpoint(pageID))
+}
+
+func cloudDirectChildrenEndpoint(kind, id string) (string, error) {
+	plural := map[string]string{
+		"page": "pages", "folder": "folders", "database": "databases", "whiteboard": "whiteboards", "embed": "embeds",
+	}[kind]
+	if plural == "" {
+		return "", fmt.Errorf("unsupported Confluence Cloud hierarchy type %q", kind)
+	}
+	return "/api/v2/" + plural + "/" + url.PathEscape(id) + "/direct-children?limit=250", nil
+}
+
+// visibleCloudPageChildren projects Cloud's mixed-content hierarchy onto a
+// Page-only picker. Containers remain connector-internal and are traversed
+// until the next visible Page is found.
+func (c *client) visibleCloudPageChildren(ctx context.Context, pageID string) ([]page, error) {
+	return c.walkCloudPageHierarchy(ctx, pageID, false)
+}
+
+// walkCloudPageHierarchy traverses Cloud's mixed content tree through
+// direct-children endpoints. Picker expansion stops at visible pages, while a
+// sync walk continues through them to return the complete page subtree.
+func (c *client) walkCloudPageHierarchy(ctx context.Context, pageID string, descendPages bool) ([]page, error) {
+	type queuedNode struct {
+		id, kind string
+		depth    int
+	}
+	queue := []queuedNode{{id: pageID, kind: "page"}}
+	visited := map[string]struct{}{"page:" + pageID: {}}
+	pages := make([]page, 0)
+	nodeLimit := maxTransparentTraversalNodes
+	if descendPages {
+		nodeLimit = maxTraversalNodes
+	}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		endpoint, err := cloudDirectChildrenEndpoint(current.kind, current.id)
+		if err != nil {
+			return nil, err
+		}
+		children, err := c.listCloudHierarchy(ctx, endpoint)
+		if err != nil {
+			return nil, err
+		}
+		for _, child := range children {
+			kind := child.Kind
+			if kind == "" {
+				kind = "page"
+			}
+			key := kind + ":" + child.ID
+			if child.ID == "" || (kind == "page" && child.ID == pageID) {
+				continue
+			}
+			if _, exists := visited[key]; exists {
+				continue
+			}
+			if len(visited) >= nodeLimit {
+				return nil, fmt.Errorf(
+					"confluence Cloud hierarchy traversal exceeds %d nodes",
+					nodeLimit,
+				)
+			}
+			visited[key] = struct{}{}
+			if kind == "page" {
+				pages = append(pages, child)
+				if !descendPages {
+					continue
+				}
+			}
+			depth := 0
+			if kind != "page" {
+				depth = current.depth + 1
+				if current.kind == "page" {
+					depth = 1
+				}
+			}
+			if depth > maxTransparentTraversalDepth {
+				return nil, fmt.Errorf(
+					"confluence Cloud transparent traversal exceeds depth %d",
+					maxTransparentTraversalDepth,
+				)
+			}
+			if _, err := cloudDirectChildrenEndpoint(kind, child.ID); err != nil {
+				return nil, err
+			}
+			queue = append(queue, queuedNode{id: child.ID, kind: kind, depth: depth})
+		}
+	}
+	return pages, nil
+}
+
+// pageAncestors validates that pageID belongs to s and returns its path from
+// the space root. A selected page is fetched even if it is top-level, so a
+// forged page:{space}:{page} ID cannot cross a space boundary.
+func (c *client) pageAncestors(ctx context.Context, s space, pageID string) ([]page, error) {
+	if c.cfg.cloud() {
+		full, err := c.pageDetail(ctx, pageID)
+		if err != nil {
+			return nil, err
+		}
+		if full.SpaceID != s.ID {
+			return nil, fmt.Errorf("page %s belongs to space %s, not %s", pageID, full.SpaceID, s.ID)
+		}
+		ancestors, err := c.listCloudHierarchy(ctx, "/api/v2/pages/"+url.PathEscape(pageID)+"/ancestors?limit=250")
+		if err != nil {
+			return nil, err
+		}
+		return ancestors, nil
+	}
+	var full page
+	if err := c.get(ctx, "/rest/api/content/"+url.PathEscape(pageID)+"?expand=ancestors,space", &full); err != nil {
+		return nil, err
+	}
+	if full.Space.Key == "" || full.Space.Key != s.Key {
+		return nil, fmt.Errorf("page %s does not belong to space %s", pageID, s.ID)
+	}
+	return full.Ancestors, nil
+}
+
+// pageSubtree uses direct-child traversal for Server/DC because that endpoint
+// is stable across supported versions. Cloud uses the same complete
+// mixed-content hierarchy walk as the picker, but continues through visible
+// pages to include every page in the selected subtree.
+func (c *client) pageSubtree(ctx context.Context, s space, pageID string) ([]page, error) {
+	full, err := c.pageDetail(ctx, pageID)
+	if err != nil {
+		return nil, err
+	}
+	if c.cfg.cloud() {
+		if full.SpaceID != s.ID {
+			return nil, fmt.Errorf("page %s does not belong to space %s", pageID, s.ID)
+		}
+	} else if full.Space.Key == "" || full.Space.Key != s.Key {
+		return nil, fmt.Errorf("page %s does not belong to space %s", pageID, s.ID)
+	}
+	root := full
+	if c.cfg.cloud() {
+		descendants, err := c.walkCloudPageHierarchy(ctx, pageID, true)
+		if err != nil {
+			return nil, err
+		}
+		out := []page{root}
+		for _, descendant := range descendants {
+			// Direct-child responses are intentionally compact. Hydrate each page
+			// before version comparison; an unknown version must never be treated
+			// as an unchanged stable token.
+			detail, err := c.pageDetail(ctx, descendant.ID)
+			if err != nil {
+				return nil, err
+			}
+			if detail.SpaceID != s.ID {
+				return nil, fmt.Errorf("page %s does not belong to space %s", descendant.ID, s.ID)
+			}
+			out = append(out, detail)
+		}
+		return out, nil
+	}
+	queue, out := []page{root}, []page{root}
+	seen := map[string]bool{root.ID: true}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		children, err := c.directChildPages(ctx, s, current.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, child := range children {
+			if child.ID == "" || seen[child.ID] {
+				continue
+			}
+			if len(seen) >= maxTraversalNodes {
+				return nil, fmt.Errorf("confluence page subtree exceeds %d nodes", maxTraversalNodes)
+			}
+			seen[child.ID] = true
+			if child.SpaceID != "" && child.SpaceID != s.ID {
+				return nil, fmt.Errorf("page %s does not belong to space %s", child.ID, s.ID)
+			}
+			if !c.cfg.cloud() && child.Space.Key != "" && child.Space.Key != s.Key {
+				return nil, fmt.Errorf("page %s does not belong to space %s", child.ID, s.ID)
+			}
+			queue, out = append(queue, child), append(out, child)
+		}
+	}
+	return out, nil
 }

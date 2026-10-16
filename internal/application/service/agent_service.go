@@ -10,8 +10,11 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/application/access"
+	"github.com/Tencent/WeKnora/internal/application/attachment"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -20,6 +23,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
+	"github.com/Tencent/WeKnora/internal/productdocs"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -114,6 +118,8 @@ type agentService struct {
 	memoryService         interfaces.MemoryService
 	storageResolver       interfaces.StorageBackendResolver
 	toolApprovalGate      approval.MCPApproval
+	customAgentService    interfaces.CustomAgentService
+	operationDispatcher   operations.Dispatcher
 	sandboxMgr            sandbox.Manager
 	sandboxResolver       sandbox.TenantSandboxResolver
 	sandboxPinner         *SessionSandboxPinner
@@ -153,8 +159,12 @@ func NewAgentService(
 	browserSkill *browserskill.Manager,
 	userRepo interfaces.UserRepository,
 	graphRepo interfaces.RetrieveGraphRepository,
+	operationDispatcher *operations.HandlerDispatcher,
+	customAgentService interfaces.CustomAgentService,
 ) interfaces.AgentService {
 	svc := &agentService{
+		customAgentService:   customAgentService,
+		operationDispatcher:  operationDispatcher,
 		browserSkill:         browserSkill,
 		userRepo:             userRepo,
 		graphRepo:            graphRepo,
@@ -226,6 +236,8 @@ func (s *agentService) CreateAgentEngine(
 		return nil, fmt.Errorf("failed to register tools: %w", err)
 	}
 	s.registerMCPTools(ctx, toolRegistry, config)
+	s.registerOperationTools(ctx, toolRegistry, config)
+	registerProductDocTools(ctx, toolRegistry, config)
 
 	// Register the shell first: file discovery needs a separate tool only
 	// when no shell is available. File access still follows the sandbox
@@ -233,6 +245,7 @@ func (s *agentService) CreateAgentEngine(
 	s.registerSandboxShellIfAllowed(ctx, toolRegistry, sessionID, config)
 	s.registerSandboxFileTools(ctx, toolRegistry, sessionID, config)
 	s.registerWebPageFiles(ctx, toolRegistry, config, sessionID, assistantMessageID)
+	attachmentReader := s.registerAttachmentReader(ctx, toolRegistry, config, sessionID)
 	// Advertise cached service summaries independently of @mentions. Concrete
 	// tool definitions are published after describe, before the next model request.
 	toolRegistry.PrepareMCPTools(ctx)
@@ -260,14 +273,25 @@ func (s *agentService) CreateAgentEngine(
 		s.resolvePinnedSkillInfos(config),
 	)
 	engine.SetQuestionOrigin(s.resolveQuestionOriginInfo(ctx, config.QuestionOrigin, config.SearchTargets, kbInfos))
+	engine.SetPageContext(s.resolvePageContextInfo(ctx, config.PageContext, config.SearchTargets, kbInfos))
+	engine.SetAssistantName(config.AssistantName)
 
 	// Non-vision chat models use the configured VLM to describe tool images.
 	// Vision chat models receive the original images after the tool replies.
 	if config.VLMModelID != "" {
 		if vlmModel, err := s.modelService.GetVLMModel(ctx, config.VLMModelID); err == nil {
-			engine.SetImageDescriber(func(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
+			describe := func(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
 				return vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
-			})
+			}
+			engine.SetImageDescriber(describe)
+			if attachmentReader != nil && !config.ChatModelSupportsVision {
+				tenantID, _ := types.SandboxTenantIDFromContext(ctx)
+				attachmentReader.Images = &attachment.ImageReader{
+					Model: config.VLMModelID, Describe: describe,
+					Cache: repository.NewAttachmentDescriptionRepository(s.db, tenantID),
+				}
+			}
+
 			logger.Infof(ctx, "VLM image describer set for tool result analysis (model: %s)", config.VLMModelID)
 		} else {
 			logger.Warnf(ctx, "Failed to load VLM model %s for tool image fallback: %v", config.VLMModelID, err)
@@ -431,6 +455,62 @@ func (s *agentService) resolveKBAndDocInfos(
 // Install mode gets write_skill_file / edit_skill_file instead, which write
 // the image tree and are scoped to the one skill being installed —
 // see registerSkillFileTools.
+// registerOperationTools grants the operation catalog to built-in management
+// agents. Operations run as the signed-in user through the router, so they
+// are withheld from any run that has no such user (API key, embed, IM) and
+// from shared agents, whose runs must not mutate the source workspace.
+func (s *agentService) registerOperationTools(
+	ctx context.Context,
+	toolRegistry *tools.ToolRegistry,
+	config *types.AgentConfig,
+) {
+	if config == nil || config.OperationsAgentID == "" || config.SharedAgentReadOnly || s.operationDispatcher == nil {
+		return
+	}
+	identity, ok := tools.OperationIdentityFromContext(ctx)
+	if !ok {
+		logger.Infof(ctx, "Operation tools withheld: the run has no signed-in web user")
+		return
+	}
+	identity.Agent.AgentID = config.OperationsAgentID
+	gate, _ := s.toolApprovalGate.(approval.BuiltinApproval)
+	// The router authorizes every call anyway; checking the role up front
+	// lets the model tell the user why instead of failing at the router.
+	operationAccess := operations.Access{
+		Role:        types.CallerFromContext(ctx).Role,
+		EnforceRole: s.cfg != nil && s.cfg.Tenant.IsRBACEnforced() && !access.IsCrossTenantSuperuser(ctx, s.cfg),
+		Level:       config.AssistantAccess,
+	}
+	catalog := operations.Builtin()
+	toolRegistry.RegisterTool(tools.NewFindOperationsTool(catalog, operationAccess))
+	toolRegistry.RegisterTool(tools.NewRunOperationTool(tools.OperationsRuntime{
+		Catalog:    catalog,
+		Dispatcher: s.operationDispatcher,
+		Gate:       gate,
+		Identity:   identity,
+		Access:     operationAccess,
+	}))
+}
+
+// registerProductDocTools gives a granted run the documentation bundled with
+// the server. Pages that fail to load are left out; only a library with no
+// pages at all withholds the tools, and never the run.
+func registerProductDocTools(ctx context.Context, toolRegistry *tools.ToolRegistry, config *types.AgentConfig) {
+	if config == nil || !config.ProductDocs {
+		return
+	}
+	lib, err := productdocs.Default()
+	if lib == nil {
+		logger.Warnf(ctx, "WeKnora documentation tools withheld: %v", err)
+		return
+	}
+	if err != nil {
+		logger.Warnf(ctx, "WeKnora documentation pages left out: %v", err)
+	}
+	toolRegistry.RegisterTool(tools.NewSearchWeKnoraDocsTool(lib))
+	toolRegistry.RegisterTool(tools.NewReadWeKnoraDocTool(lib))
+}
+
 func (s *agentService) registerSandboxFileTools(
 	ctx context.Context,
 	toolRegistry *tools.ToolRegistry,
@@ -1017,17 +1097,11 @@ func (s *agentService) registerTools(
 	//   - We still *filter out* tools whose capability prerequisites are missing
 	//     (no KB in scope, no Wiki-capable KB, etc.) so the LLM can't call tools
 	//     that would error at runtime.
-	//   - Legacy agents without AllowedTools fall back to DefaultAllowedTools().
-	var allowedTools []string
-	if len(config.AllowedTools) > 0 {
-		// Retired retrieval tool names in stored configs map onto their
-		// successors here, so no data migration is needed.
-		allowedTools = tools.NormalizeAllowedTools(config.AllowedTools)
-		logger.Infof(ctx, "Using custom allowed tools from config: %v", allowedTools)
-	} else {
-		allowedTools = tools.DefaultAllowedTools()
-		logger.Infof(ctx, "Using default allowed tools: %v", allowedTools)
-	}
+	//   - Agents whose AllowedTools was never set fall back to
+	//     DefaultAllowedTools(); an empty list means no built-in tools.
+	//     tools.EffectiveAllowedTools also rewrites retired names.
+	allowedTools := tools.EffectiveAllowedTools(config.AllowedTools)
+	logger.Infof(ctx, "Using allowed tools: %v (set in config: %v)", allowedTools, config.AllowedTools != nil)
 	if config.SharedAgentReadOnly {
 		allowedTools = withoutWikiWriteTools(allowedTools)
 	}
@@ -1224,6 +1298,12 @@ func (s *agentService) registerTools(
 			toolToRegister = tools.NewSequentialThinkingTool()
 		case tools.ToolTodoWrite:
 			toolToRegister = tools.NewTodoWriteTool()
+		case tools.ToolAskUser:
+			asker, ok := s.toolApprovalGate.(approval.UserAsker)
+			if !ok || asker == nil {
+				continue
+			}
+			toolToRegister = tools.NewAskUserTool(asker)
 		case tools.ToolSearchKnowledge:
 			toolToRegister = tools.NewSearchKnowledgeTool(
 				s.knowledgeBaseService,
@@ -1232,7 +1312,7 @@ func (s *agentService) registerTools(
 				config.SearchTargets,
 				rerankModel,
 				s.cfg,
-			)
+			).WithContextImages(config.ChatModelSupportsVision)
 		case tools.ToolReadDocument:
 			toolToRegister = tools.NewReadDocumentTool(s.knowledgeService, s.chunkService, config.SearchTargets)
 		case tools.ToolListDocuments:
@@ -1323,12 +1403,29 @@ func (s *agentService) registerTools(
 			if toolToRegister.Name() != toolName {
 				logger.Warnf(ctx, "Tool name mismatch: expected %s, got %s", toolName, toolToRegister.Name())
 			}
+			if risk, writes := assistantWriteToolRisk[toolName]; writes && config.OperationsAgentID != "" {
+				gate, _ := s.toolApprovalGate.(approval.BuiltinApproval)
+				toolToRegister = tools.NewConfirmedTool(toolToRegister, risk,
+					operations.Access{Level: config.AssistantAccess}, gate)
+			}
 			registry.RegisterTool(toolToRegister)
 		}
 	}
 
 	logger.Infof(ctx, "Registered %d tools", len(registry.ListTools()))
 	return nil
+}
+
+// assistantWriteToolRisk are the direct tools of the WeKnora assistant that
+// change data outside the operation catalog. Its access level decides which
+// of them ask the user first, as it does for catalog operations.
+var assistantWriteToolRisk = map[string]operations.Risk{
+	tools.ToolWikiWritePage:   operations.RiskWrite,
+	tools.ToolWikiReplaceText: operations.RiskWrite,
+	tools.ToolWikiRenamePage:  operations.RiskWrite,
+	tools.ToolWikiFlagIssue:   operations.RiskWrite,
+	tools.ToolWikiUpdateIssue: operations.RiskWrite,
+	tools.ToolWikiDeletePage:  operations.RiskDestructive,
 }
 
 // withoutWikiWriteTools drops the tools that write Wiki state. They execute
@@ -1528,9 +1625,7 @@ func kbRetrievalCapabilities(kb *types.KnowledgeBase) []string {
 // resolveQuestionOriginInfo turns a suggested question's origin into the
 // names the runtime context shows. It re-checks the base against this turn's
 // search targets rather than trusting the caller, and keeps a document only
-// when it belongs to that base. A base reached only through a document or tag
-// scope is not in kbInfos when other bases are selected, so its name is
-// looked up directly.
+// when it belongs to that base.
 func (s *agentService) resolveQuestionOriginInfo(
 	ctx context.Context, origin *types.QuestionOrigin, targets types.SearchTargets,
 	kbInfos []*agent.KnowledgeBaseInfo,
@@ -1538,18 +1633,9 @@ func (s *agentService) resolveQuestionOriginInfo(
 	if origin == nil || origin.KnowledgeBaseID == "" || !targets.ContainsKB(origin.KnowledgeBaseID) {
 		return nil
 	}
-	info := &agent.QuestionOriginInfo{KnowledgeBaseID: origin.KnowledgeBaseID}
-	for _, kb := range kbInfos {
-		if kb != nil && kb.ID == origin.KnowledgeBaseID {
-			info.KnowledgeBaseName = kb.Name
-			break
-		}
-	}
-	if info.KnowledgeBaseName == "" && s.knowledgeBaseService != nil {
-		kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, origin.KnowledgeBaseID)
-		if err == nil && kb != nil {
-			info.KnowledgeBaseName = kb.Name
-		}
+	info := &agent.QuestionOriginInfo{
+		KnowledgeBaseID:   origin.KnowledgeBaseID,
+		KnowledgeBaseName: s.knowledgeBaseName(ctx, origin.KnowledgeBaseID, kbInfos),
 	}
 	if origin.KnowledgeID == "" {
 		return info
@@ -1562,6 +1648,157 @@ func (s *agentService) resolveQuestionOriginInfo(
 	}
 	info.Document = docs[0]
 	return info
+}
+
+// knowledgeBaseName returns a base's display name, preferring the already
+// loaded kbInfos. A base reached only through a document or tag scope is not
+// in kbInfos when other bases are selected, so it is looked up directly.
+func (s *agentService) knowledgeBaseName(
+	ctx context.Context, kbID string, kbInfos []*agent.KnowledgeBaseInfo,
+) string {
+	for _, kb := range kbInfos {
+		if kb != nil && kb.ID == kbID {
+			return kb.Name
+		}
+	}
+	if s.knowledgeBaseService == nil {
+		return ""
+	}
+	kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil || kb == nil {
+		return ""
+	}
+	return kb.Name
+}
+
+// resolvePageContextInfo turns the page the user has open into what the
+// runtime context shows. The config's page context is already narrowed to
+// this turn's search targets; this keeps only the parts that exist in that
+// base, so the model is never pointed at a document, page or issue it cannot
+// find. Parts that fail to resolve are dropped individually.
+func (s *agentService) resolvePageContextInfo(
+	ctx context.Context, page *types.PageContext, targets types.SearchTargets,
+	kbInfos []*agent.KnowledgeBaseInfo,
+) *agent.PageContextInfo {
+	if page == nil {
+		return nil
+	}
+	info := &agent.PageContextInfo{}
+	if page.AgentID != "" && s.customAgentService != nil {
+		agentCtx := ctx
+		if tenantID := types.CallerFromContext(ctx).TenantID; tenantID != 0 {
+			agentCtx = types.WithExecutionTenant(ctx, tenantID)
+		}
+		if a, err := s.customAgentService.GetAgentByID(agentCtx, page.AgentID); err == nil && a != nil {
+			info.Agent = &agent.PageContextAgent{ID: a.ID, Name: a.Name}
+		}
+	}
+	kbID := page.KnowledgeBaseID
+	if kbID == "" || !targets.ContainsKB(kbID) {
+		if info.Agent == nil {
+			return nil
+		}
+		return info
+	}
+	info.KnowledgeBaseID = kbID
+	info.KnowledgeBaseName = s.knowledgeBaseName(ctx, kbID, kbInfos)
+	if page.KnowledgeID != "" {
+		docs, err := s.getSelectedDocumentInfos(ctx, []string{page.KnowledgeID})
+		if err == nil && len(docs) == 1 && docs[0].KnowledgeBaseID == kbID {
+			info.Document = docs[0]
+		} else {
+			logger.Infof(ctx, "Page context document %s dropped: not found in knowledge base %s",
+				secutils.SanitizeForLog(page.KnowledgeID), secutils.SanitizeForLog(kbID))
+		}
+	}
+	if s.wikiPageService == nil {
+		return info
+	}
+	scopes := tools.NewWikiScopesFromSearchTargets(targets, []string{kbID})
+	if len(scopes) == 0 {
+		return info
+	}
+	scope := scopes[0]
+	// Cache page lookups because the open page and several issue references
+	// can name the same slug. Failed or out-of-scope lookups stay excluded.
+	pages := make(map[string]*types.WikiPage)
+	pageInScope := func(slug string) *types.WikiPage {
+		if page, ok := pages[slug]; ok {
+			return page
+		}
+		pages[slug] = nil
+		page, err := s.wikiPageService.GetPageBySlug(ctx, kbID, slug)
+		if err != nil || page == nil {
+			return nil
+		}
+		allowed, err := tools.WikiPageInScope(ctx, page, scope, s.knowledgeService)
+		if err != nil {
+			logger.Warnf(ctx, "Page context wiki scope check failed: %v", err)
+			return nil
+		}
+		if allowed {
+			pages[slug] = page
+		}
+		return pages[slug]
+	}
+	if page.WikiSlug != "" {
+		if wikiPage := pageInScope(page.WikiSlug); wikiPage != nil {
+			info.WikiPage = &agent.PageContextWikiPage{Slug: wikiPage.Slug, Title: wikiPage.Title}
+		} else {
+			logger.Infof(ctx, "Page context wiki page %s dropped: unavailable in scope of knowledge base %s",
+				secutils.SanitizeForLog(page.WikiSlug), secutils.SanitizeForLog(kbID))
+		}
+	}
+	if len(page.WikiIssueIDs) > 0 {
+		info.WikiIssues = s.pageContextIssues(ctx, kbID, page.WikiIssueIDs)
+		if len(scope.KnowledgeIDs) > 0 || len(scope.TagIDs) > 0 {
+			kept := info.WikiIssues[:0]
+			for _, issue := range info.WikiIssues {
+				if pageInScope(issue.Slug) != nil {
+					kept = append(kept, issue)
+				}
+			}
+			info.WikiIssues = kept
+		}
+	}
+	return info
+}
+
+// pageContextIssues keeps the requested issues that exist in kbID, in the
+// order the client listed them.
+func (s *agentService) pageContextIssues(
+	ctx context.Context, kbID string, ids []string,
+) []*agent.PageContextWikiIssue {
+	issues, err := s.wikiPageService.ListIssues(ctx, kbID, "", "")
+	if err != nil {
+		logger.Warnf(ctx, "Page context issues dropped: list issues of knowledge base %s: %v",
+			secutils.SanitizeForLog(kbID), err)
+		return nil
+	}
+	byID := make(map[string]*types.WikiPageIssue, len(issues))
+	for _, issue := range issues {
+		if issue != nil && issue.KnowledgeBaseID == kbID {
+			byID[issue.ID] = issue
+		}
+	}
+	kept := make([]*agent.PageContextWikiIssue, 0, len(ids))
+	for _, id := range ids {
+		issue, ok := byID[id]
+		if !ok {
+			continue
+		}
+		kept = append(kept, &agent.PageContextWikiIssue{
+			ID:        issue.ID,
+			Slug:      issue.Slug,
+			IssueType: issue.IssueType,
+			Status:    issue.Status,
+		})
+	}
+	if len(kept) < len(ids) {
+		logger.Infof(ctx, "Page context kept %d of %d wiki issues in knowledge base %s",
+			len(kept), len(ids), secutils.SanitizeForLog(kbID))
+	}
+	return kept
 }
 
 func (s *agentService) getSelectedDocumentInfos(ctx context.Context, knowledgeIDs []string) ([]*agent.SelectedDocumentInfo, error) {

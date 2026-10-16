@@ -15,6 +15,10 @@ import (
 type ModelService interface {
 	// CreateModel creates a model
 	CreateModel(ctx context.Context, model *types.Model) error
+	// CopyModel clones a tenant model. The model name stays the source
+	// identifier; displayName is the caller-chosen label. Stored credentials
+	// are copied with the row. An active local model is not downloaded again.
+	CopyModel(ctx context.Context, sourceID, displayName string) (*types.Model, error)
 	// GetModelByID gets a model by ID
 	GetModelByID(ctx context.Context, id string) (*types.Model, error)
 	// ListModels lists all models

@@ -30,25 +30,30 @@ var versionedSQLiteTables = []string{
 	"browser_task_interruptions",
 	"fork_snapshot_leases",
 	"mcp_endpoints",
+	"mcp_metadata",
 	"message_artifacts",
 	"tenant_skills",
 	"tenant_skill_snapshots",
 	"tenant_skill_catalog",
 	"tenant_user_env_vars",
+	"agent_prompts",
+	"agent_run_suspensions",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
 // versioned migrations add and the SQLite baseline was missing.
 var versionedSQLiteColumns = map[string][]string{
-	"model_catalog_configs": {"version", "overlay", "history", "updated_by", "updated_at"},        // 000031
-	"memory_subjects":       {"extraction_state"},                                                 // 000094
-	"memory_items":          {"replaces_id"},                                                      // 000094
-	"tenants":               {"api_principal_config"},                                             // 000064
-	"users":                 {"is_system_admin"},                                                  // 000053
-	"knowledges":            {"pending_subtasks_count", "profile"},                                // 000056, 000101
-	"knowledge_bases":       {"profile_config", "generated_profile"},                              // 000101
-	"messages":              {"attachments", "usage", "sandbox_checkpoint", "context_checkpoint"}, // 000034/085/097/105
+	"model_catalog_configs": {"version", "overlay", "history", "updated_by", "updated_at"}, // 000031
+	"memory_subjects":       {"extraction_state"},                                          // 000094
+	"memory_items":          {"replaces_id"},                                               // 000094
+	"tenants":               {"api_principal_config"},                                      // 000064
+	"users":                 {"is_system_admin"},                                           // 000053
+	"knowledges":            {"pending_subtasks_count", "profile"},                         // 000056, 000101
+	"knowledge_bases":       {"profile_config", "generated_profile"},                       // 000101
+	// 000034/085/097/105/119
+	"messages": {"attachments", "usage", "sandbox_checkpoint", "context_checkpoint", "run_state"},
 	"sessions": {
+		"kind",
 		"parent_session_id", "forked_from_message_id", "fork_bootstrap", // 000097
 		"sandbox_config_tenant_id", // 000027
 		"host_workspace_dir",       // 000029
@@ -59,6 +64,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"chunks":             {"source_locators"},                // 000033
 	"mcp_oauth_tokens":   {"principal_type", "principal_id"}, // 000064
 	"mcp_tool_approvals": {"enabled"},                        // 000091
+	"mcp_services":       {"usage_instructions"},             // 000092
 	"message_artifacts":  {"deleted_at"},                     // 000107
 	"tenant_skills": {
 		"envs", "served", "catalog_id", "install_session_id", "install_message_id",
@@ -69,7 +75,7 @@ var versionedSQLiteColumns = map[string][]string{
 	}, // 000028
 }
 
-const expectedSQLiteMigrationVersion = 33
+const expectedSQLiteMigrationVersion = 39
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -100,6 +106,8 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 
 	require.True(t, sqliteIndexExists(t, db, "idx_messages_session_created_id"),
 		"SQLite migrations must add the session/created_at index") // 000106
+	require.True(t, sqliteIndexExists(t, db, "idx_messages_live_attachments"),
+		"SQLite migrations must index live user message references")
 	assertSQLiteAgentHistoryQueriesUseTheIndex(t, db)
 
 	var catalogVersion int
@@ -395,4 +403,41 @@ func copySQLiteMigrationsThrough(t *testing.T, repoRoot string, maxVersion int) 
 	}
 	require.Greater(t, copied, 0)
 	return dest
+}
+
+func TestSQLiteSessionKindBackfillAndRollback(t *testing.T) {
+	repoRoot := sqliteRepoRoot(t)
+	chdirAndRestore(t, copySQLiteMigrationsThrough(t, repoRoot, 38))
+	dbPath := filepath.Join(t.TempDir(), "session-kind.db")
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+	db := openSQLiteDB(t, dbPath)
+	configs := []any{
+		nil, "invalid JSON", `{"agent_id":"builtin-weknora-assistant"}`, `{}`, `null`, `[]`,
+		`{"agent_id":"another-agent"}`, `{"agent_id":`,
+	}
+	for i, config := range configs {
+		_, err := db.Exec("INSERT INTO sessions (id, tenant_id, agent_config) VALUES (?, 1, ?)", fmt.Sprint(i), config)
+		require.NoError(t, err)
+	}
+	chdirAndRestore(t, repoRoot)
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+	for i := range configs {
+		var kind string
+		require.NoError(t, db.QueryRow("SELECT kind FROM sessions WHERE id = ?", fmt.Sprint(i)).Scan(&kind))
+		if i == 2 {
+			require.Equal(t, "assistant", kind)
+		} else {
+			require.Empty(t, kind)
+		}
+	}
+	require.True(t, sqliteIndexExists(t, db, "idx_sessions_tenant_kind_user_updated"))
+	down, err := os.ReadFile(filepath.Join(repoRoot, "migrations/sqlite/000039_session_kind.down.sql"))
+	require.NoError(t, err)
+	_, err = db.Exec(string(down))
+	require.NoError(t, err)
+	require.False(t, sqliteColumnExists(t, db, "sessions", "kind"))
+	require.False(t, sqliteIndexExists(t, db, "idx_sessions_tenant_kind_user_updated"))
+	var count int
+	require.NoError(t, db.QueryRow("SELECT COUNT(*) FROM sessions").Scan(&count))
+	require.Equal(t, len(configs), count)
 }
