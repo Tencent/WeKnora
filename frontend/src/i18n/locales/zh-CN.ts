@@ -1838,6 +1838,7 @@ export default {
       searchWeKnoraDocs: '搜索产品文档',
       readWeKnoraDoc: '阅读产品文档',
       readPage: '查看当前页面',
+      selectTab: '切换标签',
       fillPage: '填写页面'
     },
     pageAccess: {

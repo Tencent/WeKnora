@@ -90,6 +90,14 @@ func TestOpenPageLinksCheckedTargets(t *testing.T) {
 			},
 		},
 		{
+			name: "system settings user tab",
+			args: `{"page":"settings","section":"system-global","panel":"users"}`,
+			want: map[string]any{
+				"page": "settings", "detail": "System Settings / User management",
+				"section": "system-global", "panel": "users",
+			},
+		},
+		{
 			name: "settings integration",
 			args: `{"page":"settings","section":"integration-chrome"}`,
 			want: map[string]any{"page": "settings", "detail": "Chrome Extension", "section": "integration-chrome"},
@@ -174,6 +182,9 @@ func TestOpenPageRefuses(t *testing.T) {
 			"section for page settings must be one of",
 		},
 		{"agent tab on the toolbox", `{"page":"toolbox","section":"tools"}`, "section for page toolbox must be one of"},
+		{"panel outside system settings", `{"page":"settings","section":"members","panel":"users"}`, "panel applies only"},
+		{"unknown system settings tab", `{"page":"settings","section":"system-global","panel":"billing"}`, "panel must be"},
+		{"panel on a list page", `{"page":"agents","panel":"users"}`, "does not apply"},
 		{"field of a list page", `{"page":"agents","agent_id":"agent-1"}`, "does not apply"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -206,6 +217,13 @@ func TestOpenPageNavigates(t *testing.T) {
 		Action: types.PageActionNavigate,
 		Target: &types.PageNavigateTarget{Page: "settings", Section: "general"},
 	}, opened.got[0].Action)
+
+	users := &fakePageActor{res: approval.PageActionResult{Answered: true, Response: types.PageActionPromptResponse{
+		Location: "Settings / System", Snapshot: `tab "User management" [selected]`,
+	}}}
+	run(users, `{"page":"settings","section":"system-global","panel":"users","navigate":true}`)
+	assert.Equal(t, &types.PageNavigateTarget{Page: "settings", Section: "system-global", Panel: "users"},
+		users.got[0].Action.Target)
 	assert.Contains(t, result.Output, "Opened Settings")
 	assert.Contains(t, result.Output, `select "Font" = "System"`)
 	assert.Equal(t, true, result.Data["navigated"])

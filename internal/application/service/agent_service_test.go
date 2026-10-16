@@ -619,6 +619,8 @@ func TestRegisterOperationToolsOffersPageToolsByAccessLevel(t *testing.T) {
 		})
 		_, err := registry.GetTool(tools.ToolReadPage)
 		assert.NoError(t, err, "reading the page is offered at every level")
+		_, err = registry.GetTool(tools.ToolSelectTab)
+		assert.NoError(t, err, "selecting a tab is offered at every level")
 		_, err = registry.GetTool(tools.ToolFillPage)
 		assert.Equal(t, wantFill, err == nil, level)
 	}

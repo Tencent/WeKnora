@@ -75,6 +75,13 @@ func TestPageActionRequestValidate(t *testing.T) {
 			Action: PageActionRead,
 			Target: &PageNavigateTarget{Page: "agents"},
 		}, wantErr: "no changes or target"},
+		"select a tab":         {req: PageActionPromptRequest{Action: PageActionSelect, Ref: "e3"}},
+		"select without a ref": {req: PageActionPromptRequest{Action: PageActionSelect}, wantErr: "like e12"},
+		"select with a change": {req: PageActionPromptRequest{
+			Action:  PageActionSelect,
+			Ref:     "e3",
+			Changes: []PageFillChange{{Ref: "e1", Value: json.RawMessage(`"x"`)}},
+		}, wantErr: "only a ref"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := tc.req.Validate()
@@ -124,4 +131,9 @@ func TestValidatePageActionResponse(t *testing.T) {
 		assert.Error(t, ValidatePageActionResponse(nav, json.RawMessage(bad)), bad)
 	}
 	assert.Error(t, ValidatePageActionResponse(read, json.RawMessage(`{"stayed":true}`)), "only a navigate stays")
+
+	sel := json.RawMessage(`{"action":"select","ref":"e3"}`)
+	require.NoError(t, ValidatePageActionResponse(sel,
+		json.RawMessage(`{"location":"Settings","snapshot":"tab \"用户管理\" [selected]"}`)))
+	assert.Error(t, ValidatePageActionResponse(sel, json.RawMessage(`{"applied":[{"ref":"e3"}]}`)))
 }

@@ -18,6 +18,8 @@ export interface AssistantPageLink {
   wiki_slug?: string
   agent_id?: string
   section?: string
+  /** A tab inside a settings section, e.g. system-global's users. */
+  panel?: string
   model_id?: string
   model_draft?: AssistantModelDraft
   mcp_service_id?: string
@@ -75,7 +77,13 @@ export function pageLinkLocation(link: AssistantPageLink): PageLinkLocation | nu
         query: link.mcp_service_id ? { service_id: link.mcp_service_id } : {},
       }
     case 'settings':
-      return { path: '/platform/settings', query: link.section ? { section: link.section } : {} }
+      return {
+        path: '/platform/settings',
+        query: {
+          ...(link.section ? { section: link.section } : {}),
+          ...(link.panel ? { panel: link.panel } : {}),
+        },
+      }
     case 'toolbox':
       return {
         path: link.section ? `/platform/toolbox/${encodeURIComponent(link.section)}` : '/platform/toolbox',

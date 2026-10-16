@@ -1836,6 +1836,7 @@ export default {
       searchWeKnoraDocs: 'Поиск в документации',
       readWeKnoraDoc: 'Чтение документации',
       readPage: 'Просмотр страницы',
+      selectTab: 'Выбор вкладки',
       fillPage: 'Заполнение страницы'
     },
     pageAccess: {

@@ -31,6 +31,8 @@ test('a page the assistant opened goes back only to an in-app path', () => {
 test('pages without a resource open the settings section, the tool or the list', () => {
   assert.deepEqual(pageLinkLocation(link({ page: 'settings', section: 'general' })),
     { path: '/platform/settings', query: { section: 'general' } })
+  assert.deepEqual(pageLinkLocation(link({ page: 'settings', section: 'system-global', panel: 'users' })),
+    { path: '/platform/settings', query: { section: 'system-global', panel: 'users' } })
   assert.deepEqual(pageLinkLocation(link({ page: 'settings' })), { path: '/platform/settings', query: {} })
   assert.deepEqual(pageLinkLocation(link({ page: 'toolbox', section: 'skills' })),
     { path: '/platform/toolbox/skills', query: {} })

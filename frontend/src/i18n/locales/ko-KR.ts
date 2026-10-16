@@ -1836,6 +1836,7 @@ export default {
       searchWeKnoraDocs: '제품 문서 검색',
       readWeKnoraDoc: '제품 문서 읽기',
       readPage: '페이지 보기',
+      selectTab: '탭 선택',
       fillPage: '페이지 입력'
     },
     pageAccess: {

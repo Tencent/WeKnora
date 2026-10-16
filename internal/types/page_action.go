@@ -20,6 +20,9 @@ const (
 	PageActionRead     = "read"
 	PageActionFill     = "fill"
 	PageActionNavigate = "navigate"
+	// PageActionSelect opens a tab the page is already showing. It changes
+	// which panel is visible and nothing else.
+	PageActionSelect = "select"
 )
 
 // Operations of a PageTextEdit.
@@ -76,8 +79,10 @@ type PageNavigateTarget struct {
 	WikiSlug        string `json:"wiki_slug,omitempty"`
 	AgentID         string `json:"agent_id,omitempty"`
 	Section         string `json:"section,omitempty"`
-	ModelID         string `json:"model_id,omitempty"`
-	MCPServiceID    string `json:"mcp_service_id,omitempty"`
+	// Panel is a tab inside a settings section, e.g. system-global's users.
+	Panel        string `json:"panel,omitempty"`
+	ModelID      string `json:"model_id,omitempty"`
+	MCPServiceID string `json:"mcp_service_id,omitempty"`
 }
 
 // PageActionPromptRequest is the Request of an AgentPromptKindPageAction.
@@ -147,6 +152,14 @@ func (r *PageActionPromptRequest) Validate() error {
 		}
 		if r.Target == nil || r.Target.Page == "" {
 			return errors.New("a navigate needs a target page")
+		}
+		return nil
+	case PageActionSelect:
+		if len(r.Changes) > 0 || r.Target != nil || r.StartLine != 0 || r.LineCount != 0 {
+			return errors.New("a select takes only a ref")
+		}
+		if !pageRefRE.MatchString(r.Ref) {
+			return fmt.Errorf("ref %q is not a reference like e12", r.Ref)
 		}
 		return nil
 	default:
@@ -292,9 +305,9 @@ func (r *PageActionPromptRequest) ValidateAnswer(a *PageActionPromptResponse) er
 		}
 		return nil
 	}
-	if r.Action == PageActionRead {
+	if r.Action == PageActionRead || r.Action == PageActionSelect {
 		if len(a.Applied) > 0 {
-			return errors.New("a read applies nothing")
+			return errors.New("this action applies nothing")
 		}
 		return nil
 	}

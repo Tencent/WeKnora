@@ -830,6 +830,7 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   try_agent: 'agentStream.tools.tryAgent',
   open_page: 'agentStream.tools.openPage',
   read_page: 'agentStream.tools.readPage',
+  select_tab: 'agentStream.tools.selectTab',
   fill_page: 'agentStream.tools.fillPage',
   search_weknora_docs: 'agentStream.tools.searchWeKnoraDocs',
   read_weknora_doc: 'agentStream.tools.readWeKnoraDoc',
@@ -2251,8 +2252,8 @@ const showPageEditInStep = (event: any): boolean =>
   isPageEditEvent(event) && pinnedPageEdits.value.length === 0;
 
 const isPageReadEvent = (event: any): boolean =>
-  event?.type === 'tool_call' && event.tool_name === 'read_page' && !event.pending &&
-  event.success !== false && !!event.tool_data?.location;
+  event?.type === 'tool_call' && (event.tool_name === 'read_page' || event.tool_name === 'select_tab') &&
+  !event.pending && event.success !== false && !!event.tool_data?.location;
 
 // Get unique key for event
 const getEventKey = (event: any, index: number): string => {
@@ -2330,7 +2331,7 @@ const hasExpandableResults = (event: any): boolean => {
   if (event?.tool_name === 'open_page' && event.success !== false) return false;
   if (event?.tool_name === 'fill_page' && event.success !== false) return false;
   // The snapshot is page text for the model, not something to read here.
-  if (event?.tool_name === 'read_page' && event.success !== false) return false;
+  if ((event?.tool_name === 'read_page' || event?.tool_name === 'select_tab') && event.success !== false) return false;
   return hasResults(event);
 };
 

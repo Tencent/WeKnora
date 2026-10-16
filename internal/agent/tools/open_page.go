@@ -85,6 +85,16 @@ var SettingsSections = map[string]openPageSection{
 	"integration-claw":      {"Claw Skill", "Claw Skill"},
 }
 
+// SystemSettingsPanels are the tabs inside settings section system-global.
+// "other" is conditional on the page and is reached with select_tab instead.
+var SystemSettingsPanels = map[string]openPageSection{
+	"access":   {"注册与访问", "Registration and access"},
+	"users":    {"用户管理", "User management"},
+	"tenant":   {"空间默认值", "Workspace defaults"},
+	"runtime":  {"运行与并发", "Runtime and concurrency"},
+	"security": {"网络安全", "Network security"},
+}
+
 // ToolboxSections are the toolbox's tools.
 var ToolboxSections = map[string]openPageSection{
 	"skills":            {"技能管理", "Skill Management"},
@@ -136,7 +146,9 @@ const openPageDescription = "" +
 	"Show the user a button that opens a WeKnora page: a knowledge base or one of its documents, " +
 	"a Wiki page, an agent's editor at a given tab, the model settings, the MCP services, any section " +
 	"of the settings dialog (personal preferences, profile, workspace, engines, integrations, system), " +
-	"a toolbox tool, or the agent, knowledge base or shared space lists. Once the user opens it, " +
+	"a toolbox tool, or the agent, knowledge base or shared space lists. settings section system-global " +
+	"also takes panel, so a tab such as user management opens directly instead of registration and access. " +
+	"Once the user opens it, " +
 	"read_page can read what it shows. " +
 	"It can open an existing model or MCP service for editing, or a new one with the form filled in " +
 	"from model_draft or mcp_service_draft. Use it whenever the next step is the user's on one of these " +
@@ -177,6 +189,14 @@ const openPageSchema = `{
 	`platform-api-keys, system-audit-log, integration-im, integration-embed, integration-api, ` +
 	`integration-mcpserver, integration-cli, integration-chrome, integration-claw; ` +
 	`a section the user may not see opens their first one. toolbox: skills, mcp, browserconnection."
+    },
+    "panel": {
+      "type": "string",
+      "enum": ["access", "users", "tenant", "runtime", "security"],
+      "description": "settings with section system-global only: which tab to open. users is user management ` +
+	`(accounts, enable or disable, reset password — the user still confirms and types the password). ` +
+	`access is registration and access, the tab shown when panel is omitted. tenant, runtime, security ` +
+	`are the other tabs."
     },
     "model_id": {"type": "string", "description": "settings_models only: open this model for editing."},
     "model_draft": {
@@ -257,6 +277,7 @@ type openPageInput struct {
 	WikiSlug        string                   `json:"wiki_slug"`
 	AgentID         string                   `json:"agent_id"`
 	Section         string                   `json:"section"`
+	Panel           string                   `json:"panel"`
 	ModelID         string                   `json:"model_id"`
 	ModelDraft      *OpenPageModelDraft      `json:"model_draft"`
 	MCPServiceID    string                   `json:"mcp_service_id"`
@@ -278,6 +299,7 @@ type OpenPageLink struct {
 	WikiSlug          string                   `json:"wiki_slug,omitempty"`
 	AgentID           string                   `json:"agent_id,omitempty"`
 	Section           string                   `json:"section,omitempty"`
+	Panel             string                   `json:"panel,omitempty"`
 	ModelID           string                   `json:"model_id,omitempty"`
 	ModelDraft        *OpenPageModelDraft      `json:"model_draft,omitempty"`
 	MCPServiceID      string                   `json:"mcp_service_id,omitempty"`
@@ -305,7 +327,7 @@ func parseOpenPageInput(args json.RawMessage) (openPageInput, error) {
 		}
 	}
 	trim(&input.Page, &input.KnowledgeBaseID, &input.KnowledgeID, &input.WikiSlug, &input.AgentID,
-		&input.Section, &input.ModelID, &input.MCPServiceID, &input.Note)
+		&input.Section, &input.Panel, &input.ModelID, &input.MCPServiceID, &input.Note)
 	if d := input.ModelDraft; d != nil {
 		trim(&d.Type, &d.Source, &d.Provider, &d.ModelName, &d.DisplayName, &d.BaseURL)
 	}
@@ -326,7 +348,7 @@ func validateOpenPageInput(in openPageInput) error {
 		set := map[string]bool{
 			"knowledge_base_id": in.KnowledgeBaseID != "", "knowledge_id": in.KnowledgeID != "",
 			"wiki_slug": in.WikiSlug != "", "agent_id": in.AgentID != "", "section": in.Section != "",
-			"model_id": in.ModelID != "", "model_draft": in.ModelDraft != nil,
+			"panel": in.Panel != "", "model_id": in.ModelID != "", "model_draft": in.ModelDraft != nil,
 			"mcp_service_id": in.MCPServiceID != "", "mcp_service_draft": in.MCPServiceDraft != nil,
 		}
 		for name, present := range set {
@@ -377,12 +399,31 @@ func validateOpenPageInput(in openPageInput) error {
 		if _, ok := sections[in.Section]; in.Section != "" && !ok {
 			return fmt.Errorf("section for page %s must be one of %s", in.Page, sectionKeys(sections))
 		}
+		if in.Page == openPageSettings {
+			if err := validateSystemSettingsPanel(in); err != nil {
+				return err
+			}
+			return only("section", "panel")
+		}
 		return only("section")
 	case openPageAgents, openPageKnowledgeBases, openPageOrganizations:
 		return only()
 	default:
 		return fmt.Errorf("page must be one of %s", strings.Join(openPages, ", "))
 	}
+}
+
+func validateSystemSettingsPanel(in openPageInput) error {
+	if in.Panel == "" {
+		return nil
+	}
+	if in.Section != "system-global" {
+		return errors.New("panel applies only to settings section system-global")
+	}
+	if _, ok := SystemSettingsPanels[in.Panel]; !ok {
+		return fmt.Errorf("panel must be one of %s", sectionKeys(SystemSettingsPanels))
+	}
+	return nil
 }
 
 func validateModelDraft(d *OpenPageModelDraft) error {
@@ -480,7 +521,7 @@ func (t *OpenPageTool) navigate(ctx context.Context, link *OpenPageLink, button 
 		Action: types.PageActionNavigate,
 		Target: &types.PageNavigateTarget{
 			Page: link.Page, KnowledgeBaseID: link.KnowledgeBaseID, KnowledgeID: link.KnowledgeID,
-			WikiSlug: link.WikiSlug, AgentID: link.AgentID, Section: link.Section,
+			WikiSlug: link.WikiSlug, AgentID: link.AgentID, Section: link.Section, Panel: link.Panel,
 			ModelID: link.ModelID, MCPServiceID: link.MCPServiceID,
 		},
 	})
@@ -584,6 +625,10 @@ func (t *OpenPageTool) resolve(ctx context.Context, in openPageInput) (*OpenPage
 		link.Label = pick("设置", "Settings")
 		if s, ok := SettingsSections[in.Section]; ok {
 			link.Section, link.Detail = in.Section, pick(s.zh, s.en)
+		}
+		if p, ok := SystemSettingsPanels[in.Panel]; ok {
+			link.Panel = in.Panel
+			link.Detail = strings.TrimPrefix(link.Detail+" / "+pick(p.zh, p.en), " / ")
 		}
 	case openPageToolbox:
 		link.Label = pick("工具箱", "Toolbox")

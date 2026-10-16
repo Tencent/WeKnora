@@ -6579,6 +6579,7 @@ export default {
       searchWeKnoraDocs: '製品ドキュメントを検索',
       readWeKnoraDoc: '製品ドキュメントを読む',
       readPage: 'ページを確認',
+      selectTab: 'タブを選択',
       fillPage: 'ページに入力'
     },
     pageAccess: {

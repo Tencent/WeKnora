@@ -6579,6 +6579,7 @@ export default {
       searchWeKnoraDocs: 'Search product docs',
       readWeKnoraDoc: 'Read product doc',
       readPage: 'View page',
+      selectTab: 'Select tab',
       fillPage: 'Fill page'
     },
     pageAccess: {

@@ -393,6 +393,48 @@ function nameOf(el: HTMLElement): string {
   return collapse(el.getAttribute('aria-label') || el.getAttribute('title')) || textOf(el)
 }
 
+function isPageTab(el: HTMLElement): boolean {
+  return el.getAttribute('role') === 'tab' || el.classList.contains('t-tabs__nav-item')
+}
+
+function tabDisabled(el: HTMLElement): boolean {
+  return (el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true' ||
+    el.classList.contains('t-is-disabled')
+}
+
+function describeTab(el: HTMLElement, name: string): string {
+  const disabled = tabDisabled(el)
+  const parts = [`tab ${quote(name)}`]
+  if (!disabled) parts.push(`[ref=${refFor(el)}]`)
+  if (isSelected(el)) parts.push('[selected]')
+  if (disabled) parts.push('[disabled]')
+  return parts.join(' ')
+}
+
+/**
+ * Opens a tab from read_page. Returns whether the tab was clicked; an
+ * already selected tab is left as it is. Anything that is not a tab is refused.
+ */
+export function activateTab(ref: string): boolean {
+  const el = elementByRef(ref)
+  if (!el || !isShown(el) || isAssistantUI(el)) {
+    throw new PageFillError(`${ref} is no longer on the page; read the page again for current refs`)
+  }
+  if (!isPageTab(el)) {
+    throw new PageFillError(`${ref} is not a tab. select_tab only opens a tab; buttons stay with the user`)
+  }
+  if (tabDisabled(el)) throw new PageFillError(`${ref} is disabled`)
+  if (el instanceof HTMLAnchorElement && /^(https?:|\/\/)/i.test(el.getAttribute('href') || '')) {
+    throw new PageFillError(`${ref} opens another site; ask the user to open it`)
+  }
+  if (el instanceof HTMLButtonElement && el.type === 'submit') {
+    throw new PageFillError(`${ref} submits a form; ask the user to use it`)
+  }
+  if (isSelected(el)) return false
+  el.click()
+  return true
+}
+
 function isSelected(el: HTMLElement): boolean {
   return el.getAttribute('aria-selected') === 'true' || el.getAttribute('aria-checked') === 'true' ||
     el.classList.contains('t-is-active') || el.classList.contains('t-is-checked') ||
@@ -466,7 +508,7 @@ function walkElement(el: HTMLElement, depth: number, state: WalkState) {
     }
     case 'tab': {
       const name = clip(nameOf(el), 80)
-      if (name) emit(state, depth, `tab ${quote(name)}${isSelected(el) ? ' [selected]' : ''}`)
+      if (name) emit(state, depth, describeTab(el, name))
       return
     }
     case 'table':

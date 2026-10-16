@@ -4,7 +4,7 @@
  */
 import { resolveAgentPrompt } from '@/api/mcp-service'
 import { PageFillError, type PageTextEdit } from './pageText'
-import { currentLocation, readFieldText, snapshotPage } from './pageSnapshot'
+import { activateTab, currentLocation, readFieldText, snapshotPage } from './pageSnapshot'
 import { fillPage, undoFill } from './pageFill'
 import { pageLinkLocation, type AssistantPageLink, type PageLinkLocation } from './assistantPageLink'
 import { hasUnsavedChanges } from './unsavedChanges'
@@ -115,6 +115,10 @@ async function act(prompt: PageActionPrompt, key: string, navigator?: PageNaviga
       return request.ref
         ? readFieldText(request.ref, request.start_line || 1, request.line_count || 200)
         : snapshotPage()
+    }
+    if (request.action === 'select') {
+      if (activateTab(request.ref || '')) await settle()
+      return snapshotPage()
     }
     if (request.action === 'fill') {
       const applied = await fillPage(request.changes || [], key)

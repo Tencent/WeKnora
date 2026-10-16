@@ -505,6 +505,7 @@ func (s *agentService) registerOperationTools(
 	if actor, ok := s.toolApprovalGate.(approval.PageActor); ok && actor != nil {
 		openPage.WithPageActor(actor)
 		toolRegistry.RegisterTool(tools.NewReadPageTool(actor))
+		toolRegistry.RegisterTool(tools.NewSelectTabTool(actor))
 		if operationAccess.Level != types.AssistantAccessReadOnly {
 			toolRegistry.RegisterTool(tools.NewFillPageTool(actor))
 		}

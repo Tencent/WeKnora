@@ -123,6 +123,26 @@ func TestFillPageSendsChangesAndReportsThem(t *testing.T) {
 	assert.JSONEq(t, `["A","B"]`, string(changes[2].Value))
 }
 
+func TestSelectTabOpensTheTabAndReturnsThePanel(t *testing.T) {
+	actor := &fakePageActor{res: approval.PageActionResult{Answered: true, Response: types.PageActionPromptResponse{
+		Location: "Settings / System",
+		Snapshot: "tab \"用户管理\" [ref=e3] [selected]\nheading \"用户管理\"",
+	}}}
+	result, err := NewSelectTabTool(actor).Execute(pageToolContext(), json.RawMessage(`{"ref":"e3"}`))
+	require.NoError(t, err)
+	require.True(t, result.Success, result.Error)
+	assert.Contains(t, result.Output, "用户管理")
+	assert.Equal(t, ToolSelectTab, result.Data["display_type"])
+	assert.Equal(t, "e3", result.Data["ref"])
+	require.Len(t, actor.got, 1)
+	assert.Equal(t, types.PageActionPromptRequest{Action: types.PageActionSelect, Ref: "e3"}, actor.got[0].Action)
+
+	rejected, err := NewSelectTabTool(actor).Execute(pageToolContext(), json.RawMessage(`{"ref":"save"}`))
+	require.NoError(t, err)
+	assert.False(t, rejected.Success)
+	assert.Len(t, actor.got, 1, "a ref that is not a tab never reaches the browser")
+}
+
 func TestFillPageRejectsBadChangesBeforeTheBrowser(t *testing.T) {
 	actor := &fakePageActor{}
 	for _, args := range []string{
