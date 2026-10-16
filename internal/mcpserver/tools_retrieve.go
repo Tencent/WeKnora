@@ -93,9 +93,12 @@ func readDocumentTool() mcp.Tool {
 			"continue with offset=next_offset from the response."),
 		mcp.WithString("knowledge_id", mcp.Required(),
 			mcp.Description("Document id from search results or list_documents")),
-		mcp.WithNumber("offset", mcp.Description("0-based position in document reading order, default 0; use returned next_offset to continue")),
-		mcp.WithNumber("limit", mcp.Description("Chunks per page without query, default 20, max 100; ignored in query mode; output size budget may reduce the page")),
-		mcp.WithString("query", mcp.Description("Optional case-insensitive keywords split on whitespace; every word must occur in the chunk, in any order (not an exact phrase)")),
+		mcp.WithNumber("offset", mcp.Description("0-based position in document reading order, default 0; "+
+			"use returned next_offset to continue")),
+		mcp.WithNumber("limit", mcp.Description("Chunks per page without query, default 20, max 100; "+
+			"ignored in query mode; output size budget may reduce the page")),
+		mcp.WithString("query", mcp.Description("Optional case-insensitive keywords split on whitespace; "+
+			"every word must occur in the chunk, in any order (not an exact phrase)")),
 		readOnlyEndpointAnnotations(),
 	)
 }
