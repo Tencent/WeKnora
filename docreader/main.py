@@ -7,7 +7,9 @@ import uuid
 from concurrent import futures
 from typing import Optional
 
+import cv2
 import grpc
+import numpy as np
 from grpc_health.v1 import health_pb2_grpc
 from grpc_health.v1.health import HealthServicer
 
@@ -15,6 +17,7 @@ from docreader.auth import AuthInterceptor, TLSConfigError, load_tls_credentials
 from docreader import config
 from docreader.config import CONFIG
 from docreader.parser import Parser
+from docreader.parser.image_preprocess import preprocess
 from docreader.proto import docreader_pb2_grpc
 from docreader.parser.registry import registry
 from docreader.proto.docreader_pb2 import (
@@ -25,6 +28,7 @@ from docreader.proto.docreader_pb2 import (
     ReadStreamResponse,
     ListEnginesResponse,
     ParserEngineInfo,
+    PreprocessImageResponse,
 )
 from docreader.source_wire import source_blocks_to_proto
 from docreader.utils.request import init_logging_request_id, request_id_context
@@ -289,6 +293,82 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
             for e in engines_data
         ]
         return ListEnginesResponse(engines=engines)
+
+    def PreprocessImage(self, request, context):
+        """Straighten and crop a photographed page before OCR runs.
+
+        A page this pipeline declines to improve is reported as a verdict
+        (fallback_needed=true, empty image) rather than an error: the caller
+        keeps its own bytes and OCRs them. Every failure mode is caught here
+        for the same reason — a page cropper that cannot decide must never be
+        able to fail the image it was handed.
+        """
+        try:
+            bgr = cv2.imdecode(np.frombuffer(request.image, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if bgr is None:
+                logger.warning(
+                    "PreprocessImage: undecodable input (%d bytes)", len(request.image)
+                )
+                return PreprocessImageResponse(fallback_needed=True, status="undecodable")
+
+            out = preprocess(bgr)
+            theta = float(out.get("theta") or 0.0)
+            residual = float(out.get("residual") or 0.0)
+            n_boxes = int(out.get("n_boxes") or 0)
+            n_kept = int(out.get("n_kept") or 0)
+
+            if out.get("status") != "ok" or out.get("rect") is None:
+                logger.info(
+                    "PreprocessImage: declined (%s, boxes=%d/%d)",
+                    out.get("status"), n_kept, n_boxes,
+                )
+                return PreprocessImageResponse(
+                    fallback_needed=True,
+                    status=str(out.get("status", "unknown")),
+                    theta=theta,
+                    residual=residual,
+                    n_boxes=n_boxes,
+                    n_kept=n_kept,
+                )
+
+            # A large residual means the alignment never really converged: the
+            # corrected page would be worse than the original, so it is declined
+            # here instead of being handed on for OCR to suffer.
+            if residual > 2.0:
+                logger.info("PreprocessImage: declined (residual=%.2f deg)", residual)
+                return PreprocessImageResponse(
+                    fallback_needed=True,
+                    status="low_quality",
+                    theta=theta,
+                    residual=residual,
+                    flip=bool(out.get("flip")),
+                    n_boxes=n_boxes,
+                    n_kept=n_kept,
+                )
+
+            ok, encoded = cv2.imencode(".jpg", out["rect"], [cv2.IMWRITE_JPEG_QUALITY, 92])
+            if not ok:
+                return PreprocessImageResponse(fallback_needed=True, status="encode_failed")
+            logger.info(
+                "PreprocessImage: ok theta=%.2f deg residual=%.2f deg flip=%s boxes=%d/%d",
+                theta, residual, out.get("flip"), n_kept, n_boxes,
+            )
+            return PreprocessImageResponse(
+                image=encoded.tobytes(),
+                fallback_needed=False,
+                status="ok",
+                theta=theta,
+                residual=residual,
+                flip=bool(out.get("flip")),
+                n_boxes=n_boxes,
+                n_kept=n_kept,
+            )
+        except Exception:
+            logger.warning(
+                "PreprocessImage failed; the caller falls back to its original:\n%s",
+                traceback.format_exc(),
+            )
+            return PreprocessImageResponse(fallback_needed=True, status="failed")
 
 
 def main():
