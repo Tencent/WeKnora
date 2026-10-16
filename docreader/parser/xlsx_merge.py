@@ -3,18 +3,171 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
 import zipfile
 from io import BytesIO
 
 logger = logging.getLogger(__name__)
 
+# --- Percentage number formats (opt-in) --------------------------------------
+# Excel keeps a percentage as the stored fraction plus a display format: the
+# cell holds 0.61123366 and "0.00%" renders it as 61.12%. openpyxl and pandas
+# read only the fraction, so a value the user sees as 61.12% reaches the
+# pipeline as 0.6112 — a 100x error that a model will copy verbatim into a
+# report. When this switch is on, percentage cells are materialized as the
+# literal text the spreadsheet shows ("61.12%") instead.
+#
+# It is off by default on purpose: the cell changes from a number into a
+# string, so anything that sorts, aggregates or computes with it sees different
+# input. With it off, every workbook is read exactly as before. A single upload
+# can override it through parser_engine_overrides.xlsx_percent_as_text.
+PERCENT_AS_TEXT_ENV = "DOCREADER_XLSX_PERCENT_AS_TEXT"
 
-def fill_merged_cells_xlsx(content: bytes) -> bytes:
+# Only percentages are materialized. Currency and thousands separators change
+# how a number is displayed, not what it means ("1,234,567" and 1234567 are the
+# same number), so rewriting them would churn cells for no semantic gain, and
+# date formats are already converted to datetimes by openpyxl.
+
+# --- Same-row hint fallback (opt-in, off by default) -------------------------
+# Workbooks occasionally leave one cell of a percentage row without a
+# percentage format (a real financial statement had 折旧率 0.0592 formatted as
+# "0.00_ ;[Red]\-0.00\ "). When a row carries at least this many explicitly
+# percentage-formatted cells, an unformatted 0 < |value| < 1 number in that row
+# is treated as a percentage too. Only consulted while percent materialization
+# is on; 0 disables the fallback.
+ROW_HINT_MIN_ENV = "DOCREADER_XLSX_PCT_ROW_HINT_MIN"
+_DEFAULT_ROW_HINT_MIN = 0
+
+# Decimal places of the displayed text: "0.00%" -> 2, "0.0%" -> 1.
+_PCT_DECIMALS = re.compile(r"\.(0+)%")
+# "0%" (and "[Red]0%") display whole percents, with no decimals at all.
+_PCT_NO_DECIMALS = re.compile(r"0\s*%")
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None or not str(value).strip():
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(str(os.environ.get(name, default)).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def percent_as_text_default() -> bool:
+    """Deployment-wide default for materializing percentage formats.
+
+    Read per call (not at import time) so the value can be flipped without a
+    module reload; a per-upload override still wins over it.
+    """
+    return _env_bool(PERCENT_AS_TEXT_ENV, False)
+
+
+def _percent_decimals(number_format: str) -> int:
+    """Decimal places *number_format* displays: "0.00%" -> 2, "0%" -> 0."""
+    match = _PCT_DECIMALS.search(number_format)
+    if match:
+        return len(match.group(1))
+    if _PCT_NO_DECIMALS.search(number_format):
+        return 0
+    return 2
+
+
+def _format_percentage(value, number_format: str):
+    """Render ``0.6112`` together with ``'0.00%'`` as ``'61.12%'``.
+
+    Returns ``None`` when the cell must keep its value: no percentage format,
+    not a number, or a value the format cannot be applied to.
+    """
+    if not number_format or "%" not in number_format:
+        return None
+    if isinstance(value, bool):  # bool is an int subclass: never a percentage
+        return None
+    if not isinstance(value, (int, float)):
+        return None
+    decimals = _percent_decimals(number_format)
+    try:
+        return f"{float(value) * 100:.{decimals}f}%"
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _materialize_percentage_cells(ws, row_hint_min: int) -> tuple[int, int]:
+    """Rewrite the percentage-formatted numbers of *ws* as their display text.
+
+    Must run before merged ranges are filled: only the master cell of a merge
+    carries a number_format while the covered cells are General, so filling
+    first would copy a bare fraction into rows 2..n and leave it unconverted —
+    the same row would then show both "0.55%" and 0.005509433890047721.
+
+    Returns ``(materialized, hinted)`` cell counts.
+    """
+    row_hints: dict = {}
+    if row_hint_min > 0:
+        # Count the explicit percentage formats before converting anything:
+        # the conversion below resets number_format to General.
+        for row in ws.iter_rows():
+            count = sum(
+                1
+                for cell in row
+                if type(cell.value) in (int, float)  # noqa: E721 - excludes bool
+                and "%" in str(cell.number_format or "")
+            )
+            if count:
+                row_hints[row[0].row] = count
+
+    materialized = 0
+    hinted = 0
+    for row in ws.iter_rows():
+        hint = row_hints.get(row[0].row, 0)
+        for cell in row:
+            if type(cell.value) not in (int, float):  # noqa: E721 - excludes bool
+                continue
+            text = _format_percentage(cell.value, cell.number_format)
+            if text is None and hint >= row_hint_min > 0 and 0 < abs(cell.value) < 1:
+                # Fallback for a cell that lost its percentage format while its
+                # row kept one. Logged because it rewrites an unformatted value.
+                text = f"{float(cell.value) * 100:.2f}%"
+                hinted += 1
+                logger.info(
+                    "XLSX pre-parse: %s!%s%d has no percentage format but its row "
+                    "does; reading it as %.2f%% (stored value %r)",
+                    ws.title,
+                    cell.column_letter,
+                    cell.row,
+                    float(cell.value) * 100,
+                    cell.value,
+                )
+            if text is None:
+                continue
+            cell.value = text
+            cell.number_format = "General"
+            materialized += 1
+    return materialized, hinted
+
+
+def fill_merged_cells_xlsx(
+    content: bytes, percent_as_text: bool | None = None
+) -> bytes:
     """Unmerge ranges and copy the master cell value into every covered cell.
 
     openpyxl only stores values on the top-left cell of a merge; pandas then
     sees NaN in the rest. Filling makes row-wise RAG chunks retain context.
+
+    ``percent_as_text`` also materializes percentage-formatted numbers as the
+    text the spreadsheet displays ("0.6112" -> "61.12%"), because the stored
+    fraction is 100x off from what a reader sees. ``None`` (the default) uses
+    the ``DOCREADER_XLSX_PERCENT_AS_TEXT`` deployment default, which is off, so
+    the default path is unchanged.
     """
+    if percent_as_text is None:
+        percent_as_text = percent_as_text_default()
+
     if not zipfile.is_zipfile(BytesIO(content)):
         return content
 
@@ -22,7 +175,21 @@ def fill_merged_cells_xlsx(content: bytes) -> bytes:
 
     wb = load_workbook(BytesIO(content), data_only=True)
     changed = False
+    materialized_cells = 0
+    hinted_cells = 0
+    row_hint_min = (
+        _env_int(ROW_HINT_MIN_ENV, _DEFAULT_ROW_HINT_MIN) if percent_as_text else 0
+    )
+
     for ws in wb.worksheets:
+        if percent_as_text:
+            # Before the merge fill below — see _materialize_percentage_cells.
+            materialized, hinted = _materialize_percentage_cells(ws, row_hint_min)
+            materialized_cells += materialized
+            hinted_cells += hinted
+            if materialized:
+                changed = True
+
         if not ws.merged_cells.ranges:
             continue
         for merge_range in list(ws.merged_cells.ranges):
@@ -52,5 +219,13 @@ def fill_merged_cells_xlsx(content: bytes) -> bytes:
 
     out = BytesIO()
     wb.save(out)
+    if materialized_cells:
+        logger.info(
+            "Materialized %d percentage cell(s) in XLSX before parse "
+            "(%d recovered by the same-row hint fallback, threshold=%d)",
+            materialized_cells,
+            hinted_cells,
+            row_hint_min,
+        )
     logger.info("Filled merged cells in XLSX before parse")
     return out.getvalue()

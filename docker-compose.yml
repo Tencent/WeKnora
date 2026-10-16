@@ -461,6 +461,16 @@ services:
       # ========== 解析通用 ==========
       - DOCREADER_DOCX_MAX_PAGES=${DOCREADER_DOCX_MAX_PAGES:-0}
       - DOCREADER_MARKITDOWN_MAX_WORKERS=${DOCREADER_MARKITDOWN_MAX_WORKERS:-1}
+      # ========== XLSX / Excel ==========
+      # 按显示格式物化百分比单元格：Excel 的百分比是显示格式而非存储值，单元格实存
+      # 0.6112 靠 "0.00%" 渲染成 61.12%，而 pandas/openpyxl 只读到分数，报表里的
+      # 61.12% 会变成 0.6112（100 倍偏差）。开启后该单元格变成字面量文本 "61.12%"。
+      # 默认 false：开启会使单元格由数值变为字符串，改变下游排序/计算看到的内容，
+      # 存量部署行为保持不变。单次上传可用 parser_engine_overrides.xlsx_percent_as_text 覆盖。
+      - DOCREADER_XLSX_PERCENT_AS_TEXT=${DOCREADER_XLSX_PERCENT_AS_TEXT:-false}
+      # 同一行有 >= N 个显式百分比格式单元格时，把该行漏标格式的 0<|v|<1 数字也按百分比
+      # 处理（源文件偶有漏刷格式的格子）。仅在上一开关开启时生效；0=关闭（默认）。
+      - DOCREADER_XLSX_PCT_ROW_HINT_MIN=${DOCREADER_XLSX_PCT_ROW_HINT_MIN:-0}
       # 出站 HTTP/HTTPS 代理（抓取网页 / 远程图片时）
       - DOCREADER_EXTERNAL_HTTP_PROXY=${DOCREADER_EXTERNAL_HTTP_PROXY:-}
       - DOCREADER_EXTERNAL_HTTPS_PROXY=${DOCREADER_EXTERNAL_HTTPS_PROXY:-}
