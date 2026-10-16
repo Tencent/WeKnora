@@ -378,6 +378,11 @@ func (s *ImageMultimodalService) processImage(
 		// The preprocess action asks this to straighten the page. Nil is fine:
 		// the action reports "unavailable" and OCR reads the original bytes.
 		preprocessor: s.docReader,
+		// TODO(preprocess-mode): carry ImageProcessingConfig.PreprocessMode on
+		// the payload so a knowledge base can choose off/force. Until that
+		// wiring lands, every run resolves to auto, which is the documented
+		// default and the only mode that observes geometry before deciding.
+		preprocessMode: types.ResolvePreprocessMode(nil),
 	}
 	if err := pipeline.Run(ctx, rc); err != nil {
 		// Surface the pipeline failure on this image's span instead of
@@ -499,7 +504,13 @@ func (s *ImageMultimodalService) processImage(
 // known before the image's OCR call is spent. The attribute list and questions
 // come from the registry, so the prompt cannot drift from the attributes the
 // parser folds answers back onto.
-func buildImageAttrsPrompt(ctx context.Context, cfg types.VLMConfig) string {
+//
+// onDemand tells the builder whether the steps that consume on-demand
+// attributes are switched on for this run. When they are off the prompt is
+// byte-identical to what it was before those attributes existed, so a
+// knowledge base that does not use them pays neither prompt length nor a
+// chance of answer drift.
+func buildImageAttrsPrompt(ctx context.Context, cfg types.VLMConfig, onDemand bool) string {
 	language := strings.TrimSpace(cfg.DescriptionLanguage)
 	if language == "" {
 		language = types.LanguageNameFromContext(ctx)
@@ -510,6 +521,9 @@ func buildImageAttrsPrompt(ctx context.Context, cfg types.VLMConfig) string {
 			"Output one line per observation using exactly this format, then a DESCRIPTION line:\n\n",
 		language)
 	for _, spec := range types.ImageAttrRegistry {
+		if !spec.WantsInjection(onDemand) {
+			continue
+		}
 		allowed := make([]string, 0, len(spec.Values))
 		for _, value := range spec.Values {
 			allowed = append(allowed, value.Value)
@@ -518,6 +532,9 @@ func buildImageAttrsPrompt(ctx context.Context, cfg types.VLMConfig) string {
 	}
 	b.WriteString("DESCRIPTION: <one or two sentences>\n\nRules:\n")
 	for _, spec := range types.ImageAttrRegistry {
+		if !spec.WantsInjection(onDemand) {
+			continue
+		}
 		fmt.Fprintf(&b, "- %s: %s\n", spec.Name, spec.Question)
 	}
 	b.WriteString("- Output only those lines. No preamble, no summary, no extra commentary.\n")

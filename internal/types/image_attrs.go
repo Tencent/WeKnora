@@ -37,6 +37,38 @@ type AttrSpec struct {
 	// surface, where they would only add noise: no operator wants to filter a
 	// library by "how much margin is left around the text".
 	Internal bool `json:"internal,omitempty"`
+	// Inject says whether this attribute is always part of the describe round's
+	// standing questions, or only asked when something is going to act on it.
+	// An empty value means AttrInjectAlways, so attributes registered before
+	// this field existed keep their behaviour.
+	Inject AttrInject `json:"inject,omitempty"`
+}
+
+// AttrInject is how an attribute enters the describe prompt.
+type AttrInject string
+
+const (
+	// AttrInjectAlways puts the attribute in every describe round. This is for
+	// attributes the pipeline's policy itself reads (contain.text,
+	// contain.data_visual): their answers decide whether OCR runs, so they must
+	// always be present.
+	AttrInjectAlways AttrInject = "always"
+	// AttrInjectOnDemand asks the attribute only when a consumer is going to
+	// act on it. Asking is not free — it lengthens the prompt and gives the
+	// model one more chance to drift — so an attribute whose only job is to
+	// gate a later step is asked exactly when that step is switched on, and
+	// left out entirely otherwise.
+	AttrInjectOnDemand AttrInject = "on_demand"
+)
+
+// WantsInjection reports whether this attribute belongs in a describe round that
+// is being built for the given situation. onDemandOnly callers (a step that has
+// nothing to act on) skip the on-demand attributes entirely.
+func (s AttrSpec) WantsInjection(onDemandConsumersActive bool) bool {
+	if s.Inject != AttrInjectOnDemand {
+		return true
+	}
+	return onDemandConsumersActive
 }
 
 // AttrValue is one allowed value of an attribute: the raw value plus the words
@@ -76,6 +108,7 @@ var ImageAttrRegistry = []AttrSpec{
 		Description: "How much body text the picture itself carries. " +
 			"Decides whether reading its text is worth a separate OCR pass.",
 		Consumers: []string{"ocr"},
+		Inject:    AttrInjectAlways,
 	},
 	{
 		Name: "contain.data_visual",
@@ -90,6 +123,7 @@ var ImageAttrRegistry = []AttrSpec{
 		Description: "Whether the picture conveys data as a chart, graph, diagram or infographic. " +
 			"Such images keep their labels on the OCR path even when the text looks sparse.",
 		Consumers: []string{"ocr"},
+		Inject:    AttrInjectAlways,
 	},
 	{
 		Name: "contain.margin",
@@ -108,6 +142,7 @@ var ImageAttrRegistry = []AttrSpec{
 			"page can be cropped tighter before OCR reads it.",
 		Consumers: []string{"preprocess"},
 		Internal:  true,
+		Inject:    AttrInjectOnDemand,
 	},
 	{
 		Name: "contain.upright",
@@ -124,6 +159,7 @@ var ImageAttrRegistry = []AttrSpec{
 			"is worth straightening before OCR reads it.",
 		Consumers: []string{"preprocess"},
 		Internal:  true,
+		Inject:    AttrInjectOnDemand,
 	},
 }
 
@@ -170,6 +206,32 @@ func (a ImageAttrs) TextExtent() string {
 		return ""
 	}
 	if v, ok := a.Attrs["contain.text"]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// Margin returns the observed contain.margin value ("none" | "small" |
+// "large"), or "" when the observation did not answer for it. The empty string
+// is meaningful and must not be read as "none": it says this run has no basis
+// to conclude the page is already tidy, and callers treat that as "worth a
+// look" so an unobserved page still gets its chance.
+func (a ImageAttrs) Margin() string { return a.attrString("contain.margin") }
+
+// Upright returns the observed contain.upright value ("true" | "false"), or ""
+// when the observation did not answer. Returned as a string rather than a bool
+// so "the model said no" stays distinguishable from "the model did not say".
+func (a ImageAttrs) Upright() string { return a.attrString("contain.upright") }
+
+// attrString reads one observed attribute as a string, treating a missing key
+// and a non-string value the same way: as "not answered".
+func (a ImageAttrs) attrString(name string) string {
+	if a.Attrs == nil {
+		return ""
+	}
+	if v, ok := a.Attrs[name]; ok {
 		if s, ok := v.(string); ok {
 			return s
 		}

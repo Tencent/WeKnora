@@ -578,6 +578,52 @@ type ImageProcessingConfig struct {
 	// and widens vector recall. Existing knowledge bases stay off after an
 	// upgrade because the stored JSON has no such key.
 	ImageVectorEnabled bool `yaml:"image_vector_enabled,omitempty" json:"image_vector_enabled,omitempty" extensions:"x-agent"` //nolint:lll // one-line struct tag
+	// PreprocessMode controls the page-straightening step that runs before OCR:
+	//
+	//	auto   (default) the describe round also observes the page's geometry
+	//	       (contain.margin / contain.upright) and the page is straightened
+	//	       and cropped only when those say it is worth it;
+	//	off    never preprocess, and leave the describe prompt exactly as it was
+	//	       before this feature existed;
+	//	force  preprocess every readable page without asking, and likewise leave
+	//	       the describe prompt untouched.
+	//
+	// Only auto changes the describe prompt; off and force cannot disturb an
+	// observation pipeline that is already tuned.
+	PreprocessMode string `yaml:"preprocess_mode,omitempty" json:"preprocess_mode,omitempty"`
+}
+
+// Preprocess modes accepted by ImageProcessingConfig.PreprocessMode.
+const (
+	PreprocessModeOff   = "off"
+	PreprocessModeAuto  = "auto"
+	PreprocessModeForce = "force"
+)
+
+// ResolvePreprocessMode returns the effective preprocess mode. An unset or
+// unrecognised value falls back to auto, which is the mode the settings panel
+// offers first and the only one that observes geometry before deciding.
+func ResolvePreprocessMode(cfg *ImageProcessingConfig) string {
+	if cfg == nil {
+		return PreprocessModeAuto
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.PreprocessMode)) {
+	case PreprocessModeOff:
+		return PreprocessModeOff
+	case PreprocessModeForce:
+		return PreprocessModeForce
+	default:
+		return PreprocessModeAuto
+	}
+}
+
+// PreprocessObservesGeometry reports whether the describe round should ask the
+// geometry attributes, and PreprocessRunsUnconditionally whether the page is
+// straightened without consulting them. The three modes are mutually exclusive
+// so a caller reads exactly one of these.
+func PreprocessObservesGeometry(mode string) bool { return mode == PreprocessModeAuto }
+func PreprocessRunsUnconditionally(mode string) bool {
+	return mode == PreprocessModeForce
 }
 
 // ResolveImagePipelineID returns the pipeline id a knowledge base asks for. An
