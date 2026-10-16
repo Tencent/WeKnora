@@ -87,12 +87,20 @@ func TestImagePipelineActionSequences(t *testing.T) {
 	}{
 		{
 			"observation, caption and OCR", true, true, true, types.ImagePipelineSmartOCR,
-			[]types.ImageActionID{types.ImageActionObservationCaption, types.ImageActionOCR},
+			// Preprocess sits between the OCR decision and OCR itself: when the
+			// policy says OCR runs, the page is straightened first.
+			[]types.ImageActionID{
+				types.ImageActionObservationCaption, types.ImageActionPreprocess, types.ImageActionOCR,
+			},
 			2,
 		},
 		{
 			"observation and caption", true, false, true, types.ImagePipelineSmartOCR,
-			[]types.ImageActionID{types.ImageActionObservationCaption, types.ImageActionOCR},
+			// Preprocess sits between the OCR decision and OCR itself: when the
+			// policy says OCR runs, the page is straightened first.
+			[]types.ImageActionID{
+				types.ImageActionObservationCaption, types.ImageActionPreprocess, types.ImageActionOCR,
+			},
 			2,
 		},
 		{

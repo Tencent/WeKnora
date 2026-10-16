@@ -195,7 +195,7 @@ func TestBuildImageAttrsPrompt(t *testing.T) {
 	got := buildImageAttrsPrompt(context.Background(), types.VLMConfig{
 		DescriptionLanguage: "English",
 		CustomInstructions:  "Focus on alarm codes.",
-	})
+	}, false)
 
 	for _, want := range []string{
 		"in English",
@@ -210,15 +210,34 @@ func TestBuildImageAttrsPrompt(t *testing.T) {
 	}
 
 	// Every attribute the parser understands must be offered to the model,
-	// otherwise a label the prompt never mentions can never be produced.
+	// otherwise a label the prompt never mentions can never be produced. The
+	// exception is an on-demand attribute when nothing is switched on to
+	// consume it: it must be absent, not merely ignored, because the whole
+	// point of asking on demand is that an unused knowledge base sees the
+	// prompt it saw before the attribute existed.
 	for _, spec := range types.ImageAttrRegistry {
-		if !strings.Contains(got, spec.Name) {
+		mentioned := strings.Contains(got, spec.Name)
+		if !spec.WantsInjection(false) {
+			if mentioned {
+				t.Errorf("on-demand attribute %q leaked into a prompt with no active consumer", spec.Name)
+			}
+			continue
+		}
+		if !mentioned {
 			t.Errorf("attrs prompt does not mention attribute %q", spec.Name)
 		}
 	}
 
+	// With the consumer switched on, every attribute must be asked for.
+	withOnDemand := buildImageAttrsPrompt(context.Background(), types.VLMConfig{}, true)
+	for _, spec := range types.ImageAttrRegistry {
+		if !strings.Contains(withOnDemand, spec.Name) {
+			t.Errorf("prompt with active consumers is missing attribute %q", spec.Name)
+		}
+	}
+
 	ctx := context.WithValue(context.Background(), types.LanguageContextKey, "ko-KR")
-	if got := buildImageAttrsPrompt(ctx, types.VLMConfig{}); !strings.Contains(got, "in Korean") {
+	if got := buildImageAttrsPrompt(ctx, types.VLMConfig{}, false); !strings.Contains(got, "in Korean") {
 		t.Errorf("attrs prompt should fall back to the context language:\n%s", got)
 	}
 }

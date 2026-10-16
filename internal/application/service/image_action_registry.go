@@ -239,10 +239,14 @@ type runContext struct {
 	// preprocessor straightens the page before OCR. Nil when the document
 	// service is not wired into this build — see imagePreprocessor.
 	preprocessor imagePreprocessor
-	imageBytes   []byte
-	vlmCfg       types.VLMConfig
-	imageInfo    *types.ImageInfo
-	out          types.JSONMap
+	// preprocessMode is the resolved off/auto/force setting for this run. It
+	// decides both whether the describe round asks the geometry attributes and
+	// whether the page is straightened at all.
+	preprocessMode string
+	imageBytes     []byte
+	vlmCfg         types.VLMConfig
+	imageInfo      *types.ImageInfo
+	out            types.JSONMap
 	// pipelineID is the pipeline serving this run, used to namespace
 	// pipeline-private param lookups ("<pipeline>.<key>"). Empty in tests
 	// that build a runContext by hand, which then read bare keys only.
@@ -471,7 +475,9 @@ func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 		}
 		r.tracker.EndSpan(ctx, obsSpan, types.JSONMap{"status": "succeeded"})
 	}
-	raw, err := r.predictCaption(ctx, buildImageAttrsPrompt(ctx, r.vlmCfg), "image_observation")
+	raw, err := r.predictCaption(ctx,
+		buildImageAttrsPrompt(ctx, r.vlmCfg, types.PreprocessObservesGeometry(r.preprocessMode)),
+		"image_observation")
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Describe and observe failed for %s: %v", r.payload.ImageURL, err)
 		r.out["caption_error"] = err.Error()
@@ -519,13 +525,43 @@ func runPreprocessAction(ctx context.Context, r *runContext) error {
 		r.out["preprocess_status"] = "unavailable"
 		return nil
 	}
-	// The same signal the OCR policy reads (contain.text) decides this: text in
-	// blocks is what a page cropper has boxes to work with, while a caption-like
-	// sparse image has too few to fit a page. The attribute's vocabulary is owned
-	// by types.TextExtent, not re-spelled here.
-	if r.imageInfo == nil || r.imageInfo.Attrs.TextExtent() != "block" {
-		r.out["preprocess_status"] = "skipped_by_attrs"
+	// Off means off: the describe round did not even ask for the geometry
+	// attributes, so there is nothing to consult and nothing to do.
+	if r.preprocessMode == types.PreprocessModeOff {
+		r.out["preprocess_status"] = "off"
 		return nil
+	}
+	// Force skips the question entirely — it exists precisely for the case
+	// where an operator does not trust the observation to make this call.
+	if !types.PreprocessRunsUnconditionally(r.preprocessMode) {
+		// Auto: the same signal the OCR policy reads (contain.text) says whether
+		// there is a page at all, and the geometry attributes say whether
+		// straightening it is worth the pass. Their vocabularies are owned by
+		// types.TextExtent / the registry, not re-spelled here.
+		text := ""
+		margin, upright := "", ""
+		if r.imageInfo != nil {
+			text = r.imageInfo.Attrs.TextExtent()
+			margin = r.imageInfo.Attrs.Margin()
+			upright = r.imageInfo.Attrs.Upright()
+		}
+		if text != "block" && text != "sparse" {
+			r.out["preprocess_status"] = "skipped_by_attrs"
+			r.out["preprocess_reason"] = "no_text"
+			return nil
+		}
+		// A page that already fills the frame and already reads upright has
+		// nothing to gain: the cropper would spend its pass to hand back the
+		// same picture. An unanswered attribute is treated as "worth a look",
+		// because the whole point of the pass is to cover what the observation
+		// could not see.
+		croppable := margin == "" || margin == "large"
+		rotated := upright == "false"
+		if !croppable && !rotated {
+			r.out["preprocess_status"] = "skipped_by_attrs"
+			r.out["preprocess_reason"] = "already_tidy"
+			return nil
+		}
 	}
 	rectified, fallback, err := r.preprocessor.PreprocessImage(ctx, r.imageBytes)
 	if err != nil {
