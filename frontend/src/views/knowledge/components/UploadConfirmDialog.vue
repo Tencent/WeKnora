@@ -450,7 +450,7 @@
                           </div>
                         </div>
 
-                        <div v-if="uiState.multimodalConfig.enabled" class="setting-row setting-row-vertical">
+                        <div v-if="uiState.multimodalConfig.enabled" class="setting-row setting-row-vertical image-panel-flush">
                           <div class="setting-info">
                             <label>{{ t('knowledgeEditor.advanced.multimodal.imagePipelineSectionLabel') }}</label>
                             <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.imagePipelineSectionDescription') }}</p>
@@ -472,7 +472,7 @@
                              溢出、开关被顶到容器右缘之外，所以它与其它开关行同级。 -->
                         <div
                           v-if="uiState.multimodalConfig.enabled && uiState.imagePipeline === IMAGE_PIPELINE_SMARTOCR"
-                          class="setting-row"
+                          class="setting-row image-panel-flush"
                         >
                           <div class="setting-info">
                             <label>{{ t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobserved') }}</label>
@@ -1707,6 +1707,12 @@ const handleConfirm = () => {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid var(--td-component-border);
+}
+
+// .setting-row 自带下边框；图片流水线面板里分段之间才画线，段内不留线（与知识库
+// 编辑器同款）。② / ③ 之间的那条线就是上面 .image-attr-block 的上边框。
+.setting-row.image-panel-flush {
+  border-bottom: none;
 }
 // 折叠标题：收起时仍读得到这一段是什么。
 .image-attr-summary {

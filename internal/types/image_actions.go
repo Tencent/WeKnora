@@ -86,6 +86,11 @@ type ImageFieldDef struct {
 	Default any `json:"default"`
 	// Options enumerates the allowed values of an enum field.
 	Options []string `json:"options"`
+	// Group says which run of the panel the field belongs to: the switches
+	// shown outright, the switches folded under "advanced", or the explanation
+	// text folded under "notes". The zero value is ImageFieldGroupSwitch, so a
+	// pipeline says nothing about groups until it has something to fold away.
+	Group ImageFieldGroup `json:"group,omitempty"`
 	// DecidesAction marks a field that turns one of the pipeline's actions on or
 	// off, as opposed to one that tunes a call the pipeline always makes. Only
 	// such a field can leave a pipeline with nothing left to do, and only such
@@ -103,6 +108,35 @@ const (
 	ImageFieldTypeString ImageFieldType = "string"
 	// ImageFieldTypeEnum renders as a select over the field's Options.
 	ImageFieldTypeEnum ImageFieldType = "enum"
+	// ImageFieldTypeNote renders no control at all: the field is an explanation
+	// the pipeline declares next to the switches it explains, and the panel
+	// shows it in the folded notes block. It carries no value, so its Key is
+	// only a name for the entry.
+	ImageFieldTypeNote ImageFieldType = "note"
+)
+
+// ImageFieldGroup is the run of a panel a declared field belongs to. Fields are
+// declared in three consecutive runs, and the panel renders them as three
+// places:
+//
+//  1. ImageFieldGroupSwitch — the standing switches, always on screen;
+//  2. ImageFieldGroupAdvanced — switches folded under "advanced";
+//  3. ImageFieldGroupNote — explanations folded under "notes".
+//
+// A field declared outside its run would silently jump to another part of the
+// panel, so the order is not a matter of taste: TestFieldDeclarationOrder
+// enforces it for every registered pipeline.
+type ImageFieldGroup string
+
+const (
+	// ImageFieldGroupSwitch is a switch the panel always shows. It is the zero
+	// value, so a standing switch does not have to mention its group.
+	ImageFieldGroupSwitch ImageFieldGroup = "switch"
+	// ImageFieldGroupAdvanced is a switch that only matters to someone tuning
+	// the pipeline; the panel folds it away by default.
+	ImageFieldGroupAdvanced ImageFieldGroup = "advanced"
+	// ImageFieldGroupNote is explanation text: no control, no value.
+	ImageFieldGroupNote ImageFieldGroup = "note"
 )
 
 // SharedImageActions are the actions every pipeline starts from. They are

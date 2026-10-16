@@ -4904,9 +4904,8 @@ export default {
         imagePipelineSectionLabel: '图片解析方案',
         imagePipelineSectionDescription: '多模态解析开启后，可以根据需要选择图片的解析方案',
         imagePipelineLabel: '选择解析方案',
-        preprocessLabel: '文档预处理',
-        preprocessDescription:
-          '在 OCR 之前把拍摄的页面摆正并裁掉周围环境。自动：由描述轮判断页面是否需要；关闭：从不处理；强制：总是处理。',
+        advancedSettingsLabel: '高级设置',
+        notesLabel: '说明信息',
         preprocessModeAuto: '自动',
         preprocessModeOff: '关闭',
         preprocessModeForce: '强制',
@@ -8737,6 +8736,11 @@ export default {
     },
     default: {
       name: '传统',
+      note_actions: {
+        label: '两项动作互相独立',
+        description:
+          '两项各自开关：关掉识别，图片仍会被描述；关掉描述，文字仍会被识别。只有两个都关掉时这张图才不会被处理 —— 所以面板不允许这种组合。',
+      },
       description: '用户根据任务需要手动选择解析动作开关。',
       enable_caption: {
         label: '图片描述',
@@ -8761,6 +8765,16 @@ export default {
     },
     smartocr: {
       name: '智能模式',
+      note_flow: {
+        label: '由观察结果决定',
+        description:
+          '先描述图片并观察属性，由属性决定是否值得再为它花一次 OCR。属性显示页面需要摆正时，会先摆正并裁掉周围环境再识别；若该步骤不可用或判定不适用，则直接用原图，绝不会比不启用更差。',
+      },
+      preprocess_mode: {
+        label: '文档预处理',
+        description:
+          '在 OCR 之前把拍摄的页面摆正并裁掉周围环境。自动：由描述轮判断页面是否需要；关闭：从不处理；强制：总是处理。',
+      },
       caption: {
         thinking: {
           label: '描述时开启思考',

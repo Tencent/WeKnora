@@ -34,7 +34,33 @@ func (smartOcrPipeline) Description() string {
 const (
 	smartFieldKeyAllowOCR       = "allow_ocr"
 	smartFieldKeyCaptureCaption = "capture_caption"
+	// smartFieldKeyPreprocessMode is the page-straightening switch. It is the
+	// one field here that is not a pipeline param: its value is the knowledge
+	// base's preprocess_mode, so the panel binds it to that setting instead of
+	// to image_pipeline_params. It is declared by this pipeline and no other
+	// because this is the pipeline whose observation round produces the
+	// attributes the decision rests on — see Fields.
+	smartFieldKeyPreprocessMode = "preprocess_mode"
+	// Not a param: a note is explanation text, and its key only names the entry.
+	smartFieldKeyNoteFlow = "note_flow"
 )
+
+// smartPreprocessField is the page-straightening switch as the panel shows it.
+// The Default is the same value ResolvePreprocessMode resolves an unset
+// knowledge base setting to, so the payload describes the field completely; the
+// panel does not read it (it binds the knowledge base's own setting) and the
+// run never reads it from params.
+var smartPreprocessField = types.ImageFieldDef{
+	Key:     smartFieldKeyPreprocessMode,
+	Type:    types.ImageFieldTypeEnum,
+	Default: types.PreprocessModeAuto,
+	Label:   "Document preprocessing",
+	Description: "Straighten and crop a photographed page before OCR reads it. " +
+		"Auto asks the describe round whether the page needs it; Off never does; Force always does.",
+	Options: []string{
+		types.PreprocessModeAuto, types.PreprocessModeOff, types.PreprocessModeForce,
+	},
+}
 
 // Fields declares this pipeline's panel controls. The model decides from the
 // observed attributes whether OCR is worth a second pass, and the caption the
@@ -46,12 +72,31 @@ const (
 // drives the same action — this pipeline reaches the caption through the
 // observation call rather than through a caption action of its own. A knowledge
 // base that never touched these switches still behaves as it always did.
+//
+// Declared in the three runs the panel renders: the standing switch (the
+// straightening choice, which is this pipeline's whole reason to exist), then
+// the advanced thinking switches, then the note. The straightening switch lives
+// here rather than in the manual pipeline's list because the manual pipeline
+// has no observation round to drive it — nothing there could answer "does this
+// page need it".
 func (smartOcrPipeline) Fields() []types.ImageFieldDef {
 	return []types.ImageFieldDef{
+		smartPreprocessField,
 		// The thinking switches are action-level fields, declared once at the
 		// action layer and carried in here.
 		imageActionThinkingFields[0],
 		imageActionThinkingFields[1],
+		{
+			Key:   smartFieldKeyNoteFlow,
+			Type:  types.ImageFieldTypeNote,
+			Group: types.ImageFieldGroupNote,
+			Label: "The observation decides",
+			Description: "The image is described and observed first; the attributes that come back " +
+				"decide whether OCR is worth a second pass at all. When they say the page needs " +
+				"straightening, it is straightened and its surroundings cropped before reading — " +
+				"and if that step is unavailable or declines, the original photograph is read " +
+				"instead, never something worse.",
+		},
 	}
 }
 

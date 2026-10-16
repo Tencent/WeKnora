@@ -4903,9 +4903,8 @@ export default {
         imagePipelineSectionDescription:
           '멀티모달 분석이 켜져 있으면 이미지의 분석 방식을 필요에 따라 선택할 수 있습니다.',
         imagePipelineLabel: '분석 방식',
-        preprocessLabel: '문서 전처리',
-        preprocessDescription:
-          'OCR 전에 촬영한 페이지를 반듯하게 펴고 주변을 잘라냅니다. 자동: 설명 단계에서 필요 여부를 판단 / 끄기: 항상 사용 안 함 / 강제: 항상 사용.',
+        advancedSettingsLabel: '고급 설정',
+        notesLabel: '설명',
         preprocessModeAuto: '자동',
         preprocessModeOff: '끄기',
         preprocessModeForce: '강제',
@@ -8737,6 +8736,11 @@ export default {
     },
     default: {
       name: '수동',
+      note_actions: {
+        label: '두 동작은 서로 독립적입니다',
+        description:
+          '각각 따로 켜고 끌 수 있습니다. 인식을 끄면 이미지는 여전히 설명되고, 설명을 끄면 글자는 여전히 추출됩니다. 둘 다 끄면 이미지가 아무것도 처리되지 않으므로 패널은 그 조합을 허용하지 않습니다.',
+      },
       description: '작업에 맞게 분석 동작 스위치를 직접 켜거나 끕니다.',
       enable_caption: {
         label: '이미지 설명',
@@ -8761,6 +8765,16 @@ export default {
     },
     smartocr: {
       name: '스마트',
+      note_flow: {
+        label: '관찰 결과가 결정합니다',
+        description:
+          '먼저 이미지를 설명하고 속성을 관찰한 뒤, 돌아온 속성이 OCR을 한 번 더 할 가치가 있는지 결정합니다. 페이지를 반듯하게 펴야 한다고 속성이 알리면 먼저 펴고 주변을 잘라낸 뒤 읽습니다. 그 단계를 쓸 수 없으면 원본 사진을 그대로 읽으며, 더 나빠지지 않습니다.',
+      },
+      preprocess_mode: {
+        label: '문서 전처리',
+        description:
+          'OCR 전에 촬영한 페이지를 반듯하게 펴고 주변을 잘라냅니다. 자동: 설명 단계에서 필요 여부를 판단 / 끄기: 항상 사용 안 함 / 강제: 항상 사용.',
+      },
       caption: {
         thinking: {
           label: '설명 시 사고 사용',
