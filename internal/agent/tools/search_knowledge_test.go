@@ -368,7 +368,9 @@ func TestDeduplicateResultsKeepsSiblingsImagesAndBestScore(t *testing.T) {
 }
 
 func TestFormatOutputPreservesChunkType(t *testing.T) {
-	for _, chunkType := range []string{"text", "summary", "image_ocr", "image_caption", "image_vector", "", `custom"<&`} {
+	for _, chunkType := range []string{
+		"text", "summary", "image_ocr", "image_caption", "image_vector", "", `custom"<&`,
+	} {
 		t.Run(chunkType, func(t *testing.T) {
 			tool := &SearchKnowledgeTool{}
 			res := tool.formatOutput(context.Background(), []*searchResultWithMeta{{
