@@ -151,16 +151,8 @@ func (c *Client) GetTenantAccessToken(ctx context.Context) (string, error) {
 	}
 	c.tokenExpAt = time.Now().Add(ttl)
 
-	prefixLen := 8
-	if len(result.TenantAccessToken) < prefixLen {
-		prefixLen = len(result.TenantAccessToken)
-	}
-	suffixLen := 4
-	if len(result.TenantAccessToken) < suffixLen {
-		suffixLen = len(result.TenantAccessToken)
-	}
-	logger.Infof(ctx, "[Feishu] got tenant_access_token: %s...%s expire=%ds",
-		result.TenantAccessToken[:prefixLen], result.TenantAccessToken[len(result.TenantAccessToken)-suffixLen:], result.Expire)
+	// Never log token material: even a prefix/suffix narrows the bearer credential.
+	logger.Infof(ctx, "[Feishu] tenant access token refreshed expire=%ds", result.Expire)
 
 	return c.tokenCache, nil
 }
