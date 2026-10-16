@@ -187,6 +187,9 @@ func TestWikiPageIndexLifecycleAndSearch(t *testing.T) {
 	require.Equal(t, page.Title, results[0].KnowledgeTitle)
 	require.Equal(t, page.KnowledgeBaseID, results[0].KnowledgeBaseID)
 	require.Equal(t, types.ChunkTypeWikiPage, results[0].ChunkType)
+	require.Equal(t, page.Slug, results[0].Metadata["wiki_slug"], "citations need the real Wiki route")
+	require.Equal(t, page.ID, results[0].Metadata["wiki_page_id"])
+	require.Equal(t, "wiki", results[0].KnowledgeSource)
 
 	page.Content = "replacement unique wiki body"
 	page.Title = "Renamed concept"

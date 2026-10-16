@@ -21,6 +21,7 @@ const target = resolveReferenceSource(refs, { chunkId: 'chunk-1', anchorText: 'æ
 async function fixture(options: { details?: Record<string, unknown>; chunk?: Record<string, unknown>; target?: ReferenceSourceTarget } = {}) {
   const props = reactive({ target: options.target || target, active: true })
   const requests: string[] = [], events: string[] = []
+  const navigation: any[] = [], resolved: any[] = []
   let preview: any, mounts = 0
   const exports: any = {}
   const Preview = defineComponent({
@@ -30,7 +31,7 @@ async function fixture(options: { details?: Record<string, unknown>; chunk?: Rec
   runInNewContext(compiled, { exports, console, require(name: string) {
     if (name === 'vue') return require('vue')
     if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
-    if (name === 'vue-router') return { useRouter: () => ({ resolve: () => ({ href: '/knowledge' }) }) }
+    if (name === 'vue-router') return { useRouter: () => ({ resolve: (route: any) => { resolved.push(route); return { href: '/knowledge' } }, push: async (route: any) => { navigation.push(route) } }) }
     if (name === '@/api/knowledge-base/index') return {
       getKnowledgeDetails: async (id: string) => {
         requests.push(`details:${id}`)
@@ -58,7 +59,7 @@ async function fixture(options: { details?: Record<string, unknown>; chunk?: Rec
   for (const name of ['t-button', 't-icon', 't-loading']) app.component(name, { render: () => null })
   app.mount(node())
   await flush()
-  return { props, requests, events, preview: () => preview, mounts: () => mounts, dispose: () => app.unmount() }
+  return { props, requests, events, navigation, resolved, preview: () => preview, mounts: () => mounts, dispose: () => app.unmount() }
 }
 
 test('manual citation opens Markdown with raw chunk evidence even without source locators', async t => {
@@ -118,4 +119,29 @@ test('FAQ still falls back to the source list even with manual source metadata',
 test('uploaded files keep their original preview format', async t => {
   const f = await fixture({ details: { type: 'file', source: 'upload', file_type: 'pdf', file_name: 'Report.pdf' }, target: { ...target, knowledgeSource: 'upload' } }); t.after(f.dispose)
   assert.equal(f.preview().fileType, 'pdf')
+})
+
+
+test('Wiki citations navigate to the real page without document-detail or file-preview requests', async t => {
+  const wikiTarget = resolveReferenceSource([{
+    id: 'wiki-chunk', knowledge_id: 'derived-index-scope', knowledge_base_id: 'wiki-kb',
+    knowledge_source: 'wiki', chunk_type: 'wiki_page', knowledge_title: 'Wiki synthesis',
+    metadata: { wiki_slug: 'concept/synthesis', wiki_page_id: 'real-wiki-page' },
+  }], { chunkId: 'wiki-chunk', openSource: true })!
+  const f = await fixture({ target: wikiTarget }); t.after(f.dispose)
+  const expected = { path: '/platform/knowledge-bases/wiki-kb', query: { tab: 'graph', slug: 'concept/synthesis' } }
+  assert.deepEqual(JSON.parse(JSON.stringify(f.navigation)), [expected])
+  assert.ok(f.resolved.some(route => JSON.stringify(route) === JSON.stringify(expected)), 'the source link uses the same Wiki route')
+  assert.deepEqual(f.requests, [], 'a Wiki index scope must never be sent to getKnowledgeDetails')
+  assert.deepEqual(f.events, [])
+  assert.equal(f.preview(), undefined)
+})
+
+
+test('Wiki references without page metadata never fall back to synthetic document details', async t => {
+  const f = await fixture({ target: { ...target, knowledgeSource: 'wiki', chunkType: 'wiki_page', knowledgeBaseId: 'wiki-kb' } })
+  t.after(f.dispose)
+  assert.deepEqual(f.requests, [])
+  assert.deepEqual(f.navigation, [])
+  assert.deepEqual(f.events, ['unavailable'])
 })

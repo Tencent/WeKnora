@@ -187,6 +187,7 @@ import ChatReferenceSourceView from '@/components/ChatReferenceSourceView.vue'
 import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
 import {
   buildReferenceSections,
+  referenceSourceRoute,
   formatReferenceSnippet,
   resolveReferenceHighlightKey,
   type ReferenceListItem,
@@ -278,6 +279,10 @@ function openItemSource(item: ReferenceListItem) {
     knowledgeBaseId: item.knowledgeBaseId,
     title: item.title,
     fileName: item.fileName,
+    knowledgeSource: item.knowledgeSource,
+    chunkType: item.chunkType,
+    wikiSlug: item.wikiSlug,
+    wikiPageId: item.wikiPageId,
   })
 }
 
@@ -381,13 +386,8 @@ function toggleDocumentSnippet(item: ReferenceListItem, event?: MouseEvent) {
 }
 
 function getDocumentHref(item: ReferenceListItem) {
-  if (!item.knowledgeBaseId) return ''
-  const query: Record<string, string> = {}
-  if (item.knowledgeId) query.knowledge_id = item.knowledgeId
-  return router.resolve({
-    path: `/platform/knowledge-bases/${item.knowledgeBaseId}`,
-    query,
-  }).href
+  const route = referenceSourceRoute(item)
+  return route ? router.resolve(route).href : ''
 }
 
 function shouldShowItemTitle(item: ReferenceListItem) {
