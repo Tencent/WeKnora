@@ -131,14 +131,23 @@ func (w *orientationVLM) GetModelName() string { return w.inner.GetModelName() }
 func (w *orientationVLM) GetModelID() string   { return w.inner.GetModelID() }
 
 func (w *orientationVLM) Predict(ctx context.Context, imgBytes [][]byte, prompt string) (string, error) {
+	return w.PredictWithOptions(ctx, imgBytes, prompt, nil)
+}
+
+// PredictWithOptions keeps a tuned request on the same path as a plain one:
+// orient the pixels first, then hand them to the wrapped client with its
+// per-call options untouched.
+func (w *orientationVLM) PredictWithOptions(
+	ctx context.Context, imgBytes [][]byte, prompt string, opts *PredictOptions,
+) (string, error) {
 	if len(imgBytes) == 0 {
-		return w.inner.Predict(ctx, imgBytes, prompt)
+		return w.inner.PredictWithOptions(ctx, imgBytes, prompt, opts)
 	}
 	oriented := make([][]byte, len(imgBytes))
 	for i, img := range imgBytes {
 		oriented[i] = orientImageBytes(ctx, img)
 	}
-	return w.inner.Predict(ctx, oriented, prompt)
+	return w.inner.PredictWithOptions(ctx, oriented, prompt, opts)
 }
 
 // wrapVLMImageOrientation installs the EXIF orientation normaliser as the

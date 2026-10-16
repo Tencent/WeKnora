@@ -312,7 +312,16 @@ type recordingVLM struct {
 	received [][]byte
 }
 
-func (r *recordingVLM) Predict(_ context.Context, imgBytes [][]byte, _ string) (string, error) {
+func (r *recordingVLM) Predict(ctx context.Context, imgBytes [][]byte, prompt string) (string, error) {
+	return r.PredictWithOptions(ctx, imgBytes, prompt, nil)
+}
+
+// PredictWithOptions keeps the fake in step with the VLM interface: the
+// decorator under test forwards tuned requests here too, and the assertions
+// only care about the bytes that reached the inner client.
+func (r *recordingVLM) PredictWithOptions(
+	_ context.Context, imgBytes [][]byte, _ string, _ *PredictOptions,
+) (string, error) {
 	r.received = imgBytes
 	return "ok", nil
 }
