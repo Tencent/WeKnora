@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { useConnectorLabel } from '@/composables/useConnectorLabel'
 import {
   listDataSources,
   deleteDataSource,
@@ -129,12 +130,15 @@ function statusLabel(status: string) {
   return t(`datasource.status.${status}`)
 }
 
+// Shared with DataSourceTypeIcon: the icon's alt text and this subtitle have to
+// name a connector the same way. The helper moved to a composable because the
+// inline `t(key) || type` it replaced never fell back — vue-i18n echoes the key
+// back for a missing message — so a connector with no translation (the registry
+// ships several) rendered as "datasource.connector.github".
+const { connectorLabel } = useConnectorLabel()
+
 function syncModeLabel(mode: string) {
   return t(`datasource.syncMode.${mode}`)
-}
-
-function connectorLabel(type: string) {
-  return t(`datasource.connector.${type}`) || type
 }
 
 function scheduleLabel(cron: string) {
