@@ -974,6 +974,7 @@ export default {
     syncModeLabel: '동기화 모드',
     parseModeLabel: '구문 분석 모드',
     parseMode: {
+      inherit: '서버 설정 사용',
       blocks: '블록 분석 (기본값)',
       export: '내보내기 분석 (docx)',
     },

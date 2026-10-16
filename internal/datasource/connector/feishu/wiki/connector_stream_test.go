@@ -189,11 +189,15 @@ func TestFetchStream_SkipsUnchangedNodesFromCursor(t *testing.T) {
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	cursor := makeStreamCursor(t, map[string]map[string]string{
-		"space1": {"nt1": "100"}, // nt1 unchanged; nt3 unknown → new
-	})
-
 	c := NewConnector(core.RegionFeishu)
+	_, firstCursor, err := c.FetchIncremental(context.Background(), makeConfig(cfg, []string{"space1"}), nil)
+	if err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+	first := (&wikiOps{}).DecodeCursorTimes(firstCursor.ConnectorCursor)
+	delete(first["space1"], "nt3") // nt1 unchanged; nt3 unknown → new
+	cursor := makeStreamCursor(t, first)
+
 	h := &recordingHandler{}
 	if _, err := c.FetchStream(context.Background(), makeConfig(cfg, []string{"space1"}), cursor, h); err != nil {
 		t.Fatalf("FetchStream() error: %v", err)

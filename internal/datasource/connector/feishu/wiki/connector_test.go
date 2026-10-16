@@ -1102,7 +1102,8 @@ func TestFetchIncremental_ChildNodeListErrorDoesNotDeletePreviouslySeenChildren(
 	if err := json.Unmarshal(cursorBytes, &restored); err != nil {
 		t.Fatalf("restore cursor: %v", err)
 	}
-	if restored.SpaceNodeTimes["space1"]["nt-child"] != "150" {
+	previous := (&wikiOps{}).DecodeCursorTimes(cursor.ConnectorCursor)
+	if restored.SpaceNodeTimes["space1"]["nt-child"] != previous["space1"]["nt-child"] {
 		t.Fatalf("partial sync should preserve previous child cursor entry, got %+v", restored.SpaceNodeTimes["space1"])
 	}
 }

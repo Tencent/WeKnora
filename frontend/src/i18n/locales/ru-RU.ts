@@ -974,6 +974,7 @@ export default {
     syncModeLabel: 'Режим синхронизации',
     parseModeLabel: 'Режим разбора',
     parseMode: {
+      inherit: 'Использовать настройки сервера',
       blocks: 'Блочный разбор (по умолчанию)',
       export: 'Экспорт (docx)',
     },

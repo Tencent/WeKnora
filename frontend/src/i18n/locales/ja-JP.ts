@@ -7133,6 +7133,7 @@ export default {
     syncModeLabel: '同期モード',
     parseModeLabel: '解析モード',
     parseMode: {
+      inherit: 'サーバー設定を使用',
       blocks: 'ブロック解析（デフォルト）',
       export: 'エクスポート解析（docx）',
     },

@@ -974,6 +974,7 @@ export default {
     syncModeLabel: '同步模式',
     parseModeLabel: '解析模式',
     parseMode: {
+      inherit: '使用服务器配置',
       blocks: '块级解析（默认）',
       export: '导出解析（docx）',
     },

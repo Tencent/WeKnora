@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -431,5 +432,22 @@ func TestFetchDocxWithBlocks_MentionDocTitleBackfill(t *testing.T) {
 	if !strings.Contains(string(main.Content),
 		"[https://my.feishu.cn/docx/RefDoc001](https://my.feishu.cn/docx/RefDoc001)") {
 		t.Errorf("fallback form missing, got:\n%s", main.Content)
+	}
+}
+
+// A header can advertise dimensions far beyond the compressed download size.
+// The sentinel codec proves that the full pixel decoder is never invoked.
+func TestTrimBoardImageRejectsOversizeBeforeDecode(t *testing.T) {
+	const magic = "weknora-oversized-board-test"
+	image.RegisterFormat("png", magic,
+		func(io.Reader) (image.Image, error) {
+			panic("oversized board reached pixel decoder")
+		},
+		func(io.Reader) (image.Config, error) {
+			return image.Config{Width: maxTrimPixels + 1, Height: 1}, nil
+		})
+	data := []byte(magic)
+	if got := trimBoardImage(data); !bytes.Equal(got, data) {
+		t.Fatal("oversized image must pass through unchanged")
 	}
 }

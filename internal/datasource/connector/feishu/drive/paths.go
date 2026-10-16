@@ -71,39 +71,66 @@ func (o *driveOps) listDriveFilesForResource(
 		return files, partialDriveError(failures)
 	}
 
-	// Sub-selection ("rootFolderToken:fileToken"). The selected node's kind is
-	// read off the root subtree listing — probing it with folder APIs would
-	// fail for file tokens (folder meta 91202, folder list 1061002) and log
-	// API errors on every sync.
-	rootFiles, rootDirs, rootFailures := core.WalkDriveTree(ctx, client, rootFolderToken, rootBase)
-	for _, f := range rootFiles {
-		if f.Token == fileToken && f.Type != "folder" {
-			o.dirPaths = rootDirs
-			return filterDriveFileByToken(rootFiles, fileToken), partialDriveError(rootFailures)
+	// A shallow root listing identifies direct files without probing them with
+	// folder APIs, and direct folders without visiting unselected siblings.
+	if o.rootEntries == nil {
+		o.rootEntries = make(map[string][]core.DriveFile)
+	}
+	entries, cached := o.rootEntries[rootFolderToken]
+	if !cached {
+		if listed, err := client.ListDriveFilesAllPages(ctx, rootFolderToken); err == nil {
+			entries = listed
+			o.rootEntries[rootFolderToken] = listed
 		}
 	}
-
-	// Sub-folder selection: walk that sub-folder's subtree, prefixed with
-	// "<根名>/<子文件夹名>" (unresolved names drop their segment). If the
-	// token turns out to be a file missing from the root listing (partial
-	// listing, permission edge), fall back to the already-fetched root
-	// subtree — mirroring single-file behaviour.
 	base := rootBase
-	if subName, ok := o.driveFolderName(ctx, client, fileToken); ok {
-		if base != "" {
-			base += "/"
+	folderFound := false
+	for _, entry := range entries {
+		f, ok := core.ExpandDriveShortcut(entry)
+		if !ok || (entry.Token != fileToken && f.Token != fileToken) {
+			continue
 		}
-		base += subName
+		if f.Type != "folder" {
+			// Some list responses omit parent_token; the listing itself tells
+			// us the containing directory.
+			f.ParentToken = rootFolderToken
+			o.dirPaths = map[string]string{rootFolderToken: rootBase}
+			return []core.DriveFile{f}, nil
+		}
+		folderFound = true
+		base = joinDriveDir(rootBase, core.SanitizeFileName(f.Name))
+		break
+	}
+	if !folderFound {
+		// A nested selected folder can be walked directly, even when the
+		// caller cannot list its parent. No full-root discovery is needed.
+		if subName, ok := o.driveFolderName(ctx, client, fileToken); ok {
+			base = joinDriveDir(rootBase, subName)
+		}
 	}
 	files, dirPaths, failures := core.WalkDriveTree(ctx, client, fileToken, base)
 	for _, failure := range failures {
 		if failure.FolderToken == fileToken && isDriveNotFolderError(failure.Err) {
+			// Only nested single files need the legacy root search: Drive
+			// exposes no single-file parent query. Never use this fallback for
+			// permission/transport failures, which must retain the old cursor.
+			rootFiles, rootDirs, rootFailures := core.WalkDriveTree(ctx, client, rootFolderToken, rootBase)
 			o.dirPaths = rootDirs
 			return filterDriveFileByToken(rootFiles, fileToken), partialDriveError(rootFailures)
 		}
 	}
 	o.dirPaths = dirPaths
 	return files, partialDriveError(failures)
+}
+
+func joinDriveDir(parent, name string) string {
+	if parent == "" {
+		return name
+	}
+	if name == "" {
+		return parent
+	}
+	return parent + "/" + name
 }
 
 // partialDriveError wraps collected failures into a

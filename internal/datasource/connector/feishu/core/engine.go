@@ -41,7 +41,7 @@ type NodeOps[N any] interface {
 	Token(n N) string
 	Title(n N) string
 	ObjType(n N) string
-	// EditTime is the change-detection timestamp string stored in the cursor.
+	// EditTime is an opaque change key stored in the cursor (time and/or path).
 	EditTime(n N) string
 
 	// fetch retrieves one node's content; (nil, nil) means an unsupported

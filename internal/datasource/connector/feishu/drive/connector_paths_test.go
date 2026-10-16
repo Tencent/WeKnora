@@ -2,6 +2,7 @@ package drive
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -334,5 +335,94 @@ func TestDriveFetchIncremental_SubFolderSelection(t *testing.T) {
 	}
 	if got["f-spec"].FileName != "规格/详细.pdf" {
 		t.Errorf("FileName for f-spec = %q, want %q", got["f-spec"].FileName, "规格/详细.pdf")
+	}
+}
+
+func TestDriveSubfolderDoesNotWalkUnselectedSiblings(t *testing.T) {
+	for _, nested := range []bool{false, true} {
+		t.Run(map[bool]string{false: "direct", true: "nested"}[nested], func(t *testing.T) {
+			f := newFakeDriveTree(t, map[string][]core.DriveFile{
+				"root": {
+					driveFolder("selected", "Selected", "root"), driveFolder("unselected", "Unselected", "root"),
+				},
+				"selected": {driveFile("doc", "doc.pdf", "selected", "100")},
+			})
+			if nested {
+				f.folders["root"] = []core.DriveFile{driveFolder("unselected", "Unselected", "root")}
+			}
+			f.metaNames = map[string]string{"root": "Root", "selected": "Selected"}
+			// A failure in an unrelated folder must not add retries or partial errors.
+			f.failing["unselected"] = true
+			conn := NewDriveConnector(core.RegionFeishuDrive)
+			cfg := makeDriveConfig(f.cfg, []string{"root:selected"})
+			items, cursor, err := conn.FetchIncremental(context.Background(), cfg, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(items) != 1 || items[0].FileName != "Root/Selected/doc.pdf" {
+				t.Fatalf("unexpected items: %+v", items)
+			}
+			if f.listCalls["unselected"] != 0 || f.listCalls["selected"] != 1 {
+				t.Fatalf("unexpected list calls: %v", f.listCalls)
+			}
+			f.folders["selected"] = nil
+			items, _, err = conn.FetchIncremental(context.Background(), cfg, cursor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ids := deletedIDs(items); len(ids) != 1 || ids[0] != "doc" {
+				t.Fatalf("selected deletion lost: %+v", items)
+			}
+		})
+	}
+}
+
+func TestDriveSelectionsShareShallowRootListing(t *testing.T) {
+	f := newFakeDriveTree(t, map[string][]core.DriveFile{
+		"root": {
+			driveFolder("a", "A", "root"), driveFolder("b", "B", "root"), driveFile("doc", "root.pdf", "root", "100"),
+		},
+		"a": {driveFile("doc-a", "a.pdf", "a", "100")},
+		"b": {driveFile("doc-b", "b.pdf", "b", "100")},
+	})
+	f.metaNames = map[string]string{"root": "Root"}
+	conn := NewDriveConnector(core.RegionFeishuDrive)
+	cfg := makeDriveConfig(f.cfg, []string{"root:a", "root:b", "root:doc"})
+	items, _, err := conn.FetchIncremental(context.Background(), cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("items=%+v", items)
+	}
+	if f.listCalls["root"] != 1 || f.listCalls["a"] != 1 || f.listCalls["b"] != 1 || f.listCalls["doc"] != 0 {
+		t.Fatalf("unexpected calls: %v", f.listCalls)
+	}
+}
+
+func TestDriveSelectedShortcutKeepsDisplayNameAndTarget(t *testing.T) {
+	for _, selected := range []string{"shortcut", "target"} {
+		t.Run(selected, func(t *testing.T) {
+			var shortcut core.DriveFile
+			raw := `{"token":"shortcut","type":"shortcut","name":"reference.pdf","modified_time":"100",
+				"shortcut_info":{"target_token":"target","target_type":"file"}}`
+			if err := json.Unmarshal([]byte(raw), &shortcut); err != nil {
+				t.Fatal(err)
+			}
+			f := newFakeDriveTree(t, map[string][]core.DriveFile{"root": {shortcut}})
+			f.metaNames = map[string]string{"root": "Root"}
+			conn := NewDriveConnector(core.RegionFeishuDrive)
+			cfg := makeDriveConfig(f.cfg, []string{"root:" + selected})
+			items, _, err := conn.FetchIncremental(context.Background(), cfg, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(items) != 1 || items[0].ExternalID != "target" || items[0].FileName != "Root/reference.pdf" {
+				t.Fatalf("unexpected shortcut item: %+v", items)
+			}
+			if f.listCalls["target"] != 0 || f.listCalls["shortcut"] != 0 || f.listCalls["root"] != 1 {
+				t.Fatalf("shortcut must not trigger folder probes: %v", f.listCalls)
+			}
+		})
 	}
 }

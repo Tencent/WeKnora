@@ -67,9 +67,10 @@ type mdRenderer struct {
 	// blocksToMarkdown.
 	userName func(string) string
 
-	orderedActive     bool   // an ordered-list run is in progress
-	lastOrderedParent string // ParentID of the most recent ordered item
-	orderedNext       int    // next number for "auto"/absent sequence
+	orderedActive     bool            // an ordered-list run is in progress
+	lastOrderedParent string          // ParentID of the most recent ordered item
+	orderedNext       int             // next number for "auto"/absent sequence
+	rendering         map[string]bool // guard malformed cyclic container children
 }
 
 // nextImageNo assigns the next marker sequence number. The renderer and the
@@ -219,7 +220,7 @@ func (r *mdRenderer) renderBlock(b DocxBlock) string {
 		var lines []string
 		for _, cid := range b.Children {
 			if child, ok := r.byID[cid]; ok {
-				if s := r.renderBlock(child); s != "" {
+				if s := r.renderContainerChild(child); s != "" {
 					lines = append(lines, strings.Split(s, "\n")...)
 				}
 			}
@@ -317,7 +318,7 @@ func (r *mdRenderer) renderQuotedContainer(b DocxBlock, own string) string {
 		if !ok {
 			continue
 		}
-		if s := r.renderBlock(child); s != "" {
+		if s := r.renderContainerChild(child); s != "" {
 			lines = append(lines, strings.Split(s, "\n")...)
 		}
 	}
@@ -343,12 +344,12 @@ func (r *mdRenderer) renderGrid(b DocxBlock) string {
 		if col.BlockType == BlockTypeGridColumn {
 			for _, ccid := range col.Children {
 				if cb, ok := r.byID[ccid]; ok {
-					if s := r.renderBlock(cb); s != "" {
+					if s := r.renderContainerChild(cb); s != "" {
 						parts = append(parts, s)
 					}
 				}
 			}
-		} else if s := r.renderBlock(col); s != "" {
+		} else if s := r.renderContainerChild(col); s != "" {
 			// Malformed grid whose child is not a grid_column: keep its content.
 			parts = append(parts, s)
 		}
@@ -357,6 +358,60 @@ func (r *mdRenderer) renderGrid(b DocxBlock) string {
 		}
 	}
 	return strings.Join(cols, "\n\n---\n\n")
+}
+
+// renderContainerChild renders all descendants consumed on behalf of a
+// container. Outside containers the flat API listing still renders ordinary
+// list/paragraph children, so renderBlock itself must not recurse into them.
+func (r *mdRenderer) renderContainerChild(b DocxBlock) string {
+	if r.rendering == nil {
+		r.rendering = make(map[string]bool)
+	}
+	if r.rendering[b.BlockID] {
+		return ""
+	}
+	r.rendering[b.BlockID] = true
+	defer delete(r.rendering, b.BlockID)
+
+	own := r.renderBlock(b)
+	switch b.BlockType {
+	case BlockTypeCallout, BlockTypeGrid, BlockTypeQuoteContainer, BlockTypeView:
+		return own // these render their own descendants; table media stays in the flat pass
+	case BlockTypeTable:
+		if tableRenderable(b) {
+			return own // malformed tables must retain their descendants as loose text
+		}
+	}
+	active, parent, next := r.orderedActive, r.lastOrderedParent, r.orderedNext
+	defer func() { r.orderedActive, r.lastOrderedParent, r.orderedNext = active, parent, next }()
+	// Nested ordered runs must not share their parent's counter.
+	r.orderedActive = false
+	var parts []string
+	if own != "" {
+		parts = append(parts, own)
+	}
+	indent := ""
+	switch b.BlockType {
+	case BlockTypeBullet, BlockTypeTodo:
+		indent = "  "
+	case BlockTypeOrdered:
+		if i := strings.Index(own, ". "); i >= 0 {
+			indent = strings.Repeat(" ", i+2)
+		}
+	}
+	for _, id := range b.Children {
+		child, ok := r.byID[id]
+		if !ok {
+			continue
+		}
+		if s := r.renderContainerChild(child); s != "" {
+			if indent != "" {
+				s = indent + strings.ReplaceAll(s, "\n", "\n"+indent)
+			}
+			parts = append(parts, s)
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // nextOrderedNo returns the real number for an ordered list item. Feishu stores
@@ -651,7 +706,7 @@ func tableDescendants(blocks []DocxBlock, byID map[string]DocxBlock) map[string]
 		// Attachment/media blocks nested in a cell must still be collected (and
 		// their reference emitted) by the main loop — the table renderer only
 		// extracts text — so do not consume them, only their text structure.
-		if b.BlockType == BlockTypeFile || b.BlockType == BlockTypeImage {
+		if b.BlockType == BlockTypeFile || b.BlockType == BlockTypeImage || b.BlockType == BlockTypeBoard {
 			return
 		}
 		consumed[id] = true

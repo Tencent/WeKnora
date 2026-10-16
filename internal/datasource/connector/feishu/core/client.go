@@ -1000,19 +1000,8 @@ func WalkDriveTree(
 				dirPaths[f.Token] = name
 				walk(f.Token)
 			case "shortcut":
-				// Expand to target. target_type is never "folder" (verified), so
-				// no recursion here - the target is a regular file.
-				if f.ShortcutInfo != nil && f.ShortcutInfo.TargetToken != "" {
-					files = append(files, DriveFile{
-						Token:        f.ShortcutInfo.TargetToken,
-						Name:         f.Name,
-						Type:         f.ShortcutInfo.TargetType,
-						ParentToken:  f.ParentToken,
-						URL:          f.URL,
-						CreatedTime:  f.CreatedTime,
-						ModifiedTime: f.ModifiedTime,
-						OwnerID:      f.OwnerID,
-					})
+				if target, ok := ExpandDriveShortcut(f); ok {
+					files = append(files, target)
 				}
 			default:
 				files = append(files, f)
@@ -1022,6 +1011,20 @@ func WalkDriveTree(
 
 	walk(rootToken)
 	return files, dirPaths, failures
+}
+
+// ExpandDriveShortcut preserves the shortcut's display name and location while
+// addressing its content by the target token. Folder targets are unsupported.
+func ExpandDriveShortcut(f DriveFile) (DriveFile, bool) {
+	if f.Type != "shortcut" {
+		return f, true
+	}
+	if f.ShortcutInfo == nil || f.ShortcutInfo.TargetToken == "" || f.ShortcutInfo.TargetType == "folder" {
+		return DriveFile{}, false
+	}
+	f.Token, f.Type = f.ShortcutInfo.TargetToken, f.ShortcutInfo.TargetType
+	f.ShortcutInfo = nil
+	return f, true
 }
 
 // userNameResponse is the GET /contact/v3/users/:userID payload;

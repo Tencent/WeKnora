@@ -15,26 +15,48 @@ import (
 // engine changes. external_id stays the node token, so a move/rename lands in
 // the new folder through the existing update=delete+recreate path.
 
-// filterShortcutSubtrees drops shortcut nodes and every descendant below them
-// from a recursive listing. A shortcut mirrors its origin node, which the same
-// walk already enumerates at the origin's real location; without the filter
-// the origin document is ingested a second time under the shortcut token.
-// The engine's deletion detection converges the duplicates from earlier syncs:
-// a filtered shortcut that a previous cursor still records yields one
-// IsDeleted item, then leaves the cursor.
+// filterShortcutSubtrees drops only shortcuts whose original subtree is also
+// in this complete listing. Never follow origins outside the selected scope:
+// the shortcut can be the only accessible copy of a document.
 func filterShortcutSubtrees(nodes []core.WikiNode) []core.WikiNode {
 	byToken := make(map[string]core.WikiNode, len(nodes))
 	for _, n := range nodes {
 		byToken[n.NodeToken] = n
 	}
+	redundant := make(map[string]bool)
+	for _, n := range nodes {
+		origin, ok := byToken[n.OriginNodeID]
+		if n.NodeType != "shortcut" || !ok || origin.NodeType == "shortcut" {
+			continue
+		}
+		if n.OriginSpaceID != "" && origin.SpaceID != "" && n.OriginSpaceID != origin.SpaceID {
+			continue
+		}
+		// An origin reached only through a shortcut is not an independently
+		// enumerated copy. In particular, do not discard mutually linked trees.
+		if !underShortcut(origin, byToken) {
+			redundant[n.NodeToken] = true
+		}
+	}
 	kept := make([]core.WikiNode, 0, len(nodes))
 	for _, n := range nodes {
-		if underShortcut(n, byToken) {
+		if underFilteredNode(n, byToken, redundant) {
 			continue
 		}
 		kept = append(kept, n)
 	}
 	return kept
+}
+
+func underFilteredNode(n core.WikiNode, byToken map[string]core.WikiNode, filtered map[string]bool) bool {
+	visited := make(map[string]bool)
+	for token := n.NodeToken; token != "" && !visited[token]; token = byToken[token].ParentNodeID {
+		if filtered[token] {
+			return true
+		}
+		visited[token] = true
+	}
+	return false
 }
 
 // underShortcut reports whether n is itself a shortcut or has one on its
@@ -99,8 +121,7 @@ func buildWikiDirPaths(nodes []core.WikiNode, spacePrefix string) map[string]str
 }
 
 // prepareDirPaths rebuilds the per-resource directory table. Called from List
-// after the shortcut filter, so shortcut tokens (and their subtrees) never
-// appear as path segments.
+// after removing redundant shortcut subtrees.
 func (o *wikiOps) prepareDirPaths(nodes []core.WikiNode, spacePrefix string) {
 	o.dirPaths = buildWikiDirPaths(nodes, spacePrefix)
 }

@@ -7133,6 +7133,7 @@ export default {
     syncModeLabel: 'Sync mode',
     parseModeLabel: 'Parse mode',
     parseMode: {
+      inherit: 'Use server setting',
       blocks: 'Blocks (default)',
       export: 'Export (docx)',
     },

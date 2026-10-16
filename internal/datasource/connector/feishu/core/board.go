@@ -61,13 +61,20 @@ func (c *Client) downloadBoardAsImage(ctx context.Context, boardToken string) ([
 // through untrimmed. Border rows/columns entirely within blankTolerance of
 // the background are trimmed, keeping trimMargin pixels around the content.
 func trimBoardImage(data []byte) []byte {
+	// Read dimensions before decoding: compressed exports can describe a huge
+	// canvas even when their download fits within the byte limit.
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || (format != "png" && format != "jpeg") ||
+		cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > maxTrimPixels/cfg.Height {
+		return data
+	}
 	img, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil || (format != "png" && format != "jpeg") {
 		return data
 	}
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
-	if w <= 0 || h <= 0 || w*h > maxTrimPixels {
+	if w <= 0 || h <= 0 || w > maxTrimPixels/h {
 		return data
 	}
 	at := func(x, y int) boardPixel {

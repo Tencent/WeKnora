@@ -9,7 +9,11 @@
 -- block-level parsing, then clears the marker.
 
 UPDATE data_sources
-SET config = json_set(config, '$.settings.resync_required', json('true'))
+SET config = json_set(
+    json_set(config, '$.settings', json(
+        CASE WHEN json_type(config, '$.settings') = 'object'
+             THEN json_extract(config, '$.settings') ELSE '{}' END)),
+    '$.settings.resync_required', json('true'))
 WHERE deleted_at IS NULL
   AND type IN ('feishu', 'lark', 'feishu_drive', 'lark_drive')
   AND json_extract(config, '$.settings.resync_required') IS NULL;

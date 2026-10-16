@@ -295,6 +295,7 @@ type driveOps struct {
 	parseMode   string
 	folderNames map[string]string
 	dirPaths    map[string]string
+	rootEntries map[string][]core.DriveFile // successful shallow listings, per run
 }
 
 func (o *driveOps) List(ctx context.Context, client *core.Client, resourceID string) ([]core.DriveFile, error, error) {

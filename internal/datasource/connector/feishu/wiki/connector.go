@@ -2,6 +2,7 @@ package wiki
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -275,7 +276,11 @@ func (o *wikiOps) List(ctx context.Context, client *core.Client, resourceID stri
 		// Partial listing: nodes are still usable; the failed sub-trees are
 		// surfaced via ListFailureItems, and the sync continues.
 	}
-	nodes = filterShortcutSubtrees(nodes)
+	// On a partial listing the original's descendants may be missing even
+	// when the original node itself is present. Keep the accessible shortcut.
+	if err == nil {
+		nodes = filterShortcutSubtrees(nodes)
+	}
 	o.prepareDirPaths(nodes, o.spaceDirPrefix(ctx, client, spaceID))
 	if err != nil {
 		return nodes, err, nil
@@ -287,13 +292,20 @@ func (o *wikiOps) Token(n core.WikiNode) string   { return n.NodeToken }
 func (o *wikiOps) Title(n core.WikiNode) string   { return n.Title }
 func (o *wikiOps) ObjType(n core.WikiNode) string { return n.ObjType }
 
-// EditTime is the incremental-sync change key: the later of the object edit
-// time and the node edit time. It drives the cursor comparison only — the
-// fetched item's source_updated_at keeps tracking content edits (see
-// contentEditTime). Moves/renames are node-level operations and may
-// not bump obj_edit_time, so keying on the object alone would skip a moved
-// document forever (stale KB folder path) until its next content edit.
+// EditTime is an opaque change key including the effective destination path.
+// An ancestor rename/move changes that path without touching this node's times.
+// Timestamp-only legacy cursors refresh once; source_updated_at still uses
+// contentEditTime and never contains the path fingerprint.
 func (o *wikiOps) EditTime(n core.WikiNode) string {
+	timestamp := wikiNodeEditTime(n)
+	if dir, ok := o.dirPaths[n.NodeToken]; ok {
+		pathHash := sha256.Sum256([]byte(dir + "\x00" + core.SanitizeFileName(n.Title)))
+		return fmt.Sprintf("%s:%x", timestamp, pathHash)
+	}
+	return timestamp
+}
+
+func wikiNodeEditTime(n core.WikiNode) string {
 	obj, objErr := strconv.ParseInt(n.ObjEditTime, 10, 64)
 	node, nodeErr := strconv.ParseInt(n.NodeEditTime, 10, 64)
 	switch {

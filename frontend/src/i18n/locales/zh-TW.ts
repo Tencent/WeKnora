@@ -973,6 +973,7 @@ export default {
     logs: '日誌',
     syncModeLabel: '同步模式',
     parseMode: {
+      inherit: '使用伺服器設定',
       blocks: '塊級解析（預設）',
       export: '導出解析（docx）',
     },
