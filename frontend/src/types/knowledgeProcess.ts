@@ -79,6 +79,10 @@ export interface KnowledgeProcessOverrides {
   // derives image_attrs_enabled from it.
   image_pipeline?: string
   image_pipeline_params?: Record<string, unknown>
+  // Per-upload override of the page-straightening switch. Absent keeps the
+  // knowledge base's setting, which is what a dialog that never touched the
+  // select sends.
+  preprocess_mode?: string
   // Controls indexing for this document, without changing KB retrieval.
   image_vector_enabled?: boolean
   // Per-task attribute -> work table; merged per action key on top of the
