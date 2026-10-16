@@ -460,11 +460,17 @@ func (s *RedisSessionSandboxBindingStore) ConsumeTurnRebuild(
 }
 
 func (s *RedisSessionSandboxBindingStore) turnKey(key SessionSandboxKey) string {
-	return "weknora:sandbox:session:{" + s.hashTag(key) + "}:turn"
+	if key.IsUserScoped() {
+		return s.keyBase(key) + ":session:" + key.SessionID + ":turn"
+	}
+	return s.keyBase(key) + ":turn"
 }
 
 func (s *RedisSessionSandboxBindingStore) rewindKey(key SessionSandboxKey) string {
-	return "weknora:sandbox:session:{" + s.hashTag(key) + "}:rewind"
+	if key.IsUserScoped() {
+		return s.keyBase(key) + ":session:" + key.SessionID + ":rewind"
+	}
+	return s.keyBase(key) + ":rewind"
 }
 
 // TryLockRewind takes a distributed exclusive rewind lock for key.
@@ -596,14 +602,23 @@ func (s *RedisSessionSandboxBindingStore) renewRewindLock(
 	}
 }
 
+// keyBase is the hash-tagged prefix of every key of one machine. User keys
+// carry the allocation digest, which already includes the namespace.
+func (s *RedisSessionSandboxBindingStore) keyBase(key SessionSandboxKey) string {
+	if key.IsUserScoped() {
+		return "weknora:sandbox:user:{" + key.User.Digest(s.namespace) + "}"
+	}
+	return "weknora:sandbox:session:{" + s.hashTag(key) + "}"
+}
+
 func (s *RedisSessionSandboxBindingStore) bindingKey(key SessionSandboxKey) string {
-	return "weknora:sandbox:session:{" + s.hashTag(key) + "}:binding"
+	return s.keyBase(key.Machine()) + ":binding"
 }
 
 func (s *RedisSessionSandboxBindingStore) lockKey(key SessionSandboxKey) string {
 	// Keep the historical suffix used by the saved multi-node Cube
 	// implementation so rolling upgrades serialize on the same lock.
-	return "weknora:sandbox:session:{" + s.hashTag(key) + "}:create-lock"
+	return s.keyBase(key.Machine()) + ":create-lock"
 }
 
 func (s *RedisSessionSandboxBindingStore) hashTag(key SessionSandboxKey) string {
