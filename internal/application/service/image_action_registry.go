@@ -129,6 +129,21 @@ func ListImagePipelines() []types.ImagePipelineSpec {
 	return specs
 }
 
+// imagePreprocessor is the document-straightening capability a pipeline may
+// use before OCR: given the run's image it returns a straightened, content-tight
+// version of it. It is deliberately an interface local to this package — the
+// action must not learn which transport (gRPC, in-process, …) serves it.
+//
+// A nil preprocessor is a normal state, not an error: builds without the
+// document service wired simply OCR the original image.
+type imagePreprocessor interface {
+	// PreprocessImage returns (rectified, fallbackNeeded, err). fallbackNeeded
+	// reports "the input is not a correctable page, or the result would be
+	// worse than the original" — a verdict, not a failure, so the caller must
+	// keep its original bytes without logging an error.
+	PreprocessImage(ctx context.Context, image []byte) ([]byte, bool, error)
+}
+
 // actionHandler is the executable half of an image action. There is deliberately
 // no service receiver: every current action is a pure function of the run
 // context, so running one needs no wiring.
@@ -157,6 +172,7 @@ func init() {
 		types.ImageActionCaption:            runCaptionAction,
 		types.ImageActionObservationCaption: runObservationCaptionAction,
 		types.ImageActionOCR:                runOCRAction,
+		types.ImageActionPreprocess:         runPreprocessAction,
 	}
 	for _, spec := range types.SharedImageActions {
 		handler, bound := handlers[spec.ID]
@@ -218,9 +234,12 @@ var imageActionThinkingFields = []types.ImageFieldDef{
 // hands out no VLM handle: talking to a model is the action's business, reached
 // only through execute.
 type runContext struct {
-	payload    *types.ImageMultimodalPayload
-	model      vlm.VLM
-	imageBytes []byte
+	payload *types.ImageMultimodalPayload
+	model   vlm.VLM
+	// preprocessor straightens the page before OCR. Nil when the document
+	// service is not wired into this build — see imagePreprocessor.
+	preprocessor imagePreprocessor
+	imageBytes   []byte
 	vlmCfg     types.VLMConfig
 	imageInfo  *types.ImageInfo
 	out        types.JSONMap
@@ -485,6 +504,46 @@ func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 		r.out["caption_missing"] = true
 	}
 	resolve(false)
+	return nil
+}
+
+// runPreprocessAction straightens and crops the page before OCR runs, when the
+// attributes the observation produced say OCR is worth a pass.
+//
+// Every failure mode is a no-op by construction: the run keeps its own image
+// bytes, so OCR falls back to the original photograph without a second code
+// path. That is deliberate — a page cropper that cannot decide must not be able
+// to make the run worse than not having run it at all.
+func runPreprocessAction(ctx context.Context, r *runContext) error {
+	if r.preprocessor == nil {
+		r.out["preprocess_status"] = "unavailable"
+		return nil
+	}
+	// The same signal the OCR policy reads (contain.text) decides this: text in
+	// blocks is what a page cropper has boxes to work with, while a caption-like
+	// sparse image has too few to fit a page. The attribute's vocabulary is owned
+	// by types.TextExtent, not re-spelled here.
+	if r.imageInfo == nil || r.imageInfo.Attrs.TextExtent() != "block" {
+		r.out["preprocess_status"] = "skipped_by_attrs"
+		return nil
+	}
+	rectified, fallback, err := r.preprocessor.PreprocessImage(ctx, r.imageBytes)
+	if err != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] Preprocess failed for %s: %v", r.payload.ImageURL, err)
+		r.out["preprocess_status"] = "failed"
+		r.out["preprocess_error"] = err.Error()
+		return nil
+	}
+	if fallback || len(rectified) == 0 {
+		logger.Infof(ctx, "[ImageMultimodal] Preprocess declined for %s; OCR will use the original",
+			r.payload.ImageURL)
+		r.out["preprocess_status"] = "fallback"
+		return nil
+	}
+	// The one line that does the work: everything downstream reads imageBytes.
+	r.imageBytes = rectified
+	r.out["preprocess_status"] = "ok"
+	r.out["preprocess_chars"] = len(rectified)
 	return nil
 }
 

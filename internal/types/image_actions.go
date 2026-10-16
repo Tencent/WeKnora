@@ -24,6 +24,13 @@ const (
 	// ImageActionOCR extracts the text the image carries, when the policy wants
 	// it.
 	ImageActionOCR ImageActionID = "ocr"
+	// ImageActionPreprocess straightens and crops a photographed page before
+	// OCR runs, so the OCR pass sees an upright, content-tight image. It is
+	// pure: it talks to the local document preprocessor, never to a VLM, and
+	// a preprocessor that is absent or fails leaves the image untouched —
+	// which is why it writes a slot instead of replacing the run's image
+	// reference outright.
+	ImageActionPreprocess ImageActionID = "preprocess"
 )
 
 // ImageActionImpl records how an action does its work. The flag is not
@@ -127,6 +134,17 @@ var SharedImageActions = []ImageActionSpec{
 		// The OCR prompt is deliberately not built from the knowledge base
 		// custom instructions, so it does not read the same slot the other two
 		// does. See buildVLMOCRPrompt.
+		Version: "v1",
+	},
+	{
+		ID:   ImageActionPreprocess,
+		Impl: ImageActionImplPure,
+		// Writes the slot it may fill; whether the slot is filled depends on the
+		// observed attributes and on whether a preprocessor is reachable at all.
+		Writes: []string{"preprocessed_image"},
+		// Reads the attributes it decides on — the OCR policy's own signal
+		// (contain.text), so a pipeline that never observed cannot preprocess.
+		Reads:   []string{"attrs"},
 		Version: "v1",
 	},
 }

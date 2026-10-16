@@ -119,5 +119,12 @@ func (smartOcrPipeline) Run(ctx context.Context, r *runContext) error {
 		}
 		return nil
 	}
+	// Between the OCR decision and OCR itself: straighten the page when the
+	// attributes say there is a page to straighten. A preprocessor that is
+	// absent, declines, or fails leaves the image exactly as it was, so this
+	// step can only help — the OCR below still reads the original bytes.
+	if err := r.execute(ctx, types.ImageActionPreprocess); err != nil {
+		return err
+	}
 	return r.execute(ctx, types.ImageActionOCR)
 }
