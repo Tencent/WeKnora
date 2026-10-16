@@ -5428,6 +5428,7 @@ export default {
         enabled: 'MCPサービスを有効化しました',
         disabled: 'MCPサービスを無効化しました',
         updateStateFailed: 'MCPサービスのステータス更新に失敗しました',
+        linkedServiceMissing: 'アシスタントがリンクした MCP サービスが見つかりません。削除された可能性があります',
         testing: '{name}をテスト中...',
         noResponse: 'テストに失敗しました: サーバから応答がありません',
         testFailed: 'MCPサービスのテストに失敗しました',
@@ -5498,6 +5499,7 @@ export default {
         deleted: 'モデルを削除しました',
         deleteFailed: 'モデルの削除に失敗しました',
         builtinCannotEdit: '組み込みモデルは編集できません',
+        linkedModelMissing: 'アシスタントがリンクしたモデルが見つかりません。削除された可能性があります',
         builtinCannotDelete: '組み込みモデルは削除できません',
         builtinCannotCopy: '組み込みモデルはコピーできません',
         copied: 'モデルをコピーしました',
@@ -6510,8 +6512,15 @@ export default {
       findOperations: '操作を検索',
       runOperation: '操作を実行',
       tryAgent: 'エージェントを試す',
+      openPage: 'ページを開く',
       searchWeKnoraDocs: '製品ドキュメントを検索',
       readWeKnoraDoc: '製品ドキュメントを読む'
+    },
+    openPage: {
+      open: '開く',
+      openForm: '開いて入力',
+      endpoint: '接続先：',
+      draftHint: 'アシスタントが入力済みです。API キーなどの認証情報を入力し、確認してからご自身で保存してください。'
     },
     skillFiles: {
       heading: 'スキルファイル',

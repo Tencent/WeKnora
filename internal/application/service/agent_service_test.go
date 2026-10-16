@@ -565,7 +565,8 @@ func TestRegisterOperationToolsRequiresGrantAndWebUser(t *testing.T) {
 	}
 
 	granted := &types.AgentConfig{OperationsAgentID: types.BuiltinWeKnoraAssistantID}
-	require.ElementsMatch(t, []string{tools.ToolFindOperations, tools.ToolRunOperation}, registered(webUser, granted))
+	require.ElementsMatch(t, []string{tools.ToolFindOperations, tools.ToolRunOperation, tools.ToolOpenPage},
+		registered(webUser, granted))
 	require.Empty(t, registered(webUser, &types.AgentConfig{}))
 	require.Empty(t, registered(webUser, &types.AgentConfig{
 		OperationsAgentID: types.BuiltinWeKnoraAssistantID, SharedAgentReadOnly: true,
@@ -593,6 +594,8 @@ func TestRegisterOperationToolsOffersAgentTrialsUnlessReadOnly(t *testing.T) {
 		})
 		_, err := registry.GetTool(tools.ToolTryAgent)
 		assert.Equal(t, want, err == nil, level)
+		_, err = registry.GetTool(tools.ToolOpenPage)
+		assert.NoError(t, err, "opening a page is offered at every level, read-only included")
 	}
 }
 

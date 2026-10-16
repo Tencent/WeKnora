@@ -5428,6 +5428,7 @@ export default {
         enabled: 'MCP service enabled',
         disabled: 'MCP service disabled',
         updateStateFailed: 'Failed to update MCP service status',
+        linkedServiceMissing: 'The MCP service the assistant linked to was not found; it may have been deleted',
         testing: 'Testing {name}...',
         noResponse: 'Test failed: no response from server',
         testFailed: 'Failed to test MCP service',
@@ -5498,6 +5499,7 @@ export default {
         deleted: 'Model deleted',
         deleteFailed: 'Failed to delete model',
         builtinCannotEdit: 'Built-in models cannot be edited',
+        linkedModelMissing: 'The model the assistant linked to was not found; it may have been deleted',
         builtinCannotDelete: 'Built-in models cannot be deleted',
         builtinCannotCopy: 'Built-in models cannot be copied',
         copied: 'Model copied',
@@ -6510,8 +6512,15 @@ export default {
       findOperations: 'Find operations',
       runOperation: 'Run operation',
       tryAgent: 'Try agent',
+      openPage: 'Open page',
       searchWeKnoraDocs: 'Search product docs',
       readWeKnoraDoc: 'Read product doc'
+    },
+    openPage: {
+      open: 'Open',
+      openForm: 'Open and fill in',
+      endpoint: 'Connects to: ',
+      draftHint: 'Filled in from the assistant. Add the API key or other credentials, check it and save it yourself.'
     },
     skillFiles: {
       heading: 'Skill files',

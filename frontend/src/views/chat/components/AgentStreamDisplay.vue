@@ -216,6 +216,9 @@
                     <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                   </div>
 
+                  <OpenPageCard v-if="!event.pending && event.tool_name === 'open_page' && isAssistantPageLink(event.tool_data)"
+                    :link="event.tool_data" />
+
                   <SandboxCommandProgress
                     v-if="event.tool_name === 'shell_exec' && event.pending && event.command_output && !event.command_output.done"
                     :progress="event.command_output"
@@ -554,6 +557,9 @@
                   <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                 </div>
 
+                <OpenPageCard v-if="!event.pending && event.tool_name === 'open_page' && isAssistantPageLink(event.tool_data)"
+                  :link="event.tool_data" />
+
                 <SandboxCommandProgress
                   v-if="event.tool_name === 'shell_exec' && event.pending && event.command_output && !event.command_output.done"
                   :progress="event.command_output"
@@ -667,6 +673,8 @@ import SandboxCommandProgress from '@/components/SandboxCommandProgress.vue';
 import ToolResultRenderer from './ToolResultRenderer.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
 import McpOAuthCard from './McpOAuthCard.vue';
+import OpenPageCard from './OpenPageCard.vue';
+import { isAssistantPageLink } from '@/utils/assistantPageLink';
 import AskUserCard from './AskUserCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
@@ -807,6 +815,7 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   find_operations: 'agentStream.tools.findOperations',
   run_operation: 'agentStream.tools.runOperation',
   try_agent: 'agentStream.tools.tryAgent',
+  open_page: 'agentStream.tools.openPage',
   search_weknora_docs: 'agentStream.tools.searchWeKnoraDocs',
   read_weknora_doc: 'agentStream.tools.readWeKnoraDoc',
 };
@@ -2261,6 +2270,8 @@ const isReferenceDrawerTool = (toolName?: string | null): boolean =>
 
 const hasExpandableResults = (event: any): boolean => {
   if (isReferenceDrawerTool(event?.tool_name)) return false;
+  // Its card is the result.
+  if (event?.tool_name === 'open_page' && event.success !== false) return false;
   return hasResults(event);
 };
 

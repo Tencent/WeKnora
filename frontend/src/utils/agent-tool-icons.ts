@@ -71,6 +71,9 @@ export function getAgentToolIconName(
   if (toolName === 'try_agent') {
     return 'chat'
   }
+  if (toolName === 'open_page') {
+    return 'jump'
+  }
   if (toolName === 'search_weknora_docs') {
     return 'search'
   }

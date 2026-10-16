@@ -45,6 +45,31 @@ export interface AssistantPageContext {
   messageId?: string
 }
 
+/** A new model's form, filled in by the assistant; never carries credentials. */
+export interface AssistantModelDraft {
+  type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
+  source?: 'remote' | 'local'
+  provider?: string
+  model_name?: string
+  display_name?: string
+  base_url?: string
+}
+
+/** A new remote MCP service's form, filled in by the assistant; never carries credentials. */
+export interface AssistantMcpServiceDraft {
+  name: string
+  usage_instructions?: string
+  transport_type: 'sse' | 'http-streamable'
+  url: string
+  auth_type?: '' | 'api_key' | 'oauth'
+  api_key_header?: string
+}
+
+/** A form the user asked the assistant to open, waiting for its page. */
+export type AssistantPageDraft =
+  | { kind: 'model'; draft: AssistantModelDraft }
+  | { kind: 'mcp_service'; draft: AssistantMcpServiceDraft }
+
 export interface AssistantOpenRequest {
   /** Sent as the first message of a new conversation. */
   query?: string
@@ -293,6 +318,20 @@ export const useAssistantStore = defineStore('assistant', () => {
     return request
   }
 
+  const pageDraft = ref<AssistantPageDraft | null>(null)
+  const setPageDraft = (draft: AssistantPageDraft | null) => {
+    pageDraft.value = draft
+  }
+  /** Hands the waiting form to the page that shows it, once. */
+  function takePageDraft(kind: 'model'): AssistantModelDraft | null
+  function takePageDraft(kind: 'mcp_service'): AssistantMcpServiceDraft | null
+  function takePageDraft(kind: AssistantPageDraft['kind']) {
+    const waiting = pageDraft.value
+    if (!waiting || waiting.kind !== kind) return null
+    pageDraft.value = null
+    return waiting.draft
+  }
+
   const publishPageContext = (owner: symbol, context: Partial<AssistantPageContext>) => {
     layers.set(owner, context)
   }
@@ -334,6 +373,9 @@ export const useAssistantStore = defineStore('assistant', () => {
     setWidth,
     startNewConversation,
     takePendingRequest,
+    pageDraft,
+    setPageDraft,
+    takePageDraft,
     publishPageContext,
     retractPageContext,
     dismissPageContext,

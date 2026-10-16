@@ -303,7 +303,7 @@
 
     <!-- 模型编辑器抽屉 -->
     <ModelEditorDialog v-model:visible="showDialog" :model-type="currentModelType" :model-data="editingModel"
-      :save-model="handleModelSave" />
+      :draft="modelDraft" :save-model="handleModelSave" />
     <ModelDebugDrawer v-model:visible="showDebugDrawer" :models="allModels" />
 
   </div>
@@ -314,8 +314,9 @@ import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon, PlayCircleIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
+import { useAssistantStore, type AssistantModelDraft } from '@/stores/assistant'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
 import ModelDebugDrawer from '@/components/ModelDebugDrawer.vue'
 import {
@@ -354,6 +355,8 @@ const uiStore = useUIStore()
 const chatResources = useChatResourcesStore()
 const providersStore = useModelProvidersStore()
 const router = useRouter()
+const route = useRoute()
+const assistant = useAssistantStore()
 type ModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
 type FilterType = 'all' | ModelType
 
@@ -364,6 +367,7 @@ const usageConflict = ref<ModelUsageDetails | null>(null)
 const usageConflictModelName = ref('')
 const currentModelType = ref<ModelType>('chat')
 const editingModel = ref<any>(null)
+const modelDraft = ref<Record<string, unknown> | null>(null)
 const loading = ref(true)
 const activeTypeFilter = ref<FilterType>('all')
 const modelQuery = ref('')
@@ -920,8 +924,44 @@ function getModelType(type: ModelType): 'KnowledgeQA' | 'Embedding' | 'Rerank' |
   return typeMap[type]
 }
 
-onMounted(() => {
-  loadModels()
+// The assistant links here to edit a model (?model_id=) or to add one it
+// filled in; the user enters the key and saves.
+const openRequestedModel = () => {
+  const id = typeof route.query.model_id === 'string' ? route.query.model_id : ''
+  if (!id || loading.value) return
+  const model = allLegacyModels.value.find(m => m.id === id)
+  const { model_id: _id, ...rest } = route.query
+  void router.replace({ path: route.path, query: rest })
+  if (model) editModel(model._modelType, model)
+  else MessagePlugin.warning(t('modelSettings.toasts.linkedModelMissing'))
+}
+
+const openModelDraft = (draft: AssistantModelDraft) => {
+  if (!authStore.hasRole('admin')) return
+  currentModelType.value = draft.type
+  editingModel.value = null
+  modelDraft.value = {
+    ...(draft.source ? { source: draft.source } : {}),
+    ...(draft.provider ? { provider: draft.provider } : {}),
+    ...(draft.model_name ? { modelName: draft.model_name } : {}),
+    ...(draft.display_name ? { displayName: draft.display_name } : {}),
+    ...(draft.base_url ? { baseUrl: draft.base_url } : {}),
+  }
+  showDialog.value = true
+}
+
+watch(() => assistant.pageDraft, () => {
+  const draft = assistant.takePageDraft('model')
+  if (draft) openModelDraft(draft)
+}, { immediate: true })
+watch(showDialog, (open) => {
+  if (!open) modelDraft.value = null
+})
+watch(() => route.query.model_id, openRequestedModel)
+
+onMounted(async () => {
+  await loadModels()
+  openRequestedModel()
 })
 </script>
 

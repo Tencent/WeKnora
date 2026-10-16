@@ -1832,8 +1832,15 @@ export default {
       findOperations: '작업 찾기',
       runOperation: '작업 실행',
       tryAgent: '에이전트 시험 실행',
+      openPage: '페이지 열기',
       searchWeKnoraDocs: '제품 문서 검색',
       readWeKnoraDoc: '제품 문서 읽기'
+    },
+    openPage: {
+      open: '열기',
+      openForm: '열고 입력',
+      endpoint: '연결 대상: ',
+      draftHint: '어시스턴트가 미리 채웠습니다. API 키 등 자격 증명을 입력하고 확인한 뒤 직접 저장하세요.'
     },
     skillFiles: {
       heading: '스킬 파일',
@@ -2893,6 +2900,7 @@ export default {
       deleted: '모델이 삭제되었습니다',
       deleteFailed: '모델 삭제 실패',
       builtinCannotEdit: '기본 제공 모델은 편집할 수 없습니다',
+      linkedModelMissing: '어시스턴트가 연결한 모델을 찾을 수 없습니다. 삭제되었을 수 있습니다',
       builtinCannotDelete: '기본 제공 모델은 삭제할 수 없습니다',
       builtinCannotCopy: '기본 제공 모델은 복사할 수 없습니다',
       copied: '모델이 복사되었습니다',
@@ -2962,6 +2970,7 @@ export default {
       enabled: 'MCP 서비스가 활성화되었습니다',
       disabled: 'MCP 서비스가 비활성화되었습니다',
       updateStateFailed: 'MCP 서비스 상태 업데이트 실패',
+      linkedServiceMissing: '어시스턴트가 연결한 MCP 서비스를 찾을 수 없습니다. 삭제되었을 수 있습니다',
       testing: '{name} 테스트 중...',
       noResponse: '테스트 실패: 서버 응답 없음',
       testFailed: 'MCP 서비스 테스트 실패',

@@ -490,13 +490,16 @@ func (s *agentService) registerOperationTools(
 	}
 	catalog := operations.Builtin()
 	toolRegistry.RegisterTool(tools.NewFindOperationsTool(catalog, operationAccess))
-	toolRegistry.RegisterTool(tools.NewRunOperationTool(tools.OperationsRuntime{
+	runtime := tools.OperationsRuntime{
 		Catalog:    catalog,
 		Dispatcher: s.operationDispatcher,
 		Gate:       gate,
 		Identity:   identity,
 		Access:     operationAccess,
-	}))
+	}
+	toolRegistry.RegisterTool(tools.NewRunOperationTool(runtime))
+	// Opening a page changes nothing; the user saves any form themselves.
+	toolRegistry.RegisterTool(tools.NewOpenPageTool(runtime))
 	// A trial spends model calls and runs the agent's own tools, so it is
 	// a change for the access level to approve.
 	if s.trialRunner != nil && operationAccess.Level != types.AssistantAccessReadOnly {

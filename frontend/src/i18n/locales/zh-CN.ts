@@ -1834,8 +1834,15 @@ export default {
       findOperations: '查找操作',
       runOperation: '执行操作',
       tryAgent: '试跑智能体',
+      openPage: '打开页面',
       searchWeKnoraDocs: '搜索产品文档',
       readWeKnoraDoc: '阅读产品文档'
+    },
+    openPage: {
+      open: '打开',
+      openForm: '打开并填写',
+      endpoint: '将连接到：',
+      draftHint: '已按助手的建议预填。请补全密钥等凭据，检查后自己保存。'
     },
     skillFiles: {
       heading: '技能文件',
@@ -2895,6 +2902,7 @@ export default {
       deleted: '模型已删除',
       deleteFailed: '删除模型失败',
       builtinCannotEdit: '内置模型不能编辑',
+      linkedModelMissing: '没有找到助手链接的模型，它可能已被删除',
       builtinCannotDelete: '内置模型不能删除',
       builtinCannotCopy: '内置模型不能复制',
       copied: '模型已复制',
@@ -2964,6 +2972,7 @@ export default {
       enabled: '已启用 MCP 服务',
       disabled: '已禁用 MCP 服务',
       updateStateFailed: '更新 MCP 服务状态失败',
+      linkedServiceMissing: '没有找到助手链接的 MCP 服务，它可能已被删除',
       testing: '正在测试 {name}...',
       noResponse: '测试失败：未收到服务器响应',
       testFailed: '测试 MCP 服务失败',

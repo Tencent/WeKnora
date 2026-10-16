@@ -1832,8 +1832,15 @@ export default {
       findOperations: 'Поиск операций',
       runOperation: 'Выполнение операции',
       tryAgent: 'Пробный запуск агента',
+      openPage: 'Открыть страницу',
       searchWeKnoraDocs: 'Поиск в документации',
       readWeKnoraDoc: 'Чтение документации'
+    },
+    openPage: {
+      open: 'Открыть',
+      openForm: 'Открыть и заполнить',
+      endpoint: 'Подключение к: ',
+      draftHint: 'Заполнено ассистентом. Добавьте API-ключ или другие учётные данные, проверьте и сохраните сами.'
     },
     skillFiles: {
       heading: 'Файлы навыка',
@@ -2893,6 +2900,7 @@ export default {
       deleted: 'Модель удалена',
       deleteFailed: 'Не удалось удалить модель',
       builtinCannotEdit: 'Встроенные модели нельзя редактировать',
+      linkedModelMissing: 'Модель, на которую сослался ассистент, не найдена; возможно, она удалена',
       builtinCannotDelete: 'Встроенные модели нельзя удалить',
       builtinCannotCopy: 'Встроенные модели нельзя копировать',
       copied: 'Модель скопирована',
@@ -2962,6 +2970,7 @@ export default {
       enabled: 'Сервис MCP включён',
       disabled: 'Сервис MCP выключен',
       updateStateFailed: 'Не удалось обновить статус сервиса MCP',
+      linkedServiceMissing: 'MCP-сервис, на который сослался ассистент, не найден; возможно, он удалён',
       testing: 'Тестируем {name}...',
       noResponse: 'Тест не удался: нет ответа от сервера',
       testFailed: 'Не удалось протестировать сервис MCP',

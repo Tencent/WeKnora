@@ -722,6 +722,8 @@ interface Props {
   visible: boolean
   modelType: EditorModelType
   modelData?: ModelFormData | null
+  /** Create mode only: fields to start the new model's form with. */
+  draft?: Partial<ModelFormData> | null
   saveModel: (data: ModelFormData & { modelType?: EditorModelType }) => Promise<void>
 }
 
@@ -731,7 +733,8 @@ const providersStore = useModelProvidersStore()
 
 const props = withDefaults(defineProps<Props>(), {
   visible: false,
-  modelData: null
+  modelData: null,
+  draft: null
 })
 
 const emit = defineEmits<{
@@ -1522,6 +1525,9 @@ watch(() => props.visible, (val) => {
             : [],
         }
         legacyThinkingControlLoaded.value = !!props.modelData.thinkingControl
+      } else if (props.draft) {
+        resetForm()
+        Object.assign(formData.value, props.draft)
       } else if (typeChanged || lastOpenedModelId.value !== null || !formData.value.id) {
         // 切换类型、上次是编辑某个模型，或第一次新增 → 重置成空白
         resetForm()

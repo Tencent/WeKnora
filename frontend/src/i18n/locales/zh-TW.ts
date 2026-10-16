@@ -1834,8 +1834,15 @@ export default {
       findOperations: '查找操作',
       runOperation: '執行操作',
       tryAgent: '試跑智能體',
+      openPage: '開啟頁面',
       searchWeKnoraDocs: '搜尋產品文件',
       readWeKnoraDoc: '閱讀產品文件'
+    },
+    openPage: {
+      open: '開啟',
+      openForm: '開啟並填寫',
+      endpoint: '將連線到：',
+      draftHint: '已依助手的建議預填。請補上金鑰等憑證，檢查後自行儲存。'
     },
     skillFiles: {
       heading: '技能檔案',
@@ -2895,6 +2902,7 @@ export default {
       deleted: '模型已刪除',
       deleteFailed: '刪除模型失敗',
       builtinCannotEdit: '內建模型不能編輯',
+      linkedModelMissing: '找不到助手連結的模型，它可能已被刪除',
       builtinCannotDelete: '內建模型不能刪除',
       builtinCannotCopy: '內建模型不能複製',
       copied: '模型已複製',
@@ -2964,6 +2972,7 @@ export default {
       enabled: '已啟用 MCP 服務',
       disabled: '已停用 MCP 服務',
       updateStateFailed: '更新 MCP 服務狀態失敗',
+      linkedServiceMissing: '找不到助手連結的 MCP 服務，它可能已被刪除',
       testing: '正在測試 {name}...',
       noResponse: '測試失敗：未收到伺服器回應',
       testFailed: '測試 MCP 服務失敗',
