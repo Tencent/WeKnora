@@ -194,7 +194,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "回答 Agent 运行中发起的交互（ask_user 提问或工具审批）。\nkind 须与交互一致，response 为该类型的回答 JSON（不接受未知字段）：\nask_user 为 {selected?, values?, text?, declined?}；\ntool_approval 为 {approved: bool, modified_args?: object, reason?: string}。\n返回 resumed=true 表示运行已挂起并在本次回答后恢复，客户端需重新接入该消息的事件流",
+                "description": "回答 Agent 运行中发起的交互（ask_user 提问、工具审批，或由浏览器自动应答的页面读写）。\nkind 须与交互一致，response 为该类型的回答 JSON（不接受未知字段）：\nask_user 为 {selected?, values?, text?, declined?}；\ntool_approval 为 {approved: bool, modified_args?: object, reason?: string, allow_in_session?: bool}；\npage_action 为 {declined?, error?, location?, snapshot?, applied?: [{ref, label?, summary?}],\nstayed?, return_path?}。\n返回 resumed=true 表示运行已挂起并在本次回答后恢复，客户端需重新接入该消息的事件流",
                 "consumes": [
                     "application/json"
                 ],
@@ -5926,6 +5926,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "知识库ID",
                         "name": "id",
                         "in": "path",
@@ -5971,7 +5972,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "knowledge_base.search",
+                    "max_items": 30,
+                    "method": "post",
+                    "risk": "probe"
+                },
+                "x-agent-hint": "Runs the raw vector and keyword recall of one knowledge base, without rerank, and returns the chunks it finds in rank order, so you can see why something is or is not found. match_type 0 is a vector hit, 1 a keyword hit; score ranks the merged results and is not a similarity. Each threshold filters its own retriever before merging: leave them out to see every candidate, or set them to an agent's vector_threshold and keyword_threshold to see what passes. For answering a question, use search_knowledge instead."
             },
             "post": {
                 "security": [
@@ -5996,6 +6004,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "知识库ID",
                         "name": "id",
                         "in": "path",
@@ -6041,7 +6050,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "knowledge_base.search",
+                    "max_items": 30,
+                    "method": "post",
+                    "risk": "probe"
+                },
+                "x-agent-hint": "Runs the raw vector and keyword recall of one knowledge base, without rerank, and returns the chunks it finds in rank order, so you can see why something is or is not found. match_type 0 is a vector hit, 1 a keyword hit; score ranks the merged results and is not a similarity. Each threshold filters its own retriever before merging: leave them out to see every candidate, or set them to an agent's vector_threshold and keyword_threshold to see what passes. For answering a question, use search_knowledge instead."
             }
         },
         "/knowledge-bases/{id}/images": {
@@ -8525,7 +8541,7 @@ const docTemplate = `{
                     "risk": "write",
                     "target": "knowledge_base.get"
                 },
-                "x-agent-hint": "Sets the same tags on up to 20 documents in one knowledge base, replacing the tags they have now. tag_ids come from knowledge_base.list_tags; an empty tag_ids clears every tag. It does not delete documents."
+                "x-agent-hint": "Sets the same tags on up to 20 documents in one knowledge base, replacing the tags they have now. To add or remove one tag, read each document's tags with knowledge.get or knowledge.list first and pass the full resulting list. tag_ids come from knowledge_base.list_tags; an empty tag_ids clears every tag. It does not delete documents."
             }
         },
         "/knowledge/{id}": {
@@ -10717,7 +10733,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPService"
+                            "$ref": "#/definitions/internal_handler.CreateMCPServiceRequest"
                         }
                     }
                 ],
@@ -10746,7 +10762,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "mcp_service.create",
+                    "label_param": "name",
+                    "risk": "write",
+                    "role": "admin"
+                },
+                "x-agent-hint": "Adds a remote MCP service (SSE or HTTP Streamable) and turns it on. Take the URL from the user or the service's own documentation. It never carries a key or token: for a service that needs one, set auth_type (api_key, bearer or oauth) and afterwards give the user open_page with mcp_service_id so they enter the credential or authorize. Then check it with mcp_service.test."
             }
         },
         "/mcp-services/oauth/callback": {
@@ -10868,6 +10891,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "mcp_service_id",
                         "description": "MCP服务ID",
                         "name": "id",
                         "in": "path",
@@ -10879,7 +10903,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/internal_handler.UpdateMCPServiceRequest"
                         }
                     }
                 ],
@@ -10908,7 +10932,15 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "mcp_service.update",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "admin",
+                    "target": "mcp_service.get"
+                },
+                "x-agent-hint": "Changes the listed settings of an MCP service; a field left out is kept. Turning a service off stops every agent from using it. Changing url or transport_type drops the API key, token and custom headers saved for the old address, so give the user open_page with mcp_service_id to enter them again; a service that uses OAuth cannot be moved here. Built-in services cannot be changed."
             },
             "delete": {
                 "security": [
@@ -10933,6 +10965,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "mcp_service_id",
                         "description": "MCP服务ID",
                         "name": "id",
                         "in": "path",
@@ -10952,7 +10985,15 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "mcp_service.delete",
+                    "label": "name",
+                    "risk": "destructive",
+                    "role": "admin",
+                    "target": "mcp_service.get"
+                },
+                "x-agent-hint": "Deletes an MCP service with its saved credentials; agents that used it lose its tools. Cannot be undone; built-in services cannot be deleted."
             }
         },
         "/mcp-services/{id}/credentials": {
@@ -11500,6 +11541,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "mcp_service_id",
                         "description": "MCP服务ID",
                         "name": "id",
                         "in": "path",
@@ -11531,7 +11573,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "mcp_service.test",
+                    "risk": "probe",
+                    "role": "admin"
+                },
+                "x-agent-hint": "Connects to an MCP service with its saved settings and reports whether it works. success false comes with the reason in message; oauth_required means the user must authorize it in the MCP settings. List its tools with mcp_service.list_tools."
             }
         },
         "/mcp-services/{id}/tool-approvals/{tool_name}": {
@@ -11627,6 +11675,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "mcp_service_id",
                         "description": "MCP服务ID",
                         "name": "id",
                         "in": "path",
@@ -11661,7 +11710,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "mcp_service.list_tools",
+                    "max_items": 200,
+                    "risk": "read"
+                },
+                "x-agent-hint": "Lists the tools an MCP service offers, asking the service itself. Use it to check that a service can do what an agent needs before binding it. An error means the service is unreachable; mcp_service.test says why."
             }
         },
         "/me/env-vars": {
@@ -12790,7 +12845,12 @@ const docTemplate = `{
                             ]
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "message.chat_history_stats",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Whether the workspace indexes conversations for search by meaning, and how many messages are indexed. When it is off, message.search only matches exact words; the setting is under settings section chathistory."
             }
         },
         "/messages/search": {
@@ -12850,7 +12910,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "message.search",
+                    "max_items": 20,
+                    "risk": "probe",
+                    "root": "data.items"
+                },
+                "x-agent-hint": "Finds exchanges in the user's own past conversations by what was said, each with its session_id. Matching is by meaning only when message indexing is on (see message.chat_history_stats); otherwise words must appear verbatim, so retry with the user's exact wording before concluding nothing matches."
             }
         },
         "/messages/{session_id}/load": {
@@ -12877,20 +12944,25 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": true,
                         "description": "会话ID",
                         "name": "session_id",
                         "in": "path",
                         "required": true
                     },
                     {
+                        "minimum": 1,
                         "type": "integer",
                         "default": 20,
+                        "x-agent": true,
+                        "x-agent-maximum": "20",
                         "description": "返回数量",
                         "name": "limit",
                         "in": "query"
                     },
                     {
                         "type": "string",
+                        "x-agent": true,
                         "description": "在此时间之前的消息（RFC3339Nano格式）",
                         "name": "before_time",
                         "in": "query"
@@ -12935,7 +13007,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "message.list",
+                    "risk": "read"
+                },
+                "x-agent-hint": "The latest messages of one of the user's conversations, oldest first. For earlier ones, pass the created_at of the first message as before_time."
             }
         },
         "/messages/{session_id}/{id}": {
@@ -13046,7 +13123,7 @@ const docTemplate = `{
                     "max_items": 200,
                     "risk": "read"
                 },
-                "x-agent-hint": "Lists the workspace's models by name and type. An agent's chat model must be of type KnowledgeQA. Endpoints and keys are not shown; the user manages models in the settings."
+                "x-agent-hint": "Lists the workspace's models by name, type and provider. An agent's chat model must be of type KnowledgeQA. base_url is shown only to users who may manage integrations and is empty for builtin models; keys are never shown. The provider is an id for model.get_provider."
             },
             "post": {
                 "security": [
@@ -13189,7 +13266,15 @@ const docTemplate = `{
                 "summary": "获取模型厂商列表",
                 "parameters": [
                     {
+                        "enum": [
+                            "chat",
+                            "embedding",
+                            "rerank",
+                            "vllm",
+                            "asr"
+                        ],
                         "type": "string",
+                        "x-agent": true,
                         "description": "模型类型 (chat, embedding, rerank, vllm, asr)",
                         "name": "model_type",
                         "in": "query"
@@ -13217,7 +13302,104 @@ const docTemplate = `{
                             ]
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "model.list_providers",
+                    "max_items": 200,
+                    "risk": "read"
+                },
+                "x-agent-hint": "Lists the providers of the model catalog, including vendors an admin added, by id and name. Use the id as model_draft.provider in open_page, and read one provider's models with model.get_provider."
+            }
+        },
+        "/models/providers/{provider}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "返回一个厂商的定义及其模型目录，可按模型类型与关键词过滤模型",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型管理"
+                ],
+                "summary": "获取单个模型厂商",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "provider",
+                        "description": "厂商标识",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "chat",
+                            "embedding",
+                            "rerank",
+                            "vllm",
+                            "asr"
+                        ],
+                        "type": "string",
+                        "x-agent": true,
+                        "description": "模型类型 (chat, embedding, rerank, vllm, asr)",
+                        "name": "model_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "x-agent": true,
+                        "description": "按模型 ID 或名称过滤（不区分大小写）",
+                        "name": "keyword",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "厂商详情",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.ModelProviderDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "厂商不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "model.get_provider",
+                    "risk": "read"
+                },
+                "x-agent-hint": "One catalog provider with the models it offers: model_name is what model_draft.model_name takes in open_page. Pass model_type to keep one kind, and keyword when the list is truncated."
             }
         },
         "/models/weknoracloud/status": {
@@ -13405,6 +13587,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "model_id",
                         "description": "模型ID",
                         "name": "id",
                         "in": "path",
@@ -13430,7 +13613,101 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "model.delete",
+                    "label": "name",
+                    "risk": "destructive",
+                    "role": "admin",
+                    "target": "model.get"
+                },
+                "x-agent-hint": "Deletes a model with its saved key. Refused while a knowledge base, agent or long-term memory still uses it; the error names them, so tell the user what to switch first. Cannot be undone."
+            },
+            "patch": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "只修改显示名称和描述；接入配置与凭据保持不变。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型管理"
+                ],
+                "summary": "修改模型显示信息",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "model_id",
+                        "description": "模型ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "要修改的字段",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.PatchModelRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "更新后的模型",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.ModelResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "内置模型只能由系统管理员修改",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "模型不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "model.update",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "admin",
+                    "target": "model.get"
+                },
+                "x-agent-hint": "Renames a model for display or changes its description; its endpoint, key and settings stay as they are. To change those, give the user open_page with model_id."
             }
         },
         "/models/{id}/copy": {
@@ -15027,7 +15304,8 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Sandbox config ID",
+                        "x-agent": "sandbox_config_id",
+                        "description": "Sandbox config ID: the agent's sandbox_config_id, or host on WeKnora Lite",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -15068,7 +15346,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "skill.list_installed",
+                    "max_items": 200,
+                    "risk": "read",
+                    "role": "admin"
+                },
+                "x-agent-hint": "Lists every skill installed on a sandbox, including disabled, failed and still-installing ones, with the ids that skill.set_enabled and skill.uninstall take. status ready means it can run; missing_envs names values the user must set in the skill settings before it works. Use skill.list for what an agent can pick."
             },
             "post": {
                 "security": [
@@ -15094,7 +15379,8 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Sandbox config ID",
+                        "x-agent": "sandbox_config_id",
+                        "description": "Sandbox config ID: the agent's sandbox_config_id, or host on WeKnora Lite",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -15118,8 +15404,19 @@ const docTemplate = `{
                     "202": {
                         "description": "Install accepted",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.skillAccepted"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "400": {
@@ -15141,7 +15438,15 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "always_confirm": true,
+                    "id": "skill.install",
+                    "label_param": "source",
+                    "risk": "write",
+                    "role": "admin"
+                },
+                "x-agent-hint": "Installs a public skill onto a sandbox from its source. When the user pastes install instructions from a skill hub (a command such as npx skills add owner/repo --skill name, a clawhub install line, or a page link), turn them into one source: a github.com / gitlab.com / skills.sh / clawhub / skillhub page URL, @owner/slug or a bare slug for ClawHub, skills-sh:owner/repo/slug, or a direct zip or SKILL.md URL. Bare owner/slug is ambiguous and rejected; ask which hub it is from. Never run their commands or ask for keys. The install runs fetched code as root in the sandbox image, so it always asks the user. It takes minutes: tell the user it started, then check it with skill.get_installed. Enable it for an agent with agent.update selected_skills once it is ready."
             }
         },
         "/sandbox-configs/{id}/skills/{skillId}": {
@@ -15165,6 +15470,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "sandbox_config_id",
                         "description": "Sandbox config ID",
                         "name": "id",
                         "in": "path",
@@ -15172,7 +15478,8 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Skill ID",
+                        "x-agent": "skill_id",
+                        "description": "Skill ID from skill.list_installed",
                         "name": "skillId",
                         "in": "path",
                         "required": true
@@ -15210,7 +15517,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "skill.get_installed",
+                    "risk": "read",
+                    "role": "admin"
+                },
+                "x-agent-hint": "Returns one installed skill. After skill.install, read it to follow the install: status moves from installing to ready or failed, and error says why it failed."
             },
             "delete": {
                 "security": [
@@ -15232,6 +15545,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "sandbox_config_id",
                         "description": "Sandbox config ID",
                         "name": "id",
                         "in": "path",
@@ -15239,7 +15553,8 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Skill ID",
+                        "x-agent": "skill_id",
+                        "description": "Skill ID from skill.list_installed",
                         "name": "skillId",
                         "in": "path",
                         "required": true
@@ -15249,8 +15564,19 @@ const docTemplate = `{
                     "202": {
                         "description": "Removal accepted",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.skillAccepted"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "401": {
@@ -15266,7 +15592,15 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "skill.uninstall",
+                    "label": "name",
+                    "risk": "destructive",
+                    "role": "admin",
+                    "target": "skill.get_installed"
+                },
+                "x-agent-hint": "Removes a skill from a sandbox image; agents on that sandbox can no longer use it. The rebuild takes minutes. To only hide it, use skill.set_enabled instead."
             },
             "patch": {
                 "security": [
@@ -15291,6 +15625,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "sandbox_config_id",
                         "description": "Sandbox config ID",
                         "name": "id",
                         "in": "path",
@@ -15298,7 +15633,8 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Skill ID",
+                        "x-agent": "skill_id",
+                        "description": "Skill ID from skill.list_installed",
                         "name": "skillId",
                         "in": "path",
                         "required": true
@@ -15351,7 +15687,15 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "skill.set_enabled",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "admin",
+                    "target": "skill.get_installed"
+                },
+                "x-agent-hint": "Shows or hides an installed skill for every agent on that sandbox; the files stay installed. Environment values are not set here: the user enters them in the skill settings."
             }
         },
         "/sandbox-configs/{id}/skills/{skillId}/files": {
@@ -15790,13 +16134,20 @@ const docTemplate = `{
                 "summary": "获取会话列表",
                 "parameters": [
                     {
+                        "minimum": 1,
                         "type": "integer",
+                        "x-agent": true,
+                        "x-agent-maximum": "10000",
                         "description": "页码",
                         "name": "page",
                         "in": "query"
                     },
                     {
+                        "maximum": 1000,
+                        "minimum": 1,
                         "type": "integer",
+                        "x-agent": true,
+                        "x-agent-maximum": "20",
                         "description": "每页数量",
                         "name": "page_size",
                         "in": "query"
@@ -15806,12 +16157,14 @@ const docTemplate = `{
                             "assistant"
                         ],
                         "type": "string",
+                        "x-agent": true,
                         "description": "会话类型：空值仅普通会话；assistant 仅当前用户的助手会话",
                         "name": "kind",
                         "in": "query"
                     },
                     {
                         "type": "string",
+                        "x-agent": true,
                         "description": "标题模糊搜索",
                         "name": "keyword",
                         "in": "query"
@@ -15833,8 +16186,7 @@ const docTemplate = `{
                     "200": {
                         "description": "会话列表",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/internal_handler_session.sessionListResponse"
                         }
                     },
                     "400": {
@@ -15843,7 +16195,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "session.list",
+                    "risk": "read"
+                },
+                "x-agent-hint": "The user's own conversations, pinned ones first, then most recently active. keyword matches titles only, which are often auto-generated; to find a conversation by what was said, use message.search. Read one with message.list."
             },
             "post": {
                 "security": [
@@ -17229,11 +17586,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.SkillCatalogView"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "skill.list_catalog",
+                    "max_items": 200,
+                    "risk": "read"
+                },
+                "x-agent-hint": "Lists the skills already added to this workspace, with the sandbox config ids each is installed_on. skill.install_catalog puts one onto more sandboxes without fetching it again; for a skill not listed here, use skill.install with its source."
             },
             "post": {
                 "description": "Records a skill without installing it. Send a zip as multipart field \"file\", or JSON {\"source\":\"...\"}.",
@@ -17260,6 +17637,64 @@ const docTemplate = `{
             }
         },
         "/skills/catalog/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Returns one skill definition of this workspace and which sandbox configs it is installed on.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Skills"
+                ],
+                "summary": "Get a workspace skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "catalog_skill_id",
+                        "description": "Catalog skill ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.SkillCatalogView"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Skill not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "skill.get_catalog",
+                    "risk": "read"
+                }
+            },
             "delete": {
                 "description": "Refused while any sandbox still has an installation of this skill.",
                 "tags": [
@@ -17378,6 +17813,14 @@ const docTemplate = `{
         },
         "/skills/catalog/{id}/install": {
             "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Runs the existing snapshot install onto each named sandbox config.",
                 "consumes": [
                     "application/json"
@@ -17392,21 +17835,40 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "catalog_skill_id",
                         "description": "Catalog skill ID",
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "description": "Target sandboxes",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.catalogInstallRequest"
+                        }
                     }
                 ],
                 "responses": {
                     "202": {
                         "description": "Accepted",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/internal_handler.catalogInstallResponse"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "always_confirm": true,
+                    "id": "skill.install_catalog",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "admin",
+                    "root": "",
+                    "target": "skill.get_catalog"
+                },
+                "x-agent-hint": "Installs a workspace skill from skill.list_catalog onto sandboxes, reusing its stored bundle. Like skill.install it runs as root in each image and always asks the user, and each install takes minutes; check them with skill.list_installed."
             }
         },
         "/storage-backends": {
@@ -21837,6 +22299,93 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_application_service.SkillCatalogInstallView": {
+            "type": "object",
+            "properties": {
+                "bundle_sha256": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "sandbox_config_id": {
+                    "type": "string"
+                },
+                "sandbox_config_name": {
+                    "type": "string"
+                },
+                "sandbox_type": {
+                    "type": "string"
+                },
+                "served": {
+                    "description": "Served is set while a newer install of this skill is in flight or has\nfailed and the image still runs the previous version.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.SkillServedInfo"
+                        }
+                    ]
+                },
+                "skill_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_application_service.SkillCatalogView": {
+            "type": "object",
+            "properties": {
+                "bundle_sha256": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "id": {
+                    "type": "string",
+                    "x-agent": "catalog_skill_id"
+                },
+                "installations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.SkillCatalogInstallView"
+                    }
+                },
+                "installed_on": {
+                    "description": "InstalledOn lists the sandbox config ids of Installations.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true
+                },
+                "name": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string",
+                    "x-agent": true
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_application_service.SkillEnvGroup": {
             "type": "object",
             "properties": {
@@ -22239,7 +22788,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "auth_type": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthType"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthType"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "client_id": {
                     "type": "string"
@@ -22279,7 +22833,12 @@ const docTemplate = `{
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig"
                 },
                 "auth_config": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.MCPAuthConfigResponse"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.MCPAuthConfigResponse"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "catalog": {
                     "description": "Catalog is the persisted tool-directory summary for list cards.\nOmitted when this principal has never synchronized the service.",
@@ -22357,7 +22916,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "base_url": {
-                    "type": "string"
+                    "description": "BaseURL is empty for callers who may not view integration detail, and\nfor builtin models; see NewModelResponse.",
+                    "type": "string",
+                    "x-agent": true
                 },
                 "context_window": {
                     "type": "integer"
@@ -22375,7 +22936,10 @@ const docTemplate = `{
                     "type": "object",
                     "additionalProperties": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true,
+                    "x-agent-detail": true,
+                    "x-agent-keys": "remote_model_name"
                 },
                 "interface_type": {
                     "type": "string"
@@ -22390,7 +22954,8 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "provider": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "spec": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSpecOverride"
@@ -22409,7 +22974,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_models_runtime.Capabilities"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "created_at": {
                     "type": "string"
@@ -22446,7 +23013,12 @@ const docTemplate = `{
                     "x-agent": true
                 },
                 "parameters": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.ModelParametersDTO"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.ModelParametersDTO"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "source": {
                     "allOf": [
@@ -23012,22 +23584,31 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "api": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_models_api.API"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_models_api.API"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "cataloged": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "context_window": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "input": {
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true
                 },
                 "max_output_tokens": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "max_tokens_field": {
                     "type": "string"
@@ -23036,7 +23617,8 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "reasoning": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "thinking_format": {
                     "type": "string"
@@ -23045,7 +23627,8 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_models_api.ReasoningEffort"
-                    }
+                    },
+                    "x-agent": true
                 }
             }
         },
@@ -23665,11 +24248,13 @@ const docTemplate = `{
             "properties": {
                 "embedding_model_id": {
                     "description": "ID of the embedding model used",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "enabled": {
                     "description": "Whether the chat history KB is configured and enabled",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "has_indexed_messages": {
                     "description": "Whether there are any indexed messages (used by frontend to lock embedding model)",
@@ -23677,7 +24262,8 @@ const docTemplate = `{
                 },
                 "indexed_message_count": {
                     "description": "Number of indexed message entries (Knowledge count)",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "knowledge_base_id": {
                     "description": "ID of the knowledge base used for chat history",
@@ -24011,7 +24597,7 @@ const docTemplate = `{
                     "x-agent": true
                 },
                 "enable_parent_child": {
-                    "description": "EnableParentChild splits into large parent chunks and small child chunks. Search matches a child and returns its parent.",
+                    "description": "EnableParentChild splits into large parent chunks and small child chunks.\nSearch matches a child and returns its parent.",
                     "type": "boolean",
                     "x-agent": true
                 },
@@ -24048,7 +24634,7 @@ const docTemplate = `{
                     "x-agent-maximum": "20"
                 },
                 "strategy": {
-                    "description": "Strategy selects how documents are split: auto, heading, heuristic, recursive or legacy. Empty keeps the server default.",
+                    "description": "Strategy selects how documents are split: auto, heading, heuristic,\nrecursive or legacy. Empty keeps the server default.",
                     "type": "string",
                     "enum": [
                         "auto",
@@ -26382,7 +26968,8 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeTag"
-                    }
+                    },
+                    "x-agent": true
                 },
                 "tenant_id": {
                     "description": "Workspace ID",
@@ -26613,7 +27200,7 @@ const docTemplate = `{
                     ]
                 },
                 "summary_model_id": {
-                    "description": "Summary model ID. model.list returns the ids. Used for summaries, and as the default for auto-tagging and the AI description.",
+                    "description": "Summary model ID. model.list returns the ids. Used for summaries, and as\nthe default for auto-tagging and the AI description.",
                     "type": "string",
                     "x-agent": "summary_model_id"
                 },
@@ -27443,54 +28030,6 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_WeKnora_internal_types.MCPAuthConfig": {
-            "type": "object",
-            "properties": {
-                "api_key": {
-                    "type": "string"
-                },
-                "api_key_header": {
-                    "description": "APIKeyHeader is the header name that carries APIKey when AuthType is\napi_key. Empty defaults to \"X-API-Key\". This is non-secret structural\nconfig (the secret is APIKey), so it is not encrypted and is safe to echo\nback in responses. It lets services that expect the key in a different\nheader (e.g. the raw token directly in \"Authorization\") work without\nresorting to plaintext custom headers.",
-                    "type": "string"
-                },
-                "auth_server_metadata_url": {
-                    "description": "AuthServerMetadataURL optionally pins the OAuth authorization server\nmetadata URL. When empty, the server is discovered automatically from\nthe MCP URL (RFC 9728 / RFC 8414).",
-                    "type": "string"
-                },
-                "auth_type": {
-                    "description": "AuthType selects the authentication strategy. Empty (\"\") is treated as\nnone for backward compatibility with rows that pre-date this field.",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthType"
-                        }
-                    ]
-                },
-                "client_id": {
-                    "description": "ClientID optionally names an OAuth client registered with the\nauthorization server in advance. When set it is used instead of dynamic\nclient registration, for servers that offer no registration endpoint or\nallow grants only to clients an administrator registered. Non-secret.",
-                    "type": "string"
-                },
-                "client_secret": {
-                    "description": "ClientSecret is the secret of ClientID for a confidential client.\nSecret: encrypted at rest like APIKey and Token, never returned, and\nchanged only through the credentials subresource after creation.",
-                    "type": "string"
-                },
-                "custom_headers": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "scopes": {
-                    "description": "Scopes are the OAuth scopes requested during authorization. Optional.",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "token": {
-                    "type": "string"
-                }
-            }
-        },
         "github_com_Tencent_WeKnora_internal_types.MCPAuthType": {
             "type": "string",
             "enum": [
@@ -27535,75 +28074,6 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_WeKnora_internal_types.MCPService": {
-            "type": "object",
-            "properties": {
-                "advanced_config": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig"
-                },
-                "auth_config": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthConfig"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "deleted_at": {
-                    "$ref": "#/definitions/gorm.DeletedAt"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "enabled": {
-                    "type": "boolean"
-                },
-                "env_vars": {
-                    "description": "Environment variables for stdio",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPEnvVars"
-                        }
-                    ]
-                },
-                "headers": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPHeaders"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "is_builtin": {
-                    "description": "Whether this is a builtin MCP service (visible to all workspaces)",
-                    "type": "boolean"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "stdio_config": {
-                    "description": "Required for stdio transport",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPStdioConfig"
-                        }
-                    ]
-                },
-                "tenant_id": {
-                    "type": "integer"
-                },
-                "transport_type": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPTransportType"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "url": {
-                    "description": "Optional: required for SSE/HTTP Streamable",
-                    "type": "string"
-                },
-                "usage_instructions": {
-                    "description": "UsageInstructions is maintained locally and is not overwritten by directory refresh.",
-                    "type": "string"
-                }
-            }
-        },
         "github_com_Tencent_WeKnora_internal_types.MCPStdioConfig": {
             "type": "object",
             "properties": {
@@ -27627,11 +28097,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "message": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-runes": "500"
                 },
                 "oauth_required": {
                     "description": "OAuthRequired is true when the connection failed because the server\nrequires OAuth authorization (RFC 9728), even though the service was not\nconfigured for OAuth. The UI uses it to guide the user to switch the auth\nstrategy to OAuth.",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "resources": {
                     "type": "array",
@@ -27640,7 +28113,8 @@ const docTemplate = `{
                     }
                 },
                 "success": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "tools": {
                     "type": "array",
@@ -27654,18 +28128,22 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "description": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-runes": "500"
                 },
                 "inputSchema": {
                     "description": "JSON Schema for tool parameters",
                     "type": "object"
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "require_approval": {
                     "description": "RequireApproval when true: agent execution pauses until the user approves in UI (issue #1173).",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 }
             }
         },
@@ -28102,11 +28580,16 @@ const docTemplate = `{
                 },
                 "content": {
                     "description": "Message text content",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-runes": "1500",
+                    "x-agent-response": true
                 },
                 "created_at": {
                     "description": "Message creation timestamp",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "deleted_at": {
                     "description": "Soft delete timestamp",
@@ -28118,7 +28601,9 @@ const docTemplate = `{
                 },
                 "id": {
                     "description": "Unique identifier for the message",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "message_id",
+                    "x-agent-response": true
                 },
                 "images": {
                     "description": "Attached images with OCR/Caption text (for user messages)",
@@ -28167,11 +28652,15 @@ const docTemplate = `{
                 },
                 "request_id": {
                     "description": "Request identifier for tracking API requests",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "role": {
                     "description": "Message role: \"user\", \"assistant\", \"system\"",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "run_state": {
                     "description": "RunState refines an incomplete message: MessageRunStateAwaitingInput\nmeans the run ended suspended on a prompt instead of still generating.\nEmpty means IsCompleted alone describes the message.",
@@ -28316,23 +28805,30 @@ const docTemplate = `{
             "properties": {
                 "answer_content": {
                     "description": "Assistant answer content (role=assistant), may be empty if only Q matched",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-runes": "1000"
                 },
                 "created_at": {
                     "description": "Timestamp of the earliest message in the group",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "match_type": {
                     "description": "How this result was matched: \"keyword\", \"vector\", or \"hybrid\"",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "query_content": {
                     "description": "User query content (role=user)",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-runes": "600"
                 },
                 "request_id": {
                     "description": "The request_id that groups Q\u0026A together",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "score": {
                     "description": "Best score among the matched messages in this group",
@@ -28340,10 +28836,12 @@ const docTemplate = `{
                 },
                 "session_id": {
                     "description": "Session info",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "session_title": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -28359,7 +28857,8 @@ const docTemplate = `{
                 },
                 "total": {
                     "description": "Total number of results",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 }
             }
         },
@@ -29216,6 +29715,41 @@ const docTemplate = `{
                 "knowledge_id": {
                     "type": "string"
                 },
+                "mcp_service_id": {
+                    "type": "string"
+                },
+                "message_id": {
+                    "type": "string"
+                },
+                "model_id": {
+                    "type": "string"
+                },
+                "page": {
+                    "type": "string"
+                },
+                "section": {
+                    "description": "part of the page in view, e.g. an editor tab",
+                    "type": "string"
+                },
+                "selection": {
+                    "description": "Selection is the text the user selected on the page. Assistant only.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.PageSelection"
+                        }
+                    ]
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "description": "Title is the page's name as the client's navigation shows it, e.g.\n\"Agents\"; it names pages without an identifier. Assistant only.",
+                    "type": "string"
+                },
+                "view": {
+                    "description": "View is the title of the dialog or drawer open over the page, as the\npage shows it. Assistant only.",
+                    "type": "string"
+                },
                 "wiki_issue_ids": {
                     "type": "array",
                     "items": {
@@ -29223,6 +29757,29 @@ const docTemplate = `{
                     }
                 },
                 "wiki_slug": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.PageSelection": {
+            "type": "object",
+            "properties": {
+                "end_line": {
+                    "type": "integer"
+                },
+                "field": {
+                    "description": "the field's label",
+                    "type": "string"
+                },
+                "ref": {
+                    "description": "the field's read_page ref",
+                    "type": "string"
+                },
+                "start_line": {
+                    "description": "1-based, multi-line fields only",
+                    "type": "integer"
+                },
+                "text": {
                     "type": "string"
                 }
             }
@@ -30180,13 +30737,19 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "disable_keywords_match": {
-                    "type": "boolean"
+                    "description": "Turns keyword matching off, leaving vector matching only.",
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "disable_vector_match": {
-                    "type": "boolean"
+                    "description": "Turns vector matching off, leaving keyword matching only.",
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "keyword_threshold": {
-                    "type": "number"
+                    "description": "Minimum keyword score a hit needs; 0 keeps every keyword hit.",
+                    "type": "number",
+                    "x-agent": true
                 },
                 "knowledge_base_ids": {
                     "description": "KnowledgeBaseIDs overrides the single KB ID passed to HybridSearch,\nallowing a single retrieval call to span multiple KBs that share the\nsame embedding model. When empty, HybridSearch uses its own id parameter.",
@@ -30196,13 +30759,19 @@ const docTemplate = `{
                     }
                 },
                 "knowledge_ids": {
+                    "description": "Limits the search to these documents of the knowledge base.",
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true,
+                    "x-agent-maximum": "20"
                 },
                 "match_count": {
-                    "type": "integer"
+                    "description": "Number of chunks to return; 0 uses the default.",
+                    "type": "integer",
+                    "x-agent": true,
+                    "x-agent-maximum": "30"
                 },
                 "only_recommended": {
                     "type": "boolean"
@@ -30215,7 +30784,9 @@ const docTemplate = `{
                 },
                 "query_text": {
                     "description": "QueryText is required unless query_embedding is provided, keyword matching is disabled,\nand vector matching remains enabled.",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-required": true
                 },
                 "rerank": {
                     "description": "Rerank, when present and enabled, reranks the fused candidates before\ntruncating to MatchCount. Only the hybrid-search API reads it; internal\ncallers rerank on their own.",
@@ -30243,7 +30814,9 @@ const docTemplate = `{
                     }
                 },
                 "vector_threshold": {
-                    "type": "number"
+                    "description": "Minimum vector similarity a hit needs; 0 keeps every vector hit.",
+                    "type": "number",
+                    "x-agent": true
                 }
             }
         },
@@ -30252,7 +30825,8 @@ const docTemplate = `{
             "properties": {
                 "chunk_index": {
                     "description": "Chunk index",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "chunk_metadata": {
                     "description": "ChunkMetadata stores chunk-level metadata (e.g., generated questions)",
@@ -30260,11 +30834,14 @@ const docTemplate = `{
                 },
                 "chunk_type": {
                     "description": "Chunk 类型",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "content": {
                     "description": "Content",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-runes": "600"
                 },
                 "end_at": {
                     "description": "End at",
@@ -30272,7 +30849,8 @@ const docTemplate = `{
                 },
                 "id": {
                     "description": "ID",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "chunk_id"
                 },
                 "image_info": {
                     "description": "图片信息 (JSON 格式)",
@@ -30300,7 +30878,8 @@ const docTemplate = `{
                 },
                 "knowledge_id": {
                     "description": "Knowledge ID",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "knowledge_source": {
                     "description": "Knowledge source\nUsed to indicate the source of the knowledge, such as \"url\"",
@@ -30308,7 +30887,8 @@ const docTemplate = `{
                 },
                 "knowledge_title": {
                     "description": "Knowledge title",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "match_type": {
                     "description": "Match type",
@@ -30316,7 +30896,8 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MatchType"
                         }
-                    ]
+                    ],
+                    "x-agent": true
                 },
                 "matched_content": {
                     "description": "MatchedContent is the actual content that was matched in vector search\nFor FAQ: this is the matched question text (standard or similar question)",
@@ -30342,7 +30923,8 @@ const docTemplate = `{
                 },
                 "score": {
                     "description": "Score",
-                    "type": "number"
+                    "type": "number",
+                    "x-agent": true
                 },
                 "seq": {
                     "description": "Seq",
@@ -30409,7 +30991,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "created_at": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "deleted_at": {
                     "$ref": "#/definitions/gorm.DeletedAt"
@@ -30428,7 +31012,9 @@ const docTemplate = `{
                 },
                 "id": {
                     "description": "ID",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "session_id",
+                    "x-agent-response": true
                 },
                 "im_platform": {
                     "description": "IMPlatform is the originating IM platform (e.g. \"feishu\", \"wecom\") when\nthis session is bound to an IM channel. It is not stored on the sessions\ntable (it lives in im_channel_sessions) and is populated on read so the\nWeb console can classify a session's origin folder without a list query.",
@@ -30436,7 +31022,9 @@ const docTemplate = `{
                 },
                 "is_pinned": {
                     "description": "IsPinned indicates whether the session is pinned in the list.",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "kind": {
                     "description": "Kind is empty for ordinary chats and SessionKindAssistant for assistant\nconversations; it is set at creation and never updated.",
@@ -30468,10 +31056,14 @@ const docTemplate = `{
                 },
                 "title": {
                     "description": "Title",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "updated_at": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "user_id": {
                     "description": "UserID is the owner scope for this session. WeKnora user UUIDs, API\nexternal-user principals, and embed visitor principals all use this column.",
@@ -30535,6 +31127,104 @@ const docTemplate = `{
                 },
                 "web_search_enabled": {
                     "type": "boolean"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.SessionListItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "deleted_at": {
+                    "$ref": "#/definitions/gorm.DeletedAt"
+                },
+                "description": {
+                    "description": "Description",
+                    "type": "string"
+                },
+                "forked_from_message_id": {
+                    "description": "ForkedFromMessageID is the user or assistant message, IN THE PARENT\nSESSION, that the fork branched at. For a user point, messages strictly\nbefore it were copied here. For an assistant point, that answer is\nincluded so the branch continues after it.",
+                    "type": "string"
+                },
+                "host_workspace_dir": {
+                    "description": "HostWorkspaceDir is the user-selected project directory this session\noperates in, for the WeKnora Lite host sandbox only. Empty means the session\ngets an auto-allocated workspace instead.\n\nWritten once at creation and never updated: re-pointing a live session\nat a different directory would leave its transcript describing files\nthat are no longer there. Standard edition never writes it.",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "ID",
+                    "type": "string",
+                    "x-agent": "session_id",
+                    "x-agent-response": true
+                },
+                "im_agent_id": {
+                    "type": "string"
+                },
+                "im_channel_id": {
+                    "type": "string"
+                },
+                "im_chat_id": {
+                    "type": "string"
+                },
+                "im_platform": {
+                    "type": "string"
+                },
+                "im_thread_id": {
+                    "type": "string"
+                },
+                "im_user_id": {
+                    "type": "string"
+                },
+                "is_pinned": {
+                    "description": "IsPinned indicates whether the session is pinned in the list.",
+                    "type": "boolean",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "kind": {
+                    "description": "Kind is empty for ordinary chats and SessionKindAssistant for assistant\nconversations; it is set at creation and never updated.",
+                    "type": "string"
+                },
+                "last_request_state": {
+                    "description": "LastRequestState records the input-bar state used the last time this\nsession sent a question (agent, model, KB scope, web search, MCPs).\nPersisted on every successful POST to /knowledge-chat or /agent-chat so\nthat reopening the session can restore the original request context to\nthe chat UI. Stored in the legacy sessions.agent_config JSONB column to\navoid a new migration; the shape used today is ` + "`" + `SessionLastRequestState` + "`" + `.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SessionLastRequestState"
+                        }
+                    ]
+                },
+                "parent_session_id": {
+                    "description": "ParentSessionID names the session this one was forked from. Empty for\nordinary sessions. Deliberately not a foreign key: the parent may be\ndeleted while the branch lives on, and a branch must not cascade away\nwith it. A dangling value simply renders as an ordinary session.",
+                    "type": "string"
+                },
+                "pinned_at": {
+                    "description": "PinnedAt records when the session was pinned; nil when not pinned.",
+                    "type": "string"
+                },
+                "sandbox_config_id": {
+                    "description": "SandboxConfigID pins which sandbox config this session's CURRENT live\nsandbox was created on. Empty means no live sandbox;\nSandboxConfigIDGlobalDefault means the deployment-wide default config.\n\nThis is an ephemeral pin that dies with the sandbox, not a permanent\nowner: sessions outlive sandboxes by months, so treating it as\npermanent would make \"no session references this config\" never true.",
+                    "type": "string"
+                },
+                "tenant_id": {
+                    "description": "Workspace ID",
+                    "type": "integer"
+                },
+                "title": {
+                    "description": "Title",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "updated_at": {
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "user_id": {
+                    "description": "UserID is the owner scope for this session. WeKnora user UUIDs, API\nexternal-user principals, and embed visitor principals all use this column.",
+                    "type": "string"
                 }
             }
         },
@@ -33576,6 +34266,59 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.CreateMCPServiceRequest": {
+            "type": "object",
+            "required": [
+                "name",
+                "transport_type",
+                "url"
+            ],
+            "properties": {
+                "advanced_config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig"
+                },
+                "auth_config": {
+                    "$ref": "#/definitions/internal_handler.MCPServiceAuthRequest"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "description": "服务名称，空间内唯一",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "transport_type": {
+                    "description": "传输方式",
+                    "type": "string",
+                    "enum": [
+                        "sse",
+                        "http-streamable"
+                    ],
+                    "x-agent": true
+                },
+                "url": {
+                    "description": "服务地址（http 或 https）",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "usage_instructions": {
+                    "description": "告诉智能体何时、如何使用该服务",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-bytes": "48000"
+                }
+            }
+        },
         "internal_handler.CreateModelRequest": {
             "type": "object",
             "required": [
@@ -34630,7 +35373,7 @@ const docTemplate = `{
                     ]
                 },
                 "summary_model_id": {
-                    "description": "Summary model ID. model.list returns the ids. Used for summaries, and as the default for auto-tagging and the AI description.",
+                    "description": "Summary model ID. model.list returns the ids. Used for summaries, and as\nthe default for auto-tagging and the AI description.",
                     "type": "string",
                     "x-agent": "summary_model_id"
                 },
@@ -35081,6 +35824,81 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.MCPServiceAuthRequest": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "type": "string"
+                },
+                "api_key_header": {
+                    "description": "api_key 认证使用的请求头，默认 X-API-Key",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "auth_type": {
+                    "description": "auth_type 留空表示无认证；bearer 发送 token，api_key 按 api_key_header 发送密钥",
+                    "type": "string",
+                    "enum": [
+                        "api_key",
+                        "bearer",
+                        "oauth"
+                    ],
+                    "x-agent": true
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "custom_headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "scopes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.MCPServiceAuthUpdateRequest": {
+            "type": "object",
+            "properties": {
+                "api_key_header": {
+                    "type": "string"
+                },
+                "auth_server_metadata_url": {
+                    "type": "string"
+                },
+                "auth_type": {
+                    "type": "string",
+                    "enum": [
+                        "api_key",
+                        "bearer",
+                        "oauth"
+                    ]
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "custom_headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "scopes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "internal_handler.MessageResponse": {
             "type": "object",
             "properties": {
@@ -35101,7 +35919,8 @@ const docTemplate = `{
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_models_api.API"
                 },
                 "context_window": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "cost": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_models.ModelCost"
@@ -35110,22 +35929,26 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "model_name"
                 },
                 "input": {
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true
                 },
                 "max_output_tokens": {
                     "type": "integer"
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "display_name"
                 },
                 "reasoning": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "source": {
                     "description": "Source is the vendor page these facts were read from, so the editor can\nsend an operator to the documentation for this exact model.",
@@ -35138,7 +35961,8 @@ const docTemplate = `{
                     }
                 },
                 "type": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -35165,7 +35989,9 @@ const docTemplate = `{
                     }
                 },
                 "description": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "descriptions": {
                     "type": "object",
@@ -35184,7 +36010,8 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "label": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "labels": {
                     "type": "object",
@@ -35196,25 +36023,30 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": "model_types"
                 },
                 "models": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/internal_handler.ModelCatalogEntryDTO"
-                    }
+                    },
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "order": {
                     "type": "integer"
                 },
                 "requiresAuth": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": "requires_auth"
                 },
                 "thinking": {
                     "$ref": "#/definitions/internal_handler.ProviderThinkingDTO"
                 },
                 "value": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "provider"
                 },
                 "website": {
                     "type": "string"
@@ -35605,6 +36437,21 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiConfig"
                         }
                     ]
+                }
+            }
+        },
+        "internal_handler.PatchModelRequest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "description": "新的描述",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "display_name": {
+                    "description": "新的显示名称，空字符串表示改回使用模型名",
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -36138,7 +36985,10 @@ const docTemplate = `{
             "properties": {
                 "limit": {
                     "description": "Maximum number of results to return (default: 20)",
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 1,
+                    "x-agent": true,
+                    "x-agent-maximum": "20"
                 },
                 "mode": {
                     "description": "Search mode: \"keyword\", \"vector\", \"hybrid\" (default: \"hybrid\")",
@@ -36146,7 +36996,8 @@ const docTemplate = `{
                 },
                 "query": {
                     "description": "Query text for search",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "session_ids": {
                     "description": "Filter by specific session IDs (optional)",
@@ -36700,6 +37551,56 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.UpdateMCPServiceRequest": {
+            "type": "object",
+            "properties": {
+                "advanced_config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig"
+                },
+                "auth_config": {
+                    "$ref": "#/definitions/internal_handler.MCPServiceAuthUpdateRequest"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "description": "启用或停用该服务",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "description": "新的服务名称",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "transport_type": {
+                    "description": "新的传输方式",
+                    "type": "string",
+                    "enum": [
+                        "sse",
+                        "http-streamable"
+                    ],
+                    "x-agent": true
+                },
+                "url": {
+                    "description": "新的服务地址（http 或 https）",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "usage_instructions": {
+                    "description": "新的使用说明，1 到 16000 个字符",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-bytes": "48000"
+                }
+            }
+        },
         "internal_handler.UpdateModelRequest": {
             "type": "object",
             "properties": {
@@ -36998,6 +37899,74 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.catalogInstallData": {
+            "type": "object",
+            "properties": {
+                "errors": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "failed": {
+                    "description": "\"sandbox config id: reason\" for each sandbox that was not started",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true
+                },
+                "installs": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "started": {
+                    "description": "Sandbox config ids whose install started",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true
+                }
+            }
+        },
+        "internal_handler.catalogInstallRequest": {
+            "type": "object",
+            "required": [
+                "sandbox_config_ids"
+            ],
+            "properties": {
+                "sandbox_config_ids": {
+                    "description": "Sandbox config ids to install onto: an agent's sandbox_config_id, or host on WeKnora Lite",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true,
+                    "x-agent-maximum": "20"
+                }
+            }
+        },
+        "internal_handler.catalogInstallResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/internal_handler.catalogInstallData"
+                        }
+                    ],
+                    "x-agent": true
+                },
+                "success": {
+                    "description": "false when any sandbox failed to start",
+                    "type": "boolean",
+                    "x-agent": true
+                }
+            }
+        },
         "internal_handler.createInvitationRequest": {
             "type": "object",
             "required": [
@@ -37264,6 +38233,15 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.skillAccepted": {
+            "type": "object",
+            "properties": {
+                "skill_id": {
+                    "type": "string",
+                    "x-agent": true
+                }
+            }
+        },
         "internal_handler.skillEnvResponse": {
             "type": "object",
             "properties": {
@@ -37285,8 +38263,10 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "enabled": {
-                    "description": "Enabled is a pointer because its absence is not a request to disable the\nskill; a body may carry envs instead.",
-                    "type": "boolean"
+                    "description": "Enabled shows (true) or hides (false) the skill. Its absence leaves the\nskill as it is, since a body may carry envs instead.",
+                    "type": "boolean",
+                    "x-agent": true,
+                    "x-agent-required": true
                 },
                 "envs": {
                     "description": "Envs is a pointer to a map because \"sent an empty object\" and \"did not\nmention envs\" are different requests: the first clears what it names,\nthe second must leave every stored value alone.",
@@ -37307,10 +38287,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "description": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "envs": {
                     "type": "array",
@@ -37319,10 +38301,12 @@ const docTemplate = `{
                     }
                 },
                 "error": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "skill_id"
                 },
                 "install_message_id": {
                     "type": "string"
@@ -37333,8 +38317,17 @@ const docTemplate = `{
                 "installed_snapshot_id": {
                     "type": "string"
                 },
+                "missing_envs": {
+                    "description": "MissingEnvs names the required environment variables with no\nworkspace value yet; the skill cannot run until they are set.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true
+                },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "served": {
                     "description": "Served is the previous version that keeps running while this install\nis in flight or after it failed.",
@@ -37345,22 +38338,30 @@ const docTemplate = `{
                     ]
                 },
                 "status": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "updated_at": {
                     "type": "string"
                 },
                 "version": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
         "internal_handler.skillSourceRequest": {
             "type": "object",
+            "required": [
+                "source"
+            ],
             "properties": {
                 "source": {
                     "description": "Source is exactly one of: \"@owner/slug\" or a slash-free slug (ClawHub),\na github.com / gitlab.com / skills.sh / clawhub / skillhub page URL, a\nClawHub skills-sh catalog page or \"skills-sh:owner/repo/slug\" locator, or\na direct zip/SKILL.md URL. Bare \"owner/slug\" is rejected: it is both a\nClawHub id and a GitHub repo. The fetch carries no credential.",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-bytes": "2048",
+                    "x-agent-required": true
                 }
             }
         },
@@ -37905,6 +38906,32 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "internal_handler_session.sessionListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SessionListItem"
+                    }
+                },
+                "page": {
+                    "type": "integer",
+                    "x-agent": true
+                },
+                "page_size": {
+                    "type": "integer",
+                    "x-agent": true
+                },
+                "success": {
+                    "type": "boolean"
+                },
+                "total": {
+                    "type": "integer",
+                    "x-agent": true
                 }
             }
         }

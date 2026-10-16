@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
-import { computed, ref, shallowReactive, watch } from 'vue'
-import type { PageContextPayload } from '@/api/chat/streame'
+import { computed, ref, shallowReactive, shallowRef, watch } from 'vue'
+import type { PageContextPayload, PageSelectionPayload } from '@/api/chat/streame'
 import {
   DEFAULT_ASSISTANT_ACCESS_LEVEL,
   capAssistantAccessLevel,
@@ -11,8 +11,20 @@ import {
 } from '@/api/assistant'
 import { useAuthStore } from './auth'
 
+/** Pages that tell the assistant where the user is. */
+export type AssistantPageId =
+  | 'knowledge_base'
+  | 'wiki'
+  | 'agent_editor'
+  | 'settings_models'
+  | 'mcp_services'
+  | 'chat'
+
 /** What the user has open, as published by the pages that know it. */
 export interface AssistantPageContext {
+  page?: AssistantPageId
+  /** The part of the page in view, e.g. an editor tab ("tools"). */
+  section?: string
   agentId?: string
   agentName?: string
   knowledgeBaseId?: string
@@ -24,7 +36,59 @@ export interface AssistantPageContext {
   wikiSlug?: string
   wikiTitle?: string
   wikiIssueIds?: string[]
+  modelId?: string
+  modelName?: string
+  mcpServiceId?: string
+  mcpServiceName?: string
+  /** A chat message the user asked the assistant about, with its session. */
+  chatSessionId?: string
+  messageId?: string
 }
+
+/** A new model's form, filled in by the assistant; never carries credentials. */
+export interface AssistantModelDraft {
+  type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
+  source?: 'remote' | 'local'
+  provider?: string
+  model_name?: string
+  display_name?: string
+  base_url?: string
+}
+
+/** A new remote MCP service's form, filled in by the assistant; never carries credentials. */
+export interface AssistantMcpServiceDraft {
+  name: string
+  usage_instructions?: string
+  transport_type: 'sse' | 'http-streamable'
+  url: string
+  auth_type?: '' | 'api_key' | 'oauth'
+  api_key_header?: string
+}
+
+/** Text the user selected on the page beside the assistant. */
+export interface AssistantPageSelection {
+  text: string
+  /** Set when the text is selected in a field the assistant can write to. */
+  field?: string
+  ref?: string
+  startLine?: number
+  endLine?: number
+}
+
+export function toPageSelectionPayload(selection: AssistantPageSelection): PageSelectionPayload {
+  return {
+    text: selection.text,
+    field: selection.field || undefined,
+    ref: selection.ref || undefined,
+    start_line: selection.startLine || undefined,
+    end_line: selection.endLine || undefined,
+  }
+}
+
+/** A form the user asked the assistant to open, waiting for its page. */
+export type AssistantPageDraft =
+  | { kind: 'model'; draft: AssistantModelDraft }
+  | { kind: 'mcp_service'; draft: AssistantMcpServiceDraft }
 
 export interface AssistantOpenRequest {
   /** Sent as the first message of a new conversation. */
@@ -34,8 +98,10 @@ export interface AssistantOpenRequest {
 }
 
 const SESSION_KEY_PREFIX = 'weknora:assistant-session'
+const VISIBLE_KEY_PREFIX = 'weknora:assistant-visible'
 const MODEL_KEY_PREFIX = 'weknora:assistant-model'
 const ACCESS_KEY_PREFIX = 'weknora:assistant-access'
+const PAGE_ACCESS_KEY_PREFIX = 'weknora:assistant-page-access'
 const LAYOUT_KEY = 'weknora:assistant-layout'
 const WIDTH_KEY = 'weknora:assistant-width'
 const ENTRY_KEY = 'weknora:assistant-entry'
@@ -82,18 +148,34 @@ function readWidth(): number {
 }
 
 export function toPageContextPayload(context: AssistantPageContext): PageContextPayload {
+  const message = !!context.chatSessionId && !!context.messageId
   return {
+    page: context.page || undefined,
+    section: (context.page && context.section) || undefined,
     agent_id: context.agentId || undefined,
     knowledge_base_id: context.knowledgeBaseId || undefined,
     knowledge_id: context.knowledgeId || undefined,
     wiki_slug: context.wikiSlug || undefined,
     wiki_issue_ids: context.wikiIssueIds?.length ? [...context.wikiIssueIds] : undefined,
+    model_id: context.modelId || undefined,
+    mcp_service_id: context.mcpServiceId || undefined,
+    session_id: message ? context.chatSessionId : undefined,
+    message_id: message ? context.messageId : undefined,
   }
 }
 
 function contextKey(context: AssistantPageContext | null): string {
   if (!context) return ''
-  return [context.agentId || '', context.knowledgeBaseId || '', context.knowledgeId || '', context.wikiSlug || ''].join('|')
+  return [
+    context.page, context.agentId, context.knowledgeBaseId, context.knowledgeId, context.wikiSlug,
+    context.modelId, context.mcpServiceId, context.messageId,
+  ].map(part => part || '').join('|')
+}
+
+/** Whether a merged context names anything worth attaching. */
+function hasPageContext(context: Partial<AssistantPageContext>): boolean {
+  return !!(context.page || context.knowledgeBaseId || context.agentId || context.modelId ||
+    context.mcpServiceId || (context.chatSessionId && context.messageId))
 }
 
 /**
@@ -112,16 +194,24 @@ export const useAssistantStore = defineStore('assistant', () => {
   const pageContext = computed<AssistantPageContext | null>(() => {
     const merged: Partial<AssistantPageContext> = {}
     for (const layer of layers.values()) Object.assign(merged, layer)
-    return merged.knowledgeBaseId || merged.agentId ? merged : null
+    return hasPageContext(merged) ? merged : null
   })
-  const contextAttached = computed(() => !!pageContext.value && dismissedKey.value !== contextKey(pageContext.value))
+  // The page's name from the route, for pages that publish nothing; the
+  // dialog or drawer open over the page; and the text selected on it.
+  const pageTitle = ref('')
+  const pageView = ref('')
+  const pageSelection = shallowRef<AssistantPageSelection | null>(null)
+  // Opening another page or dialog brings a dismissed context back: it is new.
+  const attachKey = computed(() => `${contextKey(pageContext.value)}#${pageTitle.value}#${pageView.value}`)
+  const contextAttached = computed(() =>
+    (!!pageContext.value || !!pageTitle.value || !!pageView.value) && dismissedKey.value !== attachKey.value)
 
   // '' leaves the choice to the run: the knowledge base's chat model, then
   // the system default.
   const modelId = ref('')
 
-  // The conversation survives reloads within the tab and the model choice
-  // persists, both scoped like the command palette's history so another user
+  // The conversation and whether the panel is open survive reloads within
+  // the tab and the model choice persists, all scoped like the command palette's history so another user
   // or workspace never inherits them.
   const storageKey = (prefix: string): string => {
     const auth = useAuthStore()
@@ -136,6 +226,8 @@ export const useAssistantStore = defineStore('assistant', () => {
     const level = workspaceConfig.value?.max_access_level
     return isAssistantAccessLevel(level) ? level : DEFAULT_ASSISTANT_ACCESS_LEVEL
   })
+  // Whether the assistant may read and fill the page beside it.
+  const pageAccess = ref(true)
   const effectiveAccessLevel = computed(() => capAssistantAccessLevel(accessLevel.value, accessCeiling.value))
   /** The workspace's name for the assistant; empty means the default. */
   const displayName = computed(() => workspaceConfig.value?.display_name?.trim() || '')
@@ -143,13 +235,17 @@ export const useAssistantStore = defineStore('assistant', () => {
   const restore = () => {
     try {
       sessionId.value = sessionStorage.getItem(storageKey(SESSION_KEY_PREFIX)) || ''
+      visible.value = sessionStorage.getItem(storageKey(VISIBLE_KEY_PREFIX)) === '1'
       modelId.value = localStorage.getItem(storageKey(MODEL_KEY_PREFIX)) || ''
       const level = localStorage.getItem(storageKey(ACCESS_KEY_PREFIX))
       accessLevel.value = isAssistantAccessLevel(level) ? level : DEFAULT_ASSISTANT_ACCESS_LEVEL
+      pageAccess.value = localStorage.getItem(storageKey(PAGE_ACCESS_KEY_PREFIX)) !== '0'
     } catch {
       sessionId.value = ''
+      visible.value = false
       modelId.value = ''
       accessLevel.value = DEFAULT_ASSISTANT_ACCESS_LEVEL
+      pageAccess.value = true
     }
     void loadWorkspaceConfig()
   }
@@ -176,6 +272,15 @@ export const useAssistantStore = defineStore('assistant', () => {
     accessLevel.value = level
     try {
       localStorage.setItem(storageKey(ACCESS_KEY_PREFIX), level)
+    } catch {
+      // See setSession.
+    }
+  }
+  const setPageAccess = (on: boolean) => {
+    pageAccess.value = on
+    try {
+      if (on) localStorage.removeItem(storageKey(PAGE_ACCESS_KEY_PREFIX))
+      else localStorage.setItem(storageKey(PAGE_ACCESS_KEY_PREFIX), '0')
     } catch {
       // See setSession.
     }
@@ -234,15 +339,24 @@ export const useAssistantStore = defineStore('assistant', () => {
     return `${auth.user?.id}:${auth.effectiveTenantId}`
   }, restore)
 
+  const setVisible = (next: boolean) => {
+    visible.value = next
+    try {
+      if (next) sessionStorage.setItem(storageKey(VISIBLE_KEY_PREFIX), '1')
+      else sessionStorage.removeItem(storageKey(VISIBLE_KEY_PREFIX))
+    } catch {
+      // See setSession.
+    }
+  }
   const open = (request?: AssistantOpenRequest) => {
     if (request?.query) {
       setSession('')
       pendingRequest.value = request
     }
-    visible.value = true
+    setVisible(true)
   }
   const close = () => {
-    visible.value = false
+    setVisible(false)
   }
   const toggle = () => {
     if (visible.value) close()
@@ -258,6 +372,54 @@ export const useAssistantStore = defineStore('assistant', () => {
     return request
   }
 
+  const setPageTitle = (title: string) => {
+    pageTitle.value = title
+  }
+  const setPageView = (view: string) => {
+    pageView.value = view
+  }
+  const setPageSelection = (selection: AssistantPageSelection | null) => {
+    pageSelection.value = selection
+  }
+
+  // A message for the open conversation, sent by the conversation itself.
+  const queuedMessage = shallowRef<{ id: number; query: string } | null>(null)
+  let queuedSeq = 0
+  /** Asks in the open conversation, or starts one when there is none. */
+  const ask = (query: string) => {
+    if (!sessionId.value) {
+      open({ query })
+      return
+    }
+    queuedMessage.value = { id: ++queuedSeq, query }
+    setVisible(true)
+  }
+  const takeQueuedMessage = () => {
+    const message = queuedMessage.value
+    queuedMessage.value = null
+    return message
+  }
+  // Bumped to move the cursor into the assistant's input box.
+  const focusRequest = ref(0)
+  const focusComposer = () => {
+    setVisible(true)
+    focusRequest.value++
+  }
+
+  const pageDraft = ref<AssistantPageDraft | null>(null)
+  const setPageDraft = (draft: AssistantPageDraft | null) => {
+    pageDraft.value = draft
+  }
+  /** Hands the waiting form to the page that shows it, once. */
+  function takePageDraft(kind: 'model'): AssistantModelDraft | null
+  function takePageDraft(kind: 'mcp_service'): AssistantMcpServiceDraft | null
+  function takePageDraft(kind: AssistantPageDraft['kind']) {
+    const waiting = pageDraft.value
+    if (!waiting || waiting.kind !== kind) return null
+    pageDraft.value = null
+    return waiting.draft
+  }
+
   const publishPageContext = (owner: symbol, context: Partial<AssistantPageContext>) => {
     layers.set(owner, context)
   }
@@ -265,7 +427,7 @@ export const useAssistantStore = defineStore('assistant', () => {
     layers.delete(owner)
   }
   const dismissPageContext = () => {
-    dismissedKey.value = contextKey(pageContext.value)
+    dismissedKey.value = attachKey.value
   }
   const restorePageContext = () => {
     dismissedKey.value = ''
@@ -278,6 +440,7 @@ export const useAssistantStore = defineStore('assistant', () => {
     accessLevel,
     accessCeiling,
     effectiveAccessLevel,
+    pageAccess,
     displayName,
     workspaceConfig,
     entry,
@@ -286,12 +449,24 @@ export const useAssistantStore = defineStore('assistant', () => {
     pendingRequest,
     pageContext,
     contextAttached,
+    pageTitle,
+    pageView,
+    pageSelection,
+    setPageTitle,
+    setPageView,
+    setPageSelection,
+    queuedMessage,
+    ask,
+    takeQueuedMessage,
+    focusRequest,
+    focusComposer,
     open,
     close,
     toggle,
     setSession,
     setModel,
     setAccessLevel,
+    setPageAccess,
     setWorkspaceConfig,
     loadWorkspaceConfig,
     setEntry,
@@ -299,6 +474,9 @@ export const useAssistantStore = defineStore('assistant', () => {
     setWidth,
     startNewConversation,
     takePendingRequest,
+    pageDraft,
+    setPageDraft,
+    takePageDraft,
     publishPageContext,
     retractPageContext,
     dismissPageContext,

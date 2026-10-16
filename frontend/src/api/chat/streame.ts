@@ -17,11 +17,30 @@ import {
 
 /** The WeKnora page the user has open; agent-chat only. */
 export interface PageContextPayload {
+  page?: string
+  section?: string
   agent_id?: string
   knowledge_base_id?: string
   knowledge_id?: string
   wiki_slug?: string
   wiki_issue_ids?: string[]
+  model_id?: string
+  mcp_service_id?: string
+  session_id?: string
+  message_id?: string
+  /** The page's name as the sidebar shows it. */
+  title?: string
+  /** The dialog or drawer open over the page. */
+  view?: string
+  selection?: PageSelectionPayload
+}
+
+export interface PageSelectionPayload {
+  text: string
+  field?: string
+  ref?: string
+  start_line?: number
+  end_line?: number
 }
 
 interface StreamOptions {

@@ -73,7 +73,7 @@
             type="button" role="tab" class="settings-tab" :data-section="tab.key"
             :aria-selected="activeSettingsSection === tab.key" :tabindex="activeSettingsSection === tab.key ? 0 : -1"
             :aria-controls="tab.key === 'users' ? 'system-settings-users' : 'system-settings-values'"
-            @click="activeSettingsSection = tab.key" @keydown="onTabKeydown($event, tab.key)">
+            @click="showPanel(tab.key)" @keydown="onTabKeydown($event, tab.key)">
             <t-icon :name="tab.icon" size="16px" />
             <span>{{ tab.label }}</span>
           </button>
@@ -242,6 +242,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import {
@@ -259,6 +260,8 @@ import { isSettingValueDirty, resolveCurrentSetting } from './systemSettingsEdit
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
 
 const { t, tm, te, locale } = useI18n()
+const route = useRoute()
+const router = useRouter()
 
 // Friendly labels per key live in i18n (system.globalSettings.keyLabels.*).
 // Adding a new entry there must accompany every new key registered in
@@ -424,6 +427,28 @@ const sectionTabs = computed(() => {
   return tabs
 })
 
+const PANEL_KEYS: readonly SettingsSection[] = ['access', 'users', 'tenant', 'runtime', 'security', 'other']
+
+function panelFromQuery(): SettingsSection | null {
+  const raw = Array.isArray(route.query.panel) ? route.query.panel[0] : route.query.panel
+  return typeof raw === 'string' && (PANEL_KEYS as readonly string[]).includes(raw) ? raw as SettingsSection : null
+}
+
+/** Follows ?panel= so a navigated link can open a tab other than the first. */
+function applyRoutePanel() {
+  const panel = panelFromQuery()
+  if (!panel || panel === activeSettingsSection.value) return
+  if (panel === 'other' && !hasUnknownSettings.value) return
+  activeSettingsSection.value = panel
+}
+
+function showPanel(key: SettingsSection) {
+  activeSettingsSection.value = key
+  if (route.path !== '/platform/settings' || route.query.section !== 'system-global') return
+  if (route.query.panel === key) return
+  void router.replace({ path: route.path, query: { ...route.query, panel: key } })
+}
+
 function onTabKeydown(event: KeyboardEvent, key: SettingsSection) {
   const tabs = sectionTabs.value
   const index = tabs.findIndex(tab => tab.key === key)
@@ -436,16 +461,19 @@ function onTabKeydown(event: KeyboardEvent, key: SettingsSection) {
     default: return
   }
   event.preventDefault()
-  activeSettingsSection.value = tabs[next]!.key
+  showPanel(tabs[next]!.key)
   const tablist = (event.currentTarget as HTMLElement).parentElement
   tablist?.querySelector<HTMLButtonElement>(`[data-section="${activeSettingsSection.value}"]`)?.focus()
 }
 
+watch(() => route.query.panel, applyRoutePanel, { immediate: true })
 
 watch(hasUnknownSettings, (hasUnknown) => {
   if (!hasUnknown && activeSettingsSection.value === 'other') {
-    activeSettingsSection.value = 'access'
+    showPanel('access')
+    return
   }
+  applyRoutePanel()
 })
 
 const activeSectionSettings = computed(() => {

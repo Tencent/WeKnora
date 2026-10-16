@@ -1412,6 +1412,12 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 			}
 			return nil
 		})
+
+		// A failed pipeline never streams EventAgentFinalAnswer with Done=true,
+		// so the turn would otherwise end with an empty, incomplete assistant
+		// row: the live UI shows the error event, but a refresh renders a blank
+		// bubble and the SSE stream never closes (issue #4145).
+		h.registerQuickAnswerFailureHandler(streamCtx, &completionHandled, reqCtx.session.TenantID)
 	}
 
 	// Execute QA asynchronously
@@ -2021,6 +2027,46 @@ func (h *Handler) completeQuickAnswerTurn(
 	if streamCtx.releaseTurn != nil {
 		streamCtx.releaseTurn()
 	}
+}
+
+// quickAnswerFailureContent is persisted when a pipeline error carries no
+// message, so the failed turn does not save an empty answer.
+const quickAnswerFailureContent = "Failed to generate the answer"
+
+// registerQuickAnswerFailureHandler completes and persists the assistant
+// message when the quick-answer pipeline reports EventError. The empty query
+// keeps the failed turn out of the chat-history index, follow-up suggestions
+// and memory writes — only the visible error text belongs in history.
+func (h *Handler) registerQuickAnswerFailureHandler(
+	streamCtx *sseStreamContext, completionHandled *bool, sessionTenantID uint64,
+) {
+	streamCtx.eventBus.On(event.EventError, func(ctx context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.ErrorData)
+		if !ok || *completionHandled {
+			return nil
+		}
+		*completionHandled = true
+
+		errorContent := strings.TrimSpace(data.Error)
+		if errorContent == "" {
+			errorContent = quickAnswerFailureContent
+		}
+		msg := streamCtx.assistantMessage
+		// Keep any partial answer the stream produced before failing and
+		// append the error, so a reload shows both instead of losing the text.
+		if remaining := strings.TrimSpace(msg.Content); remaining != "" {
+			msg.Content += "\n\n" + errorContent
+		} else {
+			msg.Content = errorContent
+		}
+
+		updateCtx := context.WithValue(
+			context.WithoutCancel(ctx),
+			types.TenantIDContextKey, sessionTenantID,
+		)
+		h.completeQuickAnswerTurn(updateCtx, streamCtx, "", "")
+		return nil
+	})
 }
 
 // sessionTenantInfoContext makes the tenant info match the session owner (the

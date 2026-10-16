@@ -947,6 +947,7 @@ export default {
     selectLoaded: 'Select loaded',
     confirmBatchDeleteDocument: 'Delete {count} selected documents? This action cannot be undone.',
     deleteSubmitted: 'Delete request submitted. Waiting for completion.',
+    assistantDeleted: 'The assistant deleted this knowledge base.',
     deletePending: 'Deletion is still pending. Refresh later to check the result.',
     deleteTaskFailed: 'Deletion failed. Check the document error details and try again.',
     deleteStatusUnavailable: 'Could not confirm the deletion result. Refresh later to check the document status.',
@@ -2837,6 +2838,21 @@ export default {
     upload: 'Upload File'
   },
   manualEditor: {
+    assistant: {
+      button: 'Assistant',
+      tooltip: 'Let the assistant help you write',
+      continue: 'Continue writing',
+      outline: 'Draft an outline',
+      polish: 'Polish the text',
+      summarize: 'Summarize',
+      open: 'Open assistant',
+      prompts: {
+        continue: 'Continue the text from its end with one more paragraph that follows on from it.',
+        outline: 'Draft a clearly structured outline for this document from its title and current text, and put it at the start of the text.',
+        polish: 'Polish the text: fix typos and awkward sentences without changing the meaning, section by section.',
+        summarize: 'Summarize the key points of this document in the chat. Do not change the text.'
+      }
+    },
     placeholders: {
       heading: 'Heading {level}',
       listItem: 'List item',
@@ -5443,6 +5459,7 @@ export default {
         enabled: 'MCP service enabled',
         disabled: 'MCP service disabled',
         updateStateFailed: 'Failed to update MCP service status',
+        linkedServiceMissing: 'The MCP service the assistant linked to was not found; it may have been deleted',
         testing: 'Testing {name}...',
         noResponse: 'Test failed: no response from server',
         testFailed: 'Failed to test MCP service',
@@ -5513,6 +5530,7 @@ export default {
         deleted: 'Model deleted',
         deleteFailed: 'Failed to delete model',
         builtinCannotEdit: 'Built-in models cannot be edited',
+        linkedModelMissing: 'The model the assistant linked to was not found; it may have been deleted',
         builtinCannotDelete: 'Built-in models cannot be deleted',
         builtinCannotCopy: 'Built-in models cannot be copied',
         copied: 'Model copied',
@@ -6139,9 +6157,40 @@ export default {
       welcomeDesc: 'Ask how WeKnora works, or have me check and handle document parsing, knowledge base activity and Wiki issues in your workspace, or create and configure agents. Whether I ask before a change depends on the access level below the input box.',
       startFailed: 'Failed to start the assistant. Please try again.',
       askAboutDocument: 'Ask {name}',
+      askAboutAnswer: 'Ask {name} about this answer',
+      selection: {
+        label: 'Selected',
+        lines: '{count} lines selected',
+        detach: 'Don’t include the selection',
+        tip: 'Your selection goes with the message: {text}',
+        tipField: 'Your selection in “{field}” goes with the message: {text}'
+      },
+      bubble: {
+        label: 'Assistant actions',
+        ask: 'Ask assistant',
+        polish: 'Polish',
+        rewrite: 'Rewrite',
+        translate: 'Translate',
+        continue: 'Continue',
+        prompts: {
+          polish: 'Polish the selected text: fix typos and awkward phrasing without changing the meaning, and replace it in place.',
+          rewrite: 'Rewrite the selected text to be clearer and more concise, and replace it in place.',
+          translate: 'Translate the selected text, Chinese into English and other languages into Chinese, and replace it in place.',
+          continue: 'Continue writing after the selected text with one more paragraph that fits the context, placed right after it.'
+        }
+      },
+      fillNotice: {
+        title: 'Assistant filled {count} field(s)',
+        undo: 'Undo',
+        dismiss: 'Dismiss'
+      },
       access: {
         title: 'Access level',
         capped: 'Not allowed by your workspace admin',
+        page: {
+          label: 'See and fill the current page',
+          desc: 'Reads the page on the left and can fill in forms. Never clicks buttons or saves.'
+        },
         levels: {
         read_only: {
           label: 'Read only',
@@ -6161,7 +6210,16 @@ export default {
       currentPage: 'Current page',
       detach: 'Don\'t include the current page',
       attachedTip: 'Including the current page: {path}',
-      detachedTip: 'Click to include the current page: {path}'
+      detachedTip: 'Click to include the current page: {path}',
+      chatMessage: 'This answer',
+      pages: {
+        knowledge_base: 'Knowledge base',
+        wiki: 'Wiki',
+        agent_editor: 'Agent editor',
+        settings_models: 'Models',
+        mcp_services: 'MCP services',
+        chat: 'Chat'
+      }
     },
     starters: {
       agentConfig: 'Check this agent’s configuration',
@@ -6175,7 +6233,15 @@ export default {
       recentActivity: 'What changed in this knowledge base recently?',
       formats: 'Which document formats does WeKnora support?',
       createWiki: 'How do I create a Wiki knowledge base?',
-      agents: 'Which agents do I have, and which models do they use?'
+      agents: 'Which agents do I have, and which models do they use?',
+      messageSources: 'What is this answer based on?',
+      messageCheck: 'Is anything in this answer wrong?',
+      modelCheck: 'Check this model\'s configuration',
+      modelUsage: 'Which agents and knowledge bases use these models?',
+      mcpTools: 'Which tools does this MCP service offer?',
+      mcpCheck: 'Why can\'t it connect?',
+      modelSetup: 'Which models do I still need to set up?',
+      mcpSetup: 'How do I connect an MCP service?'
     }
   },
   assistantSettings: {
@@ -6397,9 +6463,15 @@ export default {
       waitingStatus: 'Awaiting review',
       targetWithTool: '{service} › {tool}',
       dockQuestion: 'Allow {target} to run?',
+      operationQuestion: 'Allow {action}: “{target}”?',
+      operationQuestionNoTarget: 'Allow {action}?',
+      operationTarget: '{action}: “{target}”',
+      reviewTitle: 'Review · {target}',
+      characterCount: '{count} characters',
       titleWithTarget: 'Review · {service} › {tool}',
       argsLabel: 'Arguments',
       argsModified: 'Modified',
+      allowInSession: 'Allow this for the rest of the conversation',
       countdownShort: '{seconds}s',
       approve: 'Approve & run',
       reject: 'Reject',
@@ -6437,7 +6509,19 @@ export default {
         mcpServices: 'MCP services',
         skills: 'Skills',
         webSearch: 'Web search',
-        multiTurn: 'Multi-turn conversation'
+        multiTurn: 'Multi-turn conversation',
+        transport: 'Transport',
+        authentication: 'Authentication',
+        usageInstructions: 'Usage instructions',
+        displayName: 'Display name',
+        enabled: 'Enabled',
+        sandbox: 'Sandbox',
+        sandboxes: 'Sandboxes',
+        systemPrompt: 'System prompt',
+        content: 'Content',
+        kbScope: 'Knowledge base scope',
+        mcpScope: 'MCP scope',
+        skillsScope: 'Skills scope'
       },
       value: {
         document: 'Document',
@@ -6505,8 +6589,31 @@ export default {
       databaseQuery: 'Database Query',
       findOperations: 'Find operations',
       runOperation: 'Run operation',
+      tryAgent: 'Try agent',
+      openPage: 'Open page',
       searchWeKnoraDocs: 'Search product docs',
-      readWeKnoraDoc: 'Read product doc'
+      readWeKnoraDoc: 'Read product doc',
+      readPage: 'View page',
+      selectTab: 'Select tab',
+      fillPage: 'Fill page'
+    },
+    pageAccess: {
+      viewed: 'Viewed the current page: {location}'
+    },
+    pageEdit: {
+      title: 'Filled {count} field(s)',
+      undo: 'Undo',
+      undone: 'Fill undone',
+      undoSkipped: '{count} field(s) changed since or no longer on the page were left as they are',
+      unsaved: 'Nothing is saved yet. Review it and save on the page.'
+    },
+    openPage: {
+      open: 'Open',
+      openForm: 'Open and fill in',
+      opened: 'Opened by the assistant',
+      back: 'Back',
+      endpoint: 'Connects to: ',
+      draftHint: 'Filled in from the assistant. Add the API key or other credentials, check it and save it yourself.'
     },
     skillFiles: {
       heading: 'Skill files',
@@ -6559,6 +6666,7 @@ export default {
       range: 'Range {min}–{max}',
       risk: {
         read: 'Read',
+        probe: 'Check',
         write: 'Write',
         destructive: 'Destructive'
       },
@@ -7146,6 +7254,13 @@ export default {
     pauseFailed: 'Failed to pause',
     logs: 'Logs',
     syncModeLabel: 'Sync mode',
+    parseModeLabel: 'Parse mode',
+    parseMode: {
+      inherit: 'Use server setting',
+      blocks: 'Blocks (default)',
+      export: 'Export (docx)',
+    },
+    parseModeHint: 'How Feishu cloud documents are parsed. Blocks is faster and keeps in-document attachments; Export converts documents to docx for parsing and keeps images associated with the document.',
     syncMode: {
       incremental: 'Incremental',
       full: 'Full'

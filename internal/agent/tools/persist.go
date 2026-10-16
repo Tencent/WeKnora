@@ -61,10 +61,31 @@ func SanitizeToolDataForClient(toolName string, data map[string]interface{}) map
 		omit = persistStripFieldsByTool[toolName]
 	}
 	out := sanitizeToolData(data, omit)
-	if toolName != ToolRunOperation {
+	if !dataChangeTools[toolName] {
 		delete(out, "data_change")
 	}
 	return out
+}
+
+// dataChangeTools may tell live clients what they changed, so open pages
+// reload it.
+var dataChangeTools = map[string]bool{
+	ToolRunOperation:    true,
+	ToolWikiWritePage:   true,
+	ToolWikiReplaceText: true,
+	ToolWikiRenamePage:  true,
+	ToolWikiDeletePage:  true,
+	ToolWikiUpdateIssue: true,
+}
+
+// wikiDataChange names the knowledge base whose Wiki a tool changed, in the
+// shape run_operation reports its changes.
+func wikiDataChange(action, kbID string) map[string]any {
+	return map[string]any{
+		"operation": "wiki." + action,
+		"area":      "wiki",
+		"ids":       map[string][]string{"knowledge_base_id": {kbID}},
+	}
 }
 
 func sanitizeToolData(data map[string]interface{}, extraOmit []string) map[string]interface{} {

@@ -718,7 +718,7 @@ func (r *ImageResolver) ResolveDataURIImages(
 
 	processed := 0
 	for i := len(matches) - 1; i >= 0; i-- {
-		if processed >= maxRemoteImages {
+		if processed >= types.MaxInlineDocumentImages {
 			break
 		}
 		m := matches[i]

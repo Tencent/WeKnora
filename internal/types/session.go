@@ -77,6 +77,10 @@ type ContextConfig struct {
 // SessionKindAssistant keeps assistant conversations out of ordinary chat listings.
 const SessionKindAssistant = "assistant"
 
+// SessionKindAgentTrial holds one question the assistant asks an agent to
+// check its setup. Only the server creates it, and removes it afterwards.
+const SessionKindAgentTrial = "agent_trial"
+
 // IsValidSessionKind restricts API kinds to ordinary chats (empty) and assistant history.
 func IsValidSessionKind(kind string) bool {
 	return kind == "" || kind == SessionKindAssistant
@@ -85,9 +89,9 @@ func IsValidSessionKind(kind string) bool {
 // Session represents the session
 type Session struct {
 	// ID
-	ID string `json:"id"          gorm:"type:varchar(36);primaryKey"`
+	ID string `json:"id"          gorm:"type:varchar(36);primaryKey" extensions:"x-agent=session_id,x-agent-response"`
 	// Title
-	Title string `json:"title"`
+	Title string `json:"title" extensions:"x-agent,x-agent-response"`
 	// Description
 	Description string `json:"description"`
 	// Workspace ID
@@ -99,7 +103,7 @@ type Session struct {
 	// external-user principals, and embed visitor principals all use this column.
 	UserID string `json:"user_id,omitempty" gorm:"type:varchar(512);index"`
 	// IsPinned indicates whether the session is pinned in the list.
-	IsPinned bool `json:"is_pinned" gorm:"default:false"`
+	IsPinned bool `json:"is_pinned" gorm:"default:false" extensions:"x-agent,x-agent-response"`
 	// PinnedAt records when the session was pinned; nil when not pinned.
 	PinnedAt *time.Time `json:"pinned_at,omitempty"`
 
@@ -174,8 +178,8 @@ type Session struct {
 	// AgentConfig       *SessionAgentConfig `json:"agent_config"       gorm:"type:jsonb"` // Agent 配置（会话级别，仅存储enabled和knowledge_bases）
 	// ContextConfig     *ContextConfig      `json:"context_config"     gorm:"type:jsonb"` // 上下文管理配置（可选）
 
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
+	CreatedAt time.Time      `json:"created_at" extensions:"x-agent,x-agent-response"`
+	UpdatedAt time.Time      `json:"updated_at" extensions:"x-agent,x-agent-response"`
 	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"index"`
 
 	// IMPlatform is the originating IM platform (e.g. "feishu", "wecom") when

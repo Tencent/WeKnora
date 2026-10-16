@@ -8,6 +8,12 @@ import { expandSteerForksInHistory, forkAfterInjectedUser, steerStepEvents, rese
 
 export type ChatMessage = Record<string, unknown>
 
+// Tools whose results tell open pages what changed (see dataChangeTools on
+// the server).
+const DATA_CHANGE_TOOLS = new Set([
+  'run_operation', 'wiki_write_page', 'wiki_replace_text', 'wiki_rename_page', 'wiki_delete_page', 'wiki_update_issue',
+])
+
 export interface UseChatStreamHandlerOptions {
   messagesList: ChatMessage[]
   loading: Ref<boolean>
@@ -34,6 +40,8 @@ export interface UseChatStreamHandlerOptions {
   onAgentAnswerDone?: (message: ChatMessage) => void
   onAgentChunkBound?: (message: ChatMessage, created: boolean) => void
   onUserMessageInjected?: (steerId: string) => void
+  /** The assistant asks to read or fill the page; answered by the page, not shown. */
+  onPageAction?: (prompt: ChatMessage) => void
   /** Remote or local stop: the composer overlay must drop server-discarded items. */
   onGenerationStopped?: () => void
   debug?: boolean
@@ -93,6 +101,7 @@ export function pendingPromptEvents(prompt: unknown): ChatMessage[] {
     mcp_tool_name: request.mcp_tool_name,
     description: request.description,
     args_json: request.args === undefined ? '' : JSON.stringify(request.args),
+    grant_scope: request.grant_scope,
     tool_call_id: p.tool_call_id,
     requested_at: requestedAt,
     suspendable: true,
@@ -805,6 +814,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           mcp_tool_name: d.mcp_tool_name,
           description: d.description,
           args_json: d.args_json,
+          grant_scope: d.grant_scope,
           timeout_seconds: d.timeout_seconds,
           hot_wait_seconds: d.hot_wait_seconds,
           suspendable: d.suspendable,
@@ -815,8 +825,12 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         break
       }
       case 'agent_prompt_required': {
-        if (!message.agentEventStream) message.agentEventStream = []
         const d = dataPayload || {}
+        if (d.kind === 'page_action') {
+          options.onPageAction?.(d)
+          break
+        }
+        if (!message.agentEventStream) message.agentEventStream = []
         ;(message.agentEventStream as ChatMessage[]).push({
           type: 'agent_prompt_required',
           pending_id: d.pending_id,
@@ -1007,7 +1021,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           const toolCallId = dataPayload.tool_call_id as string | undefined
           const toolName = dataPayload.tool_name as string | undefined
           const success = responseType !== 'error' && dataPayload.success !== false
-          if (responseType === 'tool_result' && dataPayload.success === true && toolName === 'run_operation') {
+          if (responseType === 'tool_result' && dataPayload.success === true && toolName
+            && DATA_CHANGE_TOOLS.has(toolName)) {
             emitAssistantDataChange(dataPayload.data_change)
           }
           log('[Tool Result]', {

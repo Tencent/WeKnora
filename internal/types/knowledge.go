@@ -172,7 +172,7 @@ type Knowledge struct {
 	// ID of the knowledge base
 	KnowledgeBaseID string `json:"knowledge_base_id" extensions:"x-agent"`
 	// Tags holds the tags associated with this knowledge (populated on query, not persisted directly).
-	Tags []*KnowledgeTag `json:"tags"               gorm:"-"`
+	Tags []*KnowledgeTag `json:"tags"               gorm:"-" extensions:"x-agent"`
 	// Type of the knowledge
 	Type string `json:"type" extensions:"x-agent"`
 	// Title of the knowledge

@@ -357,7 +357,7 @@ type ImageAttrSchemaData struct {
 // @Tags         知识库
 // @Accept       json
 // @Produce      json
-// @Param        id             path      string             true   "知识库ID"
+// @Param        id             path      string             true   "知识库ID"  extensions(x-agent=knowledge_base_id)
 // @Param        request        body      types.SearchParams true   "搜索参数"
 // @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
 // @Success      200            {object}  handler.HybridSearchResponse  "搜索结果"
@@ -365,6 +365,8 @@ type ImageAttrSchemaData struct {
 // @Failure      404            {object}  errors.AppError               "知识库不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge_base.search","risk":"probe","method":"post","max_items":30}
+// @x-agent-hint "Runs the raw vector and keyword recall of one knowledge base, without rerank, and returns the chunks it finds in rank order, so you can see why something is or is not found. match_type 0 is a vector hit, 1 a keyword hit; score ranks the merged results and is not a similarity. Each threshold filters its own retriever before merging: leave them out to see every candidate, or set them to an agent's vector_threshold and keyword_threshold to see what passes. For answering a question, use search_knowledge instead."
 // @Router       /knowledge-bases/{id}/hybrid-search [post]
 // @Router       /knowledge-bases/{id}/hybrid-search [get]
 func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {

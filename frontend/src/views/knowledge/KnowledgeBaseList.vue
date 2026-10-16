@@ -1193,7 +1193,17 @@ watch(creatorFilter, () => {
   fetchList(true)
 })
 
-useAssistantDataChange(() => { void fetchList(true) }, { areas: ['knowledge_base'] })
+// Document and FAQ changes move the counts on the cards. Deletes and moves
+// finish in the background, so look again once they likely have.
+let settleTimer: ReturnType<typeof setTimeout> | undefined
+useAssistantDataChange((changes) => {
+  void fetchList(true)
+  if (changes.some(change => ['knowledge.delete', 'knowledge.batch_delete', 'knowledge.move'].includes(change.operation))) {
+    clearTimeout(settleTimer)
+    settleTimer = setTimeout(() => { void fetchList(true) }, 5000)
+  }
+}, { areas: ['knowledge_base', 'knowledge', 'faq'] })
+onUnmounted(() => clearTimeout(settleTimer))
 
 onMounted(() => {
   fetchList().then(() => {

@@ -20,6 +20,7 @@
         theme="normal" size="small" class="ask-number" />
       <t-select v-else-if="field.type === 'select' || field.type === 'multiselect'" v-model="values[field.name]"
         :multiple="field.type === 'multiselect'" :disabled="submitting" size="small" clearable
+        :popup-props="{ overlayClassName: 'wk-popover' }"
         :placeholder="$t('agentStream.askUser.selectPlaceholder')">
         <t-option v-for="option in field.options || []" :key="option" :value="option" :label="option" />
       </t-select>
@@ -245,7 +246,7 @@ defineExpose({ handleKey })
 .ask-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .ask-field-label {
@@ -258,10 +259,37 @@ defineExpose({ handleKey })
   width: 100%;
 }
 
-.ask-text {
-  :deep(.t-textarea__inner) {
-    font-size: var(--agent-step-summary-size, 13px);
+// Filled, borderless fields, like the option rows and argument editor of the
+// other prompts in the dock.
+.ask-field :deep(.t-input),
+.ask-text :deep(.t-textarea__inner) {
+  min-height: 32px;
+  border-color: transparent;
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-secondarycontainer);
+  box-shadow: none;
+  font-size: var(--agent-step-summary-size, 13px);
+  transition: background var(--app-motion-fast) ease, border-color var(--app-motion-fast) ease;
+
+  &:hover:not(.t-is-disabled):not(.t-input--focused):not(:focus) {
+    border-color: transparent;
+    background: var(--td-bg-color-secondarycontainer-hover);
   }
+}
+
+.ask-field :deep(.t-input.t-input--focused),
+.ask-text :deep(.t-textarea__inner:focus) {
+  border-color: color-mix(in srgb, var(--td-brand-color) 45%, var(--td-component-stroke));
+  background: var(--td-bg-color-container);
+  box-shadow: none;
+}
+
+.ask-field :deep(.t-input__inner::placeholder),
+.ask-text :deep(.t-textarea__inner::placeholder) {
+  color: var(--td-text-color-placeholder);
+}
+
+.ask-text {
 
   // The limit is far above a typical answer; the counter is noise here.
   :deep(.t-textarea__info_wrapper),

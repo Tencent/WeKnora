@@ -27,6 +27,10 @@ Shapes of a question:
   (set "multi_select" for several, "allow_free_text" to also accept a typed answer);
 - a short form: "fields" with types text, number, select or multiselect.
 
+Options and field labels are shown to the user as written, and the chosen text comes back as the answer. Write
+them in the user's language as a person would say them ("No authentication", "API key"), never as internal ids
+("api_key"), and offer only choices the next step accepts. Leave out a field you can fill yourself.
+
 The user may take a long time, decline, or not answer at all; then you are told so and must decide how to continue
 without the answer.`
 
@@ -37,7 +41,7 @@ var askUserSchema = json.RawMessage(fmt.Sprintf(`{
     "options": {
       "type": "array", "maxItems": %[2]d,
       "items": {"type": "string", "maxLength": %[3]d},
-      "description": "Choices the user picks from"
+      "description": "Choices the user picks from, worded for the user"
     },
     "multi_select": {"type": "boolean", "description": "Allow choosing several options"},
     "allow_free_text": {"type": "boolean", "description": "Also accept a typed answer besides the options"},

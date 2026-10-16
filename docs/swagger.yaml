@@ -201,6 +201,66 @@ definitions:
           so instead of rendering a reassuring "0 sandboxes".
         type: boolean
     type: object
+  github_com_Tencent_WeKnora_internal_application_service.SkillCatalogInstallView:
+    properties:
+      bundle_sha256:
+        type: string
+      enabled:
+        type: boolean
+      error:
+        type: string
+      sandbox_config_id:
+        type: string
+      sandbox_config_name:
+        type: string
+      sandbox_type:
+        type: string
+      served:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.SkillServedInfo'
+        description: |-
+          Served is set while a newer install of this skill is in flight or has
+          failed and the image still runs the previous version.
+      skill_id:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+      version:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_application_service.SkillCatalogView:
+    properties:
+      bundle_sha256:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+        x-agent: true
+      id:
+        type: string
+        x-agent: catalog_skill_id
+      installations:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.SkillCatalogInstallView'
+        type: array
+      installed_on:
+        description: InstalledOn lists the sandbox config ids of Installations.
+        items:
+          type: string
+        type: array
+        x-agent: true
+      name:
+        type: string
+        x-agent: true
+      updated_at:
+        type: string
+      version:
+        type: string
+        x-agent: true
+    type: object
   github_com_Tencent_WeKnora_internal_application_service.SkillEnvGroup:
     properties:
       description:
@@ -493,7 +553,9 @@ definitions:
       auth_server_metadata_url:
         type: string
       auth_type:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthType'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthType'
+        x-agent: true
       client_id:
         type: string
       custom_headers:
@@ -519,7 +581,9 @@ definitions:
       advanced_config:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig'
       auth_config:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.MCPAuthConfigResponse'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.MCPAuthConfigResponse'
+        x-agent: true
       catalog:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.MCPCatalogSummary'
@@ -577,7 +641,11 @@ definitions:
       app_id:
         type: string
       base_url:
+        description: |-
+          BaseURL is empty for callers who may not view integration detail, and
+          for builtin models; see NewModelResponse.
         type: string
+        x-agent: true
       context_window:
         type: integer
       custom_headers:
@@ -590,6 +658,9 @@ definitions:
         additionalProperties:
           type: string
         type: object
+        x-agent: true
+        x-agent-detail: true
+        x-agent-keys: remote_model_name
       interface_type:
         type: string
       max_concurrency:
@@ -600,6 +671,7 @@ definitions:
         type: string
       provider:
         type: string
+        x-agent: true
       spec:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSpecOverride'
       supports_vision:
@@ -614,6 +686,8 @@ definitions:
           Capabilities is the catalog view of the model. Chat models get the
           protocol, thinking levels and context window; embedding and rerank
           models get input modalities, including support for image input.
+        x-agent: true
+        x-agent-detail: true
       created_at:
         type: string
       credentials:
@@ -642,7 +716,9 @@ definitions:
         type: string
         x-agent: true
       parameters:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.ModelParametersDTO'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.ModelParametersDTO'
+        x-agent: true
       source:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSource'
@@ -1044,29 +1120,37 @@ definitions:
   github_com_Tencent_WeKnora_internal_models_runtime.Capabilities:
     properties:
       api:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_models_api.API'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_models_api.API'
+        x-agent: true
       cataloged:
         type: boolean
+        x-agent: true
       context_window:
         type: integer
+        x-agent: true
       input:
         items:
           type: string
         type: array
+        x-agent: true
       max_output_tokens:
         type: integer
+        x-agent: true
       max_tokens_field:
         type: string
       provider:
         type: string
       reasoning:
         type: boolean
+        x-agent: true
       thinking_format:
         type: string
       thinking_levels:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_models_api.ReasoningEffort'
         type: array
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.APIKeyScopeType:
     enum:
@@ -1566,9 +1650,11 @@ definitions:
       embedding_model_id:
         description: ID of the embedding model used
         type: string
+        x-agent: true
       enabled:
         description: Whether the chat history KB is configured and enabled
         type: boolean
+        x-agent: true
       has_indexed_messages:
         description: Whether there are any indexed messages (used by frontend to lock
           embedding model)
@@ -1576,6 +1662,7 @@ definitions:
       indexed_message_count:
         description: Number of indexed message entries (Knowledge count)
         type: integer
+        x-agent: true
       knowledge_base_id:
         description: ID of the knowledge base used for chat history
         type: string
@@ -1837,8 +1924,9 @@ definitions:
         type: integer
         x-agent: true
       enable_parent_child:
-        description: EnableParentChild splits into large parent chunks and small child
-          chunks. Search matches a child and returns its parent.
+        description: |-
+          EnableParentChild splits into large parent chunks and small child chunks.
+          Search matches a child and returns its parent.
         type: boolean
         x-agent: true
       languages:
@@ -1875,8 +1963,9 @@ definitions:
         x-agent: true
         x-agent-maximum: "20"
       strategy:
-        description: 'Strategy selects how documents are split: auto, heading, heuristic,
-          recursive or legacy. Empty keeps the server default.'
+        description: |-
+          Strategy selects how documents are split: auto, heading, heuristic,
+          recursive or legacy. Empty keeps the server default.
         enum:
         - auto
         - heading
@@ -3805,6 +3894,7 @@ definitions:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeTag'
         type: array
+        x-agent: true
       tenant_id:
         description: Workspace ID
         type: integer
@@ -3994,8 +4084,9 @@ definitions:
         description: 'Storage provider config (new): only stores provider selection;
           credentials from workspace StorageEngineConfig'
       summary_model_id:
-        description: Summary model ID. model.list returns the ids. Used for summaries,
-          and as the default for auto-tagging and the AI description.
+        description: |-
+          Summary model ID. model.list returns the ids. Used for summaries, and as
+          the default for auto-tagging and the AI description.
         type: string
         x-agent: summary_model_id
       tenant_id:
@@ -4618,56 +4709,6 @@ definitions:
         description: 'Timeout in seconds, default: 30'
         type: integer
     type: object
-  github_com_Tencent_WeKnora_internal_types.MCPAuthConfig:
-    properties:
-      api_key:
-        type: string
-      api_key_header:
-        description: |-
-          APIKeyHeader is the header name that carries APIKey when AuthType is
-          api_key. Empty defaults to "X-API-Key". This is non-secret structural
-          config (the secret is APIKey), so it is not encrypted and is safe to echo
-          back in responses. It lets services that expect the key in a different
-          header (e.g. the raw token directly in "Authorization") work without
-          resorting to plaintext custom headers.
-        type: string
-      auth_server_metadata_url:
-        description: |-
-          AuthServerMetadataURL optionally pins the OAuth authorization server
-          metadata URL. When empty, the server is discovered automatically from
-          the MCP URL (RFC 9728 / RFC 8414).
-        type: string
-      auth_type:
-        allOf:
-        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthType'
-        description: |-
-          AuthType selects the authentication strategy. Empty ("") is treated as
-          none for backward compatibility with rows that pre-date this field.
-      client_id:
-        description: |-
-          ClientID optionally names an OAuth client registered with the
-          authorization server in advance. When set it is used instead of dynamic
-          client registration, for servers that offer no registration endpoint or
-          allow grants only to clients an administrator registered. Non-secret.
-        type: string
-      client_secret:
-        description: |-
-          ClientSecret is the secret of ClientID for a confidential client.
-          Secret: encrypted at rest like APIKey and Token, never returned, and
-          changed only through the credentials subresource after creation.
-        type: string
-      custom_headers:
-        additionalProperties:
-          type: string
-        type: object
-      scopes:
-        description: Scopes are the OAuth scopes requested during authorization. Optional.
-        items:
-          type: string
-        type: array
-      token:
-        type: string
-    type: object
   github_com_Tencent_WeKnora_internal_types.MCPAuthType:
     enum:
     - ""
@@ -4699,51 +4740,6 @@ definitions:
       uri:
         type: string
     type: object
-  github_com_Tencent_WeKnora_internal_types.MCPService:
-    properties:
-      advanced_config:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig'
-      auth_config:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthConfig'
-      created_at:
-        type: string
-      deleted_at:
-        $ref: '#/definitions/gorm.DeletedAt'
-      description:
-        type: string
-      enabled:
-        type: boolean
-      env_vars:
-        allOf:
-        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPEnvVars'
-        description: Environment variables for stdio
-      headers:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPHeaders'
-      id:
-        type: string
-      is_builtin:
-        description: Whether this is a builtin MCP service (visible to all workspaces)
-        type: boolean
-      name:
-        type: string
-      stdio_config:
-        allOf:
-        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPStdioConfig'
-        description: Required for stdio transport
-      tenant_id:
-        type: integer
-      transport_type:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPTransportType'
-      updated_at:
-        type: string
-      url:
-        description: 'Optional: required for SSE/HTTP Streamable'
-        type: string
-      usage_instructions:
-        description: UsageInstructions is maintained locally and is not overwritten
-          by directory refresh.
-        type: string
-    type: object
   github_com_Tencent_WeKnora_internal_types.MCPStdioConfig:
     properties:
       args:
@@ -4761,6 +4757,8 @@ definitions:
         type: string
       message:
         type: string
+        x-agent: true
+        x-agent-max-runes: "500"
       oauth_required:
         description: |-
           OAuthRequired is true when the connection failed because the server
@@ -4768,12 +4766,14 @@ definitions:
           configured for OAuth. The UI uses it to guide the user to switch the auth
           strategy to OAuth.
         type: boolean
+        x-agent: true
       resources:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPResource'
         type: array
       success:
         type: boolean
+        x-agent: true
       tools:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPTool'
@@ -4783,15 +4783,19 @@ definitions:
     properties:
       description:
         type: string
+        x-agent: true
+        x-agent-max-runes: "500"
       inputSchema:
         description: JSON Schema for tool parameters
         type: object
       name:
         type: string
+        x-agent: true
       require_approval:
         description: 'RequireApproval when true: agent execution pauses until the
           user approves in UI (issue #1173).'
         type: boolean
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.MCPTransportType:
     enum:
@@ -5175,9 +5179,14 @@ definitions:
       content:
         description: Message text content
         type: string
+        x-agent: true
+        x-agent-max-runes: "1500"
+        x-agent-response: true
       created_at:
         description: Message creation timestamp
         type: string
+        x-agent: true
+        x-agent-response: true
       deleted_at:
         allOf:
         - $ref: '#/definitions/gorm.DeletedAt'
@@ -5185,6 +5194,8 @@ definitions:
       id:
         description: Unique identifier for the message
         type: string
+        x-agent: message_id
+        x-agent-response: true
       images:
         description: Attached images with OCR/Caption text (for user messages)
         items:
@@ -5228,9 +5239,13 @@ definitions:
       request_id:
         description: Request identifier for tracking API requests
         type: string
+        x-agent: true
+        x-agent-response: true
       role:
         description: 'Message role: "user", "assistant", "system"'
         type: string
+        x-agent: true
+        x-agent-response: true
       run_state:
         description: |-
           RunState refines an incomplete message: MessageRunStateAwaitingInput
@@ -5355,26 +5370,35 @@ definitions:
         description: Assistant answer content (role=assistant), may be empty if only
           Q matched
         type: string
+        x-agent: true
+        x-agent-max-runes: "1000"
       created_at:
         description: Timestamp of the earliest message in the group
         type: string
+        x-agent: true
       match_type:
         description: 'How this result was matched: "keyword", "vector", or "hybrid"'
         type: string
+        x-agent: true
       query_content:
         description: User query content (role=user)
         type: string
+        x-agent: true
+        x-agent-max-runes: "600"
       request_id:
         description: The request_id that groups Q&A together
         type: string
+        x-agent: true
       score:
         description: Best score among the matched messages in this group
         type: number
       session_id:
         description: Session info
         type: string
+        x-agent: true
       session_title:
         type: string
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.MessageSearchResult:
     properties:
@@ -5386,6 +5410,7 @@ definitions:
       total:
         description: Total number of results
         type: integer
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.MessageSuggestionSet:
     properties:
@@ -6023,11 +6048,55 @@ definitions:
         type: string
       knowledge_id:
         type: string
+      mcp_service_id:
+        type: string
+      message_id:
+        type: string
+      model_id:
+        type: string
+      page:
+        type: string
+      section:
+        description: part of the page in view, e.g. an editor tab
+        type: string
+      selection:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.PageSelection'
+        description: Selection is the text the user selected on the page. Assistant
+          only.
+      session_id:
+        type: string
+      title:
+        description: |-
+          Title is the page's name as the client's navigation shows it, e.g.
+          "Agents"; it names pages without an identifier. Assistant only.
+        type: string
+      view:
+        description: |-
+          View is the title of the dialog or drawer open over the page, as the
+          page shows it. Assistant only.
+        type: string
       wiki_issue_ids:
         items:
           type: string
         type: array
       wiki_slug:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.PageSelection:
+    properties:
+      end_line:
+        type: integer
+      field:
+        description: the field's label
+        type: string
+      ref:
+        description: the field's read_page ref
+        type: string
+      start_line:
+        description: 1-based, multi-line fields only
+        type: integer
+      text:
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.ParserEngineConfig:
@@ -6759,11 +6828,17 @@ definitions:
   github_com_Tencent_WeKnora_internal_types.SearchParams:
     properties:
       disable_keywords_match:
+        description: Turns keyword matching off, leaving vector matching only.
         type: boolean
+        x-agent: true
       disable_vector_match:
+        description: Turns vector matching off, leaving keyword matching only.
         type: boolean
+        x-agent: true
       keyword_threshold:
+        description: Minimum keyword score a hit needs; 0 keeps every keyword hit.
         type: number
+        x-agent: true
       knowledge_base_ids:
         description: |-
           KnowledgeBaseIDs overrides the single KB ID passed to HybridSearch,
@@ -6773,11 +6848,17 @@ definitions:
           type: string
         type: array
       knowledge_ids:
+        description: Limits the search to these documents of the knowledge base.
         items:
           type: string
         type: array
+        x-agent: true
+        x-agent-maximum: "20"
       match_count:
+        description: Number of chunks to return; 0 uses the default.
         type: integer
+        x-agent: true
+        x-agent-maximum: "30"
       only_recommended:
         type: boolean
       query_embedding:
@@ -6789,6 +6870,8 @@ definitions:
           QueryText is required unless query_embedding is provided, keyword matching is disabled,
           and vector matching remains enabled.
         type: string
+        x-agent: true
+        x-agent-required: true
       rerank:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.RerankOptions'
@@ -6812,28 +6895,35 @@ definitions:
           type: string
         type: array
       vector_threshold:
+        description: Minimum vector similarity a hit needs; 0 keeps every vector hit.
         type: number
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.SearchResult:
     properties:
       chunk_index:
         description: Chunk index
         type: integer
+        x-agent: true
       chunk_metadata:
         description: ChunkMetadata stores chunk-level metadata (e.g., generated questions)
         type: object
       chunk_type:
         description: Chunk 类型
         type: string
+        x-agent: true
       content:
         description: Content
         type: string
+        x-agent: true
+        x-agent-max-runes: "600"
       end_at:
         description: End at
         type: integer
       id:
         description: ID
         type: string
+        x-agent: chunk_id
       image_info:
         description: 图片信息 (JSON 格式)
         type: string
@@ -6860,6 +6950,7 @@ definitions:
       knowledge_id:
         description: Knowledge ID
         type: string
+        x-agent: true
       knowledge_source:
         description: |-
           Knowledge source
@@ -6868,10 +6959,12 @@ definitions:
       knowledge_title:
         description: Knowledge title
         type: string
+        x-agent: true
       match_type:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MatchType'
         description: Match type
+        x-agent: true
       matched_content:
         description: |-
           MatchedContent is the actual content that was matched in vector search
@@ -6895,6 +6988,7 @@ definitions:
       score:
         description: Score
         type: number
+        x-agent: true
       seq:
         description: Seq
         type: integer
@@ -6943,6 +7037,8 @@ definitions:
     properties:
       created_at:
         type: string
+        x-agent: true
+        x-agent-response: true
       deleted_at:
         $ref: '#/definitions/gorm.DeletedAt'
       description:
@@ -6968,6 +7064,8 @@ definitions:
       id:
         description: ID
         type: string
+        x-agent: session_id
+        x-agent-response: true
       im_platform:
         description: |-
           IMPlatform is the originating IM platform (e.g. "feishu", "wecom") when
@@ -6978,6 +7076,8 @@ definitions:
       is_pinned:
         description: IsPinned indicates whether the session is pinned in the list.
         type: boolean
+        x-agent: true
+        x-agent-response: true
       kind:
         description: |-
           Kind is empty for ordinary chats and SessionKindAssistant for assistant
@@ -7019,8 +7119,12 @@ definitions:
       title:
         description: Title
         type: string
+        x-agent: true
+        x-agent-response: true
       updated_at:
         type: string
+        x-agent: true
+        x-agent-response: true
       user_id:
         description: |-
           UserID is the owner scope for this session. WeKnora user UUIDs, API
@@ -7065,6 +7169,109 @@ definitions:
         type: array
       web_search_enabled:
         type: boolean
+    type: object
+  github_com_Tencent_WeKnora_internal_types.SessionListItem:
+    properties:
+      created_at:
+        type: string
+        x-agent: true
+        x-agent-response: true
+      deleted_at:
+        $ref: '#/definitions/gorm.DeletedAt'
+      description:
+        description: Description
+        type: string
+      forked_from_message_id:
+        description: |-
+          ForkedFromMessageID is the user or assistant message, IN THE PARENT
+          SESSION, that the fork branched at. For a user point, messages strictly
+          before it were copied here. For an assistant point, that answer is
+          included so the branch continues after it.
+        type: string
+      host_workspace_dir:
+        description: |-
+          HostWorkspaceDir is the user-selected project directory this session
+          operates in, for the WeKnora Lite host sandbox only. Empty means the session
+          gets an auto-allocated workspace instead.
+
+          Written once at creation and never updated: re-pointing a live session
+          at a different directory would leave its transcript describing files
+          that are no longer there. Standard edition never writes it.
+        type: string
+      id:
+        description: ID
+        type: string
+        x-agent: session_id
+        x-agent-response: true
+      im_agent_id:
+        type: string
+      im_channel_id:
+        type: string
+      im_chat_id:
+        type: string
+      im_platform:
+        type: string
+      im_thread_id:
+        type: string
+      im_user_id:
+        type: string
+      is_pinned:
+        description: IsPinned indicates whether the session is pinned in the list.
+        type: boolean
+        x-agent: true
+        x-agent-response: true
+      kind:
+        description: |-
+          Kind is empty for ordinary chats and SessionKindAssistant for assistant
+          conversations; it is set at creation and never updated.
+        type: string
+      last_request_state:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SessionLastRequestState'
+        description: |-
+          LastRequestState records the input-bar state used the last time this
+          session sent a question (agent, model, KB scope, web search, MCPs).
+          Persisted on every successful POST to /knowledge-chat or /agent-chat so
+          that reopening the session can restore the original request context to
+          the chat UI. Stored in the legacy sessions.agent_config JSONB column to
+          avoid a new migration; the shape used today is `SessionLastRequestState`.
+      parent_session_id:
+        description: |-
+          ParentSessionID names the session this one was forked from. Empty for
+          ordinary sessions. Deliberately not a foreign key: the parent may be
+          deleted while the branch lives on, and a branch must not cascade away
+          with it. A dangling value simply renders as an ordinary session.
+        type: string
+      pinned_at:
+        description: PinnedAt records when the session was pinned; nil when not pinned.
+        type: string
+      sandbox_config_id:
+        description: |-
+          SandboxConfigID pins which sandbox config this session's CURRENT live
+          sandbox was created on. Empty means no live sandbox;
+          SandboxConfigIDGlobalDefault means the deployment-wide default config.
+
+          This is an ephemeral pin that dies with the sandbox, not a permanent
+          owner: sessions outlive sandboxes by months, so treating it as
+          permanent would make "no session references this config" never true.
+        type: string
+      tenant_id:
+        description: Workspace ID
+        type: integer
+      title:
+        description: Title
+        type: string
+        x-agent: true
+        x-agent-response: true
+      updated_at:
+        type: string
+        x-agent: true
+        x-agent-response: true
+      user_id:
+        description: |-
+          UserID is the owner scope for this session. WeKnora user UUIDs, API
+          external-user principals, and embed visitor principals all use this column.
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.ShareKnowledgeBaseRequest:
     properties:
@@ -9455,6 +9662,45 @@ definitions:
     required:
     - url
     type: object
+  internal_handler.CreateMCPServiceRequest:
+    properties:
+      advanced_config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig'
+      auth_config:
+        $ref: '#/definitions/internal_handler.MCPServiceAuthRequest'
+      description:
+        type: string
+      enabled:
+        type: boolean
+      headers:
+        additionalProperties:
+          type: string
+        type: object
+      name:
+        description: 服务名称，空间内唯一
+        type: string
+        x-agent: true
+      transport_type:
+        description: 传输方式
+        enum:
+        - sse
+        - http-streamable
+        type: string
+        x-agent: true
+      url:
+        description: 服务地址（http 或 https）
+        type: string
+        x-agent: true
+      usage_instructions:
+        description: 告诉智能体何时、如何使用该服务
+        type: string
+        x-agent: true
+        x-agent-max-bytes: "48000"
+    required:
+    - name
+    - transport_type
+    - url
+    type: object
   internal_handler.CreateModelRequest:
     properties:
       description:
@@ -10206,8 +10452,9 @@ definitions:
         description: 'Storage provider config (new): only stores provider selection;
           credentials from workspace StorageEngineConfig'
       summary_model_id:
-        description: Summary model ID. model.list returns the ids. Used for summaries,
-          and as the default for auto-tagging and the AI description.
+        description: |-
+          Summary model ID. model.list returns the ids. Used for summaries, and as
+          the default for auto-tagging and the AI description.
         type: string
         x-agent: summary_model_id
       tenant_id:
@@ -10529,6 +10776,58 @@ definitions:
       total:
         type: integer
     type: object
+  internal_handler.MCPServiceAuthRequest:
+    properties:
+      api_key:
+        type: string
+      api_key_header:
+        description: api_key 认证使用的请求头，默认 X-API-Key
+        type: string
+        x-agent: true
+      auth_type:
+        description: auth_type 留空表示无认证；bearer 发送 token，api_key 按 api_key_header 发送密钥
+        enum:
+        - api_key
+        - bearer
+        - oauth
+        type: string
+        x-agent: true
+      client_id:
+        type: string
+      custom_headers:
+        additionalProperties:
+          type: string
+        type: object
+      scopes:
+        items:
+          type: string
+        type: array
+      token:
+        type: string
+    type: object
+  internal_handler.MCPServiceAuthUpdateRequest:
+    properties:
+      api_key_header:
+        type: string
+      auth_server_metadata_url:
+        type: string
+      auth_type:
+        enum:
+        - api_key
+        - bearer
+        - oauth
+        type: string
+      client_id:
+        type: string
+      custom_headers:
+        additionalProperties:
+          type: string
+        type: object
+      scopes:
+        items:
+          type: string
+        type: array
+    type: object
   internal_handler.MessageResponse:
     properties:
       message:
@@ -10544,22 +10843,27 @@ definitions:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_models_api.API'
       context_window:
         type: integer
+        x-agent: true
       cost:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_models.ModelCost'
       dimension:
         type: integer
       id:
         type: string
+        x-agent: model_name
       input:
         items:
           type: string
         type: array
+        x-agent: true
       max_output_tokens:
         type: integer
       name:
         type: string
+        x-agent: display_name
       reasoning:
         type: boolean
+        x-agent: true
       source:
         description: |-
           Source is the vendor page these facts were read from, so the editor can
@@ -10571,6 +10875,7 @@ definitions:
         type: array
       type:
         type: string
+        x-agent: true
     type: object
   internal_handler.ModelProviderDTO:
     properties:
@@ -10591,6 +10896,8 @@ definitions:
         type: object
       description:
         type: string
+        x-agent: true
+        x-agent-detail: true
       descriptions:
         additionalProperties:
           type: string
@@ -10604,6 +10911,7 @@ definitions:
         type: string
       label:
         type: string
+        x-agent: true
       labels:
         additionalProperties:
           type: string
@@ -10612,18 +10920,23 @@ definitions:
         items:
           type: string
         type: array
+        x-agent: model_types
       models:
         items:
           $ref: '#/definitions/internal_handler.ModelCatalogEntryDTO'
         type: array
+        x-agent: true
+        x-agent-detail: true
       order:
         type: integer
       requiresAuth:
         type: boolean
+        x-agent: requires_auth
       thinking:
         $ref: '#/definitions/internal_handler.ProviderThinkingDTO'
       value:
         type: string
+        x-agent: provider
       website:
         type: string
     type: object
@@ -10911,6 +11224,17 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiConfig'
         description: Wiki page settings.
+    type: object
+  internal_handler.PatchModelRequest:
+    properties:
+      description:
+        description: 新的描述
+        type: string
+        x-agent: true
+      display_name:
+        description: 新的显示名称，空字符串表示改回使用模型名
+        type: string
+        x-agent: true
     type: object
   internal_handler.PlaceholderGroups:
     properties:
@@ -11284,13 +11608,17 @@ definitions:
     properties:
       limit:
         description: 'Maximum number of results to return (default: 20)'
+        minimum: 1
         type: integer
+        x-agent: true
+        x-agent-maximum: "20"
       mode:
         description: 'Search mode: "keyword", "vector", "hybrid" (default: "hybrid")'
         type: string
       query:
         description: Query text for search
         type: string
+        x-agent: true
       session_ids:
         description: Filter by specific session IDs (optional)
         items:
@@ -11664,6 +11992,43 @@ definitions:
         example: true
         type: boolean
     type: object
+  internal_handler.UpdateMCPServiceRequest:
+    properties:
+      advanced_config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig'
+      auth_config:
+        $ref: '#/definitions/internal_handler.MCPServiceAuthUpdateRequest'
+      description:
+        type: string
+      enabled:
+        description: 启用或停用该服务
+        type: boolean
+        x-agent: true
+      headers:
+        additionalProperties:
+          type: string
+        type: object
+      name:
+        description: 新的服务名称
+        type: string
+        x-agent: true
+      transport_type:
+        description: 新的传输方式
+        enum:
+        - sse
+        - http-streamable
+        type: string
+        x-agent: true
+      url:
+        description: 新的服务地址（http 或 https）
+        type: string
+        x-agent: true
+      usage_instructions:
+        description: 新的使用说明，1 到 16000 个字符
+        type: string
+        x-agent: true
+        x-agent-max-bytes: "48000"
+    type: object
   internal_handler.UpdateModelRequest:
     properties:
       description:
@@ -11868,6 +12233,53 @@ definitions:
     - ids
     - kb_id
     type: object
+  internal_handler.catalogInstallData:
+    properties:
+      errors:
+        additionalProperties:
+          type: string
+        type: object
+      failed:
+        description: '"sandbox config id: reason" for each sandbox that was not started'
+        items:
+          type: string
+        type: array
+        x-agent: true
+      installs:
+        additionalProperties:
+          type: string
+        type: object
+      started:
+        description: Sandbox config ids whose install started
+        items:
+          type: string
+        type: array
+        x-agent: true
+    type: object
+  internal_handler.catalogInstallRequest:
+    properties:
+      sandbox_config_ids:
+        description: 'Sandbox config ids to install onto: an agent''s sandbox_config_id,
+          or host on WeKnora Lite'
+        items:
+          type: string
+        type: array
+        x-agent: true
+        x-agent-maximum: "20"
+    required:
+    - sandbox_config_ids
+    type: object
+  internal_handler.catalogInstallResponse:
+    properties:
+      data:
+        allOf:
+        - $ref: '#/definitions/internal_handler.catalogInstallData'
+        x-agent: true
+      success:
+        description: false when any sandbox failed to start
+        type: boolean
+        x-agent: true
+    type: object
   internal_handler.createInvitationRequest:
     properties:
       email:
@@ -12050,6 +12462,12 @@ definitions:
       updated_at:
         type: string
     type: object
+  internal_handler.skillAccepted:
+    properties:
+      skill_id:
+        type: string
+        x-agent: true
+    type: object
   internal_handler.skillEnvResponse:
     properties:
       description:
@@ -12065,9 +12483,11 @@ definitions:
     properties:
       enabled:
         description: |-
-          Enabled is a pointer because its absence is not a request to disable the
-          skill; a body may carry envs instead.
+          Enabled shows (true) or hides (false) the skill. Its absence leaves the
+          skill as it is, since a body may carry envs instead.
         type: boolean
+        x-agent: true
+        x-agent-required: true
       envs:
         additionalProperties:
           type: string
@@ -12085,24 +12505,37 @@ definitions:
         type: string
       description:
         type: string
+        x-agent: true
       enabled:
         type: boolean
+        x-agent: true
       envs:
         items:
           $ref: '#/definitions/internal_handler.skillEnvResponse'
         type: array
       error:
         type: string
+        x-agent: true
       id:
         type: string
+        x-agent: skill_id
       install_message_id:
         type: string
       install_session_id:
         type: string
       installed_snapshot_id:
         type: string
+      missing_envs:
+        description: |-
+          MissingEnvs names the required environment variables with no
+          workspace value yet; the skill cannot run until they are set.
+        items:
+          type: string
+        type: array
+        x-agent: true
       name:
         type: string
+        x-agent: true
       served:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.SkillServedInfo'
@@ -12111,10 +12544,12 @@ definitions:
           is in flight or after it failed.
       status:
         type: string
+        x-agent: true
       updated_at:
         type: string
       version:
         type: string
+        x-agent: true
     type: object
   internal_handler.skillSourceRequest:
     properties:
@@ -12126,6 +12561,11 @@ definitions:
           a direct zip/SKILL.md URL. Bare "owner/slug" is rejected: it is both a
           ClawHub id and a GitHub repo. The fetch carries no credential.
         type: string
+        x-agent: true
+        x-agent-max-bytes: "2048"
+        x-agent-required: true
+    required:
+    - source
     type: object
   internal_handler.storageBackendRequest:
     properties:
@@ -12526,6 +12966,24 @@ definitions:
           type: string
         type: array
     type: object
+  internal_handler_session.sessionListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SessionListItem'
+        type: array
+      page:
+        type: integer
+        x-agent: true
+      page_size:
+        type: integer
+        x-agent: true
+      success:
+        type: boolean
+      total:
+        type: integer
+        x-agent: true
+    type: object
 info:
   contact:
     name: WeKnora Github
@@ -12645,10 +13103,12 @@ paths:
       consumes:
       - application/json
       description: |-
-        回答 Agent 运行中发起的交互（ask_user 提问或工具审批）。
+        回答 Agent 运行中发起的交互（ask_user 提问、工具审批，或由浏览器自动应答的页面读写）。
         kind 须与交互一致，response 为该类型的回答 JSON（不接受未知字段）：
         ask_user 为 {selected?, values?, text?, declined?}；
-        tool_approval 为 {approved: bool, modified_args?: object, reason?: string}。
+        tool_approval 为 {approved: bool, modified_args?: object, reason?: string, allow_in_session?: bool}；
+        page_action 为 {declined?, error?, location?, snapshot?, applied?: [{ref, label?, summary?}],
+        stayed?, return_path?}。
         返回 resumed=true 表示运行已挂起并在本次回答后恢复，客户端需重新接入该消息的事件流
       parameters:
       - description: 交互 ID（事件中的 pending_id）
@@ -16209,6 +16669,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: knowledge_base_id
       - description: 搜索参数
         in: body
         name: request
@@ -16244,6 +16705,18 @@ paths:
       summary: 混合搜索
       tags:
       - 知识库
+      x-agent:
+        id: knowledge_base.search
+        max_items: 30
+        method: post
+        risk: probe
+      x-agent-hint: 'Runs the raw vector and keyword recall of one knowledge base,
+        without rerank, and returns the chunks it finds in rank order, so you can
+        see why something is or is not found. match_type 0 is a vector hit, 1 a keyword
+        hit; score ranks the merged results and is not a similarity. Each threshold
+        filters its own retriever before merging: leave them out to see every candidate,
+        or set them to an agent''s vector_threshold and keyword_threshold to see what
+        passes. For answering a question, use search_knowledge instead.'
     post:
       consumes:
       - application/json
@@ -16255,6 +16728,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: knowledge_base_id
       - description: 搜索参数
         in: body
         name: request
@@ -16290,6 +16764,18 @@ paths:
       summary: 混合搜索
       tags:
       - 知识库
+      x-agent:
+        id: knowledge_base.search
+        max_items: 30
+        method: post
+        risk: probe
+      x-agent-hint: 'Runs the raw vector and keyword recall of one knowledge base,
+        without rerank, and returns the chunks it finds in rank order, so you can
+        see why something is or is not found. match_type 0 is a vector hit, 1 a keyword
+        hit; score ranks the merged results and is not a similarity. Each threshold
+        filters its own retriever before merging: leave them out to see every candidate,
+        or set them to an agent''s vector_threshold and keyword_threshold to see what
+        passes. For answering a question, use search_knowledge instead.'
   /knowledge-bases/{id}/images:
     get:
       consumes:
@@ -18305,8 +18791,10 @@ paths:
         risk: write
         target: knowledge_base.get
       x-agent-hint: Sets the same tags on up to 20 documents in one knowledge base,
-        replacing the tags they have now. tag_ids come from knowledge_base.list_tags;
-        an empty tag_ids clears every tag. It does not delete documents.
+        replacing the tags they have now. To add or remove one tag, read each document's
+        tags with knowledge.get or knowledge.list first and pass the full resulting
+        list. tag_ids come from knowledge_base.list_tags; an empty tag_ids clears
+        every tag. It does not delete documents.
   /knowledgebase/{kb_id}/wiki/auto-fix:
     post:
       description: Automatically fix fixable wiki issues (broken links, etc.)
@@ -19403,7 +19891,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPService'
+          $ref: '#/definitions/internal_handler.CreateMCPServiceRequest'
       produces:
       - application/json
       responses:
@@ -19426,6 +19914,16 @@ paths:
       summary: 创建MCP服务
       tags:
       - MCP服务
+      x-agent:
+        id: mcp_service.create
+        label_param: name
+        risk: write
+        role: admin
+      x-agent-hint: 'Adds a remote MCP service (SSE or HTTP Streamable) and turns
+        it on. Take the URL from the user or the service''s own documentation. It
+        never carries a key or token: for a service that needs one, set auth_type
+        (api_key, bearer or oauth) and afterwards give the user open_page with mcp_service_id
+        so they enter the credential or authorize. Then check it with mcp_service.test.'
   /mcp-services/{id}:
     delete:
       consumes:
@@ -19437,6 +19935,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: mcp_service_id
       produces:
       - application/json
       responses:
@@ -19454,6 +19953,14 @@ paths:
       summary: 删除MCP服务
       tags:
       - MCP服务
+      x-agent:
+        id: mcp_service.delete
+        label: name
+        risk: destructive
+        role: admin
+        target: mcp_service.get
+      x-agent-hint: Deletes an MCP service with its saved credentials; agents that
+        used it lose its tools. Cannot be undone; built-in services cannot be deleted.
     get:
       consumes:
       - application/json
@@ -19500,12 +20007,13 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: mcp_service_id
       - description: 更新字段
         in: body
         name: request
         required: true
         schema:
-          type: object
+          $ref: '#/definitions/internal_handler.UpdateMCPServiceRequest'
       produces:
       - application/json
       responses:
@@ -19528,6 +20036,18 @@ paths:
       summary: 更新MCP服务
       tags:
       - MCP服务
+      x-agent:
+        id: mcp_service.update
+        label: name
+        risk: write
+        role: admin
+        target: mcp_service.get
+      x-agent-hint: Changes the listed settings of an MCP service; a field left out
+        is kept. Turning a service off stops every agent from using it. Changing url
+        or transport_type drops the API key, token and custom headers saved for the
+        old address, so give the user open_page with mcp_service_id to enter them
+        again; a service that uses OAuth cannot be moved here. Built-in services cannot
+        be changed.
   /mcp-services/{id}/credentials:
     put:
       consumes:
@@ -19864,6 +20384,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: mcp_service_id
       produces:
       - application/json
       responses:
@@ -19886,6 +20407,14 @@ paths:
       summary: 测试MCP服务连接
       tags:
       - MCP服务
+      x-agent:
+        id: mcp_service.test
+        risk: probe
+        role: admin
+      x-agent-hint: Connects to an MCP service with its saved settings and reports
+        whether it works. success false comes with the reason in message; oauth_required
+        means the user must authorize it in the MCP settings. List its tools with
+        mcp_service.list_tools.
   /mcp-services/{id}/tool-approvals/{tool_name}:
     put:
       consumes:
@@ -19942,6 +20471,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: mcp_service_id
       produces:
       - application/json
       responses:
@@ -19966,6 +20496,13 @@ paths:
       summary: 获取MCP服务工具列表
       tags:
       - MCP服务
+      x-agent:
+        id: mcp_service.list_tools
+        max_items: 200
+        risk: read
+      x-agent-hint: Lists the tools an MCP service offers, asking the service itself.
+        Use it to check that a service can do what an agent needs before binding it.
+        An error means the service is unreachable; mcp_service.test says why.
   /mcp-services/oauth/callback:
     get:
       description: 接收授权服务器回调并完成 code 交换，随后重定向回前端
@@ -20664,15 +21201,20 @@ paths:
         name: session_id
         required: true
         type: string
+        x-agent: true
       - default: 20
         description: 返回数量
         in: query
+        minimum: 1
         name: limit
         type: integer
+        x-agent: true
+        x-agent-maximum: "20"
       - description: 在此时间之前的消息（RFC3339Nano格式）
         in: query
         name: before_time
         type: string
+        x-agent: true
       - default: handle
         description: 文件引用形式，public 返回可加载直链
         enum:
@@ -20705,6 +21247,11 @@ paths:
       summary: 加载消息历史
       tags:
       - 消息
+      x-agent:
+        id: message.list
+        risk: read
+      x-agent-hint: The latest messages of one of the user's conversations, oldest
+        first. For earlier ones, pass the created_at of the first message as before_time.
   /messages/chat-history-index/clear:
     post:
       description: 暂停消息索引，删除索引知识、分块和向量，保留原始会话和消息。失败后保持暂停，可重试。
@@ -20757,6 +21304,12 @@ paths:
       summary: 获取聊天历史知识库统计
       tags:
       - 消息
+      x-agent:
+        id: message.chat_history_stats
+        risk: read
+      x-agent-hint: Whether the workspace indexes conversations for search by meaning,
+        and how many messages are indexed. When it is off, message.search only matches
+        exact words; the setting is under settings section chathistory.
   /messages/search:
     post:
       consumes:
@@ -20791,6 +21344,15 @@ paths:
       summary: 搜索历史对话
       tags:
       - 消息
+      x-agent:
+        id: message.search
+        max_items: 20
+        risk: probe
+        root: data.items
+      x-agent-hint: Finds exchanges in the user's own past conversations by what was
+        said, each with its session_id. Matching is by meaning only when message indexing
+        is on (see message.chat_history_stats); otherwise words must appear verbatim,
+        so retry with the user's exact wording before concluding nothing matches.
   /models:
     get:
       consumes:
@@ -20824,9 +21386,10 @@ paths:
         id: model.list
         max_items: 200
         risk: read
-      x-agent-hint: Lists the workspace's models by name and type. An agent's chat
-        model must be of type KnowledgeQA. Endpoints and keys are not shown; the user
-        manages models in the settings.
+      x-agent-hint: Lists the workspace's models by name, type and provider. An agent's
+        chat model must be of type KnowledgeQA. base_url is shown only to users who
+        may manage integrations and is empty for builtin models; keys are never shown.
+        The provider is an id for model.get_provider.
     post:
       consumes:
       - application/json
@@ -20871,6 +21434,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: model_id
       produces:
       - application/json
       responses:
@@ -20892,6 +21456,15 @@ paths:
       summary: 删除模型
       tags:
       - 模型管理
+      x-agent:
+        id: model.delete
+        label: name
+        risk: destructive
+        role: admin
+        target: model.get
+      x-agent-hint: Deletes a model with its saved key. Refused while a knowledge
+        base, agent or long-term memory still uses it; the error names them, so tell
+        the user what to switch first. Cannot be undone.
     get:
       consumes:
       - application/json
@@ -20928,6 +21501,62 @@ paths:
       x-agent:
         id: model.get
         risk: read
+    patch:
+      consumes:
+      - application/json
+      description: 只修改显示名称和描述；接入配置与凭据保持不变。
+      parameters:
+      - description: 模型ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: model_id
+      - description: 要修改的字段
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.PatchModelRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的模型
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.ModelResponse'
+              type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 内置模型只能由系统管理员修改
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 模型不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 修改模型显示信息
+      tags:
+      - 模型管理
+      x-agent:
+        id: model.update
+        label: name
+        risk: write
+        role: admin
+        target: model.get
+      x-agent-hint: Renames a model for display or changes its description; its endpoint,
+        key and settings stay as they are. To change those, give the user open_page
+        with model_id.
     put:
       consumes:
       - application/json
@@ -21053,9 +21682,16 @@ paths:
       description: 根据模型类型获取支持的厂商定义（含图标、默认地址、额外字段、内置模型目录与思考能力）
       parameters:
       - description: 模型类型 (chat, embedding, rerank, vllm, asr)
+        enum:
+        - chat
+        - embedding
+        - rerank
+        - vllm
+        - asr
         in: query
         name: model_type
         type: string
+        x-agent: true
       produces:
       - application/json
       responses:
@@ -21076,6 +21712,73 @@ paths:
       summary: 获取模型厂商列表
       tags:
       - 模型管理
+      x-agent:
+        id: model.list_providers
+        max_items: 200
+        risk: read
+      x-agent-hint: Lists the providers of the model catalog, including vendors an
+        admin added, by id and name. Use the id as model_draft.provider in open_page,
+        and read one provider's models with model.get_provider.
+  /models/providers/{provider}:
+    get:
+      consumes:
+      - application/json
+      description: 返回一个厂商的定义及其模型目录，可按模型类型与关键词过滤模型
+      parameters:
+      - description: 厂商标识
+        in: path
+        name: provider
+        required: true
+        type: string
+        x-agent: provider
+      - description: 模型类型 (chat, embedding, rerank, vllm, asr)
+        enum:
+        - chat
+        - embedding
+        - rerank
+        - vllm
+        - asr
+        in: query
+        name: model_type
+        type: string
+        x-agent: true
+      - description: 按模型 ID 或名称过滤（不区分大小写）
+        in: query
+        name: keyword
+        type: string
+        x-agent: true
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 厂商详情
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ModelProviderDTO'
+              type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 厂商不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取单个模型厂商
+      tags:
+      - 模型管理
+      x-agent:
+        id: model.get_provider
+        risk: read
+      x-agent-hint: 'One catalog provider with the models it offers: model_name is
+        what model_draft.model_name takes in open_page. Pass model_type to keep one
+        kind, and keyword when the list is truncated.'
   /models/weknoracloud/status:
     get:
       description: 检查当前空间的 WeKnoraCloud 凭证是否完好；needs_reinit=true 表示需要重新保存
@@ -22015,11 +22718,13 @@ paths:
     get:
       description: List the agent skills installed onto one sandbox config's image.
       parameters:
-      - description: Sandbox config ID
+      - description: 'Sandbox config ID: the agent''s sandbox_config_id, or host on
+          WeKnora Lite'
         in: path
         name: id
         required: true
         type: string
+        x-agent: sandbox_config_id
       produces:
       - application/json
       responses:
@@ -22049,6 +22754,16 @@ paths:
       summary: List installed skills
       tags:
       - SandboxConfig
+      x-agent:
+        id: skill.list_installed
+        max_items: 200
+        risk: read
+        role: admin
+      x-agent-hint: Lists every skill installed on a sandbox, including disabled,
+        failed and still-installing ones, with the ids that skill.set_enabled and
+        skill.uninstall take. status ready means it can run; missing_envs names values
+        the user must set in the skill settings before it works. Use skill.list for
+        what an agent can pick.
     post:
       consumes:
       - application/json
@@ -22066,11 +22781,13 @@ paths:
         runs for minutes, so the request is only accepted; follow it
         via the install-events stream.
       parameters:
-      - description: Sandbox config ID
+      - description: 'Sandbox config ID: the agent''s sandbox_config_id, or host on
+          WeKnora Lite'
         in: path
         name: id
         required: true
         type: string
+        x-agent: sandbox_config_id
       - description: Skill bundle (zip)
         in: formData
         name: file
@@ -22086,8 +22803,12 @@ paths:
         "202":
           description: Install accepted
           schema:
-            additionalProperties: true
-            type: object
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.skillAccepted'
+              type: object
         "400":
           description: Missing, oversized or invalid bundle or source
           schema:
@@ -22107,6 +22828,22 @@ paths:
       summary: Install a skill
       tags:
       - SandboxConfig
+      x-agent:
+        always_confirm: true
+        id: skill.install
+        label_param: source
+        risk: write
+        role: admin
+      x-agent-hint: 'Installs a public skill onto a sandbox from its source. When
+        the user pastes install instructions from a skill hub (a command such as npx
+        skills add owner/repo --skill name, a clawhub install line, or a page link),
+        turn them into one source: a github.com / gitlab.com / skills.sh / clawhub
+        / skillhub page URL, @owner/slug or a bare slug for ClawHub, skills-sh:owner/repo/slug,
+        or a direct zip or SKILL.md URL. Bare owner/slug is ambiguous and rejected;
+        ask which hub it is from. Never run their commands or ask for keys. The install
+        runs fetched code as root in the sandbox image, so it always asks the user.
+        It takes minutes: tell the user it started, then check it with skill.get_installed.
+        Enable it for an agent with agent.update selected_skills once it is ready.'
   /sandbox-configs/{id}/skills/{skillId}:
     delete:
       description: |-
@@ -22119,19 +22856,25 @@ paths:
         name: id
         required: true
         type: string
-      - description: Skill ID
+        x-agent: sandbox_config_id
+      - description: Skill ID from skill.list_installed
         in: path
         name: skillId
         required: true
         type: string
+        x-agent: skill_id
       produces:
       - application/json
       responses:
         "202":
           description: Removal accepted
           schema:
-            additionalProperties: true
-            type: object
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.skillAccepted'
+              type: object
         "401":
           description: Unauthorized
           schema:
@@ -22147,6 +22890,15 @@ paths:
       summary: Remove an installed skill
       tags:
       - SandboxConfig
+      x-agent:
+        id: skill.uninstall
+        label: name
+        risk: destructive
+        role: admin
+        target: skill.get_installed
+      x-agent-hint: Removes a skill from a sandbox image; agents on that sandbox can
+        no longer use it. The rebuild takes minutes. To only hide it, use skill.set_enabled
+        instead.
     get:
       description: Retrieve one installed skill of a sandbox config.
       parameters:
@@ -22155,11 +22907,13 @@ paths:
         name: id
         required: true
         type: string
-      - description: Skill ID
+        x-agent: sandbox_config_id
+      - description: Skill ID from skill.list_installed
         in: path
         name: skillId
         required: true
         type: string
+        x-agent: skill_id
       produces:
       - application/json
       responses:
@@ -22187,6 +22941,13 @@ paths:
       summary: Get an installed skill
       tags:
       - SandboxConfig
+      x-agent:
+        id: skill.get_installed
+        risk: read
+        role: admin
+      x-agent-hint: 'Returns one installed skill. After skill.install, read it to
+        follow the install: status moves from installing to ready or failed, and error
+        says why it failed.'
     patch:
       consumes:
       - application/json
@@ -22199,11 +22960,13 @@ paths:
         name: id
         required: true
         type: string
-      - description: Skill ID
+        x-agent: sandbox_config_id
+      - description: Skill ID from skill.list_installed
         in: path
         name: skillId
         required: true
         type: string
+        x-agent: skill_id
       - description: Fields to update
         in: body
         name: request
@@ -22241,6 +23004,15 @@ paths:
       summary: Update an installed skill
       tags:
       - SandboxConfig
+      x-agent:
+        id: skill.set_enabled
+        label: name
+        risk: write
+        role: admin
+        target: skill.get_installed
+      x-agent-hint: 'Shows or hides an installed skill for every agent on that sandbox;
+        the files stay installed. Environment values are not set here: the user enters
+        them in the skill settings.'
   /sandbox-configs/{id}/skills/{skillId}/files:
     get:
       description: List files in the stored skill bundle without starting a sandbox.
@@ -22518,22 +23290,31 @@ paths:
       parameters:
       - description: 页码
         in: query
+        minimum: 1
         name: page
         type: integer
+        x-agent: true
+        x-agent-maximum: "10000"
       - description: 每页数量
         in: query
+        maximum: 1000
+        minimum: 1
         name: page_size
         type: integer
+        x-agent: true
+        x-agent-maximum: "20"
       - description: 会话类型：空值仅普通会话；assistant 仅当前用户的助手会话
         enum:
         - assistant
         in: query
         name: kind
         type: string
+        x-agent: true
       - description: 标题模糊搜索
         in: query
         name: keyword
         type: string
+        x-agent: true
       - description: 来源过滤：web / embed / api / feishu / wechat / slack / ...（api、embed、IM
           渠道需 Admin+）
         in: query
@@ -22549,8 +23330,7 @@ paths:
         "200":
           description: 会话列表
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/internal_handler_session.sessionListResponse'
         "400":
           description: 请求参数错误
           schema:
@@ -22561,6 +23341,12 @@ paths:
       summary: 获取会话列表
       tags:
       - 会话
+      x-agent:
+        id: session.list
+        risk: read
+      x-agent-hint: The user's own conversations, pinned ones first, then most recently
+        active. keyword matches titles only, which are often auto-generated; to find
+        a conversation by what was said, use message.search. Read one with message.list.
     post:
       consumes:
       - application/json
@@ -23424,14 +24210,28 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.SkillCatalogView'
+                  type: array
+              type: object
       security:
       - Bearer: []
       - ApiKeyAuth: []
       summary: List workspace skills
       tags:
       - Skills
+      x-agent:
+        id: skill.list_catalog
+        max_items: 200
+        risk: read
+      x-agent-hint: Lists the skills already added to this workspace, with the sandbox
+        config ids each is installed_on. skill.install_catalog puts one onto more
+        sandboxes without fetching it again; for a skill not listed here, use skill.install
+        with its source.
     post:
       consumes:
       - application/json
@@ -23466,6 +24266,41 @@ paths:
       summary: Delete a catalog skill
       tags:
       - Skills
+    get:
+      description: Returns one skill definition of this workspace and which sandbox
+        configs it is installed on.
+      parameters:
+      - description: Catalog skill ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: catalog_skill_id
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.SkillCatalogView'
+              type: object
+        "404":
+          description: Skill not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Get a workspace skill
+      tags:
+      - Skills
+      x-agent:
+        id: skill.get_catalog
+        risk: read
   /skills/catalog/{id}/files:
     get:
       description: Lists the stored catalog bundle. Files belong to the skill definition,
@@ -23532,17 +24367,38 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: catalog_skill_id
+      - description: Target sandboxes
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.catalogInstallRequest'
       produces:
       - application/json
       responses:
         "202":
           description: Accepted
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/internal_handler.catalogInstallResponse'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
       summary: Install a catalog skill onto sandboxes
       tags:
       - Skills
+      x-agent:
+        always_confirm: true
+        id: skill.install_catalog
+        label: name
+        risk: write
+        role: admin
+        root: ""
+        target: skill.get_catalog
+      x-agent-hint: Installs a workspace skill from skill.list_catalog onto sandboxes,
+        reusing its stored bundle. Like skill.install it runs as root in each image
+        and always asks the user, and each install takes minutes; check them with
+        skill.list_installed.
   /storage-backends:
     get:
       description: List all storage backend instances for the current workspace, with

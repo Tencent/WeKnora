@@ -220,6 +220,14 @@ func (b *Broker) Store() Store { return b.store }
 // Suspensions exposes the run-state store.
 func (b *Broker) Suspensions() SuspensionStore { return b.suspensions }
 
+// SessionPrompts lists the session's prompts in the given statuses, oldest
+// first.
+func (b *Broker) SessionPrompts(
+	ctx context.Context, sessionID string, statuses []string,
+) ([]*types.AgentPrompt, error) {
+	return b.store.ListBySession(ctx, sessionID, statuses)
+}
+
 // RegisterKind installs the answer validator for kind. Resolve rejects
 // answers to kinds without a validator.
 func (b *Broker) RegisterKind(kind string, validate ResponseValidator) {

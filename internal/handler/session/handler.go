@@ -295,16 +295,18 @@ func (h *Handler) GetSession(c *gin.Context) {
 // @Tags         会话
 // @Accept       json
 // @Produce      json
-// @Param        page       query     int     false  "页码"
-// @Param        page_size  query     int     false  "每页数量"
-// @Param        kind       query     string  false  "会话类型：空值仅普通会话；assistant 仅当前用户的助手会话" Enums(assistant)
-// @Param        keyword    query     string  false  "标题模糊搜索"
+// @Param        page       query     int     false  "页码"  minimum(1)  extensions(x-agent,x-agent-maximum=10000)
+// @Param        page_size  query     int     false  "每页数量"  minimum(1)  maximum(1000)  extensions(x-agent,x-agent-maximum=20)
+// @Param        kind       query     string  false  "会话类型：空值仅普通会话；assistant 仅当前用户的助手会话" Enums(assistant)  extensions(x-agent)
+// @Param        keyword    query     string  false  "标题模糊搜索"  extensions(x-agent)
 // @Param        source     query     string  false  "来源过滤：web / embed / api / feishu / wechat / slack / ...（api、embed、IM 渠道需 Admin+）"
 // @Param        agent_id   query     string  false  "按 Agent 过滤（仅对 IM 会话生效）"
-// @Success      200        {object}  map[string]interface{}  "会话列表"
+// @Success      200        {object}  sessionListResponse  "会话列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"session.list","risk":"read"}
+// @x-agent-hint "The user's own conversations, pinned ones first, then most recently active. keyword matches titles only, which are often auto-generated; to find a conversation by what was said, use message.search. Read one with message.list."
 // @Router       /sessions [get]
 func (h *Handler) GetSessionsByTenant(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -339,13 +341,23 @@ func (h *Handler) GetSessionsByTenant(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success":   true,
-		"data":      result.Data,
-		"total":     result.Total,
-		"page":      result.Page,
-		"page_size": result.PageSize,
+	items, _ := result.Data.([]*types.SessionListItem)
+	c.JSON(http.StatusOK, sessionListResponse{
+		Success:  true,
+		Data:     items,
+		Total:    result.Total,
+		Page:     result.Page,
+		PageSize: result.PageSize,
 	})
+}
+
+// sessionListResponse is the body of GetSessionsByTenant.
+type sessionListResponse struct {
+	Success  bool                     `json:"success"`
+	Data     []*types.SessionListItem `json:"data"`
+	Total    int64                    `json:"total" extensions:"x-agent"`
+	Page     int                      `json:"page" extensions:"x-agent"`
+	PageSize int                      `json:"page_size" extensions:"x-agent"`
 }
 
 // UpdateSession godoc
