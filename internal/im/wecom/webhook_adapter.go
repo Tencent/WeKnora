@@ -161,6 +161,7 @@ func (a *WebhookAdapter) VerifyCallback(c *gin.Context) error {
 		encrypt = c.Query("echostr")
 	} else {
 		var body callbackRequestBody
+		im.LimitWebhookBody(c)
 		bodyBytes, err := io.ReadAll(c.Request.Body)
 		if err != nil {
 			return fmt.Errorf("read request body: %w", err)
@@ -204,6 +205,7 @@ func (a *WebhookAdapter) HandleURLVerification(c *gin.Context) bool {
 
 // ParseCallback parses a WeCom callback into a unified IncomingMessage.
 func (a *WebhookAdapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
+	im.LimitWebhookBody(c)
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
