@@ -402,7 +402,7 @@
               </div>
             </div>
 
-            <div v-if="formData.multimodalConfig.enabled" class="setting-row setting-row-vertical">
+            <div v-if="formData.multimodalConfig.enabled" class="setting-row setting-row-vertical image-panel-flush">
               <div class="setting-info">
                 <label>{{ $t('knowledgeEditor.advanced.multimodal.imagePipelineSectionLabel') }}</label>
                 <p class="desc">
@@ -426,7 +426,7 @@
             <!-- 观察失败兜底：开关，归在开关区（说明随开关就地显示）。 -->
             <div
               v-if="formData.multimodalConfig.enabled && formData.imageAttrsEnabled"
-              class="setting-row"
+              class="setting-row image-panel-flush"
             >
               <div class="setting-info">
                 <label>{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobserved') }}</label>
@@ -1998,6 +1998,14 @@ watch(() => chatResources.allModels, (list) => {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid var(--td-component-border);
+}
+
+// .setting-row 自带下边框，那是给"一排互不相关的设置行"用的。图片流水线面板里
+// 的行属于三个分段之一，分段之间才画线（① / ② 由面板内的 .image-pipeline-divider
+// 画，② / ③ 由 .image-attr-block 的上边框画），所以段内的行显式去掉下边框 ——
+// 否则「识别时开启思考」与「观察失败仍 OCR」之间会多出一条不属于任何分段的线。
+.kb-multimodal-settings .setting-row.image-panel-flush {
+  border-bottom: none;
 }
 // 折叠标题：收起时仍能读到这一段是什么、为什么有它。
 .image-attr-summary {

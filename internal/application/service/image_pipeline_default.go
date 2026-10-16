@@ -30,6 +30,8 @@ func (defaultPipeline) Description() string {
 const (
 	captionFieldKeyEnableCaption = "enable_caption"
 	captionFieldKeyEnableOCR     = "enable_ocr"
+	// Not a param: a note is explanation text, and its key only names the entry.
+	captionFieldKeyNoteActions = "note_actions"
 )
 
 // Fields declares the switches the panel renders for this pipeline. Caption and
@@ -37,6 +39,12 @@ const (
 // fields existed gets: both actions run, as before. The two thinking switches
 // default to false for the opposite reason — they are new work, and an action
 // that reasons costs a second full pass before it can say anything at all.
+//
+// Declared in the three runs the panel renders: the two standing switches, then
+// the advanced thinking switches, then the note. The thinking switches are
+// action-level fields, declared once at the action layer and carried in here —
+// a pipeline does not re-declare an action's tunable, only where that tunable
+// belongs in its own panel.
 func (defaultPipeline) Fields() []types.ImageFieldDef {
 	return []types.ImageFieldDef{
 		{
@@ -55,11 +63,17 @@ func (defaultPipeline) Fields() []types.ImageFieldDef {
 			Default:       true,
 			DecidesAction: true,
 		},
-		// The thinking switches are action-level fields, declared once at the
-		// action layer and carried in here — a pipeline does not re-declare
-		// an action's tunable.
 		imageActionThinkingFields[0],
 		imageActionThinkingFields[1],
+		{
+			Key:   captionFieldKeyNoteActions,
+			Type:  types.ImageFieldTypeNote,
+			Group: types.ImageFieldGroupNote,
+			Label: "The two actions are independent",
+			Description: "Switch them separately: with OCR off the image is still described, " +
+				"and with caption off its text is still read. Only switching both off leaves " +
+				"an image untouched, which is why the panel refuses that combination.",
+		},
 	}
 }
 

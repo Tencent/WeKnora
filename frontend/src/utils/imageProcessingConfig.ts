@@ -36,6 +36,16 @@ export const PREPROCESS_MODE_AUTO = 'auto'
 export const PREPROCESS_MODE_FORCE = 'force'
 
 /**
+ * The field key the smart pipeline declares for the page-straightening switch.
+ * It is declared as a field so the panel draws it at the point that pipeline's
+ * run uses it, but its value is not a pipeline param: the panel binds it to the
+ * knowledge base's preprocess mode instead of to params. Mirrors
+ * smartFieldKeyPreprocessMode on the backend — the two must agree, or the
+ * switch silently becomes an ordinary, ignored param.
+ */
+export const PREPROCESS_MODE_FIELD_KEY = 'preprocess_mode'
+
+/**
  * Maps a stored preprocess mode onto the one the panel offers. Anything
  * unrecognised — including the empty string a knowledge base saved before the
  * field existed carries — resolves to auto, the backend's own default, so the

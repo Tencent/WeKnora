@@ -4035,9 +4035,8 @@ export default {
         imagePipelineSectionDescription:
           'マルチモーダル解析が有効な場合、画像の解析方式を選択できます。',
         imagePipelineLabel: '解析方式',
-        preprocessLabel: '文書の前処理',
-        preprocessDescription:
-          'OCR の前に、撮影したページを傾き補正して周囲を切り落とします。自動：説明ラウンドが要否を判断／オフ：常に無効／強制：常に有効。',
+        advancedSettingsLabel: '詳細設定',
+        notesLabel: '説明',
         preprocessModeAuto: '自動',
         preprocessModeOff: 'オフ',
         preprocessModeForce: '強制',
@@ -8425,6 +8424,11 @@ export default {
     },
     default: {
       name: 'マニュアル',
+      note_actions: {
+        label: '2 つの動作は独立しています',
+        description:
+          'それぞれ個別に切り替えられます。識別をオフにしても画像は説明され、説明をオフにしても文字は抽出されます。両方をオフにしたときだけ画像は何も処理されないため、パネルはその組み合わせを許可しません。',
+      },
       description: 'タスクに合わせて解析アクションのスイッチを手動でオン/オフします。',
       enable_caption: {
         label: '画像説明',
@@ -8449,6 +8453,16 @@ export default {
     },
     smartocr: {
       name: 'スマート',
+      note_flow: {
+        label: '観察結果が決めます',
+        description:
+          'まず画像を説明し属性を観察し、返ってきた属性が OCR をもう一度行う価値があるかを決めます。ページを傾き補正すべきと属性が示した場合は、補正して周囲を切り落としてから読み取ります。その手順が利用できない場合は元の写真をそのまま読み取り、悪化することはありません。',
+      },
+      preprocess_mode: {
+        label: '文書の前処理',
+        description:
+          'OCR の前に、撮影したページを傾き補正して周囲を切り落とします。自動：説明ラウンドが要否を判断／オフ：常に無効／強制：常に有効。',
+      },
       caption: {
         thinking: {
           label: '説明時に思考を有効',

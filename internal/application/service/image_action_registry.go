@@ -24,7 +24,24 @@ type imagePipeline interface {
 	// Description tells the user how the pipeline works, shown under the
 	// pick in the settings panel.
 	Description() string
-	// Fields are the tunables of this pipeline; nil means it has none yet.
+	// Fields are the tunables and the explanations of this pipeline; nil means
+	// it has none yet.
+	//
+	// DECLARE THEM IN THREE RUNS, IN THIS ORDER:
+	//
+	//	1. GroupSwitch   — the standing switches, in the order the panel shows
+	//	                   them;
+	//	2. GroupAdvanced — the switches that belong under "advanced", which the
+	//	                   panel folds away;
+	//	3. GroupNote     — the explanations, which the panel folds away under
+	//	                   "notes".
+	//
+	// Within a run, declaration order is panel order, so a pipeline that wants
+	// a switch above another says so here. Reordering or regrouping a panel is
+	// a change to this file and to nothing else: the frontend cannot do it,
+	// because it cannot tell a tunable of the describe call from a tunable of
+	// the read call, and a panel that guessed would silently misplace them.
+	// TestFieldDeclarationOrder holds every pipeline to the three runs.
 	Fields() []types.ImageFieldDef
 	// Rules are the conditions those tunables have to meet. Declared rather
 	// than implemented because what makes a set of settings incoherent is a
@@ -203,10 +220,14 @@ const (
 // offers it on its panel. The keys are namespaced by action ("action.key"),
 // so the same tunable reads the same stored value whichever pipeline
 // schedules the action.
+//
+// Both are advanced: whether a call reasons is a tuning decision, not something
+// the panel should put in front of every user.
 var imageActionThinkingFields = []types.ImageFieldDef{
 	{
 		Key:   imageFieldKeyCaptionThinking,
 		Type:  types.ImageFieldTypeBool,
+		Group: types.ImageFieldGroupAdvanced,
 		Label: "Caption with thinking",
 		// Warning, not recommendation: on some models long reasoning can
 		// crowd out the answer itself and leave the caption empty.
@@ -221,6 +242,7 @@ var imageActionThinkingFields = []types.ImageFieldDef{
 	{
 		Key:   imageFieldKeyOCRThinking,
 		Type:  types.ImageFieldTypeBool,
+		Group: types.ImageFieldGroupAdvanced,
 		Label: "OCR with thinking",
 		Description: "Let the model think before transcribing. " +
 			"Rarely needed: it costs latency, and on some models long " +

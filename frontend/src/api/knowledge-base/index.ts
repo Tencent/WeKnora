@@ -244,11 +244,21 @@ export interface ImageProcessingConfig {
 // control per field without naming any pipeline.
 export interface ImagePipelineField {
   key: string;
-  type: 'bool' | 'string' | 'enum';
+  /**
+   * 'note' carries no value: it is explanation text the pipeline declares
+   * alongside the switches it explains.
+   */
+  type: 'bool' | 'string' | 'enum' | 'note';
   label: string;
   description: string;
   default: unknown;
   options: string[] | null;
+  /**
+   * Which run of the panel the field belongs to: 'switch' (standing, shown
+   * outright), 'advanced' or 'note' (both folded away). Absent or empty means
+   * 'switch', so a pipeline only mentions the group for fields it folds.
+   */
+  group?: 'switch' | 'advanced' | 'note';
   /** Whether this field turns an action on or off, as opposed to tuning one. */
   decides_action?: boolean;
 }

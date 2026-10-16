@@ -4035,9 +4035,8 @@ export default {
         imagePipelineSectionDescription:
           'With multimodal parsing on, pick how images are parsed.',
         imagePipelineLabel: 'Scheme',
-        preprocessLabel: 'Document preprocessing',
-        preprocessDescription:
-          'Straighten and crop a photographed page before OCR reads it. Auto asks the describe round whether the page needs it; Off never does; Force always does.',
+        advancedSettingsLabel: 'Advanced settings',
+        notesLabel: 'Notes',
         preprocessModeAuto: 'Auto',
         preprocessModeOff: 'Off',
         preprocessModeForce: 'Force',
@@ -8431,6 +8430,11 @@ export default {
     },
     default: {
       name: 'Manual',
+      note_actions: {
+        label: 'The two actions are independent',
+        description:
+          'Each can be switched separately: with OCR off the image is still described, with caption off its text is still read. Only switching both off leaves an image untouched, which is why the panel refuses that combination.',
+      },
       description: 'Turn the parsing actions on or off to fit the task.',
       enable_caption: {
         label: 'Image caption',
@@ -8455,6 +8459,16 @@ export default {
     },
     smartocr: {
       name: 'Smart',
+      note_flow: {
+        label: 'The observation decides',
+        description:
+          'The image is described and observed first, and the attributes that come back decide whether OCR is worth a second pass. When they say the page needs straightening, it is straightened and its surroundings cropped before reading; when that step is unavailable or declines, the original photograph is read instead — never something worse.',
+      },
+      preprocess_mode: {
+        label: 'Document preprocessing',
+        description:
+          'Straighten and crop a photographed page before OCR reads it. Auto asks the describe round whether the page needs it; Off never does; Force always does.',
+      },
       caption: {
         thinking: {
           label: 'Describe with thinking',

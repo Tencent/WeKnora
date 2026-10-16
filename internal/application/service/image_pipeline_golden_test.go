@@ -187,13 +187,18 @@ func TestPipelineFieldsArePrivate(t *testing.T) {
 				t.Errorf("pipeline %q declares a field with an empty key", spec.ID)
 				continue
 			}
-			if field.Default == nil {
+			// A note carries no value — it is words the pipeline wants shown —
+			// so there is nothing for it to default to. Every field that does
+			// carry a value must declare what it reads when unset, or the panel
+			// would render a control with no state.
+			if field.Default == nil && field.Type != types.ImageFieldTypeNote {
 				t.Errorf("field %q of pipeline %q has no default, so the panel would show an unset toggle",
 					field.Key, spec.ID)
 			}
 			if field.Type != types.ImageFieldTypeBool &&
 				field.Type != types.ImageFieldTypeString &&
-				field.Type != types.ImageFieldTypeEnum {
+				field.Type != types.ImageFieldTypeEnum &&
+				field.Type != types.ImageFieldTypeNote {
 				t.Errorf("field %q of pipeline %q has an unknown type %q", field.Key, spec.ID, field.Type)
 			}
 			if other, dup := seen[field.Key]; dup && other != spec.ID {

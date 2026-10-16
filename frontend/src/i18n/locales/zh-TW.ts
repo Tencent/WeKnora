@@ -4629,9 +4629,8 @@ export default {
         imagePipelineSectionLabel: '圖片解析方案',
         imagePipelineSectionDescription: '多模態解析開啟後，可以根據需要選擇圖片的解析方案',
         imagePipelineLabel: '選擇解析方案',
-        preprocessLabel: '文件預處理',
-        preprocessDescription:
-          '在 OCR 之前把拍攝的頁面擺正並裁掉周圍環境。自動：由描述輪判斷頁面是否需要；關閉：從不處理；強制：總是處理。',
+        advancedSettingsLabel: '進階設定',
+        notesLabel: '說明資訊',
         preprocessModeAuto: '自動',
         preprocessModeOff: '關閉',
         preprocessModeForce: '強制',
@@ -8422,6 +8421,11 @@ export default {
     },
     default: {
       name: '傳統',
+      note_actions: {
+        label: '兩項動作互相獨立',
+        description:
+          '兩項各自開關：關掉識別，圖片仍會被描述；關掉描述，文字仍會被識別。只有兩個都關掉時這張圖才不會被處理 —— 所以面板不允許這種組合。',
+      },
       description: '使用者根據任務需要手動選擇解析動作開關。',
       enable_caption: {
         label: '圖片描述',
@@ -8446,6 +8450,16 @@ export default {
     },
     smartocr: {
       name: '智能模式',
+      note_flow: {
+        label: '由觀察結果決定',
+        description:
+          '先描述圖片並觀察屬性，由屬性決定是否值得再為它花一次 OCR。屬性顯示頁面需要擺正時，會先擺正並裁掉周圍環境再識別；若該步驟不可用或判定不適用，則直接用原圖，絕不會比不啟用更差。',
+      },
+      preprocess_mode: {
+        label: '文件預處理',
+        description:
+          '在 OCR 之前把拍攝的頁面擺正並裁掉周圍環境。自動：由描述輪判斷頁面是否需要；關閉：從不處理；強制：總是處理。',
+      },
       caption: {
         thinking: {
           label: '描述時開啟思考',
