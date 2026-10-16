@@ -224,6 +224,32 @@ func mustActionField(id types.ImageActionID, param string) types.ImageFieldDef {
 	return field
 }
 
+// Trace keys that code reads back — the "contract" keys (docs/design/image-pipeline-naming.md §5).
+// Writer and reader share the constant, so renaming one is a single edit and the
+// readers are named right here:
+//
+//	keyOCRResult    read by resolve() below (success vs failure of the OCR span)
+//	                and by the service layer (extract-nothing verdict, task error)
+//	keyOCRErrorCode read by resolve() below; lands on the span's error_code, which
+//	                the processing timeline turns into a localized title
+//	keyOCRError     read by resolve() below; the span's error message
+//	keyOCRChars     read by resolve() below; the span's summary
+const (
+	keyOCRResult    = "ocr.result"
+	keyOCRErrorCode = "ocr.error_code"
+	keyOCRError     = "ocr.error"
+	keyOCRChars     = "ocr.chars"
+)
+
+// OCR's diagnostic keys — written and never read back. They stay literals
+// because a single writer cannot drift out of step with itself.
+const (
+	keyOCRRawChars        = "ocr.raw_chars"
+	keyOCRPreview         = "ocr.preview"
+	keyOCRPrompt          = "ocr.prompt"
+	keyOCRRejectionReason = "ocr.rejection_reason"
+)
+
 // The keys those tunables are stored and traced under. They are read by name at
 // the few call sites that compare them (the thinking switches are wired into a
 // run by the pipeline that offers them), so they are named once, here.
@@ -624,18 +650,18 @@ func runOCRAction(ctx context.Context, r *runContext) error {
 		// The code reads back from out so the span always matches what the
 		// outcome summary sees — the caller may have refined it (e.g. a
 		// request failure re-coded as OCR_TRUNCATED) after the initial set.
-		if code, _ := r.out["ocr_error_code"].(string); code != "" {
-			message, _ := r.out["ocr_error"].(string)
+		if code, _ := r.out[keyOCRErrorCode].(string); code != "" {
+			message, _ := r.out[keyOCRError].(string)
 			r.tracker.FailSpan(ctx, ocrSpan, code, message, nil)
 			return
 		}
 		r.tracker.EndSpan(ctx, ocrSpan, types.JSONMap{
-			"status": r.out["ocr_status"], "chars": r.out["ocr_chars"],
+			"status": r.out[keyOCRResult], "chars": r.out[keyOCRChars],
 		})
 	}
 	// A failed extraction must never leave text from a previous attempt behind.
 	r.imageInfo.OCRText = ""
-	r.out["ocr_chars"] = 0
+	r.out[keyOCRChars] = 0
 
 	// The OCR prompt is system-owned: knowledge base custom instructions must
 	// never reach it, or free-form business rules compete with the "No text
@@ -644,9 +670,9 @@ func runOCRAction(ctx context.Context, r *runContext) error {
 	prompt := buildVLMOCRPrompt(r.payload.ImageSourceType, r.vlmCfg)
 	if r.payload.ImageSourceType == "scanned_pdf" {
 		logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", r.payload.ImageURL)
-		r.out["ocr_prompt"] = "scanned_pdf"
+		r.out[keyOCRPrompt] = "scanned_pdf"
 	} else {
-		r.out["ocr_prompt"] = "default"
+		r.out[keyOCRPrompt] = "default"
 	}
 
 	ocrText, err := r.predictOCR(ctx, prompt)
@@ -659,39 +685,39 @@ func runOCRAction(ctx context.Context, r *runContext) error {
 		if r.vlmErr == nil {
 			r.vlmErr = err
 		}
-		r.out["ocr_status"] = "failed"
-		r.out["ocr_error_code"] = "OCR_REQUEST_FAILED"
+		r.out[keyOCRResult] = "failed"
+		r.out[keyOCRErrorCode] = "OCR_REQUEST_FAILED"
 		if errors.Is(err, vlm.ErrTruncatedCompletion) {
-			r.out["ocr_error_code"] = "OCR_TRUNCATED"
+			r.out[keyOCRErrorCode] = "OCR_TRUNCATED"
 		}
-		r.out["ocr_error"] = err.Error()
+		r.out[keyOCRError] = err.Error()
 		resolve()
 		return nil
 	}
-	r.out["ocr_raw_chars"] = len([]rune(ocrText))
+	r.out[keyOCRRawChars] = len([]rune(ocrText))
 	ocrText, vErr := validateOCRText(ocrText)
 	if vErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] OCR rejected for %s: %v", r.payload.ImageURL, vErr)
-		r.out["ocr_status"] = "failed"
-		r.out["ocr_error_code"] = "OCR_INVALID_OUTPUT"
-		r.out["ocr_error"] = vErr.Error()
+		r.out[keyOCRResult] = "failed"
+		r.out[keyOCRErrorCode] = "OCR_INVALID_OUTPUT"
+		r.out[keyOCRError] = vErr.Error()
 		var invalid *ocrValidationError
 		if errors.As(vErr, &invalid) {
-			r.out["ocr_rejection_reason"] = invalid.reason
+			r.out[keyOCRRejectionReason] = invalid.reason
 		}
 		resolve()
 		return nil
 	}
 	if ocrText != "" {
 		r.imageInfo.OCRText = ocrText
-		r.out["ocr_status"] = "done"
-		r.out["ocr_chars"] = len([]rune(ocrText))
-		r.out["ocr_preview"] = previewText(ocrText, 200)
+		r.out[keyOCRResult] = "done"
+		r.out[keyOCRChars] = len([]rune(ocrText))
+		r.out[keyOCRPreview] = previewText(ocrText, 200)
 		resolve()
 		return nil
 	}
 	logger.Warnf(ctx, "[ImageMultimodal] OCR returned no text for %s", r.payload.ImageURL)
-	r.out["ocr_status"] = "skipped_no_text"
+	r.out[keyOCRResult] = "skipped_no_text"
 	resolve()
 	return nil
 }

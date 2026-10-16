@@ -458,8 +458,8 @@ func (s *ImageMultimodalService) processImage(
 	// while there is content to protect — a valid caption must not be
 	// duplicated by an OCR retry; with nothing produced there is nothing to
 	// protect, so the image fails honestly.
-	extractionFailed := out["caption_error"] != nil || out["ocr_status"] == "failed" ||
-		out["ocr_status"] == "skipped_observation_failed"
+	extractionFailed := out["caption_error"] != nil || out[keyOCRResult] == "failed" ||
+		out[keyOCRResult] == "skipped_observation_failed"
 	if len(newChunks) == 0 && extractionFailed {
 		out["outcome"] = "failed"
 		if ctx.Err() != nil {
@@ -473,12 +473,12 @@ func (s *ImageMultimodalService) processImage(
 			handleErr = fmt.Errorf("image produced no content: %w", rc.vlmErr)
 		} else {
 			handleErr = fmt.Errorf("image produced no content (ocr_status=%v, caption_error=%v)",
-				out["ocr_status"], out["caption_error"])
+				out[keyOCRResult], out["caption_error"])
 		}
 		return handleErr
 	}
 
-	if out["ocr_status"] == "failed" {
+	if out[keyOCRResult] == "failed" {
 		// Some content exists (a valid caption was persisted) — the failure
 		// is recorded on the .ocr subspan and the outcome, and the image
 		// stays a success at the task level (#4132).

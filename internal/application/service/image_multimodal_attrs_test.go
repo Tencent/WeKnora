@@ -351,7 +351,7 @@ func TestProcessImageObservesAndDescribes(t *testing.T) {
 	if got, ok := out["attr_policy"].(types.JSONMap); !ok || got["ocr"] != true {
 		t.Errorf("attr_policy = %v, want {ocr:true}", out["attr_policy"])
 	}
-	if got, _ := out["ocr_status"].(string); strings.HasPrefix(got, "skipped_") {
+	if got, _ := out[keyOCRResult].(string); strings.HasPrefix(got, "skipped_") {
 		t.Errorf("a block of text must be OCR'd, got ocr_status=%v", got)
 	}
 	// One observe call (never the legacy caption prompt) plus one OCR call.
@@ -470,7 +470,7 @@ func TestProcessImageSkipsOCRForQuietAttr(t *testing.T) {
 	if n := countCallsWith(fake.calls, "OCR assistant"); n != 0 {
 		t.Fatalf("a quiet image must not be OCR'd, got %d OCR call(s)", n)
 	}
-	if got := out["ocr_status"]; got != "skipped_attr_policy" {
+	if got := out[keyOCRResult]; got != "skipped_attr_policy" {
 		t.Errorf("ocr_status = %v, want skipped_attr_policy", got)
 	}
 	if got, ok := out["attr_policy"].(types.JSONMap); !ok || got["ocr"] != false {
@@ -590,7 +590,7 @@ func TestProcessImageProseAnswerIsStillCaptionedAndOCRed(t *testing.T) {
 	if n := countCallsWith(fake.calls, "OCR assistant"); n != 1 {
 		t.Errorf("OCR calls = %d, want 1 (the conservative clause must not skip OCR)", n)
 	}
-	if got, _ := out["ocr_status"].(string); strings.HasPrefix(got, "skipped_") {
+	if got, _ := out[keyOCRResult].(string); strings.HasPrefix(got, "skipped_") {
 		t.Errorf("OCR must not be reported skipped, got ocr_status=%v", got)
 	}
 	if got, ok := out["attr_policy"].(types.JSONMap); !ok || got["ocr"] != true {

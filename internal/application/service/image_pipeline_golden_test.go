@@ -403,8 +403,8 @@ func TestObservationPipelineTrace(t *testing.T) {
 		smartFieldKeyCaptureCaption: true,
 		smartFieldKeyAllowOCR:       false,
 	})
-	if got := r.out["ocr_status"]; got != "skipped_attr_policy" {
-		t.Errorf(`out["ocr_status"] = %v, want "skipped_attr_policy"`, got)
+	if got := r.out[keyOCRResult]; got != "skipped_attr_policy" {
+		t.Errorf(`out[keyOCRResult] = %v, want "skipped_attr_policy"`, got)
 	}
 	if _, ok := r.out["ocr_text"]; ok {
 		t.Error("no OCR action ran, so no ocr slot may exist")
@@ -427,7 +427,7 @@ func TestDefaultPipelineTrace(t *testing.T) {
 	if _, ok := r.out["attr_policy"]; ok {
 		t.Error("caption+OCR mode has no attributes, so it must not record a policy")
 	}
-	if got := r.out["ocr_status"]; got != "done" {
+	if got := r.out[keyOCRResult]; got != "done" {
 		t.Errorf("plain path: ocr_status = %v, want done (OCR ran and read text)", got)
 	}
 }
