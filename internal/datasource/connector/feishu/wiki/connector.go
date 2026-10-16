@@ -230,27 +230,37 @@ type wikiOps struct {
 	region    core.Region
 	parseMode string
 	dirPaths  map[string]string
+	// spacePrefixes caches spaceID → sanitized folder prefix for the run, so
+	// syncing K selected spaces costs one ListWikiSpaces paging pass total
+	// instead of one per space (failures cache "" and do not retry mid-run).
+	spacePrefixes map[string]string
 }
 
 // spaceDirPrefix resolves the synced space's display name (sanitized) as the
-// top-level KB folder for this run. One ListWikiSpaces call per sync run;
-// an unresolved name yields "" and the documents fall back to landing at the
+// top-level KB folder for this run, cached per space for the whole run.
+// An unresolved name yields "" and the documents fall back to landing at the
 // KB root (pre-mirror behaviour) rather than failing the sync.
 func (o *wikiOps) spaceDirPrefix(ctx context.Context, client *core.Client, spaceID string) string {
+	if o.spacePrefixes == nil {
+		o.spacePrefixes = make(map[string]string)
+	}
+	if prefix, ok := o.spacePrefixes[spaceID]; ok {
+		return prefix
+	}
+	prefix := ""
 	spaces, err := client.ListWikiSpaces(ctx)
 	if err != nil {
-		logger.Warnf(ctx, "[Feishu] list wiki spaces for folder prefix %s: %v", spaceID, err)
-		return ""
-	}
-	for _, s := range spaces {
-		if s.SpaceID == spaceID {
-			if s.Name == "" {
-				return ""
+		logger.Warnf(ctx, "[Feishu] list wiki spaces for space folder prefix %s: %v", spaceID, err)
+	} else {
+		for _, s := range spaces {
+			if s.SpaceID == spaceID && s.Name != "" {
+				prefix = core.SanitizeFileName(s.Name)
+				break
 			}
-			return core.SanitizeFileName(s.Name)
 		}
 	}
-	return ""
+	o.spacePrefixes[spaceID] = prefix
+	return prefix
 }
 
 func (o *wikiOps) List(ctx context.Context, client *core.Client, resourceID string) ([]core.WikiNode, error, error) {

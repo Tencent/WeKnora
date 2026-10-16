@@ -20,8 +20,10 @@ import (
 // per-resource root and feeds the walk results into Fetch.
 
 // driveFolderName resolves a folder's display name via GetDriveFolderMeta,
-// one call per token per sync run (cached). resolved is false when the meta
-// call failed or returned no name — the sub-folder prefix is then skipped.
+// one call per token per sync run (cached on success only — a failure is not
+// cached, so the next resource in the same run retries). resolved is false
+// when the meta call failed or returned no name — that folder's path prefix
+// segment (root or sub-folder) is then skipped.
 func (o *driveOps) driveFolderName(
 	ctx context.Context, client *core.Client, folderToken string,
 ) (name string, resolved bool) {

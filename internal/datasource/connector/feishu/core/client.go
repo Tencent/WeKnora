@@ -962,8 +962,9 @@ func (c *Client) ListDriveFilesAllPages(ctx context.Context, folderToken string)
 // Listing failures are collected into the returned failures and the walk
 // continues (PartialDriveFileListError semantics). dirPaths maps every visited
 // folder token to its cleaned directory path relative to the selected root;
-// the walk root's own prefix is baseDir ("" for a bare root selection, the
-// sub-folder's relative path for a sub-folder selection).
+// the walk root's own prefix is baseDir (the root folder's display name for a
+// bare root selection, "<根名>/<子文件夹名>" for a sub-folder selection; ""
+// when the root name could not be resolved, mirroring pre-root-mirror paths).
 func WalkDriveTree(
 	ctx context.Context, client *Client, rootToken, baseDir string,
 ) (files []DriveFile, dirPaths map[string]string, failures []DriveFileListFailure) {
