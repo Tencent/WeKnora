@@ -288,9 +288,19 @@ test('the live answer path carries truncated onto the event and the message', ()
   )
   const message = { agentEventStream: [], _eventMap: new Map(), content: '' }
   process(message, { content: 'half an answer' }, { event_id: 'r1' })
-  assert.equal(message.truncated, undefined)
+  assert.equal(message.truncated, false)
   // The cap is only known at the close, so the Done marker carries it too.
   process(message, { content: '' }, { event_id: 'r1', done: true, truncated: true })
   assert.equal(message._eventMap.get('r1').truncated, true)
   assert.equal(message.truncated, true)
+  process(message, { content: 'Complete final answer' }, { event_id: 'r2', done: true })
+  assert.equal(message.truncated, false)
+})
+
+test('a complete final round supersedes an earlier length stop in history', () => {
+  const events = buildReconstruct()([
+    { iteration: 0, truncated: true, tool_calls: [] },
+    { iteration: 1, truncated: false, tool_calls: [] },
+  ], 'Complete final answer', true, false, 0, undefined)
+  assert.equal(events.filter(event => event.type === 'answer').at(-1).truncated, undefined)
 })
