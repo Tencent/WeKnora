@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	applicationservice "github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -31,7 +32,7 @@ type AttachmentProcessor struct {
 	fileService    interfaces.FileService
 	documentReader interfaces.DocumentReader
 	imageResolver  *docparser.ImageResolver
-	modelService   interfaces.ModelService // used to obtain the ASR model
+	modelService   interfaces.ModelService // 用于语音识别和按配置启用的附件 OCR
 }
 
 // NewAttachmentProcessor creates an AttachmentProcessor with the given dependencies.
@@ -58,6 +59,7 @@ func (p *AttachmentProcessor) ProcessAttachment(
 	fileSize int64,
 	tenantID uint64,
 	asrModelID string, // optional; enables audio transcription when set
+	imageOptions applicationservice.AttachmentImageUnderstandingOptions,
 ) (*types.MessageAttachment, error) {
 	logger.Infof(ctx, "processing attachment: fileName=%s, fileSize=%d", secutils.SanitizeForLog(fileName), fileSize)
 
@@ -112,7 +114,7 @@ func (p *AttachmentProcessor) ProcessAttachment(
 			attachment.Content = fmt.Sprintf("<error><message>Failed to parse document</message><details>%v</details></error>", err)
 		}
 	} else {
-		if err := p.processWithDocumentReader(ctx, data, baseName, ext, attachment, tenantID); err != nil {
+		if err := p.processWithDocumentReader(ctx, data, baseName, ext, attachment, tenantID, imageOptions); err != nil {
 			logger.Warnf(ctx, "DocumentReader failed: %v, keeping metadata only", err)
 			attachment.Content = fmt.Sprintf("<error><message>Failed to read document</message><details>%v</details></error>", err)
 		}
@@ -231,6 +233,7 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 	fileType string,
 	attachment *types.MessageAttachment,
 	tenantID uint64,
+	imageOptions applicationservice.AttachmentImageUnderstandingOptions,
 ) error {
 	if p.documentReader == nil {
 		return fmt.Errorf("DocumentReader not configured")
@@ -269,6 +272,13 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 	})
 	if err != nil {
 		return fmt.Errorf("document parsing failed: %w", err)
+	}
+
+	// OCR 完成前保留解析器返回的行内图片字节。
+	if enriched, applied := applicationservice.EnrichAttachmentImageContent(
+		ctx, p.modelService, normalizedType, imageOptions, result.ImageRefs, result.MarkdownContent,
+	); applied {
+		result.MarkdownContent = enriched
 	}
 
 	// Resolve embedded image refs to storage URLs.

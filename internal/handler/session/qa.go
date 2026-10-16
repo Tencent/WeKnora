@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
+	applicationservice "github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -351,8 +352,16 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 
 		// Use ASR only when the agent has audio upload enabled.
 		asrModelID := ""
+		imageOptions := applicationservice.AttachmentImageUnderstandingOptions{}
 		if customAgent != nil && customAgent.Config.AudioUploadEnabled && customAgent.Config.ASRModelID != "" {
 			asrModelID = customAgent.Config.ASRModelID
+		}
+		if customAgent != nil && customAgent.Config.ImageUploadEnabled && customAgent.Config.VLMModelID != "" {
+			imageOptions = applicationservice.AttachmentImageUnderstandingOptions{
+				VLMModelID:         customAgent.Config.VLMModelID,
+				ImageUnderstanding: customAgent.Config.AttachmentImageUnderstanding,
+				OCRMaxPages:        customAgent.Config.AttachmentOCRMaxPages,
+			}
 		}
 
 		// Resolve the agent's chat parser engine from attachment file types
@@ -377,7 +386,8 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 				defer wg.Done()
 
 				processed, err := h.attachmentProcessor.ProcessAttachment(
-					attachmentRuntimeCtx, decodedAttachments[idx], att.FileName, int64(len(decodedAttachments[idx])), tenantID, asrModelID,
+					attachmentRuntimeCtx, decodedAttachments[idx], att.FileName,
+					int64(len(decodedAttachments[idx])), tenantID, asrModelID, imageOptions,
 				)
 				if err != nil {
 					errChan <- fmt.Errorf("attachment %d processing failed: %w", idx+1, err)
