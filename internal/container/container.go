@@ -360,6 +360,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Agent catalog operations dispatch into the router, which is built later
 	// and binds itself to this dispatcher.
 	must(container.Provide(operations.NewHandlerDispatcher))
+	// The assistant's agent trials run through the session service, which
+	// depends on the agent service; it is bound to the runner further down.
+	must(container.Provide(service.NewAgentTrialRunner))
 	must(container.Provide(service.NewAgentService))
 
 	// Session service (depends on agent service)
@@ -538,6 +541,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// block above — starting the reaper any earlier panics.
 	must(container.Invoke(startTenantSkillReaper))
 	logger.Debugf(ctx, "[Container] Tenant skill reaper registered")
+	must(container.Invoke(func(r *service.AgentTrialRunner, s interfaces.SessionService) { r.Bind(s) }))
 	must(container.Provide(func(
 		sessions interfaces.SessionRepository,
 		resolver sandbox.TenantSandboxResolver,

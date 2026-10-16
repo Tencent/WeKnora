@@ -47,6 +47,7 @@ func TestEveryBuiltInToolDeclaresAModelHandlePolicy(t *testing.T) {
 		ToolWikiUpdateIssue,
 		ToolFindOperations,
 		ToolRunOperation,
+		ToolTryAgent,
 		ToolSearchWeKnoraDocs,
 		ToolReadWeKnoraDoc,
 	}

@@ -1831,6 +1831,7 @@ export default {
       databaseQuery: '데이터베이스 조회',
       findOperations: '작업 찾기',
       runOperation: '작업 실행',
+      tryAgent: '에이전트 시험 실행',
       searchWeKnoraDocs: '제품 문서 검색',
       readWeKnoraDoc: '제품 문서 읽기'
     },

@@ -1833,6 +1833,7 @@ export default {
       databaseQuery: '資料庫查詢',
       findOperations: '查找操作',
       runOperation: '執行操作',
+      tryAgent: '試跑智能體',
       searchWeKnoraDocs: '搜尋產品文件',
       readWeKnoraDoc: '閱讀產品文件'
     },

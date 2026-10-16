@@ -179,6 +179,9 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 		encodeKnownIssueIDs: true,
 		sourceOutput:        true,
 	},
+	// try_agent takes an agent ID, passed as returned like the catalog's, and
+	// reports another agent's answer, whose quoted IDs are compacted.
+	"try_agent": {},
 	// Mutation tools echo the slug they acted on and surface validation errors
 	// that can quote a durable KB or document ID. They own no source arguments,
 	// but their output must still be compacted before the model sees it.

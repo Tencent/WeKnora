@@ -806,6 +806,7 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   database_query: 'agentStream.tools.databaseQuery',
   find_operations: 'agentStream.tools.findOperations',
   run_operation: 'agentStream.tools.runOperation',
+  try_agent: 'agentStream.tools.tryAgent',
   search_weknora_docs: 'agentStream.tools.searchWeKnoraDocs',
   read_weknora_doc: 'agentStream.tools.readWeKnoraDoc',
 };

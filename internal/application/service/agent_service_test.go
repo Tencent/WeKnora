@@ -574,6 +574,28 @@ func TestRegisterOperationToolsRequiresGrantAndWebUser(t *testing.T) {
 	require.Empty(t, registered(apiKey, granted))
 }
 
+func TestRegisterOperationToolsOffersAgentTrialsUnlessReadOnly(t *testing.T) {
+	webUser := types.WithCaller(types.WithPrincipal(context.Background(),
+		types.Principal{Type: types.PrincipalWebUser, ID: "u1"}),
+		types.Caller{TenantID: 7, UserID: "u1"})
+	svc := &agentService{
+		operationDispatcher: operations.NewHandlerDispatcher(),
+		trialRunner:         NewAgentTrialRunner(nil, nil),
+	}
+	for level, want := range map[types.AssistantAccessLevel]bool{
+		types.AssistantAccessReadOnly:  false,
+		types.AssistantAccessConfirm:   true,
+		types.AssistantAccessAutoWrite: true,
+	} {
+		registry := tools.NewToolRegistry()
+		svc.registerOperationTools(webUser, registry, &types.AgentConfig{
+			OperationsAgentID: types.BuiltinWeKnoraAssistantID, AssistantAccess: level,
+		})
+		_, err := registry.GetTool(tools.ToolTryAgent)
+		assert.Equal(t, want, err == nil, level)
+	}
+}
+
 func TestRegisterOperationToolsHonorsSuperuserBypass(t *testing.T) {
 	for _, tc := range []struct {
 		name        string

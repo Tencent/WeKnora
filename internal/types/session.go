@@ -77,6 +77,10 @@ type ContextConfig struct {
 // SessionKindAssistant keeps assistant conversations out of ordinary chat listings.
 const SessionKindAssistant = "assistant"
 
+// SessionKindAgentTrial holds one question the assistant asks an agent to
+// check its setup. Only the server creates it, and removes it afterwards.
+const SessionKindAgentTrial = "agent_trial"
+
 // IsValidSessionKind restricts API kinds to ordinary chats (empty) and assistant history.
 func IsValidSessionKind(kind string) bool {
 	return kind == "" || kind == SessionKindAssistant

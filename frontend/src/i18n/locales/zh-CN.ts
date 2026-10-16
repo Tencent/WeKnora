@@ -1833,6 +1833,7 @@ export default {
       databaseQuery: '数据库查询',
       findOperations: '查找操作',
       runOperation: '执行操作',
+      tryAgent: '试跑智能体',
       searchWeKnoraDocs: '搜索产品文档',
       readWeKnoraDoc: '阅读产品文档'
     },

@@ -1831,6 +1831,7 @@ export default {
       databaseQuery: 'Запрос к базе данных',
       findOperations: 'Поиск операций',
       runOperation: 'Выполнение операции',
+      tryAgent: 'Пробный запуск агента',
       searchWeKnoraDocs: 'Поиск в документации',
       readWeKnoraDoc: 'Чтение документации'
     },

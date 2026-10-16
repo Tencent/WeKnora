@@ -82,7 +82,7 @@ func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 			ServiceName:        operationApprovalService,
 			MCPToolName:        t.Name(),
 			RegisteredToolName: t.Name(),
-			Description:        confirmedToolSummary(ctx, t.Name(), args),
+			Description:        t.summary(ctx, args),
 			Args:               args,
 			ToolCallID:         meta.ToolCallID,
 		})
@@ -120,6 +120,21 @@ func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		defer cancel()
 	}
 	return t.inner.Execute(ctx, args)
+}
+
+// approvalDescriber is a wrapped tool that writes its own confirmation card
+// text; an empty description falls back to the summary below.
+type approvalDescriber interface {
+	ApprovalDescription(ctx context.Context, args json.RawMessage) string
+}
+
+func (t *ConfirmedTool) summary(ctx context.Context, args json.RawMessage) string {
+	if d, ok := t.inner.(approvalDescriber); ok {
+		if description := d.ApprovalDescription(ctx, args); description != "" {
+			return description
+		}
+	}
+	return confirmedToolSummary(ctx, t.Name(), args)
 }
 
 // confirmedToolSummaries name each wrapped tool on the confirmation card, in

@@ -6490,6 +6490,7 @@ export default {
       databaseQuery: 'データベース照会',
       findOperations: '操作を検索',
       runOperation: '操作を実行',
+      tryAgent: 'エージェントを試す',
       searchWeKnoraDocs: '製品ドキュメントを検索',
       readWeKnoraDoc: '製品ドキュメントを読む'
     },

@@ -6490,6 +6490,7 @@ export default {
       databaseQuery: 'Database Query',
       findOperations: 'Find operations',
       runOperation: 'Run operation',
+      tryAgent: 'Try agent',
       searchWeKnoraDocs: 'Search product docs',
       readWeKnoraDoc: 'Read product doc'
     },
