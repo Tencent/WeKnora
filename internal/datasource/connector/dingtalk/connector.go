@@ -112,11 +112,19 @@ func (c *Connector) Type() string {
 const maxValidateProbes = 5
 
 // Validate checks the application credentials and operator access, including
-// node listing and a sample document read when one is visible in a workspace.
+// node listing and a sample document read when one is visible.
 //
-// The operator is not expected to reach every workspace in the tenant: app
-// credentials are valid as long as one reachable workspace yields one readable
-// document. A failed probe does not condemn that workspace; the walk keeps
+// A data source that selects resources is validated against those resources
+// only. They are what the operator asked to sync, so an unrelated workspace
+// that happens to be listed first, and that the operator cannot read, must not
+// decide whether the selection is usable: a selected folder or workspace is
+// walked for one readable document, and a selected document is probed
+// directly. Without a selection there is nothing narrower to sample, so the
+// whole tenant is walked as before.
+//
+// In both modes the operator is not expected to reach every object: app
+// credentials are valid as long as one reachable document can be read. A
+// failed probe does not condemn the object it was found in; the walk keeps
 // looking, inside the probe cap, for another document the operator can read.
 // When the cap itself stops a conclusive walk, the error says how many
 // documents were read.
@@ -127,6 +135,15 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 	}
 	api := c.api(cfg)
 	settings := parseDocumentSettings(dataSourceConfig)
+	if selected := uniqueIDs(dataSourceConfig.ResourceIDs); len(selected) > 0 {
+		return validateSelectedResources(ctx, api, selected, settings)
+	}
+	return validateTenantCredentials(ctx, api, settings)
+}
+
+// validateTenantCredentials samples every workspace in the tenant, which is
+// what a data source without a selection is going to sync.
+func validateTenantCredentials(ctx context.Context, api dingTalkAPI, settings documentSettings) error {
 	workspaces, err := api.listWorkspaces(ctx)
 	if err != nil {
 		return fmt.Errorf("validate DingTalk data source: %w", err)
@@ -174,19 +191,168 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 			break
 		}
 	}
-	// Folders were left unexplored, because the listing budget ran out or a
-	// folder could not be listed, so an unreadable document elsewhere does not
-	// prove the data source is unusable. A probe cap hit in that situation
-	// stays quiet too: the walk cannot claim it sampled every visible document.
+	return validateOutcome(inconclusive, sawDocument, workspaceFail, probeCapHit, lastErr)
+}
+
+// validateSelectedResources checks only the scopes a data source selects.
+// References are resolved through the same code path a sync uses, so Validate
+// answers the question the operator asked — would this selection sync
+// anything? — instead of sampling workspaces the selection never mentions.
+//
+// A reference this build cannot resolve is reported rather than quietly
+// replaced by the tenant walk: the data source would fail on that resource,
+// and a selection the picker can no longer resolve is exactly what the
+// operator needs to see.
+func validateSelectedResources(
+	ctx context.Context,
+	api dingTalkAPI,
+	selected []string,
+	settings documentSettings,
+) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("validate DingTalk data source: %w", err)
+	}
+	workspaces, err := api.listWorkspaces(ctx)
+	if err != nil {
+		return fmt.Errorf("validate DingTalk data source: %w", err)
+	}
+	scopes, failures, err := resolveSyncScopes(ctx, api, workspaces, selected, settings)
+	if err != nil {
+		return fmt.Errorf("validate DingTalk data source: %w", err)
+	}
+	names := make(map[string]string, len(workspaces))
+	for _, item := range workspaces {
+		names[item.ID] = item.Name
+	}
+
+	var (
+		lastErr      error
+		resolveErr   error
+		sawDocument  bool
+		inconclusive bool
+		scopeFail    int
+		probes       int
+		listings     int
+		probeCapHit  bool
+	)
+	for _, resourceID := range selected {
+		failure := failures[resourceID]
+		if failure == nil {
+			continue
+		}
+		scopeFail++
+		if resolveErr == nil {
+			resolveErr = fmt.Errorf("resource %s: %w", resourceID, failure)
+		}
+	}
+	for i, scope := range scopes {
+		// A failed probe names the workspace it was found in, the way the
+		// tenant-wide sample does, so it stays actionable.
+		name := names[scope.Reference.WorkspaceID]
+		if name == "" {
+			name = scope.Reference.WorkspaceID
+		}
+		readable, unexplored, hitCap, err := sampleScope(
+			ctx, api, scope, name, settings,
+			&listings, &probes, &sawDocument, &lastErr,
+		)
+		if err != nil {
+			// Name the selected node when the selection is one: a folder that
+			// cannot be listed is what the operator has to look at, and the
+			// workspace alone would not say which folder.
+			label := fmt.Sprintf("workspace %q", name)
+			if scope.Reference.NodeID != "" {
+				label = fmt.Sprintf("workspace %q node %q", name, scope.Reference.NodeID)
+			}
+			lastErr = fmt.Errorf("%s: %w", label, err)
+			// A cancelled or timed-out request proves nothing about the
+			// credentials, so it must never fall through to acceptance.
+			if ctx.Err() != nil || isContextError(err) {
+				return fmt.Errorf("validate DingTalk data source: %w", lastErr)
+			}
+			scopeFail++
+			continue
+		}
+		if readable {
+			return nil
+		}
+		if unexplored {
+			inconclusive = true
+		}
+		if probes >= maxValidateProbes {
+			probeCapHit = hitCap || i+1 < len(scopes)
+			break
+		}
+	}
+	if lastErr == nil {
+		// A failed probe names a workspace and a document the operator can act
+		// on; a reference that does not resolve can only name itself.
+		lastErr = resolveErr
+	}
+	return validateOutcome(inconclusive, sawDocument, scopeFail, probeCapHit, lastErr)
+}
+
+// sampleScope probes one resolved selection scope. A selected document is read
+// through its own read API, while a selected folder or workspace is walked the
+// way the tenant sample walks a workspace root, so a readable document below
+// the selected folder is still found.
+func sampleScope(
+	ctx context.Context,
+	api dingTalkAPI,
+	scope syncScope,
+	workspaceName string,
+	settings documentSettings,
+	listings *int,
+	probes *int,
+	sawDocument *bool,
+	lastErr *error,
+) (readable, unexplored, capHit bool, err error) {
+	if scope.Document == nil {
+		return sampleWorkspace(
+			ctx, api, workspaceName, scope.StartNodeID, settings,
+			listings, probes, sawDocument, lastErr,
+		)
+	}
+	document := *scope.Document
+	*probes++
+	*sawDocument = true
+	if probeErr := verifyDocument(ctx, api, document); probeErr != nil {
+		if ctx.Err() != nil || isContextError(probeErr) {
+			return false, false, false, fmt.Errorf("document %q: %w", document.title(), probeErr)
+		}
+		*lastErr = fmt.Errorf(
+			"workspace %q document %q: %w", workspaceName, document.title(), probeErr,
+		)
+		return false, false, false, nil
+	}
+	return true, false, false, nil
+}
+
+// validateOutcome folds the counters of a validate walk into its result. The
+// tenant-wide sample and the selection-scoped one both end here, because they
+// answer the same question: is there a document in what this data source syncs
+// that the operator can read?
+//
+// Folders were left unexplored, because the listing budget ran out or a folder
+// could not be listed, so an unreadable document elsewhere does not prove the
+// data source is unusable. A probe cap hit in that situation stays quiet too:
+// the walk cannot claim it sampled every visible document.
+//
+// Nothing readable anywhere. Only a scope that exposed no document at all is
+// accepted: there was nothing to read, so credentials could not be disproved.
+// A document that exists but cannot be read means the data source would sync
+// nothing, which is worth reporting.
+func validateOutcome(
+	inconclusive bool,
+	sawDocument bool,
+	failures int,
+	probeCapHit bool,
+	lastErr error,
+) error {
 	if inconclusive {
 		return nil
 	}
-
-	// Nothing readable anywhere. Only a tenant that exposed no document at all
-	// is accepted: there was nothing to read, so credentials could not be
-	// disproved. A document that exists but cannot be read means the data
-	// source would sync nothing, which is worth reporting.
-	if !sawDocument && workspaceFail == 0 {
+	if !sawDocument && failures == 0 {
 		return nil
 	}
 	if lastErr == nil {
