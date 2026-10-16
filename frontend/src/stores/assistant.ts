@@ -11,8 +11,20 @@ import {
 } from '@/api/assistant'
 import { useAuthStore } from './auth'
 
+/** Pages that tell the assistant where the user is. */
+export type AssistantPageId =
+  | 'knowledge_base'
+  | 'wiki'
+  | 'agent_editor'
+  | 'settings_models'
+  | 'mcp_services'
+  | 'chat'
+
 /** What the user has open, as published by the pages that know it. */
 export interface AssistantPageContext {
+  page?: AssistantPageId
+  /** The part of the page in view, e.g. an editor tab ("tools"). */
+  section?: string
   agentId?: string
   agentName?: string
   knowledgeBaseId?: string
@@ -24,6 +36,13 @@ export interface AssistantPageContext {
   wikiSlug?: string
   wikiTitle?: string
   wikiIssueIds?: string[]
+  modelId?: string
+  modelName?: string
+  mcpServiceId?: string
+  mcpServiceName?: string
+  /** A chat message the user asked the assistant about, with its session. */
+  chatSessionId?: string
+  messageId?: string
 }
 
 export interface AssistantOpenRequest {
@@ -82,18 +101,34 @@ function readWidth(): number {
 }
 
 export function toPageContextPayload(context: AssistantPageContext): PageContextPayload {
+  const message = !!context.chatSessionId && !!context.messageId
   return {
+    page: context.page || undefined,
+    section: (context.page && context.section) || undefined,
     agent_id: context.agentId || undefined,
     knowledge_base_id: context.knowledgeBaseId || undefined,
     knowledge_id: context.knowledgeId || undefined,
     wiki_slug: context.wikiSlug || undefined,
     wiki_issue_ids: context.wikiIssueIds?.length ? [...context.wikiIssueIds] : undefined,
+    model_id: context.modelId || undefined,
+    mcp_service_id: context.mcpServiceId || undefined,
+    session_id: message ? context.chatSessionId : undefined,
+    message_id: message ? context.messageId : undefined,
   }
 }
 
 function contextKey(context: AssistantPageContext | null): string {
   if (!context) return ''
-  return [context.agentId || '', context.knowledgeBaseId || '', context.knowledgeId || '', context.wikiSlug || ''].join('|')
+  return [
+    context.page, context.agentId, context.knowledgeBaseId, context.knowledgeId, context.wikiSlug,
+    context.modelId, context.mcpServiceId, context.messageId,
+  ].map(part => part || '').join('|')
+}
+
+/** Whether a merged context names anything worth attaching. */
+function hasPageContext(context: Partial<AssistantPageContext>): boolean {
+  return !!(context.page || context.knowledgeBaseId || context.agentId || context.modelId ||
+    context.mcpServiceId || (context.chatSessionId && context.messageId))
 }
 
 /**
@@ -112,7 +147,7 @@ export const useAssistantStore = defineStore('assistant', () => {
   const pageContext = computed<AssistantPageContext | null>(() => {
     const merged: Partial<AssistantPageContext> = {}
     for (const layer of layers.values()) Object.assign(merged, layer)
-    return merged.knowledgeBaseId || merged.agentId ? merged : null
+    return hasPageContext(merged) ? merged : null
   })
   const contextAttached = computed(() => !!pageContext.value && dismissedKey.value !== contextKey(pageContext.value))
 

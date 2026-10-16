@@ -437,3 +437,28 @@ test('agent layers merge, dismissal follows the agent id, and the payload has no
     assert.equal(f.assistant.pageContext, null)
   } finally { f.close() }
 })
+
+test('settings and chat pages send their resources without widening the search scope', async () => {
+  const f = await fixture()
+  try {
+    const owner = Symbol()
+    f.assistant.publishPageContext(owner, { page: 'chat', chatSessionId: 'chat-1', messageId: 'msg-1' })
+    f.assistant.open({ query: 'Why this answer?' })
+    await flush()
+    assert.equal(f.sent.length, 1)
+    assert.deepEqual(Array.from(f.sent[0].scope.knowledgeBaseIds), [])
+    assert.equal(JSON.stringify(f.sent[0].scope.pageContext),
+      JSON.stringify({ page: 'chat', session_id: 'chat-1', message_id: 'msg-1' }))
+
+    f.assistant.publishPageContext(owner, { page: 'settings_models', section: 'chat', modelId: 'm-1', messageId: 'stale' })
+    assert.ok(f.assistant.pageContext)
+    f.assistant.open({ query: 'Check it' })
+    await flush()
+    assert.equal(JSON.stringify(f.sent.at(-1)?.scope.pageContext),
+      JSON.stringify({ page: 'settings_models', section: 'chat', model_id: 'm-1' }),
+      'a message without its session is not sent')
+
+    f.assistant.publishPageContext(owner, { section: 'tools' })
+    assert.equal(f.assistant.pageContext, null, 'a section alone names no page')
+  } finally { f.close() }
+})

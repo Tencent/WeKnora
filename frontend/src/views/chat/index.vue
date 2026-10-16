@@ -132,8 +132,10 @@
                                     :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
                                     :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
                                     :can-rewind="canRewindMessage(session.id)"
+                                    :can-ask-assistant="!embeddedMode"
                                     @fork="handleFork"
                                     @rewind="handleRewind"
+                                    @ask-assistant="handleAskAssistant"
                                     @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
                                 </botmsg>
                                 <FollowUpSuggestions v-if="session.answerFullyRendered && !session.steerForked && !session.suggestionsDismissed"
@@ -248,6 +250,8 @@ import {
 import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
 import { provideChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
 import { useSessionActivityStore } from '@/stores/sessionActivity';
+import { useAssistantStore } from '@/stores/assistant';
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext';
 import { provideChatSandboxPanel } from '@/composables/useChatSandboxPanel';
 import SandboxSidePanel from '@/components/chat/SandboxSidePanel.vue';
 import BrowserTaskPreview from './components/BrowserTaskPreview.vue';
@@ -349,6 +353,20 @@ const created_at = ref('');
 const limit = ref(20);
 const messagesList = reactive([]);
 providePromptDock(messagesList);
+
+// The answer the user asked the assistant about, until they leave the session.
+const assistant = useAssistantStore();
+const askedMessage = ref({ sessionId: '', messageId: '' });
+useAssistantPageContext(() => {
+    const asked = askedMessage.value;
+    if (props.embeddedMode || !asked.messageId || asked.sessionId !== props.session_id) return null;
+    return { page: 'chat', chatSessionId: asked.sessionId, messageId: asked.messageId };
+});
+function handleAskAssistant(messageId) {
+    askedMessage.value = { sessionId: props.session_id, messageId };
+    assistant.restorePageContext();
+    assistant.open();
+}
 
 function forkAffordanceOf(messageId) {
     if (!messageId) return { canFork: false }

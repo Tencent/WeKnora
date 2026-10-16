@@ -2144,6 +2144,7 @@ export default {
     welcomeDesc: '我可以解答 WeKnora 的用法，也可以檢視和處理你空間裡的文件解析、知識庫動態和 Wiki 問題，還能幫你建立和設定智慧代理。變更前是否先請你確認，由輸入框下方的權限等級決定。',
     startFailed: '啟動助手失敗，請重試',
     askAboutDocument: '問 {name}',
+    askAboutAnswer: '就這則回答問 {name}',
     access: {
       title: '權限等級',
       capped: '空間管理員未開放這一等級',
@@ -2166,7 +2167,16 @@ export default {
       currentPage: '目前頁面',
       detach: '不附帶目前頁面',
       attachedTip: '已附帶目前頁面：{path}',
-      detachedTip: '點擊附帶目前頁面：{path}'
+      detachedTip: '點擊附帶目前頁面：{path}',
+      chatMessage: '這則回答',
+      pages: {
+        knowledge_base: '知識庫',
+        wiki: 'Wiki',
+        agent_editor: '智能體編輯',
+        settings_models: '模型管理',
+        mcp_services: 'MCP 服務',
+        chat: '對話'
+      }
     },
     starters: {
       agentConfig: '檢查這個智慧代理的設定',
@@ -2180,7 +2190,15 @@ export default {
       recentActivity: '這個知識庫最近有哪些變動？',
       formats: 'WeKnora 支援哪些文件格式？',
       createWiki: '怎樣建立 Wiki 知識庫？',
-      agents: '我有哪些智慧代理？分別用的什麼模型？'
+      agents: '我有哪些智慧代理？分別用的什麼模型？',
+      messageSources: '這則回答的依據是什麼？',
+      messageCheck: '這則回答有沒有說錯？',
+      modelCheck: '檢查這個模型的設定',
+      modelUsage: '哪些智能體和知識庫在用這些模型？',
+      mcpTools: '這個 MCP 服務提供哪些工具？',
+      mcpCheck: '它為什麼連不上？',
+      modelSetup: '我還需要設定哪些模型？',
+      mcpSetup: '怎樣接入一個 MCP 服務？'
     }
   },
   assistantSettings: {

@@ -6034,6 +6034,19 @@ definitions:
         type: string
       knowledge_id:
         type: string
+      mcp_service_id:
+        type: string
+      message_id:
+        type: string
+      model_id:
+        type: string
+      page:
+        type: string
+      section:
+        description: part of the page in view, e.g. an editor tab
+        type: string
+      session_id:
+        type: string
       wiki_issue_ids:
         items:
           type: string

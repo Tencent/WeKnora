@@ -22,11 +22,15 @@ async function fixture(update: () => Promise<void> = async () => {}, admin = tru
   const errors: string[] = []
   const deletes: unknown[] = []
   const service = reactive({ id: 'one', name: 'Logs', enabled: true, is_builtin: false })
+  let pageContext: () => unknown = () => null
   const exports: any = {}
   runInNewContext(compiled, {
     exports, console: { error() {} },
     require(name: string) {
       if (name === '@/utils/resourceListSearch') return { matchesResourceQuery }
+      if (name === '@/composables/useAssistantPageContext') return {
+        useAssistantPageContext: (source: () => unknown) => { pageContext = source },
+      }
       if (name === 'vue') return require('vue')
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
       if (name === '@/stores/auth') return { useAuthStore: () => ({ hasRole: () => admin }) }
@@ -50,7 +54,7 @@ async function fixture(update: () => Promise<void> = async () => {}, admin = tru
   const vm: any = app.mount({})
   await new Promise<void>(resolve => setImmediate(resolve))
   await nextTick()
-  return { vm, service, calls, errors, deletes, close: () => app.unmount() }
+  return { vm, service, calls, errors, deletes, pageContext: () => JSON.parse(JSON.stringify(pageContext())), close: () => app.unmount() }
 }
 
 test('edit and tools buttons select the correct drawer step; add resets it', async () => {
@@ -167,5 +171,18 @@ test('a failed MCP save keeps the row in the search results', async () => {
     assert.deepEqual(ids(f.vm), ['logs'])
     assert.equal(f.vm.filteredServices[0].enabled, true)
     assert.deepEqual(f.errors, ['mcpSettings.toasts.updateStateFailed'])
+  } finally { f.close() }
+})
+
+test('the assistant sees the MCP page and the service open for editing', async () => {
+  const f = await fixture()
+  try {
+    assert.deepEqual(f.pageContext(), { page: 'mcp_services' })
+    f.vm.handleAdd()
+    assert.deepEqual(f.pageContext(), { page: 'mcp_services' }, 'a service being created has no id yet')
+    f.vm.handleEdit(f.service)
+    assert.deepEqual(f.pageContext(), { page: 'mcp_services', mcpServiceId: 'one', mcpServiceName: 'Logs' })
+    f.vm.dialogVisible = false
+    assert.deepEqual(f.pageContext(), { page: 'mcp_services' })
   } finally { f.close() }
 })

@@ -6124,6 +6124,7 @@ export default {
       welcomeDesc: 'Ask how WeKnora works, or have me check and handle document parsing, knowledge base activity and Wiki issues in your workspace, or create and configure agents. Whether I ask before a change depends on the access level below the input box.',
       startFailed: 'Failed to start the assistant. Please try again.',
       askAboutDocument: 'Ask {name}',
+      askAboutAnswer: 'Ask {name} about this answer',
       access: {
         title: 'Access level',
         capped: 'Not allowed by your workspace admin',
@@ -6146,7 +6147,16 @@ export default {
       currentPage: 'Current page',
       detach: 'Don\'t include the current page',
       attachedTip: 'Including the current page: {path}',
-      detachedTip: 'Click to include the current page: {path}'
+      detachedTip: 'Click to include the current page: {path}',
+      chatMessage: 'This answer',
+      pages: {
+        knowledge_base: 'Knowledge base',
+        wiki: 'Wiki',
+        agent_editor: 'Agent editor',
+        settings_models: 'Models',
+        mcp_services: 'MCP services',
+        chat: 'Chat'
+      }
     },
     starters: {
       agentConfig: 'Check this agent’s configuration',
@@ -6160,7 +6170,15 @@ export default {
       recentActivity: 'What changed in this knowledge base recently?',
       formats: 'Which document formats does WeKnora support?',
       createWiki: 'How do I create a Wiki knowledge base?',
-      agents: 'Which agents do I have, and which models do they use?'
+      agents: 'Which agents do I have, and which models do they use?',
+      messageSources: 'What is this answer based on?',
+      messageCheck: 'Is anything in this answer wrong?',
+      modelCheck: 'Check this model\'s configuration',
+      modelUsage: 'Which agents and knowledge bases use these models?',
+      mcpTools: 'Which tools does this MCP service offer?',
+      mcpCheck: 'Why can\'t it connect?',
+      modelSetup: 'Which models do I still need to set up?',
+      mcpSetup: 'How do I connect an MCP service?'
     }
   },
   assistantSettings: {

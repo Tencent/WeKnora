@@ -202,6 +202,11 @@ const welcomeDescription = computed(() => t(assistant.contextAttached && assista
 
 const starters = computed(() => {
   const c = assistant.contextAttached ? assistant.pageContext : null
+  if (c?.messageId) return [t('assistant.starters.messageSources'), t('assistant.starters.messageCheck')]
+  if (c?.modelId) return [t('assistant.starters.modelCheck'), t('assistant.starters.modelUsage')]
+  if (c?.mcpServiceId) return [t('assistant.starters.mcpTools'), t('assistant.starters.mcpCheck')]
+  if (c?.page === 'settings_models') return [t('assistant.starters.modelSetup'), t('assistant.starters.modelUsage')]
+  if (c?.page === 'mcp_services') return [t('assistant.starters.mcpSetup')]
   if (c?.agentId) return [
     t('assistant.starters.agentConfig'), t('assistant.starters.agentModel'), t('assistant.starters.agentKnowledge'),
   ]

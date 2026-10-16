@@ -32,16 +32,24 @@ const assistant = useAssistantStore()
 const context = computed(() => assistant.pageContext)
 
 const icon = computed(() => {
-  if (context.value?.agentId) return 'robot'
-  if (context.value?.wikiSlug) return 'book-open'
-  if (context.value?.knowledgeId) return 'file'
+  const c = context.value
+  if (c?.messageId) return 'chat-message'
+  if (c?.modelId || c?.page === 'settings_models') return 'control-platform'
+  if (c?.mcpServiceId || c?.page === 'mcp_services') return 'tools'
+  if (c?.agentId) return 'robot'
+  if (c?.wikiSlug) return 'book-open'
+  if (c?.knowledgeId) return 'file'
   return 'folder'
 })
 
 const segments = computed(() => {
   const c = context.value
   if (!c) return []
+  if (c.messageId) return [t('assistant.context.chatMessage')]
+  if (c.modelId) return [t('assistant.context.pages.settings_models'), c.modelName || c.modelId]
+  if (c.mcpServiceId) return [t('assistant.context.pages.mcp_services'), c.mcpServiceName || c.mcpServiceId]
   if (c.agentId) return [c.agentName || c.agentId]
+  if (!c.knowledgeBaseId && c.page) return [t(`assistant.context.pages.${c.page}`)]
   const leaf = c.wikiTitle || c.wikiSlug || c.knowledgeTitle
   const path = [c.knowledgeBaseName, leaf].filter((s): s is string => !!s)
   return path.length ? path : [t('assistant.context.currentPage')]

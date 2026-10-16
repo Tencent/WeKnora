@@ -2144,6 +2144,7 @@ export default {
     welcomeDesc: '我可以解答 WeKnora 的用法，也可以查看和处理你空间里的文档解析、知识库动态和 Wiki 问题，还能帮你创建和配置智能体。改动前是否先请你确认，由输入框下方的权限等级决定。',
     startFailed: '启动助手失败，请重试',
     askAboutDocument: '问 {name}',
+    askAboutAnswer: '就这条回答问 {name}',
     access: {
       title: '权限等级',
       capped: '空间管理员未开放这一等级',
@@ -2166,7 +2167,16 @@ export default {
       currentPage: '当前页面',
       detach: '不附带当前页面',
       attachedTip: '已附带当前页面：{path}',
-      detachedTip: '点击附带当前页面：{path}'
+      detachedTip: '点击附带当前页面：{path}',
+      chatMessage: '这条回答',
+      pages: {
+        knowledge_base: '知识库',
+        wiki: 'Wiki',
+        agent_editor: '智能体编辑',
+        settings_models: '模型管理',
+        mcp_services: 'MCP 服务',
+        chat: '对话'
+      }
     },
     starters: {
       agentConfig: '检查这个智能体的配置',
@@ -2180,7 +2190,15 @@ export default {
       recentActivity: '这个知识库最近有哪些变动？',
       formats: 'WeKnora 支持哪些文档格式？',
       createWiki: '怎样创建 Wiki 知识库？',
-      agents: '我有哪些智能体？分别用的什么模型？'
+      agents: '我有哪些智能体？分别用的什么模型？',
+      messageSources: '这个回答的依据是什么？',
+      messageCheck: '这个回答有没有说错？',
+      modelCheck: '检查这个模型的配置',
+      modelUsage: '哪些智能体和知识库在用这些模型？',
+      mcpTools: '这个 MCP 服务提供哪些工具？',
+      mcpCheck: '它为什么连不上？',
+      modelSetup: '我还需要配置哪些模型？',
+      mcpSetup: '怎样接入一个 MCP 服务？'
     }
   },
   assistantSettings: {

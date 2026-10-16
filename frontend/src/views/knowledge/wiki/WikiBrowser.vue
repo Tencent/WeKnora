@@ -1008,6 +1008,7 @@ useAssistantPageContext(() => {
   const page = selectedPage.value
   if (!page) return null
   return {
+    page: 'wiki',
     knowledgeBaseId: props.knowledgeBaseId,
     wikiSlug: page.slug,
     wikiTitle: page.title,

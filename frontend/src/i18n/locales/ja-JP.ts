@@ -6124,6 +6124,7 @@ export default {
       welcomeDesc: 'WeKnora の使い方にお答えするほか、ワークスペースのドキュメント解析、ナレッジベースの履歴、Wiki の問題を確認・対応し、エージェントの作成や設定もお手伝いできます。変更の前に確認するかどうかは、入力欄の下の権限レベルで決まります。',
       startFailed: 'アシスタントを起動できませんでした。もう一度お試しください。',
       askAboutDocument: '{name}に聞く',
+      askAboutAnswer: 'この回答について{name}に聞く',
       access: {
         title: '権限レベル',
         capped: 'ワークスペース管理者が許可していません',
@@ -6146,7 +6147,16 @@ export default {
       currentPage: '現在のページ',
       detach: '現在のページを含めない',
       attachedTip: '現在のページを含めています：{path}',
-      detachedTip: 'クリックして現在のページを含める：{path}'
+      detachedTip: 'クリックして現在のページを含める：{path}',
+      chatMessage: 'この回答',
+      pages: {
+        knowledge_base: 'ナレッジベース',
+        wiki: 'Wiki',
+        agent_editor: 'エージェント編集',
+        settings_models: 'モデル管理',
+        mcp_services: 'MCP サービス',
+        chat: 'チャット'
+      }
     },
     starters: {
       agentConfig: 'このエージェントの設定を確認して',
@@ -6160,7 +6170,15 @@ export default {
       recentActivity: 'このナレッジベースの最近の変更は？',
       formats: 'WeKnora はどのドキュメント形式に対応していますか？',
       createWiki: 'Wiki ナレッジベースの作り方は？',
-      agents: 'どんなエージェントがあり、それぞれどのモデルを使っていますか？'
+      agents: 'どんなエージェントがあり、それぞれどのモデルを使っていますか？',
+      messageSources: 'この回答の根拠は何ですか？',
+      messageCheck: 'この回答に誤りはありますか？',
+      modelCheck: 'このモデルの設定を確認して',
+      modelUsage: 'どのエージェントとナレッジベースがこれらのモデルを使っていますか？',
+      mcpTools: 'この MCP サービスにはどんなツールがありますか？',
+      mcpCheck: 'なぜ接続できないのですか？',
+      modelSetup: 'ほかにどのモデルを設定する必要がありますか？',
+      mcpSetup: 'MCP サービスを接続するには？'
     }
   },
   assistantSettings: {

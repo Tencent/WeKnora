@@ -1042,7 +1042,7 @@ useAssistantPageContext(() => {
   const agent = editingAgent.value
   if (!editorVisible.value || editorMode.value !== 'edit' || !agent) return null
   if (!agents.value.some(own => own.id === agent.id && own.tenant_id === agent.tenant_id)) return null
-  return { agentId: agent.id, agentName: agent.name }
+  return { page: 'agent_editor', agentId: agent.id, agentName: agent.name }
 })
 const editorInitialSection = ref<string>('basic')
 const editorInitialHighlightField = ref<string>('')

@@ -17,11 +17,17 @@ import {
 
 /** The WeKnora page the user has open; agent-chat only. */
 export interface PageContextPayload {
+  page?: string
+  section?: string
   agent_id?: string
   knowledge_base_id?: string
   knowledge_id?: string
   wiki_slug?: string
   wiki_issue_ids?: string[]
+  model_id?: string
+  mcp_service_id?: string
+  session_id?: string
+  message_id?: string
 }
 
 interface StreamOptions {

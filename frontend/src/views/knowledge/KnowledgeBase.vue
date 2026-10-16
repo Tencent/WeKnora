@@ -440,6 +440,7 @@ useAssistantPageContext(() => {
   if (!kbId.value) return null;
   const docOpen = isCardDetails.value && !!details.id;
   return {
+    page: 'knowledge_base',
     knowledgeBaseId: kbId.value,
     knowledgeBaseName: kbInfo.value?.id === kbId.value ? kbInfo.value?.name : undefined,
     chatModelId: kbInfo.value?.id === kbId.value ? kbInfo.value?.summary_model_id || undefined : undefined,

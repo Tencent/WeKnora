@@ -33,3 +33,30 @@ test('agent breadcrumb uses its name and an available agent icon', () => {
   assert.equal(state.icon.value, 'file')
   assert.deepEqual(Array.from(state.segments.value), ['KB', 'Doc'])
 })
+
+test('settings and chat breadcrumbs name the page and the open resource', () => {
+  const assistant = vue.reactive({ pageContext: { page: 'settings_models' } as any, contextAttached: true })
+  const exports: any = {}
+  runInNewContext(ts.transpileModule(script, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS },
+  }).outputText, {
+    exports,
+    require: (name: string) => ({
+      vue, 'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
+      '@/stores/assistant': { useAssistantStore: () => assistant },
+    } as Record<string, unknown>)[name],
+  })
+  const state = exports.default.setup({}, { expose() {} })
+  assert.equal(state.icon.value, 'control-platform')
+  assert.deepEqual(Array.from(state.segments.value), ['assistant.context.pages.settings_models'])
+  assistant.pageContext = { page: 'settings_models', modelId: 'm-1', modelName: 'Qwen' }
+  assert.deepEqual(Array.from(state.segments.value), ['assistant.context.pages.settings_models', 'Qwen'])
+  assistant.pageContext = { page: 'mcp_services', mcpServiceId: 'mcp-1' }
+  assert.equal(state.icon.value, 'tools')
+  assert.deepEqual(Array.from(state.segments.value), ['assistant.context.pages.mcp_services', 'mcp-1'])
+  assistant.pageContext = { page: 'chat', chatSessionId: 's', messageId: 'msg' }
+  assert.equal(state.icon.value, 'chat-message')
+  assert.deepEqual(Array.from(state.segments.value), ['assistant.context.chatMessage'])
+  assistant.pageContext = { page: 'knowledge_base', knowledgeBaseId: 'kb', knowledgeBaseName: 'KB' }
+  assert.deepEqual(Array.from(state.segments.value), ['KB'], 'a knowledge base keeps its own breadcrumb')
+})

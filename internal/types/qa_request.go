@@ -62,14 +62,57 @@ type QuestionOrigin struct {
 // MaxPageContextIssues bounds how many Wiki issues one page context names.
 const MaxPageContextIssues = 20
 
+// Page identifiers a client may report in PageContext.Page.
+const (
+	PageKnowledgeBase = "knowledge_base"
+	PageWiki          = "wiki"
+	PageAgentEditor   = "agent_editor"
+	PageModelSettings = "settings_models"
+	PageMCPServices   = "mcp_services"
+	PageChat          = "chat"
+)
+
+var pageContextPages = map[string]struct{}{
+	PageKnowledgeBase: {}, PageWiki: {}, PageAgentEditor: {},
+	PageModelSettings: {}, PageMCPServices: {}, PageChat: {},
+}
+
+// IsPageContextPage reports whether page is a known page identifier.
+func IsPageContextPage(page string) bool {
+	_, ok := pageContextPages[page]
+	return ok
+}
+
+// IsPageContextSection reports whether section looks like a UI section key
+// such as "tools" or "knowledge": lowercase words joined by '_' or '-'.
+func IsPageContextSection(section string) bool {
+	if section == "" || len(section) > 32 || section[0] < 'a' || section[0] > 'z' {
+		return false
+	}
+	for _, r := range section {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
 // PageContext identifies the open page. Knowledge-base resources must be in
 // the resolved search targets; agents are checked independently in the current tenant.
+// Models, MCP services and chat messages are resolved for the assistant only:
+// the first two in the current tenant, messages through the caller's session read access.
 type PageContext struct {
+	Page            string   `json:"page,omitempty"`
+	Section         string   `json:"section,omitempty"` // part of the page in view, e.g. an editor tab
 	AgentID         string   `json:"agent_id,omitempty"`
 	KnowledgeBaseID string   `json:"knowledge_base_id,omitempty"`
 	KnowledgeID     string   `json:"knowledge_id,omitempty"`
 	WikiSlug        string   `json:"wiki_slug,omitempty"`
 	WikiIssueIDs    []string `json:"wiki_issue_ids,omitempty"`
+	ModelID         string   `json:"model_id,omitempty"`
+	MCPServiceID    string   `json:"mcp_service_id,omitempty"`
+	SessionID       string   `json:"session_id,omitempty"`
+	MessageID       string   `json:"message_id,omitempty"`
 }
 
 // QARequest consolidates all parameters for KnowledgeQA and AgentQA service calls,

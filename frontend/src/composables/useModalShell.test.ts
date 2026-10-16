@@ -76,6 +76,7 @@ function fixture() {
     })
     return exports
   }
+  modules['@/composables/useAssistantPageContext'] = { useAssistantPageContext() {} }
   modules['@/composables/useModalShell'] = evaluate(readFileSync(new URL('./useModalShell.ts', import.meta.url), 'utf8'))
   modules['@/utils/assistantDataChange'] = evaluate(readFileSync(new URL('../utils/assistantDataChange.ts', import.meta.url), 'utf8'))
   function mount(path: string, props: Record<string, any>) {

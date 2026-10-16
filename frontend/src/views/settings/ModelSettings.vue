@@ -315,6 +315,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon, PlayCircleIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
 import ModelDebugDrawer from '@/components/ModelDebugDrawer.vue'
 import {
@@ -521,6 +522,14 @@ const modelDisplayName = (model: any) => {
   const displayName = typeof model.displayName === 'string' ? model.displayName.trim() : ''
   return displayName || model.name
 }
+
+useAssistantPageContext(() => {
+  const model = showDialog.value ? editingModel.value : null
+  return {
+    page: 'settings_models',
+    ...(model?.id ? { modelId: model.id, modelName: modelDisplayName(model) } : {}),
+  }
+})
 
 const contextWindowTitle = (tokens?: number) => {
   if (isDefaultContextWindow(tokens)) {

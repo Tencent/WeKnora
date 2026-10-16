@@ -136,6 +136,7 @@ import McpServiceDialog from './components/McpServiceDialog.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
 import { matchesResourceQuery } from '@/utils/resourceListSearch'
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 
 const emit = defineEmits<{ count: [value: number] }>()
 const { t } = useI18n()
@@ -154,6 +155,14 @@ const query = ref('')
 const filteredServices = computed(() => services.value.filter((service) =>
   matchesResourceQuery({ name: service.name, description: serviceUsage(service) }, query.value),
 ))
+
+useAssistantPageContext(() => {
+  const service = dialogVisible.value && dialogMode.value === 'edit' ? currentService.value : null
+  return {
+    page: 'mcp_services',
+    ...(service?.id ? { mcpServiceId: service.id, mcpServiceName: service.name } : {}),
+  }
+})
 
 // Load MCP services
 const loadServices = async () => {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/application/repository"
@@ -119,7 +120,7 @@ func TestResolvePageContextInfo(t *testing.T) {
 		KnowledgeID:     "doc-in",
 		WikiSlug:        "entity/acme",
 		WikiIssueIDs:    []string{"i-2", "i-other", "missing", "i-1"},
-	}, targets, kbInfos)
+	}, targets, kbInfos, false)
 	require.NotNil(t, info)
 	assert.Equal(t, "Handbook", info.KnowledgeBaseName)
 	require.NotNil(t, info.Document)
@@ -134,15 +135,15 @@ func TestResolvePageContextInfo(t *testing.T) {
 		KnowledgeBaseID: "kb-a",
 		KnowledgeID:     "doc-elsewhere",
 		WikiSlug:        "entity/beta",
-	}, targets, kbInfos)
+	}, targets, kbInfos, false)
 	require.NotNil(t, info)
 	assert.Nil(t, info.Document, "a document from another base must be dropped")
 	assert.Nil(t, info.WikiPage, "a Wiki page from another base must be dropped")
 	assert.Empty(t, info.WikiIssues)
 
-	assert.Nil(t, svc.resolvePageContextInfo(ctx, &types.PageContext{KnowledgeBaseID: "kb-b"}, targets, kbInfos),
+	assert.Nil(t, svc.resolvePageContextInfo(ctx, &types.PageContext{KnowledgeBaseID: "kb-b"}, targets, kbInfos, false),
 		"a base outside the search targets must be dropped")
-	assert.Nil(t, svc.resolvePageContextInfo(ctx, nil, targets, kbInfos))
+	assert.Nil(t, svc.resolvePageContextInfo(ctx, nil, targets, kbInfos, false))
 }
 
 type pageContextKnowledgeService struct {
@@ -219,7 +220,7 @@ func TestResolvePageContextWikiScope(t *testing.T) {
 				pageContext.WikiSlug = ""
 			}
 			info := svc.resolvePageContextInfo(context.Background(), pageContext,
-				tc.targets, []*agent.KnowledgeBaseInfo{{ID: "kb", Name: "Handbook"}})
+				tc.targets, []*agent.KnowledgeBaseInfo{{ID: "kb", Name: "Handbook"}}, false)
 			require.NotNil(t, info)
 			if tc.want {
 				if !tc.issueOnly {
@@ -262,7 +263,7 @@ func TestResolveAgentPageContext(t *testing.T) {
 	ctx = types.WithExecutionTenant(ctx, 2)
 	for _, id := range []string{"own", "unknown", "foreign", types.BuiltinSmartReasoningID} {
 		t.Run(id, func(t *testing.T) {
-			info := svc.resolvePageContextInfo(ctx, &types.PageContext{AgentID: id}, nil, nil)
+			info := svc.resolvePageContextInfo(ctx, &types.PageContext{AgentID: id}, nil, nil, false)
 			if id == "own" || id == types.BuiltinSmartReasoningID {
 				require.NotNil(t, info)
 				require.NotNil(t, info.Agent)
@@ -273,4 +274,119 @@ func TestResolveAgentPageContext(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPageContextInTargetsKeepsSettingsAndChat(t *testing.T) {
+	got := pageContextInTargets(context.Background(), &types.PageContext{
+		Page: " chat ", Section: " answer ", ModelID: " m-1 ", MCPServiceID: " mcp-1 ",
+		SessionID: " s-1 ", MessageID: " msg-1 ",
+		KnowledgeBaseID: "outside",
+	}, nil)
+	assert.Equal(t, &types.PageContext{
+		Page: "chat", Section: "answer", ModelID: "m-1", MCPServiceID: "mcp-1", SessionID: "s-1", MessageID: "msg-1",
+	}, got)
+
+	assert.Nil(t, pageContextInTargets(context.Background(), &types.PageContext{Page: "admin"}, nil),
+		"an unknown page identifier is dropped")
+	got = pageContextInTargets(context.Background(),
+		&types.PageContext{Page: types.PageAgentEditor, Section: "<b>Tools</b>", AgentID: "a"}, nil)
+	assert.Equal(t, &types.PageContext{Page: types.PageAgentEditor, AgentID: "a"}, got,
+		"a section that is not a plain key is dropped")
+	assert.Nil(t, pageContextInTargets(context.Background(), &types.PageContext{Section: "tools"}, nil),
+		"a section means nothing without its page")
+	assert.Nil(t, pageContextInTargets(context.Background(), &types.PageContext{MessageID: "msg-1"}, nil),
+		"a message without its session cannot be looked up")
+}
+
+type pageContextModelService struct {
+	interfaces.ModelService
+}
+
+func (*pageContextModelService) GetModelByID(_ context.Context, id string) (*types.Model, error) {
+	if id == "m-1" {
+		return &types.Model{ID: id, Name: "qwen-max", DisplayName: "Qwen", Type: types.ModelTypeKnowledgeQA}, nil
+	}
+	return nil, errors.New("not found")
+}
+
+type pageContextMCPService struct {
+	interfaces.MCPServiceService
+}
+
+func (*pageContextMCPService) GetMCPServiceByID(
+	_ context.Context, tenantID uint64, id string,
+) (*types.MCPService, error) {
+	if id == "mcp-1" && tenantID == 1 {
+		return &types.MCPService{ID: id, Name: "Jira", TransportType: types.MCPTransportSSE, Enabled: true}, nil
+	}
+	return nil, errors.New("not found")
+}
+
+type pageContextMessageService struct {
+	interfaces.MessageService
+}
+
+func (*pageContextMessageService) GetMessage(_ context.Context, sessionID, id string) (*types.Message, error) {
+	if sessionID != "s-1" || id != "msg-1" {
+		return nil, errors.New("session not found")
+	}
+	return &types.Message{
+		ID: id, SessionID: sessionID, RequestID: "r-2", Role: "assistant", AgentID: "agent-1",
+		Content: "Use the handbook.",
+		KnowledgeReferences: types.References{
+			{KnowledgeID: "k-1", KnowledgeBaseID: "kb-1", KnowledgeTitle: "Handbook"},
+			{KnowledgeID: "k-1", KnowledgeBaseID: "kb-1", KnowledgeTitle: "Handbook"},
+			{KnowledgeID: "k-2", KnowledgeFilename: "faq.pdf"},
+		},
+	}, nil
+}
+
+func (*pageContextMessageService) GetMessagesBySessionBeforeTime(
+	context.Context, string, time.Time, int,
+) ([]*types.Message, error) {
+	return []*types.Message{
+		{RequestID: "r-1", Role: "user", Content: "Earlier question"},
+		{RequestID: "r-1", Role: "assistant", Content: "Earlier answer"},
+		{RequestID: "r-2", Role: "user", Content: "  Where are the rules?  "},
+	}, nil
+}
+
+// Settings and chat resources are the assistant's only, and each is dropped
+// unless the caller can read it.
+func TestResolveAssistantPageContext(t *testing.T) {
+	svc := &agentService{
+		modelService:      &pageContextModelService{},
+		mcpServiceService: &pageContextMCPService{},
+		messageService:    &pageContextMessageService{},
+	}
+	ctx := types.WithCaller(context.Background(), types.Caller{TenantID: 1, UserID: "u1"})
+	page := &types.PageContext{
+		Page: types.PageChat, ModelID: "m-1", MCPServiceID: "mcp-1", SessionID: "s-1", MessageID: "msg-1",
+	}
+
+	assert.Nil(t, svc.resolvePageContextInfo(ctx, page, nil, nil, false),
+		"other agents never see settings or chat resources")
+
+	info := svc.resolvePageContextInfo(ctx, page, nil, nil, true)
+	require.NotNil(t, info)
+	assert.Equal(t, types.PageChat, info.Page)
+	assert.Equal(t, &agent.PageContextModel{ID: "m-1", Name: "Qwen", Type: string(types.ModelTypeKnowledgeQA)},
+		info.Model, "the display name wins and no endpoint or key is carried")
+	assert.Equal(t, &agent.PageContextMCPService{ID: "mcp-1", Name: "Jira", Transport: "sse", Enabled: true},
+		info.MCPService)
+	require.NotNil(t, info.Message)
+	assert.Equal(t, "Where are the rules?", info.Message.Question, "the question of the same request is quoted")
+	assert.Equal(t, "Use the handbook.", info.Message.Answer)
+	assert.Equal(t, []*agent.PageContextReference{
+		{KnowledgeID: "k-1", KnowledgeBaseID: "kb-1", Title: "Handbook"},
+		{KnowledgeID: "k-2", Title: "faq.pdf"},
+	}, info.Message.References)
+
+	info = svc.resolvePageContextInfo(ctx, &types.PageContext{
+		Page: types.PageMCPServices, ModelID: "gone", MCPServiceID: "gone", SessionID: "other", MessageID: "msg-1",
+	}, nil, nil, true)
+	require.NotNil(t, info)
+	assert.Nil(t, info.Model)
+	assert.Nil(t, info.MCPService)
+	assert.Nil(t, info.Message, "a message in a session the caller cannot read is dropped")
 }

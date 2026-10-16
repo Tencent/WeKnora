@@ -2142,6 +2142,7 @@ export default {
     welcomeDesc: 'WeKnora 사용법을 안내하고, 워크스페이스의 문서 파싱, 지식 베이스 활동, Wiki 문제를 확인하고 처리하며, 에이전트를 만들고 설정할 수도 있습니다. 변경 전에 확인을 요청할지는 입력창 아래의 권한 수준에 따라 정해집니다.',
     startFailed: '어시스턴트를 시작하지 못했습니다. 다시 시도해 주세요.',
     askAboutDocument: '{name}에게 묻기',
+    askAboutAnswer: '이 답변에 대해 {name}에게 묻기',
     access: {
       title: '권한 수준',
       capped: '워크스페이스 관리자가 허용하지 않았습니다',
@@ -2164,7 +2165,16 @@ export default {
       currentPage: '현재 페이지',
       detach: '현재 페이지 포함하지 않기',
       attachedTip: '현재 페이지 포함됨: {path}',
-      detachedTip: '클릭하여 현재 페이지 포함: {path}'
+      detachedTip: '클릭하여 현재 페이지 포함: {path}',
+      chatMessage: '이 답변',
+      pages: {
+        knowledge_base: '지식베이스',
+        wiki: 'Wiki',
+        agent_editor: '에이전트 편집',
+        settings_models: '모델 관리',
+        mcp_services: 'MCP 서비스',
+        chat: '대화'
+      }
     },
     starters: {
       agentConfig: '이 에이전트의 설정 확인하기',
@@ -2178,7 +2188,15 @@ export default {
       recentActivity: '이 지식 베이스에 최근 어떤 변경이 있었나요?',
       formats: 'WeKnora는 어떤 문서 형식을 지원하나요?',
       createWiki: 'Wiki 지식 베이스는 어떻게 만드나요?',
-      agents: '어떤 에이전트가 있고, 각각 어떤 모델을 쓰나요?'
+      agents: '어떤 에이전트가 있고, 각각 어떤 모델을 쓰나요?',
+      messageSources: '이 답변의 근거는 무엇인가요?',
+      messageCheck: '이 답변에 틀린 내용이 있나요?',
+      modelCheck: '이 모델의 설정을 확인해 줘',
+      modelUsage: '어떤 에이전트와 지식베이스가 이 모델들을 쓰나요?',
+      mcpTools: '이 MCP 서비스는 어떤 도구를 제공하나요?',
+      mcpCheck: '왜 연결되지 않나요?',
+      modelSetup: '어떤 모델을 더 설정해야 하나요?',
+      mcpSetup: 'MCP 서비스는 어떻게 연결하나요?'
     }
   },
   assistantSettings: {
