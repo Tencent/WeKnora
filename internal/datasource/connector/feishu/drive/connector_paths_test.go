@@ -123,9 +123,10 @@ func deletedIDs(items []types.FetchedItem) []string {
 }
 
 // TestDriveFetchIncremental_PathQualifiedMultiLevel anchors the directory
-// mapping: the selected root is the KB root, so paths are <子目录...>/<文件名>
-// relative to it, Chinese names kept, "/" in a folder
-// name sanitised to "_", multi-level nesting resolved from the same walk.
+// mapping: the selected root folder mirrors as a top-level KB folder named
+// after it, so paths are <根名>/<子目录...>/<文件名>, Chinese names kept,
+// "/" in a folder name sanitised to "_", multi-level nesting resolved from
+// the same walk.
 func TestDriveFetchIncremental_PathQualifiedMultiLevel(t *testing.T) {
 	f := newFakeDriveTree(t, map[string][]core.DriveFile{
 		"fold-root": {
@@ -145,11 +146,12 @@ func TestDriveFetchIncremental_PathQualifiedMultiLevel(t *testing.T) {
 	}
 
 	want := map[string]string{
-		// The selected root folder IS the KB root: direct children carry no
-		// prefix, deeper ones only the sub-directory path.
-		"f-root": "说明.pdf",
-		"f-spec": "规格/详细.pdf",
-		"f-bad":  "a_b/child.pdf",
+		// The selected root folder mirrors as a top-level KB folder ("团队资料"
+		// via the meta mock): every item's path starts with the root name,
+		// deeper ones then carry the sub-directory path.
+		"f-root": "团队资料/说明.pdf",
+		"f-spec": "团队资料/规格/详细.pdf",
+		"f-bad":  "团队资料/a_b/child.pdf",
 	}
 	got := fetchedByToken(items)
 	if len(got) != len(want) {
@@ -256,8 +258,8 @@ func TestDriveFetchIncremental_MoveFollowsNewPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first sync error: %v", err)
 	}
-	if got := fetchedByToken(items1)["f-doc"].FileName; got != "目录A/文档.pdf" {
-		t.Fatalf("first sync f-doc FileName = %q, want 目录A/文档.pdf", got)
+	if got := fetchedByToken(items1)["f-doc"].FileName; got != "团队资料/目录A/文档.pdf" {
+		t.Fatalf("first sync f-doc FileName = %q, want 团队资料/目录A/文档.pdf", got)
 	}
 
 	// Move f-doc to a new folder 目录B and bump its modified time.
@@ -275,8 +277,8 @@ func TestDriveFetchIncremental_MoveFollowsNewPath(t *testing.T) {
 	if !ok {
 		t.Fatalf("moved file not re-fetched on second sync: %+v", items2)
 	}
-	if moved.FileName != "目录B/文档.pdf" {
-		t.Errorf("moved file FileName = %q, want 目录B/文档.pdf (same external_id, new folder)", moved.FileName)
+	if moved.FileName != "团队资料/目录B/文档.pdf" {
+		t.Errorf("moved file FileName = %q, want 团队资料/目录B/文档.pdf (same external_id, new folder)", moved.FileName)
 	}
 }
 

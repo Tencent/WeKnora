@@ -8,8 +8,8 @@ import (
 )
 
 // This file implements the P1 directory mapping: FetchedItem.FileName becomes
-// "<目录A>/<目录B>/<文档名>.md" relative to the selected sync root (the space
-// = the knowledge base root) so ingestion's
+// "<空间名>/<目录A>/<目录B>/<文档名>.md" rooted at the synced space's own name
+// (the space = a top-level KB folder) so ingestion's
 // types.SplitKnowledgeRelativePath derives the KB folder_path (GitLab-style).
 // The path table is built per sync run from the recursive node listing — zero
 // engine changes. external_id stays the node token, so a move/rename lands in
@@ -59,15 +59,16 @@ func underShortcut(n core.WikiNode, byToken map[string]core.WikiNode) bool {
 }
 
 // buildWikiDirPaths maps each node token to its cleaned directory prefix,
-// relative to the selected sync root: the user-selected space IS the knowledge
-// base root, so a top-level node maps to "" (its document lands directly in
-// the KB root) and deeper nodes to "<父目录标题...>". Ancestors are resolved
-// bottom-up through ParentNodeID within the listing. A docx node that also has
-// children is both a document and a directory — its own item sits beside the
-// child folder it forms.
-// NOTE: with several wiki spaces selected into one KB, same-named
-// sub-directories of different spaces merge into one KB folder — accepted.
-func buildWikiDirPaths(nodes []core.WikiNode) map[string]string {
+// rooted at spacePrefix (the synced space's sanitized name): a top-level node
+// maps to spacePrefix (its document lands in the space's own KB folder) and
+// deeper nodes to "<space>/<父目录标题...>". Ancestors are resolved bottom-up
+// through ParentNodeID within the listing; for a sub-tree selection the
+// ancestors above the sub-tree root are unknown, so its documents land
+// directly in the space folder. A docx node that also has children is both a
+// document and a directory — its own item sits beside the child folder it
+// forms. An empty spacePrefix (space name unresolved) falls back to paths
+// relative to the listing root.
+func buildWikiDirPaths(nodes []core.WikiNode, spacePrefix string) map[string]string {
 	byToken := make(map[string]core.WikiNode, len(nodes))
 	for _, n := range nodes {
 		byToken[n.NodeToken] = n
@@ -75,7 +76,7 @@ func buildWikiDirPaths(nodes []core.WikiNode) map[string]string {
 	paths := make(map[string]string, len(nodes))
 	for _, n := range nodes {
 		// Walk up collecting ancestor titles, then reverse so the topmost
-		// directory leads; no space-name segment (selected root = KB root).
+		// directory leads; the space name itself leads the chain.
 		var ancestors []string
 		visited := make(map[string]bool)
 		for p := n.ParentNodeID; p != "" && !visited[p]; p = byToken[p].ParentNodeID {
@@ -89,6 +90,9 @@ func buildWikiDirPaths(nodes []core.WikiNode) map[string]string {
 		for i, j := 0, len(ancestors)-1; i < j; i, j = i+1, j-1 {
 			ancestors[i], ancestors[j] = ancestors[j], ancestors[i]
 		}
+		if spacePrefix != "" {
+			ancestors = append([]string{spacePrefix}, ancestors...)
+		}
 		paths[n.NodeToken] = strings.Join(ancestors, "/")
 	}
 	return paths
@@ -97,8 +101,8 @@ func buildWikiDirPaths(nodes []core.WikiNode) map[string]string {
 // prepareDirPaths rebuilds the per-resource directory table. Called from List
 // after the shortcut filter, so shortcut tokens (and their subtrees) never
 // appear as path segments.
-func (o *wikiOps) prepareDirPaths(nodes []core.WikiNode) {
-	o.dirPaths = buildWikiDirPaths(nodes)
+func (o *wikiOps) prepareDirPaths(nodes []core.WikiNode, spacePrefix string) {
+	o.dirPaths = buildWikiDirPaths(nodes, spacePrefix)
 }
 
 // qualifyItemFileNames prefixes every fetched item's FileName with dir so

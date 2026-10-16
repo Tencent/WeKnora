@@ -120,10 +120,10 @@ func fileNode(token, title string, opts ...func(*core.WikiNode)) core.WikiNode {
 }
 
 // TestWikiFetchAll_PathQualifiedMultiLevel anchors the multi-level directory
-// mapping: the selected root is the KB root, so paths are
-// <目录A>/<目录B>/<文档名> relative to it, Chinese directory names kept as-is
-// and "/" inside a directory name sanitised to "_" so it cannot fake an extra
-// nesting level.
+// mapping: the synced space mirrors as a top-level KB folder named after it,
+// so paths are <空间名>/<目录A>/<目录B>/<文档名>, Chinese directory names kept
+// as-is and "/" inside a directory name sanitised to "_" so it cannot fake an
+// extra nesting level.
 func TestWikiFetchAll_PathQualifiedMultiLevel(t *testing.T) {
 	f := newFakeWikiTree(t,
 		[]core.WikiNode{
@@ -147,15 +147,16 @@ func TestWikiFetchAll_PathQualifiedMultiLevel(t *testing.T) {
 	}
 
 	want := map[string]string{
-		// The selected space IS the KB root: a top-level item's prefix is
-		// empty (bare file name), deeper items carry only the directory path.
-		// Base names are sanitised like directory segments: a "/" in a title
-		// must not fake an extra folder level (nt-dirB), while the directory
-		// path prefix is built from the sanitised folder name (nt-leaf).
-		"nt-dirA": "产品文档",
-		"nt-top":  "顶层.pdf",
-		"nt-dirB": "产品文档/子_目录",
-		"nt-leaf": "产品文档/子_目录/规格说明.pdf",
+		// The synced space mirrors as a top-level KB folder ("Test Space" in
+		// the fake tree): every item's prefix starts with the space name,
+		// deeper items then carry the directory path. Base names are
+		// sanitised like directory segments: a "/" in a title must not fake
+		// an extra folder level (nt-dirB), while the directory path prefix
+		// is built from the sanitised folder name (nt-leaf).
+		"nt-dirA": "Test Space/产品文档",
+		"nt-top":  "Test Space/顶层.pdf",
+		"nt-dirB": "Test Space/产品文档/子_目录",
+		"nt-leaf": "Test Space/产品文档/子_目录/规格说明.pdf",
 	}
 	got := make(map[string]string, len(items))
 	for _, item := range items {
@@ -249,7 +250,7 @@ func TestWikiFetchIncremental_MoveFollowsNewPath(t *testing.T) {
 			docItem = &items1[i]
 		}
 	}
-	if docItem == nil || docItem.FileName != "目录A/文档.pdf" {
+	if docItem == nil || docItem.FileName != "Test Space/目录A/文档.pdf" {
 		t.Fatalf("first sync: doc item missing or wrong path: %+v", items1)
 	}
 
@@ -274,7 +275,8 @@ func TestWikiFetchIncremental_MoveFollowsNewPath(t *testing.T) {
 	if moved == nil {
 		t.Fatalf("moved doc not re-fetched on second sync: %+v", items2)
 	}
-	if moved.FileName != "目录B/文档.pdf" {
-		t.Errorf("moved doc FileName = %q, want %q (same external_id, new folder)", moved.FileName, "目录B/文档.pdf")
+	if moved.FileName != "Test Space/目录B/文档.pdf" {
+		t.Errorf("moved doc FileName = %q, want %q (same external_id, new folder)",
+			moved.FileName, "Test Space/目录B/文档.pdf")
 	}
 }

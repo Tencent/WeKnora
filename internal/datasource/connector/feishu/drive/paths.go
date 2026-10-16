@@ -9,9 +9,10 @@ import (
 )
 
 // This file implements the P1 directory mapping for the Drive connector:
-// FetchedItem.FileName becomes "<子目录...>/<文件名>" relative to the selected
-// sync root (the root folder = the knowledge base root) so ingestion's
-// types.SplitKnowledgeRelativePath derives the KB folder_path. The recursive
+// FetchedItem.FileName becomes "<根文件夹名>/<子目录...>/<文件名>" rooted at
+// the selected sync root's own display name (the root folder = a top-level KB
+// folder) so ingestion's types.SplitKnowledgeRelativePath derives the KB
+// folder_path. The recursive
 // walk itself is core.WalkDriveTree (the Drive connector's single walker,
 // shared with core): DFS order, shortcut expansion, partial-failure
 // aggregation — plus a folder-token → cleaned directory path table built in
@@ -45,17 +46,25 @@ func (o *driveOps) driveFolderName(
 
 // listDriveFilesForResource lists the files to sync for a resourceID and
 // records the directory-path table for Fetch. A resourceID is either a bare
-// root folderToken (sync the whole subtree) or "rootFolderToken:fileToken"
-// (sync a single selected file or sub-folder).
+// rootFolderToken (sync the whole subtree) or "rootFolderToken:fileToken"
+// (sync a single selected file or sub-folder). Every walk is rooted at the
+// root folder's own display name, so the synced folder appears as a top-level
+// KB folder holding its subtree (an unresolved root name falls back to no
+// prefix, mirroring pre-root-mirror behaviour).
 func (o *driveOps) listDriveFilesForResource(
 	ctx context.Context, client *core.Client, resourceID string,
 ) ([]core.DriveFile, error) {
 	rootFolderToken, fileToken := parseDriveResourceID(resourceID)
 
+	rootBase := ""
+	if rootName, ok := o.driveFolderName(ctx, client, rootFolderToken); ok {
+		rootBase = rootName
+	}
+
 	if fileToken == "" {
-		// The selected root folder maps to the knowledge base root: documents
-		// directly under it land in folder_path "".
-		files, dirPaths, failures := core.WalkDriveTree(ctx, client, rootFolderToken, "")
+		// The selected root folder maps to a top-level KB folder named after
+		// it: documents directly under it land in folder_path "<根名>".
+		files, dirPaths, failures := core.WalkDriveTree(ctx, client, rootFolderToken, rootBase)
 		o.dirPaths = dirPaths
 		return files, partialDriveError(failures)
 	}
@@ -64,7 +73,7 @@ func (o *driveOps) listDriveFilesForResource(
 	// read off the root subtree listing — probing it with folder APIs would
 	// fail for file tokens (folder meta 91202, folder list 1061002) and log
 	// API errors on every sync.
-	rootFiles, rootDirs, rootFailures := core.WalkDriveTree(ctx, client, rootFolderToken, "")
+	rootFiles, rootDirs, rootFailures := core.WalkDriveTree(ctx, client, rootFolderToken, rootBase)
 	for _, f := range rootFiles {
 		if f.Token == fileToken && f.Type != "folder" {
 			o.dirPaths = rootDirs
@@ -72,14 +81,17 @@ func (o *driveOps) listDriveFilesForResource(
 		}
 	}
 
-	// Sub-folder selection: walk that sub-folder's subtree, prefixed with the
-	// sub-folder's own name (relative to the KB root; unresolved name → the
-	// walk runs with no prefix). If the token turns out to be a file missing
-	// from the root listing (partial listing, permission edge), fall back to
-	// the already-fetched root subtree — mirroring single-file behaviour.
-	base := ""
+	// Sub-folder selection: walk that sub-folder's subtree, prefixed with
+	// "<根名>/<子文件夹名>" (unresolved names drop their segment). If the
+	// token turns out to be a file missing from the root listing (partial
+	// listing, permission edge), fall back to the already-fetched root
+	// subtree — mirroring single-file behaviour.
+	base := rootBase
 	if subName, ok := o.driveFolderName(ctx, client, fileToken); ok {
-		base = subName
+		if base != "" {
+			base += "/"
+		}
+		base += subName
 	}
 	files, dirPaths, failures := core.WalkDriveTree(ctx, client, fileToken, base)
 	for _, failure := range failures {

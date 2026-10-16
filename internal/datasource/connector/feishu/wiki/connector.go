@@ -222,13 +222,35 @@ func (c *Connector) FetchStream(
 // region (for URL rendering), encodes/decodes the wiki cursor wire format
 // (core.FeishuCursor / space_node_times), and holds the per-run directory
 // mapping state (P1): dirPaths maps node token → cleaned directory prefix
-// relative to the selected space (KB root). List builds the state for the
-// resource being synced; Fetch reads it. runSync processes one resource at a
-// time, so the mutation is race-free.
+// rooted at the space's own name, so every synced space lands in a top-level
+// KB folder named after the space. List builds the state for the resource
+// being synced; Fetch reads it. runSync processes one resource at a time, so
+// the mutation is race-free.
 type wikiOps struct {
 	region    core.Region
 	parseMode string
 	dirPaths  map[string]string
+}
+
+// spaceDirPrefix resolves the synced space's display name (sanitized) as the
+// top-level KB folder for this run. One ListWikiSpaces call per sync run;
+// an unresolved name yields "" and the documents fall back to landing at the
+// KB root (pre-mirror behaviour) rather than failing the sync.
+func (o *wikiOps) spaceDirPrefix(ctx context.Context, client *core.Client, spaceID string) string {
+	spaces, err := client.ListWikiSpaces(ctx)
+	if err != nil {
+		logger.Warnf(ctx, "[Feishu] list wiki spaces for folder prefix %s: %v", spaceID, err)
+		return ""
+	}
+	for _, s := range spaces {
+		if s.SpaceID == spaceID {
+			if s.Name == "" {
+				return ""
+			}
+			return core.SanitizeFileName(s.Name)
+		}
+	}
+	return ""
 }
 
 func (o *wikiOps) List(ctx context.Context, client *core.Client, resourceID string) ([]core.WikiNode, error, error) {
@@ -244,7 +266,7 @@ func (o *wikiOps) List(ctx context.Context, client *core.Client, resourceID stri
 		// surfaced via ListFailureItems, and the sync continues.
 	}
 	nodes = filterShortcutSubtrees(nodes)
-	o.prepareDirPaths(nodes)
+	o.prepareDirPaths(nodes, o.spaceDirPrefix(ctx, client, spaceID))
 	if err != nil {
 		return nodes, err, nil
 	}
