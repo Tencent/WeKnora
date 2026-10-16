@@ -5926,6 +5926,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "知识库ID",
                         "name": "id",
                         "in": "path",
@@ -5971,7 +5972,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "knowledge_base.search",
+                    "max_items": 30,
+                    "method": "post",
+                    "risk": "probe"
+                },
+                "x-agent-hint": "Runs the raw vector and keyword recall of one knowledge base, without rerank, and returns the chunks it finds in rank order, so you can see why something is or is not found. match_type 0 is a vector hit, 1 a keyword hit; score ranks the merged results and is not a similarity. Each threshold filters its own retriever before merging: leave them out to see every candidate, or set them to an agent's vector_threshold and keyword_threshold to see what passes. For answering a question, use search_knowledge instead."
             },
             "post": {
                 "security": [
@@ -5996,6 +6004,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "knowledge_base_id",
                         "description": "知识库ID",
                         "name": "id",
                         "in": "path",
@@ -6041,7 +6050,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "knowledge_base.search",
+                    "max_items": 30,
+                    "method": "post",
+                    "risk": "probe"
+                },
+                "x-agent-hint": "Runs the raw vector and keyword recall of one knowledge base, without rerank, and returns the chunks it finds in rank order, so you can see why something is or is not found. match_type 0 is a vector hit, 1 a keyword hit; score ranks the merged results and is not a similarity. Each threshold filters its own retriever before merging: leave them out to see every candidate, or set them to an agent's vector_threshold and keyword_threshold to see what passes. For answering a question, use search_knowledge instead."
             }
         },
         "/knowledge-bases/{id}/images": {
@@ -11500,6 +11516,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "mcp_service_id",
                         "description": "MCP服务ID",
                         "name": "id",
                         "in": "path",
@@ -11531,7 +11548,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "mcp_service.test",
+                    "risk": "probe",
+                    "role": "admin"
+                },
+                "x-agent-hint": "Connects to an MCP service with its saved settings and reports whether it works. success false comes with the reason in message; oauth_required means the user must authorize it in the MCP settings. List its tools with mcp_service.list_tools."
             }
         },
         "/mcp-services/{id}/tool-approvals/{tool_name}": {
@@ -11627,6 +11650,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "mcp_service_id",
                         "description": "MCP服务ID",
                         "name": "id",
                         "in": "path",
@@ -11661,7 +11685,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "mcp_service.list_tools",
+                    "max_items": 200,
+                    "risk": "read"
+                },
+                "x-agent-hint": "Lists the tools an MCP service offers, asking the service itself. Use it to check that a service can do what an agent needs before binding it. An error means the service is unreachable; mcp_service.test says why."
             }
         },
         "/me/env-vars": {
@@ -23959,7 +23989,7 @@ const docTemplate = `{
                     "x-agent": true
                 },
                 "enable_parent_child": {
-                    "description": "EnableParentChild splits into large parent chunks and small child chunks. Search matches a child and returns its parent.",
+                    "description": "EnableParentChild splits into large parent chunks and small child chunks.\nSearch matches a child and returns its parent.",
                     "type": "boolean",
                     "x-agent": true
                 },
@@ -23996,7 +24026,7 @@ const docTemplate = `{
                     "x-agent-maximum": "20"
                 },
                 "strategy": {
-                    "description": "Strategy selects how documents are split: auto, heading, heuristic, recursive or legacy. Empty keeps the server default.",
+                    "description": "Strategy selects how documents are split: auto, heading, heuristic,\nrecursive or legacy. Empty keeps the server default.",
                     "type": "string",
                     "enum": [
                         "auto",
@@ -26561,7 +26591,7 @@ const docTemplate = `{
                     ]
                 },
                 "summary_model_id": {
-                    "description": "Summary model ID. model.list returns the ids. Used for summaries, and as the default for auto-tagging and the AI description.",
+                    "description": "Summary model ID. model.list returns the ids. Used for summaries, and as\nthe default for auto-tagging and the AI description.",
                     "type": "string",
                     "x-agent": "summary_model_id"
                 },
@@ -27575,11 +27605,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "message": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-runes": "500"
                 },
                 "oauth_required": {
                     "description": "OAuthRequired is true when the connection failed because the server\nrequires OAuth authorization (RFC 9728), even though the service was not\nconfigured for OAuth. The UI uses it to guide the user to switch the auth\nstrategy to OAuth.",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "resources": {
                     "type": "array",
@@ -27588,7 +27621,8 @@ const docTemplate = `{
                     }
                 },
                 "success": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "tools": {
                     "type": "array",
@@ -27602,18 +27636,22 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "description": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-runes": "500"
                 },
                 "inputSchema": {
                     "description": "JSON Schema for tool parameters",
                     "type": "object"
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "require_approval": {
                     "description": "RequireApproval when true: agent execution pauses until the user approves in UI (issue #1173).",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 }
             }
         },
@@ -30128,13 +30166,19 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "disable_keywords_match": {
-                    "type": "boolean"
+                    "description": "Turns keyword matching off, leaving vector matching only.",
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "disable_vector_match": {
-                    "type": "boolean"
+                    "description": "Turns vector matching off, leaving keyword matching only.",
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "keyword_threshold": {
-                    "type": "number"
+                    "description": "Minimum keyword score a hit needs; 0 keeps every keyword hit.",
+                    "type": "number",
+                    "x-agent": true
                 },
                 "knowledge_base_ids": {
                     "description": "KnowledgeBaseIDs overrides the single KB ID passed to HybridSearch,\nallowing a single retrieval call to span multiple KBs that share the\nsame embedding model. When empty, HybridSearch uses its own id parameter.",
@@ -30144,13 +30188,19 @@ const docTemplate = `{
                     }
                 },
                 "knowledge_ids": {
+                    "description": "Limits the search to these documents of the knowledge base.",
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true,
+                    "x-agent-maximum": "20"
                 },
                 "match_count": {
-                    "type": "integer"
+                    "description": "Number of chunks to return; 0 uses the default.",
+                    "type": "integer",
+                    "x-agent": true,
+                    "x-agent-maximum": "30"
                 },
                 "only_recommended": {
                     "type": "boolean"
@@ -30163,7 +30213,9 @@ const docTemplate = `{
                 },
                 "query_text": {
                     "description": "QueryText is required unless query_embedding is provided, keyword matching is disabled,\nand vector matching remains enabled.",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-required": true
                 },
                 "rerank": {
                     "description": "Rerank, when present and enabled, reranks the fused candidates before\ntruncating to MatchCount. Only the hybrid-search API reads it; internal\ncallers rerank on their own.",
@@ -30191,7 +30243,9 @@ const docTemplate = `{
                     }
                 },
                 "vector_threshold": {
-                    "type": "number"
+                    "description": "Minimum vector similarity a hit needs; 0 keeps every vector hit.",
+                    "type": "number",
+                    "x-agent": true
                 }
             }
         },
@@ -30200,7 +30254,8 @@ const docTemplate = `{
             "properties": {
                 "chunk_index": {
                     "description": "Chunk index",
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "chunk_metadata": {
                     "description": "ChunkMetadata stores chunk-level metadata (e.g., generated questions)",
@@ -30208,11 +30263,14 @@ const docTemplate = `{
                 },
                 "chunk_type": {
                     "description": "Chunk 类型",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "content": {
                     "description": "Content",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-runes": "600"
                 },
                 "end_at": {
                     "description": "End at",
@@ -30220,7 +30278,8 @@ const docTemplate = `{
                 },
                 "id": {
                     "description": "ID",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "chunk_id"
                 },
                 "image_info": {
                     "description": "图片信息 (JSON 格式)",
@@ -30248,7 +30307,8 @@ const docTemplate = `{
                 },
                 "knowledge_id": {
                     "description": "Knowledge ID",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "knowledge_source": {
                     "description": "Knowledge source\nUsed to indicate the source of the knowledge, such as \"url\"",
@@ -30256,7 +30316,8 @@ const docTemplate = `{
                 },
                 "knowledge_title": {
                     "description": "Knowledge title",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "match_type": {
                     "description": "Match type",
@@ -30264,7 +30325,8 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MatchType"
                         }
-                    ]
+                    ],
+                    "x-agent": true
                 },
                 "matched_content": {
                     "description": "MatchedContent is the actual content that was matched in vector search\nFor FAQ: this is the matched question text (standard or similar question)",
@@ -30290,7 +30352,8 @@ const docTemplate = `{
                 },
                 "score": {
                     "description": "Score",
-                    "type": "number"
+                    "type": "number",
+                    "x-agent": true
                 },
                 "seq": {
                     "description": "Seq",
@@ -34578,7 +34641,7 @@ const docTemplate = `{
                     ]
                 },
                 "summary_model_id": {
-                    "description": "Summary model ID. model.list returns the ids. Used for summaries, and as the default for auto-tagging and the AI description.",
+                    "description": "Summary model ID. model.list returns the ids. Used for summaries, and as\nthe default for auto-tagging and the AI description.",
                     "type": "string",
                     "x-agent": "summary_model_id"
                 },

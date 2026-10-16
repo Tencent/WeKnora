@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -83,6 +84,9 @@ type agentOperation struct {
 	// Role is the lowest workspace role the route accepts, when it differs
 	// from the default for the risk.
 	Role types.TenantRole `json:"role,omitempty"`
+	// Method picks one route when the handler's doc lists several (a legacy
+	// GET next to the POST, say); the others stay out of the catalog.
+	Method string `json:"method,omitempty"`
 }
 
 type specDocument struct {
@@ -175,23 +179,42 @@ func FromSpec(document []byte) ([]Operation, error) {
 			if len(sop.Agent) == 0 {
 				continue
 			}
-			op, err := doc.compile(strings.ToUpper(method), path, sop)
+			op, skip, err := doc.compile(strings.ToUpper(method), path, sop)
 			if err != nil {
 				return nil, fmt.Errorf("%s %s: %w", strings.ToUpper(method), path, err)
 			}
-			ops = append(ops, op)
+			if !skip {
+				ops = append(ops, op)
+			}
 		}
 	}
 	return ops, nil
 }
 
-func (doc *specDocument) compile(method, path string, sop specOperation) (Operation, error) {
+// compile builds the operation for one route, or reports skip when the
+// annotation names another of the handler's methods.
+func (doc *specDocument) compile(method, path string, sop specOperation) (Operation, bool, error) {
 	var meta agentOperation
 	dec := json.NewDecoder(bytes.NewReader(sop.Agent))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&meta); err != nil {
-		return Operation{}, fmt.Errorf("%s: %w", extAgent, err)
+		return Operation{}, false, fmt.Errorf("%s: %w", extAgent, err)
 	}
+	if meta.Method != "" {
+		if !slices.Contains(specMethods, strings.ToLower(meta.Method)) {
+			return Operation{}, false, fmt.Errorf("%s: unknown method %q", extAgent, meta.Method)
+		}
+		if !strings.EqualFold(meta.Method, method) {
+			return Operation{}, true, nil
+		}
+	}
+	op, err := doc.compileOperation(method, path, sop, meta)
+	return op, false, err
+}
+
+func (doc *specDocument) compileOperation(
+	method, path string, sop specOperation, meta agentOperation,
+) (Operation, error) {
 	route, err := ginRoute(doc.BasePath, path, meta.CatchAll)
 	if err != nil {
 		return Operation{}, fmt.Errorf("%s: %w", extAgent, err)
@@ -443,6 +466,8 @@ func (doc *specDocument) typeParam(p *Param, shape *specSchema, agentMax, agentM
 		p.Enum = enumStrings(shape.Enum)
 	case "integer":
 		p.Type = TypeInteger
+	case "number":
+		p.Type = TypeNumber
 	case "boolean":
 		p.Type = TypeBoolean
 	case "array":

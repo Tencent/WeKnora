@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
@@ -34,11 +35,17 @@ const defaultOperationTimeout = 60 * time.Second
 // find_operations call returns; broader matches list summaries only.
 const maxDescribedOperations = 12
 
+// maxProbesPerRun bounds the probe operations one run may make. A probe
+// changes nothing, but each one connects to a service or runs a retrieval,
+// so a model looping on one must stop and report instead.
+const maxProbesPerRun = 10
+
 const findOperationsDescription = "" +
 	"Find WeKnora management operations you can run for the user with run_operation: " +
 	"inspecting knowledge bases and documents, diagnosing and retrying document parsing, " +
-	"deleting documents, checking Wiki health, creating and configuring agents, and listing " +
-	"the models and MCP services an agent can use. Returns each operation's id, risk and parameters. " +
+	"deleting documents, checking Wiki health, creating and configuring agents, listing " +
+	"the models and MCP services an agent can use, and checking that they work (testing an MCP " +
+	"connection, trying a retrieval). Returns each operation's id, risk and parameters. " +
 	"Call with no arguments to see every operation, or narrow with query (words matched " +
 	"against ids and summaries) or domain. Operation ids must come from this tool; never guess them. " +
 	"Matches this user may not run are listed under unavailable with the reason; when the one " +
@@ -50,7 +57,7 @@ const (
 	approvalPolicyConfirm   = "Operations with risk write or destructive ask the user to confirm before they run."
 	approvalPolicyAutoWrite = "Operations with risk write run right away; destructive ones ask the user " +
 		"to confirm before they run."
-	approvalPolicyReadOnly = "The user set the assistant to read-only, so only read operations can run. " +
+	approvalPolicyReadOnly = "The user set the assistant to read-only, so only read and probe operations can run. " +
 		"If they ask for a change, say it is off and that they can allow changes in the assistant settings."
 )
 
@@ -68,14 +75,18 @@ func withheldReason(w operations.Withholding, access operations.Access) string {
 	}
 }
 
+var probePolicy = fmt.Sprintf(" Operations with risk probe change nothing and run right away, "+
+	"but each does real work, so a run may make at most %d; use them to check a setup, not to poll.",
+	maxProbesPerRun)
+
 func approvalPolicy(level types.AssistantAccessLevel) string {
 	switch level {
 	case types.AssistantAccessReadOnly:
-		return approvalPolicyReadOnly
+		return approvalPolicyReadOnly + probePolicy
 	case types.AssistantAccessAutoWrite:
-		return approvalPolicyAutoWrite
+		return approvalPolicyAutoWrite + probePolicy
 	default:
-		return approvalPolicyConfirm
+		return approvalPolicyConfirm + probePolicy
 	}
 }
 
@@ -275,10 +286,12 @@ func describeParams(params []operations.Param) []operationParamView {
 	return views
 }
 
-// RunOperationTool executes catalog operations through the router.
+// RunOperationTool executes catalog operations through the router. One is
+// built per run, so probes counts that run's probe operations.
 type RunOperationTool struct {
 	BaseTool
-	rt OperationsRuntime
+	rt     OperationsRuntime
+	probes atomic.Int32
 }
 
 // NewRunOperationTool creates run_operation over rt's catalog and dispatcher.
@@ -329,6 +342,11 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 	call, err := op.Build(input.Params)
 	if err != nil {
 		return operationFailure(fmt.Sprintf("invalid params for %s: %v", op.ID, err)), nil
+	}
+	if op.Risk == operations.RiskProbe && t.probes.Add(1) > maxProbesPerRun {
+		return operationFailure(fmt.Sprintf(
+			"%s was not run: this conversation turn already used its %d probe operations. "+
+				"Report what the earlier checks showed instead of checking again.", op.ID, maxProbesPerRun)), nil
 	}
 
 	identity := t.rt.Identity

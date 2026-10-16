@@ -532,11 +532,13 @@ func (h *MCPServiceHandler) DeleteMCPService(c *gin.Context) {
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "MCP服务ID"
+// @Param        id   path      string  true  "MCP服务ID"  extensions(x-agent=mcp_service_id)
 // @Success      200  {object}  handler.DataResponse{data=types.MCPTestResult}  "测试结果"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"mcp_service.test","risk":"probe","role":"admin"}
+// @x-agent-hint "Connects to an MCP service with its saved settings and reports whether it works. success false comes with the reason in message; oauth_required means the user must authorize it in the MCP settings. List its tools with mcp_service.list_tools."
 // @Router       /mcp-services/{id}/test [post]
 func (h *MCPServiceHandler) TestMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -577,11 +579,13 @@ func (h *MCPServiceHandler) TestMCPService(c *gin.Context) {
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "MCP服务ID"
+// @Param        id   path      string  true  "MCP服务ID"  extensions(x-agent=mcp_service_id)
 // @Success      200  {object}  handler.DataResponse{data=[]types.MCPTool}  "工具列表"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"mcp_service.list_tools","risk":"read","max_items":200}
+// @x-agent-hint "Lists the tools an MCP service offers, asking the service itself. Use it to check that a service can do what an agent needs before binding it. An error means the service is unreachable; mcp_service.test says why."
 // @Router       /mcp-services/{id}/tools [get]
 func (h *MCPServiceHandler) GetMCPServiceTools(c *gin.Context) {
 	ctx := c.Request.Context()

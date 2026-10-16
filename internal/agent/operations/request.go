@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/url"
 	"sort"
 	"strconv"
@@ -108,6 +109,8 @@ func (op Operation) Build(params map[string]json.RawMessage) (Call, error) {
 				query.Set(p.wireKey(), v)
 			case int64:
 				query.Set(p.wireKey(), strconv.FormatInt(v, 10))
+			case float64:
+				query.Set(p.wireKey(), strconv.FormatFloat(v, 'f', -1, 64))
 			case bool:
 				query.Set(p.wireKey(), strconv.FormatBool(v))
 			}
@@ -265,6 +268,15 @@ func decodeParam(p Param, raw json.RawMessage) (any, error) {
 		return out, nil
 	case TypeInteger:
 		return decodeInteger(p, raw)
+	case TypeNumber:
+		if trimmed := bytes.TrimSpace(raw); len(trimmed) == 0 || trimmed[0] == '"' {
+			return nil, paramErr(p.Name, "must be a number")
+		}
+		var f float64
+		if err := json.Unmarshal(raw, &f); err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+			return nil, paramErr(p.Name, "must be a number")
+		}
+		return f, nil
 	case TypeBoolean:
 		var b bool
 		if err := json.Unmarshal(raw, &b); err != nil {

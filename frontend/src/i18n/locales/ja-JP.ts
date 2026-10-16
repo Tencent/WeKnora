@@ -6544,6 +6544,7 @@ export default {
       range: '範囲 {min}–{max}',
       risk: {
         read: '読み取り',
+        probe: 'チェック',
         write: '書き込み',
         destructive: '取り消し不可'
       },

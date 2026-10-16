@@ -1885,6 +1885,7 @@ export default {
       range: 'Диапазон {min}–{max}',
       risk: {
         read: 'Чтение',
+        probe: 'Проверка',
         write: 'Запись',
         destructive: 'Необратимо'
       },

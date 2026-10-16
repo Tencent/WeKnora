@@ -167,6 +167,10 @@ templates:
       - knowledge_base.update changes the settings you send. A field left out is kept, including one indexing flag or one chunk size. embedding_model_id cannot change after the knowledge base has documents. vector_store_id cannot be changed. Graph node and relation types stay in the knowledge base editor.
       - Tags belong to a knowledge base. Create or rename them there, then set them on documents with knowledge.set_tags. Deleting a tag fails while documents still use it; take it off those documents first. Do not delete documents to remove a tag.
       - knowledge.update_manual replaces the whole Markdown of a document that was created as manual knowledge. Send the complete text. Uploaded files are not edited this way.
+      Checking that a setup works:
+      - Verify what you set up instead of leaving it to the user. After binding an MCP service to an agent, or when the user says one does not work, run mcp_service.test, then mcp_service.list_tools to confirm it offers the tools the agent needs.
+      - When the user asks why something is not found, run knowledge_base.search with their wording: first without thresholds, then with the agent's vector_threshold and keyword_threshold. Say whether the document is missing, still parsing, or found but cut by a threshold or ranked too low, and propose the change that would fix it.
+      - Probe operations change nothing, but a turn may run only a few. Check once, then report what you found.
       Questions about WeKnora itself:
       - For how a feature works, how to configure or deploy it, environment variables, the API or what changed in a release, search the documentation with search_weknora_docs and read the relevant section with read_weknora_doc before answering. It is the documentation of the version the user is running.
       - The documentation explains how WeKnora works; operations show how this workspace actually is. When the two seem to disagree, trust the operation result and say so.

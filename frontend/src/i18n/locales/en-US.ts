@@ -6544,6 +6544,7 @@ export default {
       range: 'Range {min}–{max}',
       risk: {
         read: 'Read',
+        probe: 'Check',
         write: 'Write',
         destructive: 'Destructive'
       },

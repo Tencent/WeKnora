@@ -1885,6 +1885,7 @@ export default {
       range: '범위 {min}–{max}',
       risk: {
         read: '읽기',
+        probe: '점검',
         write: '쓰기',
         destructive: '되돌릴 수 없음'
       },

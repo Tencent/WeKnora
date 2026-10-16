@@ -27,6 +27,10 @@ type Risk string
 const (
 	// RiskRead has no side effects.
 	RiskRead Risk = "read"
+	// RiskProbe changes no data but does real work to answer: it connects to
+	// an external service or runs a retrieval. It runs without approval,
+	// within a per-run budget, and uses POST because the API does.
+	RiskProbe Risk = "probe"
 	// RiskWrite changes state in a recoverable way (reparse, status change).
 	RiskWrite Risk = "write"
 	// RiskDestructive removes data or cannot be undone.
@@ -34,7 +38,7 @@ const (
 )
 
 func (r Risk) valid() bool {
-	return r == RiskRead || r == RiskWrite || r == RiskDestructive
+	return r == RiskRead || r == RiskProbe || r == RiskWrite || r == RiskDestructive
 }
 
 // Mutates reports whether running the operation needs the user's approval.
@@ -57,6 +61,7 @@ type ParamType string
 const (
 	TypeString      ParamType = "string"
 	TypeInteger     ParamType = "integer"
+	TypeNumber      ParamType = "number"
 	TypeBoolean     ParamType = "boolean"
 	TypeStringList  ParamType = "string_list"
 	TypeIntegerList ParamType = "integer_list"
@@ -167,9 +172,9 @@ type Operation struct {
 }
 
 // defaultRole is the role the route guards usually ask of an operation:
-// reading needs a viewer, changing content a contributor.
+// reading or probing needs a viewer, changing content a contributor.
 func defaultRole(risk Risk) types.TenantRole {
-	if risk == RiskRead {
+	if !risk.Mutates() {
 		return types.TenantRoleViewer
 	}
 	return types.TenantRoleContributor
@@ -194,7 +199,7 @@ func (a Access) NeedsApproval(op Operation) bool {
 // the user; it also covers tools outside the catalog.
 func (a Access) NeedsApprovalFor(risk Risk) bool {
 	switch risk {
-	case RiskRead:
+	case RiskRead, RiskProbe:
 		return false
 	case RiskWrite:
 		return a.Level != types.AssistantAccessAutoWrite
@@ -467,6 +472,12 @@ func validateOperation(op Operation) error {
 	if op.Risk == RiskRead && op.Method != http.MethodGet {
 		return fmt.Errorf("read operations must use GET")
 	}
+	if op.Risk == RiskProbe && op.Method != http.MethodPost {
+		return fmt.Errorf("probe operations must use POST")
+	}
+	if op.Risk == RiskProbe && (op.Target != nil || op.LabelParam != "") {
+		return fmt.Errorf("probe operations change nothing, so they take no approval target")
+	}
 	if op.Risk != RiskRead && op.Method == http.MethodGet {
 		return fmt.Errorf("GET operations must be read-only")
 	}
@@ -508,7 +519,7 @@ func validateOperation(op Operation) error {
 			return fmt.Errorf("param %q: description is required", p.Name)
 		}
 		switch p.Type {
-		case TypeString, TypeInteger, TypeBoolean, TypeStringList, TypeIntegerList:
+		case TypeString, TypeInteger, TypeNumber, TypeBoolean, TypeStringList, TypeIntegerList:
 		default:
 			return fmt.Errorf("param %q: invalid type %q", p.Name, p.Type)
 		}

@@ -71,6 +71,18 @@ func TestNewCatalogRejectsUnsafeDeclarations(t *testing.T) {
 		},
 		"route segment without param": readOp("x.get", "/api/v1/knowledge-bases/:id"),
 		"param without route segment": readOp("x.get", "/api/v1/knowledge-bases", kb),
+		"probe as GET": {
+			ID: "x.check", Summary: "s", Risk: RiskProbe, Method: http.MethodGet,
+			Route: "/api/v1/knowledge-bases",
+		},
+		"probe as PUT": {
+			ID: "x.check", Summary: "s", Risk: RiskProbe, Method: http.MethodPut,
+			Route: "/api/v1/knowledge-bases",
+		},
+		"probe with an approval target": {
+			ID: "x.check", Summary: "s", Risk: RiskProbe, Method: http.MethodPost,
+			Route: "/api/v1/knowledge-bases", Target: &Target{Operation: "x.get", Label: "title"},
+		},
 	}
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills"},
@@ -459,6 +471,99 @@ func TestCatalogForFiltersByRoleAndLevel(t *testing.T) {
 		ids(catalog.For(Access{Role: types.TenantRoleViewer})), "roles filter only when RBAC is enforced")
 	assert.Equal(t, []string{"knowledge.audit", "knowledge.get"},
 		ids(catalog.For(Access{Role: types.TenantRoleOwner, EnforceRole: true, Level: types.AssistantAccessReadOnly})))
+}
+
+func TestProbeRunsWithoutApprovalAtEveryLevel(t *testing.T) {
+	kb := Param{Name: "knowledge_base_id", In: InPath, Key: "id", Type: TypeString, Required: true, Description: "d"}
+	probe := Operation{
+		ID: "knowledge_base.search", Summary: "s", Risk: RiskProbe, Method: http.MethodPost,
+		Route: "/api/v1/knowledge-bases/:id/hybrid-search", Params: []Param{kb},
+		Result: Result{Root: "data", List: true, Fields: []Field{{From: "content"}}},
+	}
+	catalog, err := NewCatalog(probe)
+	require.NoError(t, err)
+	op, _ := catalog.Get(probe.ID)
+	assert.Equal(t, types.TenantRoleViewer, op.Role, "a probe needs only a viewer by default")
+	assert.False(t, op.Risk.Mutates())
+	for _, level := range []types.AssistantAccessLevel{
+		types.AssistantAccessReadOnly, types.AssistantAccessConfirm, types.AssistantAccessAutoWrite,
+	} {
+		access := Access{Level: level, Role: types.TenantRoleViewer, EnforceRole: true}
+		_, withheld := catalog.Withheld(access, op)
+		assert.False(t, withheld, level)
+		assert.False(t, access.NeedsApproval(op), level)
+	}
+}
+
+func TestBuiltinProbeOperations(t *testing.T) {
+	catalog := Builtin()
+	project := func(op Operation, body string) string {
+		t.Helper()
+		projected, err := op.Project([]byte(body))
+		require.NoError(t, err)
+		out, err := json.Marshal(projected)
+		require.NoError(t, err)
+		return string(out)
+	}
+
+	search, ok := catalog.Get("knowledge_base.search")
+	require.True(t, ok)
+	assert.Equal(t, RiskProbe, search.Risk)
+	assert.Equal(t, http.MethodPost, search.Method, "the legacy GET route is not compiled")
+	assert.Equal(t, types.TenantRoleViewer, search.Role)
+	var names []string
+	for _, p := range search.Params {
+		names = append(names, p.Name)
+	}
+	assert.ElementsMatch(t, []string{
+		"knowledge_base_id", "query_text", "vector_threshold", "keyword_threshold", "match_count",
+		"disable_keywords_match", "disable_vector_match", "knowledge_ids",
+	}, names)
+	query, _ := search.Param("query_text")
+	assert.True(t, query.Required)
+	threshold, _ := search.Param("vector_threshold")
+	assert.Equal(t, TypeNumber, threshold.Type)
+	count, _ := search.Param("match_count")
+	assert.Equal(t, 30, count.Maximum)
+	assert.JSONEq(t, `{"data":[{"chunk_id":"c1","content":"hello","knowledge_id":"k1","chunk_index":2,
+		"knowledge_title":"Q3","score":0.8,"match_type":1,"chunk_type":"text"}]}`,
+		project(search, `{"success":true,"data":[{"id":"c1","content":"hello","knowledge_id":"k1",
+		"chunk_index":2,"knowledge_title":"Q3","score":0.8,"match_type":1,"chunk_type":"text",
+		"metadata":{"k":"v"},"image_info":"local://secret","knowledge_filename":"q3.pdf"}]}`))
+
+	test, ok := catalog.Get("mcp_service.test")
+	require.True(t, ok)
+	assert.Equal(t, RiskProbe, test.Risk)
+	assert.Equal(t, types.TenantRoleAdmin, test.Role)
+	assert.JSONEq(t, `{"data":{"success":false,"message":"Connection failed: 401","oauth_required":true}}`,
+		project(test, `{"success":true,"data":{"success":false,"message":"Connection failed: 401",
+		"oauth_required":true,"description":"server","tools":[{"name":"t"}]}}`))
+
+	tools, ok := catalog.Get("mcp_service.list_tools")
+	require.True(t, ok)
+	assert.Equal(t, RiskRead, tools.Risk)
+	assert.JSONEq(t, `{"data":[{"name":"maps_weather","description":"Weather by city","require_approval":true}]}`,
+		project(tools, `{"success":true,"data":[{"name":"maps_weather","description":"Weather by city",
+		"inputSchema":{"type":"object"},"require_approval":true}]}`))
+}
+
+func TestBuildNumberParams(t *testing.T) {
+	threshold := Param{Name: "vector_threshold", In: InBody, Type: TypeNumber, Description: "d"}
+	op := Operation{
+		ID: "x.check", Summary: "s", Risk: RiskProbe, Method: http.MethodPost,
+		Route: "/api/v1/knowledge-bases", Params: []Param{threshold},
+		Result: Result{Fields: []Field{{From: "title"}}},
+	}
+	_, err := NewCatalog(op)
+	require.NoError(t, err)
+
+	call, err := op.Build(map[string]json.RawMessage{"vector_threshold": json.RawMessage(`0.35`)})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"vector_threshold":0.35}`, string(call.Body))
+	for _, bad := range []string{`"0.35"`, `true`, `[1]`} {
+		_, err := op.Build(map[string]json.RawMessage{"vector_threshold": json.RawMessage(bad)})
+		assert.Error(t, err, bad)
+	}
 }
 
 func TestBuiltinSkillList(t *testing.T) {

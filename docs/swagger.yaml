@@ -1837,8 +1837,9 @@ definitions:
         type: integer
         x-agent: true
       enable_parent_child:
-        description: EnableParentChild splits into large parent chunks and small child
-          chunks. Search matches a child and returns its parent.
+        description: |-
+          EnableParentChild splits into large parent chunks and small child chunks.
+          Search matches a child and returns its parent.
         type: boolean
         x-agent: true
       languages:
@@ -1875,8 +1876,9 @@ definitions:
         x-agent: true
         x-agent-maximum: "20"
       strategy:
-        description: 'Strategy selects how documents are split: auto, heading, heuristic,
-          recursive or legacy. Empty keeps the server default.'
+        description: |-
+          Strategy selects how documents are split: auto, heading, heuristic,
+          recursive or legacy. Empty keeps the server default.
         enum:
         - auto
         - heading
@@ -3994,8 +3996,9 @@ definitions:
         description: 'Storage provider config (new): only stores provider selection;
           credentials from workspace StorageEngineConfig'
       summary_model_id:
-        description: Summary model ID. model.list returns the ids. Used for summaries,
-          and as the default for auto-tagging and the AI description.
+        description: |-
+          Summary model ID. model.list returns the ids. Used for summaries, and as
+          the default for auto-tagging and the AI description.
         type: string
         x-agent: summary_model_id
       tenant_id:
@@ -4761,6 +4764,8 @@ definitions:
         type: string
       message:
         type: string
+        x-agent: true
+        x-agent-max-runes: "500"
       oauth_required:
         description: |-
           OAuthRequired is true when the connection failed because the server
@@ -4768,12 +4773,14 @@ definitions:
           configured for OAuth. The UI uses it to guide the user to switch the auth
           strategy to OAuth.
         type: boolean
+        x-agent: true
       resources:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPResource'
         type: array
       success:
         type: boolean
+        x-agent: true
       tools:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPTool'
@@ -4783,15 +4790,19 @@ definitions:
     properties:
       description:
         type: string
+        x-agent: true
+        x-agent-max-runes: "500"
       inputSchema:
         description: JSON Schema for tool parameters
         type: object
       name:
         type: string
+        x-agent: true
       require_approval:
         description: 'RequireApproval when true: agent execution pauses until the
           user approves in UI (issue #1173).'
         type: boolean
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.MCPTransportType:
     enum:
@@ -6759,11 +6770,17 @@ definitions:
   github_com_Tencent_WeKnora_internal_types.SearchParams:
     properties:
       disable_keywords_match:
+        description: Turns keyword matching off, leaving vector matching only.
         type: boolean
+        x-agent: true
       disable_vector_match:
+        description: Turns vector matching off, leaving keyword matching only.
         type: boolean
+        x-agent: true
       keyword_threshold:
+        description: Minimum keyword score a hit needs; 0 keeps every keyword hit.
         type: number
+        x-agent: true
       knowledge_base_ids:
         description: |-
           KnowledgeBaseIDs overrides the single KB ID passed to HybridSearch,
@@ -6773,11 +6790,17 @@ definitions:
           type: string
         type: array
       knowledge_ids:
+        description: Limits the search to these documents of the knowledge base.
         items:
           type: string
         type: array
+        x-agent: true
+        x-agent-maximum: "20"
       match_count:
+        description: Number of chunks to return; 0 uses the default.
         type: integer
+        x-agent: true
+        x-agent-maximum: "30"
       only_recommended:
         type: boolean
       query_embedding:
@@ -6789,6 +6812,8 @@ definitions:
           QueryText is required unless query_embedding is provided, keyword matching is disabled,
           and vector matching remains enabled.
         type: string
+        x-agent: true
+        x-agent-required: true
       rerank:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.RerankOptions'
@@ -6812,28 +6837,35 @@ definitions:
           type: string
         type: array
       vector_threshold:
+        description: Minimum vector similarity a hit needs; 0 keeps every vector hit.
         type: number
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.SearchResult:
     properties:
       chunk_index:
         description: Chunk index
         type: integer
+        x-agent: true
       chunk_metadata:
         description: ChunkMetadata stores chunk-level metadata (e.g., generated questions)
         type: object
       chunk_type:
         description: Chunk 类型
         type: string
+        x-agent: true
       content:
         description: Content
         type: string
+        x-agent: true
+        x-agent-max-runes: "600"
       end_at:
         description: End at
         type: integer
       id:
         description: ID
         type: string
+        x-agent: chunk_id
       image_info:
         description: 图片信息 (JSON 格式)
         type: string
@@ -6860,6 +6892,7 @@ definitions:
       knowledge_id:
         description: Knowledge ID
         type: string
+        x-agent: true
       knowledge_source:
         description: |-
           Knowledge source
@@ -6868,10 +6901,12 @@ definitions:
       knowledge_title:
         description: Knowledge title
         type: string
+        x-agent: true
       match_type:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MatchType'
         description: Match type
+        x-agent: true
       matched_content:
         description: |-
           MatchedContent is the actual content that was matched in vector search
@@ -6895,6 +6930,7 @@ definitions:
       score:
         description: Score
         type: number
+        x-agent: true
       seq:
         description: Seq
         type: integer
@@ -10206,8 +10242,9 @@ definitions:
         description: 'Storage provider config (new): only stores provider selection;
           credentials from workspace StorageEngineConfig'
       summary_model_id:
-        description: Summary model ID. model.list returns the ids. Used for summaries,
-          and as the default for auto-tagging and the AI description.
+        description: |-
+          Summary model ID. model.list returns the ids. Used for summaries, and as
+          the default for auto-tagging and the AI description.
         type: string
         x-agent: summary_model_id
       tenant_id:
@@ -16209,6 +16246,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: knowledge_base_id
       - description: 搜索参数
         in: body
         name: request
@@ -16244,6 +16282,18 @@ paths:
       summary: 混合搜索
       tags:
       - 知识库
+      x-agent:
+        id: knowledge_base.search
+        max_items: 30
+        method: post
+        risk: probe
+      x-agent-hint: 'Runs the raw vector and keyword recall of one knowledge base,
+        without rerank, and returns the chunks it finds in rank order, so you can
+        see why something is or is not found. match_type 0 is a vector hit, 1 a keyword
+        hit; score ranks the merged results and is not a similarity. Each threshold
+        filters its own retriever before merging: leave them out to see every candidate,
+        or set them to an agent''s vector_threshold and keyword_threshold to see what
+        passes. For answering a question, use search_knowledge instead.'
     post:
       consumes:
       - application/json
@@ -16255,6 +16305,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: knowledge_base_id
       - description: 搜索参数
         in: body
         name: request
@@ -16290,6 +16341,18 @@ paths:
       summary: 混合搜索
       tags:
       - 知识库
+      x-agent:
+        id: knowledge_base.search
+        max_items: 30
+        method: post
+        risk: probe
+      x-agent-hint: 'Runs the raw vector and keyword recall of one knowledge base,
+        without rerank, and returns the chunks it finds in rank order, so you can
+        see why something is or is not found. match_type 0 is a vector hit, 1 a keyword
+        hit; score ranks the merged results and is not a similarity. Each threshold
+        filters its own retriever before merging: leave them out to see every candidate,
+        or set them to an agent''s vector_threshold and keyword_threshold to see what
+        passes. For answering a question, use search_knowledge instead.'
   /knowledge-bases/{id}/images:
     get:
       consumes:
@@ -19864,6 +19927,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: mcp_service_id
       produces:
       - application/json
       responses:
@@ -19886,6 +19950,14 @@ paths:
       summary: 测试MCP服务连接
       tags:
       - MCP服务
+      x-agent:
+        id: mcp_service.test
+        risk: probe
+        role: admin
+      x-agent-hint: Connects to an MCP service with its saved settings and reports
+        whether it works. success false comes with the reason in message; oauth_required
+        means the user must authorize it in the MCP settings. List its tools with
+        mcp_service.list_tools.
   /mcp-services/{id}/tool-approvals/{tool_name}:
     put:
       consumes:
@@ -19942,6 +20014,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: mcp_service_id
       produces:
       - application/json
       responses:
@@ -19966,6 +20039,13 @@ paths:
       summary: 获取MCP服务工具列表
       tags:
       - MCP服务
+      x-agent:
+        id: mcp_service.list_tools
+        max_items: 200
+        risk: read
+      x-agent-hint: Lists the tools an MCP service offers, asking the service itself.
+        Use it to check that a service can do what an agent needs before binding it.
+        An error means the service is unreachable; mcp_service.test says why.
   /mcp-services/oauth/callback:
     get:
       description: 接收授权服务器回调并完成 code 交换，随后重定向回前端

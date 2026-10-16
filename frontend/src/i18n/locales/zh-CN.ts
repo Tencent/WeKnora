@@ -1887,6 +1887,7 @@ export default {
       range: '范围 {min}–{max}',
       risk: {
         read: '只读',
+        probe: '检测',
         write: '写入',
         destructive: '不可恢复'
       },

@@ -209,6 +209,43 @@ func TestFromSpecRejectsBadAnnotations(t *testing.T) {
 	}
 }
 
+func TestFromSpecMethodPicksOneOfTheHandlersRoutes(t *testing.T) {
+	route := func(method string) string {
+		return `"` + method + `": {
+      "summary": "Search",
+      "x-agent": {"id": "kb.search", "risk": "probe", "method": "post"},
+      "parameters": [
+        {"name": "id", "in": "path", "type": "string", "required": true, "description": "KB",
+         "x-agent": "knowledge_base_id"},
+        {"name": "request", "in": "body", "required": true, "schema": {"type": "object", "properties": {
+          "query_text": {"type": "string", "description": "Q", "x-agent": true, "x-agent-required": true},
+          "vector_threshold": {"type": "number", "description": "T", "x-agent": true}
+        }}}
+      ],
+      "responses": {"200": {"schema": {"type": "object", "properties": {
+        "data": {"type": "array", "items": {"type": "object", "properties": {
+          "content": {"type": "string", "x-agent": true}
+        }}}
+      }}}}
+    }`
+	}
+	spec := `{"basePath": "/api/v1", "paths": {"/knowledge-bases/{id}/hybrid-search": {` +
+		route("post") + `, ` + route("get") + `}}}`
+
+	ops, err := FromSpec([]byte(spec))
+	require.NoError(t, err)
+	require.Len(t, ops, 1, "the GET route that shares the doc stays out")
+	assert.Equal(t, http.MethodPost, ops[0].Method)
+	threshold, ok := ops[0].Param("vector_threshold")
+	require.True(t, ok)
+	assert.Equal(t, TypeNumber, threshold.Type)
+	_, err = NewCatalog(ops...)
+	require.NoError(t, err)
+
+	_, err = FromSpec([]byte(strings.ReplaceAll(spec, `"method": "post"`, `"method": "fetch"`)))
+	assert.ErrorContains(t, err, "unknown method")
+}
+
 func TestFromSpecAgentRequired(t *testing.T) {
 	spec := strings.Replace(testSpec,
 		`"description": "S",
@@ -357,7 +394,9 @@ func TestBuiltinMatchesHandlerAnnotations(t *testing.T) {
 	require.NotEmpty(t, declared)
 
 	built := map[string]agentOperation{}
+	methods := map[string]string{}
 	for _, op := range Builtin().All() {
+		methods[op.ID] = op.Method
 		meta := agentOperation{ID: op.ID, Risk: op.Risk, LabelParam: op.LabelParam}
 		if op.Target != nil {
 			meta.Target, meta.Label = op.Target.Operation, op.Target.Label
@@ -375,7 +414,11 @@ func TestBuiltinMatchesHandlerAnnotations(t *testing.T) {
 		built[op.ID] = meta
 	}
 	for id, meta := range declared {
-		meta.Root, meta.MaxItems = nil, 0
+		if meta.Method != "" {
+			assert.True(t, strings.EqualFold(meta.Method, methods[id]),
+				"%s names method %s but was built from %s", id, meta.Method, methods[id])
+		}
+		meta.Root, meta.MaxItems, meta.Method = nil, 0, ""
 		declared[id] = meta
 	}
 	assert.Equal(t, declared, built, "docs/swagger.json is stale; run make docs")
