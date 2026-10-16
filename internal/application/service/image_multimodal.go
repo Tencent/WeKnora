@@ -106,6 +106,12 @@ type ImageMultimodalService struct {
 	// spanTracker records this image's subspan under the parent attempt's
 	// multimodal stage. nil-safe — falls back to no-op via tracker().
 	spanTracker SpanTracker
+
+	// docReader is the document service the pipeline asks to straighten a
+	// photographed page before OCR. Nil when this build has none (tests,
+	// minimal wiring): the preprocess action then reports "unavailable" and
+	// OCR simply reads the original bytes.
+	docReader interfaces.DocumentReader
 }
 
 func NewImageMultimodalService(
@@ -123,6 +129,7 @@ func NewImageMultimodalService(
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
 	spanTracker SpanTracker,
+	docReader interfaces.DocumentReader,
 ) interfaces.TaskHandler {
 	return &ImageMultimodalService{
 		chunkService:    chunkService,
@@ -139,6 +146,7 @@ func NewImageMultimodalService(
 		storageResolver: storageResolver,
 		resourceCatalog: resourceCatalog,
 		spanTracker:     spanTracker,
+		docReader:       docReader,
 	}
 }
 
@@ -378,6 +386,9 @@ func (s *ImageMultimodalService) processImage(
 		out:        out,
 		tracker:    tracker,
 		imgSpan:    imgSpan,
+		// The preprocess action asks this to straighten the page. Nil is fine:
+		// the action reports "unavailable" and OCR reads the original bytes.
+		preprocessor: s.docReader,
 	}
 	if err := pipeline.Run(ctx, rc); err != nil {
 		// Surface the pipeline failure on this image's span instead of
