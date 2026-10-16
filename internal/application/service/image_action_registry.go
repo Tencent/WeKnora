@@ -191,10 +191,10 @@ func registerAction(spec actionSpec) {
 // one place" stays true as pipelines grow.
 func init() {
 	handlers := map[types.ImageActionID]actionHandler{
-		types.ImageActionCaption:            runCaptionAction,
-		types.ImageActionObservationCaption: runObservationCaptionAction,
-		types.ImageActionOCR:                runOCRAction,
-		types.ImageActionPreprocess:         runPreprocessAction,
+		types.ImageActionCaption:     runCaptionAction,
+		types.ImageActionObservation: runObservationCaptionAction,
+		types.ImageActionOCR:         runOCRAction,
+		types.ImageActionPreprocess:  runPreprocessAction,
 	}
 	for _, spec := range types.SharedImageActions {
 		handler, bound := handlers[spec.ID]
@@ -211,10 +211,18 @@ func init() {
 // types.ActionField). The lookup panics rather than returning a zero field — a
 // missing declaration is a programming error, not a mode of operation.
 var (
-	captionThinkingField = mustActionField(types.ImageActionCaption, types.ImageActionParamThinking)
-	ocrThinkingField     = mustActionField(types.ImageActionOCR, types.ImageActionParamThinking)
-	ocrOnUnobservedField = mustActionField(types.ImageActionOCR, types.ImageActionParamOnUnobserved)
+	captionThinkingField     = mustActionField(types.ImageActionCaption, types.ImageActionParamThinking)
+	observationThinkingField = mustActionField(types.ImageActionObservation, types.ImageActionParamThinking)
+	ocrThinkingField         = mustActionField(types.ImageActionOCR, types.ImageActionParamThinking)
 )
+
+// keyObservationCaptionEnabled gates the observation round's caption sub-item:
+// the round always observes, and this says whether it also writes the description
+// down. It is an action-level key ("<action>.<name>") and is deliberately not
+// declared in Fields() — no panel exposes it, so it stays at its working default
+// (on) unless an API caller sets it.
+var keyObservationCaptionEnabled = types.ActionParam(
+	types.ImageActionObservation, "caption_enabled")
 
 func mustActionField(id types.ImageActionID, param string) types.ImageFieldDef {
 	field, ok := types.ActionField(id, param)
@@ -250,14 +258,69 @@ const (
 	keyOCRRejectionReason = "ocr.rejection_reason"
 )
 
-// The keys those tunables are stored and traced under. They are read by name at
-// the few call sites that compare them (the thinking switches are wired into a
-// run by the pipeline that offers them), so they are named once, here.
-var (
-	imageFieldKeyCaptionThinking = captionThinkingField.Key
-	imageFieldKeyOCRThinking     = ocrThinkingField.Key
-	imageFieldKeyOCROnUnobserved = ocrOnUnobservedField.Key
+// The describe side's keys. The caption action writes the caption.* set; the
+// observation action writes the observation.* set — the same description, but a
+// different action produced it, and the trace names the action that did the work
+// (docs/design/image-pipeline-naming.md §1).
+const (
+	keyCaptionResult             = "caption.result"
+	keyCaptionChars              = "caption.chars"
+	keyCaptionPreview            = "caption.preview"
+	keyCaptionError              = "caption.error"
+	keyObservationResult         = "observation.result"
+	keyObservationCaptionResult  = "observation.caption_result"
+	keyObservationCaptionChars   = "observation.caption_chars"
+	keyObservationCaptionPreview = "observation.caption_preview"
+	keyObservationError          = "observation.error"
 )
+
+// The preprocess action's keys.
+const (
+	keyPreprocessResult = "preprocess.result"
+	keyPreprocessBytes  = "preprocess.bytes"
+	keyPreprocessError  = "preprocess.error"
+)
+
+// Frame-level keys: the image's own facts, written by the service layer, so they
+// carry no action prefix.
+const (
+	keyOutcome       = "outcome"
+	keyActions       = "actions"
+	keyConfig        = "config"
+	keyImageAttrs    = "image_attrs"
+	keyImageBytes    = "image_bytes"
+	keyChunksCreated = "chunks_created"
+	keyIndexed       = "indexed"
+	keyReadError     = "error"
+)
+
+// The value vocabularies. They live in code (not only in the document) because a
+// guard test checks every trace value against them: a new value has to be added
+// here deliberately, which is what keeps the words readable a year from now.
+var (
+	captionResultValues     = []string{"done", "empty", "skipped_disabled", "failed"}
+	observationResultValues = []string{"all_done", "partial", "none", "failed"}
+	ocrResultValues         = []string{
+		"done", "failed", "skipped_disabled", "skipped_no_text",
+		"skipped_attr_policy", "skipped_observation_failed",
+	}
+	preprocessResultValues = []string{
+		"done", "failed", "skipped_off", "skipped_no_text", "skipped_already_tidy",
+		"skipped_declined", "skipped_no_capability",
+	}
+	outcomeValues = []string{
+		"done", "partial_failure", "failed", "skipped_unreadable_image", "skipped_no_content",
+	}
+)
+
+// The one value several of those vocabularies share: the action ran, read its
+// gate, and found itself switched off.
+const resultSkippedDisabled = "skipped_disabled"
+
+// The thinking switches are read by name at the call sites that wire them into a
+// run: a pipeline offers the switch of the action it actually schedules, and the
+// action's key is used for the parameter and for the trace (they are the same
+// string because the switch is action-level). See pipelines' Run.
 
 // runContext is the only framework entry point a pipeline or an action gets. It
 // hands out no VLM handle: talking to a model is the action's business, reached
@@ -303,6 +366,13 @@ type runContext struct {
 	// executes anything.
 	captionThinkingKey string
 	ocrThinkingKey     string
+	// The gate keys the caption and OCR actions read to decide whether they were
+	// switched on for this run. The pipeline owns those switches, so it hands
+	// the keys over ("" means "never gated"); the ACTIONS read them, because an
+	// action that never ran cannot record that it was switched off
+	// (docs/design/image-pipeline-naming.md §4).
+	captionGateKey string
+	ocrGateKey     string
 	// tracker and imgSpan carry the per-image trace plumbing so the OCR
 	// action can raise and resolve its own subspan ("multimodal.image[n].ocr")
 	// at the exact spot it runs — a failed OCR fails that subspan and the
@@ -369,18 +439,35 @@ func (r *runContext) BoolParamOr(key string, def bool) bool {
 	return def
 }
 
-// ParamSnapshot renders the given keys as a plain map for the trace row.
-func (r *runContext) ParamSnapshot(keys ...string) types.JSONMap {
-	snapshot := make(types.JSONMap, len(keys))
-	for _, key := range keys {
-		if _, declared := r.fieldByKey(key); declared {
-			snapshot[key] = r.Param(key)
+// recordConfig writes the settings this run actually used, under the same
+// fully-qualified keys the knowledge base stores them under, so a trace row can
+// be read back against the config that produced it — the config itself may have
+// changed since. A note carries no value and is skipped.
+func (r *runContext) recordConfig() {
+	echo := make(types.JSONMap, len(r.declared))
+	for _, field := range r.declared {
+		if field.Type == types.ImageFieldTypeNote {
+			continue
 		}
+		echo[slotKey(r.pipelineID, field.Key)] = r.Param(field.Key)
 	}
-	if len(snapshot) == 0 {
-		return nil
+	if len(echo) > 0 {
+		r.out[keyConfig] = echo
 	}
-	return snapshot
+}
+
+// actionIDs is the sequence of actions this run actually executed, in order.
+func (r *runContext) actionIDs() []types.ImageActionID { return r.actions }
+
+// slotKey namespaces a pipeline-private key with the pipeline that owns it. A
+// key already carrying this pipeline's own namespace — an action scoped to one
+// pipeline, whose id is "<pipeline>.<action>" — is left alone, so the pipeline
+// id is never doubled.
+func slotKey(pipelineID, key string) string {
+	if pipelineID == "" || strings.HasPrefix(key, pipelineID+".") {
+		return key
+	}
+	return pipelineID + "." + key
 }
 
 // predictCaption asks for a caption, with the tunable the current pipeline
@@ -389,16 +476,14 @@ func (r *runContext) ParamSnapshot(keys ...string) types.JSONMap {
 // passes "image_caption", the attribute-observing caption passes
 // "image_observation".
 func (r *runContext) predictCaption(ctx context.Context, prompt, purpose string) (string, error) {
-	return r.think(types.WithLLMCallMetadata(ctx, purpose, ""), prompt,
-		r.captionThinkingKey, imageFieldKeyCaptionThinking)
+	return r.think(types.WithLLMCallMetadata(ctx, purpose, ""), prompt, r.captionThinkingKey)
 }
 
 // predictOCR transcribes text from an image, with the tunable the current
 // pipeline offers for it. The image_ocr purpose labels the VLM call in the
 // usage log so it can be told apart from the observation step.
 func (r *runContext) predictOCR(ctx context.Context, prompt string) (string, error) {
-	return r.think(types.WithLLMCallMetadata(ctx, "image_ocr", ""), prompt,
-		r.ocrThinkingKey, imageFieldKeyOCRThinking)
+	return r.think(types.WithLLMCallMetadata(ctx, "image_ocr", ""), prompt, r.ocrThinkingKey)
 }
 
 // think asks the model with the thinking switch the pipeline wired to this
@@ -407,14 +492,15 @@ func (r *runContext) predictOCR(ctx context.Context, prompt string) (string, err
 // caller cannot tell that empty answer from an image that genuinely carries no
 // text — which is exactly how an OCR result comes to be discarded as invalid.
 // Turning it on costs a longer run and is what a dense or degraded image wants,
-// so the switch is per action. The effective value reaches the trace under the
-// SHARED action-level key, never under the pipeline's own field key: pipelines
-// own private param keys (per-pipeline storage isolation — one pipeline's
-// stored switch must not drive another's run), but a run's trace names the
-// same switch the same way whichever pipeline served it.
-func (r *runContext) think(ctx context.Context, prompt, paramKey, traceKey string) (string, error) {
-	on := r.BoolParamOr(paramKey, false)
-	r.out[traceKey] = on
+// so the switch is per action. The key is the action's own ("<action>.thinking")
+// and is used for both the parameter and the trace: it is an action-level tunable,
+// so the same action reads the same stored value whichever pipeline schedules it,
+// and a run's trace names it the way the action does. Pipelines that schedule a
+// different action offer that action's switch instead (the manual pipeline offers
+// the caption's, the observing one offers its own round's).
+func (r *runContext) think(ctx context.Context, prompt, key string) (string, error) {
+	on := r.BoolParamOr(key, false)
+	r.out[key] = on
 	return r.model.PredictWithOptions(ctx, [][]byte{r.imageBytes}, prompt,
 		&vlm.PredictOptions{Thinking: &on})
 }
@@ -428,15 +514,19 @@ func (r *runContext) fieldByKey(key string) (types.ImageFieldDef, bool) {
 	return types.ImageFieldDef{}, false
 }
 
-// execute runs one action by id. A missing or unbound action costs that one
-// field, not the whole image: interrupting would drop every later slot of the
-// same image for the sake of a warning.
+// execute runs one action by id.
+//
+// An action this build does not implement is a programming error, not a state a
+// run can be in: pipelines are code, and nothing stores an action id as data. It
+// therefore fails the image loudly instead of skipping the step — a skipped step
+// that never says so is how an image comes back "processed" with its OCR never
+// having run. The guard is unreachable for the shipped pipelines, whose action
+// sequences a golden test pins.
 func (r *runContext) execute(ctx context.Context, id types.ImageActionID) error {
 	spec, ok := imageActionRegistry[id]
 	if !ok || spec.handler == nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Action %q is not implemented; skipping", id)
-		r.out["action_unimplemented"] = string(id)
-		return nil
+		return fmt.Errorf("image pipeline %q schedules action %q, which this build does not implement",
+			r.pipelineID, id)
 	}
 	r.actions = append(r.actions, id)
 	return spec.handler(ctx, r)
@@ -446,6 +536,13 @@ func (r *runContext) execute(ctx context.Context, id types.ImageActionID) error 
 // Its failure subspan mirrors the OCR one (#4132): a caption miss is recorded
 // (caption_error + a red .caption subspan) without failing the image.
 func runCaptionAction(ctx context.Context, r *runContext) error {
+	// The gate is read here rather than by the pipeline that schedules it: a
+	// caption switched off must still leave a result saying so, and an action
+	// that was never executed cannot write one.
+	if !r.BoolParamOr(r.captionGateKey, true) {
+		r.out[keyCaptionResult] = resultSkippedDisabled
+		return nil
+	}
 	var captionSpan *Span
 	if r.tracker != nil && r.imgSpan != nil {
 		captionSpan = r.tracker.BeginSubSpan(ctx, r.imgSpan, r.imgSpan.Name+".caption",
@@ -456,12 +553,12 @@ func runCaptionAction(ctx context.Context, r *runContext) error {
 			return
 		}
 		if failed {
-			message, _ := r.out["caption_error"].(string)
+			message, _ := r.out[keyCaptionError].(string)
 			r.tracker.FailSpan(ctx, captionSpan, "CAPTION_FAILED", message, nil)
 			return
 		}
 		r.tracker.EndSpan(ctx, captionSpan, types.JSONMap{
-			"status": "succeeded", "chars": r.out["caption_chars"],
+			"status": r.out[keyCaptionResult], "chars": r.out[keyCaptionChars],
 		})
 	}
 	raw, err := r.predictCaption(ctx, buildVLMCaptionPrompt(ctx, r.vlmCfg), "image_caption")
@@ -469,7 +566,8 @@ func runCaptionAction(ctx context.Context, r *runContext) error {
 		// Only recorded, not logged: an observation failure below is the same
 		// kind of event and logs its own line, and a caption miss must not be
 		// louder than the rest of the run.
-		r.out["caption_error"] = err.Error()
+		r.out[keyCaptionError] = err.Error()
+		r.out[keyCaptionResult] = "failed"
 		if r.vlmErr == nil {
 			r.vlmErr = err
 		}
@@ -478,8 +576,11 @@ func runCaptionAction(ctx context.Context, r *runContext) error {
 	}
 	if text := strings.TrimSpace(raw); text != "" {
 		r.imageInfo.Caption = text
-		r.out["caption_chars"] = len([]rune(text))
-		r.out["caption_preview"] = previewText(text, 200)
+		r.out[keyCaptionChars] = len([]rune(text))
+		r.out[keyCaptionPreview] = previewText(text, 200)
+		r.out[keyCaptionResult] = "done"
+	} else {
+		r.out[keyCaptionResult] = "empty"
 	}
 	resolve(false)
 	return nil
@@ -500,7 +601,7 @@ func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 			return
 		}
 		if failed {
-			message, _ := r.out["caption_error"].(string)
+			message, _ := r.out[keyObservationError].(string)
 			r.tracker.FailSpan(ctx, obsSpan, "OBSERVATION_FAILED", message, nil)
 			return
 		}
@@ -511,38 +612,45 @@ func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 		"image_observation")
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Describe and observe failed for %s: %v", r.payload.ImageURL, err)
-		r.out["caption_error"] = err.Error()
-		// The request itself failed: no attributes will ever arrive. The status
-		// says so, and the pipeline's OCR decision reads it to tell "observed
-		// and declined" from "no observation to decide on".
-		r.out["observation_status"] = "failed"
+		r.out[keyObservationError] = err.Error()
+		// The request itself failed: nothing was observed and nothing was
+		// described. Both dimensions say so, and the pipeline's OCR decision
+		// reads the result to tell "observed and declined" from "no observation
+		// to decide on".
+		r.out[keyObservationResult] = "failed"
+		r.out[keyObservationCaptionResult] = "failed"
 		if r.vlmErr == nil {
 			r.vlmErr = err
 		}
 		resolve(true)
 		return nil
 	}
-	obs, ok := types.ParseImageAttrsResponse(raw)
-	// Whether the description reaches the caption slot is this pipeline's
-	// business, so the observation reads its own key rather than a payload
-	// field. The key is not declared in Fields(), so the working default is
-	// pinned here: with it, the caption stays a by-product; an API caller
-	// passing false observes the attributes and records nothing to caption.
+	obs, _ := types.ParseImageAttrsResponse(raw)
+	// The round always observes — the attributes are the whole point of it — and
+	// the description is kept only when this run wants a caption. The switch is
+	// the action's own and is not declared in Fields(), so its working default
+	// (on) is pinned at the read.
 	applyImageObservation(r.imageInfo, obs.Attrs, obs.Description, r.out,
-		r.BoolParamOr(smartFieldKeyCaptureCaption, true))
-	// One status for the round, carrying its own reason: an answer that is not
-	// the protocol at all ("unparsed") and one whose shape is right but whose
-	// attribute lines were skipped ("incomplete") leave the same empty table —
-	// nothing is invented to fill the gap, and the OCR policy falls back to its
-	// conservative OnUnobserved clause — while reading differently to whoever
-	// is diagnosing the prompt.
+		r.BoolParamOr(keyObservationCaptionEnabled, true))
+	// How much of what was asked came back. The list comes from the same
+	// function the prompt was built from, so "asked everything" and "answered
+	// everything" are comparable instead of guessed. Nothing is invented to fill
+	// a gap: an unanswered attribute stays absent, and the OCR policy falls back
+	// to its conservative OnUnobserved clause for it.
+	asked := types.InjectedImageAttrNames(types.PreprocessObservesGeometry(r.preprocessMode))
+	answered := 0
+	for _, name := range asked {
+		if _, present := obs.Attrs.Attrs[name]; present {
+			answered++
+		}
+	}
 	switch {
-	case !ok:
-		r.out["observation_status"] = "unparsed"
-	case !obs.Observed:
-		r.out["observation_status"] = "incomplete"
+	case answered == 0:
+		r.out[keyObservationResult] = "none"
+	case answered < len(asked):
+		r.out[keyObservationResult] = "partial"
 	default:
-		r.out["observation_status"] = "done"
+		r.out[keyObservationResult] = "all_done"
 	}
 	resolve(false)
 	return nil
@@ -559,15 +667,14 @@ func runPreprocessAction(ctx context.Context, r *runContext) error {
 	// What was asked for and what happened are two different questions: "always"
 	// and an auto run that hit both attributes produce the same status, and the
 	// mode is what tells them apart afterwards. Both go on the trace.
-	r.out["preprocess_mode"] = r.preprocessMode
 	if r.preprocessor == nil {
-		r.out["preprocess_status"] = "unavailable"
+		r.out[keyPreprocessResult] = "skipped_no_capability"
 		return nil
 	}
 	// Off means off: the describe round did not even ask for the geometry
 	// attributes, so there is nothing to consult and nothing to do.
 	if r.preprocessMode == types.PreprocessModeOff {
-		r.out["preprocess_status"] = "skipped_off"
+		r.out[keyPreprocessResult] = "skipped_off"
 		return nil
 	}
 	// Force skips the question entirely — it exists precisely for the case
@@ -586,7 +693,7 @@ func runPreprocessAction(ctx context.Context, r *runContext) error {
 			upright, uprightObserved = r.imageInfo.Attrs.Upright()
 		}
 		if text != "block" && text != "sparse" {
-			r.out["preprocess_status"] = "skipped_no_text"
+			r.out[keyPreprocessResult] = "skipped_no_text"
 			return nil
 		}
 		// A page that already fills the frame and already reads upright has
@@ -597,32 +704,32 @@ func runPreprocessAction(ctx context.Context, r *runContext) error {
 		croppable := margin == "" || margin == "large"
 		rotated := uprightObserved && !upright
 		if !croppable && !rotated {
-			r.out["preprocess_status"] = "skipped_already_tidy"
+			r.out[keyPreprocessResult] = "skipped_already_tidy"
 			return nil
 		}
 	}
 	rectified, fallback, err := r.preprocessor.PreprocessImage(ctx, r.imageBytes)
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Preprocess failed for %s: %v", r.payload.ImageURL, err)
-		r.out["preprocess_status"] = "failed"
-		r.out["preprocess_error"] = err.Error()
+		r.out[keyPreprocessResult] = "failed"
+		r.out[keyPreprocessError] = err.Error()
 		return nil
 	}
 	if fallback || len(rectified) == 0 {
 		logger.Infof(ctx, "[ImageMultimodal] Preprocess declined for %s; OCR will use the original",
 			r.payload.ImageURL)
-		r.out["preprocess_status"] = "skipped_declined"
+		r.out[keyPreprocessResult] = "skipped_declined"
 		return nil
 	}
 	// The one line that does the work: everything downstream reads imageBytes.
 	r.imageBytes = rectified
-	r.out["preprocess_status"] = "done"
+	r.out[keyPreprocessResult] = "done"
 	// The corrected image's size in bytes — bytes, not characters: the
 	// neighbours that end in _chars (ocr_chars, caption_chars) measure text,
 	// while this measures a picture. It reads next to image_bytes (the
 	// original), and the pair is what shows how much of the photograph the
 	// crop and the perspective correction threw away.
-	r.out["preprocess_bytes"] = len(rectified)
+	r.out[keyPreprocessBytes] = len(rectified)
 	return nil
 }
 
@@ -636,6 +743,12 @@ func runPreprocessAction(ctx context.Context, r *runContext) error {
 // that already succeeded and duplicate its chunk, so the outcome summary (not
 // the task retry) is what surfaces the failure.
 func runOCRAction(ctx context.Context, r *runContext) error {
+	// Read here, not by the pipeline: a switched-off OCR still has to leave a
+	// result saying so.
+	if !r.BoolParamOr(r.ocrGateKey, true) {
+		r.out[keyOCRResult] = resultSkippedDisabled
+		return nil
+	}
 	// The OCR subspan rides on the image span; without a parent span there is
 	// nothing to hang it on and the outcome fields carry the signal alone.
 	var ocrSpan *Span

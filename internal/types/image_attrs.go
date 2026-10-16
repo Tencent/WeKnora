@@ -86,6 +86,20 @@ type AttrValue struct {
 	Description string `json:"description,omitempty"` // sentence explaining the value
 }
 
+// InjectedImageAttrNames lists the attributes a describe round asks the model
+// for, given whether the steps that consume on-demand attributes are switched on
+// for this run. The prompt builder and the observation action both take the list
+// from here, so "what was asked" and "what was answered" cannot drift apart.
+func InjectedImageAttrNames(onDemand bool) []string {
+	names := make([]string, 0, len(ImageAttrRegistry))
+	for _, spec := range ImageAttrRegistry {
+		if spec.WantsInjection(onDemand) {
+			names = append(names, spec.Name)
+		}
+	}
+	return names
+}
+
 // ImageAttrRegistry is the canonical, ordered list of observed attributes for
 // this release. Two are active:
 //   - contain.text drives the OCR decision through its "block" value;

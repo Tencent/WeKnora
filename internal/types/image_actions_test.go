@@ -8,11 +8,11 @@ import "testing"
 // namespace — not a naming convention someone has to remember — keeps them
 // apart.
 func TestActionParamNamespacesByOwner(t *testing.T) {
-	if got := ActionParam(ImageActionCaption, ImageActionParamThinking); got != "caption.thinking" {
-		t.Errorf("ActionParam(caption, thinking) = %q, want caption.thinking", got)
+	if got := ActionParam(ImageActionCaption, ImageActionParamThinking); got != "caption.thinking_enabled" {
+		t.Errorf("ActionParam(caption, thinking) = %q, want caption.thinking_enabled", got)
 	}
-	if got := ActionParam(ImageActionOCR, ImageActionParamThinking); got != "ocr.thinking" {
-		t.Errorf("ActionParam(ocr, thinking) = %q, want ocr.thinking", got)
+	if got := ActionParam(ImageActionOCR, ImageActionParamThinking); got != "ocr.thinking_enabled" {
+		t.Errorf("ActionParam(ocr, thinking) = %q, want ocr.thinking_enabled", got)
 	}
 	if got := ActionParam(ImageActionOCR, ImageActionParamOnUnobserved); got != "ocr.on_unobserved" {
 		t.Errorf("ActionParam(ocr, on_unobserved) = %q, want ocr.on_unobserved", got)
@@ -48,18 +48,20 @@ func TestDeclaredActionFieldsAreNamespaced(t *testing.T) {
 // TestActionFieldFindsWhatWasDeclared is the lookup pipelines use to carry an
 // action's control onto their panel without spelling the key.
 func TestActionFieldFindsWhatWasDeclared(t *testing.T) {
-	field, ok := ActionField(ImageActionOCR, ImageActionParamOnUnobserved)
+	field, ok := ActionField(ImageActionPreprocess, "mode")
 	if !ok {
-		t.Fatal("ActionField(ocr, on_unobserved) not found")
+		t.Fatal("ActionField(preprocess, mode) not found")
 	}
-	if field.Key != "ocr.on_unobserved" {
-		t.Errorf("looked up %q, want ocr.on_unobserved", field.Key)
+	if field.Key != "preprocess.mode" {
+		t.Errorf("looked up %q, want preprocess.mode", field.Key)
 	}
-	if _, ok := ActionField(ImageActionCaption, ImageActionParamOnUnobserved); ok {
+	if _, ok := ActionField(ImageActionCaption, "mode"); ok {
 		t.Error("ActionField found a tunable the caption action never declares")
 	}
-	if _, ok := ActionField(ImageActionPreprocess, "thinking"); ok {
-		t.Error("ActionField found a tunable the preprocess action never declares")
+	// The OCR fallback clause is a pipeline's decision about whether to schedule
+	// the OCR action, not the action's own tunable, so no action declares it.
+	if _, ok := ActionField(ImageActionOCR, ImageActionParamOnUnobserved); ok {
+		t.Error("the OCR fallback clause must not be an action-level field")
 	}
 }
 

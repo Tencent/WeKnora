@@ -24,42 +24,35 @@ func (smartOcrPipeline) Description() string {
 		"from the attributes whether OCR is worth a pass, saving model calls."
 }
 
-// Field keys of this pipeline. allow_ocr and capture_caption are
-// PIPELINE-private keys (this pipeline answers "may OCR be spent at all",
-// which is a ceiling on the policy rather than a step to run) and deliberately
-// do not reuse the default pipeline's step switches. The thinking switches are
-// ACTION-level keys (caption.thinking / ocr.thinking) shared with the default
-// pipeline: the same action means the same tunable wherever it runs, so there
-// is nothing to isolate and no reason to invent per-pipeline names.
+// Field keys of this pipeline. The fallback clause is PIPELINE-private: it says
+// whether OCR is scheduled at all when the observation did not answer, which is
+// orchestration rather than a step to run — so it does not borrow the OCR
+// action's namespace (docs/design/image-pipeline-naming.md §2). The thinking
+// switches are ACTION-level keys carried in from the actions that own them.
 const (
-	smartFieldKeyAllowOCR       = "allow_ocr"
-	smartFieldKeyCaptureCaption = "capture_caption"
-	// smartFieldKeyPreprocessMode is the page-straightening switch. It is the
-	// one field here that is not a pipeline param: its value is the knowledge
-	// base's preprocess_mode, so the panel binds it to that setting instead of
-	// to image_pipeline_params. It is declared by this pipeline and no other
-	// because this is the pipeline whose observation round produces the
-	// attributes the decision rests on — see Fields.
-	smartFieldKeyPreprocessMode = "preprocess_mode"
+	// smartFieldKeyOCROnUnobserved is the clause that decides whether an image
+	// whose attributes were not observed is still read.
+	smartFieldKeyOCROnUnobserved = "ocr_on_unobserved"
 	// Not a param: a note is explanation text, and its key only names the entry.
 	smartFieldKeyNoteFlow = "note_flow"
 )
 
-// smartPreprocessField is the page-straightening switch as the panel shows it.
-// The Default is the same value ResolvePreprocessMode resolves an unset
-// knowledge base setting to, so the payload describes the field completely; the
-// panel does not read it (it binds the knowledge base's own setting) and the
-// run never reads it from params.
-var smartPreprocessField = types.ImageFieldDef{
-	Key:     smartFieldKeyPreprocessMode,
-	Type:    types.ImageFieldTypeEnum,
-	Default: types.PreprocessModeAuto,
-	Label:   "Document preprocessing",
-	Description: "Straighten and crop a photographed page before OCR reads it. " +
-		"Auto asks the describe round whether the page needs it; Off never does; Force always does.",
-	Options: []string{
-		types.PreprocessModeAuto, types.PreprocessModeOff, types.PreprocessModeAlways,
-	},
+// smartPreprocessField is the page-straightening switch, declared by the
+// preprocessing action itself and carried in here by reference: the action owns
+// its tunable, the pipeline only says where it belongs on its own panel.
+var smartPreprocessField = mustActionField(types.ImageActionPreprocess, "mode")
+
+// smartOcrOnUnobservedField is the OCR policy's fallback clause as a control. It
+// is declared here rather than by the OCR action because it decides whether that
+// action runs at all — see the note on the key above.
+var smartOcrOnUnobservedField = types.ImageFieldDef{
+	Key:   smartFieldKeyOCROnUnobserved,
+	Type:  types.ImageFieldTypeBool,
+	Label: "OCR after an unobserved image",
+	Description: "Still read an image whose attributes could not be observed, so a missed " +
+		"block of text costs one extra call instead of being lost. Turn it off only with a " +
+		"model reliable enough to answer every attribute line.",
+	Default: true,
 }
 
 // Fields declares this pipeline's panel controls. The model decides from the
@@ -83,11 +76,12 @@ var smartPreprocessField = types.ImageFieldDef{
 func (smartOcrPipeline) Fields() []types.ImageFieldDef {
 	return []types.ImageFieldDef{
 		smartPreprocessField,
-		// The fallback clause and the two thinking switches are action-level
-		// fields, declared by the actions themselves and carried in here by
-		// reference — the pipeline only says where they belong on its panel.
-		ocrOnUnobservedField,
-		captionThinkingField,
+		smartOcrOnUnobservedField,
+		// The thinking switches are action-level fields, declared by the actions
+		// themselves and carried in here by reference — this pipeline schedules
+		// its own observe round, so it offers that round's switch, and the OCR
+		// call's.
+		observationThinkingField,
 		ocrThinkingField,
 		{
 			Key:   smartFieldKeyNoteFlow,
@@ -118,47 +112,41 @@ func (smartOcrPipeline) Validate(_ map[string]any) error {
 }
 
 func (smartOcrPipeline) Run(ctx context.Context, r *runContext) error {
+	// What this run was configured to do — including the fallback clause above —
+	// under the keys the knowledge base stores it under, so the trace can be read
+	// back against the settings that produced it.
+	r.recordConfig()
+
 	// The keys the shared actions read, set before the observation runs so the
 	// OCR branch below leaves them filled in either way. The thinking switches
 	// are action-level keys shared with the default pipeline.
-	r.captionThinkingKey = imageFieldKeyCaptionThinking
-	r.ocrThinkingKey = imageFieldKeyOCRThinking
+	// The describe side here is the observation action, so its own thinking switch
+	// is the one this pipeline offers.
+	r.captionThinkingKey = observationThinkingField.Key
+	r.ocrThinkingKey = ocrThinkingField.Key
 
 	// One request fills both the attribute slots and the caption slot, so there
-	// is no separate caption action to schedule here. The allow_ocr and
-	// capture_caption ceilings are deliberately NOT recorded on the trace: the
-	// panel never declares them (only the two thinking switches), so they are
-	// always their defaults — recording them read as if a decision had been
-	// made ("allow_ocr=true" next to a declined OCR). The decision and the
-	// inputs that actually drove it are recorded on attr_policy below.
-	if err := r.execute(ctx, types.ImageActionObservationCaption); err != nil {
+	// is no separate caption action to schedule here.
+	if err := r.execute(ctx, types.ImageActionObservation); err != nil {
 		return err
 	}
 
-	// The policy reads the attributes the action above just wrote; the ceiling
-	// only says whether OCR is allowed at all. Both lines are recorded even
-	// when OCR is skipped, because the trace has to show the decision that was
-	// made rather than an OCR chunk that is simply missing. ocr_on_unobserved
-	// travels with the decision: it is the clause that decides when the
-	// observation failed or left attributes unanswered, and it is what tells
-	// "declined on data nobody produced" apart from a confident negative.
-	want := r.BoolParamOr(smartFieldKeyAllowOCR, true) &&
-		DecideOCR(r.imageInfo.Attrs, r.payload.ImageActions)
-	// The decision is this run's answer; on_unobserved is the setting that drove
-	// it. Both belong on the trace — a decision without its input cannot be
-	// audited — and the key names say which is which.
-	r.out["attr_policy"] = types.JSONMap{
-		"ocr":           want,
-		"on_unobserved": r.payload.ImageActions.OCR.OnUnobserved,
-	}
-	r.out["image_attrs"] = r.imageInfo.Attrs.Attrs
+	// The policy reads the attributes the action above just wrote. The decision
+	// itself is recorded as ocr.result below — done means it was taken, a
+	// skipped_* value says why it was not — so there is no separate decision key
+	// to keep in step with it.
+	want := DecideOCR(r.imageInfo.Attrs, r.payload.ImageActions)
+	r.out[keyImageAttrs] = r.imageInfo.Attrs.Attrs
 	if !want {
-		// WHY the policy said no: a failed observation left no attributes to
-		// decide on (the OnUnobserved clause declined), which is a different
-		// story from attributes that were observed and voted against OCR. The
-		// trace keeps the two apart instead of a generic "attr_policy" that
-		// reads as if a decision was made on data nobody produced.
-		observationFailed := r.out["observation_status"] != "done"
+		// WHY the policy said no: an observation that did not answer leaves no
+		// attributes to decide on (the fallback clause declined), which is a
+		// different story from attributes that were observed and voted against
+		// OCR.
+		// "No attributes to decide on" is not the same as "not all of them":
+		// a partial answer is data the policy can act on, so only an observation
+		// that produced nothing (or failed outright) counts as failed here.
+		result := r.out[keyObservationResult]
+		observationFailed := result == "none" || result == "failed"
 		if observationFailed {
 			logger.Infof(ctx, "[ImageMultimodal] Skipping OCR for %s (observation failed, attrs=%v)",
 				r.payload.ImageURL, r.imageInfo.Attrs.Attrs)

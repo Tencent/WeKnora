@@ -333,8 +333,7 @@ func TestProcessImageObservesAndDescribes(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			smartFieldKeyAllowOCR:       true,
-			smartFieldKeyCaptureCaption: true,
+			keyObservationCaptionEnabled: true,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
@@ -348,8 +347,10 @@ func TestProcessImageObservesAndDescribes(t *testing.T) {
 	if attrs["contain.text"] != "block" {
 		t.Errorf("contain.text = %v, want block", attrs["contain.text"])
 	}
-	if got, ok := out["attr_policy"].(types.JSONMap); !ok || got["ocr"] != true {
-		t.Errorf("attr_policy = %v, want {ocr:true}", out["attr_policy"])
+	// The decision is the OCR result now: a value that means "it ran" says the
+	// policy allowed it.
+	if got := out[keyOCRResult]; got == "skipped_attr_policy" || got == "skipped_observation_failed" {
+		t.Errorf("ocr.result = %v, want a value that means OCR ran", got)
 	}
 	if got, _ := out[keyOCRResult].(string); strings.HasPrefix(got, "skipped_") {
 		t.Errorf("a block of text must be OCR'd, got ocr_status=%v", got)
@@ -408,16 +409,20 @@ func TestProcessImageMarksObservationFailed(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			smartFieldKeyAllowOCR:       true,
-			smartFieldKeyCaptureCaption: true,
+			keyObservationCaptionEnabled: true,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
 	}
 	out := runProcessImage(t, svc, payload, fake)
 
-	if got := out["observation_status"]; got != "incomplete" {
-		t.Errorf("observation_status = %v, want incomplete for a prose-only answer", got)
+	// Two dimensions, two keys: nothing was observed about the image, and the
+	// description came anyway — which is exactly what a prose answer looks like.
+	if got := out[keyObservationResult]; got != "none" {
+		t.Errorf("observation.result = %v, want none for a prose-only answer", got)
+	}
+	if got := out[keyObservationCaptionResult]; got != "done" {
+		t.Errorf("observation.caption_result = %v, want done (the prose was kept)", got)
 	}
 	// No attribute is invented for the unanswered questions: the table stays
 	// empty, and the conservative clause is what keeps OCR running.
@@ -459,8 +464,7 @@ func TestProcessImageSkipsOCRForQuietAttr(t *testing.T) {
 		ChunkID:         "chunk-a",
 		// The ceiling stays on; the observation is what vetoes.
 		ImagePipelineParams: map[string]any{
-			smartFieldKeyAllowOCR:       true,
-			smartFieldKeyCaptureCaption: true,
+			keyObservationCaptionEnabled: true,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
@@ -473,9 +477,7 @@ func TestProcessImageSkipsOCRForQuietAttr(t *testing.T) {
 	if got := out[keyOCRResult]; got != "skipped_attr_policy" {
 		t.Errorf("ocr_status = %v, want skipped_attr_policy", got)
 	}
-	if got, ok := out["attr_policy"].(types.JSONMap); !ok || got["ocr"] != false {
-		t.Errorf("attr_policy = %v, want {ocr:false}", out["attr_policy"])
-	}
+
 	if len(repo.created) != 1 {
 		t.Fatalf("persisted chunks = %d, want 1 (caption only)", len(repo.created))
 	}
@@ -514,8 +516,7 @@ func TestProcessImageKeepsAttrsButDropsCaptionWhenCaptionsAreOff(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			smartFieldKeyAllowOCR:       true,
-			smartFieldKeyCaptureCaption: false,
+			keyObservationCaptionEnabled: false,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
@@ -530,8 +531,8 @@ func TestProcessImageKeepsAttrsButDropsCaptionWhenCaptionsAreOff(t *testing.T) {
 		t.Errorf("contain.data_visual = %v, want true (needed even without captions)",
 			attrs["contain.data_visual"])
 	}
-	if got := out["caption_skipped"]; got != "disabled" {
-		t.Errorf("caption_skipped = %v, want disabled", got)
+	if got := out[keyObservationCaptionResult]; got != resultSkippedDisabled {
+		t.Errorf("observation.caption_result = %v, want %v", got, resultSkippedDisabled)
 	}
 	if got, present := out["caption_preview"]; present {
 		t.Errorf("a caption must not be recorded when captions are off, got %v", got)
@@ -575,8 +576,7 @@ func TestProcessImageProseAnswerIsStillCaptionedAndOCRed(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			smartFieldKeyAllowOCR:       true,
-			smartFieldKeyCaptureCaption: true,
+			keyObservationCaptionEnabled: true,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
@@ -593,8 +593,8 @@ func TestProcessImageProseAnswerIsStillCaptionedAndOCRed(t *testing.T) {
 	if got, _ := out[keyOCRResult].(string); strings.HasPrefix(got, "skipped_") {
 		t.Errorf("OCR must not be reported skipped, got ocr_status=%v", got)
 	}
-	if got, ok := out["attr_policy"].(types.JSONMap); !ok || got["ocr"] != true {
-		t.Errorf("attr_policy = %v, want the conservative decision", out["attr_policy"])
+	if got := out[keyOCRResult]; got == "skipped_attr_policy" {
+		t.Errorf("ocr.result = %v; the conservative clause must keep OCR running", got)
 	}
 	if got := out["observation_status"]; got == "unparsed" {
 		t.Error("prose is a description: the answer must not read as unparsed")
@@ -641,16 +641,19 @@ func TestProcessImageLabelOnlyAnswerKeepsAttrsWithoutCaption(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			smartFieldKeyAllowOCR:       true,
-			smartFieldKeyCaptureCaption: true,
+			keyObservationCaptionEnabled: true,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
 	}
 	out := runProcessImage(t, svc, payload, fake)
 
-	if got := out["observation_status"]; got != "unparsed" {
-		t.Errorf("observation_status = %v, want unparsed", got)
+	// The attribute lines came, the description line did not.
+	if got := out[keyObservationCaptionResult]; got != "empty" {
+		t.Errorf("observation.caption_result = %v, want empty (no description line)", got)
+	}
+	if got := out[keyObservationResult]; got == "none" || got == "failed" {
+		t.Errorf("observation.result = %v, want the attributes it did answer", got)
 	}
 	if n := countCallsWith(fake.calls, "OCR assistant"); n != 1 {
 		t.Errorf("OCR calls = %d, want 1 (block + data visual keep OCR)", n)
@@ -691,8 +694,8 @@ func TestProcessImageCaptionOCRPipeline(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			captionFieldKeyEnableCaption: true,
-			captionFieldKeyEnableOCR:     true,
+			captionFieldKeyCaptionEnabled: true,
+			captionFieldKeyOCREnabled:     true,
 		},
 		ImageAttrsEnabled: false,
 		// An action table is present but must be ignored: caption+OCR mode has
@@ -710,9 +713,7 @@ func TestProcessImageCaptionOCRPipeline(t *testing.T) {
 	if _, present := out["image_attrs"]; present {
 		t.Errorf("caption+OCR mode must not record attributes, got %v", out["image_attrs"])
 	}
-	if _, present := out["attr_policy"]; present {
-		t.Errorf("caption+OCR mode must not evaluate an action policy, got %v", out["attr_policy"])
-	}
+
 	if len(repo.created) != 2 {
 		t.Fatalf("persisted chunks = %d, want OCR + caption", len(repo.created))
 	}
@@ -743,8 +744,7 @@ func TestProcessImageReturnsUnreadableImageError(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			smartFieldKeyAllowOCR:       true,
-			smartFieldKeyCaptureCaption: true,
+			keyObservationCaptionEnabled: true,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),

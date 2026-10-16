@@ -16,8 +16,8 @@ import (
 func TestManualPipelineRejectsEveryActionOff(t *testing.T) {
 	pipeline := imagePipelineRegistry[types.ImagePipelineDefault]
 	err := pipeline.Validate(map[string]any{
-		captionFieldKeyEnableCaption: false,
-		captionFieldKeyEnableOCR:     false,
+		captionFieldKeyCaptionEnabled: false,
+		captionFieldKeyOCREnabled:     false,
 	})
 	invalid, ok := err.(*types.ImagePipelineValidationError)
 	if !ok {
@@ -27,8 +27,8 @@ func TestManualPipelineRejectsEveryActionOff(t *testing.T) {
 		t.Error("the rejection carries no message key, so the panel could not translate it")
 	}
 	// Pointing at a switch is what tells the user which one to turn back on.
-	if invalid.Field != captionFieldKeyEnableCaption {
-		t.Errorf("field = %q, want %q (the first of the pair)", invalid.Field, captionFieldKeyEnableCaption)
+	if invalid.Field != captionFieldKeyCaptionEnabled {
+		t.Errorf("field = %q, want %q (the first of the pair)", invalid.Field, captionFieldKeyCaptionEnabled)
 	}
 }
 
@@ -38,18 +38,18 @@ func TestManualPipelineRejectsEveryActionOff(t *testing.T) {
 func TestManualPipelineAcceptsOneActionOn(t *testing.T) {
 	pipeline := imagePipelineRegistry[types.ImagePipelineDefault]
 	cases := []map[string]any{
-		{captionFieldKeyEnableCaption: true, captionFieldKeyEnableOCR: false},
-		{captionFieldKeyEnableCaption: false, captionFieldKeyEnableOCR: true},
+		{captionFieldKeyCaptionEnabled: true, captionFieldKeyOCREnabled: false},
+		{captionFieldKeyCaptionEnabled: false, captionFieldKeyOCREnabled: true},
 		// Neither key carried: both default to true, which is what a knowledge
 		// base saved before these fields existed gets.
 		{},
 		// A thinking switch off changes nothing about whether the actions run.
 		{
-			captionFieldKeyEnableCaption: true, captionFieldKeyEnableOCR: true,
-			imageFieldKeyCaptionThinking: false, imageFieldKeyOCRThinking: false,
+			captionFieldKeyCaptionEnabled: true, captionFieldKeyOCREnabled: true,
+			captionThinkingField.Key: false, ocrThinkingField.Key: false,
 		},
 		// Values that reached the pipeline through a form may arrive as strings.
-		{captionFieldKeyEnableCaption: "true", captionFieldKeyEnableOCR: "false"},
+		{captionFieldKeyCaptionEnabled: "true", captionFieldKeyOCREnabled: "false"},
 	}
 	for i, params := range cases {
 		if err := pipeline.Validate(params); err != nil {
@@ -71,8 +71,8 @@ func TestManualPipelineRejectsOffByValue(t *testing.T) {
 	for _, caption := range cases {
 		for _, ocr := range cases {
 			err := pipeline.Validate(map[string]any{
-				captionFieldKeyEnableCaption: caption,
-				captionFieldKeyEnableOCR:     ocr,
+				captionFieldKeyCaptionEnabled: caption,
+				captionFieldKeyOCREnabled:     ocr,
 			})
 			if err == nil {
 				t.Errorf("both off as %#v and %#v = nil, want the rule to fire", caption, ocr)
@@ -99,8 +99,8 @@ func TestValidationGoesThroughTheSavedPipeline(t *testing.T) {
 		t.Errorf("Validate(\"\") = %v, want nil (both actions default on)", err)
 	}
 	err := ValidateImagePipelineParams(types.ImagePipelineDefault, map[string]any{
-		captionFieldKeyEnableCaption: false,
-		captionFieldKeyEnableOCR:     false,
+		captionFieldKeyCaptionEnabled: false,
+		captionFieldKeyOCREnabled:     false,
 	})
 	if err == nil || !strings.Contains(err.Error(), "noActionEnabled") {
 		t.Errorf("Validate(manual, both off) = %v, want the noActionEnabled message key", err)
@@ -119,37 +119,37 @@ func TestImagePipelineValidationMatchesExecution(t *testing.T) {
 		{
 			"namespace overrides bare keys",
 			map[string]any{
-				"enable_caption": true, "enable_ocr": true,
-				"default.enable_caption": false, "default.enable_ocr": false,
+				"caption_enabled": true, "ocr_enabled": true,
+				"default.caption_enabled": false, "default.ocr_enabled": false,
 			},
 			0,
 		},
-		{"namespace only", map[string]any{"default.enable_caption": false, "default.enable_ocr": false}, 0},
+		{"namespace only", map[string]any{"default.caption_enabled": false, "default.ocr_enabled": false}, 0},
 		{
 			"namespace enables caption",
 			map[string]any{
-				"enable_caption": false, "enable_ocr": false,
-				"default.enable_caption": true,
+				"caption_enabled": false, "ocr_enabled": false,
+				"default.caption_enabled": true,
 			},
 			1,
 		},
-		{"other namespace ignored", map[string]any{"smartocr.enable_caption": false, "smartocr.enable_ocr": false}, 2},
-		{"null uses declared default", map[string]any{"enable_caption": nil, "enable_ocr": false}, 1},
+		{"other namespace ignored", map[string]any{"smartocr.caption_enabled": false, "smartocr.ocr_enabled": false}, 2},
+		{"null uses declared default", map[string]any{"caption_enabled": nil, "ocr_enabled": false}, 1},
 		{
 			"null namespace falls through to bare key",
 			map[string]any{
-				"default.enable_caption": nil, "enable_caption": false,
-				"enable_ocr": false,
+				"default.caption_enabled": nil, "caption_enabled": false,
+				"ocr_enabled": false,
 			},
 			0,
 		},
-		{"string true", map[string]any{"enable_caption": "true", "enable_ocr": false}, 1},
-		{"string on", map[string]any{"enable_caption": "on", "enable_ocr": false}, 1},
-		{"string one", map[string]any{"enable_caption": "1", "enable_ocr": false}, 1},
-		{"string false", map[string]any{"enable_caption": "false", "enable_ocr": false}, 0},
+		{"string true", map[string]any{"caption_enabled": "true", "ocr_enabled": false}, 1},
+		{"string on", map[string]any{"caption_enabled": "on", "ocr_enabled": false}, 1},
+		{"string one", map[string]any{"caption_enabled": "1", "ocr_enabled": false}, 1},
+		{"string false", map[string]any{"caption_enabled": "false", "ocr_enabled": false}, 0},
 		{
 			"numeric values are not boolean switches",
-			map[string]any{"enable_caption": float64(1), "enable_ocr": false},
+			map[string]any{"caption_enabled": float64(1), "ocr_enabled": false},
 			0,
 		},
 	}

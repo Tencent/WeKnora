@@ -293,7 +293,7 @@ func (s *ImageMultimodalService) processImage(
 			name := fmt.Sprintf("multimodal.image[%d]", payload.ImageIndex)
 			// The observation, and the policy it resolves to, are only known
 			// after the describe round, so they land on the span's output (see
-			// out["image_attrs"] and out["attr_policy"]) instead of here.
+			// out[keyImageAttrs]) instead of here.
 			imgSpan = tracker.BeginSubSpan(ctx, parent, name, types.SpanKindGeneration, types.JSONMap{
 				"image_url":         payload.ImageURL,
 				"image_source_type": payload.ImageSourceType,
@@ -347,12 +347,12 @@ func (s *ImageMultimodalService) processImage(
 	imgBytes, readErr := s.readImageBytes(ctx, *payload)
 	if readErr != nil {
 		logger.Errorf(ctx, "[ImageMultimodal] Skip unreadable image %s: %v", payload.ImageURL, readErr)
-		out["outcome"] = "skipped_unreadable_image"
-		out["read_error"] = readErr.Error()
+		out[keyOutcome] = "skipped_unreadable_image"
+		out[keyReadError] = readErr.Error()
 		handleErr = fmt.Errorf("read source image: %w", readErr)
 		return handleErr
 	}
-	out["image_bytes"] = len(imgBytes)
+	out[keyImageBytes] = len(imgBytes)
 	// A successful storage read can still return an empty object or an HTML/
 	// JSON error body. Do not let the VLM turn that into a successful caption
 	// such as "please provide an image" and persist it in the gallery.
@@ -394,6 +394,16 @@ func (s *ImageMultimodalService) processImage(
 		// under, exactly like the pipeline id next to it. An empty value (a
 		// payload from before this field existed) resolves to auto.
 		preprocessMode: types.ResolvePreprocessMode(&types.ImageProcessingConfig{PreprocessMode: payload.PreprocessMode}),
+	}
+	// Recorded here rather than inside a pipeline's Run: a run that returns early
+	// with an error still did the actions it did, and "what ran before it failed"
+	// is exactly what a trace is for.
+	if rc != nil {
+		defer func() {
+			if ids := rc.actionIDs(); len(ids) > 0 {
+				out[keyActions] = ids
+			}
+		}()
 	}
 	if err := pipeline.Run(ctx, rc); err != nil {
 		// Surface the pipeline failure on this image's span instead of
@@ -445,7 +455,7 @@ func (s *ImageMultimodalService) processImage(
 			UpdatedAt:       time.Now(),
 		})
 	}
-	out["chunks_created"] = len(newChunks)
+	out[keyChunksCreated] = len(newChunks)
 
 	// Nothing was produced and a requested extraction failed: the image
 	// has no image_info, so it will not appear in the gallery, and a silent
@@ -458,10 +468,11 @@ func (s *ImageMultimodalService) processImage(
 	// while there is content to protect — a valid caption must not be
 	// duplicated by an OCR retry; with nothing produced there is nothing to
 	// protect, so the image fails honestly.
-	extractionFailed := out["caption_error"] != nil || out[keyOCRResult] == "failed" ||
+	extractionFailed := out[keyCaptionError] != nil || out[keyObservationError] != nil ||
+		out[keyOCRResult] == "failed" ||
 		out[keyOCRResult] == "skipped_observation_failed"
 	if len(newChunks) == 0 && extractionFailed {
-		out["outcome"] = "failed"
+		out[keyOutcome] = "failed"
 		if ctx.Err() != nil {
 			handleErr = fmt.Errorf("image processing cancelled with no content produced: %w", ctx.Err())
 			return handleErr
@@ -473,7 +484,7 @@ func (s *ImageMultimodalService) processImage(
 			handleErr = fmt.Errorf("image produced no content: %w", rc.vlmErr)
 		} else {
 			handleErr = fmt.Errorf("image produced no content (ocr_status=%v, caption_error=%v)",
-				out[keyOCRResult], out["caption_error"])
+				out[keyOCRResult], out[keyCaptionError])
 		}
 		return handleErr
 	}
@@ -482,14 +493,14 @@ func (s *ImageMultimodalService) processImage(
 		// Some content exists (a valid caption was persisted) — the failure
 		// is recorded on the .ocr subspan and the outcome, and the image
 		// stays a success at the task level (#4132).
-		out["outcome"] = "partial_failure"
+		out[keyOutcome] = "partial_failure"
 	}
 
 	if len(newChunks) == 0 {
 		// Deferred finalize will count this image on success. A genuine
 		// blank (OCR answered no_text) or a policy-declined image keeps its
 		// trace-level skip.
-		out["outcome"] = "skipped_no_content"
+		out[keyOutcome] = "skipped_no_content"
 		return nil
 	}
 
@@ -505,13 +516,13 @@ func (s *ImageMultimodalService) processImage(
 
 	// Index chunks so they can be retrieved
 	s.indexChunks(ctx, *payload, newChunks, imgBytes, out)
-	out["indexed"] = true
+	out[keyIndexed] = true
 	// Only an image that reached this point with no verdict of its own is a
 	// plain success: a partial failure was already recorded by the OCR clause
 	// above, and overwriting it would hide the failure behind the content that
 	// did survive.
-	if _, decided := out["outcome"]; !decided {
-		out["outcome"] = "done"
+	if _, decided := out[keyOutcome]; !decided {
+		out[keyOutcome] = "done"
 	}
 
 	return nil
@@ -575,16 +586,18 @@ func applyImageObservation(
 	if attrs.Attrs != nil {
 		imageInfo.Attrs = attrs
 	}
-	if description == "" {
+	if !wantCaption {
+		out[keyObservationCaptionResult] = resultSkippedDisabled
 		return
 	}
-	if !wantCaption {
-		out["caption_skipped"] = "disabled"
+	if description == "" {
+		out[keyObservationCaptionResult] = "empty"
 		return
 	}
 	imageInfo.Caption = description
-	out["caption_chars"] = len([]rune(description))
-	out["caption_preview"] = previewText(description, 200)
+	out[keyObservationCaptionChars] = len([]rune(description))
+	out[keyObservationCaptionPreview] = previewText(description, 200)
+	out[keyObservationCaptionResult] = "done"
 }
 
 // shouldDropOrphanedMultimodal reports whether the task should exit without
