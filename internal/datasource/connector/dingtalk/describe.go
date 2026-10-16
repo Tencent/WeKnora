@@ -68,17 +68,36 @@ func describeResource(ctx context.Context, api dingTalkAPI, rawReference string)
 // describeNode names one referenced wiki node. The node is read by id, exactly
 // as the sync reads it, so a personal-space node resolves without any workspace
 // listing and the picker's name cannot disagree with the item the sync writes.
+//
+// The reference's encoded kind is a claim, and the node is the fact. A Base's id
+// answers this read exactly as a document's does — same FILE/ALIDOC shape, and
+// the name is the Base's own, which is why the wrong kind produces a confident
+// label — so a Base entered under the node kind would describe itself as a
+// document-shaped row for the one reference the sync cannot read. The node is
+// therefore described as what it is, and the row reports the reference that
+// reads it: correcting the kind here is what keeps the picker from showing a
+// positive signal for a selection that can only fail later.
 func describeNode(
 	ctx context.Context,
 	api dingTalkAPI,
 	nodeID, canonicalID string,
 ) (types.Resource, error) {
+	described, err := api.getNode(ctx, nodeID)
+	if err == nil && isBaseNode(described) {
+		baseID, encodeErr := baseFormReference(nodeID)
+		if encodeErr != nil {
+			return types.Resource{}, encodeErr
+		}
+		// The read that identified the Base is the read that names it: asking
+		// the wiki API for the same node twice would only add a way for the two
+		// answers to disagree.
+		return describeBaseFromNode(ctx, api, nodeID, baseID, described, nil)
+	}
 	resource := types.Resource{
 		ExternalID: canonicalID,
 		Name:       nodeID,
 		Metadata:   map[string]interface{}{"node_id": nodeID},
 	}
-	described, err := api.getNode(ctx, nodeID)
 	if err != nil {
 		if isContextError(err) {
 			return types.Resource{}, err
@@ -123,6 +142,22 @@ func describeBase(
 	api dingTalkAPI,
 	baseID, canonicalID string,
 ) (types.Resource, error) {
+	described, err := api.getNode(ctx, baseID)
+	return describeBaseFromNode(ctx, api, baseID, canonicalID, described, err)
+}
+
+// describeBaseFromNode is describeBase from a node the caller has already read,
+// or from the error that reading it produced. A Base whose id arrived in the
+// node form is corrected through the read that identified it, so the same node
+// is not asked for twice; a Base whose id arrived in the Base form passes the
+// read its own path just made.
+func describeBaseFromNode(
+	ctx context.Context,
+	api dingTalkAPI,
+	baseID, canonicalID string,
+	described node,
+	readErr error,
+) (types.Resource, error) {
 	resource := types.Resource{
 		ExternalID: canonicalID,
 		Name:       baseID,
@@ -140,15 +175,15 @@ func describeBase(
 			"category":  "ALIDOC",
 		},
 	}
-	if described, err := api.getNode(ctx, baseID); err != nil {
-		if isContextError(err) {
-			return types.Resource{}, err
+	if readErr != nil {
+		if isContextError(readErr) {
+			return types.Resource{}, readErr
 		}
 		// A tenant whose wiki API does not know the Base still syncs it through
 		// the notable API, so the id stands in for the missing name.
 		logger.Debugf(ctx,
 			"[DingTalk] describe base %s: %v; the picker shows the id instead",
-			baseID, err)
+			baseID, readErr)
 	} else {
 		if name := strings.TrimSpace(described.Name); name != "" {
 			resource.Name = name

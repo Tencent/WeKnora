@@ -42,6 +42,27 @@ export function dingtalkManualKind(reference: string): 'node' | 'base' {
   return reference.startsWith('dingtalk:v1?base=') ? 'base' : 'node'
 }
 
+// correctedManualReference returns the reference a describe answer stores, given
+// the reference it was asked about.
+//
+// The kind is a control the user sets because a document link and a Base link
+// are byte-identical — but the kind is not unknowable: the connector reads the
+// node behind the id and answers with the form that actually reads it, so a
+// 多维表 pasted under 文档节点 comes back as the base= reference (and vice
+// versa). The answer is authoritative about the KIND and about nothing else, so
+// a correction must keep the id: an answer naming a different resource is not a
+// correction, and returning null for it is what keeps a stray or unexpected row
+// from replacing a selection the user never made.
+export function correctedManualReference(requested: string, answered: string): string | null {
+  if (answered === requested) return requested
+  if (!DINGTALK_MANUAL_REFERENCE.test(requested) || !DINGTALK_MANUAL_REFERENCE.test(answered)) {
+    return null
+  }
+  return dingtalkManualReferenceId(answered) === dingtalkManualReferenceId(requested)
+    ? answered
+    : null
+}
+
 // extractDingTalkId accepts a bare node/Base id or a DingTalk link
 // (https://alidocs.dingtalk.com/i/nodes/<ID>, with or without a query string
 // such as ?utm_scene=...) and returns the id. Matching is path-based, so any

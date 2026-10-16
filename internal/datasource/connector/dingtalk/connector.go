@@ -58,6 +58,15 @@ var unsupportedDocumentExtensions = map[string]string{
 // claim there is no ingest path.
 const baseExtension = "able"
 
+// isBaseNode reports whether a wiki node is a multi-dimensional table. Nothing
+// else about the node says so: GET /v2.0/wiki/nodes answers for a Base's id
+// exactly as it does for a document's, reporting the same FILE/ALIDOC shape, so
+// the extension is the one fact that separates the two — and therefore the one
+// fact that decides which reference form can read the node at all.
+func isBaseNode(n node) bool {
+	return strings.EqualFold(strings.TrimSpace(n.Extension), baseExtension)
+}
+
 // skipReason explains, in the words of the sync log, why a node the connector
 // just listed will not be ingested. Every answer is deterministic: retrying the
 // sync can never turn such a node into a document, which is what separates a
@@ -74,7 +83,7 @@ func skipReason(n node, settings documentSettings) string {
 	if n.isBinaryDocument() && !settings.IncludeUploadedFiles {
 		return "uploaded files are not ingested because include_uploaded_files is not enabled for this data source"
 	}
-	if extension == baseExtension {
+	if isBaseNode(n) {
 		return "DingTalk multi-dimensional table is ingested only through a base= selection, " +
 			"not as a workspace document"
 	}
@@ -152,6 +161,47 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 	}
 	api := c.api(cfg)
 	settings := parseDocumentSettings(dataSourceConfig)
+
+	// A saved selection is re-read for the one mistake the picker cannot show:
+	// a multi-dimensional table's id committed under the node kind. The
+	// wiki-nodes API answers for a Base exactly as it does for a document, so
+	// such a reference describes itself with the Base's own name and then syncs
+	// nothing — its failure arrives at sync time as "resource is unavailable",
+	// which sends an operator looking for a permission problem that is not
+	// there. The extension is the fact that separates the two, so the verdict
+	// is available here, at save time, in the terms that fix it: the id, the
+	// type it really is, and the reference form that reads it.
+	//
+	// This runs before the probes below, which accept as soon as one reference
+	// proves readable: a selection that is partly wrong must still be reported
+	// rather than covered by the part that works.
+	for _, resourceID := range dataSourceConfig.ResourceIDs {
+		ref, err := decodeResourceReference(resourceID)
+		if err != nil || ref.NodeID == "" {
+			continue
+		}
+		described, err := api.getNode(ctx, ref.NodeID)
+		if err != nil {
+			if isContextError(err) {
+				return fmt.Errorf("validate DingTalk data source: %w", err)
+			}
+			// A node the wiki API will not answer for is the sync's to report:
+			// this check corrects a reference whose kind is provably wrong, it
+			// does not duplicate the sync's reachability probe.
+			continue
+		}
+		if !isBaseNode(described) {
+			continue
+		}
+		baseID, err := baseFormReference(ref.NodeID)
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf(
+			"validate DingTalk data source: DingTalk node %q is a multi-dimensional table (able), "+
+				"which a node reference cannot read; re-add the id as a multi-dimensional table (%s)",
+			ref.NodeID, baseID)
+	}
 
 	// Each base reference is probed through the same call the sync uses, so a
 	// pass here means the selection will really produce content.

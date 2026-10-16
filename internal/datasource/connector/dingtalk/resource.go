@@ -70,6 +70,17 @@ func (r resourceReference) child(nodeID string) resourceReference {
 	}
 }
 
+// baseFormReference renders the Base reference for one node id.
+//
+// It exists because the Base form is the correction of a node form that named a
+// multi-dimensional table: the id is the only field that carries over. A Base
+// is self-addressing, so the workspace and the ancestor path of the reference
+// being corrected are dropped rather than converted — a Base has neither, and
+// the decoder rejects a reference that claims otherwise.
+func baseFormReference(nodeID string) (string, error) {
+	return encodeResourceReference(resourceReference{BaseID: nodeID})
+}
+
 func encodeResourceReference(ref resourceReference) (string, error) {
 	if err := validateResourceReference(ref); err != nil {
 		return "", err

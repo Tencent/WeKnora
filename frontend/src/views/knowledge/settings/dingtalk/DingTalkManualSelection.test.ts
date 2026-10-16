@@ -752,3 +752,138 @@ test('a described row is reported to the dialog exactly once per reference', asy
     assert.deepEqual([...f.state.selected], [])
   } finally { f.close() }
 })
+
+// A document link and a multi-dimensional table link are byte-identical, so the
+// kind is a control the user sets — but the kind is not unknowable: the
+// connector reads the node behind the id and answers with the reference that
+// actually reads it. The describe answer is therefore authoritative about the
+// KIND of a reference (never about its id), and the selection stores what the
+// answer reports. Without that, a 多维表 pasted under 文档节点 is stored as
+// `?node=` — a reference whose sync fails — while the picker shows the Base's
+// own correct name, which is the trap this closes.
+test('a multi-dimensional table pasted as a document node is stored as the Base it is', async () => {
+  const f = await fixture({
+    resources: PREVIEW_RESOURCES,
+    described: {
+      'dingtalk:v1?node=baseId123': {
+        external_id: 'dingtalk:v1?base=baseId123',
+        name: '项目与任务管理（AI判断风险与建议）.able',
+        type: 'base',
+        description: '项目, 任务',
+        has_children: true,
+      },
+    },
+  })
+  try {
+    // The user pastes the id and leaves the selector on 文档节点.
+    assert.equal(await add(f.vm, 'baseId123', 'node'), true)
+    await settle()
+
+    // Only the reference that reads the content survives ...
+    assert.deepEqual([...f.state.selected], ['dingtalk:v1?base=baseId123'])
+    assert.deepEqual([...f.vm.manualReferences], ['dingtalk:v1?base=baseId123'])
+    // ... the selector follows the type the connector proved, so pressing Add
+    // again with the same id cannot put the unreadable form back ...
+    assert.equal(f.vm.manualKind, 'base')
+    // ... the field still holds the id the user pasted ...
+    assert.equal(f.vm.manualId, 'baseId123')
+    // ... and the row is previewed as the Base, by its real name and kind.
+    assert.deepEqual(previewRows(f.vm), [{
+      id: 'dingtalk:v1?base=baseId123',
+      manual: true,
+      kind: 'datasource.dingtalk.manualKindBase',
+      label: '项目与任务管理（AI判断风险与建议）.able',
+    }])
+    assert.equal(f.vm.rowHint(previewRows(f.vm)[0]), 'datasource.dingtalk.resourceHintBase')
+    // The dialog is told about the corrected reference, which is the key its
+    // tree row is merged under: the two views cannot disagree about what is
+    // selected.
+    assert.deepEqual(Object.keys(f.describedReports.at(-1)!), ['dingtalk:v1?base=baseId123'])
+  } finally { f.close() }
+})
+
+// The acceptance criterion in one place: whichever kind the selector is left
+// on, a multi-dimensional table's id ends up as the reference that syncs it.
+test('a multi-dimensional table id is stored as a Base whichever kind was selected', async () => {
+  for (const kind of ['node', 'base'] as const) {
+    const requested = `dingtalk:v1?${kind}=baseId123`
+    const f = await fixture({
+      described: {
+        [requested]: {
+          external_id: 'dingtalk:v1?base=baseId123',
+          name: 'Project tracker.able',
+          type: 'base',
+          description: '项目, 任务',
+        },
+      },
+    })
+    try {
+      assert.equal(await add(f.vm, 'baseId123', kind), true)
+      await settle()
+      assert.deepEqual([...f.state.selected], ['dingtalk:v1?base=baseId123'], `kind=${kind}`)
+      assert.equal(f.vm.manualKind, 'base', `kind=${kind}`)
+      assert.equal(previewRows(f.vm).length, 1, `kind=${kind}`)
+    } finally { f.close() }
+  }
+})
+
+// The same id entered once under each kind is one selection, not two: the
+// correction folds the duplicate rather than leaving one Base selected twice.
+test('correcting a reference folds a duplicate of the same id', async () => {
+  const f = await fixture({
+    described: {
+      'dingtalk:v1?node=baseId123': {
+        external_id: 'dingtalk:v1?base=baseId123', name: 'Project tracker.able', type: 'base',
+      },
+    },
+  })
+  try {
+    assert.equal(await add(f.vm, 'baseId123', 'base'), true)
+    await settle()
+    assert.deepEqual([...f.state.selected], ['dingtalk:v1?base=baseId123'])
+
+    // The selector is deliberately moved back to 文档节点, the way a user who
+    // believes the id is a document would.
+    assert.equal(await add(f.vm, 'baseId123', 'node'), true)
+    await settle()
+    assert.deepEqual([...f.state.selected], ['dingtalk:v1?base=baseId123'])
+    assert.equal(previewRows(f.vm).length, 1)
+    assert.equal([...f.state.selected].includes('dingtalk:v1?node=baseId123'), false)
+  } finally { f.close() }
+})
+
+// The connector may correct a reference's kind, never its id: a row about some
+// other resource is not an answer, and storing it would silently replace the
+// user's selection with something they never picked.
+test('a describe row about a different id is ignored', async () => {
+  const f = await fixture({
+    described: {
+      'dingtalk:v1?node=docId456': {
+        external_id: 'dingtalk:v1?base=someOtherId',
+        name: 'Someone else\'s table',
+        type: 'base',
+      },
+    },
+  })
+  try {
+    assert.equal(await add(f.vm, 'docId456', 'node'), true)
+    await settle()
+    assert.deepEqual([...f.state.selected], ['dingtalk:v1?node=docId456'])
+    assert.deepEqual(previewRows(f.vm), [{
+      id: 'dingtalk:v1?node=docId456', manual: true,
+      kind: 'datasource.dingtalk.manualKindNode', label: 'docId456',
+    }])
+
+    // The grammar says the same thing directly: a correction keeps the id and
+    // swaps only the kind, and every other answer is refused.
+    const corrected = dingtalkResources.correctedManualReference
+    assert.equal(corrected('dingtalk:v1?node=a', 'dingtalk:v1?base=a'), 'dingtalk:v1?base=a')
+    assert.equal(corrected('dingtalk:v1?base=a', 'dingtalk:v1?node=a'), 'dingtalk:v1?node=a')
+    assert.equal(corrected('dingtalk:v1?node=a', 'dingtalk:v1?node=a'), 'dingtalk:v1?node=a')
+    assert.equal(corrected('dingtalk:v1?node=a', 'dingtalk:v1?base=b'), null)
+    assert.equal(corrected('dingtalk:v1?node=a', 'ws-1'), null)
+    assert.equal(corrected('ws-1', 'dingtalk:v1?base=a'), null)
+    assert.equal(corrected('dingtalk:v1?node=a', 'dingtalk:v1?workspace=w&node=a'), null)
+    assert.equal(corrected('dingtalk:v1?node=a', 'dingtalk:v1?describe=dingtalk:v1?base=a'), null)
+  } finally { f.close() }
+})

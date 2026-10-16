@@ -10,6 +10,7 @@ import { createRenderer, h, nextTick, reactive, ref } from 'vue'
 import {
   DINGTALK_DESCRIBE_PARENT_PREFIX,
   DINGTALK_MANUAL_REFERENCE,
+  correctedManualReference,
   dingtalkManualKind,
   dingtalkManualReference,
   dingtalkManualReferenceId,
@@ -71,6 +72,7 @@ const SHARED_MODULES: Record<string, unknown> = {
   './dingtalk/dingtalkResources': {
     DINGTALK_DESCRIBE_PARENT_PREFIX,
     DINGTALK_MANUAL_REFERENCE,
+    correctedManualReference,
     dingtalkManualKind,
     dingtalkManualReference,
     dingtalkManualReferenceId,
@@ -81,6 +83,7 @@ const SHARED_MODULES: Record<string, unknown> = {
   './dingtalkResources': {
     DINGTALK_DESCRIBE_PARENT_PREFIX,
     DINGTALK_MANUAL_REFERENCE,
+    correctedManualReference,
     dingtalkManualKind,
     dingtalkManualReference,
     dingtalkManualReferenceId,
@@ -365,6 +368,38 @@ test('tree picks and manual references are saved as one resource_ids array', asy
     const submitted = f.calls.at(-1)!
     assert.equal(submitted.method, 'updateDataSource')
     assert.deepEqual(submitted.args[1].config.resource_ids, ['ws-1', 'dingtalk:v1?base=baseId123'])
+  } finally { f.close() }
+})
+
+// The correction, end to end: a 多维表 id pasted with the selector left on
+// 文档节点 is SUBMITTED as the base= reference. Nothing downstream has to know
+// the selector was ever on the wrong kind — what is saved is what syncs.
+test('a multi-dimensional table pasted as a document node is saved as the Base reference', async () => {
+  const f = await fixture({
+    resources: TEAM_RESOURCES,
+    described: {
+      'dingtalk:v1?node=tableId789': {
+        external_id: 'dingtalk:v1?base=tableId789',
+        name: '项目与任务管理.able',
+        type: 'base',
+        description: '项目, 任务',
+      },
+    },
+  })
+  try {
+    await f.enterResourcesStep()
+    // The selector is left on its default kind, 文档节点.
+    await add(f, 'tableId789')
+    await settle()
+
+    assert.deepEqual([...f.vm.selectedResourceIds], ['dingtalk:v1?base=tableId789'])
+    await f.vm.handleSubmit()
+    const submitted = f.calls.at(-1)!
+    assert.equal(submitted.method, 'updateDataSource')
+    assert.deepEqual(submitted.args[1].config.resource_ids, ['dingtalk:v1?base=tableId789'])
+    // The row the dialog merged into its tree is the same reference, so the tree
+    // does not show an unchecked row for a selection that is in fact selected.
+    assert.deepEqual(visibleIds(f.vm), ['ws-1', 'ws-2', 'dingtalk:v1?base=tableId789'])
   } finally { f.close() }
 })
 

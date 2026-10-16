@@ -6,6 +6,7 @@ import { resourceIconName, resourceTypeLabel, shouldShowResourceType } from '../
 import {
   DINGTALK_DESCRIBE_PARENT_PREFIX,
   DINGTALK_MANUAL_REFERENCE,
+  correctedManualReference,
   dingtalkManualKind,
   dingtalkManualReference,
   dingtalkManualReferenceId,
@@ -137,6 +138,32 @@ function removeManualReference(reference: string) {
   emit('described', { ...describedRows.value })
 }
 
+// adoptReference replaces a manual reference with the reference the connector
+// reported for the same id.
+//
+// The kind is the user's to set — a document link and a Base link are
+// byte-identical — but it is the connector's to know: it reads the node behind
+// the id, so it can answer that the id is a 多维表 and report the base= form
+// that reads it. Storing that answer is required, not cosmetic, because the
+// node form of a Base syncs nothing while still naming the Base correctly — the
+// selection would look right and fail at sync. The id never changes, so the
+// field is left alone; only the selector follows the kind the connector proved,
+// so pressing Add again cannot put the unreadable form back.
+function adoptReference(from: string, to: string) {
+  // The corrected reference may already be in the selection — the same id
+  // entered once under each kind — so the replacement is a cover set, and the
+  // duplicate folds into the one entry that syncs.
+  const next: string[] = []
+  for (const id of selection.value) {
+    const adopted = id === from ? to : id
+    if (!next.includes(adopted)) next.push(adopted)
+  }
+  commit(next)
+  if (dingtalkManualReferenceId(from) === manualId.value.trim()) {
+    manualKind.value = dingtalkManualKind(to)
+  }
+}
+
 // removeTreeSelectionRow drops one tree-picked resource from the preview. It
 // filters the cover set directly instead of asking the dialog to toggle it: a
 // saved node the lazy tree has not loaded has no check state yet, so a toggle
@@ -159,6 +186,14 @@ function commit(ids: string[]) {
 // collapsed presentation makes — never the tree listing — and every failure
 // degrades to the id already on screen, because a name lookup must not be able
 // to break the step.
+//
+// The same answer also settles which of the two reference forms reads the id:
+// the connector describes a 多维表 entered as a document under the base= form,
+// and the selection adopts it (see adoptReference). A describe is therefore the
+// only call the component makes AND the only place a reference can be
+// corrected — including for a selection restored from a saved data source,
+// which is how one saved before this correction existed becomes syncable
+// without the user retyping the id.
 async function resolveManualNames() {
   const known = new Set(Object.keys(describedRows.value))
   const pending = manualReferences.value.filter(id => !known.has(id) && !describePending.has(id))
@@ -174,11 +209,17 @@ async function resolveManualNames() {
       const rows: Resource[] = res?.data || res || []
       // The connector echoes the reference it described, so an unexpected row
       // is ignored rather than shown under the wrong name; a reference removed
-      // while the lookup was in flight is dropped for the same reason.
-      const row = rows.find(r => r.external_id === id)
-      if (row && manualReferences.value.includes(id)) {
-        describedRows.value = { ...describedRows.value, [id]: row }
-      }
+      // while the lookup was in flight is dropped for the same reason. The one
+      // row that is not the reference itself but is still its answer is the
+      // correction of its kind, which correctedManualReference recognizes — and
+      // only that, so a row about a different id stays ignored.
+      const answer = rows.find(r => r.external_id === id)
+        || rows.find(r => correctedManualReference(id, (r.external_id || '').trim()) !== null)
+      if (!answer || !manualReferences.value.includes(id)) return
+      const stored = correctedManualReference(id, (answer.external_id || '').trim())
+      if (!stored) return
+      if (stored !== id) adoptReference(id, stored)
+      describedRows.value = { ...describedRows.value, [stored]: answer }
     } catch {
       // The id stays on screen; nothing else about the step depends on this.
     } finally {
