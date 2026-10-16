@@ -220,10 +220,23 @@ func (a ImageAttrs) TextExtent() string {
 // look" so an unobserved page still gets its chance.
 func (a ImageAttrs) Margin() string { return a.attrString("contain.margin") }
 
-// Upright returns the observed contain.upright value ("true" | "false"), or ""
-// when the observation did not answer. Returned as a string rather than a bool
-// so "the model said no" stays distinguishable from "the model did not say".
-func (a ImageAttrs) Upright() string { return a.attrString("contain.upright") }
+// Upright reports whether the observation found the text upright, and whether
+// it answered the question at all. A presence attribute stores a real bool (see
+// coerceAttrValue), so this is deliberately not a plain bool accessor: "the
+// model said not upright" and "the model did not say" call for different
+// behaviour, and collapsing them would turn an unanswered attribute into a
+// confident "it is upright" that skips a page which needed straightening.
+func (a ImageAttrs) Upright() (upright bool, observed bool) {
+	if a.Attrs == nil {
+		return false, false
+	}
+	if v, ok := a.Attrs["contain.upright"]; ok {
+		if b, ok := v.(bool); ok {
+			return b, true
+		}
+	}
+	return false, false
+}
 
 // attrString reads one observed attribute as a string, treating a missing key
 // and a non-string value the same way: as "not answered".

@@ -539,11 +539,12 @@ func runPreprocessAction(ctx context.Context, r *runContext) error {
 		// straightening it is worth the pass. Their vocabularies are owned by
 		// types.TextExtent / the registry, not re-spelled here.
 		text := ""
-		margin, upright := "", ""
+		margin := ""
+		upright, uprightObserved := false, false
 		if r.imageInfo != nil {
 			text = r.imageInfo.Attrs.TextExtent()
 			margin = r.imageInfo.Attrs.Margin()
-			upright = r.imageInfo.Attrs.Upright()
+			upright, uprightObserved = r.imageInfo.Attrs.Upright()
 		}
 		if text != "block" && text != "sparse" {
 			r.out["preprocess_status"] = "skipped_by_attrs"
@@ -556,7 +557,7 @@ func runPreprocessAction(ctx context.Context, r *runContext) error {
 		// because the whole point of the pass is to cover what the observation
 		// could not see.
 		croppable := margin == "" || margin == "large"
-		rotated := upright == "false"
+		rotated := uprightObserved && !upright
 		if !croppable && !rotated {
 			r.out["preprocess_status"] = "skipped_by_attrs"
 			r.out["preprocess_reason"] = "already_tidy"
