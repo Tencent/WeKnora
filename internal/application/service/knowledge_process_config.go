@@ -53,6 +53,7 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 		ImageActions:             types.ResolveImageActions(imageCfg.ImageActions),
 		ImagePipelineID:          types.ResolveImagePipelineID(&imageCfg),
 		ImagePipelineParams:      imageCfg.ImagePipelineParams,
+		PreprocessMode:           types.ResolvePreprocessMode(&imageCfg),
 	}
 	if overrides == nil {
 		return eff

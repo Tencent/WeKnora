@@ -4454,6 +4454,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			ChunkID:             chunkID,
 			ImageURL:            img.ServingURL,
 			ImagePipelineID:     eff.ImagePipelineID,
+			PreprocessMode:      eff.PreprocessMode,
 			ImagePipelineParams: eff.ImagePipelineParams,
 			ImageAttrsEnabled:   eff.ImageAttrsEnabled,
 			ImageActions:        eff.ImageActions,
