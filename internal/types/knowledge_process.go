@@ -51,5 +51,6 @@ type EffectiveProcessConfig struct {
 	ImageActions             ImageActionsConfig
 	ImagePipelineID          ImagePipelineID
 	ImagePipelineParams      map[string]any
+	PreprocessMode           string
 	ExtractConfig            ExtractConfig
 }

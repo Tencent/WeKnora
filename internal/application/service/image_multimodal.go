@@ -378,11 +378,11 @@ func (s *ImageMultimodalService) processImage(
 		// The preprocess action asks this to straighten the page. Nil is fine:
 		// the action reports "unavailable" and OCR reads the original bytes.
 		preprocessor: s.docReader,
-		// TODO(preprocess-mode): carry ImageProcessingConfig.PreprocessMode on
-		// the payload so a knowledge base can choose off/force. Until that
-		// wiring lands, every run resolves to auto, which is the documented
-		// default and the only mode that observes geometry before deciding.
-		preprocessMode: types.ResolvePreprocessMode(nil),
+		// The mode travels in the payload, not read live from the knowledge
+		// base: a task already enqueued must run the mode it was enqueued
+		// under, exactly like the pipeline id next to it. An empty value (a
+		// payload from before this field existed) resolves to auto.
+		preprocessMode: types.ResolvePreprocessMode(&types.ImageProcessingConfig{PreprocessMode: payload.PreprocessMode}),
 	}
 	if err := pipeline.Run(ctx, rc); err != nil {
 		// Surface the pipeline failure on this image's span instead of

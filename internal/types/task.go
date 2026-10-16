@@ -524,6 +524,10 @@ type ImageMultimodalPayload struct {
 	// enqueued for one pipeline and must not be re-routed by a later edit.
 	ImagePipelineID     ImagePipelineID `json:"image_pipeline,omitempty"`
 	ImagePipelineParams map[string]any  `json:"image_pipeline_params,omitempty"`
+	// PreprocessMode is the page-straightening switch (off | auto | force),
+	// resolved from the knowledge base at enqueue time for the same reason
+	// ImagePipelineID is: the task must run the mode it was enqueued under.
+	PreprocessMode string `json:"preprocess_mode,omitempty"`
 	// Language is the request locale for {{language}} in prompt templates.
 	Language string `json:"language,omitempty"`
 	// ImageSourceType drives the OCR prompt, e.g. "scanned_pdf".
