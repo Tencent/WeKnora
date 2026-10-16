@@ -167,3 +167,45 @@ func TestCancelledAllFailedImageIsCancelled(t *testing.T) {
 	require.NotErrorIs(t, err, asynq.SkipRetry)
 	require.Equal(t, "MULTIMODAL_CANCELLED", tracker.failed["multimodal.image[0]"])
 }
+
+func TestCaptionOnlyFailureFailsImage(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		err       error
+		permanent bool
+	}{
+		{"retryable", &api.HTTPError{StatusCode: 503}, false},
+		{"permanent", &api.HTTPError{StatusCode: 401}, true},
+		{"cancelled", context.Canceled, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &attrsChunkRepo{}
+			svc := newAttrsTestService(&attrsFileService{body: testPNG(t)}, repo)
+			model := &attrsFakeVLM{reply: func(string, int) (string, error) { return "", tc.err }}
+			tracker := &ocrTestTracker{failed: map[string]string{}, outputs: map[string]types.JSONMap{}}
+			out := types.JSONMap{}
+			ctx := context.Background()
+			if errors.Is(tc.err, context.Canceled) {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+			err := svc.processImage(ctx, &types.ImageMultimodalPayload{
+				ImageURL: "local://test.png", Attempt: 1,
+				ImagePipelineID:     types.ImagePipelineDefault,
+				ImagePipelineParams: map[string]any{"enable_caption": true, "enable_ocr": false},
+			}, model, types.VLMConfig{}, tracker, out)
+			require.ErrorIs(t, err, tc.err)
+			require.Equal(t, "failed", out["outcome"])
+			require.Equal(t, 0, out["chunks_created"])
+			require.NotContains(t, out, "skipped")
+			require.NotContains(t, out, "ocr_status")
+			require.Equal(t, tc.permanent, errors.Is(wrapSkipRetry(err), asynq.SkipRetry))
+			code := "MULTIMODAL_VLM_FAILED"
+			if errors.Is(tc.err, context.Canceled) {
+				code = "MULTIMODAL_CANCELLED"
+			}
+			require.Equal(t, code, tracker.failed["multimodal.image[0]"])
+		})
+	}
+}

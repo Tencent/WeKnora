@@ -128,7 +128,10 @@ test('clearing the pick removes the stored one rather than repeating it', () => 
     image_pipeline: IMAGE_PIPELINE_SMARTOCR,
     image_pipeline_params: { capture_caption: true },
   }
-  const built = buildImageProcessingConfig(snapshot, editsWith({ pipelineId: '', pipelineParams: {} }))
+  const built = buildImageProcessingConfig(snapshot, editsWith({
+    pipelineId: '',
+    pipelineParams: { enable_caption: false, enable_ocr: false },
+  }))
 
   assert.deepEqual(built, {
     image_attrs_enabled: true,
@@ -145,9 +148,7 @@ test('both dialogs drop an empty pick and empty parameters the same way', () => 
   assert.deepEqual(buildPipelineFields(IMAGE_PIPELINE_SMARTOCR, {}), {
     image_pipeline: IMAGE_PIPELINE_SMARTOCR,
   })
-  assert.deepEqual(buildPipelineFields('', { enable_ocr: true }), {
-    image_pipeline_params: { enable_ocr: true },
-  })
+  assert.deepEqual(buildPipelineFields('', { enable_ocr: true }), {})
 })
 
 test('stored renames resolve to the ids the panel offers', () => {

@@ -59,6 +59,7 @@ export function buildPipelineFields(
   pipelineId: string,
   pipelineParams: Record<string, unknown> | null | undefined,
 ): PipelineFields {
+  if (!pipelineId) return {}
   const fields: PipelineFields = {}
   if (pipelineId) fields.image_pipeline = pipelineId
   if (pipelineParams && Object.keys(pipelineParams).length > 0) {

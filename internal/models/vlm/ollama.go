@@ -33,10 +33,8 @@ func (v *OllamaVLM) Predict(ctx context.Context, imgBytesList [][]byte, prompt s
 	return v.PredictWithOptions(ctx, imgBytesList, prompt, nil)
 }
 
-// PredictWithOptions sends the same request with Ollama's own spelling of the
-// thinking switch. Ollama carries extra options as free-form entries, and a
-// server older than the switch ignores an unknown one instead of rejecting the
-// request, so the cost of passing it when the model cannot use it is nil.
+// PredictWithOptions carries the thinking preference in Ollama's top-level
+// Think field; sampling parameters remain in Options.
 func (v *OllamaVLM) PredictWithOptions(
 	ctx context.Context, imgBytesList [][]byte, prompt string, opts *PredictOptions,
 ) (string, error) {
@@ -46,11 +44,6 @@ func (v *OllamaVLM) PredictWithOptions(
 		if len(imgBytes) > 0 {
 			images = append(images, imgBytes)
 		}
-	}
-
-	ollamaOptions := map[string]interface{}{"temperature": 0.1}
-	if opts != nil && opts.Thinking != nil {
-		ollamaOptions["think"] = *opts.Thinking
 	}
 
 	chatReq := &ollamaapi.ChatRequest{
@@ -63,7 +56,10 @@ func (v *OllamaVLM) PredictWithOptions(
 			},
 		},
 		Stream:  &streamFlag,
-		Options: ollamaOptions,
+		Options: map[string]interface{}{"temperature": 0.1},
+	}
+	if opts != nil && opts.Thinking != nil {
+		chatReq.Think = &ollamaapi.ThinkValue{Value: *opts.Thinking}
 	}
 
 	totalImageSize := 0

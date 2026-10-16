@@ -420,7 +420,7 @@ func (s *ImageMultimodalService) processImage(
 	}
 	out["chunks_created"] = len(newChunks)
 
-	// Nothing was produced AND every VLM call failed or never ran: the image
+	// Nothing was produced and a requested extraction failed: the image
 	// has no image_info, so it will not appear in the gallery, and a silent
 	// "skipped" success would hide a dead endpoint behind a green trace.
 	// Report the failure to the task layer — the caller wraps permanent
@@ -431,9 +431,9 @@ func (s *ImageMultimodalService) processImage(
 	// while there is content to protect — a valid caption must not be
 	// duplicated by an OCR retry; with nothing produced there is nothing to
 	// protect, so the image fails honestly.
-	allFailed := out["ocr_status"] == "failed" ||
+	extractionFailed := out["caption_error"] != nil || out["ocr_status"] == "failed" ||
 		out["ocr_skipped"] == "no_ocr_after_observation_failed"
-	if len(newChunks) == 0 && allFailed {
+	if len(newChunks) == 0 && extractionFailed {
 		out["outcome"] = "failed"
 		if ctx.Err() != nil {
 			handleErr = fmt.Errorf("image processing cancelled with no content produced: %w", ctx.Err())
