@@ -4626,9 +4626,6 @@ export default {
         imagePipelineLabel: '분석 방식',
         advancedSettingsLabel: '고급 설정',
         notesLabel: '추가 설명',
-        preprocessModeAuto: '자동',
-        preprocessModeOff: '끄기',
-        preprocessModeAlways: '항상',
         imagePipelinePlaceholder: '분석 방식 선택',
         imagePipelineLoading: '파이프라인을 불러오는 중…',
         imagePipelineLoadError: '파이프라인을 불러오지 못했습니다',
@@ -8428,52 +8425,60 @@ export default {
           '각각 따로 켜고 끌 수 있습니다. 인식을 끄면 이미지는 여전히 설명되고, 설명을 끄면 글자는 여전히 추출됩니다. 둘 다 끄면 이미지가 아무것도 처리되지 않으므로 패널은 그 조합을 허용하지 않습니다.',
       },
       description: '작업에 맞게 분석 동작 스위치를 직접 켜거나 끕니다.',
-      enable_caption: {
+      caption_enabled: {
         label: '이미지 설명',
         description: '각 이미지에 대한 한 줄 설명을 생성해 캡션으로 저장합니다.'
       },
-      enable_ocr: {
+      ocr_enabled: {
         label: '문자 인식',
         description: '이미지 속에 나타나는 텍스트를 추출합니다.'
       },
       caption: {
-        thinking: {
+        thinking_enabled: {
           label: '설명 시 사고 사용',
           description: '설명을 쓰기 전에 모델이 먼저 추론하도록 합니다. 일반적으로 사고는 필요하지 않습니다. 켜면 분석이 느려질 뿐 아니라 사고가 너무 길어져 본문이 잘려서 작업이 실패할 수 있습니다. 꼭 필요하다고 판단될 때만 켜세요.',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: 'OCR 시 사고 사용',
           description: '텍스트를 추출하기 전에 모델이 먼저 추론하도록 합니다. 일반적으로 사고는 필요하지 않습니다. 켜면 분석이 느려질 뿐 아니라 사고가 너무 길어져 본문이 잘려서 작업이 실패할 수 있습니다. 꼭 필요하다고 판단될 때만 켜세요.',
         },
       }
     },
     smartocr: {
+      ocr_on_unobserved: {
+        label: '이미지 속성 관찰에 실패해도 OCR 실행',
+        description:
+          '모델이 이미지 속성을 올바르게 관찰하지 못하면 본문 텍스트 손실을 막기 위해 기본적으로 OCR을 실행합니다. 끄면 건너뜁니다. (4B 등 소형 비전 모델을 쓰거나, 사용자 지정 이미지 지시문이 시스템 프롬프트와 충돌할 때 관찰에 실패할 수 있습니다. 8B 이상은 실패 가능성이 낮아 끄지 않는 것을 권장합니다)',
+      },
       name: '스마트',
       note_flow: {
         label: '관찰 결과가 결정합니다',
         description:
           '먼저 이미지를 설명하고 속성을 관찰한 뒤, 돌아온 속성이 OCR을 한 번 더 할 가치가 있는지 결정합니다. 페이지를 반듯하게 펴야 한다고 속성이 알리면 먼저 펴고 주변을 잘라낸 뒤 읽습니다. 그 단계를 쓸 수 없으면 원본 사진을 그대로 읽으며, 더 나빠지지 않습니다.',
       },
-      preprocess_mode: {
-        label: '문서 전처리',
-        description:
-          'OCR 전에 촬영한 페이지를 반듯하게 펴고 주변을 잘라냅니다. 자동: 설명 단계에서 필요 여부를 판단 / 끄기: 항상 사용 안 함 / 항상: 무조건 사용.',
+      preprocess: {
+        mode: {
+          label: '문서 전처리',
+          description:
+            'OCR 전에 촬영한 페이지를 반듯하게 펴고 주변을 잘라냅니다. 자동: 설명 단계에서 필요 여부를 판단 / 끄기: 항상 사용 안 함 / 항상: 무조건 사용.',
+          options: {
+            auto: '자동',
+            off: '끄기',
+            always: '항상',
+          },
+        },
       },
-      caption: {
-        thinking: {
+      observation: {
+        thinking_enabled: {
           label: '설명 시 사고 사용',
           description: '이미지를 설명하고 속성을 보고하기 전에 모델이 먼저 추론하도록 합니다. 일반적으로 사고는 필요하지 않습니다. 켜면 분석이 느려질 뿐 아니라 사고가 너무 길어져 본문이 잘려서 작업이 실패할 수 있습니다. 꼭 필요하다고 판단될 때만 켜세요.',
         },
       },
       ocr: {
-        on_unobserved: {
-          label: '이미지 속성 관찰에 실패해도 OCR 실행',
-          description:
-            '모델이 이미지 속성을 올바르게 관찰하지 못하면 본문 텍스트 손실을 막기 위해 기본적으로 OCR을 실행합니다. 끄면 건너뜁니다. (4B 등 소형 비전 모델을 쓰거나, 사용자 지정 이미지 지시문이 시스템 프롬프트와 충돌할 때 관찰에 실패할 수 있습니다. 8B 이상은 실패 가능성이 낮아 끄지 않는 것을 권장합니다)',
-        },
-        thinking: {
+
+        thinking_enabled: {
           label: '문자 인식 시 사고 사용',
           description: '텍스트를 추출하기 전에 모델이 먼저 추론하도록 합니다. 일반적으로 사고는 필요하지 않습니다. 켜면 분석이 느려질 뿐 아니라 사고가 너무 길어져 본문이 잘려서 작업이 실패할 수 있습니다. 꼭 필요하다고 판단될 때만 켜세요.',
         },

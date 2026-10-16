@@ -4,9 +4,14 @@ import test from 'node:test'
 import {
   buildImageProcessingConfig,
   buildPipelineFields,
+  pipelineParamKey,
+  pipelineParamsFromKb,
+  readPipelineParam,
   resolveImagePipelineFromKb,
   normalizeImagePipelineId,
+  IMAGE_PIPELINE_DEFAULT,
   IMAGE_PIPELINE_SMARTOCR,
+  PREPROCESS_MODE_KEY,
   LEGACY_PIPELINE_CAPTION_OCR,
   LEGACY_PIPELINE_OB_CAP_OCR,
   type ImageProcessingEdits,
@@ -26,7 +31,6 @@ function editsWith(overrides: Partial<ImageProcessingEdits> = {}): ImageProcessi
     defaultOn: DEFAULT_ON,
     pipelineId: IMAGE_PIPELINE_SMARTOCR,
     pipelineParams: {},
-    preprocessMode: 'auto',
     ...overrides,
   }
 }
@@ -173,4 +177,82 @@ test('stored renames resolve to the ids the panel offers', () => {
   )
   // Nothing stored at all — the oldest knowledge bases.
   assert.equal(resolveImagePipelineFromKb({}), 'default')
+})
+
+test('a pipeline-private setting is stored under the slot of the pipeline that owns it', () => {
+  // Regression: switching pipelines used to clear the parameters, so going
+  // A -> B -> A lost what A was set to. Keys are namespaced per pipeline, so
+  // both answers survive side by side and neither pipeline reads the other's.
+  const params = {
+    [pipelineParamKey(IMAGE_PIPELINE_DEFAULT, 'caption_enabled')]: false,
+    [pipelineParamKey(IMAGE_PIPELINE_SMARTOCR, PREPROCESS_MODE_KEY)]: 'always',
+  }
+  assert.deepEqual(params, {
+    'default.caption_enabled': false,
+    'smartocr.preprocess.mode': 'always',
+  })
+  assert.equal(readPipelineParam(params, IMAGE_PIPELINE_DEFAULT, 'caption_enabled'), false)
+  assert.equal(readPipelineParam(params, IMAGE_PIPELINE_SMARTOCR, PREPROCESS_MODE_KEY), 'always')
+  // A key the other pipeline never set falls through to the field default
+  // rather than to whatever the neighbouring slot happens to say.
+  assert.equal(readPipelineParam(params, IMAGE_PIPELINE_DEFAULT, PREPROCESS_MODE_KEY), undefined)
+  // A key that already carries this pipeline's namespace is not doubled.
+  assert.equal(pipelineParamKey(IMAGE_PIPELINE_SMARTOCR, 'smartocr.preprocess.mode'), 'smartocr.preprocess.mode')
+  // No pick at all, e.g. multimodal switched off: the bare key is left alone.
+  assert.equal(pipelineParamKey('', 'caption_enabled'), 'caption_enabled')
+})
+
+test('the run reads a bare key written before the slots existed', () => {
+  // Configs saved before keys were namespaced carry the bare spelling; the
+  // slot wins once it exists, and the bare key is the fallback rather than a
+  // second, competing source.
+  assert.equal(readPipelineParam({ caption_enabled: false }, IMAGE_PIPELINE_DEFAULT, 'caption_enabled'), false)
+  assert.equal(
+    readPipelineParam(
+      { caption_enabled: true, 'default.caption_enabled': false },
+      IMAGE_PIPELINE_DEFAULT,
+      'caption_enabled',
+    ),
+    false,
+  )
+  assert.equal(readPipelineParam({}, IMAGE_PIPELINE_DEFAULT, 'caption_enabled'), undefined)
+  assert.equal(readPipelineParam(null, IMAGE_PIPELINE_DEFAULT, 'caption_enabled'), undefined)
+  // An explicitly null slot is "nothing stored", not "stored as null".
+  assert.equal(
+    readPipelineParam({ 'default.caption_enabled': null }, IMAGE_PIPELINE_DEFAULT, 'caption_enabled'),
+    undefined,
+  )
+})
+
+test('a knowledge base that stored a setting before the slots shows the value it runs with', () => {
+  // Regression: the controls for these two are bound to the slot, so a base
+  // whose value still lives in the older field would draw the declared default
+  // and write it into the slot on the next save, shadowing the real setting.
+  const params = pipelineParamsFromKb({
+    image_processing_config: {
+      image_pipeline: IMAGE_PIPELINE_SMARTOCR,
+      preprocess_mode: 'off',
+      image_actions: { ocr: { on: DEFAULT_ON, on_unobserved: false } },
+    },
+  })
+  assert.equal(params['smartocr.preprocess.mode'], 'off')
+  assert.equal(params['smartocr.ocr_on_unobserved'], false)
+
+  // A stored slot wins over the older field, which is exactly what the backend
+  // resolves — the migration must not undo a value the operator already set.
+  const alreadyMoved = pipelineParamsFromKb({
+    image_processing_config: {
+      image_pipeline: IMAGE_PIPELINE_SMARTOCR,
+      preprocess_mode: 'off',
+      image_pipeline_params: { 'smartocr.preprocess.mode': 'always' },
+    },
+  })
+  assert.equal(alreadyMoved['smartocr.preprocess.mode'], 'always')
+
+  // Nothing older to fold in: the parameters are handed through untouched, so
+  // a knowledge base that never had these fields gains no keys.
+  assert.deepEqual(
+    pipelineParamsFromKb({ image_processing_config: { image_pipeline: IMAGE_PIPELINE_SMARTOCR } }),
+    {},
+  )
 })

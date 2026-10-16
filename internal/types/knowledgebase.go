@@ -604,14 +604,69 @@ const (
 	PreprocessModeAlways = "always"
 )
 
-// ResolvePreprocessMode returns the effective preprocess mode. An unset or
-// unrecognised value falls back to auto, which is the mode the settings panel
-// offers first and the only one that observes geometry before deciding.
+// SlotKey namespaces a pipeline-private key with the pipeline that owns it. A key
+// already carrying this pipeline's own namespace — an action scoped to one
+// pipeline, whose id is "<pipeline>.<action>" — is left alone, so the pipeline id
+// is never doubled. The runtime lookup in the image service and the config
+// resolution here both go through it, so a stored key is read the way it was
+// written.
+func SlotKey(pipelineID, key string) string {
+	if pipelineID == "" || strings.HasPrefix(key, pipelineID+".") {
+		return key
+	}
+	return pipelineID + "." + key
+}
+
+// ImagePipelineParam reads one pipeline-private setting out of a params map: the
+// running pipeline's slot first, then the bare key, which is how configs written
+// before the slots existed keep working. The caller decides what a missing or nil
+// value means.
+func ImagePipelineParam(params map[string]any, pipelineID, key string) (any, bool) {
+	if params == nil {
+		return nil, false
+	}
+	if pipelineID != "" {
+		if v, ok := params[SlotKey(pipelineID, key)]; ok && v != nil {
+			return v, true
+		}
+	}
+	if pipelineID != "" && SlotKey(pipelineID, key) == key {
+		// The key already carries this pipeline's namespace; the bare lookup below
+		// would read the same entry twice.
+		return nil, false
+	}
+	if v, ok := params[key]; ok && v != nil {
+		return v, true
+	}
+	return nil, false
+}
+
+// PreprocessModeKey is the preprocessing action's tunable, as the panel declares
+// it. The setting lives in the pipeline's slot under this key.
+const PreprocessModeKey = "preprocess.mode"
+
+// ResolvePreprocessMode returns the effective preprocess mode: the running
+// pipeline's slot first, then the knowledge base field that predates the slot,
+// and auto when neither says anything the run would understand. Auto is the mode
+// the panel offers first and the only one that observes geometry before deciding.
 func ResolvePreprocessMode(cfg *ImageProcessingConfig) string {
 	if cfg == nil {
 		return PreprocessModeAuto
 	}
-	switch strings.ToLower(strings.TrimSpace(cfg.PreprocessMode)) {
+	mode := ""
+	slot, ok := ImagePipelineParam(
+		cfg.ImagePipelineParams, string(ResolveImagePipelineID(cfg)), PreprocessModeKey,
+	)
+	if ok {
+		mode = valueAsString(slot)
+	}
+	if strings.TrimSpace(mode) == "" {
+		// Configs written before the switch moved into the pipeline slot carry it
+		// here; it is read, never written back, and can go once no such config
+		// is left in the field.
+		mode = cfg.PreprocessMode
+	}
+	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case PreprocessModeOff:
 		return PreprocessModeOff
 	case PreprocessModeAlways:
@@ -621,14 +676,25 @@ func ResolvePreprocessMode(cfg *ImageProcessingConfig) string {
 	}
 }
 
+// valueAsString reads a stored config value the way JSON hands it over: a string
+// stays a string, anything else is nothing this resolver understands.
+func valueAsString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
 // PreprocessObservesGeometry reports whether the describe round should ask the
-// geometry attributes, and PreprocessRunsUnconditionally whether the page is
-// straightened without consulting them. The three modes are mutually exclusive
+// geometry attributes; PreprocessRunsUnconditionally reports whether the page is
+// straightened without consulting them. The three modes are mutually exclusive,
 // so a caller reads exactly one of these.
 func PreprocessObservesGeometry(mode string) bool { return mode == PreprocessModeAuto }
-func PreprocessRunsUnconditionally(mode string) bool {
-	return mode == PreprocessModeAlways
-}
+
+// PreprocessRunsUnconditionally is the other half of the pair above: the mode
+// that straightens every page without asking, which is also why it leaves the
+// describe prompt alone (there is no question to ask).
+func PreprocessRunsUnconditionally(mode string) bool { return mode == PreprocessModeAlways }
 
 // ResolveImagePipelineID returns the pipeline id a knowledge base asks for. An
 // explicit ImagePipelineID wins; without one the old attribute-observation

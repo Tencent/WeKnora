@@ -308,10 +308,26 @@ var (
 		"done", "failed", "skipped_off", "skipped_no_text", "skipped_already_tidy",
 		"skipped_declined", "skipped_no_capability",
 	}
-	outcomeValues = []string{
-		"done", "partial_failure", "failed", "skipped_unreadable_image", "skipped_no_content",
-	}
 )
+
+// The image-level verdicts. Unlike the action results above they are written by
+// the service layer, at the several ends a run can reach, so the write sites
+// name these constants rather than repeating the words: one of them is a
+// sentence about an unreadable image, and a typo in a branch is exactly the kind
+// of drift nobody reads back.
+const (
+	outcomeDone           = "done"
+	outcomePartialFailure = "partial_failure"
+	outcomeFailed         = "failed"
+	outcomeUnreadable     = "skipped_unreadable_image"
+	outcomeNoContent      = "skipped_no_content"
+)
+
+// outcomeValues is that set as a list, so the guard test has one place to hold
+// the frame-level key to — see TestTraceResultsStayInTheirVocabulary.
+var outcomeValues = []string{
+	outcomeDone, outcomePartialFailure, outcomeFailed, outcomeUnreadable, outcomeNoContent,
+}
 
 // The one value several of those vocabularies share: the action ran, read its
 // gate, and found itself switched off.
@@ -331,7 +347,7 @@ type runContext struct {
 	// preprocessor straightens the page before OCR. Nil when the document
 	// service is not wired into this build — see imagePreprocessor.
 	preprocessor imagePreprocessor
-	// preprocessMode is the resolved off/auto/force setting for this run. It
+	// preprocessMode is the resolved off/auto/always setting for this run. It
 	// decides both whether the describe round asks the geometry attributes and
 	// whether the page is straightened at all.
 	preprocessMode string
@@ -399,15 +415,8 @@ type runContext struct {
 // answers, which keeps stored configs written before namespacing readable.
 // Action-level keys ("action.key") are stored bare and hit the exact lookup.
 func (r *runContext) Param(key string) any {
-	if r.params != nil {
-		if r.pipelineID != "" {
-			if v, ok := r.params[r.pipelineID+"."+key]; ok && v != nil {
-				return v
-			}
-		}
-		if v, ok := r.params[key]; ok && v != nil {
-			return v
-		}
+	if v, ok := types.ImagePipelineParam(r.params, r.pipelineID, key); ok {
+		return v
 	}
 	for _, field := range r.declared {
 		if field.Key == key {
@@ -459,16 +468,9 @@ func (r *runContext) recordConfig() {
 // actionIDs is the sequence of actions this run actually executed, in order.
 func (r *runContext) actionIDs() []types.ImageActionID { return r.actions }
 
-// slotKey namespaces a pipeline-private key with the pipeline that owns it. A
-// key already carrying this pipeline's own namespace — an action scoped to one
-// pipeline, whose id is "<pipeline>.<action>" — is left alone, so the pipeline
-// id is never doubled.
-func slotKey(pipelineID, key string) string {
-	if pipelineID == "" || strings.HasPrefix(key, pipelineID+".") {
-		return key
-	}
-	return pipelineID + "." + key
-}
+// slotKey is types.SlotKey, kept short here because the trace keys are written
+// through it on nearly every line that mentions a setting.
+func slotKey(pipelineID, key string) string { return types.SlotKey(pipelineID, key) }
 
 // predictCaption asks for a caption, with the tunable the current pipeline
 // offers for it. purpose labels the underlying VLM call in the usage log so the

@@ -416,11 +416,7 @@
               <ImagePipelineSettings
                 v-model:params="formData.imagePipelineParams"
                 :pipeline-id="formData.imagePipeline"
-                :preprocess-mode="formData.preprocessMode"
-                :on-unobserved="formData.imageActions.ocr.on_unobserved"
                 @update:pipeline-id="onPipelineChange"
-                @update:preprocess-mode="formData.preprocessMode = $event"
-                @update:on-unobserved="formData.imageActions.ocr.on_unobserved = $event"
                 @update:invalid="onPipelineInvalidChange"
               >
                 <!-- 观察属性说明：收进面板的「附加说明」折叠区。属性字典来自后端注册表，
@@ -616,8 +612,7 @@ import {
 } from '@/api/knowledge-base'
 import {
   buildImageProcessingConfig,
-  PREPROCESS_MODE_AUTO,
-  resolvePreprocessModeFromKb,
+  pipelineParamsFromKb,
   resolveImagePipelineFromKb as resolveKbImagePipeline,
   IMAGE_PIPELINE_DEFAULT,
   IMAGE_PIPELINE_SMARTOCR,
@@ -963,9 +958,12 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       customInstructions: ''
     },
     // 图片解析方案：方案选择与各方案的私有参数由 ImagePipelineSettings
-    // 编辑；其余配置（model_id 等）按加载时的快照原样回传，避免把 API 侧写入
+    // 编辑，参数按「方案槽位」存放（见 pipelineParamKey），所以切走再切回不会
+    // 丢设置；其余配置（model_id 等）按加载时的快照原样回传，避免把 API 侧写入
     // 的设置洗掉。新建模式也必须用完整默认动作初始化——imageActions.ocr
-    // .on_unobserved 直接被开关绑定，缺省会让打开开关的瞬间渲染崩溃。
+    // .on 直接被面板渲染，缺省会让面板读空列表。旧库把预处理开关存在知识库
+    // 顶层，读取时折进槽位（pipelineParamsFromKb），否则面板会显示默认值、
+    // 一保存就把它盖上。
     imageAttrsEnabled: false,
     // 图片向量默认关闭：能处理图片的向量模型也常只用来编码文本。
     imageVectorEnabled: false,
@@ -975,7 +973,6 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     // 方案决定旧观察开关的取值（见 onPipelineChange）。
     imagePipeline: IMAGE_PIPELINE_DEFAULT,
     imagePipelineParams: {} as Record<string, unknown>,
-    preprocessMode: PREPROCESS_MODE_AUTO,
     imageProcessingConfigSnapshot: null as Record<string, unknown> | null,
     asrConfig: {
       enabled: false,
@@ -1139,12 +1136,7 @@ const loadKBData = async (
       imageActions: mergeImageActions(
         (kb as Record<string, any>).image_processing_config?.image_actions,
       ),
-      imagePipelineParams:
-        ((kb as Record<string, any>).image_processing_config?.image_pipeline_params as Record<
-          string,
-          unknown
-        >) ?? {},
-      preprocessMode: resolvePreprocessModeFromKb(kb),
+      imagePipelineParams: pipelineParamsFromKb(kb),
       imageProcessingConfigSnapshot:
         (kb as Record<string, any>).image_processing_config || null,
       asrConfig: {
@@ -1332,10 +1324,10 @@ const handleMultimodalToggle = () => {
  */
 
 /**
- * 流水线参数的清理由 ImagePipelineSettings 自己完成（切换即清空上一条的
- * 私有参数）；这里只负责让旧的观察开关跟上选择——只有观察属性流水线把它
- * 点亮，这样无论从哪个控件看，知识库读到的是同一个意思，下方的属性面板
- * 也跟随这个开关显隐。
+ * 方案私有参数按槽位存放，切换方案不清理：每个方案读自己的键，切走再切回
+ * 正好找回上次在这里选的设置。这里只负责让旧的观察开关跟上选择——只有观察
+ * 属性流水线把它点亮，这样无论从哪个控件看，知识库读到的是同一个意思，下方
+ * 的属性面板也跟随这个开关显隐。
  */
 const onPipelineChange = (value: string) => {
   if (!formData.value) return
@@ -1563,8 +1555,10 @@ const buildSubmitData = () => {
   }
 
   // 图片属性观察配置：后端是整体替换语义（payload 不带该字段 = 保持不变）。
-  // UI 只编辑观察开关与 on_unobserved；快照里用 API 自定义过的 on 原样保留，
-  // 没有自定义时才取注册表默认值。合并规则见 buildImageProcessingConfig。
+  // 面板编辑的是所选方案的槽位参数；知识库自己的 on_unobserved 是各方案共同
+  // 的起点值，原样回传（面板上的那个开关改的是方案槽位，不是这里）。快照里用
+  // API 自定义过的 on 原样保留，没有自定义时才取注册表默认值。合并规则见
+  // buildImageProcessingConfig。
   {
     const built = buildImageProcessingConfig(formData.value.imageProcessingConfigSnapshot, {
       imageAttrsEnabled: formData.value.imageAttrsEnabled,
@@ -1575,7 +1569,6 @@ const buildSubmitData = () => {
       // 对空 pipelineId 的处理是删掉这两个字段），配置里只留下观察开关的语义。
       pipelineId: formData.value.multimodalConfig.enabled ? formData.value.imagePipeline : '',
       pipelineParams: formData.value.imagePipelineParams,
-      preprocessMode: formData.value.preprocessMode,
     })
     if (built) {
       data.image_processing_config = built

@@ -37,6 +37,50 @@ func normalizeParserFileType(fileType string) string {
 }
 
 // ResolveProcessConfig merges KB defaults with per-upload overrides for the parse pipeline.
+// resolveImageActions resolves the attribute policy and then lets the pipeline's
+// slot override the clause the panel exposes. The clause decides whether OCR is
+// scheduled when the observation did not answer — orchestration, so it belongs to
+// the pipeline that does the scheduling, while the knowledge base field it falls
+// back to is the default every pipeline starts from.
+func resolveImageActions(imageCfg types.ImageProcessingConfig) types.ImageActionsConfig {
+	actions := types.ResolveImageActions(imageCfg.ImageActions)
+	if v, ok := types.ImagePipelineParam(
+		imageCfg.ImagePipelineParams, string(types.ResolveImagePipelineID(&imageCfg)), ImagePipelineKeyOCROnUnobserved,
+	); ok {
+		if b, isBool := v.(bool); isBool {
+			actions.OCR.OnUnobserved = b
+			return actions
+		}
+		if s, isString := v.(string); isString {
+			actions.OCR.OnUnobserved = s == "true" || s == "1" || s == "on"
+		}
+	}
+	return actions
+}
+
+// ImagePipelineKeyOCROnUnobserved is the OCR fallback clause as a pipeline setting:
+// "read an image whose attributes could not be observed". Declared by the pipeline
+// that observes (it is that pipeline's scheduling decision) and kept here so the
+// config resolution and the panel agree on the name.
+const ImagePipelineKeyOCROnUnobserved = "ocr_on_unobserved"
+
+// applySlotResidentSettings folds the running pipeline's own slot into the two
+// settings that live inside it: the page-straightening mode and the OCR fallback
+// clause. Neither is touched when the slot says nothing about it — the caller has
+// already resolved both from the knowledge base, and an override that does not
+// mention a setting must not quietly reset it to the default.
+func applySlotResidentSettings(cfg types.ImageProcessingConfig, eff *types.EffectiveProcessConfig) {
+	pipelineID := string(types.ResolveImagePipelineID(&cfg))
+	if _, ok := types.ImagePipelineParam(cfg.ImagePipelineParams, pipelineID, types.PreprocessModeKey); ok {
+		eff.PreprocessMode = types.ResolvePreprocessMode(&cfg)
+	}
+	if _, ok := types.ImagePipelineParam(
+		cfg.ImagePipelineParams, pipelineID, ImagePipelineKeyOCROnUnobserved,
+	); ok {
+		eff.ImageActions = resolveImageActions(cfg)
+	}
+}
+
 func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgeProcessOverrides) types.EffectiveProcessConfig {
 	imageCfg := kb.ImageProcessingConfig
 	eff := types.EffectiveProcessConfig{
@@ -50,7 +94,7 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 		ExtractConfig:            derefExtractConfig(kb.ExtractConfig),
 		ImageAttrsEnabled:        imageCfg.ImageAttrsEnabled,
 		ImageVectorEnabled:       imageCfg.ImageVectorEnabled,
-		ImageActions:             types.ResolveImageActions(imageCfg.ImageActions),
+		ImageActions:             resolveImageActions(imageCfg),
 		ImagePipelineID:          types.ResolveImagePipelineID(&imageCfg),
 		ImagePipelineParams:      imageCfg.ImagePipelineParams,
 		PreprocessMode:           types.ResolvePreprocessMode(&imageCfg),
@@ -122,6 +166,15 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 		// The explicit pick also decides the legacy switch, so the fallback
 		// path and the run agree on which pipeline this document asked for.
 		eff.ImageAttrsEnabled = eff.ImagePipelineID == types.ImagePipelineSmartOCR
+		// Two settings live inside the pipeline's own slot, and both were read
+		// above from the knowledge base's slot — which the override has just
+		// replaced. Read them again from the slot that will actually run, or a
+		// dialog offering these controls would be offering the operator a knob
+		// the run ignores.
+		overridden := imageCfg
+		overridden.ImagePipelineID = string(eff.ImagePipelineID)
+		overridden.ImagePipelineParams = eff.ImagePipelineParams
+		applySlotResidentSettings(overridden, &eff)
 	}
 	if overrides.ImageVectorEnabled != nil {
 		eff.ImageVectorEnabled = *overrides.ImageVectorEnabled

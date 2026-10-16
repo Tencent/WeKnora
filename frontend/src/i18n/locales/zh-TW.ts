@@ -4629,9 +4629,6 @@ export default {
         imagePipelineLabel: '選擇解析方案',
         advancedSettingsLabel: '進階設定',
         notesLabel: '附加說明',
-        preprocessModeAuto: '自動',
-        preprocessModeOff: '關閉',
-        preprocessModeAlways: '總是',
         imagePipelinePlaceholder: '請選擇解析方案',
         imagePipelineLoading: '正在讀取流水線…',
         imagePipelineLoadError: '讀取流水線失敗',
@@ -8425,52 +8422,60 @@ export default {
           '兩項各自開關：關掉識別，圖片仍會被描述；關掉描述，文字仍會被識別。只有兩個都關掉時這張圖才不會被處理 —— 所以面板不允許這種組合。',
       },
       description: '使用者根據任務需要手動選擇解析動作開關。',
-      enable_caption: {
+      caption_enabled: {
         label: '圖片描述',
         description: '讓模型為每張圖片生成一句內容描述，作為圖片的說明文字。',
       },
-      enable_ocr: {
+      ocr_enabled: {
         label: '文字辨識',
         description: '提取圖片中出現的文字。',
       },
       caption: {
-        thinking: {
+        thinking_enabled: {
           label: '圖片描述時開啟思考',
           description: '讓模型在寫描述前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '文字辨識時開啟思考',
           description: '讓模型在提取文字前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
         },
       },
     },
     smartocr: {
+      ocr_on_unobserved: {
+        label: '圖片屬性觀察失敗時仍執行 OCR',
+        description:
+          '當模型未能正確觀察到圖片屬性時，預設仍執行 OCR 兜底，以免漏掉正文文字；關閉則跳過。（採用 4B 等小參數視覺模型，或自定義的圖片解析提示語與系統提示語衝突時，可能造成觀察失敗；8B 及以上模型的失敗概率很低，不建議關閉）',
+      },
       name: '智能模式',
       note_flow: {
         label: '由觀察結果決定',
         description:
           '先描述圖片並觀察屬性，由屬性決定是否值得再為它花一次 OCR。屬性顯示頁面需要擺正時，會先擺正並裁掉周圍環境再識別；若該步驟不可用或判定不適用，則直接用原圖，絕不會比不啟用更差。',
       },
-      preprocess_mode: {
-        label: '文件預處理',
-        description:
-          '在 OCR 之前把拍攝的頁面擺正並裁掉周圍環境。自動：由描述輪判斷頁面是否需要；關閉：從不處理；總是：無條件處理。',
+      preprocess: {
+        mode: {
+          label: '文件預處理',
+          description:
+            '在 OCR 之前把拍攝的頁面擺正並裁掉周圍環境。自動：由描述輪判斷頁面是否需要；關閉：從不處理；總是：無條件處理。',
+          options: {
+            auto: '自動',
+            off: '關閉',
+            always: '總是',
+          },
+        },
       },
-      caption: {
-        thinking: {
+      observation: {
+        thinking_enabled: {
           label: '描述時開啟思考',
           description: '讓模型在描述圖片並觀察屬性前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
         },
       },
       ocr: {
-        on_unobserved: {
-          label: '圖片屬性觀察失敗時仍執行 OCR',
-          description:
-            '當模型未能正確觀察到圖片屬性時，預設仍執行 OCR 兜底，以免漏掉正文文字；關閉則跳過。（採用 4B 等小參數視覺模型，或自定義的圖片解析提示語與系統提示語衝突時，可能造成觀察失敗；8B 及以上模型的失敗概率很低，不建議關閉）',
-        },
-        thinking: {
+
+        thinking_enabled: {
           label: '文字辨識時開啟思考',
           description: '讓模型在提取文字前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
         },
