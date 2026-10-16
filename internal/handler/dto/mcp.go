@@ -31,7 +31,7 @@ type MCPServiceResponse struct {
 	TransportType     types.MCPTransportType   `json:"transport_type" extensions:"x-agent"`
 	URL               *string                  `json:"url,omitempty"`
 	Headers           types.MCPHeaders         `json:"headers,omitempty"`
-	AuthConfig        *MCPAuthConfigResponse   `json:"auth_config,omitempty"`
+	AuthConfig        *MCPAuthConfigResponse   `json:"auth_config,omitempty" extensions:"x-agent"`
 	AdvancedConfig    *types.MCPAdvancedConfig `json:"advanced_config,omitempty"`
 	StdioConfig       *types.MCPStdioConfig    `json:"stdio_config,omitempty"`
 	EnvVars           types.MCPEnvVars         `json:"env_vars,omitempty"`
@@ -62,7 +62,7 @@ type MCPCatalogSummary struct {
 // configuration and are safe to echo back so the UI can render the current
 // strategy.
 type MCPAuthConfigResponse struct {
-	AuthType              types.MCPAuthType `json:"auth_type,omitempty"`
+	AuthType              types.MCPAuthType `json:"auth_type,omitempty" extensions:"x-agent"`
 	APIKeyHeader          string            `json:"api_key_header,omitempty"`
 	CustomHeaders         map[string]string `json:"custom_headers,omitempty"`
 	Scopes                []string          `json:"scopes,omitempty"`

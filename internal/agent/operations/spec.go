@@ -84,6 +84,8 @@ type agentOperation struct {
 	// Role is the lowest workspace role the route accepts, when it differs
 	// from the default for the risk.
 	Role types.TenantRole `json:"role,omitempty"`
+	// AlwaysConfirm asks before every call of a write; see Operation.
+	AlwaysConfirm bool `json:"always_confirm,omitempty"`
 	// Method picks one route when the handler's doc lists several (a legacy
 	// GET next to the POST, say); the others stay out of the catalog.
 	Method string `json:"method,omitempty"`
@@ -226,8 +228,9 @@ func (doc *specDocument) compileOperation(
 		Risk:        meta.Risk,
 		Method:      method,
 		Route:       route,
-		Role:        meta.Role,
-		LabelParam:  meta.LabelParam,
+		Role:          meta.Role,
+		LabelParam:    meta.LabelParam,
+		AlwaysConfirm: meta.AlwaysConfirm,
 	}
 	if op.Description == "" {
 		op.Description = strings.TrimSpace(sop.Description)
@@ -390,7 +393,7 @@ func (doc *specDocument) bodyParams(sp specParameter) ([]Param, error) {
 			Name:        name,
 			In:          InBody,
 			Key:         key,
-			Required:    sp.Required && (required[key] || prop.AgentRequired),
+			Required:    (sp.Required && required[key]) || prop.AgentRequired,
 			AllowEmpty:  prop.AgentRequired && !required[key],
 			Description: strings.TrimSpace(prop.Description),
 		}
@@ -447,7 +450,7 @@ func (doc *specDocument) flattenBodyObject(obj *specSchema, prefix string, bodyR
 			Name:        name,
 			In:          InBody,
 			Key:         path,
-			Required:    bodyRequired && (required[key] || prop.AgentRequired),
+			Required:    (bodyRequired && required[key]) || prop.AgentRequired,
 			AllowEmpty:  prop.AgentRequired && !required[key],
 			Description: strings.TrimSpace(prop.Description),
 		}

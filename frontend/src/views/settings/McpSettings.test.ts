@@ -29,6 +29,8 @@ async function fixture(
   const route = reactive({ path: '/platform/toolbox/mcp', query: { ...(options.query || {}) } as Record<string, string> })
   const replaced: unknown[] = []
   const warnings: string[] = []
+  let lists = 0
+  let dataChange: { handler: () => void; areas: string[] } | null = null
   const assistant = reactive({
     pageDraft: options.draft ? { kind: 'mcp_service', draft: options.draft } : null as any,
     takePageDraft(kind: string) {
@@ -58,8 +60,13 @@ async function fixture(
       if (name === 'tdesign-vue-next') return { MessagePlugin: {
         success() {}, error: (message: string) => errors.push(message), warning: (message: string) => warnings.push(message),
       } }
+      if (name === '@/utils/assistantDataChange') return {
+        useAssistantDataChange: (handler: () => void, opts: { areas: string[] }) => {
+          dataChange = { handler, areas: opts.areas }
+        },
+      }
       if (name === '@/api/mcp-service') return {
-        listMCPServices: async () => [service],
+        listMCPServices: async () => { lists++; return [service] },
         updateMCPService: async (id: string, data: unknown) => { calls.push({ id, data }); await update() },
       }
       return { default: {} }
@@ -76,8 +83,24 @@ async function fixture(
   const vm: any = app.mount({})
   await new Promise<void>(resolve => setImmediate(resolve))
   await nextTick()
-  return { vm, service, calls, errors, deletes, route, replaced, warnings, assistant, pageContext: () => JSON.parse(JSON.stringify(pageContext())), close: () => app.unmount() }
+  return {
+    vm, service, calls, errors, deletes, route, replaced, warnings, assistant,
+    pageContext: () => JSON.parse(JSON.stringify(pageContext())),
+    lists: () => lists, dataChange: () => dataChange,
+    close: () => app.unmount(),
+  }
 }
+
+test('an assistant change to MCP services reloads the list', async () => {
+  const f = await fixture()
+  try {
+    assert.equal(f.lists(), 1)
+    assert.deepEqual([...f.dataChange()?.areas || []], ['mcp_service'])
+    f.dataChange()?.handler()
+    await new Promise<void>(resolve => setImmediate(resolve))
+    assert.equal(f.lists(), 2)
+  } finally { f.close() }
+})
 
 test('edit and tools buttons select the correct drawer step; add resets it', async () => {
   const f = await fixture()

@@ -80,17 +80,79 @@ func (h *MCPServiceHandler) mcpServiceResponses(
 	return resp
 }
 
+// MCPServiceAuthRequest is auth_config when creating an MCP service.
+type MCPServiceAuthRequest struct {
+	// auth_type 留空表示无认证；bearer 发送 token，api_key 按 api_key_header 发送密钥
+	AuthType string `json:"auth_type" enums:"api_key,bearer,oauth" extensions:"x-agent"`
+	// api_key 认证使用的请求头，默认 X-API-Key
+	APIKeyHeader  string            `json:"api_key_header" extensions:"x-agent"`
+	APIKey        string            `json:"api_key"`
+	Token         string            `json:"token"`
+	CustomHeaders map[string]string `json:"custom_headers"`
+	Scopes        []string          `json:"scopes"`
+	ClientID      string            `json:"client_id"`
+}
+
+// CreateMCPServiceRequest is the body of POST /mcp-services.
+type CreateMCPServiceRequest struct {
+	// 服务名称，空间内唯一
+	Name        string `json:"name" binding:"required" extensions:"x-agent"`
+	Description string `json:"description"`
+	// 告诉智能体何时、如何使用该服务
+	UsageInstructions string `json:"usage_instructions" extensions:"x-agent,x-agent-max-bytes=48000"`
+	Enabled           *bool  `json:"enabled"`
+	// 传输方式
+	TransportType string `json:"transport_type" binding:"required" enums:"sse,http-streamable" extensions:"x-agent"`
+	// 服务地址（http 或 https）
+	URL            string                   `json:"url" binding:"required" extensions:"x-agent"`
+	Headers        map[string]string        `json:"headers"`
+	AuthConfig     *MCPServiceAuthRequest   `json:"auth_config"`
+	AdvancedConfig *types.MCPAdvancedConfig `json:"advanced_config"`
+}
+
+// UpdateMCPServiceRequest is the body of PUT /mcp-services/{id}. Only the
+// fields present change.
+type UpdateMCPServiceRequest struct {
+	// 新的服务名称
+	Name        *string `json:"name" extensions:"x-agent"`
+	Description *string `json:"description"`
+	// 新的使用说明，1 到 16000 个字符
+	UsageInstructions *string `json:"usage_instructions" extensions:"x-agent,x-agent-max-bytes=48000"`
+	// 启用或停用该服务
+	Enabled *bool `json:"enabled" extensions:"x-agent"`
+	// 新的传输方式
+	TransportType *string `json:"transport_type" enums:"sse,http-streamable" extensions:"x-agent"`
+	// 新的服务地址（http 或 https）
+	URL            *string                      `json:"url" extensions:"x-agent"`
+	Headers        map[string]string            `json:"headers"`
+	AuthConfig     *MCPServiceAuthUpdateRequest `json:"auth_config"`
+	AdvancedConfig *types.MCPAdvancedConfig     `json:"advanced_config"`
+}
+
+// MCPServiceAuthUpdateRequest is auth_config in an MCP service update. Secrets
+// are not read here; they go through /credentials.
+type MCPServiceAuthUpdateRequest struct {
+	AuthType              string            `json:"auth_type" enums:"api_key,bearer,oauth"`
+	APIKeyHeader          string            `json:"api_key_header"`
+	CustomHeaders         map[string]string `json:"custom_headers"`
+	Scopes                []string          `json:"scopes"`
+	AuthServerMetadataURL string            `json:"auth_server_metadata_url"`
+	ClientID              string            `json:"client_id"`
+}
+
 // CreateMCPService godoc
 // @Summary      创建MCP服务
 // @Description  创建新的MCP服务配置
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
-// @Param        request  body      types.MCPService  true  "MCP服务配置"
+// @Param        request  body      CreateMCPServiceRequest  true  "MCP服务配置"
 // @Success      200      {object}  handler.DataResponse{data=dto.MCPServiceResponse}  "创建的MCP服务"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"mcp_service.create","risk":"write","role":"admin","label_param":"name"}
+// @x-agent-hint "Adds a remote MCP service (SSE or HTTP Streamable) and turns it on. Take the URL from the user or the service's own documentation. It never carries a key or token: for a service that needs one, set auth_type (api_key, bearer or oauth) and afterwards give the user open_page with mcp_service_id so they enter the credential or authorize. Then check it with mcp_service.test."
 // @Router       /mcp-services [post]
 func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -279,12 +341,14 @@ func (h *MCPServiceHandler) GetMCPService(c *gin.Context) {
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string  true  "MCP服务ID"
-// @Param        request  body      object  true  "更新字段"
+// @Param        id       path      string                   true  "MCP服务ID"  extensions(x-agent=mcp_service_id)
+// @Param        request  body      UpdateMCPServiceRequest  true  "更新字段"
 // @Success      200      {object}  handler.DataResponse{data=dto.MCPServiceResponse}  "更新后的MCP服务"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"mcp_service.update","risk":"write","role":"admin","target":"mcp_service.get","label":"name"}
+// @x-agent-hint "Changes the listed settings of an MCP service; a field left out is kept. Turning a service off stops every agent from using it. Changing url or transport_type drops the API key, token and custom headers saved for the old address, so give the user open_page with mcp_service_id to enter them again; a service that uses OAuth cannot be moved here. Built-in services cannot be changed."
 // @Router       /mcp-services/{id} [put]
 func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -468,6 +532,12 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
+	if _, fromAssistant := types.AuditAgentActionFromContext(ctx); fromAssistant {
+		if err := h.guardAssistantEndpointMove(ctx, tenantID, &service, updateFields); err != nil {
+			_ = c.Error(err)
+			return
+		}
+	}
 
 	if err := h.mcpServiceService.UpdateMCPService(ctx, &service, updateFields); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_id": secutils.SanitizeForLog(serviceID)})
@@ -490,17 +560,49 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	})
 }
 
+// guardAssistantEndpointMove keeps saved secrets with the address they were
+// issued for when the assistant moves a service. The assistant never sees
+// them, but a URL it was talked into would receive them on the next call, so
+// the move drops the API key, token and custom headers. An OAuth service is
+// refused outright: every user's sign-in would follow it to the new server.
+func (h *MCPServiceHandler) guardAssistantEndpointMove(
+	ctx context.Context, tenantID uint64, update *types.MCPService, updateFields map[string]bool,
+) error {
+	if update.URL == nil && update.TransportType == "" {
+		return nil
+	}
+	existing, err := h.mcpServiceService.GetMCPServiceByID(ctx, tenantID, update.ID)
+	if err != nil || existing == nil {
+		return errors.NewNotFoundError("MCP service not found")
+	}
+	moved := update.TransportType != "" && update.TransportType != existing.TransportType
+	if update.URL != nil && (existing.URL == nil || *existing.URL != *update.URL) {
+		moved = true
+	}
+	if !moved {
+		return nil
+	}
+	if existing.AuthConfig != nil && existing.AuthConfig.AuthType == types.MCPAuthOAuth {
+		return errors.NewBadRequestError("This MCP service signs in with OAuth, so its address cannot be " +
+			"changed for the user: everyone's sign-in would follow it. Ask the user to change it in the MCP settings.")
+	}
+	updateFields[types.MCPUpdateDropSecrets] = true
+	return nil
+}
+
 // DeleteMCPService godoc
 // @Summary      删除MCP服务
 // @Description  删除指定的MCP服务
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "MCP服务ID"
+// @Param        id   path      string  true  "MCP服务ID"  extensions(x-agent=mcp_service_id)
 // @Success      200  {object}  handler.MessageResponse  "删除成功"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"mcp_service.delete","risk":"destructive","role":"admin","target":"mcp_service.get","label":"name"}
+// @x-agent-hint "Deletes an MCP service with its saved credentials; agents that used it lose its tools. Cannot be undone; built-in services cannot be deleted."
 // @Router       /mcp-services/{id} [delete]
 func (h *MCPServiceHandler) DeleteMCPService(c *gin.Context) {
 	ctx := c.Request.Context()

@@ -343,6 +343,7 @@ import { useChatResourcesStore } from '@/stores/chatResources'
 import { useModelProvidersStore } from '@/stores/modelProviders'
 import { docsUrl } from '@/utils/docsUrl'
 import { matchesResourceQuery } from '@/utils/resourceListSearch'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import {
   formatContextWindow,
   isDefaultContextWindow,
@@ -963,6 +964,7 @@ onMounted(async () => {
   await loadModels()
   openRequestedModel()
 })
+useAssistantDataChange(() => { void loadModels() }, { areas: ['model'] })
 </script>
 
 <style lang="less" scoped>

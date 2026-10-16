@@ -201,6 +201,66 @@ definitions:
           so instead of rendering a reassuring "0 sandboxes".
         type: boolean
     type: object
+  github_com_Tencent_WeKnora_internal_application_service.SkillCatalogInstallView:
+    properties:
+      bundle_sha256:
+        type: string
+      enabled:
+        type: boolean
+      error:
+        type: string
+      sandbox_config_id:
+        type: string
+      sandbox_config_name:
+        type: string
+      sandbox_type:
+        type: string
+      served:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.SkillServedInfo'
+        description: |-
+          Served is set while a newer install of this skill is in flight or has
+          failed and the image still runs the previous version.
+      skill_id:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+      version:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_application_service.SkillCatalogView:
+    properties:
+      bundle_sha256:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+        x-agent: true
+      id:
+        type: string
+        x-agent: catalog_skill_id
+      installations:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.SkillCatalogInstallView'
+        type: array
+      installed_on:
+        description: InstalledOn lists the sandbox config ids of Installations.
+        items:
+          type: string
+        type: array
+        x-agent: true
+      name:
+        type: string
+        x-agent: true
+      updated_at:
+        type: string
+      version:
+        type: string
+        x-agent: true
+    type: object
   github_com_Tencent_WeKnora_internal_application_service.SkillEnvGroup:
     properties:
       description:
@@ -493,7 +553,9 @@ definitions:
       auth_server_metadata_url:
         type: string
       auth_type:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthType'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthType'
+        x-agent: true
       client_id:
         type: string
       custom_headers:
@@ -519,7 +581,9 @@ definitions:
       advanced_config:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig'
       auth_config:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.MCPAuthConfigResponse'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.MCPAuthConfigResponse'
+        x-agent: true
       catalog:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.MCPCatalogSummary'
@@ -4621,56 +4685,6 @@ definitions:
         description: 'Timeout in seconds, default: 30'
         type: integer
     type: object
-  github_com_Tencent_WeKnora_internal_types.MCPAuthConfig:
-    properties:
-      api_key:
-        type: string
-      api_key_header:
-        description: |-
-          APIKeyHeader is the header name that carries APIKey when AuthType is
-          api_key. Empty defaults to "X-API-Key". This is non-secret structural
-          config (the secret is APIKey), so it is not encrypted and is safe to echo
-          back in responses. It lets services that expect the key in a different
-          header (e.g. the raw token directly in "Authorization") work without
-          resorting to plaintext custom headers.
-        type: string
-      auth_server_metadata_url:
-        description: |-
-          AuthServerMetadataURL optionally pins the OAuth authorization server
-          metadata URL. When empty, the server is discovered automatically from
-          the MCP URL (RFC 9728 / RFC 8414).
-        type: string
-      auth_type:
-        allOf:
-        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthType'
-        description: |-
-          AuthType selects the authentication strategy. Empty ("") is treated as
-          none for backward compatibility with rows that pre-date this field.
-      client_id:
-        description: |-
-          ClientID optionally names an OAuth client registered with the
-          authorization server in advance. When set it is used instead of dynamic
-          client registration, for servers that offer no registration endpoint or
-          allow grants only to clients an administrator registered. Non-secret.
-        type: string
-      client_secret:
-        description: |-
-          ClientSecret is the secret of ClientID for a confidential client.
-          Secret: encrypted at rest like APIKey and Token, never returned, and
-          changed only through the credentials subresource after creation.
-        type: string
-      custom_headers:
-        additionalProperties:
-          type: string
-        type: object
-      scopes:
-        description: Scopes are the OAuth scopes requested during authorization. Optional.
-        items:
-          type: string
-        type: array
-      token:
-        type: string
-    type: object
   github_com_Tencent_WeKnora_internal_types.MCPAuthType:
     enum:
     - ""
@@ -4700,51 +4714,6 @@ definitions:
       name:
         type: string
       uri:
-        type: string
-    type: object
-  github_com_Tencent_WeKnora_internal_types.MCPService:
-    properties:
-      advanced_config:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig'
-      auth_config:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthConfig'
-      created_at:
-        type: string
-      deleted_at:
-        $ref: '#/definitions/gorm.DeletedAt'
-      description:
-        type: string
-      enabled:
-        type: boolean
-      env_vars:
-        allOf:
-        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPEnvVars'
-        description: Environment variables for stdio
-      headers:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPHeaders'
-      id:
-        type: string
-      is_builtin:
-        description: Whether this is a builtin MCP service (visible to all workspaces)
-        type: boolean
-      name:
-        type: string
-      stdio_config:
-        allOf:
-        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPStdioConfig'
-        description: Required for stdio transport
-      tenant_id:
-        type: integer
-      transport_type:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPTransportType'
-      updated_at:
-        type: string
-      url:
-        description: 'Optional: required for SSE/HTTP Streamable'
-        type: string
-      usage_instructions:
-        description: UsageInstructions is maintained locally and is not overwritten
-          by directory refresh.
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.MCPStdioConfig:
@@ -9504,6 +9473,45 @@ definitions:
     required:
     - url
     type: object
+  internal_handler.CreateMCPServiceRequest:
+    properties:
+      advanced_config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig'
+      auth_config:
+        $ref: '#/definitions/internal_handler.MCPServiceAuthRequest'
+      description:
+        type: string
+      enabled:
+        type: boolean
+      headers:
+        additionalProperties:
+          type: string
+        type: object
+      name:
+        description: 服务名称，空间内唯一
+        type: string
+        x-agent: true
+      transport_type:
+        description: 传输方式
+        enum:
+        - sse
+        - http-streamable
+        type: string
+        x-agent: true
+      url:
+        description: 服务地址（http 或 https）
+        type: string
+        x-agent: true
+      usage_instructions:
+        description: 告诉智能体何时、如何使用该服务
+        type: string
+        x-agent: true
+        x-agent-max-bytes: "48000"
+    required:
+    - name
+    - transport_type
+    - url
+    type: object
   internal_handler.CreateModelRequest:
     properties:
       description:
@@ -10579,6 +10587,58 @@ definitions:
       total:
         type: integer
     type: object
+  internal_handler.MCPServiceAuthRequest:
+    properties:
+      api_key:
+        type: string
+      api_key_header:
+        description: api_key 认证使用的请求头，默认 X-API-Key
+        type: string
+        x-agent: true
+      auth_type:
+        description: auth_type 留空表示无认证；bearer 发送 token，api_key 按 api_key_header 发送密钥
+        enum:
+        - api_key
+        - bearer
+        - oauth
+        type: string
+        x-agent: true
+      client_id:
+        type: string
+      custom_headers:
+        additionalProperties:
+          type: string
+        type: object
+      scopes:
+        items:
+          type: string
+        type: array
+      token:
+        type: string
+    type: object
+  internal_handler.MCPServiceAuthUpdateRequest:
+    properties:
+      api_key_header:
+        type: string
+      auth_server_metadata_url:
+        type: string
+      auth_type:
+        enum:
+        - api_key
+        - bearer
+        - oauth
+        type: string
+      client_id:
+        type: string
+      custom_headers:
+        additionalProperties:
+          type: string
+        type: object
+      scopes:
+        items:
+          type: string
+        type: array
+    type: object
   internal_handler.MessageResponse:
     properties:
       message:
@@ -10961,6 +11021,17 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiConfig'
         description: Wiki page settings.
+    type: object
+  internal_handler.PatchModelRequest:
+    properties:
+      description:
+        description: 新的描述
+        type: string
+        x-agent: true
+      display_name:
+        description: 新的显示名称，空字符串表示改回使用模型名
+        type: string
+        x-agent: true
     type: object
   internal_handler.PlaceholderGroups:
     properties:
@@ -11714,6 +11785,43 @@ definitions:
         example: true
         type: boolean
     type: object
+  internal_handler.UpdateMCPServiceRequest:
+    properties:
+      advanced_config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig'
+      auth_config:
+        $ref: '#/definitions/internal_handler.MCPServiceAuthUpdateRequest'
+      description:
+        type: string
+      enabled:
+        description: 启用或停用该服务
+        type: boolean
+        x-agent: true
+      headers:
+        additionalProperties:
+          type: string
+        type: object
+      name:
+        description: 新的服务名称
+        type: string
+        x-agent: true
+      transport_type:
+        description: 新的传输方式
+        enum:
+        - sse
+        - http-streamable
+        type: string
+        x-agent: true
+      url:
+        description: 新的服务地址（http 或 https）
+        type: string
+        x-agent: true
+      usage_instructions:
+        description: 新的使用说明，1 到 16000 个字符
+        type: string
+        x-agent: true
+        x-agent-max-bytes: "48000"
+    type: object
   internal_handler.UpdateModelRequest:
     properties:
       description:
@@ -11918,6 +12026,53 @@ definitions:
     - ids
     - kb_id
     type: object
+  internal_handler.catalogInstallData:
+    properties:
+      errors:
+        additionalProperties:
+          type: string
+        type: object
+      failed:
+        description: '"sandbox config id: reason" for each sandbox that was not started'
+        items:
+          type: string
+        type: array
+        x-agent: true
+      installs:
+        additionalProperties:
+          type: string
+        type: object
+      started:
+        description: Sandbox config ids whose install started
+        items:
+          type: string
+        type: array
+        x-agent: true
+    type: object
+  internal_handler.catalogInstallRequest:
+    properties:
+      sandbox_config_ids:
+        description: 'Sandbox config ids to install onto: an agent''s sandbox_config_id,
+          or host on WeKnora Lite'
+        items:
+          type: string
+        type: array
+        x-agent: true
+        x-agent-maximum: "20"
+    required:
+    - sandbox_config_ids
+    type: object
+  internal_handler.catalogInstallResponse:
+    properties:
+      data:
+        allOf:
+        - $ref: '#/definitions/internal_handler.catalogInstallData'
+        x-agent: true
+      success:
+        description: false when any sandbox failed to start
+        type: boolean
+        x-agent: true
+    type: object
   internal_handler.createInvitationRequest:
     properties:
       email:
@@ -12100,6 +12255,12 @@ definitions:
       updated_at:
         type: string
     type: object
+  internal_handler.skillAccepted:
+    properties:
+      skill_id:
+        type: string
+        x-agent: true
+    type: object
   internal_handler.skillEnvResponse:
     properties:
       description:
@@ -12115,9 +12276,11 @@ definitions:
     properties:
       enabled:
         description: |-
-          Enabled is a pointer because its absence is not a request to disable the
-          skill; a body may carry envs instead.
+          Enabled shows (true) or hides (false) the skill. Its absence leaves the
+          skill as it is, since a body may carry envs instead.
         type: boolean
+        x-agent: true
+        x-agent-required: true
       envs:
         additionalProperties:
           type: string
@@ -12135,24 +12298,37 @@ definitions:
         type: string
       description:
         type: string
+        x-agent: true
       enabled:
         type: boolean
+        x-agent: true
       envs:
         items:
           $ref: '#/definitions/internal_handler.skillEnvResponse'
         type: array
       error:
         type: string
+        x-agent: true
       id:
         type: string
+        x-agent: skill_id
       install_message_id:
         type: string
       install_session_id:
         type: string
       installed_snapshot_id:
         type: string
+      missing_envs:
+        description: |-
+          MissingEnvs names the required environment variables with no
+          workspace value yet; the skill cannot run until they are set.
+        items:
+          type: string
+        type: array
+        x-agent: true
       name:
         type: string
+        x-agent: true
       served:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.SkillServedInfo'
@@ -12161,10 +12337,12 @@ definitions:
           is in flight or after it failed.
       status:
         type: string
+        x-agent: true
       updated_at:
         type: string
       version:
         type: string
+        x-agent: true
     type: object
   internal_handler.skillSourceRequest:
     properties:
@@ -12176,6 +12354,11 @@ definitions:
           a direct zip/SKILL.md URL. Bare "owner/slug" is rejected: it is both a
           ClawHub id and a GitHub repo. The fetch carries no credential.
         type: string
+        x-agent: true
+        x-agent-max-bytes: "2048"
+        x-agent-required: true
+    required:
+    - source
     type: object
   internal_handler.storageBackendRequest:
     properties:
@@ -19479,7 +19662,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPService'
+          $ref: '#/definitions/internal_handler.CreateMCPServiceRequest'
       produces:
       - application/json
       responses:
@@ -19502,6 +19685,16 @@ paths:
       summary: 创建MCP服务
       tags:
       - MCP服务
+      x-agent:
+        id: mcp_service.create
+        label_param: name
+        risk: write
+        role: admin
+      x-agent-hint: 'Adds a remote MCP service (SSE or HTTP Streamable) and turns
+        it on. Take the URL from the user or the service''s own documentation. It
+        never carries a key or token: for a service that needs one, set auth_type
+        (api_key, bearer or oauth) and afterwards give the user open_page with mcp_service_id
+        so they enter the credential or authorize. Then check it with mcp_service.test.'
   /mcp-services/{id}:
     delete:
       consumes:
@@ -19513,6 +19706,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: mcp_service_id
       produces:
       - application/json
       responses:
@@ -19530,6 +19724,14 @@ paths:
       summary: 删除MCP服务
       tags:
       - MCP服务
+      x-agent:
+        id: mcp_service.delete
+        label: name
+        risk: destructive
+        role: admin
+        target: mcp_service.get
+      x-agent-hint: Deletes an MCP service with its saved credentials; agents that
+        used it lose its tools. Cannot be undone; built-in services cannot be deleted.
     get:
       consumes:
       - application/json
@@ -19576,12 +19778,13 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: mcp_service_id
       - description: 更新字段
         in: body
         name: request
         required: true
         schema:
-          type: object
+          $ref: '#/definitions/internal_handler.UpdateMCPServiceRequest'
       produces:
       - application/json
       responses:
@@ -19604,6 +19807,18 @@ paths:
       summary: 更新MCP服务
       tags:
       - MCP服务
+      x-agent:
+        id: mcp_service.update
+        label: name
+        risk: write
+        role: admin
+        target: mcp_service.get
+      x-agent-hint: Changes the listed settings of an MCP service; a field left out
+        is kept. Turning a service off stops every agent from using it. Changing url
+        or transport_type drops the API key, token and custom headers saved for the
+        old address, so give the user open_page with mcp_service_id to enter them
+        again; a service that uses OAuth cannot be moved here. Built-in services cannot
+        be changed.
   /mcp-services/{id}/credentials:
     put:
       consumes:
@@ -20935,6 +21150,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: model_id
       produces:
       - application/json
       responses:
@@ -20956,6 +21172,15 @@ paths:
       summary: 删除模型
       tags:
       - 模型管理
+      x-agent:
+        id: model.delete
+        label: name
+        risk: destructive
+        role: admin
+        target: model.get
+      x-agent-hint: Deletes a model with its saved key. Refused while a knowledge
+        base, agent or long-term memory still uses it; the error names them, so tell
+        the user what to switch first. Cannot be undone.
     get:
       consumes:
       - application/json
@@ -20992,6 +21217,62 @@ paths:
       x-agent:
         id: model.get
         risk: read
+    patch:
+      consumes:
+      - application/json
+      description: 只修改显示名称和描述；接入配置与凭据保持不变。
+      parameters:
+      - description: 模型ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: model_id
+      - description: 要修改的字段
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.PatchModelRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的模型
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.ModelResponse'
+              type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 内置模型只能由系统管理员修改
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 模型不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 修改模型显示信息
+      tags:
+      - 模型管理
+      x-agent:
+        id: model.update
+        label: name
+        risk: write
+        role: admin
+        target: model.get
+      x-agent-hint: Renames a model for display or changes its description; its endpoint,
+        key and settings stay as they are. To change those, give the user open_page
+        with model_id.
     put:
       consumes:
       - application/json
@@ -22079,11 +22360,13 @@ paths:
     get:
       description: List the agent skills installed onto one sandbox config's image.
       parameters:
-      - description: Sandbox config ID
+      - description: 'Sandbox config ID: the agent''s sandbox_config_id, or host on
+          WeKnora Lite'
         in: path
         name: id
         required: true
         type: string
+        x-agent: sandbox_config_id
       produces:
       - application/json
       responses:
@@ -22113,6 +22396,16 @@ paths:
       summary: List installed skills
       tags:
       - SandboxConfig
+      x-agent:
+        id: skill.list_installed
+        max_items: 200
+        risk: read
+        role: admin
+      x-agent-hint: Lists every skill installed on a sandbox, including disabled,
+        failed and still-installing ones, with the ids that skill.set_enabled and
+        skill.uninstall take. status ready means it can run; missing_envs names values
+        the user must set in the skill settings before it works. Use skill.list for
+        what an agent can pick.
     post:
       consumes:
       - application/json
@@ -22130,11 +22423,13 @@ paths:
         runs for minutes, so the request is only accepted; follow it
         via the install-events stream.
       parameters:
-      - description: Sandbox config ID
+      - description: 'Sandbox config ID: the agent''s sandbox_config_id, or host on
+          WeKnora Lite'
         in: path
         name: id
         required: true
         type: string
+        x-agent: sandbox_config_id
       - description: Skill bundle (zip)
         in: formData
         name: file
@@ -22150,8 +22445,12 @@ paths:
         "202":
           description: Install accepted
           schema:
-            additionalProperties: true
-            type: object
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.skillAccepted'
+              type: object
         "400":
           description: Missing, oversized or invalid bundle or source
           schema:
@@ -22171,6 +22470,22 @@ paths:
       summary: Install a skill
       tags:
       - SandboxConfig
+      x-agent:
+        always_confirm: true
+        id: skill.install
+        label_param: source
+        risk: write
+        role: admin
+      x-agent-hint: 'Installs a public skill onto a sandbox from its source. When
+        the user pastes install instructions from a skill hub (a command such as npx
+        skills add owner/repo --skill name, a clawhub install line, or a page link),
+        turn them into one source: a github.com / gitlab.com / skills.sh / clawhub
+        / skillhub page URL, @owner/slug or a bare slug for ClawHub, skills-sh:owner/repo/slug,
+        or a direct zip or SKILL.md URL. Bare owner/slug is ambiguous and rejected;
+        ask which hub it is from. Never run their commands or ask for keys. The install
+        runs fetched code as root in the sandbox image, so it always asks the user.
+        It takes minutes: tell the user it started, then check it with skill.get_installed.
+        Enable it for an agent with agent.update selected_skills once it is ready.'
   /sandbox-configs/{id}/skills/{skillId}:
     delete:
       description: |-
@@ -22183,19 +22498,25 @@ paths:
         name: id
         required: true
         type: string
-      - description: Skill ID
+        x-agent: sandbox_config_id
+      - description: Skill ID from skill.list_installed
         in: path
         name: skillId
         required: true
         type: string
+        x-agent: skill_id
       produces:
       - application/json
       responses:
         "202":
           description: Removal accepted
           schema:
-            additionalProperties: true
-            type: object
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.skillAccepted'
+              type: object
         "401":
           description: Unauthorized
           schema:
@@ -22211,6 +22532,15 @@ paths:
       summary: Remove an installed skill
       tags:
       - SandboxConfig
+      x-agent:
+        id: skill.uninstall
+        label: name
+        risk: destructive
+        role: admin
+        target: skill.get_installed
+      x-agent-hint: Removes a skill from a sandbox image; agents on that sandbox can
+        no longer use it. The rebuild takes minutes. To only hide it, use skill.set_enabled
+        instead.
     get:
       description: Retrieve one installed skill of a sandbox config.
       parameters:
@@ -22219,11 +22549,13 @@ paths:
         name: id
         required: true
         type: string
-      - description: Skill ID
+        x-agent: sandbox_config_id
+      - description: Skill ID from skill.list_installed
         in: path
         name: skillId
         required: true
         type: string
+        x-agent: skill_id
       produces:
       - application/json
       responses:
@@ -22251,6 +22583,13 @@ paths:
       summary: Get an installed skill
       tags:
       - SandboxConfig
+      x-agent:
+        id: skill.get_installed
+        risk: read
+        role: admin
+      x-agent-hint: 'Returns one installed skill. After skill.install, read it to
+        follow the install: status moves from installing to ready or failed, and error
+        says why it failed.'
     patch:
       consumes:
       - application/json
@@ -22263,11 +22602,13 @@ paths:
         name: id
         required: true
         type: string
-      - description: Skill ID
+        x-agent: sandbox_config_id
+      - description: Skill ID from skill.list_installed
         in: path
         name: skillId
         required: true
         type: string
+        x-agent: skill_id
       - description: Fields to update
         in: body
         name: request
@@ -22305,6 +22646,15 @@ paths:
       summary: Update an installed skill
       tags:
       - SandboxConfig
+      x-agent:
+        id: skill.set_enabled
+        label: name
+        risk: write
+        role: admin
+        target: skill.get_installed
+      x-agent-hint: 'Shows or hides an installed skill for every agent on that sandbox;
+        the files stay installed. Environment values are not set here: the user enters
+        them in the skill settings.'
   /sandbox-configs/{id}/skills/{skillId}/files:
     get:
       description: List files in the stored skill bundle without starting a sandbox.
@@ -23488,14 +23838,28 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.SkillCatalogView'
+                  type: array
+              type: object
       security:
       - Bearer: []
       - ApiKeyAuth: []
       summary: List workspace skills
       tags:
       - Skills
+      x-agent:
+        id: skill.list_catalog
+        max_items: 200
+        risk: read
+      x-agent-hint: Lists the skills already added to this workspace, with the sandbox
+        config ids each is installed_on. skill.install_catalog puts one onto more
+        sandboxes without fetching it again; for a skill not listed here, use skill.install
+        with its source.
     post:
       consumes:
       - application/json
@@ -23530,6 +23894,41 @@ paths:
       summary: Delete a catalog skill
       tags:
       - Skills
+    get:
+      description: Returns one skill definition of this workspace and which sandbox
+        configs it is installed on.
+      parameters:
+      - description: Catalog skill ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: catalog_skill_id
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.SkillCatalogView'
+              type: object
+        "404":
+          description: Skill not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Get a workspace skill
+      tags:
+      - Skills
+      x-agent:
+        id: skill.get_catalog
+        risk: read
   /skills/catalog/{id}/files:
     get:
       description: Lists the stored catalog bundle. Files belong to the skill definition,
@@ -23596,17 +23995,38 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: catalog_skill_id
+      - description: Target sandboxes
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.catalogInstallRequest'
       produces:
       - application/json
       responses:
         "202":
           description: Accepted
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/internal_handler.catalogInstallResponse'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
       summary: Install a catalog skill onto sandboxes
       tags:
       - Skills
+      x-agent:
+        always_confirm: true
+        id: skill.install_catalog
+        label: name
+        risk: write
+        role: admin
+        root: ""
+        target: skill.get_catalog
+      x-agent-hint: Installs a workspace skill from skill.list_catalog onto sandboxes,
+        reusing its stored bundle. Like skill.install it runs as root in each image
+        and always asks the user, and each install takes minutes; check them with
+        skill.list_installed.
   /storage-backends:
     get:
       description: List all storage backend instances for the current workspace, with

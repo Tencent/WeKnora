@@ -21,6 +21,10 @@ const (
 	MCPTransportStdio          MCPTransportType = "stdio"           // Stdio (Standard Input/Output)
 )
 
+// MCPUpdateDropSecrets is an update field-map flag that clears the service's
+// API key, token and custom headers along with the update.
+const MCPUpdateDropSecrets = "drop_secrets"
+
 // MCPService represents an MCP (Model Context Protocol) service configuration
 type MCPService struct {
 	// UsageInstructions is maintained locally and is not overwritten by directory refresh.

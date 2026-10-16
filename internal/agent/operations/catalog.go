@@ -169,6 +169,10 @@ type Operation struct {
 	// offered: the router still authorizes every call, and a router test
 	// keeps the two in step.
 	Role types.TenantRole
+	// AlwaysConfirm makes a write ask every time, whatever the access level
+	// and session grants: installing a skill runs fetched code as root in
+	// the image every later session boots, so it is never pre-approved.
+	AlwaysConfirm bool
 }
 
 // defaultRole is the role the route guards usually ask of an operation:
@@ -192,7 +196,7 @@ type Access struct {
 
 // NeedsApproval reports whether running op must wait for the user.
 func (a Access) NeedsApproval(op Operation) bool {
-	return a.NeedsApprovalFor(op.Risk)
+	return op.AlwaysConfirm || a.NeedsApprovalFor(op.Risk)
 }
 
 // NeedsApprovalFor reports whether a change of the given risk must wait for
@@ -333,19 +337,33 @@ var allowedRouteAreas = map[string]bool{
 	// identifying ones and nothing else.
 	"models":       true,
 	"mcp-services": true,
+	// Sandbox configs hold provider credentials; see sandboxSkillsRoute.
+	"sandbox-configs": true,
 }
 
 // forbiddenRouteSegments are refused anywhere inside an allowed area:
 // sharing and publishing change who can reach a knowledge base or agent,
-// and credentials never pass through the model; the user handles these
-// themselves.
+// credentials never pass through the model, and a skill install's installer
+// conversation (its guidance, transcript and event stream) belongs to the
+// user watching it; the user handles these themselves.
 var forbiddenRouteSegments = map[string]bool{
 	"shares":         true,
 	"embed-channels": true,
 	"im-channels":    true,
 	"credentials":    true,
 	"oauth":          true,
-	"catalog":        true,
+	"guidance":       true,
+	"transcript":     true,
+	"install-events": true,
+}
+
+// sandboxSkillsRoute reports whether a route in the sandbox-configs area
+// stays within one config's installed skills. The config itself, its
+// sandboxes and the workspace policy are never reachable.
+func sandboxSkillsRoute(rest string) bool {
+	segments := strings.Split(rest, "/")
+	return len(segments) >= 3 && segments[0] == "sandbox-configs" &&
+		strings.HasPrefix(segments[1], ":") && segments[2] == "skills"
 }
 
 var allowedMethods = map[string]bool{
@@ -495,6 +513,9 @@ func validateOperation(op Operation) error {
 		if !ok || p.Type != TypeString || !p.Required {
 			return fmt.Errorf("label_param %q must be a required string param", op.LabelParam)
 		}
+	}
+	if op.AlwaysConfirm && op.Risk != RiskWrite {
+		return fmt.Errorf("always_confirm is for writes; destructive operations always ask")
 	}
 	if !op.Role.IsValid() {
 		return fmt.Errorf("invalid role %q", op.Role)
@@ -666,8 +687,9 @@ func parseRoute(route string) (map[string]bool, error) {
 	if !strings.HasPrefix(route, base) {
 		return nil, fmt.Errorf("route %q must be under /api/v1", route)
 	}
-	area, _, _ := strings.Cut(strings.TrimPrefix(route, base), "/")
-	if !allowedRouteAreas[area] {
+	rest := strings.TrimPrefix(route, base)
+	area, _, _ := strings.Cut(rest, "/")
+	if !allowedRouteAreas[area] || (area == "sandbox-configs" && !sandboxSkillsRoute(rest)) {
 		return nil, fmt.Errorf("route %q is outside the areas an agent may reach", route)
 	}
 	params := map[string]bool{}

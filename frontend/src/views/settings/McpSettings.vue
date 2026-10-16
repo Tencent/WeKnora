@@ -139,6 +139,7 @@ import { useAuthStore } from '@/stores/auth'
 import { matchesResourceQuery } from '@/utils/resourceListSearch'
 import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import { useAssistantStore, type AssistantMcpServiceDraft } from '@/stores/assistant'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 
 const emit = defineEmits<{ count: [value: number] }>()
 const { t } = useI18n()
@@ -310,6 +311,7 @@ onMounted(async () => {
   await loadServices()
   openRequestedService()
 })
+useAssistantDataChange(() => { void loadServices() }, { areas: ['mcp_service'] })
 
 defineExpose({ openAdd: handleAdd })
 </script>

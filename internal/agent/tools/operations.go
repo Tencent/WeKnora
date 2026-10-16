@@ -43,9 +43,10 @@ const maxProbesPerRun = 10
 const findOperationsDescription = "" +
 	"Find WeKnora management operations you can run for the user with run_operation: " +
 	"inspecting knowledge bases and documents, diagnosing and retrying document parsing, " +
-	"deleting documents, checking Wiki health, creating and configuring agents, listing " +
-	"the models and MCP services an agent can use, and checking that they work (testing an MCP " +
-	"connection, trying a retrieval). Returns each operation's id, risk and parameters. " +
+	"deleting documents, checking Wiki health, creating and configuring agents, managing the " +
+	"workspace's models, MCP services and skills (adding, renaming, enabling, removing, installing a " +
+	"skill from a hub), and checking that they work (testing an MCP connection, trying a retrieval). " +
+	"Returns each operation's id, risk and parameters. " +
 	"Call with no arguments to see every operation, or narrow with query (words matched " +
 	"against ids and summaries) or domain. Operation ids must come from this tool; never guess them. " +
 	"Matches this user may not run are listed under unavailable with the reason; when the one " +
@@ -56,9 +57,10 @@ const findOperationsDescription = "" +
 const (
 	approvalPolicyConfirm = "Operations with risk write or destructive ask the user to confirm before they run. " +
 		"When confirming a write, the user may allow the same operation on the same knowledge base or agent " +
-		"for the rest of the conversation; such calls then run without asking. Deletions always ask."
-	approvalPolicyAutoWrite = "Operations with risk write run right away; destructive ones ask the user " +
-		"to confirm before they run."
+		"for the rest of the conversation; such calls then run without asking. Deletions and skill installs " +
+		"always ask."
+	approvalPolicyAutoWrite = "Operations with risk write run right away, except skill installs; destructive " +
+		"ones and skill installs ask the user to confirm before they run."
 	approvalPolicyReadOnly = "The user set the assistant to read-only, so only read and probe operations can run. " +
 		"If they ask for a change, say it is off and that they can allow changes in the assistant settings."
 )
@@ -691,7 +693,7 @@ func (t *RunOperationTool) readTarget(
 func approvalGrant(
 	ctx context.Context, op operations.Operation, params map[string]json.RawMessage, target operations.Projected,
 ) (grant, scope string) {
-	if op.Risk != operations.RiskWrite {
+	if op.Risk != operations.RiskWrite || op.AlwaysConfirm {
 		return "", ""
 	}
 	declared := func(name string) string {
@@ -872,7 +874,51 @@ func mutationDetail(
 		}
 	}
 	lines = append(lines, agentSettingsDetail(ctx, t, op, params, identity)...)
+	lines = append(lines, serviceSettingsDetail(op, params)...)
 	return strings.Join(lines, "\n")
+}
+
+// serviceSettingsDetail lists the MCP service, model and skill settings a
+// call sets. A moved MCP service loses its saved credentials, which the card
+// says before the user approves.
+func serviceSettingsDetail(op operations.Operation, params map[string]json.RawMessage) []string {
+	var lines []string
+	if s, ok := rawString(params, "transport_type"); ok && s != "" {
+		lines = append(lines, "Transport: "+s)
+	}
+	if s, ok := rawString(params, "auth_type"); ok && s != "" {
+		lines = append(lines, "Authentication: "+s)
+	}
+	if s, ok := rawString(params, "usage_instructions"); ok {
+		lines = append(lines, fmt.Sprintf("Usage instructions (%d characters): %s", len([]rune(s)), excerpt(s)))
+	}
+	if s, ok := rawString(params, "display_name"); ok {
+		if s = strings.TrimSpace(s); s == "" {
+			s = "(model name)"
+		}
+		lines = append(lines, "Display name: "+excerpt(s))
+	}
+	if on, ok := rawBool(params, "enabled"); ok {
+		state := "off"
+		if on {
+			state = "on"
+		}
+		lines = append(lines, "Enabled: "+state)
+	}
+	if s, ok := rawString(params, "sandbox_config_id"); ok && s != "" {
+		lines = append(lines, "Sandbox: "+s)
+	}
+	if ids, ok := rawStringList(params, "sandbox_config_ids"); ok && len(ids) > 0 {
+		lines = append(lines, "Sandboxes: "+strings.Join(ids, ", "))
+	}
+	if op.ID == "mcp_service.update" {
+		_, url := params["url"]
+		_, transport := params["transport_type"]
+		if url || transport {
+			lines = append(lines, "A new address or transport removes the saved API key, token and custom headers.")
+		}
+	}
+	return lines
 }
 
 // agentSettingsDetail lists the agent settings a call sets, with models,

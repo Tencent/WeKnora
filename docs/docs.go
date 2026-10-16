@@ -10733,7 +10733,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPService"
+                            "$ref": "#/definitions/internal_handler.CreateMCPServiceRequest"
                         }
                     }
                 ],
@@ -10762,7 +10762,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "mcp_service.create",
+                    "label_param": "name",
+                    "risk": "write",
+                    "role": "admin"
+                },
+                "x-agent-hint": "Adds a remote MCP service (SSE or HTTP Streamable) and turns it on. Take the URL from the user or the service's own documentation. It never carries a key or token: for a service that needs one, set auth_type (api_key, bearer or oauth) and afterwards give the user open_page with mcp_service_id so they enter the credential or authorize. Then check it with mcp_service.test."
             }
         },
         "/mcp-services/oauth/callback": {
@@ -10884,6 +10891,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "mcp_service_id",
                         "description": "MCP服务ID",
                         "name": "id",
                         "in": "path",
@@ -10895,7 +10903,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/internal_handler.UpdateMCPServiceRequest"
                         }
                     }
                 ],
@@ -10924,7 +10932,15 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "mcp_service.update",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "admin",
+                    "target": "mcp_service.get"
+                },
+                "x-agent-hint": "Changes the listed settings of an MCP service; a field left out is kept. Turning a service off stops every agent from using it. Changing url or transport_type drops the API key, token and custom headers saved for the old address, so give the user open_page with mcp_service_id to enter them again; a service that uses OAuth cannot be moved here. Built-in services cannot be changed."
             },
             "delete": {
                 "security": [
@@ -10949,6 +10965,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "mcp_service_id",
                         "description": "MCP服务ID",
                         "name": "id",
                         "in": "path",
@@ -10968,7 +10985,15 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "mcp_service.delete",
+                    "label": "name",
+                    "risk": "destructive",
+                    "role": "admin",
+                    "target": "mcp_service.get"
+                },
+                "x-agent-hint": "Deletes an MCP service with its saved credentials; agents that used it lose its tools. Cannot be undone; built-in services cannot be deleted."
             }
         },
         "/mcp-services/{id}/credentials": {
@@ -13383,6 +13408,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "model_id",
                         "description": "模型ID",
                         "name": "id",
                         "in": "path",
@@ -13408,7 +13434,101 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "model.delete",
+                    "label": "name",
+                    "risk": "destructive",
+                    "role": "admin",
+                    "target": "model.get"
+                },
+                "x-agent-hint": "Deletes a model with its saved key. Refused while a knowledge base, agent or long-term memory still uses it; the error names them, so tell the user what to switch first. Cannot be undone."
+            },
+            "patch": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "只修改显示名称和描述；接入配置与凭据保持不变。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型管理"
+                ],
+                "summary": "修改模型显示信息",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "model_id",
+                        "description": "模型ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "要修改的字段",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.PatchModelRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "更新后的模型",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.ModelResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "内置模型只能由系统管理员修改",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "模型不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "model.update",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "admin",
+                    "target": "model.get"
+                },
+                "x-agent-hint": "Renames a model for display or changes its description; its endpoint, key and settings stay as they are. To change those, give the user open_page with model_id."
             }
         },
         "/models/{id}/copy": {
@@ -15005,7 +15125,8 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Sandbox config ID",
+                        "x-agent": "sandbox_config_id",
+                        "description": "Sandbox config ID: the agent's sandbox_config_id, or host on WeKnora Lite",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -15046,7 +15167,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "skill.list_installed",
+                    "max_items": 200,
+                    "risk": "read",
+                    "role": "admin"
+                },
+                "x-agent-hint": "Lists every skill installed on a sandbox, including disabled, failed and still-installing ones, with the ids that skill.set_enabled and skill.uninstall take. status ready means it can run; missing_envs names values the user must set in the skill settings before it works. Use skill.list for what an agent can pick."
             },
             "post": {
                 "security": [
@@ -15072,7 +15200,8 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Sandbox config ID",
+                        "x-agent": "sandbox_config_id",
+                        "description": "Sandbox config ID: the agent's sandbox_config_id, or host on WeKnora Lite",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -15096,8 +15225,19 @@ const docTemplate = `{
                     "202": {
                         "description": "Install accepted",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.skillAccepted"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "400": {
@@ -15119,7 +15259,15 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "always_confirm": true,
+                    "id": "skill.install",
+                    "label_param": "source",
+                    "risk": "write",
+                    "role": "admin"
+                },
+                "x-agent-hint": "Installs a public skill onto a sandbox from its source. When the user pastes install instructions from a skill hub (a command such as npx skills add owner/repo --skill name, a clawhub install line, or a page link), turn them into one source: a github.com / gitlab.com / skills.sh / clawhub / skillhub page URL, @owner/slug or a bare slug for ClawHub, skills-sh:owner/repo/slug, or a direct zip or SKILL.md URL. Bare owner/slug is ambiguous and rejected; ask which hub it is from. Never run their commands or ask for keys. The install runs fetched code as root in the sandbox image, so it always asks the user. It takes minutes: tell the user it started, then check it with skill.get_installed. Enable it for an agent with agent.update selected_skills once it is ready."
             }
         },
         "/sandbox-configs/{id}/skills/{skillId}": {
@@ -15143,6 +15291,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "sandbox_config_id",
                         "description": "Sandbox config ID",
                         "name": "id",
                         "in": "path",
@@ -15150,7 +15299,8 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Skill ID",
+                        "x-agent": "skill_id",
+                        "description": "Skill ID from skill.list_installed",
                         "name": "skillId",
                         "in": "path",
                         "required": true
@@ -15188,7 +15338,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "skill.get_installed",
+                    "risk": "read",
+                    "role": "admin"
+                },
+                "x-agent-hint": "Returns one installed skill. After skill.install, read it to follow the install: status moves from installing to ready or failed, and error says why it failed."
             },
             "delete": {
                 "security": [
@@ -15210,6 +15366,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "sandbox_config_id",
                         "description": "Sandbox config ID",
                         "name": "id",
                         "in": "path",
@@ -15217,7 +15374,8 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Skill ID",
+                        "x-agent": "skill_id",
+                        "description": "Skill ID from skill.list_installed",
                         "name": "skillId",
                         "in": "path",
                         "required": true
@@ -15227,8 +15385,19 @@ const docTemplate = `{
                     "202": {
                         "description": "Removal accepted",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.skillAccepted"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "401": {
@@ -15244,7 +15413,15 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "skill.uninstall",
+                    "label": "name",
+                    "risk": "destructive",
+                    "role": "admin",
+                    "target": "skill.get_installed"
+                },
+                "x-agent-hint": "Removes a skill from a sandbox image; agents on that sandbox can no longer use it. The rebuild takes minutes. To only hide it, use skill.set_enabled instead."
             },
             "patch": {
                 "security": [
@@ -15269,6 +15446,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "sandbox_config_id",
                         "description": "Sandbox config ID",
                         "name": "id",
                         "in": "path",
@@ -15276,7 +15454,8 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Skill ID",
+                        "x-agent": "skill_id",
+                        "description": "Skill ID from skill.list_installed",
                         "name": "skillId",
                         "in": "path",
                         "required": true
@@ -15329,7 +15508,15 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "skill.set_enabled",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "admin",
+                    "target": "skill.get_installed"
+                },
+                "x-agent-hint": "Shows or hides an installed skill for every agent on that sandbox; the files stay installed. Environment values are not set here: the user enters them in the skill settings."
             }
         },
         "/sandbox-configs/{id}/skills/{skillId}/files": {
@@ -17207,11 +17394,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.SkillCatalogView"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "skill.list_catalog",
+                    "max_items": 200,
+                    "risk": "read"
+                },
+                "x-agent-hint": "Lists the skills already added to this workspace, with the sandbox config ids each is installed_on. skill.install_catalog puts one onto more sandboxes without fetching it again; for a skill not listed here, use skill.install with its source."
             },
             "post": {
                 "description": "Records a skill without installing it. Send a zip as multipart field \"file\", or JSON {\"source\":\"...\"}.",
@@ -17238,6 +17445,64 @@ const docTemplate = `{
             }
         },
         "/skills/catalog/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Returns one skill definition of this workspace and which sandbox configs it is installed on.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Skills"
+                ],
+                "summary": "Get a workspace skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "catalog_skill_id",
+                        "description": "Catalog skill ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.SkillCatalogView"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Skill not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "skill.get_catalog",
+                    "risk": "read"
+                }
+            },
             "delete": {
                 "description": "Refused while any sandbox still has an installation of this skill.",
                 "tags": [
@@ -17356,6 +17621,14 @@ const docTemplate = `{
         },
         "/skills/catalog/{id}/install": {
             "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Runs the existing snapshot install onto each named sandbox config.",
                 "consumes": [
                     "application/json"
@@ -17370,21 +17643,40 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "catalog_skill_id",
                         "description": "Catalog skill ID",
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "description": "Target sandboxes",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.catalogInstallRequest"
+                        }
                     }
                 ],
                 "responses": {
                     "202": {
                         "description": "Accepted",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/internal_handler.catalogInstallResponse"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "always_confirm": true,
+                    "id": "skill.install_catalog",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "admin",
+                    "root": "",
+                    "target": "skill.get_catalog"
+                },
+                "x-agent-hint": "Installs a workspace skill from skill.list_catalog onto sandboxes, reusing its stored bundle. Like skill.install it runs as root in each image and always asks the user, and each install takes minutes; check them with skill.list_installed."
             }
         },
         "/storage-backends": {
@@ -21815,6 +22107,93 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_application_service.SkillCatalogInstallView": {
+            "type": "object",
+            "properties": {
+                "bundle_sha256": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "sandbox_config_id": {
+                    "type": "string"
+                },
+                "sandbox_config_name": {
+                    "type": "string"
+                },
+                "sandbox_type": {
+                    "type": "string"
+                },
+                "served": {
+                    "description": "Served is set while a newer install of this skill is in flight or has\nfailed and the image still runs the previous version.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.SkillServedInfo"
+                        }
+                    ]
+                },
+                "skill_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_application_service.SkillCatalogView": {
+            "type": "object",
+            "properties": {
+                "bundle_sha256": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "id": {
+                    "type": "string",
+                    "x-agent": "catalog_skill_id"
+                },
+                "installations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.SkillCatalogInstallView"
+                    }
+                },
+                "installed_on": {
+                    "description": "InstalledOn lists the sandbox config ids of Installations.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true
+                },
+                "name": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string",
+                    "x-agent": true
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_application_service.SkillEnvGroup": {
             "type": "object",
             "properties": {
@@ -22217,7 +22596,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "auth_type": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthType"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthType"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "client_id": {
                     "type": "string"
@@ -22257,7 +22641,12 @@ const docTemplate = `{
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig"
                 },
                 "auth_config": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.MCPAuthConfigResponse"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.MCPAuthConfigResponse"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "catalog": {
                     "description": "Catalog is the persisted tool-directory summary for list cards.\nOmitted when this principal has never synchronized the service.",
@@ -27421,54 +27810,6 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_WeKnora_internal_types.MCPAuthConfig": {
-            "type": "object",
-            "properties": {
-                "api_key": {
-                    "type": "string"
-                },
-                "api_key_header": {
-                    "description": "APIKeyHeader is the header name that carries APIKey when AuthType is\napi_key. Empty defaults to \"X-API-Key\". This is non-secret structural\nconfig (the secret is APIKey), so it is not encrypted and is safe to echo\nback in responses. It lets services that expect the key in a different\nheader (e.g. the raw token directly in \"Authorization\") work without\nresorting to plaintext custom headers.",
-                    "type": "string"
-                },
-                "auth_server_metadata_url": {
-                    "description": "AuthServerMetadataURL optionally pins the OAuth authorization server\nmetadata URL. When empty, the server is discovered automatically from\nthe MCP URL (RFC 9728 / RFC 8414).",
-                    "type": "string"
-                },
-                "auth_type": {
-                    "description": "AuthType selects the authentication strategy. Empty (\"\") is treated as\nnone for backward compatibility with rows that pre-date this field.",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthType"
-                        }
-                    ]
-                },
-                "client_id": {
-                    "description": "ClientID optionally names an OAuth client registered with the\nauthorization server in advance. When set it is used instead of dynamic\nclient registration, for servers that offer no registration endpoint or\nallow grants only to clients an administrator registered. Non-secret.",
-                    "type": "string"
-                },
-                "client_secret": {
-                    "description": "ClientSecret is the secret of ClientID for a confidential client.\nSecret: encrypted at rest like APIKey and Token, never returned, and\nchanged only through the credentials subresource after creation.",
-                    "type": "string"
-                },
-                "custom_headers": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "scopes": {
-                    "description": "Scopes are the OAuth scopes requested during authorization. Optional.",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "token": {
-                    "type": "string"
-                }
-            }
-        },
         "github_com_Tencent_WeKnora_internal_types.MCPAuthType": {
             "type": "string",
             "enum": [
@@ -27509,75 +27850,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "uri": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_Tencent_WeKnora_internal_types.MCPService": {
-            "type": "object",
-            "properties": {
-                "advanced_config": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig"
-                },
-                "auth_config": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthConfig"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "deleted_at": {
-                    "$ref": "#/definitions/gorm.DeletedAt"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "enabled": {
-                    "type": "boolean"
-                },
-                "env_vars": {
-                    "description": "Environment variables for stdio",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPEnvVars"
-                        }
-                    ]
-                },
-                "headers": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPHeaders"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "is_builtin": {
-                    "description": "Whether this is a builtin MCP service (visible to all workspaces)",
-                    "type": "boolean"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "stdio_config": {
-                    "description": "Required for stdio transport",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPStdioConfig"
-                        }
-                    ]
-                },
-                "tenant_id": {
-                    "type": "integer"
-                },
-                "transport_type": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPTransportType"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "url": {
-                    "description": "Optional: required for SSE/HTTP Streamable",
-                    "type": "string"
-                },
-                "usage_instructions": {
-                    "description": "UsageInstructions is maintained locally and is not overwritten by directory refresh.",
                     "type": "string"
                 }
             }
@@ -33606,6 +33878,59 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.CreateMCPServiceRequest": {
+            "type": "object",
+            "required": [
+                "name",
+                "transport_type",
+                "url"
+            ],
+            "properties": {
+                "advanced_config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig"
+                },
+                "auth_config": {
+                    "$ref": "#/definitions/internal_handler.MCPServiceAuthRequest"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "description": "服务名称，空间内唯一",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "transport_type": {
+                    "description": "传输方式",
+                    "type": "string",
+                    "enum": [
+                        "sse",
+                        "http-streamable"
+                    ],
+                    "x-agent": true
+                },
+                "url": {
+                    "description": "服务地址（http 或 https）",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "usage_instructions": {
+                    "description": "告诉智能体何时、如何使用该服务",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-bytes": "48000"
+                }
+            }
+        },
         "internal_handler.CreateModelRequest": {
             "type": "object",
             "required": [
@@ -35111,6 +35436,81 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.MCPServiceAuthRequest": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "type": "string"
+                },
+                "api_key_header": {
+                    "description": "api_key 认证使用的请求头，默认 X-API-Key",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "auth_type": {
+                    "description": "auth_type 留空表示无认证；bearer 发送 token，api_key 按 api_key_header 发送密钥",
+                    "type": "string",
+                    "enum": [
+                        "api_key",
+                        "bearer",
+                        "oauth"
+                    ],
+                    "x-agent": true
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "custom_headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "scopes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.MCPServiceAuthUpdateRequest": {
+            "type": "object",
+            "properties": {
+                "api_key_header": {
+                    "type": "string"
+                },
+                "auth_server_metadata_url": {
+                    "type": "string"
+                },
+                "auth_type": {
+                    "type": "string",
+                    "enum": [
+                        "api_key",
+                        "bearer",
+                        "oauth"
+                    ]
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "custom_headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "scopes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "internal_handler.MessageResponse": {
             "type": "object",
             "properties": {
@@ -35635,6 +36035,21 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiConfig"
                         }
                     ]
+                }
+            }
+        },
+        "internal_handler.PatchModelRequest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "description": "新的描述",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "display_name": {
+                    "description": "新的显示名称，空字符串表示改回使用模型名",
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -36730,6 +37145,56 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.UpdateMCPServiceRequest": {
+            "type": "object",
+            "properties": {
+                "advanced_config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig"
+                },
+                "auth_config": {
+                    "$ref": "#/definitions/internal_handler.MCPServiceAuthUpdateRequest"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "description": "启用或停用该服务",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "description": "新的服务名称",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "transport_type": {
+                    "description": "新的传输方式",
+                    "type": "string",
+                    "enum": [
+                        "sse",
+                        "http-streamable"
+                    ],
+                    "x-agent": true
+                },
+                "url": {
+                    "description": "新的服务地址（http 或 https）",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "usage_instructions": {
+                    "description": "新的使用说明，1 到 16000 个字符",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-bytes": "48000"
+                }
+            }
+        },
         "internal_handler.UpdateModelRequest": {
             "type": "object",
             "properties": {
@@ -37028,6 +37493,74 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.catalogInstallData": {
+            "type": "object",
+            "properties": {
+                "errors": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "failed": {
+                    "description": "\"sandbox config id: reason\" for each sandbox that was not started",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true
+                },
+                "installs": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "started": {
+                    "description": "Sandbox config ids whose install started",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true
+                }
+            }
+        },
+        "internal_handler.catalogInstallRequest": {
+            "type": "object",
+            "required": [
+                "sandbox_config_ids"
+            ],
+            "properties": {
+                "sandbox_config_ids": {
+                    "description": "Sandbox config ids to install onto: an agent's sandbox_config_id, or host on WeKnora Lite",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true,
+                    "x-agent-maximum": "20"
+                }
+            }
+        },
+        "internal_handler.catalogInstallResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/internal_handler.catalogInstallData"
+                        }
+                    ],
+                    "x-agent": true
+                },
+                "success": {
+                    "description": "false when any sandbox failed to start",
+                    "type": "boolean",
+                    "x-agent": true
+                }
+            }
+        },
         "internal_handler.createInvitationRequest": {
             "type": "object",
             "required": [
@@ -37294,6 +37827,15 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.skillAccepted": {
+            "type": "object",
+            "properties": {
+                "skill_id": {
+                    "type": "string",
+                    "x-agent": true
+                }
+            }
+        },
         "internal_handler.skillEnvResponse": {
             "type": "object",
             "properties": {
@@ -37315,8 +37857,10 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "enabled": {
-                    "description": "Enabled is a pointer because its absence is not a request to disable the\nskill; a body may carry envs instead.",
-                    "type": "boolean"
+                    "description": "Enabled shows (true) or hides (false) the skill. Its absence leaves the\nskill as it is, since a body may carry envs instead.",
+                    "type": "boolean",
+                    "x-agent": true,
+                    "x-agent-required": true
                 },
                 "envs": {
                     "description": "Envs is a pointer to a map because \"sent an empty object\" and \"did not\nmention envs\" are different requests: the first clears what it names,\nthe second must leave every stored value alone.",
@@ -37337,10 +37881,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "description": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "envs": {
                     "type": "array",
@@ -37349,10 +37895,12 @@ const docTemplate = `{
                     }
                 },
                 "error": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "skill_id"
                 },
                 "install_message_id": {
                     "type": "string"
@@ -37363,8 +37911,17 @@ const docTemplate = `{
                 "installed_snapshot_id": {
                     "type": "string"
                 },
+                "missing_envs": {
+                    "description": "MissingEnvs names the required environment variables with no\nworkspace value yet; the skill cannot run until they are set.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true
+                },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "served": {
                     "description": "Served is the previous version that keeps running while this install\nis in flight or after it failed.",
@@ -37375,22 +37932,30 @@ const docTemplate = `{
                     ]
                 },
                 "status": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "updated_at": {
                     "type": "string"
                 },
                 "version": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
         "internal_handler.skillSourceRequest": {
             "type": "object",
+            "required": [
+                "source"
+            ],
             "properties": {
                 "source": {
                     "description": "Source is exactly one of: \"@owner/slug\" or a slash-free slug (ClawHub),\na github.com / gitlab.com / skills.sh / clawhub / skillhub page URL, a\nClawHub skills-sh catalog page or \"skills-sh:owner/repo/slug\" locator, or\na direct zip/SKILL.md URL. Bare \"owner/slug\" is rejected: it is both a\nClawHub id and a GitHub repo. The fetch carries no credential.",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-bytes": "2048",
+                    "x-agent-required": true
                 }
             }
         },

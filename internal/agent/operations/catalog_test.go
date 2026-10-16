@@ -84,51 +84,94 @@ func TestNewCatalogRejectsUnsafeDeclarations(t *testing.T) {
 			Route: "/api/v1/knowledge-bases", Target: &Target{Operation: "x.get", Label: "title"},
 		},
 	}
-	for _, route := range []struct{ method, path string }{
-		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills"},
-		{http.MethodPost, "/api/v1/sandbox-configs/:id/skills"},
-		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId"},
-		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/files"},
-		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/files/content"},
-		{http.MethodPost, "/api/v1/sandbox-configs/:id/skills/:skillId/reinstall"},
-		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/guidance"},
-		{http.MethodPost, "/api/v1/sandbox-configs/:id/skills/:skillId/guidance"},
-		{http.MethodPost, "/api/v1/sandbox-configs/:id/skills/:skillId/stop"},
-		{http.MethodPatch, "/api/v1/sandbox-configs/:id/skills/:skillId"},
-		{http.MethodDelete, "/api/v1/sandbox-configs/:id/skills/:skillId"},
-		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/install-events"},
-		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/transcript"},
-		{http.MethodGet, "/api/v1/skills/catalog"},
-		{http.MethodPost, "/api/v1/skills/catalog"},
-		{http.MethodPost, "/api/v1/skills/catalog/:id/install"},
-		{http.MethodGet, "/api/v1/skills/catalog/:id/files"},
-		{http.MethodGet, "/api/v1/skills/catalog/:id/files/content"},
-		{http.MethodDelete, "/api/v1/skills/catalog/:id"},
+	// A sandbox config is reachable only for its installed skills, and never
+	// the installer conversation a user is watching.
+	reasons := map[string]string{}
+	for _, route := range []struct{ method, path, reason string }{
+		{http.MethodGet, "/api/v1/sandbox-configs/:id", "outside the areas"},
+		{http.MethodPut, "/api/v1/sandbox-configs/:id", "outside the areas"},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/sandboxes", "outside the areas"},
+		{http.MethodPut, "/api/v1/sandbox-configs/workspace-policy", "outside the areas"},
+		{http.MethodPost, "/api/v1/sandbox-configs/templates/query", "outside the areas"},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/guidance", `reaches "guidance"`},
+		{http.MethodPost, "/api/v1/sandbox-configs/:id/skills/:skillId/guidance", `reaches "guidance"`},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/install-events", `reaches "install-events"`},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/transcript", `reaches "transcript"`},
 	} {
-		op := readOp("skill.admin", route.path)
+		op := readOp("skill.admin", route.path, routeParams(route.path)...)
 		op.Method = route.method
 		if route.method != http.MethodGet {
 			op.Risk = RiskWrite
 			op.Target = &Target{Operation: "skill.get", Label: "name"}
 		}
-		if route.method == http.MethodDelete {
-			op.Risk = RiskDestructive
-		}
 		cases[route.method+" "+route.path] = op
+		reasons[route.method+" "+route.path] = route.reason
 	}
 	for name, op := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := NewCatalog(op)
 			require.Error(t, err)
-			if strings.HasPrefix(name, op.Method+" ") {
-				if strings.HasPrefix(op.Route, "/api/v1/sandbox-configs") {
-					assert.Contains(t, err.Error(), "outside the areas")
-				} else {
-					assert.Contains(t, err.Error(), `reaches "catalog"`)
-				}
+			if reason := reasons[name]; reason != "" {
+				assert.Contains(t, err.Error(), reason)
 			}
 		})
 	}
+}
+
+// routeParams declares a string path param for every :name segment.
+func routeParams(route string) []Param {
+	var params []Param
+	for _, seg := range strings.Split(route, "/") {
+		if strings.HasPrefix(seg, ":") {
+			params = append(params, Param{
+				Name: strings.ToLower(seg[1:]), In: InPath, Key: seg[1:], Type: TypeString,
+				Required: true, Description: "d",
+			})
+		}
+	}
+	return params
+}
+
+func TestNewCatalogAdmitsInstalledSkillRoutes(t *testing.T) {
+	routes := []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills"},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId"},
+		{http.MethodPatch, "/api/v1/sandbox-configs/:id/skills/:skillId"},
+		{http.MethodGet, "/api/v1/skills/catalog/:id"},
+	}
+	for _, route := range routes {
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			op := readOp("skill.x", route.path, routeParams(route.path)...)
+			op.Method = route.method
+			if route.method != http.MethodGet {
+				op.Risk = RiskWrite
+				op.Target = &Target{Operation: "skill.get", Label: "title"}
+			}
+			get := readOp("skill.get", "/api/v1/sandbox-configs/:id/skills/:skillId",
+				routeParams("/api/v1/sandbox-configs/:id/skills/:skillId")...)
+			if op.ID == get.ID {
+				op.ID = "skill.other"
+			}
+			_, err := NewCatalog(op, get)
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestAlwaysConfirmAsksAtEveryLevel(t *testing.T) {
+	install := Operation{ID: "skill.install", Risk: RiskWrite, AlwaysConfirm: true}
+	update := Operation{ID: "agent.update", Risk: RiskWrite}
+	auto := Access{Level: types.AssistantAccessAutoWrite}
+	assert.True(t, auto.NeedsApproval(install))
+	assert.False(t, auto.NeedsApproval(update))
+
+	op := Operation{
+		ID: "skill.uninstall", Summary: "s", Risk: RiskDestructive, Method: http.MethodPost,
+		Route: "/api/v1/knowledge-bases", LabelParam: "", AlwaysConfirm: true,
+		Target: &Target{Operation: "x.get", Label: "title"},
+	}
+	_, err := NewCatalog(op, readOp("x.get", "/api/v1/knowledge-bases"))
+	assert.ErrorContains(t, err, "always_confirm is for writes")
 }
 
 func TestNewCatalogChecksTargets(t *testing.T) {
