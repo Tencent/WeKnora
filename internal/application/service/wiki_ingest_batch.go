@@ -826,9 +826,6 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	_ = egReduce.Wait()
 
-	tailCtx, tailCancel := wikiIngestCleanupContext(ctx)
-	defer tailCancel()
-
 	// Sanitize the doc summary pages produced by this batch BEFORE we
 	// rebuild the index. The summary LLM (run during
 	// map) was free to inject [[entity/foo|name]] links to every slug it
@@ -836,7 +833,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// those slugs into actual pages. Rewrite those dead links to plain
 	// text so the summary doesn't contain unresolvable references.
 	if len(failedAdditionSlugs) > 0 && len(docResults) > 0 {
-		s.sanitizeDeadSummaryLinks(tailCtx, payload.KnowledgeBaseID, docResults, failedAdditionSlugs, batchCtx)
+		s.sanitizeDeadSummaryLinks(ctx, payload.KnowledgeBaseID, docResults, failedAdditionSlugs, batchCtx)
 	}
 
 	totalPagesAffected = len(allPagesAffected)
@@ -855,16 +852,23 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			wikiActivityActions["ingest"]++
 		}
 	}
-	RecordWikiContentActivity(tailCtx, s.audit, payload.TenantID, payload.KnowledgeBaseID, wikiActivityActions)
+	RecordWikiContentActivity(ctx, s.audit, payload.TenantID, payload.KnowledgeBaseID, wikiActivityActions)
 
 	// Retry indexing for every processed slug, including unchanged pages from a
 	// previous failed publication. Do not settle/trim their pending document ops
 	// until publication succeeds; the existing abnormal-exit cleanup releases
 	// claims and the task executor retries with backoff.
-	if err := s.publishDraftPages(tailCtx, payload.KnowledgeBaseID, publishSlugs); err != nil {
+	// Publication includes embedding and external writes: retain the worker
+	// processing deadline and cancellation, not the short detached cleanup budget.
+	if err := s.publishDraftPages(ctx, payload.KnowledgeBaseID, publishSlugs); err != nil {
 		exitStatus = "publish_failed"
 		return err
 	}
+
+	// Start the detached bookkeeping budget after publication so a healthy slow
+	// batch still has time to enqueue its finalize work.
+	tailCtx, tailCancel := wikiIngestCleanupContext(ctx)
+	defer tailCancel()
 
 	// Defer KB-global convergence (index-intro rebuild + dead-link cleanup +
 	// cross-link injection) to a debounced per-KB wiki:finalize task instead of
