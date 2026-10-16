@@ -299,3 +299,36 @@ func TestReleaseWithoutASessionIDIsAnError(t *testing.T) {
 	_, err := e.svc.Release(context.Background(), " ")
 	require.Error(t, err)
 }
+
+func (e *testEnv) updateSession(t *testing.T, id string, cols map[string]any) {
+	t.Helper()
+	require.NoError(t, e.db.Session(&gorm.Session{SkipHooks: true}).Model(&types.Session{}).Where("id = ?", id).Updates(cols).Error)
+}
+
+var _ sandbox.AllocationDirectory = (*Service)(nil)
+
+func TestVerifySessionAllocationChecksTheCurrentOwnerAndRetirement(t *testing.T) {
+	enableUserMode(t)
+	id := uuid.NewString()
+	e := newEnv(t, fakeConfigs{"cfg-a": "user"}, webSession(id))
+	a := e.place(t, id, "cfg-a")
+	ctx := context.Background()
+	require.NoError(t, e.svc.VerifySessionAllocation(ctx, 7, id, a))
+
+	stale := a
+	stale.ConfigID = "cfg-b"
+	require.ErrorIs(t, e.svc.VerifySessionAllocation(ctx, 7, id, stale), sandbox.ErrUserAllocationRejected,
+		"a cached address that no longer matches the row is refused")
+
+	e.updateSession(t, id, map[string]any{"user_id": "u-2"})
+	require.ErrorIs(t, e.svc.VerifySessionAllocation(ctx, 7, id, a), sandbox.ErrUserAllocationRejected,
+		"the session changed hands; the old owner's machine is off limits (C15)")
+	e.updateSession(t, id, map[string]any{"user_id": "u-1", "owner_auth_source": "api_key"})
+	require.ErrorIs(t, e.svc.VerifySessionAllocation(ctx, 7, id, a), sandbox.ErrUserAllocationRejected)
+	e.updateSession(t, id, map[string]any{"owner_auth_source": "web"})
+	require.NoError(t, e.svc.VerifySessionAllocation(ctx, 7, id, a))
+
+	_, err := e.svc.Retire(ctx, []string{id})
+	require.NoError(t, err)
+	require.ErrorIs(t, e.svc.VerifySessionAllocation(ctx, 7, id, a), sandbox.ErrSandboxSessionDeleted)
+}

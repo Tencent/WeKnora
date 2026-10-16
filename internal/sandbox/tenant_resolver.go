@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/sandbox/admission"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -87,6 +88,12 @@ type TenantSandboxResolverDeps struct {
 	// Bootstrapper customises the first sandbox create of individual sessions
 	// (session fork). Optional: nil is the ordinary path.
 	Bootstrapper SessionBootstrapper
+
+	// Allocations, Admission and Namespace are passed to every session-bound
+	// manager; see SessionBoundManagerConfig.
+	Allocations AllocationDirectory
+	Admission   admission.Registry
+	Namespace   string
 
 	// SharedTransport is reused by every tenant's HTTP client. Optional; a
 	// guarded transport is installed when nil.
@@ -194,6 +201,9 @@ func (r *tenantSandboxResolver) Resolve(
 			SkipHealthProbe: true,
 			ConfigID:        configID,
 			Bootstrapper:    r.deps.Bootstrapper,
+			Allocations:     r.deps.Allocations,
+			Admission:       r.deps.Admission,
+			Namespace:       r.deps.Namespace,
 		})
 	default:
 		return NewDisabledManager(), nil

@@ -46,11 +46,12 @@ func (s *sessionService) KnowledgeQA(
 		if req.CustomAgent != nil {
 			configID = req.CustomAgent.Config.SandboxConfigID
 		}
-		releaseTurn, holdErr := s.holdSandboxTurn(ctx, req.Session.ID, configID)
+		turnCtx, releaseTurn, holdErr := s.holdSandboxTurn(ctx, req.Session.ID, configID)
 		if holdErr != nil {
 			return holdErr
 		}
 		defer releaseTurn()
+		ctx = turnCtx
 	}
 
 	// Span the request setup (KB / model resolution, search target building,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -102,6 +103,9 @@ type fakeRemoteClient struct {
 	// snapshots maps snapshotID -> source sandboxID.
 	snapshots   map[string]string
 	snapshotSeq int
+
+	// ptyClosed is set when a fake PTY opened on this client is closed.
+	ptyClosed atomic.Bool
 }
 
 func newFakeRemoteClient(provider RemoteProvider) *fakeRemoteClient {
@@ -453,6 +457,33 @@ func (c *fakeRemoteClient) counts() (creates, connects, gets, lists, deletes int
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.createCount, len(c.connectIDs), len(c.getIDs), c.listCount, len(c.deleteIDs)
+}
+
+func (c *fakeRemoteClient) OpenTerminal(
+	context.Context, RemoteSandboxHandle, RemoteTerminalOptions,
+) (RemoteTerminalSession, error) {
+	return &fakeRemoteTerminal{client: c}, nil
+}
+
+func (c *fakeRemoteClient) terminalClosed() bool { return c.ptyClosed.Load() }
+
+// fakeRemoteTerminal is the PTY the shared fake opens. Close records that
+// the stream was torn down, which is how a lost admission lease is observed.
+type fakeRemoteTerminal struct {
+	client *fakeRemoteClient
+}
+
+func (s *fakeRemoteTerminal) Output() <-chan RemoteTerminalEvent  { return nil }
+func (s *fakeRemoteTerminal) PID() uint32                         { return 1 }
+func (s *fakeRemoteTerminal) Write(context.Context, []byte) error { return nil }
+func (s *fakeRemoteTerminal) Resize(context.Context, uint32, uint32) error {
+	return nil
+}
+func (s *fakeRemoteTerminal) Close() error {
+	if s.client != nil {
+		s.client.ptyClosed.Store(true)
+	}
+	return nil
 }
 
 func (c *fakeRemoteClient) hasSandbox(id string) bool {

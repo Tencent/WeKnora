@@ -1215,23 +1215,23 @@ func (h *Handler) rejectIfSessionRewinding(ctx context.Context, sessionID string
 	return errors.NewInternalServerError(err.Error())
 }
 
-func (h *Handler) holdQATurn(ctx context.Context, reqCtx *qaRequestContext) (func(), bool) {
+func (h *Handler) holdQATurn(ctx context.Context, reqCtx *qaRequestContext) (context.Context, func(), bool) {
 	noop := func() {}
 	if reqCtx == nil {
-		return noop, true
+		return ctx, noop, true
 	}
 	type sessionTurnHolder interface {
-		HoldSandboxTurn(context.Context, string, string) (func(), error)
+		HoldSandboxTurn(context.Context, string, string) (context.Context, func(), error)
 	}
 	holder, ok := h.sessionService.(sessionTurnHolder)
 	if !ok {
-		return noop, true
+		return ctx, noop, true
 	}
 	configID := ""
 	if reqCtx.customAgent != nil {
 		configID = reqCtx.customAgent.Config.SandboxConfigID
 	}
-	release, err := holder.HoldSandboxTurn(ctx, reqCtx.sessionID, configID)
+	turnCtx, release, err := holder.HoldSandboxTurn(ctx, reqCtx.sessionID, configID)
 	if err == nil {
 		// The QA service reads this off the built request and skips its own
 		// hold, so the send path opens and closes the lease exactly once.
@@ -1247,13 +1247,16 @@ func (h *Handler) holdQATurn(ctx context.Context, reqCtx *qaRequestContext) (fun
 		} else {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": reqCtx.sessionID})
 		}
-		return noop, false
+		return ctx, noop, false
+	}
+	if turnCtx == nil {
+		turnCtx = ctx
 	}
 	if release == nil {
 		release = noop
 	}
 	var once sync.Once
-	return func() { once.Do(release) }, true
+	return turnCtx, func() { once.Do(release) }, true
 }
 
 // executeQA is the unified execution flow for both KnowledgeQA and AgentQA modes.
@@ -1295,10 +1298,13 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 		h.supersedeSuspendedRuns(ctx, sessionID)
 	}
 
-	releaseQATurn, held := h.holdQATurn(ctx, reqCtx)
+	ctx, releaseQATurn, held := h.holdQATurn(ctx, reqCtx)
 	if !held {
 		return
 	}
+	// setupSSEStream clones reqCtx.ctx. The turn's admission members have to
+	// be on that context or a detached tool call waits on its own hold.
+	reqCtx.ctx = ctx
 
 	// Agent mode: emit agent query event before message creation
 	if mode == qaModeAgent {

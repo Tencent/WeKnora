@@ -1064,50 +1064,55 @@ func (s *sessionService) GenerateTitleAsync(
 // cannot silently proceed while this store is unreachable either.
 func (s *sessionService) holdSandboxTurn(
 	ctx context.Context, sessionID, configID string,
-) (func(), error) {
+) (context.Context, func(), error) {
 	noop := func() {}
 	if strings.TrimSpace(sessionID) == "" {
-		return noop, nil
+		return ctx, noop, nil
 	}
 	releaseGate, err := s.busyGate.HoldSend(sessionID)
 	if err != nil {
-		return noop, err
+		return ctx, noop, err
 	}
-	begin := func(mgr sandbox.Manager) (sandbox.SessionTurnHolder, error) {
+	begin := func(mgr sandbox.Manager) (context.Context, func(), error) {
 		if mgr == nil {
-			return nil, nil
+			return ctx, nil, nil
 		}
 		holder, ok := mgr.(sandbox.SessionTurnHolder)
 		if !ok {
-			return nil, nil
+			return ctx, nil, nil
 		}
-		if err := holder.BeginSessionTurn(ctx, sessionID); err != nil {
+		turnCtx, end, err := holder.BeginSessionTurn(ctx, sessionID)
+		if err != nil {
 			logger.Warnf(ctx, "[sandbox] begin turn for session %s failed: %v", sessionID, err)
 			if stderrors.Is(err, sandbox.ErrSessionRewindLocked) {
-				return nil, err
+				return ctx, nil, err
 			}
-			return nil, nil
+			return ctx, nil, nil
 		}
-		return holder, nil
+		if turnCtx == nil {
+			turnCtx = ctx
+		}
+		if end == nil {
+			end = noop
+		}
+		return turnCtx, end, nil
 	}
 
-	holder, err := begin(s.sandboxMgr)
+	turnCtx, end, err := begin(s.sandboxMgr)
 	if err != nil {
 		releaseGate()
-		return noop, err
+		return ctx, noop, err
 	}
-	if holder != nil {
-		return func() {
-			if err := holder.EndSessionTurn(ctx, sessionID); err != nil {
-				logger.Warnf(ctx, "[sandbox] end turn for session %s failed: %v", sessionID, err)
-			}
+	if end != nil {
+		return turnCtx, func() {
+			end()
 			releaseGate()
 		}, nil
 	}
 
 	tenantID, _ := types.TenantIDFromContext(ctx)
 	if s.sandboxResolver == nil || tenantID == 0 {
-		return releaseGate, nil
+		return ctx, releaseGate, nil
 	}
 	mgr, _, err := resolveSandboxForExecution(
 		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
@@ -1117,20 +1122,18 @@ func (s *sessionService) holdSandboxTurn(
 	if err != nil {
 		logger.Warnf(ctx, "[sandbox] resolve config %s to begin turn of session %s failed: %v",
 			configID, sessionID, err)
-		return releaseGate, nil
+		return ctx, releaseGate, nil
 	}
-	holder, err = begin(mgr)
+	turnCtx, end, err = begin(mgr)
 	if err != nil {
 		releaseGate()
-		return noop, err
+		return ctx, noop, err
 	}
-	if holder == nil {
-		return releaseGate, nil
+	if end == nil {
+		return ctx, releaseGate, nil
 	}
-	return func() {
-		if err := holder.EndSessionTurn(ctx, sessionID); err != nil {
-			logger.Warnf(ctx, "[sandbox] end turn for session %s failed: %v", sessionID, err)
-		}
+	return turnCtx, func() {
+		end()
 		releaseGate()
 	}, nil
 }
@@ -1172,6 +1175,6 @@ func (s *sessionService) RejectSendIfRewinding(ctx context.Context, sessionID st
 // lease before persisting messages, matching rewind's busy check.
 func (s *sessionService) HoldSandboxTurn(
 	ctx context.Context, sessionID, configID string,
-) (func(), error) {
+) (context.Context, func(), error) {
 	return s.holdSandboxTurn(ctx, sessionID, configID)
 }

@@ -235,6 +235,16 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		return b
 	}))
 	must(container.Provide(newTenantSandboxResolver))
+	// The resolver admits user-mode sessions, so the allocation service has to
+	// exist before the first Invoke that builds a TenantSandboxResolver
+	// (the chat pipeline plugins construct SessionService, which does).
+	must(container.Provide(func(
+		repo interfaces.SandboxAllocationRepository,
+		configs repository.TenantSandboxConfigRepository,
+		sessions interfaces.SessionRepository,
+	) *sandboxalloc.Service {
+		return sandboxalloc.New(repo, configs, sessions, sandboxRedisNamespace())
+	}))
 
 	// Business service layer
 	logger.Debugf(ctx, "[Container] Registering business services...")

@@ -11,9 +11,11 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/application/service/sandboxalloc"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/admission"
 	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -38,10 +40,12 @@ func sandboxRedisNamespace() string {
 	return namespace
 }
 
-// userModeRuntimeReady is false until the session manager places sessions by
-// their assignment (plan T10). Until then a user-mode assignment would be
-// recorded for life while the session still runs on a machine of its own in
-// /workspace, so the gate stays closed whatever the env says.
+// userModeRuntimeReady stays false until a deleted user-mode session is
+// retired, fork and rewind take the shared machine's exclusive window, and
+// the desktop slot is per machine (plan T12–T18). T10 can already place and
+// run those sessions, but opening the gate before the rest leaves a shared
+// machine that is never released, forked, or exclusively rewound. The gate
+// also needs Redis and the env opt-in; without those it stays closed.
 const userModeRuntimeReady = false
 
 func selectSessionBindingStore(
@@ -144,6 +148,7 @@ func newTenantSandboxResolver(
 	redisClient *redis.Client,
 	sessionRepo interfaces.SessionRepository,
 	bootstrapper sandbox.SessionBootstrapper,
+	alloc *sandboxalloc.Service,
 ) sandbox.TenantSandboxResolver {
 	ctx := context.Background()
 
@@ -162,6 +167,9 @@ func newTenantSandboxResolver(
 		Store:           store,
 		Checker:         sessionExistenceCheckerFor(sessionRepo),
 		Bootstrapper:    bootstrapper,
+		Allocations:     alloc,
+		Admission:       newAdmissionRegistry(redisClient),
+		Namespace:       sandboxRedisNamespace(),
 		SharedTransport: sandbox.NewGuardedTransport(),
 	})
 	if err != nil {
@@ -172,4 +180,13 @@ func newTenantSandboxResolver(
 	}
 	logger.Infof(ctx, "Tenant sandbox resolver configured: binding=%s", storeKind)
 	return resolver
+}
+
+// newAdmissionRegistry shares Redis with the binding store; the key prefix
+// matches the user binding keys so both live under one hash tag.
+func newAdmissionRegistry(redisClient *redis.Client) admission.Registry {
+	if redisClient == nil {
+		return admission.NewMemory()
+	}
+	return admission.NewRedis(redisClient, "weknora:sandbox:user:")
 }

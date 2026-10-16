@@ -10,11 +10,13 @@ import (
 	"strings"
 	"time"
 
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"gorm.io/gorm"
 )
 
 // ConfigReader loads a sandbox config by its owning workspace.
@@ -289,6 +291,76 @@ func (s *Service) Release(ctx context.Context, sessionID string) (interfaces.Ret
 	}
 	return out[0], nil
 }
+
+// SessionAllocation implements sandbox.AllocationDirectory.
+func (s *Service) SessionAllocation(ctx context.Context, sessionID string) (allocation.Assignment, bool, error) {
+	return s.Lookup(ctx, sessionID)
+}
+
+// VerifySessionAllocation implements sandbox.AllocationDirectory (C4, C15,
+// C17). The row must still be live and name the expected address. For a
+// shared machine, the digest recomputed from the session's CURRENT owner must
+// be the stored one — the digest binds the owner, so this is stricter than
+// comparing a snapshot — and the session's current auth source must still
+// qualify. A retired session's row is released (or a tombstone), so the
+// release check covers retirement.
+func (s *Service) VerifySessionAllocation(
+	ctx context.Context, sessionTenantID uint64, sessionID string, expected allocation.Assignment,
+) error {
+	row, err := s.repo.GetAssignment(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("sandboxalloc: read assignment %s: %w", sessionID, err)
+	}
+	if row == nil || row.ReleasedAt != nil {
+		return sandbox.ErrSandboxSessionDeleted
+	}
+	if row.ConfigTenantID != expected.ConfigTenantID ||
+		sandbox.NormalizeConfigID(row.ConfigID) != sandbox.NormalizeConfigID(expected.ConfigID) ||
+		row.MachineDigest != s.digestOf(expected) {
+		return fmt.Errorf("%w: session %s was re-addressed", sandbox.ErrUserAllocationRejected, sessionID)
+	}
+	sess, err := s.sessions.GetByID(ctx, sessionTenantID, sessionID)
+	if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, apperrors.ErrSessionNotFound) || (err == nil && sess == nil) {
+		return sandbox.ErrSandboxSessionDeleted
+	}
+	if err != nil {
+		return fmt.Errorf("sandboxalloc: read session %s: %w", sessionID, err)
+	}
+	if row.MachineDigest == "" {
+		return nil
+	}
+	current := allocation.UserMachine{
+		OwnerTenantID: sess.TenantID, OwnerID: sess.UserID,
+		ConfigTenantID: row.ConfigTenantID, ConfigID: row.ConfigID,
+	}
+	if s.Digest(current) != row.MachineDigest {
+		return fmt.Errorf("%w: session %s no longer belongs to the machine's owner",
+			sandbox.ErrUserAllocationRejected, sessionID)
+	}
+	owner := ownerFromSession(sess)
+	if !allocation.EligibleForUser(owner.Kind, owner.Source) {
+		return sandbox.ErrUserAllocationRejected
+	}
+	return nil
+}
+
+// UserMachinesByConfig implements sandbox.AllocationDirectory.
+func (s *Service) UserMachinesByConfig(ctx context.Context, configTenantID uint64, configID string) ([]allocation.UserMachine, error) {
+	rows, err := s.repo.ListUserMachinesByConfig(ctx, configTenantID, configID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]allocation.UserMachine, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, allocation.UserMachine{
+			OwnerTenantID: r.OwnerTenantID, OwnerID: r.OwnerID,
+			ConfigTenantID: r.ConfigTenantID, ConfigID: r.ConfigID,
+		})
+	}
+	return out, nil
+}
+
+var _ sandbox.AllocationDirectory = (*Service)(nil)
 
 // ForkAssignment is the child's assignment: same mode, machine and config,
 // fresh session id. The caller persists it with the forked session.

@@ -762,7 +762,7 @@ func TestRewindBlocksLocalSendWithoutSandbox(t *testing.T) {
 	svc.busyGate = gate
 	sessionSvc := &sessionService{busyGate: gate}
 
-	release, err := sessionSvc.holdSandboxTurn(context.Background(), "src", "")
+	_, release, err := sessionSvc.holdSandboxTurn(context.Background(), "src", "")
 	require.NoError(t, err)
 
 	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-2")

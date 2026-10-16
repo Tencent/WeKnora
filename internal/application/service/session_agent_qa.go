@@ -237,11 +237,12 @@ func (s *sessionService) AgentQA(
 	// where the new image is picked up. HTTP send already holds the lease it
 	// took before persisting the turn, so only direct callers take one here.
 	if !req.TurnLeaseHeld {
-		releaseTurn, err := s.holdSandboxTurn(ctx, sessionID, agentConfig.SandboxConfigID)
+		turnCtx, releaseTurn, err := s.holdSandboxTurn(ctx, sessionID, agentConfig.SandboxConfigID)
 		if err != nil {
 			return err
 		}
 		defer releaseTurn()
+		ctx = turnCtx
 	}
 
 	// Reconcile all durable session attachments into the session's remote
