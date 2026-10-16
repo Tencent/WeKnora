@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -169,5 +170,83 @@ func TestEveryActionTraceKeyCarriesAnActionNamespace(t *testing.T) {
 		if !registered[action] {
 			t.Errorf("trace key %q is namespaced with %q, which is not a registered action", key, action)
 		}
+	}
+}
+
+// TestTheRunReadsTheSettingItsTraceEchoes is the round trip the whole naming
+// rule exists for: for every setting a pipeline declares, the value the run used
+// and the value the trace reports have to be the same value.
+//
+// The preprocess mode is the one that can come from three places — the
+// pipeline's slot, the knowledge base field that predates it, and a per-task
+// override — and it is resolved into a field of its own on the way. So the task
+// folds the answer back into the slot, and this test holds the two together: if
+// the fold were dropped, the run would still straighten the page to the mode
+// asked for while its trace reported the field's declared default.
+func TestTheRunReadsTheSettingItsTraceEchoes(t *testing.T) {
+	kbWith := func(cfg types.ImageProcessingConfig) *types.KnowledgeBase {
+		return &types.KnowledgeBase{ImageProcessingConfig: cfg}
+	}
+	smart := types.ImageProcessingConfig{
+		ImageAttrsEnabled: true,
+		ImagePipelineID:   string(types.ImagePipelineSmartOCR),
+	}
+
+	cases := []struct {
+		name     string
+		kb       types.ImageProcessingConfig
+		wantMode string
+	}{
+		{
+			"the slot is the setting",
+			types.ImageProcessingConfig{
+				ImageAttrsEnabled:   true,
+				ImagePipelineID:     string(types.ImagePipelineSmartOCR),
+				ImagePipelineParams: map[string]any{"smartocr.preprocess.mode": types.PreprocessModeOff},
+			},
+			types.PreprocessModeOff,
+		},
+		{
+			"the field that predates the slot still decides",
+			types.ImageProcessingConfig{ImageAttrsEnabled: true, PreprocessMode: types.PreprocessModeAlways},
+			types.PreprocessModeAlways,
+		},
+		{
+			"the slot wins over the field",
+			types.ImageProcessingConfig{
+				ImageAttrsEnabled:   true,
+				ImagePipelineID:     string(types.ImagePipelineSmartOCR),
+				PreprocessMode:      types.PreprocessModeAlways,
+				ImagePipelineParams: map[string]any{"smartocr.preprocess.mode": types.PreprocessModeOff},
+			},
+			types.PreprocessModeOff,
+		},
+		{
+			"nothing stored anywhere means auto",
+			smart,
+			types.PreprocessModeAuto,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// A per-task value must never be written back into the config it was
+			// resolved from, so the map is compared before and after.
+			before := fmt.Sprint(tc.kb.ImagePipelineParams)
+			eff := ResolveProcessConfig(kbWith(tc.kb), nil)
+			if got := fmt.Sprint(tc.kb.ImagePipelineParams); got != before {
+				t.Fatalf("resolving wrote back into the stored config: %s -> %s", before, got)
+			}
+			if eff.PreprocessMode != tc.wantMode {
+				t.Fatalf("resolved mode = %q, want %q", eff.PreprocessMode, tc.wantMode)
+			}
+			r, _ := runImagePipeline(t, true, eff.ImagePipelineParams, eff.ImageActions)
+			echo, _ := r.out[keyConfig].(types.JSONMap)
+			if got := echo["smartocr.preprocess.mode"]; got != tc.wantMode {
+				t.Errorf("the trace reports %v for the mode the run used (%q); "+
+					"read the trace back against the settings that produced it and "+
+					"it must name the same setting", got, eff.PreprocessMode)
+			}
+		})
 	}
 }
