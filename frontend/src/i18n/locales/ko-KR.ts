@@ -1999,7 +1999,9 @@ export default {
           update: "MCP 서비스 수정",
           delete: "MCP 서비스 삭제",
           test: "MCP 서비스 연결 테스트",
-          list_tools: "MCP 서비스 도구 목록 조회",
+          list_tools: "MCP 도구 실시간 조회",
+          get_metadata: "동기화된 MCP 도구 보기",
+          refresh_metadata: "MCP 도구 목록 동기화",
         },
         message: {
           chat_history_stats: "채팅 기록 통계 조회",

@@ -6745,7 +6745,9 @@ export default {
           update: "Update MCP service",
           delete: "Delete MCP service",
           test: "Test MCP service connection",
-          list_tools: "List MCP service tools",
+          list_tools: "Query live MCP tools",
+          get_metadata: "View synced MCP tools",
+          refresh_metadata: "Sync MCP tool directory",
         },
         message: {
           chat_history_stats: "Get chat history statistics",

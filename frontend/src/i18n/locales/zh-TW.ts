@@ -2001,7 +2001,9 @@ export default {
           update: "更新 MCP 服務",
           delete: "刪除 MCP 服務",
           test: "測試 MCP 服務連線",
-          list_tools: "取得 MCP 服務工具清單",
+          list_tools: "即時查詢 MCP 工具",
+          get_metadata: "查看已同步 MCP 工具",
+          refresh_metadata: "同步 MCP 工具目錄",
         },
         message: {
           chat_history_stats: "取得聊天歷史統計",

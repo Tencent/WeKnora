@@ -6745,7 +6745,9 @@ export default {
           update: "MCP サービスを更新",
           delete: "MCP サービスを削除",
           test: "MCP サービスの接続をテスト",
-          list_tools: "MCP サービスのツール一覧を取得",
+          list_tools: "MCP ツールをリアルタイムで取得",
+          get_metadata: "同期済み MCP ツールを表示",
+          refresh_metadata: "MCP ツール一覧を同期",
         },
         message: {
           chat_history_stats: "チャット履歴の統計を取得",

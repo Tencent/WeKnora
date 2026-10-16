@@ -48,7 +48,8 @@ const findOperationsDescription = "" +
 	"skill from a hub), copying knowledge bases, editing or restoring document chunks, " +
 	"inspecting data sources and sync logs, pausing/resuming sync schedules, triggering syncs, " +
 	"configuring document parsing, chunking, OCR and generated questions, " +
-	"batch updating FAQ enabled/recommended states and tags, and checking connections and retrieval. " +
+	"batch updating FAQ enabled/recommended states and tags, reading and refreshing saved MCP tool directories, " +
+	"and checking connections and retrieval. " +
 	"Returns each operation's id, risk and parameters. " +
 	"Call with no arguments to see every operation, or narrow with query (words matched " +
 	"against ids and summaries) or domain. Operation ids must come from this tool; never guess them. " +
@@ -892,6 +893,9 @@ func mutationDetail(
 	}
 	if op.ID == "knowledge_base.duplicate" {
 		lines = append(lines, "Copies settings only; the new knowledge base starts empty.")
+	}
+	if op.ID == "mcp_service.refresh_metadata" {
+		lines = append(lines, "Connects to the MCP server and replaces the saved tool directory without executing tools. OAuth updates only your directory; shared directories require an administrator.")
 	}
 	if op.ID == "data_source.sync" {
 		lines = append(lines, "Uses the saved sync settings; may replace content and remove documents deleted upstream when deletion sync is enabled.")
