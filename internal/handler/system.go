@@ -112,7 +112,7 @@ type platformAPIKeyCreateRequest struct {
 // @Description  Lists non-workspace API keys. Full tokens are always masked. Human SystemAdmin only.
 // @Tags         System Admin
 // @Produce      json
-// @Success      200 {object} map[string]interface{}
+// @Success      200 {object} handler.DataResponse{data=[]handler.tenantAPIKeyResponse}
 // @Security     Bearer
 // @Router       /system/admin/api-keys [get]
 func (h *SystemHandler) ListPlatformAPIKeys(c *gin.Context) {
@@ -137,7 +137,7 @@ func (h *SystemHandler) ListPlatformAPIKeys(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        request body platformAPIKeyCreateRequest true "Platform API key"
-// @Success      201 {object} map[string]interface{}
+// @Success      201 {object} handler.DataResponse{data=handler.tenantAPIKeyCreateResponse}
 // @Security     Bearer
 // @Router       /system/admin/api-keys [post]
 func (h *SystemHandler) CreatePlatformAPIKey(c *gin.Context) {
@@ -189,7 +189,7 @@ func (h *SystemHandler) CreatePlatformAPIKey(c *gin.Context) {
 // @Tags         System Admin
 // @Produce      json
 // @Param        key_id path int true "API key ID"
-// @Success      200 {object} map[string]interface{}
+// @Success      200 {object} handler.SuccessResponse
 // @Security     Bearer
 // @Router       /system/admin/api-keys/{key_id} [delete]
 func (h *SystemHandler) DeletePlatformAPIKey(c *gin.Context) {
@@ -398,7 +398,7 @@ func (h *SystemHandler) getDocReaderConnInfo() (addr, transport string) {
 // @Summary      列出可用的文档解析引擎
 // @Tags         系统
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "解析引擎列表"
+// @Success      200  {object}  handler.ListParserEnginesResponse  "解析引擎列表"
 // @Router       /system/parser-engines [get]
 func (h *SystemHandler) ListParserEngines(c *gin.Context) {
 	var overrides map[string]string
@@ -1598,7 +1598,7 @@ type SetUserStatusRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request body SetUserStatusRequest true "Account status request"
-// @Success      200  {object}  map[string]interface{}  "Status updated"
+// @Success      200  {object}  handler.SetUserStatusResponse  "Status updated"
 // @Failure      400  {object}  map[string]interface{}  "Self-disable / last-admin guard"
 // @Failure      404  {object}  map[string]interface{}  "User not found"
 // @Router       /system/admin/users/status [post]
@@ -1651,7 +1651,7 @@ type ResetUserPasswordRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request body ResetUserPasswordRequest true "Password reset request"
-// @Success      200  {object}  map[string]interface{}  "Password reset successfully"
+// @Success      200  {object}  handler.ResetUserPasswordResponse  "Password reset successfully"
 // @Failure      400  {object}  map[string]interface{}  "Invalid request, weak password, or self reset"
 // @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
 // @Failure      404  {object}  map[string]interface{}  "User not found"
@@ -2241,7 +2241,7 @@ func (h *SystemHandler) MutateRuntimeTask(c *gin.Context) {
 // @Tags         System Admin
 // @Produce      json
 // @Param        queue path string true "Queue name"
-// @Success      200 {object} map[string]interface{}
+// @Success      200 {object} handler.PurgeArchivedRuntimeTasksResponse
 // @Router       /system/admin/runtime/queues/{queue}/archived [delete]
 func (h *SystemHandler) PurgeArchivedRuntimeTasks(c *gin.Context) {
 	queue := c.Param("queue")
@@ -2425,7 +2425,7 @@ func (h *SystemHandler) UpdateSystemSetting(c *gin.Context) {
 // @Description  Idempotent — running twice with the same setting is a no-op.
 // @Tags         System Admin
 // @Produce      json
-// @Success      200 {object} map[string]interface{} "{ affected: int64, quota_bytes: int64 }"
+// @Success 200 {object} handler.ApplyDefaultStorageQuotaToAllTenantsResponse "{ affected: int64, quota_bytes: int64 }"
 // @Failure      500 {object} map[string]interface{} "DB write failed"
 // @Router       /system/admin/tenants/apply-default-storage-quota [post]
 func (h *SystemHandler) ApplyDefaultStorageQuotaToAllTenants(c *gin.Context) {
@@ -2488,7 +2488,7 @@ func (h *SystemHandler) ApplyDefaultStorageQuotaToAllTenants(c *gin.Context) {
 // @Description  that was never persisted returns 200.
 // @Tags         System Admin
 // @Param        key path string true "Setting key"
-// @Success      200 {object} map[string]interface{} "Reset acknowledged"
+// @Success      200 {object} handler.SuccessResponse "Reset acknowledged"
 // @Failure      400 {object} map[string]interface{} "Unknown key"
 // @Failure      500 {object} map[string]interface{} "DB write failed"
 // @Router       /system/admin/settings/{key} [delete]

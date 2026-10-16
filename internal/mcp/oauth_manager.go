@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -59,24 +60,43 @@ func (m *OAuthManager) newHandler(
 	if err := ValidateServiceOutboundURLs(service); err != nil {
 		return nil, err
 	}
-	httpCfg := secutils.DefaultSSRFSafeHTTPClientConfig()
-	httpCfg.SameOriginRedirectsOnly = true
-	httpCfg.Timeout = 30 * time.Second
 	cfg := transport.OAuthConfig{
 		RedirectURI:           redirectURI,
 		Scopes:                service.AuthConfig.Scopes,
 		TokenStore:            newDBTokenStore(m.repo, tenantID, principal, service.ID),
 		PKCEEnabled:           true,
 		AuthServerMetadataURL: service.AuthConfig.AuthServerMetadataURL,
-		HTTPClient:            secutils.NewSSRFSafeHTTPClient(httpCfg),
+		HTTPClient:            newOAuthHTTPClient(),
 	}
-	if existing, err := m.repo.GetClient(ctx, tenantID, service.ID); err == nil && existing != nil {
+	if clientID, clientSecret, ok := preRegisteredClient(service); ok {
+		cfg.ClientID, cfg.ClientSecret = clientID, clientSecret
+	} else if existing, err := m.repo.GetClient(ctx, tenantID, service.ID); err == nil && existing != nil {
 		cfg.ClientID = existing.ClientID
 		cfg.ClientSecret = existing.ClientSecret
 	}
 	h := transport.NewOAuthHandler(cfg)
 	h.SetBaseURL(*service.URL)
 	return h, nil
+}
+
+// newOAuthHTTPClient builds the client for every request sent to an
+// authorization server: addresses are checked against SSRF rules when dialing
+// and only same-origin redirects are followed.
+func newOAuthHTTPClient() *http.Client {
+	httpCfg := secutils.DefaultSSRFSafeHTTPClientConfig()
+	httpCfg.SameOriginRedirectsOnly = true
+	httpCfg.Timeout = 30 * time.Second
+	return secutils.NewSSRFSafeHTTPClient(httpCfg)
+}
+
+// preRegisteredClient returns the OAuth client an administrator registered
+// with the authorization server in advance and set on the service. It takes
+// the place of dynamic client registration.
+func preRegisteredClient(service *types.MCPService) (clientID, clientSecret string, ok bool) {
+	if service == nil || service.AuthConfig == nil || service.AuthConfig.ClientID == "" {
+		return "", "", false
+	}
+	return service.AuthConfig.ClientID, service.AuthConfig.ClientSecret, true
 }
 
 // StartAuthorization performs discovery + (one-time) dynamic client
@@ -108,9 +128,10 @@ func (m *OAuthManager) StartAuthorization(
 		return "", "", err
 	}
 
-	// Register a client dynamically if we don't have one yet for this service.
+	// Register a client dynamically if the service has no pre-registered client
+	// and we don't have one yet.
 	existing, _ := m.repo.GetClient(ctx, tenantID, service.ID)
-	if existing == nil {
+	if _, _, preRegistered := preRegisteredClient(service); !preRegistered && existing == nil {
 		if err := h.RegisterClient(ctx, clientRegistrationName); err != nil {
 			return "", "", fmt.Errorf("dynamic client registration failed: %w", err)
 		}

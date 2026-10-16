@@ -1,36 +1,40 @@
 <template>
   <div class="graph-settings" :class="{ 'graph-settings--embedded': embedded }">
-    <div :class="{ 'section-header': !embedded }">
-      <h2 v-if="!embedded">{{ t('graphSettings.title') }}</h2>
-      <p v-if="!embedded" class="section-description">{{ t('graphSettings.description') }}</p>
-
-      <t-alert
-        v-if="graphAvailability !== 'enabled'"
-        :theme="graphAvailability === 'loading' ? 'info' : 'warning'"
-        :class="{ 'embedded-graph-alert': embedded }"
-        :style="embedded ? undefined : { marginTop: '16px' }"
+    <div v-if="!embedded" class="section-header">
+      <h2>{{ t('graphSettings.title') }}</h2>
+      <p class="section-description">{{ t('graphSettings.description') }}</p>
+    </div>
+    <div
+      v-if="graphAvailability !== 'enabled'"
+      class="graph-disabled"
+      :class="{ 'graph-disabled--loading': graphAvailability === 'loading' }"
+      :role="graphAvailability === 'loading' ? 'status' : 'alert'"
+    >
+      <span class="graph-disabled-icon">
+        <t-icon :name="graphAvailability === 'loading' ? 'info-circle' : 'chart-bubble'" />
+      </span>
+      <div class="graph-disabled-text">
+        <p>{{ graphAvailabilityMessage }}</p>
+      </div>
+      <t-button
+        v-if="graphAvailability === 'error'"
+        size="small"
+        theme="primary"
+        variant="outline"
+        @click="loadSystemInfo(true)"
       >
-        <template #message>
-          <div>{{ graphAvailabilityMessage }}</div>
-          <t-button
-            v-if="graphAvailability === 'error'"
-            variant="text"
-            theme="primary"
-            size="small"
-            @click="loadSystemInfo(true)"
-          >
-            {{ t('common.retry') }}
-          </t-button>
-          <t-link
-            v-if="graphAvailability === 'disabled' && !embedded"
-            class="graph-guide-link"
-            theme="primary"
-            @click="handleOpenGraphGuide"
-          >
-            {{ t('graphSettings.howToEnable') }}
-          </t-link>
-        </template>
-      </t-alert>
+        {{ t('common.retry') }}
+      </t-button>
+      <t-button
+        v-if="graphAvailability === 'disabled' && !embedded"
+        size="small"
+        theme="primary"
+        variant="outline"
+        @click="handleOpenGraphGuide"
+      >
+        <template #icon><t-icon name="help-circle" /></template>
+        {{ t('graphSettings.howToEnable') }}
+      </t-button>
     </div>
 
     <div v-if="isGraphDatabaseEnabled" class="settings-group">
@@ -637,6 +641,46 @@ onMounted(async () => {
   }
 }
 
+.graph-disabled {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px dashed var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.graph-disabled-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-2xl);
+  color: var(--td-warning-color);
+  background: var(--td-warning-color-light);
+}
+
+.graph-disabled-text {
+  flex: 1;
+  min-width: 0;
+
+  p {
+    margin: 0;
+    font-size: var(--app-text-md);
+    line-height: 1.5;
+    color: var(--td-text-color-secondary);
+  }
+}
+
+.graph-disabled--loading .graph-disabled-icon {
+  color: var(--td-brand-color);
+  background: var(--td-brand-color-light);
+}
+
 .settings-group {
   display: flex;
   flex-direction: column;
@@ -811,7 +855,7 @@ onMounted(async () => {
 }
 
 .graph-settings--embedded {
-  .embedded-graph-alert {
+  .graph-disabled {
     margin-bottom: 12px;
   }
 

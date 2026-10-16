@@ -59,6 +59,19 @@ type QuestionOrigin struct {
 	KnowledgeID     string `json:"knowledge_id,omitempty"`
 }
 
+// MaxPageContextIssues bounds how many Wiki issues one page context names.
+const MaxPageContextIssues = 20
+
+// PageContext identifies the open page. Knowledge-base resources must be in
+// the resolved search targets; agents are checked independently in the current tenant.
+type PageContext struct {
+	AgentID         string   `json:"agent_id,omitempty"`
+	KnowledgeBaseID string   `json:"knowledge_base_id,omitempty"`
+	KnowledgeID     string   `json:"knowledge_id,omitempty"`
+	WikiSlug        string   `json:"wiki_slug,omitempty"`
+	WikiIssueIDs    []string `json:"wiki_issue_ids,omitempty"`
+}
+
 // QARequest consolidates all parameters for KnowledgeQA and AgentQA service calls,
 // replacing the previous 14-parameter method signatures.
 // EventBus is passed separately to avoid circular dependency with the event package.
@@ -83,6 +96,10 @@ type QARequest struct {
 	QuotedContext       string             // Quoted message content from IM quote-reply (appended at LLM prompt stage, not used for retrieval)
 	Attachments         MessageAttachments // File attachments (processed and ready for prompt injection)
 	QuestionOrigin      *QuestionOrigin    // Source of a picked suggested question; a retrieval hint only
+	PageContext         *PageContext       // Page the user has open; a hint inside the resolved scope only
+	// AssistantAccess is the access level the user picked for the WeKnora
+	// assistant; the workspace ceiling still caps it. Ignored by other agents.
+	AssistantAccess AssistantAccessLevel
 	// SteerSink, when set, enables mid-run message injection for this run:
 	// the engine drains user-appended messages at every round boundary and
 	// persists accepted ones through this sink. A structural interface so
@@ -94,4 +111,23 @@ type QARequest struct {
 	// IM/MCP, which call the QA services directly, do not and leave this
 	// false so the service takes the lease itself.
 	TurnLeaseHeld bool
+	// Suspendable lets the run end while it waits on a user prompt and be
+	// resumed later. Set by callers whose client can render a suspended
+	// message and answer it afterwards (web, embed, API); IM and MCP callers
+	// wait synchronously.
+	Suspendable bool
+	// Interactive marks a caller that can show and answer a prompt the agent
+	// raises on its own, such as an ask_user question. API-key callers cannot
+	// answer prompts, so their runs are not interactive.
+	Interactive bool
+	// Resume, when set, continues a suspended run instead of starting one.
+	Resume *AgentResume
+}
+
+// AgentResume is what a resumed run continues from.
+type AgentResume struct {
+	// Snapshot is the run state saved when the run suspended.
+	Snapshot []byte
+	// Prompt is the answered prompt the run was suspended on.
+	Prompt *AgentPrompt
 }

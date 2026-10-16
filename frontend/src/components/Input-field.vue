@@ -248,7 +248,7 @@ const sharedAgentKbList = ref<Array<{ id: string; name: string; type?: string; k
 // 知识库：用新智能体配置的列表替换当前选中，使已选与可@列表一致（含共享智能体）
 watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId, newAgentKbs, newKbMode], [oldAgentId]) => {
   if (settingsStore._isApplyingSessionState) return;
-  if (newAgentId !== oldAgentId && oldAgentId !== undefined) {
+  if (newAgentId !== oldAgentId && oldAgentId !== undefined && !props.embeddedMode) {
     if (newKbMode === 'none') {
       settingsStore.selectKnowledgeBases([]);
     } else {
@@ -312,6 +312,8 @@ const isKnowledgeBaseDisabledByAgent = computed(() => {
   return agentKBSelectionMode.value === 'none';
 });
 const isMentionDisabled = computed(() => {
+  // The host pins the scope; @-mentions would edit the main chat's selection.
+  if (props.embeddedMode) return true;
   if (settingsStore.isAgentStreamMode && isKnowledgeBaseDisabledByAgent.value) {
     return agentMCPSelectionMode.value === 'none' && agentSkillsSelectionMode.value === 'none';
   }
@@ -379,7 +381,7 @@ const isSkillAllowedByAgent = (skillName: string) => {
 
 // 切换智能体时清理不允许的 MCP / Skill @mention
 watch([selectedAgentId, agentMCPSelectionMode, agentSkillsSelectionMode], ([newAgentId], [oldAgentId]) => {
-  if (settingsStore._isApplyingSessionState) return;
+  if (props.embeddedMode || settingsStore._isApplyingSessionState) return;
   if (newAgentId === oldAgentId || oldAgentId === undefined) return;
 
   const mcpMode = agentMCPSelectionMode.value;
@@ -539,6 +541,19 @@ const props = defineProps({
   embeddedMode: {
     type: Boolean,
     default: false
+  },
+  // Embedded only: the host owns the model choice (v-model:model-id) so the
+  // main chat's pick is neither read nor overwritten. '' follows
+  // defaultModelId.
+  modelId: {
+    type: String,
+    default: ''
+  },
+  // Embedded only: the model used while modelId is empty, normally the open
+  // knowledge base's chat model. Falls back to the first available model.
+  defaultModelId: {
+    type: String,
+    default: ''
   },
   queuedSteers: {
     type: Array as PropType<SteerQueueItem[]>,
@@ -1005,7 +1020,7 @@ const loadChatModels = async (force = false) => {
   modelsLoading.value = true;
   try {
     await chatResources.ensureChatModels(force);
-    ensureModelSelection();
+    if (!props.embeddedMode) ensureModelSelection();
   } catch (error) {
     console.error('Failed to load chat models:', error);
     chatResources.invalidate('models');
@@ -1036,7 +1051,7 @@ const ensureModelSelection = () => {
 watch(
   [selectedAgentId, () => settingsStore.selectedAgentSourceTenantId, agentModelId],
   ([, sourceTenantId, newModelId]) => {
-    if (!newModelId || newModelId.trim() === '') return;
+    if (props.embeddedMode || !newModelId || newModelId.trim() === '') return;
 
     const lastPick = readLastChatModelID();
     const isSharedAgent = !!sourceTenantId;
@@ -1078,8 +1093,13 @@ const handleModelChange = (value: string | number | Array<string | number> | und
     return;
   }
   if (val === '__add_model__') {
-    selectedModelId.value = readLastChatModelID();
+    if (!props.embeddedMode) selectedModelId.value = readLastChatModelID();
     handleGoToConversationModels();
+    return;
+  }
+  if (props.embeddedMode) {
+    emit('update:modelId', val === EMBEDDED_AUTO_MODEL ? '' : val);
+    showModelSelector.value = false;
     return;
   }
 
@@ -1101,6 +1121,24 @@ const handleModelChange = (value: string | number | Array<string | number> | und
 
 const selectedModel = computed(() => {
   return availableModels.value.find(model => model.id === selectedModelId.value);
+});
+
+// What the composer shows and sends. Embedded, an empty or no longer
+// available pick follows the default, which is resolved to a concrete model
+// here so the label always names the model that will answer.
+const EMBEDDED_AUTO_MODEL = '__auto__';
+const embeddedPickedModel = computed(() => props.modelId
+  ? availableModels.value.find(model => model.id === props.modelId) : undefined);
+const embeddedDefaultModel = computed(() =>
+  availableModels.value.find(model => model.id === props.defaultModelId) || availableModels.value[0]);
+const followsDefaultModel = computed(() => props.embeddedMode && !embeddedPickedModel.value);
+const composerModel = computed(() => {
+  if (!props.embeddedMode) return selectedModel.value;
+  return embeddedPickedModel.value || embeddedDefaultModel.value;
+});
+const composerModelId = computed(() => {
+  if (!props.embeddedMode) return selectedModelId.value;
+  return composerModel.value?.id || '';
 });
 
 const reasoningLevels = computed(() => supportedLevels(selectedModel.value?.capabilities));
@@ -1127,12 +1165,18 @@ watch([selectedModel, reasoningLevels, () => settingsStore.reasoningEffortOverri
 
 // 模型展示名：本空间列表中有则用名称；若为共享智能体且其 model_id 不在本空间列表中则显示“共享智能体配置的模型”
 const selectedModelDisplayName = computed(() => {
-  if (selectedModel.value) return modelDisplayName(selectedModel.value);
-  if (!selectedModelId.value) return t('input.notConfigured');
+  if (composerModel.value) return modelDisplayName(composerModel.value);
+  if (!selectedModelId.value || props.embeddedMode) return t('input.notConfigured');
   const isSharedAgent = !!settingsStore.selectedAgentSourceTenantId;
   const modelFromAgent = agentModelId.value && agentModelId.value === selectedModelId.value;
   if (isSharedAgent && modelFromAgent) return t('input.sharedAgentModelLabel');
   return t('input.notConfigured');
+});
+
+const modelTriggerTooltip = computed(() => {
+  if (isModelLockedByAgent.value) return t('input.modelLockedByAgent');
+  if (followsDefaultModel.value) return t('input.modelAutoHint');
+  return '';
 });
 
 const modelDisplayName = (model: ModelConfig) => {
@@ -1148,17 +1192,17 @@ const contextWindowTitle = (tokens?: number) => {
 };
 
 const selectedModelContextLabel = computed(() => {
-  if (!selectedModel.value) return '';
-  return formatContextWindow(selectedModel.value.parameters?.context_window);
+  if (!composerModel.value) return '';
+  return formatContextWindow(composerModel.value.parameters?.context_window);
 });
 
 const selectedModelContextIsDefault = computed(() => {
-  return isDefaultContextWindow(selectedModel.value?.parameters?.context_window);
+  return isDefaultContextWindow(composerModel.value?.parameters?.context_window);
 });
 
 const selectedModelContextTitle = computed(() => {
-  if (!selectedModel.value) return '';
-  return contextWindowTitle(selectedModel.value.parameters?.context_window);
+  if (!composerModel.value) return '';
+  return contextWindowTitle(composerModel.value.parameters?.context_window);
 });
 
 const updateModelDropdownPosition = () => {
@@ -1272,9 +1316,14 @@ const updateModelDropdownPosition = () => {
 
 // Mention Logic
 let lastMentionQuery = '';
+// 关键词变化时旧请求可能晚于新请求返回；只采纳最新一次加载的结果
+let mentionLoadSeq = 0;
 const loadMentionItems = async (q: string, resetIndex = true, append = false) => {
   console.log('[Mention] loadMentionItems called with query:', q, 'append:', append);
 
+  const seq = append ? mentionLoadSeq : ++mentionLoadSeq;
+  const isStale = () => seq !== mentionLoadSeq;
+  const nextGroupCounts: Partial<Record<MentionItemType, number>> = append ? mentionGroupCounts.value : {};
   if (!append) {
     mentionOffset.value = 0;
   }
@@ -1392,7 +1441,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         orgName: kb.org_name || sharedAgentOrgName.value || undefined
       };
     }));
-    mentionGroupCounts.value.kb = kbItems.length;
+    nextGroupCounts.kb = kbItems.length;
 
     const tagKeyword = q.trim();
     const tagSources = availableKbs;
@@ -1410,7 +1459,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         }));
       }));
       tagItems = tagResults.flat();
-      mentionGroupCounts.value.tag = tagItems.length;
+      nextGroupCounts.tag = tagItems.length;
     } catch (e) {
       console.error('[Mention] listKnowledgeTags error:', e);
       tagItems = [];
@@ -1488,6 +1537,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         fileTypesParam,
         searchOptions
       );
+      if (isStale()) return;
       console.log('[Mention] searchKnowledge response:', res);
       if (res.data && Array.isArray(res.data)) {
         let files = res.data;
@@ -1528,24 +1578,28 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         if (!append) {
           const clientFiltered = !!mentionAllowedKbIds.value && fileItems.length < apiPageSize;
           if (!clientFiltered && rawTotal != null) {
-            mentionGroupCounts.value.file = rawTotal;
+            nextGroupCounts.file = rawTotal;
           } else {
-            delete mentionGroupCounts.value.file;
+            delete nextGroupCounts.file;
           }
         }
       }
       mentionHasMore.value = res.has_more || false;
       mentionOffset.value += fileItems.length;
     } catch (e) {
+      if (isStale()) return;
       console.error('[Mention] searchKnowledge error:', e);
       mentionHasMore.value = false;
     } finally {
-      mentionLoading.value = false;
+      if (!isStale()) mentionLoading.value = false;
     }
   } else {
+    if (isStale()) return;
     mentionHasMore.value = false;
   }
 
+  if (isStale()) return;
+  if (!append) mentionGroupCounts.value = nextGroupCounts;
   if (append) {
     // Append file items to existing list
     mentionItems.value = [...mentionItems.value, ...fileItems];
@@ -1569,6 +1623,21 @@ const loadMoreMentionItems = () => {
   if (mentionHasMore.value && !mentionLoading.value) {
     loadMentionItems(lastMentionQuery, false, true);
   }
+};
+
+let mentionSearchTimer: ReturnType<typeof setTimeout> | null = null;
+const onMentionSearchInput = (q: string) => {
+  mentionQuery.value = q;
+  if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
+  mentionSearchTimer = setTimeout(() => {
+    mentionSearchTimer = null;
+    loadMentionItems(q, true);
+  }, 180);
+};
+
+const closeMentionFromPopup = () => {
+  showMention.value = false;
+  void focusInput();
 };
 
 const getTextareaEl = () => {
@@ -1631,10 +1700,8 @@ const onInput = (val: string | InputEvent) => {
       showMention.value = false;
       return;
     }
-    // Only reload if query changed
     if (q !== mentionQuery.value) {
-      mentionQuery.value = q;
-      loadMentionItems(q, true); // Reset index when query changes
+      onMentionSearchInput(q);
     }
   } else {
     if (textBeforeCursor.endsWith('@')) {
@@ -1655,7 +1722,7 @@ const onInput = (val: string | InputEvent) => {
       const rect = rectToCssPx(textarea.getBoundingClientRect(), zoom);
       const { width: vw, height: vh } = cssViewportSize(zoom);
       const scrollTop = textarea.scrollTop;
-      const menuHeight = 320; // 预估最大高度
+      const menuHeight = 380; // 预估最大高度
 
       let left = rect.left + coords.left;
       // Prevent menu from going off-screen horizontally
@@ -1688,6 +1755,7 @@ const onInput = (val: string | InputEvent) => {
         };
       }
 
+      if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
       loadMentionItems("");
     }
   }
@@ -1734,7 +1802,7 @@ const triggerMention = () => {
   const zoom = getRootZoom();
   const rect = rectToCssPx(textarea.getBoundingClientRect(), zoom);
   const { height: vh } = cssViewportSize(zoom);
-  const menuHeight = 320;
+  const menuHeight = 380;
 
   // 判断输入框上方空间
   const spaceAbove = rect.top;
@@ -1757,6 +1825,7 @@ const triggerMention = () => {
     };
   }
 
+  if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
   loadMentionItems("");
 };
 
@@ -1886,8 +1955,11 @@ let scrollHandler: (() => void) | null = null;
 
 onMounted(() => {
   if (props.autoFocus) void focusInput();
-  // Embed 渠道由宿主注入 agent/KB，勿拉取需 JWT 的平台资源
-  if (props.embeddedMode) return;
+  // 嵌入时 agent/KB 由宿主注入，只需模型列表供宿主选择
+  if (props.embeddedMode) {
+    void loadChatModels();
+    return;
+  }
 
   browserConnection.watchStatus();
 
@@ -1967,6 +2039,7 @@ onUnmounted(() => {
   document.removeEventListener('click', closeAgentModeSelector);
   document.removeEventListener('click', closeModelSelector);
   document.removeEventListener('click', closeMentionSelector);
+  if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
   if (resizeHandler) {
     window.removeEventListener('resize', resizeHandler);
   }
@@ -1977,6 +2050,7 @@ onUnmounted(() => {
 
 // 监听路由变化
 watch(() => route.params.kbId, (newKbId) => {
+  if (props.embeddedMode) return;
   if (newKbId && typeof newKbId === 'string' && !selectedKbIds.value.includes(newKbId)) {
     settingsStore.addKnowledgeBase(newKbId);
   }
@@ -1999,6 +2073,7 @@ watch([selectedKbIds, selectedFileIds], ([kbIds, fileIds]) => {
 
 const emit = defineEmits<{
   (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[], options: SendMessageOptions): void;
+  (e: 'update:modelId', modelId: string): void;
   (e: 'stop-generation'): void;
   (e: 'stop-confirmed'): void;
   (e: 'stop-failed'): void;
@@ -2043,7 +2118,8 @@ const createSession = async (
       MessagePlugin.warning(t('input.messages.steerHasAttachments'));
       return;
     }
-    const steerMentions: MentionRequestItem[] = allSelectedItems.value.map(item => ({
+    // Embedded scope belongs to the host, including queued and injected turns.
+    const steerMentions: MentionRequestItem[] = (props.embeddedMode ? [] : allSelectedItems.value).map(item => ({
       id: item.id,
       name: item.name,
       type: item.type,
@@ -2074,9 +2150,10 @@ const createSession = async (
     return;
   }
 
-  // Embed 渠道由后端绑定 agent/KB，勿走平台侧 agent 列表与就绪校验
+  // 嵌入时 agent/KB 由宿主注入，勿走平台侧 agent 列表与就绪校验。
+  // 模型只用宿主的选择，不能把主对话里选的模型带进来。
   if (props.embeddedMode) {
-    emit('send-msg', val, selectedModelId.value || '', [], [], [], options);
+    emit('send-msg', val, composerModelId.value, [], [], [], options);
     clearvalue();
     void focusInput();
     return;
@@ -2402,6 +2479,10 @@ const onKeydown = (val: string, event: { e: KeyboardEvent }) => {
       mentionSelectorRef.value?.confirmActive();
       return;
     }
+    if (event.e.keyCode === 9 && !event.e.shiftKey) { // Tab
+      if (mentionSelectorRef.value?.enterActiveGroup()) event.e.preventDefault();
+      return;
+    }
     if (event.e.keyCode === 27) { // Esc
       if (mentionSelectorRef.value?.leaveGroup()) {
         return;
@@ -2671,6 +2752,7 @@ onBeforeRouteUpdate((to, from, next) => {
 
 defineExpose({
   focusInput,
+  getComposerModelId: () => composerModelId.value,
   triggerSend(text: string, options: SendMessageOptions = {}) {
     if (!text.trim()) return;
     query.value = text;
@@ -2733,8 +2815,9 @@ defineExpose({
         @update:files="uploadedAttachments = $event" />
 
       <!-- 选中的知识库和文件标签（显示在输入框内顶部） -->
-      <div v-if="allSelectedItems.length > 0" class="selected-tags-inline">
-        <span v-for="item in allSelectedItems" :key="`${item.type}:${item.id}`" class="mention-chip" :class="[
+      <div v-if="$slots.chips || (!embeddedMode && allSelectedItems.length > 0)" class="selected-tags-inline">
+        <slot name="chips" />
+        <span v-for="item in (embeddedMode ? [] : allSelectedItems)" :key="`${item.type}:${item.id}`" class="mention-chip" :class="[
           getMentionChipClass(item),
           { 'mention-chip--agent': item.isAgentConfigured }
         ]">
@@ -2762,7 +2845,9 @@ defineExpose({
       <!-- 控制栏按文档流排列，换行时自动撑开容器 -->
       <div class="control-bar" :class="{ 'is-embedded': embeddedMode }">
         <!-- 左侧控制按钮 -->
-        <div class="control-left" v-if="!embeddedMode">
+        <div class="control-left">
+          <!-- 嵌入时宿主已定好 agent/KB，只保留模型选择 -->
+          <template v-if="!embeddedMode">
           <!-- Agent 模式切换按钮 -->
           <div ref="agentModeButtonRef" class="control-btn agent-mode-btn" :class="{
             'is-normal': !isCustomAgent && !isAgentEnabled,
@@ -2901,17 +2986,22 @@ defineExpose({
               </svg>
             </div>
           </t-tooltip>
+          </template>
+
+          <slot name="controls" />
 
           <!-- 模型显示 -->
-          <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
-            :disabled="!isModelLockedByAgent">
+          <t-tooltip :content="modelTriggerTooltip" :disabled="!modelTriggerTooltip">
             <div class="model-display" :class="{ 'agent-controlled': isModelLockedByAgent }">
               <div ref="modelButtonRef" class="model-selector-trigger" @click.stop="toggleModelSelector">
                 <span class="model-selector-name">
                   {{ selectedModelDisplayName }}
                 </span>
+                <span v-if="followsDefaultModel && composerModel" class="model-selector-default">
+                  {{ $t('input.modelAuto') }}
+                </span>
                 <span
-                  v-if="selectedModelContextLabel"
+                  v-else-if="selectedModelContextLabel"
                   class="model-selector-ctx"
                   :class="{ 'is-default': selectedModelContextIsDefault }"
                   :title="selectedModelContextTitle"
@@ -2923,7 +3013,7 @@ defineExpose({
               </div>
             </div>
           </t-tooltip>
-          <t-popup v-if="reasoningLevels.length > 0" v-model:visible="showReasoningSelector"
+          <t-popup v-if="!embeddedMode && reasoningLevels.length > 0" v-model:visible="showReasoningSelector"
             trigger="click" placement="top-right" :disabled="composerLocked"
             :overlay-inner-style="{ padding: '4px', borderRadius: 'var(--app-radius-lg)' }"
             @visible-change="handleReasoningVisibleChange">
@@ -2964,8 +3054,22 @@ defineExpose({
                 </button>
               </div>
               <div class="model-selector-content">
+                <div v-if="embeddedMode && embeddedDefaultModel" class="model-option"
+                  :class="{ selected: followsDefaultModel }"
+                  :title="$t('input.modelAutoHint')" @click="handleModelChange(EMBEDDED_AUTO_MODEL)">
+                  <div class="model-option-left">
+                    <div class="model-option-name-wrap">
+                      <span class="model-option-name">{{ $t('input.modelFollowDefault') }}</span>
+                      <span class="model-option-raw-name">{{ modelDisplayName(embeddedDefaultModel) }}</span>
+                    </div>
+                  </div>
+                  <span class="model-option-check">
+                    <t-icon v-if="followsDefaultModel" name="check" size="14px" />
+                  </span>
+                </div>
                 <div v-for="model in availableModels" :key="model.id" class="model-option"
-                  :class="{ selected: model.id === selectedModelId }" @click="handleModelChange(model.id || '')">
+                  :class="{ selected: !followsDefaultModel && model.id === composerModelId }"
+                  @click="handleModelChange(model.id || '')">
                   <div class="model-option-left">
                     <div class="model-option-name-wrap">
                       <span class="model-option-name">{{ modelDisplayName(model) }}</span>
@@ -2978,7 +3082,7 @@ defineExpose({
                     :title="contextWindowTitle(model.parameters?.context_window)"
                   >{{ formatContextWindow(model.parameters?.context_window) }}</span>
                   <span class="model-option-check">
-                    <t-icon v-if="model.id === selectedModelId" name="check" size="14px" />
+                    <t-icon v-if="model.id === composerModelId" name="check" size="14px" />
                   </span>
                 </div>
                 <div v-if="availableModels.length === 0" class="model-option empty">
@@ -3010,7 +3114,9 @@ defineExpose({
     <!-- Mention Selector -->
     <Teleport to="body">
       <MentionSelector ref="mentionSelectorRef" :visible="showMention" :style="mentionStyle" :items="mentionItems" :hasMore="mentionHasMore"
-        :loading="mentionLoading" :emptyHint="mentionEmptyHint" :query="mentionQuery" :group-counts="mentionGroupCounts" v-model:activeIndex="mentionActiveIndex"
+        :loading="mentionLoading" :emptyHint="mentionEmptyHint" :query="mentionQuery" :searchable="isMentionTriggeredByButton"
+        :group-counts="mentionGroupCounts" v-model:activeIndex="mentionActiveIndex"
+        @update:query="onMentionSearchInput" @close="closeMentionFromPopup"
         @select="onMentionSelect" @loadMore="loadMoreMentionItems" />
     </Teleport>
 
@@ -3904,6 +4010,13 @@ const getImgSrc = (url: string) => {
   &.is-default {
     opacity: 0.85;
   }
+}
+
+.model-selector-default {
+  flex-shrink: 0;
+  font-size: var(--app-text-xs);
+  color: var(--td-text-color-placeholder);
+  font-weight: 400;
 }
 
 .model-dropdown-arrow {

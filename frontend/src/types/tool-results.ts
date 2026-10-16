@@ -31,8 +31,13 @@ export type DisplayType =
     | 'write_sandbox_file'
     | 'edit_sandbox_file'
     | 'read_skill'
+    | 'image_view'
     | 'mcp_discovery'
-    | 'mcp_call';
+    | 'mcp_call'
+    | 'find_operations'
+    | 'run_operation'
+    | 'search_weknora_docs'
+    | 'read_weknora_doc';
 
 // Search result item
 export interface SearchResultItem {
@@ -449,6 +454,21 @@ export interface ReadSkillData {
     skill_dir?: string;
 }
 
+/** An image read by read_file: a sandbox image file, or images of an attachment. */
+export interface ImageViewData {
+    display_type?: 'image_view';
+    path?: string;
+    file_name?: string;
+    total_images?: number;
+    first_image?: number;
+    returned?: number;
+    image_numbers?: number[];
+    /** Aligned with image_numbers; present when a vision model described the images. */
+    image_descriptions?: string[];
+    image_errors?: string[];
+    next_path?: string;
+}
+
 // Union type for all wiki edit data
 export type WikiEditData = WikiWritePageData | WikiReplaceTextData | WikiRenamePageData | WikiDeletePageData;
 
@@ -473,7 +493,8 @@ export type ToolResultData =
     | WikiDeletePageData
     | ShellExecData
     | ListSandboxFilesData
-    | ReadSkillData;
+    | ReadSkillData
+    | ImageViewData;
 
 // Action data (from index.vue)
 export interface ActionData {

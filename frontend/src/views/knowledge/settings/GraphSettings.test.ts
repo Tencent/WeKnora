@@ -93,7 +93,7 @@ function fixture(t: TestContext, embedded: boolean) {
     embedded,
     'onUpdate:graphExtract': (value: unknown) => events.push(value),
   })
-  for (const name of ['t-alert', 't-button', 't-icon', 't-input', 't-link', 't-option', 't-select', 't-switch', 't-textarea']) {
+  for (const name of ['t-button', 't-icon', 't-input', 't-option', 't-select', 't-switch', 't-textarea']) {
     app.component(name, vue.defineComponent({
       inheritAttrs: false,
       setup: (_props, { attrs, slots }) => () => vue.h(name, attrs, slots.message?.() ?? slots.default?.()),
@@ -115,11 +115,13 @@ function fixture(t: TestContext, embedded: boolean) {
     return button.props.onClick as () => Promise<void>
   }
   const expectState = (state: 'loading' | 'enabled' | 'disabled' | 'error') => {
-    const alerts = elements('t-alert')
-    assert.equal(alerts.length, state === 'enabled' ? 0 : 1)
+    const notices = classes('graph-disabled')
+    assert.equal(notices.length, state === 'enabled' ? 0 : 1)
+    if (state !== 'enabled') assert.equal(notices[0]!.props.role, state === 'loading' ? 'status' : 'alert')
+    assert.equal(classes('graph-disabled--loading').length, state === 'loading' ? 1 : 0)
     assert.equal(classes('settings-group').length, state === 'enabled' ? 1 : 0)
     assert.equal(classes('section-header').length, embedded ? 0 : 1)
-    assert.equal(elements('t-link').length, state === 'disabled' && !embedded ? 1 : 0)
+    assert.equal(elements('t-button').filter(el => textOf(el).trim() === 'graphSettings.howToEnable').length, state === 'disabled' && !embedded ? 1 : 0)
     const messages = {
       loading: 'graphSettings.checkingAvailability',
       disabled: 'graphSettings.disabledWarning',
@@ -170,7 +172,7 @@ for (const embedded of [false, true]) {
     await flush()
     f.expectState('disabled')
     if (!embedded) {
-      f.elements('t-link')[0]!.props.onClick()
+      f.elements('t-button').find(el => textOf(el).trim() === 'graphSettings.howToEnable')!.props.onClick()
       assert.deepEqual(f.opened, [['https://example.com/knowledge-graph', '_blank', 'noopener']])
     }
   })

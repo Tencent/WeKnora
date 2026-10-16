@@ -62,6 +62,14 @@ app:
   # -- Number of replicas
   replicaCount: 1
 
+  # -- App update strategy. Use Recreate for single-replica, single-node-attach storage.
+  strategy:
+    type: RollingUpdate
+    # -- Only used with RollingUpdate; integers and percentages are supported.
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
   image:
     # -- Image repository
     repository: wechatopenai/weknora-app

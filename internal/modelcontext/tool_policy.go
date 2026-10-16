@@ -45,7 +45,8 @@ var sourceKeySpaces = map[string]sourceKeySpace{
 	"source_refs":    spaceDocumentRef,
 	"knowledge_base": spaceKnowledgeBase, "knowledge_base_id": spaceKnowledgeBase,
 	"knowledge_base_ids": spaceKnowledgeBase, "kb_id": spaceKnowledgeBase, "kb_ids": spaceKnowledgeBase,
-	"url": spaceWeb, "urls": spaceWeb,
+	"source_knowledge_base_id": spaceKnowledgeBase,
+	"url":                      spaceWeb, "urls": spaceWeb,
 	"id": spaceAnySource,
 }
 
@@ -160,6 +161,24 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 		decodedIssueIDKeys:  map[string]struct{}{"issue_id": {}},
 		encodeKnownIssueIDs: true,
 	},
+	// The bundled documentation is static text with public URLs; it carries no
+	// workspace identifiers.
+	"search_weknora_docs": {},
+	"read_weknora_doc":    {},
+	// The operation catalog names parameters and result fields with the
+	// canonical keys below, so handles decode inside params and returned IDs
+	// come back as handles. Catalog metadata itself carries no identifiers.
+	"find_operations": {},
+	"run_operation": {
+		sourceIDKeys: map[string]struct{}{
+			"knowledge_base_id": {}, "knowledge_base_ids": {}, "source_knowledge_base_id": {},
+			"knowledge_id": {}, "knowledge_ids": {},
+		},
+		decodedIssueIDKeys:  map[string]struct{}{"issue_id": {}},
+		encodedIssueIDKeys:  map[string]struct{}{"issue_id": {}},
+		encodeKnownIssueIDs: true,
+		sourceOutput:        true,
+	},
 	// Mutation tools echo the slug they acted on and surface validation errors
 	// that can quote a durable KB or document ID. They own no source arguments,
 	// but their output must still be compacted before the model sees it.
@@ -174,6 +193,7 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 	// never structured source rendering.
 	"thinking":   {},
 	"todo_write": {},
+	"ask_user":   {},
 	// Skill output is user-authored content of unknown shape. Compact known
 	// durable IDs, but do not mine it for source keys: a skill's JSON may use
 	// "url"/"knowledge_id" with unrelated semantics.

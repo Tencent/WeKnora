@@ -49,15 +49,22 @@ func ShouldOmitRawToolOutput(_ string, data map[string]interface{}) bool {
 
 // SanitizeToolDataForPersist returns a copy of tool Data safe for DB / SSE replay.
 func SanitizeToolDataForPersist(toolName string, data map[string]interface{}) map[string]interface{} {
-	return sanitizeToolData(data, persistStripFieldsByTool[toolName])
+	out := sanitizeToolData(data, persistStripFieldsByTool[toolName])
+	delete(out, "data_change")
+	return out
 }
 
-func sanitizeToolDataForClient(toolName string, data map[string]interface{}) map[string]interface{} {
+// SanitizeToolDataForClient retains transient metadata only for live clients.
+func SanitizeToolDataForClient(toolName string, data map[string]interface{}) map[string]interface{} {
 	omit := clientStripFieldsByTool[toolName]
 	if omit == nil {
 		omit = persistStripFieldsByTool[toolName]
 	}
-	return sanitizeToolData(data, omit)
+	out := sanitizeToolData(data, omit)
+	if toolName != ToolRunOperation {
+		delete(out, "data_change")
+	}
+	return out
 }
 
 func sanitizeToolData(data map[string]interface{}, extraOmit []string) map[string]interface{} {
@@ -85,7 +92,7 @@ func SanitizeToolResultForClient(toolName string, result *types.ToolResult) map[
 		return meta
 	}
 	if result.Data != nil {
-		for k, v := range sanitizeToolDataForClient(toolName, result.Data) {
+		for k, v := range SanitizeToolDataForClient(toolName, result.Data) {
 			meta[k] = v
 		}
 	}
@@ -127,9 +134,9 @@ func SanitizeAgentStepsForStorage(steps []types.AgentStep) []types.AgentStep {
 				continue
 			}
 			result := *tc.Result
-			if tc.Name == "local_browser" || tc.Name == ToolSearchKnowledge {
+			if tc.Name == "local_browser" || tc.Name == ToolSearchKnowledge || tc.Name == ToolReadFile {
 				// Screenshot bytes already live in Data for the result card;
-				// retrieved knowledge images are read again from storage.
+				// knowledge and file images are read again from storage.
 				result.Images = nil
 			}
 			if isSandboxContentTool(tc.Name) {

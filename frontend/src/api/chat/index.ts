@@ -1,14 +1,32 @@
 import { get, post, put, del, postChat, getDown } from "../../utils/request";
 
-export async function createSessions(data: Record<string, unknown> = {}) {
+export type SessionKind = '' | 'assistant';
+
+export interface SessionSummary {
+  id: string;
+  kind: SessionKind;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateSessionRequest {
+  title?: string;
+  description?: string;
+  project_dir?: string;
+  kind?: SessionKind;
+}
+
+export async function createSessions(data: CreateSessionRequest = {}) {
   return post("/api/v1/sessions", data);
 }
 
-export async function getSessionsList(page: number, page_size: number, source?: string) {
+export async function getSessionsList(page: number, page_size: number, source?: string, kind?: SessionKind) {
   const params = new URLSearchParams({ page: String(page), page_size: String(page_size) });
   if (source) {
     params.set("source", source);
   }
+  if (kind) params.set("kind", kind);
   return get(`/api/v1/sessions?${params.toString()}`);
 }
 

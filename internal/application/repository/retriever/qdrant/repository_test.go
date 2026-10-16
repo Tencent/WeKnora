@@ -881,3 +881,62 @@ func TestPointWritesWaitForApplication(t *testing.T) {
 		})
 	}
 }
+
+// newEnsureCollectionTestRepository answers the existence probe with "missing"
+// and CreateCollection with createErr, recording the payload indexes created.
+func newEnsureCollectionTestRepository(t *testing.T, createErr error) (*qdrantRepository, *[]string) {
+	t.Helper()
+	var indexed []string
+	client := newInterceptedQdrantClient(t, func(
+		_ context.Context, method string, req, reply any, _ *grpc.ClientConn,
+		_ grpc.UnaryInvoker, _ ...grpc.CallOption,
+	) error {
+		switch request := req.(type) {
+		case *qdrant.CollectionExistsRequest:
+			reply.(*qdrant.CollectionExistsResponse).Result = &qdrant.CollectionExists{Exists: false}
+			return nil
+		case *qdrant.CreateCollection:
+			return createErr
+		case *qdrant.CreateFieldIndexCollection:
+			indexed = append(indexed, request.GetFieldName())
+			return nil
+		default:
+			return fmt.Errorf("unexpected RPC %s", method)
+		}
+	})
+	return &qdrantRepository{client: client, collectionBaseName: "vectors"}, &indexed
+}
+
+// Several workers write the first batches of a new dimension at once, so the
+// create can lose to another worker. That must not fail the write: the
+// collection exists, and its payload indexes are still ensured.
+func TestEnsureCollectionAcceptsConcurrentCreate(t *testing.T) {
+	repo, indexed := newEnsureCollectionTestRepository(t,
+		status.Error(codes.AlreadyExists, "Wrong input: Collection `vectors_1024` already exists!"))
+
+	if err := repo.ensureCollection(context.Background(), 1024); err != nil {
+		t.Fatalf("ensureCollection after losing the create race: %v", err)
+	}
+	if _, ok := repo.initializedCollections.Load(1024); !ok {
+		t.Fatal("dimension must be cached once the collection is known to exist")
+	}
+	want := []string{fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldSourceID, fieldIsEnabled, fieldContent}
+	if !slices.Equal(*indexed, want) {
+		t.Fatalf("payload indexes = %v, want %v", *indexed, want)
+	}
+}
+
+func TestEnsureCollectionReturnsOtherCreateErrors(t *testing.T) {
+	repo, indexed := newEnsureCollectionTestRepository(t, status.Error(codes.Unavailable, "qdrant down"))
+
+	err := repo.ensureCollection(context.Background(), 1024)
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("ensureCollection error = %v, want the Unavailable create error", err)
+	}
+	if _, ok := repo.initializedCollections.Load(1024); ok {
+		t.Fatal("a failed create must not cache the dimension")
+	}
+	if len(*indexed) != 0 {
+		t.Fatalf("no payload index should be created after a failed create, got %v", *indexed)
+	}
+}

@@ -1,5 +1,6 @@
+import { subscribeAssistantDataChange } from '@/utils/assistantDataChange'
 import { defineStore } from 'pinia'
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onScopeDispose } from 'vue'
 import { listKnowledgeBases, getKnowledgeBaseById } from '@/api/knowledge-base'
 import { listAgents, type CustomAgent } from '@/api/agent'
 import { listModels, type ModelConfig } from '@/api/model'
@@ -300,6 +301,17 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
       agentsLoadedLocale = ''
     }
   }
+
+  onScopeDispose(subscribeAssistantDataChange((changes) => {
+    if (changes.some(change => change.area === 'agent')) {
+      agentKbCache.invalidate()
+      void ensureAgents(true).catch(() => {})
+    }
+    if (changes.some(change => ['knowledge_base', 'knowledge', 'faq', 'wiki'].includes(change.area))) {
+      invalidate('knowledgeBases')
+      void ensureKnowledgeBases(true).catch(() => {})
+    }
+  }, { areas: ['agent', 'knowledge_base', 'knowledge', 'faq', 'wiki'] }))
 
   return {
     rawKnowledgeBases,

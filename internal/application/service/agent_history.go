@@ -484,13 +484,15 @@ func (r *historyReplay) openingUserMessage(m *types.Message) chat.Message {
 // context format, which must not be mixed into the current request protocol.
 // Image captions and attachments are reconstructed from their canonical DB
 // columns so useful user-provided context is retained without stale RAG data.
+// Stored documents replay as manifest entries the agent can read again, so
+// excerpts chosen for an earlier question do not ride along in every turn.
 func buildUserHistoryMessage(m *types.Message) chat.Message {
 	content := m.Content
 	if captions := extractImageCaptionsFromMessage(m.Images); captions != "" {
 		content += "\n\n[用户上传图片内容]\n" + captions
 	}
 	if len(m.Attachments) > 0 {
-		content += m.Attachments.BuildPrompt()
+		content += m.Attachments.BuildAgentPrompt()
 	}
 	return chat.Message{Role: "user", Content: content}
 }

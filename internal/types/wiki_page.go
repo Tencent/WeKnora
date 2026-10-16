@@ -197,17 +197,17 @@ type WikiPage struct {
 	KnowledgeBaseID string `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
 	// URL-friendly slug for addressing, e.g. "entity/acme-corp", "concept/rag"
 	// Unique within a knowledge base
-	Slug string `json:"slug" gorm:"type:varchar(255);uniqueIndex:idx_kb_slug"`
+	Slug string `json:"slug" gorm:"type:varchar(255);uniqueIndex:idx_kb_slug" extensions:"x-agent"`
 	// Human-readable title
-	Title string `json:"title" gorm:"type:varchar(512)"`
+	Title string `json:"title" gorm:"type:varchar(512)" extensions:"x-agent"`
 	// Page type: summary, entity, concept, index, synthesis, comparison
-	PageType string `json:"page_type" gorm:"type:varchar(32);index"`
+	PageType string `json:"page_type" gorm:"type:varchar(32);index" extensions:"x-agent"`
 	// Page status: draft, published, archived
-	Status string `json:"status" gorm:"type:varchar(32);default:'published'"`
+	Status string `json:"status" gorm:"type:varchar(32);default:'published'" extensions:"x-agent"`
 	// Full markdown content
 	Content string `json:"content" gorm:"type:text"`
 	// One-line summary for index listing
-	Summary string `json:"summary" gorm:"type:text"`
+	Summary string `json:"summary" gorm:"type:text" extensions:"x-agent"`
 	// Alternate names, abbreviations, acronyms or translated names
 	Aliases StringArray `json:"aliases" gorm:"type:json"`
 	// ParentSlug optionally points at the wiki page that should act as this
@@ -219,7 +219,7 @@ type WikiPage struct {
 	// CategoryPath / WikiPath / Depth fields below are denormalized caches
 	// recomputed from this folder's chain on every write so list/index/search
 	// queries don't have to join wiki_folders.
-	FolderID string `json:"folder_id,omitempty" gorm:"column:folder_id;type:varchar(36);index;default:''"`
+	FolderID string `json:"folder_id,omitempty" gorm:"column:folder_id;type:varchar(36);index;default:''" extensions:"x-agent"`
 	// CategoryPath is the directory breadcrumb that groups this page in the
 	// wiki browser, e.g. ["AI", "LLM 应用", "RAG"]. Derived cache of the
 	// folder chain identified by FolderID.
@@ -256,7 +256,7 @@ type WikiPage struct {
 	// bookkeeping writes (link maintenance, same-content re-ingest, status
 	// sync from background jobs) leave it untouched so it can be used as a
 	// real "the page was edited" signal.
-	Version int `json:"version" gorm:"default:1"`
+	Version int `json:"version" gorm:"default:1" extensions:"x-agent"`
 	// LastEditSource records who authored the CURRENT version: pipeline |
 	// agent | user | revert. Empty for legacy rows (treated as pipeline).
 	// When the version is superseded this value travels into the revision
@@ -268,7 +268,7 @@ type WikiPage struct {
 	// Creation time
 	CreatedAt time.Time `json:"created_at"`
 	// Last update time
-	UpdatedAt time.Time `json:"updated_at"`
+	UpdatedAt time.Time `json:"updated_at" extensions:"x-agent"`
 	// Soft delete
 	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"index"`
 }
@@ -327,18 +327,18 @@ type WikiPageRevision struct {
 	KnowledgeBaseID string      `json:"knowledge_base_id" gorm:"type:varchar(36);index:idx_wiki_page_revisions_kb_slug"`
 	PageID          string      `json:"page_id" gorm:"type:varchar(36);uniqueIndex:idx_wiki_page_revisions_page_version"`
 	Slug            string      `json:"slug" gorm:"type:varchar(255);index:idx_wiki_page_revisions_kb_slug"`
-	Version         int         `json:"version" gorm:"uniqueIndex:idx_wiki_page_revisions_page_version"`
-	Title           string      `json:"title" gorm:"type:varchar(512)"`
+	Version         int         `json:"version" gorm:"uniqueIndex:idx_wiki_page_revisions_page_version" extensions:"x-agent"`
+	Title           string      `json:"title" gorm:"type:varchar(512)" extensions:"x-agent"`
 	PageType        string      `json:"page_type" gorm:"type:varchar(32)"`
 	Status          string      `json:"status" gorm:"type:varchar(32)"`
-	Content         string      `json:"content,omitempty" gorm:"type:text"`
-	Summary         string      `json:"summary" gorm:"type:text"`
+	Content         string      `json:"content,omitempty" gorm:"type:text" extensions:"x-agent,x-agent-max-runes=8000"`
+	Summary         string      `json:"summary" gorm:"type:text" extensions:"x-agent"`
 	Aliases         StringArray `json:"aliases" gorm:"type:json"`
 	// Author of THIS version (same semantics as WikiPage.LastEditSource).
-	EditSource string `json:"edit_source" gorm:"type:varchar(16);default:''"`
+	EditSource string `json:"edit_source" gorm:"type:varchar(16);default:''" extensions:"x-agent"`
 	EditorID   string `json:"editor_id" gorm:"type:varchar(64);default:''"`
 	// When this version was authored (the page's updated_at while current).
-	EditedAt  time.Time `json:"edited_at"`
+	EditedAt  time.Time `json:"edited_at" extensions:"x-agent"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -402,16 +402,18 @@ type WikiPageUpdateRequest struct {
 // which the frontend already has.
 type WikiPageRevisionListResponse struct {
 	Revisions      []*WikiPageRevision `json:"revisions"`
-	Total          int64               `json:"total"`
-	CurrentVersion int                 `json:"current_version"`
+	Total          int64               `json:"total" extensions:"x-agent"`
+	CurrentVersion int                 `json:"current_version" extensions:"x-agent"`
 }
 
 // WikiPageRevertRequest rolls a page back to one of its stored revisions.
 // Slug travels in the body (not the path) for the same reason as
 // WikiPageMoveRequest: hierarchical slugs collide with gin's catch-all.
 type WikiPageRevertRequest struct {
-	Slug    string `json:"slug" binding:"required"`
-	Version int    `json:"version" binding:"required"`
+	// Slug of the page to revert.
+	Slug string `json:"slug" binding:"required" extensions:"x-agent"`
+	// Revision to restore. Versions start at 1.
+	Version int `json:"version" binding:"required" minimum:"1" extensions:"x-agent"`
 }
 
 // WikiFolderRootID is the sentinel parent/folder id meaning "the wiki root"
@@ -424,12 +426,12 @@ const WikiFolderRootID = ""
 // (ParentID, "" = root); Path is the materialized "/"-joined name chain kept
 // purely for cheap display/sort. A wiki page's placement is WikiPage.FolderID.
 type WikiFolder struct {
-	ID              string         `json:"id" gorm:"type:varchar(36);primaryKey"`
+	ID              string         `json:"id" gorm:"type:varchar(36);primaryKey" extensions:"x-agent=folder_id"`
 	TenantID        uint64         `json:"tenant_id" gorm:"index"`
 	KnowledgeBaseID string         `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
-	ParentID        string         `json:"parent_id" gorm:"column:parent_id;type:varchar(36);index;default:''"`
-	Name            string         `json:"name" gorm:"type:varchar(255)"`
-	Path            string         `json:"path" gorm:"type:varchar(1024)"`
+	ParentID        string         `json:"parent_id" gorm:"column:parent_id;type:varchar(36);index;default:''" extensions:"x-agent"`
+	Name            string         `json:"name" gorm:"type:varchar(255)" extensions:"x-agent"`
+	Path            string         `json:"path" gorm:"type:varchar(1024)" extensions:"x-agent"`
 	Depth           int            `json:"depth" gorm:"default:0"`
 	SortOrder       int            `json:"sort_order" gorm:"default:0"`
 	CreatedAt       time.Time      `json:"created_at"`
@@ -447,8 +449,8 @@ func (WikiFolder) TableName() string {
 // the UI can render an expand affordance without a second round-trip.
 type WikiFolderNode struct {
 	WikiFolder
-	PageCount   int64 `json:"page_count"`
-	HasChildren bool  `json:"has_children"`
+	PageCount   int64 `json:"page_count" extensions:"x-agent"`
+	HasChildren bool  `json:"has_children" extensions:"x-agent"`
 }
 
 // WikiFolderListResponse is the payload for listing the direct children of a
@@ -460,8 +462,10 @@ type WikiFolderListResponse struct {
 
 // WikiFolderCreateRequest creates a new (initially empty) folder under ParentID.
 type WikiFolderCreateRequest struct {
-	ParentID string `json:"parent_id"`
-	Name     string `json:"name"`
+	// Parent folder id; empty means the top level.
+	ParentID string `json:"parent_id" extensions:"x-agent"`
+	// Folder name.
+	Name string `json:"name" extensions:"x-agent"`
 }
 
 // WikiFolderUpdateRequest renames and/or reparents a folder. ParentID is
@@ -477,8 +481,10 @@ type WikiFolderUpdateRequest struct {
 // ("" = root). Slug is carried in the body (not the path) because wiki slugs
 // are hierarchical ("entity/acme") and would collide with gin's catch-all.
 type WikiPageMoveRequest struct {
-	Slug     string `json:"slug" binding:"required"`
-	FolderID string `json:"folder_id"`
+	// Slug of the page to move.
+	Slug string `json:"slug" binding:"required" extensions:"x-agent"`
+	// Target folder id; empty means the top level.
+	FolderID string `json:"folder_id" extensions:"x-agent"`
 }
 
 // WikiExtractionGranularity controls how aggressive Pass 0 (candidate slug
@@ -529,19 +535,16 @@ func (g WikiExtractionGranularity) Normalize() WikiExtractionGranularity {
 // Whether the wiki feature is turned on is controlled by IndexingStrategy.WikiEnabled;
 // this struct only carries wiki-specific tunables.
 type WikiConfig struct {
-	// SynthesisModelID is the LLM model ID used for wiki page generation and updates
-	SynthesisModelID string `yaml:"synthesis_model_id" json:"synthesis_model_id"`
-	// MaxPagesPerIngest limits pages created/updated per ingest operation (0 = no limit)
-	MaxPagesPerIngest int `yaml:"max_pages_per_ingest" json:"max_pages_per_ingest"`
-	// ExtractionGranularity controls how many candidate slugs Pass 0 extracts
-	// per document. Empty / unknown value is treated as WikiExtractionStandard.
-	ExtractionGranularity WikiExtractionGranularity `yaml:"extraction_granularity" json:"extraction_granularity,omitempty"`
-	// ContentInstructions controls tone, structure and emphasis for generated
-	// summary/entity/index prose. Citation and merge rules remain system-owned.
-	ContentInstructions string `yaml:"content_instructions,omitempty" json:"content_instructions,omitempty"`
-	// ExtractionInstructions tells candidate extraction which domain concepts
-	// to emphasize without replacing the stable JSON/citation protocol.
-	ExtractionInstructions string `yaml:"extraction_instructions,omitempty" json:"extraction_instructions,omitempty"`
+	// SynthesisModelID is the model that writes Wiki pages. Empty uses summary_model_id.
+	SynthesisModelID string `yaml:"synthesis_model_id" json:"synthesis_model_id" extensions:"x-agent=wiki_synthesis_model_id"`
+	// MaxPagesPerIngest limits pages created or updated per ingest. 0 means no limit.
+	MaxPagesPerIngest int `yaml:"max_pages_per_ingest" json:"max_pages_per_ingest" minimum:"0" maximum:"1000" extensions:"x-agent=wiki_max_pages"`
+	// ExtractionGranularity is focused, standard or exhaustive. Empty means standard.
+	ExtractionGranularity WikiExtractionGranularity `yaml:"extraction_granularity" json:"extraction_granularity,omitempty" enums:"focused,standard,exhaustive" extensions:"x-agent=wiki_granularity"`
+	// ContentInstructions sets tone and emphasis for generated Wiki prose. Citations stay fixed.
+	ContentInstructions string `yaml:"content_instructions,omitempty" json:"content_instructions,omitempty" extensions:"x-agent=wiki_content_instructions,x-agent-detail,x-agent-max-bytes=4000"`
+	// ExtractionInstructions tells page extraction which concepts to keep. The output format stays fixed.
+	ExtractionInstructions string `yaml:"extraction_instructions,omitempty" json:"extraction_instructions,omitempty" extensions:"x-agent=wiki_extraction_instructions,x-agent-detail,x-agent-max-bytes=4000"`
 
 	// Wiki ingest concurrency is two-level:
 	//   1. batch-level: multiple batches per KB run concurrently in the wiki
@@ -733,29 +736,29 @@ type WikiGraphEdge struct {
 
 // WikiStats provides aggregate statistics about the wiki
 type WikiStats struct {
-	TotalPages    int64            `json:"total_pages"`
+	TotalPages    int64            `json:"total_pages" extensions:"x-agent"`
 	PagesByType   map[string]int64 `json:"pages_by_type"`
-	TotalLinks    int64            `json:"total_links"`
-	OrphanCount   int64            `json:"orphan_count"`   // pages with no inbound links
-	RecentUpdates []*WikiPage      `json:"recent_updates"` // last N updated pages
-	PendingTasks  int64            `json:"pending_tasks"`  // number of documents waiting to be ingested
-	PendingIssues int64            `json:"pending_issues"` // number of pending wiki issues
-	IsActive      bool             `json:"is_active"`      // whether wiki ingestion is currently running
+	TotalLinks    int64            `json:"total_links" extensions:"x-agent"`
+	OrphanCount   int64            `json:"orphan_count" extensions:"x-agent"`   // pages with no inbound links
+	RecentUpdates []*WikiPage      `json:"recent_updates"`                      // last N updated pages
+	PendingTasks  int64            `json:"pending_tasks" extensions:"x-agent"`  // number of documents waiting to be ingested
+	PendingIssues int64            `json:"pending_issues" extensions:"x-agent"` // number of pending wiki issues
+	IsActive      bool             `json:"is_active" extensions:"x-agent"`      // whether wiki ingestion is currently running
 }
 
 // WikiPageIssue represents an issue flagged on a specific wiki page.
 // These issues are typically identified by agents or linters and stored for review.
 type WikiPageIssue struct {
-	ID                    string         `json:"id" gorm:"type:varchar(36);primaryKey"`
+	ID                    string         `json:"id" gorm:"type:varchar(36);primaryKey" extensions:"x-agent=issue_id"`
 	TenantID              uint64         `json:"tenant_id" gorm:"index"`
 	KnowledgeBaseID       string         `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
-	Slug                  string         `json:"slug" gorm:"type:varchar(255);index"`
-	IssueType             string         `json:"issue_type" gorm:"type:varchar(50)"`
-	Description           string         `json:"description" gorm:"type:text"`
-	SuspectedKnowledgeIDs StringArray    `json:"suspected_knowledge_ids" gorm:"type:json"`
-	Status                string         `json:"status" gorm:"type:varchar(20);default:'pending';index"`
-	ReportedBy            string         `json:"reported_by" gorm:"type:varchar(100)"`
-	CreatedAt             time.Time      `json:"created_at"`
+	Slug                  string         `json:"slug" gorm:"type:varchar(255);index" extensions:"x-agent"`
+	IssueType             string         `json:"issue_type" gorm:"type:varchar(50)" extensions:"x-agent"`
+	Description           string         `json:"description" gorm:"type:text" extensions:"x-agent"`
+	SuspectedKnowledgeIDs StringArray    `json:"suspected_knowledge_ids" gorm:"type:json" extensions:"x-agent=knowledge_ids"`
+	Status                string         `json:"status" gorm:"type:varchar(20);default:'pending';index" extensions:"x-agent"`
+	ReportedBy            string         `json:"reported_by" gorm:"type:varchar(100)" extensions:"x-agent"`
+	CreatedAt             time.Time      `json:"created_at" extensions:"x-agent"`
 	UpdatedAt             time.Time      `json:"updated_at"`
 	DeletedAt             gorm.DeletedAt `json:"deleted_at" gorm:"index"`
 }

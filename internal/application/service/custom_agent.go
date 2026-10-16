@@ -101,9 +101,10 @@ func (s *customAgentService) CreateAgent(ctx context.Context, agent *types.Custo
 	agent.CreatedAt = time.Now()
 	agent.UpdatedAt = time.Now()
 
-	// Ensure agent mode is set for user-created agents
+	// An omitted mode follows the editor: smart-reasoning, so MCP and skills
+	// work. An explicit quick-answer is kept.
 	if agent.Config.AgentMode == "" {
-		agent.Config.AgentMode = types.AgentModeQuickAnswer
+		agent.Config.AgentMode = types.AgentModeSmartReasoning
 	}
 
 	// Cannot create built-in agents
@@ -664,13 +665,23 @@ func (s *customAgentService) getSuggestedQuestions(
 			// e.g. a quick-answer (RAG-only) agent doesn't surface wiki-only
 			// KBs whose wiki pages it could never answer from. Same filter
 			// the @ mention dropdown applies on the frontend.
-			capFilter := tools.DeriveKBFilterForAgent(agent.Config.AgentMode, agent.Config.AllowedTools)
+			mode, allowed := agent.Config.AgentMode, agent.Config.AllowedTools
+			capFilter := tools.DeriveKBFilterForAgent(mode, allowed)
+			accept := func(kb *types.KnowledgeBase) bool {
+				return capFilter.IsEmpty() || tools.KBSatisfiesAgentRequirements(kb.Capabilities(), mode, allowed)
+			}
 			for _, kb := range kbs {
-				if !capFilter.IsEmpty() &&
-					!tools.KBSatisfiesAgentRequirements(kb.Capabilities(), agent.Config.AgentMode, agent.Config.AllowedTools) {
-					continue
+				if accept(kb) {
+					effectiveKBIDs = append(effectiveKBIDs, kb.ID)
 				}
-				effectiveKBIDs = append(effectiveKBIDs, kb.ID)
+			}
+			// Match the chat runtime's "all" scope, which also reaches KBs shared
+			// into the caller's tenant; otherwise a tenant whose only KB is shared
+			// sees no starters until it @mentions that KB explicitly.
+			for _, kb := range s.sharedSuggestionKnowledgeBases(ctx, tenantID, agent) {
+				if accept(kb) {
+					effectiveKBIDs = mergeUniqueStrings(effectiveKBIDs, []string{kb.ID})
+				}
 			}
 		case "selected":
 			effectiveKBIDs = agent.Config.KnowledgeBases
@@ -1154,6 +1165,31 @@ func (s *customAgentService) readableSuggestionKnowledgeIDs(ctx context.Context,
 		}
 	}
 	return readable
+}
+
+// sharedSuggestionKnowledgeBases lists the KBs shared into the caller's tenant.
+// A shared agent keeps its owner's scope, so it never picks up the borrower's
+// shares.
+func (s *customAgentService) sharedSuggestionKnowledgeBases(
+	ctx context.Context,
+	tenantID uint64,
+	agent *types.CustomAgent,
+) []*types.KnowledgeBase {
+	if s.kbShareService == nil || agent.TenantID != tenantID {
+		return nil
+	}
+	shared, err := s.kbShareService.ListSharedKnowledgeBases(ctx, tenantID, types.TenantRoleFromContext(ctx))
+	if err != nil {
+		logger.Warnf(ctx, "Failed to list shared knowledge bases for suggestions: %v", err)
+		return nil
+	}
+	kbs := make([]*types.KnowledgeBase, 0, len(shared))
+	for _, info := range shared {
+		if info != nil && info.KnowledgeBase != nil {
+			kbs = append(kbs, info.KnowledgeBase)
+		}
+	}
+	return kbs
 }
 
 // groupKBIDsByEffectiveTenant resolves each kbID to the tenant whose chunk

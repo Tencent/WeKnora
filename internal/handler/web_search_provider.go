@@ -277,7 +277,7 @@ func (h *WebSearchProviderHandler) UpdateProvider(c *gin.Context) {
 // @Tags         网络搜索
 // @Produce      json
 // @Param        id   path      string                  true  "Provider ID"
-// @Success      200  {object}  map[string]interface{}  "success: true"
+// @Success      200  {object}  handler.SuccessResponse  "success: true"
 // @Failure      404  {object}  map[string]interface{}  "Provider 不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -315,7 +315,7 @@ func (h *WebSearchProviderHandler) DeleteProvider(c *gin.Context) {
 // @Description  返回 UI 表单需要的 provider 类型及参数定义
 // @Tags         网络搜索
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "provider 类型列表"
+// @Success      200  {object}  handler.DataResponse{data=[]types.WebSearchProviderTypeInfo}  "provider 类型列表"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /web-search-providers/types [get]
@@ -334,7 +334,7 @@ func (h *WebSearchProviderHandler) ListProviderTypes(c *gin.Context) {
 // @Tags         网络搜索
 // @Produce      json
 // @Param        id   path      string                  true  "Provider ID"
-// @Success      200  {object}  map[string]interface{}  "测试结果"
+// @Success      200  {object}  handler.SuccessErrorResponse  "测试结果"
 // @Failure      404  {object}  map[string]interface{}  "Provider 不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -379,7 +379,7 @@ type TestProviderRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      handler.TestProviderRequest  true  "{provider, parameters}"
-// @Success      200      {object}  map[string]interface{}  "测试结果"
+// @Success      200      {object}  handler.SuccessErrorResponse  "测试结果"
 // @Failure      400      {object}  map[string]interface{}  "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth

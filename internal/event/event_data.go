@@ -1,6 +1,9 @@
 package event
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // EventData contains common event data structures for different stages
 
@@ -142,10 +145,14 @@ type AgentCompleteData struct {
 	KnowledgeRefs   []interface{}          `json:"knowledge_refs,omitempty"` // []*types.SearchResult
 	AgentSteps      interface{}            `json:"agent_steps,omitempty"`    // []types.AgentStep - detailed execution steps
 	Usage           interface{}            `json:"usage,omitempty"`          // *types.TokenUsage - LLM token usage aggregated over the turn
+	ModelID         string                 `json:"model_id,omitempty"`       // Chat model whose calls produced Usage
 	TotalDurationMs int64                  `json:"total_duration_ms"`
 	MessageID       string                 `json:"message_id,omitempty"` // Assistant message ID
 	RequestID       string                 `json:"request_id,omitempty"`
 	Extra           map[string]interface{} `json:"extra,omitempty"`
+	// Suspended is set (*types.PromptSuspension) when the run ended waiting
+	// on a user prompt; the message is then not complete.
+	Suspended interface{} `json:"suspended,omitempty"`
 }
 
 // === Streaming Event Data Structures ===
@@ -270,9 +277,13 @@ type ToolApprovalRequiredData struct {
 	Args               interface{} `json:"args,omitempty"`
 	ArgsJSON           string      `json:"args_json,omitempty"`
 	TimeoutSeconds     int         `json:"timeout_seconds"`
-	RequestedAtUnix    int64       `json:"requested_at"`
-	ToolCallID         string      `json:"tool_call_id"`
-	RequestID          string      `json:"request_id,omitempty"`
+	// HotWaitSeconds equals TimeoutSeconds; when Suspendable, the run is
+	// suspended rather than rejected once it elapses.
+	HotWaitSeconds  int    `json:"hot_wait_seconds"`
+	Suspendable     bool   `json:"suspendable"`
+	RequestedAtUnix int64  `json:"requested_at"`
+	ToolCallID      string `json:"tool_call_id"`
+	RequestID       string `json:"request_id,omitempty"`
 }
 
 // ToolApprovalResolvedData confirms the user decision (or timeout/cancel).
@@ -282,6 +293,34 @@ type ToolApprovalResolvedData struct {
 	Reason    string `json:"reason,omitempty"`
 	TimedOut  bool   `json:"timed_out,omitempty"`
 	Canceled  bool   `json:"canceled,omitempty"`
+}
+
+// AgentPromptRequiredData asks the user a question of the given kind.
+// Request is the kind's request JSON, e.g. types.AskUserPromptRequest.
+type AgentPromptRequiredData struct {
+	PendingID          string          `json:"pending_id"`
+	Kind               string          `json:"kind"`
+	SessionID          string          `json:"session_id"`
+	AssistantMessageID string          `json:"assistant_message_id"`
+	Request            json.RawMessage `json:"request"`
+	TimeoutSeconds     int             `json:"timeout_seconds"`
+	HotWaitSeconds     int             `json:"hot_wait_seconds"`
+	Suspendable        bool            `json:"suspendable"`
+	RequestedAtUnix    int64           `json:"requested_at"`
+	ToolCallID         string          `json:"tool_call_id"`
+	RequestID          string          `json:"request_id,omitempty"`
+}
+
+// AgentPromptResolvedData reports how a prompt ended. Response is the
+// answer JSON when Answered.
+type AgentPromptResolvedData struct {
+	PendingID string          `json:"pending_id"`
+	Kind      string          `json:"kind"`
+	Answered  bool            `json:"answered"`
+	Response  json.RawMessage `json:"response,omitempty"`
+	Reason    string          `json:"reason,omitempty"`
+	TimedOut  bool            `json:"timed_out,omitempty"`
+	Canceled  bool            `json:"canceled,omitempty"`
 }
 
 // MCPOAuthRequiredData is emitted when an OAuth-enabled MCP service is invoked

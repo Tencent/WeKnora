@@ -166,55 +166,55 @@ func (order KnowledgeListSortOrder) Valid() bool {
 // and references to the physical file if applicable.
 type Knowledge struct {
 	// Unique identifier of the knowledge
-	ID string `json:"id"                 gorm:"type:varchar(36);primaryKey"`
+	ID string `json:"id"                 gorm:"type:varchar(36);primaryKey" extensions:"x-agent=knowledge_id"`
 	// Workspace ID
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the knowledge base
-	KnowledgeBaseID string `json:"knowledge_base_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id" extensions:"x-agent"`
 	// Tags holds the tags associated with this knowledge (populated on query, not persisted directly).
 	Tags []*KnowledgeTag `json:"tags"               gorm:"-"`
 	// Type of the knowledge
-	Type string `json:"type"`
+	Type string `json:"type" extensions:"x-agent"`
 	// Title of the knowledge
-	Title string `json:"title"`
+	Title string `json:"title" extensions:"x-agent"`
 	// Description of the knowledge
 	Description string `json:"description"`
 	// DescriptionSpecified distinguishes an explicitly supplied empty description
 	// from an omitted field in partial update requests.
 	DescriptionSpecified bool `json:"-" gorm:"-"`
 	// Source of the knowledge (e.g. URL address for url type, "manual" for manual type)
-	Source string `json:"source"             gorm:"type:varchar(2048)"`
+	Source string `json:"source"             gorm:"type:varchar(2048)" extensions:"x-agent"`
 	// Channel indicates through which channel the knowledge was ingested (web, api, browser_extension, wechat, etc.)
-	Channel string `json:"channel"            gorm:"type:varchar(50);default:'web'"`
+	Channel string `json:"channel"            gorm:"type:varchar(50);default:'web'" extensions:"x-agent"`
 	// Parse status of the knowledge
-	ParseStatus string `json:"parse_status"`
+	ParseStatus string `json:"parse_status" extensions:"x-agent"`
 	// PendingSubtasksCount is the outstanding enrichment subtask count
 	// (summary + question + graph chunks). Only meaningful while
 	// ParseStatus == "finalizing"; defaults to 0 in any terminal state.
 	PendingSubtasksCount int `json:"pending_subtasks_count" gorm:"type:int;not null;default:0"`
 	// Summary status for async summary generation
-	SummaryStatus string `json:"summary_status"     gorm:"type:varchar(32);default:none"`
+	SummaryStatus string `json:"summary_status"     gorm:"type:varchar(32);default:none" extensions:"x-agent"`
 	// Profile is the structured companion of Description: a one-line gist,
 	// topic keywords, a document type and one typical question. It is produced
 	// by the same model call as the summary and feeds the knowledge-base
 	// level description aggregation. nil when no summary has been generated.
 	Profile *KnowledgeProfile `json:"profile,omitempty" gorm:"column:profile;type:json"`
 	// Enable status of the knowledge
-	EnableStatus string `json:"enable_status"`
+	EnableStatus string `json:"enable_status" extensions:"x-agent"`
 	// ID of the embedding model
 	EmbeddingModelID string `json:"embedding_model_id"`
 	// File name of the knowledge
-	FileName string `json:"file_name"`
+	FileName string `json:"file_name" extensions:"x-agent"`
 	// FolderPath is the canonical relative directory this entry belongs to
 	// inside the knowledge base, e.g. "docs/spec" for a folder upload of
 	// "docs/spec/design.md". Empty means the knowledge base root. It is a
 	// display/navigation concern only: it never affects where the file is
 	// physically stored (see FilePath).
-	FolderPath string `json:"folder_path"        gorm:"type:varchar(1024);not null;default:''"`
+	FolderPath string `json:"folder_path"        gorm:"type:varchar(1024);not null;default:''" extensions:"x-agent"`
 	// File type of the knowledge
-	FileType string `json:"file_type"`
+	FileType string `json:"file_type" extensions:"x-agent"`
 	// File size of the knowledge
-	FileSize int64 `json:"file_size"`
+	FileSize int64 `json:"file_size" extensions:"x-agent"`
 	// File hash of the knowledge
 	FileHash string `json:"file_hash"`
 	// File path of the knowledge
@@ -229,24 +229,24 @@ type Knowledge struct {
 	// Last FAQ import result (for FAQ type knowledge only)
 	LastFAQImportResult JSON `json:"last_faq_import_result" gorm:"type:json"`
 	// Creation time of the knowledge
-	CreatedAt time.Time `json:"created_at"`
+	CreatedAt time.Time `json:"created_at" extensions:"x-agent"`
 	// Last updated time of the knowledge
-	UpdatedAt time.Time `json:"updated_at"`
+	UpdatedAt time.Time `json:"updated_at" extensions:"x-agent"`
 	// Processed time of the knowledge
-	ProcessedAt *time.Time `json:"processed_at"`
+	ProcessedAt *time.Time `json:"processed_at" extensions:"x-agent"`
 	// Error message of the knowledge
-	ErrorMessage string `json:"error_message"`
+	ErrorMessage string `json:"error_message" extensions:"x-agent"`
 	// Deletion time of the knowledge
 	DeletedAt gorm.DeletedAt `json:"deleted_at"         gorm:"index"`
 	// Knowledge base name (not stored in database, populated on query)
-	KnowledgeBaseName string `json:"knowledge_base_name" gorm:"-"`
+	KnowledgeBaseName string `json:"knowledge_base_name" gorm:"-" extensions:"x-agent"`
 	// Most recent processing progress (row or span write) for an in-flight
 	// row, so clients can tell a slow stage from a stalled one. Not stored.
-	LastActivityAt *time.Time `json:"last_activity_at,omitempty" gorm:"-"`
+	LastActivityAt *time.Time `json:"last_activity_at,omitempty" gorm:"-" extensions:"x-agent"`
 	// Verdict on an in-flight row gone quiet: StallStateQueued (its work is
 	// still queued, i.e. backlogged) or StallStateStalled (nothing left to
 	// run it). Empty while it is progressing or the probe failed. Not stored.
-	StallState string `json:"stall_state,omitempty" gorm:"-"`
+	StallState string `json:"stall_state,omitempty" gorm:"-" extensions:"x-agent"`
 }
 
 // Stall verdicts for Knowledge.StallState.
@@ -326,9 +326,13 @@ type ManualKnowledgeMetadata struct {
 
 // ManualKnowledgePayload represents the payload for manual knowledge operations.
 type ManualKnowledgePayload struct {
-	Title         string                     `json:"title"`
-	Content       string                     `json:"content"`
-	Status        string                     `json:"status"`
+	// Document title.
+	Title string `json:"title" extensions:"x-agent"`
+	// Markdown content. The assistant may send a full document; the API limit
+	// is 200000 runes, and x-agent-max-bytes covers that in UTF-8.
+	Content string `json:"content" extensions:"x-agent,x-agent-required,x-agent-max-bytes=800000"`
+	// draft keeps the document out of search; publish indexes it.
+	Status        string                     `json:"status" enums:"draft,publish" extensions:"x-agent,x-agent-required"`
 	TagIDs        []string                   `json:"tag_ids"`
 	Channel       string                     `json:"channel"`
 	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`

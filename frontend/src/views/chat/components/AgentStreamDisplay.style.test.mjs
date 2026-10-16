@@ -20,6 +20,7 @@ test('steer seals animation while keeping the preceding timeline open without co
   const props = reactive({ ragMode: false, session: { steerForked: true, is_completed: true } })
   const state = vm.runInNewContext(`${stateBlock}\n${collapseBlock}\n({ isConversationDone, isSegmentDone, shouldShowCollapsedSteps })`, {
     props, computed, isAssistantTurnComplete, intermediateStepsCount: { value: 2 },
+    isAwaitingInput: (m) => m?.run_state === 'awaiting_input',
   })
   assert.equal(state.isSegmentDone.value, true)
   assert.equal(state.isConversationDone.value, false)
@@ -27,6 +28,9 @@ test('steer seals animation while keeping the preceding timeline open without co
   props.session.steerForked = false
   assert.equal(state.isConversationDone.value, true)
   assert.equal(state.shouldShowCollapsedSteps.value, true)
+  props.session.run_state = 'awaiting_input'
+  assert.equal(state.isConversationDone.value, false)
+  assert.equal(state.shouldShowCollapsedSteps.value, false)
 })
 
 test('agent steps use compact muted timeline styling', () => {
@@ -145,7 +149,10 @@ test('agent mode shows a native placeholder before answer whenever nothing is pe
   assert.match(source, /return !hasPendingStreamingActivity\.value/)
   assert.match(source, /const hasPendingStreamingActivity = computed/)
   assert.match(source, /event\.thinking === true \|\| isThinkingActive\(event\.event_id\)/)
-  assert.match(source, /event\.type === 'tool_approval_required' \|\| event\.type === 'mcp_oauth_required'/)
+  assert.match(
+    source,
+    /event\.type === 'tool_approval_required' \|\|\s*event\.type === 'mcp_oauth_required' \|\|\s*event\.type === 'agent_prompt_required'/,
+  )
   assert.match(source, /class="action-card action-pending"/)
   assert.match(source, /t\('chat\.thinkingAlt'\)/)
   assert.match(source, /chat-timeline-loading\.less/)

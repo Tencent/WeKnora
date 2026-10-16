@@ -64,6 +64,36 @@ type QuestionOriginInfo struct {
 	Document          *SelectedDocumentInfo // nil when only the base is known
 }
 
+// PageContextAgent is a tenant-visible agent; IDs remain raw in model context.
+type PageContextAgent struct {
+	ID   string
+	Name string
+}
+
+// PageContextInfo contains only resources verified as visible in this turn.
+type PageContextInfo struct {
+	Agent             *PageContextAgent
+	KnowledgeBaseID   string
+	KnowledgeBaseName string
+	Document          *SelectedDocumentInfo // nil unless a document is open
+	WikiPage          *PageContextWikiPage  // nil unless a Wiki page is open
+	WikiIssues        []*PageContextWikiIssue
+}
+
+// PageContextWikiPage is the Wiki page open in a page context.
+type PageContextWikiPage struct {
+	Slug  string
+	Title string
+}
+
+// PageContextWikiIssue is a Wiki issue shown on the page the user has open.
+type PageContextWikiIssue struct {
+	ID        string
+	Slug      string
+	IssueType string
+	Status    string
+}
+
 // PinnedMCPServiceInfo describes an MCP service explicitly @mentioned for this turn.
 type PinnedMCPServiceInfo struct {
 	Discoverable bool // Available through the scoped MCP directory.

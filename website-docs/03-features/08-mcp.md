@@ -2,7 +2,7 @@
 
 MCP 用于智能体与外部工具之间的连接。WeKnora 支持接入外部 MCP 服务，也提供独立 MCP Server 供其他客户端调用：
 
-1. **WeKnora 作为 MCP 客户端**：在「工具箱 → MCP服务」中接入任意外部 MCP server（SSE / Streamable HTTP），其工具通过目录按需加载，供 Agent 在对话中调用。支持 API Key / Bearer / OAuth 2.0（含动态客户端注册与 PKCE）三种认证策略、按工具粒度的启停与人工审批，以及会话内（in-conversation）OAuth 授权。
+1. **WeKnora 作为 MCP 客户端**：在「工具箱 → MCP服务」中接入任意外部 MCP server（SSE / Streamable HTTP），其工具通过目录按需加载，供 Agent 在对话中调用。支持 API Key / Bearer / OAuth 2.0（含动态客户端注册与 PKCE，也可填写预注册客户端；支持以 JWT Bearer 断言代用户获取 token）三种认证策略、按工具粒度的启停与人工审批，以及会话内（in-conversation）OAuth 授权。
 2. **WeKnora 作为 MCP Server**：在「设置 → 发布集成 → MCP Server」中为当前空间创建一个或多个 MCP 端点，每个端点有独立的令牌、知识库范围和工具清单，Claude Desktop、Cursor、Claude Code、VS Code Copilot 等 MCP 客户端通过 Streamable HTTP 直接连接，无需额外部署进程。仓库 `mcp-server/` 目录下的 Python 服务是旧方案，已标记弃用。
 
 接入外部服务可扩展 WeKnora 智能体的工具；运行 WeKnora MCP Server 可让外部客户端使用知识库检索、问答和管理能力。
@@ -28,6 +28,8 @@ MCP 管理页支持按服务名称和卡片显示的用途说明搜索。搜索�
 2. **工具与用途说明**：连接并拉取 Tools，系统会保存完整的工具描述和参数定义；再填写「使用说明」，说明服务用途、适用场景和关键约束。已同步工具后可点「AI 生成」，根据已启用的工具生成一段精简说明，检查后保存。工具列表中可逐个设置「启用工具」和「调用需审批」，修改即时生效，刷新目录不会覆盖这些设置。
 
 模型先读取服务的使用说明，再按需加载具体工具，所以使用说明直接影响 Agent 能否选对服务。OAuth 服务按调用者分别授权。工具需要审批时，在对话中检查参数并确认；单独停用某个工具后，运行时不会执行该工具。WeKnora 的 MCP 客户端不支持 stdio 传输。
+
+工具人工审批通过后，如果 OAuth 尚未授权或已经失效，对话会继续给出 OAuth 授权入口；工具审批与第三方授权是两个独立步骤。无需浏览器的调用者可使用 JWT Bearer 断言换取自身主体的 token，前提是上游支持该授权方式，详见 [OAuth API](../04-api/02-api-agent-mcp.md)。
 
 ## 供外部客户端调用
 
@@ -199,16 +201,17 @@ ClientInfo: mcp.Implementation{ Name: "WeKnora", Version: "1.0.0" }
 | POST | `/mcp-services` | Admin+ | 创建 MCP 服务（URL 经 SSRF 校验 `secutils.ValidateURLForSSRF`） |
 | GET | `/mcp-services` | Viewer+ | 列出当前空间的 MCP 服务（含 builtin） |
 | GET | `/mcp-services/{id}` | Viewer+ | 服务详情（经 DTO 脱敏） |
-| PUT | `/mcp-services/{id}` | Admin+ | 更新服务；主 PUT **忽略** `auth_config.api_key` / `auth_config.token`（打 deprecated 警告） |
+| PUT | `/mcp-services/{id}` | Admin+ | 更新服务；主 PUT **忽略** `auth_config.api_key` / `auth_config.token`（打 deprecated 警告）与 `auth_config.client_secret`；`auth_config.client_id` 可在此设置或以空字符串清除 |
 | DELETE | `/mcp-services/{id}` | Admin+ | 删除服务（软删除，先 `CloseClient`） |
 | POST | `/mcp-services/{id}/test` | Admin+ | 连接测试：临时客户端 Connect + Initialize，并尝试读取工具与资源列表；读取失败且服务端声明支持该能力时返回失败结果，否则记录警告并按空列表继续。返回 `MCPTestResult`（含 `oauth_required` 标记） |
 | GET | `/mcp-services/{id}/tools` | Viewer+ | 拉取 MCP 服务的工具列表 |
 | GET | `/mcp-services/{id}/resources` | Viewer+ | 拉取 MCP 服务的资源列表 |
-| PUT | `/mcp-services/{id}/credentials` | Admin+ | 写入 `api_key` / `token` 凭据（见下） |
-| DELETE | `/mcp-services/{id}/credentials/{field}` | Admin+ | 清除单个凭据字段（`api_key` 或 `token`），幂等，成功返回 204 |
+| PUT | `/mcp-services/{id}/credentials` | Admin+ | 写入 `api_key` / `token` / `client_secret` 凭据（见下） |
+| DELETE | `/mcp-services/{id}/credentials/{field}` | Admin+ | 清除单个凭据字段（`api_key`、`token` 或 `client_secret`），幂等，成功返回 204 |
 | GET | `/mcp-services/{id}/tool-approvals` | Viewer+ | 列出该服务的工具审批策略 |
 | PUT | `/mcp-services/{id}/tool-approvals/{tool_name}` | Admin+ | 更新工具启停/审批：`{"enabled":bool,"require_approval":bool}`，至少一项 |
 | POST | `/mcp-services/{id}/oauth/authorize-url` | Viewer+ | 发起当前用户的 OAuth 授权，返回 `authorization_url` 与 `authorization_attempt` |
+| POST | `/mcp-services/{id}/oauth/assertion` | Viewer+ | 以 JWT Bearer 授权（RFC 7523）提交调用方签发的断言，为当前用户获取 token，无需浏览器；使用服务已有的 OAuth 客户端 |
 | GET | `/mcp-services/{id}/oauth/status` | Viewer+ | 查询授权状态；带 `authorization_attempt` 参数时只认可本次授权流程 |
 | DELETE | `/mcp-services/{id}/oauth/token` | Viewer+ | 撤销当前用户对该服务的 token，并回收连接 |
 | GET | `/mcp-oauth/callback` | **公开** | 授权服务器回调（单次使用的 `state` 参数即鉴权），注册在 `/mcp-services` 组之外避免与 `:id` 路由冲突 |
@@ -220,7 +223,7 @@ embed 渠道另有对应的会话级路由（`/embed/sessions/{session_id}/mcp-o
 
 ##### 凭据子资源（mcp_credentials.go）
 
-密钥（`api_key` / `token`）**不走主 PUT**，而是走独立的 `/credentials` 子资源，`internal/handler/mcp_credentials.go` 的注释给出了三点理由：
+密钥（`api_key` / `token` / 预注册客户端的 `client_secret`）**不走主 PUT**，而是走独立的 `/credentials` 子资源，`internal/handler/mcp_credentials.go` 的注释给出了三点理由：
 
 1. 主 PUT body 从不携带密钥——在契约层面消灭「掩码值回写覆盖真实密钥」这类 bug；
 2. 保存编辑弹窗（改 timeout / enabled 等）不可能误伤已配置的凭据；
@@ -272,10 +275,10 @@ sequenceDiagram
 
 ##### 流程要点（对应源码）
 
-- **发现与动态注册**（`internal/mcp/oauth_manager.go`）：`StartAuthorization` 先构造 `transport.OAuthHandler`（`AuthServerMetadataURL` 为空时由 mcp-go 依据 MCP URL 自动发现授权服务器）；若 `mcp_oauth_clients` 表中该 `(tenant, service)` 尚无客户端，调用 `h.RegisterClient(ctx, "WeKnora")` 做一次性 RFC 7591 注册并 `SaveClient` 持久化，之后所有用户复用同一 client_id。
+- **发现与动态注册**（`internal/mcp/oauth_manager.go`）：`StartAuthorization` 先构造 `transport.OAuthHandler`（`AuthServerMetadataURL` 为空时由 mcp-go 依据 MCP URL 自动发现授权服务器）；服务配置了预注册客户端（`auth_config.client_id`）时直接使用它，否则若 `mcp_oauth_clients` 表中该 `(tenant, service)` 尚无客户端，调用 `h.RegisterClient(ctx, "WeKnora")` 做一次性 RFC 7591 注册并 `SaveClient` 持久化，之后所有用户复用同一 client_id。
 - **PKCE**：`transport.GenerateCodeVerifier()` / `GenerateCodeChallenge()` / `GenerateState()`；`code_verifier` 是秘密，**只存服务端 state**（`internal/mcp/oauth_state.go` 注释明确禁止编码进 state 参数）。
 - **State 存储**（`oauth_state.go`）：有 Redis 时写 `weknora:mcp_oauth_state:<state>`（支持 `WEKNORA_REDIS_NAMESPACE` 命名空间，回调可落在任意后端副本）；Lite 模式退化为带 GC 的内存 map。TTL 固定 10 分钟；`Take` 为**取即删**的单次消费。另存一份不含秘密的 `OAuthAttempt` 记录，`CompleteAttempt` 仅在 token 成功落库后置 `Completed=true`——因此新弹窗的授权状态查询（`status?authorization_attempt=`）**绝不会被历史 token 误判为已完成**。
-- **回调**（`oauth_manager.go` 的 `CompleteAuthorization` + `internal/handler/mcp_oauth.go` 的 `Callback`）：回调路由公开无鉴权，靠单次 state 认证；由于浏览器收到重定向后 Gin 请求 ctx 即取消，token 交换用 `context.WithoutCancel + 60s` 超时（`oauthCallbackTimeout`）脱离请求生命周期。交换成功后 `CloseClient(serviceID)` 回收可能携带旧注册信息的连接，最后把结果编码在 URL fragment（`#mcp_oauth_result=success` / `#mcp_oauth_error=...`）重定向回前端。
+- **回调**（`oauth_manager.go` 的 `CompleteAuthorization` + `internal/handler/mcp_oauth.go` 的 `Callback`）：回调路由公开无鉴权，靠单次 state 认证；由于浏览器收到重定向后 Gin 请求 ctx 即取消，token 交换用 `context.WithoutCancel + 60s` 超时（`oauthCallbackTimeout`）脱离请求生命周期。交换成功后 `CloseClientsAfterAuthorization(ctx, tenantID, serviceID, principal)` 回收当前授权主体的连接，以及同空间仍使用旧 client_id 的过期连接；其余用户的有效连接保留。注册信息读取失败时会保守清理该服务连接，请求已取消时仅清理当前主体，最后把结果编码在 URL fragment（`#mcp_oauth_result=success` / `#mcp_oauth_error=...`）重定向回前端。
 - **重建 handler 的 CSRF 检查**：回调请求里 handler 是重新构造的，需 `h.SetExpectedState(state)` 重新灌入期望 state，mcp-go 的 CSRF 校验才能通过。
 
 ##### Token 的加密存储（oauth_tokenstore.go + types/mcp_oauth.go）

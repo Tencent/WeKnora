@@ -3,6 +3,7 @@ import { ref, onUnmounted } from 'vue';
 import { generateRandomString } from '@/utils/index';
 import i18n from '@/i18n';
 import { getApiBaseUrl } from '@/utils/api-base';
+import type { AssistantAccessLevel } from '@/api/assistant';
 import {
   sanitizeStreamRequestBody,
   type StreamRequestMeta,
@@ -13,6 +14,15 @@ import {
   refreshAccessTokenShared,
   runStreamWithAuthRetry,
 } from '@/utils/authRefresh';
+
+/** The WeKnora page the user has open; agent-chat only. */
+export interface PageContextPayload {
+  agent_id?: string
+  knowledge_base_id?: string
+  knowledge_id?: string
+  wiki_slug?: string
+  wiki_issue_ids?: string[]
+}
 
 interface StreamOptions {
   // 请求方法 (默认POST)
@@ -40,7 +50,7 @@ export function useStream() {
   let renderTimer: number | null = null
 
   // 启动流式请求
-  const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; tag_ids?: string[]; agent_enabled?: boolean; agent_id?: string; agent_source_tenant_id?: string | number; web_search_enabled?: boolean; local_browser_enabled?: boolean; summary_model_id?: string; reasoning_effort?: string; mcp_service_ids?: string[]; skill_names?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string; kb_id?: string; kb_name?: string; service_id?: string; skill_name?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; attachment_ids?: string[]; suggestion_attribution?: { suggestion_set_id: string; question_id: string }; question_origin?: { knowledge_base_id: string; knowledge_id?: string }; method: string; url: string; embed_token?: string; embed_session_sig?: string; embed_visitor_id?: string }) => {
+  const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; tag_ids?: string[]; agent_enabled?: boolean; agent_id?: string; agent_source_tenant_id?: string | number; web_search_enabled?: boolean; local_browser_enabled?: boolean; summary_model_id?: string; reasoning_effort?: string; mcp_service_ids?: string[]; skill_names?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string; kb_id?: string; kb_name?: string; service_id?: string; skill_name?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; attachment_ids?: string[]; suggestion_attribution?: { suggestion_set_id: string; question_id: string }; question_origin?: { knowledge_base_id: string; knowledge_id?: string }; page_context?: PageContextPayload; assistant_access?: AssistantAccessLevel; method: string; url: string; embed_token?: string; embed_session_sig?: string; embed_visitor_id?: string }) => {
     const myGeneration = ++streamGeneration
     const streamAbort = controller
     // 重置状态
@@ -153,6 +163,12 @@ export function useStream() {
       }
       if (params.question_origin) {
         postBody.question_origin = params.question_origin;
+      }
+      if (params.page_context) {
+        postBody.page_context = params.page_context;
+      }
+      if (params.assistant_access) {
+        postBody.assistant_access = params.assistant_access;
       }
       postBody.channel = embedToken ? "embed" : "web";
 

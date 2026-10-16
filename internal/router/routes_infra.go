@@ -182,10 +182,11 @@ func RegisterMCPServiceRoutes(
 		// MCP tool human approval (issue #1173) — Viewer+ to read, Admin+ to set policy
 		mcpServices.GET("/:id/tool-approvals", g.Viewer(), handler.ListMCPToolApprovals)
 		mcpServices.PUT("/:id/tool-approvals/:tool_name", g.Admin(), handler.SetMCPToolApproval)
-		// Per-user OAuth authorization flow. Viewer+ may authorize/inspect/
-		// revoke their own token; the callback is the separate public route
-		// registered above.
+		// Per-user OAuth authorization. Viewer+ may authorize/inspect/revoke
+		// their own token, through the browser flow (authorize-url and the
+		// public callback registered above) or with an assertion.
 		mcpServices.POST("/:id/oauth/authorize-url", g.Viewer(), oauthHandler.AuthorizeURL)
+		mcpServices.POST("/:id/oauth/assertion", g.Viewer(), oauthHandler.AssertionGrant)
 		mcpServices.GET("/:id/oauth/status", g.Viewer(), oauthHandler.Status)
 		mcpServices.DELETE("/:id/oauth/token", g.Viewer(), oauthHandler.Revoke)
 	}
@@ -200,6 +201,8 @@ func RegisterMCPServiceRoutes(
 		// people who actually have context to approve, so the gate is
 		// kept at "anyone in the tenant" instead.
 		agentTool.POST("/tool-approvals/:pending_id", g.Viewer(), handler.ResolveToolApproval)
+		// Answer any user-answerable prompt (ask_user, tool approval); same gating.
+		agentTool.POST("/prompts/:prompt_id", g.Viewer(), handler.ResolveAgentPrompt)
 		// Resume an agent run paused on an in-conversation MCP OAuth prompt.
 		// Same tenant-member (Viewer+) gating rationale as tool-approvals.
 		agentTool.POST("/mcp-oauth-resolutions/:pending_id", g.Viewer(), oauthHandler.ResolveMCPOAuth)

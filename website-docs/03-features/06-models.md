@@ -95,6 +95,46 @@
 | 向量或重排服务响应慢，需要更长的超时 | `{"request_timeout_seconds": 120}` |
 | 自建重排服务返回的是未归一化分数（logit） | `{"score_scale": "logit"}` |
 
+#### WeMM-Embedding
+
+自定义厂商（`generic`）的向量模型列表已内置以下预设，选择后会自动识别图片输入和原生向量维度：
+
+| 模型名称 | 原生维度 |
+| --- | --- |
+| `tencent/WeMM-Embedding-2B` | 2048 |
+| `tencent/WeMM-Embedding-4B` | 2560 |
+| `tencent/WeMM-Embedding-9B` | 4096 |
+
+可选择官方 vLLM 部署，或使用本仓库的 [Transformers 部署脚本](../06-development/06-wemm-transformers.md)在 CUDA、MPS 或 CPU 上提供同一 Embedding 接口。MPS 是可选计算设备，服务也可以部署在独立服务器上。
+
+按[官方部署说明](https://github.com/Tencent/WeMM-Embedding#serving)使用 vLLM `0.27.0`，并加载模型目录中的 `embedding_chat_template.jinja`。例如部署 2B，并通过 `--served-model-name` 让服务名称与预设一致：
+
+```bash
+MODEL_PATH=/path/to/WeMM-Embedding-2B
+vllm serve "$MODEL_PATH" \
+  --runner pooling \
+  --chat-template "$MODEL_PATH/embedding_chat_template.jinja" \
+  --served-model-name tencent/WeMM-Embedding-2B
+```
+
+4B、9B 分别替换模型路径与服务名称。在 WeKnora 中选择「自定义」厂商，Base URL 填写服务的 `http://主机:端口/v1`，选择对应向量模型，初次接入保持「自定义输出维度」关闭。若服务没有设置 `--served-model-name`，模型名称须填写服务实际返回的本地路径；短名称 `WeMM-Embedding-2B` 及以 `/WeMM-Embedding-2B` 结尾的路径也能识别预设，4B、9B 同理。任意自定义别名需要另行配置模型能力和协议覆盖。
+
+预设让文本和图片都通过 `messages` 进入模型模板，由模板追加取向量所需的 `<embedding>` 标记；启用 `batch_messages`，将同一批内的独立 conversations 合并请求，每条仍返回各自的向量。图片批量调用最多每批 5 张，超出自动拆分；这是 WeKnora 选择的批量大小，与现有 Qwen3-VL-Embedding 预设一致，不代表模型或 vLLM 的官方上限，可用 `max_image_batch_size` 按服务承载能力调整。当前知识库图片索引任务仍逐张调用，不会因该配置自动合并多个任务。不发送历史默认的 `truncate_prompt_tokens: 511`；超出服务上下文上限时由服务报错，不会静默截断。无需额外填写兼容 JSON 或图片提示词。若此前用普通文本 `input` 为该模型建立过索引，需要重建向量。
+
+WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_tokens: false`、`add_generation_prompt: false` 默认行为，不要照搬 Qwen3-VL-Embedding 预设的 `add_special_tokens: true`。vLLM 的 Embedding 默认使用末尾 token 并做 L2 归一化，无需额外发送 `normalize` 或关闭 `use_activation`。
+
+需要降维时，开启「自定义输出维度」并选择模型配置中的合法维度，WeKnora 会给文本和图片请求发送相同的 `dimensions`；vLLM 会先截取对应维度，再归一化：
+
+| 模型 | 可选维度 |
+| --- | --- |
+| 2B | 64、128、256、512、1024、2048 |
+| 4B | 64、128、256、512、1024、2560 |
+| 9B | 64、128、256、512、1024、2048、4096 |
+
+这些值来自[官方模型配置与说明](https://github.com/Tencent/WeMM-Embedding#model-zoo)，vLLM 会拒绝列表之外的维度。更换输出维度后需重建已有向量索引。超时、并发与图片大小限制保持现有默认值，按实际服务性能调整。
+
+知识库还需开启图片向量索引才能直接检索图片内容。当前预设接入文本和图片；视频、任意图文交错输入及扫描 PDF 整页向量化不在当前业务链路的支持范围内。
+
 #### 字段参考
 
 下表的「协议默认」是没有任何厂商、目录或覆盖时的取值；具体厂商的实际值以「实际调用方式」面板为准。
@@ -241,7 +281,7 @@
 
 ## 内置厂商
 
-内置 29 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
+内置 30 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
 
 | 厂商 | ID | 对话 | 向量 | 重排 | 视觉 | 语音 |
 | --- | --- | :-: | :-: | :-: | :-: | :-: |
@@ -516,7 +556,7 @@ builtin_models:
 
 | 层 | 位置 | 职责 |
 |----|------|------|
-| 协议层 | `internal/models/api/<protocol>` | 一个 wire 协议一个包。对话：`openaicompletions`、`openairesponses`、`anthropicmessages`、`googlegenai`；重排：`cohererank`、`dashscoperank`、`nimrerank`、`tencentlkeap`、`volcengineknowledge`；向量：`openaiembeddings`、`dashscopeembeddings`、`arkembeddings`、`googleembeddings`；语音：`openaitranscriptions`、`openaichataudio`。各自持有请求/响应结构与解析，不依赖厂商定义或模型目录 |
+| 协议层 | `internal/models/api/<protocol>` | 一个 wire 协议一个包。对话：`openaicompletions`、`openairesponses`、`anthropicmessages`、`googlegenai`；重排：`cohererank`、`dashscoperank`、`nimrerank`、`tencentlkeap`、`volcengineknowledge`、`teirank`、`pineconerank`；向量：`openaiembeddings`、`dashscopeembeddings`、`arkembeddings`、`googleembeddings`；语音：`openaitranscriptions`、`openaichataudio`。各自持有请求/响应结构与解析，不依赖厂商定义或模型目录 |
 | 厂商层 | `internal/models/providers/<id>.go` | 一个厂商一份定义，声明支持的模型类型、各类型默认地址、鉴权方式、额外字段、协议兼容默认值与特殊端点钩子；图标放 `providers/assets/`，在 `builtin.go` 的 `Builtins()` 显式列出 |
 | 目录层 | `internal/models/catalog` | 加载生成的模型目录 `catalog/data/models.generated.json`，按类型和模型名查询条目；不含厂商行为 |
 | 运行时 | `internal/models/runtime` | 组合厂商定义与目录、应用部署叠加（`overlay.go`），合并单个模型配置、选择协议、组装认证和端点，隔离旧字段推断 |
