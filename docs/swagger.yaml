@@ -2066,6 +2066,8 @@ definitions:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule'
         type: array
+        x-agent: true
+        x-agent-response: true
       separators:
         description: Separators, in the order they are tried.
         items:
@@ -3626,7 +3628,11 @@ definitions:
           knowledge bases configured before the field existed; those follow
           ImageAttrsEnabled — see ResolveImagePipelineID. An explicit id always
           wins over the switch.
+        enum:
+        - default
+        - smartocr
         type: string
+        x-agent: true
       image_pipeline_params:
         additionalProperties: {}
         description: |-
@@ -3635,6 +3641,9 @@ definitions:
           declares is dropped when the run reads it, so an old stored config stays
           loadable rather than being rewritten on save.
         type: object
+        x-agent: true
+        x-agent-keys: enable_caption|enable_ocr|default.enable_caption|default.enable_ocr
+        x-agent-response: true
       image_vector_enabled:
         description: |-
           ImageVectorEnabled lets a knowledge base whose embedding model takes
@@ -6348,32 +6357,40 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.ParserEngineInfo:
     properties:
-      available:
+      Available:
         type: boolean
-      description:
+        x-agent: available
+      Description:
         type: string
-      fileTypes:
+        x-agent: description
+      FileTypes:
         items:
           type: string
         type: array
-      name:
+        x-agent: file_types
+      Name:
         type: string
-      unavailableReason:
+        x-agent: engine
+      UnavailableReason:
         type: string
+        x-agent: unavailable_reason
     type: object
   github_com_Tencent_WeKnora_internal_types.ParserEngineRule:
     properties:
       engine:
         type: string
+        x-agent: true
       file_types:
         items:
           type: string
         type: array
+        x-agent: true
       xlsx_first_row_as_header:
         description: |-
           XLSXFirstRowAsHeader restores row-1 column context for flat XLSX tables.
           nil preserves the parser default; an explicit false disables the mode.
         type: boolean
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.PendingPromptView:
     properties:
@@ -10197,6 +10214,37 @@ definitions:
       truncated:
         type: boolean
     type: object
+  internal_handler.FAQBatchPatchRequest:
+    properties:
+      entry_ids:
+        description: Explicit FAQ entry seq_ids from faq.list_entries. At most 20
+          per call.
+        items:
+          type: integer
+        maxItems: 20
+        minItems: 1
+        type: array
+        x-agent: true
+        x-agent-maximum: "20"
+      is_enabled:
+        description: Whether these entries can be retrieved; omitted keeps the current
+          state.
+        type: boolean
+        x-agent: true
+      is_recommended:
+        description: Whether these entries are recommended; omitted keeps the current
+          state.
+        type: boolean
+        x-agent: true
+      tag_id:
+        description: Tag seq_id from knowledge_base.list_tags; 0 clears tags, omitted
+          keeps them.
+        minimum: 0
+        type: integer
+        x-agent: tag_seq_id
+    required:
+    - entry_ids
+    type: object
   internal_handler.FAQEntryPage:
     properties:
       data:
@@ -11499,6 +11547,16 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FAQConfig'
         description: FAQ indexing. Only for an FAQ knowledge base.
+      image_caption_enabled:
+        description: Run image captions in the default image pipeline. Set image_pipeline=default
+          to select that pipeline.
+        type: boolean
+        x-agent: true
+      image_ocr_enabled:
+        description: Run OCR in the default image pipeline. At least one of captions
+          or OCR must stay enabled.
+        type: boolean
+        x-agent: true
       image_processing_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ImageProcessingConfig'
@@ -11510,6 +11568,24 @@ definitions:
       name:
         description: New name. Omit to keep the current one.
         type: string
+        x-agent: true
+      parser_engine:
+        description: Engine name from knowledge_base.list_parser_engines; empty removes
+          explicit routing for parser_file_types.
+        type: string
+        x-agent: true
+      parser_file_types:
+        description: File extensions whose parser routing should change, e.g. ["pdf",
+          "docx"]. Other file types keep their rules.
+        items:
+          type: string
+        type: array
+        x-agent: true
+        x-agent-maximum: "20"
+      parser_xlsx_first_row_as_header:
+        description: Treat the first XLSX row as headers. Requires parser_file_types
+          including xlsx and an explicit parser_engine.
+        type: boolean
         x-agent: true
       profile_config:
         allOf:
@@ -16445,8 +16521,15 @@ paths:
         target: knowledge_base.get
       x-agent-hint: Changes the settings you send; a field left out is kept, including
         one indexing flag or one chunking field. Model ids come from model.list. embedding_model_id
-        cannot change after documents exist. vector_store_id cannot be changed. Graph
-        node types stay in the knowledge base editor.
+        cannot change after documents exist. vector_store_id cannot be changed. Parsing
+        settings (strategy, enable_parent_child, parent_chunk_size, child_chunk_size,
+        VLM/ASR and question_generation_enabled/question_count) affect future parses;
+        existing documents need an explicit knowledge.reparse or knowledge.batch_reparse.
+        Read current settings first. For parser routing send parser_file_types and
+        parser_engine from knowledge_base.list_parser_engines; empty parser_engine
+        restores defaults. Use image_pipeline=smartocr for adaptive OCR, or default
+        plus image_caption_enabled/image_ocr_enabled for manual image processing.
+        Graph node types stay in the knowledge base editor.
     put:
       consumes:
       - application/json
@@ -16752,6 +16835,56 @@ paths:
         root: data.data
       x-agent-hint: FAQ entries of an FAQ knowledge base, newest first; keyword searches
         questions and answers.
+    patch:
+      consumes:
+      - application/json
+      description: 对明确指定的 FAQ 条目应用相同的部分更新，保留问题、答案及未指定字段
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: knowledge_base_id
+      - description: 批量修改请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.FAQBatchPatchRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 批量修改 FAQ 状态和标签
+      tags:
+      - FAQ管理
+      x-agent:
+        id: faq.batch_update
+        items:
+          as: entry_id
+          label: standard_question
+          param: entry_ids
+          target: faq.get_entry
+        label: name
+        risk: write
+        target: knowledge_base.get
+      x-agent-hint: Set is_enabled, is_recommended or tag_seq_id for 1-20 explicit
+        FAQ entry seq_ids; at least one field is required. Omitted fields and all
+        questions/answers stay unchanged. tag_seq_id comes from knowledge_base.list_tags
+        (tag_seq_id); 0 removes the tag. Select entries with faq.list_entries first;
+        for a whole tag or knowledge base paginate the list and process batches of
+        up to 20. Confirmation lists every question.
     post:
       consumes:
       - application/json
@@ -26036,6 +26169,12 @@ paths:
       summary: 列出可用的文档解析引擎
       tags:
       - 系统
+      x-agent:
+        id: knowledge_base.list_parser_engines
+        risk: read
+      x-agent-hint: Lists parser engine names, supported file extensions and availability.
+        Choose an available engine supporting every requested file type before setting
+        parser_engine in knowledge_base.update. Never guess an engine name.
   /system/parser-engines/check:
     post:
       consumes:

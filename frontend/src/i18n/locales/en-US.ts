@@ -6678,6 +6678,7 @@ export default {
           list: "List knowledge chunks",
         },
         knowledge_base: {
+          list_parser_engines: "List available parser engines",
           copy: "Copy knowledge base content",
           duplicate: "Copy knowledge base settings",
           get_copy_progress: "Get knowledge base copy progress",
@@ -6697,6 +6698,7 @@ export default {
           list_shared: "List shared knowledge bases",
         },
         faq: {
+          batch_update: "Batch update FAQ states and tags",
           list_entries: "List FAQ entries",
           delete_entries: "Delete FAQ entries",
           get_entry: "Get FAQ entry details",

@@ -101,6 +101,13 @@ func projectObject(obj map[string]any, fields []Field) (map[string]any, bool) {
 	truncated := false
 	for _, f := range fields {
 		v, ok := lookup(obj, f.From)
+		if ok && f.MapKey != "" {
+			m, isMap := v.(map[string]any)
+			if !isMap {
+				continue
+			}
+			v, ok = m[f.MapKey]
+		}
 		if !ok {
 			continue
 		}

@@ -106,6 +106,9 @@ func (p Param) wireKey() string {
 type Field struct {
 	// From is a dotted path inside the source object.
 	From string
+	// MapKey selects one literal key within From, including keys containing dots.
+	// Used for explicitly allow-listed keys of free-form maps.
+	MapKey string
 	// As is the output key; defaults to the last segment of From. Identifiers
 	// should be renamed to the canonical handle keys so the model-context
 	// policy turns them into handles.
@@ -357,6 +360,7 @@ var allowedRouteAreas = map[string]bool{
 var readOnlyRouteAreas = map[string]bool{
 	"sessions": true,
 	"messages": true,
+	"system":   true, // Only the parser-engines route is reachable; see parseRoute.
 }
 
 // forbiddenRouteSegments are refused anywhere inside an allowed area:
@@ -732,7 +736,7 @@ func parseRoute(route string) (map[string]bool, string, error) {
 	}
 	rest := strings.TrimPrefix(route, base)
 	area, _, _ := strings.Cut(rest, "/")
-	if !allowedRouteAreas[area] || (area == "sandbox-configs" && !sandboxSkillsRoute(rest)) {
+	if (!allowedRouteAreas[area] && rest != "system/parser-engines") || (area == "sandbox-configs" && !sandboxSkillsRoute(rest)) {
 		return nil, "", fmt.Errorf("route %q is outside the areas an agent may reach", route)
 	}
 	params := map[string]bool{}

@@ -734,7 +734,11 @@ func (doc *specDocument) fields(obj *specSchema, prefix string, list bool) ([]Fi
 		case raw.AgentKeys != "":
 			for _, sub := range strings.Split(raw.AgentKeys, "|") {
 				if sub = strings.TrimSpace(sub); sub != "" {
-					out = append(out, Field{From: from + "." + sub, As: sub})
+					if strings.Contains(sub, ".") {
+						out = append(out, Field{From: from, MapKey: sub, As: sub})
+					} else {
+						out = append(out, Field{From: from + "." + sub, As: sub})
+					}
 				}
 			}
 		default:

@@ -47,7 +47,8 @@ const findOperationsDescription = "" +
 	"workspace's models, MCP services and skills (adding, renaming, enabling, removing, installing a " +
 	"skill from a hub), copying knowledge bases, editing or restoring document chunks, " +
 	"inspecting data sources and sync logs, pausing/resuming sync schedules, triggering syncs, " +
-	"and checking connections and retrieval. " +
+	"configuring document parsing, chunking, OCR and generated questions, " +
+	"batch updating FAQ enabled/recommended states and tags, and checking connections and retrieval. " +
 	"Returns each operation's id, risk and parameters. " +
 	"Call with no arguments to see every operation, or narrow with query (words matched " +
 	"against ids and summaries) or domain. Operation ids must come from this tool; never guess them. " +
@@ -906,6 +907,7 @@ func mutationDetail(
 		}
 	}
 	lines = append(lines, agentSettingsDetail(ctx, t, op, params, identity)...)
+	lines = append(lines, parsingAndFAQDetail(op, params)...)
 	lines = append(lines, serviceSettingsDetail(op, params)...)
 	return strings.Join(lines, "\n")
 }

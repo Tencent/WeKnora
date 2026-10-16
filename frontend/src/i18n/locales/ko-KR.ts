@@ -1932,6 +1932,7 @@ export default {
           list: "지식 청크 목록 조회",
         },
         knowledge_base: {
+          list_parser_engines: "사용 가능한 파싱 엔진 조회",
           copy: "지식베이스 내용 복사",
           duplicate: "지식베이스 설정 복사",
           get_copy_progress: "지식베이스 복사 진행 상황 조회",
@@ -1951,6 +1952,7 @@ export default {
           list_shared: "공유 지식 베이스 목록 조회",
         },
         faq: {
+          batch_update: "FAQ 상태 및 태그 일괄 수정",
           list_entries: "FAQ 항목 목록 조회",
           delete_entries: "FAQ 항목 일괄 삭제",
           get_entry: "FAQ 항목 상세 조회",

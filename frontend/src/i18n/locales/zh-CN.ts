@@ -1934,6 +1934,7 @@ export default {
           list: "获取知识分块列表",
         },
         knowledge_base: {
+          list_parser_engines: "获取可用解析引擎",
           copy: "复制知识库内容",
           duplicate: "复制知识库设置",
           get_copy_progress: "获取知识库复制进度",
@@ -1953,6 +1954,7 @@ export default {
           list_shared: "获取共享知识库列表",
         },
         faq: {
+          batch_update: "批量修改 FAQ 状态和标签",
           list_entries: "获取 FAQ 条目列表",
           delete_entries: "批量删除 FAQ 条目",
           get_entry: "获取 FAQ 条目详情",

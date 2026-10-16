@@ -1934,6 +1934,7 @@ export default {
           list: "取得知識分塊清單",
         },
         knowledge_base: {
+          list_parser_engines: "取得可用解析引擎",
           copy: "複製知識庫內容",
           duplicate: "複製知識庫設定",
           get_copy_progress: "取得知識庫複製進度",
@@ -1953,6 +1954,7 @@ export default {
           list_shared: "取得共用知識庫清單",
         },
         faq: {
+          batch_update: "批次修改 FAQ 狀態與標籤",
           list_entries: "取得 FAQ 項目清單",
           delete_entries: "批次刪除 FAQ 項目",
           get_entry: "取得 FAQ 項目詳細資訊",

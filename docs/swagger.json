@@ -5073,7 +5073,7 @@
                     "risk": "write",
                     "target": "knowledge_base.get"
                 },
-                "x-agent-hint": "Changes the settings you send; a field left out is kept, including one indexing flag or one chunking field. Model ids come from model.list. embedding_model_id cannot change after documents exist. vector_store_id cannot be changed. Graph node types stay in the knowledge base editor."
+                "x-agent-hint": "Changes the settings you send; a field left out is kept, including one indexing flag or one chunking field. Model ids come from model.list. embedding_model_id cannot change after documents exist. vector_store_id cannot be changed. Parsing settings (strategy, enable_parent_child, parent_chunk_size, child_chunk_size, VLM/ASR and question_generation_enabled/question_count) affect future parses; existing documents need an explicit knowledge.reparse or knowledge.batch_reparse. Read current settings first. For parser routing send parser_file_types and parser_engine from knowledge_base.list_parser_engines; empty parser_engine restores defaults. Use image_pipeline=smartocr for adaptive OCR, or default plus image_caption_enabled/image_ocr_enabled for manual image processing. Graph node types stay in the knowledge base editor."
             }
         },
         "/knowledge-bases/{id}/activity": {
@@ -5513,6 +5513,73 @@
                     "target": "knowledge_base.get"
                 },
                 "x-agent-hint": "Removes up to 20 FAQ entries. Cannot be undone; the confirmation lists every question."
+            },
+            "patch": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "对明确指定的 FAQ 条目应用相同的部分更新，保留问题、答案及未指定字段",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "FAQ管理"
+                ],
+                "summary": "批量修改 FAQ 状态和标签",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "knowledge_base_id",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "批量修改请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.FAQBatchPatchRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.SuccessResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "faq.batch_update",
+                    "items": {
+                        "as": "entry_id",
+                        "label": "standard_question",
+                        "param": "entry_ids",
+                        "target": "faq.get_entry"
+                    },
+                    "label": "name",
+                    "risk": "write",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Set is_enabled, is_recommended or tag_seq_id for 1-20 explicit FAQ entry seq_ids; at least one field is required. Omitted fields and all questions/answers stay unchanged. tag_seq_id comes from knowledge_base.list_tags (tag_seq_id); 0 removes the tag. Select entries with faq.list_entries first; for a whole tag or knowledge base paginate the list and process batches of up to 20. Confirmation lists every question."
             }
         },
         "/knowledge-bases/{id}/faq/entries/export": {
@@ -19705,7 +19772,12 @@
                             "$ref": "#/definitions/internal_handler.ListParserEnginesResponse"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "knowledge_base.list_parser_engines",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Lists parser engine names, supported file extensions and availability. Choose an available engine supporting every requested file type before setting parser_engine in knowledge_base.update. Never guess an engine name."
             }
         },
         "/system/parser-engines/check": {
@@ -24953,7 +25025,9 @@
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule"
-                    }
+                    },
+                    "x-agent": true,
+                    "x-agent-response": true
                 },
                 "separators": {
                     "description": "Separators, in the order they are tried.",
@@ -26823,12 +26897,20 @@
                 },
                 "image_pipeline": {
                     "description": "ImagePipelineID selects the image pipeline by id, so the choice the\nsettings panel offers is the choice the backend runs. It is unset on\nknowledge bases configured before the field existed; those follow\nImageAttrsEnabled — see ResolveImagePipelineID. An explicit id always\nwins over the switch.",
-                    "type": "string"
+                    "type": "string",
+                    "enum": [
+                        "default",
+                        "smartocr"
+                    ],
+                    "x-agent": true
                 },
                 "image_pipeline_params": {
                     "description": "ImagePipelineParams holds the tunables of ImagePipelineID, keyed by the\nfield's own key. The map travels whole: a key a pipeline no longer\ndeclares is dropped when the run reads it, so an old stored config stays\nloadable rather than being rewritten on save.",
                     "type": "object",
-                    "additionalProperties": {}
+                    "additionalProperties": {},
+                    "x-agent": true,
+                    "x-agent-keys": "enable_caption|enable_ocr|default.enable_caption|default.enable_ocr",
+                    "x-agent-response": true
                 },
                 "image_vector_enabled": {
                     "description": "ImageVectorEnabled lets a knowledge base whose embedding model takes\nimages index each image by its own vector and recall it with one. It\nis off by default on purpose: a model that takes images is also used\nfor plain text, and turning this on costs an embedding call per image\nand widens vector recall. Existing knowledge bases stay off after an\nupgrade because the stored JSON has no such key.",
@@ -30278,23 +30360,28 @@
         "github_com_Tencent_WeKnora_internal_types.ParserEngineInfo": {
             "type": "object",
             "properties": {
-                "available": {
-                    "type": "boolean"
+                "Available": {
+                    "type": "boolean",
+                    "x-agent": "available"
                 },
-                "description": {
-                    "type": "string"
+                "Description": {
+                    "type": "string",
+                    "x-agent": "description"
                 },
-                "fileTypes": {
+                "FileTypes": {
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": "file_types"
                 },
-                "name": {
-                    "type": "string"
+                "Name": {
+                    "type": "string",
+                    "x-agent": "engine"
                 },
-                "unavailableReason": {
-                    "type": "string"
+                "UnavailableReason": {
+                    "type": "string",
+                    "x-agent": "unavailable_reason"
                 }
             }
         },
@@ -30302,17 +30389,20 @@
             "type": "object",
             "properties": {
                 "engine": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "file_types": {
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true
                 },
                 "xlsx_first_row_as_header": {
                     "description": "XLSXFirstRowAsHeader restores row-1 column context for flat XLSX tables.\nnil preserves the parser default; an explicit false disables the mode.",
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 }
             }
         },
@@ -35156,6 +35246,41 @@
                 }
             }
         },
+        "internal_handler.FAQBatchPatchRequest": {
+            "type": "object",
+            "required": [
+                "entry_ids"
+            ],
+            "properties": {
+                "entry_ids": {
+                    "description": "Explicit FAQ entry seq_ids from faq.list_entries. At most 20 per call.",
+                    "type": "array",
+                    "maxItems": 20,
+                    "minItems": 1,
+                    "items": {
+                        "type": "integer"
+                    },
+                    "x-agent": true,
+                    "x-agent-maximum": "20"
+                },
+                "is_enabled": {
+                    "description": "Whether these entries can be retrieved; omitted keeps the current state.",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "is_recommended": {
+                    "description": "Whether these entries are recommended; omitted keeps the current state.",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "tag_id": {
+                    "description": "Tag seq_id from knowledge_base.list_tags; 0 clears tags, omitted keeps them.",
+                    "type": "integer",
+                    "minimum": 0,
+                    "x-agent": "tag_seq_id"
+                }
+            }
+        },
         "internal_handler.FAQEntryPage": {
             "type": "object",
             "properties": {
@@ -36939,6 +37064,16 @@
                         }
                     ]
                 },
+                "image_caption_enabled": {
+                    "description": "Run image captions in the default image pipeline. Set image_pipeline=default to select that pipeline.",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "image_ocr_enabled": {
+                    "description": "Run OCR in the default image pipeline. At least one of captions or OCR must stay enabled.",
+                    "type": "boolean",
+                    "x-agent": true
+                },
                 "image_processing_config": {
                     "description": "Image description settings.",
                     "allOf": [
@@ -36958,6 +37093,25 @@
                 "name": {
                     "description": "New name. Omit to keep the current one.",
                     "type": "string",
+                    "x-agent": true
+                },
+                "parser_engine": {
+                    "description": "Engine name from knowledge_base.list_parser_engines; empty removes explicit routing for parser_file_types.",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "parser_file_types": {
+                    "description": "File extensions whose parser routing should change, e.g. [\"pdf\", \"docx\"]. Other file types keep their rules.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true,
+                    "x-agent-maximum": "20"
+                },
+                "parser_xlsx_first_row_as_header": {
+                    "description": "Treat the first XLSX row as headers. Requires parser_file_types including xlsx and an explicit parser_engine.",
+                    "type": "boolean",
                     "x-agent": true
                 },
                 "profile_config": {

@@ -6678,6 +6678,7 @@ export default {
           list: "ナレッジチャンク一覧を取得",
         },
         knowledge_base: {
+          list_parser_engines: "利用可能な解析エンジンを取得",
           copy: "ナレッジベースの内容をコピー",
           duplicate: "ナレッジベースの設定をコピー",
           get_copy_progress: "ナレッジベースのコピー進捗を取得",
@@ -6697,6 +6698,7 @@ export default {
           list_shared: "共有ナレッジベース一覧を取得",
         },
         faq: {
+          batch_update: "FAQ の状態とタグを一括更新",
           list_entries: "FAQ 項目一覧を取得",
           delete_entries: "FAQ 項目を一括削除",
           get_entry: "FAQ 項目の詳細を取得",

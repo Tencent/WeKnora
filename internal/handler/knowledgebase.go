@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"io"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -935,6 +936,16 @@ type PatchKnowledgeBaseRequest struct {
 	SummaryModelID *string `json:"summary_model_id" extensions:"x-agent=summary_model_id"`
 	// Storage instance to bind. Omit to keep the current one.
 	StorageBackendID *string `json:"storage_backend_id" extensions:"x-agent=storage_backend_id"`
+	// File extensions whose parser routing should change, e.g. ["pdf", "docx"]. Other file types keep their rules.
+	ParserFileTypes []string `json:"parser_file_types,omitempty" extensions:"x-agent,x-agent-maximum=20"`
+	// Engine name from knowledge_base.list_parser_engines; empty removes explicit routing for parser_file_types.
+	ParserEngine *string `json:"parser_engine,omitempty" extensions:"x-agent"`
+	// Treat the first XLSX row as headers. Requires parser_file_types including xlsx and an explicit parser_engine.
+	ParserXLSXFirstRowAsHeader *bool `json:"parser_xlsx_first_row_as_header,omitempty" extensions:"x-agent"`
+	// Run image captions in the default image pipeline. Set image_pipeline=default to select that pipeline.
+	ImageCaptionEnabled *bool `json:"image_caption_enabled,omitempty" extensions:"x-agent"`
+	// Run OCR in the default image pipeline. At least one of captions or OCR must stay enabled.
+	ImageOCREnabled *bool `json:"image_ocr_enabled,omitempty" extensions:"x-agent"`
 	// Chunking settings. Only the fields present are changed.
 	Chunking *types.ChunkingConfig `json:"chunking_config"`
 	// Indexing pipelines. A flag left out stays as it is.
@@ -1001,6 +1012,12 @@ func applyKnowledgeBasePatch(
 	if err := merge("chunking_config", &chunking); err != nil {
 		return out, err
 	}
+	if patch.ParserFileTypes != nil || patch.ParserEngine != nil || patch.ParserXLSXFirstRowAsHeader != nil {
+		if err := applyParserRoutingPatch(&chunking, patch, sections); err != nil {
+			return out, err
+		}
+		used = true
+	}
 	cfg.ChunkingConfig = chunking
 
 	strategy := kb.IndexingStrategy
@@ -1013,10 +1030,27 @@ func applyKnowledgeBasePatch(
 	}
 
 	image := kb.ImageProcessingConfig
+	image.ImagePipelineParams = maps.Clone(image.ImagePipelineParams)
 	if err := merge("image_processing_config", &image); err != nil {
 		return out, err
 	}
-	if _, ok := sections["image_processing_config"]; ok && string(sections["image_processing_config"]) != "null" {
+	if patch.ImageCaptionEnabled != nil || patch.ImageOCREnabled != nil {
+		if types.ResolveImagePipelineID(&image) != types.ImagePipelineDefault {
+			return out, apperrors.NewBadRequestError("image_caption_enabled and image_ocr_enabled require image_pipeline=default")
+		}
+		if image.ImagePipelineParams == nil {
+			image.ImagePipelineParams = map[string]any{}
+		}
+		for key, value := range map[string]*bool{"enable_caption": patch.ImageCaptionEnabled, "enable_ocr": patch.ImageOCREnabled} {
+			if value != nil {
+				// Namespaced values take precedence at execution time.
+				image.ImagePipelineParams["default."+key] = *value
+				image.ImagePipelineParams[key] = *value
+			}
+		}
+		used = true
+	}
+	if (len(sections["image_processing_config"]) > 0 && string(sections["image_processing_config"]) != "null") || patch.ImageCaptionEnabled != nil || patch.ImageOCREnabled != nil {
 		cfg.ImageProcessingConfig = &image
 	}
 
@@ -1168,7 +1202,7 @@ func fillOmittedIndexingFlags(raw []byte, kb *types.KnowledgeBase) {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"knowledge_base.update","risk":"write","target":"knowledge_base.get","label":"name"}
-// @x-agent-hint "Changes the settings you send; a field left out is kept, including one indexing flag or one chunking field. Model ids come from model.list. embedding_model_id cannot change after documents exist. vector_store_id cannot be changed. Graph node types stay in the knowledge base editor."
+// @x-agent-hint "Changes the settings you send; a field left out is kept, including one indexing flag or one chunking field. Model ids come from model.list. embedding_model_id cannot change after documents exist. vector_store_id cannot be changed. Parsing settings (strategy, enable_parent_child, parent_chunk_size, child_chunk_size, VLM/ASR and question_generation_enabled/question_count) affect future parses; existing documents need an explicit knowledge.reparse or knowledge.batch_reparse. Read current settings first. For parser routing send parser_file_types and parser_engine from knowledge_base.list_parser_engines; empty parser_engine restores defaults. Use image_pipeline=smartocr for adaptive OCR, or default plus image_caption_enabled/image_ocr_enabled for manual image processing. Graph node types stay in the knowledge base editor."
 // @Router       /knowledge-bases/{id} [patch]
 func (h *KnowledgeBaseHandler) PatchKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()

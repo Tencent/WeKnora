@@ -399,6 +399,8 @@ func (h *SystemHandler) getDocReaderConnInfo() (addr, transport string) {
 // @Tags         系统
 // @Produce      json
 // @Success      200  {object}  handler.ListParserEnginesResponse  "解析引擎列表"
+// @x-agent {"id":"knowledge_base.list_parser_engines","risk":"read"}
+// @x-agent-hint "Lists parser engine names, supported file extensions and availability. Choose an available engine supporting every requested file type before setting parser_engine in knowledge_base.update. Never guess an engine name."
 // @Router       /system/parser-engines [get]
 func (h *SystemHandler) ListParserEngines(c *gin.Context) {
 	var overrides map[string]string

@@ -60,7 +60,7 @@ test('refreshes the FAQ entries and tags once per burst for its own KB only', as
   t.mock.timers.tick(300)
   assert.equal(listFAQEntries.mock.callCount(), 0)
   assert.equal(listKnowledgeTags.mock.callCount(), 0)
-  f.emit(change('faq.update_entry', { knowledge_base_id: ['kb'] }))
+  f.emit(change('faq.batch_update', { knowledge_base_id: ['kb'] }))
   f.emit(change('faq.delete_entries', { knowledge_base_id: ['kb'] }))
   t.mock.timers.tick(300)
   await flush()
