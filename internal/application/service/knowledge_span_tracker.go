@@ -111,8 +111,13 @@ type SpanTracker interface {
 
 	// FailSpan marks span as failed and cascade-cancels its
 	// descendants. errorDetail (a Go error) is recorded verbatim in
-	// error_detail (truncated to 8 KB) for admin views.
+	// error_detail (truncated to 8 KB) for admin views. Main pipeline stage
+	// failures close the root even when unused retry budget remains.
 	FailSpan(ctx context.Context, span *Span, errorCode, errorMessage string, errorDetail error)
+
+	// FailSpanRetryable records a failure that the caller will return to the
+	// task runner for retry. It leaves the root open only while retries remain.
+	FailSpanRetryable(ctx context.Context, span *Span, errorCode, errorMessage string, errorDetail error)
 
 	// SkipSpan marks an intentionally not-run span (e.g. multimodal
 	// on a text-only document). Distinct from cancelled — skipped is
@@ -494,6 +499,18 @@ func (t *spanTracker) EndSpan(ctx context.Context, span *Span, output types.JSON
 }
 
 func (t *spanTracker) FailSpan(ctx context.Context, span *Span, errorCode, errorMessage string, errorDetail error) {
+	t.failSpan(ctx, span, errorCode, errorMessage, errorDetail, false)
+}
+
+func (t *spanTracker) FailSpanRetryable(
+	ctx context.Context, span *Span, errorCode, errorMessage string, errorDetail error,
+) {
+	t.failSpan(ctx, span, errorCode, errorMessage, errorDetail, attemptStillHasRetry(ctx))
+}
+
+func (t *spanTracker) failSpan(
+	ctx context.Context, span *Span, errorCode, errorMessage string, errorDetail error, willRetry bool,
+) {
 	if span == nil {
 		return
 	}
@@ -541,17 +558,16 @@ func (t *spanTracker) FailSpan(ctx context.Context, span *Span, errorCode, error
 	// in StageDependencies (those are siblings, not descendants).
 	if span.Kind == types.SpanKindStage {
 		t.cascadeDependentStages(ctx, span, reason)
-		// A failure in a MAIN pipeline stage closes the attempt as failed so
-		// the UI doesn't show "进行中" forever, but only once the task runner
-		// has no retry left. asynq retries reuse the same payload and so
-		// record onto the same attempt: closing the root on retry 0/3 leaves
-		// it failed even when the next retry completes every child span and
-		// the document itself reaches completed (#4326).
+		// Only an explicitly retryable failure with remaining budget leaves
+		// the root open. Retries share the same attempt, so closing it early
+		// prevents a successful retry from finalizing it as done (#4326).
+		// Terminal failures must close it even when retry budget is unused:
+		// callers can record a permanent failure and acknowledge the task.
 		//
 		// Optional downstream stages (summary/question/wiki/graph) do not
 		// poison the attempt: they can fail without invalidating the parsed
 		// document.
-		if isMainPipelineStage(span.Name) && !attemptStillHasRetry(ctx) {
+		if isMainPipelineStage(span.Name) && !willRetry {
 			t.FinalizeAttempt(ctx, span.KnowledgeID, span.Attempt,
 				types.SpanStatusFailed, nil, errorCode, errorMessage)
 		}
@@ -730,9 +746,9 @@ func contains(haystack []string, needle string) bool {
 	return false
 }
 
-// attemptStillHasRetry reports whether the task runner will run this attempt
-// again after a failure. It reads the same counters ProcessDocument uses for
-// its own isLastRetry: the Lite executor's injected metadata wins, otherwise
+// attemptStillHasRetry reports whether retry budget remains, not whether the
+// caller will actually request a retry. It reads ProcessDocument's isLastRetry
+// counters: the Lite executor's injected metadata wins, otherwise
 // the asynq counters. Outside a task runner (a synchronous reparse, a test
 // harness) neither is present and the failure is final.
 func attemptStillHasRetry(ctx context.Context) bool {
@@ -749,8 +765,7 @@ func attemptStillHasRetry(ctx context.Context) bool {
 
 // isMainPipelineStage reports whether stage is one of the 5 mandatory
 // pipeline stages (docreader / chunking / embedding / multimodal /
-// postprocess). A failure in any of these ends the attempt once no retry is
-// left (see attemptStillHasRetry) and must close the root as failed. Optional
+// postprocess). A terminal failure in any of these closes the root. Optional
 // downstream stages added later (summary, question, wiki, graph) do NOT match
 // — those can fail individually without poisoning the parse result.
 func isMainPipelineStage(name string) bool {
@@ -906,10 +921,11 @@ func (noopSpanTracker) BeginStage(_ context.Context, _ string, _ int, _ string, 
 func (noopSpanTracker) BeginSubSpan(_ context.Context, _ *Span, _, _ string, _ types.JSONMap) *Span {
 	return nil
 }
-func (noopSpanTracker) EndSpan(_ context.Context, _ *Span, _ types.JSONMap)            {}
-func (noopSpanTracker) FailSpan(_ context.Context, _ *Span, _, _ string, _ error)      {}
-func (noopSpanTracker) SkipSpan(_ context.Context, _ *Span, _ string)                  {}
-func (noopSpanTracker) LookupStage(_ context.Context, _ string, _ int, _ string) *Span { return nil }
+func (noopSpanTracker) EndSpan(_ context.Context, _ *Span, _ types.JSONMap)                {}
+func (noopSpanTracker) FailSpan(_ context.Context, _ *Span, _, _ string, _ error)          {}
+func (noopSpanTracker) FailSpanRetryable(_ context.Context, _ *Span, _, _ string, _ error) {}
+func (noopSpanTracker) SkipSpan(_ context.Context, _ *Span, _ string)                      {}
+func (noopSpanTracker) LookupStage(_ context.Context, _ string, _ int, _ string) *Span     { return nil }
 func (noopSpanTracker) LookupSpanByName(_ context.Context, _ string, _ int, _ string) *Span {
 	return nil
 }

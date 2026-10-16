@@ -550,7 +550,7 @@ func rootSpan(t *testing.T, db *gorm.DB, knowledgeID string, attempt int) (statu
 	return status, code, message
 }
 
-func TestSpanTracker_FailSpan_KeepsRootOpenWhileRetriesRemain(t *testing.T) {
+func TestSpanTracker_FailSpanRetryable_KeepsRootOpenWhileRetriesRemain(t *testing.T) {
 	ctx := context.Background()
 	// Every main pipeline stage goes through the same deferral, not just the
 	// docreader one a report happens to show.
@@ -566,7 +566,7 @@ func TestSpanTracker_FailSpan_KeepsRootOpenWhileRetriesRemain(t *testing.T) {
 			// still complete it.
 			first := types.WithTaskRetryMetadata(ctx, 0, 3)
 			span := tracker.BeginStage(first, kid, attempt, stage, nil)
-			tracker.FailSpan(first, span, "STAGE_FAILED", "transient upstream", errors.New("boom"))
+			tracker.FailSpanRetryable(first, span, "STAGE_FAILED", "transient upstream", errors.New("boom"))
 
 			status, code, _ := rootSpan(t, db, kid, attempt)
 			assert.Equal(t, types.SpanStatusRunning, status, "root stays open while a retry is left")
@@ -584,7 +584,7 @@ func TestSpanTracker_FailSpan_KeepsRootOpenWhileRetriesRemain(t *testing.T) {
 
 			// A failure arriving after the attempt closed must not reopen it.
 			late := tracker.BeginStage(first, kid, attempt, stage, nil)
-			tracker.FailSpan(types.WithTaskRetryMetadata(ctx, 3, 3),
+			tracker.FailSpanRetryable(types.WithTaskRetryMetadata(ctx, 3, 3),
 				late, "STAGE_FAILED", "later failure", errors.New("boom"))
 			status, _, _ = rootSpan(t, db, kid, attempt)
 			assert.Equal(t, types.SpanStatusDone, status, "a terminal attempt stays terminal")
@@ -592,7 +592,7 @@ func TestSpanTracker_FailSpan_KeepsRootOpenWhileRetriesRemain(t *testing.T) {
 	}
 }
 
-func TestSpanTracker_FailSpan_ClosesRootOnTheLastRetry(t *testing.T) {
+func TestSpanTracker_FailSpanRetryable_ClosesRootOnTheLastRetry(t *testing.T) {
 	tracker, db := setupSpanTrackerTest(t)
 	ctx := context.Background()
 
@@ -600,7 +600,7 @@ func TestSpanTracker_FailSpan_ClosesRootOnTheLastRetry(t *testing.T) {
 	require.NoError(t, err)
 	last := types.WithTaskRetryMetadata(ctx, 3, 3)
 	docreader := tracker.BeginStage(last, "kid-final", attempt, types.StageDocReader, nil)
-	tracker.FailSpan(last, docreader,
+	tracker.FailSpanRetryable(last, docreader,
 		"DOCREADER_PARSE_FAILED", "engine core initialization failed", errors.New("boom"))
 	status, code, message := rootSpan(t, db, "kid-final", attempt)
 	assert.Equal(t, types.SpanStatusFailed, status, "exhausted retries must not hang at 进行中")
@@ -612,7 +612,25 @@ func TestSpanTracker_FailSpan_ClosesRootOnTheLastRetry(t *testing.T) {
 	_, syncAttempt, err := tracker.OpenAttempt(ctx, "kid-sync", "")
 	require.NoError(t, err)
 	post := tracker.BeginStage(ctx, "kid-sync", syncAttempt, types.StagePostProcess, nil)
-	tracker.FailSpan(ctx, post, "POSTPROCESS_FAILED", "no retry metadata", errors.New("boom"))
+	tracker.FailSpanRetryable(ctx, post, "POSTPROCESS_FAILED", "no retry metadata", errors.New("boom"))
 	status, _, _ = rootSpan(t, db, "kid-sync", syncAttempt)
 	assert.Equal(t, types.SpanStatusFailed, status)
+}
+
+// Unused queue budget does not make an acknowledged failure retryable.
+func TestSpanTracker_FailSpan_ClosesRootWithUnusedRetries(t *testing.T) {
+	for _, stage := range types.AllStages {
+		t.Run(stage, func(t *testing.T) {
+			tracker, db := setupSpanTrackerTest(t)
+			ctx := types.WithTaskRetryMetadata(context.Background(), 0, 3)
+			_, attempt, err := tracker.OpenAttempt(ctx, "terminal", "")
+			require.NoError(t, err)
+			span := tracker.BeginStage(ctx, "terminal", attempt, stage, nil)
+			tracker.FailSpan(ctx, span, "PERMANENT_FAILURE", "cannot continue", nil)
+			status, code, message := rootSpan(t, db, "terminal", attempt)
+			require.Equal(t, types.SpanStatusFailed, status)
+			require.Equal(t, "PERMANENT_FAILURE", code)
+			require.Equal(t, "cannot continue", message)
+		})
+	}
 }
