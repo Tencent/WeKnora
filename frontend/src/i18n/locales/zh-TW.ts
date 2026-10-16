@@ -4908,6 +4908,7 @@ export default {
         imagePipelineSectionLabel: '圖片解析方案',
         imagePipelineSectionDescription: '多模態解析開啟後，可以根據需要選擇圖片的解析方案',
         imagePipelineLabel: '選擇解析方案',
+        imagePipelineHelpSummary: '欄位說明',
         preprocessLabel: '文件預處理',
         preprocessDescription:
           '在 OCR 之前把拍攝的頁面擺正並裁掉周圍環境。自動：由描述輪判斷頁面是否需要；關閉：從不處理；強制：總是處理。',
@@ -8713,6 +8714,25 @@ export default {
     errors: {
       noActionEnabled: '至少開啟一個解析動作，否則多模態不會處理任何內容。',
     },
+      layout_margin: {
+        label: '版面留白',
+        description:
+          '文字內容之外的部分（桌面、背景、空白）占整張畫面的比例。留白越大，越能在 OCR 之前把頁面裁得更緊。',
+        values: {
+          'none': { label: '無留白', description: '文字幾乎鋪滿畫面' },
+          'small': { label: '少量留白', description: '邊緣只有一條窄邊' },
+          'large': { label: '大片留白', description: '有大片非文字區域 —— 桌面、房間，或拍進來的周邊環境' }
+        }
+      },
+      layout_upright: {
+        label: '文字朝向',
+        description:
+          '圖中文字是否正立。歪斜或倒置的頁面，值得在 OCR 之前擺正。',
+        values: {
+          'true': { label: '正立', description: '文字方向正常' },
+          'false': { label: '非正立', description: '文字被旋轉、傾斜拍攝或倒置' }
+        }
+      },
     default: {
       name: '傳統',
       description: '使用者根據任務需要手動選擇解析動作開關。',

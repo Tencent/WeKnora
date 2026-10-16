@@ -432,7 +432,11 @@
                      「后端加一行 / 前端自动跟随」，属性集合随版本演进不需要改这里。 -->
                 <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaDescription') }}</p>
               </div>
-              <div class="image-attr-panel">
+              <!-- 属性字典默认折叠：属性会随版本增加，平铺会把面板撑得很长。 -->
+              <details class="image-attr-panel">
+                <summary class="image-attr-summary">
+                  {{ $t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaLabel') }}
+                </summary>
                 <ul v-if="imageAttrDisplays.length" class="image-attr-list">
                   <li v-for="attr in imageAttrDisplays" :key="attr.name" class="image-attr-row">
                     <div class="image-attr-head">
@@ -460,7 +464,7 @@
                     </li>
                   </ul>
                 </div>
-              </div>
+              </details>
 
               <!-- 观察失败兜底：与上方整块开关同级（不再嵌在属性面板里）。
                    开关仍包在 setting-control 里，与其它开关行共用同一套
@@ -1988,6 +1992,11 @@ watch(() => chatResources.allModels, (list) => {
 // 图片属性面板（可观察属性 / OCR 触发条件 / 观察失败兜底）
 // 文案全部来自后端属性注册表（人话名 + 每个取值的含义），前端只做翻译覆盖，
 // 因此新增属性无需改这里。铺在所在设置区里、不套独立底色块（与整体风格一致）。
+.image-attr-summary {
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+}
 .image-attr-panel {
   margin-top: 4px;
 }

@@ -126,7 +126,7 @@ var ImageAttrRegistry = []AttrSpec{
 		Inject:    AttrInjectAlways,
 	},
 	{
-		Name: "contain.margin",
+		Name: "layout.margin",
 		Type: AttrTypeExtent,
 		Values: []AttrValue{
 			{Value: "none", Label: "None", Description: "the text reaches the edges; almost no background"},
@@ -145,7 +145,7 @@ var ImageAttrRegistry = []AttrSpec{
 		Inject:    AttrInjectOnDemand,
 	},
 	{
-		Name: "contain.upright",
+		Name: "layout.upright",
 		Type: AttrTypePresence,
 		Values: []AttrValue{
 			{Value: "true", Label: "Upright", Description: "text reads in its normal orientation"},
@@ -213,12 +213,12 @@ func (a ImageAttrs) TextExtent() string {
 	return ""
 }
 
-// Margin returns the observed contain.margin value ("none" | "small" |
+// Margin returns the observed layout.margin value ("none" | "small" |
 // "large"), or "" when the observation did not answer for it. The empty string
 // is meaningful and must not be read as "none": it says this run has no basis
 // to conclude the page is already tidy, and callers treat that as "worth a
 // look" so an unobserved page still gets its chance.
-func (a ImageAttrs) Margin() string { return a.attrString("contain.margin") }
+func (a ImageAttrs) Margin() string { return a.attrString("layout.margin") }
 
 // Upright reports whether the observation found the text upright, and whether
 // it answered the question at all. A presence attribute stores a real bool (see
@@ -230,7 +230,7 @@ func (a ImageAttrs) Upright() (upright bool, observed bool) {
 	if a.Attrs == nil {
 		return false, false
 	}
-	if v, ok := a.Attrs["contain.upright"]; ok {
+	if v, ok := a.Attrs["layout.upright"]; ok {
 		if b, ok := v.(bool); ok {
 			return b, true
 		}

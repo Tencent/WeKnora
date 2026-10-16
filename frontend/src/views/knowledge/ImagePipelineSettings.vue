@@ -55,6 +55,14 @@ const current = computed<ImagePipelineSpec | undefined>(() =>
 /** Its fields, in the order the backend declared them. */
 const fields = computed<ImagePipelineField[]>(() => current.value?.fields ?? [])
 
+// 控件按业务顺序分组：描述轮（caption.*）→ [预处理] → 识别轮（ocr.*）。
+// 其它字段兜底渲染，未来新增的字段不会因为没被归类而消失。
+const captionFields = computed(() => fields.value.filter((f) => f.key.startsWith('caption')))
+const ocrFields = computed(() => fields.value.filter((f) => f.key.startsWith('ocr')))
+const otherFields = computed(() =>
+  fields.value.filter((f) => !f.key.startsWith('caption') && !f.key.startsWith('ocr')),
+)
+
 // Every rule the selected pipeline breaks, reported by the backend and in the
 // backend's own terms: each violation carries the i18n key of its own wording
 // and the name of the control to point at. Nothing here decides what is
@@ -207,6 +215,8 @@ watch(() => props.pipelineId, () => {
     </div>
 
     <template v-else>
+      <!-- 控件区按业务顺序排：方案 → 描述轮 → 文档预处理 → 识别轮。
+           所有解释性文字收进底部折叠区，控件行只留标签。 -->
       <div class="image-pipeline-row">
         <div class="image-pipeline-info">
           <label>{{ $t('knowledgeEditor.advanced.multimodal.imagePipelineLabel') }}</label>
@@ -226,42 +236,11 @@ watch(() => props.pipelineId, () => {
           </t-select>
         </div>
       </div>
-      <p v-if="current" class="image-pipeline-desc">{{ pipelineDescription(current) }}</p>
 
-      <!-- Page straightening. Offered next to the pick because it is part of
-           what the pipeline does to an image, but framed as its own decision:
-           the three states trade a pass over the page against reading it as
-           photographed, and an operator may reasonably want either. -->
-      <div class="image-pipeline-row">
-        <div class="image-pipeline-info">
-          <label>{{ $t('knowledgeEditor.advanced.multimodal.preprocessLabel') }}</label>
-          <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.preprocessDescription') }}</p>
-        </div>
-        <div class="image-pipeline-control">
-          <t-select :value="preprocessMode || PREPROCESS_MODE_AUTO" @change="onPreprocessModeChange">
-            <t-option
-              value="auto"
-              :label="$t('knowledgeEditor.advanced.multimodal.preprocessModeAuto')"
-            />
-            <t-option
-              value="off"
-              :label="$t('knowledgeEditor.advanced.multimodal.preprocessModeOff')"
-            />
-            <t-option
-              value="force"
-              :label="$t('knowledgeEditor.advanced.multimodal.preprocessModeForce')"
-            />
-          </t-select>
-        </div>
-      </div>
-
-      <!-- One row per field the running pipeline declares. A pipeline with no
-           fields shows nothing here, which is the honest rendering of "nothing
-           to tune" rather than an empty section. -->
-      <div v-for="field in fields" :key="field.key" class="image-pipeline-row">
+      <!-- 描述轮的开关（caption.*） -->
+      <div v-for="field in captionFields" :key="field.key" class="image-pipeline-row">
         <div class="image-pipeline-info">
           <label>{{ fieldLabel(field) }}</label>
-          <p v-if="fieldDescription(field)" class="desc">{{ fieldDescription(field) }}</p>
         </div>
         <div class="image-pipeline-control">
           <t-switch
@@ -285,6 +264,99 @@ watch(() => props.pipelineId, () => {
           />
         </div>
       </div>
+
+      <!-- 文档预处理：夹在描述与识别之间 —— 流水线里的位置就是这里
+           （观察 → 决定 → 摆正 → 识别）。 -->
+      <div class="image-pipeline-row">
+        <div class="image-pipeline-info">
+          <label>{{ $t('knowledgeEditor.advanced.multimodal.preprocessLabel') }}</label>
+        </div>
+        <div class="image-pipeline-control">
+          <t-select
+            :value="preprocessMode || PREPROCESS_MODE_AUTO"
+            @change="onPreprocessModeChange"
+          >
+            <t-option value="auto" :label="$t('knowledgeEditor.advanced.multimodal.preprocessModeAuto')" />
+            <t-option value="off" :label="$t('knowledgeEditor.advanced.multimodal.preprocessModeOff')" />
+            <t-option value="force" :label="$t('knowledgeEditor.advanced.multimodal.preprocessModeForce')" />
+          </t-select>
+        </div>
+      </div>
+
+      <!-- 识别轮的开关（ocr.*） -->
+      <div v-for="field in ocrFields" :key="field.key" class="image-pipeline-row">
+        <div class="image-pipeline-info">
+          <label>{{ fieldLabel(field) }}</label>
+        </div>
+        <div class="image-pipeline-control">
+          <t-switch
+            v-if="field.type === 'bool'"
+            :value="Boolean(paramValue(field))"
+            size="medium"
+            @change="(value: boolean) => onParamChange(field.key, value)"
+          />
+          <t-select
+            v-else-if="field.type === 'enum'"
+            :value="String(paramValue(field) ?? '')"
+            clearable
+            @change="(value: string) => onParamChange(field.key, value)"
+          >
+            <t-option v-for="opt in field.options ?? []" :key="opt" :value="opt" :label="opt" />
+          </t-select>
+          <t-input
+            v-else
+            :value="String(paramValue(field) ?? '')"
+            @change="(value: string) => onParamChange(field.key, value)"
+          />
+        </div>
+      </div>
+
+      <!-- 未归类的字段（未来新增的兜底） -->
+      <div v-for="field in otherFields" :key="field.key" class="image-pipeline-row">
+        <div class="image-pipeline-info">
+          <label>{{ fieldLabel(field) }}</label>
+        </div>
+        <div class="image-pipeline-control">
+          <t-switch
+            v-if="field.type === 'bool'"
+            :value="Boolean(paramValue(field))"
+            size="medium"
+            @change="(value: boolean) => onParamChange(field.key, value)"
+          />
+          <t-select
+            v-else-if="field.type === 'enum'"
+            :value="String(paramValue(field) ?? '')"
+            clearable
+            @change="(value: string) => onParamChange(field.key, value)"
+          >
+            <t-option v-for="opt in field.options ?? []" :key="opt" :value="opt" :label="opt" />
+          </t-select>
+          <t-input
+            v-else
+            :value="String(paramValue(field) ?? '')"
+            @change="(value: string) => onParamChange(field.key, value)"
+          />
+        </div>
+      </div>
+
+      <!-- 说明区：默认折叠，解释性文字集中在此。 -->
+      <details class="image-pipeline-help">
+        <summary>{{ $t('knowledgeEditor.advanced.multimodal.imagePipelineHelpSummary') }}</summary>
+        <dl class="image-pipeline-help-list">
+          <template v-if="current">
+            <dt>{{ pipelineName(current) }}</dt>
+            <dd>{{ pipelineDescription(current) }}</dd>
+          </template>
+          <dt>{{ $t('knowledgeEditor.advanced.multimodal.preprocessLabel') }}</dt>
+          <dd>{{ $t('knowledgeEditor.advanced.multimodal.preprocessDescription') }}</dd>
+          <template v-for="field in fields" :key="field.key">
+            <template v-if="fieldDescription(field)">
+              <dt>{{ fieldLabel(field) }}</dt>
+              <dd>{{ fieldDescription(field) }}</dd>
+            </template>
+          </template>
+        </dl>
+      </details>
 
       <!-- Every broken rule, listed rather than summarised: each line names what
            is wrong and, through the field it points at, which control to turn

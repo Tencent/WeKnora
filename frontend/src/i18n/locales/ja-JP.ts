@@ -4283,6 +4283,7 @@ export default {
         imagePipelineSectionDescription:
           'マルチモーダル解析が有効な場合、画像の解析方式を選択できます。',
         imagePipelineLabel: '解析方式',
+        imagePipelineHelpSummary: '項目の説明',
         preprocessLabel: '文書の前処理',
         preprocessDescription:
           'OCR の前に、撮影したページを傾き補正して周囲を切り落とします。自動：説明ラウンドが要否を判断／オフ：常に無効／強制：常に有効。',
@@ -8716,6 +8717,25 @@ export default {
     errors: {
       noActionEnabled: '解析アクションを1つ以上オンにしてください。オフのままでは何も処理されません。',
     },
+      layout_margin: {
+        label: '版面の余白',
+        description:
+          '内容の外側（机・背景・余白）が画面全体に占める割合。余白が大きいほど、OCR の前にページをより詰めて切り出せます。',
+        values: {
+          'none': { label: '余白なし', description: '文字がほぼ画面いっぱい' },
+          'small': { label: '余白少', description: '縁に細い帯だけ' },
+          'large': { label: '余白大', description: '非文字領域が広い —— 机・部屋・ほぼ空白のページ' }
+        }
+      },
+      layout_upright: {
+        label: '文字の向き',
+        description:
+          '画像内の文字が正立しているか。傾いた・逆さまのページは OCR の前に傾き補正する価値があります。',
+        values: {
+          'true': { label: '正立', description: '文字が通常の向き' },
+          'false': { label: '非正立', description: '回転・傾き撮影・逆さま' }
+        }
+      },
     default: {
       name: 'マニュアル',
       description: 'タスクに合わせて解析アクションのスイッチを手動でオン/オフします。',
