@@ -92,7 +92,6 @@ export function buildPipelineFields(
   pipelineId: string,
   pipelineParams: Record<string, unknown> | null | undefined,
   preprocessMode?: string | null,
-  kbPreprocessMode?: string | null,
 ): PipelineFields {
   if (!pipelineId) return {}
   const fields: PipelineFields = {}
@@ -100,12 +99,12 @@ export function buildPipelineFields(
   if (pipelineParams && Object.keys(pipelineParams).length > 0) {
     fields.image_pipeline_params = pipelineParams
   }
-  // Ditto for the preprocess switch: the dialogs open showing the knowledge
-  // base's value, and only a deliberate change is worth overriding with.
-  const mode = normalizePreprocessMode(preprocessMode)
-  if (preprocessMode && mode !== normalizePreprocessMode(kbPreprocessMode)) {
-    fields.preprocess_mode = mode
-  }
+  // The preprocess switch follows the same rule as the pick above: what the
+  // dialog shows is what it sends, so the document is re-parsed with the
+  // settings the operator just looked at. How a document's own setting and the
+  // knowledge base's default interact is decided elsewhere (see
+  // applyOverridesToState), not here.
+  if (preprocessMode) fields.preprocess_mode = normalizePreprocessMode(preprocessMode)
   return fields
 }
 

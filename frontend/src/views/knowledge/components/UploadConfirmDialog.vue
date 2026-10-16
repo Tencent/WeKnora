@@ -694,6 +694,7 @@ import ImagePipelineSettings from '../ImagePipelineSettings.vue'
 import {
   buildPipelineFields,
   PREPROCESS_MODE_AUTO,
+  normalizePreprocessMode,
   resolveImagePipelineFromKb,
   resolvePreprocessModeFromKb,
   normalizeImagePipelineId,
@@ -1409,7 +1410,6 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
       state.multimodalConfig.enabled ? state.imagePipeline : '',
       state.imagePipelineParams,
       state.preprocessMode,
-      resolvePreprocessModeFromKb(props.kbInfo),
     ),
   )
 
@@ -1453,6 +1453,7 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
     if (pipeline !== s.imagePipeline) s.imagePipelineParams = {}
     s.imagePipeline = pipeline
   }
+  if (o.preprocess_mode != null) s.preprocessMode = normalizePreprocessMode(o.preprocess_mode)
   if (o.image_vector_enabled != null) s.imageVectorEnabled = o.image_vector_enabled
   if (o.image_actions) s.imageActions = mergeImageActions(o.image_actions)
   if (o.vlm_config) {

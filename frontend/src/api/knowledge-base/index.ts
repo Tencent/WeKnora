@@ -224,6 +224,12 @@ export interface ImageProcessingConfig {
   image_pipeline?: string;
   /** That pipeline's private tunables, keyed by field. See ImagePipelineField. */
   image_pipeline_params?: Record<string, unknown>;
+  /**
+   * Page-straightening switch: 'off' | 'auto' | 'force'. Empty means auto, the
+   * backend's own default, so a base that never touched the select stores no
+   * key at all.
+   */
+  preprocess_mode?: string;
   // Index and recall images by their own vectors. Off unless the knowledge
   // base opts in, and only takes effect with an embedding model that takes
   // images.
