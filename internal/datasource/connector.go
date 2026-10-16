@@ -222,6 +222,14 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "api_key",
 		Capabilities: []string{"incremental", "deletion_sync"},
 	},
+	types.ConnectorTypeJira: {
+		Type:         types.ConnectorTypeJira,
+		Name:         "Jira",
+		Description:  "Sync projects and issues from Atlassian Jira",
+		Priority:     2,
+		AuthType:     "api_key",
+		Capabilities: []string{"incremental", "deletion_sync"},
+	},
 	types.ConnectorTypeYuque: {
 		Type:         types.ConnectorTypeYuque,
 		Name:         "Yuque (语雀)",
