@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
@@ -276,5 +279,139 @@ func TestDriveFetchStream_DocxImageEmitted(t *testing.T) {
 	}
 	if main.Metadata["image_map"] != "" {
 		t.Errorf("image_map must be gone, got %q", main.Metadata["image_map"])
+	}
+}
+
+func TestDriveParseModeChangeRefetchesExistingDocument(t *testing.T) {
+	ts, cfg := fakeFeishuDriveDocx(t, []core.DriveFile{driveDocxFile()}, driveDocxFileToken,
+		driveDocxBlocks("", ""), "ok", nil)
+	defer ts.Close()
+	conf := makeDriveConfig(cfg, []string{"folder1"})
+	conf.Settings = map[string]interface{}{"parse_mode": "export"}
+	c := NewDriveConnector(core.RegionFeishu)
+	items, cursor, err := c.FetchIncremental(context.Background(), conf, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("initial sync: %d items", len(items))
+	}
+	for _, mode := range []string{"blocks", "export"} {
+		conf.Settings["parse_mode"] = mode
+		items, cursor, err = c.FetchIncremental(context.Background(), conf, cursor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("mode %s: want one refreshed document, got %d", mode, len(items))
+		}
+		items, _, err = c.FetchIncremental(context.Background(), conf, cursor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(items) != 0 {
+			t.Fatalf("unchanged mode %s unexpectedly refetched", mode)
+		}
+	}
+}
+
+// Image-heavy documents must take the native export path, whose ImageRefs do
+// not have the Markdown data-URI count limit. In particular, no excess base64
+// may be persisted as searchable document text.
+func TestDriveImageBudgetFallsBackToNativeExport(t *testing.T) {
+	for _, count := range []int{types.MaxInlineDocumentImages, types.MaxInlineDocumentImages + 1, 61} {
+		t.Run(strconv.Itoa(count), func(t *testing.T) {
+			blocks := []core.DocxBlock{{BlockID: "page", BlockType: core.BlockTypePage}}
+			for i := 0; i < count; i++ {
+				blocks = append(blocks, core.DocxBlock{
+					BlockID: fmt.Sprintf("img%d", i), BlockType: core.BlockTypeImage,
+					Image: &core.BlockTokenRef{Token: "img"},
+				})
+			}
+			data := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte("x"), core.MinAttachmentBytes)...)
+			_, cfg := fakeFeishuDriveDocx(t, []core.DriveFile{driveDocxFile()}, driveDocxFileToken, blocks, "ok", data)
+			items, err := core.FetchDocxWithBlocks(context.Background(), core.NewClient(cfg), core.DocxFetchInput{
+				DocToken: driveDocxFileToken, ObjToken: driveDocxFileToken, Title: "Images",
+				BaseMeta: map[string]string{}, ParseMode: core.ParseModeBlocks,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(items) != 1 {
+				t.Fatalf("want one document, got %d", len(items))
+			}
+			if count <= types.MaxInlineDocumentImages {
+				if n := strings.Count(string(items[0].Content), "data:image/png;base64,"); n != count {
+					t.Fatalf("inline images=%d, want %d", n, count)
+				}
+			} else {
+				if !strings.HasSuffix(items[0].FileName, ".docx") ||
+					string(items[0].Content) != "fake-drive-export-binary" {
+					t.Fatalf("image-heavy document was not exported: %s", items[0].FileName)
+				}
+				if !items[0].ReplacesSubtree {
+					t.Fatal("complete blocks listing must retain attachment reconciliation")
+				}
+			}
+		})
+	}
+}
+
+func TestDriveImageBudgetPreservesAttachmentsAndExportFailures(t *testing.T) {
+	for _, failExport := range []bool{false, true} {
+		t.Run(strconv.FormatBool(failExport), func(t *testing.T) {
+			blocks := driveDocxBlocks("attachment", "report.pdf")
+			for i := 0; i < 61; i++ {
+				blocks = append(blocks, core.DocxBlock{
+					BlockID: fmt.Sprintf("img%d", i), BlockType: core.BlockTypeImage,
+					Image: &core.BlockTokenRef{Token: "img"},
+				})
+			}
+			ts, cfg := fakeFeishuDriveDocx(t, []core.DriveFile{driveDocxFile()}, driveDocxFileToken,
+				blocks, "ok", bytes.Repeat([]byte("pdf"), 1024))
+			handler := ts.Config.Handler
+			var mediaDownloads atomic.Int32
+			ts.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.Contains(r.URL.Path, "/medias/") {
+					mediaDownloads.Add(1)
+				}
+				if failExport && r.URL.Path == "/open-apis/drive/v1/export_tasks" {
+					writeJSON(w, core.ApiResponse{Code: 1, Msg: "export unavailable"})
+					return
+				}
+				handler.ServeHTTP(w, r)
+			})
+			items, err := core.FetchDocxWithBlocks(context.Background(), core.NewClient(cfg), core.DocxFetchInput{
+				DocToken: driveDocxFileToken, ObjToken: driveDocxFileToken, Title: "Images",
+				BaseMeta: map[string]string{}, ParseMode: core.ParseModeBlocks,
+			})
+			if failExport {
+				if err == nil || len(items) != 0 {
+					t.Fatalf("failed export must remain retryable: err=%v items=%d", err, len(items))
+				}
+				if mediaDownloads.Load() != 0 {
+					t.Fatal("media downloaded despite failed parent export")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(items) != 2 {
+				t.Fatalf("want attachment and exported parent, got %d", len(items))
+			}
+			parent := items[1]
+			childID := types.SubtreeChildID(driveDocxFileToken, "file", "attachment")
+			if items[0].ExternalID != childID || items[0].Metadata["parent_doc_id"] != parent.ExternalID {
+				t.Fatal("lost attachment association")
+			}
+			if !parent.ReplacesSubtree || len(parent.SubtreeKeep) != 1 || parent.SubtreeKeep[0] != childID ||
+				!strings.Contains(parent.Metadata["attachment_ids"], childID) {
+				t.Fatalf("lost attachment keep list: %+v", parent)
+			}
+			if mediaDownloads.Load() != 1 {
+				t.Fatalf("want only attachment download, got %d", mediaDownloads.Load())
+			}
+		})
 	}
 }

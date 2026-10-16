@@ -18,6 +18,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/stretchr/testify/require"
 )
 
 // createTestPNG generates a minimal PNG image with the given dimensions.
@@ -632,5 +633,24 @@ func TestResolveAndStoreSharedMHTMLContract(t *testing.T) {
 	}
 	if !strings.Contains(out, "```\nline1\n\n\nline2\n```") {
 		t.Fatalf("fenced code blank lines changed: %s", out)
+	}
+}
+
+func TestResolveAndStore_ExportImageRefsBeyondInlineBudget(t *testing.T) {
+	data := createTestPNG(200, 150)
+	result := &types.ReadResult{}
+	for i := 0; i < 61; i++ {
+		ref := fmt.Sprintf("image-%d.png", i)
+		result.MarkdownContent += "![image](" + ref + ")\n"
+		result.ImageRefs = append(result.ImageRefs, types.ImageRef{
+			OriginalRef: ref, Filename: ref, ImageData: data, MimeType: "image/png",
+		})
+	}
+	out, images, err := NewImageResolver().ResolveAndStore(context.Background(), result, &captureSaveBytes{}, 1)
+	require.NoError(t, err)
+	require.Len(t, images, 61, "native export ImageRefs must retain all images beyond the inline URI budget")
+	require.NotContains(t, out, "data:image/")
+	for i := 0; i < 61; i++ {
+		require.NotContains(t, out, fmt.Sprintf("](image-%d.png)", i))
 	}
 }

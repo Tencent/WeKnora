@@ -32,6 +32,7 @@ func NewDriveConnector(region core.Region) *DriveConnector {
 // Drive supports resumable streaming sync; the service prefers FetchStream over
 // FetchAll/FetchIncremental when a connector implements StreamingConnector.
 var _ datasource.StreamingConnector = (*DriveConnector)(nil)
+var _ datasource.FullStreamingConnector = (*DriveConnector)(nil)
 
 // Type returns the connector type identifier.
 func (c *DriveConnector) Type() string {
@@ -283,6 +284,23 @@ func (c *DriveConnector) FetchStream(
 	return core.FetchStreamEngine(ctx, client, config, cursor, h, ops)
 }
 
+// FetchFullStream refetches content without discarding the deletion baseline.
+func (c *DriveConnector) FetchFullStream(
+	ctx context.Context, config *types.DataSourceConfig,
+	cursor *types.SyncCursor, h datasource.StreamHandler,
+) (*types.SyncCursor, error) {
+	feishuConfig, err := core.ParseFeishuConfig(config, c.region)
+	if err != nil {
+		return nil, err
+	}
+	client := core.NewClient(feishuConfig)
+	ops := &driveOps{region: c.region, parseMode: feishuConfig.ParseMode}
+	if len(config.ResourceIDs) == 0 {
+		return nil, errors.New(ops.EmptyResourceIDsError())
+	}
+	return core.FetchFullStreamEngine(ctx, client, config, cursor, h, ops)
+}
+
 // driveOps adapts the Drive DriveConnector to the generic sync engine. It
 // carries the region (for channel + URL), encodes/decodes the Drive cursor
 // wire format (core.FeishuDriveCursor / file_times), and holds the per-run
@@ -310,10 +328,12 @@ func (o *driveOps) List(ctx context.Context, client *core.Client, resourceID str
 	return files, nil, err
 }
 
-func (o *driveOps) Token(n core.DriveFile) string    { return n.Token }
-func (o *driveOps) Title(n core.DriveFile) string    { return n.Name }
-func (o *driveOps) ObjType(n core.DriveFile) string  { return n.Type }
-func (o *driveOps) EditTime(n core.DriveFile) string { return n.ModifiedTime }
+func (o *driveOps) Token(n core.DriveFile) string   { return n.Token }
+func (o *driveOps) Title(n core.DriveFile) string   { return n.Name }
+func (o *driveOps) ObjType(n core.DriveFile) string { return n.Type }
+func (o *driveOps) EditTime(n core.DriveFile) string {
+	return core.DocxChangeKey(n.ModifiedTime, n.Type, o.parseMode)
+}
 
 func (o *driveOps) Fetch(
 	ctx context.Context, client *core.Client, n core.DriveFile, resourceID string,

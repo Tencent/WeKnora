@@ -31,6 +31,7 @@ func NewConnector(region core.Region) *Connector {
 // Feishu supports resumable streaming sync; the service prefers FetchStream over
 // FetchAll/FetchIncremental when a connector implements StreamingConnector.
 var _ datasource.StreamingConnector = (*Connector)(nil)
+var _ datasource.FullStreamingConnector = (*Connector)(nil)
 
 // Type returns the connector type identifier.
 func (c *Connector) Type() string {
@@ -219,6 +220,23 @@ func (c *Connector) FetchStream(
 	return core.FetchStreamEngine(ctx, client, config, cursor, h, ops)
 }
 
+// FetchFullStream refetches content without discarding the deletion baseline.
+func (c *Connector) FetchFullStream(
+	ctx context.Context, config *types.DataSourceConfig,
+	cursor *types.SyncCursor, h datasource.StreamHandler,
+) (*types.SyncCursor, error) {
+	feishuConfig, err := core.ParseFeishuConfig(config, c.region)
+	if err != nil {
+		return nil, err
+	}
+	client := core.NewClient(feishuConfig)
+	ops := &wikiOps{region: c.region, parseMode: feishuConfig.ParseMode}
+	if len(config.ResourceIDs) == 0 {
+		return nil, errors.New(ops.EmptyResourceIDsError())
+	}
+	return core.FetchFullStreamEngine(ctx, client, config, cursor, h, ops)
+}
+
 // wikiOps adapts the wiki Connector to the generic sync engine. It carries the
 // region (for URL rendering), encodes/decodes the wiki cursor wire format
 // (core.FeishuCursor / space_node_times), and holds the per-run directory
@@ -297,7 +315,7 @@ func (o *wikiOps) ObjType(n core.WikiNode) string { return n.ObjType }
 // Timestamp-only legacy cursors refresh once; source_updated_at still uses
 // contentEditTime and never contains the path fingerprint.
 func (o *wikiOps) EditTime(n core.WikiNode) string {
-	timestamp := wikiNodeEditTime(n)
+	timestamp := core.DocxChangeKey(wikiNodeEditTime(n), n.ObjType, o.parseMode)
 	if dir, ok := o.dirPaths[n.NodeToken]; ok {
 		pathHash := sha256.Sum256([]byte(dir + "\x00" + core.SanitizeFileName(n.Title)))
 		return fmt.Sprintf("%s:%x", timestamp, pathHash)

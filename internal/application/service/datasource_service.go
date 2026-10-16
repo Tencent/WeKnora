@@ -1144,7 +1144,7 @@ func (s *DataSourceService) processSyncStreaming(
 	if resyncRequired(config) {
 		// One-shot legacy upgrade (design §7). The marker is cleared only
 		// after the run succeeds below; a failure keeps it so the retry
-		// upgrades again from scratch.
+		// resumes the upgraded pass from its checkpoint.
 		forceFull = true
 	}
 	attempt, _ := asynq.GetRetryCount(ctx)

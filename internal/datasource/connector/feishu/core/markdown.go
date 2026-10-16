@@ -162,6 +162,11 @@ func markContainerDescendants(blocks []DocxBlock, byID map[string]DocxBlock, con
 		}
 	}
 	for _, b := range blocks {
+		// A table-owned container is not recursively rendered. Its media
+		// must remain available to the flat pass, just like direct cell media.
+		if consumed[b.BlockID] {
+			continue
+		}
 		switch b.BlockType {
 		case BlockTypeCallout, BlockTypeGrid, BlockTypeQuoteContainer, BlockTypeView:
 			for _, c := range b.Children {

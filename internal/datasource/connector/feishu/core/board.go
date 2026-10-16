@@ -13,8 +13,7 @@ import (
 
 // board.go covers the docx board block (block_type 43): whiteboards embedded in
 // documents are exported to an image via the official download_as_image API and
-// ride the embedded-image pipeline as a regular image sub-item
-// (external_id "<parent>#board#<token>").
+// ride the parent document's embedded-image pipeline.
 //
 // API: GET /open-apis/board/v1/whiteboards/:whiteboard_id/download_as_image —
 // responds with the raw image bytes (Content-Type image/png|jpeg|gif|svg+xml).

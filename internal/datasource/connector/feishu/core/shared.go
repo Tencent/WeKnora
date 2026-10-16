@@ -271,6 +271,18 @@ func ParseFeishuConfig(config *types.DataSourceConfig, region Region) (*Config, 
 	return &feishuConfig, nil
 }
 
+// DocxChangeKey invalidates cached docx content when its effective parser changes.
+// Other file types do not depend on the docx parser setting.
+func DocxChangeKey(editTime, objType, parseMode string) string {
+	if objType != "docx" {
+		return editTime
+	}
+	if parseMode == "" {
+		parseMode = ParseModeBlocks
+	}
+	return editTime + ":parse=" + parseMode
+}
+
 // IsSupportedDocType checks if a Feishu document type can be synced.
 // mindnote and slides have no content read API and are skipped.
 func IsSupportedDocType(objType string) bool {
@@ -440,6 +452,20 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 	}
 	md := string(mdBytes)
 
+	// Export image-heavy documents before downloading any media or attachments.
+	// The native document parser carries images as ImageRefs, which do not use
+	// the Markdown data-URI count budget. Never silently leave excess base64
+	// in persisted Markdown, and do not raise the shared parser's resource cap.
+	var exported *types.FetchedItem
+	if len(imgs) > types.MaxInlineDocumentImages {
+		logger.Infof(ctx, "[Feishu] doc %s has %d images; falling back to export", in.ObjToken, len(imgs))
+		item, ferr := exportDocxFallback(ctx, client, in)
+		if ferr != nil {
+			return nil, ferr
+		}
+		exported = item
+	}
+
 	if len(strings.TrimSpace(md)) == 0 {
 		logger.Infof(ctx, "[Feishu] doc %s (%s): blocks rendered empty Markdown, falling back to export",
 			in.Title, in.ObjToken)
@@ -546,6 +572,22 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 		attachmentIDs = append(attachmentIDs, childID)
 	}
 
+	if exported != nil {
+		// A successful blocks listing still provides authoritative attachments.
+		// Preserve those children even though the parent's images use native
+		// export parsing; ordinary export alone omits file block attachments.
+		exported.ReplacesSubtree = true
+		exported.SubtreeKeep = keep
+		if len(attachmentIDs) > 0 {
+			if exported.Metadata == nil {
+				exported.Metadata = make(map[string]string)
+			}
+			ids, _ := json.Marshal(attachmentIDs)
+			exported.Metadata["attachment_ids"] = string(ids)
+		}
+		return append(children, exported), nil
+	}
+
 	// ── 云文档 mention links: backfill document titles ──
 	// The renderer emits "[weknora-docname://<token>](<url>)" placeholders; the
 	// drive metadata batch API resolves every title in one call. Refs that
@@ -599,9 +641,9 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 			continue
 		}
 		ext, contentType, ok := SupportedImageExt(data)
-		if !ok || len(data) < MinAttachmentBytes {
-			// Non-image payload or decorative micro-image (icon/spacer):
-			// degrade to a placeholder rather than embedding junk.
+		if !ok {
+			// Reject non-images here. The image resolver filters icons by
+			// dimensions; compressed diagrams can be well below 2 KB.
 			logger.Infof(ctx, "[Feishu] doc %s: %s %s not a usable image (type=%q bytes=%d)",
 				in.ObjToken, pi.Kind, pi.Token, contentType, len(data))
 			patchMarker(pi.N, "![图片]()")

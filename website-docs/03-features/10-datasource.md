@@ -114,13 +114,13 @@
 - **认证**（`core/client.go`）：`POST /open-apis/auth/v3/tenant_access_token/internal` 换取 tenant_access_token，带互斥锁缓存与过期刷新。
 - **资源列举**（`ListResources`）：三级懒加载——`parentID==""` 列 Wiki 空间；`parentID==spaceID` 列空间顶层节点；`parentID=="spaceID:nodeToken"` 列该节点子节点。早期版本会预先递归整棵树，大 Wiki 会超时（issue #1672），现在递归只发生在同步时。`ResolveResourceAncestors` 通过 `GetWikiNode` 的 `parent_node_token` 逐级上溯，O(depth) 回显深层勾选。
 - **目录映射**：同步时按 Wiki 节点树 / Drive 文件夹树在知识库内重建同名目录（`knowledges.folder_path`，目录名中的 `/` 等非法字符替换为 `_`）。**选中的同步根本身也镜像为顶层文件夹**——Wiki 空间以其名称建目录（如同步知识库「飞书知识库同步测试」→ 顶层出现 `飞书知识库同步测试/`），Drive 文件夹同理（如同步「测试1」→ 顶层出现 `测试1/`），因此一个知识库同时链接多个飞书数据源时可以一眼区分来源；根名解析失败时退回根不落目录的旧行为，同步不失败。Wiki 侧通过节点时间和目标路径指纹识别改名/移动，祖先目录变化也会触发后代文档重新归档；Drive 侧目录改名/文件移动不改变文件修改时间，增量同步不感知，需手动全量同步刷新目录结构；节点删除时文档跟随删除（彻底删除，不可恢复，可在数据源关闭"同步删除"）。Wiki 快捷方式仅在同一次完整列举中包含独立的原节点子树时去重；原节点不在同步范围内或列举不完整时保留快捷方式及其子节点。存量数据源升级后会在下一次同步（含增量）自动按全量执行一次完成目录收敛，无需手动操作。
-- **docx 解析模式**（数据源编辑页 → 解析模式，配置存于数据源级 `settings.parse_mode`，新建默认 `blocks`）：旧数据源未显式设置时显示“使用服务器配置”，保存其他设置不会改变其解析方式；也可选择该选项恢复服务器回退配置。
+- **docx 解析模式**（数据源编辑页 → 解析模式，配置存于数据源级 `settings.parse_mode`，新建默认 `blocks`）：旧数据源未显式设置时显示“使用服务器配置”，保存其他设置不会改变其解析方式；也可选择该选项恢复服务器回退配置。有效解析模式改变后，下一次同步（含增量）会重新抓取已有 docx，无需源文档再次修改。
   - `blocks`（默认）→ blocks API 逐块读取并转为 GFM Markdown（`core/blocks.go`/`markdown.go`），保留代码块语言、LaTeX 公式（`$...$`）、原生表格（**合并单元格拆分为独立单元格并填充左上值**，列对齐随源文档）、任务列表、分栏、高亮块等；文档内嵌的电子表格/多维表格块直接转为文档内 Markdown 表格（合并单元格同样以左上值填充）；文档小组件中的时间轴转为 Markdown 列表；覆盖不到的块类型（会话卡片、OKR、议程等无公开内容 API 的少数类型）降级为占位标记，不影响文档其余部分；
   - `export` → 异步导出 API（`POST /drive/v1/export_tasks`）导出 `.docx` 走通用文档解析。
   - `doc`（旧版文档）/`sheet`/`bitable` 不受此开关影响，仍走导出通道。
   - 取舍：**blocks** 快、保留 docx 内 file block 附件、需 `docx:document:readonly`；**export** 慢（异步导出 + docreader 解析）、丢失 docx 内附件、但解析表现与普通 docx 手工上传完全一致。只要正文与附件用默认 blocks 即可；需要与上传流程一致的解析表现时选 export。
 - **内嵌对象**（blocks 模式）：
-  - **图片**：下载后存入 WeKnora 存储，Markdown 正文内嵌 WeKnora 持久图片地址；配置了 VLM 的知识库会自动生成 OCR/描述子分块（未配置则仅保留图片，不报错）。**画板**（block 43）经官方 `download_as_image` 接口导出为图片走同一管线，无权限/失败时降级占位（需应用具备 `board:whiteboard:node:read` 权限）。
+  - **图片**：下载后存入 WeKnora 存储，Markdown 正文内嵌 WeKnora 持久图片地址；配置了 VLM 的知识库会自动生成 OCR/描述子分块（未配置则仅保留图片，不报错）。**画板**（block 43）经官方 `download_as_image` 接口导出为图片走同一管线，无权限/失败时降级占位（需应用具备 `board:whiteboard:node:read` 权限）。单篇超过 30 个图片/画板块时，正文自动走原生 docx 导出解析，避免超出内联图片预算；已列出的 file block 附件仍单独同步并关联父文档。导出失败会记录失败并在后续同步重试，不会入库带有未处理 base64 的正文。
   - **文档类附件**（PDF/Markdown/Excel/PPT/Word 等）：下载后作为独立知识入库，落在父文档同目录，文件名用附件自身名称；父文档元数据与附件元数据互相记录对方 ID，正文中附件位置以文件名列表展示。同字节文件在多个文档出现时共享同一份知识（去重）。
   - **电子表格/多维表格块**：转为 GFM 内联表格（非独立文件），检索时保持文档上下文。
   - **视频**：不存储不解析，正文留占位与飞书原链接。
@@ -133,8 +133,8 @@
   - `sheet`/`bitable` → 导出 `.xlsx`；
   - `file` → drive 原文件下载（PDF/Word/图片等）；
   - `mindnote`/`slides` → **跳过**（无内容读取 API），并通过 `fetchTally` 统计输出 `discovered/fetched/failed/skipped_unsupported by_type` 摘要日志，解释"发现 13 篇为何只同步了 3 篇"（issue #2136）。
-- **增量逻辑**：Wiki 游标 `FeishuCursor.SpaceNodeTimes` 保存 `resourceID → nodeToken → 变更键`，由 `obj_edit_time`、`node_edit_time` 的较新值与目标路径指纹组成，同时识别内容编辑和祖先目录改名/移动；文档源更新时间仍保留内容编辑时间。旧时间戳游标会刷新一次以升级格式。抓取失败的节点**不推进游标**（保留旧变更键，下次重试），避免瞬时导出失败导致文档被永久跳过。
-- **FetchStream**：统一全量/增量路径（cursor==nil 即全量），每处理 `FeishuStreamCheckpointInterval = 50` 个节点、或距上次 checkpoint 超过 `FeishuStreamCheckpointMaxInterval = 30s` 就落盘一次游标——后者兜底"少量文档但每篇导出都极慢（被限流）"导致 2 小时超时前从未 checkpoint 的场景。
+- **增量逻辑**：Wiki 游标 `FeishuCursor.SpaceNodeTimes` 保存 `resourceID → nodeToken → 变更键`，由 `obj_edit_time`、`node_edit_time` 的较新值、目标路径指纹以及 docx 的有效解析模式组成，同时识别内容编辑和祖先目录改名/移动；文档源更新时间仍保留内容编辑时间。旧格式游标会刷新一次以升级格式。抓取失败的节点**不推进游标**（保留旧变更键，下次重试），避免瞬时导出失败导致文档被永久跳过。
+- **FetchStream / FetchFullStream**：增量按变更键跳过未修改文档；全量重新抓取全部文档，同时保留旧游标中的删除基线，只有完整列举后才确认删除。中途 checkpoint 保留尚未遍历的旧节点，抓取失败的节点会在后续同步重试。每处理 `FeishuStreamCheckpointInterval = 50` 个节点、或距上次 checkpoint 超过 `FeishuStreamCheckpointMaxInterval = 30s` 就落盘一次游标——后者兜底"少量文档但每篇导出都极慢（被限流）"导致 2 小时超时前从未 checkpoint 的场景。
 - **错误分类**（`feishuFailure`）：把原始错误归类为稳定 i18n code（`feishu_auth_or_permission` / `feishu_rate_limited` / `feishu_timeout` / `feishu_server_unavailable` / `feishu_api_error`(+code) / `sync_failed`），前端本地化展示；原始 status/body/log_id 只留在服务端日志。
 
 #### GitLab（`connector/gitlab/`）
@@ -304,7 +304,7 @@ flowchart LR
 
 - **防御性取消**：数据源或知识库已被删除时，把 SyncLog 置为 `canceled` 并返回 nil（不再重试）。
 - **两条抓取路径**：连接器实现了 `StreamingConnector` 走 `processSyncStreaming`（流式）；否则按 `ForceFull || SyncMode==full` 走 `FetchAll`，或带上 `ParseSyncCursor()` 的游标走 `FetchIncremental`（批量）。
-- **流式路径的游标策略**（`streamStartCursor`）：用户触发的全量同步在**首次尝试**时丢弃游标全量抓取；Asynq **重试**（attempt > 0）以及所有增量同步都从最后一个 checkpoint 续传。实现了 `FullStreamingConnector` 的连接器（目前为 Confluence）在全量同步时改走 `FetchFullStream`：重新抓取全部条目，同时保留旧游标作为删除对账基线。
+- **流式路径的游标策略**（`streamStartCursor`）：用户触发的全量同步在**首次尝试**时丢弃游标全量抓取；Asynq **重试**（attempt > 0）以及所有增量同步都从最后一个 checkpoint 续传。实现了 `FullStreamingConnector` 的连接器（包括 Feishu/Lark Wiki 与云盘、Seafile、Confluence）在全量同步时改走 `FetchFullStream`：重新抓取全部条目，同时保留旧游标作为删除对账基线。
 - **入库核心 `applyFetchedItem` → `ingestItem`**：
   - `IsDeleted=true` 且 `sync_deletions=true` 时，按租户、知识库、数据源 ID 和 external_id 查找并真实删除对应知识；关闭同步删除则保留已有知识。删除能力还取决于连接器是否提供可靠的删除检测；
   - 有 `Content` 字节 → 包装成 `multipart.FileHeader` 走 `KnowledgeService.CreateKnowledgeFromFile`（完整文档解析流水线）；只有 `URL` → 走 `CreateKnowledgeFromURL` 由 WeKnora 下载解析；
@@ -448,7 +448,7 @@ type StreamingConnector interface {
 }
 ```
 
-任务超时后可从最近的 checkpoint 继续处理。Asynq 同步任务超时为 2 小时，流式路径按条目推进，避免缓存全部文件正文。Feishu/Lark（知识库与云盘）、GitLab 和 Confluence 连接器实现了 `StreamingConnector`；Confluence 另实现 `FullStreamingConnector`，全量同步也能对账删除。钉钉目前走 batch `FetchAll`/`FetchIncremental`/`FetchAllFromCursor`，超大知识库建议使用增量模式以免一次装入全部 Markdown。
+任务超时后可从最近的 checkpoint 继续处理。Asynq 同步任务超时为 2 小时，流式路径按条目推进，避免缓存全部文件正文。Feishu/Lark（知识库与云盘）、GitLab 和 Confluence 连接器实现了 `StreamingConnector`；Feishu/Lark、Seafile 和 Confluence 另实现 `FullStreamingConnector`，全量同步也能对账删除。钉钉目前走 batch `FetchAll`/`FetchIncremental`/`FetchAllFromCursor`，超大知识库建议使用增量模式以免一次装入全部 Markdown。
 
 #### ConnectorRegistry：注册与查找
 
