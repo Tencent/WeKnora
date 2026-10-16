@@ -511,7 +511,7 @@
                                 </div>
                               </div>
                             </template>
-                          />
+                          </ImagePipelineSettings>
                         </div>
                         <div
                           v-if="uiState.multimodalConfig.enabled && uiState.imagePipeline === IMAGE_PIPELINE_SMARTOCR"
