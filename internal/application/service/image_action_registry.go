@@ -200,75 +200,33 @@ func init() {
 	}
 }
 
-// Thinking-switch keys of the shared actions, in the action's own namespace
-// ("action.key"). An action may want the model to reason — a dense scanned
-// page or a chart that has to be read before it can be transcribed — and must
-// not pay for it on the simple majority, so the switch belongs to the ACTION,
-// not to the model and not to any pipeline: whichever pipeline schedules the
-// caption or the OCR, the tunable means the same thing and reads the same
-// stored key. Pipelines declare these same keys in their Fields() so the
-// panel renders them; the keys never collide with pipeline-private ones
-// because the action namespace is distinct.
-const (
-	imageFieldKeyCaptionThinking = "caption.thinking"
-	imageFieldKeyOCRThinking     = "ocr.thinking"
-	imageFieldKeyOCROnUnobserved = "ocr.on_unobserved"
+// The action-level tunables this package schedules, looked up from the actions
+// that declare them rather than re-declared here: an action owns its params, and
+// a pipeline's panel offers the same field def the action published (see
+// types.ActionField). The lookup panics rather than returning a zero field — a
+// missing declaration is a programming error, not a mode of operation.
+var (
+	captionThinkingField = mustActionField(types.ImageActionCaption, types.ImageActionParamThinking)
+	ocrThinkingField     = mustActionField(types.ImageActionOCR, types.ImageActionParamThinking)
+	ocrOnUnobservedField = mustActionField(types.ImageActionOCR, types.ImageActionParamOnUnobserved)
 )
 
-// imageActionThinkingFields are the thinking switches DECLARED ONCE here, at
-// the action layer, and carried into every pipeline's Fields() by reference —
-// a pipeline does not re-declare or re-name an action's tunable, it only
-// offers it on its panel. The keys are namespaced by action ("action.key"),
-// so the same tunable reads the same stored value whichever pipeline
-// schedules the action.
-//
-// Both are advanced: whether a call reasons is a tuning decision, not something
-// the panel should put in front of every user.
-var imageActionThinkingFields = []types.ImageFieldDef{
-	{
-		Key:   imageFieldKeyCaptionThinking,
-		Type:  types.ImageFieldTypeBool,
-		Group: types.ImageFieldGroupAdvanced,
-		Label: "Caption with thinking",
-		// Warning, not recommendation: on some models long reasoning can
-		// crowd out the answer itself and leave the caption empty.
-		Description: "Let the model think before writing the caption. " +
-			"Rarely needed: it costs latency, and on some models long " +
-			"reasoning truncates the caption. Enable only when necessary.",
-		Default: false,
-		// No DecidesAction: an image is still captioned with thinking off,
-		// just faster and with less care, so this switch cannot be the one
-		// that leaves the pipeline with nothing to do.
-	},
-	{
-		Key:   imageFieldKeyOCRThinking,
-		Type:  types.ImageFieldTypeBool,
-		Group: types.ImageFieldGroupAdvanced,
-		Label: "OCR with thinking",
-		Description: "Let the model think before transcribing. " +
-			"Rarely needed: it costs latency, and on some models long " +
-			"reasoning truncates the text. Enable only when necessary.",
-		Default: false,
-		// Same reasoning: an image with no text still yields no OCR.
-	},
+func mustActionField(id types.ImageActionID, param string) types.ImageFieldDef {
+	field, ok := types.ActionField(id, param)
+	if !ok {
+		panic(fmt.Sprintf("image pipeline: action %q declares no %q tunable", id, param))
+	}
+	return field
 }
 
-// imageActionOnUnobservedField is the OCR policy's fallback clause as a panel
-// control: whether an image whose attributes could not be observed is still
-// read. It is declared here, at the action layer, because it tunes the OCR
-// action — and offered by the smart pipeline alone, because only a pipeline
-// that observes attributes can fail to observe them. Like the straightening
-// switch it is not a pipeline param: the value is the knowledge base's
-// image_actions setting, and the panel binds it there.
-var imageActionOnUnobservedField = types.ImageFieldDef{
-	Key:   imageFieldKeyOCROnUnobserved,
-	Type:  types.ImageFieldTypeBool,
-	Label: "OCR after an unobserved image",
-	Description: "Still read an image whose attributes could not be observed, so a missed " +
-		"block of text costs one extra call instead of being lost. Turn it off only with a " +
-		"model reliable enough to answer every attribute line.",
-	Default: true,
-}
+// The keys those tunables are stored and traced under. They are read by name at
+// the few call sites that compare them (the thinking switches are wired into a
+// run by the pipeline that offers them), so they are named once, here.
+var (
+	imageFieldKeyCaptionThinking = captionThinkingField.Key
+	imageFieldKeyOCRThinking     = ocrThinkingField.Key
+	imageFieldKeyOCROnUnobserved = ocrOnUnobservedField.Key
+)
 
 // runContext is the only framework entry point a pipeline or an action gets. It
 // hands out no VLM handle: talking to a model is the action's business, reached
@@ -620,7 +578,12 @@ func runPreprocessAction(ctx context.Context, r *runContext) error {
 	// The one line that does the work: everything downstream reads imageBytes.
 	r.imageBytes = rectified
 	r.out["preprocess_status"] = "ok"
-	r.out["preprocess_chars"] = len(rectified)
+	// The corrected image's size in bytes — bytes, not characters: the
+	// neighbours that end in _chars (ocr_chars, caption_chars) measure text,
+	// while this measures a picture. It reads next to image_bytes (the
+	// original), and the pair is what shows how much of the photograph the
+	// crop and the perspective correction threw away.
+	r.out["preprocess_bytes"] = len(rectified)
 	return nil
 }
 

@@ -83,11 +83,12 @@ var smartPreprocessField = types.ImageFieldDef{
 func (smartOcrPipeline) Fields() []types.ImageFieldDef {
 	return []types.ImageFieldDef{
 		smartPreprocessField,
-		imageActionOnUnobservedField,
-		// The thinking switches are action-level fields, declared once at the
-		// action layer and carried in here.
-		imageActionThinkingFields[0],
-		imageActionThinkingFields[1],
+		// The fallback clause and the two thinking switches are action-level
+		// fields, declared by the actions themselves and carried in here by
+		// reference — the pipeline only says where they belong on its panel.
+		ocrOnUnobservedField,
+		captionThinkingField,
+		ocrThinkingField,
 		{
 			Key:   smartFieldKeyNoteFlow,
 			Type:  types.ImageFieldTypeNote,

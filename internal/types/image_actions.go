@@ -66,8 +66,51 @@ type ImageActionSpec struct {
 	// row can be matched back to the revision that produced an image rather
 	// than only to the pipeline that ran.
 	Version string
-	// Fields are the per-action tunables the settings panel renders.
+	// Fields are the per-action tunables the settings panel renders. A field's
+	// key is the action's own namespace plus its bare name — build it with
+	// ActionParam(id, name), never by hand — so the caption's "thinking" and
+	// the OCR's "thinking" are two keys that cannot collide, and a pipeline
+	// carries them by reference (see ActionField) rather than re-declaring or
+	// re-spelling them.
 	Fields []ImageFieldDef
+}
+
+// Bare names of the tunables the shared actions declare. The action id is added
+// by ActionParam, so the same name in two actions stays two distinct keys.
+const (
+	ImageActionParamThinking     = "thinking"
+	ImageActionParamOnUnobserved = "on_unobserved"
+)
+
+// ActionParam namespaces one of an action's own tunables: the caption action
+// declares a "thinking" switch and the key it is stored and traced under is
+// "caption.thinking".
+//
+// Declaring the bare name is the point. Two actions may each want a "thinking",
+// and a pipeline may want one too, without either inventing a distinct spelling
+// for the same idea: an action's params live in the action's namespace, a
+// pipeline's private params live inside the pipeline's own stored map, and the
+// two cannot meet. A key written by hand would need a naming rule remembered by
+// everyone; derived here, it is a rule the compiler and the tests can hold.
+func ActionParam(id ImageActionID, name string) string {
+	return string(id) + "." + name
+}
+
+// ActionField returns the tunable an action declares under a bare name
+// ("thinking"), and whether it declares one. Callers use it to carry an action's
+// control into a pipeline's panel without spelling the key themselves.
+func ActionField(id ImageActionID, param string) (ImageFieldDef, bool) {
+	for _, spec := range SharedImageActions {
+		if spec.ID != id {
+			continue
+		}
+		for _, field := range spec.Fields {
+			if field.Key == ActionParam(id, param) {
+				return field, true
+			}
+		}
+	}
+	return ImageFieldDef{}, false
 }
 
 // ImageFieldDef is one tunable of an action as the settings panel sees it. Its
@@ -151,6 +194,23 @@ var SharedImageActions = []ImageActionSpec{
 		Impl:    ImageActionImplVLM,
 		Writes:  []string{"caption"},
 		Version: "v1",
+		Fields: []ImageFieldDef{
+			{
+				Key:   ActionParam(ImageActionCaption, ImageActionParamThinking),
+				Type:  ImageFieldTypeBool,
+				Group: ImageFieldGroupAdvanced,
+				Label: "Caption with thinking",
+				// Warning, not recommendation: on some models long reasoning can
+				// crowd out the answer itself and leave the caption empty.
+				Description: "Let the model think before writing the caption. " +
+					"Rarely needed: it costs latency, and on some models long " +
+					"reasoning truncates the caption. Enable only when necessary.",
+				Default: false,
+				// No DecidesAction: an image is still captioned with thinking off,
+				// just faster and with less care, so this switch cannot be the one
+				// that leaves the pipeline with nothing to do.
+			},
+		},
 	},
 	{
 		ID:     ImageActionObservationCaption,
@@ -169,6 +229,28 @@ var SharedImageActions = []ImageActionSpec{
 		// custom instructions, so it does not read the same slot the other two
 		// does. See buildVLMOCRPrompt.
 		Version: "v1",
+		Fields: []ImageFieldDef{
+			{
+				Key:   ActionParam(ImageActionOCR, ImageActionParamThinking),
+				Type:  ImageFieldTypeBool,
+				Group: ImageFieldGroupAdvanced,
+				Label: "OCR with thinking",
+				Description: "Let the model think before transcribing. " +
+					"Rarely needed: it costs latency, and on some models long " +
+					"reasoning truncates the text. Enable only when necessary.",
+				Default: false,
+				// Same reasoning: an image with no text still yields no OCR.
+			},
+			{
+				Key:   ActionParam(ImageActionOCR, ImageActionParamOnUnobserved),
+				Type:  ImageFieldTypeBool,
+				Label: "OCR after an unobserved image",
+				Description: "Still read an image whose attributes could not be observed, so a missed " +
+					"block of text costs one extra call instead of being lost. Turn it off only with a " +
+					"model reliable enough to answer every attribute line.",
+				Default: true,
+			},
+		},
 	},
 	{
 		ID:   ImageActionPreprocess,
