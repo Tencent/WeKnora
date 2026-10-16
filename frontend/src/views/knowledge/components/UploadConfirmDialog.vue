@@ -466,6 +466,51 @@
                             @update:preprocess-mode="uiState.preprocessMode = $event"
                             @update:on-unobserved="uiState.imageActions.ocr.on_unobserved = $event"
                             @update:invalid="imagePipelineInvalid = $event"
+                          >
+                            <!-- 观察属性说明：收进面板的「附加说明」折叠区。属性字典来自后端注册表，
+                                 流水线声明不了它，所以由宿主通过插槽递进去；折叠交给面板统一负责，
+                                 这里不再套一层 details。 -->
+                            <template #notes>
+                              <div
+                                v-if="
+                                  uiState.multimodalConfig.enabled &&
+                                  uiState.imagePipeline === IMAGE_PIPELINE_SMARTOCR
+                                "
+                                class="image-attr-block"
+                              >
+                                <div class="image-attr-heading">
+                                  <label>{{ t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaLabel') }}</label>
+                                  <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaDescription') }}</p>
+                                </div>
+                                <ul v-if="imageAttrDisplays.length" class="image-attr-list">
+                                  <li v-for="attr in imageAttrDisplays" :key="attr.name" class="image-attr-row">
+                                    <div class="image-attr-head">
+                                      <span class="image-attr-label">{{ attr.label }}</span>
+                                      <code class="image-attr-name">{{ attr.name }}</code>
+                                    </div>
+                                    <p v-if="attr.description" class="image-attr-desc">{{ attr.description }}</p>
+                                    <ul class="image-attr-value-list">
+                                      <li v-for="v in attr.values" :key="v.value" class="image-attr-value">
+                                        <code>{{ v.value }}</code>
+                                        <span class="image-attr-value-label">{{ v.label }}</span>
+                                      </li>
+                                    </ul>
+                                  </li>
+                                </ul>
+                                <div class="image-attr-section">
+                                  <div class="setting-info">
+                                    <label>{{ t('knowledgeEditor.advanced.multimodal.imageAttrsOcrConditions') }}</label>
+                                    <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.imageAttrsOcrConditionsDesc') }}</p>
+                                  </div>
+                                  <ul class="image-attr-condition-list">
+                                    <li v-for="(cond, i) in imageAttrConditionDisplays" :key="i" class="image-attr-condition">
+                                      <span class="image-attr-condition-label">{{ cond.label }}</span>
+                                      <code class="image-attr-condition-raw">{{ cond.raw }}</code>
+                                    </li>
+                                  </ul>
+                                </div>
+                              </div>
+                            </template>
                           />
                         </div>
                         <div
@@ -475,48 +520,6 @@
                           {{ t('knowledgeEditor.advanced.multimodal.imagePipelineKbNote') }}
                         </div>
 
-                        <!-- ③ 观察属性说明（只属于智能流水线）：默认折叠，点击展开。
-                             与上一段之间用分割线分开；段内不再画线。
-                             实现说明（不放 UI）：内容完全由后端属性注册表驱动 —— 属性名、说明、
-                             每个取值的含义都随 schema 端点下发，前端只按属性名覆盖翻译。 -->
-                        <div
-                          v-if="uiState.multimodalConfig.enabled && uiState.imagePipeline === IMAGE_PIPELINE_SMARTOCR"
-                          class="setting-row setting-row-vertical image-attr-block"
-                        >
-                          <details class="image-attr-panel">
-                            <summary class="image-attr-summary">
-                              <label>{{ t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaLabel') }}</label>
-                              <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaDescription') }}</p>
-                            </summary>
-                            <ul v-if="imageAttrDisplays.length" class="image-attr-list">
-                              <li v-for="attr in imageAttrDisplays" :key="attr.name" class="image-attr-row">
-                                <div class="image-attr-head">
-                                  <span class="image-attr-label">{{ attr.label }}</span>
-                                  <code class="image-attr-name">{{ attr.name }}</code>
-                                </div>
-                                <p v-if="attr.description" class="image-attr-desc">{{ attr.description }}</p>
-                                <ul class="image-attr-value-list">
-                                  <li v-for="v in attr.values" :key="v.value" class="image-attr-value">
-                                    <code>{{ v.value }}</code>
-                                    <span class="image-attr-value-label">{{ v.label }}</span>
-                                  </li>
-                                </ul>
-                              </li>
-                            </ul>
-                            <div class="image-attr-section">
-                              <div class="setting-info">
-                                <label>{{ t('knowledgeEditor.advanced.multimodal.imageAttrsOcrConditions') }}</label>
-                                <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.imageAttrsOcrConditionsDesc') }}</p>
-                              </div>
-                              <ul class="image-attr-condition-list">
-                                <li v-for="(cond, i) in imageAttrConditionDisplays" :key="i" class="image-attr-condition">
-                                  <span class="image-attr-condition-label">{{ cond.label }}</span>
-                                  <code class="image-attr-condition-raw">{{ cond.raw }}</code>
-                                </li>
-                              </ul>
-                            </div>
-                          </details>
-                        </div>
                       </div>
                     </div>
                   </div>
@@ -1689,10 +1692,10 @@ const handleConfirm = () => {
 // 文案全部来自后端属性注册表（人话名 + 每个取值的含义），前端只做翻译覆盖，
 // 因此新增属性无需改这里。与知识库编辑器同款：铺在所在设置区里、不套独立底色块。
 // 第三段（观察属性说明）与上方开关区之间的分割线：分段之间才画线。
+// 属性字典与流水线自己的说明同处一个折叠区，只留间距不画线：分割线只用在
+// 段落之间（面板自己画），段内不画。
 .image-attr-block {
   margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--td-component-border);
 }
 
 // .setting-row 自带下边框；图片流水线面板里分段之间才画线，段内不留线（与知识库
@@ -1701,10 +1704,9 @@ const handleConfirm = () => {
   border-bottom: none;
 }
 // 折叠标题：收起时仍读得到这一段是什么。
-.image-attr-summary {
-  cursor: pointer;
-  user-select: none;
-
+// 属性字典的小标题。它现在活在面板的「附加说明」折叠区里，自己不再折叠，
+// 所以没有指针与展开语义 —— 折叠由面板统一负责。
+.image-attr-heading {
   label {
     font-weight: 500;
     color: var(--td-text-color-primary);
@@ -1717,9 +1719,6 @@ const handleConfirm = () => {
     color: var(--td-text-color-secondary);
   }
 }
-.image-attr-panel {
-  margin-top: 4px;
-}
 .image-attr-list,
 .image-attr-value-list,
 .image-attr-condition-list {
@@ -1727,7 +1726,7 @@ const handleConfirm = () => {
   padding: 0;
   list-style: none;
 }
-// 属性之间只留间距，不画线 —— 分割线只用在分段之间。
+// 属性之间只留间距，不画线。
 .image-attr-row + .image-attr-row {
   margin-top: 12px;
 }

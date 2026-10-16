@@ -12,7 +12,7 @@
  * that order is part of what a pipeline decides about itself. Nothing here may
  * sort, group or reorder them — see the note above the field loop.
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, useSlots, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   fetchImagePipelines,
@@ -92,6 +92,12 @@ const noteFields = computed(() => fields.value.filter((f) => fieldGroup(f) === '
 // the way rather than to lengthen the panel.
 const advancedOpen = ref(false)
 const notesOpen = ref(false)
+
+// The notes run also carries whatever the host hands over through the slot, and
+// a pipeline that declares no note of its own must still show that — the smart
+// pipeline's attribute dictionary is the case it exists for.
+const slots = useSlots()
+const hasNotesSlot = computed(() => Boolean(slots.notes))
 
 /**
  * Whether this field is the page-straightening switch, whose value lives on the
@@ -454,8 +460,13 @@ watch(() => props.pipelineId, () => {
         </div>
       </template>
 
-      <!-- What the pipeline wants said about itself, folded away with it. -->
-      <template v-if="noteFields.length">
+      <!-- What the pipeline wants said about itself, folded away with it — plus
+           whatever the host folds in here through the slot. For the smart
+           pipeline that is the attribute dictionary: it explains what the OCR
+           policy reads, it comes from the attribute registry rather than from
+           the pipeline, and it belongs in the same place a reader looks for
+           this pipeline's explanation. -->
+      <template v-if="noteFields.length || hasNotesSlot">
         <div class="image-pipeline-section">
           <button type="button" class="advanced-toggle" @click="notesOpen = !notesOpen">
             <t-icon name="chevron-right" class="toggle-arrow" :class="{ open: notesOpen }" />
@@ -466,6 +477,7 @@ watch(() => props.pipelineId, () => {
               <label>{{ fieldLabel(note) }}</label>
               <p v-if="fieldDescription(note)" class="desc">{{ fieldDescription(note) }}</p>
             </div>
+            <slot name="notes" />
           </div>
         </div>
       </template>
