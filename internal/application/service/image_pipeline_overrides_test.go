@@ -38,11 +38,11 @@ func TestResolveProcessConfig_LegacyOverrideSelectsImagePipeline(t *testing.T) {
 	id := types.ImagePipelineLegacyCaptionOCR
 	eff := ResolveProcessConfig(&types.KnowledgeBase{}, &types.KnowledgeProcessOverrides{
 		ImageAttrsEnabled: processConfigBoolPtr(true), ImagePipelineID: &id,
-		ImagePipelineParams: map[string]any{"enable_caption": false},
+		ImagePipelineParams: map[string]any{"caption_enabled": false},
 	})
 	require.Equal(t, types.ImagePipelineDefault, eff.ImagePipelineID)
 	require.False(t, eff.ImageAttrsEnabled)
-	require.Equal(t, false, eff.ImagePipelineParams["enable_caption"])
+	require.Equal(t, false, eff.ImagePipelineParams["caption_enabled"])
 }
 
 func TestProcessOverrides_ValidateImagePipelineBeforePersistence(t *testing.T) {
@@ -52,7 +52,7 @@ func TestProcessOverrides_ValidateImagePipelineBeforePersistence(t *testing.T) {
 			kb := &types.KnowledgeBase{}
 			overrides := &types.KnowledgeProcessOverrides{
 				EnableMultimodel: &enabled, ImagePipelineID: &id,
-				ImagePipelineParams: map[string]any{"enable_caption": caption, "enable_ocr": false},
+				ImagePipelineParams: map[string]any{"caption_enabled": caption, "ocr_enabled": false},
 			}
 			knowledge := &types.Knowledge{}
 			_, uploadErr := resolveFileImportProcessConfig(context.Background(), kb, "pdf", overrides, nil)
@@ -82,7 +82,7 @@ func TestProcessOverrides_ValidateLegacyMultimodalFlag(t *testing.T) {
 	id := types.ImagePipelineDefault
 	overrides := &types.KnowledgeProcessOverrides{
 		ImagePipelineID:     &id,
-		ImagePipelineParams: map[string]any{"enable_caption": false, "enable_ocr": false},
+		ImagePipelineParams: map[string]any{"caption_enabled": false, "ocr_enabled": false},
 	}
 	enabled := true
 	_, err := resolveFileImportProcessConfig(context.Background(), &types.KnowledgeBase{}, "pdf", overrides, &enabled)

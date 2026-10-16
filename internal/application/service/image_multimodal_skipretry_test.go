@@ -199,7 +199,8 @@ func TestCaptionOnlyFailureFailsImage(t *testing.T) {
 			require.Equal(t, "failed", out["outcome"])
 			require.Equal(t, 0, out["chunks_created"])
 			require.NotContains(t, out, "skipped")
-			require.NotContains(t, out, keyOCRResult)
+			require.Equal(t, "failed", out[keyOCRResult],
+				"a failed call must read as failed, never as skipped")
 			require.Equal(t, tc.permanent, errors.Is(wrapSkipRetry(err), asynq.SkipRetry))
 			code := "MULTIMODAL_VLM_FAILED"
 			if errors.Is(tc.err, context.Canceled) {

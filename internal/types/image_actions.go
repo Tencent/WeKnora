@@ -15,12 +15,12 @@ const (
 	// ImageActionCaption asks the model for a short description of the image
 	// and stores it as the caption slot.
 	ImageActionCaption ImageActionID = "caption"
-	// ImageActionObservationCaption observes the registered attributes
+	// ImageActionObservation observes the registered attributes
 	// (contain.text, contain.data_visual, ...) and describes the image in the
 	// same answer. One VLM request fills the attribute slots and the caption
 	// slot, which is why there is no standalone observation action and no
 	// "merge observation with caption" rule anywhere in the framework.
-	ImageActionObservationCaption ImageActionID = "observation_caption"
+	ImageActionObservation ImageActionID = "observation"
 	// ImageActionOCR extracts the text the image carries, when the policy wants
 	// it.
 	ImageActionOCR ImageActionID = "ocr"
@@ -78,7 +78,7 @@ type ImageActionSpec struct {
 // Bare names of the tunables the shared actions declare. The action id is added
 // by ActionParam, so the same name in two actions stays two distinct keys.
 const (
-	ImageActionParamThinking     = "thinking"
+	ImageActionParamThinking     = "thinking_enabled"
 	ImageActionParamOnUnobserved = "on_unobserved"
 )
 
@@ -223,13 +223,29 @@ var SharedImageActions = []ImageActionSpec{
 		},
 	},
 	{
-		ID:     ImageActionObservationCaption,
+		ID:     ImageActionObservation,
 		Impl:   ImageActionImplVLM,
 		Writes: []string{"attrs", "caption"},
 		// Observing reads the image and the registered attribute table; the
 		// caption is a by-product of that same request.
 		Reads:   []string{"attrs"},
 		Version: "v1",
+		Fields: []ImageFieldDef{
+			{
+				// The observe call is its own action, so it owns its own
+				// thinking switch: the default pipeline's caption and this
+				// round are different work on the same image, and tuning one
+				// must not tune the other.
+				Key:   ActionParam(ImageActionObservation, ImageActionParamThinking),
+				Type:  ImageFieldTypeBool,
+				Group: ImageFieldGroupAdvanced,
+				Label: "Observe and describe with thinking",
+				Description: "Let the model think before observing the attributes and describing " +
+					"the image. Rarely needed: it costs latency, and on some models long " +
+					"reasoning truncates the answer. Enable only when necessary.",
+				Default: false,
+			},
+		},
 	},
 	{
 		ID:     ImageActionOCR,
@@ -251,15 +267,6 @@ var SharedImageActions = []ImageActionSpec{
 				Default: false,
 				// Same reasoning: an image with no text still yields no OCR.
 			},
-			{
-				Key:   ActionParam(ImageActionOCR, ImageActionParamOnUnobserved),
-				Type:  ImageFieldTypeBool,
-				Label: "OCR after an unobserved image",
-				Description: "Still read an image whose attributes could not be observed, so a missed " +
-					"block of text costs one extra call instead of being lost. Turn it off only with a " +
-					"model reliable enough to answer every attribute line.",
-				Default: true,
-			},
 		},
 	},
 	{
@@ -272,6 +279,23 @@ var SharedImageActions = []ImageActionSpec{
 		// (contain.text), so a pipeline that never observed cannot preprocess.
 		Reads:   []string{"attrs"},
 		Version: "v1",
+		Fields: []ImageFieldDef{
+			{
+				// How much say this action has in whether it runs. It is the
+				// action's own tunable: any pipeline that schedules the action
+				// offers this field under its own slot, and a pipeline that
+				// schedules it for a different purpose still gets the same
+				// meaning.
+				Key:     ActionParam(ImageActionPreprocess, "mode"),
+				Type:    ImageFieldTypeEnum,
+				Default: PreprocessModeAuto,
+				Label:   "Document preprocessing",
+				Description: "Straighten and crop a photographed page before OCR reads it. " +
+					"Auto asks the describe round whether the page needs it; Off never does; " +
+					"Always does it unconditionally.",
+				Options: []string{PreprocessModeAuto, PreprocessModeOff, PreprocessModeAlways},
+			},
+		},
 	},
 }
 
