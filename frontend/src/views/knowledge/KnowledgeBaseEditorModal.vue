@@ -464,7 +464,7 @@
                     </div>
                   </div>
                 </template>
-              />
+              </ImagePipelineSettings>
             </div>
 
           </div>
