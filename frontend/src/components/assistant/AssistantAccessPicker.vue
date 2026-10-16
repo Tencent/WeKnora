@@ -31,6 +31,16 @@
           <t-icon v-if="level === assistant.effectiveAccessLevel" name="check" size="14px"
             class="assistant-access-option__check" />
         </button>
+        <button type="button" role="menuitemcheckbox" class="assistant-access-option assistant-access-page"
+          :aria-checked="assistant.pageAccess" @click="assistant.setPageAccess(!assistant.pageAccess)">
+          <t-icon name="window" class="assistant-access-option__icon" />
+          <span class="assistant-access-option__text">
+            <span class="assistant-access-option__label">{{ t('assistant.access.page.label') }}</span>
+            <span class="assistant-access-option__desc">{{ t('assistant.access.page.desc') }}</span>
+          </span>
+          <t-switch :value="assistant.pageAccess" size="small" class="assistant-access-page__switch"
+            aria-hidden="true" tabindex="-1" />
+        </button>
       </div>
     </template>
   </t-popup>
@@ -186,6 +196,19 @@ function pick(level: AssistantAccessLevel) {
   font-size: var(--app-text-xs);
   line-height: 16px;
   color: var(--td-text-color-placeholder);
+}
+
+.assistant-access-page {
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: .5px solid var(--td-component-stroke);
+  border-radius: 0 0 var(--app-radius-sm) var(--app-radius-sm);
+}
+
+.assistant-access-page__switch {
+  flex-shrink: 0;
+  margin-top: 2px;
+  pointer-events: none;
 }
 
 .assistant-access-option__check {

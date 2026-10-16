@@ -83,12 +83,18 @@ type PageContextInfo struct {
 	Model             *PageContextModel
 	MCPService        *PageContextMCPService
 	Message           *PageContextMessage
+	// Title, View and Selection come from the page as the client reports it;
+	// they are what the user sees, not verified resources.
+	Title     string
+	View      string
+	Selection *types.PageSelection
 }
 
 // Empty reports whether nothing on the page was verified.
 func (p *PageContextInfo) Empty() bool {
 	return p == nil || (p.Page == "" && p.Agent == nil && p.KnowledgeBaseID == "" &&
-		p.Model == nil && p.MCPService == nil && p.Message == nil)
+		p.Model == nil && p.MCPService == nil && p.Message == nil && p.Title == "" &&
+		p.View == "" && p.Selection == nil)
 }
 
 // PageContextModel is the model open in the model settings. It never

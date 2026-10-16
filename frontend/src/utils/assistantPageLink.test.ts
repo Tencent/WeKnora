@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isAssistantPageLink, pageLinkDraft, pageLinkEndpoint, pageLinkLocation, type AssistantPageLink } from './assistantPageLink'
+import {
+  isAssistantPageLink, pageLinkDraft, pageLinkEndpoint, pageLinkLocation, pageLinkReturnPath, type AssistantPageLink,
+} from './assistantPageLink'
 
 const link = (fields: Partial<AssistantPageLink>): AssistantPageLink =>
   ({ display_type: 'open_page', page: 'knowledge_base', label: 'x', ...fields }) as AssistantPageLink
@@ -16,6 +18,26 @@ test('links use the deep links each page reads', () => {
     { path: '/platform/settings', query: { section: 'models', model_id: 'm' } })
   assert.deepEqual(pageLinkLocation(link({ page: 'mcp_services' })), { path: '/platform/toolbox/mcp', query: {} })
   assert.equal(pageLinkLocation(link({ page: 'agent_editor' })), null, 'a link without its target goes nowhere')
+})
+
+test('a page the assistant opened goes back only to an in-app path', () => {
+  assert.equal(pageLinkReturnPath(link({ navigated: true, return_path: '/platform/agents?x=1' })), '/platform/agents?x=1')
+  assert.equal(pageLinkReturnPath(link({ return_path: '/platform/agents' })), '', 'a button has no way back')
+  for (const bad of ['https://evil.example', '//evil.example', '/\\evil.example', '']) {
+    assert.equal(pageLinkReturnPath(link({ navigated: true, return_path: bad })), '', bad)
+  }
+})
+
+test('pages without a resource open the settings section, the tool or the list', () => {
+  assert.deepEqual(pageLinkLocation(link({ page: 'settings', section: 'general' })),
+    { path: '/platform/settings', query: { section: 'general' } })
+  assert.deepEqual(pageLinkLocation(link({ page: 'settings' })), { path: '/platform/settings', query: {} })
+  assert.deepEqual(pageLinkLocation(link({ page: 'toolbox', section: 'skills' })),
+    { path: '/platform/toolbox/skills', query: {} })
+  assert.deepEqual(pageLinkLocation(link({ page: 'toolbox' })), { path: '/platform/toolbox', query: {} })
+  assert.deepEqual(pageLinkLocation(link({ page: 'agents' })), { path: '/platform/agents', query: {} })
+  assert.deepEqual(pageLinkLocation(link({ page: 'knowledge_bases' })), { path: '/platform/knowledge-bases', query: {} })
+  assert.deepEqual(pageLinkLocation(link({ page: 'organizations' })), { path: '/platform/organizations', query: {} })
 })
 
 test('only a new model or service carries a form, and its endpoint is shown', () => {

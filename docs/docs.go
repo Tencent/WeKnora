@@ -194,7 +194,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "回答 Agent 运行中发起的交互（ask_user 提问或工具审批）。\nkind 须与交互一致，response 为该类型的回答 JSON（不接受未知字段）：\nask_user 为 {selected?, values?, text?, declined?}；\ntool_approval 为 {approved: bool, modified_args?: object, reason?: string, allow_in_session?: bool}。\n返回 resumed=true 表示运行已挂起并在本次回答后恢复，客户端需重新接入该消息的事件流",
+                "description": "回答 Agent 运行中发起的交互（ask_user 提问、工具审批，或由浏览器自动应答的页面读写）。\nkind 须与交互一致，response 为该类型的回答 JSON（不接受未知字段）：\nask_user 为 {selected?, values?, text?, declined?}；\ntool_approval 为 {approved: bool, modified_args?: object, reason?: string, allow_in_session?: bool}；\npage_action 为 {declined?, error?, location?, snapshot?, applied?: [{ref, label?, summary?}],\nstayed?, return_path?}。\n返回 resumed=true 表示运行已挂起并在本次回答后恢复，客户端需重新接入该消息的事件流",
                 "consumes": [
                     "application/json"
                 ],
@@ -29620,7 +29620,23 @@ const docTemplate = `{
                     "description": "part of the page in view, e.g. an editor tab",
                     "type": "string"
                 },
+                "selection": {
+                    "description": "Selection is the text the user selected on the page. Assistant only.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.PageSelection"
+                        }
+                    ]
+                },
                 "session_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "description": "Title is the page's name as the client's navigation shows it, e.g.\n\"Agents\"; it names pages without an identifier. Assistant only.",
+                    "type": "string"
+                },
+                "view": {
+                    "description": "View is the title of the dialog or drawer open over the page, as the\npage shows it. Assistant only.",
                     "type": "string"
                 },
                 "wiki_issue_ids": {
@@ -29630,6 +29646,29 @@ const docTemplate = `{
                     }
                 },
                 "wiki_slug": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.PageSelection": {
+            "type": "object",
+            "properties": {
+                "end_line": {
+                    "type": "integer"
+                },
+                "field": {
+                    "description": "the field's label",
+                    "type": "string"
+                },
+                "ref": {
+                    "description": "the field's read_page ref",
+                    "type": "string"
+                },
+                "start_line": {
+                    "description": "1-based, multi-line fields only",
+                    "type": "integer"
+                },
+                "text": {
                     "type": "string"
                 }
             }

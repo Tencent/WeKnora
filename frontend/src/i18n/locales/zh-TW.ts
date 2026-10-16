@@ -1836,11 +1836,25 @@ export default {
       tryAgent: '試跑智能體',
       openPage: '開啟頁面',
       searchWeKnoraDocs: '搜尋產品文件',
-      readWeKnoraDoc: '閱讀產品文件'
+      readWeKnoraDoc: '閱讀產品文件',
+      readPage: '查看目前頁面',
+      fillPage: '填寫頁面'
+    },
+    pageAccess: {
+      viewed: '已查看目前頁面：{location}'
+    },
+    pageEdit: {
+      title: '已填寫 {count} 處',
+      undo: '復原',
+      undone: '已復原這次填寫',
+      undoSkipped: '{count} 處已被你修改或不在頁面上，未復原',
+      unsaved: '尚未儲存，請檢查後在頁面上自行儲存'
     },
     openPage: {
       open: '開啟',
       openForm: '開啟並填寫',
+      opened: '助手已開啟',
+      back: '返回',
       endpoint: '將連線到：',
       draftHint: '已依助手的建議預填。請補上金鑰等憑證，檢查後自行儲存。'
     },
@@ -2169,9 +2183,39 @@ export default {
     startFailed: '啟動助手失敗，請重試',
     askAboutDocument: '問 {name}',
     askAboutAnswer: '就這則回答問 {name}',
+    selection: {
+      label: '已選取',
+      lines: '已選 {count} 行',
+      detach: '不帶上選取內容',
+      tip: '傳送時會帶上選取的內容：{text}',
+      tipField: '傳送時會帶上「{field}」中選取的內容：{text}'
+    },
+    bubble: {
+      label: '助手快捷操作',
+      ask: '問助手',
+      polish: '潤飾',
+      rewrite: '改寫',
+      translate: '翻譯',
+      continue: '續寫',
+      prompts: {
+        polish: '潤飾選取的內容：修正錯字和不通順的地方，不改變原意，直接在原處取代。',
+        rewrite: '改寫選取的內容，讓表達更清楚簡潔，直接在原處取代。',
+        translate: '翻譯選取的內容：中文譯成英文，其他語言譯成中文，直接在原處取代。',
+        continue: '接著選取的內容往下續寫一段，與上下文銜接，寫在選取內容之後。'
+      }
+    },
+    fillNotice: {
+      title: '助手已填寫 {count} 處',
+      undo: '復原',
+      dismiss: '關閉'
+    },
     access: {
       title: '權限等級',
       capped: '空間管理員未開放這一等級',
+      page: {
+        label: '查看和填寫目前頁面',
+        desc: '讀取左側頁面，並可代為填寫表單；不會點擊按鈕或儲存'
+      },
       levels: {
         read_only: {
           label: '唯讀',
@@ -5478,6 +5522,21 @@ export default {
     }
   },
   manualEditor: {
+    assistant: {
+      button: '助手',
+      tooltip: '讓助手幫你寫',
+      continue: '續寫',
+      outline: '產生大綱',
+      polish: '潤飾全文',
+      summarize: '總結重點',
+      open: '開啟助手',
+      prompts: {
+        continue: '接著正文結尾續寫一段，與前文銜接。',
+        outline: '根據標題和現有內容，為這篇文件擬一份結構清楚的大綱，寫在正文開頭。',
+        polish: '潤飾正文：修正錯字和不通順的句子，不改變原意，分段修改。',
+        summarize: '總結這篇文件的重點，在對話裡回覆，不要修改正文。'
+      }
+    },
     defaultTitlePrefix: '新建文件',
     noDocumentKnowledgeBases: '暫無可用的文件型知識庫，請先建立一個文件型知識庫',
     actions: {

@@ -1,5 +1,5 @@
 <template>
-  <t-tooltip v-if="context" :content="tooltip" placement="top">
+  <t-tooltip v-if="segments.length" :content="tooltip" placement="top">
     <span v-if="assistant.contextAttached" class="assistant-context-chip">
       <t-icon :name="icon" class="assistant-context-chip__icon" />
       <span class="assistant-context-chip__path">
@@ -30,21 +30,33 @@ import { useAssistantStore } from '@/stores/assistant'
 const { t } = useI18n()
 const assistant = useAssistantStore()
 const context = computed(() => assistant.pageContext)
+const view = computed(() => assistant.pageView)
 
 const icon = computed(() => {
+  if (view.value) return 'edit-1'
   const c = context.value
-  if (c?.messageId) return 'chat-message'
-  if (c?.modelId || c?.page === 'settings_models') return 'control-platform'
-  if (c?.mcpServiceId || c?.page === 'mcp_services') return 'tools'
-  if (c?.agentId) return 'robot'
-  if (c?.wikiSlug) return 'book-open'
-  if (c?.knowledgeId) return 'file'
+  if (!c) return 'browse'
+  if (c.messageId) return 'chat-message'
+  if (c.modelId || c.page === 'settings_models') return 'control-platform'
+  if (c.mcpServiceId || c.page === 'mcp_services') return 'tools'
+  if (c.agentId) return 'robot'
+  if (c.wikiSlug) return 'book-open'
+  if (c.knowledgeId) return 'file'
   return 'folder'
 })
 
 const segments = computed(() => {
+  const base = pageSegments()
+  if (!view.value) return base
+  // The page stays as the parent of the dialog open over it, once.
+  const parent = base.slice(0, 1)
+  const viewParts = view.value.split(' / ')
+  return viewParts[0] === parent[0] ? [...parent, ...viewParts.slice(1)] : [...parent, ...viewParts]
+})
+
+function pageSegments(): string[] {
   const c = context.value
-  if (!c) return []
+  if (!c) return assistant.pageTitle ? assistant.pageTitle.split(' / ') : []
   if (c.messageId) return [t('assistant.context.chatMessage')]
   if (c.modelId) return [t('assistant.context.pages.settings_models'), c.modelName || c.modelId]
   if (c.mcpServiceId) return [t('assistant.context.pages.mcp_services'), c.mcpServiceName || c.mcpServiceId]
@@ -53,7 +65,7 @@ const segments = computed(() => {
   const leaf = c.wikiTitle || c.wikiSlug || c.knowledgeTitle
   const path = [c.knowledgeBaseName, leaf].filter((s): s is string => !!s)
   return path.length ? path : [t('assistant.context.currentPage')]
-})
+}
 
 const tooltip = computed(() => {
   const path = segments.value.join(' / ')

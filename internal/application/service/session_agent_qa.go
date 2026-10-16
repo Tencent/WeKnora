@@ -819,6 +819,9 @@ func pageContextInTargets(
 		AgentID:      strings.TrimSpace(page.AgentID),
 		ModelID:      strings.TrimSpace(page.ModelID),
 		MCPServiceID: strings.TrimSpace(page.MCPServiceID),
+		Title:        types.NormalizePageView(page.Title),
+		View:         types.NormalizePageView(page.View),
+		Selection:    page.Selection.Normalize(),
 	}
 	if p := strings.TrimSpace(page.Page); types.IsPageContextPage(p) {
 		kept.Page = p
@@ -837,7 +840,8 @@ func pageContextInTargets(
 				secutils.SanitizeForLog(kbID))
 		}
 		if kept.Page == "" && kept.AgentID == "" && kept.ModelID == "" &&
-			kept.MCPServiceID == "" && kept.SessionID == "" {
+			kept.MCPServiceID == "" && kept.SessionID == "" && kept.Title == "" && kept.View == "" &&
+			kept.Selection == nil {
 			return nil
 		}
 		return kept

@@ -8,6 +8,7 @@
              跨页面保留会话，从侧栏、右侧边缘按钮或命令面板唤出（设置里可选） -->
         <AssistantPanel />
         <AssistantLauncher />
+        <AssistantPageBridge />
         <div class="upload-mask" v-show="ismask">
             <UploadMask></UploadMask>
         </div>
@@ -33,6 +34,7 @@ import Settings from '@/views/settings/Settings.vue'
 import GlobalCommandPalette from '@/components/GlobalCommandPalette.vue'
 import AssistantPanel from '@/components/assistant/AssistantPanel.vue'
 import AssistantLauncher from '@/components/assistant/AssistantLauncher.vue'
+import AssistantPageBridge from '@/components/assistant/AssistantPageBridge.vue'
 import GlobalInvitationBell from '@/components/GlobalInvitationBell.vue'
 import UploadTasksPanel from '@/components/upload-tasks/UploadTasksPanel.vue'
 import NewUserGuide from '@/components/NewUserGuide.vue'

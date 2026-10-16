@@ -962,16 +962,18 @@ type resolveAgentPromptBody struct {
 
 // ResolveAgentPrompt godoc
 // @Summary      回答 Agent 的交互请求
-// @Description  回答 Agent 运行中发起的交互（ask_user 提问或工具审批）。
+// @Description  回答 Agent 运行中发起的交互（ask_user 提问、工具审批，或由浏览器自动应答的页面读写）。
 // @Description  kind 须与交互一致，response 为该类型的回答 JSON（不接受未知字段）：
 // @Description  ask_user 为 {selected?, values?, text?, declined?}；
-// @Description  tool_approval 为 {approved: bool, modified_args?: object, reason?: string, allow_in_session?: bool}。
+// @Description  tool_approval 为 {approved: bool, modified_args?: object, reason?: string, allow_in_session?: bool}；
+// @Description  page_action 为 {declined?, error?, location?, snapshot?, applied?: [{ref, label?, summary?}],
+// @Description  stayed?, return_path?}。
 // @Description  返回 resumed=true 表示运行已挂起并在本次回答后恢复，客户端需重新接入该消息的事件流
 // @Tags         Agent
 // @Accept       json
 // @Produce      json
 // @Param        prompt_id  path      string                  true  "交互 ID（事件中的 pending_id）"
-// @Param request body map[string]interface{} true "{kind: \"ask_user\"|\"tool_approval\", response: object}"
+// @Param request body map[string]interface{} true "{kind: \"ask_user\"|\"tool_approval\"|\"page_action\", response: object}"
 // @Success      200        {object}  map[string]interface{}  "{success: true, resumed: bool}"
 // @Failure      400        {object}  errors.AppError         "回答不合法或交互已结束"
 // @Failure      404        {object}  errors.AppError         "交互不存在"

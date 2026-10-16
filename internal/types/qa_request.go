@@ -113,6 +113,55 @@ type PageContext struct {
 	MCPServiceID    string   `json:"mcp_service_id,omitempty"`
 	SessionID       string   `json:"session_id,omitempty"`
 	MessageID       string   `json:"message_id,omitempty"`
+	// Title is the page's name as the client's navigation shows it, e.g.
+	// "Agents"; it names pages without an identifier. Assistant only.
+	Title string `json:"title,omitempty"`
+	// View is the title of the dialog or drawer open over the page, as the
+	// page shows it. Assistant only.
+	View string `json:"view,omitempty"`
+	// Selection is the text the user selected on the page. Assistant only.
+	Selection *PageSelection `json:"selection,omitempty"`
+}
+
+// Bounds on the view and selection a page context carries.
+const (
+	PageViewMaxRunes           = 120
+	PageSelectionMaxRunes      = 4000
+	PageSelectionFieldMaxRunes = 200
+)
+
+// PageSelection is text the user selected on the page: in a text field
+// (Field, Ref and the lines are set) or in the page's text.
+type PageSelection struct {
+	Text      string `json:"text"`
+	Field     string `json:"field,omitempty"`      // the field's label
+	Ref       string `json:"ref,omitempty"`        // the field's read_page ref
+	StartLine int    `json:"start_line,omitempty"` // 1-based, multi-line fields only
+	EndLine   int    `json:"end_line,omitempty"`
+}
+
+// Normalize trims and bounds a client-sent selection; nil when nothing is left.
+func (s *PageSelection) Normalize() *PageSelection {
+	if s == nil {
+		return nil
+	}
+	text := truncateRunes(s.Text, PageSelectionMaxRunes)
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	out := &PageSelection{Text: text, Field: truncateRunes(strings.TrimSpace(s.Field), PageSelectionFieldMaxRunes)}
+	if pageRefRE.MatchString(s.Ref) {
+		out.Ref = s.Ref
+	}
+	if s.StartLine > 0 && s.EndLine >= s.StartLine {
+		out.StartLine, out.EndLine = s.StartLine, s.EndLine
+	}
+	return out
+}
+
+// NormalizePageView trims and bounds a client-sent page or view title.
+func NormalizePageView(view string) string {
+	return truncateRunes(strings.Join(strings.Fields(view), " "), PageViewMaxRunes)
 }
 
 // QARequest consolidates all parameters for KnowledgeQA and AgentQA service calls,

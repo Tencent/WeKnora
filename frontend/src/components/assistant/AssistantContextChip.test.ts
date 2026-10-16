@@ -60,3 +60,56 @@ test('settings and chat breadcrumbs name the page and the open resource', () => 
   assistant.pageContext = { page: 'knowledge_base', knowledgeBaseId: 'kb', knowledgeBaseName: 'KB' }
   assert.deepEqual(Array.from(state.segments.value), ['KB'], 'a knowledge base keeps its own breadcrumb')
 })
+
+test('a dialog open over the page shows under the page', () => {
+  const assistant = vue.reactive({
+    pageContext: { knowledgeBaseId: 'kb', knowledgeBaseName: 'KB', knowledgeTitle: 'Doc', knowledgeId: 'doc' } as any,
+    pageView: 'Edit Markdown', contextAttached: true,
+  })
+  const exports: any = {}
+  runInNewContext(ts.transpileModule(script, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS },
+  }).outputText, {
+    exports,
+    require: (name: string) => ({
+      vue, 'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
+      '@/stores/assistant': { useAssistantStore: () => assistant },
+    } as Record<string, unknown>)[name],
+  })
+  const state = exports.default.setup({}, { expose() {} })
+  assert.equal(state.icon.value, 'edit-1')
+  assert.deepEqual(Array.from(state.segments.value), ['KB', 'Edit Markdown'])
+  assistant.pageContext = null
+  assert.deepEqual(Array.from(state.segments.value), ['Edit Markdown'], 'a dialog alone is enough')
+  assistant.pageView = ''
+  assert.deepEqual(Array.from(state.segments.value), [])
+})
+
+test('a page that publishes nothing shows its route title', () => {
+  const assistant = vue.reactive({
+    pageContext: null as any, pageTitle: 'Toolbox / Skills', pageView: '', contextAttached: true,
+  })
+  const exports: any = {}
+  runInNewContext(ts.transpileModule(script, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS },
+  }).outputText, {
+    exports,
+    require: (name: string) => ({
+      vue, 'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
+      '@/stores/assistant': { useAssistantStore: () => assistant },
+    } as Record<string, unknown>)[name],
+  })
+  const state = exports.default.setup({}, { expose() {} })
+  assert.equal(state.icon.value, 'browse')
+  assert.deepEqual(Array.from(state.segments.value), ['Toolbox', 'Skills'])
+  assistant.pageTitle = 'Agents'
+  assistant.pageView = 'Agents / Tools'
+  assert.deepEqual(Array.from(state.segments.value), ['Agents', 'Tools'], 'the page is not repeated')
+  assistant.pageTitle = ''
+  assistant.pageView = 'Settings / Models'
+  assert.deepEqual(Array.from(state.segments.value), ['Settings', 'Models'])
+  assistant.pageContext = { agentId: 'a', agentName: 'Helper' }
+  assistant.pageTitle = 'Agents'
+  assistant.pageView = ''
+  assert.deepEqual(Array.from(state.segments.value), ['Helper'], 'a published context wins over the title')
+})

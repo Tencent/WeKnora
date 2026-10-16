@@ -3,9 +3,17 @@
     <div class="open-page-card__header">
       <span class="open-page-card__icon" aria-hidden="true"><t-icon :name="icon" /></span>
       <div class="open-page-card__heading">
-        <div v-if="link.detail" class="open-page-card__eyebrow">{{ link.label }}</div>
+        <div v-if="link.navigated" class="open-page-card__eyebrow">
+          {{ t('agentStream.openPage.opened') }} · {{ link.label }}
+        </div>
+        <div v-else-if="link.detail" class="open-page-card__eyebrow">{{ link.label }}</div>
         <div class="open-page-card__title">{{ link.detail || link.label }}</div>
       </div>
+      <t-button v-if="returnPath" class="open-page-card__action" size="small" variant="text"
+        @click="goBack">
+        <template #icon><t-icon name="rollback" /></template>
+        {{ t('agentStream.openPage.back') }}
+      </t-button>
       <t-button class="open-page-card__action" size="small" theme="primary" variant="outline"
         :disabled="!location" @click="open">
         {{ draft ? t('agentStream.openPage.openForm') : t('agentStream.openPage.open') }}
@@ -34,6 +42,7 @@ import {
   pageLinkDraft,
   pageLinkEndpoint,
   pageLinkLocation,
+  pageLinkReturnPath,
   type AssistantPageLink,
 } from '@/utils/assistantPageLink'
 
@@ -46,6 +55,7 @@ const assistant = useAssistantStore()
 const location = computed(() => pageLinkLocation(props.link))
 const draft = computed(() => pageLinkDraft(props.link))
 const endpoint = computed(() => pageLinkEndpoint(props.link))
+const returnPath = computed(() => pageLinkReturnPath(props.link))
 
 const icon = computed(() => {
   switch (props.link.page) {
@@ -53,6 +63,10 @@ const icon = computed(() => {
     case 'settings_models': return 'control-platform'
     case 'mcp_services': return 'tools'
     case 'wiki': return 'book-open'
+    case 'settings': return 'setting'
+    case 'toolbox': return 'tools'
+    case 'agents': return 'robot'
+    case 'organizations': return 'usergroup'
     default: return props.link.knowledge_id ? 'file' : 'folder'
   }
 })
@@ -61,6 +75,10 @@ function open() {
   if (!location.value) return
   assistant.setPageDraft(draft.value)
   void router.push(location.value)
+}
+
+function goBack() {
+  if (returnPath.value) void router.push(returnPath.value)
 }
 </script>
 

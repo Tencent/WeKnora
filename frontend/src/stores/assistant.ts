@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
-import { computed, ref, shallowReactive, watch } from 'vue'
-import type { PageContextPayload } from '@/api/chat/streame'
+import { computed, ref, shallowReactive, shallowRef, watch } from 'vue'
+import type { PageContextPayload, PageSelectionPayload } from '@/api/chat/streame'
 import {
   DEFAULT_ASSISTANT_ACCESS_LEVEL,
   capAssistantAccessLevel,
@@ -65,6 +65,26 @@ export interface AssistantMcpServiceDraft {
   api_key_header?: string
 }
 
+/** Text the user selected on the page beside the assistant. */
+export interface AssistantPageSelection {
+  text: string
+  /** Set when the text is selected in a field the assistant can write to. */
+  field?: string
+  ref?: string
+  startLine?: number
+  endLine?: number
+}
+
+export function toPageSelectionPayload(selection: AssistantPageSelection): PageSelectionPayload {
+  return {
+    text: selection.text,
+    field: selection.field || undefined,
+    ref: selection.ref || undefined,
+    start_line: selection.startLine || undefined,
+    end_line: selection.endLine || undefined,
+  }
+}
+
 /** A form the user asked the assistant to open, waiting for its page. */
 export type AssistantPageDraft =
   | { kind: 'model'; draft: AssistantModelDraft }
@@ -81,6 +101,7 @@ const SESSION_KEY_PREFIX = 'weknora:assistant-session'
 const VISIBLE_KEY_PREFIX = 'weknora:assistant-visible'
 const MODEL_KEY_PREFIX = 'weknora:assistant-model'
 const ACCESS_KEY_PREFIX = 'weknora:assistant-access'
+const PAGE_ACCESS_KEY_PREFIX = 'weknora:assistant-page-access'
 const LAYOUT_KEY = 'weknora:assistant-layout'
 const WIDTH_KEY = 'weknora:assistant-width'
 const ENTRY_KEY = 'weknora:assistant-entry'
@@ -175,7 +196,15 @@ export const useAssistantStore = defineStore('assistant', () => {
     for (const layer of layers.values()) Object.assign(merged, layer)
     return hasPageContext(merged) ? merged : null
   })
-  const contextAttached = computed(() => !!pageContext.value && dismissedKey.value !== contextKey(pageContext.value))
+  // The page's name from the route, for pages that publish nothing; the
+  // dialog or drawer open over the page; and the text selected on it.
+  const pageTitle = ref('')
+  const pageView = ref('')
+  const pageSelection = shallowRef<AssistantPageSelection | null>(null)
+  // Opening another page or dialog brings a dismissed context back: it is new.
+  const attachKey = computed(() => `${contextKey(pageContext.value)}#${pageTitle.value}#${pageView.value}`)
+  const contextAttached = computed(() =>
+    (!!pageContext.value || !!pageTitle.value || !!pageView.value) && dismissedKey.value !== attachKey.value)
 
   // '' leaves the choice to the run: the knowledge base's chat model, then
   // the system default.
@@ -197,6 +226,8 @@ export const useAssistantStore = defineStore('assistant', () => {
     const level = workspaceConfig.value?.max_access_level
     return isAssistantAccessLevel(level) ? level : DEFAULT_ASSISTANT_ACCESS_LEVEL
   })
+  // Whether the assistant may read and fill the page beside it.
+  const pageAccess = ref(true)
   const effectiveAccessLevel = computed(() => capAssistantAccessLevel(accessLevel.value, accessCeiling.value))
   /** The workspace's name for the assistant; empty means the default. */
   const displayName = computed(() => workspaceConfig.value?.display_name?.trim() || '')
@@ -208,11 +239,13 @@ export const useAssistantStore = defineStore('assistant', () => {
       modelId.value = localStorage.getItem(storageKey(MODEL_KEY_PREFIX)) || ''
       const level = localStorage.getItem(storageKey(ACCESS_KEY_PREFIX))
       accessLevel.value = isAssistantAccessLevel(level) ? level : DEFAULT_ASSISTANT_ACCESS_LEVEL
+      pageAccess.value = localStorage.getItem(storageKey(PAGE_ACCESS_KEY_PREFIX)) !== '0'
     } catch {
       sessionId.value = ''
       visible.value = false
       modelId.value = ''
       accessLevel.value = DEFAULT_ASSISTANT_ACCESS_LEVEL
+      pageAccess.value = true
     }
     void loadWorkspaceConfig()
   }
@@ -239,6 +272,15 @@ export const useAssistantStore = defineStore('assistant', () => {
     accessLevel.value = level
     try {
       localStorage.setItem(storageKey(ACCESS_KEY_PREFIX), level)
+    } catch {
+      // See setSession.
+    }
+  }
+  const setPageAccess = (on: boolean) => {
+    pageAccess.value = on
+    try {
+      if (on) localStorage.removeItem(storageKey(PAGE_ACCESS_KEY_PREFIX))
+      else localStorage.setItem(storageKey(PAGE_ACCESS_KEY_PREFIX), '0')
     } catch {
       // See setSession.
     }
@@ -330,6 +372,40 @@ export const useAssistantStore = defineStore('assistant', () => {
     return request
   }
 
+  const setPageTitle = (title: string) => {
+    pageTitle.value = title
+  }
+  const setPageView = (view: string) => {
+    pageView.value = view
+  }
+  const setPageSelection = (selection: AssistantPageSelection | null) => {
+    pageSelection.value = selection
+  }
+
+  // A message for the open conversation, sent by the conversation itself.
+  const queuedMessage = shallowRef<{ id: number; query: string } | null>(null)
+  let queuedSeq = 0
+  /** Asks in the open conversation, or starts one when there is none. */
+  const ask = (query: string) => {
+    if (!sessionId.value) {
+      open({ query })
+      return
+    }
+    queuedMessage.value = { id: ++queuedSeq, query }
+    setVisible(true)
+  }
+  const takeQueuedMessage = () => {
+    const message = queuedMessage.value
+    queuedMessage.value = null
+    return message
+  }
+  // Bumped to move the cursor into the assistant's input box.
+  const focusRequest = ref(0)
+  const focusComposer = () => {
+    setVisible(true)
+    focusRequest.value++
+  }
+
   const pageDraft = ref<AssistantPageDraft | null>(null)
   const setPageDraft = (draft: AssistantPageDraft | null) => {
     pageDraft.value = draft
@@ -351,7 +427,7 @@ export const useAssistantStore = defineStore('assistant', () => {
     layers.delete(owner)
   }
   const dismissPageContext = () => {
-    dismissedKey.value = contextKey(pageContext.value)
+    dismissedKey.value = attachKey.value
   }
   const restorePageContext = () => {
     dismissedKey.value = ''
@@ -364,6 +440,7 @@ export const useAssistantStore = defineStore('assistant', () => {
     accessLevel,
     accessCeiling,
     effectiveAccessLevel,
+    pageAccess,
     displayName,
     workspaceConfig,
     entry,
@@ -372,12 +449,24 @@ export const useAssistantStore = defineStore('assistant', () => {
     pendingRequest,
     pageContext,
     contextAttached,
+    pageTitle,
+    pageView,
+    pageSelection,
+    setPageTitle,
+    setPageView,
+    setPageSelection,
+    queuedMessage,
+    ask,
+    takeQueuedMessage,
+    focusRequest,
+    focusComposer,
     open,
     close,
     toggle,
     setSession,
     setModel,
     setAccessLevel,
+    setPageAccess,
     setWorkspaceConfig,
     loadWorkspaceConfig,
     setEntry,

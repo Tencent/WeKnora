@@ -1836,11 +1836,25 @@ export default {
       tryAgent: '试跑智能体',
       openPage: '打开页面',
       searchWeKnoraDocs: '搜索产品文档',
-      readWeKnoraDoc: '阅读产品文档'
+      readWeKnoraDoc: '阅读产品文档',
+      readPage: '查看当前页面',
+      fillPage: '填写页面'
+    },
+    pageAccess: {
+      viewed: '已查看当前页面：{location}'
+    },
+    pageEdit: {
+      title: '已填写 {count} 处',
+      undo: '撤销',
+      undone: '已撤销这次填写',
+      undoSkipped: '{count} 处已被你改过或不在页面上，未撤销',
+      unsaved: '尚未保存，请检查后在页面上自行保存'
     },
     openPage: {
       open: '打开',
       openForm: '打开并填写',
+      opened: '助手已打开',
+      back: '返回',
       endpoint: '将连接到：',
       draftHint: '已按助手的建议预填。请补全密钥等凭据，检查后自己保存。'
     },
@@ -2169,9 +2183,39 @@ export default {
     startFailed: '启动助手失败，请重试',
     askAboutDocument: '问 {name}',
     askAboutAnswer: '就这条回答问 {name}',
+    selection: {
+      label: '已选中',
+      lines: '已选 {count} 行',
+      detach: '不带上选中内容',
+      tip: '发送时会带上选中的内容：{text}',
+      tipField: '发送时会带上「{field}」中选中的内容：{text}'
+    },
+    bubble: {
+      label: '助手快捷操作',
+      ask: '问助手',
+      polish: '润色',
+      rewrite: '改写',
+      translate: '翻译',
+      continue: '续写',
+      prompts: {
+        polish: '润色选中的内容：修正错别字和不通顺的地方，不改变原意，直接在原处替换。',
+        rewrite: '改写选中的内容，让表达更清晰简洁，直接在原处替换。',
+        translate: '翻译选中的内容：中文译成英文，其他语言译成中文，直接在原处替换。',
+        continue: '接着选中的内容往下续写一段，与上下文衔接，写在选中内容之后。'
+      }
+    },
+    fillNotice: {
+      title: '助手已填写 {count} 处',
+      undo: '撤销',
+      dismiss: '关闭'
+    },
     access: {
       title: '权限等级',
       capped: '空间管理员未开放这一等级',
+      page: {
+        label: '查看和填写当前页面',
+        desc: '读取左侧页面，并可代为填写表单；不会点击按钮或保存'
+      },
       levels: {
         read_only: {
           label: '只读',
@@ -5478,6 +5522,21 @@ export default {
     }
   },
   manualEditor: {
+    assistant: {
+      button: '助手',
+      tooltip: '让助手帮你写',
+      continue: '续写',
+      outline: '生成大纲',
+      polish: '润色全文',
+      summarize: '总结要点',
+      open: '打开助手',
+      prompts: {
+        continue: '接着正文末尾续写一段，与前文衔接。',
+        outline: '根据标题和现有内容，为这篇文档拟一份结构清晰的大纲，写在正文开头。',
+        polish: '润色正文：修正错别字和不通顺的句子，不改变原意，分段修改。',
+        summarize: '总结这篇文档的要点，在对话里回复，不要修改正文。'
+      }
+    },
     defaultTitlePrefix: '新建文档',
     noDocumentKnowledgeBases: '暂无可用的文档型知识库，请先创建一个文档型知识库',
     actions: {

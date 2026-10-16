@@ -1834,11 +1834,25 @@ export default {
       tryAgent: '에이전트 시험 실행',
       openPage: '페이지 열기',
       searchWeKnoraDocs: '제품 문서 검색',
-      readWeKnoraDoc: '제품 문서 읽기'
+      readWeKnoraDoc: '제품 문서 읽기',
+      readPage: '페이지 보기',
+      fillPage: '페이지 입력'
+    },
+    pageAccess: {
+      viewed: '현재 페이지를 확인했습니다: {location}'
+    },
+    pageEdit: {
+      title: '{count}곳을 입력했습니다',
+      undo: '되돌리기',
+      undone: '입력을 되돌렸습니다',
+      undoSkipped: '{count}곳은 이미 변경되었거나 페이지에 없어 그대로 두었습니다',
+      unsaved: '아직 저장되지 않았습니다. 확인 후 페이지에서 저장하세요.'
     },
     openPage: {
       open: '열기',
       openForm: '열고 입력',
+      opened: '어시스턴트가 열었습니다',
+      back: '돌아가기',
       endpoint: '연결 대상: ',
       draftHint: '어시스턴트가 미리 채웠습니다. API 키 등 자격 증명을 입력하고 확인한 뒤 직접 저장하세요.'
     },
@@ -2167,9 +2181,39 @@ export default {
     startFailed: '어시스턴트를 시작하지 못했습니다. 다시 시도해 주세요.',
     askAboutDocument: '{name}에게 묻기',
     askAboutAnswer: '이 답변에 대해 {name}에게 묻기',
+    selection: {
+      label: '선택됨',
+      lines: '{count}줄 선택됨',
+      detach: '선택한 내용 빼기',
+      tip: '보낼 때 선택한 내용을 함께 보냅니다: {text}',
+      tipField: '보낼 때 「{field}」에서 선택한 내용을 함께 보냅니다: {text}'
+    },
+    bubble: {
+      label: '어시스턴트 빠른 작업',
+      ask: '어시스턴트에게 묻기',
+      polish: '다듬기',
+      rewrite: '다시 쓰기',
+      translate: '번역',
+      continue: '이어 쓰기',
+      prompts: {
+        polish: '선택한 내용을 다듬어 주세요. 오타와 어색한 표현을 고치되 의미는 바꾸지 말고 그 자리에서 바꿔 주세요.',
+        rewrite: '선택한 내용을 더 명확하고 간결하게 다시 써서 그 자리에서 바꿔 주세요.',
+        translate: '선택한 내용을 번역해 주세요. 중국어는 영어로, 다른 언어는 중국어로 옮겨 그 자리에서 바꿔 주세요.',
+        continue: '선택한 내용 뒤에 문맥에 맞는 문단을 하나 이어 써 주세요.'
+      }
+    },
+    fillNotice: {
+      title: '어시스턴트가 {count}곳을 입력했습니다',
+      undo: '되돌리기',
+      dismiss: '닫기'
+    },
     access: {
       title: '권한 수준',
       capped: '워크스페이스 관리자가 허용하지 않았습니다',
+      page: {
+        label: '현재 페이지 보기 및 입력',
+        desc: '왼쪽 페이지를 읽고 양식을 대신 입력할 수 있습니다. 버튼을 누르거나 저장하지 않습니다.'
+      },
       levels: {
         read_only: {
           label: '읽기 전용',
@@ -5476,6 +5520,21 @@ export default {
     }
   },
   manualEditor: {
+    assistant: {
+      button: '어시스턴트',
+      tooltip: '어시스턴트에게 글쓰기 맡기기',
+      continue: '이어 쓰기',
+      outline: '개요 만들기',
+      polish: '전체 다듬기',
+      summarize: '요점 정리',
+      open: '어시스턴트 열기',
+      prompts: {
+        continue: '본문 끝에서 앞 내용에 이어지는 문단을 하나 써 주세요.',
+        outline: '제목과 현재 내용을 바탕으로 이 문서의 구조가 잘 드러나는 개요를 만들어 본문 맨 앞에 써 주세요.',
+        polish: '본문을 다듬어 주세요. 오타와 어색한 문장을 고치되 의미는 바꾸지 말고 문단별로 고쳐 주세요.',
+        summarize: '이 문서의 요점을 대화에서 정리해 주세요. 본문은 수정하지 마세요.'
+      }
+    },
     defaultTitlePrefix: '새 문서',
     noDocumentKnowledgeBases: '사용 가능한 문서형 지식베이스가 없습니다. 먼저 문서형 지식베이스를 생성해주세요',
     actions: {

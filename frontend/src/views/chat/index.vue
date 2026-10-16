@@ -252,6 +252,7 @@ import { provideChatAttachmentPreviewDrawer } from '@/composables/useChatAttachm
 import { useSessionActivityStore } from '@/stores/sessionActivity';
 import { useAssistantStore } from '@/stores/assistant';
 import { useAssistantPageContext } from '@/composables/useAssistantPageContext';
+import { respondToPageAction } from '@/utils/pageActionResponder';
 import { provideChatSandboxPanel } from '@/composables/useChatSandboxPanel';
 import SandboxSidePanel from '@/components/chat/SandboxSidePanel.vue';
 import BrowserTaskPreview from './components/BrowserTaskPreview.vue';
@@ -977,6 +978,11 @@ const {
     isAgentStreamSession,
     scrollToBottom,
     onError: (msg) => MessagePlugin.error(msg),
+    onPageAction: (prompt) => void respondToPageAction(
+        prompt,
+        !props.embeddedMode ? 'unavailable' : assistant.pageAccess ? 'enabled' : 'disabled',
+        { current: () => router.currentRoute.value.fullPath, push: (location) => router.push(location) },
+    ),
     preserveIncompleteStreamReactive: true,
     isFirstEnter,
     scrollContainer,
@@ -1692,6 +1698,24 @@ const resumeSuspendedRun = async (pendingId) => {
     }
 };
 provide(resumeSuspendedRunKey, resumeSuspendedRun);
+
+// The assistant panel's conversation takes messages asked from the page (the
+// selection bubble, the editor toolbar) once its history is in.
+if (props.embeddedMode) {
+    watch([() => assistant.queuedMessage, historyLoading], ([message, pending]) => {
+        if (!message || pending) return;
+        assistant.takeQueuedMessage();
+        if (isReplying.value || loading.value) {
+            // Mid-reply it waits in the input box for the user to send.
+            inputFieldRef.value?.prefill?.(message.query);
+            return;
+        }
+        sendMsg(message.query, inputFieldRef.value?.getComposerModelId?.() || props.modelId);
+    }, { immediate: true });
+    watch(() => assistant.focusRequest, () => {
+        inputFieldRef.value?.focusInput?.();
+    });
+}
 
 watch(error, (newError) => {
     if (!newError) return;

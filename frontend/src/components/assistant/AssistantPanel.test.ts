@@ -95,6 +95,7 @@ async function fixture(
     '@/components/Input-field.vue': emptyComponent,
     '@/components/PanelResizeHandle.vue': emptyComponent,
     './AssistantContextChip.vue': emptyComponent,
+    './AssistantSelectionChip.vue': emptyComponent,
     './AssistantAccessPicker.vue': emptyComponent,
     '@/api/chat': {
       createSessions: createSession,
@@ -460,5 +461,66 @@ test('settings and chat pages send their resources without widening the search s
 
     f.assistant.publishPageContext(owner, { section: 'tools' })
     assert.equal(f.assistant.pageContext, null, 'a section alone names no page')
+  } finally { f.close() }
+})
+
+test('the open dialog and the selection go with the message, the selection only once', async () => {
+  const f = await fixture()
+  try {
+    const owner = Symbol()
+    f.assistant.publishPageContext(owner, { knowledgeBaseId: 'kb-a', knowledgeBaseName: 'KB' })
+    f.assistant.setPageView('Edit Markdown')
+    f.assistant.setPageSelection({ text: 'Run setup.', field: 'Content', ref: 'e2', startLine: 7, endLine: 7 })
+    f.assistant.open({ query: 'Polish this' })
+    await flush()
+    assert.equal(JSON.stringify(f.sent[0].scope.pageContext), JSON.stringify({
+      knowledge_base_id: 'kb-a', view: 'Edit Markdown',
+      selection: { text: 'Run setup.', field: 'Content', ref: 'e2', start_line: 7, end_line: 7 },
+    }))
+    assert.equal(f.assistant.pageSelection, null, 'the selection is used up by the message')
+
+    f.assistant.retractPageContext(owner)
+    f.assistant.setPageView('')
+    f.assistant.setPageSelection({ text: 'page text' })
+    f.assistant.open({ query: 'Explain' })
+    await flush()
+    assert.equal(JSON.stringify(f.sent.at(-1)?.scope.pageContext), JSON.stringify({ selection: { text: 'page text' } }),
+      'a selection alone is a page context')
+
+    f.assistant.setPageView('Edit Markdown')
+    f.assistant.dismissPageContext()
+    assert.equal(f.assistant.contextAttached, false)
+    f.assistant.setPageView('Another dialog')
+    assert.equal(f.assistant.contextAttached, true, 'a new dialog brings the context back')
+  } finally { f.close() }
+})
+
+test('a page that publishes nothing still sends its route title', async () => {
+  const f = await fixture()
+  try {
+    f.assistant.setPageTitle('Agents')
+    assert.equal(f.assistant.contextAttached, true)
+    f.assistant.open({ query: 'What is here?' })
+    await flush()
+    assert.equal(JSON.stringify(f.sent.at(-1)?.scope.pageContext), JSON.stringify({ title: 'Agents' }))
+
+    f.assistant.dismissPageContext()
+    assert.equal(f.assistant.contextAttached, false)
+    f.assistant.setPageTitle('Toolbox')
+    assert.equal(f.assistant.contextAttached, true, 'another page brings it back')
+  } finally { f.close() }
+})
+
+test('ask sends into the open conversation and starts one when there is none', async () => {
+  const f = await fixture()
+  try {
+    f.assistant.ask('First')
+    await flush()
+    assert.equal(f.sent.at(-1)?.query, 'First')
+    assert.equal(f.assistant.queuedMessage, null)
+    f.assistant.ask('Second')
+    assert.equal(f.assistant.queuedMessage?.query, 'Second', 'the open conversation sends it')
+    assert.equal(f.assistant.takeQueuedMessage()?.query, 'Second')
+    assert.equal(f.assistant.queuedMessage, null)
   } finally { f.close() }
 })

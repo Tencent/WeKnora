@@ -217,6 +217,10 @@
                   </div>
 
                   <OpenPageCard v-if="showPageLinkInStep(event)" :link="event.tool_data" />
+                  <PageEditCard v-if="showPageEditInStep(event)" :fill="event.tool_data" :tool-call-id="event.tool_call_id" />
+                  <div v-if="isPageReadEvent(event)" class="search-results-summary-fixed">
+                    <div class="results-summary-text">{{ t('agentStream.pageAccess.viewed', { location: event.tool_data.location }) }}</div>
+                  </div>
 
                   <SandboxCommandProgress
                     v-if="event.tool_name === 'shell_exec' && event.pending && event.command_output && !event.command_output.done"
@@ -408,8 +412,11 @@
                 <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)">
                 </div>
               </div>
-              <div v-if="event === pinnedAnswerEvent && pinnedPageLinks.length > 0" class="answer-page-links">
+              <div v-if="event === pinnedAnswerEvent && (pinnedPageLinks.length > 0 || pinnedPageEdits.length > 0)"
+                class="answer-page-links">
                 <OpenPageCard v-for="link in pinnedPageLinks" :key="link.tool_call_id" :link="link.tool_data" />
+                <PageEditCard v-for="edit in pinnedPageEdits" :key="edit.tool_call_id" :fill="edit.tool_data"
+                  :tool-call-id="edit.tool_call_id" />
               </div>
               <div v-if="answerFullyRendered && event.done && event.content && event.content.trim() && !embeddedMode"
                 class="answer-toolbar">
@@ -560,6 +567,10 @@
                 </div>
 
                 <OpenPageCard v-if="showPageLinkInStep(event)" :link="event.tool_data" />
+                <PageEditCard v-if="showPageEditInStep(event)" :fill="event.tool_data" :tool-call-id="event.tool_call_id" />
+                <div v-if="isPageReadEvent(event)" class="search-results-summary-fixed">
+                  <div class="results-summary-text">{{ t('agentStream.pageAccess.viewed', { location: event.tool_data.location }) }}</div>
+                </div>
 
                 <SandboxCommandProgress
                   v-if="event.tool_name === 'shell_exec' && event.pending && event.command_output && !event.command_output.done"
@@ -675,6 +686,7 @@ import ToolResultRenderer from './ToolResultRenderer.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
 import McpOAuthCard from './McpOAuthCard.vue';
 import OpenPageCard from './OpenPageCard.vue';
+import PageEditCard from './PageEditCard.vue';
 import { isAssistantPageLink } from '@/utils/assistantPageLink';
 import AskUserCard from './AskUserCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
@@ -817,6 +829,8 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   run_operation: 'agentStream.tools.runOperation',
   try_agent: 'agentStream.tools.tryAgent',
   open_page: 'agentStream.tools.openPage',
+  read_page: 'agentStream.tools.readPage',
+  fill_page: 'agentStream.tools.fillPage',
   search_weknora_docs: 'agentStream.tools.searchWeKnoraDocs',
   read_weknora_doc: 'agentStream.tools.readWeKnoraDoc',
 };
@@ -2222,6 +2236,24 @@ const pinnedPageLinks = computed(() => {
 const showPageLinkInStep = (event: any): boolean =>
   isPageLinkEvent(event) && pinnedPageLinks.value.length === 0;
 
+const isPageEditEvent = (event: any): boolean =>
+  event?.type === 'tool_call' && event.tool_name === 'fill_page' && !event.pending &&
+  event.success !== false && Array.isArray(event.tool_data?.applied) && !!event.tool_call_id;
+
+// What the assistant typed is still unsaved, so its card stays in view with
+// the page buttons.
+const pinnedPageEdits = computed(() => {
+  if (!pinnedAnswerEvent.value) return [];
+  return eventStream.value.filter(isPageEditEvent);
+});
+
+const showPageEditInStep = (event: any): boolean =>
+  isPageEditEvent(event) && pinnedPageEdits.value.length === 0;
+
+const isPageReadEvent = (event: any): boolean =>
+  event?.type === 'tool_call' && event.tool_name === 'read_page' && !event.pending &&
+  event.success !== false && !!event.tool_data?.location;
+
 // Get unique key for event
 const getEventKey = (event: any, index: number): string => {
   if (!event) return `event-${index}`;
@@ -2296,6 +2328,9 @@ const hasExpandableResults = (event: any): boolean => {
   if (isReferenceDrawerTool(event?.tool_name)) return false;
   // Its card is the result.
   if (event?.tool_name === 'open_page' && event.success !== false) return false;
+  if (event?.tool_name === 'fill_page' && event.success !== false) return false;
+  // The snapshot is page text for the model, not something to read here.
+  if (event?.tool_name === 'read_page' && event.success !== false) return false;
   return hasResults(event);
 };
 

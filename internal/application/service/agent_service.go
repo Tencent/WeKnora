@@ -499,7 +499,16 @@ func (s *agentService) registerOperationTools(
 	}
 	toolRegistry.RegisterTool(tools.NewRunOperationTool(runtime))
 	// Opening a page changes nothing; the user saves any form themselves.
-	toolRegistry.RegisterTool(tools.NewOpenPageTool(runtime))
+	openPage := tools.NewOpenPageTool(runtime)
+	toolRegistry.RegisterTool(openPage)
+	// Filling the page saves nothing either, but read-only runs only look.
+	if actor, ok := s.toolApprovalGate.(approval.PageActor); ok && actor != nil {
+		openPage.WithPageActor(actor)
+		toolRegistry.RegisterTool(tools.NewReadPageTool(actor))
+		if operationAccess.Level != types.AssistantAccessReadOnly {
+			toolRegistry.RegisterTool(tools.NewFillPageTool(actor))
+		}
+	}
 	// A trial spends model calls and runs the agent's own tools, so it is
 	// a change for the access level to approve.
 	if s.trialRunner != nil && operationAccess.Level != types.AssistantAccessReadOnly {
@@ -1711,6 +1720,9 @@ func (s *agentService) resolvePageContextInfo(
 	}
 	if assistant {
 		s.resolveAssistantPageContext(ctx, page, info)
+		info.Title = page.Title
+		info.View = page.View
+		info.Selection = page.Selection
 	}
 	if kbID := page.KnowledgeBaseID; kbID != "" && targets.ContainsKB(kbID) {
 		s.resolveKnowledgeBasePageContext(ctx, page, targets, kbInfos, info)

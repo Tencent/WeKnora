@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
@@ -596,6 +597,30 @@ func TestRegisterOperationToolsOffersAgentTrialsUnlessReadOnly(t *testing.T) {
 		assert.Equal(t, want, err == nil, level)
 		_, err = registry.GetTool(tools.ToolOpenPage)
 		assert.NoError(t, err, "opening a page is offered at every level, read-only included")
+	}
+}
+
+func TestRegisterOperationToolsOffersPageToolsByAccessLevel(t *testing.T) {
+	webUser := types.WithCaller(types.WithPrincipal(context.Background(),
+		types.Principal{Type: types.PrincipalWebUser, ID: "u1"}),
+		types.Caller{TenantID: 7, UserID: "u1"})
+	svc := &agentService{
+		operationDispatcher: operations.NewHandlerDispatcher(),
+		toolApprovalGate:    approval.NewGate(nil, nil, nil),
+	}
+	for level, wantFill := range map[types.AssistantAccessLevel]bool{
+		types.AssistantAccessReadOnly:  false,
+		types.AssistantAccessConfirm:   true,
+		types.AssistantAccessAutoWrite: true,
+	} {
+		registry := tools.NewToolRegistry()
+		svc.registerOperationTools(webUser, registry, &types.AgentConfig{
+			OperationsAgentID: types.BuiltinWeKnoraAssistantID, AssistantAccess: level,
+		})
+		_, err := registry.GetTool(tools.ToolReadPage)
+		assert.NoError(t, err, "reading the page is offered at every level")
+		_, err = registry.GetTool(tools.ToolFillPage)
+		assert.Equal(t, wantFill, err == nil, level)
 	}
 }
 

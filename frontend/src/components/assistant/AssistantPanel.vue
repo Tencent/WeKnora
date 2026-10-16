@@ -67,8 +67,9 @@
           :agent-id="BUILTIN_WEKNORA_ASSISTANT_ID" :embedded-mode="true" :initial-query="initialQuery"
           :host-scope="hostScope" :model-id="assistant.modelId" :default-model-id="defaultModelId"
           @update:model-id="assistant.setModel">
-          <template v-if="assistant.pageContext" #composer-chips>
+          <template v-if="hasComposerChips" #composer-chips>
             <AssistantContextChip />
+            <AssistantSelectionChip />
           </template>
           <template #composer-controls>
             <AssistantAccessPicker />
@@ -97,11 +98,12 @@
             </div>
           </div>
           <div class="assistant-welcome-composer">
-            <InputField :embedded-mode="true" compact :auto-focus="assistant.visible" :model-id="assistant.modelId"
-              :default-model-id="defaultModelId" @update:model-id="assistant.setModel"
+            <InputField ref="welcomeInput" :embedded-mode="true" compact :auto-focus="assistant.visible"
+              :model-id="assistant.modelId" :default-model-id="defaultModelId" @update:model-id="assistant.setModel"
               @send-msg="(query) => startConversation(query)">
-              <template v-if="assistant.pageContext" #chips>
+              <template v-if="hasComposerChips" #chips>
                 <AssistantContextChip />
+                <AssistantSelectionChip />
               </template>
               <template #controls>
                 <AssistantAccessPicker />
@@ -122,6 +124,7 @@ import ChatView from '@/views/chat/index.vue'
 import InputField from '@/components/Input-field.vue'
 import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
 import AssistantContextChip from './AssistantContextChip.vue'
+import AssistantSelectionChip from './AssistantSelectionChip.vue'
 import AssistantAccessPicker from './AssistantAccessPicker.vue'
 import { createSessions, getSessionsList, getSession, type SessionSummary } from '@/api/chat'
 import { classifyDateBucket } from '@/components/sessionGrouping'
@@ -131,10 +134,12 @@ import {
   ASSISTANT_PANEL_MAX_WIDTH,
   ASSISTANT_PANEL_MIN_WIDTH,
   toPageContextPayload,
+  toPageSelectionPayload,
   useAssistantStore,
   type AssistantOpenRequest,
 } from '@/stores/assistant'
 import { removeSession, SESSION_MUTATION_EVENT, type SessionMutationDetail } from '@/components/sessionMutations'
+import type { PageContextPayload } from '@/api/chat/streame'
 
 const { t } = useI18n()
 const assistant = useAssistantStore()
@@ -216,20 +221,37 @@ const starters = computed(() => {
   return [t('assistant.starters.agents'), t('assistant.starters.formats'), t('assistant.starters.createWiki')]
 })
 
+const hasComposerChips = computed(() =>
+  !!(assistant.pageContext || assistant.pageTitle || assistant.pageView || assistant.pageSelection))
+
 // The backend only honours a page context inside the run's search scope, so
 // the page's knowledge base travels with it.
 const hostScope = () => {
   const context = assistant.contextAttached ? assistant.pageContext : null
+  const title = assistant.contextAttached ? assistant.pageTitle : ''
+  const view = assistant.contextAttached ? assistant.pageView : ''
+  const selection = assistant.pageSelection
+  // A selection goes with one message; the next is about what is selected then.
+  if (selection) assistant.setPageSelection(null)
   const focus = initialMessage.value?.sessionId === assistant.sessionId ? initialMessage.value.focus : undefined
   initialMessage.value = null
   const assistantAccess = assistant.effectiveAccessLevel
-  if (!context) return { knowledgeBaseIds: [], pageContext: null, assistantAccess }
+  if (!context && !title && !view && !selection) return { knowledgeBaseIds: [], pageContext: null, assistantAccess }
+  const pageContext: PageContextPayload = context ? toPageContextPayload(focus ? { ...context, ...focus } : context) : {}
+  if (title) pageContext.title = title
+  if (view) pageContext.view = view
+  if (selection) pageContext.selection = toPageSelectionPayload(selection)
   return {
-    knowledgeBaseIds: context.knowledgeBaseId ? [context.knowledgeBaseId] : [],
-    pageContext: toPageContextPayload(focus ? { ...context, ...focus } : context),
+    knowledgeBaseIds: context?.knowledgeBaseId ? [context.knowledgeBaseId] : [],
+    pageContext,
     assistantAccess,
   }
 }
+
+const welcomeInput = ref<{ focusInput?: () => void } | null>(null)
+watch(() => assistant.focusRequest, () => {
+  if (!assistant.sessionId) welcomeInput.value?.focusInput?.()
+})
 
 async function startConversation(query: string, focus?: AssistantOpenRequest['focus']) {
   const text = query.trim()

@@ -203,6 +203,10 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 	"thinking":   {},
 	"todo_write": {},
 	"ask_user":   {},
+	// The page tools quote the user's screen and echo the text they typed
+	// into it: compact any durable ID shown there, mine nothing structured.
+	"read_page": {},
+	"fill_page": {},
 	// Skill output is user-authored content of unknown shape. Compact known
 	// durable IDs, but do not mine it for source keys: a skill's JSON may use
 	// "url"/"knowledge_id" with unrelated semantics.

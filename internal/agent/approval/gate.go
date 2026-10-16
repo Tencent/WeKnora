@@ -167,6 +167,7 @@ func NewGate(cfg *config.Config, checker Checker, broker *hitl.Broker) *Gate {
 	broker.RegisterKind(types.AgentPromptKindToolApproval, validateToolApprovalResponse)
 	broker.RegisterKind(types.AgentPromptKindMCPOAuth, validateMCPOAuthResponse)
 	broker.RegisterKind(types.AgentPromptKindAskUser, types.ValidateAskUserResponse)
+	broker.RegisterKind(types.AgentPromptKindPageAction, types.ValidatePageActionResponse)
 	// Default fail-close: if the checker errors, require approval (safer for a
 	// HITL feature). Set WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN=true to revert.
 	failClose := !strings.EqualFold(strings.TrimSpace(os.Getenv("WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN")), "true")
@@ -592,6 +593,7 @@ func (g *Gate) ResolveForResume(ctx context.Context, req ResolveRequest) (hitl.R
 var AnswerableKinds = map[string]bool{
 	types.AgentPromptKindAskUser:      true,
 	types.AgentPromptKindToolApproval: true,
+	types.AgentPromptKindPageAction:   true,
 }
 
 // ResolveResponse records a user's answer given as the kind's response

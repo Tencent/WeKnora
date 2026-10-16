@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -32,6 +33,74 @@ var AgentEditorSections = []string{
 	"tools", "mcp", "skills", "knowledge", "websearch", "retrieval", "share",
 }
 
+// Pages without a resource of their own: the settings dialog at a section,
+// the toolbox at a tool, and the lists in the sidebar.
+const (
+	openPageSettings       = "settings"
+	openPageToolbox        = "toolbox"
+	openPageAgents         = "agents"
+	openPageKnowledgeBases = "knowledge_bases"
+	openPageOrganizations  = "organizations"
+)
+
+var openPages = []string{
+	types.PageKnowledgeBase, types.PageWiki, types.PageAgentEditor, types.PageModelSettings, types.PageMCPServices,
+	openPageSettings, openPageToolbox, openPageAgents, openPageKnowledgeBases, openPageOrganizations,
+}
+
+type openPageSection struct{ zh, en string }
+
+// SettingsSections are the settings dialog's sections, keyed as the client's
+// navigation keys them, with the names it shows.
+var SettingsSections = map[string]openPageSection{
+	"general":               {"常规设置", "General Settings"},
+	"userprofile":           {"用户信息", "User Profile"},
+	"assistant":             {"助手", "Assistant"},
+	"mymemory":              {"我的记忆", "My memory"},
+	"envvars":               {"沙箱密钥", "Sandbox secrets"},
+	"tenant":                {"空间信息", "Workspace Info"},
+	"members":               {"成员管理", "Members"},
+	"chathistory":           {"消息管理", "Message Management"},
+	"memory":                {"长期记忆", "Long-term memory"},
+	"models":                {"模型管理", "Model Management"},
+	"ollama":                {"Ollama", "Ollama"},
+	"weknoracloud":          {"WeKnora Cloud", "WeKnora Cloud"},
+	"websearch":             {"网络搜索", "Web Search"},
+	"vectorstore":           {"向量数据库引擎", "Vector DB Engine"},
+	"parser":                {"解析引擎", "Parser Engine"},
+	"storage":               {"存储引擎", "Storage Engine"},
+	"sandbox":               {"沙箱配置", "Sandbox Config"},
+	"system":                {"版本信息", "Version Info"},
+	"system-global":         {"系统设置", "System Settings"},
+	"model-catalog":         {"模型目录", "Model catalog"},
+	"runtime-queues":        {"任务队列", "Task Queues"},
+	"platform-api-keys":     {"平台 API Key", "Platform API Keys"},
+	"system-audit-log":      {"审计日志", "Audit log"},
+	"integration-im":        {"IM 集成", "IM Integration"},
+	"integration-embed":     {"网页嵌入", "Web Embed"},
+	"integration-api":       {"API 集成", "API Integration"},
+	"integration-mcpserver": {"MCP Server", "MCP Server"},
+	"integration-cli":       {"CLI", "CLI"},
+	"integration-chrome":    {"Chrome 插件", "Chrome Extension"},
+	"integration-claw":      {"Claw Skill", "Claw Skill"},
+}
+
+// ToolboxSections are the toolbox's tools.
+var ToolboxSections = map[string]openPageSection{
+	"skills":            {"技能管理", "Skill Management"},
+	"mcp":               {"MCP 服务", "MCP services"},
+	"browserconnection": {"浏览器连接", "Browser connection"},
+}
+
+func sectionKeys(sections map[string]openPageSection) string {
+	keys := make([]string, 0, len(sections))
+	for key := range sections {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	return strings.Join(keys, ", ")
+}
+
 var (
 	openPageModelTypes   = []string{"chat", "embedding", "rerank", "vllm", "asr"}
 	openPageModelSources = []string{"remote", "local"}
@@ -44,6 +113,9 @@ var (
 type OpenPageTool struct {
 	BaseTool
 	rt OperationsRuntime
+	// actor opens the page in the user's browser for navigate; without it
+	// every link is a button.
+	actor approval.PageActor
 }
 
 // NewOpenPageTool creates open_page; target reads go through rt.
@@ -54,9 +126,18 @@ func NewOpenPageTool(rt OperationsRuntime) *OpenPageTool {
 	}
 }
 
+// WithPageActor lets navigate open the page in the user's browser.
+func (t *OpenPageTool) WithPageActor(actor approval.PageActor) *OpenPageTool {
+	t.actor = actor
+	return t
+}
+
 const openPageDescription = "" +
 	"Show the user a button that opens a WeKnora page: a knowledge base or one of its documents, " +
-	"a Wiki page, an agent's editor at a given tab, the model settings, or the MCP services. " +
+	"a Wiki page, an agent's editor at a given tab, the model settings, the MCP services, any section " +
+	"of the settings dialog (personal preferences, profile, workspace, engines, integrations, system), " +
+	"a toolbox tool, or the agent, knowledge base or shared space lists. Once the user opens it, " +
+	"read_page can read what it shows. " +
 	"It can open an existing model or MCP service for editing, or a new one with the form filled in " +
 	"from model_draft or mcp_service_draft. Use it whenever the next step is the user's on one of these " +
 	"pages: to look at what you created, changed or found (a knowledge base, a document, a Wiki page, " +
@@ -65,15 +146,21 @@ const openPageDescription = "" +
 	"never ask for those in chat, and the drafts have no field for them. Offer one button per target, " +
 	"once the work it points to is done, and none for the page the user already has open. The user " +
 	"reviews any form and saves it; nothing is saved by this tool, and the page only opens when they " +
-	"click. Name what they still need to fill in."
+	"click. Name what they still need to fill in. " +
+	"When you need to look at a page yourself to answer (a setting's current value, what a section shows), " +
+	"set navigate: the page opens for the user now and its content comes back in the result, so you can " +
+	"answer in the same turn. The user can go back from the card. If their page has unsaved changes it is " +
+	"not left and they get the button instead. Not with a draft."
 
 const openPageSchema = `{
   "type": "object",
   "properties": {
     "page": {
       "type": "string",
-      "enum": ["knowledge_base", "wiki", "agent_editor", "settings_models", "mcp_services"],
-      "description": "Which page to open."
+      "enum": ["knowledge_base", "wiki", "agent_editor", "settings_models", "mcp_services",
+        "settings", "toolbox", "agents", "knowledge_bases", "organizations"],
+      "description": "Which page to open. ` +
+	`For a model or MCP service use settings_models or mcp_services, which can open one."
     },
     "knowledge_base_id": {"type": "string", "description": "For knowledge_base and wiki."},
     "knowledge_id": {"type": "string", "description": "knowledge_base only: open this document."},
@@ -81,9 +168,15 @@ const openPageSchema = `{
     "agent_id": {"type": "string", "description": "agent_editor: the agent to edit."},
     "section": {
       "type": "string",
-      "enum": ["basic", "prompts", "model", "multimodal", "conversation", "suggestions", "tools", "mcp",
-        "skills", "knowledge", "websearch", "retrieval", "share"],
-      "description": "agent_editor only: the tab to open."
+      "description": "The part of the page to open. ` +
+	`agent_editor: basic, prompts, model, multimodal, conversation, suggestions, tools, mcp, skills, ` +
+	`knowledge, websearch, retrieval, share. ` +
+	`settings: general (personal preferences: language, theme, font), userprofile, assistant, mymemory, ` +
+	`envvars, tenant, members, chathistory, memory, models, ollama, weknoracloud, websearch, vectorstore, ` +
+	`parser, storage, sandbox, system (version), system-global, model-catalog, runtime-queues, ` +
+	`platform-api-keys, system-audit-log, integration-im, integration-embed, integration-api, ` +
+	`integration-mcpserver, integration-cli, integration-chrome, integration-claw; ` +
+	`a section the user may not see opens their first one. toolbox: skills, mcp, browserconnection."
     },
     "model_id": {"type": "string", "description": "settings_models only: open this model for editing."},
     "model_draft": {
@@ -126,7 +219,12 @@ const openPageSchema = `{
       "required": ["name", "transport_type", "url"],
       "additionalProperties": false
     },
-    "note": {"type": "string", "description": "One short line on the button card: what to check or fill in."}
+    "note": {"type": "string", "description": "One short line on the button card: what to check or fill in."},
+    "navigate": {
+      "type": "boolean",
+      "description": "Open the page now and return what it shows, instead of a button. ` +
+	`Only to look at it yourself; never with a draft."
+    }
   },
   "required": ["page"],
   "additionalProperties": false
@@ -164,6 +262,7 @@ type openPageInput struct {
 	MCPServiceID    string                   `json:"mcp_service_id"`
 	MCPServiceDraft *OpenPageMCPServiceDraft `json:"mcp_service_draft"`
 	Note            string                   `json:"note"`
+	Navigate        bool                     `json:"navigate"`
 }
 
 // OpenPageLink is what the client needs to render the button and open the
@@ -184,6 +283,9 @@ type OpenPageLink struct {
 	MCPServiceID      string                   `json:"mcp_service_id,omitempty"`
 	MCPServiceDraft   *OpenPageMCPServiceDraft `json:"mcp_service_draft,omitempty"`
 	KnowledgeBaseName string                   `json:"knowledge_base_name,omitempty"`
+	// Navigated: the page was opened for the user; ReturnPath is where they were.
+	Navigated  bool   `json:"navigated,omitempty"`
+	ReturnPath string `json:"return_path,omitempty"`
 }
 
 func parseOpenPageInput(args json.RawMessage) (openPageInput, error) {
@@ -217,6 +319,9 @@ func parseOpenPageInput(args json.RawMessage) (openPageInput, error) {
 }
 
 func validateOpenPageInput(in openPageInput) error {
+	if in.Navigate && (in.ModelDraft != nil || in.MCPServiceDraft != nil) {
+		return errors.New("a form with a draft opens only from its button, for the user to review; drop navigate")
+	}
 	only := func(allowed ...string) error {
 		set := map[string]bool{
 			"knowledge_base_id": in.KnowledgeBaseID != "", "knowledge_id": in.KnowledgeID != "",
@@ -264,8 +369,19 @@ func validateOpenPageInput(in openPageInput) error {
 			return err
 		}
 		return validateMCPServiceDraft(in.MCPServiceDraft)
+	case openPageSettings, openPageToolbox:
+		sections := SettingsSections
+		if in.Page == openPageToolbox {
+			sections = ToolboxSections
+		}
+		if _, ok := sections[in.Section]; in.Section != "" && !ok {
+			return fmt.Errorf("section for page %s must be one of %s", in.Page, sectionKeys(sections))
+		}
+		return only("section")
+	case openPageAgents, openPageKnowledgeBases, openPageOrganizations:
+		return only()
 	default:
-		return errors.New("page must be one of knowledge_base, wiki, agent_editor, settings_models, mcp_services")
+		return fmt.Errorf("page must be one of %s", strings.Join(openPages, ", "))
 	}
 }
 
@@ -349,15 +465,44 @@ func (t *OpenPageTool) Execute(ctx context.Context, args json.RawMessage) (*type
 	if blocked != nil {
 		return blocked, nil
 	}
+	button := fmt.Sprintf("The user now sees a button to open %s. Nothing was opened or saved yet: "+
+		"they open it, review the form and save it themselves.", link.Label)
+	if !input.Navigate {
+		return openPageResult(link, button), nil
+	}
+	return t.navigate(ctx, link, button), nil
+}
+
+// navigate opens the link in the user's browser and returns what the page
+// shows. Whatever stops it, the user still gets the button.
+func (t *OpenPageTool) navigate(ctx context.Context, link *OpenPageLink, button string) *types.ToolResult {
+	res, failure := requestPageAction(ctx, t.actor, types.PageActionPromptRequest{
+		Action: types.PageActionNavigate,
+		Target: &types.PageNavigateTarget{
+			Page: link.Page, KnowledgeBaseID: link.KnowledgeBaseID, KnowledgeID: link.KnowledgeID,
+			WikiSlug: link.WikiSlug, AgentID: link.AgentID, Section: link.Section,
+			ModelID: link.ModelID, MCPServiceID: link.MCPServiceID,
+		},
+	})
+	switch {
+	case failure != nil:
+		return openPageResult(link, "The page could not be opened for the user ("+failure.Error+"). "+button)
+	case res.Response.Stayed:
+		return openPageResult(link, "The user's page has unsaved changes, so it was not left. "+button+
+			" Ask them to open it and tell you when it is open; then read it with read_page.")
+	case res.Response.Error != "":
+		return openPageResult(link, "The page could not be opened for the user ("+res.Response.Error+"). "+button)
+	}
+	link.Navigated, link.ReturnPath = true, res.Response.ReturnPath
+	return openPageResult(link, fmt.Sprintf("Opened %s for the user; they can go back from the card. "+
+		"Nothing was saved. It shows:\n", link.Label)+quotePageSnapshot(res.Response.Location, res.Response.Snapshot))
+}
+
+func openPageResult(link *OpenPageLink, output string) *types.ToolResult {
 	data := map[string]any{}
 	raw, _ := json.Marshal(link)
 	_ = json.Unmarshal(raw, &data)
-	return &types.ToolResult{
-		Success: true,
-		Output: fmt.Sprintf("The user now sees a button to open %s. Nothing was opened or saved yet: "+
-			"they open it, review the form and save it themselves.", link.Label),
-		Data: data,
-	}, nil
+	return &types.ToolResult{Success: true, Output: output, Data: data}
 }
 
 func (t *OpenPageTool) resolve(ctx context.Context, in openPageInput) (*OpenPageLink, *types.ToolResult) {
@@ -435,6 +580,22 @@ func (t *OpenPageTool) resolve(ctx context.Context, in openPageInput) (*OpenPage
 			link.MCPServiceDraft = d
 			link.Detail = pick("新服务：", "New service: ") + d.Name
 		}
+	case openPageSettings:
+		link.Label = pick("设置", "Settings")
+		if s, ok := SettingsSections[in.Section]; ok {
+			link.Section, link.Detail = in.Section, pick(s.zh, s.en)
+		}
+	case openPageToolbox:
+		link.Label = pick("工具箱", "Toolbox")
+		if s, ok := ToolboxSections[in.Section]; ok {
+			link.Section, link.Detail = in.Section, pick(s.zh, s.en)
+		}
+	case openPageAgents:
+		link.Label = pick("智能体", "Agents")
+	case openPageKnowledgeBases:
+		link.Label = pick("知识库", "Knowledge bases")
+	case openPageOrganizations:
+		link.Label = pick("共享空间", "Shared spaces")
 	}
 	return link, nil
 }

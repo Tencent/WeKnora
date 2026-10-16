@@ -40,6 +40,8 @@ export interface UseChatStreamHandlerOptions {
   onAgentAnswerDone?: (message: ChatMessage) => void
   onAgentChunkBound?: (message: ChatMessage, created: boolean) => void
   onUserMessageInjected?: (steerId: string) => void
+  /** The assistant asks to read or fill the page; answered by the page, not shown. */
+  onPageAction?: (prompt: ChatMessage) => void
   /** Remote or local stop: the composer overlay must drop server-discarded items. */
   onGenerationStopped?: () => void
   debug?: boolean
@@ -823,8 +825,12 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         break
       }
       case 'agent_prompt_required': {
-        if (!message.agentEventStream) message.agentEventStream = []
         const d = dataPayload || {}
+        if (d.kind === 'page_action') {
+          options.onPageAction?.(d)
+          break
+        }
+        if (!message.agentEventStream) message.agentEventStream = []
         ;(message.agentEventStream as ChatMessage[]).push({
           type: 'agent_prompt_required',
           pending_id: d.pending_id,

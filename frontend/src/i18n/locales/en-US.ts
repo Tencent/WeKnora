@@ -2831,6 +2831,21 @@ export default {
     upload: 'Upload File'
   },
   manualEditor: {
+    assistant: {
+      button: 'Assistant',
+      tooltip: 'Let the assistant help you write',
+      continue: 'Continue writing',
+      outline: 'Draft an outline',
+      polish: 'Polish the text',
+      summarize: 'Summarize',
+      open: 'Open assistant',
+      prompts: {
+        continue: 'Continue the text from its end with one more paragraph that follows on from it.',
+        outline: 'Draft a clearly structured outline for this document from its title and current text, and put it at the start of the text.',
+        polish: 'Polish the text: fix typos and awkward sentences without changing the meaning, section by section.',
+        summarize: 'Summarize the key points of this document in the chat. Do not change the text.'
+      }
+    },
     placeholders: {
       heading: 'Heading {level}',
       listItem: 'List item',
@@ -6128,9 +6143,39 @@ export default {
       startFailed: 'Failed to start the assistant. Please try again.',
       askAboutDocument: 'Ask {name}',
       askAboutAnswer: 'Ask {name} about this answer',
+      selection: {
+        label: 'Selected',
+        lines: '{count} lines selected',
+        detach: 'Don’t include the selection',
+        tip: 'Your selection goes with the message: {text}',
+        tipField: 'Your selection in “{field}” goes with the message: {text}'
+      },
+      bubble: {
+        label: 'Assistant actions',
+        ask: 'Ask assistant',
+        polish: 'Polish',
+        rewrite: 'Rewrite',
+        translate: 'Translate',
+        continue: 'Continue',
+        prompts: {
+          polish: 'Polish the selected text: fix typos and awkward phrasing without changing the meaning, and replace it in place.',
+          rewrite: 'Rewrite the selected text to be clearer and more concise, and replace it in place.',
+          translate: 'Translate the selected text, Chinese into English and other languages into Chinese, and replace it in place.',
+          continue: 'Continue writing after the selected text with one more paragraph that fits the context, placed right after it.'
+        }
+      },
+      fillNotice: {
+        title: 'Assistant filled {count} field(s)',
+        undo: 'Undo',
+        dismiss: 'Dismiss'
+      },
       access: {
         title: 'Access level',
         capped: 'Not allowed by your workspace admin',
+        page: {
+          label: 'See and fill the current page',
+          desc: 'Reads the page on the left and can fill in forms. Never clicks buttons or saves.'
+        },
         levels: {
         read_only: {
           label: 'Read only',
@@ -6532,11 +6577,25 @@ export default {
       tryAgent: 'Try agent',
       openPage: 'Open page',
       searchWeKnoraDocs: 'Search product docs',
-      readWeKnoraDoc: 'Read product doc'
+      readWeKnoraDoc: 'Read product doc',
+      readPage: 'View page',
+      fillPage: 'Fill page'
+    },
+    pageAccess: {
+      viewed: 'Viewed the current page: {location}'
+    },
+    pageEdit: {
+      title: 'Filled {count} field(s)',
+      undo: 'Undo',
+      undone: 'Fill undone',
+      undoSkipped: '{count} field(s) changed since or no longer on the page were left as they are',
+      unsaved: 'Nothing is saved yet. Review it and save on the page.'
     },
     openPage: {
       open: 'Open',
       openForm: 'Open and fill in',
+      opened: 'Opened by the assistant',
+      back: 'Back',
       endpoint: 'Connects to: ',
       draftHint: 'Filled in from the assistant. Add the API key or other credentials, check it and save it yourself.'
     },

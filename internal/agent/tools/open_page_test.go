@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -81,6 +82,30 @@ func TestOpenPageLinksCheckedTargets(t *testing.T) {
 			args: `{"page":"mcp_services","mcp_service_id":"mcp-1"}`,
 			want: map[string]any{"page": "mcp_services", "detail": "Jira", "mcp_service_id": "mcp-1"},
 		},
+		{
+			name: "settings section",
+			args: `{"page":"settings","section":"general"}`,
+			want: map[string]any{
+				"page": "settings", "label": "Settings", "detail": "General Settings", "section": "general",
+			},
+		},
+		{
+			name: "settings integration",
+			args: `{"page":"settings","section":"integration-chrome"}`,
+			want: map[string]any{"page": "settings", "detail": "Chrome Extension", "section": "integration-chrome"},
+		},
+		{
+			name: "toolbox tool",
+			args: `{"page":"toolbox","section":"skills"}`,
+			want: map[string]any{
+				"page": "toolbox", "label": "Toolbox", "detail": "Skill Management", "section": "skills",
+			},
+		},
+		{
+			name: "agent list",
+			args: `{"page":"agents"}`,
+			want: map[string]any{"page": "agents", "label": "Agents"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := runOpenPage(t, tool, tc.args)
@@ -144,6 +169,12 @@ func TestOpenPageRefuses(t *testing.T) {
 		{"document of another base", `{"page":"knowledge_base","knowledge_base_id":"kb-1",
 			"knowledge_id":"doc-other"}`, "not a document of that knowledge base"},
 		{"unknown page", `{"page":"system"}`, "page must be one of"},
+		{
+			"unknown settings section", `{"page":"settings","section":"knowledge"}`,
+			"section for page settings must be one of",
+		},
+		{"agent tab on the toolbox", `{"page":"toolbox","section":"tools"}`, "section for page toolbox must be one of"},
+		{"field of a list page", `{"page":"agents","agent_id":"agent-1"}`, "does not apply"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := runOpenPage(t, tool, tc.args)
@@ -151,6 +182,69 @@ func TestOpenPageRefuses(t *testing.T) {
 			assert.Contains(t, result.Error, tc.want)
 		})
 	}
+}
+
+func TestOpenPageNavigates(t *testing.T) {
+	ctx := context.WithValue(pageToolContext(), types.LanguageContextKey, "en-US")
+	run := func(actor approval.PageActor, args string) *types.ToolResult {
+		tool, _ := openPageFixture(types.TenantRoleAdmin)
+		if actor != nil {
+			tool.WithPageActor(actor)
+		}
+		result, err := tool.Execute(ctx, json.RawMessage(args))
+		require.NoError(t, err)
+		require.True(t, result.Success, result.Error)
+		return result
+	}
+
+	opened := &fakePageActor{res: approval.PageActionResult{Answered: true, Response: types.PageActionPromptResponse{
+		Location: "Settings / General", Snapshot: `select "Font" = "System"`, ReturnPath: "/platform/agents",
+	}}}
+	result := run(opened, `{"page":"settings","section":"general","navigate":true}`)
+	require.Len(t, opened.got, 1)
+	assert.Equal(t, types.PageActionPromptRequest{
+		Action: types.PageActionNavigate,
+		Target: &types.PageNavigateTarget{Page: "settings", Section: "general"},
+	}, opened.got[0].Action)
+	assert.Contains(t, result.Output, "Opened Settings")
+	assert.Contains(t, result.Output, `select "Font" = "System"`)
+	assert.Equal(t, true, result.Data["navigated"])
+	assert.Equal(t, "/platform/agents", result.Data["return_path"])
+
+	agent := &fakePageActor{res: approval.PageActionResult{Answered: true}}
+	run(agent, `{"page":"agent_editor","agent_id":"agent-1","section":"tools","navigate":true}`)
+	assert.Equal(t, &types.PageNavigateTarget{Page: "agent_editor", AgentID: "agent-1", Section: "tools"},
+		agent.got[0].Action.Target, "the checked link is what the browser opens")
+
+	for name, tc := range map[string]struct {
+		actor approval.PageActor
+		want  string
+	}{
+		"unsaved changes": {&fakePageActor{res: approval.PageActionResult{
+			Answered: true,
+			Response: types.PageActionPromptResponse{Stayed: true},
+		}}, "unsaved changes"},
+		"page access off": {&fakePageActor{res: approval.PageActionResult{
+			Answered: true,
+			Response: types.PageActionPromptResponse{Declined: true},
+		}}, "could not be opened"},
+		"silent page":       {&fakePageActor{res: approval.PageActionResult{TimedOut: true}}, "could not be opened"},
+		"no browser access": {nil, "could not be opened"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			result := run(tc.actor, `{"page":"settings","section":"general","navigate":true}`)
+			assert.Contains(t, result.Output, tc.want)
+			assert.Contains(t, result.Output, "now sees a button", "the user still gets the button")
+			assert.Nil(t, result.Data["navigated"])
+		})
+	}
+
+	tool, _ := openPageFixture(types.TenantRoleAdmin)
+	result, err := tool.WithPageActor(opened).Execute(ctx,
+		json.RawMessage(`{"page":"settings_models","model_draft":{"type":"chat"},"navigate":true}`))
+	require.NoError(t, err)
+	assert.False(t, result.Success)
+	assert.Contains(t, result.Error, "drop navigate")
 }
 
 func TestOpenPageModelAndMCPFormsNeedAdmin(t *testing.T) {

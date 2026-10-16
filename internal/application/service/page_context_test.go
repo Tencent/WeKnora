@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/application/repository"
@@ -389,4 +391,46 @@ func TestResolveAssistantPageContext(t *testing.T) {
 	assert.Nil(t, info.Model)
 	assert.Nil(t, info.MCPService)
 	assert.Nil(t, info.Message, "a message in a session the caller cannot read is dropped")
+}
+
+// The open view and the selection are what the user sees; they are bounded
+// and reach only the assistant.
+func TestPageContextViewAndSelection(t *testing.T) {
+	long := strings.Repeat("字", types.PageSelectionMaxRunes+10)
+	got := pageContextInTargets(context.Background(), &types.PageContext{
+		View: "  Edit \n Markdown  ",
+		Selection: &types.PageSelection{
+			Text: long, Field: " Content ", Ref: "e3", StartLine: 4, EndLine: 6,
+		},
+	}, nil)
+	require.NotNil(t, got, "a view or selection alone is kept")
+	assert.Equal(t, "Edit Markdown", got.View)
+	require.NotNil(t, got.Selection)
+	assert.Equal(t, types.PageSelectionMaxRunes, utf8.RuneCountInString(got.Selection.Text))
+	assert.Equal(t, "Content", got.Selection.Field)
+	assert.Equal(t, "e3", got.Selection.Ref)
+	assert.Equal(t, 4, got.Selection.StartLine)
+
+	got = pageContextInTargets(context.Background(), &types.PageContext{
+		Selection: &types.PageSelection{Text: "x", Ref: "body", StartLine: 5, EndLine: 2},
+	}, nil)
+	require.NotNil(t, got)
+	assert.Equal(t, &types.PageSelection{Text: "x"}, got.Selection, "a bad ref and line range are dropped")
+	assert.Nil(t, pageContextInTargets(context.Background(),
+		&types.PageContext{Selection: &types.PageSelection{Text: "  \n"}}, nil), "a blank selection is nothing")
+
+	titled := pageContextInTargets(context.Background(), &types.PageContext{Title: " Agents \n", Page: "agents"}, nil)
+	require.NotNil(t, titled, "a page title alone is kept")
+	assert.Equal(t, "Agents", titled.Title)
+	assert.Empty(t, titled.Page, "an unknown page identifier is still dropped")
+
+	svc := &agentService{}
+	page := &types.PageContext{Title: "Agents", View: "Edit", Selection: &types.PageSelection{Text: "x"}}
+	assert.Nil(t, svc.resolvePageContextInfo(context.Background(), page, nil, nil, false),
+		"other agents never see the title, view or selection")
+	info := svc.resolvePageContextInfo(context.Background(), page, nil, nil, true)
+	require.NotNil(t, info)
+	assert.Equal(t, "Agents", info.Title)
+	assert.Equal(t, "Edit", info.View)
+	assert.Equal(t, "x", info.Selection.Text)
 }

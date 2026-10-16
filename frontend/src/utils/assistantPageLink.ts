@@ -7,7 +7,9 @@ import type {
 /** The open_page tool's result: a checked link, optionally with a form to fill in. */
 export interface AssistantPageLink {
   display_type: 'open_page'
-  page: 'knowledge_base' | 'wiki' | 'agent_editor' | 'settings_models' | 'mcp_services'
+  page:
+    | 'knowledge_base' | 'wiki' | 'agent_editor' | 'settings_models' | 'mcp_services'
+    | 'settings' | 'toolbox' | 'agents' | 'knowledge_bases' | 'organizations'
   label: string
   detail?: string
   note?: string
@@ -20,6 +22,15 @@ export interface AssistantPageLink {
   model_draft?: AssistantModelDraft
   mcp_service_id?: string
   mcp_service_draft?: AssistantMcpServiceDraft
+  /** The assistant opened the page itself; return_path is where the user was. */
+  navigated?: boolean
+  return_path?: string
+}
+
+/** Where a navigated link's back button goes: an in-app path only. */
+export function pageLinkReturnPath(link: AssistantPageLink): string {
+  const path = link.navigated ? link.return_path || '' : ''
+  return path.startsWith('/') && !path.startsWith('//') && !path.includes('\\') ? path : ''
 }
 
 export interface PageLinkLocation {
@@ -63,6 +74,19 @@ export function pageLinkLocation(link: AssistantPageLink): PageLinkLocation | nu
         path: '/platform/toolbox/mcp',
         query: link.mcp_service_id ? { service_id: link.mcp_service_id } : {},
       }
+    case 'settings':
+      return { path: '/platform/settings', query: link.section ? { section: link.section } : {} }
+    case 'toolbox':
+      return {
+        path: link.section ? `/platform/toolbox/${encodeURIComponent(link.section)}` : '/platform/toolbox',
+        query: {},
+      }
+    case 'agents':
+      return { path: '/platform/agents', query: {} }
+    case 'knowledge_bases':
+      return { path: '/platform/knowledge-bases', query: {} }
+    case 'organizations':
+      return { path: '/platform/organizations', query: {} }
     default:
       return null
   }

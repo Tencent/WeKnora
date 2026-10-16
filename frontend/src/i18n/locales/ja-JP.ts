@@ -2831,6 +2831,21 @@ export default {
     upload: 'ファイルをアップロード'
   },
   manualEditor: {
+    assistant: {
+      button: 'アシスタント',
+      tooltip: 'アシスタントに書いてもらう',
+      continue: '続きを書く',
+      outline: 'アウトラインを作成',
+      polish: '全文を推敲',
+      summarize: '要点をまとめる',
+      open: 'アシスタントを開く',
+      prompts: {
+        continue: '本文の末尾から、前の内容に続く段落を一つ書き足してください。',
+        outline: 'タイトルと現在の内容をもとに、この文書の構成がわかるアウトラインを作り、本文の先頭に書いてください。',
+        polish: '本文を推敲してください。誤字や不自然な文を直し、意味は変えずに段落ごとに修正してください。',
+        summarize: 'この文書の要点をチャットでまとめてください。本文は変更しないでください。'
+      }
+    },
     placeholders: {
       heading: '見出し{level}',
       listItem: 'リスト項目',
@@ -6128,9 +6143,39 @@ export default {
       startFailed: 'アシスタントを起動できませんでした。もう一度お試しください。',
       askAboutDocument: '{name}に聞く',
       askAboutAnswer: 'この回答について{name}に聞く',
+      selection: {
+        label: '選択中',
+        lines: '{count} 行を選択',
+        detach: '選択内容を含めない',
+        tip: '送信時に選択内容を含めます：{text}',
+        tipField: '送信時に「{field}」の選択内容を含めます：{text}'
+      },
+      bubble: {
+        label: 'アシスタントの操作',
+        ask: 'アシスタントに聞く',
+        polish: '推敲',
+        rewrite: '書き直し',
+        translate: '翻訳',
+        continue: '続きを書く',
+        prompts: {
+          polish: '選択したテキストを推敲してください。誤字や不自然な表現を直し、意味は変えずにその場で置き換えてください。',
+          rewrite: '選択したテキストを、より明確で簡潔な表現に書き直し、その場で置き換えてください。',
+          translate: '選択したテキストを翻訳してください。中国語は英語に、その他の言語は中国語にして、その場で置き換えてください。',
+          continue: '選択したテキストの後に、文脈に合う段落を一つ書き足してください。'
+        }
+      },
+      fillNotice: {
+        title: 'アシスタントが {count} か所に入力しました',
+        undo: '元に戻す',
+        dismiss: '閉じる'
+      },
       access: {
         title: '権限レベル',
         capped: 'ワークスペース管理者が許可していません',
+        page: {
+          label: '現在のページの確認と入力',
+          desc: '左側のページを読み取り、フォームに入力できます。ボタンのクリックや保存はしません。'
+        },
         levels: {
         read_only: {
           label: '読み取り専用',
@@ -6532,11 +6577,25 @@ export default {
       tryAgent: 'エージェントを試す',
       openPage: 'ページを開く',
       searchWeKnoraDocs: '製品ドキュメントを検索',
-      readWeKnoraDoc: '製品ドキュメントを読む'
+      readWeKnoraDoc: '製品ドキュメントを読む',
+      readPage: 'ページを確認',
+      fillPage: 'ページに入力'
+    },
+    pageAccess: {
+      viewed: '現在のページを確認しました：{location}'
+    },
+    pageEdit: {
+      title: '{count} か所に入力しました',
+      undo: '元に戻す',
+      undone: '入力を元に戻しました',
+      undoSkipped: '{count} か所は変更済みかページにないため、そのままにしました',
+      unsaved: 'まだ保存されていません。確認してからページで保存してください。'
     },
     openPage: {
       open: '開く',
       openForm: '開いて入力',
+      opened: 'アシスタントが開きました',
+      back: '戻る',
       endpoint: '接続先：',
       draftHint: 'アシスタントが入力済みです。API キーなどの認証情報を入力し、確認してからご自身で保存してください。'
     },
