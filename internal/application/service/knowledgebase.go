@@ -774,6 +774,17 @@ func (s *knowledgeBaseService) rejectEmbeddingModelChange(
 	if total > 0 {
 		return apperrors.NewBadRequestError("知识库中已有文件，无法修改Embedding模型")
 	}
+	// Wiki vectors use derived scopes rather than knowledge rows. They must
+	// keep the same embedding model until their retrieval artifacts are removed.
+	if s.chunkRepo != nil {
+		count, err := s.chunkRepo.CountChunksByKnowledgeBaseID(ctx, kb.TenantID, kb.ID)
+		if err != nil {
+			return err
+		}
+		if count > 0 {
+			return apperrors.NewBadRequestError("知识库中已有检索分块，无法修改Embedding模型")
+		}
+	}
 	return nil
 }
 

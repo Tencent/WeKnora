@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"slices"
 	"sort"
@@ -87,6 +89,7 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 }
 
 func (s *wikiPageService) createPage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, error) {
+	requestedID := page.ID
 	if page.ID == "" {
 		page.ID = uuid.New().String()
 	}
@@ -113,6 +116,25 @@ func (s *wikiPageService) createPage(ctx context.Context, page *types.WikiPage) 
 	}
 	normalizeWikiHierarchy(page)
 
+	// A failed index write can leave the original row committed. Under the
+	// same page lock, an identical creation retries that row's indexing without
+	// creating another scope or overwriting a subsequent edit.
+	if s.pageIndex != nil {
+		existing, err := s.repo.GetBySlug(ctx, page.KnowledgeBaseID, page.Slug)
+		if err == nil {
+			if (requestedID != "" && requestedID != existing.ID) || !sameWikiPageCreation(existing, page) {
+				return nil, errors.New("wiki page slug already exists")
+			}
+			if err := s.syncPageIndex(ctx, existing); err != nil {
+				return nil, fmt.Errorf("index wiki page: %w", err)
+			}
+			return existing, nil
+		}
+		if !errors.Is(err, repository.ErrWikiPageNotFound) {
+			return nil, err
+		}
+	}
+
 	now := time.Now()
 	page.CreatedAt = now
 	page.UpdatedAt = now
@@ -128,6 +150,33 @@ func (s *wikiPageService) createPage(ctx context.Context, page *types.WikiPage) 
 		return nil, fmt.Errorf("index wiki page: %w", err)
 	}
 	return page, nil
+}
+
+// sameWikiPageCreation permits only the same revision and content from the same
+// author. Derived links/folder caches and server-assigned IDs/timestamps are not
+// request identity. JSONB may reorder metadata keys between attempts.
+func sameWikiPageCreation(a, b *types.WikiPage) bool {
+	if a.Version != b.Version || a.TenantID != b.TenantID ||
+		a.LastEditorID != b.LastEditorID || a.LastEditSource != b.LastEditSource ||
+		a.Title != b.Title || a.Content != b.Content || a.Summary != b.Summary ||
+		a.PageType != b.PageType || a.Status != b.Status ||
+		a.FolderID != b.FolderID || a.ParentSlug != b.ParentSlug ||
+		!slices.Equal(a.Aliases, b.Aliases) || !slices.Equal(a.SourceRefs, b.SourceRefs) ||
+		!slices.Equal(a.ChunkRefs, b.ChunkRefs) {
+		return false
+	}
+	var left, right any
+	if len(a.PageMetadata) > 0 {
+		if err := json.Unmarshal(a.PageMetadata, &left); err != nil {
+			return false
+		}
+	}
+	if len(b.PageMetadata) > 0 {
+		if err := json.Unmarshal(b.PageMetadata, &right); err != nil {
+			return false
+		}
+	}
+	return reflect.DeepEqual(left, right)
 }
 
 // UpdatePage updates an existing wiki page.
