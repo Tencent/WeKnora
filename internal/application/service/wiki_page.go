@@ -45,6 +45,7 @@ func stripWikiPageInlineChunkCitations(page *types.WikiPage) {
 
 // wikiPageService implements the WikiPageService interface
 type wikiPageService struct {
+	pageIndex       *wikiPageIndex
 	repo            interfaces.WikiPageRepository
 	chunkRepo       interfaces.ChunkRepository
 	kbService       interfaces.KnowledgeBaseService
@@ -113,6 +114,9 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	// Update inbound links on target pages
 	s.updateInLinks(ctx, page.KnowledgeBaseID, page.Slug, page.OutLinks)
 
+	if err := s.syncPageIndex(ctx, page); err != nil {
+		return nil, fmt.Errorf("index wiki page: %w", err)
+	}
 	return page, nil
 }
 
@@ -287,6 +291,9 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	s.removeInLinks(ctx, existing.KnowledgeBaseID, existing.Slug, oldOutLinks)
 	s.updateInLinks(ctx, existing.KnowledgeBaseID, existing.Slug, existing.OutLinks)
 
+	if err := s.syncPageIndex(ctx, existing); err != nil {
+		return nil, fmt.Errorf("index wiki page: %w", err)
+	}
 	return existing, nil
 }
 
@@ -294,7 +301,10 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 func (s *wikiPageService) UpdatePageMeta(ctx context.Context, page *types.WikiPage) error {
 	normalizeWikiHierarchy(page)
 	page.UpdatedAt = time.Now()
-	return s.repo.UpdateMeta(ctx, page)
+	if err := s.repo.UpdateMeta(ctx, page); err != nil {
+		return err
+	}
+	return s.syncPageIndex(ctx, page)
 }
 
 // UpdateAutoLinkedContent persists content produced by machine-only link
@@ -321,7 +331,7 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 	s.removeInLinks(ctx, existing.KnowledgeBaseID, existing.Slug, oldOutLinks)
 	s.updateInLinks(ctx, existing.KnowledgeBaseID, existing.Slug, existing.OutLinks)
 
-	return nil
+	return s.syncPageIndex(ctx, existing)
 }
 
 // revisionFromPage builds the immutable snapshot row for the given page
@@ -497,6 +507,13 @@ func (s *wikiPageService) DeletePage(ctx context.Context, kbID string, slug stri
 
 	// Remove inbound link references from pages this page links to
 	s.removeInLinks(ctx, kbID, slug, page.OutLinks)
+
+	// Remove retrieval artifacts before the page, so a failed store deletion can retry.
+	if s.pageIndex != nil {
+		if err := s.pageIndex.sync(ctx, page, true); err != nil {
+			return err
+		}
+	}
 
 	// Delete the page
 	if err := s.repo.Delete(ctx, kbID, slug); err != nil {
@@ -1574,8 +1591,7 @@ func (s *wikiPageService) deleteChunkForPage(ctx context.Context, page *types.Wi
 	if s.chunkRepo == nil {
 		return
 	}
-	chunkID := "wp-" + page.ID
-	if err := s.chunkRepo.DeleteChunk(ctx, page.TenantID, chunkID); err != nil {
+	if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, page.TenantID, wikiPageKnowledgeID(page.ID)); err != nil {
 		logger.Warnf(ctx, "wiki: failed to delete chunk for page %s: %v", page.Slug, err)
 	}
 }

@@ -1042,11 +1042,14 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 	// Set tenant context for downstream services
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
 	defer func() {
-		// Wiki rows are independent of the vector engine. Run this on every
-		// return path — including SkipRetry — with its own timeout so a slow
-		// Redis queue scan cannot starve the SQL deletes.
+		// Remove wiki retrieval artifacts before their SQL rows on every return
+		// path. A store failure must preserve page identities for a later retry.
+		// Keep a separate timeout so queue scans cannot starve this cleanup.
 		wikiCtx, cancelWiki := context.WithTimeout(context.WithoutCancel(ctx), kbTaskCleanupTimeout)
-		wikiErr := s.cleanupWikiForKnowledgeBase(wikiCtx, tenantID, kbID)
+		wikiErr := s.cleanupWikiPageIndexes(wikiCtx, payload)
+		if wikiErr == nil {
+			wikiErr = s.cleanupWikiForKnowledgeBase(wikiCtx, tenantID, kbID)
+		}
 		cancelWiki()
 		if wikiErr != nil {
 			logger.Warnf(ctx, "Failed to clean wiki data for KB %s: %v", kbID, wikiErr)
