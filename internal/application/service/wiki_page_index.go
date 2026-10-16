@@ -70,7 +70,7 @@ func (w *wikiPageIndex) sync(ctx context.Context, page *types.WikiPage, remove b
 	}
 	ctx = types.WithExecutionTenant(ctx, page.TenantID)
 	knowledgeID := wikiPageKnowledgeID(page.ID)
-	old, err := w.chunks.ListAllChunksByKnowledgeID(ctx, page.TenantID, knowledgeID)
+	old, err := w.chunks.ListWikiPageChunks(ctx, page.TenantID, knowledgeID)
 	if err != nil {
 		return err
 	}
@@ -131,7 +131,7 @@ func (w *wikiPageIndex) sync(ctx context.Context, page *types.WikiPage, remove b
 		return err
 	}
 	for _, part := range parts {
-		// Fresh IDs allow retry after the repository soft-deletes an older version.
+		// Superseded derived rows have been physically purged before replacement.
 		id := uuid.NewString()
 		c := &types.Chunk{
 			ID: id, TenantID: page.TenantID, KnowledgeBaseID: page.KnowledgeBaseID, KnowledgeID: knowledgeID,
@@ -189,7 +189,7 @@ func deleteWikiPageIndex(
 			seen[key] = true
 		}
 	}
-	return chunks.DeleteChunksByKnowledgeID(ctx, tenantID, knowledgeID)
+	return chunks.PurgeWikiPageChunks(ctx, tenantID, knowledgeID)
 }
 
 // cleanupWikiPageIndexes runs before wiki SQL cleanup on every KB-delete
@@ -211,26 +211,33 @@ func (s *knowledgeBaseService) cleanupWikiPageIndexes(ctx context.Context, paylo
 			if page.TenantID != payload.TenantID {
 				return fmt.Errorf("wiki cleanup tenant mismatch")
 			}
-			knowledgeID := wikiPageKnowledgeID(page.ID)
-			old, err := s.chunkRepo.ListAllChunksByKnowledgeID(ctx, payload.TenantID, knowledgeID)
-			if err != nil {
-				return err
-			}
-			if len(old) == 0 {
-				continue
-			}
-			if !resolved {
-				engine, err = retriever.CreateRetrieveEngineFromPayload(ctx, s.retrieveEngine, s.ownership,
-					payload.TenantID, payload.EffectiveEngines, payload.VectorStoreID)
-				if err != nil && !errors.Is(err, retriever.ErrVectorStoreForbidden) &&
-					!errors.Is(err, retriever.ErrVectorStoreNotFound) {
+			err := s.wikiRepo.WithPageWriteLock(ctx, page.KnowledgeBaseID, page.Slug, func() error {
+				knowledgeID := wikiPageKnowledgeID(page.ID)
+				old, err := s.chunkRepo.ListWikiPageChunks(ctx, payload.TenantID, knowledgeID)
+				if err != nil {
 					return err
 				}
-				// As with document cleanup, a permanently gone/inaccessible store
-				// must not prevent deleting this workspace's local SQL rows.
-				resolved = true
-			}
-			if err := deleteWikiPageIndex(ctx, s.chunkRepo, engine, payload.TenantID, knowledgeID, old); err != nil {
+				if len(old) == 0 {
+					return nil
+				}
+				if !resolved {
+					engine, err = retriever.CreateRetrieveEngineFromPayload(ctx, s.retrieveEngine, s.ownership,
+						payload.TenantID, payload.EffectiveEngines, payload.VectorStoreID)
+					if err != nil && !errors.Is(err, retriever.ErrVectorStoreForbidden) &&
+						!errors.Is(err, retriever.ErrVectorStoreNotFound) {
+						return err
+					}
+					// As with document cleanup, a permanently gone/inaccessible store
+					// must not prevent deleting this workspace's local SQL rows.
+					resolved = true
+				}
+				if err := deleteWikiPageIndex(ctx, s.chunkRepo, engine,
+					payload.TenantID, knowledgeID, old); err != nil {
+					return err
+				}
+				return nil
+			})
+			if err != nil {
 				return err
 			}
 		}

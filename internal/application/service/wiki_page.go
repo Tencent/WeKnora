@@ -77,6 +77,16 @@ func NewWikiPageService(
 
 // CreatePage creates a new wiki page
 func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, error) {
+	var result *types.WikiPage
+	err := s.withPageWriteLock(ctx, page.KnowledgeBaseID, page.Slug, func() error {
+		var err error
+		result, err = s.createPage(ctx, page)
+		return err
+	})
+	return result, err
+}
+
+func (s *wikiPageService) createPage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, error) {
 	if page.ID == "" {
 		page.ID = uuid.New().String()
 	}
@@ -131,6 +141,16 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 // nothing, etc.) still persist through `UpdateMeta` but leave `version`
 // untouched so consumers can treat a bump as a real edit signal.
 func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, error) {
+	var result *types.WikiPage
+	err := s.withPageWriteLock(ctx, page.KnowledgeBaseID, page.Slug, func() error {
+		var err error
+		result, err = s.updatePage(ctx, page)
+		return err
+	})
+	return result, err
+}
+
+func (s *wikiPageService) updatePage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, error) {
 	existing, err := s.repo.GetBySlug(ctx, page.KnowledgeBaseID, page.Slug)
 	if err != nil {
 		return nil, fmt.Errorf("get existing page: %w", err)
@@ -299,12 +319,41 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 
 // UpdatePageMeta updates only metadata (status, source_refs) without version bump or link re-parse.
 func (s *wikiPageService) UpdatePageMeta(ctx context.Context, page *types.WikiPage) error {
+	return s.withPageWriteLock(ctx, page.KnowledgeBaseID, page.Slug, func() error {
+		return s.updatePageMeta(ctx, page)
+	})
+}
+
+type wikiPublicationContextKey struct{}
+
+func (s *wikiPageService) updatePageMeta(ctx context.Context, page *types.WikiPage) error {
+	if publishing, _ := ctx.Value(wikiPublicationContextKey{}).(bool); publishing && s.pageIndex != nil {
+		// Re-read inside the lifecycle lock: a stale ingest snapshot must never
+		// resurrect a page archived while the publisher was waiting.
+		current, err := s.repo.GetByID(ctx, page.ID)
+		if err != nil {
+			return err
+		}
+		if current.Status == types.WikiPageStatusArchived {
+			return nil
+		}
+		page = current
+		page.Status = types.WikiPageStatusPublished
+	}
+
 	normalizeWikiHierarchy(page)
 	page.UpdatedAt = time.Now()
 	if err := s.repo.UpdateMeta(ctx, page); err != nil {
 		return err
 	}
-	return s.syncPageIndex(ctx, page)
+	if s.pageIndex == nil {
+		return nil
+	}
+	current, err := s.repo.GetByID(ctx, page.ID)
+	if err != nil {
+		return err
+	}
+	return s.syncPageIndex(ctx, current)
 }
 
 // UpdateAutoLinkedContent persists content produced by machine-only link
@@ -313,6 +362,12 @@ func (s *wikiPageService) UpdatePageMeta(ctx context.Context, page *types.WikiPa
 // in-link references on target pages are refreshed so link navigation stays
 // consistent — only the user-facing revision counter is preserved.
 func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *types.WikiPage) error {
+	return s.withPageWriteLock(ctx, page.KnowledgeBaseID, page.Slug, func() error {
+		return s.updateAutoLinkedContent(ctx, page)
+	})
+}
+
+func (s *wikiPageService) updateAutoLinkedContent(ctx context.Context, page *types.WikiPage) error {
 	existing, err := s.repo.GetBySlug(ctx, page.KnowledgeBaseID, page.Slug)
 	if err != nil {
 		return fmt.Errorf("get existing page: %w", err)
@@ -500,6 +555,10 @@ func (s *wikiPageService) ListPages(ctx context.Context, req *types.WikiPageList
 
 // DeletePage soft-deletes a wiki page
 func (s *wikiPageService) DeletePage(ctx context.Context, kbID string, slug string) error {
+	return s.withPageWriteLock(ctx, kbID, slug, func() error { return s.deletePage(ctx, kbID, slug) })
+}
+
+func (s *wikiPageService) deletePage(ctx context.Context, kbID string, slug string) error {
 	page, err := s.repo.GetBySlug(ctx, kbID, slug)
 	if err != nil {
 		return err
@@ -1153,7 +1212,7 @@ func (s *wikiPageService) RebuildLinks(ctx context.Context, kbID string) error {
 	var failures []error
 	for _, p := range pages {
 		p.UpdatedAt = time.Now()
-		if err := s.repo.UpdateMeta(ctx, p); err != nil {
+		if err := s.updateDerivedMeta(ctx, p, false); err != nil {
 			logger.Warnf(ctx, "wiki: failed to update links for page %s: %v", p.Slug, err)
 			failures = append(failures, fmt.Errorf("%s: %w", p.Slug, err))
 		}
@@ -1559,7 +1618,7 @@ func (s *wikiPageService) updateInLinks(ctx context.Context, kbID string, source
 		if !containsString(targetPage.InLinks, sourceSlug) {
 			targetPage.InLinks = append(targetPage.InLinks, sourceSlug)
 			targetPage.UpdatedAt = time.Now()
-			if err := s.repo.UpdateMeta(ctx, targetPage); err != nil {
+			if err := s.updateDerivedMeta(ctx, targetPage, false); err != nil {
 				logger.Warnf(ctx, "wiki: failed to update in_links for %s: %v", targetSlug, err)
 			}
 		}
@@ -1577,7 +1636,7 @@ func (s *wikiPageService) removeInLinks(ctx context.Context, kbID string, source
 		if len(newInLinks) != len(targetPage.InLinks) {
 			targetPage.InLinks = newInLinks
 			targetPage.UpdatedAt = time.Now()
-			if err := s.repo.UpdateMeta(ctx, targetPage); err != nil {
+			if err := s.updateDerivedMeta(ctx, targetPage, false); err != nil {
 				logger.Warnf(ctx, "wiki: failed to update in_links for %s: %v", targetSlug, err)
 			}
 		}
@@ -1965,7 +2024,7 @@ func (s *wikiPageService) MovePage(
 	}
 	page.UpdatedAt = time.Now()
 	normalizeWikiHierarchy(page)
-	if err := s.repo.UpdateMeta(ctx, page); err != nil {
+	if err := s.updateDerivedMeta(ctx, page, true); err != nil {
 		return nil, fmt.Errorf("move wiki page: %w", err)
 	}
 	return page, nil
@@ -2085,7 +2144,7 @@ func (s *wikiPageService) recomputePagesForFolders(ctx context.Context, kbID str
 		}
 		page.UpdatedAt = time.Now()
 		normalizeWikiHierarchy(page)
-		if err := s.repo.UpdateMeta(ctx, page); err != nil {
+		if err := s.updateDerivedMeta(ctx, page, true); err != nil {
 			logger.Warnf(ctx, "wiki: recompute folder path for page %s failed: %v", page.Slug, err)
 		}
 	}
@@ -2259,4 +2318,18 @@ func (s *wikiPageService) RebuildIndexPage(ctx context.Context, kbID string) err
 	_ = ctx
 	_ = kbID
 	return nil
+}
+
+func (s *wikiPageService) withPageWriteLock(ctx context.Context, kbID, slug string, fn func() error) error {
+	if s.pageIndex == nil {
+		return fn()
+	}
+	return s.repo.WithPageWriteLock(ctx, kbID, slug, fn)
+}
+
+func (s *wikiPageService) updateDerivedMeta(ctx context.Context, page *types.WikiPage, placement bool) error {
+	if s.pageIndex == nil {
+		return s.repo.UpdateMeta(ctx, page)
+	}
+	return s.repo.UpdateDerivedMeta(ctx, page, placement)
 }

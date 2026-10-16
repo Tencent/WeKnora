@@ -2369,19 +2369,29 @@ func splitSummaryLine(raw string) (summary string, content string) {
 
 // publishDraftPages transitions draft pages to published status after ingest completes.
 // This ensures users don't see half-built pages during the ingest process.
-func (s *wikiIngestService) publishDraftPages(ctx context.Context, kbID string, slugs []string) {
+func (s *wikiIngestService) publishDraftPages(ctx context.Context, kbID string, slugs []string) error {
+	var failures []error
 	for _, slug := range slugs {
 		page, err := s.wikiService.GetPageBySlug(ctx, kbID, slug)
-		if err != nil || page == nil {
+		if errors.Is(err, apprepo.ErrWikiPageNotFound) {
 			continue
 		}
-		if page.Status == types.WikiPageStatusDraft {
-			page.Status = types.WikiPageStatusPublished
-			if err := s.wikiService.UpdatePageMeta(ctx, page); err != nil {
-				logger.Warnf(ctx, "wiki ingest: failed to publish page %s: %v", slug, err)
-			}
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		if page == nil || page.Status == types.WikiPageStatusArchived {
+			continue
+		}
+		// Published status alone is not evidence of successful retrieval indexing.
+		// Retry published pages too when a previous attempt stopped mid-sync.
+		page.Status = types.WikiPageStatusPublished
+		publishCtx := context.WithValue(ctx, wikiPublicationContextKey{}, true)
+		if err := s.wikiService.UpdatePageMeta(publishCtx, page); err != nil {
+			failures = append(failures, fmt.Errorf("publish wiki page %s: %w", slug, err))
 		}
 	}
+	return errors.Join(failures...)
 }
 
 // writeDedupCandidateGroup renders one new item together with its own

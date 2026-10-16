@@ -1407,3 +1407,23 @@ func (r *chunkRepository) ListAllChunksByKnowledgeID(
 		Error
 	return chunks, err
 }
+
+// ListWikiPageChunks includes retained generations so engine cleanup can use
+// their original dimensions even after the model configuration changes.
+func (r *chunkRepository) ListWikiPageChunks(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+) ([]*types.Chunk, error) {
+	var rows []*types.Chunk
+	err := r.db.WithContext(ctx).Unscoped().
+		Where("tenant_id = ? AND knowledge_id = ? AND chunk_type = ?", tenantID, knowledgeID, types.ChunkTypeWikiPage).
+		Find(&rows).Error
+	return rows, err
+}
+
+// PurgeWikiPageChunks only hard-deletes disposable Wiki derivatives. Document
+// chunks keep their normal soft-delete semantics, even in the same scope.
+func (r *chunkRepository) PurgeWikiPageChunks(ctx context.Context, tenantID uint64, knowledgeID string) error {
+	return r.db.WithContext(ctx).Unscoped().
+		Where("tenant_id = ? AND knowledge_id = ? AND chunk_type = ?", tenantID, knowledgeID, types.ChunkTypeWikiPage).
+		Delete(&types.Chunk{}).Error
+}

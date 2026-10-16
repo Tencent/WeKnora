@@ -693,6 +693,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 
 	var reduceMu sync.Mutex
 	var allPagesAffected []string
+	var publishSlugs []string
 	var ingestPagesAffected []string
 	var retractPagesAffected []string
 	// failedAdditionSlugs collects entity/concept slugs whose page
@@ -800,6 +801,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 					reduceMu.Unlock()
 				}
 			}
+			if reduceErr == nil && !updateDeferred && !additionFailed {
+				reduceMu.Lock()
+				publishSlugs = append(publishSlugs, slug)
+				reduceMu.Unlock()
+			}
 			if changed {
 				reduceMu.Lock()
 				allPagesAffected = append(allPagesAffected, slug)
@@ -851,12 +857,13 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	RecordWikiContentActivity(tailCtx, s.audit, payload.TenantID, payload.KnowledgeBaseID, wikiActivityActions)
 
-	// Publish freshly-generated pages immediately (NOT deferred to finalize):
-	// users should see a document's wiki pages as soon as their content is
-	// written, not after the debounce window. This is a cheap status flip.
-	if len(allPagesAffected) > 0 {
-		logger.Infof(ctx, "wiki ingest: publishing draft pages")
-		s.publishDraftPages(tailCtx, payload.KnowledgeBaseID, allPagesAffected)
+	// Retry indexing for every processed slug, including unchanged pages from a
+	// previous failed publication. Do not settle/trim their pending document ops
+	// until publication succeeds; the existing abnormal-exit cleanup releases
+	// claims and the task executor retries with backoff.
+	if err := s.publishDraftPages(tailCtx, payload.KnowledgeBaseID, publishSlugs); err != nil {
+		exitStatus = "publish_failed"
+		return err
 	}
 
 	// Defer KB-global convergence (index-intro rebuild + dead-link cleanup +
