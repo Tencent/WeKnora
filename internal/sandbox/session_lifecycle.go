@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/sandbox/admission"
+	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -23,6 +25,14 @@ const (
 	// Two configs in one workspace may share a provider account, so cleanup
 	// must filter by config as well as tenant/session ownership.
 	remoteMetadataConfigID = "weknora_sandbox_config_id"
+
+	// User machines are identified by their allocation digest, never by a
+	// session. weknora_tenant_id on a user machine is the CONFIG owner, so
+	// the config inventory and the credential-change sweep include every
+	// borrower's machine; the owner tenant is recorded separately.
+	remoteMetadataOwnerTenantID = "weknora_owner_tenant_id"
+	remoteMetadataMachineDigest = "weknora_machine_digest"
+	remoteMetadataAllocation    = "weknora_allocation"
 )
 
 // ErrSandboxSessionDeleted reports that the owning WeKnora session no longer
@@ -48,6 +58,21 @@ type remoteSessionLifecycle struct {
 	// bootstrapper customises the first create of individual sessions
 	// (session fork). Optional; nil keeps the default behaviour.
 	bootstrapper SessionBootstrapper
+
+	// namespace and admission are set only when the deployment can host
+	// shared user machines; user keys are refused without them.
+	namespace string
+	admission admission.Registry
+}
+
+type lifecycleOption func(*remoteSessionLifecycle)
+
+// withUserMachines enables shared user machines on this lifecycle.
+func withUserMachines(namespace string, reg admission.Registry) lifecycleOption {
+	return func(l *remoteSessionLifecycle) {
+		l.namespace = namespace
+		l.admission = reg
+	}
 }
 
 func newRemoteSessionLifecycle(
@@ -58,6 +83,7 @@ func newRemoteSessionLifecycle(
 	cleanupTimeout time.Duration,
 	sandboxConfigID string,
 	bootstrapper SessionBootstrapper,
+	opts ...lifecycleOption,
 ) (*remoteSessionLifecycle, error) {
 	if client == nil {
 		return nil, errors.New("remote sandbox client is required")
@@ -85,7 +111,7 @@ func newRemoteSessionLifecycle(
 	}
 	createRequest.Metadata = cloneMetadata(createRequest.Metadata)
 	createRequest.EnvVars = cloneMetadata(createRequest.EnvVars)
-	return &remoteSessionLifecycle{
+	l := &remoteSessionLifecycle{
 		client:          client,
 		bindings:        bindings,
 		sessionChecker:  sessionChecker,
@@ -94,7 +120,15 @@ func newRemoteSessionLifecycle(
 		sandboxConfigID: sandboxConfigID,
 		now:             time.Now,
 		bootstrapper:    bootstrapper,
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(l)
+	}
+	return l, nil
+}
+
+func (l *remoteSessionLifecycle) digest(key SessionSandboxKey) string {
+	return key.User.Digest(l.namespace)
 }
 
 // Resolve returns the current provider's sandbox for key, creating or
@@ -106,9 +140,12 @@ func (l *remoteSessionLifecycle) Resolve(
 	if err := key.Validate(); err != nil {
 		return nil, err
 	}
+	if key.IsUserScoped() && l.admission == nil {
+		return nil, errors.New("resolve remote sandbox: user machines require an admission registry")
+	}
 
 	var handle RemoteSandboxHandle
-	err := l.bindings.WithLifecycleLock(ctx, key, func(lockCtx context.Context) error {
+	err := l.bindings.WithLifecycleLock(ctx, key.Machine(), func(lockCtx context.Context) error {
 		resolved, err := l.resolveLocked(lockCtx, key)
 		if err != nil {
 			return err
@@ -151,29 +188,32 @@ func (l *remoteSessionLifecycle) resolveLocked(
 	ctx context.Context,
 	key SessionSandboxKey,
 ) (RemoteSandboxHandle, error) {
-	binding, err := l.readBinding(ctx, key)
+	machine := key.Machine()
+	binding, err := l.readBinding(ctx, machine)
 	if err != nil {
 		return nil, err
 	}
 
-	exists, err := l.sessionChecker.SessionExists(ctx, key)
-	if err != nil {
-		return nil, fmt.Errorf("check owning session: %w", err)
-	}
-	if !exists {
-		if binding != nil {
-			err = l.destroyBindingLocked(ctx, key, *binding)
+	// A per-session machine dies with its session. A shared machine never
+	// does: the manager refuses a deleted session before calling here, and
+	// the machine is reclaimed only by explicit release or the empty-machine
+	// GC. Running this check on a user key would let one stale request
+	// destroy every session's workspace.
+	if !key.IsUserScoped() {
+		exists, err := l.sessionChecker.SessionExists(ctx, key)
+		if err != nil {
+			return nil, fmt.Errorf("check owning session: %w", err)
 		}
-		return nil, errors.Join(ErrSandboxSessionDeleted, err)
+		if !exists {
+			if binding != nil {
+				err = l.destroyBindingLocked(ctx, key, *binding)
+			}
+			return nil, errors.Join(ErrSandboxSessionDeleted, err)
+		}
 	}
 
 	if binding != nil && binding.Provider != l.client.Provider() {
-		deleted, err := l.bindings.DeleteIfMatch(
-			ctx,
-			key,
-			binding.Provider,
-			binding.SandboxID,
-		)
+		deleted, err := l.bindings.DeleteIfMatch(ctx, machine, binding.Provider, binding.SandboxID)
 		if err != nil {
 			return nil, fmt.Errorf("delete mismatched provider binding: %w", err)
 		}
@@ -193,30 +233,28 @@ func (l *remoteSessionLifecycle) resolveLocked(
 	// Destroying before rebuilding is not optional: the recovery pass below
 	// adopts any live sandbox carrying this session's metadata, so a surviving
 	// one would simply be picked up again.
-	if binding != nil && binding.StaleAt != nil && l.shouldRebuildStaleBinding(ctx, key) {
-		if err := l.destroyBindingLocked(ctx, key, *binding); err != nil {
-			return nil, fmt.Errorf("release stale sandbox binding: %w", err)
+	if binding != nil && binding.StaleAt != nil {
+		rebuilt, err := l.rebuildStale(ctx, key, *binding)
+		if err != nil {
+			return nil, err
 		}
-		binding = nil
+		if rebuilt {
+			binding = nil
+		}
 	}
 	// First resolve of a turn spends rebuildOnce even when nothing was stale,
 	// so a later install in the same turn cannot tear the sandbox down.
 	l.consumeTurnRebuild(ctx, key)
 
 	if binding != nil {
-		handle, replace, err := l.connectBinding(ctx, key, *binding)
+		handle, replace, err := l.connectBinding(ctx, machine, *binding)
 		if err != nil {
 			return nil, err
 		}
 		if !replace {
 			return handle, nil
 		}
-		deleted, err := l.bindings.DeleteIfMatch(
-			ctx,
-			key,
-			binding.Provider,
-			binding.SandboxID,
-		)
+		deleted, err := l.bindings.DeleteIfMatch(ctx, machine, binding.Provider, binding.SandboxID)
 		if err != nil {
 			return nil, fmt.Errorf("delete terminal sandbox binding: %w", err)
 		}
@@ -225,14 +263,82 @@ func (l *remoteSessionLifecycle) resolveLocked(
 		}
 	}
 
-	recovered, ok, err := l.recoverOwnedSandbox(ctx, key)
+	recovered, ok, err := l.recoverOwnedSandbox(ctx, machine)
 	if err != nil {
 		return nil, err
 	}
 	if ok {
 		return recovered, nil
 	}
-	return l.createAndBind(ctx, key)
+	return l.createAndBind(ctx, machine)
+}
+
+// rebuildStale replaces a sandbox booted from a superseded image. A
+// per-session machine rebuilds at its turn boundary. A shared machine also
+// needs every operation except this request's own to be gone, and holds the
+// machine barrier while it destroys so none can start in between; a closer
+// already at work wins. Losing the barrier stops before any further step.
+func (l *remoteSessionLifecycle) rebuildStale(
+	ctx context.Context, key SessionSandboxKey, binding SessionSandboxBinding,
+) (bool, error) {
+	if !l.shouldRebuildStaleBinding(ctx, key) {
+		return false, nil
+	}
+	if !key.IsUserScoped() {
+		if err := l.destroyBindingLocked(ctx, key, binding); err != nil {
+			return false, fmt.Errorf("release stale sandbox binding: %w", err)
+		}
+		return true, nil
+	}
+	scope := admission.MachineScope(l.digest(key))
+	barrier, err := l.admission.Close(ctx, scope, redisLifecycleLockLease)
+	if err != nil {
+		if !errors.Is(err, admission.ErrClosed) {
+			log.Printf("[sandbox] close %s for rebuild failed (%v); keeping the current sandbox", key, err)
+		}
+		return false, nil
+	}
+	defer barrier.Release()
+	// C3: a lost barrier also cancels the provider call in flight.
+	guarded, stop := admission.Bind(ctx, barrier)
+	defer stop()
+	others, err := l.admission.ActiveExcept(guarded, scope, admissionExemptFrom(ctx)...)
+	if err != nil || others > 0 {
+		return false, nil
+	}
+	if err := barrier.Check(); err != nil {
+		return false, err
+	}
+	if err := l.destroyBindingLocked(guarded, key.Machine(), binding); err != nil {
+		if cause := barrier.Check(); cause != nil {
+			return false, cause
+		}
+		return false, fmt.Errorf("release stale sandbox binding: %w", err)
+	}
+	if err := barrier.Check(); err != nil {
+		// The old machine is gone but admission may already be open again:
+		// do not create a replacement under a lost barrier.
+		return false, err
+	}
+	return true, nil
+}
+
+// withAdmissionExempt records the admission members that belong to the
+// current request, so a rebuild it triggers does not wait for itself. The key
+// is a types.ContextKey that survives logger.CloneContext: the async QA run
+// (internal/handler/session/qa.go setupSSEStream) is built through it, and a
+// dropped exemption would make every turn block its own rebuild forever.
+func withAdmissionExempt(ctx context.Context, members ...string) context.Context {
+	prev := admissionExemptFrom(ctx)
+	all := make([]string, 0, len(prev)+len(members))
+	all = append(all, prev...)
+	all = append(all, members...)
+	return context.WithValue(ctx, types.SandboxAdmissionExemptContextKey, all)
+}
+
+func admissionExemptFrom(ctx context.Context) []string {
+	members, _ := ctx.Value(types.SandboxAdmissionExemptContextKey).([]string)
+	return members
 }
 
 func (l *remoteSessionLifecycle) connectBinding(
@@ -277,8 +383,8 @@ func persistInboundToken(
 	}
 	if _, err := store.ReplaceTrafficTokenIfMatch(ctx, key, binding, token); err != nil {
 		log.Printf(
-			"[sandbox] persist inbound token of session %s failed: %v",
-			key.SessionID, err,
+			"[sandbox] persist inbound token of %s failed: %v",
+			key, err,
 		)
 	}
 }
@@ -371,10 +477,10 @@ func (l *remoteSessionLifecycle) recoverOwnedSandbox(
 			// Connect above has already resumed this sandbox and refreshed its
 			// TTL, so leaving it would strand a billable sandbox per restart.
 			log.Printf(
-				"[sandbox] deleting remote sandbox %s of session %s: "+
+				"[sandbox] deleting remote sandbox %s of %s: "+
 					"adopted by metadata without the inbound traffic token "+
 					"this config's network policy requires",
-				summary.ID, key.SessionID,
+				summary.ID, key,
 			)
 			if err := l.cleanupSandboxID(ctx, summary.ID); err != nil {
 				return nil, false, fmt.Errorf(
@@ -439,9 +545,16 @@ func (l *remoteSessionLifecycle) createAndBind(
 		}
 	}
 	request.EnvVars = cloneMetadata(l.createRequest.EnvVars)
+	userMachine := key.IsUserMachine()
+	if userMachine {
+		// Session paths are per call on a shared machine; a container-level
+		// value would point every session at one tree.
+		delete(request.EnvVars, skillOutputEnvVar)
+		delete(request.EnvVars, sessionInputEnvVar)
+	}
 
 	usedOverride := false
-	if l.bootstrapper != nil {
+	if l.bootstrapper != nil && !userMachine {
 		override, err := l.bootstrapper.TemplateOverride(ctx, key)
 		if err != nil {
 			return nil, fmt.Errorf("resolve session template override: %w", err)
@@ -477,15 +590,17 @@ func (l *remoteSessionLifecycle) createAndBind(
 		)
 	}
 
-	exists, checkErr := l.sessionChecker.SessionExists(ctx, key)
-	if checkErr != nil {
-		return nil, errors.Join(
-			fmt.Errorf("recheck owning session: %w", checkErr),
-			l.cleanupCreated(ctx, handle),
-		)
-	}
-	if !exists {
-		return nil, errors.Join(ErrSandboxSessionDeleted, l.cleanupCreated(ctx, handle))
+	if !userMachine {
+		exists, checkErr := l.sessionChecker.SessionExists(ctx, key)
+		if checkErr != nil {
+			return nil, errors.Join(
+				fmt.Errorf("recheck owning session: %w", checkErr),
+				l.cleanupCreated(ctx, handle),
+			)
+		}
+		if !exists {
+			return nil, errors.Join(ErrSandboxSessionDeleted, l.cleanupCreated(ctx, handle))
+		}
 	}
 
 	binding := l.newBinding(
@@ -503,8 +618,10 @@ func (l *remoteSessionLifecycle) createAndBind(
 		)
 	}
 	if created {
-		if err := l.runBootstrap(ctx, key, handle); err != nil {
-			return nil, err
+		if !userMachine {
+			if err := l.runBootstrap(ctx, key, handle); err != nil {
+				return nil, err
+			}
 		}
 		return handle, nil
 	}
@@ -591,10 +708,7 @@ func (l *remoteSessionLifecycle) connectKnownWinner(
 			l.client.Provider(),
 		)
 	}
-	handle, replace, err := l.connectBinding(ctx, SessionSandboxKey{
-		TenantID:  winner.TenantID,
-		SessionID: winner.SessionID,
-	}, winner)
+	handle, replace, err := l.connectBinding(ctx, bindingConnectKey(winner), winner)
 	if err != nil {
 		return nil, err
 	}
@@ -747,7 +861,7 @@ func (l *remoteSessionLifecycle) newBinding(
 	if createdAt.IsZero() {
 		createdAt = l.now().UTC()
 	}
-	return SessionSandboxBinding{
+	b := SessionSandboxBinding{
 		Version:            SessionSandboxBindingVersion,
 		Provider:           l.client.Provider(),
 		TenantID:           key.TenantID,
@@ -758,9 +872,28 @@ func (l *remoteSessionLifecycle) newBinding(
 		ConfigID:           l.sandboxConfigID,
 		TrafficAccessToken: trafficAccessToken,
 	}
+	if key.IsUserMachine() {
+		b.Version = UserSandboxBindingVersion
+		b.SessionID = ""
+		b.OwnerID = key.User.OwnerID
+		b.ConfigTenantID = key.User.ConfigTenantID
+		b.ConfigID = key.User.ConfigID
+	}
+	return b
 }
 
 func (l *remoteSessionLifecycle) metadata(key SessionSandboxKey) map[string]string {
+	if key.IsUserMachine() {
+		return map[string]string{
+			remoteMetadataTenantID:       strconv.FormatUint(key.User.ConfigTenantID, 10),
+			remoteMetadataOwnerTenantID:  strconv.FormatUint(key.User.OwnerTenantID, 10),
+			remoteMetadataMachineDigest:  l.digest(key),
+			remoteMetadataAllocation:     MetadataAllocationUser,
+			remoteMetadataBindingVersion: strconv.Itoa(UserSandboxBindingVersion),
+			remoteMetadataProvider:       string(l.client.Provider()),
+			remoteMetadataConfigID:       l.sandboxConfigID,
+		}
+	}
 	return map[string]string{
 		remoteMetadataTenantID:       strconv.FormatUint(key.TenantID, 10),
 		remoteMetadataSessionID:      key.SessionID,
@@ -779,36 +912,76 @@ func (l *remoteSessionLifecycle) shouldRebuildStaleBinding(
 	key SessionSandboxKey,
 ) bool {
 	leaser, ok := l.bindings.(sessionTurnLeaseStore)
-	if !ok {
-		return true
+	active, rebuildOnce := false, false
+	if ok && key.SessionID != "" {
+		var err error
+		active, rebuildOnce, err = leaser.TurnState(ctx, key)
+		if err != nil {
+			log.Printf("[sandbox] turn lease of %s unavailable (%v); keeping the current sandbox", key, err)
+			return false
+		}
 	}
-	active, rebuildOnce, err := leaser.TurnState(ctx, key)
-	if err != nil {
-		log.Printf(
-			"[sandbox] turn lease of session %s unavailable (%v); keeping the current sandbox",
-			key.SessionID, err,
-		)
+	if active && !rebuildOnce {
 		return false
 	}
-	if !active {
+	if !key.IsUserScoped() {
 		return true
 	}
-	return rebuildOnce
+	others, err := l.admission.ActiveExcept(ctx, admission.MachineScope(l.digest(key)), admissionExemptFrom(ctx)...)
+	if err != nil {
+		log.Printf("[sandbox] admission of %s unavailable (%v); keeping the current sandbox", key, err)
+		return false
+	}
+	return others == 0
 }
 
 func (l *remoteSessionLifecycle) consumeTurnRebuild(
 	ctx context.Context,
 	key SessionSandboxKey,
 ) {
+	if key.SessionID == "" {
+		return
+	}
 	leaser, ok := l.bindings.(sessionTurnLeaseStore)
 	if !ok {
 		return
 	}
 	if err := leaser.ConsumeTurnRebuild(ctx, key); err != nil {
 		log.Printf(
-			"[sandbox] consume turn rebuild of session %s failed: %v",
-			key.SessionID, err,
+			"[sandbox] consume turn rebuild of %s failed: %v",
+			key, err,
 		)
+	}
+}
+
+// stateFilter is the provider listing filter that finds key's machine
+// without Connect (lookup-only state peeks).
+func (l *remoteSessionLifecycle) stateFilter(key SessionSandboxKey) map[string]string {
+	if key.IsUserScoped() {
+		return map[string]string{remoteMetadataMachineDigest: l.digest(key.Machine())}
+	}
+	return map[string]string{
+		remoteMetadataTenantID:  strconv.FormatUint(key.TenantID, 10),
+		remoteMetadataSessionID: key.SessionID,
+	}
+}
+
+// bindingConnectKey is the address connectBinding must use for a winner.
+// Per-session bindings stay {tenant, session}. A user-machine binding stores
+// an empty session id, so the key is rebuilt from the binding's machine
+// identity: connectKnownWinner takes the binding, not the key.
+func bindingConnectKey(winner SessionSandboxBinding) SessionSandboxKey {
+	if winner.Version != UserSandboxBindingVersion {
+		return SessionSandboxKey{TenantID: winner.TenantID, SessionID: winner.SessionID}
+	}
+	return SessionSandboxKey{
+		TenantID: winner.TenantID,
+		User: allocation.UserMachine{
+			OwnerTenantID:  winner.TenantID,
+			OwnerID:        winner.OwnerID,
+			ConfigTenantID: winner.ConfigTenantID,
+			ConfigID:       winner.ConfigID,
+		},
 	}
 }
 

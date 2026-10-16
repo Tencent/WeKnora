@@ -60,6 +60,10 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	SessionIDContextKey:       true,
 	SessionTenantIDContextKey: true,
 	SandboxTenantIDContextKey: true,
+	// The request's own admission members. Not a grant: it only exempts
+	// members this turn holds itself, by unique token, from a rebuild check.
+	// Dropping it would make detached QA work wait on its own turn.
+	SandboxAdmissionExemptContextKey: true,
 
 	// Embed callers: the anonymous visitor id isolates embed OAuth, so losing
 	// it would merge visitors together.

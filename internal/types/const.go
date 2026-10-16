@@ -58,6 +58,9 @@ const (
 	// distinct key from SessionTenantIDContextKey, which also re-scopes
 	// session/message repository lookups. See SandboxTenantIDFromContext.
 	SandboxTenantIDContextKey ContextKey = "SandboxTenantID"
+	// SandboxAdmissionExemptContextKey carries the shared-machine admission
+	// members of the current request and its chat turn ([]string).
+	SandboxAdmissionExemptContextKey ContextKey = "sandbox_admission_exempt"
 	// EmbedQueryContextKey marks an embedding call as a search query; see
 	// WithEmbedQuery.
 	EmbedQueryContextKey ContextKey = "EmbedQuery"

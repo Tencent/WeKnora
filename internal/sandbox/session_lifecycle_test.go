@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/sandbox/admission"
+	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -1355,4 +1357,162 @@ func newTestLifecycleWithConfigID(t *testing.T, configID string) *remoteSessionL
 	)
 	require.NoError(t, err)
 	return lifecycle
+}
+
+const (
+	userSessionA = "0f8fad5b-d9cb-469f-a165-70867728950e"
+	userSessionB = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+)
+
+type userLifecycleFixture struct {
+	lifecycle *remoteSessionLifecycle
+	bindings  *MemorySessionSandboxBindingStore
+	client    *fakeRemoteClient
+	checker   *fakeSessionExistenceChecker
+	admission *admission.MemoryRegistry
+	machine   allocation.UserMachine
+}
+
+func newUserLifecycleFixture(t *testing.T) *userLifecycleFixture {
+	t.Helper()
+	client := newFakeRemoteClient(SandboxTypeCube)
+	bindings := NewMemorySessionSandboxBindingStore()
+	checker := &fakeSessionExistenceChecker{exists: true}
+	reg := admission.NewMemory()
+	lifecycle, err := newRemoteSessionLifecycle(
+		client, bindings, checker,
+		RemoteCreateRequest{TemplateID: "template-a", EnvVars: map[string]string{
+			skillOutputEnvVar: SessionOutputRoot, sessionInputEnvVar: SessionInputRoot, "KEEP": "1",
+		}},
+		time.Minute, "cfg-1", nil,
+		withUserMachines("weknora", reg),
+	)
+	require.NoError(t, err)
+	return &userLifecycleFixture{
+		lifecycle: lifecycle, bindings: bindings, client: client, checker: checker, admission: reg,
+		machine: allocation.UserMachine{OwnerTenantID: 42, OwnerID: "u-1", ConfigTenantID: 42, ConfigID: "cfg-1"},
+	}
+}
+
+func (f *userLifecycleFixture) sessionKey(sessionID string) SessionSandboxKey {
+	return SessionSandboxKey{TenantID: 42, SessionID: sessionID, User: f.machine}
+}
+
+func TestUserMachineIsSharedBySessions(t *testing.T) {
+	f := newUserLifecycleFixture(t)
+	ctx := context.Background()
+	a, err := f.lifecycle.Resolve(ctx, f.sessionKey(userSessionA))
+	require.NoError(t, err)
+	b, err := f.lifecycle.Resolve(ctx, f.sessionKey(userSessionB))
+	require.NoError(t, err)
+	require.Equal(t, a.ID(), b.ID())
+	creates, _, _, _, _ := f.client.counts()
+	require.Equal(t, 1, creates)
+
+	req := f.client.lastCreateRequest
+	require.Equal(t, "user", req.Metadata[remoteMetadataAllocation])
+	require.Equal(t, f.machine.Digest("weknora"), req.Metadata[remoteMetadataMachineDigest])
+	require.Equal(t, "42", req.Metadata[remoteMetadataTenantID])
+	require.NotContains(t, req.Metadata, remoteMetadataSessionID)
+	require.NotContains(t, req.EnvVars, skillOutputEnvVar, "session paths are per call on a shared machine")
+	require.NotContains(t, req.EnvVars, sessionInputEnvVar)
+	require.Equal(t, "1", req.EnvVars["KEEP"])
+}
+
+func TestUserMachineSurvivesAMissingSession(t *testing.T) {
+	f := newUserLifecycleFixture(t)
+	ctx := context.Background()
+	first, err := f.lifecycle.Resolve(ctx, f.sessionKey(userSessionA))
+	require.NoError(t, err)
+
+	f.checker.exists = false // every session row is gone
+	again, err := f.lifecycle.Resolve(ctx, f.sessionKey(userSessionB))
+	require.NoError(t, err, "the lifecycle never consults one session to destroy a shared machine")
+	require.Equal(t, first.ID(), again.ID())
+	_, _, _, _, deletes := f.client.counts()
+	require.Zero(t, deletes)
+}
+
+func TestUserMachineRecoversFromLostBindingByDigest(t *testing.T) {
+	f := newUserLifecycleFixture(t)
+	ctx := context.Background()
+	first, err := f.lifecycle.Resolve(ctx, f.sessionKey(userSessionA))
+	require.NoError(t, err)
+	machineKey := f.sessionKey(userSessionA).Machine()
+	deleted, err := f.bindings.DeleteIfMatch(ctx, machineKey, SandboxTypeCube, first.ID())
+	require.NoError(t, err)
+	require.True(t, deleted)
+
+	again, err := f.lifecycle.Resolve(ctx, f.sessionKey(userSessionB))
+	require.NoError(t, err)
+	require.Equal(t, first.ID(), again.ID(), "metadata recovery must adopt the same machine, not create a second")
+}
+
+func TestStaleUserMachineWaitsForOtherSessions(t *testing.T) {
+	f := newUserLifecycleFixture(t)
+	ctx := context.Background()
+	first, err := f.lifecycle.Resolve(ctx, f.sessionKey(userSessionA))
+	require.NoError(t, err)
+	// InvalidateByConfig's scan does not see user keys; mark the machine the
+	// way the manager does (T10).
+	n, err := markBindingKeysStale(ctx, f.bindings, []SessionSandboxKey{f.sessionKey(userSessionA).Machine()}, "cfg-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	machine := admission.MachineScope(f.machine.Digest("weknora"))
+	self := admission.SessionMember(userSessionA, "shell", "self")
+	selfLease, err := f.admission.Hold(ctx, machine, self, time.Minute)
+	require.NoError(t, err)
+	defer selfLease.Release()
+	ownTurn := admission.SessionMember(userSessionA, "turn", "own")
+	ownTurnLease, err := f.admission.Hold(ctx, machine, ownTurn, time.Minute)
+	require.NoError(t, err)
+	defer ownTurnLease.Release()
+	ctxA := withAdmissionExempt(ctx, self, ownTurn)
+
+	other, err := f.admission.Hold(ctx, machine, admission.SessionMember(userSessionB, "shell", "t"), time.Minute)
+	require.NoError(t, err)
+	kept, err := f.lifecycle.Resolve(ctxA, f.sessionKey(userSessionA))
+	require.NoError(t, err)
+	require.Equal(t, first.ID(), kept.ID(), "B is running a command; A's turn must not rebuild under it")
+	other.Release()
+
+	ownPTY, err := f.admission.Hold(ctx, machine, admission.SessionMember(userSessionA, "pty", "p"), time.Minute)
+	require.NoError(t, err)
+	kept, err = f.lifecycle.Resolve(ctxA, f.sessionKey(userSessionA))
+	require.NoError(t, err)
+	require.Equal(t, first.ID(), kept.ID(), "A's own terminal is not this request; it blocks the rebuild too")
+	ownPTY.Release()
+
+	rebuilt, err := f.lifecycle.Resolve(ctxA, f.sessionKey(userSessionA))
+	require.NoError(t, err)
+	require.NotEqual(t, first.ID(), rebuilt.ID())
+	creates, _, _, _, _ := f.client.counts()
+	require.Equal(t, 2, creates)
+}
+
+func TestStaleRebuildStopsWhenTheBarrierIsLost(t *testing.T) {
+	f := newUserLifecycleFixture(t)
+	ctx := context.Background()
+	first, err := f.lifecycle.Resolve(ctx, f.sessionKey(userSessionA))
+	require.NoError(t, err)
+	_, err = markBindingKeysStale(ctx, f.bindings, []SessionSandboxKey{f.sessionKey(userSessionA).Machine()}, "cfg-1")
+	require.NoError(t, err)
+
+	f.client.deleteHook = func(context.Context, string) error {
+		f.admission.LoseBarrier(admission.MachineScope(f.machine.Digest("weknora")))
+		return nil
+	}
+	_, err = f.lifecycle.Resolve(ctx, f.sessionKey(userSessionA))
+	require.ErrorIs(t, err, admission.ErrLeaseLost, "after losing the barrier no further destructive step runs")
+	_ = first
+}
+
+func TestUserKeyWithoutAdmissionIsRefused(t *testing.T) {
+	fx := newLifecycleFixture(t) // per-session fixture, no withUserMachines
+	_, err := fx.lifecycle.Resolve(context.Background(), SessionSandboxKey{
+		TenantID: 42, SessionID: userSessionA,
+		User: allocation.UserMachine{OwnerTenantID: 42, OwnerID: "u", ConfigTenantID: 42, ConfigID: "cfg-1"},
+	})
+	require.ErrorContains(t, err, "admission")
 }
