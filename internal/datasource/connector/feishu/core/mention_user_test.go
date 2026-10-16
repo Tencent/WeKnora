@@ -99,7 +99,7 @@ func TestBlocksToMarkdown_NoMention_ZeroResolverCalls(t *testing.T) {
 }
 
 func TestUserName(t *testing.T) {
-	ts, cfg := retryTestServer("/open-apis/contact/v3/users/ou_1", func(w http.ResponseWriter, r *http.Request) {
+	ts, cfg := retryTestServer(t, "/open-apis/contact/v3/users/ou_1", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("user_id_type") != "open_id" {
 			t.Errorf("user_id_type = %q, want open_id", r.URL.Query().Get("user_id_type"))
 		}
@@ -119,17 +119,18 @@ func TestUserName(t *testing.T) {
 	}
 
 	// 403 (no contact scope): error, caller degrades.
-	ts403, cfg403 := retryTestServer("/open-apis/contact/v3/users/ou_1", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"code":99991679,"msg":"permission denied"}`))
-	})
+	ts403, cfg403 := retryTestServer(t, "/open-apis/contact/v3/users/ou_1",
+		func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code":99991679,"msg":"permission denied"}`))
+		})
 	defer ts403.Close()
 	if _, err := NewClient(cfg403).UserName(context.Background(), "ou_1"); err == nil {
 		t.Error("403 must return an error for the caller to degrade")
 	}
 
 	// HTTP 200 but business error code: also an error.
-	tsCode, cfgCode := retryTestServer("/open-apis/contact/v3/users/ou_1",
+	tsCode, cfgCode := retryTestServer(t, "/open-apis/contact/v3/users/ou_1",
 		func(w http.ResponseWriter, _ *http.Request) {
 			writeJSON(w, map[string]any{"code": 99991672, "msg": "no permission"})
 		})
@@ -141,7 +142,7 @@ func TestUserName(t *testing.T) {
 
 func TestUserNameResolver_NegativeCache(t *testing.T) {
 	var hits atomic.Int64
-	ts, cfg := retryTestServer("/open-apis/contact/v3/users/", func(w http.ResponseWriter, r *http.Request) {
+	ts, cfg := retryTestServer(t, "/open-apis/contact/v3/users/", func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		if strings.Contains(r.URL.Path, "ou_ok") {
 			writeJSON(w, map[string]any{"code": 0, "data": map[string]any{
