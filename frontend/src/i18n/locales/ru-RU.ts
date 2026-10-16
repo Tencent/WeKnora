@@ -4907,7 +4907,7 @@ export default {
         notesLabel: 'Дополнительные пояснения',
         preprocessModeAuto: 'Авто',
         preprocessModeOff: 'Выкл.',
-        preprocessModeForce: 'Принудительно',
+        preprocessModeAlways: 'Всегда',
         imagePipelinePlaceholder: 'Выберите способ разбора',
         imagePipelineLoading: 'Загрузка пайплайнов…',
         imagePipelineLoadError: 'Не удалось загрузить пайплайны',
@@ -8771,7 +8771,7 @@ export default {
       preprocess_mode: {
         label: 'Предобработка документа',
         description:
-          'Выравнивает и обрезает сфотографированную страницу перед OCR. Авто: описание решает, нужно ли это; Выкл.: никогда; Принудительно: всегда.',
+          'Выравнивает и обрезает сфотографированную страницу перед OCR. Авто: описание решает, нужно ли это; Выкл.: никогда; Всегда: без условий.',
       },
       caption: {
         thinking: {

@@ -58,7 +58,7 @@ var smartPreprocessField = types.ImageFieldDef{
 	Description: "Straighten and crop a photographed page before OCR reads it. " +
 		"Auto asks the describe round whether the page needs it; Off never does; Force always does.",
 	Options: []string{
-		types.PreprocessModeAuto, types.PreprocessModeOff, types.PreprocessModeForce,
+		types.PreprocessModeAuto, types.PreprocessModeOff, types.PreprocessModeAlways,
 	},
 }
 
@@ -144,9 +144,12 @@ func (smartOcrPipeline) Run(ctx context.Context, r *runContext) error {
 	// "declined on data nobody produced" apart from a confident negative.
 	want := r.BoolParamOr(smartFieldKeyAllowOCR, true) &&
 		DecideOCR(r.imageInfo.Attrs, r.payload.ImageActions)
+	// The decision is this run's answer; on_unobserved is the setting that drove
+	// it. Both belong on the trace — a decision without its input cannot be
+	// audited — and the key names say which is which.
 	r.out["attr_policy"] = types.JSONMap{
-		"ocr":               want,
-		"ocr_on_unobserved": r.payload.ImageActions.OCR.OnUnobserved,
+		"ocr":           want,
+		"on_unobserved": r.payload.ImageActions.OCR.OnUnobserved,
 	}
 	r.out["image_attrs"] = r.imageInfo.Attrs.Attrs
 	if !want {
@@ -155,15 +158,15 @@ func (smartOcrPipeline) Run(ctx context.Context, r *runContext) error {
 		// story from attributes that were observed and voted against OCR. The
 		// trace keeps the two apart instead of a generic "attr_policy" that
 		// reads as if a decision was made on data nobody produced.
-		observationFailed := r.out["observation_failed"] == true || r.out["caption_error"] != nil
+		observationFailed := r.out["observation_status"] != "done"
 		if observationFailed {
 			logger.Infof(ctx, "[ImageMultimodal] Skipping OCR for %s (observation failed, attrs=%v)",
 				r.payload.ImageURL, r.imageInfo.Attrs.Attrs)
-			r.out["ocr_skipped"] = "no_ocr_after_observation_failed"
+			r.out["ocr_status"] = "skipped_observation_failed"
 		} else {
 			logger.Infof(ctx, "[ImageMultimodal] Skipping OCR for %s (attrs=%v)",
 				r.payload.ImageURL, r.imageInfo.Attrs.Attrs)
-			r.out["ocr_skipped"] = "attr_policy"
+			r.out["ocr_status"] = "skipped_attr_policy"
 		}
 		return nil
 	}

@@ -86,6 +86,11 @@ const (
 // declares a "thinking" switch and the key it is stored and traced under is
 // "caption.thinking".
 //
+// The full naming rules — three families, the ownership test, the value
+// vocabularies, and where to change keys when you rename one — live in
+// docs/design/image-pipeline-naming.md. This comment keeps only what a caller
+// needs at the call site.
+//
 // Declaring the bare name is the point. Two actions may each want a "thinking",
 // and a pipeline may want one too, without either inventing a distinct spelling
 // for the same idea: an action's params live in the action's namespace, a
@@ -116,6 +121,11 @@ func ActionField(id ImageActionID, param string) (ImageFieldDef, bool) {
 // ImageFieldDef is one tunable of an action as the settings panel sees it. Its
 // json tags are snake_case to match the rest of the image API, including the
 // enclosing ImagePipelineSpec.
+//
+// Key is either a bare name owned by the declaring pipeline ("caption_enabled")
+// or an action-namespaced one built with ActionParam ("ocr.thinking_enabled").
+// A key never carries a pipeline prefix: one run serves one pipeline, and the
+// run's trace names it once. See docs/design/image-pipeline-naming.md.
 type ImageFieldDef struct {
 	// Key is the name the action reads with r.Param(key).
 	Key string `json:"key"`

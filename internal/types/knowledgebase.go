@@ -585,7 +585,7 @@ type ImageProcessingConfig struct {
 	//	       and cropped only when those say it is worth it;
 	//	off    never preprocess, and leave the describe prompt exactly as it was
 	//	       before this feature existed;
-	//	force  preprocess every readable page without asking, and likewise leave
+	//	always preprocess every readable page without asking, and likewise leave
 	//	       the describe prompt untouched.
 	//
 	// Only auto changes the describe prompt; off and force cannot disturb an
@@ -594,10 +594,14 @@ type ImageProcessingConfig struct {
 }
 
 // Preprocess modes accepted by ImageProcessingConfig.PreprocessMode.
+//
+// A mode is a SETTING — what the knowledge base asked for. What actually
+// happened to an image is a different question with a different vocabulary, and
+// it is recorded on the trace as the run's preprocess_status.
 const (
-	PreprocessModeOff   = "off"
-	PreprocessModeAuto  = "auto"
-	PreprocessModeForce = "force"
+	PreprocessModeOff    = "off"
+	PreprocessModeAuto   = "auto"
+	PreprocessModeAlways = "always"
 )
 
 // ResolvePreprocessMode returns the effective preprocess mode. An unset or
@@ -610,8 +614,8 @@ func ResolvePreprocessMode(cfg *ImageProcessingConfig) string {
 	switch strings.ToLower(strings.TrimSpace(cfg.PreprocessMode)) {
 	case PreprocessModeOff:
 		return PreprocessModeOff
-	case PreprocessModeForce:
-		return PreprocessModeForce
+	case PreprocessModeAlways:
+		return PreprocessModeAlways
 	default:
 		return PreprocessModeAuto
 	}
@@ -623,7 +627,7 @@ func ResolvePreprocessMode(cfg *ImageProcessingConfig) string {
 // so a caller reads exactly one of these.
 func PreprocessObservesGeometry(mode string) bool { return mode == PreprocessModeAuto }
 func PreprocessRunsUnconditionally(mode string) bool {
-	return mode == PreprocessModeForce
+	return mode == PreprocessModeAlways
 }
 
 // ResolveImagePipelineID returns the pipeline id a knowledge base asks for. An

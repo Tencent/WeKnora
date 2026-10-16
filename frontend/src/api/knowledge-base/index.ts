@@ -225,7 +225,7 @@ export interface ImageProcessingConfig {
   /** That pipeline's private tunables, keyed by field. See ImagePipelineField. */
   image_pipeline_params?: Record<string, unknown>;
   /**
-   * Page-straightening switch: 'off' | 'auto' | 'force'. Empty means auto, the
+   * Page-straightening switch: 'off' | 'auto' | 'always'. Empty means auto, the
    * backend's own default, so a base that never touched the select stores no
    * key at all.
    */

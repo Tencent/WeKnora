@@ -25,7 +25,7 @@ export interface ImageProcessingEdits {
   pipelineParams: Record<string, unknown>
   /**
    * The page-straightening switch: 'auto' (observe geometry, then decide),
-   * 'off' (never) or 'force' (always). Mirrors backend preprocess modes.
+   * 'off' (never) or 'always' (unconditional). Mirrors backend preprocess modes.
    */
   preprocessMode: string
 }
@@ -33,7 +33,7 @@ export interface ImageProcessingEdits {
 /** The preprocess switch's values, mirroring the backend's constants. */
 export const PREPROCESS_MODE_OFF = 'off'
 export const PREPROCESS_MODE_AUTO = 'auto'
-export const PREPROCESS_MODE_FORCE = 'force'
+export const PREPROCESS_MODE_ALWAYS = 'always'
 
 /**
  * The field key the smart pipeline declares for the page-straightening switch.
@@ -63,8 +63,8 @@ export function normalizePreprocessMode(mode: string | null | undefined): string
   switch ((mode || '').trim().toLowerCase()) {
     case PREPROCESS_MODE_OFF:
       return PREPROCESS_MODE_OFF
-    case PREPROCESS_MODE_FORCE:
-      return PREPROCESS_MODE_FORCE
+    case PREPROCESS_MODE_ALWAYS:
+      return PREPROCESS_MODE_ALWAYS
     default:
       return PREPROCESS_MODE_AUTO
   }

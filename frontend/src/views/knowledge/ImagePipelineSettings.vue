@@ -28,7 +28,7 @@ const props = defineProps<{
   /** That pipeline's private tunables; a missing key reads the field default. */
   params: Record<string, unknown>
   /**
-   * Page-straightening switch: 'auto' | 'off' | 'force'. Optional because it
+   * Page-straightening switch: 'auto' | 'off' | 'always'. Optional because it
    * is a knowledge-base setting: the upload dialog's per-task overrides have no
    * such field, and a host that does not manage it simply shows the default.
    */
@@ -55,7 +55,7 @@ import {
   OCR_ON_UNOBSERVED_FIELD_KEY,
   PREPROCESS_MODE_AUTO,
   PREPROCESS_MODE_FIELD_KEY,
-  PREPROCESS_MODE_FORCE,
+  PREPROCESS_MODE_ALWAYS,
   PREPROCESS_MODE_OFF,
 } from '@/utils/imageProcessingConfig'
 
@@ -128,7 +128,7 @@ function isOnUnobservedField(field: ImagePipelineField): boolean {
 const PREPROCESS_MODE_LABEL_KEYS: Record<string, string> = {
   [PREPROCESS_MODE_AUTO]: 'knowledgeEditor.advanced.multimodal.preprocessModeAuto',
   [PREPROCESS_MODE_OFF]: 'knowledgeEditor.advanced.multimodal.preprocessModeOff',
-  [PREPROCESS_MODE_FORCE]: 'knowledgeEditor.advanced.multimodal.preprocessModeForce',
+  [PREPROCESS_MODE_ALWAYS]: 'knowledgeEditor.advanced.multimodal.preprocessModeAlways',
 }
 
 function preprocessModeLabel(mode: string): string {

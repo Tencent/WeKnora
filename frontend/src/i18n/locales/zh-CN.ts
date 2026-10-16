@@ -4908,7 +4908,7 @@ export default {
         notesLabel: '附加说明',
         preprocessModeAuto: '自动',
         preprocessModeOff: '关闭',
-        preprocessModeForce: '强制',
+        preprocessModeAlways: '总是',
         imagePipelinePlaceholder: '请选择解析方案',
         imagePipelineLoading: '正在读取流水线…',
         imagePipelineLoadError: '读取流水线失败',
@@ -8771,7 +8771,7 @@ export default {
       preprocess_mode: {
         label: '文档预处理',
         description:
-          '在 OCR 之前把拍摄的页面摆正并裁掉周围环境。自动：由描述轮判断页面是否需要；关闭：从不处理；强制：总是处理。',
+          '在 OCR 之前把拍摄的页面摆正并裁掉周围环境。自动：由描述轮判断页面是否需要；关闭：从不处理；总是：无条件处理。',
       },
       caption: {
         thinking: {

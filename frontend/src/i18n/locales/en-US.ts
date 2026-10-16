@@ -4287,7 +4287,7 @@ export default {
         notesLabel: 'Additional notes',
         preprocessModeAuto: 'Auto',
         preprocessModeOff: 'Off',
-        preprocessModeForce: 'Force',
+        preprocessModeAlways: 'Always',
         imagePipelinePlaceholder: 'Select a scheme',
         imagePipelineLoading: 'Loading pipelines…',
         imagePipelineLoadError: 'Could not load pipelines',

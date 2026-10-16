@@ -347,7 +347,7 @@ func (s *ImageMultimodalService) processImage(
 	imgBytes, readErr := s.readImageBytes(ctx, *payload)
 	if readErr != nil {
 		logger.Errorf(ctx, "[ImageMultimodal] Skip unreadable image %s: %v", payload.ImageURL, readErr)
-		out["skipped"] = "unreadable_image"
+		out["outcome"] = "skipped_unreadable_image"
 		out["read_error"] = readErr.Error()
 		handleErr = fmt.Errorf("read source image: %w", readErr)
 		return handleErr
@@ -459,7 +459,7 @@ func (s *ImageMultimodalService) processImage(
 	// duplicated by an OCR retry; with nothing produced there is nothing to
 	// protect, so the image fails honestly.
 	extractionFailed := out["caption_error"] != nil || out["ocr_status"] == "failed" ||
-		out["ocr_skipped"] == "no_ocr_after_observation_failed"
+		out["ocr_status"] == "skipped_observation_failed"
 	if len(newChunks) == 0 && extractionFailed {
 		out["outcome"] = "failed"
 		if ctx.Err() != nil {
@@ -489,7 +489,7 @@ func (s *ImageMultimodalService) processImage(
 		// Deferred finalize will count this image on success. A genuine
 		// blank (OCR answered no_text) or a policy-declined image keeps its
 		// trace-level skip.
-		out["skipped"] = "no_extracted_content"
+		out["outcome"] = "skipped_no_content"
 		return nil
 	}
 
@@ -506,6 +506,13 @@ func (s *ImageMultimodalService) processImage(
 	// Index chunks so they can be retrieved
 	s.indexChunks(ctx, *payload, newChunks, imgBytes, out)
 	out["indexed"] = true
+	// Only an image that reached this point with no verdict of its own is a
+	// plain success: a partial failure was already recorded by the OCR clause
+	// above, and overwriting it would hide the failure behind the content that
+	// did survive.
+	if _, decided := out["outcome"]; !decided {
+		out["outcome"] = "done"
+	}
 
 	return nil
 }

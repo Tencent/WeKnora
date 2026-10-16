@@ -49,7 +49,7 @@ func TestLiveImageOCRValidation(t *testing.T) {
 			}, model, types.VLMConfig{}, tracker, out)
 			require.NoError(t, err)
 			require.Empty(t, tracker.failed)
-			require.Equal(t, "succeeded", out["ocr_status"], "OCR outcome: %v", out)
+			require.Equal(t, "done", out["ocr_status"], "OCR outcome: %v", out)
 			require.Len(t, repo.created, 1)
 			chunk := repo.created[0]
 			require.Equal(t, types.ChunkTypeImageOCR, chunk.ChunkType)

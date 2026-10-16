@@ -15,6 +15,11 @@ import (
 // imagePipeline is one image pipeline: a function over actions, not a data
 // topology. Run owns the pipeline's whole control flow, which is why there is no
 // scheduler and no round model in this package — see the image pipeline spec §2.
+// The keys this file writes into runContext.out — and the ones a pipeline's own
+// run writes — follow docs/design/image-pipeline-naming.md: settings live in the
+// config container, an action's state and data are prefixed with the action that
+// wrote them, and image-level facts carry no prefix. Read that document before
+// adding a key; the rules it states are enforced by the tests named there.
 type imagePipeline interface {
 	// ID is the stable id of the pipeline; it doubles as the value recorded on
 	// the trace row.
@@ -244,7 +249,9 @@ type runContext struct {
 	imageBytes     []byte
 	vlmCfg         types.VLMConfig
 	imageInfo      *types.ImageInfo
-	out            types.JSONMap
+	// out is the per-image trace record. Keys follow
+	// docs/design/image-pipeline-naming.md — see the note above imagePipeline.
+	out types.JSONMap
 	// pipelineID is the pipeline serving this run, used to namespace
 	// pipeline-private param lookups ("<pipeline>.<key>"). Empty in tests
 	// that build a runContext by hand, which then read bare keys only.
@@ -402,7 +409,7 @@ func (r *runContext) execute(ctx context.Context, id types.ImageActionID) error 
 	spec, ok := imageActionRegistry[id]
 	if !ok || spec.handler == nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Action %q is not implemented; skipping", id)
-		r.out["action_skipped"] = string(id)
+		r.out["action_unimplemented"] = string(id)
 		return nil
 	}
 	r.actions = append(r.actions, id)
@@ -479,10 +486,10 @@ func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Describe and observe failed for %s: %v", r.payload.ImageURL, err)
 		r.out["caption_error"] = err.Error()
-		// The request itself failed: no attributes will ever arrive. Flag it so
-		// the pipeline's OCR decision can tell "observed and declined" from
-		// "no observation to decide on".
-		r.out["observation_failed"] = true
+		// The request itself failed: no attributes will ever arrive. The status
+		// says so, and the pipeline's OCR decision reads it to tell "observed
+		// and declined" from "no observation to decide on".
+		r.out["observation_status"] = "failed"
 		if r.vlmErr == nil {
 			r.vlmErr = err
 		}
@@ -497,15 +504,19 @@ func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 	// passing false observes the attributes and records nothing to caption.
 	applyImageObservation(r.imageInfo, obs.Attrs, obs.Description, r.out,
 		r.BoolParamOr(smartFieldKeyCaptureCaption, true))
-	if !obs.Observed {
-		// The model ignored the attribute protocol — a user custom instruction
-		// may have derailed the format, or it answered in prose. Nothing is
-		// invented to fill the gap: the attribute table stays empty and the
-		// OCR policy falls back to its conservative OnUnobserved clause.
-		r.out["observation_failed"] = true
-	}
-	if !ok {
-		r.out["caption_missing"] = true
+	// One status for the round, carrying its own reason: an answer that is not
+	// the protocol at all ("unparsed") and one whose shape is right but whose
+	// attribute lines were skipped ("incomplete") leave the same empty table —
+	// nothing is invented to fill the gap, and the OCR policy falls back to its
+	// conservative OnUnobserved clause — while reading differently to whoever
+	// is diagnosing the prompt.
+	switch {
+	case !ok:
+		r.out["observation_status"] = "unparsed"
+	case !obs.Observed:
+		r.out["observation_status"] = "incomplete"
+	default:
+		r.out["observation_status"] = "done"
 	}
 	resolve(false)
 	return nil
@@ -519,6 +530,10 @@ func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 // path. That is deliberate — a page cropper that cannot decide must not be able
 // to make the run worse than not having run it at all.
 func runPreprocessAction(ctx context.Context, r *runContext) error {
+	// What was asked for and what happened are two different questions: "always"
+	// and an auto run that hit both attributes produce the same status, and the
+	// mode is what tells them apart afterwards. Both go on the trace.
+	r.out["preprocess_mode"] = r.preprocessMode
 	if r.preprocessor == nil {
 		r.out["preprocess_status"] = "unavailable"
 		return nil
@@ -526,7 +541,7 @@ func runPreprocessAction(ctx context.Context, r *runContext) error {
 	// Off means off: the describe round did not even ask for the geometry
 	// attributes, so there is nothing to consult and nothing to do.
 	if r.preprocessMode == types.PreprocessModeOff {
-		r.out["preprocess_status"] = "off"
+		r.out["preprocess_status"] = "skipped_off"
 		return nil
 	}
 	// Force skips the question entirely — it exists precisely for the case
@@ -545,8 +560,7 @@ func runPreprocessAction(ctx context.Context, r *runContext) error {
 			upright, uprightObserved = r.imageInfo.Attrs.Upright()
 		}
 		if text != "block" && text != "sparse" {
-			r.out["preprocess_status"] = "skipped_by_attrs"
-			r.out["preprocess_reason"] = "no_text"
+			r.out["preprocess_status"] = "skipped_no_text"
 			return nil
 		}
 		// A page that already fills the frame and already reads upright has
@@ -557,8 +571,7 @@ func runPreprocessAction(ctx context.Context, r *runContext) error {
 		croppable := margin == "" || margin == "large"
 		rotated := uprightObserved && !upright
 		if !croppable && !rotated {
-			r.out["preprocess_status"] = "skipped_by_attrs"
-			r.out["preprocess_reason"] = "already_tidy"
+			r.out["preprocess_status"] = "skipped_already_tidy"
 			return nil
 		}
 	}
@@ -572,12 +585,12 @@ func runPreprocessAction(ctx context.Context, r *runContext) error {
 	if fallback || len(rectified) == 0 {
 		logger.Infof(ctx, "[ImageMultimodal] Preprocess declined for %s; OCR will use the original",
 			r.payload.ImageURL)
-		r.out["preprocess_status"] = "fallback"
+		r.out["preprocess_status"] = "skipped_declined"
 		return nil
 	}
 	// The one line that does the work: everything downstream reads imageBytes.
 	r.imageBytes = rectified
-	r.out["preprocess_status"] = "ok"
+	r.out["preprocess_status"] = "done"
 	// The corrected image's size in bytes — bytes, not characters: the
 	// neighbours that end in _chars (ocr_chars, caption_chars) measure text,
 	// while this measures a picture. It reads next to image_bytes (the
@@ -671,15 +684,14 @@ func runOCRAction(ctx context.Context, r *runContext) error {
 	}
 	if ocrText != "" {
 		r.imageInfo.OCRText = ocrText
-		r.out["ocr_status"] = "succeeded"
+		r.out["ocr_status"] = "done"
 		r.out["ocr_chars"] = len([]rune(ocrText))
 		r.out["ocr_preview"] = previewText(ocrText, 200)
 		resolve()
 		return nil
 	}
 	logger.Warnf(ctx, "[ImageMultimodal] OCR returned no text for %s", r.payload.ImageURL)
-	r.out["ocr_status"] = "no_text"
-	r.out["ocr_skipped"] = "no_text"
+	r.out["ocr_status"] = "skipped_no_text"
 	resolve()
 	return nil
 }

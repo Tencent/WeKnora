@@ -4287,7 +4287,7 @@ export default {
         notesLabel: '補足説明',
         preprocessModeAuto: '自動',
         preprocessModeOff: 'オフ',
-        preprocessModeForce: '強制',
+        preprocessModeAlways: '常に',
         imagePipelinePlaceholder: '解析方式を選択',
         imagePipelineLoading: 'パイプラインを読み込み中…',
         imagePipelineLoadError: 'パイプラインの読み込みに失敗しました',
@@ -8771,7 +8771,7 @@ export default {
       preprocess_mode: {
         label: '文書の前処理',
         description:
-          'OCR の前に、撮影したページを傾き補正して周囲を切り落とします。自動：説明ラウンドが要否を判断／オフ：常に無効／強制：常に有効。',
+          'OCR の前に、撮影したページを傾き補正して周囲を切り落とします。自動：説明ラウンドが要否を判断／オフ：常に無効／常に：無条件で有効。',
       },
       caption: {
         thinking: {
