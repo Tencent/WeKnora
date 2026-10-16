@@ -81,8 +81,8 @@ func TestRunOCRActionRecordsFailureWithoutFailing(t *testing.T) {
 	if _, ok := r.out["ocr_error"]; !ok {
 		t.Errorf("ocr_error not recorded for a failed call")
 	}
-	if _, skipped := r.out["ocr_skipped"]; skipped {
-		t.Errorf(`a failed call must not read as skipped: %v`, r.out["ocr_skipped"])
+	if got := r.out["ocr_status"]; got != "failed" {
+		t.Errorf("a failed call must read as failed, never as skipped: %v", got)
 	}
 	if got := r.imageInfo.OCRText; got != "" {
 		t.Errorf("a failed call must leave no OCR text behind, got %q", got)

@@ -4628,7 +4628,7 @@ export default {
         notesLabel: '추가 설명',
         preprocessModeAuto: '자동',
         preprocessModeOff: '끄기',
-        preprocessModeForce: '강제',
+        preprocessModeAlways: '항상',
         imagePipelinePlaceholder: '분석 방식 선택',
         imagePipelineLoading: '파이프라인을 불러오는 중…',
         imagePipelineLoadError: '파이프라인을 불러오지 못했습니다',
@@ -8459,7 +8459,7 @@ export default {
       preprocess_mode: {
         label: '문서 전처리',
         description:
-          'OCR 전에 촬영한 페이지를 반듯하게 펴고 주변을 잘라냅니다. 자동: 설명 단계에서 필요 여부를 판단 / 끄기: 항상 사용 안 함 / 강제: 항상 사용.',
+          'OCR 전에 촬영한 페이지를 반듯하게 펴고 주변을 잘라냅니다. 자동: 설명 단계에서 필요 여부를 판단 / 끄기: 항상 사용 안 함 / 항상: 무조건 사용.',
       },
       caption: {
         thinking: {

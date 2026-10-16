@@ -51,10 +51,10 @@ func TestImageOCRRejectsInvalidContentBeforePersistence(t *testing.T) {
 			err: fmt.Errorf("request: %w", vlm.ErrTruncatedCompletion),
 		},
 		{name: "request failure", status: "failed", code: "OCR_REQUEST_FAILED", err: errors.New("model unavailable")},
-		{name: "no text", raw: "No text content.", status: "no_text"},
-		{name: "HTML no text", raw: "<p>No text content.</p>", status: "no_text"},
-		{name: "HTML short no text", raw: "<p>empty</p>", status: "no_text"},
-		{name: "HTML emphasized no text", raw: "<p><strong>No text content.</strong></p>", status: "no_text"},
+		{name: "no text", raw: "No text content.", status: "skipped_no_text"},
+		{name: "HTML no text", raw: "<p>No text content.</p>", status: "skipped_no_text"},
+		{name: "HTML short no text", raw: "<p>empty</p>", status: "skipped_no_text"},
+		{name: "HTML emphasized no text", raw: "<p><strong>No text content.</strong></p>", status: "skipped_no_text"},
 		{name: "empty HTML", raw: "<html><body></body></html>", status: "failed", code: "OCR_INVALID_OUTPUT"},
 	} {
 		for _, caption := range []bool{false, true} {
@@ -111,8 +111,16 @@ func TestImageOCRRejectsInvalidContentBeforePersistence(t *testing.T) {
 					require.Empty(t, tracker.failed)
 					require.NotContains(t, out, "ocr_error")
 					require.NotContains(t, out, "ocr_error_code")
-					require.NotContains(t, out, "outcome")
-					require.Equal(t, "no_text", tracker.outputs["multimodal.image[0].ocr"]["status"])
+					// Every image states its end state now, so "no text" is a
+					// verdict rather than an absent key: nothing was extracted
+					// when there was no caption to keep, and the run is a plain
+					// success when the caption is what survived.
+					if caption {
+						require.Equal(t, "done", out["outcome"])
+					} else {
+						require.Equal(t, "skipped_no_content", out["outcome"])
+					}
+					require.Equal(t, "skipped_no_text", tracker.outputs["multimodal.image[0].ocr"]["status"])
 				}
 				if caption {
 					require.Len(t, repo.created, 1)

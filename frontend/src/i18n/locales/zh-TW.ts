@@ -4631,7 +4631,7 @@ export default {
         notesLabel: '附加說明',
         preprocessModeAuto: '自動',
         preprocessModeOff: '關閉',
-        preprocessModeForce: '強制',
+        preprocessModeAlways: '總是',
         imagePipelinePlaceholder: '請選擇解析方案',
         imagePipelineLoading: '正在讀取流水線…',
         imagePipelineLoadError: '讀取流水線失敗',
@@ -8456,7 +8456,7 @@ export default {
       preprocess_mode: {
         label: '文件預處理',
         description:
-          '在 OCR 之前把拍攝的頁面擺正並裁掉周圍環境。自動：由描述輪判斷頁面是否需要；關閉：從不處理；強制：總是處理。',
+          '在 OCR 之前把拍攝的頁面擺正並裁掉周圍環境。自動：由描述輪判斷頁面是否需要；關閉：從不處理；總是：無條件處理。',
       },
       caption: {
         thinking: {

@@ -403,8 +403,8 @@ func TestObservationPipelineTrace(t *testing.T) {
 		smartFieldKeyCaptureCaption: true,
 		smartFieldKeyAllowOCR:       false,
 	})
-	if got := r.out["ocr_skipped"]; got != "attr_policy" {
-		t.Errorf(`out["ocr_skipped"] = %v, want "attr_policy"`, got)
+	if got := r.out["ocr_status"]; got != "skipped_attr_policy" {
+		t.Errorf(`out["ocr_status"] = %v, want "skipped_attr_policy"`, got)
 	}
 	if _, ok := r.out["ocr_text"]; ok {
 		t.Error("no OCR action ran, so no ocr slot may exist")
@@ -427,8 +427,8 @@ func TestDefaultPipelineTrace(t *testing.T) {
 	if _, ok := r.out["attr_policy"]; ok {
 		t.Error("caption+OCR mode has no attributes, so it must not record a policy")
 	}
-	if _, ok := r.out["ocr_skipped"]; ok {
-		t.Errorf("unexpected ocr_skipped in the plain path: %v", r.out["ocr_skipped"])
+	if got := r.out["ocr_status"]; got != "done" {
+		t.Errorf("plain path: ocr_status = %v, want done (OCR ran and read text)", got)
 	}
 }
 
@@ -479,8 +479,8 @@ func TestExecuteSkipsUnimplementedAction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute returned %v, want nil", err)
 	}
-	if got := r.out["action_skipped"]; got != "not_registered" {
-		t.Errorf(`out["action_skipped"] = %v, want "not_registered"`, got)
+	if got := r.out["action_unimplemented"]; got != "not_registered" {
+		t.Errorf(`out["action_unimplemented"] = %v, want "not_registered"`, got)
 	}
 }
 

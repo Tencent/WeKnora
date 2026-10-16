@@ -351,8 +351,8 @@ func TestProcessImageObservesAndDescribes(t *testing.T) {
 	if got, ok := out["attr_policy"].(types.JSONMap); !ok || got["ocr"] != true {
 		t.Errorf("attr_policy = %v, want {ocr:true}", out["attr_policy"])
 	}
-	if _, skipped := out["ocr_skipped"]; skipped {
-		t.Errorf("a block of text must be OCR'd, got %v", out["ocr_skipped"])
+	if got, _ := out["ocr_status"].(string); strings.HasPrefix(got, "skipped_") {
+		t.Errorf("a block of text must be OCR'd, got ocr_status=%v", got)
 	}
 	// One observe call (never the legacy caption prompt) plus one OCR call.
 	if n := countCallsWith(fake.calls, "OCR assistant"); n != 1 {
@@ -416,8 +416,8 @@ func TestProcessImageMarksObservationFailed(t *testing.T) {
 	}
 	out := runProcessImage(t, svc, payload, fake)
 
-	if out["observation_failed"] != true {
-		t.Errorf("observation_failed = %v, want true for a prose-only answer", out["observation_failed"])
+	if got := out["observation_status"]; got != "incomplete" {
+		t.Errorf("observation_status = %v, want incomplete for a prose-only answer", got)
 	}
 	// No attribute is invented for the unanswered questions: the table stays
 	// empty, and the conservative clause is what keeps OCR running.
@@ -427,9 +427,9 @@ func TestProcessImageMarksObservationFailed(t *testing.T) {
 	if n := countCallsWith(fake.calls, "OCR assistant"); n != 1 {
 		t.Errorf("OCR calls = %d, want 1 (the conservative clause must still extract)", n)
 	}
-	// And the description was kept, so caption_missing must NOT be set.
-	if _, missing := out["caption_missing"]; missing {
-		t.Errorf("caption_missing should be unset for a prose answer that has a description")
+	// And the description was kept, so the answer was not unreadable.
+	if got := out["observation_status"]; got == "unparsed" {
+		t.Errorf("a prose answer carrying a description must not read as unparsed")
 	}
 }
 
@@ -470,8 +470,8 @@ func TestProcessImageSkipsOCRForQuietAttr(t *testing.T) {
 	if n := countCallsWith(fake.calls, "OCR assistant"); n != 0 {
 		t.Fatalf("a quiet image must not be OCR'd, got %d OCR call(s)", n)
 	}
-	if got := out["ocr_skipped"]; got != "attr_policy" {
-		t.Errorf("ocr_skipped = %v, want attr_policy", got)
+	if got := out["ocr_status"]; got != "skipped_attr_policy" {
+		t.Errorf("ocr_status = %v, want skipped_attr_policy", got)
 	}
 	if got, ok := out["attr_policy"].(types.JSONMap); !ok || got["ocr"] != false {
 		t.Errorf("attr_policy = %v, want {ocr:false}", out["attr_policy"])
@@ -590,14 +590,14 @@ func TestProcessImageProseAnswerIsStillCaptionedAndOCRed(t *testing.T) {
 	if n := countCallsWith(fake.calls, "OCR assistant"); n != 1 {
 		t.Errorf("OCR calls = %d, want 1 (the conservative clause must not skip OCR)", n)
 	}
-	if _, skipped := out["ocr_skipped"]; skipped {
-		t.Errorf("OCR must not be reported skipped, got %v", out["ocr_skipped"])
+	if got, _ := out["ocr_status"].(string); strings.HasPrefix(got, "skipped_") {
+		t.Errorf("OCR must not be reported skipped, got ocr_status=%v", got)
 	}
 	if got, ok := out["attr_policy"].(types.JSONMap); !ok || got["ocr"] != true {
 		t.Errorf("attr_policy = %v, want the conservative decision", out["attr_policy"])
 	}
-	if _, missing := out["caption_missing"]; missing {
-		t.Error("prose is a description: caption_missing must not be reported")
+	if got := out["observation_status"]; got == "unparsed" {
+		t.Error("prose is a description: the answer must not read as unparsed")
 	}
 	if len(repo.created) != 2 {
 		t.Fatalf("persisted chunks = %d, want OCR + caption", len(repo.created))
@@ -649,8 +649,8 @@ func TestProcessImageLabelOnlyAnswerKeepsAttrsWithoutCaption(t *testing.T) {
 	}
 	out := runProcessImage(t, svc, payload, fake)
 
-	if got := out["caption_missing"]; got != true {
-		t.Errorf("caption_missing = %v, want true", got)
+	if got := out["observation_status"]; got != "unparsed" {
+		t.Errorf("observation_status = %v, want unparsed", got)
 	}
 	if n := countCallsWith(fake.calls, "OCR assistant"); n != 1 {
 		t.Errorf("OCR calls = %d, want 1 (block + data visual keep OCR)", n)
@@ -756,7 +756,7 @@ func TestProcessImageReturnsUnreadableImageError(t *testing.T) {
 		t.Fatalf("storage error was swallowed: %v", err)
 	}
 
-	if got := out["skipped"]; got != "unreadable_image" {
+	if got := out["outcome"]; got != "skipped_unreadable_image" {
 		t.Errorf("skipped = %v, want unreadable_image", got)
 	}
 	if len(fake.calls) != 0 {
