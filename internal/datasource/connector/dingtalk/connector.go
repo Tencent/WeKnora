@@ -647,6 +647,12 @@ type syncScope struct {
 	Reference   resourceReference
 	StartNodeID string
 	Document    *node
+	// FolderPath is the folder hierarchy between the workspace root and the
+	// scope's own node, root-first, with the scope's own folder name last. It
+	// anchors every document the scope yields, so selecting a subfolder and
+	// selecting the whole workspace file the same document under the same
+	// folder instead of under two.
+	FolderPath []string
 }
 
 func (s syncScope) contains(candidate syncScope) bool {
@@ -688,6 +694,9 @@ func (c *Connector) sync(
 
 	api := c.api(cfg)
 	settings := parseDocumentSettings(dataSourceConfig)
+	if settings.PreserveFolderStructure {
+		logger.Infof(ctx, "[DingTalk] source folder structure is encoded into document file names")
+	}
 	workspaces, err := api.listWorkspaces(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -695,6 +704,13 @@ func (c *Connector) sync(
 	scopes, failures, err := resolveSyncScopes(ctx, api, workspaces, selected, settings)
 	if err != nil {
 		return nil, nil, err
+	}
+	// The workspace name is the first folder segment of every encoded path. It
+	// is read from the listing the sync already made, so the leading level
+	// costs no extra request.
+	workspaceFolderNames := make(map[string]string, len(workspaces))
+	for _, item := range workspaces {
+		workspaceFolderNames[item.ID] = workspaceFolderName(item)
 	}
 
 	next := &cursorState{
@@ -757,7 +773,8 @@ func (c *Connector) sync(
 		synced := 0
 		failed := 0
 
-		for _, document := range documents {
+		for _, scanned := range documents {
+			document := scanned.node
 			if document.ID == "" {
 				continue
 			}
@@ -770,7 +787,13 @@ func (c *Connector) sync(
 				continue
 			}
 
-			item, err := readDocument(ctx, api, scope.ResourceID, scope.Reference.WorkspaceID, document)
+			folders := documentFolders(
+				settings, workspaceFolderNames[scope.Reference.WorkspaceID],
+				scope.FolderPath, scanned.folders,
+			)
+			item, err := readDocument(
+				ctx, api, scope.ResourceID, scope.Reference.WorkspaceID, document, folders,
+			)
 			if err != nil {
 				if isContextError(err) {
 					return nil, nil, err
@@ -894,6 +917,7 @@ func resolveSyncScopes(
 			}, nil
 		}
 
+		var ancestorFolders []string
 		parentNodeID := rootNodeID
 		for _, ancestorID := range ref.Ancestors {
 			children, err := listChildren(parentNodeID)
@@ -908,6 +932,11 @@ func resolveSyncScopes(
 			if ancestor.WorkspaceID != "" && ancestor.WorkspaceID != ref.WorkspaceID {
 				return syncScope{}, fmt.Errorf("DingTalk ancestor %q belongs to a different workspace", ancestorID)
 			}
+			// The name is read off a listing this resolution has to make
+			// anyway, so anchoring the path at the workspace root costs no
+			// extra request. A selection saved without ancestors yields a
+			// shallower path rather than an error.
+			ancestorFolders = append(ancestorFolders, ancestor.title())
 			parentNodeID = ancestor.ID
 		}
 		children, err := listChildren(parentNodeID)
@@ -926,11 +955,13 @@ func resolveSyncScopes(
 		case selectedNode.isFolder():
 			return syncScope{
 				ResourceID: canonicalID, Reference: ref, StartNodeID: selectedNode.ID,
+				FolderPath: appendFolder(ancestorFolders, selectedNode.title()),
 			}, nil
 		case selectedNode.isIngestible(settings):
 			document := selectedNode
 			return syncScope{
 				ResourceID: canonicalID, Reference: ref, Document: &document,
+				FolderPath: ancestorFolders,
 			}, nil
 		default:
 			return syncScope{}, fmt.Errorf("DingTalk node %q is not a supported online document or folder",
@@ -990,6 +1021,26 @@ func childByID(children []node, nodeID string) (node, bool) {
 	return node{}, false
 }
 
+// scannedDocument pairs an ingestible node with the folder hierarchy the walk
+// found it under, relative to the scan's root node. The hierarchy is carried
+// alongside the node rather than recomputed later: the breadth-first walk is
+// the only place that knows which parent listed the node.
+type scannedDocument struct {
+	node
+	// folders holds the folder titles between the scan root and the document,
+	// root-first. A document sitting directly in the scan root has none.
+	folders []string
+}
+
+// appendFolder returns parent plus one folder title. The result is always a
+// fresh slice: appending in place would let one sibling's name overwrite
+// another's inside a shared backing array.
+func appendFolder(parent []string, name string) []string {
+	folders := make([]string, 0, len(parent)+1)
+	folders = append(folders, parent...)
+	return append(folders, name)
+}
+
 // scanScope lists every ingestible document in one scope, together with the
 // nodes it saw but cannot ingest. The skipped nodes are returned rather than
 // discarded so the caller can report them: a full sync must never look clean
@@ -999,26 +1050,34 @@ func scanScope(
 	api dingTalkAPI,
 	scope syncScope,
 	settings documentSettings,
-) ([]node, []node, error) {
+) ([]scannedDocument, []node, error) {
 	if scope.Document != nil {
-		return []node{*scope.Document}, nil, nil
+		// A single-document scope has no tree to walk; the scope's own
+		// FolderPath already carries the folders above it.
+		return []scannedDocument{{node: *scope.Document}}, nil, nil
 	}
 	return scanWorkspace(ctx, api, scope.Reference.WorkspaceID, scope.StartNodeID, settings)
 }
 
 // scanWorkspace walks a workspace subtree breadth-first. Folders are traversal
-// only; every file is either an ingestible document or a skip.
+// only; every file is either an ingestible document or a skip. Each document is
+// reported with the folder titles the walk descended through to reach it, so
+// the caller can mirror the source hierarchy in the knowledge base.
 func scanWorkspace(
 	ctx context.Context,
 	api dingTalkAPI,
 	workspaceID string,
 	rootNodeID string,
 	settings documentSettings,
-) ([]node, []node, error) {
+) ([]scannedDocument, []node, error) {
 	queue := []string{rootNodeID}
 	visitedParents := make(map[string]struct{})
 	seenNodes := make(map[string]struct{})
-	var documents []node
+	// foldersByParent maps a node ID to the folder titles between the scan root
+	// and that node, root-first. Only nodes the walk descends through get an
+	// entry; the scan root itself has none.
+	foldersByParent := map[string][]string{rootNodeID: nil}
+	var documents []scannedDocument
 	var skipped []node
 
 	for len(queue) > 0 {
@@ -1052,7 +1111,10 @@ func scanWorkspace(
 			}
 			switch {
 			case child.isIngestible(settings):
-				documents = append(documents, child)
+				documents = append(documents, scannedDocument{
+					node:    child,
+					folders: foldersByParent[parentID],
+				})
 			case child.isFolder():
 				// Containers hold no content of their own, so they are never
 				// reported as skipped.
@@ -1060,6 +1122,7 @@ func scanWorkspace(
 				skipped = append(skipped, child)
 			}
 			if child.isFolder() || child.HasChildren {
+				foldersByParent[child.ID] = appendFolder(foldersByParent[parentID], child.title())
 				queue = append(queue, child.ID)
 			}
 		}
@@ -1141,13 +1204,16 @@ func warnUnknownBlockTypes(ctx context.Context, document node, rendered renderRe
 
 // readDocument turns one supported wiki node into a FetchedItem. Native adoc
 // documents are rendered from their blocks, and uploaded files are transferred
-// byte-for-byte so WeKnora's own parsers can read them.
+// byte-for-byte so WeKnora's own parsers can read them. folders is the source
+// folder hierarchy to encode in the item's FileName, or nil to keep the
+// historical flat name.
 func readDocument(
 	ctx context.Context,
 	api dingTalkAPI,
 	sourceResourceID string,
 	workspaceID string,
 	document node,
+	folders []string,
 ) (types.FetchedItem, error) {
 	switch {
 	case document.isOnlineDocument():
@@ -1160,14 +1226,71 @@ func readDocument(
 		// both the request context and the node identity are known. Uploaded
 		// files take the default branch and have no rendering step to lose.
 		warnUnknownBlockTypes(ctx, document, rendered)
-		return fetchedDocument(sourceResourceID, workspaceID, document, rendered), nil
+		return fetchedDocument(sourceResourceID, workspaceID, document, rendered, folders), nil
 	default:
 		data, err := api.downloadDocument(ctx, document.ID)
 		if err != nil {
 			return types.FetchedItem{}, err
 		}
-		return fetchedBinaryDocument(sourceResourceID, workspaceID, document, data), nil
+		return fetchedBinaryDocument(sourceResourceID, workspaceID, document, data, folders), nil
 	}
+}
+
+// documentFolders assembles the folder segments a document's FileName encodes:
+// the workspace, the folders between the workspace root and the scope's own
+// node, then the folders the scan descended through.
+//
+// It returns nil when the switch is off, which is what keeps the emitted
+// FileName byte-for-byte identical to previous releases for every data source
+// that never turned it on.
+func documentFolders(
+	settings documentSettings,
+	workspaceName string,
+	scopeFolders []string,
+	scanFolders []string,
+) []string {
+	if !settings.PreserveFolderStructure {
+		return nil
+	}
+	folders := make([]string, 0, len(scopeFolders)+len(scanFolders)+1)
+	if workspaceName != "" {
+		folders = append(folders, workspaceName)
+	}
+	folders = append(folders, scopeFolders...)
+	return append(folders, scanFolders...)
+}
+
+// workspaceFolderName names a workspace the way the resource picker does: the
+// workspace name, falling back to its ID, which is what an operator sees when a
+// tenant exposes no name.
+func workspaceFolderName(item workspace) string {
+	if name := strings.TrimSpace(item.Name); name != "" {
+		return name
+	}
+	return item.ID
+}
+
+// buildFolderFileName prepends the folder hierarchy to a document's file name.
+//
+// folder_path downstream is derived from FileName alone
+// (SplitKnowledgeRelativePath → NormalizeKnowledgeFolderPath), so the hierarchy
+// has to be encoded here as a relative path.
+//
+// Every level is sanitised on its own, as the Yuque connector's own folder
+// encoding does, so a "/" inside a folder name cannot silently create an extra
+// nesting level. Folder names the downstream normaliser rejects outright — ".",
+// "..", an empty name — drop their level instead of failing the sync. An empty
+// folder list, which is what the default settings produce, returns the file
+// name unchanged.
+func buildFolderFileName(folders []string, fileName string) string {
+	if len(folders) == 0 {
+		return fileName
+	}
+	segments := make([]string, 0, len(folders))
+	for _, folder := range folders {
+		segments = append(segments, datasource.SanitizeFileName(folder))
+	}
+	return strings.Join(segments, "/") + "/" + fileName
 }
 
 // documentMetadata describes a wiki node the same way for rendered and
@@ -1195,6 +1318,7 @@ func fetchedDocument(
 	workspaceID string,
 	document node,
 	rendered renderResult,
+	folders []string,
 ) types.FetchedItem {
 	metadata := documentMetadata(workspaceID, document)
 	if len(rendered.UnknownTypes) > 0 {
@@ -1205,7 +1329,7 @@ func fetchedDocument(
 		Title:            document.title(),
 		Content:          []byte(rendered.Markdown),
 		ContentType:      "text/markdown",
-		FileName:         renderedDocumentFileName(document.title()),
+		FileName:         buildFolderFileName(folders, renderedDocumentFileName(document.title())),
 		URL:              documentURL(document),
 		UpdatedAt:        document.modifiedAt(),
 		Metadata:         metadata,
@@ -1234,6 +1358,7 @@ func fetchedBinaryDocument(
 	workspaceID string,
 	document node,
 	data []byte,
+	folders []string,
 ) types.FetchedItem {
 	contentType, ok := document.binaryContentType()
 	if !ok {
@@ -1244,7 +1369,7 @@ func fetchedBinaryDocument(
 		Title:            document.title(),
 		Content:          data,
 		ContentType:      contentType,
-		FileName:         binaryDocumentFileName(document),
+		FileName:         buildFolderFileName(folders, binaryDocumentFileName(document)),
 		URL:              documentURL(document),
 		UpdatedAt:        document.modifiedAt(),
 		Metadata:         documentMetadata(workspaceID, document),
