@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -101,14 +100,15 @@ func (p *BingProvider) doSearch(ctx context.Context, req *http.Request) ([]*type
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
+	if resp.StatusCode != http.StatusOK {
+		preview := readErrorPreview(resp.Body)
+		logger.Warnf(ctx, "[WebSearch][Bing] API returned status %d: %s", resp.StatusCode, preview)
+		return nil, fmt.Errorf("bing API returned status %d: %s", resp.StatusCode, preview)
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		logger.Warnf(ctx, "[WebSearch][Bing] API returned status %d: %s", resp.StatusCode, string(body))
-		return nil, fmt.Errorf("bing API returned status %d: %s", resp.StatusCode, string(body))
+	body, err := readCapped(resp.Body, 0)
+	if err != nil {
+		return nil, err
 	}
 
 	var respData bingSearchResponse
