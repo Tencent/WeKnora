@@ -30,6 +30,13 @@ type AttrSpec struct {
 	Label       string      `json:"label"`                 // human-readable name for the settings panel
 	Description string      `json:"description,omitempty"` // one line explaining what the attribute measures
 	Consumers   []string    `json:"consumers,omitempty"`   // downstream steps that read this attribute
+	// Internal marks an attribute that steers this pipeline's own scheduling
+	// rather than describing what the image holds. Such attributes are still
+	// observed and persisted — the values are what justify a scheduling
+	// decision after the fact — but they are kept out of the gallery's filter
+	// surface, where they would only add noise: no operator wants to filter a
+	// library by "how much margin is left around the text".
+	Internal bool `json:"internal,omitempty"`
 }
 
 // AttrValue is one allowed value of an attribute: the raw value plus the words
@@ -83,6 +90,40 @@ var ImageAttrRegistry = []AttrSpec{
 		Description: "Whether the picture conveys data as a chart, graph, diagram or infographic. " +
 			"Such images keep their labels on the OCR path even when the text looks sparse.",
 		Consumers: []string{"ocr"},
+	},
+	{
+		Name: "contain.margin",
+		Type: AttrTypeExtent,
+		Values: []AttrValue{
+			{Value: "none", Label: "None", Description: "the text reaches the edges; almost no background"},
+			{Value: "small", Label: "Small", Description: "a thin band of background or whitespace"},
+			{Value: "large", Label: "Large", Description: "plenty of non-text area: a desk, a room, a mostly empty page"},
+		},
+		Question: "How much of the frame is NOT the document itself — background, desk, or empty " +
+			"space around the text? Answer exactly one of: none (text reaches the edges), " +
+			"small (a thin border), large (a substantial non-text area such as a desk or " +
+			"a page photographed with its surroundings).",
+		Label: "Non-text area",
+		Description: "How much background surrounds the content. Large margins mean the " +
+			"page can be cropped tighter before OCR reads it.",
+		Consumers: []string{"preprocess"},
+		Internal:  true,
+	},
+	{
+		Name: "contain.upright",
+		Type: AttrTypePresence,
+		Values: []AttrValue{
+			{Value: "true", Label: "Upright", Description: "text reads in its normal orientation"},
+			{Value: "false", Label: "Rotated", Description: "text is turned, tilted or upside down"},
+		},
+		Question: "Is the text in the image upright — that is, in its normal reading orientation? " +
+			"Text that is rotated a quarter turn, tilted by the camera, or upside down counts as false. " +
+			"Answer exactly one of: true, false.",
+		Label: "Text orientation",
+		Description: "Whether the text reads the right way up. A rotated or upside-down page " +
+			"is worth straightening before OCR reads it.",
+		Consumers: []string{"preprocess"},
+		Internal:  true,
 	},
 }
 
