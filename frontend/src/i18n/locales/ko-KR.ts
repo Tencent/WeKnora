@@ -2025,6 +2025,7 @@ export default {
           get: "모델 상세 조회",
           delete: "모델 삭제",
           update: "모델 표시 정보 수정",
+          copy: "모델 설정 복사",
         },
         skill: {
           list_installed: "설치된 스킬 목록 조회",

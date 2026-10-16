@@ -10023,7 +10023,10 @@ definitions:
   internal_handler.CopyModelRequest:
     properties:
       display_name:
+        description: Display name of the new copy; the upstream model identifier stays
+          unchanged.
         type: string
+        x-agent: true
     required:
     - display_name
     type: object
@@ -22496,6 +22499,7 @@ paths:
         name: id
         required: true
         type: string
+        x-agent: model_id
       - description: 副本展示名
         in: body
         name: request
@@ -22528,6 +22532,20 @@ paths:
       summary: 复制模型
       tags:
       - 模型管理
+      x-agent:
+        id: model.copy
+        label: name
+        risk: write
+        role: admin
+        target: model.get
+      x-agent-hint: Copies a workspace-owned model configuration under a required
+        new display_name. Choose model_id from model.list; builtin models cannot be
+        copied. The upstream model name, connection parameters and saved credentials
+        are copied on the backend; never request or resend credentials. The copy is
+        not the default and does not change agent or knowledge base bindings. Active
+        local models are reused without downloading again; copying an unfinished or
+        failed local model starts a background download, so read the returned model_id
+        with model.get until its status is active or download_failed.
   /models/catalog/resolve:
     get:
       consumes:

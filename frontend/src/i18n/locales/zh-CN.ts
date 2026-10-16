@@ -2027,6 +2027,7 @@ export default {
           get: "获取模型详情",
           delete: "删除模型",
           update: "更新模型显示信息",
+          copy: "复制模型配置",
         },
         skill: {
           list_installed: "获取已安装技能列表",

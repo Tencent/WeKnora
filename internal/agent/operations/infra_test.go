@@ -29,6 +29,7 @@ func TestBuiltinInfrastructureWrites(t *testing.T) {
 			[]string{"mcp_service_id", "name", "usage_instructions", "enabled", "transport_type", "url"},
 		},
 		{"mcp_service.delete", RiskDestructive, http.MethodDelete, []string{"mcp_service_id"}},
+		{"model.copy", RiskWrite, http.MethodPost, []string{"model_id", "display_name"}},
 		{"model.update", RiskWrite, http.MethodPatch, []string{"model_id", "display_name", "description"}},
 		{"model.delete", RiskDestructive, http.MethodDelete, []string{"model_id"}},
 		{"skill.install", RiskWrite, http.MethodPost, []string{"sandbox_config_id", "source"}},
@@ -116,4 +117,24 @@ func TestBuiltinInfrastructureProjections(t *testing.T) {
 	assert.JSONEq(t, `{"success":false,"started":["cfg-1"],"failed":["cfg-2: not found"]}`,
 		project("skill.install_catalog", `{"success":false,"data":{"installs":{"cfg-1":"s1"},
 		"errors":{"cfg-2":"not found"},"started":["cfg-1"],"failed":["cfg-2: not found"]}}`))
+}
+
+func TestModelCopyOnlyAcceptsSourceAndNewDisplayName(t *testing.T) {
+	op, ok := Builtin().Get("model.copy")
+	require.True(t, ok)
+	require.Equal(t, "model.get", op.Target.Operation)
+	call, err := op.Build(map[string]json.RawMessage{"model_id": raw("source"), "display_name": raw("Experiment")})
+	require.NoError(t, err)
+	assert.Equal(t, "/api/v1/models/source/copy", call.URI())
+	assert.JSONEq(t, `{"display_name":"Experiment"}`, string(call.Body))
+	for _, params := range []map[string]json.RawMessage{
+		{"model_id": raw("source")},
+		{"model_id": raw("source"), "display_name": raw("")},
+		{"model_id": raw("source"), "display_name": raw("Experiment"), "api_key": raw("secret")},
+		{"model_id": raw("source"), "display_name": raw("Experiment"), "name": raw("another-model")},
+		{"model_id": raw("source"), "display_name": raw("Experiment"), "is_default": raw(true)},
+	} {
+		_, err = op.Build(params)
+		require.Error(t, err)
+	}
 }

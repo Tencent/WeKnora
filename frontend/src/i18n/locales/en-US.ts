@@ -6771,6 +6771,7 @@ export default {
           get: "Get model details",
           delete: "Delete model",
           update: "Update model display information",
+          copy: "Copy model configuration",
         },
         skill: {
           list_installed: "List installed skills",

@@ -135,7 +135,8 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 // name is client-supplied. The model name and credentials come from the
 // stored source row.
 type CopyModelRequest struct {
-	DisplayName string `json:"display_name" binding:"required"`
+	// Display name of the new copy; the upstream model identifier stays unchanged.
+	DisplayName string `json:"display_name" binding:"required" extensions:"x-agent"`
 }
 
 // CopyModel godoc
@@ -144,13 +145,15 @@ type CopyModelRequest struct {
 // @Tags         模型管理
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string           true  "源模型ID"
+// @Param        id       path      string           true  "源模型ID" extensions(x-agent=model_id)
 // @Param        request  body      CopyModelRequest true  "副本展示名"
 // @Success      201      {object}  handler.DataResponse{data=dto.ModelResponse}  "复制的模型"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      404      {object}  errors.AppError         "模型不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent {"id":"model.copy","risk":"write","role":"admin","target":"model.get","label":"name"}
+// @x-agent-hint "Copies a workspace-owned model configuration under a required new display_name. Choose model_id from model.list; builtin models cannot be copied. The upstream model name, connection parameters and saved credentials are copied on the backend; never request or resend credentials. The copy is not the default and does not change agent or knowledge base bindings. Active local models are reused without downloading again; copying an unfinished or failed local model starts a background download, so read the returned model_id with model.get until its status is active or download_failed."
 // @Router       /models/{id}/copy [post]
 func (h *ModelHandler) CopyModel(c *gin.Context) {
 	ctx := c.Request.Context()

@@ -6771,6 +6771,7 @@ export default {
           get: "モデルの詳細を取得",
           delete: "モデルを削除",
           update: "モデルの表示情報を更新",
+          copy: "モデル設定をコピー",
         },
         skill: {
           list_installed: "インストール済みスキル一覧を取得",

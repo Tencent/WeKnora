@@ -14065,6 +14065,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "x-agent": "model_id",
                         "description": "源模型ID",
                         "name": "id",
                         "in": "path",
@@ -14111,7 +14112,15 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "model.copy",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "admin",
+                    "target": "model.get"
+                },
+                "x-agent-hint": "Copies a workspace-owned model configuration under a required new display_name. Choose model_id from model.list; builtin models cannot be copied. The upstream model name, connection parameters and saved credentials are copied on the backend; never request or resend credentials. The copy is not the default and does not change agent or knowledge base bindings. Active local models are reused without downloading again; copying an unfinished or failed local model starts a background download, so read the returned model_id with model.get until its status is active or download_failed."
             }
         },
         "/organizations": {
@@ -35207,7 +35216,9 @@ const docTemplate = `{
             ],
             "properties": {
                 "display_name": {
-                    "type": "string"
+                    "description": "Display name of the new copy; the upstream model identifier stays unchanged.",
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
