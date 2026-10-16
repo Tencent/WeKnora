@@ -78,6 +78,7 @@ export interface AssistantOpenRequest {
 }
 
 const SESSION_KEY_PREFIX = 'weknora:assistant-session'
+const VISIBLE_KEY_PREFIX = 'weknora:assistant-visible'
 const MODEL_KEY_PREFIX = 'weknora:assistant-model'
 const ACCESS_KEY_PREFIX = 'weknora:assistant-access'
 const LAYOUT_KEY = 'weknora:assistant-layout'
@@ -180,8 +181,8 @@ export const useAssistantStore = defineStore('assistant', () => {
   // the system default.
   const modelId = ref('')
 
-  // The conversation survives reloads within the tab and the model choice
-  // persists, both scoped like the command palette's history so another user
+  // The conversation and whether the panel is open survive reloads within
+  // the tab and the model choice persists, all scoped like the command palette's history so another user
   // or workspace never inherits them.
   const storageKey = (prefix: string): string => {
     const auth = useAuthStore()
@@ -203,11 +204,13 @@ export const useAssistantStore = defineStore('assistant', () => {
   const restore = () => {
     try {
       sessionId.value = sessionStorage.getItem(storageKey(SESSION_KEY_PREFIX)) || ''
+      visible.value = sessionStorage.getItem(storageKey(VISIBLE_KEY_PREFIX)) === '1'
       modelId.value = localStorage.getItem(storageKey(MODEL_KEY_PREFIX)) || ''
       const level = localStorage.getItem(storageKey(ACCESS_KEY_PREFIX))
       accessLevel.value = isAssistantAccessLevel(level) ? level : DEFAULT_ASSISTANT_ACCESS_LEVEL
     } catch {
       sessionId.value = ''
+      visible.value = false
       modelId.value = ''
       accessLevel.value = DEFAULT_ASSISTANT_ACCESS_LEVEL
     }
@@ -294,15 +297,24 @@ export const useAssistantStore = defineStore('assistant', () => {
     return `${auth.user?.id}:${auth.effectiveTenantId}`
   }, restore)
 
+  const setVisible = (next: boolean) => {
+    visible.value = next
+    try {
+      if (next) sessionStorage.setItem(storageKey(VISIBLE_KEY_PREFIX), '1')
+      else sessionStorage.removeItem(storageKey(VISIBLE_KEY_PREFIX))
+    } catch {
+      // See setSession.
+    }
+  }
   const open = (request?: AssistantOpenRequest) => {
     if (request?.query) {
       setSession('')
       pendingRequest.value = request
     }
-    visible.value = true
+    setVisible(true)
   }
   const close = () => {
-    visible.value = false
+    setVisible(false)
   }
   const toggle = () => {
     if (visible.value) close()

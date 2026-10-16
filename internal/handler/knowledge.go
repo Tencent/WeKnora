@@ -2726,7 +2726,7 @@ func applyKnowledgeTagBatch(req *KnowledgeTagBatchRequest) error {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"knowledge.set_tags","risk":"write","target":"knowledge_base.get","label":"name","items":{"param":"knowledge_ids","target":"knowledge.get","as":"knowledge_id","label":"title"}}
-// @x-agent-hint "Sets the same tags on up to 20 documents in one knowledge base, replacing the tags they have now. tag_ids come from knowledge_base.list_tags; an empty tag_ids clears every tag. It does not delete documents."
+// @x-agent-hint "Sets the same tags on up to 20 documents in one knowledge base, replacing the tags they have now. To add or remove one tag, read each document's tags with knowledge.get or knowledge.list first and pass the full resulting list. tag_ids come from knowledge_base.list_tags; an empty tag_ids clears every tag. It does not delete documents."
 // @Router       /knowledge/tags [put]
 func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 	ctx := c.Request.Context()

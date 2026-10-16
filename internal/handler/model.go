@@ -258,7 +258,7 @@ func (h *ModelHandler) GetModel(c *gin.Context) {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"model.list","risk":"read","max_items":200}
-// @x-agent-hint "Lists the workspace's models by name and type. An agent's chat model must be of type KnowledgeQA. Endpoints and keys are not shown; the user manages models in the settings."
+// @x-agent-hint "Lists the workspace's models by name, type and provider. An agent's chat model must be of type KnowledgeQA. base_url is shown only to users who may manage integrations and is empty for builtin models; keys are never shown. The provider is an id for model.get_provider."
 // @Router       /models [get]
 func (h *ModelHandler) ListModels(c *gin.Context) {
 	ctx := c.Request.Context()

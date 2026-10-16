@@ -216,8 +216,7 @@
                     <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                   </div>
 
-                  <OpenPageCard v-if="!event.pending && event.tool_name === 'open_page' && isAssistantPageLink(event.tool_data)"
-                    :link="event.tool_data" />
+                  <OpenPageCard v-if="showPageLinkInStep(event)" :link="event.tool_data" />
 
                   <SandboxCommandProgress
                     v-if="event.tool_name === 'shell_exec' && event.pending && event.command_output && !event.command_output.done"
@@ -409,6 +408,9 @@
                 <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)">
                 </div>
               </div>
+              <div v-if="event === pinnedAnswerEvent && pinnedPageLinks.length > 0" class="answer-page-links">
+                <OpenPageCard v-for="link in pinnedPageLinks" :key="link.tool_call_id" :link="link.tool_data" />
+              </div>
               <div v-if="answerFullyRendered && event.done && event.content && event.content.trim() && !embeddedMode"
                 class="answer-toolbar">
                 <t-tooltip v-if="canFork" :content="forkTooltip">
@@ -557,8 +559,7 @@
                   <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                 </div>
 
-                <OpenPageCard v-if="!event.pending && event.tool_name === 'open_page' && isAssistantPageLink(event.tool_data)"
-                  :link="event.tool_data" />
+                <OpenPageCard v-if="showPageLinkInStep(event)" :link="event.tool_data" />
 
                 <SandboxCommandProgress
                   v-if="event.tool_name === 'shell_exec' && event.pending && event.command_output && !event.command_output.done"
@@ -2198,6 +2199,29 @@ const displayEvents = computed(() => {
   return result;
 });
 
+const isPageLinkEvent = (event: any): boolean =>
+  event?.type === 'tool_call' && event.tool_name === 'open_page' && !event.pending &&
+  event.success !== false && isAssistantPageLink(event.tool_data);
+
+// Once the steps fold away, the page buttons move under the final answer:
+// they are what the user acts on next.
+const pinnedAnswerEvent = computed(() => {
+  if (!isConversationDone.value) return null;
+  const events = displayEvents.value;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i]?.type === 'answer') return events[i];
+  }
+  return null;
+});
+
+const pinnedPageLinks = computed(() => {
+  if (!pinnedAnswerEvent.value) return [];
+  return eventStream.value.filter(isPageLinkEvent);
+});
+
+const showPageLinkInStep = (event: any): boolean =>
+  isPageLinkEvent(event) && pinnedPageLinks.value.length === 0;
+
 // Get unique key for event
 const getEventKey = (event: any, index: number): string => {
   if (!event) return `event-${index}`;
@@ -3437,6 +3461,17 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
   .answer-toolbar {
     margin-top: 10px;
+  }
+
+  .answer-page-links {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+
+    :deep(.open-page-card) {
+      margin-top: 0;
+    }
   }
 }
 

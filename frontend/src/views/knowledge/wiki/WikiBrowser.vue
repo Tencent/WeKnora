@@ -1061,16 +1061,18 @@ const GRAPH_OVERVIEW_LIMIT = 500
 const GRAPH_EGO_LIMIT = 500
 const GRAPH_EGO_DEFAULT_DEPTH = 1
 
-watch(showGlobalIssuesDrawer, async (val) => {
-  if (val) {
-    try {
-      const res = await listWikiIssues(props.knowledgeBaseId, '', 'pending')
-      globalIssues.value = (res as any).data || res as any || []
-    } catch (e) {
-      console.error('Failed to load global wiki issues:', e)
-      globalIssues.value = []
-    }
+async function loadGlobalIssues() {
+  try {
+    const res = await listWikiIssues(props.knowledgeBaseId, '', 'pending')
+    globalIssues.value = (res as any).data || res as any || []
+  } catch (e) {
+    console.error('Failed to load global wiki issues:', e)
+    globalIssues.value = []
   }
+}
+
+watch(showGlobalIssuesDrawer, (val) => {
+  if (val) void loadGlobalIssues()
 })
 
 async function navigateToSlugAndFix(slug: string) {
@@ -5081,6 +5083,7 @@ useAssistantDataChange((changes) => {
   void loadPages()
   void refreshSelectedPage()
   void loadStats()
+  if (showGlobalIssuesDrawer.value) void loadGlobalIssues()
 }, { areas: ['wiki'] })
 
 onMounted(() => {

@@ -649,7 +649,8 @@ func (doc *specDocument) result(responses map[string]specResponse, meta agentOpe
 }
 
 // fields lists the projected fields of obj. Nested objects marked with
-// x-agent are flattened: their marked fields are named on their own. list
+// x-agent are flattened: their marked fields are named on their own. A list of
+// objects keeps each element's marked fields under the list's name. list
 // drops fields marked x-agent-detail.
 func (doc *specDocument) fields(obj *specSchema, prefix string, list bool) ([]Field, error) {
 	var out []Field
@@ -688,9 +689,28 @@ func (doc *specDocument) fields(obj *specSchema, prefix string, list bool) ([]Fi
 			if err != nil {
 				return nil, err
 			}
+			if items != nil && len(items.Properties) > 0 {
+				if runes > 0 {
+					return nil, fmt.Errorf("field %q: %s applies to strings", from, extAgentMaxRunes)
+				}
+				elem, err := doc.fields(items, "", list)
+				if err != nil {
+					return nil, fmt.Errorf("field %q: %w", from, err)
+				}
+				if len(elem) == 0 {
+					return nil, fmt.Errorf("field %q: list items expose no fields", from)
+				}
+				for _, f := range elem {
+					if len(f.Items) > 0 {
+						return nil, fmt.Errorf("field %q: list items cannot hold lists of objects", from)
+					}
+				}
+				out = append(out, Field{From: from, As: name, Items: elem})
+				continue
+			}
 			if items == nil || !isScalar(items.Type) {
-				return nil, fmt.Errorf("field %q: only lists of scalars are projected; "+
-					"point the operation's root at a list of objects instead", from)
+				return nil, fmt.Errorf("field %q: only lists of scalars or of objects with %s fields are projected",
+					from, extAgent)
 			}
 			if runes > 0 && items.Type != "string" {
 				return nil, fmt.Errorf("field %q: %s applies to strings", from, extAgentMaxRunes)

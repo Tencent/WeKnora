@@ -113,6 +113,9 @@ type Field struct {
 	// MaxRunes overrides the projected string length for this field. Zero
 	// keeps maxProjectedStringRunes.
 	MaxRunes int
+	// Items projects each element of a list of objects. Element fields are
+	// relative to the element and cannot declare Items themselves.
+	Items []Field
 }
 
 func (f Field) outputKey() string {
@@ -604,6 +607,27 @@ func validateOperation(op Operation) error {
 			return fmt.Errorf("result key %q declared twice", key)
 		}
 		seenOut[key] = true
+		if err := validateItemFields(key, f.Items); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateItemFields(parent string, items []Field) error {
+	seen := map[string]bool{}
+	for _, f := range items {
+		if f.From == "" {
+			return fmt.Errorf("result field %q has an item with empty path", parent)
+		}
+		if len(f.Items) > 0 {
+			return fmt.Errorf("result field %q: items cannot hold lists of objects", parent)
+		}
+		key := f.outputKey()
+		if seen[key] {
+			return fmt.Errorf("result field %q: item key %q declared twice", parent, key)
+		}
+		seen[key] = true
 	}
 	return nil
 }

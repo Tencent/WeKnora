@@ -233,6 +233,7 @@ func (t *wikiWritePageTool) Execute(ctx context.Context, args json.RawMessage) (
 		Output:  output,
 		Data: map[string]interface{}{
 			"display_type": "wiki_write_page",
+			"data_change":  wikiDataChange("write_page", kbID),
 			"action":       action,
 			"slug":         params.Slug,
 			"title":        params.Title,

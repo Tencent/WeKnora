@@ -641,7 +641,11 @@ definitions:
       app_id:
         type: string
       base_url:
+        description: |-
+          BaseURL is empty for callers who may not view integration detail, and
+          for builtin models; see NewModelResponse.
         type: string
+        x-agent: true
       context_window:
         type: integer
       custom_headers:
@@ -654,6 +658,9 @@ definitions:
         additionalProperties:
           type: string
         type: object
+        x-agent: true
+        x-agent-detail: true
+        x-agent-keys: remote_model_name
       interface_type:
         type: string
       max_concurrency:
@@ -664,6 +671,7 @@ definitions:
         type: string
       provider:
         type: string
+        x-agent: true
       spec:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSpecOverride'
       supports_vision:
@@ -678,6 +686,8 @@ definitions:
           Capabilities is the catalog view of the model. Chat models get the
           protocol, thinking levels and context window; embedding and rerank
           models get input modalities, including support for image input.
+        x-agent: true
+        x-agent-detail: true
       created_at:
         type: string
       credentials:
@@ -706,7 +716,9 @@ definitions:
         type: string
         x-agent: true
       parameters:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.ModelParametersDTO'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.ModelParametersDTO'
+        x-agent: true
       source:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSource'
@@ -1108,29 +1120,37 @@ definitions:
   github_com_Tencent_WeKnora_internal_models_runtime.Capabilities:
     properties:
       api:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_models_api.API'
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_models_api.API'
+        x-agent: true
       cataloged:
         type: boolean
+        x-agent: true
       context_window:
         type: integer
+        x-agent: true
       input:
         items:
           type: string
         type: array
+        x-agent: true
       max_output_tokens:
         type: integer
+        x-agent: true
       max_tokens_field:
         type: string
       provider:
         type: string
       reasoning:
         type: boolean
+        x-agent: true
       thinking_format:
         type: string
       thinking_levels:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_models_api.ReasoningEffort'
         type: array
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.APIKeyScopeType:
     enum:
@@ -3871,6 +3891,7 @@ definitions:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeTag'
         type: array
+        x-agent: true
       tenant_id:
         description: Workspace ID
         type: integer
@@ -10654,22 +10675,27 @@ definitions:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_models_api.API'
       context_window:
         type: integer
+        x-agent: true
       cost:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_models.ModelCost'
       dimension:
         type: integer
       id:
         type: string
+        x-agent: model_name
       input:
         items:
           type: string
         type: array
+        x-agent: true
       max_output_tokens:
         type: integer
       name:
         type: string
+        x-agent: display_name
       reasoning:
         type: boolean
+        x-agent: true
       source:
         description: |-
           Source is the vendor page these facts were read from, so the editor can
@@ -10681,6 +10707,7 @@ definitions:
         type: array
       type:
         type: string
+        x-agent: true
     type: object
   internal_handler.ModelProviderDTO:
     properties:
@@ -10701,6 +10728,8 @@ definitions:
         type: object
       description:
         type: string
+        x-agent: true
+        x-agent-detail: true
       descriptions:
         additionalProperties:
           type: string
@@ -10714,6 +10743,7 @@ definitions:
         type: string
       label:
         type: string
+        x-agent: true
       labels:
         additionalProperties:
           type: string
@@ -10722,18 +10752,23 @@ definitions:
         items:
           type: string
         type: array
+        x-agent: model_types
       models:
         items:
           $ref: '#/definitions/internal_handler.ModelCatalogEntryDTO'
         type: array
+        x-agent: true
+        x-agent-detail: true
       order:
         type: integer
       requiresAuth:
         type: boolean
+        x-agent: requires_auth
       thinking:
         $ref: '#/definitions/internal_handler.ProviderThinkingDTO'
       value:
         type: string
+        x-agent: provider
       website:
         type: string
     type: object
@@ -18564,8 +18599,10 @@ paths:
         risk: write
         target: knowledge_base.get
       x-agent-hint: Sets the same tags on up to 20 documents in one knowledge base,
-        replacing the tags they have now. tag_ids come from knowledge_base.list_tags;
-        an empty tag_ids clears every tag. It does not delete documents.
+        replacing the tags they have now. To add or remove one tag, read each document's
+        tags with knowledge.get or knowledge.list first and pass the full resulting
+        list. tag_ids come from knowledge_base.list_tags; an empty tag_ids clears
+        every tag. It does not delete documents.
   /knowledgebase/{kb_id}/wiki/auto-fix:
     post:
       description: Automatically fix fixable wiki issues (broken links, etc.)
@@ -21103,9 +21140,10 @@ paths:
         id: model.list
         max_items: 200
         risk: read
-      x-agent-hint: Lists the workspace's models by name and type. An agent's chat
-        model must be of type KnowledgeQA. Endpoints and keys are not shown; the user
-        manages models in the settings.
+      x-agent-hint: Lists the workspace's models by name, type and provider. An agent's
+        chat model must be of type KnowledgeQA. base_url is shown only to users who
+        may manage integrations and is empty for builtin models; keys are never shown.
+        The provider is an id for model.get_provider.
     post:
       consumes:
       - application/json
@@ -21398,9 +21436,16 @@ paths:
       description: 根据模型类型获取支持的厂商定义（含图标、默认地址、额外字段、内置模型目录与思考能力）
       parameters:
       - description: 模型类型 (chat, embedding, rerank, vllm, asr)
+        enum:
+        - chat
+        - embedding
+        - rerank
+        - vllm
+        - asr
         in: query
         name: model_type
         type: string
+        x-agent: true
       produces:
       - application/json
       responses:
@@ -21421,6 +21466,73 @@ paths:
       summary: 获取模型厂商列表
       tags:
       - 模型管理
+      x-agent:
+        id: model.list_providers
+        max_items: 200
+        risk: read
+      x-agent-hint: Lists the providers of the model catalog, including vendors an
+        admin added, by id and name. Use the id as model_draft.provider in open_page,
+        and read one provider's models with model.get_provider.
+  /models/providers/{provider}:
+    get:
+      consumes:
+      - application/json
+      description: 返回一个厂商的定义及其模型目录，可按模型类型与关键词过滤模型
+      parameters:
+      - description: 厂商标识
+        in: path
+        name: provider
+        required: true
+        type: string
+        x-agent: provider
+      - description: 模型类型 (chat, embedding, rerank, vllm, asr)
+        enum:
+        - chat
+        - embedding
+        - rerank
+        - vllm
+        - asr
+        in: query
+        name: model_type
+        type: string
+        x-agent: true
+      - description: 按模型 ID 或名称过滤（不区分大小写）
+        in: query
+        name: keyword
+        type: string
+        x-agent: true
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 厂商详情
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ModelProviderDTO'
+              type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 厂商不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取单个模型厂商
+      tags:
+      - 模型管理
+      x-agent:
+        id: model.get_provider
+        risk: read
+      x-agent-hint: 'One catalog provider with the models it offers: model_name is
+        what model_draft.model_name takes in open_page. Pass model_type to keep one
+        kind, and keyword when the list is truncated.'
   /models/weknoracloud/status:
     get:
       description: 检查当前空间的 WeKnoraCloud 凭证是否完好；needs_reinit=true 表示需要重新保存

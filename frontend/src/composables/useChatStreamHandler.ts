@@ -8,6 +8,12 @@ import { expandSteerForksInHistory, forkAfterInjectedUser, steerStepEvents, rese
 
 export type ChatMessage = Record<string, unknown>
 
+// Tools whose results tell open pages what changed (see dataChangeTools on
+// the server).
+const DATA_CHANGE_TOOLS = new Set([
+  'run_operation', 'wiki_write_page', 'wiki_replace_text', 'wiki_rename_page', 'wiki_delete_page', 'wiki_update_issue',
+])
+
 export interface UseChatStreamHandlerOptions {
   messagesList: ChatMessage[]
   loading: Ref<boolean>
@@ -1009,7 +1015,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           const toolCallId = dataPayload.tool_call_id as string | undefined
           const toolName = dataPayload.tool_name as string | undefined
           const success = responseType !== 'error' && dataPayload.success !== false
-          if (responseType === 'tool_result' && dataPayload.success === true && toolName === 'run_operation') {
+          if (responseType === 'tool_result' && dataPayload.success === true && toolName
+            && DATA_CHANGE_TOOLS.has(toolName)) {
             emitAssistantDataChange(dataPayload.data_change)
           }
           log('[Tool Result]', {

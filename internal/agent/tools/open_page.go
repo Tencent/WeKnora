@@ -58,10 +58,14 @@ const openPageDescription = "" +
 	"Show the user a button that opens a WeKnora page: a knowledge base or one of its documents, " +
 	"a Wiki page, an agent's editor at a given tab, the model settings, or the MCP services. " +
 	"It can open an existing model or MCP service for editing, or a new one with the form filled in " +
-	"from model_draft or mcp_service_draft. Use it when the user has to finish something themselves, " +
-	"above all when it needs an API key, token or password: never ask for those in chat, and the " +
-	"drafts have no field for them. The user reviews the form and saves it; nothing is saved by this " +
-	"tool, and the page only opens when they click. Name what they still need to fill in."
+	"from model_draft or mcp_service_draft. Use it whenever the next step is the user's on one of these " +
+	"pages: to look at what you created, changed or found (a knowledge base, a document, a Wiki page, " +
+	"an agent), to finish something themselves, or when they ask where something is, instead of " +
+	"describing the way there. Above all use it when the step needs an API key, token or password: " +
+	"never ask for those in chat, and the drafts have no field for them. Offer one button per target, " +
+	"once the work it points to is done, and none for the page the user already has open. The user " +
+	"reviews any form and saves it; nothing is saved by this tool, and the page only opens when they " +
+	"click. Name what they still need to fill in."
 
 const openPageSchema = `{
   "type": "object",
@@ -90,9 +94,9 @@ const openPageSchema = `{
         "source": {"type": "string", "enum": ["remote", "local"]},
         "provider": {
           "type": "string",
-          "description": "Provider id from the model catalog, e.g. openai, aliyun, generic."
+          "description": "Provider id from model.list_providers, e.g. openai, aliyun, generic. Prefer the catalog provider over generic."
         },
-        "model_name": {"type": "string", "description": "The model name the provider expects."},
+        "model_name": {"type": "string", "description": "The model name the provider expects: a model_name from model.get_provider when it lists one."},
         "display_name": {"type": "string"},
         "base_url": {"type": "string", "description": "http(s) endpoint, when the provider needs one."}
       },

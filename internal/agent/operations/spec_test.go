@@ -177,9 +177,13 @@ func TestFromSpecRejectsBadAnnotations(t *testing.T) {
 			`"strategy": {"allOf": [{"$ref": "#/definitions/types.Strategy"}], "x-agent": true}`,
 			`"strategy": {"allOf": [{"$ref": "#/definitions/types.Strategy"}], "x-agent": "strategy_flags"}`,
 		},
-		"list of objects inside a result": {
+		"list of objects without exposed fields": {
 			`"tags": {"type": "array", "items": {"type": "string"}, "x-agent": true}`,
-			`"tags": {"type": "array", "items": {"$ref": "#/definitions/types.Strategy"}, "x-agent": true}`,
+			`"tags": {"type": "array", "items": {"type": "object", "properties": {"secret": {"type": "string"}}}, "x-agent": true}`,
+		},
+		"length cap on a list of objects": {
+			`"tags": {"type": "array", "items": {"type": "string"}, "x-agent": true}`,
+			`"tags": {"type": "array", "items": {"$ref": "#/definitions/types.Strategy"}, "x-agent": true, "x-agent-max-runes": "10"}`,
 		},
 		"nothing exposed": {
 			`"message": {"type": "string", "x-agent": true}`, `"message": {"type": "string"}`,
@@ -501,6 +505,55 @@ func TestFromSpecProjectsNestedListMeta(t *testing.T) {
 	require.NoError(t, err)
 	out, _ := json.Marshal(projected)
 	assert.JSONEq(t, `{"data":[{"name":"a"}],"meta":{"total":3}}`, string(out))
+}
+
+func TestFromSpecProjectsListsOfObjects(t *testing.T) {
+	const spec = `{
+	  "basePath": "/api/v1",
+	  "definitions": {
+	    "Tag": {"type": "object", "properties": {
+	      "id": {"type": "string", "x-agent": "tag_id"},
+	      "color": {"type": "string"},
+	      "note": {"type": "string", "x-agent": true, "x-agent-detail": true}
+	    }},
+	    "Doc": {"type": "object", "properties": {
+	      "id": {"type": "string", "x-agent": "knowledge_id"},
+	      "tags": {"type": "array", "x-agent": true, "items": {"$ref": "#/definitions/Tag"}}
+	    }}
+	  },
+	  "paths": {
+	    "/knowledge": {"get": {"summary": "list", "x-agent": {"id": "doc.list", "risk": "read"},
+	      "responses": {"200": {"schema": {"type": "object", "properties": {
+	        "data": {"type": "array", "items": {"$ref": "#/definitions/Doc"}}}}}}}},
+	    "/knowledge/{id}": {"get": {"summary": "get", "x-agent": {"id": "doc.get", "risk": "read"},
+	      "parameters": [{"name": "id", "in": "path", "type": "string", "required": true,
+	        "description": "d", "x-agent": "knowledge_id"}],
+	      "responses": {"200": {"schema": {"type": "object", "properties": {
+	        "data": {"$ref": "#/definitions/Doc"}}}}}}}
+	  }
+	}`
+	ops, err := FromSpec([]byte(spec))
+	require.NoError(t, err)
+	catalog, err := NewCatalog(ops...)
+	require.NoError(t, err)
+	list, _ := catalog.Get("doc.list")
+	tags, ok := fieldByFrom(list.Result.Fields, "tags")
+	require.True(t, ok)
+	assert.Equal(t, []Field{{From: "id", As: "tag_id"}}, tags.Items, "lists drop detail fields of items too")
+	get, _ := catalog.Get("doc.get")
+	tags, _ = fieldByFrom(get.Result.Fields, "tags")
+	assert.Equal(t, []Field{{From: "id", As: "tag_id"}, {From: "note", As: "note"}}, tags.Items)
+
+	nested := strings.Replace(spec, `"color": {"type": "string"},`,
+		`"color": {"type": "array", "x-agent": true, "items": {"type": "object", "properties": {
+		  "hex": {"type": "string", "x-agent": true}}}},`, 1)
+	_, err = FromSpec([]byte(nested))
+	assert.ErrorContains(t, err, "cannot hold lists of objects")
+
+	bare := strings.Replace(spec, `"id": {"type": "string", "x-agent": "tag_id"},`, `"id": {"type": "string"},`, 1)
+	bare = strings.Replace(bare, `"note": {"type": "string", "x-agent": true, "x-agent-detail": true}`, `"note": {"type": "string"}`, 1)
+	_, err = FromSpec([]byte(bare))
+	assert.ErrorContains(t, err, "list items expose no fields")
 }
 
 func TestBuildAllowsDeclaredLongStrings(t *testing.T) {

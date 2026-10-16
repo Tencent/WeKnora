@@ -74,6 +74,7 @@ func (t *wikiUpdateIssueTool) Execute(ctx context.Context, args json.RawMessage)
 	return &types.ToolResult{
 		Success: true,
 		Output:  fmt.Sprintf("Successfully updated issue %s to status '%s'", params.IssueID, params.Status),
+		Data:    map[string]interface{}{"data_change": wikiDataChange("update_issue", issue.KnowledgeBaseID)},
 	}, nil
 }
 

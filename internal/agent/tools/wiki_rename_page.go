@@ -167,6 +167,7 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 		Output:  outputMsg,
 		Data: map[string]interface{}{
 			"display_type":   "wiki_rename_page",
+			"data_change":    wikiDataChange("rename_page", kbID),
 			"old_slug":       params.Slug,
 			"new_slug":       params.NewSlug,
 			"title":          existingPage.Title,

@@ -1515,22 +1515,70 @@ useAssistantDataChange((changes) => {
     // ID-only operations may affect a document outside the loaded folder or page.
     || (change.area === 'knowledge' && change.ids.knowledgeBaseIds.length === 0));
   if (!relevant.length) return;
+  if (relevant.some(change => change.operation === 'knowledge_base.delete')) {
+    MessagePlugin.warning(t('knowledgeBase.assistantDeleted'));
+    handleNavigateToKbList();
+    return;
+  }
   if (isCardDetails.value && relevant.some(change => change.ids.knowledgeIds.includes(details.id))) {
     if (relevant.some(change => change.ids.knowledgeIds.includes(details.id)
-      && ['knowledge.delete', 'knowledge.batch_delete'].includes(change.operation))) {
+      && LEAVING_OPERATIONS.includes(change.operation))) {
       closeDoc();
     } else {
       getCardDetails({ id: details.id });
     }
   }
-  resetPage();
-  if (relevant.some(change => change.area === 'knowledge_base')) {
-    void loadKnowledgeBaseInfo(targetKbId, true);
-  } else {
+  const reload = () => {
+    if (!isCurrentKb(targetKbId)) return;
+    resetPage();
     void loadKnowledgeFiles(targetKbId);
     void loadFolderTree(targetKbId);
+    void loadTags(targetKbId, true);
+  };
+  if (relevant.some(change => change.area === 'knowledge_base')) {
+    resetPage();
+    void loadKnowledgeBaseInfo(targetKbId, true);
+  } else {
+    reload();
   }
+  // Deletes and moves only start here; the list changes once they finish.
+  const loaded = new Set(cardList.value.map(item => item.id));
+  const leaving = new Set<string>();
+  const arriving = new Set<string>();
+  for (const change of relevant) {
+    if (!LEAVING_OPERATIONS.includes(change.operation) && change.operation !== 'knowledge.move') continue;
+    for (const id of change.ids.knowledgeIds) {
+      if (change.operation === 'knowledge.move' && !loaded.has(id)) arriving.add(id);
+      else leaving.add(id);
+    }
+  }
+  if (leaving.size || arriving.size) void settleThenReload(targetKbId, [...leaving], [...arriving], reload);
 }, { areas: ['knowledge_base', 'knowledge'] });
+
+const LEAVING_OPERATIONS = ['knowledge.delete', 'knowledge.batch_delete', 'knowledge.move'];
+
+const settleThenReload = async (
+  targetKbId: string, leaving: string[], arriving: string[], reload: () => void,
+) => {
+  const isActive = () => isCurrentKb(targetKbId);
+  const fetchRows = async (ids: string[]) => {
+    const query = new URLSearchParams();
+    ids.forEach(id => query.append('ids', id));
+    return await batchQueryKnowledge(query.toString(), targetKbId) as any;
+  };
+  try {
+    if (leaving.length) await waitForKnowledgeDeletion(leaving, fetchRows, { isActive });
+    for (let i = 0; arriving.length && i < 30 && isActive(); i++) {
+      const res = await fetchRows(arriving);
+      const present = new Set(((res?.data ?? []) as KnowledgeCard[]).map(row => row.id));
+      if (arriving.every(id => present.has(id))) break;
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  } catch {
+    // Reload whatever the server shows now.
+  }
+  reload();
+};
 
 const openCardDetails = (item: KnowledgeCard) => {
   isCardDetails.value = true;

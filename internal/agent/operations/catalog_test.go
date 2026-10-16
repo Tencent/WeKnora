@@ -3,6 +3,7 @@ package operations
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -387,15 +388,86 @@ func TestProjectKeepsOnlyDeclaredFields(t *testing.T) {
 	op, _ := Builtin().Get("knowledge.list")
 	body := `{"success":true,"total":3,"page":1,"page_size":2,"data":[
 		{"id":"k1","title":"A","parse_status":"failed","error_message":"bad pdf",
-		 "file_path":"s3://secret","tenant_id":9,"metadata":{"x":1}},
-		{"id":"k2","title":"B","parse_status":"completed"}]}`
+		 "file_path":"s3://secret","tenant_id":9,"metadata":{"x":1},
+		 "tags":[{"id":"t1","seq_id":7,"name":"Ops","color":"#f00","tenant_id":9}]},
+		{"id":"k2","title":"B","parse_status":"completed","tags":null}]}`
 	projected, err := op.Project([]byte(body))
 	require.NoError(t, err)
 	out, _ := json.Marshal(projected)
 	assert.JSONEq(t, `{"data":[
-		{"knowledge_id":"k1","title":"A","parse_status":"failed","error_message":"bad pdf"},
-		{"knowledge_id":"k2","title":"B","parse_status":"completed"}],
+		{"knowledge_id":"k1","title":"A","parse_status":"failed","error_message":"bad pdf",
+		 "tags":[{"tag_id":"t1","tag_seq_id":7,"name":"Ops"}]},
+		{"knowledge_id":"k2","title":"B","parse_status":"completed","tags":[]}],
 		"meta":{"total":3,"page":1,"page_size":2}}`, string(out))
+}
+
+func TestProjectModelEndpointAndCatalog(t *testing.T) {
+	get, ok := Builtin().Get("model.get")
+	require.True(t, ok)
+	model := []byte(`{"data":{"id":"m1","name":"hy4","type":"KnowledgeQA",
+		"parameters":{"base_url":"http://127.0.0.1:3425/v1","provider":"magpie",
+		"custom_headers":{"Authorization":"x"},"extra_config":{"k":"v","remote_model_name":"hy4-preview"},
+		"spec":{"compat":{"extra_body":{"token":"x"}}}},
+		"capabilities":{"provider":"magpie","api":"openai-responses","context_window":960000,
+		"max_output_tokens":64000,"input":["text","image"],"thinking_format":"x"}}}`)
+	projected, err := get.Project(model)
+	require.NoError(t, err)
+	data := projected.Data.(map[string]any)
+	assert.Equal(t, "http://127.0.0.1:3425/v1", data["base_url"])
+	assert.Equal(t, "magpie", data["provider"])
+	assert.Equal(t, "hy4-preview", data["remote_model_name"])
+	assert.Equal(t, "openai-responses", data["api"])
+	assert.Equal(t, json.Number("960000"), data["context_window"])
+	assert.Equal(t, []any{"text", "image"}, data["input"])
+	for _, hidden := range []string{"custom_headers", "extra_config", "k", "spec", "compat", "thinking_format"} {
+		assert.NotContains(t, data, hidden)
+	}
+
+	models, ok := Builtin().Get("model.list")
+	require.True(t, ok)
+	projected, err = models.Project([]byte(`{"data":[` + strings.TrimSuffix(strings.TrimPrefix(string(model), `{"data":`), `}`) + `]}`))
+	require.NoError(t, err)
+	row := projected.Data.([]any)[0].(map[string]any)
+	assert.Equal(t, "magpie", row["provider"])
+	assert.NotContains(t, row, "context_window", "the list leaves capabilities to model.get")
+	assert.NotContains(t, row, "remote_model_name")
+
+	list, ok := Builtin().Get("model.list_providers")
+	require.True(t, ok)
+	body := `{"data":[{"value":"magpie","label":"Magpie","description":"d","icon":"data:x",
+		"modelTypes":["chat"],"models":[{"id":"a","name":"A"}]}]}`
+	projected, err = list.Project([]byte(body))
+	require.NoError(t, err)
+	out, _ := json.Marshal(projected.Data)
+	assert.JSONEq(t, `[{"provider":"magpie","label":"Magpie","model_types":["chat"]}]`, string(out),
+		"the list leaves models and descriptions to model.get_provider")
+
+	one, ok := Builtin().Get("model.get_provider")
+	require.True(t, ok)
+	projected, err = one.Project([]byte(`{"data":{"value":"magpie","label":"Magpie","models":[
+		{"id":"codex/gpt","name":"GPT","type":"chat","reasoning":true,"context_window":272000,"cost":{"input":1}}]}}`))
+	require.NoError(t, err)
+	entries := projected.Data.(map[string]any)["models"].([]any)
+	assert.Equal(t, map[string]any{
+		"model_name": "codex/gpt", "display_name": "GPT", "type": "chat", "reasoning": true,
+		"context_window": json.Number("272000"),
+	}, entries[0])
+}
+
+func TestProjectKnowledgeGetReportsTags(t *testing.T) {
+	op, ok := Builtin().Get("knowledge.get")
+	require.True(t, ok)
+	tags := make([]map[string]any, defaultMaxListItems+1)
+	for i := range tags {
+		tags[i] = map[string]any{"id": fmt.Sprintf("t%d", i), "name": "n", "color": "#000"}
+	}
+	body, _ := json.Marshal(map[string]any{"data": map[string]any{"id": "k1", "tags": tags}})
+	projected, err := op.Project(body)
+	require.NoError(t, err)
+	assert.True(t, projected.Truncated)
+	got := projected.Data.(map[string]any)["tags"].([]any)
+	require.Len(t, got, defaultMaxListItems)
+	assert.Equal(t, map[string]any{"tag_id": "t0", "name": "n"}, got[0])
 }
 
 func TestProjectTruncatesLists(t *testing.T) {

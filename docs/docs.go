@@ -8541,7 +8541,7 @@ const docTemplate = `{
                     "risk": "write",
                     "target": "knowledge_base.get"
                 },
-                "x-agent-hint": "Sets the same tags on up to 20 documents in one knowledge base, replacing the tags they have now. tag_ids come from knowledge_base.list_tags; an empty tag_ids clears every tag. It does not delete documents."
+                "x-agent-hint": "Sets the same tags on up to 20 documents in one knowledge base, replacing the tags they have now. To add or remove one tag, read each document's tags with knowledge.get or knowledge.list first and pass the full resulting list. tag_ids come from knowledge_base.list_tags; an empty tag_ids clears every tag. It does not delete documents."
             }
         },
         "/knowledge/{id}": {
@@ -13049,7 +13049,7 @@ const docTemplate = `{
                     "max_items": 200,
                     "risk": "read"
                 },
-                "x-agent-hint": "Lists the workspace's models by name and type. An agent's chat model must be of type KnowledgeQA. Endpoints and keys are not shown; the user manages models in the settings."
+                "x-agent-hint": "Lists the workspace's models by name, type and provider. An agent's chat model must be of type KnowledgeQA. base_url is shown only to users who may manage integrations and is empty for builtin models; keys are never shown. The provider is an id for model.get_provider."
             },
             "post": {
                 "security": [
@@ -13192,7 +13192,15 @@ const docTemplate = `{
                 "summary": "获取模型厂商列表",
                 "parameters": [
                     {
+                        "enum": [
+                            "chat",
+                            "embedding",
+                            "rerank",
+                            "vllm",
+                            "asr"
+                        ],
                         "type": "string",
+                        "x-agent": true,
                         "description": "模型类型 (chat, embedding, rerank, vllm, asr)",
                         "name": "model_type",
                         "in": "query"
@@ -13220,7 +13228,104 @@ const docTemplate = `{
                             ]
                         }
                     }
-                }
+                },
+                "x-agent": {
+                    "id": "model.list_providers",
+                    "max_items": 200,
+                    "risk": "read"
+                },
+                "x-agent-hint": "Lists the providers of the model catalog, including vendors an admin added, by id and name. Use the id as model_draft.provider in open_page, and read one provider's models with model.get_provider."
+            }
+        },
+        "/models/providers/{provider}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "返回一个厂商的定义及其模型目录，可按模型类型与关键词过滤模型",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型管理"
+                ],
+                "summary": "获取单个模型厂商",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "provider",
+                        "description": "厂商标识",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "chat",
+                            "embedding",
+                            "rerank",
+                            "vllm",
+                            "asr"
+                        ],
+                        "type": "string",
+                        "x-agent": true,
+                        "description": "模型类型 (chat, embedding, rerank, vllm, asr)",
+                        "name": "model_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "x-agent": true,
+                        "description": "按模型 ID 或名称过滤（不区分大小写）",
+                        "name": "keyword",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "厂商详情",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.ModelProviderDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "厂商不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "model.get_provider",
+                    "risk": "read"
+                },
+                "x-agent-hint": "One catalog provider with the models it offers: model_name is what model_draft.model_name takes in open_page. Pass model_type to keep one kind, and keyword when the list is truncated."
             }
         },
         "/models/weknoracloud/status": {
@@ -22724,7 +22829,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "base_url": {
-                    "type": "string"
+                    "description": "BaseURL is empty for callers who may not view integration detail, and\nfor builtin models; see NewModelResponse.",
+                    "type": "string",
+                    "x-agent": true
                 },
                 "context_window": {
                     "type": "integer"
@@ -22742,7 +22849,10 @@ const docTemplate = `{
                     "type": "object",
                     "additionalProperties": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true,
+                    "x-agent-detail": true,
+                    "x-agent-keys": "remote_model_name"
                 },
                 "interface_type": {
                     "type": "string"
@@ -22757,7 +22867,8 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "provider": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "spec": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSpecOverride"
@@ -22776,7 +22887,9 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_models_runtime.Capabilities"
                         }
-                    ]
+                    ],
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "created_at": {
                     "type": "string"
@@ -22813,7 +22926,12 @@ const docTemplate = `{
                     "x-agent": true
                 },
                 "parameters": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.ModelParametersDTO"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.ModelParametersDTO"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "source": {
                     "allOf": [
@@ -23379,22 +23497,31 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "api": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_models_api.API"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_models_api.API"
+                        }
+                    ],
+                    "x-agent": true
                 },
                 "cataloged": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "context_window": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "input": {
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true
                 },
                 "max_output_tokens": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "max_tokens_field": {
                     "type": "string"
@@ -23403,7 +23530,8 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "reasoning": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "thinking_format": {
                     "type": "string"
@@ -23412,7 +23540,8 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_models_api.ReasoningEffort"
-                    }
+                    },
+                    "x-agent": true
                 }
             }
         },
@@ -26749,7 +26878,8 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeTag"
-                    }
+                    },
+                    "x-agent": true
                 },
                 "tenant_id": {
                     "description": "Workspace ID",
@@ -35531,7 +35661,8 @@ const docTemplate = `{
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_models_api.API"
                 },
                 "context_window": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-agent": true
                 },
                 "cost": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_models.ModelCost"
@@ -35540,22 +35671,26 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "id": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "model_name"
                 },
                 "input": {
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": true
                 },
                 "max_output_tokens": {
                     "type": "integer"
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "display_name"
                 },
                 "reasoning": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": true
                 },
                 "source": {
                     "description": "Source is the vendor page these facts were read from, so the editor can\nsend an operator to the documentation for this exact model.",
@@ -35568,7 +35703,8 @@ const docTemplate = `{
                     }
                 },
                 "type": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -35595,7 +35731,9 @@ const docTemplate = `{
                     }
                 },
                 "description": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "descriptions": {
                     "type": "object",
@@ -35614,7 +35752,8 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "label": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "labels": {
                     "type": "object",
@@ -35626,25 +35765,30 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "x-agent": "model_types"
                 },
                 "models": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/internal_handler.ModelCatalogEntryDTO"
-                    }
+                    },
+                    "x-agent": true,
+                    "x-agent-detail": true
                 },
                 "order": {
                     "type": "integer"
                 },
                 "requiresAuth": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "x-agent": "requires_auth"
                 },
                 "thinking": {
                     "$ref": "#/definitions/internal_handler.ProviderThinkingDTO"
                 },
                 "value": {
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": "provider"
                 },
                 "website": {
                     "type": "string"
