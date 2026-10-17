@@ -427,21 +427,21 @@ func (s *knowledgeService) frameExtractor() videoFrameExtractor {
 }
 
 // videoParseCapabilities reports which text sources this parse can actually
-// use. The audio source exists when the mode reads narration and an ASR model
-// is configured — the video section's own model, or the audio section's as the
-// fallback for knowledge bases configured before video had a model of its own.
-// The frame source exists when the mode reads the picture and a VLM model is
-// configured in the image section. The model ids are only checked for presence
-// here; resolving and type-checking them happens in the worker, where a failure
-// degrades the video instead of rejecting the import.
+// use. The audio source exists when the mode reads narration and the video
+// section itself names an ASR model; the audio section's model does not count,
+// because the two sections are configured independently and an implicit
+// fallback would hide which model the video actually uses. The frame source
+// exists when the mode reads the picture and a VLM model is configured in the
+// image section. The model ids are only checked for presence here; resolving
+// and type-checking them happens in the worker, where a failure degrades the
+// video instead of rejecting the import.
 func videoParseCapabilities(
 	kb *types.KnowledgeBase, eff types.EffectiveProcessConfig,
 ) (audio, frames bool) {
 	if kb == nil {
 		return false, false
 	}
-	audio = kb.VideoConfig.AllowsAudioParse() &&
-		(kb.VideoConfig.HasOwnASRModel() || eff.ASRConfig.IsASREnabled())
+	audio = kb.VideoConfig.AllowsAudioParse() && kb.VideoConfig.HasOwnASRModel()
 	frames = kb.VideoConfig.AllowsKeyframeParse() && eff.VLMConfig.IsEnabled()
 	return audio, frames
 }
@@ -466,11 +466,11 @@ func videoParseRequirementMessage(kb *types.KnowledgeBase) string {
 	frames := kb.VideoConfig.AllowsKeyframeParse()
 	switch {
 	case audio && frames:
-		return "上传视频文件需要先配置ASR语音识别模型或VLM视觉模型"
+		return "上传视频文件需要先配置视频 ASR 语音识别模型或 VLM 视觉模型"
 	case frames:
 		return "上传视频文件需要先配置VLM视觉模型"
 	case audio:
-		return "上传视频文件需要先配置ASR语音识别模型"
+		return "上传视频文件需要先配置视频 ASR 语音识别模型"
 	default:
 		return "上传视频文件需要先启用视频解析"
 	}
@@ -487,24 +487,23 @@ var errVideoASRNotConfigured = errors.New("no ASR model is configured for video 
 // worker resolves the video model once and hands the result to the same ASR
 // step an audio upload uses, so transcription has exactly one implementation.
 //
-// A video may name its own model (video_config.model_id). Only when that is
-// empty does it fall back to the audio section's model, so knowledge bases
-// configured before the field existed keep working. A configured model is
-// validated here: it must exist and be an ASR model. A wrong-typed or missing
-// model is returned as an error for the caller to degrade (archive, or frames
-// when the mode asks for them), never as a failed import.
+// The video section is authoritative on its own: only video_config.model_id is
+// consulted, and an empty value is an error rather than a fallback to the audio
+// section. Inheriting the audio model would make the bill and the transcription
+// behaviour depend on a setting the operator did not choose for videos. A
+// configured model is validated here: it must exist and be an ASR model. A
+// wrong-typed or missing model is returned as an error for the caller to
+// degrade (archive, or frames when the mode asks for them), never as a failed
+// import.
 func (s *knowledgeService) resolveVideoASRConfig(
-	ctx context.Context, kb *types.KnowledgeBase, eff types.EffectiveProcessConfig,
+	ctx context.Context, kb *types.KnowledgeBase,
 ) (types.ASRConfig, error) {
 	if kb == nil {
 		return types.ASRConfig{}, errors.New("video parsing has no knowledge base")
 	}
 	modelID := strings.TrimSpace(kb.VideoConfig.ModelID)
 	if modelID == "" {
-		if !eff.ASRConfig.IsASREnabled() {
-			return types.ASRConfig{}, errVideoASRNotConfigured
-		}
-		return eff.ASRConfig, nil
+		return types.ASRConfig{}, errVideoASRNotConfigured
 	}
 	if s.modelService == nil {
 		return types.ASRConfig{}, errors.New("model service is not available")
@@ -520,10 +519,14 @@ func (s *knowledgeService) resolveVideoASRConfig(
 		return types.ASRConfig{}, fmt.Errorf(
 			"video ASR model %q is a %s model, not an ASR model", modelID, model.Type)
 	}
-	// The language hint stays the knowledge base's: the video section has no
-	// language field of its own, and the audio section's hint is the only one
-	// an operator can set.
-	return types.ASRConfig{Enabled: true, ModelID: modelID, Language: eff.ASRConfig.Language}, nil
+	// The language hint is the video section's own, for the same reason the
+	// model is: the audio section's hint belongs to audio uploads. Empty means
+	// auto-detection, the vendors' default.
+	return types.ASRConfig{
+		Enabled:  true,
+		ModelID:  modelID,
+		Language: strings.TrimSpace(kb.VideoConfig.Language),
+	}, nil
 }
 
 // withStoredVideo opens a fresh reader on the stored video for one extraction.
@@ -947,7 +950,7 @@ func (s *knowledgeService) transcribeMedia(
 	isVideoAudio := IsVideoType(knowledge.FileType)
 	asrConfig := eff.ASRConfig
 	if isVideoAudio {
-		resolved, resolveErr := s.resolveVideoASRConfig(ctx, kb, eff)
+		resolved, resolveErr := s.resolveVideoASRConfig(ctx, kb)
 		if resolveErr != nil {
 			logger.Warnf(ctx, "[video] Cannot resolve the ASR model for knowledge %s: %v",
 				knowledge.ID, resolveErr)

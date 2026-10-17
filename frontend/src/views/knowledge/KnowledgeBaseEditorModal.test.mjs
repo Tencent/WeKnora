@@ -50,3 +50,18 @@ test('edit mode forwards image_processing_config in the update payload', () => {
   assert.ok(editBranch, 'expected to find the edit-mode update block')
   assert.match(editBranch, /if \(data\.image_processing_config\) \{\s*updateConfig\.image_processing_config = data\.image_processing_config\s*\}/)
 })
+
+test('video parsing saves its own ASR language and never borrows the audio model', () => {
+  // The video section is independent: emptying its model must not resurrect the
+  // audio section's model, and its language hint has to round-trip.
+  const payload = source.match(/data\.video_config = \{([\s\S]*?)\n  \}/)?.[1]
+  assert.ok(payload, 'expected to find the video_config payload block')
+  assert.match(payload, /language: formData\.value\.videoConfig\?\.language \|\| ''/)
+
+  const configured = source.match(
+    /const videoAudioModelConfigured = computed\(\(\) =>\s*([\s\S]*?)\)\n/
+  )?.[1]
+  assert.ok(configured, 'expected to find videoAudioModelConfigured')
+  assert.match(configured, /isVideoAudioModelConfigured\(formData\.value\?\.videoConfig\)/)
+  assert.doesNotMatch(configured, /asrConfig/)
+})

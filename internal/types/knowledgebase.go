@@ -774,13 +774,17 @@ type VideoConfig struct {
 	// Mode selects what to read from the video. Empty decodes rows written
 	// before the field existed and means audio_only.
 	Mode string `yaml:"mode" json:"mode"`
-	// ModelID is the ASR model used for this knowledge base's videos. Empty
-	// falls back to ASRConfig.ModelID (the audio section) so knowledge bases
-	// configured before this field existed keep transcribing. When set, it must
-	// name an ASR model: a stale or wrong-typed id degrades the video instead of
-	// silently borrowing the audio model. Frames do not use it; they use
+	// ModelID is the ASR model used for this knowledge base's videos. It is
+	// independent of ASRConfig.ModelID: an empty value means the video has no
+	// narration model and is never silently borrowed from the audio section.
+	// When set, it must name an ASR model: a stale or wrong-typed id degrades
+	// the video instead of failing the import. Frames do not use it; they use
 	// VLMConfig.ModelID.
 	ModelID string `yaml:"model_id" json:"model_id"`
+	// Language is the hint sent to the video's ASR model, in the vendor's
+	// language code (for example "zh"). Empty means auto-detection, the
+	// vendors' default; it never inherits the audio section's hint.
+	Language string `yaml:"language,omitempty" json:"language,omitempty"`
 }
 
 // Normalize fills the mode default and coalesces unknown modes to audio_only:
@@ -791,6 +795,7 @@ func (c *VideoConfig) Normalize() {
 		return
 	}
 	c.ModelID = strings.TrimSpace(c.ModelID)
+	c.Language = strings.TrimSpace(c.Language)
 	switch strings.TrimSpace(c.Mode) {
 	case "", VideoParseModeAudioOnly:
 		c.Mode = VideoParseModeAudioOnly
@@ -847,8 +852,8 @@ func (c VideoConfig) AllowsKeyframeParse() bool {
 }
 
 // HasOwnASRModel reports whether the video section names its own ASR model.
-// An empty value is the pre-existing configuration and falls back to the audio
-// section's model.
+// There is no fallback: an empty value means the video cannot transcribe, and
+// the operator has to choose a model in the video section.
 func (c VideoConfig) HasOwnASRModel() bool {
 	return strings.TrimSpace(c.ModelID) != ""
 }
@@ -874,8 +879,9 @@ func (c *VideoConfig) Scan(value interface{}) error {
 // into searchable text under its configured mode. Depending on the mode the
 // video needs at least one text source:
 //
-//   - audio modes need an ASR model — video_config.model_id when set, otherwise
-//     the audio section's asr_config.model_id;
+//   - audio modes need the video section's own ASR model
+//     (video_config.model_id). The audio section's asr_config.model_id does not
+//     count: the two sections are configured independently.
 //   - keyframe modes need a VLM model (vlm_config.model_id).
 //
 // The model ids are only checked for presence here: whether the id resolves to
@@ -888,8 +894,7 @@ func VideoAudioParseEnabled(kb *KnowledgeBase) bool {
 	if kb == nil || !kb.VideoConfig.Enabled {
 		return false
 	}
-	if kb.VideoConfig.AllowsAudioParse() &&
-		(kb.VideoConfig.HasOwnASRModel() || kb.ASRConfig.IsASREnabled()) {
+	if kb.VideoConfig.AllowsAudioParse() && kb.VideoConfig.HasOwnASRModel() {
 		return true
 	}
 	return kb.VideoConfig.AllowsKeyframeParse() && kb.VLMConfig.IsEnabled()

@@ -153,13 +153,6 @@ test('isVideoParsingReady mirrors the backend model requirement per mode', () =>
       { video_config: { enabled: true, mode: 'audio_only', model_id: 'asr-1' } },
     ],
     [
-      'audio_only with an empty mode falling back to the audio model',
-      {
-        video_config: { enabled: true },
-        asr_config: { enabled: true, model_id: 'asr-audio' },
-      },
-    ],
-    [
       'keyframes with the image VLM',
       {
         video_config: { enabled: true, mode: 'keyframes' },
@@ -185,6 +178,13 @@ test('isVideoParsingReady mirrors the backend model requirement per mode', () =>
   const notReady: Array<[string, unknown]> = [
     ['the switch is off', { video_config: { enabled: false, model_id: 'asr-1' } }],
     ['audio_only without any model', { video_config: { enabled: true, mode: 'audio_only' } }],
+    [
+      'audio_only with only the audio section model',
+      {
+        video_config: { enabled: true, mode: 'audio_only' },
+        asr_config: { enabled: true, model_id: 'asr-audio' },
+      },
+    ],
     [
       'audio_only with an ASR config that has no model',
       {

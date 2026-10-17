@@ -178,10 +178,11 @@ func TestVideoConfigValueAndScanRoundTrip(t *testing.T) {
 	}
 }
 
-// Each mode needs its own text source: audio modes need an ASR model (video's
-// own or the audio section's fallback), keyframe modes need a VLM model. The
-// switch alone never suffices, and the video model id is presence-checked only
-// — type validation happens in the worker.
+// Each mode needs its own text source: audio modes need the video section's
+// own ASR model, keyframe modes need a VLM model. The switch alone never
+// suffices, the audio section's ASR model does not satisfy the video, and the
+// video model id is presence-checked only — type validation happens in the
+// worker.
 func TestVideoAudioParseEnabledPerMode(t *testing.T) {
 	t.Parallel()
 
@@ -205,12 +206,12 @@ func TestVideoAudioParseEnabledPerMode(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "audio_only with fallback asr model",
+			name: "audio_only with only the audio-section asr model",
 			kb: &KnowledgeBase{
 				VideoConfig: VideoConfig{Enabled: true, Mode: VideoParseModeAudioOnly},
 				ASRConfig:   asr,
 			},
-			want: true,
+			want: false,
 		},
 		{
 			name: "audio_only with the video's own model and no audio model",
@@ -222,10 +223,17 @@ func TestVideoAudioParseEnabledPerMode(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "legacy empty mode with fallback asr model",
+			name: "legacy empty mode with only the audio-section asr model",
 			kb: &KnowledgeBase{
 				VideoConfig: VideoConfig{Enabled: true},
 				ASRConfig:   asr,
+			},
+			want: false,
+		},
+		{
+			name: "legacy empty mode with the video's own model",
+			kb: &KnowledgeBase{
+				VideoConfig: VideoConfig{Enabled: true, ModelID: "asr-video"},
 			},
 			want: true,
 		},
@@ -246,10 +254,19 @@ func TestVideoAudioParseEnabledPerMode(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "audio_and_keyframes with only asr",
+			name: "audio_and_keyframes with only the audio-section asr",
 			kb: &KnowledgeBase{
 				VideoConfig: VideoConfig{Enabled: true, Mode: VideoParseModeAudioKeyframes},
 				ASRConfig:   asr,
+			},
+			want: false,
+		},
+		{
+			name: "audio_and_keyframes with the video's own model",
+			kb: &KnowledgeBase{
+				VideoConfig: VideoConfig{
+					Enabled: true, Mode: VideoParseModeAudioKeyframes, ModelID: "asr-video",
+				},
 			},
 			want: true,
 		},
@@ -280,18 +297,39 @@ func TestVideoAudioParseEnabledPerMode(t *testing.T) {
 	}
 }
 
-// The video section may name its own ASR model; an empty id keeps the old
-// fallback to the audio section.
+// The video section may name its own ASR model; an empty id means the video
+// cannot transcribe — there is no audio-section fallback.
 func TestVideoConfigHasOwnASRModel(t *testing.T) {
 	t.Parallel()
 
 	if (VideoConfig{}).HasOwnASRModel() {
-		t.Fatal("an empty model id must use the audio fallback")
+		t.Fatal("an empty model id must not report a video model")
 	}
 	if (VideoConfig{ModelID: "   "}).HasOwnASRModel() {
-		t.Fatal("a whitespace model id must use the audio fallback")
+		t.Fatal("a whitespace model id must not report a video model")
 	}
 	if !(VideoConfig{ModelID: "asr-video"}).HasOwnASRModel() {
 		t.Fatal("a configured model id must be used")
+	}
+}
+
+// The language hint belongs to the video section: Normalize trims it and keeps
+// an empty value as the auto-detect signal.
+func TestVideoConfigNormalizeKeepsItsOwnLanguage(t *testing.T) {
+	t.Parallel()
+
+	config := VideoConfig{Language: "  zh  "}
+	config.Normalize()
+	if config.Language != "zh" {
+		t.Fatalf("Language = %q, want %q", config.Language, "zh")
+	}
+
+	empty := VideoConfig{Language: "   "}
+	empty.Normalize()
+	if empty.Language != "" {
+		t.Fatalf("Language = %q, want the empty auto-detect value", empty.Language)
+	}
+	if (VideoConfig{}).Language != "" {
+		t.Fatal("a zero VideoConfig must mean auto-detect")
 	}
 }

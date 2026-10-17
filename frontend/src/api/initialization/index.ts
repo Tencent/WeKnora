@@ -118,11 +118,16 @@ export interface KBModelConfigRequest {
         model_id?: string
         language?: string
     }
-    /** 视频解析配置。mode 为 audio_only / keyframes / audio_and_keyframes；model_id 留空沿用音频处理里的 ASR 模型。 */
+    /**
+     * 视频解析配置。mode 为 audio_only / keyframes / audio_and_keyframes；
+     * model_id 是视频页自己的 ASR 模型，留空就是没配（不沿用音频处理）；
+     * language 是视频转写的语言提示，留空为自动检测。
+     */
     video_config?: {
         enabled: boolean
         mode?: string
         model_id?: string
+        language?: string
     }
     documentSplitting: {
         chunkSize: number

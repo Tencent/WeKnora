@@ -568,7 +568,7 @@
               </div>
             </div>
 
-            <!-- 视频专用 ASR 模型：留空回退到「音频处理」里的模型 -->
+            <!-- 视频专用 ASR 模型：独立配置，不沿用「音频处理」里的模型 -->
             <div v-if="formData.videoConfig.enabled && videoModeUsesAudio" class="setting-row">
               <div class="setting-info">
                 <label>{{ $t('knowledgeEditor.video.modelLabel') }}</label>
@@ -588,6 +588,22 @@
                   :placeholder="$t('knowledgeEditor.video.modelPlaceholder')"
                 />
                 <p class="video-model-hint">{{ $t('knowledgeEditor.video.asrHint') }}</p>
+              </div>
+            </div>
+
+            <!-- 视频转写的语言提示：自由输入，只属于视频页，空值即自动检测 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesAudio" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.languageLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.languageDescription') }}</p>
+              </div>
+              <div class="setting-control">
+                <t-input
+                  v-model="formData.videoConfig.language"
+                  clearable
+                  :placeholder="$t('knowledgeEditor.video.languagePlaceholder')"
+                  :style="{ width: '280px' }"
+                />
               </div>
             </div>
 
@@ -741,6 +757,7 @@ import KBVectorStoreSettings from './settings/KBVectorStoreSettings.vue'
 import KBAdvancedSettings from './settings/KBAdvancedSettings.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import GraphSettings from './settings/GraphSettings.vue'
+import { isVideoAudioModelConfigured } from './videoConfig'
 import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
 import KnowledgeBaseActivitySettings from './settings/KnowledgeBaseActivitySettings.vue'
@@ -928,13 +945,9 @@ const videoModeUsesFrames = computed(() => {
   const mode = formData.value?.videoConfig?.mode
   return mode === 'keyframes' || mode === 'audio_and_keyframes'
 })
-// 与后端同一套判定：视频页自己的 ASR 模型优先，留空才回退到音频处理页。
-const videoAudioModelConfigured = computed(() => {
-  if (!formData.value) return false
-  if (formData.value.videoConfig?.modelId) return true
-  const asr = formData.value.asrConfig
-  return !!(asr?.enabled && asr?.modelId)
-})
+// 与后端同一套判定：视频转写只看视频页自己的 ASR 模型，音频页配了也不算。
+const videoAudioModelConfigured = computed(() =>
+  isVideoAudioModelConfigured(formData.value?.videoConfig))
 // 画面描述固定使用「图像处理」页的 VLM（vlm_config.model_id）。
 const videoFrameModelConfigured = computed(() => {
   const multimodal = formData.value?.multimodalConfig
@@ -1129,11 +1142,13 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       language: ''
     },
     // 视频解析：默认关闭。mode 始终显式发送，免得老行（mode 缺省）在保存后
-    // 被后端归一成别的读法；modelId 留空表示沿用「音频处理」里的 ASR 模型。
+    // 被后端归一成别的读法；modelId/language 是视频页自己的配置，留空表示
+    // 没有可用的 ASR 模型 / 自动检测，都不回退到「音频处理」。
     videoConfig: {
       enabled: false,
       mode: 'audio_only' as string,
-      modelId: '' as string
+      modelId: '' as string,
+      language: '' as string
     },
     nodeExtractConfig: {
       enabled: false,
@@ -1311,9 +1326,11 @@ const loadKBData = async (
         // An old row decodes to an empty mode; the server treats that as
         // audio_only, and so does the dropdown.
         mode: normalizeVideoMode(kb.video_config?.mode),
-        // Empty means "use the ASR model configured under Audio", exactly like
-        // the backend's fallback.
-        modelId: kb.video_config?.model_id || ''
+        // Empty means "no video ASR model": the backend no longer borrows the
+        // audio section's model, so the warning shows until one is chosen.
+        modelId: kb.video_config?.model_id || '',
+        // Empty means auto-detection; the hint never comes from asr_config.
+        language: kb.video_config?.language || ''
       },
       nodeExtractConfig: {
         enabled: kb.extract_config?.enabled || false,
@@ -1753,12 +1770,13 @@ const buildSubmitData = () => {
     language: formData.value.asrConfig?.language || ''
   }
 
-  // 视频解析配置。mode 永远显式发送；model_id 为空时后端回退到音频处理的
-  // ASR 模型，因此老配置不需要迁移。
+  // 视频解析配置。mode 与 language 永远显式发送（清空语言也要生效）；
+  // model_id 为空就是没配视频 ASR，后端不会回退到「音频处理」。
   data.video_config = {
     enabled: formData.value.videoConfig?.enabled || false,
     mode: formData.value.videoConfig?.mode || 'audio_only',
-    model_id: formData.value.videoConfig?.modelId || ''
+    model_id: formData.value.videoConfig?.modelId || '',
+    language: formData.value.videoConfig?.language || ''
   }
 
   // storage_backend_id is authoritative. Keep provider projection for old clients

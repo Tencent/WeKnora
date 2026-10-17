@@ -13,10 +13,6 @@ export interface VideoParsingKbInfo {
     mode?: string
     model_id?: string
   } | null
-  asr_config?: {
-    enabled?: boolean
-    model_id?: string
-  } | null
   vlm_config?: {
     enabled?: boolean
     model_id?: string
@@ -57,12 +53,9 @@ export function isVideoParsingReady(kbInfo?: VideoParsingKbInfo | null): boolean
   const mode = normalizeVideoParseMode(kbInfo?.video_config?.mode)
   const usesAudio = mode === 'audio_only' || mode === 'audio_and_keyframes'
   const usesFrames = mode === 'keyframes' || mode === 'audio_and_keyframes'
-  // The video's own ASR model wins; an empty value falls back to the audio
-  // section, exactly like the backend.
-  const audioReady =
-    usesAudio &&
-    (!!kbInfo?.video_config?.model_id?.trim() ||
-      (kbInfo?.asr_config?.enabled === true && !!kbInfo.asr_config.model_id?.trim()))
+  // The video's own ASR model is the only one that counts: the audio section's
+  // model never makes a video parseable, exactly like the backend.
+  const audioReady = usesAudio && !!kbInfo?.video_config?.model_id?.trim()
   // Frames use the VLM configured under image processing; the legacy
   // model_name/base_url pair counts as configured on older rows.
   const framesReady =

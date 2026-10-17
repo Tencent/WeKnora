@@ -339,12 +339,14 @@ export function createKnowledgeBase(data: {
     language?: string;
   };
   // Video parsing. mode picks narration (audio_only), pictures (keyframes) or
-  // both (audio_and_keyframes). model_id is the video's own ASR model; empty
-  // falls back to the audio section's model.
+  // both (audio_and_keyframes). model_id is the video's own ASR model — empty
+  // means no narration model, never a fallback to the audio section. language
+  // is the video's own ASR hint; empty means auto-detect.
   video_config?: {
     enabled: boolean;
     mode?: string;
     model_id?: string;
+    language?: string;
   };
   extract_config?: any;
   faq_config?: { index_mode: string; question_index_mode?: string };
@@ -394,6 +396,7 @@ export function updateKnowledgeBase(id: string, data: {
       enabled: boolean;
       mode?: string;
       model_id?: string;
+      language?: string;
     };
     indexing_strategy?: {
       vector_enabled: boolean;
