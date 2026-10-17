@@ -8,8 +8,12 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"golang.org/x/text/encoding/charmap"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/encoding/unicode"
 )
 
 // simpleFormats lists file extensions that Go can handle without the Python service.
@@ -56,11 +60,11 @@ func (b *SimpleFormatReader) Read(_ context.Context, req *types.ReadRequest) (*t
 
 	switch {
 	case ft == "md" || ft == "markdown":
-		return &types.ReadResult{MarkdownContent: string(req.FileContent)}, nil
+		return &types.ReadResult{MarkdownContent: string(decodeText(req.FileContent))}, nil
 	case ft == "txt" || ft == "text":
-		return &types.ReadResult{MarkdownContent: string(req.FileContent)}, nil
+		return &types.ReadResult{MarkdownContent: string(decodeText(req.FileContent))}, nil
 	case ft == "csv":
-		md, err := csvToMarkdown(req.FileContent)
+		md, err := csvToMarkdown(decodeText(req.FileContent))
 		if err != nil {
 			return nil, fmt.Errorf("csv conversion failed: %w", err)
 		}
@@ -176,6 +180,33 @@ func ensureOriginalImageRef(req *types.ReadRequest, mdContent string, imageRefs 
 	})
 
 	return mdContent, imageRefs
+}
+
+// decodeText returns a text file as UTF-8. Windows tools often save text in
+// another encoding: UTF-16 with a byte order mark (Notepad's "Unicode"), or
+// the code page of a Chinese locale, GBK, which Excel also writes for "CSV
+// (Comma delimited)". Taken as UTF-8, such a file reached the index as
+// invalid bytes. The order follows decode_bytes in docreader/utils/endecode.py,
+// which docreader's Markdown parser reads text with: UTF-8, then GB18030 (a
+// superset of GBK and GB2312), then Latin-1, which decodes any byte. A UTF-8
+// file, byte order mark included, is returned unchanged.
+func decodeText(data []byte) []byte {
+	if bytes.HasPrefix(data, []byte{0xff, 0xfe}) || bytes.HasPrefix(data, []byte{0xfe, 0xff}) {
+		if text, err := unicode.UTF16(unicode.BigEndian, unicode.ExpectBOM).NewDecoder().Bytes(data); err == nil {
+			return text
+		}
+	}
+	if utf8.Valid(data) {
+		return data
+	}
+	// The decoder writes U+FFFD for a byte sequence GB18030 does not define
+	// instead of failing, so that marks a file in some other encoding.
+	text, err := simplifiedchinese.GB18030.NewDecoder().Bytes(data)
+	if err == nil && !bytes.ContainsRune(text, utf8.RuneError) {
+		return text
+	}
+	text, _ = charmap.ISO8859_1.NewDecoder().Bytes(data)
+	return text
 }
 
 func csvToMarkdown(data []byte) (string, error) {
