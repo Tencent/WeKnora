@@ -2111,14 +2111,21 @@ func (h *KnowledgeHandler) PreviewKnowledgeFile(c *gin.Context) {
 		return
 	}
 
-	file, filename, err := h.kgService.GetKnowledgeFile(effCtx, id)
+	preview, err := h.kgService.GetKnowledgePreviewFile(effCtx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError("Failed to retrieve file").WithDetails(err.Error()))
 		return
 	}
-	if err := filetransport.Serve(c.Writer, c.Request, file, filetransport.Options{
-		Filename: filename, CacheControl: "private, no-store",
+	if preview.FallbackReason != "" {
+		// The browser gets the original bytes, exactly as before the feature
+		// existed; the header lets support tell a degraded preview apart from
+		// a document that never needed conversion.
+		c.Header("X-WeKnora-Preview-Fallback", "original")
+		logger.Warnf(ctx, "preview: serving original file for %s: %s", id, preview.FallbackReason)
+	}
+	if err := filetransport.Serve(c.Writer, c.Request, preview.Reader, filetransport.Options{
+		Filename: preview.Filename, CacheControl: "private, no-store",
 	}); err != nil {
 		logger.Errorf(ctx, "Failed to stream preview: %v", err)
 	}

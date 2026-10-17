@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import sys
+import time
 import traceback
 import uuid
 from concurrent import futures
@@ -15,9 +16,11 @@ from docreader.auth import AuthInterceptor, TLSConfigError, load_tls_credentials
 from docreader import config
 from docreader.config import CONFIG
 from docreader.parser import Parser
+from docreader.parser.docx_preview import convert_docx_preview
 from docreader.proto import docreader_pb2_grpc
 from docreader.parser.registry import registry
 from docreader.proto.docreader_pb2 import (
+    ConvertPreviewResponse,
     ReadRequest,
     ReadResponse,
     ImageRef,
@@ -224,6 +227,76 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                 logger.error(error_msg)
                 logger.info("Traceback: %s", traceback.format_exc())
                 return ReadResponse(error=str(e))
+
+    def ConvertPreview(self, request, context):
+        """Rewrite a document so browsers can render every embedded image.
+
+        Only DOCX packages that contain EMF/WMF media need work today. The
+        conversion is best-effort: failures are reported so the Go app can
+        keep serving the original file instead of a broken preview.
+        """
+        request_id = request.request_id or str(uuid.uuid4())
+
+        with request_id_context(request_id):
+            file_name = request.file_name or "<upload>"
+            file_type = (request.file_type or "").lower()
+            size = len(request.file_content)
+            logger.info(
+                "ConvertPreview: file=%s type=%s size=%d bytes",
+                file_name,
+                file_type,
+                size,
+            )
+            if not request.file_content:
+                return ConvertPreviewResponse(error="empty file_content")
+            if file_type not in ("", "docx") and not file_name.lower().endswith(
+                ".docx"
+            ):
+                return ConvertPreviewResponse(
+                    skipped_reason=f"unsupported file type: {file_type or file_name}"
+                )
+
+            started = time.monotonic()
+            try:
+                result = convert_docx_preview(request.file_content, file_name)
+            except Exception as e:  # defensive: never fail the preview request
+                logger.error("Error converting preview for %s: %s", file_name, e)
+                logger.info("Traceback: %s", traceback.format_exc())
+                return ConvertPreviewResponse(error=str(e))
+
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            if result.error:
+                logger.warning(
+                    "ConvertPreview failed for %s: %s (%d ms)",
+                    file_name,
+                    result.error,
+                    elapsed_ms,
+                )
+                return ConvertPreviewResponse(error=result.error)
+            if not result.converted:
+                logger.info(
+                    "ConvertPreview skipped %s: %s (%d ms)",
+                    file_name,
+                    result.skipped_reason,
+                    elapsed_ms,
+                )
+                return ConvertPreviewResponse(
+                    skipped_reason=result.skipped_reason,
+                    warnings=result.warnings,
+                )
+
+            logger.info(
+                "ConvertPreview converted %s: %d -> %d bytes in %d ms",
+                file_name,
+                size,
+                len(result.content),
+                elapsed_ms,
+            )
+            return ConvertPreviewResponse(
+                file_content=result.content,
+                converted=True,
+                warnings=result.warnings,
+            )
 
     def ReadStream(self, request: ReadRequest, context):
         """Streaming read: yields one meta frame, then one frame per image.

@@ -28,6 +28,7 @@ type Config struct {
 	Models          []ModelConfig          `yaml:"models"           json:"models"`
 	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"  json:"vector_database"`
 	DocReader       *DocReaderConfig       `yaml:"docreader"        json:"docreader"`
+	Preview         *PreviewConfig         `yaml:"preview"          json:"preview"`
 	StreamManager   *StreamManagerConfig   `yaml:"stream_manager"   json:"stream_manager"`
 	ExtractManager  *ExtractManagerConfig  `yaml:"extract"          json:"extract"`
 	WebSearch       *WebSearchConfig       `yaml:"web_search"       json:"web_search"`
@@ -127,6 +128,18 @@ type DocReaderConfig struct {
 	Addr string `yaml:"addr" json:"addr"`
 	// Transport: "grpc" (default) or "http"
 	Transport string `yaml:"transport" json:"transport"`
+}
+
+// PreviewConfig controls server-side preparation of in-browser preview copies.
+// Both knobs are opt-in so a deployment that does not need them keeps the
+// original file bytes and the old latency profile.
+type PreviewConfig struct {
+	// DocxEMF rasterizes EMF/WMF media inside DOCX files to PNG before the
+	// browser previewer sees them. Off by default.
+	DocxEMF bool `yaml:"docx_emf" json:"docx_emf"`
+	// CacheDir stores converted preview copies keyed by file hash. Empty uses
+	// $TMPDIR/weknora-docx-preview.
+	CacheDir string `yaml:"cache_dir" json:"cache_dir"`
 }
 
 type VectorDatabaseConfig struct {
@@ -633,6 +646,7 @@ func LoadConfig() (*Config, error) {
 	applyOIDCEnvOverrides(&cfg)
 	applyAgentEnvOverrides(&cfg)
 	applyKnowledgeBaseEnvOverrides(&cfg)
+	applyPreviewEnvOverrides(&cfg)
 	applyNetworkEnvOverrides()
 	applyAuthAndTenantDefaults(&cfg)
 	applyAuditDefaults(&cfg)
@@ -824,6 +838,24 @@ func applyKnowledgeBaseEnvOverrides(cfg *Config) {
 		if d, err := time.ParseDuration(value); err == nil && d > 0 {
 			cfg.KnowledgeBase.DocReaderCallTimeout = d
 		}
+	}
+}
+
+// applyPreviewEnvOverrides reads the preview copy switches explicitly.
+// viper.AutomaticEnv is not bound to nested structs, so a WEKNORA_-prefixed
+// variable would otherwise be ignored and operators could believe the feature
+// was enabled when it was not.
+func applyPreviewEnvOverrides(cfg *Config) {
+	if cfg.Preview == nil {
+		cfg.Preview = &PreviewConfig{}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_DOCX_EMF_PREVIEW")); value != "" {
+		if parsed, err := strconv.ParseBool(value); err == nil {
+			cfg.Preview.DocxEMF = parsed
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_DOCX_PREVIEW_CACHE_DIR")); value != "" {
+		cfg.Preview.CacheDir = value
 	}
 }
 
