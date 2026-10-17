@@ -5717,6 +5717,21 @@ export default {
       "saveNext": "保存して次へ"
   },
     mcpServiceDialog: {
+      presets: {
+        "title": "サービスのプリセットを探す",
+        "hint": "各サービスを個別に設定できます。カスタムMCPも追加できます。これらはAce Data Cloudが提供する連携であり、モデルブランドの公式アプリではありません。",
+        "search": "Suno、Seedance、HappyHorse、GPT Image、Nano Bananaを検索",
+        "custom": "カスタムMCPサービスを設定",
+        "account": "Ace Data Cloudにログインし、Applications → General applicationでAPIキーをコピーするか専用キーを作成します。サービス権限、残高、現在の料金を確認してください。",
+        "getKey": "Ace Data CloudのAPIキーを開く",
+        "pricing": "現在のサービス料金を確認",
+        "credentialHint": "下の非公開Token欄にキーを貼り付けます。保存時にBearer接頭辞を付けます。プリセットを選ぶだけではリクエストは送信されません。生成は課金対象です。",
+        "suno": "音楽生成と同じタスクの音声取得",
+        "seedance": "動画生成とタスク取得",
+        "happyhorse": "動画作成と同じタスクの結果取得",
+        "gptImage": "画像生成と非同期結果の取得",
+        "nanoBanana": "画像の作成と編集"
+      },
       addTitle: 'MCPサービスを追加',
       addDesc: '外部の MCP サービスを接続すると、エージェントがそのツールを呼び出せます。',
       editTitle: 'MCPサービスを編集',

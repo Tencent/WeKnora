@@ -16,15 +16,16 @@ const script = compileScript(descriptor, { id: 'mcp-dialog-test' }).content
   .replace('return __returned__', '__expose(__returned__); return __returned__')
 const compiled = ts.transpileModule(script, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 
-function fixture(generate: () => Promise<string> = async () => 'Query logs by module and time.', initialStep: 0 | 1 = 0) {
+function fixture(generate: () => Promise<string> = async () => 'Query logs by module and time.', initialStep: 0 | 1 = 0, addMode = false) {
   const updates: Array<{ id: string; data: Record<string, unknown> }> = []
   const warnings: string[] = []
-  const props = reactive({ visible: true, service: { id: 'one', name: 'Logs', description: 'Legacy usage', transport_type: 'sse', url: 'https://example.com/mcp' }, mode: 'edit', initialStep })
+  const props = reactive({ visible: true, service: addMode ? null as any : { id: 'one', name: 'Logs', description: 'Legacy usage', transport_type: 'sse', url: 'https://example.com/mcp' }, mode: addMode ? 'add' : 'edit', initialStep })
   const exports: any = {}
   runInNewContext(compiled, {
     exports,
     require(name: string) {
       if (name === 'vue') return require('vue')
+      if (name === '@/utils/mcpServicePresets') return require('../../../utils/mcpServicePresets.ts')
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key, locale: ref('zh-CN') }) }
       if (name === 'tdesign-vue-next') return { MessagePlugin: { warning: (text: string) => warnings.push(text), success() {}, error() {} } }
       if (name === '@/api/mcp-service') return {
@@ -173,5 +174,44 @@ test('API key payload never carries OAuth client fields', () => {
     const body = f.vm.buildPayload(true)
     assert.equal('client_id' in body.auth_config, false)
     assert.equal('client_secret' in body.auth_config, false)
+  } finally { f.close() }
+})
+
+test('selecting a service preset is local-only and requires the user’s own credential', () => {
+  const f = fixture(undefined, 0, true)
+  const { MCP_SERVICE_PRESETS } = require('../../../utils/mcpServicePresets.ts')
+  try {
+    f.vm.selectPreset(MCP_SERVICE_PRESETS[0])
+    assert.equal(f.updates.length, 0, 'choosing a preset must not save or connect')
+    assert.equal(f.vm.formData.name, 'Suno by Ace Data Cloud')
+    assert.equal(f.vm.formData.url, 'https://suno.mcp.acedata.cloud/mcp')
+    assert.equal(f.vm.formData.auth_config.api_key, '')
+    assert.equal(f.vm.formData.auth_config.api_key_header, 'Authorization')
+    f.vm.formData.auth_config.api_key = 'test-key'
+    const body = f.vm.buildPayload(true)
+    assert.equal(body.auth_config.api_key, 'Bearer test-key')
+    assert.equal(body.usage_instructions, f.vm.formData.usage_instructions.trim(),
+      'preset guidance must survive the saved row reload before step two')
+    assert.equal(body.headers.Authorization, undefined, 'credential must not enter ordinary headers')
+    assert.equal(body.url.includes('test-key'), false)
+    f.vm.formData.auth_config.api_key = 'Bearer test-key'
+    assert.equal(f.vm.buildPayload(true).auth_config.api_key, 'Bearer test-key')
+    f.vm.selectPreset(MCP_SERVICE_PRESETS[1])
+    assert.equal(f.vm.formData.auth_config.api_key, '', 'switching services must clear the prior key')
+    assert.equal(f.vm.formData.name, 'Seedance by Ace Data Cloud')
+    f.vm.clearPreset()
+    assert.equal(f.vm.selectedPreset, null)
+    assert.equal(f.vm.formData.url, '', 'custom setup remains available')
+  } finally { f.close() }
+})
+
+test('a preset cannot overwrite an existing saved connection', () => {
+  const f = fixture()
+  const { MCP_SERVICE_PRESETS } = require('../../../utils/mcpServicePresets.ts')
+  try {
+    f.vm.selectPreset(MCP_SERVICE_PRESETS[0])
+    assert.equal(f.vm.formData.name, 'Logs')
+    assert.equal(f.vm.formData.url, 'https://example.com/mcp')
+    assert.equal(f.updates.length, 0)
   } finally { f.close() }
 })

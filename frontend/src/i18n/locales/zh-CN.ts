@@ -2899,6 +2899,21 @@ export default {
     "saveNext": "保存并下一步"
 },
   mcpServiceDialog: {
+      presets: {
+        "title": "按服务名选择预设",
+        "hint": "每项独立配置；也可添加自定义 MCP。以下集成由 Ace Data Cloud 提供，并非对应模型品牌的官方应用。",
+        "search": "搜索 Suno、Seedance、HappyHorse、GPT Image 或 Nano Banana",
+        "custom": "配置自定义 MCP 服务",
+        "account": "登录 Ace Data Cloud → Applications → General application，复制已有 API Key 或创建专用 Key；先确认服务权限、余额及当前价格。",
+        "getKey": "打开 Ace Data Cloud API Key",
+        "pricing": "查看当前服务价格",
+        "credentialHint": "在下方私密 Token 栏粘贴 Key，预设保存时自动补 Bearer 前缀。选择预设不会发送请求；生成操作仍会计费。",
+        "suno": "音乐生成与同任务音频查询",
+        "seedance": "视频生成与任务查询",
+        "happyhorse": "视频创作与同任务结果",
+        "gptImage": "图片生成与异步结果查询",
+        "nanoBanana": "图片生成与编辑"
+      },
     addTitle: '添加 MCP 服务',
     addDesc: '连接外部 MCP 服务，智能体即可调用其中的工具。',
     editTitle: '编辑 MCP 服务',
