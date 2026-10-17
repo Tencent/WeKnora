@@ -124,7 +124,7 @@ func runSteerOrderIntegration(t *testing.T, failFirst bool) {
 	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
 	db, sessionID := steerOrderDatabase(t, failFirst)
 	msgs := &recoveringSteerMessages{MessageService: service.NewMessageService(
-		repository.NewMessageRepository(db), repository.NewSessionRepository(db), nil, nil, nil, nil, nil), db: db}
+		repository.NewMessageRepository(db), repository.NewSessionRepository(db), nil, nil, nil, nil, nil, nil), db: db}
 	tenantCtx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(1))
 	ctx, cancel := context.WithTimeout(tenantCtx, 10*time.Second)
 	defer cancel()

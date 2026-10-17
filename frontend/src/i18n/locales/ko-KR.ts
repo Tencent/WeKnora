@@ -6327,9 +6327,16 @@ export default {
     statsIndexedMessages: '인덱싱된 메시지',
     statsNotConfigured: '메시지 인덱싱 미설정',
     statsNotConfiguredDesc: '활성화하고 Embedding 모델을 선택하면 대화 메시지가 자동으로 벡터화 인덱싱됩니다',
+    clearIndexLabel: '메시지 인덱스 비우기',
+    clearIndexDescription: '인덱싱을 일시 중지하고 이 작업 공간의 메시지 검색 인덱스를 비웁니다. 대화와 메시지는 유지됩니다.',
+    clearIndexButton: '인덱스 비우기',
+    clearIndexConfirm: '이 작업 공간의 모든 구성원의 메시지 인덱스를 비우시겠습니까? 인덱싱이 일시 중지됩니다. 대화와 메시지는 삭제되지 않으며 이전 메시지는 자동으로 다시 인덱싱되지 않습니다. 이 작업은 취소할 수 없습니다.',
     toasts: {
       saveSuccess: '메시지 관리 설정이 저장되었습니다',
-      saveFailed: '설정 저장 실패: {message}'
+      saveFailed: '설정 저장 실패: {message}',
+      loadFailed: '메시지 인덱스 설정 또는 통계를 불러올 수 없습니다',
+      clearSuccess: '메시지 인덱스를 비웠습니다. 다시 활성화할 때까지 인덱싱이 일시 중지됩니다.',
+      clearFailed: '인덱스 정리가 완료되지 않았습니다. 현재 상태를 확인한 후 다시 시도하세요: {message}'
     }
   },
   vectorStoreSettings: {

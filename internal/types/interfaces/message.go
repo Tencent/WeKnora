@@ -58,6 +58,14 @@ type MessageService interface {
 	// GetChatHistoryKBStats returns statistics about the chat history knowledge base (indexed message count, etc.)
 	GetChatHistoryKBStats(ctx context.Context) (*types.ChatHistoryKBStats, error)
 
+	// UpdateChatHistoryConfig serializes configuration changes with indexing and cleanup.
+	// KnowledgeBaseID is managed internally; a model change requires an empty index.
+	UpdateChatHistoryConfig(ctx context.Context, config *types.ChatHistoryConfig) (*types.ChatHistoryConfig, error)
+
+	// ClearChatHistoryIndex pauses indexing and removes only the current workspace's
+	// chat-history knowledge, chunks and retrieval indexes, preserving conversations.
+	ClearChatHistoryIndex(ctx context.Context) (*types.ChatHistoryKBStats, error)
+
 	// GetSessionArtifacts returns every skill-produced MessageArtifact
 	// recorded against any assistant message of the session. Used to power
 	// the frontend "download files generated in this session" drawer and

@@ -2560,9 +2560,16 @@ export default {
     statsIndexedMessages: 'Indexed Messages',
     statsNotConfigured: 'Message indexing not configured',
     statsNotConfiguredDesc: 'Enable and select an embedding model to start auto-indexing conversation messages',
+    clearIndexLabel: 'Clear Message Index',
+    clearIndexDescription: 'Pause indexing and remove this workspace’s message search index. Conversations and messages are kept.',
+    clearIndexButton: 'Clear Index',
+    clearIndexConfirm: 'Clear the message index for everyone in this workspace? Indexing will be paused. Conversations and messages will not be deleted, and old messages will not be automatically re-indexed. This cannot be undone.',
     toasts: {
       saveSuccess: 'Message management configuration saved',
-      saveFailed: 'Failed to save configuration: {message}'
+      saveFailed: 'Failed to save configuration: {message}',
+      loadFailed: 'Unable to load message index settings or statistics',
+      clearSuccess: 'Message index cleared. Indexing is paused until you enable it again.',
+      clearFailed: 'Index cleanup did not complete. Check the current state and retry: {message}'
     }
   },
   retrievalSettings: {

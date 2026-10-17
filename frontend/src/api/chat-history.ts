@@ -59,6 +59,14 @@ export function getChatHistoryKBStats() {
   return get('/api/v1/messages/chat-history-stats')
 }
 
+// Cleanup is synchronous: do not report success while a background deletion is
+// still pending. Large indexes can exceed the normal JSON-request timeout.
+export function clearChatHistoryIndex() {
+  return post<{ success: boolean; data: ChatHistoryKBStats }>(
+    '/api/v1/messages/chat-history-index/clear', {}, { timeout: 300000 },
+  )
+}
+
 // Search messages across all sessions (keyword + vector hybrid search)
 export function searchMessages(data: MessageSearchRequest) {
   return post('/api/v1/messages/search', data)
