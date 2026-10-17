@@ -75,14 +75,14 @@ func (w *weaviateRepository) getCollectionName(dimension int) string {
 func (w *weaviateRepository) ensureCollection(ctx context.Context, dimension int) error {
 	collectionName := w.getCollectionName(dimension)
 
-	//Check cache first
+	// Check cache first
 	if _, ok := w.initializedCollections.Load(dimension); ok {
 		return nil
 	}
 
 	log := logger.GetLogger(ctx)
 
-	//Check if collection exists
+	// Check if collection exists
 	exists, err := w.client.Schema().ClassExistenceChecker().WithClassName(collectionName).Do(ctx)
 	if err != nil {
 		log.Errorf("[Weaviate] Failed to check collection existence: %v", err)
@@ -92,7 +92,7 @@ func (w *weaviateRepository) ensureCollection(ctx context.Context, dimension int
 	if !exists {
 		log.Infof("[Weaviate] Creating collection %s with dimension %d", collectionName, dimension)
 
-		//定义class结构
+		// 定义class结构
 		classObj := models.Class{
 			Class:       collectionName,
 			Description: fmt.Sprintf("WeKnora embeddings collection with dimension %d", dimension),
@@ -163,7 +163,7 @@ func (w *weaviateRepository) ensureCollection(ctx context.Context, dimension int
 				"desiredCount": w.desiredShardCount,
 			}
 		}
-		//创建collection
+		// 创建collection
 		if err = w.client.Schema().ClassCreator().WithClass(&classObj).Do(ctx); err != nil {
 			// The first batches written at a new dimension are saved by several
 			// workers at once, so another one (or another replica) may have
@@ -246,7 +246,6 @@ func (w *weaviateRepository) Save(ctx context.Context,
 		WithProperties(dataSchema).
 		WithVector(embeddingDB.Embedding).
 		Do(ctx)
-
 	if err != nil {
 		log.Errorf("[Weaviate] Failed to save index: %v", err)
 		return err
@@ -331,7 +330,7 @@ func (w *weaviateRepository) DeleteByChunkIDList(ctx context.Context, chunkIDLis
 	collectionName := w.getCollectionName(dimension)
 	log.Infof("[Weaviate] Deleting indices by chunk IDs from %s, count: %d", collectionName, len(chunkIDList))
 
-	//define filter
+	// define filter
 	filter := w.client.Batch().ObjectsBatchDeleter().
 		WithClassName(collectionName).
 		WithWhere(filters.Where().
@@ -362,7 +361,7 @@ func (w *weaviateRepository) DeleteByKnowledgeIDList(ctx context.Context,
 	collectionName := w.getCollectionName(dimension)
 	log.Infof("[Weaviate] Deleting indices by knowledge IDs from %s, count: %d", collectionName, len(knowledgeIDList))
 
-	//define filter
+	// define filter
 	filter := w.client.Batch().ObjectsBatchDeleter().
 		WithClassName(collectionName).
 		WithWhere(filters.Where().
@@ -392,7 +391,7 @@ func (w *weaviateRepository) DeleteBySourceIDList(ctx context.Context,
 	collectionName := w.getCollectionName(dimension)
 	log.Infof("[Weaviate] Deleting indices by source IDs from %s, count: %d", collectionName, len(sourceIDList))
 
-	//define filter
+	// define filter
 	filter := w.client.Batch().ObjectsBatchDeleter().
 		WithClassName(collectionName).
 		WithWhere(filters.Where().
@@ -402,12 +401,61 @@ func (w *weaviateRepository) DeleteBySourceIDList(ctx context.Context,
 		WithOutput("minimal")
 
 	// Execute deletion
-	if _, err := filter.Do(ctx); err != nil {
+	result, err := filter.Do(ctx)
+	if err != nil {
 		log.Errorf("[Weaviate] Failed to delete by source IDs: %v", err)
 		return fmt.Errorf("failed to delete by source IDs: %w", err)
 	}
+
+	// An HTTP 200 is not by itself proof that every object is gone. Weaviate
+	// reports the per-object outcome in the body, and a batch delete that could
+	// not delete an object still answers 200 with results.failed > 0; it also
+	// stops at QUERY_MAXIMUM_RESULTS, so results.matches can exceed the objects
+	// it actually deleted. The SDK discards that body and hands back a nil error
+	// either way, so a caller that trusted the error alone would treat a
+	// partial deletion as done and let the rows naming the surviving objects be
+	// deleted — they are the only record of the source IDs still to purge, so
+	// the leftover entries become unreachable orphans that keep taking TopK
+	// slots. Every matched object has to be confirmed deleted here.
+	undeleted, err := batchDeleteUndeletedCount(result)
+	if err != nil {
+		log.Errorf("[Weaviate] No usable batch delete acknowledgement: %v", err)
+		return fmt.Errorf("failed to delete by source IDs: %w", err)
+	}
+	if undeleted > 0 {
+		log.Errorf("[Weaviate] Incomplete deletion by source IDs: %d of %d object(s) not deleted",
+			undeleted, result.Results.Matches)
+		return fmt.Errorf(
+			"failed to delete by source IDs: %d object(s) still in %s "+
+				"(deleted %d of %d matched, %d failed, limit %d)",
+			undeleted, collectionName, result.Results.Successful, result.Results.Matches,
+			result.Results.Failed, result.Results.Limit)
+	}
+
 	log.Infof("[Weaviate] Successfully deleted documents by source IDs")
 	return nil
+}
+
+// batchDeleteUndeletedCount reports how many objects a batch-delete response
+// says are still in the index: everything the filter matched that was not
+// confirmed deleted. It returns an error when the response carries no results
+// block, which is the only shape that proves nothing about the deletion.
+//
+// The counts come from models.BatchDeleteResponseResults:
+//
+//	matches    objects the filter matched
+//	successful objects deleted without error
+//	failed     objects Weaviate tried and could not delete
+//	limit      QUERY_MAXIMUM_RESULTS, the cap on one batch delete
+//
+// A failed object is already counted in failed, and a truncated deletion leaves
+// matches above successful+failed, so matches-successful covers both without
+// treating "the filter matched nothing" as a failure.
+func batchDeleteUndeletedCount(result *models.BatchDeleteResponse) (int64, error) {
+	if result == nil || result.Results == nil {
+		return 0, errors.New("response carries no results block")
+	}
+	return result.Results.Matches - result.Results.Successful, nil
 }
 
 // BatchUpdateChunkEnabledStatus updates the enabled status of chunks in batch
@@ -506,7 +554,6 @@ func (w *weaviateRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTag
 	}
 	log.Infof("[Weaviate] Batch update chunk tag ID completed")
 	return nil
-
 }
 
 func (w *weaviateRepository) getBaseFilter(params types.RetrieveParams) *filters.WhereBuilder {
@@ -613,7 +660,6 @@ func (w *weaviateRepository) VectorRetrieve(ctx context.Context,
 			WithVector(params.Embedding).
 			WithCertainty(scoreThreshold)).
 		Do(ctx)
-
 	if err != nil {
 		log.Errorf("[Weaviate] Vector search failed: %v", err)
 		return nil, fmt.Errorf("failed to search: %w", err)
@@ -669,7 +715,7 @@ func (w *weaviateRepository) KeywordsRetrieve(ctx context.Context,
 
 		filter := w.getBaseFilter(params)
 
-		//bm25 search
+		// bm25 search
 		bm25 := w.client.GraphQL().Bm25ArgBuilder().
 			WithQuery(params.Query).
 			WithProperties([]string{fieldContent}...)
@@ -682,7 +728,6 @@ func (w *weaviateRepository) KeywordsRetrieve(ctx context.Context,
 			WithFields(fields...).
 			WithBM25(bm25).
 			Do(ctx)
-
 		if err != nil {
 			log.Errorf("[Weaviate] keywords search failed: %v", err)
 			return nil, fmt.Errorf("failed to search: %w", err)
