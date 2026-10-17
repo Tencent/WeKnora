@@ -35,12 +35,12 @@ func NewCmdWait(f *cmdutil.Factory) *cobra.Command {
 		Use:   "wait <doc-id> [<doc-id>...]",
 		Short: "Wait for one or more documents to finish parsing",
 		Long: `Block until every given document reaches a terminal parse_status
-(completed or failed), the timeout expires, or the user interrupts (Ctrl-C).
+(completed, failed, or cancelled), the timeout expires, or the user interrupts (Ctrl-C).
 Always wait-all: every id must reach a terminal state before returning.
 
 Exit codes:
   0    all completed
-  1    any failed
+  1    any failed or cancelled
   124  --timeout reached (matches GNU 'timeout' command)
   130  Ctrl-C / SIGINT
 
@@ -96,7 +96,8 @@ For fail-fast semantics, use shell composition:
 	cmdutil.AddFormatFlag(cmd)
 	cmdutil.AddIgnoredKBFlag(cmd)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor:       "block until one or more documents reach a terminal parse state (completed or failed), or --timeout elapses",
+		UsedFor: "block until one or more documents reach a terminal parse state " +
+			"(completed, failed, or cancelled), or --timeout elapses",
 		RequiredFlags: []string{"<doc-id>... (one or more positionals)"},
 		Examples: []string{
 			"weknora doc wait doc_abc",
@@ -127,7 +128,7 @@ type WaitResult struct {
 	Timeout   []string    `json:"timeout,omitempty"`
 }
 
-// FailedDoc carries the id + reason for a doc that reached parse_status=failed
+// FailedDoc carries the id + reason for a doc that reached a failed or cancelled parse status
 // or that GetKnowledge returned an error for.
 type FailedDoc struct {
 	ID      string `json:"id"`
@@ -234,6 +235,14 @@ func waitForDocs(ctx context.Context, ids []string, svc WaitService, opts WaitOp
 					return
 				case "failed":
 					addFailed(FailedDoc{ID: id, Message: doc.ErrorMessage})
+					return
+				case "cancelled":
+					message := doc.ErrorMessage
+					if message == "" {
+						message = "parse_status=cancelled: parsing was cancelled - " +
+							"run `weknora doc reparse " + id + "` to retry"
+					}
+					addFailed(FailedDoc{ID: id, Message: message})
 					return
 				case "draft":
 					// draft = created but NOT queued for parsing (inline
