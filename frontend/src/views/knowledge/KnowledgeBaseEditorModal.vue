@@ -521,6 +521,57 @@
         </div>
       </div>
 
+      <!-- 视频处理设置 -->
+      <div v-if="!isFAQ" v-show="currentSection === 'video'" class="section">
+        <div v-if="formData" class="kb-multimodal-settings">
+          <div class="section-header">
+            <h2>{{ $t('knowledgeEditor.video.title') }}</h2>
+            <p class="section-description">{{ $t('knowledgeEditor.video.description') }}</p>
+          </div>
+
+          <div class="settings-group">
+            <!-- 视频解析开关 -->
+            <div class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.label') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.desc') }}</p>
+              </div>
+              <div class="setting-control">
+                <t-switch
+                  v-model="formData.videoConfig.enabled"
+                  size="medium"
+                />
+              </div>
+            </div>
+
+            <!-- 解析方式（目前只有「仅语音转写」） -->
+            <div v-if="formData.videoConfig.enabled" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.modeLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.modeDescription') }}</p>
+              </div>
+              <div class="setting-control">
+                <t-select
+                  v-model="formData.videoConfig.mode"
+                  class="video-mode-select"
+                  :options="videoModeOptions"
+                />
+              </div>
+            </div>
+
+            <!-- 依赖提醒：没有 ASR 模型时视频只会存档，不会报错 -->
+            <div v-if="formData.videoConfig.enabled" class="setting-row">
+              <div class="setting-info">
+                <p class="desc">{{ $t('knowledgeEditor.video.asrHint') }}</p>
+                <p v-if="!formData.asrConfig.enabled" class="desc video-asr-warning">
+                  {{ $t('knowledgeEditor.video.asrRequired') }}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 知识图谱 -->
       <div v-if="!isFAQ && currentSection === 'graph'" class="section">
         <GraphSettings
@@ -809,6 +860,12 @@ const DEFAULT_CHUNKING_PRESET = {
 const INSTANT_SECTIONS = new Set(['datasource', 'share', 'activity'])
 const isInstantSection = computed(() => INSTANT_SECTIONS.has(currentSection.value))
 
+// 视频解析方式。目前只实现「仅语音转写」；下拉保留一个显式选项，是为了
+// 配置形状固定，后续加画面解析时不需要迁移已存的 video_config。
+const videoModeOptions = computed(() => [
+  { value: 'audio_only', label: t('knowledgeEditor.video.modeAudioOnly') },
+])
+
 const navItems = computed(() => {
   const items: { key: string; icon: string; label: string; badge?: number }[] = [
     { key: 'basic', icon: 'info-circle', label: t('knowledgeEditor.sidebar.basic') },
@@ -825,6 +882,7 @@ const navItems = computed(() => {
       { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
       { key: 'multimodal', icon: 'image', label: t('knowledgeEditor.sidebar.multimodal') },
       { key: 'asr', icon: 'sound', label: t('knowledgeEditor.sidebar.asr') },
+      { key: 'video', icon: 'video', label: t('knowledgeEditor.sidebar.video') },
       { key: 'storage', icon: 'cloud', label: t('knowledgeEditor.sidebar.storage') },
       { key: 'chunking', icon: 'file-copy', label: t('knowledgeEditor.sidebar.chunking') },
       { key: 'graph', icon: 'chart-bubble', label: t('knowledgeEditor.sidebar.graph') },
@@ -857,7 +915,7 @@ const navGroups = computed(() => {
     {
       key: 'processing',
       label: t('knowledgeEditor.navGroups.processing'),
-      items: pickItems(['parser', 'chunking', 'multimodal', 'asr', 'graph', 'advanced']),
+      items: pickItems(['parser', 'chunking', 'multimodal', 'asr', 'video', 'graph', 'advanced']),
     },
     {
       key: 'data',
@@ -984,6 +1042,12 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       enabled: false,
       modelId: '',
       language: ''
+    },
+    // 视频解析：默认关闭，且只实现「仅语音转写」。mode 始终显式发送，
+    // 免得老行（mode 缺省）在保存后被后端归一成别的读法。
+    videoConfig: {
+      enabled: false,
+      mode: 'audio_only' as string
     },
     nodeExtractConfig: {
       enabled: false,
@@ -1153,6 +1217,14 @@ const loadKBData = async (
         enabled: !!kb.asr_config?.enabled,
         modelId: kb.asr_config?.model_id || '',
         language: kb.asr_config?.language || ''
+      },
+      videoConfig: {
+        // Absent on knowledge bases saved before the switch existed; the
+        // backend default is off, so mirror it instead of inventing an opt-in.
+        enabled: !!kb.video_config?.enabled,
+        // An old row decodes to an empty mode; the server treats that as
+        // audio_only, and so does the dropdown.
+        mode: kb.video_config?.mode || 'audio_only'
       },
       nodeExtractConfig: {
         enabled: kb.extract_config?.enabled || false,
@@ -1592,6 +1664,13 @@ const buildSubmitData = () => {
     language: formData.value.asrConfig?.language || ''
   }
 
+  // 视频解析配置。mode 永远显式发送；后端只实现了 audio_only，未知值会被
+  // 归一回去，所以下拉里目前只有这一项。
+  data.video_config = {
+    enabled: formData.value.videoConfig?.enabled || false,
+    mode: formData.value.videoConfig?.mode || 'audio_only'
+  }
+
   // storage_backend_id is authoritative. Keep provider projection for old clients
   // and for rolling upgrades where a node has not picked up the new schema yet.
   if (formData.value.storageBackendId) {
@@ -1787,6 +1866,7 @@ const doSubmit = async () => {
         embeddingModelId: data.embedding_model_id,
         vlm_config: data.vlm_config,
         asr_config: data.asr_config,
+        video_config: data.video_config,
         documentSplitting: {
           chunkSize: data.chunking_config.chunk_size,
           chunkOverlap: data.chunking_config.chunk_overlap,

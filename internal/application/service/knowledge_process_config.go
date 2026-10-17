@@ -157,7 +157,24 @@ func validateDefaultFileImportRequirements(
 		logger.Error(ctx, "ASR model is not configured")
 		return werrors.NewBadRequestError("上传音频文件需要设置ASR语音识别模型")
 	}
+	// A video is only readable through its narration, so it has the same ASR
+	// prerequisite as audio; the switch itself was already checked.
+	if IsVideoType(fileType) && !kb.ASRConfig.IsASREnabled() {
+		logger.Error(ctx, "ASR model is not configured for video parsing")
+		return werrors.NewBadRequestError("上传视频文件需要先配置ASR语音识别模型")
+	}
 	return nil
+}
+
+// validateImportFileTypeForConfig is validateImportFileType plus the one
+// exception the video switch introduces: a video is a valid import only for a
+// knowledge base that opted in. Keeping this next to the shared gate means the
+// generic upload path still rejects video with the same message as before.
+func validateImportFileTypeForConfig(kb *types.KnowledgeBase, fileType string) error {
+	if IsVideoType(normalizeFileExtension(fileType)) && kb != nil && kb.VideoConfig.AllowsAudioOnlyParse() {
+		return nil
+	}
+	return validateImportFileType(fileType)
 }
 
 // resolveFileImportProcessConfig is the single gate every file import passes
@@ -172,7 +189,7 @@ func resolveFileImportProcessConfig(
 	processOverrides *types.KnowledgeProcessOverrides,
 	enableMultimodel *bool,
 ) (types.EffectiveProcessConfig, error) {
-	if err := validateImportFileType(fileType); err != nil {
+	if err := validateImportFileTypeForConfig(kb, fileType); err != nil {
 		return types.EffectiveProcessConfig{}, err
 	}
 
@@ -210,12 +227,16 @@ func ValidateProcessOverrides(
 func validateEffectiveProcessOverrides(eff types.EffectiveProcessConfig, fileTypes []string) error {
 	hasImage := false
 	hasAudio := false
+	hasVideo := false
 	for _, ft := range fileTypes {
 		if IsImageType(ft) {
 			hasImage = true
 		}
 		if IsAudioType(ft) {
 			hasAudio = true
+		}
+		if IsVideoType(ft) {
+			hasVideo = true
 		}
 	}
 
@@ -227,6 +248,13 @@ func validateEffectiveProcessOverrides(eff types.EffectiveProcessConfig, fileTyp
 
 	if hasAudio && !eff.ASRConfig.IsASREnabled() {
 		return werrors.NewBadRequestError("上传音频文件需要设置ASR语音识别模型")
+	}
+
+	// Video parsing has no text source other than the narration, so an override
+	// that leaves ASR unset has to be rejected here rather than discovered by
+	// the worker (which would archive the file instead of indexing it).
+	if hasVideo && !eff.ASRConfig.IsASREnabled() {
+		return werrors.NewBadRequestError("上传视频文件需要先配置ASR语音识别模型")
 	}
 
 	if err := types.ValidateEffectiveProcessPromptInstructions(eff); err != nil {

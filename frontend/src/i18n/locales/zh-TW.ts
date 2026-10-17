@@ -4685,6 +4685,17 @@ export default {
       languageDescription: '可選；指定主要語種可提高部分 ASR 模型的識別穩定性，留空時自動檢測',
       languagePlaceholder: '例如 zh、en，留空自動檢測'
     },
+    video: {
+      title: '影片處理',
+      description: '設定影片解析。開啟後，存檔的影片會擷取音軌並轉寫為文字，旁白可被檢索；畫面內容不進行解析。',
+      label: '啟用影片解析',
+      desc: '開啟後影片會轉寫為文字並參與檢索；關閉時影片僅存檔，可播放但搜尋不到。',
+      modeLabel: '解析方式',
+      modeDescription: '只轉寫旁白，畫面內容不解析。需要先在「音訊處理」設定 ASR 模型。',
+      modeAudioOnly: '僅語音轉寫（沿用音訊處理的 ASR 模型）',
+      asrHint: '沿用「音訊處理」中設定的 ASR 模型。',
+      asrRequired: '尚未啟用 ASR 模型，影片將維持僅存檔；請先在「音訊處理」啟用。',
+    },
     multimodal: {
       title: '影像處理設定',
       description: '設定影像內容理解能力，啟用後支持圖片等非文字內容的解析和檢索'
@@ -5279,6 +5290,7 @@ export default {
       graph: '知識圖譜',
       multimodal: '影像處理',
       asr: '音訊處理',
+      video: '影片',
       datasource: '資料源',
       share: '共享管理',
       activity: '活動記錄'

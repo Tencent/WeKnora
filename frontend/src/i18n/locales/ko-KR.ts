@@ -4684,6 +4684,17 @@ export default {
       languageDescription: '선택 사항입니다. 기본 언어를 지정하면 일부 ASR 모델의 인식이 향상되며, 비워 두면 자동 감지합니다.',
       languagePlaceholder: '예: zh, en; 비워 두면 자동 감지'
     },
+    video: {
+      title: '비디오 처리',
+      description: '비디오 파싱을 설정합니다. 활성화하면 저장된 비디오의 오디오 트랙을 추출해 텍스트로 변환하므로 나레이션을 검색할 수 있습니다. 화면 내용은 분석하지 않습니다.',
+      label: '비디오 파싱 활성화',
+      desc: '활성화하면 비디오를 텍스트로 변환해 검색에 사용합니다. 비활성화하면 비디오는 보관만 되며 재생은 가능하지만 검색되지 않습니다.',
+      modeLabel: '파싱 방식',
+      modeDescription: '나레이션만 텍스트로 변환하며 화면 내용은 분석하지 않습니다. 「오디오 처리」에서 ASR 모델을 먼저 설정해야 합니다.',
+      modeAudioOnly: '음성 변환만 (오디오 처리의 ASR 모델 재사용)',
+      asrHint: '「오디오 처리」에 설정된 ASR 모델을 사용합니다.',
+      asrRequired: 'ASR 모델이 아직 활성화되지 않아 비디오는 보관 상태로 유지됩니다. 「오디오 처리」에서 활성화하세요.',
+    },
     multimodal: {
       title: '이미지 처리 설정',
       description: '이미지 콘텐츠 이해 기능을 설정하여 이미지 등 비텍스트 콘텐츠의 파싱 및 검색을 지원합니다'
@@ -5278,6 +5289,7 @@ export default {
       graph: '지식 그래프',
       multimodal: '이미지 처리',
       asr: '오디오',
+      video: '비디오',
       datasource: '데이터 소스',
       share: '공유관리',
       activity: '활동 기록'

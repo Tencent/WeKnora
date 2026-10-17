@@ -118,6 +118,11 @@ export interface KBModelConfigRequest {
         model_id?: string
         language?: string
     }
+    /** 视频解析配置。目前只实现 audio_only（仅转写旁白）。 */
+    video_config?: {
+        enabled: boolean
+        mode?: string
+    }
     documentSplitting: {
         chunkSize: number
         chunkOverlap: number

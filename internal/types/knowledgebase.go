@@ -88,6 +88,8 @@ type KnowledgeBase struct {
 	VLMConfig VLMConfig `yaml:"vlm_config"              json:"vlm_config"              gorm:"type:json" extensions:"x-agent,x-agent-detail"`
 	// ASR config (Automatic Speech Recognition)
 	ASRConfig ASRConfig `yaml:"asr_config"              json:"asr_config"              gorm:"type:json" extensions:"x-agent,x-agent-detail"`
+	// VideoConfig controls video parsing (audio-only transcription today).
+	VideoConfig VideoConfig `yaml:"video_config"            json:"video_config"            gorm:"type:json" extensions:"x-agent,x-agent-detail"`
 	// Storage provider config (new): only stores provider selection; credentials from workspace StorageEngineConfig
 	StorageProviderConfig *StorageProviderConfig `yaml:"storage_provider_config" json:"storage_provider_config"  gorm:"column:storage_provider_config;type:jsonb"`
 	// StorageBackendID binds this KB to one concrete storage instance. The
@@ -194,6 +196,10 @@ type KnowledgeBaseConfig struct {
 	ExtractConfig *ExtractConfig `json:"extract_config,omitempty"`
 	// QuestionGenerationConfig replaces generated-question settings when set. nil means no change.
 	QuestionGenerationConfig *QuestionGenerationConfig `json:"question_generation_config,omitempty"`
+	// VideoConfig controls video parsing. nil means "no change" when
+	// updating, mirroring ImageProcessingConfig: a client that predates the
+	// video switch must not turn it off by saving the KB.
+	VideoConfig *VideoConfig `yaml:"video_config" json:"video_config,omitempty"`
 }
 
 const (
@@ -745,6 +751,74 @@ func (c *ASRConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
+// VideoParseModeAudioOnly transcribes the video's audio track and indexes the
+// narration. It is the only mode implemented; frame analysis (OCR / VLM) would
+// add values here without changing the stored config shape.
+const VideoParseModeAudioOnly = "audio_only"
+
+// VideoConfig represents the video parsing configuration of a knowledge base.
+type VideoConfig struct {
+	// Enabled turns on video parsing. Off by default: an existing deployment
+	// must behave exactly as before until an operator opts in, and the only
+	// cost-free outcome today is archiving the video.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// Mode selects how much of the video to read. Only audio_only is
+	// implemented; the others are reserved so the stored config never has to
+	// change shape when they land.
+	Mode string `yaml:"mode" json:"mode"`
+}
+
+// Normalize fills the mode default and coalesces unknown modes to audio_only:
+// silently keeping a mode the pipeline cannot run would turn a typo into a
+// video that is neither transcribed nor obviously misconfigured.
+func (c *VideoConfig) Normalize() {
+	if c == nil {
+		return
+	}
+	if strings.TrimSpace(c.Mode) != VideoParseModeAudioOnly {
+		c.Mode = VideoParseModeAudioOnly
+	}
+}
+
+// AllowsAudioOnlyParse reports whether the operator asked for narration
+// transcription. An empty mode is the decode result of rows written before the
+// field existed, and means the default.
+func (c VideoConfig) AllowsAudioOnlyParse() bool {
+	return c.Enabled && (c.Mode == "" || c.Mode == VideoParseModeAudioOnly)
+}
+
+// Value implements the driver.Valuer interface, used to convert VideoConfig to database value
+func (c VideoConfig) Value() (driver.Value, error) {
+	return json.Marshal(c)
+}
+
+// Scan implements the sql.Scanner interface, used to convert database value to VideoConfig
+func (c *VideoConfig) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		return nil
+	}
+	return json.Unmarshal(b, c)
+}
+
+// VideoAudioParseEnabled reports whether this knowledge base can turn a video
+// into searchable text: the video switch is on in audio_only mode and an ASR
+// model is configured. Both are required — the pipeline has no second source
+// of text for a video, so a missing ASR model is a configuration error rather
+// than something to discover after ffmpeg has already run.
+//
+// The single predicate is shared by the import gates, the create path and the
+// worker so they cannot disagree about whether a video is parseable.
+func VideoAudioParseEnabled(kb *KnowledgeBase) bool {
+	if kb == nil {
+		return false
+	}
+	return kb.VideoConfig.AllowsAudioOnlyParse() && kb.ASRConfig.IsASREnabled()
+}
+
 // ExtractConfig represents the extract configuration for a knowledge base
 type ExtractConfig struct {
 	// Enabled turns graph extraction on. Node and relation types are edited in the knowledge base editor.
@@ -813,6 +887,9 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	if kb.Type != KnowledgeBaseTypeFAQ {
 		kb.FAQConfig = nil
 	}
+	// Keep the video mode canonical so the settings UI and the pipeline read
+	// the same value even on rows written before the column existed.
+	kb.VideoConfig.Normalize()
 	if kb.Type != KnowledgeBaseTypeDocument {
 		kb.AutoTagConfig = nil
 		kb.ProfileConfig = nil

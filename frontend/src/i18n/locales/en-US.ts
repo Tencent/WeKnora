@@ -3380,6 +3380,7 @@ export default {
       graph: 'Knowledge Graph',
       multimodal: 'Image Processing',
       asr: 'Audio',
+      video: 'Video',
       datasource: 'Data Sources',
       share: 'Sharing',
       activity: 'Activity'
@@ -3978,6 +3979,17 @@ export default {
       languageLabel: 'Audio language hint',
       languageDescription: 'Optional. A primary language hint can improve some ASR models; leave empty for auto-detection.',
       languagePlaceholder: 'For example zh or en; empty means auto-detect'
+    },
+    video: {
+      title: 'Video Processing',
+      description: 'Configure video parsing. When enabled, a stored video’s audio track is extracted and transcribed so its narration becomes searchable; the picture itself is not analysed.',
+      label: 'Enable video parsing',
+      desc: 'When enabled, videos are transcribed and indexed. When disabled, videos stay archived: playable, but not searchable.',
+      modeLabel: 'Parsing mode',
+      modeDescription: 'Only the narration is transcribed; visual content is not analysed. An ASR model must be configured under Audio first.',
+      modeAudioOnly: 'Speech transcription only (reuses the ASR model from Audio)',
+      asrHint: 'Uses the ASR model configured under Audio.',
+      asrRequired: 'No ASR model is enabled yet, so videos will stay archived. Enable one under Audio to index them.',
     },
     advanced: {
       title: 'Advanced Settings',

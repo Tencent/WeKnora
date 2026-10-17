@@ -338,6 +338,12 @@ export function createKnowledgeBase(data: {
     model_id?: string;
     language?: string;
   };
+  // Video parsing. Only mode "audio_only" is implemented; mode is stored so
+  // adding frame analysis later does not change the config shape.
+  video_config?: {
+    enabled: boolean;
+    mode?: string;
+  };
   extract_config?: any;
   faq_config?: { index_mode: string; question_index_mode?: string };
   wiki_config?: {
@@ -381,6 +387,11 @@ export function updateKnowledgeBase(id: string, data: {
     };
     auto_tag_config?: { enabled: boolean; model_id?: string; max_tags?: number; skip_if_tagged?: boolean };
     profile_config?: KnowledgeBaseProfileConfig;
+    // Omit to leave the video switch unchanged (the server treats nil that way).
+    video_config?: {
+      enabled: boolean;
+      mode?: string;
+    };
     indexing_strategy?: {
       vector_enabled: boolean;
       keyword_enabled: boolean;

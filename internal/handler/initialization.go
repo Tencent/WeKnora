@@ -101,6 +101,9 @@ type KBModelConfigRequest struct {
 	EmbeddingModelID string           `json:"embeddingModelId"` // optional when RAG indexing is disabled
 	VLMConfig        *types.VLMConfig `json:"vlm_config"`
 	ASRConfig        *types.ASRConfig `json:"asr_config"`
+	// VideoConfig is optional: nil means "no change", so a client that predates
+	// the video switch cannot turn it off by saving the model configuration.
+	VideoConfig *types.VideoConfig `json:"video_config"`
 
 	// 文档分块配置
 	DocumentSplitting struct {
@@ -326,6 +329,17 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 			kb.ASRConfig.ModelID = req.ASRConfig.ModelID
 			kb.ASRConfig.Language = req.ASRConfig.Language
 		}
+	}
+
+	// 处理视频解析配置（nil = 保持不变）。模式由服务端归一，前端只表达
+	// 「开/关 + 哪种读法」，避免未知 mode 落库后既不转写也不报错。
+	if req.VideoConfig != nil {
+		next := *req.VideoConfig
+		next.Normalize()
+		if next.Enabled && !kb.ASRConfig.IsASREnabled() {
+			logger.Warn(ctx, "Video parsing enabled without an ASR model; videos will stay archived")
+		}
+		kb.VideoConfig = next
 	}
 
 	// 更新文档分块配置

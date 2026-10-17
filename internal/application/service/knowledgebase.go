@@ -635,6 +635,17 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 			kb.ExtractConfig = config.ExtractConfig
 			changedFields = append(changedFields, "extract_config")
 		}
+		// Video parsing. Replaced only when the request carried the field, the
+		// same nil-means-no-change contract the image config uses: turning the
+		// switch off by omission would silently un-index every future video.
+		if config.VideoConfig != nil {
+			next := *config.VideoConfig
+			next.Normalize()
+			if kb.VideoConfig != next {
+				changedFields = append(changedFields, "video_config")
+			}
+			kb.VideoConfig = next
+		}
 		// Update indexing strategy — syncs to ExtractConfig for backward compat
 		if config.IndexingStrategy != nil {
 			if !config.IndexingStrategy.HasAnyIndexing() {

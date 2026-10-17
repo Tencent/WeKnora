@@ -4685,6 +4685,17 @@ export default {
       languageDescription: '可选；指定主要语种可提高部分 ASR 模型的识别稳定性，留空时自动检测',
       languagePlaceholder: '例如 zh、en，留空自动检测'
     },
+    video: {
+      title: '视频处理',
+      description: '配置视频解析。开启后，存档的视频会抽取音轨并转写为文字，旁白可被检索；画面内容不做解析。',
+      label: '启用视频解析',
+      desc: '开启后视频会转写成文字并参与检索；关闭时视频仅存档，可播放但搜不到。',
+      modeLabel: '解析方式',
+      modeDescription: '只转写旁白，画面内容不解析。需要先在「音频处理」里配置 ASR 模型。',
+      modeAudioOnly: '仅语音转写（复用音频处理里的 ASR 模型）',
+      asrHint: '复用「音频处理」中配置的 ASR 模型。',
+      asrRequired: '尚未启用 ASR 模型，视频将保持仅存档；请在「音频处理」中启用后再解析。',
+    },
     multimodal: {
       title: '图像处理配置',
       description: '配置图像内容理解能力，启用后支持图片等非文本内容的解析和检索'
@@ -5279,6 +5290,7 @@ export default {
       graph: '知识图谱',
       multimodal: '图像处理',
       asr: '音频处理',
+      video: '视频',
       datasource: '数据源',
       share: '共享管理',
       activity: '活动记录'

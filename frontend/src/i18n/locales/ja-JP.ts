@@ -3380,6 +3380,7 @@ export default {
       graph: 'ナレッジグラフ',
       multimodal: '画像処理',
       asr: '音声',
+      video: '動画',
       datasource: 'データソース',
       share: '共有',
       activity: 'アクティビティ'
@@ -3978,6 +3979,17 @@ export default {
       languageLabel: '音声の言語ヒント',
       languageDescription: '任意。主要な言語のヒントを指定すると、一部のASRモデルで精度が向上します。空欄の場合は自動判定します。',
       languagePlaceholder: '例: zh、en。空欄の場合は自動判定'
+    },
+    video: {
+      title: '動画処理',
+      description: '動画の解析を設定します。有効にすると、保存済み動画の音声トラックを抽出して文字起こしし、ナレーションを検索できるようになります。映像内容は解析しません。',
+      label: '動画解析を有効化',
+      desc: '有効にすると動画を文字起こしして検索対象にします。無効の場合は動画は保存のみ（再生は可能、検索は不可）になります。',
+      modeLabel: '解析方式',
+      modeDescription: 'ナレーションのみを文字起こしし、映像内容は解析しません。「音声処理」で ASR モデルを設定しておく必要があります。',
+      modeAudioOnly: '音声の文字起こしのみ（音声処理の ASR モデルを再利用）',
+      asrHint: '「音声処理」で設定した ASR モデルを使用します。',
+      asrRequired: 'ASR モデルが有効になっていないため、動画は保存のみになります。「音声処理」で有効にしてください。',
     },
     advanced: {
       title: '詳細設定',

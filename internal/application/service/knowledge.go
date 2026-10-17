@@ -84,6 +84,10 @@ type knowledgeService struct {
 	// which has a no-op fallback. See knowledge_span_tracker.go.
 	spanTracker SpanTracker
 	audit       interfaces.AuditLogService
+
+	// videoExtractor extracts a video's audio track for ASR. nil means "use the
+	// configured ffmpeg binary"; tests inject a fake so no unit test shells out.
+	videoExtractor videoAudioExtractor
 }
 
 const (

@@ -224,9 +224,10 @@ type KnowledgeBaseConfig struct {
 	// leave knowledge in "processing". Default 30 minutes is generous enough
 	// for OCR-heavy large PDFs while ensuring forward progress.
 	DocReaderCallTimeout time.Duration `yaml:"docreader_call_timeout"   json:"docreader_call_timeout"`
-	// FFmpegPath is the ffmpeg binary that cuts an audio file longer than one
-	// ASR request may carry. It lives in the application container (not
-	// docreader), so it is resolved on the PATH by default.
+	// FFmpegPath is the ffmpeg binary used to cut an audio file longer than one
+	// ASR request may carry, and to extract a video's audio track before ASR.
+	// It lives in the application container (not docreader), so it is resolved
+	// on the PATH by default.
 	FFmpegPath string `yaml:"ffmpeg_path" json:"ffmpeg_path"`
 	// FFprobePath is the ffprobe binary used to measure an audio file before
 	// deciding whether it has to be cut. Same container, same default; override
@@ -238,6 +239,11 @@ type KnowledgeBaseConfig struct {
 	// Defaults to DefaultASRMaxSegmentDuration; override with
 	// WEKNORA_ASR_MAX_SEGMENT_SECONDS.
 	MaxAudioSegmentDuration time.Duration `yaml:"asr_max_segment_duration" json:"asr_max_segment_duration"`
+	// VideoAudioTimeout bounds one ffmpeg audio-extraction invocation. A corrupt
+	// or endless container can make ffmpeg spin without producing output; this is
+	// the equivalent of the 64 MiB download cap for the media path — a hard stop
+	// that archives the video instead of pinning a worker forever.
+	VideoAudioTimeout time.Duration `yaml:"video_audio_timeout" json:"video_audio_timeout"`
 }
 
 // DefaultASRMaxSegmentDuration is the longest audio one ASR request carries
@@ -252,6 +258,12 @@ const DefaultASRMaxSegmentDuration = 120 * time.Second
 // DefaultDocumentProcessTimeout is the ceiling for a single document:process
 // Asynq task when document_process_timeout is unset or non-positive.
 const DefaultDocumentProcessTimeout = 2 * time.Hour
+
+// DefaultVideoAudioExtractionTimeout is the ceiling for one ffmpeg audio
+// extraction. Ten minutes is ~10x a 2h video's realtime extraction on the
+// deployment hardware, and short enough that a wedged ffmpeg cannot outlive
+// the document process task budget.
+const DefaultVideoAudioExtractionTimeout = 10 * time.Minute
 
 // DocumentProcessTimeout returns the effective document-process task timeout.
 // Partial configs (e.g. unit tests) receive the default when unset.
@@ -868,6 +880,14 @@ func applyKnowledgeBaseEnvOverrides(cfg *Config) {
 		// tuning a vendor's length limit thinks in seconds.
 		if seconds, err := strconv.Atoi(value); err == nil && seconds > 0 {
 			cfg.KnowledgeBase.MaxAudioSegmentDuration = time.Duration(seconds) * time.Second
+		}
+	}
+	if cfg.KnowledgeBase.VideoAudioTimeout <= 0 {
+		cfg.KnowledgeBase.VideoAudioTimeout = DefaultVideoAudioExtractionTimeout
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_VIDEO_AUDIO_EXTRACTION_TIMEOUT")); value != "" {
+		if d, err := time.ParseDuration(value); err == nil && d > 0 {
+			cfg.KnowledgeBase.VideoAudioTimeout = d
 		}
 	}
 }
