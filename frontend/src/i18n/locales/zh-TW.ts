@@ -6050,6 +6050,8 @@ export default {
     extractFailed: '實體關係提取失敗',
     exampleLoaded: '示例已載入',
     exampleCleared: '示例已清除',
+    checkingAvailability: '正在檢查知識圖譜服務…',
+    checkAvailabilityFailed: '無法檢查知識圖譜服務，請重試。',
     disabledWarning: '知識圖譜資料庫未啟用，實體關係提取功能將無法使用',
     howToEnable: '如何啟用知識圖譜？'
   },
