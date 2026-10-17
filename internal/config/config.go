@@ -224,7 +224,30 @@ type KnowledgeBaseConfig struct {
 	// leave knowledge in "processing". Default 30 minutes is generous enough
 	// for OCR-heavy large PDFs while ensuring forward progress.
 	DocReaderCallTimeout time.Duration `yaml:"docreader_call_timeout"   json:"docreader_call_timeout"`
+	// FFmpegPath is the ffmpeg binary that cuts an audio file longer than one
+	// ASR request may carry. It lives in the application container (not
+	// docreader), so it is resolved on the PATH by default.
+	FFmpegPath string `yaml:"ffmpeg_path" json:"ffmpeg_path"`
+	// FFprobePath is the ffprobe binary used to measure an audio file before
+	// deciding whether it has to be cut. Same container, same default; override
+	// with WEKNORA_FFPROBE_PATH.
+	FFprobePath string `yaml:"ffprobe_path" json:"ffprobe_path"`
+	// MaxAudioSegmentDuration is the longest audio one ASR request may carry.
+	// A longer recording is cut into pieces of this length and transcribed
+	// piecewise; anything shorter keeps the single-request path untouched.
+	// Defaults to DefaultASRMaxSegmentDuration; override with
+	// WEKNORA_ASR_MAX_SEGMENT_SECONDS.
+	MaxAudioSegmentDuration time.Duration `yaml:"asr_max_segment_duration" json:"asr_max_segment_duration"`
 }
+
+// DefaultASRMaxSegmentDuration is the longest audio one ASR request carries
+// when asr_max_segment_duration is unset. Well under the vendor ceiling on
+// purpose: Alibaba documents 300 s for qwen3-asr-flash, but a 485 s recording
+// was refused with "The audio is too long" while 250 s passed, so 120 s — 40 %
+// of the documented ceiling — leaves headroom for a vendor that counts
+// container overhead, and keeps two hours of audio within the 60-request
+// ceiling the cutter enforces (see internal/models/asr).
+const DefaultASRMaxSegmentDuration = 120 * time.Second
 
 // DefaultDocumentProcessTimeout is the ceiling for a single document:process
 // Asynq task when document_process_timeout is unset or non-positive.
@@ -823,6 +846,28 @@ func applyKnowledgeBaseEnvOverrides(cfg *Config) {
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_DOCREADER_CALL_TIMEOUT")); value != "" {
 		if d, err := time.ParseDuration(value); err == nil && d > 0 {
 			cfg.KnowledgeBase.DocReaderCallTimeout = d
+		}
+	}
+	if cfg.KnowledgeBase.FFmpegPath == "" {
+		cfg.KnowledgeBase.FFmpegPath = "ffmpeg"
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_FFMPEG_PATH")); value != "" {
+		cfg.KnowledgeBase.FFmpegPath = value
+	}
+	if cfg.KnowledgeBase.FFprobePath == "" {
+		cfg.KnowledgeBase.FFprobePath = "ffprobe"
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_FFPROBE_PATH")); value != "" {
+		cfg.KnowledgeBase.FFprobePath = value
+	}
+	if cfg.KnowledgeBase.MaxAudioSegmentDuration <= 0 {
+		cfg.KnowledgeBase.MaxAudioSegmentDuration = DefaultASRMaxSegmentDuration
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_ASR_MAX_SEGMENT_SECONDS")); value != "" {
+		// Seconds, not a duration string: the env var says so, and an operator
+		// tuning a vendor's length limit thinks in seconds.
+		if seconds, err := strconv.Atoi(value); err == nil && seconds > 0 {
+			cfg.KnowledgeBase.MaxAudioSegmentDuration = time.Duration(seconds) * time.Second
 		}
 	}
 }
