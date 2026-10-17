@@ -4794,6 +4794,17 @@
         "context_window": 4096,
         "source": "https://docs.cohere.com/docs/models#rerank"
       }
+    ],
+    "deepinfra": [
+      {
+        "id": "Qwen/Qwen3-Reranker-4B",
+        "name": "Qwen3 Reranker 4B (DeepInfra)",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "source": "https://deepinfra.com/Qwen/Qwen3-Reranker-4B/api"
+      }
     ]
   }
 }

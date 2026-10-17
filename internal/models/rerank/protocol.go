@@ -24,6 +24,8 @@ type protocolReranker struct {
 	endpoint  string
 	modelName string
 	modelID   string
+	// Pairwise protocols serialize one query for every document.
+	queryPerDocument bool
 }
 
 // defaultBatchConcurrency bounds in-flight batches when a vendor declares no
@@ -43,8 +45,8 @@ func (r *protocolReranker) Rerank(
 	logger.Debugf(ctx, "%s", buildRerankRequestDebug(r.modelName, r.endpoint, query, documents))
 
 	// The query travels in every request, so an over-long one cannot be made
-	// to fit by splitting the documents. SplitBatches charges it to each
-	// batch but only against a whole-request budget; a vendor that caps the
+	// to fit by splitting the documents. SplitBatches charges it per batch
+	// or per pair against the whole-request budget; a vendor that caps the
 	// query on its own is checked here.
 	if limit := r.settings.MaxQueryChars; limit > 0 {
 		if length := utf8.RuneCountInString(query); length > limit {
@@ -55,7 +57,9 @@ func (r *protocolReranker) Rerank(
 		}
 	}
 
-	batches, err := api.SplitBatches(documents, utf8.RuneCountInString(query), r.settings.BatchLimits())
+	limits := r.settings.BatchLimits()
+	limits.RepeatFixedRunes = r.queryPerDocument
+	batches, err := api.SplitBatches(documents, utf8.RuneCountInString(query), limits)
 	if err != nil {
 		return nil, fmt.Errorf("%s rerank: %w", r.modelName, err)
 	}
