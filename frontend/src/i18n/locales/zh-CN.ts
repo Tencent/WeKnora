@@ -3143,6 +3143,11 @@ export default {
       desc: '配置用于语音识别和音频转录的语音转文本模型（如 OpenAI Whisper）',
       empty: '暂无 ASR 语音模型'
     },
+    video: {
+      title: '视频',
+      desc: '模型目录中标注支持视频输入的模型',
+      empty: '暂无支持视频输入的模型'
+    },
     vllm: {
       title: 'VLLM 视觉模型',
       desc: '配置用于视觉理解和多模态的视觉语言模型',
@@ -3177,7 +3182,8 @@ export default {
       embedding: 'Embedding',
       rerank: 'ReRank',
       vllm: '视觉',
-      asr: '语音'
+      asr: '语音',
+      video: '视频'
     }
   },
   mcpSettings: {
@@ -4706,9 +4712,18 @@ export default {
       languageLabel: '转写语言',
       languageDescription: '视频旁白的语言提示；留空则自动检测。与「音频处理」的语言设置无关。',
       languagePlaceholder: '例如 zh、en，留空自动检测',
-      vlmHint: '画面描述使用「图像处理」中配置的 VLM 视觉模型，最多抽取 12 帧。',
-      vlmRequired: '尚未配置 VLM 视觉模型，画面描述无法生成，视频将保持仅存档；请先在「图像处理」中配置。',
-      vlmPartial: '尚未配置 VLM 视觉模型，本次只转写旁白，画面描述会被跳过。',
+      vlmHint: '画面描述使用「视频处理」页自己的视觉模型，最多抽取 12 帧。',
+      vlmRequired: '尚未选择视频画面视觉模型，画面描述无法生成，视频将保持仅存档；请先在「视频处理」中选择。',
+      vlmPartial: '尚未选择视频画面视觉模型，本次只转写旁白，画面描述会被跳过。',
+      vlmLabel: '画面视觉模型（VLM）',
+      vlmDescription: '用于描述抽取的视频画面。独立于「图像处理」：改动图片解析不会影响视频输出。',
+      vlmPlaceholder: '选择视频画面描述用的视觉模型',
+      vlmLanguageLabel: '画面描述语言',
+      vlmLanguageDescription: '生成的画面描述使用的语言；留空则跟随请求语言。',
+      vlmLanguageAuto: '自动（跟随请求语言）',
+      customInstructionsLabel: '画面描述要求',
+      customInstructionsDescription: '补充画面描述需要重点关注的内容。它会追加在内置要求之后，内置要求始终优先，因此不能覆盖「看不清就说不清楚、不要猜」这条规则。',
+      customInstructionsPlaceholder: '补充需要重点识别的画面信息，例如：重点识别弹窗标题与报错文案；忽略右下角水印。',
     },
     multimodal: {
       title: '图像处理配置',

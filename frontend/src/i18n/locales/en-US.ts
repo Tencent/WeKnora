@@ -4004,9 +4004,18 @@ export default {
       languageLabel: 'Transcription language',
       languageDescription: 'Language hint for the video narration; leave empty to auto-detect. It is independent of the Audio language setting.',
       languagePlaceholder: 'For example zh or en; empty means auto-detect',
-      vlmHint: 'Frame descriptions use the VLM model configured under Image Processing; at most 12 frames are sampled.',
-      vlmRequired: 'No VLM model is configured, so frame descriptions cannot be generated and videos will stay archived. Configure one under Image Processing first.',
-      vlmPartial: 'No VLM model is configured, so this run only transcribes the narration and skips frame descriptions.',
+      vlmHint: 'Frame descriptions use this video section’s own vision model; at most 12 frames are sampled.',
+      vlmRequired: 'No vision model is selected for video frames, so frames cannot be described and the video stays archived. Select a vision model under Video Processing.',
+      vlmPartial: 'No vision model is selected for video frames, so this run only transcribes the narration and skips frame descriptions.',
+      vlmLabel: 'Frame vision model (VLM)',
+      vlmDescription: 'Describes sampled video frames. It is independent of Image Processing: changing image parsing never changes video output.',
+      vlmPlaceholder: 'Select the vision model for video frames',
+      vlmLanguageLabel: 'Frame description language',
+      vlmLanguageDescription: 'Language of the generated frame descriptions; empty follows the request language.',
+      vlmLanguageAuto: 'Auto (follow request language)',
+      customInstructionsLabel: 'Frame description requirements',
+      customInstructionsDescription: 'Extra guidance for what the frame descriptions should focus on. It is appended to the built-in requirements, which still win, so it cannot override the “say unreadable instead of guessing” rule.',
+      customInstructionsPlaceholder: 'Add what the frame descriptions should pay special attention to, for example: focus on dialog titles and error messages; ignore the watermark in the corner.',
     },
     advanced: {
       title: 'Advanced Settings',
@@ -5508,7 +5517,8 @@ export default {
         embedding: 'Embedding',
         rerank: 'ReRank',
         vllm: 'Vision',
-        asr: 'Speech'
+        asr: 'Speech',
+        video: 'Video'
       },
       actions: {
         addModel: 'Add Model',
@@ -5543,6 +5553,11 @@ export default {
         title: 'ASR Speech Models',
         desc: 'Configure speech-to-text models for audio transcription (e.g. OpenAI Whisper)',
         empty: 'No ASR models'
+      },
+      video: {
+        title: 'Video',
+        desc: 'Models that accept video input, per the model catalog',
+        empty: 'No video-capable models'
       },
       toasts: {
         nameRequired: 'Model name cannot be empty',

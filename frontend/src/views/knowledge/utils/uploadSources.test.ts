@@ -153,24 +153,23 @@ test('isVideoParsingReady mirrors the backend model requirement per mode', () =>
       { video_config: { enabled: true, mode: 'audio_only', model_id: 'asr-1' } },
     ],
     [
-      'keyframes with the image VLM',
+      'keyframes with the video section VLM',
       {
-        video_config: { enabled: true, mode: 'keyframes' },
-        vlm_config: { enabled: true, model_id: 'vlm-1' },
+        video_config: {
+          enabled: true,
+          mode: 'keyframes',
+          vlm_config: { enabled: true, model_id: 'vlm-video' },
+        },
       },
     ],
     [
       'audio_and_keyframes satisfied by frames alone',
       {
-        video_config: { enabled: true, mode: 'audio_and_keyframes' },
-        vlm_config: { enabled: true, model_id: 'vlm-1' },
-      },
-    ],
-    [
-      'legacy VLM rows configured by model_name and base_url',
-      {
-        video_config: { enabled: true, mode: 'keyframes' },
-        vlm_config: { model_name: 'qwen-vl', base_url: 'http://vlm' },
+        video_config: {
+          enabled: true,
+          mode: 'audio_and_keyframes',
+          vlm_config: { enabled: true, model_id: 'vlm-video' },
+        },
       },
     ],
   ]
@@ -194,10 +193,37 @@ test('isVideoParsingReady mirrors the backend model requirement per mode', () =>
     ],
     ['keyframes without the VLM', { video_config: { enabled: true, mode: 'keyframes' } }],
     [
-      'keyframes with a VLM that has no model',
+      'keyframes with a video VLM that has no model',
+      {
+        video_config: {
+          enabled: true,
+          mode: 'keyframes',
+          vlm_config: { enabled: true, model_id: '' },
+        },
+      },
+    ],
+    [
+      'keyframes with only the image section VLM',
       {
         video_config: { enabled: true, mode: 'keyframes' },
-        vlm_config: { enabled: true, model_id: '' },
+        vlm_config: { enabled: true, model_id: 'vlm-1' },
+      },
+    ],
+    [
+      'keyframes with a legacy image-section VLM',
+      {
+        video_config: { enabled: true, mode: 'keyframes' },
+        vlm_config: { model_name: 'qwen-vl', base_url: 'http://vlm' },
+      },
+    ],
+    [
+      'keyframes with a video VLM that is not enabled',
+      {
+        video_config: {
+          enabled: true,
+          mode: 'keyframes',
+          vlm_config: { enabled: false, model_id: 'vlm-video' },
+        },
       },
     ],
     ['an old knowledge base without video_config', {}],

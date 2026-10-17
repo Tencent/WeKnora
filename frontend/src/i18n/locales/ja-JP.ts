@@ -4004,9 +4004,18 @@ export default {
       languageLabel: '文字起こしの言語',
       languageDescription: '動画ナレーションの言語ヒントです。空欄の場合は自動検出します。「音声」の言語設定とは連動しません。',
       languagePlaceholder: '例: zh、en（空欄で自動検出）',
-      vlmHint: '映像説明には「画像処理」で設定した VLM モデルを使用し、最大 12 フレームを抽出します。',
-      vlmRequired: 'VLM モデルが未設定のため映像説明を生成できず、動画は保存のみになります。先に「画像処理」で設定してください。',
-      vlmPartial: 'VLM モデルが未設定のため、今回は音声のみ文字起こしし、映像説明はスキップします。',
+      vlmHint: '映像説明にはこの動画セクション専用の視覚モデルを使用し、最大 12 フレームを抽出します。',
+      vlmRequired: '動画の画面説明用の視覚モデルが未選択のため、画面説明を生成できず動画は保存のみになります。「動画処理」で選択してください。',
+      vlmPartial: '動画の画面説明用の視覚モデルが未選択のため、今回は音声のみ文字起こしし、画面説明はスキップします。',
+      vlmLabel: '画面用視覚モデル（VLM）',
+      vlmDescription: '抽出したフレームを説明します。「画像処理」とは独立しており、画像解析の変更が動画の出力を変えることはありません。',
+      vlmPlaceholder: '動画の画面説明に使う視覚モデルを選択',
+      vlmLanguageLabel: '画面説明の言語',
+      vlmLanguageDescription: '生成される画面説明の言語。空の場合はリクエストの言語に従います。',
+      vlmLanguageAuto: '自動（リクエストの言語に従う）',
+      customInstructionsLabel: '画面説明の要件',
+      customInstructionsDescription: '画面説明で特に注目したい内容の追加指示。組み込みの要件の後に追加され、組み込み側が優先されるため、「判別できない場合は推測せず不明と書く」規則は上書きできません。',
+      customInstructionsPlaceholder: '画面説明で特に注目したい内容を入力してください。例：ダイアログのタイトルとエラーメッセージを重点的に。右下の透かしは無視。',
     },
     advanced: {
       title: '詳細設定',
@@ -5508,7 +5517,8 @@ export default {
         embedding: '埋め込み',
         rerank: 'リランク',
         vllm: '視覚',
-        asr: '音声'
+        asr: '音声',
+        video: '動画'
       },
       actions: {
         addModel: 'モデルを追加',
@@ -5543,6 +5553,11 @@ export default {
         title: 'ASR音声モデル',
         desc: '音声の文字起こしに使用する音声認識モデルを設定します（例: OpenAI Whisper）',
         empty: 'ASRモデルがありません'
+      },
+      video: {
+        title: '動画',
+        desc: 'モデルカタログ上で動画入力をサポートするモデル',
+        empty: '動画入力対応モデルがありません'
       },
       toasts: {
         nameRequired: 'モデル名を入力してください',

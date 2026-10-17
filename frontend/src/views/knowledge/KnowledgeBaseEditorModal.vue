@@ -607,15 +607,59 @@
               </div>
             </div>
 
-            <!-- 画面描述依赖「图像处理」页配置的 VLM 模型 -->
+            <!-- 画面视觉模型：视频页自己的 VLM，独立于「图像处理」的 vlm_config -->
             <div v-if="formData.videoConfig.enabled && videoModeUsesFrames" class="setting-row">
               <div class="setting-info">
-                <p class="desc">{{ $t('knowledgeEditor.video.vlmHint') }}</p>
+                <label>{{ $t('knowledgeEditor.video.vlmLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.vlmDescription') }}</p>
                 <p v-if="!videoFrameModelConfigured" class="desc video-asr-warning">
                   {{ videoModeUsesAudio
                     ? $t('knowledgeEditor.video.vlmPartial')
                     : $t('knowledgeEditor.video.vlmRequired') }}
                 </p>
+              </div>
+              <div class="setting-control video-model-control">
+                <ModelSelector
+                  model-type="VLLM"
+                  :selected-model-id="formData.videoConfig.vlm.modelId"
+                  :all-models="allModels"
+                  clearable
+                  @update:selected-model-id="(val: string) => { if (formData) formData.videoConfig.vlm.modelId = val }"
+                  @add-model="handleAddVLLMModel"
+                  :placeholder="$t('knowledgeEditor.video.vlmPlaceholder')"
+                />
+                <p class="video-model-hint">{{ $t('knowledgeEditor.video.vlmHint') }}</p>
+              </div>
+            </div>
+
+            <!-- 画面描述语言：与「图像处理」同一组选项，空值跟随请求语言 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesFrames" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.vlmLanguageLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.vlmLanguageDescription') }}</p>
+              </div>
+              <div class="setting-control">
+                <t-select v-model="formData.videoConfig.vlm.descriptionLanguage" clearable
+                  :placeholder="$t('knowledgeEditor.video.vlmLanguageAuto')">
+                  <t-option value="Chinese" :label="$t('language.zhCN')" />
+                  <t-option value="English" :label="$t('language.enUS')" />
+                  <t-option value="Korean" :label="$t('language.koKR')" />
+                  <t-option value="Russian" :label="$t('language.ruRU')" />
+                </t-select>
+              </div>
+            </div>
+
+            <!-- 画面描述要求：追加到固定 prompt 之后，不能覆盖「看不清就说不清楚」 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesFrames"
+              class="setting-row setting-row-vertical">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.customInstructionsLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.customInstructionsDescription') }}</p>
+              </div>
+              <div class="setting-control setting-control-full">
+                <t-textarea v-model="formData.videoConfig.vlm.customInstructions"
+                  :placeholder="$t('knowledgeEditor.video.customInstructionsPlaceholder')"
+                  :maxlength="4000" :autosize="{ minRows: 3, maxRows: 8 }" />
               </div>
             </div>
           </div>
@@ -757,7 +801,7 @@ import KBVectorStoreSettings from './settings/KBVectorStoreSettings.vue'
 import KBAdvancedSettings from './settings/KBAdvancedSettings.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import GraphSettings from './settings/GraphSettings.vue'
-import { isVideoAudioModelConfigured } from './videoConfig'
+import { isVideoAudioModelConfigured, isVideoFrameModelConfigured } from './videoConfig'
 import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
 import KnowledgeBaseActivitySettings from './settings/KnowledgeBaseActivitySettings.vue'
@@ -948,11 +992,9 @@ const videoModeUsesFrames = computed(() => {
 // 与后端同一套判定：视频转写只看视频页自己的 ASR 模型，音频页配了也不算。
 const videoAudioModelConfigured = computed(() =>
   isVideoAudioModelConfigured(formData.value?.videoConfig))
-// 画面描述固定使用「图像处理」页的 VLM（vlm_config.model_id）。
-const videoFrameModelConfigured = computed(() => {
-  const multimodal = formData.value?.multimodalConfig
-  return !!(multimodal?.enabled && multimodal?.vllmModelId)
-})
+// 与后端同一套判定：画面描述只看视频页自己的 VLM，与「图像处理」无关。
+const videoFrameModelConfigured = computed(() =>
+  isVideoFrameModelConfigured(formData.value?.videoConfig))
 const selectedVideoModeDescription = computed(() => {
   switch (formData.value?.videoConfig?.mode) {
     case 'keyframes':
@@ -1143,12 +1185,18 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     },
     // 视频解析：默认关闭。mode 始终显式发送，免得老行（mode 缺省）在保存后
     // 被后端归一成别的读法；modelId/language 是视频页自己的配置，留空表示
-    // 没有可用的 ASR 模型 / 自动检测，都不回退到「音频处理」。
+    // 没有可用的 ASR 模型 / 自动检测，都不回退到「音频处理」。vlm 是画面描
+    // 述自己的视觉模型与要求，同样不回退到「图像处理」的 vlm_config。
     videoConfig: {
       enabled: false,
       mode: 'audio_only' as string,
       modelId: '' as string,
-      language: '' as string
+      language: '' as string,
+      vlm: {
+        modelId: '' as string,
+        descriptionLanguage: '' as string,
+        customInstructions: '' as string
+      }
     },
     nodeExtractConfig: {
       enabled: false,
@@ -1330,7 +1378,15 @@ const loadKBData = async (
         // audio section's model, so the warning shows until one is chosen.
         modelId: kb.video_config?.model_id || '',
         // Empty means auto-detection; the hint never comes from asr_config.
-        language: kb.video_config?.language || ''
+        language: kb.video_config?.language || '',
+        // The video's own frame-description settings. Both fields are read
+        // regardless of the stored enabled flag: the mode decides whether
+        // frames are described, and the model id is what the page shows.
+        vlm: {
+          modelId: kb.video_config?.vlm_config?.model_id || '',
+          descriptionLanguage: kb.video_config?.vlm_config?.description_language || '',
+          customInstructions: kb.video_config?.vlm_config?.custom_instructions || ''
+        }
       },
       nodeExtractConfig: {
         enabled: kb.extract_config?.enabled || false,
@@ -1772,11 +1828,21 @@ const buildSubmitData = () => {
 
   // 视频解析配置。mode 与 language 永远显式发送（清空语言也要生效）；
   // model_id 为空就是没配视频 ASR，后端不会回退到「音频处理」。
+  // vlm_config 是视频自己的画面描述配置：enabled 只表达「这一节有没有选视觉
+  // 模型」，真正决定要不要描述画面的是 mode；留空即清空，绝不继承「图像处理」。
+  const videoVLM = formData.value.videoConfig?.vlm
+  const videoVLMModelId = videoVLM?.modelId?.trim() || ''
   data.video_config = {
     enabled: formData.value.videoConfig?.enabled || false,
     mode: formData.value.videoConfig?.mode || 'audio_only',
     model_id: formData.value.videoConfig?.modelId || '',
-    language: formData.value.videoConfig?.language || ''
+    language: formData.value.videoConfig?.language || '',
+    vlm_config: {
+      enabled: !!videoVLMModelId,
+      model_id: videoVLMModelId,
+      description_language: videoVLM?.descriptionLanguage || '',
+      custom_instructions: videoVLM?.customInstructions || ''
+    }
   }
 
   // storage_backend_id is authoritative. Keep provider projection for old clients

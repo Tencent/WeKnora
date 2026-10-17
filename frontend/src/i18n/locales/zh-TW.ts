@@ -3143,6 +3143,11 @@ export default {
       desc: '設定用於語音辨識和音訊轉錄的語音轉文字模型（如 OpenAI Whisper）',
       empty: '暫無 ASR 語音模型'
     },
+    video: {
+      title: '影片',
+      desc: '模型目錄中標註支援影片輸入的模型',
+      empty: '暫無支援影片輸入的模型'
+    },
     vllm: {
       title: 'VLLM 視覺模型',
       desc: '設定用於視覺理解和多模態的視覺語言模型',
@@ -3177,7 +3182,8 @@ export default {
       embedding: 'Embedding',
       rerank: 'ReRank',
       vllm: '視覺',
-      asr: '語音'
+      asr: '語音',
+      video: '影片'
     }
   },
   mcpSettings: {
@@ -4706,9 +4712,18 @@ export default {
       languageLabel: '轉寫語言',
       languageDescription: '影片旁白的語言提示；留空則自動偵測。與「音訊處理」的語言設定無關。',
       languagePlaceholder: '例如 zh、en，留空自動偵測',
-      vlmHint: '畫面描述使用「影像處理」中設定的 VLM 視覺模型，最多擷取 12 個影格。',
-      vlmRequired: '尚未設定 VLM 視覺模型，畫面描述無法產生，影片將維持僅存檔；請先在「影像處理」中設定。',
-      vlmPartial: '尚未設定 VLM 視覺模型，本次只轉寫旁白，畫面描述會被略過。',
+      vlmHint: '畫面描述使用「影片處理」頁自己的視覺模型，最多擷取 12 個影格。',
+      vlmRequired: '尚未選擇影片畫面視覺模型，畫面描述無法產生，影片將維持僅存檔；請先在「影片處理」中選擇。',
+      vlmPartial: '尚未選擇影片畫面視覺模型，本次只轉寫旁白，畫面描述會被略過。',
+      vlmLabel: '畫面視覺模型（VLM）',
+      vlmDescription: '用於描述擷取的影片畫面。獨立於「影像處理」：變更圖片解析不會影響影片輸出。',
+      vlmPlaceholder: '選擇影片畫面描述用的視覺模型',
+      vlmLanguageLabel: '畫面描述語言',
+      vlmLanguageDescription: '產生的畫面描述使用的語言；留空則跟隨請求語言。',
+      vlmLanguageAuto: '自動（跟隨請求語言）',
+      customInstructionsLabel: '畫面描述要求',
+      customInstructionsDescription: '補充畫面描述需要重點關注的內容。它會附加在內建要求之後，內建要求始終優先，因此不能覆寫「看不清就說不清楚、不要猜」這條規則。',
+      customInstructionsPlaceholder: '補充需要重點識別的畫面資訊，例如：重點識別彈窗標題與錯誤文案；忽略右下角浮水印。',
     },
     multimodal: {
       title: '影像處理設定',

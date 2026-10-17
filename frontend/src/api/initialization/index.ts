@@ -121,13 +121,20 @@ export interface KBModelConfigRequest {
     /**
      * 视频解析配置。mode 为 audio_only / keyframes / audio_and_keyframes；
      * model_id 是视频页自己的 ASR 模型，留空就是没配（不沿用音频处理）；
-     * language 是视频转写的语言提示，留空为自动检测。
+     * language 是视频转写的语言提示，留空为自动检测。vlm_config 是视频自己的
+     * 画面描述模型与要求，同样独立于图像处理的 vlm_config。
      */
     video_config?: {
         enabled: boolean
         mode?: string
         model_id?: string
         language?: string
+        vlm_config?: {
+            enabled: boolean
+            model_id?: string
+            description_language?: string
+            custom_instructions?: string
+        }
     }
     documentSplitting: {
         chunkSize: number

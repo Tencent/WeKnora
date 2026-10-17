@@ -65,3 +65,36 @@ test('video parsing saves its own ASR language and never borrows the audio model
   assert.match(configured, /isVideoAudioModelConfigured\(formData\.value\?\.videoConfig\)/)
   assert.doesNotMatch(configured, /asrConfig/)
 })
+
+test('video frame descriptions carry their own vlm_config, not the image section', () => {
+  // The video page owns its vision model and prompt: saving the editor must
+  // send video_config.vlm_config, and the warning state must read the video
+  // section instead of multimodalConfig.
+  const payload = source.match(/data\.video_config = \{([\s\S]*?)\n  \}/)?.[1]
+  assert.ok(payload, 'expected to find the video_config payload block')
+
+  const vlmPayload = payload.match(/vlm_config: \{([\s\S]*?)\n    \}/)?.[1]
+  assert.ok(vlmPayload, 'expected to find the nested vlm_config payload')
+  assert.match(vlmPayload, /enabled: !!videoVLMModelId/)
+  assert.match(vlmPayload, /model_id: videoVLMModelId/)
+  assert.match(vlmPayload, /description_language: videoVLM\?\.descriptionLanguage \|\| ''/)
+  assert.match(vlmPayload, /custom_instructions: videoVLM\?\.customInstructions \|\| ''/)
+
+  const configured = source.match(
+    /const videoFrameModelConfigured = computed\(\(\) =>\s*([\s\S]*?)\)\n/
+  )?.[1]
+  assert.ok(configured, 'expected to find videoFrameModelConfigured')
+  assert.match(configured, /isVideoFrameModelConfigured\(formData\.value\?\.videoConfig\)/)
+  assert.doesNotMatch(configured, /multimodalConfig/)
+})
+
+test('video frame settings round-trip from the stored video_config.vlm_config', () => {
+  // The edit-mode initializer is the block that reads the stored KB.
+  const editInit = source.match(
+    /modelId: kb\.video_config\?\.model_id \|\| '',[\s\S]*?vlm: \{([\s\S]*?)\n\s*\}\n\s*\},/
+  )?.[1]
+  assert.ok(editInit, 'expected to find the stored video vlm initializer')
+  assert.match(editInit, /modelId: kb\.video_config\?\.vlm_config\?\.model_id \|\| ''/)
+  assert.match(editInit, /descriptionLanguage: kb\.video_config\?\.vlm_config\?\.description_language \|\| ''/)
+  assert.match(editInit, /customInstructions: kb\.video_config\?\.vlm_config\?\.custom_instructions \|\| ''/)
+})

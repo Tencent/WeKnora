@@ -12,6 +12,12 @@ export interface VideoParsingKbInfo {
     enabled?: boolean
     mode?: string
     model_id?: string
+    // The video section owns its frame-description model; the knowledge base's
+    // top-level vlm_config (image processing) never makes a video parseable.
+    vlm_config?: {
+      enabled?: boolean
+      model_id?: string
+    } | null
   } | null
   vlm_config?: {
     enabled?: boolean
@@ -56,12 +62,13 @@ export function isVideoParsingReady(kbInfo?: VideoParsingKbInfo | null): boolean
   // The video's own ASR model is the only one that counts: the audio section's
   // model never makes a video parseable, exactly like the backend.
   const audioReady = usesAudio && !!kbInfo?.video_config?.model_id?.trim()
-  // Frames use the VLM configured under image processing; the legacy
-  // model_name/base_url pair counts as configured on older rows.
+  // Frames use the video section's own vision model. The image section's
+  // vlm_config is a different setting and must not make a video look ready:
+  // the server would archive it. `enabled` mirrors VLMConfig.IsEnabled, which
+  // requires both the flag and a model id.
+  const frameVLM = kbInfo?.video_config?.vlm_config
   const framesReady =
-    usesFrames &&
-    ((kbInfo?.vlm_config?.enabled === true && !!kbInfo.vlm_config.model_id?.trim()) ||
-      (!!kbInfo?.vlm_config?.model_name?.trim() && !!kbInfo?.vlm_config?.base_url?.trim()))
+    usesFrames && frameVLM?.enabled === true && !!frameVLM.model_id?.trim()
   return audioReady || framesReady
 }
 

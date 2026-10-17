@@ -3141,6 +3141,11 @@ export default {
       desc: '음성 인식 및 오디오 전사를 위한 음성 인식 모델 설정 (예: OpenAI Whisper)',
       empty: 'ASR 음성 모델 없음'
     },
+    video: {
+      title: '비디오',
+      desc: '모델 카탈로그에서 비디오 입력을 지원하는 모델',
+      empty: '비디오 입력 지원 모델이 없습니다'
+    },
     vllm: {
       title: 'VLLM 비전 모델',
       desc: '시각 이해 및 멀티모달용 비전 언어 모델 설정',
@@ -3175,7 +3180,8 @@ export default {
       embedding: 'Embedding',
       rerank: 'ReRank',
       vllm: '비전',
-      asr: '음성'
+      asr: '음성',
+      video: '비디오'
     }
   },
   mcpSettings: {
@@ -4705,9 +4711,18 @@ export default {
       languageLabel: '변환 언어',
       languageDescription: '비디오 나레이션의 언어 힌트입니다. 비워 두면 자동 감지합니다. 「오디오」의 언어 설정과는 무관합니다.',
       languagePlaceholder: '예: zh, en (비워 두면 자동 감지)',
-      vlmHint: '화면 설명은 「이미지 처리」에 설정된 VLM 모델을 사용하며 최대 12개 프레임을 추출합니다.',
-      vlmRequired: 'VLM 모델이 설정되지 않아 화면 설명을 생성할 수 없으며 비디오는 보관 상태로 유지됩니다. 먼저 「이미지 처리」에서 설정하세요.',
-      vlmPartial: 'VLM 모델이 설정되지 않아 이번에는 나레이션만 변환하고 화면 설명은 건너뜁니다.',
+      vlmHint: '화면 설명에는 이 비디오 섹션 전용 비전 모델을 사용하며 최대 12개 프레임을 추출합니다.',
+      vlmRequired: '비디오 화면 설명용 비전 모델이 선택되지 않아 화면 설명을 생성할 수 없으며 비디오는 보관 상태로 유지됩니다. 「비디오 처리」에서 선택하세요.',
+      vlmPartial: '비디오 화면 설명용 비전 모델이 선택되지 않아 이번에는 나레이션만 변환하고 화면 설명은 건너뜁니다.',
+      vlmLabel: '화면 비전 모델(VLM)',
+      vlmDescription: '추출된 프레임을 설명합니다. 「이미지 처리」와 독립적이므로 이미지 파싱을 바꿔도 비디오 출력은 바뀌지 않습니다.',
+      vlmPlaceholder: '비디오 화면 설명에 사용할 비전 모델 선택',
+      vlmLanguageLabel: '화면 설명 언어',
+      vlmLanguageDescription: '생성되는 화면 설명의 언어입니다. 비워 두면 요청 언어를 따릅니다.',
+      vlmLanguageAuto: '자동(요청 언어 따름)',
+      customInstructionsLabel: '화면 설명 요구 사항',
+      customInstructionsDescription: '화면 설명에서 특히 주의할 내용을 추가로 지정합니다. 기본 요구 사항 뒤에 추가되며 기본 요구 사항이 우선하므로 「판별할 수 없으면 추측하지 말고 불명이라고 쓰기」 규칙은 덮어쓸 수 없습니다.',
+      customInstructionsPlaceholder: '화면 설명에서 특히 주의할 내용을 입력하세요. 예: 대화상자 제목과 오류 메시지에 집중, 모서리 워터마크는 무시.',
     },
     multimodal: {
       title: '이미지 처리 설정',

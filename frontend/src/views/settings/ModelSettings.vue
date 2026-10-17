@@ -349,6 +349,7 @@ import {
   isDefaultContextWindow,
   effectiveContextWindow,
 } from '@/utils/contextWindow'
+import { countVideoCapable, supportsVideoInput } from './modelVideoTab'
 
 const { t, locale } = useI18n()
 const authStore = useAuthStore()
@@ -359,7 +360,10 @@ const router = useRouter()
 const route = useRoute()
 const assistant = useAssistantStore()
 type ModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
-type FilterType = 'all' | ModelType
+// 「视频」是跨类型的父级分类：它按模型目录声明的输入模态筛选，本身不是一个
+// 可以新建的模型类型。类型筛选与它互斥。
+type FilterType = 'all' | ModelType | 'video'
+const VIDEO_FILTER: FilterType = 'video'
 
 const showDialog = ref(false)
 const showDebugDrawer = ref(false)
@@ -385,7 +389,9 @@ const KNOWLEDGE_BASE_EDITOR_HOST_ROUTES = new Set([
 watch(
   () => uiStore.settingsInitialSubSection,
   (sub) => {
-    if (sub && MODEL_TAB_TYPES.includes(sub as ModelType)) {
+    // 'video' is a valid landing tab too: it is a filter, not a model type, so
+    // it is checked separately from MODEL_TAB_TYPES.
+    if (sub && (MODEL_TAB_TYPES.includes(sub as ModelType) || sub === VIDEO_FILTER)) {
       activeTypeFilter.value = sub as FilterType
     }
   },
@@ -447,13 +453,24 @@ function convertToLegacyFormat(model: ModelConfig) {
 // 平铺 + 过滤
 const allLegacyModels = computed(() => allModels.value.map(convertToLegacyFormat))
 const filteredModels = computed(() => allLegacyModels.value.filter(model =>
-  (activeTypeFilter.value === 'all' || model._modelType === activeTypeFilter.value)
+  (activeTypeFilter.value === 'all'
+    || (activeTypeFilter.value === VIDEO_FILTER
+      ? supportsVideoInput(model)
+      : model._modelType === activeTypeFilter.value))
   && matchesResourceQuery({ name: modelDisplayName(model), description: vendorLabel(model) }, modelQuery.value),
 ))
 
+// 「视频」tab 与类型 tab 并列，但计数口径不同：它按模型目录声明的输入模态
+// （capabilities.input）统计，因此会横跨 chat / vllm / embedding 等类型。
 const modelTypeTabs = computed(() => [
   { value: 'all', label: t('common.all'), icon: 'view-module', count: allLegacyModels.value.length },
   ...MODEL_TAB_TYPES.map(value => ({ value, label: typeLabel(value), icon: typeIcon(value), count: countByType(value) })),
+  {
+    value: VIDEO_FILTER,
+    label: t('modelSettings.typeShort.video'),
+    icon: 'play-circle',
+    count: countVideoCapable(allLegacyModels.value),
+  },
 ])
 
 const countByType = (type: ModelType) => allLegacyModels.value.filter(m => m._modelType === type).length
@@ -545,6 +562,9 @@ const contextWindowTitle = (tokens?: number) => {
 
 const emptyHint = computed(() => {
   if (activeTypeFilter.value === 'all') return t('modelSettings.chat.empty')
+  // The video tab is not a model type: an empty list means no model's catalog
+  // entry declares video input, not that this type has no models.
+  if (activeTypeFilter.value === VIDEO_FILTER) return t('modelSettings.video.empty')
   const map: Record<ModelType, string> = {
     chat: t('modelSettings.chat.empty'),
     embedding: t('modelSettings.embedding.empty'),
@@ -574,9 +594,13 @@ const loadModels = async () => {
   }
 }
 
-// 打开添加对话框；类型在抽屉内选择，此处仅按当前 Tab 预填默认值
+// 打开添加对话框；类型在抽屉内选择，此处仅按当前 Tab 预填默认值。
+// 「视频」是输入模态分类而非模型类型，没有可预填的类型，退回对话模型。
 const openAddDialog = () => {
-  currentModelType.value = activeTypeFilter.value === 'all' ? 'chat' : activeTypeFilter.value
+  const filter = activeTypeFilter.value
+  currentModelType.value = filter === 'all' || filter === VIDEO_FILTER
+    ? 'chat'
+    : filter
   editingModel.value = null
   showDialog.value = true
 }
