@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent"
@@ -120,6 +121,7 @@ type agentService struct {
 	toolApprovalGate      approval.MCPApproval
 	customAgentService    interfaces.CustomAgentService
 	operationDispatcher   operations.Dispatcher
+	trialRunner           tools.AgentTrialRunner
 	sandboxMgr            sandbox.Manager
 	sandboxResolver       sandbox.TenantSandboxResolver
 	sandboxPinner         *SessionSandboxPinner
@@ -161,6 +163,7 @@ func NewAgentService(
 	graphRepo interfaces.RetrieveGraphRepository,
 	operationDispatcher *operations.HandlerDispatcher,
 	customAgentService interfaces.CustomAgentService,
+	trialRunner *AgentTrialRunner,
 ) interfaces.AgentService {
 	svc := &agentService{
 		customAgentService:   customAgentService,
@@ -197,6 +200,9 @@ func NewAgentService(
 		svc.hostSkillInstaller = hostSandbox.SkillInstaller
 		svc.hostSkillsRoot = hostSandbox.SkillTree.Root()
 		svc.hostSkillVersionsRoot = hostSandbox.SkillTree.VersionsRoot()
+	}
+	if trialRunner != nil {
+		svc.trialRunner = trialRunner
 	}
 	return svc
 }
@@ -273,7 +279,8 @@ func (s *agentService) CreateAgentEngine(
 		s.resolvePinnedSkillInfos(config),
 	)
 	engine.SetQuestionOrigin(s.resolveQuestionOriginInfo(ctx, config.QuestionOrigin, config.SearchTargets, kbInfos))
-	engine.SetPageContext(s.resolvePageContextInfo(ctx, config.PageContext, config.SearchTargets, kbInfos))
+	engine.SetPageContext(s.resolvePageContextInfo(
+		ctx, config.PageContext, config.SearchTargets, kbInfos, config.OperationsAgentID != ""))
 	engine.SetAssistantName(config.AssistantName)
 
 	// Non-vision chat models use the configured VLM to describe tool images.
@@ -478,18 +485,38 @@ func (s *agentService) registerOperationTools(
 	// lets the model tell the user why instead of failing at the router.
 	operationAccess := operations.Access{
 		Role:        types.CallerFromContext(ctx).Role,
+		SystemAdmin: types.IsSystemAdminFromContext(ctx),
 		EnforceRole: s.cfg != nil && s.cfg.Tenant.IsRBACEnforced() && !access.IsCrossTenantSuperuser(ctx, s.cfg),
 		Level:       config.AssistantAccess,
 	}
 	catalog := operations.Builtin()
 	toolRegistry.RegisterTool(tools.NewFindOperationsTool(catalog, operationAccess))
-	toolRegistry.RegisterTool(tools.NewRunOperationTool(tools.OperationsRuntime{
+	runtime := tools.OperationsRuntime{
 		Catalog:    catalog,
 		Dispatcher: s.operationDispatcher,
 		Gate:       gate,
 		Identity:   identity,
 		Access:     operationAccess,
-	}))
+	}
+	toolRegistry.RegisterTool(tools.NewRunOperationTool(runtime))
+	// Opening a page changes nothing; the user saves any form themselves.
+	openPage := tools.NewOpenPageTool(runtime)
+	toolRegistry.RegisterTool(openPage)
+	// Filling the page saves nothing either, but read-only runs only look.
+	if actor, ok := s.toolApprovalGate.(approval.PageActor); ok && actor != nil {
+		openPage.WithPageActor(actor)
+		toolRegistry.RegisterTool(tools.NewReadPageTool(actor))
+		toolRegistry.RegisterTool(tools.NewSelectTabTool(actor))
+		if operationAccess.Level != types.AssistantAccessReadOnly {
+			toolRegistry.RegisterTool(tools.NewFillPageTool(actor))
+		}
+	}
+	// A trial spends model calls and runs the agent's own tools, so it is
+	// a change for the access level to approve.
+	if s.trialRunner != nil && operationAccess.Level != types.AssistantAccessReadOnly {
+		toolRegistry.RegisterTool(tools.NewConfirmedTool(
+			tools.NewTryAgentTool(s.trialRunner), operations.RiskWrite, operationAccess, gate))
+	}
 }
 
 // registerProductDocTools gives a granted run the documentation bundled with
@@ -1678,7 +1705,7 @@ func (s *agentService) knowledgeBaseName(
 // find. Parts that fail to resolve are dropped individually.
 func (s *agentService) resolvePageContextInfo(
 	ctx context.Context, page *types.PageContext, targets types.SearchTargets,
-	kbInfos []*agent.KnowledgeBaseInfo,
+	kbInfos []*agent.KnowledgeBaseInfo, assistant bool,
 ) *agent.PageContextInfo {
 	if page == nil {
 		return nil
@@ -1693,13 +1720,136 @@ func (s *agentService) resolvePageContextInfo(
 			info.Agent = &agent.PageContextAgent{ID: a.ID, Name: a.Name}
 		}
 	}
-	kbID := page.KnowledgeBaseID
-	if kbID == "" || !targets.ContainsKB(kbID) {
-		if info.Agent == nil {
-			return nil
-		}
-		return info
+	if assistant {
+		s.resolveAssistantPageContext(ctx, page, info)
+		info.Title = page.Title
+		info.View = page.View
+		info.Selection = page.Selection
 	}
+	if kbID := page.KnowledgeBaseID; kbID != "" && targets.ContainsKB(kbID) {
+		s.resolveKnowledgeBasePageContext(ctx, page, targets, kbInfos, info)
+	}
+	if info.Empty() {
+		return nil
+	}
+	return info
+}
+
+// Bounds on the chat exchange quoted into a page context.
+const (
+	pageContextQuestionRunes   = 600
+	pageContextAnswerRunes     = 2000
+	pageContextMaxReferences   = 10
+	pageContextQuestionLookups = 4
+)
+
+// resolveAssistantPageContext adds the page identifier and the settings and
+// chat resources only the assistant is shown. Each is dropped unless the
+// caller can read it.
+func (s *agentService) resolveAssistantPageContext(
+	ctx context.Context, page *types.PageContext, info *agent.PageContextInfo,
+) {
+	info.Page, info.Section = page.Page, page.Section
+	tenantID := types.CallerFromContext(ctx).TenantID
+	if page.ModelID != "" && s.modelService != nil {
+		if m, err := s.modelService.GetModelByID(ctx, page.ModelID); err == nil && m != nil {
+			name := m.DisplayName
+			if name == "" {
+				name = m.Name
+			}
+			info.Model = &agent.PageContextModel{
+				ID: m.ID, Name: name, Type: string(m.Type), Source: string(m.Source), IsBuiltin: m.IsBuiltin,
+			}
+		} else {
+			logger.Infof(ctx, "Page context model %s dropped: not visible", secutils.SanitizeForLog(page.ModelID))
+		}
+	}
+	if page.MCPServiceID != "" && s.mcpServiceService != nil && tenantID != 0 {
+		svc, err := s.mcpServiceService.GetMCPServiceByID(ctx, tenantID, page.MCPServiceID)
+		if err == nil && svc != nil {
+			info.MCPService = &agent.PageContextMCPService{
+				ID: svc.ID, Name: svc.Name, Transport: string(svc.TransportType), Enabled: svc.Enabled,
+			}
+		} else {
+			logger.Infof(ctx, "Page context MCP service %s dropped: not visible",
+				secutils.SanitizeForLog(page.MCPServiceID))
+		}
+	}
+	if page.SessionID != "" && page.MessageID != "" && s.messageService != nil {
+		info.Message = s.pageContextMessage(ctx, page.SessionID, page.MessageID)
+	}
+}
+
+// pageContextMessage loads the chosen message through the message service,
+// which enforces the caller's read access to its session, and quotes the
+// question it answered.
+func (s *agentService) pageContextMessage(
+	ctx context.Context, sessionID, messageID string,
+) *agent.PageContextMessage {
+	msg, err := s.messageService.GetMessage(ctx, sessionID, messageID)
+	if err != nil || msg == nil {
+		logger.Infof(ctx, "Page context message %s dropped: not readable", secutils.SanitizeForLog(messageID))
+		return nil
+	}
+	out := &agent.PageContextMessage{
+		SessionID: sessionID, MessageID: msg.ID, Role: msg.Role, AgentID: msg.AgentID,
+	}
+	if msg.Role == "user" {
+		out.Question = truncatePageContextText(msg.Content, pageContextQuestionRunes)
+		return out
+	}
+	out.Answer = truncatePageContextText(msg.Content, pageContextAnswerRunes)
+	for _, ref := range msg.KnowledgeReferences {
+		if ref == nil || ref.KnowledgeID == "" {
+			continue
+		}
+		if len(out.References) == pageContextMaxReferences {
+			break
+		}
+		if slices.ContainsFunc(out.References, func(r *agent.PageContextReference) bool {
+			return r.KnowledgeID == ref.KnowledgeID
+		}) {
+			continue
+		}
+		title := ref.KnowledgeTitle
+		if title == "" {
+			title = ref.KnowledgeFilename
+		}
+		out.References = append(out.References, &agent.PageContextReference{
+			KnowledgeID: ref.KnowledgeID, KnowledgeBaseID: ref.KnowledgeBaseID, Title: title,
+		})
+	}
+	earlier, err := s.messageService.GetMessagesBySessionBeforeTime(
+		ctx, sessionID, msg.CreatedAt, pageContextQuestionLookups)
+	if err != nil {
+		return out
+	}
+	for i := len(earlier) - 1; i >= 0; i-- {
+		if m := earlier[i]; m != nil && m.Role == "user" && m.RequestID == msg.RequestID {
+			out.Question = truncatePageContextText(m.Content, pageContextQuestionRunes)
+			break
+		}
+	}
+	return out
+}
+
+func truncatePageContextText(s string, limit int) string {
+	s = strings.TrimSpace(s)
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	return string(runes[:limit]) + "…"
+}
+
+// resolveKnowledgeBasePageContext adds the open knowledge base, after the
+// caller checked this turn's search targets reach it, with its document and
+// Wiki resources.
+func (s *agentService) resolveKnowledgeBasePageContext(
+	ctx context.Context, page *types.PageContext, targets types.SearchTargets,
+	kbInfos []*agent.KnowledgeBaseInfo, info *agent.PageContextInfo,
+) {
+	kbID := page.KnowledgeBaseID
 	info.KnowledgeBaseID = kbID
 	info.KnowledgeBaseName = s.knowledgeBaseName(ctx, kbID, kbInfos)
 	if page.KnowledgeID != "" {
@@ -1712,11 +1862,11 @@ func (s *agentService) resolvePageContextInfo(
 		}
 	}
 	if s.wikiPageService == nil {
-		return info
+		return
 	}
 	scopes := tools.NewWikiScopesFromSearchTargets(targets, []string{kbID})
 	if len(scopes) == 0 {
-		return info
+		return
 	}
 	scope := scopes[0]
 	// Cache page lookups because the open page and several issue references
@@ -1761,7 +1911,6 @@ func (s *agentService) resolvePageContextInfo(
 			info.WikiIssues = kept
 		}
 	}
-	return info
 }
 
 // pageContextIssues keeps the requested issues that exist in kbID, in the

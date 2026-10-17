@@ -101,6 +101,32 @@ class AppStorageTests(unittest.TestCase):
         env = app["spec"]["template"]["spec"]["containers"][0]["env"]
         self.assertIn({"name": "STORAGE_TYPE", "value": "local"}, env)
 
+    def data_files_claim(self, documents):
+        return next(doc for doc in documents
+                    if doc["kind"] == "PersistentVolumeClaim"
+                    and doc["metadata"]["name"] == "audit-weknora-data-files")
+
+    def test_data_files_claim_defaults_to_read_write_once(self):
+        pvc = self.data_files_claim(self.documents())
+        self.assertEqual(pvc["spec"]["accessModes"], ["ReadWriteOnce"])
+
+    def test_data_files_access_modes_are_configurable(self):
+        """A shared filesystem can keep the chart's rolling-update default.
+
+        The claim was hard-coded to ReadWriteOnce, so an RWX storage class
+        could not be used for the chart-created volume at all: the upgrade
+        then failed with Multi-Attach and the only way out was an
+        ``existingClaim``. Setting the access modes lets that deployment keep
+        ``app.strategy.type: RollingUpdate``.
+        """
+        documents = self.documents({"dataFiles": {"persistence": {
+            "accessModes": ["ReadWriteMany"],
+        }}})
+        self.assertEqual(self.data_files_claim(documents)["spec"]["accessModes"],
+                         ["ReadWriteMany"])
+        app = self.app(documents)
+        self.assertEqual(app["spec"]["strategy"]["type"], "RollingUpdate")
+
     def test_shared_storage_example_references_existing_claim(self):
         values = self.readme_values("values-production.yaml")
         override = self.readme_values("values-shared-storage.yaml")

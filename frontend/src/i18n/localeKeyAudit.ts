@@ -68,6 +68,8 @@ const TM_KEY_PATTERNS = [
 ] as const
 
 const EXTRA_PREFIXES = [
+  // Operation labels use IDs supplied by the backend catalog at runtime.
+  'agentStream.operations.names.',
   'system.globalSettings.listConfirm.',
   'system.globalSettings.keyLabels.',
   'system.globalSettings.keyDescriptions.',

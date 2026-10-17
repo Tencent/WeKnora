@@ -284,6 +284,9 @@ type ToolApprovalRequiredData struct {
 	RequestedAtUnix int64  `json:"requested_at"`
 	ToolCallID      string `json:"tool_call_id"`
 	RequestID       string `json:"request_id,omitempty"`
+	// GrantScope, when set, offers to allow calls like this one for the rest
+	// of the session, and describes which calls that covers.
+	GrantScope string `json:"grant_scope,omitempty"`
 }
 
 // ToolApprovalResolvedData confirms the user decision (or timeout/cancel).

@@ -307,6 +307,21 @@ func IsMCPOAuthNonInteractive(ctx context.Context) bool {
 	return v
 }
 
+// WithUnattendedRun marks ctx as a run whose prompts nobody can answer. See
+// UnattendedRunContextKey.
+func WithUnattendedRun(ctx context.Context) context.Context {
+	return context.WithValue(ctx, UnattendedRunContextKey, true)
+}
+
+// IsUnattendedRun reports whether ctx was marked by WithUnattendedRun.
+func IsUnattendedRun(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(UnattendedRunContextKey).(bool)
+	return v
+}
+
 // WithBackgroundTask marks ctx as originating from an asynq background worker
 // (document parse / summary / question / graph / multimodal enrichment). The
 // chat concurrency governor throttles only background LLM traffic, so this flag

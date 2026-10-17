@@ -406,7 +406,7 @@ export async function resolveEmbedToolApproval(
   sessionSig: string,
   visitorId: string,
   pendingId: string,
-  body: { decision: 'approve' | 'reject'; modified_args?: Record<string, unknown>; reason?: string },
+  body: { decision: 'approve' | 'reject'; modified_args?: Record<string, unknown>; reason?: string; allow_in_session?: boolean },
 ): Promise<{ resumed: boolean }> {
   const res: any = await post(
     `/api/v1/embed/${channelId}/sessions/${encodeURIComponent(sessionId)}/tool-approvals/${encodeURIComponent(pendingId)}`,

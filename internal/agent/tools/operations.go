@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
@@ -34,11 +35,24 @@ const defaultOperationTimeout = 60 * time.Second
 // find_operations call returns; broader matches list summaries only.
 const maxDescribedOperations = 12
 
+// maxProbesPerRun bounds the probe operations one run may make. A probe
+// changes nothing, but each one connects to a service or runs a retrieval,
+// so a model looping on one must stop and report instead.
+const maxProbesPerRun = 10
+
 const findOperationsDescription = "" +
 	"Find WeKnora management operations you can run for the user with run_operation: " +
 	"inspecting knowledge bases and documents, diagnosing and retrying document parsing, " +
-	"deleting documents, checking Wiki health, creating and configuring agents, and listing " +
-	"the models and MCP services an agent can use. Returns each operation's id, risk and parameters. " +
+	"deleting documents, checking Wiki health, creating and configuring agents, managing the " +
+	"workspace's models, MCP services and skills (adding, renaming, enabling, removing, installing a " +
+	"skill from a hub), copying knowledge bases, editing or restoring document chunks, " +
+	"inspecting data sources and sync logs, pausing/resuming sync schedules, triggering syncs, " +
+	"configuring document parsing, chunking, OCR and generated questions, " +
+	"batch updating FAQ enabled/recommended states and tags, reading and refreshing saved MCP tool directories, " +
+	"managing saved web search providers and data source sync settings, checking connections and retrieval, " +
+	"reading current workspace/member/version information, and querying platform users, settings and runtime tasks " +
+	"as a system administrator. " +
+	"Returns each operation's id, risk and parameters. " +
 	"Call with no arguments to see every operation, or narrow with query (words matched " +
 	"against ids and summaries) or domain. Operation ids must come from this tool; never guess them. " +
 	"Matches this user may not run are listed under unavailable with the reason; when the one " +
@@ -47,10 +61,13 @@ const findOperationsDescription = "" +
 // Approval policy sentences, one per assistant access level, appended to
 // both tool descriptions.
 const (
-	approvalPolicyConfirm   = "Operations with risk write or destructive ask the user to confirm before they run."
-	approvalPolicyAutoWrite = "Operations with risk write run right away; destructive ones ask the user " +
-		"to confirm before they run."
-	approvalPolicyReadOnly = "The user set the assistant to read-only, so only read operations can run. " +
+	approvalPolicyConfirm = "Operations with risk write or destructive ask the user to confirm before they run. " +
+		"When confirming a write, the user may allow the same operation on the same knowledge base or agent " +
+		"for the rest of the conversation; such calls then run without asking. Deletions and skill installs " +
+		"always ask."
+	approvalPolicyAutoWrite = "Operations with risk write run right away, except skill installs; destructive " +
+		"ones and skill installs ask the user to confirm before they run."
+	approvalPolicyReadOnly = "The user set the assistant to read-only, so only read and probe operations can run. " +
 		"If they ask for a change, say it is off and that they can allow changes in the assistant settings."
 )
 
@@ -60,6 +77,9 @@ func withheldReason(w operations.Withholding, access operations.Access) string {
 	switch {
 	case w.ReadOnly:
 		return "The user set the assistant to read-only; they can allow changes in the assistant settings."
+	case w.SystemAdmin:
+		return "Requires system administrator permission; " +
+			"workspace owner/admin roles and cross-workspace access do not grant it."
 	case w.Role != "":
 		return fmt.Sprintf("Needs the %s workspace role or above; the user is %s. "+
 			"A workspace admin can change their role.", w.Role, access.Role)
@@ -68,14 +88,18 @@ func withheldReason(w operations.Withholding, access operations.Access) string {
 	}
 }
 
+var probePolicy = fmt.Sprintf(" Operations with risk probe change nothing and run right away, "+
+	"but each does real work, so a run may make at most %d; use them to check a setup, not to poll.",
+	maxProbesPerRun)
+
 func approvalPolicy(level types.AssistantAccessLevel) string {
 	switch level {
 	case types.AssistantAccessReadOnly:
-		return approvalPolicyReadOnly
+		return approvalPolicyReadOnly + probePolicy
 	case types.AssistantAccessAutoWrite:
-		return approvalPolicyAutoWrite
+		return approvalPolicyAutoWrite + probePolicy
 	default:
-		return approvalPolicyConfirm
+		return approvalPolicyConfirm + probePolicy
 	}
 }
 
@@ -275,10 +299,12 @@ func describeParams(params []operations.Param) []operationParamView {
 	return views
 }
 
-// RunOperationTool executes catalog operations through the router.
+// RunOperationTool executes catalog operations through the router. One is
+// built per run, so probes counts that run's probe operations.
 type RunOperationTool struct {
 	BaseTool
-	rt OperationsRuntime
+	rt     OperationsRuntime
+	probes atomic.Int32
 }
 
 // NewRunOperationTool creates run_operation over rt's catalog and dispatcher.
@@ -330,6 +356,11 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 	if err != nil {
 		return operationFailure(fmt.Sprintf("invalid params for %s: %v", op.ID, err)), nil
 	}
+	if op.Risk == operations.RiskProbe && t.probes.Add(1) > maxProbesPerRun {
+		return operationFailure(fmt.Sprintf(
+			"%s was not run: this conversation turn already used its %d probe operations. "+
+				"Report what the earlier checks showed instead of checking again.", op.ID, maxProbesPerRun)), nil
+	}
 
 	identity := t.rt.Identity
 	meta, _ := ToolExecFromContext(ctx)
@@ -365,7 +396,7 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 	} else if op.Target != nil && op.Target.RequireComplete {
 		// Complete-target checks protect whole-entry replacements from losing
 		// truncated content; they apply even when no confirmation is needed.
-		if _, blocked := t.describeTarget(ctx, op, input, identity); blocked != nil {
+		if _, _, blocked := t.describeTarget(ctx, op, input, identity); blocked != nil {
 			return blocked, nil
 		}
 	}
@@ -393,6 +424,12 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 	}
 	result := &types.ToolResult{Success: true, Output: string(out)}
 	if op.Risk.Mutates() {
+		result.Data = map[string]any{"data_change": operationDataChange(op, input.Params, projected)}
+	} else if op.ID == "knowledge_base.get_copy_progress" &&
+		(projected.Label("status") == "completed" || projected.Label("status") == "failed") {
+		// The destination is created by the worker, after the initial copy
+		// event. Refresh when its terminal state is observed, including a
+		// partial destination left by a failed job.
 		result.Data = map[string]any{"data_change": operationDataChange(op, input.Params, projected)}
 	}
 	return result, nil
@@ -430,7 +467,10 @@ func operationDataChange(
 		}
 	}
 	area, action, _ := strings.Cut(op.ID, ".")
-	if action == "copy" || strings.HasPrefix(action, "create") {
+	if action == "copy" || action == "duplicate" || action == "get_copy_progress" || strings.HasPrefix(
+		action,
+		"create",
+	) {
 		for _, key := range []string{"knowledge_base_id", "knowledge_id", "agent_id"} {
 			add(key, projected.Label(key))
 		}
@@ -475,11 +515,12 @@ func (t *RunOperationTool) confirm(
 	if resumed {
 		decision = t.rt.Gate.ResumeDecision(waitCtx, meta.Answered, meta.EventBus)
 	} else {
-		label, blocked := t.describeTarget(ctx, op, input, identity)
+		label, target, blocked := t.describeTarget(ctx, op, input, identity)
 		if blocked != nil {
 			return confirmedCall{}, blocked
 		}
 		detail := mutationDetail(ctx, t, op, input.Params, identity)
+		grant, grantScope := approvalGrant(ctx, op, input.Params, target)
 		approvalArgs, err := json.Marshal(input)
 		if err != nil {
 			return confirmedCall{}, operationFailure(err.Error())
@@ -508,6 +549,8 @@ func (t *RunOperationTool) confirm(
 			Description:        approvalDescription(op, label, detail),
 			Args:               approvalArgs,
 			ToolCallID:         meta.ToolCallID,
+			Grant:              grant,
+			GrantScope:         grantScope,
 		})
 		if err != nil {
 			msg := fmt.Sprintf("could not ask the user to confirm %s: %v", op.ID, err)
@@ -558,7 +601,7 @@ func (t *RunOperationTool) confirm(
 		}
 		checkCtx, cancel := context.WithTimeout(waitCtx, timeout)
 		defer cancel()
-		if _, blocked := t.describeTarget(checkCtx, op, confirmedInput, identity); blocked != nil {
+		if _, _, blocked := t.describeTarget(checkCtx, op, confirmedInput, identity); blocked != nil {
 			t.rt.Gate.MarkExecuted(ctx, decision.PendingID)
 			return confirmedCall{}, blocked
 		}
@@ -567,35 +610,40 @@ func (t *RunOperationTool) confirm(
 }
 
 // describeTarget runs the operation's target read so the approval names what
-// it acts on. The read goes through the same authorization as the mutation,
-// so a target the user cannot see is refused here, before any prompt.
+// it acts on, and returns that read. The read goes through the same
+// authorization as the mutation, so a target the user cannot see is refused
+// here, before any prompt.
 func (t *RunOperationTool) describeTarget(
 	ctx context.Context,
 	op operations.Operation,
 	input runOperationInput,
 	identity operations.Identity,
-) (string, *types.ToolResult) {
+) (string, operations.Projected, *types.ToolResult) {
 	if op.Target == nil {
 		label, _ := rawString(input.Params, op.LabelParam)
-		return strings.Join(strings.Fields(label), " "), nil
+		return strings.Join(strings.Fields(label), " "), operations.Projected{}, nil
 	}
 	items := op.Target.Items
 	var ids []json.RawMessage
 	if items != nil {
 		if raw, ok := input.Params[items.Param]; ok {
 			if err := json.Unmarshal(raw, &ids); err != nil {
-				return "", operationFailure(fmt.Sprintf("invalid params for %s: %s must be an array",
-					op.ID, items.Param))
+				return "", operations.Projected{}, operationFailure(fmt.Sprintf(
+					"invalid params for %s: %s must be an array", op.ID, items.Param))
 			}
 		}
 		if len(ids) > operations.MaxApprovalItems {
-			return "", operationFailure(fmt.Sprintf("invalid params for %s: %s accepts at most %d items",
-				op.ID, items.Param, operations.MaxApprovalItems))
+			return "", operations.Projected{}, operationFailure(fmt.Sprintf(
+				"invalid params for %s: %s accepts at most %d items", op.ID, items.Param, operations.MaxApprovalItems))
 		}
 	}
-	label, blocked := t.readLabel(ctx, op, op.Target.Operation, op.Target.Label, input.Params, identity)
-	if blocked != nil || items == nil {
-		return label, blocked
+	target, blocked := t.readTarget(ctx, op, op.Target.Operation, input.Params, identity)
+	if blocked != nil {
+		return "", operations.Projected{}, blocked
+	}
+	label := target.Label(op.Target.Label)
+	if items == nil {
+		return label, target, nil
 	}
 	lines := []string{label}
 	for _, id := range ids {
@@ -604,10 +652,11 @@ func (t *RunOperationTool) describeTarget(
 			params[k] = v
 		}
 		params[items.As] = id
-		itemLabel, blocked := t.readLabel(ctx, op, items.Operation, items.Label, params, identity)
+		item, blocked := t.readTarget(ctx, op, items.Operation, params, identity)
 		if blocked != nil {
-			return "", blocked
+			return "", operations.Projected{}, blocked
 		}
+		itemLabel := item.Label(items.Label)
 		if itemLabel == "" {
 			itemLabel = strings.Trim(string(id), `"`)
 		}
@@ -615,43 +664,120 @@ func (t *RunOperationTool) describeTarget(
 		// item on one line so the approval card cannot hide later items.
 		lines = append(lines, "- "+strings.Join(strings.Fields(itemLabel), " "))
 	}
-	return strings.TrimSpace(strings.Join(lines, "\n")), nil
+	return strings.TrimSpace(strings.Join(lines, "\n")), target, nil
 }
 
-// readLabel runs one target read of op and returns the label field.
-func (t *RunOperationTool) readLabel(
+// readTarget runs one target read of op.
+func (t *RunOperationTool) readTarget(
 	ctx context.Context,
 	op operations.Operation,
-	targetID, label string,
+	targetID string,
 	params map[string]json.RawMessage,
 	identity operations.Identity,
-) (string, *types.ToolResult) {
+) (operations.Projected, *types.ToolResult) {
 	target, ok := t.rt.Catalog.Get(targetID)
 	if !ok {
-		return "", operationFailure(fmt.Sprintf("%s is misconfigured", op.ID))
+		return operations.Projected{}, operationFailure(fmt.Sprintf("%s is misconfigured", op.ID))
 	}
 	call, err := target.Build(operations.SelectParams(target, params))
 	if err != nil {
-		return "", operationFailure(fmt.Sprintf("invalid params for %s: %v", op.ID, err))
+		return operations.Projected{}, operationFailure(fmt.Sprintf("invalid params for %s: %v", op.ID, err))
 	}
 	resp, err := t.rt.Dispatcher.Dispatch(ctx, identity, call)
 	if err != nil {
-		return "", operationFailure(fmt.Sprintf("%s could not be run: %v", op.ID, err))
+		return operations.Projected{}, operationFailure(fmt.Sprintf("%s could not be run: %v", op.ID, err))
 	}
 	if resp.Status < 200 || resp.Status >= 300 {
-		return "", operationFailure(fmt.Sprintf("%s failed (HTTP %d): %s",
+		return operations.Projected{}, operationFailure(fmt.Sprintf("%s failed (HTTP %d): %s",
 			op.ID, resp.Status, operationErrorMessage(resp.Status, resp.Body)))
 	}
 	projected, err := target.Project(resp.Body)
 	if err != nil {
-		return "", operationFailure(fmt.Sprintf("%s returned an unexpected response", target.ID))
+		return operations.Projected{}, operationFailure(fmt.Sprintf("%s returned an unexpected response", target.ID))
 	}
 	if op.Target != nil && op.Target.RequireComplete && projected.Truncated {
-		return "", operationFailure(fmt.Sprintf(
+		return operations.Projected{}, operationFailure(fmt.Sprintf(
 			"%s cannot safely replace this entry because its current content was truncated. "+
 				"Use the application editor to preserve the full content.", op.ID))
 	}
-	return projected.Label(label), nil
+	return projected, nil
+}
+
+// approvalGrant is what approving this call may allow for the rest of the
+// session: the same operation on the same knowledge bases, or on the same
+// agent. A document's knowledge base comes from the target read, not from
+// the model. Deletions, and operations with no such scope (creating a
+// knowledge base or an agent), always ask.
+func approvalGrant(
+	ctx context.Context, op operations.Operation, params map[string]json.RawMessage, target operations.Projected,
+) (grant, scope string) {
+	if op.Risk != operations.RiskWrite || op.AlwaysConfirm {
+		return "", ""
+	}
+	declared := func(name string) string {
+		if _, ok := op.Param(name); !ok {
+			return ""
+		}
+		id, _ := rawString(params, name)
+		return strings.TrimSpace(id)
+	}
+	targetOp := ""
+	if op.Target != nil {
+		targetOp = op.Target.Operation
+	}
+	var kbIDs []string
+	for _, name := range []string{"knowledge_base_id", "source_knowledge_base_id"} {
+		if id := declared(name); id != "" && !slices.Contains(kbIDs, id) {
+			kbIDs = append(kbIDs, id)
+		}
+	}
+	agentID := declared("agent_id")
+	if len(kbIDs) == 0 && agentID == "" && declared("knowledge_id") != "" && targetOp == "knowledge.get" {
+		if id := target.Label("knowledge_base_id"); id != "" {
+			kbIDs = append(kbIDs, id)
+		}
+	}
+	summary := strings.TrimSpace(op.Summary)
+	if summary == "" {
+		summary = op.ID
+	}
+	zh := strings.HasPrefix(types.LanguageFromContextOrDefault(ctx), "zh")
+	switch {
+	case len(kbIDs) > 0:
+		name := ""
+		if len(kbIDs) == 1 && targetOp == "knowledge_base.get" {
+			name = excerpt(target.Label("name"))
+		}
+		slices.Sort(kbIDs)
+		grant = op.ID + " knowledge_base:" + strings.Join(kbIDs, ",")
+		switch {
+		case name != "" && zh:
+			return grant, fmt.Sprintf("%s（仅限知识库「%s」）", summary, name)
+		case name != "":
+			return grant, fmt.Sprintf("%s (only in knowledge base %q)", summary, name)
+		case zh:
+			return grant, summary + "（仅限这次涉及的知识库）"
+		default:
+			return grant, summary + " (only in the knowledge bases this call touches)"
+		}
+	case agentID != "":
+		name := ""
+		if targetOp == "agent.get" {
+			name = excerpt(target.Label("name"))
+		}
+		grant = op.ID + " agent:" + agentID
+		switch {
+		case name != "" && zh:
+			return grant, fmt.Sprintf("%s（仅限智能体「%s」）", summary, name)
+		case name != "":
+			return grant, fmt.Sprintf("%s (only for agent %q)", summary, name)
+		case zh:
+			return grant, summary + "（仅限这个智能体）"
+		default:
+			return grant, summary + " (only for this agent)"
+		}
+	}
+	return "", ""
 }
 
 func approvalDescription(op operations.Operation, label, detail string) string {
@@ -755,6 +881,56 @@ func mutationDetail(
 	if n, ok := rawInt(params, "version"); ok {
 		lines = append(lines, fmt.Sprintf("Version: %d", n))
 	}
+	if strings.HasPrefix(op.ID, "chunk.") {
+		if id, ok := rawString(params, "knowledge_id"); ok {
+			lines = append(lines, "Document: "+resolvedLabels(ctx, t, knowledgeLabels, []string{id}, identity))
+		}
+		for _, field := range []struct{ param, label string }{
+			{"revision", "Restore revision"}, {"expected_revision", "Current revision"},
+		} {
+			if n, ok := rawInt(params, field.param); ok {
+				lines = append(lines, fmt.Sprintf("%s: %d", field.label, n))
+			}
+		}
+		if enabled, ok := rawBool(params, "is_enabled"); ok {
+			lines = append(lines, fmt.Sprintf("Enabled: %t", enabled))
+		}
+	}
+	if op.ID == "knowledge_base.copy" {
+		lines = append(lines, "Copies content into a new knowledge base in the background.")
+	}
+	if op.ID == "knowledge_base.duplicate" {
+		lines = append(lines, "Copies settings only; the new knowledge base starts empty.")
+	}
+	if op.ID == "model.copy" {
+		lines = append(
+			lines,
+			"Copies the saved configuration and credentials on the backend. "+
+				"The copy is not the default and does not change existing model bindings. "+
+				"An unfinished local model will start a background download.",
+		)
+	}
+	if op.ID == "workspace.update" {
+		lines = append(
+			lines,
+			"Updates the current workspace profile for all its members. "+
+				"Quota, permissions and other settings stay unchanged.",
+		)
+	}
+	if op.ID == "mcp_service.refresh_metadata" {
+		lines = append(
+			lines,
+			"Connects to the MCP server and replaces the saved tool directory without executing tools. "+
+				"OAuth updates only your directory; shared directories require an administrator.",
+		)
+	}
+	if op.ID == "data_source.sync" {
+		lines = append(
+			lines,
+			"Uses the saved sync settings; may replace content and remove documents deleted upstream "+
+				"when deletion sync is enabled.",
+		)
+	}
 	if s, ok := rawString(params, "content"); ok && s != "" {
 		lines = append(lines, fmt.Sprintf("Content (%d characters): %s", len([]rune(s)), excerpt(s)))
 	}
@@ -766,7 +942,53 @@ func mutationDetail(
 		}
 	}
 	lines = append(lines, agentSettingsDetail(ctx, t, op, params, identity)...)
+	lines = append(lines, parsingAndFAQDetail(op, params)...)
+	lines = append(lines, syncAndSearchDetail(op, params)...)
+	lines = append(lines, serviceSettingsDetail(op, params)...)
 	return strings.Join(lines, "\n")
+}
+
+// serviceSettingsDetail lists the MCP service, model and skill settings a
+// call sets. A moved MCP service loses its saved credentials, which the card
+// says before the user approves.
+func serviceSettingsDetail(op operations.Operation, params map[string]json.RawMessage) []string {
+	var lines []string
+	if s, ok := rawString(params, "transport_type"); ok && s != "" {
+		lines = append(lines, "Transport: "+s)
+	}
+	if s, ok := rawString(params, "auth_type"); ok && s != "" {
+		lines = append(lines, "Authentication: "+s)
+	}
+	if s, ok := rawString(params, "usage_instructions"); ok {
+		lines = append(lines, fmt.Sprintf("Usage instructions (%d characters): %s", len([]rune(s)), excerpt(s)))
+	}
+	if s, ok := rawString(params, "display_name"); ok {
+		if s = strings.TrimSpace(s); s == "" {
+			s = "(model name)"
+		}
+		lines = append(lines, "Display name: "+excerpt(s))
+	}
+	if on, ok := rawBool(params, "enabled"); ok {
+		state := "off"
+		if on {
+			state = "on"
+		}
+		lines = append(lines, "Enabled: "+state)
+	}
+	if s, ok := rawString(params, "sandbox_config_id"); ok && s != "" {
+		lines = append(lines, "Sandbox: "+s)
+	}
+	if ids, ok := rawStringList(params, "sandbox_config_ids"); ok && len(ids) > 0 {
+		lines = append(lines, "Sandboxes: "+strings.Join(ids, ", "))
+	}
+	if op.ID == "mcp_service.update" {
+		_, url := params["url"]
+		_, transport := params["transport_type"]
+		if url || transport {
+			lines = append(lines, "A new address or transport removes the saved API key, token and custom headers.")
+		}
+	}
+	return lines
 }
 
 // agentSettingsDetail lists the agent settings a call sets, with models,
@@ -788,6 +1010,30 @@ func agentSettingsDetail(
 	}
 	if s, ok := rawString(params, "system_prompt"); ok {
 		lines = append(lines, fmt.Sprintf("System prompt (%d characters): %s", len([]rune(s)), excerpt(s)))
+	}
+	if s, ok := rawString(params, "web_search_provider_id"); ok && strings.HasPrefix(op.ID, "agent.") {
+		if s == "" {
+			lines = append(lines, "Web search provider: workspace default")
+		} else {
+			lines = append(
+				lines,
+				"Web search provider: "+resolvedLabels(
+					ctx,
+					t,
+					labelSource{
+						"web_search_provider.get",
+						"web_search_provider_id",
+						[]string{
+							"name",
+						},
+					},
+					[]string{
+						s,
+					},
+					identity,
+				),
+			)
+		}
 	}
 	if s, ok := rawString(params, "model_id"); ok && s != "" {
 		lines = append(lines, "Model: "+resolvedLabels(ctx, t, modelLabels, []string{s}, identity))

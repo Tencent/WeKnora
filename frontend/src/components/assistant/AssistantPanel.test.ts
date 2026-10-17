@@ -48,7 +48,9 @@ async function fixture(
   workspaceConfig = { display_name: '', max_access_level: 'confirm' },
   api: Record<string, (...args: any[]) => Promise<any>> = {},
 ) {
-  const auth = vue.reactive({ user: { id: 'user-a' }, effectiveTenantId: 1 })
+  let workspaceRefreshes = 0
+  let workspaceChanged: (() => void) | undefined
+  const auth = vue.reactive({ user: { id: 'user-a' }, effectiveTenantId: 1, refreshFromAuthMe: async () => { workspaceRefreshes++; return true } })
   const assistantApi = evaluate(assistantApiScript, {
     '@/utils/request': { get: async () => ({ success: true, data: workspaceConfig }), put: assert.fail },
   })
@@ -94,7 +96,8 @@ async function fixture(
     '@/views/chat/index.vue': ChatView,
     '@/components/Input-field.vue': emptyComponent,
     '@/components/PanelResizeHandle.vue': emptyComponent,
-    './AssistantContextChip.vue': emptyComponent,
+    './AssistantContextMenu.vue': emptyComponent,
+    './AssistantSelectionChip.vue': emptyComponent,
     './AssistantAccessPicker.vue': emptyComponent,
     '@/api/chat': {
       createSessions: createSession,
@@ -109,6 +112,10 @@ async function fixture(
     '@/stores/menu': { useMenuStore: () => ({ updataMenuChildren: (entry: unknown) => menuEntries.push(entry) }) },
     '@/stores/auth': { useAuthStore: () => auth },
     '@/stores/assistant': stores,
+    '@/utils/assistantDataChange': { useAssistantDataChange: (callback: () => void, options: { areas: string[] }) => {
+      assert.deepEqual(Array.from(options.areas), ['workspace'])
+      workspaceChanged = callback
+    } },
     '@/components/sessionMutations': {
       SESSION_MUTATION_EVENT: 'session-mutation',
       removeSession: async (id: string) => {
@@ -161,7 +168,7 @@ async function fixture(
     await flush()
   }
   await flush()
-  return { auth, assistant, mounted, sent, menuEntries, sessionStorage, localStorage, findAll, click, listCalls, deleted, dialogs, errors, close: () => app.unmount() }
+  return { workspaceChanged: () => workspaceChanged?.(), workspaceRefreshes: () => workspaceRefreshes, auth, assistant, mounted, sent, menuEntries, sessionStorage, localStorage, findAll, click, listCalls, deleted, dialogs, errors, close: () => app.unmount() }
 }
 
 test('layout and width persist, with the width kept within bounds', async () => {
@@ -435,5 +442,102 @@ test('agent layers merge, dismissal follows the agent id, and the payload has no
     assert.equal(f.assistant.pageContext.knowledgeBaseId, 'kb-a')
     f.assistant.retractPageContext(nested)
     assert.equal(f.assistant.pageContext, null)
+  } finally { f.close() }
+})
+
+test('settings and chat pages send their resources without widening the search scope', async () => {
+  const f = await fixture()
+  try {
+    const owner = Symbol()
+    f.assistant.publishPageContext(owner, { page: 'chat', chatSessionId: 'chat-1', messageId: 'msg-1' })
+    f.assistant.open({ query: 'Why this answer?' })
+    await flush()
+    assert.equal(f.sent.length, 1)
+    assert.deepEqual(Array.from(f.sent[0].scope.knowledgeBaseIds), [])
+    assert.equal(JSON.stringify(f.sent[0].scope.pageContext),
+      JSON.stringify({ page: 'chat', session_id: 'chat-1', message_id: 'msg-1' }))
+
+    f.assistant.publishPageContext(owner, { page: 'settings_models', section: 'chat', modelId: 'm-1', messageId: 'stale' })
+    assert.ok(f.assistant.pageContext)
+    f.assistant.open({ query: 'Check it' })
+    await flush()
+    assert.equal(JSON.stringify(f.sent.at(-1)?.scope.pageContext),
+      JSON.stringify({ page: 'settings_models', section: 'chat', model_id: 'm-1' }),
+      'a message without its session is not sent')
+
+    f.assistant.publishPageContext(owner, { section: 'tools' })
+    assert.equal(f.assistant.pageContext, null, 'a section alone names no page')
+  } finally { f.close() }
+})
+
+test('the open dialog and the selection go with the message, the selection only once', async () => {
+  const f = await fixture()
+  try {
+    const owner = Symbol()
+    f.assistant.publishPageContext(owner, { knowledgeBaseId: 'kb-a', knowledgeBaseName: 'KB' })
+    f.assistant.setPageView('Edit Markdown')
+    f.assistant.setPageSelection({ text: 'Run setup.', field: 'Content', ref: 'e2', startLine: 7, endLine: 7 })
+    f.assistant.open({ query: 'Polish this' })
+    await flush()
+    assert.equal(JSON.stringify(f.sent[0].scope.pageContext), JSON.stringify({
+      knowledge_base_id: 'kb-a', view: 'Edit Markdown',
+      selection: { text: 'Run setup.', field: 'Content', ref: 'e2', start_line: 7, end_line: 7 },
+    }))
+    assert.equal(f.assistant.pageSelection, null, 'the selection is used up by the message')
+
+    f.assistant.retractPageContext(owner)
+    f.assistant.setPageView('')
+    f.assistant.setPageSelection({ text: 'page text' })
+    f.assistant.open({ query: 'Explain' })
+    await flush()
+    assert.equal(JSON.stringify(f.sent.at(-1)?.scope.pageContext), JSON.stringify({ selection: { text: 'page text' } }),
+      'a selection alone is a page context')
+
+    f.assistant.setPageView('Edit Markdown')
+    f.assistant.dismissPageContext()
+    assert.equal(f.assistant.contextAttached, false)
+    f.assistant.setPageView('Another dialog')
+    assert.equal(f.assistant.contextAttached, true, 'a new dialog brings the context back')
+  } finally { f.close() }
+})
+
+test('a page that publishes nothing still sends its route title', async () => {
+  const f = await fixture()
+  try {
+    f.assistant.setPageTitle('Agents')
+    assert.equal(f.assistant.contextAttached, true)
+    f.assistant.open({ query: 'What is here?' })
+    await flush()
+    assert.equal(JSON.stringify(f.sent.at(-1)?.scope.pageContext), JSON.stringify({ title: 'Agents' }))
+
+    f.assistant.dismissPageContext()
+    assert.equal(f.assistant.contextAttached, false)
+    f.assistant.setPageTitle('Toolbox')
+    assert.equal(f.assistant.contextAttached, true, 'another page brings it back')
+  } finally { f.close() }
+})
+
+test('ask sends into the open conversation and starts one when there is none', async () => {
+  const f = await fixture()
+  try {
+    f.assistant.ask('First')
+    await flush()
+    assert.equal(f.sent.at(-1)?.query, 'First')
+    assert.equal(f.assistant.queuedMessage, null)
+    f.assistant.ask('Second')
+    assert.equal(f.assistant.queuedMessage?.query, 'Second', 'the open conversation sends it')
+    assert.equal(f.assistant.takeQueuedMessage()?.query, 'Second')
+    assert.equal(f.assistant.queuedMessage, null)
+  } finally { f.close() }
+})
+
+ test('workspace changes refresh the shared profile and workspace selector even while the panel is hidden', async () => {
+  const f = await fixture()
+  try {
+    assert.equal(f.assistant.visible, false)
+    assert.equal(f.workspaceRefreshes(), 0)
+    f.workspaceChanged()
+    await flush()
+    assert.equal(f.workspaceRefreshes(), 1)
   } finally { f.close() }
 })

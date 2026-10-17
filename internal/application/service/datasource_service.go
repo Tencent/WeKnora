@@ -149,6 +149,22 @@ func (s *DataSourceService) ListDataSources(ctx context.Context, kbID string) ([
 
 // UpdateDataSource updates an existing data source
 func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.DataSource) (*types.DataSource, error) {
+	return s.updateDataSource(ctx, ds, nil, nil)
+}
+
+// PatchDataSourceSyncSettings preserves worker state and settings omitted by the caller.
+func (s *DataSourceService) PatchDataSourceSyncSettings(
+	ctx context.Context, before, after *types.DataSource, fields []string,
+) (*types.DataSource, error) {
+	if before == nil || after == nil || before.ID != after.ID || len(fields) == 0 {
+		return nil, datasource.ErrDataSourceInvalid
+	}
+	return s.updateDataSource(ctx, after, before, fields)
+}
+
+func (s *DataSourceService) updateDataSource(
+	ctx context.Context, ds, before *types.DataSource, fields []string,
+) (*types.DataSource, error) {
 	if ds == nil || ds.ID == "" {
 		return nil, datasource.ErrDataSourceInvalid
 	}
@@ -221,9 +237,22 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 		}
 	}
 
-	if err := s.dsRepo.Update(ctx, ds); err != nil {
+	if before != nil {
+		err = s.dsRepo.PatchSyncSettings(ctx, ds, before.Config, fields)
+	} else {
+		err = s.dsRepo.Update(ctx, ds)
+	}
+	if err != nil {
 		logger.Errorf(ctx, "failed to update data source: %v", err)
 		return nil, err
+	}
+
+	if before != nil {
+		// Schedule from current persisted status, never the handler's stale snapshot.
+		ds, err = s.dsRepo.FindByID(ctx, ds.ID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Update cron schedule

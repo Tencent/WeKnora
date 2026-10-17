@@ -174,6 +174,12 @@ type ToolApprovalPromptRequest struct {
 	RegisteredToolName string          `json:"registered_tool_name"`
 	Description        string          `json:"description,omitempty"`
 	Args               json.RawMessage `json:"args,omitempty"`
+	// Grant, when set, names the kind of call this approval can allow for the
+	// rest of the session: approving with AllowInSession lets later calls
+	// with the same Grant in the same session run without asking. The server
+	// derives it from the call; GrantScope describes it to the user.
+	Grant      string `json:"grant,omitempty"`
+	GrantScope string `json:"grant_scope,omitempty"`
 }
 
 // ToolApprovalPromptResponse is the Response of an AgentPromptKindToolApproval.
@@ -182,6 +188,8 @@ type ToolApprovalPromptResponse struct {
 	// ModifiedArgs, when set on approval, replaces the original arguments.
 	ModifiedArgs json.RawMessage `json:"modified_args,omitempty"`
 	Reason       string          `json:"reason,omitempty"`
+	// AllowInSession approves later calls with the request's Grant too.
+	AllowInSession bool `json:"allow_in_session,omitempty"`
 }
 
 // MCPOAuthPromptRequest is the Request of an AgentPromptKindMCPOAuth.

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
@@ -101,9 +102,11 @@ func (stubSessionFileStore) ReadSessionFile(context.Context, string, string) ([]
 func (stubSessionFileStore) WriteSessionInputFile(context.Context, string, string, []byte) error {
 	return nil
 }
+
 func (stubSessionFileStore) WriteSessionWorkspaceFile(context.Context, string, string, []byte) error {
 	return nil
 }
+
 func (stubSessionFileStore) WriteSessionWorkspaceFiles(context.Context, string, []sandbox.SessionWorkspaceFile) error {
 	return nil
 }
@@ -565,13 +568,64 @@ func TestRegisterOperationToolsRequiresGrantAndWebUser(t *testing.T) {
 	}
 
 	granted := &types.AgentConfig{OperationsAgentID: types.BuiltinWeKnoraAssistantID}
-	require.ElementsMatch(t, []string{tools.ToolFindOperations, tools.ToolRunOperation}, registered(webUser, granted))
+	require.ElementsMatch(t, []string{tools.ToolFindOperations, tools.ToolRunOperation, tools.ToolOpenPage},
+		registered(webUser, granted))
 	require.Empty(t, registered(webUser, &types.AgentConfig{}))
 	require.Empty(t, registered(webUser, &types.AgentConfig{
 		OperationsAgentID: types.BuiltinWeKnoraAssistantID, SharedAgentReadOnly: true,
 	}))
 	apiKey := types.WithTenantAPIKeyScope(webUser, types.TenantAPIKeyScope{KeyID: 1})
 	require.Empty(t, registered(apiKey, granted))
+}
+
+func TestRegisterOperationToolsOffersAgentTrialsUnlessReadOnly(t *testing.T) {
+	webUser := types.WithCaller(types.WithPrincipal(context.Background(),
+		types.Principal{Type: types.PrincipalWebUser, ID: "u1"}),
+		types.Caller{TenantID: 7, UserID: "u1"})
+	svc := &agentService{
+		operationDispatcher: operations.NewHandlerDispatcher(),
+		trialRunner:         NewAgentTrialRunner(nil, nil),
+	}
+	for level, want := range map[types.AssistantAccessLevel]bool{
+		types.AssistantAccessReadOnly:  false,
+		types.AssistantAccessConfirm:   true,
+		types.AssistantAccessAutoWrite: true,
+	} {
+		registry := tools.NewToolRegistry()
+		svc.registerOperationTools(webUser, registry, &types.AgentConfig{
+			OperationsAgentID: types.BuiltinWeKnoraAssistantID, AssistantAccess: level,
+		})
+		_, err := registry.GetTool(tools.ToolTryAgent)
+		assert.Equal(t, want, err == nil, level)
+		_, err = registry.GetTool(tools.ToolOpenPage)
+		assert.NoError(t, err, "opening a page is offered at every level, read-only included")
+	}
+}
+
+func TestRegisterOperationToolsOffersPageToolsByAccessLevel(t *testing.T) {
+	webUser := types.WithCaller(types.WithPrincipal(context.Background(),
+		types.Principal{Type: types.PrincipalWebUser, ID: "u1"}),
+		types.Caller{TenantID: 7, UserID: "u1"})
+	svc := &agentService{
+		operationDispatcher: operations.NewHandlerDispatcher(),
+		toolApprovalGate:    approval.NewGate(nil, nil, nil),
+	}
+	for level, wantFill := range map[types.AssistantAccessLevel]bool{
+		types.AssistantAccessReadOnly:  false,
+		types.AssistantAccessConfirm:   true,
+		types.AssistantAccessAutoWrite: true,
+	} {
+		registry := tools.NewToolRegistry()
+		svc.registerOperationTools(webUser, registry, &types.AgentConfig{
+			OperationsAgentID: types.BuiltinWeKnoraAssistantID, AssistantAccess: level,
+		})
+		_, err := registry.GetTool(tools.ToolReadPage)
+		assert.NoError(t, err, "reading the page is offered at every level")
+		_, err = registry.GetTool(tools.ToolSelectTab)
+		assert.NoError(t, err, "selecting a tab is offered at every level")
+		_, err = registry.GetTool(tools.ToolFillPage)
+		assert.Equal(t, wantFill, err == nil, level)
+	}
 }
 
 func TestRegisterOperationToolsHonorsSuperuserBypass(t *testing.T) {
@@ -928,5 +982,49 @@ func TestSwitchManagedToolsIgnoreTheAllowlist(t *testing.T) {
 	for _, managed := range tools.SwitchManagedTools() {
 		require.False(t, toolOffered(chatModel.lastToolNames, managed),
 			"%s follows another agent setting, not the allowlist", managed)
+	}
+}
+
+func TestRegisterOperationToolsKeepsSystemAdminIndependentOfWorkspaceRole(t *testing.T) {
+	for _, enforce := range []bool{true, false} {
+		for _, isAdmin := range []bool{true, false} {
+			ctx := types.WithCaller(types.WithPrincipal(
+				context.Background(),
+				types.Principal{
+					Type: types.PrincipalWebUser,
+					ID:   "u1",
+				},
+			),
+				types.Caller{TenantID: 7, UserID: "u1", Role: types.TenantRoleOwner})
+			ctx = context.WithValue(ctx, types.SystemAdminContextKey, isAdmin)
+			ctx = context.WithValue(ctx, types.UserContextKey, &types.User{ID: "u1", CanAccessAllTenants: true})
+			svc := &agentService{
+				cfg: &config.Config{
+					Tenant: &config.TenantConfig{
+						EnableRBAC:              &enforce,
+						EnableCrossTenantAccess: true,
+					},
+				},
+				operationDispatcher: operations.NewHandlerDispatcher(),
+			}
+			registry := tools.NewToolRegistry()
+			svc.registerOperationTools(
+				ctx,
+				registry,
+				&types.AgentConfig{
+					OperationsAgentID: types.BuiltinWeKnoraAssistantID,
+					AssistantAccess:   types.AssistantAccessReadOnly,
+				},
+			)
+			find, err := registry.GetTool(tools.ToolFindOperations)
+			require.NoError(t, err)
+			result, err := find.Execute(ctx, []byte(`{"query":"system_admin.list_users"}`))
+			require.NoError(t, err)
+			if isAdmin {
+				assert.NotContains(t, result.Output, `"unavailable"`)
+			} else {
+				assert.Contains(t, result.Output, "Requires system administrator permission")
+			}
+		}
 	}
 }

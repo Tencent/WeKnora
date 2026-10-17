@@ -72,12 +72,67 @@ type PageContextAgent struct {
 
 // PageContextInfo contains only resources verified as visible in this turn.
 type PageContextInfo struct {
+	Page              string // known page identifier, e.g. "settings_models"; may be empty
+	Section           string // part of the page in view, e.g. "tools"; only with Page
 	Agent             *PageContextAgent
 	KnowledgeBaseID   string
 	KnowledgeBaseName string
 	Document          *SelectedDocumentInfo // nil unless a document is open
 	WikiPage          *PageContextWikiPage  // nil unless a Wiki page is open
 	WikiIssues        []*PageContextWikiIssue
+	Model             *PageContextModel
+	MCPService        *PageContextMCPService
+	Message           *PageContextMessage
+	// Title, View and Selection come from the page as the client reports it;
+	// they are what the user sees, not verified resources.
+	Title     string
+	View      string
+	Selection *types.PageSelection
+}
+
+// Empty reports whether nothing on the page was verified.
+func (p *PageContextInfo) Empty() bool {
+	return p == nil || (p.Page == "" && p.Agent == nil && p.KnowledgeBaseID == "" &&
+		p.Model == nil && p.MCPService == nil && p.Message == nil && p.Title == "" &&
+		p.View == "" && p.Selection == nil)
+}
+
+// PageContextModel is the model open in the model settings. It never
+// carries the endpoint or credentials.
+type PageContextModel struct {
+	ID        string
+	Name      string
+	Type      string
+	Source    string
+	IsBuiltin bool
+}
+
+// PageContextMCPService is the MCP service open in the MCP settings. It
+// never carries the URL, headers or credentials.
+type PageContextMCPService struct {
+	ID        string
+	Name      string
+	Transport string
+	Enabled   bool
+}
+
+// PageContextMessage is the chat message the user pointed the assistant at,
+// with excerpts of the exchange it belongs to.
+type PageContextMessage struct {
+	SessionID  string
+	MessageID  string
+	Role       string
+	AgentID    string
+	Question   string
+	Answer     string
+	References []*PageContextReference
+}
+
+// PageContextReference is one source a chat answer cited.
+type PageContextReference struct {
+	KnowledgeID     string
+	KnowledgeBaseID string
+	Title           string
 }
 
 // PageContextWikiPage is the Wiki page open in a page context.

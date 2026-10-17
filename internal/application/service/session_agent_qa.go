@@ -806,21 +806,42 @@ func questionOriginInTargets(
 // search targets reach its knowledge base, and its document only when a
 // target covers it. The Wiki slug and issue IDs are kept as given (trimmed,
 // deduplicated and bounded); the agent service checks they exist in that base
-// before showing them to the model.
+// before showing them to the model. Resources outside knowledge bases (agent,
+// model, MCP service, chat message) and a known page identifier are kept as
+// given; the agent service verifies them.
 func pageContextInTargets(
 	ctx context.Context, page *types.PageContext, targets types.SearchTargets,
 ) *types.PageContext {
 	if page == nil {
 		return nil
 	}
-	kept := &types.PageContext{AgentID: strings.TrimSpace(page.AgentID)}
+	kept := &types.PageContext{
+		AgentID:      strings.TrimSpace(page.AgentID),
+		ModelID:      strings.TrimSpace(page.ModelID),
+		MCPServiceID: strings.TrimSpace(page.MCPServiceID),
+		Title:        types.NormalizePageView(page.Title),
+		View:         types.NormalizePageView(page.View),
+		Selection:    page.Selection.Normalize(),
+	}
+	if p := strings.TrimSpace(page.Page); types.IsPageContextPage(p) {
+		kept.Page = p
+		if section := strings.TrimSpace(page.Section); types.IsPageContextSection(section) {
+			kept.Section = section
+		}
+	}
+	if sessionID, messageID := strings.TrimSpace(page.SessionID), strings.TrimSpace(page.MessageID); sessionID != "" {
+		kept.SessionID = sessionID
+		kept.MessageID = messageID
+	}
 	kbID := strings.TrimSpace(page.KnowledgeBaseID)
 	if kbID == "" || !targets.ContainsKB(kbID) {
 		if kbID != "" {
 			logger.Infof(ctx, "Ignoring page context: knowledge base %s is outside this turn's search targets",
 				secutils.SanitizeForLog(kbID))
 		}
-		if kept.AgentID == "" {
+		if kept.Page == "" && kept.AgentID == "" && kept.ModelID == "" &&
+			kept.MCPServiceID == "" && kept.SessionID == "" && kept.Title == "" && kept.View == "" &&
+			kept.Selection == nil {
 			return nil
 		}
 		return kept

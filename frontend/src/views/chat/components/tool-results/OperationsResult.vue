@@ -15,7 +15,7 @@
         <article v-for="(op, index) in operations" :key="`${op.id}-${index}`" class="catalog-item">
           <div class="catalog-item__head catalog-item__head--static">
             <span class="catalog-item__index">#{{ index + 1 }}</span>
-            <code class="catalog-item__name">{{ op.id }}</code>
+            <span class="catalog-item__name" :title="op.id">{{ getOperationLabel(t, op.id) }}</span>
             <span v-if="op.risk" class="catalog-risk" :data-risk="op.risk">{{ riskLabel(op.risk) }}</span>
             <span class="catalog-item__summary">{{ op.summary }}</span>
           </div>
@@ -43,7 +43,7 @@
           <article v-for="(op, index) in unavailable" :key="`${op.id}-${index}`" class="catalog-item">
             <div class="catalog-item__head catalog-item__head--static">
               <span class="catalog-item__index">#{{ index + 1 }}</span>
-              <code class="catalog-item__name">{{ op.id }}</code>
+              <span class="catalog-item__name" :title="op.id">{{ getOperationLabel(t, op.id) }}</span>
               <span v-if="op.risk" class="catalog-risk" :data-risk="op.risk">{{ riskLabel(op.risk) }}</span>
               <span class="catalog-item__summary">{{ op.summary }}</span>
             </div>
@@ -55,7 +55,7 @@
 
     <template v-else>
       <div v-if="run.operation || run.truncated" class="catalog-summary">
-        <code v-if="run.operation">{{ run.operation }}</code>
+        <span v-if="run.operation" class="catalog-operation-name" :title="run.operation">{{ getOperationLabel(t, run.operation) }}</span>
         <span v-if="run.truncated">{{ $t('agentStream.operations.truncated') }}</span>
       </div>
       <p v-if="resultEmpty" class="catalog-empty">{{ $t('agentStream.operations.emptyResult') }}</p>
@@ -72,6 +72,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
+  getOperationLabel,
   isEmptyCatalogValue,
   operationRows,
   parseCatalogPayload,
@@ -117,7 +118,7 @@ function riskLabel(risk: string) {
   margin-bottom: 8px;
   color: var(--td-text-color-secondary);
 }
-.catalog-summary code { font-weight: 600; color: var(--td-text-color-primary); }
+.catalog-operation-name { font-weight: 600; color: var(--td-text-color-primary); }
 .catalog-empty { margin: 0; color: var(--td-text-color-placeholder); }
 .catalog-list {
   border: 1px solid var(--td-component-stroke);
@@ -151,7 +152,8 @@ function riskLabel(risk: string) {
 .catalog-item__name {
   flex-shrink: 0;
   max-width: 46%;
-  font: var(--app-text-sm)/1.5 var(--app-font-family-mono, monospace);
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;

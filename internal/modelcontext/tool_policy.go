@@ -179,6 +179,15 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 		encodeKnownIssueIDs: true,
 		sourceOutput:        true,
 	},
+	// try_agent takes an agent ID, passed as returned like the catalog's, and
+	// reports another agent's answer, whose quoted IDs are compacted.
+	"try_agent": {},
+	// open_page links to a knowledge base or document by the handles the model
+	// was shown; the client needs the real IDs.
+	"open_page": {
+		sourceIDKeys: map[string]struct{}{"knowledge_base_id": {}, "knowledge_id": {}},
+		sourceOutput: true,
+	},
 	// Mutation tools echo the slug they acted on and surface validation errors
 	// that can quote a durable KB or document ID. They own no source arguments,
 	// but their output must still be compacted before the model sees it.
@@ -194,6 +203,11 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 	"thinking":   {},
 	"todo_write": {},
 	"ask_user":   {},
+	// The page tools quote the user's screen and echo the text they typed
+	// into it: compact any durable ID shown there, mine nothing structured.
+	"read_page":  {},
+	"select_tab": {},
+	"fill_page":  {},
 	// Skill output is user-authored content of unknown shape. Compact known
 	// durable IDs, but do not mine it for source keys: a skill's JSON may use
 	// "url"/"knowledge_id" with unrelated semantics.

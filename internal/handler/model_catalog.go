@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -23,24 +24,24 @@ import (
 // catalog models, thinking capabilities) comes from here; the frontend keeps
 // no vendor table of its own.
 type ModelProviderDTO struct {
-	Value        string            `json:"value"`
-	Label        string            `json:"label"`
+	Value        string            `json:"value" extensions:"x-agent=provider"`
+	Label        string            `json:"label" extensions:"x-agent"`
 	Labels       map[string]string `json:"labels,omitempty"`
-	Description  string            `json:"description"`
+	Description  string            `json:"description" extensions:"x-agent,x-agent-detail"`
 	Descriptions map[string]string `json:"descriptions,omitempty"`
 	Website      string            `json:"website,omitempty"`
 	// Icon is a data: URI (image/svg+xml;base64) ready for <img src>.
 	Icon         string                 `json:"icon,omitempty"`
 	API          api.API                `json:"api"`
 	Auth         providers.AuthStyle    `json:"auth"`
-	RequiresAuth bool                   `json:"requiresAuth"`
+	RequiresAuth bool                   `json:"requiresAuth" extensions:"x-agent=requires_auth"`
 	DefaultURLs  map[string]string      `json:"defaultUrls"`
-	ModelTypes   []string               `json:"modelTypes"`
+	ModelTypes   []string               `json:"modelTypes" extensions:"x-agent=model_types"`
 	ExtraFields  []providers.ExtraField `json:"extraFields,omitempty"`
 	// CredentialLabels rename the primary credential input for the model
 	// types that do not take a plain API key (signed rerank APIs).
 	CredentialLabels []providers.CredentialLabel `json:"credentialLabels,omitempty"`
-	Models           []ModelCatalogEntryDTO      `json:"models,omitempty"`
+	Models           []ModelCatalogEntryDTO      `json:"models,omitempty" extensions:"x-agent,x-agent-detail"`
 	Thinking         ProviderThinkingDTO         `json:"thinking"`
 	Order            int                         `json:"order"`
 }
@@ -54,13 +55,13 @@ type ProviderThinkingDTO struct {
 
 // ModelCatalogEntryDTO is one catalog model for the picker.
 type ModelCatalogEntryDTO struct {
-	ID              string                `json:"id"`
-	Name            string                `json:"name"`
-	Type            string                `json:"type"`
+	ID              string                `json:"id" extensions:"x-agent=model_name"`
+	Name            string                `json:"name" extensions:"x-agent=display_name"`
+	Type            string                `json:"type" extensions:"x-agent"`
 	API             api.API               `json:"api,omitempty"`
-	Reasoning       bool                  `json:"reasoning"`
-	Input           []string              `json:"input,omitempty"`
-	ContextWindow   int                   `json:"context_window,omitempty"`
+	Reasoning       bool                  `json:"reasoning" extensions:"x-agent"`
+	Input           []string              `json:"input,omitempty" extensions:"x-agent"`
+	ContextWindow   int                   `json:"context_window,omitempty" extensions:"x-agent"`
 	MaxOutputTokens int                   `json:"max_output_tokens,omitempty"`
 	Dimension       int                   `json:"dimension,omitempty"`
 	ThinkingLevels  []api.ReasoningEffort `json:"thinking_levels"`
@@ -189,24 +190,21 @@ func providerDTO(v *modelruntime.Provider, modelType types.ModelType, includeMod
 // @Tags         模型管理
 // @Accept       json
 // @Produce      json
-// @Param        model_type  query     string  false  "模型类型 (chat, embedding, rerank, vllm, asr)"
+// @Param        model_type  query     string  false  "模型类型 (chat, embedding, rerank, vllm, asr)"  Enums(chat,embedding,rerank,vllm,asr)  extensions(x-agent)
 // @Success      200         {object}  handler.DataResponse{data=[]handler.ModelProviderDTO}  "厂商列表"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"model.list_providers","risk":"read","max_items":200}
+// @x-agent-hint "Lists the providers of the model catalog, including vendors an admin added, by id and name. Use the id as model_draft.provider in open_page, and read one provider's models with model.get_provider."
 // @Router       /models/providers [get]
 func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 	ctx := c.Request.Context()
 	modelType := c.Query("model_type")
 	logger.Infof(ctx, "Listing model providers for type: %s", secutils.SanitizeForLog(modelType))
 
-	var backendType types.ModelType
-	if modelType != "" {
-		parsed, ok := models.ParseModelType(modelType)
-		if !ok {
-			_ = c.Error(errors.NewBadRequestError("unknown model_type"))
-			return
-		}
-		backendType = parsed
+	backendType, ok := parseProviderModelType(c, modelType)
+	if !ok {
+		return
 	}
 
 	var vendors []*modelruntime.Provider
@@ -231,6 +229,66 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 	}
 	logger.Infof(ctx, "Retrieved %d providers", len(result))
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+}
+
+func parseProviderModelType(c *gin.Context, modelType string) (types.ModelType, bool) {
+	if modelType == "" {
+		return "", true
+	}
+	parsed, ok := models.ParseModelType(modelType)
+	if !ok {
+		_ = c.Error(errors.NewBadRequestError("unknown model_type"))
+		return "", false
+	}
+	return parsed, true
+}
+
+// GetModelProvider godoc
+// @Summary      获取单个模型厂商
+// @Description  返回一个厂商的定义及其模型目录，可按模型类型与关键词过滤模型
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Param        provider    path      string  true   "厂商标识"  extensions(x-agent=provider)
+// @Param        model_type  query     string  false  "模型类型 (chat, embedding, rerank, vllm, asr)"  Enums(chat,embedding,rerank,vllm,asr)  extensions(x-agent)
+// @Param        keyword     query     string  false  "按模型 ID 或名称过滤（不区分大小写）"  extensions(x-agent)
+// @Success      200         {object}  handler.DataResponse{data=handler.ModelProviderDTO}  "厂商详情"
+// @Failure      400         {object}  errors.AppError  "请求参数错误"
+// @Failure      404         {object}  errors.AppError  "厂商不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"model.get_provider","risk":"read"}
+// @x-agent-hint "One catalog provider with the models it offers: model_name is what model_draft.model_name takes in open_page. Pass model_type to keep one kind, and keyword when the list is truncated."
+// @Router       /models/providers/{provider} [get]
+func (h *ModelHandler) GetModelProvider(c *gin.Context) {
+	ctx := c.Request.Context()
+	backendType, ok := parseProviderModelType(c, c.Query("model_type"))
+	if !ok {
+		return
+	}
+	vendor, found := modelruntime.Get(c.Param("provider"))
+	if !found {
+		_ = c.Error(errors.NewNotFoundError("provider not found"))
+		return
+	}
+	if backendType != "" && !slices.Contains(vendor.ModelTypes, backendType) {
+		_ = c.Error(errors.NewBadRequestError("provider does not offer this model_type"))
+		return
+	}
+	p := providerDTO(vendor, backendType, true)
+	if !dto.CanViewIntegrationSecrets(ctx) {
+		p.DefaultURLs = nil
+	}
+	if keyword := strings.ToLower(strings.TrimSpace(c.Query("keyword"))); keyword != "" {
+		kept := p.Models[:0]
+		for _, m := range p.Models {
+			if strings.Contains(strings.ToLower(m.ID), keyword) || strings.Contains(strings.ToLower(m.Name), keyword) {
+				kept = append(kept, m)
+			}
+		}
+		p.Models = kept
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": p})
 }
 
 // ResolveModelCatalog godoc

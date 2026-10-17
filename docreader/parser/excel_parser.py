@@ -74,11 +74,16 @@ class ExcelParser(BaseParser):
         file_name: str = "",
         file_type: str | None = None,
         xlsx_first_row_as_header: Any = False,
+        xlsx_percent_as_text: Any = None,
         **kwargs: Any,
     ):
         super().__init__(file_name=file_name, file_type=file_type, **kwargs)
         self.xlsx_first_row_as_header = _parse_bool(xlsx_first_row_as_header)
-    
+        # Tri-state: None (or an empty value) keeps the deployment default from
+        # DOCREADER_XLSX_PERCENT_AS_TEXT, an explicit value wins. Same
+        # precedence as the pdf_force_scanned parser override.
+        self.xlsx_percent_as_text = _parse_optional_bool(xlsx_percent_as_text)
+
     def parse_into_text(self, content: bytes) -> Document:
         """Parse Excel file bytes into a Document object.
         
@@ -100,7 +105,11 @@ class ExcelParser(BaseParser):
         source_blocks: List[dict] = []
         start, end = 0, 0
 
-        excel_file = _open_excel_file(content, file_type=self.file_type)
+        excel_file = _open_excel_file(
+            content,
+            file_type=self.file_type,
+            percent_as_text=self.xlsx_percent_as_text,
+        )
         
         # Process each sheet in the Excel file
         for excel_sheet_name in excel_file.sheet_names:
@@ -205,7 +214,19 @@ def _parse_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _prepare_xlsx_bytes(data: bytes) -> bytes:
+def _parse_optional_bool(value: Any) -> bool | None:
+    """Parse a tri-state parser override; None keeps the deployment default."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    return text in {"1", "true", "yes", "y", "on"}
+
+
+def _prepare_xlsx_bytes(data: bytes, percent_as_text: bool | None = None) -> bytes:
     repaired = repair_xlsx_bytes(data)
     if repaired is not None:
         data = repaired
@@ -213,7 +234,7 @@ def _prepare_xlsx_bytes(data: bytes) -> bytes:
     if readable is not None:
         data = readable
     try:
-        return fill_merged_cells_xlsx(data)
+        return fill_merged_cells_xlsx(data, percent_as_text=percent_as_text)
     except TypeError:
         # A non-conforming styles.xml (empty/malformed fills) makes openpyxl's
         # load_workbook raise before pandas ever sees the file (#3637).
@@ -222,10 +243,14 @@ def _prepare_xlsx_bytes(data: bytes) -> bytes:
         sanitized = sanitize_xlsx_styles(data)
         if sanitized is None:
             raise
-        return fill_merged_cells_xlsx(sanitized)
+        return fill_merged_cells_xlsx(sanitized, percent_as_text=percent_as_text)
 
 
-def _open_excel_file(content: bytes, file_type: str | None = None) -> pd.ExcelFile:
+def _open_excel_file(
+    content: bytes,
+    file_type: str | None = None,
+    percent_as_text: bool | None = None,
+) -> pd.ExcelFile:
     """Open an Excel workbook with explicit engine selection and fallbacks."""
     data = content
     converted_via_soffice = False
@@ -254,7 +279,7 @@ def _open_excel_file(content: bytes, file_type: str | None = None) -> pd.ExcelFi
 
         engine = engine_for_format(ext)
         if ext == "xlsx":
-            data = _prepare_xlsx_bytes(data)
+            data = _prepare_xlsx_bytes(data, percent_as_text=percent_as_text)
             engine = "openpyxl"
         try:
             return pd.ExcelFile(BytesIO(data), engine=engine)
@@ -269,7 +294,7 @@ def _open_excel_file(content: bytes, file_type: str | None = None) -> pd.ExcelFi
             if repaired is None:
                 raise
             logger.info("Repaired XLSX sharedStrings packaging before parse")
-            data = _prepare_xlsx_bytes(repaired)
+            data = _prepare_xlsx_bytes(repaired, percent_as_text=percent_as_text)
             continue
         except ValueError as exc:
             if converted_via_soffice or "cannot be determined" not in str(exc):

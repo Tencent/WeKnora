@@ -80,6 +80,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getMCPMetadata, refreshMCPMetadata, type MCPMetadata } from '@/api/mcp-service'
 import McpToolsList from './McpToolsList.vue'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 
 const props = defineProps<{ serviceId: string; disabled?: boolean }>()
 const emit = defineEmits<{ (e: 'busy', value: boolean): void; (e: 'synced', value: boolean): void }>()
@@ -91,6 +92,7 @@ const policyBusy = ref(false)
 const docsOpen = ref(false)
 const error = ref('')
 let generation = 0
+let assistantRead = 0
 const busy = computed(() => loading.value || (refreshing.value && !snapshot.value))
 const hasServerDocumentation = computed(() => !!(snapshot.value?.instructions || snapshot.value?.server_description))
 
@@ -116,6 +118,7 @@ function formatTime(value: string) {
 
 async function refreshFrom(current: number) {
   if (refreshing.value || props.disabled || policyBusy.value) return
+  assistantRead++
   refreshing.value = true
   error.value = ''
   emit('busy', true)
@@ -134,6 +137,7 @@ async function refreshFrom(current: number) {
 
 watch(() => props.serviceId, async id => {
   const current = ++generation
+  const read = ++assistantRead
   setSnapshot(null)
   error.value = ''
   refreshing.value = false
@@ -142,7 +146,7 @@ watch(() => props.serviceId, async id => {
   loading.value = true
   try {
     const saved = await getMCPMetadata(id)
-    if (current !== generation) return
+    if (current !== generation || read !== assistantRead) return
     if (!saved && !props.disabled) {
       loading.value = false
       await refreshFrom(current)
@@ -150,11 +154,26 @@ watch(() => props.serviceId, async id => {
     }
     setSnapshot(saved)
   } catch (e) {
-    if (current === generation) error.value = errorText(e)
+    if (current === generation && read === assistantRead) error.value = errorText(e)
   } finally {
     if (current === generation) loading.value = false
   }
 }, { immediate: true })
+
+// Assistant synchronization already contacted the upstream. Only read the
+// persisted snapshot here so a change event never triggers another refresh.
+useAssistantDataChange(() => {
+  if (!props.serviceId) return
+  const current = generation
+  const read = ++assistantRead
+  void getMCPMetadata(props.serviceId).then(saved => {
+    if (current !== generation || read !== assistantRead || refreshing.value) return
+    setSnapshot(saved)
+    error.value = ''
+  }).catch(e => {
+    if (current === generation && read === assistantRead) error.value = errorText(e)
+  })
+}, { areas: ['mcp_service'] })
 
 function refresh() {
   void refreshFrom(generation)

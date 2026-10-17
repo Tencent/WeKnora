@@ -129,3 +129,61 @@ func TestResolveCitedChunksStillFallsBackWithoutRepoRows(t *testing.T) {
 		t.Fatalf("unknown cited chunk must be skipped, got %v", out)
 	}
 }
+
+// Classification and Reduce must consume the same OCR even though Reduce
+// reloads the original, unenriched parent from storage.
+func TestResolveCitedChunksRetainsScannedOCR(t *testing.T) {
+	const text = "The contractual amount is 123456 dollars."
+	for _, tc := range []struct {
+		name string
+		info string
+	}{
+		{name: "missing image info"},
+		{name: "caption without OCR", info: `[{"url":"resource://page","caption":"Contract page"}]`},
+		{name: "existing OCR", info: `[{"url":"resource://page","ocr_text":"` + text + `"}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parent := citationChunk("page", "![page](resource://page)")
+			ocr := imageChildChunk("ocr", parent.ID, types.ChunkTypeImageOCR, tc.info, true)
+			ocr.Content = text
+			cited := wikiCitationChunks([]*types.Chunk{parent, ocr})
+			if len(cited) != 1 || !strings.Contains(cited[0].Content, text) {
+				t.Fatal("classification did not receive OCR")
+			}
+			repo := &citedChunkRepo{
+				byID:     map[string][]*types.Chunk{parent.ID: {parent}},
+				byParent: map[string][]*types.Chunk{parent.ID: {ocr}},
+			}
+			svc := &wikiIngestService{chunkRepo: repo}
+			out := svc.resolveCitedChunks(context.Background(), 1, []SlugUpdate{
+				{KnowledgeID: "kn-1", SourceChunks: []string{cited[0].ID}},
+			})
+			if strings.Count(out[parent.ID], text) != 1 {
+				t.Fatalf("Reduce must receive OCR exactly once: %q", out[parent.ID])
+			}
+		})
+	}
+}
+
+func TestResolveCitedChunksExcludesDisabledScannedEvidence(t *testing.T) {
+	for _, disabledParent := range []bool{false, true} {
+		parent := citationChunk("page", "![page](resource://page)")
+		parent.IsEnabled = !disabledParent
+		ocr := imageChildChunk("ocr", parent.ID, types.ChunkTypeImageOCR, "", disabledParent)
+		ocr.Content = "DISABLED_TEXT"
+		repo := &citedChunkRepo{
+			byID:     map[string][]*types.Chunk{parent.ID: {parent}},
+			byParent: map[string][]*types.Chunk{parent.ID: {ocr}},
+		}
+		svc := &wikiIngestService{chunkRepo: repo}
+		out := svc.resolveCitedChunks(context.Background(), 1, []SlugUpdate{
+			{KnowledgeID: "kn-1", SourceChunks: []string{parent.ID}},
+		})
+		if strings.Contains(out[parent.ID], "DISABLED_TEXT") {
+			t.Fatalf("disabled evidence reached Reduce: %q", out[parent.ID])
+		}
+		if disabledParent && out[parent.ID] != "" {
+			t.Fatalf("disabled parent reached Reduce: %q", out[parent.ID])
+		}
+	}
+}

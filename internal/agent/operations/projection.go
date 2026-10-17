@@ -101,7 +101,20 @@ func projectObject(obj map[string]any, fields []Field) (map[string]any, bool) {
 	truncated := false
 	for _, f := range fields {
 		v, ok := lookup(obj, f.From)
+		if ok && f.MapKey != "" {
+			m, isMap := v.(map[string]any)
+			if !isMap {
+				continue
+			}
+			v, ok = m[f.MapKey]
+		}
 		if !ok {
+			continue
+		}
+		if len(f.Items) > 0 {
+			list, cut := projectItems(v, f.Items)
+			truncated = truncated || cut
+			out[f.outputKey()] = list
 			continue
 		}
 		limit := f.MaxRunes
@@ -112,6 +125,25 @@ func projectObject(obj map[string]any, fields []Field) (map[string]any, bool) {
 		truncated = truncated || cut
 		if bounded != nil {
 			out[f.outputKey()] = bounded
+		}
+	}
+	return out, truncated
+}
+
+// projectItems projects a list of objects element by element. A null list
+// becomes an empty one so the model can tell "none" from "not reported".
+func projectItems(v any, fields []Field) ([]any, bool) {
+	items, _ := v.([]any)
+	out := make([]any, 0, min(len(items), defaultMaxListItems))
+	truncated := len(items) > defaultMaxListItems
+	for _, item := range items {
+		if len(out) == defaultMaxListItems {
+			break
+		}
+		if obj, ok := item.(map[string]any); ok {
+			data, cut := projectObject(obj, fields)
+			out = append(out, data)
+			truncated = truncated || cut
 		}
 	}
 	return out, truncated

@@ -43,12 +43,14 @@ func NewChunkHandler(service interfaces.ChunkService, kgService interfaces.Knowl
 // @Tags         分块管理
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "分块ID"
-// @Success      200  {object}  handler.DataResponse{data=types.Chunk}  "分块详情"
+// @Param        id   path      string  true  "分块ID" extensions(x-agent=chunk_id)
+// @Success      200  {object}  handler.DataResponse{data=handler.AgentChunkDetail}  "分块详情"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      404  {object}  errors.AppError         "分块不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent {"id":"chunk.get","risk":"read"}
+// @x-agent-hint "Read a chunk before editing. knowledge_id identifies its parent document; content_revision is required as expected_revision for changes. If truncated, do not reconstruct missing content."
 // @Router       /chunks/by-id/{id} [get]
 func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -158,9 +160,12 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 
 // UpdateChunkRequest defines the request structure for updating a chunk
 type UpdateChunkRequest struct {
-	Content          *string `json:"content"`
-	IsEnabled        *bool   `json:"is_enabled"`
-	ExpectedRevision *int    `json:"expected_revision"`
+	// Complete replacement content; omitted keeps the existing content.
+	Content *string `json:"content" extensions:"x-agent,x-agent-max-bytes=32000"`
+	// Whether this chunk participates in retrieval; omitted keeps its state.
+	IsEnabled *bool `json:"is_enabled" extensions:"x-agent"`
+	// Current content_revision from chunk.get; a stale value fails with HTTP 409.
+	ExpectedRevision *int `json:"expected_revision" minimum:"0" extensions:"x-agent,x-agent-required"`
 }
 
 // fetchChunkAndVerifyOwnership fetches a chunk by ID and verifies it
@@ -204,14 +209,16 @@ func (h *ChunkHandler) fetchChunkAndVerifyOwnership(c *gin.Context) (*types.Chun
 // @Tags         分块管理
 // @Accept       json
 // @Produce      json
-// @Param        knowledge_id  path      string              true  "知识ID"
-// @Param        id            path      string              true  "分块ID"
+// @Param        knowledge_id  path      string              true  "知识ID" extensions(x-agent)
+// @Param        id            path      string              true  "分块ID" extensions(x-agent=chunk_id)
 // @Param        request       body      UpdateChunkRequest  true  "更新请求"
 // @Success      200           {object}  handler.UpdateChunkResponse  "更新后的分块"
 // @Failure      400           {object}  errors.AppError         "请求参数错误"
 // @Failure      404           {object}  errors.AppError         "分块不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent {"id":"chunk.update","risk":"write","target":"chunk.get","label":"chunk_id","require_complete_target":true}
+// @x-agent-hint "Edit the complete content of a document chunk or set is_enabled; omitted fields stay unchanged. Read chunk.get first and pass its content_revision as expected_revision. Do not edit truncated content. A conflict requires rereading and reconciling edits. Reindexes affected content and preserves revision history; FAQ and wiki chunks use their own editors."
 // @Router       /chunks/{knowledge_id}/{id} [put]
 func (h *ChunkHandler) UpdateChunk(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -259,6 +266,19 @@ func (h *ChunkHandler) UpdateChunk(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// ListChunkRevisions godoc
+// @Summary 获取分块历史版本
+// @Tags 分块管理
+// @Accept json
+// @Produce json
+// @Param knowledge_id path string true "知识ID" extensions(x-agent)
+// @Param id path string true "分块ID" extensions(x-agent=chunk_id)
+// @Success 200 {object} handler.DataResponse{data=[]types.ChunkRevision}
+// @Security Bearer
+// @Security ApiKeyAuth
+// @x-agent {"id":"chunk.list_revisions","risk":"read"}
+// @x-agent-hint "Read saved earlier revisions of a document chunk. Current revision is returned by chunk.get."
+// @Router /chunks/{knowledge_id}/{id}/revisions [get]
 func (h *ChunkHandler) ListChunkRevisions(c *gin.Context) {
 	chunk, _, err := h.fetchChunkAndVerifyOwnership(c)
 	if err != nil {
@@ -274,10 +294,26 @@ func (h *ChunkHandler) ListChunkRevisions(c *gin.Context) {
 }
 
 type RevertChunkRequest struct {
-	Revision         *int `json:"revision" binding:"required"`
-	ExpectedRevision *int `json:"expected_revision"`
+	// Historical revision number from chunk.list_revisions to restore.
+	Revision *int `json:"revision" binding:"required" minimum:"0" extensions:"x-agent"`
+	// Current content_revision from chunk.get; a stale value fails with HTTP 409.
+	ExpectedRevision *int `json:"expected_revision" minimum:"0" extensions:"x-agent,x-agent-required"`
 }
 
+// RevertChunk godoc
+// @Summary 恢复分块历史版本
+// @Tags 分块管理
+// @Accept json
+// @Produce json
+// @Param knowledge_id path string true "知识ID" extensions(x-agent)
+// @Param id path string true "分块ID" extensions(x-agent=chunk_id)
+// @Param request body RevertChunkRequest true "恢复请求"
+// @Success 200 {object} handler.DataResponse{data=types.Chunk}
+// @Security Bearer
+// @Security ApiKeyAuth
+// @x-agent {"id":"chunk.revert","risk":"write","target":"chunk.get","label":"chunk_id"}
+// @x-agent-hint "Restore content and enabled state from a saved revision, creating a new revision and reindexing. Get revision from chunk.list_revisions and expected_revision from chunk.get; on conflict reread before retrying."
+// @Router /chunks/{knowledge_id}/{id}/revert [post]
 func (h *ChunkHandler) RevertChunk(c *gin.Context) {
 	chunk, knowledgeID, err := h.fetchChunkAndVerifyOwnership(c)
 	if err != nil {
@@ -474,4 +510,11 @@ func (h *ChunkHandler) DeleteGeneratedQuestion(c *gin.Context) {
 		"success": true,
 		"message": "Generated question deleted",
 	})
+}
+
+// AgentChunkDetail describes the same chunk JSON with a larger detail projection.
+// Lists keep their compact content preview; edits require a complete detail read.
+type AgentChunkDetail struct {
+	types.Chunk
+	Content string `json:"content" extensions:"x-agent,x-agent-max-runes=8000"`
 }

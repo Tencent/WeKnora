@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import type { ComposerTranslation } from 'vue-i18n'
+import { readFileSync } from 'node:fs'
+import { createI18n, type ComposerTranslation } from 'vue-i18n'
+import { LOCALE_BUNDLES } from '../i18n/localeKeyAudit'
 import {
   docHits,
   docPages,
   docReadView,
   getCatalogToolDisplayType,
   getCatalogToolTitle,
+  getOperationLabel,
   operationRows,
   parseCatalogPayload,
   runOperationView,
@@ -18,6 +21,41 @@ const t = ((key: string, params?: Record<string, unknown>) => {
   if (params && 'name' in params) return `${key} ${params.name}`
   return key
 }) as ComposerTranslation
+
+test('operation titles follow the UI locale for live events, history, and status changes', () => {
+  const { global } = createI18n({ legacy: false, locale: 'zh-CN', messages: LOCALE_BUNDLES })
+  const event = { tool_name: 'run_operation', arguments: { operation: 'model.list' } }
+  assert.equal(getCatalogToolTitle(global.t, event), '执行操作：获取模型列表')
+  assert.equal(getCatalogToolTitle(global.t, {
+    tool_name: 'run_operation', output: JSON.stringify({ operation: 'agent.list' }),
+  }), '执行操作：获取智能体列表')
+  for (const status of [{ pending: true }, { success: false }]) {
+    assert.match(getCatalogToolTitle(global.t, { ...event, ...status }), /获取模型列表/)
+  }
+  global.locale.value = 'en-US'
+  assert.equal(getCatalogToolTitle(global.t, event), 'Run operation：List models')
+  assert.equal(getOperationLabel(global.t, 'future.unknown'), 'future.unknown')
+  assert.equal(getOperationLabel(global.t, ''), '')
+  assert.equal(event.arguments.operation, 'model.list')
+})
+
+test('every backend catalog operation has a label in every UI locale', () => {
+  const spec = JSON.parse(readFileSync(new URL('../../../docs/swagger.json', import.meta.url), 'utf8'))
+  const ids = new Set<string>()
+  for (const path of Object.values(spec.paths)) {
+    for (const op of Object.values(path as Record<string, any>)) {
+      if (op['x-agent']?.id) ids.add(op['x-agent'].id)
+    }
+  }
+  assert.ok(ids.size > 0)
+  for (const [locale, bundle] of Object.entries(LOCALE_BUNDLES)) {
+    const { global } = createI18n({ legacy: false, locale, fallbackLocale: false, messages: { [locale]: bundle } })
+    for (const id of ids) {
+      assert.ok(global.te(`agentStream.operations.names.${id}`), `${locale}: missing ${id}`)
+      assert.notEqual(getOperationLabel(global.t, id), id, `${locale}: untranslated ${id}`)
+    }
+  }
+})
 
 test('operation and product-doc tools have dedicated display types', () => {
   assert.equal(getCatalogToolDisplayType('find_operations'), 'find_operations')

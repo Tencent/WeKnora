@@ -1838,8 +1838,31 @@ export default {
       databaseQuery: '데이터베이스 조회',
       findOperations: '작업 찾기',
       runOperation: '작업 실행',
+      tryAgent: '에이전트 시험 실행',
+      openPage: '페이지 열기',
       searchWeKnoraDocs: '제품 문서 검색',
-      readWeKnoraDoc: '제품 문서 읽기'
+      readWeKnoraDoc: '제품 문서 읽기',
+      readPage: '페이지 보기',
+      selectTab: '탭 선택',
+      fillPage: '페이지 입력'
+    },
+    pageAccess: {
+      viewed: '현재 페이지를 확인했습니다: {location}'
+    },
+    pageEdit: {
+      title: '{count}곳을 입력했습니다',
+      undo: '되돌리기',
+      undone: '입력을 되돌렸습니다',
+      undoSkipped: '{count}곳은 이미 변경되었거나 페이지에 없어 그대로 두었습니다',
+      unsaved: '아직 저장되지 않았습니다. 확인 후 페이지에서 저장하세요.'
+    },
+    openPage: {
+      open: '열기',
+      openForm: '열고 입력',
+      opened: '어시스턴트가 열었습니다',
+      back: '돌아가기',
+      endpoint: '연결 대상: ',
+      draftHint: '어시스턴트가 미리 채웠습니다. API 키 등 자격 증명을 입력하고 확인한 뒤 직접 저장하세요.'
     },
     skillFiles: {
       heading: '스킬 파일',
@@ -1882,6 +1905,158 @@ export default {
       binarySuppressed: '바이너리 출력은 생략되었습니다. 파일은 산출물 디렉터리에 저장한 뒤 다운로드하세요.'
     },
     operations: {
+      names: {
+        data_source: {
+          list: "데이터 소스 목록 조회",
+          get: "데이터 소스 상세 조회",
+          test: "데이터 소스 연결 테스트",
+          sync: "데이터 소스 동기화",
+          pause: "데이터 소스 동기화 일시 중지",
+          resume: "데이터 소스 동기화 재개",
+          list_sync_logs: "데이터 소스 동기화 이력 조회",
+          get_sync_log: "데이터 소스 동기화 진행 상황 조회",
+          list_resources: "동기화 가능한 리소스 조회",
+          update_sync: "데이터 소스 동기화 설정 수정",
+        },
+        agent: {
+          list: "에이전트 목록 조회",
+          create: "에이전트 생성",
+          get: "에이전트 상세 조회",
+          delete: "에이전트 삭제",
+          update: "에이전트 수정",
+          copy: "에이전트 복사",
+        },
+        chunk: {
+          get: "청크 상세 조회",
+          update: "청크 수정",
+          list_revisions: "청크 변경 이력 조회",
+          revert: "청크 이전 버전 복원",
+          list: "지식 청크 목록 조회",
+        },
+        knowledge_base: {
+          list_parser_engines: "사용 가능한 파싱 엔진 조회",
+          copy: "지식베이스 내용 복사",
+          duplicate: "지식베이스 설정 복사",
+          get_copy_progress: "지식베이스 복사 진행 상황 조회",
+          list: "지식 베이스 목록 조회",
+          create: "지식 베이스 생성",
+          get: "지식 베이스 상세 조회",
+          delete: "지식 베이스 삭제",
+          update: "지식 베이스 수정",
+          list_activity: "지식 베이스 활동 조회",
+          search: "지식 베이스 검색",
+          list_move_targets: "이동 대상 지식 베이스 조회",
+          generate_profile: "지식 베이스 설명 생성",
+          list_tags: "지식 베이스 태그 목록 조회",
+          create_tag: "지식 베이스 태그 생성",
+          update_tag: "지식 베이스 태그 수정",
+          delete_tag: "지식 베이스 태그 삭제",
+          list_shared: "공유 지식 베이스 목록 조회",
+        },
+        faq: {
+          batch_update: "FAQ 상태 및 태그 일괄 수정",
+          list_entries: "FAQ 항목 목록 조회",
+          delete_entries: "FAQ 항목 일괄 삭제",
+          get_entry: "FAQ 항목 상세 조회",
+          update_entry: "FAQ 항목 수정",
+          add_similar_questions: "유사 질문 추가",
+          create_entry: "FAQ 항목 생성",
+        },
+        knowledge: {
+          list: "지식 목록 조회",
+          list_folders: "지식 폴더 목록 조회",
+          rename_folder: "폴더 이름 변경 또는 이동",
+          create_manual: "지식 수동 생성",
+          create_from_url: "URL에서 지식 생성",
+          batch_delete: "지식 일괄 삭제",
+          batch_reparse: "지식 일괄 재분석",
+          move_to_folder: "지식을 폴더로 이동",
+          update_manual: "수동 생성 지식 수정",
+          move: "지식을 다른 지식 베이스로 이동",
+          get_move_progress: "지식 이동 진행 상황 조회",
+          set_tags: "지식 태그 설정",
+          get: "지식 상세 조회",
+          update: "지식 수정",
+          delete: "지식 삭제",
+          cancel_parse: "지식 분석 취소",
+          reparse: "지식 재분석",
+          get_parse_progress: "지식 분석 진행 상황 조회",
+        },
+        wiki: {
+          list_folders: "Wiki 폴더 목록 조회",
+          create_folder: "Wiki 폴더 생성",
+          list_issues: "Wiki 페이지 문제 목록 조회",
+          lint: "Wiki 페이지 검사",
+          move_page: "Wiki 페이지 이동",
+          get_page: "Wiki 페이지 조회",
+          rebuild_links: "Wiki 링크 재구축",
+          revert: "Wiki 페이지 버전 복원",
+          list_revisions: "Wiki 페이지 버전 목록 조회",
+          get_stats: "Wiki 통계 조회",
+        },
+        system_admin: {
+          list_admins: "시스템 관리자 조회",
+          list_users: "플랫폼 사용자 조회",
+          list_settings: "시스템 설정 조회",
+          get_queues: "작업 큐 실행 상태 조회",
+          list_tasks: "큐 작업 조회",
+        },
+        workspace: {
+          get: "현재 워크스페이스 정보 조회",
+          update: "현재 워크스페이스 기본 정보 수정",
+          list_members: "현재 워크스페이스 구성원 조회",
+        },
+        system: {
+          get_info: "버전 및 시스템 정보 조회",
+        },
+        web_search_provider: {
+          list: "웹 검색 서비스 목록 조회",
+          get: "웹 검색 서비스 상세 조회",
+          list_types: "웹 검색 서비스 유형 조회",
+          test: "웹 검색 연결 테스트",
+          update: "웹 검색 서비스 수정",
+          delete: "웹 검색 서비스 삭제",
+        },
+        mcp_service: {
+          list: "MCP 서비스 목록 조회",
+          create: "MCP 서비스 생성",
+          get: "MCP 서비스 상세 조회",
+          update: "MCP 서비스 수정",
+          delete: "MCP 서비스 삭제",
+          test: "MCP 서비스 연결 테스트",
+          list_tools: "MCP 도구 실시간 조회",
+          get_metadata: "동기화된 MCP 도구 보기",
+          refresh_metadata: "MCP 도구 목록 동기화",
+        },
+        message: {
+          chat_history_stats: "채팅 기록 통계 조회",
+          search: "대화 기록 검색",
+          list: "메시지 기록 조회",
+        },
+        model: {
+          list: "모델 목록 조회",
+          list_providers: "모델 제공업체 목록 조회",
+          get_provider: "모델 제공업체 상세 조회",
+          get: "모델 상세 조회",
+          delete: "모델 삭제",
+          update: "모델 표시 정보 수정",
+          copy: "모델 설정 복사",
+        },
+        skill: {
+          list_installed: "설치된 스킬 목록 조회",
+          install: "스킬 설치",
+          get_installed: "설치된 스킬 상세 조회",
+          uninstall: "스킬 제거",
+          set_enabled: "스킬 활성화 상태 설정",
+          list: "실행 가능한 스킬 목록 조회",
+          list_catalog: "워크스페이스 스킬 목록 조회",
+          get_catalog: "워크스페이스 스킬 상세 조회",
+          install_catalog: "카탈로그 스킬을 샌드박스에 설치",
+        },
+        session: {
+          list: "대화 목록 조회",
+        },
+      },
       found: '실행 가능 {count}개',
       unavailableCount: '현재 사용 불가 {count}개',
       empty: '일치하는 작업이 없습니다',
@@ -1892,6 +2067,7 @@ export default {
       range: '범위 {min}–{max}',
       risk: {
         read: '읽기',
+        probe: '점검',
         write: '쓰기',
         destructive: '되돌릴 수 없음'
       },
@@ -1930,6 +2106,7 @@ export default {
       skipFailed: '건너뛰기 실패, 다시 시도하세요'
     },
     askUser: {
+      answerLabel: '내 답변',
       title: '질문이 있습니다',
       selectPlaceholder: '선택하세요',
       textPlaceholder: '답변을 입력하세요',
@@ -1960,9 +2137,15 @@ export default {
       waitingStatus: '승인 대기',
       targetWithTool: '{service} › {tool}',
       dockQuestion: '{target} 실행을 허용할까요?',
+      operationQuestion: '{action} “{target}”을(를) 허용할까요?',
+      operationQuestionNoTarget: '{action}을(를) 허용할까요?',
+      operationTarget: '{action} “{target}”',
+      reviewTitle: '검토 · {target}',
+      characterCount: '{count}자',
       titleWithTarget: '검토 · {service} › {tool}',
       argsLabel: '인수',
       argsModified: '수정됨',
+      allowInSession: '이 대화에서 같은 작업은 모두 허용',
       countdownShort: '{seconds}초',
       approve: '승인 후 실행',
       reject: '거부',
@@ -2000,7 +2183,19 @@ export default {
         mcpServices: 'MCP 서비스',
         skills: '스킬',
         webSearch: '웹 검색',
-        multiTurn: '멀티턴'
+        multiTurn: '멀티턴',
+        transport: '전송 방식',
+        authentication: '인증 방식',
+        usageInstructions: '사용 안내',
+        displayName: '표시 이름',
+        enabled: '사용',
+        sandbox: '샌드박스',
+        sandboxes: '샌드박스',
+        systemPrompt: '시스템 프롬프트',
+        content: '내용',
+        kbScope: '지식베이스 범위',
+        mcpScope: 'MCP 범위',
+        skillsScope: '스킬 범위'
       },
       value: {
         document: '문서',
@@ -2146,9 +2341,40 @@ export default {
     welcomeDesc: 'WeKnora 사용법을 안내하고, 워크스페이스의 문서 파싱, 지식 베이스 활동, Wiki 문제를 확인하고 처리하며, 에이전트를 만들고 설정할 수도 있습니다. 변경 전에 확인을 요청할지는 입력창 아래의 권한 수준에 따라 정해집니다.',
     startFailed: '어시스턴트를 시작하지 못했습니다. 다시 시도해 주세요.',
     askAboutDocument: '{name}에게 묻기',
+    askAboutAnswer: '이 답변에 대해 {name}에게 묻기',
+    selection: {
+      label: '선택됨',
+      lines: '{count}줄 선택됨',
+      detach: '선택한 내용 빼기',
+      tip: '보낼 때 선택한 내용을 함께 보냅니다: {text}',
+      tipField: '보낼 때 「{field}」에서 선택한 내용을 함께 보냅니다: {text}'
+    },
+    bubble: {
+      label: '어시스턴트 빠른 작업',
+      ask: '어시스턴트에게 묻기',
+      polish: '다듬기',
+      rewrite: '다시 쓰기',
+      translate: '번역',
+      continue: '이어 쓰기',
+      prompts: {
+        polish: '선택한 내용을 다듬어 주세요. 오타와 어색한 표현을 고치되 의미는 바꾸지 말고 그 자리에서 바꿔 주세요.',
+        rewrite: '선택한 내용을 더 명확하고 간결하게 다시 써서 그 자리에서 바꿔 주세요.',
+        translate: '선택한 내용을 번역해 주세요. 중국어는 영어로, 다른 언어는 중국어로 옮겨 그 자리에서 바꿔 주세요.',
+        continue: '선택한 내용 뒤에 문맥에 맞는 문단을 하나 이어 써 주세요.'
+      }
+    },
+    fillNotice: {
+      title: '어시스턴트가 {count}곳을 입력했습니다',
+      undo: '되돌리기',
+      dismiss: '닫기'
+    },
     access: {
       title: '권한 수준',
       capped: '워크스페이스 관리자가 허용하지 않았습니다',
+      page: {
+        label: '현재 페이지 보기 및 입력',
+        desc: '왼쪽 페이지를 읽고 양식을 대신 입력할 수 있습니다. 버튼을 누르거나 저장하지 않습니다.'
+      },
       levels: {
         read_only: {
           label: '읽기 전용',
@@ -2165,10 +2391,20 @@ export default {
       }
     },
     context: {
+      detachedLabel: '페이지 제외됨',
       currentPage: '현재 페이지',
       detach: '현재 페이지 포함하지 않기',
       attachedTip: '현재 페이지 포함됨: {path}',
-      detachedTip: '클릭하여 현재 페이지 포함: {path}'
+      detachedTip: '클릭하여 현재 페이지 포함: {path}',
+      chatMessage: '이 답변',
+      pages: {
+        knowledge_base: '지식베이스',
+        wiki: 'Wiki',
+        agent_editor: '에이전트 편집',
+        settings_models: '모델 관리',
+        mcp_services: 'MCP 서비스',
+        chat: '대화'
+      }
     },
     starters: {
       agentConfig: '이 에이전트의 설정 확인하기',
@@ -2182,7 +2418,15 @@ export default {
       recentActivity: '이 지식 베이스에 최근 어떤 변경이 있었나요?',
       formats: 'WeKnora는 어떤 문서 형식을 지원하나요?',
       createWiki: 'Wiki 지식 베이스는 어떻게 만드나요?',
-      agents: '어떤 에이전트가 있고, 각각 어떤 모델을 쓰나요?'
+      agents: '어떤 에이전트가 있고, 각각 어떤 모델을 쓰나요?',
+      messageSources: '이 답변의 근거는 무엇인가요?',
+      messageCheck: '이 답변에 틀린 내용이 있나요?',
+      modelCheck: '이 모델의 설정을 확인해 줘',
+      modelUsage: '어떤 에이전트와 지식베이스가 이 모델들을 쓰나요?',
+      mcpTools: '이 MCP 서비스는 어떤 도구를 제공하나요?',
+      mcpCheck: '왜 연결되지 않나요?',
+      modelSetup: '어떤 모델을 더 설정해야 하나요?',
+      mcpSetup: 'MCP 서비스는 어떻게 연결하나요?'
     }
   },
   assistantSettings: {
@@ -2279,6 +2523,11 @@ export default {
     videoNotSupported: '브라우저가 동영상 재생을 지원하지 않습니다'
   },
   organization: {
+    cardStats: {
+      members: '멤버 {count}',
+      knowledgeBases: '지식 베이스 {count}',
+      agents: '에이전트 {count}',
+    },
     title: '공유 공간',
     subtitle: '공유 공간를 만들거나 참여하여 여러 스페이스가 함께 협업하고 지식베이스와 에이전트를 공유하세요.',
     createOrg: '공유 공간 생성',
@@ -2879,6 +3128,7 @@ export default {
       deleted: '모델이 삭제되었습니다',
       deleteFailed: '모델 삭제 실패',
       builtinCannotEdit: '기본 제공 모델은 편집할 수 없습니다',
+      linkedModelMissing: '어시스턴트가 연결한 모델을 찾을 수 없습니다. 삭제되었을 수 있습니다',
       builtinCannotDelete: '기본 제공 모델은 삭제할 수 없습니다',
       builtinCannotCopy: '기본 제공 모델은 복사할 수 없습니다',
       copied: '모델이 복사되었습니다',
@@ -2948,6 +3198,7 @@ export default {
       enabled: 'MCP 서비스가 활성화되었습니다',
       disabled: 'MCP 서비스가 비활성화되었습니다',
       updateStateFailed: 'MCP 서비스 상태 업데이트 실패',
+      linkedServiceMissing: '어시스턴트가 연결한 MCP 서비스를 찾을 수 없습니다. 삭제되었을 수 있습니다',
       testing: '{name} 테스트 중...',
       noResponse: '테스트 실패: 서버 응답 없음',
       testFailed: 'MCP 서비스 테스트 실패',
@@ -5444,6 +5695,21 @@ export default {
     }
   },
   manualEditor: {
+    assistant: {
+      button: '어시스턴트',
+      tooltip: '어시스턴트에게 글쓰기 맡기기',
+      continue: '이어 쓰기',
+      outline: '개요 만들기',
+      polish: '전체 다듬기',
+      summarize: '요점 정리',
+      open: '어시스턴트 열기',
+      prompts: {
+        continue: '본문 끝에서 앞 내용에 이어지는 문단을 하나 써 주세요.',
+        outline: '제목과 현재 내용을 바탕으로 이 문서의 구조가 잘 드러나는 개요를 만들어 본문 맨 앞에 써 주세요.',
+        polish: '본문을 다듬어 주세요. 오타와 어색한 문장을 고치되 의미는 바꾸지 말고 문단별로 고쳐 주세요.',
+        summarize: '이 문서의 요점을 대화에서 정리해 주세요. 본문은 수정하지 마세요.'
+      }
+    },
     defaultTitlePrefix: '새 문서',
     noDocumentKnowledgeBases: '사용 가능한 문서형 지식베이스가 없습니다. 먼저 문서형 지식베이스를 생성해주세요',
     actions: {
@@ -7404,6 +7670,8 @@ export default {
       folderCardCount: '문서 {count}개',
       searchingSubtree: '(하위 폴더 포함)',
       emptyFolder: '이 폴더에는 아직 문서가 없습니다',
+      emptyFolderWithSubfolders: '이 폴더에는 직접 문서가 없지만 하위 폴더에 {count}개가 있습니다',
+      folderContentsCount: '문서 {documents}개 / 폴더 {folders}개',
       emptySearch: '일치하는 문서가 없습니다',
       collapse: '폴더 접기',
       expand: '폴더 펼치기',
@@ -7628,6 +7896,7 @@ export default {
     selectLoaded: '불러온 문서 선택',
     confirmBatchDeleteDocument: '선택한 {count}개 문서를 삭제하시겠습니까? 삭제 후 복구할 수 없습니다.',
     deleteSubmitted: '삭제 요청이 제출되었습니다. 완료를 기다리는 중입니다.',
+    assistantDeleted: '어시스턴트가 이 지식 베이스를 삭제했습니다.',
     deletePending: '삭제가 아직 완료되지 않았습니다. 잠시 후 새로고침하여 결과를 확인하세요.',
     deleteTaskFailed: '삭제에 실패했습니다. 문서의 오류 세부 정보를 확인한 후 다시 시도하세요.',
     deleteStatusUnavailable: '삭제 결과를 확인할 수 없습니다. 잠시 후 새로고침하여 문서 상태를 확인하세요.',

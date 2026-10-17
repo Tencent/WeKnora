@@ -3455,6 +3455,22 @@ const getImgSrc = (url: string) => {
 
   &.is-embedded {
     justify-content: flex-end;
+    flex-wrap: nowrap;
+
+    .control-left {
+      flex-wrap: nowrap;
+    }
+
+    // Let long model names shrink before the fixed controls wrap or move.
+    .model-display {
+      flex-shrink: 1;
+      min-width: 0;
+    }
+
+    .model-selector-trigger {
+      min-width: 0;
+      max-width: 100%;
+    }
   }
 }
 

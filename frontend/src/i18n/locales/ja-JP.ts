@@ -723,6 +723,8 @@ export default {
       folderCardCount: '{count}件のドキュメント',
       searchingSubtree: '（サブフォルダを含む）',
       emptyFolder: 'このフォルダにはまだドキュメントがありません',
+      emptyFolderWithSubfolders: 'このフォルダに直接のドキュメントはありませんが、サブフォルダに {count} 件あります',
+      folderContentsCount: '{documents} 件のドキュメント / {folders} 個のフォルダ',
       emptySearch: '該当するドキュメントがありません',
       collapse: 'フォルダを折りたたむ',
       expand: 'フォルダを展開',
@@ -947,6 +949,7 @@ export default {
     selectLoaded: '読み込み済みを選択',
     confirmBatchDeleteDocument: '選択した{count}件のドキュメントを削除しますか？この操作は取り消せません。',
     deleteSubmitted: '削除リクエストを送信しました。完了までお待ちください。',
+    assistantDeleted: 'アシスタントがこのナレッジベースを削除しました。',
     deletePending: '削除はまだ処理中です。後で更新して結果を確認してください。',
     deleteTaskFailed: '削除に失敗しました。ドキュメントのエラー詳細を確認して再試行してください。',
     deleteStatusUnavailable: '削除結果を確認できませんでした。後で更新してドキュメントのステータスを確認してください。',
@@ -2830,6 +2833,21 @@ export default {
     upload: 'ファイルをアップロード'
   },
   manualEditor: {
+    assistant: {
+      button: 'アシスタント',
+      tooltip: 'アシスタントに書いてもらう',
+      continue: '続きを書く',
+      outline: 'アウトラインを作成',
+      polish: '全文を推敲',
+      summarize: '要点をまとめる',
+      open: 'アシスタントを開く',
+      prompts: {
+        continue: '本文の末尾から、前の内容に続く段落を一つ書き足してください。',
+        outline: 'タイトルと現在の内容をもとに、この文書の構成がわかるアウトラインを作り、本文の先頭に書いてください。',
+        polish: '本文を推敲してください。誤字や不自然な文を直し、意味は変えずに段落ごとに修正してください。',
+        summarize: 'この文書の要点をチャットでまとめてください。本文は変更しないでください。'
+      }
+    },
     placeholders: {
       heading: '見出し{level}',
       listItem: 'リスト項目',
@@ -5436,6 +5454,7 @@ export default {
         enabled: 'MCPサービスを有効化しました',
         disabled: 'MCPサービスを無効化しました',
         updateStateFailed: 'MCPサービスのステータス更新に失敗しました',
+        linkedServiceMissing: 'アシスタントがリンクした MCP サービスが見つかりません。削除された可能性があります',
         testing: '{name}をテスト中...',
         noResponse: 'テストに失敗しました: サーバから応答がありません',
         testFailed: 'MCPサービスのテストに失敗しました',
@@ -5506,6 +5525,7 @@ export default {
         deleted: 'モデルを削除しました',
         deleteFailed: 'モデルの削除に失敗しました',
         builtinCannotEdit: '組み込みモデルは編集できません',
+        linkedModelMissing: 'アシスタントがリンクしたモデルが見つかりません。削除された可能性があります',
         builtinCannotDelete: '組み込みモデルは削除できません',
         builtinCannotCopy: '組み込みモデルはコピーできません',
         copied: 'モデルをコピーしました',
@@ -5791,6 +5811,11 @@ export default {
       withWebSearch: 'Web検索'
     },
     organization: {
+      cardStats: {
+        members: 'メンバー {count}',
+        knowledgeBases: 'ナレッジベース {count}',
+        agents: 'エージェント {count}',
+      },
       title: '共有スペース',
       subtitle: '共有スペースを作成したり参加したりすることで、複数のワークスペースがナレッジベースやエージェントを共有して協働できます',
       createOrg: '共有スペースを作成',
@@ -6132,9 +6157,40 @@ export default {
       welcomeDesc: 'WeKnora の使い方にお答えするほか、ワークスペースのドキュメント解析、ナレッジベースの履歴、Wiki の問題を確認・対応し、エージェントの作成や設定もお手伝いできます。変更の前に確認するかどうかは、入力欄の下の権限レベルで決まります。',
       startFailed: 'アシスタントを起動できませんでした。もう一度お試しください。',
       askAboutDocument: '{name}に聞く',
+      askAboutAnswer: 'この回答について{name}に聞く',
+      selection: {
+        label: '選択中',
+        lines: '{count} 行を選択',
+        detach: '選択内容を含めない',
+        tip: '送信時に選択内容を含めます：{text}',
+        tipField: '送信時に「{field}」の選択内容を含めます：{text}'
+      },
+      bubble: {
+        label: 'アシスタントの操作',
+        ask: 'アシスタントに聞く',
+        polish: '推敲',
+        rewrite: '書き直し',
+        translate: '翻訳',
+        continue: '続きを書く',
+        prompts: {
+          polish: '選択したテキストを推敲してください。誤字や不自然な表現を直し、意味は変えずにその場で置き換えてください。',
+          rewrite: '選択したテキストを、より明確で簡潔な表現に書き直し、その場で置き換えてください。',
+          translate: '選択したテキストを翻訳してください。中国語は英語に、その他の言語は中国語にして、その場で置き換えてください。',
+          continue: '選択したテキストの後に、文脈に合う段落を一つ書き足してください。'
+        }
+      },
+      fillNotice: {
+        title: 'アシスタントが {count} か所に入力しました',
+        undo: '元に戻す',
+        dismiss: '閉じる'
+      },
       access: {
         title: '権限レベル',
         capped: 'ワークスペース管理者が許可していません',
+        page: {
+          label: '現在のページの確認と入力',
+          desc: '左側のページを読み取り、フォームに入力できます。ボタンのクリックや保存はしません。'
+        },
         levels: {
         read_only: {
           label: '読み取り専用',
@@ -6151,10 +6207,20 @@ export default {
       }
     },
     context: {
+      detachedLabel: 'ページ未添付',
       currentPage: '現在のページ',
       detach: '現在のページを含めない',
       attachedTip: '現在のページを含めています：{path}',
-      detachedTip: 'クリックして現在のページを含める：{path}'
+      detachedTip: 'クリックして現在のページを含める：{path}',
+      chatMessage: 'この回答',
+      pages: {
+        knowledge_base: 'ナレッジベース',
+        wiki: 'Wiki',
+        agent_editor: 'エージェント編集',
+        settings_models: 'モデル管理',
+        mcp_services: 'MCP サービス',
+        chat: 'チャット'
+      }
     },
     starters: {
       agentConfig: 'このエージェントの設定を確認して',
@@ -6168,7 +6234,15 @@ export default {
       recentActivity: 'このナレッジベースの最近の変更は？',
       formats: 'WeKnora はどのドキュメント形式に対応していますか？',
       createWiki: 'Wiki ナレッジベースの作り方は？',
-      agents: 'どんなエージェントがあり、それぞれどのモデルを使っていますか？'
+      agents: 'どんなエージェントがあり、それぞれどのモデルを使っていますか？',
+      messageSources: 'この回答の根拠は何ですか？',
+      messageCheck: 'この回答に誤りはありますか？',
+      modelCheck: 'このモデルの設定を確認して',
+      modelUsage: 'どのエージェントとナレッジベースがこれらのモデルを使っていますか？',
+      mcpTools: 'この MCP サービスにはどんなツールがありますか？',
+      mcpCheck: 'なぜ接続できないのですか？',
+      modelSetup: 'ほかにどのモデルを設定する必要がありますか？',
+      mcpSetup: 'MCP サービスを接続するには？'
     }
   },
   assistantSettings: {
@@ -6360,6 +6434,7 @@ export default {
   },
   agentStream: {
     askUser: {
+      answerLabel: 'あなたの回答',
       title: 'あなたへの質問',
       selectPlaceholder: '選択してください',
       textPlaceholder: '回答を入力',
@@ -6390,9 +6465,15 @@ export default {
       waitingStatus: '承認待ち',
       targetWithTool: '{service} › {tool}',
       dockQuestion: '{target} の実行を許可しますか？',
+      operationQuestion: '{action}「{target}」を許可しますか？',
+      operationQuestionNoTarget: '{action}を許可しますか？',
+      operationTarget: '{action}「{target}」',
+      reviewTitle: '承認 · {target}',
+      characterCount: '{count} 文字',
       titleWithTarget: '承認 · {service} › {tool}',
       argsLabel: '引数',
       argsModified: '変更あり',
+      allowInSession: 'この会話では同様の操作をすべて許可',
       countdownShort: '{seconds}秒',
       approve: '承認して実行',
       reject: '拒否',
@@ -6430,7 +6511,19 @@ export default {
         mcpServices: 'MCP サービス',
         skills: 'スキル',
         webSearch: 'ウェブ検索',
-        multiTurn: 'マルチターン'
+        multiTurn: 'マルチターン',
+        transport: 'トランスポート',
+        authentication: '認証方式',
+        usageInstructions: '利用ガイド',
+        displayName: '表示名',
+        enabled: '有効',
+        sandbox: 'サンドボックス',
+        sandboxes: 'サンドボックス',
+        systemPrompt: 'システムプロンプト',
+        content: '内容',
+        kbScope: 'ナレッジベースの範囲',
+        mcpScope: 'MCP の範囲',
+        skillsScope: 'スキルの範囲'
       },
       value: {
         document: 'ドキュメント',
@@ -6498,8 +6591,31 @@ export default {
       databaseQuery: 'データベース照会',
       findOperations: '操作を検索',
       runOperation: '操作を実行',
+      tryAgent: 'エージェントを試す',
+      openPage: 'ページを開く',
       searchWeKnoraDocs: '製品ドキュメントを検索',
-      readWeKnoraDoc: '製品ドキュメントを読む'
+      readWeKnoraDoc: '製品ドキュメントを読む',
+      readPage: 'ページを確認',
+      selectTab: 'タブを選択',
+      fillPage: 'ページに入力'
+    },
+    pageAccess: {
+      viewed: '現在のページを確認しました：{location}'
+    },
+    pageEdit: {
+      title: '{count} か所に入力しました',
+      undo: '元に戻す',
+      undone: '入力を元に戻しました',
+      undoSkipped: '{count} か所は変更済みかページにないため、そのままにしました',
+      unsaved: 'まだ保存されていません。確認してからページで保存してください。'
+    },
+    openPage: {
+      open: '開く',
+      openForm: '開いて入力',
+      opened: 'アシスタントが開きました',
+      back: '戻る',
+      endpoint: '接続先：',
+      draftHint: 'アシスタントが入力済みです。API キーなどの認証情報を入力し、確認してからご自身で保存してください。'
     },
     skillFiles: {
       heading: 'スキルファイル',
@@ -6542,6 +6658,158 @@ export default {
       binarySuppressed: 'バイナリ出力は省略されました。ダウンロードするには、成果物ディレクトリにファイルを書き込んでください。'
     },
     operations: {
+      names: {
+        data_source: {
+          list: "データソース一覧を取得",
+          get: "データソース詳細を取得",
+          test: "データソースの接続をテスト",
+          sync: "データソースを同期",
+          pause: "データソースの同期を一時停止",
+          resume: "データソースの同期を再開",
+          list_sync_logs: "データソースの同期履歴を取得",
+          get_sync_log: "データソースの同期進捗を取得",
+          list_resources: "同期可能なリソースを取得",
+          update_sync: "データソースの同期設定を更新",
+        },
+        agent: {
+          list: "エージェント一覧を取得",
+          create: "エージェントを作成",
+          get: "エージェントの詳細を取得",
+          delete: "エージェントを削除",
+          update: "エージェントを更新",
+          copy: "エージェントをコピー",
+        },
+        chunk: {
+          get: "チャンク詳細を取得",
+          update: "チャンクを更新",
+          list_revisions: "チャンクの変更履歴を取得",
+          revert: "チャンクの過去の版を復元",
+          list: "ナレッジチャンク一覧を取得",
+        },
+        knowledge_base: {
+          list_parser_engines: "利用可能な解析エンジンを取得",
+          copy: "ナレッジベースの内容をコピー",
+          duplicate: "ナレッジベースの設定をコピー",
+          get_copy_progress: "ナレッジベースのコピー進捗を取得",
+          list: "ナレッジベース一覧を取得",
+          create: "ナレッジベースを作成",
+          get: "ナレッジベースの詳細を取得",
+          delete: "ナレッジベースを削除",
+          update: "ナレッジベースを更新",
+          list_activity: "ナレッジベースの操作履歴を取得",
+          search: "ナレッジベースを検索",
+          list_move_targets: "移動先のナレッジベース一覧を取得",
+          generate_profile: "ナレッジベースの説明を生成",
+          list_tags: "ナレッジベースのタグ一覧を取得",
+          create_tag: "ナレッジベースのタグを作成",
+          update_tag: "ナレッジベースのタグを更新",
+          delete_tag: "ナレッジベースのタグを削除",
+          list_shared: "共有ナレッジベース一覧を取得",
+        },
+        faq: {
+          batch_update: "FAQ の状態とタグを一括更新",
+          list_entries: "FAQ 項目一覧を取得",
+          delete_entries: "FAQ 項目を一括削除",
+          get_entry: "FAQ 項目の詳細を取得",
+          update_entry: "FAQ 項目を更新",
+          add_similar_questions: "類似の質問を追加",
+          create_entry: "FAQ 項目を作成",
+        },
+        knowledge: {
+          list: "ナレッジ一覧を取得",
+          list_folders: "ナレッジフォルダー一覧を取得",
+          rename_folder: "フォルダーの名前変更または移動",
+          create_manual: "ナレッジを手動作成",
+          create_from_url: "URL からナレッジを作成",
+          batch_delete: "ナレッジを一括削除",
+          batch_reparse: "ナレッジを一括再解析",
+          move_to_folder: "ナレッジをフォルダーに移動",
+          update_manual: "手動作成したナレッジを更新",
+          move: "ナレッジを別のナレッジベースに移動",
+          get_move_progress: "ナレッジの移動状況を取得",
+          set_tags: "ナレッジのタグを設定",
+          get: "ナレッジの詳細を取得",
+          update: "ナレッジを更新",
+          delete: "ナレッジを削除",
+          cancel_parse: "ナレッジの解析をキャンセル",
+          reparse: "ナレッジを再解析",
+          get_parse_progress: "ナレッジの解析状況を取得",
+        },
+        wiki: {
+          list_folders: "Wiki フォルダー一覧を取得",
+          create_folder: "Wiki フォルダーを作成",
+          list_issues: "Wiki ページの問題一覧を取得",
+          lint: "Wiki ページを検査",
+          move_page: "Wiki ページを移動",
+          get_page: "Wiki ページを取得",
+          rebuild_links: "Wiki リンクを再構築",
+          revert: "Wiki ページの版を復元",
+          list_revisions: "Wiki ページの版一覧を取得",
+          get_stats: "Wiki の統計を取得",
+        },
+        system_admin: {
+          list_admins: "システム管理者を取得",
+          list_users: "プラットフォームユーザーを取得",
+          list_settings: "システム設定を取得",
+          get_queues: "タスクキューの稼働状況を取得",
+          list_tasks: "キューのタスクを取得",
+        },
+        workspace: {
+          get: "現在のワークスペース情報を取得",
+          update: "現在のワークスペース情報を変更",
+          list_members: "現在のワークスペースのメンバーを取得",
+        },
+        system: {
+          get_info: "バージョンとシステム情報を取得",
+        },
+        web_search_provider: {
+          list: "ウェブ検索サービス一覧を取得",
+          get: "ウェブ検索サービス詳細を取得",
+          list_types: "ウェブ検索サービスの種類を取得",
+          test: "ウェブ検索接続をテスト",
+          update: "ウェブ検索サービスを更新",
+          delete: "ウェブ検索サービスを削除",
+        },
+        mcp_service: {
+          list: "MCP サービス一覧を取得",
+          create: "MCP サービスを作成",
+          get: "MCP サービスの詳細を取得",
+          update: "MCP サービスを更新",
+          delete: "MCP サービスを削除",
+          test: "MCP サービスの接続をテスト",
+          list_tools: "MCP ツールをリアルタイムで取得",
+          get_metadata: "同期済み MCP ツールを表示",
+          refresh_metadata: "MCP ツール一覧を同期",
+        },
+        message: {
+          chat_history_stats: "チャット履歴の統計を取得",
+          search: "会話履歴を検索",
+          list: "メッセージ履歴を取得",
+        },
+        model: {
+          list: "モデル一覧を取得",
+          list_providers: "モデルプロバイダー一覧を取得",
+          get_provider: "モデルプロバイダーの詳細を取得",
+          get: "モデルの詳細を取得",
+          delete: "モデルを削除",
+          update: "モデルの表示情報を更新",
+          copy: "モデル設定をコピー",
+        },
+        skill: {
+          list_installed: "インストール済みスキル一覧を取得",
+          install: "スキルをインストール",
+          get_installed: "インストール済みスキルの詳細を取得",
+          uninstall: "スキルをアンインストール",
+          set_enabled: "スキルの有効状態を設定",
+          list: "実行可能なスキル一覧を取得",
+          list_catalog: "ワークスペースのスキル一覧を取得",
+          get_catalog: "ワークスペースのスキルの詳細を取得",
+          install_catalog: "カタログのスキルをサンドボックスにインストール",
+        },
+        session: {
+          list: "会話一覧を取得",
+        },
+      },
       found: '実行できる操作 {count} 件',
       unavailableCount: '現在使えない操作 {count} 件',
       empty: '一致する操作はありません',
@@ -6552,6 +6820,7 @@ export default {
       range: '範囲 {min}–{max}',
       risk: {
         read: '読み取り',
+        probe: 'チェック',
         write: '書き込み',
         destructive: '取り消し不可'
       },

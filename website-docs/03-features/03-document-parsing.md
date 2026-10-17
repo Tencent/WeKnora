@@ -202,10 +202,16 @@ sequenceDiagram
 三个辅助模块解决现实中的脏文件：
 
 - **`excel_convert.py`**：魔数/`inspect_excel_format` 检测真实格式（xlsx/xls/xlsb/ods），为每种格式选 pandas engine（`xlrd`/`openpyxl`/`odf`）；无法识别时（如 WPS `.et`、被改名的 csv）用 LibreOffice `convert-to xlsx` 归一化（`normalize_excel_bytes` 依次尝试 `.xlsx/.xls/.et/.csv` 后缀）。
-- **`xlsx_merge.py`**：`fill_merged_cells_xlsx` 解除合并单元格并把左上角主值**复制到覆盖区域的每个单元格**——openpyxl 只在左上角存值，pandas 会把其余读成 NaN，填充后按行分块的 RAG chunk 才能保留上下文。
+- **`xlsx_merge.py`**：`fill_merged_cells_xlsx` 解除合并单元格并把左上角主值**复制到覆盖区域的每个单元格**——openpyxl 只在左上角存值，pandas 会把其余读成 NaN，填充后按行分块的 RAG chunk 才能保留上下文。可选地**按显示格式物化百分比**（见下）。
 - **`xlsx_repair.py`**：修复常见 XLSX 打包问题——`sharedStrings.xml` 路径大小写/位置不规范时重命名归位；manifest 引用了 sharedStrings 但包内缺失且工作表只用 inline string 时，从 `[Content_Types].xml` 与 workbook rels 中剥掉引用，使 openpyxl 能读。
 
-XLSX 读取前统一走 `repair → fill_merged_cells` 预处理，并用 `header=None` + A/B/C 列字母作为稳定列名（xls 则先尝试首行做表头，遇 `Unnamed:` 列回退列字母）。
+**百分比格式**：Excel 的百分比是**显示格式而非存储值**——单元格实存 `0.61123366`，靠 `0.00%` 渲染成 `61.12%`，而 pandas/openpyxl 读的是原始值，格式被丢掉，于是 `61.12%` 变成 `0.6112`（**100 倍偏差**，财务报表类数据会直接把错数字喂给模型）。打开 `DOCREADER_XLSX_PERCENT_AS_TEXT`（或单次上传给 `parser_engine_overrides.xlsx_percent_as_text=true`，优先级高于环境变量）后，带百分比格式的数值单元格会被就地转成显示文本 `"61.12%"`（格式置 `General`），转换在**填合并单元格之前**完成——只有合并区域左上角带 `number_format`，被覆盖的格子是 `General`，先填合并会让第 2..n 行漏转。**只处理百分比**：货币/千分位只影响可读性（`1,234,567` 和 `1234567` 是同一个数），日期由 openpyxl 自动转 datetime。默认 **false**——开启后该单元格由数值变成字符串，会影响下游排序/计算，关闭时读取行为与升级前完全一致。
+
+格式识别仅转换可可靠渲染的数字百分比模式（含颜色及正数/负数/零分段）。转义或引号中的 `%` 是字面量，不会触发乘 100；条件、填充和其他复杂自定义格式保留原始值，避免错误缩放。字面量百分号单元格也不会触发行提示推断。
+
+同源文件偶尔有「一格忘了刷百分比格式」的单元格（如某财报 `D12` 折旧率 `0.0592` 格式为 `0.00_ ;[Red]\-0.00\ `）。把 `DOCREADER_XLSX_PCT_ROW_HINT_MIN` 设为 N（默认 **0=关闭**）后，同一行有 ≥N 个显式百分比格式单元格时，该行漏标的 `0<|v|<1` 数字也按百分比处理，每次命中打 INFO 日志可事后审计。
+
+XLSX 读取前统一走 `repair → fill_merged_cells` 预处理，并用 `header=None` + A/B/C 列字母作为稳定列名（xls 则先尝试首行做表头，遇 `Unnamed:` 列回退列字母）。百分比物化（若开启）发生在 `fill_merged_cells` 内部、填合并单元格之前。
 
 #### ppt_convert.py / pptx_media.py（.ppt / .pptx，服务于 markitdown 引擎） {#_3-5-ppt-convert-py-pptx-media-py-ppt-pptx-服务于-markitdown-引擎}
 

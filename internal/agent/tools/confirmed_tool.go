@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
@@ -69,6 +70,7 @@ func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 				snapshot = nil
 			}
 		}
+		grant, grantScope := t.grant(ctx, args)
 		var err error
 		decision, err = t.gate.RequestBuiltinApproval(waitCtx, approval.PendingRequest{
 			Snapshot:           snapshot,
@@ -82,9 +84,11 @@ func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 			ServiceName:        operationApprovalService,
 			MCPToolName:        t.Name(),
 			RegisteredToolName: t.Name(),
-			Description:        confirmedToolSummary(ctx, t.Name(), args),
+			Description:        t.summary(ctx, args),
 			Args:               args,
 			ToolCallID:         meta.ToolCallID,
+			Grant:              grant,
+			GrantScope:         grantScope,
 		})
 		if err != nil {
 			return operationFailure(fmt.Sprintf("could not ask the user to confirm %s: %v", t.Name(), err)), nil
@@ -120,6 +124,48 @@ func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		defer cancel()
 	}
 	return t.inner.Execute(ctx, args)
+}
+
+// approvalDescriber is a wrapped tool that writes its own confirmation card
+// text; an empty description falls back to the summary below.
+type approvalDescriber interface {
+	ApprovalDescription(ctx context.Context, args json.RawMessage) string
+}
+
+func (t *ConfirmedTool) summary(ctx context.Context, args json.RawMessage) string {
+	if d, ok := t.inner.(approvalDescriber); ok {
+		if description := d.ApprovalDescription(ctx, args); description != "" {
+			return description
+		}
+	}
+	return confirmedToolSummary(ctx, t.Name(), args)
+}
+
+// approvalGranter is a wrapped tool whose approval may be extended to the
+// rest of the session; see approval.PendingRequest.Grant.
+type approvalGranter interface {
+	ApprovalGrant(ctx context.Context, args json.RawMessage) (grant, scope string)
+}
+
+// grant offers a session-wide approval only for recoverable changes.
+func (t *ConfirmedTool) grant(ctx context.Context, args json.RawMessage) (string, string) {
+	if t.risk != operations.RiskWrite {
+		return "", ""
+	}
+	if g, ok := t.inner.(approvalGranter); ok {
+		return g.ApprovalGrant(ctx, args)
+	}
+	return "", ""
+}
+
+// wikiApprovalGrant scopes a Wiki tool's session approval to the knowledge
+// bases the run may write to, so a turn that writes elsewhere asks again.
+func wikiApprovalGrant(ctx context.Context, name string, kbIDs []string) (string, string) {
+	if len(kbIDs) == 0 {
+		return "", ""
+	}
+	sorted := slices.Sorted(slices.Values(kbIDs))
+	return name + " knowledge_base:" + strings.Join(sorted, ","), confirmedToolSummary(ctx, name, nil)
 }
 
 // confirmedToolSummaries name each wrapped tool on the confirmation card, in
