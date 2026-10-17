@@ -19,7 +19,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/searchutil"
@@ -3835,13 +3834,13 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		return nil
 	}
 
-	// 视频：只有 KB 显式开启「视频解析」且配置了 ASR 模型才读取旁白。
+	// 视频：只有 KB 显式开启「视频解析」且所选解析方式需要的模型可用才读取。
 	// 条件不满足时视频保持存档（stored），不算失败：配置可能在任务入队后被
 	// 关掉，而文件本身仍然完好，没有理由把一次同步标红。
 	if payload.FilePath != "" && IsVideoType(payload.FileType) &&
-		!videoAudioParseReady(kb, eff) {
+		!videoParseReady(kb, eff) {
 		if _, err := s.settleVideoAsArchive(ctx, knowledge,
-			"video parsing is disabled or no ASR model is configured"); err != nil {
+			"video parsing is disabled or no model is configured for its mode"); err != nil {
 			return err
 		}
 		return nil
@@ -3969,86 +3968,18 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 	}
 
-	// Step 1.5: ASR transcription for audio files
+	// Step 1.5: ASR transcription for audio files, and for videos whose mode
+	// reads the narration. The ASR step is shared: the video branch only swaps
+	// in the model resolved for the video (video_config.model_id, falling back
+	// to the audio section) and merges frame captions afterwards.
 	if convertResult != nil && convertResult.IsAudio && len(convertResult.AudioData) > 0 {
-		// A video reaches this step through the local ffmpeg extraction. Its
-		// failures degrade back to the archive instead of failing the import:
-		// the bytes are safe, only the narration could not be read.
-		isVideoAudio := IsVideoType(knowledge.FileType)
-		if !eff.ASRConfig.IsASREnabled() {
-			if isVideoAudio {
-				_, settleErr := s.settleVideoAsArchive(ctx, knowledge,
-					"ASR model is no longer configured")
-				return settleErr
-			}
-			logger.Error(ctx, "Audio file detected but ASR is not configured")
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = "ASR model is not configured for audio transcription"
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+		settled, asrErr := s.transcribeMedia(ctx, kb, knowledge, eff, convertResult, isLastRetry)
+		if asrErr != nil {
+			return asrErr
+		}
+		if settled {
 			return nil
 		}
-
-		logger.Infof(ctx, "[ASR] Starting audio transcription for knowledge %s, audio size=%d bytes",
-			knowledge.ID, len(convertResult.AudioData))
-
-		asrModel, err := s.modelService.GetASRModel(ctx, eff.ASRConfig.ModelID)
-		if err != nil {
-			logger.Errorf(ctx, "[ASR] Failed to get ASR model: %v", err)
-			if isVideoAudio {
-				_, settleErr := s.settleVideoAsArchive(ctx, knowledge,
-					"failed to get ASR model: "+err.Error())
-				return settleErr
-			}
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = fmt.Sprintf("failed to get ASR model: %v", err)
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
-			return nil
-		}
-
-		// The knowledge base's language hint; the vendor declares where it
-		// goes, or that it takes none.
-		asrCtx := asr.WithLanguage(ctx, eff.ASRConfig.Language)
-		transcriptionResult, err := asrModel.Transcribe(asrCtx, convertResult.AudioData, knowledge.FileName)
-		if err != nil {
-			logger.Errorf(ctx, "[ASR] Transcription failed: %v", err)
-			if isLastRetry {
-				if isVideoAudio {
-					_, settleErr := s.settleVideoAsArchive(ctx, knowledge,
-						"audio transcription failed: "+err.Error())
-					return settleErr
-				}
-				knowledge.ParseStatus = "failed"
-				knowledge.ErrorMessage = fmt.Sprintf("audio transcription failed: %v", err)
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
-			}
-			return fmt.Errorf("audio transcription failed: %w", err)
-		}
-
-		transcribedText, timeBlocks := transcriptWithSegments(transcriptionResult)
-
-		if transcribedText == "" {
-			logger.Warn(ctx, "[ASR] Transcription returned empty text")
-			if isVideoAudio {
-				// No narration means nothing to search. Archived is the honest
-				// outcome; a completed row with zero chunks would claim an
-				// index that does not exist.
-				_, settleErr := s.settleVideoAsArchive(ctx, knowledge,
-					"no speech detected in the video audio track")
-				return settleErr
-			}
-			transcribedText = "[No speech detected in audio file]"
-			timeBlocks = nil
-		}
-
-		logger.Infof(ctx, "[ASR] Transcription completed, text length=%d", len(transcribedText))
-		// Replace the audio placeholder with the transcribed text
-		convertResult.MarkdownContent = transcribedText
-		convertResult.SourceBlocks = timeBlocks
-		convertResult.IsAudio = false
-		convertResult.AudioData = nil
 	}
 
 	// Normalize inline HTML tables from any parser engine (MinerU, builtin,
@@ -4231,7 +4162,7 @@ func (s *knowledgeService) convert(
 	// Everything after extraction is the shared ASR/chunk/embed pipeline, so
 	// this hop is the whole difference between a video and an audio upload.
 	if !isURL && IsVideoType(fileType) {
-		return s.convertVideoToAudio(ctx, payload, kb, knowledge)
+		return s.convertVideo(ctx, payload, kb, knowledge, eff)
 	}
 
 	tenantOverrides := s.getParserEngineOverridesFromContext(ctx)

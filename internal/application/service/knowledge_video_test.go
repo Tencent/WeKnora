@@ -5,8 +5,13 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
+	"github.com/Tencent/WeKnora/internal/models/asr"
+	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
@@ -36,6 +41,113 @@ func (f *fakeVideoExtractor) Extract(
 		return nil, err
 	}
 	return f.audio, nil
+}
+
+// fakeVideoFrameExtractor stands in for the ffmpeg frame pass. The JPEG bytes
+// are opaque on purpose: the pipeline only forwards them to the VLM.
+type fakeVideoFrameExtractor struct {
+	frames []videoFrame
+	err    error
+	calls  int
+}
+
+func (f *fakeVideoFrameExtractor) ExtractKeyframes(
+	ctx context.Context, src io.Reader, fileName string,
+) ([]videoFrame, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	if _, err := io.Copy(io.Discard, src); err != nil {
+		return nil, err
+	}
+	return f.frames, nil
+}
+
+// videoTestVLM records the prompts it was called with and can fail on chosen
+// frames, which is how the tests pin the per-frame degradation.
+type videoTestVLM struct {
+	replies []string
+	err     error
+	failAt  map[int]error
+	prompts []string
+	images  int
+}
+
+func (v *videoTestVLM) Predict(
+	ctx context.Context, imgBytes [][]byte, prompt string,
+) (string, error) {
+	v.prompts = append(v.prompts, prompt)
+	v.images += len(imgBytes)
+	index := len(v.prompts)
+	if err, ok := v.failAt[index]; ok {
+		return "", err
+	}
+	if v.err != nil {
+		return "", v.err
+	}
+	if index <= len(v.replies) {
+		return v.replies[index-1], nil
+	}
+	return "", nil
+}
+
+func (v *videoTestVLM) GetModelName() string { return "video-test-vlm" }
+func (v *videoTestVLM) GetModelID() string   { return "vlm-1" }
+
+type videoTestASR struct {
+	result   *asr.TranscriptionResult
+	err      error
+	calls    int
+	modelID  string
+	gotAudio []byte
+}
+
+func (a *videoTestASR) Transcribe(
+	ctx context.Context, audioBytes []byte, fileName string,
+) (*asr.TranscriptionResult, error) {
+	a.calls++
+	a.gotAudio = audioBytes
+	if a.err != nil {
+		return nil, a.err
+	}
+	return a.result, nil
+}
+
+func (a *videoTestASR) GetModelName() string { return "video-test-asr" }
+func (a *videoTestASR) GetModelID() string   { return a.modelID }
+
+// videoTestModelService embeds the interface so only the lookups a video parse
+// performs have to be implemented.
+type videoTestModelService struct {
+	interfaces.ModelService
+	models        map[string]*types.Model
+	vlmModel      vlm.VLM
+	vlmErr        error
+	asrModel      asr.ASR
+	asrErr        error
+	gotASRModelID string
+	gotVLMModelID string
+}
+
+func (s *videoTestModelService) GetModelByID(ctx context.Context, id string) (*types.Model, error) {
+	return s.models[id], nil
+}
+
+func (s *videoTestModelService) GetVLMModel(ctx context.Context, id string) (vlm.VLM, error) {
+	s.gotVLMModelID = id
+	if s.vlmErr != nil {
+		return nil, s.vlmErr
+	}
+	return s.vlmModel, nil
+}
+
+func (s *videoTestModelService) GetASRModel(ctx context.Context, id string) (asr.ASR, error) {
+	s.gotASRModelID = id
+	if s.asrErr != nil {
+		return nil, s.asrErr
+	}
+	return s.asrModel, nil
 }
 
 type videoTestFileService struct {
@@ -71,10 +183,55 @@ func newVideoTestContext() context.Context {
 	return context.WithValue(ctx, types.TenantInfoContextKey, &types.Tenant{})
 }
 
+func newVideoTestKnowledge() *types.Knowledge {
+	return &types.Knowledge{
+		ID:              "knowledge-1",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		FileType:        "mp4",
+		FileName:        "Lesson.mp4",
+		FilePath:        "videos/knowledge-1.mp4",
+		ParseStatus:     types.ParseStatusProcessing,
+	}
+}
+
+func newVideoTestPayload(knowledge *types.Knowledge) types.DocumentProcessPayload {
+	return types.DocumentProcessPayload{
+		FilePath: knowledge.FilePath,
+		FileName: knowledge.FileName,
+		FileType: knowledge.FileType,
+	}
+}
+
+func newAudioOnlyVideoKB() *types.KnowledgeBase {
+	return &types.KnowledgeBase{
+		ID:          "kb-1",
+		VideoConfig: types.VideoConfig{Enabled: true, Mode: types.VideoParseModeAudioOnly},
+		ASRConfig:   types.ASRConfig{Enabled: true, ModelID: "asr-1"},
+	}
+}
+
+func newKeyframeVideoKB() *types.KnowledgeBase {
+	return &types.KnowledgeBase{
+		ID:          "kb-1",
+		VideoConfig: types.VideoConfig{Enabled: true, Mode: types.VideoParseModeKeyframes},
+		VLMConfig:   types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
+	}
+}
+
+func newAudioKeyframeVideoKB() *types.KnowledgeBase {
+	return &types.KnowledgeBase{
+		ID:          "kb-1",
+		VideoConfig: types.VideoConfig{Enabled: true, Mode: types.VideoParseModeAudioKeyframes},
+		ASRConfig:   types.ASRConfig{Enabled: true, ModelID: "asr-1"},
+		VLMConfig:   types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
+	}
+}
+
 // The video branch must hand the extracted track to the ASR step as audio, not
 // pretend it parsed text: that is what makes Step 1.5 transcribe it and the
 // existing chunk/embed pipeline index the narration.
-func TestConvertVideoToAudioHandsTheTrackToTheASRStep(t *testing.T) {
+func TestConvertVideoHandsTheTrackToTheASRStep(t *testing.T) {
 	t.Parallel()
 
 	extractor := &fakeVideoExtractor{audio: []byte("m4a-audio-bytes")}
@@ -84,30 +241,17 @@ func TestConvertVideoToAudioHandsTheTrackToTheASRStep(t *testing.T) {
 		fileSvc:        &videoTestFileService{content: []byte("mp4-bytes")},
 		videoExtractor: extractor,
 	}
-	knowledge := &types.Knowledge{
-		ID:              "knowledge-1",
-		TenantID:        1,
-		KnowledgeBaseID: "kb-1",
-		FileType:        "mp4",
-		FileName:        "Lesson.mp4",
-		FilePath:        "videos/knowledge-1.mp4",
-		ParseStatus:     types.ParseStatusProcessing,
-	}
+	knowledge := newVideoTestKnowledge()
+	kb := newAudioOnlyVideoKB()
 
-	result, err := svc.convertVideoToAudio(newVideoTestContext(),
-		types.DocumentProcessPayload{
-			FilePath: knowledge.FilePath,
-			FileName: knowledge.FileName,
-			FileType: knowledge.FileType,
-		},
-		&types.KnowledgeBase{ID: "kb-1"},
-		knowledge,
-	)
+	result, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
+		kb, knowledge, ResolveProcessConfig(kb, nil))
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.True(t, result.IsAudio, "the result must route through the ASR step")
 	require.Equal(t, []byte("m4a-audio-bytes"), result.AudioData)
+	require.Empty(t, result.VideoFrames, "an audio_only mode must not sample frames")
 	require.Equal(t, "Lesson.mp4", extractor.fileName)
 	require.Zero(t, repo.updates, "a successful extraction must not rewrite the row")
 }
@@ -115,7 +259,7 @@ func TestConvertVideoToAudioHandsTheTrackToTheASRStep(t *testing.T) {
 // ffmpeg missing / codec failure / unreadable object: the import degrades to the
 // archive it already was. It must not return an error (asynq would retry into the
 // same wall) and must not leave the row saying "processing".
-func TestConvertVideoToAudioFallsBackToArchiveWhenExtractionFails(t *testing.T) {
+func TestConvertVideoFallsBackToArchiveWhenExtractionFails(t *testing.T) {
 	t.Parallel()
 
 	repo := &videoTestKnowledgeRepo{}
@@ -125,21 +269,11 @@ func TestConvertVideoToAudioFallsBackToArchiveWhenExtractionFails(t *testing.T) 
 		fileSvc:        &videoTestFileService{content: []byte("mp4-bytes")},
 		videoExtractor: extractor,
 	}
-	knowledge := &types.Knowledge{
-		ID:              "knowledge-1",
-		TenantID:        1,
-		KnowledgeBaseID: "kb-1",
-		FileType:        "mp4",
-		FileName:        "Lesson.mp4",
-		ParseStatus:     types.ParseStatusProcessing,
-	}
-	ctx := newVideoTestContext()
+	knowledge := newVideoTestKnowledge()
+	kb := newAudioOnlyVideoKB()
 
-	_, err := svc.convertVideoToAudio(ctx, types.DocumentProcessPayload{
-		FilePath: "videos/knowledge-1.mp4",
-		FileName: "Lesson.mp4",
-		FileType: "mp4",
-	}, &types.KnowledgeBase{ID: "kb-1"}, knowledge)
+	_, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
+		kb, knowledge, ResolveProcessConfig(kb, nil))
 
 	require.NoError(t, err, "degradation is not a task failure")
 	require.Equal(t, 1, repo.updates)
@@ -150,7 +284,7 @@ func TestConvertVideoToAudioFallsBackToArchiveWhenExtractionFails(t *testing.T) 
 	require.Equal(t, "disabled", knowledge.EnableStatus)
 }
 
-func TestConvertVideoToAudioFallsBackWhenTheStoredFileIsUnreadable(t *testing.T) {
+func TestConvertVideoFallsBackWhenTheStoredFileIsUnreadable(t *testing.T) {
 	t.Parallel()
 
 	repo := &videoTestKnowledgeRepo{}
@@ -160,20 +294,11 @@ func TestConvertVideoToAudioFallsBackWhenTheStoredFileIsUnreadable(t *testing.T)
 		fileSvc:        &videoTestFileService{err: errors.New("object not found")},
 		videoExtractor: extractor,
 	}
-	knowledge := &types.Knowledge{
-		ID:              "knowledge-1",
-		TenantID:        1,
-		KnowledgeBaseID: "kb-1",
-		FileType:        "mp4",
-		FileName:        "Lesson.mp4",
-		ParseStatus:     types.ParseStatusProcessing,
-	}
+	knowledge := newVideoTestKnowledge()
+	kb := newAudioOnlyVideoKB()
 
-	_, err := svc.convertVideoToAudio(newVideoTestContext(), types.DocumentProcessPayload{
-		FilePath: "videos/knowledge-1.mp4",
-		FileName: "Lesson.mp4",
-		FileType: "mp4",
-	}, &types.KnowledgeBase{ID: "kb-1"}, knowledge)
+	_, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
+		kb, knowledge, ResolveProcessConfig(kb, nil))
 
 	require.NoError(t, err)
 	require.Zero(t, extractor.calls, "no bytes means no ffmpeg run")
@@ -182,7 +307,7 @@ func TestConvertVideoToAudioFallsBackWhenTheStoredFileIsUnreadable(t *testing.T)
 
 // If the archive state cannot be persisted, the row is still "processing" and
 // acking the task would strand it there. Surface the error so asynq retries.
-func TestConvertVideoToAudioRetriesWhenArchivingCannotBePersisted(t *testing.T) {
+func TestConvertVideoRetriesWhenArchivingCannotBePersisted(t *testing.T) {
 	t.Parallel()
 
 	repo := &videoTestKnowledgeRepo{err: errors.New("db unavailable")}
@@ -191,21 +316,413 @@ func TestConvertVideoToAudioRetriesWhenArchivingCannotBePersisted(t *testing.T) 
 		fileSvc:        &videoTestFileService{content: []byte("mp4-bytes")},
 		videoExtractor: &fakeVideoExtractor{err: errors.New("no audio stream")},
 	}
-	knowledge := &types.Knowledge{
-		ID:              "knowledge-1",
-		TenantID:        1,
-		KnowledgeBaseID: "kb-1",
-		FileType:        "mp4",
-		ParseStatus:     types.ParseStatusProcessing,
-	}
+	knowledge := newVideoTestKnowledge()
+	kb := newAudioOnlyVideoKB()
 
-	_, err := svc.convertVideoToAudio(newVideoTestContext(), types.DocumentProcessPayload{
-		FilePath: "videos/knowledge-1.mp4",
-		FileName: "Lesson.mp4",
-		FileType: "mp4",
-	}, &types.KnowledgeBase{ID: "kb-1"}, knowledge)
+	_, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
+		kb, knowledge, ResolveProcessConfig(kb, nil))
 
 	require.Error(t, err)
+}
+
+// keyframes mode: frames go to the VLM one by one, and the returned captions
+// carry their capture times so the final text can be time-ordered.
+func TestConvertVideoDescribesSampledFrames(t *testing.T) {
+	t.Parallel()
+
+	frames := &fakeVideoFrameExtractor{frames: []videoFrame{
+		{StartMs: 0, Data: []byte("jpeg-1")},
+		{StartMs: 15_000, Data: []byte("jpeg-2")},
+	}}
+	model := &videoTestVLM{replies: []string{"  终端里执行 go test  ", "PPT：\n视频处理架构"}}
+	modelSvc := &videoTestModelService{vlmModel: model}
+	svc := &knowledgeService{
+		repo:                &videoTestKnowledgeRepo{},
+		fileSvc:             &videoTestFileService{content: []byte("mp4-bytes")},
+		videoFrameExtractor: frames,
+		modelService:        modelSvc,
+	}
+	knowledge := newVideoTestKnowledge()
+	kb := newKeyframeVideoKB()
+
+	result, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
+		kb, knowledge, ResolveProcessConfig(kb, nil))
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.IsAudio, "keyframes mode must not transcribe the narration")
+	require.Empty(t, result.AudioData)
+	require.Len(t, result.VideoFrames, 2)
+	require.Equal(t, int64(0), result.VideoFrames[0].StartMs)
+	require.Equal(t, int64(15_000), result.VideoFrames[1].StartMs)
+	require.Equal(t, "终端里执行 go test", result.VideoFrames[0].Text,
+		"the caption is flattened to one line before it is chunked")
+	require.Equal(t, "PPT： 视频处理架构", result.VideoFrames[1].Text)
+	require.Equal(t, "vlm-1", modelSvc.gotVLMModelID)
+	require.Equal(t, 2, model.images)
+	require.Contains(t, model.prompts[0], "training video")
+	require.Contains(t, model.prompts[0], "unreadable frame")
+	require.Contains(t, result.MarkdownContent, "[00:00:00] 画面：终端里执行 go test")
+	require.Contains(t, result.MarkdownContent, "[00:00:15] 画面：PPT： 视频处理架构")
+	require.Len(t, result.SourceBlocks, 2)
+	require.Equal(t, int64(15_000), result.SourceBlocks[1].Locator.StartMs)
+	// The captions must survive the real chunker: this is the text the index
+	// will actually hold, not just an intermediate string.
+	chunks := chunker.SplitText(result.MarkdownContent,
+		chunker.SplitterConfig{ChunkSize: 512, ChunkOverlap: 0})
+	require.NotEmpty(t, chunks)
+	var chunked strings.Builder
+	for _, chunk := range chunks {
+		chunked.WriteString(chunk.Content)
+	}
+	require.Contains(t, chunked.String(), "[00:00:15] 画面：PPT： 视频处理架构")
+}
+
+// A failed frame pass must not cost the narration: the audio result is still
+// handed to the ASR step, and only the picture source degrades.
+func TestConvertVideoKeepsAudioWhenFrameDescriptionFails(t *testing.T) {
+	t.Parallel()
+
+	svc := &knowledgeService{
+		repo:           &videoTestKnowledgeRepo{},
+		fileSvc:        &videoTestFileService{content: []byte("mp4-bytes")},
+		videoExtractor: &fakeVideoExtractor{audio: []byte("m4a-bytes")},
+		videoFrameExtractor: &fakeVideoFrameExtractor{
+			frames: []videoFrame{{StartMs: 0, Data: []byte("jpeg")}},
+		},
+		modelService: &videoTestModelService{vlmErr: errors.New("vlm down")},
+	}
+	knowledge := newVideoTestKnowledge()
+	kb := newAudioKeyframeVideoKB()
+
+	result, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
+		kb, knowledge, ResolveProcessConfig(kb, nil))
+
+	require.NoError(t, err)
+	require.True(t, result.IsAudio)
+	require.Equal(t, []byte("m4a-bytes"), result.AudioData)
+	require.Empty(t, result.VideoFrames)
+}
+
+// A keyframes-only video with no VLM has no text source at all: it settles as an
+// archive, never as a failed import.
+func TestConvertVideoArchivesKeyframesWithoutVLM(t *testing.T) {
+	t.Parallel()
+
+	repo := &videoTestKnowledgeRepo{}
+	svc := &knowledgeService{
+		repo:    repo,
+		fileSvc: &videoTestFileService{content: []byte("mp4-bytes")},
+		videoFrameExtractor: &fakeVideoFrameExtractor{
+			frames: []videoFrame{{StartMs: 0, Data: []byte("jpeg")}},
+		},
+	}
+	knowledge := newVideoTestKnowledge()
+	kb := &types.KnowledgeBase{
+		ID:          "kb-1",
+		VideoConfig: types.VideoConfig{Enabled: true, Mode: types.VideoParseModeKeyframes},
+	}
+
+	_, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
+		kb, knowledge, ResolveProcessConfig(kb, nil))
+
+	require.NoError(t, err, "degradation is not a task failure")
+	require.Equal(t, 1, repo.updates)
+	require.Equal(t, types.ParseStatusStored, repo.columns["parse_status"])
+	require.Equal(t, types.ParseStatusStored, knowledge.ParseStatus)
+}
+
+// A keyframes-only video whose VLM exists but cannot describe anything settles
+// the same way instead of failing.
+func TestConvertVideoArchivesWhenVLMDescribesNothing(t *testing.T) {
+	t.Parallel()
+
+	repo := &videoTestKnowledgeRepo{}
+	svc := &knowledgeService{
+		repo:    repo,
+		fileSvc: &videoTestFileService{content: []byte("mp4-bytes")},
+		videoFrameExtractor: &fakeVideoFrameExtractor{
+			frames: []videoFrame{{StartMs: 0, Data: []byte("jpeg")}},
+		},
+		modelService: &videoTestModelService{vlmModel: &videoTestVLM{err: errors.New("boom")}},
+	}
+	knowledge := newVideoTestKnowledge()
+	kb := newKeyframeVideoKB()
+
+	_, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
+		kb, knowledge, ResolveProcessConfig(kb, nil))
+
+	require.NoError(t, err)
+	require.Equal(t, types.ParseStatusStored, repo.columns["parse_status"])
+}
+
+// The model choice is video_config.model_id first, asr_config.model_id only as
+// the fallback for knowledge bases written before the video section had one.
+func TestResolveVideoASRConfigPrefersTheVideoModel(t *testing.T) {
+	t.Parallel()
+
+	modelSvc := &videoTestModelService{models: map[string]*types.Model{
+		"asr-video": {ID: "asr-video", Type: types.ModelTypeASR},
+		"vlm-1":     {ID: "vlm-1", Type: types.ModelTypeVLLM},
+	}}
+	svc := &knowledgeService{modelService: modelSvc}
+
+	t.Run("video model wins over the audio section", func(t *testing.T) {
+		t.Parallel()
+		kb := &types.KnowledgeBase{
+			VideoConfig: types.VideoConfig{
+				Enabled: true, Mode: types.VideoParseModeAudioOnly, ModelID: "asr-video",
+			},
+			ASRConfig: types.ASRConfig{Enabled: true, ModelID: "asr-audio", Language: "zh"},
+		}
+		cfg, err := svc.resolveVideoASRConfig(newVideoTestContext(), kb, ResolveProcessConfig(kb, nil))
+		require.NoError(t, err)
+		require.Equal(t, "asr-video", cfg.ModelID)
+		require.True(t, cfg.Enabled)
+		require.Equal(t, "zh", cfg.Language, "the audio section's language hint still applies")
+	})
+
+	t.Run("empty video model falls back to the audio section", func(t *testing.T) {
+		t.Parallel()
+		kb := &types.KnowledgeBase{
+			VideoConfig: types.VideoConfig{Enabled: true, Mode: types.VideoParseModeAudioOnly},
+			ASRConfig:   types.ASRConfig{Enabled: true, ModelID: "asr-audio"},
+		}
+		cfg, err := svc.resolveVideoASRConfig(newVideoTestContext(), kb, ResolveProcessConfig(kb, nil))
+		require.NoError(t, err)
+		require.Equal(t, "asr-audio", cfg.ModelID)
+	})
+
+	t.Run("no model anywhere", func(t *testing.T) {
+		t.Parallel()
+		kb := &types.KnowledgeBase{
+			VideoConfig: types.VideoConfig{Enabled: true, Mode: types.VideoParseModeAudioOnly},
+		}
+		_, err := svc.resolveVideoASRConfig(newVideoTestContext(), kb, ResolveProcessConfig(kb, nil))
+		require.ErrorIs(t, err, errVideoASRNotConfigured)
+	})
+
+	t.Run("video model must be an ASR model", func(t *testing.T) {
+		t.Parallel()
+		kb := &types.KnowledgeBase{
+			VideoConfig: types.VideoConfig{
+				Enabled: true, Mode: types.VideoParseModeAudioOnly, ModelID: "vlm-1",
+			},
+			// A valid fallback must not be used: a configured-but-wrong model is
+			// a configuration error, not a reason to silently borrow another.
+			ASRConfig: types.ASRConfig{Enabled: true, ModelID: "asr-audio"},
+		}
+		_, err := svc.resolveVideoASRConfig(newVideoTestContext(), kb, ResolveProcessConfig(kb, nil))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not an ASR model")
+	})
+
+	t.Run("missing video model is an error", func(t *testing.T) {
+		t.Parallel()
+		kb := &types.KnowledgeBase{
+			VideoConfig: types.VideoConfig{
+				Enabled: true, Mode: types.VideoParseModeAudioOnly, ModelID: "ghost",
+			},
+		}
+		_, err := svc.resolveVideoASRConfig(newVideoTestContext(), kb, ResolveProcessConfig(kb, nil))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "does not exist")
+	})
+}
+
+// A video whose configured model is not an ASR model degrades instead of
+// failing: with no frames it archives, with frames it keeps the captions.
+func TestTranscribeMediaDegradesANonASRVideoModel(t *testing.T) {
+	t.Parallel()
+
+	modelSvc := &videoTestModelService{models: map[string]*types.Model{
+		"vlm-1": {ID: "vlm-1", Type: types.ModelTypeVLLM},
+	}}
+
+	t.Run("audio_only archives the video", func(t *testing.T) {
+		t.Parallel()
+		repo := &videoTestKnowledgeRepo{}
+		svc := &knowledgeService{repo: repo, modelService: modelSvc}
+		knowledge := newVideoTestKnowledge()
+		kb := &types.KnowledgeBase{
+			ID: "kb-1",
+			VideoConfig: types.VideoConfig{
+				Enabled: true, Mode: types.VideoParseModeAudioOnly, ModelID: "vlm-1",
+			},
+		}
+		result := &types.ReadResult{IsAudio: true, AudioData: []byte("m4a")}
+
+		settled, err := svc.transcribeMedia(newVideoTestContext(), kb, knowledge,
+			ResolveProcessConfig(kb, nil), result, true)
+
+		require.NoError(t, err, "a model type mismatch must not fail the import")
+		require.True(t, settled)
+		require.Equal(t, types.ParseStatusStored, repo.columns["parse_status"])
+		require.Equal(t, types.ParseStatusStored, knowledge.ParseStatus)
+	})
+
+	t.Run("audio_and_keyframes keeps the captions", func(t *testing.T) {
+		t.Parallel()
+		repo := &videoTestKnowledgeRepo{}
+		svc := &knowledgeService{repo: repo, modelService: modelSvc}
+		knowledge := newVideoTestKnowledge()
+		kb := &types.KnowledgeBase{
+			ID: "kb-1",
+			VideoConfig: types.VideoConfig{
+				Enabled: true, Mode: types.VideoParseModeAudioKeyframes, ModelID: "vlm-1",
+			},
+			VLMConfig: types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
+		}
+		result := &types.ReadResult{
+			IsAudio:   true,
+			AudioData: []byte("m4a"),
+			VideoFrames: []types.VideoFrameDescription{
+				{StartMs: 3_000, Text: "界面：登录页"},
+			},
+		}
+
+		settled, err := svc.transcribeMedia(newVideoTestContext(), kb, knowledge,
+			ResolveProcessConfig(kb, nil), result, true)
+
+		require.NoError(t, err)
+		require.False(t, settled, "the frame captions are still indexable")
+		require.Zero(t, repo.updates)
+		require.False(t, result.IsAudio)
+		require.Nil(t, result.AudioData)
+		require.Contains(t, result.MarkdownContent, "[00:00:03] 画面：界面：登录页")
+	})
+}
+
+// audio_and_keyframes must interleave both sources by time and keep a source
+// block for every line.
+func TestTranscribeMediaMergesNarrationAndFrames(t *testing.T) {
+	t.Parallel()
+
+	asrModel := &videoTestASR{result: &asr.TranscriptionResult{Segments: []asr.Segment{
+		{Start: 0, End: 2, Text: "开场介绍"},
+		{Start: 10, End: 12, Text: "演示操作"},
+		{Start: 25, End: 26, Text: "总结"},
+	}}}
+	modelSvc := &videoTestModelService{asrModel: asrModel}
+	svc := &knowledgeService{repo: &videoTestKnowledgeRepo{}, modelService: modelSvc}
+	knowledge := newVideoTestKnowledge()
+	kb := newAudioKeyframeVideoKB()
+	result := &types.ReadResult{
+		IsAudio:   true,
+		AudioData: []byte("m4a"),
+		VideoFrames: []types.VideoFrameDescription{
+			{StartMs: 5_000, Text: "界面：登录页"},
+			{StartMs: 20_000, Text: "终端：go test"},
+		},
+	}
+
+	settled, err := svc.transcribeMedia(newVideoTestContext(), kb, knowledge,
+		ResolveProcessConfig(kb, nil), result, true)
+
+	require.NoError(t, err)
+	require.False(t, settled)
+	require.Equal(t, "asr-1", modelSvc.gotASRModelID,
+		"an empty video model uses the audio section's model")
+	require.Equal(t, []byte("m4a"), asrModel.gotAudio)
+	lines := strings.Split(result.MarkdownContent, "\n")
+	require.Equal(t, []string{
+		"开场介绍",
+		"[00:00:05] 画面：界面：登录页",
+		"演示操作",
+		"[00:00:20] 画面：终端：go test",
+		"总结",
+	}, lines)
+	require.Len(t, result.SourceBlocks, 5)
+	require.Equal(t, int64(5_000), result.SourceBlocks[1].Locator.StartMs)
+	require.Nil(t, result.VideoFrames, "captions are consumed by the merge")
+	chunks := chunker.SplitText(result.MarkdownContent,
+		chunker.SplitterConfig{ChunkSize: 512, ChunkOverlap: 0})
+	require.NotEmpty(t, chunks)
+	var chunked strings.Builder
+	for _, chunk := range chunks {
+		chunked.WriteString(chunk.Content)
+	}
+	require.Contains(t, chunked.String(), "开场介绍")
+	require.Contains(t, chunked.String(), "[00:00:20] 画面：终端：go test")
+}
+
+// Vendors without segment timings leave no way to interleave; the captions are
+// appended after the transcript and keep exact offsets.
+func TestMergeVideoContentWithoutSegmentsAppendsCaptions(t *testing.T) {
+	t.Parallel()
+
+	text, blocks := mergeVideoContent("没有时间轴的旁白", nil,
+		[]types.VideoFrameDescription{{StartMs: 5_000, Text: "界面：登录页"}})
+
+	require.Equal(t, "没有时间轴的旁白\n\n[00:00:05] 画面：界面：登录页", text)
+	require.Len(t, blocks, 1)
+	require.Equal(t, len([]rune("没有时间轴的旁白"))+2, blocks[0].Start)
+	require.Equal(t, int64(5_000), blocks[0].Locator.StartMs)
+}
+
+// A transcript failure on the last retry keeps the captions instead of throwing
+// away a partially readable video.
+func TestTranscribeMediaKeepsFramesWhenTranscriptionFails(t *testing.T) {
+	t.Parallel()
+
+	decisions := 0
+	svc := &knowledgeService{
+		repo: &videoTestKnowledgeRepo{},
+		modelService: &videoTestModelService{
+			asrModel: &videoTestASR{err: errors.New("vendor 500")},
+		},
+	}
+	knowledge := newVideoTestKnowledge()
+	kb := newAudioKeyframeVideoKB()
+	result := &types.ReadResult{
+		IsAudio:     true,
+		AudioData:   []byte("m4a"),
+		VideoFrames: []types.VideoFrameDescription{{StartMs: 7_000, Text: "终端：构建失败"}},
+	}
+
+	settled, err := svc.transcribeMedia(newVideoTestContext(), kb, knowledge,
+		ResolveProcessConfig(kb, nil), result, true)
+	decisions++
+
+	require.NoError(t, err)
+	require.False(t, settled)
+	require.Equal(t, 1, decisions)
+	require.Contains(t, result.MarkdownContent, "[00:00:07] 画面：终端：构建失败")
+	require.Nil(t, result.VideoFrames)
+}
+
+// The effective config decides readiness, so a per-upload override can satisfy
+// the mode even when the knowledge base defaults do not.
+func TestVideoParseReadyUsesEffectiveModels(t *testing.T) {
+	t.Parallel()
+
+	audioOnly := &types.KnowledgeBase{
+		VideoConfig: types.VideoConfig{Enabled: true, Mode: types.VideoParseModeAudioOnly},
+	}
+	require.False(t, videoParseReady(audioOnly, ResolveProcessConfig(audioOnly, nil)))
+
+	asrEnabled := true
+	audioOverride := &types.KnowledgeProcessOverrides{
+		ASRConfig: &types.ASRConfig{Enabled: asrEnabled, ModelID: "asr-override"},
+	}
+	require.True(t, videoParseReady(audioOnly, ResolveProcessConfig(audioOnly, audioOverride)),
+		"an ASR override makes an audio-only video parseable")
+
+	keyframes := &types.KnowledgeBase{
+		VideoConfig: types.VideoConfig{Enabled: true, Mode: types.VideoParseModeKeyframes},
+	}
+	require.False(t, videoParseReady(keyframes, ResolveProcessConfig(keyframes, nil)))
+	vlmOverride := &types.KnowledgeProcessOverrides{
+		VLMConfig: &types.VLMConfig{Enabled: true, ModelID: "vlm-override"},
+	}
+	require.True(t, videoParseReady(keyframes, ResolveProcessConfig(keyframes, vlmOverride)),
+		"a VLM override makes a keyframes video parseable")
+
+	disabled := &types.KnowledgeBase{
+		VideoConfig: types.VideoConfig{Enabled: false, Mode: types.VideoParseModeAudioKeyframes},
+		ASRConfig:   types.ASRConfig{Enabled: true, ModelID: "asr-1"},
+	}
+	require.False(t, videoParseReady(disabled, ResolveProcessConfig(disabled, nil)))
 }
 
 // The connector asks to store unindexed. With the KB opted in, the same bytes
@@ -245,8 +762,38 @@ func TestCreateStoredVideoParsesWhenVideoConfigEnabled(t *testing.T) {
 	require.Equal(t, 1, task.calls, "the parse task is what turns the video into chunks")
 }
 
-// The switch alone cannot produce text: without an ASR model the connector's
-// request keeps its old meaning and the video stays an archive.
+// An opted-in KB that names its own video ASR model needs no audio-section
+// model: the video section is authoritative.
+func TestCreateStoredVideoParsesWithTheVideoModelOnly(t *testing.T) {
+	t.Parallel()
+
+	repo := &createKnowledgeFileRepoStub{}
+	task := &createKnowledgeTaskEnqueuerStub{}
+	svc := &knowledgeService{
+		repo: repo,
+		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{
+			ID: "kb-1",
+			VideoConfig: types.VideoConfig{
+				Enabled: true, Mode: types.VideoParseModeAudioOnly, ModelID: "asr-video",
+			},
+		}},
+		fileSvc: &createKnowledgeFileServiceStub{},
+		task:    task,
+	}
+
+	knowledge, err := svc.CreateStoredKnowledgeFromFile(
+		newCreateKnowledgeFileContext(), "kb-1",
+		newMultipartFileHeader(t, "Lesson.mp4", videoBytes),
+		nil, "", nil, types.ChannelDingtalk,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, types.ParseStatusPending, knowledge.ParseStatus)
+	require.Equal(t, 1, task.calls)
+}
+
+// The switch alone cannot produce text: without the model the mode needs, the
+// connector's request keeps its old meaning and the video stays an archive.
 func TestCreateStoredVideoStaysArchivedWithoutASRModel(t *testing.T) {
 	t.Parallel()
 
@@ -382,11 +929,8 @@ func TestCreateVideoUploadUsesTheVideoSwitch(t *testing.T) {
 func TestCanUpgradeStoredVideo(t *testing.T) {
 	t.Parallel()
 
-	enabledKB := &types.KnowledgeBase{
-		ID:          "kb-1",
-		VideoConfig: types.VideoConfig{Enabled: true, Mode: types.VideoParseModeAudioOnly},
-		ASRConfig:   types.ASRConfig{Enabled: true, ModelID: "asr-1"},
-	}
+	enabledKB := newAudioOnlyVideoKB()
+	keyframesKB := newKeyframeVideoKB()
 	asrOnlyKB := &types.KnowledgeBase{
 		ID:        "kb-1",
 		ASRConfig: types.ASRConfig{Enabled: true, ModelID: "asr-1"},
@@ -402,6 +946,7 @@ func TestCanUpgradeStoredVideo(t *testing.T) {
 		want      bool
 	}{
 		{name: "video with switch and asr", knowledge: video("mp4", "Lesson.mp4"), kb: enabledKB, want: true},
+		{name: "video with switch and vlm", knowledge: video("mp4", "Lesson.mp4"), kb: keyframesKB, want: true},
 		{name: "video file type empty, name carries it", knowledge: video("", "Lesson.mp4"), kb: enabledKB, want: true},
 		{name: "video without the switch", knowledge: video("mp4", "Lesson.mp4"), kb: asrOnlyKB, want: false},
 		{name: "video without asr", knowledge: video("mp4", "Lesson.mp4"), kb: &types.KnowledgeBase{
@@ -440,4 +985,39 @@ func TestFFmpegAudioExtractorReportsAMissingBinary(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "is not available")
+}
+
+func TestFFmpegFrameExtractorReportsAMissingBinary(t *testing.T) {
+	t.Parallel()
+
+	extractor := &ffmpegFrameExtractor{binary: "weknora-test-ffmpeg-does-not-exist"}
+	_, err := extractor.ExtractKeyframes(newVideoTestContext(), bytes.NewReader(nil), "Lesson.mp4")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "is not available")
+}
+
+// The sampling policy is unit-testable without ffmpeg: a short clip samples
+// every second, a long one spreads its cap over the duration, and an unknown
+// duration falls back to the conservative default.
+func TestVideoKeyframeInterval(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, 3*time.Second, videoKeyframeInterval(30*time.Second))
+	require.Equal(t, time.Second, videoKeyframeInterval(5*time.Second))
+	require.Equal(t, 50*time.Second, videoKeyframeInterval(10*time.Minute))
+	require.Equal(t, 300*time.Second, videoKeyframeInterval(time.Hour))
+	require.Equal(t, videoKeyframeDefaultInterval, videoKeyframeInterval(0))
+}
+
+func TestParseFFmpegDuration(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, 90*time.Second, parseFFmpegDuration(
+		"  Duration: 00:01:30.00, start: 0.000000, bitrate: 1234 kb/s"))
+	require.Equal(t, 2*time.Hour+3*time.Minute+4500*time.Millisecond, parseFFmpegDuration(
+		"Duration: 02:03:04.50, start: 0.000000, bitrate: 1 kb/s"))
+	require.Zero(t, parseFFmpegDuration("Duration: N/A, start: 0.000000, bitrate: N/A"))
+	require.Zero(t, parseFFmpegDuration("ffmpeg version 6.0"))
+	require.Zero(t, parseFFmpegDuration(""))
 }

@@ -338,11 +338,13 @@ export function createKnowledgeBase(data: {
     model_id?: string;
     language?: string;
   };
-  // Video parsing. Only mode "audio_only" is implemented; mode is stored so
-  // adding frame analysis later does not change the config shape.
+  // Video parsing. mode picks narration (audio_only), pictures (keyframes) or
+  // both (audio_and_keyframes). model_id is the video's own ASR model; empty
+  // falls back to the audio section's model.
   video_config?: {
     enabled: boolean;
     mode?: string;
+    model_id?: string;
   };
   extract_config?: any;
   faq_config?: { index_mode: string; question_index_mode?: string };
@@ -391,6 +393,7 @@ export function updateKnowledgeBase(id: string, data: {
     video_config?: {
       enabled: boolean;
       mode?: string;
+      model_id?: string;
     };
     indexing_strategy?: {
       vector_enabled: boolean;

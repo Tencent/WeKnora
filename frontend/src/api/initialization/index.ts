@@ -118,10 +118,11 @@ export interface KBModelConfigRequest {
         model_id?: string
         language?: string
     }
-    /** 视频解析配置。目前只实现 audio_only（仅转写旁白）。 */
+    /** 视频解析配置。mode 为 audio_only / keyframes / audio_and_keyframes；model_id 留空沿用音频处理里的 ASR 模型。 */
     video_config?: {
         enabled: boolean
         mode?: string
+        model_id?: string
     }
     documentSplitting: {
         chunkSize: number

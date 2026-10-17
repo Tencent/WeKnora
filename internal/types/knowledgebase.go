@@ -751,21 +751,36 @@ func (c *ASRConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// VideoParseModeAudioOnly transcribes the video's audio track and indexes the
-// narration. It is the only mode implemented; frame analysis (OCR / VLM) would
-// add values here without changing the stored config shape.
-const VideoParseModeAudioOnly = "audio_only"
+// The three video parsing modes. They are cumulative: audio_only reads the
+// narration, keyframes reads the picture, and audio_and_keyframes does both.
+const (
+	// VideoParseModeAudioOnly transcribes the video's audio track. Lightest:
+	// one ASR call, no VLM, no frame storage.
+	VideoParseModeAudioOnly = "audio_only"
+	// VideoParseModeKeyframes samples frames and describes them with the VLM.
+	// For silent screen recordings and slide decks, where the narration says
+	// nothing but the screen carries the content.
+	VideoParseModeKeyframes = "keyframes"
+	// VideoParseModeAudioKeyframes combines both, interleaved by time.
+	VideoParseModeAudioKeyframes = "audio_and_keyframes"
+)
 
 // VideoConfig represents the video parsing configuration of a knowledge base.
 type VideoConfig struct {
 	// Enabled turns on video parsing. Off by default: an existing deployment
 	// must behave exactly as before until an operator opts in, and the only
-	// cost-free outcome today is archiving the video.
+	// cost-free outcome is archiving the video.
 	Enabled bool `yaml:"enabled" json:"enabled"`
-	// Mode selects how much of the video to read. Only audio_only is
-	// implemented; the others are reserved so the stored config never has to
-	// change shape when they land.
+	// Mode selects what to read from the video. Empty decodes rows written
+	// before the field existed and means audio_only.
 	Mode string `yaml:"mode" json:"mode"`
+	// ModelID is the ASR model used for this knowledge base's videos. Empty
+	// falls back to ASRConfig.ModelID (the audio section) so knowledge bases
+	// configured before this field existed keep transcribing. When set, it must
+	// name an ASR model: a stale or wrong-typed id degrades the video instead of
+	// silently borrowing the audio model. Frames do not use it; they use
+	// VLMConfig.ModelID.
+	ModelID string `yaml:"model_id" json:"model_id"`
 }
 
 // Normalize fills the mode default and coalesces unknown modes to audio_only:
@@ -775,16 +790,67 @@ func (c *VideoConfig) Normalize() {
 	if c == nil {
 		return
 	}
-	if strings.TrimSpace(c.Mode) != VideoParseModeAudioOnly {
+	c.ModelID = strings.TrimSpace(c.ModelID)
+	switch strings.TrimSpace(c.Mode) {
+	case "", VideoParseModeAudioOnly:
+		c.Mode = VideoParseModeAudioOnly
+	case VideoParseModeKeyframes, VideoParseModeAudioKeyframes:
+		c.Mode = strings.TrimSpace(c.Mode)
+	default:
 		c.Mode = VideoParseModeAudioOnly
 	}
 }
 
-// AllowsAudioOnlyParse reports whether the operator asked for narration
-// transcription. An empty mode is the decode result of rows written before the
-// field existed, and means the default.
-func (c VideoConfig) AllowsAudioOnlyParse() bool {
-	return c.Enabled && (c.Mode == "" || c.Mode == VideoParseModeAudioOnly)
+// EffectiveMode returns the mode the pipeline runs, without mutating the
+// stored value. Decoded rows may hold an empty mode; callers that merely read
+// the config must not have to Normalize first.
+func (c VideoConfig) EffectiveMode() string {
+	switch strings.TrimSpace(c.Mode) {
+	case VideoParseModeKeyframes:
+		return VideoParseModeKeyframes
+	case VideoParseModeAudioKeyframes:
+		return VideoParseModeAudioKeyframes
+	default:
+		return VideoParseModeAudioOnly
+	}
+}
+
+// AllowsAudioParse reports whether the mode reads the narration. An empty mode
+// is the decode result of rows written before the field existed, and means the
+// audio_only default. An unrecognised mode is refused here (Normalize is what
+// coalesces it on save): a typo must archive the video, not silently run a
+// source the operator did not choose.
+func (c VideoConfig) AllowsAudioParse() bool {
+	if !c.Enabled {
+		return false
+	}
+	switch strings.TrimSpace(c.Mode) {
+	case "", VideoParseModeAudioOnly, VideoParseModeAudioKeyframes:
+		return true
+	default:
+		return false
+	}
+}
+
+// AllowsKeyframeParse reports whether the mode describes sampled frames. The
+// same strictness about unknown modes applies.
+func (c VideoConfig) AllowsKeyframeParse() bool {
+	if !c.Enabled {
+		return false
+	}
+	switch strings.TrimSpace(c.Mode) {
+	case VideoParseModeKeyframes, VideoParseModeAudioKeyframes:
+		return true
+	default:
+		return false
+	}
+}
+
+// HasOwnASRModel reports whether the video section names its own ASR model.
+// An empty value is the pre-existing configuration and falls back to the audio
+// section's model.
+func (c VideoConfig) HasOwnASRModel() bool {
+	return strings.TrimSpace(c.ModelID) != ""
 }
 
 // Value implements the driver.Valuer interface, used to convert VideoConfig to database value
@@ -805,18 +871,28 @@ func (c *VideoConfig) Scan(value interface{}) error {
 }
 
 // VideoAudioParseEnabled reports whether this knowledge base can turn a video
-// into searchable text: the video switch is on in audio_only mode and an ASR
-// model is configured. Both are required — the pipeline has no second source
-// of text for a video, so a missing ASR model is a configuration error rather
-// than something to discover after ffmpeg has already run.
+// into searchable text under its configured mode. Depending on the mode the
+// video needs at least one text source:
+//
+//   - audio modes need an ASR model — video_config.model_id when set, otherwise
+//     the audio section's asr_config.model_id;
+//   - keyframe modes need a VLM model (vlm_config.model_id).
+//
+// The model ids are only checked for presence here: whether the id resolves to
+// an existing, correctly typed model is a database question answered by the
+// worker, which degrades the video instead of rejecting the import.
 //
 // The single predicate is shared by the import gates, the create path and the
 // worker so they cannot disagree about whether a video is parseable.
 func VideoAudioParseEnabled(kb *KnowledgeBase) bool {
-	if kb == nil {
+	if kb == nil || !kb.VideoConfig.Enabled {
 		return false
 	}
-	return kb.VideoConfig.AllowsAudioOnlyParse() && kb.ASRConfig.IsASREnabled()
+	if kb.VideoConfig.AllowsAudioParse() &&
+		(kb.VideoConfig.HasOwnASRModel() || kb.ASRConfig.IsASREnabled()) {
+		return true
+	}
+	return kb.VideoConfig.AllowsKeyframeParse() && kb.VLMConfig.IsEnabled()
 }
 
 // ExtractConfig represents the extract configuration for a knowledge base

@@ -88,6 +88,9 @@ type knowledgeService struct {
 	// videoExtractor extracts a video's audio track for ASR. nil means "use the
 	// configured ffmpeg binary"; tests inject a fake so no unit test shells out.
 	videoExtractor videoAudioExtractor
+	// videoFrameExtractor samples still frames for the keyframe modes, with the
+	// same test injection contract as videoExtractor.
+	videoFrameExtractor videoFrameExtractor
 }
 
 const (

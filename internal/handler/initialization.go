@@ -336,8 +336,10 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	if req.VideoConfig != nil {
 		next := *req.VideoConfig
 		next.Normalize()
-		if next.Enabled && !kb.ASRConfig.IsASREnabled() {
-			logger.Warn(ctx, "Video parsing enabled without an ASR model; videos will stay archived")
+		probe := *kb
+		probe.VideoConfig = next
+		if next.Enabled && !types.VideoAudioParseEnabled(&probe) {
+			logger.Warn(ctx, "Video parsing enabled without the model its mode needs; videos will stay archived")
 		}
 		kb.VideoConfig = next
 	}

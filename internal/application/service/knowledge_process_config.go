@@ -157,11 +157,13 @@ func validateDefaultFileImportRequirements(
 		logger.Error(ctx, "ASR model is not configured")
 		return werrors.NewBadRequestError("上传音频文件需要设置ASR语音识别模型")
 	}
-	// A video is only readable through its narration, so it has the same ASR
-	// prerequisite as audio; the switch itself was already checked.
-	if IsVideoType(fileType) && !kb.ASRConfig.IsASREnabled() {
-		logger.Error(ctx, "ASR model is not configured for video parsing")
-		return werrors.NewBadRequestError("上传视频文件需要先配置ASR语音识别模型")
+	// A video is only readable through its narration and/or its frames, so it
+	// has the model prerequisites the selected mode implies; the switch itself
+	// was already checked. The requirement message names the missing model so a
+	// keyframes-only knowledge base is not told to configure ASR.
+	if IsVideoType(fileType) && !videoParseReady(kb, eff) {
+		logger.Error(ctx, "Video parsing model is not configured")
+		return werrors.NewBadRequestError(videoParseRequirementMessage(kb))
 	}
 	return nil
 }
@@ -171,7 +173,7 @@ func validateDefaultFileImportRequirements(
 // knowledge base that opted in. Keeping this next to the shared gate means the
 // generic upload path still rejects video with the same message as before.
 func validateImportFileTypeForConfig(kb *types.KnowledgeBase, fileType string) error {
-	if IsVideoType(normalizeFileExtension(fileType)) && kb != nil && kb.VideoConfig.AllowsAudioOnlyParse() {
+	if IsVideoType(normalizeFileExtension(fileType)) && kb != nil && kb.VideoConfig.Enabled {
 		return nil
 	}
 	return validateImportFileType(fileType)
@@ -250,11 +252,11 @@ func validateEffectiveProcessOverrides(eff types.EffectiveProcessConfig, fileTyp
 		return werrors.NewBadRequestError("上传音频文件需要设置ASR语音识别模型")
 	}
 
-	// Video parsing has no text source other than the narration, so an override
-	// that leaves ASR unset has to be rejected here rather than discovered by
-	// the worker (which would archive the file instead of indexing it).
-	if hasVideo && !eff.ASRConfig.IsASREnabled() {
-		return werrors.NewBadRequestError("上传视频文件需要先配置ASR语音识别模型")
+	// Video parsing reads the narration and/or the frames, so the mode decides
+	// which model is required. Rejecting here beats discovering it in the
+	// worker, which would archive the file instead of indexing it.
+	if hasVideo && !videoParseReady(kb, eff) {
+		return werrors.NewBadRequestError(videoParseRequirementMessage(kb))
 	}
 
 	if err := types.ValidateEffectiveProcessPromptInstructions(eff); err != nil {

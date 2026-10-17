@@ -114,15 +114,16 @@ func (s *knowledgeService) createKnowledgeFromFile(
 		return nil, err
 	}
 
-	// Video: the knowledge base decides. With video_config.enabled and an ASR
-	// model the import is a normal parse — the worker extracts the narration
-	// with ffmpeg — so a connector's store-only request and a direct upload both
-	// take it. Without both prerequisites the video keeps its old meaning: an
-	// archive the connector asked for, or a rejected upload.
+	// Video: the knowledge base decides. With video_config.enabled and the model
+	// its mode needs (ASR for narration, VLM for frames) the import is a normal
+	// parse — the worker extracts the track and/or samples frames — so a
+	// connector's store-only request and a direct upload both take it. Without
+	// the prerequisites the video keeps its old meaning: an archive the
+	// connector asked for, or a rejected upload.
 	videoFile := IsVideoType(getFileType(fileName))
 	videoParse := false
 	if videoFile {
-		videoParse = videoAudioParseReady(kb, ResolveProcessConfig(kb, processOverrides))
+		videoParse = videoParseReady(kb, ResolveProcessConfig(kb, processOverrides))
 		switch {
 		case videoParse:
 			// A connector may have archived these bytes because the switch was
@@ -130,15 +131,17 @@ func (s *knowledgeService) createKnowledgeFromFile(
 			archiveOnly = false
 		case archiveOnly:
 			// Still archiving. Say why: an operator who flipped the switch but
-			// left the ASR model unset would otherwise get silence.
+			// left the mode's model unset would otherwise get silence.
 			if kb.VideoConfig.Enabled {
-				logger.Warnf(ctx, "Video parsing enabled but ASR is not configured, archiving: %s", fileName)
+				logger.Warnf(ctx,
+					"Video parsing enabled but the model required by its mode is not configured, archiving: %s",
+					fileName)
 			} else {
 				logger.Infof(ctx, "Video parsing disabled, archiving: %s", fileName)
 			}
 		case kb.VideoConfig.Enabled:
-			logger.Error(ctx, "Video upload rejected: ASR is not configured")
-			return nil, werrors.NewBadRequestError("上传视频文件需要先配置ASR语音识别模型")
+			logger.Error(ctx, "Video upload rejected: the model required by its mode is not configured")
+			return nil, werrors.NewBadRequestError(videoParseRequirementMessage(kb))
 		default:
 			logger.Error(ctx, "Video file upload is not supported")
 			return nil, werrors.NewBadRequestError("暂不支持上传视频文件")

@@ -544,27 +544,61 @@
               </div>
             </div>
 
-            <!-- 解析方式（目前只有「仅语音转写」） -->
+            <!-- 解析方式：仅旁白 / 仅画面 / 两者都做 -->
             <div v-if="formData.videoConfig.enabled" class="setting-row">
               <div class="setting-info">
                 <label>{{ $t('knowledgeEditor.video.modeLabel') }}</label>
                 <p class="desc">{{ $t('knowledgeEditor.video.modeDescription') }}</p>
+                <p class="desc">{{ selectedVideoModeDescription }}</p>
               </div>
               <div class="setting-control">
                 <t-select
                   v-model="formData.videoConfig.mode"
                   class="video-mode-select"
+                  :popup-props="{ overlayClassName: 'video-mode-popup' }"
                   :options="videoModeOptions"
-                />
+                >
+                  <template #option="{ option }">
+                    <div class="video-mode-option">
+                      <span class="video-mode-option__label">{{ option.label }}</span>
+                      <span class="video-mode-option__desc">{{ option.desc }}</span>
+                    </div>
+                  </template>
+                </t-select>
               </div>
             </div>
 
-            <!-- 依赖提醒：没有 ASR 模型时视频只会存档，不会报错 -->
-            <div v-if="formData.videoConfig.enabled" class="setting-row">
+            <!-- 视频专用 ASR 模型：留空回退到「音频处理」里的模型 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesAudio" class="setting-row">
               <div class="setting-info">
-                <p class="desc">{{ $t('knowledgeEditor.video.asrHint') }}</p>
-                <p v-if="!formData.asrConfig.enabled" class="desc video-asr-warning">
+                <label>{{ $t('knowledgeEditor.video.modelLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.modelDescription') }}</p>
+                <p v-if="!videoAudioModelConfigured" class="desc video-asr-warning">
                   {{ $t('knowledgeEditor.video.asrRequired') }}
+                </p>
+              </div>
+              <div class="setting-control video-model-control">
+                <ModelSelector
+                  model-type="ASR"
+                  :selected-model-id="formData.videoConfig.modelId"
+                  :all-models="allModels"
+                  clearable
+                  @update:selected-model-id="(val: string) => { if (formData) formData.videoConfig.modelId = val }"
+                  @add-model="handleAddASRModel"
+                  :placeholder="$t('knowledgeEditor.video.modelPlaceholder')"
+                />
+                <p class="video-model-hint">{{ $t('knowledgeEditor.video.asrHint') }}</p>
+              </div>
+            </div>
+
+            <!-- 画面描述依赖「图像处理」页配置的 VLM 模型 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesFrames" class="setting-row">
+              <div class="setting-info">
+                <p class="desc">{{ $t('knowledgeEditor.video.vlmHint') }}</p>
+                <p v-if="!videoFrameModelConfigured" class="desc video-asr-warning">
+                  {{ videoModeUsesAudio
+                    ? $t('knowledgeEditor.video.vlmPartial')
+                    : $t('knowledgeEditor.video.vlmRequired') }}
                 </p>
               </div>
             </div>
@@ -860,11 +894,62 @@ const DEFAULT_CHUNKING_PRESET = {
 const INSTANT_SECTIONS = new Set(['datasource', 'share', 'activity'])
 const isInstantSection = computed(() => INSTANT_SECTIONS.has(currentSection.value))
 
-// 视频解析方式。目前只实现「仅语音转写」；下拉保留一个显式选项，是为了
-// 配置形状固定，后续加画面解析时不需要迁移已存的 video_config。
+const VIDEO_PARSE_MODES = ['audio_only', 'keyframes', 'audio_and_keyframes'] as const
+
+// Unknown/old modes would render as an empty dropdown; the backend coalesces
+// them to audio_only on save, so show the same value here.
+const normalizeVideoMode = (mode?: string) =>
+  VIDEO_PARSE_MODES.includes(mode as (typeof VIDEO_PARSE_MODES)[number]) ? mode! : 'audio_only'
+
+// 视频解析方式。三档共用同一份 video_config：audio_only 只读旁白，
+// keyframes 只描述画面，audio_and_keyframes 两者都做并按时间合并。
+// 每档的说明直接写进下拉项，选之前就能比较成本与效果。
 const videoModeOptions = computed(() => [
-  { value: 'audio_only', label: t('knowledgeEditor.video.modeAudioOnly') },
+  {
+    value: 'audio_only',
+    label: t('knowledgeEditor.video.modeAudioOnly'),
+    desc: t('knowledgeEditor.video.modeAudioOnlyDesc'),
+  },
+  {
+    value: 'keyframes',
+    label: t('knowledgeEditor.video.modeKeyframes'),
+    desc: t('knowledgeEditor.video.modeKeyframesDesc'),
+  },
+  {
+    value: 'audio_and_keyframes',
+    label: t('knowledgeEditor.video.modeAudioKeyframes'),
+    desc: t('knowledgeEditor.video.modeAudioKeyframesDesc'),
+  },
 ])
+
+// 选中的档位决定要显示哪个模型依赖：旁白要 ASR，画面要 VLM。
+const videoModeUsesAudio = computed(() => formData.value?.videoConfig?.mode !== 'keyframes')
+const videoModeUsesFrames = computed(() => {
+  const mode = formData.value?.videoConfig?.mode
+  return mode === 'keyframes' || mode === 'audio_and_keyframes'
+})
+// 与后端同一套判定：视频页自己的 ASR 模型优先，留空才回退到音频处理页。
+const videoAudioModelConfigured = computed(() => {
+  if (!formData.value) return false
+  if (formData.value.videoConfig?.modelId) return true
+  const asr = formData.value.asrConfig
+  return !!(asr?.enabled && asr?.modelId)
+})
+// 画面描述固定使用「图像处理」页的 VLM（vlm_config.model_id）。
+const videoFrameModelConfigured = computed(() => {
+  const multimodal = formData.value?.multimodalConfig
+  return !!(multimodal?.enabled && multimodal?.vllmModelId)
+})
+const selectedVideoModeDescription = computed(() => {
+  switch (formData.value?.videoConfig?.mode) {
+    case 'keyframes':
+      return t('knowledgeEditor.video.modeKeyframesDesc')
+    case 'audio_and_keyframes':
+      return t('knowledgeEditor.video.modeAudioKeyframesDesc')
+    default:
+      return t('knowledgeEditor.video.modeAudioOnlyDesc')
+  }
+})
 
 const navItems = computed(() => {
   const items: { key: string; icon: string; label: string; badge?: number }[] = [
@@ -1043,11 +1128,12 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       modelId: '',
       language: ''
     },
-    // 视频解析：默认关闭，且只实现「仅语音转写」。mode 始终显式发送，
-    // 免得老行（mode 缺省）在保存后被后端归一成别的读法。
+    // 视频解析：默认关闭。mode 始终显式发送，免得老行（mode 缺省）在保存后
+    // 被后端归一成别的读法；modelId 留空表示沿用「音频处理」里的 ASR 模型。
     videoConfig: {
       enabled: false,
-      mode: 'audio_only' as string
+      mode: 'audio_only' as string,
+      modelId: '' as string
     },
     nodeExtractConfig: {
       enabled: false,
@@ -1224,7 +1310,10 @@ const loadKBData = async (
         enabled: !!kb.video_config?.enabled,
         // An old row decodes to an empty mode; the server treats that as
         // audio_only, and so does the dropdown.
-        mode: kb.video_config?.mode || 'audio_only'
+        mode: normalizeVideoMode(kb.video_config?.mode),
+        // Empty means "use the ASR model configured under Audio", exactly like
+        // the backend's fallback.
+        modelId: kb.video_config?.model_id || ''
       },
       nodeExtractConfig: {
         enabled: kb.extract_config?.enabled || false,
@@ -1664,11 +1753,12 @@ const buildSubmitData = () => {
     language: formData.value.asrConfig?.language || ''
   }
 
-  // 视频解析配置。mode 永远显式发送；后端只实现了 audio_only，未知值会被
-  // 归一回去，所以下拉里目前只有这一项。
+  // 视频解析配置。mode 永远显式发送；model_id 为空时后端回退到音频处理的
+  // ASR 模型，因此老配置不需要迁移。
   data.video_config = {
     enabled: formData.value.videoConfig?.enabled || false,
-    mode: formData.value.videoConfig?.mode || 'audio_only'
+    mode: formData.value.videoConfig?.mode || 'audio_only',
+    model_id: formData.value.videoConfig?.modelId || ''
   }
 
   // storage_backend_id is authoritative. Keep provider projection for old clients
@@ -2582,6 +2672,63 @@ watch(() => chatResources.allModels, (list) => {
       line-height: 1.5;
       color: var(--td-text-color-secondary);
     }
+  }
+
+  // 视频模型依赖：缺模型只影响可用性，不阻塞保存，所以用提示色而不是错误色。
+  .video-asr-warning {
+    color: var(--td-warning-color);
+  }
+
+  .video-model-hint {
+    margin: var(--app-space-1) 0 0;
+    font-size: var(--app-text-sm);
+    line-height: 1.5;
+    color: var(--td-text-color-placeholder);
+  }
+
+  // The selector and its fallback note stack in the right-hand column instead
+  // of sitting side by side (setting-control is a flex row by default).
+  .video-model-control {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+</style>
+
+<!-- Non-scoped: TDesign teleports the mode dropdown outside this component, so
+     a scoped selector cannot reach its option rows. -->
+<style lang="less">
+.video-mode-popup {
+  .t-select-option {
+    // Options are two lines (label + cost note); the default 32px row clips.
+    height: auto;
+    min-height: 48px;
+    padding: 8px 12px;
+    line-height: 1.4;
+    white-space: normal;
+  }
+}
+
+.video-mode-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  width: 100%;
+
+  &__label {
+    font-size: var(--app-text-md);
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--td-text-color-primary);
+  }
+
+  &__desc {
+    font-size: var(--app-text-sm);
+    line-height: 1.4;
+    color: var(--td-text-color-secondary);
+    white-space: normal;
+    overflow-wrap: break-word;
   }
 }
 </style>

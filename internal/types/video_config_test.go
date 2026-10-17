@@ -19,7 +19,7 @@ func TestVideoConfigDefaultsToDisabledAudioOnly(t *testing.T) {
 	if zero.Mode != VideoParseModeAudioOnly {
 		t.Fatalf("mode = %q, want %q", zero.Mode, VideoParseModeAudioOnly)
 	}
-	if zero.AllowsAudioOnlyParse() {
+	if zero.AllowsAudioParse() || zero.AllowsKeyframeParse() {
 		t.Fatal("a disabled VideoConfig must not request parsing")
 	}
 
@@ -42,26 +42,117 @@ func TestVideoConfigEnabledWithoutModeMeansAudioOnly(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"enabled":true}`), &cfg); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if !cfg.AllowsAudioOnlyParse() {
+	if !cfg.AllowsAudioParse() {
 		t.Fatalf("cfg = %+v, want audio-only parse enabled", cfg)
 	}
 
 	cfg.Mode = "visual"
-	if cfg.AllowsAudioOnlyParse() {
-		t.Fatal("an unimplemented mode must not silently parse as audio_only")
+	if cfg.AllowsAudioParse() || cfg.AllowsKeyframeParse() {
+		t.Fatal("an unimplemented mode must not silently parse as a known mode")
 	}
 	cfg.Normalize()
-	if cfg.Mode != VideoParseModeAudioOnly || !cfg.AllowsAudioOnlyParse() {
+	if cfg.Mode != VideoParseModeAudioOnly || !cfg.AllowsAudioParse() {
 		t.Fatalf("after Normalize = %+v, want audio_only", cfg)
 	}
 }
 
+// Every implemented mode survives Normalize and selects exactly the sources it
+// claims; an unknown mode is still coalesced to the default rather than
+// silently running something the pipeline cannot do.
+func TestVideoConfigNormalizeKeepsKnownModes(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		stored      string
+		wantMode    string
+		wantAudio   bool
+		wantFrames  bool
+		wantUnknown bool
+	}{
+		{stored: "", wantMode: VideoParseModeAudioOnly, wantAudio: true},
+		{stored: " audio_only ", wantMode: VideoParseModeAudioOnly, wantAudio: true},
+		{stored: VideoParseModeKeyframes, wantMode: VideoParseModeKeyframes, wantFrames: true},
+		{
+			stored:   VideoParseModeAudioKeyframes,
+			wantMode: VideoParseModeAudioKeyframes, wantAudio: true, wantFrames: true,
+		},
+		{stored: "scene", wantMode: VideoParseModeAudioOnly, wantAudio: true, wantUnknown: true},
+		{stored: "AUDIO_ONLY", wantMode: VideoParseModeAudioOnly, wantAudio: true, wantUnknown: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.stored, func(t *testing.T) {
+			t.Parallel()
+			cfg := VideoConfig{Enabled: true, Mode: tc.stored}
+			cfg.Normalize()
+			if cfg.Mode != tc.wantMode {
+				t.Fatalf("mode = %q, want %q", cfg.Mode, tc.wantMode)
+			}
+			if got := cfg.AllowsAudioParse(); got != tc.wantAudio {
+				t.Fatalf("AllowsAudioParse() = %v, want %v", got, tc.wantAudio)
+			}
+			if got := cfg.AllowsKeyframeParse(); got != tc.wantFrames {
+				t.Fatalf("AllowsKeyframeParse() = %v, want %v", got, tc.wantFrames)
+			}
+			if tc.wantUnknown && cfg.Mode != VideoParseModeAudioOnly {
+				t.Fatalf("unknown mode %q must normalize to audio_only", tc.stored)
+			}
+		})
+	}
+
+	// EffectiveMode must answer without mutating the stored value: the settings
+	// UI and the worker both read rows that were never normalized.
+	var raw VideoConfig
+	if got := raw.EffectiveMode(); got != VideoParseModeAudioOnly {
+		t.Fatalf("EffectiveMode() on empty mode = %q, want audio_only", got)
+	}
+	raw.Enabled = true
+	raw.Mode = VideoParseModeKeyframes
+	if got := raw.EffectiveMode(); got != VideoParseModeKeyframes {
+		t.Fatalf("EffectiveMode() = %q, want keyframes", got)
+	}
+	if raw.Mode != VideoParseModeKeyframes {
+		t.Fatal("EffectiveMode must not rewrite the stored mode")
+	}
+}
+
+// Only an explicit, known mode turns a source on: a disabled switch never does,
+// whatever the mode says.
+func TestVideoConfigAllowsMethodsRequireTheSwitch(t *testing.T) {
+	t.Parallel()
+
+	modes := []string{VideoParseModeAudioOnly, VideoParseModeKeyframes, VideoParseModeAudioKeyframes}
+	for _, mode := range modes {
+		mode := mode
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			cfg := VideoConfig{Mode: mode}
+			if cfg.AllowsAudioParse() || cfg.AllowsKeyframeParse() {
+				t.Fatalf("disabled %q requested parsing", mode)
+			}
+			cfg.Enabled = true
+			wantAudio := mode == VideoParseModeAudioOnly || mode == VideoParseModeAudioKeyframes
+			wantFrames := mode == VideoParseModeKeyframes || mode == VideoParseModeAudioKeyframes
+			if got := cfg.AllowsAudioParse(); got != wantAudio {
+				t.Fatalf("AllowsAudioParse() = %v, want %v", got, wantAudio)
+			}
+			if got := cfg.AllowsKeyframeParse(); got != wantFrames {
+				t.Fatalf("AllowsKeyframeParse() = %v, want %v", got, wantFrames)
+			}
+		})
+	}
+}
+
 // The JSONB value round-trips through the driver.Valuer / sql.Scanner pair the
-// repository relies on.
+// repository relies on, including the video-specific model id.
 func TestVideoConfigValueAndScanRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	want := VideoConfig{Enabled: true, Mode: VideoParseModeAudioOnly}
+	want := VideoConfig{
+		Enabled: true,
+		Mode:    VideoParseModeAudioKeyframes,
+		ModelID: "asr-video",
+	}
 	value, err := want.Value()
 	if err != nil {
 		t.Fatalf("Value: %v", err)
@@ -87,55 +178,95 @@ func TestVideoConfigValueAndScanRoundTrip(t *testing.T) {
 	}
 }
 
-// Both halves are required: the switch says the operator wants video text, the
-// ASR model is the only thing that can produce it.
-func TestVideoAudioParseEnabledRequiresSwitchAndASR(t *testing.T) {
+// Each mode needs its own text source: audio modes need an ASR model (video's
+// own or the audio section's fallback), keyframe modes need a VLM model. The
+// switch alone never suffices, and the video model id is presence-checked only
+// — type validation happens in the worker.
+func TestVideoAudioParseEnabledPerMode(t *testing.T) {
 	t.Parallel()
 
+	asr := ASRConfig{Enabled: true, ModelID: "asr-1"}
+	vlm := VLMConfig{Enabled: true, ModelID: "vlm-1"}
 	cases := []struct {
 		name string
 		kb   *KnowledgeBase
 		want bool
 	}{
+		{name: "nil kb", kb: nil, want: false},
+		{name: "default config", kb: &KnowledgeBase{}, want: false},
 		{
-			name: "nil kb",
-			kb:   nil,
+			name: "switch on, no model",
+			kb:   &KnowledgeBase{VideoConfig: VideoConfig{Enabled: true, Mode: VideoParseModeAudioOnly}},
 			want: false,
 		},
 		{
-			name: "default config",
-			kb:   &KnowledgeBase{},
+			name: "switch off, audio model configured",
+			kb:   &KnowledgeBase{ASRConfig: asr},
 			want: false,
 		},
 		{
-			name: "switch on, no asr",
+			name: "audio_only with fallback asr model",
 			kb: &KnowledgeBase{
 				VideoConfig: VideoConfig{Enabled: true, Mode: VideoParseModeAudioOnly},
-			},
-			want: false,
-		},
-		{
-			name: "switch off, asr configured",
-			kb: &KnowledgeBase{
-				ASRConfig: ASRConfig{Enabled: true, ModelID: "asr-1"},
-			},
-			want: false,
-		},
-		{
-			name: "switch on and asr configured",
-			kb: &KnowledgeBase{
-				VideoConfig: VideoConfig{Enabled: true, Mode: VideoParseModeAudioOnly},
-				ASRConfig:   ASRConfig{Enabled: true, ModelID: "asr-1"},
+				ASRConfig:   asr,
 			},
 			want: true,
 		},
 		{
-			name: "switch on with legacy empty mode",
+			name: "audio_only with the video's own model and no audio model",
+			kb: &KnowledgeBase{
+				VideoConfig: VideoConfig{
+					Enabled: true, Mode: VideoParseModeAudioOnly, ModelID: "asr-video",
+				},
+			},
+			want: true,
+		},
+		{
+			name: "legacy empty mode with fallback asr model",
 			kb: &KnowledgeBase{
 				VideoConfig: VideoConfig{Enabled: true},
-				ASRConfig:   ASRConfig{Enabled: true, ModelID: "asr-1"},
+				ASRConfig:   asr,
 			},
 			want: true,
+		},
+		{
+			name: "keyframes with vlm",
+			kb: &KnowledgeBase{
+				VideoConfig: VideoConfig{Enabled: true, Mode: VideoParseModeKeyframes},
+				VLMConfig:   vlm,
+			},
+			want: true,
+		},
+		{
+			name: "keyframes without vlm",
+			kb: &KnowledgeBase{
+				VideoConfig: VideoConfig{Enabled: true, Mode: VideoParseModeKeyframes},
+				ASRConfig:   asr,
+			},
+			want: false,
+		},
+		{
+			name: "audio_and_keyframes with only asr",
+			kb: &KnowledgeBase{
+				VideoConfig: VideoConfig{Enabled: true, Mode: VideoParseModeAudioKeyframes},
+				ASRConfig:   asr,
+			},
+			want: true,
+		},
+		{
+			name: "audio_and_keyframes with only vlm",
+			kb: &KnowledgeBase{
+				VideoConfig: VideoConfig{Enabled: true, Mode: VideoParseModeAudioKeyframes},
+				VLMConfig:   vlm,
+			},
+			want: true,
+		},
+		{
+			name: "audio_and_keyframes without any model",
+			kb: &KnowledgeBase{
+				VideoConfig: VideoConfig{Enabled: true, Mode: VideoParseModeAudioKeyframes},
+			},
+			want: false,
 		},
 	}
 	for _, tc := range cases {
@@ -146,5 +277,21 @@ func TestVideoAudioParseEnabledRequiresSwitchAndASR(t *testing.T) {
 				t.Fatalf("VideoAudioParseEnabled() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// The video section may name its own ASR model; an empty id keeps the old
+// fallback to the audio section.
+func TestVideoConfigHasOwnASRModel(t *testing.T) {
+	t.Parallel()
+
+	if (VideoConfig{}).HasOwnASRModel() {
+		t.Fatal("an empty model id must use the audio fallback")
+	}
+	if (VideoConfig{ModelID: "   "}).HasOwnASRModel() {
+		t.Fatal("a whitespace model id must use the audio fallback")
+	}
+	if !(VideoConfig{ModelID: "asr-video"}).HasOwnASRModel() {
+		t.Fatal("a configured model id must be used")
 	}
 }
