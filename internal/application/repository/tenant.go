@@ -133,6 +133,21 @@ func (r *tenantRepository) SetChatHistoryConfig(
 		Update("chat_history_config", cfg).Error
 }
 
+func (r *tenantRepository) UpdateTenantProfile(ctx context.Context, id uint64, name, description *string) error {
+	fields := map[string]interface{}{}
+	if name != nil {
+		fields["name"] = *name
+	}
+	if description != nil {
+		fields["description"] = *description
+	}
+	if id == 0 || len(fields) == 0 {
+		return errors.New("workspace id and profile fields are required")
+	}
+	result := r.db.WithContext(ctx).Model(&types.Tenant{}).Where("id = ?", id).Updates(fields)
+	return result.Error
+}
+
 // DeleteTenant soft-deletes the tenant and every active membership row
 // for that tenant in one transaction. Without the membership purge,
 // /auth/me still lists the defunct tenant (name lookup fails → UI shows

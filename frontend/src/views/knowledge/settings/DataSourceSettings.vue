@@ -15,6 +15,7 @@ import DataSourceEditorDialog from './DataSourceEditorDialog.vue'
 import DataSourceSyncLogs from './DataSourceSyncLogs.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 
 const props = defineProps<{ kbId: string }>()
 const emit = defineEmits<{ (e: 'count', value: number): void }>()
@@ -178,6 +179,7 @@ function onEditorSaved() {
 }
 
 onMounted(loadList)
+useAssistantDataChange(() => { void loadList(true) }, { areas: ['data_source'] })
 onBeforeUnmount(stopPolling)
 </script>
 

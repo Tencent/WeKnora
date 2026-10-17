@@ -264,11 +264,11 @@ func (c *AutoTagConfig) Normalize() {
 
 // ParserEngineRule maps a set of file types to a specific parser engine.
 type ParserEngineRule struct {
-	FileTypes []string `yaml:"file_types" json:"file_types"`
-	Engine    string   `yaml:"engine"     json:"engine"`
+	FileTypes []string `yaml:"file_types" json:"file_types" extensions:"x-agent"`
+	Engine    string   `yaml:"engine"     json:"engine" extensions:"x-agent"`
 	// XLSXFirstRowAsHeader restores row-1 column context for flat XLSX tables.
 	// nil preserves the parser default; an explicit false disables the mode.
-	XLSXFirstRowAsHeader *bool `yaml:"xlsx_first_row_as_header,omitempty" json:"xlsx_first_row_as_header,omitempty"`
+	XLSXFirstRowAsHeader *bool `yaml:"xlsx_first_row_as_header,omitempty" json:"xlsx_first_row_as_header,omitempty" extensions:"x-agent"`
 }
 
 // ChunkingConfig represents the document splitting configuration
@@ -284,7 +284,7 @@ type ChunkingConfig struct {
 	// types that only a specific engine can parse: ppt/pptx fall back to
 	// markitdown). A linked anydoc binding is preferred for every type it
 	// converts.
-	ParserEngineRules []ParserEngineRule `yaml:"parser_engine_rules,omitempty" json:"parser_engine_rules,omitempty"`
+	ParserEngineRules []ParserEngineRule `yaml:"parser_engine_rules,omitempty" json:"parser_engine_rules,omitempty" extensions:"x-agent,x-agent-response"`
 	// EnableParentChild splits into large parent chunks and small child chunks.
 	// Search matches a child and returns its parent.
 	EnableParentChild bool `yaml:"enable_parent_child,omitempty" json:"enable_parent_child,omitempty" extensions:"x-agent"`
@@ -565,12 +565,12 @@ type ImageProcessingConfig struct {
 	// knowledge bases configured before the field existed; those follow
 	// ImageAttrsEnabled — see ResolveImagePipelineID. An explicit id always
 	// wins over the switch.
-	ImagePipelineID string `yaml:"image_pipeline,omitempty" json:"image_pipeline,omitempty"`
+	ImagePipelineID string `yaml:"image_pipeline,omitempty" json:"image_pipeline,omitempty" enums:"default,smartocr" extensions:"x-agent"`
 	// ImagePipelineParams holds the tunables of ImagePipelineID, keyed by the
 	// field's own key. The map travels whole: a key a pipeline no longer
 	// declares is dropped when the run reads it, so an old stored config stays
 	// loadable rather than being rewritten on save.
-	ImagePipelineParams map[string]any `yaml:"image_pipeline_params,omitempty" json:"image_pipeline_params,omitempty"`
+	ImagePipelineParams map[string]any `yaml:"image_pipeline_params,omitempty" json:"image_pipeline_params,omitempty" extensions:"x-agent,x-agent-response,x-agent-keys=enable_caption|enable_ocr|default.enable_caption|default.enable_ocr"`
 	// ImageVectorEnabled lets a knowledge base whose embedding model takes
 	// images index each image by its own vector and recall it with one. It
 	// is off by default on purpose: a model that takes images is also used

@@ -278,6 +278,14 @@ export function safeDocUrl(value: string): string {
   }
 }
 
+// Operation IDs belong to the API contract; only their visible labels are translated.
+export function getOperationLabel(t: ComposerTranslation, operation: string): string {
+  if (!operation) return ''
+  const key = `agentStream.operations.names.${operation}`
+  const label = t(key, {}, { missingWarn: false, fallbackWarn: false })
+  return label === key ? operation : label
+}
+
 export function getCatalogToolTitle(t: ComposerTranslation, event: ToolEventLike): string {
   const type = getCatalogToolDisplayType(event.tool_name)
   if (!type) return ''
@@ -291,7 +299,7 @@ export function getCatalogToolTitle(t: ComposerTranslation, event: ToolEventLike
   } else if (type === 'run_operation') {
     const base = t('agentStream.tools.runOperation')
     const operation = stringField(args, 'operation') || stringField(data, 'operation')
-    title = operation ? `${base}：${operation}` : base
+    title = operation ? `${base}：${getOperationLabel(t, operation)}` : base
   } else if (type === 'search_weknora_docs') {
     const base = t('agentStream.tools.searchWeKnoraDocs')
     const detail = stringField(args, 'query') || stringField(args, 'category')

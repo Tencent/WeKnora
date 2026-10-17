@@ -1510,7 +1510,7 @@ useAssistantDataChange((changes) => {
   const targetKbId = kbId.value;
   if (!targetKbId) return;
   const relevant = changes.filter(change => change.ids.knowledgeBaseIds.includes(targetKbId)
-    || (change.area === 'knowledge' && change.ids.knowledgeIds.some(id =>
+    || (['knowledge', 'chunk'].includes(change.area) && change.ids.knowledgeIds.some(id =>
       cardList.value.some(item => item.id === id) || (isCardDetails.value && details.id === id)))
     // ID-only operations may affect a document outside the loaded folder or page.
     || (change.area === 'knowledge' && change.ids.knowledgeBaseIds.length === 0));
@@ -1553,7 +1553,7 @@ useAssistantDataChange((changes) => {
     }
   }
   if (leaving.size || arriving.size) void settleThenReload(targetKbId, [...leaving], [...arriving], reload);
-}, { areas: ['knowledge_base', 'knowledge'] });
+}, { areas: ['knowledge_base', 'knowledge', 'chunk'] });
 
 const LEAVING_OPERATIONS = ['knowledge.delete', 'knowledge.batch_delete', 'knowledge.move'];
 

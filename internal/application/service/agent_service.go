@@ -485,6 +485,7 @@ func (s *agentService) registerOperationTools(
 	// lets the model tell the user why instead of failing at the router.
 	operationAccess := operations.Access{
 		Role:        types.CallerFromContext(ctx).Role,
+		SystemAdmin: types.IsSystemAdminFromContext(ctx),
 		EnforceRole: s.cfg != nil && s.cfg.Tenant.IsRBACEnforced() && !access.IsCrossTenantSuperuser(ctx, s.cfg),
 		Level:       config.AssistantAccess,
 	}

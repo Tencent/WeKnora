@@ -246,6 +246,7 @@ func RegisterWebSearchProviderRoutes(
 		providers.GET("", g.Viewer(), h.ListProviders)
 		providers.GET("/:id", g.Viewer(), h.GetProvider)
 		providers.PUT("/:id", g.Admin(), h.UpdateProvider)
+		providers.PATCH("/:id", g.Admin(), h.PatchProvider)
 		providers.DELETE("/:id", g.Admin(), h.DeleteProvider)
 		// Per-field credential subresource — Admin+
 		providers.PUT("/:id/credentials", g.Admin(), credHandler.Put)
@@ -320,6 +321,7 @@ func RegisterDataSourceRoutes(
 		ds.GET("", g.Viewer(), handler.ListDataSources)
 		ds.GET("/:id", g.Viewer(), handler.GetDataSource)
 		ds.PUT("/:id", g.Admin(), handler.UpdateDataSource)
+		ds.PATCH("/:id/sync-settings", g.Admin(), handler.PatchSyncSettings)
 		ds.DELETE("/:id", g.Admin(), handler.DeleteDataSource)
 
 		// Credential subresource. Single logical field "credentials" because

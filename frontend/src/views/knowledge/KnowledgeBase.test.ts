@@ -80,7 +80,7 @@ test('reloads KB metadata with force without adding file requests beyond the exi
   assert.equal(f.hook.getKnowled.mock.callCount(), fileRequests)
 })
 
-for (const operation of ['knowledge.update', 'knowledge.reparse', 'knowledge.cancel_parse']) {
+for (const operation of ['knowledge.update', 'knowledge.reparse', 'knowledge.cancel_parse', 'chunk.update', 'chunk.revert']) {
   test(`refreshes the open document on ${operation}`, async t => {
     const f = await setup(t)
     f.emit(change(operation, { knowledge_id: ['doc'] }))
@@ -92,6 +92,14 @@ for (const operation of ['knowledge.update', 'knowledge.reparse', 'knowledge.can
     assert.equal(f.vm.isCardDetails, true)
   })
 }
+
+test('ignores chunk changes in another document outside this knowledge base', async t => {
+  const f = await setup(t)
+  f.emit(change('chunk.update', { knowledge_id: ['other-doc'] }))
+  t.mock.timers.tick(300)
+  assert.equal(f.hook.getCardDetails.mock.callCount(), 0)
+  assert.equal(f.hook.getKnowled.mock.callCount(), 0)
+})
 
 test('closes a deleted drawer even when the same burst includes an update', async t => {
   const f = await setup(t)

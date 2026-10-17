@@ -83,7 +83,8 @@ type agentOperation struct {
 	CatchAll string `json:"catch_all"`
 	// Role is the lowest workspace role the route accepts, when it differs
 	// from the default for the risk.
-	Role types.TenantRole `json:"role,omitempty"`
+	Role        types.TenantRole `json:"role,omitempty"`
+	SystemAdmin bool             `json:"system_admin,omitempty"`
 	// AlwaysConfirm asks before every call of a write; see Operation.
 	AlwaysConfirm bool `json:"always_confirm,omitempty"`
 	// Method picks one route when the handler's doc lists several (a legacy
@@ -229,6 +230,7 @@ func (doc *specDocument) compileOperation(
 		Method:        method,
 		Route:         route,
 		Role:          meta.Role,
+		SystemAdmin:   meta.SystemAdmin,
 		LabelParam:    meta.LabelParam,
 		AlwaysConfirm: meta.AlwaysConfirm,
 	}
@@ -734,7 +736,11 @@ func (doc *specDocument) fields(obj *specSchema, prefix string, list bool) ([]Fi
 		case raw.AgentKeys != "":
 			for _, sub := range strings.Split(raw.AgentKeys, "|") {
 				if sub = strings.TrimSpace(sub); sub != "" {
-					out = append(out, Field{From: from + "." + sub, As: sub})
+					if strings.Contains(sub, ".") {
+						out = append(out, Field{From: from, MapKey: sub, As: sub})
+					} else {
+						out = append(out, Field{From: from + "." + sub, As: sub})
+					}
 				}
 			}
 		default:

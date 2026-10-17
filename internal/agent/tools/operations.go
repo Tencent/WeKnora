@@ -45,7 +45,13 @@ const findOperationsDescription = "" +
 	"inspecting knowledge bases and documents, diagnosing and retrying document parsing, " +
 	"deleting documents, checking Wiki health, creating and configuring agents, managing the " +
 	"workspace's models, MCP services and skills (adding, renaming, enabling, removing, installing a " +
-	"skill from a hub), and checking that they work (testing an MCP connection, trying a retrieval). " +
+	"skill from a hub), copying knowledge bases, editing or restoring document chunks, " +
+	"inspecting data sources and sync logs, pausing/resuming sync schedules, triggering syncs, " +
+	"configuring document parsing, chunking, OCR and generated questions, " +
+	"batch updating FAQ enabled/recommended states and tags, reading and refreshing saved MCP tool directories, " +
+	"managing saved web search providers and data source sync settings, checking connections and retrieval, " +
+	"reading current workspace/member/version information, and querying platform users, settings and runtime tasks " +
+	"as a system administrator. " +
 	"Returns each operation's id, risk and parameters. " +
 	"Call with no arguments to see every operation, or narrow with query (words matched " +
 	"against ids and summaries) or domain. Operation ids must come from this tool; never guess them. " +
@@ -71,6 +77,9 @@ func withheldReason(w operations.Withholding, access operations.Access) string {
 	switch {
 	case w.ReadOnly:
 		return "The user set the assistant to read-only; they can allow changes in the assistant settings."
+	case w.SystemAdmin:
+		return "Requires system administrator permission; " +
+			"workspace owner/admin roles and cross-workspace access do not grant it."
 	case w.Role != "":
 		return fmt.Sprintf("Needs the %s workspace role or above; the user is %s. "+
 			"A workspace admin can change their role.", w.Role, access.Role)
@@ -416,6 +425,12 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 	result := &types.ToolResult{Success: true, Output: string(out)}
 	if op.Risk.Mutates() {
 		result.Data = map[string]any{"data_change": operationDataChange(op, input.Params, projected)}
+	} else if op.ID == "knowledge_base.get_copy_progress" &&
+		(projected.Label("status") == "completed" || projected.Label("status") == "failed") {
+		// The destination is created by the worker, after the initial copy
+		// event. Refresh when its terminal state is observed, including a
+		// partial destination left by a failed job.
+		result.Data = map[string]any{"data_change": operationDataChange(op, input.Params, projected)}
 	}
 	return result, nil
 }
@@ -452,7 +467,10 @@ func operationDataChange(
 		}
 	}
 	area, action, _ := strings.Cut(op.ID, ".")
-	if action == "copy" || strings.HasPrefix(action, "create") {
+	if action == "copy" || action == "duplicate" || action == "get_copy_progress" || strings.HasPrefix(
+		action,
+		"create",
+	) {
 		for _, key := range []string{"knowledge_base_id", "knowledge_id", "agent_id"} {
 			add(key, projected.Label(key))
 		}
@@ -863,6 +881,56 @@ func mutationDetail(
 	if n, ok := rawInt(params, "version"); ok {
 		lines = append(lines, fmt.Sprintf("Version: %d", n))
 	}
+	if strings.HasPrefix(op.ID, "chunk.") {
+		if id, ok := rawString(params, "knowledge_id"); ok {
+			lines = append(lines, "Document: "+resolvedLabels(ctx, t, knowledgeLabels, []string{id}, identity))
+		}
+		for _, field := range []struct{ param, label string }{
+			{"revision", "Restore revision"}, {"expected_revision", "Current revision"},
+		} {
+			if n, ok := rawInt(params, field.param); ok {
+				lines = append(lines, fmt.Sprintf("%s: %d", field.label, n))
+			}
+		}
+		if enabled, ok := rawBool(params, "is_enabled"); ok {
+			lines = append(lines, fmt.Sprintf("Enabled: %t", enabled))
+		}
+	}
+	if op.ID == "knowledge_base.copy" {
+		lines = append(lines, "Copies content into a new knowledge base in the background.")
+	}
+	if op.ID == "knowledge_base.duplicate" {
+		lines = append(lines, "Copies settings only; the new knowledge base starts empty.")
+	}
+	if op.ID == "model.copy" {
+		lines = append(
+			lines,
+			"Copies the saved configuration and credentials on the backend. "+
+				"The copy is not the default and does not change existing model bindings. "+
+				"An unfinished local model will start a background download.",
+		)
+	}
+	if op.ID == "workspace.update" {
+		lines = append(
+			lines,
+			"Updates the current workspace profile for all its members. "+
+				"Quota, permissions and other settings stay unchanged.",
+		)
+	}
+	if op.ID == "mcp_service.refresh_metadata" {
+		lines = append(
+			lines,
+			"Connects to the MCP server and replaces the saved tool directory without executing tools. "+
+				"OAuth updates only your directory; shared directories require an administrator.",
+		)
+	}
+	if op.ID == "data_source.sync" {
+		lines = append(
+			lines,
+			"Uses the saved sync settings; may replace content and remove documents deleted upstream "+
+				"when deletion sync is enabled.",
+		)
+	}
 	if s, ok := rawString(params, "content"); ok && s != "" {
 		lines = append(lines, fmt.Sprintf("Content (%d characters): %s", len([]rune(s)), excerpt(s)))
 	}
@@ -874,6 +942,8 @@ func mutationDetail(
 		}
 	}
 	lines = append(lines, agentSettingsDetail(ctx, t, op, params, identity)...)
+	lines = append(lines, parsingAndFAQDetail(op, params)...)
+	lines = append(lines, syncAndSearchDetail(op, params)...)
 	lines = append(lines, serviceSettingsDetail(op, params)...)
 	return strings.Join(lines, "\n")
 }
@@ -940,6 +1010,30 @@ func agentSettingsDetail(
 	}
 	if s, ok := rawString(params, "system_prompt"); ok {
 		lines = append(lines, fmt.Sprintf("System prompt (%d characters): %s", len([]rune(s)), excerpt(s)))
+	}
+	if s, ok := rawString(params, "web_search_provider_id"); ok && strings.HasPrefix(op.ID, "agent.") {
+		if s == "" {
+			lines = append(lines, "Web search provider: workspace default")
+		} else {
+			lines = append(
+				lines,
+				"Web search provider: "+resolvedLabels(
+					ctx,
+					t,
+					labelSource{
+						"web_search_provider.get",
+						"web_search_provider_id",
+						[]string{
+							"name",
+						},
+					},
+					[]string{
+						s,
+					},
+					identity,
+				),
+			)
+		}
 	}
 	if s, ok := rawString(params, "model_id"); ok && s != "" {
 		lines = append(lines, "Model: "+resolvedLabels(ctx, t, modelLabels, []string{s}, identity))

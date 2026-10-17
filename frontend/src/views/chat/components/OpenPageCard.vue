@@ -1,36 +1,32 @@
 <template>
-  <div class="open-page-card" @click.stop @keydown.stop>
-    <button type="button" class="open-page-card__main" :disabled="!location" :title="actionLabel" @click="open">
+  <button type="button" class="open-page-card" :disabled="!location" :title="actionLabel" @click.stop="activate" @keydown.stop>
+    <span class="open-page-card__main">
       <span class="open-page-card__icon" aria-hidden="true"><t-icon :name="icon" size="18px" /></span>
       <span class="open-page-card__body">
         <span class="open-page-card__title">{{ link.detail || link.label }}</span>
-        <span v-if="meta" class="open-page-card__meta">
-          <t-icon v-if="link.navigated" name="check-circle-filled" class="open-page-card__opened" />{{ meta }}
-        </span>
+        <span v-if="meta" class="open-page-card__meta">{{ meta }}</span>
       </span>
       <span class="open-page-card__go">
-        <span v-if="draft" class="open-page-card__go-label">{{ actionLabel }}</span>
-        <t-icon name="chevron-right" size="16px" />
+        <t-icon v-if="canReturn" name="rollback" size="14px" aria-hidden="true" />
+        <span>{{ actionLabel }}</span>
+        <t-icon v-if="!canReturn" name="chevron-right" size="14px" aria-hidden="true" />
       </span>
-    </button>
-    <div v-if="link.note || endpoint || draft || returnPath" class="open-page-card__extra">
-      <p v-if="link.note" class="open-page-card__note">{{ link.note }}</p>
-      <div v-if="endpoint" class="open-page-card__endpoint">
+    </span>
+    <span v-if="link.note || endpoint || draft" class="open-page-card__extra">
+      <span v-if="link.note" class="open-page-card__note">{{ link.note }}</span>
+      <span v-if="endpoint" class="open-page-card__endpoint">
         <span class="open-page-card__endpoint-label">{{ t('agentStream.openPage.endpoint') }}</span>
         <code>{{ endpoint }}</code>
-      </div>
-      <div v-if="draft" class="open-page-card__hint">
+      </span>
+      <span v-if="draft" class="open-page-card__hint">
         <t-icon name="info-circle" />{{ t('agentStream.openPage.draftHint') }}
-      </div>
-      <button v-if="returnPath" type="button" class="open-page-card__back" @click="goBack">
-        <t-icon name="rollback" />{{ t('agentStream.openPage.back') }}
-      </button>
-    </div>
-  </div>
+      </span>
+    </span>
+  </button>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useAssistantStore } from '@/stores/assistant'
@@ -51,8 +47,20 @@ const assistant = useAssistantStore()
 const location = computed(() => pageLinkLocation(props.link))
 const draft = computed(() => pageLinkDraft(props.link))
 const endpoint = computed(() => pageLinkEndpoint(props.link))
-const returnPath = computed(() => pageLinkReturnPath(props.link))
-const actionLabel = computed(() => draft.value ? t('agentStream.openPage.openForm') : t('agentStream.openPage.open'))
+const openedFrom = ref('')
+const returnPath = computed(() => openedFrom.value || pageLinkReturnPath(props.link))
+const atTarget = computed(() => {
+  if (!location.value) return false
+  const target = router.resolve(location.value)
+  const current = router.currentRoute.value
+  return current.path === target.path
+    && Object.entries(target.query).every(([key, value]) => current.query[key] === value)
+})
+const canReturn = computed(() => atTarget.value && !!returnPath.value
+  && router.resolve(returnPath.value).fullPath !== router.currentRoute.value.fullPath)
+const actionLabel = computed(() => canReturn.value
+  ? t('agentStream.openPage.back')
+  : draft.value ? t('agentStream.openPage.openForm') : t('agentStream.openPage.open'))
 
 const meta = computed(() => {
   const parent = props.link.detail ? props.link.label : ''
@@ -66,7 +74,7 @@ const icon = computed(() => {
     case 'settings_models': return 'control-platform'
     case 'mcp_services': return 'tools'
     case 'wiki': return 'book-open'
-    case 'settings': return 'setting'
+    case 'settings': return props.link.section === 'system' ? 'info-circle' : 'setting-1'
     case 'toolbox': return 'tools'
     case 'agents': return 'robot'
     case 'organizations': return 'usergroup'
@@ -76,57 +84,53 @@ const icon = computed(() => {
 
 function open() {
   if (!location.value) return
+  if (!atTarget.value) openedFrom.value = router.currentRoute.value.fullPath
   assistant.setPageDraft(draft.value)
   void router.push(location.value)
 }
 
-function goBack() {
-  if (returnPath.value) void router.push(returnPath.value)
+function activate() {
+  if (canReturn.value) {
+    void router.push(returnPath.value)
+  } else {
+    open()
+  }
 }
+
 </script>
 
 <style lang="less" scoped>
 .open-page-card {
+  appearance: none;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
   width: 360px;
   max-width: 100%;
   margin-top: 8px;
+  padding: 0;
+  border: 1px solid var(--td-component-stroke);
   border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
-  cursor: default;
-}
-
-.open-page-card__main {
-  appearance: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-width: 0;
-  margin: 0;
-  padding: 8px 10px 8px 8px;
-  border: 0;
-  border-radius: inherit;
-  background: transparent;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
   font: inherit;
   text-align: left;
   color: inherit;
   cursor: pointer;
-  transition: background var(--app-motion-fast) ease;
+  transition: background var(--app-motion-fast) ease, border-color var(--app-motion-fast) ease;
 
   &:hover:not(:disabled) {
     background: var(--td-bg-color-secondarycontainer-hover);
+    border-color: var(--td-component-border);
 
     .open-page-card__go {
-      color: var(--td-text-color-secondary);
+      color: var(--td-text-color-primary);
     }
   }
 
   &:focus-visible {
     outline: 2px solid var(--td-brand-color-focus);
-    outline-offset: -2px;
+    outline-offset: 2px;
   }
 
   &:disabled {
@@ -138,16 +142,26 @@ function goBack() {
   }
 }
 
+.open-page-card__main {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+}
+
 .open-page-card__icon {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--app-radius-md);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-container);
-  color: var(--td-brand-color);
+  color: var(--td-text-color-secondary);
 }
 
 .open-page-card__body {
@@ -166,22 +180,16 @@ function goBack() {
 
 .open-page-card__title {
   color: var(--td-text-color-primary);
-  font-size: var(--app-text-md);
-  font-weight: 500;
-  line-height: 1.35;
+  font-size: var(--app-text-base, 14px);
+  font-weight: 600;
+  line-height: 1.5;
 }
 
 .open-page-card__meta {
   margin-top: 2px;
   color: var(--td-text-color-placeholder);
-  font-size: var(--app-text-sm);
-  line-height: 1.3;
-}
-
-.open-page-card__opened {
-  margin-right: 4px;
-  color: var(--td-success-color);
-  vertical-align: -2px;
+  font-size: var(--app-text-xs, 12px);
+  line-height: 1.5;
 }
 
 .open-page-card__go {
@@ -189,8 +197,9 @@ function goBack() {
   flex-shrink: 0;
   align-items: center;
   gap: 2px;
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
   font-size: var(--app-text-sm);
+  white-space: nowrap;
   transition: color var(--app-motion-fast) ease;
 }
 
@@ -199,7 +208,7 @@ function goBack() {
   flex-direction: column;
   align-items: flex-start;
   gap: 6px;
-  margin: 0 10px;
+  margin: 0 12px;
   padding: 8px 0 10px;
   border-top: 1px solid var(--td-component-stroke);
   font-size: var(--app-text-sm);
@@ -243,21 +252,4 @@ function goBack() {
   }
 }
 
-.open-page-card__back {
-  appearance: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  font: inherit;
-  color: var(--td-text-color-placeholder);
-  cursor: pointer;
-  transition: color var(--app-motion-fast) ease;
-
-  &:hover {
-    color: var(--td-text-color-secondary);
-  }
-}
 </style>

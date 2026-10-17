@@ -687,7 +687,7 @@ func (h *MCPServiceHandler) TestMCPService(c *gin.Context) {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"mcp_service.list_tools","risk":"read","max_items":200}
-// @x-agent-hint "Lists the tools an MCP service offers, asking the service itself. Use it to check that a service can do what an agent needs before binding it. An error means the service is unreachable; mcp_service.test says why."
+// @x-agent-hint "Lists the tools an MCP service offers, asking the service itself without saving a directory. Prefer mcp_service.get_metadata for ordinary directory queries; use this live query only when a current upstream check without saving is needed; to synchronize it use mcp_service.refresh_metadata. Use it to check that a service can do what an agent needs before binding it. An error means the service is unreachable; mcp_service.test says why."
 // @Router       /mcp-services/{id}/tools [get]
 func (h *MCPServiceHandler) GetMCPServiceTools(c *gin.Context) {
 	ctx := c.Request.Context()

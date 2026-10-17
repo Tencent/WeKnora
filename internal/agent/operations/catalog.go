@@ -106,6 +106,9 @@ func (p Param) wireKey() string {
 type Field struct {
 	// From is a dotted path inside the source object.
 	From string
+	// MapKey selects one literal key within From, including keys containing dots.
+	// Used for explicitly allow-listed keys of free-form maps.
+	MapKey string
 	// As is the output key; defaults to the last segment of From. Identifiers
 	// should be renamed to the canonical handle keys so the model-context
 	// policy turns them into handles.
@@ -172,6 +175,8 @@ type Operation struct {
 	// offered: the router still authorizes every call, and a router test
 	// keeps the two in step.
 	Role types.TenantRole
+	// SystemAdmin requires the independent platform administrator permission.
+	SystemAdmin bool
 	// AlwaysConfirm makes a write ask every time, whatever the access level
 	// and session grants: installing a skill runs fetched code as root in
 	// the image every later session boots, so it is never pre-approved.
@@ -193,6 +198,7 @@ type Access struct {
 	// is set, matching the router, which skips role checks otherwise.
 	Role        types.TenantRole
 	EnforceRole bool
+	SystemAdmin bool
 	// Level is the user's assistant access level.
 	Level types.AssistantAccessLevel
 }
@@ -218,7 +224,8 @@ func (a Access) NeedsApprovalFor(risk Risk) bool {
 // Withholding says why an access leaves an operation out.
 type Withholding struct {
 	// ReadOnly: the user set the assistant to read-only.
-	ReadOnly bool
+	ReadOnly    bool
+	SystemAdmin bool
 	// Role is the workspace role the operation needs when the caller's falls
 	// short.
 	Role types.TenantRole
@@ -231,7 +238,10 @@ func (c *Catalog) Withheld(a Access, op Operation) (Withholding, bool) {
 	if a.Level == types.AssistantAccessReadOnly && op.Risk.Mutates() {
 		return Withholding{ReadOnly: true}, true
 	}
-	if a.EnforceRole && !a.Role.HasPermission(op.Role) {
+	if op.SystemAdmin && !a.SystemAdmin {
+		return Withholding{SystemAdmin: true}, true
+	}
+	if !op.SystemAdmin && a.EnforceRole && !a.Role.HasPermission(op.Role) {
 		return Withholding{Role: op.Role}, true
 	}
 	if t := op.Target; t != nil {
@@ -339,8 +349,11 @@ var allowedRouteAreas = map[string]bool{
 	// Model and MCP responses carry endpoints and headers next to the
 	// names; only fields tagged x-agent are projected, so annotate the
 	// identifying ones and nothing else.
-	"models":       true,
-	"mcp-services": true,
+	"models":               true,
+	"mcp-services":         true,
+	"web-search-providers": true,
+	// Saved data sources: status, connection tests, sync settings and control.
+	"datasource": true,
 	// Sandbox configs hold provider credentials; see sandboxSkillsRoute.
 	"sandbox-configs": true,
 	// The caller's own conversations, read-only; see readOnlyRouteAreas.
@@ -355,6 +368,7 @@ var allowedRouteAreas = map[string]bool{
 var readOnlyRouteAreas = map[string]bool{
 	"sessions": true,
 	"messages": true,
+	"system":   true, // Only info and parser-engines are reachable; see parseRoute.
 }
 
 // forbiddenRouteSegments are refused anywhere inside an allowed area:
@@ -363,14 +377,15 @@ var readOnlyRouteAreas = map[string]bool{
 // conversation (its guidance, transcript and event stream) belongs to the
 // user watching it; the user handles these themselves.
 var forbiddenRouteSegments = map[string]bool{
-	"shares":         true,
-	"embed-channels": true,
-	"im-channels":    true,
-	"credentials":    true,
-	"oauth":          true,
-	"guidance":       true,
-	"transcript":     true,
-	"install-events": true,
+	"shares":               true,
+	"embed-channels":       true,
+	"im-channels":          true,
+	"credentials":          true,
+	"validate-credentials": true,
+	"oauth":                true,
+	"guidance":             true,
+	"transcript":           true,
+	"install-events":       true,
 }
 
 // sandboxSkillsRoute reports whether a route in the sandbox-configs area
@@ -540,8 +555,18 @@ func validateOperation(op Operation) error {
 	if err != nil {
 		return err
 	}
+	if systemAdminReadRoute(strings.TrimPrefix(op.Route, "/api/v1/")) != op.SystemAdmin {
+		return fmt.Errorf("route %q requires matching system_admin declaration", op.Route)
+	}
+	if op.SystemAdmin && (op.Risk != RiskRead || op.Method != http.MethodGet) {
+		return fmt.Errorf("system administrator operations must be read-only GET requests")
+	}
 	if readOnlyRouteAreas[area] && op.Risk.Mutates() {
 		return fmt.Errorf("route %q is in an area an agent may only read", op.Route)
+	}
+	if area == "tenants" && op.Method != http.MethodGet &&
+		(op.Route != "/api/v1/tenants/current" || op.Method != http.MethodPatch || op.Risk != RiskWrite) {
+		return fmt.Errorf("route %q only permits current workspace reads and profile patches", op.Route)
 	}
 
 	seenNames := map[string]bool{}
@@ -720,6 +745,17 @@ func (c *Catalog) validateRead(op Operation, id, label, item string, itemType Pa
 	return fmt.Errorf("target label %q is not a result field of %q", label, target.ID)
 }
 
+// systemAdminReadRoute is deliberately exact: no other platform routes are exposed.
+func systemAdminReadRoute(rest string) bool {
+	switch rest {
+	case "system/admin/list", "system/admin/users", "system/admin/settings-summary",
+		"system/admin/runtime/queues", "system/admin/runtime/queues/:queue/tasks":
+		return true
+	default:
+		return false
+	}
+}
+
 // parseRoute checks that route is a clean absolute path in an allowed area
 // under /api/v1, returning its parameter segment names and its area.
 func parseRoute(route string) (map[string]bool, string, error) {
@@ -729,7 +765,10 @@ func parseRoute(route string) (map[string]bool, string, error) {
 	}
 	rest := strings.TrimPrefix(route, base)
 	area, _, _ := strings.Cut(rest, "/")
-	if !allowedRouteAreas[area] || (area == "sandbox-configs" && !sandboxSkillsRoute(rest)) {
+	currentWorkspace := rest == "tenants/current" || rest == "tenants/current/members"
+	allowed := allowedRouteAreas[area] || rest == "system/parser-engines" || rest == "system/info" ||
+		currentWorkspace || systemAdminReadRoute(rest)
+	if !allowed || (area == "sandbox-configs" && !sandboxSkillsRoute(rest)) {
 		return nil, "", fmt.Errorf("route %q is outside the areas an agent may reach", route)
 	}
 	params := map[string]bool{}

@@ -48,7 +48,9 @@ async function fixture(
   workspaceConfig = { display_name: '', max_access_level: 'confirm' },
   api: Record<string, (...args: any[]) => Promise<any>> = {},
 ) {
-  const auth = vue.reactive({ user: { id: 'user-a' }, effectiveTenantId: 1 })
+  let workspaceRefreshes = 0
+  let workspaceChanged: (() => void) | undefined
+  const auth = vue.reactive({ user: { id: 'user-a' }, effectiveTenantId: 1, refreshFromAuthMe: async () => { workspaceRefreshes++; return true } })
   const assistantApi = evaluate(assistantApiScript, {
     '@/utils/request': { get: async () => ({ success: true, data: workspaceConfig }), put: assert.fail },
   })
@@ -94,7 +96,7 @@ async function fixture(
     '@/views/chat/index.vue': ChatView,
     '@/components/Input-field.vue': emptyComponent,
     '@/components/PanelResizeHandle.vue': emptyComponent,
-    './AssistantContextChip.vue': emptyComponent,
+    './AssistantContextMenu.vue': emptyComponent,
     './AssistantSelectionChip.vue': emptyComponent,
     './AssistantAccessPicker.vue': emptyComponent,
     '@/api/chat': {
@@ -110,6 +112,10 @@ async function fixture(
     '@/stores/menu': { useMenuStore: () => ({ updataMenuChildren: (entry: unknown) => menuEntries.push(entry) }) },
     '@/stores/auth': { useAuthStore: () => auth },
     '@/stores/assistant': stores,
+    '@/utils/assistantDataChange': { useAssistantDataChange: (callback: () => void, options: { areas: string[] }) => {
+      assert.deepEqual(Array.from(options.areas), ['workspace'])
+      workspaceChanged = callback
+    } },
     '@/components/sessionMutations': {
       SESSION_MUTATION_EVENT: 'session-mutation',
       removeSession: async (id: string) => {
@@ -162,7 +168,7 @@ async function fixture(
     await flush()
   }
   await flush()
-  return { auth, assistant, mounted, sent, menuEntries, sessionStorage, localStorage, findAll, click, listCalls, deleted, dialogs, errors, close: () => app.unmount() }
+  return { workspaceChanged: () => workspaceChanged?.(), workspaceRefreshes: () => workspaceRefreshes, auth, assistant, mounted, sent, menuEntries, sessionStorage, localStorage, findAll, click, listCalls, deleted, dialogs, errors, close: () => app.unmount() }
 }
 
 test('layout and width persist, with the width kept within bounds', async () => {
@@ -522,5 +528,16 @@ test('ask sends into the open conversation and starts one when there is none', a
     assert.equal(f.assistant.queuedMessage?.query, 'Second', 'the open conversation sends it')
     assert.equal(f.assistant.takeQueuedMessage()?.query, 'Second')
     assert.equal(f.assistant.queuedMessage, null)
+  } finally { f.close() }
+})
+
+ test('workspace changes refresh the shared profile and workspace selector even while the panel is hidden', async () => {
+  const f = await fixture()
+  try {
+    assert.equal(f.assistant.visible, false)
+    assert.equal(f.workspaceRefreshes(), 0)
+    f.workspaceChanged()
+    await flush()
+    assert.equal(f.workspaceRefreshes(), 1)
   } finally { f.close() }
 })

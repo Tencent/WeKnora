@@ -67,11 +67,13 @@
           :agent-id="BUILTIN_WEKNORA_ASSISTANT_ID" :embedded-mode="true" :initial-query="initialQuery"
           :host-scope="hostScope" :model-id="assistant.modelId" :default-model-id="defaultModelId"
           @update:model-id="assistant.setModel">
-          <template v-if="hasComposerChips" #composer-chips>
-            <AssistantContextChip />
-            <AssistantSelectionChip />
+          <template v-if="assistant.pageSelection" #composer-chips>
+            <div class="assistant-composer-context">
+              <AssistantSelectionChip />
+            </div>
           </template>
           <template #composer-controls>
+            <AssistantContextMenu />
             <AssistantAccessPicker />
           </template>
         </ChatView>
@@ -101,11 +103,13 @@
             <InputField ref="welcomeInput" :embedded-mode="true" compact :auto-focus="assistant.visible"
               :model-id="assistant.modelId" :default-model-id="defaultModelId" @update:model-id="assistant.setModel"
               @send-msg="(query) => startConversation(query)">
-              <template v-if="hasComposerChips" #chips>
-                <AssistantContextChip />
-                <AssistantSelectionChip />
+              <template v-if="assistant.pageSelection" #chips>
+                <div class="assistant-composer-context">
+                  <AssistantSelectionChip />
+                </div>
               </template>
               <template #controls>
+                <AssistantContextMenu />
                 <AssistantAccessPicker />
               </template>
             </InputField>
@@ -123,13 +127,14 @@ import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import ChatView from '@/views/chat/index.vue'
 import InputField from '@/components/Input-field.vue'
 import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
-import AssistantContextChip from './AssistantContextChip.vue'
+import AssistantContextMenu from './AssistantContextMenu.vue'
 import AssistantSelectionChip from './AssistantSelectionChip.vue'
 import AssistantAccessPicker from './AssistantAccessPicker.vue'
 import { createSessions, getSessionsList, getSession, type SessionSummary } from '@/api/chat'
 import { classifyDateBucket } from '@/components/sessionGrouping'
 import { BUILTIN_WEKNORA_ASSISTANT_ID } from '@/api/agent'
 import { useAuthStore } from '@/stores/auth'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import {
   ASSISTANT_PANEL_MAX_WIDTH,
   ASSISTANT_PANEL_MIN_WIDTH,
@@ -144,6 +149,7 @@ import type { PageContextPayload } from '@/api/chat/streame'
 const { t } = useI18n()
 const assistant = useAssistantStore()
 const auth = useAuthStore()
+useAssistantDataChange(() => { void auth.refreshFromAuthMe() }, { areas: ['workspace'] })
 const conversationOwner = computed(() => `${auth.user?.id}:${auth.effectiveTenantId}`)
 const assistantName = computed(() => assistant.displayName || t('assistant.title'))
 
@@ -220,9 +226,6 @@ const starters = computed(() => {
   if (c) return [t('assistant.starters.failedDocuments'), t('assistant.starters.recentActivity')]
   return [t('assistant.starters.agents'), t('assistant.starters.formats'), t('assistant.starters.createWiki')]
 })
-
-const hasComposerChips = computed(() =>
-  !!(assistant.pageContext || assistant.pageTitle || assistant.pageView || assistant.pageSelection))
 
 // The backend only honours a page context inside the run's search scope, so
 // the page's knowledge base travels with it.
@@ -477,6 +480,22 @@ onUnmounted(() => {
   }
 }
 
+.assistant-composer-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  flex: 0 0 100%;
+
+  :deep(.assistant-selection-chip) {
+    flex: 0 1 auto;
+    max-width: 100%;
+    height: 26px;
+  }
+}
+
 .assistant-panel__header {
   display: flex;
   align-items: center;
@@ -557,6 +576,11 @@ onUnmounted(() => {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+
+  // Align the assistant composer with the main conversation composer.
+  :deep(.input-container.is-embedded) {
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
 }
 
 .assistant-history {
@@ -683,7 +707,7 @@ onUnmounted(() => {
 // Same inset as the composer inside a conversation.
 .assistant-welcome-composer {
   flex-shrink: 0;
-  padding: 12px 16px 16px;
+  padding: 12px 16px max(8px, env(safe-area-inset-bottom));
 }
 </style>
 

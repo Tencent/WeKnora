@@ -152,3 +152,7 @@ func TestSharedAgentInfoLeavesCustomAgentName(t *testing.T) {
 	require.Equal(t, "Mine", info.Agent.Name)
 	require.Equal(t, "keep me", info.Agent.Description)
 }
+
+func (*sharedAgentWebSearchRepo) PatchSettings(context.Context, *types.WebSearchProviderEntity, []string) error {
+	panic("unexpected PatchSettings call")
+}

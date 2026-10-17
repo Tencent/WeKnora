@@ -1,25 +1,19 @@
 <template>
-  <t-tooltip v-if="segments.length" :content="tooltip" placement="top">
-    <span v-if="assistant.contextAttached" class="assistant-context-chip">
-      <t-icon :name="icon" class="assistant-context-chip__icon" />
-      <span class="assistant-context-chip__path">
-        <template v-for="(segment, index) in segments" :key="index">
-          <span v-if="index > 0" class="assistant-context-chip__sep" aria-hidden="true">/</span>
-          <span class="assistant-context-chip__segment" :class="{ 'is-leaf': index === segments.length - 1 }">
-            {{ segment }}
-          </span>
-        </template>
-      </span>
-      <span class="assistant-context-chip__remove" role="button" :aria-label="t('assistant.context.detach')"
-        @click.stop="assistant.dismissPageContext()">×</span>
-    </span>
-    <button v-else type="button" class="assistant-context-chip is-detached" @click="assistant.restorePageContext()">
-      <t-icon name="add" class="assistant-context-chip__icon" />
-      <span class="assistant-context-chip__path">
-        <span class="assistant-context-chip__segment is-leaf">{{ segments[segments.length - 1] }}</span>
-      </span>
+  <div class="assistant-context-chip" :class="{ 'is-detached': !assistant.contextAttached }">
+    <t-icon name="window" class="assistant-context-chip__icon" aria-hidden="true" />
+    <span class="assistant-context-chip__label">{{ t(segments.length && !assistant.contextAttached
+      ? 'assistant.context.detachedLabel' : 'assistant.context.currentPage') }}</span>
+    <span class="assistant-context-chip__sep" aria-hidden="true">·</span>
+    <t-tooltip :content="tooltip" placement="top">
+      <span class="assistant-context-chip__path">{{ segments.join(' / ') || '—' }}</span>
+    </t-tooltip>
+    <button v-if="segments.length" type="button" class="assistant-context-chip__toggle"
+      :aria-label="assistant.contextAttached ? t('assistant.context.detach') : tooltip"
+      :title="assistant.contextAttached ? t('assistant.context.detach') : tooltip"
+      @click.stop="assistant.contextAttached ? assistant.dismissPageContext() : assistant.restorePageContext()">
+      <t-icon :name="assistant.contextAttached ? 'close' : 'add'" size="12px" />
     </button>
-  </t-tooltip>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -31,19 +25,6 @@ const { t } = useI18n()
 const assistant = useAssistantStore()
 const context = computed(() => assistant.pageContext)
 const view = computed(() => assistant.pageView)
-
-const icon = computed(() => {
-  if (view.value) return 'edit-1'
-  const c = context.value
-  if (!c) return 'browse'
-  if (c.messageId) return 'chat-message'
-  if (c.modelId || c.page === 'settings_models') return 'control-platform'
-  if (c.mcpServiceId || c.page === 'mcp_services') return 'tools'
-  if (c.agentId) return 'robot'
-  if (c.wikiSlug) return 'book-open'
-  if (c.knowledgeId) return 'file'
-  return 'folder'
-})
 
 const segments = computed(() => {
   const base = pageSegments()
@@ -69,6 +50,7 @@ function pageSegments(): string[] {
 
 const tooltip = computed(() => {
   const path = segments.value.join(' / ')
+  if (!path) return t('assistant.context.currentPage')
   return assistant.contextAttached
     ? t('assistant.context.attachedTip', { path })
     : t('assistant.context.detachedTip', { path })
@@ -76,104 +58,71 @@ const tooltip = computed(() => {
 </script>
 
 <style lang="less" scoped>
-@import '@/components/css/chat-resource-chips.less';
-
 .assistant-context-chip {
-  .chat-resource-chip-surface();
-
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 5px;
-  min-height: 26px;
-  max-width: 100%;
+  gap: 6px;
+  flex: 1;
   min-width: 0;
-  padding: 3px 6px;
-  border-radius: var(--td-radius-medium);
+  height: 28px;
   box-sizing: border-box;
-  font-size: var(--app-text-sm);
-  font-weight: 500;
-  line-height: 18px;
-  transition: background var(--app-motion-fast), border-color var(--app-motion-fast);
-
-  &:hover {
-    .chat-resource-chip-hover();
-  }
-
-  &.is-detached {
-    border-style: dashed;
-    background: transparent;
-    box-shadow: none;
-    color: var(--td-text-color-secondary);
-    cursor: pointer;
-    font-family: inherit;
-  }
+  font-size: var(--app-text-sm, 13px);
+  line-height: 20px;
+  color: var(--td-text-color-secondary);
 }
 
 .assistant-context-chip__icon {
   flex-shrink: 0;
   font-size: var(--app-text-base);
-  color: var(--td-brand-color);
+  color: var(--td-text-color-placeholder);
+}
 
-  .is-detached & {
-    color: inherit;
-  }
+.assistant-context-chip__label {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .assistant-context-chip__path {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  flex: 1;
   min-width: 0;
-}
-
-.assistant-context-chip__segment {
-  min-width: 0;
-  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--td-text-color-secondary);
-  font-weight: 400;
+  color: var(--td-text-color-primary);
 
-  &.is-leaf {
-    flex-shrink: 0.5;
-    max-width: 240px;
-    color: inherit;
-    font-weight: 500;
+  .is-detached & {
+    color: var(--td-text-color-placeholder);
   }
 }
 
 .assistant-context-chip__sep {
   flex-shrink: 0;
   color: var(--td-text-color-placeholder);
-  font-weight: 400;
 }
 
-.assistant-context-chip__remove {
+.assistant-context-chip__toggle {
+  appearance: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
-  margin-left: 1px;
-  border-radius: 50%;
-  font-size: var(--app-text-base);
-  line-height: 1;
-  font-weight: 400;
-  cursor: pointer;
-  opacity: 0.5;
-  transition: opacity var(--app-motion-fast), background var(--app-motion-fast), color var(--app-motion-fast);
-  color: currentColor;
   flex-shrink: 0;
-
-  .assistant-context-chip:hover & {
-    opacity: 0.8;
-  }
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  cursor: pointer;
 
   &:hover {
-    opacity: 1;
-    background: var(--td-bg-color-component);
+    background: var(--td-bg-color-container-hover);
     color: var(--td-text-color-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color-focus);
+    outline-offset: 1px;
   }
 }
 </style>

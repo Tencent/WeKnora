@@ -195,27 +195,27 @@ func (c WorkerPoolConcurrency) UpstreamTotal() int {
 // pool) so the UI can group and explain the lanes without the frontend
 // hard-coding the topology.
 type QueueStat struct {
-	Name string `json:"name"`
+	Name string `json:"name" extensions:"x-agent"`
 	// Pool is the independent worker pool that drains this queue.
-	Pool string `json:"pool"`
+	Pool string `json:"pool" extensions:"x-agent"`
 	// Weight is the queue's scheduling weight inside its pool.
-	Weight int `json:"weight"`
+	Weight int `json:"weight" extensions:"x-agent"`
 	// Size is the total number of tasks in the queue (pending + active +
 	// scheduled + retry + aggregating + archived).
-	Size      int `json:"size"`
-	Pending   int `json:"pending"`
-	Active    int `json:"active"`
-	Scheduled int `json:"scheduled"`
-	Retry     int `json:"retry"`
-	Archived  int `json:"archived"`
-	Completed int `json:"completed"`
+	Size      int `json:"size" extensions:"x-agent"`
+	Pending   int `json:"pending" extensions:"x-agent"`
+	Active    int `json:"active" extensions:"x-agent"`
+	Scheduled int `json:"scheduled" extensions:"x-agent"`
+	Retry     int `json:"retry" extensions:"x-agent"`
+	Archived  int `json:"archived" extensions:"x-agent"`
+	Completed int `json:"completed" extensions:"x-agent"`
 	// Processed / Failed are today's counters (reset daily).
-	Processed int `json:"processed"`
-	Failed    int `json:"failed"`
+	Processed int `json:"processed" extensions:"x-agent"`
+	Failed    int `json:"failed" extensions:"x-agent"`
 	// Paused reports whether the queue is paused (tasks not consumed).
-	Paused bool `json:"paused"`
+	Paused bool `json:"paused" extensions:"x-agent"`
 	// LatencyMs is the age of the oldest pending task, in milliseconds.
-	LatencyMs int64 `json:"latency_ms"`
+	LatencyMs int64 `json:"latency_ms" extensions:"x-agent"`
 	// MemoryUsageBytes is the approximate Redis memory the queue occupies.
 	MemoryUsageBytes int64 `json:"memory_usage_bytes"`
 }
@@ -602,15 +602,15 @@ const (
 
 // KBCloneProgress represents the progress of a knowledge base clone task
 type KBCloneProgress struct {
-	TaskID    string            `json:"task_id"`
-	SourceID  string            `json:"source_id"`
-	TargetID  string            `json:"target_id"`
-	Status    KBCloneTaskStatus `json:"status"`
-	Progress  int               `json:"progress"`   // 0-100
-	Total     int               `json:"total"`      // 总知识数
-	Processed int               `json:"processed"`  // 已处理数
-	Message   string            `json:"message"`    // 状态消息
-	Error     string            `json:"error"`      // 错误信息
-	CreatedAt int64             `json:"created_at"` // 任务创建时间
-	UpdatedAt int64             `json:"updated_at"` // 最后更新时间
+	TaskID    string            `json:"task_id" extensions:"x-agent"`
+	SourceID  string            `json:"source_id" extensions:"x-agent=source_knowledge_base_id"`
+	TargetID  string            `json:"target_id" extensions:"x-agent=knowledge_base_id"`
+	Status    KBCloneTaskStatus `json:"status" extensions:"x-agent"`
+	Progress  int               `json:"progress" extensions:"x-agent"`  // 0-100
+	Total     int               `json:"total" extensions:"x-agent"`     // 总知识数
+	Processed int               `json:"processed" extensions:"x-agent"` // 已处理数
+	Message   string            `json:"message" extensions:"x-agent"`   // 状态消息
+	Error     string            `json:"error" extensions:"x-agent"`     // 错误信息
+	CreatedAt int64             `json:"created_at"`                     // 任务创建时间
+	UpdatedAt int64             `json:"updated_at"`                     // 最后更新时间
 }
