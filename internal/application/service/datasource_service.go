@@ -1401,7 +1401,11 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		}
 	}
 
-	// Case 1: content already fetched → build a FileHeader from bytes and call CreateKnowledgeFromFile
+	// Case 1: content already fetched → build a FileHeader from bytes and call
+	// the matching create path. A connector marks an item StoreWithoutIndexing
+	// when it decided (behind its own opt-in switch) that the bytes are worth
+	// keeping but cannot be parsed; that routes to the archived-entry path, which
+	// skips the parse dispatch. Everything else keeps the normal pipeline.
 	if len(item.Content) > 0 {
 		// Images ride inline as base64 data URIs; ProcessDocument's image
 		// resolver stores them on the file service and swaps in persistent
@@ -1410,25 +1414,39 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		if err != nil {
 			return isUpdate, fmt.Errorf("build file header: %w", err)
 		}
-		if _, err := s.knowledgeService.CreateKnowledgeFromFile(
-			ctx,
-			ds.KnowledgeBaseID,
-			fh,
-			metadata,
-			nil,           // use KB default for multimodal
-			item.FileName, // customFileName — must include extension for file-type validation
-			tagIDs,        // auto-tag from data source
-			channel,
-			nil,
-		); err != nil {
+		var createErr error
+		if item.StoreWithoutIndexing {
+			_, createErr = s.knowledgeService.CreateStoredKnowledgeFromFile(
+				ctx,
+				ds.KnowledgeBaseID,
+				fh,
+				metadata,
+				item.FileName, // customFileName — the extension is the archive's identity
+				tagIDs,        // auto-tag from data source
+				channel,
+			)
+		} else {
+			_, createErr = s.knowledgeService.CreateKnowledgeFromFile(
+				ctx,
+				ds.KnowledgeBaseID,
+				fh,
+				metadata,
+				nil,           // use KB default for multimodal
+				item.FileName, // customFileName — must include extension for file-type validation
+				tagIDs,        // auto-tag from data source
+				channel,
+				nil,
+			)
+		}
+		if createErr != nil {
 			var dupErr *types.DuplicateKnowledgeError
-			if errors.As(err, &dupErr) && dupIsSameNode(dupErr, item) {
+			if errors.As(createErr, &dupErr) && dupIsSameNode(dupErr, item) {
 				// Identical content is already present in the KB under THIS node's
 				// own external_id, so the parent effectively exists — reconcile the
 				// subtree so children removed from the doc do not linger.
 				s.sweepStaleSubtree(ctx, ds, item)
 			}
-			return isUpdate, err
+			return isUpdate, createErr
 		}
 		s.sweepStaleSubtree(ctx, ds, item)
 		return isUpdate, nil

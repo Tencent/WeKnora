@@ -5,6 +5,7 @@ import { formatFileSize } from '@/utils/files';
 import { formatReferenceSnippet } from '@/utils/referenceSources';
 import KnowledgeTagPopover from './KnowledgeTagPopover.vue';
 import DocumentFileIcon from './DocumentFileIcon.vue';
+import DocumentArchiveBadge from './DocumentArchiveBadge.vue';
 import DocumentActionMenu from './DocumentActionMenu.vue';
 import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
@@ -546,6 +547,9 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
           <t-icon name="stop-circle" />
           <span>{{ t('knowledgeBase.statusCancelled') }}</span>
         </div>
+        <div v-else-if="item.parse_status === 'stored'" class="card-analyze card-stored">
+          <DocumentArchiveBadge />
+        </div>
         <div v-else class="card-content-txt" :class="{ 'is-empty': !cardSummaries.get(item.id) }">
           {{ cardSummaries.get(item.id) || t('knowledgeBase.noDocumentSummary') }}
         </div>
@@ -855,6 +859,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
 .card-analyze.queued { color: var(--td-text-color-secondary); }
 .card-draft { color: var(--td-warning-color); }
 .card-cancelled { color: var(--td-text-color-placeholder); }
+.card-stored { color: var(--td-text-color-secondary); }
 .card-draft-tip { font-size: var(--app-text-xs); }
 .knowledge-card button:focus-visible {
   outline: 2px solid var(--app-focus-border);

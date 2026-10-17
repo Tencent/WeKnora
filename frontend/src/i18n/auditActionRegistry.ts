@@ -104,6 +104,7 @@ export const KB_ACTIVITY_DETAIL_VALUES = [
   'partial',
   'canceled',
   'failed',
+  'stored',
   'enqueue',
   'reuse_vectors',
   'reparse',

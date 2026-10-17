@@ -16,6 +16,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 const (
@@ -29,9 +30,11 @@ const (
 	// are small, while an uploaded document can be several megabytes.
 	downloadTimeout = 5 * time.Minute
 
-	// maxDocumentBytes bounds a single uploaded file transfer. DingTalk lists a
-	// "size" per node that does not match the stored object, so the cap is
-	// enforced on the transfer itself instead of on listing metadata.
+	// maxDocumentBytes bounds a single uploaded file transfer. The transfer cap
+	// stays authoritative because listing metadata is not always trustworthy,
+	// but an archived video whose listing already reports a fileSize beyond the
+	// cap is skipped up front: downloading it could only fail, and a skip says
+	// why instead of looking like a broken sync.
 	maxDocumentBytes = 64 << 20
 )
 
@@ -91,17 +94,63 @@ type node struct {
 	ModifiedTime      string `json:"modifiedTime"`
 	ModifiedTimestamp int64  `json:"modifiedTimestamp"`
 	HasChildren       bool   `json:"hasChildren"`
+	// FileSize is the stored object size in bytes, decoded from the listing's
+	// "size" field (the API does not call it fileSize — verified against a real
+	// node response). The wiki API omits it for some node types, so zero means
+	// unknown and must never be read as "empty".
+	FileSize int64 `json:"size"`
 }
 
 // binaryDocumentTypes maps the extension of an uploaded DingTalk file to the
 // MIME type WeKnora stores it under. Only formats WeKnora can parse are listed;
 // native ALIDOC files have their own online read APIs and are absent on
-// purpose, as are media files that would be pointless to index as text.
+// purpose, as are video files, which no WeKnora parser reads. Audio has its own
+// map because audio is transcribed rather than parsed.
 var binaryDocumentTypes = map[string]string{
 	"docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 	"pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 	"xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 	"pdf":  "application/pdf",
+}
+
+// audioContentTypes maps the audio containers a wiki node can carry to the MIME
+// type WeKnora stores them under. Audio is not skipped as "media": WeKnora
+// transcribes it through its ASR model, so the transcript is text the knowledge
+// base can index. aac is listed because DingTalk can list it, but it is absent
+// from WeKnora's shared import whitelist, which keeps it from being downloaded;
+// skipReason then names the format instead of claiming there is no read path.
+var audioContentTypes = map[string]string{
+	"mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/x-m4a",
+	"flac": "audio/flac", "ogg": "audio/ogg", "aac": "audio/aac",
+}
+
+// videoExtensions are the video containers this connector knows about. WeKnora
+// has no video parser, so a video is skipped by default; store_unindexed_media
+// can instead keep the bytes as an archive without indexing them. The list is
+// deliberately separate from audioContentTypes: a switch about video must never
+// change what happens to an audio file, and the two lists are allowed to move
+// independently.
+var videoExtensions = map[string]struct{}{
+	"mp4": {}, "mov": {}, "avi": {}, "mkv": {}, "flv": {}, "wmv": {}, "m4v": {}, "webm": {},
+}
+
+// isVideoExtension reports whether ext names a video container this connector
+// can archive. Audio extensions are absent on purpose.
+func isVideoExtension(ext string) bool {
+	_, ok := videoExtensions[strings.ToLower(strings.TrimSpace(ext))]
+	return ok
+}
+
+// isArchivedVideoFile reports whether the node is a video file this data source
+// asked to keep without indexing. Admission needs all three: the operator turned
+// store_unindexed_media on, the node is a downloadable FILE (otherwise there is
+// no body to keep), and its extension is a video container. Everything else
+// keeps whatever behaviour it had before the switch existed.
+func (n node) isArchivedVideoFile(settings documentSettings) bool {
+	if !settings.StoreUnindexedMedia || !strings.EqualFold(n.Type, "FILE") {
+		return false
+	}
+	return isVideoExtension(n.Extension)
 }
 
 func (n node) isFolder() bool {
@@ -117,14 +166,33 @@ func (n node) isOnlineDocument() bool {
 }
 
 // binaryContentType returns the MIME type of an uploaded file node. Uploaded
-// files are listed as DOCUMENT; ALIDOC covers DingTalk's own document family,
-// which is never downloaded as a file.
+// Office/PDF files are listed as DOCUMENT; ALIDOC covers DingTalk's own document
+// family, which is never downloaded as a file.
+//
+// Audio is recognised by its extension alone. The wiki API labels audio nodes
+// AUDIO, but the file suffix is what selects the parser during ingestion, so a
+// node reported under another category is still transcribed instead of being
+// silently dropped. The shared import whitelist has the final say: it is the
+// single source of truth for formats the ingest pipeline accepts, and it is
+// what keeps aac out.
 func (n node) binaryContentType() (string, bool) {
-	if !strings.EqualFold(n.Type, "FILE") || !strings.EqualFold(n.Category, "DOCUMENT") {
+	if !strings.EqualFold(n.Type, "FILE") {
 		return "", false
 	}
-	contentType, ok := binaryDocumentTypes[strings.ToLower(strings.TrimSpace(n.Extension))]
-	return contentType, ok
+	extension := strings.ToLower(strings.TrimSpace(n.Extension))
+	contentType, ok := audioContentTypes[extension]
+	if !ok {
+		if !strings.EqualFold(n.Category, "DOCUMENT") {
+			return "", false
+		}
+		if contentType, ok = binaryDocumentTypes[extension]; !ok {
+			return "", false
+		}
+	}
+	if !utils.IsSupportedImportExtension(extension) {
+		return "", false
+	}
+	return contentType, true
 }
 
 // isBinaryDocument reports whether the node is an uploaded file this connector
@@ -146,11 +214,34 @@ func (n node) isDocument() bool {
 // must exist and the switch guarding it must be on. Validate, the resource
 // picker and both sync modes select nodes through this one predicate, so a
 // switch that is off is off in every one of them.
+//
+// store_unindexed_media adds a fourth path — video files that are kept as
+// archives — without weakening the upload rule: an Office/PDF file still needs
+// include_uploaded_files even when the video switch is on. An archived video
+// whose listing already reports more than maxDocumentBytes is not ingestible:
+// the transfer could only fail, so it is reported as an oversized skip instead.
 func (n node) isIngestible(settings documentSettings) bool {
 	if n.isOnlineDocument() {
 		return true
 	}
-	return settings.IncludeUploadedFiles && n.isBinaryDocument()
+	if settings.IncludeUploadedFiles && n.isBinaryDocument() {
+		return true
+	}
+	return n.isArchivedVideoFile(settings) && !n.isOversized()
+}
+
+// isOversized reports whether the listing already reports a file larger than
+// this connector can transfer. A missing or zero fileSize means unknown, so the
+// node is still attempted and the transfer cap decides: absent metadata must
+// never pre-empt a download that might fit.
+func (n node) isOversized() bool {
+	return n.FileSize > maxDocumentBytes
+}
+
+// fileSizeMiB renders the reported size for the oversized skip log. The value
+// is only meaningful once isOversized is true, which guards every caller.
+func (n node) fileSizeMiB() int64 {
+	return n.FileSize >> 20
 }
 
 func (n node) title() string {

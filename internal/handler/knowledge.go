@@ -967,6 +967,10 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 		syntheticStatus = types.SpanStatusFailed
 	case types.ParseStatusCancelled:
 		syntheticStatus = types.SpanStatusCancelled
+	case types.ParseStatusStored:
+		// A stored-only row never had stages to run, so "skipped" is the
+		// honest synthesis: nothing is pending and nothing failed.
+		syntheticStatus = types.SpanStatusSkipped
 	}
 
 	// Synthesize root if no rows came back so the API contract stays
@@ -1053,7 +1057,7 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 // @Param        tag_ids       query     string  false  "标签ID筛选，逗号分隔（OR语义）"  extensions(x-agent)
 // @Param        keyword       query     string  false  "关键词搜索"  extensions(x-agent)
 // @Param        file_type     query     string  false  "文件类型筛选"  extensions(x-agent)
-// @Param parse_status query string false "状态" Enums(pending,processing,finalizing,completed,failed,cancelled,deleting)  extensions(x-agent)
+// @Param parse_status query string false "状态" Enums(pending,processing,finalizing,completed,failed,cancelled,deleting,stored)  extensions(x-agent)
 // @Param        source        query     string  false  "来源/渠道筛选 (web/api/feishu/notion/yuque/wechat/...，或 manual/url 按 type 过滤)"
 // @Param        start_time    query     string  false  "更新时间起点，RFC3339 格式"
 // @Param        end_time      query     string  false  "更新时间终点，RFC3339 格式"

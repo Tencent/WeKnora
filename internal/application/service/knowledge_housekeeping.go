@@ -74,8 +74,11 @@ var openSpanStatuses = []string{types.SpanStatusPending, types.SpanStatusRunning
 
 // terminalParseStatuses are knowledge states in which no pipeline can still be
 // advancing, so any open span left on the row is orphaned by definition.
+// ParseStatusStored belongs here: a stored-only row is written in its final
+// state and no task is ever dispatched for it.
 var terminalParseStatuses = []string{
 	types.ParseStatusCompleted, types.ParseStatusFailed, types.ParseStatusCancelled,
+	types.ParseStatusStored,
 }
 
 // terminalSpanMessage is the fallback explanation for a span Sweep D closes on
@@ -367,7 +370,10 @@ func (h *HousekeepingService) recoverStrandedPendingSummaries(ctx context.Contex
 	if err := h.db.WithContext(ctx).Select("id").
 		Where("summary_status = ? AND parse_status IN ? AND updated_at < ?",
 			types.SummaryStatusPending,
-			[]string{types.ParseStatusCompleted, types.ParseStatusFailed, types.ParseStatusCancelled},
+			[]string{
+				types.ParseStatusCompleted, types.ParseStatusFailed, types.ParseStatusCancelled,
+				types.ParseStatusStored,
+			},
 			cutoff).
 		Find(&rows).Error; err != nil {
 		logger.Warnf(ctx, "[Housekeeping] pending summary query failed: %v", err)

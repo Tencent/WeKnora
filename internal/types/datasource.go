@@ -337,6 +337,19 @@ type FetchedItem struct {
 	// Source resource ID (e.g., folder ID this document belongs to)
 	SourceResourceID string `json:"source_resource_id"`
 
+	// StoreWithoutIndexing, when set by a connector, asks ingestion to keep the
+	// bytes as an archive instead of a parsed document: the file is saved, a
+	// knowledge row is created with parse_status "stored", and no parse task is
+	// dispatched. The entry is visible, downloadable and (for media) playable,
+	// but produces no chunks and therefore never shows up in retrieval.
+	//
+	// Only a connector that has already established the content is worth
+	// keeping but cannot be parsed should set this, and it must gate the
+	// decision behind its own opt-in setting: the default for every data
+	// source is to skip such files exactly as before. It is deliberately not
+	// derived from Metadata, which a plain upload can forge.
+	StoreWithoutIndexing bool `json:"store_without_indexing,omitempty"`
+
 	// ReplacesSubtree, when true, tells ingestion to reconcile this item's
 	// sub-items: after the parent is (re)ingested, every existing knowledge item
 	// whose external_id starts with SubtreeChildPrefix(ExternalID) that is NOT

@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { formatFileSize } from '@/utils/files';
 import KnowledgeTagPopover from './KnowledgeTagPopover.vue';
 import DocumentFileIcon from './DocumentFileIcon.vue';
+import DocumentArchiveBadge from './DocumentArchiveBadge.vue';
 import DocumentActionMenu from './DocumentActionMenu.vue';
 import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue';
 import { shownStall } from '@/utils/knowledgeProcessingStall';
@@ -332,7 +333,10 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
         </div>
 
         <div class="cell cell-status" role="cell">
-          <template v-if="statusByRow.get(item.id) as StatusInfo | undefined">
+          <!-- An archived file is settled on purpose, not failed and not idle:
+              it gets its own neutral badge instead of a status from the map. -->
+          <DocumentArchiveBadge v-if="item.parse_status === 'stored'" />
+          <template v-else-if="statusByRow.get(item.id) as StatusInfo | undefined">
             <t-tag v-if="statusByRow.get(item.id)!.label !== '--'" size="small" :theme="statusByRow.get(item.id)!.theme"
               variant="light" class="row-status-tag" :class="`status-${statusByRow.get(item.id)!.theme}`"
               :title="statusByRow.get(item.id)!.hint">

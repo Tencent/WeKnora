@@ -23,13 +23,6 @@ const (
 	maxTraversalNodes = 1_000_000
 )
 
-// mediaExtensions are the file types this connector deliberately never
-// downloads: media carries no text WeKnora could index.
-var mediaExtensions = map[string]struct{}{
-	"mp4": {}, "mov": {}, "avi": {}, "mkv": {}, "flv": {}, "wmv": {}, "m4v": {}, "webm": {},
-	"mp3": {}, "wav": {}, "m4a": {}, "aac": {}, "flac": {},
-}
-
 // unsupportedDocumentExtensions names the native DingTalk document types the
 // wiki API lists but this connector has no ingest path for, so a skip can name
 // the concrete type instead of only saying the node is unsupported. The
@@ -42,20 +35,41 @@ var unsupportedDocumentExtensions = map[string]string{
 }
 
 // skipReason explains, in the words of the sync log, why a node the connector
-// just listed will not be ingested. Both answers are deterministic: retrying
-// the sync can never turn such a node into a document, which is what separates
-// a skip from a failed read that must be retried.
+// just listed will not be ingested. An empty answer means the node is ingested.
+// Both answers are deterministic: retrying the sync can never turn such a node
+// into a document, which is what separates a skip from a failed read that must
+// be retried.
 func skipReason(n node, settings documentSettings) string {
-	extension := strings.ToLower(strings.TrimSpace(n.Extension))
-	_, knownMediaExtension := mediaExtensions[extension]
-	if strings.EqualFold(n.Category, "VIDEO") || knownMediaExtension {
-		return "video/media files are deliberately not downloaded by this connector"
+	if n.isIngestible(settings) {
+		return ""
 	}
+	extension := strings.ToLower(strings.TrimSpace(n.Extension))
 	// An uploaded file this connector could read, but this data source was
 	// never told to. Naming the switch makes the skip actionable instead of
 	// looking like a missing feature.
 	if n.isBinaryDocument() && !settings.IncludeUploadedFiles {
 		return "uploaded files are not ingested because include_uploaded_files is not enabled for this data source"
+	}
+	// Audio is decided by its extension, never by the node category, so an
+	// audio node only reaches this branch when WeKnora cannot import the
+	// format: aac is not in the shared import whitelist the ASR pipeline uses.
+	if _, audio := audioContentTypes[extension]; audio {
+		return "audio files in this format are not supported by WeKnora's import whitelist" +
+			" and cannot be transcribed"
+	}
+	// The category is the label the wiki API documents for video; the extension
+	// catches a video node filed under another category. Audio was answered
+	// above, so neither check can hide an audio file.
+	if strings.EqualFold(n.Category, "VIDEO") || isVideoExtension(extension) {
+		// An archived video is normally ingested, so it reaches this branch
+		// only when the listing already reports a size this connector cannot
+		// transfer. Naming the actual size and the cap lets the operator shrink
+		// or split the file instead of reading a failed download.
+		if isVideoExtension(extension) && n.isArchivedVideoFile(settings) && n.isOversized() {
+			return fmt.Sprintf("video is %d MiB, over the %d MiB single-file transfer limit",
+				n.fileSizeMiB(), maxDocumentBytes>>20)
+		}
+		return "video files are deliberately not downloaded by this connector"
 	}
 	if label := unsupportedDocumentExtensions[extension]; label != "" {
 		return label + " has no ingest path in this connector yet"
@@ -770,7 +784,9 @@ func (c *Connector) sync(
 				continue
 			}
 
-			item, err := readDocument(ctx, api, scope.ResourceID, scope.Reference.WorkspaceID, document)
+			item, err := readDocument(
+				ctx, api, scope.ResourceID, scope.Reference.WorkspaceID, document, settings,
+			)
 			if err != nil {
 				if isContextError(err) {
 					return nil, nil, err
@@ -1141,13 +1157,17 @@ func warnUnknownBlockTypes(ctx context.Context, document node, rendered renderRe
 
 // readDocument turns one supported wiki node into a FetchedItem. Native adoc
 // documents are rendered from their blocks, and uploaded files are transferred
-// byte-for-byte so WeKnora's own parsers can read them.
+// byte-for-byte so WeKnora's own parsers can read them. A video admitted by
+// store_unindexed_media is transferred the same way but flagged as an archive:
+// ingestion keeps the bytes and skips the parse instead of failing on content
+// that was never parseable.
 func readDocument(
 	ctx context.Context,
 	api dingTalkAPI,
 	sourceResourceID string,
 	workspaceID string,
 	document node,
+	settings documentSettings,
 ) (types.FetchedItem, error) {
 	switch {
 	case document.isOnlineDocument():
@@ -1166,7 +1186,9 @@ func readDocument(
 		if err != nil {
 			return types.FetchedItem{}, err
 		}
-		return fetchedBinaryDocument(sourceResourceID, workspaceID, document, data), nil
+		return fetchedBinaryDocument(
+			sourceResourceID, workspaceID, document, data, document.isArchivedVideoFile(settings),
+		), nil
 	}
 }
 
@@ -1234,21 +1256,23 @@ func fetchedBinaryDocument(
 	workspaceID string,
 	document node,
 	data []byte,
+	storeWithoutIndexing bool,
 ) types.FetchedItem {
 	contentType, ok := document.binaryContentType()
 	if !ok {
 		contentType = "application/octet-stream"
 	}
 	return types.FetchedItem{
-		ExternalID:       document.ID,
-		Title:            document.title(),
-		Content:          data,
-		ContentType:      contentType,
-		FileName:         binaryDocumentFileName(document),
-		URL:              documentURL(document),
-		UpdatedAt:        document.modifiedAt(),
-		Metadata:         documentMetadata(workspaceID, document),
-		SourceResourceID: sourceResourceID,
+		ExternalID:           document.ID,
+		Title:                document.title(),
+		Content:              data,
+		ContentType:          contentType,
+		FileName:             binaryDocumentFileName(document),
+		URL:                  documentURL(document),
+		UpdatedAt:            document.modifiedAt(),
+		Metadata:             documentMetadata(workspaceID, document),
+		SourceResourceID:     sourceResourceID,
+		StoreWithoutIndexing: storeWithoutIndexing,
 	}
 }
 
