@@ -1358,7 +1358,12 @@ func (s *wikiIngestService) mapOneDocument(
 		return nil, nil, nil
 	}
 
-	chunks, err := s.chunkRepo.ListChunksByKnowledgeID(ctx, payload.TenantID, knowledgeID)
+	// Text chunks of a scanned PDF are image links. The readable prose lives on
+	// image_ocr chunks and is not always copied into image_info, so load those
+	// chunks too and append them when the enriched text is still empty.
+	chunks, err := s.chunkRepo.ListChunksByKnowledgeIDAndTypes(ctx, payload.TenantID, knowledgeID, []types.ChunkType{
+		types.ChunkTypeText, types.ChunkTypeImageOCR, types.ChunkTypeImageCaption,
+	})
 	if err != nil {
 		s.tracker().FailSpan(ctx, wikiSpan, "LIST_CHUNKS_FAILED", err.Error(), err)
 		return nil, nil, fmt.Errorf("get chunks: %w", err)
@@ -1369,7 +1374,10 @@ func (s *wikiIngestService) mapOneDocument(
 		return nil, nil, nil
 	}
 
-	content := reconstructEnrichedContent(ctx, s.chunkRepo, payload.TenantID, chunks)
+	content := appendScannedPageText(
+		reconstructEnrichedContent(ctx, s.chunkRepo, payload.TenantID, chunks),
+		chunks,
+	)
 	rawRuneCount := len([]rune(content))
 	if len([]rune(content)) > maxContentForWiki {
 		content = string([]rune(content)[:maxContentForWiki])

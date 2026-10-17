@@ -3183,6 +3183,33 @@ func reconstructEnrichedContent(
 	return searchutil.EnrichContentWithImageInfo(content, mergedImageInfo)
 }
 
+// appendScannedPageText adds OCR from pages whose parent text is only an
+// image link. reconstructEnrichedContent inlines image_info when that JSON
+// exists; scanned pages often keep the recognized text only on the image_ocr
+// chunk. OCR beside real prose is left out so an illustrated document is not
+// sent twice.
+func appendScannedPageText(content string, chunks []*types.Chunk) string {
+	if hasSufficientTextContent(content) {
+		return content
+	}
+	var b strings.Builder
+	b.WriteString(content)
+	for _, c := range selectGraphChunks(chunks) {
+		if c.ChunkType != types.ChunkTypeImageOCR {
+			continue
+		}
+		text := strings.TrimSpace(c.Content)
+		if text == "" || strings.Contains(content, text) {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(text)
+	}
+	return b.String()
+}
+
 // slugify creates a URL-friendly slug from a string
 func slugify(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))

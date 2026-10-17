@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -65,6 +66,41 @@ func TestSelectGraphChunks(t *testing.T) {
 		gotIDs[i] = c.ID
 	}
 	assert.Equal(t, []string{"ocr-scanned", "text-prose", "ocr-orphan"}, gotIDs)
+}
+
+func TestWikiIngestKeepsScannedPageOCR(t *testing.T) {
+	chunks := []*types.Chunk{
+		{ID: "text-link", ChunkType: types.ChunkTypeText, Content: "![page_1.jpg](resource://abc)"},
+		{
+			ID: "ocr-scanned", ChunkType: types.ChunkTypeImageOCR, ParentChunkID: "text-link",
+			Content: "第1章 総則 本标准规定了扫描件正文。",
+		},
+		{
+			ID: "cap-scanned", ChunkType: types.ChunkTypeImageCaption,
+			ParentChunkID: "text-link", Content: "a scanned page",
+		},
+		{ID: "text-prose", ChunkType: types.ChunkTypeText, Content: "Contract between Alice and Bob."},
+		{ID: "ocr-figure", ChunkType: types.ChunkTypeImageOCR, ParentChunkID: "text-prose", Content: "ACME logo"},
+	}
+
+	scanned := appendScannedPageText(
+		reconstructEnrichedContent(context.Background(), nil, 1, chunks[:3]),
+		chunks[:3],
+	)
+	if !strings.Contains(scanned, "第1章 総則") || strings.Contains(scanned, "a scanned page") {
+		t.Fatalf("scanned wiki content = %q", scanned)
+	}
+	if !hasSufficientTextContent(scanned) {
+		t.Fatal("scanned OCR should be enough text for wiki extraction")
+	}
+
+	prose := appendScannedPageText(
+		reconstructEnrichedContent(context.Background(), nil, 1, chunks[3:]),
+		chunks[3:],
+	)
+	if strings.Contains(prose, "ACME logo") {
+		t.Fatalf("figure OCR was appended beside real prose: %q", prose)
+	}
 }
 
 func TestKnowledgePostProcessGraphEnqueueSelection(t *testing.T) {
