@@ -68,7 +68,7 @@ export function getAgentToolIconName(
   if (toolName === 'run_operation') {
     return 'terminal'
   }
-  if (toolName === 'try_agent') {
+  if (['spawn_agent', 'list_agents', 'send_message', 'followup_task', 'interrupt_agent', 'wait_agent'].includes(toolName)) {
     return 'chat'
   }
   if (toolName === 'open_page') {

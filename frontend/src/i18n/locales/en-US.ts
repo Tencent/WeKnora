@@ -6461,6 +6461,9 @@ export default {
       expand: 'Expand'
     },
     toolApproval: {
+      title: 'Approval',
+      toolDescription: 'Tool description',
+      delegatedTask: 'Delegated task',
       waiting: 'Awaiting review · {target}',
       waitingStatus: 'Awaiting review',
       targetWithTool: '{service} › {tool}',
@@ -6482,6 +6485,7 @@ export default {
       parked: 'Waiting in the background — answer any time',
       parkedUntil: 'Waiting in the background — answer before {time}',
       abandonedTag: 'Abandoned',
+      canceledTag: 'Canceled',
       invalidJson: 'Arguments must be valid JSON',
       submitted: 'Submitted',
       submitFailed: 'Submit failed',
@@ -6591,13 +6595,45 @@ export default {
       databaseQuery: 'Database Query',
       findOperations: 'Find operations',
       runOperation: 'Run operation',
-      tryAgent: 'Try agent',
+      spawn_agent: 'Start agent',
+      list_agents: 'List agents',
+      send_message: 'Send message',
+      followup_task: 'Continue task',
+      interrupt_agent: 'Interrupt agent',
+      wait_agent: 'Wait for agent',
       openPage: 'Open page',
       searchWeKnoraDocs: 'Search product docs',
       readWeKnoraDoc: 'Read product doc',
       readPage: 'View page',
       selectTab: 'Select tab',
       fillPage: 'Fill page'
+    },
+    collaboration: {
+      tabs: 'Task tabs',
+      mainConversation: 'Main chat',
+      recentProgress: 'Recent progress',
+      waitFailed: 'Could not wait for task updates',
+      assignment: 'View assignment',
+      "title": "Tasks",
+      "unnamed": "Unnamed task",
+      "waiting": "Waiting for task updates…",
+      "status": {
+        "queued": "Queued",
+        "running": "Running",
+        "waiting": "Waiting for your input",
+        "succeeded": "Completed",
+        "failed": "Failed",
+        "interrupted": "Interrupted",
+        "cancelled": "Cancelled",
+        "needs_attention": "Needs attention",
+        "cancelling": "Cancelling",
+        "unknown": "Unknown status"
+      },
+      "phase": {
+        "tool_running": "Using tool",
+        "tool_succeeded": "Tool completed",
+        "tool_failed": "Tool failed"
+      }
     },
     pageAccess: {
       viewed: 'Viewed the current page: {location}'
@@ -7038,7 +7074,7 @@ export default {
       model: 'Select the LLM used by the agent',
       temperature: 'Control output randomness, 0 is most deterministic, 1 is most random',
       maxTokens: 'Maximum tokens for the model reply. Default is 2048. Custom values are saved as entered.',
-      maxTokensAgent: 'Maximum tokens generated in each reasoning round, including tool-call JSON. Default is 4096 without a sandbox, or 24576 when a sandbox can write or edit files. A custom value is saved as entered and is not changed later.',
+      maxTokensAgent: 'Maximum tokens generated in each reasoning round, including tool-call JSON. Defaults to 24576. A custom value is saved as entered.',
       thinking: 'Enable extended thinking capability (requires model support)',
       conversationSection: 'Configure multi-turn conversation and query rewriting parameters',
       conversationSectionAgent: 'Smart reasoning is always multi-turn. Earlier conversation is kept up to the model context window, and older turns are summarized automatically once it fills',

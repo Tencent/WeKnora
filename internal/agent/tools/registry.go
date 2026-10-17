@@ -16,6 +16,8 @@ import (
 
 // ToolRegistry manages the registration and retrieval of tools
 type ToolRegistry struct {
+	executionGuard    func(context.Context, types.Tool) error
+	mcpCallGuard      MCPCallGuard
 	tools             map[string]types.Tool
 	deferred          map[string]bool
 	mcpDirect         bool // Full exposure is an explicit compatibility path.
@@ -204,6 +206,11 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 	if err := ctx.Err(); err != nil {
 		return &types.ToolResult{Success: false, Error: err.Error()}, err
 	}
+	if r.executionGuard != nil {
+		if err := r.executionGuard(ctx, tool); err != nil {
+			return &types.ToolResult{Success: false, Error: err.Error()}, err
+		}
+	}
 	name := tool.Name()
 	// Cast parameters to match expected schema types before execution.
 	// This handles common LLM quirks like returning "true" instead of true.
@@ -248,6 +255,7 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 			maxOutput = toolLimit
 		}
 	}
+	ctx = withMCPCallGuard(ctx, r.mcpCallGuard)
 	result, execErr := executeRecovered(WithOutputBudget(ctx, maxOutput), tool, args)
 	if result == nil {
 		result = &types.ToolResult{Success: false, Error: "tool returned no result"}
@@ -323,4 +331,9 @@ func (r *ToolRegistry) Cleanup(ctx context.Context) {
 			cleanable.Cleanup(ctx)
 		}
 	}
+}
+
+// SetExecutionGuard installs a runtime authority fence before any direct or deferred tool.
+func (r *ToolRegistry) SetExecutionGuard(guard func(context.Context, types.Tool) error) {
+	r.executionGuard = guard
 }

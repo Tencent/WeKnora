@@ -1586,7 +1586,7 @@ export default {
       model: '에이전트가 사용할 대규모 언어 모델을 선택하세요',
       temperature: '출력의 무작위성을 제어합니다. 0이 가장 확정적, 1이 가장 무작위',
       maxTokens: '모델 응답의 최대 토큰 수. 「기본값」은 2048입니다. 「사용자 지정」은 입력한 값을 그대로 저장합니다.',
-      maxTokensAgent: '각 추론 라운드에서 생성할 최대 토큰 수(도구 호출 JSON 포함). 「기본값」은 샌드박스 없으면 4096, 파일 쓰기/편집이 가능하면 24576입니다. 「사용자 지정」은 입력한 값을 그대로 저장합니다.',
+      maxTokensAgent: '각 추론 라운드에서 생성할 최대 토큰 수(도구 호출 JSON 포함). 기본값은 24576입니다. 사용자 지정 값은 입력한 대로 저장됩니다.',
       thinking: '모델의 확장 사고 기능 활성화 (모델 지원 필요)',
       conversationSection: '다중 턴 대화 및 질문 재작성 관련 매개변수 설정',
       conversationSectionAgent: '스마트 추론은 항상 다중 턴입니다. 이전 대화는 모델의 컨텍스트 창 범위까지 유지되며, 초과하면 오래된 내용이 자동으로 요약됩니다',
@@ -1838,13 +1838,45 @@ export default {
       databaseQuery: '데이터베이스 조회',
       findOperations: '작업 찾기',
       runOperation: '작업 실행',
-      tryAgent: '에이전트 시험 실행',
+      spawn_agent: '에이전트 시작',
+      list_agents: '에이전트 목록',
+      send_message: '메시지 보내기',
+      followup_task: '작업 계속',
+      interrupt_agent: '에이전트 중단',
+      wait_agent: '에이전트 대기',
       openPage: '페이지 열기',
       searchWeKnoraDocs: '제품 문서 검색',
       readWeKnoraDoc: '제품 문서 읽기',
       readPage: '페이지 보기',
       selectTab: '탭 선택',
       fillPage: '페이지 입력'
+    },
+    collaboration: {
+      tabs: '작업 탭',
+      mainConversation: '기본 대화',
+      recentProgress: '최근 진행 상황',
+      waitFailed: '작업 업데이트 대기 실패',
+      assignment: '작업 내용 보기',
+      "title": "하위 작업",
+      "unnamed": "이름 없는 작업",
+      "waiting": "작업 업데이트 기다리는 중…",
+      "status": {
+        "queued": "대기 중",
+        "running": "진행 중",
+        "waiting": "입력 대기 중",
+        "succeeded": "완료",
+        "failed": "실패",
+        "interrupted": "중단됨",
+        "cancelled": "취소됨",
+        "needs_attention": "확인 필요",
+        "cancelling": "취소 중",
+        "unknown": "알 수 없음"
+      },
+      "phase": {
+        "tool_running": "도구 사용 중",
+        "tool_succeeded": "도구 완료",
+        "tool_failed": "도구 실패"
+      }
     },
     pageAccess: {
       viewed: '현재 페이지를 확인했습니다: {location}'
@@ -2133,6 +2165,9 @@ export default {
       expand: '펼치기'
     },
     toolApproval: {
+      title: '승인',
+      toolDescription: '도구 설명',
+      delegatedTask: '위임된 작업',
       waiting: '승인 대기 · {target}',
       waitingStatus: '승인 대기',
       targetWithTool: '{service} › {tool}',
@@ -2154,6 +2189,7 @@ export default {
       parked: '백그라운드에서 대기 중 — 나중에 처리할 수 있습니다',
       parkedUntil: '백그라운드에서 대기 중 — {time} 전에 처리하세요',
       abandonedTag: '포기됨',
+      canceledTag: '취소됨',
       invalidJson: '유효한 JSON이 아닙니다',
       submitted: '제출됨',
       submitFailed: '제출 실패',

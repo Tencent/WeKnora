@@ -6461,6 +6461,9 @@ export default {
       expand: '展開'
     },
     toolApproval: {
+      title: '承認',
+      toolDescription: 'ツールの説明',
+      delegatedTask: '委任されたタスク',
       waiting: '承認待ち · {target}',
       waitingStatus: '承認待ち',
       targetWithTool: '{service} › {tool}',
@@ -6482,6 +6485,7 @@ export default {
       parked: 'バックグラウンドで待機中。後で対応できます',
       parkedUntil: 'バックグラウンドで待機中。{time} までに対応してください',
       abandonedTag: '破棄済み',
+      canceledTag: 'キャンセル済み',
       invalidJson: '引数は有効なJSONである必要があります',
       submitted: '送信しました',
       submitFailed: '送信に失敗しました',
@@ -6591,13 +6595,45 @@ export default {
       databaseQuery: 'データベース照会',
       findOperations: '操作を検索',
       runOperation: '操作を実行',
-      tryAgent: 'エージェントを試す',
+      spawn_agent: 'エージェントを起動',
+      list_agents: 'エージェント一覧',
+      send_message: 'メッセージを送信',
+      followup_task: 'タスクを続行',
+      interrupt_agent: 'エージェントを中断',
+      wait_agent: 'エージェントを待機',
       openPage: 'ページを開く',
       searchWeKnoraDocs: '製品ドキュメントを検索',
       readWeKnoraDoc: '製品ドキュメントを読む',
       readPage: 'ページを確認',
       selectTab: 'タブを選択',
       fillPage: 'ページに入力'
+    },
+    collaboration: {
+      tabs: 'タスクタブ',
+      mainConversation: 'メインチャット',
+      recentProgress: '最近の進捗',
+      waitFailed: 'タスク更新の待機に失敗しました',
+      assignment: '担当内容を表示',
+      "title": "サブタスク",
+      "unnamed": "無名のタスク",
+      "waiting": "タスクの更新を待機中…",
+      "status": {
+        "queued": "待機中",
+        "running": "実行中",
+        "waiting": "入力待ち",
+        "succeeded": "完了",
+        "failed": "失敗",
+        "interrupted": "中断",
+        "cancelled": "キャンセル済み",
+        "needs_attention": "対応が必要",
+        "cancelling": "キャンセル中",
+        "unknown": "不明"
+      },
+      "phase": {
+        "tool_running": "ツールを使用中",
+        "tool_succeeded": "ツール完了",
+        "tool_failed": "ツール失敗"
+      }
     },
     pageAccess: {
       viewed: '現在のページを確認しました：{location}'
@@ -7038,7 +7074,7 @@ export default {
       model: 'エージェントが使用するLLMを選択します',
       temperature: '出力のランダム性を制御します。0が最も決定的、1が最もランダムです',
       maxTokens: 'モデルの応答の最大トークン数。デフォルトは2048です。カスタム値は入力したとおりに保存されます。',
-      maxTokensAgent: '推論の各ラウンドで生成される最大トークン数（ツール呼び出しのJSONを含む）。デフォルトは、サンドボックスなしの場合4096、サンドボックスがファイルの書き込みや編集を行える場合は24576です。カスタム値は入力したとおりに保存され、以降変更されません。',
+      maxTokensAgent: '推論の各ラウンドで生成される最大トークン数（ツール呼び出しのJSONを含む）。デフォルトは24576です。カスタム値は入力したとおりに保存されます。',
       thinking: '拡張思考機能を有効にします（モデルの対応が必要）',
       conversationSection: 'マルチターン会話とクエリのリライトに関するパラメータを設定します',
       conversationSectionAgent: 'スマート推論は常にマルチターンです。過去の会話はモデルのコンテキストウィンドウに収まる範囲で保持され、超えると古い部分が自動的に要約されます',

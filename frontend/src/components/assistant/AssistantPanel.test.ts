@@ -7,6 +7,7 @@ import { compileScript, parse } from '@vue/compiler-sfc'
 import * as vue from 'vue'
 import * as pinia from 'pinia'
 import ts from 'typescript'
+import * as childAgentTabs from '../../composables/useChildAgentTabs'
 
 const filename = fileURLToPath(new URL('./AssistantPanel.vue', import.meta.url))
 const { descriptor } = parse(readFileSync(filename, 'utf8'), { filename })
@@ -94,6 +95,8 @@ async function fixture(
       DialogPlugin: { confirm: (options: any) => { dialogs.push(options); return { destroy() {} } } },
     },
     '@/views/chat/index.vue': ChatView,
+    '@/views/chat/components/ChildAgentTabBar.vue': emptyComponent,
+    '@/composables/useChildAgentTabs': childAgentTabs,
     '@/components/Input-field.vue': emptyComponent,
     '@/components/PanelResizeHandle.vue': emptyComponent,
     './AssistantContextMenu.vue': emptyComponent,

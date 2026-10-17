@@ -279,6 +279,12 @@ func (c *Client) BuildRequestBody(messages []api.Message, opts *api.Options, str
 		// entries were system messages legitimately produces no turns.
 		converted = []message{}
 	}
+	// Anthropic has no in-sequence instruction role. Keep the marked runtime
+	// notice in a trailing input turn, after the existing cache breakpoint;
+	// never move transient recovery text into the stable system prefix.
+	if opts != nil && opts.RuntimeNotice != "" {
+		converted = append(converted, message{Role: "user", Content: opts.RuntimeNotice})
+	}
 	body["messages"] = converted
 
 	if plan.body != nil {

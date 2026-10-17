@@ -32,10 +32,8 @@ func AgentMaxContextTokens(configured, modelContextWindow int) int {
 }
 
 // DefaultSmartReasoningMaxCompletionTokens is the per-round budget when the
-// agent cannot emit write_sandbox_file / edit_sandbox_file. 4096 matches
-// typical OpenAI-compatible provider defaults and is enough for ordinary
-// tool-call JSON.
-const DefaultSmartReasoningMaxCompletionTokens = 4096
+// agent has no sandbox. Leave room for complete reports as well as tool calls.
+const DefaultSmartReasoningMaxCompletionTokens = 24576
 
 // DefaultAgentMaxCompletionTokens is the per-round budget when the agent
 // can write or edit sandbox files. Those tool calls carry the file body in
@@ -53,7 +51,7 @@ func NeedsSandboxWriteCompletionBudget(sandboxConfigID string) bool {
 }
 
 // DefaultMaxCompletionTokens is the unset-config default for one agent:
-// quick-answer 2048, smart-reasoning 4096, smart-reasoning with a sandbox 24576.
+// quick-answer 2048, smart-reasoning 24576 with or without a sandbox.
 func DefaultMaxCompletionTokens(agentMode, sandboxConfigID string) int {
 	if agentMode == AgentModeSmartReasoning {
 		if NeedsSandboxWriteCompletionBudget(sandboxConfigID) {
@@ -473,6 +471,9 @@ func IsPipelineToolCallID(id string) bool {
 type AgentStep struct {
 	Iteration int    `json:"iteration"` // Iteration number (0-indexed)
 	Thought   string `json:"thought"`   // LLM's reasoning/thinking (Think phase)
+	// Progress is user-facing commentary from a non-terminal round. Thought stays intact for model replay.
+	Progress        string `json:"progress,omitempty"`
+	ProgressEventID string `json:"progress_event_id,omitempty"`
 	// UserMessagesBefore records consumed steer rows in delivery order, before
 	// this model response. Unlike timestamps, this remains unambiguous on replay.
 	UserMessagesBefore []string `json:"user_messages_before,omitempty"`

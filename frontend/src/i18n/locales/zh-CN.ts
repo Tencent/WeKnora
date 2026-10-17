@@ -1588,7 +1588,7 @@ export default {
       model: '选择智能体使用的大语言模型',
       temperature: '控制输出的随机性，0 最确定，1 最随机',
       maxTokens: '模型生成回复的最大 Token 数。选「默认」时为 2048；选「自定义」后按你填的数保存。',
-      maxTokensAgent: '每一轮推理的最大生成 Token（含工具调用 JSON）。选「默认」时，未绑沙箱为 4096，绑了沙箱（可写/改文件）为 24576。选「自定义」后按你填的数保存，不再自动改。',
+      maxTokensAgent: '每一轮推理的最大生成 Token（含工具调用 JSON）。默认 24576。选「自定义」后按你填的数保存。',
       thinking: '启用模型的扩展思考能力（需要模型支持）',
       conversationSection: '配置多轮对话开关与问题改写开关（改写提示词见「提示词」）',
       conversationSectionAgent: '智能推理始终为多轮模式：按模型上下文窗口保留历史对话，超出时自动把较早的内容压缩成摘要。',
@@ -1840,13 +1840,45 @@ export default {
       databaseQuery: '数据库查询',
       findOperations: '查找操作',
       runOperation: '执行操作',
-      tryAgent: '试跑智能体',
+      spawn_agent: '启动智能体',
+      list_agents: '查看智能体',
+      send_message: '发送消息',
+      followup_task: '继续任务',
+      interrupt_agent: '中断智能体',
+      wait_agent: '等待智能体',
       openPage: '打开页面',
       searchWeKnoraDocs: '搜索产品文档',
       readWeKnoraDoc: '阅读产品文档',
       readPage: '查看当前页面',
       selectTab: '切换标签',
       fillPage: '填写页面'
+    },
+    collaboration: {
+      tabs: '任务标签页',
+      mainConversation: '主对话',
+      recentProgress: '最近进展',
+      waitFailed: '等待子任务更新失败',
+      assignment: '查看任务分工',
+      "title": "子任务",
+      "unnamed": "未命名任务",
+      "waiting": "等待子任务更新…",
+      "status": {
+        "queued": "排队中",
+        "running": "进行中",
+        "waiting": "等待你处理",
+        "succeeded": "已完成",
+        "failed": "失败",
+        "interrupted": "已中断",
+        "cancelled": "已取消",
+        "needs_attention": "需要处理",
+        "cancelling": "正在取消",
+        "unknown": "状态未知"
+      },
+      "phase": {
+        "tool_running": "正在使用工具",
+        "tool_succeeded": "工具已完成",
+        "tool_failed": "工具失败"
+      }
     },
     pageAccess: {
       viewed: '已查看当前页面：{location}'
@@ -2135,6 +2167,9 @@ export default {
       expand: '展开'
     },
     toolApproval: {
+      title: '人工审核',
+      toolDescription: '工具说明',
+      delegatedTask: '子任务',
       waiting: '等待审核 · {target}',
       waitingStatus: '等待审核',
       targetWithTool: '{service} › {tool}',
@@ -2156,6 +2191,7 @@ export default {
       parked: '已转入后台等待，可稍后处理',
       parkedUntil: '已转入后台等待，{time} 前可处理',
       abandonedTag: '已放弃',
+      canceledTag: '已取消',
       invalidJson: '参数不是合法 JSON',
       submitted: '已提交',
       submitFailed: '提交失败',

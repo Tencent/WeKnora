@@ -1,0 +1,216 @@
+package collaboration
+
+import (
+	"context"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// ParentWait is a replay-safe checkpoint. It exists only while the engine is
+// waiting, never while a model request or side-effecting tool is in flight.
+type ParentWait struct {
+	Snapshot []byte
+	After    int64
+	Until    time.Time
+}
+
+// SaveWait persists a replay-safe checkpoint for the current parent execution.
+func (b *Binding) SaveWait(ctx context.Context, snapshot []byte, until time.Time) error {
+	if b.Child != nil || b.ParentOwner == "" {
+		return nil
+	}
+	return b.Runtime.Store.Change(b.Context(ctx), b.Scope, func(g *Group) error {
+		if g.Status != "active" {
+			return ErrClosed
+		}
+		g.ParentWait = &ParentWait{Snapshot: snapshot, After: b.Seen, Until: until}
+		return nil
+	})
+}
+
+// ClearWait removes the owned parent checkpoint after the engine resumes.
+func (b *Binding) ClearWait(ctx context.Context) error {
+	if b.Child != nil || b.ParentOwner == "" {
+		return nil
+	}
+	return b.Runtime.Store.Change(b.Context(ctx), b.Scope, func(g *Group) error {
+		if g.Status != "active" {
+			return ErrClosed
+		}
+		g.ParentWait = nil
+		return nil
+	})
+}
+
+func (r *Runtime) wakeParent(ctx context.Context, scope Scope) {
+	if r.WakeParent == nil {
+		return
+	}
+	// Check durable input only for an abandoned safe checkpoint. The CAS below
+	// rechecks ownership and parent message, so a concurrent takeover wins.
+	inputReady := false
+	inputMessage := ""
+	if r.ParentInput != nil {
+		g, err := r.Store.Read(ctx, scope)
+		if err != nil {
+			return
+		}
+		if g.Status == "active" && g.ParentWait != nil && (g.ParentOwner == "" || time.Now().After(g.ParentLease)) {
+			inputMessage = g.ParentMessageID
+			inputReady, err = r.ParentInput(ctx, scope, inputMessage)
+			if err != nil {
+				return
+			}
+		}
+	}
+	var wait *ParentWait
+	owner := uuid.NewString()
+	err := r.Store.Change(ctx, scope, func(g *Group) error {
+		wait = nil
+		now := time.Now()
+		if g.Status != "active" || !now.Before(g.Deadline) || (g.ParentOwner != "" && now.Before(g.ParentLease)) {
+			return nil
+		}
+		if g.ParentWait == nil {
+			// There is no replay-safe point after a crash during inference or
+			// a tool call. Claim the abandoned turn only to close it explicitly;
+			// an empty snapshot must never execute the model or tools again.
+			if g.ParentOwner == "" || g.ParentMessageID == "" {
+				return nil
+			}
+			wait = &ParentWait{}
+			g.ParentOwner, g.ParentLease = owner, now.Add(r.Lease)
+			return nil
+		}
+		ready := !now.Before(g.ParentWait.Until) || (inputReady && g.ParentMessageID == inputMessage)
+		for _, e := range g.Events {
+			ready = ready || e.Sequence > g.ParentWait.After
+		}
+		if !ready {
+			return nil
+		}
+		wait = g.ParentWait
+		g.ParentOwner, g.ParentLease = owner, now.Add(r.Lease)
+		return nil
+	})
+	if err != nil || wait == nil {
+		return
+	}
+	r.workers.Add(1)
+	go func() {
+		defer r.workers.Done()
+		b := &Binding{Runtime: r, Scope: scope, ParentOwner: owner, WaitUntil: wait.Until, Seen: wait.After}
+		runCtx, stop := b.Start(ctx)
+		defer stop()
+		if err := r.WakeParent(WithBinding(runCtx, b), b, wait.Snapshot); err != nil && ctx.Err() == nil {
+			_ = r.Cancel(b.Context(context.WithoutCancel(ctx)), scope)
+		}
+	}()
+}
+
+// SetRunMessages and AwaitPrompt are fenced by the same child execution lease
+// as tool execution. Prompt ownership is registered before it reaches the UI.
+func (r *Runtime) SetRunMessages(ctx context.Context, w Work, userID, messageID string) error {
+	return r.changeWork(
+		ctx,
+		w,
+		func(_ *Group, v *Run) error { v.UserMessageID = userID; v.MessageID = messageID; return nil },
+	)
+}
+
+// AwaitPrompt registers a prompt under the current child execution lease.
+func (r *Runtime) AwaitPrompt(ctx context.Context, w Work, prompt PromptState) error {
+	return r.changeWork(ctx, w, func(_ *Group, v *Run) error { v.PromptID, v.Prompt = prompt.ID, &prompt; return nil })
+}
+
+func (r *Runtime) changeWork(ctx context.Context, w Work, fn func(*Group, *Run) error) error {
+	return r.Store.Change(ctx, w.Scope, func(g *Group) error {
+		m, err := member(g, w.Member.ID)
+		if err != nil {
+			return err
+		}
+		v := current(m)
+		if g.Status != "active" || v.ID != w.Run.ID || v.State != "running" || v.Owner != w.Run.Owner ||
+			v.CancelRequested ||
+			!time.Now().Before(v.Lease) {
+			return ErrConflict
+		}
+		return fn(g, v)
+	})
+}
+
+// ReconcilePrompt is called with broker state read outside the CAS callback.
+// An executing/done prompt can never be replayed, even after a process dies.
+func (r *Runtime) ReconcilePrompt(ctx context.Context, w Work, prompt PromptState) error {
+	return r.Store.Change(ctx, w.Scope, func(g *Group) error {
+		m, err := member(g, w.Member.ID)
+		if err != nil {
+			return err
+		}
+		v := current(m)
+		if v.ID != w.Run.ID || v.PromptID != w.Run.PromptID || v.PromptID == "" || prompt.ID != v.PromptID {
+			return nil
+		}
+		if v.State != "waiting" && (v.State != "running" || !time.Now().After(v.Lease)) {
+			return nil
+		}
+		if g.Status != "active" || v.CancelRequested {
+			v.State = "cancelled"
+			publish(g, m, v)
+			settle(g)
+			return nil
+		}
+		v.Prompt = &prompt
+		switch prompt.Status {
+		case "pending", "suspended":
+			if v.State != "waiting" {
+				publishPromptState(g, m, v, "waiting")
+			}
+			v.State = "waiting"
+			v.Owner = ""
+		case "answered":
+			v.State = "queued"
+			v.Owner = ""
+			publishPromptState(g, m, v, "resumed")
+		default:
+			v.State = "needs_attention"
+			v.Result.Error = "child prompt closed or execution outcome uncertain; not replayed"
+			publish(g, m, v)
+		}
+		return nil
+	})
+}
+
+// ClearCanceledPrompt removes a canceled run’s prompt after the broker closes it.
+func (r *Runtime) ClearCanceledPrompt(ctx context.Context, w Work) error {
+	return r.Store.Change(ctx, w.Scope, func(g *Group) error {
+		m, err := member(g, w.Member.ID)
+		if err != nil {
+			return err
+		}
+		var v *Run
+		for _, candidate := range m.Runs {
+			if candidate.ID == w.Run.ID {
+				v = candidate
+				break
+			}
+		}
+		if v == nil || v.PromptID != w.Run.PromptID || (g.Status == "active" && !v.CancelRequested) {
+			return nil
+		}
+		v.PromptID = ""
+		v.Prompt = nil
+		settle(g)
+		return nil
+	})
+}
+
+// RecordProgress coalesces telemetry without adding mailbox events or waking a
+// model on each tool. Old workers and canceled turns cannot publish late updates.
+func (r *Runtime) RecordProgress(ctx context.Context, w Work, p Progress) error {
+	p.ToolName = truncate(p.ToolName, 128)
+	p.ToolCallID = truncate(p.ToolCallID, 128)
+	p.UpdatedAt = time.Now()
+	return r.changeWork(ctx, w, func(_ *Group, v *Run) error { v.Progress = &p; return nil })
+}

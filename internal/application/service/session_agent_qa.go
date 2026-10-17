@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	"github.com/Tencent/WeKnora/internal/agent/collaboration"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -27,6 +28,15 @@ func (s *sessionService) AgentQA(
 	eventBus *event.EventBus,
 ) error {
 	sessionID := req.Session.ID
+	if req.Session.Kind == types.SessionKindAgentDelegated {
+		b := collaboration.FromContext(ctx)
+		if b == nil || b.Child == nil || b.Child.Member.SessionID != sessionID {
+			return errors.New("delegated conversations require a scheduler-owned execution")
+		}
+		if err := b.Runtime.CheckOwner(ctx, *b.Child); err != nil {
+			return err
+		}
+	}
 	// Propagate the session ID so stateful sandbox backends (CubeSandbox) can
 	// bind script execution to a per-session MicroVM instance.
 	ctx = types.WithSessionID(ctx, sessionID)
@@ -284,7 +294,11 @@ func (s *sessionService) AgentQA(
 	}
 
 	engine.SetInteractive(req.Interactive)
-	if req.Suspendable && s.cfg != nil && s.cfg.Agent.PromptSuspend() {
+	collaborating := false
+	if bound, ok := engine.(interface{ HasCollaboration() bool }); ok {
+		collaborating = bound.HasCollaboration()
+	}
+	if req.Suspendable && ((s.cfg != nil && s.cfg.Agent.PromptSuspend()) || collaborating) {
 		if request, err := json.Marshal(resumableAgentRequest(ctx, req)); err != nil {
 			logger.Warnf(ctx, "Run cannot be suspended, encoding its request failed: %v", err)
 		} else {

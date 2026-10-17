@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/hitl"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -165,6 +166,9 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 			Error:   fmt.Sprintf("Failed to parse args: %v", err),
 		}, err
 	}
+	if result, err := checkMCPCallGuard(ctx, t.service.ID, t.mcpTool.Name, args); result != nil || err != nil {
+		return result, err
+	}
 
 	// The post-approval ctx is derived from ApprovalCtx, which does not carry
 	// the exec metadata; read it once here so the OAuth prompt still works
@@ -317,6 +321,9 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 			}()
 		}
 
+		if err := hitl.CheckDelegation(callCtx); err != nil {
+			return nil, err
+		}
 		result, err := client.CallTool(callCtx, t.mcpTool.Name, input)
 		if err != nil && !isStdio && callCtx.Err() == nil && mcp.IsToolCallRetrySafe(err) {
 			logger.GetLogger(callCtx).Warnf("MCP tool call failed, retrying with fresh connection: %v", err)
@@ -326,6 +333,9 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 				callCtx, t.mcpManager, t.service, t.gate, oauthSess, t.mcpTool.Name, toolCallID,
 			)
 			if err != nil {
+				return nil, err
+			}
+			if err := hitl.CheckDelegation(callCtx); err != nil {
 				return nil, err
 			}
 			result, err = client.CallTool(callCtx, t.mcpTool.Name, input)

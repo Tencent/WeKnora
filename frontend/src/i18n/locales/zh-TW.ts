@@ -1588,7 +1588,7 @@ export default {
       model: '選擇智慧代理使用的大型語言模型',
       temperature: '控制輸出的隨機性，0 最確定，1 最隨機',
       maxTokens: '模型生成回覆的最大 Token 數。選「預設」時為 2048；選「自定義」後按你填的數儲存。',
-      maxTokensAgent: '每一輪推論的最大生成 Token（含工具呼叫 JSON）。選「預設」時，未綁沙箱為 4096，綁了沙箱（可寫/改檔案）為 24576。選「自定義」後按你填的數儲存，不再自動改。',
+      maxTokensAgent: '每一輪推論的最大生成 Token（含工具呼叫 JSON）。預設為 24576。選「自訂」後按你填的數儲存。',
       thinking: '啟用模型的擴展思考能力（需要模型支持）',
       conversationSection: '設定多輪對話開關與問題改寫開關（改寫提示語見「提示語」）',
       conversationSectionAgent: '智慧推論始終為多輪模式：按模型脈絡視窗保留歷史對話，超出時自動把較早的內容壓縮成摘要。',
@@ -1840,13 +1840,45 @@ export default {
       databaseQuery: '資料庫查詢',
       findOperations: '查找操作',
       runOperation: '執行操作',
-      tryAgent: '試跑智能體',
+      spawn_agent: '啟動智慧體',
+      list_agents: '查看智慧體',
+      send_message: '傳送訊息',
+      followup_task: '繼續任務',
+      interrupt_agent: '中斷智慧體',
+      wait_agent: '等待智慧體',
       openPage: '開啟頁面',
       searchWeKnoraDocs: '搜尋產品文件',
       readWeKnoraDoc: '閱讀產品文件',
       readPage: '查看目前頁面',
       selectTab: '切換標籤',
       fillPage: '填寫頁面'
+    },
+    collaboration: {
+      tabs: '任務分頁',
+      mainConversation: '主對話',
+      recentProgress: '最近進展',
+      waitFailed: '等待子任務更新失敗',
+      assignment: '查看任務分工',
+      "title": "子任務",
+      "unnamed": "未命名任務",
+      "waiting": "等待子任務更新…",
+      "status": {
+        "queued": "排隊中",
+        "running": "進行中",
+        "waiting": "等待你處理",
+        "succeeded": "已完成",
+        "failed": "失敗",
+        "interrupted": "已中斷",
+        "cancelled": "已取消",
+        "needs_attention": "需要處理",
+        "cancelling": "正在取消",
+        "unknown": "狀態未知"
+      },
+      "phase": {
+        "tool_running": "正在使用工具",
+        "tool_succeeded": "工具已完成",
+        "tool_failed": "工具失敗"
+      }
     },
     pageAccess: {
       viewed: '已查看目前頁面：{location}'
@@ -2135,6 +2167,9 @@ export default {
       expand: '展開'
     },
     toolApproval: {
+      title: '人工審核',
+      toolDescription: '工具說明',
+      delegatedTask: '子任務',
       waiting: '等待審核 · {target}',
       waitingStatus: '等待審核',
       targetWithTool: '{service} › {tool}',
@@ -2156,6 +2191,7 @@ export default {
       parked: '已轉入背景等待，可稍後處理',
       parkedUntil: '已轉入背景等待，{time} 前可處理',
       abandonedTag: '已放棄',
+      canceledTag: '已取消',
       invalidJson: '參數不是合法 JSON',
       submitted: '已提交',
       submitFailed: '提交失敗',

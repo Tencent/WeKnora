@@ -165,6 +165,13 @@ type AgentThoughtData struct {
 	Done      bool   `json:"done"`
 }
 
+// AgentProgressData is a complete user-facing update, separate from reasoning.
+// ID identifies the update across stream replay; Content is a snapshot, not a delta.
+type AgentProgressData struct {
+	Content   string `json:"content"`
+	Iteration int    `json:"iteration"`
+}
+
 // AgentToolCallData represents agent tool call notification data
 type AgentToolCallData struct {
 	ToolCallID string         `json:"tool_call_id"` // Tool call ID for tracking
@@ -201,6 +208,8 @@ type MemoryRecalledData struct {
 
 // AgentFinalAnswerData represents final answer streaming data
 type AgentFinalAnswerData struct {
+	// Replace retracts only this event ID after explicit provider protocol evidence.
+	Replace    bool   `json:"replace,omitempty"`
 	Content    string `json:"content"`
 	Done       bool   `json:"done"`
 	IsFallback bool   `json:"is_fallback,omitempty"` // True when response is a fallback (no knowledge base match)

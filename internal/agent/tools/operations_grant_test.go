@@ -117,15 +117,9 @@ func TestConfirmedToolOffersGrantsOnlyForRecoverableChanges(t *testing.T) {
 	}
 	_, err = NewConfirmedTool(del, operations.RiskDestructive, access, gate).Execute(ctx, json.RawMessage(`{}`))
 	require.NoError(t, err)
-	trial := NewTryAgentTool(&fakeTrialRunner{trial: &AgentTrial{}})
-	_, err = NewConfirmedTool(trial, operations.RiskWrite, access, gate).Execute(ctx,
-		json.RawMessage(`{"agent_id":"a1","question":"q"}`))
-	require.NoError(t, err)
 
-	require.Len(t, gate.requests, 3)
+	require.Len(t, gate.requests, 2)
 	assert.Equal(t, ToolWikiReplaceText+" knowledge_base:kb1,kb2", gate.requests[0].Grant)
 	assert.Equal(t, "Edit Wiki page text", gate.requests[0].GrantScope)
 	assert.Empty(t, gate.requests[1].Grant, "a deletion always asks")
-	assert.Equal(t, ToolTryAgent+" agent:a1", gate.requests[2].Grant)
-	assert.Equal(t, `Try agent "Support bot"`, gate.requests[2].GrantScope)
 }
