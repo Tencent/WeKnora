@@ -66,7 +66,12 @@ func runThinkingPipeline(t *testing.T, attrsEnabled bool, params map[string]any)
 		t.Fatalf("no pipeline registered for attrsEnabled=%v", attrsEnabled)
 	}
 	r := &runContext{
-		payload:    payload,
+		payload: payload,
+		// The pipeline id is what namespaces every param lookup; leaving it
+		// empty would make the run read bare keys nothing writes and fall back
+		// to the declared defaults, so a test about a stored switch would be
+		// asserting that the default is off.
+		pipelineID: string(pipeline.ID()),
 		params:     params,
 		declared:   pipeline.Fields(),
 		model:      model,
@@ -88,8 +93,8 @@ func runThinkingPipeline(t *testing.T, attrsEnabled bool, params map[string]any)
 // thinking is off unless somebody asked for it, per action.
 func TestThinkingDefaultsToOff(t *testing.T) {
 	r, model := runThinkingPipeline(t, false, map[string]any{
-		captionFieldKeyEnableCaption: true,
-		captionFieldKeyEnableOCR:     true,
+		manualCaptionKey: true,
+		manualOCRKey:     true,
 	})
 	if len(model.calls) != 2 {
 		t.Fatalf("VLM calls = %d (%v), want 2", len(model.calls), model.calls)
@@ -101,11 +106,11 @@ func TestThinkingDefaultsToOff(t *testing.T) {
 	}
 	// The switch is recorded in the trace too, so a reader of a run can tell
 	// which mode produced a chunk.
-	if got := r.out[imageFieldKeyCaptionThinking]; got != false {
-		t.Errorf(`out[%q] = %v, want false`, imageFieldKeyCaptionThinking, got)
+	if got := r.out[captionThinkingField.Key]; got != false {
+		t.Errorf(`out[%q] = %v, want false`, captionThinkingField.Key, got)
 	}
-	if got := r.out[imageFieldKeyOCRThinking]; got != false {
-		t.Errorf(`out[%q] = %v, want false`, imageFieldKeyOCRThinking, got)
+	if got := r.out[ocrThinkingField.Key]; got != false {
+		t.Errorf(`out[%q] = %v, want false`, ocrThinkingField.Key, got)
 	}
 }
 
@@ -114,9 +119,9 @@ func TestThinkingDefaultsToOff(t *testing.T) {
 // the model, and the switch is honoured for exactly the action that asked.
 func TestThinkingFollowsTheStoredSwitch(t *testing.T) {
 	r, model := runThinkingPipeline(t, false, map[string]any{
-		captionFieldKeyEnableCaption: true,
-		captionFieldKeyEnableOCR:     true,
-		imageFieldKeyCaptionThinking: true,
+		manualCaptionKey:      true,
+		manualOCRKey:          true,
+		manualCaptionThinkKey: true,
 	})
 	if len(model.calls) != 2 {
 		t.Fatalf("VLM calls = %d (%v), want 2", len(model.calls), model.calls)
@@ -127,45 +132,45 @@ func TestThinkingFollowsTheStoredSwitch(t *testing.T) {
 	if model.calls[1].thinking {
 		t.Errorf("OCR ran with thinking on; the switch is per action, and only caption asked")
 	}
-	if got := r.out[imageFieldKeyCaptionThinking]; got != true {
-		t.Errorf(`out[%q] = %v, want true`, imageFieldKeyCaptionThinking, got)
+	if got := r.out[captionThinkingField.Key]; got != true {
+		t.Errorf(`out[%q] = %v, want true`, captionThinkingField.Key, got)
 	}
-	if got := r.out[imageFieldKeyOCRThinking]; got != false {
-		t.Errorf(`out[%q] = %v, want false`, imageFieldKeyOCRThinking, got)
+	if got := r.out[ocrThinkingField.Key]; got != false {
+		t.Errorf(`out[%q] = %v, want false`, ocrThinkingField.Key, got)
 	}
 }
 
 // TestObservationPipelineThinkingKeys pins that the thinking switches are
-// ACTION-level keys shared with the default pipeline: caption.thinking /
-// ocr.thinking drive the calls, the pre-unification private keys
-// (describe_thinking / text_thinking) are stale and ignored, and the trace
-// records the same action keys.
+// ACTION-level keys this pipeline carries the same way the default one does:
+// observation.thinking_enabled / ocr.thinking_enabled drive the calls, the
+// pre-unification private keys (describe_thinking / text_thinking) are stale and
+// ignored, and the trace records the same action keys.
 func TestObservationPipelineThinkingKeys(t *testing.T) {
 	r, model := runThinkingPipeline(t, true, map[string]any{
-		smartFieldKeyCaptureCaption: true,
-		smartFieldKeyAllowOCR:       true,
+		observeCaptionKey: true,
 		// Stale keys from before the action-level unification: present in a
 		// stored config, honoured by nothing.
 		"describe_thinking": true,
 		"text_thinking":     true,
-		// The action-level switches this pipeline declares.
-		imageFieldKeyCaptionThinking: false,
-		imageFieldKeyOCRThinking:     true,
+		// The action-level switches this pipeline declares, stored the way the
+		// panel stores them: under the slot of the pipeline that offers them.
+		types.SlotKey(string(types.ImagePipelineSmartOCR), observationThinkingField.Key): false,
+		types.SlotKey(string(types.ImagePipelineSmartOCR), ocrThinkingField.Key):         true,
 	})
 	if len(model.calls) != 2 {
 		t.Fatalf("VLM calls = %d (%v), want 2", len(model.calls), model.calls)
 	}
 	if model.calls[0].thinking {
-		t.Error("the observation call ran with thinking on; caption.thinking=false was ignored")
+		t.Error("the observation call ran with thinking on; the observation switch was ignored")
 	}
 	if !model.calls[1].thinking {
-		t.Error("the OCR call ran with thinking off; ocr.thinking=true was ignored")
+		t.Error("the OCR call ran with thinking off; the OCR switch was ignored")
 	}
-	if got := r.out[imageFieldKeyCaptionThinking]; got != false {
-		t.Errorf(`out[%q] = %v, want false`, imageFieldKeyCaptionThinking, got)
+	if got := r.out[observationThinkingField.Key]; got != false {
+		t.Errorf(`out[%q] = %v, want false`, observationThinkingField.Key, got)
 	}
-	if got := r.out[imageFieldKeyOCRThinking]; got != true {
-		t.Errorf(`out[%q] = %v, want true`, imageFieldKeyOCRThinking, got)
+	if got := r.out[ocrThinkingField.Key]; got != true {
+		t.Errorf(`out[%q] = %v, want true`, ocrThinkingField.Key, got)
 	}
 	// The stale private keys must not leak into the trace.
 	if _, ok := r.out["describe_thinking"]; ok {

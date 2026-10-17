@@ -245,3 +245,12 @@ func (p *HTTPDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (
 	}
 	return fromHTTPReadResponse(&out), nil
 }
+
+// PreprocessImage is not offered over the HTTP transport: page straightening
+// lives in the docreader service, and this reader speaks to a different
+// surface. It reports that as a verdict — fallback=true, no error — so the
+// caller's single fallback (OCR the original bytes) is the only outcome, with
+// nothing logged that looks like a failure.
+func (p *HTTPDocumentReader) PreprocessImage(_ context.Context, _ []byte) ([]byte, bool, error) {
+	return nil, true, nil
+}

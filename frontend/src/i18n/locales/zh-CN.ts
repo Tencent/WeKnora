@@ -4625,14 +4625,14 @@ export default {
         imagePipelineSectionLabel: '图片解析方案',
         imagePipelineSectionDescription: '多模态解析开启后，可以根据需要选择图片的解析方案',
         imagePipelineLabel: '选择解析方案',
+        advancedSettingsLabel: '高级设置',
+        notesLabel: '附加说明',
         imagePipelinePlaceholder: '请选择解析方案',
         imagePipelineLoading: '正在读取流水线…',
         imagePipelineLoadError: '读取流水线失败',
-          imagePipelineValidateError: '无法校验当前设置，保存时后端会再次检查。',
+        imagePipelineValidateError: '无法校验当前设置，保存时后端会再次检查。',
         imageAttrsOcrConditions: '根据观察到的属性条件触发 OCR',
         imageAttrsOcrConditionsDesc: '当观察到的属性满足以下条件时，对图片进行 OCR',
-        imageAttrsOcrOnUnobserved: '图片属性观察失败时仍执行 OCR',
-        imageAttrsOcrOnUnobservedDesc: '当模型未能正确观察到图片属性时，默认仍执行 OCR 兜底，以免漏掉正文文字；关闭则跳过。（采用 4B 等小参数视觉模型，或自定义的图片解析提示词与系统提示词冲突时，可能造成观察失败；8B 及以上模型的失败概率很低，不建议关闭）',
         imagePipelineKbNote: '默认跟随知识库设置，可针对本次任务调整'
       },
       tableMetadataInstructions: {
@@ -8389,6 +8389,25 @@ export default {
         'true': { label: '是', description: '是 —— 图表、曲线或示意图' },
         'false': { label: '否', description: '否 —— 照片、插画、图标或装饰图' }
       }
+    },
+    layout_margin: {
+      label: '版面留白',
+      description:
+        '文字内容之外的部分（桌面、背景、空白）占整张画面的比例。留白大意味着可以在 OCR 之前把页面裁得更紧。',
+      values: {
+        'none': { label: '无留白', description: '文字几乎铺满画面' },
+        'small': { label: '少量留白', description: '边缘只有一条窄边' },
+        'large': { label: '大片留白', description: '有大片非文字区域 —— 桌面、房间，或拍进来的周边环境' }
+      }
+    },
+    layout_upright: {
+      label: '文字朝向',
+      description:
+        '图中文字是否正立。歪斜或倒置的页面，值得在 OCR 之前摆正。',
+      values: {
+        'true': { label: '正立', description: '文字方向正常' },
+        'false': { label: '非正立', description: '文字被旋转、倾斜拍摄或倒置' }
+      }
     }
   },
   // 流水线选择面板的覆盖文案：按流水线 id 与字段 key 索引（后端注册表给出
@@ -8400,43 +8419,70 @@ export default {
     },
     default: {
       name: '传统',
+      note_actions: {
+        label: '两项动作互相独立',
+        description:
+          '两项各自开关：关掉识别，图片仍会被描述；关掉描述，文字仍会被识别。只有两个都关掉时这张图才不会被处理 —— 所以面板不允许这种组合。',
+      },
       description: '用户根据任务需要手动选择解析动作开关。',
-      enable_caption: {
+      caption_enabled: {
         label: '图片描述',
         description: '让模型为每张图片生成一句内容描述，作为图片的说明文字。'
       },
-      enable_ocr: {
+      ocr_enabled: {
         label: '文字识别',
         description: '提取图片中出现的文字。'
       },
       caption: {
-        thinking: {
+        thinking_enabled: {
           label: '图片描述时开启思考',
           description: '让模型在写描述前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '文字识别时开启思考',
           description: '让模型在提取文字前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。',
         },
       }
     },
     smartocr: {
+      ocr_on_unobserved: {
+        label: '图片属性观察失败时仍执行 OCR',
+        description:
+          '当模型未能正确观察到图片属性时，默认仍执行 OCR 兜底，以免漏掉正文文字；关闭则跳过。（采用 4B 等小参数视觉模型，或自定义的图片解析提示词与系统提示词冲突时，可能造成观察失败；8B 及以上模型的失败概率很低，不建议关闭）',
+      },
       name: '智能模式',
-      caption: {
-        thinking: {
+      note_flow: {
+        label: '由观察结果决定',
+        description:
+          '先描述图片并观察属性，由属性决定是否值得再为它花一次 OCR。属性显示页面需要摆正时，会先摆正并裁掉周围环境再识别；若该步骤不可用或判定不适用，则直接用原图，绝不会比不启用更差。',
+      },
+      preprocess: {
+        mode: {
+          label: '文档预处理',
+          description:
+            '在 OCR 之前把拍摄的页面摆正并裁掉周围环境。自动：由描述轮判断页面是否需要；关闭：从不处理；总是：无条件处理。',
+          options: {
+            auto: '自动',
+            off: '关闭',
+            always: '总是',
+          },
+        },
+      },
+      observation: {
+        thinking_enabled: {
           label: '描述时开启思考',
           description: '让模型在描述图片并观察属性前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '文字识别时开启思考',
           description: '让模型在提取文字前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。',
         },
       },
-      description: '先观察图片特征并进行图片描述，再根据图片特征决定是否调用OCR对图片进行识别，以节省模型调用次数并提升解析速度。'
+      description: '先观察图片特征并进行图片描述，再根据图片特征决定是否调用OCR对图片进行识别，以节省模型调用次数并提升解析速度。当识别到图片为可校正的文档或标签页照片时，会在识别前自动摆正并裁剪页面，以提升 OCR 准确率；若校正失败则直接使用原图。'
     }
   }
 }

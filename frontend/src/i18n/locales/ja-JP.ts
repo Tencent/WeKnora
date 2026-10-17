@@ -4035,14 +4035,14 @@ export default {
         imagePipelineSectionDescription:
           'マルチモーダル解析が有効な場合、画像の解析方式を選択できます。',
         imagePipelineLabel: '解析方式',
+        advancedSettingsLabel: '詳細設定',
+        notesLabel: '補足説明',
         imagePipelinePlaceholder: '解析方式を選択',
         imagePipelineLoading: 'パイプラインを読み込み中…',
         imagePipelineLoadError: 'パイプラインの読み込みに失敗しました',
-          imagePipelineValidateError: '現在の設定を検証できませんでした。保存時にバックエンドが再度检查します。',
+        imagePipelineValidateError: '現在の設定を検証できませんでした。保存時にバックエンドが再度チェックします。',
         imageAttrsOcrConditions: '観察した属性条件に基づいて OCR を実行',
         imageAttrsOcrConditionsDesc: '観察した属性が以下の条件を満たす場合、その画像に OCR を実行します',
-        imageAttrsOcrOnUnobserved: '画像属性の観察に失敗した場合も OCR を実行',
-        imageAttrsOcrOnUnobservedDesc: 'モデルが画像属性を正しく観察できなかった場合、本文テキストを逃さないようデフォルトで OCR を実行します。オフにするとスキップします。（4B など小規模な視覚モデルを使う場合や、カスタムの画像指示がシステムプロンプトと衝突する場合に観察が失敗することがあります。8B 以上は失敗の可能性が低く、オフは推奨しません）',
         imagePipelineKbNote: 'デフォルトはナレッジベースの設定に従い、今回のタスク向けに調整できます'
       }
     }
@@ -8388,6 +8388,25 @@ export default {
         'true': { label: 'はい', description: 'はい —— グラフ・図表・ダイアグラム' },
         'false': { label: 'いいえ', description: 'いいえ —— 写真・イラスト・アイコン・装飾' }
       }
+    },
+    layout_margin: {
+      label: '版面の余白',
+      description:
+        '内容の外側（机・背景・余白）が画面全体に占める割合。余白が大きいほど、OCR の前にページをより詰めて切り出せます。',
+      values: {
+        'none': { label: '余白なし', description: '文字がほぼ画面いっぱい' },
+        'small': { label: '余白少', description: '縁に細い帯だけ' },
+        'large': { label: '余白大', description: '非文字領域が広い —— 机・部屋・ほぼ空白のページ' }
+      }
+    },
+    layout_upright: {
+      label: '文字の向き',
+      description:
+        '画像内の文字が正立しているか。傾いた・逆さまのページは OCR の前に傾き補正する価値があります。',
+      values: {
+        'true': { label: '正立', description: '文字が通常の向き' },
+        'false': { label: '非正立', description: '回転・傾き撮影・逆さま' }
+      }
     }
   },
   // パイプラインパネルの上書き文言：パイプライン id とフィールド key で索引
@@ -8400,44 +8419,71 @@ export default {
     },
     default: {
       name: 'マニュアル',
+      note_actions: {
+        label: '2 つの動作は独立しています',
+        description:
+          'それぞれ個別に切り替えられます。識別をオフにしても画像は説明され、説明をオフにしても文字は抽出されます。両方をオフにしたときだけ画像は何も処理されないため、パネルはその組み合わせを許可しません。',
+      },
       description: 'タスクに合わせて解析アクションのスイッチを手動でオン/オフします。',
-      enable_caption: {
+      caption_enabled: {
         label: '画像説明',
         description: '各画像について一言の説明を生成し、キャプションとして保存します。'
       },
-      enable_ocr: {
+      ocr_enabled: {
         label: '文字認識',
         description: '画像内に出現するテキストを抽出します。'
       },
       caption: {
-        thinking: {
+        thinking_enabled: {
           label: '説明時に思考を有効',
           description: '説明を書く前にモデルに考えさせます。基本的に思考は必要ありません。有効にすると解析が遅くなるだけでなく、思考が長くなりすぎて本文が切り詰められ、タスクが失敗する可能性があります。必要だと判断した場合のみ有効にしてください。',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '文字認識時に思考を有効',
           description: 'テキストを抽出する前にモデルに考えさせます。基本的に思考は必要ありません。有効にすると解析が遅くなるだけでなく、思考が長くなりすぎて本文が切り詰められ、タスクが失敗する可能性があります。必要だと判断した場合のみ有効にしてください。',
         },
       }
     },
     smartocr: {
+      ocr_on_unobserved: {
+        label: '画像属性の観察に失敗した場合も OCR を実行',
+        description:
+          'モデルが画像属性を正しく観察できなかった場合、本文テキストを逃さないようデフォルトで OCR を実行します。オフにするとスキップします。（4B など小規模な視覚モデルを使う場合や、カスタムの画像指示がシステムプロンプトと衝突する場合に観察が失敗することがあります。8B 以上は失敗の可能性が低く、オフは推奨しません）',
+      },
       name: 'スマート',
-      caption: {
-        thinking: {
+      note_flow: {
+        label: '観察結果が決めます',
+        description:
+          'まず画像を説明し属性を観察し、返ってきた属性が OCR をもう一度行う価値があるかを決めます。ページを傾き補正すべきと属性が示した場合は、補正して周囲を切り落としてから読み取ります。その手順が利用できない場合は元の写真をそのまま読み取り、悪化することはありません。',
+      },
+      preprocess: {
+        mode: {
+          label: '文書の前処理',
+          description:
+            'OCR の前に、撮影したページを傾き補正して周囲を切り落とします。自動：説明ラウンドが要否を判断／オフ：常に無効／常に：無条件で有効。',
+          options: {
+            auto: '自動',
+            off: 'オフ',
+            always: '常に',
+          },
+        },
+      },
+      observation: {
+        thinking_enabled: {
           label: '説明時に思考を有効',
           description: '画像を説明し属性を報告する前にモデルに考えさせます。基本的に思考は必要ありません。有効にすると解析が遅くなるだけでなく、思考が長くなりすぎて本文が切り詰められ、タスクが失敗する可能性があります。必要だと判断した場合のみ有効にしてください。',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '文字認識時に思考を有効',
           description: 'テキストを抽出する前にモデルに考えさせます。基本的に思考は必要ありません。有効にすると解析が遅くなるだけでなく、思考が長くなりすぎて本文が切り詰められ、タスクが失敗する可能性があります。必要だと判断した場合のみ有効にしてください。',
         },
       },
       description:
-        'まず画像の特徴を観察して説明を生成し、その特徴に基づいて OCR を実行するかどうかを判断します。モデル呼び出しを節約し、解析速度を向上させます。'
+        'まず画像の特徴を観察して説明を生成し、その特徴に基づいて OCR を実行するかどうかを判断します。モデル呼び出しを節約し、解析速度を向上させます 画像が補正可能な書類やラベルの写真と判定された場合、認識前にページを傾き補正・トリミングして OCR 精度を高めます。補正に失敗した場合は元の画像を使用します。'
     }
   }
 }
