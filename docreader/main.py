@@ -17,7 +17,7 @@ from docreader.auth import AuthInterceptor, TLSConfigError, load_tls_credentials
 from docreader import config
 from docreader.config import CONFIG
 from docreader.parser import Parser
-from docreader.parser.image_preprocess import preprocess
+from docreader.parser.image_preprocess import effective_thresholds, preprocess
 from docreader.proto import docreader_pb2_grpc
 from docreader.parser.registry import registry
 from docreader.proto.docreader_pb2 import (
@@ -55,6 +55,16 @@ logging.root.setLevel(_level)
 
 logger = logging.getLogger(__name__)
 logger.info("Initializing server logging, level=%s", _level_name)
+
+# The page-straightening thresholds are env-overridable, so the startup banner
+# names the set this process runs with — the output of a debugging run can then
+# be read back against the tuning that produced it. Logged here rather than from
+# the module itself: that module is imported above, before the level is set, and
+# an INFO line emitted then would go nowhere.
+logger.info(
+    "Page straightening thresholds: %s",
+    ", ".join(f"{name}={value:g}" for name, value in effective_thresholds().items()),
+)
 
 init_logging_request_id()
 
