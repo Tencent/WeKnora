@@ -2508,6 +2508,8 @@ export default {
     }
   },
   preview: {
+    tooLarge: '此試算表檔案過大，無法安全預覽',
+    tooLargeHint: '請使用下載按鈕後透過本機試算表應用程式開啟',
     tab: '預覽',
     loading: '正在載入文件預覽...',
     loadFailed: '載入文件預覽失敗',
