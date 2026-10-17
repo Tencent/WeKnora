@@ -310,7 +310,7 @@ func TestMCPResourceURLsSkipErrorsAndPlainResults(t *testing.T) {
 func TestMCPExistingToolTransportRewritesResourceURLs(t *testing.T) {
 	f := newResourceURLFixture(t)
 	srv := NewServer(f.srv.kbService, nil, nil, nil, nil, nil, nil, f.srv.kbShareService,
-		f.srv.tenantService, nil, nil, nil, nil, f.srv.resourceCatalog, nil, f.srv.storageResolver)
+		f.srv.tenantService, nil, nil, nil, nil, nil, f.srv.resourceCatalog, nil, f.srv.storageResolver)
 	// Replace the existing document handler to isolate the outbound middleware
 	// while retaining the real MCP transport, catalog and endpoint guard.
 	srv.mcp.AddTool(readDocumentTool(), func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
