@@ -422,7 +422,7 @@
                 class="answer-toolbar">
                 <t-tooltip v-if="canFork" :content="forkTooltip">
                   <t-button size="small" variant="outline" shape="round" @click.stop="emitFork">
-                    <t-icon name="git-branch" />
+                    <ChatActionIcon name="git-branch" />
                   </t-button>
                 </t-tooltip>
                 <t-popconfirm
@@ -441,17 +441,17 @@
                   </template>
                   <t-tooltip :content="rewindTooltip">
                     <t-button size="small" variant="outline" shape="round" @click.stop>
-                      <t-icon name="rollback" />
+                      <ChatActionIcon name="rollback" />
                     </t-button>
                   </t-tooltip>
                 </t-popconfirm>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
                   :title="$t('agent.copy')" :aria-label="$t('agent.copy')">
-                  <t-icon name="copy" />
+                  <ChatActionIcon name="copy" />
                 </t-button>
                 <t-button v-if="!embeddedMode" size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge(event)"
                   :title="$t('agent.addToKnowledgeBase')">
-                  <t-icon name="bookmark-add" />
+                  <ChatActionIcon name="bookmark-add" />
                 </t-button>
                 <!-- Skill artifact download: only shown when the persisted
                      assistant message recorded any generated files. Agent
@@ -465,18 +465,18 @@
                     :title="hasArtifacts ? $t('agent.artifactDrawer.buttonTitle') : $t('agent.artifactDrawer.collecting')"
                     @click.stop="openArtifactDrawer()">
                     <t-icon v-if="artifactButtonCollecting" name="loading" class="answer-toolbar__artifact-spinner" />
-                    <t-icon v-else name="folder" />
+                    <ChatActionIcon v-else name="folder" />
                   </t-button>
                   <span v-if="hasArtifacts" class="answer-toolbar__artifact-count" aria-hidden="true">{{ artifactCount }}</span>
                 </span>
                 <t-tooltip v-if="!embeddedMode && event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
-                    <t-icon name="info-circle" />
+                    <ChatActionIcon name="info-circle" />
                   </t-button>
                 </t-tooltip>
                 <t-tooltip v-if="!embeddedMode && event.truncated" :content="$t('chat.truncatedHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
-                    <t-icon name="info-circle" />
+                    <ChatActionIcon name="info-circle" />
                   </t-button>
                 </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo && isConversationDone" :session="session"
@@ -689,6 +689,7 @@ import OpenPageCard from './OpenPageCard.vue';
 import PageEditCard from './PageEditCard.vue';
 import { isAssistantPageLink } from '@/utils/assistantPageLink';
 import AskUserCard from './AskUserCard.vue';
+import ChatActionIcon from '@/components/ChatActionIcon.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';

@@ -5809,6 +5809,11 @@ export default {
       withWebSearch: 'Web検索'
     },
     organization: {
+      cardStats: {
+        members: 'メンバー {count}',
+        knowledgeBases: 'ナレッジベース {count}',
+        agents: 'エージェント {count}',
+      },
       title: '共有スペース',
       subtitle: '共有スペースを作成したり参加したりすることで、複数のワークスペースがナレッジベースやエージェントを共有して協働できます',
       createOrg: '共有スペースを作成',

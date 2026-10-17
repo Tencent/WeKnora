@@ -2523,6 +2523,11 @@ export default {
     videoNotSupported: '브라우저가 동영상 재생을 지원하지 않습니다'
   },
   organization: {
+    cardStats: {
+      members: '멤버 {count}',
+      knowledgeBases: '지식 베이스 {count}',
+      agents: '에이전트 {count}',
+    },
     title: '공유 공간',
     subtitle: '공유 공간를 만들거나 참여하여 여러 스페이스가 함께 협업하고 지식베이스와 에이전트를 공유하세요.',
     createOrg: '공유 공간 생성',

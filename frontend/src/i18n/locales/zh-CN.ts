@@ -2525,6 +2525,11 @@ export default {
     videoNotSupported: '您的浏览器不支持视频播放'
   },
   organization: {
+    cardStats: {
+      members: '{count} 成员',
+      knowledgeBases: '{count} 知识库',
+      agents: '{count} 智能体',
+    },
     title: '共享空间',
     subtitle: '创建或加入共享空间，让多个空间互相协作，共享知识库与智能体',
     createOrg: '创建共享空间',

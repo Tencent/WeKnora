@@ -67,13 +67,13 @@
           :agent-id="BUILTIN_WEKNORA_ASSISTANT_ID" :embedded-mode="true" :initial-query="initialQuery"
           :host-scope="hostScope" :model-id="assistant.modelId" :default-model-id="defaultModelId"
           @update:model-id="assistant.setModel">
-          <template #composer-chips>
+          <template v-if="assistant.pageSelection" #composer-chips>
             <div class="assistant-composer-context">
-              <AssistantContextChip />
               <AssistantSelectionChip />
             </div>
           </template>
           <template #composer-controls>
+            <AssistantContextMenu />
             <AssistantAccessPicker />
           </template>
         </ChatView>
@@ -103,13 +103,13 @@
             <InputField ref="welcomeInput" :embedded-mode="true" compact :auto-focus="assistant.visible"
               :model-id="assistant.modelId" :default-model-id="defaultModelId" @update:model-id="assistant.setModel"
               @send-msg="(query) => startConversation(query)">
-              <template #chips>
+              <template v-if="assistant.pageSelection" #chips>
                 <div class="assistant-composer-context">
-                  <AssistantContextChip />
                   <AssistantSelectionChip />
                 </div>
               </template>
               <template #controls>
+                <AssistantContextMenu />
                 <AssistantAccessPicker />
               </template>
             </InputField>
@@ -127,7 +127,7 @@ import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import ChatView from '@/views/chat/index.vue'
 import InputField from '@/components/Input-field.vue'
 import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
-import AssistantContextChip from './AssistantContextChip.vue'
+import AssistantContextMenu from './AssistantContextMenu.vue'
 import AssistantSelectionChip from './AssistantSelectionChip.vue'
 import AssistantAccessPicker from './AssistantAccessPicker.vue'
 import { createSessions, getSessionsList, getSession, type SessionSummary } from '@/api/chat'
@@ -491,7 +491,7 @@ onUnmounted(() => {
 
   :deep(.assistant-selection-chip) {
     flex: 0 1 auto;
-    max-width: 42%;
+    max-width: 100%;
     height: 26px;
   }
 }
@@ -576,6 +576,11 @@ onUnmounted(() => {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+
+  // Align the assistant composer with the main conversation composer.
+  :deep(.input-container.is-embedded) {
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
 }
 
 .assistant-history {
@@ -702,7 +707,7 @@ onUnmounted(() => {
 // Same inset as the composer inside a conversation.
 .assistant-welcome-composer {
   flex-shrink: 0;
-  padding: 12px 16px 16px;
+  padding: 12px 16px max(8px, env(safe-area-inset-bottom));
 }
 </style>
 

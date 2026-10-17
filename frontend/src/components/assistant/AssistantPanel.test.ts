@@ -96,7 +96,7 @@ async function fixture(
     '@/views/chat/index.vue': ChatView,
     '@/components/Input-field.vue': emptyComponent,
     '@/components/PanelResizeHandle.vue': emptyComponent,
-    './AssistantContextChip.vue': emptyComponent,
+    './AssistantContextMenu.vue': emptyComponent,
     './AssistantSelectionChip.vue': emptyComponent,
     './AssistantAccessPicker.vue': emptyComponent,
     '@/api/chat': {

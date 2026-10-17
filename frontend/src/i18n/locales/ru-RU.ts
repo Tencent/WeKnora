@@ -2523,6 +2523,11 @@ export default {
     videoNotSupported: 'Ваш браузер не поддерживает воспроизведение видео'
   },
   organization: {
+    cardStats: {
+      members: 'Участники: {count}',
+      knowledgeBases: 'Базы знаний: {count}',
+      agents: 'Агенты: {count}',
+    },
     title: 'Shared Spaces',
     subtitle: 'Create or join shared spaces so multiple workspaces can collaborate and share knowledge bases and agents',
     createOrg: 'Создать общее пространство',

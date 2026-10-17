@@ -5809,6 +5809,11 @@ export default {
       withWebSearch: 'Web Search'
     },
     organization: {
+      cardStats: {
+        members: '{count} members',
+        knowledgeBases: '{count} knowledge bases',
+        agents: '{count} agents',
+      },
       title: 'Shared Spaces',
       subtitle: 'Create or join shared spaces so multiple workspaces can collaborate and share knowledge bases and agents',
       createOrg: 'Create Shared Space',
