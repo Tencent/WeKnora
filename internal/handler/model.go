@@ -711,7 +711,7 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		writeModelDebugResult(c, started, requestPreview, result, callErr, observations)
 	case types.ModelTypeVideo:
 		if len(fileBytes) == 0 {
-			c.Error(errors.NewBadRequestError("video file is required"))
+			_ = c.Error(errors.NewBadRequestError("video file is required"))
 			return
 		}
 		instance, callErr := h.service.GetVideoModel(ctx, id)

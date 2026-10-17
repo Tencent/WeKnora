@@ -1215,7 +1215,9 @@ func (s *knowledgeService) transcribeMedia(
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = "ASR model is not configured for audio transcription"
 		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
+			logger.Errorf(ctx, "[ASR] Failed to record the missing-ASR status: %v", updateErr)
+		}
 		return true, nil
 	}
 
@@ -1237,7 +1239,9 @@ func (s *knowledgeService) transcribeMedia(
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = fmt.Sprintf("failed to get ASR model: %v", err)
 		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
+			logger.Errorf(ctx, "[ASR] Failed to record the ASR-model error: %v", updateErr)
+		}
 		return true, nil
 	}
 
@@ -1260,7 +1264,9 @@ func (s *knowledgeService) transcribeMedia(
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = fmt.Sprintf("audio transcription failed: %v", err)
 			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
+				logger.Errorf(ctx, "[ASR] Failed to record the transcription error: %v", updateErr)
+			}
 		}
 		return false, fmt.Errorf("audio transcription failed: %w", err)
 	}
