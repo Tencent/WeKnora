@@ -317,6 +317,7 @@ type ParserEngineConfig struct {
 	MinerUTier         string `json:"mineru_tier,omitempty"`           // 4.0+：flash/basic/standard/advanced，空为服务端默认
 	// 以下 backend、vLLM、公式/表格、语言参数仅对 3.x 及更早版本生效。
 	MinerUModel         string `json:"mineru_model,omitempty"`          // backend: pipeline, vlm-*, hybrid-*
+	MinerUEffort        string `json:"mineru_effort,omitempty"`         // hybrid: medium/high; empty = server default
 	MinerUVLMServerURL  string `json:"mineru_vlm_server_url,omitempty"` // vLLM 服务器地址 (vlm-http-client / hybrid-http-client)
 	MinerUEnableFormula *bool  `json:"mineru_enable_formula,omitempty"`
 	MinerUEnableTable   *bool  `json:"mineru_enable_table,omitempty"`
@@ -413,6 +414,9 @@ func (c *ParserEngineConfig) ToOverridesMap() map[string]string {
 	}
 	if c.MinerUModel != "" {
 		m["mineru_model"] = c.MinerUModel
+	}
+	if c.MinerUEffort != "" {
+		m["mineru_effort"] = c.MinerUEffort
 	}
 	if c.MinerUVLMServerURL != "" {
 		m["mineru_vlm_server_url"] = c.MinerUVLMServerURL
