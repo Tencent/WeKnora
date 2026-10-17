@@ -11,7 +11,7 @@ import (
 // set avoids the drift that let direct upload accept xlsx while URL import
 // rejected it (#2447).
 var supportedImportFileExtensions = map[string]struct{}{
-	"pdf": {}, "txt": {}, "docx": {}, "doc": {}, "epub": {},
+	"pdf": {}, "txt": {}, "sql": {}, "docx": {}, "doc": {}, "epub": {},
 	"html": {}, "htm": {}, "mhtml": {}, "md": {}, "markdown": {},
 	"xmind": {},
 	"png":   {}, "jpg": {}, "jpeg": {}, "gif": {},
