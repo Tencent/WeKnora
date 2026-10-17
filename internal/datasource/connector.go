@@ -51,6 +51,28 @@ type Connector interface {
 	FetchIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error)
 }
 
+type StreamHandler interface {
+	Emit(ctx context.Context, item types.FetchedItem) error
+	Checkpoint(ctx context.Context, cursor *types.SyncCursor) error
+}
+
+type StreamingConnector interface {
+	Connector
+	FetchStream(ctx context.Context, config *types.DataSourceConfig,
+		cursor *types.SyncCursor, h StreamHandler) (*types.SyncCursor, error)
+}
+
+type FullStreamingConnector interface {
+	StreamingConnector
+	FetchFullStream(ctx context.Context, config *types.DataSourceConfig,
+		cursor *types.SyncCursor, h StreamHandler) (*types.SyncCursor, error)
+}
+
+type FullSyncWithCursor interface {
+	FetchAllFromCursor(ctx context.Context, config *types.DataSourceConfig,
+		resourceIDs []string, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error)
+}
+
 // OAuthConnector allows an OAuth-backed data source to be created in a
 // paused, not-yet-authorized state after validating only non-secret settings.
 type OAuthConnector interface {

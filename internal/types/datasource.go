@@ -17,6 +17,9 @@ import (
 const (
 	// Connector types
 	ConnectorTypeFeishu      = "feishu"
+	ConnectorTypeLark        = "lark"
+	ConnectorTypeFeishuDrive = "feishu_drive"
+	ConnectorTypeLarkDrive   = "lark_drive"
 	ConnectorTypeNotion      = "notion"
 	ConnectorTypeConfluence  = "confluence"
 	ConnectorTypeYuque       = "yuque"
@@ -28,6 +31,9 @@ const (
 	ConnectorTypeSlack       = "slack"
 	ConnectorTypeIMAP        = "imap"
 	ConnectorTypeRSS         = "rss"
+	ConnectorTypeGitLab      = "gitlab"
+	ConnectorTypeIMA         = "ima"
+	ConnectorTypeSeafile     = "seafile"
 
 	// Sync modes
 	SyncModeIncremental = "incremental"
@@ -442,6 +448,9 @@ type FetchedItem struct {
 	// When last modified in external system
 	UpdatedAt time.Time `json:"updated_at"`
 
+	// When created in external system. Zero when the source does not expose it.
+	CreatedAt time.Time `json:"created_at"`
+
 	// Additional metadata to preserve
 	Metadata map[string]string `json:"metadata"`
 
@@ -450,6 +459,17 @@ type FetchedItem struct {
 
 	// Source resource ID (e.g., folder ID this document belongs to)
 	SourceResourceID string `json:"source_resource_id"`
+
+	ReplacesSubtree bool     `json:"replaces_subtree,omitempty"`
+	SubtreeKeep     []string `json:"subtree_keep,omitempty"`
+}
+
+func SubtreeChildID(parentExternalID, kind, token string) string {
+	return parentExternalID + "#" + kind + "#" + token
+}
+
+func SubtreeChildPrefix(parentExternalID string) string {
+	return parentExternalID + "#"
 }
 
 // SyncCursor represents the position/state for incremental sync
@@ -490,6 +510,39 @@ type SyncResult struct {
 
 	// Updated cursor for next incremental sync
 	NextCursor *SyncCursor `json:"next_cursor,omitempty"`
+}
+
+type SyncItemError struct {
+	Title   string            `json:"title,omitempty"`
+	Code    string            `json:"code,omitempty"`
+	Params  map[string]string `json:"params,omitempty"`
+	Message string            `json:"message,omitempty"`
+}
+
+func (e SyncItemError) Display() string {
+	switch {
+	case e.Title != "" && e.Message != "":
+		return e.Title + ": " + e.Message
+	case e.Message != "":
+		return e.Message
+	default:
+		return e.Title
+	}
+}
+
+func (e *SyncItemError) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		e.Message = s
+		return nil
+	}
+	type alias SyncItemError
+	var a alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	*e = SyncItemError(a)
+	return nil
 }
 
 // DataSourcePendingKnowledge identifies ingestion work awaiting finalization.

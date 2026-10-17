@@ -14,6 +14,9 @@ import (
 
 var ErrKnowledgeNotFound = errors.New("knowledge not found")
 
+// likeEscapeChar is the SQL ESCAPE character paired with escapeLikeKeyword.
+const likeEscapeChar = `\`
+
 // escapeLikeKeyword escapes SQL LIKE wildcards (%, _) in a keyword
 // so they are treated as literal characters.
 func escapeLikeKeyword(keyword string) string {
