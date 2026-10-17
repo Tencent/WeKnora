@@ -279,7 +279,8 @@ func (s *temporaryDocumentService) Delete(ctx context.Context, tenantID uint64, 
 	}
 	for ref := range refs {
 		if err := s.releaseResource(ctx, document.ID, ref); err != nil {
-			logger.Warnf(ctx, "keeping attachment resource after cleanup failure: document_id=%s err=%v", document.ID, err)
+			logger.Warnf(ctx, "keeping attachment resource after cleanup failure: document_id=%s err=%v",
+				document.ID, err)
 		}
 	}
 	return s.repo.DeleteScoped(ctx, tenantID, sessionID, documentID)
