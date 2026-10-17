@@ -36,6 +36,14 @@ async function setup(t: TestContext) {
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
     '@/utils/kbPermission': {}, '@/utils/knowledgeDeletion': { waitForKnowledgeDeletion }, '@/utils/knowledgeTrace': {},
     '@/utils/knowledgeProcessingStall': stall, '@/api/wiki': {}, '@/api/knowledge-base': {},
+    // The upload menu reads the KB video switch from the detail already loaded
+    // on this page; the page's own refresh behaviour does not depend on it, and
+    // the real module pulls the i18n runtime in at module load, so keep it inert.
+    './utils/uploadSources': {
+      UPLOAD_VIDEO_EXTENSIONS: [],
+      isVideoParsingEnabled: () => false,
+      isVideoParsingReady: () => false,
+    },
     '@/api/knowledge-base/index': { listKnowledgeFolders, listKnowledgeTags: async () => ({ data: { data: [], total: 0 } }) },
   })
   await flush()
