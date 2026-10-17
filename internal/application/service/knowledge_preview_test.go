@@ -50,6 +50,34 @@ func (s *previewFileServiceStub) GetFile(context.Context, string) (io.ReadCloser
 	return io.NopCloser(bytes.NewReader(s.data)), nil
 }
 
+// countingPreviewReader is seekable like a local/MinIO object, and counts
+// actual Read calls so tests can assert the directory-only fast path never
+// buffers the file.
+type countingPreviewReader struct {
+	*bytes.Reader
+	reads int
+}
+
+func (r *countingPreviewReader) Read(p []byte) (int, error) {
+	r.reads++
+	return r.Reader.Read(p)
+}
+
+func (r *countingPreviewReader) Close() error { return nil }
+
+type seekablePreviewFileServiceStub struct {
+	interfaces.FileService
+	data  []byte
+	opens int
+}
+
+func (s *seekablePreviewFileServiceStub) GetFile(
+	context.Context, string,
+) (io.ReadCloser, error) {
+	s.opens++
+	return &countingPreviewReader{Reader: bytes.NewReader(s.data)}, nil
+}
+
 type previewDocReaderStub struct {
 	interfaces.DocumentReader
 	calls   int
@@ -118,7 +146,7 @@ func buildPreviewDocx(t *testing.T, media map[string][]byte) []byte {
 
 func newPreviewService(
 	knowledge *types.Knowledge,
-	files *previewFileServiceStub,
+	files interfaces.FileService,
 	reader interfaces.DocumentReader,
 	cacheDir string,
 	enabled bool,
@@ -215,6 +243,35 @@ func TestGetKnowledgePreviewFileWithoutVectorMediaSkipsConversion(t *testing.T) 
 	}
 	if preview.Converted {
 		t.Fatal("Converted = true for a file that needed no conversion")
+	}
+}
+
+func TestGetKnowledgePreviewFileStreamsNonVectorFileWithoutBuffering(t *testing.T) {
+	original := buildPreviewDocx(t, map[string][]byte{
+		"word/media/image1.png": []byte("png-bytes"),
+	})
+	files := &seekablePreviewFileServiceStub{data: original}
+	reader := &previewDocReaderStub{}
+	service, _ := newPreviewService(docxKnowledge(), files, reader, t.TempDir(), true)
+
+	preview, err := service.GetKnowledgePreviewFile(previewTestContext(), "k1")
+	if err != nil {
+		t.Fatalf("GetKnowledgePreviewFile: %v", err)
+	}
+	defer preview.Reader.Close()
+	counting, ok := preview.Reader.(*countingPreviewReader)
+	if !ok {
+		t.Fatalf("reader = %T, want the original seekable stream", preview.Reader)
+	}
+	if counting.reads != 0 {
+		t.Fatalf("Read calls = %d before the handler streams; the zip directory scan must use ReaderAt only", counting.reads)
+	}
+	got, _ := io.ReadAll(counting)
+	if !bytes.Equal(got, original) {
+		t.Fatal("streamed bytes differ from the original file")
+	}
+	if reader.calls != 0 {
+		t.Fatalf("converter calls = %d, want 0", reader.calls)
 	}
 }
 

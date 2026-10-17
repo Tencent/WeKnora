@@ -87,6 +87,19 @@ func (s *knowledgeService) GetKnowledgePreviewFile(
 	if err != nil {
 		return nil, err
 	}
+	// Most storage backends hand back a seekable object. For a file without
+	// vector media we can keep the original streaming response (no buffering,
+	// Range/HEAD intact) after reading only the zip central directory.
+	if readerAt, size, ok := previewReaderAt(file, knowledge.FileSize); ok {
+		hasVector, scanErr := zipHasVectorMedia(readerAt, size)
+		if scanErr != nil {
+			logger.Warnf(ctx, "preview: could not inspect %s, serving original: %v", knowledge.ID, scanErr)
+			return &types.KnowledgePreviewFile{Reader: file, Filename: knowledge.FileName}, nil
+		}
+		if !hasVector {
+			return &types.KnowledgePreviewFile{Reader: file, Filename: knowledge.FileName}, nil
+		}
+	}
 	data, readErr := io.ReadAll(io.LimitReader(file, previewSourceSizeLimit+1))
 	closeErr := file.Close()
 	if readErr != nil {
@@ -219,9 +232,14 @@ func (s *knowledgeService) previewCachePath(key string) string {
 // docxHasVectorMedia only inspects the zip directory: it never inflates a
 // member, so a crafted archive cannot make this check expensive.
 func docxHasVectorMedia(data []byte) bool {
-	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	hasVector, err := zipHasVectorMedia(bytes.NewReader(data), int64(len(data)))
+	return err == nil && hasVector
+}
+
+func zipHasVectorMedia(reader io.ReaderAt, size int64) (bool, error) {
+	archive, err := zip.NewReader(reader, size)
 	if err != nil {
-		return false
+		return false, err
 	}
 	for _, entry := range archive.File {
 		if entry.FileInfo().IsDir() || !strings.HasPrefix(entry.Name, "word/media/") {
@@ -229,10 +247,34 @@ func docxHasVectorMedia(data []byte) bool {
 		}
 		switch strings.ToLower(path.Ext(entry.Name)) {
 		case ".emf", ".wmf":
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
+}
+
+// previewReaderAt exposes a storage reader for directory-only zip inspection
+// and leaves its offset at the start for the subsequent full read.
+func previewReaderAt(file io.ReadCloser, sizeHint int64) (io.ReaderAt, int64, bool) {
+	readerAt, ok := file.(io.ReaderAt)
+	if !ok {
+		return nil, 0, false
+	}
+	seeker, ok := file.(io.Seeker)
+	if !ok {
+		if sizeHint <= 0 {
+			return nil, 0, false
+		}
+		return readerAt, sizeHint, true
+	}
+	size, err := seeker.Seek(0, io.SeekEnd)
+	if err != nil {
+		return nil, 0, false
+	}
+	if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+		return nil, 0, false
+	}
+	return readerAt, size, true
 }
 
 func previewContentHash(data []byte) string {
