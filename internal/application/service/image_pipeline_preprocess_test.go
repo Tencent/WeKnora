@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -18,10 +19,17 @@ type stubPreprocessor struct {
 	// block, when non-nil, holds every call until it is closed or the caller's
 	// context ends — the shape a hung document service has.
 	block chan struct{}
+	// budget records the deadline the caller set for the call, if any.
+	budget time.Duration
+	hadEnd bool
 }
 
 func (s *stubPreprocessor) PreprocessImage(ctx context.Context, _ []byte) ([]byte, bool, error) {
 	s.calls++
+	if deadline, ok := ctx.Deadline(); ok {
+		s.hadEnd = true
+		s.budget = time.Until(deadline)
+	}
 	if s.block != nil {
 		select {
 		case <-s.block:
@@ -167,6 +175,50 @@ func TestPreprocessSkipReasonFollowsTheSetting(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPreprocessCallCarriesItsOwnDeadline pins the guard against a document
+// service that never answers: the call is capped rather than left to inherit the
+// whole document's budget, and a call that runs past the cap is recorded like
+// any other failure with the image left as it was, so OCR still runs.
+//
+// The run's own timeout is set small here rather than waiting out the package
+// default, which is several times the measured worst case.
+func TestPreprocessCallCarriesItsOwnDeadline(t *testing.T) {
+	page := types.ImageAttrs{Attrs: map[string]any{"contain.text": "block", "layout.margin": "large"}}
+
+	t.Run("a call that answers in time", func(t *testing.T) {
+		stub := &stubPreprocessor{rectified: []byte("rectified bytes")}
+		r := preprocessRun(types.PreprocessModeAuto, stub, page)
+		if err := runPreprocessAction(context.Background(), r); err != nil {
+			t.Fatalf("runPreprocessAction returned an error: %v", err)
+		}
+		if !stub.hadEnd {
+			t.Fatal("the preprocessor was called without a deadline of its own")
+		}
+		if stub.budget <= 0 || stub.budget > imagePreprocessTimeout {
+			t.Errorf("the call's budget was %v, want (0, %v]", stub.budget, imagePreprocessTimeout)
+		}
+	})
+
+	t.Run("a call that never answers", func(t *testing.T) {
+		stub := &stubPreprocessor{rectified: []byte("rectified bytes"), block: make(chan struct{})}
+		defer close(stub.block)
+		r := preprocessRun(types.PreprocessModeAuto, stub, page)
+		r.preprocessTimeout = 20 * time.Millisecond
+		if err := runPreprocessAction(context.Background(), r); err != nil {
+			t.Fatalf("runPreprocessAction returned an error: %v", err)
+		}
+		if got := r.out[keyPreprocessResult]; got != "failed" {
+			t.Errorf("preprocess.result = %v, want %q", got, "failed")
+		}
+		if _, written := r.out[keyPreprocessError]; !written {
+			t.Error("a call cut short by the deadline left no reason behind")
+		}
+		if string(r.imageBytes) != "original bytes" {
+			t.Errorf("the run replaced its image with %q, want the original", r.imageBytes)
+		}
+	})
 }
 
 // TestPreprocessDeclinesWithoutChangingTheImage pins the one promise the

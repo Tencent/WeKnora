@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
@@ -281,6 +282,15 @@ const (
 	keyPreprocessError  = "preprocess.error"
 )
 
+// imagePreprocessTimeout caps one page-straightening call. It is a guard
+// against a document service that hangs, not a budget the algorithm is meant to
+// fit in: a full-size photograph takes around 9 seconds once the recogniser is
+// warm, and the first call in a fresh process measured 23 seconds (model load
+// plus engine construction). The cap is set well above both, so a legitimate
+// slow page is never cut short — and it stays an order of magnitude below the
+// docreader RPC timeout, which is what a hung call would otherwise consume.
+const imagePreprocessTimeout = 60 * time.Second
+
 // Frame-level keys: the image's own facts, written by the service layer, so they
 // carry no action prefix.
 const (
@@ -347,9 +357,13 @@ type runContext struct {
 	// preprocessor straightens the page before OCR. Nil when the document
 	// service is not wired into this build — see imagePreprocessor.
 	preprocessor imagePreprocessor
-	imageBytes   []byte
-	vlmCfg       types.VLMConfig
-	imageInfo    *types.ImageInfo
+	// preprocessTimeout caps one call to it. Zero means the package default
+	// (imagePreprocessTimeout); a test sets it small so the timeout path can be
+	// exercised without waiting for the real cap.
+	preprocessTimeout time.Duration
+	imageBytes        []byte
+	vlmCfg            types.VLMConfig
+	imageInfo         *types.ImageInfo
 	// out is the per-image trace record. Keys follow
 	// docs/design/image-pipeline-naming.md — see the note above imagePipeline.
 	out types.JSONMap
@@ -746,17 +760,52 @@ func runPreprocessAction(ctx context.Context, r *runContext) error {
 			return nil
 		}
 	}
-	rectified, fallback, err := r.preprocessor.PreprocessImage(ctx, r.imageBytes)
+	// The call is about to happen, so this is where its own subspan belongs.
+	// The neighbours that spend a model call (.caption, .ocr) each have one, and
+	// the pass this one measures is not cheap — a full-size page takes seconds,
+	// which a reader of the timeline should see rather than infer.
+	var prepSpan *Span
+	if r.tracker != nil && r.imgSpan != nil {
+		prepSpan = r.tracker.BeginSubSpan(ctx, r.imgSpan, r.imgSpan.Name+".preprocess",
+			types.SpanKindSubSpan, nil)
+	}
+	resolve := func(failed bool) {
+		if prepSpan == nil {
+			return
+		}
+		if failed {
+			message, _ := r.out[keyPreprocessError].(string)
+			r.tracker.FailSpan(ctx, prepSpan, "PREPROCESS_FAILED", message, nil)
+			return
+		}
+		r.tracker.EndSpan(ctx, prepSpan, types.JSONMap{
+			"status": r.out[keyPreprocessResult],
+			"bytes":  r.out[keyPreprocessBytes],
+		})
+	}
+	// The call gets a deadline of its own rather than the task's: a document
+	// service that hangs must not hold a worker until the whole document's
+	// budget is gone. A call that runs past the cap is recorded like any other
+	// failure, and OCR reads the original bytes.
+	timeout := r.preprocessTimeout
+	if timeout <= 0 {
+		timeout = imagePreprocessTimeout
+	}
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	rectified, fallback, err := r.preprocessor.PreprocessImage(callCtx, r.imageBytes)
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Preprocess failed for %s: %v", r.payload.ImageURL, err)
 		r.out[keyPreprocessResult] = "failed"
 		r.out[keyPreprocessError] = err.Error()
+		resolve(true)
 		return nil
 	}
 	if fallback || len(rectified) == 0 {
 		logger.Infof(ctx, "[ImageMultimodal] Preprocess declined for %s; OCR will use the original",
 			r.payload.ImageURL)
 		r.out[keyPreprocessResult] = "skipped_declined"
+		resolve(false)
 		return nil
 	}
 	// The one line that does the work: everything downstream reads imageBytes.
@@ -768,6 +817,7 @@ func runPreprocessAction(ctx context.Context, r *runContext) error {
 	// original), and the pair is what shows how much of the photograph the
 	// crop and the perspective correction threw away.
 	r.out[keyPreprocessBytes] = len(rectified)
+	resolve(false)
 	return nil
 }
 
