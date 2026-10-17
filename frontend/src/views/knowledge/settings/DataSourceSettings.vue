@@ -15,6 +15,7 @@ import DataSourceEditorDialog from './DataSourceEditorDialog.vue'
 import DataSourceSyncLogs from './DataSourceSyncLogs.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 
 const props = defineProps<{ kbId: string }>()
 const emit = defineEmits<{ (e: 'count', value: number): void }>()
@@ -178,6 +179,7 @@ function onEditorSaved() {
 }
 
 onMounted(loadList)
+useAssistantDataChange(() => { void loadList(true) }, { areas: ['data_source'] })
 onBeforeUnmount(stopPolling)
 </script>
 
@@ -225,10 +227,7 @@ onBeforeUnmount(stopPolling)
                   <template #dropdown>
                     <t-dropdown-menu>
                       <t-dropdown-item v-if="canManageDataSource" @click="openEdit(ds)">
-                        <t-icon :name="ds.status === 'reauthorization_required' ? 'link' : 'edit'" />
-                        {{ ds.status === 'reauthorization_required'
-                          ? t('datasource.oauthReconnect')
-                          : t('datasource.edit') }}
+                        <t-icon name="edit" /> {{ t('datasource.edit') }}
                       </t-dropdown-item>
                       <t-dropdown-item
                         v-if="canManageDataSource"
@@ -259,9 +258,7 @@ onBeforeUnmount(stopPolling)
                         class="ds-dropdown-delete-item"
                       >
                         <t-popconfirm
-                          :content="t(ds.type === 'onedrive'
-                            ? 'datasource.deleteConfirmOneDrive'
-                            : 'datasource.deleteConfirm')"
+                          :content="t('datasource.deleteConfirm')"
                           :confirm-btn="{ content: t('datasource.delete'), theme: 'danger' }"
                           :cancel-btn="{ content: t('common.cancel') }"
                           placement="left"
@@ -354,14 +351,14 @@ onBeforeUnmount(stopPolling)
   margin-bottom: 28px;
 
   h2 {
-    font-size: 20px;
+    font-size: var(--app-text-3xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
     margin: 0 0 8px 0;
   }
 
   .section-description {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.6;
@@ -436,14 +433,14 @@ onBeforeUnmount(stopPolling)
       justify-content: center;
       width: 32px;
       height: 32px;
-      border-radius: 8px;
+      border-radius: var(--app-radius-md);
       background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
       color: var(--td-brand-color);
-      font-size: 18px;
+      font-size: var(--app-text-2xl);
     }
 
     &__label {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       font-weight: 500;
       line-height: 1.4;
     }
@@ -458,10 +455,10 @@ onBeforeUnmount(stopPolling)
     align-items: center;
     justify-content: center;
     margin-top: 1px;
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 600;
     letter-spacing: 0.02em;
-    background: rgba(7, 192, 95, 0.12);
+    background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
     color: #07c05f;
     overflow: hidden;
   }
@@ -469,9 +466,11 @@ onBeforeUnmount(stopPolling)
   &--feishu .ds-card__badge,
   &--notion .ds-card__badge,
   &--yuque .ds-card__badge,
-  &--onedrive .ds-card__badge,
+  &--ima .ds-card__badge,
+  &--connecting .ds-card__badge,
+  &--reauthorization_required .ds-card__badge,
   &--rss .ds-card__badge {
-    background: var(--td-bg-color-container, #fff);
+    background: var(--td-bg-color-container);
     box-shadow: inset 0 0 0 1px var(--td-component-stroke);
   }
 
@@ -491,7 +490,7 @@ onBeforeUnmount(stopPolling)
     flex: 1;
     min-width: 0;
     margin: 0;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 600;
     line-height: 1.4;
     color: var(--td-text-color-primary);
@@ -506,7 +505,7 @@ onBeforeUnmount(stopPolling)
     flex-wrap: wrap;
     gap: 4px;
     margin: 2px 0 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
     color: var(--td-text-color-secondary);
     min-width: 0;
@@ -525,15 +524,7 @@ onBeforeUnmount(stopPolling)
       color: var(--td-warning-color);
     }
 
-    &--connecting {
-      color: var(--td-brand-color);
-    }
-
     &--error {
-      color: var(--td-error-color);
-    }
-
-    &--reauthorization_required {
       color: var(--td-error-color);
     }
   }
@@ -544,7 +535,7 @@ onBeforeUnmount(stopPolling)
     flex-wrap: wrap;
     gap: 4px;
     margin: 4px 0 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.45;
     color: var(--td-text-color-placeholder);
     min-width: 0;
@@ -572,7 +563,7 @@ onBeforeUnmount(stopPolling)
   }
 
   &__metric {
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     font-variant-numeric: tabular-nums;
     color: var(--td-text-color-disabled);
   }
@@ -588,10 +579,10 @@ onBeforeUnmount(stopPolling)
     gap: 6px;
     margin-top: 8px;
     padding: 8px 10px;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     background: var(--td-error-color-1);
     color: var(--td-error-color);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.45;
     text-align: left;
   }
@@ -609,7 +600,7 @@ onBeforeUnmount(stopPolling)
     padding: 2px;
     opacity: 0;
     color: var(--td-text-color-placeholder);
-    transition: opacity 0.15s ease, color 0.15s ease;
+    transition: opacity var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
     &:hover,
     &:focus-visible {
@@ -634,12 +625,7 @@ onBeforeUnmount(stopPolling)
 }
 
 .ds-icon-spin {
-  animation: ds-spin 1s linear infinite;
-}
-
-@keyframes ds-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  animation: wk-spin 1s linear infinite;
 }
 
 :deep(.t-dropdown__item.ds-dropdown-delete-item) {

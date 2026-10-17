@@ -35,7 +35,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/application/repository"
-	memoryRepo "github.com/Tencent/WeKnora/internal/application/repository/memory/neo4j"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
@@ -56,7 +55,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/datasource"
-	feishuConnector "github.com/Tencent/WeKnora/internal/datasource/connector/feishu"
+	feishuCore "github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
+	feishuWiki "github.com/Tencent/WeKnora/internal/datasource/connector/feishu/wiki"
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
 	onedriveConnector "github.com/Tencent/WeKnora/internal/datasource/connector/onedrive"
 	rssConnector "github.com/Tencent/WeKnora/internal/datasource/connector/rss"
@@ -158,7 +158,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewAuthTokenRepository))
 	must(container.Provide(repository.NewSystemSettingRepository))
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
-	must(container.Provide(memoryRepo.NewMemoryRepository))
+	must(container.Provide(repository.NewMemoryRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
@@ -1580,7 +1580,7 @@ func initConnectorRegistry(
 	registry := datasource.NewConnectorRegistry()
 
 	var errs error
-	if err := registry.Register(feishuConnector.NewConnector()); err != nil {
+	if err := registry.Register(feishuWiki.NewConnector(feishuCore.RegionFeishu)); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register feishu connector: %w", err))
 	}
 	if err := registry.Register(notionConnector.NewConnector()); err != nil {
