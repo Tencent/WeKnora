@@ -724,6 +724,7 @@ export default {
       searchingSubtree: '(including sub-folders)',
       emptyFolder: 'This folder has no documents yet',
       emptyFolderWithSubfolders: 'This folder has no documents of its own, but {count} in sub-folders',
+      folderContentsCount: '{documents} documents / {folders} folders',
       emptySearch: 'No matching documents',
       collapse: 'Collapse folders',
       expand: 'Expand folders',

@@ -1,20 +1,28 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test, { type TestContext } from 'node:test'
+import { createI18n } from 'vue-i18n'
 import * as vue from 'vue'
 import * as stall from '../../utils/knowledgeProcessingStall.ts'
 import { fixture, flush } from '../../test-utils/vueFixture.ts'
+import enUS from '../../i18n/locales/en-US'
+import zhCN from '../../i18n/locales/zh-CN'
+import zhTW from '../../i18n/locales/zh-TW'
+import jaJP from '../../i18n/locales/ja-JP'
+import koKR from '../../i18n/locales/ko-KR'
+import ruRU from '../../i18n/locales/ru-RU'
 
 const source = readFileSync(new URL('./KnowledgeBase.vue', import.meta.url), 'utf8')
 
-// Mirrors the deployed DingTalk sync: a connector now produces multi-level
-// folders, so a parent folder can hold 0 documents of its own while its subtree
-// holds 5. Reading the direct count there made the page claim it was empty.
+// Mirrors the deployed DingTalk sync, which produces multi-level folders:
+// 售后 holds 2 documents of its own plus a video sub-folder with 1 more, so its
+// direct, sub-folder and recursive numbers are all different. The root has 3
+// documents of its own and 5 top-level folders, and the whole base holds 17.
 const syncedTree = {
   root_document_count: 3,
   total_document_count: 17,
   folders: [
-    { path: '培训材料库', name: '培训材料库', document_count: 3, total_count: 17 },
+    { path: '培训材料库', name: '培训材料库', document_count: 3, total_count: 3 },
     {
       path: '天诛渗透攻防',
       name: '天诛渗透攻防',
@@ -22,10 +30,24 @@ const syncedTree = {
       total_count: 5,
       children: [
         { path: '天诛渗透攻防/FAQ', name: 'FAQ', document_count: 2, total_count: 2 },
-        { path: '天诛渗透攻防/售后', name: '售后', document_count: 2, total_count: 2 },
-        { path: '天诛渗透攻防/2024使用培训视频', name: '2024使用培训视频', document_count: 1, total_count: 1 },
+        {
+          path: '天诛渗透攻防/售后',
+          name: '售后',
+          document_count: 2,
+          total_count: 3,
+          children: [
+            {
+              path: '天诛渗透攻防/售后/2024使用培训视频',
+              name: '2024使用培训视频',
+              document_count: 1,
+              total_count: 1,
+            },
+          ],
+        },
       ],
     },
+    { path: '设计规范', name: '设计规范', document_count: 4, total_count: 4 },
+    { path: '历史归档', name: '历史归档', document_count: 2, total_count: 2 },
     { path: '空目录', name: '空目录', document_count: 0, total_count: 0 },
   ],
 }
@@ -71,44 +93,91 @@ async function selectFolder(f: Awaited<ReturnType<typeof setup>>, path: string) 
 
 // ── Breadcrumb ──────────────────────────────────────────────────────────────
 
-test('the breadcrumb counts a folder recursively, not by its direct documents', async t => {
+test('the breadcrumb counts the documents and sub-folders the page can show', async t => {
   const f = await setup(t, syncedTree)
-  // Browsing lists only the folder's own documents, and its parent row holds none.
-  f.hook.total.value = 0
-  await selectFolder(f, '天诛渗透攻防')
-  assert.equal(f.vm.folderDocumentCount, 5)
+  f.hook.total.value = 2 // the two documents directly inside 售后
+  await selectFolder(f, '天诛渗透攻防/售后')
+  assert.equal(f.vm.folderContentsCount.documents, 2)
+  assert.equal(f.vm.folderContentsCount.folders, 1)
+  // 3 is the recursive document total (2 direct + 1 in the video sub-folder),
+  // which is what used to be shown next to a list of only 2.
+  assert.notEqual(f.vm.folderContentsCount.documents, 3)
+  // Fed through the real zh-CN bundle, the pair renders as DingTalk does.
+  assert.equal(renderFolderContents('zh-CN', f.vm.folderContentsCount), '2 个文档 / 1 个文件夹')
 })
 
-test('the root breadcrumb counts the whole knowledge base', async t => {
+test('the root breadcrumb counts the root documents and the top-level folders', async t => {
   const f = await setup(t, syncedTree)
   f.hook.total.value = 3 // the root-level documents only
   assert.equal(f.vm.selectedFolderPath, '')
-  assert.equal(f.vm.folderDocumentCount, 17)
+  assert.equal(f.vm.folderContentsCount.documents, 3)
+  assert.equal(f.vm.folderContentsCount.folders, 5)
+  // 17 is the whole knowledge base, not what the root list shows.
+  assert.notEqual(f.vm.folderContentsCount.documents, 17)
 })
 
-test('filtering keeps reporting the flat result count', async t => {
+test('the sub-folder number is direct children, not the documents below them', async t => {
   const f = await setup(t, syncedTree)
+  f.hook.total.value = 0
   await selectFolder(f, '天诛渗透攻防')
+  // FAQ and 售后: the two direct sub-folders.
+  assert.equal(f.vm.folderContentsCount.folders, 2)
+  // The empty state still reports the 5 documents inside those sub-folders.
+  assert.equal(f.vm.folderSubfolderDocumentCount, 5)
+  assert.equal(f.vm.folderEmptyState, 'subfolders')
+})
+
+test('filtering keeps the flat result count and adds no folder number', async t => {
+  const f = await setup(t, syncedTree)
+  await selectFolder(f, '天诛渗透攻防/售后')
   f.hook.total.value = 2 // two matching documents inside the subtree
   f.vm.docSearchKeyword = 'FAQ'
   await flush()
   assert.equal(f.vm.isFiltering, true)
-  assert.equal(f.vm.folderDocumentCount, 2)
+  assert.equal(f.vm.folderContentsCount.documents, 2)
+  assert.equal(f.vm.folderContentsCount.folders, 0)
 })
 
-test('an unloaded folder tree falls back to the loaded document total', async t => {
+test('an unloaded folder tree reports no folders instead of crashing', async t => {
   const f = await setup(t, null)
   f.hook.total.value = 4
   await selectFolder(f, '天诛渗透攻防')
   assert.equal(f.vm.folderTree, null)
-  assert.equal(f.vm.folderDocumentCount, 4)
+  assert.equal(f.vm.folderContentsCount.documents, 4)
+  assert.equal(f.vm.folderContentsCount.folders, 0)
 })
 
-test('a stale folder path falls back to the loaded document total', async t => {
+test('a stale folder path reports no folders instead of crashing', async t => {
   const f = await setup(t, syncedTree)
   f.hook.total.value = 2
   await selectFolder(f, '已删除/目录')
-  assert.equal(f.vm.folderDocumentCount, 2)
+  assert.equal(f.vm.folderContentsCount.documents, 2)
+  assert.equal(f.vm.folderContentsCount.folders, 0)
+})
+
+// ── Wording ─────────────────────────────────────────────────────────────────
+// The rendered numbers are the pair above; these assertions pin the message the
+// template feeds them into, so a single-number message cannot come back.
+const FOLDER_CONTENTS = 'knowledgeBase.folderTree.folderContentsCount'
+const locales = {
+  'zh-CN': zhCN, 'zh-TW': zhTW, 'en-US': enUS, 'ja-JP': jaJP, 'ko-KR': koKR, 'ru-RU': ruRU,
+}
+
+function renderFolderContents(
+  locale: keyof typeof locales,
+  counts: { documents: number; folders: number } = { documents: 2, folders: 1 },
+): string {
+  const i18n = createI18n({ legacy: false, locale, messages: { [locale]: locales[locale] } })
+  return i18n.global.t(FOLDER_CONTENTS, counts)
+}
+
+test('every locale renders both numbers as "documents / folders"', () => {
+  assert.equal(renderFolderContents('zh-CN'), '2 个文档 / 1 个文件夹')
+  assert.equal(renderFolderContents('zh-TW'), '2 個文件 / 1 個資料夾')
+  assert.equal(renderFolderContents('en-US'), '2 documents / 1 folders')
+  assert.equal(renderFolderContents('ja-JP'), '2 件のドキュメント / 1 個のフォルダ')
+  assert.equal(renderFolderContents('ko-KR'), '문서 2개 / 폴더 1개')
+  assert.equal(renderFolderContents('ru-RU'), 'Документов: 2 / Папок: 1')
 })
 
 // ── Empty state ─────────────────────────────────────────────────────────────
@@ -142,9 +211,22 @@ test('a knowledge base without folders keeps the onboarding empty state', async 
 
 // The rendered count and message come from the template, which the mounted
 // fixture does not render; these assertions keep the wiring honest.
-test('the breadcrumb renders the folder count and the flat total while filtering', () => {
-  assert.match(source, /\{ count: folderDocumentCount \}/)
-  assert.doesNotMatch(source, /\{ count: total \}/)
+function expectSource(pattern: RegExp) {
+  assert.ok(pattern.test(source), `KnowledgeBase.vue should match ${pattern}`)
+}
+
+test('the breadcrumb wires both numbers into the two-part message', () => {
+  expectSource(/\$t\('knowledgeBase\.folderTree\.folderContentsCount', folderContentsCount\)/)
+  expectSource(
+    /\$t\('knowledgeBase\.folderTree\.filteredCount', \{ count: folderContentsCount\.documents \}\)/,
+  )
+  expectSource(/v-if="isFiltering"/)
+  // The single-number knowledgeBase.documentCount message must be gone: it only
+  // ever described documents, which is what made the list and count disagree.
+  assert.ok(
+    !source.includes('knowledgeBase.documentCount'),
+    'the breadcrumb should no longer use the single-number documentCount message',
+  )
 })
 
 test('the empty state tells sub-folder documents apart from an empty folder', () => {

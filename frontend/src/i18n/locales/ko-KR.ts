@@ -7405,6 +7405,7 @@ export default {
       searchingSubtree: '(하위 폴더 포함)',
       emptyFolder: '이 폴더에는 아직 문서가 없습니다',
       emptyFolderWithSubfolders: '이 폴더에는 직접 문서가 없지만 하위 폴더에 {count}개가 있습니다',
+      folderContentsCount: '문서 {documents}개 / 폴더 {folders}개',
       emptySearch: '일치하는 문서가 없습니다',
       collapse: '폴더 접기',
       expand: '폴더 펼치기',

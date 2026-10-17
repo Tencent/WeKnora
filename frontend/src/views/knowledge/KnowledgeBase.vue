@@ -68,6 +68,7 @@ import { resolveKnowledgeDownloadFileName } from './knowledgeDownloadFileName';
 import {
   buildUploadFileName,
   canMoveFolderTo,
+  childFolders,
   folderBreadcrumbs as buildFolderBreadcrumbs,
   folderDocumentCounts,
   folderPathExists as folderExistsInTree,
@@ -818,14 +819,16 @@ const isFiltering = computed(() =>
 // A row's folder is worth showing only when the list can span folders.
 const showDocumentFolderPath = computed(() => hasFolders.value && isFiltering.value);
 const folderBreadcrumbs = computed(() => buildFolderBreadcrumbs(selectedFolderPath.value));
-// The count beside the breadcrumb describes the folder, not the page: a folder
-// whose documents all live in sub-folders still has a size. Filtering reports
-// the flat result set instead, and a tree that is loading or failed to load
-// falls back to the total of the list that did load.
-const folderDocumentCount = computed(() => {
-  if (isFiltering.value) return total.value;
-  return folderDocumentCounts(folderTree.value, selectedFolderPath.value)?.total ?? total.value;
-});
+// What the breadcrumb reports is the folder's own contents the way a file
+// manager counts them: the documents this list can show plus its direct
+// sub-folders, which the sidebar tree lists as rows. A recursive document total
+// here would not match what the page shows, so that number stays on the tree row
+// and in the empty state below. Filtering searches the subtree instead and
+// reports only the flat result set, so it adds no folder number.
+const folderContentsCount = computed<{ documents: number; folders: number }>(() => ({
+  documents: total.value,
+  folders: isFiltering.value ? 0 : childFolders(folderTree.value, selectedFolderPath.value).length,
+}));
 // Documents below the selected folder rather than directly inside it; this is
 // what tells "documents live in the sub-folders" apart from "nothing here yet".
 const folderSubfolderDocumentCount = computed(() => {
@@ -2432,7 +2435,10 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                     <span v-if="index === folderBreadcrumbs.length - 1" class="doc-folder-path__crumb is-current" :title="crumb.name" aria-current="page">{{ crumb.name }}</span>
                     <button v-else type="button" class="doc-folder-path__crumb" :title="crumb.name" @click="handleFolderSelect(crumb.path)">{{ crumb.name }}</button>
                   </template>
-                  <span v-if="!docListLoading" class="doc-folder-path__count">{{ $t(isFiltering ? 'knowledgeBase.folderTree.filteredCount' : 'knowledgeBase.documentCount', { count: folderDocumentCount }) }}</span>
+                  <span v-if="!docListLoading" class="doc-folder-path__count">
+                    <template v-if="isFiltering">{{ $t('knowledgeBase.folderTree.filteredCount', { count: folderContentsCount.documents }) }}</template>
+                    <template v-else>{{ $t('knowledgeBase.folderTree.folderContentsCount', folderContentsCount) }}</template>
+                  </span>
                   <t-tooltip v-if="showFolderTree && isFiltering" :content="$t('knowledgeBase.folderTree.searchingSubtree')">
                     <t-icon name="info-circle" class="doc-folder-path__sep" />
                   </t-tooltip>

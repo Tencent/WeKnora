@@ -161,8 +161,8 @@ function findFolderNode(
 }
 
 /**
- * Direct sub-folders of a folder, i.e. what the document list shows as folder
- * entries while browsing it. The root's children are the top-level folders.
+ * Direct sub-folders of a folder: the rows the sidebar tree renders underneath
+ * it. The root's children are the top-level folders.
  */
 export function childFolders(
   tree: KnowledgeFolderTree | null,

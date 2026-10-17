@@ -7406,6 +7406,7 @@ export default {
       searchingSubtree: '（含子目录）',
       emptyFolder: '这个文件夹里还没有文档',
       emptyFolderWithSubfolders: '这个目录里没有直接文档，子目录里有 {count} 个',
+      folderContentsCount: '{documents} 个文档 / {folders} 个文件夹',
       emptySearch: '没有匹配的文档',
       collapse: '收起目录',
       expand: '展开目录',
