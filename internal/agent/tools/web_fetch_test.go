@@ -35,6 +35,11 @@ func (fetcher *stubWebContentFetcher) Fetch(_ context.Context, rawURL string) (s
 	return fetcher.contents[rawURL], nil
 }
 
+func TestWebPageFetchTimeoutUsesTheAgentBudget(t *testing.T) {
+	require.Equal(t, webfetch.AgentFetchTimeout, webPageFetchTimeout)
+	require.Greater(t, webPageFetchTimeout, 60*time.Second)
+}
+
 func TestWebFetchSchemaExposesOnlyPageReadParameters(t *testing.T) {
 	var schema struct {
 		Properties map[string]struct {

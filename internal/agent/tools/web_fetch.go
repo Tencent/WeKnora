@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-	"time"
 	"unicode/utf8"
 
 	webfetch "github.com/Tencent/WeKnora/internal/infrastructure/web_fetch"
@@ -17,7 +16,7 @@ import (
 )
 
 const (
-	webPageFetchTimeout = 150 * time.Second
+	webPageFetchTimeout = webfetch.AgentFetchTimeout
 	webPageCacheLimit   = 8
 )
 

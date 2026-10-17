@@ -23,9 +23,10 @@ import (
 )
 
 const (
-	// fetchTimeout is the agent page budget. It matches webPageFetchTimeout in
-	// the web_fetch tool; the agent wrapper waits a few seconds longer.
-	fetchTimeout         = 150 * time.Second
+	// AgentFetchTimeout is how long an agent web_fetch may spend downloading
+	// one page, including the browser fallback. The agent tool wrapper waits
+	// a few seconds longer so this fetcher can return its own timeout.
+	AgentFetchTimeout    = 150 * time.Second
 	pipelineFetchTimeout = 15 * time.Second
 	maxBodySize          = 100 * 1024
 	maxAgentBodySize     = 2 * 1024 * 1024
@@ -118,7 +119,7 @@ type httpFetchResult struct {
 
 // NewFetcher creates a production fetcher with DNS and redirect SSRF guards.
 func NewFetcher() *Fetcher {
-	f := newFetcher(fetchTimeout, renderWithChromium)
+	f := newFetcher(AgentFetchTimeout, renderWithChromium)
 	f.markdown = true
 	f.maxBodySize = maxAgentBodySize
 	return f
@@ -352,7 +353,7 @@ func renderWithChromium(ctx context.Context, target pinnedTarget) (string, error
 	defer cancelAllocator()
 	browserCtx, cancelBrowser := chromedp.NewContext(allocatorCtx)
 	defer cancelBrowser()
-	browserCtx, cancelTimeout := context.WithTimeout(browserCtx, fetchTimeout)
+	browserCtx, cancelTimeout := context.WithTimeout(browserCtx, AgentFetchTimeout)
 	defer cancelTimeout()
 	var html string
 	if err := chromedp.Run(browserCtx,

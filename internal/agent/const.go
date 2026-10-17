@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
 	"github.com/Tencent/WeKnora/internal/browserskill"
+	webfetch "github.com/Tencent/WeKnora/internal/infrastructure/web_fetch"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
@@ -42,11 +43,10 @@ const (
 	// 600-second command timeout so the tool can return a structured timeout
 	// result instead of being cancelled first by the generic agent wrapper.
 	shellExecToolTimeout = 10*time.Minute + 5*time.Second
-	// webFetchToolTimeout is slightly longer than the 150s page-download
-	// budget in tools/web_fetch.go and infrastructure/web_fetch. A slow page
-	// can finish, and a page that still times out returns the fetcher's own
-	// error instead of the generic wrapper.
-	webFetchToolTimeout = 150*time.Second + 5*time.Second
+	// webFetchToolTimeout is slightly longer than the page-download budget so a
+	// slow page can finish, and a page that still times out returns the
+	// fetcher's own error instead of the generic wrapper.
+	webFetchToolTimeout = webfetch.AgentFetchTimeout + 5*time.Second
 	// tryAgentToolTimeout is above the trial runner's own 4-minute limit so
 	// a slow trial still reports what the agent did before it was stopped.
 	tryAgentToolTimeout = 4*time.Minute + 30*time.Second
