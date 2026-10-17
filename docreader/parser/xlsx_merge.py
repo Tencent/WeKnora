@@ -39,10 +39,16 @@ PERCENT_AS_TEXT_ENV = "DOCREADER_XLSX_PERCENT_AS_TEXT"
 ROW_HINT_MIN_ENV = "DOCREADER_XLSX_PCT_ROW_HINT_MIN"
 _DEFAULT_ROW_HINT_MIN = 0
 
-# Decimal places of the displayed text: "0.00%" -> 2, "0.0%" -> 1.
-_PCT_DECIMALS = re.compile(r"\.(0+)%")
-# "0%" (and "[Red]0%") display whole percents, with no decimals at all.
-_PCT_NO_DECIMALS = re.compile(r"0\s*%")
+# Only materialize a known numeric percentage pattern. Excel literals, conditions,
+# scaling and arbitrary decorations require a full format renderer; leave those
+# values untouched rather than guessing that every '%' means multiply by 100.
+_PERCENT_PATTERN = re.compile(
+    r"(?P<sign>-?)(?P<open>\()?(?P<group>#,##)?0"
+    r"(?:\.(?P<decimals>0+))?%(?P<close>\))?"
+)
+_FORMAT_COLOR = re.compile(
+    r"\[(?:Black|Blue|Cyan|Green|Magenta|Red|White|Yellow|Color[0-9]+)\]", re.I
+)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -68,31 +74,34 @@ def percent_as_text_default() -> bool:
     return _env_bool(PERCENT_AS_TEXT_ENV, False)
 
 
-def _percent_decimals(number_format: str) -> int:
-    """Decimal places *number_format* displays: "0.00%" -> 2, "0%" -> 0."""
-    match = _PCT_DECIMALS.search(number_format)
-    if match:
-        return len(match.group(1))
-    if _PCT_NO_DECIMALS.search(number_format):
-        return 0
-    return 2
-
-
 def _format_percentage(value, number_format: str):
-    """Render ``0.6112`` together with ``'0.00%'`` as ``'61.12%'``.
-
-    Returns ``None`` when the cell must keep its value: no percentage format,
-    not a number, or a value the format cannot be applied to.
-    """
+    """Render supported Excel percentage formats, leaving other formats intact."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
     if not number_format or "%" not in number_format:
         return None
-    if isinstance(value, bool):  # bool is an int subclass: never a percentage
+    # Quoted/escaped percentages are literal text, not percentage operators.
+    # Reject unsupported conditions across all sections before selecting one.
+    cleaned = _FORMAT_COLOR.sub("", number_format)
+    if any(char in cleaned for char in ('"', "\\", "_", "*", "[", "]")):
         return None
-    if not isinstance(value, (int, float)):
+    sections = cleaned.split(";")
+    if len(sections) > 4:
         return None
-    decimals = _percent_decimals(number_format)
+    section_index = 1 if value < 0 and len(sections) >= 2 else 0
+    if value == 0 and len(sections) >= 3:
+        section_index = 2
+    match = _PERCENT_PATTERN.fullmatch(sections[section_index].strip())
+    if not match or bool(match["open"]) != bool(match["close"]):
+        return None
+    decimals = len(match["decimals"] or "")
+    # Excel's negative section formats the magnitude; a single section instead
+    # supplies the minus sign automatically.
+    amount = abs(value) if section_index == 1 else value
+    grouping = "," if match["group"] else ""
     try:
-        return f"{float(value) * 100:.{decimals}f}%"
+        number = f"{float(amount) * 100:{grouping}.{decimals}f}"
+        return f"{match['sign']}{match['open'] or ''}{number}%{match['close'] or ''}"
     except (TypeError, ValueError, OverflowError):
         return None
 
@@ -116,7 +125,7 @@ def _materialize_percentage_cells(ws, row_hint_min: int) -> tuple[int, int]:
                 1
                 for cell in row
                 if type(cell.value) in (int, float)  # noqa: E721 - excludes bool
-                and "%" in str(cell.number_format or "")
+                and _format_percentage(cell.value, cell.number_format) is not None
             )
             if count:
                 row_hints[row[0].row] = count
@@ -129,7 +138,12 @@ def _materialize_percentage_cells(ws, row_hint_min: int) -> tuple[int, int]:
             if type(cell.value) not in (int, float):  # noqa: E721 - excludes bool
                 continue
             text = _format_percentage(cell.value, cell.number_format)
-            if text is None and hint >= row_hint_min > 0 and 0 < abs(cell.value) < 1:
+            if (
+                text is None
+                and "%" not in str(cell.number_format or "")
+                and hint >= row_hint_min > 0
+                and 0 < abs(cell.value) < 1
+            ):
                 # Fallback for a cell that lost its percentage format while its
                 # row kept one. Logged because it rewrites an unformatted value.
                 text = f"{float(cell.value) * 100:.2f}%"

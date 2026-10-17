@@ -24,7 +24,7 @@ import openpyxl
 
 from docreader.parser.excel_parser import ExcelParser
 from docreader.parser.parser import Parser
-from docreader.parser.xlsx_merge import fill_merged_cells_xlsx
+from docreader.parser.xlsx_merge import fill_merged_cells_xlsx, _format_percentage
 
 PERCENT_ENV = "DOCREADER_XLSX_PERCENT_AS_TEXT"
 ROW_HINT_ENV = "DOCREADER_XLSX_PCT_ROW_HINT_MIN"
@@ -286,6 +286,41 @@ class PercentMaterializationOnTests(unittest.TestCase):
             self.assertEqual(
                 _read_cells(fill_merged_cells_xlsx(content), "D2"), ["50.00%"]
             )
+
+
+class PercentageFormatSyntaxTests(unittest.TestCase):
+    def test_literal_and_conditional_percent_formats_are_not_scaled(self):
+        for fmt in (r"0.00\%", '0.00"%"', '[>1]0%;0.00%', '0.00%" growth"'):
+            with self.subTest(fmt=fmt):
+                self.assertIsNone(_format_percentage(0.5, fmt))
+
+    def test_selects_the_section_for_the_value(self):
+        for value, fmt, expected in (
+            (0.5, "0%;0.00%", "50%"),
+            (-0.5, "0%;[Red]-0.00%", "-50.00%"),
+            (-0.5, "0%;(0.00%)", "(50.00%)"),
+            (0, "0%;0.00%;0.0%", "0.0%"),
+            (-0.5, "0.00%", "-50.00%"),
+            (12.345, "#,##0.00%", "1,234.50%"),
+        ):
+            with self.subTest(value=value, fmt=fmt):
+                self.assertEqual(_format_percentage(value, fmt), expected)
+
+    def test_row_hint_does_not_convert_literal_percent_or_count_it_as_a_hint(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["label", "percent", "literal", "plain"])
+        ws.append(["mixed", 0.5, 0.5, 0.5])
+        ws.append(["literal only", 0.5, 0.5, 0.5])
+        ws["B2"].number_format = "0%"
+        ws["C2"].number_format = r"0.00\%"
+        ws["B3"].number_format = '0.00"%"'
+        data = io.BytesIO()
+        wb.save(data)
+        with patch.dict(os.environ, {PERCENT_ENV: "true", ROW_HINT_ENV: "1"}):
+            result = fill_merged_cells_xlsx(data.getvalue())
+        self.assertEqual(_read_cells(result, "B2", "C2", "D2"), ["50%", 0.5, "50.00%"])
+        self.assertEqual(_read_cells(result, "B3", "C3", "D3"), [0.5, 0.5, 0.5])
 
 
 class PercentMaterializationSwitchTests(unittest.TestCase):
