@@ -140,6 +140,7 @@ npm run test:integration
 - `static-site/`：唯一的部署目录，由构建生成。
 - `deploy/`、`Dockerfile`：Nginx 和 Docker 部署配置。
 - `releases/`：生成的部署压缩包。
+- `embed.go`：把 `01-getting-started/` 至 `07-releases/` 的正文编进 WeKnora 服务端，供内置的 WeKnora 助手检索和引用。新增分类目录时，同步更新 `embed.go` 和 `internal/productdocs/library.go` 中的分类列表。服务端测试会检查每篇正文能否解析、站内链接与锚点是否有效。
 
 品牌素材来源见 [homepage/BRAND-ASSETS.md](homepage/BRAND-ASSETS.md)。产品视频使用 README 中的 GitHub 原始附件，播放需要访问 GitHub；页面、文档和截图随包部署。
 

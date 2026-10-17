@@ -182,14 +182,14 @@ curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/tags/t-1 -H "Authorization: Bearer
 
 ### DELETE /api/v1/knowledge-bases/:id/tags/:tag_id
 
-用途：删除标签。查询参数：`force`（bool，强制删除被引用的标签）、`content_only`（bool，仅删除标签下的内容、保留标签）。请求体（可选）：`{"exclude_ids":[int64]}`，列出删除时保留的 FAQ 条目 seq_id。
+用途：删除标签。查询参数：`force`（bool，连同仍引用该标签的文档或 FAQ 条目一起删除）、`content_only`（bool，仅删除标签下的内容、保留标签）。请求体（可选）：`{"exclude_ids":[int64]}`，列出删除时保留的 FAQ 条目 seq_id。不传 `force` 时，仍有知识或 FAQ 引用该标签会返回 400，文档不会被删除。
 
 请求体格式不合法或 ID 非正整数返回 400；ID 不存在返回 404；ID 不属于当前知识库的 FAQ 条目返回 403。
 
 响应：200 `{"success":true}`
 
 ```bash
-curl -X DELETE "$BASE/api/v1/knowledge-bases/kb-1/tags/t-1?force=true" -H "Authorization: Bearer $TOKEN"
+curl -X DELETE $BASE/api/v1/knowledge-bases/kb-1/tags/t-1 -H "Authorization: Bearer $TOKEN"
 ```
 
 ## 分块调试

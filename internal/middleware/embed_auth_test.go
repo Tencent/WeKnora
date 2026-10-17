@@ -550,3 +550,7 @@ func TestEmbedAuthHostAllowlist(t *testing.T) {
 		})
 	}
 }
+
+func (f *fakeTenantService) UpdateTenantProfile(context.Context, uint64, *string, *string) (*types.Tenant, error) {
+	panic("unexpected UpdateTenantProfile call")
+}

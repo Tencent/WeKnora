@@ -21,6 +21,10 @@ const (
 	MCPTransportStdio          MCPTransportType = "stdio"           // Stdio (Standard Input/Output)
 )
 
+// MCPUpdateDropSecrets is an update field-map flag that clears the service's
+// API key, token and custom headers along with the update.
+const MCPUpdateDropSecrets = "drop_secrets"
+
 // MCPService represents an MCP (Model Context Protocol) service configuration
 type MCPService struct {
 	// UsageInstructions is maintained locally and is not overwritten by directory refresh.
@@ -138,11 +142,11 @@ type MCPEnvVars map[string]string
 
 // MCPTool represents a tool exposed by an MCP service
 type MCPTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
+	Name        string          `json:"name" extensions:"x-agent"`
+	Description string          `json:"description" extensions:"x-agent,x-agent-max-runes=500"`
 	InputSchema json.RawMessage `json:"inputSchema"` // JSON Schema for tool parameters
 	// RequireApproval when true: agent execution pauses until the user approves in UI (issue #1173).
-	RequireApproval bool `json:"require_approval,omitempty"`
+	RequireApproval bool `json:"require_approval,omitempty" extensions:"x-agent"`
 }
 
 // MCPToolApproval persists per-tool policies for an MCP service, including
@@ -189,14 +193,14 @@ type MCPResource struct {
 
 // MCPTestResult represents the result of testing an MCP service connection
 type MCPTestResult struct {
-	Success     bool   `json:"success"`
-	Message     string `json:"message,omitempty"`
+	Success     bool   `json:"success" extensions:"x-agent"`
+	Message     string `json:"message,omitempty" extensions:"x-agent,x-agent-max-runes=500"`
 	Description string `json:"description,omitempty"`
 	// OAuthRequired is true when the connection failed because the server
 	// requires OAuth authorization (RFC 9728), even though the service was not
 	// configured for OAuth. The UI uses it to guide the user to switch the auth
 	// strategy to OAuth.
-	OAuthRequired bool           `json:"oauth_required,omitempty"`
+	OAuthRequired bool           `json:"oauth_required,omitempty" extensions:"x-agent"`
 	Tools         []*MCPTool     `json:"tools,omitempty"`
 	Resources     []*MCPResource `json:"resources,omitempty"`
 }

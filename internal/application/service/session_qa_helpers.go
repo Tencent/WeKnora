@@ -154,7 +154,7 @@ func (s *sessionService) resolveChatModelID(
 
 	if customAgent != nil {
 		configuredAgentModelID = strings.TrimSpace(customAgent.Config.ModelID)
-		if configuredAgentModelID == "" && !types.UsesFallbackChatModel(customAgent) {
+		if configuredAgentModelID == "" && !types.UsesWorkspaceModelFallback(customAgent) {
 			return "", fmt.Errorf("chat model is not configured: please set model_id on agent %s", customAgent.ID)
 		}
 		if configuredAgentModelID != "" {

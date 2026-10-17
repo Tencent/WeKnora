@@ -972,6 +972,13 @@ export default {
     pauseFailed: '일시정지 실패',
     logs: '로그',
     syncModeLabel: '동기화 모드',
+    parseModeLabel: '구문 분석 모드',
+    parseMode: {
+      inherit: '서버 설정 사용',
+      blocks: '블록 분석 (기본값)',
+      export: '내보내기 분석 (docx)',
+    },
+    parseModeHint: 'Feishu 클라우드 문서의 구문 분석 방식입니다. 블록 분석은 더 빠르고 문서 내 첨부 파일을 유지합니다. 내보내기 분석은 docx로 변환하여 분석하며 이미지와 문서의 연관성이 더 잘 유지됩니다.',
     createTitle: '데이터 소스 추가',
     editTitle: '데이터 소스 편집',
     nameLabel: '이름',
@@ -1828,7 +1835,34 @@ export default {
       shellExec: '샌드박스 명령 실행',
       dataAnalysis: '데이터 분석',
       dataSchema: '데이터 구조',
-      databaseQuery: '데이터베이스 조회'
+      databaseQuery: '데이터베이스 조회',
+      findOperations: '작업 찾기',
+      runOperation: '작업 실행',
+      tryAgent: '에이전트 시험 실행',
+      openPage: '페이지 열기',
+      searchWeKnoraDocs: '제품 문서 검색',
+      readWeKnoraDoc: '제품 문서 읽기',
+      readPage: '페이지 보기',
+      selectTab: '탭 선택',
+      fillPage: '페이지 입력'
+    },
+    pageAccess: {
+      viewed: '현재 페이지를 확인했습니다: {location}'
+    },
+    pageEdit: {
+      title: '{count}곳을 입력했습니다',
+      undo: '되돌리기',
+      undone: '입력을 되돌렸습니다',
+      undoSkipped: '{count}곳은 이미 변경되었거나 페이지에 없어 그대로 두었습니다',
+      unsaved: '아직 저장되지 않았습니다. 확인 후 페이지에서 저장하세요.'
+    },
+    openPage: {
+      open: '열기',
+      openForm: '열고 입력',
+      opened: '어시스턴트가 열었습니다',
+      back: '돌아가기',
+      endpoint: '연결 대상: ',
+      draftHint: '어시스턴트가 미리 채웠습니다. API 키 등 자격 증명을 입력하고 확인한 뒤 직접 저장하세요.'
     },
     skillFiles: {
       heading: '스킬 파일',
@@ -1870,6 +1904,188 @@ export default {
       killed: '시간 초과로 종료됨',
       binarySuppressed: '바이너리 출력은 생략되었습니다. 파일은 산출물 디렉터리에 저장한 뒤 다운로드하세요.'
     },
+    operations: {
+      names: {
+        data_source: {
+          list: "데이터 소스 목록 조회",
+          get: "데이터 소스 상세 조회",
+          test: "데이터 소스 연결 테스트",
+          sync: "데이터 소스 동기화",
+          pause: "데이터 소스 동기화 일시 중지",
+          resume: "데이터 소스 동기화 재개",
+          list_sync_logs: "데이터 소스 동기화 이력 조회",
+          get_sync_log: "데이터 소스 동기화 진행 상황 조회",
+          list_resources: "동기화 가능한 리소스 조회",
+          update_sync: "데이터 소스 동기화 설정 수정",
+        },
+        agent: {
+          list: "에이전트 목록 조회",
+          create: "에이전트 생성",
+          get: "에이전트 상세 조회",
+          delete: "에이전트 삭제",
+          update: "에이전트 수정",
+          copy: "에이전트 복사",
+        },
+        chunk: {
+          get: "청크 상세 조회",
+          update: "청크 수정",
+          list_revisions: "청크 변경 이력 조회",
+          revert: "청크 이전 버전 복원",
+          list: "지식 청크 목록 조회",
+        },
+        knowledge_base: {
+          list_parser_engines: "사용 가능한 파싱 엔진 조회",
+          copy: "지식베이스 내용 복사",
+          duplicate: "지식베이스 설정 복사",
+          get_copy_progress: "지식베이스 복사 진행 상황 조회",
+          list: "지식 베이스 목록 조회",
+          create: "지식 베이스 생성",
+          get: "지식 베이스 상세 조회",
+          delete: "지식 베이스 삭제",
+          update: "지식 베이스 수정",
+          list_activity: "지식 베이스 활동 조회",
+          search: "지식 베이스 검색",
+          list_move_targets: "이동 대상 지식 베이스 조회",
+          generate_profile: "지식 베이스 설명 생성",
+          list_tags: "지식 베이스 태그 목록 조회",
+          create_tag: "지식 베이스 태그 생성",
+          update_tag: "지식 베이스 태그 수정",
+          delete_tag: "지식 베이스 태그 삭제",
+          list_shared: "공유 지식 베이스 목록 조회",
+        },
+        faq: {
+          batch_update: "FAQ 상태 및 태그 일괄 수정",
+          list_entries: "FAQ 항목 목록 조회",
+          delete_entries: "FAQ 항목 일괄 삭제",
+          get_entry: "FAQ 항목 상세 조회",
+          update_entry: "FAQ 항목 수정",
+          add_similar_questions: "유사 질문 추가",
+          create_entry: "FAQ 항목 생성",
+        },
+        knowledge: {
+          list: "지식 목록 조회",
+          list_folders: "지식 폴더 목록 조회",
+          rename_folder: "폴더 이름 변경 또는 이동",
+          create_manual: "지식 수동 생성",
+          create_from_url: "URL에서 지식 생성",
+          batch_delete: "지식 일괄 삭제",
+          batch_reparse: "지식 일괄 재분석",
+          move_to_folder: "지식을 폴더로 이동",
+          update_manual: "수동 생성 지식 수정",
+          move: "지식을 다른 지식 베이스로 이동",
+          get_move_progress: "지식 이동 진행 상황 조회",
+          set_tags: "지식 태그 설정",
+          get: "지식 상세 조회",
+          update: "지식 수정",
+          delete: "지식 삭제",
+          cancel_parse: "지식 분석 취소",
+          reparse: "지식 재분석",
+          get_parse_progress: "지식 분석 진행 상황 조회",
+        },
+        wiki: {
+          list_folders: "Wiki 폴더 목록 조회",
+          create_folder: "Wiki 폴더 생성",
+          list_issues: "Wiki 페이지 문제 목록 조회",
+          lint: "Wiki 페이지 검사",
+          move_page: "Wiki 페이지 이동",
+          get_page: "Wiki 페이지 조회",
+          rebuild_links: "Wiki 링크 재구축",
+          revert: "Wiki 페이지 버전 복원",
+          list_revisions: "Wiki 페이지 버전 목록 조회",
+          get_stats: "Wiki 통계 조회",
+        },
+        system_admin: {
+          list_admins: "시스템 관리자 조회",
+          list_users: "플랫폼 사용자 조회",
+          list_settings: "시스템 설정 조회",
+          get_queues: "작업 큐 실행 상태 조회",
+          list_tasks: "큐 작업 조회",
+        },
+        workspace: {
+          get: "현재 워크스페이스 정보 조회",
+          update: "현재 워크스페이스 기본 정보 수정",
+          list_members: "현재 워크스페이스 구성원 조회",
+        },
+        system: {
+          get_info: "버전 및 시스템 정보 조회",
+        },
+        web_search_provider: {
+          list: "웹 검색 서비스 목록 조회",
+          get: "웹 검색 서비스 상세 조회",
+          list_types: "웹 검색 서비스 유형 조회",
+          test: "웹 검색 연결 테스트",
+          update: "웹 검색 서비스 수정",
+          delete: "웹 검색 서비스 삭제",
+        },
+        mcp_service: {
+          list: "MCP 서비스 목록 조회",
+          create: "MCP 서비스 생성",
+          get: "MCP 서비스 상세 조회",
+          update: "MCP 서비스 수정",
+          delete: "MCP 서비스 삭제",
+          test: "MCP 서비스 연결 테스트",
+          list_tools: "MCP 도구 실시간 조회",
+          get_metadata: "동기화된 MCP 도구 보기",
+          refresh_metadata: "MCP 도구 목록 동기화",
+        },
+        message: {
+          chat_history_stats: "채팅 기록 통계 조회",
+          search: "대화 기록 검색",
+          list: "메시지 기록 조회",
+        },
+        model: {
+          list: "모델 목록 조회",
+          list_providers: "모델 제공업체 목록 조회",
+          get_provider: "모델 제공업체 상세 조회",
+          get: "모델 상세 조회",
+          delete: "모델 삭제",
+          update: "모델 표시 정보 수정",
+          copy: "모델 설정 복사",
+        },
+        skill: {
+          list_installed: "설치된 스킬 목록 조회",
+          install: "스킬 설치",
+          get_installed: "설치된 스킬 상세 조회",
+          uninstall: "스킬 제거",
+          set_enabled: "스킬 활성화 상태 설정",
+          list: "실행 가능한 스킬 목록 조회",
+          list_catalog: "워크스페이스 스킬 목록 조회",
+          get_catalog: "워크스페이스 스킬 상세 조회",
+          install_catalog: "카탈로그 스킬을 샌드박스에 설치",
+        },
+        session: {
+          list: "대화 목록 조회",
+        },
+      },
+      found: '실행 가능 {count}개',
+      unavailableCount: '현재 사용 불가 {count}개',
+      empty: '일치하는 작업이 없습니다',
+      unavailableHeading: '현재 사용 불가',
+      parameters: '매개변수',
+      required: '필수',
+      enum: '허용 값',
+      range: '범위 {min}–{max}',
+      risk: {
+        read: '읽기',
+        probe: '점검',
+        write: '쓰기',
+        destructive: '되돌릴 수 없음'
+      },
+      truncated: '결과가 잘렸습니다',
+      emptyResult: '반환된 데이터가 없습니다',
+      failed: '작업 실패',
+      meta: '추가 정보'
+    },
+    weknoraDocs: {
+      pages: '문서 {count}편',
+      hits: '일치하는 섹션 {count}개',
+      empty: '일치하는 문서가 없습니다',
+      outline: '목차',
+      content: '본문',
+      truncated: '본문이 이어집니다',
+      failed: '읽기 실패',
+      openDoc: '문서 사이트에서 열기'
+    },
     mcpOAuth: {
       waiting: '인증 대기 · {target}',
       waitingStatus: '인증 대기',
@@ -1890,6 +2106,7 @@ export default {
       skipFailed: '건너뛰기 실패, 다시 시도하세요'
     },
     askUser: {
+      answerLabel: '내 답변',
       title: '질문이 있습니다',
       selectPlaceholder: '선택하세요',
       textPlaceholder: '답변을 입력하세요',
@@ -1920,9 +2137,15 @@ export default {
       waitingStatus: '승인 대기',
       targetWithTool: '{service} › {tool}',
       dockQuestion: '{target} 실행을 허용할까요?',
+      operationQuestion: '{action} “{target}”을(를) 허용할까요?',
+      operationQuestionNoTarget: '{action}을(를) 허용할까요?',
+      operationTarget: '{action} “{target}”',
+      reviewTitle: '검토 · {target}',
+      characterCount: '{count}자',
       titleWithTarget: '검토 · {service} › {tool}',
       argsLabel: '인수',
       argsModified: '수정됨',
+      allowInSession: '이 대화에서 같은 작업은 모두 허용',
       countdownShort: '{seconds}초',
       approve: '승인 후 실행',
       reject: '거부',
@@ -1934,7 +2157,59 @@ export default {
       invalidJson: '유효한 JSON이 아닙니다',
       submitted: '제출됨',
       submitFailed: '제출 실패',
-      userRejected: '사용자 거부'
+      userRejected: '사용자 거부',
+      detail: {
+        type: '유형',
+        embeddingModel: '임베딩 모델',
+        summaryModel: '요약 모델',
+        captionModel: '이미지 설명',
+        speechModel: '음성 인식',
+        storage: '스토리지',
+        indexes: '인덱스',
+        name: '이름',
+        title: '제목',
+        status: '상태',
+        summary: '설명',
+        model: '모델',
+        mode: '모드',
+        url: '링크',
+        from: '출발',
+        to: '도착',
+        folder: '폴더',
+        page: '페이지',
+        version: '버전',
+        documents: '문서',
+        knowledgeBases: '지식베이스',
+        mcpServices: 'MCP 서비스',
+        skills: '스킬',
+        webSearch: '웹 검색',
+        multiTurn: '멀티턴',
+        transport: '전송 방식',
+        authentication: '인증 방식',
+        usageInstructions: '사용 안내',
+        displayName: '표시 이름',
+        enabled: '사용',
+        sandbox: '샌드박스',
+        sandboxes: '샌드박스',
+        systemPrompt: '시스템 프롬프트',
+        content: '내용',
+        kbScope: '지식베이스 범위',
+        mcpScope: 'MCP 범위',
+        skillsScope: '스킬 범위'
+      },
+      value: {
+        document: '문서',
+        faq: 'FAQ',
+        wiki: 'Wiki',
+        on: '켜짐',
+        off: '꺼짐',
+        vector: '벡터',
+        keyword: '키워드',
+        graph: '그래프',
+        quickAnswer: '빠른 답변',
+        smartReasoning: '스마트 추론',
+        indexSep: ', '
+      }
     }
   },
   kbSettings: {
@@ -2048,6 +2323,143 @@ export default {
     todoWrite: '계획 수립',
     askUser: '사용자에게 질문'
   },
+  assistant: {
+    title: 'WeKnora 어시스턴트',
+    newConversation: '새 대화',
+    history: '대화 기록',
+    untitledConversation: '제목 없는 대화',
+    historyEmpty: '아직 대화 기록이 없습니다',
+    historyFailed: '대화 기록을 불러오지 못했습니다',
+    loadMore: '더 불러오기',
+    resize: '어시스턴트 너비 조정',
+    layout: {
+      dock: '오른쪽에 고정',
+      float: '떠 있는 창으로 전환',
+    },
+    welcomeTitle: '무엇을 도와드릴까요?',
+    agentWelcomeDesc: '이 에이전트의 설정을 확인하고, 모델을 변경하거나 검색할 수 있는 지식 베이스를 확인할 수 있습니다.',
+    welcomeDesc: 'WeKnora 사용법을 안내하고, 워크스페이스의 문서 파싱, 지식 베이스 활동, Wiki 문제를 확인하고 처리하며, 에이전트를 만들고 설정할 수도 있습니다. 변경 전에 확인을 요청할지는 입력창 아래의 권한 수준에 따라 정해집니다.',
+    startFailed: '어시스턴트를 시작하지 못했습니다. 다시 시도해 주세요.',
+    askAboutDocument: '{name}에게 묻기',
+    askAboutAnswer: '이 답변에 대해 {name}에게 묻기',
+    selection: {
+      label: '선택됨',
+      lines: '{count}줄 선택됨',
+      detach: '선택한 내용 빼기',
+      tip: '보낼 때 선택한 내용을 함께 보냅니다: {text}',
+      tipField: '보낼 때 「{field}」에서 선택한 내용을 함께 보냅니다: {text}'
+    },
+    bubble: {
+      label: '어시스턴트 빠른 작업',
+      ask: '어시스턴트에게 묻기',
+      polish: '다듬기',
+      rewrite: '다시 쓰기',
+      translate: '번역',
+      continue: '이어 쓰기',
+      prompts: {
+        polish: '선택한 내용을 다듬어 주세요. 오타와 어색한 표현을 고치되 의미는 바꾸지 말고 그 자리에서 바꿔 주세요.',
+        rewrite: '선택한 내용을 더 명확하고 간결하게 다시 써서 그 자리에서 바꿔 주세요.',
+        translate: '선택한 내용을 번역해 주세요. 중국어는 영어로, 다른 언어는 중국어로 옮겨 그 자리에서 바꿔 주세요.',
+        continue: '선택한 내용 뒤에 문맥에 맞는 문단을 하나 이어 써 주세요.'
+      }
+    },
+    fillNotice: {
+      title: '어시스턴트가 {count}곳을 입력했습니다',
+      undo: '되돌리기',
+      dismiss: '닫기'
+    },
+    access: {
+      title: '권한 수준',
+      capped: '워크스페이스 관리자가 허용하지 않았습니다',
+      page: {
+        label: '현재 페이지 보기 및 입력',
+        desc: '왼쪽 페이지를 읽고 양식을 대신 입력할 수 있습니다. 버튼을 누르거나 저장하지 않습니다.'
+      },
+      levels: {
+        read_only: {
+          label: '읽기 전용',
+          desc: '확인만 하고 아무것도 변경하지 않습니다'
+        },
+        confirm: {
+          label: '변경 전 확인',
+          desc: '변경하거나 삭제할 때마다 먼저 확인을 요청합니다'
+        },
+        auto_write: {
+          label: '자동 실행',
+          desc: '되돌릴 수 있는 변경은 바로 실행하고, 삭제는 여전히 확인합니다'
+        }
+      }
+    },
+    context: {
+      detachedLabel: '페이지 제외됨',
+      currentPage: '현재 페이지',
+      detach: '현재 페이지 포함하지 않기',
+      attachedTip: '현재 페이지 포함됨: {path}',
+      detachedTip: '클릭하여 현재 페이지 포함: {path}',
+      chatMessage: '이 답변',
+      pages: {
+        knowledge_base: '지식베이스',
+        wiki: 'Wiki',
+        agent_editor: '에이전트 편집',
+        settings_models: '모델 관리',
+        mcp_services: 'MCP 서비스',
+        chat: '대화'
+      }
+    },
+    starters: {
+      agentConfig: '이 에이전트의 설정 확인하기',
+      agentModel: '모델 변경하기',
+      agentKnowledge: '어떤 지식 베이스를 검색할 수 있나요?',
+      wikiIssues: '이 페이지에 처리할 문제가 있나요?',
+      wikiSummary: '이 Wiki 페이지를 요약해 줘',
+      documentStatus: '이 문서의 파싱 상태는 어떤가요?',
+      documentSummary: '이 문서를 요약해 줘',
+      failedDocuments: '이 지식 베이스에서 파싱에 실패한 문서는?',
+      recentActivity: '이 지식 베이스에 최근 어떤 변경이 있었나요?',
+      formats: 'WeKnora는 어떤 문서 형식을 지원하나요?',
+      createWiki: 'Wiki 지식 베이스는 어떻게 만드나요?',
+      agents: '어떤 에이전트가 있고, 각각 어떤 모델을 쓰나요?',
+      messageSources: '이 답변의 근거는 무엇인가요?',
+      messageCheck: '이 답변에 틀린 내용이 있나요?',
+      modelCheck: '이 모델의 설정을 확인해 줘',
+      modelUsage: '어떤 에이전트와 지식베이스가 이 모델들을 쓰나요?',
+      mcpTools: '이 MCP 서비스는 어떤 도구를 제공하나요?',
+      mcpCheck: '왜 연결되지 않나요?',
+      modelSetup: '어떤 모델을 더 설정해야 하나요?',
+      mcpSetup: 'MCP 서비스는 어떻게 연결하나요?'
+    }
+  },
+  assistantSettings: {
+    title: '어시스턴트',
+    description: '{name}의 진입점, 열기 방식, 권한 수준을 설정합니다.',
+    introTitle: '어시스턴트는 내가 할 수 있는 일만 합니다',
+    introDescription: '어시스턴트는 내 계정으로 동작하므로, 볼 수 있고 변경할 수 있는 범위가 워크스페이스 역할과 같습니다. 권한 수준은 이 범위를 더 좁힐 뿐 넓히지 않습니다.',
+    personalGroup: '개인 설정',
+    accessLabel: '권한 수준',
+    accessDescription: '어시스턴트가 무언가를 변경하기 전에 확인을 요청할지 정합니다. 어시스턴트 입력창 아래에서도 언제든 바꿀 수 있습니다.',
+    accessCeilingHint: '워크스페이스 관리자가 최고 수준을 "{level}"(으)로 제한했습니다.',
+    entryLabel: '진입점',
+    entryDescription: '어느 것을 선택해도 명령 팔레트({shortcut})에서 어시스턴트를 열 수 있습니다.',
+    entries: {
+      sidebar: '사이드바',
+      launcher: '화면 오른쪽',
+      palette: '명령 팔레트만'
+    },
+    layoutLabel: '열기 방식',
+    layoutDescription: '오른쪽에 고정하면 페이지가 좁아지고, 플로팅이면 페이지 위에 겹쳐 표시됩니다. 창이 좁으면 항상 플로팅으로 열립니다.',
+    layouts: {
+      docked: '오른쪽에 고정',
+      floating: '플로팅'
+    },
+    workspaceGroup: '워크스페이스',
+    adminOnly: '관리자만 변경할 수 있습니다',
+    nameLabel: '어시스턴트 이름',
+    nameDescription: '워크스페이스의 모든 멤버에게 보이는 이름입니다. 비워 두면 기본 이름을 사용합니다.',
+    ceilingLabel: '최고 권한 수준',
+    ceilingDescription: '멤버가 선택할 수 있는 최고 수준입니다. "읽기 전용"으로 설정하면 이 워크스페이스에서 어시스턴트는 아무것도 변경하지 않습니다.',
+    saved: '저장했습니다',
+    saveFailed: '저장하지 못했습니다: {message}'
+  },
   commandPalette: {
     placeholder: '지식베이스, 파일, 대화 검색…',
     clearRecent: '지우기',
@@ -2071,7 +2483,8 @@ export default {
       agents: '에이전트 열기',
       organizations: '공유 공간 열기',
       settings: '설정 열기',
-      productTour: '사용 가이드'
+      productTour: '사용 가이드',
+      assistant: '{name} 열기'
     },
     match: {
       vector: '벡터',
@@ -2110,6 +2523,11 @@ export default {
     videoNotSupported: '브라우저가 동영상 재생을 지원하지 않습니다'
   },
   organization: {
+    cardStats: {
+      members: '멤버 {count}',
+      knowledgeBases: '지식 베이스 {count}',
+      agents: '에이전트 {count}',
+    },
     title: '공유 공간',
     subtitle: '공유 공간를 만들거나 참여하여 여러 스페이스가 함께 협업하고 지식베이스와 에이전트를 공유하세요.',
     createOrg: '공유 공간 생성',
@@ -2479,6 +2897,21 @@ export default {
     "saveNext": "저장하고 다음"
 },
   mcpServiceDialog: {
+      presets: {
+        "title": "서비스 프리셋 찾기",
+        "hint": "각 서비스를 개별로 설정하거나 사용자 지정 MCP를 추가하세요. 이 통합은 Ace Data Cloud가 제공하며 모델 브랜드의 공식 앱이 아닙니다.",
+        "search": "Suno, Seedance, HappyHorse, GPT Image 또는 Nano Banana 검색",
+        "custom": "사용자 지정 MCP 서비스 설정",
+        "account": "Ace Data Cloud에 로그인한 뒤 Applications → General application에서 기존 API 키를 복사하거나 전용 키를 만드세요. 서비스 권한, 잔액과 현재 가격을 확인하세요.",
+        "getKey": "Ace Data Cloud API 키 열기",
+        "pricing": "현재 서비스 가격 확인",
+        "credentialHint": "아래 비공개 Token 필드에 키를 붙여 넣으세요. 저장할 때 Bearer 접두사가 추가됩니다. 프리셋 선택만으로 요청을 보내지 않으며 생성 작업에는 요금이 부과됩니다.",
+        "suno": "음악 생성 및 동일 작업의 오디오 조회",
+        "seedance": "동영상 생성 및 작업 조회",
+        "happyhorse": "동영상 제작 및 동일 작업 결과 조회",
+        "gptImage": "이미지 생성 및 비동기 결과 조회",
+        "nanoBanana": "이미지 생성 및 편집"
+      },
     addTitle: 'MCP 서비스 추가',
     addDesc: '외부 MCP 서비스를 연결하면 에이전트가 해당 도구를 호출할 수 있습니다.',
     editTitle: 'MCP 서비스 편집',
@@ -2710,6 +3143,7 @@ export default {
       deleted: '모델이 삭제되었습니다',
       deleteFailed: '모델 삭제 실패',
       builtinCannotEdit: '기본 제공 모델은 편집할 수 없습니다',
+      linkedModelMissing: '어시스턴트가 연결한 모델을 찾을 수 없습니다. 삭제되었을 수 있습니다',
       builtinCannotDelete: '기본 제공 모델은 삭제할 수 없습니다',
       builtinCannotCopy: '기본 제공 모델은 복사할 수 없습니다',
       copied: '모델이 복사되었습니다',
@@ -2779,6 +3213,7 @@ export default {
       enabled: 'MCP 서비스가 활성화되었습니다',
       disabled: 'MCP 서비스가 비활성화되었습니다',
       updateStateFailed: 'MCP 서비스 상태 업데이트 실패',
+      linkedServiceMissing: '어시스턴트가 연결한 MCP 서비스를 찾을 수 없습니다. 삭제되었을 수 있습니다',
       testing: '{name} 테스트 중...',
       noResponse: '테스트 실패: 서버 응답 없음',
       testFailed: 'MCP 서비스 테스트 실패',
@@ -4200,6 +4635,14 @@ export default {
         imageVectorModelUnsupported: '현재 임베딩 모델은 이미지 입력을 선언하지 않아 이미지 벡터가 생성되거나 검색되지 않습니다',
         imageAttrsSchemaLabel: '관찰 가능한 이미지 속성',
         imageAttrsSchemaDescription: '모델은 아래 속성(백엔드 레지스트리 정의)을 관찰해 OCR 정책을 결정합니다',
+        imagePipelineSectionLabel: '이미지 분석 방식',
+        imagePipelineSectionDescription:
+          '멀티모달 분석이 켜져 있으면 이미지의 분석 방식을 필요에 따라 선택할 수 있습니다.',
+        imagePipelineLabel: '분석 방식',
+        imagePipelinePlaceholder: '분석 방식 선택',
+        imagePipelineLoading: '파이프라인을 불러오는 중…',
+        imagePipelineLoadError: '파이프라인을 불러오지 못했습니다',
+          imagePipelineValidateError: '현재 설정을 검증할 수 없습니다. 저장 시 백엔드가 다시 검사합니다.',
         imageAttrsOcrConditions: '관찰된 속성 조건에 따라 OCR 실행',
         imageAttrsOcrConditionsDesc: '관찰된 속성이 아래 조건을 충족하면 해당 이미지에 OCR을 실행합니다',
         imageAttrsOcrOnUnobserved: '이미지 속성 관찰에 실패해도 OCR 실행',
@@ -4762,12 +5205,10 @@ export default {
       globalIssuesEmpty: '보류 중인 콘텐츠 문제가 없습니다',
       issuePagePrefix: '페이지: ',
       issueGoFix: '수정하러 가기',
-      fixAssistantTitle: 'Wiki 스마트 수정 도우미',
       issueFixSuggestions: '콘텐츠 최적화 제안 ({count})',
       issueFixSingle: '수정',
-      fixStartError: '수정 도우미 시작 실패',
-      issueFixPromptSingle: '페이지 [[{slug}]] 의 문제(ID: {id})를 수정해 주세요.',
-      issueFixPromptAutoStart: '페이지 [[{slug}]] 의 다음 문제들을 수정해 주세요:'
+      issueFixPromptSingle: '이 Wiki 문제를 수정해 줘: {description}',
+      issueFixPromptAll: '이 페이지의 처리할 문제 {count}개를 수정해 줘'
     },
     indexing: {
       title: '인덱싱 전략',
@@ -4877,6 +5318,7 @@ export default {
       systemActor: '시스템',
       actorWithAPIKey: '{actor} · API Key · {name}',
       actorAPIKey: 'API Key · {name}',
+      viaAssistant: 'WeKnora 어시스턴트 경유',
       knowledgeBase: '지식 베이스',
       countItems: '{count}개 항목',
       titleWithCount: '{title} 외 {count}개',
@@ -4982,6 +5424,8 @@ export default {
         actorId: '시작자 ID',
         apiKeyName: 'API 키 이름',
         apiKeyId: 'API 키 ID',
+        agentSessionId: '어시스턴트 대화 ID',
+        agentOperation: '어시스턴트 작업',
         details: '상세'
       },
       columns: {
@@ -5219,6 +5663,9 @@ export default {
     notConfigured: '구성되지 않음',
     sharedAgentModelLabel: '공유 에이전트에 구성된 모델',
     noModel: '사용 가능한 모델 없음',
+    modelAuto: '기본',
+    modelFollowDefault: '기본값 따르기',
+    modelAutoHint: '현재 지식 베이스의 대화 모델을 사용하며, 지식 베이스 밖이거나 설정되지 않은 경우 첫 번째로 사용 가능한 대화 모델을 사용합니다',
     stopGeneration: '생성 중지',
     send: '전송',
     steerCurrent: '현재 작업에 추가',
@@ -5263,6 +5710,21 @@ export default {
     }
   },
   manualEditor: {
+    assistant: {
+      button: '어시스턴트',
+      tooltip: '어시스턴트에게 글쓰기 맡기기',
+      continue: '이어 쓰기',
+      outline: '개요 만들기',
+      polish: '전체 다듬기',
+      summarize: '요점 정리',
+      open: '어시스턴트 열기',
+      prompts: {
+        continue: '본문 끝에서 앞 내용에 이어지는 문단을 하나 써 주세요.',
+        outline: '제목과 현재 내용을 바탕으로 이 문서의 구조가 잘 드러나는 개요를 만들어 본문 맨 앞에 써 주세요.',
+        polish: '본문을 다듬어 주세요. 오타와 어색한 문장을 고치되 의미는 바꾸지 말고 문단별로 고쳐 주세요.',
+        summarize: '이 문서의 요점을 대화에서 정리해 주세요. 본문은 수정하지 마세요.'
+      }
+    },
     defaultTitlePrefix: '새 문서',
     noDocumentKnowledgeBases: '사용 가능한 문서형 지식베이스가 없습니다. 먼저 문서형 지식베이스를 생성해주세요',
     actions: {
@@ -6784,6 +7246,8 @@ export default {
       capabilityUnconfigured: '미구성'
     },
     editor: {
+      assistantChanged: '어시스턴트가 이 에이전트를 변경했습니다. 최신 설정을 보려면 다시 여세요.',
+      assistantDeleted: '어시스턴트가 이 에이전트를 삭제했습니다.',
       reasoningEffortUnsupported: '선택한 모델은 사고를 지원하지 않습니다. "끄기" 외의 옵션은 무시됩니다.',
       reasoningEffortAlwaysOn: '선택한 모델은 항상 사고하며 끌 수 없습니다. 강도만 조정할 수 있습니다.',
       createTitle: '에이전트 만들기',
@@ -7221,6 +7685,8 @@ export default {
       folderCardCount: '문서 {count}개',
       searchingSubtree: '(하위 폴더 포함)',
       emptyFolder: '이 폴더에는 아직 문서가 없습니다',
+      emptyFolderWithSubfolders: '이 폴더에는 직접 문서가 없지만 하위 폴더에 {count}개가 있습니다',
+      folderContentsCount: '문서 {documents}개 / 폴더 {folders}개',
       emptySearch: '일치하는 문서가 없습니다',
       collapse: '폴더 접기',
       expand: '폴더 펼치기',
@@ -7445,6 +7911,7 @@ export default {
     selectLoaded: '불러온 문서 선택',
     confirmBatchDeleteDocument: '선택한 {count}개 문서를 삭제하시겠습니까? 삭제 후 복구할 수 없습니다.',
     deleteSubmitted: '삭제 요청이 제출되었습니다. 완료를 기다리는 중입니다.',
+    assistantDeleted: '어시스턴트가 이 지식 베이스를 삭제했습니다.',
     deletePending: '삭제가 아직 완료되지 않았습니다. 잠시 후 새로고침하여 결과를 확인하세요.',
     deleteTaskFailed: '삭제에 실패했습니다. 문서의 오류 세부 정보를 확인한 후 다시 시도하세요.',
     deleteStatusUnavailable: '삭제 결과를 확인할 수 없습니다. 잠시 후 새로고침하여 문서 상태를 확인하세요.',
@@ -7938,6 +8405,56 @@ export default {
         'true': { label: '예', description: '예 —— 차트, 그래프, 도표' },
         'false': { label: '아니오', description: '아니오 —— 사진, 삽화, 아이콘, 장식' }
       }
+    }
+  },
+  // 파이프라인 패널의 오버레이 문구: 파이프라인 id와 필드 key로 색인합니다
+  // (둘 다 백엔드 레지스트리가 제공하며 여기서는 번역만 합니다). 여기서
+  // 다루지 않은 부분은 백엔드 자체 문구로 폴백되므로, 새 파이프라인이 키
+  // 이름 그대로 표시되는 일은 없습니다.
+  imagePipeline: {
+    errors: {
+      noActionEnabled: '분석 동작을 하나 이상 켜세요. 모두 꺼져 있으면 아무것도 처리되지 않습니다.',
+    },
+    default: {
+      name: '수동',
+      description: '작업에 맞게 분석 동작 스위치를 직접 켜거나 끕니다.',
+      enable_caption: {
+        label: '이미지 설명',
+        description: '각 이미지에 대한 한 줄 설명을 생성해 캡션으로 저장합니다.'
+      },
+      enable_ocr: {
+        label: '문자 인식',
+        description: '이미지 속에 나타나는 텍스트를 추출합니다.'
+      },
+      caption: {
+        thinking: {
+          label: '설명 시 사고 사용',
+          description: '설명을 쓰기 전에 모델이 먼저 추론하도록 합니다. 일반적으로 사고는 필요하지 않습니다. 켜면 분석이 느려질 뿐 아니라 사고가 너무 길어져 본문이 잘려서 작업이 실패할 수 있습니다. 꼭 필요하다고 판단될 때만 켜세요.',
+        },
+      },
+      ocr: {
+        thinking: {
+          label: 'OCR 시 사고 사용',
+          description: '텍스트를 추출하기 전에 모델이 먼저 추론하도록 합니다. 일반적으로 사고는 필요하지 않습니다. 켜면 분석이 느려질 뿐 아니라 사고가 너무 길어져 본문이 잘려서 작업이 실패할 수 있습니다. 꼭 필요하다고 판단될 때만 켜세요.',
+        },
+      }
+    },
+    smartocr: {
+      name: '스마트',
+      caption: {
+        thinking: {
+          label: '설명 시 사고 사용',
+          description: '이미지를 설명하고 속성을 보고하기 전에 모델이 먼저 추론하도록 합니다. 일반적으로 사고는 필요하지 않습니다. 켜면 분석이 느려질 뿐 아니라 사고가 너무 길어져 본문이 잘려서 작업이 실패할 수 있습니다. 꼭 필요하다고 판단될 때만 켜세요.',
+        },
+      },
+      ocr: {
+        thinking: {
+          label: '문자 인식 시 사고 사용',
+          description: '텍스트를 추출하기 전에 모델이 먼저 추론하도록 합니다. 일반적으로 사고는 필요하지 않습니다. 켜면 분석이 느려질 뿐 아니라 사고가 너무 길어져 본문이 잘려서 작업이 실패할 수 있습니다. 꼭 필요하다고 판단될 때만 켜세요.',
+        },
+      },
+      description:
+        '먼저 이미지 특징을 관찰하여 설명을 생성하고, 그 특징을 바탕으로 OCR 실행 여부를 결정합니다. 모델 호출을 절약하고 분석 속도를 높입니다.'
     }
   }
 }

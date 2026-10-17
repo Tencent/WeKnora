@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
@@ -48,7 +49,7 @@ func (e *failingIndexEngine) DeleteByKnowledgeIDList(context.Context, []string, 
 }
 
 func runProcessChunksWithFailingIndex(
-	ctx context.Context, t *testing.T,
+	ctx context.Context, t *testing.T, tracker SpanTracker,
 ) (*indexRetryKnowledgeRepo, *indexRetryChunkRepo, *failingIndexEngine, error) {
 	t.Helper()
 	knowledge := &types.Knowledge{
@@ -70,6 +71,7 @@ func runProcessChunksWithFailingIndex(
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 	svc := &knowledgeService{
 		repo:           repo,
+		spanTracker:    tracker,
 		chunkRepo:      chunks,
 		modelService:   parentChildModelService{embedder: parentChildEmbedder{}},
 		retrieveEngine: parentChildRetrieveRegistry{engine: engine},
@@ -95,9 +97,17 @@ func runProcessChunksWithFailingIndex(
 func TestProcessChunksRetriesBatchIndexFailureBeforeLastAttempt(t *testing.T) {
 	ctx := types.WithTaskRetryMetadata(context.Background(), 0, 3)
 
-	repo, chunks, engine, err := runProcessChunksWithFailingIndex(ctx, t)
+	tracker, db := setupSpanTrackerTest(t)
+	_, attempt, err := tracker.OpenAttempt(ctx, "knowledge-1", "")
+	require.NoError(t, err)
+	ctx = withAttempt(ctx, attempt)
+	repo, chunks, engine, err := runProcessChunksWithFailingIndex(ctx, t, tracker)
 
 	require.ErrorContains(t, err, "embedding endpoint unavailable")
+	status, code, message := rootSpan(t, db, "knowledge-1", attempt)
+	require.Equal(t, types.SpanStatusRunning, status)
+	require.Empty(t, code)
+	require.Empty(t, message)
 	for _, update := range repo.updates {
 		require.NotEqual(t, types.ParseStatusFailed, update.ParseStatus)
 	}
@@ -109,9 +119,17 @@ func TestProcessChunksRetriesBatchIndexFailureBeforeLastAttempt(t *testing.T) {
 func TestProcessChunksFailsKnowledgeOnLastBatchIndexAttempt(t *testing.T) {
 	ctx := types.WithTaskRetryMetadata(context.Background(), 3, 3)
 
-	repo, chunks, engine, err := runProcessChunksWithFailingIndex(ctx, t)
+	tracker, db := setupSpanTrackerTest(t)
+	_, attempt, err := tracker.OpenAttempt(ctx, "knowledge-1", "")
+	require.NoError(t, err)
+	ctx = withAttempt(ctx, attempt)
+	repo, chunks, engine, err := runProcessChunksWithFailingIndex(ctx, t, tracker)
 
 	require.NoError(t, err)
+	status, code, message := rootSpan(t, db, "knowledge-1", attempt)
+	require.Equal(t, types.SpanStatusFailed, status)
+	require.Equal(t, werrors.ErrCodeVectorStoreWriteFailed, code)
+	require.Equal(t, "batch index failed", message)
 	require.NotEmpty(t, repo.updates)
 	last := repo.updates[len(repo.updates)-1]
 	require.Equal(t, types.ParseStatusFailed, last.ParseStatus)

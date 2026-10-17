@@ -68,6 +68,7 @@ func (a *Adapter) HandleURLVerification(c *gin.Context) bool {
 }
 
 func (a *Adapter) VerifyCallback(c *gin.Context) error {
+	im.LimitWebhookBody(c)
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		return fmt.Errorf("read body: %w", err)
@@ -87,6 +88,7 @@ func (a *Adapter) VerifyCallback(c *gin.Context) error {
 }
 
 func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
+	im.LimitWebhookBody(c)
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)

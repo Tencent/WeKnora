@@ -1849,6 +1849,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAssistantDataChange } from '@/utils/assistantDataChange';
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import AgentCreateContextualGuide from '@/components/AgentCreateContextualGuide.vue';
@@ -1862,6 +1863,7 @@ import { hydrateAgentPromptRefs, serializeAgentPrompts } from '@/utils/agentProm
 import { copyWithToast } from '@/utils/clipboard';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useModalShell } from '@/composables/useModalShell'
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import SettingsModalShell from '@/components/SettingsModalShell.vue'
 import {
   createAgent,
@@ -1974,6 +1976,17 @@ const savedAgent = ref<CustomAgent | null>(null);
 const editorMode = computed(() => (savedAgent.value ? 'edit' : props.mode));
 const editorAgent = computed(() => savedAgent.value ?? props.agent ?? null);
 const isPostCreateSession = computed(() => !!savedAgent.value);
+
+useAssistantDataChange((changes) => {
+  const agentId = editorAgent.value?.id;
+  if (!props.visible || !agentId) return;
+  const relevant = changes.filter(change => change.ids.agentIds.includes(agentId)
+    && change.operation !== 'agent.copy');
+  if (!relevant.length) return;
+  const deleted = relevant.some(change => change.operation === 'agent.delete');
+  MessagePlugin.warning(t(deleted ? 'agent.editor.assistantDeleted' : 'agent.editor.assistantChanged'));
+}, { areas: ['agent'] });
+
 const saveButtonLabel = computed(() =>
   editorMode.value === 'create'
     ? t('agent.editor.buttons.create')
@@ -1995,6 +2008,8 @@ function resolveEditorSection(section?: string | null): string {
 }
 
 const currentSection = ref(resolveEditorSection(props.initialSection));
+// Refines the agent AgentList publishes; on its own it names no page.
+useAssistantPageContext(() => props.visible && props.mode === 'edit' ? { section: currentSection.value } : null);
 const suggestionTab = ref<'starters' | 'followUps'>('starters');
 const contentWrapperRef = ref<HTMLElement | null>(null);
 const highlightedField = ref<AgentNotReadyReasonKey | null>(null);

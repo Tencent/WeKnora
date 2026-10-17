@@ -115,7 +115,7 @@
               <div v-else-if="event.type === 'tool_approval_required'" class="tool-event">
                 <ToolApprovalCard :pending-id="event.pending_id" :service-name="event.service_name || ''"
                   :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description"
-                  :args-json="event.args_json" :timeout-seconds="event.timeout_seconds"
+                  :args-json="event.args_json" :grant-scope="event.grant_scope" :timeout-seconds="event.timeout_seconds"
                   :requested-at="event.requested_at" :resolved="event.resolved" :approved="event.approved"
                   :resolve-reason="event.resolve_reason" :suspendable="event.suspendable"
                   :hot-wait-seconds="event.hot_wait_seconds" :suspended="event.suspended"
@@ -216,6 +216,12 @@
                     <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                   </div>
 
+                  <OpenPageCard v-if="showPageLinkInStep(event)" :link="event.tool_data" />
+                  <PageEditCard v-if="showPageEditInStep(event)" :fill="event.tool_data" :tool-call-id="event.tool_call_id" />
+                  <div v-if="isPageReadEvent(event)" class="search-results-summary-fixed">
+                    <div class="results-summary-text">{{ t('agentStream.pageAccess.viewed', { location: event.tool_data.location }) }}</div>
+                  </div>
+
                   <SandboxCommandProgress
                     v-if="event.tool_name === 'shell_exec' && event.pending && event.command_output && !event.command_output.done"
                     :progress="event.command_output"
@@ -231,7 +237,7 @@
                     <BrowserToolDetails v-if="event.tool_name === 'local_browser'" :event="event" />
                     <div v-else-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
                       <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
-                        :output="mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
+                        :output="toolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
                     </div>
                     <div v-else-if="event.output" class="tool-output-wrapper">
                       <div class="fallback-header">
@@ -352,7 +358,7 @@
             <div v-else-if="event.type === 'tool_approval_required'" class="tool-event">
               <ToolApprovalCard :pending-id="event.pending_id" :service-name="event.service_name || ''"
                 :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description" :args-json="event.args_json"
-                :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
+                :grant-scope="event.grant_scope" :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
                 :approved="event.approved" :resolve-reason="event.resolve_reason" :suspendable="event.suspendable"
                 :hot-wait-seconds="event.hot_wait_seconds" :suspended="event.suspended" :expires-at="event.expires_at"
                 :abandoned="event.abandoned" v-bind="embedAuthProps" />
@@ -406,11 +412,17 @@
                 <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)">
                 </div>
               </div>
-              <div v-if="answerFullyRendered && event.done && event.content && event.content.trim() && !embeddedMode"
+              <div v-if="event === pinnedAnswerEvent && (pinnedPageLinks.length > 0 || pinnedPageEdits.length > 0)"
+                class="answer-page-links">
+                <OpenPageCard v-for="link in pinnedPageLinks" :key="link.tool_call_id" :link="link.tool_data" />
+                <PageEditCard v-for="edit in pinnedPageEdits" :key="edit.tool_call_id" :fill="edit.tool_data"
+                  :tool-call-id="edit.tool_call_id" />
+              </div>
+              <div v-if="answerFullyRendered && event.done && event.content && event.content.trim()"
                 class="answer-toolbar">
                 <t-tooltip v-if="canFork" :content="forkTooltip">
                   <t-button size="small" variant="outline" shape="round" @click.stop="emitFork">
-                    <t-icon name="git-branch" />
+                    <ChatActionIcon name="git-branch" />
                   </t-button>
                 </t-tooltip>
                 <t-popconfirm
@@ -429,23 +441,23 @@
                   </template>
                   <t-tooltip :content="rewindTooltip">
                     <t-button size="small" variant="outline" shape="round" @click.stop>
-                      <t-icon name="rollback" />
+                      <ChatActionIcon name="rollback" />
                     </t-button>
                   </t-tooltip>
                 </t-popconfirm>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
-                  :title="$t('agent.copy')">
-                  <t-icon name="copy" />
+                  :title="$t('agent.copy')" :aria-label="$t('agent.copy')">
+                  <ChatActionIcon name="copy" />
                 </t-button>
-                <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge(event)"
+                <t-button v-if="!embeddedMode" size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge(event)"
                   :title="$t('agent.addToKnowledgeBase')">
-                  <t-icon name="bookmark-add" />
+                  <ChatActionIcon name="bookmark-add" />
                 </t-button>
                 <!-- Skill artifact download: only shown when the persisted
                      assistant message recorded any generated files. Agent
                      mode is the primary path for skills, so this is where
                      the button is most likely to appear. -->
-                <span v-if="hasArtifacts || artifactsCollecting" class="answer-toolbar__artifact"
+                <span v-if="!embeddedMode && (hasArtifacts || artifactsCollecting)" class="answer-toolbar__artifact"
                   :class="{ 'is-collecting': artifactButtonCollecting, 'is-arrived': artifactArrived }"
                   @animationend="onArtifactArriveEnd">
                   <t-button size="small" variant="outline" shape="round"
@@ -453,24 +465,24 @@
                     :title="hasArtifacts ? $t('agent.artifactDrawer.buttonTitle') : $t('agent.artifactDrawer.collecting')"
                     @click.stop="openArtifactDrawer()">
                     <t-icon v-if="artifactButtonCollecting" name="loading" class="answer-toolbar__artifact-spinner" />
-                    <t-icon v-else name="folder" />
+                    <ChatActionIcon v-else name="folder" />
                   </t-button>
                   <span v-if="hasArtifacts" class="answer-toolbar__artifact-count" aria-hidden="true">{{ artifactCount }}</span>
                 </span>
-                <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
+                <t-tooltip v-if="!embeddedMode && event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
-                    <t-icon name="info-circle" />
+                    <ChatActionIcon name="info-circle" />
                   </t-button>
                 </t-tooltip>
-                <t-tooltip v-if="event.truncated" :content="$t('chat.truncatedHint')" placement="top">
+                <t-tooltip v-if="!embeddedMode && event.truncated" :content="$t('chat.truncatedHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
-                    <t-icon name="info-circle" />
+                    <ChatActionIcon name="info-circle" />
                   </t-button>
                 </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo && isConversationDone" :session="session"
                   :session-id="sessionId" />
                 <transition name="follow-up-toolbar-loading">
-                  <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
+                  <span v-if="!embeddedMode && followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
                     aria-live="polite">
                     <t-icon name="lightbulb" />
                     <span class="answer-toolbar__follow-up-label">{{ t('chat.followUpQuestionsLoading') }}</span>
@@ -554,6 +566,12 @@
                   <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                 </div>
 
+                <OpenPageCard v-if="showPageLinkInStep(event)" :link="event.tool_data" />
+                <PageEditCard v-if="showPageEditInStep(event)" :fill="event.tool_data" :tool-call-id="event.tool_call_id" />
+                <div v-if="isPageReadEvent(event)" class="search-results-summary-fixed">
+                  <div class="results-summary-text">{{ t('agentStream.pageAccess.viewed', { location: event.tool_data.location }) }}</div>
+                </div>
+
                 <SandboxCommandProgress
                   v-if="event.tool_name === 'shell_exec' && event.pending && event.command_output && !event.command_output.done"
                   :progress="event.command_output"
@@ -569,7 +587,7 @@
                   <BrowserToolDetails v-if="event.tool_name === 'local_browser'" :event="event" />
                     <div v-else-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
                     <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
-                      :output="mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
+                      :output="toolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
                   </div>
 
                   <div v-else-if="event.output" class="tool-output-wrapper">
@@ -667,7 +685,11 @@ import SandboxCommandProgress from '@/components/SandboxCommandProgress.vue';
 import ToolResultRenderer from './ToolResultRenderer.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
 import McpOAuthCard from './McpOAuthCard.vue';
+import OpenPageCard from './OpenPageCard.vue';
+import PageEditCard from './PageEditCard.vue';
+import { isAssistantPageLink } from '@/utils/assistantPageLink';
 import AskUserCard from './AskUserCard.vue';
+import ChatActionIcon from '@/components/ChatActionIcon.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
@@ -704,6 +726,7 @@ import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
 import { getMcpToolDisplayType, getMcpToolTitle, mcpToolResultOutput } from '@/utils/mcpToolDisplay';
+import { getCatalogToolDisplayType, getCatalogToolTitle } from '@/utils/catalogToolDisplay';
 import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
 import {
   formatToolTitleWithDetail,
@@ -803,6 +826,15 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   data_analysis: 'agentStream.tools.dataAnalysis',
   data_schema: 'agentStream.tools.dataSchema',
   database_query: 'agentStream.tools.databaseQuery',
+  find_operations: 'agentStream.tools.findOperations',
+  run_operation: 'agentStream.tools.runOperation',
+  try_agent: 'agentStream.tools.tryAgent',
+  open_page: 'agentStream.tools.openPage',
+  read_page: 'agentStream.tools.readPage',
+  select_tab: 'agentStream.tools.selectTab',
+  fill_page: 'agentStream.tools.fillPage',
+  search_weknora_docs: 'agentStream.tools.searchWeKnoraDocs',
+  read_weknora_doc: 'agentStream.tools.readWeKnoraDoc',
 };
 
 const getLocalizedToolName = (toolName?: string | null): string => {
@@ -1224,9 +1256,18 @@ const formatToolResultContent = (value: unknown): string => {
 
 const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').startsWith('mcp_');
 
+const toolResultOutput = (event: any): string | undefined => {
+  if (getMcpToolDisplayType(event?.tool_name) || getCatalogToolDisplayType(event?.tool_name)) {
+    return event?.output || event?.error
+  }
+  return mcpToolResultOutput(event)
+}
+
 const resolveToolDisplayType = (event: any): DisplayType | undefined => {
   const mcpType = getMcpToolDisplayType(event?.tool_name)
   if (mcpType) return mcpType
+  const catalogType = getCatalogToolDisplayType(event?.tool_name)
+  if (catalogType) return catalogType
   if (event?.display_type) return event.display_type as DisplayType
   if (event?.tool_name === 'shell_exec' || event?.tool_name === 'execute_skill_script') {
     return 'shell_exec'
@@ -2174,6 +2215,47 @@ const displayEvents = computed(() => {
   return result;
 });
 
+const isPageLinkEvent = (event: any): boolean =>
+  event?.type === 'tool_call' && event.tool_name === 'open_page' && !event.pending &&
+  event.success !== false && isAssistantPageLink(event.tool_data);
+
+// Once the steps fold away, the page buttons move under the final answer:
+// they are what the user acts on next.
+const pinnedAnswerEvent = computed(() => {
+  if (!isConversationDone.value) return null;
+  const events = displayEvents.value;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i]?.type === 'answer') return events[i];
+  }
+  return null;
+});
+
+const pinnedPageLinks = computed(() => {
+  if (!pinnedAnswerEvent.value) return [];
+  return eventStream.value.filter(isPageLinkEvent);
+});
+
+const showPageLinkInStep = (event: any): boolean =>
+  isPageLinkEvent(event) && pinnedPageLinks.value.length === 0;
+
+const isPageEditEvent = (event: any): boolean =>
+  event?.type === 'tool_call' && event.tool_name === 'fill_page' && !event.pending &&
+  event.success !== false && Array.isArray(event.tool_data?.applied) && !!event.tool_call_id;
+
+// What the assistant typed is still unsaved, so its card stays in view with
+// the page buttons.
+const pinnedPageEdits = computed(() => {
+  if (!pinnedAnswerEvent.value) return [];
+  return eventStream.value.filter(isPageEditEvent);
+});
+
+const showPageEditInStep = (event: any): boolean =>
+  isPageEditEvent(event) && pinnedPageEdits.value.length === 0;
+
+const isPageReadEvent = (event: any): boolean =>
+  event?.type === 'tool_call' && (event.tool_name === 'read_page' || event.tool_name === 'select_tab') &&
+  !event.pending && event.success !== false && !!event.tool_data?.location;
+
 // Get unique key for event
 const getEventKey = (event: any, index: number): string => {
   if (!event) return `event-${index}`;
@@ -2246,6 +2328,11 @@ const isReferenceDrawerTool = (toolName?: string | null): boolean =>
 
 const hasExpandableResults = (event: any): boolean => {
   if (isReferenceDrawerTool(event?.tool_name)) return false;
+  // Its card is the result.
+  if (event?.tool_name === 'open_page' && event.success !== false) return false;
+  if (event?.tool_name === 'fill_page' && event.success !== false) return false;
+  // The snapshot is page text for the model, not something to read here.
+  if ((event?.tool_name === 'read_page' || event?.tool_name === 'select_tab') && event.success !== false) return false;
   return hasResults(event);
 };
 
@@ -2886,6 +2973,8 @@ const getToolTitle = (event: any): string => {
   if (event.tool_name === 'local_browser') return browserToolTitle(t, event);
   const mcpTitle = getMcpToolTitle(t, event)
   if (mcpTitle) return mcpTitle
+  const catalogTitle = getCatalogToolTitle(t, event)
+  if (catalogTitle) return catalogTitle
   if (event.pending) {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');
@@ -3409,6 +3498,17 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
   .answer-toolbar {
     margin-top: 10px;
+  }
+
+  .answer-page-links {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+
+    :deep(.open-page-card) {
+      margin-top: 0;
+    }
   }
 }
 

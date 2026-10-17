@@ -62,7 +62,11 @@ app:
   # -- Number of replicas
   replicaCount: 1
 
-  # -- App update strategy. Use Recreate for single-replica, single-node-attach storage.
+  # -- App update strategy. `RollingUpdate` needs storage that can be attached
+  # by two Pods at once: with the default `ReadWriteOnce` `data-files` claim an
+  # upgrade fails with `Multi-Attach error` unless this is `Recreate`. Set
+  # `dataFiles.persistence.accessModes` to `ReadWriteMany` to keep rolling
+  # updates with more than one replica.
   strategy:
     type: RollingUpdate
     # -- Only used with RollingUpdate; integers and percentages are supported.
@@ -366,6 +370,12 @@ dataFiles:
     enabled: true
     # -- Size of the PVC
     size: 10Gi
+    # -- Access modes for the created `data-files` claim. The chart's default
+    # single-writer claim requires `app.strategy.type: Recreate` (see
+    # `app.strategy`); set `ReadWriteMany` here when the storage class supports
+    # it (NFS, CephFS, EFS, ...) and the App can keep rolling updates.
+    accessModes:
+      - ReadWriteOnce
     # -- Use existing PVC (leave empty to create new)
     existingClaim: ""
 

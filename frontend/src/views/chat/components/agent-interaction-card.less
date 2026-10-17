@@ -276,11 +276,59 @@
   font-size: var(--agent-step-summary-size, 13px);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
+  white-space: pre-line;
   word-break: break-word;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  max-height: calc(1.55em * 8);
+  overflow-y: auto;
+}
+
+// One grid for all rows, so every value starts at the same column.
+.prompt-fields {
+  display: grid;
+  grid-template-columns: fit-content(120px) minmax(0, 1fr);
+  column-gap: 16px;
+  row-gap: 6px;
+  align-items: baseline;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-secondarycontainer);
+  font-size: var(--agent-step-summary-size, 13px);
+  line-height: 1.55;
+  max-height: calc(1.55em * 9 + 20px);
+  overflow-y: auto;
+}
+
+.prompt-field {
+  display: contents;
+
+  dt {
+    margin: 0;
+    color: var(--td-text-color-placeholder);
+  }
+
+  dd {
+    margin: 0;
+    color: var(--td-text-color-primary);
+    overflow-wrap: anywhere;
+  }
+}
+
+.prompt-field-count {
+  margin-left: 6px;
+  color: var(--td-text-color-placeholder);
+  white-space: nowrap;
+}
+
+.prompt-desc-items {
+  margin: -4px 0 0;
+  padding-left: 18px;
+  max-height: calc(1.55em * 8);
+  overflow-y: auto;
+  font-size: var(--agent-step-summary-size, 13px);
+  line-height: 1.55;
+  color: var(--td-text-color-secondary);
+  word-break: break-word;
 }
 
 .prompt-options {
@@ -395,6 +443,18 @@
     border-radius: var(--app-radius-md);
     color: var(--td-text-color-secondary);
   }
+}
+
+.prompt-grant {
+  align-self: flex-start;
+  font-size: var(--agent-step-summary-size, 13px);
+  color: var(--td-text-color-secondary);
+}
+
+.prompt-grant-scope {
+  margin-left: 6px;
+  color: var(--td-text-color-placeholder);
+  word-break: break-word;
 }
 
 .prompt-footer {

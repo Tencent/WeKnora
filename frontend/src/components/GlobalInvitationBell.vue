@@ -36,7 +36,7 @@ const openDialog = () => {
 .global-invitation-bell {
   position: fixed;
   top: 12px;
-  right: 16px;
+  right: calc(16px + var(--assistant-dock-width, 0px));
   /* 远低于 TDesign 抽屉的默认 z-index (2500)，确保业务页右侧抽屉弹出时能正常盖住铃铛。
      高于普通页面内容（一般 0~10），避免被列表卡片覆盖。 */
   z-index: 100;

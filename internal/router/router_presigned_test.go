@@ -238,3 +238,7 @@ func TestPresignedFile_MissingFile_404(t *testing.T) {
 		t.Fatalf("status = %d, want %d", got, want)
 	}
 }
+
+func (s *stubTenantService) UpdateTenantProfile(context.Context, uint64, *string, *string) (*types.Tenant, error) {
+	panic("unexpected UpdateTenantProfile call")
+}

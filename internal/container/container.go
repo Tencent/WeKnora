@@ -178,6 +178,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewSystemSettingRepository))
 	must(container.Provide(repository.NewModelCatalogRepository))
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
+	must(container.Provide(neo4jRepo.NewGraphSearchRepository))
+	must(container.Provide(repository.NewGraphSearchEvidenceRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewAgentPromptRepository))
@@ -240,6 +242,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewAuditLogService))
 	must(container.Provide(service.NewAuditLogRetentionRunner))
 	must(container.Provide(service.NewKnowledgeBaseService))
+	must(container.Provide(service.NewGraphSearchService))
 	must(container.Provide(service.NewOrganizationService))
 	must(container.Provide(service.NewKBShareService)) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
 	must(container.Provide(service.NewAgentShareService))
@@ -360,6 +363,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Agent catalog operations dispatch into the router, which is built later
 	// and binds itself to this dispatcher.
 	must(container.Provide(operations.NewHandlerDispatcher))
+	// The assistant's agent trials run through the session service, which
+	// depends on the agent service; it is bound to the runner further down.
+	must(container.Provide(service.NewAgentTrialRunner))
 	must(container.Provide(service.NewAgentService))
 
 	// Session service (depends on agent service)
@@ -538,6 +544,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// block above — starting the reaper any earlier panics.
 	must(container.Invoke(startTenantSkillReaper))
 	logger.Debugf(ctx, "[Container] Tenant skill reaper registered")
+	must(container.Invoke(func(r *service.AgentTrialRunner, s interfaces.SessionService) { r.Bind(s) }))
 	must(container.Provide(func(
 		sessions interfaces.SessionRepository,
 		resolver sandbox.TenantSandboxResolver,
@@ -557,6 +564,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewTenantInvitationHandler))
 	must(container.Provide(handler.NewAuditLogHandler))
 	must(container.Provide(handler.NewKnowledgeBaseHandler))
+	must(container.Provide(handler.NewGraphSearchHandler))
 	must(container.Provide(handler.NewKnowledgeHandler))
 	must(container.Provide(handler.NewChunkHandler))
 	must(container.Provide(handler.NewFAQHandler))

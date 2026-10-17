@@ -94,6 +94,43 @@ func TestGate_RequestAndWait_Timeout(t *testing.T) {
 	require.True(t, d.TimedOut)
 }
 
+func TestGate_UnattendedRunRefusesWithoutAsking(t *testing.T) {
+	g := NewGate(&config.Config{Agent: &config.AgentConfig{ToolApprovalTimeoutSeconds: 30}},
+		&stubChecker{required: true}, nil)
+	bus := event.NewEventBus()
+	raised := 0
+	bus.On(event.EventToolApprovalRequired, func(context.Context, event.Event) error {
+		raised++
+		return nil
+	})
+	req := PendingRequest{
+		TenantID: 1, UserID: "u1", SessionID: "s1", AssistantMessageID: "m1", EventBus: bus,
+		ServiceID: "svc", ServiceName: "svcname", MCPToolName: "t", RegisteredToolName: "mcp_svcname_t",
+		Args: json.RawMessage(`{}`),
+	}
+	ctx := types.WithUnattendedRun(context.Background())
+
+	started := time.Now()
+	d, err := g.RequestAndWait(ctx, req)
+	require.NoError(t, err)
+	require.False(t, d.Approved)
+	require.Equal(t, UnattendedApprovalReason, d.Reason)
+
+	d, err = g.RequestBuiltinApproval(ctx, req)
+	require.NoError(t, err)
+	require.False(t, d.Approved)
+	require.Equal(t, UnattendedApprovalReason, d.Reason)
+
+	require.Less(t, time.Since(started), time.Second, "nothing waits for an answer")
+	require.Zero(t, raised, "no card is shown to nobody")
+	prompts, err := g.broker.SessionPrompts(context.Background(), "s1", []string{
+		types.AgentPromptPending, types.AgentPromptAnswered, types.AgentPromptExpired,
+		types.AgentPromptCanceled, types.AgentPromptSuspended,
+	})
+	require.NoError(t, err)
+	require.Empty(t, prompts, "no prompt is left pending")
+}
+
 func TestGate_NeedsApproval_NoChecker(t *testing.T) {
 	g := NewGate(nil, nil, nil)
 	require.False(t, g.NeedsApproval(context.Background(), 1, "x", "y"))

@@ -111,11 +111,11 @@ func (r *sessionRepository) GetIMPlatform(
 	return platform, nil
 }
 
-// GetByTenantID retrieves all sessions for a tenant
+// GetByTenantID retrieves normal sessions for a tenant
 func (r *sessionRepository) GetByTenantID(ctx context.Context, tenantID uint64, userID string) ([]*types.Session, error) {
 	var sessions []*types.Session
 	err := applySessionUserScope(
-		r.db.WithContext(ctx).Where("tenant_id = ?", tenantID),
+		r.db.WithContext(ctx).Where("tenant_id = ? AND kind = ''", tenantID),
 		userID,
 	).Order("updated_at DESC").Find(&sessions).Error
 	if err != nil {
@@ -124,7 +124,7 @@ func (r *sessionRepository) GetByTenantID(ctx context.Context, tenantID uint64, 
 	return sessions, nil
 }
 
-// GetPagedByTenantID retrieves sessions for a tenant with pagination
+// GetPagedByTenantID retrieves normal sessions for a tenant with pagination
 func (r *sessionRepository) GetPagedByTenantID(
 	ctx context.Context, tenantID uint64, userID string, page *types.Pagination,
 ) ([]*types.Session, int64, error) {
@@ -133,7 +133,7 @@ func (r *sessionRepository) GetPagedByTenantID(
 
 	// First query the total count
 	baseQ := applySessionUserScope(
-		r.db.WithContext(ctx).Model(&types.Session{}).Where("tenant_id = ?", tenantID),
+		r.db.WithContext(ctx).Model(&types.Session{}).Where("tenant_id = ? AND kind = ''", tenantID),
 		userID,
 	)
 	err := baseQ.Count(&total).Error
@@ -143,7 +143,7 @@ func (r *sessionRepository) GetPagedByTenantID(
 
 	// Then query the paginated data
 	err = applySessionUserScope(
-		r.db.WithContext(ctx).Where("tenant_id = ?", tenantID),
+		r.db.WithContext(ctx).Where("tenant_id = ? AND kind = ''", tenantID),
 		userID,
 	).
 		Order("updated_at DESC").
@@ -177,10 +177,16 @@ func (r *sessionRepository) QueryPaged(
 		orderClause = "s.is_pinned DESC, s.pinned_at DESC, s.updated_at DESC"
 	}
 
+	if q.Kind == types.SessionKindAssistant {
+		orderClause = "s.updated_at DESC"
+	}
+
 	// Base filter shared by count and list queries.
 	applyBase := func(db *gorm.DB) *gorm.DB {
-		db = db.Where("s.tenant_id = ? AND s.deleted_at IS NULL", q.TenantID)
-		if q.UserID != "" {
+		db = db.Where("s.tenant_id = ? AND s.deleted_at IS NULL AND s.kind = ?", q.TenantID, q.Kind)
+		if q.Kind == types.SessionKindAssistant {
+			db = db.Where("s.user_id = ? AND s.user_id <> ''", q.UserID)
+		} else if q.UserID != "" {
 			db = db.Where("(s.user_id = ? OR s.user_id IS NULL OR s.user_id = '')", q.UserID)
 		}
 		// Skill image maintenance runs in a real session so its transcript can
@@ -393,10 +399,10 @@ func (r *sessionRepository) BatchDelete(ctx context.Context, tenantID uint64, us
 	return res.RowsAffected, res.Error
 }
 
-// DeleteAllByTenantID deletes all sessions for a tenant
+// DeleteAllByTenantID deletes normal sessions for a tenant
 func (r *sessionRepository) DeleteAllByTenantID(ctx context.Context, tenantID uint64, userID string) (int64, error) {
 	res := applySessionUserScope(
-		r.db.WithContext(ctx).Where("tenant_id = ?", tenantID),
+		r.db.WithContext(ctx).Where("tenant_id = ? AND kind = ''", tenantID),
 		userID,
 	).Delete(&types.Session{})
 	return res.RowsAffected, res.Error

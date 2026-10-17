@@ -49,6 +49,19 @@
 
     <t-form ref="formRef" :data="formData" :rules="rules" label-align="top" class="mcp-editor-form">
       <div v-show="step === 0" class="connection-step">
+      <McpPresetPicker v-if="mode === 'add' && !currentService?.id"
+        :selected-id="selectedPreset?.id" @select="selectPreset" @custom="clearPreset" />
+      <section v-if="selectedPreset && mode === 'add' && !currentService?.id"
+        class="setting-drawer__section mcp-preset-onboarding">
+        <p class="form-desc">{{ t('mcpServiceDialog.presets.account') }}</p>
+        <a :href="mcpPresetPlatformLink(selectedPreset, 'key')" target="_blank" rel="noopener noreferrer">
+          {{ t('mcpServiceDialog.presets.getKey') }}
+        </a>
+        <a :href="mcpPresetPlatformLink(selectedPreset, 'pricing')" target="_blank" rel="noopener noreferrer">
+          {{ t('mcpServiceDialog.presets.pricing') }}
+        </a>
+        <p class="form-desc">{{ t('mcpServiceDialog.presets.credentialHint') }}</p>
+      </section>
       <!--
         从代码导入：粘贴标准 mcpServers JSON，纯前端解析后填回表单。
         不自动提交；用户检查后再点保存。
@@ -400,6 +413,10 @@ import {
 } from '@/api/mcp-service'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import McpMetadataPanel from './McpMetadataPanel.vue'
+import McpPresetPicker from '@/components/settings/McpPresetPicker.vue'
+import {
+  mcpPresetDraft, mcpPresetBearer, mcpPresetPlatformLink, type McpServicePreset,
+} from '@/utils/mcpServicePresets'
 import CredentialResource, {
   type CredentialFieldDef,
   type CredentialResourceApi,
@@ -475,6 +492,25 @@ const formData = ref({
   },
 })
 
+const selectedPreset = ref<McpServicePreset | null>(null)
+function selectPreset(preset: McpServicePreset) {
+  if (props.mode !== 'add' || currentService.value?.id) return
+  resetForm()
+  const draft = mcpPresetDraft(preset, locale.value)
+  formData.value.name = draft.name
+  formData.value.url = draft.url
+  formData.value.transport_type = draft.transport_type
+  formData.value.usage_instructions = draft.usage_instructions
+  formData.value.auth_config.auth_type = draft.auth_config.auth_type
+  formData.value.auth_config.api_key_header = draft.auth_config.api_key_header
+  selectedPreset.value = preset
+}
+function clearPreset() {
+  if (currentService.value?.id) return
+  selectedPreset.value = null
+  resetForm()
+}
+
 // ---- Custom headers (key/value editor, same UX as ModelEditorDialog) ----
 const addCustomHeader = () => {
   formData.value.headers.push({ key: '', value: '' })
@@ -490,6 +526,7 @@ const codeImportError = ref('')
 
 // Map a raw MCP server config object onto the form. Stdio is rejected.
 function applyServerConfig(name: string, cfg: Record<string, unknown>) {
+  selectedPreset.value = null
   if (cfg.command) {
     codeImportError.value = t('mcpServiceDialog.codeImport.errors.stdioUnsupported')
     return false
@@ -878,6 +915,7 @@ watch(
     codeImportOpen.value = false
     codeImportText.value = ''
     codeImportError.value = ''
+    selectedPreset.value = null
     if (service) {
       const transportType = service.transport_type === 'stdio' ? 'sse' : (service.transport_type || 'sse')
       formData.value = {
@@ -963,7 +1001,11 @@ function buildPayload(asCreate: boolean): Partial<MCPService> {
     }
   }
   if (asCreate && !isOAuth.value) {
-    if (formData.value.auth_config.api_key) auth.api_key = formData.value.auth_config.api_key
+    const rawKey = formData.value.auth_config.api_key
+    if (rawKey) auth.api_key = selectedPreset.value &&
+      formData.value.auth_config.auth_type === 'api_key' &&
+      formData.value.auth_config.api_key_header.toLowerCase() === 'authorization'
+      ? mcpPresetBearer(rawKey) : rawKey
     if (formData.value.auth_config.token) auth.token = formData.value.auth_config.token
   }
   data.auth_config = auth

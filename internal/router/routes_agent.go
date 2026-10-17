@@ -44,6 +44,8 @@ func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomA
 		agentsRead.GET("/:id", g.Viewer(), agentHandler.GetAgent)
 		// Update agent — creator OR Admin+
 		agentsWrite.PUT("/:id", g.OwnedAgentOrAdmin(), agentHandler.UpdateAgent)
+		// Partially update agent — same guard as PUT
+		agentsWrite.PATCH("/:id", g.OwnedAgentOrAdmin(), agentHandler.PatchAgent)
 		// Delete agent — creator OR Admin+
 		agentsWrite.DELETE("/:id", g.OwnedAgentOrAdmin(), agentHandler.DeleteAgent)
 		// Copy agent — Contributor+ (copy is owned by the caller)
@@ -83,6 +85,7 @@ func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler,
 		skills.GET("", g.Viewer(), skillHandler.ListSkills)
 		// Catalog reads are Viewer+ so the agent editor can show uninstalled skills.
 		skills.GET("/catalog", g.Viewer(), skillHandler.ListCatalog)
+		skills.GET("/catalog/:id", g.Viewer(), skillHandler.GetCatalog)
 	}
 	// Catalog writes bake into sandbox images; scoped API keys cannot hold them.
 	catalogWrite := g.apiKeyGroup(r.Group("/skills/catalog"), apiKeyFullAccess())
