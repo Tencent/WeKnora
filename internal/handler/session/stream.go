@@ -164,6 +164,8 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	logger.Debug(ctx, "Starting event update monitoring")
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
+	heartbeat := time.NewTicker(10 * time.Second)
+	defer heartbeat.Stop()
 
 	for {
 		select {
@@ -171,6 +173,9 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 			logger.Debug(ctx, "Client connection closed")
 			return
 
+		case <-heartbeat.C:
+			c.SSEvent("message", gin.H{"response_type": "heartbeat"})
+			c.Writer.Flush()
 		case <-ticker.C:
 			// Get new events from current offset
 			newEvents, newOffset, err := h.streamManager.GetEvents(ctx, sessionID, messageID, currentOffset)
@@ -284,6 +289,13 @@ func (h *Handler) StopSession(c *gin.Context) {
 		return
 	}
 
+	if h.stopCollaboration != nil {
+		if err := h.stopCollaboration(ctx, sessionID, assistantMessageID); err != nil {
+			c.JSON(500, gin.H{"error": "Failed to stop delegated tasks"})
+			return
+		}
+	}
+
 	// Check if message is already completed (stopped)
 	if message.IsCompleted {
 		logger.Infof(ctx, "Message %s is already completed, no need to stop", assistantMessageID)
@@ -338,6 +350,8 @@ func (h *Handler) handleAgentEventsForSSE(
 ) {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
+	heartbeat := time.NewTicker(10 * time.Second)
+	defer heartbeat.Stop()
 
 	lastOffset := 0
 	log := logger.GetLogger(ctx)
@@ -355,6 +369,9 @@ func (h *Handler) handleAgentEventsForSSE(
 			)
 			return
 
+		case <-heartbeat.C:
+			c.SSEvent("message", gin.H{"response_type": "heartbeat"})
+			c.Writer.Flush()
 		case <-ticker.C:
 			// Get new events from StreamManager using offset
 			events, newOffset, err := h.streamManager.GetEvents(ctx, sessionID, assistantMessageID, lastOffset)

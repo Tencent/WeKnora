@@ -238,6 +238,8 @@ const (
 	ResponseTypeReferences ResponseType = "references"
 	// Thinking response type (for agent thought process)
 	ResponseTypeThinking ResponseType = "thinking"
+	// ResponseTypeProgress carries a user-visible intermediate update.
+	ResponseTypeProgress ResponseType = "progress"
 	// Tool call response type (for agent tool invocations)
 	ResponseTypeToolCall ResponseType = "tool_call"
 	// Tool result response type (for agent tool results)

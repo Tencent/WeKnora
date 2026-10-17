@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	stderrors "errors"
 	"net/http"
 	"strconv"
@@ -31,7 +32,9 @@ type MessageHandler struct {
 	StorageResolver interfaces.StorageBackendResolver
 	// Prompts supplies the pending prompt of messages awaiting input. May be
 	// nil, in which case such messages carry none.
-	Prompts interfaces.AgentPromptRepository
+	Prompts               interfaces.AgentPromptRepository
+	DelegatedPrompts      func(context.Context, string) (map[string][]*types.PendingPromptView, error)
+	CollaborationStatuses func(context.Context, string, []string) (map[string]json.RawMessage, error)
 }
 
 // NewMessageHandler creates a new message handler instance with the required service
@@ -55,41 +58,55 @@ func NewMessageHandler(
 	}
 }
 
-// attachPendingPrompts sets PendingPrompt on messages awaiting input. Only
+// attachPendingPrompts restores timeline history and the current open prompt. Only
 // prompts raised for the caller are shown; the messages themselves were
 // already scoped to the caller's session.
 func (h *MessageHandler) attachPendingPrompts(ctx context.Context, sessionID string, messages []*types.Message) {
+	if h.CollaborationStatuses != nil {
+		ids := make([]string, 0, len(messages))
+		for _, m := range messages {
+			ids = append(ids, m.ID)
+		}
+		if rows, err := h.CollaborationStatuses(ctx, sessionID, ids); err == nil {
+			for _, m := range messages {
+				m.CollaborationStatus = rows[m.ID]
+			}
+		}
+	}
+	if h.DelegatedPrompts != nil {
+		if rows, err := h.DelegatedPrompts(ctx, sessionID); err == nil {
+			for _, m := range messages {
+				m.DelegatedPrompts = rows[m.ID]
+			}
+		}
+	}
 	if h.Prompts == nil {
 		return
 	}
-	awaiting := false
-	for _, m := range messages {
-		awaiting = awaiting || m.RunState == types.MessageRunStateAwaitingInput
-	}
-	if !awaiting {
-		return
-	}
-	rows, err := h.Prompts.ListBySession(ctx, sessionID, []string{types.AgentPromptSuspended})
+	rows, err := h.Prompts.ListBySession(ctx, sessionID, types.AgentPromptHistoryStatuses)
 	if err != nil {
-		logger.Warnf(ctx, "list pending prompts of session %s: %v", sessionID, err)
+		logger.Warnf(ctx, "list prompts of session %s: %v", sessionID, err)
 		return
 	}
 	principal, _ := types.PrincipalFromContext(ctx)
 	caller := principal.StorageID()
-	byMessage := make(map[string]*types.AgentPrompt, len(rows))
-	for _, p := range rows {
-		if p.UserID == "" || p.UserID == caller {
-			byMessage[p.AssistantMessageID] = p
-		}
-	}
+	tenantID := types.CallerFromContext(ctx).TenantID
+	byMessage := make(map[string]*types.Message, len(messages))
 	for _, m := range messages {
-		p := byMessage[m.ID]
-		if p == nil || m.RunState != types.MessageRunStateAwaitingInput {
+		m.PromptHistory, m.PendingPrompt = nil, nil
+		byMessage[m.ID] = m
+	}
+	for _, p := range rows {
+		m := byMessage[p.AssistantMessageID]
+		if m == nil || p.TenantID != tenantID || (p.UserID != "" && p.UserID != caller) {
 			continue
 		}
-		m.PendingPrompt = &types.PendingPromptView{
-			ID: p.ID, Kind: p.Kind, ToolCallID: p.ToolCallID,
-			Request: p.Request, ExpiresAt: p.ExpiresAt, CreatedAt: p.CreatedAt,
+		if p.Kind != types.AgentPromptKindToolApproval && p.Kind != types.AgentPromptKindAskUser {
+			continue
+		}
+		m.PromptHistory = append(m.PromptHistory, p.TimelineView())
+		if p.IsOpen() && m.RunState == types.MessageRunStateAwaitingInput {
+			m.PendingPrompt = p.TimelineView()
 		}
 	}
 }

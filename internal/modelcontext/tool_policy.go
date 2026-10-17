@@ -179,9 +179,12 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 		encodeKnownIssueIDs: true,
 		sourceOutput:        true,
 	},
-	// try_agent takes an agent ID, passed as returned like the catalog's, and
-	// reports another agent's answer, whose quoted IDs are compacted.
-	"try_agent": {},
+	"spawn_agent":     {},
+	"list_agents":     {},
+	"send_message":    {},
+	"followup_task":   {},
+	"interrupt_agent": {},
+	"wait_agent":      {},
 	// open_page links to a knowledge base or document by the handles the model
 	// was shown; the client needs the real IDs.
 	"open_page": {

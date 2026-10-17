@@ -121,7 +121,7 @@ type agentService struct {
 	toolApprovalGate      approval.MCPApproval
 	customAgentService    interfaces.CustomAgentService
 	operationDispatcher   operations.Dispatcher
-	trialRunner           tools.AgentTrialRunner
+	collaboration         *AgentCollaboration
 	sandboxMgr            sandbox.Manager
 	sandboxResolver       sandbox.TenantSandboxResolver
 	sandboxPinner         *SessionSandboxPinner
@@ -163,7 +163,7 @@ func NewAgentService(
 	graphRepo interfaces.RetrieveGraphRepository,
 	operationDispatcher *operations.HandlerDispatcher,
 	customAgentService interfaces.CustomAgentService,
-	trialRunner *AgentTrialRunner,
+	collaboration *AgentCollaboration,
 ) interfaces.AgentService {
 	svc := &agentService{
 		customAgentService:   customAgentService,
@@ -201,9 +201,7 @@ func NewAgentService(
 		svc.hostSkillsRoot = hostSandbox.SkillTree.Root()
 		svc.hostSkillVersionsRoot = hostSandbox.SkillTree.VersionsRoot()
 	}
-	if trialRunner != nil {
-		svc.trialRunner = trialRunner
-	}
+	svc.collaboration = collaboration
 	return svc
 }
 
@@ -338,6 +336,11 @@ func (s *agentService) CreateAgentEngine(
 		toolRegistry.RegisterTool(tools.NewBrowserSkillTool(s.browserSkill, scope, sessionID, instructions))
 	}
 
+	if s.collaboration != nil {
+		if err := s.collaboration.attach(ctx, engine, toolRegistry, config, sessionID, assistantMessageID); err != nil {
+			return nil, err
+		}
+	}
 	toolRegistry.BindSession(sessionID)
 	engine.SetWorkspaceLayout(s.lookupSessionWorkspaceLayout(ctx, sessionID, config))
 
@@ -510,12 +513,6 @@ func (s *agentService) registerOperationTools(
 		if operationAccess.Level != types.AssistantAccessReadOnly {
 			toolRegistry.RegisterTool(tools.NewFillPageTool(actor))
 		}
-	}
-	// A trial spends model calls and runs the agent's own tools, so it is
-	// a change for the access level to approve.
-	if s.trialRunner != nil && operationAccess.Level != types.AssistantAccessReadOnly {
-		toolRegistry.RegisterTool(tools.NewConfirmedTool(
-			tools.NewTryAgentTool(s.trialRunner), operations.RiskWrite, operationAccess, gate))
 	}
 }
 

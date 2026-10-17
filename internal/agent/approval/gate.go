@@ -180,6 +180,9 @@ func NewGate(cfg *config.Config, checker Checker, broker *hitl.Broker) *Gate {
 
 // NeedsApproval returns whether execution should pause for human confirmation.
 func (g *Gate) NeedsApproval(ctx context.Context, tenantID uint64, serviceID, toolName string) bool {
+	if hitl.RequiresDelegatedApproval(ctx) {
+		return true
+	}
 	if g == nil || g.checker == nil || tenantID == 0 || serviceID == "" || toolName == "" {
 		return false
 	}
@@ -217,7 +220,7 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 	if g == nil {
 		return Decision{Approved: true}, nil
 	}
-	if g.checker == nil {
+	if g.checker == nil && !hitl.RequiresDelegatedApproval(ctx) {
 		return Decision{Approved: true}, nil
 	}
 	return g.awaitToolApproval(ctx, req)

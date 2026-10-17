@@ -21,7 +21,10 @@ const RunSnapshotVersion = 1
 // as the raw query and re-rendered on resume, and tool arguments are kept in
 // their decoded form.
 type RunSnapshot struct {
-	Version int `json:"version"`
+	MCPToolRefs       []string `json:"mcp_tool_refs,omitempty"`
+	Version           int      `json:"version"`
+	CollaborationWait bool     `json:"collaboration_wait,omitempty"`
+	BetweenRounds     bool     `json:"between_rounds,omitempty"`
 	// Request is the caller's types.ResumableAgentRequest.
 	Request   json.RawMessage `json:"request,omitempty"`
 	Query     string          `json:"query"`
@@ -251,6 +254,7 @@ func (e *AgentEngine) snapshot(blocked int) (*RunSnapshot, error) {
 	}
 	return &RunSnapshot{
 		Version:        RunSnapshotVersion,
+		MCPToolRefs:    e.toolRegistry.MCPExposureSnapshot(),
 		Request:        e.suspendRequest,
 		Query:          p.query,
 		ImageURLs:      p.imageURLs,

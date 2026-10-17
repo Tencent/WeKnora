@@ -3,11 +3,14 @@ package agent
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/collaboration"
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
@@ -35,6 +38,7 @@ const langfuseQueryPreview = 2000
 // engine therefore does not maintain its own cache, system-prompt store, or
 // cross-turn buffer.
 type AgentEngine struct {
+	collaboration        *collaboration.Binding
 	config               *types.AgentConfig
 	toolRegistry         *agenttools.ToolRegistry
 	chatModel            chat.Chat
@@ -91,6 +95,8 @@ type AgentEngine struct {
 	// interactive: the client renders prompt cards and can answer them.
 	interactive bool
 	progress    turnProgress
+	// Hold speculative parent prose until delegated work has been reviewed.
+	holdCollaborationAnswer bool
 }
 
 // maxSteerOverruns caps loop-end injects past MaxIterations. One extra round
@@ -222,7 +228,7 @@ func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
 	for _, section := range sections {
 		logger.Debugf(ctx, "[Agent][Prompt] section=%s bytes=%d", section.Name, len(section.Content))
 	}
-	return renderSystemPromptSections(sections)
+	return renderSystemPromptSections(sections) + e.collaborationGuidance()
 }
 
 // SetMemoryPrompt supplies the long-term memory envelope for this run. Empty
@@ -527,7 +533,9 @@ func (e *AgentEngine) withinIterationBudget(round int) bool {
 // and rounds cut off at the completion-token cap.
 type loopGuards struct {
 	// emptyRetries counts nudges sent after a stop with no content.
-	emptyRetries int
+	emptyRetries         int
+	pendingRuntimeNotice string
+	childAnswerRevised   bool
 	// consecutiveSameContent counts plain rounds that repeated the previous
 	// plain round verbatim, an identical lack of content included.
 	consecutiveSameContent int
@@ -635,6 +643,12 @@ func (e *AgentEngine) executeLoop(
 	sessionID string,
 	messageID string,
 ) (*types.AgentState, error) {
+	if e.collaboration != nil {
+		var stop func()
+		ctx, stop = e.collaboration.Start(ctx)
+		defer stop()
+		e.bindCollaborationInput(sessionID, messageID)
+	}
 	startTime := time.Now()
 	common.PipelineInfo(ctx, "Agent", "loop_start", map[string]interface{}{
 		"max_iterations": e.config.MaxIterations,
@@ -656,6 +670,35 @@ func (e *AgentEngine) executeLoop(
 		e.emitCompletionEvent(context.WithoutCancel(ctx), state, sessionID, messageID, startTime)
 	}
 	defer emitCompletion()
+	if e.collaboration != nil {
+		defer func() {
+			b := e.collaboration
+			if b.Child == nil && ctx.Err() != nil && state.Suspended == nil {
+				g, err := b.Runtime.Store.Read(context.WithoutCancel(ctx), b.Scope)
+				if err == nil && g.Status == "active" && g.ParentWait != nil && g.ParentOwner == b.ParentOwner {
+					state.Suspended = &types.PromptSuspension{
+						PromptID: b.Scope.ID,
+						Kind:     "collaboration_wait",
+						Detached: true,
+					}
+				}
+			}
+			b.End(state.Suspended != nil)
+		}()
+	}
+
+	if e.collaboration != nil && e.collaboration.Child == nil {
+		if err := e.collaboration.Runtime.Store.Change(e.collaboration.Context(ctx),
+			e.collaboration.Scope,
+			func(g *collaboration.Group) error {
+				if g.RootQuery == "" {
+					g.RootQuery = string([]rune(query)[:min(len([]rune(query)), 16000)])
+				}
+				return nil
+			}); err != nil {
+			return state, err
+		}
+	}
 
 	guards := &loopGuards{}
 loop:
@@ -713,6 +756,9 @@ loop:
 	// A suspended run has not finished either; it resumes once the user
 	// answers, so no answer is synthesized for it.
 	if !state.IsComplete && ctx.Err() == nil && state.Suspended == nil {
+		if e.collaboration != nil && e.collaboration.Child == nil {
+			return state, fmt.Errorf("parent iteration budget exhausted; remaining delegated work was cancelled")
+		}
 		e.handleMaxIterations(ctx, query, state, sessionID, messages)
 	}
 
@@ -818,6 +864,20 @@ func (e *AgentEngine) runReActIteration(
 	// updated (the injected text counts as new delta tokens for the next
 	// call), so the very next LLM call sees the user's addition.
 	e.drainSteerMessages(ctx, state, messagesPtr, sessionID, assistantMessageID)
+	if e.collaboration != nil {
+		events, err := e.collaboration.Poll(ctx)
+		if err != nil {
+			return iterOutcomeBreak, err
+		}
+		appendCollaborationEvents(messagesPtr, events)
+		e.holdCollaborationAnswer, err = e.collaboration.PendingAnswer(ctx)
+		if err != nil {
+			return iterOutcomeBreak, err
+		}
+	}
+	if guards.childAnswerRevised {
+		tools = nil
+	}
 
 	logger.Infof(ctx, "[Agent][Round-%d/%s] Starting: %d messages, %d tools, est_tokens=%d",
 		round, e.maxIterationsDisplay(), len(*messagesPtr), len(tools), currentTokens)
@@ -832,7 +892,9 @@ func (e *AgentEngine) runReActIteration(
 
 	// 1. Think: Call LLM with function calling (includes retry + graceful degradation)
 	e.lastSentMsgCount = len(*messagesPtr)
-	resp, err := e.callLLMWithRetry(ctx, messagesPtr, tools, state, query, state.CurrentRound, sessionID)
+	runtimeNotice := guards.pendingRuntimeNotice
+	guards.pendingRuntimeNotice = ""
+	resp, err := e.callLLMWithRetry(ctx, messagesPtr, tools, state, query, state.CurrentRound, sessionID, runtimeNotice)
 	if err != nil {
 		retErr = err
 		return iterOutcomeNext, err
@@ -853,7 +915,16 @@ func (e *AgentEngine) runReActIteration(
 			round, resp.FinishReason, resp.Usage.CompletionTokens, e.getCompletionTokenBudget())
 		*messagesPtr = e.forceCompaction(ctx, *messagesPtr, round)
 		e.lastSentMsgCount = len(*messagesPtr)
-		resp, err = e.callLLMWithRetry(ctx, messagesPtr, tools, state, query, state.CurrentRound, sessionID)
+		resp, err = e.callLLMWithRetry(
+			ctx,
+			messagesPtr,
+			tools,
+			state,
+			query,
+			state.CurrentRound,
+			sessionID,
+			runtimeNotice,
+		)
 		if err != nil {
 			retErr = err
 			return iterOutcomeNext, err
@@ -912,6 +983,9 @@ func (e *AgentEngine) runReActIteration(
 				e.failTruncatedToolCalls(ctx, response, &step, state.CurrentRound, sessionID)
 			}
 			state.RoundSteps = append(state.RoundSteps, step)
+			if e.collaboration != nil {
+				return iterOutcomeBreak, fmt.Errorf("collaboration stopped after repeated output truncation")
+			}
 			e.finishStalledTurn(ctx, state, sessionID, response, true)
 			return iterOutcomeBreak, nil
 		}
@@ -933,8 +1007,16 @@ func (e *AgentEngine) runReActIteration(
 		guards.sawPlainRound = true
 		guards.lastResponseContent = response.Content
 		if guards.consecutiveSameContent >= maxRepeatedResponseRounds {
-			logger.Warnf(ctx, "[Agent][Round-%d] Detected stuck loop: same content repeated %d times (finish=%s), stopping",
-				round, guards.consecutiveSameContent+1, response.FinishReason)
+			logger.Warnf(
+				ctx,
+				"[Agent][Round-%d] Detected stuck loop: same content repeated %d times (finish=%s), stopping",
+				round,
+				guards.consecutiveSameContent+1,
+				response.FinishReason,
+			)
+			if e.collaboration != nil {
+				return iterOutcomeBreak, fmt.Errorf("collaboration stopped after repeated responses without progress")
+			}
 			e.finishStalledTurn(ctx, state, sessionID, response, false)
 			return iterOutcomeBreak, nil
 		}
@@ -976,23 +1058,64 @@ func (e *AgentEngine) runReActIteration(
 		return iterOutcomeBreak, nil
 	}
 
+	// A delegated deliverable must not silently become a partial success. Give
+	// it one text-only revision using existing evidence; never re-run tools or
+	// create an unbounded continuation loop. The last truncated step remains
+	// explicit if the revision also hits its cap or no round remains.
+	if e.collaboration != nil && e.collaboration.Child != nil &&
+		isLengthFinishReason(response.FinishReason) && len(response.ToolCalls) == 0 &&
+		strings.TrimSpace(
+			response.Content,
+		) != "" && !guards.childAnswerRevised && e.withinIterationBudget(state.CurrentRound+1) {
+		guards.childAnswerRevised = true
+		state.FinalAnswer = response.Content // retain the partial deliverable if recovery fails
+		step.Truncated, step.IntermediateAnswer = true, true
+		state.RoundSteps = append(state.RoundSteps, step)
+		*messagesPtr = append(
+			*messagesPtr,
+			chat.Message{
+				Role: "assistant", Content: response.Content,
+				ReasoningContent:   response.ReasoningContent,
+				ReasoningSignature: response.ReasoningSignature,
+				ReasoningMetadata:  response.ReasoningMetadata,
+			},
+			chat.Message{
+				Role: "system",
+				Content: "The delegated draft reached the output token limit and is incomplete. Produce " +
+					"one shorter, self-contained final deliverable covering all requested sections " +
+					"using the evidence already collected. Do not repeat tool calls or claim missing " +
+					"sections are complete. Omit process narration and repeated source excerpts. If " +
+					"evidence is missing, say so explicitly. This is the only revision attempt.",
+			},
+		)
+		return iterOutcomeNext, nil
+	}
+
+	if guards.childAnswerRevised && len(response.ToolCalls) > 0 {
+		return iterOutcomeBreak, fmt.Errorf("delegated answer revision requested tools despite text-only recovery")
+	}
+
 	// 2. Analyze: Check for stop conditions (natural stop with no tool calls)
 	verdict := e.analyzeResponse(ctx, response, step, state.CurrentRound, sessionID, roundStart)
 	if verdict.isDone {
 		// Guard against empty content: when the LLM stops naturally with no
 		// content and no tool calls (e.g., thinking-only loop without KB),
-		// retry with a nudge message instead of accepting an empty answer.
+		// Retry with a runtime notice, without inventing a user request to
+		// finalize or preventing the next round from using tools/waiting.
 		if verdict.emptyContent {
 			guards.emptyRetries++
 			if guards.emptyRetries <= maxEmptyResponseRetries {
 				state.PendingSteerMessages = step.UserMessagesBefore
 				logger.Warnf(ctx, "[Agent][Round-%d] Empty content with stop - retrying (%d/%d)",
 					round, guards.emptyRetries, maxEmptyResponseRetries)
-				*messagesPtr = append(*messagesPtr, chat.Message{
-					Role:    "user",
-					Content: "Please provide your complete answer now as plain text.",
-				})
+				guards.pendingRuntimeNotice = emptyResponseRetryNotice
 				return iterOutcomeContinue, nil
+			}
+			// A fallback answer cannot replace unreviewed child results or mark
+			// an empty child deliverable as successful. Propagate a failure so
+			// runtime cleanup/parent notification follows the normal error path.
+			if e.collaboration != nil {
+				return iterOutcomeBreak, fmt.Errorf("collaboration stopped after repeated empty answers")
 			}
 			// Retries exhausted — use fallback message rather than empty answer.
 			// analyzeResponse emitted nothing for the empty rounds (they were
@@ -1044,6 +1167,7 @@ func (e *AgentEngine) runReActIteration(
 				})
 				injected := e.drainSteerMessages(ctx, state, messagesPtr, sessionID, assistantMessageID)
 				if injected > 0 {
+					*messagesPtr = e.appendCollaborationDeliveryBoundary(*messagesPtr, verdict.finalAnswer)
 					verdict.step.IntermediateAnswer = true
 					state.RoundSteps = append(state.RoundSteps, verdict.step)
 					if !e.withinIterationBudget(nextRound) {
@@ -1053,6 +1177,67 @@ func (e *AgentEngine) runReActIteration(
 					return iterOutcomeNext, nil
 				}
 			}
+		}
+		if e.collaboration != nil && response.FinishReason != "content_filter" {
+			if e.suspendable && e.collaboration.Child == nil {
+				checkpoint := RunSnapshot{
+					MCPToolRefs:       e.toolRegistry.MCPExposureSnapshot(),
+					Version:           RunSnapshotVersion,
+					CollaborationWait: true,
+					BetweenRounds:     true,
+					Request:           e.suspendRequest,
+					Query:             e.progress.query,
+					ImageURLs:         e.progress.imageURLs,
+					UserMessages:      e.progress.userMessages,
+					CompletedSteps:    append([]types.AgentStep(nil), state.RoundSteps...),
+					KnowledgeRefs:     state.KnowledgeRefs,
+					CurrentRound:      state.CurrentRound + 1,
+					TurnUsage:         state.TurnUsage,
+				}
+				intermediate := verdict.step
+				intermediate.IntermediateAnswer = true
+				checkpoint.CompletedSteps = append(checkpoint.CompletedSteps, intermediate)
+				data, err := json.Marshal(checkpoint)
+				if err != nil {
+					return iterOutcomeBreak, err
+				}
+				if err = e.collaboration.SaveWait(ctx, data, time.Now().Add(time.Hour)); err != nil {
+					return iterOutcomeBreak, err
+				}
+			}
+			events, err := e.collaboration.BeforeFinish(ctx)
+			inputReady := errors.Is(err, collaboration.ErrInput)
+			if err != nil && !inputReady {
+				return iterOutcomeBreak, err
+			}
+			if len(events) > 0 || inputReady {
+				if err := e.collaboration.ClearWait(ctx); err != nil {
+					return iterOutcomeBreak, err
+				}
+				if !e.withinIterationBudget(state.CurrentRound + 1) {
+					if inputReady && e.steerOverruns < maxSteerOverruns {
+						e.steerOverruns++
+						e.allowSteerOverrun = true
+					} else {
+						return iterOutcomeBreak,
+							fmt.Errorf("agent iteration budget exhausted with unprocessed collaboration events")
+					}
+				}
+				*messagesPtr = e.appendCollaborationDeliveryBoundary(*messagesPtr, verdict.finalAnswer)
+				appendCollaborationEvents(messagesPtr, events)
+				verdict.step.IntermediateAnswer = true
+				state.RoundSteps = append(state.RoundSteps, verdict.step)
+				return iterOutcomeNext, nil
+			}
+		}
+		if e.holdCollaborationAnswer && response.FinishReason != "content_filter" {
+			_ = e.eventBus.Emit(
+				ctx,
+				event.Event{
+					ID: verdict.answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
+					Data: event.AgentFinalAnswerData{Content: verdict.finalAnswer, Truncated: verdict.truncated},
+				},
+			)
 		}
 		state.FinalAnswer = verdict.finalAnswer
 		state.IsComplete = true
@@ -1071,6 +1256,21 @@ func (e *AgentEngine) runReActIteration(
 	// preceding a tool call in the same stream as a preamble and relocate it
 	// into the steps tree. The preamble is still preserved as this round's
 	// Thought.
+	// A tool-bearing response is an intermediate user update. Publish it on its
+	// own channel, never as reasoning or as part of the final deliverable.
+	progress := agenttools.StripThinkBlocks(response.Content)
+	if e.collaboration != nil && e.collaboration.Child == nil && strings.TrimSpace(progress) != "" {
+		step.Progress = progress
+		progressID := response.AnswerEventID
+		if progressID == "" {
+			progressID = generateEventID("collaboration-progress")
+		}
+		step.ProgressEventID = progressID
+		_ = e.eventBus.Emit(ctx, event.Event{
+			ID: progressID, Type: event.EventAgentProgress, SessionID: sessionID,
+			Data: event.AgentProgressData{Content: progress, Iteration: state.CurrentRound},
+		})
+	}
 
 	// 3. Act: Execute tool calls
 	e.beginRound(step, response.ToolCalls)
@@ -1162,7 +1362,11 @@ func (e *AgentEngine) describeImages(ctx context.Context, imageDataURIs, prompts
 			}
 		}
 		if ctx.Err() != nil {
-			logger.Warnf(ctx, "[Agent] Context cancelled, skipping remaining %d tool result images", len(imageDataURIs)-i)
+			logger.Warnf(
+				ctx,
+				"[Agent] Context cancelled, skipping remaining %d tool result images",
+				len(imageDataURIs)-i,
+			)
 			break
 		}
 		wg.Add(1)

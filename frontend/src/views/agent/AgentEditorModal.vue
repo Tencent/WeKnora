@@ -2468,7 +2468,7 @@ const defaultVectorThreshold = ref(0.5);
 const defaultRerankTopK = ref(5);
 const defaultRerankThreshold = ref(0.5);
 const defaultQuickAnswerMaxCompletionTokens = 2048;
-const defaultSmartReasoningMaxCompletionTokens = 4096;
+const defaultSmartReasoningMaxCompletionTokens = 24576;
 const defaultSandboxWriteMaxCompletionTokens = 24576;
 const defaultTemperature = ref(0.7);
 
@@ -3692,6 +3692,7 @@ watch(() => props.visible, async (val) => {
       newFormData.config.rerank_top_k = defaultRerankTopK.value;
       newFormData.config.rerank_threshold = defaultRerankThreshold.value;
       newFormData.config.max_completion_tokens = 0;
+      newFormData.config.max_iterations = -1;
       newFormData.config.temperature = defaultTemperature.value;
       // 应用系统默认提示词（根据模式填充）
       const isAgent = newFormData.config.agent_mode === 'smart-reasoning';
@@ -3948,7 +3949,7 @@ watch(agentMode, (val, _oldVal) => {
       formData.value.config.allowed_tools = tools;
     }
     if (formData.value.config.max_iterations >= 0 && formData.value.config.max_iterations <= 1) {
-      formData.value.config.max_iterations = 10;
+      formData.value.config.max_iterations = -1;
     }
     // 切换到 Agent 模式时，如果系统提示词是快速问答的默认值或为空，替换为 Agent 默认提示词
     if (defaultAgentSystemPrompt.value) {

@@ -142,6 +142,7 @@ func NewAgentStreamHandler(
 func (h *AgentStreamHandler) Subscribe() {
 	// Subscribe to all agent streaming events on the dedicated EventBus
 	h.eventBus.On(event.EventAgentThought, h.handleThought)
+	h.eventBus.On(event.EventAgentProgress, h.handleProgress)
 	h.eventBus.On(event.EventAgentToolCall, h.handleToolCall)
 	h.eventBus.On(event.EventAgentToolResult, h.handleToolResult)
 	h.eventBus.On(event.EventAgentCommandOutput, h.handleCommandOutput)
@@ -183,6 +184,18 @@ func (h *AgentStreamHandler) handleAgentPromptEvent(_ context.Context, evt event
 		logger.GetLogger(h.ctx).Error("Append agent prompt event failed", "error", err)
 	}
 	return nil
+}
+
+// handleProgress never contributes to the persisted final answer or reasoning.
+func (h *AgentStreamHandler) handleProgress(ctx context.Context, evt event.Event) error {
+	data, ok := evt.Data.(event.AgentProgressData)
+	if !ok {
+		return nil
+	}
+	return h.streamManager.AppendEvent(ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+		ID: evt.ID, Type: types.ResponseTypeProgress, Content: data.Content, Done: true, Timestamp: time.Now(),
+		Data: map[string]interface{}{"event_id": evt.ID, "iteration": data.Iteration},
+	})
 }
 
 // handleThought handles agent thought events
@@ -577,13 +590,18 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 
 	// Accumulate final answer locally for assistant message (database). Track
 	// per event ID so a later supersede can subtract this segment's content.
-	if data.Content != "" {
+	if data.Content != "" || data.Replace {
 		seg := h.findAnswerSegment(evt.ID)
 		if seg == nil {
 			seg = &answerSegment{id: evt.ID}
 			h.answerSegments = append(h.answerSegments, seg)
 		}
-		seg.content += data.Content
+		if data.Replace {
+			seg.content = data.Content
+			seg.superseded = false
+		} else {
+			seg.content += data.Content
+		}
 		h.finalAnswer = h.composeFinalAnswer()
 	}
 	if data.IsFallback {
@@ -605,6 +623,9 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 		metadata = map[string]interface{}{
 			"event_id": evt.ID,
 		}
+	}
+	if data.Replace {
+		metadata["replace"] = true
 	}
 	if data.IsFallback {
 		metadata["is_fallback"] = true

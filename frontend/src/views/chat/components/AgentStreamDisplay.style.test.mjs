@@ -4,8 +4,11 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import vm from 'node:vm'
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { isAssistantTurnComplete } from '../../../utils/steerStreamFork.ts'
+
+import { useDeferredTimelineCompletion } from '../../../composables/useChatScrollFollow.ts'
+import { collaborationWaitState, collaborationActivity } from '../../../utils/collaborationDisplay.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const source = readFileSync(join(here, 'AgentStreamDisplay.vue'), 'utf8')
@@ -20,6 +23,8 @@ test('steer seals animation while keeping the preceding timeline open without co
   const props = reactive({ ragMode: false, session: { steerForked: true, is_completed: true } })
   const state = vm.runInNewContext(`${stateBlock}\n${collapseBlock}\n({ isConversationDone, isSegmentDone, shouldShowCollapsedSteps })`, {
     props, computed, isAssistantTurnComplete, intermediateStepsCount: { value: 2 },
+    useDeferredTimelineCompletion, readingHistory: ref(false), eventStream: ref([]),
+    collaborationWaitState, collaborationActivity,
     isAwaitingInput: (m) => m?.run_state === 'awaiting_input',
   })
   assert.equal(state.isSegmentDone.value, true)
@@ -52,7 +57,7 @@ test('expanded agent step log keeps model thinking in the tool timeline', () => 
 })
 
 test('streaming log renders reasoning alongside tool calls', () => {
-  assert.match(source, /if \(!isConversationDone\.value\)\s*\{\s*return result;\s*\}/)
+  assert.match(source, /if \(!timelineCompleted\.value\)\s*\{\s*return result;\s*\}/)
 })
 
 test('expanded model reasoning stays inline without a separate thinking title', () => {
@@ -74,7 +79,7 @@ test('streaming tool log uses the same timeline structure', () => {
 })
 
 test('final done row uses an existing common translation key', () => {
-  assert.match(source, /t\('common\.finish'\)/)
+  assert.match(source, /t\(wasUserStopped \? 'input\.messages\.stopSuccess' : 'common\.finish'\)/)
   assert.doesNotMatch(source, /\$t\('common\.done'\)/)
   assert.match(source, /'tree-child-last': !isSegmentDone && index === visibleIntermediateEvents\.length - 1/)
 })
@@ -97,7 +102,7 @@ test('tool rows use line icon names instead of legacy asset masks', () => {
 
 test('rag mode delegates pre-answer loading to pipeline and adds no row after answer starts', () => {
   assert.match(source, /if \(props\.ragMode \|\| hasAnswerStarted\.value\) return false/)
-  assert.match(source, /v-if="displayEvents\.length > 0 \|\| showMemoryRow \|\| showAgentActivityIndicator"/)
+  assert.match(source, /v-if="displayEvents\.length > 0 \|\| showMemoryRow \|\| showAgentActivityIndicator \|\| childActivity"/)
   assert.doesNotMatch(source, /ChatActivityIndicator/)
 })
 
@@ -151,9 +156,9 @@ test('agent mode shows a native placeholder before answer whenever nothing is pe
   assert.match(source, /event\.thinking === true \|\| isThinkingActive\(event\.event_id\)/)
   assert.match(
     source,
-    /event\.type === 'tool_approval_required' \|\|\s*event\.type === 'mcp_oauth_required' \|\|\s*event\.type === 'agent_prompt_required'/,
+    /return isUnresolvedCollaborationPrompt\(event\)/,
   )
   assert.match(source, /class="action-card action-pending"/)
-  assert.match(source, /t\('chat\.thinkingAlt'\)/)
+  assert.match(source, /childActivity \? 'agentStream\.collaboration\.waiting' : 'chat\.thinkingAlt'/)
   assert.match(source, /chat-timeline-loading\.less/)
 })

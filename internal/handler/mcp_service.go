@@ -949,6 +949,11 @@ func (h *MCPServiceHandler) finishResolve(c *gin.Context, pendingID string, res 
 	}
 	// A suspended run has ended; this replica now continues it.
 	resumed := res.Resume && h.runResumer != nil
+	if router, ok := h.runResumer.(interface {
+		HandlesDelegatedPrompt(context.Context, *types.AgentPrompt) bool
+	}); ok && router.HandlesDelegatedPrompt(ctx, res.Prompt) {
+		resumed = false
+	}
 	if resumed {
 		h.runResumer.ResumeSuspendedRun(c, res.Prompt, res.OwnerGone, res.OwnerLeaseUntil)
 	}

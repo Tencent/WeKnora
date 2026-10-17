@@ -49,6 +49,7 @@ const (
 	EventAgentComplete EventType = "agent.complete" // Agent 完成
 
 	// Agent streaming events (for real-time feedback)
+	EventAgentProgress      EventType = "progress"       // User-facing intermediate update
 	EventAgentThought       EventType = "thought"        // Agent 思考过程
 	EventAgentCommandOutput EventType = "command_output" // bounded command output
 	EventAgentToolCall      EventType = "tool_call"      // 工具调用通知

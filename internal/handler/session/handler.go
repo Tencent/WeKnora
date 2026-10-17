@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	stderrors "errors"
 	"net/http"
 
@@ -75,8 +76,10 @@ type Handler struct {
 	approvedProjectDirs HostProjectDirsLoader
 	// promptBroker and suspendedRuns resume and supersede runs suspended on
 	// agent prompts. Nil leaves suspended prompts to the reaper.
-	promptBroker  *hitl.Broker
-	suspendedRuns *service.SuspendedRunService
+	promptBroker      *hitl.Broker
+	suspendedRuns     *service.SuspendedRunService
+	stopCollaboration func(context.Context, string, string) error
+	delegatedPrompt   func(context.Context, *types.AgentPrompt) bool
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -663,4 +666,9 @@ func (h *Handler) setSessionPinned(c *gin.Context, pinned bool) {
 		"success":   true,
 		"is_pinned": pinned,
 	})
+}
+
+// SetCollaborationStopper persists stops independently of the live stream owner.
+func (h *Handler) SetCollaborationStopper(stop func(context.Context, string, string) error) {
+	h.stopCollaboration = stop
 }

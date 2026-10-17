@@ -251,6 +251,18 @@ func (b *Broker) Await(ctx context.Context, spec Spec) (out Outcome, err error) 
 	if p.ID == "" {
 		p.ID = uuid.New().String()
 	}
+	delegation, delegated := ctx.Value(delegationKey{}).(Delegation)
+	if delegated {
+		if err := CheckDelegation(ctx); err != nil {
+			return Outcome{}, err
+		}
+		if spec.Suspend == nil {
+			return Outcome{}, errors.New("delegated prompts require a durable snapshot")
+		}
+		// Persist or fail closed; a worker must never silently become a hot waiter.
+		spec.FallbackTimeout = 0
+		spec.Timeout = 0
+	}
 	dbCtx := context.WithoutCancel(ctx)
 	// A fresh token also fences a takeover by another run on this same replica.
 	owner := uuid.NewString()
@@ -282,6 +294,11 @@ func (b *Broker) Await(ctx context.Context, spec Spec) (out Outcome, err error) 
 			spec.Suspend, spec.Timeout, p.Suspendable = nil, spec.FallbackTimeout, false
 		default:
 			return Outcome{}, fmt.Errorf("persist run state: %w", err)
+		}
+	}
+	if delegated && delegation.Register != nil {
+		if err := delegation.Register(ctx, p); err != nil {
+			return Outcome{}, err
 		}
 	}
 	lease := time.Now().Add(b.leaseTTL)
@@ -437,6 +454,9 @@ func (b *Broker) closed(ctx context.Context, id, owner string) (Outcome, bool) {
 // without detaching the run, so ordinary completion can persist its message.
 // Neither outcome permits executing the authorized side effect.
 func (b *Broker) Consume(ctx context.Context, id, to, owner string) (bool, error) {
+	if err := CheckDelegation(ctx); err != nil {
+		return false, err
+	}
 	ctx = context.WithoutCancel(ctx)
 	transition := types.AgentPromptTransition{
 		From:          []string{types.AgentPromptAnswered},

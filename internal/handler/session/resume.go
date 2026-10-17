@@ -9,6 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/hitl"
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -46,6 +47,9 @@ var (
 func (h *Handler) ResumeSuspendedRun(
 	c *gin.Context, prompt *types.AgentPrompt, ownerGone bool, ownerLeaseUntil *time.Time,
 ) {
+	if h.HandlesDelegatedPrompt(c.Request.Context(), prompt) {
+		return
+	}
 	if h.promptBroker == nil || h.suspendedRuns == nil {
 		return
 	}
@@ -169,6 +173,9 @@ func (h *Handler) buildResumeRequest(
 	session, err := h.sessionService.GetSession(ctx, prompt.SessionID)
 	if err != nil || session == nil {
 		return nil, state, fmt.Errorf("load session: %v", err)
+	}
+	if session.Kind == types.SessionKindAgentDelegated {
+		return nil, state, fmt.Errorf("delegated prompts must resume through the scheduler")
 	}
 	msg, err := h.messageService.GetMessage(ctx, prompt.SessionID, prompt.AssistantMessageID)
 	if err != nil || msg == nil {
@@ -347,4 +354,29 @@ func (h *Handler) writeRunResumedEvent(ctx context.Context, sessionID, messageID
 	}); err != nil {
 		logger.Warnf(ctx, "append run_resumed of message %s: %v", messageID, err)
 	}
+}
+
+// SetDelegatedPromptRouter installs the delegated prompt ownership router.
+func (h *Handler) SetDelegatedPromptRouter(f func(context.Context, *types.AgentPrompt) bool) {
+	h.delegatedPrompt = f
+}
+
+// HandlesDelegatedPrompt reports whether the collaboration runtime owns this prompt.
+func (h *Handler) HandlesDelegatedPrompt(ctx context.Context, p *types.AgentPrompt) bool {
+	return h.delegatedPrompt != nil && h.delegatedPrompt(ctx, p)
+}
+
+// CollaborationEvents publishes a child or resumed parent execution to its own stream.
+func (h *Handler) CollaborationEvents(ctx context.Context,
+	s *types.Session,
+	m *types.Message,
+	bus *event.EventBus,
+) func(context.Context) error {
+	stream := h.setupStreamHandler(ctx, s.ID, m.ID, m.RequestID, s.TenantID, time.Now(), m, bus)
+	return stream.publishCompletion
+}
+
+// CollaborationSteer builds a steer sink for a collaboration execution.
+func (h *Handler) CollaborationSteer(ctx context.Context, s *types.Session, m *types.Message) types.SteerSink {
+	return newSteerSink(ctx, s.ID, m.RequestID, m, h.messageService, h.streamManager)
 }
