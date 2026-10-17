@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -182,6 +183,7 @@ func csvToMarkdown(data []byte) (string, error) {
 	// Excel's "CSV UTF-8" export starts the file with a byte order mark.
 	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
 	reader := csv.NewReader(bytes.NewReader(data))
+	reader.Comma = csvDelimiter(data)
 	reader.LazyQuotes = true
 	reader.TrimLeadingSpace = true
 	// Rows may differ in length. The default, the first row's length, made
@@ -238,3 +240,41 @@ func csvToMarkdown(data []byte) (string, error) {
 // Escape existing backslashes too, so a literal backslash before a pipe does
 // not consume the pipe's escape and turn it back into a column separator.
 var csvCellReplacer = strings.NewReplacer(`\`, `\\`, "|", `\|`, "\r\n", "<br />", "\n", "<br />", "\r", "<br />")
+
+// csvDelimiters are the field separators csvToMarkdown recognizes, in order of
+// preference. Spreadsheet programs write a semicolon where the comma is the
+// decimal separator, as in German or French, and some exports use tabs or pipes.
+var csvDelimiters = []rune{',', ';', '\t', '|'}
+
+// csvDelimiterSample is how many records csvDelimiter reads per candidate.
+const csvDelimiterSample = 50
+
+// csvDelimiter returns the separator that splits the first records of data into
+// the same number of fields, at least two. The one with the most fields wins,
+// and on a tie the earlier one in csvDelimiters. With no such separator the
+// file is read with commas, as before.
+func csvDelimiter(data []byte) rune {
+	best, bestFields := ',', 0
+	for _, delimiter := range csvDelimiters {
+		reader := csv.NewReader(bytes.NewReader(data))
+		reader.Comma = delimiter
+		reader.LazyQuotes = true
+		reader.FieldsPerRecord = -1
+		fields := 0
+		for range csvDelimiterSample {
+			record, err := reader.Read()
+			if err == io.EOF {
+				break
+			}
+			if err != nil || (fields != 0 && len(record) != fields) {
+				fields = 0
+				break
+			}
+			fields = len(record)
+		}
+		if fields >= 2 && fields > bestFields {
+			best, bestFields = delimiter, fields
+		}
+	}
+	return best
+}
