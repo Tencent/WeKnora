@@ -7405,7 +7405,7 @@ export default {
       searchingSubtree: '(с вложенными папками)',
       emptyFolder: 'В этой папке пока нет документов',
       emptyFolderWithSubfolders: 'В этой папке нет собственных документов, но в подпапках есть {count}',
-      folderContentsCount: 'Документов: {documents} / Папок: {folders}',
+      folderContentsCount: 'Документов: {documents} / {folders} папка | Документов: {documents} / {folders} папки | Документов: {documents} / {folders} папок',
       emptySearch: 'Подходящих документов нет',
       collapse: 'Свернуть папки',
       expand: 'Развернуть папки',

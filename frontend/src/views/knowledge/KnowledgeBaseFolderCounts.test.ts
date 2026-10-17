@@ -11,6 +11,7 @@ import zhTW from '../../i18n/locales/zh-TW'
 import jaJP from '../../i18n/locales/ja-JP'
 import koKR from '../../i18n/locales/ko-KR'
 import ruRU from '../../i18n/locales/ru-RU'
+import { pluralRules } from '../../i18n/pluralizationRules'
 
 const source = readFileSync(new URL('./KnowledgeBase.vue', import.meta.url), 'utf8')
 
@@ -127,6 +128,21 @@ test('the sub-folder number is direct children, not the documents below them', a
   assert.equal(f.vm.folderEmptyState, 'subfolders')
 })
 
+test('the breadcrumb omits the folder segment when the folder has no sub-folders', async t => {
+  const f = await setup(t, syncedTree)
+  f.hook.total.value = 2
+  await selectFolder(f, '培训材料库')
+  assert.equal(f.vm.folderContentsCount.folders, 0)
+  assert.equal(f.vm.isFiltering, false)
+  assert.equal(f.vm.showFolderContentsCount, false)
+  // The same branch feeds the existing single-number message; rendered for
+  // real, it cannot contain a "/ 0 folders" tail.
+  const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': zhCN } })
+  const text = i18n.global.t('knowledgeBase.documentCount', { count: 2 })
+  assert.equal(text, '2 个文档')
+  assert.doesNotMatch(text, /文件夹/)
+})
+
 test('filtering keeps the flat result count and adds no folder number', async t => {
   const f = await setup(t, syncedTree)
   await selectFolder(f, '天诛渗透攻防/售后')
@@ -136,6 +152,38 @@ test('filtering keeps the flat result count and adds no folder number', async t 
   assert.equal(f.vm.isFiltering, true)
   assert.equal(f.vm.folderContentsCount.documents, 2)
   assert.equal(f.vm.folderContentsCount.folders, 0)
+})
+
+// ── Sub-folders as list entries ─────────────────────────────────────────────
+// Browsing a folder lists its direct children, the way a file manager does.
+// The document list and card grid receive exactly this array.
+
+test('the page lists exactly the direct sub-folders of the current folder', async t => {
+  const f = await setup(t, syncedTree)
+  await selectFolder(f, '天诛渗透攻防')
+  assert.deepEqual(
+    f.vm.visibleSubFolders.map((node: { path: string }) => node.path),
+    ['天诛渗透攻防/FAQ', '天诛渗透攻防/售后'],
+  )
+
+  await selectFolder(f, '')
+  assert.equal(f.vm.visibleSubFolders.length, 5)
+})
+
+test('filtering hides sub-folder entries because it lists matching documents', async t => {
+  const f = await setup(t, syncedTree)
+  await selectFolder(f, '天诛渗透攻防')
+  f.vm.docSearchKeyword = 'FAQ'
+  await flush()
+  assert.equal(f.vm.isFiltering, true)
+  assert.equal(f.vm.visibleSubFolders.length, 0)
+})
+
+test('an unloaded folder tree contributes no sub-folder entries', async t => {
+  const f = await setup(t, null)
+  await selectFolder(f, '天诛渗透攻防')
+  assert.equal(f.vm.folderTree, null)
+  assert.equal(f.vm.visibleSubFolders.length, 0)
 })
 
 test('an unloaded folder tree reports no folders instead of crashing', async t => {
@@ -167,17 +215,29 @@ function renderFolderContents(
   locale: keyof typeof locales,
   counts: { documents: number; folders: number } = { documents: 2, folders: 1 },
 ): string {
-  const i18n = createI18n({ legacy: false, locale, messages: { [locale]: locales[locale] } })
-  return i18n.global.t(FOLDER_CONTENTS, counts)
+  const i18n = createI18n({ legacy: false, locale, pluralRules, messages: { [locale]: locales[locale] } })
+  // `count` is what vue-i18n uses to pick the plural form; the folder number is
+  // the noun that changes, so it drives the choice.
+  return i18n.global.t(FOLDER_CONTENTS, { ...counts, count: counts.folders })
 }
 
 test('every locale renders both numbers as "documents / folders"', () => {
   assert.equal(renderFolderContents('zh-CN'), '2 个文档 / 1 个文件夹')
   assert.equal(renderFolderContents('zh-TW'), '2 個文件 / 1 個資料夾')
-  assert.equal(renderFolderContents('en-US'), '2 documents / 1 folders')
+  assert.equal(renderFolderContents('en-US'), '2 documents / 1 folder')
   assert.equal(renderFolderContents('ja-JP'), '2 件のドキュメント / 1 個のフォルダ')
   assert.equal(renderFolderContents('ko-KR'), '문서 2개 / 폴더 1개')
-  assert.equal(renderFolderContents('ru-RU'), 'Документов: 2 / Папок: 1')
+  assert.equal(renderFolderContents('ru-RU'), 'Документов: 2 / 1 папка')
+})
+
+test('plural locales inflect the folder noun', () => {
+  assert.equal(renderFolderContents('en-US', { documents: 2, folders: 2 }), '2 documents / 2 folders')
+  assert.equal(renderFolderContents('ru-RU', { documents: 2, folders: 2 }), 'Документов: 2 / 2 папки')
+  assert.equal(renderFolderContents('ru-RU', { documents: 2, folders: 5 }), 'Документов: 2 / 5 папок')
+  // No plural change in these locales; the number alone changes.
+  assert.equal(renderFolderContents('zh-CN', { documents: 2, folders: 2 }), '2 个文档 / 2 个文件夹')
+  assert.equal(renderFolderContents('ja-JP', { documents: 1, folders: 1 }), '1 件のドキュメント / 1 個のフォルダ')
+  assert.equal(renderFolderContents('ko-KR', { documents: 2, folders: 2 }), '문서 2개 / 폴더 2개')
 })
 
 // ── Empty state ─────────────────────────────────────────────────────────────
@@ -216,17 +276,20 @@ function expectSource(pattern: RegExp) {
 }
 
 test('the breadcrumb wires both numbers into the two-part message', () => {
-  expectSource(/\$t\('knowledgeBase\.folderTree\.folderContentsCount', folderContentsCount\)/)
+  expectSource(/\$t\('knowledgeBase\.folderTree\.folderContentsCount', folderContentsMessage\)/)
   expectSource(
     /\$t\('knowledgeBase\.folderTree\.filteredCount', \{ count: folderContentsCount\.documents \}\)/,
   )
   expectSource(/v-if="isFiltering"/)
-  // The single-number knowledgeBase.documentCount message must be gone: it only
-  // ever described documents, which is what made the list and count disagree.
-  assert.ok(
-    !source.includes('knowledgeBase.documentCount'),
-    'the breadcrumb should no longer use the single-number documentCount message',
-  )
+  expectSource(/v-else-if="showFolderContentsCount"/)
+  // With no sub-folders the two-part message would end in "0 folders", so the
+  // breadcrumb falls back to the existing document-only message.
+  expectSource(/\$t\('knowledgeBase\.documentCount', \{ count: folderContentsCount\.documents \}\)/)
+})
+
+test('the document views receive the current sub-folders', () => {
+  const passed = source.match(/:sub-folders="visibleSubFolders"/g) || []
+  assert.equal(passed.length, 2, 'both the list and the card grid should receive the folders')
 })
 
 test('the empty state tells sub-folder documents apart from an empty folder', () => {

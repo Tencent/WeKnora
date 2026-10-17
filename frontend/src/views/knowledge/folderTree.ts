@@ -24,6 +24,15 @@ export type UploadFileLike = {
 }
 
 /**
+ * A folder listed as a row or card in the document list. It is the subset of a
+ * tree node the list needs: the path to navigate to and the two counts.
+ */
+export type FolderEntry = Pick<
+  KnowledgeFolderNode,
+  'path' | 'name' | 'document_count' | 'total_count'
+>
+
+/**
  * One rendered row of the flattened tree. The root row carries the knowledge
  * base totals; the component supplies its label.
  */

@@ -654,7 +654,7 @@ export default {
   },
   knowledgeBase: {
     tagAddAction: 'Add tags',
-    documentCount: '{count} documents',
+    documentCount: '{count} document | {count} documents',
     filters: 'Filters',
     clearFilters: 'Clear filters',
 
@@ -720,11 +720,11 @@ export default {
       title: 'Folders',
       rootRow: 'Root',
       rootRowTip: 'Knowledge base root; documents not in a subfolder live here',
-      folderCardCount: '{count} documents',
+      folderCardCount: '{count} document | {count} documents',
       searchingSubtree: '(including sub-folders)',
       emptyFolder: 'This folder has no documents yet',
       emptyFolderWithSubfolders: 'This folder has no documents of its own, but {count} in sub-folders',
-      folderContentsCount: '{documents} documents / {folders} folders',
+      folderContentsCount: '{documents} documents / {folders} folder | {documents} documents / {folders} folders',
       emptySearch: 'No matching documents',
       collapse: 'Collapse folders',
       expand: 'Expand folders',

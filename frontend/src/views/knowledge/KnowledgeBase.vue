@@ -818,6 +818,12 @@ const isFiltering = computed(() =>
 );
 // A row's folder is worth showing only when the list can span folders.
 const showDocumentFolderPath = computed(() => hasFolders.value && isFiltering.value);
+// Browsing a folder lists its direct sub-folders as entries, the way a file
+// manager does. Filtering returns matching documents from the whole subtree,
+// so folder entries would be noise there.
+const visibleSubFolders = computed(() =>
+  isFiltering.value ? [] : childFolders(folderTree.value, selectedFolderPath.value),
+);
 const folderBreadcrumbs = computed(() => buildFolderBreadcrumbs(selectedFolderPath.value));
 // What the breadcrumb reports is the folder's own contents the way a file
 // manager counts them: the documents this list can show plus its direct
@@ -828,6 +834,18 @@ const folderBreadcrumbs = computed(() => buildFolderBreadcrumbs(selectedFolderPa
 const folderContentsCount = computed<{ documents: number; folders: number }>(() => ({
   documents: total.value,
   folders: isFiltering.value ? 0 : childFolders(folderTree.value, selectedFolderPath.value).length,
+}));
+// A folder with no sub-folders would otherwise end the breadcrumb with
+// "/ 0 folders"; the document-only message is the whole truth there.
+const showFolderContentsCount = computed(
+  () => !isFiltering.value && folderContentsCount.value.folders > 0,
+);
+const folderContentsMessage = computed(() => ({
+  documents: folderContentsCount.value.documents,
+  folders: folderContentsCount.value.folders,
+  // vue-i18n selects the plural form from `count`; folders are the noun that
+  // changes with the number.
+  count: folderContentsCount.value.folders,
 }));
 // Documents below the selected folder rather than directly inside it; this is
 // what tells "documents live in the sub-folders" apart from "nothing here yet".
@@ -2437,7 +2455,8 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                   </template>
                   <span v-if="!docListLoading" class="doc-folder-path__count">
                     <template v-if="isFiltering">{{ $t('knowledgeBase.folderTree.filteredCount', { count: folderContentsCount.documents }) }}</template>
-                    <template v-else>{{ $t('knowledgeBase.folderTree.folderContentsCount', folderContentsCount) }}</template>
+                    <template v-else-if="showFolderContentsCount">{{ $t('knowledgeBase.folderTree.folderContentsCount', folderContentsMessage) }}</template>
+                    <template v-else>{{ $t('knowledgeBase.documentCount', { count: folderContentsCount.documents }) }}</template>
                   </span>
                   <t-tooltip v-if="showFolderTree && isFiltering" :content="$t('knowledgeBase.folderTree.searchingSubtree')">
                     <t-icon name="info-circle" class="doc-folder-path__sep" />
@@ -2571,7 +2590,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
               </div>
               <div class="doc-scroll-container"
                 :class="{
-                  'is-empty': !cardList.length && !docListLoading,
+                  'is-empty': !cardList.length && !visibleSubFolders.length && !docListLoading,
                   'is-marquee-active': docMarqueeVisible,
                 }"
                 ref="knowledgeScroll" @scroll="handleScroll" @mousedown="onDocMarqueeMouseDown">
@@ -2599,10 +2618,11 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                     </div>
                   </div>
                 </div>
-                <template v-else-if="cardList.length && viewMode === 'grid'">
+                <template v-else-if="(cardList.length || visibleSubFolders.length) && viewMode === 'grid'">
                   <DocumentCardView :kb-id="kbId"
                     :items="cardList"
                     :folder-options="folderOptions"
+                    :sub-folders="visibleSubFolders"
                     :selected-ids="selectedIds"
                     :batch-mode="batchMode"
                     :can-edit="canEdit"
@@ -2629,8 +2649,9 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                     @update:move-mode="(mode: any) => moveMode = mode"
                   />
                 </template>
-                <template v-else-if="cardList.length && viewMode === 'list'">
+                <template v-else-if="(cardList.length || visibleSubFolders.length) && viewMode === 'list'">
                   <DocumentListView :kb-id="kbId" :items="cardList" :folder-options="folderOptions"
+                    :sub-folders="visibleSubFolders"
                     :selected-ids="selectedIds"
                     :can-edit="canEdit" :can-download="canDownloadKnowledge" :can-mutate-knowledge="canMutateKnowledge"
                     :trace-visible-ids="traceAvailableById"
