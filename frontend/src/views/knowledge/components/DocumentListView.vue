@@ -590,10 +590,6 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   align-items: center;
   justify-content: center;
   color: var(--td-warning-color);
-
-  .t-icon {
-    font-size: 26px;
-  }
 }
 
 .cell {

@@ -349,14 +349,14 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
       <div class="card-content">
         <div class="card-content-nav">
           <div class="card-file-icon folder-card-icon">
-            <t-icon name="folder" />
+            <t-icon name="folder" size="28px" />
           </div>
           <span class="card-content-title folder-card-title" :title="folder.path">{{ folder.name }}</span>
         </div>
         <div class="card-preview">
           <div class="card-content-txt folder-card-count"
             :title="t('knowledgeBase.folderTree.countHint', { direct: folder.document_count, total: folder.total_count })">
-            <t-icon name="file" />
+            <t-icon name="file" size="12px" />
             <span>{{ t('knowledgeBase.folderTree.folderCardCount', { count: folder.total_count }) }}</span>
           </div>
         </div>
@@ -836,7 +836,6 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
       align-items: center;
       justify-content: center;
       color: var(--td-warning-color);
-      .t-icon { font-size: 28px; }
     }
     .folder-card-title { cursor: pointer; }
     .folder-card-count {
@@ -844,7 +843,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
       align-items: center;
       gap: 4px;
       color: var(--td-text-color-placeholder);
-      .t-icon { flex-shrink: 0; font-size: 12px; }
+      .t-icon { flex-shrink: 0; }
     }
   }
 }
