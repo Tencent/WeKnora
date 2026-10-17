@@ -56,7 +56,7 @@ type fakeVideoFrameExtractor struct {
 }
 
 func (f *fakeVideoFrameExtractor) ExtractKeyframes(
-	_ context.Context, src io.Reader, fileName string, sampling videoFrameSampling,
+	_ context.Context, src io.Reader, _ string, sampling videoFrameSampling,
 ) ([]videoFrame, error) {
 	f.calls++
 	f.sampling = sampling
@@ -80,7 +80,7 @@ type videoTestVLM struct {
 }
 
 func (v *videoTestVLM) Predict(
-	ctx context.Context, imgBytes [][]byte, prompt string,
+	_ context.Context, imgBytes [][]byte, prompt string,
 ) (string, error) {
 	v.prompts = append(v.prompts, prompt)
 	v.images += len(imgBytes)
@@ -115,7 +115,7 @@ type videoTestASR struct {
 }
 
 func (a *videoTestASR) Transcribe(
-	ctx context.Context, audioBytes []byte, fileName string,
+	_ context.Context, audioBytes []byte, _ string,
 ) (*asr.TranscriptionResult, error) {
 	a.calls++
 	a.gotAudio = audioBytes
@@ -144,11 +144,11 @@ type videoTestModelService struct {
 	gotVideoModelID string
 }
 
-func (s *videoTestModelService) GetModelByID(ctx context.Context, id string) (*types.Model, error) {
+func (s *videoTestModelService) GetModelByID(_ context.Context, id string) (*types.Model, error) {
 	return s.models[id], nil
 }
 
-func (s *videoTestModelService) GetVLMModel(ctx context.Context, id string) (vlm.VLM, error) {
+func (s *videoTestModelService) GetVLMModel(_ context.Context, id string) (vlm.VLM, error) {
 	s.gotVLMModelID = id
 	if s.vlmErr != nil {
 		return nil, s.vlmErr
@@ -156,7 +156,7 @@ func (s *videoTestModelService) GetVLMModel(ctx context.Context, id string) (vlm
 	return s.vlmModel, nil
 }
 
-func (s *videoTestModelService) GetASRModel(ctx context.Context, id string) (asr.ASR, error) {
+func (s *videoTestModelService) GetASRModel(_ context.Context, id string) (asr.ASR, error) {
 	s.gotASRModelID = id
 	if s.asrErr != nil {
 		return nil, s.asrErr
@@ -164,7 +164,7 @@ func (s *videoTestModelService) GetASRModel(ctx context.Context, id string) (asr
 	return s.asrModel, nil
 }
 
-func (s *videoTestModelService) GetVideoModel(ctx context.Context, id string) (video.Video, error) {
+func (s *videoTestModelService) GetVideoModel(_ context.Context, id string) (video.Video, error) {
 	s.gotVideoModelID = id
 	if s.videoErr != nil {
 		return nil, s.videoErr
@@ -178,7 +178,7 @@ type videoTestFileService struct {
 	err     error
 }
 
-func (s *videoTestFileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
+func (s *videoTestFileService) GetFile(_ context.Context, _ string) (io.ReadCloser, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -193,7 +193,7 @@ type videoTestKnowledgeRepo struct {
 }
 
 func (r *videoTestKnowledgeRepo) UpdateKnowledgeColumns(
-	ctx context.Context, id string, values map[string]interface{},
+	_ context.Context, _ string, values map[string]interface{},
 ) error {
 	r.updates++
 	r.columns = values
