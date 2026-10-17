@@ -95,7 +95,8 @@ func TestGate_RequestAndWait_Timeout(t *testing.T) {
 }
 
 func TestGate_UnattendedRunRefusesWithoutAsking(t *testing.T) {
-	g := NewGate(&config.Config{Agent: &config.AgentConfig{ToolApprovalTimeoutSeconds: 30}}, &stubChecker{required: true}, nil)
+	g := NewGate(&config.Config{Agent: &config.AgentConfig{ToolApprovalTimeoutSeconds: 30}},
+		&stubChecker{required: true}, nil)
 	bus := event.NewEventBus()
 	raised := 0
 	bus.On(event.EventToolApprovalRequired, func(context.Context, event.Event) error {
