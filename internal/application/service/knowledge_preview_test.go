@@ -190,7 +190,7 @@ func TestGetKnowledgePreviewFileDisabledStreamsOriginal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetKnowledgePreviewFile: %v", err)
 	}
-	defer preview.Reader.Close()
+	defer func() { _ = preview.Reader.Close() }()
 	got, _ := io.ReadAll(preview.Reader)
 	if !bytes.Equal(got, original) {
 		t.Fatal("disabled feature must serve the original bytes")
@@ -211,7 +211,7 @@ func TestGetKnowledgePreviewFileNonDocxStreamsOriginal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetKnowledgePreviewFile: %v", err)
 	}
-	defer preview.Reader.Close()
+	defer func() { _ = preview.Reader.Close() }()
 	got, _ := io.ReadAll(preview.Reader)
 	if string(got) != "%PDF-1.7" {
 		t.Fatalf("got %q, want the original PDF", got)
@@ -233,7 +233,7 @@ func TestGetKnowledgePreviewFileWithoutVectorMediaSkipsConversion(t *testing.T) 
 	if err != nil {
 		t.Fatalf("GetKnowledgePreviewFile: %v", err)
 	}
-	defer preview.Reader.Close()
+	defer func() { _ = preview.Reader.Close() }()
 	got, _ := io.ReadAll(preview.Reader)
 	if !bytes.Equal(got, original) {
 		t.Fatal("PNG-only DOCX must be served unchanged")
@@ -258,13 +258,16 @@ func TestGetKnowledgePreviewFileStreamsNonVectorFileWithoutBuffering(t *testing.
 	if err != nil {
 		t.Fatalf("GetKnowledgePreviewFile: %v", err)
 	}
-	defer preview.Reader.Close()
+	defer func() { _ = preview.Reader.Close() }()
 	counting, ok := preview.Reader.(*countingPreviewReader)
 	if !ok {
 		t.Fatalf("reader = %T, want the original seekable stream", preview.Reader)
 	}
 	if counting.reads != 0 {
-		t.Fatalf("Read calls = %d before the handler streams; the zip directory scan must use ReaderAt only", counting.reads)
+		t.Fatalf(
+			"Read calls = %d before the handler streams; the zip directory scan must use ReaderAt only",
+			counting.reads,
+		)
 	}
 	got, _ := io.ReadAll(counting)
 	if !bytes.Equal(got, original) {
@@ -365,7 +368,7 @@ func TestGetKnowledgePreviewFileFallsBackOnConversionError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetKnowledgePreviewFile: %v", err)
 	}
-	defer preview.Reader.Close()
+	defer func() { _ = preview.Reader.Close() }()
 	got, _ := io.ReadAll(preview.Reader)
 	if !bytes.Equal(got, original) {
 		t.Fatal("conversion failure must fall back to the original bytes")
@@ -391,7 +394,7 @@ func TestGetKnowledgePreviewFileFallsBackWithoutPreviewConverter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetKnowledgePreviewFile: %v", err)
 	}
-	defer preview.Reader.Close()
+	defer func() { _ = preview.Reader.Close() }()
 	got, _ := io.ReadAll(preview.Reader)
 	if !bytes.Equal(got, original) {
 		t.Fatal("a reader without PreviewConverter must serve the original bytes")
