@@ -201,7 +201,7 @@ func resolveFileImportProcessConfig(
 	}
 
 	if processOverrides != nil {
-		if err := validateEffectiveProcessOverrides(eff, []string{fileType}); err != nil {
+		if err := validateEffectiveProcessOverrides(eff, kb, []string{fileType}); err != nil {
 			return eff, err
 		}
 	} else if err := validateDefaultFileImportRequirements(ctx, kb, eff, fileType); err != nil {
@@ -221,12 +221,14 @@ func ValidateProcessOverrides(
 	if overrides == nil {
 		return nil
 	}
-	return validateEffectiveProcessOverrides(ResolveProcessConfig(kb, overrides), fileTypes)
+	return validateEffectiveProcessOverrides(ResolveProcessConfig(kb, overrides), kb, fileTypes)
 }
 
 // Validate the final config, including the legacy enableMultimodel argument
 // applied by upload and reparse callers, before persisting or enqueueing it.
-func validateEffectiveProcessOverrides(eff types.EffectiveProcessConfig, fileTypes []string) error {
+func validateEffectiveProcessOverrides(
+	eff types.EffectiveProcessConfig, kb *types.KnowledgeBase, fileTypes []string,
+) error {
 	hasImage := false
 	hasAudio := false
 	hasVideo := false
@@ -288,7 +290,7 @@ func ApplyKnowledgeProcessOverrides(
 	if processOverrides == nil {
 		return eff, nil
 	}
-	if err := validateEffectiveProcessOverrides(eff, fileTypes); err != nil {
+	if err := validateEffectiveProcessOverrides(eff, kb, fileTypes); err != nil {
 		return eff, err
 	}
 	if err := knowledge.SetProcessOverrides(processOverrides); err != nil {
