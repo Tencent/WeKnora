@@ -2699,6 +2699,36 @@ watch(() => chatResources.allModels, (list) => {
     margin-left: 2px;
     font-weight: 500;
   }
+
+  // 视频模型依赖：缺模型只影响可用性，不阻塞保存，所以用提示色而不是错误色。
+  .video-asr-warning {
+    color: var(--td-warning-color);
+  }
+
+  .video-model-hint {
+    margin: var(--app-space-1) 0 0;
+    font-size: var(--app-text-sm);
+    line-height: 1.5;
+    color: var(--td-text-color-placeholder);
+  }
+
+  // The selector and its fallback note stack in the right-hand column instead
+  // of sitting side by side (setting-control is a flex row by default).
+  .video-model-control {
+    flex-direction: column;
+    align-items: stretch;
+    // A model selector sizes itself to its label, and the hint below it can be
+    // a full sentence. Left unconstrained the control grows past the row and
+    // squeezes the description column down to a few characters, so it takes
+    // the same width every other control takes and wraps its own text.
+    width: 320px;
+    min-width: 320px;
+    max-width: 320px;
+  }
+
+  .video-model-control > * {
+    width: 100%;
+  }
 }
 
 .kb-profile-card {
@@ -2805,24 +2835,6 @@ watch(() => chatResources.allModels, (list) => {
     }
   }
 
-  // 视频模型依赖：缺模型只影响可用性，不阻塞保存，所以用提示色而不是错误色。
-  .video-asr-warning {
-    color: var(--td-warning-color);
-  }
-
-  .video-model-hint {
-    margin: var(--app-space-1) 0 0;
-    font-size: var(--app-text-sm);
-    line-height: 1.5;
-    color: var(--td-text-color-placeholder);
-  }
-
-  // The selector and its fallback note stack in the right-hand column instead
-  // of sitting side by side (setting-control is a flex row by default).
-  .video-model-control {
-    flex-direction: column;
-    align-items: stretch;
-  }
 }
 </style>
 

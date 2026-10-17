@@ -84,7 +84,7 @@
           <t-empty :description="$t('common.noResult')" />
           <t-button variant="outline" @click="modelQuery = ''">{{ $t('common.clear') }}</t-button>
         </div>
-        <div v-else-if="!loading && filteredModels.length === 0 && !authStore.hasRole('admin')" class="empty-state">
+        <div v-else-if="!loading && filteredModels.length === 0 && (!authStore.hasRole('admin') || activeTypeFilter === VIDEO_FILTER)" class="empty-state">
           <t-empty :description="emptyHint" />
         </div>
         <div v-else-if="!loading" class="model-grid">
