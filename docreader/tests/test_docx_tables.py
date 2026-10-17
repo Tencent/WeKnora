@@ -269,6 +269,35 @@ class DocxContentControlAndRevisionTest(unittest.TestCase):
         document = _parse(_docx_bytes(build))
         self.assertEqual("Signed by Jane Doe on Monday", document.content)
 
+    def test_toc_and_placeholder_controls_are_left_out(self):
+        """A table of contents repeats the headings with page numbers, and a
+        control still showing its placeholder holds no document text."""
+
+        def build(doc):
+            _insert_before_sectpr(
+                doc,
+                _xml(
+                    "<w:sdt><w:sdtPr><w:docPartObj>"
+                    "<w:docPartGallery w:val='Table of Contents'/><w:docPartUnique/>"
+                    "</w:docPartObj></w:sdtPr><w:sdtContent>"
+                    "<w:p><w:r><w:t>Contents</w:t></w:r></w:p>"
+                    "<w:p><w:r><w:t>Introduction 1</w:t></w:r></w:p>"
+                    "</w:sdtContent></w:sdt>"
+                ),
+            )
+            paragraph = doc.add_paragraph("Name: ")
+            paragraph._p.append(
+                _xml(
+                    "<w:sdt><w:sdtPr><w:showingPlcHdr/></w:sdtPr><w:sdtContent>"
+                    "<w:r><w:t>Click or tap here to enter text.</w:t></w:r>"
+                    "</w:sdtContent></w:sdt>"
+                )
+            )
+            doc.add_paragraph("Introduction")
+
+        document = _parse(_docx_bytes(build))
+        self.assertEqual("Name:\n\nIntroduction", document.content)
+
     def test_tables_in_a_control_and_cell_insertions_are_kept(self):
         def build(doc):
             doc.add_paragraph("Intro")

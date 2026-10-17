@@ -55,28 +55,45 @@ _W_P = qn("w:p")
 _W_TBL = qn("w:tbl")
 _W_R = qn("w:r")
 _W_SDT = qn("w:sdt")
+_W_SDT_PR = qn("w:sdtPr")
 _W_SDT_CONTENT = qn("w:sdtContent")
 _W_CUSTOM_XML = qn("w:customXml")
 
 # Inline wrappers whose runs Word shows as part of the paragraph. python-docx's
-# Paragraph.text reads only w:r and w:hyperlink children, so the text of an
-# inline content control (w:sdt), a tracked insertion (w:ins) or move
-# destination (w:moveTo), a smart tag, custom XML markup or a simple field was
-# dropped. Deletions (w:del, w:moveFrom) hold their text in w:delText, not
-# w:t, and stay out, which is the document as it reads with changes accepted.
+# Paragraph.text reads only w:r and w:hyperlink children, so the text of a
+# tracked insertion (w:ins) or move destination (w:moveTo), a smart tag,
+# custom XML markup or a simple field was dropped, and that of an inline
+# content control (w:sdt, read through _sdt_content). Deletions (w:del,
+# w:moveFrom) hold their text in w:delText, not w:t, and stay out, which is
+# the document as it reads with changes accepted.
 _INLINE_TEXT_CONTAINERS = frozenset(
     qn(tag)
     for tag in (
         "w:hyperlink",
         "w:ins",
         "w:moveTo",
-        "w:sdt",
-        "w:sdtContent",
         "w:smartTag",
         "w:customXml",
         "w:fldSimple",
     )
 )
+
+
+def _sdt_content(sdt: Any) -> Optional[Any]:
+    """The w:sdtContent of a content control that holds document text, or None.
+
+    A control still showing its placeholder ("Click or tap here to enter
+    text.") holds none, and a table of contents repeats the headings with
+    their page numbers, so both are left out as before.
+    """
+    props = sdt.find(_W_SDT_PR)
+    if props is not None:
+        if props.find(qn("w:showingPlcHdr")) is not None:
+            return None
+        gallery = props.find(f"{qn('w:docPartObj')}/{qn('w:docPartGallery')}")
+        if gallery is not None and gallery.get(qn("w:val")) == "Table of Contents":
+            return None
+    return sdt.find(_W_SDT_CONTENT)
 
 
 def _paragraph_text(p_element: Any) -> str:
@@ -87,6 +104,10 @@ def _paragraph_text(p_element: Any) -> str:
         for child in parent:
             if child.tag == _W_R:
                 parts.append(Run(child, None).text)
+            elif child.tag == _W_SDT:
+                content = _sdt_content(child)
+                if content is not None:
+                    walk(content)
             elif child.tag in _INLINE_TEXT_CONTAINERS:
                 walk(child)
 
@@ -106,7 +127,7 @@ def _block_children(container: Any):
         if child.tag in (_W_P, _W_TBL):
             yield child, True
         elif child.tag == _W_SDT:
-            content = child.find(_W_SDT_CONTENT)
+            content = _sdt_content(child)
             if content is not None:
                 for element, _ in _block_children(content):
                     yield element, False
