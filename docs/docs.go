@@ -11134,12 +11134,13 @@ const docTemplate = `{
                     }
                 },
                 "x-agent": {
+                    "always_confirm": true,
                     "id": "mcp_service.create",
                     "label_param": "name",
                     "risk": "write",
                     "role": "admin"
                 },
-                "x-agent-hint": "Adds a remote MCP service (SSE or HTTP Streamable) and turns it on. Take the URL from the user or the service's own documentation. It never carries a key or token: for a service that needs one, set auth_type (api_key, bearer or oauth) and afterwards give the user open_page with mcp_service_id so they enter the credential or authorize. Then check it with mcp_service.test."
+                "x-agent-hint": "Adds a remote MCP service (SSE or HTTP Streamable) and turns it on. Take the URL from the user or the service's own documentation. It never carries a key or token: for a service that needs one, set auth_type (api_key, bearer or oauth) and afterwards give the user open_page with mcp_service_id so they enter the credential or authorize. Every agent set to use all MCP services starts calling the new URL, so this always asks the user. Then check it with mcp_service.test."
             }
         },
         "/mcp-services/oauth/callback": {

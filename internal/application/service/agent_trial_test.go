@@ -75,6 +75,8 @@ func TestAgentTrialRunsInAHiddenSessionAndCollectsTheRun(t *testing.T) {
 	sessions.agentQA = func(ctx context.Context, req *types.QARequest, bus *event.EventBus) error {
 		assert.False(t, req.Interactive, "nobody can answer a prompt inside a trial")
 		assert.False(t, req.Suspendable)
+		assert.True(t, types.IsUnattendedRun(ctx), "tool approvals are refused, not awaited")
+		assert.True(t, types.IsMCPOAuthNonInteractive(ctx), "OAuth prompts are refused, not awaited")
 		assert.Equal(t, "Where is the VPN guide?", req.Query)
 		emit := func(typ event.EventType, data any) { require.NoError(t, bus.Emit(ctx, event.NewEvent(typ, data))) }
 		emit(event.EventAgentToolCall, event.AgentToolCallData{ToolCallID: "c1", ToolName: "knowledge_search"})
