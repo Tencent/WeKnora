@@ -154,7 +154,10 @@ func (c *Client) planThinking(opts *api.Options) thinkingPlan {
 	plan := thinkingPlan{enabled: true}
 	switch s.ThinkingMode {
 	case api.AnthropicThinkingAdaptive:
-		plan.body = map[string]any{"type": "adaptive"}
+		// Opus 4.7 and later default to display "omitted", which returns
+		// thinking blocks with empty text; ask for the summary so the
+		// reasoning stream has something to show.
+		plan.body = map[string]any{"type": "adaptive", "display": "summarized"}
 		if level.Graded() && s.SupportsEffort {
 			plan.effort = levels.Value(level)
 		}
