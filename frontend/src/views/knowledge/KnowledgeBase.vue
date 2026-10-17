@@ -49,6 +49,11 @@ import DocumentListView from './components/DocumentListView.vue';
 import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
+import {
+  UPLOAD_VIDEO_EXTENSIONS,
+  isVideoParsingEnabled,
+  isVideoParsingReady,
+} from './utils/uploadSources';
 import KbFolderTree from './components/KbFolderTree.vue';
 import BatchTagDialog from './components/BatchTagDialog.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
@@ -245,9 +250,22 @@ const supportedFileTypes = computed<Set<string>>(() => {
   return available
 })
 
-const acceptFileTypes = computed(() =>
-  [...supportedFileTypes.value].map(t => '.' + t).join(',')
-)
+// Video parsing is a KB-level switch, so the upload entry follows the KB detail
+// already loaded for this page — no extra request. The picker's own whitelist
+// comes from the parser engines, which never list video extensions, so the
+// accept list has to be widened here as well as in filterUploadFiles.
+const videoParsingEnabled = computed(() => isVideoParsingEnabled(kbInfo.value))
+const videoParsingReady = computed(() => isVideoParsingReady(kbInfo.value))
+
+const acceptFileTypes = computed(() => {
+  const types = [...supportedFileTypes.value]
+  if (videoParsingEnabled.value) {
+    for (const ext of UPLOAD_VIDEO_EXTENSIONS) {
+      if (!types.includes(ext)) types.push(ext)
+    }
+  }
+  return types.map(t => '.' + t).join(',')
+})
 
 const unsupportedFileTypes = computed<string[]>(() => {
   const engines = parserEngines.value
@@ -2630,7 +2648,9 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                   </div>
                   <div v-if="canEdit" class="doc-filter-actions">
                     <KbUploadSourceDropdown ref="uploadSourceRef" :accept-file-types="acceptFileTypes"
-                      :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="add" :trigger-label="t('knowledgeBase.addDocument')"
+                      :supported-file-types="[...supportedFileTypes]" :allow-video="videoParsingEnabled"
+                      :video-parse-ready="videoParsingReady"
+                      include-manual trigger-icon="add" :trigger-label="t('knowledgeBase.addDocument')"
                       trigger-class="content-bar-icon-btn" data-guide="kb-detail-add-doc"
                       :tooltip="t('knowledgeBase.addDocument')" placement="bottom-right" @files="handleUploadSourceFiles"
                       @url="handleUploadSourceUrl" @manual="handleManualCreate" />
