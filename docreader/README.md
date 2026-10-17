@@ -86,7 +86,7 @@ docreader:
 
 ### 上传 HTML 的正文抽取
 
-- `DOCREADER_HTML_MAIN_CONTENT`: 上传的 `.html` / `.htm` 文件是否只索引正文（默认：`false`）。开启后用 trafilatura 抽取正文，与 URL 导入路径一致，导航栏 / 侧栏 / 页脚不再进入索引；抽取结果过短（< 120 字符）或不足整页转换的 15% 时自动回退整页转换。默认关闭，升级后既有行为不变。
+- `DOCREADER_HTML_MAIN_CONTENT`: 上传的 `.html` / `.htm` 文件是否只索引正文（默认：`false`）。开启后用 trafilatura 抽取正文，与 URL 导入路径一致，导航栏 / 侧栏 / 页脚不再进入索引；抽取结果过短（< 250 字符）、不足整页转换的 15%，或抽取器额外重复正文段落时自动回退整页转换。默认关闭，升级后既有行为不变。 正文图片引用会保留在 Markdown 中，供 Go 侧解析；Python 侧不会下载远程图片。
 
 ### OCR / VLM
 

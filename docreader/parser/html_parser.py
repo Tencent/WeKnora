@@ -1,6 +1,7 @@
 """Static HTML file parser."""
 
 import logging
+from collections import Counter
 
 from bs4 import BeautifulSoup
 from trafilatura import extract
@@ -47,7 +48,9 @@ def extract_main_content(html: str) -> str:
             include_tables=True,
             include_links=True,
             include_formatting=True,
-            include_images=False,
+            # Keep references in Markdown; Go can only resolve/download body
+            # images if their URLs survive this extraction step.
+            include_images=True,
         )
     except Exception as exc:  # never fail a parse the full conversion can serve
         logger.warning("HTML main-content extraction failed: %s", exc)
@@ -83,6 +86,17 @@ class HTMLToMarkdownParser(BaseParser):
             return Document(content=full)
 
         extracted = extract_main_content(html)
+        # Some short articles are repeated by trafilatura's fallback. Do not
+        # index extra copies or let them inflate the length/retention guards.
+        # Only reject repetitions absent from the full conversion: deliberate
+        # repeated paragraphs in the source must remain valid.
+        blocks = Counter(line.strip() for line in extracted.splitlines())
+        for block, occurrences in blocks.items():
+            if occurrences > 1 and len(block) >= 80 and 0 < full.count(block) < occurrences:
+                logger.info(
+                    "HTML main-content extraction duplicated a body block; keeping the full conversion"
+                )
+                return Document(content=full)
         if len(extracted) < _MIN_EXTRACTED_CHARS:
             logger.info(
                 "HTML main-content extraction returned %d chars (<%d); "

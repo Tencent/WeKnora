@@ -248,7 +248,7 @@ PPT 系列**没有独立解析器**，由 `MarkitdownParser` 处理，这两个�
 - `HTMLToMarkdownParser` 先用 `BeautifulSoup(content, "lxml")` 解码原始字节——先看 BOM 与 HTML 内的 charset 声明，再交给统一的 Markdown 转换；
 - HTML → Markdown 复用 `MHTMLParser.html_to_markdown()`，但传入 `extract_images=False`（本地 HTML 文件没有 MIME 附件可抽）、`strip_internal_links=False`（保留站内链接）、`fallback_to_raw_html=False`（转换不出内容时返回空而不是塞一整块 ```` ```html ````）；
 - 正文中通过 `<img src="http://...">` 引用的远程图片由 Go 侧补齐：`internal/infrastructure/docparser/image_resolver.go` 会带 SSRF 校验下载这些远程图片并转存到对象存储，再重写引用，使其与本地上传的图片走同一套 OCR / caption 流程。
-- 默认整页转换，导航栏 / 侧栏 / 页脚也会进入索引。设 `DOCREADER_HTML_MAIN_CONTENT=true` 后改用 trafilatura 只抽正文（与 URL 导入路径同一策略），抽取结果过短（< 120 字符）或不足整页转换的 15% 时回退整页转换。该开关默认关闭，升级不会改变既有文档的索引内容。
+- 默认整页转换，导航栏 / 侧栏 / 页脚也会进入索引。设 `DOCREADER_HTML_MAIN_CONTENT=true` 后改用 trafilatura 只抽正文（与 URL 导入路径同一策略），抽取结果过短（< 250 字符）、不足整页转换的 15%，或抽取器额外重复正文段落时回退整页转换。该开关默认关闭，升级不会改变既有文档的索引内容。 正文图片引用会保留在 Markdown 中，供 Go 侧解析；Python 侧不会下载远程图片。
 
 #### xmind_parser.py — XMindParser（.xmind 思维导图）
 

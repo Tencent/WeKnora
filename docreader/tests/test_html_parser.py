@@ -131,6 +131,38 @@ class HTMLMainContentTest(unittest.TestCase):
         self.assertIn("[分块器的实现细节](/blog/99)", content)
         self.assertLess(len(content), len(full))
 
+    def test_enabled_extraction_preserves_body_image_references(self):
+        html = (MAIN_CONTENT_FIXTURES / "article_page.html").read_text(encoding="utf-8")
+        html = html.replace(
+            "</article>",
+            '<figure><img src="https://example.com/chart.png" alt="Recall comparison" /></figure>'
+            '<figure><img src="images/local-chart.png" alt="Local comparison" /></figure>'
+            '</article>',
+        )
+        self.assertIn("https://example.com/chart.png", html)
+        content = _parse_bytes(html.encode(), main_content=True)
+        self.assertNotIn("产品定价", content)
+        self.assertIn("https://example.com/chart.png", content)
+        self.assertIn("images/local-chart.png", content)
+        self.assertIn("混合检索", content)
+
+    def test_short_article_does_not_index_duplicate_body_text(self):
+        body = "正文说明知识库如何解析上传文件，以及如何把检索到的内容交给模型生成答案。" * 9
+        html = f"<html><body><article><h1>知识库解析说明</h1><p>{body}</p></article></body></html>".encode()
+        content = _parse_bytes(html, main_content=True)
+        self.assertEqual(content.count(body), 1)
+
+    def test_extractor_introduced_repetition_falls_back_but_source_repetition_does_not(self):
+        body = "A long paragraph about retrieval, citations and document parsing. " * 5
+        html = f"<article><p>{body}</p></article>".encode()
+        full = _parse_bytes(html, main_content=False)
+        repeated = body.strip() + "\n\n" + body.strip()
+        with patch.object(html_parser, "extract_main_content", return_value=repeated):
+            self.assertEqual(_parse_bytes(html, main_content=True), full)
+            original_repeated = f"<article><p>{body}</p><p>{body}</p></article>".encode()
+            content = _parse_bytes(original_repeated, main_content=True)
+            self.assertEqual(content.count(body.strip()), 2)
+
     def test_falls_back_to_full_conversion_without_an_article_body(self):
         for name, expected in (
             ("form_page.html", "忘记密码？"),
