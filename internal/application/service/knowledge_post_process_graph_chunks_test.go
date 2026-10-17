@@ -93,13 +93,24 @@ func TestWikiIngestKeepsScannedPageOCR(t *testing.T) {
 	if !hasSufficientTextContent(scanned) {
 		t.Fatal("scanned OCR should be enough text for wiki extraction")
 	}
+	if strings.Count(scanned, "第1章 総則") != 1 {
+		t.Fatalf("OCR was repeated: %q", scanned)
+	}
 
-	prose := appendScannedPageText(
-		reconstructEnrichedContent(context.Background(), nil, 1, chunks[3:]),
-		chunks[3:],
+	already := appendScannedPageText(scanned, chunks[:3])
+	if already != scanned {
+		t.Fatalf("inlined OCR was appended again: %q", already)
+	}
+
+	mixed := appendScannedPageText(
+		reconstructEnrichedContent(context.Background(), nil, 1, []*types.Chunk{chunks[0], chunks[3]}),
+		chunks,
 	)
-	if strings.Contains(prose, "ACME logo") {
-		t.Fatalf("figure OCR was appended beside real prose: %q", prose)
+	if !strings.Contains(mixed, "Contract between Alice and Bob.") || !strings.Contains(mixed, "第1章 総則") {
+		t.Fatalf("mixed document dropped scanned OCR: %q", mixed)
+	}
+	if strings.Contains(mixed, "ACME logo") {
+		t.Fatalf("figure OCR was appended beside real prose: %q", mixed)
 	}
 }
 

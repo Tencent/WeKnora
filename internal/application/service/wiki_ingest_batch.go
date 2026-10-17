@@ -1360,9 +1360,9 @@ func (s *wikiIngestService) mapOneDocument(
 
 	// Text chunks of a scanned PDF are image links. The readable prose lives on
 	// image_ocr chunks and is not always copied into image_info, so load those
-	// chunks too and append them when the enriched text is still empty.
+	// chunks and append the pages that are still missing.
 	chunks, err := s.chunkRepo.ListChunksByKnowledgeIDAndTypes(ctx, payload.TenantID, knowledgeID, []types.ChunkType{
-		types.ChunkTypeText, types.ChunkTypeImageOCR, types.ChunkTypeImageCaption,
+		types.ChunkTypeText, types.ChunkTypeImageOCR,
 	})
 	if err != nil {
 		s.tracker().FailSpan(ctx, wikiSpan, "LIST_CHUNKS_FAILED", err.Error(), err)

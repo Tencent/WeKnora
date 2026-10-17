@@ -3186,26 +3186,25 @@ func reconstructEnrichedContent(
 // appendScannedPageText adds OCR from pages whose parent text is only an
 // image link. reconstructEnrichedContent inlines image_info when that JSON
 // exists; scanned pages often keep the recognized text only on the image_ocr
-// chunk. OCR beside real prose is left out so an illustrated document is not
-// sent twice.
+// chunk. A document that already has some prose still receives those pages.
+// OCR beside real prose, and text already present, is left out.
 func appendScannedPageText(content string, chunks []*types.Chunk) string {
-	if hasSufficientTextContent(content) {
-		return content
-	}
 	var b strings.Builder
 	b.WriteString(content)
+	written := content
 	for _, c := range selectGraphChunks(chunks) {
-		if c.ChunkType != types.ChunkTypeImageOCR {
+		if c == nil || c.ChunkType != types.ChunkTypeImageOCR {
 			continue
 		}
 		text := strings.TrimSpace(c.Content)
-		if text == "" || strings.Contains(content, text) {
+		if text == "" || strings.Contains(written, text) {
 			continue
 		}
 		if b.Len() > 0 {
 			b.WriteByte('\n')
 		}
 		b.WriteString(text)
+		written = b.String()
 	}
 	return b.String()
 }
