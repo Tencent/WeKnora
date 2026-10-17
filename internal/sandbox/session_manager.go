@@ -525,10 +525,29 @@ func (m *SessionBoundManager) WriteSessionInputFile(
 	if err != nil {
 		return err
 	}
-	handle, err := m.resolveSession(ctx, sessionID)
-	if err != nil {
-		return err
+	var handle RemoteSandboxHandle
+	for attempt := 0; attempt < 2; attempt++ {
+		handle, err = m.resolveSession(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		err = m.writeSessionInputOnHandle(ctx, handle, clean, content)
+		if err == nil || attempt == 1 || !sessionBindingLost(err) {
+			return err
+		}
+		// The idle sweep can delete the container after resolve and before
+		// mkdir. The binding still points at that container, so drop it and
+		// provision once more.
+		if dropErr := m.dropBoundSandbox(ctx, sessionID, handle.ID()); dropErr != nil {
+			return err
+		}
 	}
+	return err
+}
+
+func (m *SessionBoundManager) writeSessionInputOnHandle(
+	ctx context.Context, handle RemoteSandboxHandle, clean string, content []byte,
+) error {
 	if err := ignoreExistingDir(m.client.MakeDir(ctx, handle, path.Dir(clean))); err != nil {
 		return fmt.Errorf("sandbox: create input directory: %w", err)
 	}
@@ -536,6 +555,33 @@ func (m *SessionBoundManager) WriteSessionInputFile(
 		return fmt.Errorf("sandbox: write session input %s: %w", clean, err)
 	}
 	return nil
+}
+
+// sessionBindingLost reports a sandbox that is gone. A missing path inside a
+// live container is also NotFound ("does not exist"); rebinding on that
+// would discard the session.
+func sessionBindingLost(err error) bool {
+	if !CanReplaceRemoteBinding(err) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "does not exist") && !strings.Contains(msg, "vanished") {
+		return false
+	}
+	return true
+}
+
+func (m *SessionBoundManager) dropBoundSandbox(ctx context.Context, sessionID, sandboxID string) error {
+	key, err := m.sessionKey(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	binding, err := m.bindings.Get(ctx, key)
+	if err != nil || binding == nil || binding.SandboxID != sandboxID || binding.Provider != m.client.Provider() {
+		return err
+	}
+	_, err = m.bindings.DeleteIfMatch(ctx, key, binding.Provider, binding.SandboxID)
+	return err
 }
 
 // WriteSessionWorkspaceFile writes a model-authored file into the session's
