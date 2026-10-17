@@ -7816,6 +7816,8 @@ export default {
     regenerateSummary: '重新生成摘要',
     generateSummary: '生成摘要',
     noDocumentSummary: '暫無文件摘要',
+    archiveNoSummary:
+      '該檔案為僅存檔條目，未建立索引，因此沒有摘要；可在「預覽」中播放原始檔案',
     summaryRefreshed: '摘要已更新',
     summaryRefreshQueued: '摘要重新整理已提交，完成後會自動更新',
     indexFailed: '索引同步失敗',

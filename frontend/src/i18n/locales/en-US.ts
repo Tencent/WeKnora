@@ -853,6 +853,8 @@ export default {
     regenerateSummary: 'Regenerate summary',
     generateSummary: 'Generate summary',
     noDocumentSummary: 'No document summary',
+    archiveNoSummary:
+      'This file is archived without an index, so it has no summary. Use Preview to play the original file.',
     summaryRefreshed: 'Summary refreshed',
     summaryRefreshQueued: 'Summary refresh queued; it will update automatically when ready',
     indexFailed: 'Index sync failed',

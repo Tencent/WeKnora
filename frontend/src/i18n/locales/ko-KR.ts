@@ -7815,6 +7815,8 @@ export default {
     regenerateSummary: '요약 다시 생성',
     generateSummary: '요약 생성',
     noDocumentSummary: '문서 요약 없음',
+    archiveNoSummary:
+      '이 파일은 인덱싱 없이 보관된 항목이라 요약이 없습니다. \'미리보기\'에서 원본 파일을 재생할 수 있습니다.',
     summaryRefreshed: '요약이 업데이트되었습니다',
     summaryRefreshQueued: '요약 새로고침이 대기열에 추가되었으며 완료되면 자동으로 업데이트됩니다',
     indexFailed: '인덱스 동기화 실패',

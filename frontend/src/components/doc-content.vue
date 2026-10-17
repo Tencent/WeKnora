@@ -263,6 +263,11 @@ const applySummaryState = (summaryStatus?: string, description?: string) => {
 const isSummaryStatusInFlight = (status?: string) => status === 'pending' || status === 'processing';
 const summaryStatusRefreshing = computed(() => isSummaryStatusInFlight(props.details?.summary_status));
 const canEditSummary = computed(() => canEditContent.value && !summaryStatusRefreshing.value);
+// A stored entry is an archive, not an indexed document: the bytes were kept
+// without parsing, so there is no chunk, no summary and nothing to generate.
+// The drawer keeps the preview (the file itself is playable) and says why the
+// rest is absent instead of offering actions that cannot succeed.
+const isStoredArchive = computed(() => props.details?.parse_status === 'stored');
 let summaryStatusPollTimer: ReturnType<typeof setTimeout> | null = null;
 let summaryStatusPollGeneration = 0;
 
@@ -1807,6 +1812,10 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
               <t-loading size="small" />
               <span>{{ $t('knowledgeBase.generatingSummary') }}</span>
             </template>
+            <template v-else-if="isStoredArchive">
+              <t-icon name="file-unknown" size="18px" />
+              <span>{{ $t('knowledgeBase.archiveNoSummary') }}</span>
+            </template>
             <template v-else>
               <t-icon name="file-unknown" size="18px" />
               <span>{{ $t('knowledgeBase.noDocumentSummary') }}</span>
@@ -1822,7 +1831,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
           <div class="doc-content-section-head">
             <div class="doc-content-section-head-left">
               <h4 class="setting-drawer__section-title">{{ getContentLabel() }}</h4>
-              <span v-if="details.total > 0" class="chunk-count">
+              <span v-if="!isStoredArchive && details.total > 0" class="chunk-count">
                 {{ $t('knowledgeBase.chunkCount', { count: details.total }) }}
               </span>
             </div>
@@ -1832,12 +1841,12 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
                 class="view-mode-btn">
                 {{ $t('preview.tab') }}
               </t-button>
-              <t-button v-if="!canPreview()" size="small" :variant="viewMode === 'merged' ? 'base' : 'outline'"
+              <t-button v-if="!canPreview() && !isStoredArchive" size="small" :variant="viewMode === 'merged' ? 'base' : 'outline'"
                 :theme="viewMode === 'merged' ? 'primary' : 'default'" @click="viewMode = 'merged'"
                 class="view-mode-btn">
                 {{ $t('knowledgeBase.viewMerged') }}
               </t-button>
-              <t-button size="small" :variant="viewMode === 'chunks' ? 'base' : 'outline'"
+              <t-button v-if="!isStoredArchive" size="small" :variant="viewMode === 'chunks' ? 'base' : 'outline'"
                 :theme="viewMode === 'chunks' ? 'primary' : 'default'" @click="viewMode = 'chunks'"
                 class="view-mode-btn">
                 {{ $t('knowledgeBase.viewChunks') }}

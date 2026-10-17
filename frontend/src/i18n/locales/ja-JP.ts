@@ -853,6 +853,8 @@ export default {
     regenerateSummary: '要約を再生成',
     generateSummary: '要約を生成',
     noDocumentSummary: 'ドキュメントの要約はありません',
+    archiveNoSummary:
+      'このファイルはインデックスを作成せずにアーカイブされているため、要約はありません。「プレビュー」で元のファイルを再生できます。',
     summaryRefreshed: '要約を更新しました',
     summaryRefreshQueued: '要約の更新を登録しました。完了すると自動的に反映されます',
     indexFailed: 'インデックスの同期に失敗しました',
