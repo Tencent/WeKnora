@@ -357,7 +357,7 @@ func (h *Handler) liveAgentRun(ctx context.Context, sessionID string) (string, e
 	if err != nil {
 		return "", err
 	}
-	if msg == nil || msg.IsCompleted {
+	if msg == nil || msg.IsCompleted || msg.RunState == types.MessageRunStateAwaitingInput {
 		if err := h.streamManager.ClearLiveRun(ctx, sessionID, assistantID); err != nil {
 			logger.Warnf(ctx, "stale live run cleanup failed for session %s: %v", sessionID, err)
 		}
@@ -947,6 +947,8 @@ func (h *Handler) claimNextSteerFollowUp(
 		prevReqCtx.sessionID, len(backlog), len(injected))
 
 	followUp := *prevReqCtx
+	// A queued message starts a new turn, never another replay of this one.
+	followUp.resume = nil
 	followUp.ctx = ctx
 	followUp.query = first.Content
 	followUp.userInput = first.Content

@@ -7,6 +7,12 @@
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
             </div>
             <div class="logo_actions">
+                <t-tooltip v-if="assistantStore.entry === 'sidebar'" :content="assistantName" placement="bottom">
+                    <div class="header-icon-btn" :class="{ 'is-active': assistantStore.visible }"
+                        :aria-label="assistantName" @click="assistantStore.toggle()">
+                        <t-icon name="compass" size="18px" />
+                    </div>
+                </t-tooltip>
                 <t-tooltip placement="bottom">
                     <template #content>
                         <span class="cmdk-tip">
@@ -73,6 +79,16 @@
                         <div class="menu_item-box">
                             <div class="menu_icon">
                                 <img class="icon" :src="getImgSrc('search.svg')" alt="">
+                            </div>
+                        </div>
+                    </div>
+                </t-tooltip>
+                <t-tooltip v-if="assistantStore.entry === 'sidebar'" :content="assistantName" placement="right">
+                    <div class="menu_item menu_item--cmdk" :class="{ 'menu_item_active': assistantStore.visible }"
+                        :aria-label="assistantName" @click="assistantStore.toggle()">
+                        <div class="menu_item-box">
+                            <div class="menu_icon">
+                                <t-icon name="compass" size="18px" />
                             </div>
                         </div>
                     </div>
@@ -163,6 +179,7 @@
                                     <div class="session-list-row__body">
                                         <SessionSidebarRow :item="subitem" :batch-mode="batchMode"
                                             :running="Boolean(sessionActivityEntries[subitem.id])"
+                                            :unread="Boolean(sessionUnread[subitem.id])"
                                             :active-path="currentSecondpath" :selected-ids="batchSelectedIds"
                                             :menu-options="buildSessionMenuOptions(subitem)"
                                             @navigate="gotopage(subitem.path)"
@@ -273,6 +290,7 @@ import { useBrowserConnectionStore } from '@/stores/browserConnection';
 import { useOrganizationStore } from '@/stores/organization';
 import { useUIStore } from '@/stores/ui';
 import { useCommandPaletteStore } from '@/stores/commandPalette';
+import { useAssistantStore } from '@/stores/assistant';
 import { MessagePlugin, DialogPlugin, Icon as TIcon } from "tdesign-vue-next";
 import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
@@ -310,7 +328,7 @@ const platformLogo = (p: string): string => (p ? PLATFORM_LOGO[p] || '' : '');
 const { t } = useI18n();
 const usemenuStore = useMenuStore();
 const sessionActivity = useSessionActivityStore();
-const { entries: sessionActivityEntries } = storeToRefs(sessionActivity);
+const { entries: sessionActivityEntries, unread: sessionUnread } = storeToRefs(sessionActivity);
 let sessionActivityTimer: ReturnType<typeof setInterval> | undefined;
 const authStore = useAuthStore();
 const deploymentCapabilities = useDeploymentCapabilitiesStore();
@@ -332,6 +350,8 @@ watch(() => uiStore.sidebarBrowserStatus && toolboxPreview.value.some((tool) => 
     if (visible && !browserConnection.loaded) browserConnection.refresh().catch(() => {});
 }, { immediate: true });
 const commandPaletteStore = useCommandPaletteStore();
+const assistantStore = useAssistantStore();
+const assistantName = computed(() => assistantStore.displayName || t('assistant.title'));
 
 // Platform-aware label for the ⌘K hint. navigator.platform is deprecated but
 // the alternatives (userAgentData.platform) aren't universally available yet;
@@ -1033,7 +1053,7 @@ const loadSessionOriginMeta = async () => {
 const handleSessionMutation = (event: Event) => {
     const detail = (event as CustomEvent<SessionMutationDetail>).detail;
     if (!detail?.sessionId) return;
-    if (detail.removed || detail.messagesCleared) sessionActivity.update(detail.sessionId, false);
+    if (detail.removed || detail.messagesCleared) sessionActivity.dismiss(detail.sessionId);
     if (detail.patch) {
         updateSessionInBuckets(detail.sessionId, {
             ...detail.patch,
@@ -1050,6 +1070,8 @@ const handleSessionMutation = (event: Event) => {
 };
 
 onMounted(async () => {
+    sessionActivity.restore();
+    void sessionActivity.refresh();
     sessionActivityTimer = setInterval(() => { void sessionActivity.refresh(); }, 5000);
     const routeName = typeof route.name === 'string' ? route.name : (route.name ? String(route.name) : '')
     currentpath.value = routeName;
@@ -1730,11 +1752,6 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
             overflow: hidden;
         }
 
-        .session-running-indicator {
-            flex: 0 0 16px;
-            flex-shrink: 0;
-        }
-
         .submenu_title-text {
             flex: 1 1 auto;
             min-width: 0;
@@ -1836,6 +1853,11 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
 
     &:hover {
         background: var(--td-bg-color-container-hover);
+    }
+
+    &.is-active {
+        background: var(--td-bg-color-container-hover);
+        color: var(--td-brand-color);
     }
 
     .header-icon-img {

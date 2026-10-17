@@ -32,12 +32,13 @@ func TestPrepareExcelForDuckDBConvertsLegacyXLS(t *testing.T) {
 	require.Equal(t, [][]string{{"sku"}, {"A-1"}}, stock)
 }
 
-func TestPrepareExcelForDuckDBRejectsNonOLEXls(t *testing.T) {
+func TestPrepareExcelForDuckDBLeavesNonOLEXlsAlone(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "not.xls")
 	require.NoError(t, os.WriteFile(path, []byte("PK\x03\x04not-an-xls"), 0o644))
-	_, cleanup, err := prepareExcelForDuckDB(path)
-	require.Error(t, err)
+	got, cleanup, err := prepareExcelForDuckDB(path)
+	require.NoError(t, err)
 	cleanup()
+	require.Equal(t, path, got)
 }
 
 func TestPrepareExcelForDuckDBAcceptsUppercaseExtension(t *testing.T) {

@@ -47,7 +47,8 @@ export function continueListOnEnter({ value, start, end }: EditorState): EditorP
   if (!match) return null
 
   const [, indent, marker, checkbox, content] = match
-  if (!content.trim()) {
+  const remainingContent = value.slice(start, lineEndAt(value, start))
+  if (!content.trim() && !remainingContent.trim()) {
     // Empty item: drop the marker and leave the caret on a clean line.
     const nextValue = value.slice(0, lineStart) + value.slice(start)
     return { value: nextValue, start: lineStart, end: lineStart }

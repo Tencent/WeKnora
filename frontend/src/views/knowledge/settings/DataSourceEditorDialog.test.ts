@@ -394,3 +394,44 @@ test('Cloud hierarchy limitation stays visible after an empty space expansion', 
     assert.equal(f.vm.visibleTree.some((row: any) => row.noticeAfter), true)
   } finally { f.close() }
 })
+
+for (const type of ['feishu', 'lark', 'feishu_drive', 'lark_drive']) {
+  test(`${type} preserves inherited parse mode when saving unrelated settings`, async () => {
+    const settings = { timezone: 'Asia/Shanghai', resync_required: true }
+    const f = await fixture({ type, settings })
+    try {
+      assert.equal(f.vm.feishuParseMode, '')
+      assert.equal(f.vm.form.config.settings.parse_mode, undefined)
+      f.vm.form.name = 'Renamed source'
+      await f.vm.handleSubmit()
+      const saved = f.calls.find(call => call.method === 'updateDataSource')
+      assert.ok(saved)
+      assert.deepEqual(saved.args[1].config.settings, settings)
+      assert.equal('parse_mode' in settings, false, 'opening the editor must not mutate props')
+    } finally { f.close() }
+  })
+}
+
+test('Feishu explicit mode changes are saved without mutating the source configuration', async () => {
+  const settings = { parse_mode: 'export', timezone: 'Asia/Shanghai' }
+  const f = await fixture({ type: 'feishu', settings })
+  try {
+    assert.equal(f.vm.feishuParseMode, 'export')
+    f.vm.feishuParseMode = 'blocks'
+    assert.equal(settings.parse_mode, 'export')
+    assert.equal(f.vm.buildConfigPayload().settings.parse_mode, 'blocks')
+    f.vm.feishuParseMode = ''
+    assert.deepEqual(JSON.parse(JSON.stringify(f.vm.buildConfigPayload().settings)), { timezone: 'Asia/Shanghai' })
+    assert.equal(settings.parse_mode, 'export')
+  } finally { f.close() }
+})
+
+test('new Feishu sources keep the blocks default and do not leak it to another connector', async () => {
+  const f = await fixture({ create: true })
+  try {
+    f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'feishu'))
+    assert.equal(f.vm.feishuParseMode, 'blocks')
+    f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'gitlab'))
+    assert.equal(f.vm.form.config.settings.parse_mode, undefined)
+  } finally { f.close() }
+})

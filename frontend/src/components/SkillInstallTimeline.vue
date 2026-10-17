@@ -10,7 +10,14 @@
       <template v-else>
         <div v-for="(msg, index) in messages" :key="msg.id || index" class="skill-timeline__turn"
           :class="{ 'skill-timeline__turn--command': index === messages.length - 1 && live && commandOutput && !commandOutput.done }">
-          <pre v-if="msg.role === 'user'" class="skill-timeline__prompt">{{ msg.content }}</pre>
+          <details v-if="msg.role === 'user'" class="skill-timeline__prompt">
+            <summary>
+              <t-icon name="chevron-right" size="14px" class="skill-timeline__prompt-arrow" />
+              <span class="skill-timeline__prompt-label">{{ $t('settings.sandbox.skillTranscriptPrompt') }}</span>
+              <span class="skill-timeline__prompt-preview">{{ promptPreview(msg.content) }}</span>
+            </summary>
+            <pre>{{ String(msg.content || '').trim() }}</pre>
+          </details>
           <AgentStreamDisplay
             v-else
             :session="msg"
@@ -31,23 +38,33 @@
       </div>
     </div>
     <div v-if="live || canRetry" class="skill-timeline__guidance">
-      <t-textarea
-        v-model="guidanceText"
-        :placeholder="$t('settings.sandbox.skillGuidance.placeholder')"
-        :maxlength="10000"
-        :autosize="{ minRows: 2, maxRows: 6 }"
-        :disabled="sendingGuidance"
-      />
-      <p v-if="guidanceError" role="alert" class="skill-timeline__guidance-error">{{ guidanceError }}</p>
-      <div class="skill-timeline__guidance-actions">
-        <span v-if="live && !guidance.accepting">{{ $t('settings.sandbox.skillGuidance.unavailable') }}</span>
-        <t-button
-          size="small"
-          :loading="sendingGuidance"
-          :disabled="!guidanceText.trim() || (live && !guidance.accepting)"
-          @click="sendGuidance"
-        >{{ $t(live ? 'settings.sandbox.skillGuidance.send' : 'settings.sandbox.skillGuidance.retry') }}</t-button>
+      <div class="skill-timeline__guidance-box">
+        <t-textarea
+          v-model="guidanceText"
+          :placeholder="$t('settings.sandbox.skillGuidance.placeholder')"
+          :maxlength="10000"
+          :autosize="{ minRows: 2, maxRows: 6 }"
+          :disabled="sendingGuidance"
+        />
+        <div class="skill-timeline__guidance-actions">
+          <span v-if="live && !guidance.accepting">{{ $t('settings.sandbox.skillGuidance.unavailable') }}</span>
+          <span v-else-if="guidanceText.length > 9000" class="skill-timeline__guidance-count">
+            {{ guidanceText.length }}/10000
+          </span>
+          <t-button
+            size="small"
+            :variant="guidanceText.trim() ? 'base' : 'outline'"
+            :theme="guidanceText.trim() ? 'primary' : 'default'"
+            :loading="sendingGuidance"
+            :disabled="!guidanceText.trim() || (live && !guidance.accepting)"
+            @click="sendGuidance"
+          >
+            <template #icon><t-icon :name="live ? 'send' : 'refresh'" /></template>
+            {{ $t(live ? 'settings.sandbox.skillGuidance.send' : 'settings.sandbox.skillGuidance.retry') }}
+          </t-button>
+        </div>
       </div>
+      <p v-if="guidanceError" role="alert" class="skill-timeline__guidance-error">{{ guidanceError }}</p>
     </div>
   </section>
 </template>
@@ -181,6 +198,11 @@ const { handleMsgList, processStreamChunk } = useChatStreamHandler({
 // install_prompt is the installer's opening line. It is not an assistant
 // event, so it becomes the user turn here rather than going through the chat
 // stream handler.
+function promptPreview(content: unknown): string {
+  const line = String(content || '').trim().split('\n')[0] || ''
+  return line.length > 80 ? `${line.slice(0, 80)}…` : line
+}
+
 function applyPrompt(content: string) {
   if (!content) return
   if (messages.some((msg) => msg.role === 'user')) return
@@ -357,7 +379,6 @@ onUnmounted(stop)
   margin-top: 12px;
   padding-top: 12px;
   background: var(--td-bg-color-container);
-  border-top: 1px solid var(--td-component-stroke);
 
   // Cover the timeline's padding too, so scrolling text cannot peek around
   // the sticky composer. Its z-index keeps this backdrop above the transcript.
@@ -372,21 +393,46 @@ onUnmounted(stop)
 }
 .skill-timeline__guidance-message {
   margin: 8px 0;
-  padding: 8px;
-  background: var(--td-bg-color-container);
+  padding: 8px 10px;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: var(--app-radius-sm);
-  span { font-size: var(--app-text-sm); color: var(--td-text-color-secondary); }
-  p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  span { font-size: var(--app-text-xs); color: var(--td-text-color-placeholder); }
+  p { margin: 4px 0 0; font-size: var(--app-text-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+.skill-timeline__guidance-box {
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-container);
+  transition: border-color var(--app-motion-fast) ease, box-shadow var(--app-motion-fast) ease;
+
+  &:focus-within {
+    border-color: var(--td-brand-color);
+    box-shadow: 0 0 0 2px var(--td-brand-color-focus);
+  }
+
+  :deep(.t-textarea__inner) {
+    padding: 10px 12px 4px;
+    border: 0;
+    box-shadow: none;
+    background: transparent;
+    resize: none;
+  }
+
+  :deep(.t-textarea__info_wrapper),
+  :deep(.t-textarea__limit) {
+    display: none;
+  }
 }
 .skill-timeline__guidance-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
-  margin-top: 8px;
-  span { flex: 1; font-size: var(--app-text-sm); color: var(--td-text-color-secondary); }
+  padding: 4px 8px 8px 12px;
+  span { flex: 1; font-size: var(--app-text-xs); color: var(--td-text-color-placeholder); }
 }
-.skill-timeline__guidance-error { color: var(--td-error-color); font-size: var(--app-text-sm); }
+.skill-timeline__guidance-count { font-variant-numeric: tabular-nums; }
+.skill-timeline__guidance-error { margin: 6px 0 0; color: var(--td-error-color); font-size: var(--app-text-sm); }
 
 .skill-timeline {
   display: flex;
@@ -402,17 +448,63 @@ onUnmounted(stop)
 }
 
 .skill-timeline__prompt {
-  max-height: 140px;
-  margin: 0;
-  padding: 8px 10px;
-  overflow-y: auto;
-  color: var(--td-text-color-secondary);
-  font-size: var(--app-text-sm);
-  line-height: 1.6;
-  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
   border-radius: var(--app-radius-sm);
-  white-space: pre-wrap;
-  word-break: break-word;
+  background: var(--td-bg-color-container);
+
+  summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 6px 10px;
+    cursor: pointer;
+    list-style: none;
+    font-size: var(--app-text-sm);
+    line-height: 20px;
+    color: var(--td-text-color-secondary);
+    user-select: none;
+
+    &::-webkit-details-marker { display: none; }
+
+    &:hover { color: var(--td-text-color-primary); }
+  }
+
+  pre {
+    max-height: 240px;
+    margin: 0;
+    padding: 8px 12px 10px;
+    overflow-y: auto;
+    border-top: 1px solid var(--td-component-stroke);
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-xs);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  &[open] .skill-timeline__prompt-arrow { transform: rotate(90deg); }
+  &[open] .skill-timeline__prompt-preview { display: none; }
+}
+
+.skill-timeline__prompt-arrow {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+  transition: transform var(--app-motion-fast) ease;
+}
+
+.skill-timeline__prompt-label {
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.skill-timeline__prompt-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--td-text-color-placeholder);
 }
 
 .skill-timeline__empty {
@@ -428,11 +520,8 @@ onUnmounted(stop)
   border-radius: 0;
 }
 
-.skill-timeline--compact .skill-timeline__prompt {
-  max-height: 72px;
-  padding: 6px 8px;
-  font-size: var(--app-text-xs);
-  line-height: 1.5;
+.skill-timeline--compact .skill-timeline__prompt pre {
+  max-height: 160px;
 }
 
 .skill-timeline--compact .skill-timeline__empty {

@@ -186,7 +186,8 @@ func TestPatchEmbedChatPayloadInjectsAgentID(t *testing.T) {
 	ch := &types.EmbedChannel{AgentID: "agent-embed-42"}
 	body := `{"query":"hello","agent_id":"client-override","agent_source_tenant_id":84,"web_search_enabled":true,` +
 		`"knowledge_ids":["doc-x"],"tag_ids":["tag-x"],"mentioned_items":[{"id":"kb-x","type":"kb"}],` +
-		`"skill_names":["s"],"summary_model_id":"model-x","question_origin":{"knowledge_base_id":"kb-x"}}`
+		`"skill_names":["s"],"summary_model_id":"model-x","question_origin":{"knowledge_base_id":"kb-x"},` +
+		`"page_context":{"knowledge_base_id":"kb-x"}}`
 
 	patched, err := patchEmbedChatPayload(strings.NewReader(body), ch, false)
 	if err != nil {
@@ -223,7 +224,7 @@ func TestPatchEmbedChatPayloadInjectsAgentID(t *testing.T) {
 			t.Fatalf("%s = %v, want empty", key, payload[key])
 		}
 	}
-	for _, key := range []string{"summary_model_id", "question_origin"} {
+	for _, key := range []string{"summary_model_id", "question_origin", "page_context"} {
 		if _, ok := payload[key]; ok {
 			t.Fatalf("%s = %v, want dropped", key, payload[key])
 		}

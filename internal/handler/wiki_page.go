@@ -145,11 +145,13 @@ func (h *WikiPageHandler) ListPages(c *gin.Context) {
 // @Description  Retrieve the direct child folders of a parent folder (parent_id empty = root level), each with its page count and a has-children flag for the directory tree.
 // @Tags         Wiki
 // @Produce      json
-// @Param        kb_id     path   string  true   "Knowledge base ID"
-// @Param        parent_id query  string  false  "Parent folder id (empty = root)"
+// @Param        kb_id     path   string  true   "Knowledge base ID"  extensions(x-agent=knowledge_base_id)
+// @Param        parent_id query  string  false  "Parent folder id (empty = root)"  extensions(x-agent)
 // @Success      200  {object}  types.WikiFolderListResponse
 // @Failure      400  {object}  errors.AppError
 // @Security     Bearer
+// @x-agent      {"id":"wiki.list_folders","risk":"read","root":"folders","max_items":200}
+// @x-agent-hint "Direct child folders of parent_id (omit it for the top level), up to 200, with page counts; has_children tells whether to look deeper."
 // @Router       /knowledgebase/{kb_id}/wiki/folders [get]
 func (h *WikiPageHandler) ListFolders(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
@@ -183,12 +185,14 @@ func (h *WikiPageHandler) ListFolders(c *gin.Context) {
 // @Tags         Wiki
 // @Accept       json
 // @Produce      json
-// @Param        kb_id  path  string                       true  "Knowledge base ID"
+// @Param        kb_id  path  string                       true  "Knowledge base ID"  extensions(x-agent=knowledge_base_id)
 // @Param        folder body  types.WikiFolderCreateRequest true  "Folder data"
 // @Success      201  {object}  types.WikiFolder
 // @Failure      400  {object}  errors.AppError
 // @Failure      409  {object}  errors.AppError
 // @Security     Bearer
+// @x-agent      {"id":"wiki.create_folder","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Creates an empty Wiki folder under parent_id (omit it for the top level)."
 // @Router       /knowledgebase/{kb_id}/wiki/folders [post]
 func (h *WikiPageHandler) CreateFolder(c *gin.Context) {
 	kbID, tenantID, err := h.validateWikiKB(c)
@@ -284,11 +288,13 @@ func (h *WikiPageHandler) DeleteFolder(c *gin.Context) {
 // @Tags         Wiki
 // @Accept       json
 // @Produce      json
-// @Param        kb_id  path  string  true  "Knowledge base ID"
+// @Param        kb_id  path  string  true  "Knowledge base ID"  extensions(x-agent=knowledge_base_id)
 // @Param        move   body  types.WikiPageMoveRequest true "Move target"
 // @Success      200  {object}  types.WikiPage
 // @Failure      404  {object}  errors.AppError
 // @Security     Bearer
+// @x-agent      {"id":"wiki.move_page","risk":"write","target":"wiki.get_page","label":"title"}
+// @x-agent-hint "Files a Wiki page under a folder from wiki.list_folders; an empty folder_id moves it to the top level. Content is unchanged."
 // @Router       /knowledgebase/{kb_id}/wiki/move-page [put]
 func (h *WikiPageHandler) MovePage(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
@@ -408,11 +414,13 @@ func (h *WikiPageHandler) recordManualWikiActivity(
 // @Description  Retrieve a wiki page by its slug, including titles of existing backlinks
 // @Tags         Wiki
 // @Produce      json
-// @Param        kb_id  path  string  true  "Knowledge base ID"
-// @Param        slug   path  string  true  "Page slug"
+// @Param        kb_id  path  string  true  "Knowledge base ID"  extensions(x-agent=knowledge_base_id)
+// @Param        slug   path  string  true  "Page slug"  extensions(x-agent)
 // @Success      200  {object}  types.WikiPageDetail
 // @Failure      404  {object}  errors.AppError
 // @Security     Bearer
+// @x-agent      {"id":"wiki.get_page","risk":"read","catch_all":"slug"}
+// @x-agent-hint "A Wiki page's title, type, status, folder and version. Read its content with the document tools instead."
 // @Router       /knowledgebase/{kb_id}/wiki/pages/{slug} [get]
 func (h *WikiPageHandler) GetPage(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
@@ -569,16 +577,21 @@ func (h *WikiPageHandler) UpdatePage(c *gin.Context) {
 // @Description  Returns the stored historical snapshots for a page, newest
 // @Description  first (content omitted), plus the current version. Passing
 // @Description  `version` returns that single snapshot with full content.
+// @Description  `content_version` keeps this list envelope and includes that
+// @Description  one revision's content.
 // @Tags         Wiki
 // @Produce      json
-// @Param        kb_id    path   string  true   "Knowledge base ID"
-// @Param        slug     path   string  true   "Page slug"
-// @Param        version  query  int     false  "Return this single revision with content"
-// @Param        limit    query  int     false  "Page size (default 50, max 200)"
-// @Param        offset   query  int     false  "Offset into the newest-first list"
+// @Param        kb_id    path   string  true   "Knowledge base ID"  extensions(x-agent=knowledge_base_id)
+// @Param        slug     path   string  true   "Page slug"  extensions(x-agent)
+// @Param        version         query  int  false  "Return this single revision with content"
+// @Param        content_version query  int  false  "Include this stored revision's content in the list envelope"  minimum(1)  extensions(x-agent)
+// @Param        limit    query  int     false  "Page size (default 50, max 200)"  extensions(x-agent,x-agent-maximum=50)
+// @Param        offset   query  int     false  "Offset into the newest-first list"  extensions(x-agent,x-agent-maximum=10000)
 // @Success      200  {object}  types.WikiPageRevisionListResponse
 // @Failure      404  {object}  errors.AppError
 // @Security     Bearer
+// @x-agent      {"id":"wiki.list_revisions","risk":"read","root":"revisions","catch_all":"slug"}
+// @x-agent-hint "Earlier versions of a Wiki page, newest first. Pass content_version to read one stored revision's content before wiki.revert. The current page is not in this list."
 // @Router       /knowledgebase/{kb_id}/wiki/revisions/{slug} [get]
 func (h *WikiPageHandler) ListRevisions(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
@@ -594,6 +607,40 @@ func (h *WikiPageHandler) ListRevisions(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
+
+	// content_version keeps the list envelope so the assistant can read one
+	// revision without the bare-object response that `version` returns.
+	if raw := strings.TrimSpace(c.Query("content_version")); raw != "" {
+		version, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || version < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid version"})
+			return
+		}
+		page, err := h.wikiService.GetPageBySlug(ctx, kbID, slug)
+		if err != nil {
+			if stderrors.Is(err, repository.ErrWikiPageNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Wiki page not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		rev, err := h.wikiService.GetRevision(ctx, kbID, slug, version)
+		if err != nil {
+			if stderrors.Is(err, repository.ErrWikiPageNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Wiki page revision not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, types.WikiPageRevisionListResponse{
+			Revisions:      []*types.WikiPageRevision{rev},
+			Total:          1,
+			CurrentVersion: page.Version,
+		})
+		return
+	}
 
 	if raw := c.Query("version"); raw != "" {
 		version, parseErr := strconv.Atoi(raw)
@@ -647,13 +694,15 @@ func (h *WikiPageHandler) ListRevisions(c *gin.Context) {
 // @Tags         Wiki
 // @Accept       json
 // @Produce      json
-// @Param        kb_id   path  string                       true  "Knowledge base ID"
+// @Param        kb_id   path  string                       true  "Knowledge base ID"  extensions(x-agent=knowledge_base_id)
 // @Param        revert  body  types.WikiPageRevertRequest  true  "Revert target"
 // @Success      200  {object}  types.WikiPage
 // @Failure      400  {object}  errors.AppError
 // @Failure      404  {object}  errors.AppError
 // @Failure      409  {object}  errors.AppError
 // @Security     Bearer
+// @x-agent      {"id":"wiki.revert","risk":"write","target":"wiki.get_page","label":"title"}
+// @x-agent-hint "Restores a Wiki page to a version from wiki.list_revisions. Read that version with content_version first. The restore is saved as a new version, so it can be undone the same way."
 // @Router       /knowledgebase/{kb_id}/wiki/revert [post]
 func (h *WikiPageHandler) RevertPage(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
@@ -895,14 +944,28 @@ func (h *WikiPageHandler) GetGraph(c *gin.Context) {
 	c.JSON(http.StatusOK, graph)
 }
 
+// WikiMessageResponse is the {"message": ...} body Wiki maintenance endpoints
+// write on success.
+type WikiMessageResponse struct {
+	Message string `json:"message" extensions:"x-agent"`
+}
+
+// WikiErrorResponse is the {"error": ...} body Wiki endpoints write on failure.
+type WikiErrorResponse struct {
+	Error string `json:"error"`
+}
+
 // GetStats godoc
 // @Summary      Get wiki statistics
 // @Description  Returns aggregate statistics about the wiki
 // @Tags         Wiki
 // @Produce      json
-// @Param        kb_id  path  string  true  "Knowledge base ID"
+// @Param        kb_id  path  string  true  "Knowledge base ID"  extensions(x-agent=knowledge_base_id)
 // @Success      200  {object}  types.WikiStats
+// @Failure      400  {object}  handler.WikiErrorResponse  "Not a Wiki knowledge base, or no access"
+// @Failure      500  {object}  handler.WikiErrorResponse
 // @Security     Bearer
+// @x-agent      {"id":"wiki.get_stats","risk":"read"}
 // @Router       /knowledgebase/{kb_id}/wiki/stats [get]
 func (h *WikiPageHandler) GetStats(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
@@ -925,11 +988,15 @@ func (h *WikiPageHandler) GetStats(c *gin.Context) {
 // @Description  List issues flagged on wiki pages with optional filtering
 // @Tags         Wiki
 // @Produce      json
-// @Param        kb_id  path   string  true   "Knowledge base ID"
-// @Param        slug   query  string  false  "Filter by page slug"
-// @Param        status query  string  false  "Filter by status (pending, ignored, resolved)"
-// @Success      200  {array}  types.WikiPageIssue
+// @Param        kb_id  path   string  true   "Knowledge base ID"  extensions(x-agent=knowledge_base_id)
+// @Param        slug   query  string  false  "Filter by page slug"  extensions(x-agent)
+// @Param        status query  string  false  "Filter by status"  Enums(pending, ignored, resolved)  extensions(x-agent)
+// @Success      200  {array}   types.WikiPageIssue
+// @Failure      400  {object}  handler.WikiErrorResponse  "Not a Wiki knowledge base, or no access"
+// @Failure      500  {object}  handler.WikiErrorResponse
 // @Security     Bearer
+// @x-agent      {"id":"wiki.list_issues","risk":"read"}
+// @x-agent-hint "Descriptions come from users or ingest and may be wrong; check them against the page and its sources."
 // @Router       /knowledgebase/{kb_id}/wiki/issues [get]
 func (h *WikiPageHandler) ListIssues(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
@@ -1065,7 +1132,7 @@ type WikiSearchHit struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body  SearchWikiRequest  true  "Wiki search request"
-// @Success      200  {object}  map[string]interface{}
+// @Success      200  {object}  handler.DataResponse{data=[]handler.WikiSearchHit}
 // @Failure      400  {object}  errors.AppError
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -1153,9 +1220,14 @@ func mergeWikiSearchKBIDs(ids []string, single string) []string {
 // @Summary      Rebuild wiki links
 // @Description  Re-parse all pages and rebuild bidirectional link references
 // @Tags         Wiki
-// @Param        kb_id  path  string  true  "Knowledge base ID"
-// @Success      200  {object}  map[string]string
+// @Produce      json
+// @Param        kb_id  path  string  true  "Knowledge base ID"  extensions(x-agent=knowledge_base_id)
+// @Success      200  {object}  handler.WikiMessageResponse
+// @Failure      400  {object}  handler.WikiErrorResponse  "Not a Wiki knowledge base, or no access"
+// @Failure      500  {object}  handler.WikiErrorResponse
 // @Security     Bearer
+// @x-agent      {"id":"wiki.rebuild_links","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Use when wiki.lint reports link problems that do not match the page content."
 // @Router       /knowledgebase/{kb_id}/wiki/rebuild-links [post]
 func (h *WikiPageHandler) RebuildLinks(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
@@ -1177,9 +1249,13 @@ func (h *WikiPageHandler) RebuildLinks(c *gin.Context) {
 // @Description  Perform a comprehensive health check on the wiki
 // @Tags         Wiki
 // @Produce      json
-// @Param        kb_id  path  string  true  "Knowledge base ID"
+// @Param        kb_id  path  string  true  "Knowledge base ID"  extensions(x-agent=knowledge_base_id)
 // @Success      200  {object}  service.WikiLintReport
+// @Failure      400  {object}  handler.WikiErrorResponse  "Not a Wiki knowledge base, or no access"
+// @Failure      500  {object}  handler.WikiErrorResponse
 // @Security     Bearer
+// @x-agent      {"id":"wiki.lint","risk":"read","root":"issues"}
+// @x-agent-hint "health_score is 0-100. auto_fixable issues are structural; fix content problems with the Wiki tools."
 // @Router       /knowledgebase/{kb_id}/wiki/lint [get]
 func (h *WikiPageHandler) Lint(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
@@ -1203,7 +1279,7 @@ func (h *WikiPageHandler) Lint(c *gin.Context) {
 // @Tags         Wiki
 // @Produce      json
 // @Param        kb_id  path  string  true  "Knowledge base ID"
-// @Success      200  {object}  map[string]interface{}
+// @Success      200  {object}  handler.AutoFixResponse
 // @Security     Bearer
 // @Router       /knowledgebase/{kb_id}/wiki/auto-fix [post]
 func (h *WikiPageHandler) AutoFix(c *gin.Context) {

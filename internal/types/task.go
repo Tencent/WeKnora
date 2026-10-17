@@ -478,15 +478,15 @@ type KnowledgeMoveProgress struct {
 	TaskID     string            `json:"task_id"`
 	SourceKBID string            `json:"source_kb_id"`
 	TargetKBID string            `json:"target_kb_id"`
-	Status     KBCloneTaskStatus `json:"status"`
-	Progress   int               `json:"progress"`   // 0-100
-	Total      int               `json:"total"`      // 总知识数
-	Processed  int               `json:"processed"`  // 已处理数
-	Failed     int               `json:"failed"`     // 失败数
-	Message    string            `json:"message"`    // 状态消息
-	Error      string            `json:"error"`      // 错误信息
-	CreatedAt  int64             `json:"created_at"` // 任务创建时间
-	UpdatedAt  int64             `json:"updated_at"` // 最后更新时间
+	Status     KBCloneTaskStatus `json:"status" extensions:"x-agent"`
+	Progress   int               `json:"progress" extensions:"x-agent"`  // 0-100
+	Total      int               `json:"total" extensions:"x-agent"`     // 总知识数
+	Processed  int               `json:"processed" extensions:"x-agent"` // 已处理数
+	Failed     int               `json:"failed" extensions:"x-agent"`    // 失败数
+	Message    string            `json:"message" extensions:"x-agent"`   // 状态消息
+	Error      string            `json:"error" extensions:"x-agent"`     // 错误信息
+	CreatedAt  int64             `json:"created_at"`                     // 任务创建时间
+	UpdatedAt  int64             `json:"updated_at"`                     // 最后更新时间
 }
 
 // ManualProcessPayload represents the manual knowledge processing task payload.
@@ -510,14 +510,24 @@ type ImageMultimodalPayload struct {
 	ChunkID         string `json:"chunk_id"`         // parent text chunk
 	ImageURL        string `json:"image_url"`        // provider:// URL (e.g. local://..., minio://...)
 	ImageLocalPath  string `json:"image_local_path"` // deprecated: kept for backward compat with in-flight tasks
-	// EnableOCR and EnableCaption are whole-task switches applied on top of the
-	// image-action policy: a step runs only when both this switch and the
-	// policy allow it. Normal parsing leaves both true and lets the observed
-	// attributes decide.
-	EnableOCR       bool   `json:"enable_ocr"`
-	EnableCaption   bool   `json:"enable_caption"`
-	Language        string `json:"language,omitempty"`          // Request locale for {{language}} in prompt templates
-	ImageSourceType string `json:"image_source_type,omitempty"` // Source type of the image (e.g., "scanned_pdf")
+	// ImagePipelineParams carries the tunables of the pipeline this task runs,
+	// resolved from the knowledge base at enqueue time. They are deliberately
+	// not payload fields of their own: two pipelines may each define a field
+	// called "enable_ocr" with a different meaning, so a name only has to be
+	// unambiguous relative to the pipeline that reads it. A key the running
+	// pipeline does not declare is ignored, which is what lets a stored
+	// knowledge base keep working after a pipeline stops reading one.
+	// ImagePipelineID is the pipeline this task runs, resolved from the
+	// knowledge base at enqueue time by types.ResolveImagePipelineID. It
+	// travels in the payload rather than being re-read at handle time for the
+	// same reason ImageAttrsEnabled does: a task already in flight was
+	// enqueued for one pipeline and must not be re-routed by a later edit.
+	ImagePipelineID     ImagePipelineID `json:"image_pipeline,omitempty"`
+	ImagePipelineParams map[string]any  `json:"image_pipeline_params,omitempty"`
+	// Language is the request locale for {{language}} in prompt templates.
+	Language string `json:"language,omitempty"`
+	// ImageSourceType drives the OCR prompt, e.g. "scanned_pdf".
+	ImageSourceType string `json:"image_source_type,omitempty"`
 	// Attempt links this image task back to the parent ProcessDocument
 	// attempt so the worker can record its image[i] subspan under the
 	// same attempt's multimodal stage span.
@@ -527,7 +537,7 @@ type ImageMultimodalPayload struct {
 	// ("multimodal.image[3]") so the timeline preserves order.
 	ImageIndex int `json:"image_index,omitempty"`
 	// ImageAttrsEnabled selects which image pipeline the task runs — see
-	// PipelineModeFor and the PipelineMode constants. True is the
+	// types.ImagePipelineIDFor and the ImagePipelineID constants. True is the
 	// attribute-observed pipeline: the describe round also observes image
 	// attributes, and the attribute policy decides whether OCR runs for it.
 	// False is the upstream behaviour: a plain caption, then OCR, no attribute

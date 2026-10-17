@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -27,6 +28,12 @@ func (*catalogPolicy) NeedsApproval(context.Context, uint64, string, string) boo
 func (*catalogPolicy) RequestAndWait(context.Context, approval.PendingRequest) (approval.Decision, error) {
 	return approval.Decision{Approved: true}, nil
 }
+
+func (*catalogPolicy) ResumeDecision(_ context.Context, p *types.AgentPrompt, _ *event.EventBus) approval.Decision {
+	return approval.Decision{PendingID: p.ID, Approved: true}
+}
+
+func (*catalogPolicy) MarkExecuted(context.Context, string) {}
 
 func catalogTestContext() context.Context {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))

@@ -34,6 +34,8 @@ func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomA
 		agentsRead.GET("/placeholders", g.Viewer(), agentHandler.GetPlaceholders)
 		// List smart-reasoning agent type presets (rag-qa / wiki-qa / hybrid / custom) — Viewer+
 		agentsRead.GET("/type-presets", g.Viewer(), agentHandler.GetAgentTypePresets)
+		// List the built-in tools an agent may select — Viewer+
+		agentsRead.GET("/tools", g.Viewer(), agentHandler.GetAgentTools)
 		// Create custom agent — Contributor+
 		agentsWrite.POST("", g.Contributor(), agentHandler.CreateAgent)
 		// List all agents (including built-in) — Viewer+
@@ -42,6 +44,8 @@ func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomA
 		agentsRead.GET("/:id", g.Viewer(), agentHandler.GetAgent)
 		// Update agent — creator OR Admin+
 		agentsWrite.PUT("/:id", g.OwnedAgentOrAdmin(), agentHandler.UpdateAgent)
+		// Partially update agent — same guard as PUT
+		agentsWrite.PATCH("/:id", g.OwnedAgentOrAdmin(), agentHandler.PatchAgent)
 		// Delete agent — creator OR Admin+
 		agentsWrite.DELETE("/:id", g.OwnedAgentOrAdmin(), agentHandler.DeleteAgent)
 		// Copy agent — Contributor+ (copy is owned by the caller)
@@ -81,6 +85,7 @@ func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler,
 		skills.GET("", g.Viewer(), skillHandler.ListSkills)
 		// Catalog reads are Viewer+ so the agent editor can show uninstalled skills.
 		skills.GET("/catalog", g.Viewer(), skillHandler.ListCatalog)
+		skills.GET("/catalog/:id", g.Viewer(), skillHandler.GetCatalog)
 	}
 	// Catalog writes bake into sandbox images; scoped API keys cannot hold them.
 	catalogWrite := g.apiKeyGroup(r.Group("/skills/catalog"), apiKeyFullAccess())
@@ -254,6 +259,7 @@ func RegisterEmbedPublicRoutes(
 		embed.POST("/sessions/:session_id/mcp-services/:id/oauth/authorize-url", embedHandler.EmbedMCPOAuthAuthorizeURL)
 		embed.GET("/sessions/:session_id/mcp-services/:id/oauth/status", embedHandler.EmbedMCPOAuthStatus)
 		embed.POST("/sessions/:session_id/tool-approvals/:pending_id", embedHandler.EmbedResolveToolApproval)
+		embed.POST("/sessions/:session_id/prompts/:prompt_id", embedHandler.EmbedResolveAgentPrompt)
 		// Serve images embedded in bot replies (e.g. chart exports). EmbedAuth
 		// injects the channel's tenant, and the handler enforces that the
 		// requested path belongs to that tenant.

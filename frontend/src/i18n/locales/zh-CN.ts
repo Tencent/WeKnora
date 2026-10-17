@@ -972,6 +972,13 @@ export default {
     pauseFailed: '暂停失败',
     logs: '日志',
     syncModeLabel: '同步模式',
+    parseModeLabel: '解析模式',
+    parseMode: {
+      inherit: '使用服务器配置',
+      blocks: '块级解析（默认）',
+      export: '导出解析（docx）',
+    },
+    parseModeHint: '飞书云文档的解析方式。块级解析更快并保留文档内附件；导出解析将文档导出为 docx 后解析，图片与文档的关联更完整。',
     createTitle: '添加数据源',
     editTitle: '编辑数据源',
     nameLabel: '名称',
@@ -1499,6 +1506,8 @@ export default {
       thinkingDesc: '动态和反思性的问题解决思考工具',
       todoWrite: '制定计划',
       todoWriteDesc: '创建结构化的研究计划',
+      askUser: '向用户提问',
+      askUserDesc: '在缺少关键信息时向用户提问，并等待回答后继续',
       searchKnowledge: '检索知识库',
       searchKnowledgeDesc: '语义、关键词或混合检索知识库分块',
       readDocument: '阅读文档',
@@ -1558,6 +1567,13 @@ export default {
       kbMetricRag: 'RAG 知识库',
       kbMetricWiki: 'Wiki 知识库',
       statusInactive: '有 {count} 个已勾选工具在当前配置下无法生效',
+      searchConversations: '回顾历史对话',
+      searchConversationsDesc: '在用户自己的历史会话中查找之前聊过的内容',
+      groupStored: '已保存但未提供的工具',
+      switchManagedDesc: '由智能体的其他设置控制，而不是由此列表决定，在此勾选不会启用它。取消勾选即可移除。',
+      unrecognizedDesc: '当前版本不提供该工具，智能体无法调用它。取消勾选即可移除。',
+      keptUnknownWarning: '已保存。以下已保存的工具在当前版本中不提供，已保留，但智能体无法调用：{names}',
+      droppedWarning: '已保存。以下工具由智能体的其他设置控制，已从工具列表中移除：{names}',
       effectiveLabel: '最终启用的工具',
       effectiveDesc: '根据当前配置计算，这是智能体保存后实际能调用的工具集合',
       effectiveEmpty: '当前没有可用工具，智能体将退化为纯模型问答'
@@ -1804,6 +1820,7 @@ export default {
       readDocument: '阅读文档',
       listDocuments: '浏览文档列表',
       todoWrite: '计划管理',
+      askUser: '向用户提问',
       knowledgeGraphExtract: '知识图谱抽取',
       thinking: '思考',
       attachmentParsing: '解析附件',
@@ -1820,12 +1837,55 @@ export default {
       shellExec: '执行沙箱命令',
       dataAnalysis: '数据分析',
       dataSchema: '数据结构',
-      databaseQuery: '数据库查询'
+      databaseQuery: '数据库查询',
+      findOperations: '查找操作',
+      runOperation: '执行操作',
+      tryAgent: '试跑智能体',
+      openPage: '打开页面',
+      searchWeKnoraDocs: '搜索产品文档',
+      readWeKnoraDoc: '阅读产品文档',
+      readPage: '查看当前页面',
+      selectTab: '切换标签',
+      fillPage: '填写页面'
+    },
+    pageAccess: {
+      viewed: '已查看当前页面：{location}'
+    },
+    pageEdit: {
+      title: '已填写 {count} 处',
+      undo: '撤销',
+      undone: '已撤销这次填写',
+      undoSkipped: '{count} 处已被你改过或不在页面上，未撤销',
+      unsaved: '尚未保存，请检查后在页面上自行保存'
+    },
+    openPage: {
+      open: '打开',
+      openForm: '打开并填写',
+      opened: '助手已打开',
+      back: '返回',
+      endpoint: '将连接到：',
+      draftHint: '已按助手的建议预填。请补全密钥等凭据，检查后自己保存。'
     },
     skillFiles: {
       heading: '技能文件',
       script: '脚本',
       instructions: '技能说明'
+    },
+    attachmentTarget: {
+      list: '全部附件',
+      file: '附件',
+      images: '{name} 中的图片',
+      imagesUnnamed: '附件中的图片',
+      image: '{name} 第 {n} 张图片',
+      imageUnnamed: '附件第 {n} 张图片'
+    },
+    imageView: {
+      summary: '已查看「{file}」第 {numbers} 张图片，共 {total} 张',
+      single: '已查看图片「{file}」',
+      descriptionsHeading: '视觉模型的图片描述',
+      imageLabel: '图片 #{n}',
+      noDescription: '未能生成描述',
+      remaining: '还有 {count} 张未查看'
     },
     sandboxFiles: {
       found: '找到 {count} 个文件',
@@ -1846,10 +1906,41 @@ export default {
       killed: '已超时终止',
       binarySuppressed: '二进制输出已省略，请将文件写入产物目录后下载'
     },
+    operations: {
+      found: '{count} 个可执行操作',
+      unavailableCount: '{count} 个当前不可用',
+      empty: '没有匹配的操作',
+      unavailableHeading: '当前不可用',
+      parameters: '参数',
+      required: '必填',
+      enum: '可选值',
+      range: '范围 {min}–{max}',
+      risk: {
+        read: '只读',
+        probe: '检测',
+        write: '写入',
+        destructive: '不可恢复'
+      },
+      truncated: '结果已截断',
+      emptyResult: '没有返回数据',
+      failed: '操作失败',
+      meta: '附加信息'
+    },
+    weknoraDocs: {
+      pages: '{count} 篇文档',
+      hits: '匹配 {count} 个章节',
+      empty: '没有匹配的文档',
+      outline: '目录',
+      content: '正文',
+      truncated: '正文未读完，可以继续读取',
+      failed: '读取失败',
+      openDoc: '在文档站打开'
+    },
     mcpOAuth: {
       waiting: '等待授权 · {target}',
       waitingStatus: '等待授权',
       targetWithTool: '{service} › {tool}',
+      dockQuestion: '需要授权 {target} 才能继续',
       titleWithService: 'OAuth 授权 · {service}',
       titleWithTool: 'OAuth 授权 · {service} › {tool}',
       desc: '点击授权将打开新窗口完成登录，授权成功后会自动继续本次工具调用。',
@@ -1864,22 +1955,110 @@ export default {
       resumeFailed: '恢复执行失败，请重试',
       skipFailed: '跳过失败，请重试'
     },
+    askUser: {
+      title: '向你提问',
+      selectPlaceholder: '请选择',
+      textPlaceholder: '输入你的回答',
+      otherPlaceholder: '其他（可选）',
+      decline: '不回答',
+      submit: '提交',
+      declinedTag: '已拒绝回答',
+      submitted: '已提交',
+      answeredTag: '已回答',
+      timedOutTag: '超时未回答',
+      canceledTag: '已取消',
+      unansweredTag: '未回答',
+      submitFailed: '提交失败',
+    },
+    promptDock: {
+      approvalTitle: '需要你审核',
+      oauthTitle: '需要你授权',
+      waiting: '等待你处理',
+      handle: '去处理',
+      pager: '{current} / {total}',
+      previous: '上一个',
+      next: '下一个',
+      collapse: '收起',
+      expand: '展开'
+    },
     toolApproval: {
       waiting: '等待审核 · {target}',
       waitingStatus: '等待审核',
       targetWithTool: '{service} › {tool}',
+      dockQuestion: '允许调用 {target}？',
+      operationQuestion: '允许{action}「{target}」？',
+      operationQuestionNoTarget: '允许{action}？',
+      operationTarget: '{action}「{target}」',
+      reviewTitle: '人工审核 · {target}',
+      characterCount: '{count} 字',
       titleWithTarget: '人工审核 · {service} › {tool}',
       argsLabel: '调用参数',
       argsModified: '已修改',
+      allowInSession: '本会话内同类操作都允许',
       countdownShort: '{seconds}s',
       approve: '通过并执行',
       reject: '拒绝',
       approvedTag: '已通过',
       rejectedTag: '已拒绝',
+      parked: '已转入后台等待，可稍后处理',
+      parkedUntil: '已转入后台等待，{time} 前可处理',
+      abandonedTag: '已放弃',
       invalidJson: '参数不是合法 JSON',
       submitted: '已提交',
       submitFailed: '提交失败',
-      userRejected: '用户拒绝'
+      userRejected: '用户拒绝',
+      detail: {
+        type: '类型',
+        embeddingModel: '嵌入模型',
+        summaryModel: '摘要模型',
+        captionModel: '图片描述',
+        speechModel: '语音识别',
+        storage: '存储',
+        indexes: '索引',
+        name: '名称',
+        title: '标题',
+        status: '状态',
+        summary: '简介',
+        model: '模型',
+        mode: '模式',
+        url: '链接',
+        from: '从',
+        to: '到',
+        folder: '目录',
+        page: '页面',
+        version: '版本',
+        documents: '文档',
+        knowledgeBases: '知识库',
+        mcpServices: 'MCP 服务',
+        skills: '技能',
+        webSearch: '联网搜索',
+        multiTurn: '多轮对话',
+        transport: '传输方式',
+        authentication: '认证方式',
+        usageInstructions: '使用说明',
+        displayName: '显示名称',
+        enabled: '启用',
+        sandbox: '沙箱',
+        sandboxes: '沙箱',
+        systemPrompt: '系统提示词',
+        content: '内容',
+        kbScope: '知识库范围',
+        mcpScope: 'MCP 范围',
+        skillsScope: '技能范围'
+      },
+      value: {
+        document: '文档',
+        faq: '问答',
+        wiki: 'Wiki',
+        on: '开',
+        off: '关',
+        vector: '向量',
+        keyword: '关键词',
+        graph: '图谱',
+        quickAnswer: '快速问答',
+        smartReasoning: '智能推理',
+        indexSep: '、'
+      }
     }
   },
   kbSettings: {
@@ -1990,7 +2169,144 @@ export default {
     getDocumentInfo: '获取文档信息',
     queryKnowledgeGraph: '查询知识图谱',
     think: '深度思考',
-    todoWrite: '制定计划'
+    todoWrite: '制定计划',
+    askUser: '向用户提问'
+  },
+  assistant: {
+    title: 'WeKnora 助手',
+    newConversation: '新对话',
+    history: '历史对话',
+    untitledConversation: '未命名对话',
+    historyEmpty: '暂无历史对话',
+    historyFailed: '加载历史对话失败',
+    loadMore: '加载更多',
+    resize: '调整助手宽度',
+    layout: {
+      dock: '固定在右侧',
+      float: '改为悬浮',
+    },
+    welcomeTitle: '有什么可以帮你？',
+    agentWelcomeDesc: '可以检查这个智能体的配置、调整模型或查看它能检索的知识库。',
+    welcomeDesc: '我可以解答 WeKnora 的用法，也可以查看和处理你空间里的文档解析、知识库动态和 Wiki 问题，还能帮你创建和配置智能体。改动前是否先请你确认，由输入框下方的权限等级决定。',
+    startFailed: '启动助手失败，请重试',
+    askAboutDocument: '问 {name}',
+    askAboutAnswer: '就这条回答问 {name}',
+    selection: {
+      label: '已选中',
+      lines: '已选 {count} 行',
+      detach: '不带上选中内容',
+      tip: '发送时会带上选中的内容：{text}',
+      tipField: '发送时会带上「{field}」中选中的内容：{text}'
+    },
+    bubble: {
+      label: '助手快捷操作',
+      ask: '问助手',
+      polish: '润色',
+      rewrite: '改写',
+      translate: '翻译',
+      continue: '续写',
+      prompts: {
+        polish: '润色选中的内容：修正错别字和不通顺的地方，不改变原意，直接在原处替换。',
+        rewrite: '改写选中的内容，让表达更清晰简洁，直接在原处替换。',
+        translate: '翻译选中的内容：中文译成英文，其他语言译成中文，直接在原处替换。',
+        continue: '接着选中的内容往下续写一段，与上下文衔接，写在选中内容之后。'
+      }
+    },
+    fillNotice: {
+      title: '助手已填写 {count} 处',
+      undo: '撤销',
+      dismiss: '关闭'
+    },
+    access: {
+      title: '权限等级',
+      capped: '空间管理员未开放这一等级',
+      page: {
+        label: '查看和填写当前页面',
+        desc: '读取左侧页面，并可代为填写表单；不会点击按钮或保存'
+      },
+      levels: {
+        read_only: {
+          label: '只读',
+          desc: '只查看，不做任何修改'
+        },
+        confirm: {
+          label: '修改前确认',
+          desc: '每次修改或删除前都先请你确认'
+        },
+        auto_write: {
+          label: '自动执行',
+          desc: '可恢复的修改直接执行，删除仍需确认'
+        }
+      }
+    },
+    context: {
+      currentPage: '当前页面',
+      detach: '不附带当前页面',
+      attachedTip: '已附带当前页面：{path}',
+      detachedTip: '点击附带当前页面：{path}',
+      chatMessage: '这条回答',
+      pages: {
+        knowledge_base: '知识库',
+        wiki: 'Wiki',
+        agent_editor: '智能体编辑',
+        settings_models: '模型管理',
+        mcp_services: 'MCP 服务',
+        chat: '对话'
+      }
+    },
+    starters: {
+      agentConfig: '检查这个智能体的配置',
+      agentModel: '给它换个模型',
+      agentKnowledge: '它能检索哪些知识库？',
+      wikiIssues: '这个页面有哪些待处理的问题？',
+      wikiSummary: '总结一下这个 Wiki 页面',
+      documentStatus: '这个文档的解析状态怎么样？',
+      documentSummary: '总结一下这个文档',
+      failedDocuments: '这个知识库有哪些解析失败的文档？',
+      recentActivity: '这个知识库最近有哪些变动？',
+      formats: 'WeKnora 支持哪些文档格式？',
+      createWiki: '怎样创建 Wiki 知识库？',
+      agents: '我有哪些智能体？分别用的什么模型？',
+      messageSources: '这个回答的依据是什么？',
+      messageCheck: '这个回答有没有说错？',
+      modelCheck: '检查这个模型的配置',
+      modelUsage: '哪些智能体和知识库在用这些模型？',
+      mcpTools: '这个 MCP 服务提供哪些工具？',
+      mcpCheck: '它为什么连不上？',
+      modelSetup: '我还需要配置哪些模型？',
+      mcpSetup: '怎样接入一个 MCP 服务？'
+    }
+  },
+  assistantSettings: {
+    title: '助手',
+    description: '设置 {name} 的入口、打开方式和权限等级。',
+    introTitle: '助手只能做你本人有权限做的事',
+    introDescription: '助手以你的身份操作，能看到和修改的范围与你在空间里的角色一致。权限等级只会在此基础上进一步收紧，不会放宽。',
+    personalGroup: '个人偏好',
+    accessLabel: '权限等级',
+    accessDescription: '决定助手修改内容前是否先请你确认。也可以在助手输入框下方随时切换。',
+    accessCeilingHint: '空间管理员将最高等级设为「{level}」。',
+    entryLabel: '入口位置',
+    entryDescription: '无论选哪种，都可以在命令面板（{shortcut}）中打开助手。',
+    entries: {
+      sidebar: '侧边栏',
+      launcher: '页面右侧',
+      palette: '仅命令面板'
+    },
+    layoutLabel: '打开方式',
+    layoutDescription: '固定在右侧时会挤压页面内容，悬浮时盖在页面上方。窗口较窄时总是悬浮。',
+    layouts: {
+      docked: '固定在右侧',
+      floating: '悬浮'
+    },
+    workspaceGroup: '空间设置',
+    adminOnly: '仅管理员可修改',
+    nameLabel: '助手名称',
+    nameDescription: '空间内所有成员看到的名称，留空使用默认名称。',
+    ceilingLabel: '最高权限等级',
+    ceilingDescription: '成员能选择的最高等级。设为「只读」后，助手在这个空间里不会做任何修改。',
+    saved: '已保存',
+    saveFailed: '保存失败：{message}'
   },
   commandPalette: {
     placeholder: '搜索知识库、文件、对话…',
@@ -2015,7 +2331,8 @@ export default {
       agents: '打开智能体',
       organizations: '打开共享空间',
       settings: '打开设置',
-      productTour: '新手引导'
+      productTour: '新手引导',
+      assistant: '打开 {name}'
     },
     match: {
       vector: '向量',
@@ -2401,6 +2718,9 @@ export default {
     "serverDocumentation": "服务端原始说明",
     "noServerDocumentation": "该 MCP Server 的 initialize 未返回 instructions / serverInfo.description（均为可选字段）。工具说明在下方各工具的 description 里。",
     "policyHint": "工具开关与审批设置即时保存；刷新目录不会覆盖这些设置。",
+    "columnTool": "工具",
+    "columnEnabled": "启用",
+    "columnApproval": "需审批",
     "failed": "工具目录读取失败",
     "setupProgress": "MCP 配置步骤",
     "connection": "连接配置",
@@ -2443,6 +2763,9 @@ export default {
     authTypeApiKey: 'API Key / Token',
     authTypeOAuth: 'OAuth 2.0（首次连接授权）',
     oauthScopes: 'Scopes（可选，空格分隔）',
+    oauthClientId: 'Client ID（可选）',
+    oauthClientIdDesc: '填写在授权服务器预先注册的客户端；留空则自动进行动态客户端注册。更换 Client ID 时请同时更新 Client Secret。',
+    oauthClientSecret: 'Client Secret（可选）',
     oauthAuthorization: '授权状态',
     oauthAuthorized: '已授权',
     oauthRefreshable: 'Token 已过期，将在下次使用时自动刷新',
@@ -2648,6 +2971,7 @@ export default {
       deleted: '模型已删除',
       deleteFailed: '删除模型失败',
       builtinCannotEdit: '内置模型不能编辑',
+      linkedModelMissing: '没有找到助手链接的模型，它可能已被删除',
       builtinCannotDelete: '内置模型不能删除',
       builtinCannotCopy: '内置模型不能复制',
       copied: '模型已复制',
@@ -2717,6 +3041,7 @@ export default {
       enabled: '已启用 MCP 服务',
       disabled: '已禁用 MCP 服务',
       updateStateFailed: '更新 MCP 服务状态失败',
+      linkedServiceMissing: '没有找到助手链接的 MCP 服务，它可能已被删除',
       testing: '正在测试 {name}...',
       noResponse: '测试失败：未收到服务器响应',
       testFailed: '测试 MCP 服务失败',
@@ -3971,7 +4296,8 @@ export default {
     truncatedHint: '回答在模型单次输出上限处被截断，以上为截断前已生成的内容',
     rewind: {
       tooltip: '回滚到这里',
-      confirmBody: '将删除此条之后的对话。从用户消息回滚时会删掉该问题本身，并填回输入框。若有可用检查点，工作区会一并回退。此操作不可撤销。',
+      confirmTitle: '回滚到这里？',
+      confirmBody: '此条之后的对话将被删除；从提问回滚时，该问题会填回输入框。有检查点时工作区也会一并回退，操作不可撤销。',
       confirmButton: '回滚',
       cancelButton: '取消',
       success: '已回滚',
@@ -4137,6 +4463,13 @@ export default {
         imageVectorModelUnsupported: '当前向量模型未声明图片输入，开启后不会生成或召回图片向量',
         imageAttrsSchemaLabel: '可观察的图片属性',
         imageAttrsSchemaDescription: '模型会观察以下属性（由后端注册表定义）以驱动 OCR 策略',
+        imagePipelineSectionLabel: '图片解析方案',
+        imagePipelineSectionDescription: '多模态解析开启后，可以根据需要选择图片的解析方案',
+        imagePipelineLabel: '选择解析方案',
+        imagePipelinePlaceholder: '请选择解析方案',
+        imagePipelineLoading: '正在读取流水线…',
+        imagePipelineLoadError: '读取流水线失败',
+          imagePipelineValidateError: '无法校验当前设置，保存时后端会再次检查。',
         imageAttrsOcrConditions: '根据观察到的属性条件触发 OCR',
         imageAttrsOcrConditionsDesc: '当观察到的属性满足以下条件时，对图片进行 OCR',
         imageAttrsOcrOnUnobserved: '图片属性观察失败时仍执行 OCR',
@@ -4699,12 +5032,10 @@ export default {
       globalIssuesEmpty: '暂无待处理的内容问题',
       issuePagePrefix: '页面: ',
       issueGoFix: '去处理',
-      fixAssistantTitle: 'Wiki 智能修复助手',
       issueFixSuggestions: '内容优化建议 ({count})',
       issueFixSingle: '修复',
-      fixStartError: '启动修复助手失败',
-      issueFixPromptSingle: '请修复页面 [[{slug}]] 上的问题 (ID: {id})。',
-      issueFixPromptAutoStart: '请修复页面 [[{slug}]] 上的以下问题：'
+      issueFixPromptSingle: '修复这个 Wiki 问题：{description}',
+      issueFixPromptAll: '修复当前页面的 {count} 个待处理问题'
     },
     indexing: {
       title: '索引策略',
@@ -4814,6 +5145,7 @@ export default {
       systemActor: '系统触发',
       actorWithAPIKey: '{actor} · API Key · {name}',
       actorAPIKey: 'API Key · {name}',
+      viaAssistant: '经 WeKnora 助手',
       knowledgeBase: '知识库',
       countItems: '共 {count} 项',
       titleWithCount: '{title} 等 {count} 项',
@@ -4919,6 +5251,8 @@ export default {
         actorId: '发起人 ID',
         apiKeyName: 'API Key 名称',
         apiKeyId: 'API Key ID',
+        agentSessionId: '助手会话 ID',
+        agentOperation: '助手操作',
         details: '详情'
       },
       columns: {
@@ -5156,6 +5490,9 @@ export default {
     notConfigured: '未配置',
     sharedAgentModelLabel: '共享智能体配置的模型',
     noModel: '暂无可用模型',
+    modelAuto: '默认',
+    modelFollowDefault: '跟随默认',
+    modelAutoHint: '当前知识库配置的对话模型；不在知识库页面或知识库未配置时，使用第一个可用的对话模型',
     stopGeneration: '停止生成',
     send: '发送',
     steerCurrent: '补充当前任务',
@@ -5200,6 +5537,21 @@ export default {
     }
   },
   manualEditor: {
+    assistant: {
+      button: '助手',
+      tooltip: '让助手帮你写',
+      continue: '续写',
+      outline: '生成大纲',
+      polish: '润色全文',
+      summarize: '总结要点',
+      open: '打开助手',
+      prompts: {
+        continue: '接着正文末尾续写一段，与前文衔接。',
+        outline: '根据标题和现有内容，为这篇文档拟一份结构清晰的大纲，写在正文开头。',
+        polish: '润色正文：修正错别字和不通顺的句子，不改变原意，分段修改。',
+        summarize: '总结这篇文档的要点，在对话里回复，不要修改正文。'
+      }
+    },
     defaultTitlePrefix: '新建文档',
     noDocumentKnowledgeBases: '暂无可用的文档型知识库，请先创建一个文档型知识库',
     actions: {
@@ -5314,7 +5666,13 @@ export default {
     mcpStale: '需重新同步',
     belongsToKb: '所属知识库：',
     belongsToOrg: '所属空间：',
-    noCompatibleKbForAgent: '当前智能体的工具与作用域内知识库的能力不匹配，暂无可引用的知识库。'
+    noCompatibleKbForAgent: '当前智能体的工具与作用域内知识库的能力不匹配，暂无可引用的知识库。',
+    tag: '标签',
+    searchPlaceholder: '搜索知识库、文件、技能等',
+    searchInGroup: '在{group}中搜索…',
+    typeToSearch: "在 {'@'} 后继续输入以搜索…",
+    viewAll: '查看全部',
+    back: '返回'
   },
   common: {
     add: '添加',
@@ -5537,6 +5895,15 @@ export default {
     howToEnable: '如何启用知识图谱？'
   },
   retrievalSettings: {
+    recallTab: '召回',
+    rerankTab: '重排序',
+    rrfTitle: '结果融合（RRF）',
+    rrfKLabel: 'RRF 平滑常数 (K)',
+    rrfKDescription: '值越大，排名靠前结果的优势越小。默认 60；设为 0 使用默认值。',
+    rrfVectorWeightLabel: 'RRF 向量权重',
+    rrfVectorWeightDescription: '控制向量检索对融合结果的影响。默认 0.7；设为 0 使用默认值。两项权重之和无需等于 1。',
+    rrfKeywordWeightLabel: 'RRF 关键词权重',
+    rrfKeywordWeightDescription: '控制关键词检索对融合结果的影响。默认 0.3；设为 0 使用默认值。两项权重之和无需等于 1。',
     title: '搜索设置',
     description: '配置知识库搜索和消息搜索的全局检索参数',
     embeddingTopKLabel: '向量检索数量 (Top K)',
@@ -6235,6 +6602,7 @@ export default {
       skillTranscriptLive: '安装过程',
       skillTranscriptLiveHint: '正在安装，点击查看过程',
       skillTranscriptTitle: '安装过程',
+      skillTranscriptPrompt: '安装指令',
       skillTranscriptHide: '收起安装过程',
       skillGuidance: {
         placeholder: '补充安装说明，例如需要安装的 CLI、安装文档或环境限制',
@@ -6353,6 +6721,7 @@ export default {
       installedCount: '已安装到 {count} 个沙箱',
       installPanelGroup: '已安装',
       installPanelAvailable: '未安装',
+      installAction: '安装',
       viewInstallProgress: '查看进度',
       manageOnSandbox: '管理沙箱「{name}」上的安装',
       manageDrawerDesc: '在沙箱「{name}」上管理启用、变量和卸载。',
@@ -6704,6 +7073,8 @@ export default {
       capabilityUnconfigured: '未配置'
     },
     editor: {
+      assistantChanged: '助手已修改此智能体，请重新打开以查看最新设置。',
+      assistantDeleted: '助手已删除此智能体。',
       reasoningEffortUnsupported: '当前所选模型不支持思考，除「关闭」外的选项将被忽略。',
       reasoningEffortAlwaysOn: '当前所选模型始终开启思考，无法关闭，只能调整思考强度。',
       createTitle: '创建智能体',
@@ -7365,6 +7736,7 @@ export default {
     selectLoaded: '全选已加载',
     confirmBatchDeleteDocument: '确认删除选中的 {count} 个文档？删除后将无法恢复。',
     deleteSubmitted: '删除任务已提交，正在等待完成。',
+    assistantDeleted: '助手已删除这个知识库。',
     deletePending: '删除尚未完成，请稍后刷新查看结果。',
     deleteTaskFailed: '删除任务失败，请查看文档错误详情后重试。',
     deleteStatusUnavailable: '暂时无法确认删除结果，请稍后刷新查看文档状态。',
@@ -7809,6 +8181,7 @@ export default {
   },
   menu: {
     sessionInProgress: '会话进行中',
+    sessionUnread: '有新回复',
     knowledgeBase: '知识库',
     agents: '智能体',
     artifacts: '产物',
@@ -7857,6 +8230,54 @@ export default {
         'true': { label: '是', description: '是 —— 图表、曲线或示意图' },
         'false': { label: '否', description: '否 —— 照片、插画、图标或装饰图' }
       }
+    }
+  },
+  // 流水线选择面板的覆盖文案：按流水线 id 与字段 key 索引（后端注册表给出
+  // id 与 key，这里只做翻译）。未覆盖的流水线或字段回落到后端自带的英文
+  // 说明，所以新增流水线不会显示成键名。
+  imagePipeline: {
+    errors: {
+      noActionEnabled: '至少开启一个解析动作，否则多模态不会处理任何内容。',
+    },
+    default: {
+      name: '传统',
+      description: '用户根据任务需要手动选择解析动作开关。',
+      enable_caption: {
+        label: '图片描述',
+        description: '让模型为每张图片生成一句内容描述，作为图片的说明文字。'
+      },
+      enable_ocr: {
+        label: '文字识别',
+        description: '提取图片中出现的文字。'
+      },
+      caption: {
+        thinking: {
+          label: '图片描述时开启思考',
+          description: '让模型在写描述前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。',
+        },
+      },
+      ocr: {
+        thinking: {
+          label: '文字识别时开启思考',
+          description: '让模型在提取文字前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。',
+        },
+      }
+    },
+    smartocr: {
+      name: '智能模式',
+      caption: {
+        thinking: {
+          label: '描述时开启思考',
+          description: '让模型在描述图片并观察属性前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。',
+        },
+      },
+      ocr: {
+        thinking: {
+          label: '文字识别时开启思考',
+          description: '让模型在提取文字前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。',
+        },
+      },
+      description: '先观察图片特征并进行图片描述，再根据图片特征决定是否调用OCR对图片进行识别，以节省模型调用次数并提升解析速度。'
     }
   }
 }

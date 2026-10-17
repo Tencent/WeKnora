@@ -162,6 +162,8 @@ curl -N "$BASE/api/v1/sandbox-configs/cfg-1/skills/skill-1/install-events" \
 
 `GET /skills?sandbox_config_id=cfg-1` 返回可用于智能体的技能元数据 `{success,data:[{name,description}],skills_available}`，与管理员看到的全部安装记录不同。
 
+助手通过 `skill.list` 调用此接口，必须传入 `agent.get` 返回的 `sandbox_config_id`（可为空）；仅投影 `name`、`description` 和 `skills_available`，不暴露共享智能体查询参数或技能管理接口。空配置 ID 返回空列表且 `skills_available:false`，应提示用户在智能体编辑器选择沙箱；配置技能时使用返回的 `name`，不是安装记录 ID。
+
 同时传 `agent_id` 和 `agent_source_tenant_id`（共享智能体的来源空间 ID）时，列出该共享智能体可 @ 的技能：沙箱配置取自智能体本身，忽略查询中的 `sandbox_config_id`；智能体技能范围为 `selected` 时只返回指定技能，禁用时返回空列表且 `skills_available:false`。调用者无权使用该智能体时返回 403。
 
 ## 会话交互终端

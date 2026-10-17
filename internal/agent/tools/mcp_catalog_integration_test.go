@@ -37,6 +37,12 @@ func (g *proxyApprovalGate) RequestAndWait(
 	return approval.Decision{Approved: !g.reject, Reason: "rejected by test user"}, nil
 }
 
+func (*proxyApprovalGate) ResumeDecision(_ context.Context, p *types.AgentPrompt, _ *event.EventBus) approval.Decision {
+	return approval.Decision{PendingID: p.ID, Approved: true}
+}
+
+func (*proxyApprovalGate) MarkExecuted(context.Context, string) {}
+
 func TestMCPProxyHTTPApprovalArgumentsAndImages(t *testing.T) {
 	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
 	t.Cleanup(utils.ResetSSRFWhitelistForTest)

@@ -61,20 +61,28 @@
                 </t-tooltip>
                 <t-popconfirm
                     v-if="canRewind"
-                    :content="t('chat.rewind.confirmBody')"
-                    :confirm-btn="{ content: t('chat.rewind.confirmButton'), theme: 'danger' }"
-                    :cancel-btn="{ content: t('chat.rewind.cancelButton') }"
+                    :confirm-btn="{ content: t('chat.rewind.confirmButton'), theme: 'danger', size: 'small' }"
+                    :cancel-btn="{ content: t('chat.rewind.cancelButton'), size: 'small' }"
                     theme="warning"
                     placement="top"
-                    overlay-class-name="chat-rewind-popconfirm"
+                    :show-arrow="false"
+                    overlay-class-name="wk-popover chat-rewind-popconfirm"
                     @confirm="emitRewind"
                 >
+                    <template #content>
+                        <div class="chat-rewind-confirm__title">{{ t('chat.rewind.confirmTitle') }}</div>
+                        <div class="chat-rewind-confirm__body">{{ t('chat.rewind.confirmBody') }}</div>
+                    </template>
                     <t-tooltip :content="rewindTooltip">
                         <t-button size="small" variant="outline" shape="round" @click.stop>
                             <t-icon name="rollback" />
                         </t-button>
                     </t-tooltip>
                 </t-popconfirm>
+                <t-button v-if="canAskAssistant" size="small" variant="outline" shape="round"
+                    :title="askAssistantTitle" @click.stop="emitAskAssistant">
+                    <t-icon name="compass" />
+                </t-button>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer"
                     :title="$t('agent.copy')">
                     <t-icon name="copy" />
@@ -164,6 +172,7 @@ import {
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
+import { useAssistantStore } from '@/stores/assistant';
 import {
     buildManualMarkdown,
     formatManualTitle,
@@ -199,7 +208,7 @@ const mentionTagIcon = (item) => {
     return 'file';
 };
 
-const emit = defineEmits(['scroll-bottom', 'render-complete-change', 'fork', 'rewind'])
+const emit = defineEmits(['scroll-bottom', 'render-complete-change', 'fork', 'rewind', 'ask-assistant'])
 const { t } = useI18n()
 const uiStore = useUIStore();
 let parentMd = ref()
@@ -244,6 +253,10 @@ const props = defineProps({
     canRewind: {
         type: Boolean,
         default: false
+    },
+    canAskAssistant: {
+        type: Boolean,
+        default: false
     }
 });
 // The popover evaluates sessionId during setup, so it must follow defineProps.
@@ -263,6 +276,14 @@ const emitFork = () => {
 const emitRewind = () => {
     const messageId = persistedAssistantId(props.session) || props.session?.id
     if (messageId) emit('rewind', messageId)
+}
+const assistant = useAssistantStore()
+const canAskAssistant = computed(() => props.canAskAssistant === true && !props.embeddedMode)
+const askAssistantTitle = computed(() =>
+    t('assistant.askAboutAnswer', { name: assistant.displayName || t('assistant.title') }))
+const emitAskAssistant = () => {
+    const messageId = persistedAssistantId(props.session) || props.session?.id
+    if (messageId) emit('ask-assistant', messageId)
 }
 
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));

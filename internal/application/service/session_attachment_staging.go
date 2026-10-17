@@ -20,7 +20,15 @@ type stagedSessionAttachment struct {
 	FileType string
 	Size     int64
 	Path     string
+	// ParsedPath is the Markdown text extracted from a binary attachment,
+	// staged beside it so a shell does not have to parse the file again.
+	ParsedPath string
+	// AttachmentPath is the read_file address of the same stored attachment.
+	AttachmentPath string
 }
+
+// parsedSidecarSuffix names the staged Markdown beside a binary attachment.
+const parsedSidecarSuffix = ".parsed.md"
 
 // sessionSandboxFileStore returns the manager's effective session filesystem
 // capability, or nil when the backend cannot support it. Centralised so
@@ -126,7 +134,7 @@ func (s *agentService) stageSessionAttachments(
 		return nil, fmt.Errorf("file service is unavailable for session input staging")
 	}
 
-	resolved, err := s.resolveSessionAttachmentURLs(ctx, tenantID, sessionID, attachments)
+	resolved, parsed, err := s.resolveSessionAttachmentURLs(ctx, tenantID, sessionID, attachments)
 	if err != nil {
 		return nil, err
 	}
@@ -141,6 +149,7 @@ func (s *agentService) stageSessionAttachments(
 	}
 
 	desired := make(map[string]struct{}, len(attachments))
+	var assets []string
 	staged := make([]stagedSessionAttachment, 0, len(attachments))
 	maxBytes := int64(secutils.GetMaxFileSizeMB()) * 1024 * 1024
 	for _, attachment := range attachments {
@@ -149,6 +158,7 @@ func (s *agentService) stageSessionAttachments(
 			return nil, pathErr
 		}
 		desired[remotePath] = struct{}{}
+		assets = append(assets, remotePath+attachmentAssetsSuffix)
 
 		entry, present := existing[remotePath]
 		if !present || attachment.FileSize <= 0 || entry.Size != attachment.FileSize {
@@ -173,11 +183,24 @@ func (s *agentService) stageSessionAttachments(
 			attachment.FileSize = int64(len(content))
 		}
 
+		parsedPath := ""
+		if text, ok := parsed[strings.TrimSpace(attachment.URL)]; ok {
+			parsedPath = remotePath + parsedSidecarSuffix
+			desired[parsedPath] = struct{}{}
+			if entry, present := existing[parsedPath]; !present || entry.Size != int64(len(text)) {
+				if writeErr := store.WriteSessionInputFile(ctx, sessionID, parsedPath, []byte(text)); writeErr != nil {
+					return nil, fmt.Errorf("stage parsed text of %q: %w", attachment.FileName, writeErr)
+				}
+			}
+		}
+
 		staged = append(staged, stagedSessionAttachment{
-			Name:     attachment.FileName,
-			FileType: attachment.FileType,
-			Size:     attachment.FileSize,
-			Path:     remotePath,
+			Name:           attachment.FileName,
+			FileType:       attachment.FileType,
+			Size:           attachment.FileSize,
+			Path:           remotePath,
+			ParsedPath:     parsedPath,
+			AttachmentPath: types.AttachmentPath(attachment.ID),
 		})
 	}
 
@@ -189,6 +212,18 @@ func (s *agentService) stageSessionAttachments(
 	// files.
 	for filePath := range existing {
 		if _, keep := desired[filePath]; !keep {
+			// On-demand image copies and observations belong to the same original.
+			// Preserve them for live attachments; remove them with stale originals.
+			liveAsset := false
+			for _, root := range assets {
+				if filePath == root || strings.HasPrefix(filePath, root+"/") {
+					liveAsset = true
+					break
+				}
+			}
+			if liveAsset {
+				continue
+			}
 			if err := store.RemoveSessionInputPath(ctx, sessionID, filePath); err != nil {
 				return nil, fmt.Errorf("remove stale session input %s: %w", filePath, err)
 			}
@@ -206,38 +241,53 @@ func (s *agentService) stageSessionAttachments(
 // attachment.ID is the authoritative source of the storage reference.
 // Lookup is tenant+id (not session-scoped) so a forked session can still
 // stage attachments whose temporary_documents row remains on the parent.
-// Attachments that already carry a URL, or that have no temporary-document ID,
-// pass through unchanged so callers with other attachment sources keep working.
+// Attachments without a temporary-document ID pass through unchanged. A stored
+// document is also loaded when its URL is already on the message, so its parsed
+// text is available on normal sends as well as restored history.
+//
+// The second result maps a storage URL to the parsed Markdown of a ready,
+// non-plain-text document, for staging beside the original file.
 func (s *agentService) resolveSessionAttachmentURLs(
 	ctx context.Context,
 	tenantID uint64,
 	_ string,
 	attachments types.MessageAttachments,
-) (types.MessageAttachments, error) {
+) (types.MessageAttachments, map[string]string, error) {
 	if len(attachments) == 0 || s == nil || s.db == nil {
-		return attachments, nil
+		return attachments, nil, nil
 	}
 	repo := repository.NewTemporaryDocumentRepository(s.db)
 	out := make(types.MessageAttachments, 0, len(attachments))
+	parsed := make(map[string]string)
 	for _, attachment := range attachments {
-		if strings.TrimSpace(attachment.URL) != "" || strings.TrimSpace(attachment.ID) == "" {
+		if strings.TrimSpace(attachment.ID) == "" {
 			out = append(out, attachment)
 			continue
 		}
 		document, err := repo.GetByID(ctx, tenantID, attachment.ID)
 		if err != nil {
-			return nil, fmt.Errorf("resolve attachment %q storage reference: %w", attachment.FileName, err)
+			return nil, nil, fmt.Errorf("resolve attachment %q storage reference: %w", attachment.FileName, err)
 		}
 		if document == nil || strings.TrimSpace(document.ResourceRef) == "" {
-			// Expired or already-deleted temporary document: leave the URL
-			// empty so deduplicateSessionAttachments skips it instead of
-			// failing the whole staging pass.
+			if strings.TrimSpace(attachment.URL) != "" {
+				out = append(out, attachment)
+			}
+			// Keep an existing storage reference when its document is gone;
+			// without one there is no file left to stage.
 			continue
 		}
-		attachment.URL = document.ResourceRef
+		if strings.TrimSpace(attachment.URL) == "" {
+			attachment.URL = document.ResourceRef
+		}
 		out = append(out, attachment)
+		if _, plainText := temporaryTextExtensions[strings.ToLower(document.FileType)]; !plainText &&
+			document.Status == types.TemporaryDocumentStatusReady && strings.TrimSpace(document.Content) != "" &&
+			strings.TrimSpace(attachment.URL) == strings.TrimSpace(document.ResourceRef) {
+			parsed[strings.TrimSpace(document.ResourceRef)] = types.NumberAttachmentImages(
+				document.Content, document.ViewableImages())
+		}
 	}
-	return out, nil
+	return out, parsed, nil
 }
 
 func deduplicateSessionAttachments(attachments types.MessageAttachments) types.MessageAttachments {
@@ -282,23 +332,41 @@ func buildSandboxAttachmentsPrompt(attachments []stagedSessionAttachment, layout
 	workspace := strings.TrimSpace(layout.Root)
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n\n<sandbox_attachments root=\"%s\">\n", escapeAttachmentXML(inputDir))
+	hasParsed, hasStored := false, false
 	for _, attachment := range attachments {
+		parsed := ""
+		if attachment.ParsedPath != "" {
+			hasParsed = true
+			parsed = fmt.Sprintf(" parsed_text_path=\"%s\"", escapeAttachmentXML(attachment.ParsedPath))
+		}
+		if attachment.AttachmentPath != "" {
+			hasStored = true
+			parsed += fmt.Sprintf(" attachment_path=\"%s\"", escapeAttachmentXML(attachment.AttachmentPath))
+		}
 		fmt.Fprintf(
 			&b,
-			"  <file name=\"%s\" type=\"%s\" size_bytes=\"%d\" path=\"%s\" />\n",
+			"  <file name=\"%s\" type=\"%s\" size_bytes=\"%d\" path=\"%s\"%s />\n",
 			escapeAttachmentXML(attachment.Name),
 			escapeAttachmentXML(attachment.FileType),
 			attachment.Size,
 			escapeAttachmentXML(attachment.Path),
+			parsed,
 		)
 	}
 	// The instruction body carries the same host-chosen paths as the
 	// attributes above, so it gets the same escaping: on a host layout these
 	// are directory names the user picked, and unescaped markup in one would
 	// close the element and read as instructions.
-	b.WriteString("  <instruction>These are the user's files: read them at the absolute paths above " +
-		"and do not write into " + escapeAttachmentXML(inputDir) + ". Inspect them with read_file, " +
-		"or with shell_exec (ls/find) when a shell is available. " +
+	b.WriteString("  <instruction>These are the user's files at the absolute paths above; " +
+		"do not write into " + escapeAttachmentXML(inputDir) + ".")
+	if hasStored {
+		b.WriteString(" Use read_file at attachment_path for parsed text and images. " +
+			"Use path when a program needs the original bytes.")
+	}
+	if hasParsed {
+		b.WriteString(" parsed_text_path is the same parsed text as a sandbox file for shell programs.")
+	}
+	b.WriteString(" Inspect other files with read_file, or with shell_exec (ls/find) when a shell is available. " +
 		"Create generated files with write_sandbox_file " +
 		"and patch existing ones with edit_sandbox_file.")
 	if layout.IsHost() {

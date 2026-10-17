@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -16,19 +15,17 @@ import (
 var oleCompoundHeader = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
 
 // prepareExcelForDuckDB returns a path DuckDB's read_xlsx can open.
-// .xlsx files are returned unchanged. A legacy OLE .xls workbook is
-// converted to a temporary .xlsx; the cleanup function removes that file.
+// A legacy OLE workbook is converted to a temporary .xlsx; the cleanup
+// function removes that file. Anything else, including a .xls that is
+// really a renamed .xlsx, is returned unchanged.
 func prepareExcelForDuckDB(filename string) (string, func(), error) {
 	noop := func() {}
-	if !strings.EqualFold(filepath.Ext(filename), ".xls") {
-		return filename, noop, nil
-	}
 	ole, err := isOLECompoundFile(filename)
 	if err != nil {
 		return "", noop, err
 	}
 	if !ole {
-		return "", noop, fmt.Errorf("%s is not a legacy Excel workbook", filename)
+		return filename, noop, nil
 	}
 	converted, err := convertLegacyXLSToXLSX(filename)
 	if err != nil {

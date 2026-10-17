@@ -19,6 +19,10 @@ func TestBuiltInToolSchemasAreValidJSON(t *testing.T) {
 	wikiRead := NewWikiReadPageTool(nil, nil, NewWikiScopesFromKBIDs([]string{"kb"}), nil)
 	static[wikiSearch.Name()] = wikiSearch.Parameters()
 	static[wikiRead.Name()] = wikiRead.Parameters()
+	static[ToolOpenPage] = NewOpenPageTool(OperationsRuntime{}).Parameters()
+	static[ToolReadPage] = NewReadPageTool(nil).Parameters()
+	static[ToolSelectTab] = NewSelectTabTool(nil).Parameters()
+	static[ToolFillPage] = NewFillPageTool(nil).Parameters()
 
 	for name, schema := range static {
 		var parsed map[string]interface{}

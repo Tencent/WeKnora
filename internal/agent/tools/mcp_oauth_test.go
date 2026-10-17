@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http/httptest"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
+	mcpgo "github.com/mark3labs/mcp-go/mcp"
 	sdkserver "github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/require"
 )
@@ -79,6 +81,84 @@ func (g oauthRetryTestGate) RequestOAuthAndWait(
 	return approval.Decision{Approved: true}, nil
 }
 
+// approvedOAuthGate requires approval for every call, approves it, and then
+// completes the OAuth prompt the way oauthRetryTestGate does.
+type approvedOAuthGate struct {
+	oauthRetryTestGate
+	oauthPrompts *int
+}
+
+func (approvedOAuthGate) NeedsApproval(context.Context, uint64, string, string) bool { return true }
+
+func (approvedOAuthGate) IsEnabled(context.Context, uint64, string, string) (bool, error) {
+	return true, nil
+}
+
+func (approvedOAuthGate) RequestAndWait(context.Context, approval.PendingRequest) (approval.Decision, error) {
+	return approval.Decision{Approved: true}, nil
+}
+
+func (approvedOAuthGate) ResumeDecision(_ context.Context, p *types.AgentPrompt, _ *event.EventBus) approval.Decision {
+	return approval.Decision{PendingID: p.ID, Approved: true}
+}
+
+func (approvedOAuthGate) MarkExecuted(context.Context, string) {}
+
+func (g approvedOAuthGate) RequestOAuthAndWait(
+	ctx context.Context, req approval.OAuthPendingRequest,
+) (approval.Decision, error) {
+	*g.oauthPrompts++
+	return g.oauthRetryTestGate.RequestOAuthAndWait(ctx, req)
+}
+
+// The approval step swaps in a ctx derived from ApprovalCtx; the OAuth prompt
+// must still be offered afterwards instead of failing with "open settings".
+func TestMCPToolOffersOAuthPromptAfterApproval(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+	mcpServer := sdkserver.NewMCPServer("test", "1")
+	mcpServer.AddTool(mcpgo.NewTool("echo"),
+		func(context.Context, mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+			return mcpgo.NewToolResultText("pong"), nil
+		})
+	server := httptest.NewServer(sdkserver.NewStreamableHTTPServer(mcpServer, sdkserver.WithStateLess(true)))
+	t.Cleanup(server.Close)
+	service := &types.MCPService{
+		ID:            "svc-approval",
+		Name:          "km",
+		Enabled:       true,
+		TransportType: types.MCPTransportHTTPStreamable,
+		URL:           &server.URL,
+		AuthConfig:    &types.MCPAuthConfig{AuthType: types.MCPAuthOAuth},
+	}
+	repo := &oauthRetryTestRepo{clients: map[string]*types.MCPOAuthClient{}, tokens: map[string]*types.MCPOAuthToken{}}
+	repo.registerClient(service.ID, "client-1")
+	manager := mcp.NewMCPManager(repo)
+	t.Cleanup(manager.Shutdown)
+
+	alice := types.Principal{Type: types.PrincipalWebUser, ID: "alice"}
+	prompts := 0
+	gate := approvedOAuthGate{
+		oauthRetryTestGate: oauthRetryTestGate{authorized: func() { repo.saveToken(alice, service.ID) }},
+		oauthPrompts:       &prompts,
+	}
+	tool := NewMCPTool(service, &types.MCPTool{Name: "echo"}, manager, gate, 0)
+
+	base := ctxForOAuthRetryTest(alice)
+	ctx := WithToolExecContext(base, &ToolExecContext{
+		EventBus:    event.NewEventBus(),
+		ToolCallID:  "call-1",
+		UserID:      alice.StorageID(),
+		ApprovalCtx: base,
+		ExecTimeout: 5 * time.Second,
+	})
+	result, err := tool.Execute(ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.Equal(t, 1, prompts, "the OAuth prompt must be offered after approval")
+	require.True(t, result.Success, result.Error)
+	require.Contains(t, result.Output, "pong")
+}
+
 func ctxForOAuthRetryTest(principal types.Principal) context.Context {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, oauthRetryTestTenant)
 	return types.WithPrincipal(ctx, principal)
@@ -139,4 +219,82 @@ func TestOAuthRetryRecyclesOnlyOutdatedConnections(t *testing.T) {
 			require.Equal(t, tc.otherUserSurvives, bobConn.IsConnected())
 		})
 	}
+}
+
+// tenantRecordingGate records the workspace each prompt is filed under.
+type tenantRecordingGate struct {
+	approvedOAuthGate
+	approvalTenant, oauthTenant *uint64
+}
+
+func (g tenantRecordingGate) RequestAndWait(
+	ctx context.Context, req approval.PendingRequest,
+) (approval.Decision, error) {
+	*g.approvalTenant = req.TenantID
+	return g.approvedOAuthGate.RequestAndWait(ctx, req)
+}
+
+func (g tenantRecordingGate) RequestOAuthAndWait(
+	ctx context.Context, req approval.OAuthPendingRequest,
+) (approval.Decision, error) {
+	*g.oauthTenant = req.TenantID
+	return g.approvedOAuthGate.RequestOAuthAndWait(ctx, req)
+}
+
+// A shared agent runs in its owner's workspace, but the user answers its
+// prompts from their own: the prompts must be filed under the user's, while
+// the service and its tokens are still looked up in the agent's.
+func TestMCPToolFilesPromptsUnderCallerWorkspaceForSharedAgent(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+	mcpServer := sdkserver.NewMCPServer("test", "1")
+	mcpServer.AddTool(mcpgo.NewTool("echo"),
+		func(context.Context, mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+			return mcpgo.NewToolResultText("pong"), nil
+		})
+	server := httptest.NewServer(sdkserver.NewStreamableHTTPServer(mcpServer, sdkserver.WithStateLess(true)))
+	t.Cleanup(server.Close)
+	service := &types.MCPService{
+		ID:            "svc-shared",
+		Name:          "km",
+		Enabled:       true,
+		TransportType: types.MCPTransportHTTPStreamable,
+		URL:           &server.URL,
+		AuthConfig:    &types.MCPAuthConfig{AuthType: types.MCPAuthOAuth},
+	}
+	repo := &oauthRetryTestRepo{clients: map[string]*types.MCPOAuthClient{}, tokens: map[string]*types.MCPOAuthToken{}}
+	repo.registerClient(service.ID, "client-1")
+	manager := mcp.NewMCPManager(repo)
+	t.Cleanup(manager.Shutdown)
+
+	alice := types.Principal{Type: types.PrincipalWebUser, ID: "alice"}
+	const callerTenant = uint64(3)
+	var approvalTenant, oauthTenant uint64
+	prompts := 0
+	gate := tenantRecordingGate{
+		approvedOAuthGate: approvedOAuthGate{
+			oauthRetryTestGate: oauthRetryTestGate{authorized: func() { repo.saveToken(alice, service.ID) }},
+			oauthPrompts:       &prompts,
+		},
+		approvalTenant: &approvalTenant,
+		oauthTenant:    &oauthTenant,
+	}
+	tool := NewMCPTool(service, &types.MCPTool{Name: "echo"}, manager, gate, 0)
+
+	caller := types.WithPrincipal(
+		context.WithValue(context.Background(), types.TenantIDContextKey, callerTenant), alice)
+	base := types.WithExecutionTenant(caller, oauthRetryTestTenant)
+	ctx := WithToolExecContext(base, &ToolExecContext{
+		EventBus:    event.NewEventBus(),
+		ToolCallID:  "call-1",
+		UserID:      alice.StorageID(),
+		ApprovalCtx: base,
+		ExecTimeout: 5 * time.Second,
+	})
+	result, err := tool.Execute(ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.True(t, result.Success, result.Error)
+	require.Equal(t, 1, prompts)
+	require.Equal(t, callerTenant, approvalTenant)
+	require.Equal(t, callerTenant, oauthTenant)
 }

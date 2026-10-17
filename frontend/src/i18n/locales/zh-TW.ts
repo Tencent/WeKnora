@@ -972,6 +972,13 @@ export default {
     pauseFailed: '暫停失敗',
     logs: '日誌',
     syncModeLabel: '同步模式',
+    parseMode: {
+      inherit: '使用伺服器設定',
+      blocks: '塊級解析（預設）',
+      export: '導出解析（docx）',
+    },
+    parseModeHint: '飛書雲文檔的解析方式。塊級解析更快並保留文檔內附件；導出解析將文檔導出為 docx 後解析，圖片與文檔的關聯更完整。',
+    parseModeLabel: '解析模式',
     createTitle: '新增資料源',
     editTitle: '編輯資料源',
     nameLabel: '名稱',
@@ -1499,6 +1506,8 @@ export default {
       thinkingDesc: '動態和反思性的問題解決思考工具',
       todoWrite: '制定計劃',
       todoWriteDesc: '建立結構化的研究計劃',
+      askUser: '向使用者提問',
+      askUserDesc: '在缺少關鍵資訊時向使用者提問，並等待回答後繼續',
       searchKnowledge: '檢索知識庫',
       searchKnowledgeDesc: '語義、關鍵字或混合檢索知識庫切塊',
       readDocument: '閱讀文件',
@@ -1558,6 +1567,13 @@ export default {
       kbMetricRag: 'RAG 知識庫',
       kbMetricWiki: 'Wiki 知識庫',
       statusInactive: '有 {count} 個已勾選工具在當前設定下無法生效',
+      searchConversations: '回顧歷史對話',
+      searchConversationsDesc: '在使用者自己的歷史會話中查找之前聊過的內容',
+      groupStored: '已儲存但未提供的工具',
+      switchManagedDesc: '由智慧體的其他設定控制，而不是由此列表決定，在此勾選不會啟用它。取消勾選即可移除。',
+      unrecognizedDesc: '目前版本不提供此工具，智慧體無法呼叫它。取消勾選即可移除。',
+      keptUnknownWarning: '已儲存。以下已儲存的工具在目前版本中不提供，已保留，但智慧體無法呼叫：{names}',
+      droppedWarning: '已儲存。以下工具由智慧體的其他設定控制，已從工具列表中移除：{names}',
       effectiveLabel: '最終啟用的工具',
       effectiveDesc: '根據當前設定計算，這是智慧代理儲存後實際能呼叫的工具集合',
       effectiveEmpty: '當前沒有可用工具，智慧代理將退化為純模型問答'
@@ -1804,6 +1820,7 @@ export default {
       readDocument: '閱讀文件',
       listDocuments: '瀏覽文件清單',
       todoWrite: '計劃管理',
+      askUser: '向使用者提問',
       knowledgeGraphExtract: '知識圖譜抽取',
       thinking: '思考',
       attachmentParsing: '解析附件',
@@ -1820,12 +1837,55 @@ export default {
       shellExec: '執行沙箱命令',
       dataAnalysis: '資料分析',
       dataSchema: '資料結構',
-      databaseQuery: '資料庫查詢'
+      databaseQuery: '資料庫查詢',
+      findOperations: '查找操作',
+      runOperation: '執行操作',
+      tryAgent: '試跑智能體',
+      openPage: '開啟頁面',
+      searchWeKnoraDocs: '搜尋產品文件',
+      readWeKnoraDoc: '閱讀產品文件',
+      readPage: '查看目前頁面',
+      selectTab: '切換標籤',
+      fillPage: '填寫頁面'
+    },
+    pageAccess: {
+      viewed: '已查看目前頁面：{location}'
+    },
+    pageEdit: {
+      title: '已填寫 {count} 處',
+      undo: '復原',
+      undone: '已復原這次填寫',
+      undoSkipped: '{count} 處已被你修改或不在頁面上，未復原',
+      unsaved: '尚未儲存，請檢查後在頁面上自行儲存'
+    },
+    openPage: {
+      open: '開啟',
+      openForm: '開啟並填寫',
+      opened: '助手已開啟',
+      back: '返回',
+      endpoint: '將連線到：',
+      draftHint: '已依助手的建議預填。請補上金鑰等憑證，檢查後自行儲存。'
     },
     skillFiles: {
       heading: '技能檔案',
       script: '指令碼',
       instructions: '技能說明'
+    },
+    attachmentTarget: {
+      list: '全部附件',
+      file: '附件',
+      images: '{name} 中的圖片',
+      imagesUnnamed: '附件中的圖片',
+      image: '{name} 第 {n} 張圖片',
+      imageUnnamed: '附件第 {n} 張圖片'
+    },
+    imageView: {
+      summary: '已查看「{file}」第 {numbers} 張圖片，共 {total} 張',
+      single: '已查看圖片「{file}」',
+      descriptionsHeading: '視覺模型的圖片描述',
+      imageLabel: '圖片 #{n}',
+      noDescription: '未能生成描述',
+      remaining: '還有 {count} 張未查看'
     },
     sandboxFiles: {
       found: '找到 {count} 個檔案',
@@ -1846,10 +1906,41 @@ export default {
       killed: '已超時終止',
       binarySuppressed: '二進位輸出已省略，請將檔案寫入產物目錄後下載'
     },
+    operations: {
+      found: '{count} 個可執行操作',
+      unavailableCount: '{count} 個目前不可用',
+      empty: '沒有符合的操作',
+      unavailableHeading: '目前不可用',
+      parameters: '參數',
+      required: '必填',
+      enum: '可選值',
+      range: '範圍 {min}–{max}',
+      risk: {
+        read: '唯讀',
+        probe: '檢測',
+        write: '寫入',
+        destructive: '不可恢復'
+      },
+      truncated: '結果已截斷',
+      emptyResult: '沒有傳回資料',
+      failed: '操作失敗',
+      meta: '附加資訊'
+    },
+    weknoraDocs: {
+      pages: '{count} 篇文件',
+      hits: '符合 {count} 個章節',
+      empty: '沒有符合的文件',
+      outline: '目錄',
+      content: '正文',
+      truncated: '正文未讀完，可以繼續讀取',
+      failed: '讀取失敗',
+      openDoc: '在文件站開啟'
+    },
     mcpOAuth: {
       waiting: '等待授權 · {target}',
       waitingStatus: '等待授權',
       targetWithTool: '{service} › {tool}',
+      dockQuestion: '需要授權 {target} 才能繼續',
       titleWithService: 'OAuth 授權 · {service}',
       titleWithTool: 'OAuth 授權 · {service} › {tool}',
       desc: '點擊授權將打開新視窗完成登入，授權成功後會自動繼續本次工具呼叫。',
@@ -1864,22 +1955,110 @@ export default {
       resumeFailed: '復原執行失敗，請重試',
       skipFailed: '跳過失敗，請重試'
     },
+    askUser: {
+      title: '向你提問',
+      selectPlaceholder: '請選擇',
+      textPlaceholder: '輸入你的回答',
+      otherPlaceholder: '其他（選填）',
+      decline: '不回答',
+      submit: '提交',
+      declinedTag: '已拒絕回答',
+      submitted: '已提交',
+      answeredTag: '已回答',
+      timedOutTag: '逾時未回答',
+      canceledTag: '已取消',
+      unansweredTag: '未回答',
+      submitFailed: '提交失敗',
+    },
+    promptDock: {
+      approvalTitle: '需要你審核',
+      oauthTitle: '需要你授權',
+      waiting: '等待你處理',
+      handle: '去處理',
+      pager: '{current} / {total}',
+      previous: '上一個',
+      next: '下一個',
+      collapse: '收起',
+      expand: '展開'
+    },
     toolApproval: {
       waiting: '等待審核 · {target}',
       waitingStatus: '等待審核',
       targetWithTool: '{service} › {tool}',
+      dockQuestion: '允許呼叫 {target}？',
+      operationQuestion: '允許{action}「{target}」？',
+      operationQuestionNoTarget: '允許{action}？',
+      operationTarget: '{action}「{target}」',
+      reviewTitle: '人工審核 · {target}',
+      characterCount: '{count} 字',
       titleWithTarget: '人工審核 · {service} › {tool}',
       argsLabel: '呼叫參數',
       argsModified: '已修改',
+      allowInSession: '本會話內同類操作都允許',
       countdownShort: '{seconds}s',
       approve: '透過並執行',
       reject: '拒絕',
       approvedTag: '已透過',
       rejectedTag: '已拒絕',
+      parked: '已轉入背景等待，可稍後處理',
+      parkedUntil: '已轉入背景等待，{time} 前可處理',
+      abandonedTag: '已放棄',
       invalidJson: '參數不是合法 JSON',
       submitted: '已提交',
       submitFailed: '提交失敗',
-      userRejected: '使用者拒絕'
+      userRejected: '使用者拒絕',
+      detail: {
+        type: '類型',
+        embeddingModel: '嵌入模型',
+        summaryModel: '摘要模型',
+        captionModel: '圖片描述',
+        speechModel: '語音識別',
+        storage: '儲存',
+        indexes: '索引',
+        name: '名稱',
+        title: '標題',
+        status: '狀態',
+        summary: '簡介',
+        model: '模型',
+        mode: '模式',
+        url: '連結',
+        from: '從',
+        to: '到',
+        folder: '目錄',
+        page: '頁面',
+        version: '版本',
+        documents: '文件',
+        knowledgeBases: '知識庫',
+        mcpServices: 'MCP 服務',
+        skills: '技能',
+        webSearch: '聯網搜尋',
+        multiTurn: '多輪對話',
+        transport: '傳輸方式',
+        authentication: '認證方式',
+        usageInstructions: '使用說明',
+        displayName: '顯示名稱',
+        enabled: '啟用',
+        sandbox: '沙箱',
+        sandboxes: '沙箱',
+        systemPrompt: '系統提示詞',
+        content: '內容',
+        kbScope: '知識庫範圍',
+        mcpScope: 'MCP 範圍',
+        skillsScope: '技能範圍'
+      },
+      value: {
+        document: '文件',
+        faq: '問答',
+        wiki: 'Wiki',
+        on: '開',
+        off: '關',
+        vector: '向量',
+        keyword: '關鍵詞',
+        graph: '圖譜',
+        quickAnswer: '快速問答',
+        smartReasoning: '智能推理',
+        indexSep: '、'
+      }
     }
   },
   kbSettings: {
@@ -1990,7 +2169,144 @@ export default {
     getDocumentInfo: '獲取文件資訊',
     queryKnowledgeGraph: '查詢知識圖譜',
     think: '深度思考',
-    todoWrite: '制定計劃'
+    todoWrite: '制定計劃',
+    askUser: '向使用者提問'
+  },
+  assistant: {
+    title: 'WeKnora 助手',
+    newConversation: '新對話',
+    history: '歷史對話',
+    untitledConversation: '未命名對話',
+    historyEmpty: '尚無歷史對話',
+    historyFailed: '無法載入歷史對話',
+    loadMore: '載入更多',
+    resize: '調整助手寬度',
+    layout: {
+      dock: '固定在右側',
+      float: '改為懸浮',
+    },
+    welcomeTitle: '有什麼可以幫你？',
+    agentWelcomeDesc: '可以檢查這個智慧代理的設定、調整模型或查看它能檢索的知識庫。',
+    welcomeDesc: '我可以解答 WeKnora 的用法，也可以檢視和處理你空間裡的文件解析、知識庫動態和 Wiki 問題，還能幫你建立和設定智慧代理。變更前是否先請你確認，由輸入框下方的權限等級決定。',
+    startFailed: '啟動助手失敗，請重試',
+    askAboutDocument: '問 {name}',
+    askAboutAnswer: '就這則回答問 {name}',
+    selection: {
+      label: '已選取',
+      lines: '已選 {count} 行',
+      detach: '不帶上選取內容',
+      tip: '傳送時會帶上選取的內容：{text}',
+      tipField: '傳送時會帶上「{field}」中選取的內容：{text}'
+    },
+    bubble: {
+      label: '助手快捷操作',
+      ask: '問助手',
+      polish: '潤飾',
+      rewrite: '改寫',
+      translate: '翻譯',
+      continue: '續寫',
+      prompts: {
+        polish: '潤飾選取的內容：修正錯字和不通順的地方，不改變原意，直接在原處取代。',
+        rewrite: '改寫選取的內容，讓表達更清楚簡潔，直接在原處取代。',
+        translate: '翻譯選取的內容：中文譯成英文，其他語言譯成中文，直接在原處取代。',
+        continue: '接著選取的內容往下續寫一段，與上下文銜接，寫在選取內容之後。'
+      }
+    },
+    fillNotice: {
+      title: '助手已填寫 {count} 處',
+      undo: '復原',
+      dismiss: '關閉'
+    },
+    access: {
+      title: '權限等級',
+      capped: '空間管理員未開放這一等級',
+      page: {
+        label: '查看和填寫目前頁面',
+        desc: '讀取左側頁面，並可代為填寫表單；不會點擊按鈕或儲存'
+      },
+      levels: {
+        read_only: {
+          label: '唯讀',
+          desc: '只檢視，不做任何變更'
+        },
+        confirm: {
+          label: '變更前確認',
+          desc: '每次變更或刪除前都先請你確認'
+        },
+        auto_write: {
+          label: '自動執行',
+          desc: '可復原的變更直接執行，刪除仍需確認'
+        }
+      }
+    },
+    context: {
+      currentPage: '目前頁面',
+      detach: '不附帶目前頁面',
+      attachedTip: '已附帶目前頁面：{path}',
+      detachedTip: '點擊附帶目前頁面：{path}',
+      chatMessage: '這則回答',
+      pages: {
+        knowledge_base: '知識庫',
+        wiki: 'Wiki',
+        agent_editor: '智能體編輯',
+        settings_models: '模型管理',
+        mcp_services: 'MCP 服務',
+        chat: '對話'
+      }
+    },
+    starters: {
+      agentConfig: '檢查這個智慧代理的設定',
+      agentModel: '幫它換個模型',
+      agentKnowledge: '它能檢索哪些知識庫？',
+      wikiIssues: '這個頁面有哪些待處理的問題？',
+      wikiSummary: '總結一下這個 Wiki 頁面',
+      documentStatus: '這個文件的解析狀態如何？',
+      documentSummary: '總結一下這個文件',
+      failedDocuments: '這個知識庫有哪些解析失敗的文件？',
+      recentActivity: '這個知識庫最近有哪些變動？',
+      formats: 'WeKnora 支援哪些文件格式？',
+      createWiki: '怎樣建立 Wiki 知識庫？',
+      agents: '我有哪些智慧代理？分別用的什麼模型？',
+      messageSources: '這則回答的依據是什麼？',
+      messageCheck: '這則回答有沒有說錯？',
+      modelCheck: '檢查這個模型的設定',
+      modelUsage: '哪些智能體和知識庫在用這些模型？',
+      mcpTools: '這個 MCP 服務提供哪些工具？',
+      mcpCheck: '它為什麼連不上？',
+      modelSetup: '我還需要設定哪些模型？',
+      mcpSetup: '怎樣接入一個 MCP 服務？'
+    }
+  },
+  assistantSettings: {
+    title: '助手',
+    description: '設定 {name} 的入口、開啟方式和權限等級。',
+    introTitle: '助手只能做你本人有權限做的事',
+    introDescription: '助手以你的身分操作，能看到和變更的範圍與你在空間裡的角色一致。權限等級只會在此基礎上進一步收緊，不會放寬。',
+    personalGroup: '個人偏好',
+    accessLabel: '權限等級',
+    accessDescription: '決定助手變更內容前是否先請你確認。也可以在助手輸入框下方隨時切換。',
+    accessCeilingHint: '空間管理員將最高等級設為「{level}」。',
+    entryLabel: '入口位置',
+    entryDescription: '無論選哪種，都可以在命令面板（{shortcut}）中開啟助手。',
+    entries: {
+      sidebar: '側邊欄',
+      launcher: '頁面右側',
+      palette: '僅命令面板'
+    },
+    layoutLabel: '開啟方式',
+    layoutDescription: '固定在右側時會擠壓頁面內容，懸浮時蓋在頁面上方。視窗較窄時總是懸浮。',
+    layouts: {
+      docked: '固定在右側',
+      floating: '懸浮'
+    },
+    workspaceGroup: '空間設定',
+    adminOnly: '僅管理員可修改',
+    nameLabel: '助手名稱',
+    nameDescription: '空間內所有成員看到的名稱，留空使用預設名稱。',
+    ceilingLabel: '最高權限等級',
+    ceilingDescription: '成員能選擇的最高等級。設為「唯讀」後，助手在這個空間裡不會做任何變更。',
+    saved: '已儲存',
+    saveFailed: '儲存失敗：{message}'
   },
   commandPalette: {
     placeholder: '搜尋知識庫、檔案、對話…',
@@ -2015,7 +2331,8 @@ export default {
       agents: '打開智慧代理',
       organizations: '打開共享空間',
       settings: '打開設定',
-      productTour: '新手引導'
+      productTour: '新手引導',
+      assistant: '開啟 {name}'
     },
     match: {
       vector: '向量',
@@ -2401,6 +2718,9 @@ export default {
     "serverDocumentation": "伺服器端原始說明",
     "noServerDocumentation": "該 MCP Server 的 initialize 未返回 instructions / serverInfo.description（均為可選欄位）。工具說明在下方各工具的 description 裡。",
     "policyHint": "工具開關與審批設定即時儲存；重新整理目錄不會覆蓋這些設定。",
+    "columnTool": "工具",
+    "columnEnabled": "啟用",
+    "columnApproval": "需審批",
     "failed": "工具目錄讀取失敗",
     "setupProgress": "MCP 設定步驟",
     "connection": "連結設定",
@@ -2443,6 +2763,9 @@ export default {
     authTypeApiKey: 'API Key / Token',
     authTypeOAuth: 'OAuth 2.0（首次連結授權）',
     oauthScopes: 'Scopes（可選，空格分隔）',
+    oauthClientId: 'Client ID（可選）',
+    oauthClientIdDesc: '填寫在授權伺服器預先註冊的用戶端；留空則自動進行動態用戶端註冊。更換 Client ID 時請同時更新 Client Secret。',
+    oauthClientSecret: 'Client Secret（可選）',
     oauthAuthorization: '授權狀態',
     oauthAuthorized: '已授權',
     oauthRefreshable: 'Token 已過期，將在下次使用時自動重新整理',
@@ -2648,6 +2971,7 @@ export default {
       deleted: '模型已刪除',
       deleteFailed: '刪除模型失敗',
       builtinCannotEdit: '內建模型不能編輯',
+      linkedModelMissing: '找不到助手連結的模型，它可能已被刪除',
       builtinCannotDelete: '內建模型不能刪除',
       builtinCannotCopy: '內建模型不能複製',
       copied: '模型已複製',
@@ -2717,6 +3041,7 @@ export default {
       enabled: '已啟用 MCP 服務',
       disabled: '已停用 MCP 服務',
       updateStateFailed: '更新 MCP 服務狀態失敗',
+      linkedServiceMissing: '找不到助手連結的 MCP 服務，它可能已被刪除',
       testing: '正在測試 {name}...',
       noResponse: '測試失敗：未收到伺服器回應',
       testFailed: '測試 MCP 服務失敗',
@@ -3971,7 +4296,8 @@ export default {
     truncatedHint: '回答在模型單次輸出上限處被截斷，以上為截斷前已生成的內容',
     rewind: {
       tooltip: '回滾到這裡',
-      confirmBody: '將刪除此條之後的對話。從使用者訊息回滾時會刪掉該問題本身，並填回輸入框。若有可用檢查點，工作區會一併回退。此操作不可復原。',
+      confirmTitle: '回滾到這裡？',
+      confirmBody: '此條之後的對話將被刪除；從提問回滾時，該問題會填回輸入框。有檢查點時工作區也會一併回退，操作不可復原。',
       confirmButton: '回滾',
       cancelButton: '取消',
       success: '已回滾',
@@ -4141,6 +4467,13 @@ export default {
         imageAttrsOcrConditionsDesc: '當觀察到的屬性滿足以下條件時，對圖片進行 OCR',
         imageAttrsOcrOnUnobserved: '圖片屬性觀察失敗時仍執行 OCR',
         imageAttrsOcrOnUnobservedDesc: '當模型未能正確觀察到圖片屬性時，預設仍執行 OCR 兜底，以免漏掉正文文字；關閉則跳過。（採用 4B 等小參數視覺模型，或自定義的圖片解析提示語與系統提示語衝突時，可能造成觀察失敗；8B 及以上模型的失敗概率很低，不建議關閉）',
+        imagePipelineSectionLabel: '圖片解析方案',
+        imagePipelineSectionDescription: '多模態解析開啟後，可以根據需要選擇圖片的解析方案',
+        imagePipelineLabel: '選擇解析方案',
+        imagePipelinePlaceholder: '請選擇解析方案',
+        imagePipelineLoading: '正在讀取流水線…',
+        imagePipelineLoadError: '讀取流水線失敗',
+        imagePipelineValidateError: '無法校驗當前設定，儲存時後端會再次檢查。',
         imagePipelineKbNote: '預設跟隨知識庫設定，可針對本次任務調整'
       },
       tableMetadataInstructions: {
@@ -4699,12 +5032,10 @@ export default {
       globalIssuesEmpty: '暫無待處理的內容問題',
       issuePagePrefix: '頁面: ',
       issueGoFix: '去處理',
-      fixAssistantTitle: 'Wiki 智慧修復助手',
       issueFixSuggestions: '內容最佳化建議 ({count})',
       issueFixSingle: '修復',
-      fixStartError: '啟動修復助手失敗',
-      issueFixPromptSingle: '請修復頁面 [[{slug}]] 上的問題 (ID: {id})。',
-      issueFixPromptAutoStart: '請修復頁面 [[{slug}]] 上的以下問題：'
+      issueFixPromptSingle: '修復這個 Wiki 問題：{description}',
+      issueFixPromptAll: '修復目前頁面的 {count} 個待處理問題'
     },
     indexing: {
       title: '索引策略',
@@ -4814,6 +5145,7 @@ export default {
       systemActor: '系統觸發',
       actorWithAPIKey: '{actor} · API Key · {name}',
       actorAPIKey: 'API Key · {name}',
+      viaAssistant: '經 WeKnora 助手',
       knowledgeBase: '知識庫',
       countItems: '共 {count} 項',
       titleWithCount: '{title} 等 {count} 項',
@@ -4919,6 +5251,8 @@ export default {
         actorId: '發起人 ID',
         apiKeyName: 'API Key 名稱',
         apiKeyId: 'API Key ID',
+        agentSessionId: '助手對話 ID',
+        agentOperation: '助手操作',
         details: '詳情'
       },
       columns: {
@@ -5156,6 +5490,9 @@ export default {
     notConfigured: '未設定',
     sharedAgentModelLabel: '共享智慧代理設定的模型',
     noModel: '暫無可用模型',
+    modelAuto: '預設',
+    modelFollowDefault: '跟隨預設',
+    modelAutoHint: '目前知識庫設定的對話模型；不在知識庫頁面或知識庫未設定時，使用第一個可用的對話模型',
     stopGeneration: '停止生成',
     send: '傳送',
     steerCurrent: '補充當前任務',
@@ -5200,6 +5537,21 @@ export default {
     }
   },
   manualEditor: {
+    assistant: {
+      button: '助手',
+      tooltip: '讓助手幫你寫',
+      continue: '續寫',
+      outline: '產生大綱',
+      polish: '潤飾全文',
+      summarize: '總結重點',
+      open: '開啟助手',
+      prompts: {
+        continue: '接著正文結尾續寫一段，與前文銜接。',
+        outline: '根據標題和現有內容，為這篇文件擬一份結構清楚的大綱，寫在正文開頭。',
+        polish: '潤飾正文：修正錯字和不通順的句子，不改變原意，分段修改。',
+        summarize: '總結這篇文件的重點，在對話裡回覆，不要修改正文。'
+      }
+    },
     defaultTitlePrefix: '新建文件',
     noDocumentKnowledgeBases: '暫無可用的文件型知識庫，請先建立一個文件型知識庫',
     actions: {
@@ -5314,7 +5666,13 @@ export default {
     mcpStale: '需重新同步',
     belongsToKb: '所屬知識庫：',
     belongsToOrg: '所屬空間：',
-    noCompatibleKbForAgent: '當前智慧代理的工具與作用域內知識庫的能力不比對，暫無可引用的知識庫。'
+    noCompatibleKbForAgent: '當前智慧代理的工具與作用域內知識庫的能力不比對，暫無可引用的知識庫。',
+    tag: '標籤',
+    searchPlaceholder: '搜尋知識庫、檔案、技能等',
+    searchInGroup: '在{group}中搜尋…',
+    typeToSearch: "在 {'@'} 後繼續輸入以搜尋…",
+    viewAll: '檢視全部',
+    back: '返回'
   },
   common: {
     add: '新增',
@@ -5537,6 +5895,15 @@ export default {
     howToEnable: '如何啟用知識圖譜？'
   },
   retrievalSettings: {
+    recallTab: '召回',
+    rerankTab: '重排序',
+    rrfTitle: '結果融合（RRF）',
+    rrfKLabel: 'RRF 平滑常數 (K)',
+    rrfKDescription: '值越大，排名靠前結果的優勢越小。預設 60；設為 0 使用預設值。',
+    rrfVectorWeightLabel: 'RRF 向量權重',
+    rrfVectorWeightDescription: '控制向量檢索對融合結果的影響。預設 0.7；設為 0 使用預設值。兩項權重之和無需等於 1。',
+    rrfKeywordWeightLabel: 'RRF 關鍵詞權重',
+    rrfKeywordWeightDescription: '控制關鍵詞檢索對融合結果的影響。預設 0.3；設為 0 使用預設值。兩項權重之和無需等於 1。',
     title: '搜尋設定',
     description: '設定知識庫搜尋和訊息搜尋的全局檢索參數',
     embeddingTopKLabel: '向量檢索數量 (Top K)',
@@ -6235,6 +6602,7 @@ export default {
       skillTranscriptLive: '安裝過程',
       skillTranscriptLiveHint: '正在安裝，點擊查看過程',
       skillTranscriptTitle: '安裝過程',
+      skillTranscriptPrompt: '安裝指令',
       skillTranscriptHide: '收起安裝過程',
       skillGuidance: {
         placeholder: '補充安裝說明，例如需要安裝的 CLI、安裝文件或環境限制',
@@ -6353,6 +6721,7 @@ export default {
       installedCount: '已安裝到 {count} 個沙箱',
       installPanelGroup: '已安裝',
       installPanelAvailable: '未安裝',
+      installAction: '安裝',
       viewInstallProgress: '查看進度',
       manageOnSandbox: '管理沙箱「{name}」上的安裝',
       manageDrawerDesc: '在沙箱「{name}」上管理啟用、變數和解除安裝。',
@@ -6704,6 +7073,8 @@ export default {
       capabilityUnconfigured: '未設定'
     },
     editor: {
+      assistantChanged: '助手已修改此智慧代理，請重新開啟以查看最新設定。',
+      assistantDeleted: '助手已刪除此智慧代理。',
       reasoningEffortUnsupported: '當前所選模型不支持思考，除「關閉」外的選項將被忽略。',
       reasoningEffortAlwaysOn: '當前所選模型始終開啟思考，無法關閉，只能調整思考強度。',
       createTitle: '建立智慧代理',
@@ -7365,6 +7736,7 @@ export default {
     selectLoaded: '全選已載入',
     confirmBatchDeleteDocument: '確認刪除選中的 {count} 個文件？刪除後將無法復原。',
     deleteSubmitted: '刪除任務已提交，正在等待完成。',
+    assistantDeleted: '助手已刪除這個知識庫。',
     deletePending: '刪除尚未完成，請稍後重新整理查看結果。',
     deleteTaskFailed: '刪除任務失敗，請查看文件錯誤詳情後重試。',
     deleteStatusUnavailable: '暫時無法確認刪除結果，請稍後重新整理查看文件狀態。',
@@ -7809,6 +8181,7 @@ export default {
   },
   menu: {
     sessionInProgress: '會話進行中',
+    sessionUnread: '有新回覆',
     knowledgeBase: '知識庫',
     agents: '智慧代理',
     artifacts: '產物',
@@ -7858,5 +8231,50 @@ export default {
         'false': { label: '否', description: '否 ── 照片、插畫、圖示或裝飾圖' }
       }
     }
-  }
+  },
+  imagePipeline: {
+    errors: {
+      noActionEnabled: '至少開啟一個解析動作，否則多模態不會處理任何內容。',
+    },
+    default: {
+      name: '傳統',
+      description: '使用者根據任務需要手動選擇解析動作開關。',
+      enable_caption: {
+        label: '圖片描述',
+        description: '讓模型為每張圖片生成一句內容描述，作為圖片的說明文字。',
+      },
+      enable_ocr: {
+        label: '文字辨識',
+        description: '提取圖片中出現的文字。',
+      },
+      caption: {
+        thinking: {
+          label: '圖片描述時開啟思考',
+          description: '讓模型在寫描述前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
+        },
+      },
+      ocr: {
+        thinking: {
+          label: '文字辨識時開啟思考',
+          description: '讓模型在提取文字前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
+        },
+      },
+    },
+    smartocr: {
+      name: '智能模式',
+      caption: {
+        thinking: {
+          label: '描述時開啟思考',
+          description: '讓模型在描述圖片並觀察屬性前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
+        },
+      },
+      ocr: {
+        thinking: {
+          label: '文字辨識時開啟思考',
+          description: '讓模型在提取文字前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
+        },
+      },
+      description: '先觀察圖片特徵並進行圖片描述，再根據圖片特徵決定是否呼叫 OCR 對圖片進行辨識，以節省模型呼叫次數並提升解析速度。',
+    },
+  },
 }

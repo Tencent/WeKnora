@@ -257,6 +257,7 @@ func (s *SessionForkService) Fork(
 	newSession := &types.Session{
 		ID:               uuid.New().String(),
 		TenantID:         source.TenantID,
+		Kind:             source.Kind,
 		UserID:           source.UserID,
 		Title:            forkTitle(title, source.Title),
 		Description:      source.Description,

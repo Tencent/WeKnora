@@ -197,6 +197,14 @@
     .header-title { width: 100%; gap: 4px; }
     .title-row { flex-wrap: wrap; gap: 12px; }
     h2 { margin-right: auto; }
+    .header-actions-lite {
+      max-width: 100%;
+      flex-wrap: wrap;
+      @media (max-width: 720px) {
+        width: 100%;
+        .resource-toolbar { width: 100%; }
+      }
+    }
     .header-subtitle { color: var(--td-text-color-secondary); font-size: var(--app-text-base); }
     .header-action-btn {
       width: auto;

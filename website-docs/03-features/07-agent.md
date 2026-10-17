@@ -59,7 +59,7 @@ MCP 服务需要 OAuth 授权时，可在当前对话中完成授权，成功后
 
 ## 使用技能、附件和记忆
 
-绑定沙箱后，智能推理可读取附件、运行脚本并生成文件。可下载的产物应写入 `/workspace/output`，回答完成后可在会话中预览和下载。每轮回答结束后，系统为 `/workspace` 记录一个 git 检查点，分叉和回滚会话时据此恢复对应轮次的工作区；桌面版直接使用本机目录的会话不记录检查点，分叉和回滚只作用于对话。安装与变量配置见[技能目录与沙箱](22-skills-sandbox.md)，附件操作见[会话与对话体验](18-chat-experience.md)。
+智能推理无需沙箱即可按需读取会话附件；绑定沙箱后还可以运行脚本并生成文件。可下载的产物应写入 `/workspace/output`，回答完成后可在会话中预览和下载。每轮回答结束后，系统为 `/workspace` 记录一个 git 检查点，分叉和回滚会话时据此恢复对应轮次的工作区；桌面版直接使用本机目录的会话不记录检查点，分叉和回滚只作用于对话。安装与变量配置见[技能目录与沙箱](22-skills-sandbox.md)，附件操作见[会话与对话体验](18-chat-experience.md)。
 
 长期记忆按空间和调用者隔离，智能体可单独关闭记忆读写；完整说明见[跨会话长期记忆](23-memory.md)。
 
@@ -99,7 +99,7 @@ smart-reasoning 下还可选**类型预设**（`Config.AgentType`，定义在 `c
 | 模型 | `model_id`、`rerank_model_id`、`temperature`、`max_completion_tokens`、`thinking`、`reasoning_effort`、`citation_enabled` | temperature<0 → 0.7；max_completion_tokens=0 使用运行时默认：quick-answer 2048、smart-reasoning 4096、绑定沙箱的 smart-reasoning 24576；绑定沙箱时显式值低于 8192 按 8192 执行；`reasoning_effort` 取 `off`/`auto`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`，设置后优先于 `thinking`（`thinking: true` 等同 `auto`），模型不支持的档位在调用时自动就近调整；两者都未设时不开启思考；单次对话可用请求字段 `reasoning_effort` 临时覆盖；citation 未设时视为 true |
 | Agent | `max_iterations` | 默认 10，负数表示不限轮数（服务层上限 100） |
 | Agent | `llm_call_timeout` | 单次模型流式调用允许连续无输出的秒数，0 用默认 120s；总时长由模型传输层控制 |
-| Agent | `allowed_tools` | 工具白名单；空回退 DefaultAllowedTools |
+| Agent | `allowed_tools` | 工具白名单；未设置/null 回退 DefaultAllowedTools，显式 `[]` 不选内置工具 |
 | MCP | `mcp_selection_mode`（all/selected/none）、`mcp_services`、`mcp_auth_wait_timeout` | OAuth 等待秒数 <=0 用 Gate 默认 |
 | 技能 | `skills_selection_mode`（all/selected/none）、`selected_skills`、`sandbox_config_id` | 选择空间沙箱及其已安装技能，见[技能目录与沙箱](22-skills-sandbox.md) |
 | 记忆 | `memory_enabled` | nil 继承空间，false 禁用本智能体的记忆读写 |
@@ -419,7 +419,7 @@ flowchart TD
 | `data_analysis` | `knowledge_id`\*、`sql`\* | 把 CSV/Excel 载入 DuckDB 后执行 SQL。文档由 `knowledge_id` 选定，SQL 中固定以表名 `dataset` 引用它（每次查询在独立连接上建临时视图映射到物理表，模型永远不需要在 SQL 里写文档 ID）；多 Sheet Excel 合并为一张表并暴露 `__sheet_name` 列；自动纠正列名大小写/空格差异；会话结束 Cleanup 时 DROP 所建表 |
 | `web_search` | `query`\*，可选 `count`（不超过配置上限，最多 20）、`country`（两位国家码或 `ALL`）、`freshness`（`pd`/`pw`/`pm`/`py`，Brave 另支持日期区间）、`content` | 联网搜索，直接返回提供商的标题、摘要和 `wN` 页面短 ID；按任务需要选择知识库或联网检索，Agent 搜索不再自动进行 RAG 压缩；`country`/`freshness` 仅 Brave 与 Serply 支持，其他提供商传入时报错；`content=true` 在 15 秒内并行抓取前 3 条结果、各取 5000 字符正文摘录 |
 | `web_fetch` | `items[]`\*（每项 `url`\*=`wN` 或 HTTP(S) URL，可选 `offset`、`limit`；`limit` 按字符计，默认且最多 8000，多项共享输出预算） | 并发抓取最多 8 个网页（SSRF 安全客户端 + DNS pinning，必要时 chromedp 渲染），直接返回 Markdown 或支持的文本正文；60s 超时。按字符分页，使用 `next_offset` 续读；完整正文保存在 `full_output_path`（`web://` 地址，仅同一会话可读），可用 `read_file` 跨轮按行读取；逐 URL 返回 `success`/`failed`/`skipped` 状态与可重试错误码（如快照已过期的 `snapshot_expired`），部分失败不影响其它页面 |
-| `read_file` | `path`\*、`offset`（从 1 开始的行号）、`limit`（默认 2000 行）、`max_bytes`（上限 64 KiB，网页快照 50 KiB）；网页可带 `line_offset` | 读取工作区文本、skill:// 资源和 web:// 网页快照，按结果续读 |
+| `read_file` | `path`\*、`offset`（从 1 开始的行号）、`limit`（默认 2000 行）、`max_bytes`（上限 64 KiB，网页快照 50 KiB）；网页可带 `line_offset` | 读取工作区文本、skill:// 资源、web:// 网页快照及 attachment:// 会话附件，按结果续读；附件支持按需阅读、等待后台解析及指定图片读取，见[会话体验](18-chat-experience.md#使用临时附件提问) |
 | `shell_exec` | `command`\*；可选 `skill_name`、`work_dir`、`timeout_sec`、`stdin`（≤ 64 KiB）、`max_output_bytes`（默认 16 KiB，上限 64 KiB）、`max_stderr_bytes`（默认 8 KiB，上限 16 KiB）、`env` | 在当前会话沙箱运行命令，默认工作目录 `/workspace`；指定技能时解析技能目录和变量 |
 | `list_sandbox_files` | `path`、`max_entries`（默认 200，上限 500） | 浏览沙箱文件和可用产物；仅在未注册 `shell_exec` 时提供 |
 | `write_sandbox_file` | `path`\*、`content`\*、`mode`（`overwrite` 默认 / `append`） | 写入或追加工作区文件，不能写 `/workspace/input` |
@@ -441,6 +441,8 @@ flowchart TD
 | `write_skill_file` / `edit_skill_file` | 写：`path`\*、`content`\*（≤ 256 KiB）；改：`path`\*、`old_string`\*、`new_string`\*、`replace_all` | 仅内置技能安装器在安装模式下使用，只能改动正在安装的技能目录 |
 
 默认工具白名单 `DefaultAllowedTools()`（Agent 未配置 `allowed_tools` 时的回退）：`search_knowledge`、`read_document`、`list_documents`、`search_conversations`。`web_search` / `web_fetch` 与 `search_memory` 不由白名单决定：注册时先从白名单中剔除，再分别按联网开关、记忆开关（空间、用户、智能体三方都允许）注入。
+
+**显式空工具列表**：`allowed_tools: []` 表示不选内置工具；未设置或 `null` 才使用默认列表。联网、记忆、MCP、沙箱及会话附件仍按各自开关和能力注册。v0.8.3 的迁移 `000116`（SQLite `000035`）会把旧智能推理配置中的空列表写成原默认工具，保留其行为。编辑器从 `GET /agents/tools` 获取工具目录和能力要求；新加入未知工具名会返回 400，历史未知项保留并返回警告，受其他开关管理的工具名从白名单移除。
 
 **旧工具名的兼容**：`knowledge_search`、`grep_chunks` 已合并为 `search_knowledge`；`list_knowledge_chunks`、`get_document_info`、`wiki_read_source_doc` 已合并为 `read_document`。`definitions.go` 的 `legacyToolSuccessors` 记录这组映射，`NormalizeAllowedTools` 在注册工具时把已保存 Agent 配置、预设与 API 调用里的旧名字自动改写为新工具，无需数据迁移；历史消息中记录的旧工具名仍能正常渲染。
 
@@ -487,11 +489,11 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 
 **运行时启停逻辑**（`agent_service.go` 的 `registerTools`）：
 
-1. 起点是 `config.AllowedTools`（用户可编辑的白名单，preset 只做初始填充），先经 `NormalizeAllowedTools` 把旧工具名改写为新名；为空回退 `DefaultAllowedTools()`；共享智能体的只读调用、或作用域内没有可写 Wiki 库时，移除 Wiki 写工具（`wiki_write_page`、`wiki_replace_text`、`wiki_rename_page`、`wiki_delete_page`、`wiki_flag_issue`、`wiki_update_issue`）；
+1. 起点是 `config.AllowedTools`（用户可编辑的白名单，preset 只做初始填充），经 `EffectiveAllowedTools` 解析：未设置/null 回退 `DefaultAllowedTools()`，显式空数组不回退；旧工具名自动映射；共享智能体的只读调用、或作用域内没有可写 Wiki 库时，移除 Wiki 写工具（`wiki_write_page`、`wiki_replace_text`、`wiki_rename_page`、`wiki_delete_page`、`wiki_flag_issue`、`wiki_update_issue`）；
 2. 若本轮**没有任何知识检索 scope**（Pure Agent 模式），过滤掉全部 KB/Wiki/数据工具；若同时未开 Web 搜索，连 `todo_write` 也一并去掉；
 3. 按运行时开关注入：开启联网搜索时追加 `web_search` + `web_fetch`，记忆可用时追加 `search_memory`（白名单里写了也会先剔除）；
 4. **硬安全网**：扫描 `SearchTargets` 中各 KB 的真实能力——没有 wiki KB 就丢弃全部 wiki 工具；没有 vector/keyword KB 就丢弃 `search_knowledge`、`query_knowledge_graph`、`database_query`，此时若也没有 wiki KB 还会丢弃 `read_document`、`list_documents`；没有启用图谱的 KB 就丢弃 `query_knowledge_graph`（防止配置陈旧：先勾了 wiki 工具、后换成非 wiki KB）；
-5. 去重后逐个实例化并注册；MCP 工具按 `MCPSelectionMode`（all/selected/none）另行注册；沙箱 shell/文件工具按会话能力注册（有 `shell_exec` 时不再注册 `list_sandbox_files`），`read_file` 再叠加技能和网页数据源；`local_browser` 与技能安装器的文件工具走各自的注册条件；旧技能工具名仅作兼容识别，不再注册。
+5. 去重后逐个实例化并注册；MCP 工具按 `MCPSelectionMode`（all/selected/none）另行注册；沙箱 shell/文件工具按会话能力注册（有 `shell_exec` 时不再注册 `list_sandbox_files`），`read_file` 再叠加技能、网页和会话附件数据源（附件读取不要求沙箱）；`local_browser` 与技能安装器的文件工具走各自的注册条件；旧技能工具名仅作兼容识别，不再注册。
 
 ### 记忆与上下文压缩 {#_4-记忆与上下文压缩}
 

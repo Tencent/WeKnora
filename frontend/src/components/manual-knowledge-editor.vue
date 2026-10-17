@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch, nextTick, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onBeforeUnmount, h } from 'vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { marked } from 'marked'
-import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
+import { DialogPlugin, MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
+import { registerUnsavedChanges } from '@/utils/unsavedChanges'
 import { useUIStore } from '@/stores/ui'
 import {
   getKnowledgeDetails,
@@ -17,6 +18,7 @@ import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 import { sanitizeHTML, safeMarkdownToHTML, hydrateProtectedFileImages } from '@/utils/security'
 import { continueListOnEnter, countContent, indentOnTab } from '@/utils/markdownEditing'
 import { useI18n } from 'vue-i18n'
+import { useAssistantStore } from '@/stores/assistant'
 
 interface KnowledgeBaseOption {
   label: string
@@ -59,6 +61,35 @@ const uploadConfirmStore = useUploadConfirmStore()
 const organizationStore = useOrganizationStore()
 const chatResources = useChatResourcesStore()
 const { t } = useI18n()
+const assistant = useAssistantStore()
+
+// Asks the assistant beside the editor; it writes into the editor and the
+// user saves. "open" only moves to its input box.
+const ASSISTANT_ACTIONS = ['continue', 'outline', 'polish', 'summarize'] as const
+const ASSISTANT_ACTION_ICONS: Record<typeof ASSISTANT_ACTIONS[number], string> = {
+  continue: 'pen',
+  outline: 'tree-list',
+  polish: 'ai-edit',
+  summarize: 'bulletpoint',
+}
+const menuIcon = (name: string) => () => h(TIcon, { name, size: '16px' })
+// A dropdown divider is drawn below its item, so it sits on the last action.
+const assistantMenu = computed(() => [
+  ...ASSISTANT_ACTIONS.map((action, i) => ({
+    content: t(`manualEditor.assistant.${action}`),
+    value: action,
+    prefixIcon: menuIcon(ASSISTANT_ACTION_ICONS[action]),
+    divider: i === ASSISTANT_ACTIONS.length - 1,
+  })),
+  { content: t('manualEditor.assistant.open'), value: 'open', prefixIcon: menuIcon('chat-bubble') },
+])
+const handleAssistantMenu = (selected: unknown) => {
+  const value = (selected as { value?: string } | null)?.value
+  if (value === 'open') assistant.focusComposer()
+  else if (ASSISTANT_ACTIONS.includes(value as typeof ASSISTANT_ACTIONS[number])) {
+    assistant.ask(t(`manualEditor.assistant.prompts.${value}`))
+  }
+}
 
 const visible = computed({
   get: () => uiStore.manualEditorVisible,
@@ -876,6 +907,7 @@ const markPristine = () => {
   pristineSnapshot.value = snapshot()
 }
 const isDirty = () => initialLoaded.value && snapshot() !== pristineSnapshot.value
+onBeforeUnmount(registerUnsavedChanges(() => visible.value && isDirty()))
 
 const handleClose = () => {
   if (!isDirty()) {
@@ -1048,6 +1080,20 @@ onBeforeUnmount(() => {
             </template>
           </div>
           <div class="editor-toolbar__view">
+            <t-dropdown
+              v-if="assistant.pageAccess"
+              :options="assistantMenu"
+              trigger="click"
+              :min-column-width="112"
+              :popup-props="{ attach: 'body', zIndex: 2600, overlayInnerClassName: 'editor-assistant-menu' }"
+              @click="(selected: unknown) => handleAssistantMenu(selected)"
+            >
+              <button type="button" class="toolbar-assistant" :aria-label="$t('manualEditor.assistant.tooltip')"
+                @mousedown.prevent>
+                <t-icon name="ai-edit" />
+                <span>{{ $t('manualEditor.assistant.button') }}</span>
+              </button>
+            </t-dropdown>
             <t-tooltip placement="top-right" :show-arrow="false">
               <template #content>
                 <div class="shortcut-sheet">
@@ -1109,7 +1155,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="editor-pane editor-pane--preview" v-show="showPreview">
-            <div ref="previewRoot" class="preview-container" v-html="previewHTML" />
+            <div ref="previewRoot" class="preview-container" data-assistant-ignore v-html="previewHTML" />
           </div>
         </div>
 
@@ -1392,6 +1438,43 @@ onBeforeUnmount(() => {
   }
 }
 
+.toolbar-assistant {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font: inherit;
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+
+  .t-icon {
+    color: var(--td-brand-color);
+    font-size: var(--app-text-md);
+  }
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
+  }
+
+  &:active {
+    background: var(--td-bg-color-container-active);
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 25%, transparent);
+  }
+}
+
 /* 快捷键速查：和视图切换同处工具栏右端，省掉一整条状态栏 */
 .toolbar-shortcuts {
   display: flex;
@@ -1649,6 +1732,37 @@ onBeforeUnmount(() => {
     font-family: var(--app-font-family-mono);
     font-size: var(--app-text-xs);
     opacity: 0.9;
+  }
+}
+
+/* 工具栏下拉跟工具栏同尺寸，全局下拉样式是按侧边栏菜单定的 */
+.t-popup__content.editor-assistant-menu {
+  .t-dropdown__menu {
+    min-width: 0;
+  }
+
+  .t-dropdown__item {
+    padding: 5px 8px;
+    line-height: 18px;
+
+    .t-dropdown__item-text {
+      font-size: var(--app-text-md) !important;
+      line-height: 18px !important;
+    }
+
+    .t-dropdown__item-icon {
+      margin-right: 6px;
+
+      .t-icon {
+        font-size: var(--app-text-base);
+        width: var(--app-text-base);
+        height: var(--app-text-base);
+      }
+    }
+  }
+
+  .t-divider {
+    margin: 3px 6px;
   }
 }
 
