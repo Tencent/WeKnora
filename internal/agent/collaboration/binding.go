@@ -269,3 +269,22 @@ func (b *Binding) PendingAnswer(ctx context.Context) (bool, error) {
 	}
 	return false, nil
 }
+
+// DeliveredEvents recovers input omitted by legacy parent snapshots without
+// advancing the cursor or granting execution authority to a cancelled owner.
+func (b *Binding) DeliveredEvents(ctx context.Context) ([]Event, error) {
+	if err := b.Runtime.CheckParent(ctx, b.Scope, b.ParentOwner); err != nil {
+		return nil, err
+	}
+	g, err := b.Runtime.Store.Read(ctx, b.Scope)
+	if err != nil {
+		return nil, err
+	}
+	var events []Event
+	for _, event := range g.Events {
+		if event.Sequence <= b.Seen {
+			events = append(events, event)
+		}
+	}
+	return events, nil
+}

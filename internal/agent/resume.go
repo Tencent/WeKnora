@@ -69,6 +69,9 @@ func (e *AgentEngine) Resume(
 	}
 	systemPrompt := e.buildSystemPrompt(ctx)
 	e.beginTurn(snap.Query, snap.ImageURLs, state)
+	if err := e.restoreCollaborationDeliveries(ctx, snap); err != nil {
+		return nil, err
+	}
 	for id, content := range snap.UserMessages {
 		e.recordSteerMessage(id, content)
 	}
@@ -83,16 +86,20 @@ func (e *AgentEngine) Resume(
 		}
 		return nil
 	}
-	for _, step := range state.RoundSteps {
+	for i, step := range state.RoundSteps {
+		e.replayCollaborationDeliveries(&messages, i, true)
 		if err := appendUsers(step); err != nil {
 			return nil, err
 		}
+		e.replayCollaborationDeliveries(&messages, i, false)
 		messages = e.appendToolResults(messages, step)
 		messages = e.appendToolImages(ctx, messages, step)
 	}
+	e.replayCollaborationDeliveries(&messages, len(state.RoundSteps), true)
 	if err := appendUsers(p.Step); err != nil {
 		return nil, err
 	}
+	e.replayCollaborationDeliveries(&messages, len(state.RoundSteps), false)
 	if e.toolRegistry != nil {
 		e.toolRegistry.RestoreMCPExposure(snap.MCPToolRefs)
 		e.toolRegistry.RememberMCPHistory(messages)

@@ -700,7 +700,7 @@ import 'katex/dist/katex.min.css';
 import SandboxCommandProgress from '@/components/SandboxCommandProgress.vue';
 import ToolResultRenderer from './ToolResultRenderer.vue';
 import CollaborationTasks from './CollaborationTasks.vue';
-import { childAgentTabsKey } from '@/composables/useChildAgentTabs';
+import { childAgentTabsKey, childAgentTaskLookupKey } from '@/composables/useChildAgentTabs';
 import { useChildAgentViewer } from '@/composables/useChildAgentViewer';
 import { defineAsyncComponent } from 'vue';
 const ChildAgentStream = defineAsyncComponent(() => import('./ChildAgentStream.vue'));
@@ -1542,8 +1542,11 @@ configureMarkedForChatMarkdown();
 // Event stream
 const eventStream = computed(() => props.session?.agentEventStream || []);
 const childAgentTabs = inject(childAgentTabsKey, null);
+const lookupChildTask = inject(childAgentTaskLookupKey, null);
 const openChildTask = (task: ReturnType<typeof collaborationTasks>[number]) => {
-  if (childAgentTabs) childAgentTabs.open(task, () => collaborationTasks(props.session.collaborationStatus).find(item => item.id === task.id));
+  if (childAgentTabs) childAgentTabs.open(task, () => lookupChildTask
+    ? lookupChildTask(task)
+    : collaborationTasks(props.session.collaborationStatus).find(item => item.id === task.id));
   else selectedChildId.value = task.id;
 };
 const selectedChildId = useChildAgentViewer();

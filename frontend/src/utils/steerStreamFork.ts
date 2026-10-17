@@ -295,7 +295,7 @@ export function steerStepEvents(step: ChatMessage): ChatMessage[] {
  * every segment from that log rather than appending old events onto the tail. */
 export function resetSteerTurnForReplay(list: ChatMessage[], requestId: string): ChatMessage | undefined {
   const segments = list.filter(m => m.role === 'assistant' && m.request_id === requestId)
-  if (!segments.some(m => m.steerForked)) return undefined
+  if (!requestId || segments.length === 0) return undefined
   for (const segment of segments) {
     segment.content = ''
     segment.agentEventStream = []

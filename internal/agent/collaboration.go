@@ -170,3 +170,60 @@ func (e *AgentEngine) appendCollaborationDeliveryBoundary(messages []chat.Messag
 	}
 	return append(messages, chat.Message{Role: "system", Content: collaborationDeliveryBoundary})
 }
+
+// Record delivery before advancing to the next model round so both prompt and
+// between-round checkpoints retain the same input and execution-turn identity.
+func (e *AgentEngine) deliverCollaborationEvents(
+	messages *[]chat.Message, events []collaboration.Event, beforeStep int, beforeUsers bool,
+) {
+	if len(events) == 0 {
+		return
+	}
+	e.progress.mu.Lock()
+	e.progress.collaborationDeliveries = append(e.progress.collaborationDeliveries, CollaborationDelivery{
+		BeforeStep: beforeStep, BeforeUsers: beforeUsers, Events: append([]collaboration.Event(nil), events...),
+	})
+	e.progress.mu.Unlock()
+	appendCollaborationEvents(messages, events)
+}
+
+func (e *AgentEngine) collaborationCursor() *int64 {
+	if e.collaboration == nil {
+		return nil
+	}
+	seen := e.collaboration.Seen
+	return &seen
+}
+
+func (e *AgentEngine) restoreCollaborationDeliveries(ctx context.Context, snap *RunSnapshot) error {
+	deliveries := snap.CollaborationDeliveries
+	if e.collaboration != nil {
+		if snap.CollaborationCursor != nil {
+			e.collaboration.Seen = *snap.CollaborationCursor
+		} else if e.collaboration.Child == nil && e.collaboration.Seen > 0 {
+			// Older checkpoints saved the delivery cursor without the model input.
+			// Preserve their consumed results as context; their original round positions
+			// are unavailable, so replay them after the reconstructed completed rounds.
+			events, err := e.collaboration.DeliveredEvents(ctx)
+			if err != nil {
+				return err
+			}
+			deliveries = []CollaborationDelivery{{BeforeStep: len(snap.CompletedSteps), Events: events}}
+		}
+	}
+	for _, delivery := range deliveries {
+		if delivery.BeforeStep < 0 || delivery.BeforeStep > len(snap.CompletedSteps) {
+			return fmt.Errorf("invalid collaboration delivery boundary %d", delivery.BeforeStep)
+		}
+	}
+	e.progress.collaborationDeliveries = append([]CollaborationDelivery(nil), deliveries...)
+	return nil
+}
+
+func (e *AgentEngine) replayCollaborationDeliveries(messages *[]chat.Message, beforeStep int, beforeUsers bool) {
+	for _, delivery := range e.progress.collaborationDeliveries {
+		if delivery.BeforeStep == beforeStep && delivery.BeforeUsers == beforeUsers {
+			appendCollaborationEvents(messages, delivery.Events)
+		}
+	}
+}

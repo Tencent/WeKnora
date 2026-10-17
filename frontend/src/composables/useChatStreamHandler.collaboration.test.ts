@@ -278,3 +278,55 @@ test('protocol replacement of current progress reuses its event for later chunks
   assert.equal(messagesList[0].agentEventStream[0].content, 'Clean final')
   assert.equal(messagesList[0].content, 'Clean final')
 })
+
+
+test('ordinary stream reconnect rebuilds answer, reasoning and tools without duplication', () => {
+  const { handler, messagesList } = setup()
+  const replay = () => {
+    handler.processStreamChunk({ response_type: 'agent_query', id: 'r1', assistant_message_id: 'a1' })
+    handler.processStreamChunk({ response_type: 'thinking', id: 'r1', content: 'reasoning', data: { event_id: 'thought' } })
+    handler.processStreamChunk({ response_type: 'tool_call', id: 'r1', data: { tool_call_id: 'call', tool_name: 'search', arguments: {} } })
+    handler.processStreamChunk({ response_type: 'tool_result', id: 'r1', data: { tool_call_id: 'call', tool_name: 'search', success: true, output: 'found' } })
+    handler.processStreamChunk({ response_type: 'answer', id: 'r1', content: 'first part', data: { event_id: 'answer' }, done: false })
+  }
+  replay()
+  const row = messagesList[0]
+  replay()
+  replay()
+  assert.equal(messagesList.length, 1)
+  assert.equal(messagesList[0], row)
+  assert.equal(row.content, 'first part')
+  assert.equal(row.agentEventStream.filter((e: Record<string, any>) => e.type === 'thinking').length, 1)
+  assert.equal(row.agentEventStream.find((e: Record<string, any>) => e.type === 'thinking').content, 'reasoning')
+  assert.equal(row.agentEventStream.filter((e: Record<string, any>) => e.type === 'tool_call').length, 1)
+  handler.processStreamChunk({ response_type: 'answer', id: 'r1', content: ' continued', data: { event_id: 'answer' }, done: false })
+  assert.equal(row.content, 'first part continued')
+})
+
+import { createChildAgentTabs, findChildAgentTask } from './useChildAgentTabs'
+import { collaborationTasks } from '../utils/collaborationDisplay'
+
+test('open child tab follows steering, approval, completion and subsequent runs', () => {
+  const { handler, messagesList } = setup()
+  handler.processStreamChunk({ response_type: 'agent_query', id: 'r1', assistant_message_id: 'a1' })
+  const update = (revision: number, status: string, runId = 'child-run-1') => handler.processStreamChunk({
+    response_type: 'collaboration_status', id: 'r1', data: { group_id: 'group', revision, tasks: [task(status, runId)] },
+  })
+  update(1, 'running')
+  const original = messagesList[0]
+  const child = collaborationTasks(original.collaborationStatus)[0]
+  const tabs = createChildAgentTabs()
+  tabs.open(child, () => findChildAgentTask(messagesList, child))
+  handler.processStreamChunk({ response_type: 'user_message_injected', id: 'r1', data: { steer_id: 's1', user_message_id: 'u1', content: 'Current progress?' } })
+  assert.equal(original.collaborationStatus, undefined)
+  update(2, 'waiting')
+  assert.equal(tabs.tabs.value[0].task.status, 'waiting')
+  update(3, 'succeeded')
+  assert.equal(tabs.tabs.value[0].task.status, 'succeeded')
+  update(4, 'running', 'child-run-2')
+  assert.equal(tabs.tabs.value[0].task.runId, 'child-run-2')
+  assert.equal(tabs.tabs.value[0].task.status, 'running')
+  // Another conversation with a matching display ID must not hijack the tab.
+  messagesList.push({ collaborationStatus: { tasks: [{ ...task('failed'), session_id: 'other-session' }] } })
+  assert.equal(tabs.tabs.value[0].task.status, 'running')
+})

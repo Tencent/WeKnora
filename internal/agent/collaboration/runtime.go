@@ -522,7 +522,7 @@ func (r *Runtime) execute(serverCtx context.Context, w Work) {
 		var followups []string
 		for _, mail := range m.Mail {
 			if mail.Kind == "followup" && mail.RunID == v.ID &&
-				(mail.Sequence > result.ConsumedSequence || err != nil) {
+				mail.Sequence > result.ConsumedSequence {
 				followups = append(followups, mail.Content)
 			}
 		}

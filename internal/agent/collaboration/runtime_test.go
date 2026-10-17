@@ -654,3 +654,58 @@ func TestConcurrentMixedOutcomesDrainQueueAndDeliverEachRunOnce(t *testing.T) {
 	restarted.workers.Wait()
 	require.EqualValues(t, 7, total.Load())
 }
+
+// A failed model request after an external effect cannot authorize replay of
+// consumed guidance. Only genuinely new mail at the finishing boundary may run.
+func TestFailedRunDoesNotReplayConsumedFollowup(t *testing.T) {
+	for _, late := range []bool{false, true} {
+		t.Run(fmt.Sprint(late), func(t *testing.T) {
+			s, scope := testStore(t)
+			ctx := t.Context()
+			r := New(s, nil)
+			id, err := r.Spawn(ctx, scope, "spawn", "child", "agent", "{}", "initial")
+			require.NoError(t, err)
+			_, err = r.Send(ctx, scope, "consumed", id, "COMPLETED_EXTERNAL_EFFECT", "", true)
+			require.NoError(t, err)
+			var effects atomic.Int32
+			r.Run = func(ctx context.Context, w Work) (Result, error) {
+				mail, inboxErr := r.Inbox(ctx, w, 0)
+				if inboxErr != nil {
+					return Result{}, inboxErr
+				}
+				require.Len(t, mail, 1)
+				effects.Add(1)
+				if late {
+					_, sendErr := r.Send(ctx, scope, "late", id, "NEW_UNCONSUMED_TASK", "", true)
+					if sendErr != nil {
+						return Result{}, sendErr
+					}
+				}
+				return Result{ConsumedSequence: mail[0].Sequence}, fmt.Errorf("later model request failed")
+			}
+			r.Tick(ctx)
+			r.workers.Wait()
+			g := read(t, s, scope)
+			require.Equal(t, "failed", g.Members[0].Runs[0].State)
+			wantRuns := 1
+			if late {
+				wantRuns = 2
+				require.Equal(t, "NEW_UNCONSUMED_TASK", g.Members[0].Runs[1].Query)
+			}
+			require.Len(t, g.Members[0].Runs, wantRuns)
+			var newCalls atomic.Int32
+			restarted := New(s, func(_ context.Context, w Work) (Result, error) {
+				newCalls.Add(1)
+				require.Equal(t, "NEW_UNCONSUMED_TASK", w.Run.Query)
+				return Result{Answer: "new task completed"}, nil
+			})
+			for i := 0; i < 3; i++ {
+				restarted.Tick(ctx)
+				restarted.workers.Wait()
+			}
+			require.EqualValues(t, 1, effects.Load())
+			require.EqualValues(t, wantRuns-1, newCalls.Load())
+			require.Len(t, read(t, s, scope).Members[0].Runs, wantRuns)
+		})
+	}
+}

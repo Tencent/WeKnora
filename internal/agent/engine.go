@@ -869,7 +869,7 @@ func (e *AgentEngine) runReActIteration(
 		if err != nil {
 			return iterOutcomeBreak, err
 		}
-		appendCollaborationEvents(messagesPtr, events)
+		e.deliverCollaborationEvents(messagesPtr, events, len(state.RoundSteps), false)
 		e.holdCollaborationAnswer, err = e.collaboration.PendingAnswer(ctx)
 		if err != nil {
 			return iterOutcomeBreak, err
@@ -1181,18 +1181,20 @@ func (e *AgentEngine) runReActIteration(
 		if e.collaboration != nil && response.FinishReason != "content_filter" {
 			if e.suspendable && e.collaboration.Child == nil {
 				checkpoint := RunSnapshot{
-					MCPToolRefs:       e.toolRegistry.MCPExposureSnapshot(),
-					Version:           RunSnapshotVersion,
-					CollaborationWait: true,
-					BetweenRounds:     true,
-					Request:           e.suspendRequest,
-					Query:             e.progress.query,
-					ImageURLs:         e.progress.imageURLs,
-					UserMessages:      e.progress.userMessages,
-					CompletedSteps:    append([]types.AgentStep(nil), state.RoundSteps...),
-					KnowledgeRefs:     state.KnowledgeRefs,
-					CurrentRound:      state.CurrentRound + 1,
-					TurnUsage:         state.TurnUsage,
+					CollaborationDeliveries: e.progress.collaborationDeliveries,
+					CollaborationCursor:     e.collaborationCursor(),
+					MCPToolRefs:             e.toolRegistry.MCPExposureSnapshot(),
+					Version:                 RunSnapshotVersion,
+					CollaborationWait:       true,
+					BetweenRounds:           true,
+					Request:                 e.suspendRequest,
+					Query:                   e.progress.query,
+					ImageURLs:               e.progress.imageURLs,
+					UserMessages:            e.progress.userMessages,
+					CompletedSteps:          append([]types.AgentStep(nil), state.RoundSteps...),
+					KnowledgeRefs:           state.KnowledgeRefs,
+					CurrentRound:            state.CurrentRound + 1,
+					TurnUsage:               state.TurnUsage,
 				}
 				intermediate := verdict.step
 				intermediate.IntermediateAnswer = true
@@ -1224,7 +1226,7 @@ func (e *AgentEngine) runReActIteration(
 					}
 				}
 				*messagesPtr = e.appendCollaborationDeliveryBoundary(*messagesPtr, verdict.finalAnswer)
-				appendCollaborationEvents(messagesPtr, events)
+				e.deliverCollaborationEvents(messagesPtr, events, len(state.RoundSteps)+1, true)
 				verdict.step.IntermediateAnswer = true
 				state.RoundSteps = append(state.RoundSteps, verdict.step)
 				return iterOutcomeNext, nil

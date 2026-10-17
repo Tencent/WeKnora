@@ -8,6 +8,7 @@ import (
 	"maps"
 	"sync"
 
+	"github.com/Tencent/WeKnora/internal/agent/collaboration"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -15,16 +16,28 @@ import (
 // RunSnapshotVersion is the format version written into RunSnapshot.
 const RunSnapshotVersion = 1
 
+// CollaborationDelivery keeps mailbox input at its original round boundary.
+// It is model context, not a user-visible execution step.
+type CollaborationDelivery struct {
+	BeforeStep int `json:"before_step"`
+	// BeforeUsers distinguishes finishing-boundary events from the next poll,
+	// which happens after that round's queued user messages have been delivered.
+	BeforeUsers bool                  `json:"before_users,omitempty"`
+	Events      []collaboration.Event `json:"events"`
+}
+
 // RunSnapshot is everything needed to resume a run that ended waiting on a
 // user prompt. It holds durable values only: request-local model handles
 // (cN, dN, res://, msN, mtN) do not survive the run, so the user turn is kept
 // as the raw query and re-rendered on resume, and tool arguments are kept in
 // their decoded form.
 type RunSnapshot struct {
-	MCPToolRefs       []string `json:"mcp_tool_refs,omitempty"`
-	Version           int      `json:"version"`
-	CollaborationWait bool     `json:"collaboration_wait,omitempty"`
-	BetweenRounds     bool     `json:"between_rounds,omitempty"`
+	CollaborationDeliveries []CollaborationDelivery `json:"collaboration_deliveries,omitempty"`
+	CollaborationCursor     *int64                  `json:"collaboration_cursor,omitempty"`
+	MCPToolRefs             []string                `json:"mcp_tool_refs,omitempty"`
+	Version                 int                     `json:"version"`
+	CollaborationWait       bool                    `json:"collaboration_wait,omitempty"`
+	BetweenRounds           bool                    `json:"between_rounds,omitempty"`
 	// Request is the caller's types.ResumableAgentRequest.
 	Request   json.RawMessage `json:"request,omitempty"`
 	Query     string          `json:"query"`
@@ -112,11 +125,12 @@ func (s *RunSnapshot) ClosedSteps(reason string) []types.AgentStep {
 // turnProgress tracks the turn so it can be captured mid-round. Tool calls
 // finish on errgroup goroutines, hence the lock.
 type turnProgress struct {
-	mu           sync.Mutex
-	query        string
-	imageURLs    []string
-	state        *types.AgentState
-	userMessages map[string]string
+	mu                      sync.Mutex
+	query                   string
+	imageURLs               []string
+	state                   *types.AgentState
+	userMessages            map[string]string
+	collaborationDeliveries []CollaborationDelivery
 	// round is the round executing tools, nil between rounds.
 	round *roundProgress
 }
@@ -146,6 +160,7 @@ func (e *AgentEngine) beginTurn(query string, imageURLs []string, state *types.A
 	defer e.progress.mu.Unlock()
 	e.progress.query, e.progress.imageURLs, e.progress.state = query, imageURLs, state
 	e.progress.userMessages = make(map[string]string)
+	e.progress.collaborationDeliveries = nil
 }
 
 func (e *AgentEngine) recordSteerMessage(id, content string) {
@@ -253,17 +268,19 @@ func (e *AgentEngine) snapshot(blocked int) (*RunSnapshot, error) {
 		}
 	}
 	return &RunSnapshot{
-		Version:        RunSnapshotVersion,
-		MCPToolRefs:    e.toolRegistry.MCPExposureSnapshot(),
-		Request:        e.suspendRequest,
-		Query:          p.query,
-		ImageURLs:      p.imageURLs,
-		UserMessages:   maps.Clone(p.userMessages),
-		CompletedSteps: append([]types.AgentStep(nil), p.state.RoundSteps...),
-		KnowledgeRefs:  append([]*types.SearchResult(nil), p.state.KnowledgeRefs...),
-		CurrentRound:   p.state.CurrentRound,
-		TurnUsage:      p.state.TurnUsage,
-		PendingRound:   PendingRound{Step: step, Calls: calls, BlockedIndex: blocked},
+		CollaborationDeliveries: append([]CollaborationDelivery(nil), p.collaborationDeliveries...),
+		CollaborationCursor:     e.collaborationCursor(),
+		Version:                 RunSnapshotVersion,
+		MCPToolRefs:             e.toolRegistry.MCPExposureSnapshot(),
+		Request:                 e.suspendRequest,
+		Query:                   p.query,
+		ImageURLs:               p.imageURLs,
+		UserMessages:            maps.Clone(p.userMessages),
+		CompletedSteps:          append([]types.AgentStep(nil), p.state.RoundSteps...),
+		KnowledgeRefs:           append([]*types.SearchResult(nil), p.state.KnowledgeRefs...),
+		CurrentRound:            p.state.CurrentRound,
+		TurnUsage:               p.state.TurnUsage,
+		PendingRound:            PendingRound{Step: step, Calls: calls, BlockedIndex: blocked},
 	}, nil
 }
 

@@ -209,7 +209,7 @@
 <script setup>
 import ChildAgentTabBar from './components/ChildAgentTabBar.vue';
 import ChildAgentStream from './components/ChildAgentStream.vue';
-import { createChildAgentTabs, childAgentTabsKey } from '@/composables/useChildAgentTabs';
+import { createChildAgentTabs, childAgentTabsKey, childAgentTaskLookupKey, findChildAgentTask } from '@/composables/useChildAgentTabs';
 import { makeSteerClientId } from '@/utils/steerId';
 import { storeToRefs } from 'pinia';
 import { inject, ref, onMounted, onBeforeMount, onUnmounted, nextTick, watch, reactive, computed, provide } from 'vue';
@@ -365,6 +365,7 @@ const inputFieldRef = ref();
 const created_at = ref('');
 const limit = ref(20);
 const messagesList = reactive([]);
+provide(childAgentTaskLookupKey, task => findChildAgentTask(messagesList, task));
 const promptDock = providePromptDock(messagesList);
 watch(promptDock.focusRequest, () => childTabs.select(''), { flush: 'sync' });
 watch(promptDock.prompts, prompts => { childTabs.attention.value = prompts.length > 0; }, { immediate: true });
