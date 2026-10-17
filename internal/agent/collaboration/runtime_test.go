@@ -658,54 +658,121 @@ func TestConcurrentMixedOutcomesDrainQueueAndDeliverEachRunOnce(t *testing.T) {
 // A failed model request after an external effect cannot authorize replay of
 // consumed guidance. Only genuinely new mail at the finishing boundary may run.
 func TestFailedRunDoesNotReplayConsumedFollowup(t *testing.T) {
-	for _, late := range []bool{false, true} {
-		t.Run(fmt.Sprint(late), func(t *testing.T) {
-			s, scope := testStore(t)
-			ctx := t.Context()
-			r := New(s, nil)
-			id, err := r.Spawn(ctx, scope, "spawn", "child", "agent", "{}", "initial")
-			require.NoError(t, err)
-			_, err = r.Send(ctx, scope, "consumed", id, "COMPLETED_EXTERNAL_EFFECT", "", true)
-			require.NoError(t, err)
-			var effects atomic.Int32
-			r.Run = func(ctx context.Context, w Work) (Result, error) {
-				mail, inboxErr := r.Inbox(ctx, w, 0)
-				if inboxErr != nil {
-					return Result{}, inboxErr
-				}
-				require.Len(t, mail, 1)
-				effects.Add(1)
-				if late {
-					_, sendErr := r.Send(ctx, scope, "late", id, "NEW_UNCONSUMED_TASK", "", true)
-					if sendErr != nil {
-						return Result{}, sendErr
+	for _, failure := range []string{"error", "panic", "missing_result"} {
+		for _, late := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/late=%t", failure, late), func(t *testing.T) {
+				s, scope := testStore(t)
+				ctx := t.Context()
+				r := New(s, nil)
+				id, err := r.Spawn(ctx, scope, "spawn", "child", "agent", "{}", "initial")
+				require.NoError(t, err)
+				_, err = r.Send(ctx, scope, "consumed", id, "COMPLETED_EXTERNAL_EFFECT", "", true)
+				require.NoError(t, err)
+				var effects atomic.Int32
+				r.Run = func(ctx context.Context, w Work) (Result, error) {
+					mail, inboxErr := r.Inbox(ctx, w, 0)
+					if inboxErr != nil {
+						return Result{}, inboxErr
 					}
+					require.Len(t, mail, 1)
+					effects.Add(1)
+					if late {
+						_, sendErr := r.Send(ctx, scope, "late", id, "NEW_UNCONSUMED_TASK", "", true)
+						if sendErr != nil {
+							return Result{}, sendErr
+						}
+					}
+					if failure == "panic" {
+						panic("model adapter panic after external effect")
+					}
+					if failure == "missing_result" {
+						return Result{}, fmt.Errorf("executor lost its result")
+					}
+					return Result{ConsumedSequence: mail[0].Sequence}, fmt.Errorf("later model request failed")
 				}
-				return Result{ConsumedSequence: mail[0].Sequence}, fmt.Errorf("later model request failed")
-			}
-			r.Tick(ctx)
-			r.workers.Wait()
-			g := read(t, s, scope)
-			require.Equal(t, "failed", g.Members[0].Runs[0].State)
-			wantRuns := 1
-			if late {
-				wantRuns = 2
-				require.Equal(t, "NEW_UNCONSUMED_TASK", g.Members[0].Runs[1].Query)
-			}
-			require.Len(t, g.Members[0].Runs, wantRuns)
-			var newCalls atomic.Int32
-			restarted := New(s, func(_ context.Context, w Work) (Result, error) {
-				newCalls.Add(1)
-				require.Equal(t, "NEW_UNCONSUMED_TASK", w.Run.Query)
-				return Result{Answer: "new task completed"}, nil
+				r.Tick(ctx)
+				r.workers.Wait()
+				g := read(t, s, scope)
+				require.Equal(t, "failed", g.Members[0].Runs[0].State)
+				wantRuns := 1
+				if late {
+					wantRuns = 2
+					require.Equal(t, "NEW_UNCONSUMED_TASK", g.Members[0].Runs[1].Query)
+				}
+				require.Len(t, g.Members[0].Runs, wantRuns)
+				var newCalls atomic.Int32
+				restarted := New(NewStore(s.db), func(_ context.Context, w Work) (Result, error) {
+					newCalls.Add(1)
+					require.Equal(t, "NEW_UNCONSUMED_TASK", w.Run.Query)
+					return Result{Answer: "new task completed"}, nil
+				})
+				for i := 0; i < 3; i++ {
+					restarted.Tick(ctx)
+					restarted.workers.Wait()
+				}
+				require.EqualValues(t, 1, effects.Load())
+				require.EqualValues(t, wantRuns-1, newCalls.Load())
+				require.Len(t, read(t, s, scope).Members[0].Runs, wantRuns)
 			})
-			for i := 0; i < 3; i++ {
-				restarted.Tick(ctx)
-				restarted.workers.Wait()
-			}
-			require.EqualValues(t, 1, effects.Load())
-			require.EqualValues(t, wantRuns-1, newCalls.Load())
-			require.Len(t, read(t, s, scope).Members[0].Runs, wantRuns)
-		})
+		}
 	}
+}
+
+func TestSuspendedFollowupDeliverySurvivesFailedResume(t *testing.T) {
+	s, scope := testStore(t)
+	ctx := t.Context()
+	r := New(s, nil)
+	id, err := r.Spawn(ctx, scope, "spawn", "child", "a", "{}", "initial")
+	require.NoError(t, err)
+	_, err = r.Send(ctx, scope, "followup", id, "external effect", "", true)
+	require.NoError(t, err)
+	var suspended Work
+	r.Run = func(ctx context.Context, w Work) (Result, error) {
+		mail, err := r.Inbox(ctx, w, 0)
+		require.NoError(t, err)
+		require.Len(t, mail, 1)
+		require.NoError(t, r.AwaitPrompt(ctx, w, PromptState{ID: "approval", Status: "suspended"}))
+		suspended = w
+		return Result{Suspended: true}, nil
+	}
+	r.Tick(ctx)
+	r.workers.Wait()
+	require.Equal(t, "waiting", read(t, s, scope).Members[0].Runs[0].State)
+	restarted := New(NewStore(s.db), func(context.Context, Work) (Result, error) {
+		return Result{}, fmt.Errorf("resume failed before restoring engine snapshot")
+	})
+	suspended.Run.PromptID = "approval"
+	require.NoError(t, restarted.ReconcilePrompt(ctx, suspended, PromptState{ID: "approval", Status: "answered"}))
+	for i := 0; i < 3; i++ {
+		restarted.Tick(ctx)
+		restarted.workers.Wait()
+	}
+	g := read(t, s, scope)
+	require.Len(t, g.Members[0].Runs, 1)
+	require.Equal(t, "failed", g.Members[0].Runs[0].State)
+	require.Positive(t, g.Members[0].Runs[0].Result.ConsumedSequence)
+}
+
+func TestCanceledPanickingRunCannotQueueFollowup(t *testing.T) {
+	s, scope := testStore(t)
+	ctx := t.Context()
+	r := New(s, nil)
+	id, err := r.Spawn(ctx, scope, "spawn", "child", "a", "{}", "initial")
+	require.NoError(t, err)
+	_, err = r.Send(ctx, scope, "consumed", id, "effect", "", true)
+	require.NoError(t, err)
+	r.Run = func(ctx context.Context, w Work) (Result, error) {
+		_, err := r.Inbox(ctx, w, 0)
+		require.NoError(t, err)
+		_, err = r.Send(ctx, scope, "late", id, "new task", "", true)
+		require.NoError(t, err)
+		require.NoError(t, r.Cancel(ctx, scope))
+		panic("late panic after cancellation")
+	}
+	r.Tick(ctx)
+	r.workers.Wait()
+	g := read(t, s, scope)
+	require.Len(t, g.Members[0].Runs, 1)
+	require.Equal(t, "cancelled", g.Members[0].Runs[0].State)
+	require.Nil(t, g.ParentWait)
 }

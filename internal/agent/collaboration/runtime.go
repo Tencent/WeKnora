@@ -284,8 +284,9 @@ func (r *Runtime) Wait(ctx context.Context, s Scope, after int64, d time.Duratio
 	}
 }
 
-// Inbox retains mail until a run successfully commits its result. Replaying a
-// read-only run after a crash must not lose messages drained by the old worker.
+// Inbox retains mail for snapshot reconstruction, but durably acknowledges its
+// delivery before execution. A panic or failed approval continuation must never
+// turn already delivered guidance into an automatic new execution.
 func (r *Runtime) Inbox(ctx context.Context, w Work, after int64) ([]Event, error) {
 	g, err := r.Store.Read(ctx, w.Scope)
 	if err != nil {
@@ -295,11 +296,40 @@ func (r *Runtime) Inbox(ctx context.Context, w Work, after int64) ([]Event, erro
 	if err != nil {
 		return nil, err
 	}
-	var out []Event
+	hasMail := false
 	for _, e := range m.Mail {
 		if e.Sequence > after {
-			out = append(out, e)
+			hasMail = true
+			break
 		}
+	}
+	if !hasMail {
+		return nil, nil
+	}
+	var out []Event
+	err = r.Store.Change(ctx, w.Scope, func(g *Group) error {
+		out = nil
+		m, err := member(g, w.Member.ID)
+		if err != nil {
+			return err
+		}
+		v := current(m)
+		if v.ID != w.Run.ID || v.Owner != w.Run.Owner || v.State != "running" || time.Now().After(v.Lease) {
+			return ErrConflict
+		}
+		if g.Status != "active" || v.CancelRequested {
+			return ErrClosed
+		}
+		for _, e := range m.Mail {
+			if e.Sequence > after {
+				out = append(out, e)
+				v.DeliveredSequence = max(v.DeliveredSequence, e.Sequence)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -499,6 +529,7 @@ func (r *Runtime) execute(serverCtx context.Context, w Work) {
 			publishPromptState(g, m, v, "waiting")
 			return nil
 		}
+		result.ConsumedSequence = max(result.ConsumedSequence, v.DeliveredSequence)
 		v.Result = result
 		v.Result.Error = truncate(v.Result.Error, 1000)
 		v.State = "succeeded"

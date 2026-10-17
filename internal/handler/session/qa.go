@@ -827,6 +827,7 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 		reqCtx.userMessageID,
 		reqCtx.userCreatedAt,
 		reqCtx.assistantMessage,
+		reqCtx.resume,
 	)
 	if reqCtx.resume != nil {
 		h.writeRunResumedEvent(reqCtx.ctx, reqCtx.sessionID, reqCtx.assistantMessage.ID, reqCtx.resume.Prompt.ID)

@@ -376,13 +376,16 @@ func (s *AgentCollaboration) run(ctx context.Context, w collaboration.Work) (col
 		}
 		answer.Content = ""
 		finishStream = s.ChildEvents(ctx, session, answer, bus)
+		queryData := map[string]interface{}{
+			"session_id": session.ID, "assistant_message_id": answer.ID, "user_message_id": userMsg.ID,
+		}
+		if resume != nil && resume.Prompt != nil {
+			queryData["resume_pending_id"] = resume.Prompt.ID
+			queryData["resume_tool_call_id"] = resume.Prompt.ToolCallID
+		}
 		if err = s.streams.AppendEvent(ctx, session.ID, answer.ID, interfaces.StreamEvent{
 			ID: "query-" + answer.ID, Type: types.ResponseTypeAgentQuery, Done: true, Timestamp: time.Now(),
-			Data: map[string]interface{}{
-				"session_id":           session.ID,
-				"assistant_message_id": answer.ID,
-				"user_message_id":      userMsg.ID,
-			},
+			Data: queryData,
 		}); err != nil {
 			return result, err
 		}

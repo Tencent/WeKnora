@@ -49,9 +49,20 @@ func TestDelegatedApprovalRecoveryAndLateAnswerCancellation(t *testing.T) {
 	for _, cancelTask := range []bool{false, true} {
 		t.Run(map[bool]string{false: "restart", true: "cancel-before-restart"}[cancelTask], func(t *testing.T) {
 			s, _, _, ctx := collaborationService(t)
+			streams := &childTestStreams{}
+			s.streams = streams
+			s.ChildEvents = func(
+				_ context.Context, _ *types.Session, answer *types.Message, bus *event.EventBus,
+			) func(context.Context) error {
+				bus.On(event.EventAgentComplete, func(_ context.Context, evt event.Event) error {
+					answer.Content = evt.Data.(event.AgentCompleteData).FinalAnswer
+					return nil
+				})
+				return func(context.Context) error { return nil }
+			}
 			broker := hitl.NewBroker(nil, nil)
 			gate := approval.NewGate(nil, nil, broker)
-			s.BindRecovery(broker, gate, nil)
+			s.BindRecovery(broker, gate, streams)
 			scope := collaboration.Scope{TenantID: 7, UserID: "u", SessionID: "parent", ID: "parent-message"}
 			require.NoError(t, s.Runtime.Store.Ensure(ctx, scope))
 			var effects atomic.Int32
@@ -136,7 +147,7 @@ func TestDelegatedApprovalRecoveryAndLateAnswerCancellation(t *testing.T) {
 			gate = approval.NewGate(nil, nil, broker)
 			s.Runtime = collaboration.New(collaboration.NewStore(s.db), s.run)
 			s.Runtime.Reconcile = s.reconcile
-			s.BindRecovery(broker, gate, nil)
+			s.BindRecovery(broker, gate, streams)
 			answer, err := broker.Resolve(
 				ctx,
 				hitl.ResolveRequest{
@@ -197,6 +208,23 @@ func TestDelegatedApprovalRecoveryAndLateAnswerCancellation(t *testing.T) {
 				s.Runtime.Tick(ctx)
 			}
 			stopCollaborationTestRuntime(t, s.Runtime)
+			require.NotEmpty(t, streams.events)
+			var queries []interfaces.StreamEvent
+			for _, e := range streams.events {
+				if e.Type == types.ResponseTypeAgentQuery {
+					queries = append(queries, e)
+				}
+			}
+			require.Len(t, queries, 1)
+			query := queries[0]
+			if cancelTask {
+				require.Zero(t, streams.resets)
+				require.NotContains(t, query.Data, "resume_pending_id")
+			} else {
+				require.Equal(t, 1, streams.resets)
+				require.Equal(t, run.PromptID, query.Data["resume_pending_id"])
+				require.Equal(t, "write", query.Data["resume_tool_call_id"])
+			}
 			if cancelTask {
 				require.Zero(t, effects.Load())
 			} else {

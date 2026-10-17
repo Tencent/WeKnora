@@ -99,9 +99,11 @@ type Run struct {
 	Attempt         int          `json:"attempt"`
 	CancelRequested bool         `json:"cancel_requested"`
 	Result          Result       `json:"result"`
-	PromptID        string       `json:"prompt_id,omitempty"`
-	MessageID       string       `json:"message_id,omitempty"`
-	UserMessageID   string       `json:"user_message_id,omitempty"`
+	// DeliveredSequence fences automatic followups even when the executor cannot return a result.
+	DeliveredSequence int64  `json:"delivered_sequence,omitempty"`
+	PromptID          string `json:"prompt_id,omitempty"`
+	MessageID         string `json:"message_id,omitempty"`
+	UserMessageID     string `json:"user_message_id,omitempty"`
 }
 
 // MarshalJSON preserves private ownership for persistence; model projections omit it.

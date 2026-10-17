@@ -341,3 +341,104 @@ test('resolved approvals reload once in timeline order before completion and nev
   assert.ok(events.findIndex(e => e.pending_id === 'canceled') < events.findIndex(e => e.type === 'agent_complete'))
   assert.equal(events.at(-1)?.content, 'final')
 })
+
+for (const prepared of [false, true]) {
+  test(`same-request approval resume and reconnect retain the timeline (prepared=${prepared})`, async () => {
+    const { handler, messagesList } = setup()
+    await handler.handleMsgList([awaitingRow()])
+    const m = messagesList[0]
+    if (prepared) handler.prepareResumedMessage(m, 'p1')
+    const resume = () => {
+      handler.processStreamChunk({ response_type: 'agent_query', id: 'r1', assistant_message_id: 'a1',
+        data: { resume_pending_id: 'p1', resume_tool_call_id: 'call-1' } })
+      handler.processStreamChunk({ response_type: 'tool_approval_resolved', id: 'r1',
+        data: { pending_id: 'p1', approved: true } })
+      handler.processStreamChunk({ response_type: 'tool_call', id: 'r1',
+        data: { tool_call_id: 'call-1', tool_name: 'mcp_x', arguments: {} } })
+      handler.processStreamChunk({ response_type: 'tool_result', id: 'r1',
+        data: { tool_call_id: 'call-1', tool_name: 'mcp_x', success: true, output: 'approved result' } })
+      handler.processStreamChunk({ response_type: 'answer', id: 'r1', content: 'after approval',
+        data: { event_id: 'resume-progress' }, done: false })
+    }
+    resume()
+    resume()
+    resume()
+    assert.equal(messagesList.length, 1)
+    const events = m.agentEventStream as Record<string, any>[]
+    assert.equal(events.filter(e => e.content === 'checking').length, 1)
+    assert.equal(events.filter(e => e.type === 'tool_call' && e.tool_call_id === 'call-1').length, 1)
+    assert.equal(events.filter(e => e.type === 'answer' && e.content === 'after approval').length, 1)
+    assert.equal(cards(m).length, 1)
+    assert.equal(cards(m)[0].approved, true)
+    assert.equal(m.content, 'after approval')
+
+    // A second approval creates a new suffix, retaining the first one's history.
+    handler.processStreamChunk({ response_type: 'tool_approval_required', id: 'r1',
+      data: { pending_id: 'p2', tool_call_id: 'call-2' } })
+    handler.prepareResumedMessage(m, 'p2')
+    const secondResume = () => {
+      handler.processStreamChunk({ response_type: 'agent_query', id: 'r1', assistant_message_id: 'a1',
+        data: { resume_pending_id: 'p2', resume_tool_call_id: 'call-2' } })
+      handler.processStreamChunk({ response_type: 'tool_approval_resolved', id: 'r1',
+        data: { pending_id: 'p2', approved: true } })
+    }
+    secondResume()
+    secondResume()
+    assert.equal(cards(m).length, 2)
+    assert.ok(cards(m).every(e => e.approved))
+    assert.equal(m.agentEventStream.filter((e: any) => e.content === 'checking').length, 1)
+    assert.equal(m.agentEventStream.filter((e: any) => e.content === 'after approval').length, 1)
+  })
+}
+
+test('approval suffix replay preserves steer boundaries before and after suspension', async () => {
+  const { handler, messagesList } = setup()
+  const query = { response_type: 'agent_query', id: 'r1', assistant_message_id: 'a1' }
+  const steer = (id: string) => handler.processStreamChunk({ response_type: 'user_message_injected', id: 'r1',
+    data: { steer_id: id, user_message_id: id, content: id } })
+  const answer = (text: string) => handler.processStreamChunk({ response_type: 'answer', id: 'r1',
+    data: { event_id: text }, content: text, done: false })
+  handler.processStreamChunk(query)
+  answer('before-steer')
+  steer('u-before')
+  answer('before-approval')
+  const replay = () => {
+    handler.processStreamChunk({ ...query, data: { resume_pending_id: 'p1', resume_tool_call_id: 'c1' } })
+    answer('after-approval')
+    steer('u-after')
+    answer('after-steer')
+  }
+  replay()
+  replay()
+  const assistants = messagesList.filter(m => m.role === 'assistant')
+  assert.equal(assistants.length, 3)
+  const texts = assistants.map(m => m.agentEventStream.filter((e: any) => e.type === 'answer').map((e: any) => e.content))
+  assert.deepEqual(JSON.parse(JSON.stringify(texts)), [['before-steer'], ['before-approval', 'after-approval'], ['after-steer']])
+})
+
+
+test('reloaded history containing a later checkpoint does not duplicate the resumed suffix', async () => {
+  const { handler, messagesList } = setup()
+  await handler.handleMsgList([awaitingRow()])
+  const m = messagesList[0]
+  m.agentEventStream.push({ type: 'answer', content: 'persisted suffix', event_id: 'suffix', done: true })
+  handler.processStreamChunk({ response_type: 'agent_query', id: 'r1', assistant_message_id: 'a1',
+    data: { resume_pending_id: 'p1', resume_tool_call_id: 'call-1' } })
+  handler.processStreamChunk({ response_type: 'answer', id: 'r1', content: 'persisted suffix',
+    data: { event_id: 'suffix' }, done: false })
+  assert.equal(m.agentEventStream.filter((e: any) => e.content === 'checking').length, 1)
+  assert.equal(m.agentEventStream.filter((e: any) => e.content === 'persisted suffix').length, 1)
+  assert.equal(cards(m).length, 1)
+})
+
+
+test('approval resume keeps updates that arrived while approval was pending', async () => {
+  const { handler, messagesList } = setup()
+  await handler.handleMsgList([awaitingRow()])
+  const m = messagesList[0]
+  handler.prepareResumedMessage(m, 'p1')
+  m.agentEventStream.push({ type: 'answer', content: 'another child finished', event_id: 'child-progress', done: true })
+  handler.processStreamChunk({ response_type: 'agent_query', id: 'r1', assistant_message_id: 'a1',
+    data: { resume_pending_id: 'p1', resume_tool_call_id: 'call-1' } })
+  assert.equal(m.agentEventStream.filter((e: any) => e.content === 'another child finished').length, 1)
+})

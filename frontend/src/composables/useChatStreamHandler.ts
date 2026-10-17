@@ -1510,7 +1510,9 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
     if (data.response_type === 'agent_query') {
       if (data.id) replaySegments.delete(String(data.id))
-      const replay = resetSteerTurnForReplay(messagesList, String(data.id || ''))
+      const resumeData = (data.data || {}) as ChatMessage
+      const replay = resetSteerTurnForReplay(messagesList, String(data.id || ''),
+        String(resumeData.resume_pending_id || ''), String(resumeData.resume_tool_call_id || ''))
       if (replay) replaySegments.set(String(data.id), replay)
       if (data.id) {
         const earlyMsg = getTrailingIncompleteAssistant()
