@@ -434,6 +434,15 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	// scope happens to include them (e.g. KBSelectionMode=all picking up a
 	// wiki-only KB).
 	var faqVectorKBIDs, docVectorKBIDs, docKeywordKBIDs []string
+	// Document KBs with question generation off must not spend TopK on
+	// historical question vectors. FAQ KBs are absent from this list: their
+	// similar-question rows use the same source-id shape.
+	var questionOffKBIDs []string
+	for _, kb := range groupKBs {
+		if types.QuestionGenerationDisabled(kb) {
+			questionOffKBIDs = append(questionOffKBIDs, kb.ID)
+		}
+	}
 	// The query is embedded with the primary's model, or with the first
 	// vector KB of the group when the primary has none (a wiki primary
 	// searched together with document KBs): asking the primary for its empty
@@ -473,15 +482,16 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 
 		appendVectorParams := func(kbIDs []string, knowledgeType string) {
 			retrieveParams = append(retrieveParams, types.RetrieveParams{
-				Query:            params.QueryText,
-				Embedding:        queryEmbedding,
-				KnowledgeBaseIDs: kbIDs,
-				TopK:             matchCount,
-				Threshold:        params.VectorThreshold,
-				RetrieverType:    types.VectorRetrieverType,
-				KnowledgeIDs:     params.KnowledgeIDs,
-				TagIDs:           params.TagIDs,
-				KnowledgeType:    knowledgeType,
+				Query:                         params.QueryText,
+				Embedding:                     queryEmbedding,
+				KnowledgeBaseIDs:              kbIDs,
+				TopK:                          matchCount,
+				Threshold:                     params.VectorThreshold,
+				RetrieverType:                 types.VectorRetrieverType,
+				KnowledgeIDs:                  params.KnowledgeIDs,
+				TagIDs:                        params.TagIDs,
+				KnowledgeType:                 knowledgeType,
+				ExcludeGeneratedQuestionKBIDs: generatedQuestionKBIDs(kbIDs, questionOffKBIDs),
 			})
 		}
 
@@ -503,18 +513,38 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 		len(docKeywordKBIDs) > 0 {
 		logger.Info(ctx, "Keyword retrieval supported, preparing keyword retrieval parameters")
 		retrieveParams = append(retrieveParams, types.RetrieveParams{
-			Query:            params.QueryText,
-			KnowledgeBaseIDs: docKeywordKBIDs,
-			TopK:             matchCount,
-			Threshold:        params.KeywordThreshold,
-			RetrieverType:    types.KeywordsRetrieverType,
-			KnowledgeIDs:     params.KnowledgeIDs,
-			TagIDs:           params.TagIDs,
+			Query:                         params.QueryText,
+			KnowledgeBaseIDs:              docKeywordKBIDs,
+			TopK:                          matchCount,
+			Threshold:                     params.KeywordThreshold,
+			RetrieverType:                 types.KeywordsRetrieverType,
+			KnowledgeIDs:                  params.KnowledgeIDs,
+			TagIDs:                        params.TagIDs,
+			ExcludeGeneratedQuestionKBIDs: generatedQuestionKBIDs(docKeywordKBIDs, questionOffKBIDs),
 		})
 		logger.Info(ctx, "Keyword retrieval parameters setup completed")
 	}
 
 	return retrieveParams, nil
+}
+
+// generatedQuestionKBIDs keeps the off-switch ids that this retrieval param
+// actually searches. An empty result leaves the SQL filter off.
+func generatedQuestionKBIDs(searched, disabled []string) []string {
+	if len(searched) == 0 || len(disabled) == 0 {
+		return nil
+	}
+	off := make(map[string]struct{}, len(disabled))
+	for _, id := range disabled {
+		off[id] = struct{}{}
+	}
+	var matched []string
+	for _, id := range searched {
+		if _, ok := off[id]; ok {
+			matched = append(matched, id)
+		}
+	}
+	return matched
 }
 
 // resolveQueryEmbedding returns the query embedding for a store group. It

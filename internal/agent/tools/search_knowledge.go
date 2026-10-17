@@ -855,6 +855,14 @@ func (t *SearchKnowledgeTool) rerankResults(
 	}
 	if t.knowledgeBaseService != nil {
 		opts.LoadImage = t.knowledgeBaseService.ReadChunkImage
+		if ids := types.SearchResultKnowledgeBaseIDs(rows); len(ids) > 0 {
+			kbs, err := t.knowledgeBaseService.GetKnowledgeBasesByIDsOnly(ctx, ids)
+			if err != nil {
+				logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to read question generation config: %v", err)
+			} else {
+				types.ApplySkipGeneratedQuestions(rows, types.QuestionGenerationOffIDs(kbs))
+			}
+		}
 	}
 	res := reranking.Rerank(ctx, t.rerankModel, query, rows, opts)
 	if res.Diagnostics.Outcome == types.RerankOutcomeModelError {

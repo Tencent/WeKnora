@@ -417,7 +417,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		return
 	}
 
-	// 更新问题生成配置
+	// 更新问题生成配置。检索是否使用问句由查询时的开关决定，保存设置不改索引。
 	if req.QuestionGeneration.Enabled {
 		questionCount := req.QuestionGeneration.QuestionCount
 		if questionCount <= 0 {
