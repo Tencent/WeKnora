@@ -123,7 +123,7 @@ func (s *knowledgeService) createKnowledgeFromFile(
 	videoFile := IsVideoType(getFileType(fileName))
 	videoParse := false
 	if videoFile {
-		videoParse = videoParseReady(kb, ResolveProcessConfig(kb, processOverrides))
+		videoParse = videoParseReady(kb)
 		switch {
 		case videoParse:
 			// A connector may have archived these bytes because the switch was

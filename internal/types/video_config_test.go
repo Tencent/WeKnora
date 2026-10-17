@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -152,6 +153,12 @@ func TestVideoConfigValueAndScanRoundTrip(t *testing.T) {
 		Enabled: true,
 		Mode:    VideoParseModeAudioKeyframes,
 		ModelID: "asr-video",
+		VLMConfig: &VLMConfig{
+			Enabled:             true,
+			ModelID:             "vlm-video",
+			DescriptionLanguage: "Chinese",
+			CustomInstructions:  "识别报错弹窗",
+		},
 	}
 	value, err := want.Value()
 	if err != nil {
@@ -165,8 +172,11 @@ func TestVideoConfigValueAndScanRoundTrip(t *testing.T) {
 	if err := got.Scan(raw); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
-	if got != want {
+	if !got.Equal(want) {
 		t.Fatalf("round trip = %+v, want %+v", got, want)
+	}
+	if got.VLMConfig == nil {
+		t.Fatal("the nested vision config must survive the round trip")
 	}
 
 	var nilTarget VideoConfig
@@ -238,12 +248,21 @@ func TestVideoAudioParseEnabledPerMode(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "keyframes with vlm",
+			name: "keyframes with the video's own vlm",
+			kb: &KnowledgeBase{
+				VideoConfig: VideoConfig{
+					Enabled: true, Mode: VideoParseModeKeyframes, VLMConfig: &vlm,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "keyframes with only the image-section vlm",
 			kb: &KnowledgeBase{
 				VideoConfig: VideoConfig{Enabled: true, Mode: VideoParseModeKeyframes},
 				VLMConfig:   vlm,
 			},
-			want: true,
+			want: false,
 		},
 		{
 			name: "keyframes without vlm",
@@ -271,12 +290,21 @@ func TestVideoAudioParseEnabledPerMode(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "audio_and_keyframes with only vlm",
+			name: "audio_and_keyframes with only the video's own vlm",
+			kb: &KnowledgeBase{
+				VideoConfig: VideoConfig{
+					Enabled: true, Mode: VideoParseModeAudioKeyframes, VLMConfig: &vlm,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "audio_and_keyframes with only the image-section vlm",
 			kb: &KnowledgeBase{
 				VideoConfig: VideoConfig{Enabled: true, Mode: VideoParseModeAudioKeyframes},
 				VLMConfig:   vlm,
 			},
-			want: true,
+			want: false,
 		},
 		{
 			name: "audio_and_keyframes without any model",
@@ -331,5 +359,117 @@ func TestVideoConfigNormalizeKeepsItsOwnLanguage(t *testing.T) {
 	}
 	if (VideoConfig{}).Language != "" {
 		t.Fatal("a zero VideoConfig must mean auto-detect")
+	}
+}
+
+// The video-owned vision block is optional in JSON: a row written before it
+// existed (or a client that only knows the switch and the mode) must serialize
+// exactly as it did, and a missing block must decode to "no frame description".
+func TestVideoConfigVLMConfigIsAnOptionalNestedBlock(t *testing.T) {
+	t.Parallel()
+
+	raw, err := json.Marshal(VideoConfig{Enabled: true, Mode: VideoParseModeAudioOnly, ModelID: "asr-1"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), "vlm_config") {
+		t.Fatalf("an absent video vision block must not be serialized: %s", raw)
+	}
+
+	var decoded VideoConfig
+	payload := `{"enabled":true,"mode":"keyframes","vlm_config":{` +
+		`"enabled":true,"model_id":"vlm-1","description_language":"Chinese",` +
+		`"custom_instructions":"重点识别弹窗"}}`
+	if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	frameVLM := decoded.FrameVLM()
+	if !frameVLM.IsEnabled() || frameVLM.ModelID != "vlm-1" {
+		t.Fatalf("decoded vision block = %+v, want an enabled vlm-1", frameVLM)
+	}
+	if frameVLM.DescriptionLanguage != "Chinese" || frameVLM.CustomInstructions != "重点识别弹窗" {
+		t.Fatalf("decoded vision block lost its fields: %+v", frameVLM)
+	}
+
+	var zero VideoConfig
+	if zero.FrameVLM().IsEnabled() {
+		t.Fatal("a missing vision block must mean no frame description")
+	}
+	if zero.VLMConfig != nil {
+		t.Fatalf("a zero VideoConfig must keep the block nil, got %+v", zero.VLMConfig)
+	}
+}
+
+// Normalize trims the nested block field by field and drops a block that
+// carries no setting, so the JSONB column keeps its old shape. It must also
+// copy the block: the request's struct must never alias the stored row.
+func TestVideoConfigNormalizeOwnsTheNestedVisionBlock(t *testing.T) {
+	t.Parallel()
+
+	request := VideoConfig{
+		Enabled: true,
+		Mode:    VideoParseModeKeyframes,
+		VLMConfig: &VLMConfig{
+			Enabled:             true,
+			ModelID:             "  vlm-1  ",
+			DescriptionLanguage: "  Chinese  ",
+			CustomInstructions:  "  重点识别弹窗  ",
+		},
+	}
+	request.Normalize()
+	if request.VLMConfig == nil {
+		t.Fatal("a configured vision block must survive Normalize")
+	}
+	if request.VLMConfig.ModelID != "vlm-1" ||
+		request.VLMConfig.DescriptionLanguage != "Chinese" ||
+		request.VLMConfig.CustomInstructions != "重点识别弹窗" {
+		t.Fatalf("nested block was not trimmed: %+v", request.VLMConfig)
+	}
+
+	empty := VideoConfig{VLMConfig: &VLMConfig{Enabled: false, ModelID: "   "}}
+	empty.Normalize()
+	if empty.VLMConfig != nil {
+		t.Fatalf("an empty vision block must collapse to nil, got %+v", empty.VLMConfig)
+	}
+
+	callerBlock := &VLMConfig{ModelID: "  vlm-1  "}
+	config := VideoConfig{VLMConfig: callerBlock}
+	config.Normalize()
+	if callerBlock.ModelID != "  vlm-1  " {
+		t.Fatal("Normalize must not rewrite the caller's struct")
+	}
+	if config.VLMConfig == callerBlock {
+		t.Fatal("Normalize must store its own copy, not the caller's pointer")
+	}
+}
+
+// Equal is what the update service uses to decide whether the audit log should
+// say video_config changed. The nested block is compared by value: Normalize
+// allocates a fresh pointer on every save.
+func TestVideoConfigEqualComparesTheVisionBlockByValue(t *testing.T) {
+	t.Parallel()
+
+	block := func() *VLMConfig {
+		return &VLMConfig{Enabled: true, ModelID: "vlm-1", CustomInstructions: "a"}
+	}
+	left := VideoConfig{Enabled: true, Mode: VideoParseModeKeyframes, VLMConfig: block()}
+	right := left
+	right.Normalize()
+	if !left.Equal(right) {
+		t.Fatal("configs with the same values must be equal even with different pointers")
+	}
+
+	right.VLMConfig.CustomInstructions = "b"
+	if left.Equal(right) {
+		t.Fatal("a changed instruction must be reported as a change")
+	}
+
+	withImageVLMOnly := VideoConfig{Enabled: true, Mode: VideoParseModeKeyframes}
+	withVideoVLM := VideoConfig{
+		Enabled: true, Mode: VideoParseModeKeyframes,
+		VLMConfig: &VLMConfig{Enabled: true, ModelID: "vlm-1"},
+	}
+	if withImageVLMOnly.Equal(withVideoVLM) {
+		t.Fatal("a nil vision block must differ from a configured one")
 	}
 }

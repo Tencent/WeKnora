@@ -35,9 +35,39 @@ func TestValidateKnowledgeBasePromptInstructions(t *testing.T) {
 func TestNormalizeKnowledgeBasePromptInstructions(t *testing.T) {
 	kb := &KnowledgeBase{
 		VLMConfig: VLMConfig{CustomInstructions: "  focus labels  "},
+		VideoConfig: VideoConfig{
+			VLMConfig: &VLMConfig{CustomInstructions: "  focus frames  "},
+		},
 	}
 	NormalizeKnowledgeBasePromptInstructions(kb)
 	if kb.VLMConfig.CustomInstructions != "focus labels" {
 		t.Fatalf("got %q", kb.VLMConfig.CustomInstructions)
+	}
+	if kb.VideoConfig.VLMConfig == nil ||
+		kb.VideoConfig.VLMConfig.CustomInstructions != "focus frames" {
+		t.Fatalf("video frame instructions were not trimmed: %+v", kb.VideoConfig.VLMConfig)
+	}
+}
+
+// The video page's frame-description prompt is its own field: it must be
+// length-checked like every other user-authored instruction, and a knowledge
+// base with no video section must not be affected.
+func TestValidateKnowledgeBasePromptInstructionsCoversVideoFrames(t *testing.T) {
+	t.Parallel()
+
+	long := strings.Repeat("a", MaxCustomPromptInstructionsLength+1)
+	withVideo := &KnowledgeBase{VideoConfig: VideoConfig{
+		VLMConfig: &VLMConfig{CustomInstructions: long},
+	}}
+	err := ValidateKnowledgeBasePromptInstructions(withVideo)
+	if err == nil || !strings.Contains(err.Error(), "video frame instructions") {
+		t.Fatalf("expected a video frame instructions error, got %v", err)
+	}
+
+	atLimit := &KnowledgeBase{VideoConfig: VideoConfig{
+		VLMConfig: &VLMConfig{CustomInstructions: long[:MaxCustomPromptInstructionsLength]},
+	}}
+	if err := ValidateKnowledgeBasePromptInstructions(atLimit); err != nil {
+		t.Fatalf("a value at the limit must pass: %v", err)
 	}
 }

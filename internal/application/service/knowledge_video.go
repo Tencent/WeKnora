@@ -431,27 +431,26 @@ func (s *knowledgeService) frameExtractor() videoFrameExtractor {
 // section itself names an ASR model; the audio section's model does not count,
 // because the two sections are configured independently and an implicit
 // fallback would hide which model the video actually uses. The frame source
-// exists when the mode reads the picture and a VLM model is configured in the
-// image section. The model ids are only checked for presence here; resolving
-// and type-checking them happens in the worker, where a failure degrades the
-// video instead of rejecting the import.
-func videoParseCapabilities(
-	kb *types.KnowledgeBase, eff types.EffectiveProcessConfig,
-) (audio, frames bool) {
+// exists when the mode reads the picture and the video section names its own
+// VLM model; the image section's vlm_config does not count, for the same
+// reason. The model ids are only checked for presence here; resolving and
+// type-checking them happens in the worker, where a failure degrades the video
+// instead of rejecting the import.
+func videoParseCapabilities(kb *types.KnowledgeBase) (audio, frames bool) {
 	if kb == nil {
 		return false, false
 	}
 	audio = kb.VideoConfig.AllowsAudioParse() && kb.VideoConfig.HasOwnASRModel()
-	frames = kb.VideoConfig.AllowsKeyframeParse() && eff.VLMConfig.IsEnabled()
+	frames = kb.VideoConfig.AllowsKeyframeParse() && kb.VideoConfig.FrameVLM().IsEnabled()
 	return audio, frames
 }
 
 // videoParseReady reports whether this import can turn a video into text: at
-// least one source selected by the mode has a model. The switch itself is a
-// knowledge-base setting; the model check runs against the effective config so
-// a per-upload override counts the same way the pipeline will use it.
-func videoParseReady(kb *types.KnowledgeBase, eff types.EffectiveProcessConfig) bool {
-	audio, frames := videoParseCapabilities(kb, eff)
+// least one source selected by the mode has a model. Both models belong to the
+// video section, so the knowledge base alone decides; a per-upload image
+// override cannot make a video parseable.
+func videoParseReady(kb *types.KnowledgeBase) bool {
+	audio, frames := videoParseCapabilities(kb)
 	return audio || frames
 }
 
@@ -548,7 +547,7 @@ func (s *knowledgeService) withStoredVideo(
 // parser, so the narration is extracted locally (ffmpeg ships in the
 // application container) and handed to the same ASR step an audio upload uses.
 // When the mode also asks for the picture, frames are sampled and captioned by
-// the knowledge base's VLM; the ASR step interleaves both by time.
+// the video section's own VLM; the ASR step interleaves both by time.
 //
 // Returning (nil, nil) means "handled": the video could not be read and the row
 // has been settled back into an archive. Failing the import instead would turn
@@ -565,9 +564,17 @@ func (s *knowledgeService) convertVideo(
 	payload types.DocumentProcessPayload,
 	kb *types.KnowledgeBase,
 	knowledge *types.Knowledge,
-	eff types.EffectiveProcessConfig,
 ) (*types.ReadResult, error) {
-	wantAudio, wantFrames := videoParseCapabilities(kb, eff)
+	wantAudio, wantFrames := videoParseCapabilities(kb)
+	if kb.VideoConfig.AllowsKeyframeParse() && !wantFrames {
+		// The mode asks for the picture but the video section names no VLM.
+		// The skip is deliberate and never borrows the image section's model,
+		// so say it out loud instead of leaving an unexplained empty frame
+		// list in the stage output.
+		logger.Warnf(ctx,
+			"[video] Skipping frame descriptions for %s: the video section has no VLM model configured",
+			payload.FileName)
+	}
 	if !wantAudio && !wantFrames {
 		// The worker gate already rejects this; keep the branch total so a
 		// stale task cannot panic or index an empty result.
@@ -595,7 +602,7 @@ func (s *knowledgeService) convertVideo(
 	var frames []types.VideoFrameDescription
 	var framesErr error
 	if wantFrames {
-		frames, framesErr = s.describeVideoFrames(ctx, kb, payload, eff)
+		frames, framesErr = s.describeVideoFrames(ctx, kb, payload)
 		if framesErr != nil {
 			logger.Warnf(ctx, "[video] Frame descriptions unavailable for %s: %v", payload.FileName, framesErr)
 		}
@@ -639,16 +646,18 @@ func (s *knowledgeService) convertVideo(
 	return result, nil
 }
 
-// describeVideoFrames samples frames and captions them with the knowledge
-// base's VLM (vlm_config.model_id, the image section). A VLM that cannot be
-// resolved, a sampling failure and a failed caption call all degrade the frame
-// source, never the import; the caller decides whether narration alone is
-// enough.
+// describeVideoFrames samples frames and captions them with the video
+// section's own VLM (video_config.vlm_config.model_id). The image section's
+// vlm_config is deliberately not consulted: a knowledge base that never
+// enabled image parsing can still read a video's picture, and retuning image
+// descriptions must not silently change the video's output. A VLM that cannot
+// be resolved, a sampling failure and a failed caption call all degrade the
+// frame source, never the import; the caller decides whether narration alone
+// is enough.
 func (s *knowledgeService) describeVideoFrames(
 	ctx context.Context,
 	kb *types.KnowledgeBase,
 	payload types.DocumentProcessPayload,
-	eff types.EffectiveProcessConfig,
 ) ([]types.VideoFrameDescription, error) {
 	var sampled []videoFrame
 	if err := s.withStoredVideo(ctx, kb, payload.FilePath, func(src io.Reader) error {
@@ -667,11 +676,12 @@ func (s *knowledgeService) describeVideoFrames(
 	if s.modelService == nil {
 		return nil, errors.New("model service is not available")
 	}
-	model, err := s.modelService.GetVLMModel(ctx, eff.VLMConfig.ModelID)
+	frameVLM := kb.VideoConfig.FrameVLM()
+	model, err := s.modelService.GetVLMModel(ctx, frameVLM.ModelID)
 	if err != nil {
-		return nil, fmt.Errorf("resolve VLM model: %w", err)
+		return nil, fmt.Errorf("resolve video VLM model: %w", err)
 	}
-	descriptions := s.captionVideoFrames(ctx, model, sampled, buildVideoFramePrompt(ctx, eff.VLMConfig))
+	descriptions := s.captionVideoFrames(ctx, model, sampled, buildVideoFramePrompt(ctx, frameVLM))
 	if len(descriptions) == 0 {
 		return nil, errors.New("no frame could be described by the VLM")
 	}
@@ -724,6 +734,13 @@ func normalizeFrameDescription(text string) string {
 // hallucinated menu item becomes a retrievable chunk, so guessing is worse than
 // admitting a bad frame. Custom image instructions are not reused here — they
 // are written for stills, not for a time-ordered video timeline.
+//
+// The video section's own custom_instructions are appended after this fixed
+// block with types.AppendCustomPromptInstructions, which keeps the
+// unreadable-frame rule and the output shape in force and tells the model that
+// the system rules win. Empty instructions return the prompt unchanged, so a
+// knowledge base that never customized anything sends exactly the prompt it
+// sent before the field existed.
 func buildVideoFramePrompt(ctx context.Context, cfg types.VLMConfig) string {
 	language := strings.TrimSpace(cfg.DescriptionLanguage)
 	if language == "" {
@@ -732,7 +749,7 @@ func buildVideoFramePrompt(ctx context.Context, cfg types.VLMConfig) string {
 	if language == "" {
 		language = "English"
 	}
-	return fmt.Sprintf(`You describe frames sampled from a training video so a text-only reader can follow it.
+	prompt := fmt.Sprintf(`You describe frames sampled from a training video so a text-only reader can follow it.
 Look at the frame and report, in this order of priority:
 1. Software interfaces: which screen, menu, dialog or button is visible, and the readable labels.
 2. Terminals: the command being run and the visible output.
@@ -740,6 +757,7 @@ Look at the frame and report, in this order of priority:
 Only state what is clearly visible. If the frame is blank, blurred or unreadable,
 say "unreadable frame" instead of guessing.
 Answer in %s with at most three short sentences. No preamble, no markdown headings, no bullet points.`, language)
+	return types.AppendCustomPromptInstructions(prompt, cfg.CustomInstructions, "video_frame")
 }
 
 // formatVideoFrames renders frame captions as the timestamped markdown lines
@@ -920,11 +938,12 @@ func videoDegradeReason(audioErr, framesErr error) string {
 // knowledge base can now read. It is the one exception to "stored entries are
 // not re-parseable": turning the video switch on is how the archives that
 // already exist become searchable, and the worker keeps "stored" as its floor
-// if extraction or captioning fails.
+// if extraction or captioning fails. The video section owns both of its models,
+// so the knowledge base alone decides; per-upload image overrides cannot turn
+// an archive into a parse.
 func canUpgradeStoredVideo(
 	knowledge *types.Knowledge,
 	kb *types.KnowledgeBase,
-	processOverrides *types.KnowledgeProcessOverrides,
 ) bool {
 	if knowledge == nil || kb == nil {
 		return false
@@ -932,7 +951,7 @@ func canUpgradeStoredVideo(
 	if !IsVideoType(knowledge.FileType) && !IsVideoType(getFileType(knowledge.FileName)) {
 		return false
 	}
-	return videoParseReady(kb, ResolveProcessConfig(kb, processOverrides))
+	return videoParseReady(kb)
 }
 
 // transcribeMedia is Step 1.5 of the pipeline: it turns the extracted audio

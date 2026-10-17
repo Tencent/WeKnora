@@ -386,13 +386,23 @@ func TestKnowledgeBase_MarshalJSONWithholdsInlineCredentials(t *testing.T) {
 			Provider: "minio", BucketName: "bucket", SecretID: "root-id", SecretKey: "root-secret",
 		},
 		VLMConfig: VLMConfig{ModelName: "vlm", BaseURL: "https://vlm.example", APIKey: "vlm-key"},
+		VideoConfig: VideoConfig{
+			Enabled: true,
+			Mode:    VideoParseModeKeyframes,
+			// The video section carries its own VLMConfig, and the same legacy
+			// credential rules apply to it.
+			VLMConfig: &VLMConfig{
+				Enabled: true, ModelID: "vlm-video", ModelName: "video-vlm",
+				BaseURL: "https://video-vlm.example", APIKey: "video-vlm-key",
+			},
+		},
 	}
 
 	data, err := json.Marshal(kb)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	for _, secret := range []string{"root-id", "root-secret", "vlm-key"} {
+	for _, secret := range []string{"root-id", "root-secret", "vlm-key", "video-vlm-key"} {
 		if strings.Contains(string(data), secret) {
 			t.Fatalf("KB JSON leaks %q: %s", secret, data)
 		}
@@ -402,6 +412,9 @@ func TestKnowledgeBase_MarshalJSONWithholdsInlineCredentials(t *testing.T) {
 	}
 	if kb.StorageConfig.SecretKey != "root-secret" || kb.VLMConfig.APIKey != "vlm-key" {
 		t.Fatal("MarshalJSON mutated the knowledge base")
+	}
+	if kb.VideoConfig.VLMConfig == nil || kb.VideoConfig.VLMConfig.APIKey != "video-vlm-key" {
+		t.Fatal("MarshalJSON must not clear the nested video VLM key in memory")
 	}
 
 	storageColumn, err := kb.StorageConfig.Value()

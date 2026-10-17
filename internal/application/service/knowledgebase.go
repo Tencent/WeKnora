@@ -641,7 +641,10 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		if config.VideoConfig != nil {
 			next := *config.VideoConfig
 			next.Normalize()
-			if kb.VideoConfig != next {
+			// Equal compares the nested vision block by value: Normalize hands
+			// out a fresh copy, so a struct comparison would report a change on
+			// every save.
+			if !kb.VideoConfig.Equal(next) {
 				changedFields = append(changedFields, "video_config")
 			}
 			kb.VideoConfig = next

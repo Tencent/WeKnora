@@ -161,7 +161,7 @@ func validateDefaultFileImportRequirements(
 	// has the model prerequisites the selected mode implies; the switch itself
 	// was already checked. The requirement message names the missing model so a
 	// keyframes-only knowledge base is not told to configure ASR.
-	if IsVideoType(fileType) && !videoParseReady(kb, eff) {
+	if IsVideoType(fileType) && !videoParseReady(kb) {
 		logger.Error(ctx, "Video parsing model is not configured")
 		return werrors.NewBadRequestError(videoParseRequirementMessage(kb))
 	}
@@ -255,7 +255,7 @@ func validateEffectiveProcessOverrides(eff types.EffectiveProcessConfig, fileTyp
 	// Video parsing reads the narration and/or the frames, so the mode decides
 	// which model is required. Rejecting here beats discovering it in the
 	// worker, which would archive the file instead of indexing it.
-	if hasVideo && !videoParseReady(kb, eff) {
+	if hasVideo && !videoParseReady(kb) {
 		return werrors.NewBadRequestError(videoParseRequirementMessage(kb))
 	}
 

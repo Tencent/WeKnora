@@ -779,12 +779,30 @@ type VideoConfig struct {
 	// narration model and is never silently borrowed from the audio section.
 	// When set, it must name an ASR model: a stale or wrong-typed id degrades
 	// the video instead of failing the import. Frames do not use it; they use
-	// VLMConfig.ModelID.
+	// the video section's own VLMConfig.ModelID.
 	ModelID string `yaml:"model_id" json:"model_id"`
 	// Language is the hint sent to the video's ASR model, in the vendor's
 	// language code (for example "zh"). Empty means auto-detection, the
 	// vendors' default; it never inherits the audio section's hint.
 	Language string `yaml:"language,omitempty" json:"language,omitempty"`
+	// VLMConfig is the vision model that describes frames sampled from a
+	// video. It mirrors image processing's top-level vlm_config but is owned
+	// by the video pipeline: changing image parsing must never silently change
+	// video output, and a knowledge base that never enabled images can still
+	// describe video frames. nil means "this section has no vision model", the
+	// same meaning as an empty VLMConfig, so old rows keep their exact JSON.
+	VLMConfig *VLMConfig `yaml:"vlm_config,omitempty" json:"vlm_config,omitempty"`
+}
+
+// FrameVLM returns the video section's own vision configuration. It never
+// falls back to the knowledge base's image vlm_config: a zero value here means
+// "no frame description is configured", and callers can ask IsEnabled without
+// nil-checking first.
+func (c VideoConfig) FrameVLM() VLMConfig {
+	if c.VLMConfig == nil {
+		return VLMConfig{}
+	}
+	return *c.VLMConfig
 }
 
 // Normalize fills the mode default and coalesces unknown modes to audio_only:
@@ -804,6 +822,32 @@ func (c *VideoConfig) Normalize() {
 	default:
 		c.Mode = VideoParseModeAudioOnly
 	}
+	// Normalize the nested vision block through a copy and store that copy:
+	// the incoming request's struct must not alias the knowledge base's row,
+	// and a block that carries no setting decodes to nil so the JSONB column
+	// keeps its pre-vision-config shape.
+	if c.VLMConfig != nil {
+		nested := *c.VLMConfig
+		nested.ModelID = strings.TrimSpace(nested.ModelID)
+		nested.DescriptionLanguage = strings.TrimSpace(nested.DescriptionLanguage)
+		nested.CustomInstructions = strings.TrimSpace(nested.CustomInstructions)
+		if nested == (VLMConfig{}) {
+			c.VLMConfig = nil
+		} else {
+			c.VLMConfig = &nested
+		}
+	}
+}
+
+// Equal reports whether two video configurations express the same setting. The
+// nested vision block is compared by value: Normalize hands out a fresh copy,
+// so a pointer comparison would report a change on every save.
+func (c VideoConfig) Equal(other VideoConfig) bool {
+	return c.Enabled == other.Enabled &&
+		c.Mode == other.Mode &&
+		c.ModelID == other.ModelID &&
+		c.Language == other.Language &&
+		c.FrameVLM() == other.FrameVLM()
 }
 
 // EffectiveMode returns the mode the pipeline runs, without mutating the
@@ -882,7 +926,11 @@ func (c *VideoConfig) Scan(value interface{}) error {
 //   - audio modes need the video section's own ASR model
 //     (video_config.model_id). The audio section's asr_config.model_id does not
 //     count: the two sections are configured independently.
-//   - keyframe modes need a VLM model (vlm_config.model_id).
+//   - keyframe modes need the video section's own vision model
+//     (video_config.vlm_config.model_id). The image section's
+//     vlm_config.model_id does not count: the two sections are configured
+//     independently, and an implicit fallback would hide which model actually
+//     described the frames.
 //
 // The model ids are only checked for presence here: whether the id resolves to
 // an existing, correctly typed model is a database question answered by the
@@ -897,7 +945,7 @@ func VideoAudioParseEnabled(kb *KnowledgeBase) bool {
 	if kb.VideoConfig.AllowsAudioParse() && kb.VideoConfig.HasOwnASRModel() {
 		return true
 	}
-	return kb.VideoConfig.AllowsKeyframeParse() && kb.VLMConfig.IsEnabled()
+	return kb.VideoConfig.AllowsKeyframeParse() && kb.VideoConfig.FrameVLM().IsEnabled()
 }
 
 // ExtractConfig represents the extract configuration for a knowledge base
@@ -1055,6 +1103,14 @@ func (kb *KnowledgeBase) MarshalJSON() ([]byte, error) {
 	redacted.StorageConfig.SecretID = ""
 	redacted.StorageConfig.SecretKey = ""
 	redacted.VLMConfig.APIKey = ""
+	// The video section carries its own VLMConfig. Copy it before redacting:
+	// the nested block is a pointer, so writing through it would clear the
+	// caller's in-memory key, not just the rendered response.
+	if redacted.VideoConfig.VLMConfig != nil {
+		frameVLM := *redacted.VideoConfig.VLMConfig
+		frameVLM.APIKey = ""
+		redacted.VideoConfig.VLMConfig = &frameVLM
+	}
 	aux := struct {
 		*alias
 		Capabilities KBCapabilities `json:"capabilities"`

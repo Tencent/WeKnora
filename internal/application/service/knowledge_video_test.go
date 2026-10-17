@@ -5,11 +5,13 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -214,9 +216,12 @@ func newAudioOnlyVideoKB() *types.KnowledgeBase {
 
 func newKeyframeVideoKB() *types.KnowledgeBase {
 	return &types.KnowledgeBase{
-		ID:          "kb-1",
-		VideoConfig: types.VideoConfig{Enabled: true, Mode: types.VideoParseModeKeyframes},
-		VLMConfig:   types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
+		ID: "kb-1",
+		VideoConfig: types.VideoConfig{
+			Enabled:   true,
+			Mode:      types.VideoParseModeKeyframes,
+			VLMConfig: &types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
+		},
 	}
 }
 
@@ -224,9 +229,11 @@ func newAudioKeyframeVideoKB() *types.KnowledgeBase {
 	return &types.KnowledgeBase{
 		ID: "kb-1",
 		VideoConfig: types.VideoConfig{
-			Enabled: true, Mode: types.VideoParseModeAudioKeyframes, ModelID: "asr-1",
+			Enabled:   true,
+			Mode:      types.VideoParseModeAudioKeyframes,
+			ModelID:   "asr-1",
+			VLMConfig: &types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
 		},
-		VLMConfig: types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
 	}
 }
 
@@ -247,7 +254,7 @@ func TestConvertVideoHandsTheTrackToTheASRStep(t *testing.T) {
 	kb := newAudioOnlyVideoKB()
 
 	result, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
-		kb, knowledge, ResolveProcessConfig(kb, nil))
+		kb, knowledge)
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -275,7 +282,7 @@ func TestConvertVideoFallsBackToArchiveWhenExtractionFails(t *testing.T) {
 	kb := newAudioOnlyVideoKB()
 
 	_, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
-		kb, knowledge, ResolveProcessConfig(kb, nil))
+		kb, knowledge)
 
 	require.NoError(t, err, "degradation is not a task failure")
 	require.Equal(t, 1, repo.updates)
@@ -300,7 +307,7 @@ func TestConvertVideoFallsBackWhenTheStoredFileIsUnreadable(t *testing.T) {
 	kb := newAudioOnlyVideoKB()
 
 	_, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
-		kb, knowledge, ResolveProcessConfig(kb, nil))
+		kb, knowledge)
 
 	require.NoError(t, err)
 	require.Zero(t, extractor.calls, "no bytes means no ffmpeg run")
@@ -322,7 +329,7 @@ func TestConvertVideoRetriesWhenArchivingCannotBePersisted(t *testing.T) {
 	kb := newAudioOnlyVideoKB()
 
 	_, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
-		kb, knowledge, ResolveProcessConfig(kb, nil))
+		kb, knowledge)
 
 	require.Error(t, err)
 }
@@ -348,7 +355,7 @@ func TestConvertVideoDescribesSampledFrames(t *testing.T) {
 	kb := newKeyframeVideoKB()
 
 	result, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
-		kb, knowledge, ResolveProcessConfig(kb, nil))
+		kb, knowledge)
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -380,6 +387,135 @@ func TestConvertVideoDescribesSampledFrames(t *testing.T) {
 	require.Contains(t, chunked.String(), "[00:00:15] 画面：PPT： 视频处理架构")
 }
 
+// Frame descriptions use the video section's own vision model. The image
+// section's vlm_config is a different setting: retuning image descriptions must
+// never silently change what a video's frames say.
+func TestConvertVideoDescribesFramesWithTheVideoSectionsVLM(t *testing.T) {
+	t.Parallel()
+
+	model := &videoTestVLM{replies: []string{"界面：登录页"}}
+	modelSvc := &videoTestModelService{vlmModel: model}
+	svc := &knowledgeService{
+		repo:    &videoTestKnowledgeRepo{},
+		fileSvc: &videoTestFileService{content: []byte("mp4-bytes")},
+		videoFrameExtractor: &fakeVideoFrameExtractor{
+			frames: []videoFrame{{StartMs: 0, Data: []byte("jpeg")}},
+		},
+		modelService: modelSvc,
+	}
+	knowledge := newVideoTestKnowledge()
+	kb := &types.KnowledgeBase{
+		ID: "kb-1",
+		VideoConfig: types.VideoConfig{
+			Enabled:   true,
+			Mode:      types.VideoParseModeKeyframes,
+			VLMConfig: &types.VLMConfig{Enabled: true, ModelID: "vlm-video"},
+		},
+		// A different, perfectly usable VLM in the image section: it must not be
+		// the model the video asks for.
+		VLMConfig: types.VLMConfig{Enabled: true, ModelID: "vlm-image"},
+	}
+
+	result, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
+		kb, knowledge)
+
+	require.NoError(t, err)
+	require.Len(t, result.VideoFrames, 1)
+	require.Equal(t, "vlm-video", modelSvc.gotVLMModelID,
+		"the video's frames must be described by video_config.vlm_config")
+	require.Len(t, model.prompts, 1)
+}
+
+// The system-owned prompt is byte-for-byte what it was before the configurable
+// instructions existed: a knowledge base that never customized anything must
+// send exactly the same text to the model.
+func TestBuildVideoFramePromptIsUnchangedWithoutInstructions(t *testing.T) {
+	t.Parallel()
+
+	const want = `You describe frames sampled from a training video so a text-only reader can follow it.
+Look at the frame and report, in this order of priority:
+1. Software interfaces: which screen, menu, dialog or button is visible, and the readable labels.
+2. Terminals: the command being run and the visible output.
+3. Slides, whiteboards or diagrams: the title and the key points.
+Only state what is clearly visible. If the frame is blank, blurred or unreadable,
+say "unreadable frame" instead of guessing.
+Answer in Chinese with at most three short sentences. No preamble, no markdown headings, no bullet points.`
+
+	for _, instructions := range []string{"", "   ", "\n\t"} {
+		got := buildVideoFramePrompt(context.Background(), types.VLMConfig{
+			DescriptionLanguage: "Chinese",
+			CustomInstructions:  instructions,
+		})
+		require.Equal(t, want, got, "instructions %q must not change the prompt", instructions)
+	}
+}
+
+// Custom guidance is appended after the fixed block, so the unreadable-frame
+// rule and the output shape stay in force even when the operator writes
+// guidance that tries to replace them.
+func TestBuildVideoFramePromptAppendsInstructionsAfterTheFixedRules(t *testing.T) {
+	t.Parallel()
+
+	base := buildVideoFramePrompt(context.Background(), types.VLMConfig{DescriptionLanguage: "Chinese"})
+	guidance := "重点识别报错弹窗和按钮文案；忽略右下角水印。"
+	got := buildVideoFramePrompt(context.Background(), types.VLMConfig{
+		DescriptionLanguage: "Chinese",
+		CustomInstructions:  "  " + guidance + "  ",
+	})
+
+	require.True(t, strings.HasPrefix(got, base),
+		"the fixed prompt must come first, unchanged")
+	require.Contains(t, got, guidance)
+	require.Contains(t, got, "unreadable frame", "the anti-hallucination rule must survive")
+	require.Contains(t, got, "at most three short sentences", "the output contract must survive")
+	require.Contains(t, got, "video_frame_business_instructions")
+	require.Contains(t, got, "do not conflict with the system-owned output format")
+	require.Less(t, strings.Index(got, "unreadable frame"), strings.Index(got, guidance),
+		"the fixed rules must precede the custom guidance")
+}
+
+// Without a VLM in the video section the frame pass is skipped with a warning,
+// and the narration is still transcribed: the two sources degrade
+// independently.
+func TestConvertVideoKeepsNarrationWhenTheVideoVLMIsNotConfigured(t *testing.T) {
+	// Not parallel: it captures the process-wide logger output.
+	var logs bytes.Buffer
+	logger.SetOutput(&logs)
+	defer logger.SetOutput(os.Stdout)
+
+	frames := &fakeVideoFrameExtractor{
+		frames: []videoFrame{{StartMs: 0, Data: []byte("jpeg")}},
+	}
+	modelSvc := &videoTestModelService{vlmModel: &videoTestVLM{replies: []string{"never used"}}}
+	svc := &knowledgeService{
+		repo:                &videoTestKnowledgeRepo{},
+		fileSvc:             &videoTestFileService{content: []byte("mp4-bytes")},
+		videoExtractor:      &fakeVideoExtractor{audio: []byte("m4a-bytes")},
+		videoFrameExtractor: frames,
+		modelService:        modelSvc,
+	}
+	knowledge := newVideoTestKnowledge()
+	kb := &types.KnowledgeBase{
+		ID: "kb-1",
+		VideoConfig: types.VideoConfig{
+			Enabled: true, Mode: types.VideoParseModeAudioKeyframes, ModelID: "asr-1",
+		},
+		// The image section's VLM is configured and must not be borrowed.
+		VLMConfig: types.VLMConfig{Enabled: true, ModelID: "vlm-image"},
+	}
+
+	result, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
+		kb, knowledge)
+
+	require.NoError(t, err)
+	require.True(t, result.IsAudio, "the narration must still be transcribed")
+	require.Equal(t, []byte("m4a-bytes"), result.AudioData)
+	require.Empty(t, result.VideoFrames)
+	require.Zero(t, frames.calls, "no video VLM means the frame pass never runs")
+	require.Empty(t, modelSvc.gotVLMModelID, "the image section's VLM must not be resolved")
+	require.Contains(t, logs.String(), "the video section has no VLM model configured")
+}
+
 // A failed frame pass must not cost the narration: the audio result is still
 // handed to the ASR step, and only the picture source degrades.
 func TestConvertVideoKeepsAudioWhenFrameDescriptionFails(t *testing.T) {
@@ -398,7 +534,7 @@ func TestConvertVideoKeepsAudioWhenFrameDescriptionFails(t *testing.T) {
 	kb := newAudioKeyframeVideoKB()
 
 	result, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
-		kb, knowledge, ResolveProcessConfig(kb, nil))
+		kb, knowledge)
 
 	require.NoError(t, err)
 	require.True(t, result.IsAudio)
@@ -426,7 +562,7 @@ func TestConvertVideoArchivesKeyframesWithoutVLM(t *testing.T) {
 	}
 
 	_, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
-		kb, knowledge, ResolveProcessConfig(kb, nil))
+		kb, knowledge)
 
 	require.NoError(t, err, "degradation is not a task failure")
 	require.Equal(t, 1, repo.updates)
@@ -452,7 +588,7 @@ func TestConvertVideoArchivesWhenVLMDescribesNothing(t *testing.T) {
 	kb := newKeyframeVideoKB()
 
 	_, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
-		kb, knowledge, ResolveProcessConfig(kb, nil))
+		kb, knowledge)
 
 	require.NoError(t, err)
 	require.Equal(t, types.ParseStatusStored, repo.columns["parse_status"])
@@ -460,7 +596,7 @@ func TestConvertVideoArchivesWhenVLMDescribesNothing(t *testing.T) {
 
 // The audio source exists only when the video section names a model; the audio
 // section's ASR is a different upload type and must not make this capability
-// true.
+// true. The frame source is the same story with the image section's VLM.
 func TestVideoParseCapabilitiesReadTheVideoSectionOnly(t *testing.T) {
 	t.Parallel()
 
@@ -468,7 +604,7 @@ func TestVideoParseCapabilitiesReadTheVideoSectionOnly(t *testing.T) {
 		VideoConfig: types.VideoConfig{Enabled: true, Mode: types.VideoParseModeAudioOnly},
 		ASRConfig:   types.ASRConfig{Enabled: true, ModelID: "asr-audio"},
 	}
-	audio, frames := videoParseCapabilities(audioOnly, ResolveProcessConfig(audioOnly, nil))
+	audio, frames := videoParseCapabilities(audioOnly)
 	require.False(t, audio, "an audio-section model must not count as the video's model")
 	require.False(t, frames)
 
@@ -477,9 +613,30 @@ func TestVideoParseCapabilitiesReadTheVideoSectionOnly(t *testing.T) {
 			Enabled: true, Mode: types.VideoParseModeAudioOnly, ModelID: "asr-video",
 		},
 	}
-	audio, frames = videoParseCapabilities(withVideoModel, ResolveProcessConfig(withVideoModel, nil))
+	audio, frames = videoParseCapabilities(withVideoModel)
 	require.True(t, audio)
 	require.False(t, frames)
+
+	// The image section's VLM is a different setting: a keyframes video whose
+	// only VLM lives at the knowledge-base level has no frame source.
+	imageVLMOnly := &types.KnowledgeBase{
+		VideoConfig: types.VideoConfig{Enabled: true, Mode: types.VideoParseModeKeyframes},
+		VLMConfig:   types.VLMConfig{Enabled: true, ModelID: "vlm-image"},
+	}
+	audio, frames = videoParseCapabilities(imageVLMOnly)
+	require.False(t, audio)
+	require.False(t, frames, "the image section's VLM must not describe video frames")
+
+	withVideoVLM := &types.KnowledgeBase{
+		VideoConfig: types.VideoConfig{
+			Enabled:   true,
+			Mode:      types.VideoParseModeKeyframes,
+			VLMConfig: &types.VLMConfig{Enabled: true, ModelID: "vlm-video"},
+		},
+	}
+	audio, frames = videoParseCapabilities(withVideoVLM)
+	require.False(t, audio)
+	require.True(t, frames)
 }
 
 // audio_only without a video ASR model has no text source at all: the video is
@@ -502,7 +659,7 @@ func TestConvertVideoArchivesAudioOnlyWithoutTheVideoASRModel(t *testing.T) {
 	}
 
 	_, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
-		kb, knowledge, ResolveProcessConfig(kb, nil))
+		kb, knowledge)
 
 	require.NoError(t, err, "degradation is not a task failure")
 	require.Zero(t, extractor.calls, "no video ASR means no narration pass")
@@ -532,14 +689,17 @@ func TestVideoAudioAndKeyframesWithoutVideoASRKeepsFrameDescriptions(t *testing.
 	}
 	knowledge := newVideoTestKnowledge()
 	kb := &types.KnowledgeBase{
-		ID:          "kb-1",
-		VideoConfig: types.VideoConfig{Enabled: true, Mode: types.VideoParseModeAudioKeyframes},
-		ASRConfig:   types.ASRConfig{Enabled: true, ModelID: "asr-audio"},
-		VLMConfig:   types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
+		ID: "kb-1",
+		VideoConfig: types.VideoConfig{
+			Enabled:   true,
+			Mode:      types.VideoParseModeAudioKeyframes,
+			VLMConfig: &types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
+		},
+		ASRConfig: types.ASRConfig{Enabled: true, ModelID: "asr-audio"},
 	}
 
 	result, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge),
-		kb, knowledge, ResolveProcessConfig(kb, nil))
+		kb, knowledge)
 
 	require.NoError(t, err)
 	require.Zero(t, extractor.calls, "the narration source is skipped without a video ASR")
@@ -808,44 +968,66 @@ func TestTranscribeMediaKeepsFramesWhenTranscriptionFails(t *testing.T) {
 }
 
 // Readiness only checks presence, but it checks the video section: an audio
-// override (or an audio-section model) cannot make an audio video parseable.
+// override, an audio-section model, or an image-section VLM cannot make a video
+// parseable.
 func TestVideoParseReadyUsesTheVideoModelOnly(t *testing.T) {
 	t.Parallel()
 
 	audioOnly := &types.KnowledgeBase{
 		VideoConfig: types.VideoConfig{Enabled: true, Mode: types.VideoParseModeAudioOnly},
 	}
-	require.False(t, videoParseReady(audioOnly, ResolveProcessConfig(audioOnly, nil)))
+	require.False(t, videoParseReady(audioOnly))
 
 	asrEnabled := true
 	audioOverride := &types.KnowledgeProcessOverrides{
 		ASRConfig: &types.ASRConfig{Enabled: asrEnabled, ModelID: "asr-override"},
 	}
-	require.False(t, videoParseReady(audioOnly, ResolveProcessConfig(audioOnly, audioOverride)),
+	require.False(t, videoParseReady(audioOnly),
 		"an ASR override belongs to audio uploads, not to the video section")
+	require.True(t, ResolveProcessConfig(audioOnly, audioOverride).ASRConfig.IsASREnabled(),
+		"the override does merge into the effective config; only the video gate ignores it")
 
 	withVideoModel := &types.KnowledgeBase{
 		VideoConfig: types.VideoConfig{
 			Enabled: true, Mode: types.VideoParseModeAudioOnly, ModelID: "asr-video",
 		},
 	}
-	require.True(t, videoParseReady(withVideoModel, ResolveProcessConfig(withVideoModel, nil)))
+	require.True(t, videoParseReady(withVideoModel))
 
 	keyframes := &types.KnowledgeBase{
 		VideoConfig: types.VideoConfig{Enabled: true, Mode: types.VideoParseModeKeyframes},
 	}
-	require.False(t, videoParseReady(keyframes, ResolveProcessConfig(keyframes, nil)))
+	require.False(t, videoParseReady(keyframes))
 	vlmOverride := &types.KnowledgeProcessOverrides{
 		VLMConfig: &types.VLMConfig{Enabled: true, ModelID: "vlm-override"},
 	}
-	require.True(t, videoParseReady(keyframes, ResolveProcessConfig(keyframes, vlmOverride)),
-		"a VLM override makes a keyframes video parseable")
+	require.True(t, ResolveProcessConfig(keyframes, vlmOverride).VLMConfig.IsEnabled(),
+		"the image override merges into the effective config; only the video gate ignores it")
+	require.False(t, videoParseReady(keyframes),
+		"a VLM override belongs to image parsing; the video keeps its own model")
+
+	keyframesWithImageVLM := &types.KnowledgeBase{
+		VideoConfig: types.VideoConfig{Enabled: true, Mode: types.VideoParseModeKeyframes},
+		VLMConfig:   types.VLMConfig{Enabled: true, ModelID: "vlm-image"},
+	}
+	require.False(t, videoParseReady(keyframesWithImageVLM),
+		"the image section's VLM must not make a keyframes video parseable")
+
+	keyframesWithVideoVLM := &types.KnowledgeBase{
+		VideoConfig: types.VideoConfig{
+			Enabled:   true,
+			Mode:      types.VideoParseModeKeyframes,
+			VLMConfig: &types.VLMConfig{Enabled: true, ModelID: "vlm-video"},
+		},
+	}
+	require.True(t, videoParseReady(keyframesWithVideoVLM),
+		"the video section's own VLM makes a keyframes video parseable")
 
 	disabled := &types.KnowledgeBase{
 		VideoConfig: types.VideoConfig{Enabled: false, Mode: types.VideoParseModeAudioKeyframes},
 		ASRConfig:   types.ASRConfig{Enabled: true, ModelID: "asr-1"},
 	}
-	require.False(t, videoParseReady(disabled, ResolveProcessConfig(disabled, nil)))
+	require.False(t, videoParseReady(disabled))
 }
 
 // The connector asks to store unindexed. With the KB opted in, the same bytes
@@ -1088,7 +1270,7 @@ func TestCanUpgradeStoredVideo(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			require.Equal(t, tc.want, canUpgradeStoredVideo(tc.knowledge, tc.kb, nil))
+			require.Equal(t, tc.want, canUpgradeStoredVideo(tc.knowledge, tc.kb))
 		})
 	}
 }

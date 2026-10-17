@@ -2827,9 +2827,9 @@ func (s *knowledgeService) reparseKnowledge(
 	// The exception is a video the knowledge base has since opted into parsing:
 	// that is the upgrade path for the archive that already exists, and the
 	// worker keeps "stored" as its floor if the audio cannot be read. The
-	// prerequisites are checked against the same effective config the worker
-	// will see, so a reparse never enqueues a task bound to degrade.
-	videoUpgrade := canUpgradeStoredVideo(existing, kb, processOverrides)
+	// prerequisites are the video section's own models, the same ones the
+	// worker reads, so a reparse never enqueues a task bound to degrade.
+	videoUpgrade := canUpgradeStoredVideo(existing, kb)
 	if existing.ParseStatus == types.ParseStatusStored && !allowStored && !videoUpgrade {
 		return nil, werrors.NewBadRequestError("该文件为仅存档条目，没有可重建的索引，不支持重新解析")
 	}
@@ -3838,7 +3838,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// 条件不满足时视频保持存档（stored），不算失败：配置可能在任务入队后被
 	// 关掉，而文件本身仍然完好，没有理由把一次同步标红。
 	if payload.FilePath != "" && IsVideoType(payload.FileType) &&
-		!videoParseReady(kb, eff) {
+		!videoParseReady(kb) {
 		if _, err := s.settleVideoAsArchive(ctx, knowledge,
 			"video parsing is disabled or no model is configured for its mode"); err != nil {
 			return err
@@ -4162,7 +4162,7 @@ func (s *knowledgeService) convert(
 	// Everything after extraction is the shared ASR/chunk/embed pipeline, so
 	// this hop is the whole difference between a video and an audio upload.
 	if !isURL && IsVideoType(fileType) {
-		return s.convertVideo(ctx, payload, kb, knowledge, eff)
+		return s.convertVideo(ctx, payload, kb, knowledge)
 	}
 
 	tenantOverrides := s.getParserEngineOverridesFromContext(ctx)
