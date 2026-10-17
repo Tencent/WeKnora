@@ -827,7 +827,8 @@ onMounted(async () => {
 .provider-card--keenable .provider-card__badge {
   .provider-card-badge-color(#149e82);
 }
-.provider-card--zhipu .provider-card__badge {
+.provider-card--zhipu .provider-card__badge,
+.provider-card--zhipu_prime .provider-card__badge {
   .provider-card-badge-color(#2563eb);
 }
 
@@ -1075,7 +1076,8 @@ onMounted(async () => {
   background: rgba(20, 158, 130, 0.12);
   color: #149E82;
 }
-.websearch-drawer--zhipu .setting-drawer__header-icon {
+.websearch-drawer--zhipu .setting-drawer__header-icon,
+.websearch-drawer--zhipu_prime .setting-drawer__header-icon {
   background: rgba(37, 99, 235, 0.12);
   color: #2563EB;
 }
