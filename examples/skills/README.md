@@ -7,12 +7,20 @@
 ```
 skills/
 ├── README.md              # 本文件
-└── pdf-processing/        # PDF 处理技能示例
-    ├── SKILL.md           # 主文件（Level 2）
-    ├── FORMS.md           # 补充文档（Level 3）
-    └── scripts/           # 可执行脚本
-        ├── analyze_form.py
-        └── extract_text.py
+├── pdf-processing/        # PDF 处理技能示例
+│   ├── SKILL.md           # 主文件（Level 2）
+│   ├── FORMS.md           # 补充文档（Level 3）
+│   └── scripts/           # 可执行脚本
+│       ├── analyze_form.py
+│       └── extract_text.py
+└── presentation-generation/ # 可编辑 PPTX 生成示例
+    ├── SKILL.md
+    ├── requirements.txt
+    ├── assets/example.json
+    ├── scripts/build_presentation.py
+    └── tests/
+        ├── test_build_presentation.py
+        └── verify_weknora_preview.ts
 ```
 
 ## 快速开始
@@ -76,6 +84,10 @@ description: Extract text and tables from PDF files, fill forms, merge documents
 |------|------|
 | `analyze_form.py` | 分析 PDF 表单字段 |
 | `extract_text.py` | 从 PDF 提取文本 |
+
+## 示例：presentation-generation
+
+该 focused skill 将结构化 JSON 生成可编辑的 `.pptx`，支持中英文文本、五种布局、锁定依赖和可重复的包结构/文本验证。输出到 `/workspace/output` 后直接复用现有 ArtifactCollector、PPTX 预览与下载链路。
 
 ### 使用示例
 
