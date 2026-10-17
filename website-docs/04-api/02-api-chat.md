@@ -421,6 +421,44 @@ curl -N -X POST $BASE/api/v1/agent-chat/s-1 -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"query":"分析上季度数据","agent_id":"agent-1"}'
 ```
 
+## 两接口的流式事件差异（引用获取指引）
+
+`knowledge-chat` 与 `agent-chat` 共用同一 SSE 信封与事件集（见[总览·流式接口协议](./01-api-overview.md#流式接口协议sse)），但在引用回传上目前存在差异：
+
+| | `knowledge-chat` | `agent-chat` |
+| --- | --- | --- |
+| `references` 事件 | ✅ 检索命中时发出，携带 `knowledge_references` | ❌ 当前不发出（[修复讨论中 #3501](https://github.com/Tencent/WeKnora/issues/3501)） |
+| 消息落库 `knowledge_references` | ✅ 随消息持久化 | ❌ 当前为空数组（同上） |
+| 答案内联 `<kb/>` 标记 | 通常有 | 通常有，**非确定**（见下） |
+
+需要结构化引用的消费方，现阶段建议：`agent-chat` 场景解析答案内联标记（见下节），或改走 `knowledge-search` / `knowledge-chat`；`references` 结构化通道在 `agent-chat` 上的补齐正在 [#3501](https://github.com/Tencent/WeKnora/issues/3501) 讨论。
+
+### 答案内联 `<kb/>` 标记的解析要点
+
+两接口的答案正文中，模型可能以内联标记标注引用来源：
+
+```
+<kb doc="文档标题" chunk_id="chunk-uuid" kb_id="kb-uuid"/>
+```
+
+解析时有三个必须注意的行为特征：
+
+1. **流式切块**：标记可能被 `answer` 增量事件从中间切开，必须聚合完整答案后再解析（产品前端的参考实现：`frontend/src/utils/citationMarkdown.ts`）。
+2. **非确定性**：标记是否出现、出现几处取决于模型行为，同一问题两次运行可能一次有多处、一次完全没有。不能把它当作协议保证——依赖它的消费方应在无标记轮次给出降级展示。
+3. **字段与 `knowledge_references` 同源**：`chunk_id` / `kb_id` 可直接用于后续 `knowledge-search` 或溯源接口。
+
+### 内置智能体的调用前置
+
+`agent-chat` 使用内置智能体（`builtin-quick-answer` / `builtin-smart-reasoning` 等）前，需要先为其绑定模型，否则分别返回 400 `chat model is not configured` / `rerank model is not configured`：
+
+```bash
+curl -X PUT $BASE/api/v1/agents/builtin-smart-reasoning \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"config":{"agent_mode":"smart-reasoning","model_id":"<chat-model-uuid>","rerank_model_id":"<rerank-model-uuid>","kb_selection_mode":"request"}}'
+```
+
+`kb_selection_mode: "request"` 表示知识库范围跟随每次请求的 `knowledge_base_ids`（产品内即"每次对话选择"行为）。
+
 ### POST /api/v1/knowledge-search
 
 用途：无会话知识检索（非流式），外部系统取检索结果的首选接口。和产品内问答走同一条检索流程（召回 → rerank → 合并 → 截断），排序与页面问答一致。和 `hybrid-search` 怎么选见[检索接口怎么选](./01-api-overview.md#retrieval-api)。Handler: `internal/handler/session/qa.go` 的 `SearchKnowledge`。
