@@ -1139,6 +1139,18 @@ const (
 	toolImageDescribeTimeout     = 120 * time.Second
 )
 
+// DescribeDataURIImages turns user-uploaded data URIs into text with the
+// configured VLM. A chat model that cannot see images uses this instead of
+// dropping the upload. Uploads ask for a full read; tool results keep the
+// prompt that came with the tool call.
+func (e *AgentEngine) DescribeDataURIImages(ctx context.Context, imageDataURIs []string) []string {
+	prompts := make([]string, len(imageDataURIs))
+	for i := range prompts {
+		prompts[i] = toolImageFullPrompt
+	}
+	return e.describeImages(ctx, imageDataURIs, prompts)
+}
+
 // describeImages asks the configured VLM to describe tool result images, a
 // few at a time, each under its own timeout so a slow image cannot starve the
 // rest. prompts is aligned with the images (nil means a brief description for
