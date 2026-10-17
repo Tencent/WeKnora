@@ -98,6 +98,12 @@ func (approvedOAuthGate) RequestAndWait(context.Context, approval.PendingRequest
 	return approval.Decision{Approved: true}, nil
 }
 
+func (approvedOAuthGate) ResumeDecision(_ context.Context, p *types.AgentPrompt, _ *event.EventBus) approval.Decision {
+	return approval.Decision{PendingID: p.ID, Approved: true}
+}
+
+func (approvedOAuthGate) MarkExecuted(context.Context, string) {}
+
 func (g approvedOAuthGate) RequestOAuthAndWait(
 	ctx context.Context, req approval.OAuthPendingRequest,
 ) (approval.Decision, error) {
@@ -213,4 +219,82 @@ func TestOAuthRetryRecyclesOnlyOutdatedConnections(t *testing.T) {
 			require.Equal(t, tc.otherUserSurvives, bobConn.IsConnected())
 		})
 	}
+}
+
+// tenantRecordingGate records the workspace each prompt is filed under.
+type tenantRecordingGate struct {
+	approvedOAuthGate
+	approvalTenant, oauthTenant *uint64
+}
+
+func (g tenantRecordingGate) RequestAndWait(
+	ctx context.Context, req approval.PendingRequest,
+) (approval.Decision, error) {
+	*g.approvalTenant = req.TenantID
+	return g.approvedOAuthGate.RequestAndWait(ctx, req)
+}
+
+func (g tenantRecordingGate) RequestOAuthAndWait(
+	ctx context.Context, req approval.OAuthPendingRequest,
+) (approval.Decision, error) {
+	*g.oauthTenant = req.TenantID
+	return g.approvedOAuthGate.RequestOAuthAndWait(ctx, req)
+}
+
+// A shared agent runs in its owner's workspace, but the user answers its
+// prompts from their own: the prompts must be filed under the user's, while
+// the service and its tokens are still looked up in the agent's.
+func TestMCPToolFilesPromptsUnderCallerWorkspaceForSharedAgent(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+	mcpServer := sdkserver.NewMCPServer("test", "1")
+	mcpServer.AddTool(mcpgo.NewTool("echo"),
+		func(context.Context, mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+			return mcpgo.NewToolResultText("pong"), nil
+		})
+	server := httptest.NewServer(sdkserver.NewStreamableHTTPServer(mcpServer, sdkserver.WithStateLess(true)))
+	t.Cleanup(server.Close)
+	service := &types.MCPService{
+		ID:            "svc-shared",
+		Name:          "km",
+		Enabled:       true,
+		TransportType: types.MCPTransportHTTPStreamable,
+		URL:           &server.URL,
+		AuthConfig:    &types.MCPAuthConfig{AuthType: types.MCPAuthOAuth},
+	}
+	repo := &oauthRetryTestRepo{clients: map[string]*types.MCPOAuthClient{}, tokens: map[string]*types.MCPOAuthToken{}}
+	repo.registerClient(service.ID, "client-1")
+	manager := mcp.NewMCPManager(repo)
+	t.Cleanup(manager.Shutdown)
+
+	alice := types.Principal{Type: types.PrincipalWebUser, ID: "alice"}
+	const callerTenant = uint64(3)
+	var approvalTenant, oauthTenant uint64
+	prompts := 0
+	gate := tenantRecordingGate{
+		approvedOAuthGate: approvedOAuthGate{
+			oauthRetryTestGate: oauthRetryTestGate{authorized: func() { repo.saveToken(alice, service.ID) }},
+			oauthPrompts:       &prompts,
+		},
+		approvalTenant: &approvalTenant,
+		oauthTenant:    &oauthTenant,
+	}
+	tool := NewMCPTool(service, &types.MCPTool{Name: "echo"}, manager, gate, 0)
+
+	caller := types.WithPrincipal(
+		context.WithValue(context.Background(), types.TenantIDContextKey, callerTenant), alice)
+	base := types.WithExecutionTenant(caller, oauthRetryTestTenant)
+	ctx := WithToolExecContext(base, &ToolExecContext{
+		EventBus:    event.NewEventBus(),
+		ToolCallID:  "call-1",
+		UserID:      alice.StorageID(),
+		ApprovalCtx: base,
+		ExecTimeout: 5 * time.Second,
+	})
+	result, err := tool.Execute(ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.True(t, result.Success, result.Error)
+	require.Equal(t, 1, prompts)
+	require.Equal(t, callerTenant, approvalTenant)
+	require.Equal(t, callerTenant, oauthTenant)
 }

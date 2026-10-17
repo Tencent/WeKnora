@@ -54,6 +54,24 @@
   caption="解析时间线：各阶段耗时、失败原因与卡住提示"
   hint="展示文档解析时间线抽屉：阶段瀑布图（文档解析/分块/向量化/多模态/后处理）、失败时的错误卡片（阶段名、错误码、后端原因与重试按钮），以及「已 N 分钟没有进展」的提示条和停止解析按钮。" />
 
+## 浏览画廊 {#image-gallery}
+
+文档知识库的「画廊」页签汇总从文档提取的图片，以瀑布流持续加载。可搜索图片描述和 OCR 文字，按系统提供的图片属性、来源文档等筛选；点击图片可查看大图、描述、OCR 与来源。来源文档筛选支持多选，便于核对某批文件的解析结果。
+
+画廊展示已有图片资源，不要求开启图片向量检索。
+
+<Screenshot src="/screenshots/kb-image-gallery.png" caption="知识库画廊：图片瀑布流与来源文档筛选" hint="展示画廊页签、搜索和来源文档筛选弹层，放入含照片、图表的多份文档；另一张详情可展示 OCR、描述与来源链接。" />
+
+<Screenshot src="/screenshots/kb-image-gallery-detail.png" caption="画廊详情：查看原图、图片描述、识别文字与来源文档" />
+
+## 多模态 Embedding 与图片检索 {#multimodal-embedding}
+
+支持图片输入的 Embedding 模型将文本与原图编码到同一向量空间，使文字问题能够召回相关图片。已支持的模型包括腾讯 WeMM-Embedding、Qwen3-VL-Embedding 等，接入时需匹配图片输入能力与请求协议；WeMM 的服务部署与接入见[模型配置](06-models.md#wemm-embedding)。
+
+在知识库设置中开启多模态处理和「图片向量检索」，并选用支持图片输入的向量模型。图片向量默认关闭，已有文档需要重新解析才会补建图片向量，扫描 PDF 页不生成图片向量。详细参数与限制见下文「图片向量」。
+
+<Screenshot src="/screenshots/kb-image-vector-settings.png" caption="多模态 Embedding：开启图片向量检索" hint="选择支持图片输入的向量模型，开启多模态处理，展示「图片向量检索」开关及说明；腾讯 WeMM-Embedding 可作为示例。" />
+
 ## 整理文件夹与标签
 
 文件夹用于按目录归档，一篇文档只属于一个文件夹。上传整个目录可保留层级结构；在文件夹树中重命名或移动时，子目录路径会一并更新，目标目录已存在时合并内容。文档在同一知识库内移动文件夹只调整归类，不重新解析。
@@ -206,7 +224,7 @@ OCR 决策是代码纯函数 `DecideOCR`（`internal/application/service/image_a
 - 策略读取到的属性**缺键**（模型漏答该行，或答了非法取值）→ 按 `on_unobserved` 兜底（默认仍 OCR）；
 - 全部属性都被观察到、且都不命中 → 跳过 OCR。
 
-模型答非所问 / 属性缺失一律按兜底策略处理，观察失误只多花一次调用、不会丢内容。注意**属性缺键是正常结果**：观察失败时不会写入保守默认值（schema 版本 `attrs/2`），因此 `image_attrs` 可能为空对象，读取方需区分「未观察到」与「观察到了负值」。
+模型答非所问或属性缺失时按 `on_unobserved` 策略处理，默认继续 OCR；若将其设为 `false`，未观察到属性的图片也会跳过 OCR。完整的负值观察结果可能使 OCR 被跳过，因此仍需抽查模型判断与文字提取结果。注意**属性缺键是正常结果**：观察失败时不会写入保守默认值（schema 版本 `attrs/2`），因此 `image_attrs` 可能为空对象，读取方需区分「未观察到」与「观察到了负值」。
 
 管线与观察结果记录在每张图的处理轨迹子 span 上，便于核对与排查：input `pipeline` = `observation_driven`（本开关开启）或 `caption_ocr`（关闭，历史行为）；output `attr_policy`（本轮 OCR 决策）、`image_attrs`（观察到的属性）、`ocr_skipped`（`attr_policy`＝被策略跳过 / `disabled`＝OCR 总开关关闭）、`observation_failed`（未形成有效观察）、`chunks_created`。
 

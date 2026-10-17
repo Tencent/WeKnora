@@ -4,6 +4,11 @@
         <div v-if="isRouterAlive" class="platform-route-outlet">
             <RouterView />
         </div>
+        <!-- WeKnora 助手：停靠时作为布局右栏挤压页面，悬浮时浮在页面上；都不加遮罩，
+             跨页面保留会话，从侧栏、右侧边缘按钮或命令面板唤出（设置里可选） -->
+        <AssistantPanel />
+        <AssistantLauncher />
+        <AssistantPageBridge />
         <div class="upload-mask" v-show="ismask">
             <UploadMask></UploadMask>
         </div>
@@ -27,6 +32,9 @@ import { useRoute, useRouter } from 'vue-router'
 import UploadMask from '@/components/upload-mask.vue'
 import Settings from '@/views/settings/Settings.vue'
 import GlobalCommandPalette from '@/components/GlobalCommandPalette.vue'
+import AssistantPanel from '@/components/assistant/AssistantPanel.vue'
+import AssistantLauncher from '@/components/assistant/AssistantLauncher.vue'
+import AssistantPageBridge from '@/components/assistant/AssistantPageBridge.vue'
 import GlobalInvitationBell from '@/components/GlobalInvitationBell.vue'
 import UploadTasksPanel from '@/components/upload-tasks/UploadTasksPanel.vue'
 import NewUserGuide from '@/components/NewUserGuide.vue'

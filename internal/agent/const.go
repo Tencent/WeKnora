@@ -42,6 +42,9 @@ const (
 	// 600-second command timeout so the tool can return a structured timeout
 	// result instead of being cancelled first by the generic agent wrapper.
 	shellExecToolTimeout = 10*time.Minute + 5*time.Second
+	// tryAgentToolTimeout is above the trial runner's own 4-minute limit so
+	// a slow trial still reports what the agent did before it was stopped.
+	tryAgentToolTimeout = 4*time.Minute + 30*time.Second
 
 	// maxLLMRetries is the maximum number of retries for transient LLM errors.
 	maxLLMRetries = 2
@@ -91,8 +94,11 @@ func toolExecutionTimeout(toolName string, arguments ...string) time.Duration {
 			return browserskill.HumanStepTimeout
 		}
 	}
-	if toolName == "shell_exec" {
+	switch toolName {
+	case "shell_exec":
 		return shellExecToolTimeout
+	case "try_agent":
+		return tryAgentToolTimeout
 	}
 	return defaultToolExecTimeout
 }

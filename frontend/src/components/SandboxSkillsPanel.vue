@@ -645,6 +645,7 @@ import {
 import { installSkillCatalog, type SkillCatalogItem } from '@/api/skill'
 import { installUpgradable, servedPreviousText, upgradeVersions } from '@/utils/skillUpgrade'
 import { MAX_SKILL_BUNDLE_SIZE_BYTES, MAX_SKILL_BUNDLE_SIZE_MB } from '@/utils/index'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import {
   MAX_ENV_VALUE_BYTES,
   addSkillEnvSaveInFlight,
@@ -1231,6 +1232,8 @@ async function loadAll() {
   if (props.mode === 'install') tasks.push(loadInstallerModel())
   await Promise.all(tasks)
 }
+
+useAssistantDataChange(() => { void loadSkills(true) }, { areas: ['skill'] })
 
 defineExpose({
   reload: loadAll,

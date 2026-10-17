@@ -274,7 +274,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		// enqueue its KB-scoped trigger. Retry only the trigger: appending a
 		// second pending op would duplicate durable work and its finalizer.
 		if err := enqueueWikiIngestTrigger(ctx, s.taskEnqueuer, payload.TenantID, payload.KnowledgeBaseID); err != nil {
-			s.tracker().FailSpan(ctx, postSpan, "WIKI_TRIGGER_ENQUEUE_FAILED", err.Error(), err)
+			s.tracker().FailSpanRetryable(ctx, postSpan, "WIKI_TRIGGER_ENQUEUE_FAILED", err.Error(), err)
 			return fmt.Errorf("retry wiki ingest trigger: %w", err)
 		}
 		logger.Infof(ctx, "[KnowledgePostProcess] Re-enqueued wiki ingest trigger for %s", payload.KnowledgeID)
@@ -303,7 +303,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	case expectedSubtasks == 0:
 		completed, err := s.knowledgeRepo.CompleteProcessingWithoutSubtasks(ctx, payload.KnowledgeID)
 		if err != nil {
-			s.tracker().FailSpan(ctx, postSpan, "COMPLETION_FAILED", err.Error(), err)
+			s.tracker().FailSpanRetryable(ctx, postSpan, "COMPLETION_FAILED", err.Error(), err)
 			return fmt.Errorf("complete knowledge without enrichment: %w", err)
 		}
 		if !completed {
@@ -340,7 +340,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 			// strand the row; retry so the handoff (or dead-letter) happens.
 			logger.Warnf(ctx, "[KnowledgePostProcess] SetFinalizing failed for %s: %v",
 				payload.KnowledgeID, err)
-			s.tracker().FailSpan(ctx, postSpan, "FINALIZING_HANDOFF_FAILED", err.Error(), err)
+			s.tracker().FailSpanRetryable(ctx, postSpan, "FINALIZING_HANDOFF_FAILED", err.Error(), err)
 			return fmt.Errorf("enter finalizing: %w", err)
 		}
 		if promoted {

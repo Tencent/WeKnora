@@ -13,6 +13,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"go.uber.org/dig"
 
+	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
@@ -94,6 +95,7 @@ type RouterParams struct {
 	WikiPageHandler              *handler.WikiPageHandler
 	MemoryHandler                *handler.MemoryHandler
 	HostSandbox                  service.HostSandboxManager
+	OperationDispatcher          *operations.HandlerDispatcher
 }
 
 // NewRouter 创建新的路由
@@ -333,6 +335,11 @@ func NewRouter(params RouterParams) *gin.Engine {
 		// stale template would silently 403 every API key on that route,
 		// so we panic at startup instead of shipping a dead policy.
 		rbacGuards.assertAPIKeyPoliciesMatchRoutes(r)
+	}
+
+	if params.OperationDispatcher != nil {
+		assertOperationRoutesExist(r, operations.Builtin())
+		params.OperationDispatcher.Bind(r)
 	}
 
 	return r

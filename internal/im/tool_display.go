@@ -44,6 +44,7 @@ var imToolNameLabels = map[string]string{
 	"wiki_read_page":          "Wiki 阅读",
 	"wiki_read_source_doc":    "精读源文档",
 	"todo_write":              "计划管理",
+	"ask_user":                "向用户提问",
 	"knowledge_graph_extract": "知识图谱抽取",
 	"thinking":                "思考",
 	"image_analysis":          "查看图片内容",

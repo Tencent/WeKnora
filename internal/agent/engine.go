@@ -44,6 +44,8 @@ type AgentEngine struct {
 	pinnedMCPServices    []*PinnedMCPServiceInfo // User @mentioned MCP services for this turn
 	pinnedSkills         []*PinnedSkillInfo      // User @mentioned skills for this turn
 	questionOrigin       *QuestionOriginInfo     // Source of a picked suggested question, if any
+	pageContext          *PageContextInfo        // Page the user has open, if any
+	assistantName        string                  // Workspace name for the assistant, if renamed
 	sessionID            string                  // Session ID for logging and event emission
 	systemPromptTemplate string                  // System prompt template (optional, uses default if empty)
 	memoryPrompt         string                  // Long-term memory envelope appended to the system prompt
@@ -82,6 +84,13 @@ type AgentEngine struct {
 	allowSteerOverrun bool // one extra ReAct round after a loop-end inject past MaxIterations
 	steerOverruns     int  // how many times this turn has already used the extra round
 	workspaceLayout   sandbox.WorkspaceLayout
+	// suspendable lets a user prompt end the run so it can be resumed later;
+	// suspendRequest is saved with the run for that (see EnableSuspension).
+	suspendable    bool
+	suspendRequest []byte
+	// interactive: the client renders prompt cards and can answer them.
+	interactive bool
+	progress    turnProgress
 }
 
 // maxSteerOverruns caps loop-end injects past MaxIterations. One extra round
@@ -144,6 +153,18 @@ func NewAgentEngine(
 // user picked for this turn; nil clears it.
 func (e *AgentEngine) SetQuestionOrigin(origin *QuestionOriginInfo) {
 	e.questionOrigin = origin
+}
+
+// SetPageContext records the WeKnora page the user has open for this turn;
+// nil clears it.
+func (e *AgentEngine) SetPageContext(page *PageContextInfo) {
+	e.pageContext = page
+}
+
+// SetAssistantName records the name the workspace gave the assistant; empty
+// keeps the one in the system prompt.
+func (e *AgentEngine) SetAssistantName(name string) {
+	e.assistantName = name
 }
 
 // SetPinnedMentions sets per-turn @mention scope for MCP services and skills.
@@ -399,6 +420,7 @@ func (e *AgentEngine) Execute(
 	if len(imageURLs) > 0 {
 		imgs = imageURLs[0]
 	}
+	e.beginTurn(query, imgs, state)
 	messages := e.buildMessagesWithLLMContext(systemPrompt, query, sessionID, llmContext, imgs)
 	if e.toolRegistry != nil {
 		e.toolRegistry.RememberMCPHistory(messages)
@@ -688,7 +710,9 @@ loop:
 	// state.FinalAnswer to the generic "Sorry, I was unable to generate a
 	// complete answer." message, which then leaks to the UI as the final
 	// answer for a conversation the user deliberately stopped.
-	if !state.IsComplete && ctx.Err() == nil {
+	// A suspended run has not finished either; it resumes once the user
+	// answers, so no answer is synthesized for it.
+	if !state.IsComplete && ctx.Err() == nil && state.Suspended == nil {
 		e.handleMaxIterations(ctx, query, state, sessionID, messages)
 	}
 
@@ -1049,8 +1073,18 @@ func (e *AgentEngine) runReActIteration(
 	// Thought.
 
 	// 3. Act: Execute tool calls
-	e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID, assistantMessageID)
+	e.beginRound(step, response.ToolCalls)
+	suspended := e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID, assistantMessageID)
+	e.endRound()
 	toolCallCount = len(step.ToolCalls)
+	if suspended != nil {
+		// The blocked call and the ones after it have not run, so the round
+		// is not part of the transcript yet; it is completed on resume.
+		logger.Infof(ctx, "[Agent][Round-%d] Suspended waiting on prompt %s", round, suspended.PromptID)
+		state.Suspended = suspended
+		state.SuspendedStep = &step
+		return iterOutcomeBreak, nil
+	}
 
 	// 4. Observe: Add tool results to messages and write to context
 	state.RoundSteps = append(state.RoundSteps, step)

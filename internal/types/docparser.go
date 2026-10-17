@@ -2,6 +2,11 @@ package types
 
 import "strings"
 
+// MaxInlineDocumentImages is the number of Markdown data-URI images the parser
+// stores in one pass. Producers must use a file export when a document exceeds
+// this budget, rather than leave unprocessed base64 in searchable content.
+const MaxInlineDocumentImages = 30
+
 // ReadRequest is the unified transport-agnostic request for document reading.
 // Set FileContent for file mode, URL for URL mode.
 type ReadRequest struct {

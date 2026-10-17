@@ -222,3 +222,33 @@ func TestRedisDropMessageStreamsRemovesEventsSteerAndLiveRun(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, liveID)
 }
+
+func TestResetEventsDropsEventsAndKeepsSteer(t *testing.T) {
+	redisManager, _ := newTestRedisStreamManager(t, time.Hour)
+	for name, manager := range map[string]interfaces.StreamManager{
+		"memory": NewMemoryStreamManager(), "redis": redisManager,
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			require.NoError(t, manager.AppendEvent(ctx, "session", "run",
+				interfaces.StreamEvent{ID: "old", Content: "before"}))
+			require.NoError(t, manager.AppendSteerEvents(ctx, "session", "run",
+				[]interfaces.StreamEvent{{ID: "steer-1", Content: "next"}}))
+
+			require.NoError(t, manager.ResetEvents(ctx, "session", "run"))
+			events, _, err := manager.GetEvents(ctx, "session", "run", 0)
+			require.NoError(t, err)
+			require.Empty(t, events)
+			steer, _, err := manager.GetSteerEvents(ctx, "session", "run", 0)
+			require.NoError(t, err)
+			require.Len(t, steer, 1)
+
+			require.NoError(t, manager.AppendEvent(ctx, "session", "run",
+				interfaces.StreamEvent{ID: "new", Content: "after"}))
+			events, _, err = manager.GetEvents(ctx, "session", "run", 0)
+			require.NoError(t, err)
+			require.Len(t, events, 1)
+			require.Equal(t, "new", events[0].ID)
+		})
+	}
+}

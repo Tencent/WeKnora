@@ -382,12 +382,17 @@ func (s *sessionService) ListSessions(
 	if query == nil {
 		query = &types.SessionListQuery{}
 	}
+	if !types.IsValidSessionKind(query.Kind) {
+		return nil, apperrors.NewBadRequestError("invalid session kind")
+	}
 	query.TenantID = types.MustTenantIDFromContext(ctx)
 	// API / IM / embed source filters are tenant-wide admin views over channel
 	// traffic. Gate them behind Admin+ and drop the per-user owner scope so an
 	// Owner/admin can observe sessions that are otherwise isolated per key,
 	// visitor, or IM identity; everyone else stays scoped to their own principal.
-	if types.SessionListSourceRequiresAdmin(query.Source) {
+	if query.Kind == types.SessionKindAssistant {
+		query.UserID = types.SessionOwnerIDFromContext(ctx)
+	} else if types.SessionListSourceRequiresAdmin(query.Source) {
 		if !types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
 			return nil, apperrors.NewForbiddenError(
 				"listing channel sessions requires tenant admin or owner role",
@@ -424,7 +429,9 @@ func (s *sessionService) CountSessionsBySource(
 		query = &types.SessionListQuery{}
 	}
 	query.TenantID = types.MustTenantIDFromContext(ctx)
-	if types.SessionListSourceRequiresAdmin(query.Source) {
+	if query.Kind == types.SessionKindAssistant {
+		query.UserID = types.SessionOwnerIDFromContext(ctx)
+	} else if types.SessionListSourceRequiresAdmin(query.Source) {
 		query.UserID = ""
 	} else if uid := types.SessionOwnerIDFromContext(ctx); uid != "" {
 		query.UserID = uid

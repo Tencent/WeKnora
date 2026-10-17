@@ -9,6 +9,9 @@ export interface RetrievalConfig {
   rerank_top_k: number
   rerank_threshold: number
   rerank_model_id: string
+  rrf_k?: number
+  rrf_vector_weight?: number
+  rrf_keyword_weight?: number
 }
 
 // Get tenant retrieval config via KV API

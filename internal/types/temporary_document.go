@@ -37,7 +37,7 @@ type TemporaryDocument struct {
 	Status            string         `json:"status" gorm:"type:varchar(16);not null;index"`
 	Content           string         `json:"-" gorm:"type:text"`
 	Chunks            JSON           `json:"-" gorm:"type:jsonb;not null;default:'[]'"`
-	ImageRefs         JSON           `json:"image_refs,omitempty" gorm:"type:jsonb;not null;default:'[]'"`
+	ImageRefs         JSON           `json:"image_refs,omitempty" gorm:"type:jsonb;not null;default:'[]'" swaggertype:"array,object"`
 	Metadata          JSON           `json:"metadata,omitempty" gorm:"type:jsonb;not null;default:'{}'"`
 	ProcessingOptions JSON           `json:"-" gorm:"type:jsonb;not null;default:'{}'"`
 	TokenCount        int            `json:"token_count" gorm:"not null;default:0"`

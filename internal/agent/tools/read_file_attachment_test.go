@@ -606,3 +606,49 @@ func TestAttachmentPagesReserveAllOutputMetadata(t *testing.T) {
 		})
 	}
 }
+
+func TestAttachmentImageInstructionsUseCompleteAddresses(t *testing.T) {
+	doc := readyDocument("chart-report", "Report")
+	doc.ImageRefs = types.JSON(`[{"url":"local://chart.png"}]`)
+	data := pngBytes(t)
+	tool := NewReadFileTool(nil).WithAttachments(attachment.NewReader(singleAttachmentStore(doc), 0,
+		func(context.Context, string) ([]byte, error) { return data, nil }))
+	require.Contains(t, tool.Description(), "attachment://<handle>/images/N")
+	require.NotContains(t, tool.Description(), ". /images/N reads")
+	require.Contains(t, tool.Description(), "calculations, use full + focus")
+	require.NotContains(t, tool.Description(), "full only when the user explicitly requests")
+	text := runReadFile(t, tool, ReadFileInput{Path: types.AttachmentPath(doc.ID)})
+	require.True(t, text.Success)
+	_, next, ok := strings.Cut(text.Output, "Start with read_file path=")
+	require.True(t, ok)
+	address, _, ok := strings.Cut(next, ";")
+	require.True(t, ok)
+	image := runReadFile(t, tool, ReadFileInput{Path: address, Detail: "full", Focus: "quarterly values"})
+	require.True(t, image.Success, image.Error)
+	require.Equal(t, types.AttachmentPath(doc.ID)+"/images/1", image.Data["path"])
+	require.Len(t, image.Images, 1)
+}
+
+func TestBareImageReadGuidanceDoesNotShadowSandboxFiles(t *testing.T) {
+	for _, exists := range []bool{false, true} {
+		t.Run(fmt.Sprint(exists), func(t *testing.T) {
+			source := &fakeSandboxFileSource{}
+			if exists {
+				source.data = []byte("real sandbox file")
+				source.stat = &sandbox.RemoteStatEntry{Type: sandbox.RemoteEntryFile, Size: int64(len(source.data))}
+			}
+			store := singleAttachmentStore(readyDocument("report", "not the sandbox file"))
+			tool := NewReadFileTool(source).WithAttachments(attachment.NewReader(store, 0, nil))
+			result, err := tool.Execute(sandboxFileTestContext(), json.RawMessage(`{"path":"/images/1"}`))
+			require.NoError(t, err)
+			require.Empty(t, store.loads, "a bare path must never guess an attachment")
+			if exists {
+				require.True(t, result.Success, result.Error)
+				require.Contains(t, result.Output, "real sandbox file")
+			} else {
+				require.False(t, result.Success)
+				require.Contains(t, result.Error, "attachment://<handle>/images/1")
+			}
+		})
+	}
+}

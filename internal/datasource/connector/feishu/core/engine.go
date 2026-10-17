@@ -41,12 +41,12 @@ type NodeOps[N any] interface {
 	Token(n N) string
 	Title(n N) string
 	ObjType(n N) string
-	// EditTime is the change-detection timestamp string stored in the cursor.
+	// EditTime is an opaque change key stored in the cursor (time and/or path).
 	EditTime(n N) string
 
 	// fetch retrieves one node's content; (nil, nil) means an unsupported
 	// type that yields no item.
-	Fetch(ctx context.Context, client *Client, n N, resourceID string, multimodal bool) ([]*types.FetchedItem, error)
+	Fetch(ctx context.Context, client *Client, n N, resourceID string) ([]*types.FetchedItem, error)
 
 	// ListFailureItems converts a partial-listing error into error FetchedItems.
 	ListFailureItems(resourceID string, partial error) []types.FetchedItem
@@ -81,23 +81,48 @@ func (h *CollectHandler) Emit(_ context.Context, item types.FetchedItem) error {
 
 func (h *CollectHandler) Checkpoint(_ context.Context, _ *types.SyncCursor) error { return nil }
 
+// fullSyncPending is checkpoint-only state. A retried full pass must skip work
+// completed before the checkpoint while keeping unseen deletion identities.
+const fullSyncPending = "feishu_full_sync_pending"
+
 // runSync is the single implementation behind FetchStream / FetchAll /
 // FetchIncremental. With cursor == nil it fetches everything (full sync);
 // with a cursor it skips nodes whose recorded edit time is unchanged
-// (incremental + resume). resourceIDs comes from the caller: FetchStream /
+// (incremental + resume), unless forceFull is set. Full runs retain cursor
+// identities for deletion tracking. resourceIDs comes from the caller: FetchStream /
 // FetchIncremental pass config.ResourceIDs (after a non-empty check),
 // FetchAll passes its own argument without one.
 func runSync[N any](
 	ctx context.Context, client *Client, config *types.DataSourceConfig,
 	resourceIDs []string, cursor *types.SyncCursor, h datasource.StreamHandler,
-	ops NodeOps[N],
+	ops NodeOps[N], forceFull bool,
 ) (*types.SyncCursor, error) {
 	var prevTimes map[string]map[string]string
 	if cursor != nil && cursor.ConnectorCursor != nil {
 		prevTimes = ops.DecodeCursorTimes(cursor.ConnectorCursor)
 	}
 
+	resumingFull := false
+	if cursor != nil {
+		resumingFull, _ = cursor.ConnectorCursor[fullSyncPending].(bool)
+	}
+	fullRun := forceFull || resumingFull
+	forceFull = forceFull && !resumingFull
+
+	// Keep unseen entries in checkpoints until a complete listing proves them
+	// deleted. This also preserves later resources if a run is interrupted.
 	newTimes := make(map[string]map[string]string)
+	for _, resourceID := range resourceIDs {
+		newTimes[resourceID] = make(map[string]string)
+		for token, edit := range prevTimes[resourceID] {
+			if forceFull {
+				// Invalidating the value (not the identity) makes failed full
+				// fetches retryable even if the source timestamp is unchanged.
+				edit = "!pending-full-fetch"
+			}
+			newTimes[resourceID][token] = edit
+		}
+	}
 	lastSync := time.Now()
 
 	processed := 0
@@ -111,17 +136,6 @@ func runSync[N any](
 			for _, item := range ops.ListFailureItems(resourceID, partial) {
 				if eerr := h.Emit(ctx, item); eerr != nil {
 					return nil, eerr
-				}
-			}
-		}
-
-		newTimes[resourceID] = make(map[string]string)
-		// On a partial listing, carry prior edit times forward so a later full
-		// listing can still detect changes and deletions.
-		if partial != nil && prevTimes != nil {
-			if prev, ok := prevTimes[resourceID]; ok {
-				for tok, et := range prev {
-					newTimes[resourceID][tok] = et
 				}
 			}
 		}
@@ -144,21 +158,20 @@ func runSync[N any](
 			// Resume/incremental fast-path: a node recorded at its current edit
 			// time is unchanged (or already synced this run) - keep the record
 			// and Skip re-fetching.
-			if hadPrev && prevEdit == editTimeStr {
+			if !forceFull && hadPrev && prevEdit == editTimeStr {
 				newTimes[resourceID][tok] = editTimeStr
 				continue
 			}
 
-			items, ferr := ops.Fetch(ctx, client, node, resourceID, config.MultimodalEnabled)
+			items, ferr := ops.Fetch(ctx, client, node, resourceID)
 			if ferr != nil {
 				tally.fail()
 				// Do NOT advance the cursor: the content was never fetched.
 				// Retain the prior edit time (if any) so prev != current next
 				// run and the node is retried, instead of being permanently
 				// skipped on a transient export failure (Tencent/WeKnora#2136).
-				if hadPrev {
-					newTimes[resourceID][tok] = prevEdit
-				}
+				// The seeded entry keeps the prior key, or the invalidated
+				// full-fetch key, without losing its deletion identity.
 				if eerr := h.Emit(ctx, types.FetchedItem{
 					ExternalID:       tok,
 					Title:            ops.Title(node),
@@ -186,7 +199,11 @@ func runSync[N any](
 
 			processed++
 			if processed%FeishuStreamCheckpointInterval == 0 || time.Since(lastCheckpoint) >= FeishuStreamCheckpointMaxInterval {
-				if cerr := h.Checkpoint(ctx, ops.EncodeCursor(newTimes, lastSync)); cerr != nil {
+				checkpoint := ops.EncodeCursor(newTimes, lastSync)
+				if fullRun {
+					checkpoint.ConnectorCursor[fullSyncPending] = true
+				}
+				if cerr := h.Checkpoint(ctx, checkpoint); cerr != nil {
 					logger.Warnf(ctx, "%s stream Checkpoint failed: %v", ops.LogTag(), cerr)
 				}
 				lastCheckpoint = time.Now()
@@ -211,6 +228,7 @@ func runSync[N any](
 						}); eerr != nil {
 							return nil, eerr
 						}
+						delete(newTimes[resourceID], tok)
 					}
 				}
 			}
@@ -228,7 +246,15 @@ func FetchStreamEngine[N any](
 	ctx context.Context, client *Client, config *types.DataSourceConfig,
 	cursor *types.SyncCursor, h datasource.StreamHandler, ops NodeOps[N],
 ) (*types.SyncCursor, error) {
-	return runSync(ctx, client, config, config.ResourceIDs, cursor, h, ops)
+	return runSync(ctx, client, config, config.ResourceIDs, cursor, h, ops, false)
+}
+
+// FetchFullStreamEngine refetches all nodes while retaining deletion identities.
+func FetchFullStreamEngine[N any](
+	ctx context.Context, client *Client, config *types.DataSourceConfig,
+	cursor *types.SyncCursor, h datasource.StreamHandler, ops NodeOps[N],
+) (*types.SyncCursor, error) {
+	return runSync(ctx, client, config, config.ResourceIDs, cursor, h, ops, true)
 }
 
 // FetchAllEngine runs a full sync, collecting every item into a slice. It
@@ -241,7 +267,7 @@ func FetchAllEngine[N any](
 	resourceIDs []string, ops NodeOps[N],
 ) ([]types.FetchedItem, error) {
 	ch := &CollectHandler{}
-	if _, err := runSync(ctx, client, config, resourceIDs, nil, ch, ops); err != nil {
+	if _, err := runSync(ctx, client, config, resourceIDs, nil, ch, ops, false); err != nil {
 		return nil, err
 	}
 	return ch.items, nil
@@ -255,7 +281,7 @@ func FetchIncrementalEngine[N any](
 	cursor *types.SyncCursor, ops NodeOps[N],
 ) ([]types.FetchedItem, *types.SyncCursor, error) {
 	ch := &CollectHandler{}
-	next, err := runSync(ctx, client, config, config.ResourceIDs, cursor, ch, ops)
+	next, err := runSync(ctx, client, config, config.ResourceIDs, cursor, ch, ops, false)
 	if err != nil {
 		return nil, nil, err
 	}

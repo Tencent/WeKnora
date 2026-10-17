@@ -746,13 +746,6 @@
       </div>
     </t-drawer>
 
-    <!-- Fix Chat Drawer -->
-    <t-drawer v-model:visible="showFixDrawer" :header="$t('knowledgeEditor.wikiBrowser.fixAssistantTitle')" size="700px"
-      :footer="false" class="wiki-fix-drawer">
-      <ChatView v-if="showFixDrawer" :session_id="currentFixSessionId" agentId="builtin-wiki-fixer"
-        :kbIds="[props.knowledgeBaseId]" :embeddedMode="true" />
-    </t-drawer>
-
     <!-- Revision history drawer -->
     <WikiRevisionDrawer v-model:visible="showRevisionDrawer" :kb-id="props.knowledgeBaseId"
       :slug="selectedPage?.slug || ''" :current-page="selectedPage" :can-edit="props.canEdit"
@@ -819,9 +812,9 @@
 </template>
 
 <script setup lang="ts">
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import { ref, computed, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useMenuStore } from '@/stores/menu'
 import { useSettingsStore } from '@/stores/settings'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
@@ -840,8 +833,8 @@ import {
 import { resolveWikiBacklinkTitle } from './wikiBacklinkTitles'
 import { buildGraphLayout, graphNodeRadius, stepGraphLayout, visibleGraphLabels, graphPointBounds, initialGraphViewport, graphClusterOutline, graphLandmarkTitle, type GraphBounds, type GraphCluster } from './wikiGraphLayout'
 import { getKnowledgeDetails } from '@/api/knowledge-base'
-import { createSessions } from '@/api/chat'
-import ChatView from '@/views/chat/index.vue'
+import { useAssistantStore } from '@/stores/assistant'
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import {
   listWikiPages,
   listWikiFolders,
@@ -870,7 +863,7 @@ import {
 
 const router = useRouter()
 const route = useRoute()
-const menuStore = useMenuStore()
+const assistant = useAssistantStore()
 const settingsStore = useSettingsStore()
 
 ensureLiteralSingleTildeOnGlobalMarked()
@@ -1011,10 +1004,19 @@ const activeSystemView = ref<'' | 'index'>('')
 const searchResults = ref<WikiPage[] | null>(null)
 const pageIssues = ref<WikiPageIssue[]>([])
 const showIssuesBox = ref(false)
-const showFixDrawer = ref(false)
+useAssistantPageContext(() => {
+  const page = selectedPage.value
+  if (!page) return null
+  return {
+    page: 'wiki',
+    knowledgeBaseId: props.knowledgeBaseId,
+    wikiSlug: page.slug,
+    wikiTitle: page.title,
+    wikiIssueIds: pageIssues.value.map(issue => issue.id),
+  }
+})
 const showGlobalIssuesDrawer = ref(false)
 const globalIssues = ref<WikiPageIssue[]>([])
-const currentFixSessionId = ref('')
 const stats = ref<WikiStats | null>(null)
 const graphData = ref<WikiGraphData | null>(null)
 const searchQuery = ref('')
@@ -1059,16 +1061,18 @@ const GRAPH_OVERVIEW_LIMIT = 500
 const GRAPH_EGO_LIMIT = 500
 const GRAPH_EGO_DEFAULT_DEPTH = 1
 
-watch(showGlobalIssuesDrawer, async (val) => {
-  if (val) {
-    try {
-      const res = await listWikiIssues(props.knowledgeBaseId, '', 'pending')
-      globalIssues.value = (res as any).data || res as any || []
-    } catch (e) {
-      console.error('Failed to load global wiki issues:', e)
-      globalIssues.value = []
-    }
+async function loadGlobalIssues() {
+  try {
+    const res = await listWikiIssues(props.knowledgeBaseId, '', 'pending')
+    globalIssues.value = (res as any).data || res as any || []
+  } catch (e) {
+    console.error('Failed to load global wiki issues:', e)
+    globalIssues.value = []
   }
+}
+
+watch(showGlobalIssuesDrawer, (val) => {
+  if (val) void loadGlobalIssues()
 })
 
 async function navigateToSlugAndFix(slug: string) {
@@ -3700,57 +3704,30 @@ async function handleIssueIgnore(issueId: string) {
   }
 }
 
-async function startFixSession(prompt: string) {
-  try {
-    const res = await createSessions({})
-    if (res && (res as any).data && (res as any).data.id) {
-      const sessionId = (res as any).data.id
-      const now = new Date().toISOString()
-
-      menuStore.updataMenuChildren({
-        title: t('knowledgeEditor.wikiBrowser.fixAssistantTitle'),
-        path: `chat/${sessionId}`,
-        id: sessionId,
-        isMore: false,
-        isNoTitle: true,
-        created_at: now,
-        updated_at: now
-      })
-
-      menuStore.changeIsFirstSession(true)
-      menuStore.changeFirstQuery(prompt, [], '', [])
-
-      currentFixSessionId.value = sessionId
-      showFixDrawer.value = true
-      showIssuesBox.value = false // Hide issues box
-    } else {
-      MessagePlugin.error(t('knowledgeEditor.wikiBrowser.fixStartError'))
-    }
-  } catch (e) {
-    console.error('Failed to create fix session', e)
-    MessagePlugin.error(t('knowledgeEditor.wikiBrowser.fixStartError'))
-  }
-}
-
 function triggerFixIssue(issue: WikiPageIssue) {
   if (!selectedPage.value) return
-  const prompt = t('knowledgeEditor.wikiBrowser.issueFixPromptSingle', {
-    slug: selectedPage.value.slug,
-    id: issue.id
+  showIssuesBox.value = false
+  assistant.open({
+    query: t('knowledgeEditor.wikiBrowser.issueFixPromptSingle', { description: issue.description }),
+    focus: { wikiIssueIds: [issue.id] },
   })
-  startFixSession(prompt)
 }
 
 function triggerAutoFix() {
   if (!selectedPage.value || pageIssues.value.length === 0) return
-  let prompt = t('knowledgeEditor.wikiBrowser.issueFixPromptAutoStart', { slug: selectedPage.value.slug }) + '\n\n'
-
-  pageIssues.value.forEach((issue, idx) => {
-    prompt += `${idx + 1}. Issue ID: ${issue.id}\n`
+  showIssuesBox.value = false
+  assistant.open({
+    query: t('knowledgeEditor.wikiBrowser.issueFixPromptAll', { count: pageIssues.value.length }),
+    focus: { wikiIssueIds: pageIssues.value.map(issue => issue.id) },
   })
-
-  startFixSession(prompt)
 }
+
+// The assistant may have rewritten the page or resolved its issues.
+watch(() => assistant.visible, (visible, wasVisible) => {
+  if (!wasVisible || visible || editingPage.value) return
+  void refreshSelectedPage()
+  void loadStats()
+})
 
 async function doSearch() {
   if (!searchQuery.value.trim()) {
@@ -5100,6 +5077,14 @@ watch(() => route.query.slug, (newSlug) => {
     }
   }
 })
+
+useAssistantDataChange((changes) => {
+  if (!changes.some(change => change.ids.knowledgeBaseIds.includes(props.knowledgeBaseId))) return
+  void loadPages()
+  void refreshSelectedPage()
+  void loadStats()
+  if (showGlobalIssuesDrawer.value) void loadGlobalIssues()
+}, { areas: ['wiki'] })
 
 onMounted(() => {
   loadPages()
@@ -7008,44 +6993,4 @@ span.graph-focus-name {
 }
 </style>
 
-<style lang="less">
-/* Fix Embedded Chat UI (unscoped because drawer attaches to body) */
-.wiki-fix-drawer {
-  .t-drawer__body {
-    padding: 20px !important;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    overflow: hidden;
-  }
-
-  .chat {
-    max-width: 100% !important;
-    min-width: 100% !important;
-    padding: 0 !important;
-    height: 100% !important;
-    flex: 1 !important;
-    border-radius: 0 !important;
-  }
-
-  .chat_scroll_box {
-    padding: 0 !important;
-  }
-
-  .chat>.input-container {
-    padding: 16px 0 0 0 !important;
-    box-sizing: border-box;
-    width: 100% !important;
-    max-width: 100% !important;
-    margin: 0 !important;
-    overflow-x: hidden;
-  }
-
-  .msg_list {
-    max-width: 100% !important;
-    padding-bottom: 0 !important;
-    margin: 0 !important;
-  }
-}
-</style>
 <style lang="less" src="@/components/css/wiki-graph-drawer.less"></style>

@@ -29,6 +29,8 @@ MCP 管理页支持按服务名称和卡片显示的用途说明搜索。搜索�
 
 模型先读取服务的使用说明，再按需加载具体工具，所以使用说明直接影响 Agent 能否选对服务。OAuth 服务按调用者分别授权。工具需要审批时，在对话中检查参数并确认；单独停用某个工具后，运行时不会执行该工具。WeKnora 的 MCP 客户端不支持 stdio 传输。
 
+工具人工审批通过后，如果 OAuth 尚未授权或已经失效，对话会继续给出 OAuth 授权入口；工具审批与第三方授权是两个独立步骤。无需浏览器的调用者可使用 JWT Bearer 断言换取自身主体的 token，前提是上游支持该授权方式，详见 [OAuth API](../04-api/02-api-agent-mcp.md)。
+
 ## 供外部客户端调用
 
 在「设置 → 发布集成 → MCP Server」新建端点：填写名称、选择可访问的知识库（留空为全部）、勾选要暴露的工具，并按需指定 `ask` 使用的默认 Agent（留空时使用内置快速问答）和每分钟调用上限（默认 60 次）。创建后会一次性展示令牌和地址 `/mcp/<endpoint_id>`，页面同时给出 Cursor / VS Code / Claude Desktop 的 `mcpServers` 配置、Claude Code 的一行命令，以及仅支持 stdio 的客户端通过 `mcp-remote` 桥接的写法。
@@ -276,7 +278,7 @@ sequenceDiagram
 - **发现与动态注册**（`internal/mcp/oauth_manager.go`）：`StartAuthorization` 先构造 `transport.OAuthHandler`（`AuthServerMetadataURL` 为空时由 mcp-go 依据 MCP URL 自动发现授权服务器）；服务配置了预注册客户端（`auth_config.client_id`）时直接使用它，否则若 `mcp_oauth_clients` 表中该 `(tenant, service)` 尚无客户端，调用 `h.RegisterClient(ctx, "WeKnora")` 做一次性 RFC 7591 注册并 `SaveClient` 持久化，之后所有用户复用同一 client_id。
 - **PKCE**：`transport.GenerateCodeVerifier()` / `GenerateCodeChallenge()` / `GenerateState()`；`code_verifier` 是秘密，**只存服务端 state**（`internal/mcp/oauth_state.go` 注释明确禁止编码进 state 参数）。
 - **State 存储**（`oauth_state.go`）：有 Redis 时写 `weknora:mcp_oauth_state:<state>`（支持 `WEKNORA_REDIS_NAMESPACE` 命名空间，回调可落在任意后端副本）；Lite 模式退化为带 GC 的内存 map。TTL 固定 10 分钟；`Take` 为**取即删**的单次消费。另存一份不含秘密的 `OAuthAttempt` 记录，`CompleteAttempt` 仅在 token 成功落库后置 `Completed=true`——因此新弹窗的授权状态查询（`status?authorization_attempt=`）**绝不会被历史 token 误判为已完成**。
-- **回调**（`oauth_manager.go` 的 `CompleteAuthorization` + `internal/handler/mcp_oauth.go` 的 `Callback`）：回调路由公开无鉴权，靠单次 state 认证；由于浏览器收到重定向后 Gin 请求 ctx 即取消，token 交换用 `context.WithoutCancel + 60s` 超时（`oauthCallbackTimeout`）脱离请求生命周期。交换成功后 `CloseClient(serviceID)` 回收可能携带旧注册信息的连接，最后把结果编码在 URL fragment（`#mcp_oauth_result=success` / `#mcp_oauth_error=...`）重定向回前端。
+- **回调**（`oauth_manager.go` 的 `CompleteAuthorization` + `internal/handler/mcp_oauth.go` 的 `Callback`）：回调路由公开无鉴权，靠单次 state 认证；由于浏览器收到重定向后 Gin 请求 ctx 即取消，token 交换用 `context.WithoutCancel + 60s` 超时（`oauthCallbackTimeout`）脱离请求生命周期。交换成功后 `CloseClientsAfterAuthorization(ctx, tenantID, serviceID, principal)` 回收当前授权主体的连接，以及同空间仍使用旧 client_id 的过期连接；其余用户的有效连接保留。注册信息读取失败时会保守清理该服务连接，请求已取消时仅清理当前主体，最后把结果编码在 URL fragment（`#mcp_oauth_result=success` / `#mcp_oauth_error=...`）重定向回前端。
 - **重建 handler 的 CSRF 检查**：回调请求里 handler 是重新构造的，需 `h.SetExpectedState(state)` 重新灌入期望 state，mcp-go 的 CSRF 校验才能通过。
 
 ##### Token 的加密存储（oauth_tokenstore.go + types/mcp_oauth.go）
@@ -341,6 +343,12 @@ Agent 启动时由 `internal/application/service/agent_service.go` 按 Agent 配
 函数名使用服务 ID 和原始工具名的稳定哈希后缀避免清洗后的碰撞；引用绑定具体 schema，定义变化后需重新读取。Schema 校验不访问外部 URL 或文件，审批修改后的参数也会校验。服务说明与工具结果按外部数据处理，不具有覆盖用户请求或扩大权限的效力。
 
 Mention 只是优先选择，不改变 Agent 的 `all / selected / none` 范围。全量函数暴露保留为兼容路径，不是生产默认。
+
+##### 工具调用失败与重试
+
+远端工具可能已经执行操作，但响应在网络中丢失，或服务端在操作完成后返回错误。此时 WeKnora 会提示执行结果不确定，在同一次调用中不自动重复提交工具。请先在远端系统核实操作是否已完成，再决定是否重新调用；新调用仍按原有工具审批策略处理。
+
+客户端尚未连接，或服务端因会话失效返回 HTTP 404 时，保留最多一次重连重试；请求取消后不发起该重试。OAuth 401 的刷新和重试仍按原有授权流程处理。
 
 ##### 持久目录的管理 {#mcp-tool-directory}
 

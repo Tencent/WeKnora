@@ -30,6 +30,8 @@
 
 响应：201 `{"success":true,"data":{KnowledgeBase}}`
 
+`indexing_strategy` 里没写到的开关保持默认：向量和关键词开启，Wiki 和图谱关闭。显式传 `false` 才会关掉。
+
 ```bash
 curl -X POST $BASE/api/v1/knowledge-bases -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"name":"产品文档","type":"document"}'
@@ -107,6 +109,28 @@ curl $BASE/api/v1/knowledge-bases/kb-1 -H "Authorization: Bearer $TOKEN"
 
 ```bash
 curl -X PUT $BASE/api/v1/knowledge-bases/kb-1 -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"name":"产品文档 v2"}'
+```
+
+### PATCH /api/v1/knowledge-bases/:id
+
+用途：只修改请求里出现的设置，其余保持不变。这包括名称、描述、模型、存储、分块、索引开关、FAQ、Wiki、自动标签、AI 描述、图片、语音和图谱提取里的字段：嵌套对象中没写到的字段也保持原值。权限与 PUT 相同；修改嵌入模型、摘要模型、多模态或语音时，共享知识库还需要管理员共享权限。存储实例只能由知识库所属空间修改，且知识库中已有文件时必须先迁移存储；共享管理员可以原样回传当前存储 ID，但不能更换。`embedding_model_id` 在知识库已有文档时不能改。`vector_store_id` 只能在创建时指定。`name` 传了就不能为空；`description` 传空字符串会清空描述。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `name` | string | 否 | 新名称 |
+| `description` | string | 否 | 新描述；空字符串清空 |
+| `embedding_model_id` / `summary_model_id` / `storage_backend_id` | string | 否 | 模型或存储实例 |
+| `chunking_config` | object | 否 | 只覆盖写到的分块字段 |
+| `indexing_strategy` | object | 否 | 只覆盖写到的开关；至少保留一种索引 |
+| `vlm_config` / `asr_config` / `image_processing_config` | object | 否 | 多模态、语音、图片 |
+| `faq_config` / `wiki_config` / `auto_tag_config` / `profile_config` | object | 否 | 类型相关设置 |
+| `extract_config` / `question_generation_config` | object | 否 | 图谱提取、分块问题生成 |
+
+响应：200 `{"success":true,"data":{KnowledgeBase}}`
+
+```bash
+curl -X PATCH $BASE/api/v1/knowledge-bases/kb-1 -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"name":"产品文档 v2"}'
 ```
 
@@ -526,7 +550,7 @@ curl -X POST $BASE/api/v1/knowledge/k-1/regenerate-summary -H "Authorization: Be
 
 ### PUT /api/v1/knowledge/manual/:id
 
-用途：更新手工知识内容（`ManualKnowledgePayload` 子集：`title/content/status/...`）。权限同上。
+用途：整篇替换手工录入的 Markdown。只适用于手工知识；上传文件不能用这个接口改正文。`content` 是完整正文，空内容会被拒绝。`status` 为 `draft`（不进入检索）或 `publish`（建立索引）；不传 `status` 时按草稿保存。权限同上。
 
 响应：200 `{"success":true,"data":{Knowledge}}`
 
@@ -617,12 +641,14 @@ curl $BASE/api/v1/knowledge/move/progress/task-1 -H "Authorization: Bearer $TOKE
 
 ### PUT /api/v1/knowledge/tags
 
-用途：批量更新知识标签。权限：Contributor+；API key `ingest`/full（KB 白名单在 handler 校验）。
+用途：批量更新知识标签。权限：Contributor+；API key `ingest`/full（KB 白名单在 handler 校验）。两种写法互斥：`updates`，或 `knowledge_ids` 加 `tag_ids`。
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `updates` | map[string][]string | 是（`binding:"required,min=1"`） | knowledge_id → tag_ids |
-| `kb_id` | string | 否 | 限定 KB |
+| `updates` | map[string][]string | 与 `knowledge_ids` 二选一 | knowledge_id → tag_ids，替换该文档现有标签 |
+| `kb_id` | string | 否 | 限定知识库；不传时从第一条知识推断 |
+| `knowledge_ids` | []string | 与 `updates` 二选一 | 最多 20 篇，同一组标签 |
+| `tag_ids` | []string | 使用 `knowledge_ids` 时必填 | 最多 50 个；空数组清空标签 |
 
 响应：200 `{"success":true}`
 
@@ -700,6 +726,42 @@ curl -X POST $BASE/api/v1/knowledge/move -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"knowledge_ids":["k-1"],"source_kb_id":"kb-1","target_kb_id":"kb-2","mode":"reuse_vectors"}'
 ```
+
+## 画廊与图片属性 {#image-gallery-api}
+
+画廊读取要求 Viewer+、目标知识库可读；API Key 需 `retrieve` 或 full，并遵守知识库范围。画廊与图片向量开关独立，列表返回已提取图片的描述、OCR 和来源。
+
+### GET /api/v1/knowledge-bases/:id/gallery-config
+
+返回 `{"success":true,"data":{"attribute_sources":[...],"attributes":[...],"mode":"...","status":{...}}}`。客户端据返回的属性定义和使用策略构造搜索、筛选与排序；不要硬编码可用属性。属性 ID 带来源前缀，例如 `builtin:caption`、`system:contain.text`。
+
+### GET /api/v1/knowledge-bases/:id/images
+
+| 查询参数 | 说明 |
+| --- | --- |
+| `page` / `page_size` | 默认 1 / 20，page_size 最大 1000 |
+| `keyword` / `search_in` | 忽略大小写的子串搜索；search_in 为逗号分隔的可搜索属性 ID，默认描述与 OCR |
+| `sort_by` / `sort_order` | 可排序属性 ID，默认 created_at / desc；兼容 created_at、updated_at、caption 旧值 |
+| `knowledge_ids` | 逗号分隔的来源文档 ID；GET 只取前 50 个，更多文档请使用 POST |
+| `is_enabled` | true / false，按所属分块启用状态筛选 |
+| `attr_filters` | JSON 对象，属性 ID → 允许值数组，同属性 OR、不同属性 AND |
+| `attr_rules` | JSON 对象，属性 ID → 值 → on/off；on 强制显示优先于 off，未命中规则的图片保留 |
+
+只接受 gallery-config 声明适用的搜索、筛选、排序字段，不适用字段会被剔除。响应 `{"success":true,"data":[ImageAsset],"total":N,"page":1,"page_size":20}`。每项包含 `id`、`chunk_id`、`knowledge_id`、`source_name`、`url`、`original_url`、`caption`、`ocr_text`、`attrs`、`is_enabled`、`status` 与时间戳。
+
+### POST /api/v1/knowledge-bases/:id/images
+
+与 GET 相同的只读查询，参数改放 JSON body；`knowledge_ids`、`search_in` 用字符串数组，`attr_filters` / `attr_rules` 直接传对象。来源文档最多 1000 个，超出返回 400，适合来源筛选全选，避免 URL 过长。
+
+```bash
+curl -X POST "$BASE/api/v1/knowledge-bases/kb-1/images" -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"page":1,"page_size":20,"knowledge_ids":["k-1","k-2"],"keyword":"架构"}'
+```
+
+### GET /api/v1/image-attrs/schema
+
+全局只读的图片观察属性注册表，需 Viewer+，API Key 需 retrieve/full，无路径知识库。知识库编辑器用它配置图片观察与 OCR 条件；画廊的实际搜索/筛选用法仍以每个知识库的 gallery-config 为准。
 
 ## 实现参考
 
