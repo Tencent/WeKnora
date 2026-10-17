@@ -980,6 +980,11 @@ function buildPayload(asCreate: boolean): Partial<MCPService> {
     url: formData.value.url || undefined,
     headers: headersMap,
   }
+  // Persist reviewed preset instructions with the initial service. The parent
+  // reloads the saved row before step two, so a local-only value would be lost.
+  if (asCreate && selectedPreset.value) {
+    data.usage_instructions = formData.value.usage_instructions.trim()
+  }
 
   // Non-secret auth config (strategy + OAuth params) flows through the main body.
   const auth: NonNullable<MCPService['auth_config']> = {

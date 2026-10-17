@@ -190,6 +190,8 @@ test('selecting a service preset is local-only and requires the user’s own cre
     f.vm.formData.auth_config.api_key = 'test-key'
     const body = f.vm.buildPayload(true)
     assert.equal(body.auth_config.api_key, 'Bearer test-key')
+    assert.equal(body.usage_instructions, f.vm.formData.usage_instructions.trim(),
+      'preset guidance must survive the saved row reload before step two')
     assert.equal(body.headers.Authorization, undefined, 'credential must not enter ordinary headers')
     assert.equal(body.url.includes('test-key'), false)
     f.vm.formData.auth_config.api_key = 'Bearer test-key'
