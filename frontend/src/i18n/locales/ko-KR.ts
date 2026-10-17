@@ -4629,7 +4629,7 @@ export default {
         imagePipelinePlaceholder: '분석 방식 선택',
         imagePipelineLoading: '파이프라인을 불러오는 중…',
         imagePipelineLoadError: '파이프라인을 불러오지 못했습니다',
-          imagePipelineValidateError: '현재 설정을 검증할 수 없습니다. 저장 시 백엔드가 다시 검사합니다.',
+        imagePipelineValidateError: '현재 설정을 검증할 수 없습니다. 저장 시 백엔드가 다시 검사합니다.',
         imageAttrsOcrConditions: '관찰된 속성 조건에 따라 OCR 실행',
         imageAttrsOcrConditionsDesc: '관찰된 속성이 아래 조건을 충족하면 해당 이미지에 OCR을 실행합니다',
         imagePipelineKbNote: '기본값은 지식베이스 설정을 따르며 이번 작업에 맞게 조정할 수 있습니다'
@@ -8477,7 +8477,6 @@ export default {
         },
       },
       ocr: {
-
         thinking_enabled: {
           label: '문자 인식 시 사고 사용',
           description: '텍스트를 추출하기 전에 모델이 먼저 추론하도록 합니다. 일반적으로 사고는 필요하지 않습니다. 켜면 분석이 느려질 뿐 아니라 사고가 너무 길어져 본문이 잘려서 작업이 실패할 수 있습니다. 꼭 필요하다고 판단될 때만 켜세요.',

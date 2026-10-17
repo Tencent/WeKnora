@@ -1,24 +1,40 @@
 #!/usr/bin/env python3
-"""PDCA R22 — RapidOCR 进管线（新约束：本地代码 + RapidOCR + VLM 灵活组合）。
+"""Straighten and crop a photographed page before OCR reads it.
 
-核心假设：RapidOCR 的文本框并集 ≈「内容区」——WPS 用户参照正是内容级裁剪。
-流程（每张原图）：
-  1. RapidOCR 检测原图 -> 文字行框（带旋转角）
-  2. 过滤：分数 + 角度共识（与主导角偏差 ≤15°，杀掉背景误检）+ 尺寸（长边 ≥0.35×中位）
-  3. 对齐：按主导文字朝向旋转（双候选残差择优选符号；±90° 情形保留，不塌成 0）
-  4. 在「对齐坐标系」内拟合内容四边形（上下左右最外点集 TLS -> 交点），外扩 1.5% pad
-  5. 在「对齐坐标系」里 warpPerspective -> 矩形内容图（文字水平）
-  6. 方向（0/180）：use_cls=False 下比较 rect 与 rot180(rect) 的识别均分
-  7. 与 WPS 参照（(1) 文件）比 AR + 目视
+The working assumption is that the union of RapidOCR's text-line boxes is the
+page's content area, so a content-tight rectangle can be recovered from text
+geometry alone — no page detector and no model beyond the recogniser already in
+the image pipeline.
+
+Per input image:
+
+  1. RapidOCR detects the text-line boxes, each with a rotation angle;
+  2. filter them: score, angle consensus (within ANG_TOL of the dominant angle,
+     which is what kills detections on background objects) and size (long edge
+     at least SIZE_MIN of the median);
+  3. align by the dominant text direction (two candidate signs, chosen by the
+     smaller residual; a +/-90deg page is kept, never collapsed to 0);
+  4. fit the content quad inside the ALIGNED coordinate system (outer supporting
+     lines through the extreme point sets, intersected), then pad it by PAD;
+  5. warpPerspective inside that same coordinate system, giving a rectangular
+     content image with horizontal text;
+  6. decide 0 vs 180 degrees by comparing the mean recognition score of the
+     result with that of its 180deg rotation (with cls disabled, so the score
+     is orientation-sensitive);
+  7. compare against a content-level reference crop (aspect ratio, then by eye).
+
+Every failure mode is a verdict rather than an exception — the caller keeps its
+own bytes — so a page that cannot be corrected is read as the original
+photograph instead of something worse.
 """
-import json
+import logging
 import threading
-import time
-from pathlib import Path
 
 import cv2
 import numpy as np
 from rapidocr import RapidOCR
+
+logger = logging.getLogger(__name__)
 
 # Tuned on the 17-image benchmark; see the R22 handover document.
 PAD = 0.015
@@ -42,6 +58,7 @@ def _engine() -> "RapidOCR":
 
 
 def box_angle(b):
+    """(angle of a box's long edge in degrees, length of that edge)."""
     d1 = float(np.linalg.norm(b[1] - b[0]))
     d2 = float(np.linalg.norm(b[2] - b[1]))
     v = (b[1] - b[0]) if d1 >= d2 else (b[2] - b[1])
@@ -49,6 +66,7 @@ def box_angle(b):
 
 
 def wrap90(a):
+    """Fold an angle into (-90, 90], the period a text line really has."""
     return ((a + 90.0) % 180.0) - 90.0
 
 
@@ -93,7 +111,11 @@ def dominant_angle(items):
 
 
 def filter_items(items, theta):
-    """角度共识 + 尺寸过滤：背景物体（键盘/手机）上的误检方向、尺寸都不同。"""
+    """Keep the boxes that agree with the dominant angle and are not too small.
+
+    A false detection on a background object (a keyboard, a phone) fails on both
+    counts: its angle is unrelated to the text and its box is short.
+    """
     med = float(np.median([box_angle(b)[1] for b, _ in items])) if items else 0.0
     keep = []
     for b, s in items:
@@ -129,6 +151,12 @@ def align_residual(items, angle_deg):
 
 
 def choose_rotation(items, theta):
+    """The sign of theta that leaves the smaller residual: -theta or theta.
+
+    Both signs are real candidates because the dominant angle is only known
+    modulo 180, and a page rotated by +90 and one rotated by -90 are different
+    pictures even though their text lines share an angle.
+    """
     return -theta if align_residual(items, -theta) <= align_residual(items, theta) else theta
 
 
@@ -179,13 +207,21 @@ def _intersect(line_h, line_v):
 
 
 def order_pts(p):
+    """Order four corners as top-left, top-right, bottom-right, bottom-left."""
     p = np.asarray(p, "float32").reshape(4, 2)
     s, d = p.sum(1), np.diff(p, axis=1).ravel()
     return np.array([p[np.argmin(s)], p[np.argmin(d)], p[np.argmax(s)], p[np.argmax(d)]], "float32")
 
 
 def fit_quad(pts):
-    """Content quad = intersections of four OUTER supporting lines of the boxes."""
+    """Content quad = intersections of four OUTER supporting lines of the boxes.
+
+    The supporting lines enclose every point, so a first attempt can come back
+    with a few outliers still inside the tolerance band; those are dropped and
+    the quad is refitted, which is why the loop exists. `tol` is a negative
+    allowance: a point is accepted while it is no further outside than 2% of the
+    quad's longer side.
+    """
     quad = None
     for _ in range(3):
         top = _boundary_line(pts, 1, "min")      # y = m*x + b, above all points
@@ -213,6 +249,7 @@ def fit_quad(pts):
 
 
 def warp(img, quad, pad=PAD):
+    """Perspective-warp the padded quad into a rectangle; return (rect, quad)."""
     q = order_pts(quad)
     side = float(np.mean([np.linalg.norm(q[(i + 1) % 4] - q[i]) for i in range(4)]))
     d = pad * side
@@ -233,7 +270,7 @@ def rec_score(img):
         sc = np.asarray(res.scores if res.scores is not None else [], "float32").ravel()
         return (float(sc.mean()) if sc.size else 0.0), int(sc.size)
     except Exception as e:
-        print("    [rec err]", e)
+        logger.warning("Recognition score unavailable, treating the image as unreadable: %s", e)
         return 0.0, 0
 
 

@@ -34,9 +34,11 @@ func TestPipelineFieldKeysAreOwned(t *testing.T) {
 }
 
 // TestParamIsIsolatedPerPipeline pins the namespaced lookup: two pipelines may
-// declare the same bare key, and neither reads the other's stored value. The
-// bare-key fallback is the documented compatibility path for configs written
-// before namespacing, so it is asserted here rather than left to chance.
+// declare the same bare key, and neither reads the other's stored value. A key
+// stored without a slot is not a second home — nothing writes one, and reading
+// it would let a stored value mean two different things depending on which
+// pipeline happened to run — so that case is asserted here too: the bare key is
+// ignored and the default the field declares is what answers.
 func TestParamIsIsolatedPerPipeline(t *testing.T) {
 	params := map[string]any{
 		"default.thinking":  true,
@@ -57,11 +59,18 @@ func TestParamIsIsolatedPerPipeline(t *testing.T) {
 		}
 	}
 
-	// A config stored before namespacing answers under the bare key, which is
-	// what keeps an old knowledge base readable.
-	r := &runContext{pipelineID: "smartocr", params: map[string]any{"thinking": true}, declared: declared}
-	if !r.BoolParam("thinking") {
-		t.Error("a bare stored key no longer answers; stored configs written before namespacing would break")
+	// A key stored without a slot is not read, so the answer is the default the
+	// field declares — asserted with a default of false on purpose: a default of
+	// true would make this pass whether or not the bare key was read, which is
+	// the one way this test could stop proving anything.
+	noDefault := []types.ImageFieldDef{{Key: "thinking", Default: false}}
+	r := &runContext{
+		pipelineID: "smartocr",
+		params:     map[string]any{"thinking": true},
+		declared:   noDefault,
+	}
+	if r.BoolParam("thinking") {
+		t.Error("a key stored without a slot answered; a setting lives in a slot and nowhere else")
 	}
 
 	// With neither stored form present, the declared default answers.

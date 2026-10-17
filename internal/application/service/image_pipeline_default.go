@@ -44,7 +44,8 @@ const (
 // the advanced thinking switches, then the note. The thinking switches are
 // action-level fields, declared once at the action layer and carried in here —
 // a pipeline does not re-declare an action's tunable, only where that tunable
-// belongs in its own panel.
+// belongs in its own panel. What it carries is the declaration: the value a
+// knowledge base stores for it sits in this pipeline's own slot.
 func (defaultPipeline) Fields() []types.ImageFieldDef {
 	return []types.ImageFieldDef{
 		{
@@ -64,7 +65,8 @@ func (defaultPipeline) Fields() []types.ImageFieldDef {
 			DecidesAction: true,
 		},
 		// The thinking switches are action-level fields, declared once by the
-		// actions themselves and carried in here by reference.
+		// actions themselves and carried in here by reference — the value each
+		// one reads is this pipeline's own, stored under its slot.
 		captionThinkingField,
 		ocrThinkingField,
 		{

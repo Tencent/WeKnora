@@ -4630,7 +4630,7 @@ export default {
         imagePipelinePlaceholder: '请选择解析方案',
         imagePipelineLoading: '正在读取流水线…',
         imagePipelineLoadError: '读取流水线失败',
-          imagePipelineValidateError: '无法校验当前设置，保存时后端会再次检查。',
+        imagePipelineValidateError: '无法校验当前设置，保存时后端会再次检查。',
         imageAttrsOcrConditions: '根据观察到的属性条件触发 OCR',
         imageAttrsOcrConditionsDesc: '当观察到的属性满足以下条件时，对图片进行 OCR',
         imagePipelineKbNote: '默认跟随知识库设置，可针对本次任务调整'
@@ -8477,7 +8477,6 @@ export default {
         },
       },
       ocr: {
-
         thinking_enabled: {
           label: '文字识别时开启思考',
           description: '让模型在提取文字前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。',

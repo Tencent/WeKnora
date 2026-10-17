@@ -569,10 +569,11 @@ type ImageProcessingConfig struct {
 	// ImageAttrsEnabled — see ResolveImagePipelineID. An explicit id always
 	// wins over the switch.
 	ImagePipelineID string `yaml:"image_pipeline,omitempty" json:"image_pipeline,omitempty" enums:"default,smartocr" extensions:"x-agent"`
-	// ImagePipelineParams holds the tunables of ImagePipelineID, keyed by the
-	// field's own key. The map travels whole: a key a pipeline no longer
-	// declares is dropped when the run reads it, so an old stored config stays
-	// loadable rather than being rewritten on save.
+	// ImagePipelineParams holds the tunables of ImagePipelineID, keyed by each
+	// field's slot — the pipeline id joined to the field's own key, built by
+	// SlotKey and read back by ImagePipelineParam. The map travels whole: a key
+	// a pipeline no longer declares is dropped when the run reads it, so an old
+	// stored config stays loadable rather than being rewritten on save.
 	ImagePipelineParams map[string]any `yaml:"image_pipeline_params,omitempty" json:"image_pipeline_params,omitempty" extensions:"x-agent,x-agent-response,x-agent-keys=enable_caption|enable_ocr|default.enable_caption|default.enable_ocr"`
 	// ImageVectorEnabled lets a knowledge base whose embedding model takes
 	// images index each image by its own vector and recall it with one. It
