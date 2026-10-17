@@ -156,6 +156,19 @@ app:
   # -- Affinity rules
   affinity: {}
 
+  # -- Extra volumes for the app pod. Rendered verbatim into spec.template.spec.volumes.
+  # Use together with extraVolumeMounts to mount ConfigMaps/Secrets/PVCs into the app container.
+  extraVolumes: []
+  # - name: my-config
+  #   configMap:
+  #     name: my-config
+
+  # -- Extra volume mounts for the app container. Rendered verbatim into the app container's volumeMounts.
+  extraVolumeMounts: []
+  # - name: my-config
+  #   mountPath: /etc/my-config
+  #   readOnly: true
+
 # -----------------------------------------------------------------------------
 # Frontend (Web UI)
 # -----------------------------------------------------------------------------
