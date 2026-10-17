@@ -202,10 +202,6 @@ func (c *Client) decodeToolCalls(raws []json.RawMessage) ([]types.LLMToolCall, [
 			// was told to take went missing. Surface it instead.
 			return nil, nil, fmt.Errorf("decode tool call %d: %w", i, err)
 		}
-		idx := i
-		if tc.Index != nil {
-			idx = *tc.Index
-		}
 		call := types.LLMToolCall{
 			ID:       tc.ID,
 			Type:     orDefault(tc.Type, "function"),
@@ -213,9 +209,19 @@ func (c *Client) decodeToolCalls(raws []json.RawMessage) ([]types.LLMToolCall, [
 		}
 		call.ProviderMetadata = c.extractToolCallMetadata(raw)
 		calls = append(calls, call)
-		deltas = append(deltas, api.ToolCallDelta{
-			Index: idx, ID: tc.ID, Type: tc.Type, Name: tc.Function.Name, Arguments: tc.Function.Arguments,
-		})
+		delta := api.ToolCallDelta{
+			ID: tc.ID, Type: tc.Type, Name: tc.Function.Name,
+			Arguments: tc.Function.Arguments, IndexMissing: tc.Index == nil,
+			Metadata: call.ProviderMetadata,
+		}
+		if tc.Index != nil {
+			delta.Index = *tc.Index
+		}
+		// The entry's position is deliberately not used when index is absent:
+		// the position is chunk-local, so every fragment would number 0 and the
+		// assembler would merge parallel calls. The assembler splits them by id
+		// and name instead.
+		deltas = append(deltas, delta)
 	}
 	return calls, deltas, nil
 }
@@ -383,15 +389,6 @@ func (c *Client) processStream(
 				return
 			}
 			delta.ToolCalls = deltas
-			for i, raw := range choice.Delta.ToolCalls {
-				if md := c.extractToolCallMetadata(raw); len(md) > 0 {
-					idx := i
-					if i < len(deltas) {
-						idx = deltas[i].Index
-					}
-					assembler.SetToolCallMetadata(idx, md)
-				}
-			}
 		}
 		assembler.Process(ch, delta)
 	}
