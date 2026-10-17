@@ -761,17 +761,17 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 // instance. It mirrors GetVLMModel: the row is loaded through the repository
 // (so credentials are decrypted by the scan hook) and the client resolves the
 // catalog entry itself.
-func (s *modelService) GetVideoModel(ctx context.Context, modelId string) (video.Video, error) {
-	if modelId == "" {
+func (s *modelService) GetVideoModel(ctx context.Context, modelID string) (video.Video, error) {
+	if modelID == "" {
 		return nil, errors.New("model ID cannot be empty")
 	}
 
 	tenantID := types.MustTenantIDFromContext(ctx)
 
-	model, err := s.repo.GetByID(ctx, tenantID, modelId)
+	model, err := s.repo.GetByID(ctx, tenantID, modelID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id":  modelId,
+			"model_id":  modelID,
 			"tenant_id": tenantID,
 		})
 		return nil, err

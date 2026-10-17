@@ -51,7 +51,7 @@ type ModelService interface {
 	GetASRModel(ctx context.Context, modelId string) (asr.ASR, error)
 	// GetVideoModel gets a video understanding model (one that accepts a whole
 	// video and answers in text)
-	GetVideoModel(ctx context.Context, modelId string) (video.Video, error)
+	GetVideoModel(ctx context.Context, modelID string) (video.Video, error)
 }
 
 // ModelRepository defines the model repository interface

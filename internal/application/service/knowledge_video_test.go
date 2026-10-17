@@ -31,7 +31,7 @@ type fakeVideoExtractor struct {
 }
 
 func (f *fakeVideoExtractor) Extract(
-	ctx context.Context, src io.Reader, fileName string,
+	_ context.Context, src io.Reader, fileName string,
 ) ([]byte, error) {
 	f.calls++
 	f.fileName = fileName
@@ -56,7 +56,7 @@ type fakeVideoFrameExtractor struct {
 }
 
 func (f *fakeVideoFrameExtractor) ExtractKeyframes(
-	ctx context.Context, src io.Reader, fileName string, sampling videoFrameSampling,
+	_ context.Context, src io.Reader, fileName string, sampling videoFrameSampling,
 ) ([]videoFrame, error) {
 	f.calls++
 	f.sampling = sampling

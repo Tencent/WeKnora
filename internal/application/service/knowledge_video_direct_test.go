@@ -25,7 +25,7 @@ type videoTestDirectModel struct {
 }
 
 func (m *videoTestDirectModel) Predict(
-	ctx context.Context, videoBytes []byte, fileName, prompt string,
+	_ context.Context, videoBytes []byte, fileName, prompt string,
 ) (string, error) {
 	m.calls++
 	m.gotBytes = videoBytes

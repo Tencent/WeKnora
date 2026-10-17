@@ -66,7 +66,7 @@ func (f *fakeDashScope) handler() http.Handler {
 			http.Error(w, `{"code":"InvalidApiKey","message":"bad key"}`, f.policyStatus)
 			return
 		}
-		fmt.Fprintf(w, `{"data":{"policy":"policy-value","signature":"sig-value",
+		_, _ = fmt.Fprintf(w, `{"data":{"policy":"policy-value","signature":"sig-value",
 			"upload_dir":"dashscope-video/abc123","upload_host":"http://%s/upload",
 			"oss_access_key_id":"oss-key","x_oss_object_acl":"private",
 			"x_oss_forbid_overwrite":"true","max_file_size_mb":1024,
