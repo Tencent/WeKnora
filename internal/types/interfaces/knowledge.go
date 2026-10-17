@@ -24,6 +24,20 @@ type KnowledgeService interface {
 		channel string,
 		processOverrides *types.KnowledgeProcessOverrides,
 	) (*types.Knowledge, error)
+	// CreateStoredKnowledgeFromFile persists a file as an archived entry that is
+	// never parsed: parse_status is set to "stored" and no task is dispatched, so
+	// the file is visible/downloadable but produces no chunks and stays out of
+	// retrieval. Reserved for callers that have already established the content
+	// cannot be indexed; plain uploads must keep using CreateKnowledgeFromFile.
+	CreateStoredKnowledgeFromFile(
+		ctx context.Context,
+		kbID string,
+		file *multipart.FileHeader,
+		metadata map[string]string,
+		customFileName string,
+		tagIDs []string,
+		channel string,
+	) (*types.Knowledge, error)
 	// CreateKnowledgeFromURL creates knowledge from a URL.
 	// When fileName or fileType is provided (or the URL path has a known file extension),
 	// the URL is treated as a direct file download instead of a web page crawl.

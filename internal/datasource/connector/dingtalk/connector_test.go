@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 type fakeAPI struct {
@@ -623,7 +624,7 @@ func TestSyncLogsEverySkippedNodeWithItsReason(t *testing.T) {
 	output := logs.String()
 	for _, want := range []string{
 		`[DingTalk] skip node video-1 (name="Lesson.mp4" type=FILE category=VIDEO extension=mp4): ` +
-			"video/media files are deliberately not downloaded by this connector",
+			"video files are deliberately not downloaded by this connector",
 		`[DingTalk] skip node table-1 (name="Roadmap.able" type=FILE category=ALIDOC extension=able): ` +
 			"DingTalk multi-dimensional table has no ingest path in this connector yet",
 		`[DingTalk] skip node mind-1 (name="Plan.amind" type=FILE category=ALIDOC extension=amind): ` +
@@ -753,9 +754,10 @@ func TestScanScopeReportsSkippedNodesAndSingleDocumentScopeHasNone(t *testing.T)
 }
 
 // The reason has to say which kind of unsupported a node is: a video is skipped
-// on purpose, a native type has simply not been implemented, and an uploaded
-// file the connector could read is skipped only because its switch is off.
-func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
+// on purpose, an audio format the platform cannot import is named as such, a
+// native type has simply not been implemented, and an uploaded file the
+// connector could read is skipped only because its switch is off.
+func TestSkipReasonDistinguishesVideoFromUnimplementedTypes(t *testing.T) {
 	enabled := documentSettings{IncludeUploadedFiles: true}
 	for _, testCase := range []struct {
 		label    string
@@ -767,19 +769,53 @@ func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
 			"video category",
 			node{Type: "FILE", Category: "VIDEO", Extension: "mp4"},
 			documentSettings{},
-			"video/media files are deliberately not downloaded by this connector",
+			"video files are deliberately not downloaded by this connector",
 		},
 		{
 			"video extension without a category",
 			node{Type: "FILE", Category: "OTHER", Extension: "MOV"},
 			documentSettings{},
-			"video/media files are deliberately not downloaded by this connector",
+			"video files are deliberately not downloaded by this connector",
 		},
 		{
-			"audio extension",
-			node{Type: "FILE", Category: "OTHER", Extension: "mp3"},
+			// Audio is not a media type to skip: the platform transcribes it
+			// through ASR, so with the upload switch on the node is ingested.
+			"audio category",
+			node{Type: "FILE", Category: "AUDIO", Extension: "mp3"},
+			enabled,
+			"",
+		},
+		{
+			// The extension, not the category, decides that a file is audio.
+			"audio extension with an unrelated category",
+			node{Type: "FILE", Category: "OTHER", Extension: "wav"},
+			enabled,
+			"",
+		},
+		{
+			// The boundary this test exists for: a node a tenant reports as
+			// VIDEO but whose extension is audio must not stay a video skip.
+			"audio extension under the video category",
+			node{Type: "FILE", Category: "VIDEO", Extension: "mp3"},
+			enabled,
+			"",
+		},
+		{
+			// Audio is an uploaded file, so the upload switch governs it; the
+			// skip must name the switch, not a media or platform limitation.
+			"audio with the upload switch off",
+			node{Type: "FILE", Category: "AUDIO", Extension: "m4a"},
 			documentSettings{},
-			"video/media files are deliberately not downloaded by this connector",
+			"uploaded files are not ingested because include_uploaded_files is not enabled for this data source",
+		},
+		{
+			// aac is audio DingTalk can list, but the platform's shared import
+			// whitelist rejects it, so no ASR transcription is possible.
+			"audio format the platform cannot import",
+			node{Type: "FILE", Category: "AUDIO", Extension: "aac"},
+			enabled,
+			"audio files in this format are not supported by WeKnora's import whitelist" +
+				" and cannot be transcribed",
 		},
 		{
 			// Only the types with a name worth printing are in the map; every
@@ -832,15 +868,137 @@ func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
 			"DingTalk mind map has no ingest path in this connector yet",
 		},
 		{
-			"media with the switch on",
+			"video with the switch on",
 			node{Type: "FILE", Category: "VIDEO", Extension: "mp4"},
 			enabled,
-			"video/media files are deliberately not downloaded by this connector",
+			"video files are deliberately not downloaded by this connector",
 		},
 	} {
 		t.Run(testCase.label, func(t *testing.T) {
 			if got := skipReason(testCase.node, testCase.settings); got != testCase.want {
 				t.Fatalf("skipReason() = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
+// Every audio container the platform transcribes must pass: WeKnora accepts
+// mp3, wav, m4a, flac and ogg through its shared import whitelist and reads
+// them with ASR, so a synced audio file becomes a document with a transcript.
+// The connector used to list audio with video as "media carries no text"; that
+// is the regression this test pins.
+func TestAudioExtensionsAreNotSkipped(t *testing.T) {
+	enabled := documentSettings{IncludeUploadedFiles: true}
+	for _, extension := range []string{"mp3", "wav", "m4a", "flac", "ogg"} {
+		t.Run(extension, func(t *testing.T) {
+			audio := node{Type: "FILE", Category: "AUDIO", Extension: extension}
+			if reason := skipReason(audio, enabled); reason != "" {
+				t.Fatalf("skipReason() = %q, want no skip for audio %s", reason, extension)
+			}
+			if !audio.isIngestible(enabled) {
+				t.Fatalf("%s audio node is not ingestible, want it treated as a document", extension)
+			}
+			if !audio.isBinaryDocument() {
+				t.Fatalf("%s audio node has no download path, want the 钉盘 download API", extension)
+			}
+		})
+	}
+	// The wiki API documents AUDIO for audio files, but the extension is what
+	// selects the parser: a node reported under another category, including
+	// VIDEO, must still be transcribed rather than skipped as media.
+	for _, category := range []string{"DOCUMENT", "VIDEO", "OTHER"} {
+		t.Run("category "+category, func(t *testing.T) {
+			audio := node{Type: "FILE", Category: category, Extension: "mp3"}
+			if reason := skipReason(audio, enabled); reason != "" {
+				t.Fatalf("skipReason(category=%s) = %q, want no skip", category, reason)
+			}
+			if !audio.isIngestible(enabled) {
+				t.Fatalf("audio under category %s is not ingestible", category)
+			}
+		})
+	}
+}
+
+// Video is still skipped by default: WeKnora has no video parser, so
+// downloading it would only produce a file the pipeline cannot read. The
+// archive switch (store_unindexed_media) adds a separate path, tested in
+// store_unindexed_media_test.go; with the switch off this reason must survive
+// the audio fix, and with the switch on but IncludeUploadedFiles on it remains
+// untouched as well.
+func TestVideoExtensionsAreStillSkipped(t *testing.T) {
+	enabled := documentSettings{IncludeUploadedFiles: true}
+	for _, extension := range []string{"mp4", "mov", "avi", "mkv", "flv", "wmv", "m4v", "webm"} {
+		t.Run(extension, func(t *testing.T) {
+			video := node{Type: "FILE", Category: "VIDEO", Extension: extension}
+			want := "video files are deliberately not downloaded by this connector"
+			if reason := skipReason(video, enabled); reason != want {
+				t.Fatalf("skipReason() = %q, want %q", reason, want)
+			}
+			if video.isIngestible(enabled) {
+				t.Fatalf("%s video node is ingestible, want a skip", extension)
+			}
+			if video.isBinaryDocument() {
+				t.Fatalf("%s video node has a download path, want a skip", extension)
+			}
+		})
+	}
+	// A video extension is a skip even when the node carries another category,
+	// and the category alone is a skip even for an extension this connector
+	// does not enumerate.
+	for _, testCase := range []node{
+		{Type: "FILE", Category: "OTHER", Extension: "MP4"},
+		{Type: "FILE", Category: "VIDEO", Extension: "mts"},
+	} {
+		want := "video files are deliberately not downloaded by this connector"
+		if reason := skipReason(testCase, enabled); reason != want {
+			t.Fatalf("skipReason(category=%s extension=%s) = %q, want %q",
+				testCase.Category, testCase.Extension, reason, want)
+		}
+	}
+}
+
+// aac is the one audio container DingTalk can list that the platform cannot
+// import, so it keeps being skipped — with a reason about the format, not the
+// removed "media carries no text" claim.
+func TestAacIsSkippedBecauseThePlatformCannotImportIt(t *testing.T) {
+	if utils.IsSupportedImportExtension("aac") {
+		t.Fatal("the shared import whitelist accepts aac: the skip reason below is now wrong")
+	}
+	enabled := documentSettings{IncludeUploadedFiles: true}
+	want := "audio files in this format are not supported by WeKnora's import whitelist" +
+		" and cannot be transcribed"
+	for _, category := range []string{"AUDIO", "DOCUMENT"} {
+		t.Run(category, func(t *testing.T) {
+			aac := node{Type: "FILE", Category: category, Extension: "aac"}
+			if reason := skipReason(aac, enabled); reason != want {
+				t.Fatalf("skipReason() = %q, want %q", reason, want)
+			}
+			if aac.isIngestible(enabled) {
+				t.Fatalf("aac under category %s is ingestible, want a skip", category)
+			}
+			if aac.isBinaryDocument() {
+				t.Fatalf("aac under category %s has a download path, want a skip", category)
+			}
+		})
+	}
+	// The format is the reason even with the upload switch off: turning the
+	// switch on would not make this file importable.
+	off := skipReason(node{Type: "FILE", Category: "AUDIO", Extension: "aac"}, documentSettings{})
+	if off != want {
+		t.Fatalf("skipReason() with the switch off = %q, want %q", off, want)
+	}
+}
+
+// Audio ingestion follows the platform's shared import whitelist instead of a
+// second copy of the supported formats: whatever the whitelist accepts is
+// downloaded, and whatever it rejects is skipped with the format's own reason.
+func TestAudioIngestionTracksThePlatformImportWhitelist(t *testing.T) {
+	for _, extension := range []string{"mp3", "wav", "m4a", "flac", "ogg", "aac"} {
+		t.Run(extension, func(t *testing.T) {
+			audio := node{Type: "FILE", Category: "AUDIO", Extension: extension}
+			want := utils.IsSupportedImportExtension(extension)
+			if got := audio.isBinaryDocument(); got != want {
+				t.Fatalf("isBinaryDocument() = %v, want %v for %s", got, want, extension)
 			}
 		})
 	}
@@ -1008,6 +1166,161 @@ func TestFetchAllDownloadsUploadedDocuments(t *testing.T) {
 	if byID["adoc"].ContentType != "text/markdown" ||
 		string(byID["adoc"].Content) != "# Runbook.adoc\n\nrun\n" {
 		t.Fatalf("adoc item = %#v", byID["adoc"])
+	}
+}
+
+// audioNode is an uploaded audio file as the List nodes API documents it: a
+// FILE in the AUDIO category carrying the original extension.
+func audioNode(id, name, extension string) node {
+	return node{
+		ID: id, WorkspaceID: "space", Name: name, Type: "FILE",
+		Category: "AUDIO", Extension: extension, ModifiedTime: "2026-07-25T08:00:00Z",
+	}
+}
+
+// uploadedAudioFixture mixes the audio containers the platform transcribes with
+// the two nodes that must stay out: aac audio (no import path) and a video.
+func uploadedAudioFixture() *fakeAPI {
+	return &fakeAPI{
+		workspaces: []workspace{{ID: "space", RootNodeID: "root"}},
+		nodes: map[string][]node{
+			"root": {
+				binaryNode("pdf", "Policy.pdf", "pdf"),
+				audioNode("mp3", "Standup.mp3", "mp3"),
+				audioNode("wav", "Interview.wav", "wav"),
+				audioNode("m4a", "Call.m4a", "m4a"),
+				audioNode("flac", "Lecture.flac", "flac"),
+				audioNode("ogg", "Voice-Memo.ogg", "ogg"),
+				audioNode("aac", "Raw.aac", "aac"),
+				{
+					ID: "video", WorkspaceID: "space", Name: "Lesson.mp4", Type: "FILE",
+					Category: "VIDEO", Extension: "mp4",
+				},
+			},
+		},
+		downloads: map[string][]byte{
+			"pdf":  []byte("%PDF-1.7-policy-bytes"),
+			"mp3":  []byte("ID3\x04standup-bytes"),
+			"wav":  []byte("RIFF\x00\x00\x00\x00wav-bytes"),
+			"m4a":  []byte("\x00\x00\x00\x20ftypM4A call-bytes"),
+			"flac": []byte("fLaC\x00\x00lecture-bytes"),
+			"ogg":  []byte("OggSvoice-bytes"),
+		},
+	}
+}
+
+// An uploaded audio file must reach the documents list, not the skipped list:
+// WeKnora transcribes audio through ASR, so the sync downloads it like any
+// other uploaded file. The transcript needs an ASR model on the knowledge base;
+// without one the document fails to parse, which is the knowledge base's
+// configuration to decide, not the connector's.
+func TestFetchAllIngestsUploadedAudio(t *testing.T) {
+	api := uploadedAudioFixture()
+	logs := captureLogs(t)
+
+	// The scan is the decision point: audio belongs in documents, and only aac
+	// and video are reported as skipped.
+	documents, skipped, err := scanScope(context.Background(), api, syncScope{
+		ResourceID:  "space",
+		Reference:   resourceReference{WorkspaceID: "space"},
+		StartNodeID: "root",
+	}, documentSettings{IncludeUploadedFiles: true})
+	if err != nil {
+		t.Fatalf("scanScope() error = %v", err)
+	}
+	documentIDs := make(map[string]struct{}, len(documents))
+	for _, document := range documents {
+		documentIDs[document.ID] = struct{}{}
+	}
+	for _, want := range []string{"pdf", "mp3", "wav", "m4a", "flac", "ogg"} {
+		if _, exists := documentIDs[want]; !exists {
+			t.Fatalf("document %q missing from scan: %#v", want, documents)
+		}
+	}
+	if len(documents) != 6 {
+		t.Fatalf("scanScope() documents = %#v, want 6", documents)
+	}
+	skippedIDs := make(map[string]struct{}, len(skipped))
+	for _, item := range skipped {
+		skippedIDs[item.ID] = struct{}{}
+	}
+	if len(skipped) != 2 {
+		t.Fatalf("scanScope() skipped = %#v, want only aac and video", skipped)
+	}
+	for _, unwanted := range []string{"aac", "video"} {
+		if _, exists := skippedIDs[unwanted]; !exists {
+			t.Fatalf("node %q missing from skipped: %#v", unwanted, skipped)
+		}
+	}
+
+	items, err := testConnector(api).FetchAll(
+		context.Background(), testConfigWithUploadedFiles("space"), []string{"space"},
+	)
+	if err != nil {
+		t.Fatalf("FetchAll() error = %v", err)
+	}
+	if len(items) != 6 {
+		t.Fatalf("FetchAll() returned %d items, want 6: %#v", len(items), items)
+	}
+	byID := make(map[string]types.FetchedItem, len(items))
+	for _, item := range items {
+		byID[item.ExternalID] = item
+	}
+	want := []struct {
+		id          string
+		category    string
+		contentType string
+		fileName    string
+		content     string
+	}{
+		{"mp3", "AUDIO", "audio/mpeg", "Standup.mp3", "ID3\x04standup-bytes"},
+		{"wav", "AUDIO", "audio/wav", "Interview.wav", "RIFF\x00\x00\x00\x00wav-bytes"},
+		{"m4a", "AUDIO", "audio/x-m4a", "Call.m4a", "\x00\x00\x00\x20ftypM4A call-bytes"},
+		{"flac", "AUDIO", "audio/flac", "Lecture.flac", "fLaC\x00\x00lecture-bytes"},
+		{"ogg", "AUDIO", "audio/ogg", "Voice-Memo.ogg", "OggSvoice-bytes"},
+		{"pdf", "DOCUMENT", "application/pdf", "Policy.pdf", "%PDF-1.7-policy-bytes"},
+	}
+	for _, expected := range want {
+		item, exists := byID[expected.id]
+		if !exists {
+			t.Fatalf("audio document %q was not synced: %#v", expected.id, byID)
+		}
+		if string(item.Content) != expected.content || item.ContentType != expected.contentType ||
+			item.FileName != expected.fileName {
+			t.Fatalf("%s item = %#v (content_type %q, file_name %q)",
+				expected.id, item, item.ContentType, item.FileName)
+		}
+		if item.SourceResourceID != "space" || item.Metadata["channel"] != types.ChannelDingtalk ||
+			item.Metadata["category"] != expected.category {
+			t.Fatalf("%s metadata = %#v", expected.id, item.Metadata)
+		}
+	}
+	// Nothing is downloaded for aac or video: the skip decisions hold at the
+	// transfer boundary, not just in the log.
+	if api.dlCalls["aac"] != 0 || api.dlCalls["video"] != 0 {
+		t.Fatalf("download calls = %#v, want none for aac or video", api.dlCalls)
+	}
+	if len(api.dlCalls) != 6 {
+		t.Fatalf("download calls = %#v, want one per ingested file", api.dlCalls)
+	}
+
+	output := logs.String()
+	for _, notSkipped := range []string{"mp3", "wav", "m4a", "flac", "ogg"} {
+		if strings.Contains(output, "skip node "+notSkipped+" ") {
+			t.Fatalf("audio node %q was reported as skipped:\n%s", notSkipped, output)
+		}
+	}
+	for _, want := range []string{
+		`[DingTalk] skip node aac (name="Raw.aac" type=FILE category=AUDIO extension=aac): ` +
+			"audio files in this format are not supported by WeKnora's import whitelist" +
+			" and cannot be transcribed",
+		`[DingTalk] skip node video (name="Lesson.mp4" type=FILE category=VIDEO extension=mp4): ` +
+			"video files are deliberately not downloaded by this connector",
+		"[DingTalk] scope space/root: total=8 synced=6 skipped=2 failed=0",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("sync log is missing:\n%s\ngot:\n%s", want, output)
+		}
 	}
 }
 
@@ -1338,8 +1651,10 @@ func TestBinaryDocumentFileNameKeepsASingleExtension(t *testing.T) {
 // isDocument answers whether a read path exists at all, and isIngestible
 // answers whether this data source takes the node: the blocks API for adoc
 // always, the 钉盘 download API for an uploaded file only once
-// include_uploaded_files is on. Native DingTalk types stay out either way, so
-// nothing is ever enumerated that the sync cannot read.
+// include_uploaded_files is on. Audio is an uploaded file the ASR pipeline can
+// read, and it is recognised by extension rather than category, so a video
+// category cannot hide it. Native DingTalk types and video stay out either way,
+// so nothing is ever enumerated that the sync cannot read.
 func TestNodeDocumentClassification(t *testing.T) {
 	for _, testCase := range []struct {
 		label    string
@@ -1356,6 +1671,18 @@ func TestNodeDocumentClassification(t *testing.T) {
 		{"pdf", node{Type: "FILE", Category: "DOCUMENT", Extension: "pdf"}, true, false, true},
 		{"uppercase", node{Type: "file", Category: "document", Extension: "PDF"}, true, false, true},
 		{"mp4", node{Type: "FILE", Category: "VIDEO", Extension: "mp4"}, false, false, false},
+		{"mp3 audio", node{Type: "FILE", Category: "AUDIO", Extension: "mp3"}, true, false, true},
+		{
+			"audio under the video category",
+			node{Type: "FILE", Category: "VIDEO", Extension: "wav"},
+			true, false, true,
+		},
+		{
+			"uppercase audio",
+			node{Type: "FILE", Category: "audio", Extension: "MP3"},
+			true, false, true,
+		},
+		{"aac audio", node{Type: "FILE", Category: "AUDIO", Extension: "aac"}, false, false, false},
 		{"aitable", node{Type: "FILE", Category: "ALIDOC", Extension: "able"}, false, false, false},
 		{"mindmap", node{Type: "FILE", Category: "ALIDOC", Extension: "amind"}, false, false, false},
 		{"upload category", node{Type: "FILE", Category: "FILE", Extension: "pdf"}, false, false, false},

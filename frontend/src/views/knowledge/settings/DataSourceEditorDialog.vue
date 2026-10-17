@@ -240,6 +240,16 @@ const dingtalkIncludeUploadedFiles = computed({
   },
 })
 
+// DingTalk videos as archived, unindexed entries. Same default-off contract as
+// the upload switch above: a data source that never opted in keeps skipping
+// videos, and reading the form never writes the key back.
+const dingtalkStoreUnindexedMedia = computed({
+  get: () => form.value.config.settings?.store_unindexed_media === true,
+  set: (on: boolean) => {
+    form.value.config.settings = { ...form.value.config.settings, store_unindexed_media: on }
+  },
+})
+
 // Step 2: Resources
 const resources = ref<Resource[]>([])
 const loadingResources = ref(false)
@@ -2072,6 +2082,12 @@ const drawerConfirmText = computed(() => {
           </t-checkbox>
         </div>
         <p class="form-desc">{{ t('datasource.dingtalkIncludeUploadedFilesHint') }}</p>
+        <div class="form-item form-item--flat">
+          <t-checkbox v-model="dingtalkStoreUnindexedMedia">
+            {{ t('datasource.dingtalkStoreUnindexedMedia') }}
+          </t-checkbox>
+        </div>
+        <p class="form-desc">{{ t('datasource.dingtalkStoreUnindexedMediaHint') }}</p>
       </section>
 
       <!-- Yuque only: how synced documents are laid out, and what may be admitted. -->

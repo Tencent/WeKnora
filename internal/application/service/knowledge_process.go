@@ -2797,18 +2797,20 @@ func (s *knowledgeService) ReparseKnowledge(
 	knowledgeID string,
 	processOverrides *types.KnowledgeProcessOverrides,
 ) (*types.Knowledge, error) {
-	return s.reparseKnowledge(ctx, knowledgeID, processOverrides, false)
+	return s.reparseKnowledge(ctx, knowledgeID, processOverrides, false, false)
 }
 
 // reparseKnowledge implements ReparseKnowledge. tasksDequeued tells it the
 // caller already dropped the knowledge's queued tasks (ReplaceKnowledgeFile
 // does, before pointing the row at the new file), which saves a second scan
-// of every queue.
+// of every queue. allowStored is set only by that same call: swapping in a
+// parseable file is the one legitimate way out of an archive.
 func (s *knowledgeService) reparseKnowledge(
 	ctx context.Context,
 	knowledgeID string,
 	processOverrides *types.KnowledgeProcessOverrides,
 	tasksDequeued bool,
+	allowStored bool,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start re-parsing knowledge")
 
@@ -2816,6 +2818,14 @@ func (s *knowledgeService) reparseKnowledge(
 	if err != nil {
 		logger.Errorf(ctx, "Failed to load knowledge: %v", err)
 		return nil, err
+	}
+
+	// A stored-only entry has no parse to run: its bytes are the deliverable and
+	// no index was ever built. Cleaning up and re-parsing would flip a settled
+	// archive to "failed" (the video guard in ProcessDocument) with no path back
+	// to "stored", so refuse before anything is destroyed.
+	if existing.ParseStatus == types.ParseStatusStored && !allowStored {
+		return nil, werrors.NewBadRequestError("该文件为仅存档条目，没有可重建的索引，不支持重新解析")
 	}
 
 	tenantID := existing.TenantID

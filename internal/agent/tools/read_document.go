@@ -668,6 +668,10 @@ func formatParseStatus(status string) string {
 		return "Completed"
 	case "failed":
 		return "Failed"
+	case "stored":
+		// An archived file has no index by design, so the agent must not treat
+		// the raw token as an unknown transient state.
+		return "Stored (not indexed)"
 	default:
 		return status
 	}

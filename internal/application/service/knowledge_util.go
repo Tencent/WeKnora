@@ -467,14 +467,28 @@ func IsAudioType(fileType string) bool {
 	}
 }
 
-// IsVideoType checks if a file type is a video format
+// IsVideoType checks if a file type is a video format.
+// m4v is listed because the DingTalk connector's own media set already treats it
+// as video; leaving it out would let a switch admit a file this gate then
+// rejects, turning a promised archive into a failed sync item.
 func IsVideoType(fileType string) bool {
 	switch strings.ToLower(fileType) {
-	case "mp4", "mov", "avi", "mkv", "webm", "wmv", "flv":
+	case "mp4", "mov", "avi", "mkv", "webm", "wmv", "flv", "m4v":
 		return true
 	default:
 		return false
 	}
+}
+
+// isStorableUnindexedFileType reports whether a file type may be admitted as an
+// archive — stored, never parsed — when the caller explicitly asks for it.
+// Today the video family is the whole list: the bytes are worth keeping even
+// though no text can be extracted from them. Extending "store without indexing"
+// to another unparseable format starts here; nothing else in the import pipeline
+// needs to change, but the extension also has to be admitted by the connector
+// that ships such files.
+func isStorableUnindexedFileType(fileType string) bool {
+	return IsVideoType(fileType)
 }
 
 // downloadFileFromURL downloads a remote file to a temp file and returns its binary content.

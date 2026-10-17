@@ -373,6 +373,40 @@ test('toggling the DingTalk uploaded-file switch writes the settings key', async
   } finally { f.close() }
 })
 
+test('the DingTalk unindexed-media switch reports the settings key, defaulting to off', async () => {
+  const off = await fixture({ type: 'dingtalk', settings: {} })
+  try {
+    // A data source that predates the switch must render as off and stay
+    // untouched: merely opening it may never change what it syncs.
+    assert.equal(off.vm.dingtalkStoreUnindexedMedia, false)
+    assert.equal(off.vm.form.config.settings.store_unindexed_media, undefined)
+  } finally { off.close() }
+
+  const on = await fixture({ type: 'dingtalk', settings: { store_unindexed_media: true } })
+  try {
+    assert.equal(on.vm.dingtalkStoreUnindexedMedia, true)
+  } finally { on.close() }
+
+  const explicitOff = await fixture({ type: 'dingtalk', settings: { store_unindexed_media: false } })
+  try {
+    assert.equal(explicitOff.vm.dingtalkStoreUnindexedMedia, false)
+  } finally { explicitOff.close() }
+})
+
+test('toggling the DingTalk unindexed-media switch writes only its own key', async () => {
+  const f = await fixture({ type: 'dingtalk', settings: { include_uploaded_files: true } })
+  try {
+    f.vm.dingtalkStoreUnindexedMedia = true
+    assert.equal(f.vm.form.config.settings.store_unindexed_media, true)
+    // The switches are independent: turning video archiving on must not turn
+    // the uploaded-file switch off (or on).
+    assert.equal(f.vm.form.config.settings.include_uploaded_files, true)
+    f.vm.dingtalkStoreUnindexedMedia = false
+    assert.equal(f.vm.form.config.settings.store_unindexed_media, false)
+    assert.equal(f.vm.form.config.settings.include_uploaded_files, true)
+  } finally { f.close() }
+})
+
 test('Cloud hierarchy limitation stays visible after an empty space expansion', async () => {
   const f = await fixture()
   try {
