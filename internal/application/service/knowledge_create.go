@@ -42,6 +42,9 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		logger.Infof(ctx, "Using custom filename: %s (original: %s, folder: %s)",
 			fileName, file.Filename, folderPath)
 	}
+	// Windows curl -F often sends Content-Disposition filename= in the active
+	// ANSI code page (GBK on zh-CN). Reinterpret before ValidateInput (#4268).
+	fileName = secutils.NormalizeUploadFilename(fileName)
 
 	logger.Infof(ctx, "Knowledge base ID: %s, file: %s", kbID, fileName)
 
@@ -142,8 +145,8 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	// 验证文件名安全性
 	safeFilename, isValid := secutils.ValidateInput(fileName)
 	if !isValid {
-		logger.Errorf(ctx, "Invalid filename: %s", fileName)
-		return nil, werrors.NewValidationError("文件名包含非法字符")
+		logger.Errorf(ctx, "Invalid filename: %s", secutils.SanitizeForLog(fileName))
+		return nil, invalidUploadFilenameError(fileName)
 	}
 
 	// The folder path is rendered as sidebar tree labels, so it goes through the
@@ -556,10 +559,11 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		fileName = extractFileNameFromURL(fileURL)
 	}
 	if fileName != "" {
+		fileName = secutils.NormalizeUploadFilename(fileName)
 		safeFilename, ok := secutils.ValidateInput(fileName)
 		if !ok {
-			logger.Errorf(ctx, "Invalid filename: %s", fileName)
-			return nil, werrors.NewValidationError("文件名包含非法字符")
+			logger.Errorf(ctx, "Invalid filename: %s", secutils.SanitizeForLog(fileName))
+			return nil, invalidUploadFilenameError(fileName)
 		}
 		fileName = safeFilename
 	}
@@ -1184,6 +1188,19 @@ func ensureManualFileName(title string) string {
 		return trimmed
 	}
 	return trimmed + manualFileExtension
+}
+
+
+// invalidUploadFilenameError distinguishes legacy encoding mismatches (e.g.
+// Windows curl sending GBK filename= bytes) from truly illegal characters so
+// API users get an actionable message (#4268).
+func invalidUploadFilenameError(fileName string) error {
+	if !secutils.IsValidUTF8String(fileName) {
+		return werrors.NewValidationError(
+			"文件名编码无效（需要 UTF-8）。Windows curl 请使用 UTF-8 文件名，或通过 fileName 表单字段指定名称",
+		)
+	}
+	return werrors.NewValidationError("文件名包含非法字符")
 }
 
 // sanitizeManualDownloadFilename converts a knowledge title into a safe .md

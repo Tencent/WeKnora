@@ -75,9 +75,10 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 			folderPath = customFolder
 		}
 	}
+	fileName = secutils.NormalizeUploadFilename(fileName)
 	safeFileName, ok := secutils.ValidateInput(fileName)
 	if !ok {
-		return nil, werrors.NewValidationError("文件名包含非法字符")
+		return nil, invalidUploadFilenameError(fileName)
 	}
 	if folderPath != "" {
 		safeFolderPath, ok := secutils.ValidateInput(folderPath)
