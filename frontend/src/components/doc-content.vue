@@ -17,6 +17,7 @@ import {
 import { MessagePlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
 import { normalizeSpuriousTablePrefixes } from '@/utils/markdownTableNormalize';
+import { stripDuplicateLeadingH1 } from '@/utils/markdownTitleDedupe';
 import { ensureLiteralSingleTildeOnGlobalMarked } from '@/utils/markedLiteralTilde';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { diffWikiLines, type WikiDiffLine } from '@/utils/wikiLineDiff';
@@ -914,6 +915,9 @@ const processMarkdown = (markdownText) => {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&amp;/g, '&');
+
+  // 抽屉标题已经显示条目名，正文第一行的同名 H1 会重复；仅在同名时剥掉。
+  processedText = stripDuplicateLeadingH1(processedText, [props.details?.title]);
 
   // 处理被 <p> 包裹的表格行，转换为正常的表格行，并在前后补空行
   processedText = processedText.replace(/<p>\s*(\|[\s\S]*?\|)\s*<\/p>/gi, '\n$1\n');
@@ -1864,7 +1868,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
             </div>
             <template v-else>
               <div v-if="!mergedContent" class="no_content">{{ $t('common.noData') }}</div>
-              <div v-else class="md-content" v-html="processMarkdown(mergedContent)"></div>
+              <div v-else class="md-content doc-merged-content" v-html="processMarkdown(mergedContent)"></div>
             </template>
           </div>
 
