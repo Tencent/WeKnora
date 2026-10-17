@@ -97,6 +97,12 @@ func (v *videoTestVLM) Predict(
 	return "", nil
 }
 
+func (v *videoTestVLM) PredictWithOptions(
+	ctx context.Context, imgBytes [][]byte, prompt string, _ *vlm.PredictOptions,
+) (string, error) {
+	return v.Predict(ctx, imgBytes, prompt)
+}
+
 func (v *videoTestVLM) GetModelName() string { return "video-test-vlm" }
 func (v *videoTestVLM) GetModelID() string   { return "vlm-1" }
 
