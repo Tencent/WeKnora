@@ -98,3 +98,62 @@ test('video frame settings round-trip from the stored video_config.vlm_config', 
   assert.match(editInit, /descriptionLanguage: kb\.video_config\?\.vlm_config\?\.description_language \|\| ''/)
   assert.match(editInit, /customInstructions: kb\.video_config\?\.vlm_config\?\.custom_instructions \|\| ''/)
 })
+
+test('video direct read offers a transport selector with a per-choice explanation', () => {
+  // 传输方式是直读自己的设置：只在 video_direct 下显示，选项把限制直接写进
+  // 下拉项（和解析方式一样），收起后仍能看到当前一档承诺了什么。
+  const block = source.match(
+    /<!-- 传输方式：([\s\S]*?)<div v-if="formData\.videoConfig\.enabled && videoModeUsesDirect" class="setting-row">([\s\S]*?)\n            <\/div>\n          <\/div>/
+  )?.[2]
+  assert.ok(block, 'expected to find the transport setting row')
+  assert.match(block, /v-model="formData\.videoConfig\.directInput"/)
+  assert.match(block, /:options="videoDirectInputOptions"/)
+  assert.match(block, /knowledgeEditor\.video\.directInputLabel/)
+  assert.match(block, /selectedDirectInputDescription/)
+  assert.match(block, /knowledgeEditor\.video\.directInputCostHint/)
+
+  const options = source.match(
+    /const videoDirectInputOptions = computed\(\(\) => \[([\s\S]*?)\n\]\)/
+  )?.[1]
+  assert.ok(options, 'expected to find videoDirectInputOptions')
+  for (const value of ['auto', 'base64', 'upload', 'url']) {
+    assert.match(options, new RegExp(`value: '${value}'`), `missing the ${value} option`)
+  }
+  for (const key of [
+    'directInputAuto',
+    'directInputBase64',
+    'directInputUpload',
+    'directInputUrl',
+  ]) {
+    assert.match(options, new RegExp(`knowledgeEditor\\.video\\.${key}`))
+    assert.match(options, new RegExp(`knowledgeEditor\\.video\\.${key}Desc`))
+  }
+
+  // 当前一档的说明按后端同一套归一读取，老行（空值）显示 auto 的说明。
+  const selected = source.match(
+    /const selectedDirectInputDescription = computed\(\(\) => \{([\s\S]*?)\n\}\)/
+  )?.[1]
+  assert.ok(selected, 'expected to find selectedDirectInputDescription')
+  assert.match(selected, /normalizeVideoDirectInput\(formData\.value\?\.videoConfig\?\.directInput\)/)
+})
+
+test('video transport is sent on save and round-trips from the stored config', () => {
+  // 保存必须显式发送 direct_input：缺省在后端等于 auto，但显式发送才能让
+  // 「刚刚从 base64 改回 auto」这种修改落库。读取侧对老行归一成 auto。
+  const payload = source.match(/data\.video_config = \{([\s\S]*?)\n  \}/)?.[1]
+  assert.ok(payload, 'expected to find the video_config payload block')
+  assert.match(
+    payload,
+    /direct_input: normalizeVideoDirectInput\(formData\.value\.videoConfig\?\.directInput\)/
+  )
+
+  const editInit = source.match(
+    /videoModelId: kb\.video_config\?\.video_model_id \|\| '',([\s\S]*?)directPrompt: kb\.video_config\?\.direct_prompt \|\| ''/
+  )?.[1]
+  assert.ok(editInit, 'expected to find the stored video initializer')
+  assert.match(editInit, /directInput: normalizeVideoDirectInput\(kb\.video_config\?\.direct_input\)/)
+
+  const defaults = source.match(/videoConfig: \{([\s\S]*?)\n    \},/)?.[1]
+  assert.ok(defaults, 'expected to find the videoConfig defaults')
+  assert.match(defaults, /directInput: 'auto' as string/)
+})

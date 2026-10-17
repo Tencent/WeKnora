@@ -47,3 +47,37 @@ export function isVideoDirectModelConfigured(
 ): boolean {
   return !!videoConfig?.videoModelId?.trim()
 }
+
+/**
+ * How the direct read carries the video to the model. `auto` sends files that
+ * fit the model provider's inline ceiling base64 inside the request and uploads
+ * the rest to the vendor's temporary storage, `base64` never stages the file
+ * anywhere, `upload` always stages it, and `url` is for a video the caller
+ * already serves publicly.
+ */
+export type VideoDirectInput = 'auto' | 'base64' | 'url' | 'upload'
+
+const VIDEO_DIRECT_INPUTS: readonly VideoDirectInput[] = ['auto', 'base64', 'url', 'upload']
+
+/**
+ * Mirrors the backend's NormalizeVideoDirectInput: an empty value is the decode
+ * result of rows written before the field existed and means auto, and an
+ * unknown value is a typo the client must never act on, so it also means auto.
+ */
+export function normalizeVideoDirectInput(mode?: string | null): VideoDirectInput {
+  const stored = mode?.trim()
+  return VIDEO_DIRECT_INPUTS.includes(stored as VideoDirectInput)
+    ? (stored as VideoDirectInput)
+    : 'auto'
+}
+
+/**
+ * Whether this transport can hand the file to the model vendor's temporary
+ * storage. The compliance note under the selector keys off it: base64 keeps the
+ * bytes inside the request, url means the caller hosts them.
+ */
+export function videoDirectInputStoresWithVendor(mode?: string | null): boolean {
+  const transport = normalizeVideoDirectInput(mode)
+  return transport === 'auto' || transport === 'upload'
+}
+

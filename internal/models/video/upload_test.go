@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -148,6 +149,9 @@ func newTestClient(t *testing.T, server *httptest.Server) Video {
 		ModelName:     "qwen3.8-max",
 		APIKey:        "test-key",
 		UploadBaseURL: server.URL,
+		// These tests pin the upload protocol, so the transport is explicit:
+		// the default (auto) would inline a file this small.
+		DirectInput: types.VideoDirectInputUpload,
 	})
 	require.NoError(t, err)
 	return client

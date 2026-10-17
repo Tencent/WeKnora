@@ -592,6 +592,32 @@
               </div>
             </div>
 
+            <!-- 传输方式：整段视频怎么送到模型。auto 按文件大小二选一，base64 承诺
+                 不落第三方临时存储，url 表示视频本来就有公网地址。 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesDirect" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.directInputLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.directInputDescription') }}</p>
+                <p class="desc">{{ selectedDirectInputDescription }}</p>
+                <p class="desc video-transport-cost">{{ $t('knowledgeEditor.video.directInputCostHint') }}</p>
+              </div>
+              <div class="setting-control">
+                <t-select
+                  v-model="formData.videoConfig.directInput"
+                  class="video-transport-select"
+                  :popup-props="{ overlayClassName: 'video-transport-popup' }"
+                  :options="videoDirectInputOptions"
+                >
+                  <template #option="{ option }">
+                    <div class="video-transport-option">
+                      <span class="video-transport-option__label">{{ option.label }}</span>
+                      <span class="video-transport-option__desc">{{ option.desc }}</span>
+                    </div>
+                  </template>
+                </t-select>
+              </div>
+            </div>
+
             <!-- 直读要求：追加到固定 prompt 之后，不能覆盖输出格式与「不许猜」 -->
             <div v-if="formData.videoConfig.enabled && videoModeUsesDirect"
               class="setting-row setting-row-vertical">
@@ -879,6 +905,7 @@ import {
   isVideoAudioModelConfigured,
   isVideoDirectModelConfigured,
   isVideoFrameModelConfigured,
+  normalizeVideoDirectInput,
 } from './videoConfig'
 import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
@@ -1099,6 +1126,46 @@ const selectedVideoModeDescription = computed(() => {
   }
 })
 
+// 直读的传输方式。auto 是本页默认，也是唯一按文件大小决策的一档；
+// base64 承诺视频不落厂商的临时存储（过大时直接失败，绝不偷偷上传），
+// upload 永远走临时存储，url 表示视频已经有公网地址、由调用方提供。
+// 说明直接写进下拉项，选之前就能看到限制与代价。
+const videoDirectInputOptions = computed(() => [
+  {
+    value: 'auto',
+    label: t('knowledgeEditor.video.directInputAuto'),
+    desc: t('knowledgeEditor.video.directInputAutoDesc'),
+  },
+  {
+    value: 'base64',
+    label: t('knowledgeEditor.video.directInputBase64'),
+    desc: t('knowledgeEditor.video.directInputBase64Desc'),
+  },
+  {
+    value: 'upload',
+    label: t('knowledgeEditor.video.directInputUpload'),
+    desc: t('knowledgeEditor.video.directInputUploadDesc'),
+  },
+  {
+    value: 'url',
+    label: t('knowledgeEditor.video.directInputUrl'),
+    desc: t('knowledgeEditor.video.directInputUrlDesc'),
+  },
+])
+// 选中的一档的说明也显示在选择器下面：下拉收起后仍然能看到它承诺了什么。
+const selectedDirectInputDescription = computed(() => {
+  switch (normalizeVideoDirectInput(formData.value?.videoConfig?.directInput)) {
+    case 'base64':
+      return t('knowledgeEditor.video.directInputBase64Desc')
+    case 'upload':
+      return t('knowledgeEditor.video.directInputUploadDesc')
+    case 'url':
+      return t('knowledgeEditor.video.directInputUrlDesc')
+    default:
+      return t('knowledgeEditor.video.directInputAutoDesc')
+  }
+})
+
 const navItems = computed(() => {
   const items: { key: string; icon: string; label: string; badge?: number }[] = [
     { key: 'basic', icon: 'info-circle', label: t('knowledgeEditor.sidebar.basic') },
@@ -1287,8 +1354,11 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       mode: 'audio_only' as string,
       modelId: '' as string,
       language: '' as string,
-      // 视频直读（video_direct）：视频模型与追加要求，都是视频页自己的设置。
+      // 视频直读（video_direct）：视频模型、传输方式与追加要求，都是视频页自己的设置。
       videoModelId: '' as string,
+      // 传输方式默认「自动」：按文件大小选 base64 内联或上传临时存储，
+      // 与后端 NormalizeVideoDirectInput 的归一结果一致。
+      directInput: 'auto' as string,
       directPrompt: '' as string,
       maxFrames: 12,
       frameIntervalSeconds: 0,
@@ -1483,6 +1553,9 @@ const loadKBData = async (
         // mode has no video model, and the pipeline then archives instead of
         // borrowing the ASR or frame model.
         videoModelId: kb.video_config?.video_model_id || '',
+        // Rows saved before the transport existed decode to empty, which the
+        // backend reads as auto; show the same value instead of an empty select.
+        directInput: normalizeVideoDirectInput(kb.video_config?.direct_input),
         directPrompt: kb.video_config?.direct_prompt || '',
         // Rows saved before the knobs existed decode to 0; show the effective
         // defaults instead of an empty input, and keep 0 as "auto interval".
@@ -1951,8 +2024,10 @@ const buildSubmitData = () => {
     mode: formData.value.videoConfig?.mode || 'audio_only',
     model_id: formData.value.videoConfig?.modelId || '',
     language: formData.value.videoConfig?.language || '',
-    // 直读的视频模型与追加要求：留空即清空，绝不借用 ASR / VLM 的模型。
+    // 直读的视频模型、传输方式与追加要求：留空即清空，绝不借用 ASR / VLM 的模型。
     video_model_id: formData.value.videoConfig?.videoModelId || '',
+    // 传输方式总是显式发送：老行（字段缺省）保存后按 auto 落库，未知值由后端归一。
+    direct_input: normalizeVideoDirectInput(formData.value.videoConfig?.directInput),
     direct_prompt: formData.value.videoConfig?.directPrompt || '',
     max_frames: formData.value.videoConfig?.maxFrames || 12,
     frame_interval_seconds: formData.value.videoConfig?.frameIntervalSeconds ?? 0,
@@ -2777,6 +2852,13 @@ watch(() => chatResources.allModels, (list) => {
     color: var(--td-warning-color);
   }
 
+  // 传输方式的成本 / 合规提示：与说明文字同色系，但单独起行，避免和
+  // 「当前选中的一档」混成一段。
+  .video-transport-cost {
+    margin-top: 4px;
+    color: var(--td-text-color-placeholder);
+  }
+
   .video-model-hint {
     margin: var(--app-space-1) 0 0;
     font-size: var(--app-text-sm);
@@ -2913,7 +2995,8 @@ watch(() => chatResources.allModels, (list) => {
 <!-- Non-scoped: TDesign teleports the mode dropdown outside this component, so
      a scoped selector cannot reach its option rows. -->
 <style lang="less">
-.video-mode-popup {
+.video-mode-popup,
+.video-transport-popup {
   .t-select-option {
     // Options are two lines (label + cost note); the default 32px row clips.
     height: auto;
@@ -2924,7 +3007,8 @@ watch(() => chatResources.allModels, (list) => {
   }
 }
 
-.video-mode-option {
+.video-mode-option,
+.video-transport-option {
   display: flex;
   flex-direction: column;
   gap: 2px;

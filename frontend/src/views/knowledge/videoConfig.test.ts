@@ -5,6 +5,8 @@ import {
   isVideoAudioModelConfigured,
   isVideoDirectModelConfigured,
   isVideoFrameModelConfigured,
+  normalizeVideoDirectInput,
+  videoDirectInputStoresWithVendor,
 } from './videoConfig';
 
 test('视频 ASR 只看视频页自己的 modelId', () => {
@@ -67,4 +69,29 @@ test('直读没配视频模型就是没配，不回退到 ASR / VLM', () => {
   assert.equal(isVideoDirectModelConfigured({}), false);
   assert.equal(isVideoDirectModelConfigured(null), false);
   assert.equal(isVideoDirectModelConfigured(undefined), false);
+});
+
+test('直读传输方式为空或未知时读作 auto，与后端归一一致', () => {
+  // 老行没有 direct_input；Typo 不能变成客户端不认识的 switch 分支。
+  assert.equal(normalizeVideoDirectInput(), 'auto');
+  assert.equal(normalizeVideoDirectInput(''), 'auto');
+  assert.equal(normalizeVideoDirectInput('   '), 'auto');
+  assert.equal(normalizeVideoDirectInput('auto'), 'auto');
+  assert.equal(normalizeVideoDirectInput(' base64 '), 'base64');
+  assert.equal(normalizeVideoDirectInput('upload'), 'upload');
+  assert.equal(normalizeVideoDirectInput('url'), 'url');
+  assert.equal(normalizeVideoDirectInput('BASE64'), 'auto');
+  assert.equal(normalizeVideoDirectInput('stream'), 'auto');
+  assert.equal(normalizeVideoDirectInput(null), 'auto');
+  assert.equal(normalizeVideoDirectInput(undefined), 'auto');
+});
+
+test('只有 auto / upload 会把视频交给厂商的临时存储', () => {
+  // 合规提示按这个判断：base64 承诺不落第三方暂存，url 由调用方自己托管。
+  assert.equal(videoDirectInputStoresWithVendor('auto'), true);
+  assert.equal(videoDirectInputStoresWithVendor(''), true);
+  assert.equal(videoDirectInputStoresWithVendor('upload'), true);
+  assert.equal(videoDirectInputStoresWithVendor('base64'), false);
+  assert.equal(videoDirectInputStoresWithVendor('url'), false);
+  assert.equal(videoDirectInputStoresWithVendor('unknown'), true);
 });

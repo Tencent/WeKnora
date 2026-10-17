@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models/video"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -295,4 +296,67 @@ func TestBuildVideoDirectPromptAppendsTheKnowledgeBaseRequirements(t *testing.T)
 	require.Contains(t, withInstructions, "只看第三章之后的画面。")
 	require.Contains(t, withInstructions, "system-owned output format")
 	require.True(t, strings.HasPrefix(withInstructions, "You are given"), "系统的输出格式仍然在前")
+}
+
+// videoTestDirectTransport records the transport the service hands the client.
+// The client is built from the model row and knows nothing about knowledge
+// bases, so the wiring is the only place video_config.direct_input can be
+// joined to it.
+type videoTestDirectTransport struct {
+	videoTestDirectModel
+	gotDirectInput string
+	withCalls      int
+}
+
+func (m *videoTestDirectTransport) WithDirectInput(mode string) video.Video {
+	m.withCalls++
+	m.gotDirectInput = mode
+	return m
+}
+
+// The knowledge base's transport reaches the client before the video is read,
+// and an unknown stored value arrives as auto rather than as a switch case the
+// client does not implement.
+func TestConvertVideoDirectModePassesTheConfiguredTransport(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		stored string
+		want   string
+	}{
+		{stored: "", want: types.VideoDirectInputAuto},
+		{stored: types.VideoDirectInputBase64, want: types.VideoDirectInputBase64},
+		{stored: "  upload  ", want: types.VideoDirectInputUpload},
+		{stored: "stream", want: types.VideoDirectInputAuto},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.stored, func(t *testing.T) {
+			t.Parallel()
+
+			direct := &videoTestDirectTransport{
+				videoTestDirectModel: videoTestDirectModel{text: "说明。"},
+			}
+			modelService := newDirectVideoModelService()
+			modelService.videoModel = direct
+			svc := &knowledgeService{
+				repo:         &videoTestKnowledgeRepo{},
+				fileSvc:      &videoTestFileService{content: []byte("mp4-bytes")},
+				modelService: modelService,
+			}
+			knowledge := newVideoTestKnowledge()
+			kb := newDirectVideoKB()
+			kb.VideoConfig.DirectInput = tc.stored
+
+			result, err := svc.convertVideo(
+				newVideoTestContext(), newVideoTestPayload(knowledge), kb, knowledge)
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, 1, direct.withCalls,
+				"the transport must be applied to the client the model service built")
+			require.Equal(t, tc.want, direct.gotDirectInput)
+			require.Equal(t, 1, direct.calls, "the video still goes through Predict")
+		})
+	}
 }

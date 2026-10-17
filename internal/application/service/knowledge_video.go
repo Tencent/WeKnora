@@ -634,7 +634,10 @@ func (s *knowledgeService) resolveVideoDirectModel(
 	if err != nil {
 		return nil, fmt.Errorf("build video model %q: %w", modelID, err)
 	}
-	return client, nil
+	// The transport is a knowledge base setting while the client is built from
+	// the model row, which knows nothing about knowledge bases, so the two are
+	// joined here — the same place that already picks the model for a video.
+	return video.WithDirectInput(client, kb.VideoConfig.EffectiveDirectInput()), nil
 }
 
 // readVideoDirect reads the stored video into memory and hands it to the video

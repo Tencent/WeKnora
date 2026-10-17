@@ -1,6 +1,6 @@
 // Package video implements the video understanding client: a chat call whose
-// user turn carries a whole video, plus the vendor's temporary-file upload that
-// turns local bytes into the URL the call needs.
+// user turn carries a whole video, plus the two ways local bytes reach that
+// call.
 //
 // The wire shape is the OpenAI-compatible chat protocol with one extra content
 // part:
@@ -9,11 +9,20 @@
 //	  {"type":"video_url","video_url":{"url":"oss://<key>"}},
 //	  {"type":"text","text":"<prompt>"}]}
 //
-// DashScope will not fetch a local file and a private deployment cannot serve a
-// public URL, so the bytes are uploaded first and referenced by the resulting
-// oss:// URL (valid for 48 hours). That URL scheme is only understood when the
-// call opts in with the X-DashScope-OssResourceResolve: enable header; without
-// it the endpoint treats oss:// as an unsupported absolute path.
+// The URL is one of three things. It can be an http(s) URL the vendor fetches
+// itself; it can be an oss:// object staged by DashScope's temporary-file
+// upload; or it can be a data: URL, the whole file base64 encoded into the
+// request body. Which one is used is the knowledge base's choice
+// (video_config.direct_input): "auto" picks inline for files that fit the
+// vendor's inline ceiling and uploads the rest, "base64" never uploads,
+// "upload" always stages the file, and "url" refuses local bytes because the
+// URL must come from the caller.
+//
+// The upload exists because a model endpoint in the cloud cannot read a local
+// file: staging is the documented way to hand DashScope a video, and a private
+// deployment cannot serve a public URL either. Both the upload and the model
+// call must use the same model and the same account: the key in the policy
+// request is the key that later calls the model.
 //
 // The three-step upload is documented at
 // https://help.aliyun.com/en/model-studio/get-temporary-file-url :
@@ -24,8 +33,9 @@
 //     file (the file part must be last);
 //  3. the object is then addressable as oss://{upload_dir}/{filename}.
 //
-// The upload and the model call must use the same model and the same account:
-// the key in the policy request is the key that later calls the model.
+// That URL scheme is only understood when the call opts in with the
+// X-DashScope-OssResourceResolve: enable header; without it the endpoint treats
+// oss:// as an unsupported absolute path.
 package video
 
 import (
@@ -45,19 +55,42 @@ import (
 // VLM interface — one Predict call, model identity getters — with the input
 // being one video rather than a list of images.
 type Video interface {
-	// Predict uploads the video bytes and answers the prompt about them. The
-	// filename supplies the object name and the extension the vendor stores;
-	// nothing is read from disk.
+	// Predict sends the video bytes and answers the prompt about them. The
+	// filename supplies the object name, the extension the vendor stores and
+	// the media type an inline request names; nothing is read from disk. How
+	// the bytes travel is the client's transport setting (see
+	// WithDirectInput).
 	Predict(ctx context.Context, videoBytes []byte, fileName, prompt string) (string, error)
 
 	// PredictURL answers a prompt about a video that is already reachable: an
-	// oss:// object from an earlier upload, or a public http(s) URL the vendor
-	// can fetch on its own. It is the second half of Predict and the way a
-	// deployment reuses an object across calls.
+	// oss:// object from an earlier upload, a public http(s) URL the vendor
+	// can fetch on its own, or a data: URL. It is the second half of Predict
+	// and the way a deployment reuses an object across calls.
 	PredictURL(ctx context.Context, videoURL, prompt string) (string, error)
 
 	GetModelName() string
 	GetModelID() string
+}
+
+// directInputConfigurable is the transport switch a client may implement. It is
+// an optional interface on purpose: the transport is a knowledge base setting,
+// while a Video is built from a model row, which knows nothing about knowledge
+// bases. A client that does not implement it keeps whichever transport it was
+// built with, and WithDirectInput is what makes that explicit at the call site.
+type directInputConfigurable interface {
+	WithDirectInput(mode string) Video
+}
+
+// WithDirectInput returns client configured to carry videos the way mode asks
+// (types.VideoDirectInputAuto / Base64 / URL / Upload). It is how
+// video_config.direct_input reaches a client the model service built from the
+// model row; a client without a transport switch is returned unchanged.
+func WithDirectInput(client Video, mode string) Video {
+	configurable, ok := client.(directInputConfigurable)
+	if !ok {
+		return client
+	}
+	return configurable.WithDirectInput(mode)
 }
 
 // Config holds the configuration needed to create a Video instance. It is
@@ -84,6 +117,12 @@ type Config struct {
 	// Timeout bounds one upload and one model call. Zero takes the deployment
 	// setting (VIDEO_HTTP_TIMEOUT_SECONDS, ten minutes by default).
 	Timeout time.Duration
+	// DirectInput is how Predict carries the video: empty or "auto" picks by
+	// file size, "base64" always inlines, "upload" always stages the file and
+	// "url" refuses local bytes. ConfigFromModel cannot fill it because it
+	// belongs to the knowledge base, not the model row; the caller passes it
+	// with WithDirectInput or through this field.
+	DirectInput string
 }
 
 // ConfigFromModel builds a Config from a stored model row. appID / appSecret
@@ -170,12 +209,24 @@ func NewVideo(config *Config) (Video, error) {
 	}
 
 	return &dashscopeVideo{
-		endpoint:   endpoint,
-		chatURL:    endpoint.Resolve(chatCompletionsPath),
-		uploadBase: uploadBaseURL(config.UploadBaseURL, resolved.BaseURL),
-		client:     newVideoHTTPClient(),
-		timeout:    config.Timeout,
-		modelName:  config.ModelName,
-		modelID:    config.ModelID,
+		endpoint:    endpoint,
+		chatURL:     endpoint.Resolve(chatCompletionsPath),
+		uploadBase:  uploadBaseURL(config.UploadBaseURL, resolved.BaseURL),
+		client:      newVideoHTTPClient(),
+		timeout:     config.Timeout,
+		modelName:   config.ModelName,
+		modelID:     config.ModelID,
+		provider:    resolved.Vendor.ID,
+		directInput: types.NormalizeVideoDirectInput(config.DirectInput),
 	}, nil
+}
+
+// WithDirectInput returns a copy of the client that carries videos the way mode
+// asks. The receiver is left untouched: the model service hands the same client
+// to whoever asks, and one knowledge base's transport must not leak into the
+// next caller.
+func (v *dashscopeVideo) WithDirectInput(mode string) Video {
+	clone := *v
+	clone.directInput = types.NormalizeVideoDirectInput(mode)
+	return &clone
 }

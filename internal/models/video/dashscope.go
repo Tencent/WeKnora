@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 const (
@@ -44,11 +45,20 @@ type dashscopeVideo struct {
 	timeout    time.Duration
 	modelName  string
 	modelID    string
+	// provider is the resolved vendor id. It decides the inline ceiling, and
+	// it is the vendor's id rather than the model row's provider so a row that
+	// named none but matched a DashScope URL is measured as DashScope.
+	provider string
+	// directInput is how Predict carries the video; see types.VideoConfig.
+	// It is already normalized, so the switch below never sees "" or a typo.
+	directInput string
 }
 
-// Predict uploads the bytes and then answers the prompt about them. Every
-// failure is returned as an error — a caller (the knowledge pipeline) degrades
-// the video on it, and a silent empty answer would be indexed as content.
+// Predict hands the video to the model the way the configured transport asks:
+// inline as a data: URL, staged in the vendor's temporary storage, or not at
+// all when the operator committed to a caller-supplied URL. Every failure is
+// returned as an error — a caller (the knowledge pipeline) degrades the video
+// on it, and a silent empty answer would be indexed as content.
 func (v *dashscopeVideo) Predict(
 	ctx context.Context, videoBytes []byte, fileName, prompt string,
 ) (string, error) {
@@ -59,6 +69,72 @@ func (v *dashscopeVideo) Predict(
 		return "", fmt.Errorf("video is %d bytes; the vendor accepts at most %d bytes per file",
 			len(videoBytes), MaxUploadBytes)
 	}
+	// An explicit transport is a promise, not a preference: "base64" must not
+	// upload when the file is too large (the operator may have chosen it to
+	// keep the bytes out of the vendor's bucket), and "upload" must not go
+	// inline because the file happened to be small.
+	switch v.directInput {
+	case types.VideoDirectInputURL:
+		return "", fmt.Errorf(
+			"video model %s is configured with direct_input %q, which needs a caller-supplied URL; use PredictURL",
+			v.modelName, types.VideoDirectInputURL)
+	case types.VideoDirectInputBase64:
+		if err := v.checkInlineFits(len(videoBytes)); err != nil {
+			return "", err
+		}
+		return v.predictInline(ctx, videoBytes, fileName, prompt)
+	case types.VideoDirectInputUpload:
+		return v.predictUpload(ctx, videoBytes, fileName, prompt)
+	default: // auto: the file size decides
+		if v.fitsInline(int64(len(videoBytes))) {
+			return v.predictInline(ctx, videoBytes, fileName, prompt)
+		}
+		return v.predictUpload(ctx, videoBytes, fileName, prompt)
+	}
+}
+
+// fitsInline reports whether a video of n bytes may travel inside the request.
+func (v *dashscopeVideo) fitsInline(n int64) bool {
+	return n <= inlineVideoLimit(v.provider)
+}
+
+// checkInlineFits refuses an oversized inline request with the numbers the
+// operator needs. Neither transport falls back to the upload:
+//
+//   - "base64" exists precisely so the bytes are not staged in the vendor's
+//     bucket; uploading after the promise failed would be the one outcome the
+//     operator ruled out.
+//   - "auto" does not promise "never upload", but it does promise a decision
+//     made by file size. Retrying through the other transport would send the
+//     file twice, add a slow upload and a second model call to a request that
+//     is already failing, and hide the vendor's message behind a retry.
+//   - A failed direct read already degrades to narration, frames or the
+//     archive, so nothing is lost by surfacing the error, and the error names
+//     the setting that fixes it.
+func (v *dashscopeVideo) checkInlineFits(n int) error {
+	limit := inlineVideoLimit(v.provider)
+	if int64(n) <= limit {
+		return nil
+	}
+	return fmt.Errorf(
+		"video is %d bytes; model %s (provider %q) accepts at most %d bytes inline as base64: "+
+			"set video_config.direct_input to %q to send large videos through the vendor's temporary storage",
+		n, v.modelName, v.provider, limit, types.VideoDirectInputUpload)
+}
+
+// predictInline sends the video base64 encoded in the request body. No upload
+// happens, so the bytes never reach the vendor's temporary bucket.
+func (v *dashscopeVideo) predictInline(
+	ctx context.Context, videoBytes []byte, fileName, prompt string,
+) (string, error) {
+	return v.PredictURL(ctx, inlineDataURL(videoBytes, fileName), prompt)
+}
+
+// predictUpload stages the bytes in the vendor's temporary storage and answers
+// the prompt about the resulting object.
+func (v *dashscopeVideo) predictUpload(
+	ctx context.Context, videoBytes []byte, fileName, prompt string,
+) (string, error) {
 	ossURL, err := v.uploadTempFile(ctx, videoBytes, fileName)
 	if err != nil {
 		return "", fmt.Errorf("upload video for model %s: %w", v.modelName, err)
@@ -89,13 +165,16 @@ func (v *dashscopeVideo) PredictURL(ctx context.Context, videoURL, prompt string
 
 	// The header is what makes oss:// addressable; the caller's own headers
 	// stay first so a configured header can never silently replace the
-	// vendor's routing values.
+	// vendor's routing values. An inline data: URL is decoded from the body
+	// and has nothing to resolve, so the header would only be noise there.
 	endpoint := v.endpoint
 	headers := make(map[string]string, len(endpoint.Headers)+1)
 	for k, value := range endpoint.Headers {
 		headers[k] = value
 	}
-	headers[ossResolveHeader] = "enable"
+	if !strings.HasPrefix(videoURL, inlineURLPrefix) {
+		headers[ossResolveHeader] = "enable"
+	}
 	endpoint.Headers = headers
 
 	callCtx, cancel := v.operationContext(ctx)

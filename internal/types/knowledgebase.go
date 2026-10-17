@@ -775,6 +775,32 @@ const (
 	VideoParseModeDirect = "video_direct"
 )
 
+// The four ways the direct mode can get the video to the model. The transport
+// is part of the setting rather than a constant of the client because the
+// trade-off is the operator's: inline keeps the file out of the vendor's
+// temporary storage but is capped by the request body, the upload handles
+// large files but stages the bytes in the vendor's bucket first, and a public
+// URL skips both when the file is already reachable.
+const (
+	// VideoDirectInputAuto picks inline when the file fits the provider's
+	// inline ceiling and the temporary upload otherwise. It is the default,
+	// and the only mode that decides by file size.
+	VideoDirectInputAuto = "auto"
+	// VideoDirectInputBase64 always sends the video inline, base64 encoded in
+	// the request body. It never falls back to the upload: an operator picks
+	// it so the file is not staged in the vendor's bucket, and silently
+	// uploading on failure would break exactly that promise.
+	VideoDirectInputBase64 = "base64"
+	// VideoDirectInputURL means the caller supplies a URL the vendor can
+	// reach. Local bytes cannot produce one, so this mode refuses them and
+	// PredictURL is the way in.
+	VideoDirectInputURL = "url"
+	// VideoDirectInputUpload always stages the file in the vendor's temporary
+	// storage and references the resulting object. It is the only mode that
+	// accepts videos above the provider's inline ceiling.
+	VideoDirectInputUpload = "upload"
+)
+
 const (
 	// DefaultVideoMaxFrames is how many frames one video may contribute when
 	// the knowledge base names no cap. It keeps a long training video from
@@ -832,6 +858,14 @@ type VideoConfig struct {
 	// direct mode has no model, and the mode then archives the video instead of
 	// borrowing a model the operator did not choose.
 	VideoModelID string `yaml:"video_model_id,omitempty" json:"video_model_id,omitempty"`
+	// DirectInput selects how the video reaches the model in the direct mode:
+	// "auto" (or empty) sends files that fit the provider's inline ceiling
+	// base64 inside the request and uploads the rest to the vendor's
+	// temporary storage, "base64" always sends inline and fails rather than
+	// uploading, "url" means the caller supplies the URL, and "upload" always
+	// stages the file in the vendor's storage. Normalize stores the effective
+	// value, so a row saved by this build spells "auto" out.
+	DirectInput string `yaml:"direct_input,omitempty" json:"direct_input,omitempty"`
 	// DirectPrompt is extra guidance appended to the built-in prompt of the
 	// direct mode, in the same shape as the frame description instructions: the
 	// system-owned rules (language, output shape, "do not guess") still win, so
@@ -891,6 +925,10 @@ func (c *VideoConfig) Normalize() {
 	c.Language = strings.TrimSpace(c.Language)
 	c.VideoModelID = strings.TrimSpace(c.VideoModelID)
 	c.DirectPrompt = strings.TrimSpace(c.DirectPrompt)
+	// An unknown transport is coalesced to auto for the same reason an
+	// unknown mode is coalesced to audio_only: a typo must not silently keep
+	// a value the pipeline will never read.
+	c.DirectInput = NormalizeVideoDirectInput(c.DirectInput)
 	// Store the effective sampling policy so the JSONB column cannot keep a
 	// value the pipeline clamps anyway: zero frames or a negative step read as
 	// "unset" on load, and an out-of-range cap is brought back into the range
@@ -933,6 +971,7 @@ func (c VideoConfig) Equal(other VideoConfig) bool {
 		c.ModelID == other.ModelID &&
 		c.Language == other.Language &&
 		c.VideoModelID == other.VideoModelID &&
+		c.EffectiveDirectInput() == other.EffectiveDirectInput() &&
 		c.DirectPrompt == other.DirectPrompt &&
 		c.EffectiveMaxFrames() == other.EffectiveMaxFrames() &&
 		c.EffectiveFrameIntervalSeconds() == other.EffectiveFrameIntervalSeconds() &&
@@ -953,6 +992,29 @@ func (c VideoConfig) EffectiveMode() string {
 	default:
 		return VideoParseModeAudioOnly
 	}
+}
+
+// NormalizeVideoDirectInput coalesces one stored transport into the value the
+// client acts on. An empty value is the decode result of rows written before
+// the field existed and means auto; an unknown value is a typo the pipeline
+// must not carry into a switch, so it means auto as well.
+func NormalizeVideoDirectInput(mode string) string {
+	switch strings.TrimSpace(mode) {
+	case VideoDirectInputBase64:
+		return VideoDirectInputBase64
+	case VideoDirectInputURL:
+		return VideoDirectInputURL
+	case VideoDirectInputUpload:
+		return VideoDirectInputUpload
+	default:
+		return VideoDirectInputAuto
+	}
+}
+
+// EffectiveDirectInput returns the transport the direct mode uses, without
+// mutating the stored value. It is safe on rows that were never Normalized.
+func (c VideoConfig) EffectiveDirectInput() string {
+	return NormalizeVideoDirectInput(c.DirectInput)
 }
 
 // AllowsAudioParse reports whether the mode reads the narration. An empty mode
