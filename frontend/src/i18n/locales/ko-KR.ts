@@ -7624,8 +7624,9 @@ export default {
     confirmManual: '게시 및 파싱',
     titleReparse: '재파싱 확인',
     confirmReparse: '확인 후 재파싱',
+    resetToKnowledgeBase: '지식 베이스의 현재 설정으로 되돌리기',
     reparseSource: '재파싱할 문서',
-    reparseHint: '이전 파싱 설정을 사용하며 여기서 조정할 수 있습니다',
+    reparseHint: '바꾸지 않은 항목은 지식 베이스의 현재 설정을 따릅니다. 문서마다 바꾼 항목은 되돌리기 전까지 유지됩니다.',
     manualCharCount: '{count}자',
     pdfForceScanned: {
       label: '스캔 PDF로 파싱',

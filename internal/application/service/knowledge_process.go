@@ -2823,10 +2823,15 @@ func (s *knowledgeService) reparseKnowledge(
 	// When the caller supplies new overrides (e.g. via the reparse confirm
 	// dialog), validate them against this knowledge's file type, then persist
 	// to metadata so both this call's enqueue and the worker re-read the same
-	// config. nil keeps whatever was stored at upload time.
+	// config. nil keeps whatever was stored at upload time. A snapshot that
+	// only repeats the current knowledge base is cleared, so the next edit
+	// of that setting is what reparse uses.
 	if processOverrides != nil {
-		if err := ValidateProcessOverrides(ctx, kb, processOverrides, reparseFileTypes(existing)); err != nil {
-			return nil, err
+		processOverrides = compactProcessOverrides(kb, processOverrides)
+		if processOverrides != nil {
+			if err := ValidateProcessOverrides(ctx, kb, processOverrides, reparseFileTypes(existing)); err != nil {
+				return nil, err
+			}
 		}
 		if err := existing.SetProcessOverrides(processOverrides); err != nil {
 			logger.Errorf(ctx, "Failed to set process overrides on reparse: %v", err)

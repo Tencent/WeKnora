@@ -7625,8 +7625,9 @@ export default {
     confirmManual: '确认发布并解析',
     titleReparse: '重新解析确认',
     confirmReparse: '确认并重新解析',
+    resetToKnowledgeBase: '恢复为知识库当前设置',
     reparseSource: '待重新解析文档',
-    reparseHint: '将沿用上次解析的配置，可在此调整',
+    reparseHint: '未改动的项跟随知识库当前设置。上次单独改过的项会保留，可恢复为知识库设置。',
     manualCharCount: '{count} 个字符',
     pdfForceScanned: {
       label: '按扫描件解析 PDF',
