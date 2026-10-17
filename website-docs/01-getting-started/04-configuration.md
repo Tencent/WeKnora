@@ -261,11 +261,13 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 
 ### 镜像构建参数（从源码构建时）
 
-以下变量只在 `docker compose build` / `make docker-build-frontend` 构建 frontend 镜像时使用，拉取官方镜像部署时无需设置。其他构建参数（Go 代理、apt 镜像源等）见 `.env.example` A1 节。
+以下变量只在 `docker compose build` / `make docker-build-frontend` 从源码构建 frontend / app 镜像时使用，拉取官方镜像部署时无需设置。其他构建参数（Go 代理、apt 镜像源等）见 `.env.example` A1 节。
 
 | 名称 | 默认值 | 说明 |
 | --- | --- | --- |
 | `VITE_FRONTEND_COMMIT` | unknown | 写入「系统信息」页的前端短 commit。`make docker-build-frontend` 与 `start_all.sh --no-pull` 会从 git 自动填充；直接 `docker compose build` 时需自行导出 |
+| `VERSION_ARG` | 空（构建时回退读 `VERSION` 文件） | 写入「系统信息」页的应用版本号。`start_all.sh --no-pull` 会自动填充；直接 `docker compose build` 时可自行导出 |
+| `COMMIT_ID_ARG` / `BUILD_TIME_ARG` / `GO_VERSION_ARG` | 空（unknown） | 写入「系统信息」页的应用 commit / 构建时间 / Go 版本。`start_all.sh --no-pull` 会从 git 自动填充 |
 | `NPM_REGISTRY` | 空（默认源） | 构建阶段使用的 npm registry，国内可设 `https://registry.npmmirror.com` |
 | `NODE_MAX_OLD_SPACE_SIZE` | 4096 | Vite 构建的 Node 堆上限（MB），Docker Desktop 内存较小时可降到 2048 |
 

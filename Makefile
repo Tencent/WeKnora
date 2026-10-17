@@ -281,8 +281,10 @@ deps:
 # google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn for qdrant milvus proto conflict
 # GO_BUILD_TAGS adds optional build tags, e.g. GO_BUILD_TAGS=anydoc to link the
 # in-process office document parser (run `make anydoc-lib` first).
+# When .git is absent (e.g. inside a docker build), fall back to the VERSION
+# file so compose-built images still report the base version.
 build-prod:
-	VERSION=$$(git describe --tags --abbrev=0 2>/dev/null || echo "$${VERSION:-unknown}"); \
+	VERSION=$$(git describe --tags --abbrev=0 2>/dev/null || echo "$${VERSION:-$$(cat VERSION 2>/dev/null || echo unknown)}"); \
 	COMMIT_ID=$${COMMIT_ID:-unknown}; \
 	CGO_ENABLED=1 \
 	CGO_CFLAGS="-Wno-deprecated-declarations" \
