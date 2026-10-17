@@ -67,7 +67,7 @@ import DocumentPreview from '@/components/document-preview.vue'
 import ArtifactFileIcon from '@/views/chat/components/ArtifactFileIcon.vue'
 import { getChunkByIdOnly, getKnowledgeDetails } from '@/api/knowledge-base/index'
 import { isKnownPreviewableFile } from '@/utils/filePreview'
-import type { ReferenceSourceTarget } from '@/utils/referenceSources'
+import { isWikiReferenceSource, referenceSourceRoute, type ReferenceSourceTarget } from '@/utils/referenceSources'
 import {
   locatorPages,
   parseSourceLocators,
@@ -123,11 +123,8 @@ const isManual = computed(() => meta.knowledgeSource === 'manual' ||
   (meta.knowledgeType || meta.fileType).toLowerCase() === 'manual')
 
 const documentHref = computed(() => {
-  if (!props.target.knowledgeBaseId) return ''
-  return router.resolve({
-    path: `/platform/knowledge-bases/${props.target.knowledgeBaseId}`,
-    query: { knowledge_id: props.target.knowledgeId },
-  }).href
+  const route = referenceSourceRoute(props.target)
+  return route ? router.resolve(route).href : ''
 })
 
 const statusText = computed(() => {
@@ -291,6 +288,20 @@ async function load() {
   status.value = 'idle'
   locatedPage.value = 0
   locate.value = null
+  if (isWikiReferenceSource(props.target)) {
+    // Open the authenticated Wiki browser, which resolves the actual page.
+    // The synthetic retrieval scope has no knowledge-details endpoint.
+    const route = referenceSourceRoute(props.target)
+    if (route) {
+      try {
+        await router.push(route)
+        return
+      } catch { /* Fall back to the reference list if navigation fails. */ }
+    }
+    mode.value = 'none'
+    emit('unavailable')
+    return
+  }
   // Another citation in the open file: keep the preview mounted and only
   // move the highlight, instead of downloading and rendering the file again.
   const sameFile = mode.value === 'file' && shownKnowledgeId === props.target.knowledgeId
@@ -335,7 +346,7 @@ function openWebSource() {
 }
 
 watch(
-  () => [props.target.chunkId, props.target.knowledgeId, props.target.anchorText],
+  () => [props.target.chunkId, props.target.knowledgeId, props.target.knowledgeBaseId, props.target.wikiSlug, props.target.anchorText],
   () => void load(),
   { immediate: true },
 )

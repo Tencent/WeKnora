@@ -36,6 +36,9 @@ type WikiPageService interface {
 	// surfacing a version bump to end users is misleading.
 	UpdateAutoLinkedContent(ctx context.Context, page *types.WikiPage) error
 
+	// RefreshPageIndex retries retrieval synchronization from the current stored page.
+	RefreshPageIndex(ctx context.Context, kbID, slug string) error
+
 	// GetPageBySlug retrieves a wiki page by its slug within a knowledge base.
 	GetPageBySlug(ctx context.Context, kbID string, slug string) (*types.WikiPage, error)
 
@@ -249,6 +252,12 @@ type WikiPageService interface {
 
 // WikiPageRepository defines the wiki page data persistence interface.
 type WikiPageRepository interface {
+	// WithPageWriteLock serializes page persistence, retrieval replacement and embedding configuration
+	// within a KB across service instances (and across workers with PostgreSQL).
+	WithPageWriteLock(ctx context.Context, kbID, slug string, fn func() error) error
+	// UpdateDerivedMeta writes only link or placement caches, never lifecycle status.
+	UpdateDerivedMeta(ctx context.Context, page *types.WikiPage, placement bool) error
+
 	// Create inserts a new wiki page record.
 	Create(ctx context.Context, page *types.WikiPage) error
 

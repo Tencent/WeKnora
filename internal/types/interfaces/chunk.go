@@ -14,6 +14,11 @@ type ChunkImageInfo struct {
 
 // ChunkRepository defines the interface for chunk repository operations
 type ChunkRepository interface {
+	// ListWikiPageChunks includes soft-deleted derived generations for cleanup.
+	ListWikiPageChunks(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+	// PurgeWikiPageChunks physically removes derived Wiki content, including old generations.
+	PurgeWikiPageChunks(ctx context.Context, tenantID uint64, knowledgeID string) error
+
 	// ListAllChunksByKnowledgeID includes every type and storage status for
 	// scoped lifecycle operations; UI pagination hides unindexed chunks.
 	ListAllChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)

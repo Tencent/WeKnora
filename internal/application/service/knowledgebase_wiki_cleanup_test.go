@@ -36,6 +36,10 @@ type recordingWikiRepo struct {
 	issuesCalls    []wikiKBDeleteCall
 }
 
+func (*recordingWikiRepo) List(context.Context, *types.WikiPageListRequest) ([]*types.WikiPage, int64, error) {
+	return nil, 0, nil
+}
+
 func (r *recordingWikiRepo) DeleteByKnowledgeBaseID(_ context.Context, tenantID uint64, kbID string) error {
 	r.pagesCalls = append(r.pagesCalls, wikiKBDeleteCall{tenantID, kbID})
 	return r.pagesErr

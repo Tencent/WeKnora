@@ -693,6 +693,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 
 	var reduceMu sync.Mutex
 	var allPagesAffected []string
+	var publishSlugs []string
 	var ingestPagesAffected []string
 	var retractPagesAffected []string
 	// failedAdditionSlugs collects entity/concept slugs whose page
@@ -800,6 +801,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 					reduceMu.Unlock()
 				}
 			}
+			if reduceErr == nil && !updateDeferred && !additionFailed {
+				reduceMu.Lock()
+				publishSlugs = append(publishSlugs, slug)
+				reduceMu.Unlock()
+			}
 			if changed {
 				reduceMu.Lock()
 				allPagesAffected = append(allPagesAffected, slug)
@@ -820,9 +826,6 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	_ = egReduce.Wait()
 
-	tailCtx, tailCancel := wikiIngestCleanupContext(ctx)
-	defer tailCancel()
-
 	// Sanitize the doc summary pages produced by this batch BEFORE we
 	// rebuild the index. The summary LLM (run during
 	// map) was free to inject [[entity/foo|name]] links to every slug it
@@ -830,7 +833,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// those slugs into actual pages. Rewrite those dead links to plain
 	// text so the summary doesn't contain unresolvable references.
 	if len(failedAdditionSlugs) > 0 && len(docResults) > 0 {
-		s.sanitizeDeadSummaryLinks(tailCtx, payload.KnowledgeBaseID, docResults, failedAdditionSlugs, batchCtx)
+		s.sanitizeDeadSummaryLinks(ctx, payload.KnowledgeBaseID, docResults, failedAdditionSlugs, batchCtx)
 	}
 
 	totalPagesAffected = len(allPagesAffected)
@@ -849,15 +852,23 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			wikiActivityActions["ingest"]++
 		}
 	}
-	RecordWikiContentActivity(tailCtx, s.audit, payload.TenantID, payload.KnowledgeBaseID, wikiActivityActions)
+	RecordWikiContentActivity(ctx, s.audit, payload.TenantID, payload.KnowledgeBaseID, wikiActivityActions)
 
-	// Publish freshly-generated pages immediately (NOT deferred to finalize):
-	// users should see a document's wiki pages as soon as their content is
-	// written, not after the debounce window. This is a cheap status flip.
-	if len(allPagesAffected) > 0 {
-		logger.Infof(ctx, "wiki ingest: publishing draft pages")
-		s.publishDraftPages(tailCtx, payload.KnowledgeBaseID, allPagesAffected)
+	// Retry indexing for every processed slug, including unchanged pages from a
+	// previous failed publication. Do not settle/trim their pending document ops
+	// until publication succeeds; the existing abnormal-exit cleanup releases
+	// claims and the task executor retries with backoff.
+	// Publication includes embedding and external writes: retain the worker
+	// processing deadline and cancellation, not the short detached cleanup budget.
+	if err := s.publishDraftPages(ctx, payload.KnowledgeBaseID, publishSlugs); err != nil {
+		exitStatus = "publish_failed"
+		return err
 	}
+
+	// Start the detached bookkeeping budget after publication so a healthy slow
+	// batch still has time to enqueue its finalize work.
+	tailCtx, tailCancel := wikiIngestCleanupContext(ctx)
+	defer tailCancel()
 
 	// Defer KB-global convergence (index-intro rebuild + dead-link cleanup +
 	// cross-link injection) to a debounced per-KB wiki:finalize task instead of
@@ -1140,6 +1151,8 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 	pruneRowIDs := make([]int64, 0)
 	affectedSet := make(map[string]struct{}, len(rows))
 	var affectedSlugs []string
+	var indexRetrySlugs []string
+	indexRetrySet := make(map[string]struct{})
 	var freshRefs []linkRef
 	var folderPruneIDs []string
 	var changeDesc strings.Builder
@@ -1154,6 +1167,15 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		var row wikiFinalizeRow
 		if err := json.Unmarshal(r.Payload, &row); err != nil {
 			logger.Warnf(ctx, "wiki finalize: unmarshal row id=%d failed: %v", r.ID, err)
+			continue
+		}
+		if r.Op == wikiFinalizeOpIndexRetry {
+			if row.Slug != "" {
+				if _, seen := indexRetrySet[row.Slug]; !seen {
+					indexRetrySet[row.Slug] = struct{}{}
+					indexRetrySlugs = append(indexRetrySlugs, row.Slug)
+				}
+			}
 			continue
 		}
 		if r.Op == wikiFinalizeOpFolderPrune {
@@ -1225,6 +1247,14 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		s.injectCrossLinks(ctx, payload.KnowledgeBaseID, affectedSlugs, freshRefs, batchCtx)
 	}
 
+	// These durable rows survive a failed automatic rewrite's index sync. They
+	// must run even when linkifyContent no longer has any text change to make.
+	for _, slug := range indexRetrySlugs {
+		if err := s.wikiService.RefreshPageIndex(ctx, payload.KnowledgeBaseID, slug); err != nil {
+			return fmt.Errorf("wiki finalize: retry page index %s: %w", slug, err)
+		}
+	}
+
 	// A retract may leave one or more generated folders empty. Do not prune
 	// while any ingest row for this KB is queued or claimed: taxonomy planning
 	// creates folders before reduce writes pages, so an apparently-empty folder
@@ -1283,7 +1313,7 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 	}
 	if n, cErr := s.pendingRepo.PendingCount(ctx, wikiFinalizeTaskType, wikiTaskScope, payload.KnowledgeBaseID); cErr == nil && n > 0 {
 		if !pruneDeferred {
-			s.scheduleFinalize(ctx, payload)
+			s.scheduleFinalizeRetry(ctx, payload)
 		}
 		rescheduled = true
 	}

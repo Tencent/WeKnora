@@ -253,6 +253,8 @@ return proposed
 	// corresponding pages, so pruning any earlier can invalidate in-flight
 	// folder assignments.
 	wikiFinalizeOpFolderPrune = "folder_prune"
+	// Index retries remain independent of whether link decoration changes text.
+	wikiFinalizeOpIndexRetry = "index_retry"
 
 	wikiFinalizeAdded   = "added"
 	wikiFinalizeRemoved = "removed"
@@ -916,11 +918,12 @@ func (s *wikiIngestService) scheduleFinalize(ctx context.Context, payload WikiIn
 	}
 }
 
-// scheduleFinalizeRetry is used when folder pruning is waiting for ingest
-// rows to drain. It deliberately has no stable TaskID: the currently-running
+// scheduleFinalizeRetry is used for durable work remaining after a pass,
+// including index recovery and folders waiting for ingest rows to drain.
+// It deliberately has no stable TaskID: the currently-running
 // finalize task still owns that ID until it returns, so reusing it here would
 // coalesce the only retry away. Duplicate retries are harmless because the
-// durable prune row is deleted exactly once and an empty lane is a no-op.
+// durable work is acknowledged under its write lock and an empty lane is a no-op.
 func (s *wikiIngestService) scheduleFinalizeRetry(ctx context.Context, payload WikiIngestPayload) {
 	langfuse.InjectTracing(ctx, &payload)
 	b, _ := json.Marshal(payload)
@@ -931,7 +934,7 @@ func (s *wikiIngestService) scheduleFinalizeRetry(ctx context.Context, payload W
 		asynq.ProcessIn(wikiFolderPruneRetryDelay),
 	)
 	if _, err := s.task.Enqueue(t); err != nil {
-		logger.Warnf(ctx, "wiki finalize: schedule deferred folder prune failed: %v", err)
+		logger.Warnf(ctx, "wiki finalize: schedule deferred work failed: %v", err)
 	}
 }
 
@@ -2369,19 +2372,29 @@ func splitSummaryLine(raw string) (summary string, content string) {
 
 // publishDraftPages transitions draft pages to published status after ingest completes.
 // This ensures users don't see half-built pages during the ingest process.
-func (s *wikiIngestService) publishDraftPages(ctx context.Context, kbID string, slugs []string) {
+func (s *wikiIngestService) publishDraftPages(ctx context.Context, kbID string, slugs []string) error {
+	var failures []error
 	for _, slug := range slugs {
 		page, err := s.wikiService.GetPageBySlug(ctx, kbID, slug)
-		if err != nil || page == nil {
+		if errors.Is(err, apprepo.ErrWikiPageNotFound) {
 			continue
 		}
-		if page.Status == types.WikiPageStatusDraft {
-			page.Status = types.WikiPageStatusPublished
-			if err := s.wikiService.UpdatePageMeta(ctx, page); err != nil {
-				logger.Warnf(ctx, "wiki ingest: failed to publish page %s: %v", slug, err)
-			}
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		if page == nil || page.Status == types.WikiPageStatusArchived {
+			continue
+		}
+		// Published status alone is not evidence of successful retrieval indexing.
+		// Retry published pages too when a previous attempt stopped mid-sync.
+		page.Status = types.WikiPageStatusPublished
+		publishCtx := context.WithValue(ctx, wikiPublicationContextKey{}, true)
+		if err := s.wikiService.UpdatePageMeta(publishCtx, page); err != nil {
+			failures = append(failures, fmt.Errorf("publish wiki page %s: %w", slug, err))
 		}
 	}
+	return errors.Join(failures...)
 }
 
 // writeDedupCandidateGroup renders one new item together with its own
