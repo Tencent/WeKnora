@@ -14,6 +14,10 @@ async function setup(t: TestContext) {
   }
   const listKnowledgeFolders = t.mock.fn(async (_id: string) => ({ data: { folders: [] } }))
   const fetchKnowledgeBaseById = t.mock.fn(async (_id: string, _force: boolean) => ({ id: 'kb', type: 'document' }))
+  let settle: () => void = () => {}
+  const waitForKnowledgeDeletion = t.mock.fn((_ids: string[]) => new Promise<string>((resolve) => {
+    settle = () => resolve('completed')
+  }))
   const page = f.component(new URL('./KnowledgeBase.vue', import.meta.url), {
     'vue-router': { useRoute: () => route, useRouter: () => ({ replace() {} }) },
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
@@ -30,7 +34,7 @@ async function setup(t: TestContext) {
     '@/stores/uploadTasks': { useUploadTasksStore: () => ({}) },
     '@/hooks/useMarqueeSelect': { useMarqueeSelect: () => ({}) },
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
-    '@/utils/kbPermission': {}, '@/utils/knowledgeDeletion': {}, '@/utils/knowledgeTrace': {},
+    '@/utils/kbPermission': {}, '@/utils/knowledgeDeletion': { waitForKnowledgeDeletion }, '@/utils/knowledgeTrace': {},
     '@/utils/knowledgeProcessingStall': stall, '@/api/wiki': {}, '@/api/knowledge-base': {},
     '@/api/knowledge-base/index': { listKnowledgeFolders, listKnowledgeTags: async () => ({ data: { data: [], total: 0 } }) },
   })
@@ -39,7 +43,10 @@ async function setup(t: TestContext) {
   hook.getKnowled.mock.resetCalls()
   listKnowledgeFolders.mock.resetCalls()
   fetchKnowledgeBaseById.mock.resetCalls()
-  return { ...f, ...page, route, hook, listKnowledgeFolders, fetchKnowledgeBaseById }
+  return {
+    ...f, ...page, route, hook, listKnowledgeFolders, fetchKnowledgeBaseById, waitForKnowledgeDeletion,
+    settleDeletion: () => settle(),
+  }
 }
 
 test('refreshes files and folders for the open KB and ignores unrelated areas and KBs', async t => {
@@ -73,7 +80,7 @@ test('reloads KB metadata with force without adding file requests beyond the exi
   assert.equal(f.hook.getKnowled.mock.callCount(), fileRequests)
 })
 
-for (const operation of ['knowledge.update', 'knowledge.reparse', 'knowledge.cancel_parse']) {
+for (const operation of ['knowledge.update', 'knowledge.reparse', 'knowledge.cancel_parse', 'chunk.update', 'chunk.revert']) {
   test(`refreshes the open document on ${operation}`, async t => {
     const f = await setup(t)
     f.emit(change(operation, { knowledge_id: ['doc'] }))
@@ -85,6 +92,14 @@ for (const operation of ['knowledge.update', 'knowledge.reparse', 'knowledge.can
     assert.equal(f.vm.isCardDetails, true)
   })
 }
+
+test('ignores chunk changes in another document outside this knowledge base', async t => {
+  const f = await setup(t)
+  f.emit(change('chunk.update', { knowledge_id: ['other-doc'] }))
+  t.mock.timers.tick(300)
+  assert.equal(f.hook.getCardDetails.mock.callCount(), 0)
+  assert.equal(f.hook.getKnowled.mock.callCount(), 0)
+})
 
 test('closes a deleted drawer even when the same burst includes an update', async t => {
   const f = await setup(t)
@@ -102,6 +117,19 @@ test('refreshes ID-only changes outside the loaded page without refreshing an un
   assert.equal(f.hook.getKnowled.mock.callCount(), 1)
   assert.equal(f.hook.getCardDetails.mock.callCount(), 0)
   assert.equal(f.vm.isCardDetails, true)
+})
+
+test('reloads the list again once a delete the assistant started has finished', async t => {
+  const f = await setup(t)
+  f.emit(change('knowledge.delete', { knowledge_id: ['doc'] }))
+  t.mock.timers.tick(300)
+  await flush()
+  assert.equal(f.vm.isCardDetails, false)
+  assert.equal(f.hook.getKnowled.mock.callCount(), 1)
+  assert.deepEqual(Array.from(f.waitForKnowledgeDeletion.mock.calls[0].arguments[0] as string[]), ['doc'])
+  f.settleDeletion()
+  await flush()
+  assert.equal(f.hook.getKnowled.mock.callCount(), 2)
 })
 
 test('uses the current route when a queued change fires', async t => {

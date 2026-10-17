@@ -22,6 +22,7 @@ func RegisterModelRoutes(
 	{
 		// 获取模型厂商列表 — Viewer+
 		models.GET("/providers", g.Viewer(), handler.ListModelProviders)
+		models.GET("/providers/:provider", g.Viewer(), handler.GetModelProvider)
 		// 解析模型的有效接入配置（协议 / 思考等级 / 上下文）— Viewer+
 		models.GET("/catalog/resolve", g.Viewer(), handler.ResolveModelCatalog)
 		models.POST("/catalog/resolve", g.Viewer(), handler.ResolveModelCatalog)
@@ -37,6 +38,8 @@ func RegisterModelRoutes(
 		models.GET("/:id", g.Viewer(), handler.GetModel)
 		// 更新模型 — Admin+；内置模型仍由服务层额外限定为 SystemAdmin。
 		models.PUT("/:id", g.AdminOrSystemAdmin(), handler.UpdateModel)
+		// 只改显示名称与描述 — 与 PUT 相同的权限
+		models.PATCH("/:id", g.AdminOrSystemAdmin(), handler.PatchModel)
 		// 删除模型 — Admin+
 		models.DELETE("/:id", g.Admin(), handler.DeleteModel)
 		// Per-field credential subresource (see internal/handler/model_credentials.go) — Admin+
@@ -243,6 +246,7 @@ func RegisterWebSearchProviderRoutes(
 		providers.GET("", g.Viewer(), h.ListProviders)
 		providers.GET("/:id", g.Viewer(), h.GetProvider)
 		providers.PUT("/:id", g.Admin(), h.UpdateProvider)
+		providers.PATCH("/:id", g.Admin(), h.PatchProvider)
 		providers.DELETE("/:id", g.Admin(), h.DeleteProvider)
 		// Per-field credential subresource — Admin+
 		providers.PUT("/:id/credentials", g.Admin(), credHandler.Put)
@@ -317,6 +321,7 @@ func RegisterDataSourceRoutes(
 		ds.GET("", g.Viewer(), handler.ListDataSources)
 		ds.GET("/:id", g.Viewer(), handler.GetDataSource)
 		ds.PUT("/:id", g.Admin(), handler.UpdateDataSource)
+		ds.PATCH("/:id/sync-settings", g.Admin(), handler.PatchSyncSettings)
 		ds.DELETE("/:id", g.Admin(), handler.DeleteDataSource)
 
 		// Credential subresource. Single logical field "credentials" because

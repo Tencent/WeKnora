@@ -311,7 +311,11 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
       invalidate('knowledgeBases')
       void ensureKnowledgeBases(true).catch(() => {})
     }
-  }, { areas: ['agent', 'knowledge_base', 'knowledge', 'faq', 'wiki'] }))
+    if (changes.some(change => change.area === 'model')) {
+      invalidate('models')
+      void ensureModels(true).catch(() => {})
+    }
+  }, { areas: ['agent', 'knowledge_base', 'knowledge', 'faq', 'wiki', 'model'] }))
 
   return {
     rawKnowledgeBases,

@@ -1842,8 +1842,31 @@ export default {
       databaseQuery: '資料庫查詢',
       findOperations: '查找操作',
       runOperation: '執行操作',
+      tryAgent: '試跑智能體',
+      openPage: '開啟頁面',
       searchWeKnoraDocs: '搜尋產品文件',
-      readWeKnoraDoc: '閱讀產品文件'
+      readWeKnoraDoc: '閱讀產品文件',
+      readPage: '查看目前頁面',
+      selectTab: '切換標籤',
+      fillPage: '填寫頁面'
+    },
+    pageAccess: {
+      viewed: '已查看目前頁面：{location}'
+    },
+    pageEdit: {
+      title: '已填寫 {count} 處',
+      undo: '復原',
+      undone: '已復原這次填寫',
+      undoSkipped: '{count} 處已被你修改或不在頁面上，未復原',
+      unsaved: '尚未儲存，請檢查後在頁面上自行儲存'
+    },
+    openPage: {
+      open: '開啟',
+      openForm: '開啟並填寫',
+      opened: '助手已開啟',
+      back: '返回',
+      endpoint: '將連線到：',
+      draftHint: '已依助手的建議預填。請補上金鑰等憑證，檢查後自行儲存。'
     },
     skillFiles: {
       heading: '技能檔案',
@@ -1886,6 +1909,158 @@ export default {
       binarySuppressed: '二進位輸出已省略，請將檔案寫入產物目錄後下載'
     },
     operations: {
+      names: {
+        data_source: {
+          list: "取得資料來源清單",
+          get: "取得資料來源詳情",
+          test: "測試資料來源連線",
+          sync: "同步資料來源",
+          pause: "暫停資料來源同步",
+          resume: "恢復資料來源同步",
+          list_sync_logs: "取得資料來源同步紀錄",
+          get_sync_log: "取得資料來源同步進度",
+          list_resources: "查詢資料來源可同步資源",
+          update_sync: "修改資料來源同步設定",
+        },
+        agent: {
+          list: "取得智慧體清單",
+          create: "建立智慧體",
+          get: "取得智慧體詳細資訊",
+          delete: "刪除智慧體",
+          update: "更新智慧體",
+          copy: "複製智慧體",
+        },
+        chunk: {
+          get: "取得分塊詳情",
+          update: "更新分塊",
+          list_revisions: "取得分塊歷史版本",
+          revert: "還原分塊歷史版本",
+          list: "取得知識分塊清單",
+        },
+        knowledge_base: {
+          list_parser_engines: "取得可用解析引擎",
+          copy: "複製知識庫內容",
+          duplicate: "複製知識庫設定",
+          get_copy_progress: "取得知識庫複製進度",
+          list: "取得知識庫清單",
+          create: "建立知識庫",
+          get: "取得知識庫詳細資訊",
+          delete: "刪除知識庫",
+          update: "更新知識庫",
+          list_activity: "取得知識庫活動記錄",
+          search: "搜尋知識庫",
+          list_move_targets: "取得可移動的目標知識庫",
+          generate_profile: "產生知識庫描述",
+          list_tags: "取得知識庫標籤清單",
+          create_tag: "建立知識庫標籤",
+          update_tag: "更新知識庫標籤",
+          delete_tag: "刪除知識庫標籤",
+          list_shared: "取得共用知識庫清單",
+        },
+        faq: {
+          batch_update: "批次修改 FAQ 狀態與標籤",
+          list_entries: "取得 FAQ 項目清單",
+          delete_entries: "批次刪除 FAQ 項目",
+          get_entry: "取得 FAQ 項目詳細資訊",
+          update_entry: "更新 FAQ 項目",
+          add_similar_questions: "新增相似問題",
+          create_entry: "建立 FAQ 項目",
+        },
+        knowledge: {
+          list: "取得知識清單",
+          list_folders: "取得知識資料夾清單",
+          rename_folder: "重新命名或移動資料夾",
+          create_manual: "手動建立知識",
+          create_from_url: "從連結建立知識",
+          batch_delete: "批次刪除知識",
+          batch_reparse: "批次重新解析知識",
+          move_to_folder: "移動知識至資料夾",
+          update_manual: "更新手動建立的知識",
+          move: "移動知識至其他知識庫",
+          get_move_progress: "取得知識移動進度",
+          set_tags: "設定知識標籤",
+          get: "取得知識詳細資訊",
+          update: "更新知識",
+          delete: "刪除知識",
+          cancel_parse: "取消知識解析",
+          reparse: "重新解析知識",
+          get_parse_progress: "取得知識解析進度",
+        },
+        wiki: {
+          list_folders: "取得 Wiki 資料夾清單",
+          create_folder: "建立 Wiki 資料夾",
+          list_issues: "取得 Wiki 頁面問題清單",
+          lint: "檢查 Wiki 頁面",
+          move_page: "移動 Wiki 頁面",
+          get_page: "取得 Wiki 頁面",
+          rebuild_links: "重建 Wiki 連結",
+          revert: "還原 Wiki 頁面版本",
+          list_revisions: "取得 Wiki 頁面版本清單",
+          get_stats: "取得 Wiki 統計資訊",
+        },
+        system_admin: {
+          list_admins: "查詢系統管理員",
+          list_users: "查詢平台使用者",
+          list_settings: "查詢系統設定",
+          get_queues: "查詢工作佇列執行狀態",
+          list_tasks: "查詢佇列工作",
+        },
+        workspace: {
+          get: "查詢目前空間資訊",
+          update: "修改目前空間基本資訊",
+          list_members: "查詢目前空間成員",
+        },
+        system: {
+          get_info: "查詢版本與系統資訊",
+        },
+        web_search_provider: {
+          list: "取得網路搜尋服務列表",
+          get: "取得網路搜尋服務詳情",
+          list_types: "取得網路搜尋服務類型",
+          test: "測試網路搜尋連線",
+          update: "修改網路搜尋服務",
+          delete: "刪除網路搜尋服務",
+        },
+        mcp_service: {
+          list: "取得 MCP 服務清單",
+          create: "建立 MCP 服務",
+          get: "取得 MCP 服務詳細資訊",
+          update: "更新 MCP 服務",
+          delete: "刪除 MCP 服務",
+          test: "測試 MCP 服務連線",
+          list_tools: "即時查詢 MCP 工具",
+          get_metadata: "查看已同步 MCP 工具",
+          refresh_metadata: "同步 MCP 工具目錄",
+        },
+        message: {
+          chat_history_stats: "取得聊天歷史統計",
+          search: "搜尋歷史對話",
+          list: "取得訊息歷史",
+        },
+        model: {
+          list: "取得模型清單",
+          list_providers: "取得模型供應商清單",
+          get_provider: "取得模型供應商詳細資訊",
+          get: "取得模型詳細資訊",
+          delete: "刪除模型",
+          update: "更新模型顯示資訊",
+          copy: "複製模型設定",
+        },
+        skill: {
+          list_installed: "取得已安裝技能清單",
+          install: "安裝技能",
+          get_installed: "取得已安裝技能詳細資訊",
+          uninstall: "解除安裝技能",
+          set_enabled: "設定技能啟用狀態",
+          list: "取得可執行技能清單",
+          list_catalog: "取得工作空間技能清單",
+          get_catalog: "取得工作空間技能詳細資訊",
+          install_catalog: "將目錄技能安裝至沙箱",
+        },
+        session: {
+          list: "取得對話清單",
+        },
+      },
       found: '{count} 個可執行操作',
       unavailableCount: '{count} 個目前不可用',
       empty: '沒有符合的操作',
@@ -1896,6 +2071,7 @@ export default {
       range: '範圍 {min}–{max}',
       risk: {
         read: '唯讀',
+        probe: '檢測',
         write: '寫入',
         destructive: '不可恢復'
       },
@@ -1934,6 +2110,7 @@ export default {
       skipFailed: '跳過失敗，請重試'
     },
     askUser: {
+      answerLabel: '你的回答',
       title: '向你提問',
       selectPlaceholder: '請選擇',
       textPlaceholder: '輸入你的回答',
@@ -1964,9 +2141,15 @@ export default {
       waitingStatus: '等待審核',
       targetWithTool: '{service} › {tool}',
       dockQuestion: '允許呼叫 {target}？',
+      operationQuestion: '允許{action}「{target}」？',
+      operationQuestionNoTarget: '允許{action}？',
+      operationTarget: '{action}「{target}」',
+      reviewTitle: '人工審核 · {target}',
+      characterCount: '{count} 字',
       titleWithTarget: '人工審核 · {service} › {tool}',
       argsLabel: '呼叫參數',
       argsModified: '已修改',
+      allowInSession: '本會話內同類操作都允許',
       countdownShort: '{seconds}s',
       approve: '透過並執行',
       reject: '拒絕',
@@ -2004,7 +2187,19 @@ export default {
         mcpServices: 'MCP 服務',
         skills: '技能',
         webSearch: '聯網搜尋',
-        multiTurn: '多輪對話'
+        multiTurn: '多輪對話',
+        transport: '傳輸方式',
+        authentication: '認證方式',
+        usageInstructions: '使用說明',
+        displayName: '顯示名稱',
+        enabled: '啟用',
+        sandbox: '沙箱',
+        sandboxes: '沙箱',
+        systemPrompt: '系統提示詞',
+        content: '內容',
+        kbScope: '知識庫範圍',
+        mcpScope: 'MCP 範圍',
+        skillsScope: '技能範圍'
       },
       value: {
         document: '文件',
@@ -2150,9 +2345,40 @@ export default {
     welcomeDesc: '我可以解答 WeKnora 的用法，也可以檢視和處理你空間裡的文件解析、知識庫動態和 Wiki 問題，還能幫你建立和設定智慧代理。變更前是否先請你確認，由輸入框下方的權限等級決定。',
     startFailed: '啟動助手失敗，請重試',
     askAboutDocument: '問 {name}',
+    askAboutAnswer: '就這則回答問 {name}',
+    selection: {
+      label: '已選取',
+      lines: '已選 {count} 行',
+      detach: '不帶上選取內容',
+      tip: '傳送時會帶上選取的內容：{text}',
+      tipField: '傳送時會帶上「{field}」中選取的內容：{text}'
+    },
+    bubble: {
+      label: '助手快捷操作',
+      ask: '問助手',
+      polish: '潤飾',
+      rewrite: '改寫',
+      translate: '翻譯',
+      continue: '續寫',
+      prompts: {
+        polish: '潤飾選取的內容：修正錯字和不通順的地方，不改變原意，直接在原處取代。',
+        rewrite: '改寫選取的內容，讓表達更清楚簡潔，直接在原處取代。',
+        translate: '翻譯選取的內容：中文譯成英文，其他語言譯成中文，直接在原處取代。',
+        continue: '接著選取的內容往下續寫一段，與上下文銜接，寫在選取內容之後。'
+      }
+    },
+    fillNotice: {
+      title: '助手已填寫 {count} 處',
+      undo: '復原',
+      dismiss: '關閉'
+    },
     access: {
       title: '權限等級',
       capped: '空間管理員未開放這一等級',
+      page: {
+        label: '查看和填寫目前頁面',
+        desc: '讀取左側頁面，並可代為填寫表單；不會點擊按鈕或儲存'
+      },
       levels: {
         read_only: {
           label: '唯讀',
@@ -2169,10 +2395,20 @@ export default {
       }
     },
     context: {
+      detachedLabel: '未附帶頁面',
       currentPage: '目前頁面',
       detach: '不附帶目前頁面',
       attachedTip: '已附帶目前頁面：{path}',
-      detachedTip: '點擊附帶目前頁面：{path}'
+      detachedTip: '點擊附帶目前頁面：{path}',
+      chatMessage: '這則回答',
+      pages: {
+        knowledge_base: '知識庫',
+        wiki: 'Wiki',
+        agent_editor: '智能體編輯',
+        settings_models: '模型管理',
+        mcp_services: 'MCP 服務',
+        chat: '對話'
+      }
     },
     starters: {
       agentConfig: '檢查這個智慧代理的設定',
@@ -2186,7 +2422,15 @@ export default {
       recentActivity: '這個知識庫最近有哪些變動？',
       formats: 'WeKnora 支援哪些文件格式？',
       createWiki: '怎樣建立 Wiki 知識庫？',
-      agents: '我有哪些智慧代理？分別用的什麼模型？'
+      agents: '我有哪些智慧代理？分別用的什麼模型？',
+      messageSources: '這則回答的依據是什麼？',
+      messageCheck: '這則回答有沒有說錯？',
+      modelCheck: '檢查這個模型的設定',
+      modelUsage: '哪些智能體和知識庫在用這些模型？',
+      mcpTools: '這個 MCP 服務提供哪些工具？',
+      mcpCheck: '它為什麼連不上？',
+      modelSetup: '我還需要設定哪些模型？',
+      mcpSetup: '怎樣接入一個 MCP 服務？'
     }
   },
   assistantSettings: {
@@ -2283,6 +2527,11 @@ export default {
     videoNotSupported: '您的瀏覽器不支持影片播放'
   },
   organization: {
+    cardStats: {
+      members: '{count} 成員',
+      knowledgeBases: '{count} 知識庫',
+      agents: '{count} 智慧代理',
+    },
     title: '共享空間',
     subtitle: '建立或加入共享空間，讓多個空間互相協作，共享知識庫與智慧代理',
     createOrg: '建立共享空間',
@@ -2883,6 +3132,7 @@ export default {
       deleted: '模型已刪除',
       deleteFailed: '刪除模型失敗',
       builtinCannotEdit: '內建模型不能編輯',
+      linkedModelMissing: '找不到助手連結的模型，它可能已被刪除',
       builtinCannotDelete: '內建模型不能刪除',
       builtinCannotCopy: '內建模型不能複製',
       copied: '模型已複製',
@@ -2952,6 +3202,7 @@ export default {
       enabled: '已啟用 MCP 服務',
       disabled: '已停用 MCP 服務',
       updateStateFailed: '更新 MCP 服務狀態失敗',
+      linkedServiceMissing: '找不到助手連結的 MCP 服務，它可能已被刪除',
       testing: '正在測試 {name}...',
       noResponse: '測試失敗：未收到伺服器回應',
       testFailed: '測試 MCP 服務失敗',
@@ -5448,6 +5699,21 @@ export default {
     }
   },
   manualEditor: {
+    assistant: {
+      button: '助手',
+      tooltip: '讓助手幫你寫',
+      continue: '續寫',
+      outline: '產生大綱',
+      polish: '潤飾全文',
+      summarize: '總結重點',
+      open: '開啟助手',
+      prompts: {
+        continue: '接著正文結尾續寫一段，與前文銜接。',
+        outline: '根據標題和現有內容，為這篇文件擬一份結構清楚的大綱，寫在正文開頭。',
+        polish: '潤飾正文：修正錯字和不通順的句子，不改變原意，分段修改。',
+        summarize: '總結這篇文件的重點，在對話裡回覆，不要修改正文。'
+      }
+    },
     defaultTitlePrefix: '新建文件',
     noDocumentKnowledgeBases: '暫無可用的文件型知識庫，請先建立一個文件型知識庫',
     actions: {
@@ -7408,6 +7674,8 @@ export default {
       folderCardCount: '{count} 個文件',
       searchingSubtree: '（含子目錄）',
       emptyFolder: '這個資料夾裡還沒有文件',
+      emptyFolderWithSubfolders: '這個目錄裡沒有直接文件，子目錄裡有 {count} 個',
+      folderContentsCount: '{documents} 個文件 / {folders} 個資料夾',
       emptySearch: '沒有比對的文件',
       collapse: '收起目錄',
       expand: '展開目錄',
@@ -7632,6 +7900,7 @@ export default {
     selectLoaded: '全選已載入',
     confirmBatchDeleteDocument: '確認刪除選中的 {count} 個文件？刪除後將無法復原。',
     deleteSubmitted: '刪除任務已提交，正在等待完成。',
+    assistantDeleted: '助手已刪除這個知識庫。',
     deletePending: '刪除尚未完成，請稍後重新整理查看結果。',
     deleteTaskFailed: '刪除任務失敗，請查看文件錯誤詳情後重試。',
     deleteStatusUnavailable: '暫時無法確認刪除結果，請稍後重新整理查看文件狀態。',

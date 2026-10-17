@@ -773,18 +773,50 @@ func textBearingField(b DocxBlock) *BlockText {
 // cell itself, so we concatenate the text of each child block; the first child
 // carrying an explicit style alignment (2 center / 3 right) wins.
 func cellTextAndAlign(cell DocxBlock, byID map[string]DocxBlock) (string, int) {
-	var parts []string
 	align := 0
 	for _, childID := range cell.Children {
 		child := byID[childID]
-		if t := plainText(textBearingField(child)); t != "" {
-			parts = append(parts, t)
-		}
 		if align == 0 && child.Text != nil && child.Text.Style != nil && child.Text.Style.Align != 0 {
 			align = child.Text.Style.Align
 		}
 	}
-	return strings.Join(parts, " "), align
+	return cellSubtreeText(cell, byID), align
+}
+
+// cellSubtreeText joins the text of every block under a cell in document
+// order. tableDescendants consumes the whole subtree (lists and callouts
+// nested in the cell included), so text below the direct children would
+// otherwise be dropped entirely. Media blocks and their subtrees are skipped
+// exactly as tableDescendants leaves them to the flat loop, and each block is
+// visited at most once so repeated or cyclic children neither duplicate text
+// nor loop.
+func cellSubtreeText(cell DocxBlock, byID map[string]DocxBlock) string {
+	var parts []string
+	seen := map[string]bool{cell.BlockID: true}
+	var pending []string
+	push := func(children []string) {
+		for i := len(children) - 1; i >= 0; i-- {
+			pending = append(pending, children[i])
+		}
+	}
+	push(cell.Children)
+	for len(pending) > 0 {
+		id := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		block, ok := byID[id]
+		if !ok || seen[id] {
+			continue
+		}
+		seen[id] = true
+		if block.BlockType == BlockTypeFile || block.BlockType == BlockTypeImage || block.BlockType == BlockTypeBoard {
+			continue
+		}
+		if t := plainText(textBearingField(block)); t != "" {
+			parts = append(parts, t)
+		}
+		push(block.Children)
+	}
+	return strings.Join(parts, " ")
 }
 
 // renderNativeTable renders a native docx table block into a Markdown table.

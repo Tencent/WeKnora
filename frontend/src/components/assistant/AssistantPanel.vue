@@ -67,10 +67,13 @@
           :agent-id="BUILTIN_WEKNORA_ASSISTANT_ID" :embedded-mode="true" :initial-query="initialQuery"
           :host-scope="hostScope" :model-id="assistant.modelId" :default-model-id="defaultModelId"
           @update:model-id="assistant.setModel">
-          <template v-if="assistant.pageContext" #composer-chips>
-            <AssistantContextChip />
+          <template v-if="assistant.pageSelection" #composer-chips>
+            <div class="assistant-composer-context">
+              <AssistantSelectionChip />
+            </div>
           </template>
           <template #composer-controls>
+            <AssistantContextMenu />
             <AssistantAccessPicker />
           </template>
         </ChatView>
@@ -97,13 +100,16 @@
             </div>
           </div>
           <div class="assistant-welcome-composer">
-            <InputField :embedded-mode="true" compact :auto-focus="assistant.visible" :model-id="assistant.modelId"
-              :default-model-id="defaultModelId" @update:model-id="assistant.setModel"
+            <InputField ref="welcomeInput" :embedded-mode="true" compact :auto-focus="assistant.visible"
+              :model-id="assistant.modelId" :default-model-id="defaultModelId" @update:model-id="assistant.setModel"
               @send-msg="(query) => startConversation(query)">
-              <template v-if="assistant.pageContext" #chips>
-                <AssistantContextChip />
+              <template v-if="assistant.pageSelection" #chips>
+                <div class="assistant-composer-context">
+                  <AssistantSelectionChip />
+                </div>
               </template>
               <template #controls>
+                <AssistantContextMenu />
                 <AssistantAccessPicker />
               </template>
             </InputField>
@@ -121,24 +127,29 @@ import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import ChatView from '@/views/chat/index.vue'
 import InputField from '@/components/Input-field.vue'
 import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
-import AssistantContextChip from './AssistantContextChip.vue'
+import AssistantContextMenu from './AssistantContextMenu.vue'
+import AssistantSelectionChip from './AssistantSelectionChip.vue'
 import AssistantAccessPicker from './AssistantAccessPicker.vue'
 import { createSessions, getSessionsList, getSession, type SessionSummary } from '@/api/chat'
 import { classifyDateBucket } from '@/components/sessionGrouping'
 import { BUILTIN_WEKNORA_ASSISTANT_ID } from '@/api/agent'
 import { useAuthStore } from '@/stores/auth'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import {
   ASSISTANT_PANEL_MAX_WIDTH,
   ASSISTANT_PANEL_MIN_WIDTH,
   toPageContextPayload,
+  toPageSelectionPayload,
   useAssistantStore,
   type AssistantOpenRequest,
 } from '@/stores/assistant'
 import { removeSession, SESSION_MUTATION_EVENT, type SessionMutationDetail } from '@/components/sessionMutations'
+import type { PageContextPayload } from '@/api/chat/streame'
 
 const { t } = useI18n()
 const assistant = useAssistantStore()
 const auth = useAuthStore()
+useAssistantDataChange(() => { void auth.refreshFromAuthMe() }, { areas: ['workspace'] })
 const conversationOwner = computed(() => `${auth.user?.id}:${auth.effectiveTenantId}`)
 const assistantName = computed(() => assistant.displayName || t('assistant.title'))
 
@@ -202,6 +213,11 @@ const welcomeDescription = computed(() => t(assistant.contextAttached && assista
 
 const starters = computed(() => {
   const c = assistant.contextAttached ? assistant.pageContext : null
+  if (c?.messageId) return [t('assistant.starters.messageSources'), t('assistant.starters.messageCheck')]
+  if (c?.modelId) return [t('assistant.starters.modelCheck'), t('assistant.starters.modelUsage')]
+  if (c?.mcpServiceId) return [t('assistant.starters.mcpTools'), t('assistant.starters.mcpCheck')]
+  if (c?.page === 'settings_models') return [t('assistant.starters.modelSetup'), t('assistant.starters.modelUsage')]
+  if (c?.page === 'mcp_services') return [t('assistant.starters.mcpSetup')]
   if (c?.agentId) return [
     t('assistant.starters.agentConfig'), t('assistant.starters.agentModel'), t('assistant.starters.agentKnowledge'),
   ]
@@ -215,16 +231,30 @@ const starters = computed(() => {
 // the page's knowledge base travels with it.
 const hostScope = () => {
   const context = assistant.contextAttached ? assistant.pageContext : null
+  const title = assistant.contextAttached ? assistant.pageTitle : ''
+  const view = assistant.contextAttached ? assistant.pageView : ''
+  const selection = assistant.pageSelection
+  // A selection goes with one message; the next is about what is selected then.
+  if (selection) assistant.setPageSelection(null)
   const focus = initialMessage.value?.sessionId === assistant.sessionId ? initialMessage.value.focus : undefined
   initialMessage.value = null
   const assistantAccess = assistant.effectiveAccessLevel
-  if (!context) return { knowledgeBaseIds: [], pageContext: null, assistantAccess }
+  if (!context && !title && !view && !selection) return { knowledgeBaseIds: [], pageContext: null, assistantAccess }
+  const pageContext: PageContextPayload = context ? toPageContextPayload(focus ? { ...context, ...focus } : context) : {}
+  if (title) pageContext.title = title
+  if (view) pageContext.view = view
+  if (selection) pageContext.selection = toPageSelectionPayload(selection)
   return {
-    knowledgeBaseIds: context.knowledgeBaseId ? [context.knowledgeBaseId] : [],
-    pageContext: toPageContextPayload(focus ? { ...context, ...focus } : context),
+    knowledgeBaseIds: context?.knowledgeBaseId ? [context.knowledgeBaseId] : [],
+    pageContext,
     assistantAccess,
   }
 }
+
+const welcomeInput = ref<{ focusInput?: () => void } | null>(null)
+watch(() => assistant.focusRequest, () => {
+  if (!assistant.sessionId) welcomeInput.value?.focusInput?.()
+})
 
 async function startConversation(query: string, focus?: AssistantOpenRequest['focus']) {
   const text = query.trim()
@@ -450,6 +480,22 @@ onUnmounted(() => {
   }
 }
 
+.assistant-composer-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  flex: 0 0 100%;
+
+  :deep(.assistant-selection-chip) {
+    flex: 0 1 auto;
+    max-width: 100%;
+    height: 26px;
+  }
+}
+
 .assistant-panel__header {
   display: flex;
   align-items: center;
@@ -530,6 +576,11 @@ onUnmounted(() => {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+
+  // Align the assistant composer with the main conversation composer.
+  :deep(.input-container.is-embedded) {
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
 }
 
 .assistant-history {
@@ -656,7 +707,7 @@ onUnmounted(() => {
 // Same inset as the composer inside a conversation.
 .assistant-welcome-composer {
   flex-shrink: 0;
-  padding: 12px 16px 16px;
+  padding: 12px 16px max(8px, env(safe-area-inset-bottom));
 }
 </style>
 

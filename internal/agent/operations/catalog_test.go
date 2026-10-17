@@ -3,6 +3,7 @@ package operations
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -38,21 +39,25 @@ func TestNewCatalogRejectsUnsafeDeclarations(t *testing.T) {
 		"api keys":       readOp("keys.list", "/api/v1/api-keys"),
 		"outside v1":     readOp("x.get", "/health"),
 		// Areas whose names extend a sensitive one, or that no list named.
-		"sandbox configs":      readOp("x.get", "/api/v1/sandbox-configs"),
-		"storage backends":     readOp("x.get", "/api/v1/storage-backends"),
-		"web search provider":  readOp("x.get", "/api/v1/web-search-providers/types"),
-		"im channels":          readOp("x.get", "/api/v1/im-channels"),
-		"agent approvals":      readOp("x.get", "/api/v1/agent/tool-approvals"),
-		"memory":               readOp("x.get", "/api/v1/memory/items"),
-		"messages":             readOp("x.get", "/api/v1/messages/chat-history-stats"),
-		"a new area":           readOp("x.get", "/api/v1/something-new"),
-		"kb shares":            readOp("x.get", "/api/v1/knowledge-bases/:id/shares", kb),
-		"kb prefix lookalike":  readOp("x.get", "/api/v1/knowledge-bases-admin"),
-		"agent shares":         readOp("x.get", "/api/v1/agents/:id/shares", kb),
-		"agent embed channels": readOp("x.get", "/api/v1/agents/:id/embed-channels", kb),
-		"agent im channels":    readOp("x.get", "/api/v1/agents/:id/im-channels", kb),
-		"model credentials":    readOp("x.get", "/api/v1/models/:id/credentials", kb),
-		"mcp oauth":            readOp("x.get", "/api/v1/mcp-services/:id/oauth/status", kb),
+		"sandbox configs":         readOp("x.get", "/api/v1/sandbox-configs"),
+		"storage backends":        readOp("x.get", "/api/v1/storage-backends"),
+		"web search credentials":  readOp("x.get", "/api/v1/web-search-providers/:id/credentials", kb),
+		"im channels":             readOp("x.get", "/api/v1/im-channels"),
+		"agent approvals":         readOp("x.get", "/api/v1/agent/tool-approvals"),
+		"memory":                  readOp("x.get", "/api/v1/memory/items"),
+		"a new area":              readOp("x.get", "/api/v1/something-new"),
+		"kb shares":               readOp("x.get", "/api/v1/knowledge-bases/:id/shares", kb),
+		"kb prefix lookalike":     readOp("x.get", "/api/v1/knowledge-bases-admin"),
+		"agent shares":            readOp("x.get", "/api/v1/agents/:id/shares", kb),
+		"agent embed channels":    readOp("x.get", "/api/v1/agents/:id/embed-channels", kb),
+		"agent im channels":       readOp("x.get", "/api/v1/agents/:id/im-channels", kb),
+		"model credentials":       readOp("x.get", "/api/v1/models/:id/credentials", kb),
+		"data source credentials": readOp("x.get", "/api/v1/datasource/:id/credentials", kb),
+		"raw data source credentials": {
+			ID: "x.test", Summary: "s", Risk: RiskProbe, Method: http.MethodPost,
+			Route: "/api/v1/datasource/validate-credentials",
+		},
+		"mcp oauth": readOp("x.get", "/api/v1/mcp-services/:id/oauth/status", kb),
 		"read as POST": {
 			ID: "x.get", Summary: "s", Risk: RiskRead, Method: http.MethodPost,
 			Route: "/api/v1/knowledge-bases",
@@ -71,52 +76,128 @@ func TestNewCatalogRejectsUnsafeDeclarations(t *testing.T) {
 		},
 		"route segment without param": readOp("x.get", "/api/v1/knowledge-bases/:id"),
 		"param without route segment": readOp("x.get", "/api/v1/knowledge-bases", kb),
+		"probe as GET": {
+			ID: "x.check", Summary: "s", Risk: RiskProbe, Method: http.MethodGet,
+			Route: "/api/v1/knowledge-bases",
+		},
+		"probe as PUT": {
+			ID: "x.check", Summary: "s", Risk: RiskProbe, Method: http.MethodPut,
+			Route: "/api/v1/knowledge-bases",
+		},
+		"probe with an approval target": {
+			ID: "x.check", Summary: "s", Risk: RiskProbe, Method: http.MethodPost,
+			Route: "/api/v1/knowledge-bases", Target: &Target{Operation: "x.get", Label: "title"},
+		},
+		// Conversations are read-only: no deleting, stopping or rewinding.
+		"delete a session": {
+			ID: "session.delete", Summary: "s", Risk: RiskDestructive, Method: http.MethodDelete,
+			Route: "/api/v1/sessions/:id", Params: routeParams("/api/v1/sessions/:id"),
+			Target: &Target{Operation: "session.get", Label: "title"},
+		},
+		"stop a session": {
+			ID: "session.stop", Summary: "s", Risk: RiskWrite, Method: http.MethodPost,
+			Route: "/api/v1/sessions/:session_id/stop", Params: routeParams("/api/v1/sessions/:session_id/stop"),
+			Target: &Target{Operation: "session.get", Label: "title"},
+		},
+		"delete a message": {
+			ID: "message.delete", Summary: "s", Risk: RiskDestructive, Method: http.MethodDelete,
+			Route:  "/api/v1/messages/:session_id/:id",
+			Params: routeParams("/api/v1/messages/:session_id/:id"),
+			Target: &Target{Operation: "session.get", Label: "title"},
+		},
 	}
-	for _, route := range []struct{ method, path string }{
-		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills"},
-		{http.MethodPost, "/api/v1/sandbox-configs/:id/skills"},
-		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId"},
-		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/files"},
-		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/files/content"},
-		{http.MethodPost, "/api/v1/sandbox-configs/:id/skills/:skillId/reinstall"},
-		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/guidance"},
-		{http.MethodPost, "/api/v1/sandbox-configs/:id/skills/:skillId/guidance"},
-		{http.MethodPost, "/api/v1/sandbox-configs/:id/skills/:skillId/stop"},
-		{http.MethodPatch, "/api/v1/sandbox-configs/:id/skills/:skillId"},
-		{http.MethodDelete, "/api/v1/sandbox-configs/:id/skills/:skillId"},
-		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/install-events"},
-		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/transcript"},
-		{http.MethodGet, "/api/v1/skills/catalog"},
-		{http.MethodPost, "/api/v1/skills/catalog"},
-		{http.MethodPost, "/api/v1/skills/catalog/:id/install"},
-		{http.MethodGet, "/api/v1/skills/catalog/:id/files"},
-		{http.MethodGet, "/api/v1/skills/catalog/:id/files/content"},
-		{http.MethodDelete, "/api/v1/skills/catalog/:id"},
+	reasons := map[string]string{
+		"delete a session": "may only read",
+		"stop a session":   "may only read",
+		"delete a message": "may only read",
+	}
+	// A sandbox config is reachable only for its installed skills, and never
+	// the installer conversation a user is watching.
+	for _, route := range []struct{ method, path, reason string }{
+		{http.MethodGet, "/api/v1/sandbox-configs/:id", "outside the areas"},
+		{http.MethodPut, "/api/v1/sandbox-configs/:id", "outside the areas"},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/sandboxes", "outside the areas"},
+		{http.MethodPut, "/api/v1/sandbox-configs/workspace-policy", "outside the areas"},
+		{http.MethodPost, "/api/v1/sandbox-configs/templates/query", "outside the areas"},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/guidance", `reaches "guidance"`},
+		{http.MethodPost, "/api/v1/sandbox-configs/:id/skills/:skillId/guidance", `reaches "guidance"`},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/install-events", `reaches "install-events"`},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/transcript", `reaches "transcript"`},
 	} {
-		op := readOp("skill.admin", route.path)
+		op := readOp("skill.admin", route.path, routeParams(route.path)...)
 		op.Method = route.method
 		if route.method != http.MethodGet {
 			op.Risk = RiskWrite
 			op.Target = &Target{Operation: "skill.get", Label: "name"}
 		}
-		if route.method == http.MethodDelete {
-			op.Risk = RiskDestructive
-		}
 		cases[route.method+" "+route.path] = op
+		reasons[route.method+" "+route.path] = route.reason
 	}
 	for name, op := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := NewCatalog(op)
 			require.Error(t, err)
-			if strings.HasPrefix(name, op.Method+" ") {
-				if strings.HasPrefix(op.Route, "/api/v1/sandbox-configs") {
-					assert.Contains(t, err.Error(), "outside the areas")
-				} else {
-					assert.Contains(t, err.Error(), `reaches "catalog"`)
-				}
+			if reason := reasons[name]; reason != "" {
+				assert.Contains(t, err.Error(), reason)
 			}
 		})
 	}
+}
+
+// routeParams declares a string path param for every :name segment.
+func routeParams(route string) []Param {
+	var params []Param
+	for _, seg := range strings.Split(route, "/") {
+		if strings.HasPrefix(seg, ":") {
+			params = append(params, Param{
+				Name: strings.ToLower(seg[1:]), In: InPath, Key: seg[1:], Type: TypeString,
+				Required: true, Description: "d",
+			})
+		}
+	}
+	return params
+}
+
+func TestNewCatalogAdmitsInstalledSkillRoutes(t *testing.T) {
+	routes := []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills"},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId"},
+		{http.MethodPatch, "/api/v1/sandbox-configs/:id/skills/:skillId"},
+		{http.MethodGet, "/api/v1/skills/catalog/:id"},
+	}
+	for _, route := range routes {
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			op := readOp("skill.x", route.path, routeParams(route.path)...)
+			op.Method = route.method
+			if route.method != http.MethodGet {
+				op.Risk = RiskWrite
+				op.Target = &Target{Operation: "skill.get", Label: "title"}
+			}
+			get := readOp("skill.get", "/api/v1/sandbox-configs/:id/skills/:skillId",
+				routeParams("/api/v1/sandbox-configs/:id/skills/:skillId")...)
+			if op.ID == get.ID {
+				op.ID = "skill.other"
+			}
+			_, err := NewCatalog(op, get)
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestAlwaysConfirmAsksAtEveryLevel(t *testing.T) {
+	install := Operation{ID: "skill.install", Risk: RiskWrite, AlwaysConfirm: true}
+	update := Operation{ID: "agent.update", Risk: RiskWrite}
+	auto := Access{Level: types.AssistantAccessAutoWrite}
+	assert.True(t, auto.NeedsApproval(install))
+	assert.False(t, auto.NeedsApproval(update))
+
+	op := Operation{
+		ID: "skill.uninstall", Summary: "s", Risk: RiskDestructive, Method: http.MethodPost,
+		Route: "/api/v1/knowledge-bases", LabelParam: "", AlwaysConfirm: true,
+		Target: &Target{Operation: "x.get", Label: "title"},
+	}
+	_, err := NewCatalog(op, readOp("x.get", "/api/v1/knowledge-bases"))
+	assert.ErrorContains(t, err, "always_confirm is for writes")
 }
 
 func TestNewCatalogChecksTargets(t *testing.T) {
@@ -332,15 +413,87 @@ func TestProjectKeepsOnlyDeclaredFields(t *testing.T) {
 	op, _ := Builtin().Get("knowledge.list")
 	body := `{"success":true,"total":3,"page":1,"page_size":2,"data":[
 		{"id":"k1","title":"A","parse_status":"failed","error_message":"bad pdf",
-		 "file_path":"s3://secret","tenant_id":9,"metadata":{"x":1}},
-		{"id":"k2","title":"B","parse_status":"completed"}]}`
+		 "file_path":"s3://secret","tenant_id":9,"metadata":{"x":1},
+		 "tags":[{"id":"t1","seq_id":7,"name":"Ops","color":"#f00","tenant_id":9}]},
+		{"id":"k2","title":"B","parse_status":"completed","tags":null}]}`
 	projected, err := op.Project([]byte(body))
 	require.NoError(t, err)
 	out, _ := json.Marshal(projected)
 	assert.JSONEq(t, `{"data":[
-		{"knowledge_id":"k1","title":"A","parse_status":"failed","error_message":"bad pdf"},
-		{"knowledge_id":"k2","title":"B","parse_status":"completed"}],
+		{"knowledge_id":"k1","title":"A","parse_status":"failed","error_message":"bad pdf",
+		 "tags":[{"tag_id":"t1","tag_seq_id":7,"name":"Ops"}]},
+		{"knowledge_id":"k2","title":"B","parse_status":"completed","tags":[]}],
 		"meta":{"total":3,"page":1,"page_size":2}}`, string(out))
+}
+
+func TestProjectModelEndpointAndCatalog(t *testing.T) {
+	get, ok := Builtin().Get("model.get")
+	require.True(t, ok)
+	model := []byte(`{"data":{"id":"m1","name":"hy4","type":"KnowledgeQA",
+		"parameters":{"base_url":"http://127.0.0.1:3425/v1","provider":"magpie",
+		"custom_headers":{"Authorization":"x"},"extra_config":{"k":"v","remote_model_name":"hy4-preview"},
+		"spec":{"compat":{"extra_body":{"token":"x"}}}},
+		"capabilities":{"provider":"magpie","api":"openai-responses","context_window":960000,
+		"max_output_tokens":64000,"input":["text","image"],"thinking_format":"x"}}}`)
+	projected, err := get.Project(model)
+	require.NoError(t, err)
+	data := projected.Data.(map[string]any)
+	assert.Equal(t, "http://127.0.0.1:3425/v1", data["base_url"])
+	assert.Equal(t, "magpie", data["provider"])
+	assert.Equal(t, "hy4-preview", data["remote_model_name"])
+	assert.Equal(t, "openai-responses", data["api"])
+	assert.Equal(t, json.Number("960000"), data["context_window"])
+	assert.Equal(t, []any{"text", "image"}, data["input"])
+	for _, hidden := range []string{"custom_headers", "extra_config", "k", "spec", "compat", "thinking_format"} {
+		assert.NotContains(t, data, hidden)
+	}
+
+	models, ok := Builtin().Get("model.list")
+	require.True(t, ok)
+	modelObject := strings.TrimSuffix(strings.TrimPrefix(string(model), `{"data":`), `}`)
+	projected, err = models.Project([]byte(`{"data":[` + modelObject + `]}`))
+	require.NoError(t, err)
+	row := projected.Data.([]any)[0].(map[string]any)
+	assert.Equal(t, "magpie", row["provider"])
+	assert.NotContains(t, row, "context_window", "the list leaves capabilities to model.get")
+	assert.NotContains(t, row, "remote_model_name")
+
+	list, ok := Builtin().Get("model.list_providers")
+	require.True(t, ok)
+	body := `{"data":[{"value":"magpie","label":"Magpie","description":"d","icon":"data:x",
+		"modelTypes":["chat"],"models":[{"id":"a","name":"A"}]}]}`
+	projected, err = list.Project([]byte(body))
+	require.NoError(t, err)
+	out, _ := json.Marshal(projected.Data)
+	assert.JSONEq(t, `[{"provider":"magpie","label":"Magpie","model_types":["chat"]}]`, string(out),
+		"the list leaves models and descriptions to model.get_provider")
+
+	one, ok := Builtin().Get("model.get_provider")
+	require.True(t, ok)
+	projected, err = one.Project([]byte(`{"data":{"value":"magpie","label":"Magpie","models":[
+		{"id":"codex/gpt","name":"GPT","type":"chat","reasoning":true,"context_window":272000,"cost":{"input":1}}]}}`))
+	require.NoError(t, err)
+	entries := projected.Data.(map[string]any)["models"].([]any)
+	assert.Equal(t, map[string]any{
+		"model_name": "codex/gpt", "display_name": "GPT", "type": "chat", "reasoning": true,
+		"context_window": json.Number("272000"),
+	}, entries[0])
+}
+
+func TestProjectKnowledgeGetReportsTags(t *testing.T) {
+	op, ok := Builtin().Get("knowledge.get")
+	require.True(t, ok)
+	tags := make([]map[string]any, defaultMaxListItems+1)
+	for i := range tags {
+		tags[i] = map[string]any{"id": fmt.Sprintf("t%d", i), "name": "n", "color": "#000"}
+	}
+	body, _ := json.Marshal(map[string]any{"data": map[string]any{"id": "k1", "tags": tags}})
+	projected, err := op.Project(body)
+	require.NoError(t, err)
+	assert.True(t, projected.Truncated)
+	got := projected.Data.(map[string]any)["tags"].([]any)
+	require.Len(t, got, defaultMaxListItems)
+	assert.Equal(t, map[string]any{"tag_id": "t0", "name": "n"}, got[0])
 }
 
 func TestProjectTruncatesLists(t *testing.T) {
@@ -459,6 +612,99 @@ func TestCatalogForFiltersByRoleAndLevel(t *testing.T) {
 		ids(catalog.For(Access{Role: types.TenantRoleViewer})), "roles filter only when RBAC is enforced")
 	assert.Equal(t, []string{"knowledge.audit", "knowledge.get"},
 		ids(catalog.For(Access{Role: types.TenantRoleOwner, EnforceRole: true, Level: types.AssistantAccessReadOnly})))
+}
+
+func TestProbeRunsWithoutApprovalAtEveryLevel(t *testing.T) {
+	kb := Param{Name: "knowledge_base_id", In: InPath, Key: "id", Type: TypeString, Required: true, Description: "d"}
+	probe := Operation{
+		ID: "knowledge_base.search", Summary: "s", Risk: RiskProbe, Method: http.MethodPost,
+		Route: "/api/v1/knowledge-bases/:id/hybrid-search", Params: []Param{kb},
+		Result: Result{Root: "data", List: true, Fields: []Field{{From: "content"}}},
+	}
+	catalog, err := NewCatalog(probe)
+	require.NoError(t, err)
+	op, _ := catalog.Get(probe.ID)
+	assert.Equal(t, types.TenantRoleViewer, op.Role, "a probe needs only a viewer by default")
+	assert.False(t, op.Risk.Mutates())
+	for _, level := range []types.AssistantAccessLevel{
+		types.AssistantAccessReadOnly, types.AssistantAccessConfirm, types.AssistantAccessAutoWrite,
+	} {
+		access := Access{Level: level, Role: types.TenantRoleViewer, EnforceRole: true}
+		_, withheld := catalog.Withheld(access, op)
+		assert.False(t, withheld, level)
+		assert.False(t, access.NeedsApproval(op), level)
+	}
+}
+
+func TestBuiltinProbeOperations(t *testing.T) {
+	catalog := Builtin()
+	project := func(op Operation, body string) string {
+		t.Helper()
+		projected, err := op.Project([]byte(body))
+		require.NoError(t, err)
+		out, err := json.Marshal(projected)
+		require.NoError(t, err)
+		return string(out)
+	}
+
+	search, ok := catalog.Get("knowledge_base.search")
+	require.True(t, ok)
+	assert.Equal(t, RiskProbe, search.Risk)
+	assert.Equal(t, http.MethodPost, search.Method, "the legacy GET route is not compiled")
+	assert.Equal(t, types.TenantRoleViewer, search.Role)
+	var names []string
+	for _, p := range search.Params {
+		names = append(names, p.Name)
+	}
+	assert.ElementsMatch(t, []string{
+		"knowledge_base_id", "query_text", "vector_threshold", "keyword_threshold", "match_count",
+		"disable_keywords_match", "disable_vector_match", "knowledge_ids",
+	}, names)
+	query, _ := search.Param("query_text")
+	assert.True(t, query.Required)
+	threshold, _ := search.Param("vector_threshold")
+	assert.Equal(t, TypeNumber, threshold.Type)
+	count, _ := search.Param("match_count")
+	assert.Equal(t, 30, count.Maximum)
+	assert.JSONEq(t, `{"data":[{"chunk_id":"c1","content":"hello","knowledge_id":"k1","chunk_index":2,
+		"knowledge_title":"Q3","score":0.8,"match_type":1,"chunk_type":"text"}]}`,
+		project(search, `{"success":true,"data":[{"id":"c1","content":"hello","knowledge_id":"k1",
+		"chunk_index":2,"knowledge_title":"Q3","score":0.8,"match_type":1,"chunk_type":"text",
+		"metadata":{"k":"v"},"image_info":"local://secret","knowledge_filename":"q3.pdf"}]}`))
+
+	test, ok := catalog.Get("mcp_service.test")
+	require.True(t, ok)
+	assert.Equal(t, RiskProbe, test.Risk)
+	assert.Equal(t, types.TenantRoleAdmin, test.Role)
+	assert.JSONEq(t, `{"data":{"success":false,"message":"Connection failed: 401","oauth_required":true}}`,
+		project(test, `{"success":true,"data":{"success":false,"message":"Connection failed: 401",
+		"oauth_required":true,"description":"server","tools":[{"name":"t"}]}}`))
+
+	tools, ok := catalog.Get("mcp_service.list_tools")
+	require.True(t, ok)
+	assert.Equal(t, RiskRead, tools.Risk)
+	assert.JSONEq(t, `{"data":[{"name":"maps_weather","description":"Weather by city","require_approval":true}]}`,
+		project(tools, `{"success":true,"data":[{"name":"maps_weather","description":"Weather by city",
+		"inputSchema":{"type":"object"},"require_approval":true}]}`))
+}
+
+func TestBuildNumberParams(t *testing.T) {
+	threshold := Param{Name: "vector_threshold", In: InBody, Type: TypeNumber, Description: "d"}
+	op := Operation{
+		ID: "x.check", Summary: "s", Risk: RiskProbe, Method: http.MethodPost,
+		Route: "/api/v1/knowledge-bases", Params: []Param{threshold},
+		Result: Result{Fields: []Field{{From: "title"}}},
+	}
+	_, err := NewCatalog(op)
+	require.NoError(t, err)
+
+	call, err := op.Build(map[string]json.RawMessage{"vector_threshold": json.RawMessage(`0.35`)})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"vector_threshold":0.35}`, string(call.Body))
+	for _, bad := range []string{`"0.35"`, `true`, `[1]`} {
+		_, err := op.Build(map[string]json.RawMessage{"vector_threshold": json.RawMessage(bad)})
+		assert.Error(t, err, bad)
+	}
 }
 
 func TestBuiltinSkillList(t *testing.T) {

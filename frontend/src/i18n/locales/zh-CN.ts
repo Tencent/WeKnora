@@ -1842,8 +1842,31 @@ export default {
       databaseQuery: '数据库查询',
       findOperations: '查找操作',
       runOperation: '执行操作',
+      tryAgent: '试跑智能体',
+      openPage: '打开页面',
       searchWeKnoraDocs: '搜索产品文档',
-      readWeKnoraDoc: '阅读产品文档'
+      readWeKnoraDoc: '阅读产品文档',
+      readPage: '查看当前页面',
+      selectTab: '切换标签',
+      fillPage: '填写页面'
+    },
+    pageAccess: {
+      viewed: '已查看当前页面：{location}'
+    },
+    pageEdit: {
+      title: '已填写 {count} 处',
+      undo: '撤销',
+      undone: '已撤销这次填写',
+      undoSkipped: '{count} 处已被你改过或不在页面上，未撤销',
+      unsaved: '尚未保存，请检查后在页面上自行保存'
+    },
+    openPage: {
+      open: '打开',
+      openForm: '打开并填写',
+      opened: '助手已打开',
+      back: '返回',
+      endpoint: '将连接到：',
+      draftHint: '已按助手的建议预填。请补全密钥等凭据，检查后自己保存。'
     },
     skillFiles: {
       heading: '技能文件',
@@ -1886,6 +1909,158 @@ export default {
       binarySuppressed: '二进制输出已省略，请将文件写入产物目录后下载'
     },
     operations: {
+      names: {
+        data_source: {
+          list: "获取数据源列表",
+          get: "获取数据源详情",
+          test: "测试数据源连接",
+          sync: "同步数据源",
+          pause: "暂停数据源同步",
+          resume: "恢复数据源同步",
+          list_sync_logs: "获取数据源同步记录",
+          get_sync_log: "获取数据源同步进度",
+          list_resources: "查询数据源可同步资源",
+          update_sync: "修改数据源同步配置",
+        },
+        agent: {
+          list: "获取智能体列表",
+          create: "创建智能体",
+          get: "获取智能体详情",
+          delete: "删除智能体",
+          update: "更新智能体",
+          copy: "复制智能体",
+        },
+        chunk: {
+          get: "获取分块详情",
+          update: "更新分块",
+          list_revisions: "获取分块历史版本",
+          revert: "恢复分块历史版本",
+          list: "获取知识分块列表",
+        },
+        knowledge_base: {
+          list_parser_engines: "获取可用解析引擎",
+          copy: "复制知识库内容",
+          duplicate: "复制知识库设置",
+          get_copy_progress: "获取知识库复制进度",
+          list: "获取知识库列表",
+          create: "创建知识库",
+          get: "获取知识库详情",
+          delete: "删除知识库",
+          update: "更新知识库",
+          list_activity: "获取知识库活动记录",
+          search: "搜索知识库",
+          list_move_targets: "获取可移动的目标知识库",
+          generate_profile: "生成知识库描述",
+          list_tags: "获取知识库标签列表",
+          create_tag: "创建知识库标签",
+          update_tag: "更新知识库标签",
+          delete_tag: "删除知识库标签",
+          list_shared: "获取共享知识库列表",
+        },
+        faq: {
+          batch_update: "批量修改 FAQ 状态和标签",
+          list_entries: "获取 FAQ 条目列表",
+          delete_entries: "批量删除 FAQ 条目",
+          get_entry: "获取 FAQ 条目详情",
+          update_entry: "更新 FAQ 条目",
+          add_similar_questions: "添加相似问",
+          create_entry: "创建 FAQ 条目",
+        },
+        knowledge: {
+          list: "获取知识列表",
+          list_folders: "获取知识文件夹列表",
+          rename_folder: "重命名或移动文件夹",
+          create_manual: "手动创建知识",
+          create_from_url: "从链接创建知识",
+          batch_delete: "批量删除知识",
+          batch_reparse: "批量重新解析知识",
+          move_to_folder: "移动知识到文件夹",
+          update_manual: "更新手动创建的知识",
+          move: "移动知识到其他知识库",
+          get_move_progress: "获取知识移动进度",
+          set_tags: "设置知识标签",
+          get: "获取知识详情",
+          update: "更新知识",
+          delete: "删除知识",
+          cancel_parse: "取消知识解析",
+          reparse: "重新解析知识",
+          get_parse_progress: "获取知识解析进度",
+        },
+        wiki: {
+          list_folders: "获取 Wiki 文件夹列表",
+          create_folder: "创建 Wiki 文件夹",
+          list_issues: "获取 Wiki 页面问题列表",
+          lint: "检查 Wiki 页面",
+          move_page: "移动 Wiki 页面",
+          get_page: "获取 Wiki 页面",
+          rebuild_links: "重建 Wiki 链接",
+          revert: "还原 Wiki 页面版本",
+          list_revisions: "获取 Wiki 页面版本列表",
+          get_stats: "获取 Wiki 统计信息",
+        },
+        system_admin: {
+          list_admins: "查询系统管理员",
+          list_users: "查询平台用户",
+          list_settings: "查询系统设置",
+          get_queues: "查询任务队列运行状态",
+          list_tasks: "查询队列任务",
+        },
+        workspace: {
+          get: "查询当前空间信息",
+          update: "修改当前空间基本信息",
+          list_members: "查询当前空间成员",
+        },
+        system: {
+          get_info: "查询版本与系统信息",
+        },
+        web_search_provider: {
+          list: "获取网络搜索服务列表",
+          get: "获取网络搜索服务详情",
+          list_types: "获取网络搜索服务类型",
+          test: "测试网络搜索连接",
+          update: "修改网络搜索服务",
+          delete: "删除网络搜索服务",
+        },
+        mcp_service: {
+          list: "获取 MCP 服务列表",
+          create: "创建 MCP 服务",
+          get: "获取 MCP 服务详情",
+          update: "更新 MCP 服务",
+          delete: "删除 MCP 服务",
+          test: "测试 MCP 服务连接",
+          list_tools: "实时查询 MCP 工具",
+          get_metadata: "查看已同步 MCP 工具",
+          refresh_metadata: "同步 MCP 工具目录",
+        },
+        message: {
+          chat_history_stats: "获取聊天历史统计",
+          search: "搜索历史对话",
+          list: "获取消息历史",
+        },
+        model: {
+          list: "获取模型列表",
+          list_providers: "获取模型厂商列表",
+          get_provider: "获取模型厂商详情",
+          get: "获取模型详情",
+          delete: "删除模型",
+          update: "更新模型显示信息",
+          copy: "复制模型配置",
+        },
+        skill: {
+          list_installed: "获取已安装技能列表",
+          install: "安装技能",
+          get_installed: "获取已安装技能详情",
+          uninstall: "卸载技能",
+          set_enabled: "设置技能启用状态",
+          list: "获取可执行技能列表",
+          list_catalog: "获取工作空间技能列表",
+          get_catalog: "获取工作空间技能详情",
+          install_catalog: "将目录技能安装到沙箱",
+        },
+        session: {
+          list: "获取会话列表",
+        },
+      },
       found: '{count} 个可执行操作',
       unavailableCount: '{count} 个当前不可用',
       empty: '没有匹配的操作',
@@ -1896,6 +2071,7 @@ export default {
       range: '范围 {min}–{max}',
       risk: {
         read: '只读',
+        probe: '检测',
         write: '写入',
         destructive: '不可恢复'
       },
@@ -1934,6 +2110,7 @@ export default {
       skipFailed: '跳过失败，请重试'
     },
     askUser: {
+      answerLabel: '你的回答',
       title: '向你提问',
       selectPlaceholder: '请选择',
       textPlaceholder: '输入你的回答',
@@ -1964,9 +2141,15 @@ export default {
       waitingStatus: '等待审核',
       targetWithTool: '{service} › {tool}',
       dockQuestion: '允许调用 {target}？',
+      operationQuestion: '允许{action}「{target}」？',
+      operationQuestionNoTarget: '允许{action}？',
+      operationTarget: '{action}「{target}」',
+      reviewTitle: '人工审核 · {target}',
+      characterCount: '{count} 字',
       titleWithTarget: '人工审核 · {service} › {tool}',
       argsLabel: '调用参数',
       argsModified: '已修改',
+      allowInSession: '本会话内同类操作都允许',
       countdownShort: '{seconds}s',
       approve: '通过并执行',
       reject: '拒绝',
@@ -2004,7 +2187,19 @@ export default {
         mcpServices: 'MCP 服务',
         skills: '技能',
         webSearch: '联网搜索',
-        multiTurn: '多轮对话'
+        multiTurn: '多轮对话',
+        transport: '传输方式',
+        authentication: '认证方式',
+        usageInstructions: '使用说明',
+        displayName: '显示名称',
+        enabled: '启用',
+        sandbox: '沙箱',
+        sandboxes: '沙箱',
+        systemPrompt: '系统提示词',
+        content: '内容',
+        kbScope: '知识库范围',
+        mcpScope: 'MCP 范围',
+        skillsScope: '技能范围'
       },
       value: {
         document: '文档',
@@ -2150,9 +2345,40 @@ export default {
     welcomeDesc: '我可以解答 WeKnora 的用法，也可以查看和处理你空间里的文档解析、知识库动态和 Wiki 问题，还能帮你创建和配置智能体。改动前是否先请你确认，由输入框下方的权限等级决定。',
     startFailed: '启动助手失败，请重试',
     askAboutDocument: '问 {name}',
+    askAboutAnswer: '就这条回答问 {name}',
+    selection: {
+      label: '已选中',
+      lines: '已选 {count} 行',
+      detach: '不带上选中内容',
+      tip: '发送时会带上选中的内容：{text}',
+      tipField: '发送时会带上「{field}」中选中的内容：{text}'
+    },
+    bubble: {
+      label: '助手快捷操作',
+      ask: '问助手',
+      polish: '润色',
+      rewrite: '改写',
+      translate: '翻译',
+      continue: '续写',
+      prompts: {
+        polish: '润色选中的内容：修正错别字和不通顺的地方，不改变原意，直接在原处替换。',
+        rewrite: '改写选中的内容，让表达更清晰简洁，直接在原处替换。',
+        translate: '翻译选中的内容：中文译成英文，其他语言译成中文，直接在原处替换。',
+        continue: '接着选中的内容往下续写一段，与上下文衔接，写在选中内容之后。'
+      }
+    },
+    fillNotice: {
+      title: '助手已填写 {count} 处',
+      undo: '撤销',
+      dismiss: '关闭'
+    },
     access: {
       title: '权限等级',
       capped: '空间管理员未开放这一等级',
+      page: {
+        label: '查看和填写当前页面',
+        desc: '读取左侧页面，并可代为填写表单；不会点击按钮或保存'
+      },
       levels: {
         read_only: {
           label: '只读',
@@ -2169,10 +2395,20 @@ export default {
       }
     },
     context: {
+      detachedLabel: '未附带页面',
       currentPage: '当前页面',
       detach: '不附带当前页面',
       attachedTip: '已附带当前页面：{path}',
-      detachedTip: '点击附带当前页面：{path}'
+      detachedTip: '点击附带当前页面：{path}',
+      chatMessage: '这条回答',
+      pages: {
+        knowledge_base: '知识库',
+        wiki: 'Wiki',
+        agent_editor: '智能体编辑',
+        settings_models: '模型管理',
+        mcp_services: 'MCP 服务',
+        chat: '对话'
+      }
     },
     starters: {
       agentConfig: '检查这个智能体的配置',
@@ -2186,7 +2422,15 @@ export default {
       recentActivity: '这个知识库最近有哪些变动？',
       formats: 'WeKnora 支持哪些文档格式？',
       createWiki: '怎样创建 Wiki 知识库？',
-      agents: '我有哪些智能体？分别用的什么模型？'
+      agents: '我有哪些智能体？分别用的什么模型？',
+      messageSources: '这个回答的依据是什么？',
+      messageCheck: '这个回答有没有说错？',
+      modelCheck: '检查这个模型的配置',
+      modelUsage: '哪些智能体和知识库在用这些模型？',
+      mcpTools: '这个 MCP 服务提供哪些工具？',
+      mcpCheck: '它为什么连不上？',
+      modelSetup: '我还需要配置哪些模型？',
+      mcpSetup: '怎样接入一个 MCP 服务？'
     }
   },
   assistantSettings: {
@@ -2283,6 +2527,11 @@ export default {
     videoNotSupported: '您的浏览器不支持视频播放'
   },
   organization: {
+    cardStats: {
+      members: '{count} 成员',
+      knowledgeBases: '{count} 知识库',
+      agents: '{count} 智能体',
+    },
     title: '共享空间',
     subtitle: '创建或加入共享空间，让多个空间互相协作，共享知识库与智能体',
     createOrg: '创建共享空间',
@@ -2883,6 +3132,7 @@ export default {
       deleted: '模型已删除',
       deleteFailed: '删除模型失败',
       builtinCannotEdit: '内置模型不能编辑',
+      linkedModelMissing: '没有找到助手链接的模型，它可能已被删除',
       builtinCannotDelete: '内置模型不能删除',
       builtinCannotCopy: '内置模型不能复制',
       copied: '模型已复制',
@@ -2952,6 +3202,7 @@ export default {
       enabled: '已启用 MCP 服务',
       disabled: '已禁用 MCP 服务',
       updateStateFailed: '更新 MCP 服务状态失败',
+      linkedServiceMissing: '没有找到助手链接的 MCP 服务，它可能已被删除',
       testing: '正在测试 {name}...',
       noResponse: '测试失败：未收到服务器响应',
       testFailed: '测试 MCP 服务失败',
@@ -5448,6 +5699,21 @@ export default {
     }
   },
   manualEditor: {
+    assistant: {
+      button: '助手',
+      tooltip: '让助手帮你写',
+      continue: '续写',
+      outline: '生成大纲',
+      polish: '润色全文',
+      summarize: '总结要点',
+      open: '打开助手',
+      prompts: {
+        continue: '接着正文末尾续写一段，与前文衔接。',
+        outline: '根据标题和现有内容，为这篇文档拟一份结构清晰的大纲，写在正文开头。',
+        polish: '润色正文：修正错别字和不通顺的句子，不改变原意，分段修改。',
+        summarize: '总结这篇文档的要点，在对话里回复，不要修改正文。'
+      }
+    },
     defaultTitlePrefix: '新建文档',
     noDocumentKnowledgeBases: '暂无可用的文档型知识库，请先创建一个文档型知识库',
     actions: {
@@ -7408,6 +7674,8 @@ export default {
       folderCardCount: '{count} 个文档',
       searchingSubtree: '（含子目录）',
       emptyFolder: '这个文件夹里还没有文档',
+      emptyFolderWithSubfolders: '这个目录里没有直接文档，子目录里有 {count} 个',
+      folderContentsCount: '{documents} 个文档 / {folders} 个文件夹',
       emptySearch: '没有匹配的文档',
       collapse: '收起目录',
       expand: '展开目录',
@@ -7632,6 +7900,7 @@ export default {
     selectLoaded: '全选已加载',
     confirmBatchDeleteDocument: '确认删除选中的 {count} 个文档？删除后将无法恢复。',
     deleteSubmitted: '删除任务已提交，正在等待完成。',
+    assistantDeleted: '助手已删除这个知识库。',
     deletePending: '删除尚未完成，请稍后刷新查看结果。',
     deleteTaskFailed: '删除任务失败，请查看文档错误详情后重试。',
     deleteStatusUnavailable: '暂时无法确认删除结果，请稍后刷新查看文档状态。',

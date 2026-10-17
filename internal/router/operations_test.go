@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
+	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 )
@@ -30,6 +32,19 @@ func registerOperationAreas(v1 *gin.RouterGroup, g *rbacGuards) {
 	RegisterModelRoutes(v1, &handler.ModelHandler{}, &handler.ModelCredentialsHandler{}, g)
 	RegisterMCPServiceRoutes(v1, &handler.MCPServiceHandler{}, &handler.MCPCredentialsHandler{},
 		&handler.MCPOAuthHandler{}, g)
+	RegisterSandboxConfigRoutes(v1, &handler.SandboxConfigHandler{}, &handler.SandboxSkillHandler{}, g)
+	RegisterSessionRoutes(v1, &session.Handler{}, nil, g)
+	RegisterMessageRoutes(v1, &handler.MessageHandler{}, g)
+	RegisterSystemRoutes(v1, &handler.SystemHandler{}, g)
+	RegisterSystemAdminRoutes(v1, &handler.SystemHandler{}, nil, g)
+	RegisterTenantRoutes(v1, &handler.TenantHandler{}, &handler.TenantMemberHandler{}, nil, nil, g)
+	RegisterWebSearchProviderRoutes(
+		v1,
+		&handler.WebSearchProviderHandler{},
+		&handler.WebSearchProviderCredentialsHandler{},
+		g,
+	)
+	RegisterDataSourceRoutes(v1, &handler.DataSourceHandler{}, &handler.DataSourceCredentialsHandler{}, g)
 }
 
 // TestBuiltinOperationsMatchRegisteredRoutes requires every operation to
@@ -70,12 +85,14 @@ func TestBuiltinOperationRolesMatchRouteGuards(t *testing.T) {
 	}
 
 	var role types.TenantRole
+	var systemAdmin bool
 	engine := gin.New()
 	engine.Use(gin.CustomRecoveryWithWriter(io.Discard, func(c *gin.Context, _ any) {
 		c.AbortWithStatus(http.StatusInternalServerError)
 	}))
 	engine.Use(func(c *gin.Context) {
 		ctx := types.WithCaller(c.Request.Context(), types.Caller{TenantID: 1, UserID: userID, Role: role})
+		ctx = context.WithValue(ctx, types.SystemAdminContextKey, systemAdmin)
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	})
@@ -85,6 +102,22 @@ func TestBuiltinOperationRolesMatchRouteGuards(t *testing.T) {
 		types.TenantRoleViewer, types.TenantRoleContributor, types.TenantRoleAdmin, types.TenantRoleOwner,
 	}
 	for _, op := range operations.Builtin().All() {
+		if op.SystemAdmin {
+			for _, enforce = range []bool{true, false} {
+				for _, role = range ladder {
+					systemAdmin = false
+					if !deniedByRole(engine, op) {
+						t.Errorf("%s lets non-system-admin %s through (RBAC=%v)", op.ID, role, enforce)
+					}
+					systemAdmin = true
+					if deniedByRole(engine, op) {
+						t.Errorf("%s denies system admin %s", op.ID, role)
+					}
+				}
+			}
+			enforce, systemAdmin = true, false
+			continue
+		}
 		var lowest types.TenantRole
 		for _, role = range ladder {
 			if !deniedByRole(engine, op) {
@@ -119,7 +152,16 @@ func deniedByRole(engine *gin.Engine, op operations.Operation) bool {
 		return false
 	}
 	text := rec.Body.String()
-	return strings.Contains(text, "insufficient workspace role") || strings.Contains(text, "must own the resource")
+	return strings.Contains(
+		text,
+		"insufficient workspace role",
+	) || strings.Contains(
+		text,
+		"must own the resource",
+	) || strings.Contains(
+		text,
+		"system administrator required",
+	)
 }
 
 func TestAssertOperationRoutesExistPanicsOnDrift(t *testing.T) {

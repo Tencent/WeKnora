@@ -31,8 +31,7 @@
           :title="$t('common.noResult')">
           <t-button variant="outline" @click="keyword = ''">{{ $t('common.clear') }}</t-button>
         </EmptyState>
-        <!-- creator filter intentionally removed from chrome: every card
-             already shows its creator via ResourceOriginBadge / avatar, so
+        <!-- Creator identity is shown by the section header or card badge, so
              a dedicated horizontal switch added more noise than signal.
              The backend `?creator=mine|others` param and the URL-state
              field are kept so a future "filter by member" entry point
@@ -173,10 +172,11 @@
                      is now per-user and available to anyone who can see the KB
                      (backend route only requires KB read access). Settings /
                      Delete are mutations, so they stay behind canManageKBCard. -->
-                <t-popup overlayClassName="card-more-popup" trigger="click" destroy-on-close
-                  placement="bottom-right">
-                  <button type="button" :aria-label="$t('common.expand')" class="more-wrap" @click.stop>
-                    <img class="more-icon" src="@/assets/img/more.png" alt="" />
+                <t-popup :visible="openKbMenuId === kb.id" @visible-change="(visible: boolean) => setOpenKbMenu(kb.id, visible)"
+                  overlayClassName="card-more-popup" trigger="click" destroy-on-close placement="bottom-right">
+                  <button type="button" :aria-label="$t('common.expand')" class="more-wrap" @click.stop
+                    :class="{ 'active-more': openKbMenuId === kb.id }" :aria-expanded="openKbMenuId === kb.id" aria-haspopup="true">
+                    <t-icon name="ellipsis" size="16px" aria-hidden="true" />
                   </button>
                   <template #content>
                     <div class="popup-menu" @click.stop>
@@ -218,11 +218,10 @@
                     <t-tooltip
                       :content="kb.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')"
                       placement="top">
-                      <div class="feature-badge"
+                      <div class="feature-badge is-count"
                         :class="{ 'type-document': (kb.type || 'document') === 'document', 'type-faq': kb.type === 'faq' }">
                         <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'file'" size="14px" />
-                        <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count ||
-                          0) }}</span>
+                        <span class="badge-count">{{ kbCountLabel(kb) }}</span>
                         <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
                       </div>
                     </t-tooltip>
@@ -298,12 +297,10 @@
                     <t-tooltip
                       :content="kb.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')"
                       placement="top">
-                      <div class="feature-badge"
+                      <div class="feature-badge is-count"
                         :class="{ 'type-document': (kb.type || 'document') === 'document', 'type-faq': kb.type === 'faq' }">
                         <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'file'" size="14px" />
-                        <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || '-') : (kb.knowledge_count
-                          || '-')
-                        }}</span>
+                        <span class="badge-count">{{ kbCountLabel(kb) }}</span>
                       </div>
                     </t-tooltip>
                     <div v-if="isWikiKb(kb)" class="feature-badge wiki">
@@ -333,8 +330,7 @@
                 <div class="bottom-right">
                   <t-tooltip :content="kb.org_name" placement="top">
                     <div class="org-source">
-                      <img src="@/assets/img/organization-green.svg" class="org-source-icon" alt=""
-                        aria-hidden="true" />
+                      <t-icon name="usergroup" class="org-source-icon" size="14px" aria-hidden="true" />
                       <span>{{ kb.org_name }}</span>
                     </div>
                   </t-tooltip>
@@ -408,11 +404,11 @@
                 </span>
                 <!-- See the matching block in the "all" tab template for why
                      this is no longer gated by canManageKBCard. -->
-                <t-popup v-model="kb.showMore" overlayClassName="card-more-popup"
-                  :on-visible-change="onVisibleChange" trigger="click" destroy-on-close placement="bottom-right">
-                  <button type="button" :aria-label="$t('common.expand')" class="more-wrap" @click.stop="openMore(index)"
-                    :class="{ 'active-more': currentMoreIndex === index }">
-                    <img class="more-icon" src="@/assets/img/more.png" alt="" />
+                <t-popup :visible="openKbMenuId === kb.id" @visible-change="(visible: boolean) => setOpenKbMenu(kb.id, visible)"
+                  overlayClassName="card-more-popup" trigger="click" destroy-on-close placement="bottom-right">
+                  <button type="button" :aria-label="$t('common.expand')" class="more-wrap" @click.stop
+                    :class="{ 'active-more': openKbMenuId === kb.id }" :aria-expanded="openKbMenuId === kb.id" aria-haspopup="true">
+                    <t-icon name="ellipsis" size="16px" aria-hidden="true" />
                   </button>
                   <template #content>
                     <div class="popup-menu" @click.stop>
@@ -453,11 +449,10 @@
                     <t-tooltip
                       :content="kb.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')"
                       placement="top">
-                      <div class="feature-badge"
+                      <div class="feature-badge is-count"
                         :class="{ 'type-document': (kb.type || 'document') === 'document', 'type-faq': kb.type === 'faq' }">
                         <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'file'" size="14px" />
-                        <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count ||
-                          0) }}</span>
+                        <span class="badge-count">{{ kbCountLabel(kb) }}</span>
                         <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
                       </div>
                     </t-tooltip>
@@ -582,13 +577,11 @@
                     <t-tooltip
                       :content="shared.knowledge_base.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')"
                       placement="top">
-                      <div class="feature-badge"
+                      <div class="feature-badge is-count"
                         :class="{ 'type-document': (shared.knowledge_base.type || 'document') === 'document', 'type-faq': shared.knowledge_base.type === 'faq' }">
                         <t-icon :name="shared.knowledge_base.type === 'faq' ? 'chat-bubble-help' : 'file'"
                           size="14px" />
-                        <span class="badge-count">{{ shared.knowledge_base.type === 'faq' ?
-                          (shared.knowledge_base.chunk_count ??
-                            '-') : (shared.knowledge_base.knowledge_count ?? '-') }}</span>
+                        <span class="badge-count">{{ kbCountLabel(shared.knowledge_base) }}</span>
                       </div>
                     </t-tooltip>
                     <div v-if="isWikiKb(shared.knowledge_base)" class="feature-badge wiki">
@@ -800,7 +793,6 @@ interface KB {
   embedding_model_id?: string;
   summary_model_id?: string;
   type?: 'document' | 'faq';
-  showMore?: boolean;
   vlm_config?: { enabled?: boolean; model_id?: string };
   extract_config?: { enabled?: boolean };
   storage_provider_config?: { provider?: string };
@@ -835,7 +827,7 @@ const sharedKnowledgeBaseSortAccessors: ResourceSortAccessors<OrganizationShared
 const kbs = ref<KB[]>([])
 const loading = ref(false)
 const confirmDelete = useConfirmDelete()
-const currentMoreIndex = ref<number>(-1)
+const openKbMenuId = ref<string | null>(null)
 const highlightedKbId = ref<string | null>(null)
 const highlightedCardRef = ref<HTMLElement | null>(null)
 let uploadRefreshTimer: ReturnType<typeof setTimeout> | null = null
@@ -1136,7 +1128,6 @@ const applyKbListData = (data: any[]) => {
   kbs.value = data.map((kb: any) => ({
     ...kb,
     updated_at: kb.updated_at ? formatStringDate(new Date(kb.updated_at)) : '',
-    showMore: false,
     isProcessing: kb.is_processing || false,
     processing_count: kb.processing_count || 0
   }))
@@ -1193,7 +1184,17 @@ watch(creatorFilter, () => {
   fetchList(true)
 })
 
-useAssistantDataChange(() => { void fetchList(true) }, { areas: ['knowledge_base'] })
+// Document and FAQ changes move the counts on the cards. Deletes and moves
+// finish in the background, so look again once they likely have.
+let settleTimer: ReturnType<typeof setTimeout> | undefined
+useAssistantDataChange((changes) => {
+  void fetchList(true)
+  if (changes.some(change => ['knowledge.delete', 'knowledge.batch_delete', 'knowledge.move'].includes(change.operation))) {
+    clearTimeout(settleTimer)
+    settleTimer = setTimeout(() => { void fetchList(true) }, 5000)
+  }
+}, { areas: ['knowledge_base', 'knowledge', 'faq'] })
+onUnmounted(() => clearTimeout(settleTimer))
 
 onMounted(() => {
   fetchList().then(() => {
@@ -1229,22 +1230,20 @@ watch(() => route.query.highlightKbId, (newKbId) => {
   }
 })
 
-const openMore = (index: number) => {
-  // 只记录当前打开的索引，用于显示激活样式
-  // 弹窗的开关由 v-model 自动管理
-  currentMoreIndex.value = index
+function setOpenKbMenu(id: string, visible: boolean) {
+  if (visible) openKbMenuId.value = id
+  else if (openKbMenuId.value === id) openKbMenuId.value = null
 }
 
-const onVisibleChange = (visible: boolean) => {
-  // 弹窗关闭时重置索引
-  if (!visible) {
-    currentMoreIndex.value = -1
-  }
+function kbCountLabel(kb: { type?: string; chunk_count?: number; knowledge_count?: number }): string {
+  const isFaq = kb.type === 'faq'
+  const count = (isFaq ? kb.chunk_count : kb.knowledge_count) ?? '—'
+  return t(isFaq ? 'mentionDetail.faqCount' : 'knowledgeBase.documentCount', { count })
 }
 
 const handleSettings = (kb: KB) => {
   // 手动关闭弹窗
-  kb.showMore = false
+  openKbMenuId.value = null
   goSettings(kb.id)
 }
 
@@ -1316,17 +1315,19 @@ function showKbOriginBadge(kb: { creator_id?: string; creator_name?: string }): 
 
 // 通过 ID 处理设置（用于全部 Tab 下的知识库）
 const handleSettingsById = (id: string) => {
+  openKbMenuId.value = null
   goSettings(id)
 }
 
 // 通过 ID 处理删除（用于全部 Tab 下的知识库）
 const handleDeleteById = (id: string) => {
+  openKbMenuId.value = null
   const kb = kbs.value.find(k => k.id === id)
   if (kb) requestDelete(kb)
 }
 
 const handleTogglePin = async (kb: KB) => {
-  kb.showMore = false
+  openKbMenuId.value = null
   try {
     const res: any = await togglePinKnowledgeBase(kb.id)
     if (res.success) {
@@ -1341,6 +1342,7 @@ const handleTogglePin = async (kb: KB) => {
 }
 
 const handleTogglePinById = async (id: string) => {
+  openKbMenuId.value = null
   try {
     const res: any = await togglePinKnowledgeBase(id)
     if (res.success) {
@@ -1355,11 +1357,12 @@ const handleTogglePinById = async (id: string) => {
 }
 
 const handleDuplicate = async (kb: KB) => {
-  kb.showMore = false
+  openKbMenuId.value = null
   await duplicateKB(kb.id)
 }
 
 const handleDuplicateById = async (id: string) => {
+  openKbMenuId.value = null
   await duplicateKB(id)
 }
 
@@ -1435,7 +1438,7 @@ const goToSharedKbFromPanel = () => {
 
 const handleDelete = (kb: KB) => {
   // 手动关闭弹窗
-  kb.showMore = false
+  openKbMenuId.value = null
   requestDelete(kb)
 }
 
@@ -1701,7 +1704,7 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
   }
 
   .t-icon {
-    color: var(--td-brand-color);
+    color: inherit;
     flex-shrink: 0;
   }
 }
@@ -1752,14 +1755,100 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
 }
 
 .kb-card {
+  // Keep card-level hover and focus in sync with agents and shared spaces.
   .resource-card();
+  .resource-card-footer();
+
+  :deep(.kb-type-avatar) {
+    width: 16px;
+    height: 16px;
+    background: transparent;
+    color: var(--td-text-color-secondary);
+    transition: color var(--app-motion-fast);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    &:hover :deep(.kb-type-avatar) {
+      --kb-icon-transform: translateY(-1px) scale(1.12);
+    }
+    &:hover :deep(.kb-type-avatar.is-document) {
+      --kb-folder-open-angle: -65deg;
+      --kb-folder-paper-offset: -4px;
+      --kb-folder-paper-opacity: 1;
+    }
+    &:hover :deep(.kb-type-avatar.is-faq) {
+      --kb-faq-question-transform: translateY(-1px) rotate(10deg) scale(1.12);
+    }
+  }
+
+  &:hover, &:focus-visible, &:has(:focus-visible) {
+    :deep(.kb-type-avatar) { color: var(--td-text-color-primary); }
+  }
+
+  .card-description {
+    font-size: var(--app-text-md);
+    line-height: 20px;
+
+    &.is-empty {
+      font-size: var(--app-text-sm);
+    }
+  }
+
+  .card-bottom {
+    border-top: 0;
+    padding-top: 4px;
+  }
+
+  :deep(.resource-origin-badge) {
+    background: transparent;
+    color: var(--td-text-color-secondary);
+    font-weight: 400;
+  }
 
   &.uninitialized {
     opacity: 0.9;
   }
 
-  .kb-favorite-star { .resource-favorite-button(); }
+  .kb-favorite-star {
+    .resource-favorite-button();
+    right: 8px;
+  }
 
+  // Keep the favorite state anchored to the outer edge even when other actions are hidden.
+  &:has(.kb-favorite-star) {
+    .more-wrap, .shared-detail-trigger { right: 38px; }
+  }
+
+  .kb-favorite-star:not(.is-favorited), .more-wrap, .shared-detail-trigger {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--app-motion-fast), background var(--app-motion-fast);
+  }
+
+  // Mouse clicks retain focus, but only keyboard focus should keep actions visible.
+  &:hover, &:focus-visible, &:has(:focus-visible) {
+    .kb-favorite-star, .more-wrap, .shared-detail-trigger {
+      opacity: 1;
+      pointer-events: auto;
+    }
+  }
+
+  .more-wrap.active-more {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  @media (hover: none) {
+    .kb-favorite-star, .more-wrap, .shared-detail-trigger {
+      opacity: 1;
+      pointer-events: auto;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :deep(.kb-type-avatar) { transition: none; }
+    .kb-favorite-star, .more-wrap, .shared-detail-trigger { transition: none; }
+  }
 }
 
 /* 三个列表卡片统一：描述字体 */
@@ -1786,57 +1875,8 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
 .feature-badge {
   .resource-feature-badge();
 
-  &.type-document {
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-secondary);
-    width: auto;
-    padding: 0 6px;
-    gap: 3px;
-
-    &:hover {
-      background: var(--td-bg-color-container-hover);
-    }
-
-    .badge-count {
-      font-size: var(--app-text-xs);
-      font-weight: 500;
-    }
-
-    .processing-icon {
-      animation: wk-spin 1s linear infinite;
-    }
-  }
-
-  &.type-faq {
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-secondary);
-    width: auto;
-    padding: 0 6px;
-    gap: 3px;
-
-    &:hover {
-      background: var(--td-bg-color-container-hover);
-    }
-
-    .badge-count {
-      font-size: var(--app-text-xs);
-      font-weight: 500;
-    }
-
-    .processing-icon {
-      animation: wk-spin 1s linear infinite;
-    }
-  }
-
-  &.kg { color: var(--app-accent-purple); }
-  &.multimodal { color: var(--td-warning-color); }
-  &.question { color: var(--app-accent-blue); }
-  &.shared { color: var(--td-brand-color); }
-  &.wiki :deep(.kb-wiki-badge) { color: var(--app-accent-teal); }
-
-  :deep(.kb-wiki-badge svg) {
-    width: 14px;
-    height: 14px;
+  .processing-icon {
+    animation: wk-spin 1s linear infinite;
   }
 
   &.role-admin {

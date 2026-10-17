@@ -308,6 +308,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { AddIcon } from 'tdesign-icons-vue-next'
@@ -709,6 +710,8 @@ const handleMenuAction = (data: { value: string }, entity: WebSearchProviderEnti
 }
 
 // ===== Init =====
+useAssistantDataChange(() => { void loadProviderEntities() }, { areas: ['web_search_provider'] })
+
 onMounted(async () => {
   await Promise.all([loadProviderTypes(), loadProviderEntities()])
 })

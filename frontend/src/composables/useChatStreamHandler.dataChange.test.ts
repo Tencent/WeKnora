@@ -40,6 +40,15 @@ test('emits the normalized marker from a successful live SSE tool result', t => 
   assert.deepEqual(Array.from(handler.listener.mock.calls[0].arguments[0].detail.ids.agentIds), ['real-agent'])
 })
 
+test('emits the marker of a Wiki edit', t => {
+  const handler = setup(t)
+  handler.processStreamChunk({ response_type: 'tool_result', id: 'r1', data: {
+    tool_call_id: 'call', tool_name: 'wiki_write_page', success: true,
+    data_change: change('wiki.write_page', { knowledge_base_id: ['kb'] }),
+  } })
+  assert.equal(handler.listener.mock.callCount(), 1)
+})
+
 for (const data of [
   { success: false, data_change: change('agent.delete') },
   { success: true },

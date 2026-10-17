@@ -233,6 +233,7 @@ func (t *wikiWritePageTool) Execute(ctx context.Context, args json.RawMessage) (
 		Output:  output,
 		Data: map[string]interface{}{
 			"display_type": "wiki_write_page",
+			"data_change":  wikiDataChange("write_page", kbID),
 			"action":       action,
 			"slug":         params.Slug,
 			"title":        params.Title,
@@ -274,4 +275,9 @@ func normalizeAndValidateWikiSlug(raw string) (string, error) {
 // namespace (summary/…).
 func isSummaryNamespace(slug string) bool {
 	return strings.HasPrefix(slug, types.WikiPageTypeSummary+"/")
+}
+
+// ApprovalGrant scopes a session-wide approval to the run's knowledge bases.
+func (t *wikiWritePageTool) ApprovalGrant(ctx context.Context, _ json.RawMessage) (string, string) {
+	return wikiApprovalGrant(ctx, t.Name(), t.kbIDs)
 }

@@ -132,8 +132,10 @@
                                     :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
                                     :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
                                     :can-rewind="canRewindMessage(session.id)"
+                                    :can-ask-assistant="!embeddedMode"
                                     @fork="handleFork"
                                     @rewind="handleRewind"
+                                    @ask-assistant="handleAskAssistant"
                                     @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
                                 </botmsg>
                                 <FollowUpSuggestions v-if="session.answerFullyRendered && !session.steerForked && !session.suggestionsDismissed"
@@ -248,6 +250,9 @@ import {
 import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
 import { provideChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
 import { useSessionActivityStore } from '@/stores/sessionActivity';
+import { useAssistantStore } from '@/stores/assistant';
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext';
+import { respondToPageAction } from '@/utils/pageActionResponder';
 import { provideChatSandboxPanel } from '@/composables/useChatSandboxPanel';
 import SandboxSidePanel from '@/components/chat/SandboxSidePanel.vue';
 import BrowserTaskPreview from './components/BrowserTaskPreview.vue';
@@ -349,6 +354,20 @@ const created_at = ref('');
 const limit = ref(20);
 const messagesList = reactive([]);
 providePromptDock(messagesList);
+
+// The answer the user asked the assistant about, until they leave the session.
+const assistant = useAssistantStore();
+const askedMessage = ref({ sessionId: '', messageId: '' });
+useAssistantPageContext(() => {
+    const asked = askedMessage.value;
+    if (props.embeddedMode || !asked.messageId || asked.sessionId !== props.session_id) return null;
+    return { page: 'chat', chatSessionId: asked.sessionId, messageId: asked.messageId };
+});
+function handleAskAssistant(messageId) {
+    askedMessage.value = { sessionId: props.session_id, messageId };
+    assistant.restorePageContext();
+    assistant.open();
+}
 
 function forkAffordanceOf(messageId) {
     if (!messageId) return { canFork: false }
@@ -959,6 +978,11 @@ const {
     isAgentStreamSession,
     scrollToBottom,
     onError: (msg) => MessagePlugin.error(msg),
+    onPageAction: (prompt) => void respondToPageAction(
+        prompt,
+        !props.embeddedMode ? 'unavailable' : assistant.pageAccess ? 'enabled' : 'disabled',
+        { current: () => router.currentRoute.value.fullPath, push: (location) => router.push(location) },
+    ),
     preserveIncompleteStreamReactive: true,
     isFirstEnter,
     scrollContainer,
@@ -1525,8 +1549,9 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         ? (props.agentId && props.agentId !== 'builtin-quick-answer')
         : useSettingsStoreInstance.isAgentStreamMode;
 
-    // Get web search status from settings store
-    const webSearchEnabled = props.embeddedMode ? false : useSettingsStoreInstance.isWebSearchEnabled;
+    // Get web search status from settings store. The embedded assistant has no
+    // toggle of its own; its agent config decides on the server.
+    const webSearchEnabled = props.embeddedMode ? true : useSettingsStoreInstance.isWebSearchEnabled;
 
     // Get knowledge_base_ids from settings store (selected by user via KnowledgeBaseSelector)
     // Merge @mentioned KB/file IDs so retrieval uses the same targets user @mentioned (including shared KBs)
@@ -1674,6 +1699,24 @@ const resumeSuspendedRun = async (pendingId) => {
     }
 };
 provide(resumeSuspendedRunKey, resumeSuspendedRun);
+
+// The assistant panel's conversation takes messages asked from the page (the
+// selection bubble, the editor toolbar) once its history is in.
+if (props.embeddedMode) {
+    watch([() => assistant.queuedMessage, historyLoading], ([message, pending]) => {
+        if (!message || pending) return;
+        assistant.takeQueuedMessage();
+        if (isReplying.value || loading.value) {
+            // Mid-reply it waits in the input box for the user to send.
+            inputFieldRef.value?.prefill?.(message.query);
+            return;
+        }
+        sendMsg(message.query, inputFieldRef.value?.getComposerModelId?.() || props.modelId);
+    }, { immediate: true });
+    watch(() => assistant.focusRequest, () => {
+        inputFieldRef.value?.focusInput?.();
+    });
+}
 
 watch(error, (newError) => {
     if (!newError) return;

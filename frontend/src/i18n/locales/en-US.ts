@@ -654,7 +654,7 @@ export default {
   },
   knowledgeBase: {
     tagAddAction: 'Add tags',
-    documentCount: '{count} documents',
+    documentCount: '{count} document | {count} documents',
     filters: 'Filters',
     clearFilters: 'Clear filters',
 
@@ -720,9 +720,11 @@ export default {
       title: 'Folders',
       rootRow: 'Root',
       rootRowTip: 'Knowledge base root; documents not in a subfolder live here',
-      folderCardCount: '{count} documents',
+      folderCardCount: '{count} document | {count} documents',
       searchingSubtree: '(including sub-folders)',
       emptyFolder: 'This folder has no documents yet',
+      emptyFolderWithSubfolders: 'This folder has no documents of its own, but {count} in sub-folders',
+      folderContentsCount: '{documents} documents / {folders} folder | {documents} documents / {folders} folders',
       emptySearch: 'No matching documents',
       collapse: 'Collapse folders',
       expand: 'Expand folders',
@@ -947,6 +949,7 @@ export default {
     selectLoaded: 'Select loaded',
     confirmBatchDeleteDocument: 'Delete {count} selected documents? This action cannot be undone.',
     deleteSubmitted: 'Delete request submitted. Waiting for completion.',
+    assistantDeleted: 'The assistant deleted this knowledge base.',
     deletePending: 'Deletion is still pending. Refresh later to check the result.',
     deleteTaskFailed: 'Deletion failed. Check the document error details and try again.',
     deleteStatusUnavailable: 'Could not confirm the deletion result. Refresh later to check the document status.',
@@ -2832,6 +2835,21 @@ export default {
     upload: 'Upload File'
   },
   manualEditor: {
+    assistant: {
+      button: 'Assistant',
+      tooltip: 'Let the assistant help you write',
+      continue: 'Continue writing',
+      outline: 'Draft an outline',
+      polish: 'Polish the text',
+      summarize: 'Summarize',
+      open: 'Open assistant',
+      prompts: {
+        continue: 'Continue the text from its end with one more paragraph that follows on from it.',
+        outline: 'Draft a clearly structured outline for this document from its title and current text, and put it at the start of the text.',
+        polish: 'Polish the text: fix typos and awkward sentences without changing the meaning, section by section.',
+        summarize: 'Summarize the key points of this document in the chat. Do not change the text.'
+      }
+    },
     placeholders: {
       heading: 'Heading {level}',
       listItem: 'List item',
@@ -5439,6 +5457,7 @@ export default {
         enabled: 'MCP service enabled',
         disabled: 'MCP service disabled',
         updateStateFailed: 'Failed to update MCP service status',
+        linkedServiceMissing: 'The MCP service the assistant linked to was not found; it may have been deleted',
         testing: 'Testing {name}...',
         noResponse: 'Test failed: no response from server',
         testFailed: 'Failed to test MCP service',
@@ -5509,6 +5528,7 @@ export default {
         deleted: 'Model deleted',
         deleteFailed: 'Failed to delete model',
         builtinCannotEdit: 'Built-in models cannot be edited',
+        linkedModelMissing: 'The model the assistant linked to was not found; it may have been deleted',
         builtinCannotDelete: 'Built-in models cannot be deleted',
         builtinCannotCopy: 'Built-in models cannot be copied',
         copied: 'Model copied',
@@ -5794,6 +5814,11 @@ export default {
       withWebSearch: 'Web Search'
     },
     organization: {
+      cardStats: {
+        members: '{count} members',
+        knowledgeBases: '{count} knowledge bases',
+        agents: '{count} agents',
+      },
       title: 'Shared Spaces',
       subtitle: 'Create or join shared spaces so multiple workspaces can collaborate and share knowledge bases and agents',
       createOrg: 'Create Shared Space',
@@ -6135,9 +6160,40 @@ export default {
       welcomeDesc: 'Ask how WeKnora works, or have me check and handle document parsing, knowledge base activity and Wiki issues in your workspace, or create and configure agents. Whether I ask before a change depends on the access level below the input box.',
       startFailed: 'Failed to start the assistant. Please try again.',
       askAboutDocument: 'Ask {name}',
+      askAboutAnswer: 'Ask {name} about this answer',
+      selection: {
+        label: 'Selected',
+        lines: '{count} lines selected',
+        detach: 'Don’t include the selection',
+        tip: 'Your selection goes with the message: {text}',
+        tipField: 'Your selection in “{field}” goes with the message: {text}'
+      },
+      bubble: {
+        label: 'Assistant actions',
+        ask: 'Ask assistant',
+        polish: 'Polish',
+        rewrite: 'Rewrite',
+        translate: 'Translate',
+        continue: 'Continue',
+        prompts: {
+          polish: 'Polish the selected text: fix typos and awkward phrasing without changing the meaning, and replace it in place.',
+          rewrite: 'Rewrite the selected text to be clearer and more concise, and replace it in place.',
+          translate: 'Translate the selected text, Chinese into English and other languages into Chinese, and replace it in place.',
+          continue: 'Continue writing after the selected text with one more paragraph that fits the context, placed right after it.'
+        }
+      },
+      fillNotice: {
+        title: 'Assistant filled {count} field(s)',
+        undo: 'Undo',
+        dismiss: 'Dismiss'
+      },
       access: {
         title: 'Access level',
         capped: 'Not allowed by your workspace admin',
+        page: {
+          label: 'See and fill the current page',
+          desc: 'Reads the page on the left and can fill in forms. Never clicks buttons or saves.'
+        },
         levels: {
         read_only: {
           label: 'Read only',
@@ -6154,10 +6210,20 @@ export default {
       }
     },
     context: {
+      detachedLabel: 'Page excluded',
       currentPage: 'Current page',
       detach: 'Don\'t include the current page',
       attachedTip: 'Including the current page: {path}',
-      detachedTip: 'Click to include the current page: {path}'
+      detachedTip: 'Click to include the current page: {path}',
+      chatMessage: 'This answer',
+      pages: {
+        knowledge_base: 'Knowledge base',
+        wiki: 'Wiki',
+        agent_editor: 'Agent editor',
+        settings_models: 'Models',
+        mcp_services: 'MCP services',
+        chat: 'Chat'
+      }
     },
     starters: {
       agentConfig: 'Check this agent’s configuration',
@@ -6171,7 +6237,15 @@ export default {
       recentActivity: 'What changed in this knowledge base recently?',
       formats: 'Which document formats does WeKnora support?',
       createWiki: 'How do I create a Wiki knowledge base?',
-      agents: 'Which agents do I have, and which models do they use?'
+      agents: 'Which agents do I have, and which models do they use?',
+      messageSources: 'What is this answer based on?',
+      messageCheck: 'Is anything in this answer wrong?',
+      modelCheck: 'Check this model\'s configuration',
+      modelUsage: 'Which agents and knowledge bases use these models?',
+      mcpTools: 'Which tools does this MCP service offer?',
+      mcpCheck: 'Why can\'t it connect?',
+      modelSetup: 'Which models do I still need to set up?',
+      mcpSetup: 'How do I connect an MCP service?'
     }
   },
   assistantSettings: {
@@ -6363,6 +6437,7 @@ export default {
   },
   agentStream: {
     askUser: {
+      answerLabel: 'Your answer',
       title: 'Question for you',
       selectPlaceholder: 'Select',
       textPlaceholder: 'Type your answer',
@@ -6393,9 +6468,15 @@ export default {
       waitingStatus: 'Awaiting review',
       targetWithTool: '{service} › {tool}',
       dockQuestion: 'Allow {target} to run?',
+      operationQuestion: 'Allow {action}: “{target}”?',
+      operationQuestionNoTarget: 'Allow {action}?',
+      operationTarget: '{action}: “{target}”',
+      reviewTitle: 'Review · {target}',
+      characterCount: '{count} characters',
       titleWithTarget: 'Review · {service} › {tool}',
       argsLabel: 'Arguments',
       argsModified: 'Modified',
+      allowInSession: 'Allow this for the rest of the conversation',
       countdownShort: '{seconds}s',
       approve: 'Approve & run',
       reject: 'Reject',
@@ -6433,7 +6514,19 @@ export default {
         mcpServices: 'MCP services',
         skills: 'Skills',
         webSearch: 'Web search',
-        multiTurn: 'Multi-turn conversation'
+        multiTurn: 'Multi-turn conversation',
+        transport: 'Transport',
+        authentication: 'Authentication',
+        usageInstructions: 'Usage instructions',
+        displayName: 'Display name',
+        enabled: 'Enabled',
+        sandbox: 'Sandbox',
+        sandboxes: 'Sandboxes',
+        systemPrompt: 'System prompt',
+        content: 'Content',
+        kbScope: 'Knowledge base scope',
+        mcpScope: 'MCP scope',
+        skillsScope: 'Skills scope'
       },
       value: {
         document: 'Document',
@@ -6501,8 +6594,31 @@ export default {
       databaseQuery: 'Database Query',
       findOperations: 'Find operations',
       runOperation: 'Run operation',
+      tryAgent: 'Try agent',
+      openPage: 'Open page',
       searchWeKnoraDocs: 'Search product docs',
-      readWeKnoraDoc: 'Read product doc'
+      readWeKnoraDoc: 'Read product doc',
+      readPage: 'View page',
+      selectTab: 'Select tab',
+      fillPage: 'Fill page'
+    },
+    pageAccess: {
+      viewed: 'Viewed the current page: {location}'
+    },
+    pageEdit: {
+      title: 'Filled {count} field(s)',
+      undo: 'Undo',
+      undone: 'Fill undone',
+      undoSkipped: '{count} field(s) changed since or no longer on the page were left as they are',
+      unsaved: 'Nothing is saved yet. Review it and save on the page.'
+    },
+    openPage: {
+      open: 'Open',
+      openForm: 'Open and fill in',
+      opened: 'Opened by the assistant',
+      back: 'Back',
+      endpoint: 'Connects to: ',
+      draftHint: 'Filled in from the assistant. Add the API key or other credentials, check it and save it yourself.'
     },
     skillFiles: {
       heading: 'Skill files',
@@ -6545,6 +6661,158 @@ export default {
       binarySuppressed: 'Binary output omitted. Write files to the artifact directory to download them.'
     },
     operations: {
+      names: {
+        data_source: {
+          list: "List data sources",
+          get: "Get data source details",
+          test: "Test data source connection",
+          sync: "Sync data source",
+          pause: "Pause data source sync",
+          resume: "Resume data source sync",
+          list_sync_logs: "List data source sync logs",
+          get_sync_log: "Get data source sync progress",
+          list_resources: "List syncable data source resources",
+          update_sync: "Update data source sync settings",
+        },
+        agent: {
+          list: "List agents",
+          create: "Create agent",
+          get: "Get agent details",
+          delete: "Delete agent",
+          update: "Update agent",
+          copy: "Copy agent",
+        },
+        chunk: {
+          get: "Get chunk details",
+          update: "Update chunk",
+          list_revisions: "List chunk revisions",
+          revert: "Restore chunk revision",
+          list: "List knowledge chunks",
+        },
+        knowledge_base: {
+          list_parser_engines: "List available parser engines",
+          copy: "Copy knowledge base content",
+          duplicate: "Copy knowledge base settings",
+          get_copy_progress: "Get knowledge base copy progress",
+          list: "List knowledge bases",
+          create: "Create knowledge base",
+          get: "Get knowledge base details",
+          delete: "Delete knowledge base",
+          update: "Update knowledge base",
+          list_activity: "List knowledge base activity",
+          search: "Search knowledge base",
+          list_move_targets: "List destination knowledge bases",
+          generate_profile: "Generate knowledge base description",
+          list_tags: "List knowledge base tags",
+          create_tag: "Create knowledge base tag",
+          update_tag: "Update knowledge base tag",
+          delete_tag: "Delete knowledge base tag",
+          list_shared: "List shared knowledge bases",
+        },
+        faq: {
+          batch_update: "Batch update FAQ states and tags",
+          list_entries: "List FAQ entries",
+          delete_entries: "Delete FAQ entries",
+          get_entry: "Get FAQ entry details",
+          update_entry: "Update FAQ entry",
+          add_similar_questions: "Add similar questions",
+          create_entry: "Create FAQ entry",
+        },
+        knowledge: {
+          list: "List knowledge",
+          list_folders: "List knowledge folders",
+          rename_folder: "Rename or move folder",
+          create_manual: "Create knowledge manually",
+          create_from_url: "Create knowledge from URL",
+          batch_delete: "Delete knowledge in batch",
+          batch_reparse: "Reparse knowledge in batch",
+          move_to_folder: "Move knowledge to folder",
+          update_manual: "Update manually created knowledge",
+          move: "Move knowledge to another knowledge base",
+          get_move_progress: "Get knowledge move progress",
+          set_tags: "Set knowledge tags",
+          get: "Get knowledge details",
+          update: "Update knowledge",
+          delete: "Delete knowledge",
+          cancel_parse: "Cancel knowledge parsing",
+          reparse: "Reparse knowledge",
+          get_parse_progress: "Get knowledge parsing progress",
+        },
+        wiki: {
+          list_folders: "List Wiki folders",
+          create_folder: "Create Wiki folder",
+          list_issues: "List Wiki page issues",
+          lint: "Check Wiki pages",
+          move_page: "Move Wiki page",
+          get_page: "Get Wiki page",
+          rebuild_links: "Rebuild Wiki links",
+          revert: "Revert Wiki page revision",
+          list_revisions: "List Wiki page revisions",
+          get_stats: "Get Wiki statistics",
+        },
+        system_admin: {
+          list_admins: "List system administrators",
+          list_users: "List platform users",
+          list_settings: "Read system settings",
+          get_queues: "Read runtime queue status",
+          list_tasks: "List queue tasks",
+        },
+        workspace: {
+          get: "Get current workspace information",
+          update: "Update current workspace profile",
+          list_members: "List current workspace members",
+        },
+        system: {
+          get_info: "Get version and system information",
+        },
+        web_search_provider: {
+          list: "List web search providers",
+          get: "Get web search provider",
+          list_types: "List web search provider types",
+          test: "Test web search connection",
+          update: "Update web search provider",
+          delete: "Delete web search provider",
+        },
+        mcp_service: {
+          list: "List MCP services",
+          create: "Create MCP service",
+          get: "Get MCP service details",
+          update: "Update MCP service",
+          delete: "Delete MCP service",
+          test: "Test MCP service connection",
+          list_tools: "Query live MCP tools",
+          get_metadata: "View synced MCP tools",
+          refresh_metadata: "Sync MCP tool directory",
+        },
+        message: {
+          chat_history_stats: "Get chat history statistics",
+          search: "Search conversation history",
+          list: "Get message history",
+        },
+        model: {
+          list: "List models",
+          list_providers: "List model providers",
+          get_provider: "Get model provider details",
+          get: "Get model details",
+          delete: "Delete model",
+          update: "Update model display information",
+          copy: "Copy model configuration",
+        },
+        skill: {
+          list_installed: "List installed skills",
+          install: "Install skill",
+          get_installed: "Get installed skill details",
+          uninstall: "Uninstall skill",
+          set_enabled: "Set skill enabled state",
+          list: "List executable skills",
+          list_catalog: "List workspace skills",
+          get_catalog: "Get workspace skill details",
+          install_catalog: "Install catalog skill onto sandboxes",
+        },
+        session: {
+          list: "List conversations",
+        },
+      },
       found: '{count} available',
       unavailableCount: '{count} unavailable',
       empty: 'No matching operations',
@@ -6555,6 +6823,7 @@ export default {
       range: 'Range {min}–{max}',
       risk: {
         read: 'Read',
+        probe: 'Check',
         write: 'Write',
         destructive: 'Destructive'
       },

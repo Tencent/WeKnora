@@ -20,6 +20,7 @@
         theme="normal" size="small" class="ask-number" />
       <t-select v-else-if="field.type === 'select' || field.type === 'multiselect'" v-model="values[field.name]"
         :multiple="field.type === 'multiselect'" :disabled="submitting" size="small" clearable
+        :popup-props="{ overlayClassName: 'wk-popover' }"
         :placeholder="$t('agentStream.askUser.selectPlaceholder')">
         <t-option v-for="option in field.options || []" :key="option" :value="option" :label="option" />
       </t-select>
@@ -46,30 +47,26 @@
     </div>
   </div>
 
-  <div v-else class="action-card interaction-inline" :class="{ 'action-pending': !resolved }">
+  <div v-else class="action-card interaction-inline ask-inline" :class="{ 'action-pending': open }">
     <div class="action-header no-results">
       <div class="action-title">
         <t-icon class="action-title-icon" :name="headerIcon" />
         <span class="action-name">{{ $t('agentStream.askUser.title') }}</span>
+        <span class="ask-status" role="status">
+          {{ awaitingInDock ? $t('agentStream.promptDock.waiting') : statusLine }}
+        </span>
+        <button v-if="awaitingInDock" type="button" class="inline-action is-primary" @click.stop="dock?.focus(pendingId)">
+          {{ $t('agentStream.promptDock.handle') }}
+        </button>
       </div>
     </div>
 
     <div class="ask-question">{{ question.question }}</div>
 
-    <div class="interaction-status-summary">
-      <div class="results-summary-text">
-        <template v-if="awaitingInDock">
-          <span class="status-label">{{ $t('agentStream.promptDock.waiting') }}</span>
-          <span class="inline-dot">·</span>
-          <button type="button" class="inline-action is-primary" @click.stop="dock?.focus(pendingId)">
-            {{ $t('agentStream.promptDock.handle') }}
-          </button>
-        </template>
-        <span v-else class="status-label">{{ statusLine }}</span>
-      </div>
+    <div v-if="answerSummary" class="ask-answer">
+      <span class="ask-answer-label">{{ $t('agentStream.askUser.answerLabel') }}</span>
+      <div class="ask-answer-text">{{ answerSummary }}</div>
     </div>
-
-    <div v-if="answerSummary" class="ask-answer">{{ answerSummary }}</div>
   </div>
 </template>
 
@@ -232,20 +229,41 @@ defineExpose({ handleKey })
 <style scoped lang="less">
 @import './agent-interaction-card.less';
 
-// The question reads like the agent's other step text in the timeline.
+.ask-inline {
+  min-width: 0;
+
+  .action-title {
+    column-gap: 8px;
+    row-gap: 4px;
+  }
+
+  .action-name {
+    font-size: var(--agent-step-summary-size, 13px);
+  }
+}
+
+.ask-status {
+  padding: 1px 6px;
+  border-radius: var(--app-radius-sm, 4px);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-xs, 12px);
+  line-height: 1.5;
+}
+
 .ask-question {
-  padding: 2px 0 0;
-  font-size: var(--agent-step-text-size, 14px);
-  line-height: 1.55;
+  margin-top: 6px;
+  font-size: var(--agent-step-summary-size, 13px);
+  line-height: 1.65;
   color: var(--td-text-color-secondary);
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .ask-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .ask-field-label {
@@ -258,10 +276,37 @@ defineExpose({ handleKey })
   width: 100%;
 }
 
-.ask-text {
-  :deep(.t-textarea__inner) {
-    font-size: var(--agent-step-summary-size, 13px);
+// Filled, borderless fields, like the option rows and argument editor of the
+// other prompts in the dock.
+.ask-field :deep(.t-input),
+.ask-text :deep(.t-textarea__inner) {
+  min-height: 32px;
+  border-color: transparent;
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-secondarycontainer);
+  box-shadow: none;
+  font-size: var(--agent-step-summary-size, 13px);
+  transition: background var(--app-motion-fast) ease, border-color var(--app-motion-fast) ease;
+
+  &:hover:not(.t-is-disabled):not(.t-input--focused):not(:focus) {
+    border-color: transparent;
+    background: var(--td-bg-color-secondarycontainer-hover);
   }
+}
+
+.ask-field :deep(.t-input.t-input--focused),
+.ask-text :deep(.t-textarea__inner:focus) {
+  border-color: color-mix(in srgb, var(--td-brand-color) 45%, var(--td-component-stroke));
+  background: var(--td-bg-color-container);
+  box-shadow: none;
+}
+
+.ask-field :deep(.t-input__inner::placeholder),
+.ask-text :deep(.t-textarea__inner::placeholder) {
+  color: var(--td-text-color-placeholder);
+}
+
+.ask-text {
 
   // The limit is far above a typical answer; the counter is noise here.
   :deep(.t-textarea__info_wrapper),
@@ -271,12 +316,27 @@ defineExpose({ handleKey })
 }
 
 .ask-answer {
-  padding: 2px 0 0;
-  font-size: var(--agent-step-summary-size, 13px);
-  line-height: 1.55;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--app-radius-md, 8px);
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.ask-answer-label {
+  font-size: var(--app-text-xs, 12px);
+  line-height: 1.5;
   color: var(--td-text-color-secondary);
+}
+
+.ask-answer-text {
+  font-size: var(--agent-step-text-size, 14px);
+  line-height: 1.6;
+  color: var(--td-text-color-primary);
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .ask-required {

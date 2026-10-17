@@ -45,6 +45,15 @@ type documentSettings struct {
 	// default on purpose, so upgrading an existing deployment never changes
 	// what happens to the videos it already skipped.
 	StoreUnindexedMedia bool
+
+	// PreserveFolderStructure encodes each document's DingTalk folder hierarchy
+	// into its FileName, so the document lands in the knowledge base folder
+	// that mirrors where it lives in the wiki instead of at the root.
+	//
+	// It is an ingest-path switch, not a migration. An already-ingested
+	// document is only re-read when its content changes, so turning the switch
+	// on does not relocate it; a full sync does.
+	PreserveFolderStructure bool
 }
 
 // parseDocumentSettings reads the settings bag of a data source. A missing or
@@ -56,7 +65,8 @@ func parseDocumentSettings(dataSourceConfig *types.DataSourceConfig) documentSet
 		raw = dataSourceConfig.Settings
 	}
 	return documentSettings{
-		IncludeUploadedFiles: settingBool(raw["include_uploaded_files"], false),
-		StoreUnindexedMedia:  settingBool(raw["store_unindexed_media"], false),
+		IncludeUploadedFiles:    settingBool(raw["include_uploaded_files"], false),
+		StoreUnindexedMedia:     settingBool(raw["store_unindexed_media"], false),
+		PreserveFolderStructure: settingBool(raw["preserve_folder_structure"], false),
 	}
 }

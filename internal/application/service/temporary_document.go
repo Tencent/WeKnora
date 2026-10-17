@@ -136,19 +136,20 @@ func (s *temporaryDocumentService) Create(
 	}
 	optionsJSON, _ := json.Marshal(options)
 	document := &types.TemporaryDocument{
+		ID:       uuid.NewString(),
 		TenantID: tenantID, SessionID: sessionID, ResourceRef: resourceRef,
 		FileName: baseName, FileType: ext, MimeType: strings.TrimSpace(mimeType), FileSize: fileSize,
 		Status: types.TemporaryDocumentStatusUploaded, ExpiresAt: time.Now().Add(temporaryDocumentTTL()),
 		ProcessingOptions: types.JSON(optionsJSON),
 	}
 	if err := s.repo.Create(ctx, document); err != nil {
-		_ = s.fileService.DeleteFile(ctx, resourceRef)
+		_ = s.releaseResource(ctx, document.ID, resourceRef)
 		return nil, fmt.Errorf("create attachment record: %w", err)
 	}
 	if s.resourceCatalog != nil {
 		if err := s.resourceCatalog.Bind(ctx, resourceRef, types.ResourceOwnerTemporaryDocument, document.ID, types.ResourceRelationSourceFile); err != nil {
 			_ = s.repo.DeleteScoped(ctx, tenantID, sessionID, document.ID)
-			_ = s.fileService.DeleteFile(ctx, resourceRef)
+			_ = s.releaseResource(ctx, document.ID, resourceRef)
 			return nil, fmt.Errorf("bind attachment resource: %w", err)
 		}
 	}
@@ -272,11 +273,36 @@ func (s *temporaryDocumentService) Delete(ctx context.Context, tenantID uint64, 
 	if err != nil || document == nil {
 		return err
 	}
+	refs := map[string]struct{}{document.ResourceRef: {}}
 	for _, ref := range temporaryDocumentImageRefs(document.ImageRefs) {
-		_ = s.fileService.DeleteFile(ctx, ref.URL)
+		refs[ref.URL] = struct{}{}
 	}
-	_ = s.fileService.DeleteFile(ctx, document.ResourceRef)
+	for ref := range refs {
+		if err := s.releaseResource(ctx, document.ID, ref); err != nil {
+			logger.Warnf(ctx, "keeping attachment resource after cleanup failure: document_id=%s err=%v",
+				document.ID, err)
+		}
+	}
 	return s.repo.DeleteScoped(ctx, tenantID, sessionID, documentID)
+}
+
+// A content-deduplicated image can also belong to another attachment or a
+// knowledge entry. Drop only this document's claim, including on rollback;
+// an unreadable binding count must never authorize deleting shared bytes.
+func (s *temporaryDocumentService) releaseResource(ctx context.Context, documentID, ref string) error {
+	if ref == "" {
+		return nil
+	}
+	if s.resourceCatalog != nil {
+		remaining, err := s.resourceCatalog.Release(ctx, ref, types.ResourceOwnerTemporaryDocument, documentID)
+		if err != nil {
+			return fmt.Errorf("release attachment resource: %w", err)
+		}
+		if remaining > 0 {
+			return nil
+		}
+	}
+	return s.fileService.DeleteFile(ctx, ref)
 }
 
 func temporaryDocumentImageRefs(raw types.JSON) []types.TemporaryDocumentImage {

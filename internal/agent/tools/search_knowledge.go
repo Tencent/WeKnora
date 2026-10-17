@@ -1073,8 +1073,10 @@ func (t *SearchKnowledgeTool) formatOutput(
 			tag = "faq"
 			idAttr = fmt.Sprintf("faq_id=\"%s\" index=\"%d\"", xmlEscape(result.ID), result.ChunkIndex)
 		}
-		fmt.Fprintf(&ob, "<%s rank=\"%d\" %s knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\">\n",
-			tag, i+1, idAttr, xmlEscape(result.KnowledgeBaseID), xmlEscape(result.KnowledgeTitle), result.Score)
+		fmt.Fprintf(&ob, "<%s rank=\"%d\" %s knowledge_base_id=\"%s\" "+
+			"knowledge_title=\"%s\" chunk_type=\"%s\" score=\"%.3f\">\n",
+			tag, i+1, idAttr, xmlEscape(result.KnowledgeBaseID),
+			xmlEscape(result.KnowledgeTitle), xmlEscape(result.ChunkType), result.Score)
 		if snippet != "" {
 			fmt.Fprintf(&ob, "<match_snippet>%s</match_snippet>\n", xmlEscape(snippet))
 		}
@@ -1098,6 +1100,7 @@ func (t *SearchKnowledgeTool) formatOutput(
 		row := map[string]interface{}{
 			"result_index":        i + 1,
 			"content":             result.Content,
+			"chunk_type":          result.ChunkType,
 			"knowledge_id":        result.KnowledgeID,
 			"knowledge_base_id":   result.KnowledgeBaseID,
 			"knowledge_title":     result.KnowledgeTitle,

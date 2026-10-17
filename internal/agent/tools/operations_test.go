@@ -535,6 +535,47 @@ func TestRunOperationFollowsAccessLevel(t *testing.T) {
 	})
 }
 
+func TestRunOperationProbesRunWithoutApprovalWithinABudget(t *testing.T) {
+	d := &fakeDispatcher{responses: map[string]*operations.Response{
+		"POST /api/v1/knowledge-bases/kb1/hybrid-search": {
+			Status: http.StatusOK,
+			Body:   []byte(`{"success":true,"data":[{"id":"c1","content":"hello","score":0.5,"match_type":0}]}`),
+		},
+	}}
+	gate := &fakeApprover{decision: approval.Decision{Approved: true, PendingID: "p1"}}
+	tool := NewRunOperationTool(OperationsRuntime{
+		Catalog:    operations.Builtin(),
+		Dispatcher: d,
+		Gate:       gate,
+		Identity:   operations.Identity{UserID: "u1", TenantID: 7},
+		Access:     operations.Access{Level: types.AssistantAccessReadOnly},
+	})
+	search := runArgs("knowledge_base.search", map[string]any{
+		"knowledge_base_id": "kb1", "query_text": "refund policy", "vector_threshold": 0.3,
+	})
+
+	for i := 0; i < maxProbesPerRun; i++ {
+		res, err := tool.Execute(interactiveCtx(), search)
+		require.NoError(t, err)
+		require.True(t, res.Success, res.Error)
+		assert.Empty(t, res.Data, "a probe reports no data change")
+	}
+	assert.Empty(t, gate.requests, "probes never ask, even at read-only")
+	require.Len(t, d.calls, maxProbesPerRun)
+	assert.JSONEq(t, `{"query_text":"refund policy","vector_threshold":0.3}`, string(d.calls[0].call.Body))
+
+	res, err := tool.Execute(interactiveCtx(), search)
+	require.NoError(t, err)
+	assert.False(t, res.Success)
+	assert.Contains(t, res.Error, "probe operations")
+	assert.Len(t, d.calls, maxProbesPerRun, "the call over budget is not dispatched")
+
+	reads := runArgs("knowledge.get", map[string]any{"knowledge_id": "k1"})
+	d.responses["GET /api/v1/knowledge/k1"] = &operations.Response{Status: http.StatusOK, Body: []byte(docBody)}
+	res, _ = tool.Execute(interactiveCtx(), reads)
+	assert.True(t, res.Success, "reads do not count against the probe budget")
+}
+
 func TestRunOperationAutoWriteHonorsResumedAnswer(t *testing.T) {
 	for _, approved := range []bool{false, true} {
 		name := "declined"

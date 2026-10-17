@@ -130,3 +130,8 @@ func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 		Output:  fmt.Sprintf("Successfully flagged issue for %s. A maintenance ticket has been created for review.", slug),
 	}, nil
 }
+
+// ApprovalGrant scopes a session-wide approval to the run's knowledge bases.
+func (t *wikiFlagIssueTool) ApprovalGrant(ctx context.Context, _ json.RawMessage) (string, string) {
+	return wikiApprovalGrant(ctx, t.Name(), t.kbIDs)
+}

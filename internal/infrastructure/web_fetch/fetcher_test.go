@@ -133,13 +133,45 @@ func TestFetcherUsesBrowserFallbackForClientRenderedPage(t *testing.T) {
 }
 
 func TestNewFetcherKeepsAgentCompatibleTimeout(t *testing.T) {
-	assert.Equal(t, 60*time.Second, NewFetcher().timeout)
+	t.Setenv("WEKNORA_WEB_FETCH_TIMEOUT", "")
+	assert.Equal(t, 3*time.Minute, NewFetcher().timeout)
+	assert.Equal(t, PageFetchTimeout(), NewFetcher().timeout)
+
+	t.Setenv("WEKNORA_WEB_FETCH_TIMEOUT", "150s")
+	assert.Equal(t, 150*time.Second, NewFetcher().timeout)
 }
 
 func TestNewPipelineFetcherUsesHTTPOnlyAndLegacyTimeout(t *testing.T) {
 	fetcher := NewPipelineFetcher()
 	assert.Equal(t, 15*time.Second, fetcher.timeout)
 	assert.Nil(t, fetcher.renderBrowser)
+}
+
+func TestPipelineFetcherIgnoresWebFetchToolTimeout(t *testing.T) {
+	t.Setenv("WEKNORA_WEB_FETCH_TIMEOUT", "180")
+	fetcher := NewPipelineFetcher()
+	assert.Equal(t, 15*time.Second, fetcher.timeout)
+	assert.Nil(t, fetcher.renderBrowser)
+	assert.Equal(t, 180*time.Second, PageFetchTimeout())
+}
+
+func TestPageFetchTimeout(t *testing.T) {
+	t.Setenv("WEKNORA_WEB_FETCH_TIMEOUT", "")
+	assert.Equal(t, 3*time.Minute, PageFetchTimeout())
+
+	t.Setenv("WEKNORA_WEB_FETCH_TIMEOUT", "150s")
+	assert.Equal(t, 150*time.Second, PageFetchTimeout())
+	t.Setenv("WEKNORA_WEB_FETCH_TIMEOUT", "3m")
+	assert.Equal(t, 3*time.Minute, PageFetchTimeout())
+	t.Setenv("WEKNORA_WEB_FETCH_TIMEOUT", "180")
+	assert.Equal(t, 180*time.Second, PageFetchTimeout())
+
+	for _, raw := range []string{"", "0", "-1", "0s", "-5s", "nope", "   "} {
+		t.Run("fallback_"+raw, func(t *testing.T) {
+			t.Setenv("WEKNORA_WEB_FETCH_TIMEOUT", raw)
+			assert.Equal(t, 3*time.Minute, PageFetchTimeout())
+		})
+	}
 }
 
 func TestFetcherReturnsErrorWhenBrowserFallbackFailsOnSPA(t *testing.T) {

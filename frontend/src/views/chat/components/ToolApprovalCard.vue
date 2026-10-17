@@ -1,11 +1,14 @@
 <template>
   <div v-if="interactive" class="prompt-panel" @click.stop>
-    <div class="prompt-question">{{ $t('agentStream.toolApproval.dockQuestion', { target: targetLabel }) }}</div>
+    <div class="prompt-question">{{ question }}</div>
     <div v-if="descriptionParts.head" class="prompt-desc">{{ descriptionParts.head }}</div>
     <dl v-if="descriptionParts.fields.length" class="prompt-fields">
       <div v-for="(field, i) in descriptionParts.fields" :key="i" class="prompt-field">
         <dt>{{ approvalFieldLabel(field.label) }}</dt>
-        <dd>{{ approvalFieldValue(field.label, field.value) }}</dd>
+        <dd>
+          {{ approvalFieldValue(field.label, field.value) }}<span v-if="field.count" class="prompt-field-count">{{
+            $t('agentStream.toolApproval.characterCount', { count: field.count }) }}</span>
+        </dd>
       </div>
     </dl>
     <ul v-if="descriptionParts.items.length" class="prompt-desc-items">
@@ -27,6 +30,11 @@
       <t-textarea v-if="argsExpanded" v-model="argsText" class="prompt-args-input"
         :autosize="{ minRows: 2, maxRows: 10 }" placeholder="{}" />
     </div>
+
+    <t-checkbox v-if="grantScope" v-model="allowInSession" class="prompt-grant">
+      {{ $t('agentStream.toolApproval.allowInSession') }}
+      <span class="prompt-grant-scope">{{ grantScope }}</span>
+    </t-checkbox>
 
     <div class="prompt-footer">
       <div class="prompt-footer-meta">
@@ -98,6 +106,9 @@ const props = defineProps<{
   mcpToolName: string
   description?: string
   argsJson?: string
+  // grantScope, when set, offers to approve calls like this one for the
+  // rest of the session and says which calls that covers.
+  grantScope?: string
   timeoutSeconds?: number
   requestedAt?: number
   resolved?: boolean
@@ -141,6 +152,7 @@ function formatJson(raw: string): string {
 const initialArgs = formatJson(props.argsJson || '{}')
 const argsText = ref(initialArgs)
 const argsExpanded = ref(false)
+const allowInSession = ref(false)
 const submitting = ref(false)
 const { parked, secondsLeft, timerClass, countdownText, parkedText } = usePromptCountdown(props)
 
@@ -152,27 +164,54 @@ const awaitingInDock = computed(() => open.value && props.variant !== 'dock' && 
 
 const hasArgs = computed(() => argsText.value.trim().length > 0)
 
+// The service name the backend gives its own operations (run_operation).
+const isOperation = computed(() => props.serviceName === 'WeKnora')
+
 // A batch operation ends its description with one "- " line per item it acts
 // on; those render as a list so every item stays visible. "Label: value"
 // lines render as a definition list. A broken item list stays one block.
+interface ApprovalField { label: string, value: string, count?: string }
+
 const descriptionParts = computed(() => {
   const text = (props.description || '').trim()
   const lines = text ? text.split('\n') : []
   const start = lines.findIndex((line) => line.startsWith('- '))
   const brokenList = start >= 0 && !lines.slice(start).every((line) => line.startsWith('- '))
   if (!text || brokenList) {
-    return { head: text, fields: [], items: [] }
+    return { head: text, fields: [], items: [], action: '', target: '' }
   }
   const body = start < 0 ? lines : lines.slice(0, start)
   const items = start < 0 ? [] : lines.slice(start).map((line) => line.slice(2))
-  const fields = []
-  const headLines = []
+  const fields = [] as ApprovalField[]
+  const headLines = [] as string[]
   for (const line of body) {
     const match = /^([^:\n]{1,48}): (.+)$/.exec(line)
-    if (match) fields.push({ label: match[1], value: match[2] })
-    else headLines.push(line)
+    if (!match) {
+      headLines.push(line)
+      continue
+    }
+    const counted = /^(.+) \((\d+) characters\)$/.exec(match[1])
+    fields.push(counted
+      ? { label: counted[1], value: match[2], count: counted[2] }
+      : { label: match[1], value: match[2] })
   }
-  return { head: headLines.join('\n').trim(), fields, items }
+  // A WeKnora operation's description opens with its summary, then the label
+  // of what it acts on; they make the question instead of the raw operation id.
+  let action = ''
+  let target = ''
+  if (isOperation.value && headLines.length) {
+    action = String(headLines.shift()).trim()
+    if (headLines.length && !/[.。!！?？]$/.test(headLines[0].trim())) target = String(headLines.shift()).trim()
+  }
+  return { head: headLines.join('\n').trim(), fields, items, action, target }
+})
+
+const question = computed(() => {
+  const { action, target } = descriptionParts.value
+  if (!action) return t('agentStream.toolApproval.dockQuestion', { target: targetLabel.value })
+  return target
+    ? t('agentStream.toolApproval.operationQuestion', { action, target })
+    : t('agentStream.toolApproval.operationQuestionNoTarget', { action })
 })
 
 const isJsonValid = computed(() => {
@@ -211,6 +250,18 @@ const approvalDetailKey: Record<string, string> = {
   Skills: 'skills',
   'Web search': 'webSearch',
   'Multi-turn conversation': 'multiTurn',
+  Transport: 'transport',
+  Authentication: 'authentication',
+  'Usage instructions': 'usageInstructions',
+  'Display name': 'displayName',
+  Enabled: 'enabled',
+  Sandbox: 'sandbox',
+  Sandboxes: 'sandboxes',
+  'System prompt': 'systemPrompt',
+  Content: 'content',
+  'Knowledge base scope': 'kbScope',
+  'MCP scope': 'mcpScope',
+  'Skills scope': 'skillsScope',
 }
 
 const approvalValueKey: Record<string, string> = {
@@ -263,9 +314,18 @@ const targetLabel = computed(() => (
   })
 ))
 
+const operationLabel = computed(() => {
+  const { action, target } = descriptionParts.value
+  if (!action) return ''
+  return target ? t('agentStream.toolApproval.operationTarget', { action, target }) : action
+})
+
 const mainTitle = computed(() => {
   if (!props.resolved) {
-    return t('agentStream.toolApproval.waiting', { target: targetLabel.value })
+    return t('agentStream.toolApproval.waiting', { target: operationLabel.value || targetLabel.value })
+  }
+  if (operationLabel.value) {
+    return t('agentStream.toolApproval.reviewTitle', { target: operationLabel.value })
   }
   return t('agentStream.toolApproval.titleWithTarget', {
     service: props.serviceName,
@@ -285,6 +345,10 @@ const statusLine = computed(() => {
 function toggleArgs() {
   argsExpanded.value = !argsExpanded.value
 }
+
+const allowForSession = (decision: 'approve' | 'reject') => (
+  decision === 'approve' && Boolean(props.grantScope) && allowInSession.value ? true : undefined
+)
 
 const submit = async (decision: 'approve' | 'reject') => {
   if (!open.value || submitting.value) return
@@ -312,12 +376,14 @@ const submit = async (decision: 'approve' | 'reject') => {
           decision,
           modified_args: decision === 'approve' ? modified : undefined,
           reason: decision === 'reject' ? t('agentStream.toolApproval.userRejected') : undefined,
+          allow_in_session: allowForSession(decision),
         },
       )
       : resolveToolApproval(props.pendingId, {
         decision,
         modified_args: decision === 'approve' ? modified : undefined,
         reason: decision === 'reject' ? t('agentStream.toolApproval.userRejected') : undefined,
+        allow_in_session: allowForSession(decision),
       }))
     markPromptSubmitted(props.pendingId, { approved: decision === 'approve' })
     MessagePlugin.success(t('agentStream.toolApproval.submitted'))

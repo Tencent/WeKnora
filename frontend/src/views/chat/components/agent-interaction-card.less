@@ -282,23 +282,25 @@
   overflow-y: auto;
 }
 
+// One grid for all rows, so every value starts at the same column.
 .prompt-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: -2px 0 0;
-  max-height: calc(1.4em * 6 + 20px);
+  display: grid;
+  grid-template-columns: fit-content(120px) minmax(0, 1fr);
+  column-gap: 16px;
+  row-gap: 6px;
+  align-items: baseline;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-secondarycontainer);
+  font-size: var(--agent-step-summary-size, 13px);
+  line-height: 1.55;
+  max-height: calc(1.55em * 9 + 20px);
   overflow-y: auto;
 }
 
 .prompt-field {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  column-gap: 12px;
-  align-items: baseline;
-  margin: 0;
-  font-size: var(--agent-step-summary-size, 13px);
-  line-height: 1.4;
+  display: contents;
 
   dt {
     margin: 0;
@@ -308,8 +310,14 @@
   dd {
     margin: 0;
     color: var(--td-text-color-primary);
-    word-break: break-word;
+    overflow-wrap: anywhere;
   }
+}
+
+.prompt-field-count {
+  margin-left: 6px;
+  color: var(--td-text-color-placeholder);
+  white-space: nowrap;
 }
 
 .prompt-desc-items {
@@ -435,6 +443,18 @@
     border-radius: var(--app-radius-md);
     color: var(--td-text-color-secondary);
   }
+}
+
+.prompt-grant {
+  align-self: flex-start;
+  font-size: var(--agent-step-summary-size, 13px);
+  color: var(--td-text-color-secondary);
+}
+
+.prompt-grant-scope {
+  margin-left: 6px;
+  color: var(--td-text-color-placeholder);
+  word-break: break-word;
 }
 
 .prompt-footer {
