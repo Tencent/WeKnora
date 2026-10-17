@@ -6191,6 +6191,35 @@
         "context_window": 4096,
         "source": "https://docs.cohere.com/docs/models#rerank"
       }
+    ],
+    "contextual": [
+      {
+        "id": "ctxl-rerank-v2-instruct-multilingual",
+        "name": "ctxl-rerank-v2-instruct-multilingual",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "source": "https://docs.contextual.ai/api-reference/rerank/rerank"
+      },
+      {
+        "id": "ctxl-rerank-v2-instruct-multilingual-mini",
+        "name": "ctxl-rerank-v2-instruct-multilingual-mini",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "source": "https://docs.contextual.ai/api-reference/rerank/rerank"
+      },
+      {
+        "id": "ctxl-rerank-v1-instruct",
+        "name": "ctxl-rerank-v1-instruct",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "source": "https://docs.contextual.ai/api-reference/rerank/rerank"
+      }
     ]
   }
 }
