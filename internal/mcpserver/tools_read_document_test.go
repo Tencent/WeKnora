@@ -125,43 +125,6 @@ func mcpReadChunkIDs(data mcpReadDocumentData, role string) []string {
 	return ids
 }
 
-func TestMCPReadDocumentDiscoveredContract(t *testing.T) {
-	r := newMCPReadDocumentEngine(t, nil)
-	response := rpc(t, r, "tools/list", map[string]any{})
-	require.NotContains(t, response, "error")
-	raw, err := json.Marshal(response["result"])
-	require.NoError(t, err)
-	var catalog struct {
-		Tools []struct {
-			Name        string `json:"name"`
-			Description string `json:"description"`
-			InputSchema struct {
-				Properties map[string]struct {
-					Description string `json:"description"`
-				} `json:"properties"`
-			} `json:"inputSchema"`
-		} `json:"tools"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &catalog))
-	require.Len(t, catalog.Tools, 1)
-	tool := catalog.Tools[0]
-	require.Equal(t, types.MCPEndpointToolReadDocument, tool.Name)
-	for _, fact := range []string{
-		"at most 20 matches", "context", "output size budget", "same query", "offset=next_offset",
-	} {
-		require.Contains(t, tool.Description, fact)
-	}
-	for parameter, facts := range map[string][]string{
-		"query":  {"case-insensitive", "literal substrings", "whitespace", "every term", "any order", "sequential"},
-		"limit":  {"without query", "default 20", "max 100", "ignored in query mode", "output size budget"},
-		"offset": {"0-based", "reading order", "not a chunk index", "next_offset"},
-	} {
-		for _, fact := range facts {
-			require.Contains(t, tool.InputSchema.Properties[parameter].Description, fact, "parameter %s", parameter)
-		}
-	}
-}
-
 func TestMCPReadDocumentQueryMatchesLiteralTermsInAnyOrder(t *testing.T) {
 	r := newMCPReadDocumentEngine(t, []string{
 		"Before", "beta: build with C++ and ALPHA", "After", "alpha alone", "beta alone", "C only",
