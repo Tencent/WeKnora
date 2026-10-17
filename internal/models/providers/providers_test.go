@@ -18,7 +18,7 @@ import (
 var expectedIDs = []string{
 	"generic", "weknoracloud", "huggingface_tei",
 	"aliyun", "zhipu", "volcengine", "hunyuan", "siliconflow", "deepseek",
-	"minimax", "moonshot", "mimo", "modelscope", "qianfan", "qiniu", "longcat", "lkeap",
+	"minimax", "moonshot", "mimo", "modelscope", "mixedbread", "qianfan", "qiniu", "longcat", "lkeap",
 	"openai", "azure_openai", "anthropic", "gemini",
 	"openrouter", "litellm", "requesty", "pinecone",
 	"jina", "nvidia", "novita", "gpustack", "cohere",
