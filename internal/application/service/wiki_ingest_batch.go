@@ -1535,7 +1535,9 @@ func (s *wikiIngestService) mapOneDocument(
 			return
 		}
 		candidatesXML := renderCandidateSlugsXML(extractedEntities, extractedConcepts)
-		citations, newSlugs, batchCount = s.classifyChunkCitations(ctx, chatModel, candidatesXML, chunks, lang, batchCtx)
+		citations, newSlugs, batchCount = s.classifyChunkCitations(
+			ctx, chatModel, candidatesXML, wikiCitationChunks(chunks), lang, batchCtx,
+		)
 		s.tracker().EndSpan(ctx, classifySpan, types.JSONMap{
 			"cited_slugs":      len(citations),
 			"new_slugs":        len(newSlugs),
