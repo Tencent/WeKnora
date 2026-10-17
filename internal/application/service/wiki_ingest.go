@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"text/template"
@@ -3275,7 +3276,12 @@ var (
 	// e.g. <image url="...">. Capture both double- and single-quoted forms.
 	imageURLAttrRE = regexp.MustCompile(`(?i)<image\b[^>]*\surl\s*=\s*(?:"([^"]*)"|'([^']*)')`)
 
-	imagePlaceholderTokenRE = regexp.MustCompile(`wkimg:[A-Za-z0-9_-]+`)
+	// Match real URLs as a whole so placeholder-like path/query fragments stay intact.
+	imagePlaceholderTokenRE = regexp.MustCompile(
+		`(?i)\b(?:[a-z][a-z0-9+.-]*://[^\s"'<>]+|` +
+			`wkimg(?:[ \t]*[:：/_-][ \t]*[A-Za-z0-9_/-]+|` +
+			`[ \t]+[0-9][A-Za-z0-9_/-]*|[A-Za-z0-9_/-]+)(?:\.[A-Za-z0-9_/-]+)*)`)
+	looseImagePlaceholderRE = regexp.MustCompile(`(?i)^wkimg[ \t]*[:：/_-]?[ \t]*([0-9]+)$`)
 )
 
 func maskTemplateDataImageURLs(data map[string]string) (map[string]string, map[string]string) {
@@ -3374,14 +3380,14 @@ func unmaskImageURLs(out string, urlMap map[string]string) string {
 			return match
 		}
 		url := strings.TrimSpace(parts[1])
-		if realURL, ok := urlMap[url]; ok {
+		if realURL, ok := resolveImagePlaceholder(url, urlMap); ok {
 			idx := strings.LastIndex(match, "(")
 			if idx < 0 {
 				return match
 			}
 			return match[:idx+1] + realURL + ")"
 		}
-		if strings.HasPrefix(url, "wkimg:") {
+		if strings.HasPrefix(strings.ToLower(url), "wkimg") {
 			return ""
 		}
 		return match
@@ -3413,11 +3419,32 @@ func replaceImagePlaceholderTokensOutsideMarkdown(s string, urlMap map[string]st
 
 func replaceImagePlaceholderTokens(s string, urlMap map[string]string) string {
 	return imagePlaceholderTokenRE.ReplaceAllStringFunc(s, func(token string) string {
-		if realURL, ok := urlMap[token]; ok {
+		if !strings.HasPrefix(strings.ToLower(token), "wkimg") {
+			return token
+		}
+		if realURL, ok := resolveImagePlaceholder(token, urlMap); ok {
 			return realURL
 		}
 		return ""
 	})
+}
+
+// resolveImagePlaceholder tolerates formatting changes only when the complete
+// numeric identifier maps to an image supplied to this LLM call.
+func resolveImagePlaceholder(token string, urlMap map[string]string) (string, bool) {
+	if realURL, ok := urlMap[token]; ok {
+		return realURL, true
+	}
+	parts := looseImagePlaceholderRE.FindStringSubmatch(strings.TrimSpace(token))
+	if len(parts) != 2 {
+		return "", false
+	}
+	index, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return "", false
+	}
+	realURL, ok := urlMap[fmt.Sprintf("wkimg:%04d", index)]
+	return realURL, ok
 }
 
 // stripImageMarkup removes image-only placeholders (Markdown image refs,
