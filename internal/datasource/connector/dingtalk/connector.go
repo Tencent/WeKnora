@@ -1395,7 +1395,7 @@ func readDocument(
 	sourceResourceID string,
 	workspaceID string,
 	document node,
-	folders  []string,
+	folders []string,
 	settings documentSettings,
 ) (types.FetchedItem, error) {
 	switch {
@@ -1543,7 +1543,7 @@ func fetchedBinaryDocument(
 	workspaceID string,
 	document node,
 	data []byte,
-	folders              []string,
+	folders []string,
 	storeWithoutIndexing bool,
 ) types.FetchedItem {
 	contentType, ok := document.binaryContentType()
