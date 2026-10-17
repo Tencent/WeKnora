@@ -175,3 +175,28 @@ for (const type of ['VLLM', 'ASR']) {
     } finally { f.dispose() }
   })
 }
+
+// The video tab is its own entry in the debug drawer: it is a real model type,
+// not a chat model with video input, and it always takes a file (the video is
+// what gets read; the prompt only says what to look for).
+test('video models get their own tab, accept a video file and send it with the prompt', async () => {
+  const f = await fixture('Video', false)
+  try {
+    const types = Array.from(f.vm.allModelTypeOptions, (option: any) => option.value)
+    assert.ok(types.includes('Video'), 'the drawer must offer a video tab')
+    assert.equal(f.vm.selectedModelType, 'Video')
+
+    const video = { name: 'lesson.mp4', size: 4096, type: 'video/mp4' }
+    assert.equal(f.vm.showFilePicker, true)
+    assert.equal(f.vm.canRun, false, 'a video model has nothing to send without a file')
+    f.vm.onNativeFileChange({ target: { files: [video] } })
+    await nextTick()
+    assert.equal(f.vm.canRun, true, 'the file alone is enough: the prompt is optional')
+    assert.equal(f.vm.imagePreview, '', 'a video must not be rendered as an <img> preview')
+
+    f.vm.input = '这段视频讲了什么？'
+    await f.vm.runDebug()
+    assert.equal(f.requests[0].file.name, 'lesson.mp4')
+    assert.equal(f.requests[0].input, '这段视频讲了什么？')
+  } finally { f.dispose() }
+})

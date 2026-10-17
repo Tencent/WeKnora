@@ -12,6 +12,9 @@ export interface VideoParsingKbInfo {
     enabled?: boolean
     mode?: string
     model_id?: string
+    // The direct read's own video model, independent of the ASR and frame
+    // models above.
+    video_model_id?: string
     // The video section owns its frame-description model; the knowledge base's
     // top-level vlm_config (image processing) never makes a video parseable.
     vlm_config?: {
@@ -27,7 +30,7 @@ export interface VideoParsingKbInfo {
   } | null
 }
 
-const VIDEO_PARSE_MODES = ['audio_only', 'keyframes', 'audio_and_keyframes'] as const
+const VIDEO_PARSE_MODES = ['audio_only', 'keyframes', 'audio_and_keyframes', 'video_direct'] as const
 type VideoParseMode = (typeof VIDEO_PARSE_MODES)[number]
 
 // Rows saved before the mode existed decode to an empty value; the backend
@@ -50,15 +53,17 @@ export function isVideoParsingEnabled(kbInfo?: VideoParsingKbInfo | null): boole
 
 /**
  * Best-effort mirror of the server's import gate: the model the selected mode
- * needs (ASR for narration, VLM for frames) must be configured or the upload is
- * rejected with a 400. Used for an early warning only — a stale or partial
- * detail must never block the upload the server would accept.
+ * needs (ASR for narration, VLM for frames, a video model for the direct read)
+ * must be configured or the upload is rejected with a 400. Used for an early
+ * warning only — a stale or partial detail must never block the upload the
+ * server would accept.
  */
 export function isVideoParsingReady(kbInfo?: VideoParsingKbInfo | null): boolean {
   if (!isVideoParsingEnabled(kbInfo)) return false
   const mode = normalizeVideoParseMode(kbInfo?.video_config?.mode)
   const usesAudio = mode === 'audio_only' || mode === 'audio_and_keyframes'
   const usesFrames = mode === 'keyframes' || mode === 'audio_and_keyframes'
+  const usesDirect = mode === 'video_direct'
   // The video's own ASR model is the only one that counts: the audio section's
   // model never makes a video parseable, exactly like the backend.
   const audioReady = usesAudio && !!kbInfo?.video_config?.model_id?.trim()
@@ -69,7 +74,10 @@ export function isVideoParsingReady(kbInfo?: VideoParsingKbInfo | null): boolean
   const frameVLM = kbInfo?.video_config?.vlm_config
   const framesReady =
     usesFrames && frameVLM?.enabled === true && !!frameVLM.model_id?.trim()
-  return audioReady || framesReady
+  // The direct read is satisfied only by the video section's own video model;
+  // the ASR and frame models are its fallback, not its prerequisite.
+  const directReady = usesDirect && !!kbInfo?.video_config?.video_model_id?.trim()
+  return audioReady || framesReady || directReady
 }
 
 export function getUploadFileExt(file: File): string {

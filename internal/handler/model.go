@@ -540,8 +540,10 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		fileSize = int64(len(fileBytes))
 	}
 
+	// A video file is not an image: it goes to the Video branch untouched, so
+	// the image preparation (which decodes pixels) must not see it.
 	var image api.EmbedImage
-	if fileName != "" && model.Type != types.ModelTypeASR {
+	if fileName != "" && model.Type != types.ModelTypeASR && model.Type != types.ModelTypeVideo {
 		image, err = imageprep.Prepare(fileBytes, imageprep.Limits{})
 		if err != nil {
 			_ = c.Error(errors.NewBadRequestError(err.Error()))
@@ -705,6 +707,21 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 			return
 		}
 		result, callErr := instance.Predict(ctx, [][]byte{fileBytes}, input)
+		observations["answer_characters"] = len([]rune(result))
+		writeModelDebugResult(c, started, requestPreview, result, callErr, observations)
+	case types.ModelTypeVideo:
+		if len(fileBytes) == 0 {
+			c.Error(errors.NewBadRequestError("video file is required"))
+			return
+		}
+		instance, callErr := h.service.GetVideoModel(ctx, id)
+		if callErr != nil {
+			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
+			return
+		}
+		// The upload happens inside Predict; the prompt is what the operator
+		// typed, and an empty one asks the model to describe the video.
+		result, callErr := instance.Predict(ctx, fileBytes, fileName, input)
 		observations["answer_characters"] = len([]rune(result))
 		writeModelDebugResult(c, started, requestPreview, result, callErr, observations)
 	case types.ModelTypeASR:

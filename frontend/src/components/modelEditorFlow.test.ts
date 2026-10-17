@@ -167,7 +167,7 @@ for (const initiallyVisible of [true, false]) {
   }
 }
 
-for (const type of ['embedding', 'rerank', 'vllm', 'asr']) {
+for (const type of ['embedding', 'rerank', 'vllm', 'asr', 'video']) {
   test(`${type}: opening from its settings tab loads the matching providers and models`, async () => {
     const provider = {
       value: 'vendor', label: 'Vendor', modelTypes: [type],
@@ -200,10 +200,10 @@ test('reopening after changing the draft type refreshes the newly selected setti
   } finally { f.close() }
 })
 
-for (const type of ['chat', 'embedding', 'rerank', 'vllm', 'asr']) {
+for (const type of ['chat', 'embedding', 'rerank', 'vllm', 'asr', 'video']) {
   test(`${type}: changing type resets the whole connection form and its results`, async () => {
     const f = await fixture({ type: type === 'chat' ? 'rerank' : 'chat', providers: [{
-      value: 'vendor', modelTypes: ['chat', 'embedding', 'rerank', 'vllm', 'asr'], models: [],
+      value: 'vendor', modelTypes: ['chat', 'embedding', 'rerank', 'vllm', 'asr', 'video'], models: [],
     }] })
     try {
       Object.assign(f.vm.formData, {
@@ -329,7 +329,7 @@ test('selecting the current type, editing, or saving does not reset the draft', 
   }
 })
 
-for (const type of ['chat', 'embedding', 'rerank', 'vllm', 'asr']) {
+for (const type of ['chat', 'embedding', 'rerank', 'vllm', 'asr', 'video']) {
   test(`${type}: connection tests use unsaved form values without saving`, async () => {
     const f = await fixture({ type })
     try {
@@ -1237,7 +1237,7 @@ test('extraFieldDisplayPlaceholder resolves the vendor placeholder for the activ
   }
 })
 
-for (const type of ['chat', 'embedding', 'rerank', 'vllm', 'asr']) {
+for (const type of ['chat', 'embedding', 'rerank', 'vllm', 'asr', 'video']) {
   test(`${type}: connection tests include edited spec and clearing compat`, async () => {
     const f = await fixture({ type })
     try {

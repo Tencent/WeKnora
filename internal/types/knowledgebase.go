@@ -751,8 +751,10 @@ func (c *ASRConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// The three video parsing modes. They are cumulative: audio_only reads the
-// narration, keyframes reads the picture, and audio_and_keyframes does both.
+// The four video parsing modes. The first three are cumulative: audio_only
+// reads the narration, keyframes reads the picture, and audio_and_keyframes
+// does both. video_direct hands the whole file to a video understanding model
+// instead, which reads narration and picture together in one call.
 const (
 	// VideoParseModeAudioOnly transcribes the video's audio track. Lightest:
 	// one ASR call, no VLM, no frame storage.
@@ -763,6 +765,14 @@ const (
 	VideoParseModeKeyframes = "keyframes"
 	// VideoParseModeAudioKeyframes combines both, interleaved by time.
 	VideoParseModeAudioKeyframes = "audio_and_keyframes"
+	// VideoParseModeDirect uploads the whole video to a video understanding
+	// model and indexes its answer. One call sees narration, on-screen text,
+	// diagrams and their order, which the local frame sampler cannot; the
+	// price is a large upload and a model that must accept video input. It
+	// replaces the other two sources rather than adding to them, and it
+	// degrades to whatever the video section still has configured when the
+	// call fails.
+	VideoParseModeDirect = "video_direct"
 )
 
 const (
@@ -814,6 +824,20 @@ type VideoConfig struct {
 	// describe video frames. nil means "this section has no vision model", the
 	// same meaning as an empty VLMConfig, so old rows keep their exact JSON.
 	VLMConfig *VLMConfig `yaml:"vlm_config,omitempty" json:"vlm_config,omitempty"`
+	// VideoModelID is the video understanding model used by video_direct: a
+	// Video row that accepts the whole file and answers in text. It is its own
+	// field because it is a third model with a third role — neither the ASR
+	// model that transcribes narration nor the VLM that describes sampled
+	// frames — and picking one must not redirect the others. Empty means the
+	// direct mode has no model, and the mode then archives the video instead of
+	// borrowing a model the operator did not choose.
+	VideoModelID string `yaml:"video_model_id,omitempty" json:"video_model_id,omitempty"`
+	// DirectPrompt is extra guidance appended to the built-in prompt of the
+	// direct mode, in the same shape as the frame description instructions: the
+	// system-owned rules (language, output shape, "do not guess") still win, so
+	// a knowledge base can steer the summary without breaking what makes it
+	// indexable.
+	DirectPrompt string `yaml:"direct_prompt,omitempty" json:"direct_prompt,omitempty"`
 }
 
 // EffectiveMaxFrames returns how many frames this video may contribute,
@@ -865,6 +889,8 @@ func (c *VideoConfig) Normalize() {
 	}
 	c.ModelID = strings.TrimSpace(c.ModelID)
 	c.Language = strings.TrimSpace(c.Language)
+	c.VideoModelID = strings.TrimSpace(c.VideoModelID)
+	c.DirectPrompt = strings.TrimSpace(c.DirectPrompt)
 	// Store the effective sampling policy so the JSONB column cannot keep a
 	// value the pipeline clamps anyway: zero frames or a negative step read as
 	// "unset" on load, and an out-of-range cap is brought back into the range
@@ -874,7 +900,7 @@ func (c *VideoConfig) Normalize() {
 	switch strings.TrimSpace(c.Mode) {
 	case "", VideoParseModeAudioOnly:
 		c.Mode = VideoParseModeAudioOnly
-	case VideoParseModeKeyframes, VideoParseModeAudioKeyframes:
+	case VideoParseModeKeyframes, VideoParseModeAudioKeyframes, VideoParseModeDirect:
 		c.Mode = strings.TrimSpace(c.Mode)
 	default:
 		c.Mode = VideoParseModeAudioOnly
@@ -906,6 +932,8 @@ func (c VideoConfig) Equal(other VideoConfig) bool {
 		c.Mode == other.Mode &&
 		c.ModelID == other.ModelID &&
 		c.Language == other.Language &&
+		c.VideoModelID == other.VideoModelID &&
+		c.DirectPrompt == other.DirectPrompt &&
 		c.EffectiveMaxFrames() == other.EffectiveMaxFrames() &&
 		c.EffectiveFrameIntervalSeconds() == other.EffectiveFrameIntervalSeconds() &&
 		c.FrameVLM() == other.FrameVLM()
@@ -920,6 +948,8 @@ func (c VideoConfig) EffectiveMode() string {
 		return VideoParseModeKeyframes
 	case VideoParseModeAudioKeyframes:
 		return VideoParseModeAudioKeyframes
+	case VideoParseModeDirect:
+		return VideoParseModeDirect
 	default:
 		return VideoParseModeAudioOnly
 	}
@@ -956,11 +986,28 @@ func (c VideoConfig) AllowsKeyframeParse() bool {
 	}
 }
 
+// AllowsDirectParse reports whether the mode hands the whole video to a video
+// understanding model. The same strictness about unknown modes applies: only
+// the explicit video_direct value turns it on.
+func (c VideoConfig) AllowsDirectParse() bool {
+	if !c.Enabled {
+		return false
+	}
+	return strings.TrimSpace(c.Mode) == VideoParseModeDirect
+}
+
 // HasOwnASRModel reports whether the video section names its own ASR model.
 // There is no fallback: an empty value means the video cannot transcribe, and
 // the operator has to choose a model in the video section.
 func (c VideoConfig) HasOwnASRModel() bool {
 	return strings.TrimSpace(c.ModelID) != ""
+}
+
+// HasOwnVideoModel reports whether the video section names its own video
+// understanding model. Like the ASR and frame models it belongs to this
+// section only; no other section's model is ever borrowed for it.
+func (c VideoConfig) HasOwnVideoModel() bool {
+	return strings.TrimSpace(c.VideoModelID) != ""
 }
 
 // Value implements the driver.Valuer interface, used to convert VideoConfig to database value
@@ -992,6 +1039,10 @@ func (c *VideoConfig) Scan(value interface{}) error {
 //     vlm_config.model_id does not count: the two sections are configured
 //     independently, and an implicit fallback would hide which model actually
 //     described the frames.
+//   - the direct mode needs the video section's own video understanding model
+//     (video_config.video_model_id). Neither of the other two stands in for
+//     it: they read different things, and a missing video model has to be
+//     visible in the settings rather than turn into a silent transcription.
 //
 // The model ids are only checked for presence here: whether the id resolves to
 // an existing, correctly typed model is a database question answered by the
@@ -1006,7 +1057,10 @@ func VideoAudioParseEnabled(kb *KnowledgeBase) bool {
 	if kb.VideoConfig.AllowsAudioParse() && kb.VideoConfig.HasOwnASRModel() {
 		return true
 	}
-	return kb.VideoConfig.AllowsKeyframeParse() && kb.VideoConfig.FrameVLM().IsEnabled()
+	if kb.VideoConfig.AllowsKeyframeParse() && kb.VideoConfig.FrameVLM().IsEnabled() {
+		return true
+	}
+	return kb.VideoConfig.AllowsDirectParse() && kb.VideoConfig.HasOwnVideoModel()
 }
 
 // ExtractConfig represents the extract configuration for a knowledge base

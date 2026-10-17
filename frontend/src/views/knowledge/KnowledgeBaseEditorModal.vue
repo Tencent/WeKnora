@@ -568,6 +568,44 @@
               </div>
             </div>
 
+            <!-- 视频直读：把整段视频交给视频理解模型，一次读完画面与旁白 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesDirect" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.videoModelLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.videoModelDescription') }}</p>
+                <p v-if="!videoDirectModelConfigured" class="desc video-asr-warning">
+                  {{ $t('knowledgeEditor.video.videoModelRequired') }}
+                </p>
+                <p class="desc">{{ $t('knowledgeEditor.video.directFallbackHint') }}</p>
+              </div>
+              <div class="setting-control video-model-control">
+                <ModelSelector
+                  model-type="Video"
+                  :selected-model-id="formData.videoConfig.videoModelId"
+                  :all-models="allModels"
+                  clearable
+                  @update:selected-model-id="(val: string) => { if (formData) formData.videoConfig.videoModelId = val }"
+                  @add-model="handleAddVideoModel"
+                  :placeholder="$t('knowledgeEditor.video.videoModelPlaceholder')"
+                />
+                <p class="video-model-hint">{{ $t('knowledgeEditor.video.videoModelHint') }}</p>
+              </div>
+            </div>
+
+            <!-- 直读要求：追加到固定 prompt 之后，不能覆盖输出格式与「不许猜」 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesDirect"
+              class="setting-row setting-row-vertical">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.directPromptLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.directPromptDescription') }}</p>
+              </div>
+              <div class="setting-control setting-control-full">
+                <t-textarea v-model="formData.videoConfig.directPrompt"
+                  :placeholder="$t('knowledgeEditor.video.directPromptPlaceholder')"
+                  :maxlength="4000" :autosize="{ minRows: 3, maxRows: 8 }" />
+              </div>
+            </div>
+
             <!-- 视频专用 ASR 模型：独立配置，不沿用「音频处理」里的模型 -->
             <div v-if="formData.videoConfig.enabled && videoModeUsesAudio" class="setting-row">
               <div class="setting-info">
@@ -837,7 +875,11 @@ import KBVectorStoreSettings from './settings/KBVectorStoreSettings.vue'
 import KBAdvancedSettings from './settings/KBAdvancedSettings.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import GraphSettings from './settings/GraphSettings.vue'
-import { isVideoAudioModelConfigured, isVideoFrameModelConfigured } from './videoConfig'
+import {
+  isVideoAudioModelConfigured,
+  isVideoDirectModelConfigured,
+  isVideoFrameModelConfigured,
+} from './videoConfig'
 import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
 import KnowledgeBaseActivitySettings from './settings/KnowledgeBaseActivitySettings.vue'
@@ -991,15 +1033,16 @@ const DEFAULT_CHUNKING_PRESET = {
 const INSTANT_SECTIONS = new Set(['datasource', 'share', 'activity'])
 const isInstantSection = computed(() => INSTANT_SECTIONS.has(currentSection.value))
 
-const VIDEO_PARSE_MODES = ['audio_only', 'keyframes', 'audio_and_keyframes'] as const
+const VIDEO_PARSE_MODES = ['audio_only', 'keyframes', 'audio_and_keyframes', 'video_direct'] as const
 
 // Unknown/old modes would render as an empty dropdown; the backend coalesces
 // them to audio_only on save, so show the same value here.
 const normalizeVideoMode = (mode?: string) =>
   VIDEO_PARSE_MODES.includes(mode as (typeof VIDEO_PARSE_MODES)[number]) ? mode! : 'audio_only'
 
-// 视频解析方式。三档共用同一份 video_config：audio_only 只读旁白，
-// keyframes 只描述画面，audio_and_keyframes 两者都做并按时间合并。
+// 视频解析方式。四档共用同一份 video_config：audio_only 只读旁白，
+// keyframes 只描述画面，audio_and_keyframes 两者都做并按时间合并，
+// video_direct 把整段视频交给视频理解模型一次读完（也是唯一会消耗上传带宽的一档）。
 // 每档的说明直接写进下拉项，选之前就能比较成本与效果。
 const videoModeOptions = computed(() => [
   {
@@ -1017,26 +1060,40 @@ const videoModeOptions = computed(() => [
     label: t('knowledgeEditor.video.modeAudioKeyframes'),
     desc: t('knowledgeEditor.video.modeAudioKeyframesDesc'),
   },
+  {
+    value: 'video_direct',
+    label: t('knowledgeEditor.video.modeDirect'),
+    desc: t('knowledgeEditor.video.modeDirectDesc'),
+  },
 ])
 
-// 选中的档位决定要显示哪个模型依赖：旁白要 ASR，画面要 VLM。
-const videoModeUsesAudio = computed(() => formData.value?.videoConfig?.mode !== 'keyframes')
+// 选中的档位决定要显示哪个模型依赖：旁白要 ASR，画面要 VLM，直读要视频模型。
+const videoModeUsesAudio = computed(() => {
+  const mode = formData.value?.videoConfig?.mode
+  return mode !== 'keyframes' && mode !== 'video_direct'
+})
 const videoModeUsesFrames = computed(() => {
   const mode = formData.value?.videoConfig?.mode
   return mode === 'keyframes' || mode === 'audio_and_keyframes'
 })
+const videoModeUsesDirect = computed(() => formData.value?.videoConfig?.mode === 'video_direct')
 // 与后端同一套判定：视频转写只看视频页自己的 ASR 模型，音频页配了也不算。
 const videoAudioModelConfigured = computed(() =>
   isVideoAudioModelConfigured(formData.value?.videoConfig))
 // 与后端同一套判定：画面描述只看视频页自己的 VLM，与「图像处理」无关。
 const videoFrameModelConfigured = computed(() =>
   isVideoFrameModelConfigured(formData.value?.videoConfig))
+// 与后端同一套判定：直读只看视频页自己的视频模型，ASR / VLM 都不顶替。
+const videoDirectModelConfigured = computed(() =>
+  isVideoDirectModelConfigured(formData.value?.videoConfig))
 const selectedVideoModeDescription = computed(() => {
   switch (formData.value?.videoConfig?.mode) {
     case 'keyframes':
       return t('knowledgeEditor.video.modeKeyframesDesc')
     case 'audio_and_keyframes':
       return t('knowledgeEditor.video.modeAudioKeyframesDesc')
+    case 'video_direct':
+      return t('knowledgeEditor.video.modeDirectDesc')
     default:
       return t('knowledgeEditor.video.modeAudioOnlyDesc')
   }
@@ -1230,6 +1287,9 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       mode: 'audio_only' as string,
       modelId: '' as string,
       language: '' as string,
+      // 视频直读（video_direct）：视频模型与追加要求，都是视频页自己的设置。
+      videoModelId: '' as string,
+      directPrompt: '' as string,
       maxFrames: 12,
       frameIntervalSeconds: 0,
       vlm: {
@@ -1419,6 +1479,11 @@ const loadKBData = async (
         modelId: kb.video_config?.model_id || '',
         // Empty means auto-detection; the hint never comes from asr_config.
         language: kb.video_config?.language || '',
+        // The direct mode's own model and extra requirements. Empty means the
+        // mode has no video model, and the pipeline then archives instead of
+        // borrowing the ASR or frame model.
+        videoModelId: kb.video_config?.video_model_id || '',
+        directPrompt: kb.video_config?.direct_prompt || '',
         // Rows saved before the knobs existed decode to 0; show the effective
         // defaults instead of an empty input, and keep 0 as "auto interval".
         maxFrames: kb.video_config?.max_frames || 12,
@@ -1641,6 +1706,10 @@ const handleAddVLLMModel = () => {
 
 const handleAddASRModel = () => {
   uiStore.openSettings('models', 'asr')
+}
+
+const handleAddVideoModel = () => {
+  uiStore.openSettings('models', 'video')
 }
 
 const handleAddWikiModel = () => {
@@ -1882,6 +1951,9 @@ const buildSubmitData = () => {
     mode: formData.value.videoConfig?.mode || 'audio_only',
     model_id: formData.value.videoConfig?.modelId || '',
     language: formData.value.videoConfig?.language || '',
+    // 直读的视频模型与追加要求：留空即清空，绝不借用 ASR / VLM 的模型。
+    video_model_id: formData.value.videoConfig?.videoModelId || '',
+    direct_prompt: formData.value.videoConfig?.directPrompt || '',
     max_frames: formData.value.videoConfig?.maxFrames || 12,
     frame_interval_seconds: formData.value.videoConfig?.frameIntervalSeconds ?? 0,
     vlm_config: {

@@ -3053,7 +3053,8 @@ export default {
         query_understand_model: '问题理解模型',
         follow_up_model: '追问模型',
         extract_model: '记忆提取模型',
-        unknown: '其他模型配置'
+        unknown: '其他模型配置',
+        video_model: '视频模型',
       }
     },
     debug: {
@@ -3111,7 +3112,10 @@ export default {
         reasoningReturned: '返回推理内容',
         textChars: '转写字符数',
         segmentCount: '分段数量'
-      }
+      },
+      videoFile: '视频文件',
+      videoPrompt: '视频提示词',
+      videoPromptPlaceholder: '例如：这段视频分几步讲了什么？',
     },
     builtinModels: {
       title: '内置模型',
@@ -3145,8 +3149,8 @@ export default {
     },
     video: {
       title: '视频',
-      desc: '模型目录中标注支持视频输入的模型',
-      empty: '暂无支持视频输入的模型'
+      desc: '可直接读取整段视频并以文本作答的视频理解模型（「视频」类型）',
+      empty: '还没有视频模型'
     },
     vllm: {
       title: 'VLLM 视觉模型',
@@ -3626,7 +3630,8 @@ export default {
         rerank: '配置用于结果重排序的模型',
         vllm: '配置用于视觉理解和多模态的视觉语言模型',
         asr: '配置用于语音识别和音频转录的语音转文本模型',
-        default: '配置模型信息'
+        default: '配置模型信息',
+        video: '配置可直接读取整段视频的视频理解模型',
       }
     }
   },
@@ -4705,7 +4710,7 @@ export default {
     },
     video: {
       title: '视频处理',
-      description: '配置视频解析。开启后，可按解析方式读取存档视频的旁白、画面或两者，转成可检索的文字。',
+      description: '配置视频解析。按解析方式，视频的旁白、画面、两者，或整段视频（直读）会被转成可检索的文本。',
       label: '启用视频解析',
       desc: '开启后视频会转写成文字并参与检索；关闭时视频仅存档，可播放但搜不到。',
       modeLabel: '解析方式',
@@ -4740,6 +4745,17 @@ export default {
       customInstructionsLabel: '画面描述要求',
       customInstructionsDescription: '补充画面描述需要重点关注的内容。它会追加在内置要求之后，内置要求始终优先，因此不能覆盖「看不清就说不清楚、不要猜」这条规则。',
       customInstructionsPlaceholder: '补充需要重点识别的画面信息，例如：重点识别弹窗标题与报错文案；忽略右下角水印。',
+      modeDirect: '视频直读（完整理解）',
+      modeDirectDesc: '把整段视频上传给视频理解模型，一次读完旁白、字幕与画面。信息最完整，也是唯一需要把文件上传给厂商的一档。',
+      videoModelLabel: '视频模型',
+      videoModelDescription: '直接读取整段视频。它与 ASR、画面 VLM 相互独立：换一个不会影响另外两个。',
+      videoModelPlaceholder: '选择视频理解模型',
+      videoModelHint: '视频模型接受整段视频并以文本作答，调用前会先上传文件。',
+      videoModelRequired: '请先选择视频模型，否则直读没有可用模型，视频只会被存档。',
+      directFallbackHint: '直读失败时会退回本页已配置的语音识别与画面描述模型；两者都没配才会存档。',
+      directPromptLabel: '直读要求',
+      directPromptDescription: '追加到内置提示词之后。输出格式与「看不清就说不清楚」的规则仍然优先。',
+      directPromptPlaceholder: '例如：保留章节标题，并列出画面里出现的每一条命令。',
     },
     multimodal: {
       title: '图像处理配置',
@@ -7789,7 +7805,7 @@ export default {
     tagPlaceholder: '请选择标签',
     noTags: '暂无标签',
     videosFilteredParsingDisabled: '已跳过 {count} 个视频文件（视频解析未开启，可在知识库设置 → 视频处理里开启）',
-    videoModelNotConfigured: '视频解析已开启，但尚未配置当前方式所需的 ASR/VLM 模型；请先在知识库设置 → 视频处理中配置，否则视频上传会被拒绝',
+    videoModelNotConfigured: '视频解析已开启，但尚未配置当前方式所需的模型（ASR / 视觉 / 视频模型）；请先在知识库设置 → 视频处理中配置，否则视频上传会被拒绝',
     unsupportedTypesHint: '部分文档类型（{types}）暂无可用解析引擎，上传后将无法解析',
     goToParserSettings: '前往配置',
     importURL: '导入网页',

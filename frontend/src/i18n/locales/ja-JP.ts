@@ -781,7 +781,7 @@ export default {
     tagPlaceholder: 'タグを選択',
     noTags: 'タグなし',
     videosFilteredParsingDisabled: '{count}件の動画ファイルをスキップしました（動画解析が無効です。ナレッジベース設定 → 動画処理で有効にしてください）',
-    videoModelNotConfigured: '動画解析は有効ですが、現在の方式に必要なASR/VLMモデルが設定されていません。ナレッジベース設定 → 動画処理で設定しない限り、動画のアップロードは拒否されます',
+    videoModelNotConfigured: '動画解析は有効ですが、現在の方式に必要なモデル（ASR / 視覚 / 動画モデル）が設定されていません。ナレッジベース設定 → 動画処理で設定しない限り、動画のアップロードは拒否されます',
     unsupportedTypesHint: '一部のドキュメント形式（{types}）は利用できる解析エンジンがないため、アップロードしても解析できません',
     goToParserSettings: '設定を開く',
     importURL: 'URLからインポート',
@@ -3985,7 +3985,7 @@ export default {
     },
     video: {
       title: '動画処理',
-      description: '動画の解析を設定します。有効にすると、解析方式に応じて保存済み動画のナレーション・映像・その両方を読み取り、検索可能なテキストに変換します。',
+      description: '動画解析を設定します。解析モードに応じて、ナレーション・映像・その両方、または動画全体（直接読み取り）が検索可能なテキストになります。',
       label: '動画解析を有効化',
       desc: '有効にすると動画を文字起こしして検索対象にします。無効の場合は動画は保存のみ（再生は可能、検索は不可）になります。',
       modeLabel: '解析方式',
@@ -4020,6 +4020,17 @@ export default {
       customInstructionsLabel: '画面説明の要件',
       customInstructionsDescription: '画面説明で特に注目したい内容の追加指示。組み込みの要件の後に追加され、組み込み側が優先されるため、「判別できない場合は推測せず不明と書く」規則は上書きできません。',
       customInstructionsPlaceholder: '画面説明で特に注目したい内容を入力してください。例：ダイアログのタイトルとエラーメッセージを重点的に。右下の透かしは無視。',
+      modeDirect: '動画を直接読み取り（完全理解）',
+      modeDirectDesc: '動画全体を動画理解モデルにアップロードし、ナレーション・画面内の文字・映像を一度に読み取ります。最も情報量が多い代わりに、ファイルをベンダーへ送る唯一のモードです。',
+      videoModelLabel: '動画モデル',
+      videoModelDescription: '動画全体を読み取ります。ASR やフレーム VLM とは独立しており、切り替えても他方に影響しません。',
+      videoModelPlaceholder: '動画理解モデルを選択',
+      videoModelHint: '動画モデルは動画ファイルをそのまま受け取り、テキストで回答します。呼び出し前にファイルをアップロードします。',
+      videoModelRequired: '先に動画モデルを選択してください。未選択の場合、直接読み取りは実行できず動画はアーカイブされます。',
+      directFallbackHint: '直接読み取りに失敗した場合は、このページで設定済みの音声認識・フレーム記述モデルに戻ります。どちらも未設定のときのみアーカイブされます。',
+      directPromptLabel: '直接読み取りの要件',
+      directPromptDescription: '組み込みプロンプトの後ろに追加されます。出力形式と「推測せず、分からないと書く」ルールが優先されます。',
+      directPromptPlaceholder: '例：章タイトルを残し、画面に出てくるコマンドをすべて列挙してください。',
     },
     advanced: {
       title: '詳細設定',
@@ -5175,7 +5186,8 @@ export default {
           rerank: '検索結果のリランクに使うモデルを設定します',
           vllm: 'マルチモーダル理解に使う視覚言語モデルを設定します',
           asr: '音声の文字起こしに使う音声認識モデルを設定します',
-          default: 'モデル情報を設定します'
+          default: 'モデル情報を設定します',
+          video: '動画全体を読み取る動画理解モデルを設定します',
         },
         modelNamePlaceholder: {
           local: '例: llama2:latest',
@@ -5572,8 +5584,8 @@ export default {
       },
       video: {
         title: '動画',
-        desc: 'モデルカタログ上で動画入力をサポートするモデル',
-        empty: '動画入力対応モデルがありません'
+        desc: '動画全体を読み取りテキストで回答する動画理解モデル（「動画」タイプ）',
+        empty: '動画モデルはまだありません'
       },
       toasts: {
         nameRequired: 'モデル名を入力してください',
@@ -5624,7 +5636,8 @@ export default {
           query_understand_model: 'クエリ理解モデル',
           follow_up_model: 'フォローアップモデル',
           extract_model: 'メモリ抽出モデル',
-          unknown: 'その他のモデル設定'
+          unknown: 'その他のモデル設定',
+          video_model: '動画モデル',
         }
       },
       debug: {
@@ -5682,9 +5695,12 @@ export default {
           reasoningReturned: '推論内容の返却',
           textChars: '文字起こし文字数',
           segmentCount: 'セグメント数'
-        }
-      }
-    },
+      },
+      videoFile: '動画ファイル',
+      videoPrompt: '動画プロンプト',
+      videoPromptPlaceholder: '例：この動画は何をどの順番で説明していますか？',
+    }
+  },
     ollamaSettings: {
       title: 'Ollama設定',
       description: 'ローカルのOllamaサービスを管理し、モデルの確認やダウンロードを行います',

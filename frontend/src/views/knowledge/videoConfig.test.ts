@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   isVideoAudioModelConfigured,
+  isVideoDirectModelConfigured,
   isVideoFrameModelConfigured,
 } from './videoConfig';
 
@@ -45,4 +46,25 @@ test('画面 VLM 为空就是没配，不回退到「图像处理」', () => {
   assert.equal(isVideoFrameModelConfigured({}), false);
   assert.equal(isVideoFrameModelConfigured(null), false);
   assert.equal(isVideoFrameModelConfigured(undefined), false);
+});
+
+test('视频直读只看视频页自己的 videoModelId', () => {
+  assert.equal(isVideoDirectModelConfigured({ videoModelId: 'video-1' }), true);
+  assert.equal(isVideoDirectModelConfigured({ videoModelId: '  video-1  ' }), true);
+});
+
+test('直读没配视频模型就是没配，不回退到 ASR / VLM', () => {
+  // 切到 video_direct 时旧档位的 modelId / vlm 可能还留着；它们只用于失败后的
+  // 降级，不能让「已配置」变成 true，否则页面会以为直读可用。
+  const switched = {
+    videoModelId: '',
+    modelId: 'asr-video',
+    vlm: { modelId: 'vlm-video' },
+  };
+  assert.equal(isVideoDirectModelConfigured(switched), false);
+
+  assert.equal(isVideoDirectModelConfigured({ videoModelId: '   ' }), false);
+  assert.equal(isVideoDirectModelConfigured({}), false);
+  assert.equal(isVideoDirectModelConfigured(null), false);
+  assert.equal(isVideoDirectModelConfigured(undefined), false);
 });

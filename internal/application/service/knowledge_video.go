@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
+	"github.com/Tencent/WeKnora/internal/models/video"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -45,6 +46,10 @@ const (
 	// videoProbeStderrBytes bounds the stderr kept from the duration probe.
 	// The Duration line sits at the head of the output.
 	videoProbeStderrBytes = 8 << 10
+	// maxVideoDirectBytes caps the video the direct mode reads into memory. It
+	// matches the vendor's per-file ceiling; a larger video degrades rather
+	// than tying up the worker's memory for one import.
+	maxVideoDirectBytes = 1 << 30
 )
 
 // videoAudioExtractor turns the bytes of a stored video into an audio track the
@@ -479,25 +484,41 @@ func (s *knowledgeService) frameExtractor() videoFrameExtractor {
 // fallback would hide which model the video actually uses. The frame source
 // exists when the mode reads the picture and the video section names its own
 // VLM model; the image section's vlm_config does not count, for the same
-// reason. The model ids are only checked for presence here; resolving and
-// type-checking them happens in the worker, where a failure degrades the video
-// instead of rejecting the import.
-func videoParseCapabilities(kb *types.KnowledgeBase) (audio, frames bool) {
+// reason. The direct source exists when the mode hands the whole file to a
+// video understanding model the video section names. The model ids are only
+// checked for presence here; resolving and type-checking them happens in the
+// worker, where a failure degrades the video instead of rejecting the import.
+func videoParseCapabilities(kb *types.KnowledgeBase) (audio, frames, direct bool) {
 	if kb == nil {
-		return false, false
+		return false, false, false
 	}
 	audio = kb.VideoConfig.AllowsAudioParse() && kb.VideoConfig.HasOwnASRModel()
 	frames = kb.VideoConfig.AllowsKeyframeParse() && kb.VideoConfig.FrameVLM().IsEnabled()
+	direct = kb.VideoConfig.AllowsDirectParse() && kb.VideoConfig.HasOwnVideoModel()
+	return audio, frames, direct
+}
+
+// videoDirectFallbackSources reports what a failed video_direct parse may fall
+// back to: the narration and frame models the video section still has
+// configured. The mode selects the direct read, not these sources, so this is
+// deliberately not part of videoParseCapabilities — the import gate must keep
+// asking for a video model, and only a failed call may spend the others.
+func videoDirectFallbackSources(kb *types.KnowledgeBase) (audio, frames bool) {
+	if kb == nil || !kb.VideoConfig.AllowsDirectParse() {
+		return false, false
+	}
+	audio = kb.VideoConfig.HasOwnASRModel()
+	frames = kb.VideoConfig.FrameVLM().IsEnabled()
 	return audio, frames
 }
 
 // videoParseReady reports whether this import can turn a video into text: at
-// least one source selected by the mode has a model. Both models belong to the
+// least one source selected by the mode has a model. Every model belongs to the
 // video section, so the knowledge base alone decides; a per-upload image
 // override cannot make a video parseable.
 func videoParseReady(kb *types.KnowledgeBase) bool {
-	audio, frames := videoParseCapabilities(kb)
-	return audio || frames
+	audio, frames, direct := videoParseCapabilities(kb)
+	return audio || frames || direct
 }
 
 // videoParseRequirementMessage explains, for the import gate, which model the
@@ -509,6 +530,7 @@ func videoParseRequirementMessage(kb *types.KnowledgeBase) string {
 	}
 	audio := kb.VideoConfig.AllowsAudioParse()
 	frames := kb.VideoConfig.AllowsKeyframeParse()
+	direct := kb.VideoConfig.AllowsDirectParse()
 	switch {
 	case audio && frames:
 		return "上传视频文件需要先配置视频 ASR 语音识别模型或 VLM 视觉模型"
@@ -516,6 +538,8 @@ func videoParseRequirementMessage(kb *types.KnowledgeBase) string {
 		return "上传视频文件需要先配置VLM视觉模型"
 	case audio:
 		return "上传视频文件需要先配置视频 ASR 语音识别模型"
+	case direct:
+		return "上传视频文件需要先配置视频理解模型"
 	default:
 		return "上传视频文件需要先启用视频解析"
 	}
@@ -574,6 +598,113 @@ func (s *knowledgeService) resolveVideoASRConfig(
 	}, nil
 }
 
+var errVideoDirectNotConfigured = errors.New("no video model is configured for video parsing")
+
+// resolveVideoDirectModel returns the video understanding client the direct
+// mode must use. It is the single place that model is chosen, mirroring
+// resolveVideoASRConfig: only video_config.video_model_id is consulted, and an
+// empty value is an error rather than a fallback to the frame VLM. A configured
+// model is validated here — it must exist and be a Video row — so a stale or
+// wrong-typed id degrades the video instead of failing the import.
+func (s *knowledgeService) resolveVideoDirectModel(
+	ctx context.Context, kb *types.KnowledgeBase,
+) (video.Video, error) {
+	if kb == nil {
+		return nil, errors.New("video parsing has no knowledge base")
+	}
+	modelID := strings.TrimSpace(kb.VideoConfig.VideoModelID)
+	if modelID == "" {
+		return nil, errVideoDirectNotConfigured
+	}
+	if s.modelService == nil {
+		return nil, errors.New("model service is not available")
+	}
+	model, err := s.modelService.GetModelByID(ctx, modelID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve video model %q: %w", modelID, err)
+	}
+	if model == nil {
+		return nil, fmt.Errorf("video model %q does not exist", modelID)
+	}
+	if model.Type != types.ModelTypeVideo {
+		return nil, fmt.Errorf(
+			"video model %q is a %s model, not a video model", modelID, model.Type)
+	}
+	client, err := s.modelService.GetVideoModel(ctx, modelID)
+	if err != nil {
+		return nil, fmt.Errorf("build video model %q: %w", modelID, err)
+	}
+	return client, nil
+}
+
+// readVideoDirect reads the stored video into memory and hands it to the video
+// model. The bytes are capped at the vendor's per-file ceiling: a larger video
+// degrades to the archive (or to the narration and frames) instead of
+// exhausting the worker.
+func (s *knowledgeService) readVideoDirect(
+	ctx context.Context, kb *types.KnowledgeBase, payload types.DocumentProcessPayload,
+) (string, error) {
+	client, err := s.resolveVideoDirectModel(ctx, kb)
+	if err != nil {
+		return "", err
+	}
+	var data []byte
+	if err := s.withStoredVideo(ctx, kb, payload.FilePath, func(src io.Reader) error {
+		body, readErr := io.ReadAll(io.LimitReader(src, maxVideoDirectBytes+1))
+		if readErr != nil {
+			return fmt.Errorf("read stored video: %w", readErr)
+		}
+		if len(body) == 0 {
+			return errors.New("stored video is empty")
+		}
+		if len(body) > maxVideoDirectBytes {
+			return fmt.Errorf("video exceeds the %d byte upload ceiling", maxVideoDirectBytes)
+		}
+		data = body
+		return nil
+	}); err != nil {
+		return "", err
+	}
+
+	logger.Infof(ctx, "[video] Sending %s (%d bytes) to the direct video model %s",
+		payload.FileName, len(data), client.GetModelName())
+	text, err := client.Predict(ctx, data, payload.FileName, buildVideoDirectPrompt(ctx, kb.VideoConfig))
+	if err != nil {
+		return "", err
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", errors.New("the video model returned an empty description")
+	}
+	return text, nil
+}
+
+// buildVideoDirectPrompt is the system-owned prompt of the direct mode. It asks
+// for the three things a training video actually carries — what it teaches,
+// what appears on screen in order, and what is only said out loud — and forbids
+// guessing, because a hallucinated step becomes a retrievable chunk. The
+// knowledge base's own requirements are appended afterwards with
+// types.AppendCustomPromptInstructions, which keeps the output shape and the
+// "say so instead of guessing" rule in force.
+func buildVideoDirectPrompt(ctx context.Context, cfg types.VideoConfig) string {
+	language := types.LanguageNameFromContext(ctx)
+	if language == "" {
+		language = "English"
+	}
+	prompt := fmt.Sprintf(`You are given a complete training video to read, so a text-only reader can follow it
+without watching.
+Describe the video in the order it happens:
+1. What the video teaches and who it is for, in one or two sentences.
+2. The steps it demonstrates: the screens, menus, dialogs, buttons, terminals and slides that
+   appear, in order, with the visible labels.
+3. Warnings, caveats or conclusions that are spoken but not visible on screen.
+Only report what the video actually shows or says. If a part is inaudible or unreadable, say so
+instead of guessing.
+Answer in %s. Write short paragraphs grouped by step, in plain markdown with no code fences
+and no more than one heading per group.`, language)
+	return types.AppendCustomPromptInstructions(prompt, cfg.DirectPrompt, "video_direct")
+}
+
 // withStoredVideo opens a fresh reader on the stored video for one extraction.
 // Audio and frames need two passes, and re-opening is cheaper than holding a
 // whole video in memory.
@@ -595,15 +726,20 @@ func (s *knowledgeService) withStoredVideo(
 // When the mode also asks for the picture, frames are sampled and captioned by
 // the video section's own VLM; the ASR step interleaves both by time.
 //
+// The direct mode replaces both of those: the whole file goes to a video
+// understanding model in one call, which reads narration and picture together.
+//
 // Returning (nil, nil) means "handled": the video could not be read and the row
 // has been settled back into an archive. Failing the import instead would turn
 // every codec problem into a red sync item, when the file itself is still worth
-// keeping exactly as it was before video parsing existed. The two sources
-// degrade independently: a failed audio track still leaves the frame captions,
-// and a failed frame pass still leaves the narration.
+// keeping exactly as it was before video parsing existed. The sources degrade
+// independently: a failed audio track still leaves the frame captions, and a
+// failed frame pass still leaves the narration. A failed direct read falls back
+// to whichever of those two the video section still has configured, and only
+// archives when neither produced anything.
 //
 // The docreader stage was opened by the caller (convert); this method closes it
-// as skipped when both sources degrade, so the timeline does not claim a parse
+// as skipped when every source degrades, so the timeline does not claim a parse
 // that never happened.
 func (s *knowledgeService) convertVideo(
 	ctx context.Context,
@@ -611,7 +747,7 @@ func (s *knowledgeService) convertVideo(
 	kb *types.KnowledgeBase,
 	knowledge *types.Knowledge,
 ) (*types.ReadResult, error) {
-	wantAudio, wantFrames := videoParseCapabilities(kb)
+	wantAudio, wantFrames, wantDirect := videoParseCapabilities(kb)
 	if kb.VideoConfig.AllowsKeyframeParse() && !wantFrames {
 		// The mode asks for the picture but the video section names no VLM.
 		// The skip is deliberate and never borrows the image section's model,
@@ -621,12 +757,49 @@ func (s *knowledgeService) convertVideo(
 			"[video] Skipping frame descriptions for %s: the video section has no VLM model configured",
 			payload.FileName)
 	}
-	if !wantAudio && !wantFrames {
+	if kb.VideoConfig.AllowsDirectParse() && !wantDirect {
+		logger.Warnf(ctx,
+			"[video] Skipping the direct read for %s: the video section has no video model configured",
+			payload.FileName)
+	}
+	if !wantAudio && !wantFrames && !wantDirect {
 		// The worker gate already rejects this; keep the branch total so a
 		// stale task cannot panic or index an empty result.
 		s.skipStage(ctx, knowledge.ID, types.StageDocReader, "video_unavailable")
 		return s.settleVideoAsArchive(ctx, knowledge,
 			"video parsing is disabled or no model is configured for its mode")
+	}
+
+	var directErr error
+	if wantDirect {
+		text, readErr := s.readVideoDirect(ctx, kb, payload)
+		if readErr == nil {
+			s.endStage(ctx, knowledge.ID, types.StageDocReader, types.JSONMap{
+				"mode":         kb.VideoConfig.EffectiveMode(),
+				"direct_chars": len([]rune(text)),
+				"frame_count":  0,
+				"audio_bytes":  0,
+			})
+			return &types.ReadResult{
+				MarkdownContent: text,
+				Metadata:        map[string]string{},
+			}, nil
+		}
+		directErr = readErr
+		logger.Warnf(ctx, "[video] Direct read unavailable for %s: %v", payload.FileName, readErr)
+		// The direct read is the whole parse when it works; when it fails, the
+		// narration and frame models the operator already configured are the
+		// fallback. They are read only here, never on the happy path, so a
+		// successful direct parse costs exactly one model call.
+		wantAudio, wantFrames = videoDirectFallbackSources(kb)
+		if !wantAudio && !wantFrames {
+			s.skipStage(ctx, knowledge.ID, types.StageDocReader, "video_unavailable")
+			return s.settleVideoAsArchive(ctx, knowledge,
+				"video direct read: "+directErr.Error())
+		}
+		logger.Warnf(ctx,
+			"[video] Falling back to narration/frame parsing for knowledge %s: %v",
+			knowledge.ID, directErr)
 	}
 
 	var audio []byte
@@ -657,14 +830,20 @@ func (s *knowledgeService) convertVideo(
 	audioReady := len(audio) > 0
 	if !audioReady && len(frames) == 0 {
 		s.skipStage(ctx, knowledge.ID, types.StageDocReader, "video_unavailable")
-		return s.settleVideoAsArchive(ctx, knowledge,
-			videoDegradeReason(audioErr, framesErr))
+		reason := videoDegradeReason(audioErr, framesErr)
+		if directErr != nil {
+			reason = "video direct read: " + directErr.Error() + "; " + reason
+		}
+		return s.settleVideoAsArchive(ctx, knowledge, reason)
 	}
 
 	stageOutput := types.JSONMap{
 		"mode":        kb.VideoConfig.EffectiveMode(),
 		"audio_bytes": len(audio),
 		"frame_count": len(frames),
+	}
+	if directErr != nil {
+		stageOutput["direct_error"] = directErr.Error()
 	}
 	if audioErr != nil {
 		stageOutput["audio_error"] = audioErr.Error()

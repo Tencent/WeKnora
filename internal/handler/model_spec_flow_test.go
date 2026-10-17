@@ -52,6 +52,7 @@ func TestConnectionTestModelCarriesSpecForEveryCapability(t *testing.T) {
 		types.ModelTypeRerank,
 		types.ModelTypeASR,
 		types.ModelTypeVLLM,
+		types.ModelTypeVideo,
 	} {
 		row := (&InitializationHandler{}).buildTestModel(
 			&ModelTestRequest{

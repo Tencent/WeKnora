@@ -3051,7 +3051,8 @@ export default {
         query_understand_model: '질의 이해 모델',
         follow_up_model: '후속 질문 모델',
         extract_model: '메모리 추출 모델',
-        unknown: '기타 모델 설정'
+        unknown: '기타 모델 설정',
+        video_model: '동영상 모델',
       }
     },
     debug: {
@@ -3109,7 +3110,10 @@ export default {
         reasoningReturned: '추론 내용 반환',
         textChars: '전사 문자 수',
         segmentCount: '세그먼트 수'
-      }
+      },
+      videoFile: '동영상 파일',
+      videoPrompt: '동영상 프롬프트',
+      videoPromptPlaceholder: '예: 이 동영상이 무엇을 어떤 순서로 설명하나요?',
     },
     builtinModels: {
       title: '기본 제공 모델',
@@ -3142,9 +3146,9 @@ export default {
       empty: 'ASR 음성 모델 없음'
     },
     video: {
-      title: '비디오',
-      desc: '모델 카탈로그에서 비디오 입력을 지원하는 모델',
-      empty: '비디오 입력 지원 모델이 없습니다'
+      title: '동영상',
+      desc: '동영상 전체를 읽고 텍스트로 답하는 동영상 이해 모델(「동영상」 유형)',
+      empty: '아직 동영상 모델이 없습니다'
     },
     vllm: {
       title: 'VLLM 비전 모델',
@@ -3624,7 +3628,8 @@ export default {
         rerank: '결과 재정렬용 모델 설정',
         vllm: '시각 이해 및 멀티모달용 비전 언어 모델 설정',
         asr: '음성 인식 및 오디오 전사를 위한 음성 인식 모델 설정',
-        default: '모델 정보 설정'
+        default: '모델 정보 설정',
+        video: '동영상 전체를 읽는 동영상 이해 모델을 설정합니다',
       }
     }
   },
@@ -4704,7 +4709,7 @@ export default {
     },
     video: {
       title: '비디오 처리',
-      description: '비디오 파싱을 설정합니다. 활성화하면 파싱 방식에 따라 저장된 비디오의 나레이션, 화면 또는 둘 다를 읽어 검색 가능한 텍스트로 변환합니다.',
+      description: '동영상 파싱을 설정합니다. 파싱 모드에 따라 내레이션, 화면, 둘 다, 또는 동영상 전체(직접 읽기)가 검색 가능한 텍스트로 변환됩니다.',
       label: '비디오 파싱 활성화',
       desc: '활성화하면 비디오를 텍스트로 변환해 검색에 사용합니다. 비활성화하면 비디오는 보관만 되며 재생은 가능하지만 검색되지 않습니다.',
       modeLabel: '파싱 방식',
@@ -4739,6 +4744,17 @@ export default {
       customInstructionsLabel: '화면 설명 요구 사항',
       customInstructionsDescription: '화면 설명에서 특히 주의할 내용을 추가로 지정합니다. 기본 요구 사항 뒤에 추가되며 기본 요구 사항이 우선하므로 「판별할 수 없으면 추측하지 말고 불명이라고 쓰기」 규칙은 덮어쓸 수 없습니다.',
       customInstructionsPlaceholder: '화면 설명에서 특히 주의할 내용을 입력하세요. 예: 대화상자 제목과 오류 메시지에 집중, 모서리 워터마크는 무시.',
+      modeDirect: '동영상 직접 읽기(전체 이해)',
+      modeDirectDesc: '동영상 전체를 동영상 이해 모델에 업로드해 내레이션, 화면 속 텍스트, 영상을 한 번에 읽습니다. 가장 정보가 많지만 파일을 공급자에게 보내는 유일한 모드입니다.',
+      videoModelLabel: '동영상 모델',
+      videoModelDescription: '동영상 전체를 읽습니다. ASR 및 프레임 VLM과 독립적이며, 하나를 바꿔도 나머지는 그대로입니다.',
+      videoModelPlaceholder: '동영상 이해 모델 선택',
+      videoModelHint: '동영상 모델은 동영상 파일을 그대로 받아 텍스트로 답합니다. 호출 전에 파일을 업로드합니다.',
+      videoModelRequired: '먼저 동영상 모델을 선택하세요. 없으면 직접 읽기를 실행할 수 없으며 동영상은 보관 상태로 남습니다.',
+      directFallbackHint: '직접 읽기가 실패하면 이 페이지에 설정된 음성 인식·프레임 설명 모델로 대체합니다. 둘 다 없을 때만 보관됩니다.',
+      directPromptLabel: '직접 읽기 요구 사항',
+      directPromptDescription: '내장 프롬프트 뒤에 추가됩니다. 출력 형식과 "추측하지 말고 읽을 수 없다고 쓰기" 규칙이 우선합니다.',
+      directPromptPlaceholder: '예: 장 제목을 유지하고 화면에 나오는 모든 명령을 나열하세요.',
     },
     multimodal: {
       title: '이미지 처리 설정',
@@ -7788,7 +7804,7 @@ export default {
     tagPlaceholder: '태그를 선택하세요',
     noTags: '태그 없음',
     videosFilteredParsingDisabled: '{count}개의 동영상 파일을 건너뛰었습니다 (동영상 파싱이 꺼져 있습니다. 지식 베이스 설정 → 동영상 처리에서 켜세요)',
-    videoModelNotConfigured: '동영상 파싱이 켜져 있지만 현재 방식에 필요한 ASR/VLM 모델이 구성되지 않았습니다. 지식 베이스 설정 → 동영상 처리에서 구성하지 않으면 동영상 업로드가 거부됩니다',
+    videoModelNotConfigured: '동영상 파싱이 켜져 있지만 현재 방식에 필요한 모델(ASR / 비전 / 동영상 모델)이 설정되어 있지 않습니다. 지식베이스 설정 → 동영상 처리에서 설정하지 않으면 동영상 업로드가 거부됩니다',
     unsupportedTypesHint: '일부 문서 유형({types})에 사용 가능한 파서 엔진이 없어 처리할 수 없습니다',
     goToParserSettings: '설정으로 이동',
     importURL: '웹페이지 가져오기',

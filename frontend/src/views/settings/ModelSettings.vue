@@ -84,7 +84,7 @@
           <t-empty :description="$t('common.noResult')" />
           <t-button variant="outline" @click="modelQuery = ''">{{ $t('common.clear') }}</t-button>
         </div>
-        <div v-else-if="!loading && filteredModels.length === 0 && (!authStore.hasRole('admin') || activeTypeFilter === VIDEO_FILTER)" class="empty-state">
+        <div v-else-if="!loading && filteredModels.length === 0 && (!authStore.hasRole('admin') || activeTypeFilter === 'video')" class="empty-state">
           <t-empty :description="emptyHint" />
         </div>
         <div v-else-if="!loading" class="model-grid">
@@ -148,7 +148,7 @@
                   <span class="model-card__sep">·</span>
                   <span>{{ $t('model.editor.dimensionLabel') }} {{ model.dimension }}</span>
                 </template>
-                <template v-if="model._modelType === 'chat' || model._modelType === 'vllm'">
+                <template v-if="model._modelType === 'chat' || model._modelType === 'vllm' || model._modelType === 'video'">
                   <span class="model-card__sep">·</span>
                   <span
                     class="model-card__ctx"
@@ -349,7 +349,10 @@ import {
   isDefaultContextWindow,
   effectiveContextWindow,
 } from '@/utils/contextWindow'
-import { countVideoCapable, supportsVideoInput } from './modelVideoTab'
+import {
+  MODEL_SETTINGS_TAB_TYPES,
+  countModelsOfType,
+} from './modelVideoTab'
 
 const { t, locale } = useI18n()
 const authStore = useAuthStore()
@@ -359,11 +362,8 @@ const providersStore = useModelProvidersStore()
 const router = useRouter()
 const route = useRoute()
 const assistant = useAssistantStore()
-type ModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
-// 「视频」是跨类型的父级分类：它按模型目录声明的输入模态筛选，本身不是一个
-// 可以新建的模型类型。类型筛选与它互斥。
-type FilterType = 'all' | ModelType | 'video'
-const VIDEO_FILTER: FilterType = 'video'
+type ModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'video'
+type FilterType = 'all' | ModelType
 
 const showDialog = ref(false)
 const showDebugDrawer = ref(false)
@@ -377,7 +377,9 @@ const loading = ref(true)
 const activeTypeFilter = ref<FilterType>('all')
 const modelQuery = ref('')
 
-const MODEL_TAB_TYPES: ModelType[] = ['chat', 'embedding', 'rerank', 'vllm', 'asr']
+// The tab list lives in ./modelVideoTab so 「视频」 is one type among the rest,
+// not a separate entry bolted onto the end.
+const MODEL_TAB_TYPES: ModelType[] = [...MODEL_SETTINGS_TAB_TYPES]
 const KNOWLEDGE_BASE_EDITOR_HOST_ROUTES = new Set([
   'home',
   'knowledgeBaseList',
@@ -389,10 +391,8 @@ const KNOWLEDGE_BASE_EDITOR_HOST_ROUTES = new Set([
 watch(
   () => uiStore.settingsInitialSubSection,
   (sub) => {
-    // 'video' is a valid landing tab too: it is a filter, not a model type, so
-    // it is checked separately from MODEL_TAB_TYPES.
-    if (sub && (MODEL_TAB_TYPES.includes(sub as ModelType) || sub === VIDEO_FILTER)) {
-      activeTypeFilter.value = sub as FilterType
+    if (sub && MODEL_TAB_TYPES.includes(sub as ModelType)) {
+      activeTypeFilter.value = sub as ModelType
     }
   },
   { immediate: true },
@@ -408,7 +408,8 @@ const backendTypeToModelType: Record<string, ModelType> = {
   Embedding: 'embedding',
   Rerank: 'rerank',
   VLLM: 'vllm',
-  ASR: 'asr'
+  ASR: 'asr',
+  Video: 'video'
 }
 
 // 将后端模型格式转换为旧的前端格式（附带 _modelType 便于渲染）
@@ -453,27 +454,19 @@ function convertToLegacyFormat(model: ModelConfig) {
 // 平铺 + 过滤
 const allLegacyModels = computed(() => allModels.value.map(convertToLegacyFormat))
 const filteredModels = computed(() => allLegacyModels.value.filter(model =>
-  (activeTypeFilter.value === 'all'
-    || (activeTypeFilter.value === VIDEO_FILTER
-      ? supportsVideoInput(model)
-      : model._modelType === activeTypeFilter.value))
+  (activeTypeFilter.value === 'all' || model._modelType === activeTypeFilter.value)
   && matchesResourceQuery({ name: modelDisplayName(model), description: vendorLabel(model) }, modelQuery.value),
 ))
 
-// 「视频」tab 与类型 tab 并列，但计数口径不同：它按模型目录声明的输入模态
-// （capabilities.input）统计，因此会横跨 chat / vllm / embedding 等类型。
+// 「视频」是真正的模型类型 tab：视频模型是一行独立配置（Video），有自己的协议
+// 与凭证，不是「capabilities.input 含 video 的对话模型」这一筛选视图。筛选视图
+// 永远列不全也删不掉模型，而模型管理页必须以类型为准。
 const modelTypeTabs = computed(() => [
   { value: 'all', label: t('common.all'), icon: 'view-module', count: allLegacyModels.value.length },
   ...MODEL_TAB_TYPES.map(value => ({ value, label: typeLabel(value), icon: typeIcon(value), count: countByType(value) })),
-  {
-    value: VIDEO_FILTER,
-    label: t('modelSettings.typeShort.video'),
-    icon: 'play-circle',
-    count: countVideoCapable(allLegacyModels.value),
-  },
 ])
 
-const countByType = (type: ModelType) => allLegacyModels.value.filter(m => m._modelType === type).length
+const countByType = (type: ModelType) => countModelsOfType(allLegacyModels.value, type)
 
 // 类型徽章图标。沿用 TDesign 自带 icon name，避免再引第三方图标包。
 const typeIcon = (type: ModelType): string => {
@@ -483,6 +476,7 @@ const typeIcon = (type: ModelType): string => {
     rerank: 'filter-sort',
     vllm: 'image',
     asr: 'sound',
+    video: 'video',
   }
   return map[type]
 }
@@ -493,14 +487,15 @@ const typeLabel = (type: ModelType) => {
     embedding: t('modelSettings.typeShort.embedding'),
     rerank: t('modelSettings.typeShort.rerank'),
     vllm: t('modelSettings.typeShort.vllm'),
-    asr: t('modelSettings.typeShort.asr')
+    asr: t('modelSettings.typeShort.asr'),
+    video: t('modelSettings.typeShort.video'),
   }
   return map[type]
 }
 
 const sourceLabel = (type: ModelType) => {
-  // vllm / asr 的 remote 文案特殊，其余走通用 remote 文案
-  if (type === 'vllm' || type === 'asr') {
+  // vllm / asr / video 的 remote 文案特殊，其余走通用 remote 文案
+  if (type === 'vllm' || type === 'asr' || type === 'video') {
     return t('modelSettings.source.openaiCompatible')
   }
   return t('modelSettings.source.remote')
@@ -562,15 +557,13 @@ const contextWindowTitle = (tokens?: number) => {
 
 const emptyHint = computed(() => {
   if (activeTypeFilter.value === 'all') return t('modelSettings.chat.empty')
-  // The video tab is not a model type: an empty list means no model's catalog
-  // entry declares video input, not that this type has no models.
-  if (activeTypeFilter.value === VIDEO_FILTER) return t('modelSettings.video.empty')
   const map: Record<ModelType, string> = {
     chat: t('modelSettings.chat.empty'),
     embedding: t('modelSettings.embedding.empty'),
     rerank: t('modelSettings.rerank.empty'),
     vllm: t('modelSettings.vllm.empty'),
-    asr: t('modelSettings.asr.empty')
+    asr: t('modelSettings.asr.empty'),
+    video: t('modelSettings.video.empty'),
   }
   return map[activeTypeFilter.value as ModelType]
 })
@@ -595,12 +588,9 @@ const loadModels = async () => {
 }
 
 // 打开添加对话框；类型在抽屉内选择，此处仅按当前 Tab 预填默认值。
-// 「视频」是输入模态分类而非模型类型，没有可预填的类型，退回对话模型。
 const openAddDialog = () => {
   const filter = activeTypeFilter.value
-  currentModelType.value = filter === 'all' || filter === VIDEO_FILTER
-    ? 'chat'
-    : filter
+  currentModelType.value = filter === 'all' ? 'chat' : filter
   editingModel.value = null
   showDialog.value = true
 }
@@ -938,13 +928,14 @@ const copyModel = async (_type: ModelType, modelId: string) => {
 }
 
 // 获取后端模型类型
-function getModelType(type: ModelType): 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR' {
+function getModelType(type: ModelType): 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR' | 'Video' {
   const typeMap = {
     chat: 'KnowledgeQA' as const,
     embedding: 'Embedding' as const,
     rerank: 'Rerank' as const,
     vllm: 'VLLM' as const,
-    asr: 'ASR' as const
+    asr: 'ASR' as const,
+    video: 'Video' as const,
   }
   return typeMap[type]
 }
@@ -1268,7 +1259,7 @@ useAssistantDataChange(() => { void loadModels() }, { areas: ['model'] })
   .provider-card-badge-color(#0052d9);
 }
 
-// 5 种类型的徽章配色 —— 比原 tag 配色饱和度低一档，避免炫光
+// 6 种类型的徽章配色 —— 比原 tag 配色饱和度低一档，避免炫光
 .model-card--chat .model-card__badge {
   .provider-card-badge-color(#0052d9);
 }
@@ -1287,6 +1278,10 @@ useAssistantDataChange(() => { void loadModels() }, { areas: ['model'] })
 
 .model-card--asr .model-card__badge {
   .provider-card-badge-color(#118053);
+}
+
+.model-card--video .model-card__badge {
+  .provider-card-badge-color(#0f7f96);
 }
 
 .model-card__body {

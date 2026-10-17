@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
+	"github.com/Tencent/WeKnora/internal/models/video"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -125,13 +126,16 @@ func (a *videoTestASR) GetModelID() string   { return a.modelID }
 // performs have to be implemented.
 type videoTestModelService struct {
 	interfaces.ModelService
-	models        map[string]*types.Model
-	vlmModel      vlm.VLM
-	vlmErr        error
-	asrModel      asr.ASR
-	asrErr        error
-	gotASRModelID string
-	gotVLMModelID string
+	models          map[string]*types.Model
+	vlmModel        vlm.VLM
+	vlmErr          error
+	asrModel        asr.ASR
+	asrErr          error
+	videoModel      video.Video
+	videoErr        error
+	gotASRModelID   string
+	gotVLMModelID   string
+	gotVideoModelID string
 }
 
 func (s *videoTestModelService) GetModelByID(ctx context.Context, id string) (*types.Model, error) {
@@ -152,6 +156,14 @@ func (s *videoTestModelService) GetASRModel(ctx context.Context, id string) (asr
 		return nil, s.asrErr
 	}
 	return s.asrModel, nil
+}
+
+func (s *videoTestModelService) GetVideoModel(ctx context.Context, id string) (video.Video, error) {
+	s.gotVideoModelID = id
+	if s.videoErr != nil {
+		return nil, s.videoErr
+	}
+	return s.videoModel, nil
 }
 
 type videoTestFileService struct {
@@ -632,18 +644,20 @@ func TestVideoParseCapabilitiesReadTheVideoSectionOnly(t *testing.T) {
 		VideoConfig: types.VideoConfig{Enabled: true, Mode: types.VideoParseModeAudioOnly},
 		ASRConfig:   types.ASRConfig{Enabled: true, ModelID: "asr-audio"},
 	}
-	audio, frames := videoParseCapabilities(audioOnly)
+	audio, frames, direct := videoParseCapabilities(audioOnly)
 	require.False(t, audio, "an audio-section model must not count as the video's model")
 	require.False(t, frames)
+	require.False(t, direct, "the direct mode is not selected, so it has no source")
 
 	withVideoModel := &types.KnowledgeBase{
 		VideoConfig: types.VideoConfig{
 			Enabled: true, Mode: types.VideoParseModeAudioOnly, ModelID: "asr-video",
 		},
 	}
-	audio, frames = videoParseCapabilities(withVideoModel)
+	audio, frames, direct = videoParseCapabilities(withVideoModel)
 	require.True(t, audio)
 	require.False(t, frames)
+	require.False(t, direct)
 
 	// The image section's VLM is a different setting: a keyframes video whose
 	// only VLM lives at the knowledge-base level has no frame source.
@@ -651,9 +665,10 @@ func TestVideoParseCapabilitiesReadTheVideoSectionOnly(t *testing.T) {
 		VideoConfig: types.VideoConfig{Enabled: true, Mode: types.VideoParseModeKeyframes},
 		VLMConfig:   types.VLMConfig{Enabled: true, ModelID: "vlm-image"},
 	}
-	audio, frames = videoParseCapabilities(imageVLMOnly)
+	audio, frames, direct = videoParseCapabilities(imageVLMOnly)
 	require.False(t, audio)
 	require.False(t, frames, "the image section's VLM must not describe video frames")
+	require.False(t, direct)
 
 	withVideoVLM := &types.KnowledgeBase{
 		VideoConfig: types.VideoConfig{
@@ -662,9 +677,10 @@ func TestVideoParseCapabilitiesReadTheVideoSectionOnly(t *testing.T) {
 			VLMConfig: &types.VLMConfig{Enabled: true, ModelID: "vlm-video"},
 		},
 	}
-	audio, frames = videoParseCapabilities(withVideoVLM)
+	audio, frames, direct = videoParseCapabilities(withVideoVLM)
 	require.False(t, audio)
 	require.True(t, frames)
+	require.False(t, direct)
 }
 
 // audio_only without a video ASR model has no text source at all: the video is

@@ -781,7 +781,7 @@ export default {
     tagPlaceholder: 'Select tags',
     noTags: 'No tags',
     videosFilteredParsingDisabled: 'Skipped {count} video file(s) (video parsing is off — turn it on in Knowledge Base Settings → Video processing)',
-    videoModelNotConfigured: 'Video parsing is on, but the ASR/VLM model its mode needs is not configured. Add it in Knowledge Base Settings → Video processing, or video uploads will be rejected.',
+    videoModelNotConfigured: 'Video parsing is on, but the model its mode needs (ASR, vision, or video model) is not configured. Add it in Knowledge Base Settings → Video processing, or video uploads will be rejected.',
     unsupportedTypesHint: 'Some document types ({types}) have no available parser engine and cannot be processed',
     goToParserSettings: 'Configure',
     importURL: 'Import from URL',
@@ -3985,7 +3985,7 @@ export default {
     },
     video: {
       title: 'Video Processing',
-      description: 'Configure video parsing. When enabled, a stored video’s narration, picture, or both can be read according to the parsing mode and turned into searchable text.',
+      description: 'Configure video parsing. Depending on the parsing mode, a stored video\'s narration, picture, both, or the whole video (direct read) becomes searchable text.',
       label: 'Enable video parsing',
       desc: 'When enabled, videos are transcribed and indexed. When disabled, videos stay archived: playable, but not searchable.',
       modeLabel: 'Parsing mode',
@@ -4020,6 +4020,17 @@ export default {
       customInstructionsLabel: 'Frame description requirements',
       customInstructionsDescription: 'Extra guidance for what the frame descriptions should focus on. It is appended to the built-in requirements, which still win, so it cannot override the “say unreadable instead of guessing” rule.',
       customInstructionsPlaceholder: 'Add what the frame descriptions should pay special attention to, for example: focus on dialog titles and error messages; ignore the watermark in the corner.',
+      modeDirect: 'Video direct read (full understanding)',
+      modeDirectDesc: 'Uploads the whole video to a video understanding model, which reads the narration, the on-screen text and the picture together in one call. The most complete option, and the only mode that sends the file to the vendor.',
+      videoModelLabel: 'Video model',
+      videoModelDescription: 'Reads the whole video. It is independent of the ASR and frame models: choosing one never redirects the others.',
+      videoModelPlaceholder: 'Select a video understanding model',
+      videoModelHint: 'A video model accepts the whole file and answers in text; the video is uploaded before the call.',
+      videoModelRequired: 'Pick a video model first, otherwise the direct read has no model and videos stay archived.',
+      directFallbackHint: 'If the direct read fails, the narration and frame models configured here are used instead; when neither is configured the video stays archived.',
+      directPromptLabel: 'Direct read requirements',
+      directPromptDescription: 'Extra guidance appended to the built-in prompt. The output format and the "say so instead of guessing" rule still win.',
+      directPromptPlaceholder: 'For example: keep the chapter titles and list every command that appears on screen.',
     },
     advanced: {
       title: 'Advanced Settings',
@@ -5175,7 +5186,8 @@ export default {
           rerank: 'Configure models for result re-ranking',
           vllm: 'Configure vision-language models for multimodal understanding',
           asr: 'Configure speech-to-text models for audio transcription',
-          default: 'Configure model information'
+          default: 'Configure model information',
+          video: 'Configure video understanding models that read a whole video',
         },
         modelNamePlaceholder: {
           local: 'e.g. llama2:latest',
@@ -5572,8 +5584,8 @@ export default {
       },
       video: {
         title: 'Video',
-        desc: 'Models that accept video input, per the model catalog',
-        empty: 'No video-capable models'
+        desc: 'Video understanding models (the "Video" type) that read a whole video and answer in text',
+        empty: 'No video models yet'
       },
       toasts: {
         nameRequired: 'Model name cannot be empty',
@@ -5624,7 +5636,8 @@ export default {
           query_understand_model: 'Query understanding model',
           follow_up_model: 'Follow-up model',
           extract_model: 'Memory extraction model',
-          unknown: 'Other model setting'
+          unknown: 'Other model setting',
+          video_model: 'Video model',
         }
       },
       debug: {
@@ -5682,9 +5695,12 @@ export default {
           reasoningReturned: 'Reasoning returned',
           textChars: 'Transcript chars',
           segmentCount: 'Segment count'
-        }
-      }
-    },
+      },
+      videoFile: 'Video file',
+      videoPrompt: 'Video prompt',
+      videoPromptPlaceholder: 'For example: What does this video teach, step by step?',
+    }
+  },
     ollamaSettings: {
       title: 'Ollama Settings',
       description: 'Manage local Ollama service and view/download models',

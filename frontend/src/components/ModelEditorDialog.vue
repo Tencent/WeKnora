@@ -466,7 +466,7 @@
       </template>
 
       <!-- Section 3 — 高级选项（仅在有内容时渲染，避免空 section 出现底部分隔线） -->
-      <section v-if="['embedding', 'chat', 'vllm'].includes(activeModelType) || formData.source === 'remote'" class="setting-drawer__section">
+      <section v-if="['embedding', 'chat', 'vllm', 'video'].includes(activeModelType) || formData.source === 'remote'" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionAdvanced') }}</h4>
 
         <!-- Embedding 专用：维度 -->
@@ -506,7 +506,7 @@
         </div>
 
         <!-- Chat / VLM: context window. Agent compaction sizes itself from this. -->
-        <div v-if="activeModelType === 'chat' || activeModelType === 'vllm'" class="form-item">
+        <div v-if="activeModelType === 'chat' || activeModelType === 'vllm' || activeModelType === 'video'" class="form-item">
           <label class="form-label">{{ $t('model.editor.contextWindowLabel') }}</label>
           <t-input v-model.number="formData.contextWindow" type="number" :min="1024" :max="10000000"
             :placeholder="$t('model.editor.contextWindowPlaceholder', { value: DEFAULT_MODEL_CONTEXT_WINDOW })" />
@@ -523,7 +523,7 @@
         </div>
 
         <!-- Chat / VLM: max output tokens (catalog default when empty). -->
-        <div v-if="activeModelType === 'chat' || activeModelType === 'vllm'" class="form-item">
+        <div v-if="activeModelType === 'chat' || activeModelType === 'vllm' || activeModelType === 'video'" class="form-item">
           <label class="form-label">{{ $t('model.editor.maxOutputTokensLabel') }}</label>
           <t-input v-model.number="formData.maxOutputTokens" type="number" :min="1" :max="10000000"
             :placeholder="$t('model.editor.maxOutputTokensPlaceholder')" />
@@ -716,7 +716,7 @@ const LEGACY_THINKING_CONTROL_VALUES = ['none', 'enable_thinking', 'thinking_typ
 /** Keys of extra_config that are edited by dedicated controls, not the generic renderer. */
 const RESERVED_EXTRA_CONFIG_KEYS = new Set(['thinking_control'])
 
-type EditorModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
+type EditorModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'video'
 
 interface Props {
   visible: boolean
@@ -755,6 +755,7 @@ const modelTypeChoices = computed(() => ([
   { value: 'rerank' as const, label: t('modelSettings.typeShort.rerank'), icon: 'filter-sort' },
   { value: 'vllm' as const, label: t('modelSettings.typeShort.vllm'), icon: 'image' },
   { value: 'asr' as const, label: t('modelSettings.typeShort.asr'), icon: 'sound' },
+  { value: 'video' as const, label: t('modelSettings.typeShort.video'), icon: 'video' },
 ]))
 
 // 厂商列表完全来自后端目录（store 按模型类型缓存）；前端不再维护任何厂商表。
@@ -996,7 +997,7 @@ const dropEmbeddingInputOverride = () => {
 
 /** Fill blank capability fields from a catalog entry the user just picked. */
 const applyCatalogEntry = (entry: ModelCatalogEntry) => {
-  if (activeModelType.value === 'chat' || activeModelType.value === 'vllm') {
+  if (['chat', 'vllm', 'video'].includes(activeModelType.value)) {
     if (!formData.value.contextWindow && entry.context_window) {
       formData.value.contextWindow = entry.context_window
       catalogFilled.value.contextWindow = entry.context_window
@@ -1038,7 +1039,7 @@ let resolveTimer: ReturnType<typeof setTimeout> | null = null
 let resolveRevision = 0
 
 /** 目录解析出的协议 / 思考等级 / 上下文窗口只对对话与 VLM 模型有意义。 */
-const isChatLike = computed(() => activeModelType.value === 'chat' || activeModelType.value === 'vllm')
+const isChatLike = computed(() => ['chat', 'vllm', 'video'].includes(activeModelType.value))
 
 const showResolvedPanel = computed(() =>
   isChatLike.value
@@ -1160,6 +1161,7 @@ const modelTypeIcon = computed(() => {
     rerank: 'filter-sort',
     vllm: 'image',
     asr: 'sound',
+    video: 'video',
   }
   return map[activeModelType.value] || 'setting'
 })
@@ -1962,6 +1964,21 @@ const checkRemoteAPI = async () => {
       case 'vllm':
         // VLLM 模型（多模态）
         // VLLM 使用 checkRemoteModel 进行基础连接测试
+        result = await checkRemoteModel({
+          modelName: formData.value.modelName,
+          baseUrl: formData.value.baseUrl || '',
+          apiKey: formData.value.apiKey || '',
+          provider: formData.value.provider,
+          ...idPayload,
+          ...headerPayload,
+          ...extraPayload,
+        })
+        break
+
+      case 'video':
+        // 视频模型走的是对话协议（视频以 oss:// 引用出现在 chat 消息里），
+        // 所以用同一条「可达性」测试：它能验证 Base URL、密钥与模型名，
+        // 但不会上传视频（上传要几百 MB，且失败原因会被上传本身掩盖）。
         result = await checkRemoteModel({
           modelName: formData.value.modelName,
           baseUrl: formData.value.baseUrl || '',

@@ -85,6 +85,8 @@ func modelTypeToFrontend(mt types.ModelType) string {
 		return "vllm"
 	case types.ModelTypeASR:
 		return "asr"
+	case types.ModelTypeVideo:
+		return "video"
 	default:
 		return string(mt)
 	}

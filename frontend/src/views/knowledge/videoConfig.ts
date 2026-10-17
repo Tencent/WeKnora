@@ -30,3 +30,20 @@ export function isVideoFrameModelConfigured(
 ): boolean {
   return !!videoConfig?.vlm?.modelId?.trim()
 }
+
+/**
+ * The direct read (video_direct) sends the whole file to a video understanding
+ * model, which is a third model with a third role: not the ASR model that
+ * transcribes narration, not the VLM that describes sampled frames. Only
+ * video_config.video_model_id counts; falling back to either of the other two
+ * would hand a chat-style model a video it cannot read.
+ */
+export interface VideoDirectModelConfig {
+  videoModelId?: string | null
+}
+
+export function isVideoDirectModelConfigured(
+  videoConfig?: VideoDirectModelConfig | null,
+): boolean {
+  return !!videoConfig?.videoModelId?.trim()
+}

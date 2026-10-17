@@ -30580,21 +30580,24 @@ const docTemplate = `{
                 "ModelTypeEmbedding": "Embedding model",
                 "ModelTypeKnowledgeQA": "KnowledgeQA model",
                 "ModelTypeRerank": "Rerank model",
-                "ModelTypeVLLM": "VLLM model"
+                "ModelTypeVLLM": "VLLM model",
+                "ModelTypeVideo": "Video understanding model (accepts a whole video)"
             },
             "x-enum-descriptions": [
                 "Embedding model",
                 "Rerank model",
                 "KnowledgeQA model",
                 "VLLM model",
-                "ASR (Automatic Speech Recognition) model"
+                "ASR (Automatic Speech Recognition) model",
+                "Video understanding model (accepts a whole video)"
             ],
             "x-enum-varnames": [
                 "ModelTypeEmbedding",
                 "ModelTypeRerank",
                 "ModelTypeKnowledgeQA",
                 "ModelTypeVLLM",
-                "ModelTypeASR"
+                "ModelTypeASR",
+                "ModelTypeVideo"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.NamedCount": {

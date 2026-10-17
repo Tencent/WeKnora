@@ -6,7 +6,7 @@ import (
 )
 
 func knowledgeBaseModelUsageBindings(kb *types.KnowledgeBase, modelID string) []types.ModelUsageBinding {
-	bindings := make([]types.ModelUsageBinding, 0, 7)
+	bindings := make([]types.ModelUsageBinding, 0, 10)
 	if kb.EmbeddingModelID == modelID {
 		bindings = append(bindings, types.ModelUsageBindingEmbeddingModel)
 	}
@@ -21,6 +21,20 @@ func knowledgeBaseModelUsageBindings(kb *types.KnowledgeBase, modelID string) []
 	}
 	if kb.ASRConfig.ModelID == modelID {
 		bindings = append(bindings, types.ModelUsageBindingASRModel)
+	}
+	// The video section owns three independent model references. They carry
+	// the role of the model, not the section: the video's ASR model is an
+	// ASR reference, its frame model a VLM reference, and only the direct
+	// video model is a video reference. Deleting any of them while a video
+	// knowledge base points at it would silently degrade the next import.
+	if kb.VideoConfig.ModelID == modelID {
+		bindings = append(bindings, types.ModelUsageBindingASRModel)
+	}
+	if kb.VideoConfig.VLMConfig != nil && kb.VideoConfig.VLMConfig.ModelID == modelID {
+		bindings = append(bindings, types.ModelUsageBindingVLMModel)
+	}
+	if kb.VideoConfig.VideoModelID == modelID {
+		bindings = append(bindings, types.ModelUsageBindingVideoModel)
 	}
 	if kb.WikiConfig != nil && kb.WikiConfig.SynthesisModelID == modelID {
 		bindings = append(bindings, types.ModelUsageBindingWikiSynthesisModel)
@@ -64,9 +78,12 @@ func scopeKnowledgeBasesByModelID(db *gorm.DB, modelID string) *gorm.DB {
 				"image_processing_config->>'model_id' = ? OR "+
 				"vlm_config->>'model_id' = ? OR "+
 				"asr_config->>'model_id' = ? OR "+
+				"video_config->>'model_id' = ? OR "+
+				"video_config->'vlm_config'->>'model_id' = ? OR "+
+				"video_config->>'video_model_id' = ? OR "+
 				"wiki_config->>'synthesis_model_id' = ? OR "+
 				"auto_tag_config->>'model_id' = ?",
-			modelID, modelID, modelID, modelID, modelID, modelID, modelID,
+			modelID, modelID, modelID, modelID, modelID, modelID, modelID, modelID, modelID, modelID,
 		)
 	}
 	return db.Where(
@@ -74,9 +91,12 @@ func scopeKnowledgeBasesByModelID(db *gorm.DB, modelID string) *gorm.DB {
 			"json_extract(image_processing_config, '$.model_id') = ? OR "+
 			"json_extract(vlm_config, '$.model_id') = ? OR "+
 			"json_extract(asr_config, '$.model_id') = ? OR "+
+			"json_extract(video_config, '$.model_id') = ? OR "+
+			"json_extract(video_config, '$.vlm_config.model_id') = ? OR "+
+			"json_extract(video_config, '$.video_model_id') = ? OR "+
 			"json_extract(wiki_config, '$.synthesis_model_id') = ? OR "+
 			"json_extract(auto_tag_config, '$.model_id') = ?",
-		modelID, modelID, modelID, modelID, modelID, modelID, modelID,
+		modelID, modelID, modelID, modelID, modelID, modelID, modelID, modelID, modelID, modelID,
 	)
 }
 

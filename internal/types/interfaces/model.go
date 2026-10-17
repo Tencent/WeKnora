@@ -7,6 +7,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
+	"github.com/Tencent/WeKnora/internal/models/video"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -48,6 +49,9 @@ type ModelService interface {
 	GetVLMModel(ctx context.Context, modelId string) (vlm.VLM, error)
 	// GetASRModel gets an automatic speech recognition model
 	GetASRModel(ctx context.Context, modelId string) (asr.ASR, error)
+	// GetVideoModel gets a video understanding model (one that accepts a whole
+	// video and answers in text)
+	GetVideoModel(ctx context.Context, modelId string) (video.Video, error)
 }
 
 // ModelRepository defines the model repository interface

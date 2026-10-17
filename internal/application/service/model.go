@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/providers"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	"github.com/Tencent/WeKnora/internal/models/video"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -754,6 +755,46 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 	}
 
 	return vlmModel, nil
+}
+
+// GetVideoModel retrieves and initializes a video understanding model
+// instance. It mirrors GetVLMModel: the row is loaded through the repository
+// (so credentials are decrypted by the scan hook) and the client resolves the
+// catalog entry itself.
+func (s *modelService) GetVideoModel(ctx context.Context, modelId string) (video.Video, error) {
+	if modelId == "" {
+		return nil, errors.New("model ID cannot be empty")
+	}
+
+	tenantID := types.MustTenantIDFromContext(ctx)
+
+	model, err := s.repo.GetByID(ctx, tenantID, modelId)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"model_id":  modelId,
+			"tenant_id": tenantID,
+		})
+		return nil, err
+	}
+
+	if model == nil {
+		return nil, ErrModelNotFound
+	}
+
+	logger.Infof(ctx, "Getting video model: %s, source: %s", model.Name, model.Source)
+
+	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
+
+	videoModel, err := video.NewVideo(video.ConfigFromModel(model, appID, appSecret))
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"model_id":   model.ID,
+			"model_name": model.Name,
+		})
+		return nil, err
+	}
+
+	return videoModel, nil
 }
 
 // Note: default model selection logic has been removed; models no longer

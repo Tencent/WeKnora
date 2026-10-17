@@ -36,6 +36,7 @@ func NormalizeKnowledgeBasePromptInstructions(kb *KnowledgeBase) {
 		kb.VideoConfig.VLMConfig.CustomInstructions = strings.TrimSpace(
 			kb.VideoConfig.VLMConfig.CustomInstructions)
 	}
+	kb.VideoConfig.DirectPrompt = strings.TrimSpace(kb.VideoConfig.DirectPrompt)
 	if kb.WikiConfig != nil {
 		kb.WikiConfig.ContentInstructions = strings.TrimSpace(kb.WikiConfig.ContentInstructions)
 		kb.WikiConfig.ExtractionInstructions = strings.TrimSpace(kb.WikiConfig.ExtractionInstructions)
@@ -61,6 +62,7 @@ func ValidateKnowledgeBasePromptInstructions(kb *KnowledgeBase) error {
 	if kb.VideoConfig.VLMConfig != nil {
 		fields["video frame instructions"] = kb.VideoConfig.VLMConfig.CustomInstructions
 	}
+	fields["video direct instructions"] = kb.VideoConfig.DirectPrompt
 	if kb.WikiConfig != nil {
 		fields["wiki content instructions"] = kb.WikiConfig.ContentInstructions
 		fields["wiki extraction instructions"] = kb.WikiConfig.ExtractionInstructions

@@ -20,6 +20,14 @@ const (
 	ModelTypeKnowledgeQA ModelType = "KnowledgeQA" // KnowledgeQA model
 	ModelTypeVLLM        ModelType = "VLLM"        // VLLM model
 	ModelTypeASR         ModelType = "ASR"         // ASR (Automatic Speech Recognition) model
+	// ModelTypeVideo is a video understanding model: a multimodal chat model
+	// that accepts a whole video and answers in text. It is a distinct row type
+	// because its calls need a video-specific transport (the bytes are uploaded
+	// to the vendor first and referenced by URL) and because the knowledge
+	// pipeline selects it separately from the frame VLM and the ASR model.
+	// Catalog-wise it resolves against the chat entries that declare `video`
+	// input, exactly like VLLM resolves against the entries that declare image.
+	ModelTypeVideo ModelType = "Video"
 )
 
 // ModelStatus represents the status of the model
@@ -43,6 +51,7 @@ const (
 	ModelUsageBindingImageProcessingModel ModelUsageBinding = "image_processing_model"
 	ModelUsageBindingVLMModel             ModelUsageBinding = "vlm_model"
 	ModelUsageBindingASRModel             ModelUsageBinding = "asr_model"
+	ModelUsageBindingVideoModel           ModelUsageBinding = "video_model"
 	ModelUsageBindingWikiSynthesisModel   ModelUsageBinding = "wiki_synthesis_model"
 	ModelUsageBindingAutoTagModel         ModelUsageBinding = "auto_tag_model"
 	ModelUsageBindingChatModel            ModelUsageBinding = "chat_model"

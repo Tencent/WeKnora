@@ -3053,7 +3053,8 @@ export default {
         query_understand_model: '問題理解模型',
         follow_up_model: '追問模型',
         extract_model: '記憶提取模型',
-        unknown: '其他模型設定'
+        unknown: '其他模型設定',
+        video_model: '影片模型',
       }
     },
     debug: {
@@ -3111,7 +3112,10 @@ export default {
         reasoningReturned: '返回推論內容',
         textChars: '轉寫字符數',
         segmentCount: '分段數量'
-      }
+      },
+      videoFile: '影片檔案',
+      videoPrompt: '影片提示詞',
+      videoPromptPlaceholder: '例如：這段影片分幾步講了什麼？',
     },
     builtinModels: {
       title: '內建模型',
@@ -3145,8 +3149,8 @@ export default {
     },
     video: {
       title: '影片',
-      desc: '模型目錄中標註支援影片輸入的模型',
-      empty: '暫無支援影片輸入的模型'
+      desc: '可直接讀取整段影片並以文字作答的影片理解模型（「影片」類型）',
+      empty: '還沒有影片模型'
     },
     vllm: {
       title: 'VLLM 視覺模型',
@@ -3626,7 +3630,8 @@ export default {
         rerank: '設定用於結果重排序的模型',
         vllm: '設定用於視覺理解和多模態的視覺語言模型',
         asr: '設定用於語音辨識和音訊轉錄的語音轉文字模型',
-        default: '設定模型資訊'
+        default: '設定模型資訊',
+        video: '設定可直接讀取整段影片的影片理解模型',
       }
     }
   },
@@ -4705,7 +4710,7 @@ export default {
     },
     video: {
       title: '影片處理',
-      description: '設定影片解析。開啟後，可依解析方式讀取存檔影片的旁白、畫面或兩者，轉成可檢索的文字。',
+      description: '設定影片解析。依解析方式，影片的旁白、畫面、兩者，或整段影片（直讀）會被轉成可檢索的文字。',
       label: '啟用影片解析',
       desc: '開啟後影片會轉寫為文字並參與檢索；關閉時影片僅存檔，可播放但搜尋不到。',
       modeLabel: '解析方式',
@@ -4740,6 +4745,17 @@ export default {
       customInstructionsLabel: '畫面描述要求',
       customInstructionsDescription: '補充畫面描述需要重點關注的內容。它會附加在內建要求之後，內建要求始終優先，因此不能覆寫「看不清就說不清楚、不要猜」這條規則。',
       customInstructionsPlaceholder: '補充需要重點識別的畫面資訊，例如：重點識別彈窗標題與錯誤文案；忽略右下角浮水印。',
+      modeDirect: '影片直讀（完整理解）',
+      modeDirectDesc: '把整段影片上傳給影片理解模型，一次讀完旁白、字幕與畫面。資訊最完整，也是唯一需要把檔案上傳給廠商的一檔。',
+      videoModelLabel: '影片模型',
+      videoModelDescription: '直接讀取整段影片。它與 ASR、畫面 VLM 相互獨立：換一個不會影響另外兩個。',
+      videoModelPlaceholder: '選擇影片理解模型',
+      videoModelHint: '影片模型接受整段影片並以文字作答，呼叫前會先上傳檔案。',
+      videoModelRequired: '請先選擇影片模型，否則直讀沒有可用模型，影片只會被存檔。',
+      directFallbackHint: '直讀失敗時會退回本頁已設定的語音辨識與畫面描述模型；兩者都沒設定才會存檔。',
+      directPromptLabel: '直讀要求',
+      directPromptDescription: '追加到內建提示詞之後。輸出格式與「看不清就說不清楚」的規則仍然優先。',
+      directPromptPlaceholder: '例如：保留章節標題，並列出畫面裡出現的每一條指令。',
     },
     multimodal: {
       title: '影像處理設定',
@@ -7789,7 +7805,7 @@ export default {
     tagPlaceholder: '請選擇標籤',
     noTags: '暫無標籤',
     videosFilteredParsingDisabled: '已跳過 {count} 個影片檔案（影片解析未開啟，可在知識庫設定 → 影片處理裡開啟）',
-    videoModelNotConfigured: '影片解析已開啟，但尚未設定目前方式所需的 ASR/VLM 模型；請先在知識庫設定 → 影片處理中設定，否則影片上傳會被拒絕',
+    videoModelNotConfigured: '影片解析已開啟，但尚未設定目前方式所需的模型（ASR / 視覺 / 影片模型）；請先在知識庫設定 → 影片處理中設定，否則影片上傳會被拒絕',
     unsupportedTypesHint: '部分文件類型（{types}）暫無可用解析引擎，上傳後將無法解析',
     goToParserSettings: '前往設定',
     importURL: '匯入網頁',

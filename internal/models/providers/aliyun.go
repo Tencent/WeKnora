@@ -122,6 +122,10 @@ func newAliyunProvider() *Definition {
 			types.ModelTypeEmbedding:   AliyunBaseURL,
 			types.ModelTypeRerank:      AliyunRerankBaseURL,
 			types.ModelTypeVLLM:        AliyunBaseURL,
+			// A video row talks the compatible-mode chat protocol too: the
+			// video is referenced by an oss:// URL inside a chat message, and
+			// the temporary-file upload API lives on the same host.
+			types.ModelTypeVideo: AliyunBaseURL,
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
@@ -129,6 +133,7 @@ func newAliyunProvider() *Definition {
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
 			types.ModelTypeASR,
+			types.ModelTypeVideo,
 		},
 		RerankAPI: api.RerankDashScope,
 		// Text and multimodal embeddings live under different roots of the

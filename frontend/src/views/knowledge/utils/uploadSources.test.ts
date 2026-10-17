@@ -172,6 +172,10 @@ test('isVideoParsingReady mirrors the backend model requirement per mode', () =>
         },
       },
     ],
+    [
+      'video_direct with the video model',
+      { video_config: { enabled: true, mode: 'video_direct', video_model_id: 'video-1' } },
+    ],
   ]
 
   const notReady: Array<[string, unknown]> = [
@@ -192,6 +196,18 @@ test('isVideoParsingReady mirrors the backend model requirement per mode', () =>
       },
     ],
     ['keyframes without the VLM', { video_config: { enabled: true, mode: 'keyframes' } }],
+    ['video_direct without any model', { video_config: { enabled: true, mode: 'video_direct' } }],
+    [
+      'video_direct with only the ASR and frame models',
+      {
+        video_config: {
+          enabled: true,
+          mode: 'video_direct',
+          model_id: 'asr-video',
+          vlm_config: { enabled: true, model_id: 'vlm-video' },
+        },
+      },
+    ],
     [
       'keyframes with a video VLM that has no model',
       {
