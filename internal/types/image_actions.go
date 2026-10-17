@@ -354,8 +354,8 @@ type ImagePipelineSpec struct {
 	// pick. Like Name it is overlay-translated with this text as fallback.
 	Description string `json:"description"`
 	// Fields are this pipeline's private tunables. The frontend renders one
-	// control per field and posts them back under the pipeline's own key, so
-	// two pipelines can each own a field named "enable_ocr" without either
+	// control per field and posts them back under the pipeline's own slot, so
+	// two pipelines can each own a field named "ocr_enabled" without either
 	// seeing the other's.
 	Fields []ImageFieldDef `json:"fields"`
 	// Rules are conditions over those fields that have to hold before the

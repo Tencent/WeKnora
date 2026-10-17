@@ -141,10 +141,10 @@ func TestThinkingFollowsTheStoredSwitch(t *testing.T) {
 }
 
 // TestObservationPipelineThinkingKeys pins that the thinking switches are
-// ACTION-level keys shared with the default pipeline: caption.thinking /
-// ocr.thinking drive the calls, the pre-unification private keys
-// (describe_thinking / text_thinking) are stale and ignored, and the trace
-// records the same action keys.
+// ACTION-level keys this pipeline carries the same way the default one does:
+// observation.thinking_enabled / ocr.thinking_enabled drive the calls, the
+// pre-unification private keys (describe_thinking / text_thinking) are stale and
+// ignored, and the trace records the same action keys.
 func TestObservationPipelineThinkingKeys(t *testing.T) {
 	r, model := runThinkingPipeline(t, true, map[string]any{
 		observeCaptionKey: true,
@@ -164,7 +164,7 @@ func TestObservationPipelineThinkingKeys(t *testing.T) {
 		t.Error("the observation call ran with thinking on; the observation switch was ignored")
 	}
 	if !model.calls[1].thinking {
-		t.Error("the OCR call ran with thinking off; ocr.thinking=true was ignored")
+		t.Error("the OCR call ran with thinking off; the OCR switch was ignored")
 	}
 	if got := r.out[observationThinkingField.Key]; got != false {
 		t.Errorf(`out[%q] = %v, want false`, observationThinkingField.Key, got)

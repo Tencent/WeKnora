@@ -14,7 +14,7 @@ func TestResolveProcessConfig_LegacyOverrideSelectsImagePipeline(t *testing.T) {
 		for _, explicitKB := range []bool{false, true} {
 			kb := &types.KnowledgeBase{ImageProcessingConfig: types.ImageProcessingConfig{
 				ImageAttrsEnabled:   base,
-				ImagePipelineParams: map[string]any{"caption.thinking": true},
+				ImagePipelineParams: map[string]any{"default.caption.thinking_enabled": true},
 			}}
 			if explicitKB {
 				kb.ImageProcessingConfig.ImagePipelineID = string(types.ImagePipelineIDFor(base))

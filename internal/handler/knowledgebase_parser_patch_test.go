@@ -85,19 +85,22 @@ func TestParserRoutingPatchRejectsAmbiguousOrInvalidChanges(t *testing.T) {
 func TestImageControlsPreserveOtherParamsAndRespectNamespace(t *testing.T) {
 	kb := &types.KnowledgeBase{ImageProcessingConfig: types.ImageProcessingConfig{
 		ImagePipelineID: "default", ImagePipelineParams: map[string]any{
-			"default.enable_ocr": true,
-			"enable_caption":     true,
-			"caption.thinking":   true,
+			"default.ocr_enabled":              true,
+			"caption_enabled":                  true,
+			"default.caption.thinking_enabled": true,
 		},
 	}}
 	result, err := parsingPatch(t, kb, `{"image_ocr_enabled":false}`)
 	require.NoError(t, err)
 	image := result.Config.ImageProcessingConfig
-	assert.Equal(t, false, image.ImagePipelineParams["enable_ocr"])
-	assert.Equal(t, false, image.ImagePipelineParams["default.enable_ocr"])
-	assert.Equal(t, true, image.ImagePipelineParams["caption.thinking"])
-	assert.Equal(t, true, image.ImagePipelineParams["enable_caption"])
-	assert.Equal(t, true, kb.ImageProcessingConfig.ImagePipelineParams["default.enable_ocr"])
+	assert.Equal(t, false, image.ImagePipelineParams["default.ocr_enabled"])
+	assert.Equal(t, true, image.ImagePipelineParams["default.caption.thinking_enabled"])
+	assert.Equal(t, true, image.ImagePipelineParams["caption_enabled"])
+	// One home per setting: the switch lands in the pipeline's slot and is not
+	// also written under its bare name, which nothing reads.
+	_, bare := image.ImagePipelineParams["ocr_enabled"]
+	assert.False(t, bare, "the switch must be stored under its slot only")
+	assert.Equal(t, true, kb.ImageProcessingConfig.ImagePipelineParams["default.ocr_enabled"])
 	require.NoError(t, service.ValidateImagePipelineParams(types.ImagePipelineDefault, image.ImagePipelineParams))
 	result, err = parsingPatch(t, kb, `{"image_ocr_enabled":false,"image_caption_enabled":false}`)
 	require.NoError(t, err)
