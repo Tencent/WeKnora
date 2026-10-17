@@ -31,7 +31,12 @@ func TestTenantAccessTokenNeverAppearsInLogs(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": token, "expire": 7200})
 			}))
 			defer server.Close()
-			client := &Client{baseURL: server.URL, appID: "test-app", appSecret: "synthetic-credential", httpClient: server.Client()}
+			client := &Client{
+				baseURL:    server.URL,
+				appID:      "test-app",
+				appSecret:  "synthetic-credential",
+				httpClient: server.Client(),
+			}
 			for i := 0; i < 2; i++ {
 				got, err := client.GetTenantAccessToken(ctx)
 				if err != nil || got != token {
