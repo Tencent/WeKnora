@@ -1057,6 +1057,8 @@ export default {
     dingtalkIngestLabel: '釘釘攝取範圍',
     dingtalkIncludeUploadedFiles: '攝取知識庫中的上傳檔案（docx / pptx / xlsx / pdf）',
     dingtalkIncludeUploadedFilesHint: '預設關閉。開啟後，所選範圍內的 Word / PowerPoint / Excel / PDF 上傳檔案會被下載並解析入庫，單一檔案上限 64 MiB；這些檔案的正文會計入儲存與向量化成本。關閉時它們只會被跳過，同步日誌會說明開關未開啟，不會刪除知識庫中已有的副本。',
+    dingtalkIncludeSheets: '攝取釘釘表格（axls）',
+    dingtalkIncludeSheetsHint: '預設關閉。開啟後，所選範圍內的釘釘表格會透過工作表 API 讀取，每張工作表最多 10000 行 × 256 欄，超出的部分會被截斷並在同步日誌中說明截斷範圍；同一個工作簿的多張非空工作表會合併成同一篇 Markdown。表格正文會計入儲存與向量化成本。關閉時表格只會被跳過，同步日誌會說明開關未開啟。',
     prereqBarText_dingtalk: '首次使用？點擊查看釘釘應用設定指引',
     prereqStep1Brief_dingtalk: '建立企業內部應用',
     prereqStep1Desc_dingtalk: '在釘釘開放平台建立企業內部應用，並獲取 Client ID 和 Client Secret',

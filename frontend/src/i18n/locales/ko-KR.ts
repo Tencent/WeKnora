@@ -1079,6 +1079,8 @@ export default {
     dingtalkIngestLabel: 'DingTalk 수집 범위',
     dingtalkIncludeUploadedFiles: '업로드 파일(docx / pptx / xlsx / pdf) 수집',
     dingtalkIncludeUploadedFilesHint: '기본값은 꺼짐입니다. 켜면 선택한 범위에 업로드된 Word / PowerPoint / Excel / PDF 파일을 내려받아 파싱해 지식베이스에 넣습니다(파일당 최대 64 MiB). 본문은 저장소와 임베딩 비용에 포함됩니다. 꺼져 있으면 해당 파일은 건너뛰고 동기화 로그에 스위치가 꺼져 있다고 기록되며, 이미 지식베이스에 있는 사본은 삭제되지 않습니다.',
+    dingtalkIncludeSheets: 'DingTalk 스프레드시트(axls) 수집',
+    dingtalkIncludeSheetsHint: '기본값은 꺼짐입니다. 켜면 선택한 범위의 DingTalk 스프레드시트를 워크시트 API로 읽습니다. 시트당 최대 10,000행 × 256열이며, 이를 넘는 행과 열은 잘리고 잘린 범위가 동기화 로그에 기록됩니다. 한 워크북의 비어 있지 않은 시트는 모두 하나의 Markdown으로 합쳐집니다. 본문은 저장소와 임베딩 비용에 포함됩니다. 꺼져 있으면 시트는 건너뛰고 동기화 로그에 스위치가 꺼져 있다고 기록됩니다.',
     prereqBarText_dingtalk: '처음 사용하시나요? 클릭하여 DingTalk 앱 설정 가이드를 확인하세요',
     prereqStep1Brief_dingtalk: '기업 내부 앱 생성',
     prereqStep1Desc_dingtalk: 'DingTalk Open Platform에서 기업 내부 앱을 생성하고 Client ID와 Client Secret을 복사하세요.',

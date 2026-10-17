@@ -32,13 +32,24 @@ var mediaExtensions = map[string]struct{}{
 
 // unsupportedDocumentExtensions names the native DingTalk document types the
 // wiki API lists but this connector has no ingest path for, so a skip can name
-// the concrete type instead of only saying the node is unsupported. The
-// remaining types expose no read API at all.
+// the concrete type instead of only saying the node is unsupported. Native
+// types this connector does read (adoc through the blocks API, axls through the
+// workbooks API) are not listed here; see ingestableDocumentExtensions.
 var unsupportedDocumentExtensions = map[string]string{
 	"able":  "DingTalk multi-dimensional table",
 	"amind": "DingTalk mind map",
 	"appt":  "DingTalk presentation",
 	"adraw": "DingTalk drawing",
+}
+
+// ingestableDocumentExtensions names the native DingTalk document types this
+// connector reads end to end. A node of one of these types can still be skipped
+// — a FOLDER carrying a document extension, or a document outside the ALIDOC
+// category — and that skip has to say how the type is read instead of claiming
+// the type has no ingest path.
+var ingestableDocumentExtensions = map[string]string{
+	"adoc": "DingTalk document",
+	"axls": "DingTalk spreadsheet",
 }
 
 // skipReason explains, in the words of the sync log, why a node the connector
@@ -56,6 +67,15 @@ func skipReason(n node, settings documentSettings) string {
 	// looking like a missing feature.
 	if n.isBinaryDocument() && !settings.IncludeUploadedFiles {
 		return "uploaded files are not ingested because include_uploaded_files is not enabled for this data source"
+	}
+	// A spreadsheet this connector can read, but this data source was never
+	// told to. Naming the switch makes the skip actionable instead of looking
+	// like a missing feature.
+	if n.isSheet() && !settings.IncludeSheets {
+		return "spreadsheets are not ingested because include_sheets is not enabled for this data source"
+	}
+	if label := ingestableDocumentExtensions[extension]; label != "" {
+		return label + " is ingested only from a FILE node in the ALIDOC category"
 	}
 	if label := unsupportedDocumentExtensions[extension]; label != "" {
 		return label + " has no ingest path in this connector yet"
@@ -344,17 +364,21 @@ func sampleWorkspace(
 }
 
 // verifyDocument proves one visible document is readable. Native documents are
-// probed through their own read API — the blocks API for adoc — while uploaded
-// files resolve their 钉盘 download location, which exercises the same
-// permissions and returns the same errors a real download would, without
-// transferring the payload.
+// probed through their own read API — the blocks API for adoc, the workbooks
+// API for a native spreadsheet — while uploaded files resolve their 钉盘
+// download location, which exercises the same permissions and returns the same
+// errors a real download would, without transferring the payload.
 //
 // #3782 landed a narrower version of this probe (the blocks API only) with a
 // comment saying uploaded files and native spreadsheets join it "when their
-// ingest paths land". This is that follow-up: an uploaded file is not an adoc,
-// so probing it through documentBlocks would report a readable file as
-// unreadable and reject a working data source.
+// ingest paths land". This is that follow-up for both: neither an uploaded file
+// nor a workbook is an adoc, so probing either through documentBlocks would
+// report a readable selection as unreadable and reject a working data source.
 func verifyDocument(ctx context.Context, api dingTalkAPI, document node) error {
+	if document.isSheet() {
+		_, err := api.listSheets(ctx, document.ID)
+		return err
+	}
 	if document.isOnlineDocument() {
 		_, err := api.documentBlocks(ctx, document.ID)
 		return err
@@ -745,8 +769,8 @@ func (c *Connector) sync(
 		}
 
 		// Skipped nodes are deterministic: this connector has no ingest path for
-		// them, so they are reported once and never retried — unlike a failed
-		// read below, which must stay retryable.
+		// the node's type or shape, so they are reported once and never retried —
+		// unlike a failed read below, which must stay retryable.
 		for _, node := range skipped {
 			logger.Infof(ctx, "[DingTalk] skip node %s (name=%q type=%s category=%s extension=%s): %s",
 				node.ID, node.title(), node.Type, node.Category, node.Extension, skipReason(node, settings))
@@ -1140,8 +1164,9 @@ func warnUnknownBlockTypes(ctx context.Context, document node, rendered renderRe
 }
 
 // readDocument turns one supported wiki node into a FetchedItem. Native adoc
-// documents are rendered from their blocks, and uploaded files are transferred
-// byte-for-byte so WeKnora's own parsers can read them.
+// documents are rendered from their blocks, native spreadsheets (axls) are
+// rendered from their worksheets through the workbooks API, and uploaded files
+// are transferred byte-for-byte so WeKnora's own parsers can read them.
 func readDocument(
 	ctx context.Context,
 	api dingTalkAPI,
@@ -1159,6 +1184,18 @@ func readDocument(
 		// The renderer stays context-free; the warning is emitted here, where
 		// both the request context and the node identity are known. Uploaded
 		// files take the default branch and have no rendering step to lose.
+		warnUnknownBlockTypes(ctx, document, rendered)
+		return fetchedDocument(sourceResourceID, workspaceID, document, rendered), nil
+	case document.isSheet():
+		// A spreadsheet is one document to its users and one knowledge entry
+		// here, so every worksheet is rendered into a single markdown body.
+		// Without this branch an axls node would fall through to the default
+		// branch and be downloaded as a binary file, which DingTalk does not
+		// serve for a native workbook.
+		rendered, err := renderWorkbook(ctx, api, document.ID, document.title())
+		if err != nil {
+			return types.FetchedItem{}, err
+		}
 		warnUnknownBlockTypes(ctx, document, rendered)
 		return fetchedDocument(sourceResourceID, workspaceID, document, rendered), nil
 	default:

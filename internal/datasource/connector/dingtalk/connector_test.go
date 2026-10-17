@@ -25,6 +25,31 @@ type fakeAPI struct {
 	blockCalls   map[string]int
 	verifyCalls  map[string]int
 	dlCalls      map[string]int
+
+	// Native DingTalk spreadsheets (axls). Sheets are listed per workbook,
+	// their extents are read per sheet, and cells are served per ranges window
+	// so a test can assert the exact windows the connector asked for.
+	sheets           map[string][]sheet
+	sheetInfos       map[string]sheet
+	sheetValues      map[string][][]string
+	sheetListErrors  map[string]error
+	sheetInfoErrors  map[string]error
+	sheetRangeErrors map[string]error
+	sheetListCalls   map[string]int
+	sheetRangeCalls  []string
+	// sheetRangeFunc, when set, synthesises a window's cells instead of reading
+	// sheetValues: chunking and cap tests need rows that depend on the range.
+	sheetRangeFunc func(workbookID, sheetID, ranges string) ([][]string, error)
+}
+
+// sheetKey addresses one sheet's metadata in the fake.
+func sheetKey(workbookID, sheetID string) string {
+	return workbookID + "/" + sheetID
+}
+
+// sheetRangeKey addresses one ranges request in the fake.
+func sheetRangeKey(workbookID, sheetID, ranges string) string {
+	return sheetKey(workbookID, sheetID) + "/" + ranges
 }
 
 func (f *fakeAPI) listWorkspaces(context.Context) ([]workspace, error) {
@@ -74,6 +99,39 @@ func (f *fakeAPI) downloadDocument(_ context.Context, documentID string) ([]byte
 	return f.downloads[documentID], nil
 }
 
+func (f *fakeAPI) listSheets(_ context.Context, workbookID string) ([]sheet, error) {
+	if f.sheetListCalls == nil {
+		f.sheetListCalls = make(map[string]int)
+	}
+	f.sheetListCalls[workbookID]++
+	if err := f.sheetListErrors[workbookID]; err != nil {
+		return nil, err
+	}
+	return f.sheets[workbookID], nil
+}
+
+func (f *fakeAPI) sheetInfo(_ context.Context, workbookID, sheetID string) (sheet, error) {
+	if err := f.sheetInfoErrors[sheetKey(workbookID, sheetID)]; err != nil {
+		return sheet{}, err
+	}
+	return f.sheetInfos[sheetKey(workbookID, sheetID)], nil
+}
+
+func (f *fakeAPI) sheetRange(
+	_ context.Context,
+	workbookID, sheetID, ranges string,
+) ([][]string, error) {
+	key := sheetRangeKey(workbookID, sheetID, ranges)
+	f.sheetRangeCalls = append(f.sheetRangeCalls, key)
+	if f.sheetRangeFunc != nil {
+		return f.sheetRangeFunc(workbookID, sheetID, ranges)
+	}
+	if err := f.sheetRangeErrors[key]; err != nil {
+		return nil, err
+	}
+	return f.sheetValues[key], nil
+}
+
 func testConnector(api dingTalkAPI) *Connector {
 	return &Connector{newAPI: func(*config) dingTalkAPI { return api }}
 }
@@ -96,6 +154,15 @@ func testConfig(resources ...string) *types.DataSourceConfig {
 func testConfigWithUploadedFiles(resources ...string) *types.DataSourceConfig {
 	cfg := testConfig(resources...)
 	cfg.Settings = map[string]interface{}{"include_uploaded_files": true}
+	return cfg
+}
+
+// testConfigWithSheets turns include_sheets on. Cases that exercise the
+// spreadsheet ingest path have to opt in, because the switch defaults to off
+// and testConfig deliberately leaves the settings bag empty.
+func testConfigWithSheets(resources ...string) *types.DataSourceConfig {
+	cfg := testConfig(resources...)
+	cfg.Settings = map[string]interface{}{"include_sheets": true}
 	return cfg
 }
 
@@ -753,10 +820,12 @@ func TestScanScopeReportsSkippedNodesAndSingleDocumentScopeHasNone(t *testing.T)
 }
 
 // The reason has to say which kind of unsupported a node is: a video is skipped
-// on purpose, a native type has simply not been implemented, and an uploaded
-// file the connector could read is skipped only because its switch is off.
+// on purpose, a native type has simply not been implemented, and a file or
+// spreadsheet the connector could read is skipped only because its switch is
+// off.
 func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
 	enabled := documentSettings{IncludeUploadedFiles: true}
+	sheetsOn := documentSettings{IncludeSheets: true}
 	for _, testCase := range []struct {
 		label    string
 		node     node
@@ -784,11 +853,23 @@ func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
 		{
 			// Only the types with a name worth printing are in the map; every
 			// other unsupported node gets the generic reason. Kept as a
-			// regression guard on the map.
+			// regression guard on the map. The sample carries no extension:
+			// naming a concrete type here would duplicate that type's own
+			// entry, and naming an ingestible type would make the guard assert
+			// the opposite of what the connector does.
 			"type without a dedicated label",
-			node{Type: "FILE", Category: "ALIDOC", Extension: "axls"},
+			node{Type: "FILE", Category: "ALIDOC"},
 			documentSettings{},
 			"no ingest path for this DingTalk node type in this connector yet",
+		},
+		{
+			// A spreadsheet does have an ingest path, so an axls node that is
+			// still skipped must not be told otherwise: the skip names the type
+			// and the node shape it is read from.
+			"spreadsheet outside its file node shape",
+			node{Type: "FOLDER", Category: "ALIDOC", Extension: "axls"},
+			documentSettings{},
+			"DingTalk spreadsheet is ingested only from a FILE node in the ALIDOC category",
 		},
 		{
 			"multidimensional table",
@@ -822,11 +903,20 @@ func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
 			documentSettings{IncludeUploadedFiles: false},
 			"uploaded files are not ingested because include_uploaded_files is not enabled for this data source",
 		},
+
 		{
-			// A node that is not an uploaded file keeps its own reason even
-			// while the switch is on, so the switch never relabels a node it
-			// does not govern.
-			"unsupported type with the switch on",
+			// A node that is not a spreadsheet keeps its own reason even while
+			// the switch is on, so the switch never relabels a node it does not
+			// govern.
+			"unsupported type with the sheet switch on",
+			node{Type: "FILE", Category: "ALIDOC", Extension: "amind"},
+			sheetsOn,
+			"DingTalk mind map has no ingest path in this connector yet",
+		},
+		{
+			// The uploaded-file switch carries the same guarantee: turning it on
+			// must not relabel a node the upload path never governs.
+			"unsupported type with the uploaded-file switch on",
 			node{Type: "FILE", Category: "ALIDOC", Extension: "amind"},
 			enabled,
 			"DingTalk mind map has no ingest path in this connector yet",
@@ -1337,9 +1427,10 @@ func TestBinaryDocumentFileNameKeepsASingleExtension(t *testing.T) {
 
 // isDocument answers whether a read path exists at all, and isIngestible
 // answers whether this data source takes the node: the blocks API for adoc
-// always, the 钉盘 download API for an uploaded file only once
-// include_uploaded_files is on. Native DingTalk types stay out either way, so
-// nothing is ever enumerated that the sync cannot read.
+// always, the workbooks API for a native spreadsheet only once include_sheets
+// is on, and the 钉盘 download API for an uploaded file only once
+// include_uploaded_files is on. Types this connector cannot read stay out
+// either way, so nothing is ever enumerated that the sync cannot read.
 func TestNodeDocumentClassification(t *testing.T) {
 	for _, testCase := range []struct {
 		label    string
@@ -1349,7 +1440,7 @@ func TestNodeDocumentClassification(t *testing.T) {
 		binary   bool
 	}{
 		{"adoc", node{Type: "FILE", Category: "ALIDOC", Extension: "adoc"}, true, true, false},
-		{"axls", node{Type: "FILE", Category: "ALIDOC", Extension: "axls"}, false, false, false},
+		{"axls", node{Type: "FILE", Category: "ALIDOC", Extension: "axls"}, true, false, false},
 		{"docx", node{Type: "FILE", Category: "DOCUMENT", Extension: "docx"}, true, false, true},
 		{"pptx", node{Type: "FILE", Category: "DOCUMENT", Extension: "pptx"}, true, false, true},
 		{"xlsx", node{Type: "FILE", Category: "DOCUMENT", Extension: "xlsx"}, true, false, true},
@@ -1374,12 +1465,13 @@ func TestNodeDocumentClassification(t *testing.T) {
 				t.Fatalf("isBinaryDocument() = %v, want %v", got, testCase.binary)
 			}
 			// Off by default: with every switch unset only the native adoc
-			// path is admitted, and the switch must never admit a node that
-			// has no read path at all.
+			// path is admitted (the workbook path is guarded by include_sheets,
+			// the upload path by include_uploaded_files), and a switch must
+			// never admit a node that has no read path at all.
 			if got := testCase.node.isIngestible(documentSettings{}); got != testCase.online {
 				t.Fatalf("isIngestible(off) = %v, want %v", got, testCase.online)
 			}
-			enabled := documentSettings{IncludeUploadedFiles: true}
+			enabled := documentSettings{IncludeUploadedFiles: true, IncludeSheets: true}
 			if got := testCase.node.isIngestible(enabled); got != testCase.document {
 				t.Fatalf("isIngestible(on) = %v, want %v", got, testCase.document)
 			}

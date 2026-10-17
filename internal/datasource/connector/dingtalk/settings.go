@@ -31,9 +31,13 @@ func settingBool(v interface{}, def bool) bool {
 //
 // Every switch defaults to false: a data source created before the switch
 // existed keeps the behaviour it had then until an operator turns the switch on
-// deliberately, so an upgrade never starts downloading or embedding content
-// nobody asked for.
+// deliberately, so an upgrade never starts reading, downloading or embedding
+// content nobody asked for.
 type documentSettings struct {
+	// IncludeSheets admits native DingTalk spreadsheets (ALIDOC/axls) that are
+	// read through the workbooks API and merged into one markdown document.
+	IncludeSheets bool
+
 	// IncludeUploadedFiles admits uploaded Office/PDF files (FILE/DOCUMENT
 	// nodes) that are downloaded from 钉盘 and parsed by WeKnora itself.
 	IncludeUploadedFiles bool
@@ -48,6 +52,7 @@ func parseDocumentSettings(dataSourceConfig *types.DataSourceConfig) documentSet
 		raw = dataSourceConfig.Settings
 	}
 	return documentSettings{
+		IncludeSheets:        settingBool(raw["include_sheets"], false),
 		IncludeUploadedFiles: settingBool(raw["include_uploaded_files"], false),
 	}
 }

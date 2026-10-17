@@ -1057,6 +1057,8 @@ export default {
     dingtalkIngestLabel: '钉钉摄取范围',
     dingtalkIncludeUploadedFiles: '摄取知识库中的上传文件（docx / pptx / xlsx / pdf）',
     dingtalkIncludeUploadedFilesHint: '默认关闭。开启后，所选范围内的 Word / PowerPoint / Excel / PDF 上传文件会被下载并解析入库，单个文件上限 64 MiB；这些文件的正文会计入存储与向量化成本。关闭时它们只是被跳过，同步日志会说明开关未开启，不会删除知识库中已有的副本。',
+    dingtalkIncludeSheets: '摄取钉钉表格（axls）',
+    dingtalkIncludeSheetsHint: '默认关闭。开启后，所选范围内的钉钉表格会通过工作表 API 读取，每张工作表最多 10000 行 × 256 列，超出的行列会被截断并在同步日志中说明截断范围；同一个工作簿的多张非空工作表会合并成同一篇 Markdown。表格正文会计入存储与向量化成本。关闭时表格只是被跳过，同步日志会说明开关未开启。',
     prereqBarText_dingtalk: '首次使用？点击查看钉钉应用配置指引',
     prereqStep1Brief_dingtalk: '创建企业内部应用',
     prereqStep1Desc_dingtalk: '在钉钉开放平台创建企业内部应用，并获取 Client ID 和 Client Secret',
