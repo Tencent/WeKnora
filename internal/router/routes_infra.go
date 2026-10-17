@@ -306,7 +306,15 @@ func RegisterDataSourceRoutes(
 	handler *handler.DataSourceHandler,
 	credHandler *handler.DataSourceCredentialsHandler,
 	g *rbacGuards,
+	oauthHandlers ...*handler.DataSourceOAuthHandler,
 ) {
+	var oauthHandler *handler.DataSourceOAuthHandler
+	if len(oauthHandlers) > 0 {
+		oauthHandler = oauthHandlers[0]
+	}
+	if oauthHandler != nil {
+		r.GET("/datasource-oauth/onedrive/callback", oauthHandler.Callback)
+	}
 	// Data source routes
 	ds := g.apiKeyGroup(r.Group("/datasource"), apiKeyManageDataSources(apiKeyFullAccess()))
 	{
@@ -329,6 +337,11 @@ func RegisterDataSourceRoutes(
 		// internal/handler/datasource_credentials.go). — Admin+
 		ds.PUT("/:id/credentials", g.Admin(), credHandler.Put)
 		ds.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
+		if oauthHandler != nil {
+			ds.POST("/:id/oauth/authorize-url", g.Admin(), oauthHandler.AuthorizeURL)
+			ds.GET("/:id/oauth/status", g.Admin(), oauthHandler.Status)
+			ds.DELETE("/:id/oauth/token", g.Admin(), oauthHandler.Revoke)
+		}
 
 		// Connection and resource management — Admin+
 		ds.POST("/:id/validate", g.Admin(), handler.ValidateConnection)

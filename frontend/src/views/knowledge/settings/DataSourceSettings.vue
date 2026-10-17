@@ -471,6 +471,8 @@ onBeforeUnmount(stopPolling)
   &--notion .ds-card__badge,
   &--yuque .ds-card__badge,
   &--ima .ds-card__badge,
+  &--connecting .ds-card__badge,
+  &--reauthorization_required .ds-card__badge,
   &--rss .ds-card__badge {
     background: var(--td-bg-color-container);
     box-shadow: inset 0 0 0 1px var(--td-component-stroke);

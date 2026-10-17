@@ -991,6 +991,7 @@ export default {
     connectionFailed: '連結失敗',
     isRequired: '為必填項',
     credentialsLabel: '憑證',
+    oauthConnect: '連接 OneDrive', oauthReconnect: '重新授權', oauthAuthorizationRequired: '需要授權', oauthAuthorized: '已授權', oauthReauthorizationRequired: '授權已過期，請重新授權後繼續。', oauthReplaceConfirm: '更換帳號會重設同步游標，是否繼續？', oauthDisconnectConfirm: '中斷 OneDrive 並停止同步？', oauthNotCompleted: '授權未完成', oauthConnected: 'OneDrive 已連接', oauthFailed: 'OneDrive 授權失敗', connecting: '連接中',
     gitlab: {
       baseUrl: 'GitLab 地址',
       accessToken: '個人存取權杖',

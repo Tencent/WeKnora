@@ -30,8 +30,10 @@ type DataSourceResponse struct {
 	Status               string               `json:"status" extensions:"x-agent"`
 	ConflictStrategy     string               `json:"conflict_strategy" extensions:"x-agent"`
 	SyncDeletions        bool                 `json:"sync_deletions" extensions:"x-agent"`
+	ConnectionVersion    uint64               `json:"connection_version"`
 	LastSyncAt           *time.Time           `json:"last_sync_at" extensions:"x-agent"`
 	LastSyncCursor       json.RawMessage      `json:"last_sync_cursor,omitempty"`
+	HasSyncCursor        bool                 `json:"has_sync_cursor"`
 	LastSyncResult       json.RawMessage      `json:"last_sync_result,omitempty"`
 	ErrorMessage         string               `json:"error_message,omitempty"`
 	SyncLogRetentionDays int                  `json:"sync_log_retention_days"`
@@ -81,8 +83,10 @@ func NewDataSourceResponse(ds *types.DataSource) *DataSourceResponse {
 		Status:               ds.Status,
 		ConflictStrategy:     ds.ConflictStrategy,
 		SyncDeletions:        ds.SyncDeletions,
+		ConnectionVersion:    ds.ConnectionVersion,
 		LastSyncAt:           ds.LastSyncAt,
 		LastSyncCursor:       json.RawMessage(ds.LastSyncCursor),
+		HasSyncCursor:        len(ds.LastSyncCursor) > 0,
 		LastSyncResult:       json.RawMessage(ds.LastSyncResult),
 		ErrorMessage:         ds.ErrorMessage,
 		SyncLogRetentionDays: ds.SyncLogRetentionDays,

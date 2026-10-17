@@ -118,6 +118,40 @@ type FullSyncWithCursor interface {
 	) ([]types.FetchedItem, *types.SyncCursor, error)
 }
 
+type OAuthConnector interface {
+	Connector
+	ValidateStaticConfig(config *types.DataSourceConfig) error
+	OAuthProvider() string
+}
+
+type RuntimeConnector interface {
+	Connector
+	PrepareRuntime(ctx context.Context, dataSource *types.DataSource, config *types.DataSourceConfig) error
+}
+
+type ConnectionLifecycleConnector interface {
+	Connector
+	Disconnect(ctx context.Context, dataSource *types.DataSource) error
+}
+
+type SyncLifecycleConnector interface {
+	Connector
+	ReconcileItems(ctx context.Context, dataSource *types.DataSource, items []types.FetchedItem) ([]types.FetchedItem, error)
+	MarkItemDeleted(ctx context.Context, dataSource *types.DataSource, item *types.FetchedItem) error
+	IsRunCurrent(ctx context.Context, dataSource *types.DataSource) (bool, error)
+}
+
+type DeferredCommitConnector interface {
+	Connector
+	DeferCursorUntilIngestionCompletes() bool
+}
+
+type FetchResultConnector interface {
+	Connector
+	FetchAllResult(ctx context.Context, config *types.DataSourceConfig, resourceIDs []string) (*types.FetchResult, error)
+	FetchIncrementalResult(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) (*types.FetchResult, error)
+}
+
 // ConnectorRegistry manages the registration and lookup of available connectors
 type ConnectorRegistry struct {
 	connectors map[string]Connector

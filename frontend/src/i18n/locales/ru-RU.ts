@@ -991,6 +991,7 @@ export default {
     connectionFailed: 'Подключение не удалось',
     isRequired: 'обязательно для заполнения',
     credentialsLabel: 'учётные данные',
+    oauthConnect: 'Подключить OneDrive', oauthReconnect: 'Повторная авторизация', oauthAuthorizationRequired: 'Требуется авторизация', oauthAuthorized: 'Авторизовано', oauthReauthorizationRequired: 'Срок авторизации истёк. Авторизуйтесь снова.', oauthReplaceConfirm: 'Смена аккаунта сбросит курсор синхронизации. Продолжить?', oauthDisconnectConfirm: 'Отключить OneDrive и остановить синхронизацию?', oauthNotCompleted: 'Авторизация не завершена', oauthConnected: 'OneDrive подключён', oauthFailed: 'Ошибка авторизации OneDrive', connecting: 'Подключение',
     gitlab: {
       baseUrl: 'URL GitLab', accessToken: 'Персональный токен доступа', projects: 'Проекты GitLab',
       projectsHint: 'Укажите ID проекта или путь в пространстве имён (например group/project), а также при необходимости ветку и каталоги.',

@@ -13,12 +13,17 @@ import {
   deleteDataSource,
   putDataSourceCredentials,
   deleteDataSourceCredentials,
+  getDataSourceOAuthAuthorizeURL,
+  getDataSourceOAuthStatus,
+  disconnectDataSourceOAuth,
   type DataSource,
   type Resource,
+  type DataSourceOAuthStatus,
 } from '@/api/datasource'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDatasourceIconUrl } from './datasourceIcons'
+import { waitForOneDriveAuthorization } from './oneDriveOAuthFlow'
 
 const props = defineProps<{
   kbId: string
@@ -32,6 +37,9 @@ const { t } = useI18n()
 const isEdit = computed(() => !!props.dataSource)
 const step = ref(0)
 const submitting = ref(false)
+const oauthStatus = ref<DataSourceOAuthStatus | null>(null)
+const oauthConnecting = ref(false)
+const oauthAuthorizationURL = ref('')
 
 // In edit mode the credential "configured?" flag travels on the main
 // DataSource response (DataSource.credentials.credentials.configured —
@@ -156,6 +164,7 @@ function removeRssAuthHeader(idx: number) {
 }
 
 function needsConnectionTest(): boolean {
+  if (isOAuthConnector.value) return false
   return !(isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value)
 }
 
@@ -718,6 +727,15 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'onedrive',
+    available: true,
+    docUrl: 'https://learn.microsoft.com/graph/api/resources/onedrive',
+    permissionDocUrl: 'https://learn.microsoft.com/graph/permissions-reference',
+    permissionPageUrl: 'https://portal.azure.com/',
+    requiredPermissions: [],
+    fields: [],
+  },
+  {
     type: 'dingtalk',
     available: true,
     docUrl: 'https://open.dingtalk.com/document/development/knowledge-base-overview',
@@ -791,6 +809,49 @@ const displayedCredentialFields = computed(() => {
   })
 })
 
+const isOAuthConnector = computed(() => form.value.type === 'onedrive')
+
+async function refreshOneDriveOAuthStatus() {
+  if (!isOAuthConnector.value || !tempDsId.value) return
+  try {
+    oauthStatus.value = await getDataSourceOAuthStatus(tempDsId.value)
+  } catch {
+    oauthStatus.value = null
+  }
+}
+
+async function connectOneDriveOAuth(replaceConnection = false) {
+  if (!tempDsId.value) {
+    const res = await createDataSource({ ...form.value, knowledge_base_id: props.kbId, status: 'paused' } as any)
+    tempDsId.value = (res?.data || res).id
+  }
+  const dsId = tempDsId.value
+  oauthConnecting.value = true
+  try {
+    const url = await getDataSourceOAuthAuthorizeURL(dsId, replaceConnection)
+    oauthAuthorizationURL.value = url
+    const popup = window.open(url, 'weknora-onedrive-oauth', 'popup,width=720,height=760')
+    await waitForOneDriveAuthorization({
+      popup,
+      getStatus: () => getDataSourceOAuthStatus(dsId),
+      onStatus: status => { oauthStatus.value = status },
+      wait: milliseconds => new Promise(resolve => window.setTimeout(resolve, milliseconds)),
+      notCompletedMessage: t('datasource.oauthNotCompleted'),
+    })
+    MessagePlugin.success(t('datasource.oauthConnected'))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('datasource.oauthFailed'))
+  } finally {
+    oauthConnecting.value = false
+  }
+}
+
+async function disconnectOneDriveOAuth() {
+  if (!tempDsId.value || !window.confirm(t('datasource.oauthDisconnectConfirm'))) return
+  await disconnectDataSourceOAuth(tempDsId.value)
+  oauthStatus.value = await getDataSourceOAuthStatus(tempDsId.value)
+}
+
 // --- Drawer lifecycle ---
 watch(visible, async (v) => {
   if (!v) {
@@ -821,6 +882,8 @@ watch(visible, async (v) => {
   driveRootLoaded.value = false
   rssAuthHeaders.value = []
   gitlabProjects.value = []
+  oauthStatus.value = null
+  oauthAuthorizationURL.value = ''
 
   if (isEdit.value && props.dataSource) {
     // Reset edit/replace toggle every open so an aborted replace doesn't
@@ -867,6 +930,7 @@ watch(visible, async (v) => {
       }
     }
     tempDsId.value = props.dataSource.id
+    if (form.value.type === 'onedrive') void refreshOneDriveOAuthStatus()
   } else {
     replaceCredentialsMode.value = false
     credentialsConfigured.value = false
@@ -920,6 +984,7 @@ function selectType(def: ConnectorDef) {
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
   form.value.config.credentials = def.type === "confluence" ? { edition: "server" } : {}
+  oauthStatus.value = null
   if (isFeishuFamilyConnector(def.type)) {
     form.value.config.settings.parse_mode = form.value.config.settings.parse_mode || 'blocks'
   } else {
@@ -1617,7 +1682,38 @@ const drawerConfirmText = computed(() => {
       <section class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('datasource.credentialsLabel') }}</h4>
 
-        <div v-if="isEdit && credentialsConfigured && !replaceCredentialsMode" class="form-item">
+        <div v-if="isOAuthConnector" class="form-item onedrive-connection-card">
+          <div class="onedrive-connection-card__status">
+            <t-icon :name="oauthStatus?.authorized ? 'check-circle-filled' : 'link'" />
+            <span v-if="oauthStatus?.authorized">
+              {{ oauthStatus.account_display_name || t('datasource.oauthAuthorized') }}
+            </span>
+            <span v-else>{{ t('datasource.oauthAuthorizationRequired') }}</span>
+          </div>
+          <div class="onedrive-connection-card__actions">
+            <t-button
+              theme="primary"
+              :loading="oauthConnecting"
+              @click="connectOneDriveOAuth(Boolean(oauthStatus?.authorized))"
+            >
+              {{ oauthStatus?.authorized ? t('datasource.oauthReconnect') : t('datasource.oauthConnect') }}
+            </t-button>
+            <t-button
+              v-if="oauthStatus?.authorized"
+              variant="text"
+              theme="danger"
+              @click="disconnectOneDriveOAuth"
+            >{{ t('datasource.oauthDisconnectConfirm') }}</t-button>
+          </div>
+          <p v-if="oauthStatus?.reauthorization_required" class="form-desc">
+            {{ t('datasource.oauthReauthorizationRequired') }}
+          </p>
+          <a v-if="oauthAuthorizationURL" :href="oauthAuthorizationURL" target="_blank" rel="noopener" class="doc-link">
+            {{ t('datasource.oauthReplaceConfirm') }}
+          </a>
+        </div>
+
+        <div v-else-if="isEdit && credentialsConfigured && !replaceCredentialsMode" class="form-item">
           <div
             class="credential-faux-input"
             :class="{ 'is-confirm-remove': pendingRemoveCredentials }"
@@ -2120,6 +2216,24 @@ const drawerConfirmText = computed(() => {
 
 <style scoped lang="less">
 @import './datasource-surface.less';
+
+.onedrive-connection-card {
+  border: 1px solid var(--td-component-border);
+  border-radius: var(--app-radius-md);
+  padding: var(--app-space-4);
+  background: var(--td-bg-color-container);
+}
+
+.onedrive-connection-card__status,
+.onedrive-connection-card__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--app-space-2);
+}
+
+.onedrive-connection-card__actions {
+  margin-top: var(--app-space-2);
+}
 .ds-steps {
   display: flex;
   gap: 8px;

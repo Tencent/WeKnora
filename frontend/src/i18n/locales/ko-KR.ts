@@ -991,6 +991,7 @@ export default {
     connectionFailed: '연결 실패',
     isRequired: '은(는) 필수입니다',
     credentialsLabel: '자격 증명',
+    oauthConnect: 'OneDrive 연결', oauthReconnect: '재인증', oauthAuthorizationRequired: '인증 필요', oauthAuthorized: '인증됨', oauthReauthorizationRequired: '인증이 만료되었습니다. 계속하려면 재인증하세요.', oauthReplaceConfirm: '계정을 변경하면 동기화 커서가 초기화됩니다. 계속하시겠습니까?', oauthDisconnectConfirm: 'OneDrive 연결을 해제하고 동기화를 중지하시겠습니까?', oauthNotCompleted: '인증이 완료되지 않았습니다', oauthConnected: 'OneDrive 연결됨', oauthFailed: 'OneDrive 인증 실패', connecting: '연결 중',
     gitlab: {
       baseUrl: 'GitLab URL', accessToken: '개인 액세스 토큰', projects: 'GitLab 프로젝트',
       projectsHint: '프로젝트 ID 또는 네임스페이스 경로(예: group/project)를 입력하고, 필요에 따라 브랜치와 디렉터리를 지정하세요.',

@@ -7472,6 +7472,7 @@ export default {
     connectionFailed: 'Connection failed',
     isRequired: 'is required',
     credentialsLabel: 'credentials',
+    oauthConnect: 'Connect OneDrive', oauthReconnect: 'Reauthorize', oauthAuthorizationRequired: 'Authorization required', oauthAuthorized: 'Authorized', oauthReauthorizationRequired: 'Authorization expired. Reauthorize to continue.', oauthReplaceConfirm: 'Changing the account resets the sync cursor. Continue?', oauthDisconnectConfirm: 'Disconnect OneDrive and stop syncing?', oauthNotCompleted: 'Authorization was not completed', oauthConnected: 'OneDrive connected', oauthFailed: 'OneDrive authorization failed', connecting: 'Connecting',
     gitlab: {
       baseUrl: 'GitLab URL', accessToken: 'Personal access token', projects: 'GitLab projects',
       projectsHint: 'Enter a project ID or namespace path (for example group/project), with optional branch and directories.',

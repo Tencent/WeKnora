@@ -1,8 +1,10 @@
 package types
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -49,10 +51,12 @@ const (
 	SyncModeFull        = "full"
 
 	// Data source status
-	DataSourceStatusActive  = "active"
-	DataSourceStatusPaused  = "paused"
-	DataSourceStatusError   = "error"
-	DataSourceStatusDeleted = "deleted"
+	DataSourceStatusActive                  = "active"
+	DataSourceStatusPaused                  = "paused"
+	DataSourceStatusConnecting              = "connecting"
+	DataSourceStatusReauthorizationRequired = "reauthorization_required"
+	DataSourceStatusError                   = "error"
+	DataSourceStatusDeleted                 = "deleted"
 
 	// Sync log status
 	SyncLogStatusRunning  = "running"
@@ -102,6 +106,8 @@ type DataSource struct {
 	// Whether to sync deletions from source
 	SyncDeletions bool `json:"sync_deletions" gorm:"default:true"`
 
+	ConnectionVersion uint64 `json:"connection_version" gorm:"not null;default:1"`
+
 	// Last successful sync timestamp
 	LastSyncAt *time.Time `json:"last_sync_at"`
 
@@ -142,6 +148,89 @@ func (d *DataSource) TableName() string {
 func (d *DataSource) BeforeCreate(tx *gorm.DB) error {
 	if d.ID == "" {
 		d.ID = uuid.New().String()
+	}
+	if d.ConnectionVersion == 0 {
+		d.ConnectionVersion = 1
+	}
+	return nil
+}
+
+type DataSourceOAuthToken struct {
+	ID                 string    `json:"id" gorm:"type:varchar(36);primaryKey"`
+	TenantID           uint64    `json:"tenant_id" gorm:"not null;uniqueIndex:idx_ds_oauth_token_tenant_source"`
+	DataSourceID       string    `json:"data_source_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_ds_oauth_token_tenant_source;index"`
+	Provider           string    `json:"provider" gorm:"type:varchar(32);not null"`
+	AccessToken        string    `json:"-" gorm:"type:text;not null"`
+	RefreshToken       string    `json:"-" gorm:"type:text;not null"`
+	TokenType          string    `json:"token_type" gorm:"type:varchar(32)"`
+	Scopes             string    `json:"scopes" gorm:"type:text"`
+	ExpiresAt          time.Time `json:"expires_at"`
+	ProviderAccountID  string    `json:"provider_account_id" gorm:"type:varchar(255);not null"`
+	ProviderTenantID   string    `json:"provider_tenant_id" gorm:"type:varchar(255)"`
+	AuthorizedDriveID  string    `json:"authorized_drive_id" gorm:"type:varchar(255);not null"`
+	AccountDisplayName string    `json:"account_display_name" gorm:"type:varchar(255)"`
+	AuthorizedByUserID string    `json:"authorized_by_user_id" gorm:"type:varchar(255);not null"`
+	ConnectionVersion  uint64    `json:"connection_version" gorm:"not null"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+func (DataSourceOAuthToken) TableName() string { return "data_source_oauth_tokens" }
+func (t *DataSourceOAuthToken) BeforeCreate(_ *gorm.DB) error {
+	if t.ID == "" {
+		t.ID = uuid.NewString()
+	}
+	return t.encryptSecrets()
+}
+func (t *DataSourceOAuthToken) BeforeSave(_ *gorm.DB) error { return t.encryptSecrets() }
+func (t *DataSourceOAuthToken) AfterFind(_ *gorm.DB) error {
+	var err error
+	if t.AccessToken, err = utils.DecryptStoredSecret(t.AccessToken); err != nil {
+		return fmt.Errorf("decrypt data source oauth access token: %w", err)
+	}
+	if t.RefreshToken, err = utils.DecryptStoredSecret(t.RefreshToken); err != nil {
+		return fmt.Errorf("decrypt data source oauth refresh token: %w", err)
+	}
+	return nil
+}
+func (t *DataSourceOAuthToken) encryptSecrets() error {
+	key := utils.GetAESKey()
+	if key == nil {
+		return fmt.Errorf("data source oauth requires a 32-byte SYSTEM_AES_KEY")
+	}
+	var err error
+	if t.AccessToken, err = utils.EncryptAESGCM(t.AccessToken, key); err != nil {
+		return fmt.Errorf("encrypt data source oauth access token: %w", err)
+	}
+	if t.RefreshToken, err = utils.EncryptAESGCM(t.RefreshToken, key); err != nil {
+		return fmt.Errorf("encrypt data source oauth refresh token: %w", err)
+	}
+	return nil
+}
+
+type DataSourceItem struct {
+	ID                 string     `json:"id" gorm:"type:varchar(36);primaryKey"`
+	TenantID           uint64     `json:"tenant_id" gorm:"not null;index:idx_ds_item_scope,priority:1"`
+	DataSourceID       string     `json:"data_source_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_ds_item_identity,priority:1;index:idx_ds_item_scope,priority:2"`
+	ConnectionVersion  uint64     `json:"connection_version" gorm:"not null;uniqueIndex:idx_ds_item_identity,priority:2;index:idx_ds_item_scope,priority:3"`
+	DriveID            string     `json:"drive_id" gorm:"type:varchar(255);not null;uniqueIndex:idx_ds_item_identity,priority:3"`
+	ItemID             string     `json:"item_id" gorm:"type:varchar(255);not null;uniqueIndex:idx_ds_item_identity,priority:4"`
+	ParentItemID       string     `json:"parent_item_id" gorm:"type:varchar(255);index"`
+	ItemType           string     `json:"item_type" gorm:"type:varchar(16);not null"`
+	SelectedRootID     string     `json:"selected_root_id" gorm:"type:text;index"`
+	ExternalID         string     `json:"external_id" gorm:"type:text;index"`
+	LastModifiedAt     time.Time  `json:"last_modified_at"`
+	LastSeenGeneration string     `json:"last_seen_generation" gorm:"type:varchar(36);index"`
+	Ingested           bool       `json:"ingested" gorm:"not null;default:false"`
+	DeletedAt          *time.Time `json:"deleted_at" gorm:"index"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+}
+
+func (DataSourceItem) TableName() string { return "data_source_items" }
+func (i *DataSourceItem) BeforeCreate(_ *gorm.DB) error {
+	if i.ID == "" {
+		i.ID = uuid.NewString()
 	}
 	return nil
 }
@@ -188,7 +277,8 @@ type SyncLog struct {
 	ErrorMessage string `json:"error_message"`
 
 	// Detailed sync result (JSON-encoded)
-	Result JSON `json:"result" gorm:"type:jsonb"`
+	Result     JSON `json:"result" gorm:"type:jsonb"`
+	Checkpoint JSON `json:"-" gorm:"type:jsonb"`
 
 	// Creation timestamp (usually same as StartedAt)
 	CreatedAt time.Time `json:"created_at"`
@@ -232,6 +322,15 @@ type DataSourceConfig struct {
 
 	// Connector-specific configuration
 	Settings map[string]interface{} `json:"settings"`
+	Runtime  *DataSourceRuntime     `json:"-"`
+}
+
+type DataSourceRuntime struct {
+	DataSourceID       string
+	TenantID           uint64
+	ConnectionVersion  uint64
+	AccessToken        func(context.Context) (string, error)
+	RefreshAccessToken func(context.Context) (string, error)
 }
 
 // HasCredentials reports whether the credentials map carries any value at
@@ -442,6 +541,28 @@ type SyncResult struct {
 	NextCursor *SyncCursor `json:"next_cursor,omitempty"`
 }
 
+type DataSourcePendingKnowledge struct {
+	KnowledgeID string `json:"knowledge_id"`
+	Title       string `json:"title"`
+	IsUpdate    bool   `json:"is_update"`
+}
+type DataSourceSyncCheckpoint struct {
+	Result           SyncResult                   `json:"result"`
+	NextCursor       *SyncCursor                  `json:"next_cursor,omitempty"`
+	PendingKnowledge []DataSourcePendingKnowledge `json:"pending_knowledge"`
+	FinalizeDeadline time.Time                    `json:"finalize_deadline"`
+}
+type FetchWarning struct {
+	Code       string `json:"code"`
+	ExternalID string `json:"external_id,omitempty"`
+	Message    string `json:"message"`
+}
+type FetchResult struct {
+	Items      []FetchedItem  `json:"items"`
+	NextCursor *SyncCursor    `json:"-"`
+	Warnings   []FetchWarning `json:"warnings,omitempty"`
+}
+
 // SyncItemError is one user-facing failure sample. It carries a stable i18n
 // Code (+ interpolation Params) so the frontend localises it to the viewer's
 // language, plus a Message fallback for clients without the key. The raw API
@@ -500,7 +621,8 @@ type DataSourceSyncPayload struct {
 	DataSourceID string `json:"data_source_id"`
 
 	// Workspace ID
-	TenantID uint64 `json:"tenant_id"`
+	TenantID          uint64 `json:"tenant_id"`
+	ConnectionVersion uint64 `json:"connection_version"`
 
 	// Sync log ID (for tracking)
 	SyncLogID string `json:"sync_log_id"`
@@ -510,6 +632,15 @@ type DataSourceSyncPayload struct {
 
 	// Maximum number of items to fetch (0 = unlimited)
 	MaxItems int `json:"max_items,omitempty"`
+}
+
+type DataSourceFinalizePayload struct {
+	TracingContext
+	DataSourceID      string `json:"data_source_id"`
+	TenantID          uint64 `json:"tenant_id"`
+	ConnectionVersion uint64 `json:"connection_version"`
+	SyncLogID         string `json:"sync_log_id"`
+	WasPaused         bool   `json:"was_paused"`
 }
 
 // ToJSON converts a DataSourceConfig to the JSON blob stored in

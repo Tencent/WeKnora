@@ -83,7 +83,7 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 	}
 
 	// Validate connector type
-	_, err = s.connectorRegistry.Get(ds.Type)
+	connector, err := s.connectorRegistry.Get(ds.Type)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +95,12 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 			ds.Config = blob
 		}
 	}
-	if err := s.validateDataSourceConfig(ctx, ds); err != nil {
+	if oauthConnector, ok := connector.(datasource.OAuthConnector); ok {
+		if cfg, parseErr := ds.ParseConfig(); parseErr != nil || oauthConnector.ValidateStaticConfig(cfg) != nil {
+			return nil, datasource.ErrInvalidConfig
+		}
+		ds.Status = types.DataSourceStatusPaused
+	} else if err := s.validateDataSourceConfig(ctx, ds); err != nil {
 		return nil, err
 	}
 
@@ -401,6 +406,9 @@ func (s *DataSourceService) ValidateConnection(ctx context.Context, dsID string)
 	if err != nil {
 		return datasource.ErrInvalidConfig
 	}
+	if err := s.prepareConnectorRuntime(ctx, ds, config, connector); err != nil {
+		return err
+	}
 
 	// Validate connection
 	if err := connector.Validate(ctx, config); err != nil {
@@ -443,6 +451,9 @@ func (s *DataSourceService) ListAvailableResources(
 	if err != nil {
 		return nil, datasource.ErrInvalidConfig
 	}
+	if err := s.prepareConnectorRuntime(ctx, ds, config, connector); err != nil {
+		return nil, err
+	}
 
 	// List resources
 	resources, err := connector.ListResources(ctx, config, parentID)
@@ -476,6 +487,9 @@ func (s *DataSourceService) ResolveResourceAncestors(
 	config, err := ds.ParseConfig()
 	if err != nil {
 		return nil, datasource.ErrInvalidConfig
+	}
+	if err := s.prepareConnectorRuntime(ctx, ds, config, connector); err != nil {
+		return nil, err
 	}
 
 	ancestors, err := connector.ResolveResourceAncestors(ctx, config, resourceIDs)
@@ -554,6 +568,15 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 			"task_id": info.ID, "trigger": "manual", "processing_status": "pending",
 		})
 	return syncLog, nil
+}
+
+func (s *DataSourceService) prepareConnectorRuntime(
+	ctx context.Context, ds *types.DataSource, config *types.DataSourceConfig, connector datasource.Connector,
+) error {
+	if runtimeConnector, ok := connector.(datasource.RuntimeConnector); ok {
+		return runtimeConnector.PrepareRuntime(ctx, ds, config)
+	}
+	return nil
 }
 
 // PauseDataSource pauses a data source's scheduled syncs
@@ -705,6 +728,15 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		_ = s.dsRepo.Update(ctx, ds)
 		return err
 	}
+	if runtimeConnector, ok := connector.(datasource.RuntimeConnector); ok {
+		if err := runtimeConnector.PrepareRuntime(ctx, ds, config); err != nil {
+			syncLog.Status = types.SyncLogStatusFailed
+			syncLog.FinishedAt = timePtr(time.Now().UTC())
+			syncLog.ErrorMessage = err.Error()
+			_ = s.syncLogRepo.Update(ctx, syncLog)
+			return err
+		}
+	}
 	// Streaming path: connectors that support it interleave fetch→ingest→
 	// checkpoint so a large sync bounds memory and resumes after a timeout
 	// instead of restarting (Tencent/WeKnora#2136). Others fall back below.
@@ -716,8 +748,23 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	var items []types.FetchedItem
 	var nextCursor *types.SyncCursor
 	var fetchErr error
+	var fetchWarnings []string
 
-	if payload.ForceFull || ds.SyncMode == types.SyncModeFull {
+	if reliable, ok := connector.(datasource.FetchResultConnector); ok {
+		var fetched *types.FetchResult
+		if payload.ForceFull || ds.SyncMode == types.SyncModeFull {
+			fetched, fetchErr = reliable.FetchAllResult(ctx, config, config.ResourceIDs)
+		} else {
+			cursor, _ := ds.ParseSyncCursor()
+			fetched, fetchErr = reliable.FetchIncrementalResult(ctx, config, cursor)
+		}
+		if fetched != nil {
+			items, nextCursor = fetched.Items, fetched.NextCursor
+			for _, warning := range fetched.Warnings {
+				fetchWarnings = append(fetchWarnings, warning.Code+": "+warning.Message)
+			}
+		}
+	} else if payload.ForceFull || ds.SyncMode == types.SyncModeFull {
 		if full, ok := connector.(datasource.FullSyncWithCursor); ok {
 			cursor, _ := ds.ParseSyncCursor()
 			items, nextCursor, fetchErr = full.FetchAllFromCursor(ctx, config, config.ResourceIDs, cursor)
@@ -732,7 +779,6 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		logger.Infof(ctx, "incremental sync fetched %d items", len(items))
 	}
 
-	var fetchWarnings []string
 	var partialFetch *datasource.PartialFetchError
 	if errors.As(fetchErr, &partialFetch) {
 		fetchWarnings = partialFetch.Details
@@ -838,6 +884,14 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	logger.Infof(ctx, "data source sync completed: ds=%s created=%d updated=%d deleted=%d",
 		payload.DataSourceID, syncLog.ItemsCreated, syncLog.ItemsUpdated, syncLog.ItemsDeleted)
 
+	return nil
+}
+
+// ProcessSyncFinalize is reserved for connectors that defer cursor commits
+// until asynchronous ingestion completes. The current service keeps the
+// established synchronous data-source pipeline, so there is no deferred work
+// to finalize here.
+func (s *DataSourceService) ProcessSyncFinalize(_ context.Context, _ *asynq.Task) error {
 	return nil
 }
 

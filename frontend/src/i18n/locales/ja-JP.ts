@@ -7472,6 +7472,7 @@ export default {
     connectionFailed: '接続に失敗しました',
     isRequired: 'は必須です',
     credentialsLabel: '認証情報',
+    oauthConnect: 'OneDriveに接続', oauthReconnect: '再認証', oauthAuthorizationRequired: '認証が必要です', oauthAuthorized: '認証済み', oauthReauthorizationRequired: '認証の有効期限が切れています。再認証してください。', oauthReplaceConfirm: 'アカウントを変更すると同期カーソルがリセットされます。続行しますか？', oauthDisconnectConfirm: 'OneDriveの接続を解除して同期を停止しますか？', oauthNotCompleted: '認証が完了していません', oauthConnected: 'OneDriveに接続しました', oauthFailed: 'OneDriveの認証に失敗しました', connecting: '接続中',
     gitlab: {
       baseUrl: 'GitLab URL', accessToken: 'パーソナルアクセストークン', projects: 'GitLabプロジェクト',
       projectsHint: 'プロジェクトIDまたはネームスペースのパス（例: group/project）を入力します。ブランチとディレクトリは任意です。',
