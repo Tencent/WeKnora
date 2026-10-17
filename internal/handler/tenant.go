@@ -1550,6 +1550,10 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
+	if err := types.ValidateTenantOSSAuth(&cfg); err != nil {
+		_ = c.Error(err)
+		return
+	}
 	provider := strings.ToLower(strings.TrimSpace(cfg.DefaultProvider))
 	if provider == "" {
 		provider = firstAllowedStorageProvider()
@@ -1570,6 +1574,10 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 		return
 	}
 	merged := types.MergeStorageEngineConfigForUpdate(&cfg, tenant.StorageEngineConfig)
+	if err := types.ValidateTenantOSSAuth(merged); err != nil {
+		_ = c.Error(err)
+		return
+	}
 	tenant.StorageEngineConfig = merged
 	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
 	if err != nil {

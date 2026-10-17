@@ -33,6 +33,8 @@ func NewStorageBackendHandler(repo interfaces.StorageBackendRepository, service 
 }
 
 type storageBackendRequest struct {
+	// Optional user-owned backend whose masked credentials should be preserved during testing.
+	ID       string                     `json:"id,omitempty"`
 	Name     string                     `json:"name" binding:"required"`
 	Provider string                     `json:"provider" binding:"required"`
 	Config   types.StorageBackendConfig `json:"config"`
@@ -217,6 +219,31 @@ func (h *StorageBackendHandler) TestRaw(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperrors.NewBadRequestError(err.Error()))
 		return
+	}
+	if req.ID != "" {
+		existing, err := h.repo.GetByID(c.Request.Context(), storageTenantID(c), req.ID)
+		if err != nil {
+			_ = c.Error(err)
+			return
+		}
+		if existing == nil {
+			_ = c.Error(apperrors.NewNotFoundError("storage backend not found"))
+			return
+		}
+		if existing.Source == types.StorageBackendSourceEnv {
+			_ = c.Error(apperrors.NewBadRequestError("environment storage backend is read-only; test it by ID"))
+			return
+		}
+		if req.Provider != existing.Provider {
+			_ = c.Error(apperrors.NewBadRequestError("storage provider cannot be changed"))
+			return
+		}
+		// Testing edited auth must not send saved credentials to a new destination.
+		if !req.Config.SameTestDestination(req.Provider, existing.Config) {
+			_ = c.Error(apperrors.NewBadRequestError("endpoint, region, bucket and path prefix are immutable"))
+			return
+		}
+		req.Config = req.Config.MergeSecrets(req.Provider, existing.Config)
 	}
 	backend := &types.StorageBackend{TenantID: storageTenantID(c), Name: req.Name, Provider: req.Provider, Config: req.Config}
 	if err := backend.Validate(); err != nil {

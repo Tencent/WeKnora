@@ -1,6 +1,8 @@
 import { get, post, put, del } from '@/utils/request'
 
 export interface StorageBackendConfig {
+  auth_type?: 'access_key' | 'ecs_ram_role'
+  role_name?: string
   mode?: string
   endpoint?: string
   region?: string
