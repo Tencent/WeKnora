@@ -294,7 +294,7 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
 
         <div class="cell cell-name" role="cell">
           <span class="folder-row-icon" aria-hidden="true">
-            <t-icon name="folder" />
+            <t-icon name="folder" size="26px" />
           </span>
           <div class="row-file-text">
             <div class="row-title-line">
