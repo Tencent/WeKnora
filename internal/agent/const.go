@@ -36,12 +36,17 @@ const (
 	defaultLLMStallTimeout = 120 * time.Second
 
 	// defaultToolExecTimeout is the default maximum time for a single tool execution.
-	// Prevents long-running tools (web_fetch, database_query) from hanging indefinitely.
+	// Prevents ordinary tools from hanging indefinitely.
 	defaultToolExecTimeout = 60 * time.Second
 	// shellExecToolTimeout is slightly longer than shell_exec's own hard
 	// 600-second command timeout so the tool can return a structured timeout
 	// result instead of being cancelled first by the generic agent wrapper.
 	shellExecToolTimeout = 10*time.Minute + 5*time.Second
+	// webFetchToolTimeout is slightly longer than the 150s page-download
+	// budget in tools/web_fetch.go and infrastructure/web_fetch. A slow page
+	// can finish, and a page that still times out returns the fetcher's own
+	// error instead of the generic wrapper.
+	webFetchToolTimeout = 150*time.Second + 5*time.Second
 	// tryAgentToolTimeout is above the trial runner's own 4-minute limit so
 	// a slow trial still reports what the agent did before it was stopped.
 	tryAgentToolTimeout = 4*time.Minute + 30*time.Second
@@ -97,6 +102,8 @@ func toolExecutionTimeout(toolName string, arguments ...string) time.Duration {
 	switch toolName {
 	case "shell_exec":
 		return shellExecToolTimeout
+	case "web_fetch":
+		return webFetchToolTimeout
 	case "try_agent":
 		return tryAgentToolTimeout
 	}

@@ -133,7 +133,7 @@ func TestFetcherUsesBrowserFallbackForClientRenderedPage(t *testing.T) {
 }
 
 func TestNewFetcherKeepsAgentCompatibleTimeout(t *testing.T) {
-	assert.Equal(t, 60*time.Second, NewFetcher().timeout)
+	assert.Equal(t, 150*time.Second, NewFetcher().timeout)
 }
 
 func TestNewPipelineFetcherUsesHTTPOnlyAndLegacyTimeout(t *testing.T) {

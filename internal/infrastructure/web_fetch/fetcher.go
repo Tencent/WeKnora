@@ -23,7 +23,9 @@ import (
 )
 
 const (
-	fetchTimeout         = 60 * time.Second
+	// fetchTimeout is the agent page budget. It matches webPageFetchTimeout in
+	// the web_fetch tool; the agent wrapper waits a few seconds longer.
+	fetchTimeout         = 150 * time.Second
 	pipelineFetchTimeout = 15 * time.Second
 	maxBodySize          = 100 * 1024
 	maxAgentBodySize     = 2 * 1024 * 1024

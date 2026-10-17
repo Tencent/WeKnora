@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	webPageFetchTimeout = 60 * time.Second
+	webPageFetchTimeout = 150 * time.Second
 	webPageCacheLimit   = 8
 )
 
