@@ -44,6 +44,8 @@ type ModelService interface {
 	GetRerankModel(ctx context.Context, modelId string) (rerank.Reranker, error)
 	// GetChatModel gets a chat model
 	GetChatModel(ctx context.Context, modelId string) (chat.Chat, error)
+	// GetChatModelForTenant gets a chat model for a specific tenant (for cross-tenant KB sharing)
+	GetChatModelForTenant(ctx context.Context, modelId string, tenantID uint64) (chat.Chat, error)
 	// GetVLMModel gets a vision language model
 	GetVLMModel(ctx context.Context, modelId string) (vlm.VLM, error)
 	// GetASRModel gets an automatic speech recognition model

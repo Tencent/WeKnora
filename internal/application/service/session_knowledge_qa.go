@@ -71,7 +71,7 @@ func (s *sessionService) KnowledgeQA(
 	}
 
 	// Resolve chat model ID using shared helper
-	chatModelID, err := s.resolveChatModelID(ctx, req, knowledgeBaseIDs, knowledgeIDs)
+	chatModelID, chatModelTenantID, err := s.resolveChatModelID(ctx, req, knowledgeBaseIDs, knowledgeIDs)
 	if err != nil {
 		return err
 	}
@@ -137,6 +137,7 @@ func (s *sessionService) KnowledgeQA(
 			RerankTopK:              s.cfg.Conversation.RerankTopK,
 			RerankThreshold:         s.cfg.Conversation.RerankThreshold,
 			ChatModelID:             chatModelID,
+			ChatModelTenantID:       chatModelTenantID,
 			SummaryConfig:           summaryConfig,
 			FallbackStrategy:        fallbackStrategy,
 			FallbackResponse:        s.cfg.Conversation.FallbackResponse,
@@ -271,7 +272,7 @@ func (s *sessionService) selectChatModelID(
 	session *types.Session,
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
-) (string, error) {
+) (modelID string, modelTenantID uint64, err error) {
 	// If no knowledge base IDs but have knowledge IDs, derive KB IDs from knowledge IDs (include shared KB files)
 	if len(knowledgeBaseIDs) == 0 && len(knowledgeIDs) > 0 {
 		tenantID := types.MustTenantIDFromContext(ctx)
@@ -306,7 +307,13 @@ func (s *sessionService) selectChatModelID(
 				model, err := s.modelService.GetModelByID(ctx, kb.SummaryModelID)
 				if err == nil && model != nil && model.Source == types.ModelSourceRemote {
 					logger.Info(ctx, "Using Remote summary model from knowledge base")
-					return kb.SummaryModelID, nil
+					return kb.SummaryModelID, kb.TenantID, nil
+				}
+				// Shared KB: caller's GetModelByID may miss the owner's private
+				// model. Prefer the KB-bound summary model with the owner tenant.
+				if err != nil || model == nil {
+					logger.Infof(ctx, "Using summary model from shared knowledge base %s (owner tenant %d)", kb.ID, kb.TenantID)
+					return kb.SummaryModelID, kb.TenantID, nil
 				}
 			}
 		}
@@ -315,16 +322,17 @@ func (s *sessionService) selectChatModelID(
 		kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, knowledgeBaseIDs[0])
 		if err != nil {
 			logger.Errorf(ctx, "Failed to get knowledge base for model ID: %v", err)
-			return "", fmt.Errorf("failed to get knowledge base %s: %w", knowledgeBaseIDs[0], err)
+			return "", 0, fmt.Errorf("failed to get knowledge base %s: %w", knowledgeBaseIDs[0], err)
 		}
 		if kb != nil && kb.SummaryModelID != "" {
 			logger.Infof(
 				ctx,
-				"Using summary model from first knowledge base %s: %s",
+				"Using summary model from first knowledge base %s: %s (owner tenant %d)",
 				knowledgeBaseIDs[0],
 				kb.SummaryModelID,
+				kb.TenantID,
 			)
-			return kb.SummaryModelID, nil
+			return kb.SummaryModelID, kb.TenantID, nil
 		}
 	}
 
@@ -332,17 +340,17 @@ func (s *sessionService) selectChatModelID(
 	models, err := s.modelService.ListModels(ctx)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list models: %v", err)
-		return "", fmt.Errorf("failed to list models: %w", err)
+		return "", 0, fmt.Errorf("failed to list models: %w", err)
 	}
 	for _, model := range models {
 		if model != nil && model.Type == types.ModelTypeKnowledgeQA {
 			logger.Infof(ctx, "Using first available KnowledgeQA model: %s", model.ID)
-			return model.ID, nil
+			return model.ID, 0, nil
 		}
 	}
 
 	logger.Error(ctx, "No chat model ID available")
-	return "", fmt.Errorf("no chat model ID available: no knowledge bases configured and no available models")
+	return "", 0, fmt.Errorf("no chat model ID available: no knowledge bases configured and no available models")
 }
 
 // resolveKnowledgeBasesFromAgent resolves knowledge base IDs based on agent's KBSelectionMode.
@@ -1075,8 +1083,13 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 		return
 	}
 
-	// Get chat model
-	chatModel, err := s.modelService.GetChatModel(ctx, chatManage.ChatModelID)
+	// Get chat model (honor shared-KB owner tenant when set)
+	var chatModel chat.Chat
+	if chatManage.ChatModelTenantID != 0 {
+		chatModel, err = s.modelService.GetChatModelForTenant(ctx, chatManage.ChatModelID, chatManage.ChatModelTenantID)
+	} else {
+		chatModel, err = s.modelService.GetChatModel(ctx, chatManage.ChatModelID)
+	}
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get chat model for fallback: %v, falling back to fixed response", err)
 		s.handleFixedFallback(ctx, chatManage)

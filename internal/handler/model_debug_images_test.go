@@ -49,6 +49,9 @@ func (s *debugImageService) GetRerankModel(context.Context, string) (rerank.Rera
 func (s *debugImageService) GetChatModel(context.Context, string) (chat.Chat, error) {
 	return s.chat, nil
 }
+func (s *debugImageService) GetChatModelForTenant(ctx context.Context, modelId string, _ uint64) (chat.Chat, error) {
+	return s.GetChatModel(ctx, modelId)
+}
 
 type debugImageEmbedder struct {
 	embedding.Embedder

@@ -54,6 +54,9 @@ type wikiUnavailableModelService struct {
 func (s *wikiUnavailableModelService) GetChatModel(context.Context, string) (chat.Chat, error) {
 	return nil, s.err
 }
+func (s *wikiUnavailableModelService) GetChatModelForTenant(ctx context.Context, modelId string, _ uint64) (chat.Chat, error) {
+	return s.GetChatModel(ctx, modelId)
+}
 
 // A wiki that cannot run (disabled, no model, model deleted) fails the same
 // way on every retry, so its queued ingest ops must be released instead of

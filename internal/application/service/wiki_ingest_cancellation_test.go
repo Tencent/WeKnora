@@ -156,6 +156,9 @@ func (wikiLookupModelService) GetChatModel(context.Context, string) (chat.Chat, 
 	// The recovery fixture has no chunks, so the real pipeline skips the LLM.
 	return nil, nil
 }
+func (wikiLookupModelService) GetChatModelForTenant(ctx context.Context, modelId string, _ uint64) (chat.Chat, error) {
+	return (wikiLookupModelService{}).GetChatModel(ctx, modelId)
+}
 
 type wikiLookupEmptyChunks struct{ interfaces.ChunkRepository }
 

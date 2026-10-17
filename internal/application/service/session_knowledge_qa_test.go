@@ -130,6 +130,9 @@ func (s *stubModelService) GetRerankModel(context.Context, string) (rerank.Reran
 func (s *stubModelService) GetChatModel(context.Context, string) (chat.Chat, error) {
 	return s.chatModel, nil
 }
+func (s *stubModelService) GetChatModelForTenant(ctx context.Context, modelId string, _ uint64) (chat.Chat, error) {
+	return s.GetChatModel(ctx, modelId)
+}
 
 func (s *stubModelService) GetVLMModel(context.Context, string) (vlm.VLM, error) {
 	return nil, nil

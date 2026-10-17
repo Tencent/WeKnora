@@ -140,7 +140,7 @@ func (s *sessionService) resolveChatModelID(
 	req *types.QARequest,
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
-) (string, error) {
+) (modelID string, modelTenantID uint64, err error) {
 	summaryModelID := req.SummaryModelID
 	customAgent := req.CustomAgent
 	session := req.Session
@@ -155,12 +155,12 @@ func (s *sessionService) resolveChatModelID(
 	if customAgent != nil {
 		configuredAgentModelID = strings.TrimSpace(customAgent.Config.ModelID)
 		if configuredAgentModelID == "" && !types.UsesWorkspaceModelFallback(customAgent) {
-			return "", fmt.Errorf("chat model is not configured: please set model_id on agent %s", customAgent.ID)
+			return "", 0, fmt.Errorf("chat model is not configured: please set model_id on agent %s", customAgent.ID)
 		}
 		if configuredAgentModelID != "" {
 			model, err := s.modelService.GetModelByID(ctx, configuredAgentModelID)
 			if err != nil || model == nil || model.Type != types.ModelTypeKnowledgeQA {
-				return "", fmt.Errorf("configured chat model %s is unavailable for agent %s", configuredAgentModelID, customAgent.ID)
+				return "", 0, fmt.Errorf("configured chat model %s is unavailable for agent %s", configuredAgentModelID, customAgent.ID)
 			}
 		} else {
 			// Internal built-in agents are omitted from the agent-management
@@ -175,13 +175,13 @@ func (s *sessionService) resolveChatModelID(
 		if model, err := s.modelService.GetModelByID(ctx, summaryModelID); err == nil && model != nil &&
 			model.Type == types.ModelTypeKnowledgeQA {
 			logger.Infof(ctx, "Using request's summary model override: %s", summaryModelID)
-			return summaryModelID, nil
+			return summaryModelID, 0, nil
 		}
 		logger.Warnf(ctx, "Request provided invalid summary model ID %s, falling back", summaryModelID)
 	}
 	if configuredAgentModelID != "" {
 		logger.Infof(ctx, "Using custom agent's model_id: %s", configuredAgentModelID)
-		return configuredAgentModelID, nil
+		return configuredAgentModelID, 0, nil
 	}
 	return s.selectChatModelID(ctx, session, knowledgeBaseIDs, knowledgeIDs)
 }

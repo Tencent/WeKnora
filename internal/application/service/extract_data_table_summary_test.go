@@ -143,6 +143,9 @@ type tableSummaryModelService struct {
 func (s tableSummaryModelService) GetChatModel(context.Context, string) (chat.Chat, error) {
 	return s.model, nil
 }
+func (s tableSummaryModelService) GetChatModelForTenant(ctx context.Context, modelId string, _ uint64) (chat.Chat, error) {
+	return s.GetChatModel(ctx, modelId)
+}
 
 func (s tableSummaryModelService) GetEmbeddingModel(context.Context, string) (embedding.Embedder, error) {
 	return nil, nil // The recording index below does not call an embedding provider.
