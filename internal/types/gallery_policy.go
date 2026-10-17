@@ -48,6 +48,13 @@ type GalleryPolicyTier struct {
 	// keyed by namespaced attribute id with values "on"/"off". Only
 	// meaningful in the user tier.
 	Status map[string]string `json:"status,omitempty"`
+	// ViewMode is the user-tier gallery layout: "waterfall" (masonry,
+	// default) or "card" (uniform 3:2 thumbnails). Only meaningful in the
+	// user tier.
+	ViewMode string `json:"view_mode,omitempty"`
+	// ThumbCols is the user-tier preferred thumbnail column count.
+	// 0 = not recorded (the client derives a count from its own width).
+	ThumbCols int `json:"thumb_cols,omitempty"`
 }
 
 // Gallery resolved-config constants.
@@ -61,6 +68,16 @@ const (
 	// GalleryStatusOn / GalleryStatusOff are the user-tier status values.
 	GalleryStatusOn  = "on"
 	GalleryStatusOff = "off"
+	// GalleryViewWaterfall lays cards out as a masonry grid where every
+	// thumbnail keeps its natural aspect ratio. GalleryViewCard crops all
+	// thumbnails to a uniform 3:2 frame so the grid aligns. Waterfall is
+	// the default.
+	GalleryViewWaterfall = "waterfall"
+	GalleryViewCard      = "card"
+	// Thumbnail column-count bounds the user-tier slider may record; the
+	// client maps its window width onto stops inside these bounds. Anything
+	// outside is clamped on write and ignored on read.
+	GalleryThumbColsMax = 32
 )
 
 // GalleryResolvedAttr is one attribute as the gallery contract serves it to
@@ -96,6 +113,12 @@ type GalleryResolvedConfig struct {
 	// Status mirrors the user's per-field search toggles; nil means the
 	// user has not recorded any yet.
 	Status map[string]string `json:"status"`
+	// ViewMode is the user's gallery layout ("waterfall" by default).
+	ViewMode string `json:"view_mode"`
+	// ThumbCols is the user's preferred thumbnail column count. 0 = unset:
+	// the client derives a count from its current layout width, because a
+	// server-side default cannot know the viewport.
+	ThumbCols int `json:"thumb_cols"`
 }
 
 // galleryUsageFrom labels for UsageFrom, ordered low -> high.
@@ -116,6 +139,7 @@ func ResolveGalleryConfig(kbID string, system, kb, user *GalleryPolicyTier) *Gal
 		AttributeSources: []string{},
 		Attributes:       []GalleryResolvedAttr{},
 		Mode:             GalleryModeAll,
+		ViewMode:         GalleryViewWaterfall,
 	}
 
 	// Source on/off: the highest tier that mentions the source wins.
@@ -159,6 +183,12 @@ func ResolveGalleryConfig(kbID string, system, kb, user *GalleryPolicyTier) *Gal
 			if len(status) > 0 {
 				res.Status = status
 			}
+		}
+		if user.ViewMode == GalleryViewWaterfall || user.ViewMode == GalleryViewCard {
+			res.ViewMode = user.ViewMode
+		}
+		if user.ThumbCols >= 1 && user.ThumbCols <= GalleryThumbColsMax {
+			res.ThumbCols = user.ThumbCols
 		}
 	}
 	return res

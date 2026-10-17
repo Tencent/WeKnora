@@ -227,6 +227,10 @@ export interface GalleryConfig {
   mode: 'all' | 'custom';
   /** Per-attribute search toggles ("on"/"off"); consulted in custom mode. */
   status: Record<string, string>;
+  /** Gallery layout: "waterfall" (masonry, default) or "card" (3:2 grid). */
+  view_mode: 'waterfall' | 'card';
+  /** Preferred thumbnail column count; 0 = unset (client derives one). */
+  thumb_cols: number;
 }
 
 /** Fetch the gallery contract for a knowledge base. */
@@ -239,5 +243,7 @@ export async function fetchGalleryConfig(kbId: string): Promise<GalleryConfig> {
     attributes: res.data.attributes ?? [],
     mode: res.data.mode === 'custom' ? 'custom' : 'all',
     status: res.data.status ?? {},
+    view_mode: res.data.view_mode === 'card' ? 'card' : 'waterfall',
+    thumb_cols: res.data.thumb_cols ?? 0,
   };
 }

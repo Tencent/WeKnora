@@ -3580,6 +3580,11 @@ export default {
         sourceFilterSelectAll: 'Select all / none (across every hit)',
         sourceFilterOverflowRecent: 'Many documents: showing only the most recent {cap}. Refine with a keyword.',
         sourceFilterOverflowHits: '{total} documents hit; showing the first {cap}. Narrow the keyword before selecting all.',
+        viewOptions: 'View',
+        viewMode: 'Layout',
+        viewWaterfall: 'Waterfall',
+        viewCard: 'Card',
+        thumbSize: 'Thumbnail size',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).

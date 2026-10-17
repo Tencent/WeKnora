@@ -13,6 +13,7 @@ const source = readFileSync(new URL('./ImageGallery.vue', import.meta.url), 'utf
 const compiled = ts.transpileModule(`${source}\nexport {
   items, page, total, loading, error, keyword, hasMore, viewerIndex, viewerOpen,
   reload, loadMore, openViewer, onViewerLoadMore, initGallery,
+  viewMode, thumbCols, configLoaded, selectViewMode, setThumbCols,
 }`, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 
 function setup() {
@@ -20,6 +21,7 @@ function setup() {
     kb: string; params: ImageListParams
     resolve: (value: ImageListResult) => void; reject: (reason: Error) => void
   }> = []
+  const prefPatches: Array<{ gallery?: { view_mode?: string; thumb_cols?: number } }> = []
   const props = vue.reactive({ knowledgeBaseId: 'kb-1' })
   const modules: Record<string, unknown> = {
     vue: { ...vue, onMounted() {}, onBeforeUnmount() {}, watch() {} },
@@ -28,9 +30,12 @@ function setup() {
       listGalleryImages: (kb: string, params: ImageListParams) => new Promise((resolve, reject) => {
         calls.push({ kb, params, resolve, reject })
       }),
-      fetchGalleryConfig: async () => ({ attributes: [], attribute_sources: [], mode: 'all', status: {} }),
+      fetchGalleryConfig: async () => ({
+        attributes: [], attribute_sources: [], mode: 'all', status: {},
+        view_mode: 'card', thumb_cols: 5,
+      }),
     },
-    '@/api/auth': { updateMyPreferences: async () => {} },
+    '@/api/auth': { updateMyPreferences: async (patch: { gallery?: { view_mode?: string; thumb_cols?: number } }) => { prefPatches.push(patch) } },
     './galleryImageSrc': { galleryImageRequest: () => null },
   }
   const state: any = {}
@@ -47,7 +52,7 @@ function setup() {
     total, page: calls[index].params.page!, pageSize: 24,
   })
   const ids = () => Array.from(state.items.value, (img: ImageAsset) => img.id)
-  return { state, calls, props, respond, ids }
+  return { state, calls, props, respond, ids, prefPatches }
 }
 
 test('scroll appends unique images, serializes requests, and stops at the total', async () => {
@@ -144,4 +149,37 @@ test('an empty batch stops automatic loading even if the total is stale', async 
   assert.equal(state.hasMore.value, false)
   assert.equal(await state.loadMore(), false)
   assert.equal(calls.length, 2)
+})
+
+test('view preferences hydrate from the contract and persist on change', async () => {
+  const { state, calls, respond, prefPatches } = setup()
+  const fresh = state.initGallery()
+  // The contract resolves before the first page request goes out.
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  respond(0, ['a'])
+  await fresh
+  // The saved record drives the initial layout...
+  assert.equal(state.viewMode.value, 'card')
+  assert.equal(state.thumbCols.value, 5)
+  // ...and switching back to waterfall persists the new layout (debounced).
+  state.selectViewMode('waterfall')
+  assert.equal(state.viewMode.value, 'waterfall')
+  await new Promise((resolve) => setTimeout(resolve, 600))
+  // Field-wise asserts: pref objects are built inside the vm context, so
+  // their prototype differs from this realm's and deepStrictEqual would
+  // reject same-shape objects.
+  assert.equal(prefPatches.length, 1)
+  const layout = prefPatches[0]
+  assert.ok(layout?.gallery, 'layout patch recorded')
+  assert.equal(layout.gallery.view_mode, 'waterfall')
+  assert.equal(layout.gallery.thumb_cols, 5)
+  // The slider persists its own key with the layout left untouched.
+  state.thumbCols.value = 3
+  state.setThumbCols()
+  await new Promise((resolve) => setTimeout(resolve, 600))
+  assert.equal(prefPatches.length, 2)
+  const size = prefPatches[1]
+  assert.ok(size?.gallery, 'slider patch recorded')
+  assert.equal(size.gallery.view_mode, 'waterfall')
+  assert.equal(size.gallery.thumb_cols, 3)
 })

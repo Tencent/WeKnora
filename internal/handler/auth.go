@@ -686,6 +686,11 @@ type updateMyPreferencesRequest struct {
 	// login, not here. Nil = field omitted from the PATCH and stays
 	// untouched.
 	LastActiveTenantID *uint64 `json:"last_active_tenant_id"`
+	// Gallery carries the image-gallery block: search activation (mode +
+	// per-field status) and the view prefs (layout, thumbnail columns).
+	// The service merges it key by key and validates every value, so an
+	// omitted or partial block only touches the keys it names.
+	Gallery *types.GalleryUserPrefs `json:"gallery"`
 }
 
 // UpdateMyPreferences godoc
@@ -721,6 +726,7 @@ func (h *AuthHandler) UpdateMyPreferences(c *gin.Context) {
 	patch := types.UserPreferences{
 		LastActiveTenantID:        req.LastActiveTenantID,
 		BrowserSearchInstructions: req.BrowserSearchInstructions,
+		Gallery:                   req.Gallery,
 	}
 	prefs, err := h.userService.UpdateUserPreferences(ctx, user.ID, patch)
 	if err != nil {
