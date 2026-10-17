@@ -290,6 +290,7 @@ class MHTMLParser(BaseParser):
             self._unwrap_whitespace_only_inline(soup)
             text_fallback = soup.get_text(separator="\n", strip=True)
             self._escape_table_cell_pipes(soup)
+            self._move_table_footer_rows_after_body(soup)
             markdown_text = md(str(soup), heading_style="ATX")
             result = self._normalize_markdown(markdown_text)
             if not result and text_fallback:
@@ -326,6 +327,32 @@ class MHTMLParser(BaseParser):
         for tag in reversed(soup.find_all(_WHITESPACE_DROPPING_INLINE_TAGS)):
             if tag.find(True) is None and not tag.get_text().strip():
                 tag.unwrap()
+
+    @staticmethod
+    def _move_table_footer_rows_after_body(soup: BeautifulSoup) -> None:
+        """Read the rows of a ``<tfoot>`` as the last rows of their table.
+
+        markdownify takes the first row of a ``<tfoot>`` for the start of a
+        table without a header and writes an empty header row and a
+        separator line in front of it, in the middle of the table. A browser
+        draws the footer after the body wherever it sits in the source, so
+        its rows go after the table's last body row.
+        """
+        for tfoot in soup.find_all("tfoot"):
+            table = tfoot.find_parent("table")
+            if table is None:
+                continue
+            own_rows = [
+                row for row in table.find_all("tr") if row.find_parent("table") is table
+            ]
+            footer_rows = [row for row in own_rows if row.find_parent("tfoot") is tfoot]
+            body_rows = [row for row in own_rows if row.find_parent("tfoot") is None]
+            if not body_rows:
+                continue
+            last = body_rows[-1]
+            for row in reversed(footer_rows):
+                last.insert_after(row.extract())
+            tfoot.decompose()
 
     @staticmethod
     def _escape_table_cell_pipes(soup: BeautifulSoup) -> None:
