@@ -1549,8 +1549,9 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         ? (props.agentId && props.agentId !== 'builtin-quick-answer')
         : useSettingsStoreInstance.isAgentStreamMode;
 
-    // Get web search status from settings store
-    const webSearchEnabled = props.embeddedMode ? false : useSettingsStoreInstance.isWebSearchEnabled;
+    // Get web search status from settings store. The embedded assistant has no
+    // toggle of its own; its agent config decides on the server.
+    const webSearchEnabled = props.embeddedMode ? true : useSettingsStoreInstance.isWebSearchEnabled;
 
     // Get knowledge_base_ids from settings store (selected by user via KnowledgeBaseSelector)
     // Merge @mentioned KB/file IDs so retrieval uses the same targets user @mentioned (including shared KBs)

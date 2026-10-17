@@ -105,6 +105,10 @@ const (
 	// the agent emits a one-shot authorization notice and continues instead of
 	// blocking until the OAuth wait times out. See IsMCPOAuthNonInteractive.
 	MCPOAuthNonInteractiveContextKey ContextKey = "MCPOAuthNonInteractive"
+	// UnattendedRunContextKey marks a run whose prompts nobody can see, such as
+	// an agent trial. A tool approval it raises is refused at once instead of
+	// waiting out its timeout. See IsUnattendedRun.
+	UnattendedRunContextKey ContextKey = "UnattendedRun"
 	// ChatParserEngineContextKey carries the resolved parser engine
 	// from the agent's ChatParserEngineRules for chat attachment processing.
 	ChatParserEngineContextKey ContextKey = "ChatParserEngine"

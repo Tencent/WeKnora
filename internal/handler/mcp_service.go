@@ -151,8 +151,8 @@ type MCPServiceAuthUpdateRequest struct {
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @x-agent      {"id":"mcp_service.create","risk":"write","role":"admin","label_param":"name"}
-// @x-agent-hint "Adds a remote MCP service (SSE or HTTP Streamable) and turns it on. Take the URL from the user or the service's own documentation. It never carries a key or token: for a service that needs one, set auth_type (api_key, bearer or oauth) and afterwards give the user open_page with mcp_service_id so they enter the credential or authorize. Then check it with mcp_service.test."
+// @x-agent      {"id":"mcp_service.create","risk":"write","role":"admin","label_param":"name","always_confirm":true}
+// @x-agent-hint "Adds a remote MCP service (SSE or HTTP Streamable) and turns it on. Take the URL from the user or the service's own documentation. It never carries a key or token: for a service that needs one, set auth_type (api_key, bearer or oauth) and afterwards give the user open_page with mcp_service_id so they enter the credential or authorize. Every agent set to use all MCP services starts calling the new URL, so this always asks the user. Then check it with mcp_service.test."
 // @Router       /mcp-services [post]
 func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
