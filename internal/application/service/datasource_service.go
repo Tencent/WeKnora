@@ -3,6 +3,8 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -657,6 +659,22 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		return nil
 	}
 
+	// A retried (or duplicated) task must never replay a sync round that can
+	// no longer accept writes: canceled means the data source / knowledge base
+	// was removed mid-flight or the sync was explicitly canceled, while
+	// success/partial mean this same sync_log already reached its terminal
+	// state — re-running the round with the same sync_log_id would redo every
+	// delete+recreate (Tencent/WeKnora#4237). failed and running still fall
+	// through on purpose: failed is the streaming checkpoint-resume path
+	// (#2136), and running is the only recovery for a worker killed before it
+	// could persist a terminal status.
+	switch syncLog.Status {
+	case types.SyncLogStatusCanceled, types.SyncLogStatusSuccess, types.SyncLogStatusPartial:
+		logger.Infof(ctx, "sync log %s already %s, skipping replay: ds=%s",
+			payload.SyncLogID, syncLog.Status, payload.DataSourceID)
+		return nil
+	}
+
 	kb, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, ds.KnowledgeBaseID)
 	if kbErr != nil {
 		logger.Warnf(ctx, "knowledge base not found (likely deleted), cancelling sync: kb=%s ds=%s err=%v",
@@ -977,7 +995,7 @@ func (s *DataSourceService) applyFetchedItem(
 		return
 	}
 
-	isUpdate, err := s.ingestItem(ctx, ds, item, tagIDs)
+	updated, unchanged, err := s.ingestItem(ctx, ds, item, tagIDs)
 	if err != nil {
 		var dupErr *types.DuplicateKnowledgeError
 		switch {
@@ -994,7 +1012,11 @@ func (s *DataSourceService) applyFetchedItem(
 				Message: "Ingest failed; see server logs",
 			})
 		}
-	} else if isUpdate {
+	} else if unchanged {
+		// Already present byte-for-byte and fully parsed — nothing was written.
+		logger.Infof(ctx, "item %q (external_id=%s) unchanged, skipping", item.Title, item.ExternalID)
+		result.Skipped++
+	} else if updated {
 		result.Updated++
 	} else {
 		result.Created++
@@ -1374,8 +1396,12 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 //   - Has Content bytes → CreateKnowledgeFromFile (走完整的文档解析 pipeline)
 //   - Has URL only      → CreateKnowledgeFromURL  (让 WeKnora 下载并解析)
 //
-// Returns (isUpdate, error) — isUpdate is true when an existing item was replaced.
-func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource, item *types.FetchedItem, tagIDs []string) (bool, error) {
+// Returns (updated, unchanged, error) — updated is true when an existing item
+// was replaced, unchanged is true when an existing item already holds exactly
+// this content and was deliberately left untouched (Tencent/WeKnora#4237).
+func (s *DataSourceService) ingestItem(
+	ctx context.Context, ds *types.DataSource, item *types.FetchedItem, tagIDs []string,
+) (bool, bool, error) {
 	// Channel decides the knowledge "source" label shown in the UI. Prefer the
 	// connector-supplied metadata["channel"] (e.g. Feishu Drive sets it to
 	// "feishu" so Drive docs share the wiki's "飞书" label instead of showing
@@ -1418,6 +1444,16 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			logger.Warnf(ctx, "failed to check existing knowledge for external_id=%s: %v", item.ExternalID, err)
 			// Non-fatal: proceed with creation (may produce duplicate)
 		} else if existing != nil {
+			// Overwrite no longer means "delete + recreate unconditionally":
+			// a byte-identical, fully-parsed document is left untouched so a
+			// sync round stops paying the DeleteKnowledge cost (wiki cascade,
+			// embedding cleanup, chunk deletion) for every unchanged doc
+			// (Tencent/WeKnora#4237).
+			if s.overwriteTargetUnchanged(ctx, existing, item, tagIDs) {
+				logger.Infof(ctx, "knowledge %s unchanged for external_id=%s (hash match), skipping rebuild",
+					existing.ID, item.ExternalID)
+				return false, true, nil
+			}
 			logger.Infof(ctx, "found existing knowledge %s for external_id=%s, deleting for update", existing.ID, item.ExternalID)
 			if err := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); err != nil {
 				logger.Warnf(ctx, "failed to delete existing knowledge %s: %v", existing.ID, err)
@@ -1437,7 +1473,7 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		// provider:// URLs before chunking.
 		fh, err := bytesToFileHeader(item.Content, item.FileName)
 		if err != nil {
-			return isUpdate, fmt.Errorf("build file header: %w", err)
+			return isUpdate, false, fmt.Errorf("build file header: %w", err)
 		}
 		if _, err := s.knowledgeService.CreateKnowledgeFromFile(
 			ctx,
@@ -1457,10 +1493,10 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 				// subtree so children removed from the doc do not linger.
 				s.sweepStaleSubtree(ctx, ds, item)
 			}
-			return isUpdate, err
+			return isUpdate, false, err
 		}
 		s.sweepStaleSubtree(ctx, ds, item)
-		return isUpdate, nil
+		return isUpdate, false, nil
 	}
 
 	// Case 2: only a remote URL — let WeKnora handle downloading and parsing
@@ -1485,7 +1521,7 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 				// subtree so children removed from the doc do not linger.
 				s.sweepStaleSubtree(ctx, ds, item)
 			}
-			return isUpdate, err
+			return isUpdate, false, err
 		}
 		// URL-created knowledge has no metadata, so a later deletion could
 		// never find it. Attach the datasource keys on fresh creation only;
@@ -1493,7 +1529,7 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		if created != nil {
 			metadataBytes, mErr := json.Marshal(metadata)
 			if mErr != nil {
-				return isUpdate, fmt.Errorf("marshal datasource metadata: %w", mErr)
+				return isUpdate, false, fmt.Errorf("marshal datasource metadata: %w", mErr)
 			}
 			created.Metadata = types.JSON(metadataBytes)
 			// Only the metadata column: the processing task is already
@@ -1503,14 +1539,83 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			if uErr := s.knowledgeService.GetRepository().UpdateKnowledgeColumn(
 				ctx, created.ID, "metadata", created.Metadata,
 			); uErr != nil {
-				return isUpdate, fmt.Errorf("attach datasource metadata: %w", uErr)
+				return isUpdate, false, fmt.Errorf("attach datasource metadata: %w", uErr)
 			}
 		}
 		s.sweepStaleSubtree(ctx, ds, item)
-		return isUpdate, nil
+		return isUpdate, false, nil
 	}
 
-	return isUpdate, fmt.Errorf("item has neither content nor URL")
+	return isUpdate, false, fmt.Errorf("item has neither content nor URL")
+}
+
+// overwriteTargetUnchanged reports whether the existing knowledge row already
+// reflects exactly what re-ingesting item would produce, so an overwrite round
+// can skip the delete+recreate cycle for it (Tencent/WeKnora#4237: every sync
+// round rebuilt every unchanged document, and each rebuild paid the full
+// DeleteKnowledge cost — wiki cascade, embedding cleanup, chunk deletion —
+// which serially stalls whole syncs on large knowledge bases).
+//
+// The guard is deliberately narrow; anything not provably identical falls
+// through to the delete+recreate path so sync stays self-healing:
+//   - only byte-exact file ingestion is comparable (URL-only items have no
+//     bytes to hash here);
+//   - the stored row must carry a file hash AND have completed parsing — a
+//     failed/stale row keeps being rebuilt (that rebuild is the retry);
+//   - a rename still recreates, keeping titles/paths in sync;
+//   - data-source auto-tags are re-applied on recreate, so a drifted tag set
+//     recreates too. Tags a user assigned manually have no counterpart in
+//     tagIDs and are simply preserved by skipping (recreate wipes them).
+func (s *DataSourceService) overwriteTargetUnchanged(
+	ctx context.Context,
+	existing *types.Knowledge,
+	item *types.FetchedItem,
+	tagIDs []string,
+) bool {
+	if existing == nil || len(item.Content) == 0 {
+		return false
+	}
+	if existing.FileHash == "" || existing.ParseStatus != types.ParseStatusCompleted {
+		return false
+	}
+	if existing.FileName != item.FileName {
+		return false
+	}
+	sum := md5.Sum(item.Content)
+	if hex.EncodeToString(sum[:]) != existing.FileHash {
+		return false
+	}
+	if len(tagIDs) > 0 {
+		tagMap, err := s.knowledgeService.GetRepository().GetKnowledgeTags(ctx, []string{existing.ID})
+		if err != nil {
+			logger.Warnf(ctx, "unchanged check: failed to load tags for knowledge %s: %v", existing.ID, err)
+			return false // unsure → take the safe (recreate) path
+		}
+		if !sameTagIDs(tagMap[existing.ID], tagIDs) {
+			return false
+		}
+	}
+	return true
+}
+
+// sameTagIDs reports whether the stored tag set equals the desired ID set.
+func sameTagIDs(tags []*types.KnowledgeTag, want []string) bool {
+	if len(tags) != len(want) {
+		return false
+	}
+	desired := make(map[string]struct{}, len(want))
+	for _, id := range want {
+		desired[id] = struct{}{}
+	}
+	for _, t := range tags {
+		if t == nil {
+			return false
+		}
+		if _, ok := desired[t.ID]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // dupIsSameNode reports whether a duplicate-content error means the parent still
