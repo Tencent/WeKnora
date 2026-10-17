@@ -261,13 +261,14 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 
 ### 镜像构建参数（从源码构建时）
 
-以下变量只在 `docker compose build` / `make docker-build-frontend` 构建 frontend 镜像时使用，拉取官方镜像部署时无需设置。其他构建参数（Go 代理、apt 镜像源等）见 `.env.example` A1 节。
+以下变量只在从源码构建镜像时使用（除 `YTDLP_VERSION` 用于 app 镜像外，均用于 frontend 镜像），拉取官方镜像部署时无需设置。其他构建参数（Go 代理、apt 镜像源等）见 `.env.example` A1 节。
 
 | 名称 | 默认值 | 说明 |
 | --- | --- | --- |
 | `VITE_FRONTEND_COMMIT` | unknown | 写入「系统信息」页的前端短 commit。`make docker-build-frontend` 与 `start_all.sh --no-pull` 会从 git 自动填充；直接 `docker compose build` 时需自行导出 |
 | `NPM_REGISTRY` | 空（默认源） | 构建阶段使用的 npm registry，国内可设 `https://registry.npmmirror.com` |
 | `NODE_MAX_OLD_SPACE_SIZE` | 4096 | Vite 构建的 Node 堆上限（MB），Docker Desktop 内存较小时可降到 2048 |
+| `YTDLP_VERSION` | 2026.8.19 | app 镜像内置的 yt-dlp 版本（连同 deno 运行时一起固定，保证构建可复现）。YouTube 导入因上游变更失效时，改这个值重新构建即可 |
 
 ### Docreader 解析（docreader 容器）
 
@@ -307,6 +308,19 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `WEKNORA_WEKNORACLOUD_TIMEOUT` | 20m | WeKnoraCloud 托管 docreader 轮询任务结果的最长时间，格式与默认值规则同上；应小于 `WEKNORA_DOCREADER_CALL_TIMEOUT` |
 
 沙箱后端、网络策略、脚本开关与个人环境变量使用空间配置/API 管理，见[技能与沙箱](../03-features/22-skills-sandbox.md)。长期记忆与自动标签均默认关闭，分别使用租户 memory_config 和知识库 auto_tag_config，不用全局环境变量替代各空间配置。
+
+### YouTube 导入（可选）
+
+在「导入网页」中粘贴 YouTube 视频或播放列表链接时使用：优先抓取字幕，无字幕时下载音频并用知识库配置的 ASR 模型转写。Docker app 镜像已内置 yt-dlp（含 deno）与 ffmpeg；原生部署需自行安装。
+
+| 名称 | 默认值 | 说明 |
+| --- | --- | --- |
+| `YOUTUBE_COOKIES_FILE` | 空 | Netscape 格式 cookies 文件路径（容器内路径，需挂载进 app 容器）。服务器 IP 被 YouTube 要求「确认你不是机器人」时配置 |
+| `YOUTUBE_MAX_VIDEOS_PER_IMPORT` | 200 | 单次导入请求的视频数量上限，包含所有链接及播放列表展开后的视频 |
+| `YOUTUBE_MAX_AUDIO_MINUTES` | 240 | 无字幕视频走 ASR 转写的最长时长（分钟），超出的视频导入失败 |
+| `YOUTUBE_ASR_SEGMENT_SECONDS` | 600 | 送入 ASR 的每段音频时长（秒）。600 秒约 2.4MB，低于常见的 25MB 上传限制 |
+| `YOUTUBE_YTDLP_BINARY` / `YOUTUBE_FFMPEG_BINARY` | yt-dlp / ffmpeg | 可执行文件路径，默认从 `PATH` 查找 |
+| `YOUTUBE_JS_RUNTIMES` | 空（仅 deno） | 额外启用的 JS 运行时，传给 yt-dlp `--js-runtimes`（如 `node`） |
 
 ### 本机浏览器（BrowserSkill，可选）
 

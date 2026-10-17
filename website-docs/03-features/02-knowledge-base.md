@@ -347,7 +347,8 @@ stateDiagram-v2
 | 方法 | 路径 | 说明 | 门禁 |
 | --- | --- | --- | --- |
 | POST | `/knowledge-bases/:id/knowledge/file` | 上传文件 | OwnedKBOrAdmin + KBAccessWrite |
-| POST | `/knowledge-bases/:id/knowledge/url` | URL 导入 | 同上 |
+| POST | `/knowledge-bases/:id/knowledge/url` | URL 导入（含 YouTube 视频） | 同上 |
+| POST | `/knowledge-bases/:id/knowledge/youtube` | YouTube 视频/播放列表批量导入 | 同上 |
 | POST | `/knowledge-bases/:id/knowledge/manual` | 手动 Markdown 知识 | 同上 |
 | GET | `/knowledge-bases/:id/knowledge` | 列表（分页 + 过滤 + 排序） | Viewer+ + KBAccessRead |
 | POST | `/knowledge-bases/:id/knowledge/batch-download` | 批量下载原始文件（ZIP） | Contributor+ + KBAccessWrite |
