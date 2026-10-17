@@ -521,6 +521,251 @@
         </div>
       </div>
 
+      <!-- 视频处理设置 -->
+      <div v-if="!isFAQ" v-show="currentSection === 'video'" class="section">
+        <div v-if="formData" class="kb-multimodal-settings">
+          <div class="section-header">
+            <h2>{{ $t('knowledgeEditor.video.title') }}</h2>
+            <p class="section-description">{{ $t('knowledgeEditor.video.description') }}</p>
+          </div>
+
+          <div class="settings-group">
+            <!-- 视频解析开关 -->
+            <div class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.label') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.desc') }}</p>
+              </div>
+              <div class="setting-control">
+                <t-switch
+                  v-model="formData.videoConfig.enabled"
+                  size="medium"
+                />
+              </div>
+            </div>
+
+            <!-- 解析方式：仅旁白 / 仅画面 / 两者都做 -->
+            <div v-if="formData.videoConfig.enabled" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.modeLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.modeDescription') }}</p>
+                <p class="desc">{{ selectedVideoModeDescription }}</p>
+              </div>
+              <div class="setting-control">
+                <t-select
+                  v-model="formData.videoConfig.mode"
+                  class="video-mode-select"
+                  :popup-props="{ overlayClassName: 'video-mode-popup' }"
+                  :options="videoModeOptions"
+                >
+                  <template #option="{ option }">
+                    <div class="video-mode-option">
+                      <span class="video-mode-option__label">{{ option.label }}</span>
+                      <span class="video-mode-option__desc">{{ option.desc }}</span>
+                    </div>
+                  </template>
+                </t-select>
+              </div>
+            </div>
+
+            <!-- 视频直读：把整段视频交给视频理解模型，一次读完画面与旁白 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesDirect" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.videoModelLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.videoModelDescription') }}</p>
+                <p v-if="!videoDirectModelConfigured" class="desc video-asr-warning">
+                  {{ $t('knowledgeEditor.video.videoModelRequired') }}
+                </p>
+                <p class="desc">{{ $t('knowledgeEditor.video.directFallbackHint') }}</p>
+              </div>
+              <div class="setting-control video-model-control">
+                <ModelSelector
+                  model-type="Video"
+                  :selected-model-id="formData.videoConfig.videoModelId"
+                  :all-models="allModels"
+                  clearable
+                  @update:selected-model-id="(val: string) => { if (formData) formData.videoConfig.videoModelId = val }"
+                  @add-model="handleAddVideoModel"
+                  :placeholder="$t('knowledgeEditor.video.videoModelPlaceholder')"
+                />
+                <p class="video-model-hint">{{ $t('knowledgeEditor.video.videoModelHint') }}</p>
+              </div>
+            </div>
+
+            <!-- 传输方式：整段视频怎么送到模型。auto 按文件大小二选一，base64 承诺
+                 不落第三方临时存储，url 表示视频本来就有公网地址。 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesDirect" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.directInputLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.directInputDescription') }}</p>
+                <p class="desc">{{ selectedDirectInputDescription }}</p>
+                <p class="desc video-transport-cost">{{ $t('knowledgeEditor.video.directInputCostHint') }}</p>
+              </div>
+              <div class="setting-control">
+                <t-select
+                  v-model="formData.videoConfig.directInput"
+                  class="video-transport-select"
+                  :popup-props="{ overlayClassName: 'video-transport-popup' }"
+                  :options="videoDirectInputOptions"
+                >
+                  <template #option="{ option }">
+                    <div class="video-transport-option">
+                      <span class="video-transport-option__label">{{ option.label }}</span>
+                      <span class="video-transport-option__desc">{{ option.desc }}</span>
+                    </div>
+                  </template>
+                </t-select>
+              </div>
+            </div>
+
+            <!-- 直读要求：追加到固定 prompt 之后，不能覆盖输出格式与「不许猜」 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesDirect"
+              class="setting-row setting-row-vertical">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.directPromptLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.directPromptDescription') }}</p>
+              </div>
+              <div class="setting-control setting-control-full">
+                <t-textarea v-model="formData.videoConfig.directPrompt"
+                  :placeholder="$t('knowledgeEditor.video.directPromptPlaceholder')"
+                  :maxlength="4000" :autosize="{ minRows: 3, maxRows: 8 }" />
+              </div>
+            </div>
+
+            <!-- 视频专用 ASR 模型：独立配置，不沿用「音频处理」里的模型 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesAudio" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.modelLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.modelDescription') }}</p>
+                <p v-if="!videoAudioModelConfigured" class="desc video-asr-warning">
+                  {{ $t('knowledgeEditor.video.asrRequired') }}
+                </p>
+              </div>
+              <div class="setting-control video-model-control">
+                <ModelSelector
+                  model-type="ASR"
+                  :selected-model-id="formData.videoConfig.modelId"
+                  :all-models="allModels"
+                  clearable
+                  @update:selected-model-id="(val: string) => { if (formData) formData.videoConfig.modelId = val }"
+                  @add-model="handleAddASRModel"
+                  :placeholder="$t('knowledgeEditor.video.modelPlaceholder')"
+                />
+                <p class="video-model-hint">{{ $t('knowledgeEditor.video.asrHint') }}</p>
+              </div>
+            </div>
+
+            <!-- 视频转写的语言提示：自由输入，只属于视频页，空值即自动检测 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesAudio" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.languageLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.languageDescription') }}</p>
+              </div>
+              <div class="setting-control">
+                <t-input
+                  v-model="formData.videoConfig.language"
+                  clearable
+                  :placeholder="$t('knowledgeEditor.video.languagePlaceholder')"
+                  :style="{ width: '280px' }"
+                />
+              </div>
+            </div>
+
+            <!-- 画面视觉模型：视频页自己的 VLM，独立于「图像处理」的 vlm_config -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesFrames" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.vlmLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.vlmDescription') }}</p>
+                <p v-if="!videoFrameModelConfigured" class="desc video-asr-warning">
+                  {{ videoModeUsesAudio
+                    ? $t('knowledgeEditor.video.vlmPartial')
+                    : $t('knowledgeEditor.video.vlmRequired') }}
+                </p>
+              </div>
+              <div class="setting-control video-model-control">
+                <ModelSelector
+                  model-type="VLLM"
+                  :selected-model-id="formData.videoConfig.vlm.modelId"
+                  :all-models="allModels"
+                  clearable
+                  @update:selected-model-id="(val: string) => { if (formData) formData.videoConfig.vlm.modelId = val }"
+                  @add-model="handleAddVLLMModel"
+                  :placeholder="$t('knowledgeEditor.video.vlmPlaceholder')"
+                />
+                <p class="video-model-hint">{{ $t('knowledgeEditor.video.vlmHint') }}</p>
+              </div>
+            </div>
+
+            <!-- 抽帧上限：一次视频最多送给视觉模型的帧数 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesFrames" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.maxFramesLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.maxFramesDescription') }}</p>
+              </div>
+              <div class="setting-control">
+                <t-input-number
+                  v-model="formData.videoConfig.maxFrames"
+                  :min="1"
+                  :max="60"
+                  :step="1"
+                  theme="normal"
+                  style="width: 120px;"
+                />
+              </div>
+            </div>
+
+            <!-- 采样间隔：0 表示按视频时长与帧数上限自动计算 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesFrames" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.frameIntervalLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.frameIntervalDescription') }}</p>
+              </div>
+              <div class="setting-control">
+                <t-input-number
+                  v-model="formData.videoConfig.frameIntervalSeconds"
+                  :min="0"
+                  :max="3600"
+                  :step="5"
+                  theme="normal"
+                  style="width: 120px;"
+                />
+              </div>
+            </div>
+
+            <!-- 画面描述语言：与「图像处理」同一组选项，空值跟随请求语言 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesFrames" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.vlmLanguageLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.vlmLanguageDescription') }}</p>
+              </div>
+              <div class="setting-control">
+                <t-select v-model="formData.videoConfig.vlm.descriptionLanguage" clearable
+                  :placeholder="$t('knowledgeEditor.video.vlmLanguageAuto')">
+                  <t-option value="Chinese" :label="$t('language.zhCN')" />
+                  <t-option value="English" :label="$t('language.enUS')" />
+                  <t-option value="Korean" :label="$t('language.koKR')" />
+                  <t-option value="Russian" :label="$t('language.ruRU')" />
+                </t-select>
+              </div>
+            </div>
+
+            <!-- 画面描述要求：追加到固定 prompt 之后，不能覆盖「看不清就说不清楚」 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesFrames"
+              class="setting-row setting-row-vertical">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.customInstructionsLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.customInstructionsDescription') }}</p>
+              </div>
+              <div class="setting-control setting-control-full">
+                <t-textarea v-model="formData.videoConfig.vlm.customInstructions"
+                  :placeholder="$t('knowledgeEditor.video.customInstructionsPlaceholder')"
+                  :maxlength="4000" :autosize="{ minRows: 3, maxRows: 8 }" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 知识图谱 -->
       <div v-if="!isFAQ && currentSection === 'graph'" class="section">
         <GraphSettings
@@ -656,6 +901,12 @@ import KBVectorStoreSettings from './settings/KBVectorStoreSettings.vue'
 import KBAdvancedSettings from './settings/KBAdvancedSettings.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import GraphSettings from './settings/GraphSettings.vue'
+import {
+  isVideoAudioModelConfigured,
+  isVideoDirectModelConfigured,
+  isVideoFrameModelConfigured,
+  normalizeVideoDirectInput,
+} from './videoConfig'
 import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
 import KnowledgeBaseActivitySettings from './settings/KnowledgeBaseActivitySettings.vue'
@@ -809,6 +1060,112 @@ const DEFAULT_CHUNKING_PRESET = {
 const INSTANT_SECTIONS = new Set(['datasource', 'share', 'activity'])
 const isInstantSection = computed(() => INSTANT_SECTIONS.has(currentSection.value))
 
+const VIDEO_PARSE_MODES = ['audio_only', 'keyframes', 'audio_and_keyframes', 'video_direct'] as const
+
+// Unknown/old modes would render as an empty dropdown; the backend coalesces
+// them to audio_only on save, so show the same value here.
+const normalizeVideoMode = (mode?: string) =>
+  VIDEO_PARSE_MODES.includes(mode as (typeof VIDEO_PARSE_MODES)[number]) ? mode! : 'audio_only'
+
+// 视频解析方式。四档共用同一份 video_config：audio_only 只读旁白，
+// keyframes 只描述画面，audio_and_keyframes 两者都做并按时间合并，
+// video_direct 把整段视频交给视频理解模型一次读完（也是唯一会消耗上传带宽的一档）。
+// 每档的说明直接写进下拉项，选之前就能比较成本与效果。
+const videoModeOptions = computed(() => [
+  {
+    value: 'audio_only',
+    label: t('knowledgeEditor.video.modeAudioOnly'),
+    desc: t('knowledgeEditor.video.modeAudioOnlyDesc'),
+  },
+  {
+    value: 'keyframes',
+    label: t('knowledgeEditor.video.modeKeyframes'),
+    desc: t('knowledgeEditor.video.modeKeyframesDesc'),
+  },
+  {
+    value: 'audio_and_keyframes',
+    label: t('knowledgeEditor.video.modeAudioKeyframes'),
+    desc: t('knowledgeEditor.video.modeAudioKeyframesDesc'),
+  },
+  {
+    value: 'video_direct',
+    label: t('knowledgeEditor.video.modeDirect'),
+    desc: t('knowledgeEditor.video.modeDirectDesc'),
+  },
+])
+
+// 选中的档位决定要显示哪个模型依赖：旁白要 ASR，画面要 VLM，直读要视频模型。
+const videoModeUsesAudio = computed(() => {
+  const mode = formData.value?.videoConfig?.mode
+  return mode !== 'keyframes' && mode !== 'video_direct'
+})
+const videoModeUsesFrames = computed(() => {
+  const mode = formData.value?.videoConfig?.mode
+  return mode === 'keyframes' || mode === 'audio_and_keyframes'
+})
+const videoModeUsesDirect = computed(() => formData.value?.videoConfig?.mode === 'video_direct')
+// 与后端同一套判定：视频转写只看视频页自己的 ASR 模型，音频页配了也不算。
+const videoAudioModelConfigured = computed(() =>
+  isVideoAudioModelConfigured(formData.value?.videoConfig))
+// 与后端同一套判定：画面描述只看视频页自己的 VLM，与「图像处理」无关。
+const videoFrameModelConfigured = computed(() =>
+  isVideoFrameModelConfigured(formData.value?.videoConfig))
+// 与后端同一套判定：直读只看视频页自己的视频模型，ASR / VLM 都不顶替。
+const videoDirectModelConfigured = computed(() =>
+  isVideoDirectModelConfigured(formData.value?.videoConfig))
+const selectedVideoModeDescription = computed(() => {
+  switch (formData.value?.videoConfig?.mode) {
+    case 'keyframes':
+      return t('knowledgeEditor.video.modeKeyframesDesc')
+    case 'audio_and_keyframes':
+      return t('knowledgeEditor.video.modeAudioKeyframesDesc')
+    case 'video_direct':
+      return t('knowledgeEditor.video.modeDirectDesc')
+    default:
+      return t('knowledgeEditor.video.modeAudioOnlyDesc')
+  }
+})
+
+// 直读的传输方式。auto 是本页默认，也是唯一按文件大小决策的一档；
+// base64 承诺视频不落厂商的临时存储（过大时直接失败，绝不偷偷上传），
+// upload 永远走临时存储，url 表示视频已经有公网地址、由调用方提供。
+// 说明直接写进下拉项，选之前就能看到限制与代价。
+const videoDirectInputOptions = computed(() => [
+  {
+    value: 'auto',
+    label: t('knowledgeEditor.video.directInputAuto'),
+    desc: t('knowledgeEditor.video.directInputAutoDesc'),
+  },
+  {
+    value: 'base64',
+    label: t('knowledgeEditor.video.directInputBase64'),
+    desc: t('knowledgeEditor.video.directInputBase64Desc'),
+  },
+  {
+    value: 'upload',
+    label: t('knowledgeEditor.video.directInputUpload'),
+    desc: t('knowledgeEditor.video.directInputUploadDesc'),
+  },
+  {
+    value: 'url',
+    label: t('knowledgeEditor.video.directInputUrl'),
+    desc: t('knowledgeEditor.video.directInputUrlDesc'),
+  },
+])
+// 选中的一档的说明也显示在选择器下面：下拉收起后仍然能看到它承诺了什么。
+const selectedDirectInputDescription = computed(() => {
+  switch (normalizeVideoDirectInput(formData.value?.videoConfig?.directInput)) {
+    case 'base64':
+      return t('knowledgeEditor.video.directInputBase64Desc')
+    case 'upload':
+      return t('knowledgeEditor.video.directInputUploadDesc')
+    case 'url':
+      return t('knowledgeEditor.video.directInputUrlDesc')
+    default:
+      return t('knowledgeEditor.video.directInputAutoDesc')
+  }
+})
+
 const navItems = computed(() => {
   const items: { key: string; icon: string; label: string; badge?: number }[] = [
     { key: 'basic', icon: 'info-circle', label: t('knowledgeEditor.sidebar.basic') },
@@ -825,6 +1182,7 @@ const navItems = computed(() => {
       { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
       { key: 'multimodal', icon: 'image', label: t('knowledgeEditor.sidebar.multimodal') },
       { key: 'asr', icon: 'sound', label: t('knowledgeEditor.sidebar.asr') },
+      { key: 'video', icon: 'video', label: t('knowledgeEditor.sidebar.video') },
       { key: 'storage', icon: 'cloud', label: t('knowledgeEditor.sidebar.storage') },
       { key: 'chunking', icon: 'file-copy', label: t('knowledgeEditor.sidebar.chunking') },
       { key: 'graph', icon: 'chart-bubble', label: t('knowledgeEditor.sidebar.graph') },
@@ -857,7 +1215,7 @@ const navGroups = computed(() => {
     {
       key: 'processing',
       label: t('knowledgeEditor.navGroups.processing'),
-      items: pickItems(['parser', 'chunking', 'multimodal', 'asr', 'graph', 'advanced']),
+      items: pickItems(['parser', 'chunking', 'multimodal', 'asr', 'video', 'graph', 'advanced']),
     },
     {
       key: 'data',
@@ -984,6 +1342,31 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       enabled: false,
       modelId: '',
       language: ''
+    },
+    // 视频解析：默认关闭。mode 始终显式发送，免得老行（mode 缺省）在保存后
+    // 被后端归一成别的读法；modelId/language 是视频页自己的配置，留空表示
+    // 没有可用的 ASR 模型 / 自动检测，都不回退到「音频处理」。vlm 是画面描
+    // 述自己的视觉模型与要求，同样不回退到「图像处理」的 vlm_config。
+    // maxFrames / frameIntervalSeconds 是抽帧策略：默认最多 12 帧，间隔 0
+    // 表示按视频时长与帧数上限自动计算（后端同样会夹取范围和默认值）。
+    videoConfig: {
+      enabled: false,
+      mode: 'audio_only' as string,
+      modelId: '' as string,
+      language: '' as string,
+      // 视频直读（video_direct）：视频模型、传输方式与追加要求，都是视频页自己的设置。
+      videoModelId: '' as string,
+      // 传输方式默认「自动」：按文件大小选 base64 内联或上传临时存储，
+      // 与后端 NormalizeVideoDirectInput 的归一结果一致。
+      directInput: 'auto' as string,
+      directPrompt: '' as string,
+      maxFrames: 12,
+      frameIntervalSeconds: 0,
+      vlm: {
+        modelId: '' as string,
+        descriptionLanguage: '' as string,
+        customInstructions: '' as string
+      }
     },
     nodeExtractConfig: {
       enabled: false,
@@ -1153,6 +1536,39 @@ const loadKBData = async (
         enabled: !!kb.asr_config?.enabled,
         modelId: kb.asr_config?.model_id || '',
         language: kb.asr_config?.language || ''
+      },
+      videoConfig: {
+        // Absent on knowledge bases saved before the switch existed; the
+        // backend default is off, so mirror it instead of inventing an opt-in.
+        enabled: !!kb.video_config?.enabled,
+        // An old row decodes to an empty mode; the server treats that as
+        // audio_only, and so does the dropdown.
+        mode: normalizeVideoMode(kb.video_config?.mode),
+        // Empty means "no video ASR model": the backend no longer borrows the
+        // audio section's model, so the warning shows until one is chosen.
+        modelId: kb.video_config?.model_id || '',
+        // Empty means auto-detection; the hint never comes from asr_config.
+        language: kb.video_config?.language || '',
+        // The direct mode's own model and extra requirements. Empty means the
+        // mode has no video model, and the pipeline then archives instead of
+        // borrowing the ASR or frame model.
+        videoModelId: kb.video_config?.video_model_id || '',
+        // Rows saved before the transport existed decode to empty, which the
+        // backend reads as auto; show the same value instead of an empty select.
+        directInput: normalizeVideoDirectInput(kb.video_config?.direct_input),
+        directPrompt: kb.video_config?.direct_prompt || '',
+        // Rows saved before the knobs existed decode to 0; show the effective
+        // defaults instead of an empty input, and keep 0 as "auto interval".
+        maxFrames: kb.video_config?.max_frames || 12,
+        frameIntervalSeconds: kb.video_config?.frame_interval_seconds ?? 0,
+        // The video's own frame-description settings. Both fields are read
+        // regardless of the stored enabled flag: the mode decides whether
+        // frames are described, and the model id is what the page shows.
+        vlm: {
+          modelId: kb.video_config?.vlm_config?.model_id || '',
+          descriptionLanguage: kb.video_config?.vlm_config?.description_language || '',
+          customInstructions: kb.video_config?.vlm_config?.custom_instructions || ''
+        }
       },
       nodeExtractConfig: {
         enabled: kb.extract_config?.enabled || false,
@@ -1363,6 +1779,10 @@ const handleAddVLLMModel = () => {
 
 const handleAddASRModel = () => {
   uiStore.openSettings('models', 'asr')
+}
+
+const handleAddVideoModel = () => {
+  uiStore.openSettings('models', 'video')
 }
 
 const handleAddWikiModel = () => {
@@ -1592,6 +2012,33 @@ const buildSubmitData = () => {
     language: formData.value.asrConfig?.language || ''
   }
 
+  // 视频解析配置。mode 与 language 永远显式发送（清空语言也要生效）；
+  // model_id 为空就是没配视频 ASR，后端不会回退到「音频处理」。
+  // max_frames / frame_interval_seconds 是抽帧策略，后端会再夹取一次范围。
+  // vlm_config 是视频自己的画面描述配置：enabled 只表达「这一节有没有选视觉
+  // 模型」，真正决定要不要描述画面的是 mode；留空即清空，绝不继承「图像处理」。
+  const videoVLM = formData.value.videoConfig?.vlm
+  const videoVLMModelId = videoVLM?.modelId?.trim() || ''
+  data.video_config = {
+    enabled: formData.value.videoConfig?.enabled || false,
+    mode: formData.value.videoConfig?.mode || 'audio_only',
+    model_id: formData.value.videoConfig?.modelId || '',
+    language: formData.value.videoConfig?.language || '',
+    // 直读的视频模型、传输方式与追加要求：留空即清空，绝不借用 ASR / VLM 的模型。
+    video_model_id: formData.value.videoConfig?.videoModelId || '',
+    // 传输方式总是显式发送：老行（字段缺省）保存后按 auto 落库，未知值由后端归一。
+    direct_input: normalizeVideoDirectInput(formData.value.videoConfig?.directInput),
+    direct_prompt: formData.value.videoConfig?.directPrompt || '',
+    max_frames: formData.value.videoConfig?.maxFrames || 12,
+    frame_interval_seconds: formData.value.videoConfig?.frameIntervalSeconds ?? 0,
+    vlm_config: {
+      enabled: !!videoVLMModelId,
+      model_id: videoVLMModelId,
+      description_language: videoVLM?.descriptionLanguage || '',
+      custom_instructions: videoVLM?.customInstructions || ''
+    }
+  }
+
   // storage_backend_id is authoritative. Keep provider projection for old clients
   // and for rolling upgrades where a node has not picked up the new schema yet.
   if (formData.value.storageBackendId) {
@@ -1787,6 +2234,7 @@ const doSubmit = async () => {
         embeddingModelId: data.embedding_model_id,
         vlm_config: data.vlm_config,
         asr_config: data.asr_config,
+        video_config: data.video_config,
         documentSplitting: {
           chunkSize: data.chunking_config.chunk_size,
           chunkOverlap: data.chunking_config.chunk_overlap,
@@ -2398,6 +2846,43 @@ watch(() => chatResources.allModels, (list) => {
     margin-left: 2px;
     font-weight: 500;
   }
+
+  // 视频模型依赖：缺模型只影响可用性，不阻塞保存，所以用提示色而不是错误色。
+  .video-asr-warning {
+    color: var(--td-warning-color);
+  }
+
+  // 传输方式的成本 / 合规提示：与说明文字同色系，但单独起行，避免和
+  // 「当前选中的一档」混成一段。
+  .video-transport-cost {
+    margin-top: 4px;
+    color: var(--td-text-color-placeholder);
+  }
+
+  .video-model-hint {
+    margin: var(--app-space-1) 0 0;
+    font-size: var(--app-text-sm);
+    line-height: 1.5;
+    color: var(--td-text-color-placeholder);
+  }
+
+  // The selector and its fallback note stack in the right-hand column instead
+  // of sitting side by side (setting-control is a flex row by default).
+  .video-model-control {
+    flex-direction: column;
+    align-items: stretch;
+    // A model selector sizes itself to its label, and the hint below it can be
+    // a full sentence. Left unconstrained the control grows past the row and
+    // squeezes the description column down to a few characters, so it takes
+    // the same width every other control takes and wraps its own text.
+    width: 320px;
+    min-width: 320px;
+    max-width: 320px;
+  }
+
+  .video-model-control > * {
+    width: 100%;
+  }
 }
 
 .kb-profile-card {
@@ -2502,6 +2987,47 @@ watch(() => chatResources.allModels, (list) => {
       line-height: 1.5;
       color: var(--td-text-color-secondary);
     }
+  }
+
+}
+</style>
+
+<!-- Non-scoped: TDesign teleports the mode dropdown outside this component, so
+     a scoped selector cannot reach its option rows. -->
+<style lang="less">
+.video-mode-popup,
+.video-transport-popup {
+  .t-select-option {
+    // Options are two lines (label + cost note); the default 32px row clips.
+    height: auto;
+    min-height: 48px;
+    padding: 8px 12px;
+    line-height: 1.4;
+    white-space: normal;
+  }
+}
+
+.video-mode-option,
+.video-transport-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  width: 100%;
+
+  &__label {
+    font-size: var(--app-text-md);
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--td-text-color-primary);
+  }
+
+  &__desc {
+    font-size: var(--app-text-sm);
+    line-height: 1.4;
+    color: var(--td-text-color-secondary);
+    white-space: normal;
+    overflow-wrap: break-word;
   }
 }
 </style>

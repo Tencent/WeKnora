@@ -41,7 +41,8 @@ var databaseQueryTool = BaseTool{
 - title (VARCHAR): Document title
 - description (TEXT): Description
 - source (VARCHAR): Source location
-- parse_status (VARCHAR): Processing status (unprocessed/processing/completed/failed)
+- parse_status (VARCHAR): Processing status (unprocessed/processing/completed/failed/stored);
+  "stored" means archived without an index, so full-text search never returns it
 - enable_status (VARCHAR): Enable status (enabled/disabled)
 - file_name, file_type (VARCHAR): File information
 - file_size, storage_size (BIGINT): Size in bytes

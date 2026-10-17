@@ -13,6 +13,7 @@ var frontendTypes = map[string]types.ModelType{
 	"vlm":       types.ModelTypeVLLM,
 	"vllm":      types.ModelTypeVLLM,
 	"asr":       types.ModelTypeASR,
+	"video":     types.ModelTypeVideo,
 }
 
 // ParseModelType accepts both frontend ("chat") and backend ("KnowledgeQA")
@@ -23,7 +24,7 @@ func ParseModelType(s string) (types.ModelType, bool) {
 	}
 	switch types.ModelType(s) {
 	case types.ModelTypeKnowledgeQA, types.ModelTypeEmbedding, types.ModelTypeRerank,
-		types.ModelTypeVLLM, types.ModelTypeASR:
+		types.ModelTypeVLLM, types.ModelTypeASR, types.ModelTypeVideo:
 		return types.ModelType(s), true
 	}
 	return "", false

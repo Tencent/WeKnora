@@ -780,7 +780,8 @@ export default {
     tagLabel: 'タグ',
     tagPlaceholder: 'タグを選択',
     noTags: 'タグなし',
-    videosFilteredNoVLM: '{count}件の動画ファイルをスキップしました（動画のアップロードには対応していません）',
+    videosFilteredParsingDisabled: '{count}件の動画ファイルをスキップしました（動画解析が無効です。ナレッジベース設定 → 動画処理で有効にしてください）',
+    videoModelNotConfigured: '動画解析は有効ですが、現在の方式に必要なモデル（ASR / 視覚 / 動画モデル）が設定されていません。ナレッジベース設定 → 動画処理で設定しない限り、動画のアップロードは拒否されます',
     unsupportedTypesHint: '一部のドキュメント形式（{types}）は利用できる解析エンジンがないため、アップロードしても解析できません',
     goToParserSettings: '設定を開く',
     importURL: 'URLからインポート',
@@ -853,6 +854,8 @@ export default {
     regenerateSummary: '要約を再生成',
     generateSummary: '要約を生成',
     noDocumentSummary: 'ドキュメントの要約はありません',
+    archiveNoSummary:
+      'このファイルはインデックスを作成せずにアーカイブされているため、要約はありません。「プレビュー」で元のファイルを再生できます。',
     summaryRefreshed: '要約を更新しました',
     summaryRefreshQueued: '要約の更新を登録しました。完了すると自動的に反映されます',
     indexFailed: 'インデックスの同期に失敗しました',
@@ -975,6 +978,8 @@ export default {
     statusFailed: '失敗',
     statusCancelled: 'キャンセル済み',
     statusDraft: '下書き',
+    statusStored: 'アーカイブのみ・未インデックス',
+    storedHint: 'このファイルはインデックスが作成されていないため、検索結果に表示されません',
     noDescription: '説明なし',
     emptyKnowledgeDragDrop: 'ナレッジがありません。ドラッグ＆ドロップでアップロードできます',
     pdfDocFormat: 'pdf、doc形式のファイル、最大{size}MB',
@@ -3347,6 +3352,7 @@ export default {
         partial: '一部完了',
         canceled: 'キャンセル',
         failed: '失敗',
+        stored: 'アーカイブのみ',
         enqueue: 'タスク登録',
         reuse_vectors: 'ベクトルを再利用',
         reparse: '再解析',
@@ -3377,6 +3383,7 @@ export default {
       graph: 'ナレッジグラフ',
       multimodal: '画像処理',
       asr: '音声',
+      video: '動画処理',
       datasource: 'データソース',
       share: '共有',
       activity: 'アクティビティ'
@@ -3976,6 +3983,66 @@ export default {
       languageDescription: '任意。主要な言語のヒントを指定すると、一部のASRモデルで精度が向上します。空欄の場合は自動判定します。',
       languagePlaceholder: '例: zh、en。空欄の場合は自動判定'
     },
+    video: {
+      title: '動画処理',
+      description: '動画解析を設定します。解析モードに応じて、ナレーション・映像・その両方、または動画全体（直接読み取り）が検索可能なテキストになります。',
+      label: '動画解析を有効化',
+      desc: '有効にすると動画を文字起こしして検索対象にします。無効の場合は動画は保存のみ（再生は可能、検索は不可）になります。',
+      modeLabel: '解析方式',
+      modeDescription: '動画から何を読み取るかを選びます。方式によってコストと効果が異なります。',
+      modeAudioOnly: '音声の文字起こしのみ（軽量）',
+      modeAudioOnlyDesc: 'ナレーションだけを文字起こしし、映像は説明しません。ASR 呼び出し 1 回で最速・最安です。',
+      modeKeyframes: 'キーフレームの映像説明',
+      modeKeyframesDesc: '音声は使わず映像だけを説明します。動画の長さに応じて最大 12 フレーム（設定可能）を均等に抽出して視覚モデルに渡します。スライドや操作デモ向けです。',
+      modeAudioKeyframes: '音声 + 映像説明（標準）',
+      modeAudioKeyframesDesc: 'ナレーションの文字起こしと映像説明を両方行い、時系列に統合します。最も充実しますがコストも最大です（ASR + 最大 12 回の視覚呼び出し、フレーム数は設定可能）。',
+      modelLabel: '動画用 ASR モデル',
+      modelDescription: 'このナレッジベースの動画ナレーションにのみ使用します。「音声」の設定には影響しません。',
+      modelPlaceholder: '動画の文字起こしに使う ASR モデルを選択',
+      asrHint: '動画の文字起こしには専用の ASR モデルが必要です。「音声」とは共用しません。',
+      asrRequired: '動画用 ASR モデルを選択してください。未選択の場合、映像説明のみ、または保存のみになります。',
+      languageLabel: '文字起こしの言語',
+      languageDescription: '動画ナレーションの言語ヒントです。空欄の場合は自動検出します。「音声」の言語設定とは連動しません。',
+      languagePlaceholder: '例: zh、en（空欄で自動検出）',
+      vlmHint: '映像説明にはこの動画セクション専用の視覚モデルを使用します。抽出するフレーム数と間隔は下で調整できます。',
+      maxFramesLabel: '最大フレーム数',
+      maxFramesDescription: '1 本の動画から視覚モデルに渡すフレーム数の上限（1〜60）。増やすほど多くの場面を見られますが、視覚呼び出しのコストも増えます。既定は 12。',
+      frameIntervalLabel: 'サンプリング間隔（秒）',
+      frameIntervalDescription: '何秒ごとに 1 フレームを抽出するか（0〜3600）。0 は動画の長さと最大フレーム数から自動計算し、短い動画は密に、長い動画は疎になります。',
+      vlmRequired: '動画の画面説明用の視覚モデルが未選択のため、画面説明を生成できず動画は保存のみになります。「動画処理」で選択してください。',
+      vlmPartial: '動画の画面説明用の視覚モデルが未選択のため、今回は音声のみ文字起こしし、画面説明はスキップします。',
+      vlmLabel: '画面用視覚モデル（VLM）',
+      vlmDescription: '抽出したフレームを説明します。「画像処理」とは独立しており、画像解析の変更が動画の出力を変えることはありません。',
+      vlmPlaceholder: '動画の画面説明に使う視覚モデルを選択',
+      vlmLanguageLabel: '画面説明の言語',
+      vlmLanguageDescription: '生成される画面説明の言語。空の場合はリクエストの言語に従います。',
+      vlmLanguageAuto: '自動（リクエストの言語に従う）',
+      customInstructionsLabel: '画面説明の要件',
+      customInstructionsDescription: '画面説明で特に注目したい内容の追加指示。組み込みの要件の後に追加され、組み込み側が優先されるため、「判別できない場合は推測せず不明と書く」規則は上書きできません。',
+      customInstructionsPlaceholder: '画面説明で特に注目したい内容を入力してください。例：ダイアログのタイトルとエラーメッセージを重点的に。右下の透かしは無視。',
+      modeDirect: '動画を直接読み取り（完全理解）',
+      modeDirectDesc: '動画全体を動画理解モデルにアップロードし、ナレーション・画面内の文字・映像を一度に読み取ります。最も情報量が多い代わりに、ファイルをベンダーへ送る唯一のモードです。',
+      videoModelLabel: '動画モデル',
+      videoModelDescription: '動画全体を読み取ります。ASR やフレーム VLM とは独立しており、切り替えても他方に影響しません。',
+      videoModelPlaceholder: '動画理解モデルを選択',
+      videoModelHint: '動画モデルは動画ファイルをそのまま受け取り、テキストで回答します。転送方法は下の「転送方法」で指定します。',
+      videoModelRequired: '先に動画モデルを選択してください。未選択の場合、直接読み取りは実行できず動画はアーカイブされます。',
+      directFallbackHint: '直接読み取りに失敗した場合は、このページで設定済みの音声認識・フレーム記述モデルに戻ります。どちらも未設定のときのみアーカイブされます。',
+      directPromptLabel: '直接読み取りの要件',
+      directPromptDescription: '組み込みプロンプトの後ろに追加されます。出力形式と「推測せず、分からないと書く」ルールが優先されます。',
+      directPromptPlaceholder: '例：章タイトルを残し、画面に出てくるコマンドをすべて列挙してください。',
+      directInputLabel: '転送方法',
+      directInputDescription: '動画全体をどの経路でモデルへ渡すか：リクエスト本文（base64）、ベンダーの一時ストレージ、または既にある公開 URL。',
+      directInputCostHint: 'コストとコンプライアンス：base64 インラインはベンダー側に一時ファイルを作りませんが、リクエスト本文と一緒に送信され、本文サイズの上限に縛られます。一時ストレージへのアップロードは追加の帯域を使い、ベンダー側に一時ファイルが残ります（Alibaba Cloud は 48 時間で失効）。',
+      directInputAuto: '自動（推奨）',
+      directInputAutoDesc: '動画サイズで決定：収まる場合はインライン、超える場合は一時ストレージへアップロードします。',
+      directInputBase64: 'base64 インライン',
+      directInputBase64Desc: '動画をリクエスト本文にエンコードするため、第三者の一時ストレージを経由しません。ベンダーの上限を超えるとアップロードへ切り替えず、そのまま失敗します。',
+      directInputUpload: '一時ストレージへアップロード',
+      directInputUploadDesc: 'モデルベンダーの一時ストレージへ先にアップロードして参照します。大容量（約 1 GB まで）に対応しますが、遅くなり、一時ファイルはしばらく残ります。',
+      directInputUrl: '公開 URL（外部呼び出し）',
+      directInputUrlDesc: '呼び出し元が用意した公開アドレスを使います。この画面で取り込んだ動画はローカルファイルなので、選ぶと直接読み取りは失敗します。',
+    },
     advanced: {
       title: '詳細設定',
       description: '質問生成やその他の高度な機能を設定します',
@@ -4464,6 +4531,10 @@ export default {
         tier3: '項目を環境変数の管理下に戻すには、その行の「リセット」ボタンをクリックしてください。'
       },
       sections: {
+        asr: {
+          title: '音声認識',
+          description: '長い音声の文字起こしを設定します。既定では音声全体をベンダーに送り、上限を超えると失敗します。分割を有効にすると分割・文字起こし・統合を行います。変更は再起動なしで即時反映されます。'
+        },
         access: {
           title: '登録とアクセス',
           description: '登録方法、パスワード要件、ワークスペース作成のルールを管理します。'
@@ -4694,6 +4765,10 @@ export default {
         }
       },
       keyLabels: {
+        asr: {
+          long_audio_chunking_enabled: '長い音声の分割',
+          max_segment_seconds: '1 セグメントの長さ（秒）'
+        },
         auth: {
           registration_mode: '登録モード',
           default_tenant_mode: 'デフォルトのワークスペース作成方式',
@@ -4725,6 +4800,10 @@ export default {
         }
       },
       keyDescriptions: {
+        asr: {
+          long_audio_chunking_enabled: 'ベンダーの上限を超える長い音声を分割して個別に文字起こしするかどうか。オフの場合は音声全体をそのままベンダーに送り、長すぎる場合は失敗します。オンにすると「1 セグメントの長さ」で分割して結果を統合します。文字起こしごとに読み直すため、変更は再起動なしで即時反映されます。既定はオフ。',
+          max_segment_seconds: '長い音声を分割するときの 1 セグメントの長さ（秒、30〜300）。上のスイッチがオンのときのみ有効で、文字起こしごとに読み直されます。既定は 120 秒。'
+        },
         auth: {
           registration_mode: '登録モード。公開登録では誰でもアカウントを作成できます。招待登録には有効な招待リンクが必要です。登録禁止でも既存アカウントは招待を承諾できます。保存後すぐに反映されます。',
           default_tenant_mode: '公開登録後のワークスペース作成方式です。create_personalはオーナー権限のワークスペースを作成し、tenantlessはアカウントのみを作成して、ユーザが招待を承諾するかワークスペースを作成するまで待ちます。新規ユーザにのみ適用されます。',
@@ -5118,7 +5197,8 @@ export default {
           rerank: '検索結果のリランクに使うモデルを設定します',
           vllm: 'マルチモーダル理解に使う視覚言語モデルを設定します',
           asr: '音声の文字起こしに使う音声認識モデルを設定します',
-          default: 'モデル情報を設定します'
+          default: 'モデル情報を設定します',
+          video: '動画全体を読み取る動画理解モデルを設定します',
         },
         modelNamePlaceholder: {
           local: '例: llama2:latest',
@@ -5476,7 +5556,8 @@ export default {
         embedding: '埋め込み',
         rerank: 'リランク',
         vllm: '視覚',
-        asr: '音声'
+        asr: '音声',
+        video: '動画'
       },
       actions: {
         addModel: 'モデルを追加',
@@ -5511,6 +5592,11 @@ export default {
         title: 'ASR音声モデル',
         desc: '音声の文字起こしに使用する音声認識モデルを設定します（例: OpenAI Whisper）',
         empty: 'ASRモデルがありません'
+      },
+      video: {
+        title: '動画',
+        desc: '動画全体を読み取りテキストで回答する動画理解モデル（「動画」タイプ）',
+        empty: '動画モデルはまだありません'
       },
       toasts: {
         nameRequired: 'モデル名を入力してください',
@@ -5561,7 +5647,8 @@ export default {
           query_understand_model: 'クエリ理解モデル',
           follow_up_model: 'フォローアップモデル',
           extract_model: 'メモリ抽出モデル',
-          unknown: 'その他のモデル設定'
+          unknown: 'その他のモデル設定',
+          video_model: '動画モデル',
         }
       },
       debug: {
@@ -5619,9 +5706,12 @@ export default {
           reasoningReturned: '推論内容の返却',
           textChars: '文字起こし文字数',
           segmentCount: 'セグメント数'
-        }
-      }
-    },
+      },
+      videoFile: '動画ファイル',
+      videoPrompt: '動画プロンプト',
+      videoPromptPlaceholder: '例：この動画は何をどの順番で説明していますか？',
+    }
+  },
     ollamaSettings: {
       title: 'Ollama設定',
       description: 'ローカルのOllamaサービスを管理し、モデルの確認やダウンロードを行います',
@@ -7628,6 +7718,8 @@ export default {
     dingtalkIngestLabel: 'DingTalk の取り込み範囲',
     dingtalkIncludeUploadedFiles: 'アップロードファイル（docx / pptx / xlsx / pdf）を取り込む',
     dingtalkIncludeUploadedFilesHint: '既定ではオフです。オンにすると、選択範囲にアップロードされた Word / PowerPoint / Excel / PDF ファイルをダウンロードして解析し、ナレッジベースに取り込みます（1 ファイルあたり 64 MiB まで）。本文はストレージと埋め込みのコストに算入されます。オフの場合は単にスキップされ、同期ログにスイッチが無効である旨が記録されます。既にナレッジベースにあるコピーは削除されません。',
+    dingtalkStoreUnindexedMedia: '動画をインデックスせずに保存のみ行う',
+    dingtalkStoreUnindexedMediaHint: '既定ではオフです。オンにすると、選択範囲内の動画ファイル（mp4 / mov / m4v / webm / mkv / avi / wmv / flv）をダウンロードしてアーカイブとして保存します。一覧から見つけて再生・ダウンロードできますが、解析は行われず検索結果にも表示されません。オフの場合は従来どおりスキップされます。後でオフにすると、次回のフル同期で保存済みのコピーが削除されます（選択を外した他のファイルと同じ動作です）。',
     prereqBarText_dingtalk: '初めての利用ですか？DingTalkアプリの設定ガイドを確認',
     prereqStep1Brief_dingtalk: '企業内部アプリを作成',
     prereqStep1Desc_dingtalk: 'DingTalk開発者プラットフォームで企業内部アプリを作成し、Client IDとClient Secretを取得します。',

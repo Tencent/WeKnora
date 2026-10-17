@@ -30,7 +30,7 @@ func (r *Resolved) Endpoint(kind types.ModelType, c Connection) (api.Endpoint, e
 	}
 	protocol := v.API
 	label := strings.ToLower(string(kind))
-	if kind == types.ModelTypeKnowledgeQA || kind == types.ModelTypeVLLM {
+	if isChatProtocol(kind) {
 		protocol, label = r.API, "provider"
 	}
 	if v.AuthStyleFor(protocol) == providers.AuthSigned {
@@ -41,7 +41,7 @@ func (r *Resolved) Endpoint(kind types.ModelType, c Connection) (api.Endpoint, e
 			return api.Endpoint{}, fmt.Errorf("%s %s: AppSecret is required", v.Name, label)
 		}
 	} else if v.RequiresAuth && protocol == api.APIAnthropicMessages &&
-		(kind == types.ModelTypeKnowledgeQA || kind == types.ModelTypeVLLM) && strings.TrimSpace(creds.APIKey) == "" {
+		isChatProtocol(kind) && strings.TrimSpace(creds.APIKey) == "" {
 		return api.Endpoint{}, fmt.Errorf("%s provider: API key is required", v.Name)
 	}
 	headers := make(map[string]string, len(v.Headers)+len(c.Headers))
@@ -75,4 +75,14 @@ func (r *Resolved) Endpoint(kind types.ModelType, c Connection) (api.Endpoint, e
 		}
 	}
 	return ep, nil
+}
+
+// isChatProtocol reports whether a model type is driven by the chat protocols
+// (and therefore by the resolved chat API instead of the vendor default).
+// Video understanding is a chat call carrying a video part, so it belongs here
+// with chat and VLM.
+func isChatProtocol(kind types.ModelType) bool {
+	return kind == types.ModelTypeKnowledgeQA ||
+		kind == types.ModelTypeVLLM ||
+		kind == types.ModelTypeVideo
 }

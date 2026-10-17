@@ -33,6 +33,18 @@ type ReadResult struct {
 	// the original file. Optional: engines that know no positions leave it
 	// empty.
 	SourceBlocks []SourceBlock
+	// VideoFrames carries the timestamped frame descriptions of a video whose
+	// mode asks for picture content. The ASR step interleaves them with the
+	// narration by time before chunking; empty for every other file type.
+	VideoFrames []VideoFrameDescription
+}
+
+// VideoFrameDescription is one VLM caption for a sampled video frame. StartMs
+// is the frame's capture time in the video, which is what lets the merged text
+// keep narration and picture in chronological order.
+type VideoFrameDescription struct {
+	StartMs int64  `json:"start_ms"`
+	Text    string `json:"text"`
 }
 
 // ImageRef represents an image reference extracted from the document.

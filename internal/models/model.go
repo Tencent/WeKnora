@@ -74,3 +74,15 @@ func (m ModelSpec) AcceptsImages() bool {
 	}
 	return false
 }
+
+// AcceptsVideo reports whether Input lists video. Video rows (ModelTypeVideo)
+// are picked from the chat entries that declare it, the same way VLM rows are
+// picked from the chat entries that declare image.
+func (m ModelSpec) AcceptsVideo() bool {
+	for _, in := range m.Input {
+		if in == "video" {
+			return true
+		}
+	}
+	return false
+}

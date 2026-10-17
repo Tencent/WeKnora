@@ -9,6 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
+	"github.com/Tencent/WeKnora/internal/models/video"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -136,6 +137,10 @@ func (s *stubModelService) GetVLMModel(context.Context, string) (vlm.VLM, error)
 }
 
 func (s *stubModelService) GetASRModel(context.Context, string) (asr.ASR, error) {
+	return nil, nil
+}
+
+func (s *stubModelService) GetVideoModel(context.Context, string) (video.Video, error) {
 	return nil, nil
 }
 

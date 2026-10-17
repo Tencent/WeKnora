@@ -872,6 +872,14 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		if req.Config.ImageProcessingConfig != nil {
 			probe.ImageProcessingConfig = *req.Config.ImageProcessingConfig
 		}
+		// The video section carries its own frame-description instructions;
+		// normalize before validating so the length limit applies to the value
+		// that will be stored, exactly like the create path.
+		if req.Config.VideoConfig != nil {
+			next := *req.Config.VideoConfig
+			next.Normalize()
+			probe.VideoConfig = next
+		}
 		if err := validateKnowledgeBasePromptInstructions(probe); err != nil {
 			c.Error(err)
 			return

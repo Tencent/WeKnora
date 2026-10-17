@@ -109,7 +109,7 @@
                 ref="fileInputRef"
                 class="file-picker__input"
                 type="file"
-                :accept="selectedModel.type === 'ASR' ? 'audio/*' : 'image/*'"
+                :accept="selectedModel.type === 'ASR' ? 'audio/*' : selectedModel.type === 'Video' ? 'video/*' : 'image/*'"
                 @change="onNativeFileChange"
               >
               <t-button variant="outline" size="small" @click="fileInputRef?.click()">
@@ -309,7 +309,7 @@ const supportsThinking = computed(() => modelCanThink(selectedModel.value?.capab
 const reasoningOptions = computed(() => supportedLevels(selectedModel.value?.capabilities))
 const acceptsImages = computed(() => {
   const model = selectedModel.value
-  if (!model || model.type === 'ASR') return false
+  if (!model || model.type === 'ASR' || model.type === 'Video') return false
   return model.type === 'VLLM'
     || model.capabilities?.input?.includes('image') === true
     || (model.type === 'KnowledgeQA' && model.parameters.supports_vision === true)
@@ -318,16 +318,19 @@ const hasImageMode = computed(() => acceptsImages.value && ['Embedding', 'Rerank
 const useImageMode = computed(() => hasImageMode.value && inputMode.value === 'image')
 const isEmbedding = computed(() => selectedModel.value?.type === 'Embedding')
 const useSimilarityMode = computed(() => isEmbedding.value && inputMode.value === 'similarity')
-// In similarity mode the image is an optional extra candidate.
-const showFilePicker = computed(() => selectedModel.value?.type === 'ASR'
+// In similarity mode the image is an optional extra candidate. A video model
+// always takes a file: the video is the input, the prompt only says what to
+// look for.
+const showFilePicker = computed(() => ['ASR', 'Video'].includes(selectedModel.value?.type || '')
   || (acceptsImages.value && (!hasImageMode.value || useImageMode.value || useSimilarityMode.value)))
-const needsFile = computed(() => useImageMode.value || ['VLLM', 'ASR'].includes(selectedModel.value?.type || ''))
+const needsFile = computed(() => useImageMode.value
+  || ['VLLM', 'ASR', 'Video'].includes(selectedModel.value?.type || ''))
 const documents = computed(() => documentsText.value.split('\n').map(item => item.trim()).filter(Boolean))
 const canRun = computed(() => {
   if (!selectedModel.value) return false
   if (useSimilarityMode.value) return !!input.value.trim() && (documents.value.length > 0 || !!file.value)
   if (needsFile.value && !file.value) return false
-  if (['ASR', 'VLLM'].includes(selectedModel.value.type) || (selectedModel.value.type === 'Embedding' && useImageMode.value)) return true
+  if (['ASR', 'VLLM', 'Video'].includes(selectedModel.value.type) || (selectedModel.value.type === 'Embedding' && useImageMode.value)) return true
   if (selectedModel.value.type === 'Rerank') return !!input.value.trim() && (useImageMode.value ? !!file.value : documents.value.length > 0)
   return !!input.value.trim() || (isChat.value && acceptsImages.value && !!file.value)
 })
@@ -339,6 +342,7 @@ const allModelTypeOptions = computed(() => {
     Rerank: { short: 'rerank', icon: 'filter-sort' },
     VLLM: { short: 'vllm', icon: 'image' },
     ASR: { short: 'asr', icon: 'sound' },
+    Video: { short: 'video', icon: 'video' },
   }
   return (Object.keys(keys) as DebugModelType[]).map(value => ({
     value,
@@ -367,6 +371,7 @@ const inputLabel = computed(() => {
   if (useSimilarityMode.value) return t('modelSettings.debug.similarityQuery')
   if (selectedModel.value?.type === 'Embedding') return t('modelSettings.debug.embeddingInput')
   if (selectedModel.value?.type === 'VLLM') return t('modelSettings.debug.vlmPrompt')
+  if (selectedModel.value?.type === 'Video') return t('modelSettings.debug.videoPrompt')
   if (selectedModel.value?.type === 'Rerank') return t('modelSettings.debug.query')
   return t('modelSettings.debug.query')
 })
@@ -375,14 +380,15 @@ const inputPlaceholder = computed(() => {
   if (useSimilarityMode.value) return t('modelSettings.debug.similarityQueryPlaceholder')
   if (selectedModel.value?.type === 'Embedding') return t('modelSettings.debug.embeddingPlaceholder')
   if (selectedModel.value?.type === 'VLLM') return t('modelSettings.debug.vlmPromptPlaceholder')
+  if (selectedModel.value?.type === 'Video') return t('modelSettings.debug.videoPromptPlaceholder')
   return t('modelSettings.debug.queryPlaceholder')
 })
 
-const fileLabel = computed(() =>
-  selectedModel.value?.type === 'ASR'
-    ? t('modelSettings.debug.audioFile')
-    : t('modelSettings.debug.imageFile'),
-)
+const fileLabel = computed(() => {
+  if (selectedModel.value?.type === 'ASR') return t('modelSettings.debug.audioFile')
+  if (selectedModel.value?.type === 'Video') return t('modelSettings.debug.videoFile')
+  return t('modelSettings.debug.imageFile')
+})
 
 const formattedResult = computed(() => {
   if (!result.value) return ''
@@ -507,7 +513,11 @@ const clearFile = () => {
 
 watch(file, value => {
   if (imagePreview.value) URL.revokeObjectURL(imagePreview.value)
-  imagePreview.value = value && selectedModel.value?.type !== 'ASR' ? URL.createObjectURL(value) : ''
+  // Only images get a preview: an <img> cannot render a video, and the audio
+  // file is not meant to be shown either.
+  imagePreview.value = value && !['ASR', 'Video'].includes(selectedModel.value?.type || '')
+    ? URL.createObjectURL(value)
+    : ''
 })
 
 const onNativeFileChange = (event: Event) => {

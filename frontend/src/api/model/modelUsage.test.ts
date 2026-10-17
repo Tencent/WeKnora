@@ -111,6 +111,7 @@ test('keeps navigation and localization stable for all resource kinds', () => {
     { path: '/platform/agents', query: { edit: 'agent-1', section: 'suggestions' } },
   )
   assert.equal(modelUsageBindingI18nKey('vlm_model'), 'modelSettings.usage.bindings.vlm_model')
+  assert.equal(modelUsageBindingI18nKey('video_model'), 'modelSettings.usage.bindings.video_model')
   assert.equal(modelUsageBindingI18nKey('future_binding'), 'modelSettings.usage.bindings.unknown')
 })
 
@@ -122,6 +123,7 @@ test('maps knowledge-base bindings to the configuration section that owns them',
   assert.equal(modelUsageKnowledgeBaseSection(['image_processing_model']), 'multimodal')
   assert.equal(modelUsageKnowledgeBaseSection(['vlm_model']), 'multimodal')
   assert.equal(modelUsageKnowledgeBaseSection(['asr_model']), 'asr')
+  assert.equal(modelUsageKnowledgeBaseSection(['video_model']), 'video')
   assert.equal(modelUsageKnowledgeBaseSection(['future_binding']), 'models')
   assert.equal(modelUsageKnowledgeBaseSection(['summary_model', 'vlm_model']), 'models')
 })

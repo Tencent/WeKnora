@@ -3,6 +3,7 @@ package asr
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -64,6 +65,17 @@ type Config struct {
 	ExtraConfig map[string]string
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string
+
+	// MaxSegmentDuration is the longest audio one request may carry; a longer
+	// recording is cut and transcribed piecewise (see chunkedASR). Zero takes
+	// the deployment's setting, which defaults to DefaultMaxSegmentDuration:
+	// audio that fits in one request is never touched either way.
+	MaxSegmentDuration time.Duration
+	// FFmpegPath and FFprobePath override the binaries used to cut and measure
+	// the audio. Empty takes the deployment's setting, which resolves both on
+	// the PATH — they exist in the application container, not in docreader.
+	FFmpegPath  string
+	FFprobePath string
 }
 
 // ConfigFromModel 根据 types.Model 构造 asr.Config。
@@ -89,5 +101,13 @@ func ConfigFromModel(m *types.Model) *Config {
 // NewASR creates an ASR instance based on the provided configuration.
 func NewASR(config *Config) (ASR, error) {
 	a, err := newASR(config)
-	return wrapASRLangfuse(a, err)
+	if err != nil {
+		return nil, err
+	}
+	// The cutter wraps the vendor client and sits inside the Langfuse
+	// decorator on purpose: one transcription stays one generation, carrying
+	// the recording's full duration, however many requests it took. The other
+	// way round every segment would be its own generation and the operator
+	// would read one long recording as a burst of short ones.
+	return wrapASRLangfuse(newChunkedASR(a, config), nil)
 }

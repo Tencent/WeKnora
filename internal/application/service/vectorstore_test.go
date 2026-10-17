@@ -867,6 +867,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     is_pinned INTEGER NOT NULL DEFAULT 0,
     pinned_at DATETIME NULL,
     asr_config TEXT,
+    video_config TEXT,
 		vector_store_id VARCHAR(36),
 		storage_backend_id VARCHAR(36),
     wiki_config TEXT,

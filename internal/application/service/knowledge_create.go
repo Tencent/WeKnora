@@ -21,10 +21,47 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-// CreateKnowledgeFromFile creates a knowledge entry from an uploaded file
+// CreateKnowledgeFromFile creates a knowledge entry from an uploaded file.
+// Every import that expects the document to be searchable goes through here;
+// an entry that must NOT be indexed uses CreateStoredKnowledgeFromFile instead.
 func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
+) (*types.Knowledge, error) {
+	return s.createKnowledgeFromFile(
+		ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel,
+		processOverrides, false,
+	)
+}
+
+// CreateStoredKnowledgeFromFile persists a file as an archived knowledge entry:
+// the bytes are saved and the row is created, but nothing is parsed and no task
+// is dispatched. The row is born with parse_status "stored", so it is visible,
+// downloadable (and playable for media) while producing zero chunks — which is
+// what keeps it out of retrieval results without any query-side filter.
+//
+// This is a deliberately separate entry point rather than a flag on the upload
+// path: the caller must state that the file is the deliverable, and only the
+// archive types admitted by isStorableUnindexedFileType are accepted. A data
+// source connector decides that for itself (behind its own opt-in setting) and
+// passes the verdict through FetchedItem.StoreWithoutIndexing, so a plain upload
+// can never reach this path.
+func (s *knowledgeService) CreateStoredKnowledgeFromFile(
+	ctx context.Context, kbID string, file *multipart.FileHeader, metadata map[string]string,
+	customFileName string, tagIDs []string, channel string,
+) (*types.Knowledge, error) {
+	return s.createKnowledgeFromFile(
+		ctx, kbID, file, metadata, nil, customFileName, tagIDs, channel, nil, true,
+	)
+}
+
+// createKnowledgeFromFile is the one implementation behind both entry points.
+// storeOnly marks an archive: the extension gates and the parse dispatch below
+// are the only places the two paths differ.
+func (s *knowledgeService) createKnowledgeFromFile(
+	ctx context.Context, kbID string, file *multipart.FileHeader, metadata map[string]string,
+	enableMultimodel *bool, customFileName string, tagIDs []string, channel string,
+	processOverrides *types.KnowledgeProcessOverrides, storeOnly bool,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file")
 
@@ -45,9 +82,19 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 
 	logger.Infof(ctx, "Knowledge base ID: %s, file: %s", kbID, fileName)
 
-	if IsVideoType(getFileType(fileName)) {
-		logger.Error(ctx, "Video file upload is not supported")
-		return nil, werrors.NewBadRequestError("暂不支持上传视频文件")
+	// archiveOnly is the single switch the rest of this function branches on.
+	// A store-only request for a type that is not on the archive list is a
+	// caller bug, not a reason to fall back to parsing: refuse it loudly so a
+	// connector never believes it archived something that was actually indexed.
+	archiveOnly := false
+	if storeOnly {
+		if !isStorableUnindexedFileType(getFileType(fileName)) {
+			logger.Errorf(ctx, "Store-only import of unsupported file type: %s", getFileType(fileName))
+			return nil, werrors.NewBadRequestError(
+				fmt.Sprintf("不支持仅存档的文件类型: %s", getFileType(fileName)),
+			)
+		}
+		archiveOnly = true
 	}
 
 	// Get knowledge base configuration
@@ -67,11 +114,47 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, err
 	}
 
+	// Video: the knowledge base decides. With video_config.enabled and the model
+	// its mode needs (ASR for narration, VLM for frames) the import is a normal
+	// parse — the worker extracts the track and/or samples frames — so a
+	// connector's store-only request and a direct upload both take it. Without
+	// the prerequisites the video keeps its old meaning: an archive the
+	// connector asked for, or a rejected upload.
+	videoFile := IsVideoType(getFileType(fileName))
+	videoParse := false
+	if videoFile {
+		videoParse = videoParseReady(kb)
+		switch {
+		case videoParse:
+			// A connector may have archived these bytes because the switch was
+			// off when it synced; now that the KB opted in, parse them.
+			archiveOnly = false
+		case archiveOnly:
+			// Still archiving. Say why: an operator who flipped the switch but
+			// left the mode's model unset would otherwise get silence.
+			if kb.VideoConfig.Enabled {
+				logger.Warnf(ctx,
+					"Video parsing enabled but the model required by its mode is not configured, archiving: %s",
+					fileName)
+			} else {
+				logger.Infof(ctx, "Video parsing disabled, archiving: %s", fileName)
+			}
+		case kb.VideoConfig.Enabled:
+			logger.Error(ctx, "Video upload rejected: the model required by its mode is not configured")
+			return nil, werrors.NewBadRequestError(videoParseRequirementMessage(kb))
+		default:
+			logger.Error(ctx, "Video file upload is not supported")
+			return nil, werrors.NewBadRequestError("暂不支持上传视频文件")
+		}
+	}
+
 	// Early reject before the whole-file hash below. resolveFileImportProcessConfig
 	// gates the same extension set, but this path must keep returning
-	// ErrInvalidFileType rather than the shared gate's localized message.
+	// ErrInvalidFileType rather than the shared gate's localized message. The set
+	// is the parsers' list, so an archived file — which never reaches a parser —
+	// is admitted by isStorableUnindexedFileType above instead.
 	logger.Infof(ctx, "Checking file type: %s", fileName)
-	if !isValidFileType(fileName) {
+	if !archiveOnly && !videoParse && !isValidFileType(fileName) {
 		logger.Error(ctx, "Invalid file type")
 		return nil, ErrInvalidFileType
 	}
@@ -157,12 +240,27 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		folderPath = types.NormalizeKnowledgeFolderPath(safeFolderPath)
 	}
 
-	eff, err := resolveFileImportProcessConfig(ctx, kb, getFileType(safeFilename), processOverrides, enableMultimodel)
-	if err != nil {
-		return nil, err
+	// resolveFileImportProcessConfig gates the extension and the VLM/ASR
+	// prerequisites of the parse task that follows. An archived entry dispatches
+	// no task, so the effective config is unused and must not be resolved: an mp4
+	// would otherwise be rejected by validateImportFileType.
+	eff := types.EffectiveProcessConfig{}
+	if !archiveOnly {
+		var err error
+		eff, err = resolveFileImportProcessConfig(
+			ctx, kb, getFileType(safeFilename), processOverrides, enableMultimodel,
+		)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	// Prepare knowledge record
+	// Prepare knowledge record. A stored-only row is born settled: no task will
+	// ever move it, so it must not look like an import that is about to run.
+	parseStatus := types.ParseStatusPending
+	if archiveOnly {
+		parseStatus = types.ParseStatusStored
+	}
 	logger.Info(ctx, "Preparing knowledge record")
 	knowledge := &types.Knowledge{
 		ID:               uuid.New().String(),
@@ -176,7 +274,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		FileType:         getFileType(safeFilename),
 		FileSize:         file.Size,
 		FileHash:         hash,
-		ParseStatus:      "pending",
+		ParseStatus:      parseStatus,
 		EnableStatus:     "disabled",
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
@@ -214,6 +312,18 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, tagIDs); err != nil {
 		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
 		return nil, err
+	}
+
+	// An archived entry is complete the moment the row exists: there is no parse
+	// to dispatch, and pretending otherwise would enqueue a task bound to fail.
+	if archiveOnly {
+		recordKBActivity(ctx, s.audit, knowledge.TenantID, kbID, types.AuditActionKnowledgeCreated,
+			"knowledge", knowledge.ID, types.AuditOutcomeAccepted, map[string]any{
+				"title": knowledge.Title, "source_type": "file", "file_type": knowledge.FileType,
+				"processing_status": types.ParseStatusStored, "store_without_indexing": true,
+			})
+		logger.Infof(ctx, "Knowledge stored without indexing, ID: %s", knowledge.ID)
+		return knowledge, nil
 	}
 
 	// Enqueue document processing task to Asynq

@@ -78,6 +78,7 @@ function loadView(file: URL, extraDependencies: Record<string, unknown> = {}): a
     './KnowledgeTagPopover.vue': noopComponent,
     './DocumentFileIcon.vue': noopComponent,
     './DocumentActionMenu.vue': noopComponent,
+    './DocumentArchiveBadge.vue': noopComponent,
     './FolderPickerMenu.vue': noopComponent,
     '@/components/knowledge-processing-timeline.vue': noopComponent,
     ...extraDependencies,

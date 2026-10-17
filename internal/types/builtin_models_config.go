@@ -232,6 +232,7 @@ var validBuiltinModelTypes = map[ModelType]struct{}{
 	ModelTypeRerank:      {},
 	ModelTypeVLLM:        {},
 	ModelTypeASR:         {},
+	ModelTypeVideo:       {},
 }
 
 // validBuiltinModelStatuses is the set of statuses the loader accepts.
@@ -288,7 +289,7 @@ func validateBuiltinModelEntry(e *BuiltinModelEntry, index int) error {
 	}
 	if _, ok := validBuiltinModelTypes[e.Type]; !ok {
 		return errBuiltinModel(
-			"entry %d (%s) has unknown type %q (expected one of: KnowledgeQA, Embedding, Rerank, VLLM, ASR)",
+			"entry %d (%s) has unknown type %q (expected one of: KnowledgeQA, Embedding, Rerank, VLLM, ASR, Video)",
 			index, e.ID, e.Type)
 	}
 	if e.Status != "" {

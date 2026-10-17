@@ -81,6 +81,13 @@ async function setup(t: TestContext, tree: unknown) {
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
     '@/utils/kbPermission': {}, '@/utils/knowledgeDeletion': {}, '@/utils/knowledgeTrace': {},
     '@/utils/knowledgeProcessingStall': stall, '@/api/wiki': {}, '@/api/knowledge-base': {},
+    // The upload menu reads the KB video switch from the detail already loaded
+    // on this page; it is irrelevant to folder counts, so keep it inert.
+    './utils/uploadSources': {
+      UPLOAD_VIDEO_EXTENSIONS: [],
+      isVideoParsingEnabled: () => false,
+      isVideoParsingReady: () => false,
+    },
     '@/api/knowledge-base/index': { listKnowledgeFolders, listKnowledgeTags: async () => ({ data: { data: [], total: 0 } }) },
   })
   await flush()

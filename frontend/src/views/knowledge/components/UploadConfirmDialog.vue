@@ -19,6 +19,8 @@
                     <KbUploadSourceDropdown
                       :accept-file-types="acceptFileTypes"
                       :supported-file-types="supportedFileTypes"
+                      :allow-video="videoParsingEnabled"
+                      :video-parse-ready="videoParsingReady"
                       :tooltip="t('uploadConfirm.continueAdd')"
                       placement="bottom-left"
                       @files="appendFiles"
@@ -684,7 +686,7 @@ import { useChatResourcesStore } from '@/stores/chatResources'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useUIStore } from '@/stores/ui'
 import { formatFileSize, getFileIcon } from '@/utils/files'
-import { getUploadFileKey } from '../utils/uploadSources'
+import { getUploadFileKey, isVideoParsingEnabled, isVideoParsingReady } from '../utils/uploadSources'
 import { listKnowledgeTags, mergeImageActions, fetchImageAttrSchema, FALLBACK_IMAGE_ATTR_SCHEMA, type ImageActionsConfig, type ImageAttrSchema } from '@/api/knowledge-base'
 import { imageAttrDisplay, imageAttrConditionDisplay } from '@/utils/imageAttrDisplay'
 import KbUploadSourceDropdown from './KbUploadSourceDropdown.vue'
@@ -805,6 +807,11 @@ const emit = defineEmits<{
 }>()
 
 const { t, te } = useI18n()
+
+// "Continue adding" must admit videos on the same terms as the KB page: the
+// dialog already holds the KB detail, so the switch needs no extra fetch.
+const videoParsingEnabled = computed(() => isVideoParsingEnabled(props.kbInfo))
+const videoParsingReady = computed(() => isVideoParsingReady(props.kbInfo))
 
 // The attribute panel and the OCR conditions are rendered from the registry in
 // the operator's language: the registry supplies the wording, the i18n overlay

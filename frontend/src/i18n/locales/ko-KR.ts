@@ -1079,6 +1079,8 @@ export default {
     dingtalkIngestLabel: 'DingTalk 수집 범위',
     dingtalkIncludeUploadedFiles: '업로드 파일(docx / pptx / xlsx / pdf) 수집',
     dingtalkIncludeUploadedFilesHint: '기본값은 꺼짐입니다. 켜면 선택한 범위에 업로드된 Word / PowerPoint / Excel / PDF 파일을 내려받아 파싱해 지식베이스에 넣습니다(파일당 최대 64 MiB). 본문은 저장소와 임베딩 비용에 포함됩니다. 꺼져 있으면 해당 파일은 건너뛰고 동기화 로그에 스위치가 꺼져 있다고 기록되며, 이미 지식베이스에 있는 사본은 삭제되지 않습니다.',
+    dingtalkStoreUnindexedMedia: '동영상을 색인 없이 보관만 하기',
+    dingtalkStoreUnindexedMediaHint: '기본값은 꺼짐입니다. 켜면 선택한 범위의 동영상 파일(mp4 / mov / m4v / webm / mkv / avi / wmv / flv)을 내려받아 보관합니다. 찾아서 재생하고 내려받을 수 있지만 파싱되지 않으며 검색 결과에 나타나지 않습니다. 꺼져 있으면 이전과 동일하게 건너뜁니다. 나중에 끄면 다음 전체 동기화에서 보관된 사본이 제거되며, 선택이 해제된 다른 파일과 동일하게 동작합니다.',
     prereqBarText_dingtalk: '처음 사용하시나요? 클릭하여 DingTalk 앱 설정 가이드를 확인하세요',
     prereqStep1Brief_dingtalk: '기업 내부 앱 생성',
     prereqStep1Desc_dingtalk: 'DingTalk Open Platform에서 기업 내부 앱을 생성하고 Client ID와 Client Secret을 복사하세요.',
@@ -3049,7 +3051,8 @@ export default {
         query_understand_model: '질의 이해 모델',
         follow_up_model: '후속 질문 모델',
         extract_model: '메모리 추출 모델',
-        unknown: '기타 모델 설정'
+        unknown: '기타 모델 설정',
+        video_model: '동영상 모델',
       }
     },
     debug: {
@@ -3107,7 +3110,10 @@ export default {
         reasoningReturned: '추론 내용 반환',
         textChars: '전사 문자 수',
         segmentCount: '세그먼트 수'
-      }
+      },
+      videoFile: '동영상 파일',
+      videoPrompt: '동영상 프롬프트',
+      videoPromptPlaceholder: '예: 이 동영상이 무엇을 어떤 순서로 설명하나요?',
     },
     builtinModels: {
       title: '기본 제공 모델',
@@ -3138,6 +3144,11 @@ export default {
       title: 'ASR 음성 모델',
       desc: '음성 인식 및 오디오 전사를 위한 음성 인식 모델 설정 (예: OpenAI Whisper)',
       empty: 'ASR 음성 모델 없음'
+    },
+    video: {
+      title: '동영상',
+      desc: '동영상 전체를 읽고 텍스트로 답하는 동영상 이해 모델(「동영상」 유형)',
+      empty: '아직 동영상 모델이 없습니다'
     },
     vllm: {
       title: 'VLLM 비전 모델',
@@ -3173,7 +3184,8 @@ export default {
       embedding: 'Embedding',
       rerank: 'ReRank',
       vllm: '비전',
-      asr: '음성'
+      asr: '음성',
+      video: '비디오'
     }
   },
   mcpSettings: {
@@ -3616,7 +3628,8 @@ export default {
         rerank: '결과 재정렬용 모델 설정',
         vllm: '시각 이해 및 멀티모달용 비전 언어 모델 설정',
         asr: '음성 인식 및 오디오 전사를 위한 음성 인식 모델 설정',
-        default: '모델 정보 설정'
+        default: '모델 정보 설정',
+        video: '동영상 전체를 읽는 동영상 이해 모델을 설정합니다',
       }
     }
   },
@@ -3939,6 +3952,10 @@ export default {
         }
       },
       keyDescriptions: {
+        asr: {
+          long_audio_chunking_enabled: '벤더 한도를 초과하는 긴 오디오를 잘라 개별적으로 변환할지 여부입니다. 끄면 오디오 전체를 벤더에 보내며 너무 길면 실패합니다. 켜면 「세그먼트 길이」로 나누어 변환하고 결과를 합칩니다. 변환할 때마다 다시 읽으므로 변경 사항이 재시작 없이 즉시 적용됩니다. 기본값은 꺼짐.',
+          max_segment_seconds: '긴 오디오를 자를 때 한 세그먼트의 길이(초, 30-300)입니다. 위 스위치가 켜져 있을 때만 적용되며 변환할 때마다 다시 읽습니다. 기본값 120초.'
+        },
         model: {
           max_concurrency: '백그라운드 작업(문서 색인/보강)이 단일 모델에 대해 갖는 기본 동시 호출 상한이며, 모델 ID 기준으로 모든 복제본이 공유합니다. 매 호출마다 실시간으로 읽고 재시작 없이 즉시 적용됩니다. 0 또는 음수는 기본 상한을 해제합니다(각 모델은 모델 관리에서 설정한 자체 상한을 계속 준수함). 백그라운드 작업에만 영향을 주며 대화형 채팅에는 영향을 주지 않습니다.'
         },
@@ -3970,6 +3987,10 @@ export default {
         }
       },
       keyLabels: {
+        asr: {
+          long_audio_chunking_enabled: '긴 오디오 분할',
+          max_segment_seconds: '세그먼트 길이(초)'
+        },
         model: {
           max_concurrency: '모델 기본 동시 처리 상한'
         },
@@ -4208,6 +4229,10 @@ export default {
         }
       },
       sections: {
+        asr: {
+          title: '음성 인식',
+          description: '긴 오디오 변환을 설정합니다. 기본적으로 오디오 전체를 벤더에 보내며 한도를 넘으면 실패합니다. 분할을 켜면 나누어 변환하고 결과를 합칩니다. 변경 사항은 재시작 없이 즉시 적용됩니다.'
+        },
         other: {
           title: '기타 설정',
           description: '표준 제품 그룹에 포함되지 않은 현재 배포의 설정입니다.'
@@ -4681,6 +4706,66 @@ export default {
       languageLabel: '오디오 언어 힌트',
       languageDescription: '선택 사항입니다. 기본 언어를 지정하면 일부 ASR 모델의 인식이 향상되며, 비워 두면 자동 감지합니다.',
       languagePlaceholder: '예: zh, en; 비워 두면 자동 감지'
+    },
+    video: {
+      title: '비디오 처리',
+      description: '동영상 파싱을 설정합니다. 파싱 모드에 따라 내레이션, 화면, 둘 다, 또는 동영상 전체(직접 읽기)가 검색 가능한 텍스트로 변환됩니다.',
+      label: '비디오 파싱 활성화',
+      desc: '활성화하면 비디오를 텍스트로 변환해 검색에 사용합니다. 비활성화하면 비디오는 보관만 되며 재생은 가능하지만 검색되지 않습니다.',
+      modeLabel: '파싱 방식',
+      modeDescription: '비디오에서 무엇을 읽을지 선택합니다. 방식마다 비용과 효과가 다릅니다.',
+      modeAudioOnly: '음성 변환만 (경량)',
+      modeAudioOnlyDesc: '나레이션만 텍스트로 변환하고 화면은 설명하지 않습니다. ASR 호출 1회로 가장 빠르고 저렴합니다.',
+      modeKeyframes: '키프레임 화면 설명',
+      modeKeyframesDesc: '음성 없이 화면만 설명합니다. 비디오 길이에 맞춰 최대 12개 프레임(설정 가능)을 균등 추출해 비전 모델에 전달합니다. 슬라이드·시연 녹화에 적합합니다.',
+      modeAudioKeyframes: '음성 + 화면 설명 (표준)',
+      modeAudioKeyframesDesc: '나레이션 변환과 화면 설명을 모두 수행하고 시간순으로 합칩니다. 가장 완전하지만 비용도 가장 큽니다(ASR + 최대 12회 비전 호출, 프레임 수 설정 가능).',
+      modelLabel: '비디오 ASR 모델',
+      modelDescription: '이 지식베이스의 비디오 나레이션에만 사용하며 「오디오」 설정에는 영향을 주지 않습니다.',
+      modelPlaceholder: '비디오 변환에 사용할 ASR 모델 선택',
+      asrHint: '비디오 변환에는 별도의 ASR 모델이 필요하며 「오디오」와 공유하지 않습니다.',
+      asrRequired: '비디오 ASR 모델을 먼저 선택하세요. 선택하지 않으면 화면 설명만 하거나 보관 상태로 유지됩니다.',
+      languageLabel: '변환 언어',
+      languageDescription: '비디오 나레이션의 언어 힌트입니다. 비워 두면 자동 감지합니다. 「오디오」의 언어 설정과는 무관합니다.',
+      languagePlaceholder: '예: zh, en (비워 두면 자동 감지)',
+      vlmHint: '화면 설명에는 이 비디오 섹션 전용 비전 모델을 사용합니다. 추출할 프레임 수와 간격은 아래에서 조정할 수 있습니다.',
+      maxFramesLabel: '최대 프레임 수',
+      maxFramesDescription: '비디오 한 개가 비전 모델에 보낼 수 있는 최대 프레임 수(1-60)입니다. 프레임이 많을수록 더 많은 장면을 보지만 비전 호출 비용도 늘어납니다. 기본값 12.',
+      frameIntervalLabel: '샘플링 간격(초)',
+      frameIntervalDescription: '몇 초마다 프레임 하나를 추출할지 지정합니다(0-3600). 0이면 비디오 길이와 최대 프레임 수로 자동 계산하여 짧은 영상은 촘촘하게, 긴 영상은 드물게 추출합니다.',
+      vlmRequired: '비디오 화면 설명용 비전 모델이 선택되지 않아 화면 설명을 생성할 수 없으며 비디오는 보관 상태로 유지됩니다. 「비디오 처리」에서 선택하세요.',
+      vlmPartial: '비디오 화면 설명용 비전 모델이 선택되지 않아 이번에는 나레이션만 변환하고 화면 설명은 건너뜁니다.',
+      vlmLabel: '화면 비전 모델(VLM)',
+      vlmDescription: '추출된 프레임을 설명합니다. 「이미지 처리」와 독립적이므로 이미지 파싱을 바꿔도 비디오 출력은 바뀌지 않습니다.',
+      vlmPlaceholder: '비디오 화면 설명에 사용할 비전 모델 선택',
+      vlmLanguageLabel: '화면 설명 언어',
+      vlmLanguageDescription: '생성되는 화면 설명의 언어입니다. 비워 두면 요청 언어를 따릅니다.',
+      vlmLanguageAuto: '자동(요청 언어 따름)',
+      customInstructionsLabel: '화면 설명 요구 사항',
+      customInstructionsDescription: '화면 설명에서 특히 주의할 내용을 추가로 지정합니다. 기본 요구 사항 뒤에 추가되며 기본 요구 사항이 우선하므로 「판별할 수 없으면 추측하지 말고 불명이라고 쓰기」 규칙은 덮어쓸 수 없습니다.',
+      customInstructionsPlaceholder: '화면 설명에서 특히 주의할 내용을 입력하세요. 예: 대화상자 제목과 오류 메시지에 집중, 모서리 워터마크는 무시.',
+      modeDirect: '동영상 직접 읽기(전체 이해)',
+      modeDirectDesc: '동영상 전체를 동영상 이해 모델에 업로드해 내레이션, 화면 속 텍스트, 영상을 한 번에 읽습니다. 가장 정보가 많지만 파일을 공급자에게 보내는 유일한 모드입니다.',
+      videoModelLabel: '동영상 모델',
+      videoModelDescription: '동영상 전체를 읽습니다. ASR 및 프레임 VLM과 독립적이며, 하나를 바꿔도 나머지는 그대로입니다.',
+      videoModelPlaceholder: '동영상 이해 모델 선택',
+      videoModelHint: '동영상 모델은 동영상 파일을 그대로 받아 텍스트로 답합니다. 전송 방식은 아래 "전송 방식"에서 정합니다.',
+      videoModelRequired: '먼저 동영상 모델을 선택하세요. 없으면 직접 읽기를 실행할 수 없으며 동영상은 보관 상태로 남습니다.',
+      directFallbackHint: '직접 읽기가 실패하면 이 페이지에 설정된 음성 인식·프레임 설명 모델로 대체합니다. 둘 다 없을 때만 보관됩니다.',
+      directPromptLabel: '직접 읽기 요구 사항',
+      directPromptDescription: '내장 프롬프트 뒤에 추가됩니다. 출력 형식과 "추측하지 말고 읽을 수 없다고 쓰기" 규칙이 우선합니다.',
+      directPromptPlaceholder: '예: 장 제목을 유지하고 화면에 나오는 모든 명령을 나열하세요.',
+      directInputLabel: '전송 방식',
+      directInputDescription: '동영상 전체를 어떤 경로로 모델에 전달할지: 요청 본문(base64), 공급업체의 임시 저장소, 또는 이미 있는 공개 URL.',
+      directInputCostHint: '비용과 규정: base64 인라인은 공급업체에 임시 파일을 만들지 않지만 요청 본문과 함께 전송되어 본문 크기 제한을 받습니다. 임시 저장소 업로드는 추가 업로드 대역폭을 쓰고 공급업체에 임시 파일을 남깁니다(알리바바 클라우드는 48시간 후 만료).',
+      directInputAuto: '자동(권장)',
+      directInputAutoDesc: '동영상 크기로 결정: 들어가면 인라인, 넘으면 임시 저장소로 업로드합니다.',
+      directInputBase64: 'base64 인라인',
+      directInputBase64Desc: '동영상을 요청 본문에 인코딩하므로 제3자 임시 저장소를 거치지 않습니다. 공급업체 한도를 넘으면 업로드로 바꾸지 않고 그대로 실패합니다.',
+      directInputUpload: '임시 저장소 업로드',
+      directInputUploadDesc: '모델 공급업체의 임시 저장소에 먼저 업로드하고 참조합니다. 대용량(약 1 GB까지)을 지원하지만 느리고 임시 파일이 얼마간 남습니다.',
+      directInputUrl: '공개 URL(외부 호출)',
+      directInputUrlDesc: '호출자가 제공한 공개 주소를 사용합니다. 이 화면에서 가져온 동영상은 로컬 파일이므로 선택하면 직접 읽기가 실패합니다.',
     },
     multimodal: {
       title: '이미지 처리 설정',
@@ -5276,6 +5361,7 @@ export default {
       graph: '지식 그래프',
       multimodal: '이미지 처리',
       asr: '오디오',
+      video: '동영상 처리',
       datasource: '데이터 소스',
       share: '공유관리',
       activity: '활동 기록'
@@ -5318,6 +5404,7 @@ export default {
         partial: '일부 완료',
         canceled: '취소됨',
         failed: '실패',
+        stored: '보관 전용',
         enqueue: '작업 제출',
         reuse_vectors: '벡터 재사용',
         reparse: '재분석',
@@ -7727,7 +7814,8 @@ export default {
     tagLabel: '태그',
     tagPlaceholder: '태그를 선택하세요',
     noTags: '태그 없음',
-    videosFilteredNoVLM: '{count}개의 동영상 파일을 건너됨 (동영상 업로드 미지원)',
+    videosFilteredParsingDisabled: '{count}개의 동영상 파일을 건너뛰었습니다 (동영상 파싱이 꺼져 있습니다. 지식 베이스 설정 → 동영상 처리에서 켜세요)',
+    videoModelNotConfigured: '동영상 파싱이 켜져 있지만 현재 방식에 필요한 모델(ASR / 비전 / 동영상 모델)이 설정되어 있지 않습니다. 지식베이스 설정 → 동영상 처리에서 설정하지 않으면 동영상 업로드가 거부됩니다',
     unsupportedTypesHint: '일부 문서 유형({types})에 사용 가능한 파서 엔진이 없어 처리할 수 없습니다',
     goToParserSettings: '설정으로 이동',
     importURL: '웹페이지 가져오기',
@@ -7800,6 +7888,8 @@ export default {
     regenerateSummary: '요약 다시 생성',
     generateSummary: '요약 생성',
     noDocumentSummary: '문서 요약 없음',
+    archiveNoSummary:
+      '이 파일은 인덱싱 없이 보관된 항목이라 요약이 없습니다. \'미리보기\'에서 원본 파일을 재생할 수 있습니다.',
     summaryRefreshed: '요약이 업데이트되었습니다',
     summaryRefreshQueued: '요약 새로고침이 대기열에 추가되었으며 완료되면 자동으로 업데이트됩니다',
     indexFailed: '인덱스 동기화 실패',
@@ -7922,6 +8012,8 @@ export default {
     statusFailed: '실패',
     statusCancelled: '취소됨',
     statusDraft: '초안',
+    statusStored: '보관 전용 · 색인 없음',
+    storedHint: '이 파일은 색인이 생성되지 않아 검색 결과에 나타나지 않습니다',
     noDescription: '아직 설명이 없습니다',
     emptyKnowledgeDragDrop: '지식이 비어 있음, 드래그 앤 드롭으로 업로드',
     pdfDocFormat: 'pdf, doc 형식 파일, 최대 {size}MB',

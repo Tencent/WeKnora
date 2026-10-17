@@ -1057,6 +1057,8 @@ export default {
     dingtalkIngestLabel: '钉钉摄取范围',
     dingtalkIncludeUploadedFiles: '摄取知识库中的上传文件（docx / pptx / xlsx / pdf）',
     dingtalkIncludeUploadedFilesHint: '默认关闭。开启后，所选范围内的 Word / PowerPoint / Excel / PDF 上传文件会被下载并解析入库，单个文件上限 64 MiB；这些文件的正文会计入存储与向量化成本。关闭时它们只是被跳过，同步日志会说明开关未开启，不会删除知识库中已有的副本。',
+    dingtalkStoreUnindexedMedia: '视频仅存档、不建立索引',
+    dingtalkStoreUnindexedMediaHint: '默认关闭。开启后，所选范围内的视频文件（mp4 / mov / m4v / webm / mkv / avi / wmv / flv）会被下载并作为档案保留：可以翻到、播放和下载，但不会被解析，也不会出现在检索结果中。关闭时与以前一样直接跳过。之后若再关闭，下一次全量同步会移除这些存档副本，与其他取消选择的文件一致。',
     prereqBarText_dingtalk: '首次使用？点击查看钉钉应用配置指引',
     prereqStep1Brief_dingtalk: '创建企业内部应用',
     prereqStep1Desc_dingtalk: '在钉钉开放平台创建企业内部应用，并获取 Client ID 和 Client Secret',
@@ -3051,7 +3053,8 @@ export default {
         query_understand_model: '问题理解模型',
         follow_up_model: '追问模型',
         extract_model: '记忆提取模型',
-        unknown: '其他模型配置'
+        unknown: '其他模型配置',
+        video_model: '视频模型',
       }
     },
     debug: {
@@ -3109,7 +3112,10 @@ export default {
         reasoningReturned: '返回推理内容',
         textChars: '转写字符数',
         segmentCount: '分段数量'
-      }
+      },
+      videoFile: '视频文件',
+      videoPrompt: '视频提示词',
+      videoPromptPlaceholder: '例如：这段视频分几步讲了什么？',
     },
     builtinModels: {
       title: '内置模型',
@@ -3140,6 +3146,11 @@ export default {
       title: 'ASR 语音模型',
       desc: '配置用于语音识别和音频转录的语音转文本模型（如 OpenAI Whisper）',
       empty: '暂无 ASR 语音模型'
+    },
+    video: {
+      title: '视频',
+      desc: '可直接读取整段视频并以文本作答的视频理解模型（「视频」类型）',
+      empty: '还没有视频模型'
     },
     vllm: {
       title: 'VLLM 视觉模型',
@@ -3175,7 +3186,8 @@ export default {
       embedding: 'Embedding',
       rerank: 'ReRank',
       vllm: '视觉',
-      asr: '语音'
+      asr: '语音',
+      video: '视频'
     }
   },
   mcpSettings: {
@@ -3618,7 +3630,8 @@ export default {
         rerank: '配置用于结果重排序的模型',
         vllm: '配置用于视觉理解和多模态的视觉语言模型',
         asr: '配置用于语音识别和音频转录的语音转文本模型',
-        default: '配置模型信息'
+        default: '配置模型信息',
+        video: '配置可直接读取整段视频的视频理解模型',
       }
     }
   },
@@ -3941,6 +3954,10 @@ export default {
         }
       },
       keyDescriptions: {
+        asr: {
+          long_audio_chunking_enabled: '是否把超过厂商上限的长音频切段后分段转写。关闭时整段音频直接交给厂商，超长会失败；开启后按「单段音频时长」切分并合并结果。每次转写实时读取，修改后立即生效、无需重启。默认关闭。',
+          max_segment_seconds: '长音频切段的单段时长（秒，30-300）。仅在开启「长音频切段」后生效；每次转写实时读取，修改后立即生效。默认 120 秒。'
+        },
         model: {
           max_concurrency: '后台任务（文档入库/富化）对单个模型的默认并发上限，按模型 ID 全副本共享。每次调用实时读取，修改后立即生效、无需重启。0 或负数表示关闭默认限制（各模型仍会尊重自身在模型管理里配置的上限）。仅影响后台任务，不影响交互式对话。'
         },
@@ -3972,6 +3989,10 @@ export default {
         }
       },
       keyLabels: {
+        asr: {
+          long_audio_chunking_enabled: '长音频切段',
+          max_segment_seconds: '单段音频时长（秒）'
+        },
         model: {
           max_concurrency: '模型默认并发上限'
         },
@@ -4210,6 +4231,10 @@ export default {
         }
       },
       sections: {
+        asr: {
+          title: '语音识别',
+          description: '配置长音频转写：默认整段交给厂商，超过上限会失败；可开启切段后分段转写并合并结果。修改后立即生效，无需重启。'
+        },
         other: {
           title: '其他配置',
           description: '当前部署中未归入标准分组的配置项。'
@@ -4682,6 +4707,66 @@ export default {
       languageLabel: '音频语言提示',
       languageDescription: '可选；指定主要语种可提高部分 ASR 模型的识别稳定性，留空时自动检测',
       languagePlaceholder: '例如 zh、en，留空自动检测'
+    },
+    video: {
+      title: '视频处理',
+      description: '配置视频解析。按解析方式，视频的旁白、画面、两者，或整段视频（直读）会被转成可检索的文本。',
+      label: '启用视频解析',
+      desc: '开启后视频会转写成文字并参与检索；关闭时视频仅存档，可播放但搜不到。',
+      modeLabel: '解析方式',
+      modeDescription: '选择从视频里读取什么内容；不同档位的成本与效果不同。',
+      modeAudioOnly: '仅语音转写（轻量）',
+      modeAudioOnlyDesc: '只转写旁白，不描述画面：一次 ASR 调用，最快最省。',
+      modeKeyframes: '关键帧画面描述',
+      modeKeyframesDesc: '只描述画面，不做语音：按视频时长均匀抽取最多 12 帧（可配置）交给视觉模型，适合课件、演示录屏。',
+      modeAudioKeyframes: '语音 + 画面描述（标准）',
+      modeAudioKeyframesDesc: '旁白转写与画面描述都做，并按时间合并：效果最完整，成本也最高（ASR + 最多 12 次视觉调用，帧数可配置）。',
+      modelLabel: '视频 ASR 模型',
+      modelDescription: '仅用于本知识库的视频旁白转写，不影响「音频处理」的选择。',
+      modelPlaceholder: '选择视频转写用的 ASR 模型',
+      asrHint: '视频转写需要单独选择 ASR 模型；不与「音频处理」共用。',
+      asrRequired: '请先选择视频 ASR 模型，否则视频只做画面描述或仅存档。',
+      languageLabel: '转写语言',
+      languageDescription: '视频旁白的语言提示；留空则自动检测。与「音频处理」的语言设置无关。',
+      languagePlaceholder: '例如 zh、en，留空自动检测',
+      vlmHint: '画面描述使用「视频处理」页自己的视觉模型；抽取帧数与采样间隔可在下方调整。',
+      maxFramesLabel: '最多抽帧数',
+      maxFramesDescription: '一次视频最多抽取多少帧交给视觉模型（1-60）。帧越多看到的画面越多，视觉调用成本也越高；默认 12。',
+      frameIntervalLabel: '采样间隔（秒）',
+      frameIntervalDescription: '每隔多少秒抽取一帧（0-3600）。0 表示按视频时长与「最多抽帧数」自动计算：短视频抽得密、长视频抽得疏。',
+      vlmRequired: '尚未选择视频画面视觉模型，画面描述无法生成，视频将保持仅存档；请先在「视频处理」中选择。',
+      vlmPartial: '尚未选择视频画面视觉模型，本次只转写旁白，画面描述会被跳过。',
+      vlmLabel: '画面视觉模型（VLM）',
+      vlmDescription: '用于描述抽取的视频画面。独立于「图像处理」：改动图片解析不会影响视频输出。',
+      vlmPlaceholder: '选择视频画面描述用的视觉模型',
+      vlmLanguageLabel: '画面描述语言',
+      vlmLanguageDescription: '生成的画面描述使用的语言；留空则跟随请求语言。',
+      vlmLanguageAuto: '自动（跟随请求语言）',
+      customInstructionsLabel: '画面描述要求',
+      customInstructionsDescription: '补充画面描述需要重点关注的内容。它会追加在内置要求之后，内置要求始终优先，因此不能覆盖「看不清就说不清楚、不要猜」这条规则。',
+      customInstructionsPlaceholder: '补充需要重点识别的画面信息，例如：重点识别弹窗标题与报错文案；忽略右下角水印。',
+      modeDirect: '视频直读（完整理解）',
+      modeDirectDesc: '把整段视频上传给视频理解模型，一次读完旁白、字幕与画面。信息最完整，也是唯一需要把文件上传给厂商的一档。',
+      videoModelLabel: '视频模型',
+      videoModelDescription: '直接读取整段视频。它与 ASR、画面 VLM 相互独立：换一个不会影响另外两个。',
+      videoModelPlaceholder: '选择视频理解模型',
+      videoModelHint: '视频模型接受整段视频并以文本作答；传输方式见下方「传输方式」。',
+      videoModelRequired: '请先选择视频模型，否则直读没有可用模型，视频只会被存档。',
+      directFallbackHint: '直读失败时会退回本页已配置的语音识别与画面描述模型；两者都没配才会存档。',
+      directPromptLabel: '直读要求',
+      directPromptDescription: '追加到内置提示词之后。输出格式与「看不清就说不清楚」的规则仍然优先。',
+      directPromptPlaceholder: '例如：保留章节标题，并列出画面里出现的每一条命令。',
+      directInputLabel: '传输方式',
+      directInputDescription: '整段视频怎么送到视频模型：走请求体（base64）、走厂商的临时存储，还是用已有的公网地址。',
+      directInputCostHint: '成本与合规：base64 内联不会产生厂商临时文件，但视频随请求体一起传输、受请求体上限约束；上传临时存储会额外占用上传带宽，并在厂商侧留下临时文件（阿里云 48 小时后失效）。',
+      directInputAuto: '自动（推荐）',
+      directInputAutoDesc: '按视频大小决定：放得下就 base64 内联，放不下才上传临时存储。',
+      directInputBase64: 'base64 内联',
+      directInputBase64Desc: '视频编码进请求体，不经过第三方临时存储；超过厂商上限时直接失败，不会改走上传。',
+      directInputUpload: '上传临时存储',
+      directInputUploadDesc: '先上传到模型服务商的临时存储再引用，支持大文件（上限约 1 GB）；上传更慢，临时文件会保留一段时间。',
+      directInputUrl: '公网 URL（外部调用）',
+      directInputUrlDesc: '视频已有公网地址、由调用方提供；本页导入的视频是本地文件，选它直读会直接失败。',
     },
     multimodal: {
       title: '图像处理配置',
@@ -5277,6 +5362,7 @@ export default {
       graph: '知识图谱',
       multimodal: '图像处理',
       asr: '音频处理',
+      video: '视频处理',
       datasource: '数据源',
       share: '共享管理',
       activity: '活动记录'
@@ -5319,6 +5405,7 @@ export default {
         partial: '部分完成',
         canceled: '已取消',
         failed: '失败',
+        stored: '仅存档',
         enqueue: '任务提交',
         reuse_vectors: '复用向量',
         reparse: '重新解析',
@@ -7728,7 +7815,8 @@ export default {
     tagLabel: '标签',
     tagPlaceholder: '请选择标签',
     noTags: '暂无标签',
-    videosFilteredNoVLM: '已跳过 {count} 个视频文件（暂不支持视频上传）',
+    videosFilteredParsingDisabled: '已跳过 {count} 个视频文件（视频解析未开启，可在知识库设置 → 视频处理里开启）',
+    videoModelNotConfigured: '视频解析已开启，但尚未配置当前方式所需的模型（ASR / 视觉 / 视频模型）；请先在知识库设置 → 视频处理中配置，否则视频上传会被拒绝',
     unsupportedTypesHint: '部分文档类型（{types}）暂无可用解析引擎，上传后将无法解析',
     goToParserSettings: '前往配置',
     importURL: '导入网页',
@@ -7801,6 +7889,8 @@ export default {
     regenerateSummary: '重新生成摘要',
     generateSummary: '生成摘要',
     noDocumentSummary: '暂无文档摘要',
+    archiveNoSummary:
+      '该文件为仅存档条目，未建立索引，因此没有摘要；可在「预览」中播放原文件',
     summaryRefreshed: '摘要已更新',
     summaryRefreshQueued: '摘要刷新已提交，完成后会自动更新',
     indexFailed: '索引同步失败',
@@ -7923,6 +8013,8 @@ export default {
     statusFailed: '失败',
     statusCancelled: '已取消',
     statusDraft: '草稿',
+    statusStored: '仅存档 · 未索引',
+    storedHint: '该文件未建立索引，不会出现在检索结果中',
     noDescription: '暂无描述',
     emptyKnowledgeDragDrop: '知识为空，拖放上传',
     pdfDocFormat: 'pdf、doc 格式文件，不超过{size}M',

@@ -36,6 +36,13 @@ func (c *Catalog) ModelsByType(modelType types.ModelType) []models.ModelSpec {
 			if mt == types.ModelTypeKnowledgeQA && m.AcceptsImages() {
 				out = append(out, configcopy.Clone(m))
 			}
+		case types.ModelTypeVideo:
+			// Video pickers list chat models that accept videos. The entries
+			// stay chat entries: a video model is a chat model whose input
+			// modality includes video, and only the row type differs.
+			if mt == types.ModelTypeKnowledgeQA && m.AcceptsVideo() {
+				out = append(out, configcopy.Clone(m))
+			}
 		default:
 			if mt == modelType {
 				out = append(out, configcopy.Clone(m))
@@ -53,8 +60,8 @@ func (c *Catalog) ModelsByType(modelType types.ModelType) []models.ModelSpec {
 // Aliyun's qwen3* chat glob also matches qwen3.8-text-embedding, and gpt-5*
 // matches gpt-5-embed; an untyped lookup would hand an embedding row the chat
 // family's compat, which the embedding overlay rejects, and the row could not
-// be built at all. A VLM row is a chat model that accepts images, so it looks
-// among the chat entries.
+// be built at all. A VLM row is a chat model that accepts images, and a Video
+// row is a chat model that accepts video, so both look among the chat entries.
 func (c *Catalog) FindModel(name string, modelType types.ModelType) (models.ModelSpec, bool) {
 	needle := strings.ToLower(strings.TrimSpace(name))
 	if needle == "" {
@@ -99,9 +106,11 @@ func (c *Catalog) FindModel(name string, modelType types.ModelType) (models.Mode
 }
 
 // EntryType folds a model type onto the catalog entries that describe it:
-// chat entries leave Type empty, and VLM rows use them too.
+// chat entries leave Type empty, and VLM and Video rows use them too. A video
+// model is a chat model that accepts video, so its capabilities, context
+// window and compat all come from the chat entry.
 func EntryType(t types.ModelType) types.ModelType {
-	if t == "" || t == types.ModelTypeVLLM {
+	if t == "" || t == types.ModelTypeVLLM || t == types.ModelTypeVideo {
 		return types.ModelTypeKnowledgeQA
 	}
 	return t
