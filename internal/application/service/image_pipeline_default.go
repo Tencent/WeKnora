@@ -34,6 +34,16 @@ const (
 	captionFieldKeyNoteActions = "note_actions"
 )
 
+// ImageCaptionSwitchKey and ImageOCRSwitchKey are this pipeline's two action
+// switches, under the names it declares them. They are exported because the
+// knowledge-base PATCH handler maps the API's image_caption_enabled /
+// image_ocr_enabled onto them: a second spelling of the key at that call site is
+// exactly how a rename comes to write a setting nothing reads.
+const (
+	ImageCaptionSwitchKey = captionFieldKeyCaptionEnabled
+	ImageOCRSwitchKey     = captionFieldKeyOCREnabled
+)
+
 // Fields declares the switches the panel renders for this pipeline. Caption and
 // OCR default to true, which is what a knowledge base configured before these
 // fields existed gets: both actions run, as before. The two thinking switches

@@ -19,7 +19,7 @@ const compiled = ts.transpileModule(script, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText
 
-const violation = { message_key: 'imagePipeline.errors.noActionEnabled', field: 'enable_caption' }
+const violation = { message_key: 'imagePipeline.errors.noActionEnabled', field: 'caption_enabled' }
 const flushUpdates = async () => {
   await new Promise<void>((resolve) => setImmediate(resolve))
   await nextTick()
