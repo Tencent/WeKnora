@@ -318,7 +318,15 @@
               </template>
               <template #role="{ row }">
                 <div class="role-cell">
-                  <t-select v-if="canManage && row.user_id !== currentUserId" :model-value="row.role"
+                  <!-- Role edits on the current user's own row are allowed.
+                       Backend UpdateRole already rejects demoting the last
+                       Owner (409 / ErrLastOwner); the previous
+                       `row.user_id !== currentUserId` guard blocked the
+                       common "promote B, then demote myself to Admin and
+                       stay" ownership handoff even when another Owner
+                       already exists. Remove stays gated below — leaving
+                       the space is TenantInfo's leave flow. -->
+                  <t-select v-if="canManage" :model-value="row.role"
                     class="member-role-select" :borderless="true" :popup-props="roleSelectPopupProps"
                     :aria-label="`${memberPrimary(row)} · ${$t('tenantMember.columns.role')}`"
                     @change="(val: string) => onRoleChange(row, val)">
@@ -1390,6 +1398,17 @@ async function onRoleChange(row: TenantMember, newRole: string) {
         rememberMembersForAudit([merged])
       } else {
         row.role = next
+      }
+      // Self-demotion / self-promotion must refresh the auth-store
+      // memberships snapshot; otherwise canManage / menu gates keep
+      // using the pre-change role until the next /auth/me.
+      if (row.user_id === currentUserId.value && authStore.memberships?.length) {
+        const tid = activeTenantId.value
+        authStore.setMemberships(
+          authStore.memberships.map((m) =>
+            Number(m.tenant_id) === tid ? { ...m, role: next } : m,
+          ),
+        )
       }
       MessagePlugin.success(t('tenantMember.roleChange.success'))
       return
