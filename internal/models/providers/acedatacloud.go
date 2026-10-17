@@ -36,7 +36,9 @@ func newAceDataCloudProvider() *Definition {
 		Names:        map[string]string{"zh-CN": "Ace Data Cloud"},
 		Description:  "OpenAI-compatible chat models through Ace Data Cloud.",
 		Descriptions: map[string]string{"zh-CN": "通过 Ace Data Cloud 使用兼容 OpenAI 的对话模型。"},
-		Website:      "https://platform.acedata.cloud",
+		Website: "https://platform.acedata.cloud/console/applications?" +
+			"utm_source=opensource&utm_medium=referral&utm_campaign=evergreen&" +
+			"utm_content=weknora_provider_api_key",
 		Icon:         aceDataCloudIcon,
 		API:          api.APIOpenAICompletions,
 		Order:        43,
