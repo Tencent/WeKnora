@@ -1036,12 +1036,17 @@ func applyKnowledgeBasePatch(
 	}
 	if patch.ImageCaptionEnabled != nil || patch.ImageOCREnabled != nil {
 		if types.ResolveImagePipelineID(&image) != types.ImagePipelineDefault {
-			return out, apperrors.NewBadRequestError("image_caption_enabled and image_ocr_enabled require image_pipeline=default")
+			return out, apperrors.NewBadRequestError(
+				"image_caption_enabled and image_ocr_enabled require image_pipeline=default",
+			)
 		}
 		if image.ImagePipelineParams == nil {
 			image.ImagePipelineParams = map[string]any{}
 		}
-		for key, value := range map[string]*bool{"enable_caption": patch.ImageCaptionEnabled, "enable_ocr": patch.ImageOCREnabled} {
+		for key, value := range map[string]*bool{
+			"enable_caption": patch.ImageCaptionEnabled,
+			"enable_ocr":     patch.ImageOCREnabled,
+		} {
 			if value != nil {
 				// Namespaced values take precedence at execution time.
 				image.ImagePipelineParams["default."+key] = *value
@@ -1050,7 +1055,11 @@ func applyKnowledgeBasePatch(
 		}
 		used = true
 	}
-	if (len(sections["image_processing_config"]) > 0 && string(sections["image_processing_config"]) != "null") || patch.ImageCaptionEnabled != nil || patch.ImageOCREnabled != nil {
+	if (len(
+		sections["image_processing_config"],
+	) > 0 && string(
+		sections["image_processing_config"],
+	) != "null") || patch.ImageCaptionEnabled != nil || patch.ImageOCREnabled != nil {
 		cfg.ImageProcessingConfig = &image
 	}
 

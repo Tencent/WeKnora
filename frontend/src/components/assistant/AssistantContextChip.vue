@@ -73,7 +73,7 @@ const tooltip = computed(() => {
 
 .assistant-context-chip__icon {
   flex-shrink: 0;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-text-color-placeholder);
 }
 

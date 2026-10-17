@@ -130,7 +130,7 @@ func (h *DataSourceHandler) CreateDataSource(c *gin.Context) {
 // @Success 200 {object} dto.DataSourceResponse
 // @Failure 404 {object} map[string]string
 // @x-agent {"id":"data_source.get","risk":"read"}
-// @x-agent-hint "Read a configured data source and its sync state; credentials and connector configuration are not returned."
+// @x-agent-hint "Read a configured data source and its sync state; credentials, connector settings and raw upstream errors are omitted. For detailed failures use the data source settings page."
 // @Router /datasource/{id} [get]
 func (h *DataSourceHandler) GetDataSource(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -371,7 +371,12 @@ func (h *DataSourceHandler) ListAvailableResources(c *gin.Context) {
 
 	resources, err := h.service.ListAvailableResources(ctx, id, parentID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Could not list resources; check the saved data source connection."})
+		c.JSON(
+			http.StatusBadRequest,
+			gin.H{
+				"error": "Could not list resources; check the saved data source connection.",
+			},
+		)
 		return
 	}
 
@@ -540,7 +545,7 @@ func (h *DataSourceHandler) ResumeDataSource(c *gin.Context) {
 // @Success 200 {array} types.SyncLog
 // @Failure 400 {object} map[string]string
 // @x-agent {"id":"data_source.list_sync_logs","risk":"read"}
-// @x-agent-hint "Read recent sync results, counts and errors. Use limit and offset for older records."
+// @x-agent-hint "Read recent sync status and counts. Use limit and offset for older records. Raw upstream errors are omitted; detailed failures remain on the data source settings page."
 // @Router /datasource/{id}/logs [get]
 func (h *DataSourceHandler) GetSyncLogs(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -596,7 +601,7 @@ func (h *DataSourceHandler) GetSyncLogs(c *gin.Context) {
 // @Success 200 {object} types.SyncLog
 // @Failure 404 {object} map[string]string
 // @x-agent {"id":"data_source.get_sync_log","risk":"read"}
-// @x-agent-hint "Read the current status, counts and errors of a sync_log_id returned by data_source.sync or data_source.list_sync_logs. A started job is not a completed sync."
+// @x-agent-hint "Read the current status and counts of a sync_log_id returned by data_source.sync or data_source.list_sync_logs. A started job is not a completed sync. Raw upstream errors are omitted; detailed failures remain on the data source settings page."
 // @Router /datasource/logs/{log_id} [get]
 func (h *DataSourceHandler) GetSyncLog(c *gin.Context) {
 	ctx := c.Request.Context()

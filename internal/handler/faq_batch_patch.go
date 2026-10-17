@@ -12,13 +12,13 @@ import (
 // Unlike the legacy map-based endpoint, this shape also fits the operation catalog.
 type FAQBatchPatchRequest struct {
 	// Explicit FAQ entry seq_ids from faq.list_entries. At most 20 per call.
-	EntryIDs []int64 `json:"entry_ids" binding:"required,min=1,max=20" extensions:"x-agent,x-agent-maximum=20"`
+	EntryIDs []int64 `json:"entry_ids"                binding:"required,min=1,max=20" extensions:"x-agent,x-agent-maximum=20"`
 	// Whether these entries can be retrieved; omitted keeps the current state.
-	IsEnabled *bool `json:"is_enabled,omitempty" extensions:"x-agent"`
+	IsEnabled *bool `json:"is_enabled,omitempty"                                     extensions:"x-agent"`
 	// Whether these entries are recommended; omitted keeps the current state.
-	IsRecommended *bool `json:"is_recommended,omitempty" extensions:"x-agent"`
+	IsRecommended *bool `json:"is_recommended,omitempty"                                 extensions:"x-agent"`
 	// Tag seq_id from knowledge_base.list_tags; 0 clears tags, omitted keeps them.
-	TagID *int64 `json:"tag_id,omitempty" minimum:"0" extensions:"x-agent=tag_seq_id"`
+	TagID *int64 `json:"tag_id,omitempty"                                         extensions:"x-agent=tag_seq_id"         minimum:"0"`
 }
 
 func (req FAQBatchPatchRequest) updatePlan() (*types.FAQEntryFieldsBatchUpdate, error) {
@@ -39,7 +39,11 @@ func (req FAQBatchPatchRequest) updatePlan() (*types.FAQEntryFieldsBatchUpdate, 
 		if _, ok := plan.ByID[id]; ok {
 			return nil, errors.NewBadRequestError("entry_ids must not contain duplicates")
 		}
-		plan.ByID[id] = types.FAQEntryFieldsUpdate{IsEnabled: req.IsEnabled, IsRecommended: req.IsRecommended, TagID: req.TagID}
+		plan.ByID[id] = types.FAQEntryFieldsUpdate{
+			IsEnabled:     req.IsEnabled,
+			IsRecommended: req.IsRecommended,
+			TagID:         req.TagID,
+		}
 	}
 	return plan, nil
 }

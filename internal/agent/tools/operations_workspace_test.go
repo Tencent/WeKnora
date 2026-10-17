@@ -25,13 +25,34 @@ func TestWorkspaceUpdateApprovalsRolesAndRefresh(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := &fakeDispatcher{responses: map[string]*operations.Response{
-				"GET /api/v1/tenants/current":   {Status: 200, Body: []byte(`{"data":{"id":7,"name":"Original","description":"Old description","credentials":{"app_secret":"hidden"}}}`)},
-				"PATCH /api/v1/tenants/current": {Status: 200, Body: []byte(`{"data":{"id":7,"name":"New name","description":"","credentials":{"app_secret":"hidden"}}}`)},
+				"GET /api/v1/tenants/current": {Status: 200, Body: []byte(`{
+  "data": {
+    "id": 7,
+    "name": "Original",
+    "description": "Old description",
+    "credentials": {
+      "app_secret": "hidden"
+    }
+  }
+}`)},
+				"PATCH /api/v1/tenants/current": {Status: 200, Body: []byte(`{
+  "data": {
+    "id": 7,
+    "name": "New name",
+    "description": "",
+    "credentials": {
+      "app_secret": "hidden"
+    }
+  }
+}`)},
 			}}
 			gate := &fakeApprover{decision: approval.Decision{Approved: tc.approved}}
 			tool := newRunTool(d, gate)
 			tool.rt.Access = operations.Access{Role: tc.role, EnforceRole: true, Level: tc.level}
-			res, err := tool.Execute(interactiveCtx(), runArgs("workspace.update", map[string]any{"name": "New name", "description": ""}))
+			res, err := tool.Execute(
+				interactiveCtx(),
+				runArgs("workspace.update", map[string]any{"name": "New name", "description": ""}),
+			)
 			require.NoError(t, err)
 			assert.Equal(t, tc.success, res.Success, res.Error)
 			if tc.ask {

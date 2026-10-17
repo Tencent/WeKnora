@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// WorkspaceResponse wraps the authenticated workspace profile.
 type WorkspaceResponse struct {
 	Success bool                `json:"success"`
 	Data    *dto.TenantResponse `json:"data"`
@@ -61,8 +62,8 @@ func (h *TenantHandler) UpdateCurrentWorkspace(c *gin.Context) {
 // WorkspaceMembersResponse describes the existing paginated member response.
 type WorkspaceMembersResponse struct {
 	Members  []types.TenantMemberResponse `json:"members"`
-	Total    int64                        `json:"total" extensions:"x-agent"`
-	Page     int                          `json:"page" extensions:"x-agent"`
+	Total    int64                        `json:"total"     extensions:"x-agent"`
+	Page     int                          `json:"page"      extensions:"x-agent"`
 	PageSize int                          `json:"page_size" extensions:"x-agent"`
 }
 

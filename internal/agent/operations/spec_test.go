@@ -403,7 +403,13 @@ func TestBuiltinMatchesHandlerAnnotations(t *testing.T) {
 	methods := map[string]string{}
 	for _, op := range Builtin().All() {
 		methods[op.ID] = op.Method
-		meta := agentOperation{ID: op.ID, Risk: op.Risk, LabelParam: op.LabelParam, AlwaysConfirm: op.AlwaysConfirm, SystemAdmin: op.SystemAdmin}
+		meta := agentOperation{
+			ID:            op.ID,
+			Risk:          op.Risk,
+			LabelParam:    op.LabelParam,
+			AlwaysConfirm: op.AlwaysConfirm,
+			SystemAdmin:   op.SystemAdmin,
+		}
 		if op.Target != nil {
 			meta.Target, meta.Label = op.Target.Operation, op.Target.Label
 			meta.RequireCompleteTarget = op.Target.RequireComplete

@@ -12,9 +12,15 @@ import (
 
 // applyParserRoutingPatch changes only the explicitly named file types. Splitting
 // a stored multi-type rule preserves the engine and XLSX options of other types.
-func applyParserRoutingPatch(cfg *types.ChunkingConfig, patch PatchKnowledgeBaseRequest, sections map[string]json.RawMessage) error {
+func applyParserRoutingPatch(
+	cfg *types.ChunkingConfig,
+	patch PatchKnowledgeBaseRequest,
+	sections map[string]json.RawMessage,
+) error {
 	if len(patch.ParserFileTypes) == 0 || len(patch.ParserFileTypes) > 20 || patch.ParserEngine == nil {
-		return errors.NewBadRequestError("parser_file_types (1-20 extensions) and parser_engine must be provided together")
+		return errors.NewBadRequestError(
+			"parser_file_types (1-20 extensions) and parser_engine must be provided together",
+		)
 	}
 	var nested map[string]json.RawMessage
 	_ = json.Unmarshal(sections["chunking_config"], &nested)
@@ -22,14 +28,21 @@ func applyParserRoutingPatch(cfg *types.ChunkingConfig, patch PatchKnowledgeBase
 		return errors.NewBadRequestError("cannot combine parser_engine_rules with a parser routing patch")
 	}
 	engine := strings.TrimSpace(*patch.ParserEngine)
-	if len(engine) > 100 || strings.IndexFunc(engine, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != '-' }) >= 0 {
+	if len(engine) > 100 ||
+		strings.IndexFunc(
+			engine,
+			func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != '-' },
+		) >= 0 {
 		return errors.NewBadRequestError("invalid parser engine name")
 	}
 	fileTypes := make([]string, 0, len(patch.ParserFileTypes))
 	for _, value := range patch.ParserFileTypes {
 		ft := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(value)), ".")
-		if ft == "" || len(ft) > 20 || strings.IndexFunc(ft, func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9') }) >= 0 {
-			return errors.NewBadRequestError("parser_file_types must contain file extensions, not filenames or wildcards")
+		if ft == "" || len(ft) > 20 ||
+			strings.IndexFunc(ft, func(r rune) bool { return (r < 'a' || r > 'z') && (r < '0' || r > '9') }) >= 0 {
+			return errors.NewBadRequestError(
+				"parser_file_types must contain file extensions, not filenames or wildcards",
+			)
 		}
 		if !slices.Contains(fileTypes, ft) {
 			fileTypes = append(fileTypes, ft)

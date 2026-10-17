@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
-	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -26,7 +25,7 @@ func (h *SystemHandler) ListSystemSettingSummaries(c *gin.Context) {
 		return
 	}
 	key := strings.TrimSpace(c.Query("key"))
-	var result []types.SystemSettingSummary = service.SummarizeSystemSettings(rows, key)
+	result := service.SummarizeSystemSettings(rows, key)
 	if key != "" && len(result) == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Unknown setting key"})
 		return
@@ -46,9 +45,14 @@ func runtimeErrorCategory(raw string) string {
 		return "rate_limited"
 	case strings.Contains(s, "deadline exceeded"), strings.Contains(s, "timeout"), strings.Contains(s, "timed out"):
 		return "timeout"
-	case strings.Contains(s, "unauthorized"), strings.Contains(s, "authentication"), strings.Contains(s, "permission denied"), strings.Contains(s, "forbidden"):
+	case strings.Contains(s, "unauthorized"),
+		strings.Contains(s, "authentication"),
+		strings.Contains(s, "permission denied"),
+		strings.Contains(s, "forbidden"):
 		return "access_denied"
-	case strings.Contains(s, "connection refused"), strings.Contains(s, "no such host"), strings.Contains(s, "network unreachable"):
+	case strings.Contains(s, "connection refused"),
+		strings.Contains(s, "no such host"),
+		strings.Contains(s, "network unreachable"):
 		return "connection_failed"
 	case strings.Contains(s, "not found"), strings.Contains(s, "no such file"):
 		return "not_found"

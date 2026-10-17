@@ -11,7 +11,7 @@
   color: color-mix(in srgb, var(--td-text-color-primary) 55%, transparent);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 140ms ease;
+  transition: opacity var(--app-motion-fast) ease;
 
   // Quiet outline actions, with a full hit target around each icon.
   :deep(.t-button) {
@@ -49,7 +49,7 @@
       opacity: 1;
       align-items: center;
       justify-content: center;
-      font-size: 18px;
+      font-size: var(--app-text-2xl);
       width: 18px;
       height: 18px;
       flex-shrink: 0;

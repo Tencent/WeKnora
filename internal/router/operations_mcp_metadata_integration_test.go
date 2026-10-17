@@ -35,7 +35,10 @@ type metadataApproval struct {
 	requests []approval.PendingRequest
 }
 
-func (g *metadataApproval) RequestBuiltinApproval(_ context.Context, req approval.PendingRequest) (approval.Decision, error) {
+func (g *metadataApproval) RequestBuiltinApproval(
+	_ context.Context,
+	req approval.PendingRequest,
+) (approval.Decision, error) {
 	g.requests = append(g.requests, req)
 	return approval.Decision{Approved: g.approved, PendingID: "metadata-approval"}, nil
 }
@@ -62,13 +65,24 @@ func TestAssistantMCPDirectoryEndToEnd(t *testing.T) {
 
 	var requests, executions atomic.Int32
 	var fail atomic.Bool
-	upstream := sdkserver.NewMCPServer("Directory fixture", "1", sdkserver.WithToolCapabilities(false), sdkserver.WithInstructions("PRIVATE SERVER INSTRUCTIONS"))
+	upstream := sdkserver.NewMCPServer(
+		"Directory fixture",
+		"1",
+		sdkserver.WithToolCapabilities(false),
+		sdkserver.WithInstructions("PRIVATE SERVER INSTRUCTIONS"),
+	)
 	addTool := func(name string) {
-		upstream.AddTool(sdkmcp.Tool{Name: name, Description: "Find documents", RawInputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
+		upstream.AddTool(
+			sdkmcp.Tool{
+				Name:           name,
+				Description:    "Find documents",
+				RawInputSchema: json.RawMessage(`{"type":"object","properties":{}}`),
+			},
 			func(context.Context, sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
 				executions.Add(1)
 				return sdkmcp.NewToolResultText("unused"), nil
-			})
+			},
+		)
 	}
 	addTool("search")
 	upstreamHandler := sdkserver.NewStreamableHTTPServer(upstream, sdkserver.WithStateLess(true))
@@ -82,7 +96,14 @@ func TestAssistantMCPDirectoryEndToEnd(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
-	savedService := &types.MCPService{ID: "svc", TenantID: 1, Name: "Docs server", Enabled: true, URL: &server.URL, TransportType: types.MCPTransportHTTPStreamable}
+	savedService := &types.MCPService{
+		ID:            "svc",
+		TenantID:      1,
+		Name:          "Docs server",
+		Enabled:       true,
+		URL:           &server.URL,
+		TransportType: types.MCPTransportHTTPStreamable,
+	}
 	require.NoError(t, repo.Create(ctx, savedService))
 
 	role := types.TenantRoleAdmin
@@ -95,14 +116,23 @@ func TestAssistantMCPDirectoryEndToEnd(t *testing.T) {
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
-		requestCtx := types.WithCaller(c.Request.Context(), types.Caller{TenantID: identity.TenantID, UserID: identity.UserID, Role: role})
+		requestCtx := types.WithCaller(
+			c.Request.Context(),
+			types.Caller{TenantID: identity.TenantID, UserID: identity.UserID, Role: role},
+		)
 		requestCtx = types.WithPrincipal(requestCtx, types.Principal{Type: types.PrincipalWebUser, ID: identity.UserID})
 		requestCtx = context.WithValue(requestCtx, types.TenantIDContextKey, identity.TenantID)
 		c.Set(types.TenantIDContextKey.String(), identity.TenantID)
 		c.Request = c.Request.WithContext(requestCtx)
 		c.Next()
 	})
-	RegisterMCPServiceRoutes(router.Group("/api/v1"), handler.NewMCPServiceHandler(svc, nil, nil, nil, nil), &handler.MCPCredentialsHandler{}, &handler.MCPOAuthHandler{}, guards)
+	RegisterMCPServiceRoutes(
+		router.Group("/api/v1"),
+		handler.NewMCPServiceHandler(svc, nil, nil, nil, nil),
+		&handler.MCPCredentialsHandler{},
+		&handler.MCPOAuthHandler{},
+		guards,
+	)
 	dispatcher := operations.NewHandlerDispatcher()
 	dispatcher.Bind(router)
 	gate := &metadataApproval{approved: true}
@@ -111,7 +141,16 @@ func TestAssistantMCPDirectoryEndToEnd(t *testing.T) {
 		Identity: operations.Identity{UserID: "user-a", TenantID: 1},
 		Access:   operations.Access{Role: role, EnforceRole: true},
 	}
-	interactive := tools.WithToolExecContext(ctx, &tools.ToolExecContext{SessionID: "session", UserID: "web_user:user-a", ToolCallID: "call", EventBus: event.NewEventBus(), Interactive: true})
+	interactive := tools.WithToolExecContext(
+		ctx,
+		&tools.ToolExecContext{
+			SessionID:   "session",
+			UserID:      "web_user:user-a",
+			ToolCallID:  "call",
+			EventBus:    event.NewEventBus(),
+			Interactive: true,
+		},
+	)
 	run := func(id string) *types.ToolResult {
 		t.Helper()
 		runtime.Access.Role = role
@@ -131,7 +170,8 @@ func TestAssistantMCPDirectoryEndToEnd(t *testing.T) {
 		require.NoError(t, json.Unmarshal([]byte(result.Output), &output))
 		return string(output.Result)
 	}
-	found, err := tools.NewFindOperationsTool(runtime.Catalog, runtime.Access).Execute(ctx, json.RawMessage(`{"query":"metadata","domain":"mcp_service"}`))
+	found, err := tools.NewFindOperationsTool(runtime.Catalog, runtime.Access).
+		Execute(ctx, json.RawMessage(`{"query":"metadata","domain":"mcp_service"}`))
 	require.NoError(t, err)
 	require.Contains(t, found.Output, "mcp_service.get_metadata")
 	require.Contains(t, found.Output, "mcp_service.refresh_metadata")
@@ -172,7 +212,12 @@ func TestAssistantMCPDirectoryEndToEnd(t *testing.T) {
 	require.Contains(t, live.Output, `"name":"lookup"`)
 	require.Empty(t, live.Data)
 	require.Greater(t, requests.Load(), before)
-	require.Contains(t, run("mcp_service.get_metadata").Output, `"tool_count":1`, "live queries do not save the directory")
+	require.Contains(
+		t,
+		run("mcp_service.get_metadata").Output,
+		`"tool_count":1`,
+		"live queries do not save the directory",
+	)
 	runtime.Access.Level = types.AssistantAccessAutoWrite
 	prompts := len(gate.requests)
 	updated := run("mcp_service.refresh_metadata")
@@ -206,7 +251,12 @@ func TestAssistantMCPDirectoryEndToEnd(t *testing.T) {
 	require.False(t, failed.Success)
 	require.Empty(t, failed.Data)
 	require.NotContains(t, failed.Error, "private upstream failure")
-	require.JSONEq(t, resultOf(updated), resultOf(run("mcp_service.get_metadata")), "a failed sync keeps the complete prior snapshot")
+	require.JSONEq(
+		t,
+		resultOf(updated),
+		resultOf(run("mcp_service.get_metadata")),
+		"a failed sync keeps the complete prior snapshot",
+	)
 	require.Zero(t, executions.Load(), "directory synchronization must never execute a tool")
 
 	// A connection edit marks the existing directory stale rather than silently
@@ -222,7 +272,22 @@ func TestAssistantMCPDirectoryEndToEnd(t *testing.T) {
 	// another principal's snapshot, even when there used to be a shared one.
 	stored.AuthConfig = &types.MCPAuthConfig{AuthType: types.MCPAuthOAuth}
 	require.NoError(t, repo.Update(ctx, stored))
-	personal := &types.MCPMetadata{TenantID: 1, ServiceID: "svc", Principal: types.MCPOAuthPrincipalFromContext(types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalWebUser, ID: "user-a"})).StorageID(), ConfigFingerprint: types.MCPConfigFingerprint(stored), Tools: []*types.MCPTool{{Name: "personal_tool"}}}
+	personal := &types.MCPMetadata{
+		TenantID:  1,
+		ServiceID: "svc",
+		Principal: types.MCPOAuthPrincipalFromContext(
+			types.WithPrincipal(
+				ctx,
+				types.Principal{
+					Type: types.PrincipalWebUser,
+					ID:   "user-a",
+				},
+			),
+		).
+			StorageID(),
+		ConfigFingerprint: types.MCPConfigFingerprint(stored),
+		Tools:             []*types.MCPTool{{Name: "personal_tool"}},
+	}
 	require.NoError(t, db.Create(personal).Error)
 	require.Contains(t, run("mcp_service.get_metadata").Output, "personal_tool")
 	runtime.Identity.UserID = "user-b"

@@ -18,7 +18,11 @@ import (
 type summarySettings struct{ runtimeTestSettings }
 
 func (summarySettings) List(context.Context) ([]*types.SystemSetting, error) {
-	return []*types.SystemSetting{{Key: "sandbox.docker_enabled", Value: types.JSON(`false`)}, {Key: "unknown", Value: types.JSON(`"secret"`)}, {Key: "auth.registration_mode", Value: types.JSON(`"secret"`), IsSecret: true}}, nil
+	return []*types.SystemSetting{
+		{Key: "sandbox.docker_enabled", Value: types.JSON(`false`)},
+		{Key: "unknown", Value: types.JSON(`"secret"`)},
+		{Key: "auth.registration_mode", Value: types.JSON(`"secret"`), IsSecret: true},
+	}, nil
 }
 
 type failingRuntimeInspector struct{ runtimeTestInspector }
@@ -26,6 +30,7 @@ type failingRuntimeInspector struct{ runtimeTestInspector }
 func (failingRuntimeInspector) QueueStats(context.Context) ([]types.QueueStat, bool, error) {
 	return nil, true, errors.New("private connection details")
 }
+
 func (failingRuntimeInspector) WorkerServerStats(context.Context) ([]types.WorkerServerStat, bool, error) {
 	return nil, true, errors.New("private connection details")
 }
@@ -55,12 +60,32 @@ func TestSystemAdminSettingsProjectionUsesActualResponse(t *testing.T) {
 
 func TestSystemAdminRuntimeDiagnosticsExcludeRawErrors(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	inspector := &runtimeTaskTestInspector{tasks: []types.RuntimeTaskInfo{{ID: "t1", State: types.RuntimeTaskArchived, LastError: "deadline exceeded: https://secret:password@internal/doc?token=private", Worker: "private-host", Retried: 5, KnowledgeID: "k1"}}, hasMore: true, nextCursor: "next"}
+	inspector := &runtimeTaskTestInspector{
+		tasks: []types.RuntimeTaskInfo{
+			{
+				ID:          "t1",
+				State:       types.RuntimeTaskArchived,
+				LastError:   "deadline exceeded: https://secret:password@internal/doc?token=private",
+				Worker:      "private-host",
+				Retried:     5,
+				KnowledgeID: "k1",
+			},
+		},
+		hasMore:    true,
+		nextCursor: "next",
+	}
 	h := &SystemHandler{taskInspector: inspector}
 	r := gin.New()
 	r.GET("/api/v1/system/admin/runtime/queues/:queue/tasks", h.ListRuntimeTasks)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/system/admin/runtime/queues/"+types.QueueDefault+"/tasks?state=archived", nil))
+	r.ServeHTTP(
+		w,
+		httptest.NewRequest(
+			"GET",
+			"/api/v1/system/admin/runtime/queues/"+types.QueueDefault+"/tasks?state=archived",
+			nil,
+		),
+	)
 	require.Equal(t, 200, w.Code, w.Body.String())
 	op, _ := operations.Builtin().Get("system_admin.list_tasks")
 	out, err := op.Project(w.Body.Bytes())

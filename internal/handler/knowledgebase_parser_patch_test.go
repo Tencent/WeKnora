@@ -21,10 +21,16 @@ func parsingPatch(t *testing.T, kb *types.KnowledgeBase, body string) (knowledge
 
 func TestParserRoutingPatchPreservesOtherRulesAndChunking(t *testing.T) {
 	header := true
-	kb := &types.KnowledgeBase{ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 64, ParserEngineRules: []types.ParserEngineRule{
-		{FileTypes: []string{"pdf", "docx"}, Engine: "builtin"},
-		{FileTypes: []string{"xlsx", "csv"}, Engine: "simple", XLSXFirstRowAsHeader: &header},
-	}}}
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{
+			ChunkSize:    512,
+			ChunkOverlap: 64,
+			ParserEngineRules: []types.ParserEngineRule{
+				{FileTypes: []string{"pdf", "docx"}, Engine: "builtin"},
+				{FileTypes: []string{"xlsx", "csv"}, Engine: "simple", XLSXFirstRowAsHeader: &header},
+			},
+		},
+	}
 	result, err := parsingPatch(t, kb, `{"parser_file_types":[".PDF","pdf","xlsx"],"parser_engine":"new-engine"}`)
 	require.NoError(t, err)
 	cfg := result.Config.ChunkingConfig
@@ -35,7 +41,12 @@ func TestParserRoutingPatchPreservesOtherRulesAndChunking(t *testing.T) {
 	assert.Equal(t, "simple", cfg.ResolveParserEngine("csv"))
 	require.NotNil(t, cfg.ResolveParserEngineRule("xlsx").XLSXFirstRowAsHeader)
 	assert.True(t, *cfg.ResolveParserEngineRule("xlsx").XLSXFirstRowAsHeader)
-	assert.Equal(t, []string{"pdf", "docx"}, kb.ChunkingConfig.ParserEngineRules[0].FileTypes, "must not mutate the loaded entity")
+	assert.Equal(
+		t,
+		[]string{"pdf", "docx"},
+		kb.ChunkingConfig.ParserEngineRules[0].FileTypes,
+		"must not mutate the loaded entity",
+	)
 	result, err = parsingPatch(t, kb, `{"parser_file_types":["pdf"],"parser_engine":""}`)
 	require.NoError(t, err)
 	assert.Nil(t, result.Config.ChunkingConfig.ResolveParserEngineRule("pdf"))
@@ -49,8 +60,22 @@ func TestParserRoutingPatchRejectsAmbiguousOrInvalidChanges(t *testing.T) {
 		`{"parser_file_types":["*.pdf"],"parser_engine":"builtin"}`,
 		`{"parser_file_types":["file.pdf"],"parser_engine":"builtin"}`,
 		`{"parser_file_types":["pdf"],"parser_engine":"https://example.org"}`,
-		`{"parser_file_types":["pdf"],"parser_engine":"builtin","parser_xlsx_first_row_as_header":true}`,
-		`{"parser_file_types":["pdf"],"parser_engine":"builtin","chunking_config":{"parser_engine_rules":[]}}`,
+		`{
+  "parser_file_types": [
+    "pdf"
+  ],
+  "parser_engine": "builtin",
+  "parser_xlsx_first_row_as_header": true
+}`,
+		`{
+  "parser_file_types": [
+    "pdf"
+  ],
+  "parser_engine": "builtin",
+  "chunking_config": {
+    "parser_engine_rules": []
+  }
+}`,
 	} {
 		_, err := parsingPatch(t, &types.KnowledgeBase{}, body)
 		require.Error(t, err, body)
@@ -59,7 +84,11 @@ func TestParserRoutingPatchRejectsAmbiguousOrInvalidChanges(t *testing.T) {
 
 func TestImageControlsPreserveOtherParamsAndRespectNamespace(t *testing.T) {
 	kb := &types.KnowledgeBase{ImageProcessingConfig: types.ImageProcessingConfig{
-		ImagePipelineID: "default", ImagePipelineParams: map[string]any{"default.enable_ocr": true, "enable_caption": true, "caption.thinking": true},
+		ImagePipelineID: "default", ImagePipelineParams: map[string]any{
+			"default.enable_ocr": true,
+			"enable_caption":     true,
+			"caption.thinking":   true,
+		},
 	}}
 	result, err := parsingPatch(t, kb, `{"image_ocr_enabled":false}`)
 	require.NoError(t, err)
@@ -72,18 +101,45 @@ func TestImageControlsPreserveOtherParamsAndRespectNamespace(t *testing.T) {
 	require.NoError(t, service.ValidateImagePipelineParams(types.ImagePipelineDefault, image.ImagePipelineParams))
 	result, err = parsingPatch(t, kb, `{"image_ocr_enabled":false,"image_caption_enabled":false}`)
 	require.NoError(t, err)
-	require.Error(t, service.ValidateImagePipelineParams(types.ImagePipelineDefault, result.Config.ImageProcessingConfig.ImagePipelineParams))
+	require.Error(
+		t,
+		service.ValidateImagePipelineParams(
+			types.ImagePipelineDefault,
+			result.Config.ImageProcessingConfig.ImagePipelineParams,
+		),
+	)
 	kb.ImageProcessingConfig.ImagePipelineID = "smartocr"
 	_, err = parsingPatch(t, kb, `{"image_ocr_enabled":false}`)
 	require.Error(t, err, "manual toggles must not silently do nothing on smartocr")
-	result, err = parsingPatch(t, kb, `{"image_processing_config":{"image_pipeline":"default"},"image_ocr_enabled":false}`)
+	result, err = parsingPatch(
+		t,
+		kb,
+		`{"image_processing_config":{"image_pipeline":"default"},"image_ocr_enabled":false}`,
+	)
 	require.NoError(t, err)
 	assert.Equal(t, "default", result.Config.ImageProcessingConfig.ImagePipelineID)
 }
 
 func TestParsingPatchKeepsVLMAndQuestionOptions(t *testing.T) {
-	kb := &types.KnowledgeBase{VLMConfig: types.VLMConfig{Enabled: true, ModelID: "vision"}, QuestionGenerationConfig: &types.QuestionGenerationConfig{Enabled: true, QuestionCount: 3, CustomInstructions: "keep me"}, ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 64}}
-	result, err := parsingPatch(t, kb, `{"chunking_config":{"enable_parent_child":true,"parent_chunk_size":4096,"child_chunk_size":384},"question_generation_config":{"question_count":5}}`)
+	kb := &types.KnowledgeBase{
+		VLMConfig: types.VLMConfig{Enabled: true, ModelID: "vision"},
+		QuestionGenerationConfig: &types.QuestionGenerationConfig{
+			Enabled:            true,
+			QuestionCount:      3,
+			CustomInstructions: "keep me",
+		},
+		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 64},
+	}
+	result, err := parsingPatch(t, kb, `{
+  "chunking_config": {
+    "enable_parent_child": true,
+    "parent_chunk_size": 4096,
+    "child_chunk_size": 384
+  },
+  "question_generation_config": {
+    "question_count": 5
+  }
+}`)
 	require.NoError(t, err)
 	assert.True(t, result.Config.ChunkingConfig.EnableParentChild)
 	assert.Equal(t, 512, result.Config.ChunkingConfig.ChunkSize)

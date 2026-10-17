@@ -3,8 +3,9 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"strings"
+
+	"github.com/Tencent/WeKnora/internal/agent/operations"
 )
 
 func syncAndSearchDetail(op operations.Operation, params map[string]json.RawMessage) []string {

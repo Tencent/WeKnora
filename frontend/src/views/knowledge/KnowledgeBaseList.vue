@@ -172,7 +172,7 @@
                      is now per-user and available to anyone who can see the KB
                      (backend route only requires KB read access). Settings /
                      Delete are mutations, so they stay behind canManageKBCard. -->
-                <t-popup :visible="openKbMenuId === kb.id" @visible-change="visible => setOpenKbMenu(kb.id, visible)"
+                <t-popup :visible="openKbMenuId === kb.id" @visible-change="(visible: boolean) => setOpenKbMenu(kb.id, visible)"
                   overlayClassName="card-more-popup" trigger="click" destroy-on-close placement="bottom-right">
                   <button type="button" :aria-label="$t('common.expand')" class="more-wrap" @click.stop
                     :class="{ 'active-more': openKbMenuId === kb.id }" :aria-expanded="openKbMenuId === kb.id" aria-haspopup="true">
@@ -404,7 +404,7 @@
                 </span>
                 <!-- See the matching block in the "all" tab template for why
                      this is no longer gated by canManageKBCard. -->
-                <t-popup :visible="openKbMenuId === kb.id" @visible-change="visible => setOpenKbMenu(kb.id, visible)"
+                <t-popup :visible="openKbMenuId === kb.id" @visible-change="(visible: boolean) => setOpenKbMenu(kb.id, visible)"
                   overlayClassName="card-more-popup" trigger="click" destroy-on-close placement="bottom-right">
                   <button type="button" :aria-label="$t('common.expand')" class="more-wrap" @click.stop
                     :class="{ 'active-more': openKbMenuId === kb.id }" :aria-expanded="openKbMenuId === kb.id" aria-haspopup="true">

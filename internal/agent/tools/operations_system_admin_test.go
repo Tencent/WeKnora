@@ -11,12 +11,19 @@ import (
 
 func TestSystemAdminDiscoveryAndExecution(t *testing.T) {
 	for _, isAdmin := range []bool{false, true} {
-		access := operations.Access{Role: types.TenantRoleOwner, SystemAdmin: isAdmin, Level: types.AssistantAccessReadOnly}
+		access := operations.Access{
+			Role:        types.TenantRoleOwner,
+			SystemAdmin: isAdmin,
+			Level:       types.AssistantAccessReadOnly,
+		}
 		find := NewFindOperationsTool(operations.Builtin(), access)
 		found, err := find.Execute(interactiveCtx(), []byte(`{"query":"system_admin.list_users"}`))
 		require.NoError(t, err)
 		d := &fakeDispatcher{responses: map[string]*operations.Response{
-			"GET /api/v1/system/admin/users": {Status: 200, Body: []byte(`{"users":[{"id":"u","username":"Name","password":"secret"}],"has_more":false}`)},
+			"GET /api/v1/system/admin/users": {
+				Status: 200,
+				Body:   []byte(`{"users":[{"id":"u","username":"Name","password":"secret"}],"has_more":false}`),
+			},
 		}}
 		gate := &fakeApprover{}
 		run := newRunTool(d, gate)
@@ -35,7 +42,12 @@ func TestSystemAdminDiscoveryAndExecution(t *testing.T) {
 			require.Len(t, d.calls, 1)
 			assert.NotContains(t, res.Output, "secret")
 			// A permission revoked since discovery is still rejected by the router.
-			d.responses["GET /api/v1/system/admin/users"] = &operations.Response{Status: 403, Body: []byte(`{"error":"Forbidden: system administrator required"}`)}
+			d.responses["GET /api/v1/system/admin/users"] = &operations.Response{
+				Status: 403,
+				Body: []byte(
+					`{"error":"Forbidden: system administrator required"}`,
+				),
+			}
 			res, err = run.Execute(interactiveCtx(), runArgs("system_admin.list_users", map[string]any{}))
 			require.NoError(t, err)
 			assert.False(t, res.Success)

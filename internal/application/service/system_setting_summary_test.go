@@ -15,7 +15,12 @@ func TestSystemSettingSummariesUseRegistryAndHideSecrets(t *testing.T) {
 		nil,
 		{Key: "unknown.api_key", Value: types.JSON(`"hidden-token"`), Description: "hidden-description"},
 		{Key: "auth.registration_mode", Value: types.JSON(`"hidden-token"`), IsSecret: true},
-		{Key: "model.max_concurrency", Value: types.JSON(`9007199254740993`), ValueType: "string", Description: "hidden-description"},
+		{
+			Key:         "model.max_concurrency",
+			Value:       types.JSON(`9007199254740993`),
+			ValueType:   "string",
+			Description: "hidden-description",
+		},
 		{Key: "sandbox.docker_enabled", Value: types.JSON(`false`)},
 		{Key: "ssrf.whitelist", Value: types.JSON(`["example.com"]`)},
 		{Key: "asynq.core_concurrency", Value: types.JSON(`"invalid"`)},

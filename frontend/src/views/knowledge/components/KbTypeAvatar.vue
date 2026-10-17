@@ -33,21 +33,21 @@ const isFaq = computed(() => props.type === 'faq')
   flex-shrink: 0;
   overflow: visible;
   transform: var(--kb-icon-transform, none);
-  transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: transform var(--app-motion-slow) cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .kb-folder-paper {
   fill: var(--td-bg-color-container);
   opacity: var(--kb-folder-paper-opacity, 0);
   transform: translateY(var(--kb-folder-paper-offset, 3px));
-  transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 160ms ease;
+  transition: transform var(--app-motion-slow) cubic-bezier(0.2, 0.8, 0.2, 1), opacity var(--app-motion-fast) ease;
 }
 
 .kb-faq-question {
   transform-box: fill-box;
   transform-origin: center;
   transform: var(--kb-faq-question-transform, none);
-  transition: transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: transform var(--app-motion-slow) cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .kb-folder-front {
@@ -55,7 +55,7 @@ const isFaq = computed(() => props.type === 'faq')
   transform-box: fill-box;
   transform-origin: center bottom;
   transform: perspective(48px) rotateX(var(--kb-folder-open-angle, 0deg));
-  transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: transform var(--app-motion-base) cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {

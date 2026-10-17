@@ -565,7 +565,7 @@ func validateOperation(op Operation) error {
 		return fmt.Errorf("route %q is in an area an agent may only read", op.Route)
 	}
 	if area == "tenants" && op.Method != http.MethodGet &&
-		!(op.Route == "/api/v1/tenants/current" && op.Method == http.MethodPatch && op.Risk == RiskWrite) {
+		(op.Route != "/api/v1/tenants/current" || op.Method != http.MethodPatch || op.Risk != RiskWrite) {
 		return fmt.Errorf("route %q only permits current workspace reads and profile patches", op.Route)
 	}
 
@@ -766,7 +766,9 @@ func parseRoute(route string) (map[string]bool, string, error) {
 	rest := strings.TrimPrefix(route, base)
 	area, _, _ := strings.Cut(rest, "/")
 	currentWorkspace := rest == "tenants/current" || rest == "tenants/current/members"
-	if (!allowedRouteAreas[area] && rest != "system/parser-engines" && rest != "system/info" && !currentWorkspace && !systemAdminReadRoute(rest)) || (area == "sandbox-configs" && !sandboxSkillsRoute(rest)) {
+	allowed := allowedRouteAreas[area] || rest == "system/parser-engines" || rest == "system/info" ||
+		currentWorkspace || systemAdminReadRoute(rest)
+	if !allowed || (area == "sandbox-configs" && !sandboxSkillsRoute(rest)) {
 		return nil, "", fmt.Errorf("route %q is outside the areas an agent may reach", route)
 	}
 	params := map[string]bool{}

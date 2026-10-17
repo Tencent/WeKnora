@@ -102,9 +102,11 @@ func (stubSessionFileStore) ReadSessionFile(context.Context, string, string) ([]
 func (stubSessionFileStore) WriteSessionInputFile(context.Context, string, string, []byte) error {
 	return nil
 }
+
 func (stubSessionFileStore) WriteSessionWorkspaceFile(context.Context, string, string, []byte) error {
 	return nil
 }
+
 func (stubSessionFileStore) WriteSessionWorkspaceFiles(context.Context, string, []sandbox.SessionWorkspaceFile) error {
 	return nil
 }
@@ -986,13 +988,34 @@ func TestSwitchManagedToolsIgnoreTheAllowlist(t *testing.T) {
 func TestRegisterOperationToolsKeepsSystemAdminIndependentOfWorkspaceRole(t *testing.T) {
 	for _, enforce := range []bool{true, false} {
 		for _, isAdmin := range []bool{true, false} {
-			ctx := types.WithCaller(types.WithPrincipal(context.Background(), types.Principal{Type: types.PrincipalWebUser, ID: "u1"}),
+			ctx := types.WithCaller(types.WithPrincipal(
+				context.Background(),
+				types.Principal{
+					Type: types.PrincipalWebUser,
+					ID:   "u1",
+				},
+			),
 				types.Caller{TenantID: 7, UserID: "u1", Role: types.TenantRoleOwner})
 			ctx = context.WithValue(ctx, types.SystemAdminContextKey, isAdmin)
 			ctx = context.WithValue(ctx, types.UserContextKey, &types.User{ID: "u1", CanAccessAllTenants: true})
-			svc := &agentService{cfg: &config.Config{Tenant: &config.TenantConfig{EnableRBAC: &enforce, EnableCrossTenantAccess: true}}, operationDispatcher: operations.NewHandlerDispatcher()}
+			svc := &agentService{
+				cfg: &config.Config{
+					Tenant: &config.TenantConfig{
+						EnableRBAC:              &enforce,
+						EnableCrossTenantAccess: true,
+					},
+				},
+				operationDispatcher: operations.NewHandlerDispatcher(),
+			}
 			registry := tools.NewToolRegistry()
-			svc.registerOperationTools(ctx, registry, &types.AgentConfig{OperationsAgentID: types.BuiltinWeKnoraAssistantID, AssistantAccess: types.AssistantAccessReadOnly})
+			svc.registerOperationTools(
+				ctx,
+				registry,
+				&types.AgentConfig{
+					OperationsAgentID: types.BuiltinWeKnoraAssistantID,
+					AssistantAccess:   types.AssistantAccessReadOnly,
+				},
+			)
 			find, err := registry.GetTool(tools.ToolFindOperations)
 			require.NoError(t, err)
 			result, err := find.Execute(ctx, []byte(`{"query":"system_admin.list_users"}`))

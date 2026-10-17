@@ -27,9 +27,11 @@ func (s *stubTenantService) UpdateTenant(_ context.Context, tenant *types.Tenant
 func (s *stubTenantService) CreateTenant(context.Context, *types.Tenant) (*types.Tenant, error) {
 	return nil, nil
 }
+
 func (s *stubTenantService) GetTenantByID(context.Context, uint64) (*types.Tenant, error) {
 	return s.tenant, nil
 }
+
 func (s *stubTenantService) GetTenantsByIDs(context.Context, []uint64) (map[uint64]*types.Tenant, error) {
 	return map[uint64]*types.Tenant{s.tenant.ID: s.tenant}, nil
 }
@@ -37,18 +39,23 @@ func (s *stubTenantService) DeleteTenant(context.Context, uint64) error { return
 func (s *stubTenantService) ListTenants(context.Context) ([]*types.Tenant, error) {
 	return []*types.Tenant{s.tenant}, nil
 }
+
 func (s *stubTenantService) ListAllTenants(context.Context) ([]*types.Tenant, error) {
 	return nil, nil
 }
+
 func (s *stubTenantService) SearchTenants(context.Context, string, uint64, int, int) ([]*types.Tenant, int64, error) {
 	return nil, 0, nil
 }
+
 func (s *stubTenantService) BulkSetStorageQuota(context.Context, int64) (int64, error) {
 	return 0, nil
 }
+
 func (s *stubTenantService) GetTenantByIDForUser(context.Context, uint64, string) (*types.Tenant, error) {
 	return s.tenant, nil
 }
+
 func (s *stubTenantService) GetWeKnoraCloudCredentials(context.Context) *types.WeKnoraCloudCredentials {
 	return nil
 }

@@ -463,3 +463,7 @@ func TestScheduler_TriggerSync_NotFound(t *testing.T) {
 		t.Error("should not enqueue for non-existent data source")
 	}
 }
+
+func (*fakeDataSourceRepo) PatchSyncSettings(context.Context, *types.DataSource, types.JSON, []string) error {
+	panic("unexpected PatchSyncSettings call")
+}

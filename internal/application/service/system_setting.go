@@ -769,8 +769,10 @@ func SummarizeSystemSettings(rows []*types.SystemSetting, key string) []types.Sy
 		if !known {
 			continue
 		}
-		item := types.SystemSettingSummary{Key: row.Key, ValueType: spec.Type, Category: spec.Category,
-			Description: spec.Description, RequiresRestart: spec.RequiresRestart, Enum: spec.Enum, ValueHidden: true}
+		item := types.SystemSettingSummary{
+			Key: row.Key, ValueType: spec.Type, Category: spec.Category,
+			Description: spec.Description, RequiresRestart: spec.RequiresRestart, Enum: spec.Enum, ValueHidden: true,
+		}
 		if !row.IsSecret && json.Valid(row.Value) && len(row.Value) <= 4096 {
 			// Check the value against the declared type before returning it.
 			var value any

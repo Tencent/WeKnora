@@ -33,7 +33,7 @@ type DataSourceResponse struct {
 	LastSyncAt           *time.Time           `json:"last_sync_at" extensions:"x-agent"`
 	LastSyncCursor       json.RawMessage      `json:"last_sync_cursor,omitempty"`
 	LastSyncResult       json.RawMessage      `json:"last_sync_result,omitempty"`
-	ErrorMessage         string               `json:"error_message,omitempty" extensions:"x-agent"`
+	ErrorMessage         string               `json:"error_message,omitempty"`
 	SyncLogRetentionDays int                  `json:"sync_log_retention_days"`
 	CreatedAt            time.Time            `json:"created_at"`
 	UpdatedAt            time.Time            `json:"updated_at"`

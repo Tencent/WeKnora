@@ -31,7 +31,15 @@ func TestCurrentWorkspaceProfilePersistsOnlyRequestedFields(t *testing.T) {
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	require.NoError(t, db.AutoMigrate(&types.Tenant{}))
 	for _, tenant := range []*types.Tenant{
-		{ID: 7, Name: "Team", Description: "Original", Status: "active", StorageQuota: 1024, StorageUsed: 128, Business: "preserved"},
+		{
+			ID:           7,
+			Name:         "Team",
+			Description:  "Original",
+			Status:       "active",
+			StorageQuota: 1024,
+			StorageUsed:  128,
+			Business:     "preserved",
+		},
 		{ID: 99, Name: "Other workspace", Description: "Do not change", Status: "active"},
 	} {
 		require.NoError(t, db.Create(tenant).Error)
@@ -78,17 +86,37 @@ func TestCurrentWorkspaceProfilePersistsOnlyRequestedFields(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Other workspace", other.Name)
 	assert.Equal(t, "Do not change", other.Description)
-	for _, body := range []string{`{}`, `{"description":null}`, `{"name":"  "}`, `{"name":"` + strings.Repeat("a", 129) + `"}`, `{"description":"` + strings.Repeat("a", 513) + `"}`} {
+	for _, body := range []string{
+		`{}`,
+		`{"description":null}`,
+		`{"name":"  "}`,
+		`{"name":"` + strings.Repeat(
+			"a",
+			129,
+		) + `"}`,
+		`{"description":"` + strings.Repeat(
+			"a",
+			513,
+		) + `"}`,
+	} {
 		assert.Equal(t, http.StatusBadRequest, request("PATCH", body).Code, body)
 	}
 	// An unrecognized privileged field cannot change stored settings.
-	require.Equal(t, http.StatusOK, request("PATCH", `{"description":"Updated","storage_quota":9999,"status":"suspended"}`).Code)
+	require.Equal(
+		t,
+		http.StatusOK,
+		request("PATCH", `{"description":"Updated","storage_quota":9999,"status":"suspended"}`).Code,
+	)
 	saved = types.Tenant{}
 	require.NoError(t, db.First(&saved, 7).Error)
 	assert.Equal(t, int64(1024), saved.StorageQuota)
 	assert.Equal(t, "active", saved.Status)
 	assert.Equal(t, "New name", saved.Name, "omitted name must remain unchanged")
-	for _, role := range []types.TenantRole{types.TenantRoleViewer, types.TenantRoleContributor, types.TenantRoleAdmin} {
+	for _, role := range []types.TenantRole{
+		types.TenantRoleViewer,
+		types.TenantRoleContributor,
+		types.TenantRoleAdmin,
+	} {
 		caller.Role = role
 		assert.Equal(t, http.StatusForbidden, request("PATCH", `{"name":"Denied"}`).Code)
 		assert.Equal(t, http.StatusOK, request("GET", "").Code)
@@ -98,25 +126,44 @@ func TestCurrentWorkspaceProfilePersistsOnlyRequestedFields(t *testing.T) {
 }
 
 func TestCurrentWorkspaceMembersPaginationAndProjection(t *testing.T) {
-	ms := &stubMemberService{listMembersPage: func(_ context.Context, id uint64, q string, page, size int) ([]*types.TenantMember, int64, error) {
-		assert.Equal(t, uint64(7), id)
-		assert.Equal(t, "Alice", q)
-		assert.Equal(t, 2, page)
-		assert.Equal(t, 1, size)
-		return []*types.TenantMember{{UserID: "u1", Role: types.TenantRoleAdmin, Status: types.TenantMemberStatusActive}}, 2, nil
-	}}
-	us := &stubMemberUserService{getByIDs: func(_ context.Context, ids []string) (map[string]*types.User, error) {
+	ms := &stubMemberService{
+		listMembersPage: func(
+			_ context.Context,
+			id uint64,
+			q string,
+			page, size int,
+		) (
+			[]*types.TenantMember,
+			int64,
+			error,
+		) {
+			assert.Equal(t, uint64(7), id)
+			assert.Equal(t, "Alice", q)
+			assert.Equal(t, 2, page)
+			assert.Equal(t, 1, size)
+			return []*types.TenantMember{
+				{UserID: "u1", Role: types.TenantRoleAdmin, Status: types.TenantMemberStatusActive},
+			}, 2, nil
+		},
+	}
+	us := &stubMemberUserService{getByIDs: func(_ context.Context, _ []string) (map[string]*types.User, error) {
 		return map[string]*types.User{"u1": {ID: "u1", Username: "Alice", Email: "a@example.com"}}, nil
 	}}
 	h := NewTenantMemberHandler(ms, us)
 	r := gin.New()
 	r.Use(middleware.ErrorHandler(), func(c *gin.Context) {
-		c.Request = c.Request.WithContext(types.WithCaller(c.Request.Context(), types.Caller{TenantID: 7, Role: types.TenantRoleViewer}))
+		c.Request = c.Request.WithContext(
+			types.WithCaller(c.Request.Context(), types.Caller{TenantID: 7, Role: types.TenantRoleViewer}),
+		)
 		c.Next()
 	})
 	r.GET("/api/v1/tenants/current/members", h.ListCurrentWorkspaceMembers)
 	op, _ := operations.Builtin().Get("workspace.list_members")
-	params := map[string]json.RawMessage{"q": json.RawMessage(`"Alice"`), "page": json.RawMessage(`2`), "page_size": json.RawMessage(`1`)}
+	params := map[string]json.RawMessage{
+		"q":         json.RawMessage(`"Alice"`),
+		"page":      json.RawMessage(`2`),
+		"page_size": json.RawMessage(`1`),
+	}
 	call, err := op.Build(params)
 	require.NoError(t, err)
 	w := httptest.NewRecorder()

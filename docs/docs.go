@@ -23574,8 +23574,7 @@ const docTemplate = `{
                     }
                 },
                 "error_message": {
-                    "type": "string",
-                    "x-agent": true
+                    "type": "string"
                 },
                 "id": {
                     "type": "string",
@@ -32941,8 +32940,7 @@ const docTemplate = `{
                 },
                 "error_message": {
                     "description": "Error details if status is \"failed\"",
-                    "type": "string",
-                    "x-agent": true
+                    "type": "string"
                 },
                 "finished_at": {
                     "description": "Sync completion time",

@@ -38,7 +38,12 @@ func registerOperationAreas(v1 *gin.RouterGroup, g *rbacGuards) {
 	RegisterSystemRoutes(v1, &handler.SystemHandler{}, g)
 	RegisterSystemAdminRoutes(v1, &handler.SystemHandler{}, nil, g)
 	RegisterTenantRoutes(v1, &handler.TenantHandler{}, &handler.TenantMemberHandler{}, nil, nil, g)
-	RegisterWebSearchProviderRoutes(v1, &handler.WebSearchProviderHandler{}, &handler.WebSearchProviderCredentialsHandler{}, g)
+	RegisterWebSearchProviderRoutes(
+		v1,
+		&handler.WebSearchProviderHandler{},
+		&handler.WebSearchProviderCredentialsHandler{},
+		g,
+	)
 	RegisterDataSourceRoutes(v1, &handler.DataSourceHandler{}, &handler.DataSourceCredentialsHandler{}, g)
 }
 
@@ -147,7 +152,16 @@ func deniedByRole(engine *gin.Engine, op operations.Operation) bool {
 		return false
 	}
 	text := rec.Body.String()
-	return strings.Contains(text, "insufficient workspace role") || strings.Contains(text, "must own the resource") || strings.Contains(text, "system administrator required")
+	return strings.Contains(
+		text,
+		"insufficient workspace role",
+	) || strings.Contains(
+		text,
+		"must own the resource",
+	) || strings.Contains(
+		text,
+		"system administrator required",
+	)
 }
 
 func TestAssertOperationRoutesExistPanicsOnDrift(t *testing.T) {

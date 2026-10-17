@@ -23,11 +23,16 @@ type faqBatchService struct {
 	err  error
 }
 
-func (s *faqBatchService) UpdateFAQEntryFieldsBatch(_ context.Context, kb string, p *types.FAQEntryFieldsBatchUpdate) error {
+func (s *faqBatchService) UpdateFAQEntryFieldsBatch(
+	_ context.Context,
+	kb string,
+	p *types.FAQEntryFieldsBatchUpdate,
+) error {
 	s.kbID = kb
 	s.plan = p
 	return s.err
 }
+
 func runFAQBatchPatch(body string, s *faqBatchService) (*gin.Context, *httptest.ResponseRecorder) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
@@ -38,8 +43,12 @@ func runFAQBatchPatch(body string, s *faqBatchService) (*gin.Context, *httptest.
 	(&FAQHandler{knowledgeService: s}).PatchEntriesBatch(c)
 	return c, w
 }
+
 func TestFAQBatchPatchPreservesOmittedFieldsAndExplicitFalse(t *testing.T) {
-	for _, body := range []string{`{"entry_ids":[1,2],"is_enabled":false}`, `{"entry_ids":[1,2],"is_recommended":false,"tag_id":0}`} {
+	for _, body := range []string{
+		`{"entry_ids":[1,2],"is_enabled":false}`,
+		`{"entry_ids":[1,2],"is_recommended":false,"tag_id":0}`,
+	} {
 		s := &faqBatchService{}
 		c, w := runFAQBatchPatch(body, s)
 		require.Empty(t, c.Errors)
@@ -63,6 +72,7 @@ func TestFAQBatchPatchPreservesOmittedFieldsAndExplicitFalse(t *testing.T) {
 		}
 	}
 }
+
 func TestFAQBatchPatchRejectsInvalidSelectionWithoutDispatch(t *testing.T) {
 	ids := make([]string, 21)
 	for i := range ids {
@@ -79,6 +89,7 @@ func TestFAQBatchPatchRejectsInvalidSelectionWithoutDispatch(t *testing.T) {
 		assert.Nil(t, s.plan, body)
 	}
 }
+
 func TestFAQBatchPatchPropagatesAccessFailure(t *testing.T) {
 	s := &faqBatchService{err: errors.NewForbiddenError("entry belongs to another knowledge base")}
 	c, w := runFAQBatchPatch(`{"entry_ids":[1],"is_enabled":false}`, s)

@@ -27,14 +27,14 @@ defineProps<{ kind: 'agent' | 'space'; emoji?: string }>()
   height: 16px;
   color: var(--td-text-color-secondary);
   transform: var(--resource-avatar-transform, none);
-  transition: transform 280ms cubic-bezier(.2, .8, .2, 1), color var(--app-motion-fast);
+  transition: transform var(--app-motion-slow) cubic-bezier(.2, .8, .2, 1), color var(--app-motion-fast);
   svg { display: block; overflow: visible; flex-shrink: 0; }
 }
-.avatar-emoji { font-size: 18px; line-height: 1; }
+.avatar-emoji { font-size: var(--app-text-2xl); line-height: 1; }
 .space-member-left, .space-member-right, .space-member-center {
   transform-box: fill-box;
   transform-origin: center bottom;
-  transition: transform 300ms cubic-bezier(.34, 1.56, .64, 1);
+  transition: transform var(--app-motion-slow) cubic-bezier(.34, 1.56, .64, 1);
 }
 .space-member-left { transform: translateX(var(--resource-member-left, 0px)); }
 .space-member-right { transform: translateX(var(--resource-member-right, 0px)); }

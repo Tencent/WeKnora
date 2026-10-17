@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -15,11 +16,11 @@ import (
 // PatchWebSearchProviderRequest changes display settings without replacing connection parameters.
 type PatchWebSearchProviderRequest struct {
 	// Display name; cannot be blank.
-	Name *string `json:"name" extensions:"x-agent"`
+	Name *string `json:"name"        extensions:"x-agent"`
 	// Description; empty clears it.
 	Description *string `json:"description" extensions:"x-agent"`
 	// Whether agents without an explicit provider use this service by default.
-	IsDefault *bool `json:"is_default" extensions:"x-agent"`
+	IsDefault *bool `json:"is_default"  extensions:"x-agent"`
 }
 
 // PatchProvider godoc
@@ -56,7 +57,9 @@ func (h *WebSearchProviderHandler) PatchProvider(c *gin.Context) {
 		return
 	}
 	updated := *existing
+	var fields []string
 	if patch.Name != nil {
+		fields = append(fields, "name")
 		updated.Name = strings.TrimSpace(*patch.Name)
 		if updated.Name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name cannot be empty"})
@@ -64,39 +67,49 @@ func (h *WebSearchProviderHandler) PatchProvider(c *gin.Context) {
 		}
 	}
 	if patch.Description != nil {
+		fields = append(fields, "description")
 		updated.Description = *patch.Description
 	}
 	if patch.IsDefault != nil {
+		fields = append(fields, "is_default")
 		updated.IsDefault = *patch.IsDefault
 	}
-	if err := h.service.UpdateProvider(c.Request.Context(), &updated); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Could not update search provider; check its saved configuration."})
+	if err := h.service.PatchProviderSettings(c.Request.Context(), &updated, fields); err != nil {
+		c.JSON(
+			http.StatusBadRequest,
+			gin.H{"error": "Could not update search provider; check its saved configuration."},
+		)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": dto.NewWebSearchProviderResponse(c.Request.Context(), &updated)})
+	c.JSON(
+		http.StatusOK,
+		gin.H{"success": true, "data": dto.NewWebSearchProviderResponse(c.Request.Context(), &updated)},
+	)
 }
 
+// WebSearchProviderTestResponse reports a credential-safe connection test result.
 type WebSearchProviderTestResponse struct {
-	Success bool   `json:"success" extensions:"x-agent"`
+	Success bool   `json:"success"         extensions:"x-agent"`
 	Error   string `json:"error,omitempty" extensions:"x-agent"`
 }
 
 // PatchDataSourceSyncRequest updates only the named synchronization settings.
 type PatchDataSourceSyncRequest struct {
 	// Six-field cron including seconds, optionally prefixed with CRON_TZ=Area/City. Empty disables scheduled sync.
-	SyncSchedule *string `json:"sync_schedule" extensions:"x-agent"`
+	SyncSchedule *string `json:"sync_schedule"     extensions:"x-agent"`
 	// Incremental sync or a full scan.
-	SyncMode *string `json:"sync_mode" enums:"incremental,full" extensions:"x-agent"`
+	SyncMode *string `json:"sync_mode"         extensions:"x-agent"                    enums:"incremental,full"`
 	// Overwrite existing content or skip conflicts.
-	ConflictStrategy *string `json:"conflict_strategy" enums:"overwrite,skip" extensions:"x-agent"`
+	ConflictStrategy *string `json:"conflict_strategy" extensions:"x-agent"                    enums:"overwrite,skip"`
 	// Whether future syncs delete documents that were removed upstream.
-	SyncDeletions *bool `json:"sync_deletions" extensions:"x-agent"`
+	SyncDeletions *bool `json:"sync_deletions"    extensions:"x-agent"`
 	// Replaces the complete selection. Get IDs from data_source.list_resources; never infer them from names.
-	ResourceIDs *[]string `json:"resource_ids" extensions:"x-agent,x-agent-maximum=50"`
+	ResourceIDs *[]string `json:"resource_ids"      extensions:"x-agent,x-agent-maximum=50"`
 }
 
 func (p PatchDataSourceSyncRequest) apply(existing *types.DataSource) (*types.DataSource, error) {
-	if p.SyncSchedule == nil && p.SyncMode == nil && p.ConflictStrategy == nil && p.SyncDeletions == nil && p.ResourceIDs == nil {
+	if p.SyncSchedule == nil && p.SyncMode == nil && p.ConflictStrategy == nil && p.SyncDeletions == nil &&
+		p.ResourceIDs == nil {
 		return nil, fmt.Errorf("at least one sync setting is required")
 	}
 	updated := *existing
@@ -183,9 +196,30 @@ func (h *DataSourceHandler) PatchSyncSettings(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	saved, err := h.service.UpdateDataSource(c.Request.Context(), updated)
+	fields := []string{}
+	for name, present := range map[string]bool{
+		"sync_schedule": patch.SyncSchedule != nil, "sync_mode": patch.SyncMode != nil,
+		"conflict_strategy": patch.ConflictStrategy != nil, "sync_deletions": patch.SyncDeletions != nil,
+		"config": patch.ResourceIDs != nil,
+	} {
+		if present {
+			fields = append(fields, name)
+		}
+	}
+	if patch.ResourceIDs == nil {
+		// A schedule-only change must not rewrite or validate connector configuration.
+		updated.Config = nil
+	}
+	saved, err := h.service.PatchDataSourceSyncSettings(c.Request.Context(), existing, updated, fields)
+	if errors.Is(err, types.ErrDataSourceSettingsConflict) {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Could not update sync settings; check the saved connector configuration."})
+		c.JSON(
+			http.StatusBadRequest,
+			gin.H{"error": "Could not update sync settings; check the saved connector configuration."},
+		)
 		return
 	}
 	c.JSON(http.StatusOK, dto.NewDataSourceResponse(saved))

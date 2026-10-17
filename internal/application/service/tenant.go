@@ -168,7 +168,16 @@ func (s *tenantService) UpdateTenant(ctx context.Context, tenant *types.Tenant) 
 
 // UpdateTenantProfile persists only supplied fields. In particular, clearing a
 // description must not be skipped as a zero value or rewrite storage settings.
-func (s *tenantService) UpdateTenantProfile(ctx context.Context, id uint64, name, description *string) (*types.Tenant, error) {
+func (
+	s *tenantService,
+) UpdateTenantProfile(
+	ctx context.Context,
+	id uint64,
+	name, description *string,
+) (
+	*types.Tenant,
+	error,
+) {
 	if id == 0 || (name == nil && description == nil) {
 		return nil, werrors.NewValidationError("workspace id and profile fields are required")
 	}

@@ -372,7 +372,13 @@ func (h *WebSearchProviderHandler) TestProviderByID(c *gin.Context) {
 
 	if err := h.doTestSearch(ctx, string(provider.Provider), provider.Parameters); err != nil {
 		logger.Warnf(ctx, "Web search provider test failed: %v", err)
-		c.JSON(http.StatusOK, gin.H{"success": false, "error": "Search connection test failed; check the saved credentials and connection settings."})
+		c.JSON(
+			http.StatusOK,
+			gin.H{
+				"success": false,
+				"error":   "Search connection test failed; check the saved credentials and connection settings.",
+			},
+		)
 		return
 	}
 

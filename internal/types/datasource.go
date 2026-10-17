@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"strings"
 	"time"
@@ -10,6 +11,9 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+// ErrDataSourceSettingsConflict means the saved connector changed during a selection update.
+var ErrDataSourceSettingsConflict = errors.New("data source configuration changed; reload before retrying")
 
 // Data source types and constants
 const (
@@ -181,7 +185,7 @@ type SyncLog struct {
 	ItemsFailed int `json:"items_failed" extensions:"x-agent"`
 
 	// Error details if status is "failed"
-	ErrorMessage string `json:"error_message" extensions:"x-agent"`
+	ErrorMessage string `json:"error_message"`
 
 	// Detailed sync result (JSON-encoded)
 	Result JSON `json:"result" gorm:"type:jsonb"`

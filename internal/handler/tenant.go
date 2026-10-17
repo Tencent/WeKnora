@@ -607,7 +607,7 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 		return
 	}
 	if req.Name == nil && req.Description == nil {
-		c.Error(errors.NewValidationError("name or description is required"))
+		_ = c.Error(errors.NewValidationError("name or description is required"))
 		return
 	}
 

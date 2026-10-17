@@ -579,7 +579,6 @@ definitions:
         type: object
       error_message:
         type: string
-        x-agent: true
       id:
         type: string
         x-agent: data_source_id
@@ -8005,7 +8004,6 @@ definitions:
       error_message:
         description: Error details if status is "failed"
         type: string
-        x-agent: true
       finished_at:
         description: Sync completion time
         type: string

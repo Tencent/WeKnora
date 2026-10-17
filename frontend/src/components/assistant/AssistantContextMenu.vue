@@ -133,7 +133,7 @@ const open = ref(false)
   width: 28px;
   height: 16px;
   margin-top: 2px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-component);
   transition: background var(--app-motion-fast);
 
