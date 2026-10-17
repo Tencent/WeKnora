@@ -198,6 +198,10 @@ services:
       # Docreader 解析调优
       - DOCREADER_ADDR=${DOCREADER_ADDR:-docreader:50051}
       - DOCREADER_TRANSPORT=${DOCREADER_TRANSPORT:-grpc}
+      # DOCX 预览：把浏览器无法渲染的 EMF/WMF 矢量图转成 PNG（默认关闭）。
+      # 首次预览由 docreader 的 LibreOffice 完成，副本按文件 hash 缓存在本地。
+      - WEKNORA_DOCX_EMF_PREVIEW=${WEKNORA_DOCX_EMF_PREVIEW:-false}
+      - WEKNORA_DOCX_PREVIEW_CACHE_DIR=${WEKNORA_DOCX_PREVIEW_CACHE_DIR:-}
       # docreader gRPC TLS / 认证（客户端侧）
       - GRPC_TLS_ENABLED=${GRPC_TLS_ENABLED:-false}
       - GRPC_TLS_CERT=${GRPC_TLS_CERT:-}

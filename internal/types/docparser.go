@@ -49,6 +49,29 @@ type ImageRef struct {
 	IsOriginal bool
 }
 
+// ConvertPreviewRequest asks the docreader to rewrite a document into a copy
+// the in-browser previewer can render (today: DOCX EMF/WMF media -> PNG).
+// The bytes are already authorized by the caller; the docreader does not read
+// storage.
+type ConvertPreviewRequest struct {
+	FileContent []byte
+	FileName    string
+	FileType    string
+	RequestID   string
+}
+
+// ConvertPreviewResult is the transport-agnostic result of a preview
+// conversion. When Converted is false the caller must keep serving the
+// original file; Error is only set for a fatal conversion failure (and then
+// FileContent is empty too).
+type ConvertPreviewResult struct {
+	FileContent   []byte
+	Converted     bool
+	SkippedReason string
+	Warnings      []string
+	Error         string
+}
+
 // ParserEngineInfo describes a registered parser engine.
 type ParserEngineInfo struct {
 	Name              string   `json:"Name" extensions:"x-agent=engine"`
