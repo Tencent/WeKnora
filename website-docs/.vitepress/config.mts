@@ -5,6 +5,7 @@ import { defineConfig, type DefaultTheme } from 'vitepress'
 import { withMermaid } from 'vitepress-plugin-mermaid'
 import './theme-config.d.ts'
 import { repoVersionLabel } from './version'
+import { readScreenshotSizes } from './screenshot-sizes.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const require = createRequire(import.meta.url)
@@ -133,6 +134,7 @@ export default withMermaid(
       nav: [],
 
       weknoraVersion: repoVersionLabel,
+      weknoraScreenshotSizes: readScreenshotSizes(resolve(root, 'public/screenshots')),
 
       sidebar,
 

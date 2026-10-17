@@ -683,6 +683,27 @@ func TestCompactProcessOverridesKeepsGraphTogetherWithExtract(t *testing.T) {
 	require.True(t, eff.GraphEnabled, "graph stays on only when the extract override stays too")
 }
 
+func TestCompactProcessOverridesDropsImagePipelineThatMatchesTheKnowledgeBase(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{}
+	same := types.ImagePipelineDefault
+	got := compactProcessOverrides(kb, &types.KnowledgeProcessOverrides{
+		ImagePipelineID: &same,
+	})
+	require.True(t, got == nil || got.ImagePipelineID == nil)
+
+	other := types.ImagePipelineSmartOCR
+	kept := compactProcessOverrides(kb, &types.KnowledgeProcessOverrides{
+		ImagePipelineID:     &other,
+		ImagePipelineParams: map[string]any{"ocr_on": []any{"caption"}},
+	})
+	require.NotNil(t, kept)
+	require.NotNil(t, kept.ImagePipelineID)
+	require.Equal(t, types.ImagePipelineSmartOCR, *kept.ImagePipelineID)
+	require.NotEmpty(t, kept.ImagePipelineParams)
+}
+
 func TestCompactProcessOverridesTreatsDefaultQuestionCountAsUnchanged(t *testing.T) {
 	t.Parallel()
 

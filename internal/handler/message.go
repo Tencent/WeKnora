@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	stderrors "errors"
 	"net/http"
 	"strconv"
@@ -28,6 +29,9 @@ type MessageHandler struct {
 	// handle mode is available.
 	FileService     interfaces.FileService
 	StorageResolver interfaces.StorageBackendResolver
+	// Prompts supplies the pending prompt of messages awaiting input. May be
+	// nil, in which case such messages carry none.
+	Prompts interfaces.AgentPromptRepository
 }
 
 // NewMessageHandler creates a new message handler instance with the required service
@@ -41,11 +45,52 @@ func NewMessageHandler(
 	messageService interfaces.MessageService,
 	fileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
+	prompts interfaces.AgentPromptRepository,
 ) *MessageHandler {
 	return &MessageHandler{
 		MessageService:  messageService,
 		FileService:     fileService,
 		StorageResolver: storageResolver,
+		Prompts:         prompts,
+	}
+}
+
+// attachPendingPrompts sets PendingPrompt on messages awaiting input. Only
+// prompts raised for the caller are shown; the messages themselves were
+// already scoped to the caller's session.
+func (h *MessageHandler) attachPendingPrompts(ctx context.Context, sessionID string, messages []*types.Message) {
+	if h.Prompts == nil {
+		return
+	}
+	awaiting := false
+	for _, m := range messages {
+		awaiting = awaiting || m.RunState == types.MessageRunStateAwaitingInput
+	}
+	if !awaiting {
+		return
+	}
+	rows, err := h.Prompts.ListBySession(ctx, sessionID, []string{types.AgentPromptSuspended})
+	if err != nil {
+		logger.Warnf(ctx, "list pending prompts of session %s: %v", sessionID, err)
+		return
+	}
+	principal, _ := types.PrincipalFromContext(ctx)
+	caller := principal.StorageID()
+	byMessage := make(map[string]*types.AgentPrompt, len(rows))
+	for _, p := range rows {
+		if p.UserID == "" || p.UserID == caller {
+			byMessage[p.AssistantMessageID] = p
+		}
+	}
+	for _, m := range messages {
+		p := byMessage[m.ID]
+		if p == nil || m.RunState != types.MessageRunStateAwaitingInput {
+			continue
+		}
+		m.PendingPrompt = &types.PendingPromptView{
+			ID: p.ID, Kind: p.Kind, ToolCallID: p.ToolCallID,
+			Request: p.Request, ExpiresAt: p.ExpiresAt, CreatedAt: p.CreatedAt,
+		}
 	}
 }
 
@@ -71,14 +116,16 @@ func (h *MessageHandler) resolveResourceRewriter(c *gin.Context) (*storageurl.Re
 // @Tags         消息
 // @Accept       json
 // @Produce      json
-// @Param        session_id     path      string  true   "会话ID"
-// @Param        limit          query     int     false  "返回数量"  default(20)
-// @Param        before_time    query     string  false  "在此时间之前的消息（RFC3339Nano格式）"
+// @Param        session_id     path      string  true   "会话ID"  extensions(x-agent)
+// @Param        limit          query     int     false  "返回数量"  default(20)  minimum(1)  extensions(x-agent,x-agent-maximum=20)
+// @Param        before_time    query     string  false  "在此时间之前的消息（RFC3339Nano格式）"  extensions(x-agent)
 // @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
-// @Success      200            {object}  map[string]interface{}  "消息列表"
+// @Success      200            {object}  handler.DataResponse{data=[]types.Message}  "消息列表"
 // @Failure      400          {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"message.list","risk":"read"}
+// @x-agent-hint "The latest messages of one of the user's conversations, oldest first. For earlier ones, pass the created_at of the first message as before_time."
 // @Router       /messages/{session_id}/load [get]
 func (h *MessageHandler) LoadMessages(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -131,6 +178,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 			"Successfully retrieved recent messages, session ID: %s, message count: %d",
 			sessionID, len(messages),
 		)
+		h.attachPendingPrompts(ctx, sessionID, messages)
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data":    rewriter.RewriteMessagesResponse(ctx, messages),
@@ -171,6 +219,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 		"Successfully retrieved messages before time, session ID: %s, message count: %d",
 		sessionID, len(messages),
 	)
+	h.attachPendingPrompts(ctx, sessionID, messages)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    rewriter.RewriteMessagesResponse(ctx, messages),
@@ -185,7 +234,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 // @Produce      json
 // @Param        session_id  path      string  true  "会话ID"
 // @Param        id          path      string  true  "消息ID"
-// @Success      200         {object}  map[string]interface{}  "删除成功"
+// @Success      200         {object}  handler.MessageResponse  "删除成功"
 // @Failure      500         {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -239,10 +288,12 @@ func (h *MessageHandler) DeleteMessage(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      SearchMessagesRequest  true  "搜索请求"
-// @Success      200      {object}  map[string]interface{}  "搜索结果"
+// @Success      200      {object}  handler.DataResponse{data=types.MessageSearchResult}  "搜索结果"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"message.search","risk":"probe","root":"data.items","max_items":20}
+// @x-agent-hint "Finds exchanges in the user's own past conversations by what was said, each with its session_id. Matching is by meaning only when message indexing is on (see message.chat_history_stats); otherwise words must appear verbatim, so retry with the user's exact wording before concluding nothing matches."
 // @Router       /messages/search [post]
 func (h *MessageHandler) SearchMessages(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -263,14 +314,15 @@ func (h *MessageHandler) SearchMessages(c *gin.Context) {
 	}
 
 	params := &types.MessageSearchParams{
-		Query:      secutils.SanitizeForLog(request.Query),
+		Query:      request.Query,
 		Mode:       types.MessageSearchMode(request.Mode),
 		Limit:      request.Limit,
 		SessionIDs: request.SessionIDs,
 	}
 
 	logger.Infof(ctx, "Searching messages with params: query=%s, mode=%s, limit=%d, session_ids=%v",
-		params.Query, params.Mode, params.Limit, params.SessionIDs)
+		secutils.SanitizeForLog(params.Query), secutils.SanitizeForLog(string(params.Mode)), params.Limit,
+		secutils.SanitizeForLogArray(params.SessionIDs))
 
 	result, err := h.MessageService.SearchMessages(ctx, params)
 	if err != nil {
@@ -289,11 +341,11 @@ func (h *MessageHandler) SearchMessages(c *gin.Context) {
 // SearchMessagesRequest defines the request structure for searching messages
 type SearchMessagesRequest struct {
 	// Query text for search
-	Query string `json:"query" binding:"required"`
+	Query string `json:"query" binding:"required" extensions:"x-agent"`
 	// Search mode: "keyword", "vector", "hybrid" (default: "hybrid")
 	Mode string `json:"mode"`
 	// Maximum number of results to return (default: 20)
-	Limit int `json:"limit"`
+	Limit int `json:"limit" minimum:"1" extensions:"x-agent,x-agent-maximum=20"`
 	// Filter by specific session IDs (optional)
 	SessionIDs []string `json:"session_ids"`
 }
@@ -304,9 +356,11 @@ type SearchMessagesRequest struct {
 // @Tags         消息
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "统计信息"
+// @Success      200  {object}  handler.DataResponse{data=types.ChatHistoryKBStats}  "统计信息"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"message.chat_history_stats","risk":"read"}
+// @x-agent-hint "Whether the workspace indexes conversations for search by meaning, and how many messages are indexed. When it is off, message.search only matches exact words; the setting is under settings section chathistory."
 // @Router       /messages/chat-history-stats [get]
 func (h *MessageHandler) GetChatHistoryKBStats(c *gin.Context) {
 	ctx := c.Request.Context()

@@ -129,15 +129,30 @@ func (s *sessionService) AgentQA(
 		// the agent. If a Wiki-only agent doesn't need reranking,
 		// agentRequiresRerankModel() below already lets it pass.
 		rerankModelID := req.CustomAgent.Config.RerankModelID
-		if rerankModelID == "" {
+		if rerankModelID == "" && types.UsesWorkspaceModelFallback(req.CustomAgent) {
+			// Nobody can set a rerank model on an internal agent, so it takes
+			// the workspace's; search_knowledge keeps retrieval order without one.
+			models, listErr := s.modelService.ListModels(ctx)
+			if listErr != nil {
+				logger.Warnf(ctx, "Failed to list models for internal agent %s rerank fallback: %v",
+					req.CustomAgent.ID, listErr)
+			}
+			rerankModelID = pickWorkspaceRerankModelID(models)
+			if rerankModelID == "" {
+				logger.Infof(ctx, "No rerank model in the workspace, internal agent %s searches without reranking",
+					req.CustomAgent.ID)
+			}
+		} else if rerankModelID == "" {
 			logger.Warnf(ctx, "No rerank model configured for custom agent %s, but knowledge_search tool is enabled", req.CustomAgent.ID)
 			return errors.New("rerank model is not configured: please set rerank_model_id on the agent")
 		}
 
-		rerankModel, err = s.modelService.GetRerankModel(ctx, rerankModelID)
-		if err != nil {
-			logger.Warnf(ctx, "Failed to get rerank model: %v", err)
-			return fmt.Errorf("failed to get rerank model: %w", err)
+		if rerankModelID != "" {
+			rerankModel, err = s.modelService.GetRerankModel(ctx, rerankModelID)
+			if err != nil {
+				logger.Warnf(ctx, "Failed to get rerank model: %v", err)
+				return fmt.Errorf("failed to get rerank model: %w", err)
+			}
 		}
 	} else {
 		logger.Infof(ctx, "knowledge_search is unavailable for the effective agent scope, skipping rerank model initialization")
@@ -268,6 +283,15 @@ func (s *sessionService) AgentQA(
 		engine.SetSteerSink(req.SteerSink)
 	}
 
+	engine.SetInteractive(req.Interactive)
+	if req.Suspendable && s.cfg != nil && s.cfg.Agent.PromptSuspend() {
+		if request, err := json.Marshal(resumableAgentRequest(ctx, req)); err != nil {
+			logger.Warnf(ctx, "Run cannot be suspended, encoding its request failed: %v", err)
+		} else {
+			engine.EnableSuspension(request)
+		}
+	}
+
 	// A compaction that ends on a stored turn is written back onto it, so the
 	// next turn loads the summary instead of summarizing the same history
 	// again. Without multi-turn there is no stored history to end on.
@@ -305,7 +329,13 @@ func (s *sessionService) AgentQA(
 	// Execute agent with streaming (asynchronously)
 	// Events will be emitted to EventBus and handled by the Handler layer
 	logger.Info(ctx, "Executing agent with streaming")
-	if _, err := engine.Execute(ctx, sessionID, req.AssistantMessageID, agentQuery, llmContext, agentImageURLs); err != nil {
+	if req.Resume != nil {
+		_, err = engine.Resume(ctx, sessionID, req.AssistantMessageID, llmContext,
+			req.Resume.Snapshot, req.Resume.Prompt)
+	} else {
+		_, err = engine.Execute(ctx, sessionID, req.AssistantMessageID, agentQuery, llmContext, agentImageURLs)
+	}
+	if err != nil {
 		logger.Errorf(ctx, "Agent execution failed: %v", err)
 		// Emit error event to the EventBus used by this agent
 		eventBus.Emit(ctx, event.Event{
@@ -320,6 +350,32 @@ func (s *sessionService) AgentQA(
 	}
 	// Return empty - events will be handled by Handler via EventBus subscription
 	return nil
+}
+
+// resumableAgentRequest keeps the durable part of req needed to rebuild the
+// run elsewhere. Session, attachments and images are reloaded from storage.
+func resumableAgentRequest(ctx context.Context, req *types.QARequest) types.ResumableAgentRequest {
+	r := types.ResumableAgentRequest{
+		Query:               req.Query,
+		SummaryModelID:      req.SummaryModelID,
+		ReasoningEffort:     req.ReasoningEffort,
+		SharedAgentReadOnly: req.SharedAgentReadOnly,
+		KnowledgeBaseIDs:    req.KnowledgeBaseIDs,
+		KnowledgeIDs:        req.KnowledgeIDs,
+		TagScopes:           req.TagScopes,
+		MCPServiceIDs:       req.MCPServiceIDs,
+		SkillNames:          req.SkillNames,
+		WebSearchEnabled:    req.WebSearchEnabled,
+		QuestionOrigin:      req.QuestionOrigin,
+		PageContext:         req.PageContext,
+		AssistantAccess:     req.AssistantAccess,
+		UserMessageID:       req.UserMessageID,
+		Language:            types.LanguageFromContextOrDefault(ctx),
+	}
+	if req.CustomAgent != nil {
+		r.AgentID, r.AgentTenantID = req.CustomAgent.ID, req.CustomAgent.TenantID
+	}
+	return r
 }
 
 // buildAgentConfig creates a runtime AgentConfig from the QARequest's custom agent configuration,
@@ -467,8 +523,21 @@ func (s *sessionService) buildAgentConfig(
 	if !req.SharedAgentReadOnly {
 		roleEnforced := s.cfg != nil && s.cfg.Tenant.IsRBACEnforced()
 		agentConfig.WritableKBIDs = kbWritableIDs(ctx, s.kbShareService, searchTargets, roleEnforced)
+		if types.GrantsOperationCatalog(req.CustomAgent) {
+			agentConfig.OperationsAgentID = req.CustomAgent.ID
+			agentConfig.AssistantAccess = tenantInfo.AssistantConfig.EffectiveAccessLevel(req.AssistantAccess)
+			if cfg := tenantInfo.AssistantConfig; cfg != nil {
+				agentConfig.AssistantName = strings.TrimSpace(cfg.DisplayName)
+			}
+			if agentConfig.AssistantAccess == types.AssistantAccessReadOnly {
+				// Wiki tools write outside the catalog; read-only covers them too.
+				agentConfig.WritableKBIDs = nil
+			}
+		}
 	}
 	agentConfig.QuestionOrigin = questionOriginInTargets(ctx, req.QuestionOrigin, searchTargets)
+	agentConfig.PageContext = pageContextInTargets(ctx, req.PageContext, searchTargets)
+	agentConfig.ProductDocs = types.GrantsProductDocs(req.CustomAgent)
 	// Document tags are stored in knowledge_tag_relations, so document-KB tag
 	// scopes are resolved to concrete knowledge IDs before retrieval. Preserve
 	// those resolved IDs as this turn's pinned documents as well: otherwise the
@@ -729,6 +798,73 @@ func questionOriginInTargets(
 	kept := &types.QuestionOrigin{KnowledgeBaseID: kbID}
 	if docID := strings.TrimSpace(origin.KnowledgeID); docID != "" && targetsCoverDocument(targets, kbID, docID) {
 		kept.KnowledgeID = docID
+	}
+	return kept
+}
+
+// pageContextInTargets keeps the page the user has open only when this turn's
+// search targets reach its knowledge base, and its document only when a
+// target covers it. The Wiki slug and issue IDs are kept as given (trimmed,
+// deduplicated and bounded); the agent service checks they exist in that base
+// before showing them to the model. Resources outside knowledge bases (agent,
+// model, MCP service, chat message) and a known page identifier are kept as
+// given; the agent service verifies them.
+func pageContextInTargets(
+	ctx context.Context, page *types.PageContext, targets types.SearchTargets,
+) *types.PageContext {
+	if page == nil {
+		return nil
+	}
+	kept := &types.PageContext{
+		AgentID:      strings.TrimSpace(page.AgentID),
+		ModelID:      strings.TrimSpace(page.ModelID),
+		MCPServiceID: strings.TrimSpace(page.MCPServiceID),
+		Title:        types.NormalizePageView(page.Title),
+		View:         types.NormalizePageView(page.View),
+		Selection:    page.Selection.Normalize(),
+	}
+	if p := strings.TrimSpace(page.Page); types.IsPageContextPage(p) {
+		kept.Page = p
+		if section := strings.TrimSpace(page.Section); types.IsPageContextSection(section) {
+			kept.Section = section
+		}
+	}
+	if sessionID, messageID := strings.TrimSpace(page.SessionID), strings.TrimSpace(page.MessageID); sessionID != "" {
+		kept.SessionID = sessionID
+		kept.MessageID = messageID
+	}
+	kbID := strings.TrimSpace(page.KnowledgeBaseID)
+	if kbID == "" || !targets.ContainsKB(kbID) {
+		if kbID != "" {
+			logger.Infof(ctx, "Ignoring page context: knowledge base %s is outside this turn's search targets",
+				secutils.SanitizeForLog(kbID))
+		}
+		if kept.Page == "" && kept.AgentID == "" && kept.ModelID == "" &&
+			kept.MCPServiceID == "" && kept.SessionID == "" && kept.Title == "" && kept.View == "" &&
+			kept.Selection == nil {
+			return nil
+		}
+		return kept
+	}
+	kept.KnowledgeBaseID = kbID
+	kept.WikiSlug = strings.TrimSpace(page.WikiSlug)
+	if docID := strings.TrimSpace(page.KnowledgeID); docID != "" && targetsCoverDocument(targets, kbID, docID) {
+		kept.KnowledgeID = docID
+	}
+	seen := make(map[string]struct{}, len(page.WikiIssueIDs))
+	for _, id := range page.WikiIssueIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		if len(kept.WikiIssueIDs) == types.MaxPageContextIssues {
+			break
+		}
+		seen[id] = struct{}{}
+		kept.WikiIssueIDs = append(kept.WikiIssueIDs, id)
 	}
 	return kept
 }

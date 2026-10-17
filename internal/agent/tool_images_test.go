@@ -266,3 +266,27 @@ func TestToolImagesReuseApplicationDescriptions(t *testing.T) {
 	engine.describeToolImages(context.Background(), result)
 	require.Equal(t, []string{""}, result.Data["image_descriptions"])
 }
+
+func TestChartDescriptionsPreservePairsAndRequestVerification(t *testing.T) {
+	const rows = "华东 | Q1: 102 | Q2: 148 | 万元\n华南 | Q1: 94 | Q2: 116 | 万元"
+	engine := &AgentEngine{config: &types.AgentConfig{}}
+	engine.SetImageDescriber(func(_ context.Context, _ []byte, prompt string) (string, error) {
+		require.Contains(t, prompt, "category")
+		require.Contains(t, prompt, "series/legend and unit")
+		require.Contains(t, prompt, "axis tick labels")
+		require.Contains(t, prompt, "looking for: compare Q1 and Q2 by region")
+		return rows, nil
+	})
+	result := &types.ToolResult{
+		Success: true, Images: []string{"data:image/png;base64,YQ=="},
+		ImageDetail: types.ImageDetailFull, ImageFocus: "compare Q1 and Q2 by region",
+		Data: map[string]interface{}{"image_numbers": []int{2}},
+	}
+	engine.describeToolImages(t.Context(), result)
+	require.Equal(t, []string{rows}, result.Data["image_descriptions"])
+	step := types.AgentStep{ToolCalls: []types.ToolCall{{ID: "chart", Name: tools.ToolReadFile, Result: result}}}
+	messages := engine.appendToolImages(t.Context(), engine.appendToolResults(nil, step), step)
+	require.Contains(t, messages[1].Content, "[image #2] "+rows)
+	require.Contains(t, messages[1].Content, "totals disagree, re-read")
+	require.Contains(t, messages[1].Content, "before calculating or attributing an inconsistency to the document")
+}

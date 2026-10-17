@@ -152,7 +152,7 @@ type mcpOAuthAssertionRequest struct {
 // @Produce      json
 // @Param        id       path      string                  true  "MCP 服务 ID"
 // @Param        request  body      map[string]interface{}  true  "{assertion: string}"
-// @Success      200      {object}  map[string]interface{}  "与 oauth/status 相同"
+// @Success      200      {object}  handler.DataResponse{data=mcp.OAuthAuthorizationStatus}  "与 oauth/status 相同"
 // @Failure      400      {object}  errors.AppError         "断言无效或被授权服务器拒绝"
 // @Failure      404      {object}  errors.AppError
 // @Security     Bearer
@@ -387,7 +387,7 @@ type resolveMCPOAuthBody struct {
 // @Produce      json
 // @Param        pending_id  path  string                  true  "待授权 ID"
 // @Param        request     body  map[string]interface{}  true  "{service_id: string}"
-// @Success      200         {object}  map[string]interface{}
+// @Success      200         {object}  handler.SuccessResponse
 // @Failure      400         {object}  errors.AppError
 // @Failure      409         {object}  errors.AppError  "用户尚未完成授权"
 // @Security     Bearer
@@ -424,7 +424,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 
 	switch decision {
 	case "cancel", "reject", "skip":
-		if err := h.gate.Resolve(tenantID, gateUserID, pendingID, approval.Decision{
+		if err := h.resolveOAuthPrompt(c, tenantID, gateUserID, pendingID, approval.Decision{
 			Approved: false,
 			Reason:   "user canceled",
 		}); err != nil {
@@ -466,7 +466,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 		return
 	}
 
-	if err := h.gate.Resolve(tenantID, gateUserID, pendingID, approval.Decision{Approved: true}); err != nil {
+	if err := h.resolveOAuthPrompt(c, tenantID, gateUserID, pendingID, approval.Decision{Approved: true}); err != nil {
 		switch {
 		case stderrors.Is(err, approval.ErrPendingNotFound):
 			c.Error(errors.NewNotFoundError("pending authorization not found or already completed"))
@@ -496,7 +496,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 // @Tags         MCP服务
 // @Produce      json
 // @Param        pending_id  path  string  true  "待授权 ID"
-// @Success      200         {object}  map[string]interface{}
+// @Success      200         {object}  handler.SuccessResponse
 // @Failure      404         {object}  errors.AppError
 // @Security     Bearer
 // @Router       /agent/mcp-oauth-resolutions/{pending_id}/cancel [post]
@@ -514,7 +514,7 @@ func (h *MCPOAuthHandler) CancelMCPOAuth(c *gin.Context) {
 		return
 	}
 
-	if err := h.gate.Resolve(tenantID, gateUserID, pendingID, approval.Decision{
+	if err := h.resolveOAuthPrompt(c, tenantID, gateUserID, pendingID, approval.Decision{
 		Approved: false,
 		Reason:   "user canceled",
 	}); err != nil {
@@ -536,4 +536,19 @@ func (h *MCPOAuthHandler) CancelMCPOAuth(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// resolveOAuthPrompt records a decision on an in-conversation OAuth prompt.
+// The embed routes carry session_id, which pins the prompt to that session.
+func (h *MCPOAuthHandler) resolveOAuthPrompt(
+	c *gin.Context, tenantID uint64, userID, pendingID string, d approval.Decision,
+) error {
+	return h.gate.Resolve(c.Request.Context(), approval.ResolveRequest{
+		TenantID:  tenantID,
+		UserID:    userID,
+		SessionID: c.Param("session_id"),
+		Kind:      types.AgentPromptKindMCPOAuth,
+		PendingID: pendingID,
+		Decision:  d,
+	})
 }

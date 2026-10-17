@@ -291,9 +291,23 @@ export async function revokeMCPOAuthToken(serviceId: string): Promise<void> {
 
 export async function resolveToolApproval(
   pendingId: string,
-  body: { decision: 'approve' | 'reject'; modified_args?: Record<string, unknown>; reason?: string }
-): Promise<void> {
-  await post(`/api/v1/agent/tool-approvals/${encodeURIComponent(pendingId)}`, body)
+  body: { decision: 'approve' | 'reject'; modified_args?: Record<string, unknown>; reason?: string; allow_in_session?: boolean }
+): Promise<{ resumed: boolean }> {
+  const res: any = await post(`/api/v1/agent/tool-approvals/${encodeURIComponent(pendingId)}`, body)
+  // resumed: the run had been suspended and now continues on the server;
+  // the client must re-attach to the message's stream.
+  return { resumed: Boolean(res?.resumed) }
+}
+
+// Answer a prompt the agent raised (ask_user, tool approval) with the kind's
+// response object.
+export async function resolveAgentPrompt(
+  promptId: string,
+  kind: string,
+  response: Record<string, unknown>,
+): Promise<{ resumed: boolean }> {
+  const res: any = await post(`/api/v1/agent/prompts/${encodeURIComponent(promptId)}`, { kind, response })
+  return { resumed: Boolean(res?.resumed) }
 }
 
 // Resume an agent run that paused on an in-conversation MCP OAuth prompt.

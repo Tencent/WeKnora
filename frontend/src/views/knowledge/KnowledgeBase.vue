@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAssistantDataChange } from '@/utils/assistantDataChange';
 import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick } from "vue";
 import { MessagePlugin } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
@@ -82,6 +83,7 @@ import {
 } from './documentSorting';
 import { useI18n } from 'vue-i18n';
 import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext';
 import type { ParserEngineInfo } from '@/api/system';
 const route = useRoute();
 const { t } = useI18n();
@@ -281,7 +283,8 @@ const isOwner = computed(() => {
   // those as tenant-owned so the role gate applies (Admin+ can manage,
   // Viewer cannot).
   if (!creatorId) return false;
-  return creatorId === userId;
+  // A creator demoted to Viewer no longer manages it (access.CreatorRoleFloor).
+  return creatorId === userId && authStore.hasRole('contributor');
 });
 
 // Current KB's shared record (when accessed via organization share)
@@ -312,7 +315,7 @@ const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value
 // the KB. The backend's RBAC middleware authorizes based on the active
 // tenant, not on creator_id, so a creator viewing their own KB from a
 // different tenant context will be 403'd on write. Otherwise: KB creator
-// (any role) or tenant Admin+ in the home tenant.
+// (Contributor+) or tenant Admin+ in the home tenant.
 //
 // A resolved cross-tenant permission (org share or shared-agent visibility,
 // already capped server-side by effective = min(share, org_role, tenant_role))
@@ -433,6 +436,18 @@ const onCardMoreVisibleChange = (visible: boolean, item: KnowledgeCard) => {
   }
 };
 let isCardDetails = ref(false);
+useAssistantPageContext(() => {
+  if (!kbId.value) return null;
+  const docOpen = isCardDetails.value && !!details.id;
+  return {
+    page: 'knowledge_base',
+    knowledgeBaseId: kbId.value,
+    knowledgeBaseName: kbInfo.value?.id === kbId.value ? kbInfo.value?.name : undefined,
+    chatModelId: kbInfo.value?.id === kbId.value ? kbInfo.value?.summary_model_id || undefined : undefined,
+    knowledgeId: docOpen ? details.id : undefined,
+    knowledgeTitle: docOpen ? details.title : undefined,
+  };
+});
 let timeout: ReturnType<typeof setTimeout> | null = null;
 let knowledgeScroll = ref()
 let page = 1;
@@ -1490,6 +1505,81 @@ const updateStatus = (analyzeList: KnowledgeCard[], delay = 1500) => {
 const closeDoc = () => {
   isCardDetails.value = false;
 };
+
+useAssistantDataChange((changes) => {
+  const targetKbId = kbId.value;
+  if (!targetKbId) return;
+  const relevant = changes.filter(change => change.ids.knowledgeBaseIds.includes(targetKbId)
+    || (change.area === 'knowledge' && change.ids.knowledgeIds.some(id =>
+      cardList.value.some(item => item.id === id) || (isCardDetails.value && details.id === id)))
+    // ID-only operations may affect a document outside the loaded folder or page.
+    || (change.area === 'knowledge' && change.ids.knowledgeBaseIds.length === 0));
+  if (!relevant.length) return;
+  if (relevant.some(change => change.operation === 'knowledge_base.delete')) {
+    MessagePlugin.warning(t('knowledgeBase.assistantDeleted'));
+    handleNavigateToKbList();
+    return;
+  }
+  if (isCardDetails.value && relevant.some(change => change.ids.knowledgeIds.includes(details.id))) {
+    if (relevant.some(change => change.ids.knowledgeIds.includes(details.id)
+      && LEAVING_OPERATIONS.includes(change.operation))) {
+      closeDoc();
+    } else {
+      getCardDetails({ id: details.id });
+    }
+  }
+  const reload = () => {
+    if (!isCurrentKb(targetKbId)) return;
+    resetPage();
+    void loadKnowledgeFiles(targetKbId);
+    void loadFolderTree(targetKbId);
+    void loadTags(targetKbId, true);
+  };
+  if (relevant.some(change => change.area === 'knowledge_base')) {
+    resetPage();
+    void loadKnowledgeBaseInfo(targetKbId, true);
+  } else {
+    reload();
+  }
+  // Deletes and moves only start here; the list changes once they finish.
+  const loaded = new Set(cardList.value.map(item => item.id));
+  const leaving = new Set<string>();
+  const arriving = new Set<string>();
+  for (const change of relevant) {
+    if (!LEAVING_OPERATIONS.includes(change.operation) && change.operation !== 'knowledge.move') continue;
+    for (const id of change.ids.knowledgeIds) {
+      if (change.operation === 'knowledge.move' && !loaded.has(id)) arriving.add(id);
+      else leaving.add(id);
+    }
+  }
+  if (leaving.size || arriving.size) void settleThenReload(targetKbId, [...leaving], [...arriving], reload);
+}, { areas: ['knowledge_base', 'knowledge'] });
+
+const LEAVING_OPERATIONS = ['knowledge.delete', 'knowledge.batch_delete', 'knowledge.move'];
+
+const settleThenReload = async (
+  targetKbId: string, leaving: string[], arriving: string[], reload: () => void,
+) => {
+  const isActive = () => isCurrentKb(targetKbId);
+  const fetchRows = async (ids: string[]) => {
+    const query = new URLSearchParams();
+    ids.forEach(id => query.append('ids', id));
+    return await batchQueryKnowledge(query.toString(), targetKbId) as any;
+  };
+  try {
+    if (leaving.length) await waitForKnowledgeDeletion(leaving, fetchRows, { isActive });
+    for (let i = 0; arriving.length && i < 30 && isActive(); i++) {
+      const res = await fetchRows(arriving);
+      const present = new Set(((res?.data ?? []) as KnowledgeCard[]).map(row => row.id));
+      if (arriving.every(id => present.has(id))) break;
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  } catch {
+    // Reload whatever the server shows now.
+  }
+  reload();
+};
+
 const openCardDetails = (item: KnowledgeCard) => {
   isCardDetails.value = true;
   getCardDetails(item);

@@ -45,7 +45,7 @@ func TestLiveImageOCRValidation(t *testing.T) {
 			defer cancel()
 			start := time.Now()
 			err = svc.processImage(ctx, &types.ImageMultimodalPayload{
-				ImageURL: "local://fixture", EnableOCR: true, Attempt: 1,
+				ImageURL: "local://fixture", Attempt: 1,
 			}, model, types.VLMConfig{}, tracker, out)
 			require.NoError(t, err)
 			require.Empty(t, tracker.failed)

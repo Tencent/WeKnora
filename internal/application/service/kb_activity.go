@@ -140,6 +140,20 @@ func recordKBActivity(
 			activityDetails["api_key_name"] = name
 		}
 	}
+	if agent, ok := types.AuditAgentActionFromContext(ctx); ok {
+		if _, exists := activityDetails["via"]; !exists {
+			activityDetails["via"] = "agent"
+		}
+		if _, exists := activityDetails["agent_session_id"]; !exists && agent.SessionID != "" {
+			activityDetails["agent_session_id"] = agent.SessionID
+		}
+		if _, exists := activityDetails["agent_id"]; !exists && agent.AgentID != "" {
+			activityDetails["agent_id"] = agent.AgentID
+		}
+		if _, exists := activityDetails["agent_operation"]; !exists && agent.Operation != "" {
+			activityDetails["agent_operation"] = agent.Operation
+		}
+	}
 	if task, ok := ctx.Value(kbActivityTaskContextKey{}).(kbActivityTaskMetadata); ok {
 		if task.TaskID != "" {
 			if _, exists := activityDetails["task_id"]; !exists {

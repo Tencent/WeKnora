@@ -58,15 +58,15 @@ const (
 // KnowledgeBase represents a knowledge base entity
 type KnowledgeBase struct {
 	// Unique identifier of the knowledge base
-	ID string `yaml:"id"                      json:"id"                      gorm:"type:varchar(36);primaryKey"`
+	ID string `yaml:"id"                      json:"id"                      gorm:"type:varchar(36);primaryKey" extensions:"x-agent=knowledge_base_id,x-agent-response"`
 	// Name of the knowledge base
-	Name string `yaml:"name"                    json:"name"`
-	// Type of the knowledge base (document, faq, etc.)
-	Type string `yaml:"type"                    json:"type"                    gorm:"type:varchar(32);default:'document'"`
+	Name string `yaml:"name"                    json:"name"                    binding:"required" extensions:"x-agent,x-agent-required"`
+	// Type of the knowledge base: document, faq or wiki. Empty means document.
+	Type string `yaml:"type"                    json:"type"                    gorm:"type:varchar(32);default:'document'" enums:"document,faq,wiki" extensions:"x-agent"`
 	// Whether this knowledge base is temporary (ephemeral) and should be hidden from UI
 	IsTemporary bool `yaml:"is_temporary"            json:"is_temporary"            gorm:"default:false"`
 	// Description of the knowledge base
-	Description string `yaml:"description"             json:"description"`
+	Description string `yaml:"description"             json:"description" extensions:"x-agent"`
 	// Workspace ID
 	TenantID uint64 `yaml:"tenant_id"               json:"tenant_id"`
 	// CreatorID records the user ID of whoever originally created the KB.
@@ -76,22 +76,23 @@ type KnowledgeBase struct {
 	// RBAC migration backfilled the column to the workspace Owner.
 	CreatorID string `yaml:"creator_id"              json:"creator_id"              gorm:"type:varchar(36);index"`
 	// Chunking configuration
-	ChunkingConfig ChunkingConfig `yaml:"chunking_config"         json:"chunking_config"         gorm:"type:json"`
+	ChunkingConfig ChunkingConfig `yaml:"chunking_config"         json:"chunking_config"         gorm:"type:json" extensions:"x-agent,x-agent-detail"`
 	// Image processing configuration
-	ImageProcessingConfig ImageProcessingConfig `yaml:"image_processing_config" json:"image_processing_config" gorm:"type:json"`
-	// ID of the embedding model
-	EmbeddingModelID string `yaml:"embedding_model_id"      json:"embedding_model_id"`
-	// Summary model ID
-	SummaryModelID string `yaml:"summary_model_id"        json:"summary_model_id"`
+	ImageProcessingConfig ImageProcessingConfig `yaml:"image_processing_config" json:"image_processing_config" gorm:"type:json" extensions:"x-agent,x-agent-detail"`
+	// ID of the embedding model. model.list returns the ids. Cannot change after the knowledge base has documents.
+	EmbeddingModelID string `yaml:"embedding_model_id"      json:"embedding_model_id" extensions:"x-agent=embedding_model_id"`
+	// Summary model ID. model.list returns the ids. Used for summaries, and as
+	// the default for auto-tagging and the AI description.
+	SummaryModelID string `yaml:"summary_model_id"        json:"summary_model_id" extensions:"x-agent=summary_model_id"`
 	// VLM config
-	VLMConfig VLMConfig `yaml:"vlm_config"              json:"vlm_config"              gorm:"type:json"`
+	VLMConfig VLMConfig `yaml:"vlm_config"              json:"vlm_config"              gorm:"type:json" extensions:"x-agent,x-agent-detail"`
 	// ASR config (Automatic Speech Recognition)
-	ASRConfig ASRConfig `yaml:"asr_config"              json:"asr_config"              gorm:"type:json"`
+	ASRConfig ASRConfig `yaml:"asr_config"              json:"asr_config"              gorm:"type:json" extensions:"x-agent,x-agent-detail"`
 	// Storage provider config (new): only stores provider selection; credentials from workspace StorageEngineConfig
 	StorageProviderConfig *StorageProviderConfig `yaml:"storage_provider_config" json:"storage_provider_config"  gorm:"column:storage_provider_config;type:jsonb"`
 	// StorageBackendID binds this KB to one concrete storage instance. The
 	// legacy provider field remains readable during migration only.
-	StorageBackendID *string `yaml:"storage_backend_id" json:"storage_backend_id,omitempty" gorm:"column:storage_backend_id;type:varchar(36);default:null"`
+	StorageBackendID *string `yaml:"storage_backend_id" json:"storage_backend_id,omitempty" gorm:"column:storage_backend_id;type:varchar(36);default:null" extensions:"x-agent=storage_backend_id"`
 	// Deprecated: legacy COS config column. Kept for backward compatibility with old data.
 	StorageConfig StorageConfig `yaml:"-" json:"storage_config" gorm:"column:cos_config;type:json"`
 	// VectorStoreID references the VectorStore this knowledge base is bound to.
@@ -100,27 +101,27 @@ type KnowledgeBase struct {
 	// This field is set once at creation time and must not be modified afterwards;
 	// enforcement lives at the GORM layer (`<-:create`) plus the service-layer
 	// KB update path, which omits this field from its update DTO.
-	VectorStoreID *string `yaml:"vector_store_id"         json:"vector_store_id,omitempty" gorm:"column:vector_store_id;type:varchar(36);<-:create"`
+	VectorStoreID *string `yaml:"vector_store_id"         json:"vector_store_id,omitempty" gorm:"column:vector_store_id;type:varchar(36);<-:create" extensions:"x-agent=vector_store_id"`
 	// Extract config
-	ExtractConfig *ExtractConfig `yaml:"extract_config"          json:"extract_config"          gorm:"column:extract_config;type:json"`
+	ExtractConfig *ExtractConfig `yaml:"extract_config"          json:"extract_config"          gorm:"column:extract_config;type:json" extensions:"x-agent,x-agent-detail"`
 	// FAQConfig stores FAQ specific configuration such as indexing strategy
-	FAQConfig *FAQConfig `yaml:"faq_config"              json:"faq_config"              gorm:"column:faq_config;type:json"`
+	FAQConfig *FAQConfig `yaml:"faq_config"              json:"faq_config"              gorm:"column:faq_config;type:json" extensions:"x-agent,x-agent-detail"`
 	// QuestionGenerationConfig stores question generation configuration for document knowledge bases
-	QuestionGenerationConfig *QuestionGenerationConfig `yaml:"question_generation_config" json:"question_generation_config" gorm:"column:question_generation_config;type:json"`
+	QuestionGenerationConfig *QuestionGenerationConfig `yaml:"question_generation_config" json:"question_generation_config" gorm:"column:question_generation_config;type:json" extensions:"x-agent,x-agent-detail"`
 	// AutoTagConfig controls asynchronous association of existing tags after parsing.
-	AutoTagConfig *AutoTagConfig `yaml:"auto_tag_config" json:"auto_tag_config" gorm:"type:json"`
+	AutoTagConfig *AutoTagConfig `yaml:"auto_tag_config" json:"auto_tag_config" gorm:"type:json" extensions:"x-agent,x-agent-detail"`
 	// ProfileConfig controls automatic generation of the knowledge-base
 	// description from per-document profiles (document knowledge bases only).
-	ProfileConfig *KnowledgeBaseProfileConfig `yaml:"profile_config" json:"profile_config" gorm:"column:profile_config;type:json"` //nolint:lll // one-line struct tag
+	ProfileConfig *KnowledgeBaseProfileConfig `yaml:"profile_config" json:"profile_config" gorm:"column:profile_config;type:json" extensions:"x-agent,x-agent-detail"` //nolint:lll // one-line struct tag
 	// GeneratedProfile is the machine-generated description: a gist, merged
 	// topics, typical questions and the aggregate snapshot they came from. It
 	// never overwrites the user-authored Description; both are shown to agents.
 	GeneratedProfile *KnowledgeBaseProfile `yaml:"generated_profile" json:"generated_profile,omitempty" gorm:"column:generated_profile;type:json"` //nolint:lll // one-line struct tag
 	// WikiConfig stores wiki-specific configuration (only for wiki type knowledge bases)
-	WikiConfig *WikiConfig `yaml:"wiki_config"             json:"wiki_config"             gorm:"column:wiki_config;type:json"`
+	WikiConfig *WikiConfig `yaml:"wiki_config"             json:"wiki_config"             gorm:"column:wiki_config;type:json" extensions:"x-agent,x-agent-detail"`
 	// IndexingStrategy controls which indexing pipelines are active for this knowledge base.
 	// Pipelines: vector search, keyword search, wiki generation, knowledge graph extraction.
-	IndexingStrategy IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"       gorm:"column:indexing_strategy;type:json"`
+	IndexingStrategy IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"       gorm:"column:indexing_strategy;type:json" extensions:"x-agent,x-agent-response"`
 	// IsPinned and PinnedAt are computed per-caller from user_kb_pins
 	// (see migration 000050). They used to be stored on the row itself,
 	// which made pinning a workspace-wide ordering decision gated behind
@@ -136,17 +137,17 @@ type KnowledgeBase struct {
 	// Creation time of the knowledge base
 	CreatedAt time.Time `yaml:"created_at"              json:"created_at"`
 	// Last updated time of the knowledge base
-	UpdatedAt time.Time `yaml:"updated_at"              json:"updated_at"`
+	UpdatedAt time.Time `yaml:"updated_at"              json:"updated_at" extensions:"x-agent,x-agent-response"`
 	// Deletion time of the knowledge base
 	DeletedAt gorm.DeletedAt `yaml:"deleted_at"              json:"deleted_at"              gorm:"index"`
 	// Knowledge count (not stored in database, calculated on query)
-	KnowledgeCount int64 `yaml:"knowledge_count"         json:"knowledge_count"         gorm:"-"`
+	KnowledgeCount int64 `yaml:"knowledge_count"         json:"knowledge_count"         gorm:"-" extensions:"x-agent,x-agent-response"`
 	// Chunk count (not stored in database, calculated on query)
-	ChunkCount int64 `yaml:"chunk_count"             json:"chunk_count"             gorm:"-"`
+	ChunkCount int64 `yaml:"chunk_count"             json:"chunk_count"             gorm:"-" extensions:"x-agent,x-agent-response"`
 	// IsProcessing indicates if there is a processing import task (for FAQ type knowledge bases)
-	IsProcessing bool `yaml:"is_processing"           json:"is_processing"           gorm:"-"`
+	IsProcessing bool `yaml:"is_processing"           json:"is_processing"           gorm:"-" extensions:"x-agent,x-agent-response"`
 	// ProcessingCount indicates the number of knowledge items being processed (for document type knowledge bases)
-	ProcessingCount int64 `yaml:"processing_count"        json:"processing_count"        gorm:"-"`
+	ProcessingCount int64 `yaml:"processing_count"        json:"processing_count"        gorm:"-" extensions:"x-agent,x-agent-response"`
 	// ShareCount indicates the number of organizations this knowledge base is shared with (not stored in database)
 	ShareCount int64 `yaml:"share_count"             json:"share_count"             gorm:"-"`
 	// CreatorName 是 CreatorID 对应用户的展示名（username / email 等），
@@ -180,6 +181,19 @@ type KnowledgeBaseConfig struct {
 	// IndexingStrategy controls which indexing pipelines are active.
 	// nil means "no change" when updating (preserves existing strategy).
 	IndexingStrategy *IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"`
+	// EmbeddingModelID changes the embedding model. nil means no change.
+	// A knowledge base that already has documents cannot switch models.
+	EmbeddingModelID *string `json:"embedding_model_id,omitempty"`
+	// SummaryModelID changes the summary model. nil means no change.
+	SummaryModelID *string `json:"summary_model_id,omitempty"`
+	// StorageBackendID rebinds file storage. nil means no change.
+	StorageBackendID *string `json:"storage_backend_id,omitempty"`
+	// ASRConfig replaces speech-recognition settings when set. nil means no change.
+	ASRConfig *ASRConfig `json:"asr_config,omitempty"`
+	// ExtractConfig replaces graph extraction settings when set. nil means no change.
+	ExtractConfig *ExtractConfig `json:"extract_config,omitempty"`
+	// QuestionGenerationConfig replaces generated-question settings when set. nil means no change.
+	QuestionGenerationConfig *QuestionGenerationConfig `json:"question_generation_config,omitempty"`
 }
 
 const (
@@ -193,14 +207,14 @@ const (
 // opt-in so upgrading an existing deployment does not add model calls or alter
 // document tags unexpectedly.
 type AutoTagConfig struct {
-	Enabled bool   `yaml:"enabled" json:"enabled"`
-	ModelID string `yaml:"model_id,omitempty" json:"model_id,omitempty"`
-	MaxTags int    `yaml:"max_tags,omitempty" json:"max_tags,omitempty"`
-	// SkipIfTagged leaves documents that already carry tags untouched, so a
-	// deliberate manual classification is not diluted by model guesses. It is
-	// a pointer because the default is true: rows written before this field
-	// existed decode to nil and must not silently flip to "always append".
-	SkipIfTagged *bool `yaml:"skip_if_tagged,omitempty" json:"skip_if_tagged,omitempty"`
+	// Enabled turns automatic tagging on. The model picks from tags that already exist.
+	Enabled bool `yaml:"enabled" json:"enabled" extensions:"x-agent=auto_tag_enabled"`
+	// ModelID overrides the summary model. Empty uses summary_model_id.
+	ModelID string `yaml:"model_id,omitempty" json:"model_id,omitempty" extensions:"x-agent=auto_tag_model_id"`
+	// MaxTags is how many tags one document may receive, from 1 to 10.
+	MaxTags int `yaml:"max_tags,omitempty" json:"max_tags,omitempty" minimum:"1" maximum:"10" extensions:"x-agent=auto_tag_max_tags"`
+	// SkipIfTagged leaves a document alone when it already has tags. Empty means yes.
+	SkipIfTagged *bool `yaml:"skip_if_tagged,omitempty" json:"skip_if_tagged,omitempty" extensions:"x-agent=auto_tag_skip_if_tagged"`
 }
 
 // ShouldSkipIfTagged reports whether documents with existing tags are left
@@ -259,43 +273,36 @@ type ParserEngineRule struct {
 
 // ChunkingConfig represents the document splitting configuration
 type ChunkingConfig struct {
-	// Chunk size
-	ChunkSize int `yaml:"chunk_size"    json:"chunk_size"`
-	// Chunk overlap
-	ChunkOverlap int `yaml:"chunk_overlap" json:"chunk_overlap"`
-	// Separators
-	Separators []string `yaml:"separators"    json:"separators"`
+	// Chunk size in characters. Empty on create uses the server default.
+	ChunkSize int `yaml:"chunk_size"    json:"chunk_size" minimum:"100" maximum:"10000" extensions:"x-agent"`
+	// Chunk overlap in characters.
+	ChunkOverlap int `yaml:"chunk_overlap" json:"chunk_overlap" minimum:"0" maximum:"5000" extensions:"x-agent"`
+	// Separators, in the order they are tried.
+	Separators []string `yaml:"separators"    json:"separators" extensions:"x-agent,x-agent-maximum=20"`
 	// ParserEngineRules configures which parser engine to use for each file type.
 	// When empty, DefaultParserEngine is used (builtin/simple routing, except
 	// types that only a specific engine can parse: ppt/pptx fall back to
 	// markitdown). A linked anydoc binding is preferred for every type it
 	// converts.
 	ParserEngineRules []ParserEngineRule `yaml:"parser_engine_rules,omitempty" json:"parser_engine_rules,omitempty"`
-	// EnableParentChild enables two-level parent-child chunking strategy.
-	// When enabled, large parent chunks provide context while small child chunks
-	// are used for vector matching. Retrieval matches on child but returns parent content.
-	EnableParentChild bool `yaml:"enable_parent_child,omitempty" json:"enable_parent_child,omitempty"`
+	// EnableParentChild splits into large parent chunks and small child chunks.
+	// Search matches a child and returns its parent.
+	EnableParentChild bool `yaml:"enable_parent_child,omitempty" json:"enable_parent_child,omitempty" extensions:"x-agent"`
 	// ParentChunkSize is the size of parent chunks (default: 4096).
 	// Only used when EnableParentChild is true.
-	ParentChunkSize int `yaml:"parent_chunk_size,omitempty" json:"parent_chunk_size,omitempty"`
+	ParentChunkSize int `yaml:"parent_chunk_size,omitempty" json:"parent_chunk_size,omitempty" minimum:"1" maximum:"20000" extensions:"x-agent"`
 	// ChildChunkSize is the size of child chunks used for embedding (default: 384).
 	// Only used when EnableParentChild is true.
-	ChildChunkSize int `yaml:"child_chunk_size,omitempty" json:"child_chunk_size,omitempty"`
-	// Strategy selects the adaptive chunking tier. Empty / "legacy" preserves
-	// the historical recursive splitter; "auto" lets a profiler pick between
-	// heading-aware, heuristic and recursive tiers; "heading" / "heuristic" /
-	// "recursive" pin the tier explicitly.
-	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
-	// TokenLimit caps chunk size in approximate tokens. 0 = use ChunkSize
-	// as a character count.
-	TokenLimit int `yaml:"token_limit,omitempty" json:"token_limit,omitempty"`
-	// Languages hints the heuristic patterns. Empty = auto-detect from content.
-	// Examples: ["de"], ["en", "zh"].
-	Languages []string `yaml:"languages,omitempty" json:"languages,omitempty"`
-	// TableMetadataInstructions contains optional business guidance used when
-	// generating searchable summaries for CSV/Excel tables. The system-owned
-	// output contract remains fixed; these instructions only add domain context.
-	TableMetadataInstructions string `yaml:"table_metadata_instructions,omitempty" json:"table_metadata_instructions,omitempty"`
+	ChildChunkSize int `yaml:"child_chunk_size,omitempty" json:"child_chunk_size,omitempty" minimum:"1" maximum:"10000" extensions:"x-agent"`
+	// Strategy selects how documents are split: auto, heading, heuristic,
+	// recursive or legacy. Empty keeps the server default.
+	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty" enums:"auto,heading,heuristic,recursive,legacy" extensions:"x-agent"`
+	// TokenLimit caps chunk size in approximate tokens. 0 uses ChunkSize as a character count.
+	TokenLimit int `yaml:"token_limit,omitempty" json:"token_limit,omitempty" minimum:"0" maximum:"100000" extensions:"x-agent"`
+	// Languages hints the splitter, for example de or zh. Empty detects the language from the document.
+	Languages []string `yaml:"languages,omitempty" json:"languages,omitempty" extensions:"x-agent,x-agent-maximum=20"`
+	// TableMetadataInstructions is extra guidance for CSV and Excel summaries. The output format stays fixed.
+	TableMetadataInstructions string `yaml:"table_metadata_instructions,omitempty" json:"table_metadata_instructions,omitempty" extensions:"x-agent,x-agent-detail,x-agent-max-bytes=4000"`
 }
 
 // defaultParserEngineByType maps file types the builtin/simple engines cannot
@@ -538,8 +545,8 @@ func ParseProviderScheme(filePath string) string {
 
 // ImageProcessingConfig represents the image processing configuration
 type ImageProcessingConfig struct {
-	// Model ID
-	ModelID string `yaml:"model_id" json:"model_id"`
+	// Model ID used when describing images. Empty uses the knowledge base's caption model.
+	ModelID string `yaml:"model_id" json:"model_id" extensions:"x-agent=image_model_id"`
 	// ImageActions overrides the built-in attribute→work table (see
 	// DefaultImageActions). A nil value keeps the conservative default: run OCR
 	// for block text, data visuals, and unobserved images.
@@ -552,14 +559,41 @@ type ImageProcessingConfig struct {
 	// the attribute policy decides whether OCR runs for it. A single upload can
 	// override it per document through
 	// KnowledgeProcessOverrides.ImageAttrsEnabled.
-	ImageAttrsEnabled bool `yaml:"image_attrs_enabled,omitempty" json:"image_attrs_enabled,omitempty"` //nolint:lll // one-line struct tag
+	ImageAttrsEnabled bool `yaml:"image_attrs_enabled,omitempty" json:"image_attrs_enabled,omitempty" extensions:"x-agent"` //nolint:lll // one-line struct tag
+	// ImagePipelineID selects the image pipeline by id, so the choice the
+	// settings panel offers is the choice the backend runs. It is unset on
+	// knowledge bases configured before the field existed; those follow
+	// ImageAttrsEnabled — see ResolveImagePipelineID. An explicit id always
+	// wins over the switch.
+	ImagePipelineID string `yaml:"image_pipeline,omitempty" json:"image_pipeline,omitempty"`
+	// ImagePipelineParams holds the tunables of ImagePipelineID, keyed by the
+	// field's own key. The map travels whole: a key a pipeline no longer
+	// declares is dropped when the run reads it, so an old stored config stays
+	// loadable rather than being rewritten on save.
+	ImagePipelineParams map[string]any `yaml:"image_pipeline_params,omitempty" json:"image_pipeline_params,omitempty"`
 	// ImageVectorEnabled lets a knowledge base whose embedding model takes
 	// images index each image by its own vector and recall it with one. It
 	// is off by default on purpose: a model that takes images is also used
 	// for plain text, and turning this on costs an embedding call per image
 	// and widens vector recall. Existing knowledge bases stay off after an
 	// upgrade because the stored JSON has no such key.
-	ImageVectorEnabled bool `yaml:"image_vector_enabled,omitempty" json:"image_vector_enabled,omitempty"` //nolint:lll // one-line struct tag
+	ImageVectorEnabled bool `yaml:"image_vector_enabled,omitempty" json:"image_vector_enabled,omitempty" extensions:"x-agent"` //nolint:lll // one-line struct tag
+}
+
+// ResolveImagePipelineID returns the pipeline id a knowledge base asks for. An
+// explicit ImagePipelineID wins; without one the old attribute-observation
+// switch still decides, so a knowledge base saved before the selector existed
+// runs the pipeline the switch pointed at. An id that no pipeline registers is
+// ignored here and falls back to the switch, which is what keeps a stored
+// config from pointing at a pipeline that has since been removed.
+func ResolveImagePipelineID(cfg *ImageProcessingConfig) ImagePipelineID {
+	if cfg == nil {
+		return ImagePipelineIDFor(false)
+	}
+	if id := strings.TrimSpace(cfg.ImagePipelineID); id != "" {
+		return NormalizeImagePipelineID(ImagePipelineID(id))
+	}
+	return ImagePipelineIDFor(cfg.ImageAttrsEnabled)
 }
 
 // Value implements the driver.Valuer interface, used to convert ChunkingConfig to database value
@@ -598,14 +632,14 @@ func (c *ImageProcessingConfig) Scan(value interface{}) error {
 
 // VLMConfig represents the VLM configuration
 type VLMConfig struct {
-	Enabled bool   `yaml:"enabled"  json:"enabled"`
-	ModelID string `yaml:"model_id" json:"model_id"`
-	// DescriptionLanguage controls the language used for generated image
-	// captions. Empty means follow the document/request language.
-	DescriptionLanguage string `yaml:"description_language,omitempty" json:"description_language,omitempty"`
-	// CustomInstructions adds KB-specific image interpretation guidance without
-	// replacing the system-owned OCR and Markdown output contract.
-	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty"`
+	// Enabled turns image captions on. Also send vlm_model_id.
+	Enabled bool `yaml:"enabled" json:"enabled" extensions:"x-agent=vlm_enabled"`
+	// Model that writes image captions. model.list returns the ids.
+	ModelID string `yaml:"model_id" json:"model_id" extensions:"x-agent=vlm_model_id"`
+	// DescriptionLanguage is the language of generated image captions. Empty follows the document language.
+	DescriptionLanguage string `yaml:"description_language,omitempty" json:"description_language,omitempty" extensions:"x-agent=vlm_language"`
+	// CustomInstructions adds image-reading guidance. The OCR and Markdown format stay fixed.
+	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty" extensions:"x-agent=vlm_instructions,x-agent-detail,x-agent-max-bytes=4000"`
 
 	// 兼容老版本
 	// Model Name
@@ -637,12 +671,12 @@ func (c VLMConfig) IsEnabled() bool {
 // When enabled, the system will use LLM to generate questions for each chunk during document parsing
 // These generated questions will be indexed separately to improve recall
 type QuestionGenerationConfig struct {
-	Enabled bool `yaml:"enabled"  json:"enabled"`
-	// Number of questions to generate per chunk (default: 3, max: 10)
-	QuestionCount int `yaml:"question_count" json:"question_count"`
-	// CustomInstructions describes the intended audience or question style.
-	// It is appended to the stable system question-generation template.
-	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty"`
+	// Enabled turns question generation on. Generated questions are indexed beside the chunk.
+	Enabled bool `yaml:"enabled"  json:"enabled" extensions:"x-agent=question_generation_enabled"`
+	// QuestionCount is how many questions to write per chunk, from 1 to 10.
+	QuestionCount int `yaml:"question_count" json:"question_count" minimum:"1" maximum:"10" extensions:"x-agent=question_count"`
+	// CustomInstructions describes who the questions are for. The question format stays fixed.
+	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty" extensions:"x-agent=question_instructions,x-agent-detail,x-agent-max-bytes=4000"`
 }
 
 // Value implements the driver.Valuer interface
@@ -681,9 +715,12 @@ func (c *VLMConfig) Scan(value interface{}) error {
 
 // ASRConfig represents the ASR (Automatic Speech Recognition) configuration
 type ASRConfig struct {
-	Enabled  bool   `yaml:"enabled"  json:"enabled"`
-	ModelID  string `yaml:"model_id" json:"model_id"`
-	Language string `yaml:"language" json:"language"` // optional: language hint for transcription
+	// Enabled turns speech transcription on. Also send asr_model_id.
+	Enabled bool `yaml:"enabled" json:"enabled" extensions:"x-agent=asr_enabled"`
+	// Model that transcribes audio. model.list returns the ids.
+	ModelID string `yaml:"model_id" json:"model_id" extensions:"x-agent=asr_model_id"`
+	// Language is an optional hint for transcription, such as zh or en.
+	Language string `yaml:"language" json:"language" extensions:"x-agent=asr_language"`
 }
 
 // IsASREnabled checks if ASR is enabled with a valid model
@@ -710,14 +747,16 @@ func (c *ASRConfig) Scan(value interface{}) error {
 
 // ExtractConfig represents the extract configuration for a knowledge base
 type ExtractConfig struct {
-	Enabled   bool             `yaml:"enabled"   json:"enabled"`
-	Text      string           `yaml:"text"      json:"text,omitempty"`
-	Tags      []string         `yaml:"tags"      json:"tags,omitempty"`
+	// Enabled turns graph extraction on. Node and relation types are edited in the knowledge base editor.
+	Enabled bool `yaml:"enabled"   json:"enabled" extensions:"x-agent=extract_enabled"`
+	// Text is the extraction prompt. Required when extraction is on and no text is saved yet.
+	Text string `yaml:"text"      json:"text,omitempty" extensions:"x-agent=extract_text,x-agent-detail,x-agent-max-bytes=8000"`
+	// Tags are the entity labels extraction may use.
+	Tags      []string         `yaml:"tags"      json:"tags,omitempty" extensions:"x-agent=extract_tags,x-agent-maximum=50"`
 	Nodes     []*GraphNode     `yaml:"nodes"     json:"nodes,omitempty"`
 	Relations []*GraphRelation `yaml:"relations" json:"relations,omitempty"`
-	// CustomInstructions adds domain-specific extraction guidance while the
-	// system keeps ownership of the structured graph output protocol.
-	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty"`
+	// CustomInstructions adds domain guidance. The graph output format stays fixed.
+	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty" extensions:"x-agent=extract_instructions,x-agent-detail,x-agent-max-bytes=4000"`
 }
 
 // Value implements the driver.Valuer interface, used to convert ExtractConfig to database value
@@ -739,8 +778,10 @@ func (e *ExtractConfig) Scan(value interface{}) error {
 
 // FAQConfig 存储 FAQ 知识库的特有配置
 type FAQConfig struct {
-	IndexMode         FAQIndexMode         `yaml:"index_mode"          json:"index_mode"`
-	QuestionIndexMode FAQQuestionIndexMode `yaml:"question_index_mode" json:"question_index_mode"`
+	// IndexMode is question_only or question_answer.
+	IndexMode FAQIndexMode `yaml:"index_mode"          json:"index_mode" enums:"question_only,question_answer" extensions:"x-agent=faq_index_mode"`
+	// QuestionIndexMode is combined or separate.
+	QuestionIndexMode FAQQuestionIndexMode `yaml:"question_index_mode" json:"question_index_mode" enums:"combined,separate" extensions:"x-agent=faq_question_index_mode"`
 }
 
 // Value implements driver.Valuer

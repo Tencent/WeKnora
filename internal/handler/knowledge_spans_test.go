@@ -134,9 +134,9 @@ func TestKnowledgeSpansLastError_PrefersSpanFailure(t *testing.T) {
 
 	got := knowledgeSpansLastError(2, 2, types.ParseStatusFailed, "recovery blew up", now, spanFail)
 	a := assert.New(t)
-	a.Equal(types.StageDocReader, got["name"])
-	a.Equal("DOCREADER_TIMEOUT", got["error_code"])
-	a.Equal("slow", got["error_message"])
+	a.Equal(types.StageDocReader, got.Name)
+	a.Equal("DOCREADER_TIMEOUT", got.ErrorCode)
+	a.Equal("slow", got.ErrorMessage)
 }
 
 func TestKnowledgeSpansLastError_RecoveryFallbackUsesKnowledgeMessage(t *testing.T) {
@@ -144,10 +144,10 @@ func TestKnowledgeSpansLastError_RecoveryFallbackUsesKnowledgeMessage(t *testing
 	got := knowledgeSpansLastError(2, 2, types.ParseStatusFailed, "wiki ingest timed out", now, nil)
 	a := assert.New(t)
 	a.NotNil(got)
-	a.Equal("knowledge_processing", got["name"])
-	a.Equal("UNKNOWN", got["error_code"])
-	a.Equal("wiki ingest timed out", got["error_message"])
-	a.Equal(now, got["finished_at"])
+	a.Equal("knowledge_processing", got.Name)
+	a.Equal("UNKNOWN", got.ErrorCode)
+	a.Equal("wiki ingest timed out", got.ErrorMessage)
+	a.Equal(&now, got.FinishedAt)
 }
 
 func TestKnowledgeSpansLastError_ClassifiesServerRestart(t *testing.T) {
@@ -156,8 +156,8 @@ func TestKnowledgeSpansLastError_ClassifiesServerRestart(t *testing.T) {
 		"Task interrupted due to application restart", now, nil)
 	a := assert.New(t)
 	a.NotNil(got)
-	a.Equal("SERVER_RESTART", got["error_code"])
-	a.Equal("SERVER_RESTART", got["code"])
+	a.Equal("SERVER_RESTART", got.ErrorCode)
+	a.Equal("SERVER_RESTART", got.Code)
 }
 
 func TestKnowledgeSpansLastError_SkipsRecoveryFallbackForHistoricalAttempt(t *testing.T) {

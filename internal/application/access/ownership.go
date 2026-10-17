@@ -33,6 +33,11 @@ type OwnershipDecision struct {
 	LookupFailed       bool
 }
 
+// CreatorRoleFloor is the lowest role at which creating a resource still lets
+// the caller manage it. Below it a member mutates nothing, including what they
+// created before being demoted.
+const CreatorRoleFloor = types.TenantRoleContributor
+
 // CheckOwnershipOrRole performs no resource lookup when API-key authorization,
 // role, superuser status, or the RBAC rollout policy already settles the gate.
 // The lookup must enforce tenant visibility before returning a creator ID.
@@ -62,7 +67,7 @@ func CheckOwnershipOrRole(
 		decision.LookupFailed = true
 		return decision, err
 	}
-	if creator != "" && creator == request.UserID {
+	if creator != "" && creator == request.UserID && request.Role.HasPermission(CreatorRoleFloor) {
 		return decision, nil
 	}
 	return decision, ErrOwnershipForbidden
