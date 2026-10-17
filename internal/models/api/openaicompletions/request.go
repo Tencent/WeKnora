@@ -200,7 +200,10 @@ func (c *Client) buildBody(messages []api.Message, opts *api.Options, stream boo
 	s := c.cfg.Settings
 	wireMessages := c.convertMessages(messages)
 	if opts != nil && opts.RuntimeNotice != "" {
-		wireMessages = append(wireMessages, c.convertMessages([]api.Message{{Role: "system", Content: opts.RuntimeNotice}})...)
+		wireMessages = append(
+			wireMessages,
+			c.convertMessages([]api.Message{{Role: "system", Content: opts.RuntimeNotice}})...,
+		)
 	}
 	body := map[string]any{
 		"model":    c.cfg.Endpoint.Model,
