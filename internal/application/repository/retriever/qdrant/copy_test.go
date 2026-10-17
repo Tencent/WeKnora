@@ -117,6 +117,9 @@ func (s *copyTestServer) repository(t *testing.T, count int) (*qdrantRepository,
 		case *qdrant.CollectionExistsRequest:
 			reply.(*qdrant.CollectionExistsResponse).Result = &qdrant.CollectionExists{Exists: true}
 			return nil
+		case *qdrant.GetCollectionInfoRequest:
+			reply.(*qdrant.GetCollectionInfoResponse).Result = &qdrant.CollectionInfo{}
+			return nil
 		case *qdrant.ScrollPoints:
 			s.scrolls++
 			response := reply.(*qdrant.ScrollResponse)

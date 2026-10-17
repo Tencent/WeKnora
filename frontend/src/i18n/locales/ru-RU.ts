@@ -6333,6 +6333,7 @@ export default {
     }
   },
   vectorStoreSettings: {
+    fields: { qdrant_keyword_search: 'Поиск по ключевым словам' },
     title: 'Движок векторной базы данных',
     description: 'Регистрация и управление экземплярами векторных баз данных для поиска по базе знаний.',
     basicSection: 'Основное',
