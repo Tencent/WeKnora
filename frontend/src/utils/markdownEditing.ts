@@ -32,6 +32,25 @@ const lineEndAt = (value: string, index: number): number => {
   return nextBreak === -1 ? value.length : nextBreak
 }
 
+/** Only a matching, sufficiently long fence with no info string closes a block. */
+function isInsideCodeFence(value: string, lineStart: number): boolean {
+  let fence = ''
+  for (const line of value.slice(0, lineStart).split(/\r?\n/)) {
+    const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line)
+    if (!match) continue
+    const [, delimiter = '', rest = ''] = match
+    if (fence) {
+      if (delimiter[0] === fence[0] && delimiter.length >= fence.length && !rest.trim()) {
+        fence = ''
+      }
+    } else if (delimiter[0] !== '`' || !rest.includes('`')) {
+      // Backtick fences cannot have backticks in their info string.
+      fence = delimiter
+    }
+  }
+  return fence !== ''
+}
+
 /**
  * Enter inside a list item keeps the list going.
  *
@@ -45,6 +64,7 @@ export function continueListOnEnter({ value, start, end }: EditorState): EditorP
   const lineStart = lineStartAt(value, start)
   const match = LIST_LINE_RE.exec(value.slice(lineStart, start))
   if (!match) return null
+  if (isInsideCodeFence(value, lineStart)) return null
 
   const [, indent, marker, checkbox, content] = match
   const remainingContent = value.slice(start, lineEndAt(value, start))
