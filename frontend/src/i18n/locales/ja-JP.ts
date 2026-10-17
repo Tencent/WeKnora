@@ -723,6 +723,7 @@ export default {
       folderCardCount: '{count}件のドキュメント',
       searchingSubtree: '（サブフォルダを含む）',
       emptyFolder: 'このフォルダにはまだドキュメントがありません',
+      emptyFolderWithSubfolders: 'このフォルダに直接のドキュメントはありませんが、サブフォルダに {count} 件あります',
       emptySearch: '該当するドキュメントがありません',
       collapse: 'フォルダを折りたたむ',
       expand: 'フォルダを展開',

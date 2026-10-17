@@ -723,6 +723,7 @@ export default {
       folderCardCount: '{count} documents',
       searchingSubtree: '(including sub-folders)',
       emptyFolder: 'This folder has no documents yet',
+      emptyFolderWithSubfolders: 'This folder has no documents of its own, but {count} in sub-folders',
       emptySearch: 'No matching documents',
       collapse: 'Collapse folders',
       expand: 'Expand folders',

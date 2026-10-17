@@ -69,6 +69,7 @@ import {
   buildUploadFileName,
   canMoveFolderTo,
   folderBreadcrumbs as buildFolderBreadcrumbs,
+  folderDocumentCounts,
   folderPathExists as folderExistsInTree,
   isFilteringDocuments,
   ROOT_FOLDER_PATH,
@@ -817,6 +818,29 @@ const isFiltering = computed(() =>
 // A row's folder is worth showing only when the list can span folders.
 const showDocumentFolderPath = computed(() => hasFolders.value && isFiltering.value);
 const folderBreadcrumbs = computed(() => buildFolderBreadcrumbs(selectedFolderPath.value));
+// The count beside the breadcrumb describes the folder, not the page: a folder
+// whose documents all live in sub-folders still has a size. Filtering reports
+// the flat result set instead, and a tree that is loading or failed to load
+// falls back to the total of the list that did load.
+const folderDocumentCount = computed(() => {
+  if (isFiltering.value) return total.value;
+  return folderDocumentCounts(folderTree.value, selectedFolderPath.value)?.total ?? total.value;
+});
+// Documents below the selected folder rather than directly inside it; this is
+// what tells "documents live in the sub-folders" apart from "nothing here yet".
+const folderSubfolderDocumentCount = computed(() => {
+  const counts = folderDocumentCounts(folderTree.value, selectedFolderPath.value);
+  if (!counts) return 0;
+  return Math.max(0, counts.total - counts.direct);
+});
+// Which empty state the document list needs: a search without matches, a folder
+// whose documents are all below it, a plain empty folder, or the onboarding
+// panel for a knowledge base that has no folders at all.
+const folderEmptyState = computed<'search' | 'subfolders' | 'folder' | 'none'>(() => {
+  if (isFiltering.value) return 'search';
+  if (folderSubfolderDocumentCount.value > 0) return 'subfolders';
+  return hasFolders.value || selectedFolderPath.value ? 'folder' : 'none';
+});
 
 const filterParams = computed(() => {
   const [start, end] = updatedTimeRange.value || [];
@@ -2408,7 +2432,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                     <span v-if="index === folderBreadcrumbs.length - 1" class="doc-folder-path__crumb is-current" :title="crumb.name" aria-current="page">{{ crumb.name }}</span>
                     <button v-else type="button" class="doc-folder-path__crumb" :title="crumb.name" @click="handleFolderSelect(crumb.path)">{{ crumb.name }}</button>
                   </template>
-                  <span v-if="!docListLoading" class="doc-folder-path__count">{{ $t(isFiltering ? 'knowledgeBase.folderTree.filteredCount' : 'knowledgeBase.documentCount', { count: total }) }}</span>
+                  <span v-if="!docListLoading" class="doc-folder-path__count">{{ $t(isFiltering ? 'knowledgeBase.folderTree.filteredCount' : 'knowledgeBase.documentCount', { count: folderDocumentCount }) }}</span>
                   <t-tooltip v-if="showFolderTree && isFiltering" :content="$t('knowledgeBase.folderTree.searchingSubtree')">
                     <t-icon name="info-circle" class="doc-folder-path__sep" />
                   </t-tooltip>
@@ -2625,10 +2649,14 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                 </template>
                 <template v-else-if="!docListLoading">
                   <div class="doc-empty-state">
-                    <p v-if="hasFolders || selectedFolderPath || isFiltering" class="doc-empty-folder">
-                      {{ isFiltering
-                        ? $t('knowledgeBase.folderTree.emptySearch')
-                        : $t('knowledgeBase.folderTree.emptyFolder') }}
+                    <p v-if="folderEmptyState === 'search'" class="doc-empty-folder">
+                      {{ $t('knowledgeBase.folderTree.emptySearch') }}
+                    </p>
+                    <p v-else-if="folderEmptyState === 'subfolders'" class="doc-empty-folder">
+                      {{ $t('knowledgeBase.folderTree.emptyFolderWithSubfolders', { count: folderSubfolderDocumentCount }) }}
+                    </p>
+                    <p v-else-if="folderEmptyState === 'folder'" class="doc-empty-folder">
+                      {{ $t('knowledgeBase.folderTree.emptyFolder') }}
                     </p>
                     <EmptyKnowledge v-else />
                   </div>

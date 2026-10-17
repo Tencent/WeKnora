@@ -7405,6 +7405,7 @@ export default {
       folderCardCount: '{count} 個文件',
       searchingSubtree: '（含子目錄）',
       emptyFolder: '這個資料夾裡還沒有文件',
+      emptyFolderWithSubfolders: '這個目錄裡沒有直接文件，子目錄裡有 {count} 個',
       emptySearch: '沒有比對的文件',
       collapse: '收起目錄',
       expand: '展開目錄',
