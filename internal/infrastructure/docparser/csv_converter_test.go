@@ -30,6 +30,16 @@ func TestCSVToMarkdown(t *testing.T) {
 			want: "| expr | means |\n| --- | --- |\n| a\\|b | a or b |\n",
 		},
 		{
+			name: "backslash before pipe preserves both literal characters",
+			in:   "expr,note\na\\|b,literal\n",
+			want: "| expr | note |\n| --- | --- |\n| " + `a\\\|b` + " | literal |\n",
+		},
+		{
+			name: "multiple and trailing backslashes stay inside the cell",
+			in:   "expr,note\na\\\\|b\\,literal\n",
+			want: "| expr | note |\n| --- | --- |\n| " + `a\\\\\|b\\` + " | literal |\n",
+		},
+		{
 			name: "multi-line field stays in its row",
 			in:   "name,address\nAnn,\"1 Main St\r\nSpringfield\"\n",
 			want: "| name | address |\n| --- | --- |\n| Ann | 1 Main St<br />Springfield |\n",

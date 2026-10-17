@@ -235,4 +235,6 @@ func csvToMarkdown(data []byte) (string, error) {
 // csvCellReplacer escapes what would end a GFM table cell or row: a pipe, and
 // the line breaks of a quoted multi-line field. They become <br />, as the
 // html-to-markdown table plugin writes them.
-var csvCellReplacer = strings.NewReplacer("|", `\|`, "\r\n", "<br />", "\n", "<br />", "\r", "<br />")
+// Escape existing backslashes too, so a literal backslash before a pipe does
+// not consume the pipe's escape and turn it back into a column separator.
+var csvCellReplacer = strings.NewReplacer(`\`, `\\`, "|", `\|`, "\r\n", "<br />", "\n", "<br />", "\r", "<br />")
