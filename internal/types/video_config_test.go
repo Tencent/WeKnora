@@ -473,3 +473,99 @@ func TestVideoConfigEqualComparesTheVisionBlockByValue(t *testing.T) {
 		t.Fatal("a nil vision block must differ from a configured one")
 	}
 }
+
+// The frame sampling policy is optional in JSONB and must decode to the
+// documented defaults: a cap of twelve frames and an automatic interval. An
+// unset field on an old row and the normalized default express the same
+// setting, so Equal must not report a change on every save.
+func TestVideoConfigFrameSamplingDefaults(t *testing.T) {
+	t.Parallel()
+
+	var zero VideoConfig
+	if got := zero.EffectiveMaxFrames(); got != DefaultVideoMaxFrames {
+		t.Fatalf("EffectiveMaxFrames() = %d, want %d", got, DefaultVideoMaxFrames)
+	}
+	if got := zero.EffectiveFrameIntervalSeconds(); got != 0 {
+		t.Fatalf("EffectiveFrameIntervalSeconds() = %d, want 0 (auto)", got)
+	}
+
+	zero.Normalize()
+	if zero.MaxFrames != DefaultVideoMaxFrames {
+		t.Fatalf("Normalize MaxFrames = %d, want %d", zero.MaxFrames, DefaultVideoMaxFrames)
+	}
+	if zero.FrameIntervalSeconds != 0 {
+		t.Fatalf("Normalize FrameIntervalSeconds = %d, want 0", zero.FrameIntervalSeconds)
+	}
+
+	// Both knobs are optional in JSON: an old row keeps its exact shape.
+	raw, err := json.Marshal(VideoConfig{Enabled: true, Mode: VideoParseModeAudioOnly, ModelID: "asr-1"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, field := range []string{"max_frames", "frame_interval_seconds"} {
+		if strings.Contains(string(raw), field) {
+			t.Fatalf("an unset %s must be omitted: %s", field, raw)
+		}
+	}
+
+	// A configured policy round-trips and compares by its effective value.
+	var decoded VideoConfig
+	if err := json.Unmarshal([]byte(`{"max_frames":30,"frame_interval_seconds":45}`), &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if decoded.MaxFrames != 30 || decoded.FrameIntervalSeconds != 45 {
+		t.Fatalf("decoded sampling = %+v, want 30/45", decoded)
+	}
+	if !decoded.Equal(VideoConfig{MaxFrames: 30, FrameIntervalSeconds: 45}) {
+		t.Fatal("the same sampling values must compare equal")
+	}
+	if (VideoConfig{MaxFrames: 30}).Equal(VideoConfig{}) {
+		t.Fatal("a different cap must be reported as a change")
+	}
+	if !(VideoConfig{}).Equal(VideoConfig{MaxFrames: DefaultVideoMaxFrames}) {
+		t.Fatal("an unset cap and the normalized default express the same setting")
+	}
+}
+
+// Normalize clamps both sampling knobs: a hand-edited JSONB row (or a client
+// that ignores the limits) must never reach the sampler out of range.
+func TestVideoConfigFrameSamplingNormalizeClamps(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name         string
+		maxFrames    int
+		intervalSecs int
+		wantFrames   int
+		wantInterval int
+	}{
+		{name: "zero keeps defaults", wantFrames: DefaultVideoMaxFrames},
+		{name: "negative frames", maxFrames: -5, wantFrames: DefaultVideoMaxFrames},
+		{name: "minimum frames", maxFrames: 1, wantFrames: 1},
+		{name: "maximum frames", maxFrames: MaxAllowedVideoFrames, wantFrames: MaxAllowedVideoFrames},
+		{name: "over the cap", maxFrames: 10000, wantFrames: MaxAllowedVideoFrames},
+		{name: "negative interval", intervalSecs: -90, wantFrames: DefaultVideoMaxFrames},
+		{name: "explicit interval", intervalSecs: 30, wantFrames: DefaultVideoMaxFrames, wantInterval: 30},
+		{
+			name: "interval ceiling", intervalSecs: MaxVideoFrameIntervalSeconds + 1,
+			wantFrames: DefaultVideoMaxFrames, wantInterval: MaxVideoFrameIntervalSeconds,
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			config := VideoConfig{MaxFrames: tc.maxFrames, FrameIntervalSeconds: tc.intervalSecs}
+			config.Normalize()
+			if config.MaxFrames != tc.wantFrames {
+				t.Fatalf("MaxFrames = %d, want %d", config.MaxFrames, tc.wantFrames)
+			}
+			if config.FrameIntervalSeconds != tc.wantInterval {
+				t.Fatalf("FrameIntervalSeconds = %d, want %d", config.FrameIntervalSeconds, tc.wantInterval)
+			}
+			if got := config.EffectiveMaxFrames(); got != tc.wantFrames {
+				t.Fatalf("EffectiveMaxFrames() = %d, want %d", got, tc.wantFrames)
+			}
+		})
+	}
+}

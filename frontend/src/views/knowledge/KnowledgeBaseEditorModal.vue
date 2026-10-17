@@ -632,6 +632,42 @@
               </div>
             </div>
 
+            <!-- 抽帧上限：一次视频最多送给视觉模型的帧数 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesFrames" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.maxFramesLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.maxFramesDescription') }}</p>
+              </div>
+              <div class="setting-control">
+                <t-input-number
+                  v-model="formData.videoConfig.maxFrames"
+                  :min="1"
+                  :max="60"
+                  :step="1"
+                  theme="normal"
+                  style="width: 120px;"
+                />
+              </div>
+            </div>
+
+            <!-- 采样间隔：0 表示按视频时长与帧数上限自动计算 -->
+            <div v-if="formData.videoConfig.enabled && videoModeUsesFrames" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.video.frameIntervalLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.video.frameIntervalDescription') }}</p>
+              </div>
+              <div class="setting-control">
+                <t-input-number
+                  v-model="formData.videoConfig.frameIntervalSeconds"
+                  :min="0"
+                  :max="3600"
+                  :step="5"
+                  theme="normal"
+                  style="width: 120px;"
+                />
+              </div>
+            </div>
+
             <!-- 画面描述语言：与「图像处理」同一组选项，空值跟随请求语言 -->
             <div v-if="formData.videoConfig.enabled && videoModeUsesFrames" class="setting-row">
               <div class="setting-info">
@@ -1187,11 +1223,15 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     // 被后端归一成别的读法；modelId/language 是视频页自己的配置，留空表示
     // 没有可用的 ASR 模型 / 自动检测，都不回退到「音频处理」。vlm 是画面描
     // 述自己的视觉模型与要求，同样不回退到「图像处理」的 vlm_config。
+    // maxFrames / frameIntervalSeconds 是抽帧策略：默认最多 12 帧，间隔 0
+    // 表示按视频时长与帧数上限自动计算（后端同样会夹取范围和默认值）。
     videoConfig: {
       enabled: false,
       mode: 'audio_only' as string,
       modelId: '' as string,
       language: '' as string,
+      maxFrames: 12,
+      frameIntervalSeconds: 0,
       vlm: {
         modelId: '' as string,
         descriptionLanguage: '' as string,
@@ -1379,6 +1419,10 @@ const loadKBData = async (
         modelId: kb.video_config?.model_id || '',
         // Empty means auto-detection; the hint never comes from asr_config.
         language: kb.video_config?.language || '',
+        // Rows saved before the knobs existed decode to 0; show the effective
+        // defaults instead of an empty input, and keep 0 as "auto interval".
+        maxFrames: kb.video_config?.max_frames || 12,
+        frameIntervalSeconds: kb.video_config?.frame_interval_seconds ?? 0,
         // The video's own frame-description settings. Both fields are read
         // regardless of the stored enabled flag: the mode decides whether
         // frames are described, and the model id is what the page shows.
@@ -1828,6 +1872,7 @@ const buildSubmitData = () => {
 
   // 视频解析配置。mode 与 language 永远显式发送（清空语言也要生效）；
   // model_id 为空就是没配视频 ASR，后端不会回退到「音频处理」。
+  // max_frames / frame_interval_seconds 是抽帧策略，后端会再夹取一次范围。
   // vlm_config 是视频自己的画面描述配置：enabled 只表达「这一节有没有选视觉
   // 模型」，真正决定要不要描述画面的是 mode；留空即清空，绝不继承「图像处理」。
   const videoVLM = formData.value.videoConfig?.vlm
@@ -1837,6 +1882,8 @@ const buildSubmitData = () => {
     mode: formData.value.videoConfig?.mode || 'audio_only',
     model_id: formData.value.videoConfig?.modelId || '',
     language: formData.value.videoConfig?.language || '',
+    max_frames: formData.value.videoConfig?.maxFrames || 12,
+    frame_interval_seconds: formData.value.videoConfig?.frameIntervalSeconds ?? 0,
     vlm_config: {
       enabled: !!videoVLMModelId,
       model_id: videoVLMModelId,

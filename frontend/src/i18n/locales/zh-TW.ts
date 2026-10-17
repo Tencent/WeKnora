@@ -3949,6 +3949,10 @@ export default {
         }
       },
       keyDescriptions: {
+        asr: {
+          long_audio_chunking_enabled: '是否把超過廠商上限的長音訊切段後分段轉寫。關閉時整段音訊直接交給廠商，超長會失敗；開啟後按「單段音訊時長」切分並合併結果。每次轉寫即時讀取，修改後立即生效、無需重啟。預設關閉。',
+          max_segment_seconds: '長音訊切段的單段時長（秒，30-300）。僅在開啟「長音訊切段」後生效；每次轉寫即時讀取，修改後立即生效。預設 120 秒。'
+        },
         model: {
           max_concurrency: '後台任務（文件入庫/富化）對單個模型的預設併發上限，按模型 ID 全副本共享。每次呼叫實時讀取，修改後立即生效、無需重啟。0 或負數表示關閉預設限制（各模型仍會尊重自身在模型管理裡設定的上限）。僅影響後台任務，不影響交互式對話。'
         },
@@ -3980,6 +3984,10 @@ export default {
         }
       },
       keyLabels: {
+        asr: {
+          long_audio_chunking_enabled: '長音訊切段',
+          max_segment_seconds: '單段音訊時長（秒）'
+        },
         model: {
           max_concurrency: '模型預設併發上限'
         },
@@ -4218,6 +4226,10 @@ export default {
         }
       },
       sections: {
+        asr: {
+          title: '語音辨識',
+          description: '配置長音訊轉寫：預設整段交給廠商，超過上限會失敗；可開啟切段後分段轉寫並合併結果。修改後立即生效，無需重啟。'
+        },
         other: {
           title: '其他設定',
           description: '當前部署中未歸入標準分組的設定項。'
@@ -4701,9 +4713,9 @@ export default {
       modeAudioOnly: '僅語音轉寫（輕量）',
       modeAudioOnlyDesc: '只轉寫旁白，不描述畫面：一次 ASR 呼叫，最快最省。',
       modeKeyframes: '關鍵影格畫面描述',
-      modeKeyframesDesc: '只描述畫面，不做語音：依影片長度平均擷取最多 12 個影格交給視覺模型，適合課件、簡報錄影。',
+      modeKeyframesDesc: '只描述畫面，不做語音：依影片長度平均擷取最多 12 個影格（可設定）交給視覺模型，適合課件、簡報錄影。',
       modeAudioKeyframes: '語音 + 畫面描述（標準）',
-      modeAudioKeyframesDesc: '旁白轉寫與畫面描述都做，並依時間合併：效果最完整，成本也最高（ASR + 最多 12 次視覺呼叫）。',
+      modeAudioKeyframesDesc: '旁白轉寫與畫面描述都做，並依時間合併：效果最完整，成本也最高（ASR + 最多 12 次視覺呼叫，影格數可設定）。',
       modelLabel: '影片 ASR 模型',
       modelDescription: '僅用於本知識庫的影片旁白轉寫，不影響「音訊處理」的選擇。',
       modelPlaceholder: '選擇影片轉寫用的 ASR 模型',
@@ -4712,7 +4724,11 @@ export default {
       languageLabel: '轉寫語言',
       languageDescription: '影片旁白的語言提示；留空則自動偵測。與「音訊處理」的語言設定無關。',
       languagePlaceholder: '例如 zh、en，留空自動偵測',
-      vlmHint: '畫面描述使用「影片處理」頁自己的視覺模型，最多擷取 12 個影格。',
+      vlmHint: '畫面描述使用「影片處理」頁自己的視覺模型；擷取影格數與取樣間隔可在下方調整。',
+      maxFramesLabel: '最多擷取影格數',
+      maxFramesDescription: '一支影片最多擷取多少影格交給視覺模型（1-60）。影格越多看到的畫面越多，視覺呼叫成本也越高；預設 12。',
+      frameIntervalLabel: '取樣間隔（秒）',
+      frameIntervalDescription: '每隔多少秒擷取一格（0-3600）。0 表示依影片長度與「最多擷取影格數」自動計算：短片擷得密、長片擷得疏。',
       vlmRequired: '尚未選擇影片畫面視覺模型，畫面描述無法產生，影片將維持僅存檔；請先在「影片處理」中選擇。',
       vlmPartial: '尚未選擇影片畫面視覺模型，本次只轉寫旁白，畫面描述會被略過。',
       vlmLabel: '畫面視覺模型（VLM）',

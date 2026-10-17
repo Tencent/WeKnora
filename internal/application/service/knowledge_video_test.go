@@ -48,15 +48,17 @@ func (f *fakeVideoExtractor) Extract(
 // fakeVideoFrameExtractor stands in for the ffmpeg frame pass. The JPEG bytes
 // are opaque on purpose: the pipeline only forwards them to the VLM.
 type fakeVideoFrameExtractor struct {
-	frames []videoFrame
-	err    error
-	calls  int
+	frames   []videoFrame
+	err      error
+	calls    int
+	sampling videoFrameSampling
 }
 
 func (f *fakeVideoFrameExtractor) ExtractKeyframes(
-	ctx context.Context, src io.Reader, fileName string,
+	ctx context.Context, src io.Reader, fileName string, sampling videoFrameSampling,
 ) ([]videoFrame, error) {
 	f.calls++
+	f.sampling = sampling
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -369,6 +371,8 @@ func TestConvertVideoDescribesSampledFrames(t *testing.T) {
 	require.Equal(t, "PPT： 视频处理架构", result.VideoFrames[1].Text)
 	require.Equal(t, "vlm-1", modelSvc.gotVLMModelID)
 	require.Equal(t, 2, model.images)
+	require.Equal(t, videoFrameSampling{MaxFrames: types.DefaultVideoMaxFrames}, frames.sampling,
+		"a knowledge base with no frame policy samples the built-in cap and auto interval")
 	require.Contains(t, model.prompts[0], "training video")
 	require.Contains(t, model.prompts[0], "unreadable frame")
 	require.Contains(t, result.MarkdownContent, "[00:00:00] 画面：终端里执行 go test")
@@ -385,6 +389,30 @@ func TestConvertVideoDescribesSampledFrames(t *testing.T) {
 		chunked.WriteString(chunk.Content)
 	}
 	require.Contains(t, chunked.String(), "[00:00:15] 画面：PPT： 视频处理架构")
+}
+
+// The knowledge base's frame policy reaches the extractor: the cap and the
+// explicit interval are the values the operator configured, not the built-in
+// count.
+func TestConvertVideoPassesFrameSamplingToTheExtractor(t *testing.T) {
+	t.Parallel()
+
+	frames := &fakeVideoFrameExtractor{frames: []videoFrame{{StartMs: 0, Data: []byte("jpeg")}}}
+	svc := &knowledgeService{
+		repo:                &videoTestKnowledgeRepo{},
+		fileSvc:             &videoTestFileService{content: []byte("mp4-bytes")},
+		videoFrameExtractor: frames,
+		modelService:        &videoTestModelService{vlmModel: &videoTestVLM{replies: []string{"界面"}}},
+	}
+	knowledge := newVideoTestKnowledge()
+	kb := newKeyframeVideoKB()
+	kb.VideoConfig.MaxFrames = 20
+	kb.VideoConfig.FrameIntervalSeconds = 15
+
+	_, err := svc.convertVideo(newVideoTestContext(), newVideoTestPayload(knowledge), kb, knowledge)
+
+	require.NoError(t, err)
+	require.Equal(t, videoFrameSampling{MaxFrames: 20, Interval: 15 * time.Second}, frames.sampling)
 }
 
 // Frame descriptions use the video section's own vision model. The image
@@ -1301,23 +1329,67 @@ func TestFFmpegFrameExtractorReportsAMissingBinary(t *testing.T) {
 	t.Parallel()
 
 	extractor := &ffmpegFrameExtractor{binary: "weknora-test-ffmpeg-does-not-exist"}
-	_, err := extractor.ExtractKeyframes(newVideoTestContext(), bytes.NewReader(nil), "Lesson.mp4")
+	_, err := extractor.ExtractKeyframes(
+		newVideoTestContext(), bytes.NewReader(nil), "Lesson.mp4", videoFrameSampling{},
+	)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "is not available")
 }
 
 // The sampling policy is unit-testable without ffmpeg: a short clip samples
-// every second, a long one spreads its cap over the duration, and an unknown
-// duration falls back to the conservative default.
+// every second, a long one spreads its cap over the duration, an explicit
+// interval wins, and an unknown duration falls back to the conservative
+// default. The frame cap is clamped so a hand-edited row cannot turn ffmpeg
+// loose on thousands of frames.
 func TestVideoKeyframeInterval(t *testing.T) {
 	t.Parallel()
 
-	require.Equal(t, 3*time.Second, videoKeyframeInterval(30*time.Second))
-	require.Equal(t, time.Second, videoKeyframeInterval(5*time.Second))
-	require.Equal(t, 50*time.Second, videoKeyframeInterval(10*time.Minute))
-	require.Equal(t, 300*time.Second, videoKeyframeInterval(time.Hour))
-	require.Equal(t, videoKeyframeDefaultInterval, videoKeyframeInterval(0))
+	auto := videoFrameSampling{MaxFrames: types.DefaultVideoMaxFrames}
+	require.Equal(t, 3*time.Second, videoKeyframeInterval(30*time.Second, auto))
+	require.Equal(t, time.Second, videoKeyframeInterval(5*time.Second, auto))
+	require.Equal(t, 50*time.Second, videoKeyframeInterval(10*time.Minute, auto))
+	require.Equal(t, 300*time.Second, videoKeyframeInterval(time.Hour, auto))
+	require.Equal(t, videoKeyframeDefaultInterval, videoKeyframeInterval(0, auto))
+
+	// An explicit interval wins over the duration-derived one.
+	explicit := videoFrameSampling{MaxFrames: types.DefaultVideoMaxFrames, Interval: 7 * time.Second}
+	require.Equal(t, 7*time.Second, videoKeyframeInterval(10*time.Minute, explicit))
+	require.Equal(t, 7*time.Second, videoKeyframeInterval(0, explicit))
+
+	// The cap changes the step: 10 frames over a minute is one every six seconds.
+	tenFrames := videoFrameSampling{MaxFrames: 10}
+	require.Equal(t, 6*time.Second, videoKeyframeInterval(time.Minute, tenFrames))
+
+	// Out-of-range caps are clamped: 10000 -> 60, 0 -> the default 12.
+	require.Equal(t, time.Second, videoKeyframeInterval(30*time.Second, videoFrameSampling{MaxFrames: 10000}))
+	require.Equal(t, 3*time.Second, videoKeyframeInterval(30*time.Second, videoFrameSampling{MaxFrames: 0}))
+
+	// A sub-second / over-ceiling explicit interval is clamped, never passed
+	// to ffmpeg as fps=1/0.
+	require.Equal(t, time.Second,
+		videoKeyframeInterval(time.Minute, videoFrameSampling{Interval: 100 * time.Millisecond}))
+	require.Equal(t, time.Duration(types.MaxVideoFrameIntervalSeconds)*time.Second,
+		videoKeyframeInterval(time.Minute, videoFrameSampling{Interval: 99 * time.Hour}))
+}
+
+// The knowledge base's sampling fields are translated into the extractor's
+// policy with the same clamping: the pipeline must not depend on the caller
+// having Normalized the row first.
+func TestVideoSamplingForConfig(t *testing.T) {
+	t.Parallel()
+
+	sampling := videoSamplingForConfig(types.VideoConfig{MaxFrames: 20, FrameIntervalSeconds: 15})
+	require.Equal(t, 20, sampling.MaxFrames)
+	require.Equal(t, 15*time.Second, sampling.Interval)
+
+	sampling = videoSamplingForConfig(types.VideoConfig{})
+	require.Equal(t, types.DefaultVideoMaxFrames, sampling.MaxFrames)
+	require.Zero(t, sampling.Interval)
+
+	sampling = videoSamplingForConfig(types.VideoConfig{MaxFrames: 10000, FrameIntervalSeconds: -1})
+	require.Equal(t, types.MaxAllowedVideoFrames, sampling.MaxFrames)
+	require.Zero(t, sampling.Interval)
 }
 
 func TestParseFFmpegDuration(t *testing.T) {

@@ -31,11 +31,6 @@ const (
 	// videoAudioStderrBytes is how much ffmpeg diagnostics we keep for the
 	// degradation reason. ffmpeg can emit a lot on a broken container.
 	videoAudioStderrBytes = 4 << 10
-	// maxVideoKeyframes caps how many frames one video may send to the VLM.
-	// A one-hour training video sampled every five minutes still yields twelve
-	// captions; the cap is what keeps a long video from turning into hundreds
-	// of model calls, which is the whole cost of this mode.
-	maxVideoKeyframes = 12
 	// videoKeyframeMaxEdge bounds each frame's long edge before it is sent to
 	// the VLM. The model does not need more to read a dialog title or a
 	// terminal line, and a smaller input is both cheaper and faster.
@@ -68,11 +63,22 @@ type videoFrame struct {
 	Data    []byte
 }
 
+// videoFrameSampling is the per-knowledge-base frame sampling policy: the cap
+// on how many frames one video contributes and the step between them. Interval
+// zero means "derive the step from the duration and MaxFrames", which keeps
+// short clips dense and long ones sparse.
+type videoFrameSampling struct {
+	MaxFrames int
+	Interval  time.Duration
+}
+
 // videoFrameExtractor samples still frames from a stored video. Like the audio
 // extractor it is an interface, so unit tests never shell out to ffmpeg: the
 // tests pin the wiring from frames to captions to chunks, not the filter graph.
 type videoFrameExtractor interface {
-	ExtractKeyframes(ctx context.Context, src io.Reader, fileName string) ([]videoFrame, error)
+	ExtractKeyframes(
+		ctx context.Context, src io.Reader, fileName string, sampling videoFrameSampling,
+	) ([]videoFrame, error)
 }
 
 // ffmpegAudioExtractor shells out to the ffmpeg binary in the application
@@ -184,12 +190,13 @@ type ffmpegFrameExtractor struct {
 	timeout time.Duration
 }
 
-// ExtractKeyframes probes the duration, samples at most maxVideoKeyframes
+// ExtractKeyframes probes the duration, samples at most sampling.MaxFrames
 // frames, and returns them with their capture times. The temp directory is
 // removed on every path; only the bounded JPEG bytes are kept in memory.
 func (e *ffmpegFrameExtractor) ExtractKeyframes(
-	ctx context.Context, src io.Reader, fileName string,
+	ctx context.Context, src io.Reader, fileName string, sampling videoFrameSampling,
 ) ([]videoFrame, error) {
+	sampling = normalizeVideoFrameSampling(sampling)
 	binary := strings.TrimSpace(e.binary)
 	if binary == "" {
 		binary = "ffmpeg"
@@ -209,7 +216,7 @@ func (e *ffmpegFrameExtractor) ExtractKeyframes(
 		return nil, err
 	}
 
-	interval := videoKeyframeInterval(e.probeDuration(ctx, binary, inputPath))
+	interval := videoKeyframeInterval(e.probeDuration(ctx, binary, inputPath), sampling)
 	framesDir := filepath.Join(workDir, "frames")
 	if err := os.MkdirAll(framesDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create frame directory: %w", err)
@@ -233,7 +240,7 @@ func (e *ffmpegFrameExtractor) ExtractKeyframes(
 		"-y", "-nostdin", "-hide_banner", "-loglevel", "error",
 		"-i", inputPath,
 		"-vf", filter,
-		"-frames:v", strconv.Itoa(maxVideoKeyframes),
+		"-frames:v", strconv.Itoa(sampling.MaxFrames),
 		"-q:v", strconv.Itoa(videoKeyframeJPEGQuality),
 		filepath.Join(framesDir, "%04d.jpg"),
 	)
@@ -338,15 +345,54 @@ func parseFFmpegDuration(stderr string) time.Duration {
 	return time.Duration(total * float64(time.Second))
 }
 
-// videoKeyframeInterval spreads at most maxVideoKeyframes samples over the
-// duration. Short clips sample every second; a feature-length video samples
-// every few minutes. An unknown duration falls back to the conservative
-// default, which the frame cap still bounds.
-func videoKeyframeInterval(duration time.Duration) time.Duration {
+// videoSamplingForConfig reads the knowledge base's frame policy into the shape
+// the extractor consumes. Both fields are clamped here again because rows can
+// be older than the settings and because a hand-edited JSONB value must never
+// reach ffmpeg verbatim.
+func videoSamplingForConfig(config types.VideoConfig) videoFrameSampling {
+	return normalizeVideoFrameSampling(videoFrameSampling{
+		MaxFrames: config.EffectiveMaxFrames(),
+		Interval:  time.Duration(config.EffectiveFrameIntervalSeconds()) * time.Second,
+	})
+}
+
+// normalizeVideoFrameSampling clamps a sampling policy to the range the
+// pipeline supports: at least one frame, at most MaxAllowedVideoFrames, and a
+// step between one second and MaxVideoFrameIntervalSeconds. Interval zero means
+// "auto" and is preserved.
+func normalizeVideoFrameSampling(sampling videoFrameSampling) videoFrameSampling {
+	switch {
+	case sampling.MaxFrames <= 0:
+		sampling.MaxFrames = types.DefaultVideoMaxFrames
+	case sampling.MaxFrames > types.MaxAllowedVideoFrames:
+		sampling.MaxFrames = types.MaxAllowedVideoFrames
+	}
+	maxInterval := time.Duration(types.MaxVideoFrameIntervalSeconds) * time.Second
+	switch {
+	case sampling.Interval < 0:
+		sampling.Interval = 0
+	case sampling.Interval > 0 && sampling.Interval < time.Second:
+		sampling.Interval = time.Second
+	case sampling.Interval > maxInterval:
+		sampling.Interval = maxInterval
+	}
+	return sampling
+}
+
+// videoKeyframeInterval returns the sampling step. An explicit interval wins;
+// otherwise the frame cap is spread over the duration, so short clips sample
+// every second and a feature-length video samples every few minutes. An unknown
+// duration falls back to the conservative default, which the frame cap still
+// bounds.
+func videoKeyframeInterval(duration time.Duration, sampling videoFrameSampling) time.Duration {
+	sampling = normalizeVideoFrameSampling(sampling)
+	if sampling.Interval > 0 {
+		return sampling.Interval
+	}
 	if duration <= 0 {
 		return videoKeyframeDefaultInterval
 	}
-	seconds := int(math.Ceil(duration.Seconds() / float64(maxVideoKeyframes)))
+	seconds := int(math.Ceil(duration.Seconds() / float64(sampling.MaxFrames)))
 	if seconds < 1 {
 		seconds = 1
 	}
@@ -660,8 +706,9 @@ func (s *knowledgeService) describeVideoFrames(
 	payload types.DocumentProcessPayload,
 ) ([]types.VideoFrameDescription, error) {
 	var sampled []videoFrame
+	sampling := videoSamplingForConfig(kb.VideoConfig)
 	if err := s.withStoredVideo(ctx, kb, payload.FilePath, func(src io.Reader) error {
-		frames, err := s.frameExtractor().ExtractKeyframes(ctx, src, payload.FileName)
+		frames, err := s.frameExtractor().ExtractKeyframes(ctx, src, payload.FileName, sampling)
 		if err != nil {
 			return fmt.Errorf("extract keyframes: %w", err)
 		}

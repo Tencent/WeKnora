@@ -765,6 +765,21 @@ const (
 	VideoParseModeAudioKeyframes = "audio_and_keyframes"
 )
 
+const (
+	// DefaultVideoMaxFrames is how many frames one video may contribute when
+	// the knowledge base names no cap. It keeps a long training video from
+	// turning into hundreds of vision calls while still covering the timeline.
+	DefaultVideoMaxFrames = 12
+	// MaxAllowedVideoFrames bounds the configurable cap. Every frame is one
+	// vision call, so a typo in the JSONB column must not be able to send
+	// thousands of images to the model.
+	MaxAllowedVideoFrames = 60
+	// MaxVideoFrameIntervalSeconds bounds the explicit sampling step. Beyond
+	// one frame per hour the picture no longer describes the video, and the
+	// ceiling keeps the ffmpeg argument in a sane range.
+	MaxVideoFrameIntervalSeconds = 3600
+)
+
 // VideoConfig represents the video parsing configuration of a knowledge base.
 type VideoConfig struct {
 	// Enabled turns on video parsing. Off by default: an existing deployment
@@ -785,6 +800,13 @@ type VideoConfig struct {
 	// language code (for example "zh"). Empty means auto-detection, the
 	// vendors' default; it never inherits the audio section's hint.
 	Language string `yaml:"language,omitempty" json:"language,omitempty"`
+	// MaxFrames caps how many frames one video contributes. More frames see
+	// more of the picture and cost more vision calls; zero keeps the default.
+	MaxFrames int `yaml:"max_frames,omitempty" json:"max_frames,omitempty"`
+	// FrameIntervalSeconds samples one frame every N seconds. Zero derives the
+	// interval from the duration and MaxFrames, which keeps short clips dense
+	// and long ones sparse.
+	FrameIntervalSeconds int `yaml:"frame_interval_seconds,omitempty" json:"frame_interval_seconds,omitempty"`
 	// VLMConfig is the vision model that describes frames sampled from a
 	// video. It mirrors image processing's top-level vlm_config but is owned
 	// by the video pipeline: changing image parsing must never silently change
@@ -792,6 +814,35 @@ type VideoConfig struct {
 	// describe video frames. nil means "this section has no vision model", the
 	// same meaning as an empty VLMConfig, so old rows keep their exact JSON.
 	VLMConfig *VLMConfig `yaml:"vlm_config,omitempty" json:"vlm_config,omitempty"`
+}
+
+// EffectiveMaxFrames returns how many frames this video may contribute,
+// clamped to the supported range. It is safe to call on rows that were never
+// Normalized: an unset (zero) cap means the built-in default rather than zero
+// frames.
+func (c VideoConfig) EffectiveMaxFrames() int {
+	switch {
+	case c.MaxFrames <= 0:
+		return DefaultVideoMaxFrames
+	case c.MaxFrames > MaxAllowedVideoFrames:
+		return MaxAllowedVideoFrames
+	default:
+		return c.MaxFrames
+	}
+}
+
+// EffectiveFrameIntervalSeconds returns the configured sampling step in
+// seconds, clamped to the supported range. Zero means "derive it from the
+// duration and the frame cap", which is what the sampler does with it.
+func (c VideoConfig) EffectiveFrameIntervalSeconds() int {
+	switch {
+	case c.FrameIntervalSeconds < 0:
+		return 0
+	case c.FrameIntervalSeconds > MaxVideoFrameIntervalSeconds:
+		return MaxVideoFrameIntervalSeconds
+	default:
+		return c.FrameIntervalSeconds
+	}
 }
 
 // FrameVLM returns the video section's own vision configuration. It never
@@ -814,6 +865,12 @@ func (c *VideoConfig) Normalize() {
 	}
 	c.ModelID = strings.TrimSpace(c.ModelID)
 	c.Language = strings.TrimSpace(c.Language)
+	// Store the effective sampling policy so the JSONB column cannot keep a
+	// value the pipeline clamps anyway: zero frames or a negative step read as
+	// "unset" on load, and an out-of-range cap is brought back into the range
+	// the sampler enforces.
+	c.MaxFrames = c.EffectiveMaxFrames()
+	c.FrameIntervalSeconds = c.EffectiveFrameIntervalSeconds()
 	switch strings.TrimSpace(c.Mode) {
 	case "", VideoParseModeAudioOnly:
 		c.Mode = VideoParseModeAudioOnly
@@ -841,12 +898,16 @@ func (c *VideoConfig) Normalize() {
 
 // Equal reports whether two video configurations express the same setting. The
 // nested vision block is compared by value: Normalize hands out a fresh copy,
-// so a pointer comparison would report a change on every save.
+// so a pointer comparison would report a change on every save. The sampling
+// knobs compare by their effective value too: an old row with no cap and a row
+// normalized to the default both sample the same way.
 func (c VideoConfig) Equal(other VideoConfig) bool {
 	return c.Enabled == other.Enabled &&
 		c.Mode == other.Mode &&
 		c.ModelID == other.ModelID &&
 		c.Language == other.Language &&
+		c.EffectiveMaxFrames() == other.EffectiveMaxFrames() &&
+		c.EffectiveFrameIntervalSeconds() == other.EffectiveFrameIntervalSeconds() &&
 		c.FrameVLM() == other.FrameVLM()
 }
 

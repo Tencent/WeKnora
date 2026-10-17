@@ -354,7 +354,8 @@ func TestTooManySegmentsIsRefusedBeforeAnyRequest(t *testing.T) {
 	assert.Empty(t, inner.calls, "nothing may be sent")
 	assert.Empty(t, tool.cuts, "nothing may be cut")
 	assert.Contains(t, err.Error(), "needs 90 requests")
-	assert.Contains(t, err.Error(), "asr_max_segment_duration")
+	assert.Contains(t, err.Error(), MaxSegmentSecondsSettingKey,
+		"the message names the runtime setting an operator can raise")
 }
 
 // A duration that lands just over a multiple of the ceiling must not upload
@@ -571,4 +572,170 @@ func TestNewASRWrapsTheCutterInsideLangfuse(t *testing.T) {
 	_, ok = chunked.inner.(*protocolASR)
 	assert.True(t, ok, "the cutter must wrap the vendor client, got %T", chunked.inner)
 	assert.Equal(t, DefaultMaxSegmentDuration, chunked.maxSegment)
+}
+
+// fakeChunkingSettings stands in for SystemSettingService. A nil field answers
+// with the caller's default, which is exactly how the real resolver degrades
+// when the DB is empty or unavailable; the recorded arguments let a test prove
+// which key, ENV fallback and default the cutter asked for.
+type fakeChunkingSettings struct {
+	enabled *bool
+	seconds *int64
+
+	boolKeys []string
+	intKeys  []string
+	intEnvs  []string
+	intDefs  []int64
+}
+
+func (f *fakeChunkingSettings) GetBool(_ context.Context, key, _ string, def bool) bool {
+	f.boolKeys = append(f.boolKeys, key)
+	if f.enabled == nil {
+		return def
+	}
+	return *f.enabled
+}
+
+func (f *fakeChunkingSettings) GetInt(_ context.Context, key, envName string, def int64) int64 {
+	f.intKeys = append(f.intKeys, key)
+	f.intEnvs = append(f.intEnvs, envName)
+	f.intDefs = append(f.intDefs, def)
+	if f.seconds == nil {
+		return def
+	}
+	return *f.seconds
+}
+
+func boolPtr(value bool) *bool    { return &value }
+func int64Ptr(value int64) *int64 { return &value }
+
+// The switch defaults to off: no settings store, or a store that answers with
+// the defaults (empty DB / read failure), must leave the cutter disabled and
+// keep the deployment's segment ceiling.
+func TestRuntimeChunkingPolicyDefaultsToOff(t *testing.T) {
+	t.Cleanup(func() {
+		SetChunkingSettings(nil)
+		SetMediaDefaults(0, "", "")
+	})
+	SetChunkingSettings(nil)
+	SetMediaDefaults(0, "", "")
+
+	policy := RuntimeChunkingPolicy(context.Background())
+	require.False(t, policy.Enabled, "chunking must be off when no settings store is wired")
+	require.Equal(t, DefaultMaxSegmentDuration, policy.MaxSegment)
+
+	// An empty/unavailable store returns the caller's defaults; that must
+	// still read as off.
+	settings := &fakeChunkingSettings{}
+	SetChunkingSettings(settings)
+	SetMediaDefaults(90*time.Second, "", "")
+	policy = RuntimeChunkingPolicy(context.Background())
+	require.False(t, policy.Enabled)
+	require.Equal(t, 90*time.Second, policy.MaxSegment,
+		"the config/ENV default is the fallback when the setting is unset")
+	require.Equal(t, []string{LongAudioChunkingSettingKey}, settings.boolKeys)
+	require.Equal(t, []string{MaxSegmentSecondsSettingKey}, settings.intKeys)
+	require.Equal(t, []string{MaxSegmentSecondsEnvName}, settings.intEnvs)
+	require.Equal(t, []int64{90}, settings.intDefs)
+}
+
+// The runtime policy honours the DB override (enabled + segment length) and
+// clamps the length to the supported range even for a hand-edited row.
+func TestRuntimeChunkingPolicyReadsThePlatformSettings(t *testing.T) {
+	t.Cleanup(func() {
+		SetChunkingSettings(nil)
+		SetMediaDefaults(0, "", "")
+	})
+	SetMediaDefaults(120*time.Second, "", "")
+
+	cases := []struct {
+		name      string
+		enabled   bool
+		seconds   int64
+		wantOn    bool
+		wantLimit time.Duration
+	}{
+		{name: "off keeps env default", enabled: false, seconds: 45, wantLimit: 45 * time.Second},
+		{name: "on uses configured length", enabled: true, seconds: 45, wantOn: true, wantLimit: 45 * time.Second},
+		{name: "below the floor", enabled: true, seconds: 5, wantOn: true, wantLimit: 30 * time.Second},
+		{name: "above the ceiling", enabled: true, seconds: 10000, wantOn: true, wantLimit: 300 * time.Second},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			SetChunkingSettings(&fakeChunkingSettings{
+				enabled: boolPtr(tc.enabled), seconds: int64Ptr(tc.seconds),
+			})
+			policy := RuntimeChunkingPolicy(context.Background())
+			require.Equal(t, tc.wantOn, policy.Enabled)
+			require.Equal(t, tc.wantLimit, policy.MaxSegment)
+		})
+	}
+}
+
+// With the switch off a long recording goes to the vendor whole: one call, no
+// probe, no cut. This is the pre-switch behaviour the default preserves.
+func TestChunkedASRLeavesLongAudioWholeWhenTheSwitchIsOff(t *testing.T) {
+	inner := &fakeASR{}
+	tool := &fakeMediaTool{duration: 10 * time.Minute}
+	cutter := newTestChunked(inner, tool, 120*time.Second)
+	cutter.policy = func(context.Context) ChunkingPolicy {
+		return ChunkingPolicy{Enabled: false, MaxSegment: 120 * time.Second}
+	}
+
+	result, err := cutter.Transcribe(context.Background(), []byte("ten-minutes"), "long.mp3")
+
+	require.NoError(t, err)
+	require.Equal(t, "text:long.mp3", result.Text)
+	require.Len(t, inner.calls, 1, "the vendor must be called once with the whole file")
+	require.Equal(t, "long.mp3", inner.calls[0].fileName)
+	require.Equal(t, []byte("ten-minutes"), inner.calls[0].audio)
+	require.Zero(t, tool.probes, "the cutter must not even measure when the switch is off")
+	require.Empty(t, tool.cuts)
+}
+
+// With the switch on the recording is cut, and the runtime ceiling wins over
+// the deployment default the cutter was built with.
+func TestChunkedASRUsesTheRuntimeSegmentCeiling(t *testing.T) {
+	inner := &fakeASR{}
+	tool := &fakeMediaTool{duration: 61 * time.Second}
+	cutter := newTestChunked(inner, tool, 120*time.Second)
+	cutter.policy = func(context.Context) ChunkingPolicy {
+		return ChunkingPolicy{Enabled: true, MaxSegment: 30 * time.Second}
+	}
+
+	result, err := cutter.Transcribe(context.Background(), []byte("one-minute"), "long.mp3")
+
+	require.NoError(t, err)
+	require.Len(t, inner.calls, 3)
+	require.Equal(t, 1, tool.probes)
+	require.Equal(t, [][2]time.Duration{
+		{0, 30 * time.Second},
+		{30 * time.Second, 30 * time.Second},
+		{60 * time.Second, time.Second},
+	}, cutWindows(tool.cuts))
+	require.Equal(t, 61.0, result.Duration)
+	require.Len(t, result.Segments, 3)
+}
+
+// newChunkedASR must wire the runtime resolver, and a model row that pins its
+// own ceiling must keep it while the platform switch still decides whether the
+// cut runs.
+func TestNewChunkedASRWiresTheRuntimeChunkingPolicy(t *testing.T) {
+	t.Cleanup(func() { SetChunkingSettings(nil) })
+
+	SetChunkingSettings(&fakeChunkingSettings{enabled: boolPtr(true), seconds: int64Ptr(45)})
+	policy := newChunkedASR(&fakeASR{}, nil).(*chunkedASR).policy(context.Background())
+	require.True(t, policy.Enabled)
+	require.Equal(t, 45*time.Second, policy.MaxSegment)
+
+	pinned := newChunkedASR(&fakeASR{}, &Config{MaxSegmentDuration: 300 * time.Second}).(*chunkedASR)
+	policy = pinned.policy(context.Background())
+	require.True(t, policy.Enabled, "the switch still applies to a pinned model row")
+	require.Equal(t, 300*time.Second, policy.MaxSegment,
+		"a model row's own ceiling overrides the platform value")
+
+	SetChunkingSettings(&fakeChunkingSettings{enabled: boolPtr(false), seconds: int64Ptr(45)})
+	policy = pinned.policy(context.Background())
+	require.False(t, policy.Enabled, "the switch is off, the pinned ceiling cannot turn it on")
 }

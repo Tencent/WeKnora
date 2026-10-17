@@ -3949,6 +3949,10 @@ export default {
         }
       },
       keyDescriptions: {
+        asr: {
+          long_audio_chunking_enabled: '是否把超过厂商上限的长音频切段后分段转写。关闭时整段音频直接交给厂商，超长会失败；开启后按「单段音频时长」切分并合并结果。每次转写实时读取，修改后立即生效、无需重启。默认关闭。',
+          max_segment_seconds: '长音频切段的单段时长（秒，30-300）。仅在开启「长音频切段」后生效；每次转写实时读取，修改后立即生效。默认 120 秒。'
+        },
         model: {
           max_concurrency: '后台任务（文档入库/富化）对单个模型的默认并发上限，按模型 ID 全副本共享。每次调用实时读取，修改后立即生效、无需重启。0 或负数表示关闭默认限制（各模型仍会尊重自身在模型管理里配置的上限）。仅影响后台任务，不影响交互式对话。'
         },
@@ -3980,6 +3984,10 @@ export default {
         }
       },
       keyLabels: {
+        asr: {
+          long_audio_chunking_enabled: '长音频切段',
+          max_segment_seconds: '单段音频时长（秒）'
+        },
         model: {
           max_concurrency: '模型默认并发上限'
         },
@@ -4218,6 +4226,10 @@ export default {
         }
       },
       sections: {
+        asr: {
+          title: '语音识别',
+          description: '配置长音频转写：默认整段交给厂商，超过上限会失败；可开启切段后分段转写并合并结果。修改后立即生效，无需重启。'
+        },
         other: {
           title: '其他配置',
           description: '当前部署中未归入标准分组的配置项。'
@@ -4701,9 +4713,9 @@ export default {
       modeAudioOnly: '仅语音转写（轻量）',
       modeAudioOnlyDesc: '只转写旁白，不描述画面：一次 ASR 调用，最快最省。',
       modeKeyframes: '关键帧画面描述',
-      modeKeyframesDesc: '只描述画面，不做语音：按视频时长均匀抽取最多 12 帧交给视觉模型，适合课件、演示录屏。',
+      modeKeyframesDesc: '只描述画面，不做语音：按视频时长均匀抽取最多 12 帧（可配置）交给视觉模型，适合课件、演示录屏。',
       modeAudioKeyframes: '语音 + 画面描述（标准）',
-      modeAudioKeyframesDesc: '旁白转写与画面描述都做，并按时间合并：效果最完整，成本也最高（ASR + 最多 12 次视觉调用）。',
+      modeAudioKeyframesDesc: '旁白转写与画面描述都做，并按时间合并：效果最完整，成本也最高（ASR + 最多 12 次视觉调用，帧数可配置）。',
       modelLabel: '视频 ASR 模型',
       modelDescription: '仅用于本知识库的视频旁白转写，不影响「音频处理」的选择。',
       modelPlaceholder: '选择视频转写用的 ASR 模型',
@@ -4712,7 +4724,11 @@ export default {
       languageLabel: '转写语言',
       languageDescription: '视频旁白的语言提示；留空则自动检测。与「音频处理」的语言设置无关。',
       languagePlaceholder: '例如 zh、en，留空自动检测',
-      vlmHint: '画面描述使用「视频处理」页自己的视觉模型，最多抽取 12 帧。',
+      vlmHint: '画面描述使用「视频处理」页自己的视觉模型；抽取帧数与采样间隔可在下方调整。',
+      maxFramesLabel: '最多抽帧数',
+      maxFramesDescription: '一次视频最多抽取多少帧交给视觉模型（1-60）。帧越多看到的画面越多，视觉调用成本也越高；默认 12。',
+      frameIntervalLabel: '采样间隔（秒）',
+      frameIntervalDescription: '每隔多少秒抽取一帧（0-3600）。0 表示按视频时长与「最多抽帧数」自动计算：短视频抽得密、长视频抽得疏。',
       vlmRequired: '尚未选择视频画面视觉模型，画面描述无法生成，视频将保持仅存档；请先在「视频处理」中选择。',
       vlmPartial: '尚未选择视频画面视觉模型，本次只转写旁白，画面描述会被跳过。',
       vlmLabel: '画面视觉模型（VLM）',

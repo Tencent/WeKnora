@@ -378,7 +378,7 @@ const savedKey = ref<string | null>(null)
 const saveAnnouncement = ref('')
 let savedKeyTimer: ReturnType<typeof setTimeout> | null = null
 
-type SettingsSection = 'users' | 'access' | 'tenant' | 'runtime' | 'security' | 'other'
+type SettingsSection = 'users' | 'access' | 'tenant' | 'runtime' | 'asr' | 'security' | 'other'
 
 // Product-oriented order, rather than the registry's alphabetical key order.
 // Unknown/out-of-band rows remain visible in a conditional "Other" tab so the
@@ -406,6 +406,10 @@ const SETTINGS_SECTION_KEYS: Record<Exclude<SettingsSection, 'other' | 'users'>,
     'asynq.wiki_concurrency',
     'model.max_concurrency',
   ],
+  asr: [
+    'asr.long_audio_chunking_enabled',
+    'asr.max_segment_seconds',
+  ],
   security: ['ssrf.whitelist', 'sandbox.docker_enabled'],
 }
 
@@ -421,6 +425,7 @@ const sectionTabs = computed(() => {
     { key: 'users', icon: 'usergroup', label: t('system.globalSettings.userList.rowLabel') },
     { key: 'tenant', icon: 'folder', label: t('system.globalSettings.sections.tenant.title') },
     { key: 'runtime', icon: 'server', label: t('system.globalSettings.sections.runtime.title') },
+    { key: 'asr', icon: 'audio', label: t('system.globalSettings.sections.asr.title') },
     { key: 'security', icon: 'secured', label: t('system.globalSettings.sections.security.title') },
   ]
   if (hasUnknownSettings.value) tabs.push({ key: 'other', icon: 'ellipsis', label: t('system.globalSettings.sections.other.title') })
@@ -627,6 +632,9 @@ function placeholderFor(item: SystemSettingItem): string {
 
 function minimumFor(item: SystemSettingItem): number {
   if (item.key.startsWith('asynq.') && item.key.endsWith('_concurrency')) return 1
+  // Mirrors asr.MinMaxSegmentSeconds on the backend; the handler rejects
+  // anything below it with an inline error.
+  if (item.key === 'asr.max_segment_seconds') return 30
   return 0
 }
 

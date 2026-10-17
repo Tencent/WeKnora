@@ -3993,9 +3993,9 @@ export default {
       modeAudioOnly: 'Speech transcription only (lightweight)',
       modeAudioOnlyDesc: 'Transcribes the narration and skips the picture: one ASR call, fastest and cheapest.',
       modeKeyframes: 'Keyframe descriptions',
-      modeKeyframesDesc: 'Describes the picture without transcribing speech: up to 12 evenly spaced frames go to the vision model; good for slides and demo recordings.',
+      modeKeyframesDesc: 'Describes the picture without transcribing speech: up to 12 evenly spaced frames (configurable) go to the vision model; good for slides and demo recordings.',
       modeAudioKeyframes: 'Speech + keyframe descriptions (standard)',
-      modeAudioKeyframesDesc: 'Transcribes the narration and describes the picture, merged in time order: the most complete option, and the most expensive (ASR plus up to 12 vision calls).',
+      modeAudioKeyframesDesc: 'Transcribes the narration and describes the picture, merged in time order: the most complete option, and the most expensive (ASR plus up to 12 vision calls; the frame count is configurable).',
       modelLabel: 'Video ASR model',
       modelDescription: 'Used only for this knowledge base’s video narration; the Audio selection is unaffected.',
       modelPlaceholder: 'Select the ASR model for video transcription',
@@ -4004,7 +4004,11 @@ export default {
       languageLabel: 'Transcription language',
       languageDescription: 'Language hint for the video narration; leave empty to auto-detect. It is independent of the Audio language setting.',
       languagePlaceholder: 'For example zh or en; empty means auto-detect',
-      vlmHint: 'Frame descriptions use this video section’s own vision model; at most 12 frames are sampled.',
+      vlmHint: 'Frame descriptions use this video section’s own vision model; adjust how many frames are sampled and how often below.',
+      maxFramesLabel: 'Max frames',
+      maxFramesDescription: 'How many frames one video may send to the vision model (1–60). More frames see more of the picture and cost more vision calls; default 12.',
+      frameIntervalLabel: 'Sampling interval (seconds)',
+      frameIntervalDescription: 'Sample one frame every N seconds (0–3600). 0 derives the interval from the video duration and the frame cap, keeping short clips dense and long ones sparse.',
       vlmRequired: 'No vision model is selected for video frames, so frames cannot be described and the video stays archived. Select a vision model under Video Processing.',
       vlmPartial: 'No vision model is selected for video frames, so this run only transcribes the narration and skips frame descriptions.',
       vlmLabel: 'Frame vision model (VLM)',
@@ -4505,6 +4509,10 @@ export default {
         tier3: 'To put an item back under environment-variable control, click the "Reset" button on its row.'
       },
       sections: {
+        asr: {
+          title: 'Speech recognition',
+          description: 'Configure long-audio transcription: by default the whole file goes to the vendor and over-long files fail; enable chunking to cut, transcribe and merge. Changes apply immediately without a restart.'
+        },
         access: {
           title: 'Registration & access',
           description: 'Manage registration, password requirements, and workspace-creation rules.'
@@ -4735,6 +4743,10 @@ export default {
         }
       },
       keyLabels: {
+        asr: {
+          long_audio_chunking_enabled: 'Long-audio chunking',
+          max_segment_seconds: 'Segment length (seconds)'
+        },
         auth: {
           registration_mode: 'Registration mode',
           default_tenant_mode: 'Default workspace provisioning',
@@ -4766,6 +4778,10 @@ export default {
         }
       },
       keyDescriptions: {
+        asr: {
+          long_audio_chunking_enabled: 'Cut recordings longer than the vendor ceiling into pieces and transcribe them separately. Off: the whole recording goes to the vendor and an over-long file fails. On: the pieces are transcribed and merged. Read on every transcription, so changes apply immediately without a restart. Default off.',
+          max_segment_seconds: 'Length of one piece when long-audio chunking is on (30-300 seconds). Only used when the switch above is on; read on every transcription, so changes apply immediately. Default 120 seconds.'
+        },
         auth: {
           registration_mode: 'Registration mode. Open registration allows anyone to create an account; invitation registration requires a valid invitation link; disabled registration prevents account creation while existing accounts can still accept invitations. Changes take effect immediately.',
           default_tenant_mode: 'Workspace provisioning after public registration. create_personal creates an Owner workspace; tenantless creates only the account until the user accepts an invitation or creates a workspace. Applies to new users only.',

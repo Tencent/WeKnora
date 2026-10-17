@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -116,6 +117,114 @@ func binaryOrDefault(configured, fallback string) string {
 	return fallback
 }
 
+// Platform setting keys and bounds for the long-audio cutter. They are exported
+// so the system-settings registry (application layer) can validate the same
+// range the cutter enforces, and so the ENV name stays in one place.
+const (
+	// LongAudioChunkingSettingKey is the platform switch that enables cutting
+	// recordings over the vendor ceiling. Default false: an existing
+	// deployment keeps sending the file whole and letting the vendor refuse
+	// it, exactly as before the switch existed.
+	LongAudioChunkingSettingKey = "asr.long_audio_chunking_enabled"
+	// MaxSegmentSecondsSettingKey is the ceiling, in seconds, for one piece.
+	// It overrides the ENV / config default at runtime.
+	MaxSegmentSecondsSettingKey = "asr.max_segment_seconds"
+	// MaxSegmentSecondsEnvName is the legacy environment variable consulted
+	// when the DB row is absent.
+	MaxSegmentSecondsEnvName = "WEKNORA_ASR_MAX_SEGMENT_SECONDS"
+	// DefaultMaxSegmentSeconds is the built-in ceiling expressed in seconds.
+	DefaultMaxSegmentSeconds = int(DefaultMaxSegmentDuration / time.Second)
+	// MinMaxSegmentSeconds and MaxMaxSegmentSeconds bound the configurable
+	// ceiling. The floor keeps a cut from turning into hundreds of requests;
+	// the ceiling is under the most permissive vendor limit we know of.
+	MinMaxSegmentSeconds = 30
+	MaxMaxSegmentSeconds = 300
+)
+
+// ChunkingSettings is the narrow, read-only view of the platform settings
+// store the cutter needs. It mirrors the resolver methods on
+// SystemSettingService so the application layer can hand that service over
+// directly, without this package importing it (the dependency points the other
+// way: the service builds ASR clients).
+type ChunkingSettings interface {
+	GetBool(ctx context.Context, key string, envName string, def bool) bool
+	GetInt(ctx context.Context, key string, envName string, def int64) int64
+}
+
+var (
+	chunkingSettingsMu sync.RWMutex
+	chunkingSettings   ChunkingSettings
+)
+
+// SetChunkingSettings installs the platform settings reader. Called once at
+// startup (the container passes the SystemSettingService). Reads happen on
+// every Transcribe, so a value changed in the management UI applies to the next
+// recording without a restart; the settings service itself serves them from its
+// in-process cache, which keeps that read off the database.
+//
+// Passing nil restores the built-in default (chunking off) — useful in tests
+// and in a deployment that has no system-settings store.
+func SetChunkingSettings(settings ChunkingSettings) {
+	chunkingSettingsMu.Lock()
+	chunkingSettings = settings
+	chunkingSettingsMu.Unlock()
+}
+
+func currentChunkingSettings() ChunkingSettings {
+	chunkingSettingsMu.RLock()
+	defer chunkingSettingsMu.RUnlock()
+	return chunkingSettings
+}
+
+// ChunkingPolicy is the runtime decision applied to one transcription.
+type ChunkingPolicy struct {
+	// Enabled reports whether a recording over MaxSegment is cut and sent in
+	// pieces. Off is the default and takes the untouched path: the vendor
+	// receives the whole file and decides whether it accepts it.
+	Enabled bool
+	// MaxSegment is the longest piece one request may carry. Zero leaves the
+	// caller's fallback in place.
+	MaxSegment time.Duration
+}
+
+// ChunkingPolicyFunc resolves the policy for one transcription. It is a
+// function (not a stored value) so runtime edits apply without rebuilding the
+// ASR client: the service reads the switch and the ceiling on every call.
+type ChunkingPolicyFunc func(ctx context.Context) ChunkingPolicy
+
+// RuntimeChunkingPolicy resolves the platform switch and segment ceiling. Both
+// reads go through the SystemSettingService resolver, which is cached in
+// memory, prefers the DB row over the ENV fallback, and already degrades to the
+// caller's default on a read failure — so this function returns "off" rather
+// than an error when the settings store is missing or broken.
+//
+// An absent settings reader means the feature is not wired: the cut stays off,
+// which is the safe default and preserves the pre-switch behaviour.
+func RuntimeChunkingPolicy(ctx context.Context) ChunkingPolicy {
+	fallback := currentMediaSettings()
+	policy := ChunkingPolicy{Enabled: false, MaxSegment: fallback.maxSegment}
+	settings := currentChunkingSettings()
+	if settings == nil {
+		return policy
+	}
+	policy.Enabled = settings.GetBool(ctx, LongAudioChunkingSettingKey, "", false)
+	defaultSeconds := int64(fallback.maxSegment / time.Second)
+	seconds := settings.GetInt(ctx, MaxSegmentSecondsSettingKey, MaxSegmentSecondsEnvName, defaultSeconds)
+	policy.MaxSegment = time.Duration(clampMaxSegmentSeconds(seconds)) * time.Second
+	return policy
+}
+
+func clampMaxSegmentSeconds(seconds int64) int64 {
+	switch {
+	case seconds < MinMaxSegmentSeconds:
+		return MinMaxSegmentSeconds
+	case seconds > MaxMaxSegmentSeconds:
+		return MaxMaxSegmentSeconds
+	default:
+		return seconds
+	}
+}
+
 // mediaTool is the ffprobe/ffmpeg surface the cutter needs. It is an
 // interface so the unit tests drive the merge, the fallbacks and the
 // per-segment failures without a binary; ffmpegTool is the real one.
@@ -140,19 +249,44 @@ type mediaTool interface {
 // document and the model test button all call Transcribe the same way.
 type chunkedASR struct {
 	inner ASR
-	// maxSegment is the longest audio one request may carry.
+	// maxSegment is the fallback ceiling used when the runtime policy names
+	// none (a directly constructed cutter, or a model row that pinned its own).
 	maxSegment time.Duration
 	// tool measures and cuts the audio. newChunkedASR builds the ffmpeg-backed
 	// implementation from the configured binary paths.
 	tool mediaTool
+	// policy, when non-nil, is consulted on every Transcribe so the platform
+	// switch and ceiling apply without rebuilding the client. nil keeps the
+	// always-on behaviour of a cutter built directly (tests, or an explicit
+	// per-model opt-in).
+	policy ChunkingPolicyFunc
 }
 
 func (c *chunkedASR) GetModelName() string { return c.inner.GetModelName() }
 func (c *chunkedASR) GetModelID() string   { return c.inner.GetModelID() }
 
+// resolvePolicy returns the ceiling to plan with and whether cutting is on.
+// A nil policy keeps the legacy always-on behaviour, so a directly constructed
+// cutter (tests, or a caller that opted in explicitly) still segments its
+// audio; a wired policy is re-read on every call, which is what makes the
+// platform switch runtime-tunable.
+func (c *chunkedASR) resolvePolicy(ctx context.Context) (time.Duration, bool) {
+	if c.policy == nil {
+		return c.maxSegment, true
+	}
+	active := c.policy(ctx)
+	maxSegment := c.maxSegment
+	if active.MaxSegment > 0 {
+		maxSegment = active.MaxSegment
+	}
+	return maxSegment, active.Enabled
+}
+
 // Transcribe measures the audio, and takes the untouched path — same bytes,
-// same file name, one vendor call — for anything that fits in one request.
-// Only a recording over the ceiling is cut and transcribed piece by piece.
+// same file name, one vendor call — for anything that fits in one request. When
+// the platform switch is on, a recording over the ceiling is cut and
+// transcribed piece by piece; when it is off (the default) the whole file goes
+// to the vendor, exactly as before the switch existed.
 //
 // Everything that can go wrong before a piece exists falls back to sending the
 // whole file, because the vendor is the better judge of what it accepts: a
@@ -167,7 +301,8 @@ func (c *chunkedASR) GetModelID() string   { return c.inner.GetModelID() }
 func (c *chunkedASR) Transcribe(
 	ctx context.Context, audioBytes []byte, fileName string,
 ) (*TranscriptionResult, error) {
-	if len(audioBytes) == 0 || c.maxSegment <= 0 {
+	maxSegment, enabled := c.resolvePolicy(ctx)
+	if !enabled || len(audioBytes) == 0 || maxSegment <= 0 {
 		return c.inner.Transcribe(ctx, audioBytes, fileName)
 	}
 
@@ -192,19 +327,19 @@ func (c *chunkedASR) Transcribe(
 		logger.Warnf(ctx, "[ASR] Cannot measure %s: %v; sending it whole", fileName, err)
 		return c.inner.Transcribe(ctx, audioBytes, fileName)
 	}
-	if total <= c.maxSegment {
+	if total <= maxSegment {
 		return c.inner.Transcribe(ctx, audioBytes, fileName)
 	}
 
-	windows := planSegments(total, c.maxSegment)
+	windows := planSegments(total, maxSegment)
 	if len(windows) > maxAudioSegments {
 		return nil, fmt.Errorf(
 			"audio is %s and needs %d requests of %s each, over this deployment's ceiling of %d; "+
-				"raise asr_max_segment_duration or send a shorter recording",
-			total, len(windows), c.maxSegment, maxAudioSegments)
+				"raise %s or send a shorter recording",
+			total, len(windows), maxSegment, maxAudioSegments, MaxSegmentSecondsSettingKey)
 	}
 	logger.Infof(ctx, "[ASR] %s is %s, over the %s request ceiling; transcribing %d segments",
-		fileName, total, c.maxSegment, len(windows))
+		fileName, total, maxSegment, len(windows))
 
 	merged := &TranscriptionResult{
 		Duration: total.Seconds(),
@@ -471,7 +606,10 @@ func commandStderr(err error) string {
 // newChunkedASR wraps a vendor client with the cutter. The segment ceiling and
 // the binaries come from the model row when it names them and from the
 // deployment's settings otherwise, so an operator can move the ceiling for the
-// whole process without touching a stored model.
+// whole process without touching a stored model. The platform switch decides
+// whether long audio is cut at all; it is looked up on every transcription, so
+// turning it on or off in the management UI applies to the next recording
+// without a restart.
 func newChunkedASR(inner ASR, config *Config) ASR {
 	settings := currentMediaSettings()
 	if config != nil {
@@ -485,9 +623,21 @@ func newChunkedASR(inner ASR, config *Config) ASR {
 			settings.ffprobePath = path
 		}
 	}
-	return &chunkedASR{
+	cutter := &chunkedASR{
 		inner:      inner,
 		maxSegment: settings.maxSegment,
 		tool:       newFFmpegTool(settings.ffmpegPath, settings.ffprobePath),
+		policy:     RuntimeChunkingPolicy,
 	}
+	// A model row that pins its own ceiling keeps that ceiling, but the
+	// platform switch still decides whether cutting happens.
+	if config != nil && config.MaxSegmentDuration > 0 {
+		pinned := config.MaxSegmentDuration
+		cutter.policy = func(ctx context.Context) ChunkingPolicy {
+			policy := RuntimeChunkingPolicy(ctx)
+			policy.MaxSegment = pinned
+			return policy
+		}
+	}
+	return cutter
 }

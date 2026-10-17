@@ -341,14 +341,19 @@ export function createKnowledgeBase(data: {
   // Video parsing. mode picks narration (audio_only), pictures (keyframes) or
   // both (audio_and_keyframes). model_id is the video's own ASR model — empty
   // means no narration model, never a fallback to the audio section. language
-  // is the video's own ASR hint; empty means auto-detect. vlm_config is the
-  // video's own frame-description model and prompt, independent of the image
-  // section's vlm_config.
+  // is the video's own ASR hint; empty means auto-detect. max_frames caps how
+  // many frames the video contributes (1-60, default 12);
+  // frame_interval_seconds samples one frame every N seconds (0 = derive the
+  // step from the duration and max_frames). vlm_config is the video's own
+  // frame-description model and prompt, independent of the image section's
+  // vlm_config.
   video_config?: {
     enabled: boolean;
     mode?: string;
     model_id?: string;
     language?: string;
+    max_frames?: number;
+    frame_interval_seconds?: number;
     vlm_config?: {
       enabled: boolean;
       model_id?: string;
@@ -401,12 +406,14 @@ export function updateKnowledgeBase(id: string, data: {
     profile_config?: KnowledgeBaseProfileConfig;
     // Omit to leave the video switch unchanged (the server treats nil that way).
     // Once sent, the whole video_config is replaced, including its own
-    // frame-description vlm_config block.
+    // frame-description vlm_config block and frame sampling policy.
     video_config?: {
       enabled: boolean;
       mode?: string;
       model_id?: string;
       language?: string;
+      max_frames?: number;
+      frame_interval_seconds?: number;
       vlm_config?: {
         enabled: boolean;
         model_id?: string;
