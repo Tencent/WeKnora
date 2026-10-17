@@ -28,6 +28,7 @@ own bytes — so a page that cannot be corrected is read as the original
 photograph instead of something worse.
 """
 import logging
+import os
 import threading
 
 import cv2
@@ -36,11 +37,81 @@ from rapidocr import RapidOCR
 
 logger = logging.getLogger(__name__)
 
-# Tuned on the 17-image benchmark; see the R22 handover document.
-PAD = 0.015
-MIN_SCORE = 0.5
-ANG_TOL = 15.0
-SIZE_MIN = 0.35
+# The thresholds, tuned on the 17-image benchmark (see the R22 handover
+# document). Each one can be overridden for a debugging run through the
+# environment — WEKNORA_PREPROCESS_<NAME> — because re-tuning a constant meant
+# rebuilding the image, which is a long way round to answer "what happens if
+# this page is scored a little differently".
+#
+# The default IS the tuned value; an override is validated against a range and
+# a bad one is refused rather than clamped, so a typo cannot quietly run the
+# pipeline at a value nobody chose. The set in force is named in the server's
+# startup log, so a run's output can be read back against the tuning that
+# produced it.
+DEFAULT_PAD = 0.015
+DEFAULT_MIN_SCORE = 0.5
+DEFAULT_ANG_TOL = 15.0
+DEFAULT_SIZE_MIN = 0.35
+DEFAULT_QUAD_TOL = -0.02
+
+_ENV_PREFIX = "WEKNORA_PREPROCESS_"
+
+# name -> (default, low, high). The range is what the value has to mean
+# something in, not a second tuning: PAD is a fraction of the page side,
+# MIN_SCORE and SIZE_MIN are fractions, ANG_TOL is an angle in degrees, and
+# QUAD_TOL is a negative allowance relative to the quad's longer side.
+_THRESHOLDS = {
+    "PAD": (DEFAULT_PAD, 0.0, 0.2),
+    "MIN_SCORE": (DEFAULT_MIN_SCORE, 0.0, 1.0),
+    "ANG_TOL": (DEFAULT_ANG_TOL, 0.0, 90.0),
+    "SIZE_MIN": (DEFAULT_SIZE_MIN, 0.0, 1.0),
+    "QUAD_TOL": (DEFAULT_QUAD_TOL, -0.5, 0.0),
+}
+
+
+def resolve_threshold(name: str, raw: "str | None") -> float:
+    """The value one threshold takes for one raw environment string.
+
+    Unset or blank means the tuned default. Anything else has to parse as a
+    number inside the threshold's range, or the default is used and the reason
+    is logged — a refused override is louder than a silent one.
+    """
+    default, low, high = _THRESHOLDS[name]
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("%s%s=%r is not a number; using the default %g", _ENV_PREFIX, name, raw, default)
+        return default
+    if not low <= value <= high:
+        logger.warning("%s%s=%g is outside [%g, %g]; using the default %g",
+                       _ENV_PREFIX, name, value, low, high, default)
+        return default
+    return value
+
+
+PAD = resolve_threshold("PAD", os.environ.get(_ENV_PREFIX + "PAD"))
+MIN_SCORE = resolve_threshold("MIN_SCORE", os.environ.get(_ENV_PREFIX + "MIN_SCORE"))
+ANG_TOL = resolve_threshold("ANG_TOL", os.environ.get(_ENV_PREFIX + "ANG_TOL"))
+SIZE_MIN = resolve_threshold("SIZE_MIN", os.environ.get(_ENV_PREFIX + "SIZE_MIN"))
+QUAD_TOL = resolve_threshold("QUAD_TOL", os.environ.get(_ENV_PREFIX + "QUAD_TOL"))
+
+
+def effective_thresholds() -> dict:
+    """The thresholds this process is running with, by name.
+
+    The server logs this once at startup (see docreader.main), so the output of
+    a debugging run can be read back against the tuning that produced it. It is
+    not logged from here: this module is imported before the log level is set.
+    """
+    return {
+        "PAD": PAD,
+        "MIN_SCORE": MIN_SCORE,
+        "ANG_TOL": ANG_TOL,
+        "SIZE_MIN": SIZE_MIN,
+        "QUAD_TOL": QUAD_TOL,
+    }
 
 # RapidOCR instances carry mutable state: parameters are written onto the
 # instance (update_params -> setattr), so calling ocr(img, use_cls=...) changes
@@ -218,9 +289,9 @@ def fit_quad(pts):
 
     The supporting lines enclose every point, so a first attempt can come back
     with a few outliers still inside the tolerance band; those are dropped and
-    the quad is refitted, which is why the loop exists. `tol` is a negative
-    allowance: a point is accepted while it is no further outside than 2% of the
-    quad's longer side.
+    the quad is refitted, which is why the loop exists. `QUAD_TOL` is a negative
+    allowance: a point is accepted while it is no further outside than that
+    fraction of the quad's longer side.
     """
     quad = None
     for _ in range(3):
@@ -237,7 +308,7 @@ def fit_quad(pts):
         quad = np.array(corners, "float32")
         xr = quad[:, 0].max() - quad[:, 0].min()
         yr = quad[:, 1].max() - quad[:, 1].min()
-        tol = -0.02 * max(xr, yr)
+        tol = QUAD_TOL * max(xr, yr)
         inside = np.array([cv2.pointPolygonTest(quad, (float(p[0]), float(p[1])), True) >= tol
                            for p in pts])
         if inside.all():

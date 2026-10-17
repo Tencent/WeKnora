@@ -21,8 +21,12 @@ import numpy as np
 
 from docreader.parser.image_preprocess import (
     ANG_TOL,
+    DEFAULT_PAD,
+    MIN_SCORE,
     PAD,
+    QUAD_TOL,
     SIZE_MIN,
+    _THRESHOLDS as THRESHOLDS,
     _boundary_line,
     _intersect,
     _tls,
@@ -30,9 +34,11 @@ from docreader.parser.image_preprocess import (
     box_angle,
     choose_rotation,
     dominant_angle,
+    effective_thresholds,
     filter_items,
     fit_quad,
     order_pts,
+    resolve_threshold,
     warp,
     wrap90,
 )
@@ -269,6 +275,54 @@ class WarpTest(unittest.TestCase):
         _, padded = warp(img, quad)
         self.assertLess(float(padded[:, 0].min()), 50.0)
         self.assertGreater(float(padded[:, 1].max()), 100.0)
+
+
+class ThresholdsTest(unittest.TestCase):
+    """The thresholds are env-overridable, so the override has to be trustworthy.
+
+    The defaults are the tuned values; an override has to parse as a number in
+    the threshold's range, and anything else is refused with the default left in
+    place rather than clamped into range — a typo must not quietly run the
+    pipeline at a value nobody chose.
+    """
+
+    def test_an_unset_override_leaves_the_tuned_default(self):
+        for name, (default, _, _) in THRESHOLDS.items():
+            with self.subTest(threshold=name):
+                self.assertEqual(resolve_threshold(name, None), default)
+                self.assertEqual(resolve_threshold(name, "   "), default)
+
+    def test_a_valid_override_is_taken(self):
+        self.assertEqual(resolve_threshold("ANG_TOL", "25"), 25.0)
+        self.assertEqual(resolve_threshold("QUAD_TOL", "-0.05"), -0.05)
+        self.assertEqual(resolve_threshold("PAD", "0.02"), 0.02)
+
+    def test_the_ends_of_the_range_are_inside_it(self):
+        for name, (_, low, high) in THRESHOLDS.items():
+            with self.subTest(threshold=name):
+                self.assertEqual(resolve_threshold(name, repr(low)), low)
+                self.assertEqual(resolve_threshold(name, repr(high)), high)
+
+    def test_a_value_outside_the_range_is_refused(self):
+        for name, (default, low, high) in THRESHOLDS.items():
+            for bad in (low - 1.0, high + 1.0):
+                with self.subTest(threshold=name, value=bad):
+                    self.assertEqual(resolve_threshold(name, repr(bad)), default)
+
+    def test_a_value_that_is_not_a_number_is_refused(self):
+        for raw in ("wide", "0.015x", "1,5", "nan-ish"):
+            with self.subTest(raw=raw):
+                self.assertEqual(resolve_threshold("PAD", raw), DEFAULT_PAD)
+
+    def test_the_effective_set_is_what_the_module_uses(self):
+        # The log line printed at import reads this, so it has to agree with the
+        # names the functions actually close over.
+        effective = effective_thresholds()
+        self.assertEqual(effective["PAD"], PAD)
+        self.assertEqual(effective["MIN_SCORE"], MIN_SCORE)
+        self.assertEqual(effective["ANG_TOL"], ANG_TOL)
+        self.assertEqual(effective["SIZE_MIN"], SIZE_MIN)
+        self.assertEqual(effective["QUAD_TOL"], QUAD_TOL)
 
 
 if __name__ == "__main__":
