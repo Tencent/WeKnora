@@ -208,14 +208,33 @@ func TestImagePipelineActionSequences(t *testing.T) {
 	}
 }
 
-// TestPipelineFieldsArePrivate is the contract the settings panel rests on:
-// PIPELINE-private keys must not overlap, because the knowledge base stores
-// them flat and a collision would make one pipeline's panel control another's
-// run. ACTION-level keys ("action.key" — the thinking switches) are the
-// deliberate exception: they mean the same tunable wherever the action runs,
-// so every pipeline declares the same pair.
+// actionDeclaredKeys is the set of keys the shared actions declare, built from
+// the declarations rather than listed by hand: the exemption in
+// TestPipelineFieldsArePrivate means "the action owns this spelling", and a
+// hand-written list would go stale the moment an action gained a tunable.
+func actionDeclaredKeys() map[string]bool {
+	keys := make(map[string]bool)
+	for _, spec := range types.SharedImageActions {
+		for _, field := range spec.Fields {
+			keys[field.Key] = true
+		}
+	}
+	return keys
+}
+
+// TestPipelineFieldsArePrivate holds a pipeline's own field list to two rules:
+// one control per key (a duplicate would render two controls for one stored
+// value), and one spelling per idea across pipelines for the keys a pipeline
+// invents itself. Stored values cannot collide any more — a setting lives under
+// the slot of the pipeline that declares it (types.SlotKey), and
+// TestParamReadsOnlyItsOwnNamespace pins that isolation — so what is left to
+// guard here is the panel and the stored config agreeing on what a word means.
+// ACTION-level keys ("<action>.<name>" — the thinking switches) are exempt on
+// purpose: the action owns that spelling, so every pipeline that schedules it
+// offers the same key.
 func TestPipelineFieldsArePrivate(t *testing.T) {
 	seen := make(map[string]types.ImagePipelineID)
+	actionKeys := actionDeclaredKeys()
 	for _, spec := range ListImagePipelines() {
 		keys := make(map[string]bool)
 		for _, field := range spec.Fields {
@@ -242,13 +261,11 @@ func TestPipelineFieldsArePrivate(t *testing.T) {
 				t.Errorf("field %q of pipeline %q has an unknown type %q", field.Key, spec.ID, field.Type)
 			}
 			if other, dup := seen[field.Key]; dup && other != spec.ID {
-				if field.Key == captionThinkingField.Key ||
-					field.Key == observationThinkingField.Key ||
-					field.Key == ocrThinkingField.Key {
+				if actionKeys[field.Key] {
 					continue // an action's own tunable, offered by every pipeline that schedules it
 				}
-				t.Errorf("field %q is declared by both %q and %q; pipeline fields must not overlap",
-					field.Key, other, spec.ID)
+				t.Errorf("field %q is declared by both %q and %q; a key a pipeline invents "+
+					"for itself must mean one thing", field.Key, other, spec.ID)
 			}
 			seen[field.Key] = spec.ID
 		}

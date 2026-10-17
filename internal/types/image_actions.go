@@ -69,9 +69,11 @@ type ImageActionSpec struct {
 	// Fields are the per-action tunables the settings panel renders. A field's
 	// key is the action's own namespace plus its bare name — build it with
 	// ActionParam(id, name), never by hand — so the caption's "thinking" and
-	// the OCR's "thinking" are two keys that cannot collide, and a pipeline
-	// carries them by reference (see ActionField) rather than re-declaring or
-	// re-spelling them.
+	// the OCR's "thinking" are two keys that cannot collide. A pipeline carries
+	// the declaration by reference (see ActionField) rather than re-declaring or
+	// re-spelling it; the value is the carrying pipeline's own, stored under its
+	// slot, so two pipelines may offer the same action's tunable without either
+	// reading the other's answer.
 	Fields []ImageFieldDef
 }
 

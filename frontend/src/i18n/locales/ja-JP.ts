@@ -4288,7 +4288,7 @@ export default {
         imagePipelinePlaceholder: '解析方式を選択',
         imagePipelineLoading: 'パイプラインを読み込み中…',
         imagePipelineLoadError: 'パイプラインの読み込みに失敗しました',
-          imagePipelineValidateError: '現在の設定を検証できませんでした。保存時にバックエンドが再度检查します。',
+        imagePipelineValidateError: '現在の設定を検証できませんでした。保存時にバックエンドが再度チェックします。',
         imageAttrsOcrConditions: '観察した属性条件に基づいて OCR を実行',
         imageAttrsOcrConditionsDesc: '観察した属性が以下の条件を満たす場合、その画像に OCR を実行します',
         imagePipelineKbNote: 'デフォルトはナレッジベースの設定に従い、今回のタスク向けに調整できます'
@@ -8789,7 +8789,6 @@ export default {
         },
       },
       ocr: {
-
         thinking_enabled: {
           label: '文字認識時に思考を有効',
           description: 'テキストを抽出する前にモデルに考えさせます。基本的に思考は必要ありません。有効にすると解析が遅くなるだけでなく、思考が長くなりすぎて本文が切り詰められ、タスクが失敗する可能性があります。必要だと判断した場合のみ有効にしてください。',

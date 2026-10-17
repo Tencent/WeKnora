@@ -4288,7 +4288,7 @@ export default {
         imagePipelinePlaceholder: 'Select a scheme',
         imagePipelineLoading: 'Loading pipelines…',
         imagePipelineLoadError: 'Could not load pipelines',
-          imagePipelineValidateError: 'The current settings could not be checked; the backend re-checks them on save.',
+        imagePipelineValidateError: 'The current settings could not be checked; the backend re-checks them on save.',
         imageAttrsOcrConditions: 'Trigger OCR based on the observed attribute conditions',
         imageAttrsOcrConditionsDesc: 'When the observed attributes match the conditions below, OCR runs on the image',
         imagePipelineKbNote: 'Defaults follow the knowledge base settings; adjust them for this task'
@@ -8795,7 +8795,6 @@ export default {
         },
       },
       ocr: {
-
         thinking_enabled: {
           label: 'Text recognition with thinking',
           description: 'Let the model think before it transcribes the text. In general you do not need thinking; enabling it makes parsing slower and may make the model overthink, so overly long reasoning can run past the limit and truncate the transcribed text, failing the task. Only enable it when you have confirmed it is necessary.',

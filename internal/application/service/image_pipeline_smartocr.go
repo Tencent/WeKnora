@@ -61,10 +61,12 @@ var smartOcrOnUnobservedField = types.ImageFieldDef{
 // switch to expose. Only the two thinking switches are offered: they change
 // how the two model calls work, not which ones happen.
 //
-// The caption key here is the same one the manual pipeline renders, and it
-// drives the same action — this pipeline reaches the caption through the
-// observation call rather than through a caption action of its own. A knowledge
-// base that never touched these switches still behaves as it always did.
+// The description here is the observation action's, not the caption action's:
+// this pipeline reaches the caption through the observe round rather than
+// through a caption action of its own, so it offers that round's switch. The
+// OCR switch belongs to the OCR action. Both keys are the actions' own
+// spellings, and each is stored under this pipeline's slot, so a knowledge base
+// that never touched them still behaves as it always did.
 //
 // Declared in the three runs the panel renders: the standing switches (the
 // straightening choice, which is this pipeline's whole reason to exist, and the
@@ -119,7 +121,8 @@ func (smartOcrPipeline) Run(ctx context.Context, r *runContext) error {
 
 	// The keys the shared actions read, set before the observation runs so the
 	// OCR branch below leaves them filled in either way. The thinking switches
-	// are action-level keys shared with the default pipeline.
+	// carry the spellings the actions declare — the manual pipeline offers the
+	// same OCR switch — while the values come from this pipeline's own slot.
 	// The describe side here is the observation action, so its own thinking switch
 	// is the one this pipeline offers.
 	r.captionThinkingKey = observationThinkingField.Key

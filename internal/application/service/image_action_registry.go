@@ -372,10 +372,12 @@ type runContext struct {
 	actions []types.ImageActionID
 	// The tunable that switches thinking on for each action. A pipeline names
 	// its controls after its own vocabulary — the manual pipeline speaks of a
-	// caption, the observing one of a description — and no key may be declared
-	// by two pipelines, so it is the pipeline, not the action, that says which
-	// tunable a thinking switch is. Filled in by the pipeline before it
-	// executes anything.
+	// caption, the observing one of a description — so it is the pipeline, not
+	// the action, that says which of its switches this is. The key itself is the
+	// action's ("<action>.<name>"), which is what lets two pipelines offer the
+	// same action's tunable; the value each of them reads is its own, because a
+	// setting is stored under the slot of the pipeline that declares it (see
+	// types.SlotKey). Filled in by the pipeline before it executes anything.
 	captionThinkingKey string
 	ocrThinkingKey     string
 	// The gate keys the caption and OCR actions read to decide whether they were
@@ -516,12 +518,15 @@ func (r *runContext) predictOCR(ctx context.Context, prompt string) (string, err
 // caller cannot tell that empty answer from an image that genuinely carries no
 // text — which is exactly how an OCR result comes to be discarded as invalid.
 // Turning it on costs a longer run and is what a dense or degraded image wants,
-// so the switch is per action. The key is the action's own ("<action>.thinking")
-// and is used for both the parameter and the trace: it is an action-level tunable,
-// so the same action reads the same stored value whichever pipeline schedules it,
-// and a run's trace names it the way the action does. Pipelines that schedule a
-// different action offer that action's switch instead (the manual pipeline offers
-// the caption's, the observing one offers its own round's).
+// so the switch is per action. The key is the action's own
+// ("<action>.thinking_enabled") and is used for both the parameter and the
+// trace: naming it after the action is what lets two pipelines offer the same
+// tunable without either re-spelling it, and a run's trace names it the way the
+// action does. The value is NOT shared — each pipeline stores the setting under
+// its own slot (types.SlotKey), so tuning the OCR call in one pipeline leaves
+// the other pipeline's OCR call alone. Pipelines that schedule a different
+// action offer that action's switch instead (the manual pipeline offers the
+// caption's, the observing one offers its own round's).
 func (r *runContext) think(ctx context.Context, prompt, key string) (string, error) {
 	on := r.BoolParamOr(key, false)
 	r.out[key] = on
@@ -693,14 +698,21 @@ func runPreprocessAction(ctx context.Context, r *runContext) error {
 	// happened is result; a trace that repeats the first under the second's
 	// name is how a reader comes to think always and a lucky auto run differ.
 	mode := r.preprocessMode()
-	if r.preprocessor == nil {
-		r.out[keyPreprocessResult] = "skipped_no_capability"
-		return nil
-	}
-	// Off means off: the describe round did not even ask for the geometry
-	// attributes, so there is nothing to consult and nothing to do.
+	// Off is answered before the capability check, and the order is the point:
+	// "the user switched this off" is the more specific answer, and reporting
+	// "this build has no preprocessor" over it would hide the choice that was
+	// actually made — on a deployment without the document service every
+	// setting would read as the same missing capability. Off means off: the
+	// describe round did not even ask for the geometry attributes, so there is
+	// nothing to consult and nothing to do.
 	if mode == types.PreprocessModeOff {
 		r.out[keyPreprocessResult] = "skipped_off"
+		return nil
+	}
+	// An unwired preprocessor is what remains to explain doing nothing, so it
+	// is reported only when the mode did ask for work.
+	if r.preprocessor == nil {
+		r.out[keyPreprocessResult] = "skipped_no_capability"
 		return nil
 	}
 	// Always skips the question entirely — it exists precisely for the case
