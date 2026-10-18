@@ -1255,6 +1255,7 @@ export default {
       seafile_ssrf_blocked: 'Seafile 다운로드 URL이 SSRF 정책에 의해 차단되었습니다. fileserver 호스트를 SSRF_WHITELIST에 추가하세요.',
       seafile_fetch_failed: 'Seafile에서 파일을 가져오지 못했습니다. 다음 동기화에서 다시 시도합니다.'
     },
+    syncErrorMore: '외 {count}건',
   },
   ollama: {
     unknown: '알 수 없음',

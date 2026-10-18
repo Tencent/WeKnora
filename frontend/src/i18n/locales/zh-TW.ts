@@ -1257,6 +1257,7 @@ export default {
       seafile_ssrf_blocked: 'Seafile 檔案下載地址被 SSRF 策略攔截，請將 fileserver 網域加入 SSRF_WHITELIST。',
       seafile_fetch_failed: '從 Seafile 獲取檔案失敗，下次同步將重試。'
     },
+    syncErrorMore: '等 {count} 條',
   },
   ollama: {
     unknown: '未知',

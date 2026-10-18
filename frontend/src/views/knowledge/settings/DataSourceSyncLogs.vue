@@ -2,6 +2,7 @@
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getSyncLogs, type SyncLog, type SyncItemError } from '@/api/datasource'
+import { formatSyncError } from '@/utils/syncError'
 
 const props = defineProps<{
   dataSourceId: string
@@ -137,22 +138,6 @@ const FAILED_ITEMS_CAP = 50
 
 function failedItems(log: SyncLog): SyncItemError[] {
   return (log.result?.errors || []).slice(0, FAILED_ITEMS_CAP)
-}
-
-// Render one failure sample. The backend sends a stable i18n `code` (+ params)
-// so the reason is localised to the viewer's language; `message` is the fallback
-// for old logs / codes this client doesn't know. The document title is kept
-// separate and prefixed as "title — reason".
-function formatSyncError(e: SyncItemError): string {
-  let reason = ''
-  if (e.code) {
-    const key = `datasource.syncError.${e.code}`
-    const localised = t(key, (e.params || {}) as Record<string, unknown>)
-    reason = localised === key ? (e.message || e.code) : localised
-  } else {
-    reason = e.message || ''
-  }
-  return e.title ? (reason ? `${e.title} — ${reason}` : e.title) : reason
 }
 
 // Group logs by date
@@ -293,8 +278,8 @@ const groupedLogs = computed(() => {
                   <div class="tl-failed-title">
                     {{ t('datasource.logDetail.failedItems') }} ({{ log.items_failed }})
                   </div>
-                  <div v-for="(e, i) in failedItems(log)" :key="i" class="tl-failed-item" :title="formatSyncError(e)">
-                    {{ formatSyncError(e) }}
+                  <div v-for="(e, i) in failedItems(log)" :key="i" class="tl-failed-item" :title="formatSyncError(e, t)">
+                    {{ formatSyncError(e, t) }}
                   </div>
                   <div v-if="log.items_failed > failedItems(log).length" class="tl-failed-more">
                     {{ t('datasource.logDetail.failedItemsMore', { n: (log.items_failed - failedItems(log).length) }) }}
@@ -579,9 +564,9 @@ const groupedLogs = computed(() => {
   padding: 2px 8px;
   border-left: 2px solid var(--td-error-color-3);
   background: var(--td-bg-color-container);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Wrap instead of truncating: long document IDs have no spaces, so they need
+     an explicit break opportunity. The :title tooltip remains as a fallback. */
+  overflow-wrap: anywhere;
 }
 
 .tl-failed-more {
