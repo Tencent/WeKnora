@@ -100,6 +100,11 @@
           <WebSearchSettings />
         </div>
 
+        <!-- 检索配置 -->
+        <div v-if="currentSection === 'retrieval'" class="section">
+          <RetrievalSettings />
+        </div>
+
         <!-- 消息管理 -->
         <div v-if="currentSection === 'chathistory'" class="section">
           <ChatHistorySettings />
@@ -216,6 +221,7 @@ import ModelSettings from './ModelSettings.vue'
 import ModelCatalog from '../system/ModelCatalog.vue'
 import OllamaSettings from './OllamaSettings.vue'
 import WebSearchSettings from './WebSearchSettings.vue'
+import RetrievalSettings from './RetrievalSettings.vue'
 import ChatHistorySettings from './ChatHistorySettings.vue'
 import MemorySettings from './MemorySettings.vue'
 import EnvVarSettings from './EnvVarSettings.vue'
@@ -363,6 +369,7 @@ const navItems = computed(() => {
     { key: 'weknoracloud', icon: '', label: 'WeKnora Cloud' },
     { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
     { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig') },
+    { key: 'retrieval', icon: 'search', label: t('retrievalSettings.title') },
     { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
     { key: 'memory', icon: 'bulletpoint', label: t('memoryWorkspaceSettings.title') },
     { key: 'vectorstore', icon: 'data-base', label: t('settings.vectorStoreEngine') },
@@ -424,6 +431,7 @@ const navGroups = computed<NavGroup[]>(() => {
       key: 'data_extensions',
       label: t('settings.navGroups.dataExtensions'),
       items: pickItems([
+        'retrieval',
         'vectorstore',
         'parser',
         'storage',

@@ -12,6 +12,7 @@ test('management shortcuts are stricter than read-only settings pages', () => {
   assert.equal(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.members, 'owner')
   assert.equal(SETTINGS_SECTION_MIN_ROLE.models, 'viewer')
   assert.equal(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.models, 'admin')
+  assert.equal(SETTINGS_SECTION_MIN_ROLE.retrieval, 'viewer')
 })
 
 test('the skill catalog is admin-only like the sandbox it installs into', () => {

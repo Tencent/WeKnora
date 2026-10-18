@@ -21,7 +21,7 @@ const compiled = ts.transpileModule(grouping.getText(ast), {
   compilerOptions: { target: ts.ScriptTarget.ES2022 },
 }).outputText
 
-function integrationMenu(visibleKeys: string[]): string[] {
+function settingsGroup(visibleKeys: string[], groupKey: string): string[] {
   const groups = runInNewContext(`${compiled}\nnavGroups.value`, {
     computed,
     navItems: { value: visibleKeys.map((key) => ({ key })) },
@@ -29,8 +29,16 @@ function integrationMenu(visibleKeys: string[]): string[] {
     integrationSectionKey,
     INTEGRATION_PREVIEW_ITEMS,
   }) as Array<{ key: string; items: Array<{ key: string }> }>
-  const integrationGroup = groups.find((group) => group.key === 'integrations')
-  return Array.from(integrationGroup?.items ?? [], (item) => item.key)
+  const group = groups.find((item) => item.key === groupKey)
+  return Array.from(group?.items ?? [], (item) => item.key)
+}
+
+function integrationMenu(visibleKeys: string[]): string[] {
+  return settingsGroup(visibleKeys, 'integrations')
+}
+
+function dataExtensionsMenu(visibleKeys: string[]): string[] {
+  return settingsGroup(visibleKeys, 'data_extensions')
 }
 
 const integrationKeys = INTEGRATION_PREVIEW_ITEMS.map((item) => integrationSectionKey(item.key))
@@ -43,4 +51,14 @@ test('settings sidebar preserves visibility filtering without hiding CLI', () =>
   const visible = integrationKeys.filter((key) => key !== 'integration-api' && key !== 'integration-im')
   assert.deepEqual(integrationMenu(visible), visible)
   assert.deepEqual(integrationMenu(['general']), [])
+})
+
+test('settings sidebar exposes retrieval controls in the data and extensions group', () => {
+  assert.deepEqual(
+    dataExtensionsMenu(['retrieval', 'vectorstore', 'parser', 'storage', 'sandbox', 'websearch']),
+    ['retrieval', 'vectorstore', 'parser', 'storage', 'sandbox', 'websearch'],
+  )
+  assert.match(source, /\{ key: 'retrieval', icon: 'search', label: t\('retrievalSettings\.title'\) \}/)
+  assert.match(source, /currentSection === 'retrieval'/)
+  assert.match(source, /<RetrievalSettings \/>/)
 })

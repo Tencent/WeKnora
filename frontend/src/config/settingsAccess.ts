@@ -13,6 +13,7 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
   weknoracloud: 'admin',
   models: 'viewer',
   websearch: 'admin',
+  retrieval: 'viewer',
   chathistory: 'admin',
   vectorstore: 'admin',
   parser: 'admin',

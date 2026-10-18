@@ -23,6 +23,10 @@ test('settings nav writes section, and keeps a system-settings panel only there'
     { section: 'general' },
   )
   assert.deepEqual(
+    buildSettingsRouteQuery('retrieval', { section: 'general', tab: 'rerank' }),
+    { section: 'retrieval' },
+  )
+  assert.deepEqual(
     buildSettingsRouteQuery('runtime-queues', { section: 'system-global' }),
     { section: 'runtime-queues' },
   )
