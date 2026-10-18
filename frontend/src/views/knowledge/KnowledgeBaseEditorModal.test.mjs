@@ -56,7 +56,10 @@ test('video parsing saves its own ASR language and never borrows the audio model
   // audio section's model, and its language hint has to round-trip.
   const payload = source.match(/data\.video_config = \{([\s\S]*?)\n  \}/)?.[1]
   assert.ok(payload, 'expected to find the video_config payload block')
-  assert.match(payload, /language: formData\.value\.videoConfig\?\.language \|\| ''/)
+  // The language is a select now, but the payload contract did not change: a
+  // string, and an empty string still means auto-detect.
+  assert.match(payload, /language: normalizeVideoLanguage\(formData\.value\.videoConfig\?\.language\)/)
+  assert.doesNotMatch(payload, /language: .*__(auto|AUTO)__/)
 
   const configured = source.match(
     /const videoAudioModelConfigured = computed\(\(\) =>\s*([\s\S]*?)\)\n/
@@ -156,4 +159,56 @@ test('video transport is sent on save and round-trips from the stored config', (
   const defaults = source.match(/videoConfig: \{([\s\S]*?)\n    \},/)?.[1]
   assert.ok(defaults, 'expected to find the videoConfig defaults')
   assert.match(defaults, /directInput: 'auto' as string/)
+})
+
+test('offers the video transcription language as a dropdown, not a free-text field', () => {
+  // The field used to be a text box where the operator had to recall vendor
+  // codes. It is now a searchable, creatable select; clearing it still means
+  // auto-detect, so there is no sentinel value in the model.
+  assert.doesNotMatch(source, /v-model="formData\.videoConfig\.language"/)
+  assert.match(source, /<t-select[\s\S]{0,220}v-model="videoLanguageModel"/)
+  assert.match(source, /:options="videoLanguageOptions"/)
+  assert.match(source, /(?<![-\w])filterable(?![-\w])/)
+  assert.match(source, /(?<![-\w])creatable(?![-\w])/)
+  assert.match(source, /(?<![-\w])clearable(?![-\w])/)
+
+  // The select model normalises to a string in both directions: an empty
+  // selection (or a clear) has to leave `''` in formData, not undefined.
+  assert.match(
+    source,
+    /get: \(\) => normalizeVideoLanguage\(formData\.value\?\.videoConfig\?\.language\)/
+  )
+  assert.match(
+    source,
+    /formData\.value\.videoConfig\.language = normalizeVideoLanguage\(selected\)/
+  )
+})
+
+test('keeps ASR vendor language codes as the video option values', () => {
+  const optionBlock = source.match(
+    /const videoLanguageOptions = computed\(\(\) => \[([\s\S]*?)\n\]\)/
+  )?.[1]
+  assert.ok(optionBlock, 'expected to find videoLanguageOptions')
+  for (const code of ['zh', 'en', 'ja', 'ko', 'ru']) {
+    assert.match(optionBlock, new RegExp(`value: '${code}'`), `missing the ${code} option`)
+  }
+  // Display names come from i18n; a value like 'Chinese' would be stored in
+  // video_config.language and silently rejected by the ASR vendor.
+  assert.doesNotMatch(optionBlock, /value: '(Chinese|English|Japanese|Korean|Russian)'/)
+  assert.doesNotMatch(optionBlock, /__(auto|AUTO)__/)
+})
+
+test('labels the video language options in all six locale bundles', () => {
+  for (const locale of ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'ko-KR', 'ru-RU']) {
+    const bundle = readFileSync(new URL(`../../i18n/locales/${locale}.ts`, import.meta.url), 'utf8')
+    const markerAt = bundle.indexOf('      modeAudioOnlyDesc:')
+    assert.ok(markerAt >= 0, `${locale} has no video block`)
+    const optionsAt = bundle.indexOf('      languageOptions: {', markerAt)
+    const optionsEnd = bundle.indexOf('      },', optionsAt)
+    assert.ok(optionsAt > markerAt && optionsEnd > optionsAt, `${locale} has no languageOptions block`)
+    const block = bundle.slice(optionsAt, optionsEnd)
+    for (const code of ['zh', 'en', 'ja', 'ko', 'ru']) {
+      assert.match(block, new RegExp(`^\\s{8}${code}: '`, 'm'), `${locale} is missing ${code}`)
+    }
+  }
 })

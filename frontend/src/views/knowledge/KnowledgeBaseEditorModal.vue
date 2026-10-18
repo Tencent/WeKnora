@@ -655,15 +655,18 @@
               </div>
             </div>
 
-            <!-- 视频转写的语言提示：自由输入，只属于视频页，空值即自动检测 -->
+            <!-- 视频转写的语言：下拉选择厂商语言代码，清空即自动检测 -->
             <div v-if="formData.videoConfig.enabled && videoModeUsesAudio" class="setting-row">
               <div class="setting-info">
                 <label>{{ $t('knowledgeEditor.video.languageLabel') }}</label>
                 <p class="desc">{{ $t('knowledgeEditor.video.languageDescription') }}</p>
               </div>
               <div class="setting-control">
-                <t-input
-                  v-model="formData.videoConfig.language"
+                <t-select
+                  v-model="videoLanguageModel"
+                  :options="videoLanguageOptions"
+                  filterable
+                  creatable
                   clearable
                   :placeholder="$t('knowledgeEditor.video.languagePlaceholder')"
                   :style="{ width: '280px' }"
@@ -907,6 +910,7 @@ import {
   isVideoFrameModelConfigured,
   normalizeVideoDirectInput,
 } from './videoConfig'
+import { normalizeVideoLanguage } from './utils/videoLanguage'
 import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
 import KnowledgeBaseActivitySettings from './settings/KnowledgeBaseActivitySettings.vue'
@@ -1124,6 +1128,25 @@ const selectedVideoModeDescription = computed(() => {
     default:
       return t('knowledgeEditor.video.modeAudioOnlyDesc')
   }
+})
+
+// 转写语言：选项值是 ASR 厂商认的语言代码，不是界面语言名；显示名走 i18n。
+// 空值即自动检测——清空下拉（或选中后点清除）存回 video_config.language 的
+// 仍是 ''，与原来「留空自动检测」的语义一致。creatable 允许 es / fr / yue
+// 这类未列出的代码手输；TDesign 清空时给的是 undefined，统一在 setter 归一。
+const videoLanguageOptions = computed(() => [
+  { label: t('knowledgeEditor.video.languageOptions.zh'), value: 'zh' },
+  { label: t('knowledgeEditor.video.languageOptions.en'), value: 'en' },
+  { label: t('knowledgeEditor.video.languageOptions.ja'), value: 'ja' },
+  { label: t('knowledgeEditor.video.languageOptions.ko'), value: 'ko' },
+  { label: t('knowledgeEditor.video.languageOptions.ru'), value: 'ru' },
+])
+
+const videoLanguageModel = computed<string>({
+  get: () => normalizeVideoLanguage(formData.value?.videoConfig?.language),
+  set: (selected: unknown) => {
+    if (formData.value) formData.value.videoConfig.language = normalizeVideoLanguage(selected)
+  },
 })
 
 // 直读的传输方式。auto 是本页默认，也是唯一按文件大小决策的一档；
@@ -2023,7 +2046,8 @@ const buildSubmitData = () => {
     enabled: formData.value.videoConfig?.enabled || false,
     mode: formData.value.videoConfig?.mode || 'audio_only',
     model_id: formData.value.videoConfig?.modelId || '',
-    language: formData.value.videoConfig?.language || '',
+    // 语言永远是字符串：空字符串表示自动检测，清空下拉后也发送 ''。
+    language: normalizeVideoLanguage(formData.value.videoConfig?.language),
     // 直读的视频模型、传输方式与追加要求：留空即清空，绝不借用 ASR / VLM 的模型。
     video_model_id: formData.value.videoConfig?.videoModelId || '',
     // 传输方式总是显式发送：老行（字段缺省）保存后按 auto 落库，未知值由后端归一。
