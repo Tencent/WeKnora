@@ -37,6 +37,7 @@ type Connector struct {
 	oauth      *datasource.OneDriveOAuthManager
 	graphBase  string
 	httpClient *http.Client
+	sourceType string
 }
 
 var (
@@ -50,21 +51,39 @@ var (
 
 // NewConnector creates a production OneDrive connector.
 func NewConnector(items interfaces.DataSourceItemRepository, oauth *datasource.OneDriveOAuthManager) *Connector {
-	return &Connector{items: items, oauth: oauth, graphBase: defaultGraphBase}
+	return &Connector{items: items, oauth: oauth, graphBase: defaultGraphBase, sourceType: types.ConnectorTypeOneDrive}
+}
+
+// NewSharePointConnector creates a SharePoint connector backed by the same
+// Microsoft Graph driveItem and delta implementation as OneDrive.
+func NewSharePointConnector(items interfaces.DataSourceItemRepository, oauth *datasource.OneDriveOAuthManager) *Connector {
+	return &Connector{items: items, oauth: oauth, graphBase: defaultGraphBase, sourceType: types.ConnectorTypeSharePoint}
 }
 
 // NewConnectorWithClient creates a connector with an injected Graph endpoint for tests.
 func NewConnectorWithClient(
 	items interfaces.DataSourceItemRepository, graphBase string, client *http.Client,
 ) *Connector {
-	return &Connector{items: items, graphBase: strings.TrimRight(graphBase, "/"), httpClient: client}
+	return &Connector{items: items, graphBase: strings.TrimRight(graphBase, "/"), httpClient: client, sourceType: types.ConnectorTypeOneDrive}
+}
+
+// NewSharePointConnectorWithClient creates a SharePoint connector with an injected Graph endpoint for tests.
+func NewSharePointConnectorWithClient(
+	items interfaces.DataSourceItemRepository, graphBase string, client *http.Client,
+) *Connector {
+	return &Connector{items: items, graphBase: strings.TrimRight(graphBase, "/"), httpClient: client, sourceType: types.ConnectorTypeSharePoint}
 }
 
 // Type returns the connector registry key.
-func (c *Connector) Type() string { return types.ConnectorTypeOneDrive }
+func (c *Connector) Type() string {
+	if c.sourceType == types.ConnectorTypeSharePoint {
+		return types.ConnectorTypeSharePoint
+	}
+	return types.ConnectorTypeOneDrive
+}
 
 // OAuthProvider returns the provider key used by data-source OAuth routes.
-func (c *Connector) OAuthProvider() string { return "onedrive" }
+func (c *Connector) OAuthProvider() string { return "microsoft" }
 
 // DeferCursorUntilIngestionCompletes prevents delta commits before parsing finishes.
 func (c *Connector) DeferCursorUntilIngestionCompletes() bool { return true }
@@ -199,8 +218,11 @@ func (c *Connector) MarkItemIngested(
 
 // ValidateStaticConfig validates persisted configuration without requiring OAuth.
 func (c *Connector) ValidateStaticConfig(config *types.DataSourceConfig) error {
-	if config == nil || config.Type != "" && config.Type != types.ConnectorTypeOneDrive {
+	if config == nil || config.Type != "" && config.Type != c.Type() {
 		return datasource.ErrInvalidConfig
+	}
+	if c.Type() == types.ConnectorTypeSharePoint && sharePointSiteURL(config) == "" {
+		return fmt.Errorf("%w: SharePoint site URL is required", datasource.ErrInvalidConfig)
 	}
 	return nil
 }
@@ -210,6 +232,14 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 	client, err := c.client(config)
 	if err != nil {
 		return err
+	}
+	if c.Type() == types.ConnectorTypeSharePoint {
+		siteInfo, siteErr := client.getSiteByURL(ctx, sharePointSiteURL(config))
+		if siteErr != nil {
+			return siteErr
+		}
+		_, siteErr = client.listSiteDrives(ctx, siteInfo.ID)
+		return siteErr
 	}
 	_, err = client.getDrive(ctx)
 	return err
@@ -224,6 +254,25 @@ func (c *Connector) ListResources(
 		return nil, err
 	}
 	if parentID == "" {
+		if c.Type() == types.ConnectorTypeSharePoint {
+			siteInfo, err := client.getSiteByURL(ctx, sharePointSiteURL(config))
+			if err != nil {
+				return nil, err
+			}
+			drives, err := client.listSiteDrives(ctx, siteInfo.ID)
+			if err != nil {
+				return nil, err
+			}
+			resources := make([]types.Resource, 0, len(drives))
+			for _, driveInfo := range drives {
+				resources = append(resources, types.Resource{
+					ExternalID: encodeRef(resourceRef{DriveID: driveInfo.ID, ItemID: rootItemID}),
+					Name:       driveInfo.Name, Type: "drive", URL: driveInfo.WebURL, HasChildren: true,
+					Metadata: map[string]interface{}{"drive_id": driveInfo.ID},
+				})
+			}
+			return resources, nil
+		}
 		driveInfo, err := client.getDrive(ctx)
 		if err != nil {
 			return nil, err
@@ -318,7 +367,7 @@ func (c *Connector) FetchAllResult(
 	if err != nil {
 		return nil, err
 	}
-	driveInfo, err := client.getDrive(ctx)
+	driveInfo, err := c.resolveSyncDrive(ctx, client, config, resourceIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +376,7 @@ func (c *Connector) FetchAllResult(
 		return nil, err
 	}
 	if len(refs) == 0 {
-		return nil, fmt.Errorf("at least one OneDrive resource must be selected")
+		return nil, fmt.Errorf("at least one Microsoft drive resource must be selected")
 	}
 	startDelta, err := client.latestDelta(ctx, driveInfo.ID)
 	if err != nil {
@@ -400,7 +449,7 @@ func (c *Connector) FetchIncrementalResult(
 	if err != nil {
 		return nil, err
 	}
-	driveInfo, err := client.getDrive(ctx)
+	driveInfo, err := c.resolveSyncDrive(ctx, client, config, config.ResourceIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -782,6 +831,49 @@ func (c *Connector) descendants(
 	return result, nil
 }
 
+func (c *Connector) resolveSyncDrive(
+	ctx context.Context, client *graphClient, config *types.DataSourceConfig, resourceIDs []string,
+) (*drive, error) {
+	if c.Type() != types.ConnectorTypeSharePoint {
+		return client.getDrive(ctx)
+	}
+	if len(resourceIDs) == 0 {
+		return nil, fmt.Errorf("at least one SharePoint document library resource must be selected")
+	}
+	first, err := decodeRef(resourceIDs[0])
+	if err != nil || first.DriveID == "" {
+		return nil, datasource.ErrResourceNotFound
+	}
+	for _, raw := range resourceIDs[1:] {
+		ref, decodeErr := decodeRef(raw)
+		if decodeErr != nil || ref.DriveID != first.DriveID {
+			return nil, fmt.Errorf("a SharePoint data source currently supports selections from one document library")
+		}
+	}
+	siteInfo, err := client.getSiteByURL(ctx, sharePointSiteURL(config))
+	if err != nil {
+		return nil, err
+	}
+	drives, err := client.listSiteDrives(ctx, siteInfo.ID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range drives {
+		if drives[i].ID == first.DriveID {
+			return &drives[i], nil
+		}
+	}
+	return nil, datasource.ErrResourceNotFound
+}
+
+func sharePointSiteURL(config *types.DataSourceConfig) string {
+	if config == nil || config.Settings == nil {
+		return ""
+	}
+	value, _ := config.Settings["site_url"].(string)
+	return strings.TrimSpace(value)
+}
+
 func (c *Connector) client(config *types.DataSourceConfig) (*graphClient, error) {
 	if err := c.ValidateStaticConfig(config); err != nil {
 		return nil, err
@@ -893,7 +985,7 @@ func resourceFromItem(driveID, parentID string, item driveItem) types.Resource {
 		ExternalID: encodeRef(resourceRef{DriveID: driveID, ItemID: item.ID}), Name: item.Name,
 		Type: itemType, URL: item.WebURL, ModifiedAt: item.LastModifiedDateTime,
 		ParentID: parentID, HasChildren: item.Folder != nil,
-		Metadata: map[string]interface{}{"size": item.Size},
+		Metadata: map[string]interface{}{"size": item.Size, "drive_id": driveID},
 	}
 }
 

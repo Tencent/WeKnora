@@ -7472,7 +7472,8 @@ export default {
     connectionFailed: 'Connection failed',
     isRequired: 'is required',
     credentialsLabel: 'credentials',
-    oauthConnect: 'Connect OneDrive', oauthReconnect: 'Reauthorize', oauthAuthorizationRequired: 'Authorization required', oauthAuthorized: 'Authorized', oauthReauthorizationRequired: 'Authorization expired. Reauthorize to continue.', oauthReplaceConfirm: 'Changing the account resets the sync cursor. Continue?', oauthDisconnectConfirm: 'Disconnect OneDrive and stop syncing?', oauthNotCompleted: 'Authorization was not completed', oauthConnected: 'OneDrive connected', oauthFailed: 'OneDrive authorization failed', connecting: 'Connecting',
+    oauthConnect: 'Connect Microsoft account', oauthReconnect: 'Reauthorize', oauthAuthorizationRequired: 'Authorization required', oauthAuthorized: 'Authorized', oauthReauthorizationRequired: 'Authorization expired. Reauthorize to continue.', oauthReplaceConfirm: 'Changing the account resets the sync cursor. Continue?', oauthDisconnectConfirm: 'Disconnect the Microsoft account and stop syncing?', oauthNotCompleted: 'Authorization was not completed', oauthConnected: 'Microsoft account connected', oauthFailed: 'Microsoft authorization failed', connecting: 'Connecting',
+    sharepoint: { siteUrl: 'SharePoint site URL', siteUrlHint: 'Enter the site URL, then select a document library, folder, or file. Keep each data source within one document library.', siteUrlInvalid: 'Enter a valid https://*.sharepoint.com site URL', singleLibraryOnly: 'A SharePoint data source can sync one document library. Clear selections from the other library first.' },
     gitlab: {
       baseUrl: 'GitLab URL', accessToken: 'Personal access token', projects: 'GitLab projects',
       projectsHint: 'Enter a project ID or namespace path (for example group/project), with optional branch and directories.',

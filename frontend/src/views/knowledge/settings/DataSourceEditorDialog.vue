@@ -457,6 +457,8 @@ const parentMap = computed(() => {
   return map
 })
 
+const resourceMap = computed(() => new Map(resources.value.map(resource => [resource.external_id, resource])))
+
 // `selectedResourceIds` is a MINIMAL COVER SET: only the roots of fully-selected
 // subtrees. Sending this to the backend gives "sync these IDs and all descendants"
 // semantics — including any pages added later under a selected parent.
@@ -736,6 +738,15 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     fields: [],
   },
   {
+    type: 'sharepoint',
+    available: true,
+    docUrl: 'https://learn.microsoft.com/graph/api/resources/sharepoint',
+    permissionDocUrl: 'https://learn.microsoft.com/graph/permissions-reference',
+    permissionPageUrl: 'https://portal.azure.com/',
+    requiredPermissions: [],
+    fields: [],
+  },
+  {
     type: 'dingtalk',
     available: true,
     docUrl: 'https://open.dingtalk.com/document/development/knowledge-base-overview',
@@ -809,7 +820,26 @@ const displayedCredentialFields = computed(() => {
   })
 })
 
-const isOAuthConnector = computed(() => form.value.type === 'onedrive')
+const isOAuthConnector = computed(() => ['onedrive', 'sharepoint'].includes(form.value.type))
+
+function validateSharePointSiteURL(): boolean {
+  if (form.value.type !== 'sharepoint') return true
+  const siteURL = String(form.value.config.settings.site_url || '').trim()
+  if (!siteURL) {
+    MessagePlugin.warning(`${t('datasource.sharepoint.siteUrl')} ${t('datasource.isRequired')}`)
+    return false
+  }
+  try {
+    const parsed = new URL(siteURL)
+    if (parsed.protocol !== 'https:' || !parsed.hostname.toLowerCase().endsWith('.sharepoint.com') ||
+      parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error()
+  } catch {
+    MessagePlugin.warning(t('datasource.sharepoint.siteUrlInvalid'))
+    return false
+  }
+  form.value.config.settings.site_url = siteURL
+  return true
+}
 
 async function refreshOneDriveOAuthStatus() {
   if (!isOAuthConnector.value || !tempDsId.value) return
@@ -821,6 +851,7 @@ async function refreshOneDriveOAuthStatus() {
 }
 
 async function connectOneDriveOAuth(replaceConnection = false) {
+  if (!validateSharePointSiteURL()) return
   if (!tempDsId.value) {
     const res = await createDataSource({ ...form.value, knowledge_base_id: props.kbId, status: 'paused' } as any)
     tempDsId.value = (res?.data || res).id
@@ -930,7 +961,7 @@ watch(visible, async (v) => {
       }
     }
     tempDsId.value = props.dataSource.id
-    if (form.value.type === 'onedrive') void refreshOneDriveOAuthStatus()
+    if (isOAuthConnector.value) void refreshOneDriveOAuthStatus()
   } else {
     replaceCredentialsMode.value = false
     credentialsConfigured.value = false
@@ -1205,6 +1236,15 @@ function toggleResource(id: string) {
     MessagePlugin.warning(t('datasource.seafile.singleLibraryOnly'))
     return
   }
+  if (form.value.type === 'sharepoint') {
+    const driveIDs = new Set([...cover]
+      .map(resourceID => String(resourceMap.value.get(resourceID)?.metadata?.drive_id || ''))
+      .filter(Boolean))
+    if (driveIDs.size > 1) {
+      MessagePlugin.warning(t('datasource.sharepoint.singleLibraryOnly'))
+      return
+    }
+  }
   selectedResourceIds.value = [...cover]
 }
 
@@ -1220,6 +1260,7 @@ function validateRssFeedUrls(): boolean {
 function validateStep1Fields(): boolean {
   syncRssAuthHeadersToCredentials()
   if (!validateRssFeedUrls()) return false
+  if (!validateSharePointSiteURL()) return false
   if (isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value) {
     return true
   }
@@ -1676,6 +1717,20 @@ const drawerConfirmText = computed(() => {
             spellcheck="false"
           />
           <p class="form-desc">{{ t('datasource.field.feedUrlsHint') }}</p>
+        </div>
+      </section>
+
+      <section v-if="form.type === 'sharepoint'" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.sharepoint.siteUrl') }}</h4>
+        <div class="form-item">
+          <label class="form-label required">{{ t('datasource.sharepoint.siteUrl') }}</label>
+          <t-input
+            v-model="form.config.settings.site_url"
+            placeholder="https://contoso.sharepoint.com/sites/engineering"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <p class="form-desc">{{ t('datasource.sharepoint.siteUrlHint') }}</p>
         </div>
       </section>
 

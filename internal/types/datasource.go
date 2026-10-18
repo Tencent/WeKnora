@@ -37,6 +37,7 @@ const (
 	ConnectorTypeGitHub      = "github"
 	ConnectorTypeGoogleDrive = "google_drive"
 	ConnectorTypeOneDrive    = "onedrive"
+	ConnectorTypeSharePoint  = "sharepoint"
 	ConnectorTypeDingTalk    = "dingtalk"
 	ConnectorTypeWebCrawler  = "web_crawler"
 	ConnectorTypeSlack       = "slack"

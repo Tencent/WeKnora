@@ -991,7 +991,8 @@ export default {
     connectionFailed: '連結失敗',
     isRequired: '為必填項',
     credentialsLabel: '憑證',
-    oauthConnect: '連接 OneDrive', oauthReconnect: '重新授權', oauthAuthorizationRequired: '需要授權', oauthAuthorized: '已授權', oauthReauthorizationRequired: '授權已過期，請重新授權後繼續。', oauthReplaceConfirm: '更換帳號會重設同步游標，是否繼續？', oauthDisconnectConfirm: '中斷 OneDrive 並停止同步？', oauthNotCompleted: '授權未完成', oauthConnected: 'OneDrive 已連接', oauthFailed: 'OneDrive 授權失敗', connecting: '連接中',
+    oauthConnect: '連接 Microsoft 帳號', oauthReconnect: '重新授權', oauthAuthorizationRequired: '需要授權', oauthAuthorized: '已授權', oauthReauthorizationRequired: '授權已過期，請重新授權後繼續。', oauthReplaceConfirm: '更換帳號會重設同步游標，是否繼續？', oauthDisconnectConfirm: '中斷 Microsoft 帳號並停止同步？', oauthNotCompleted: '授權未完成', oauthConnected: 'Microsoft 帳號已連接', oauthFailed: 'Microsoft 授權失敗', connecting: '連接中',
+    sharepoint: { siteUrl: 'SharePoint 網站網址', siteUrlHint: '輸入網站網址後，可選擇文件庫、資料夾或檔案。每個資料來源請選擇同一文件庫中的內容。', siteUrlInvalid: '請輸入有效的 https://*.sharepoint.com 網站網址', singleLibraryOnly: '一個 SharePoint 資料來源只能同步一個文件庫，請先取消其他文件庫中的選擇。' },
     gitlab: {
       baseUrl: 'GitLab 地址',
       accessToken: '個人存取權杖',

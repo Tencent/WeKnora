@@ -38,6 +38,101 @@ func TestResourceRefRoundTrip(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+func TestSharePointListsSiteDocumentLibraries(t *testing.T) {
+	_, _, connector := newConnectorTestRepo(t)
+	connector.sourceType = types.ConnectorTypeSharePoint
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/sites/contoso.sharepoint.com:/sites/engineering":
+			fmt.Fprint(w, `{"id":"site-1","displayName":"Engineering","webUrl":"https://contoso.sharepoint.com/sites/engineering"}`)
+		case "/sites/site-1/drives":
+			fmt.Fprint(w, `{"value":[{"id":"documents","name":"Documents","webUrl":"https://contoso.sharepoint.com/sites/engineering/Documents"},{"id":"archive","name":"Archive"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	connector.graphBase, connector.httpClient = server.URL, server.Client()
+	config := &types.DataSourceConfig{
+		Type:     types.ConnectorTypeSharePoint,
+		Settings: map[string]interface{}{"site_url": "https://contoso.sharepoint.com/sites/engineering"},
+		Runtime: &types.DataSourceRuntime{
+			DataSourceID: "ds", TenantID: 7, ConnectionVersion: 1,
+			AccessToken: func(context.Context) (string, error) { return "token", nil },
+		},
+	}
+
+	resources, err := connector.ListResources(context.Background(), config, "")
+	require.NoError(t, err)
+	require.Len(t, resources, 2)
+	require.Equal(t, "Documents", resources[0].Name)
+	require.Equal(t, "drive", resources[0].Type)
+	require.Equal(t, encodeRef(resourceRef{DriveID: "documents", ItemID: rootItemID}), resources[0].ExternalID)
+}
+
+func TestSharePointSyncRejectsSelectionsAcrossDocumentLibraries(t *testing.T) {
+	_, _, connector := newConnectorTestRepo(t)
+	connector.sourceType = types.ConnectorTypeSharePoint
+	config := &types.DataSourceConfig{
+		Type:     types.ConnectorTypeSharePoint,
+		Settings: map[string]interface{}{"site_url": "https://contoso.sharepoint.com/sites/engineering"},
+		Runtime: &types.DataSourceRuntime{
+			DataSourceID: "ds", TenantID: 7, ConnectionVersion: 1,
+			AccessToken: func(context.Context) (string, error) { return "token", nil },
+		},
+	}
+	_, err := connector.resolveSyncDrive(context.Background(), nil, config, []string{
+		encodeRef(resourceRef{DriveID: "documents", ItemID: rootItemID}),
+		encodeRef(resourceRef{DriveID: "archive", ItemID: rootItemID}),
+	})
+	require.ErrorContains(t, err, "one document library")
+}
+
+func TestSharePointFullSyncUsesSelectedDocumentLibrary(t *testing.T) {
+	_, ds, connector := newConnectorTestRepo(t)
+	connector.sourceType = types.ConnectorTypeSharePoint
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/sites/contoso.sharepoint.com:/sites/engineering":
+			fmt.Fprint(w, `{"id":"site-1"}`)
+		case "/sites/site-1/drives":
+			fmt.Fprint(w, `{"value":[{"id":"documents","name":"Documents"}]}`)
+		case "/drives/documents/root/delta":
+			require.Equal(t, "latest", r.URL.Query().Get("token"))
+			fmt.Fprintf(w, `{"value":[],"@odata.deltaLink":%q}`, server.URL+"/delta/start")
+		case "/drives/documents/root/children":
+			fmt.Fprint(w, `{"value":[{"id":"file","name":"guide.md","size":5,"file":{"mimeType":"text/markdown"},"parentReference":{"driveId":"documents","id":"root"}}]}`)
+		case "/drives/documents/items/file/content":
+			fmt.Fprint(w, "guide")
+		case "/delta/start":
+			fmt.Fprintf(w, `{"value":[],"@odata.deltaLink":%q}`, server.URL+"/delta/next")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	connector.graphBase, connector.httpClient = server.URL, server.Client()
+	root := encodeRef(resourceRef{DriveID: "documents", ItemID: rootItemID})
+	config := &types.DataSourceConfig{
+		Type: types.ConnectorTypeSharePoint, ResourceIDs: []string{root},
+		Settings: map[string]interface{}{"site_url": "https://contoso.sharepoint.com/sites/engineering"},
+		Runtime: &types.DataSourceRuntime{
+			DataSourceID: ds.ID, TenantID: ds.TenantID, ConnectionVersion: ds.ConnectionVersion,
+			AccessToken: func(context.Context) (string, error) { return "token", nil },
+		},
+	}
+
+	result, err := connector.FetchAllResult(context.Background(), config, config.ResourceIDs)
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, []byte("guide"), result.Items[0].Content)
+	require.Equal(t, "documents", result.Items[0].Metadata["drive_id"])
+	require.NotNil(t, result.NextCursor)
+}
+
 func TestConnectorFullThenIncrementalDelta(t *testing.T) {
 	_, ds, connector := newConnectorTestRepo(t)
 	phase := "full"
@@ -127,7 +222,9 @@ func TestIncrementalDeletionStillRunsWhenSelectedFileIsGone(t *testing.T) {
 		case "/drives/drive/root/delta":
 			fmt.Fprintf(w, `{"value":[],"@odata.deltaLink":%q}`, server.URL+"/delta/next")
 		case "/delta/next":
-			fmt.Fprintf(w, `{"value":[{"id":"file","deleted":{"state":"deleted"}}],"@odata.deltaLink":%q}`, server.URL+"/delta/final")
+			fmt.Fprintf(w, `{"value":[],"@odata.deltaLink":%q}`, server.URL+"/delta/final")
+		case "/delta/final":
+			fmt.Fprintf(w, `{"value":[{"id":"file","deleted":{"state":"deleted"}}],"@odata.deltaLink":%q}`, server.URL+"/delta/end")
 		default:
 			http.NotFound(w, r)
 		}

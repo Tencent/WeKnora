@@ -73,6 +73,55 @@ func (c *graphClient) getDrive(ctx context.Context) (*drive, error) {
 	return &result, nil
 }
 
+func (c *graphClient) getDriveByID(ctx context.Context, driveID string) (*drive, error) {
+	var result drive
+	endpoint := fmt.Sprintf("%s/drives/%s", c.baseURL, url.PathEscape(driveID))
+	if err := c.getJSON(ctx, endpoint, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *graphClient) getSiteByURL(ctx context.Context, rawURL string) (*site, error) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || parsed.RawQuery != "" {
+		return nil, fmt.Errorf("sharepoint site URL must be an absolute HTTPS URL")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if !strings.HasSuffix(host, ".sharepoint.com") {
+		return nil, fmt.Errorf("sharepoint site URL must use a sharepoint.com host")
+	}
+	path := strings.Trim(strings.TrimSpace(parsed.EscapedPath()), "/")
+	endpoint := fmt.Sprintf("%s/sites/%s:/%s", c.baseURL, url.PathEscape(host), path)
+	if path == "" {
+		endpoint = fmt.Sprintf("%s/sites/%s:/", c.baseURL, url.PathEscape(host))
+	}
+	var result site
+	if err := c.getJSON(ctx, endpoint, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *graphClient) listSiteDrives(ctx context.Context, siteID string) ([]drive, error) {
+	endpoint := fmt.Sprintf("%s/sites/%s/drives", c.baseURL, url.PathEscape(siteID))
+	drives := make([]drive, 0)
+	seen := make(map[string]struct{})
+	for endpoint != "" {
+		if _, duplicate := seen[endpoint]; duplicate {
+			return nil, fmt.Errorf("microsoft Graph drive pagination cycle detected")
+		}
+		seen[endpoint] = struct{}{}
+		var page driveCollection
+		if err := c.getJSON(ctx, endpoint, &page); err != nil {
+			return nil, err
+		}
+		drives = append(drives, page.Value...)
+		endpoint = page.NextLink
+	}
+	return drives, nil
+}
+
 func (c *graphClient) getItem(ctx context.Context, driveID, itemID string) (*driveItem, error) {
 	path := c.itemURL(driveID, itemID)
 	var result driveItem

@@ -14,7 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// DataSourceOAuthHandler serves the OneDrive OAuth lifecycle endpoints.
+// DataSourceOAuthHandler serves the Microsoft drive OAuth lifecycle endpoints.
 type DataSourceOAuthHandler struct {
 	manager   *datasource.OneDriveOAuthManager
 	service   interfaces.DataSourceService
@@ -22,7 +22,7 @@ type DataSourceOAuthHandler struct {
 	content   *service.DataSourceContentManager
 }
 
-// NewDataSourceOAuthHandler constructs the OneDrive OAuth endpoint handler.
+// NewDataSourceOAuthHandler constructs the Microsoft drive OAuth endpoint handler.
 func NewDataSourceOAuthHandler(
 	manager *datasource.OneDriveOAuthManager,
 	service interfaces.DataSourceService,
@@ -48,8 +48,8 @@ func (h *DataSourceOAuthHandler) own(c *gin.Context) (*types.DataSource, bool) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "data source not found"})
 		return nil, false
 	}
-	if ds.Type != types.ConnectorTypeOneDrive {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "data source does not use OneDrive OAuth"})
+	if ds.Type != types.ConnectorTypeOneDrive && ds.Type != types.ConnectorTypeSharePoint {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "data source does not use Microsoft OAuth"})
 		return nil, false
 	}
 	return ds, true
@@ -72,7 +72,7 @@ func (h *DataSourceOAuthHandler) AuthorizeURL(c *gin.Context) {
 	}
 	userID, _ := c.Get(types.UserIDContextKey.String())
 	url, err := h.manager.AuthorizeURL(
-		c.Request.Context(), ds.TenantID, ds.ID, stringValue(userID), req.ReplaceConnection,
+		c.Request.Context(), ds.TenantID, ds.ID, oauthStringValue(userID), req.ReplaceConnection,
 	)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, oauthErrorBody(err))
@@ -81,7 +81,7 @@ func (h *DataSourceOAuthHandler) AuthorizeURL(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"authorization_url": url})
 }
 
-// Status returns the non-secret OneDrive connection state.
+// Status returns the non-secret Microsoft connection state.
 func (h *DataSourceOAuthHandler) Status(c *gin.Context) {
 	ds, ok := h.own(c)
 	if !ok {
@@ -95,24 +95,24 @@ func (h *DataSourceOAuthHandler) Status(c *gin.Context) {
 	c.JSON(http.StatusOK, status)
 }
 
-// Revoke disconnects OneDrive and removes knowledge owned by this data source.
+// Revoke disconnects Microsoft and removes knowledge owned by this data source.
 func (h *DataSourceOAuthHandler) Revoke(c *gin.Context) {
 	ds, ok := h.own(c)
 	if !ok {
 		return
 	}
 	if err := h.manager.Revoke(c.Request.Context(), ds.TenantID, ds.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to disconnect OneDrive"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to disconnect Microsoft account"})
 		return
 	}
 	if _, err := h.content.DeleteByDataSource(c.Request.Context(), ds); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "OneDrive disconnected but failed to delete synced knowledge"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Microsoft account disconnected but failed to delete synced knowledge"})
 		return
 	}
 	// The repository already persists paused state atomically with revocation;
 	// this also removes the in-process cron registration immediately.
 	if err := h.service.PauseDataSource(c.Request.Context(), ds.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "OneDrive disconnected but failed to pause schedule"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Microsoft account disconnected but failed to pause schedule"})
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -145,10 +145,10 @@ func (h *DataSourceOAuthHandler) Callback(c *gin.Context) {
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.Header("Cache-Control", "no-store")
 	c.Header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'")
-	message := "Microsoft OneDrive connected. You can close this window."
+	message := "Microsoft account connected. You can close this window."
 	autoClose := true
 	if err != nil {
-		message = "OneDrive authorization failed: " + err.Error()
+		message = "Microsoft authorization failed: " + err.Error()
 		autoClose = false
 		c.Status(http.StatusBadRequest)
 	} else {
@@ -161,7 +161,7 @@ func (h *DataSourceOAuthHandler) Callback(c *gin.Context) {
 }
 
 var oauthCallbackTemplate = template.Must(template.New("datasource-oauth-callback").Parse(`<!doctype html>
-<html><head><meta charset="utf-8"><title>OneDrive authorization</title></head>
+<html><head><meta charset="utf-8"><title>Microsoft authorization</title></head>
 <body><p>{{.Message}}</p><button type="button" onclick="window.close()">Close</button>
 {{if .AutoClose}}<script>if (window.opener) { window.close(); }</script>{{end}}</body></html>`))
 
@@ -182,7 +182,7 @@ func oauthErrorBody(err error) gin.H {
 	return gin.H{"code": code, "message": err.Error(), "error": err.Error()}
 }
 
-func stringValue(value interface{}) string {
+func oauthStringValue(value interface{}) string {
 	switch v := value.(type) {
 	case string:
 		return v

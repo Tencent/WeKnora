@@ -991,7 +991,8 @@ export default {
     connectionFailed: '연결 실패',
     isRequired: '은(는) 필수입니다',
     credentialsLabel: '자격 증명',
-    oauthConnect: 'OneDrive 연결', oauthReconnect: '재인증', oauthAuthorizationRequired: '인증 필요', oauthAuthorized: '인증됨', oauthReauthorizationRequired: '인증이 만료되었습니다. 계속하려면 재인증하세요.', oauthReplaceConfirm: '계정을 변경하면 동기화 커서가 초기화됩니다. 계속하시겠습니까?', oauthDisconnectConfirm: 'OneDrive 연결을 해제하고 동기화를 중지하시겠습니까?', oauthNotCompleted: '인증이 완료되지 않았습니다', oauthConnected: 'OneDrive 연결됨', oauthFailed: 'OneDrive 인증 실패', connecting: '연결 중',
+    oauthConnect: 'Microsoft 계정 연결', oauthReconnect: '재인증', oauthAuthorizationRequired: '인증 필요', oauthAuthorized: '인증됨', oauthReauthorizationRequired: '인증이 만료되었습니다. 계속하려면 재인증하세요.', oauthReplaceConfirm: '계정을 변경하면 동기화 커서가 초기화됩니다. 계속하시겠습니까?', oauthDisconnectConfirm: 'Microsoft 계정 연결을 해제하고 동기화를 중지하시겠습니까?', oauthNotCompleted: '인증이 완료되지 않았습니다', oauthConnected: 'Microsoft 계정 연결됨', oauthFailed: 'Microsoft 인증 실패', connecting: '연결 중',
+    sharepoint: { siteUrl: 'SharePoint 사이트 URL', siteUrlHint: '사이트 URL을 입력한 다음 문서 라이브러리, 폴더 또는 파일을 선택하세요. 데이터 원본 하나에서는 동일한 라이브러리의 항목만 선택하세요.', siteUrlInvalid: '유효한 https://*.sharepoint.com 사이트 URL을 입력하세요', singleLibraryOnly: 'SharePoint 데이터 원본 하나는 문서 라이브러리 하나만 동기화할 수 있습니다.' },
     gitlab: {
       baseUrl: 'GitLab URL', accessToken: '개인 액세스 토큰', projects: 'GitLab 프로젝트',
       projectsHint: '프로젝트 ID 또는 네임스페이스 경로(예: group/project)를 입력하고, 필요에 따라 브랜치와 디렉터리를 지정하세요.',

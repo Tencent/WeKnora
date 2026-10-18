@@ -1,11 +1,8 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"mime/multipart"
-	"net/textproto"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -69,31 +66,13 @@ func (m *DataSourceContentManager) DeleteByDataSource(
 	return deleted, nil
 }
 
-type metadataFilterFinder interface {
-	FindByMetadataFilters(context.Context, uint64, string, map[string]string) (*types.Knowledge, error)
-}
-
 // Find returns knowledge owned by this data source and external item identity.
 func (m *DataSourceContentManager) Find(
 	ctx context.Context, dataSource *types.DataSource, externalID string,
 ) (*types.Knowledge, error) {
-	repo := m.knowledgeService.GetRepository()
-	if finder, ok := repo.(metadataFilterFinder); ok {
-		return finder.FindByMetadataFilters(ctx, dataSource.TenantID, dataSource.KnowledgeBaseID, map[string]string{
-			"datasource_id": dataSource.ID,
-			"external_id":   externalID,
-		})
-	}
-	existing, err := repo.FindByMetadataKey(
-		ctx, dataSource.TenantID, dataSource.KnowledgeBaseID, "external_id", externalID,
+	return m.knowledgeService.GetRepository().FindByDataSourceExternalID(
+		ctx, dataSource.TenantID, dataSource.KnowledgeBaseID, dataSource.ID, externalID,
 	)
-	if err != nil || existing == nil {
-		return existing, err
-	}
-	if existing.GetMetadata()["datasource_id"] != dataSource.ID {
-		return nil, nil
-	}
-	return existing, nil
 }
 
 // DeleteItem idempotently removes knowledge corresponding to a fetched deletion.
@@ -195,33 +174,4 @@ func (m *DataSourceContentManager) Status(
 		return "", "cannot read knowledge processing status", err
 	}
 	return knowledge.ParseStatus, knowledge.ErrorMessage, nil
-}
-
-func bytesToFileHeader(data []byte, filename string) (*multipart.FileHeader, error) {
-	var buf bytes.Buffer
-	writer := multipart.NewWriter(&buf)
-	header := make(textproto.MIMEHeader)
-	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, filename))
-	header.Set("Content-Type", "application/octet-stream")
-	part, err := writer.CreatePart(header)
-	if err != nil {
-		return nil, fmt.Errorf("create multipart part: %w", err)
-	}
-	if _, err := part.Write(data); err != nil {
-		return nil, fmt.Errorf("write multipart data: %w", err)
-	}
-	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("close multipart writer: %w", err)
-	}
-	reader := multipart.NewReader(&buf, writer.Boundary())
-	form, err := reader.ReadForm(int64(len(data)) + (1 << 20))
-	if err != nil {
-		return nil, fmt.Errorf("read multipart form: %w", err)
-	}
-	defer func() { _ = form.RemoveAll() }()
-	files := form.File["file"]
-	if len(files) == 0 {
-		return nil, fmt.Errorf("multipart form contains no file")
-	}
-	return files[0], nil
 }

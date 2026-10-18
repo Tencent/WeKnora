@@ -303,7 +303,7 @@ func RegisterStorageBackendRoutes(r *gin.RouterGroup, h *handler.StorageBackendH
 // subresource) is Admin+.
 func RegisterDataSourceRoutes(
 	r *gin.RouterGroup,
-	handler *handler.DataSourceHandler,
+	datasourceHandler *handler.DataSourceHandler,
 	credHandler *handler.DataSourceCredentialsHandler,
 	g *rbacGuards,
 	oauthHandlers ...*handler.DataSourceOAuthHandler,
@@ -314,23 +314,24 @@ func RegisterDataSourceRoutes(
 	}
 	if oauthHandler != nil {
 		r.GET("/datasource-oauth/onedrive/callback", oauthHandler.Callback)
+		r.GET("/datasource-oauth/microsoft/callback", oauthHandler.Callback)
 	}
 	// Data source routes
 	ds := g.apiKeyGroup(r.Group("/datasource"), apiKeyManageDataSources(apiKeyFullAccess()))
 	{
 		// Get available connector types — Viewer+
-		ds.GET("/types", g.Viewer(), handler.GetAvailableConnectors)
+		ds.GET("/types", g.Viewer(), datasourceHandler.GetAvailableConnectors)
 
 		// Validate credentials without persistence (for "Test Connection" button) — Admin+
-		ds.POST("/validate-credentials", g.Admin(), handler.ValidateCredentials)
+		ds.POST("/validate-credentials", g.Admin(), datasourceHandler.ValidateCredentials)
 
 		// CRUD operations
-		ds.POST("", g.Admin(), handler.CreateDataSource)
-		ds.GET("", g.Viewer(), handler.ListDataSources)
-		ds.GET("/:id", g.Viewer(), handler.GetDataSource)
-		ds.PUT("/:id", g.Admin(), handler.UpdateDataSource)
-		ds.PATCH("/:id/sync-settings", g.Admin(), handler.PatchSyncSettings)
-		ds.DELETE("/:id", g.Admin(), handler.DeleteDataSource)
+		ds.POST("", g.Admin(), datasourceHandler.CreateDataSource)
+		ds.GET("", g.Viewer(), datasourceHandler.ListDataSources)
+		ds.GET("/:id", g.Viewer(), datasourceHandler.GetDataSource)
+		ds.PUT("/:id", g.Admin(), datasourceHandler.UpdateDataSource)
+		ds.PATCH("/:id/sync-settings", g.Admin(), datasourceHandler.PatchSyncSettings)
+		ds.DELETE("/:id", g.Admin(), datasourceHandler.DeleteDataSource)
 
 		// Credential subresource. Single logical field "credentials" because
 		// connector credentials are a per-connector atomic map (see
@@ -344,18 +345,18 @@ func RegisterDataSourceRoutes(
 		}
 
 		// Connection and resource management — Admin+
-		ds.POST("/:id/validate", g.Admin(), handler.ValidateConnection)
-		ds.GET("/:id/resources", g.Admin(), handler.ListAvailableResources)
-		ds.POST("/:id/resource-ancestors", g.Admin(), handler.ResolveResourceAncestors)
+		ds.POST("/:id/validate", g.Admin(), datasourceHandler.ValidateConnection)
+		ds.GET("/:id/resources", g.Admin(), datasourceHandler.ListAvailableResources)
+		ds.POST("/:id/resource-ancestors", g.Admin(), datasourceHandler.ResolveResourceAncestors)
 
 		// Sync management — Admin+
-		ds.POST("/:id/sync", g.Admin(), handler.ManualSync)
-		ds.POST("/:id/pause", g.Admin(), handler.PauseDataSource)
-		ds.POST("/:id/resume", g.Admin(), handler.ResumeDataSource)
+		ds.POST("/:id/sync", g.Admin(), datasourceHandler.ManualSync)
+		ds.POST("/:id/pause", g.Admin(), datasourceHandler.PauseDataSource)
+		ds.POST("/:id/resume", g.Admin(), datasourceHandler.ResumeDataSource)
 
 		// Sync logs — Viewer+ (read-only audit trail)
-		ds.GET("/:id/logs", g.Viewer(), handler.GetSyncLogs)
-		ds.GET("/logs/:log_id", g.Viewer(), handler.GetSyncLog)
+		ds.GET("/:id/logs", g.Viewer(), datasourceHandler.GetSyncLogs)
+		ds.GET("/logs/:log_id", g.Viewer(), datasourceHandler.GetSyncLog)
 	}
 }
 

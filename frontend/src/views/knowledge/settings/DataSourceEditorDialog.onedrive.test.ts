@@ -12,9 +12,11 @@ const locales = [
   '../../../i18n/locales/ru-RU.ts',
 ].map(path => readFileSync(new URL(path, import.meta.url), 'utf8'))
 
-test('OneDrive uses the OAuth lifecycle instead of credential fields', () => {
+test('OneDrive and SharePoint use the Microsoft OAuth lifecycle instead of credential fields', () => {
   assert.match(editor, /type: 'onedrive'/)
-  assert.match(editor, /const isOAuthConnector = computed\(\(\) => form\.value\.type === 'onedrive'\)/)
+  assert.match(editor, /type: 'sharepoint'/)
+  assert.match(editor, /\['onedrive', 'sharepoint'\]\.includes\(form\.value\.type\)/)
+  assert.match(editor, /form\.config\.settings\.site_url/)
   assert.match(editor, /getDataSourceOAuthAuthorizeURL\(dsId, replaceConnection\)/)
   assert.match(editor, /waitForOneDriveAuthorization/)
   assert.match(editor, /disconnectDataSourceOAuth/)

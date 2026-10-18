@@ -21,11 +21,15 @@ import (
 )
 
 func newOAuthManagerTest(
-	t *testing.T, upstream *httptest.Server,
+	t *testing.T, upstream *httptest.Server, connectorTypes ...string,
 ) (*OneDriveOAuthManager, *types.DataSource) {
 	t.Helper()
 	t.Setenv("EDITION", "lite")
 	t.Setenv("SYSTEM_AES_KEY", "0123456789abcdef0123456789abcdef")
+	t.Setenv("MICROSOFT_CLIENT_ID", "")
+	t.Setenv("MICROSOFT_CLIENT_SECRET", "")
+	t.Setenv("MICROSOFT_TENANT", "")
+	t.Setenv("MICROSOFT_REDIRECT_URL", "")
 	t.Setenv("ONEDRIVE_CLIENT_ID", "client")
 	t.Setenv("ONEDRIVE_CLIENT_SECRET", "secret")
 	t.Setenv("ONEDRIVE_TENANT", "common")
@@ -33,9 +37,13 @@ func newOAuthManagerTest(
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&types.DataSource{}, &types.DataSourceOAuthToken{}, &types.DataSourceItem{}))
+	connectorType := types.ConnectorTypeOneDrive
+	if len(connectorTypes) > 0 {
+		connectorType = connectorTypes[0]
+	}
 	ds := &types.DataSource{
 		TenantID: 9, KnowledgeBaseID: "kb", Name: "OneDrive",
-		Type: types.ConnectorTypeOneDrive, Status: types.DataSourceStatusPaused,
+		Type: connectorType, Status: types.DataSourceStatusPaused,
 	}
 	require.NoError(t, db.Create(ds).Error)
 	manager := NewOneDriveOAuthManager(
@@ -45,6 +53,38 @@ func newOAuthManagerTest(
 	manager.graphBase = upstream.URL
 	manager.httpClient = upstream.Client()
 	return manager, ds
+}
+
+func TestSharePointOAuthUsesSiteScopeAndUserIdentity(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/common/oauth2/v2.0/token":
+			require.NoError(t, r.ParseForm())
+			require.Equal(t, sharePointScopes, r.Form.Get("scope"))
+			fmt.Fprint(w, `{"access_token":"access","refresh_token":"refresh","scope":"Sites.Read.All offline_access","expires_in":3600}`)
+		case "/me":
+			require.Equal(t, "id,displayName", r.URL.Query().Get("$select"))
+			fmt.Fprint(w, `{"id":"account-1","displayName":"Alice"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+	manager, ds := newOAuthManagerTest(t, upstream, types.ConnectorTypeSharePoint)
+
+	authorizeURL, err := manager.AuthorizeURL(context.Background(), ds.TenantID, ds.ID, "admin", false)
+	require.NoError(t, err)
+	parsed, err := url.Parse(authorizeURL)
+	require.NoError(t, err)
+	require.Equal(t, sharePointScopes, parsed.Query().Get("scope"))
+
+	status, err := manager.CompleteAuthorization(context.Background(), parsed.Query().Get("state"), "code", "")
+	require.NoError(t, err)
+	require.True(t, status.Authorized)
+	require.Equal(t, types.ConnectorTypeSharePoint, status.Provider)
+	require.Equal(t, "Alice", status.AccountDisplayName)
+	require.Empty(t, status.AuthorizedDriveID)
 }
 
 func TestDataSourceOAuthAuthorizationAndRefresh(t *testing.T) {

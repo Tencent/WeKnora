@@ -15,6 +15,18 @@ type drive struct {
 	} `json:"owner"`
 }
 
+type site struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
+	Name        string `json:"name"`
+	WebURL      string `json:"webUrl"`
+}
+
+type driveCollection struct {
+	Value    []drive `json:"value"`
+	NextLink string  `json:"@odata.nextLink"`
+}
+
 type driveItem struct {
 	ID                   string    `json:"id"`
 	Name                 string    `json:"name"`

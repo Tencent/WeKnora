@@ -290,11 +290,19 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 	},
 	types.ConnectorTypeOneDrive: {
 		Type:         types.ConnectorTypeOneDrive,
-		Name:         "OneDrive / SharePoint",
+		Name:         "Microsoft OneDrive",
 		Description:  "Sync documents and files from Microsoft OneDrive",
 		Priority:     6,
 		AuthType:     "oauth2",
-		Capabilities: []string{"incremental"},
+		Capabilities: []string{"incremental", "deletion_sync", "hierarchical"},
+	},
+	types.ConnectorTypeSharePoint: {
+		Type:         types.ConnectorTypeSharePoint,
+		Name:         "Microsoft SharePoint",
+		Description:  "Sync document libraries, folders, and files from SharePoint Online",
+		Priority:     7,
+		AuthType:     "oauth2",
+		Capabilities: []string{"incremental", "deletion_sync", "hierarchical"},
 	},
 	types.ConnectorTypeDingTalk: {
 		Type:         types.ConnectorTypeDingTalk,

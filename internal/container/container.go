@@ -1992,6 +1992,9 @@ func initConnectorRegistryWithOneDrive(items interfaces.DataSourceItemRepository
 	if err := registry.Register(onedriveConnector.NewConnector(items, oauth)); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register onedrive connector: %w", err))
 	}
+	if err := registry.Register(onedriveConnector.NewSharePointConnector(items, oauth)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register sharepoint connector: %w", err))
+	}
 
 	// Future connectors will be registered here:
 	// if err := registry.Register(githubConnector.NewConnector()); err != nil { ... }
