@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/common"
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
@@ -330,8 +331,13 @@ func (r *knowledgeRepository) RenameKnowledgeFolderPath(
 	byTarget := map[string][]string{}
 	for _, row := range rows {
 		suffix := strings.TrimPrefix(row.FolderPath, from)
-		byTarget[types.NormalizeKnowledgeFolderPath(to+suffix)] = append(
-			byTarget[types.NormalizeKnowledgeFolderPath(to+suffix)], row.ID)
+		target := to + suffix
+		// Upload normalization may truncate, but moving existing folders must
+		// preserve every descendant. Validate the complete batch before writing.
+		if types.NormalizeKnowledgeFolderPath(target) != target {
+			return 0, werrors.NewBadRequestError("移动后文件夹层级或路径长度超出限制，请选择更浅的目录")
+		}
+		byTarget[target] = append(byTarget[target], row.ID)
 	}
 
 	var affected int64
