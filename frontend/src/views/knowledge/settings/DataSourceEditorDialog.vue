@@ -528,15 +528,12 @@ async function ensureChildrenLoaded(id: string) {
       }
       resources.value = merged
     } else {
-      // Connectors may conservatively advertise HasChildren to avoid an N+1
-      // probe. Once lazy loading proves this is a leaf, collapse it and retain
-      // that fact so another expand cannot trigger another empty request.
-      resources.value = resources.value.map(r => r.external_id === id
-        ? { ...r, has_children: false }
-        : r)
-      const expanded = new Set(expandedResourceIds.value)
-      expanded.delete(id)
-      expandedResourceIds.value = expanded
+      // An empty response can be a transient result while the Microsoft
+      // resource tree is being refreshed. Do not turn it into a permanent
+      // leaf: keep the node expanded and allow the next expand to retry.
+      const loaded = new Set(loadedChildrenIds.value)
+      loaded.delete(id)
+      loadedChildrenIds.value = loaded
     }
     loadedChildrenIds.value = new Set(loadedChildrenIds.value).add(id)
   } catch (e: any) {
@@ -1136,7 +1133,10 @@ async function loadResources() {
     loadingChildrenIds.value = new Set<string>()
     // If any resource already has a parent, the connector returned the whole tree
     // up front, so per-node lazy fetching is unnecessary.
-    treeFullyLoaded.value = parentsWithChildren.size > 0
+    // Microsoft Graph returns a partial tree for the root request. Even when
+    // that response contains parent IDs, child resources must still be loaded
+    // on demand; otherwise a later expand can incorrectly skip the request.
+    treeFullyLoaded.value = !isMicrosoftConnector.value && parentsWithChildren.size > 0
     // Auto-expand top-level nodes whose children are already loaded; lazy nodes
     // (children not yet fetched) stay collapsed until the user expands them.
     expandedResourceIds.value = new Set(
