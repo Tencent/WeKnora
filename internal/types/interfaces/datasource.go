@@ -100,6 +100,7 @@ type DataSourceItemRepository interface {
 	ListNotSeen(ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64, generation string) ([]*types.DataSourceItem, error)
 	ListRetainedDeleted(ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64) ([]*types.DataSourceItem, error)
 	MarkDeleted(ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64, driveID, itemID string, deletedAt time.Time) error
+	DeleteItem(ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64, driveID, itemID string) error
 	SetIngested(ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64, driveID, itemID string, ingested bool) error
 	DeleteConnection(ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64) error
 }

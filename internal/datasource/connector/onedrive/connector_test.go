@@ -255,6 +255,29 @@ func TestIncrementalDeletionStillRunsWhenSelectedFileIsGone(t *testing.T) {
 	require.Equal(t, "file", incremental.Items[0].Metadata["item_id"])
 }
 
+func TestReconcileItemsReplaysLegacyUnacknowledgedDeletionOnce(t *testing.T) {
+	_, ds, connector := newConnectorTestRepo(t)
+	ds.SyncDeletions = true
+	deletedAt := time.Now().UTC()
+	require.NoError(t, connector.items.Upsert(context.Background(), &types.DataSourceItem{
+		TenantID: ds.TenantID, DataSourceID: ds.ID, ConnectionVersion: ds.ConnectionVersion,
+		DriveID: "drive", ItemID: "deleted-file", ItemType: "file",
+		SelectedRootID: "selected-file", ExternalID: "drive:deleted-file",
+		DeletedAt: &deletedAt,
+	}))
+
+	items, err := connector.ReconcileItems(context.Background(), ds, nil)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.True(t, items[0].IsDeleted)
+	require.Equal(t, "deleted-file", items[0].Metadata["item_id"])
+
+	require.NoError(t, connector.MarkItemDeleted(context.Background(), ds, &items[0]))
+	items, err = connector.ReconcileItems(context.Background(), ds, nil)
+	require.NoError(t, err)
+	require.Empty(t, items)
+}
+
 func TestConnectorSkipsUnsupportedAndOversizedFilesWithWarnings(t *testing.T) {
 	_, ds, connector := newConnectorTestRepo(t)
 	t.Setenv("MAX_FILE_SIZE_MB", "1")

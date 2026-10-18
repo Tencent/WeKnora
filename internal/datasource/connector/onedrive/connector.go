@@ -179,7 +179,9 @@ func (c *Connector) ReconcileItems(
 	return fetched, nil
 }
 
-// MarkItemDeleted records that a source deletion was handled or retained.
+// MarkItemDeleted acknowledges a source deletion after its knowledge-side
+// cleanup succeeds. Removing the projection row also prevents a retained
+// deletion from being replayed indefinitely.
 func (c *Connector) MarkItemDeleted(
 	ctx context.Context, dataSource *types.DataSource, item *types.FetchedItem,
 ) error {
@@ -190,15 +192,8 @@ func (c *Connector) MarkItemDeleted(
 	if driveID == "" || itemID == "" {
 		return fmt.Errorf("onedrive deletion is missing drive/item identity")
 	}
-	if err := c.items.MarkDeleted(ctx, dataSource.TenantID, dataSource.ID,
-		dataSource.ConnectionVersion, driveID, itemID, time.Now().UTC()); err != nil {
-		return err
-	}
-	if dataSource.SyncDeletions {
-		return c.items.SetIngested(ctx, dataSource.TenantID, dataSource.ID,
-			dataSource.ConnectionVersion, driveID, itemID, false)
-	}
-	return nil
+	return c.items.DeleteItem(ctx, dataSource.TenantID, dataSource.ID,
+		dataSource.ConnectionVersion, driveID, itemID)
 }
 
 // MarkItemIngested records successful handoff to the knowledge pipeline.
@@ -424,17 +419,16 @@ func (c *Connector) FetchAllResult(
 		return result, err
 	}
 	for _, item := range missing {
-		if item.SelectedRootID != "" && item.Ingested && item.DeletedAt == nil {
-			result.Items = append(result.Items, deletedFetchedItem(item))
-		} else if item.DeletedAt == nil {
-			// Folders and never-ingested files have no knowledge-side effect to
-			// defer, but must still leave the live hierarchy projection.
+		if item.DeletedAt == nil {
 			if err := c.items.MarkDeleted(
 				ctx, item.TenantID, item.DataSourceID, item.ConnectionVersion,
 				item.DriveID, item.ItemID, time.Now().UTC(),
 			); err != nil {
 				return result, err
 			}
+		}
+		if item.SelectedRootID != "" {
+			result.Items = append(result.Items, deletedFetchedItem(item))
 		}
 	}
 	result.NextCursor, err = buildCursor(deltaLink, selectionHash(canonicalIDs), config.Runtime.ConnectionVersion)
@@ -641,18 +635,15 @@ func (c *Connector) queueRemoval(
 		if item != root && survivesDeletedAncestor(item, root.ItemID, liveChanges, byID) {
 			continue
 		}
-		if item.Ingested {
-			if _, exists := queued[item.ExternalID]; !exists {
-				result.Items = append(result.Items, deletedFetchedItem(item))
-				queued[item.ExternalID] = struct{}{}
-			}
-			continue
-		}
 		if err := c.items.MarkDeleted(
 			ctx, config.Runtime.TenantID, config.Runtime.DataSourceID,
 			config.Runtime.ConnectionVersion, item.DriveID, item.ItemID, deletedAt,
 		); err != nil {
 			return err
+		}
+		if _, exists := queued[item.ExternalID]; !exists {
+			result.Items = append(result.Items, deletedFetchedItem(item))
+			queued[item.ExternalID] = struct{}{}
 		}
 	}
 	return nil

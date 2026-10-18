@@ -289,7 +289,7 @@ func (r *dataSourceItemRepository) ListRetainedDeleted(
 ) ([]*types.DataSourceItem, error) {
 	var items []*types.DataSourceItem
 	err := r.scope(ctx, tenantID, dataSourceID, connectionVersion).
-		Where("deleted_at IS NOT NULL AND ingested = ?", true).Find(&items).Error
+		Where("deleted_at IS NOT NULL").Find(&items).Error
 	return items, err
 }
 
@@ -300,6 +300,14 @@ func (r *dataSourceItemRepository) MarkDeleted(
 	return r.scope(ctx, tenantID, dataSourceID, connectionVersion).
 		Where("drive_id = ? AND item_id = ?", driveID, itemID).
 		Updates(map[string]interface{}{"deleted_at": deletedAt, "updated_at": time.Now().UTC()}).Error
+}
+
+func (r *dataSourceItemRepository) DeleteItem(
+	ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64, driveID, itemID string,
+) error {
+	return r.scope(ctx, tenantID, dataSourceID, connectionVersion).
+		Where("drive_id = ? AND item_id = ?", driveID, itemID).
+		Delete(&types.DataSourceItem{}).Error
 }
 
 func (r *dataSourceItemRepository) SetIngested(
