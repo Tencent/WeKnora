@@ -3096,6 +3096,15 @@ export default {
     },
   },
   embedPublish: {
+    history: "Chat history",
+    historyHint: "The latest 30 chats are saved in this browser only. Clearing history does not delete server messages.",
+    historyEmpty: "No saved chats",
+    historyUntitled: "Untitled chat",
+    historyClear: "Clear local history",
+    historyClearConfirm: "Clear this browser’s history and start a new chat? Server messages will be kept.",
+    historyLoadFailed: "Could not open the chat. Please try again.",
+    historyUnavailable: "This chat is no longer available and was removed from local history.",
+
     create: 'New embed channel',
     channelsTitle: 'Embed channels',
     disabled: 'Disabled',

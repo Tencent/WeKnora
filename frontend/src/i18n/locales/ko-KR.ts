@@ -5423,6 +5423,15 @@ export default {
     }
   },
   embedPublish: {
+    history: "대화 기록",
+    historyHint: "최근 대화 30개가 이 브라우저에만 저장됩니다. 기록을 지워도 서버 메시지는 삭제되지 않습니다.",
+    historyEmpty: "저장된 대화 없음",
+    historyUntitled: "제목 없는 대화",
+    historyClear: "로컬 기록 지우기",
+    historyClearConfirm: "기록을 지우고 새 대화를 시작할까요? 서버 메시지는 유지됩니다.",
+    historyLoadFailed: "대화를 열 수 없습니다. 다시 시도해 주세요.",
+    historyUnavailable: "사용할 수 없는 대화이므로 로컬 기록에서 삭제했습니다.",
+
     create: '새 임베드 채널',
     channelsTitle: '임베드 채널',
     disabled: '비활성화',

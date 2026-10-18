@@ -5424,6 +5424,15 @@ export default {
     }
   },
   embedPublish: {
+    history: "對話歷史",
+    historyHint: "最近 30 個對話，僅儲存在此瀏覽器。清除紀錄不會刪除伺服器訊息。",
+    historyEmpty: "暫無對話紀錄",
+    historyUntitled: "未命名對話",
+    historyClear: "清除本機歷史",
+    historyClearConfirm: "清除此瀏覽器的歷史並開啟新對話？伺服器訊息將保留。",
+    historyLoadFailed: "無法開啟對話，請稍後重試。",
+    historyUnavailable: "此對話已無法使用，已從本機歷史移除。",
+
     create: '新建內嵌通路',
     channelsTitle: '內嵌通路',
     disabled: '已停用',
