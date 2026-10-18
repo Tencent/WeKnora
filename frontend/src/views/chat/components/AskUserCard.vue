@@ -24,7 +24,7 @@
           :class="{ 'is-selected': fieldHasOption(field.name, option), 'is-disabled': submitting }">
           <input type="checkbox" :checked="fieldHasOption(field.name, option)" :disabled="submitting"
             @change="toggleFieldOption(field.name, option)" />
-          <span class="ask-field-option-mark" aria-hidden="true"><CheckIcon /></span>
+          <span class="ask-field-option-mark" aria-hidden="true"><CheckIcon size="12px" /></span>
           <span class="ask-field-option-text">{{ option }}</span>
         </label>
       </div>
@@ -345,7 +345,6 @@ defineExpose({ handleKey })
   border: 1px solid var(--td-component-border);
   border-radius: var(--app-radius-xs, 3px);
   color: transparent;
-  .t-icon { font-size: 12px; }
 }
 .is-selected .ask-field-option-mark {
   background: var(--td-brand-color);

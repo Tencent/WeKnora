@@ -9,13 +9,13 @@
         <details v-if="message.role === 'user'" class="child-assignment">
           <summary>
             <span class="child-assignment-label">
-              <TaskIcon class="child-assignment-icon" aria-hidden="true" />
+              <TaskIcon class="child-assignment-icon" size="18px" aria-hidden="true" />
               {{ t('agentStream.collaboration.assignment') }}
             </span>
             <span v-if="message === latestAssignment" class="child-assignment-status" :class="task.status" role="status">
               {{ t(`agentStream.collaboration.status.${task.status}`) }}
             </span>
-            <ChevronRightIcon class="child-assignment-chevron" aria-hidden="true" />
+            <ChevronRightIcon class="child-assignment-chevron" size="16px" aria-hidden="true" />
           </summary>
           <div class="child-assignment-body">{{ message.content }}</div>
         </details>
@@ -142,8 +142,8 @@ onUnmounted(() => { closed = true; clearTimeout(timer); stream.stopStream() })
 .child-assignment summary:hover { background: var(--td-bg-color-container-hover); }
 .child-assignment summary:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: 2px; }
 .child-assignment-label { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
-.child-assignment-icon { flex-shrink: 0; font-size: 18px; color: var(--td-text-color-secondary); }
-.child-assignment-chevron { margin-left: auto; flex-shrink: 0; font-size: 16px; color: var(--td-text-color-secondary); transition: transform var(--app-motion-fast) ease; }
+.child-assignment-icon { flex-shrink: 0; color: var(--td-text-color-secondary); }
+.child-assignment-chevron { margin-left: auto; flex-shrink: 0; color: var(--td-text-color-secondary); transition: transform var(--app-motion-fast) ease; }
 .child-assignment[open] .child-assignment-chevron { transform: rotate(90deg); }
 .child-assignment-status { flex-shrink: 0; padding: 2px 7px; border-radius: var(--app-radius-xs); background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-secondary); font-size: var(--app-text-md); line-height: 1.5; }
 .child-assignment-status.running { color: var(--td-brand-color); background: var(--td-brand-color-light); }
