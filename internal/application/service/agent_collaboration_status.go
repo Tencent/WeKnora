@@ -95,7 +95,7 @@ func (s *AgentCollaboration) HistoryStatuses(
 	return out, nil
 }
 
-// Labels come from the pinned template, while name/run IDs retain task identity.
+// Template tasks use their pinned display name; temporary workers use the task name.
 // Decode only the public name; never expose the rest of the template snapshot.
 func collaborationStatusView(g *collaboration.Group) collaboration.StatusSnapshot {
 	view := g.StatusView()
