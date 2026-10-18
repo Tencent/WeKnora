@@ -65,19 +65,29 @@ func (r *Runtime) wakeParent(ctx context.Context, scope Scope) {
 		}
 	}
 	var wait *ParentWait
+	var closing bool
 	owner := uuid.NewString()
 	err := r.Store.Change(ctx, scope, func(g *Group) error {
 		wait = nil
+		closing = false
 		now := time.Now()
-		if g.Status != "active" || !now.Before(g.Deadline) || (g.ParentOwner != "" && now.Before(g.ParentLease)) {
+		if (g.Status != "active" && !g.ParentClosePending) || (g.ParentOwner != "" && now.Before(g.ParentLease)) {
 			return nil
 		}
-		if g.ParentWait == nil {
-			// There is no replay-safe point after a crash during inference or
-			// a tool call. Claim the abandoned turn only to close it explicitly;
-			// an empty snapshot must never execute the model or tools again.
-			if g.ParentOwner == "" || g.ParentMessageID == "" {
+		if g.ParentClosePending || !now.Before(g.Deadline) || g.ParentWait == nil {
+			if g.ParentMessageID == "" || (g.ParentWait == nil && !g.ParentClosePending && g.ParentOwner == "") {
 				return nil
+			}
+			// Fence all execution before closing the transcript. Keep this outbox
+			// pending across failures/restarts until WakeParent acknowledges delivery.
+			closing = true
+			g.ParentClosePending = true
+			g.Status = "cancelling"
+			g.ParentWait = nil
+			for _, m := range g.Members {
+				if active(current(m)) {
+					current(m).CancelRequested = true
+				}
 			}
 			wait = &ParentWait{}
 			g.ParentOwner, g.ParentLease = owner, now.Add(r.Lease)
@@ -100,10 +110,30 @@ func (r *Runtime) wakeParent(ctx context.Context, scope Scope) {
 	r.workers.Add(1)
 	go func() {
 		defer r.workers.Done()
-		b := &Binding{Runtime: r, Scope: scope, ParentOwner: owner, WaitUntil: wait.Until, Seen: wait.After}
+		b := &Binding{
+			Runtime:     r,
+			Scope:       scope,
+			ParentOwner: owner,
+			Closing:     closing,
+			WaitUntil:   wait.Until,
+			Seen:        wait.After,
+		}
 		runCtx, stop := b.Start(ctx)
 		defer stop()
-		if err := r.WakeParent(WithBinding(runCtx, b), b, wait.Snapshot); err != nil && ctx.Err() == nil {
+		err := r.WakeParent(WithBinding(runCtx, b), b, wait.Snapshot)
+		if closing {
+			if err == nil {
+				// A failed acknowledgement is safe to retry: only transcript/stream
+				// finalization can run for ParentClosePending, never the saved execution.
+				_ = r.Store.Change(b.Context(context.WithoutCancel(ctx)), scope, func(g *Group) error {
+					g.ParentClosePending = false
+					settle(g)
+					return nil
+				})
+			}
+			return
+		}
+		if err != nil && ctx.Err() == nil {
 			_ = r.Cancel(b.Context(context.WithoutCancel(ctx)), scope)
 		}
 	}()
@@ -213,4 +243,18 @@ func (r *Runtime) RecordProgress(ctx context.Context, w Work, p Progress) error 
 	p.ToolCallID = truncate(p.ToolCallID, 128)
 	p.UpdatedAt = time.Now()
 	return r.changeWork(ctx, w, func(_ *Group, v *Run) error { v.Progress = &p; return nil })
+}
+
+// CheckParentFinalization authorizes only the claimed terminal delivery. It is
+// deliberately separate from CheckParent, which rejects a closing group.
+func (r *Runtime) CheckParentFinalization(ctx context.Context, scope Scope, owner string) error {
+	g, err := r.Store.Read(ctx, scope)
+	if err != nil {
+		return err
+	}
+	if !g.ParentClosePending || g.Status != "cancelling" || g.ParentOwner != owner ||
+		!time.Now().Before(g.ParentLease) {
+		return ErrConflict
+	}
+	return nil
 }

@@ -417,7 +417,9 @@ func (s *AgentCollaboration) PendingPrompts(
 			}
 			runs := map[string]*collaboration.Run{}
 			for _, run := range m.Runs {
-				runs[run.MessageID] = run
+				if !run.Inherited {
+					runs[run.MessageID] = run
+				}
 			}
 			for _, p := range prompts {
 				if p.UserID != delegatedPromptUser(caller.UserID) || p.TenantID != caller.TenantID ||
@@ -569,7 +571,7 @@ func (s *AgentCollaboration) finishInterruptedParent(ctx context.Context, b *col
 	if err != nil {
 		return err
 	}
-	if err = s.Runtime.CheckParent(ctx, b.Scope, b.ParentOwner); err != nil {
+	if err = s.Runtime.CheckParentFinalization(ctx, b.Scope, b.ParentOwner); err != nil {
 		return err
 	}
 	g, err := s.Runtime.Store.Read(ctx, b.Scope)
@@ -580,9 +582,6 @@ func (s *AgentCollaboration) finishInterruptedParent(ctx context.Context, b *col
 	if err != nil {
 		return err
 	}
-	if err = s.Runtime.Cancel(b.Context(ctx), b.Scope); err != nil {
-		return err
-	}
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	defer func() {
@@ -590,17 +589,31 @@ func (s *AgentCollaboration) finishInterruptedParent(ctx context.Context, b *col
 			logger.Warnf(ctx, "Failed to clear collaboration live stream: %v", err)
 		}
 	}()
-	if answer.IsCompleted {
-		return nil
+	reason := "任务执行期间服务中断，当前步骤没有可安全恢复的检查点，已停止本轮及未完成的子任务，避免重复执行。请重新发起任务。"
+	if !time.Now().Before(g.Deadline) {
+		reason = "任务已超过执行时限，已停止本轮及未完成的子任务，避免重复执行。已保存的执行记录和子任务结果仍可查看。"
 	}
-	const reason = "任务执行期间服务中断，当前步骤没有可安全恢复的检查点，已停止本轮及未完成的子任务，避免重复执行。请重新发起任务。"
-	answer.IsCompleted = true
-	answer.RunState = ""
-	answer.Content = reason
-	if err = s.messages.UpdateMessage(persistCtx, answer); err != nil {
-		return err
+	wasCompleted := answer.IsCompleted
+	if !wasCompleted {
+		answer.IsCompleted = true
+		answer.RunState = ""
+		if answer.Content == "" {
+			answer.Content = reason
+		} else {
+			answer.Content += "\n\n" + reason
+		}
+		if err = s.messages.UpdateMessage(persistCtx, answer); err != nil {
+			return err
+		}
 	}
-	for _, kind := range []types.ResponseType{"error", "complete"} {
+	// Retry terminal delivery even when persistence succeeded on an earlier
+	// attempt. Stable event IDs prevent a retry from creating another turn.
+
+	kinds := []types.ResponseType{"complete"}
+	if !wasCompleted {
+		kinds = []types.ResponseType{"error", "complete"}
+	}
+	for _, kind := range kinds {
 		if err = s.streams.AppendEvent(persistCtx, b.Scope.SessionID, answer.ID, interfaces.StreamEvent{
 			ID:        "interrupted-parent-" + answer.ID + "-" + string(kind),
 			Type:      kind,
@@ -609,7 +622,7 @@ func (s *AgentCollaboration) finishInterruptedParent(ctx context.Context, b *col
 			Done:      true,
 
 			Data: map[string]interface{}{
-				"error": reason, "final_content": reason,
+				"error": reason, "final_content": answer.Content,
 				"session_id": b.Scope.SessionID, "assistant_message_id": answer.ID,
 			},
 		}); err != nil {

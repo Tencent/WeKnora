@@ -92,7 +92,8 @@ func (b *Binding) Start(ctx context.Context) (context.Context, func()) {
 					if completed {
 						return nil
 					}
-					if g.Status != "active" {
+					closing := b.Closing && g.ParentClosePending && g.Status == "cancelling"
+					if g.Status != "active" && !closing {
 						return ErrClosed
 					}
 					g.ParentLease = time.Now().Add(b.Runtime.Lease)
@@ -179,6 +180,7 @@ func (r *Runtime) previousChildren(ctx context.Context, scope *Scope) ([]*Member
 		}
 		m, run := *original, *last
 		m.Inherited, m.Mail = true, nil
+		run.Inherited = true
 		run.Owner, run.Lease, run.PromptID, run.Prompt = "", time.Time{}, "", nil
 		m.Runs = []*Run{&run}
 		members = append(members, &m)

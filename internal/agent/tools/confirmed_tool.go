@@ -32,6 +32,21 @@ func NewConfirmedTool(
 	return &ConfirmedTool{inner: inner, risk: risk, access: access, gate: gate}
 }
 
+// RequireConfirmation decorates an existing tool without permitting replacement
+// by another implementation. Duplicate registration remains first-wins.
+func (r *ToolRegistry) RequireConfirmation(
+	name string, risk operations.Risk, access operations.Access, gate approval.BuiltinApproval,
+) error {
+	inner, err := r.GetTool(name)
+	if err != nil {
+		return err
+	}
+	if _, wrapped := inner.(*ConfirmedTool); !wrapped {
+		r.tools[name] = NewConfirmedTool(inner, risk, access, gate)
+	}
+	return nil
+}
+
 // Name returns the wrapped tool's name.
 func (t *ConfirmedTool) Name() string { return t.inner.Name() }
 

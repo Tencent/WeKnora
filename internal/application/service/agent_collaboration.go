@@ -160,11 +160,10 @@ func (s *AgentCollaboration) attach(
 		}
 		cfg.AssistantAccess = pinned.Access
 		for name, risk := range assistantWriteToolRisk {
-			if tool, err := registry.GetTool(name); err == nil {
-				if _, already := tool.(*tools.ConfirmedTool); !already {
-					registry.RegisterTool(
-						tools.NewConfirmedTool(tool, risk, operations.Access{Level: cfg.AssistantAccess}, s.gate),
-					)
+			if _, err := registry.GetTool(name); err == nil {
+				access := operations.Access{Level: cfg.AssistantAccess}
+				if err := registry.RequireConfirmation(name, risk, access, s.gate); err != nil {
+					return err
 				}
 			}
 		}
@@ -447,22 +446,32 @@ func (s *AgentCollaboration) run(ctx context.Context, w collaboration.Work) (col
 	})
 	s.forwardPrompts(ctx, b, bus)
 	s.trackProgress(b, bus)
-	err = s.sessions.AgentQA(
-		ctx,
-		&types.QARequest{
-			Resume:             resume,
-			Interactive:        true,
-			Suspendable:        true,
-			Session:            session,
-			Query:              w.Run.Query,
-			AssistantMessageID: answer.ID,
-			UserMessageID:      userMsg.ID,
-			CustomAgent:        &saved.Agent,
-			WebSearchEnabled:   saved.Agent.Config.WebSearchEnabled,
-			AssistantAccess:    saved.Access,
-		},
-		bus,
-	)
+	// Recover inside the transcript boundary so panic follows the same durable
+	// completion path as a returned error. The scheduler must never replay it.
+	err = func() (runErr error) {
+		defer func() {
+			if p := recover(); p != nil {
+				runErr = fmt.Errorf("agent executor panicked: %v", p)
+			}
+		}()
+		return s.sessions.AgentQA(
+			ctx,
+			&types.QARequest{
+				Resume:             resume,
+				Interactive:        true,
+				Suspendable:        true,
+				Session:            session,
+				Query:              w.Run.Query,
+				AssistantMessageID: answer.ID,
+				UserMessageID:      userMsg.ID,
+				CustomAgent:        &saved.Agent,
+				WebSearchEnabled:   saved.Agent.Config.WebSearchEnabled,
+				AssistantAccess:    saved.Access,
+			},
+			bus,
+		)
+	}()
+
 	mu.Lock()
 	if err == nil {
 		err = runErr

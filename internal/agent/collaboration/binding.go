@@ -11,13 +11,15 @@ import (
 // input. wait_agent has its own cursor and cannot acknowledge model processing.
 type Binding struct {
 	ParentOwner string
-	Recovered   bool
-	Runtime     *Runtime
-	Scope       Scope
-	Child       *Work
-	Seen        int64
-	WaitCursor  int64
-	WaitUntil   time.Time
+	// Closing only authorizes transcript finalization, never model/tool execution.
+	Closing    bool
+	Recovered  bool
+	Runtime    *Runtime
+	Scope      Scope
+	Child      *Work
+	Seen       int64
+	WaitCursor int64
+	WaitUntil  time.Time
 	// HasInput probes durable steer without consuming it; the engine owns delivery.
 	HasInput func(context.Context) (bool, error)
 }

@@ -213,7 +213,7 @@ func (r *Runtime) cancelMessage(ctx context.Context, s Scope, messageID string) 
 }
 
 func settle(g *Group) {
-	if g.Status != "cancelling" {
+	if g.Status != "cancelling" || g.ParentClosePending {
 		return
 	}
 	for _, m := range g.Members {
@@ -405,6 +405,7 @@ func (r *Runtime) Tick(ctx context.Context) {
 			running := 0
 			if now.After(g.Deadline) && g.Status == "active" {
 				g.Status = "cancelling"
+				g.ParentClosePending = r.WakeParent != nil && g.ParentMessageID != ""
 				g.ParentWait = nil
 				for _, m := range g.Members {
 					current(m).CancelRequested = true

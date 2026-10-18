@@ -551,7 +551,7 @@ func TestCollaborationAbandonedParentClosesTranscriptWithoutModelReplay(t *testi
 			run: func(context.Context, *types.QARequest, *event.EventBus) error { calls.Add(1); return nil },
 		},
 	)
-	s.Runtime.Tick(ctx)
+	startCollaborationTestRuntime(ctx, t, s.Runtime)
 	for _, want := range []types.ResponseType{"error", "complete"} {
 		select {
 		case e := <-streams.events:
@@ -568,9 +568,12 @@ func TestCollaborationAbandonedParentClosesTranscriptWithoutModelReplay(t *testi
 	require.True(t, m.IsCompleted)
 	require.Contains(t, m.Content, "没有可安全恢复的检查点")
 	require.Zero(t, calls.Load())
-	g, err := s.Runtime.Store.Read(ctx, scope)
-	require.NoError(t, err)
-	require.Equal(t, "cancelled", g.Status)
+	// Terminal stream delivery precedes the durable acknowledgement.
+	require.Eventually(t, func() bool {
+		g, err := s.Runtime.Store.Read(ctx, scope)
+		return err == nil && g.Status == "cancelled" && !g.ParentClosePending
+	}, time.Second, 5*time.Millisecond)
+	stopCollaborationTestRuntime(t, s.Runtime)
 }
 
 func TestCompletedCollaborationRestoresAllApprovalHistory(t *testing.T) {

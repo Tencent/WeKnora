@@ -2,6 +2,7 @@ package collaboration
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -344,4 +345,74 @@ func TestAbandonedParentWithoutCheckpointClosesInsteadOfReplaying(t *testing.T) 
 		r.Tick(ctx)
 	}
 	require.Equal(t, int32(1), calls.Load())
+}
+
+func TestExpiredParentFinalizationRetriesAfterRestartWithoutExecution(t *testing.T) {
+	for _, checkpoint := range []bool{false, true} {
+		t.Run(map[bool]string{false: "in-flight", true: "waiting"}[checkpoint], func(t *testing.T) {
+			store, scope := testStore(t)
+			ctx := context.Background()
+			var executions atomic.Int32
+			runner := func(context.Context, Work) (Result, error) { executions.Add(1); return Result{}, nil }
+			r := New(store, runner)
+			b, err := r.AcquireParent(ctx, scope)
+			require.NoError(t, err)
+			_, err = r.Spawn(ctx, scope, "spawn", "child", "a", "{}", "task")
+			require.NoError(t, err)
+			if checkpoint {
+				require.NoError(t, b.SaveWait(ctx, []byte("must never replay"), time.Now().Add(time.Hour)))
+			}
+			require.NoError(t, store.Change(ctx, scope, func(g *Group) error {
+				g.ParentLease = time.Now().Add(-time.Minute)
+				g.Deadline = time.Now().Add(-time.Second)
+				return nil
+			}))
+			r.WakeParent = func(ctx context.Context, b *Binding, snapshot []byte) error {
+				if len(snapshot) != 0 {
+					return errors.New("execution snapshot must not be replayed")
+				}
+				if err := r.CheckParentFinalization(ctx, scope, b.ParentOwner); err != nil {
+					return err
+				}
+				return errors.New("temporary delivery failure")
+			}
+			r.Tick(ctx)
+			r.workers.Wait()
+			g := read(t, store, scope)
+			require.Equal(t, "cancelling", g.Status)
+			require.True(t, g.ParentClosePending)
+			require.Equal(t, "cancelled", g.Members[0].Runs[0].State)
+			require.Error(t, r.CheckParent(ctx, scope, g.ParentOwner), "closing authority cannot execute tools")
+			// Restart with the same durable record and expire the failed claim.
+			require.NoError(
+				t,
+				store.Change(
+					ctx,
+					scope,
+					func(g *Group) error { g.ParentLease = time.Now().Add(-time.Second); return nil },
+				),
+			)
+			restarted := New(NewStore(store.db), runner)
+			var closures atomic.Int32
+			restarted.WakeParent = func(ctx context.Context, b *Binding, snapshot []byte) error {
+				if len(snapshot) != 0 {
+					return errors.New("execution snapshot must not be replayed")
+				}
+				if err := restarted.CheckParentFinalization(ctx, scope, b.ParentOwner); err != nil {
+					return err
+				}
+				closures.Add(1)
+				return nil
+			}
+			for range 3 {
+				restarted.Tick(ctx)
+				restarted.workers.Wait()
+			}
+			require.Equal(t, int32(1), closures.Load())
+			require.Zero(t, executions.Load())
+			g = read(t, store, scope)
+			require.Equal(t, "cancelled", g.Status)
+			require.False(t, g.ParentClosePending)
+		})
+	}
 }

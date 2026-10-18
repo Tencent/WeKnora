@@ -59,14 +59,16 @@ type Group struct {
 	ParentOwner     string
 	ParentLease     time.Time
 	ParentWait      *ParentWait
-	RootQuery       string
-	Scope           Scope
-	Status          string
-	Members         []*Member
-	Events          []Event
-	Requests        map[string]string
-	NextSequence    int64
-	Deadline        time.Time
+	// ParentClosePending keeps interrupted/expired parents recoverable until their transcript and stream are closed.
+	ParentClosePending bool
+	RootQuery          string
+	Scope              Scope
+	Status             string
+	Members            []*Member
+	Events             []Event
+	Requests           map[string]string
+	NextSequence       int64
+	Deadline           time.Time
 }
 
 // Member is a named child task with its execution history and incoming mailbox.
@@ -95,6 +97,8 @@ type Progress struct {
 
 // Run tracks one child execution, its lease and eventual result.
 type Run struct {
+	// Inherited identifies a baseline run copied from an earlier parent turn.
+	Inherited       bool         `json:"inherited,omitempty"`
 	Prompt          *PromptState `json:"prompt,omitempty"`
 	Progress        *Progress    `json:"progress,omitempty"`
 	ID              string       `json:"run_id"`
