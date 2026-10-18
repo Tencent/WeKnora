@@ -245,8 +245,14 @@ func (*collaborationStreams) AppendEvent(context.Context, string, string, interf
 }
 
 func TestCollaborationParentAutomaticallyResumesOriginalMessage(t *testing.T) {
+	for _, id := range []string{types.BuiltinWeKnoraAssistantID, "ordinary-agent"} {
+		t.Run(id, func(t *testing.T) { testCollaborationParentResume(t, id) })
+	}
+}
+
+func testCollaborationParentResume(t *testing.T, agentID string) {
 	s, agents, messages, ctx := collaborationService(t)
-	agents.agent.ID = types.BuiltinWeKnoraAssistantID
+	agents.agent.ID = agentID
 	scope := collaboration.Scope{TenantID: 7, UserID: "u", SessionID: "parent", ID: "original-message"}
 	b, err := s.Runtime.AcquireParent(ctx, scope)
 	require.NoError(t, err)
@@ -256,7 +262,7 @@ func TestCollaborationParentAutomaticallyResumesOriginalMessage(t *testing.T) {
 	)
 	request, err := json.Marshal(
 		types.ResumableAgentRequest{
-			AgentID:       types.BuiltinWeKnoraAssistantID,
+			AgentID:       agentID,
 			Query:         "original task",
 			UserMessageID: "original-user",
 		},

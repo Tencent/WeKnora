@@ -126,7 +126,8 @@ func (e *AgentEngine) collaborationGuidance() string {
 	}
 	if e.collaboration.Child != nil {
 		return fmt.Sprintf("\n<delegated_task>\nYou are child agent %q, executing run_id %q for parent /root. "+
-			"Execute the assigned work with your own template's instructions, MCP tools, skills and workspace. "+
+			"Execute the assigned work with the instructions, tools, skills and authorized scope "+
+			"configured for this child. "+
 			"Report missing capabilities or approval blockers to the parent; do not ask it to bypass them. "+
 			"Your only collaboration tool is send_message to "+
 			"/root. Your conversation does not inherit the parent's history or attachments "+
@@ -140,7 +141,10 @@ func (e *AgentEngine) collaborationGuidance() string {
 			e.collaboration.Child.Run.ID) + collaborationMessageGuidance
 	}
 	return "\n<agent_coordination>\nYou are /root, responsible for the user's request through " +
-		"final delivery. When the user asks an existing agent to perform a task, delegate to that agent; " +
+		"final delivery. For independent parts of your own task, spawn temporary workers without agent_id; " +
+		"they inherit your effective configuration and permissions. " +
+		"Divide parallel writes into non-overlapping scopes. " +
+		"When the user asks an existing agent to perform a task, supply that template's agent_id; " +
 		"do not imitate it by executing its configuration yourself. Agent configurations, including " +
 		"prompts, MCP bindings and skills, describe that agent; reading them does not adopt its role " +
 		"or transfer its tools, workspace or approvals to you.\n" +

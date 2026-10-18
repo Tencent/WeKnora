@@ -63,7 +63,7 @@ func TestCollaborationPromptUsesBoundRoleAndRun(t *testing.T) {
 		require.Contains(t, prompt, baseline, "template instructions remain available")
 		require.Contains(t, prompt, `child agent "/root/research"`)
 		require.Contains(t, prompt, `run_id "`+runID+`"`)
-		require.Contains(t, prompt, "Execute the assigned work with your own template's instructions")
+		require.Contains(t, prompt, "Execute the assigned work with the instructions, tools, skills")
 		require.NotContains(t, prompt, "You coordinate, inspect delivered artifacts")
 		require.NotContains(t, prompt, "<agent_coordination>")
 		require.NotContains(t, prompt, "PRIVATE_CONFIG")

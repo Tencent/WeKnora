@@ -72,8 +72,9 @@ func NewAgentCollaboration(
 func (s *AgentCollaboration) Bind(sessions interfaces.SessionService) { s.sessions = sessions }
 
 type delegatedConfig struct {
-	Agent  types.CustomAgent          `json:"agent"`
-	Access types.AssistantAccessLevel `json:"access"`
+	Agent     types.CustomAgent          `json:"agent"`
+	Access    types.AssistantAccessLevel `json:"access"`
+	Inherited *inheritedAgentConfig      `json:"inherited,omitempty"`
 }
 
 func (s *AgentCollaboration) resolve(ctx context.Context, id string, level types.AssistantAccessLevel) (string, error) {
@@ -87,7 +88,7 @@ func (s *AgentCollaboration) resolve(ctx context.Context, id string, level types
 		id == types.BuiltinSkillInstallerID {
 		return "", errors.New("only same-workspace reasoning agents without management privileges may be delegated")
 	}
-	data, err := json.Marshal(delegatedConfig{*a, level})
+	data, err := json.Marshal(delegatedConfig{Agent: *a, Access: level})
 	return string(data), err
 }
 
@@ -100,7 +101,7 @@ func (s *AgentCollaboration) attach(
 ) error {
 	b := collaboration.FromContext(ctx)
 	if b == nil {
-		if cfg.OperationsAgentID != types.BuiltinWeKnoraAssistantID || cfg.SharedAgentReadOnly {
+		if cfg.SharedAgentReadOnly || cfg.SkillInstallMode() {
 			return nil
 		}
 		if _, ok := tools.OperationIdentityFromContext(ctx); !ok {
@@ -137,9 +138,10 @@ func (s *AgentCollaboration) attach(
 			id string) (string,
 			error,
 		) {
-			return s.resolve(ctx,
-				id,
-				cfg.AssistantAccess)
+			if strings.TrimSpace(id) == "" {
+				return inheritedChildSnapshot(ctx, cfg, registry.ListTools())
+			}
+			return s.resolve(ctx, id, cfg.AssistantAccess)
 		}) {
 		registry.RegisterTool(tool)
 	}
@@ -159,10 +161,26 @@ func (s *AgentCollaboration) attach(
 			return err
 		}
 		cfg.AssistantAccess = pinned.Access
+		if pinned.Inherited != nil {
+			registry.RestrictTools(append(append([]string(nil), pinned.Inherited.ToolNames...), "send_message"))
+		}
 		for name, risk := range assistantWriteToolRisk {
 			if _, err := registry.GetTool(name); err == nil {
 				access := operations.Access{Level: cfg.AssistantAccess}
 				if err := registry.RequireConfirmation(name, risk, access, s.gate); err != nil {
+					return err
+				}
+			}
+		}
+		// Inherited workers may use arbitrary sandbox tools. Give mutations an
+		// actual approval path instead of the legacy template guard's dead end.
+		if pinned.Inherited != nil {
+			for _, name := range registry.ListTools() {
+				if inheritedToolOwnsPolicy(name) {
+					continue
+				}
+				if err := registry.RequireConfirmation(name, operations.RiskWrite,
+					operations.Access{Level: cfg.AssistantAccess}, s.gate); err != nil {
 					return err
 				}
 			}
@@ -192,6 +210,9 @@ func (s *AgentCollaboration) attach(
 			}
 			if _, writes := assistantWriteToolRisk[tool.Name()]; writes {
 				return nil
+			}
+			if saved.Inherited != nil {
+				return nil // Registered tools own their policy or were wrapped above.
 			}
 			if strings.HasPrefix(tool.Name(), "mcp_") || tool.Name() == tools.ToolCallMCPTool ||
 				tool.Name() == "ask_user" {
@@ -250,14 +271,24 @@ func (s *AgentCollaboration) run(ctx context.Context, w collaboration.Work) (col
 	if _, err = s.sessions.GetSession(ctx, w.Scope.SessionID); err != nil {
 		return result, fmt.Errorf("parent conversation unavailable: %w", err)
 	}
-	// Revocation and agent deletion take effect before every turn. Configuration
-	// stays pinned to what the parent authorized instead of acquiring new tools.
-	if _, err = s.resolve(ctx, w.Member.AgentID, types.AssistantAccessReadOnly); err != nil {
-		return result, err
-	}
 	var saved delegatedConfig
 	if err = json.Unmarshal([]byte(w.Member.ConfigJSON), &saved); err != nil {
 		return result, err
+	}
+	// Both modes pin configuration, but reauthorize the source before each turn.
+	if saved.Inherited == nil {
+		if _, err = s.resolve(ctx, w.Member.AgentID, types.AssistantAccessReadOnly); err != nil {
+			return result, err
+		}
+	} else {
+		current, getErr := s.agents.GetAgentByID(ctx, saved.Agent.ID)
+		if getErr != nil {
+			return result, getErr
+		}
+		if current == nil || current.ID != saved.Agent.ID || current.TenantID != w.Scope.TenantID ||
+			!current.IsAgentMode() {
+			return result, errors.New("inherited agent is no longer available in this workspace")
+		}
 	}
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	saved.Access = tenant.AssistantConfig.EffectiveAccessLevel(saved.Access)
@@ -465,6 +496,7 @@ func (s *AgentCollaboration) run(ctx context.Context, w collaboration.Work) (col
 				AssistantMessageID: answer.ID,
 				UserMessageID:      userMsg.ID,
 				CustomAgent:        &saved.Agent,
+				SummaryModelID:     saved.modelID(),
 				WebSearchEnabled:   saved.Agent.Config.WebSearchEnabled,
 				AssistantAccess:    saved.Access,
 			},

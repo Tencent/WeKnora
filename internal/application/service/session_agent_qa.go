@@ -251,6 +251,14 @@ func (s *sessionService) AgentQA(
 		}
 	}
 
+	pin, err := sandboxConfigForExistingSandbox(ctx, s.sandboxPinner, sessionID)
+	if err != nil {
+		return fmt.Errorf("read sandbox scope for child tasks: %w", err)
+	}
+	ctx = context.WithValue(ctx, childSourceKey{}, childSource{
+		Agent: req.CustomAgent, ModelID: effectiveModelID, SandboxConfigID: pin.ConfigID,
+	})
+
 	// Create agent engine with EventBus
 	logger.Info(ctx, "Creating agent engine")
 	engine, err := s.agentService.CreateAgentEngine(
@@ -400,6 +408,11 @@ func (s *sessionService) buildAgentConfig(
 	tenantInfo *types.Tenant,
 	agentTenantID uint64,
 ) (*types.AgentConfig, error) {
+	if inherited, err := inheritedConfigFromBinding(ctx); err != nil {
+		return nil, err
+	} else if inherited != nil {
+		return s.restoreInheritedConfig(ctx, inherited, tenantInfo)
+	}
 	customAgent := req.CustomAgent
 	agentConfig := &types.AgentConfig{
 		MaxIterations:                 customAgent.Config.MaxIterations,
@@ -422,6 +435,7 @@ func (s *sessionService) buildAgentConfig(
 		MaxCompletionTokens:           customAgent.Config.MaxCompletionTokens,
 		RetainRetrievalHistory:        customAgent.Config.RetainRetrievalHistory,
 		SharedAgentReadOnly:           req.SharedAgentReadOnly,
+		AssistantAccess:               tenantInfo.AssistantConfig.EffectiveAccessLevel(req.AssistantAccess),
 		// The model is always told it may call tools in parallel; without
 		// this the engine still ran them one by one, so three searches in
 		// one reply cost three sequential embed/retrieve/rerank rounds.

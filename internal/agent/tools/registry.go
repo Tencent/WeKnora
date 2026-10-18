@@ -81,6 +81,22 @@ func (r *ToolRegistry) registerTool(tool types.Tool, deferred bool) {
 	r.deferred[name] = deferred
 }
 
+// RestrictTools intersects an already constructed registry with an authorized
+// snapshot. Used by inherited children so newly available integrations cannot
+// silently expand their parent's effective native tool set.
+func (r *ToolRegistry) RestrictTools(names []string) {
+	allowed := make(map[string]bool, len(names))
+	for _, name := range names {
+		allowed[name] = true
+	}
+	for name := range r.tools {
+		if !allowed[name] {
+			delete(r.tools, name)
+			delete(r.deferred, name)
+		}
+	}
+}
+
 // GetTool retrieves a tool by name
 func (r *ToolRegistry) GetTool(name string) (types.Tool, error) {
 	tool, exists := r.tools[name]

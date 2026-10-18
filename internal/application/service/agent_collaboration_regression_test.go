@@ -97,12 +97,16 @@ func TestChildWikiWriteMustNotBypassConfirmation(t *testing.T) {
 	})
 }
 
-func testChildWikiConfirmation(t *testing.T, name string, level types.AssistantAccessLevel) {
-	s, _, _, ctx := collaborationService(t)
+func testChildWikiConfirmation(t *testing.T, name string, level types.AssistantAccessLevel, inherited ...bool) {
+	s, agents, _, ctx := collaborationService(t)
 	s.tenants = &collaborationTenants{level: level}
 	scope := collaboration.Scope{TenantID: 7, UserID: "u", SessionID: "parent", ID: "parent-answer"}
 	require.NoError(t, s.Runtime.Store.Ensure(ctx, scope))
 	snapshot, err := s.resolve(ctx, "a", level)
+	if len(inherited) > 0 && inherited[0] {
+		ctx = context.WithValue(ctx, childSourceKey{}, childSource{Agent: agents.agent, ModelID: "model"})
+		snapshot, err = inheritedChildSnapshot(ctx, &types.AgentConfig{AssistantAccess: level}, []string{name})
+	}
 	require.NoError(t, err)
 	_, err = s.Runtime.Spawn(ctx, scope, "spawn", "child", "a", snapshot, "task")
 	require.NoError(t, err)
@@ -125,6 +129,9 @@ func testChildWikiConfirmation(t *testing.T, name string, level types.AssistantA
 		BaseTool: tools.NewBaseTool(name, "fake harmless delete", json.RawMessage(`{"type":"object"}`)),
 	}
 	registry.RegisterTool(write)
+	if len(inherited) > 0 && inherited[0] {
+		registry.RegisterTool(&collaborationWriteTool{BaseTool: tools.NewBaseTool("newly_available_tool", "new", nil)})
+	}
 	require.NoError(
 		t,
 		s.attach(
@@ -136,6 +143,10 @@ func testChildWikiConfirmation(t *testing.T, name string, level types.AssistantA
 			"child-answer",
 		),
 	)
+	if len(inherited) > 0 && inherited[0] {
+		_, err := registry.GetTool("newly_available_tool")
+		require.Error(t, err, "child must not acquire newly available tools")
+	}
 	registered, err := registry.GetTool(name)
 	require.NoError(t, err)
 	result, err := registry.ExecuteTool(ctx, name, json.RawMessage(`{}`))

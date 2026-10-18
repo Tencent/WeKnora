@@ -105,12 +105,16 @@ func collaborationStatusView(g *collaboration.Group) collaboration.StatusSnapsho
 				continue
 			}
 			var label struct {
-				Agent struct {
+				Inherited json.RawMessage `json:"inherited"`
+				Agent     struct {
 					Name string `json:"name"`
 				} `json:"agent"`
 			}
 			if json.Unmarshal([]byte(member.ConfigJSON), &label) == nil {
 				view.Tasks[i].DisplayName = label.Agent.Name
+				if len(label.Inherited) > 0 && string(label.Inherited) != "null" {
+					view.Tasks[i].DisplayName = member.Name
+				}
 			}
 			break
 		}

@@ -47,6 +47,13 @@ func (r *ToolRegistry) RequireConfirmation(
 	return nil
 }
 
+// BindSession preserves the underlying sandbox tool's session-local layout.
+func (t *ConfirmedTool) BindSession(id string) {
+	if bound, ok := t.inner.(sessionBinder); ok {
+		bound.BindSession(id)
+	}
+}
+
 // Name returns the wrapped tool's name.
 func (t *ConfirmedTool) Name() string { return t.inner.Name() }
 

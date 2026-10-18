@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
@@ -69,11 +70,21 @@ func (m *collaborationMCPModel) ChatStream(
 // Exercise the actual engine snapshot, MCP approval gate, scheduler restart,
 // resumed tool and HTTP MCP transport. Only the language model is scripted.
 func TestDelegatedMCPApprovalRealEngine(t *testing.T) {
+	for _, inherited := range []bool{false, true} {
+		name := "template"
+		if inherited {
+			name = "inherited"
+		}
+		t.Run(name, func(t *testing.T) { testCollaborationMCPApproval(t, inherited) })
+	}
+}
+
+func testCollaborationMCPApproval(t *testing.T, inherited bool) {
 	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
 	t.Cleanup(utils.ResetSSRFWhitelistForTest)
 	for _, mode := range []string{"approve", "revise", "partial", "fallback_partial", "reject", "cancel"} {
 		t.Run(mode, func(t *testing.T) {
-			s, _, messages, ctx := collaborationService(t)
+			s, agents, messages, ctx := collaborationService(t)
 			var effects atomic.Int32
 			server := sdkserver.NewMCPServer("Writer", "1", sdkserver.WithToolCapabilities(false))
 			server.AddTool(
@@ -107,6 +118,9 @@ func TestDelegatedMCPApprovalRealEngine(t *testing.T) {
 			s.BindRecovery(broker, gate, nil)
 			s.Bind(
 				&collaborationSessions{run: func(ctx context.Context, req *types.QARequest, bus *event.EventBus) error {
+					if inherited && req.SummaryModelID != "selected-model" {
+						return fmt.Errorf("inherited model lost across approval recovery")
+					}
 					registry := tools.NewToolRegistry()
 					tool := tools.NewMCPTool(
 						svc,
@@ -163,8 +177,19 @@ func TestDelegatedMCPApprovalRealEngine(t *testing.T) {
 			scope := collaboration.Scope{TenantID: 7, UserID: "u", SessionID: "parent", ID: "parent-message"}
 			require.NoError(t, s.Runtime.Store.Ensure(ctx, scope))
 			config, err := s.resolve(ctx, "a", types.AssistantAccessReadOnly)
+			id := "a"
+			if inherited {
+				id = ""
+				ctx = context.WithValue(ctx, childSourceKey{}, childSource{
+					Agent: agents.agent, ModelID: "selected-model",
+				})
+				name := tools.NewMCPTool(svc, &types.MCPTool{Name: "write"}, manager, gate, 0).Name()
+				config, err = inheritedChildSnapshot(ctx, &types.AgentConfig{
+					MaxIterations: 5, AssistantAccess: types.AssistantAccessReadOnly,
+				}, []string{name})
+			}
 			require.NoError(t, err)
-			_, err = s.Runtime.Spawn(ctx, scope, "spawn", "writer", "a", config, "write")
+			_, err = s.Runtime.Spawn(ctx, scope, "spawn", "writer", id, config, "write")
 			require.NoError(t, err)
 			startCollaborationTestRuntime(ctx, t, s.Runtime)
 			require.Eventually(t, func() bool {

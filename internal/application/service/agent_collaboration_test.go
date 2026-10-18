@@ -137,7 +137,7 @@ func TestCollaborationRegistrationOnlyOffersRootSixAndChildMessage(t *testing.T)
 		want int
 	}{
 		{"assistant", &types.AgentConfig{OperationsAgentID: types.BuiltinWeKnoraAssistantID}, 6},
-		{"ordinary", &types.AgentConfig{}, 0},
+		{"ordinary", &types.AgentConfig{}, 6},
 		{
 			"shared",
 			&types.AgentConfig{
@@ -149,7 +149,7 @@ func TestCollaborationRegistrationOnlyOffersRootSixAndChildMessage(t *testing.T)
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			registry := tools.NewToolRegistry()
-			require.NoError(t, s.attach(ctx, &agent.AgentEngine{}, registry, tc.cfg, "s", tc.name))
+			require.NoError(t, s.attach(ctx, &agent.AgentEngine{}, registry, tc.cfg, tc.name+"-session", tc.name))
 			require.Len(t, registry.ListTools(), tc.want)
 		})
 	}

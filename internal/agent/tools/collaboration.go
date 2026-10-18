@@ -41,27 +41,25 @@ func NewCollaborationTools(b *collaboration.Binding, resolve ResolveDelegatedAge
 	}{
 		{
 			"spawn_agent",
-			"Start a child task asynchronously from an existing same-workspace reasoning " +
-				"agent template. Obtain agent_id with find_operations (domain agent) and " +
-				"run_operation list/get; list_agents lists spawned instances, not " +
-				"templates. For continuation in the same conversation, check list_agents and use " +
-				"followup_task on the existing instance.\nPass a self-contained assignment. " +
-				"The child uses its template's " +
-				"model and tools in a separate conversation, without parent history or " +
-				"attachments. fork_turns/model/reasoning_effort and nested spawning are " +
-				"unsupported.\nReturns member_id, task_name and agent_path immediately, not a " +
-				"result. A template may have multiple uniquely named instances. Limits: 16 " +
-				"instances per task, 3 executing concurrently; others queue and approval waits " +
-				"release their slots. Messages and final results are delivered asynchronously by " +
-				"the runtime.",
-			"\"agent_id\":{\"type\":\"string\",\"description\":\"Existing reasoning agent template ID " +
-				"in this workspace, obtained from the agent " +
+			"Start a child task asynchronously. Omit agent_id to create a temporary worker with " +
+				"the current agent's effective model, instructions, tools and authorized scope. " +
+				"Supply agent_id to delegate to an existing same-workspace reasoning agent template " +
+				"using that template's model and tools. Neither mode creates a saved agent template. " +
+				"Use multiple uniquely named workers for independent parallel work. " +
+				"For continuation, check list_agents and use followup_task on the existing instance. " +
+				"Pass a self-contained assignment: children have separate conversations and sandboxes, " +
+				"without parent history or attachments. fork_turns/model/reasoning_effort and nested " +
+				"spawning are unsupported. Returns member_id, task_name and agent_path immediately. " +
+				"Limits: 16 instances per task, 3 executing concurrently; others queue and approval " +
+				"waits release their slots. Messages and final results arrive asynchronously.",
+			"\"agent_id\":{\"type\":\"string\",\"description\":\"Optional existing reasoning agent template ID " +
+				"in this workspace. Omit to inherit the current agent. Obtain template IDs from the agent " +
 				"catalog.\"},\"task_name\":{\"type\":\"string\",\"pattern\":\"^[a-z][a-z0-9_]{0,47}$\",\"desc" +
 				"ription\":\"Unique instance name within this task, for example research_docs. " +
 				"Address it later as research_docs or /root/research_docs.\"},\"message\":{\"type\":\"s" +
 				"tring\",\"description\":\"Self-contained task and required context, maximum 16000 " +
 				"UTF-8 bytes.\"}",
-			[]string{"agent_id", "task_name", "message"},
+			[]string{"task_name", "message"},
 		},
 		{
 			"list_agents",

@@ -196,7 +196,7 @@ func (s *AgentCollaboration) resumeParent(ctx context.Context, b *collaboration.
 	if err = json.Unmarshal(snap.Request, &saved); err != nil {
 		return err
 	}
-	if saved.AgentID != types.BuiltinWeKnoraAssistantID || saved.SharedAgentReadOnly {
+	if saved.AgentID == "" || saved.SharedAgentReadOnly {
 		return errors.New("invalid parent recovery identity")
 	}
 	ctx, err = s.workerContext(ctx, b.Scope)
@@ -231,6 +231,9 @@ func (s *AgentCollaboration) resumeParent(ctx context.Context, b *collaboration.
 	custom, err := s.agents.GetAgentByID(ctx, saved.AgentID)
 	if err != nil {
 		return err
+	}
+	if custom == nil || custom.ID != saved.AgentID || custom.TenantID != b.Scope.TenantID || !custom.IsAgentMode() {
+		return errors.New("parent agent is no longer available in this workspace")
 	}
 	if s.streams == nil || s.ParentEvents == nil {
 		return errors.New("parent stream executor unavailable")
