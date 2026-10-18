@@ -242,8 +242,10 @@ func TestIncrementalDeletionStillRunsWhenSelectedFileIsGone(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, full.Items, 1)
 	item := full.Items[0]
-	require.NoError(t, connector.items.SetIngested(context.Background(), ds.TenantID, ds.ID,
-		ds.ConnectionVersion, item.Metadata["drive_id"], item.Metadata["item_id"], true))
+	// Production sync reaches this acknowledgement through DataSourceService
+	// after the KB document is created. It is the prerequisite for a later
+	// source tombstone to be emitted as a KB deletion.
+	require.NoError(t, connector.MarkItemIngested(context.Background(), ds, &item))
 	phase = "incremental"
 
 	incremental, err := connector.FetchIncrementalResult(context.Background(), config, full.NextCursor)

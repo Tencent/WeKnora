@@ -137,6 +137,7 @@ type ConnectionLifecycleConnector interface {
 type SyncLifecycleConnector interface {
 	Connector
 	ReconcileItems(ctx context.Context, dataSource *types.DataSource, items []types.FetchedItem) ([]types.FetchedItem, error)
+	MarkItemIngested(ctx context.Context, dataSource *types.DataSource, item *types.FetchedItem) error
 	MarkItemDeleted(ctx context.Context, dataSource *types.DataSource, item *types.FetchedItem) error
 	IsRunCurrent(ctx context.Context, dataSource *types.DataSource) (bool, error)
 }
