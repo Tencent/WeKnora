@@ -416,7 +416,10 @@ const oidcEnabled = ref(false)
 const oidcProviderName = ref('')
 // Wait for configuration before showing a registration entry.
 const registrationMode = ref('')
-const registrationEnabled = computed(() => canRegister(registrationMode.value, !!inviteLookup.value))
+// Backend reports whether the very first registration on a fresh deployment
+// is allowed even when registration_mode is not self_serve (#1866).
+const firstRegistrationOpen = ref(false)
+const registrationEnabled = computed(() => canRegister(registrationMode.value, !!inviteLookup.value, firstRegistrationOpen.value))
 const complexPasswordEnabled = ref(false)
 
 // invite-link state. When the URL carries ?token=xxx we resolve it to
@@ -614,9 +617,11 @@ const loadAuthConfig = async () => {
   try {
     const response = await getAuthConfig()
     registrationMode.value = response.success ? response.registration_mode : ''
+    firstRegistrationOpen.value = response.success ? response.first_registration_open : false
     complexPasswordEnabled.value = response.complex_password_enabled
   } catch {
     registrationMode.value = ''
+    firstRegistrationOpen.value = false
     complexPasswordEnabled.value = false
   }
 }
