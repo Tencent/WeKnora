@@ -7,6 +7,7 @@ package modelcontext
 
 import (
 	"encoding/json"
+	"html"
 	"net/url"
 	"regexp"
 	"sort"
@@ -325,6 +326,19 @@ func (r *sourceRegistry) EncodeMessagesWithPolicies(
 		if out[i].Role == "tool" && (resultPolicy == nil || resultPolicy(out[i].Name)) {
 			r.registerLegacyToolReferences(out[i].Content, false)
 			out[i].Content = r.CompactKnownText(out[i].Content)
+			if out[i].Name == "web_search" || out[i].Name == "web_fetch" {
+				// Citation IDs and fetch targets are distinct: expose the actual URL after
+				// compaction so models need not infer new sequential IDs for page links.
+				out[i].Content = webPageHeaderRE.ReplaceAllStringFunc(out[i].Content, func(header string) string {
+					match := webPageHeaderRE.FindStringSubmatch(header)
+					header = webPageURLAttrRE.ReplaceAllString(header, "")
+					rawURL := r.durableForHandle(match[1])
+					if rawURL == "" {
+						return header
+					}
+					return strings.TrimSuffix(header, ">") + ` url="` + html.EscapeString(rawURL) + `">`
+				})
+			}
 		}
 		for j := range out[i].ToolCalls {
 			toolName := out[i].ToolCalls[j].Function.Name
@@ -606,3 +620,7 @@ func (r *sourceRegistry) CompactKnownText(text string) string {
 	}
 	return text
 }
+
+var webPageHeaderRE = regexp.MustCompile(`<page id="(w[1-9][0-9]*)"[^>]*>`)
+
+var webPageURLAttrRE = regexp.MustCompile(` url="[^"]*"`)

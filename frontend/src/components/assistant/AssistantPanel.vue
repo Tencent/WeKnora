@@ -235,8 +235,8 @@ const starters = computed(() => {
   return [t('assistant.starters.agents'), t('assistant.starters.formats'), t('assistant.starters.createWiki')]
 })
 
-// The backend only honours a page context inside the run's search scope, so
-// the page's knowledge base travels with it.
+// Page context is a hint, not an explicit retrieval selection. The backend
+// validates it against the agent's scope; only user selections narrow that scope.
 const hostScope = () => {
   const context = assistant.contextAttached ? assistant.pageContext : null
   const title = assistant.contextAttached ? assistant.pageTitle : ''
@@ -253,7 +253,7 @@ const hostScope = () => {
   if (view) pageContext.view = view
   if (selection) pageContext.selection = toPageSelectionPayload(selection)
   return {
-    knowledgeBaseIds: context?.knowledgeBaseId ? [context.knowledgeBaseId] : [],
+    knowledgeBaseIds: [],
     pageContext,
     assistantAccess,
   }

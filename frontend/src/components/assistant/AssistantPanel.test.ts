@@ -482,6 +482,8 @@ test('the open dialog and the selection go with the message, the selection only 
     f.assistant.setPageSelection({ text: 'Run setup.', field: 'Content', ref: 'e2', startLine: 7, endLine: 7 })
     f.assistant.open({ query: 'Polish this' })
     await flush()
+    assert.deepEqual(Array.from(f.sent[0].scope.knowledgeBaseIds), [],
+      'the current page must not become an explicit KB selection')
     assert.equal(JSON.stringify(f.sent[0].scope.pageContext), JSON.stringify({
       knowledge_base_id: 'kb-a', view: 'Edit Markdown',
       selection: { text: 'Run setup.', field: 'Content', ref: 'e2', start_line: 7, end_line: 7 },

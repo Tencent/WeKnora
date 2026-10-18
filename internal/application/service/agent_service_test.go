@@ -522,6 +522,7 @@ func TestWeKnoraAssistantIsAHiddenBuiltinWithOperations(t *testing.T) {
 	require.True(t, types.GrantsOperationCatalog(agent))
 	require.True(t, types.UsesWorkspaceModelFallback(agent))
 	require.Equal(t, "weknora_assistant", agent.Config.SystemPromptID)
+	require.Equal(t, "all", agent.Config.KBSelectionMode)
 	require.Equal(t, 24576, agent.Config.MaxCompletionTokens)
 	require.Equal(t, types.UnlimitedMaxIterations, agent.Config.MaxIterations)
 	require.NotContains(t, agent.Config.AllowedTools, tools.ToolRunOperation,

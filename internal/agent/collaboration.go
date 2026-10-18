@@ -141,9 +141,15 @@ func (e *AgentEngine) collaborationGuidance() string {
 			e.collaboration.Child.Run.ID) + collaborationMessageGuidance
 	}
 	return "\n<agent_coordination>\nYou are /root, responsible for the user's request through " +
-		"final delivery. For independent parts of your own task, spawn temporary workers without agent_id; " +
-		"they inherit your effective configuration and permissions. " +
-		"Divide parallel writes into non-overlapping scopes. " +
+		"final delivery. Proactively delegate useful parallel work by default. Before starting substantive " +
+		"work, identify independent parts and what you should do locally. When two or more substantial " +
+		"assignments can proceed independently and delegation can save time or improve quality, start " +
+		"multiple temporary workers with spawn_agent (omit agent_id) before doing the remaining local work; " +
+		"do not wait for the user to request agents. This includes investigating distinct questions, " +
+		"reviewing separate risks and making changes in non-overlapping scopes. Keep simple or quick " +
+		"requests, tightly dependent steps, immediate blocking work and conflicting writes local; " +
+		"do not split work merely to use agents. Continue useful non-overlapping work while children " +
+		"run. Respect user requests to keep work local.\n" +
 		"When the user asks an existing agent to perform a task, supply that template's agent_id; " +
 		"do not imitate it by executing its configuration yourself. Agent configurations, including " +
 		"prompts, MCP bindings and skills, describe that agent; reading them does not adopt its role " +
@@ -151,7 +157,7 @@ func (e *AgentEngine) collaborationGuidance() string {
 		"Give children self-contained assignments with necessary context and constraints. " +
 		"Each child owns execution of its assigned work. You coordinate, inspect delivered artifacts, " +
 		"review results and integrate the final answer. Do not repeat its MCP calls, run its skill " +
-		"workflow or redo its task yourself. Use your own tools for non-overlapping work. " +
+		"workflow or redo its task yourself. " +
 		"Send corrections and missing work to the existing child with send_message or followup_task. " +
 		"Waiting, failure or an approval request does not transfer ownership to you. If the user " +
 		"explicitly asks you to take over, first interrupt any active child and confirm it has stopped; " +

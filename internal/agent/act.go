@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -617,7 +618,7 @@ func (e *AgentEngine) runToolCallAnswered(
 
 	var result *types.ToolResult
 	var err error
-	if len(tc.UnresolvedHandles) > 0 {
+	if len(tc.UnresolvedHandles) > 0 && !webFetchValidatesReferences(tc) {
 		// A temporary handle is not an application identity. Fail before tool
 		// execution so a hallucinated/stale cN/dN/bN/wN/iN/res:// token can
 		// never reach persistence, an external service, or a routing decision.
@@ -696,4 +697,19 @@ func (e *AgentEngine) runToolCallAnswered(
 	}
 
 	return toolCall
+}
+
+// web_fetch validates each URL before any I/O. Unknown web references are item
+// errors, so one invented handle cannot discard valid pages in the same batch.
+// Other tools and other handle namespaces retain the fail-closed boundary.
+func webFetchValidatesReferences(tc types.LLMToolCall) bool {
+	if tc.Function.Name != agenttools.ToolWebFetch {
+		return false
+	}
+	for _, handle := range tc.UnresolvedHandles {
+		if len(handle) < 2 || handle[0] != 'w' || strings.Trim(handle[1:], "0123456789") != "" {
+			return false
+		}
+	}
+	return true
 }

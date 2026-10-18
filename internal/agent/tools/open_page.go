@@ -156,7 +156,8 @@ const openPageDescription = "" +
 	"an agent), to finish something themselves, or when they ask where something is, instead of " +
 	"describing the way there. Above all use it when the step needs an API key, token or password: " +
 	"never ask for those in chat, and the drafts have no field for them. Offer one button per target, " +
-	"once the work it points to is done, and none for the page the user already has open. The user " +
+	"after completing the relevant operations and before writing the final answer; once the tool returns, " +
+	"give the complete answer with the page entry point. Offer none for the page the user already has open. The user " +
 	"reviews any form and saves it; nothing is saved by this tool, and the page only opens when they " +
 	"click. Name what they still need to fill in. " +
 	"When you need to look at a page yourself to answer (a setting's current value, what a section shows), " +

@@ -45,7 +45,6 @@ func NewCollaborationTools(b *collaboration.Binding, resolve ResolveDelegatedAge
 				"the current agent's effective model, instructions, tools and authorized scope. " +
 				"Supply agent_id to delegate to an existing same-workspace reasoning agent template " +
 				"using that template's model and tools. Neither mode creates a saved agent template. " +
-				"Use multiple uniquely named workers for independent parallel work. " +
 				"For continuation, check list_agents and use followup_task on the existing instance. " +
 				"Pass a self-contained assignment: children have separate conversations and sandboxes, " +
 				"without parent history or attachments. fork_turns/model/reasoning_effort and nested " +

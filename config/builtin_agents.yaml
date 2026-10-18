@@ -299,7 +299,9 @@ builtin_agents:
       temperature: 0.3
       max_completion_tokens: 24576
       max_iterations: -1
-      kb_selection_mode: "selected"
+      # The workspace assistant can read the caller's accessible bases. Explicit
+      # mentions still narrow a turn; the current page is only contextual data.
+      kb_selection_mode: "all"
       retrieve_kb_only_when_mentioned: false
       retain_retrieval_history: true
       # find_operations / run_operation and search_weknora_docs /

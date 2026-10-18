@@ -744,7 +744,13 @@ func (r *sourceRegistry) modelWebFetchOutput(rows []map[string]interface{}, fall
 		if status == "" {
 			status = "success"
 		}
-		fmt.Fprintf(&b, "  <page id=\"%s\" status=\"%s\"", handle, escapeAttr(status))
+		if handle == "" {
+			// Unknown references must not become page IDs: a later real page may
+			// legitimately receive that ID in this registry.
+			fmt.Fprintf(&b, "  <page requested_reference=\"%s\" status=\"%s\"", escapeAttr(rawURL), escapeAttr(status))
+		} else {
+			fmt.Fprintf(&b, "  <page id=\"%s\" status=\"%s\"", escapeAttr(handle), escapeAttr(status))
+		}
 		if title != "" {
 			fmt.Fprintf(&b, " title=\"%s\"", escapeAttr(title))
 		}

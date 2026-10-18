@@ -41,6 +41,7 @@
 提示词与消息边界（收敛后的实现）：
 
 - 角色提示词集中说明父子职责、进展与最终交付；工具说明仅定义调用语义与返回值。模板不再重复协作细则。
+- 父级角色提示词同时集中定义主动拆分策略：开始实质工作前判断独立范围，多个有实质工作量且并行有收益的部分默认创建临时子任务；简单请求、强依赖步骤、即时阻塞工作和冲突修改保留本地，用户要求本地完成时遵从。工具说明不重复该决策策略，运行时不按关键词或任务长度强制创建子任务。
 - 参考 Codex V2 的消息封装，在模型边界将持久化事件转换为 `Message Type / Sender / Run ID / Sequence / Status / Payload`。主动消息为 `MESSAGE`，追加任务为 `NEW_TASK`，子轮次结果为 `FINAL_ANSWER`（状态可能失败），恢复与审批/输入状态变更通知为 `<runtime_event>` 包裹的 JSON。审批通知携带 `type/source/task/run_id/sequence/prompt_id/prompt_kind/tool_call_id/service/tool/decision/execution_state`，工具身份和决定来自 broker 的白名单字段，不包含参数、完整请求或用户答案。`approval_resolved` 只表示审批已答复，`execution_state=queued` 只表示安排继续执行，不能视作工具成功或子任务完成；缺失/无效决定不推断。旧的纯文本通知封装为 `message` 保留，不补造审批信息。结果正文直接保留原文，不再要求模型解码嵌套 JSON；数据库事件结构不变，旧快照兼容。
 - 普通工具调用后的文字不再触发额外 system 提醒。只有已生成的答复被新输入或子任务结果续跑取代时，记录 `IntermediateAnswer` 并追加一条简短状态标记；重启时从该标志恢复同一边界。
 - 空响应重试和最终汇总的恢复通知通过 `Options.RuntimeNotice` 仅作用于当前模型请求，不追加到持久对话或检查点。通知位于序列尾部：Chat Completions 使用适配后的 system/developer，Responses 使用 input developer；Anthropic、Gemini、Ollama 使用明确标记来源的末尾输入，不把临时通知提升到全局系统前缀。既有系统指令、工具定义、历史和缓存断点不变；缓存命中率仍由服务端缓存寿命、路由与实际上下文决定。
