@@ -19,6 +19,13 @@ import {
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDatasourceIconUrl } from './datasourceIcons'
+import {
+  classifyDatasourceError,
+  datasourceErrorText,
+  redactDatasourceErrorText,
+  type ClassifiedDatasourceError,
+} from './datasourceErrorText'
+import { dedupeResources } from './resourceList'
 
 const props = defineProps<{
   kbId: string
@@ -243,6 +250,12 @@ const dingtalkIncludeUploadedFiles = computed({
 // Step 2: Resources
 const resources = ref<Resource[]>([])
 const loadingResources = ref(false)
+// Why the last listing failed, if it did. A non-null value replaces the tree:
+// rows from the previous successful listing are stale, and rendering them as
+// current hides the failure (the user checks a row the next request can no
+// longer expand). The selection itself is kept — it is what will sync — but no
+// stale row is shown.
+const resourceLoadError = ref<ClassifiedDatasourceError | null>(null)
 const selectedResourceIds = ref<string[]>([])
 const expandedResourceIds = ref(new Set<string>())
 // Lazy loading: parents whose children have already been fetched, and parents
@@ -347,6 +360,7 @@ async function loadDriveRoot() {
   form.value.config.resource_ids = [token]
   driveRootLoaded.value = false
   loadingResources.value = true
+  resourceLoadError.value = null
   try {
     if (!tempDsId.value) {
       const res = await createDataSource({
@@ -367,7 +381,7 @@ async function loadDriveRoot() {
     }
 
     const res = await listResources(tempDsId.value)
-    resources.value = res?.data || res || []
+    resources.value = dedupeResources(res?.data || res || [])
     if (resources.value.length > 0) {
       // Mirror loadResources' tree initialization: index parents that already
       // arrived with children and auto-expand them.
@@ -394,37 +408,54 @@ async function loadDriveRoot() {
       }
     }
   } catch (e: any) {
-    MessagePlugin.error(classifyDriveLoadError(e))
+    const classified = classifyDriveLoadError(e)
+    resourceLoadError.value = classified
+    // The rows on screen belong to the previous folder/token: drop them rather
+    // than leaving a stale tree under a failed load.
+    resources.value = []
+    loadedChildrenIds.value = new Set()
+    loadingChildrenIds.value = new Set()
+    expandedResourceIds.value = new Set()
+    treeFullyLoaded.value = false
+    driveRootLoaded.value = false
+    MessagePlugin.error(t(classified.messageKey))
+  } finally {
+    loadingResources.value = false
   }
-  loadingResources.value = false
 }
 
 // classifyDriveLoadError turns a raw Drive list error into an actionable i18n
 // message. The Feishu list API returns 403 with code=1061004 when the app has
 // not been shared the target folder; without this the user sees "forbidden"
-// and has no idea what to do.
-function classifyDriveLoadError(e: any): string {
-  const raw = String(e?.message || e?.error || '')
-  const lower = raw.toLowerCase()
+// and has no idea what to do. Secrets are still stripped by the shared
+// classifier, including in the technical detail.
+function classifyDriveLoadError(e: any): ClassifiedDatasourceError {
+  const classified = classifyDatasourceError(e)
+  // An IP whitelist / credential failure is about the app, not this folder;
+  // the generic message is the accurate one and already carries the FAQ.
+  if (classified.kind === 'ip-whitelist' || classified.kind === 'invalid-credentials') {
+    return classified
+  }
+  const raw = datasourceErrorText(e).toLowerCase()
   // 403 / forbidden / 1061004 -> the app lacks access to this specific folder;
   // the user must share it with the app's group in Feishu Drive.
   if (
-    lower.includes('status=403') ||
-    lower.includes('forbidden') ||
-    lower.includes('"code":1061004') ||
-    lower.includes('code=1061004')
+    raw.includes('status=403') ||
+    raw.includes('forbidden') ||
+    raw.includes('"code":1061004') ||
+    raw.includes('code=1061004')
   ) {
-    return t('datasource.drive.loadForbiddenHint')
+    return { ...classified, messageKey: 'datasource.drive.loadForbiddenHint' }
   }
   // 401 / auth -> app credentials wrong or app lacks the drive scopes.
-  if (lower.includes('status=401') || lower.includes('auth') || lower.includes('1061005')) {
-    return t('datasource.drive.loadAuthHint')
+  if (raw.includes('status=401') || raw.includes('auth') || raw.includes('1061005')) {
+    return { ...classified, messageKey: 'datasource.drive.loadAuthHint' }
   }
   // Invalid / not-found folder_token.
-  if (lower.includes('1061003') || lower.includes('not found')) {
-    return t('datasource.drive.loadNotFoundHint')
+  if (raw.includes('1061003') || raw.includes('not found')) {
+    return { ...classified, messageKey: 'datasource.drive.loadNotFoundHint' }
   }
-  return raw || t('datasource.resourceLoadFailed')
+  return classified
 }
 
 // Shared children/parent indexes — used by tree rendering and selection logic
@@ -504,12 +535,11 @@ async function ensureChildrenLoaded(id: string) {
     const res = await listResources(tempDsId.value, id)
     const children: Resource[] = res?.data || res || []
     if (children.length > 0) {
-      const existing = new Set(resources.value.map(r => r.external_id))
-      const merged = resources.value.slice()
-      for (const c of children) {
-        if (!existing.has(c.external_id)) merged.push(c)
-      }
-      resources.value = merged
+      // Merge first and dedupe after: the children of a node may overlap with
+      // rows another expansion already added (the same wiki page can be listed
+      // under two parents), and rendering the same external_id twice is the
+      // defect this guards against.
+      resources.value = dedupeResources([...resources.value, ...children])
     } else {
       // Connectors may conservatively advertise HasChildren to avoid an N+1
       // probe. Once lazy loading proves this is a leaf, collapse it and retain
@@ -523,7 +553,7 @@ async function ensureChildrenLoaded(id: string) {
     }
     loadedChildrenIds.value = new Set(loadedChildrenIds.value).add(id)
   } catch (e: any) {
-    MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
+    MessagePlugin.error(t(classifyDatasourceError(e).messageKey))
     // Collapse again so the user can retry the expand.
     const next = new Set(expandedResourceIds.value)
     next.delete(id)
@@ -538,8 +568,16 @@ async function ensureChildrenLoaded(id: string) {
 const visibleTree = computed(() => {
   const roots = resources.value.filter(r => !r.parent_id)
   const result: { resource: Resource; depth: number; noticeAfter?: boolean }[] = []
+  // A node can legitimately be reached from two parents (a wiki page linked in
+  // two knowledge bases), and a connector can return the same external_id in
+  // two rows. Either way it is one resource and must render once — a second
+  // row would carry a second checkbox and the two copies would disagree about
+  // the selection.
+  const seen = new Set<string>()
   function walk(items: Resource[], depth: number) {
     for (const r of items) {
+      if (seen.has(r.external_id)) continue
+      seen.add(r.external_id)
       result.push({ resource: r, depth })
       if (r.has_children && expandedResourceIds.value.has(r.external_id)) {
         walk(childrenMap.value.get(r.external_id) || [], depth + 1)
@@ -811,6 +849,7 @@ watch(visible, async (v) => {
   prereqExpanded.value = false
   pendingRemoveCredentials.value = false
   resources.value = []
+  resourceLoadError.value = null
   selectedResourceIds.value = []
   expandedResourceIds.value = new Set()
   loadedChildrenIds.value = new Set()
@@ -982,8 +1021,11 @@ async function testConnection() {
     MessagePlugin.success(t('datasource.testSuccess'))
   } catch (e: any) {
     testResult.value = 'error'
-    testErrorMsg.value = e?.message || e?.error || ''
-    MessagePlugin.error(t('datasource.testFailed'))
+    // The inline line is the technical detail, so it keeps the diagnostic —
+    // but never the operator's egress IP or the app key that DingTalk puts in
+    // the same sentence. The toast carries the actionable, localised version.
+    testErrorMsg.value = redactDatasourceErrorText(datasourceErrorText(e))
+    MessagePlugin.error(t(classifyDatasourceError(e).messageKey))
   }
   testing.value = false
 }
@@ -991,6 +1033,7 @@ async function testConnection() {
 // --- Load resources ---
 async function loadResources() {
   loadingResources.value = true
+  resourceLoadError.value = null
   try {
     syncConfluencePublicFieldsToSettings()
     if (!tempDsId.value) {
@@ -1009,7 +1052,7 @@ async function loadResources() {
     }
 
     const res = await listResources(tempDsId.value)
-    resources.value = res?.data || res || []
+    resources.value = dedupeResources(res?.data || res || [])
     // Any parent that already arrived with children (connectors returning the
     // full tree, e.g. Notion) needs no further lazy fetch.
     const parentsWithChildren = new Set<string>()
@@ -1036,9 +1079,32 @@ async function loadResources() {
       if (hidden.length > 0) void revealExistingSelections(hidden)
     }
   } catch (e: any) {
-    MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
+    const classified = classifyDatasourceError(e)
+    resourceLoadError.value = classified
+    // A failed listing must not leave the previous tree on screen: those rows
+    // are a snapshot of an older request (possibly an older credential set) and
+    // acting on them is how a 403 ends up looking like a healthy picker. The
+    // saved selection is untouched — only the rendered rows are dropped.
+    resources.value = []
+    loadedChildrenIds.value = new Set()
+    loadingChildrenIds.value = new Set()
+    expandedResourceIds.value = new Set()
+    treeFullyLoaded.value = false
+    MessagePlugin.error(t(classified.messageKey))
+  } finally {
+    loadingResources.value = false
   }
-  loadingResources.value = false
+}
+
+// retryLoadResources re-runs the listing that failed. Drive connectors list
+// through the folder_token form, so their retry must go through loadDriveRoot
+// rather than the generic path.
+function retryLoadResources() {
+  if (isDriveConnector(form.value.type)) {
+    void loadDriveRoot()
+    return
+  }
+  void loadResources()
 }
 
 // revealExistingSelections asks the backend which ancestors must be expanded to
@@ -1057,7 +1123,7 @@ async function revealExistingSelections(hiddenIds: string[]) {
     // selection itself); calls are independent and dedup on merge.
     await Promise.all(ancestors.map(id => ensureChildrenLoaded(id)))
   } catch (e: any) {
-    MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
+    MessagePlugin.error(t(classifyDatasourceError(e).messageKey))
   }
 }
 
@@ -1813,11 +1879,40 @@ const drawerConfirmText = computed(() => {
         </div>
       </div>
 
+      <!-- A failed listing replaces the tree. Keeping the rows from the
+           previous successful listing would present stale content as current
+           (the 403 used to leave the picker open with its old rows); the saved
+           selection is kept, but no row is shown until a listing succeeds. -->
+      <div v-if="resourceLoadError" class="ds-resource-empty ds-resource-error" role="alert">
+        <t-icon name="error-circle" size="32px" class="ds-resource-error__icon" />
+        <p class="ds-empty-title">{{ t(resourceLoadError.messageKey) }}</p>
+        <p class="ds-empty-desc">{{ t('datasource.loadError.hint') }}</p>
+        <div class="ds-empty-actions">
+          <button type="button" class="ds-empty-retry" @click="retryLoadResources">
+            {{ t('datasource.retryLoadResources') }}
+          </button>
+          <a
+            v-if="resourceLoadError.faqUrl"
+            :href="resourceLoadError.faqUrl"
+            target="_blank"
+            rel="noopener"
+            class="doc-link"
+          >
+            {{ t('datasource.loadError.faq') }}
+            <t-icon name="link" class="link-icon" />
+          </a>
+        </div>
+        <details v-if="resourceLoadError?.detail" class="ds-resource-error__detail">
+          <summary>{{ t('datasource.loadError.detail') }}</summary>
+          <pre>{{ resourceLoadError.detail }}</pre>
+        </details>
+      </div>
+
       <!-- Drive placeholder before the first load: the tree cannot render until
            a folder_token is supplied and loaded. Non-Drive connectors never hit
            this branch. -->
       <div
-        v-if="isDriveConnector(form.type) && !driveRootLoaded && !loadingResources"
+        v-else-if="isDriveConnector(form.type) && !driveRootLoaded && !loadingResources"
         class="ds-resource-empty ds-drive-placeholder"
       >
         <p class="ds-empty-title">{{ t('datasource.drive.placeholderTitle') }}</p>
@@ -1940,7 +2035,7 @@ const drawerConfirmText = computed(() => {
           </div>
         </div>
         <div class="ds-empty-actions">
-          <button type="button" class="ds-empty-retry" @click="loadResources">
+          <button type="button" class="ds-empty-retry" @click="retryLoadResources">
             {{ t('datasource.retryLoadResources') }}
           </button>
           <a
@@ -2869,6 +2964,44 @@ const drawerConfirmText = computed(() => {
   align-items: center;
   justify-content: center;
   gap: 16px;
+}
+
+/* --- Step 2: failed listing --- */
+.ds-resource-error__icon {
+  color: var(--td-error-color);
+  margin-bottom: 8px;
+}
+
+/* The technical detail is collapsed on purpose: it is for debugging, not the
+   message the user acts on, and the shared classifier has already removed the
+   IP / app key the vendor includes in the same sentence. */
+.ds-resource-error__detail {
+  max-width: 560px;
+  margin: 14px auto 0;
+  text-align: left;
+  font-size: var(--app-text-xs);
+  line-height: 1.5;
+  color: var(--td-text-color-placeholder);
+
+  summary {
+    cursor: pointer;
+    color: var(--td-text-color-secondary);
+  }
+
+  pre {
+    margin: 6px 0 0;
+    padding: 8px 10px;
+    max-height: 160px;
+    overflow: auto;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: var(--app-radius-sm);
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-secondary);
+    font: inherit;
+    font-family: var(--app-font-family-mono, ui-monospace, monospace);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
 }
 
 .custom-headers-header {

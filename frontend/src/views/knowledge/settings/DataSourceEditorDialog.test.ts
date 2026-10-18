@@ -41,6 +41,8 @@ async function fixture({
 } = {}) {
   const calls: Array<{ method: string; args: any[] }> = []
   const warnings: string[] = []
+  const errors: string[] = []
+  let listingError: any = null
   let storedToken = configured ? 'expired-token' : ''
   const api = {
     async validateCredentials(type: string, credentials: Record<string, string>) {
@@ -66,6 +68,7 @@ async function fixture({
     // Lazy picker: the first call lists roots, later calls list one level.
     async listResources(id: string, parentId?: string) {
       calls.push({ method: 'listResources', args: [id, parentId] })
+      if (listingError) throw listingError
       return { data: resources.filter(r => (parentId ? r.parent_id === parentId : !r.parent_id)) }
     },
     async resolveResourceAncestors(id: string, ids: string[]) {
@@ -89,8 +92,12 @@ async function fixture({
     require(name: string) {
       if (name === 'vue') return require('vue')
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
-      if (name === 'tdesign-vue-next') return { MessagePlugin: { warning(msg: string) { warnings.push(msg) }, success() {}, error() {} } }
+      if (name === 'tdesign-vue-next') return { MessagePlugin: { warning(msg: string) { warnings.push(msg) }, success() {}, error(msg: string) { errors.push(msg) } } }
       if (name === '@/api/datasource') return api
+      // The dialog imports its pure helpers directly; compile them through the
+      // same tsx loader instead of stubbing the behaviour under test.
+      if (name === './datasourceErrorText') return require('./datasourceErrorText.ts')
+      if (name === './resourceList') return require('./resourceList.ts')
       return { default: {} }
     },
     URL, console,
@@ -113,7 +120,17 @@ async function fixture({
     vm.form.config.credentials = { base_url: 'https://gitlab.example.com', access_token: token }
     await nextTick()
   }
-  return { vm, calls, warnings, replace, storedToken: () => storedToken, close: () => app.unmount() }
+  return {
+    vm,
+    calls,
+    warnings,
+    errors,
+    replace,
+    // Makes the next listing fail, as a 403 after a credential change would.
+    failListing(error: any) { listingError = error },
+    storedToken: () => storedToken,
+    close: () => app.unmount(),
+  }
 }
 
 test('rotated GitLab credentials are tested without updating the saved data source', async () => {
@@ -433,5 +450,100 @@ test('new Feishu sources keep the blocks default and do not leak it to another c
     assert.equal(f.vm.feishuParseMode, 'blocks')
     f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'gitlab'))
     assert.equal(f.vm.form.config.settings.parse_mode, undefined)
+  } finally { f.close() }
+})
+
+// The body a DingTalk 403 carries when the caller's egress IP is not whitelisted.
+// The listing used to surface it verbatim in the toast.
+const dingtalkListingError = {
+  status: 403,
+  message: [
+    'list DingTalk workspaces: invalid credentials: DingTalk API status=403',
+    'code=Forbidden.AccessDenied.IpNotInWhiteList',
+    'message=访问ip不在白名单之中，request ip=120.231.209.90 appKey(dingabc123xyz)',
+  ].join(' '),
+}
+
+// Opens a new non-Drive data source on the picker step, with `resources` listed.
+async function pickerFixture(listed: any[]) {
+  const f = await fixture({ create: true, resources: listed })
+  f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'yuque'))
+  f.vm.form.config.credentials = { api_token: 'rotated-token' }
+  f.vm.testResult = 'success'
+  await f.vm.nextStep()
+  await flush()
+  return f
+}
+
+test('a failed listing clears the stale tree and exposes the error state', async () => {
+  const f = await pickerFixture([
+    { external_id: 'space-1', name: 'Space', type: 'book', has_children: false },
+  ])
+  try {
+    assert.equal(f.vm.step, 2)
+    assert.deepEqual((f.vm.resources as any[]).map(r => r.external_id), ['space-1'])
+
+    f.failListing(dingtalkListingError)
+    await f.vm.loadResources()
+
+    // The rows from the previous listing are gone: a 403 must not leave a tree
+    // that looks current (that was the reported bug).
+    assert.deepEqual([...f.vm.resources], [])
+    assert.equal(f.vm.resourceLoadError.kind, 'ip-whitelist')
+    assert.equal(f.vm.resourceLoadError.messageKey, 'datasource.loadError.ipNotInWhitelist')
+    assert.match(f.vm.resourceLoadError.faqUrl, /open\.dingtalk\.com/)
+    // The toast and the detail never carry the IP or the app key.
+    assert.equal(f.errors.at(-1), 'datasource.loadError.ipNotInWhitelist')
+    assert.doesNotMatch(f.vm.resourceLoadError.detail, /120\.231\.209\.90|dingabc123xyz/)
+  } finally { f.close() }
+})
+
+test('a successful retry after a failure restores the tree and clears the error', async () => {
+  const f = await pickerFixture([
+    { external_id: 'space-1', name: 'Space', type: 'book', has_children: false },
+  ])
+  try {
+    f.failListing(dingtalkListingError)
+    await f.vm.loadResources()
+    assert.deepEqual([...f.vm.resources], [])
+
+    // The retry button must be able to recover without reopening the dialog.
+    f.failListing(null)
+    await f.vm.loadResources()
+
+    assert.equal(f.vm.resourceLoadError, null)
+    assert.deepEqual((f.vm.resources as any[]).map(r => r.external_id), ['space-1'])
+  } finally { f.close() }
+})
+
+test('duplicate external_ids render as one row and keep the richer copy', async () => {
+  const f = await pickerFixture([
+    { external_id: 'base-1', name: '', type: '', has_children: false },
+    { external_id: 'base-1', name: '项目多维表', type: 'book', has_children: true },
+    { external_id: 'doc-1', name: 'Doc', type: 'document', has_children: false },
+  ])
+  try {
+    assert.deepEqual((f.vm.resources as any[]).map(r => r.external_id), ['base-1', 'doc-1'])
+    assert.equal(f.vm.resources[0].name, '项目多维表')
+    assert.equal(f.vm.resources[0].type, 'book')
+    assert.equal(f.vm.visibleTree.length, 2)
+  } finally { f.close() }
+})
+
+test('a node listed under two parents is rendered once', async () => {
+  const f = await fixture()
+  try {
+    f.vm.resources = [
+      { external_id: 'parent-a', name: 'A', type: '', has_children: true },
+      { external_id: 'parent-b', name: 'B', type: '', has_children: true },
+      { external_id: 'shared', name: 'Shared', type: '', parent_id: 'parent-a' },
+      { external_id: 'shared', name: 'Shared', type: '', parent_id: 'parent-b' },
+    ]
+    f.vm.expandedResourceIds = new Set(['parent-a', 'parent-b'])
+    await nextTick()
+    assert.equal(
+      f.vm.visibleTree.filter((row: any) => row.resource.external_id === 'shared').length,
+      1,
+    )
   } finally { f.close() }
 })
