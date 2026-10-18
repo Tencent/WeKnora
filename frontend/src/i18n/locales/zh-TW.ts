@@ -1171,7 +1171,9 @@ export default {
       ima: '同步騰訊 IMA 知識庫中的文件、筆記與檔案（暫不支持 AI 會話與影片解析）',
       rss: '同步 RSS / Atom 訂閱源中的文章',
       gitlab: '同步 GitLab 專案中的檔案',
-      seafile: '同步 Seafile 資料庫中的目錄與檔案'
+      seafile: '同步 Seafile 資料庫中的目錄與檔案',
+      onedrive: '同步 Microsoft OneDrive 中的檔案和資料夾',
+      sharepoint: '同步 SharePoint 文件庫中的檔案和資料夾'
     },
     connector: {
       feishu: '飛書',
@@ -1185,7 +1187,9 @@ export default {
       ima: '騰訊 IMA',
       rss: 'RSS / Atom 訂閱',
       gitlab: 'GitLab',
-      seafile: 'Seafile'
+      seafile: 'Seafile',
+      onedrive: 'OneDrive',
+      sharepoint: 'SharePoint'
     },
     logDetail: {
       startTime: '開始時間',

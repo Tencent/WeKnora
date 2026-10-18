@@ -7564,7 +7564,9 @@ export default {
       rss: 'RSS / Atom Feed',
       ima: 'Tencent IMA',
       gitlab: 'GitLab',
-      seafile: 'Seafile'
+      seafile: 'Seafile',
+      onedrive: 'OneDrive',
+      sharepoint: 'SharePoint'
     },
     connectorDesc: {
       feishu: 'Sync documents, spreadsheets and files from Feishu Wiki',
@@ -7578,7 +7580,9 @@ export default {
       rss: 'Sync articles from RSS / Atom feeds',
       ima: 'Sync documents, notes and files from Tencent IMA knowledge bases (AI sessions and video parses are not supported)',
       gitlab: 'Sync files from GitLab projects',
-      seafile: 'Sync folders and files from Seafile libraries'
+      seafile: 'Sync folders and files from Seafile libraries',
+      onedrive: 'Sync files and folders from Microsoft OneDrive',
+      sharepoint: 'Sync files and folders from a SharePoint document library'
     },
     drive: {
       folderTokenLabel: 'Drive folder token',

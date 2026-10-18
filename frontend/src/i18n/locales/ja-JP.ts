@@ -7564,7 +7564,9 @@ export default {
       rss: 'RSS / Atomフィード',
       ima: 'Tencent IMA',
       gitlab: 'GitLab',
-      seafile: 'Seafile'
+      seafile: 'Seafile',
+      onedrive: 'OneDrive',
+      sharepoint: 'SharePoint'
     },
     connectorDesc: {
       feishu: 'Feishu Wikiからドキュメント、スプレッドシート、ファイルを同期します',
@@ -7578,7 +7580,9 @@ export default {
       rss: 'RSS / Atomフィードから記事を同期します',
       ima: 'Tencent IMAのナレッジベースからドキュメント、ノート、ファイルを同期します（AIセッションと動画の解析は非対応）',
       gitlab: 'GitLabプロジェクトからファイルを同期します',
-      seafile: 'Seafileライブラリのフォルダとファイルを同期します'
+      seafile: 'Seafileライブラリのフォルダとファイルを同期します',
+      onedrive: 'Microsoft OneDrive のファイルとフォルダーを同期します',
+      sharepoint: 'SharePoint ドキュメント ライブラリのファイルとフォルダーを同期します'
     },
     drive: {
       folderTokenLabel: 'Driveフォルダトークン',

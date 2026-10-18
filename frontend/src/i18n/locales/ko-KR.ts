@@ -1169,7 +1169,9 @@ export default {
       ima: 'Tencent IMA 지식베이스에서 문서, 노트 및 파일 동기화 (AI 세션과 동영상 분석은 지원되지 않음)',
       rss: 'RSS / Atom 피드에서 글 동기화',
       gitlab: 'GitLab 프로젝트의 파일 동기화',
-      seafile: 'Seafile 라이브러리의 폴더와 파일 동기화'
+      seafile: 'Seafile 라이브러리의 폴더와 파일 동기화',
+      onedrive: 'Microsoft OneDrive의 파일과 폴더 동기화',
+      sharepoint: 'SharePoint 문서 라이브러리의 파일과 폴더 동기화'
     },
     connector: {
       feishu: '페이슈 (Feishu)',
@@ -1183,7 +1185,9 @@ export default {
       ima: 'Tencent IMA',
       rss: 'RSS / Atom 피드',
       gitlab: 'GitLab',
-      seafile: 'Seafile'
+      seafile: 'Seafile',
+      onedrive: 'OneDrive',
+      sharepoint: 'SharePoint'
     },
     logDetail: {
       startTime: '시작 시간',

@@ -1098,7 +1098,10 @@ async function loadResources() {
       } as any)
       const created = res?.data || res
       tempDsId.value = created.id
-    } else if (!isEdit.value) {
+    } else {
+      // Resource listing is driven by the persisted data-source config. Keep
+      // it current in edit mode too, otherwise expanding a Microsoft document
+      // library can query stale settings and appear empty.
       await updateDataSource(tempDsId.value, {
         ...form.value,
         knowledge_base_id: props.kbId,

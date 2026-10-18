@@ -1169,7 +1169,9 @@ export default {
       ima: 'Синхронизация документов, заметок и файлов из баз знаний Tencent IMA (ИИ-сессии и разбор видео не поддерживаются)',
       rss: 'Синхронизация статей из лент RSS / Atom',
       gitlab: 'Синхронизация файлов из проектов GitLab',
-      seafile: 'Синхронизация папок и файлов из библиотек Seafile'
+      seafile: 'Синхронизация папок и файлов из библиотек Seafile',
+      onedrive: 'Синхронизация файлов и папок из Microsoft OneDrive',
+      sharepoint: 'Синхронизация файлов и папок из библиотеки документов SharePoint'
     },
     connector: {
       feishu: 'Feishu (Фэйшу)',
@@ -1183,7 +1185,9 @@ export default {
       ima: 'Tencent IMA',
       rss: 'RSS / Atom лента',
       gitlab: 'GitLab',
-      seafile: 'Seafile'
+      seafile: 'Seafile',
+      onedrive: 'OneDrive',
+      sharepoint: 'SharePoint'
     },
     logDetail: {
       startTime: 'Время начала',
