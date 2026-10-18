@@ -2898,6 +2898,7 @@ export default {
 },
   mcpServiceDialog: {
       presets: {
+        keyRequired: "Перед сохранением этой настройки введите собственный API-ключ Ace Data Cloud.",
         "title": "Найти готовую настройку сервиса",
         "hint": "Настройте каждый сервис отдельно или добавьте свой MCP. Эти интеграции предоставляет Ace Data Cloud; это не официальные приложения брендов моделей.",
         "search": "Поиск Suno, Seedance, HappyHorse, GPT Image или Nano Banana",

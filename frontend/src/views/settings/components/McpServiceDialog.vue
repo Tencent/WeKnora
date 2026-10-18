@@ -831,8 +831,20 @@ const rules: Record<string, FormRule[]> = {
 
 const dialogVisible = computed({
   get: () => props.visible,
-  set: (value) => emit('update:visible', value),
+  set: (value) => {
+    if (!value) clearCredentialDraft()
+    emit('update:visible', value)
+  },
 })
+
+// Keep unsaved secrets only while the drawer needs them. This clears local
+// state, never the service's stored credential or its /credentials resource.
+function clearCredentialDraft() {
+  formData.value.auth_config.api_key = ''
+  formData.value.auth_config.token = ''
+  formData.value.auth_config.client_secret = ''
+  codeImportText.value = ''
+}
 
 // ---- Advanced numeric inputs (text-bound proxies) ----
 // We bind text instead of v-model directly to advanced_config.<n> so the
@@ -900,7 +912,12 @@ const resetForm = () => {
 watch(
   () => [props.visible, props.service] as const,
   ([visible, service], previous) => {
-    if (!visible) { usageGeneration++; generatingUsage.value = false; return }
+    if (!visible) {
+      usageGeneration++
+      generatingUsage.value = false
+      clearCredentialDraft()
+      return
+    }
     const opening = !previous?.[0]
     if (!opening && service?.id && savedService.value?.id === service.id) {
       savedService.value = service
@@ -1021,6 +1038,10 @@ async function saveConnection(): Promise<MCPService | null> {
   if (submitting.value) return null
   const valid = await formRef.value?.validate()
   if (valid !== true) return null
+  if (!currentService.value?.id && selectedPreset.value && !formData.value.auth_config.api_key.trim()) {
+    MessagePlugin.warning(t('mcpServiceDialog.presets.keyRequired'))
+    return null
+  }
   if (!formData.value.name.trim()) { MessagePlugin.warning(t('mcpServiceDialog.rules.nameRequired')); return null }
   try { const url = new URL(formData.value.url); if (!['https:', 'http:'].includes(url.protocol)) throw new Error('url') }
   catch { MessagePlugin.warning(t('mcpServiceDialog.rules.urlInvalid')); return null }
@@ -1029,6 +1050,7 @@ async function saveConnection(): Promise<MCPService | null> {
     const id = currentService.value?.id
     const saved = id ? await updateMCPService(id, buildPayload(false)) : await createMCPService(buildPayload(true))
     savedService.value = saved
+    clearCredentialDraft()
     emit('created', saved)
     return saved
   } catch (error) {
@@ -1059,7 +1081,7 @@ async function handleGenerateUsage() {
   }
 }
 
-onBeforeUnmount(() => { usageGeneration++ })
+onBeforeUnmount(() => { usageGeneration++; clearCredentialDraft() })
 
 const handleSubmit = async () => {
   const id = currentService.value?.id

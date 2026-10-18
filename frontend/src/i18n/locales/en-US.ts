@@ -5718,6 +5718,7 @@ export default {
   },
     mcpServiceDialog: {
       presets: {
+        keyRequired: "Enter your own Ace Data Cloud API key before saving this preset.",
         "title": "Find a service preset",
         "hint": "Choose an independently configured service, or add a custom MCP server. These integrations are provided by Ace Data Cloud; they are not official apps from the model brands.",
         "search": "Search Suno, Seedance, HappyHorse, GPT Image or Nano Banana",

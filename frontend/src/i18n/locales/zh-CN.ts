@@ -2900,6 +2900,7 @@ export default {
 },
   mcpServiceDialog: {
       presets: {
+        keyRequired: "请先填写自己的 Ace Data Cloud API Key，再保存此预设。",
         "title": "按服务名选择预设",
         "hint": "每项独立配置；也可添加自定义 MCP。以下集成由 Ace Data Cloud 提供，并非对应模型品牌的官方应用。",
         "search": "搜索 Suno、Seedance、HappyHorse、GPT Image 或 Nano Banana",

@@ -5718,6 +5718,7 @@ export default {
   },
     mcpServiceDialog: {
       presets: {
+        keyRequired: "このプリセットを保存する前に、ご自身のAce Data Cloud APIキーを入力してください。",
         "title": "サービスのプリセットを探す",
         "hint": "各サービスを個別に設定できます。カスタムMCPも追加できます。これらはAce Data Cloudが提供する連携であり、モデルブランドの公式アプリではありません。",
         "search": "Suno、Seedance、HappyHorse、GPT Image、Nano Bananaを検索",
