@@ -596,6 +596,25 @@ func TestIngestItem_URLCreationAttachesDataSourceMetadata(t *testing.T) {
 	assert.Equal(t, "url:1", repo.metadataUpdates[0]["external_id"])
 }
 
+func TestIngestItemConflictSkipKeepsExistingSourceItem(t *testing.T) {
+	ds := &types.DataSource{
+		ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1",
+		ConflictStrategy: types.ConflictStrategySkip,
+	}
+	repo := &deletionLookupKnowledgeRepo{knowledge: &types.Knowledge{ID: "existing-knowledge", FileName: "existing.txt"}}
+	ks := &sweepFakeKS{repo: repo}
+	svc := &DataSourceService{knowledgeService: ks}
+
+	_, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
+		ExternalID: "drive:file", Content: []byte("replacement"), FileName: "file.txt",
+	}, nil)
+	var duplicate *types.DuplicateKnowledgeError
+	require.ErrorAs(t, err, &duplicate)
+	assert.Empty(t, ks.deleted)
+	assert.Empty(t, repo.hardDeleted)
+	assert.Empty(t, ks.events)
+}
+
 // TestIngestItem_PersistsSourceUpdatedAt verifies that the connector-supplied
 // last-modified time reaches the persisted metadata as an RFC3339 UTC string,
 // and that an item without one gets no key rather than a zero time.

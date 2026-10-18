@@ -259,6 +259,10 @@ const expandedResourceIds = ref(new Set<string>())
 // one level at a time instead of traversing the whole tree up front (#1672).
 const loadedChildrenIds = ref(new Set<string>())
 const loadingChildrenIds = ref(new Set<string>())
+// A top-level reload replaces the tree. Child requests from an older tree must
+// not merge into the replacement, otherwise edit-mode loading can intermittently
+// make a document library appear empty.
+const resourceTreeGeneration = ref(0)
 // True when the initial listing already returned the whole tree (connectors like
 // Notion populate parent_id on the first call). In that case expanding a node
 // never needs an extra request.
@@ -510,9 +514,11 @@ async function ensureChildrenLoaded(id: string) {
     return
   }
 
+  const generation = resourceTreeGeneration.value
   loadingChildrenIds.value = new Set(loadingChildrenIds.value).add(id)
   try {
     const res = await listResources(tempDsId.value, id)
+    if (generation !== resourceTreeGeneration.value) return
     const children: Resource[] = res?.data || res || []
     if (children.length > 0) {
       const existing = new Set(resources.value.map(r => r.external_id))
@@ -534,12 +540,14 @@ async function ensureChildrenLoaded(id: string) {
     }
     loadedChildrenIds.value = new Set(loadedChildrenIds.value).add(id)
   } catch (e: any) {
+    if (generation !== resourceTreeGeneration.value) return
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
     // Collapse again so the user can retry the expand.
     const next = new Set(expandedResourceIds.value)
     next.delete(id)
     expandedResourceIds.value = next
   } finally {
+    if (generation !== resourceTreeGeneration.value) return
     const s = new Set(loadingChildrenIds.value)
     s.delete(id)
     loadingChildrenIds.value = s
@@ -886,6 +894,7 @@ async function disconnectOneDriveOAuth() {
 
 // --- Drawer lifecycle ---
 watch(visible, async (v) => {
+  resourceTreeGeneration.value++
   if (!v) {
     if (!isEdit.value && tempDsId.value) {
       try {
@@ -1087,7 +1096,13 @@ async function testConnection() {
 
 // --- Load resources ---
 async function loadResources() {
+  const generation = ++resourceTreeGeneration.value
   loadingResources.value = true
+  resources.value = []
+  expandedResourceIds.value = new Set()
+  loadedChildrenIds.value = new Set()
+  loadingChildrenIds.value = new Set()
+  treeFullyLoaded.value = false
   try {
     syncConfluencePublicFieldsToSettings()
     if (!tempDsId.value) {
@@ -1109,6 +1124,7 @@ async function loadResources() {
     }
 
     const res = await listResources(tempDsId.value)
+    if (generation !== resourceTreeGeneration.value) return
     resources.value = res?.data || res || []
     // Any parent that already arrived with children (connectors returning the
     // full tree, e.g. Notion) needs no further lazy fetch.
@@ -1136,9 +1152,10 @@ async function loadResources() {
       if (hidden.length > 0) void revealExistingSelections(hidden)
     }
   } catch (e: any) {
+    if (generation !== resourceTreeGeneration.value) return
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
   }
-  loadingResources.value = false
+  if (generation === resourceTreeGeneration.value) loadingResources.value = false
 }
 
 // revealExistingSelections asks the backend which ancestors must be expanded to
