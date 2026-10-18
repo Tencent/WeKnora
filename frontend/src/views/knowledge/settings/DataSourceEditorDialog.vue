@@ -164,7 +164,7 @@ function removeRssAuthHeader(idx: number) {
 }
 
 function needsConnectionTest(): boolean {
-  if (isOAuthConnector.value) return false
+  if (isMicrosoftConnector.value) return false
   return !(isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value)
 }
 
@@ -820,7 +820,8 @@ const displayedCredentialFields = computed(() => {
   })
 })
 
-const isOAuthConnector = computed(() => ['onedrive', 'sharepoint'].includes(form.value.type))
+const isOAuthConnector = computed(() => form.value.type === 'onedrive')
+const isMicrosoftConnector = computed(() => ['onedrive', 'sharepoint'].includes(form.value.type))
 
 function validateSharePointSiteURL(): boolean {
   if (form.value.type !== 'sharepoint') return true
@@ -842,7 +843,7 @@ function validateSharePointSiteURL(): boolean {
 }
 
 async function refreshOneDriveOAuthStatus() {
-  if (!isOAuthConnector.value || !tempDsId.value) return
+  if (!isMicrosoftConnector.value || !tempDsId.value) return
   try {
     oauthStatus.value = await getDataSourceOAuthStatus(tempDsId.value)
   } catch {
@@ -961,7 +962,7 @@ watch(visible, async (v) => {
       }
     }
     tempDsId.value = props.dataSource.id
-    if (isOAuthConnector.value) void refreshOneDriveOAuthStatus()
+    if (isMicrosoftConnector.value) void refreshOneDriveOAuthStatus()
   } else {
     replaceCredentialsMode.value = false
     credentialsConfigured.value = false
@@ -1737,7 +1738,15 @@ const drawerConfirmText = computed(() => {
       <section class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('datasource.credentialsLabel') }}</h4>
 
-        <div v-if="isOAuthConnector" class="form-item onedrive-connection-card">
+        <div v-if="form.type === 'sharepoint'" class="form-item onedrive-connection-card">
+          <div class="onedrive-connection-card__status">
+            <t-icon :name="oauthStatus?.authorized ? 'check-circle-filled' : 'info-circle-filled'" />
+            <span>Sites.Selected · {{ t('datasource.oauthAuthorized') }}</span>
+          </div>
+          <p class="form-desc">{{ t('datasource.sharepoint.siteUrlHint') }}</p>
+        </div>
+
+        <div v-else-if="isOAuthConnector" class="form-item onedrive-connection-card">
           <div class="onedrive-connection-card__status">
             <t-icon :name="oauthStatus?.authorized ? 'check-circle-filled' : 'link'" />
             <span v-if="oauthStatus?.authorized">

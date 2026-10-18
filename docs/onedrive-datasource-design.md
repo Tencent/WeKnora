@@ -8,15 +8,14 @@
 - 同时支持未启用 MFA 的普通账号，以及启用了 Microsoft Authenticator、短信验证码或条件访问 MFA 的账号。
 - 支持选择整个 OneDrive、文件夹或单个文件同步到知识库。
 - 支持按 SharePoint 站点发现文档库，并选择一个文档库、文件夹或单个文件同步。
-- 支持全量同步、增量同步、源文件删除同步和 OAuth 重新授权。
+- 支持全量同步、增量同步、源文件删除同步和 OneDrive OAuth 重新授权。
 - 不向 WeKnora 暴露或保存 Microsoft 账号密码、Authenticator 动态验证码。
 
 当前版本暂不包含：
 
-- 应用权限（client credentials）无人值守同步。
 - Webhook 推送、共享给我的文件、快捷方式和 OneDrive 国家云。
 
-后续可以在不改变知识入库模型的情况下增加应用权限、SharePoint Selected permissions、单数据源多文档库 cursor 和 Webhook。
+后续可以在不改变知识入库模型的情况下增加单数据源多文档库 cursor 和 Webhook。
 
 ### 1.1 完整贡献边界
 
@@ -34,7 +33,7 @@
 
 ## 2. 认证方案
 
-### 2.1 推荐方案：委托式 OAuth 授权码流程
+### 2.1 OneDrive：委托式 OAuth 授权码流程
 
 需要明确区分 OAuth 与 MFA：
 
@@ -49,17 +48,16 @@
 3. Microsoft 根据账号策略完成登录：未启用 MFA 时直接完成登录；启用 MFA 时继续完成 Authenticator 推送、六位动态码或其他二次验证。
 4. Microsoft 将一次性 authorization code 回调到 WeKnora 后端。
 5. 后端校验单次 `state`、PKCE `code_verifier` 和数据源归属，然后交换 access token 与 refresh token。本实现不消费 ID token，因此不申请 OpenID scope，也不依赖未校验的 JWT claim。
-6. OneDrive 调用 `GET /me/drive` 验证授权；SharePoint 调用 `GET /me` 验证账号身份，并在连接测试时解析站点和文档库。
+6. OneDrive 调用 `GET /me/drive` 验证授权。
 7. 定时同步在 access token 过期前通过 refresh token 静默刷新。
 
 建议 scope：
 
 ```text
-OneDrive:  offline_access Files.Read
-SharePoint: offline_access User.Read Sites.Read.All
+OneDrive: offline_access Files.Read
 ```
 
-`Files.Read` 用于当前登录用户的 OneDrive；SharePoint 使用 `User.Read` 取得稳定账号身份，使用 `Sites.Read.All` 浏览配置的站点及文档库。两种类型都不申请写权限。
+`Files.Read` 用于当前登录用户的 OneDrive，不申请写权限。
 
 Microsoft 官方资料：
 
@@ -67,7 +65,18 @@ Microsoft 官方资料：
 - [Microsoft Graph delegated access](https://learn.microsoft.com/en-us/graph/auth-v2-user)
 - [Microsoft Graph permissions reference](https://learn.microsoft.com/en-us/graph/permissions-reference)
 
-### 2.2 Authenticator / MFA 场景
+### 2.2 SharePoint：Sites.Selected 应用程序授权
+
+SharePoint 使用 OAuth 2.0 client credentials 和 Microsoft Graph 应用程序权限 `Sites.Selected`。后端以 `https://graph.microsoft.com/.default` 获取短期应用令牌；令牌只缓存在内存中，不保存到数据源 OAuth 表，也不需要用户登录、`User.Read`、`offline_access` 或 refresh token。
+
+`Sites.Selected` 需要两层配置同时完成：租户管理员先为应用批准该权限，再对每个允许同步的站点向应用授予 `read`。只添加 Entra 权限不会自动开放任何站点。WeKnora 不自动扩权；未授权站点由 Graph 返回 403。
+
+Microsoft 官方资料：
+
+- [Selected permissions overview](https://learn.microsoft.com/en-us/graph/permissions-selected-overview)
+- [Grant an application access to a site](https://learn.microsoft.com/en-us/graph/api/site-post-permissions)
+
+### 2.3 Authenticator / MFA 场景
 
 Authenticator/MFA 不是 OneDrive 数据源的必填项，也不应成为独立认证模式。未启用 MFA 的用户在 Microsoft 页面完成普通登录后即可授权；启用 MFA 的用户会由 Microsoft 自动追加二次验证。
 
@@ -90,19 +99,18 @@ WeKnora 不增加“账号密码”“动态验证码”“是否开启 MFA”�
 
 Device Code Flow 不作为自动回退方案。企业条件访问可以专门阻止该流程，而且它比已有 Web UI 的授权码流程更容易产生钓鱼风险。只有未来针对纯命令行部署时，才考虑显式、可配置地支持。
 
-### 2.3 应用注册
+### 2.4 应用注册
 
 建议由每个 WeKnora 部署配置自己的 Microsoft Entra App Registration：
 
 ```text
 MICROSOFT_CLIENT_ID=
 MICROSOFT_CLIENT_SECRET=
-MICROSOFT_TENANT=common
+MICROSOFT_TENANT=<directory-tenant-id>
 MICROSOFT_REDIRECT_URL=https://weknora.example.com/api/v1/datasource-oauth/microsoft/callback
 ```
 
-- `common` 可覆盖个人账号及工作/学校账号，但 App Registration 必须启用对应的 supported account types。
-- 企业可设置具体 Entra directory ID，限制只能由该组织目录授权。
+- OneDrive-only 部署可使用 `common` 覆盖受支持的个人账号及工作/学校账号；启用 SharePoint 时必须设置具体 Entra directory ID 或租户域名。
 - redirect URL 必须来自服务端配置，不能信任前端传入的任意绝对 URL。
 - callback 不要求公网域名：本地开发可使用 Microsoft 允许的 `http://localhost:<port>/...`，内网部署可使用用户浏览器能够解析、访问且证书受信任的内部 HTTPS 地址；远端部署不能把用户电脑的 `localhost` 当作服务端回调地址。注册值必须与 `MICROSOFT_REDIRECT_URL` 完全一致。
 - 当前回调由 WeKnora 后端交换 authorization code，因此 Entra 平台类型是 confidential **Web** application，`MICROSOFT_CLIENT_SECRET` 是部署级必需秘密，不是用户或数据源级配置，也不得随数据源 API 返回。若未来要取消 secret，必须改用 public-client/SPA/桌面应用的安全边界并重新评估 token 所有权、回调与多实例后台同步，不属于本次贡献范围。
@@ -545,9 +553,9 @@ MFA 本身不在自动测试中模拟；自动测试 mock Microsoft authorize/to
 6. `feat(frontend): add onedrive oauth and resource picker`
 7. `docs(datasource): document onedrive deployment, recovery and mfa`
 
-当前阶段同时提供 OneDrive 和 SharePoint 委托权限模式。后续可扩展：
+当前阶段提供 OneDrive 委托权限模式和 SharePoint `Sites.Selected` 应用程序权限模式。后续可扩展：
 
-- SharePoint Selected permissions 与单数据源多文档库 cursor；
-- client credentials/certificate 的无人值守企业同步；
+- 单数据源多文档库 cursor；
+- 使用 certificate 代替 client secret；
 - Webhook + delta；
 - 国家云 endpoint 配置。

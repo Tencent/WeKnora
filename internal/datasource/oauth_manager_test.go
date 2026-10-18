@@ -55,36 +55,51 @@ func newOAuthManagerTest(
 	return manager, ds
 }
 
-func TestSharePointOAuthUsesSiteScopeAndUserIdentity(t *testing.T) {
+func TestSharePointUsesSitesSelectedApplicationToken(t *testing.T) {
+	var tokenCalls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/common/oauth2/v2.0/token":
-			require.NoError(t, r.ParseForm())
-			require.Equal(t, sharePointScopes, r.Form.Get("scope"))
-			fmt.Fprint(w, `{"access_token":"access","refresh_token":"refresh","scope":"Sites.Read.All offline_access","expires_in":3600}`)
-		case "/me":
-			require.Equal(t, "id,displayName", r.URL.Query().Get("$select"))
-			fmt.Fprint(w, `{"id":"account-1","displayName":"Alice"}`)
-		default:
+		if r.URL.Path != "/tenant-id/oauth2/v2.0/token" {
 			http.NotFound(w, r)
+			return
 		}
+		tokenCalls.Add(1)
+		require.NoError(t, r.ParseForm())
+		require.Equal(t, "client_credentials", r.Form.Get("grant_type"))
+		require.Equal(t, sharePointAppScope, r.Form.Get("scope"))
+		require.Equal(t, "client", r.Form.Get("client_id"))
+		require.Equal(t, "secret", r.Form.Get("client_secret"))
+		fmt.Fprint(w, `{"access_token":"app-access","token_type":"Bearer","expires_in":3600}`)
 	}))
 	defer upstream.Close()
 	manager, ds := newOAuthManagerTest(t, upstream, types.ConnectorTypeSharePoint)
+	t.Setenv("ONEDRIVE_TENANT", "tenant-id")
 
-	authorizeURL, err := manager.AuthorizeURL(context.Background(), ds.TenantID, ds.ID, "admin", false)
-	require.NoError(t, err)
-	parsed, err := url.Parse(authorizeURL)
-	require.NoError(t, err)
-	require.Equal(t, sharePointScopes, parsed.Query().Get("scope"))
+	_, err := manager.AuthorizeURL(context.Background(), ds.TenantID, ds.ID, "admin", false)
+	require.ErrorContains(t, err, "Sites.Selected")
 
-	status, err := manager.CompleteAuthorization(context.Background(), parsed.Query().Get("state"), "code", "")
+	status, err := manager.Status(context.Background(), ds.TenantID, ds.ID)
 	require.NoError(t, err)
 	require.True(t, status.Authorized)
 	require.Equal(t, types.ConnectorTypeSharePoint, status.Provider)
-	require.Equal(t, "Alice", status.AccountDisplayName)
-	require.Empty(t, status.AuthorizedDriveID)
+	require.Equal(t, "Sites.Selected", status.AccountDisplayName)
+
+	token, err := manager.AccessToken(context.Background(), ds.TenantID, ds.ID, ds.ConnectionVersion)
+	require.NoError(t, err)
+	require.Equal(t, "app-access", token)
+	require.Equal(t, int32(1), tokenCalls.Load(), "status and access should share the cached application token")
+
+	_, err = manager.RefreshAccessToken(context.Background(), ds.TenantID, ds.ID, ds.ConnectionVersion)
+	require.NoError(t, err)
+	require.Equal(t, int32(2), tokenCalls.Load(), "a Graph 401 must force a fresh application token")
+}
+
+func TestSharePointRequiresConcreteTenant(t *testing.T) {
+	upstream := httptest.NewServer(http.NotFoundHandler())
+	defer upstream.Close()
+	manager, ds := newOAuthManagerTest(t, upstream, types.ConnectorTypeSharePoint)
+	_, err := manager.Status(context.Background(), ds.TenantID, ds.ID)
+	require.ErrorContains(t, err, "concrete MICROSOFT_TENANT")
 }
 
 func TestDataSourceOAuthAuthorizationAndRefresh(t *testing.T) {

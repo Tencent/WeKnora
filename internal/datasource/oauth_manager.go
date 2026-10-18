@@ -26,7 +26,7 @@ const (
 	oneDriveDefaultLogin = "https://login.microsoftonline.com"
 	oneDriveDefaultGraph = "https://graph.microsoft.com/v1.0"
 	oneDriveScopes       = "offline_access Files.Read"
-	sharePointScopes     = "offline_access User.Read Sites.Read.All"
+	sharePointAppScope   = "https://graph.microsoft.com/.default"
 	oauthRefreshSkew     = 5 * time.Minute
 	oauthHTTPTimeout     = 30 * time.Second
 )
@@ -40,6 +40,9 @@ type OneDriveOAuthManager struct {
 	loginBase  string
 	graphBase  string
 	refreshMu  sync.Mutex
+	appMu      sync.Mutex
+	appToken   string
+	appExpiry  time.Time
 }
 
 // OAuthStatus is the non-secret connection status exposed to administrators.
@@ -76,20 +79,8 @@ type microsoftDriveResponse struct {
 	} `json:"owner"`
 }
 
-type microsoftUserResponse struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"displayName"`
-}
-
 func isMicrosoftDriveType(connectorType string) bool {
 	return connectorType == types.ConnectorTypeOneDrive || connectorType == types.ConnectorTypeSharePoint
-}
-
-func microsoftScopes(connectorType string) string {
-	if connectorType == types.ConnectorTypeSharePoint {
-		return sharePointScopes
-	}
-	return oneDriveScopes
 }
 
 // NewOneDriveOAuthManager creates a data-source-scoped OneDrive OAuth manager.
@@ -114,16 +105,19 @@ func (m *OneDriveOAuthManager) AuthorizeURL(
 	authorizedBy string,
 	replaceConnection bool,
 ) (string, error) {
-	clientID, _, tenant, redirectURI, err := m.configuration()
+	ds, err := m.dataSource.FindByID(ctx, dataSourceID)
+	if err != nil || ds == nil || ds.TenantID != tenantID || !isMicrosoftDriveType(ds.Type) {
+		return "", ErrDataSourceNotFound
+	}
+	if ds.Type == types.ConnectorTypeSharePoint {
+		return "", fmt.Errorf("SharePoint uses application authorization with Sites.Selected; interactive authorization is not available")
+	}
+	clientID, _, tenant, redirectURI, err := m.delegatedConfiguration()
 	if err != nil {
 		return "", err
 	}
 	if m.states.rdb == nil && !strings.EqualFold(strings.TrimSpace(os.Getenv("EDITION")), "lite") {
 		return "", fmt.Errorf("onedrive OAuth requires Redis outside Lite single-instance mode")
-	}
-	ds, err := m.dataSource.FindByID(ctx, dataSourceID)
-	if err != nil || ds == nil || ds.TenantID != tenantID || !isMicrosoftDriveType(ds.Type) {
-		return "", ErrDataSourceNotFound
 	}
 	if strings.TrimSpace(authorizedBy) == "" {
 		return "", fmt.Errorf("authorized user is required")
@@ -151,7 +145,7 @@ func (m *OneDriveOAuthManager) AuthorizeURL(
 	q.Set("response_type", "code")
 	q.Set("redirect_uri", redirectURI)
 	q.Set("response_mode", "query")
-	q.Set("scope", microsoftScopes(ds.Type))
+	q.Set("scope", oneDriveScopes)
 	q.Set("state", state)
 	q.Set("code_challenge", challenge)
 	q.Set("code_challenge_method", "S256")
@@ -183,7 +177,10 @@ func (m *OneDriveOAuthManager) CompleteAuthorization(
 	if initialDS.ConnectionVersion != state.ConnectionVersion {
 		return nil, ErrOAuthConnectionChanged
 	}
-	clientID, clientSecret, tenant, redirectURI, err := m.configuration()
+	if initialDS.Type == types.ConnectorTypeSharePoint {
+		return nil, fmt.Errorf("SharePoint uses application authorization with Sites.Selected")
+	}
+	clientID, clientSecret, tenant, redirectURI, err := m.delegatedConfiguration()
 	if err != nil {
 		return nil, err
 	}
@@ -194,25 +191,16 @@ func (m *OneDriveOAuthManager) CompleteAuthorization(
 		"code":          {code},
 		"redirect_uri":  {redirectURI},
 		"code_verifier": {state.CodeVerifier},
-		"scope":         {microsoftScopes(initialDS.Type)},
+		"scope":         {oneDriveScopes},
 	})
 	if err != nil {
 		return nil, err
 	}
-	accountID, accountName, authorizedResourceID := "", "", ""
-	if initialDS.Type == types.ConnectorTypeSharePoint {
-		user, identityErr := m.getUser(ctx, token.AccessToken)
-		if identityErr != nil {
-			return nil, identityErr
-		}
-		accountID, accountName = user.ID, user.DisplayName
-	} else {
-		drive, identityErr := m.getDrive(ctx, token.AccessToken)
-		if identityErr != nil {
-			return nil, identityErr
-		}
-		accountID, accountName, authorizedResourceID = drive.Owner.User.ID, drive.Owner.User.DisplayName, drive.ID
+	drive, identityErr := m.getDrive(ctx, token.AccessToken)
+	if identityErr != nil {
+		return nil, identityErr
 	}
+	accountID, accountName, authorizedResourceID := drive.Owner.User.ID, drive.Owner.User.DisplayName, drive.ID
 	if accountID == "" {
 		return nil, fmt.Errorf("microsoft did not return a stable account identity")
 	}
@@ -271,6 +259,17 @@ func (m *OneDriveOAuthManager) Status(
 	if err != nil || ds == nil || ds.TenantID != tenantID || !isMicrosoftDriveType(ds.Type) {
 		return nil, ErrDataSourceNotFound
 	}
+	if ds.Type == types.ConnectorTypeSharePoint {
+		_, expiresAt, tokenErr := m.sharePointAccessToken(ctx, false)
+		if tokenErr != nil {
+			return nil, tokenErr
+		}
+		return &OAuthStatus{
+			Authorized: true, Provider: types.ConnectorTypeSharePoint,
+			AccountDisplayName: "Sites.Selected", ExpiresAt: expiresAt,
+			ConnectionVersion: ds.ConnectionVersion,
+		}, nil
+	}
 	token, err := m.tokens.Get(ctx, tenantID, dataSourceID)
 	if err != nil {
 		return nil, err
@@ -293,6 +292,9 @@ func (m *OneDriveOAuthManager) Revoke(ctx context.Context, tenantID uint64, data
 	ds, err := m.dataSource.FindByID(ctx, dataSourceID)
 	if err != nil || ds == nil || ds.TenantID != tenantID || !isMicrosoftDriveType(ds.Type) {
 		return ErrDataSourceNotFound
+	}
+	if ds.Type == types.ConnectorTypeSharePoint {
+		return nil
 	}
 	config, configErr := ds.ParseConfig()
 	if configErr != nil {
@@ -331,6 +333,13 @@ func (m *OneDriveOAuthManager) accessToken(
 	if dsErr != nil || ds == nil || ds.TenantID != tenantID || !isMicrosoftDriveType(ds.Type) {
 		return "", ErrDataSourceNotFound
 	}
+	if ds.ConnectionVersion != connectionVersion {
+		return "", ErrOAuthConnectionChanged
+	}
+	if ds.Type == types.ConnectorTypeSharePoint {
+		token, _, err := m.sharePointAccessToken(ctx, force)
+		return token, err
+	}
 	token, err := m.tokens.Get(ctx, tenantID, dataSourceID)
 	if err != nil {
 		return "", err
@@ -341,7 +350,7 @@ func (m *OneDriveOAuthManager) accessToken(
 	if !force && time.Until(token.ExpiresAt) > oauthRefreshSkew && token.AccessToken != "" {
 		return token.AccessToken, nil
 	}
-	clientID, clientSecret, tenant, _, err := m.configuration()
+	clientID, clientSecret, tenant, _, err := m.delegatedConfiguration()
 	if err != nil {
 		return "", err
 	}
@@ -358,7 +367,7 @@ func (m *OneDriveOAuthManager) accessToken(
 			response, refreshErr := m.exchange(ctx, tenant, url.Values{
 				"client_id": {clientID}, "client_secret": {clientSecret},
 				"grant_type": {"refresh_token"}, "refresh_token": {current.RefreshToken},
-				"scope": {microsoftScopes(ds.Type)},
+				"scope": {oneDriveScopes},
 			})
 			if refreshErr != nil {
 				return refreshErr
@@ -379,6 +388,28 @@ func (m *OneDriveOAuthManager) accessToken(
 		return "", err
 	}
 	return refreshed.AccessToken, nil
+}
+
+func (m *OneDriveOAuthManager) sharePointAccessToken(ctx context.Context, force bool) (string, time.Time, error) {
+	m.appMu.Lock()
+	defer m.appMu.Unlock()
+	if !force && m.appToken != "" && time.Until(m.appExpiry) > oauthRefreshSkew {
+		return m.appToken, m.appExpiry, nil
+	}
+	clientID, clientSecret, tenant, err := m.applicationConfiguration()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	response, err := m.exchange(ctx, tenant, url.Values{
+		"client_id": {clientID}, "client_secret": {clientSecret},
+		"grant_type": {"client_credentials"}, "scope": {sharePointAppScope},
+	})
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	m.appToken = response.AccessToken
+	m.appExpiry = time.Now().UTC().Add(time.Duration(response.ExpiresIn) * time.Second)
+	return m.appToken, m.appExpiry, nil
 }
 
 func (m *OneDriveOAuthManager) exchange(
@@ -446,27 +477,6 @@ func (m *OneDriveOAuthManager) getDrive(ctx context.Context, accessToken string)
 	return &drive, nil
 }
 
-func (m *OneDriveOAuthManager) getUser(ctx context.Context, accessToken string) (*microsoftUserResponse, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(m.graphBase, "/")+"/me?$select=id,displayName", nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	resp, err := m.doWithoutRedirects(req)
-	if err != nil {
-		return nil, fmt.Errorf("validate Microsoft authorization: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("validate Microsoft authorization: Microsoft Graph returned %d", resp.StatusCode)
-	}
-	var user microsoftUserResponse
-	if err := json.NewDecoder(io.LimitReader(resp.Body, (1<<20)+1)).Decode(&user); err != nil {
-		return nil, err
-	}
-	return &user, nil
-}
-
 func (m *OneDriveOAuthManager) doWithoutRedirects(req *http.Request) (*http.Response, error) {
 	if m.httpClient == nil {
 		return nil, errors.New("oauth HTTP client is not configured")
@@ -478,7 +488,7 @@ func (m *OneDriveOAuthManager) doWithoutRedirects(req *http.Request) (*http.Resp
 	return client.Do(req)
 }
 
-func (m *OneDriveOAuthManager) configuration() (clientID, clientSecret, tenant, redirectURI string, err error) {
+func (m *OneDriveOAuthManager) delegatedConfiguration() (clientID, clientSecret, tenant, redirectURI string, err error) {
 	clientID = firstNonEmptyEnv("MICROSOFT_CLIENT_ID", "ONEDRIVE_CLIENT_ID")
 	clientSecret = firstNonEmptyEnv("MICROSOFT_CLIENT_SECRET", "ONEDRIVE_CLIENT_SECRET")
 	tenant = firstNonEmptyEnv("MICROSOFT_TENANT", "ONEDRIVE_TENANT")
@@ -506,6 +516,26 @@ func (m *OneDriveOAuthManager) configuration() (clientID, clientSecret, tenant, 
 		return "", "", "", "", fmt.Errorf("%w: a 32-byte SYSTEM_AES_KEY is required", ErrOAuthNotConfigured)
 	}
 	return clientID, clientSecret, tenant, redirectURI, nil
+}
+
+func (m *OneDriveOAuthManager) applicationConfiguration() (clientID, clientSecret, tenant string, err error) {
+	clientID = firstNonEmptyEnv("MICROSOFT_CLIENT_ID", "ONEDRIVE_CLIENT_ID")
+	clientSecret = firstNonEmptyEnv("MICROSOFT_CLIENT_SECRET", "ONEDRIVE_CLIENT_SECRET")
+	tenant = firstNonEmptyEnv("MICROSOFT_TENANT", "ONEDRIVE_TENANT")
+	if clientID == "" || clientSecret == "" || tenant == "" {
+		return "", "", "", fmt.Errorf(
+			"%w: MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET and a concrete MICROSOFT_TENANT are required for SharePoint",
+			ErrOAuthNotConfigured,
+		)
+	}
+	switch strings.ToLower(tenant) {
+	case "common", "organizations", "consumers":
+		return "", "", "", fmt.Errorf(
+			"%w: SharePoint application authorization requires a concrete MICROSOFT_TENANT directory ID or domain",
+			ErrOAuthNotConfigured,
+		)
+	}
+	return clientID, clientSecret, tenant, nil
 }
 
 func firstNonEmptyEnv(names ...string) string {
