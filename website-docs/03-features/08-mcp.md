@@ -53,6 +53,24 @@ MCP 管理页支持按服务名称和卡片显示的用途说明搜索。搜索�
 | Wiki | `wiki_search`、`wiki_read_page`、`wiki_index` | 只对开启了 Wiki 的知识库生效；`wiki_search` 的 `query` 保持原有的正则语义（大小写不敏感），不是合法正则的文本按字面匹配；`regex=false` 强制字面匹配，`regex=true` 要求合法正则 |
 | 写入 | `add_document`、`update_document`、`delete_document` | 默认关闭；支持 Markdown 文本或 URL 导入 |
 
+`search_knowledge` 可通过可选的 `knowledge_ids` 字符串数组限定文档范围，三种 `mode` 均支持。先用 `list_documents` 或搜索结果取得真实文档 ID，再传入这些 ID；文档过滤在召回和候选数截断之前生效，同库其他文档不会参与此次检索。省略该参数时沿用整库检索。传入时数组必须非空，且不能包含空白 ID；ID 两端空白会被去除，重复 ID 自动去重。
+
+若同时传入 `knowledge_base_ids`，每个文档都必须属于所选知识库；仅检索这些文档，不会额外搜索所选库里的其他文档。不存在的文档、越权文档、与知识库选择冲突的文档或没有向量/关键词索引的文档都会返回错误，整次调用不会退回整库检索。共享知识库沿用端点授权和所属空间校验。
+
+例如，假设 `list_documents` 已返回 `doc-a` 和 `doc-b`，`tools/call` 的参数可以写为：
+
+```json
+{
+  "name": "search_knowledge",
+  "arguments": {
+    "query": "合同价格",
+    "mode": "hybrid",
+    "knowledge_ids": ["doc-a", "doc-b"],
+    "limit": 10
+  }
+}
+```
+
 `search_knowledge` 的结构化结果 `results[].chunk_type` 和文本结果的 `chunk_type` 属性保留命中片段的原始类型，例如 `text`、`summary`、`image_ocr`、`image_caption` 或 `image_vector`。空字符串表示类型未知，不能据此认定为原文；客户端可据类型决定是否补读文档正文。
 
 现有 MCP 工具的返回结果会复用 REST/IM 的资源链接转换：正文、Wiki 内容以及结构化数据中的图片引用，都会在权限校验后转换为可直接访问的 HTTP(S) 链接，不需要新增工具或修改端点工具清单。`ask` 的 `references[].images` 保留图片 URL、caption 和 OCR 文本，文本引用列表也包含图片链接，避免正文摘要截断后丢失图片信息。
