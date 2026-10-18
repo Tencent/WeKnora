@@ -314,6 +314,12 @@ func (c *Connector) ResolveResourceAncestors(
 		for current != "" && current != rootItemID {
 			item, err := client.getItem(ctx, ref.DriveID, current)
 			if err != nil {
+				// A previously selected item can legitimately disappear. It no
+				// longer has a path to expand in the picker, but that must not
+				// prevent the data source from being edited or saved.
+				if isNotFound(err) {
+					break
+				}
 				return nil, err
 			}
 			parent := item.ParentReference.ID
@@ -366,7 +372,10 @@ func (c *Connector) FetchAllResult(
 	if err != nil {
 		return nil, err
 	}
-	refs, canonicalIDs, err := c.normalizeRefs(ctx, client, resourceIDs, driveInfo.ID)
+	// Keep deleted selections in the canonical cursor set. A full resync can be
+	// reached after a cursor reset or an expired delta link, and source deletion
+	// is an expected state rather than a configuration error.
+	refs, canonicalIDs, err := c.normalizeRefsAllowMissing(ctx, client, resourceIDs, driveInfo.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -398,6 +407,9 @@ func (c *Connector) FetchAllResult(
 		}
 		item, err := client.getItem(ctx, ref.DriveID, ref.ItemID)
 		if err != nil {
+			if isNotFound(err) {
+				continue
+			}
 			return nil, err
 		}
 		if err := c.walk(ctx, client, config, ref.DriveID, item, selectedRoot, generation, result); err != nil {
@@ -427,7 +439,7 @@ func (c *Connector) FetchAllResult(
 				return result, err
 			}
 		}
-		if item.SelectedRootID != "" {
+		if item.SelectedRootID != "" && item.Ingested {
 			result.Items = append(result.Items, deletedFetchedItem(item))
 		}
 	}
@@ -641,9 +653,11 @@ func (c *Connector) queueRemoval(
 		); err != nil {
 			return err
 		}
-		if _, exists := queued[item.ExternalID]; !exists {
-			result.Items = append(result.Items, deletedFetchedItem(item))
-			queued[item.ExternalID] = struct{}{}
+		if item.Ingested {
+			if _, exists := queued[item.ExternalID]; !exists {
+				result.Items = append(result.Items, deletedFetchedItem(item))
+				queued[item.ExternalID] = struct{}{}
+			}
 		}
 	}
 	return nil

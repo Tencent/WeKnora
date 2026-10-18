@@ -278,6 +278,45 @@ func TestReconcileItemsReplaysLegacyUnacknowledgedDeletionOnce(t *testing.T) {
 	require.Empty(t, items)
 }
 
+func TestDeletedSelectedFileCanStillOpenAndFullSync(t *testing.T) {
+	_, ds, connector := newConnectorTestRepo(t)
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/me/drive":
+			fmt.Fprint(w, `{"id":"drive","name":"My Drive"}`)
+		case "/drives/drive/items/deleted-file":
+			http.NotFound(w, r)
+		case "/drives/drive/root/delta":
+			require.Equal(t, "latest", r.URL.Query().Get("token"))
+			fmt.Fprintf(w, `{"value":[],"@odata.deltaLink":%q}`, server.URL+"/delta/initial")
+		case "/delta/initial":
+			fmt.Fprintf(w, `{"value":[],"@odata.deltaLink":%q}`, server.URL+"/delta/next")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	connector.graphBase, connector.httpClient = server.URL, server.Client()
+	selected := encodeRef(resourceRef{DriveID: "drive", ItemID: "deleted-file"})
+	config := &types.DataSourceConfig{
+		Type: types.ConnectorTypeOneDrive, ResourceIDs: []string{selected},
+		Runtime: &types.DataSourceRuntime{
+			DataSourceID: ds.ID, TenantID: ds.TenantID, ConnectionVersion: ds.ConnectionVersion,
+			AccessToken: func(context.Context) (string, error) { return "token", nil },
+		},
+	}
+
+	ancestors, err := connector.ResolveResourceAncestors(context.Background(), config, config.ResourceIDs)
+	require.NoError(t, err)
+	require.Empty(t, ancestors)
+	result, err := connector.FetchAllResult(context.Background(), config, config.ResourceIDs)
+	require.NoError(t, err)
+	require.Empty(t, result.Items)
+	require.NotNil(t, result.NextCursor)
+}
+
 func TestConnectorSkipsUnsupportedAndOversizedFilesWithWarnings(t *testing.T) {
 	_, ds, connector := newConnectorTestRepo(t)
 	t.Setenv("MAX_FILE_SIZE_MB", "1")
