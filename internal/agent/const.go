@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
 	"github.com/Tencent/WeKnora/internal/browserskill"
+	webfetch "github.com/Tencent/WeKnora/internal/infrastructure/web_fetch"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
@@ -36,12 +37,19 @@ const (
 	defaultLLMStallTimeout = 120 * time.Second
 
 	// defaultToolExecTimeout is the default maximum time for a single tool execution.
-	// Prevents long-running tools (web_fetch, database_query) from hanging indefinitely.
+	// Prevents long-running tools (for example database_query) from hanging indefinitely.
 	defaultToolExecTimeout = 60 * time.Second
 	// shellExecToolTimeout is slightly longer than shell_exec's own hard
 	// 600-second command timeout so the tool can return a structured timeout
 	// result instead of being cancelled first by the generic agent wrapper.
 	shellExecToolTimeout = 10*time.Minute + 5*time.Second
+	// tryAgentToolTimeout is above the trial runner's own 4-minute limit so
+	// a slow trial still reports what the agent did before it was stopped.
+	tryAgentToolTimeout = 4*time.Minute + 30*time.Second
+	// webFetchToolSlack is how much longer the agent wrapper waits than the
+	// shared page-fetch budget. Same 5s headroom as shell_exec, so web_fetch can
+	// return its own timeout result instead of being cancelled first.
+	webFetchToolSlack = 5 * time.Second
 
 	// maxLLMRetries is the maximum number of retries for transient LLM errors.
 	maxLLMRetries = 2
@@ -91,8 +99,13 @@ func toolExecutionTimeout(toolName string, arguments ...string) time.Duration {
 			return browserskill.HumanStepTimeout
 		}
 	}
-	if toolName == "shell_exec" {
+	switch toolName {
+	case "shell_exec":
 		return shellExecToolTimeout
+	case "try_agent":
+		return tryAgentToolTimeout
+	case "web_fetch":
+		return webfetch.PageFetchTimeout() + webFetchToolSlack
 	}
 	return defaultToolExecTimeout
 }

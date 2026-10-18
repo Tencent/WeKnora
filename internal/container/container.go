@@ -37,6 +37,8 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/hitl"
+	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
@@ -177,8 +179,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewSystemSettingRepository))
 	must(container.Provide(repository.NewModelCatalogRepository))
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
+	must(container.Provide(neo4jRepo.NewGraphSearchRepository))
+	must(container.Provide(repository.NewGraphSearchEvidenceRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
+	must(container.Provide(repository.NewAgentPromptRepository))
+	must(container.Provide(repository.NewAgentRunSuspensionRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
 	must(container.Provide(repository.NewTenantSandboxConfigRepository))
 	must(container.Provide(repository.NewTenantSkillRepository))
@@ -237,6 +243,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewAuditLogService))
 	must(container.Provide(service.NewAuditLogRetentionRunner))
 	must(container.Provide(service.NewKnowledgeBaseService))
+	must(container.Provide(service.NewGraphSearchService))
 	must(container.Provide(service.NewOrganizationService))
 	must(container.Provide(service.NewKBShareService)) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
 	must(container.Provide(service.NewAgentShareService))
@@ -325,8 +332,24 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering event bus and agent service...")
 	must(container.Provide(event.NewEventBus))
 	must(container.Provide(service.NewSessionSandboxPinner))
-	must(container.Provide(func(cfg *config.Config, s interfaces.MCPToolApprovalService, rdb *redis.Client) *approval.Gate {
-		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, rdb)
+	must(container.Provide(func(
+		cfg *config.Config,
+		prompts interfaces.AgentPromptRepository,
+		suspensions interfaces.AgentRunSuspensionRepository,
+		rdb *redis.Client,
+	) *hitl.Broker {
+		opts := []hitl.Option{hitl.WithSuspensionStore(suspensions)}
+		if cfg != nil && cfg.Agent != nil {
+			opts = append(opts, hitl.WithSuspendExpiry(cfg.Agent.PromptExpiry()))
+		}
+		return hitl.NewBroker(prompts, rdb, opts...)
+	}))
+	must(container.Provide(service.NewSuspendedRunService))
+	must(container.Invoke(startAgentPromptReaper))
+	must(container.Provide(func(
+		cfg *config.Config, s interfaces.MCPToolApprovalService, broker *hitl.Broker,
+	) *approval.Gate {
+		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, broker)
 	}))
 	// Expose Gate as MCPApproval interface so AgentService and others can depend on the abstraction.
 	must(container.Provide(func(g *approval.Gate) approval.MCPApproval { return g }))
@@ -338,6 +361,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		cleaner.RegisterWithName("BrowserSkill", func() error { manager.Close(); return nil })
 		return manager, nil
 	}))
+	// Agent catalog operations dispatch into the router, which is built later
+	// and binds itself to this dispatcher.
+	must(container.Provide(operations.NewHandlerDispatcher))
+	// The assistant's agent trials run through the session service, which
+	// depends on the agent service; it is bound to the runner further down.
+	must(container.Provide(service.NewAgentTrialRunner))
 	must(container.Provide(service.NewAgentService))
 
 	// Session service (depends on agent service)
@@ -516,6 +545,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// block above — starting the reaper any earlier panics.
 	must(container.Invoke(startTenantSkillReaper))
 	logger.Debugf(ctx, "[Container] Tenant skill reaper registered")
+	must(container.Invoke(func(r *service.AgentTrialRunner, s interfaces.SessionService) { r.Bind(s) }))
 	must(container.Provide(func(
 		sessions interfaces.SessionRepository,
 		resolver sandbox.TenantSandboxResolver,
@@ -535,6 +565,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewTenantInvitationHandler))
 	must(container.Provide(handler.NewAuditLogHandler))
 	must(container.Provide(handler.NewKnowledgeBaseHandler))
+	must(container.Provide(handler.NewGraphSearchHandler))
 	must(container.Provide(handler.NewKnowledgeHandler))
 	must(container.Provide(handler.NewChunkHandler))
 	must(container.Provide(handler.NewFAQHandler))
@@ -564,6 +595,14 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		agents interfaces.AgentShareService,
 	) *handler.MCPServiceHandler {
 		return handler.NewMCPServiceHandler(mcpService, toolApprovals, gate, models, agents)
+	}))
+	must(container.Invoke(func(
+		sessions *session.Handler, mcp *handler.MCPServiceHandler,
+		broker *hitl.Broker, runs *service.SuspendedRunService, rewind *service.SessionRewindService,
+	) {
+		rewind.SetSuspendedRuns(runs)
+		sessions.SetSuspendedRuns(broker, runs)
+		mcp.SetRunResumer(sessions)
 	}))
 	must(container.Provide(handler.NewMCPCredentialsHandler))
 	must(container.Provide(handler.NewMCPOAuthHandler))
@@ -1732,14 +1771,7 @@ func initNeo4jClient() (neo4j.Driver, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Credentials come from the environment only; nothing is invented here. The
-	// Compose files keep carrying the Neo4j defaults. Memgraph ships without
-	// authentication, so for it empty credentials mean "connect unauthenticated"
-	// instead of an empty basic-auth login.
-	auth := neo4j.BasicAuth(username, password, "")
-	if engine == neo4jRepo.EngineMemgraph && username == "" && password == "" {
-		auth = neo4j.NoAuth()
-	}
+	auth := graphDatabaseAuth(engine, username, password)
 
 	// Retry configuration
 	maxRetries := 30                 // Max retry attempts
@@ -1755,7 +1787,7 @@ func initNeo4jClient() (neo4j.Driver, error) {
 			continue
 		}
 
-		err = driver.VerifyAuthentication(ctx, nil)
+		err = verifyGraphConnection(ctx, driver, engine)
 		if err == nil {
 			if attempt > 1 {
 				logger.Infof(ctx, "Successfully connected to %s after %d attempts", engine, attempt)
@@ -1763,12 +1795,39 @@ func initNeo4jClient() (neo4j.Driver, error) {
 			return driver, nil
 		}
 
-		logger.Warnf(ctx, "Failed to verify %s authentication (attempt %d/%d): %v", engine, attempt, maxRetries, err)
+		logger.Warnf(ctx, "Failed to verify %s connection (attempt %d/%d): %v", engine, attempt, maxRetries, err)
 		driver.Close(ctx)
 		time.Sleep(retryInterval)
 	}
 
 	return nil, fmt.Errorf("failed to connect to %s after %d attempts: %w", engine, maxRetries, err)
+}
+
+// graphDatabaseAuth preserves explicit credentials, including partial ones, so
+// a configuration error never silently downgrades to an unauthenticated login.
+func graphDatabaseAuth(engine neo4jRepo.GraphEngine, username, password string) neo4j.AuthToken {
+	if engine == neo4jRepo.EngineMemgraph && username == "" && password == "" {
+		return neo4j.NoAuth()
+	}
+	return neo4j.BasicAuth(username, password, "")
+}
+
+type graphConnectionVerifier interface {
+	VerifyAuthentication(context.Context, *neo4j.AuthToken) error
+	VerifyConnectivity(context.Context) error
+}
+
+func verifyGraphConnection(
+	ctx context.Context, driver graphConnectionVerifier, engine neo4jRepo.GraphEngine,
+) error {
+	if engine == neo4jRepo.EngineMemgraph {
+		// VerifyAuthentication is Neo4j-specific: it selects the "system"
+		// database for routing and can force re-authentication on pooled
+		// connections. Use Memgraph's supported connectivity check instead;
+		// opening the connection still authenticates with the driver's token.
+		return driver.VerifyConnectivity(ctx)
+	}
+	return driver.VerifyAuthentication(ctx, nil)
 }
 
 // graphDatabaseEngine resolves GRAPH_DATABASE_ENGINE. Unset means Neo4j, so an
@@ -2001,6 +2060,31 @@ func startForkSnapshotReaper(reaper *service.ForkSnapshotReaper, cleaner interfa
 		}
 	}()
 	cleaner.RegisterWithName("ForkSnapshotReaper", func() error {
+		close(stop)
+		return nil
+	})
+}
+
+// startAgentPromptReaper takes over prompts whose owner stopped renewing its
+// lease and suspended prompts past their expiry, so a crash never leaves a
+// prompt or its run open forever.
+func startAgentPromptReaper(runs *service.SuspendedRunService, cleaner interfaces.ResourceCleaner) {
+	stop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if _, err := runs.Reap(context.Background(), time.Now()); err != nil {
+					logger.Warnf(context.Background(), "[AgentPromptReaper] reap failed: %v", err)
+				}
+			case <-stop:
+				return
+			}
+		}
+	}()
+	cleaner.RegisterWithName("AgentPromptReaper", func() error {
 		close(stop)
 		return nil
 	})

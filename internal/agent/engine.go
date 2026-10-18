@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
@@ -43,12 +44,15 @@ type AgentEngine struct {
 	pinnedMCPServices    []*PinnedMCPServiceInfo // User @mentioned MCP services for this turn
 	pinnedSkills         []*PinnedSkillInfo      // User @mentioned skills for this turn
 	questionOrigin       *QuestionOriginInfo     // Source of a picked suggested question, if any
+	pageContext          *PageContextInfo        // Page the user has open, if any
+	assistantName        string                  // Workspace name for the assistant, if renamed
 	sessionID            string                  // Session ID for logging and event emission
 	systemPromptTemplate string                  // System prompt template (optional, uses default if empty)
 	memoryPrompt         string                  // Long-term memory envelope appended to the system prompt
 	skillsManager        *skills.Manager         // Skills manager for Progressive Disclosure (optional)
 	appConfig            *appconfig.Config       // Application config for prompt template resolution (optional)
 	imageDescriber       ImageDescriberFunc      // VLM function for describing images in tool results (optional)
+	imageDescribeSlots   chan struct{}           // Bounds VLM calls across parallel tool calls
 	tokenEstimator       *agenttoken.Estimator   // Token estimator for context window management, calibrated
 	rawEstimator         *agenttoken.Estimator   // Same tokenizer at scale 1, for measuring the calibration
 	compactor            *compaction.Compactor   // Summarizes older history to fit the context window (nil = disabled)
@@ -80,6 +84,13 @@ type AgentEngine struct {
 	allowSteerOverrun bool // one extra ReAct round after a loop-end inject past MaxIterations
 	steerOverruns     int  // how many times this turn has already used the extra round
 	workspaceLayout   sandbox.WorkspaceLayout
+	// suspendable lets a user prompt end the run so it can be resumed later;
+	// suspendRequest is saved with the run for that (see EnableSuspension).
+	suspendable    bool
+	suspendRequest []byte
+	// interactive: the client renders prompt cards and can answer them.
+	interactive bool
+	progress    turnProgress
 }
 
 // maxSteerOverruns caps loop-end injects past MaxIterations. One extra round
@@ -142,6 +153,18 @@ func NewAgentEngine(
 // user picked for this turn; nil clears it.
 func (e *AgentEngine) SetQuestionOrigin(origin *QuestionOriginInfo) {
 	e.questionOrigin = origin
+}
+
+// SetPageContext records the WeKnora page the user has open for this turn;
+// nil clears it.
+func (e *AgentEngine) SetPageContext(page *PageContextInfo) {
+	e.pageContext = page
+}
+
+// SetAssistantName records the name the workspace gave the assistant; empty
+// keeps the one in the system prompt.
+func (e *AgentEngine) SetAssistantName(name string) {
+	e.assistantName = name
 }
 
 // SetPinnedMentions sets per-turn @mention scope for MCP services and skills.
@@ -241,11 +264,28 @@ func (e *AgentEngine) SetAppConfig(cfg *appconfig.Config) {
 }
 
 // SetImageDescriber sets the VLM function for generating text descriptions of images
-// in tool results. When set, MCP tool result images are automatically analyzed and
-// their descriptions are appended to the tool message content.
-// This follows the same pattern as Handler.analyzeImageAttachments() in the handler layer.
+// in tool results. When set and the chat model cannot view images, tool result
+// images are described while their tool call runs and the descriptions are
+// appended to the tool message content.
 func (e *AgentEngine) SetImageDescriber(fn ImageDescriberFunc) {
 	e.imageDescriber = fn
+	e.imageDescribeSlots = make(chan struct{}, toolImageDescribeConcurrency)
+}
+
+// describeToolImages runs inside the tool call, so the UI keeps showing the
+// call as running while the vision model works and the description lands in
+// the tool result the user sees.
+func (e *AgentEngine) describeToolImages(ctx context.Context, result *types.ToolResult) {
+	if result == nil || !result.Success || len(result.Images) == 0 || e.imageDescriber == nil ||
+		(e.config != nil && e.config.ChatModelSupportsVision) {
+		return
+	}
+	if len(result.ImageDescriptions) != len(result.Images) {
+		result.ImageDescriptions = e.describeImages(ctx, result.Images, toolImagePrompts(result))
+	}
+	if result.Data != nil {
+		result.Data["image_descriptions"] = result.ImageDescriptions
+	}
 }
 
 // SetSkillsManager sets the skills manager for the engine
@@ -380,6 +420,7 @@ func (e *AgentEngine) Execute(
 	if len(imageURLs) > 0 {
 		imgs = imageURLs[0]
 	}
+	e.beginTurn(query, imgs, state)
 	messages := e.buildMessagesWithLLMContext(systemPrompt, query, sessionID, llmContext, imgs)
 	if e.toolRegistry != nil {
 		e.toolRegistry.RememberMCPHistory(messages)
@@ -669,7 +710,9 @@ loop:
 	// state.FinalAnswer to the generic "Sorry, I was unable to generate a
 	// complete answer." message, which then leaks to the UI as the final
 	// answer for a conversation the user deliberately stopped.
-	if !state.IsComplete && ctx.Err() == nil {
+	// A suspended run has not finished either; it resumes once the user
+	// answers, so no answer is synthesized for it.
+	if !state.IsComplete && ctx.Err() == nil && state.Suspended == nil {
 		e.handleMaxIterations(ctx, query, state, sessionID, messages)
 	}
 
@@ -1030,8 +1073,18 @@ func (e *AgentEngine) runReActIteration(
 	// Thought.
 
 	// 3. Act: Execute tool calls
-	e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID, assistantMessageID)
+	e.beginRound(step, response.ToolCalls)
+	suspended := e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID, assistantMessageID)
+	e.endRound()
 	toolCallCount = len(step.ToolCalls)
+	if suspended != nil {
+		// The blocked call and the ones after it have not run, so the round
+		// is not part of the transcript yet; it is completed on resume.
+		logger.Infof(ctx, "[Agent][Round-%d] Suspended waiting on prompt %s", round, suspended.PromptID)
+		state.Suspended = suspended
+		state.SuspendedStep = &step
+		return iterOutcomeBreak, nil
+	}
 
 	// 4. Observe: Add tool results to messages and write to context
 	state.RoundSteps = append(state.RoundSteps, step)
@@ -1065,38 +1118,77 @@ func (o iterOutcome) String() string {
 // Tool result image VLM description helpers
 // ---------------------------------------------------------------------------
 
-const toolImageAnalysisPrompt = "Describe the content of this image in detail. " +
-	"If it contains text, extract all readable text. " +
-	"If it contains charts or diagrams, describe the data and structure."
+const (
+	toolImageBriefPrompt = types.ImageReadBriefPrompt
+	toolImageFullPrompt  = types.ImageReadFullPrompt
+	toolImageFocusRunes  = types.ImageReadFocusRunes
+)
 
-// describeImages generates text descriptions for tool result images using the
-// configured imageDescriber (VLM). Each image is decoded from a data URI and
-// analyzed independently. Failures are logged and skipped gracefully.
-// This follows the same pattern as Handler.analyzeImageAttachments().
-func (e *AgentEngine) describeImages(ctx context.Context, imageDataURIs []string) []string {
-	if e.imageDescriber == nil {
-		return nil
+func toolImagePrompt(detail, focus string) string { return types.ImageReadPrompt(detail, focus) }
+func toolImagePrompts(result *types.ToolResult) []string {
+	prompt := toolImagePrompt(result.ImageDetail, result.ImageFocus)
+	prompts := make([]string, len(result.Images))
+	for i := range prompts {
+		prompts[i] = prompt
 	}
-	var descriptions []string
+	return prompts
+}
+
+const (
+	toolImageDescribeConcurrency = 4
+	toolImageDescribeTimeout     = 120 * time.Second
+)
+
+// describeImages asks the configured VLM to describe tool result images, a
+// few at a time, each under its own timeout so a slow image cannot starve the
+// rest. prompts is aligned with the images (nil means a brief description for
+// each). The result is aligned with the input; an image that could not be
+// described is left empty.
+func (e *AgentEngine) describeImages(ctx context.Context, imageDataURIs, prompts []string) []string {
+	descriptions := make([]string, len(imageDataURIs))
+	if e.imageDescriber == nil {
+		return descriptions
+	}
+	sem := e.imageDescribeSlots
+	if sem == nil {
+		sem = make(chan struct{}, toolImageDescribeConcurrency)
+	}
+	var wg sync.WaitGroup
 	for i, dataURI := range imageDataURIs {
+		if ctx.Err() == nil {
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+			}
+		}
 		if ctx.Err() != nil {
 			logger.Warnf(ctx, "[Agent] Context cancelled, skipping remaining %d tool result images", len(imageDataURIs)-i)
 			break
 		}
-		imgBytes, err := decodeDataURIBytes(dataURI)
-		if err != nil {
-			logger.Warnf(ctx, "[Agent] Failed to decode tool result image %d: %v", i, err)
-			continue
-		}
-		desc, err := e.imageDescriber(ctx, imgBytes, toolImageAnalysisPrompt)
-		if err != nil {
-			logger.Warnf(ctx, "[Agent] VLM analysis failed for tool result image %d: %v", i, err)
-			continue
-		}
-		if desc = strings.TrimSpace(desc); desc != "" {
-			descriptions = append(descriptions, desc)
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			imgBytes, err := decodeDataURIBytes(dataURI)
+			if err != nil {
+				logger.Warnf(ctx, "[Agent] Failed to decode tool result image %d: %v", i, err)
+				return
+			}
+			imageCtx, cancel := context.WithTimeout(ctx, toolImageDescribeTimeout)
+			defer cancel()
+			prompt := toolImageBriefPrompt
+			if i < len(prompts) {
+				prompt = prompts[i]
+			}
+			desc, err := e.imageDescriber(imageCtx, imgBytes, prompt)
+			if err != nil {
+				logger.Warnf(ctx, "[Agent] VLM analysis failed for tool result image %d: %v", i, err)
+				return
+			}
+			descriptions[i] = strings.TrimSpace(desc)
+		}()
 	}
+	wg.Wait()
 	return descriptions
 }
 

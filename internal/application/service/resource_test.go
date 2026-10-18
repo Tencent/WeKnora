@@ -246,3 +246,50 @@ func TestResourceCatalogRejectsUnsupportedPhysicalPath(t *testing.T) {
 	_, err := catalog.Register(context.Background(), 7, "https://example.com/a.png", interfaces.ResourceRegistration{})
 	require.ErrorContains(t, err, "unsupported provider")
 }
+
+// Register deduplicates by physical location only. Content is a second identity
+// the extractor needs: the same image pulled from two pages is written to two
+// paths, and only the payload hash can tell that it is one stored object.
+func TestResourceCatalogReuseByContentHashIsScopedToTenant(t *testing.T) {
+	catalog, _ := newResourceCatalogForTest(t)
+	ctx := context.Background()
+	ref, err := catalog.Register(ctx, 7, "local://7/exports/a.png", interfaces.ResourceRegistration{
+		Kind:        "image",
+		ContentHash: "hash-a",
+	})
+	require.NoError(t, err)
+
+	reused, ok, err := catalog.ReuseByContentHash(ctx, 7, "hash-a")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, ref, reused)
+
+	for label, tenantID := range map[string]uint64{"other tenant": 8, "zero tenant": 0} {
+		reused, ok, err = catalog.ReuseByContentHash(ctx, tenantID, "hash-a")
+		require.NoError(t, err, label)
+		require.Falsef(t, ok, "case %s", label)
+		require.Emptyf(t, reused, "case %s", label)
+	}
+
+	_, ok, err = catalog.ReuseByContentHash(ctx, 7, "hash-missing")
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+// A temporary resource is scratch storage that its owner may delete at any
+// time; aliasing a long-lived reference onto it would let that cleanup remove
+// bytes the reusable caller still serves.
+func TestResourceCatalogReuseByContentHashSkipsTemporaryResources(t *testing.T) {
+	catalog, _ := newResourceCatalogForTest(t)
+	ctx := context.Background()
+	_, err := catalog.Register(ctx, 7, "local://7/tmp/a.png", interfaces.ResourceRegistration{
+		Kind:        "image",
+		ContentHash: "hash-temp",
+		Temporary:   true,
+	})
+	require.NoError(t, err)
+
+	_, ok, err := catalog.ReuseByContentHash(ctx, 7, "hash-temp")
+	require.NoError(t, err)
+	require.False(t, ok)
+}

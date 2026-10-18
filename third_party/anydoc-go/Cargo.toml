@@ -27,6 +27,7 @@ cbindgen = "0.29"
 # document_to_markdown is crate-private in published anydoc. The build script
 # copies the pinned version above and re-exports that one function so we can
 # keep the official GFM serializer after rewriting asset images to External URLs.
+# It also raises anydoc's zip requirement to 9 for RUSTSEC-2026-0367/0368/0369.
 [patch.crates-io]
 anydoc = { path = "patched-anydoc" }
 

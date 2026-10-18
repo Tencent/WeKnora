@@ -77,6 +77,30 @@ func (s *suggestionKBShareService) CheckTenantKBPermission(
 	return types.OrgRoleViewer, s.allowed[kbID], nil
 }
 
+func (s *suggestionKBShareService) ListSharedKnowledgeBases(
+	_ context.Context,
+	_ uint64,
+	_ types.TenantRole,
+) ([]*types.SharedKnowledgeBaseInfo, error) {
+	var out []*types.SharedKnowledgeBaseInfo
+	for id := range s.allowed {
+		out = append(out, &types.SharedKnowledgeBaseInfo{KnowledgeBase: &types.KnowledgeBase{ID: id, TenantID: 2}})
+	}
+	return out, nil
+}
+
+func TestSharedSuggestionKnowledgeBases_OnlyForCallerOwnedAgents(t *testing.T) {
+	svc := &customAgentService{kbShareService: &suggestionKBShareService{allowed: map[string]bool{"shared-kb": true}}}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+
+	own := svc.sharedSuggestionKnowledgeBases(ctx, 1, &types.CustomAgent{ID: "agent", TenantID: 1})
+	require.Len(t, own, 1)
+	assert.Equal(t, "shared-kb", own[0].ID)
+
+	borrowed := svc.sharedSuggestionKnowledgeBases(ctx, 1, &types.CustomAgent{ID: "agent", TenantID: 2})
+	assert.Empty(t, borrowed, "a shared agent keeps its owner's scope")
+}
+
 func TestResolveSuggestionTagScopes_UsesSourceTenantForSharedKB(t *testing.T) {
 	const (
 		callerTenant = uint64(1)

@@ -87,13 +87,18 @@ func listDocumentsTool() mcp.Tool {
 func readDocumentTool() mcp.Tool {
 	return mcp.NewTool(types.MCPEndpointToolReadDocument,
 		mcp.WithDescription("Read a document's metadata and its text chunks in order. Page through long documents "+
-			"with offset and limit, or pass query to return only the chunks containing a phrase (with one chunk "+
-			"of context on each side)."),
+			"with offset and limit, or pass query to find chunks containing every whitespace-separated word, "+
+			"case-insensitively and in any order. Query mode returns at most 20 matches plus one chunk of "+
+			"context on each side, subject to the output size budget; limit does not apply. If truncated, "+
+			"continue with offset=next_offset from the response."),
 		mcp.WithString("knowledge_id", mcp.Required(),
 			mcp.Description("Document id from search results or list_documents")),
-		mcp.WithNumber("offset", mcp.Description("Chunk offset to start from, default 0")),
-		mcp.WithNumber("limit", mcp.Description("Number of chunks to return, default 20, max 100")),
-		mcp.WithString("query", mcp.Description("Optional case-insensitive phrase to find inside the document")),
+		mcp.WithNumber("offset", mcp.Description("0-based position in document reading order, default 0; "+
+			"use returned next_offset to continue")),
+		mcp.WithNumber("limit", mcp.Description("Chunks per page without query, default 20, max 100; "+
+			"ignored in query mode; output size budget may reduce the page")),
+		mcp.WithString("query", mcp.Description("Optional case-insensitive keywords split on whitespace; "+
+			"every word must occur in the chunk, in any order (not an exact phrase)")),
 		readOnlyEndpointAnnotations(),
 	)
 }

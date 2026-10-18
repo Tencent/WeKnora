@@ -32,6 +32,7 @@
 
       <!-- Strategy explanation panel -->
       <div v-if="currentStrategyInfo" class="strategy-info-panel">
+        <t-icon name="info-circle" class="strategy-info-icon" />
         <p>
           <strong>{{ currentStrategyInfo.label }}:</strong>
           {{ currentStrategyInfo.tooltip }}
@@ -460,15 +461,26 @@ const emitUpdate = () => {
 
 .strategy-info-panel {
   margin: 0 0 16px 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   padding: 10px 14px;
-  background: var(--td-bg-color-container-hover);
-  border-left: 3px solid var(--td-brand-color);
-  border-radius: 0 4px 4px 0;
+  background: var(--td-bg-color-secondarycontainer);
+  border-radius: var(--app-radius-md);
   font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   line-height: 1.5;
 
+  .strategy-info-icon {
+    flex-shrink: 0;
+    margin-top: 3px;
+    font-size: var(--app-text-base);
+    color: var(--td-brand-color);
+  }
+
   p {
+    flex: 1;
+    min-width: 0;
     margin: 0;
     word-break: break-word;
   }

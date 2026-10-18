@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -162,6 +164,44 @@ func (s *tenantService) UpdateTenant(ctx context.Context, tenant *types.Tenant) 
 
 	logger.Infof(ctx, "Tenant updated successfully, ID: %d", tenant.ID)
 	return tenant, nil
+}
+
+// UpdateTenantProfile persists only supplied fields. In particular, clearing a
+// description must not be skipped as a zero value or rewrite storage settings.
+func (
+	s *tenantService,
+) UpdateTenantProfile(
+	ctx context.Context,
+	id uint64,
+	name, description *string,
+) (
+	*types.Tenant,
+	error,
+) {
+	if id == 0 || (name == nil && description == nil) {
+		return nil, werrors.NewValidationError("workspace id and profile fields are required")
+	}
+	if name != nil {
+		value := strings.TrimSpace(*name)
+		if value == "" || utf8.RuneCountInString(value) > 128 {
+			return nil, werrors.NewValidationError("name must contain 1 to 128 characters")
+		}
+		name = &value
+	}
+	if description != nil {
+		value := strings.TrimSpace(*description)
+		if utf8.RuneCountInString(value) > 512 {
+			return nil, werrors.NewValidationError("description must contain at most 512 characters")
+		}
+		description = &value
+	}
+	if _, err := s.GetTenantByID(ctx, id); err != nil {
+		return nil, err
+	}
+	if err := s.repo.UpdateTenantProfile(ctx, id, name, description); err != nil {
+		return nil, err
+	}
+	return s.GetTenantByID(ctx, id)
 }
 
 // DeleteTenant removes a tenant by their ID

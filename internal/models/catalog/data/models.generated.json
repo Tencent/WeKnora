@@ -1033,11 +1033,114 @@
         "source": "https://docs.anthropic.com/en/docs/about-claude/models",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
         "thinking_levels": {
           "off": null,
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "claude-opus-5-5",
+        "name": "Claude Opus 5.5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+        "cost": {
+          "input": 4,
+          "output": 20,
+          "cache_read": 0.2,
+          "cache_write": 5
+        },
+        "source": "https://platform.claude.com/docs/en/models/overview",
+        "api": "anthropic-messages",
+        "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
+          "thinking_mode": "adaptive",
+          "supports_effort": true
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "claude-sonnet-5-5",
+        "name": "Claude Sonnet 5.5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+        "cost": {
+          "input": 2,
+          "output": 10,
+          "cache_read": 0.1,
+          "cache_write": 2.5
+        },
+        "source": "https://platform.claude.com/docs/en/models/overview",
+        "api": "anthropic-messages",
+        "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
+          "thinking_mode": "adaptive",
+          "supports_effort": true,
+          "thinking_off_type": "between_tools"
+        },
+        "thinking_levels": {
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "claude-haiku-5-5",
+        "name": "Claude Haiku 5.5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+        "cost": {
+          "input": 0.1,
+          "output": 0.5,
+          "cache_read": 0.01,
+          "cache_write": 0.125
+        },
+        "source": "https://platform.claude.com/docs/en/models/overview",
+        "api": "anthropic-messages",
+        "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
+          "thinking_mode": "adaptive",
+          "supports_effort": true
+        },
+        "thinking_levels": {
           "minimal": "low",
           "low": "low",
           "medium": "medium",
@@ -1065,6 +1168,8 @@
         "source": "https://platform.claude.com/docs/en/build-with-claude/thinking-troubleshooting#supported-models",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -1096,6 +1201,8 @@
         "source": "https://docs.anthropic.com/en/docs/about-claude/models",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -1127,6 +1234,8 @@
         "source": "https://docs.anthropic.com/en/docs/about-claude/models",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -1159,6 +1268,8 @@
         "source": "https://platform.claude.com/docs/en/build-with-claude/thinking-troubleshooting#supported-models",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -1190,6 +1301,8 @@
         "source": "https://platform.claude.com/docs/en/build-with-claude/thinking-troubleshooting#supported-models",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -2071,6 +2184,75 @@
           "extra_body": {
             "add_special_tokens": true
           }
+        }
+      },
+      {
+        "id": "tencent/WeMM-Embedding-2B",
+        "match": "*/WeMM-Embedding-2B",
+        "type": "Embedding",
+        "name": "WeMM-Embedding-2B",
+        "aliases": [
+          "WeMM-Embedding-2B"
+        ],
+        "input": [
+          "text",
+          "image"
+        ],
+        "dimension": 2048,
+        "source": "https://huggingface.co/tencent/WeMM-Embedding-2B",
+        "compat": {
+          "api": "openai-embeddings",
+          "image_format": "messages",
+          "text_as_messages": true,
+          "batch_messages": true,
+          "accepts_truncate_prompt_tokens": false,
+          "max_image_batch_size": 5
+        }
+      },
+      {
+        "id": "tencent/WeMM-Embedding-4B",
+        "match": "*/WeMM-Embedding-4B",
+        "type": "Embedding",
+        "name": "WeMM-Embedding-4B",
+        "aliases": [
+          "WeMM-Embedding-4B"
+        ],
+        "input": [
+          "text",
+          "image"
+        ],
+        "dimension": 2560,
+        "source": "https://huggingface.co/tencent/WeMM-Embedding-4B",
+        "compat": {
+          "api": "openai-embeddings",
+          "image_format": "messages",
+          "text_as_messages": true,
+          "batch_messages": true,
+          "accepts_truncate_prompt_tokens": false,
+          "max_image_batch_size": 5
+        }
+      },
+      {
+        "id": "tencent/WeMM-Embedding-9B",
+        "match": "*/WeMM-Embedding-9B",
+        "type": "Embedding",
+        "name": "WeMM-Embedding-9B",
+        "aliases": [
+          "WeMM-Embedding-9B"
+        ],
+        "input": [
+          "text",
+          "image"
+        ],
+        "dimension": 4096,
+        "source": "https://huggingface.co/tencent/WeMM-Embedding-9B",
+        "compat": {
+          "api": "openai-embeddings",
+          "image_format": "messages",
+          "text_as_messages": true,
+          "batch_messages": true,
+          "accepts_truncate_prompt_tokens": false,
+          "max_image_batch_size": 5
         }
       }
     ],
@@ -5976,6 +6158,38 @@
         "name": "GLM-ASR-2512 (at most 30 s per file)",
         "type": "ASR",
         "source": "https://docs.bigmodel.cn/api-reference/模型-api/语音转文本"
+      }
+    ],
+    "cohere": [
+      {
+        "id": "rerank-v4.0-pro",
+        "name": "rerank-v4.0-pro",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 32768,
+        "source": "https://docs.cohere.com/docs/models#rerank"
+      },
+      {
+        "id": "rerank-v4.0-fast",
+        "name": "rerank-v4.0-fast",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 32768,
+        "source": "https://docs.cohere.com/docs/models#rerank"
+      },
+      {
+        "id": "rerank-v3.5",
+        "name": "rerank-v3.5",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 4096,
+        "source": "https://docs.cohere.com/docs/models#rerank"
       }
     ]
   }

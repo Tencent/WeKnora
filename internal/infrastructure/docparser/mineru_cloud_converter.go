@@ -376,7 +376,7 @@ func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, []byte, err
 		return "", nil, nil, fmt.Errorf("download zip status %d", resp.StatusCode)
 	}
 
-	zipData, err := io.ReadAll(resp.Body)
+	zipData, err := readResultPackage(resp.Body, maxResultPackageBytes)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("read zip body: %w", err)
 	}
@@ -390,6 +390,13 @@ func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, []byte, err
 // extractMarkdownZip reads the shallowest .md file of a MinerU result package
 // and the images it references, via markdown or inline HTML <img> syntax.
 func extractMarkdownZip(zipData []byte, logLabel string) (string, []types.ImageRef, error) {
+	return extractMarkdownZipBounded(zipData, logLabel, maxZipImagesTotalBytes)
+}
+
+// extractMarkdownZipBounded is extractMarkdownZip with the accumulated-image
+// budget as a parameter, so a test can exercise the limit without materialising
+// the production figure.
+func extractMarkdownZipBounded(zipData []byte, logLabel string, maxImages int64) (string, []types.ImageRef, error) {
 	zr, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
 		return "", nil, fmt.Errorf("open zip: %w", err)
@@ -424,6 +431,10 @@ func extractMarkdownZip(zipData []byte, logLabel string) (string, []types.ImageR
 
 	// Extract referenced images
 	var imageRefs []types.ImageRef
+	// Every image below is kept in memory until the caller hands the slice on,
+	// so the package needs a total budget as well as a per-entry cap: a package
+	// of thousands of small entries expands without ever tripping the latter.
+	var imageBytes int64
 	seen := map[string]bool{}
 	for _, imgPath := range extractImageRefsFromContent(mdText) {
 		if strings.HasPrefix(imgPath, "http://") || strings.HasPrefix(imgPath, "https://") || strings.HasPrefix(imgPath, "data:") {
@@ -445,6 +456,11 @@ func extractMarkdownZip(zipData []byte, logLabel string) (string, []types.ImageR
 			logger.Errorf(context.Background(), "[%s] failed to read zip image %s: %v", logLabel, imgPath, err)
 			continue
 		}
+		if imageBytes+int64(len(imgData)) > maxImages {
+			return "", nil, fmt.Errorf("%w: images in %q exceed %d bytes",
+				errResultPackageTooLarge, logLabel, maxImages)
+		}
+		imageBytes += int64(len(imgData))
 
 		ext := strings.ToLower(filepath.Ext(resolved.Name))
 		if ext == "" {
@@ -485,26 +501,19 @@ func resolveInZip(imgPath, mdDir string, entries map[string]*zip.File) *zip.File
 	return nil
 }
 
+// readZipEntry reads a text entry (the package markdown) under the per-entry cap.
 func readZipEntry(f *zip.File) (string, error) {
-	rc, err := f.Open()
-	if err != nil {
-		return "", err
-	}
-	defer rc.Close()
-	data, err := io.ReadAll(rc)
+	data, err := readZipEntryCapped(f, maxZipEntryBytes)
 	if err != nil {
 		return "", err
 	}
 	return string(data), nil
 }
 
+// readZipEntryBytes reads a binary entry (an extracted image) under the
+// per-entry cap.
 func readZipEntryBytes(f *zip.File) ([]byte, error) {
-	rc, err := f.Open()
-	if err != nil {
-		return nil, err
-	}
-	defer rc.Close()
-	return io.ReadAll(rc)
+	return readZipEntryCapped(f, maxZipEntryBytes)
 }
 
 // PingMinerUCloud checks if the MinerU Cloud API is reachable with the given API key.

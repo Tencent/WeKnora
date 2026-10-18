@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -23,11 +24,38 @@ import (
 )
 
 const (
-	fetchTimeout         = 60 * time.Second
-	pipelineFetchTimeout = 15 * time.Second
-	maxBodySize          = 100 * 1024
-	maxAgentBodySize     = 2 * 1024 * 1024
+	// defaultPageFetchTimeout is the agent web_fetch page budget when
+	// WEKNORA_WEB_FETCH_TIMEOUT is empty, invalid, or not positive. Three
+	// minutes covers a slow browser render plus HTTP fallback: a 150s cap is
+	// still shorter than the 150036ms success reported for this timeout.
+	defaultPageFetchTimeout = 3 * time.Minute
+	pipelineFetchTimeout    = 15 * time.Second
+	maxBodySize             = 100 * 1024
+	maxAgentBodySize        = 2 * 1024 * 1024
 )
+
+// PageFetchTimeout is the shared budget for one agent web_fetch page read.
+// The HTTP client, the fetch context, and chromedp all use this value.
+// Chromedp's deadline is a child of the fetch context, so the budgets do not add.
+//
+// WEKNORA_WEB_FETCH_TIMEOUT accepts a Go duration (150s, 3m) or a bare positive
+// number of seconds (180), the same pattern as WEKNORA_AGENT_LLM_TIMEOUT.
+// Empty, invalid, and non-positive values use defaultPageFetchTimeout.
+func PageFetchTimeout() time.Duration {
+	value := strings.TrimSpace(os.Getenv("WEKNORA_WEB_FETCH_TIMEOUT"))
+	if value == "" {
+		return defaultPageFetchTimeout
+	}
+	timeout, err := time.ParseDuration(value)
+	if err != nil {
+		// Bare number of seconds, for example "180".
+		timeout, err = time.ParseDuration(value + "s")
+	}
+	if err != nil || timeout <= 0 {
+		return defaultPageFetchTimeout
+	}
+	return timeout
+}
 
 // ErrorCode identifies the stage and class of a fetch failure.
 type ErrorCode string
@@ -116,7 +144,7 @@ type httpFetchResult struct {
 
 // NewFetcher creates a production fetcher with DNS and redirect SSRF guards.
 func NewFetcher() *Fetcher {
-	f := newFetcher(fetchTimeout, renderWithChromium)
+	f := newFetcher(PageFetchTimeout(), renderWithChromium)
 	f.markdown = true
 	f.maxBodySize = maxAgentBodySize
 	return f
@@ -350,7 +378,9 @@ func renderWithChromium(ctx context.Context, target pinnedTarget) (string, error
 	defer cancelAllocator()
 	browserCtx, cancelBrowser := chromedp.NewContext(allocatorCtx)
 	defer cancelBrowser()
-	browserCtx, cancelTimeout := context.WithTimeout(browserCtx, fetchTimeout)
+	// Child of the fetch context: a full PageFetchTimeout here cannot outlive
+	// the parent budget, so HTTP and chromedp share one deadline instead of stacking.
+	browserCtx, cancelTimeout := context.WithTimeout(browserCtx, PageFetchTimeout())
 	defer cancelTimeout()
 	var html string
 	if err := chromedp.Run(browserCtx,
