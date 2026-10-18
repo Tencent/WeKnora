@@ -14,6 +14,10 @@ test('refreshes data source controls after assistant changes and stops on unmoun
     'tdesign-vue-next': { MessagePlugin: { error: assert.fail } },
     '@/stores/auth': { useAuthStore: () => ({ hasRole: () => true }) },
     '@/utils/cronHumanize': {},
+    // DataSourceSettings gained these two imports in #4427; the fixture has to
+    // provide them or the component cannot be evaluated at all.
+    '@/composables/useConnectorLabel': { useConnectorLabel: () => ({ connectorLabel: (type: string) => type }) },
+    '@/utils/syncError': { formatSyncErrorSummary: () => '' },
     '@/api/datasource': { listDataSources },
   }, { kbId: 'kb' })
   await flush()
