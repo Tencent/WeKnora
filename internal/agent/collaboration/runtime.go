@@ -62,7 +62,7 @@ func (r *Runtime) Spawn(ctx context.Context, s Scope, key, name, agentID, config
 		if g.Status != "active" {
 			return ErrClosed
 		}
-		if len(g.Members) >= 16 {
+		if currentTurnMemberCount(g) >= 16 {
 			return errors.New("maximum 16 child agents per task")
 		}
 		if _, err := member(g, name); err == nil {
@@ -133,6 +133,10 @@ func (r *Runtime) Send(
 			return err
 		}
 		if followup && !active(run) {
+			if m.Inherited && currentTurnMemberCount(g) >= 16 {
+				return errors.New("maximum 16 child agents per task")
+			}
+			m.Inherited = false
 			m.Runs = append(m.Runs, &Run{ID: id, State: "queued", Query: query})
 		} else {
 			g.NextSequence++
@@ -602,4 +606,14 @@ func (r *Runtime) CheckOwner(ctx context.Context, w Work) error {
 		return ErrConflict
 	}
 	return nil
+}
+
+func currentTurnMemberCount(g *Group) int {
+	count := 0
+	for _, m := range g.Members {
+		if !m.Inherited {
+			count++
+		}
+	}
+	return count
 }

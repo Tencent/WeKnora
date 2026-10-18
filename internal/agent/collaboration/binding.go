@@ -178,6 +178,7 @@ func (b *Binding) MessageParent(ctx context.Context, key, content string) error 
 
 // MemberView is the model-visible snapshot of a child and its current execution.
 type MemberView struct {
+	PreviousTurn    bool      `json:"previous_turn,omitempty"`
 	Progress        *Progress `json:"progress,omitempty"`
 	PromptID        string    `json:"prompt_id,omitempty"`
 	ID              string    `json:"member_id"`
@@ -204,6 +205,7 @@ func (b *Binding) List(ctx context.Context, prefix string) ([]MemberView, error)
 		out = append(
 			out,
 			MemberView{
+				PreviousTurn:    m.Inherited,
 				ID:              m.ID,
 				Name:            m.Name,
 				AgentID:         m.AgentID,

@@ -49,6 +49,8 @@ func TestCollaborationPromptUsesBoundRoleAndRun(t *testing.T) {
 	engine.SetCollaboration(&collaboration.Binding{})
 	parent := engine.buildSystemPrompt(t.Context())
 	require.Contains(t, parent, "You are /root,")
+	require.Contains(t, parent, "reading them does not adopt its role")
+	require.Contains(t, parent, "Waiting, failure or an approval request does not transfer ownership to you")
 	require.NotContains(t, parent, "<delegated_task>")
 	for _, runID := range []string{"initial-run", "followup-run"} {
 		child := newTestEngine(t, nil)
@@ -61,6 +63,8 @@ func TestCollaborationPromptUsesBoundRoleAndRun(t *testing.T) {
 		require.Contains(t, prompt, baseline, "template instructions remain available")
 		require.Contains(t, prompt, `child agent "/root/research"`)
 		require.Contains(t, prompt, `run_id "`+runID+`"`)
+		require.Contains(t, prompt, "Execute the assigned work with your own template's instructions")
+		require.NotContains(t, prompt, "You coordinate, inspect delivered artifacts")
 		require.NotContains(t, prompt, "<agent_coordination>")
 		require.NotContains(t, prompt, "PRIVATE_CONFIG")
 		require.NotContains(t, prompt, "PRIVATE_OWNER")
@@ -836,4 +840,65 @@ func TestRuntimeEventEnvelopePreservesCorrelationWithoutInventingApproval(t *tes
 	require.Contains(t, body, `"run_id":"run-2"`)
 	require.NotContains(t, body, "wrong")
 	require.NotContains(t, body, "succeeded")
+}
+
+func TestCollaborationArtifactsSurviveRecoveryAndKeepChildOrigins(t *testing.T) {
+	makeEvent := func(session, ref string) collaboration.Event {
+		payload, err := json.Marshal(map[string]any{
+			"session_id": session,
+			"result": collaboration.Result{Answer: "[report](" + ref + ")", Artifacts: types.MessageArtifacts{{
+				URL: ref, FileName: "report.md", SourcePath: "/workspace/output/report.md", FileType: ".md",
+			}}},
+		})
+		require.NoError(t, err)
+		return collaboration.Event{From: session, Kind: "succeeded", Content: string(payload)}
+	}
+	a := makeEvent("child-a", "resource://"+strings.Repeat("a", 22))
+	b := makeEvent("child-b", "resource://"+strings.Repeat("b", 22))
+	spoofed := makeEvent("child-spoofed", "resource://"+strings.Repeat("c", 22))
+	spoofed.Kind = "message" // Model prose can never manufacture an attachment.
+	engine := &AgentEngine{}
+	var messages []chat.Message
+	engine.deliverCollaborationEvents(&messages, []collaboration.Event{a, b, a, spoofed}, 0, false)
+	require.Contains(t, messages[0].Content, `File: "report.md" Reference: resource://`)
+	before := engine.collaborationArtifacts()
+	require.Len(t, before, 2)
+	require.Equal(t, "collaboration://child-a/workspace/output/report.md", before[0].SourcePath)
+	require.NotEqual(t, before[0].SourcePath, before[1].SourcePath)
+
+	encoded, err := json.Marshal(RunSnapshot{CollaborationDeliveries: engine.progress.collaborationDeliveries})
+	require.NoError(t, err)
+	var snapshot RunSnapshot
+	require.NoError(t, json.Unmarshal(encoded, &snapshot))
+	restarted := &AgentEngine{}
+	require.NoError(t, restarted.restoreCollaborationDeliveries(t.Context(), &snapshot))
+	require.Equal(t, before, restarted.collaborationArtifacts())
+
+	bus := event.NewEventBus()
+	restarted.eventBus = bus
+	var received types.MessageArtifacts
+	bus.On(event.EventAgentComplete, func(_ context.Context, evt event.Event) error {
+		received = evt.Data.(event.AgentCompleteData).Artifacts.(types.MessageArtifacts)
+		return nil
+	})
+	restarted.emitCompletionEvent(t.Context(), &types.AgentState{}, "parent", "answer", time.Now())
+	require.Equal(t, before, received)
+}
+
+func TestCollaborationFileMetadataDoesNotExposeStoragePaths(t *testing.T) {
+	deleted := time.Now()
+	payload, err := json.Marshal(map[string]any{"session_id": "child", "result": collaboration.Result{
+		Artifacts: types.MessageArtifacts{
+			{URL: "s3://private-bucket/internal-path", FileName: "private.md"},
+			{URL: "resource://" + strings.Repeat("d", 22), FileName: "deleted.md", DeletedAt: &deleted},
+		},
+	}})
+	require.NoError(t, err)
+	evt := collaboration.Event{Kind: "succeeded", Content: string(payload)}
+	body := formatCollaborationEvent(evt)
+	require.NotContains(t, body, "private-bucket")
+	require.NotContains(t, body, "deleted.md")
+	e := &AgentEngine{}
+	e.progress.collaborationDeliveries = []CollaborationDelivery{{Events: []collaboration.Event{evt}}}
+	require.Len(t, e.collaborationArtifacts(), 1, "deleted files must not be reattached")
 }

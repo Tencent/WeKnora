@@ -433,7 +433,7 @@
                   :tool-call-id="edit.tool_call_id" />
               </div>
               <div v-if="answerFullyRendered && event.done && event.content && event.content.trim()"
-                class="answer-toolbar">
+                class="answer-toolbar" :class="{ 'answer-toolbar--persistent': hasArtifacts || artifactsCollecting }">
                 <t-tooltip v-if="canFork" :content="forkTooltip">
                   <t-button size="small" variant="outline" shape="round" @click.stop="emitFork">
                     <ChatActionIcon name="git-branch" />
@@ -467,16 +467,15 @@
                   :title="$t('agent.addToKnowledgeBase')">
                   <ChatActionIcon name="bookmark-add" />
                 </t-button>
-                <!-- Skill artifact download: only shown when the persisted
-                     assistant message recorded any generated files. Agent
-                     mode is the primary path for skills, so this is where
-                     the button is most likely to appear. -->
-                <span v-if="!embeddedMode && (hasArtifacts || artifactsCollecting)" class="answer-toolbar__artifact"
+                <!-- Includes files delivered by child agents. Embedded assistants
+                     use the same entry and open the artifact drawer. -->
+                <span v-if="hasArtifacts || artifactsCollecting" class="answer-toolbar__artifact"
                   :class="{ 'is-collecting': artifactButtonCollecting, 'is-arrived': artifactArrived }"
                   @animationend="onArtifactArriveEnd">
                   <t-button size="small" variant="outline" shape="round"
                     :disabled="artifactButtonCollecting"
                     :title="hasArtifacts ? $t('agent.artifactDrawer.buttonTitle') : $t('agent.artifactDrawer.collecting')"
+                    :aria-label="hasArtifacts ? $t('agent.artifactDrawer.buttonTitle') : $t('agent.artifactDrawer.collecting')"
                     @click.stop="openArtifactDrawer()">
                     <t-icon v-if="artifactButtonCollecting" name="loading" class="answer-toolbar__artifact-spinner" />
                     <ChatActionIcon v-else name="folder" />
@@ -679,7 +678,7 @@
     </template>
   </t-drawer>
   <ChatArtifactsDrawer
-    v-if="hasArtifacts && embeddedMode && sessionIdForArtifacts && messageIdForArtifacts"
+    v-if="hasArtifacts && useArtifactDrawer && sessionIdForArtifacts && messageIdForArtifacts"
     v-model:visible="showArtifactDrawer"
     :session-id="sessionIdForArtifacts"
     :message-id="messageIdForArtifacts"
@@ -745,6 +744,7 @@ import {
   artifactIndexFromEventTarget,
   hydrateArtifactImages,
   renderArtifactReference,
+  installArtifactLinkRenderer,
 } from '@/utils/sandboxArtifactRefs';
 import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
@@ -1080,6 +1080,7 @@ const props = defineProps<{
   sessionId?: string;
   userQuery?: string;
   embeddedMode?: boolean;
+  artifactsInDrawer?: boolean;
   embedChannelId?: string;
   embedToken?: string;
   embedSessionSig?: string;
@@ -1154,9 +1155,12 @@ const protectedFileAccess = computed<ProtectedFileAccessContext | undefined>(() 
 // -----------------------------------------------------------------------------
 // Same contract as botmsg.vue: only render the button when the persisted
 // assistant message actually recorded files, then open the sandbox panel's
-// artifacts tab (or ChatArtifactsDrawer in embedded mode).
+// artifacts tab, or a session-local drawer for embedded/child conversations.
 const showArtifactDrawer = ref(false);
 const sandboxPanel = useChatSandboxPanel();
+// A child inherits the parent's injection, but that panel belongs to a different
+// session. Use the same routing condition for opening and rendering the drawer.
+const useArtifactDrawer = computed(() => props.artifactsInDrawer || props.embeddedMode || !sandboxPanel);
 const artifactList = computed(() => {
   const list = ((props.session?.artifacts as any[]) || []);
   return list.map((a, i) => ({ index: i, ...a }));
@@ -1180,7 +1184,7 @@ const messageIdForArtifacts = computed(() =>
 const artifactPreviewIndex = ref<number | null>(null);
 function openArtifactDrawer(previewIndex: number | null = null) {
   if (!hasArtifacts.value) return;
-  if (sandboxPanel && !props.embeddedMode) {
+  if (sandboxPanel && !useArtifactDrawer.value) {
     if (previewIndex == null) {
       sandboxPanel.toggleArtifacts(messageIdForArtifacts.value);
     } else {
@@ -2669,6 +2673,13 @@ agentRenderer.image = function agentImageRenderer(token) {
   if (artifactHtml !== null) return artifactHtml;
   return defaultImageRenderer.call(this, token);
 };
+
+installArtifactLinkRenderer(agentRenderer, () => ({
+  artifacts: artifactList.value,
+  labels: artifactRefLabels.value,
+  context: artifactRefContext.value,
+  streaming: !isSegmentDone.value,
+}));
 
 const hasCachedMermaidSvg = (cached: CachedMermaidSvgHtml): boolean => {
   if (!cached) return false;

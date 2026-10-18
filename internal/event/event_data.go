@@ -139,6 +139,9 @@ type AgentQueryData struct {
 
 // AgentCompleteData represents agent completion event data
 type AgentCompleteData struct {
+	// Artifacts contains runtime-delivered child files (types.MessageArtifacts).
+	// Internal only: stream handlers publish sanitized metadata after persistence.
+	Artifacts       interface{}            `json:"-"`
 	SessionID       string                 `json:"session_id"`
 	TotalSteps      int                    `json:"total_steps"`
 	FinalAnswer     string                 `json:"final_answer"`

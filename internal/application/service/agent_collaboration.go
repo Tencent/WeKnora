@@ -27,20 +27,21 @@ import (
 // resolved its dependency on AgentService. No request context or credentials
 // survive in the work record; workers reauthorize the user and membership.
 type AgentCollaboration struct {
-	Runtime      *collaboration.Runtime
-	db           *gorm.DB
-	agents       interfaces.CustomAgentService
-	messages     interfaces.MessageService
-	users        interfaces.UserService
-	members      interfaces.TenantMemberService
-	tenants      interfaces.TenantService
-	sessions     interfaces.SessionService
-	broker       *hitl.Broker
-	gate         approval.BuiltinApproval
-	streams      interfaces.StreamManager
-	ParentSteer  func(context.Context, *types.Session, *types.Message) types.SteerSink
-	ParentEvents func(context.Context, *types.Session, *types.Message, *event.EventBus) func(context.Context) error
-	ChildEvents  func(context.Context, *types.Session, *types.Message, *event.EventBus) func(context.Context) error
+	artifactFiles func(context.Context, *collaboration.Binding, string) tools.ArtifactFileSource
+	Runtime       *collaboration.Runtime
+	db            *gorm.DB
+	agents        interfaces.CustomAgentService
+	messages      interfaces.MessageService
+	users         interfaces.UserService
+	members       interfaces.TenantMemberService
+	tenants       interfaces.TenantService
+	sessions      interfaces.SessionService
+	broker        *hitl.Broker
+	gate          approval.BuiltinApproval
+	streams       interfaces.StreamManager
+	ParentSteer   func(context.Context, *types.Session, *types.Message) types.SteerSink
+	ParentEvents  func(context.Context, *types.Session, *types.Message, *event.EventBus) func(context.Context) error
+	ChildEvents   func(context.Context, *types.Session, *types.Message, *event.EventBus) func(context.Context) error
 }
 
 // NewAgentCollaboration constructs the service and its durable execution runtime.
@@ -119,6 +120,17 @@ func (s *AgentCollaboration) attach(
 		}
 	}
 	engine.SetCollaboration(b)
+	if s.artifactFiles != nil {
+		if source := s.artifactFiles(ctx, b, sessionID); source != nil {
+			if existing, err := registry.GetTool(tools.ToolReadFile); err == nil {
+				if reader, ok := existing.(*tools.ReadFileTool); ok {
+					reader.WithArtifacts(source)
+				}
+			} else {
+				registry.RegisterTool(tools.NewReadFileTool(nil).WithArtifacts(source))
+			}
+		}
+	}
 	s.replayStatus(ctx, b)
 	for _, tool := range tools.NewCollaborationTools(b,
 		func(ctx context.Context,
@@ -512,6 +524,7 @@ func (s *AgentCollaboration) run(ctx context.Context, w collaboration.Work) (col
 		_ = s.broker.Suspensions().Delete(persistCtx, answer.ID, resume.Prompt.ID)
 	}
 	result.Answer = answer.Content
+	result.Artifacts = answer.Artifacts.Live()
 	if n := len(answer.AgentSteps); n > 0 {
 		result.Truncated = answer.AgentSteps[n-1].Truncated
 	}

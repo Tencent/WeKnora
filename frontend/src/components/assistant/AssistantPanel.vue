@@ -724,13 +724,13 @@ onUnmounted(() => {
 
 <style lang="less">
 html.has-assistant-dock {
-  .t-drawer:not(.t-drawer--attach),
+  .t-drawer:not(.t-drawer--attach):not(.chat-artifacts-drawer),
   .t-dialog__ctx--fixed .t-dialog__mask,
   .t-dialog__ctx--fixed .t-dialog__wrap {
     width: calc(100% - var(--assistant-dock-width));
   }
 
-  .t-drawer--right:not(.t-drawer--attach) {
+  .t-drawer--right:not(.t-drawer--attach):not(.chat-artifacts-drawer) {
     right: var(--assistant-dock-width);
   }
 }

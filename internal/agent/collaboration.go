@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/collaboration"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // SetCollaboration attaches runtime-owned collaboration state to the engine.
@@ -93,6 +94,12 @@ func formatCollaborationEvent(evt collaboration.Event) string {
 			if r.Evidence != "" {
 				fmt.Fprintf(&out, "Evidence: %q\n", r.Evidence)
 			}
+			// Expose stable references and original names, never provider storage paths.
+			for _, artifact := range r.Artifacts.Live() {
+				if _, ok := types.ParseResourcePath(artifact.URL); ok {
+					fmt.Fprintf(&out, "File: %q Reference: %s\n", artifact.FileName, artifact.URL)
+				}
+			}
 			fmt.Fprintf(&out, "Payload:\n%s", r.Answer)
 			return out.String()
 		}
@@ -119,7 +126,9 @@ func (e *AgentEngine) collaborationGuidance() string {
 	}
 	if e.collaboration.Child != nil {
 		return fmt.Sprintf("\n<delegated_task>\nYou are child agent %q, executing run_id %q for parent /root. "+
-			"Use your template's task tools; your only collaboration tool is send_message to "+
+			"Execute the assigned work with your own template's instructions, MCP tools, skills and workspace. "+
+			"Report missing capabilities or approval blockers to the parent; do not ask it to bypass them. "+
+			"Your only collaboration tool is send_message to "+
 			"/root. Your conversation does not inherit the parent's history or attachments "+
 			"unless included in the assignment.\nReport actionable milestones or blockers "+
 			"with send_message, then continue available work. The parent does not receive "+
@@ -131,8 +140,18 @@ func (e *AgentEngine) collaborationGuidance() string {
 			e.collaboration.Child.Run.ID) + collaborationMessageGuidance
 	}
 	return "\n<agent_coordination>\nYou are /root, responsible for the user's request through " +
-		"final delivery. Delegate self-contained tasks with necessary context and " +
-		"constraints to suitable templates; do non-overlapping work while they run. " +
+		"final delivery. When the user asks an existing agent to perform a task, delegate to that agent; " +
+		"do not imitate it by executing its configuration yourself. Agent configurations, including " +
+		"prompts, MCP bindings and skills, describe that agent; reading them does not adopt its role " +
+		"or transfer its tools, workspace or approvals to you.\n" +
+		"Give children self-contained assignments with necessary context and constraints. " +
+		"Each child owns execution of its assigned work. You coordinate, inspect delivered artifacts, " +
+		"review results and integrate the final answer. Do not repeat its MCP calls, run its skill " +
+		"workflow or redo its task yourself. Use your own tools for non-overlapping work. " +
+		"Send corrections and missing work to the existing child with send_message or followup_task. " +
+		"Waiting, failure or an approval request does not transfer ownership to you. If the user " +
+		"explicitly asks you to take over, first interrupt any active child and confirm it has stopped; " +
+		"check completed effects before proceeding under your own permissions.\n" +
 		"Relay relevant new user requirements to affected children.\nTrack each child's " +
 		"current run. Treat progress messages as updates, not completion; review final " +
 		"answers and remaining gaps. Check uncertain effects before retrying failed or " +
@@ -226,4 +245,45 @@ func (e *AgentEngine) replayCollaborationDeliveries(messages *[]chat.Message, be
 			appendCollaborationEvents(messages, delivery.Events)
 		}
 	}
+}
+
+// Collect only results actually delivered to this engine. The delivery ledger
+// survives prompt suspension and restart, unlike an in-memory completion hook.
+// Names are not identities: concurrent children can produce the same filename.
+func (e *AgentEngine) collaborationArtifacts() types.MessageArtifacts {
+	e.progress.mu.Lock()
+	defer e.progress.mu.Unlock()
+	var artifacts types.MessageArtifacts
+	seen := make(map[string]bool)
+	for _, delivery := range e.progress.collaborationDeliveries {
+		for _, evt := range delivery.Events {
+			switch evt.Kind {
+			case "succeeded", "failed", "interrupted", "cancelled", "needs_attention":
+			default:
+				continue
+			}
+			var payload struct {
+				Result    collaboration.Result `json:"result"`
+				SessionID string               `json:"session_id"`
+			}
+			if json.Unmarshal([]byte(evt.Content), &payload) != nil || payload.SessionID == "" {
+				continue
+			}
+			for _, artifact := range payload.Result.Artifacts.Live() {
+				if artifact.URL == "" || seen[artifact.URL] {
+					continue
+				}
+				seen[artifact.URL] = true
+				// This file is not in the parent's sandbox. Namespace its origin
+				// so collection/version grouping cannot mistake another child's
+				// identical output path for a newer version of the same file.
+				if artifact.SourcePath != "" {
+					artifact.SourcePath = "collaboration://" + payload.SessionID + "/" +
+						strings.TrimPrefix(artifact.SourcePath, "/")
+				}
+				artifacts = append(artifacts, artifact)
+			}
+		}
+	}
+	return artifacts
 }

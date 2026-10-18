@@ -831,6 +831,13 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 			}
 		}
 
+		// Child files already exist in storage. Attach them through the same
+		// message-owned artifact path as local files, even without a sandbox.
+		delegated, _ := data.Artifacts.(types.MessageArtifacts)
+		delegated = delegated.Live()
+		h.assistantMessage.Artifacts = mergeArtifactLists(h.assistantMessage.Artifacts, delegated)
+		h.artifactCollector.BindArtifactsToMessage(context.WithoutCancel(h.ctx), h.assistantMessageID, delegated)
+
 		// Drain skill-generated files from the sandbox into persistent
 		// storage. Best-effort: any failure is logged and the turn is
 		// persisted without artifacts. Collect is a no-op when either the
@@ -905,6 +912,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 			// message that first produced the file cannot invalidate it.
 			h.artifactCollector.BindArtifactsToMessage(collectCtx, h.assistantMessageID, previous)
 		}
+		h.assistantMessage.Content = rewriteArtifactReferences(h.assistantMessage.Content, h.assistantMessage.Artifacts)
 		h.assistantMessage.Content = types.ClarifyArtifactVersions(h.assistantMessage.Content,
 			h.assistantMessage.Artifacts, previous, types.LanguageFromContextOrDefault(h.ctx))
 	}

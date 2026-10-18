@@ -44,7 +44,9 @@ func NewCollaborationTools(b *collaboration.Binding, resolve ResolveDelegatedAge
 			"Start a child task asynchronously from an existing same-workspace reasoning " +
 				"agent template. Obtain agent_id with find_operations (domain agent) and " +
 				"run_operation list/get; list_agents lists spawned instances, not " +
-				"templates.\nPass a self-contained assignment. The child uses its template's " +
+				"templates. For continuation in the same conversation, check list_agents and use " +
+				"followup_task on the existing instance.\nPass a self-contained assignment. " +
+				"The child uses its template's " +
 				"model and tools in a separate conversation, without parent history or " +
 				"attachments. fork_turns/model/reasoning_effort and nested spawning are " +
 				"unsupported.\nReturns member_id, task_name and agent_path immediately, not a " +
@@ -63,7 +65,8 @@ func NewCollaborationTools(b *collaboration.Binding, resolve ResolveDelegatedAge
 		},
 		{
 			"list_agents",
-			"Read current child instances: member_id, task_name, agent_id, session_id, " +
+			"Read child instances in this conversation, including previous-turn instances available for " +
+				"followup_task: member_id, task_name, agent_id, session_id, " +
 				"run_id, status, progress, prompt_id and cancel_requested. This snapshot does " +
 				"not consume messages or contain transcripts/final answers.\nStatuses: queued, " +
 				"running, waiting (user approval/input), succeeded, failed, interrupted, " +

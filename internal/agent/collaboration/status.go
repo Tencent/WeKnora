@@ -28,6 +28,9 @@ type TaskStatus struct {
 func (g *Group) StatusView() StatusSnapshot {
 	out := StatusSnapshot{GroupID: g.Scope.ID, Revision: g.Revision, Tasks: make([]TaskStatus, 0, len(g.Members))}
 	for _, m := range g.Members {
+		if m.Inherited {
+			continue
+		}
 		r := current(m)
 		if r == nil {
 			continue

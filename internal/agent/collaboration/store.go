@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/types"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -52,6 +54,7 @@ type Group struct {
 	// Revision is the database CAS version, never a caller-provided JSON field.
 	Revision        int64 `json:"-"`
 	InputBytes      int
+	SuccessorID     string // durable admission for a subsequent human turn
 	ParentMessageID string
 	ParentOwner     string
 	ParentLease     time.Time
@@ -68,6 +71,9 @@ type Group struct {
 
 // Member is a named child task with its execution history and incoming mailbox.
 type Member struct {
+	// Inherited instances remain addressable across parent turns but are not
+	// current-turn UI tasks until explicitly continued.
+	Inherited bool   `json:"inherited,omitempty"`
 	ID        string `json:"member_id"`
 	Name      string `json:"task_name"`
 	AgentID   string `json:"agent_id"`
@@ -131,13 +137,15 @@ func (r *Run) UnmarshalJSON(b []byte) error {
 
 // Result records a child’s answer, evidence and execution outcome.
 type Result struct {
-	Truncated        bool   `json:"truncated,omitempty"`
-	Evidence         string `json:"evidence,omitempty"`
-	Answer           string `json:"answer,omitempty"`
-	Error            string `json:"error,omitempty"`
-	MessageID        string `json:"message_id,omitempty"`
-	ConsumedSequence int64  `json:"consumed_sequence,omitempty"`
-	Suspended        bool   `json:"suspended,omitempty"`
+	// Artifacts are runtime-produced metadata, never parsed from model prose.
+	Artifacts        types.MessageArtifacts `json:"artifacts,omitempty"`
+	Truncated        bool                   `json:"truncated,omitempty"`
+	Evidence         string                 `json:"evidence,omitempty"`
+	Answer           string                 `json:"answer,omitempty"`
+	Error            string                 `json:"error,omitempty"`
+	MessageID        string                 `json:"message_id,omitempty"`
+	ConsumedSequence int64                  `json:"consumed_sequence,omitempty"`
+	Suspended        bool                   `json:"suspended,omitempty"`
 }
 
 // Event is an ordered, run-correlated mailbox message.
@@ -162,10 +170,17 @@ func NewStore(db *gorm.DB) *Store { return &Store{db: db} }
 
 // Ensure creates a scoped group if absent and verifies access to an existing group.
 func (s *Store) Ensure(ctx context.Context, scope Scope) error {
+	return s.ensure(ctx, scope, nil)
+}
+
+func (s *Store) ensure(ctx context.Context, scope Scope, members []*Member) error {
 	if scope.ID == "" || scope.SessionID == "" || scope.UserID == "" || scope.TenantID == 0 {
 		return ErrScope
 	}
-	g := Group{Scope: scope, Status: "active", Requests: map[string]string{}, Deadline: time.Now().Add(time.Hour)}
+	g := Group{
+		Scope: scope, Status: "active", Members: members,
+		Requests: map[string]string{}, Deadline: time.Now().Add(time.Hour),
+	}
 	b, err := json.Marshal(g)
 	if err != nil {
 		return err

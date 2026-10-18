@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { collaborationTasks, collaborationWaitState, withoutCollaborationWaits } from './collaborationDisplay'
+import { collaborationTimeline, collaborationTasks, collaborationWaitState, withoutCollaborationWaits } from './collaborationDisplay'
 
 test('parallel tasks retain separate identities and readable latest messages', () => {
   const tasks = collaborationTasks({ tasks: [
@@ -105,4 +105,23 @@ test('successful and timed-out waits disappear from history while real errors re
   const failure = { ...completed, success: false, output: 'Connection failed' }
   assert.deepEqual(collaborationTimeline([completed], undefined, true), [])
   assert.deepEqual(collaborationTimeline([completed, failure], undefined, true), [failure])
+})
+
+test('a continued child stays at its followup position in the new parent turn', () => {
+  for (const target of ['child-id', 'novelist', '/root/novelist']) {
+    const snapshot = { tasks: [{ id: 'child-id', name: 'novelist', session_id: 'original-session', run_id: 'new-run', status: 'running' }] }
+    const events = [
+      { type: 'progress', content: '继续写第一章' },
+      { type: 'tool_call', tool_name: 'followup_task', arguments: { target }, success: true, timestamp: 'now' },
+      { type: 'thinking', content: 'Waiting for the chapter' },
+      { type: 'tool_call', tool_name: 'wait_agent', success: true },
+    ]
+    const rows = collaborationTimeline(events, snapshot)
+    assert.deepEqual(rows.map(row => row.type), ['progress', 'child_task', 'thinking'])
+    assert.equal(rows[1].task.sessionId, 'original-session')
+    assert.equal(rows[1].task.runId, 'new-run')
+    assert.equal(rows[1].timestamp, 'now')
+    events[1].success = false
+    assert.ok(collaborationTimeline(events, snapshot).some(row => row.tool_name === 'followup_task'), 'failed continuation remains visible')
+  }
 })

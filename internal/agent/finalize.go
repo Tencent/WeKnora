@@ -195,6 +195,7 @@ func (e *AgentEngine) emitCompletionEvent(
 	}
 
 	data := event.AgentCompleteData{
+		Artifacts:       e.collaborationArtifacts(),
 		FinalAnswer:     state.FinalAnswer,
 		KnowledgeRefs:   knowledgeRefsInterface,
 		AgentSteps:      steps,

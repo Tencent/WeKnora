@@ -61,7 +61,7 @@ export function countToolCalls(events: any[]): number {
   return ids.size + calls.filter(event => !event.tool_call_id).length
 }
 
-/** Keep child rows at their spawn location, including snapshots restored from history. */
+/** Keep child rows at their spawn/continuation location, including restored snapshots. */
 export function collaborationTimeline(events: any[], snapshot: unknown, settled = false): any[] {
   const tasks = collaborationTasks(snapshot)
   const seen = new Set<string>()
@@ -69,9 +69,13 @@ export function collaborationTimeline(events: any[], snapshot: unknown, settled 
   const waitState = collaborationWaitState(events, settled)
   const lastWait = events.filter(event => event?.type === 'tool_call' && event.tool_name === 'wait_agent').at(-1)
   for (const event of events) {
-    if (event.type === 'tool_call' && event.tool_name === 'spawn_agent') {
-      const task = tasks.find(t => t.id === event.tool_data?.member_id
-        || t.name === event.arguments?.task_name || t.name === event.arguments?.name)
+    if (event.type === 'tool_call' && (event.tool_name === 'spawn_agent'
+      || (event.tool_name === 'followup_task' && event.success !== false && !event.canceled))) {
+      const target = event.arguments?.target
+      const task = tasks.find(t => event.tool_name === 'followup_task'
+        ? t.id === target || t.name === target || `/root/${t.name}` === target
+        : t.id === event.tool_data?.member_id
+          || t.name === event.arguments?.task_name || t.name === event.arguments?.name)
       if (task) {
         if (!seen.has(task.id)) result.push({ type: 'child_task', event_id: `child-${task.id}`, task, timestamp: event.timestamp })
         seen.add(task.id)

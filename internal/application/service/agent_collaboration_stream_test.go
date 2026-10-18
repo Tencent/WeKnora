@@ -71,6 +71,7 @@ func testChildStream(t *testing.T, startupFailure bool) {
 		work = collaboration.Work{Scope: scope, Member: *m, Run: *r}
 		return nil
 	}))
+	artifact := types.MessageArtifact{URL: "resource://abcdefghijklmnopqrstuv", FileName: "report.md", FileType: ".md"}
 	completionReceived := false
 	s.ChildEvents = func(_ context.Context,
 		session *types.Session,
@@ -89,6 +90,7 @@ func testChildStream(t *testing.T, startupFailure bool) {
 		bus.On(event.EventAgentComplete, func(_ context.Context, e event.Event) error {
 			completionReceived = true
 			answer.Content += e.Data.(event.AgentCompleteData).FinalAnswer
+			answer.Artifacts = types.MessageArtifacts{artifact}
 			return nil
 		})
 		return func(ctx context.Context) error {
@@ -124,6 +126,7 @@ func testChildStream(t *testing.T, startupFailure bool) {
 		require.NoError(t, err)
 		require.Equal(t, "final once", result.Answer)
 	}
+	require.Equal(t, types.MessageArtifacts{artifact}, result.Artifacts)
 	require.Empty(t, streams.live)
 	require.Len(t, streams.events, 3)
 	require.Equal(t, types.ResponseTypeAgentQuery, streams.events[0].Type)

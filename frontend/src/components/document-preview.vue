@@ -1,7 +1,7 @@
 // @ts-nocheck
 <script setup lang="ts">
 import { indexEmbeddedSourceImages } from '@/utils/sourceImage';
-import { ref, shallowRef, watch, onMounted, onUnmounted, nextTick, defineAsyncComponent } from 'vue';
+import { ref, shallowRef, watch, onMounted, onUnmounted, onErrorCaptured, nextTick, defineAsyncComponent } from 'vue';
 import { previewKnowledgeFile } from '@/api/knowledge-base/index';
 import { previewTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { downloadArtifact } from '@/api/chat';
@@ -79,6 +79,14 @@ const emit = defineEmits<{
 
 const loading = ref(false);
 const error = ref('');
+// Async renderer setup/mount failures do not emit the renderer's `error` event.
+// Surface them in the preview instead of leaving an empty document area.
+onErrorCaptured((err) => {
+  error.value = t('preview.loadFailed');
+  loading.value = false;
+  console.error('Document renderer failed:', err);
+  return false;
+});
 const previewType = ref<FilePreviewKind>('unsupported');
 const blobUrl = ref('');
 const textContent = ref('');

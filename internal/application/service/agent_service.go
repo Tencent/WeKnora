@@ -202,6 +202,9 @@ func NewAgentService(
 		svc.hostSkillVersionsRoot = hostSandbox.SkillTree.VersionsRoot()
 	}
 	svc.collaboration = collaboration
+	if collaboration != nil {
+		collaboration.artifactFiles = svc.collaborationArtifactFiles
+	}
 	return svc
 }
 
