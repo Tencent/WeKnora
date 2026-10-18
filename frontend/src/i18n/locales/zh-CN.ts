@@ -4680,8 +4680,16 @@ export default {
       modelDescription: '用于音频中语音转文本的识别模型（如 OpenAI Whisper）',
       modelPlaceholder: '请选择 ASR 模型',
       languageLabel: '音频语言提示',
-      languageDescription: '可选；指定主要语种可提高部分 ASR 模型的识别稳定性，留空时自动检测',
-      languagePlaceholder: '例如 zh、en，留空自动检测'
+      languageAutoDetect: '自动检测',
+      languageOptions: {
+        zh: '中文',
+        en: '英语',
+        ja: '日语',
+        ko: '韩语',
+        ru: '俄语',
+      },
+      languageDescription: '可选；指定主要语种可提高部分 ASR 模型的识别稳定性，留空时自动检测。列表里没有的语种可以直接输入语言代码（如 es、yue）。',
+      languagePlaceholder: '选择语言；留空自动检测'
     },
     multimodal: {
       title: '图像处理配置',

@@ -572,8 +572,11 @@
                             <p class="desc">{{ t('knowledgeEditor.asr.languageDescription') }}</p>
                           </div>
                           <div class="setting-control">
-                            <t-input
-                              v-model="uiState.asrConfig.language"
+                            <t-select
+                              v-model="asrLanguageModel"
+                              :options="asrLanguageOptions"
+                              filterable
+                              creatable
                               clearable
                               :placeholder="t('knowledgeEditor.asr.languagePlaceholder')"
                               :style="{ width: '280px' }"
@@ -685,6 +688,7 @@ import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useUIStore } from '@/stores/ui'
 import { formatFileSize, getFileIcon } from '@/utils/files'
 import { getUploadFileKey } from '../utils/uploadSources'
+import { ASR_LANGUAGE_AUTO, fromAsrLanguageModel, toAsrLanguageModel } from '../utils/asrLanguage'
 import { listKnowledgeTags, mergeImageActions, fetchImageAttrSchema, FALLBACK_IMAGE_ATTR_SCHEMA, type ImageActionsConfig, type ImageAttrSchema } from '@/api/knowledge-base'
 import { imageAttrDisplay, imageAttrConditionDisplay } from '@/utils/imageAttrDisplay'
 import KbUploadSourceDropdown from './KbUploadSourceDropdown.vue'
@@ -1012,6 +1016,26 @@ const languageOptions = computed(() => [
   { label: t('knowledgeEditor.chunking.languageOptions.en'), value: 'en' },
   { label: t('knowledgeEditor.chunking.languageOptions.zh'), value: 'zh' },
 ])
+
+// ASR 语言以前是自由文本，用户得自己回想 zh / en 这种厂商代码，写错了也照样发
+// 给后端。现在给一份常用语种下拉，另开 creatable 让 es / fr / yue 这类仍可手输。
+// “自动检测”在列表里是一个真实选项（空值在 TDesign 里等于没选中），
+// 选中它或清空后存回 asr_config.language 的仍是 ''。
+const asrLanguageOptions = computed(() => [
+  { label: t('knowledgeEditor.asr.languageAutoDetect'), value: ASR_LANGUAGE_AUTO },
+  { label: t('knowledgeEditor.asr.languageOptions.zh'), value: 'zh' },
+  { label: t('knowledgeEditor.asr.languageOptions.en'), value: 'en' },
+  { label: t('knowledgeEditor.asr.languageOptions.ja'), value: 'ja' },
+  { label: t('knowledgeEditor.asr.languageOptions.ko'), value: 'ko' },
+  { label: t('knowledgeEditor.asr.languageOptions.ru'), value: 'ru' },
+])
+
+const asrLanguageModel = computed({
+  get: (): string => toAsrLanguageModel(uiState.value.asrConfig.language),
+  set: (selected: unknown) => {
+    uiState.value.asrConfig.language = fromAsrLanguageModel(selected)
+  },
+})
 
 const tagOptions = computed(() => availableTags.value.map(tag => ({
   label: tag.name,
