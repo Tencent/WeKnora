@@ -304,12 +304,14 @@ func (c *Connector) ResolveResourceAncestors(
 	if err != nil {
 		return nil, err
 	}
-	ancestors := make(map[string]struct{})
+	ancestors := make([]string, 0)
+	seenAncestors := make(map[string]struct{})
 	for _, raw := range resourceIDs {
 		ref, err := decodeRef(raw)
 		if err != nil {
 			return nil, datasource.ErrResourceNotFound
 		}
+		path := make([]string, 0)
 		current := ref.ItemID
 		for current != "" && current != rootItemID {
 			item, err := client.getItem(ctx, ref.DriveID, current)
@@ -326,16 +328,19 @@ func (c *Connector) ResolveResourceAncestors(
 			if parent == "" {
 				parent = rootItemID
 			}
-			ancestors[encodeRef(resourceRef{DriveID: ref.DriveID, ItemID: parent})] = struct{}{}
+			ancestor := encodeRef(resourceRef{DriveID: ref.DriveID, ItemID: parent})
+			path = append(path, ancestor)
 			current = parent
 		}
+		for i := len(path) - 1; i >= 0; i-- {
+			if _, seen := seenAncestors[path[i]]; seen {
+				continue
+			}
+			seenAncestors[path[i]] = struct{}{}
+			ancestors = append(ancestors, path[i])
+		}
 	}
-	result := make([]string, 0, len(ancestors))
-	for id := range ancestors {
-		result = append(result, id)
-	}
-	sort.Strings(result)
-	return result, nil
+	return ancestors, nil
 }
 
 // FetchAll performs a full scan using the legacy connector result shape.

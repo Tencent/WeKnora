@@ -1170,9 +1170,10 @@ async function revealExistingSelections(hiddenIds: string[]) {
     const expanded = new Set(expandedResourceIds.value)
     for (const id of ancestors) expanded.add(id)
     expandedResourceIds.value = expanded
-    // Load each ancestor level (children include the next ancestor / the
-    // selection itself); calls are independent and dedup on merge.
-    await Promise.all(ancestors.map(id => ensureChildrenLoaded(id)))
+    // The connector returns ancestors from the root down. Load them in that
+    // order so each level is present before the next one is revealed. This is
+    // important for Microsoft Graph, where the resource picker is lazy.
+    for (const id of ancestors) await ensureChildrenLoaded(id)
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
   }
