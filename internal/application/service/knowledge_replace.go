@@ -75,7 +75,7 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 			folderPath = customFolder
 		}
 	}
-	fileName = secutils.NormalizeUploadFilename(fileName)
+	fileName = secutils.ResolveMultipartUploadFilename(fileName, file.Header.Get("Content-Disposition"))
 	safeFileName, ok := secutils.ValidateInput(fileName)
 	if !ok {
 		return nil, invalidUploadFilenameError(fileName)

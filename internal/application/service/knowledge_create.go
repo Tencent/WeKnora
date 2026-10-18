@@ -43,8 +43,9 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 			fileName, file.Filename, folderPath)
 	}
 	// Windows curl -F often sends Content-Disposition filename= in the active
-	// ANSI code page (GBK on zh-CN). Reinterpret before ValidateInput (#4268).
-	fileName = secutils.NormalizeUploadFilename(fileName)
+	// ANSI code page (GBK on zh-CN). Prefer raw disposition bytes when the
+	// multipart parser ate a GBK trail 0x5C, then reinterpret (#4268/#4269).
+	fileName = secutils.ResolveMultipartUploadFilename(fileName, file.Header.Get("Content-Disposition"))
 
 	logger.Infof(ctx, "Knowledge base ID: %s, file: %s", kbID, fileName)
 

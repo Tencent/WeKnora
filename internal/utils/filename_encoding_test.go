@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -99,5 +100,59 @@ func TestValidateInputAcceptsNormalizedChinese(t *testing.T) {
 	}
 	if !strings.HasSuffix(safe, ".pdf") || safe != name {
 		t.Fatalf("got %q want %q", safe, name)
+	}
+}
+
+func TestRawDispositionFilenameQuoted(t *testing.T) {
+	t.Parallel()
+	// GBK for 前乗后.pdf includes trail 0x5C inside the quoted value.
+	gbk := mustGBK(t, "前乗后.pdf")
+	disp := `form-data; name="file"; filename="` + gbk + `"`
+	raw, ok := RawDispositionFilename(disp)
+	if !ok {
+		t.Fatal("expected filename=")
+	}
+	if !bytes.Equal(raw, []byte(gbk)) {
+		t.Fatalf("raw=%x want=%x", raw, []byte(gbk))
+	}
+}
+
+func TestResolveMultipartUploadFilenameCaseERecoversFullTitle(t *testing.T) {
+	t.Parallel()
+	// Case E: parser consumed GBK trail 0x5C, leaving only 后.pdf in Filename,
+	// while Content-Disposition still holds the full GBK bytes.
+	full := "前乗后.pdf"
+	fullGBK := mustGBK(t, full)
+	// Simulate Go quoted-string unescape on a trail 0x5C: drop the 0x5C byte
+	// and keep the remainder after the escaped pair (matches jackyfan01 report).
+	parsedTrunc := string([]byte{0xba, 0xf3, 0x2e, 0x70, 0x64, 0x66}) // 后.pdf as GBK
+	disp := `form-data; name="file"; filename="` + fullGBK + `"`
+	if bytes.Equal([]byte(parsedTrunc), []byte(fullGBK)) {
+		t.Fatal("test setup: parsed must differ from raw")
+	}
+	got := ResolveMultipartUploadFilename(parsedTrunc, disp)
+	if got != full {
+		t.Fatalf("case E: got %q want %q", got, full)
+	}
+}
+
+func TestResolveMultipartUploadFilenameCaseBUnchanged(t *testing.T) {
+	t.Parallel()
+	want := "自动同步端到端自测.pdf"
+	gbk := mustGBK(t, want)
+	disp := `form-data; name="file"; filename="` + gbk + `"`
+	got := ResolveMultipartUploadFilename(gbk, disp)
+	if got != want {
+		t.Fatalf("case B: got %q want %q", got, want)
+	}
+}
+
+func TestResolveMultipartUploadFilenameEqualPath(t *testing.T) {
+	t.Parallel()
+	name := "hello.pdf"
+	disp := `form-data; name="file"; filename="hello.pdf"`
+	got := ResolveMultipartUploadFilename(name, disp)
+	if got != name {
+		t.Fatalf("got %q want %q", got, name)
 	}
 }
