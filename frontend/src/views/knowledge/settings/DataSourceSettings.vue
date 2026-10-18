@@ -12,6 +12,7 @@ import {
   type DataSource,
 } from '@/api/datasource'
 import { humanizeCron, relativeTime } from '@/utils/cronHumanize'
+import { formatSyncErrorSummary } from '@/utils/syncError'
 import DataSourceEditorDialog from './DataSourceEditorDialog.vue'
 import DataSourceSyncLogs from './DataSourceSyncLogs.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
@@ -173,6 +174,18 @@ function lastSyncStatusLabel(ds: DataSource) {
   return t(`datasource.logStatus.${log.status}`)
 }
 
+// The card used to print ds.error_message verbatim: that is the backend's
+// English err.Error() text, so it disagreed with the sync-log drawer, which
+// localises the structured result.errors sample by its i18n code. Prefer the
+// same samples here and keep error_message only as the fallback for old logs.
+function cardSyncError(ds: DataSource): string {
+  return formatSyncErrorSummary(
+    ds.latest_sync_log?.result?.errors,
+    ds.error_message,
+    t,
+  )
+}
+
 function isSyncRunning(ds: DataSource) {
   return ds.latest_sync_log?.status === 'running'
 }
@@ -309,9 +322,9 @@ onBeforeUnmount(stopPolling)
                 >{{ pill.text }}</span>
               </template>
             </p>
-            <div v-if="ds.error_message" class="ds-card__error">
+            <div v-if="cardSyncError(ds)" class="ds-card__error" :title="cardSyncError(ds)">
               <t-icon name="error-circle-filled" size="14px" />
-              <span>{{ ds.error_message }}</span>
+              <span>{{ cardSyncError(ds) }}</span>
             </div>
           </div>
         </component>
@@ -587,6 +600,11 @@ onBeforeUnmount(stopPolling)
     font-size: var(--app-text-sm);
     line-height: 1.45;
     text-align: left;
+
+    span {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
   }
 
   &__actions {

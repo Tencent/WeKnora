@@ -7690,7 +7690,8 @@ export default {
       seafile_invalid_response: 'Seafile returned a response that could not be parsed; check the server version and reverse proxy.',
       seafile_ssrf_blocked: 'The Seafile download URL was blocked by the SSRF policy; add the fileserver host to SSRF_WHITELIST.',
       seafile_fetch_failed: 'Failed to fetch the file from Seafile; the next sync retries it.'
-    }
+    },
+    syncErrorMore: 'and {count} more',
   },
   integrations: {
     cli: {

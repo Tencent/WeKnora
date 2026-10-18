@@ -7690,7 +7690,8 @@ export default {
       seafile_invalid_response: 'Seafileから解析できない応答が返されました。サーバのバージョンとリバースプロキシを確認してください。',
       seafile_ssrf_blocked: 'SeafileのダウンロードURLがSSRFポリシーでブロックされました。fileserverのホストをSSRF_WHITELISTに追加してください。',
       seafile_fetch_failed: 'Seafileからファイルを取得できませんでした。次回の同期で再試行します。'
-    }
+    },
+    syncErrorMore: 'ほか {count} 件',
   },
   integrations: {
     cli: {

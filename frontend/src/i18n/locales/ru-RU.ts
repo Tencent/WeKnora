@@ -1255,6 +1255,7 @@ export default {
       seafile_ssrf_blocked: 'URL скачивания Seafile заблокирован политикой SSRF. Добавьте хост fileserver в SSRF_WHITELIST.',
       seafile_fetch_failed: 'Не удалось получить файл из Seafile; при следующей синхронизации попытка повторится.'
     },
+    syncErrorMore: 'и ещё {count}',
   },
   ollama: {
     unknown: 'Неизвестно',
