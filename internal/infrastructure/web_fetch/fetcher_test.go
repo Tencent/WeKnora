@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -130,6 +131,26 @@ func TestFetcherUsesBrowserFallbackForClientRenderedPage(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Contains(t, content, "rendered product specifications")
+}
+
+func TestFetcherReportsBrowserDeadlineAsRetryableTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = writer.Write([]byte(`<html><body><div id="app">Loading...</div><script>render()</script></body></html>`))
+	}))
+	defer server.Close()
+
+	fetcher := newTestFetcher(server.Client())
+	fetcher.resolveIPs = func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	}
+	fetcher.renderBrowser = func(context.Context, pinnedTarget) (string, error) {
+		return "", fmt.Errorf("chromium render failed: %w", context.DeadlineExceeded)
+	}
+
+	_, err := fetcher.Fetch(context.Background(), server.URL)
+	code, retryable, _ := ErrorDetails(err)
+	assert.Equal(t, ErrorTimeout, code)
+	assert.True(t, retryable)
 }
 
 func TestNewFetcherKeepsAgentCompatibleTimeout(t *testing.T) {
