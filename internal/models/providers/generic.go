@@ -63,6 +63,10 @@ func newGenericProvider() *Definition {
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
 			types.ModelTypeASR,
+			// A gateway in front of DashScope keeps the temporary-file upload
+			// API on the vendor host; the row points the chat call at the
+			// gateway and leaves the upload endpoint at its default.
+			types.ModelTypeVideo,
 		},
 		ExtraFields: []ExtraField{{
 			Key:    models.ExtraScoreScale,

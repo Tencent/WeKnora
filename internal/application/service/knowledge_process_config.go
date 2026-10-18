@@ -157,7 +157,26 @@ func validateDefaultFileImportRequirements(
 		logger.Error(ctx, "ASR model is not configured")
 		return werrors.NewBadRequestError("上传音频文件需要设置ASR语音识别模型")
 	}
+	// A video is only readable through its narration and/or its frames, so it
+	// has the model prerequisites the selected mode implies; the switch itself
+	// was already checked. The requirement message names the missing model so a
+	// keyframes-only knowledge base is not told to configure ASR.
+	if IsVideoType(fileType) && !videoParseReady(kb) {
+		logger.Error(ctx, "Video parsing model is not configured")
+		return werrors.NewBadRequestError(videoParseRequirementMessage(kb))
+	}
 	return nil
+}
+
+// validateImportFileTypeForConfig is validateImportFileType plus the one
+// exception the video switch introduces: a video is a valid import only for a
+// knowledge base that opted in. Keeping this next to the shared gate means the
+// generic upload path still rejects video with the same message as before.
+func validateImportFileTypeForConfig(kb *types.KnowledgeBase, fileType string) error {
+	if IsVideoType(normalizeFileExtension(fileType)) && kb != nil && kb.VideoConfig.Enabled {
+		return nil
+	}
+	return validateImportFileType(fileType)
 }
 
 // resolveFileImportProcessConfig is the single gate every file import passes
@@ -172,7 +191,7 @@ func resolveFileImportProcessConfig(
 	processOverrides *types.KnowledgeProcessOverrides,
 	enableMultimodel *bool,
 ) (types.EffectiveProcessConfig, error) {
-	if err := validateImportFileType(fileType); err != nil {
+	if err := validateImportFileTypeForConfig(kb, fileType); err != nil {
 		return types.EffectiveProcessConfig{}, err
 	}
 
@@ -182,7 +201,7 @@ func resolveFileImportProcessConfig(
 	}
 
 	if processOverrides != nil {
-		if err := validateEffectiveProcessOverrides(eff, []string{fileType}); err != nil {
+		if err := validateEffectiveProcessOverrides(eff, kb, []string{fileType}); err != nil {
 			return eff, err
 		}
 	} else if err := validateDefaultFileImportRequirements(ctx, kb, eff, fileType); err != nil {
@@ -202,20 +221,26 @@ func ValidateProcessOverrides(
 	if overrides == nil {
 		return nil
 	}
-	return validateEffectiveProcessOverrides(ResolveProcessConfig(kb, overrides), fileTypes)
+	return validateEffectiveProcessOverrides(ResolveProcessConfig(kb, overrides), kb, fileTypes)
 }
 
 // Validate the final config, including the legacy enableMultimodel argument
 // applied by upload and reparse callers, before persisting or enqueueing it.
-func validateEffectiveProcessOverrides(eff types.EffectiveProcessConfig, fileTypes []string) error {
+func validateEffectiveProcessOverrides(
+	eff types.EffectiveProcessConfig, kb *types.KnowledgeBase, fileTypes []string,
+) error {
 	hasImage := false
 	hasAudio := false
+	hasVideo := false
 	for _, ft := range fileTypes {
 		if IsImageType(ft) {
 			hasImage = true
 		}
 		if IsAudioType(ft) {
 			hasAudio = true
+		}
+		if IsVideoType(ft) {
+			hasVideo = true
 		}
 	}
 
@@ -227,6 +252,13 @@ func validateEffectiveProcessOverrides(eff types.EffectiveProcessConfig, fileTyp
 
 	if hasAudio && !eff.ASRConfig.IsASREnabled() {
 		return werrors.NewBadRequestError("上传音频文件需要设置ASR语音识别模型")
+	}
+
+	// Video parsing reads the narration and/or the frames, so the mode decides
+	// which model is required. Rejecting here beats discovering it in the
+	// worker, which would archive the file instead of indexing it.
+	if hasVideo && !videoParseReady(kb) {
+		return werrors.NewBadRequestError(videoParseRequirementMessage(kb))
 	}
 
 	if err := types.ValidateEffectiveProcessPromptInstructions(eff); err != nil {
@@ -258,7 +290,7 @@ func ApplyKnowledgeProcessOverrides(
 	if processOverrides == nil {
 		return eff, nil
 	}
-	if err := validateEffectiveProcessOverrides(eff, fileTypes); err != nil {
+	if err := validateEffectiveProcessOverrides(eff, kb, fileTypes); err != nil {
 		return eff, err
 	}
 	if err := knowledge.SetProcessOverrides(processOverrides); err != nil {

@@ -19,6 +19,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -244,6 +245,31 @@ var registry = map[string]settingSpec{
 		Description: "全局开关：开启后，空间管理员通过邮箱邀请已注册用户加入空间时，" +
 			"被邀请人将被立即自动加入（直接写入成员关系），无需在收件箱手动接受，也不再生成待接受的邀请记录。" +
 			"关闭时保持原有「发出邀请 → 被邀请人收件箱确认」流程。每次邀请时实时读取，修改后立即生效。默认 false。",
+	},
+	// asr.long_audio_chunking_enabled gates the long-audio cutter in
+	// models/asr. Read on every transcription (the resolver is cached in
+	// memory), so a UI edit applies to the next recording without a restart.
+	// Default false preserves the pre-switch behaviour: audio over the
+	// vendor's ceiling is sent whole and the vendor rejects it, which is what
+	// deployments saw before this key existed.
+	"asr.long_audio_chunking_enabled": {
+		Type:     "bool",
+		EnvName:  "",
+		Default:  false,
+		Category: "asr",
+		Description: "是否允许把超长音频切段后分段转写（长音频切段）。关闭时整段音频直接交给厂商，" +
+			"超过厂商上限会失败；开启后按下面的「单段音频时长」切分并合并结果，无需重启即可生效。默认关闭。",
+	},
+	// asr.max_segment_seconds is the ceiling for one upstream request when
+	// the switch above is on. DB > ENV (WEKNORA_ASR_MAX_SEGMENT_SECONDS) >
+	// built-in 120 s; clamped to 30..300 by both Update and the cutter.
+	"asr.max_segment_seconds": {
+		Type:     "int",
+		EnvName:  asr.MaxSegmentSecondsEnvName,
+		Default:  int64(asr.DefaultMaxSegmentSeconds),
+		Category: "asr",
+		Description: "长音频切段的单段时长（秒，30-300）。仅在开启「长音频切段」后生效；" +
+			"每次转写实时读取，修改后立即生效。默认 120 秒，低于多数厂商的实际上限，留有容错余量。",
 	},
 	"asynq.core_concurrency": {
 		Type:            "int",
@@ -1380,6 +1406,15 @@ func validateRegistryEntry(key string, rawValue any) error {
 		}
 		if n < 1 {
 			return errors.New("concurrency must be at least 1")
+		}
+	case "asr.max_segment_seconds":
+		n, err := coerceToPositiveInt64(rawValue)
+		if err != nil {
+			return err
+		}
+		if n < asr.MinMaxSegmentSeconds || n > asr.MaxMaxSegmentSeconds {
+			return fmt.Errorf("must be between %d and %d seconds",
+				asr.MinMaxSegmentSeconds, asr.MaxMaxSegmentSeconds)
 		}
 	case "ssrf.whitelist":
 		// Coerce into the same shape encodeForType produced. We don't

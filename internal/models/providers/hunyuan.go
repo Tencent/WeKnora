@@ -23,6 +23,20 @@
 // `/no_think` prompt prefix
 // (https://cloud.tencent.com/document/product/1729/104753).
 //
+// Video understanding is served by TokenHub, Tencent's model gateway, on a
+// different host: https://tokenhub.tencentmaas.com/v1 answers the same OpenAI
+// Chat Completions protocol at /v1/chat/completions. The video travels in a
+// `video_url` content block whose `url` is either a public http(s) address or
+// a `data:video/mp4;base64,...` string
+// (https://cloud.tencent.com/document/product/1823/136957). The request body
+// may not exceed 100 MB, and base64 grows a file by about a third, so a video
+// may occupy three quarters of the body; internal/models/video turns that
+// budget into the inline ceiling. Base64 is not universal: HY-Vision-Video
+// (hunyuan-turbos-vision-video-*), YT-VITA and GLM-5V-Turbo accept only URL
+// references, so a row of one of those models has to be configured with
+// direct_input "url" and a publicly reachable video. A video row therefore
+// defaults to TokenHub while chat and embedding stay on the Hunyuan host.
+//
 // Second protocol: an Anthropic Messages facade at
 // https://api.hunyuan.cloud.tencent.com/anthropic (path
 // /anthropic/v1/messages) documents hunyuan-2.0-thinking-20251109 and
@@ -70,6 +84,11 @@ const HunyuanID = "hunyuan"
 // HunyuanBaseURL is the OpenAI-compatible endpoint (chat and embedding).
 const HunyuanBaseURL = "https://api.hunyuan.cloud.tencent.com/v1"
 
+// TokenHubBaseURL is Tencent's model gateway, which serves the video
+// understanding models. It is the default only for a video row: chat and
+// embeddings stay on HunyuanBaseURL.
+const TokenHubBaseURL = "https://tokenhub.tencentmaas.com/v1"
+
 func newHunyuanProvider() *Definition {
 	return &Definition{
 		ID:           HunyuanID,
@@ -82,14 +101,19 @@ func newHunyuanProvider() *Definition {
 		Order:        13,
 		RequiresAuth: true,
 		Auth:         AuthBearer,
-		URLPatterns:  []string{"hunyuan.cloud.tencent.com"},
+		URLPatterns:  []string{"hunyuan.cloud.tencent.com", "tokenhub.tencentmaas.com"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: HunyuanBaseURL,
 			types.ModelTypeEmbedding:   HunyuanBaseURL,
+			// Video understanding lives on TokenHub, not on the Hunyuan host;
+			// a row that leaves base_url empty must still reach the endpoint
+			// the video models are documented on.
+			types.ModelTypeVideo: TokenHubBaseURL,
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeEmbedding,
+			types.ModelTypeVideo,
 		},
 		Compat: VendorCompat{
 			// Embeddings keeps the bare baseline on purpose: "Embedding 接口目前仅

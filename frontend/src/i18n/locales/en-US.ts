@@ -780,7 +780,8 @@ export default {
     tagLabel: 'Tag',
     tagPlaceholder: 'Select tags',
     noTags: 'No tags',
-    videosFilteredNoVLM: 'Skipped {count} video file(s) (video upload is not supported)',
+    videosFilteredParsingDisabled: 'Skipped {count} video file(s) (video parsing is off — turn it on in Knowledge Base Settings → Video processing)',
+    videoModelNotConfigured: 'Video parsing is on, but the model its mode needs (ASR, vision, or video model) is not configured. Add it in Knowledge Base Settings → Video processing, or video uploads will be rejected.',
     unsupportedTypesHint: 'Some document types ({types}) have no available parser engine and cannot be processed',
     goToParserSettings: 'Configure',
     importURL: 'Import from URL',
@@ -853,6 +854,8 @@ export default {
     regenerateSummary: 'Regenerate summary',
     generateSummary: 'Generate summary',
     noDocumentSummary: 'No document summary',
+    archiveNoSummary:
+      'This file is archived without an index, so it has no summary. Use Preview to play the original file.',
     summaryRefreshed: 'Summary refreshed',
     summaryRefreshQueued: 'Summary refresh queued; it will update automatically when ready',
     indexFailed: 'Index sync failed',
@@ -975,6 +978,8 @@ export default {
     statusFailed: 'Failed',
     statusCancelled: 'Cancelled',
     statusDraft: 'Draft',
+    statusStored: 'Archived · Not indexed',
+    storedHint: 'No index was built for this file, so it does not appear in search results',
     noDescription: 'No description',
     emptyKnowledgeDragDrop: 'Knowledge is empty, drag and drop to upload',
     pdfDocFormat: 'pdf, doc format files, max {size}MB',
@@ -3347,6 +3352,7 @@ export default {
         partial: 'Partially completed',
         canceled: 'Canceled',
         failed: 'Failed',
+        stored: 'Archived',
         enqueue: 'Task submission',
         reuse_vectors: 'Reuse vectors',
         reparse: 'Reparse',
@@ -3377,6 +3383,7 @@ export default {
       graph: 'Knowledge Graph',
       multimodal: 'Image Processing',
       asr: 'Audio',
+      video: 'Video processing',
       datasource: 'Data Sources',
       share: 'Sharing',
       activity: 'Activity'
@@ -3976,6 +3983,73 @@ export default {
       languageDescription: 'Optional. A primary language hint can improve some ASR models; leave empty for auto-detection.',
       languagePlaceholder: 'For example zh or en; empty means auto-detect'
     },
+    video: {
+      title: 'Video Processing',
+      description: 'Configure video parsing. Depending on the mode, the narration, the picture, both, or the whole video (direct read) is converted into searchable text.',
+      label: 'Enable video parsing',
+      desc: 'When enabled, videos are transcribed and indexed. When disabled, videos are archived only: playable, but not searchable.',
+      modeLabel: 'Parsing mode',
+      modeDescription: 'Select the parsing scope for videos; each mode differs in call cost and output.',
+      modeAudioOnly: 'Speech transcription only (lightweight)',
+      modeAudioOnlyDesc: 'Transcribes the narration only and produces no picture descriptions; one ASR call per video, lowest cost.',
+      modeKeyframes: 'Keyframe descriptions',
+      modeKeyframesDesc: 'Produces picture descriptions only and transcribes no narration; up to 12 evenly spaced frames (configurable) are passed to the vision model.',
+      modeAudioKeyframes: 'Speech + keyframe descriptions (standard)',
+      modeAudioKeyframesDesc: 'Transcribes the narration and describes the picture, then merges both on the timeline; the most complete output at the highest cost (one ASR call plus up to 12 vision calls, frame count configurable).',
+      modelLabel: 'Video ASR model',
+      modelDescription: 'Used only for video narration in this knowledge base; the model selected under Audio is unaffected.',
+      modelPlaceholder: 'Select the ASR model for video transcription',
+      asrHint: 'Video transcription requires a dedicated ASR model; it is not shared with Audio.',
+      asrRequired: 'Select a video ASR model first; otherwise videos receive frame descriptions only, or are archived.',
+      languageLabel: 'Transcription language',
+      languageDescription: 'Language hint for the video narration; empty means auto-detect. This setting is independent of the language configured under Audio.',
+      languagePlaceholder: 'Empty auto-detects; another language code can be typed',
+      languageOptions: {
+        zh: 'Chinese',
+        en: 'English',
+        ja: 'Japanese',
+        ko: 'Korean',
+        ru: 'Russian'
+      },
+      vlmHint: 'Frame descriptions use the vision model dedicated to this video section; the frame count and sampling interval are configured below.',
+      maxFramesLabel: 'Max frames',
+      maxFramesDescription: 'Maximum number of frames one video submits to the vision model (1–60). More frames cover more of the picture and increase vision call cost; default 12.',
+      frameIntervalLabel: 'Sampling interval (seconds)',
+      frameIntervalDescription: 'Interval in seconds between sampled frames (0–3600). A value of 0 derives the interval from the video duration and the frame limit.',
+      vlmRequired: 'No vision model is selected for video frames, so frame descriptions cannot be generated and the video stays archived. Select one under Video Processing.',
+      vlmPartial: 'No vision model is selected for video frames, so this run transcribes the narration only and skips frame descriptions.',
+      vlmLabel: 'Frame vision model (VLM)',
+      vlmDescription: 'Describes sampled video frames. This setting is independent of Image Processing; changing the image parsing configuration does not affect video output.',
+      vlmPlaceholder: 'Select the vision model for video frames',
+      vlmLanguageLabel: 'Frame description language',
+      vlmLanguageDescription: 'Language of the generated frame descriptions; empty follows the request language.',
+      vlmLanguageAuto: 'Auto (follow request language)',
+      customInstructionsLabel: 'Frame description requirements',
+      customInstructionsDescription: 'Appended to the built-in frame description requirements to specify the information that needs particular attention. The built-in requirements always take precedence and cannot override the "describe only what is legible, never guess" constraint.',
+      customInstructionsPlaceholder: 'Specify the frame information to recognise, for example: dialog titles and error messages; ignore the watermark in the corner.',
+      modeDirect: 'Video direct read (full understanding)',
+      modeDirectDesc: 'Submits the whole video to a video understanding model, which generates one description covering the narration, on-screen text and picture. The most complete output; this mode transfers the video file to the model provider.',
+      videoModelLabel: 'Video model',
+      videoModelDescription: 'Model used for whole-video direct read. This setting is independent of the ASR and frame VLM settings; changing one does not affect the other two.',
+      videoModelPlaceholder: 'Select a video understanding model',
+      videoModelHint: 'The video model accepts the whole video and answers in text; the transport is configured below.',
+      videoModelRequired: 'Select a video model first; otherwise the direct read has no model and videos are archived.',
+      directFallbackHint: 'If the direct read fails, parsing falls back to the speech recognition and frame description models configured on this page; when neither is configured, the video is archived.',
+      directPromptLabel: 'Direct read requirements',
+      directPromptDescription: 'Appended to the built-in prompt. The output format and the "describe only what is legible" constraint still take precedence.',
+      directPromptPlaceholder: 'For example: keep the chapter titles and list every command that appears on screen.',
+      directInputLabel: 'Transport',
+      directInputDescription: 'How the video is submitted to the model: inline in the request body (base64), the provider’s temporary storage, or an existing public URL.',
+      directInputCostHint: 'Cost and compliance: base64 inline creates no temporary file at the provider, but the video travels with the request body and is bound by its size limit; temporary storage uses extra upload bandwidth and leaves a temporary file at the provider (Aliyun expires it after 48 hours).',
+      directInputAuto: 'Auto (recommended)',
+      directInputAutoDesc: 'Chosen automatically by video size: base64 when the inline limit is not exceeded, temporary storage otherwise.',
+      directInputBase64: 'base64 inline',
+      directInputBase64Desc: 'Encodes the video into the request body, bypassing third-party temporary storage; a video above the provider limit fails instead of switching to an upload.',
+      directInputUpload: 'Upload to temporary storage',
+      directInputUploadDesc: 'Uploads to the model provider’s temporary storage and references it; supports large files (up to about 1 GB). Upload takes longer and the temporary file remains for a period.',
+      directInputUrl: 'Public URL (external calls)',
+      directInputUrlDesc: 'For videos whose caller already provides a public address; videos imported on this page are local files, so this option makes the direct read fail.',
+    },
     advanced: {
       title: 'Advanced Settings',
       description: 'Configure question generation and other advanced features',
@@ -4464,6 +4538,10 @@ export default {
         tier3: 'To put an item back under environment-variable control, click the "Reset" button on its row.'
       },
       sections: {
+        asr: {
+          title: 'Speech recognition',
+          description: 'Configure long-audio transcription: by default the whole file goes to the vendor and over-long files fail; enable chunking to cut, transcribe and merge. Changes apply immediately without a restart.'
+        },
         access: {
           title: 'Registration & access',
           description: 'Manage registration, password requirements, and workspace-creation rules.'
@@ -4694,6 +4772,10 @@ export default {
         }
       },
       keyLabels: {
+        asr: {
+          long_audio_chunking_enabled: 'Long-audio chunking',
+          max_segment_seconds: 'Segment length (seconds)'
+        },
         auth: {
           registration_mode: 'Registration mode',
           default_tenant_mode: 'Default workspace provisioning',
@@ -4725,6 +4807,10 @@ export default {
         }
       },
       keyDescriptions: {
+        asr: {
+          long_audio_chunking_enabled: 'Cut recordings longer than the vendor ceiling into pieces and transcribe them separately. Off: the whole recording goes to the vendor and an over-long file fails. On: the pieces are transcribed and merged. Read on every transcription, so changes apply immediately without a restart. Default off.',
+          max_segment_seconds: 'Length of one piece when long-audio chunking is on (30-300 seconds). Only used when the switch above is on; read on every transcription, so changes apply immediately. Default 120 seconds.'
+        },
         auth: {
           registration_mode: 'Registration mode. Open registration allows anyone to create an account; invitation registration requires a valid invitation link; disabled registration prevents account creation while existing accounts can still accept invitations. Changes take effect immediately.',
           default_tenant_mode: 'Workspace provisioning after public registration. create_personal creates an Owner workspace; tenantless creates only the account until the user accepts an invitation or creates a workspace. Applies to new users only.',
@@ -5118,7 +5204,8 @@ export default {
           rerank: 'Configure models for result re-ranking',
           vllm: 'Configure vision-language models for multimodal understanding',
           asr: 'Configure speech-to-text models for audio transcription',
-          default: 'Configure model information'
+          default: 'Configure model information',
+          video: 'Configure video understanding models that read a whole video',
         },
         modelNamePlaceholder: {
           local: 'e.g. llama2:latest',
@@ -5476,7 +5563,8 @@ export default {
         embedding: 'Embedding',
         rerank: 'ReRank',
         vllm: 'Vision',
-        asr: 'Speech'
+        asr: 'Speech',
+        video: 'Video'
       },
       actions: {
         addModel: 'Add Model',
@@ -5511,6 +5599,11 @@ export default {
         title: 'ASR Speech Models',
         desc: 'Configure speech-to-text models for audio transcription (e.g. OpenAI Whisper)',
         empty: 'No ASR models'
+      },
+      video: {
+        title: 'Video',
+        desc: 'Video understanding models (the "Video" type) that read a whole video and answer in text',
+        empty: 'No video models yet'
       },
       toasts: {
         nameRequired: 'Model name cannot be empty',
@@ -5561,7 +5654,8 @@ export default {
           query_understand_model: 'Query understanding model',
           follow_up_model: 'Follow-up model',
           extract_model: 'Memory extraction model',
-          unknown: 'Other model setting'
+          unknown: 'Other model setting',
+          video_model: 'Video model',
         }
       },
       debug: {
@@ -5619,9 +5713,12 @@ export default {
           reasoningReturned: 'Reasoning returned',
           textChars: 'Transcript chars',
           segmentCount: 'Segment count'
-        }
-      }
-    },
+      },
+      videoFile: 'Video file',
+      videoPrompt: 'Video prompt',
+      videoPromptPlaceholder: 'For example: What does this video teach, step by step?',
+    }
+  },
     ollamaSettings: {
       title: 'Ollama Settings',
       description: 'Manage local Ollama service and view/download models',
@@ -7628,6 +7725,8 @@ export default {
     dingtalkIngestLabel: 'DingTalk ingestion scope',
     dingtalkIncludeUploadedFiles: 'Ingest uploaded files (docx / pptx / xlsx / pdf)',
     dingtalkIncludeUploadedFilesHint: 'Off by default. When on, Word / PowerPoint / Excel / PDF files uploaded to the selected scope are downloaded and parsed into the knowledge base, up to 64 MiB per file; their text counts towards storage and embedding cost. When off they are simply skipped — the sync log says the switch is not enabled, and copies already in the knowledge base are kept.',
+    dingtalkStoreUnindexedMedia: 'Keep videos without indexing them (archive only)',
+    dingtalkStoreUnindexedMediaHint: 'Off by default. When on, video files (mp4 / mov / m4v / webm / mkv / avi / wmv / flv) in the selected scope are downloaded and kept as archived entries: you can find, play and download them, but they are never parsed and never appear in search results. When off they are skipped exactly as before. Turning it off later removes the archived copies on the next full sync, like every other deselected file.',
     prereqBarText_dingtalk: 'First time? Click to see the DingTalk app setup guide',
     prereqStep1Brief_dingtalk: 'Create an internal enterprise app',
     prereqStep1Desc_dingtalk: 'Create an internal app in DingTalk Open Platform and copy its Client ID and Client Secret.',

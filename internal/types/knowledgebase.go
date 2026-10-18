@@ -88,6 +88,8 @@ type KnowledgeBase struct {
 	VLMConfig VLMConfig `yaml:"vlm_config"              json:"vlm_config"              gorm:"type:json" extensions:"x-agent,x-agent-detail"`
 	// ASR config (Automatic Speech Recognition)
 	ASRConfig ASRConfig `yaml:"asr_config"              json:"asr_config"              gorm:"type:json" extensions:"x-agent,x-agent-detail"`
+	// VideoConfig controls video parsing (audio-only transcription today).
+	VideoConfig VideoConfig `yaml:"video_config"            json:"video_config"            gorm:"type:json" extensions:"x-agent,x-agent-detail"`
 	// Storage provider config (new): only stores provider selection; credentials from workspace StorageEngineConfig
 	StorageProviderConfig *StorageProviderConfig `yaml:"storage_provider_config" json:"storage_provider_config"  gorm:"column:storage_provider_config;type:jsonb"`
 	// StorageBackendID binds this KB to one concrete storage instance. The
@@ -194,6 +196,10 @@ type KnowledgeBaseConfig struct {
 	ExtractConfig *ExtractConfig `json:"extract_config,omitempty"`
 	// QuestionGenerationConfig replaces generated-question settings when set. nil means no change.
 	QuestionGenerationConfig *QuestionGenerationConfig `json:"question_generation_config,omitempty"`
+	// VideoConfig controls video parsing. nil means "no change" when
+	// updating, mirroring ImageProcessingConfig: a client that predates the
+	// video switch must not turn it off by saving the KB.
+	VideoConfig *VideoConfig `yaml:"video_config" json:"video_config,omitempty"`
 }
 
 const (
@@ -745,6 +751,380 @@ func (c *ASRConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
+// The four video parsing modes. The first three are cumulative: audio_only
+// reads the narration, keyframes reads the picture, and audio_and_keyframes
+// does both. video_direct hands the whole file to a video understanding model
+// instead, which reads narration and picture together in one call.
+const (
+	// VideoParseModeAudioOnly transcribes the video's audio track. Lightest:
+	// one ASR call, no VLM, no frame storage.
+	VideoParseModeAudioOnly = "audio_only"
+	// VideoParseModeKeyframes samples frames and describes them with the VLM.
+	// For silent screen recordings and slide decks, where the narration says
+	// nothing but the screen carries the content.
+	VideoParseModeKeyframes = "keyframes"
+	// VideoParseModeAudioKeyframes combines both, interleaved by time.
+	VideoParseModeAudioKeyframes = "audio_and_keyframes"
+	// VideoParseModeDirect uploads the whole video to a video understanding
+	// model and indexes its answer. One call sees narration, on-screen text,
+	// diagrams and their order, which the local frame sampler cannot; the
+	// price is a large upload and a model that must accept video input. It
+	// replaces the other two sources rather than adding to them, and it
+	// degrades to whatever the video section still has configured when the
+	// call fails.
+	VideoParseModeDirect = "video_direct"
+)
+
+// The four ways the direct mode can get the video to the model. The transport
+// is part of the setting rather than a constant of the client because the
+// trade-off is the operator's: inline keeps the file out of the vendor's
+// temporary storage but is capped by the request body, the upload handles
+// large files but stages the bytes in the vendor's bucket first, and a public
+// URL skips both when the file is already reachable.
+const (
+	// VideoDirectInputAuto picks inline when the file fits the provider's
+	// inline ceiling and the temporary upload otherwise. It is the default,
+	// and the only mode that decides by file size.
+	VideoDirectInputAuto = "auto"
+	// VideoDirectInputBase64 always sends the video inline, base64 encoded in
+	// the request body. It never falls back to the upload: an operator picks
+	// it so the file is not staged in the vendor's bucket, and silently
+	// uploading on failure would break exactly that promise.
+	VideoDirectInputBase64 = "base64"
+	// VideoDirectInputURL means the caller supplies a URL the vendor can
+	// reach. Local bytes cannot produce one, so this mode refuses them and
+	// PredictURL is the way in.
+	VideoDirectInputURL = "url"
+	// VideoDirectInputUpload always stages the file in the vendor's temporary
+	// storage and references the resulting object. It is the only mode that
+	// accepts videos above the provider's inline ceiling.
+	VideoDirectInputUpload = "upload"
+)
+
+const (
+	// DefaultVideoMaxFrames is how many frames one video may contribute when
+	// the knowledge base names no cap. It keeps a long training video from
+	// turning into hundreds of vision calls while still covering the timeline.
+	DefaultVideoMaxFrames = 12
+	// MaxAllowedVideoFrames bounds the configurable cap. Every frame is one
+	// vision call, so a typo in the JSONB column must not be able to send
+	// thousands of images to the model.
+	MaxAllowedVideoFrames = 60
+	// MaxVideoFrameIntervalSeconds bounds the explicit sampling step. Beyond
+	// one frame per hour the picture no longer describes the video, and the
+	// ceiling keeps the ffmpeg argument in a sane range.
+	MaxVideoFrameIntervalSeconds = 3600
+)
+
+// VideoConfig represents the video parsing configuration of a knowledge base.
+type VideoConfig struct {
+	// Enabled turns on video parsing. Off by default: an existing deployment
+	// must behave exactly as before until an operator opts in, and the only
+	// cost-free outcome is archiving the video.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// Mode selects what to read from the video. Empty decodes rows written
+	// before the field existed and means audio_only.
+	Mode string `yaml:"mode" json:"mode"`
+	// ModelID is the ASR model used for this knowledge base's videos. It is
+	// independent of ASRConfig.ModelID: an empty value means the video has no
+	// narration model and is never silently borrowed from the audio section.
+	// When set, it must name an ASR model: a stale or wrong-typed id degrades
+	// the video instead of failing the import. Frames do not use it; they use
+	// the video section's own VLMConfig.ModelID.
+	ModelID string `yaml:"model_id" json:"model_id"`
+	// Language is the hint sent to the video's ASR model, in the vendor's
+	// language code (for example "zh"). Empty means auto-detection, the
+	// vendors' default; it never inherits the audio section's hint.
+	Language string `yaml:"language,omitempty" json:"language,omitempty"`
+	// MaxFrames caps how many frames one video contributes. More frames see
+	// more of the picture and cost more vision calls; zero keeps the default.
+	MaxFrames int `yaml:"max_frames,omitempty" json:"max_frames,omitempty"`
+	// FrameIntervalSeconds samples one frame every N seconds. Zero derives the
+	// interval from the duration and MaxFrames, which keeps short clips dense
+	// and long ones sparse.
+	FrameIntervalSeconds int `yaml:"frame_interval_seconds,omitempty" json:"frame_interval_seconds,omitempty"`
+	// VLMConfig is the vision model that describes frames sampled from a
+	// video. It mirrors image processing's top-level vlm_config but is owned
+	// by the video pipeline: changing image parsing must never silently change
+	// video output, and a knowledge base that never enabled images can still
+	// describe video frames. nil means "this section has no vision model", the
+	// same meaning as an empty VLMConfig, so old rows keep their exact JSON.
+	VLMConfig *VLMConfig `yaml:"vlm_config,omitempty" json:"vlm_config,omitempty"`
+	// VideoModelID is the video understanding model used by video_direct: a
+	// Video row that accepts the whole file and answers in text. It is its own
+	// field because it is a third model with a third role — neither the ASR
+	// model that transcribes narration nor the VLM that describes sampled
+	// frames — and picking one must not redirect the others. Empty means the
+	// direct mode has no model, and the mode then archives the video instead of
+	// borrowing a model the operator did not choose.
+	VideoModelID string `yaml:"video_model_id,omitempty" json:"video_model_id,omitempty"`
+	// DirectInput selects how the video reaches the model in the direct mode:
+	// "auto" (or empty) sends files that fit the provider's inline ceiling
+	// base64 inside the request and uploads the rest to the vendor's
+	// temporary storage, "base64" always sends inline and fails rather than
+	// uploading, "url" means the caller supplies the URL, and "upload" always
+	// stages the file in the vendor's storage. Normalize stores the effective
+	// value, so a row saved by this build spells "auto" out.
+	DirectInput string `yaml:"direct_input,omitempty" json:"direct_input,omitempty"`
+	// DirectPrompt is extra guidance appended to the built-in prompt of the
+	// direct mode, in the same shape as the frame description instructions: the
+	// system-owned rules (language, output shape, "do not guess") still win, so
+	// a knowledge base can steer the summary without breaking what makes it
+	// indexable.
+	DirectPrompt string `yaml:"direct_prompt,omitempty" json:"direct_prompt,omitempty"`
+}
+
+// EffectiveMaxFrames returns how many frames this video may contribute,
+// clamped to the supported range. It is safe to call on rows that were never
+// Normalized: an unset (zero) cap means the built-in default rather than zero
+// frames.
+func (c VideoConfig) EffectiveMaxFrames() int {
+	switch {
+	case c.MaxFrames <= 0:
+		return DefaultVideoMaxFrames
+	case c.MaxFrames > MaxAllowedVideoFrames:
+		return MaxAllowedVideoFrames
+	default:
+		return c.MaxFrames
+	}
+}
+
+// EffectiveFrameIntervalSeconds returns the configured sampling step in
+// seconds, clamped to the supported range. Zero means "derive it from the
+// duration and the frame cap", which is what the sampler does with it.
+func (c VideoConfig) EffectiveFrameIntervalSeconds() int {
+	switch {
+	case c.FrameIntervalSeconds < 0:
+		return 0
+	case c.FrameIntervalSeconds > MaxVideoFrameIntervalSeconds:
+		return MaxVideoFrameIntervalSeconds
+	default:
+		return c.FrameIntervalSeconds
+	}
+}
+
+// FrameVLM returns the video section's own vision configuration. It never
+// falls back to the knowledge base's image vlm_config: a zero value here means
+// "no frame description is configured", and callers can ask IsEnabled without
+// nil-checking first.
+func (c VideoConfig) FrameVLM() VLMConfig {
+	if c.VLMConfig == nil {
+		return VLMConfig{}
+	}
+	return *c.VLMConfig
+}
+
+// Normalize fills the mode default and coalesces unknown modes to audio_only:
+// silently keeping a mode the pipeline cannot run would turn a typo into a
+// video that is neither transcribed nor obviously misconfigured.
+func (c *VideoConfig) Normalize() {
+	if c == nil {
+		return
+	}
+	c.ModelID = strings.TrimSpace(c.ModelID)
+	c.Language = strings.TrimSpace(c.Language)
+	c.VideoModelID = strings.TrimSpace(c.VideoModelID)
+	c.DirectPrompt = strings.TrimSpace(c.DirectPrompt)
+	// An unknown transport is coalesced to auto for the same reason an
+	// unknown mode is coalesced to audio_only: a typo must not silently keep
+	// a value the pipeline will never read.
+	c.DirectInput = NormalizeVideoDirectInput(c.DirectInput)
+	// Store the effective sampling policy so the JSONB column cannot keep a
+	// value the pipeline clamps anyway: zero frames or a negative step read as
+	// "unset" on load, and an out-of-range cap is brought back into the range
+	// the sampler enforces.
+	c.MaxFrames = c.EffectiveMaxFrames()
+	c.FrameIntervalSeconds = c.EffectiveFrameIntervalSeconds()
+	switch strings.TrimSpace(c.Mode) {
+	case "", VideoParseModeAudioOnly:
+		c.Mode = VideoParseModeAudioOnly
+	case VideoParseModeKeyframes, VideoParseModeAudioKeyframes, VideoParseModeDirect:
+		c.Mode = strings.TrimSpace(c.Mode)
+	default:
+		c.Mode = VideoParseModeAudioOnly
+	}
+	// Normalize the nested vision block through a copy and store that copy:
+	// the incoming request's struct must not alias the knowledge base's row,
+	// and a block that carries no setting decodes to nil so the JSONB column
+	// keeps its pre-vision-config shape.
+	if c.VLMConfig != nil {
+		nested := *c.VLMConfig
+		nested.ModelID = strings.TrimSpace(nested.ModelID)
+		nested.DescriptionLanguage = strings.TrimSpace(nested.DescriptionLanguage)
+		nested.CustomInstructions = strings.TrimSpace(nested.CustomInstructions)
+		if nested == (VLMConfig{}) {
+			c.VLMConfig = nil
+		} else {
+			c.VLMConfig = &nested
+		}
+	}
+}
+
+// Equal reports whether two video configurations express the same setting. The
+// nested vision block is compared by value: Normalize hands out a fresh copy,
+// so a pointer comparison would report a change on every save. The sampling
+// knobs compare by their effective value too: an old row with no cap and a row
+// normalized to the default both sample the same way.
+func (c VideoConfig) Equal(other VideoConfig) bool {
+	return c.Enabled == other.Enabled &&
+		c.Mode == other.Mode &&
+		c.ModelID == other.ModelID &&
+		c.Language == other.Language &&
+		c.VideoModelID == other.VideoModelID &&
+		c.EffectiveDirectInput() == other.EffectiveDirectInput() &&
+		c.DirectPrompt == other.DirectPrompt &&
+		c.EffectiveMaxFrames() == other.EffectiveMaxFrames() &&
+		c.EffectiveFrameIntervalSeconds() == other.EffectiveFrameIntervalSeconds() &&
+		c.FrameVLM() == other.FrameVLM()
+}
+
+// EffectiveMode returns the mode the pipeline runs, without mutating the
+// stored value. Decoded rows may hold an empty mode; callers that merely read
+// the config must not have to Normalize first.
+func (c VideoConfig) EffectiveMode() string {
+	switch strings.TrimSpace(c.Mode) {
+	case VideoParseModeKeyframes:
+		return VideoParseModeKeyframes
+	case VideoParseModeAudioKeyframes:
+		return VideoParseModeAudioKeyframes
+	case VideoParseModeDirect:
+		return VideoParseModeDirect
+	default:
+		return VideoParseModeAudioOnly
+	}
+}
+
+// NormalizeVideoDirectInput coalesces one stored transport into the value the
+// client acts on. An empty value is the decode result of rows written before
+// the field existed and means auto; an unknown value is a typo the pipeline
+// must not carry into a switch, so it means auto as well.
+func NormalizeVideoDirectInput(mode string) string {
+	switch strings.TrimSpace(mode) {
+	case VideoDirectInputBase64:
+		return VideoDirectInputBase64
+	case VideoDirectInputURL:
+		return VideoDirectInputURL
+	case VideoDirectInputUpload:
+		return VideoDirectInputUpload
+	default:
+		return VideoDirectInputAuto
+	}
+}
+
+// EffectiveDirectInput returns the transport the direct mode uses, without
+// mutating the stored value. It is safe on rows that were never Normalized.
+func (c VideoConfig) EffectiveDirectInput() string {
+	return NormalizeVideoDirectInput(c.DirectInput)
+}
+
+// AllowsAudioParse reports whether the mode reads the narration. An empty mode
+// is the decode result of rows written before the field existed, and means the
+// audio_only default. An unrecognised mode is refused here (Normalize is what
+// coalesces it on save): a typo must archive the video, not silently run a
+// source the operator did not choose.
+func (c VideoConfig) AllowsAudioParse() bool {
+	if !c.Enabled {
+		return false
+	}
+	switch strings.TrimSpace(c.Mode) {
+	case "", VideoParseModeAudioOnly, VideoParseModeAudioKeyframes:
+		return true
+	default:
+		return false
+	}
+}
+
+// AllowsKeyframeParse reports whether the mode describes sampled frames. The
+// same strictness about unknown modes applies.
+func (c VideoConfig) AllowsKeyframeParse() bool {
+	if !c.Enabled {
+		return false
+	}
+	switch strings.TrimSpace(c.Mode) {
+	case VideoParseModeKeyframes, VideoParseModeAudioKeyframes:
+		return true
+	default:
+		return false
+	}
+}
+
+// AllowsDirectParse reports whether the mode hands the whole video to a video
+// understanding model. The same strictness about unknown modes applies: only
+// the explicit video_direct value turns it on.
+func (c VideoConfig) AllowsDirectParse() bool {
+	if !c.Enabled {
+		return false
+	}
+	return strings.TrimSpace(c.Mode) == VideoParseModeDirect
+}
+
+// HasOwnASRModel reports whether the video section names its own ASR model.
+// There is no fallback: an empty value means the video cannot transcribe, and
+// the operator has to choose a model in the video section.
+func (c VideoConfig) HasOwnASRModel() bool {
+	return strings.TrimSpace(c.ModelID) != ""
+}
+
+// HasOwnVideoModel reports whether the video section names its own video
+// understanding model. Like the ASR and frame models it belongs to this
+// section only; no other section's model is ever borrowed for it.
+func (c VideoConfig) HasOwnVideoModel() bool {
+	return strings.TrimSpace(c.VideoModelID) != ""
+}
+
+// Value implements the driver.Valuer interface, used to convert VideoConfig to database value
+func (c VideoConfig) Value() (driver.Value, error) {
+	return json.Marshal(c)
+}
+
+// Scan implements the sql.Scanner interface, used to convert database value to VideoConfig
+func (c *VideoConfig) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		return nil
+	}
+	return json.Unmarshal(b, c)
+}
+
+// VideoAudioParseEnabled reports whether this knowledge base can turn a video
+// into searchable text under its configured mode. Depending on the mode the
+// video needs at least one text source:
+//
+//   - audio modes need the video section's own ASR model
+//     (video_config.model_id). The audio section's asr_config.model_id does not
+//     count: the two sections are configured independently.
+//   - keyframe modes need the video section's own vision model
+//     (video_config.vlm_config.model_id). The image section's
+//     vlm_config.model_id does not count: the two sections are configured
+//     independently, and an implicit fallback would hide which model actually
+//     described the frames.
+//   - the direct mode needs the video section's own video understanding model
+//     (video_config.video_model_id). Neither of the other two stands in for
+//     it: they read different things, and a missing video model has to be
+//     visible in the settings rather than turn into a silent transcription.
+//
+// The model ids are only checked for presence here: whether the id resolves to
+// an existing, correctly typed model is a database question answered by the
+// worker, which degrades the video instead of rejecting the import.
+//
+// The single predicate is shared by the import gates, the create path and the
+// worker so they cannot disagree about whether a video is parseable.
+func VideoAudioParseEnabled(kb *KnowledgeBase) bool {
+	if kb == nil || !kb.VideoConfig.Enabled {
+		return false
+	}
+	if kb.VideoConfig.AllowsAudioParse() && kb.VideoConfig.HasOwnASRModel() {
+		return true
+	}
+	if kb.VideoConfig.AllowsKeyframeParse() && kb.VideoConfig.FrameVLM().IsEnabled() {
+		return true
+	}
+	return kb.VideoConfig.AllowsDirectParse() && kb.VideoConfig.HasOwnVideoModel()
+}
+
 // ExtractConfig represents the extract configuration for a knowledge base
 type ExtractConfig struct {
 	// Enabled turns graph extraction on. Node and relation types are edited in the knowledge base editor.
@@ -813,6 +1193,9 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	if kb.Type != KnowledgeBaseTypeFAQ {
 		kb.FAQConfig = nil
 	}
+	// Keep the video mode canonical so the settings UI and the pipeline read
+	// the same value even on rows written before the column existed.
+	kb.VideoConfig.Normalize()
 	if kb.Type != KnowledgeBaseTypeDocument {
 		kb.AutoTagConfig = nil
 		kb.ProfileConfig = nil
@@ -897,6 +1280,14 @@ func (kb *KnowledgeBase) MarshalJSON() ([]byte, error) {
 	redacted.StorageConfig.SecretID = ""
 	redacted.StorageConfig.SecretKey = ""
 	redacted.VLMConfig.APIKey = ""
+	// The video section carries its own VLMConfig. Copy it before redacting:
+	// the nested block is a pointer, so writing through it would clear the
+	// caller's in-memory key, not just the rendered response.
+	if redacted.VideoConfig.VLMConfig != nil {
+		frameVLM := *redacted.VideoConfig.VLMConfig
+		frameVLM.APIKey = ""
+		redacted.VideoConfig.VLMConfig = &frameVLM
+	}
 	aux := struct {
 		*alias
 		Capabilities KBCapabilities `json:"capabilities"`

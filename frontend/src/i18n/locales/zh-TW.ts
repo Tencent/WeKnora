@@ -1057,6 +1057,8 @@ export default {
     dingtalkIngestLabel: '釘釘攝取範圍',
     dingtalkIncludeUploadedFiles: '攝取知識庫中的上傳檔案（docx / pptx / xlsx / pdf）',
     dingtalkIncludeUploadedFilesHint: '預設關閉。開啟後，所選範圍內的 Word / PowerPoint / Excel / PDF 上傳檔案會被下載並解析入庫，單一檔案上限 64 MiB；這些檔案的正文會計入儲存與向量化成本。關閉時它們只會被跳過，同步日誌會說明開關未開啟，不會刪除知識庫中已有的副本。',
+    dingtalkStoreUnindexedMedia: '影片僅存檔、不建立索引',
+    dingtalkStoreUnindexedMediaHint: '預設關閉。開啟後，所選範圍內的影片檔案（mp4 / mov / m4v / webm / mkv / avi / wmv / flv）會被下載並作為檔案保留：可以找到、播放與下載，但不會被解析，也不會出現在檢索結果中。關閉時與以往一樣直接跳過。之後若再關閉，下一次完整同步會移除這些存檔副本，與其他取消選取的檔案一致。',
     prereqBarText_dingtalk: '首次使用？點擊查看釘釘應用設定指引',
     prereqStep1Brief_dingtalk: '建立企業內部應用',
     prereqStep1Desc_dingtalk: '在釘釘開放平台建立企業內部應用，並獲取 Client ID 和 Client Secret',
@@ -3051,7 +3053,8 @@ export default {
         query_understand_model: '問題理解模型',
         follow_up_model: '追問模型',
         extract_model: '記憶提取模型',
-        unknown: '其他模型設定'
+        unknown: '其他模型設定',
+        video_model: '影片模型',
       }
     },
     debug: {
@@ -3109,7 +3112,10 @@ export default {
         reasoningReturned: '返回推論內容',
         textChars: '轉寫字符數',
         segmentCount: '分段數量'
-      }
+      },
+      videoFile: '影片檔案',
+      videoPrompt: '影片提示詞',
+      videoPromptPlaceholder: '例如：這段影片分幾步講了什麼？',
     },
     builtinModels: {
       title: '內建模型',
@@ -3140,6 +3146,11 @@ export default {
       title: 'ASR 語音模型',
       desc: '設定用於語音辨識和音訊轉錄的語音轉文字模型（如 OpenAI Whisper）',
       empty: '暫無 ASR 語音模型'
+    },
+    video: {
+      title: '影片',
+      desc: '可直接讀取整段影片並以文字作答的影片理解模型（「影片」類型）',
+      empty: '還沒有影片模型'
     },
     vllm: {
       title: 'VLLM 視覺模型',
@@ -3175,7 +3186,8 @@ export default {
       embedding: 'Embedding',
       rerank: 'ReRank',
       vllm: '視覺',
-      asr: '語音'
+      asr: '語音',
+      video: '影片'
     }
   },
   mcpSettings: {
@@ -3618,7 +3630,8 @@ export default {
         rerank: '設定用於結果重排序的模型',
         vllm: '設定用於視覺理解和多模態的視覺語言模型',
         asr: '設定用於語音辨識和音訊轉錄的語音轉文字模型',
-        default: '設定模型資訊'
+        default: '設定模型資訊',
+        video: '設定可直接讀取整段影片的影片理解模型',
       }
     }
   },
@@ -3941,6 +3954,10 @@ export default {
         }
       },
       keyDescriptions: {
+        asr: {
+          long_audio_chunking_enabled: '是否把超過廠商上限的長音訊切段後分段轉寫。關閉時整段音訊直接交給廠商，超長會失敗；開啟後按「單段音訊時長」切分並合併結果。每次轉寫即時讀取，修改後立即生效、無需重啟。預設關閉。',
+          max_segment_seconds: '長音訊切段的單段時長（秒，30-300）。僅在開啟「長音訊切段」後生效；每次轉寫即時讀取，修改後立即生效。預設 120 秒。'
+        },
         model: {
           max_concurrency: '後台任務（文件入庫/富化）對單個模型的預設併發上限，按模型 ID 全副本共享。每次呼叫實時讀取，修改後立即生效、無需重啟。0 或負數表示關閉預設限制（各模型仍會尊重自身在模型管理裡設定的上限）。僅影響後台任務，不影響交互式對話。'
         },
@@ -3972,6 +3989,10 @@ export default {
         }
       },
       keyLabels: {
+        asr: {
+          long_audio_chunking_enabled: '長音訊切段',
+          max_segment_seconds: '單段音訊時長（秒）'
+        },
         model: {
           max_concurrency: '模型預設併發上限'
         },
@@ -4210,6 +4231,10 @@ export default {
         }
       },
       sections: {
+        asr: {
+          title: '語音辨識',
+          description: '配置長音訊轉寫：預設整段交給廠商，超過上限會失敗；可開啟切段後分段轉寫並合併結果。修改後立即生效，無需重啟。'
+        },
         other: {
           title: '其他設定',
           description: '當前部署中未歸入標準分組的設定項。'
@@ -4682,6 +4707,73 @@ export default {
       languageLabel: '音訊語言提示',
       languageDescription: '可選；指定主要語種可提高部分 ASR 模型的識別穩定性，留空時自動檢測',
       languagePlaceholder: '例如 zh、en，留空自動檢測'
+    },
+    video: {
+      title: '影片處理',
+      description: '設定影片解析。依解析方式，影片的旁白、畫面、兩者或整段影片（直讀）將轉換為可檢索文字。',
+      label: '啟用影片解析',
+      desc: '開啟後影片將轉寫為文字並參與檢索；關閉時影片僅存檔，可播放但無法檢索。',
+      modeLabel: '解析方式',
+      modeDescription: '選擇影片的解析範圍；各方式的呼叫成本與產出不同。',
+      modeAudioOnly: '僅語音轉寫（輕量）',
+      modeAudioOnlyDesc: '僅轉寫旁白，不產生畫面描述；每段影片一次 ASR 呼叫，成本最低。',
+      modeKeyframes: '關鍵影格畫面描述',
+      modeKeyframesDesc: '僅產生畫面描述，不轉寫旁白；依影片長度均勻擷取最多 12 個影格（可設定）交由視覺模型處理。',
+      modeAudioKeyframes: '語音 + 畫面描述（標準）',
+      modeAudioKeyframesDesc: '同時執行旁白轉寫與畫面描述，並依時間軸合併；產出最完整，成本最高（一次 ASR + 最多 12 次視覺呼叫，影格數可設定）。',
+      modelLabel: '影片 ASR 模型',
+      modelDescription: '僅用於本知識庫的影片旁白轉寫，不影響「音訊處理」所選模型。',
+      modelPlaceholder: '選擇影片轉寫用的 ASR 模型',
+      asrHint: '影片轉寫需單獨選擇 ASR 模型，不與「音訊處理」共用。',
+      asrRequired: '請先選擇影片 ASR 模型，否則影片僅產生畫面描述或僅存檔。',
+      languageLabel: '轉寫語言',
+      languageDescription: '影片旁白的語言提示；留空則自動偵測。此設定獨立於「音訊處理」的語言設定。',
+      languagePlaceholder: '留空自動偵測；可輸入其他語言代碼',
+      languageOptions: {
+        zh: '中文',
+        en: '英語',
+        ja: '日語',
+        ko: '韓語',
+        ru: '俄語'
+      },
+      vlmHint: '畫面描述使用「影片處理」頁獨立的視覺模型；擷取影格數與取樣間隔可在下方調整。',
+      maxFramesLabel: '最多擷取影格數',
+      maxFramesDescription: '單一影片提交給視覺模型的最大影格數（1-60）。影格數越多覆蓋的畫面越多，視覺呼叫成本越高；預設 12。',
+      frameIntervalLabel: '取樣間隔（秒）',
+      frameIntervalDescription: '每隔多少秒擷取一個影格（0-3600）。取 0 時依影片長度與「最多擷取影格數」自動計算取樣間隔。',
+      vlmRequired: '未選擇影片畫面視覺模型，無法產生畫面描述，影片將維持僅存檔；請先在「影片處理」中選擇。',
+      vlmPartial: '未選擇影片畫面視覺模型，本次僅轉寫旁白，畫面描述將被略過。',
+      vlmLabel: '畫面視覺模型（VLM）',
+      vlmDescription: '用於描述擷取的影片畫面。此設定獨立於「影像處理」，修改圖片解析設定不影響影片輸出。',
+      vlmPlaceholder: '選擇影片畫面描述用的視覺模型',
+      vlmLanguageLabel: '畫面描述語言',
+      vlmLanguageDescription: '畫面描述的產生語言；留空則跟隨請求語言。',
+      vlmLanguageAuto: '自動（跟隨請求語言）',
+      customInstructionsLabel: '畫面描述要求',
+      customInstructionsDescription: '附加到內建畫面描述要求之後，用於指定需重點辨識的資訊。內建要求始終優先，不可覆寫「看不清就不描述、不猜測」的約束。',
+      customInstructionsPlaceholder: '指定需重點辨識的畫面資訊，例如：彈窗標題與錯誤文案；忽略右下角浮水印。',
+      modeDirect: '影片直讀（完整理解）',
+      modeDirectDesc: '將整段影片提交給影片理解模型，一次產生涵蓋旁白、字幕與畫面的描述。產出最完整；此方式會將影片檔案傳輸至模型服務商。',
+      videoModelLabel: '影片模型',
+      videoModelDescription: '用於整段影片直讀的模型。此設定與 ASR、畫面 VLM 相互獨立，修改其中一項不影響其餘兩項。',
+      videoModelPlaceholder: '選擇影片理解模型',
+      videoModelHint: '影片模型接收整段影片並以文字回傳；傳輸方式見下方「傳輸方式」。',
+      videoModelRequired: '請先選擇影片模型，否則直讀無可用模型，影片僅存檔。',
+      directFallbackHint: '直讀失敗時回退到本頁已設定的語音辨識與畫面描述模型；兩者均未設定時僅存檔。',
+      directPromptLabel: '直讀要求',
+      directPromptDescription: '附加到內建提示詞之後。輸出格式與「看不清就不描述」的約束仍然優先。',
+      directPromptPlaceholder: '例如：保留章節標題，並列出畫面中出現的全部指令。',
+      directInputLabel: '傳輸方式',
+      directInputDescription: '影片提交至模型的方式：請求內容內聯（base64）、服務商暫存空間，或既有的公網網址。',
+      directInputCostHint: '成本與合規：base64 內聯不在服務商端產生暫存檔案，但影片隨請求內容傳輸，受請求內容大小上限約束；暫存空間方式額外佔用上傳頻寬，並在服務商端保留暫存檔案（阿里雲 48 小時後失效）。',
+      directInputAuto: '自動（建議）',
+      directInputAutoDesc: '依影片大小自動選擇：未超過內聯上限時使用 base64，超過時改用暫存空間。',
+      directInputBase64: 'base64 內聯',
+      directInputBase64Desc: '影片編碼至請求內容，不經過第三方暫存空間；超過服務商上限時直接失敗，不會改用上傳方式。',
+      directInputUpload: '上傳暫存空間',
+      directInputUploadDesc: '先上傳至模型服務商的暫存空間再引用，支援大檔案（上限約 1 GB）；上傳耗時較長，暫存檔案會保留一段時間。',
+      directInputUrl: '公網 URL（外部呼叫）',
+      directInputUrlDesc: '適用於呼叫方已提供公網網址的影片；本頁匯入的影片為本機檔案，選用此方式將導致直讀失敗。',
     },
     multimodal: {
       title: '影像處理設定',
@@ -5277,6 +5369,7 @@ export default {
       graph: '知識圖譜',
       multimodal: '影像處理',
       asr: '音訊處理',
+      video: '影片處理',
       datasource: '資料源',
       share: '共享管理',
       activity: '活動記錄'
@@ -5319,6 +5412,7 @@ export default {
         partial: '部分完成',
         canceled: '已取消',
         failed: '失敗',
+        stored: '僅存檔',
         enqueue: '任務提交',
         reuse_vectors: '復用向量',
         reparse: '重新解析',
@@ -7728,7 +7822,8 @@ export default {
     tagLabel: '標籤',
     tagPlaceholder: '請選擇標籤',
     noTags: '暫無標籤',
-    videosFilteredNoVLM: '已跳過 {count} 個影片檔案（暫不支持影片上傳）',
+    videosFilteredParsingDisabled: '已跳過 {count} 個影片檔案（影片解析未開啟，可在知識庫設定 → 影片處理裡開啟）',
+    videoModelNotConfigured: '影片解析已開啟，但尚未設定目前方式所需的模型（ASR / 視覺 / 影片模型）；請先在知識庫設定 → 影片處理中設定，否則影片上傳會被拒絕',
     unsupportedTypesHint: '部分文件類型（{types}）暫無可用解析引擎，上傳後將無法解析',
     goToParserSettings: '前往設定',
     importURL: '匯入網頁',
@@ -7801,6 +7896,8 @@ export default {
     regenerateSummary: '重新生成摘要',
     generateSummary: '生成摘要',
     noDocumentSummary: '暫無文件摘要',
+    archiveNoSummary:
+      '該檔案為僅存檔條目，未建立索引，因此沒有摘要；可在「預覽」中播放原始檔案',
     summaryRefreshed: '摘要已更新',
     summaryRefreshQueued: '摘要重新整理已提交，完成後會自動更新',
     indexFailed: '索引同步失敗',
@@ -7923,6 +8020,8 @@ export default {
     statusFailed: '失敗',
     statusCancelled: '已取消',
     statusDraft: '草稿',
+    statusStored: '僅存檔 · 未索引',
+    storedHint: '該檔案未建立索引，不會出現在檢索結果中',
     noDescription: '暫無描述',
     emptyKnowledgeDragDrop: '知識為空，拖放上傳',
     pdfDocFormat: 'pdf、doc 格式檔案，不超過{size}M',

@@ -6,6 +6,7 @@ export const KNOWN_MODEL_USAGE_BINDINGS = [
   'image_processing_model',
   'vlm_model',
   'asr_model',
+  'video_model',
   'wiki_synthesis_model',
   'auto_tag_model',
   'chat_model',
@@ -126,7 +127,7 @@ export function modelUsageListTruncated(resources: readonly ModelUsageResource[]
 
 export type ModelUsageResourceKind = 'knowledge_base' | 'agent'
 
-export type KnowledgeBaseModelUsageSection = 'models' | 'multimodal' | 'asr'
+export type KnowledgeBaseModelUsageSection = 'models' | 'multimodal' | 'asr' | 'video'
 
 export type AgentModelUsageSection = 'model' | 'multimodal' | 'suggestions'
 
@@ -138,6 +139,10 @@ const knowledgeBaseUsageSections: Partial<Record<KnownModelUsageBinding, Knowled
   image_processing_model: 'multimodal',
   vlm_model: 'multimodal',
   asr_model: 'asr',
+  // The video section owns three model references; the direct video model is
+  // the one that lives on the video page itself (the ASR and frame models are
+  // reported by their role and open the asr / multimodal sections).
+  video_model: 'video',
 }
 
 const agentUsageSections: Partial<Record<KnownModelUsageBinding, AgentModelUsageSection>> = {

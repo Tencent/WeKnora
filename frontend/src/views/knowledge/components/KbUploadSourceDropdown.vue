@@ -70,7 +70,7 @@ import { ref, computed, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon, FileAddIcon, UploadIcon, FolderAddIcon, LinkIcon, EditIcon } from 'tdesign-icons-vue-next'
-import { filterUploadFiles } from '../utils/uploadSources'
+import { filterUploadFiles, getUploadFileExt, UPLOAD_VIDEO_EXTENSIONS } from '../utils/uploadSources'
 
 const props = withDefaults(defineProps<{
   acceptFileTypes?: string
@@ -82,6 +82,10 @@ const props = withDefaults(defineProps<{
   dataGuide?: string
   tooltip?: string
   placement?: 'top' | 'bottom' | 'bottom-right' | 'bottom-left'
+  /** KB `video_config.enabled`: when true the picker admits video files. */
+  allowVideo?: boolean
+  /** `isVideoParsingReady(kbInfo)`: false only triggers an advisory warning. */
+  videoParseReady?: boolean
 }>(), {
   acceptFileTypes: '',
   supportedFileTypes: () => [],
@@ -91,6 +95,8 @@ const props = withDefaults(defineProps<{
   dataGuide: '',
   tooltip: '',
   placement: 'bottom-right',
+  allowVideo: false,
+  videoParseReady: true,
 })
 
 const emit = defineEmits<{
@@ -166,14 +172,17 @@ const handleActionSelect = (data: { value: string }) => {
 
 const notifyFilterResult = (result: ReturnType<typeof filterUploadFiles>, emptyAllSkippedKey: string) => {
   const { validFiles, skippedCount, videoFilteredCount } = result
+  // Announce skipped videos first: when the selection was videos only there is
+  // nothing to upload, and the hint about where to enable parsing is the whole
+  // message the user needs. Returning early before this used to say nothing.
+  if (videoFilteredCount > 0) {
+    MessagePlugin.warning(t('knowledgeBase.videosFilteredParsingDisabled', { count: videoFilteredCount }))
+  }
   if (validFiles.length === 0) {
     if (skippedCount > 0) {
       MessagePlugin.warning(t(emptyAllSkippedKey))
     }
     return false
-  }
-  if (videoFilteredCount > 0) {
-    MessagePlugin.warning(t('knowledgeBase.videosFilteredNoVLM', { count: videoFilteredCount }))
   }
   if (skippedCount > 0) {
     MessagePlugin.warning(t('knowledgeBase.filesSkippedNoEngine', { count: skippedCount }))
@@ -190,11 +199,20 @@ const handleFilesChange = (event: Event, fromFolder: boolean) => {
     supportedFileTypes: props.supportedFileTypes,
     fromFolder,
     multiFile: files.length > 1,
+    allowVideo: props.allowVideo,
   })
 
   if (!notifyFilterResult(result, 'knowledgeBase.allFilesSkippedNoEngine')) {
     input.value = ''
     return
+  }
+
+  // The switch is on, so the menu admits videos — but the server rejects them
+  // when the selected mode has no ASR/VLM model yet. Warn before the upload
+  // (never block: the KB detail can be stale, and the server is authoritative).
+  const hasVideo = result.validFiles.some(file => UPLOAD_VIDEO_EXTENSIONS.includes(getUploadFileExt(file)))
+  if (props.allowVideo && !props.videoParseReady && hasVideo) {
+    MessagePlugin.warning(t('knowledgeBase.videoModelNotConfigured'))
   }
 
   emit('files', result.validFiles)

@@ -19,7 +19,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/searchutil"
@@ -2797,18 +2796,20 @@ func (s *knowledgeService) ReparseKnowledge(
 	knowledgeID string,
 	processOverrides *types.KnowledgeProcessOverrides,
 ) (*types.Knowledge, error) {
-	return s.reparseKnowledge(ctx, knowledgeID, processOverrides, false)
+	return s.reparseKnowledge(ctx, knowledgeID, processOverrides, false, false)
 }
 
 // reparseKnowledge implements ReparseKnowledge. tasksDequeued tells it the
 // caller already dropped the knowledge's queued tasks (ReplaceKnowledgeFile
 // does, before pointing the row at the new file), which saves a second scan
-// of every queue.
+// of every queue. allowStored is set only by that same call: swapping in a
+// parseable file is the one legitimate way out of an archive.
 func (s *knowledgeService) reparseKnowledge(
 	ctx context.Context,
 	knowledgeID string,
 	processOverrides *types.KnowledgeProcessOverrides,
 	tasksDequeued bool,
+	allowStored bool,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start re-parsing knowledge")
 
@@ -2816,6 +2817,21 @@ func (s *knowledgeService) reparseKnowledge(
 	if err != nil {
 		logger.Errorf(ctx, "Failed to load knowledge: %v", err)
 		return nil, err
+	}
+
+	// A stored-only entry has no parse to run: its bytes are the deliverable and
+	// no index was ever built. Cleaning up and re-parsing would flip a settled
+	// archive to "failed" with no path back to "stored", so refuse before
+	// anything is destroyed.
+	//
+	// The exception is a video the knowledge base has since opted into parsing:
+	// that is the upgrade path for the archive that already exists, and the
+	// worker keeps "stored" as its floor if the audio cannot be read. The
+	// prerequisites are the video section's own models, the same ones the
+	// worker reads, so a reparse never enqueues a task bound to degrade.
+	videoUpgrade := canUpgradeStoredVideo(existing, kb)
+	if existing.ParseStatus == types.ParseStatusStored && !allowStored && !videoUpgrade {
+		return nil, werrors.NewBadRequestError("该文件为仅存档条目，没有可重建的索引，不支持重新解析")
 	}
 
 	tenantID := existing.TenantID
@@ -3818,14 +3834,15 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		return nil
 	}
 
-	// 视频文件不再支持入库解析
-	if payload.FilePath != "" && IsVideoType(payload.FileType) {
-		logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
-			Errorf("processDocument video not supported")
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = "暂不支持视频文件"
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+	// 视频：只有 KB 显式开启「视频解析」且所选解析方式需要的模型可用才读取。
+	// 条件不满足时视频保持存档（stored），不算失败：配置可能在任务入队后被
+	// 关掉，而文件本身仍然完好，没有理由把一次同步标红。
+	if payload.FilePath != "" && IsVideoType(payload.FileType) &&
+		!videoParseReady(kb) {
+		if _, err := s.settleVideoAsArchive(ctx, knowledge,
+			"video parsing is disabled or no model is configured for its mode"); err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -3951,59 +3968,18 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 	}
 
-	// Step 1.5: ASR transcription for audio files
+	// Step 1.5: ASR transcription for audio files, and for videos whose mode
+	// reads the narration. The ASR step is shared: the video branch only swaps
+	// in the model resolved for the video (video_config.model_id, falling back
+	// to the audio section) and merges frame captions afterwards.
 	if convertResult != nil && convertResult.IsAudio && len(convertResult.AudioData) > 0 {
-		if !eff.ASRConfig.IsASREnabled() {
-			logger.Error(ctx, "Audio file detected but ASR is not configured")
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = "ASR model is not configured for audio transcription"
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+		settled, asrErr := s.transcribeMedia(ctx, kb, knowledge, eff, convertResult, isLastRetry)
+		if asrErr != nil {
+			return asrErr
+		}
+		if settled {
 			return nil
 		}
-
-		logger.Infof(ctx, "[ASR] Starting audio transcription for knowledge %s, audio size=%d bytes",
-			knowledge.ID, len(convertResult.AudioData))
-
-		asrModel, err := s.modelService.GetASRModel(ctx, eff.ASRConfig.ModelID)
-		if err != nil {
-			logger.Errorf(ctx, "[ASR] Failed to get ASR model: %v", err)
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = fmt.Sprintf("failed to get ASR model: %v", err)
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
-			return nil
-		}
-
-		// The knowledge base's language hint; the vendor declares where it
-		// goes, or that it takes none.
-		asrCtx := asr.WithLanguage(ctx, eff.ASRConfig.Language)
-		transcriptionResult, err := asrModel.Transcribe(asrCtx, convertResult.AudioData, knowledge.FileName)
-		if err != nil {
-			logger.Errorf(ctx, "[ASR] Transcription failed: %v", err)
-			if isLastRetry {
-				knowledge.ParseStatus = "failed"
-				knowledge.ErrorMessage = fmt.Sprintf("audio transcription failed: %v", err)
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
-			}
-			return fmt.Errorf("audio transcription failed: %w", err)
-		}
-
-		transcribedText, timeBlocks := transcriptWithSegments(transcriptionResult)
-
-		if transcribedText == "" {
-			logger.Warn(ctx, "[ASR] Transcription returned empty text")
-			transcribedText = "[No speech detected in audio file]"
-			timeBlocks = nil
-		}
-
-		logger.Infof(ctx, "[ASR] Transcription completed, text length=%d", len(transcribedText))
-		// Replace the audio placeholder with the transcribed text
-		convertResult.MarkdownContent = transcribedText
-		convertResult.SourceBlocks = timeBlocks
-		convertResult.IsAudio = false
-		convertResult.AudioData = nil
 	}
 
 	// Normalize inline HTML tables from any parser engine (MinerU, builtin,
@@ -4180,6 +4156,15 @@ func (s *knowledgeService) convert(
 	s.beginStage(ctx, knowledge.ID, types.StageDocReader, docInput)
 	isURL := payload.URL != ""
 	fileType := payload.FileType
+
+	// Video takes the local audio-extraction path instead of the parser: the
+	// docreader has no video parser, and ffmpeg only exists in this container.
+	// Everything after extraction is the shared ASR/chunk/embed pipeline, so
+	// this hop is the whole difference between a video and an audio upload.
+	if !isURL && IsVideoType(fileType) {
+		return s.convertVideo(ctx, payload, kb, knowledge)
+	}
+
 	tenantOverrides := s.getParserEngineOverridesFromContext(ctx)
 	var uploadOverrides map[string]string
 	if processOverrides, err := knowledge.ProcessOverrides(); err == nil && processOverrides != nil {

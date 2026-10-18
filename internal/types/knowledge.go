@@ -69,6 +69,13 @@ const (
 	// queued downstream tasks, but the knowledge row and any already-written
 	// chunks/index are kept so the user can re-trigger parsing via reparse.
 	ParseStatusCancelled = "cancelled"
+	// ParseStatusStored indicates the file itself is the deliverable and no
+	// parse was ever intended: the bytes are saved, so the entry is visible,
+	// downloadable and (for media) playable, but zero chunks are produced and
+	// it therefore never appears in retrieval results. Nobody marks such a row
+	// failed for not being parseable, and no parse task is dispatched for it.
+	// A terminal state by construction: only an explicit re-parse moves it.
+	ParseStatusStored = "stored"
 )
 
 // Summary status constants for async summary generation

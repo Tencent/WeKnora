@@ -14,6 +14,10 @@ test('refreshes data source controls after assistant changes and stops on unmoun
     'tdesign-vue-next': { MessagePlugin: { error: assert.fail } },
     '@/stores/auth': { useAuthStore: () => ({ hasRole: () => true }) },
     '@/utils/cronHumanize': {},
+    // Same one-line stub as PR #4444: the fixture loads DataSourceSettings.vue,
+    // which now resolves connector labels through this composable. Carried here
+    // only so the video branch's CI is green; drop it when #4444 merges.
+    '@/composables/useConnectorLabel': { useConnectorLabel: () => ({ connectorLabel: (type: string | null | undefined) => type ?? '' }) },
     '@/api/datasource': { listDataSources },
   }, { kbId: 'kb' })
   await flush()

@@ -34,9 +34,18 @@ func settingBool(v interface{}, def bool) bool {
 // deliberately, so an upgrade never starts downloading or embedding content
 // nobody asked for.
 type documentSettings struct {
-	// IncludeUploadedFiles admits uploaded Office/PDF files (FILE/DOCUMENT
-	// nodes) that are downloaded from 钉盘 and parsed by WeKnora itself.
+	// IncludeUploadedFiles admits uploaded files that are downloaded from 钉盘
+	// and parsed by WeKnora itself: Office and PDF files (FILE/DOCUMENT nodes)
+	// through their own parsers, and audio (FILE/AUDIO nodes) through ASR.
 	IncludeUploadedFiles bool
+	// StoreUnindexedMedia admits video files as archived entries instead of
+	// skipping them: the bytes are downloaded and kept, but no parse is
+	// attempted and no chunks are written, so the video is visible, playable
+	// and downloadable without ever appearing in retrieval results. Off by
+	// default on purpose, so upgrading an existing deployment never changes
+	// what happens to the videos it already skipped.
+	StoreUnindexedMedia bool
+
 	// PreserveFolderStructure encodes each document's DingTalk folder hierarchy
 	// into its FileName, so the document lands in the knowledge base folder
 	// that mirrors where it lives in the wiki instead of at the root.
@@ -57,6 +66,7 @@ func parseDocumentSettings(dataSourceConfig *types.DataSourceConfig) documentSet
 	}
 	return documentSettings{
 		IncludeUploadedFiles:    settingBool(raw["include_uploaded_files"], false),
+		StoreUnindexedMedia:     settingBool(raw["store_unindexed_media"], false),
 		PreserveFolderStructure: settingBool(raw["preserve_folder_structure"], false),
 	}
 }

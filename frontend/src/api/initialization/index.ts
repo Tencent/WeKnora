@@ -118,6 +118,33 @@ export interface KBModelConfigRequest {
         model_id?: string
         language?: string
     }
+    /**
+     * 视频解析配置。mode 为 audio_only / keyframes / audio_and_keyframes；
+     * model_id 是视频页自己的 ASR 模型，留空就是没配（不沿用音频处理）；
+     * language 是视频转写的语言提示，留空为自动检测。max_frames 是一次
+     * 视频最多抽取的帧数（1-60，默认 12）；frame_interval_seconds 是抽帧
+     * 间隔秒数（0 表示按视频时长与帧数上限自动计算）。vlm_config 是视频
+     * 自己的画面描述模型与要求，同样独立于图像处理的 vlm_config。
+     * video_direct 另有自己的视频模型（video_model_id）、传输方式
+     * （direct_input：auto / base64 / upload / url）与追加要求（direct_prompt）。
+     */
+    video_config?: {
+        enabled: boolean
+        mode?: string
+        model_id?: string
+        language?: string
+        video_model_id?: string
+        direct_input?: string
+        direct_prompt?: string
+        max_frames?: number
+        frame_interval_seconds?: number
+        vlm_config?: {
+            enabled: boolean
+            model_id?: string
+            description_language?: string
+            custom_instructions?: string
+        }
+    }
     documentSplitting: {
         chunkSize: number
         chunkOverlap: number

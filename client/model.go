@@ -19,6 +19,7 @@ const (
 	ModelTypeKnowledgeQA ModelType = "KnowledgeQA" // KnowledgeQA model
 	ModelTypeVLLM        ModelType = "VLLM"        // VLLM model
 	ModelTypeASR         ModelType = "ASR"         // ASR (Automatic Speech Recognition) model
+	ModelTypeVideo       ModelType = "Video"       // Video understanding model (accepts a whole video)
 )
 
 // AllModelTypes returns every model type the server recognises, in a stable
@@ -27,6 +28,7 @@ const (
 func AllModelTypes() []ModelType {
 	return []ModelType{
 		ModelTypeEmbedding, ModelTypeRerank, ModelTypeKnowledgeQA, ModelTypeVLLM, ModelTypeASR,
+		ModelTypeVideo,
 	}
 }
 

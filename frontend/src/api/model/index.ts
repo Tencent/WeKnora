@@ -51,7 +51,7 @@ export interface ModelConfig {
   tenant_id?: number;
   name: string;
   display_name?: string;
-  type: 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR';
+  type: 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR' | 'Video';
   source: 'local' | 'remote';
   description?: string;
   parameters: {

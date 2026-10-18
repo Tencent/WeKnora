@@ -94,6 +94,7 @@ const KB_ACTIVITY_DETAIL_VALUE_LABELS_EN: Record<string, string> = {
   partial: 'Partially completed',
   canceled: 'Canceled',
   failed: 'Failed',
+  stored: 'Archived',
   enqueue: 'Task submission',
   reuse_vectors: 'Reuse vectors',
   reparse: 'Reparse',
