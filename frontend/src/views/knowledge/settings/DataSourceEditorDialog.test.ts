@@ -460,7 +460,7 @@ const dingtalkListingError = {
   message: [
     'list DingTalk workspaces: invalid credentials: DingTalk API status=403',
     'code=Forbidden.AccessDenied.IpNotInWhiteList',
-    'message=访问ip不在白名单之中，request ip=120.231.209.90 appKey(dingabc123xyz)',
+    'message=访问ip不在白名单之中，request ip=198.51.100.7 appKey(dingabc123xyz)',
   ].join(' '),
 }
 
@@ -494,7 +494,7 @@ test('a failed listing clears the stale tree and exposes the error state', async
     assert.match(f.vm.resourceLoadError.faqUrl, /open\.dingtalk\.com/)
     // The toast and the detail never carry the IP or the app key.
     assert.equal(f.errors.at(-1), 'datasource.loadError.ipNotInWhitelist')
-    assert.doesNotMatch(f.vm.resourceLoadError.detail, /120\.231\.209\.90|dingabc123xyz/)
+    assert.doesNotMatch(f.vm.resourceLoadError.detail, /198\.51\.100\.7|dingabc123xyz/)
   } finally { f.close() }
 })
 

@@ -4,7 +4,7 @@
 //
 //   list DingTalk workspaces: invalid credentials: DingTalk API status=403
 //   code=Forbidden.AccessDenied.IpNotInWhiteList message=访问ip不在白名单之中，
-//   request ip=120.231.209.90 appKey(dingxxxx)
+//   request ip=198.51.100.7 appKey(dingxxxx)
 //
 // Shown verbatim that is both unreadable and unsafe: it names the operator's
 // egress IP and the app key. The helpers below keep the diagnostic (minus the

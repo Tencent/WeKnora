@@ -15,7 +15,7 @@ const DINGTALK_IP_ERROR = [
   'list DingTalk workspaces: invalid credentials: DingTalk API status=403',
   'code=Forbidden.AccessDenied.IpNotInWhiteList',
   'message=访问ip不在白名单之中，请参考FAQ: https://open.dingtalk.com/document/org-faq/app-faq,',
-  'request ip=120.231.209.90 appKey(dingabc123xyz)',
+  'request ip=198.51.100.7 appKey(dingabc123xyz)',
 ].join(' ')
 
 test('a DingTalk whitelist error becomes an actionable message with the FAQ', () => {
@@ -29,7 +29,7 @@ test('a DingTalk whitelist error becomes an actionable message with the FAQ', ()
 test('the whitelist error never exposes the egress IP or the app key', () => {
   const classified = classifyDatasourceError({ message: DINGTALK_IP_ERROR })
 
-  assert.doesNotMatch(classified.detail, /120\.231\.209\.90/)
+  assert.doesNotMatch(classified.detail, /198\.51\.100\.7/)
   assert.doesNotMatch(classified.detail, /dingabc123xyz/)
   assert.match(classified.detail, /request ip=\[redacted\]/)
   assert.match(classified.detail, /appKey\(\[redacted\]\)/)
