@@ -23,10 +23,14 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 
 	// Sync errors
-	ErrSyncFailed       = errors.New("sync operation failed")
-	ErrSyncCanceled     = errors.New("sync operation was canceled")
-	ErrFetchFailed      = errors.New("failed to fetch items from source")
-	ErrResourceNotFound = errors.New("resource not found in source system")
+	ErrSyncFailed                   = errors.New("sync operation failed")
+	ErrSyncCanceled                 = errors.New("sync operation was canceled")
+	ErrFetchFailed                  = errors.New("failed to fetch items from source")
+	ErrResourceNotFound             = errors.New("resource not found in source system")
+	ErrOAuthNotConfigured           = errors.New("data source OAuth is not configured")
+	ErrOAuthReauthorizationRequired = errors.New("data source OAuth reauthorization required")
+	ErrOAuthAccountMismatch         = errors.New("data source OAuth account mismatch")
+	ErrOAuthConnectionChanged       = errors.New("data source OAuth connection changed")
 
 	// Knowledge base errors
 	ErrKnowledgeBaseNotFound = errors.New("knowledge base not found")

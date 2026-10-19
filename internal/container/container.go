@@ -69,6 +69,7 @@ import (
 	gitlabConnector "github.com/Tencent/WeKnora/internal/datasource/connector/gitlab"
 	imaConnector "github.com/Tencent/WeKnora/internal/datasource/connector/ima"
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
+	onedriveConnector "github.com/Tencent/WeKnora/internal/datasource/connector/onedrive"
 	rssConnector "github.com/Tencent/WeKnora/internal/datasource/connector/rss"
 	seafileConnector "github.com/Tencent/WeKnora/internal/datasource/connector/seafile"
 	yuqueConnector "github.com/Tencent/WeKnora/internal/datasource/connector/yuque"
@@ -197,6 +198,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewUserResourceFavoriteRepository))
 	must(container.Provide(service.NewWebSearchStateService))
 	must(container.Provide(repository.NewDataSourceRepository))
+	must(container.Provide(repository.NewDataSourceOAuthRepository))
+	must(container.Provide(repository.NewDataSourceItemRepository))
 	must(container.Provide(repository.NewSyncLogRepository))
 	must(container.Provide(repository.NewWikiPageRepository))
 	must(container.Provide(repository.NewMemoryRepository))
@@ -508,9 +511,17 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	// Data source sync framework
 	logger.Debugf(ctx, "[Container] Registering data source sync framework...")
-	must(container.Provide(initConnectorRegistry))
+	must(container.Provide(func(
+		items interfaces.DataSourceItemRepository,
+		oauth *datasource.OneDriveOAuthManager,
+	) (*datasource.ConnectorRegistry, error) {
+		return initConnectorRegistryWithOneDrive(items, oauth)
+	}))
 	must(container.Provide(datasource.NewScheduler))
 	must(container.Provide(service.NewDataSourceService))
+	must(container.Provide(service.NewDataSourceContentManager))
+	must(container.Provide(datasource.NewOneDriveOAuthManager))
+	must(container.Provide(handler.NewDataSourceOAuthHandler))
 	must(container.Invoke(startDataSourceScheduler))
 	logger.Debugf(ctx, "[Container] Data source sync framework registered")
 	must(container.Invoke(startAuditLogRetention))
@@ -1934,6 +1945,13 @@ func registerIMService(imService *imPkg.Service, cleaner interfaces.ResourceClea
 // Aggregates registration errors via errors.Join so a misconfigured or duplicated connector fails
 // container initialization loudly instead of silently disabling the feature at runtime.
 func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
+	return initConnectorRegistryWithOneDrive(nil, nil)
+}
+
+func initConnectorRegistryWithOneDrive(
+	items interfaces.DataSourceItemRepository,
+	oauth *datasource.OneDriveOAuthManager,
+) (*datasource.ConnectorRegistry, error) {
 	registry := datasource.NewConnectorRegistry()
 
 	var errs error
@@ -1976,6 +1994,12 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	}
 	if err := registry.Register(seafileConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register seafile connector: %w", err))
+	}
+	if err := registry.Register(onedriveConnector.NewConnector(items, oauth)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register onedrive connector: %w", err))
+	}
+	if err := registry.Register(onedriveConnector.NewSharePointConnector(items, oauth)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register sharepoint connector: %w", err))
 	}
 
 	// Future connectors will be registered here:

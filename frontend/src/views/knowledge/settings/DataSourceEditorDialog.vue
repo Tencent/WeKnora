@@ -13,12 +13,17 @@ import {
   deleteDataSource,
   putDataSourceCredentials,
   deleteDataSourceCredentials,
+  getDataSourceOAuthAuthorizeURL,
+  getDataSourceOAuthStatus,
+  disconnectDataSourceOAuth,
   type DataSource,
   type Resource,
+  type DataSourceOAuthStatus,
 } from '@/api/datasource'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDatasourceIconUrl } from './datasourceIcons'
+import { waitForOneDriveAuthorization } from './oneDriveOAuthFlow'
 
 const props = defineProps<{
   kbId: string
@@ -32,6 +37,9 @@ const { t } = useI18n()
 const isEdit = computed(() => !!props.dataSource)
 const step = ref(0)
 const submitting = ref(false)
+const oauthStatus = ref<DataSourceOAuthStatus | null>(null)
+const oauthConnecting = ref(false)
+const oauthAuthorizationURL = ref('')
 
 // In edit mode the credential "configured?" flag travels on the main
 // DataSource response (DataSource.credentials.credentials.configured —
@@ -156,6 +164,7 @@ function removeRssAuthHeader(idx: number) {
 }
 
 function needsConnectionTest(): boolean {
+  if (isMicrosoftConnector.value) return false
   return !(isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value)
 }
 
@@ -250,6 +259,10 @@ const expandedResourceIds = ref(new Set<string>())
 // one level at a time instead of traversing the whole tree up front (#1672).
 const loadedChildrenIds = ref(new Set<string>())
 const loadingChildrenIds = ref(new Set<string>())
+// A top-level reload replaces the tree. Child requests from an older tree must
+// not merge into the replacement, otherwise edit-mode loading can intermittently
+// make a document library appear empty.
+const resourceTreeGeneration = ref(0)
 // True when the initial listing already returned the whole tree (connectors like
 // Notion populate parent_id on the first call). In that case expanding a node
 // never needs an extra request.
@@ -448,6 +461,8 @@ const parentMap = computed(() => {
   return map
 })
 
+const resourceMap = computed(() => new Map(resources.value.map(resource => [resource.external_id, resource])))
+
 // `selectedResourceIds` is a MINIMAL COVER SET: only the roots of fully-selected
 // subtrees. Sending this to the backend gives "sync these IDs and all descendants"
 // semantics — including any pages added later under a selected parent.
@@ -499,9 +514,11 @@ async function ensureChildrenLoaded(id: string) {
     return
   }
 
+  const generation = resourceTreeGeneration.value
   loadingChildrenIds.value = new Set(loadingChildrenIds.value).add(id)
   try {
     const res = await listResources(tempDsId.value, id)
+    if (generation !== resourceTreeGeneration.value) return
     const children: Resource[] = res?.data || res || []
     if (children.length > 0) {
       const existing = new Set(resources.value.map(r => r.external_id))
@@ -511,24 +528,23 @@ async function ensureChildrenLoaded(id: string) {
       }
       resources.value = merged
     } else {
-      // Connectors may conservatively advertise HasChildren to avoid an N+1
-      // probe. Once lazy loading proves this is a leaf, collapse it and retain
-      // that fact so another expand cannot trigger another empty request.
-      resources.value = resources.value.map(r => r.external_id === id
-        ? { ...r, has_children: false }
-        : r)
-      const expanded = new Set(expandedResourceIds.value)
-      expanded.delete(id)
-      expandedResourceIds.value = expanded
+      // An empty response can be a transient result while the Microsoft
+      // resource tree is being refreshed. Do not turn it into a permanent
+      // leaf: keep the node expanded and allow the next expand to retry.
+      const loaded = new Set(loadedChildrenIds.value)
+      loaded.delete(id)
+      loadedChildrenIds.value = loaded
     }
     loadedChildrenIds.value = new Set(loadedChildrenIds.value).add(id)
   } catch (e: any) {
+    if (generation !== resourceTreeGeneration.value) return
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
     // Collapse again so the user can retry the expand.
     const next = new Set(expandedResourceIds.value)
     next.delete(id)
     expandedResourceIds.value = next
   } finally {
+    if (generation !== resourceTreeGeneration.value) return
     const s = new Set(loadingChildrenIds.value)
     s.delete(id)
     loadingChildrenIds.value = s
@@ -718,6 +734,24 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'onedrive',
+    available: true,
+    docUrl: 'https://learn.microsoft.com/graph/api/resources/onedrive',
+    permissionDocUrl: 'https://learn.microsoft.com/graph/permissions-reference',
+    permissionPageUrl: 'https://portal.azure.com/',
+    requiredPermissions: [],
+    fields: [],
+  },
+  {
+    type: 'sharepoint',
+    available: true,
+    docUrl: 'https://learn.microsoft.com/graph/api/resources/sharepoint',
+    permissionDocUrl: 'https://learn.microsoft.com/graph/permissions-reference',
+    permissionPageUrl: 'https://portal.azure.com/',
+    requiredPermissions: [],
+    fields: [],
+  },
+  {
     type: 'dingtalk',
     available: true,
     docUrl: 'https://open.dingtalk.com/document/development/knowledge-base-overview',
@@ -791,8 +825,73 @@ const displayedCredentialFields = computed(() => {
   })
 })
 
+const isOAuthConnector = computed(() => form.value.type === 'onedrive')
+const isMicrosoftConnector = computed(() => ['onedrive', 'sharepoint'].includes(form.value.type))
+
+function validateSharePointSiteURL(): boolean {
+  if (form.value.type !== 'sharepoint') return true
+  const siteURL = String(form.value.config.settings.site_url || '').trim()
+  if (!siteURL) {
+    MessagePlugin.warning(`${t('datasource.sharepoint.siteUrl')} ${t('datasource.isRequired')}`)
+    return false
+  }
+  try {
+    const parsed = new URL(siteURL)
+    if (parsed.protocol !== 'https:' || !parsed.hostname.toLowerCase().endsWith('.sharepoint.com') ||
+      parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error()
+  } catch {
+    MessagePlugin.warning(t('datasource.sharepoint.siteUrlInvalid'))
+    return false
+  }
+  form.value.config.settings.site_url = siteURL
+  return true
+}
+
+async function refreshOneDriveOAuthStatus() {
+  if (!isMicrosoftConnector.value || !tempDsId.value) return
+  try {
+    oauthStatus.value = await getDataSourceOAuthStatus(tempDsId.value)
+  } catch {
+    oauthStatus.value = null
+  }
+}
+
+async function connectOneDriveOAuth(replaceConnection = false) {
+  if (!validateSharePointSiteURL()) return
+  if (!tempDsId.value) {
+    const res = await createDataSource({ ...form.value, knowledge_base_id: props.kbId, status: 'paused' } as any)
+    tempDsId.value = (res?.data || res).id
+  }
+  const dsId = tempDsId.value
+  oauthConnecting.value = true
+  try {
+    const url = await getDataSourceOAuthAuthorizeURL(dsId, replaceConnection)
+    oauthAuthorizationURL.value = url
+    const popup = window.open(url, 'weknora-onedrive-oauth', 'popup,width=720,height=760')
+    await waitForOneDriveAuthorization({
+      popup,
+      getStatus: () => getDataSourceOAuthStatus(dsId),
+      onStatus: status => { oauthStatus.value = status },
+      wait: milliseconds => new Promise(resolve => window.setTimeout(resolve, milliseconds)),
+      notCompletedMessage: t('datasource.oauthNotCompleted'),
+    })
+    MessagePlugin.success(t('datasource.oauthConnected'))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('datasource.oauthFailed'))
+  } finally {
+    oauthConnecting.value = false
+  }
+}
+
+async function disconnectOneDriveOAuth() {
+  if (!tempDsId.value || !window.confirm(t('datasource.oauthDisconnectConfirm'))) return
+  await disconnectDataSourceOAuth(tempDsId.value)
+  oauthStatus.value = await getDataSourceOAuthStatus(tempDsId.value)
+}
+
 // --- Drawer lifecycle ---
 watch(visible, async (v) => {
+  resourceTreeGeneration.value++
   if (!v) {
     if (!isEdit.value && tempDsId.value) {
       try {
@@ -821,6 +920,8 @@ watch(visible, async (v) => {
   driveRootLoaded.value = false
   rssAuthHeaders.value = []
   gitlabProjects.value = []
+  oauthStatus.value = null
+  oauthAuthorizationURL.value = ''
 
   if (isEdit.value && props.dataSource) {
     // Reset edit/replace toggle every open so an aborted replace doesn't
@@ -867,6 +968,7 @@ watch(visible, async (v) => {
       }
     }
     tempDsId.value = props.dataSource.id
+    if (isMicrosoftConnector.value) void refreshOneDriveOAuthStatus()
   } else {
     replaceCredentialsMode.value = false
     credentialsConfigured.value = false
@@ -920,6 +1022,7 @@ function selectType(def: ConnectorDef) {
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
   form.value.config.credentials = def.type === "confluence" ? { edition: "server" } : {}
+  oauthStatus.value = null
   if (isFeishuFamilyConnector(def.type)) {
     form.value.config.settings.parse_mode = form.value.config.settings.parse_mode || 'blocks'
   } else {
@@ -990,7 +1093,13 @@ async function testConnection() {
 
 // --- Load resources ---
 async function loadResources() {
+  const generation = ++resourceTreeGeneration.value
   loadingResources.value = true
+  resources.value = []
+  expandedResourceIds.value = new Set()
+  loadedChildrenIds.value = new Set()
+  loadingChildrenIds.value = new Set()
+  treeFullyLoaded.value = false
   try {
     syncConfluencePublicFieldsToSettings()
     if (!tempDsId.value) {
@@ -1001,7 +1110,10 @@ async function loadResources() {
       } as any)
       const created = res?.data || res
       tempDsId.value = created.id
-    } else if (!isEdit.value) {
+    } else {
+      // Resource listing is driven by the persisted data-source config. Keep
+      // it current in edit mode too, otherwise expanding a Microsoft document
+      // library can query stale settings and appear empty.
       await updateDataSource(tempDsId.value, {
         ...form.value,
         knowledge_base_id: props.kbId,
@@ -1009,6 +1121,7 @@ async function loadResources() {
     }
 
     const res = await listResources(tempDsId.value)
+    if (generation !== resourceTreeGeneration.value) return
     resources.value = res?.data || res || []
     // Any parent that already arrived with children (connectors returning the
     // full tree, e.g. Notion) needs no further lazy fetch.
@@ -1020,7 +1133,10 @@ async function loadResources() {
     loadingChildrenIds.value = new Set<string>()
     // If any resource already has a parent, the connector returned the whole tree
     // up front, so per-node lazy fetching is unnecessary.
-    treeFullyLoaded.value = parentsWithChildren.size > 0
+    // Microsoft Graph returns a partial tree for the root request. Even when
+    // that response contains parent IDs, child resources must still be loaded
+    // on demand; otherwise a later expand can incorrectly skip the request.
+    treeFullyLoaded.value = !isMicrosoftConnector.value && parentsWithChildren.size > 0
     // Auto-expand top-level nodes whose children are already loaded; lazy nodes
     // (children not yet fetched) stay collapsed until the user expands them.
     expandedResourceIds.value = new Set(
@@ -1036,9 +1152,10 @@ async function loadResources() {
       if (hidden.length > 0) void revealExistingSelections(hidden)
     }
   } catch (e: any) {
+    if (generation !== resourceTreeGeneration.value) return
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
   }
-  loadingResources.value = false
+  if (generation === resourceTreeGeneration.value) loadingResources.value = false
 }
 
 // revealExistingSelections asks the backend which ancestors must be expanded to
@@ -1053,9 +1170,10 @@ async function revealExistingSelections(hiddenIds: string[]) {
     const expanded = new Set(expandedResourceIds.value)
     for (const id of ancestors) expanded.add(id)
     expandedResourceIds.value = expanded
-    // Load each ancestor level (children include the next ancestor / the
-    // selection itself); calls are independent and dedup on merge.
-    await Promise.all(ancestors.map(id => ensureChildrenLoaded(id)))
+    // The connector returns ancestors from the root down. Load them in that
+    // order so each level is present before the next one is revealed. This is
+    // important for Microsoft Graph, where the resource picker is lazy.
+    for (const id of ancestors) await ensureChildrenLoaded(id)
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
   }
@@ -1140,6 +1258,15 @@ function toggleResource(id: string) {
     MessagePlugin.warning(t('datasource.seafile.singleLibraryOnly'))
     return
   }
+  if (form.value.type === 'sharepoint') {
+    const driveIDs = new Set([...cover]
+      .map(resourceID => String(resourceMap.value.get(resourceID)?.metadata?.drive_id || ''))
+      .filter(Boolean))
+    if (driveIDs.size > 1) {
+      MessagePlugin.warning(t('datasource.sharepoint.singleLibraryOnly'))
+      return
+    }
+  }
   selectedResourceIds.value = [...cover]
 }
 
@@ -1155,6 +1282,7 @@ function validateRssFeedUrls(): boolean {
 function validateStep1Fields(): boolean {
   syncRssAuthHeadersToCredentials()
   if (!validateRssFeedUrls()) return false
+  if (!validateSharePointSiteURL()) return false
   if (isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value) {
     return true
   }
@@ -1614,10 +1742,63 @@ const drawerConfirmText = computed(() => {
         </div>
       </section>
 
+      <section v-if="form.type === 'sharepoint'" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.sharepoint.siteUrl') }}</h4>
+        <div class="form-item">
+          <label class="form-label required">{{ t('datasource.sharepoint.siteUrl') }}</label>
+          <t-input
+            v-model="form.config.settings.site_url"
+            placeholder="https://contoso.sharepoint.com/sites/engineering"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <p class="form-desc">{{ t('datasource.sharepoint.siteUrlHint') }}</p>
+        </div>
+      </section>
+
       <section class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('datasource.credentialsLabel') }}</h4>
 
-        <div v-if="isEdit && credentialsConfigured && !replaceCredentialsMode" class="form-item">
+        <div v-if="form.type === 'sharepoint'" class="form-item onedrive-connection-card">
+          <div class="onedrive-connection-card__status">
+            <t-icon :name="oauthStatus?.authorized ? 'check-circle-filled' : 'info-circle-filled'" />
+            <span>Sites.Selected · {{ t('datasource.oauthAuthorized') }}</span>
+          </div>
+          <p class="form-desc">{{ t('datasource.sharepoint.siteUrlHint') }}</p>
+        </div>
+
+        <div v-else-if="isOAuthConnector" class="form-item onedrive-connection-card">
+          <div class="onedrive-connection-card__status">
+            <t-icon :name="oauthStatus?.authorized ? 'check-circle-filled' : 'link'" />
+            <span v-if="oauthStatus?.authorized">
+              {{ oauthStatus.account_display_name || t('datasource.oauthAuthorized') }}
+            </span>
+            <span v-else>{{ t('datasource.oauthAuthorizationRequired') }}</span>
+          </div>
+          <div class="onedrive-connection-card__actions">
+            <t-button
+              theme="primary"
+              :loading="oauthConnecting"
+              @click="connectOneDriveOAuth(Boolean(oauthStatus?.authorized))"
+            >
+              {{ oauthStatus?.authorized ? t('datasource.oauthReconnect') : t('datasource.oauthConnect') }}
+            </t-button>
+            <t-button
+              v-if="oauthStatus?.authorized"
+              variant="text"
+              theme="danger"
+              @click="disconnectOneDriveOAuth"
+            >{{ t('datasource.oauthDisconnectConfirm') }}</t-button>
+          </div>
+          <p v-if="oauthStatus?.reauthorization_required" class="form-desc">
+            {{ t('datasource.oauthReauthorizationRequired') }}
+          </p>
+          <a v-if="oauthAuthorizationURL" :href="oauthAuthorizationURL" target="_blank" rel="noopener" class="doc-link">
+            {{ t('datasource.oauthReplaceConfirm') }}
+          </a>
+        </div>
+
+        <div v-else-if="isEdit && credentialsConfigured && !replaceCredentialsMode" class="form-item">
           <div
             class="credential-faux-input"
             :class="{ 'is-confirm-remove': pendingRemoveCredentials }"
@@ -2120,6 +2301,24 @@ const drawerConfirmText = computed(() => {
 
 <style scoped lang="less">
 @import './datasource-surface.less';
+
+.onedrive-connection-card {
+  border: 1px solid var(--td-component-border);
+  border-radius: var(--app-radius-md);
+  padding: var(--app-space-4);
+  background: var(--td-bg-color-container);
+}
+
+.onedrive-connection-card__status,
+.onedrive-connection-card__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--app-space-2);
+}
+
+.onedrive-connection-card__actions {
+  margin-top: var(--app-space-2);
+}
 .ds-steps {
   display: flex;
   gap: 8px;

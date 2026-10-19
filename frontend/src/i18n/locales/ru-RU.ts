@@ -991,6 +991,8 @@ export default {
     connectionFailed: 'Подключение не удалось',
     isRequired: 'обязательно для заполнения',
     credentialsLabel: 'учётные данные',
+    oauthConnect: 'Подключить учётную запись Microsoft', oauthReconnect: 'Повторная авторизация', oauthAuthorizationRequired: 'Требуется авторизация', oauthAuthorized: 'Авторизовано', oauthReauthorizationRequired: 'Срок авторизации истёк. Авторизуйтесь снова.', oauthReplaceConfirm: 'Смена аккаунта сбросит курсор синхронизации. Продолжить?', oauthDisconnectConfirm: 'Отключить учётную запись Microsoft и остановить синхронизацию?', oauthNotCompleted: 'Авторизация не завершена', oauthConnected: 'Учётная запись Microsoft подключена', oauthFailed: 'Ошибка авторизации Microsoft', connecting: 'Подключение',
+    sharepoint: { siteUrl: 'URL сайта SharePoint', siteUrlHint: 'Введите URL сайта, затем выберите библиотеку документов, папку или файл. В одном источнике выбирайте содержимое одной библиотеки.', siteUrlInvalid: 'Введите корректный URL сайта https://*.sharepoint.com', singleLibraryOnly: 'Один источник SharePoint может синхронизировать только одну библиотеку документов.' },
     gitlab: {
       baseUrl: 'URL GitLab', accessToken: 'Персональный токен доступа', projects: 'Проекты GitLab',
       projectsHint: 'Укажите ID проекта или путь в пространстве имён (например group/project), а также при необходимости ветку и каталоги.',
@@ -1167,7 +1169,9 @@ export default {
       ima: 'Синхронизация документов, заметок и файлов из баз знаний Tencent IMA (ИИ-сессии и разбор видео не поддерживаются)',
       rss: 'Синхронизация статей из лент RSS / Atom',
       gitlab: 'Синхронизация файлов из проектов GitLab',
-      seafile: 'Синхронизация папок и файлов из библиотек Seafile'
+      seafile: 'Синхронизация папок и файлов из библиотек Seafile',
+      onedrive: 'Синхронизация файлов и папок из Microsoft OneDrive',
+      sharepoint: 'Синхронизация файлов и папок из библиотеки документов SharePoint'
     },
     connector: {
       feishu: 'Feishu (Фэйшу)',
@@ -1181,7 +1185,9 @@ export default {
       ima: 'Tencent IMA',
       rss: 'RSS / Atom лента',
       gitlab: 'GitLab',
-      seafile: 'Seafile'
+      seafile: 'Seafile',
+      onedrive: 'OneDrive',
+      sharepoint: 'SharePoint'
     },
     logDetail: {
       startTime: 'Время начала',

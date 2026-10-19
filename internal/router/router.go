@@ -91,6 +91,7 @@ type RouterParams struct {
 	MCPServer                    *mcpserver.Server
 	RedisClient                  *redis.Client
 	DataSourceHandler            *handler.DataSourceHandler
+	DataSourceOAuthHandler       *handler.DataSourceOAuthHandler
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	WikiPageHandler              *handler.WikiPageHandler
@@ -326,7 +327,10 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)
 		RegisterEmbedChannelRoutes(v1, params.EmbedChannelHandler, rbacGuards)
 		RegisterMCPEndpointRoutes(v1, params.MCPEndpointHandler, rbacGuards)
-		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
+		RegisterDataSourceRoutes(
+			v1, params.DataSourceHandler, params.DataSourceCredentialsHandler,
+			rbacGuards, params.DataSourceOAuthHandler,
+		)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
 		RegisterMemoryRoutes(v1, params.MemoryHandler, rbacGuards)

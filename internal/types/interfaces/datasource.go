@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
@@ -79,6 +80,63 @@ type DataSourceService interface {
 
 	// ProcessSync handles the actual sync operation (called by asynq task)
 	ProcessSync(ctx context.Context, task *asynq.Task) error
+	ProcessSyncFinalize(ctx context.Context, task *asynq.Task) error
+}
+
+// DataSourceOAuthRepository persists data-source OAuth credentials.
+type DataSourceOAuthRepository interface {
+	Get(ctx context.Context, tenantID uint64, dataSourceID string) (*types.DataSourceOAuthToken, error)
+	Save(ctx context.Context, token *types.DataSourceOAuthToken) error
+	SaveAuthorization(
+		ctx context.Context, token *types.DataSourceOAuthToken, expectedConnectionVersion uint64,
+		replaceConnection bool, resetConfig types.JSON,
+	) (uint64, error)
+	RefreshWithLock(
+		ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64,
+		refreshFn func(*types.DataSourceOAuthToken) error,
+	) (*types.DataSourceOAuthToken, error)
+	RevokeAuthorization(
+		ctx context.Context, tenantID uint64, dataSourceID string, expectedConnectionVersion uint64,
+		resetConfig types.JSON,
+	) (uint64, error)
+	Delete(ctx context.Context, tenantID uint64, dataSourceID string) error
+}
+
+// DataSourceItemRepository persists external items observed during sync.
+type DataSourceItemRepository interface {
+	Upsert(ctx context.Context, item *types.DataSourceItem) error
+	Find(
+		ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64,
+		driveID, itemID string,
+	) (*types.DataSourceItem, error)
+	ListByParent(
+		ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64,
+		parentItemID string,
+	) ([]*types.DataSourceItem, error)
+	ListBySelectedRoot(
+		ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64,
+		selectedRootID string,
+	) ([]*types.DataSourceItem, error)
+	ListNotSeen(
+		ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64,
+		generation string,
+	) ([]*types.DataSourceItem, error)
+	ListRetainedDeleted(
+		ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64,
+	) ([]*types.DataSourceItem, error)
+	MarkDeleted(
+		ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64,
+		driveID, itemID string, deletedAt time.Time,
+	) error
+	DeleteItem(
+		ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64,
+		driveID, itemID string,
+	) error
+	SetIngested(
+		ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64,
+		driveID, itemID string, ingested bool,
+	) error
+	DeleteConnection(ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64) error
 }
 
 // DataSourceRepository defines database access patterns for data sources

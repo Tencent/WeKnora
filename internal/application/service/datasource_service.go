@@ -83,7 +83,7 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 	}
 
 	// Validate connector type
-	_, err = s.connectorRegistry.Get(ds.Type)
+	connector, err := s.connectorRegistry.Get(ds.Type)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +95,12 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 			ds.Config = blob
 		}
 	}
-	if err := s.validateDataSourceConfig(ctx, ds); err != nil {
+	if oauthConnector, ok := connector.(datasource.OAuthConnector); ok {
+		if cfg, parseErr := ds.ParseConfig(); parseErr != nil || oauthConnector.ValidateStaticConfig(cfg) != nil {
+			return nil, datasource.ErrInvalidConfig
+		}
+		ds.Status = types.DataSourceStatusPaused
+	} else if err := s.validateDataSourceConfig(ctx, ds); err != nil {
 		return nil, err
 	}
 
@@ -401,6 +406,9 @@ func (s *DataSourceService) ValidateConnection(ctx context.Context, dsID string)
 	if err != nil {
 		return datasource.ErrInvalidConfig
 	}
+	if err := s.prepareConnectorRuntime(ctx, ds, config, connector); err != nil {
+		return err
+	}
 
 	// Validate connection
 	if err := connector.Validate(ctx, config); err != nil {
@@ -443,6 +451,9 @@ func (s *DataSourceService) ListAvailableResources(
 	if err != nil {
 		return nil, datasource.ErrInvalidConfig
 	}
+	if err := s.prepareConnectorRuntime(ctx, ds, config, connector); err != nil {
+		return nil, err
+	}
 
 	// List resources
 	resources, err := connector.ListResources(ctx, config, parentID)
@@ -476,6 +487,9 @@ func (s *DataSourceService) ResolveResourceAncestors(
 	config, err := ds.ParseConfig()
 	if err != nil {
 		return nil, datasource.ErrInvalidConfig
+	}
+	if err := s.prepareConnectorRuntime(ctx, ds, config, connector); err != nil {
+		return nil, err
 	}
 
 	ancestors, err := connector.ResolveResourceAncestors(ctx, config, resourceIDs)
@@ -554,6 +568,15 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 			"task_id": info.ID, "trigger": "manual", "processing_status": "pending",
 		})
 	return syncLog, nil
+}
+
+func (s *DataSourceService) prepareConnectorRuntime(
+	ctx context.Context, ds *types.DataSource, config *types.DataSourceConfig, connector datasource.Connector,
+) error {
+	if runtimeConnector, ok := connector.(datasource.RuntimeConnector); ok {
+		return runtimeConnector.PrepareRuntime(ctx, ds, config)
+	}
+	return nil
 }
 
 // PauseDataSource pauses a data source's scheduled syncs
@@ -705,6 +728,15 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		_ = s.dsRepo.Update(ctx, ds)
 		return err
 	}
+	if runtimeConnector, ok := connector.(datasource.RuntimeConnector); ok {
+		if err := runtimeConnector.PrepareRuntime(ctx, ds, config); err != nil {
+			syncLog.Status = types.SyncLogStatusFailed
+			syncLog.FinishedAt = timePtr(time.Now().UTC())
+			syncLog.ErrorMessage = err.Error()
+			_ = s.syncLogRepo.Update(ctx, syncLog)
+			return err
+		}
+	}
 	// Streaming path: connectors that support it interleave fetch→ingest→
 	// checkpoint so a large sync bounds memory and resumes after a timeout
 	// instead of restarting (Tencent/WeKnora#2136). Others fall back below.
@@ -716,8 +748,23 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	var items []types.FetchedItem
 	var nextCursor *types.SyncCursor
 	var fetchErr error
+	var fetchWarnings []string
 
-	if payload.ForceFull || ds.SyncMode == types.SyncModeFull {
+	if reliable, ok := connector.(datasource.FetchResultConnector); ok {
+		var fetched *types.FetchResult
+		if payload.ForceFull || ds.SyncMode == types.SyncModeFull {
+			fetched, fetchErr = reliable.FetchAllResult(ctx, config, config.ResourceIDs)
+		} else {
+			cursor, _ := ds.ParseSyncCursor()
+			fetched, fetchErr = reliable.FetchIncrementalResult(ctx, config, cursor)
+		}
+		if fetched != nil {
+			items, nextCursor = fetched.Items, fetched.NextCursor
+			for _, warning := range fetched.Warnings {
+				fetchWarnings = append(fetchWarnings, warning.Code+": "+warning.Message)
+			}
+		}
+	} else if payload.ForceFull || ds.SyncMode == types.SyncModeFull {
 		if full, ok := connector.(datasource.FullSyncWithCursor); ok {
 			cursor, _ := ds.ParseSyncCursor()
 			items, nextCursor, fetchErr = full.FetchAllFromCursor(ctx, config, config.ResourceIDs, cursor)
@@ -732,7 +779,6 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		logger.Infof(ctx, "incremental sync fetched %d items", len(items))
 	}
 
-	var fetchWarnings []string
 	var partialFetch *datasource.PartialFetchError
 	if errors.As(fetchErr, &partialFetch) {
 		fetchWarnings = partialFetch.Details
@@ -763,6 +809,21 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		return fetchErr
 	}
 
+	// A connector may retain a source deletion until its knowledge-side cleanup
+	// is acknowledged. Replay those tombstones before processing this fetch so a
+	// prior interrupted run cannot leave stale documents behind.
+	if lifecycle, ok := connector.(datasource.SyncLifecycleConnector); ok {
+		items, err = lifecycle.ReconcileItems(ctx, ds, items)
+		if err != nil {
+			logger.Errorf(ctx, "failed to reconcile data source lifecycle: %v", err)
+			syncLog.Status = types.SyncLogStatusFailed
+			syncLog.FinishedAt = timePtr(time.Now().UTC())
+			syncLog.ErrorMessage = fmt.Sprintf("Failed to reconcile source state: %v", err)
+			_ = s.syncLogRepo.Update(ctx, syncLog)
+			return err
+		}
+	}
+
 	// Process fetched items and write to knowledge base
 	result := &types.SyncResult{
 		Total: len(items),
@@ -790,9 +851,11 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	// Auto-tag: find or create a tag for this data source so synced items are easily identifiable
 	autoTagIDs := s.resolveAutoTagIDs(ctx, ds)
 
+	lifecycle, _ := connector.(datasource.SyncLifecycleConnector)
 	for _, item := range items {
 		item := item
-		s.applyFetchedItem(withKBActivitySuppressed(ctx), ds, &item, autoTagIDs, result)
+		completed := s.applyFetchedItem(withKBActivitySuppressed(ctx), ds, &item, autoTagIDs, result)
+		s.completeItemLifecycle(ctx, lifecycle, ds, &item, completed, result)
 	}
 
 	resultJSON, _ := result.ToJSON()
@@ -838,6 +901,14 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	logger.Infof(ctx, "data source sync completed: ds=%s created=%d updated=%d deleted=%d",
 		payload.DataSourceID, syncLog.ItemsCreated, syncLog.ItemsUpdated, syncLog.ItemsDeleted)
 
+	return nil
+}
+
+// ProcessSyncFinalize is reserved for connectors that defer cursor commits
+// until asynchronous ingestion completes. The current service keeps the
+// established synchronous data-source pipeline, so there is no deferred work
+// to finalize here.
+func (s *DataSourceService) ProcessSyncFinalize(_ context.Context, _ *asynq.Task) error {
 	return nil
 }
 
@@ -898,16 +969,16 @@ func fetchFailureSyncError(item *types.FetchedItem, rawMsg string) types.SyncIte
 func (s *DataSourceService) applyFetchedItem(
 	ctx context.Context, ds *types.DataSource, item *types.FetchedItem,
 	tagIDs []string, result *types.SyncResult,
-) {
+) bool {
 	if item.IsDeleted {
 		if !ds.SyncDeletions {
 			// Sync deletion disabled: neither count nor delete.
-			return
+			return false
 		}
 		if item.ExternalID == "" {
 			logger.Warnf(ctx, "skipping deletion for item %q: empty external_id", item.Title)
 			result.Skipped++
-			return
+			return false
 		}
 		// Perform real KB deletion, scoped to items owned by this data source
 		// so identical external IDs from different data sources cannot collide.
@@ -925,13 +996,13 @@ func (s *DataSourceService) applyFetchedItem(
 				Code:    "deletion_lookup_failed",
 				Message: "Failed to look up the item before deletion; see server logs",
 			})
-			return
+			return false
 		}
 		if existing == nil {
 			// Deletion is idempotent: the source item may already have been
 			// removed manually or by an earlier sync.
 			result.Skipped++
-			return
+			return true
 		}
 		if deleteErr := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); deleteErr != nil {
 			// The cursor is already past this item, so a failed deletion normally
@@ -946,7 +1017,7 @@ func (s *DataSourceService) applyFetchedItem(
 				Code:    "deletion_failed",
 				Message: "Deletion failed; see server logs",
 			})
-			return
+			return false
 		}
 		if herr := repo.HardDeleteKnowledge(ctx, ds.TenantID, existing.ID); herr != nil {
 			result.Failed++
@@ -958,10 +1029,10 @@ func (s *DataSourceService) applyFetchedItem(
 				Code:    "deletion_failed",
 				Message: "Deletion failed; see server logs",
 			})
-			return
+			return false
 		}
 		result.Deleted++
-		return
+		return true
 	}
 
 	if len(item.Content) == 0 && item.URL == "" {
@@ -974,7 +1045,7 @@ func (s *DataSourceService) applyFetchedItem(
 			logger.Infof(ctx, "skipping item %q (external_id=%s): no content or URL", item.Title, item.ExternalID)
 			result.Skipped++
 		}
-		return
+		return false
 	}
 
 	isUpdate, err := s.ingestItem(ctx, ds, item, tagIDs)
@@ -985,6 +1056,10 @@ func (s *DataSourceService) applyFetchedItem(
 			// Duplicate file/URL is not a failure — count as skipped.
 			logger.Infof(ctx, "item %q (external_id=%s) already exists, skipping", item.Title, item.ExternalID)
 			result.Skipped++
+			// A skip is still a successful source observation. Connectors with a
+			// durable projection (such as OneDrive) must record it, otherwise a
+			// later source-side deletion cannot be propagated to the KB.
+			return true
 		default:
 			logger.Warnf(ctx, "failed to ingest item %q (external_id=%s): %v", item.Title, item.ExternalID, err)
 			result.Failed++
@@ -999,6 +1074,38 @@ func (s *DataSourceService) applyFetchedItem(
 	} else {
 		result.Created++
 	}
+	return err == nil
+}
+
+// completeItemLifecycle acknowledges a successful knowledge-side operation to
+// connectors that keep a durable remote-item projection. Without this, a later
+// Microsoft Graph tombstone is recognised but never becomes a KB deletion.
+func (s *DataSourceService) completeItemLifecycle(
+	ctx context.Context, lifecycle datasource.SyncLifecycleConnector, ds *types.DataSource,
+	item *types.FetchedItem, completed bool, result *types.SyncResult,
+) {
+	if lifecycle == nil || !completed {
+		return
+	}
+	var err error
+	if item.IsDeleted {
+		err = lifecycle.MarkItemDeleted(ctx, ds, item)
+	} else {
+		err = lifecycle.MarkItemIngested(ctx, ds, item)
+	}
+	if err == nil {
+		return
+	}
+	result.Failed++
+	if item.IsDeleted {
+		result.DeletionFailed++
+	}
+	logger.Errorf(ctx, "failed to acknowledge data source lifecycle: ds=%s external_id=%s deleted=%t err=%v",
+		ds.ID, item.ExternalID, item.IsDeleted, err)
+	recordSyncError(result, types.SyncItemError{
+		Title: item.Title, Code: "lifecycle_ack_failed",
+		Message: "Synced item could not be acknowledged; see server logs",
+	})
 }
 
 // streamStartCursor decides which cursor a streaming fetch should resume from.
@@ -1078,11 +1185,12 @@ func (s *DataSourceService) clearResyncMarker(ctx context.Context, ds *types.Dat
 // Emit ingests each item as it arrives (bounding memory) and Checkpoint persists
 // the connector cursor plus live progress counts at page boundaries.
 type streamSyncHandler struct {
-	svc     *DataSourceService
-	ds      *types.DataSource
-	tagIDs  []string
-	result  *types.SyncResult
-	syncLog *types.SyncLog
+	svc       *DataSourceService
+	ds        *types.DataSource
+	tagIDs    []string
+	result    *types.SyncResult
+	syncLog   *types.SyncLog
+	lifecycle datasource.SyncLifecycleConnector
 }
 
 // Emit ingests one streamed item. A canceled context aborts the stream so the
@@ -1094,7 +1202,8 @@ func (h *streamSyncHandler) Emit(ctx context.Context, item types.FetchedItem) er
 		return err
 	}
 	h.result.Total++
-	h.svc.applyFetchedItem(withKBActivitySuppressed(ctx), h.ds, &item, h.tagIDs, h.result)
+	completed := h.svc.applyFetchedItem(withKBActivitySuppressed(ctx), h.ds, &item, h.tagIDs, h.result)
+	h.svc.completeItemLifecycle(ctx, h.lifecycle, h.ds, &item, completed, h.result)
 	return nil
 }
 
@@ -1186,7 +1295,10 @@ func (s *DataSourceService) processSyncStreaming(
 	}
 
 	result := &types.SyncResult{}
-	handler := &streamSyncHandler{svc: s, ds: ds, tagIDs: autoTagIDs, result: result, syncLog: syncLog}
+	lifecycle, _ := sc.(datasource.SyncLifecycleConnector)
+	handler := &streamSyncHandler{
+		svc: s, ds: ds, tagIDs: autoTagIDs, result: result, syncLog: syncLog, lifecycle: lifecycle,
+	}
 
 	fullBaseline := startCursor
 	if forceFull {
@@ -1418,6 +1530,9 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			logger.Warnf(ctx, "failed to check existing knowledge for external_id=%s: %v", item.ExternalID, err)
 			// Non-fatal: proceed with creation (may produce duplicate)
 		} else if existing != nil {
+			if ds.ConflictStrategy == types.ConflictStrategySkip {
+				return false, types.NewDuplicateFileError(existing)
+			}
 			logger.Infof(ctx, "found existing knowledge %s for external_id=%s, deleting for update", existing.ID, item.ExternalID)
 			if err := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); err != nil {
 				logger.Warnf(ctx, "failed to delete existing knowledge %s: %v", existing.ID, err)

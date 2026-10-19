@@ -991,6 +991,8 @@ export default {
     connectionFailed: '连接失败',
     isRequired: '为必填项',
     credentialsLabel: '凭证',
+    oauthConnect: '连接 Microsoft 账号', oauthReconnect: '重新授权', oauthAuthorizationRequired: '需要授权', oauthAuthorized: '已授权', oauthReauthorizationRequired: '授权已过期，请重新授权后继续。', oauthReplaceConfirm: '更换账号会重置同步游标，是否继续？', oauthDisconnectConfirm: '断开 Microsoft 账号并停止同步？', oauthNotCompleted: '授权未完成', oauthConnected: 'Microsoft 账号已连接', oauthFailed: 'Microsoft 授权失败', connecting: '连接中',
+    sharepoint: { siteUrl: 'SharePoint 站点地址', siteUrlHint: '填写站点地址；创建后可选择该站点中的文档库、文件夹或文件。每个数据源请选择同一个文档库中的内容。', siteUrlInvalid: '请输入有效的 https://*.sharepoint.com 站点地址', singleLibraryOnly: '一个 SharePoint 数据源只能同步一个文档库，请先取消其他文档库中的选择。' },
     gitlab: {
       baseUrl: 'GitLab 地址',
       accessToken: '个人访问令牌',
@@ -1169,7 +1171,9 @@ export default {
       ima: '同步腾讯 IMA 知识库中的文档、笔记与文件（暂不支持 AI 会话与视频解析）',
       rss: '同步 RSS / Atom 订阅源中的文章',
       gitlab: '同步 GitLab 项目中的文件',
-      seafile: '同步 Seafile 资料库中的目录与文件'
+      seafile: '同步 Seafile 资料库中的目录与文件',
+      onedrive: '同步 Microsoft OneDrive 中的文件和文件夹',
+      sharepoint: '同步 SharePoint 文档库中的文件和文件夹'
     },
     connector: {
       feishu: '飞书',
@@ -1183,7 +1187,9 @@ export default {
       ima: '腾讯 IMA',
       rss: 'RSS / Atom 订阅',
       gitlab: 'GitLab',
-      seafile: 'Seafile'
+      seafile: 'Seafile',
+      onedrive: 'OneDrive',
+      sharepoint: 'SharePoint'
     },
     logDetail: {
       startTime: '开始时间',
