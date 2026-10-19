@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 
@@ -86,17 +87,15 @@ func imageToResult(fileName string, data []byte) *types.ReadResult {
 	if fileName == "" {
 		fileName = "image.png"
 	}
-	refPath := "images/" + fileName
-	// Encode spaces so the markdown URL is valid and matches the regex in ResolveAndStore.
-	safeRef := strings.ReplaceAll(refPath, " ", "%20")
+	markdown, refPath := originalImageMarkdown(fileName)
 	mime := http.DetectContentType(data)
 
 	return &types.ReadResult{
-		MarkdownContent: fmt.Sprintf("![%s](%s)", fileName, safeRef),
+		MarkdownContent: markdown,
 		ImageRefs: []types.ImageRef{
 			{
 				Filename:    fileName,
-				OriginalRef: safeRef,
+				OriginalRef: refPath,
 				MimeType:    mime,
 				ImageData:   data,
 				IsOriginal:  true,
@@ -104,6 +103,18 @@ func imageToResult(fileName string, data []byte) *types.ReadResult {
 		},
 	}
 }
+
+// originalImageMarkdown keeps a filename from changing Markdown syntax. The
+// destination is also the exact lookup key used by ImageResolver.
+func originalImageMarkdown(fileName string) (markdown, refPath string) {
+	refPath = "images/" + url.PathEscape(fileName)
+	alt := markdownImageAltReplacer.Replace(fileName)
+	return fmt.Sprintf("![%s](%s)", alt, refPath), refPath
+}
+
+var markdownImageAltReplacer = strings.NewReplacer(
+	`\`, `\\`, "[", `\[`, "]", `\]`, "\r\n", " ", "\r", " ", "\n", " ",
+)
 
 // IsImageFormat returns true if the file type is a recognized image format.
 func IsImageFormat(fileType string) bool {
@@ -153,13 +164,12 @@ func ensureOriginalImageRef(req *types.ReadRequest, mdContent string, imageRefs 
 	if fileName == "" {
 		fileName = "image." + ft
 	}
-	refPath := "images/" + fileName
+	imgLine, refPath := originalImageMarkdown(fileName)
 
-	if strings.Contains(mdContent, refPath) {
+	if strings.Contains(mdContent, "images/"+fileName) || strings.Contains(mdContent, refPath) {
 		return mdContent, imageRefs
 	}
 
-	imgLine := fmt.Sprintf("![%s](%s)", fileName, refPath)
 	if strings.TrimSpace(mdContent) == "" {
 		mdContent = imgLine
 	} else {
