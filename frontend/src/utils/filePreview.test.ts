@@ -5,6 +5,7 @@ import {
   getHighlightLang,
   getPreviewMimeType,
   isKnownPreviewableExt,
+  isValidUTF8,
   prettyPrintJson,
   resolveFilePreviewExt,
   resolvePreviewKind,
@@ -62,6 +63,39 @@ test('sniffPreview detects html, svg, pdf, png, and mermaid from bytes', () => {
 
 test('sniffPreview rejects NUL-containing binaries', () => {
   assert.equal(sniffPreview(Uint8Array.from([0x00, 0x01, 0x02, 0x03])).kind, 'unsupported')
+})
+
+test('isValidUTF8 rejects invalid scalar encodings so GBK CSV can fall back', () => {
+  // GBK for "蜡,1": accepting C0 AF as UTF-8 produces replacement characters.
+  const csv = Uint8Array.from([0xC0, 0xAF, 0x2C, 0x31])
+  assert.equal(isValidUTF8(csv), false)
+  assert.equal(new TextDecoder('gbk').decode(csv), '蜡,1')
+  for (const bytes of [
+    [0xC1, 0xBF], [0xE0, 0x80, 0xAF], [0xED, 0xA0, 0x80],
+    [0xF0, 0x80, 0x80, 0xAF], [0xF4, 0x90, 0x80, 0x80],
+    [0xF5, 0x80, 0x80, 0x80], [0x80],
+  ]) {
+    assert.equal(isValidUTF8(Uint8Array.from(bytes)), false, String(bytes))
+    assert.equal(sniffPreview(Uint8Array.from(bytes)).kind, 'unsupported', String(bytes))
+  }
+})
+
+test('isValidUTF8 only tolerates valid incomplete prefixes when requested', () => {
+  for (const bytes of [[0xC2], [0xE4, 0xB8], [0xF0, 0x9F, 0x98]]) {
+    assert.equal(isValidUTF8(Uint8Array.from(bytes)), false)
+    assert.equal(isValidUTF8(Uint8Array.from(bytes), true), true)
+  }
+  for (const bytes of [[0xC0], [0xF5], [0xE4, 0x41], [0xE0, 0x80], [0xED, 0xA0], [0xF4, 0x90]]) {
+    assert.equal(isValidUTF8(Uint8Array.from(bytes), true), false, String(bytes))
+  }
+})
+
+test('isValidUTF8 accepts valid Unicode including scalar boundaries', () => {
+  for (const text of ['', 'ASCII', '中文😀', '\u0080\u07FF\u0800\uD7FF\uE000\uFFFF', '\u{10000}\u{10FFFF}']) {
+    const bytes = new TextEncoder().encode(text)
+    assert.equal(isValidUTF8(bytes), true)
+    assert.equal(isValidUTF8(bytes, true), true)
+  }
 })
 
 test('pretty-print helpers only rewrite canonical JSON documents', () => {

@@ -289,29 +289,14 @@ export function prettyPrintJson(text: string): string {
  * reject valid text files.
  */
 export function isValidUTF8(bytes: Uint8Array, allowTruncatedEnd = false): boolean {
-  for (let i = 0; i < bytes.length;) {
-    const b = bytes[i]
-    let remaining = 0
-    if (b <= 0x7F) {
-      remaining = 0
-    } else if ((b & 0xE0) === 0xC0) {
-      remaining = 1
-    } else if ((b & 0xF0) === 0xE0) {
-      remaining = 2
-    } else if ((b & 0xF8) === 0xF0) {
-      remaining = 3
-    } else {
-      return false
-    }
-    if (i + remaining >= bytes.length) {
-      return allowTruncatedEnd
-    }
-    for (let j = 1; j <= remaining; j++) {
-      if ((bytes[i + j] & 0xC0) !== 0x80) return false
-    }
-    i += 1 + remaining
+  try {
+    // Streaming tolerates an incomplete final code point, but still rejects
+    // invalid bytes already present (including overlong and surrogate encodings).
+    new TextDecoder('utf-8', { fatal: true }).decode(bytes, { stream: allowTruncatedEnd })
+    return true
+  } catch {
+    return false
   }
-  return true
 }
 
 function asciiTag(bytes: Uint8Array, offset: number, length: number): string {
