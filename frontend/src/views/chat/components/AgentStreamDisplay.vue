@@ -3863,7 +3863,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
   background: transparent;
   cursor: pointer;
   opacity: 0.6;
-  transition: opacity 0.15s ease, background-color 0.15s ease;
+  transition: opacity var(--app-motion-fast) ease, background-color var(--app-motion-fast) ease;
 
   &:hover,
   &:focus-visible,
