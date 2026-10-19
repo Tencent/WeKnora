@@ -368,7 +368,7 @@ func (g *Gate) RequestHostAndWait(ctx context.Context, req HostPendingRequest) (
 		}, nil
 	}
 	d := toolApprovalDecision(out)
-	g.consumeDecision(ctx, &d, req.EventBus, req.SessionID, req.AssistantMessageID, req.RequestID)
+	g.consumeDecision(ctx, &d, req.EventBus, out.Prompt)
 	return d, nil
 }
 
