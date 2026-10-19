@@ -2,12 +2,14 @@ package docparser
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/JohannesKaufmann/html-to-markdown/v2/converter"
 	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/base"
 	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/commonmark"
 	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/table"
+	"github.com/PuerkitoBio/goquery"
 )
 
 var (
@@ -27,9 +29,9 @@ var (
 	)
 
 	// htmlSpanAttrPattern detects rowspan/colspan values greater than 1, which
-	// Markdown tables cannot represent; such tables keep their HTML form
-	// (attributes stripped) instead. Span values of 1 (and the invalid 0) do
-	// not merge anything and must stay convertible.
+	// need to be expanded into a rectangular grid before Markdown conversion.
+	// Span values of 1 (and the invalid 0) do not merge anything and must stay
+	// directly convertible.
 	htmlSpanAttrPattern = regexp.MustCompile(`(?i)\b(?:row|col)span\s*=\s*["']?(?:[2-9]|\d{2,})`)
 
 	// htmlTableRowPattern matches the opening <tr> tag of each table row, used
@@ -44,17 +46,23 @@ var (
 	markdownTableSeparatorPattern = regexp.MustCompile(`(?m)^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$`)
 )
 
+const (
+	maxHTMLTableSpan         = 1000
+	maxHTMLTableExpandedCell = 100000
+)
+
 // NormalizeHTMLTables rewrites inline HTML <table> blocks embedded in OCR
 // markdown output. PaddleOCR-VL emits tables as HTML with per-cell text-align
 // styles, which (1) waste tokens on layout markup and (2) are not recognized
 // by the chunker's table-protection logic, so large tables get split mid-row.
 //
 // Each table block is converted to a GFM Markdown table when possible. Tables
-// that use rowspan/colspan (which Markdown cannot express), or that the
-// converter cannot turn into a valid GFM table (cell <br>, nested lists, …),
-// fall back to presentational-attribute stripping plus one row per line so
-// the chunker can still split on "\n". Tables inside fenced code blocks are
-// left unchanged.
+// that use rowspan/colspan are first expanded into an equivalent rectangular
+// grid, so every output row remains self-contained after the chunker splits it.
+// Tables the converter cannot turn into a valid GFM table (cell <br>, nested
+// lists, nested tables, …) fall back to presentational-attribute stripping plus
+// one row per line so the chunker can still split on "\n". Tables inside fenced
+// code blocks are left unchanged.
 func NormalizeHTMLTables(md string) string {
 	if !strings.Contains(strings.ToLower(md), "<table") {
 		return md
@@ -106,7 +114,11 @@ func normalizeOneHTMLTable(conv *converter.Converter, block string) string {
 		return splitHTMLTableRows(stripHTMLLayoutAttrs(block))
 	}
 	if htmlSpanAttrPattern.MatchString(block) {
-		return fallback()
+		expanded, ok := expandHTMLTableSpans(block)
+		if !ok {
+			return fallback()
+		}
+		block = expanded
 	}
 	converted, err := conv.ConvertString(block)
 	if err != nil {
@@ -117,6 +129,134 @@ func normalizeOneHTMLTable(conv *converter.Converter, block string) string {
 		return fallback()
 	}
 	return converted
+}
+
+type expandedHTMLTableCell struct {
+	tag     string
+	content string
+}
+
+// expandHTMLTableSpans turns rowspan/colspan cells into a rectangular grid.
+// Rowspan values are repeated in the continuation rows so each row can be
+// split into an independently readable Markdown table row. Colspan values keep
+// content in the first column and leave the remaining columns empty.
+func expandHTMLTableSpans(block string) (string, bool) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(block))
+	if err != nil {
+		return "", false
+	}
+	tables := doc.Find("table")
+	if tables.Length() != 1 {
+		return "", false
+	}
+	table := tables.First()
+	if table.Find("table").Length() != 0 || table.Find("caption, colgroup, col").Length() != 0 {
+		return "", false
+	}
+
+	rows := table.Find("tr")
+	if rows.Length() == 0 {
+		return "", false
+	}
+
+	cells := make(map[int]map[int]expandedHTMLTableCell)
+	maxRow, maxCol := -1, -1
+	expandedCells := 0
+	valid := true
+	rowIndex := 0
+	rows.EachWithBreak(func(_ int, row *goquery.Selection) bool {
+		rowCells := row.ChildrenFiltered("td, th")
+		if rowCells.Length() == 0 {
+			valid = false
+			return false
+		}
+		col := 0
+		rowCells.EachWithBreak(func(_ int, cell *goquery.Selection) bool {
+			for cells[rowIndex][col].tag != "" {
+				col++
+			}
+			rowspan := htmlSpanValue(cell, "rowspan")
+			colspan := htmlSpanValue(cell, "colspan")
+			if rowspan > maxHTMLTableSpan || colspan > maxHTMLTableSpan ||
+				expandedCells+rowspan*colspan > maxHTMLTableExpandedCell {
+				valid = false
+				return false
+			}
+			content, err := cell.Html()
+			if err != nil {
+				valid = false
+				return false
+			}
+			tag := goquery.NodeName(cell)
+			if tag != "th" {
+				tag = "td"
+			}
+			for r := rowIndex; r < rowIndex+rowspan; r++ {
+				if cells[r] == nil {
+					cells[r] = make(map[int]expandedHTMLTableCell)
+				}
+				for c := col; c < col+colspan; c++ {
+					if cells[r][c].tag != "" {
+						valid = false
+						return false
+					}
+					cellContent := ""
+					if c == col {
+						cellContent = content
+					}
+					cells[r][c] = expandedHTMLTableCell{tag: tag, content: cellContent}
+					if r > maxRow {
+						maxRow = r
+					}
+					if c > maxCol {
+						maxCol = c
+					}
+					expandedCells++
+				}
+			}
+			col += colspan
+			return true
+		})
+		if !valid {
+			return false
+		}
+		rowIndex++
+		return true
+	})
+	if !valid || maxRow < 0 || maxCol < 0 {
+		return "", false
+	}
+
+	var b strings.Builder
+	b.WriteString("<table>")
+	for r := 0; r <= maxRow; r++ {
+		b.WriteString("<tr>")
+		for c := 0; c <= maxCol; c++ {
+			cell := cells[r][c]
+			tag := cell.tag
+			if tag == "" {
+				tag = "td"
+			}
+			b.WriteByte('<')
+			b.WriteString(tag)
+			b.WriteByte('>')
+			b.WriteString(cell.content)
+			b.WriteString("</")
+			b.WriteString(tag)
+			b.WriteByte('>')
+		}
+		b.WriteString("</tr>")
+	}
+	b.WriteString("</table>")
+	return b.String(), true
+}
+
+func htmlSpanValue(cell *goquery.Selection, attr string) int {
+	value, err := strconv.Atoi(strings.TrimSpace(cell.AttrOr(attr, "1")))
+	if err != nil || value < 1 {
+		return 1
+	}
+	return value
 }
 
 func indexInsideSpans(pos int, spans [][]int) bool {

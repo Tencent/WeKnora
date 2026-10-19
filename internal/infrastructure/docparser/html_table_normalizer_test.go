@@ -68,32 +68,25 @@ func TestNormalizeHTMLTables_SpanValueOneIsConvertible(t *testing.T) {
 	}
 }
 
-func TestNormalizeHTMLTables_RealSpanKeepsHTMLWithRowNewlines(t *testing.T) {
-	// Genuine merges (colspan>1 / rowspan>1) cannot be GFM, so the table stays
-	// HTML — but each row must start on its own line so the chunker can split it.
+func TestNormalizeHTMLTables_RealSpanExpandsToGFM(t *testing.T) {
+	// rowspan/colspan are expanded into a rectangular grid so every output row
+	// remains self-contained and can be split independently.
 	input := `<table><tr><td colspan="6" style="text-align:center;">合计</td></tr>` +
 		`<tr><td rowspan="3">A</td><td>1</td></tr>` +
 		`<tr><td rowspan = 2>B</td><td>2</td></tr></table>`
 
 	got := NormalizeHTMLTables(input)
 
-	if !strings.Contains(got, "<table") {
-		t.Fatalf("expected real span table to remain HTML, got:\n%s", got)
+	if strings.Contains(got, "<table") {
+		t.Fatalf("expected merged-cell table to be expanded into GFM, got:\n%s", got)
 	}
-	if !strings.Contains(got, `colspan="6"`) || !strings.Contains(got, `rowspan="3"`) {
-		t.Fatalf("expected structural span attrs preserved, got:\n%s", got)
+	if !markdownTableSeparatorPattern.MatchString(got) {
+		t.Fatalf("expected a Markdown table separator row, got:\n%s", got)
 	}
-	if !strings.Contains(got, "\n<tr") {
-		t.Fatalf("expected each <tr> to start on a new line, got:\n%q", got)
-	}
-	if !strings.Contains(got, "\n\n<table") {
-		t.Fatalf("expected block to be padded at the head with blank lines, got:\n%q", got)
-	}
-	if !strings.HasSuffix(got, "</table>\n\n") {
-		t.Fatalf("expected block to be padded at the tail with blank lines, got:\n%q", got)
-	}
-	if n := strings.Count(got, "\n<tr"); n != 3 {
-		t.Fatalf("expected 3 rows each preceded by a newline, got %d in:\n%q", n, got)
+	for _, want := range []string{"合计", "A", "B", "1", "2"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected expanded table to retain %q, got:\n%s", want, got)
+		}
 	}
 }
 
@@ -115,27 +108,39 @@ func assertHTMLRowsSplittable(t *testing.T, got string) {
 	}
 }
 
-func TestNormalizeHTMLTables_StripsAttrsOnSpanTables(t *testing.T) {
-	// rowspan/colspan cannot be expressed in Markdown, so the table stays HTML
-	// but its presentational attributes are stripped and rows become splittable.
+func compactMarkdownTableRow(row string) string {
+	cells := strings.Split(strings.Trim(strings.TrimSpace(row), "|"), "|")
+	for i := range cells {
+		cells[i] = strings.TrimSpace(cells[i])
+	}
+	return strings.Join(cells, "|")
+}
+
+func TestNormalizeHTMLTables_SpanTableExpandsToGFM(t *testing.T) {
+	// A colspan is expanded into empty cells and the original presentational
+	// attributes are dropped when the table is converted to Markdown.
 	input := `<table><tr>` +
 		`<td colspan="2" style="text-align:center;" class="hdr">合计</td></tr>` +
 		`<tr><td style="text-align:left;">A</td><td width="80">B</td></tr></table>`
 
 	got := NormalizeHTMLTables(input)
 
-	if !strings.Contains(got, "<table") {
-		t.Fatalf("expected span table to remain HTML, got:\n%s", got)
+	if strings.Contains(got, "<table") {
+		t.Fatalf("expected span table to be expanded into GFM, got:\n%s", got)
 	}
-	if !strings.Contains(got, `colspan="2"`) {
-		t.Fatalf("expected colspan to be preserved, got:\n%s", got)
+	if !markdownTableSeparatorPattern.MatchString(got) {
+		t.Fatalf("expected a Markdown table separator row, got:\n%s", got)
+	}
+	for _, want := range []string{"合计", "A", "B"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected expanded table to retain %q, got:\n%s", want, got)
+		}
 	}
 	for _, banned := range []string{"text-align", "class=", "width="} {
 		if strings.Contains(got, banned) {
 			t.Fatalf("expected %q to be stripped, got:\n%s", banned, got)
 		}
 	}
-	assertHTMLRowsSplittable(t, got)
 }
 
 func TestNormalizeHTMLTables_BRCellsStaySplittableHTML(t *testing.T) {
@@ -229,5 +234,52 @@ func TestNormalizeHTMLTables_SpanTableIdempotent(t *testing.T) {
 	twice := NormalizeHTMLTables(once)
 	if once != twice {
 		t.Fatalf("NormalizeHTMLTables is not idempotent for span tables:\n1=%q\n2=%q", once, twice)
+	}
+}
+
+func TestNormalizeHTMLTables_MergedCellsExpandToGFM(t *testing.T) {
+	input := `<table>` +
+		`<tr><th>序号</th><th>设备</th><th>数量</th><th>单价</th><th>合计</th></tr>` +
+		`<tr><td rowspan="2">1</td><td rowspan="2">防火墙</td><td>1</td><td>100.00</td><td>100.00</td></tr>` +
+		`<tr><td>2</td><td>200.00</td><td>200.00</td></tr>` +
+		`<tr><td colspan="4">合计</td><td>300.00</td></tr>` +
+		`</table>`
+
+	got := NormalizeHTMLTables(input)
+
+	if strings.Contains(got, "<table") {
+		t.Fatalf("expected merged-cell table to be expanded into GFM, got:\n%s", got)
+	}
+	if !markdownTableSeparatorPattern.MatchString(got) {
+		t.Fatalf("expected a Markdown table separator row, got:\n%s", got)
+	}
+	wantRows := map[string]bool{
+		"1|防火墙|1|100.00|100.00": false,
+		"1|防火墙|2|200.00|200.00": false,
+		"合计||||300.00":          false,
+	}
+	for _, line := range strings.Split(got, "\n") {
+		compacted := compactMarkdownTableRow(line)
+		if _, ok := wantRows[compacted]; ok {
+			wantRows[compacted] = true
+		}
+	}
+	for row, found := range wantRows {
+		if !found {
+			t.Fatalf("expected expanded row %q, got:\n%s", row, got)
+		}
+	}
+}
+
+func TestNormalizeHTMLTables_NestedSpanTableFallsBack(t *testing.T) {
+	input := `<table><tr><td rowspan="2">outer<table><tr><td>inner</td></tr></table></td><td>x</td></tr><tr><td>y</td></tr></table>`
+
+	got := NormalizeHTMLTables(input)
+
+	if !strings.Contains(got, "<table") || !strings.Contains(got, `rowspan="2"`) {
+		t.Fatalf("expected nested-table expansion to fall back to HTML, got:\n%s", got)
+	}
+	if !strings.Contains(got, "inner") || !strings.Contains(got, "outer") {
+		t.Fatalf("expected fallback to preserve table content, got:\n%s", got)
 	}
 }
