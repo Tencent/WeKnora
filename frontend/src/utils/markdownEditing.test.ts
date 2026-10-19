@@ -199,3 +199,34 @@ test('countContent reports characters and lines', () => {
   assert.deepEqual(countContent('one\ntwo'), { characters: 7, lines: 2 })
   assert.deepEqual(countContent(''), { characters: 0, lines: 0 })
 })
+
+for (const { name, opening, body, closing } of [
+  { name: 'bullet', opening: '- ```md', body: '  - literal', closing: '  ```' },
+  { name: 'ordered', opening: '10. ~~~md', body: '    1. literal', closing: '    ~~~' },
+  { name: 'nested', opening: '- outer\n  - ```md', body: '    - literal', closing: '    ```' },
+  { name: 'tabbed nested', opening: '- outer\n\t- ```md', body: '\t  - literal', closing: '\t  ```' },
+  { name: 'continuation', opening: '- outer\n  ```md', body: '  - literal', closing: '  ```' },
+  { name: 'literal list-prefixed delimiter', opening: '- ```md\n  - ```', body: '  - literal', closing: '  ```' },
+]) {
+  test(`Enter respects a fence in a ${name} list container`, () => {
+    const inside = `${opening}\n${body}`
+    assert.equal(continueListOnEnter(caret(inside, inside.length)), null)
+    const after = `${inside}\n${closing}\n- next`
+    assert.deepEqual(continueListOnEnter(caret(after, after.length)), {
+      value: `${after}\n- `, start: after.length + 3, end: after.length + 3,
+    })
+  })
+}
+
+test('leaving a list container ends its unclosed fence', () => {
+  const value = '- ```md\n  - literal\n- next'
+  assert.deepEqual(continueListOnEnter(caret(value, value.length)), {
+    value: `${value}\n- `, start: value.length + 3, end: value.length + 3,
+  })
+})
+
+test('Enter inside a closed list-prefixed fence checks only lines before the caret', () => {
+  const value = '- ```md\n  - literal\n  ```\n- next'
+  const at = value.indexOf('\n  ```')
+  assert.equal(continueListOnEnter(caret(value, at)), null)
+})
