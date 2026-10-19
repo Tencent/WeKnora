@@ -123,7 +123,9 @@ func TestViewPageIsAStep(t *testing.T) {
 }
 
 func TestFailedPageButtonRetractsTheAnswer(t *testing.T) {
-	failing := &failingTool{agenttools.NewBaseTool(agenttools.ToolOpenPage, "test", json.RawMessage(`{"type":"object"}`))}
+	failing := &failingTool{
+		agenttools.NewBaseTool(agenttools.ToolOpenPage, "test", json.RawMessage(`{"type":"object"}`)),
+	}
 	run := runPageButtonTurn(t, nil, failing,
 		pageToolResponse("the report", agenttools.ToolOpenPage),
 		answerResponse("the report again"),
