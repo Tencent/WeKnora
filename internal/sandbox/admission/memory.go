@@ -81,6 +81,22 @@ func (r *MemoryRegistry) Close(_ context.Context, scope Scope, _ time.Duration) 
 	return b, nil
 }
 
+// ExpireScope marks every member of scope lost. Tests use it when the
+// member token is chosen inside the call under test.
+func (r *MemoryRegistry) ExpireScope(scope Scope) {
+	r.mu.Lock()
+	set := r.members[scope]
+	delete(r.members, scope)
+	lost := make([]*lease, 0, len(set))
+	for _, l := range set {
+		lost = append(lost, l)
+	}
+	r.mu.Unlock()
+	for _, l := range lost {
+		l.markLost()
+	}
+}
+
 // ExpireMember simulates a lease that expired server-side.
 func (r *MemoryRegistry) ExpireMember(scope Scope, member string) {
 	r.mu.Lock()

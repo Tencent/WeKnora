@@ -1247,6 +1247,36 @@ func TestVerifyRejectsASessionWhoseOwnerChanged(t *testing.T) {
 	require.ErrorIs(t, err, ErrUserAllocationRejected, "the assignment snapshot is not enough (C15)")
 }
 
+func TestUserTerminalDialStopsWhenTheLeaseIsLost(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	started := make(chan struct{})
+	h.client.openTerminalHook = func(dialCtx context.Context) error {
+		close(started)
+		<-dialCtx.Done()
+		return context.Cause(dialCtx)
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		_, openErr := h.mgr.OpenSessionTerminal(ctx, userSessionA, RemoteTerminalOptions{})
+		errCh <- openErr
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dial did not start")
+	}
+	h.admission.ExpireScope(admission.MachineScope(machineDigest(t, userSessionA)))
+	select {
+	case err := <-errCh:
+		require.ErrorIs(t, err, admission.ErrLeaseLost)
+	case <-time.After(2 * time.Second):
+		t.Fatal("dial kept running after its lease was lost")
+	}
+}
+
 func TestTerminalIsClosedWhenItsLeaseIsLost(t *testing.T) {
 	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
 	ctx := ownerCtx()

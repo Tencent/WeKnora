@@ -106,6 +106,11 @@ type fakeRemoteClient struct {
 
 	// ptyClosed is set when a fake PTY opened on this client is closed.
 	ptyClosed atomic.Bool
+
+	// openTerminalHook, when set, runs instead of opening immediately. It
+	// sees the context the manager passed, so a test can block the dial
+	// until that context is cancelled.
+	openTerminalHook func(context.Context) error
 }
 
 func newFakeRemoteClient(provider RemoteProvider) *fakeRemoteClient {
@@ -460,8 +465,13 @@ func (c *fakeRemoteClient) counts() (creates, connects, gets, lists, deletes int
 }
 
 func (c *fakeRemoteClient) OpenTerminal(
-	context.Context, RemoteSandboxHandle, RemoteTerminalOptions,
+	ctx context.Context, _ RemoteSandboxHandle, _ RemoteTerminalOptions,
 ) (RemoteTerminalSession, error) {
+	if c.openTerminalHook != nil {
+		if err := c.openTerminalHook(ctx); err != nil {
+			return nil, err
+		}
+	}
 	return &fakeRemoteTerminal{client: c}, nil
 }
 

@@ -1267,37 +1267,44 @@ func (m *SessionBoundManager) OpenSessionTerminal(
 	if err != nil {
 		return nil, err
 	}
-	// Setup calls run on the request, but also stop if the lease is lost.
+	// The dial and the stream both stop if the lease is lost. callCtx lives
+	// as long as the terminal: cancelling it when this function returns
+	// would close a PTY that has only just opened.
 	callCtx, cancelCall := context.WithCancelCause(ctx)
-	defer cancelCall(nil)
 	stopCall := context.AfterFunc(opCtx, func() { cancelCall(context.Cause(opCtx)) })
-	defer stopCall()
+	abandon := func(err error) (RemoteTerminalSession, error) {
+		stopCall()
+		cancelCall(err)
+		release()
+		return nil, err
+	}
 	if !opts.AllowResume {
 		if err := m.RequireRunningSessionSandbox(callCtx, sessionID); err != nil {
-			release()
-			return nil, err
+			return abandon(err)
 		}
 	}
 	handle, found, err := m.lookupSessionHandle(callCtx, sessionID)
 	if err != nil || !found {
-		release()
 		if err != nil {
-			return nil, err
+			return abandon(err)
 		}
-		return nil, ErrNoLiveSessionSandbox
+		return abandon(ErrNoLiveSessionSandbox)
 	}
-	// The stream keeps the request's context, as before; loss is handled by
-	// closing the PTY below.
-	session, err := terminal.OpenTerminal(ctx, handle, opts)
+	session, err := terminal.OpenTerminal(callCtx, handle, opts)
 	if err != nil {
-		release()
-		return nil, err
+		return abandon(err)
 	}
 	if !sc.user {
+		stopCall()
 		release()
 		return session, nil
 	}
-	held := &heldTerminalSession{RemoteTerminalSession: session, release: release}
+	held := &heldTerminalSession{
+		RemoteTerminalSession: session,
+		release:               release,
+		cancelStream:          cancelCall,
+		stopLeaseWatch:        stopCall,
+	}
 	if exempt := admissionExemptFrom(opCtx); len(exempt) > 0 {
 		held.member = exempt[len(exempt)-1]
 	}
@@ -1312,11 +1319,13 @@ func (m *SessionBoundManager) OpenSessionTerminal(
 // the terminal.
 type heldTerminalSession struct {
 	RemoteTerminalSession
-	once      sync.Once
-	closeErr  error
-	release   func()
-	stopWatch func() bool
-	member    string // the PTY's admission member; tests use it to inject loss
+	once           sync.Once
+	closeErr       error
+	release        func()
+	cancelStream   func(error)
+	stopLeaseWatch func() bool
+	stopWatch      func() bool
+	member         string // the PTY's admission member; tests use it to inject loss
 }
 
 // Close closes the PTY and releases its admission. It runs at most once,
@@ -1326,7 +1335,13 @@ func (s *heldTerminalSession) Close() error {
 		if s.stopWatch != nil {
 			s.stopWatch()
 		}
+		if s.stopLeaseWatch != nil {
+			s.stopLeaseWatch()
+		}
 		s.closeErr = s.RemoteTerminalSession.Close()
+		if s.cancelStream != nil {
+			s.cancelStream(context.Canceled)
+		}
 		s.release()
 	})
 	return s.closeErr
