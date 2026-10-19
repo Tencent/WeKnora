@@ -35,8 +35,12 @@ func TestCastParamsIntegerConversionControls(t *testing.T) {
 	schema := json.RawMessage(`{"properties":{"id":{"type":"integer"}}}`)
 	for _, tc := range []struct{ input, want string }{
 		{`"9007199254740993"`, "9007199254740993"},
-		{"42.0", "42"}, {"4.2e1", "42"}, {"1.5", "1.5"},
-		{`"invalid"`, `"invalid"`}, {"null", "null"}, {"true", "true"},
+		{"42.0", "42"},
+		{"4.2e1", "42"},
+		{"1.5", "1.5"},
+		{`"invalid"`, `"invalid"`},
+		{"null", "null"},
+		{"true", "true"},
 	} {
 		result := CastParams(json.RawMessage(`{"id":`+tc.input+`}`), schema)
 		var fields map[string]json.RawMessage
