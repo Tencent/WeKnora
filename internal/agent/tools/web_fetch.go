@@ -336,13 +336,13 @@ func runWebFetchItems(
 			grace = nil
 		}
 	}
-
 }
 
 func (t *WebFetchTool) fetchItem(ctx context.Context, item WebFetchItem, budget int) *webFetchItemResult {
 	displayURL := strings.TrimSpace(item.URL)
 	if len(displayURL) > 1 && displayURL[0] == 'w' && strings.Trim(displayURL[1:], "0123456789") == "" {
-		return failedWebFetchResult(displayURL, false, "unknown_page_reference", "page reference was not supplied; use a returned page reference or an absolute HTTP(S) URL")
+		return failedWebFetchResult(displayURL, false, "unknown_page_reference",
+			"page reference was not supplied; use a returned page reference or an absolute HTTP(S) URL")
 	}
 	u, err := url.Parse(displayURL)
 	if err != nil || len(displayURL) > 2048 || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") {

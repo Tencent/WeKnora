@@ -35,14 +35,23 @@ func TestAssistantPageContextDoesNotSelectKnowledgeScope(t *testing.T) {
 	}{
 		{name: "page alone keeps workspace scope", wantKBs: []string{"doc-kb", "faq-kb", "notes-kb"}},
 		{name: "explicit KB overrides page", kbIDs: []string{"faq-kb"}, wantKBs: []string{"faq-kb"}},
-		{name: "explicit document stays narrow", docIDs: []string{"doc-2"}, wantKBs: []string{"doc-kb"}, wantDocs: []string{"doc-2"}},
-		{name: "explicit tag stays narrow", tags: []types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}}, wantKBs: []string{"doc-kb"}, wantDocs: []string{"doc-1", "doc-3"}},
+		{
+			name: "explicit document stays narrow", docIDs: []string{"doc-2"},
+			wantKBs: []string{"doc-kb"}, wantDocs: []string{"doc-2"},
+		},
+		{
+			name:    "explicit tag stays narrow",
+			tags:    []types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+			wantKBs: []string{"doc-kb"}, wantDocs: []string{"doc-1", "doc-3"},
+		},
 		{name: "API key still limits defaults", apiScope: true, wantKBs: []string{"faq-kb"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := newTagTargetSessionService()
 			base := svc.knowledgeBaseService.(*tagTargetKnowledgeBaseService)
-			base.kbs["notes-kb"] = &types.KnowledgeBase{ID: "notes-kb", TenantID: 100, Type: types.KnowledgeBaseTypeDocument}
+			base.kbs["notes-kb"] = &types.KnowledgeBase{
+				ID: "notes-kb", TenantID: 100, Type: types.KnowledgeBaseTypeDocument,
+			}
 			for _, kb := range base.kbs {
 				kb.IndexingStrategy.KeywordEnabled = true
 			}
@@ -51,7 +60,9 @@ func TestAssistantPageContextDoesNotSelectKnowledgeScope(t *testing.T) {
 			agent.Config.WebSearchProviderID = "provider"
 			ctx := tagTargetContext()
 			if tc.apiScope {
-				ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{KnowledgeBaseIDs: types.StringArray{"faq-kb"}})
+				ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{
+					KnowledgeBaseIDs: types.StringArray{"faq-kb"},
+				})
 			}
 			req := &types.QARequest{
 				Session: &types.Session{ID: "session", TenantID: 100}, CustomAgent: agent,

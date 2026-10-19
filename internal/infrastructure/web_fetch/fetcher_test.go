@@ -277,13 +277,13 @@ func newTestFetcher(client *http.Client) *Fetcher {
 func TestPinnedDialFallsBackToAnotherValidatedAddress(t *testing.T) {
 	var addresses []string
 	expected, peer := net.Pipe()
-	defer expected.Close()
-	defer peer.Close()
+	defer func() { _ = expected.Close() }()
+	defer func() { _ = peer.Close() }()
 	f := &Fetcher{
 		resolveIPs: func(context.Context, string) ([]net.IP, error) {
 			return []net.IP{net.ParseIP("2606:4700:4700::1111"), net.ParseIP("1.1.1.1")}, nil
 		},
-		dialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+		dialContext: func(_ context.Context, _ string, address string) (net.Conn, error) {
 			addresses = append(addresses, address)
 			if len(addresses) == 1 {
 				return nil, errors.New("IPv6 route unavailable")

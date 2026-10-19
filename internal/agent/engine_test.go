@@ -1160,7 +1160,13 @@ func TestWebFetchUnknownReferenceIsAnItemError(t *testing.T) {
 	engine := newTestEngine(t, &mockChat{})
 	engine.toolRegistry = agenttools.NewToolRegistry()
 	engine.toolRegistry.RegisterTool(agenttools.NewWebFetchTool())
-	calls := []types.LLMToolCall{{ID: "fetch", Function: types.FunctionCall{Name: agenttools.ToolWebFetch, Arguments: `{"items":[{"url":"w999"}]}`}}}
+	calls := []types.LLMToolCall{{
+		ID: "fetch",
+		Function: types.FunctionCall{
+			Name:      agenttools.ToolWebFetch,
+			Arguments: `{"items":[{"url":"w999"}]}`,
+		},
+	}}
 	engine.modelContext.DecodeToolCalls(calls)
 	require.Equal(t, []string{"w999"}, calls[0].UnresolvedHandles)
 	result := engine.runToolCall(t.Context(), calls[0], 0, 0, 1, "session", "message")

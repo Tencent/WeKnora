@@ -470,7 +470,9 @@ func TestWebFetchRestoresExactSnapshotAfterEviction(t *testing.T) {
 
 func TestWebFetchPermanentFailureIsNotDownloadedAgain(t *testing.T) {
 	const u = "https://example.com/missing"
-	fetcher := newStubWebContentFetcher(nil, map[string]error{u: fetchFailure(webfetch.ErrorHTTPStatus, false, "HTTP 404")})
+	fetcher := newStubWebContentFetcher(nil, map[string]error{
+		u: fetchFailure(webfetch.ErrorHTTPStatus, false, "HTTP 404"),
+	})
 	tool := newWebFetchTool(fetcher)
 	for i := 0; i < 3; i++ {
 		result, err := tool.Execute(t.Context(), webFetchArgs(WebFetchItem{URL: u}))
@@ -495,7 +497,11 @@ func TestWebFetchTimeoutKeepsSuccessfulItemsAndCancelsSlowFetch(t *testing.T) {
 	t.Setenv("WEKNORA_WEB_FETCH_TIMEOUT", "100ms")
 	fetcher := &selectiveSlowFetcher{canceled: make(chan struct{})}
 	tool := newWebFetchTool(fetcher)
-	result, err := tool.Execute(t.Context(), webFetchArgs(WebFetchItem{URL: "https://example.com/fast"}, WebFetchItem{URL: "https://example.com/slow"}, WebFetchItem{URL: "w999"}))
+	result, err := tool.Execute(t.Context(), webFetchArgs(
+		WebFetchItem{URL: "https://example.com/fast"},
+		WebFetchItem{URL: "https://example.com/slow"},
+		WebFetchItem{URL: "w999"},
+	))
 	require.NoError(t, err)
 	require.True(t, result.Success)
 	rows := result.Data["results"].([]map[string]interface{})
@@ -528,7 +534,10 @@ func TestWebFetchMixedResolvedAndUnknownReferences(t *testing.T) {
 	const u = "https://example.com/page"
 	registry := modelcontext.NewRegistry(true)
 	registry.RegisterWeb(u, "Page")
-	calls := []types.LLMToolCall{{Function: types.FunctionCall{Name: ToolWebFetch, Arguments: `{"items":[{"url":"w1"},{"url":"w2"}]}`}}}
+	calls := []types.LLMToolCall{{Function: types.FunctionCall{
+		Name:      ToolWebFetch,
+		Arguments: `{"items":[{"url":"w1"},{"url":"w2"}]}`,
+	}}}
 	registry.DecodeToolCalls(calls)
 	fetcher := newStubWebContentFetcher(map[string]string{u: "good evidence"}, nil)
 	result, err := newWebFetchTool(fetcher).Execute(t.Context(), json.RawMessage(calls[0].Function.Arguments))
@@ -545,7 +554,10 @@ func TestWebFetchPartialBatchDoesNotWaitForFullPageBudget(t *testing.T) {
 	fetcher := &selectiveSlowFetcher{canceled: make(chan struct{})}
 	tool := newWebFetchTool(fetcher)
 	started := time.Now()
-	result, err := tool.Execute(t.Context(), webFetchArgs(WebFetchItem{URL: "https://example.com/fast"}, WebFetchItem{URL: "https://example.com/slow"}))
+	result, err := tool.Execute(t.Context(), webFetchArgs(
+		WebFetchItem{URL: "https://example.com/fast"},
+		WebFetchItem{URL: "https://example.com/slow"},
+	))
 	require.NoError(t, err)
 	require.True(t, result.Success)
 	require.Less(t, time.Since(started), 5*time.Second)
@@ -559,7 +571,11 @@ func TestWebFetchPartialBatchDoesNotWaitForFullPageBudget(t *testing.T) {
 
 func TestWebFetchInitiatorCancellationKeepsAnotherWaiterAlive(t *testing.T) {
 	const u = "https://example.com/shared"
-	fetcher := &gatingWebContentFetcher{stubWebContentFetcher: newStubWebContentFetcher(map[string]string{u: "shared snapshot"}, nil), started: make(chan struct{}), release: make(chan struct{})}
+	fetcher := &gatingWebContentFetcher{
+		stubWebContentFetcher: newStubWebContentFetcher(map[string]string{u: "shared snapshot"}, nil),
+		started:               make(chan struct{}),
+		release:               make(chan struct{}),
+	}
 	tool := newWebFetchTool(fetcher)
 	first, cancel := context.WithCancel(t.Context())
 	firstDone := make(chan struct{})
