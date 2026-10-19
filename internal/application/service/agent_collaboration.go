@@ -413,7 +413,7 @@ func (s *AgentCollaboration) run(ctx context.Context, w collaboration.Work) (col
 		}
 	}
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	saved.Access = tenant.AssistantConfig.EffectiveAccessLevel(saved.Access)
+	saved.Access = saved.level(tenant)
 	// Store the attenuated permission in this worker's private binding too.
 	configJSON, err := json.Marshal(saved)
 	if err != nil {

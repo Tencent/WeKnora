@@ -86,7 +86,15 @@ func (r *MCPToolApprovalRepository) IsEnabled(ctx context.Context, tenantID uint
 	return row.Enabled, nil
 }
 
+// riskRankSQL ranks a risk column as policy.Risk.Above does; unknown and
+// empty risks rank lowest.
+func riskRankSQL(column string) string {
+	return "(CASE " + column +
+		" WHEN 'read' THEN 1 WHEN 'probe' THEN 2 WHEN 'write' THEN 3 WHEN 'destructive' THEN 4 ELSE 0 END)"
+}
+
 // UpsertPolicy creates or updates only the supplied policy columns.
+// ObservedRisk only ever raises the stored value.
 // Concurrent patches of different fields cannot clobber each other because
 // ON CONFLICT updates omit unchanged columns. A first insert uses
 // require_approval=false and enabled=true for any field the patch omits.
@@ -124,7 +132,12 @@ func (r *MCPToolApprovalRepository) UpsertPolicy(
 	}
 	if patch.ObservedRisk != nil {
 		observed = *patch.ObservedRisk
-		updates["observed_risk"] = observed
+		// Compare in the statement itself: a concurrent lower observation
+		// read before this one landed must not overwrite it.
+		updates["observed_risk"] = gorm.Expr(
+			"CASE WHEN " + riskRankSQL("excluded.observed_risk") + " > " +
+				riskRankSQL("mcp_tool_approvals.observed_risk") +
+				" THEN excluded.observed_risk ELSE mcp_tool_approvals.observed_risk END")
 	}
 
 	row := map[string]interface{}{

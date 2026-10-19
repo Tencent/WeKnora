@@ -695,8 +695,8 @@ func (c *mcpGoClient) listRawTools(ctx context.Context) ([]*types.MCPTool, error
 		}
 		var page struct {
 			Tools []struct {
-				Name        string          `json:"name"`
-				Description string          `json:"description"`
+				Name        string                    `json:"name"`
+				Description string                    `json:"description"`
 				InputSchema json.RawMessage           `json:"inputSchema"`
 				Annotations *types.MCPToolAnnotations `json:"annotations"`
 			} `json:"tools"`
