@@ -206,8 +206,16 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 						"session_id": chatManage.SessionID,
 						"error":      response.Content,
 					})
+					// The stream's error event must correlate with the turn on
+					// the client: reuse the request ID when the pipeline context
+					// carries one so the frontend can match the bubble, falling
+					// back to a random suffix for streams without it.
+					eventID := fmt.Sprintf("%s-error", uuid.New().String()[:8])
+					if rid, ok := types.RequestIDFromContext(ctx); ok {
+						eventID = rid
+					}
 					eventBus.Emit(ctx, types.Event{
-						ID:        fmt.Sprintf("%s-error", uuid.New().String()[:8]),
+						ID:        eventID,
 						Type:      types.EventType(event.EventError),
 						SessionID: chatManage.SessionID,
 						Data: event.ErrorData{

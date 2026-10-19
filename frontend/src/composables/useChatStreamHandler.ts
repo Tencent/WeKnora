@@ -1015,12 +1015,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         }
         break
       }
-      case 'tool_result':
-      case 'error': {
+      case 'tool_result': {
         if (dataPayload) {
           const toolCallId = dataPayload.tool_call_id as string | undefined
           const toolName = dataPayload.tool_name as string | undefined
-          const success = responseType !== 'error' && dataPayload.success !== false
+          const success = dataPayload.success !== false
           if (responseType === 'tool_result' && dataPayload.success === true && toolName
             && DATA_CHANGE_TOOLS.has(toolName)) {
             emitAssistantDataChange(dataPayload.data_change)
@@ -1065,28 +1064,10 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           } else {
             console.warn('[Tool Result] No pending tool call found for', toolCallId || toolName)
           }
-          if (responseType === 'error' && !toolName) {
-            const errorMsg = String(data.content || t('chat.processError'))
-            message.content = errorMsg
-            message.is_completed = true
-            isReplying.value = false
-            loading.value = false
-            fullContent.value = ''
-            currentAssistantMessageId.value = ''
-            reportError(errorMsg)
-            console.error('[Chat Error]', errorMsg)
-          }
-        } else if (responseType === 'error') {
-          const errorMsg = String(data.content || t('chat.processError'))
-          message.content = errorMsg
-          message.is_completed = true
-          isReplying.value = false
-          loading.value = false
-          fullContent.value = ''
-          currentAssistantMessageId.value = ''
-          reportError(errorMsg)
-          console.error('[Chat Error]', errorMsg)
         }
+        // response_type=error never reaches this branch: it is intercepted at
+        // the top of processStreamChunk (which reports the toast and owns the
+        // error bubble), so the old `case 'error'` merge stayed dead code.
         break
       }
       case 'answer': {
@@ -1278,16 +1259,55 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
     // Persistence can fail after the entire answer has streamed. Surface the
     // failure separately; the generic error path replaces the answer content.
-    if (data.response_type === 'error' && (data.data as ChatMessage | undefined)?.stage === 'message_persistence') {
-      const message = resolveActiveAssistantMessage(data)
+    if (data.response_type === 'error') {
+      const isMsgPersistenceError = (data.data as ChatMessage | undefined)?.stage === 'message_persistence'
+      let message = resolveActiveAssistantMessage(data)
       const errorMsg = String(data.content || t('chat.processError'))
-      if (message) {
-        message.persistence_error = errorMsg
-        message.is_completed = true
-        message.thinking = false
-        message.artifactsCollecting = false
-        emitMessageUpdated(message)
+      if (!message) {
+        // No active assistant message found — create a fallback bubble so the
+        // error is visible. Key it by the request ID and mirror it onto
+        // assistant_message_id so a later correlated event finds it through
+        // resolveActiveAssistantMessage instead of spawning a duplicate row.
+        const rowId = (data.id as string | undefined) || currentAssistantMessageId.value || `err-${Date.now()}`
+        message = {
+          id: rowId,
+          assistant_message_id: rowId,
+          request_id: rowId,
+          role: 'assistant',
+          content: '',
+          showThink: false,
+          is_completed: false,
+          isAgentMode: false,
+        }
+        messagesList.push(message)
+        emitMessageCreated(message)
       }
+      if (isMsgPersistenceError) {
+        // Persistence errors happen after content was already streamed;
+        // preserve the original content and mark the error separately.
+        message.persistence_error = errorMsg
+      } else {
+        // Generic errors (model call timeout, pipeline failure, etc.)
+        // replace the (empty or partial) answer content.
+        message.content = errorMsg
+        // Keep the agent timeline when it already shows thinking/tool steps:
+        // switching isAgentMode off would drop the whole run's timeline from
+        // botmsg.vue and render a bare markdown line instead, and a reload
+        // (which rebuilds the timeline from agent_steps) would then disagree.
+        // Only messages with no timeline content fall back to the traditional
+        // markdown bubble, which is the fast-answer failure case this path
+        // exists for.
+        const timeline = message.agentEventStream as ChatMessage[] | undefined
+        if (Array.isArray(timeline) && timeline.length > 0 && message.isAgentMode) {
+          timeline.push({ type: 'error', content: errorMsg, done: true, timestamp: Date.now() })
+        } else {
+          message.isAgentMode = false
+        }
+      }
+      message.is_completed = true
+      message.thinking = false
+      message.artifactsCollecting = false
+      emitMessageUpdated(message)
       loading.value = false
       isReplying.value = false
       fullContent.value = ''

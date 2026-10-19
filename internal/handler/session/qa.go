@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
@@ -1365,11 +1366,15 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 		return
 	}
 
+	// completionHandled tracks whether the normal-mode final-answer completion
+	// already persisted the turn. It is read from the async goroutine's error
+	// path, so guard with an atomic: a QA error that lands after the answer was
+	// completed must not overwrite the streamed content.
+	var completionHandled atomic.Bool
+
 	// Normal mode: register completion handler on EventAgentFinalAnswer
 	// (Agent mode handles completion in the defer block instead)
 	if mode == qaModeNormal {
-		var completionHandled bool
-
 		// Persist the pipeline's retrieval/attachment stages so a reloaded
 		// conversation redraws the timeline it showed while streaming, including
 		// turns that searched and cited nothing.
@@ -1401,10 +1406,10 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 				markQuickAnswerTruncated(streamCtx.assistantMessage)
 			}
 			if data.Done {
-				if completionHandled {
+				if completionHandled.Load() {
 					return nil
 				}
-				completionHandled = true
+				completionHandled.Store(true)
 
 				logger.Infof(streamCtx.asyncCtx, "Knowledge QA service completed for session: %s", sessionID)
 				updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, reqCtx.session.TenantID)
@@ -1537,16 +1542,52 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 			if streamCtx.asyncCtx.Err() != nil {
 				logger.Infof(streamCtx.asyncCtx, "QA cancelled by user stop for session: %s", sessionID)
 			} else {
+				// Log the raw upstream error but surface only a user-facing message
+				// on the stream and in the persisted row: provider errors can
+				// carry internal hosts/URLs, and the assistant row doubles as
+				// history context for later turns, so raw error strings must not
+				// leak into conversation history. Log the raw error here; the
+				// bubble, SSE and persisted content all use userMsg.
 				logger.ErrorWithFields(streamCtx.asyncCtx, serviceErr, nil)
+				userMsg := userFacingQAError(streamCtx.asyncCtx, serviceErr)
 				streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
 					Type:      event.EventError,
 					SessionID: sessionID,
+					ID:        reqCtx.requestID,
 					Data: event.ErrorData{
-						Error:     serviceErr.Error(),
+						Error:     userMsg,
 						Stage:     stageName,
 						SessionID: sessionID,
 					},
 				})
+
+				// Persist the assistant message so the error stays visible on
+				// page refresh. Reached only in quick-answer mode before the
+				// final-answer completion has run:
+				//   - agent mode completes the message from the goroutine's
+				//     defer, so persisting here would double-complete and
+				//     overwrite the agent's accumulated answer;
+				//   - a turn whose final answer already streamed and has been
+				//     persisted (completionHandled) must not be replaced by a
+				//     trailing pipeline error.
+				// Persist with a minimal UpdateMessage instead of
+				// completeAssistantMessage: the follow-up suggestions,
+				// long-term-memory extraction and chat-history KB index that
+				// path triggers would treat an error string as a real answer.
+				// WithoutCancel keeps the write alive across a client disconnect.
+				if mode == qaModeNormal && !completionHandled.Load() {
+					updateCtx := context.WithValue(
+						context.WithoutCancel(streamCtx.asyncCtx),
+						types.TenantIDContextKey, reqCtx.session.TenantID,
+					)
+					msg := streamCtx.assistantMessage
+					msg.UpdatedAt = time.Now()
+					msg.IsCompleted = true
+					msg.Content = userMsg
+					if err := h.messageService.UpdateMessage(updateCtx, msg); err != nil {
+						logger.Errorf(updateCtx, "Failed to persist error assistant message %s: %v", msg.ID, err)
+					}
+				}
 			}
 		}
 	}()
@@ -1560,6 +1601,46 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	shouldWaitForTitle := generateTitle && reqCtx.session.Title == ""
 	h.handleAgentEventsForSSE(ctx, reqCtx.c, sessionID, reqCtx.assistantMessage.ID,
 		reqCtx.requestID, streamCtx.eventBus, shouldWaitForTitle, reqCtx.resourceRewriter)
+}
+
+// userFacingQAError maps a raw QA/model error to a message safe to show in the
+// chat bubble and persist to the session. Provider errors can leak internal
+// hosts, base URLs and low-level transport details; those stay in the
+// structured log (logged by the caller) while the user gets a generic retry
+// hint. The failed turn's assistant row doubles as history context for later
+// turns, which is why the raw string must never be persisted here either.
+//
+// Only the error category survives this mapping: once a branch matches, the
+// original text is discarded, so the returned string never echoes provider
+// text. Messages are English, matching the rest of the backend's error
+// messages (internal/errors); display localization lives in the frontend
+// i18n catalogs.
+func userFacingQAError(_ context.Context, err error) string {
+	msg := ""
+	if err != nil {
+		msg = strings.ToLower(err.Error())
+	}
+	switch {
+	case msg == "":
+		return "The model call failed. Please try again."
+	case strings.Contains(msg, "timeout") || strings.Contains(msg, "timed out") ||
+		strings.Contains(msg, "deadline exceeded"):
+		return "The model service timed out. Please try again."
+	case strings.Contains(msg, "connection refused") || strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "no such host") || strings.Contains(msg, "tls handshake"):
+		return "Could not reach the model service. Please check the model service configuration and try again."
+	case strings.Contains(msg, "401") || strings.Contains(msg, "unauthorized") ||
+		strings.Contains(msg, "403") || strings.Contains(msg, "forbidden") ||
+		strings.Contains(msg, "invalid api key") || strings.Contains(msg, "authentication"):
+		return "The model service rejected the request. Please check the model API key and permissions."
+	case strings.Contains(msg, "429") || strings.Contains(msg, "rate limit"):
+		return "The model service is rate-limiting requests. Please try again later."
+	case strings.Contains(msg, "quota") || strings.Contains(msg, "insufficient_quota") ||
+		strings.Contains(msg, "insufficient balance"):
+		return "The model service reported insufficient quota or balance."
+	default:
+		return "The model call failed. Please try again or check the model configuration."
+	}
 }
 
 // runVLMAnalysisIfNeeded runs VLM image analysis within the async goroutine,
