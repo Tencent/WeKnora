@@ -1,6 +1,6 @@
 # Agent 执行权限模型
 
-状态：设计稿，未实现。日期：2026-10-19。
+状态：后端第 1–4 步已实现；`automation` 作用域与 `ActingVia` 已就绪，等待自动化需求接入；MCP 风险管理界面暂缓（§6）。日期：2026-10-19。实现与原设计的差异见 §7。
 
 本文统一 Agent 运行时“哪些动作可以直接执行、哪些要用户确认、哪些拒绝”的判断。助手、多 Agent 协作尚未上线，借此机会收敛规则；自动化（`agent-automation.md`）直接建立在本模型之上，不再自带权限概念。
 
@@ -70,9 +70,12 @@ type Action struct {
 |---|---|---|
 | operations | 目录中的 `Risk` | 目录中的 `AlwaysConfirm` |
 | 内置写工具 | 现有 `assistantWriteToolRisk`，扩展到所有 Agent 的写工具 | 否 |
-| MCP 工具 | 管理员逐工具配置；未配置时取注解：`readOnlyHint=true` → read，`destructiveHint=true` → destructive，其余 → write | `RequireApproval=true` 映射为 `Always` |
+| MCP 工具 | 管理员逐工具配置；未配置时取注解：`readOnlyHint=true` → read，其余 → write | `RequireApproval=true` 映射为 `Always` |
 
-MCP 注解来自外部服务，只用作默认值。管理员的显式配置优先；注解从 read 变为非 read 时立即生效，从非 read 变为 read 时需要管理员确认，避免外部服务自行降低风险。
+MCP 注解来自外部服务，只用作默认值，规则如下：
+
+- 管理员的显式配置（`mcp_tool_approvals.risk`）优先，destructive 只能由管理员设置。`destructiveHint` 不被采用：write 已经需要按档位确认，外部服务声明 destructive 只会让审批更严格，却无法区分声明是否可信，因此交给管理员判断。
+- 未显式配置时，生效风险取“本次声明的风险”和“历史观察到的最高风险”（`observed_risk`）中较高者。`observed_risk` 只升不降：服务把注解从 read 改为 write 立即生效；从 write 改回 read 不生效，需要管理员显式设为 read。这取代了原设计中的“降级需管理员确认”流程，无需额外的待确认状态。
 
 ### 2.2 档位
 
@@ -88,7 +91,8 @@ MCP 注解来自外部服务，只用作默认值。管理员的显式配置优�
 
 - 内置助手：沿用用户在面板选择的档位，默认 `confirm`。
 - 普通 Agent：Agent 配置新增执行档位上限，默认 `auto_write`；用户未选择时取该上限。因此在未调整配置的情况下，普通 Agent 的 MCP 仍只在 `RequireApproval=true`（即 `Always`）时审批，与现状一致。
-- `read_only` 在注册阶段移除写工具，包括 MCP 写工具和 Wiki 写工具，而不是注册后再拒绝。
+- `read_only` 在注册阶段移除写工具，包括 MCP 写工具和 Wiki 写工具；仍到达 `Decide` 的写操作（例如注册后风险变化）返回 deny，不再 ask。
+- 每个 Agent 的上限保存在 `CustomAgentConfig.AccessLevel`（空值即 `auto_write`），编辑界面可配置；内置助手使用工作空间的 `MaxAccessLevel`。
 
 ### 2.3 运行模式
 
@@ -108,13 +112,19 @@ MCP 注解来自外部服务，只用作默认值。管理员的显式配置优�
 
 | 字段 | 说明 |
 |---|---|
-| `id, tenant_id, user_id` | 授权属于用户本人 |
-| `action_key` | `Kind + ID + Resource` |
+| `id, tenant_id, user_id` | 授权属于用户本人；`user_id` 是 `Principal.StorageID()` |
+| `grant_key` | 授权键，见下文 |
+| `label` | 审批卡上展示的授权范围，用于查看与撤销界面 |
 | `scope` | `session` / `automation` |
 | `scope_id` | 根会话 ID 或自动化 ID |
-| `source_prompt_id` | 产生该授权的审批 |
+| `prompt_id` | 产生该授权的审批 |
 | `binding_hash` | 仅 `automation`：授权前提的哈希，见下文失效规则 |
-| `expires_at, revoked_at, created_at, last_used_at` | |
+| `expires_at, revoked_at, created_at, updated_at, last_used_at` | |
+
+表为 `agent_grants`，唯一键为（`tenant_id, user_id, scope, scope_id, grant_key`）；再次批准同一授权时复用该行并清除 `revoked_at`。授权键：
+
+- MCP 写工具：`mcp:<service_id>/<tool_name>#<输入 schema 的 sha256 前 6 字节>`。服务改变工具参数后键随之变化，旧授权自然不再匹配。
+- Wiki 等内置写工具：沿用工具原有的 Grant（工具名 + 规范化的知识库范围）。
 
 规则：
 
@@ -132,15 +142,26 @@ MCP 注解来自外部服务，只用作默认值。管理员的显式配置优�
 - 所有者角色降低、档位上限调低，或授权涉及资源的写权限被收回；
 - 自动化连续 90 天没有运行。
 
-失效的授权不删除，`Decide` 对其返回 ask 并附原因（例如“模板 X 的工具列表已变化”），自动化运行挂起并通知；用户重新批准时更新 `binding_hash`。
-- 匹配时同时校验用户、租户、作用域、未过期、未撤销；资源范围必须完全匹配，不做前缀推断。
-- 授权只决定“要不要问”，不扩大能力面或资源权限：工具未注册、资源无写权限时，授权不起作用。
-- 提供查看与撤销接口；撤销立即对后续调用生效，不影响已执行的调用。
+失效的授权不删除，审批改为 ask 并附原因，自动化运行挂起并通知；用户重新批准时更新 `binding_hash`。实现方式：
+
+- `binding_hash` 由 `types.AutomationBinding{AgentID, Tools, MCPServiceIDs, SystemPrompt, OwnerRole, Ceiling}.Hash()` 计算，工具与服务顺序无关。由自动化运行入口计算后放入运行上下文的 `GrantScope`。
+- `AgentGrant.LapseAt` 给出失效原因：`changed`（binding 不一致）、`expired`、`idle`（90 天未使用）、`revoked`。前三种通过审批请求的 `grant_lapsed` 字段带到审批卡并显示说明；用户主动撤销的不提示。
+- MCP 风险调高为 destructive 或被设为 `Always` 后，该工具不再可授权，已有授权不再被查询；schema 变化通过授权键失效。
+- 资源写权限收回不需要单独处理：授权只决定要不要问，路由层仍以真实用户校验写权限。
+
+接口：
+
+- `GET /api/v1/agent/grants?session_id=<根会话 ID>`：列出当前用户在该会话中的有效授权。
+- `DELETE /api/v1/agent/grants/:id`：撤销当前用户的一条授权，仅本人可撤销。
+- 前端在会话标题的“更多”菜单中提供“已允许的操作”列表与撤销按钮。
+- 删除会话时，随会话清理其 `session` 作用域的授权。
 
 ### 2.5 委派
 
 - 删除 `Delegation.RequireApproval` 的一刀切规则和协作工具过滤里的档位分支。子任务以父任务的生效档位和根会话的 `session` 授权调用同一个 `Decide`。
-- 模板子任务的档位 = min（父任务生效档位，模板 Agent 的档位上限）。
+- 模板子任务的档位 = min（父任务生效档位，模板 Agent 的档位上限）。由助手发起（`AssistantParent`）或继承了助手配置的子任务，再受工作空间助手上限约束。
+- 模板子任务的写工具同样用 `ConfirmedTool` 包装，因此只读档位下的写调用以工具结果形式返回拒绝原因，而不是报错中断子任务。
+- 授权作用域放在运行上下文中（`types.WithGrantScope`），子任务继承父任务的根会话作用域；顶层运行未设置时取请求的 `GrantSessionID`，否则取本会话。
 - 子任务的 `ask` 仍由现有机制转发到父会话展示，审批归属、恢复、取消不变。
 - 父任务对已委派工作的 MCP 防重复检查（`delegated_call_in_progress`）保留，与本模型无关。
 
@@ -149,12 +170,13 @@ MCP 注解来自外部服务，只用作默认值。管理员的显式配置优�
 `Principal` 增加可选字段 `ActingVia`，例如 `automation:<id>`：
 
 - 路由层仍按该 Web 用户鉴权，operations 可以使用；
-- 审计日志（`auditLogService.Log`）记录 `ActingVia`，区分本人操作与代为执行；
-- HITL 的 `UserID` 仍是该用户的 `StorageID()`，用户本人可以回答挂起的审批。
+- `StorageID()` 不包含 `ActingVia`，因此授权、会话归属和 HITL 的 `UserID` 都仍属于该用户，用户本人可以回答挂起的审批；
+- operations 派发时 `AuditAgentAction.ActingVia` 随请求带过去（派发会重建身份，不能依赖原 `Principal`）；`types.ActingViaFromContext` 先取 `AuditAgentAction`，再取 `Principal`；
+- 知识库活动审计在 `details.agent_acting_via` 中记录它，区分本人操作与代为执行。
 
 ### 2.7 审计
 
-每次 `Decide` 的非 read 结果写结构化日志：动作键、风险、档位、模式、结论、命中的授权或产生的审批 ID。执行写操作时按现有审计日志记录。
+每次 `Decide` 的非 read 结果由 `policy.Record` 写结构化日志（`agent policy decision`），字段为 `agent_action`、`agent_risk`、`agent_always`、`agent_level`、`agent_mode`、`agent_verdict`，代为执行时另有 `agent_acting_via`。命中授权与产生审批另由审批网关记录日志。执行写操作时按现有审计日志记录。
 
 ## 3. 兼容与迁移
 
@@ -166,15 +188,15 @@ MCP 注解来自外部服务，只用作默认值。管理员的显式配置优�
 | 助手 `read_only` 下的 MCP 写工具 | 行为变化：不再注册（修正） |
 | 协作子任务的只读 MCP | 行为变化：不再强制审批（修正） |
 | 协作子任务的写类 MCP | 规则与父任务一致；父任务已有会话授权时子任务可直接执行 |
-| 已有 `AllowInSession` 审批 | 读取时兼容旧数据，新授权写入授权表 |
-| `WithUnattendedRun`、`Interactive` 等 | 运行入口改为设置运行模式；旧标记在过渡期由模式派生，最终删除 |
+| 已有 `AllowInSession` 审批 | 不兼容：功能尚未上线，旧的会话内授权不迁移，用户再次批准即可 |
+| `WithUnattendedRun`、`Interactive` 等 | 已删除，运行入口直接设置运行模式（`types.WithRunMode`，`QARequest.Mode`）；未设置时按 `unattended` 处理 |
 
 ## 4. 实施顺序
 
-1. **行为不变的收敛**（已完成）：新增 `internal/agent/policy`，含 `Risk`（`operations.Risk` 改为其别名）、`Action`、`Rules`、`Decide`、`Offered`。operations 审批、`ConfirmedTool`、MCP `Gate.NeedsApproval`、协作委托的 `RequireApproval` 与子任务工具过滤都改为调用 `Decide`，规则完全复刻现状：MCP 暂按 `auto_write` 档位加 `Always`（租户开关）与 `ForceAsk`（委托）判断；`read_only` 下仍到达的写操作返回 ask 而非 deny。现有测试未改断言全部通过。
-2. **规则修正与运行模式**：MCP 风险分级与注解默认值；`read_only` 覆盖 MCP（注册阶段移除，`Decide` 增加 deny）；删除委派一刀切；普通 Agent 档位上限配置；合并运行模式。运行模式从第 1 步移到这里，因为合并必然改变现有行为：非交互运行中，operations 与 `ConfirmedTool` 直接拒绝，MCP 审批却发出审批卡并等待至超时（IM 渠道即如此）；`WithUnattendedRun` 目前没有生产调用方。
-3. **授权统一**：授权表、按根会话匹配的 `session` 作用域、审批卡“本会话允许”扩展到 MCP、查看与撤销界面。
-4. **身份与自动化接入**：`ActingVia`、`deferred` 模式、`automation` 作用域授权，由自动化需求使用。
+1. **行为不变的收敛**（已完成，`b2719331e`）：新增 `internal/agent/policy`，含 `Risk`（`operations.Risk` 改为其别名）、`Action`、`Rules`、`Decide`、`Offered`。operations 审批、`ConfirmedTool`、MCP `Gate.NeedsApproval`、协作委托的 `RequireApproval` 与子任务工具过滤都改为调用 `Decide`，规则完全复刻现状：MCP 暂按 `auto_write` 档位加 `Always`（租户开关）与 `ForceAsk`（委托）判断；`read_only` 下仍到达的写操作返回 ask 而非 deny。现有测试未改断言全部通过。
+2. **规则修正与运行模式**（已完成，运行模式 `e97cd5bfb`，其余 `a65b2fde6`）：MCP 风险分级与注解默认值；`read_only` 覆盖 MCP（注册阶段移除，`Decide` 增加 deny）；删除委派一刀切；普通 Agent 档位上限配置；合并运行模式。运行模式从第 1 步移到这里，因为合并必然改变现有行为：非交互运行中，operations 与 `ConfirmedTool` 直接拒绝，MCP 审批却发出审批卡并等待至超时（IM 渠道即如此）；`WithUnattendedRun` 目前没有生产调用方。
+3. **授权统一**（已完成，`a249d8a2d`）：授权表、按根会话匹配的 `session` 作用域、审批卡“本会话允许”扩展到 MCP、查看与撤销界面。
+4. **身份与自动化接入**（已完成，`2e875cca4`）：`ActingVia`、决策日志、`automation` 作用域的 binding 与失效原因。`deferred` 模式在第 2 步已实现。自动化需求只需在运行入口设置模式、`GrantScope` 与 `Principal.ActingVia`。
 
 ## 5. 验收场景
 
@@ -185,7 +207,7 @@ MCP 注解来自外部服务，只用作默认值。管理员的显式配置优�
 - 协作：父任务批准“本会话允许”后，子任务调用同一工具同一范围不再弹卡；子任务上批准的授权对父任务和兄弟任务同样生效；用户发下一条消息后（新协作组）续跑的子任务仍沿用这些授权；子任务调用只读 MCP 不弹卡；模板子任务的档位不超过父任务。
 - 自动化授权：执行模板的工具列表被他人修改后，下一次运行在对应调用处挂起并说明失效原因；重新批准后恢复；所有者降级或资源写权限收回后同样失效。
 - `Always` 的工具（含 `RequireApproval=true` 的 MCP、技能安装）在任何档位和授权下都询问。
-- MCP 服务把工具注解从 read 改为 write，下一次调用立即按 write 处理；反向变化需要管理员确认才生效。
+- MCP 服务把工具注解从 read 改为 write，下一次调用立即按 write 处理；反向变化不生效，需管理员显式设为 read。
 - `unattended` 模式下 ask 直接拒绝并告诉模型原因；`deferred` 模式下挂起并产生通知。
 - 撤销授权后下一次调用重新询问；已执行的调用不受影响。
 - 审计日志中能区分用户本人与 `ActingVia` 的执行。
@@ -193,6 +215,15 @@ MCP 注解来自外部服务，只用作默认值。管理员的显式配置优�
 
 ## 6. 待定问题
 
-- MCP 工具风险的管理界面放在现有 MCP 服务的工具列表中（`McpToolsList.vue`），还是单独的策略页。暂缓决定，第 2 步实现 MCP 风险分级前确定。
+- MCP 工具风险的管理界面放在现有 MCP 服务的工具列表中（`McpToolsList.vue`），还是单独的策略页。暂缓：后端已支持，`PUT /api/v1/mcp-services/:id/tool-approvals/:tool_name` 接受 `risk`（空字符串表示改回按注解推断），`GET` 返回显式配置的 `risk` 与 `observed_risk`；界面后续再定。
 
 已决定：不设协作作用域，授权按根会话匹配（§2.4）；`automation` 授权按前提变化失效，不按时间定期重新确认（§2.4）。
+
+## 7. 实现与原设计的差异
+
+- MCP 注解只采用 `readOnlyHint`；destructive 只能由管理员设置；降级确认改为 `observed_risk` 只升不降（§2.1）。
+- `read_only` 下仍到达的写操作返回 deny（§2.2）。
+- `Decide` 保持为纯函数 `Decide(Action, Rules) Verdict`，`Action` 只含 `Risk` 与 `Always`；授权键由各工具生成并在审批网关匹配，而不是放进 `Action`。授权在运行模式检查之前匹配，因此 `unattended` 与 `deferred` 运行同样认可已有授权。
+- 授权表字段命名为 `grant_key`、`prompt_id`，另有 `label`、`updated_at`（§2.4）。
+- 旧的 `AllowInSession` 数据不兼容（§3）。
+- 模板子任务的写工具改为包装执行，只读档位的拒绝以工具结果返回（§2.5）。
