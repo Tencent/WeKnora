@@ -326,7 +326,15 @@ export function getWikiGraph(kbId: string, params?: WikiGraphQueryParams) {
     }
   }
   const qs = query.toString();
-  return get(`/api/v1/knowledgebase/${kbId}/wiki/graph${qs ? '?' + qs : ''}`);
+  return get(`/api/v1/knowledgebase/${kbId}/wiki/graph${qs ? '?' + qs : ''}`).then((res: any) => {
+    // Older backends serialize an edgeless subgraph as `"edges": null`.
+    const graph = res?.data || res;
+    if (graph && typeof graph === 'object') {
+      graph.nodes ??= [];
+      graph.edges ??= [];
+    }
+    return res;
+  });
 }
 
 export function getWikiStats(kbId: string) {

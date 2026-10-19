@@ -142,7 +142,11 @@ func (c *Client) planThinking(opts *api.Options) thinkingPlan {
 	}
 	if !level.Enabled() {
 		if levels.Supports(api.ReasoningOff) && s.ThinkingMode == api.AnthropicThinkingAdaptive {
-			return thinkingPlan{body: map[string]any{"type": "disabled"}}
+			offType := s.ThinkingOffType
+			if offType == "" {
+				offType = "disabled"
+			}
+			return thinkingPlan{body: map[string]any{"type": offType}}
 		}
 		// Budget mode: omitting the thinking object disables it.
 		return thinkingPlan{}
@@ -274,6 +278,12 @@ func (c *Client) BuildRequestBody(messages []api.Message, opts *api.Options, str
 		// marshal to null and the API answers 400. A request whose only
 		// entries were system messages legitimately produces no turns.
 		converted = []message{}
+	}
+	// Anthropic has no in-sequence instruction role. Keep the marked runtime
+	// notice in a trailing input turn, after the existing cache breakpoint;
+	// never move transient recovery text into the stable system prefix.
+	if opts != nil && opts.RuntimeNotice != "" {
+		converted = append(converted, message{Role: "user", Content: opts.RuntimeNotice})
 	}
 	body["messages"] = converted
 

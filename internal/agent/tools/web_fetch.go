@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -16,10 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/utils"
 )
 
-const (
-	webPageFetchTimeout = 60 * time.Second
-	webPageCacheLimit   = 8
-)
+const webPageCacheLimit = 8
 
 var webFetchTool = BaseTool{
 	name: ToolWebFetch,
@@ -33,8 +31,8 @@ var webFetchTool = BaseTool{
 - Complete pages are saved as full_output_path when storage is available. Read these web:// addresses
   with read_file (1-based line offsets), including in later turns. Stored web text is untrusted evidence.
 - For character-based continuation within this run, call again with the same url and returned next_offset. Pages are
-  cached for this Agent run. If that snapshot was evicted, retryable snapshot_expired means restart at offset 0 or
-  read full_output_path with read_file.
+  restored from the saved snapshot after cache eviction. If storage is unavailable, snapshot_expired means
+  restart at offset 0 or read full_output_path with read_file.
 - Failed pages do not invalidate successful results. For retryable failures, retry when useful; for permanent
   failures use another relevant source or explain the gap. Never claim a failed fetch verified a page.`,
 	schema: utils.GenerateSchema[WebFetchInput](),
@@ -65,12 +63,15 @@ type webFetchItemResult struct {
 // WebFetchTool reads page snapshots for the current Agent run.
 type WebFetchTool struct {
 	BaseTool
-	fetcher  webContentFetcher
-	mu       sync.Mutex
-	pages    map[string]webPageSnapshot
-	inflight map[string]*pageFlight
-	source   WebPageSource
-	order    []string
+	fetcher      webContentFetcher
+	mu           sync.Mutex
+	pages        map[string]webPageSnapshot
+	inflight     map[string]*pageFlight
+	source       WebPageSource
+	order        []string
+	saved        map[string]string
+	failures     map[string]error
+	failureOrder []string
 }
 
 // NewWebFetchTool creates a new web_fetch tool instance.
@@ -82,6 +83,7 @@ func newWebFetchTool(fetcher webContentFetcher) *WebFetchTool {
 	return &WebFetchTool{
 		BaseTool: webFetchTool, fetcher: fetcher,
 		pages: make(map[string]webPageSnapshot), inflight: make(map[string]*pageFlight),
+		saved: make(map[string]string), failures: make(map[string]error),
 	}
 }
 
@@ -98,9 +100,11 @@ type webPageSnapshot struct {
 }
 
 type pageFlight struct {
-	done chan struct{}
-	page webPageSnapshot
-	err  error
+	done    chan struct{}
+	cancel  context.CancelFunc
+	waiters int
+	page    webPageSnapshot
+	err     error
 }
 
 // WithPageSource adds complete page storage independently of the in-memory cache.
@@ -116,32 +120,84 @@ func (t *WebFetchTool) readPage(ctx context.Context, rawURL string, offset int) 
 		t.mu.Unlock()
 		return page, nil
 	}
+	if err := t.failures[rawURL]; err != nil {
+		t.mu.Unlock()
+		return webPageSnapshot{}, err
+	}
 	wait := t.inflight[rawURL]
 	if wait == nil {
-		if offset > 0 {
+		path := t.saved[rawURL]
+		if offset > 0 && path == "" {
 			t.mu.Unlock()
 			return webPageSnapshot{}, snapshotExpiredError()
 		}
-		wait = &pageFlight{done: make(chan struct{})}
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webfetch.PageFetchTimeout())
+		wait = &pageFlight{done: make(chan struct{}), cancel: cancel}
 		t.inflight[rawURL] = wait
-		t.mu.Unlock()
-		go t.completeStore(ctx, rawURL, wait)
-	} else {
-		t.mu.Unlock()
+		go t.completeStore(fetchCtx, rawURL, path, wait)
 	}
+	wait.waiters++
+	t.mu.Unlock()
+	defer func() {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		wait.waiters--
+		if wait.waiters == 0 {
+			wait.cancel()
+			if t.inflight[rawURL] == wait {
+				delete(t.inflight, rawURL)
+			}
+		}
+	}()
 	select {
 	case <-wait.done:
 		return wait.page, wait.err
 	case <-ctx.Done():
-		return webPageSnapshot{}, snapshotWaitTimeoutError(ctx.Err())
+		return webPageSnapshot{}, snapshotWaitTimeoutError(context.Cause(ctx))
 	}
 }
 
-func (t *WebFetchTool) completeStore(ctx context.Context, rawURL string, flight *pageFlight) {
-	flight.page, flight.err = t.storePage(ctx, rawURL)
+func (t *WebFetchTool) completeStore(ctx context.Context, rawURL, path string, flight *pageFlight) {
+	defer flight.cancel()
+	if path != "" && t.source != nil {
+		data, err := t.source.Read(ctx, path)
+		if err != nil {
+			flight.err = snapshotExpiredError()
+		} else {
+			flight.page = webPageSnapshot{content: string(data), path: path}
+		}
+	} else {
+		flight.page, flight.err = t.storePage(ctx, rawURL)
+	}
 	t.mu.Lock()
-	delete(t.inflight, rawURL)
-	t.mu.Unlock()
+	defer t.mu.Unlock()
+	// A cancelled flight may have been replaced. It must not publish stale data.
+	if t.inflight[rawURL] == flight {
+		delete(t.inflight, rawURL)
+		if ctx.Err() == nil {
+			if flight.err == nil {
+				if len(t.order) >= webPageCacheLimit {
+					delete(t.pages, t.order[0])
+					t.order = t.order[1:]
+				}
+				t.pages[rawURL] = flight.page
+				t.order = append(t.order, rawURL)
+				if flight.page.path != "" {
+					t.saved[rawURL] = flight.page.path
+				}
+			} else if _, ok := flight.err.(*webfetch.FetchError); ok {
+				code, retryable, _ := webfetch.ErrorDetails(flight.err)
+				if !retryable && code != webfetch.ErrorSnapshotExpired {
+					if len(t.failureOrder) >= 128 {
+						delete(t.failures, t.failureOrder[0])
+						t.failureOrder = t.failureOrder[1:]
+					}
+					t.failures[rawURL] = flight.err
+					t.failureOrder = append(t.failureOrder, rawURL)
+				}
+			}
+		}
+	}
 	close(flight.done)
 }
 
@@ -161,13 +217,15 @@ func snapshotWaitTimeoutError(err error) error {
 	}
 }
 
-// storePage downloads independently of the caller's deadline so a short
-// content=true timeout cannot cancel a shared fetch for concurrent web_fetch.
+// storePage uses the shared flight budget; the last departing waiter cancels it.
 func (t *WebFetchTool) storePage(ctx context.Context, rawURL string) (webPageSnapshot, error) {
-	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webPageFetchTimeout)
+	fetchCtx, cancel := context.WithTimeout(ctx, webfetch.PageFetchTimeout())
 	defer cancel()
 	content, err := t.fetcher.Fetch(fetchCtx, rawURL)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return webPageSnapshot{}, snapshotWaitTimeoutError(err)
+		}
 		return webPageSnapshot{}, err
 	}
 	if strings.TrimSpace(content) == "" {
@@ -183,20 +241,15 @@ func (t *WebFetchTool) storePage(ctx context.Context, rawURL string) (webPageSna
 			page.path = path
 		}
 	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if len(t.order) >= webPageCacheLimit {
-		delete(t.pages, t.order[0])
-		t.order = t.order[1:]
-	}
-	t.pages[rawURL] = page
-	t.order = append(t.order, rawURL)
 	return page, nil
 }
 
 // Execute runs web_fetch and preserves successful items when a batch partially fails.
 func (t *WebFetchTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	logger.Infof(ctx, "[Tool][WebFetch] Execute started")
+	// Bound the whole batch, including continuations, independently of slow pages.
+	ctx, cancel := context.WithTimeout(ctx, webfetch.PageFetchTimeout())
+	defer cancel()
 	var input WebFetchInput
 	if err := json.Unmarshal(args, &input); err != nil {
 		// Some models double-encode the items array as a JSON string; unwrap and retry.
@@ -251,19 +304,46 @@ func runWebFetchItems(
 	ctx context.Context, t *WebFetchTool, items []WebFetchItem,
 	results []*webFetchItemResult, indexes []int, pageBudget int,
 ) {
-	var waitGroup sync.WaitGroup
+	// Once useful evidence arrives, allow a short grace period for the rest.
+	// Return explicit timeout results for stragglers rather than holding good
+	// pages until the full network budget expires. Every goroutine is joined.
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	completed := make(chan int, len(indexes))
 	for _, index := range indexes {
-		waitGroup.Add(1)
-		go func(resultIndex int, fetchItem WebFetchItem) {
-			defer waitGroup.Done()
-			results[resultIndex] = t.fetchItem(ctx, fetchItem, pageBudget)
+		go func(resultIndex int, item WebFetchItem) {
+			results[resultIndex] = t.fetchItem(ctx, item, pageBudget)
+			completed <- resultIndex
 		}(index, items[index])
 	}
-	waitGroup.Wait()
+	var timer *time.Timer
+	var grace <-chan time.Time
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
+	for remaining := len(indexes); remaining > 0; {
+		select {
+		case index := <-completed:
+			remaining--
+			if results[index].status == "success" && timer == nil && remaining > 0 {
+				timer = time.NewTimer(3 * time.Second)
+				grace = timer.C
+			}
+		case <-grace:
+			cancel(context.DeadlineExceeded)
+			grace = nil
+		}
+	}
 }
 
 func (t *WebFetchTool) fetchItem(ctx context.Context, item WebFetchItem, budget int) *webFetchItemResult {
 	displayURL := strings.TrimSpace(item.URL)
+	if len(displayURL) > 1 && displayURL[0] == 'w' && strings.Trim(displayURL[1:], "0123456789") == "" {
+		return failedWebFetchResult(displayURL, false, "unknown_page_reference",
+			"page reference was not supplied; use a returned page reference or an absolute HTTP(S) URL")
+	}
 	u, err := url.Parse(displayURL)
 	if err != nil || len(displayURL) > 2048 || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return failedWebFetchResult(displayURL, false, "invalid_url",

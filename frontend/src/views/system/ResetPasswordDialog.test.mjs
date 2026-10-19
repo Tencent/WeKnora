@@ -37,7 +37,7 @@ function compileComponent(source, imports) {
   return Object.assign(evaluate(script.content).default, { render: evaluate(template.code).render })
 }
 
-function mountResetRow() {
+function mountResetRow(email = 'user@example.com') {
   const requests = []
   const notices = []
   const Dialog = compileComponent(read('./ResetPasswordDialog.vue'), {
@@ -51,9 +51,9 @@ function mountResetRow() {
   })
   // Compile the real parent row so reverting its lifetime/visibility binding
   // also fails this test, instead of testing a hand-written approximation.
-  const { descriptor } = parse(read('./SystemSettings.vue'))
+  const { descriptor } = parse(read('./UserManagement.vue'))
   function findRow(node) {
-    if (node.props?.some((prop) => prop.name === 'class' && prop.value?.content.includes('setting-row--password-reset'))) {
+    if (node.tag === 'ResetPasswordDialog') {
       return node.loc.source
     }
     return node.children?.map(findRow).find(Boolean)
@@ -64,8 +64,15 @@ function mountResetRow() {
     <script setup>
     import { ref } from 'vue'
     import ResetPasswordDialog from './ResetPasswordDialog.vue'
-    const activeSettingsSection = ref('access')
-    const passwordResetVisible = ref(false)
+    const active = ref(true)
+    const resetVisibleId = ref(null)
+    const resetBusy = ref(false)
+    const loading = false
+    const busyId = null
+    const createVisible = false
+    const authStore = { currentUserId: 'self' }
+    const row = { id: 'target', email: ${JSON.stringify(email)}, is_active: true }
+    const announce = (message) => { saveAnnouncement.value = message }
     const saveAnnouncement = ref('')
     const dialogRef = ref()
     const t = (key) => key
@@ -113,22 +120,22 @@ for (const outcome of ['success', 'failure']) {
   test(`pending reset survives tab changes and reports ${outcome}`, async (t) => {
     const { app, parent, requests, dialog } = mountResetRow()
     t.after(() => app.unmount())
-    parent.passwordResetVisible = true
+    parent.resetVisibleId = 'target'
     await flush()
     const initial = dialog()
-    Object.assign(initial.form, { email: ' user@example.com ', newPassword: 'FirstSecret1!', confirmPassword: 'FirstSecret1!' })
+    Object.assign(initial.form, { newPassword: 'FirstSecret1!', confirmPassword: 'FirstSecret1!' })
     const pending = initial.submit()
     await flush()
     assert.equal(requests.length, 1)
     assert.equal(requests[0].body.email, 'user@example.com')
     initial.onVisibleChange(false)
-    assert.equal(parent.passwordResetVisible, true)
+    assert.equal(parent.resetVisibleId, 'target')
 
-    parent.activeSettingsSection = 'runtime'
+    parent.active = false
     await flush()
     assert.equal(dialog(), initial, 'tab changes must preserve the pending request owner')
     assert.equal(parent.dialogRef.$.subTree.component.props.visible, false, 'teleported popup must be hidden')
-    parent.activeSettingsSection = 'access'
+    parent.active = true
     await flush()
     assert.equal(dialog(), initial)
     assert.equal(parent.dialogRef.$.subTree.component.props.visible, true)
@@ -138,7 +145,7 @@ for (const outcome of ['success', 'failure']) {
     await initial.submit()
     assert.equal(requests.length, 1, 'returning to the tab must not allow a concurrent reset')
 
-    parent.activeSettingsSection = 'runtime'
+    parent.active = false
     await flush()
     if (outcome === 'success') requests[0].resolve({})
     else requests[0].reject(new Error('Reset failed'))
@@ -146,10 +153,34 @@ for (const outcome of ['success', 'failure']) {
     await flush()
     assert.equal(initial.submitting, false)
     assert.equal(parent.saveAnnouncement, outcome === 'success' ? 'system.globalSettings.passwordReset.success' : 'Reset failed')
-    assert.equal(parent.passwordResetVisible, outcome !== 'success')
-    parent.activeSettingsSection = 'access'
+    assert.equal(parent.resetVisibleId, outcome === 'success' ? null : 'target')
+    parent.active = true
     await flush()
     assert.equal(parent.dialogRef.$.subTree.component.props.visible, outcome !== 'success')
     assert.equal(initial.form.newPassword, outcome === 'success' ? '' : 'FirstSecret1!')
   })
 }
+
+
+test('row reset keeps the selected email and reports its pending state', async (t) => {
+  const { app, parent, requests, dialog } = mountResetRow('bob@example.com')
+  t.after(() => app.unmount())
+  parent.resetVisibleId = 'target'
+  await flush()
+  const state = dialog()
+  assert.equal(state.form.email, 'bob@example.com')
+  Object.assign(state.form, { newPassword: 'FirstSecret1!', confirmPassword: 'FirstSecret1!' })
+  const pending = state.submit()
+  await flush()
+  assert.equal(parent.resetBusy, true)
+  assert.equal(requests[0].body.email, 'bob@example.com')
+  requests[0].resolve({})
+  await pending
+  await flush()
+  assert.equal(parent.resetBusy, false)
+  assert.equal(parent.resetVisibleId, null)
+  assert.equal(state.form.newPassword, '')
+  parent.resetVisibleId = 'target'
+  await flush()
+  assert.equal(state.form.email, 'bob@example.com')
+})

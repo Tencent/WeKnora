@@ -1,5 +1,5 @@
 <template>
-  <div class="agent-list-container">
+  <div class="agent-list-container" :class="{ 'is-lite': authStore.isLiteMode }">
     <div class="agent-list-content">
       <div class="header" style="--wails-draggable: drag">
         <div class="header-title" style="--wails-draggable: drag">
@@ -8,7 +8,8 @@
               <ResourceIcon type="agent" :size="24" />
               {{ $t('agent.title') }}
             </h2>
-            <div class="header-actions" style="--wails-draggable: no-drag">
+            <div class="header-actions" :class="{ 'header-actions-lite': authStore.isLiteMode }" style="--wails-draggable: no-drag">
+              <ResourceListToolbar v-if="authStore.isLiteMode" hide-scopes v-model="spaceSelection" v-model:query="keyword" />
               <ResourceSortControl v-model="selectedResourceSort" />
               <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('agent.createAgent')" placement="bottom">
                 <t-button variant="text" theme="default" size="small" class="header-action-btn"
@@ -40,7 +41,7 @@
           <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('agent.subtitle') }}</p>
         </div>
       </div>
-      <ResourceListToolbar :hide-scopes="authStore.isLiteMode" v-model="spaceSelection" v-model:query="keyword" :count-all="allAgentsCount"
+      <ResourceListToolbar v-if="!authStore.isLiteMode" v-model="spaceSelection" v-model:query="keyword" :count-all="allAgentsCount"
       :count-mine="agents.length" :count-by-org="effectiveSharedCountByOrg" :count-favorites="agentFavoritesCount"
       :count-recents="agentRecentsCount" />
       <div class="agent-list-main">
@@ -95,8 +96,8 @@
             </div>
             <!-- 我创建的：当前 agent 是本空间 + 非内置 + 我亲手创建，且前一张
                  要么不存在、要么不是本空间、要么是内置（builtin → mine 过渡）、
-                 要么是同事创建。与 KB 列表对齐。 -->
-            <div v-if="agent.isMine
+                 要么是同事创建。与 KB 列表对齐，Lite 隐藏该分组标题。 -->
+            <div v-if="!authStore.isLiteMode && agent.isMine
               && !agent.is_builtin
               && isMyAgent(agent)
               && (index === 0
@@ -173,13 +174,7 @@
               </button>
               <div class="card-header">
                 <div class="card-header-left">
-                  <div v-if="agent.is_builtin" class="builtin-avatar"
-                    :class="agent.config?.agent_mode === 'smart-reasoning' ? 'agent' : 'normal'">
-                    <t-icon :name="agent.config?.agent_mode === 'smart-reasoning' ? 'control-platform' : 'chat'"
-                      size="18px" />
-                  </div>
-                  <div v-else-if="agent.avatar" class="builtin-avatar agent-emoji">{{ agent.avatar }}</div>
-                  <AgentAvatar v-else :name="agent.name" size="small" />
+                  <ResourceCardAvatar kind="agent" :emoji="agent.is_builtin ? undefined : agent.avatar" />
                   <span class="card-title" :title="agent.name">{{ agent.name }}</span>
                 </div>
                 <t-popup
@@ -187,9 +182,9 @@
                   :visible="openMoreAgentId === agent.id" trigger="click" overlayClassName="card-more-popup"
                   destroy-on-close placement="bottom-right"
                   @update:visible="(v: boolean) => { openMoreAgentId = v ? agent.id : null }">
-                  <button type="button" :aria-label="$t('common.expand')" class="more-wrap" :class="{ 'active-more': openMoreAgentId === agent.id }"
+                  <button type="button" :aria-label="$t('common.expand')" class="more-wrap" :class="{ 'active-more': openMoreAgentId === agent.id }" :aria-expanded="openMoreAgentId === agent.id" aria-haspopup="true"
                     @click.stop>
-                    <img class="more-icon" src="@/assets/img/more.png" alt="" />
+                    <t-icon name="ellipsis" size="16px" aria-hidden="true" />
                   </button>
                   <template #content>
                     <div class="popup-menu">
@@ -213,9 +208,9 @@
                   :visible="openMoreAgentId === 'shared-' + agent.share_id" trigger="click"
                   overlayClassName="card-more-popup" destroy-on-close placement="bottom-right"
                   @update:visible="(v: boolean) => { openMoreAgentId = v ? 'shared-' + agent.share_id : null }">
-                  <button type="button" :aria-label="$t('common.expand')" class="more-wrap" :class="{ 'active-more': openMoreAgentId === 'shared-' + agent.share_id }"
+                  <button type="button" :aria-label="$t('common.expand')" class="more-wrap" :class="{ 'active-more': openMoreAgentId === 'shared-' + agent.share_id }" :aria-expanded="openMoreAgentId === 'shared-' + agent.share_id" aria-haspopup="true"
                     @click.stop>
-                    <img class="more-icon" src="@/assets/img/more.png" alt="" />
+                    <t-icon name="ellipsis" size="16px" aria-hidden="true" />
                   </button>
                   <template #content>
                     <div class="popup-menu">
@@ -228,7 +223,7 @@
                 </t-popup>
               </div>
               <div class="card-content">
-                <div class="card-description" :title="agent.description || $t('agent.noDescription')">
+                <div class="card-description" :class="{ 'is-empty': !agent.description }" :title="agent.description || $t('agent.noDescription')">
                   {{ agent.description || $t('agent.noDescription') }}</div>
               </div>
               <div class="card-bottom">
@@ -252,7 +247,7 @@
                     <t-tooltip v-if="agent.config?.web_search_enabled" :content="$t('agent.features.webSearch')"
                       placement="top">
                       <div class="feature-badge web-search">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                           <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2" fill="none" />
                           <ellipse cx="8" cy="8" rx="2.5" ry="6" stroke="currentColor" stroke-width="1.2" fill="none" />
                           <line x1="2" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.2" />
@@ -263,26 +258,26 @@
                     <t-tooltip v-if="agent.config?.knowledge_bases?.length || agent.config?.kb_selection_mode === 'all'"
                       :content="$t('agent.features.knowledgeBase')" placement="top">
                       <div class="feature-badge knowledge">
-                        <t-icon name="folder" size="16px" />
+                        <t-icon name="folder" size="14px" />
                       </div>
                     </t-tooltip>
                     <t-tooltip v-if="agent.config?.mcp_services?.length || agent.config?.mcp_selection_mode === 'all'"
                       :content="$t('agent.features.mcp')" placement="top">
                       <div class="feature-badge mcp">
-                        <t-icon name="extension" size="16px" />
+                        <t-icon name="extension" size="14px" />
                       </div>
                     </t-tooltip>
                     <t-tooltip v-if="agent.config?.multi_turn_enabled" :content="$t('agent.features.multiTurn')"
                       placement="top">
                       <div class="feature-badge multi-turn">
-                        <t-icon name="chat-bubble" size="16px" />
+                        <t-icon name="chat-bubble" size="14px" />
                       </div>
                     </t-tooltip>
                   </div>
                 </div>
                 <!-- 右下角：内置 / 来源徽章 / 空间图标+名称 -->
                 <div v-if="!agent.isMine" class="card-bottom-source">
-                  <img src="@/assets/img/organization-green.svg" class="org-icon" alt="" aria-hidden="true" />
+                  <t-icon name="usergroup" class="org-icon" size="14px" aria-hidden="true" />
                   <span class="org-source-text">{{ agent.org_name }}</span>
                 </div>
                 <div v-else-if="showAgentBuiltinBadge(agent)" class="builtin-badge">
@@ -311,8 +306,8 @@
               <t-icon class="agent-section-toggle"
                 :name="isAgentSectionCollapsed('builtin') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
-            <!-- 我创建的：第一张非内置且我亲手创建的卡片前打标题 -->
-            <div v-if="!agent.is_builtin
+            <!-- 我创建的：非 Lite 在第一张非内置且我亲手创建的卡片前打标题 -->
+            <div v-if="!authStore.isLiteMode && !agent.is_builtin
               && isMyAgent(agent)
               && (index === 0
                 || sortedMineAgents[index - 1].is_builtin
@@ -356,22 +351,16 @@
               <div class="card-header">
                 <div class="card-header-left">
                   <!-- 内置智能体使用简洁图标 -->
-                  <div v-if="agent.is_builtin" class="builtin-avatar"
-                    :class="agent.config?.agent_mode === 'smart-reasoning' ? 'agent' : 'normal'">
-                    <t-icon :name="agent.config?.agent_mode === 'smart-reasoning' ? 'control-platform' : 'chat'"
-                      size="18px" />
-                  </div>
-                  <div v-else-if="agent.avatar" class="builtin-avatar agent-emoji">{{ agent.avatar }}</div>
-                  <AgentAvatar v-else :name="agent.name" size="small" />
+                  <ResourceCardAvatar kind="agent" :emoji="agent.is_builtin ? undefined : agent.avatar" />
                   <span class="card-title" :title="agent.name">{{ agent.name }}</span>
                 </div>
                 <t-popup v-if="canManageAgent(agent) || authStore.hasRole('contributor') || authStore.hasRole('admin')"
                   :visible="openMoreAgentId === agent.id" trigger="click" overlayClassName="card-more-popup"
                   destroy-on-close placement="bottom-right"
                   @update:visible="(v: boolean) => { openMoreAgentId = v ? agent.id : null }">
-                  <button type="button" :aria-label="$t('common.expand')" class="more-wrap" :class="{ 'active-more': openMoreAgentId === agent.id }"
+                  <button type="button" :aria-label="$t('common.expand')" class="more-wrap" :class="{ 'active-more': openMoreAgentId === agent.id }" :aria-expanded="openMoreAgentId === agent.id" aria-haspopup="true"
                     @click.stop>
-                    <img class="more-icon" src="@/assets/img/more.png" alt="" />
+                    <t-icon name="ellipsis" size="16px" aria-hidden="true" />
                   </button>
                   <template #content>
                     <div class="popup-menu">
@@ -400,7 +389,7 @@
 
               <!-- 卡片内容 -->
               <div class="card-content">
-                <div class="card-description" :title="agent.description || $t('agent.noDescription')">
+                <div class="card-description" :class="{ 'is-empty': !agent.description }" :title="agent.description || $t('agent.noDescription')">
                   {{ agent.description || $t('agent.noDescription') }}
                 </div>
               </div>
@@ -423,7 +412,7 @@
                     <t-tooltip v-if="agent.config?.web_search_enabled" :content="$t('agent.features.webSearch')"
                       placement="top">
                       <div class="feature-badge web-search">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                           <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2" fill="none" />
                           <ellipse cx="8" cy="8" rx="2.5" ry="6" stroke="currentColor" stroke-width="1.2" fill="none" />
                           <line x1="2" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.2" />
@@ -434,19 +423,19 @@
                     <t-tooltip v-if="agent.config?.knowledge_bases?.length || agent.config?.kb_selection_mode === 'all'"
                       :content="$t('agent.features.knowledgeBase')" placement="top">
                       <div class="feature-badge knowledge">
-                        <t-icon name="folder" size="16px" />
+                        <t-icon name="folder" size="14px" />
                       </div>
                     </t-tooltip>
                     <t-tooltip v-if="agent.config?.mcp_services?.length || agent.config?.mcp_selection_mode === 'all'"
                       :content="$t('agent.features.mcp')" placement="top">
                       <div class="feature-badge mcp">
-                        <t-icon name="extension" size="16px" />
+                        <t-icon name="extension" size="14px" />
                       </div>
                     </t-tooltip>
                     <t-tooltip v-if="agent.config?.multi_turn_enabled" :content="$t('agent.features.multiTurn')"
                       placement="top">
                       <div class="feature-badge multi-turn">
-                        <t-icon name="chat-bubble" size="16px" />
+                        <t-icon name="chat-bubble" size="14px" />
                       </div>
                     </t-tooltip>
                   </div>
@@ -516,17 +505,16 @@
             }" role="link" tabindex="0" @keydown.enter.self.prevent="handleSpaceAgentCardClick(shared)" @keydown.space.self.prevent="handleSpaceAgentCardClick(shared)" @click="handleSpaceAgentCardClick(shared)">
               <div class="card-header">
                 <div class="card-header-left">
-                  <div v-if="shared.agent?.avatar" class="builtin-avatar agent-emoji">{{ shared.agent.avatar }}</div>
-                  <AgentAvatar v-else :name="shared.agent?.name" size="small" />
+                  <ResourceCardAvatar kind="agent" :emoji="shared.agent?.avatar" />
                   <span class="card-title" :title="shared.agent?.name">{{ shared.agent?.name }}</span>
                 </div>
                 <t-popup v-if="!shared.is_mine && authStore.hasRole('admin')"
                   :visible="openMoreAgentId === 'shared-tab-' + shared.share_id" trigger="click"
                   overlayClassName="card-more-popup" destroy-on-close placement="bottom-right"
                   @update:visible="(v: boolean) => { openMoreAgentId = v ? 'shared-tab-' + shared.share_id : null }">
-                  <button type="button" :aria-label="$t('common.expand')" class="more-wrap" :class="{ 'active-more': openMoreAgentId === 'shared-tab-' + shared.share_id }"
+                  <button type="button" :aria-label="$t('common.expand')" class="more-wrap" :class="{ 'active-more': openMoreAgentId === 'shared-tab-' + shared.share_id }" :aria-expanded="openMoreAgentId === 'shared-tab-' + shared.share_id" aria-haspopup="true"
                     @click.stop>
-                    <img class="more-icon" src="@/assets/img/more.png" alt="" />
+                    <t-icon name="ellipsis" size="16px" aria-hidden="true" />
                   </button>
                   <template #content>
                     <div class="popup-menu">
@@ -539,7 +527,7 @@
                 </t-popup>
               </div>
               <div class="card-content">
-                <div class="card-description" :title="shared.agent?.description || $t('agent.noDescription')">
+                <div class="card-description" :class="{ 'is-empty': !shared.agent?.description }" :title="shared.agent?.description || $t('agent.noDescription')">
                   {{ shared.agent?.description || $t('agent.noDescription') }}</div>
               </div>
               <div class="card-bottom">
@@ -559,7 +547,7 @@
                     </t-tooltip>
                     <t-tooltip v-if="shared.agent?.config?.web_search_enabled" :content="$t('agent.features.webSearch')"
                       placement="top">
-                      <div class="feature-badge web-search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"
+                      <div class="feature-badge web-search"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"
                           xmlns="http://www.w3.org/2000/svg">
                           <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2" fill="none" />
                           <ellipse cx="8" cy="8" rx="2.5" ry="6" stroke="currentColor" stroke-width="1.2" fill="none" />
@@ -570,16 +558,16 @@
                     <t-tooltip
                       v-if="shared.agent?.config?.knowledge_bases?.length || shared.agent?.config?.kb_selection_mode === 'all'"
                       :content="$t('agent.features.knowledgeBase')" placement="top">
-                      <div class="feature-badge knowledge"><t-icon name="folder" size="16px" /></div>
+                      <div class="feature-badge knowledge"><t-icon name="folder" size="14px" /></div>
                     </t-tooltip>
                     <t-tooltip
                       v-if="shared.agent?.config?.mcp_services?.length || shared.agent?.config?.mcp_selection_mode === 'all'"
                       :content="$t('agent.features.mcp')" placement="top">
-                      <div class="feature-badge mcp"><t-icon name="extension" size="16px" /></div>
+                      <div class="feature-badge mcp"><t-icon name="extension" size="14px" /></div>
                     </t-tooltip>
                     <t-tooltip v-if="shared.agent?.config?.multi_turn_enabled" :content="$t('agent.features.multiTurn')"
                       placement="top">
-                      <div class="feature-badge multi-turn"><t-icon name="chat-bubble" size="16px" /></div>
+                      <div class="feature-badge multi-turn"><t-icon name="chat-bubble" size="14px" /></div>
                     </t-tooltip>
                   </div>
                 </div>
@@ -737,6 +725,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
@@ -753,12 +742,13 @@ import { useSettingsStore } from '@/stores/settings'
 import { useMenuStore } from '@/stores/menu'
 import type { SharedAgentInfo, OrganizationSharedAgentItem } from '@/api/organization'
 import AgentEditorModal from './AgentEditorModal.vue'
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import ContextualGuide from '@/components/ContextualGuide.vue'
 import TenantModelsGuide from '@/components/TenantModelsGuide.vue'
 import { focusAgentEditorSection, markContextualGuideDone } from '@/config/contextualGuides'
 import { useTenantModelReadiness } from '@/composables/useTenantModelReadiness'
 import { useUIStore } from '@/stores/ui'
-import AgentAvatar from '@/components/AgentAvatar.vue'
+import ResourceCardAvatar from '@/components/ResourceCardAvatar.vue'
 import ResourceListToolbar from '@/components/ResourceListToolbar.vue'
 import { matchesResourceQuery } from '@/utils/resourceListSearch'
 import ResourceSortControl from '@/components/ResourceSortControl.vue'
@@ -1035,6 +1025,12 @@ const sharedAgentMcpScopeText = computed(() => {
 const editorVisible = ref(false)
 const editorMode = ref<'create' | 'edit'>('create')
 const editingAgent = ref<CustomAgent | null>(null)
+useAssistantPageContext(() => {
+  const agent = editingAgent.value
+  if (!editorVisible.value || editorMode.value !== 'edit' || !agent) return null
+  if (!agents.value.some(own => own.id === agent.id && own.tenant_id === agent.tenant_id)) return null
+  return { page: 'agent_editor', agentId: agent.id, agentName: agent.name }
+})
 const editorInitialSection = ref<string>('basic')
 const editorInitialHighlightField = ref<string>('')
 /** 当前打开三点菜单的卡片 agent.id（用于受控弹出层，避免 computed 项无持久引用导致菜单不响应） */
@@ -1193,6 +1189,8 @@ watch(creatorFilter, () => {
   fetchList(true)
 })
 
+useAssistantDataChange(() => { void fetchList(true) }, { areas: ['agent'] })
+
 onMounted(() => {
   fetchList()
   window.addEventListener('openAgentEditor', handleOpenAgentEditor as EventListener)
@@ -1294,7 +1292,8 @@ const handleEdit = (agent: AgentWithUI) => {
 function canManageAgent(agent: AgentWithUI): boolean {
   const userId = authStore.user?.id || ''
   const creatorId = (agent as any).created_by || ''
-  if (creatorId && userId && creatorId === userId) return true
+  // A creator demoted to Viewer no longer manages it (access.CreatorRoleFloor).
+  if (creatorId && userId && creatorId === userId && authStore.hasRole('contributor')) return true
   return authStore.hasRole('admin')
 }
 
@@ -1357,7 +1356,11 @@ const tenantSectionIconName = computed(() =>
 // 思路——空 Set = 全展开，避免新增分段还得维护默认值。
 type AgentSectionKey = 'builtin' | 'mine' | 'tenantOthers' | 'sharedByMe' | 'sharedEditable' | 'sharedReadonly'
 const collapsedAgentSections = ref<Set<AgentSectionKey>>(new Set())
-const isAgentSectionCollapsed = (key: AgentSectionKey) => collapsedAgentSections.value.has(key)
+const isAgentSectionCollapsed = (key: AgentSectionKey) => {
+  // Lite 隐藏了「我创建的」折叠入口，对应卡片始终展开。
+  if (authStore.isLiteMode && key === 'mine') return false
+  return collapsedAgentSections.value.has(key)
+}
 const toggleAgentSection = (key: AgentSectionKey) => {
   const next = new Set(collapsedAgentSections.value)
   if (next.has(key)) next.delete(key)
@@ -1666,8 +1669,9 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
 }
 
 .card-bottom-source .org-icon {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
+  color: var(--td-text-color-secondary);
   flex-shrink: 0;
 }
 
@@ -1680,6 +1684,10 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
 }
 
 // 共享给我 · 可编辑 / 仅查看 分组标题，与 KB 列表 .kb-section-header 对齐。
+.is-lite .agent-card.is-builtin + .agent-card:not(.is-builtin) {
+  grid-column-start: 1;
+}
+
 .agent-section-header {
   .resource-section-header();
 }
@@ -1692,7 +1700,7 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
 .agent-card {
   .resource-card();
 
-  .agent-favorite-star { .resource-favorite-button(); }
+  .resource-card-quiet();
 }
 
 .builtin-badge {
@@ -1709,26 +1717,6 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
   flex-shrink: 0;
 }
 
-.builtin-avatar {
-  border-radius: var(--app-radius-md);
-
-  &.agent-emoji {
-    font-size: var(--app-text-2xl);
-    line-height: 1;
-    background: var(--td-bg-color-container-hover);
-  }
-
-  &.normal {
-    background: linear-gradient(135deg, color-mix(in srgb, var(--td-brand-color) 15%, transparent) 0%, color-mix(in srgb, var(--td-brand-color) 8%, transparent) 100%);
-    color: var(--td-brand-color-active);
-  }
-
-  &.agent {
-    background: linear-gradient(135deg, color-mix(in srgb, var(--app-accent-purple) 15%, transparent) 0%, color-mix(in srgb, var(--app-accent-purple) 8%, transparent) 100%);
-    color: var(--td-brand-color);
-  }
-}
-
 /* 与知识库卡片内容区一致 */
 /* 三个列表卡片统一：描述字体 */
 .bottom-left {
@@ -1737,62 +1725,9 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
   gap: 8px;
 }
 
+// Card capability icons share the knowledge-base list's quiet treatment.
 .feature-badge {
   .resource-feature-badge();
-
-  &.mode-normal {
-    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-    color: var(--td-brand-color-active);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-    }
-  }
-
-  &.mode-agent {
-    background: color-mix(in srgb, var(--app-accent-purple) 8%, transparent);
-    color: var(--td-brand-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--app-accent-purple) 12%, transparent);
-    }
-  }
-
-  &.web-search {
-    background: color-mix(in srgb, var(--td-warning-color) 8%, transparent);
-    color: var(--td-warning-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-warning-color) 12%, transparent);
-    }
-  }
-
-  &.knowledge {
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-secondary);
-
-    &:hover {
-      background: var(--td-bg-color-container-hover);
-    }
-  }
-
-  &.mcp {
-    background: color-mix(in srgb, var(--td-error-color) 8%, transparent);
-    color: var(--td-error-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-error-color) 12%, transparent);
-    }
-  }
-
-  &.multi-turn {
-    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-    color: var(--td-brand-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-    }
-  }
 }
 
 // 删除确认对话框样式

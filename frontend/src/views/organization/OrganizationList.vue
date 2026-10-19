@@ -88,18 +88,22 @@
             <!-- 卡片头部 -->
             <div class="card-header">
               <div class="card-header-left">
-                <div class="org-avatar">
-                  <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" />
-                </div>
+                <ResourceCardAvatar kind="space"
+                  :emoji="org.avatar?.startsWith('emoji:') ? org.avatar.slice(6) : undefined" />
                 <div class="card-title-block">
                   <span class="card-title" :title="org.name">{{ org.name }}</span>
+                  <span v-if="showOrgRelationTag(org)" class="relation-role-tag"
+                    :class="org.is_owner ? 'owner' : (org.my_role || '')">
+                    {{ org.is_owner ? $t('organization.owner') : (org.my_role ?
+                      $t(`organization.role.${org.my_role}`) : $t('organization.joinedByMe')) }}
+                  </span>
                 </div>
               </div>
-              <t-popup v-model="organizationMenuVisibility[org.id]" overlayClassName="card-more-popup"
+              <t-popup :visible="organizationMenuVisibility[org.id]" overlayClassName="card-more-popup"
                 :on-visible-change="(visible: boolean) => onVisibleChange(visible, org)" trigger="click"
                 destroy-on-close placement="bottom-right">
-                <button type="button" :aria-label="$t('common.expand')" class="more-wrap" @click.stop :class="{ 'active-more': organizationMenuVisibility[org.id] }">
-                  <img class="more-icon" src="@/assets/img/more.png" alt="" />
+                <button type="button" :aria-label="$t('common.expand')" class="more-wrap" @click.stop :class="{ 'active-more': organizationMenuVisibility[org.id] }" :aria-expanded="!!organizationMenuVisibility[org.id]" aria-haspopup="true">
+                  <t-icon name="ellipsis" size="16px" aria-hidden="true" />
                 </button>
                 <template #content>
                   <div class="popup-menu" @click.stop>
@@ -123,31 +127,31 @@
 
             <!-- 卡片内容 -->
             <div class="card-content">
-              <div class="card-description" :title="org.description || $t('organization.noDescription')">
+              <div class="card-description" :class="{ 'is-empty': !org.description }" :title="org.description || $t('organization.noDescription')">
                   {{ org.description || $t('organization.noDescription') }}
               </div>
             </div>
 
-            <!-- 卡片底部（与知识库卡片风格统一：小标签、无日期、智能体用主题色） -->
+            <!-- 数量常显，与知识库和智能体共用底部图标样式。 -->
             <div class="card-bottom">
               <div class="bottom-left">
                 <div class="feature-badges">
                   <t-tooltip :content="$t('organization.memberCount')" placement="top">
-                    <div class="feature-badge stat-member">
+                    <div class="feature-badge is-count stat-member">
                       <t-icon name="user" size="14px" />
-                      <span class="badge-count">{{ org.member_count || 0 }}</span>
+                      <span class="badge-count">{{ $t('organization.cardStats.members', { count: org.member_count ?? 0 }) }}</span>
                     </div>
                   </t-tooltip>
                   <t-tooltip :content="$t('organization.invite.knowledgeBases')" placement="top">
-                    <div class="feature-badge stat-kb">
+                    <div class="feature-badge is-count stat-kb">
                       <t-icon name="folder" size="14px" />
-                      <span class="badge-count">{{ org.share_count ?? 0 }}</span>
+                      <span class="badge-count">{{ $t('organization.cardStats.knowledgeBases', { count: org.share_count ?? 0 }) }}</span>
                     </div>
                   </t-tooltip>
                   <t-tooltip :content="$t('organization.invite.agents')" placement="top">
-                    <div class="feature-badge stat-agent">
-                      <img src="@/assets/img/agent-green.svg" class="stat-agent-icon" alt="" aria-hidden="true" />
-                      <span class="badge-count">{{ org.agent_share_count ?? 0 }}</span>
+                    <div class="feature-badge is-count stat-agent">
+                      <t-icon name="control-platform" size="14px" />
+                      <span class="badge-count">{{ $t('organization.cardStats.agents', { count: org.agent_share_count ?? 0 }) }}</span>
                     </div>
                   </t-tooltip>
                 </div>
@@ -157,14 +161,7 @@
                     $t('organization.settings.pendingReview') }}</span>
                 </t-tooltip>
               </div>
-              <div v-if="showOrgRelationTag(org)" class="bottom-right">
-                <div class="relation-role-tag" :class="org.is_owner ? 'owner' : (org.my_role || '')">
-                  <t-icon :name="org.is_owner ? 'usergroup-add' : 'usergroup'" size="14px" />
-                  <span>{{ org.is_owner ? $t('organization.owner') : (org.my_role ?
-                    $t(`organization.role.${org.my_role}`) :
-                    $t('organization.joinedByMe')) }}</span>
-                </div>
-              </div>
+
             </div>
           </div>
           </template>
@@ -445,6 +442,7 @@ import { useI18n } from 'vue-i18n'
 import { copyWithToast } from '@/utils/clipboard'
 import OrganizationSettingsModal from './OrganizationSettingsModal.vue'
 import SpaceAvatar from '@/components/SpaceAvatar.vue'
+import ResourceCardAvatar from '@/components/ResourceCardAvatar.vue'
 import ResourceListToolbar from '@/components/ResourceListToolbar.vue'
 import { matchesResourceQuery } from '@/utils/resourceListSearch'
 import ResourceSortControl from '@/components/ResourceSortControl.vue'
@@ -738,9 +736,7 @@ const emptyStateDesc = computed(() => {
 
 // Methods
 const onVisibleChange = (visible: boolean, org: OrgWithUI) => {
-  if (!visible) {
-    organizationMenuVisibility[org.id] = false
-  }
+  organizationMenuVisibility[org.id] = visible
 }
 
 // 创建组织
@@ -1217,6 +1213,15 @@ watch(keyword, () => { collapsedOrgSections.value = new Set() })
 /* 与知识库 / 智能体列表统一：紧凑 + 1px 描边 */
 .org-card {
   .resource-card();
+  .resource-card-quiet();
+
+  .card-title-block { gap: 6px; }
+  .card-title { flex: 0 1 auto; }
+  .relation-role-tag { flex-shrink: 0; white-space: nowrap; height: 20px; font-weight: 400; }
+
+  .feature-badge {
+    &.stat-kb .t-icon { color: inherit; }
+  }
 }
 
 // 空间头像容器（SpaceAvatar 自带样式）
@@ -1249,47 +1254,14 @@ watch(keyword, () => { collapsedOrgSections.value = new Set() })
     line-height: 1;
   }
 
-  &.stat-member {
-    background: color-mix(in srgb, var(--td-text-color-secondary) 8%, transparent);
-    color: var(--td-text-color-secondary);
+  &.stat-kb .t-icon { color: var(--td-brand-color); }
 
-    .t-icon {
-      color: var(--td-text-color-secondary);
-    }
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-text-color-secondary) 12%, transparent);
-    }
-  }
-
-  &.stat-kb {
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-secondary);
-
-    .t-icon {
-      color: var(--td-text-color-secondary);
-    }
-
-    &:hover {
-      background: var(--td-bg-color-container-hover);
-    }
-  }
-
-  &.stat-agent {
-    background: color-mix(in srgb, var(--app-accent-purple) 8%, transparent);
-    color: var(--td-brand-color);
-
-    .stat-agent-icon {
-      width: 14px;
-      height: 14px;
-      flex-shrink: 0;
-      /* 将绿色 icon 着色为紫色，与标签统一 */
-      filter: brightness(0) saturate(100%) invert(48%) sepia(79%) saturate(2476%) hue-rotate(236deg);
-    }
-
-    &:hover {
-      background: color-mix(in srgb, var(--app-accent-purple) 12%, transparent);
-    }
+  .stat-agent-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    /* 将绿色 icon 着色为紫色，与智能体能力色一致 */
+    filter: brightness(0) saturate(100%) invert(48%) sepia(79%) saturate(2476%) hue-rotate(236deg);
   }
 }
 
@@ -1307,13 +1279,7 @@ watch(keyword, () => { collapsedOrgSections.value = new Set() })
   white-space: nowrap;
 }
 
-// 右下角：创建者/角色 合并标签（带图标）
-.bottom-right {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-
+// Keep the role beside the title so metrics have the full footer width.
 .relation-role-tag {
   display: inline-flex;
   align-items: center;

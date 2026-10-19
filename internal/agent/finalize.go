@@ -34,25 +34,30 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	// messages. Tool output must retain its role and call ID; never promote it
 	// into user instructions during error recovery or iteration-limit synthesis.
 	messages := append([]chat.Message(nil), conversation...)
-	messages = append(messages, chat.Message{
-		Role: "user",
-		Content: "Tool execution has ended for this run. Respond to the current task, including " +
-			"the latest user corrections and source restrictions in the conversation. Base claims on " +
-			"the evidence actually obtained; distinguish completed work from remaining work and explain " +
-			"any missing evidence. Use the user's requested language and format. Do not claim that an " +
-			"unperformed action succeeded.",
-	})
+	runtimeNotice := "<runtime_event>{\"source\":\"runtime\",\"type\":\"final_synthesis\",\"message\":\"Tool " +
+		"execution has ended for this run. Respond to the current task, including the " +
+		"latest user corrections and source restrictions in the conversation. Base " +
+		"claims on the evidence actually obtained; distinguish completed work from " +
+		"remaining work and explain any missing evidence. Use the user's requested " +
+		"language and format. Do not claim that an unperformed action " +
+		"succeeded.\"}</runtime_event>"
 
 	// Generate a single ID for this entire final answer stream
 	answerID := generateEventID("answer")
 	logger.Debugf(ctx, "[Agent][FinalAnswer] AnswerID: %s", answerID)
 	answerDoneEmitted := false
+	splitter := agenttools.NewThinkStreamSplitter()
 
-	budget := e.clampCompletionBudgetToContext(e.tokenEstimator.EstimateMessages(messages))
+	budget := e.clampCompletionBudgetToContext(
+		e.tokenEstimator.EstimateMessages(
+			append(append([]chat.Message(nil), messages...), chat.Message{Role: "system", Content: runtimeNotice}),
+		),
+	)
 	llmResult, err := e.streamLLMToEventBus(
 		ctx,
 		messages,
 		&chat.ChatOptions{
+			RuntimeNotice:       runtimeNotice,
 			Temperature:         e.config.Temperature,
 			MaxCompletionTokens: budget,
 			PromptCacheKey:      sessionID,
@@ -63,14 +68,28 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 			if chunk.ResponseType == types.ResponseTypeThinking {
 				return
 			}
-			if chunk.Content != "" {
-				logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(chunk.Content))
+			_, answerContent := splitter.Feed(chunk.Content)
+			if splitter.TakeAnswerReset() {
+				_ = e.eventBus.Emit(
+					ctx,
+					event.Event{
+						ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
+						Data: event.AgentFinalAnswerData{Replace: true},
+					},
+				)
+			}
+			if chunk.Done {
+				_, tail := splitter.Flush()
+				answerContent += tail
+			}
+			if answerContent != "" {
+				logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(answerContent))
 				e.eventBus.Emit(ctx, event.Event{
 					ID:        answerID,
 					Type:      event.EventAgentFinalAnswer,
 					SessionID: sessionID,
 					Data: event.AgentFinalAnswerData{
-						Content: chunk.Content,
+						Content: answerContent,
 						Done:    chunk.Done,
 					},
 				})
@@ -87,6 +106,12 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 			"error":      err.Error(),
 		})
 		return err
+	}
+	if _, tail := splitter.Flush(); tail != "" {
+		_ = e.eventBus.Emit(ctx, event.Event{
+			ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
+			Data: event.AgentFinalAnswerData{Content: tail},
+		})
 	}
 
 	if !answerDoneEmitted {
@@ -114,6 +139,14 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		"session_id": sessionID,
 		"answer_len": len(fullAnswer),
 	})
+	// Delegated callers must distinguish a synthesized partial answer from a
+	// completed deliverable too, including the iteration-budget fallback path.
+	if e.collaboration != nil && e.collaboration.Child != nil && isLengthFinishReason(llmResult.FinishReason) {
+		state.RoundSteps = append(state.RoundSteps, types.AgentStep{
+			Iteration: state.CurrentRound,
+			Thought:   fullAnswer, Truncated: true, Timestamp: time.Now(),
+		})
+	}
 	state.FinalAnswer = fullAnswer
 	return nil
 }
@@ -145,6 +178,9 @@ func (e *AgentEngine) emitCompletionEvent(
 	ctx context.Context, state *types.AgentState, sessionID, messageID string, startTime time.Time,
 ) {
 	steps := state.RoundSteps
+	if state.SuspendedStep != nil {
+		steps = append(append([]types.AgentStep(nil), steps...), *state.SuspendedStep)
+	}
 	if len(state.PendingSteerMessages) > 0 {
 		// A stop or model failure can arrive after delivery but before the next
 		// response exists. Preserve that boundary without inventing an answer.
@@ -158,19 +194,31 @@ func (e *AgentEngine) emitCompletionEvent(
 		knowledgeRefsInterface = append(knowledgeRefsInterface, ref)
 	}
 
+	data := event.AgentCompleteData{
+		Artifacts:       e.collaborationArtifacts(),
+		FinalAnswer:     state.FinalAnswer,
+		KnowledgeRefs:   knowledgeRefsInterface,
+		AgentSteps:      steps,
+		Usage:           turnUsage(state),
+		TotalSteps:      len(state.RoundSteps),
+		TotalDurationMs: time.Since(startTime).Milliseconds(),
+		MessageID:       messageID, // Include message ID for proper message update
+	}
+	// The turn's usage is aggregated only from calls made through this chat
+	// model (each round and the final answer), so it is the model the usage
+	// belongs to. The message row keeps the requested binding, which can differ
+	// when a request override falls back to the agent's model.
+	if e.chatModel != nil {
+		data.ModelID = e.chatModel.GetModelID()
+	}
+	if state.Suspended != nil {
+		data.Suspended = state.Suspended
+	}
 	e.eventBus.Emit(ctx, event.Event{
 		ID:        generateEventID("complete"),
 		Type:      event.EventAgentComplete,
 		SessionID: sessionID,
-		Data: event.AgentCompleteData{
-			FinalAnswer:     state.FinalAnswer,
-			KnowledgeRefs:   knowledgeRefsInterface,
-			AgentSteps:      steps,
-			Usage:           turnUsage(state),
-			TotalSteps:      len(state.RoundSteps),
-			TotalDurationMs: time.Since(startTime).Milliseconds(),
-			MessageID:       messageID, // Include message ID for proper message update
-		},
+		Data:      data,
 	})
 
 	logger.Infof(ctx, "Agent execution completed in %d rounds", state.CurrentRound)

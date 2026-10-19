@@ -11,13 +11,13 @@ import (
 // response bodies, with the APIKey field removed by construction. Credential
 // presence is exposed via the /credentials subresource.
 type WebSearchProviderResponse struct {
-	ID          string                         `json:"id"`
+	ID          string                         `json:"id" extensions:"x-agent=web_search_provider_id"`
 	TenantID    uint64                         `json:"tenant_id"`
-	Name        string                         `json:"name"`
-	Provider    types.WebSearchProviderType    `json:"provider"`
-	Description string                         `json:"description"`
+	Name        string                         `json:"name" extensions:"x-agent"`
+	Provider    types.WebSearchProviderType    `json:"provider" extensions:"x-agent"`
+	Description string                         `json:"description" extensions:"x-agent"`
 	Parameters  WebSearchProviderParametersDTO `json:"parameters"`
-	IsDefault   bool                           `json:"is_default"`
+	IsDefault   bool                           `json:"is_default" extensions:"x-agent"`
 	CreatedAt   time.Time                      `json:"created_at"`
 	UpdatedAt   time.Time                      `json:"updated_at"`
 	// Per-field "configured?" map. See MCPServiceResponse.Credentials.

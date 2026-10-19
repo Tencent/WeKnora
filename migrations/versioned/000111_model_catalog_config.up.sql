@@ -1,4 +1,4 @@
-CREATE TABLE model_catalog_configs (
+CREATE TABLE IF NOT EXISTS model_catalog_configs (
     id INTEGER PRIMARY KEY,
     version BIGINT NOT NULL DEFAULT 0,
     overlay JSONB NOT NULL,
@@ -8,4 +8,4 @@ CREATE TABLE model_catalog_configs (
     CHECK (id = 1)
 );
 INSERT INTO model_catalog_configs (id, version, overlay, history)
-VALUES (1, 0, '{"providers":{}}', '[]');
+VALUES (1, 0, '{"providers":{}}', '[]') ON CONFLICT DO NOTHING;

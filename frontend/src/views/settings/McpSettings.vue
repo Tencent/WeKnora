@@ -12,10 +12,12 @@
     </div>
 
     <template v-else>
-      <t-input v-if="services.length > 0" v-model="query" class="list-search" :placeholder="$t('menu.search')"
-        :aria-label="$t('menu.search')" clearable>
-        <template #prefix-icon><t-icon name="search" size="16px" /></template>
-      </t-input>
+      <Teleport to="#toolbox-toolbar" defer>
+        <t-input v-if="services.length > 0" v-model="query" class="list-search" :placeholder="$t('menu.search')"
+          :aria-label="$t('menu.search')" clearable>
+          <template #prefix-icon><t-icon name="search" size="16px" /></template>
+        </t-input>
+      </Teleport>
       <div v-if="services.length === 0 && !authStore.hasRole('admin')" class="empty-state">
         <t-empty :description="$t('mcpSettings.empty')" />
       </div>
@@ -120,7 +122,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -134,11 +137,17 @@ import McpServiceDialog from './components/McpServiceDialog.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
 import { matchesResourceQuery } from '@/utils/resourceListSearch'
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
+import { useAssistantStore, type AssistantMcpServiceDraft } from '@/stores/assistant'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 
 const emit = defineEmits<{ count: [value: number] }>()
 const { t } = useI18n()
 const authStore = useAuthStore()
 const confirmDelete = useConfirmDelete()
+const route = useRoute()
+const router = useRouter()
+const assistant = useAssistantStore()
 
 const services = ref<MCPService[]>([])
 const loading = ref(false)
@@ -152,6 +161,14 @@ const query = ref('')
 const filteredServices = computed(() => services.value.filter((service) =>
   matchesResourceQuery({ name: service.name, description: serviceUsage(service) }, query.value),
 ))
+
+useAssistantPageContext(() => {
+  const service = dialogVisible.value && dialogMode.value === 'edit' ? currentService.value : null
+  return {
+    page: 'mcp_services',
+    ...(service?.id ? { mcpServiceId: service.id, mcpServiceName: service.name } : {}),
+  }
+})
 
 // Load MCP services
 const loadServices = async () => {
@@ -252,9 +269,49 @@ const getTransportTypeLabel = (transportType: string) => {
   }
 }
 
-onMounted(() => {
-  loadServices()
+// The assistant links here to edit a service (?service_id=) or to add one it
+// filled in; the user enters any key or signs in, and saves.
+const openRequestedService = () => {
+  const id = typeof route.query.service_id === 'string' ? route.query.service_id : ''
+  if (!id || loading.value) return
+  const service = services.value.find((s) => s.id === id)
+  const { service_id: _id, ...rest } = route.query
+  void router.replace({ path: route.path, query: rest })
+  if (service) handleEdit(service)
+  else MessagePlugin.warning(t('mcpSettings.toasts.linkedServiceMissing'))
+}
+
+const openServiceDraft = (draft: AssistantMcpServiceDraft) => {
+  if (!authStore.hasRole('admin')) return
+  currentService.value = {
+    id: '',
+    name: draft.name,
+    description: '',
+    usage_instructions: draft.usage_instructions || '',
+    enabled: true,
+    transport_type: draft.transport_type,
+    url: draft.url,
+    auth_config: {
+      auth_type: draft.auth_type || '',
+      ...(draft.api_key_header ? { api_key_header: draft.api_key_header } : {}),
+    },
+  }
+  dialogMode.value = 'add'
+  dialogInitialStep.value = 0
+  dialogVisible.value = true
+}
+
+watch(() => assistant.pageDraft, () => {
+  const draft = assistant.takePageDraft('mcp_service')
+  if (draft) openServiceDraft(draft)
+}, { immediate: true })
+watch(() => route.query.service_id, openRequestedService)
+
+onMounted(async () => {
+  await loadServices()
+  openRequestedService()
 })
+useAssistantDataChange(() => { void loadServices() }, { areas: ['mcp_service'] })
 
 defineExpose({ openAdd: handleAdd })
 </script>
@@ -270,10 +327,6 @@ defineExpose({ openAdd: handleAdd })
 
 .section-header {
   .settings-section-header();
-}
-
-.list-search {
-  margin-bottom: 20px;
 }
 
 .loading-container {
@@ -307,8 +360,14 @@ defineExpose({ openAdd: handleAdd })
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--td-component-stroke);
-  border-radius: var(--app-radius-lg);
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+
+  &:hover:not(.service-card--add) {
+    border-color: color-mix(in srgb, var(--td-brand-color) 40%, var(--td-component-stroke));
+    box-shadow: 0 3px 12px color-mix(in srgb, var(--td-text-color-primary) 6%, transparent);
+  }
 
   &--add {
     align-items: center;
@@ -365,7 +424,7 @@ defineExpose({ openAdd: handleAdd })
 }
 
 .service-card__badge {
-  .provider-card-badge(26px, 7px);
+  .provider-card-badge(28px, 8px);
   font-size: var(--app-text-md);
 
   :deep(.t-icon) {

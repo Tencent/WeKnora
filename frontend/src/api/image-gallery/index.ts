@@ -1,4 +1,4 @@
-import { get } from '@/utils/request';
+import { get, post } from '@/utils/request';
 
 // ---------------------------------------------------------------------------
 // Image Gallery API
@@ -66,6 +66,12 @@ export interface ImageListParams {
   /** Restrict to chunks with this enabled state. Omit to include both. */
   isEnabled?: boolean;
   /**
+   * Source-document restriction: only images owned by these knowledge items
+   * are listed. Sent in the POST body when present (the GET query-param
+   * variant keeps a lower URL-length-driven cap).
+   */
+  knowledgeIds?: string[];
+  /**
    * Attribute filters keyed by namespaced attribute id. Values within one
    * attribute are OR-ed; attributes are AND-ed. Sent as one `attr_filters`
    * JSON query param.
@@ -93,11 +99,42 @@ export interface ImageListResult {
  * List image assets for a knowledge base. Attribute references use the
  * namespaced ids from the gallery contract; the backend validates them
  * against the contract and silently drops ineligible ones.
+ *
+ * Requests carrying knowledge_ids go through POST /images with the filter as
+ * a JSON body: URL length limits would otherwise cap the source picker's
+ * select-all to a handful of documents.
  */
 export async function listGalleryImages(
   kbId: string,
   params: ImageListParams = {},
 ): Promise<ImageListResult> {
+  if (params.knowledgeIds && params.knowledgeIds.length) {
+    const res = await post<{
+      success: boolean;
+      data: ImageAsset[];
+      total: number;
+      page: number;
+      page_size: number;
+    }>(`/api/v1/knowledge-bases/${kbId}/images`, {
+      keyword: params.keyword,
+      search_in: params.searchIn,
+      sort_by: params.sortBy,
+      sort_order: params.sortOrder,
+      is_enabled: params.isEnabled,
+      knowledge_ids: params.knowledgeIds,
+      attr_filters: params.attrFilters,
+      attr_rules: params.attrRules,
+      page: params.page,
+      page_size: params.pageSize,
+    });
+    return {
+      items: res.data,
+      total: res.total,
+      page: res.page,
+      pageSize: res.page_size,
+    };
+  }
+
   const query = new URLSearchParams();
   if (params.keyword) query.set('keyword', params.keyword);
   if (params.searchIn && params.searchIn.length) {

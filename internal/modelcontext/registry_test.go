@@ -704,3 +704,32 @@ func TestDecodeResponseDropsSignatureWhenReasoningIsDecoded(t *testing.T) {
 	registry.DecodeResponse(untouched)
 	require.Equal(t, "anthropic-messages:sig", untouched.ReasoningSignature)
 }
+
+func TestWebFetchReferencesStayBoundToSuppliedPages(t *testing.T) {
+	registry := NewRegistry(true)
+	registry.RegisterWeb("https://example.com/one?a=1&b=2", "First")
+	messages := []chat.Message{{
+		Role: "tool", Name: "web_search",
+		Content: `<retrieval><page id="w1" title="First"></page></retrieval>`,
+	}}
+	encoded := registry.EncodeMessages(messages)
+	require.Contains(t, encoded[0].Content, `url="https://example.com/one?a=1&amp;b=2"`)
+	require.Equal(t, encoded[0].Content, registry.EncodeMessages(encoded)[0].Content)
+	calls := []types.LLMToolCall{{Function: types.FunctionCall{
+		Name:      "web_fetch",
+		Arguments: `{"items":[{"url":"w1"},{"url":"w2"}]}`,
+	}}}
+	registry.DecodeToolCalls(calls)
+	require.Contains(t, calls[0].Function.Arguments, "https://example.com/one")
+	require.Equal(t, []string{"w2"}, calls[0].UnresolvedHandles)
+	// Failed results for invented IDs do not allocate them or shift future IDs.
+	failed := registry.ModelToolResultForTool("web_fetch", &types.ToolResult{Data: map[string]interface{}{
+		"display_type": "web_fetch_results",
+		"results": []map[string]interface{}{{
+			"url": "w2", "status": "failed", "error_code": "unknown_page_reference",
+		}},
+	}})
+	require.Contains(t, failed, `requested_reference="w2"`)
+	require.NotContains(t, failed, `id="w2"`)
+	require.Equal(t, "w2", registry.RegisterWeb("https://example.com/two", "Second"))
+}

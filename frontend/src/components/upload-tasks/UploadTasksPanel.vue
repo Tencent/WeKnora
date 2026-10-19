@@ -368,7 +368,7 @@ onBeforeUnmount(() => {
 <style scoped lang="less">
 .upload-tasks-panel {
   position: fixed;
-  right: var(--app-space-6);
+  right: calc(var(--app-space-6) + var(--assistant-dock-width, 0px));
   bottom: var(--app-space-6);
   // Above page content, below modal shells and drawers.
   z-index: var(--z-dropdown);

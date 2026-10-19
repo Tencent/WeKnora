@@ -174,6 +174,8 @@ type sessionService struct {
 	// from sandboxResolver/sandboxMgr.
 	forkSnapshots ForkSnapshotDeleter
 	busyGate      *SessionBusyGate
+	// deletedSessionsHook releases collaboration state of deleted conversations.
+	deletedSessionsHook func(context.Context, uint64, string, []string)
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -382,12 +384,17 @@ func (s *sessionService) ListSessions(
 	if query == nil {
 		query = &types.SessionListQuery{}
 	}
+	if !types.IsValidSessionKind(query.Kind) {
+		return nil, apperrors.NewBadRequestError("invalid session kind")
+	}
 	query.TenantID = types.MustTenantIDFromContext(ctx)
 	// API / IM / embed source filters are tenant-wide admin views over channel
 	// traffic. Gate them behind Admin+ and drop the per-user owner scope so an
 	// Owner/admin can observe sessions that are otherwise isolated per key,
 	// visitor, or IM identity; everyone else stays scoped to their own principal.
-	if types.SessionListSourceRequiresAdmin(query.Source) {
+	if query.Kind == types.SessionKindAssistant {
+		query.UserID = types.SessionOwnerIDFromContext(ctx)
+	} else if types.SessionListSourceRequiresAdmin(query.Source) {
 		if !types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
 			return nil, apperrors.NewForbiddenError(
 				"listing channel sessions requires tenant admin or owner role",
@@ -424,7 +431,9 @@ func (s *sessionService) CountSessionsBySource(
 		query = &types.SessionListQuery{}
 	}
 	query.TenantID = types.MustTenantIDFromContext(ctx)
-	if types.SessionListSourceRequiresAdmin(query.Source) {
+	if query.Kind == types.SessionKindAssistant {
+		query.UserID = types.SessionOwnerIDFromContext(ctx)
+	} else if types.SessionListSourceRequiresAdmin(query.Source) {
 		query.UserID = ""
 	} else if uid := types.SessionOwnerIDFromContext(ctx); uid != "" {
 		query.UserID = uid
@@ -582,7 +591,20 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	}
 
 	s.releaseForkSnapshot(ctx, session)
+	s.notifyDeletedSessions(ctx, tenantID, session.UserID, []string{id})
 	return nil
+}
+
+// SetDeletedSessionsHook registers cleanup for resources owned by deleted
+// conversations that this service cannot depend on directly.
+func (s *sessionService) SetDeletedSessionsHook(hook func(context.Context, uint64, string, []string)) {
+	s.deletedSessionsHook = hook
+}
+
+func (s *sessionService) notifyDeletedSessions(ctx context.Context, tenantID uint64, userID string, ids []string) {
+	if s.deletedSessionsHook != nil && len(ids) > 0 {
+		s.deletedSessionsHook(context.WithoutCancel(ctx), tenantID, userID, ids)
+	}
 }
 
 // BatchDeleteSessions deletes multiple sessions by IDs
@@ -661,6 +683,9 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 	}
 
 	s.releaseForkSnapshots(ctx, visible)
+	for ownerID, ownerIDs := range idsByOwner {
+		s.notifyDeletedSessions(ctx, tenantID, ownerID, ownerIDs)
+	}
 	return nil
 }
 
@@ -720,6 +745,13 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 	}
 
 	s.releaseForkSnapshots(ctx, sessions)
+	idsByOwner := make(map[string][]string)
+	for _, session := range sessions {
+		idsByOwner[session.UserID] = append(idsByOwner[session.UserID], session.ID)
+	}
+	for ownerID, ownerIDs := range idsByOwner {
+		s.notifyDeletedSessions(ctx, tenantID, ownerID, ownerIDs)
+	}
 	logger.Infof(ctx, "All sessions deleted for tenant %d", tenantID)
 	return nil
 }

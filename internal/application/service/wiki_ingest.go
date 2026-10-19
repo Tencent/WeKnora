@@ -3183,6 +3183,134 @@ func reconstructEnrichedContent(
 	return searchutil.EnrichContentWithImageInfo(content, mergedImageInfo)
 }
 
+// appendScannedPageText adds OCR from pages whose parent text is only an
+// image link. reconstructEnrichedContent inlines image_info when that JSON
+// exists; scanned pages often keep the recognized text only on the image_ocr
+// chunk. A document that already has some prose still receives those pages.
+// Disabled chunks, OCR beside real prose, and text already present are left out.
+func appendScannedPageText(content string, chunks []*types.Chunk) string {
+	var b strings.Builder
+	b.WriteString(content)
+	written := content
+	for _, c := range scannedOCRForWiki(chunks) {
+		text := strings.TrimSpace(c.Content)
+		if text == "" || strings.Contains(written, text) {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(text)
+		written = b.String()
+	}
+	return b.String()
+}
+
+// wikiCitationChunks gives the citation pass the scanned-page OCR on the
+// parent text chunk. splitChunksIntoCitationBatches only reads text chunks,
+// so an image-link parent would otherwise be cited without the page text.
+// The returned chunks are copies; stored rows are not changed.
+func wikiCitationChunks(chunks []*types.Chunk) []*types.Chunk {
+	ocrByParent := map[string][]*types.Chunk{}
+	var orphans []*types.Chunk
+	for _, c := range scannedOCRForWiki(chunks) {
+		if c.ParentChunkID == "" {
+			orphans = append(orphans, c)
+			continue
+		}
+		ocrByParent[c.ParentChunkID] = append(ocrByParent[c.ParentChunkID], c)
+	}
+	out := make([]*types.Chunk, 0, len(chunks)+len(orphans))
+	for _, c := range chunks {
+		if c == nil || !c.IsEnabled {
+			continue
+		}
+		if c.ChunkType != types.ChunkTypeText && c.ChunkType != "" {
+			continue
+		}
+		ocrs := ocrByParent[c.ID]
+		if len(ocrs) == 0 || chunkHasExtractableText(c.Content) {
+			out = append(out, c)
+			continue
+		}
+		clone := *c
+		var b strings.Builder
+		b.WriteString(c.Content)
+		for _, o := range ocrs {
+			text := strings.TrimSpace(o.Content)
+			if text == "" || strings.Contains(b.String(), text) {
+				continue
+			}
+			b.WriteByte('\n')
+			b.WriteString(text)
+		}
+		clone.Content = b.String()
+		out = append(out, &clone)
+	}
+	for _, o := range orphans {
+		clone := *o
+		clone.ChunkType = types.ChunkTypeText
+		out = append(out, &clone)
+	}
+	return out
+}
+
+// scannedOCRForWiki returns enabled OCR chunks whose parent is only an image
+// link, ordered by the parent text chunk and then the PDF page.
+func scannedOCRForWiki(chunks []*types.Chunk) []*types.Chunk {
+	parentIndex := make(map[string]int, len(chunks))
+	disabledParent := make(map[string]bool)
+	for _, c := range chunks {
+		if c == nil || (c.ChunkType != types.ChunkTypeText && c.ChunkType != "") {
+			continue
+		}
+		parentIndex[c.ID] = c.ChunkIndex
+		if !c.IsEnabled {
+			disabledParent[c.ID] = true
+		}
+	}
+	enabled := make([]*types.Chunk, 0, len(chunks))
+	for _, c := range chunks {
+		if c == nil || !c.IsEnabled || disabledParent[c.ParentChunkID] {
+			continue
+		}
+		enabled = append(enabled, c)
+	}
+	var ocr []*types.Chunk
+	for _, c := range selectGraphChunks(enabled) {
+		if c != nil && c.ChunkType == types.ChunkTypeImageOCR {
+			ocr = append(ocr, c)
+		}
+	}
+	sort.SliceStable(ocr, func(i, j int) bool {
+		pi, pj := parentIndex[ocr[i].ParentChunkID], parentIndex[ocr[j].ParentChunkID]
+		if pi != pj {
+			return pi < pj
+		}
+		pageI, pageJ := pdfPageOf(ocr[i]), pdfPageOf(ocr[j])
+		if pageI != pageJ {
+			return pageI < pageJ
+		}
+		if ocr[i].ChunkIndex != ocr[j].ChunkIndex {
+			return ocr[i].ChunkIndex < ocr[j].ChunkIndex
+		}
+		return ocr[i].StartAt < ocr[j].StartAt
+	})
+	return ocr
+}
+
+func pdfPageOf(c *types.Chunk) int {
+	if c == nil {
+		return 0
+	}
+	for _, loc := range c.SourceLocators {
+		if loc.Type == types.SourceLocatorPDF && loc.Page > 0 {
+			return loc.Page
+		}
+	}
+	return 0
+}
+
 // slugify creates a URL-friendly slug from a string
 func slugify(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))

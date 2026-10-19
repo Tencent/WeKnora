@@ -204,6 +204,7 @@ const (
 // AnthropicMessagesCompat is the overlay for the Messages protocol.
 type AnthropicMessagesCompat struct {
 	ThinkingMode               *AnthropicThinkingMode  `json:"thinking_mode,omitempty"`
+	ThinkingOffType            *string                 `json:"thinking_off_type,omitempty"`
 	SupportsEffort             *bool                   `json:"supports_effort,omitempty"`
 	ThinkingBudgets            map[ReasoningEffort]int `json:"thinking_budgets,omitempty"`
 	DefaultMaxTokens           *int                    `json:"default_max_tokens,omitempty"`
@@ -222,8 +223,12 @@ type AnthropicMessagesCompat struct {
 
 // AnthropicMessagesSettings is the resolved Messages configuration.
 type AnthropicMessagesSettings struct {
-	ThinkingMode   AnthropicThinkingMode
-	SupportsEffort bool
+	ThinkingMode AnthropicThinkingMode
+	// ThinkingOffType is the thinking.type sent to turn thinking off in
+	// adaptive mode; empty means "disabled". Claude Sonnet 5.5 rejects
+	// "disabled" and turns off up-front thinking with "between_tools".
+	ThinkingOffType string `json:",omitempty"`
+	SupportsEffort  bool
 	// ThinkingBudgets maps graded levels to budget_tokens for budget mode.
 	ThinkingBudgets map[ReasoningEffort]int
 	// DefaultMaxTokens is used when the caller set no budget (max_tokens is

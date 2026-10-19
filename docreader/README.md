@@ -84,6 +84,10 @@ docreader:
 - `DOCREADER_PDF_RENDER_DPI`: 扫描 PDF 渲染 DPI（默认：200）
 - `DOCREADER_PDF_JPEG_QUALITY`: 扫描 PDF 输出 JPEG 质量（默认：85，范围会自动限制在 1-95）
 
+### 上传 HTML 的正文抽取
+
+- `DOCREADER_HTML_MAIN_CONTENT`: 上传的 `.html` / `.htm` 文件是否只索引正文（默认：`false`）。开启后用 trafilatura 抽取正文，与 URL 导入路径一致，导航栏 / 侧栏 / 页脚不再进入索引；抽取结果过短（< 250 字符）、不足整页转换的 15%，或抽取器额外重复正文段落时自动回退整页转换。默认关闭，升级后既有行为不变。 正文图片引用会保留在 Markdown 中，供 Go 侧解析；Python 侧不会下载远程图片。
+
 ### OCR / VLM
 
 DocReader 自身不再内置 OCR 与 VLM 后端。扫描 PDF 会被渲染为 JPEG 图片后交由 Go App 侧调用 OCR/VLM 服务处理，相关配置请参考主项目文档。

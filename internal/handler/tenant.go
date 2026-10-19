@@ -100,8 +100,10 @@ type createTenantRequest struct {
 // Pointers so we can distinguish "not sent" from "explicit empty
 // string"; when nil we leave the existing column untouched.
 type updateTenantRequest struct {
-	Name        *string `json:"name"        binding:"omitempty,min=1,max=128"`
-	Description *string `json:"description" binding:"omitempty,max=512"`
+	// New workspace name; cannot be blank, at most 128 characters.
+	Name *string `json:"name" binding:"omitempty,min=1,max=128" extensions:"x-agent"`
+	// New description, at most 512 characters; empty clears it. Omission preserves it.
+	Description *string `json:"description" binding:"omitempty,max=512" extensions:"x-agent"`
 }
 
 type apiPrincipalConfigRequest struct {
@@ -532,7 +534,7 @@ func (h *TenantHandler) autoCreateTenantAPIKey(ctx context.Context) bool {
 // @Accept       json
 // @Produce      json
 // @Param        id   path      int  true  "空间ID"
-// @Success      200  {object}  map[string]interface{}  "空间详情"
+// @Success      200  {object}  handler.DataResponse{data=dto.TenantResponse}  "空间详情"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      404  {object}  errors.AppError         "空间不存在"
 // @Security     Bearer
@@ -573,8 +575,8 @@ func (h *TenantHandler) GetTenant(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id       path      int           true  "空间ID"
-// @Param        request  body      types.Tenant  true  "空间信息"
-// @Success      200      {object}  map[string]interface{}  "更新后的空间"
+// @Param        request  body      updateTenantRequest  true  "空间名称或描述"
+// @Success      200      {object}  handler.DataResponse{data=dto.TenantResponse}  "更新后的空间"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Router       /tenants/{id} [put]
@@ -604,18 +606,8 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
-
-	// Load the persisted tenant so any column the request omits keeps
-	// its current value through the GORM `Updates(struct)` zero-skip
-	// behaviour (we always pass back the full struct).
-	existing, err := h.service.GetTenantByID(ctx, id)
-	if err != nil {
-		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
-		} else {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to load workspace").WithDetails(err.Error()))
-		}
+	if req.Name == nil && req.Description == nil {
+		_ = c.Error(errors.NewValidationError("name or description is required"))
 		return
 	}
 
@@ -625,15 +617,14 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 			c.Error(errors.NewValidationError("name cannot be blank"))
 			return
 		}
-		existing.Name = trimmed
+		req.Name = &trimmed
 	}
 	if req.Description != nil {
-		existing.Description = strings.TrimSpace(*req.Description)
+		trimmed := strings.TrimSpace(*req.Description)
+		req.Description = &trimmed
 	}
 
-	logger.Infof(ctx, "Updating tenant, ID: %d, Name: %s", id, secutils.SanitizeForLog(existing.Name))
-
-	updatedTenant, err := h.service.UpdateTenant(ctx, existing)
+	updatedTenant, err := h.service.UpdateTenantProfile(ctx, id, req.Name, req.Description)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			logger.Error(ctx, "Failed to update workspace: application error", appErr)
@@ -890,7 +881,7 @@ func apiPrincipalConfigForResponse(cfg *types.APIPrincipalConfig) apiPrincipalCo
 // @Accept       json
 // @Produce      json
 // @Param        id   path      int  true  "空间ID"
-// @Success      200  {object}  map[string]interface{}  "API principal 配置"
+// @Success      200  {object}  handler.DataResponse{data=handler.apiPrincipalConfigResponse}  "API principal 配置"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      403  {object}  errors.AppError         "权限不足"
 // @Security     Bearer
@@ -925,7 +916,7 @@ func (h *TenantHandler) GetAPIPrincipalConfig(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      int                           true  "空间ID"
 // @Param        request  body      handler.apiPrincipalConfigRequest  true  "API principal 配置"
-// @Success      200      {object}  map[string]interface{}        "更新后的配置"
+// @Success      200      {object}  handler.DataResponse{data=handler.apiPrincipalConfigResponse}        "更新后的配置"
 // @Failure      400      {object}  errors.AppError               "请求参数错误"
 // @Failure      403      {object}  errors.AppError               "权限不足"
 // @Security     Bearer
@@ -1013,7 +1004,7 @@ func (h *TenantHandler) UpdateAPIPrincipalConfig(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      int                                  true  "空间ID"
 // @Param        request  body      handler.apiPrincipalTestTokenRequest true  "测试 Token 参数"
-// @Success      200      {object}  map[string]interface{}               "短期 JWT"
+// @Success 200 {object} handler.DataResponse{data=handler.apiPrincipalTestTokenResponse}               "短期 JWT"
 // @Failure      400      {object}  errors.AppError                      "请求参数错误"
 // @Failure      403      {object}  errors.AppError                      "权限不足"
 // @Security     Bearer
@@ -1116,7 +1107,7 @@ func validateAPIPrincipalExternalUserID(id string) error {
 // @Accept       json
 // @Produce      json
 // @Param        id   path      int  true  "空间ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Success      200  {object}  handler.MessageResponse  "删除成功"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Router       /tenants/{id} [delete]
@@ -1158,7 +1149,7 @@ func (h *TenantHandler) DeleteTenant(c *gin.Context) {
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "空间列表"
+// @Success      200  {object}  handler.DataResponse{data=handler.TenantListData}  "空间列表"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
 // @Router       /tenants [get]
@@ -1185,7 +1176,7 @@ func (h *TenantHandler) ListTenants(c *gin.Context) {
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "所有空间列表"
+// @Success      200  {object}  handler.DataResponse{data=handler.TenantListData}  "所有空间列表"
 // @Failure      403  {object}  errors.AppError         "权限不足"
 // @Security     Bearer
 // @Router       /tenants/all [get]
@@ -1225,8 +1216,8 @@ func (h *TenantHandler) ListAllTenants(c *gin.Context) {
 // @Param        keyword    query     string  false  "搜索关键词"
 // @Param        tenant_id  query     int     false  "空间ID筛选"
 // @Param        page       query     int     false  "页码"  default(1)
-// @Param        page_size  query     int     false  "每页数量"  default(20)
-// @Success      200        {object}  map[string]interface{}  "搜索结果"
+// @Param        page_size  query     int     false  "每页数量"  default(20)  minimum(1)  maximum(100)
+// @Success      200        {object}  handler.DataResponse{data=handler.TenantSearchData}  "搜索结果"
 // @Failure      403        {object}  errors.AppError         "权限不足"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -1335,6 +1326,9 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	case "memory-config":
 		h.GetTenantMemoryConfig(c)
 		return
+	case "assistant-config":
+		h.GetTenantAssistantConfig(c)
+		return
 	default:
 		logger.Info(ctx, "KV key not supported", "key", key)
 		c.Error(errors.NewBadRequestError("unsupported key"))
@@ -1385,6 +1379,9 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 		return
 	case "memory-config":
 		h.updateTenantMemoryConfigInternal(c)
+		return
+	case "assistant-config":
+		h.updateTenantAssistantConfigInternal(c)
 		return
 	default:
 		logger.Info(ctx, "KV key not supported", "key", key)
@@ -1445,7 +1442,7 @@ func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "网络搜索配置"
+// @Success      200  {object}  handler.DataResponse{data=types.WebSearchConfig}  "网络搜索配置"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -1597,7 +1594,7 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "提示词模板配置"
+// @Success      200  {object}  handler.DataResponse{data=config.PromptTemplatesConfig}  "提示词模板配置"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -1899,6 +1896,73 @@ func (h *TenantHandler) updateTenantMemoryConfigInternal(c *gin.Context) {
 		"success": true,
 		"data":    updatedTenant.MemoryConfig,
 		"message": "Memory configuration updated successfully",
+	})
+}
+
+// GetTenantAssistantConfig returns the workspace assistant name and access
+// ceiling. Members read it to label the assistant and bound their own level.
+func (h *TenantHandler) GetTenantAssistantConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenant, _ := types.TenantInfoFromContext(ctx)
+	if tenant == nil {
+		logger.Error(ctx, "Workspace is empty")
+		_ = c.Error(errors.NewBadRequestError("Workspace is empty"))
+		return
+	}
+	data := types.AssistantConfig{}
+	if tenant.AssistantConfig != nil {
+		data = *tenant.AssistantConfig
+	}
+	data.Normalize()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    data,
+	})
+}
+
+// updateTenantAssistantConfigInternal updates the workspace assistant config.
+func (h *TenantHandler) updateTenantAssistantConfigInternal(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var cfg types.AssistantConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		_ = c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	if cfg.MaxAccessLevel != "" && !cfg.MaxAccessLevel.Valid() {
+		_ = c.Error(errors.NewBadRequestError("max_access_level must be read_only, confirm or auto_write"))
+		return
+	}
+	cfg.Normalize()
+	if len([]rune(cfg.DisplayName)) > types.MaxAssistantDisplayNameRunes {
+		_ = c.Error(errors.NewBadRequestError(fmt.Sprintf(
+			"display_name must be at most %d characters", types.MaxAssistantDisplayNameRunes)))
+		return
+	}
+
+	tenant, _ := types.TenantInfoFromContext(ctx)
+	if tenant == nil {
+		logger.Error(ctx, "Workspace is empty")
+		_ = c.Error(errors.NewBadRequestError("Workspace is empty"))
+		return
+	}
+
+	tenant.AssistantConfig = &cfg
+	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+		} else {
+			logger.ErrorWithFields(ctx, err, nil)
+			_ = c.Error(errors.NewInternalServerError("Failed to update assistant config").WithDetails(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    updatedTenant.AssistantConfig,
+		"message": "Assistant configuration updated successfully",
 	})
 }
 

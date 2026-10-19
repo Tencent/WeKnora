@@ -37,6 +37,8 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/hitl"
+	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
@@ -176,8 +178,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewSystemSettingRepository))
 	must(container.Provide(repository.NewModelCatalogRepository))
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
+	must(container.Provide(neo4jRepo.NewGraphSearchRepository))
+	must(container.Provide(repository.NewGraphSearchEvidenceRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
+	must(container.Provide(repository.NewAgentPromptRepository))
+	must(container.Provide(repository.NewAgentRunSuspensionRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
 	must(container.Provide(repository.NewTenantSandboxConfigRepository))
 	must(container.Provide(repository.NewTenantSkillRepository))
@@ -236,8 +242,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewAuditLogService))
 	must(container.Provide(service.NewAuditLogRetentionRunner))
 	must(container.Provide(service.NewKnowledgeBaseService))
+	must(container.Provide(service.NewGraphSearchService))
 	must(container.Provide(service.NewOrganizationService))
-	must(container.Provide(service.NewKBShareService)) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
+	must(
+		container.Provide(service.NewKBShareService),
+	) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
 	must(container.Provide(service.NewAgentShareService))
 	must(container.Provide(service.NewKnowledgeService))
 	must(container.Provide(service.NewSpanTracker))
@@ -324,8 +333,23 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering event bus and agent service...")
 	must(container.Provide(event.NewEventBus))
 	must(container.Provide(service.NewSessionSandboxPinner))
-	must(container.Provide(func(cfg *config.Config, s interfaces.MCPToolApprovalService, rdb *redis.Client) *approval.Gate {
-		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, rdb)
+	must(container.Provide(func(
+		cfg *config.Config,
+		prompts interfaces.AgentPromptRepository,
+		suspensions interfaces.AgentRunSuspensionRepository,
+		rdb *redis.Client,
+	) *hitl.Broker {
+		opts := []hitl.Option{hitl.WithSuspensionStore(suspensions)}
+		if cfg != nil && cfg.Agent != nil {
+			opts = append(opts, hitl.WithSuspendExpiry(cfg.Agent.PromptExpiry()))
+		}
+		return hitl.NewBroker(prompts, rdb, opts...)
+	}))
+	must(container.Provide(service.NewSuspendedRunService))
+	must(container.Provide(func(
+		cfg *config.Config, s interfaces.MCPToolApprovalService, broker *hitl.Broker,
+	) *approval.Gate {
+		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, broker)
 	}))
 	// Expose Gate as MCPApproval interface so AgentService and others can depend on the abstraction.
 	must(container.Provide(func(g *approval.Gate) approval.MCPApproval { return g }))
@@ -337,6 +361,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		cleaner.RegisterWithName("BrowserSkill", func() error { manager.Close(); return nil })
 		return manager, nil
 	}))
+	// Agent catalog operations dispatch into the router, which is built later
+	// and binds itself to this dispatcher.
+	must(container.Provide(operations.NewHandlerDispatcher))
+	// Collaboration workers bind SessionService after the dependency graph is built.
+	must(container.Provide(service.NewAgentCollaboration))
 	must(container.Provide(service.NewAgentService))
 
 	// Session service (depends on agent service)
@@ -515,6 +544,18 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// block above — starting the reaper any earlier panics.
 	must(container.Invoke(startTenantSkillReaper))
 	logger.Debugf(ctx, "[Container] Tenant skill reaper registered")
+	must(
+		container.Invoke(
+			func(r *service.AgentCollaboration, s interfaces.SessionService, cleaner interfaces.ResourceCleaner) {
+				r.Bind(s)
+				cleaner.RegisterWithName("AgentCollaboration", func() error {
+					ctx, cancel := context.WithTimeout(context.Background(), cleanupStepTimeout)
+					defer cancel()
+					return r.Runtime.Stop(ctx)
+				})
+			},
+		),
+	)
 	must(container.Provide(func(
 		sessions interfaces.SessionRepository,
 		resolver sandbox.TenantSandboxResolver,
@@ -534,6 +575,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewTenantInvitationHandler))
 	must(container.Provide(handler.NewAuditLogHandler))
 	must(container.Provide(handler.NewKnowledgeBaseHandler))
+	must(container.Provide(handler.NewGraphSearchHandler))
 	must(container.Provide(handler.NewKnowledgeHandler))
 	must(container.Provide(handler.NewChunkHandler))
 	must(container.Provide(handler.NewFAQHandler))
@@ -564,6 +606,32 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	) *handler.MCPServiceHandler {
 		return handler.NewMCPServiceHandler(mcpService, toolApprovals, gate, models, agents)
 	}))
+	must(container.Invoke(func(
+		sessions *session.Handler, mcp *handler.MCPServiceHandler,
+		broker *hitl.Broker, runs *service.SuspendedRunService, rewind *service.SessionRewindService,
+		collaboration *service.AgentCollaboration,
+		messages *handler.MessageHandler, gate *approval.Gate, streams interfaces.StreamManager,
+	) {
+		rewind.SetSuspendedRuns(runs)
+		sessions.SetSuspendedRuns(broker, runs)
+		sessions.SetCollaborationStopper(collaboration.Stop)
+		sessions.SetDelegatedPromptRouter(collaboration.HandlesPrompt)
+		messages.DelegatedPrompts = collaboration.PendingPrompts
+		messages.CollaborationStatuses = collaboration.HistoryStatuses
+		collaboration.BindRecovery(broker, gate, streams)
+		collaboration.ParentEvents = sessions.CollaborationEvents
+		collaboration.ChildEvents = sessions.CollaborationEvents
+		collaboration.ParentSteer = sessions.CollaborationSteer
+		runs.RecoverAnswered = collaboration.RecoverAnswered
+		broker.SetRunHooks(runs.Hooks())
+		runs.StopDelegation = func(ctx context.Context, p *types.AgentPrompt) error {
+			return collaboration.StopPrompt(ctx, p)
+		}
+		mcp.SetRunResumer(sessions)
+		collaboration.Runtime.Start(context.Background())
+	}))
+	// Start only after the delegation close hook is installed.
+	must(container.Invoke(startAgentPromptReaper))
 	must(container.Provide(handler.NewMCPCredentialsHandler))
 	must(container.Provide(handler.NewMCPOAuthHandler))
 	must(container.Provide(handler.NewModelCredentialsHandler))
@@ -964,7 +1032,9 @@ func resolveStorageProviderPending(db *gorm.DB) {
 	storageType = strings.ToLower(storageType)
 
 	result := db.Exec(
-		`UPDATE knowledge_bases SET storage_provider_config = ? WHERE storage_provider_config IS NOT NULL AND storage_provider_config->>'provider' = '__pending_env__'`,
+		"UPDATE knowledge_bases SET storage_provider_config = ? WHERE "+
+			"storage_provider_config IS NOT NULL AND storage_provider_config->>'provider' = "+
+			"'__pending_env__'",
 		fmt.Sprintf(`{"provider":"%s"}`, storageType),
 	)
 	if result.Error != nil {
@@ -1047,9 +1117,16 @@ func migrateLegacyStorageBackends(db *gorm.DB) {
 						desired = types.StorageBackendFromEnvironment(tenant.ID)
 					}
 					if desired != nil && desired.Provider == provider {
-						_ = db.Model(&types.StorageBackend{}).Where("id = ?", existing.ID).Updates(map[string]interface{}{
-							"name": desired.Name, "config": desired.Config, "source": desired.Source, "status": desired.Status, "updated_at": time.Now(),
-						}).Error
+						_ = db.Model(&types.StorageBackend{}).
+							Where("id = ?", existing.ID).
+							Updates(map[string]interface{}{
+								"name":       desired.Name,
+								"config":     desired.Config,
+								"source":     desired.Source,
+								"status":     desired.Status,
+								"updated_at": time.Now(),
+							}).
+							Error
 					}
 				}
 				backendIDs[provider] = existing.ID
@@ -1063,7 +1140,13 @@ func migrateLegacyStorageBackends(db *gorm.DB) {
 				continue
 			}
 			if err := db.Create(backend).Error; err != nil {
-				logger.Warnf(context.Background(), "Failed to migrate %s storage for workspace %d: %v", provider, tenant.ID, err)
+				logger.Warnf(
+					context.Background(),
+					"Failed to migrate %s storage for workspace %d: %v",
+					provider,
+					tenant.ID,
+					err,
+				)
 				continue
 			}
 			backendIDs[provider] = backend.ID
@@ -1071,7 +1154,12 @@ func migrateLegacyStorageBackends(db *gorm.DB) {
 		if tenant.DefaultStorageBackendID == nil {
 			if id := backendIDs[defaultProvider]; id != "" {
 				if err := db.Model(&types.Tenant{}).Where("id = ?", tenant.ID).Update("default_storage_backend_id", id).Error; err != nil {
-					logger.Warnf(context.Background(), "Failed to set default storage backend for workspace %d: %v", tenant.ID, err)
+					logger.Warnf(
+						context.Background(),
+						"Failed to set default storage backend for workspace %d: %v",
+						tenant.ID,
+						err,
+					)
 				}
 			}
 		}
@@ -1086,7 +1174,10 @@ func migrateLegacyStorageBackends(db *gorm.DB) {
 				provider = defaultProvider
 			}
 			if id := backendIDs[provider]; id != "" {
-				_ = db.Model(&types.KnowledgeBase{}).Where("id = ? AND storage_backend_id IS NULL", kb.ID).Update("storage_backend_id", id).Error
+				_ = db.Model(&types.KnowledgeBase{}).
+					Where("id = ? AND storage_backend_id IS NULL", kb.ID).
+					Update("storage_backend_id", id).
+					Error
 			}
 		}
 	}
@@ -1969,6 +2060,31 @@ func startForkSnapshotReaper(reaper *service.ForkSnapshotReaper, cleaner interfa
 		}
 	}()
 	cleaner.RegisterWithName("ForkSnapshotReaper", func() error {
+		close(stop)
+		return nil
+	})
+}
+
+// startAgentPromptReaper takes over prompts whose owner stopped renewing its
+// lease and suspended prompts past their expiry, so a crash never leaves a
+// prompt or its run open forever.
+func startAgentPromptReaper(runs *service.SuspendedRunService, cleaner interfaces.ResourceCleaner) {
+	stop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if _, err := runs.Reap(context.Background(), time.Now()); err != nil {
+					logger.Warnf(context.Background(), "[AgentPromptReaper] reap failed: %v", err)
+				}
+			case <-stop:
+				return
+			}
+		}
+	}()
+	cleaner.RegisterWithName("AgentPromptReaper", func() error {
 		close(stop)
 		return nil
 	})

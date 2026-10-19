@@ -8,6 +8,7 @@ import (
 // Sessions are now knowledge-base-independent and serve as conversation containers.
 // All configuration (knowledge bases, model settings, etc.) comes from custom agent at query time.
 type CreateSessionRequest struct {
+	Kind string `json:"kind,omitempty" enums:",assistant"`
 	// Title for the session (optional)
 	Title string `json:"title"`
 	// Description for the session (optional)
@@ -85,6 +86,12 @@ type CreateKnowledgeQARequest struct {
 	SuggestionAttribution *types.SuggestionAttribution `json:"suggestion_attribution,omitempty"`
 	// QuestionOrigin is the knowledge source of a picked suggested question.
 	QuestionOrigin *types.QuestionOrigin `json:"question_origin,omitempty"`
+	// PageContext is the WeKnora page the user has open (agent mode only).
+	PageContext *types.PageContext `json:"page_context,omitempty"`
+	// AssistantAccess is the WeKnora assistant access level: read_only,
+	// confirm or auto_write. The workspace ceiling caps it; other agents
+	// ignore it.
+	AssistantAccess types.AssistantAccessLevel `json:"assistant_access,omitempty"`
 
 	// ReasoningEffort overrides thinking for this request; empty inherits the agent configuration.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
