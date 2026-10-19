@@ -1,5 +1,5 @@
 -- Generic deferred-sync checkpoint plus OneDrive OAuth and drive-item state.
-DO $$ BEGIN RAISE NOTICE '[Migration 000123] Creating OneDrive data source state'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000125] Creating OneDrive data source state'; END $$;
 
 ALTER TABLE data_sources
     ADD COLUMN IF NOT EXISTS connection_version BIGINT NOT NULL DEFAULT 1;
@@ -62,4 +62,4 @@ CREATE INDEX IF NOT EXISTS idx_ds_item_selected_root
 CREATE INDEX IF NOT EXISTS idx_ds_item_generation
     ON data_source_items(data_source_id, connection_version, last_seen_generation);
 
-DO $$ BEGIN RAISE NOTICE '[Migration 000123] OneDrive data source state ready'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000125] OneDrive data source state ready'; END $$;

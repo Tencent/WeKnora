@@ -156,10 +156,11 @@ func (d *DataSource) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// DataSourceOAuthToken stores encrypted credentials for a connected source.
 type DataSourceOAuthToken struct {
 	ID                 string    `json:"id" gorm:"type:varchar(36);primaryKey"`
 	TenantID           uint64    `json:"tenant_id" gorm:"not null;uniqueIndex:idx_ds_oauth_token_tenant_source"`
-	DataSourceID       string    `json:"data_source_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_ds_oauth_token_tenant_source;index"`
+	DataSourceID       string    `json:"data_source_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_ds_oauth_token_tenant_source;index"` //nolint:lll // GORM index declaration
 	Provider           string    `json:"provider" gorm:"type:varchar(32);not null"`
 	AccessToken        string    `json:"-" gorm:"type:text;not null"`
 	RefreshToken       string    `json:"-" gorm:"type:text;not null"`
@@ -176,14 +177,21 @@ type DataSourceOAuthToken struct {
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
+// TableName returns the table backing DataSourceOAuthToken.
 func (DataSourceOAuthToken) TableName() string { return "data_source_oauth_tokens" }
+
+// BeforeCreate assigns an ID and encrypts token secrets before persistence.
 func (t *DataSourceOAuthToken) BeforeCreate(_ *gorm.DB) error {
 	if t.ID == "" {
 		t.ID = uuid.NewString()
 	}
 	return t.encryptSecrets()
 }
+
+// BeforeSave encrypts token secrets before persistence.
 func (t *DataSourceOAuthToken) BeforeSave(_ *gorm.DB) error { return t.encryptSecrets() }
+
+// AfterFind decrypts token secrets loaded from persistence.
 func (t *DataSourceOAuthToken) AfterFind(_ *gorm.DB) error {
 	var err error
 	if t.AccessToken, err = utils.DecryptStoredSecret(t.AccessToken); err != nil {
@@ -194,6 +202,7 @@ func (t *DataSourceOAuthToken) AfterFind(_ *gorm.DB) error {
 	}
 	return nil
 }
+
 func (t *DataSourceOAuthToken) encryptSecrets() error {
 	key := utils.GetAESKey()
 	if key == nil {
@@ -209,13 +218,14 @@ func (t *DataSourceOAuthToken) encryptSecrets() error {
 	return nil
 }
 
+// DataSourceItem records an external item observed during a source sync.
 type DataSourceItem struct {
 	ID                 string     `json:"id" gorm:"type:varchar(36);primaryKey"`
 	TenantID           uint64     `json:"tenant_id" gorm:"not null;index:idx_ds_item_scope,priority:1"`
-	DataSourceID       string     `json:"data_source_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_ds_item_identity,priority:1;index:idx_ds_item_scope,priority:2"`
-	ConnectionVersion  uint64     `json:"connection_version" gorm:"not null;uniqueIndex:idx_ds_item_identity,priority:2;index:idx_ds_item_scope,priority:3"`
-	DriveID            string     `json:"drive_id" gorm:"type:varchar(255);not null;uniqueIndex:idx_ds_item_identity,priority:3"`
-	ItemID             string     `json:"item_id" gorm:"type:varchar(255);not null;uniqueIndex:idx_ds_item_identity,priority:4"`
+	DataSourceID       string     `json:"data_source_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_ds_item_identity,priority:1;index:idx_ds_item_scope,priority:2"` //nolint:lll // GORM index declaration
+	ConnectionVersion  uint64     `json:"connection_version" gorm:"not null;uniqueIndex:idx_ds_item_identity,priority:2;index:idx_ds_item_scope,priority:3"`              //nolint:lll // GORM index declaration
+	DriveID            string     `json:"drive_id" gorm:"type:varchar(255);not null;uniqueIndex:idx_ds_item_identity,priority:3"`                                         //nolint:lll // GORM index declaration
+	ItemID             string     `json:"item_id" gorm:"type:varchar(255);not null;uniqueIndex:idx_ds_item_identity,priority:4"`                                          //nolint:lll // GORM index declaration
 	ParentItemID       string     `json:"parent_item_id" gorm:"type:varchar(255);index"`
 	ItemType           string     `json:"item_type" gorm:"type:varchar(16);not null"`
 	SelectedRootID     string     `json:"selected_root_id" gorm:"type:text;index"`
@@ -228,7 +238,10 @@ type DataSourceItem struct {
 	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
+// TableName returns the table backing DataSourceItem.
 func (DataSourceItem) TableName() string { return "data_source_items" }
+
+// BeforeCreate assigns an ID before persistence.
 func (i *DataSourceItem) BeforeCreate(_ *gorm.DB) error {
 	if i.ID == "" {
 		i.ID = uuid.NewString()
@@ -326,6 +339,7 @@ type DataSourceConfig struct {
 	Runtime  *DataSourceRuntime     `json:"-"`
 }
 
+// DataSourceRuntime carries authenticated context for one source operation.
 type DataSourceRuntime struct {
 	DataSourceID       string
 	TenantID           uint64
@@ -542,22 +556,29 @@ type SyncResult struct {
 	NextCursor *SyncCursor `json:"next_cursor,omitempty"`
 }
 
+// DataSourcePendingKnowledge is an item awaiting ingestion finalization.
 type DataSourcePendingKnowledge struct {
 	KnowledgeID string `json:"knowledge_id"`
 	Title       string `json:"title"`
 	IsUpdate    bool   `json:"is_update"`
 }
+
+// DataSourceSyncCheckpoint persists deferred sync finalization state.
 type DataSourceSyncCheckpoint struct {
 	Result           SyncResult                   `json:"result"`
 	NextCursor       *SyncCursor                  `json:"next_cursor,omitempty"`
 	PendingKnowledge []DataSourcePendingKnowledge `json:"pending_knowledge"`
 	FinalizeDeadline time.Time                    `json:"finalize_deadline"`
 }
+
+// FetchWarning describes a non-fatal warning returned by a connector.
 type FetchWarning struct {
 	Code       string `json:"code"`
 	ExternalID string `json:"external_id,omitempty"`
 	Message    string `json:"message"`
 }
+
+// FetchResult contains fetched items, cursor state, and non-fatal warnings.
 type FetchResult struct {
 	Items      []FetchedItem  `json:"items"`
 	NextCursor *SyncCursor    `json:"-"`
@@ -635,6 +656,7 @@ type DataSourceSyncPayload struct {
 	MaxItems int `json:"max_items,omitempty"`
 }
 
+// DataSourceFinalizePayload represents the deferred sync-finalization task payload.
 type DataSourceFinalizePayload struct {
 	TracingContext
 	DataSourceID      string `json:"data_source_id"`

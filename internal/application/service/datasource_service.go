@@ -1296,7 +1296,9 @@ func (s *DataSourceService) processSyncStreaming(
 
 	result := &types.SyncResult{}
 	lifecycle, _ := sc.(datasource.SyncLifecycleConnector)
-	handler := &streamSyncHandler{svc: s, ds: ds, tagIDs: autoTagIDs, result: result, syncLog: syncLog, lifecycle: lifecycle}
+	handler := &streamSyncHandler{
+		svc: s, ds: ds, tagIDs: autoTagIDs, result: result, syncLog: syncLog, lifecycle: lifecycle,
+	}
 
 	fullBaseline := startCursor
 	if forceFull {

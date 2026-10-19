@@ -57,7 +57,9 @@ func newGraphClient(
 		baseURL = defaultGraphBase
 	}
 	if httpClient == nil {
-		httpClient = utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 2 * time.Minute, MaxRedirects: 5})
+		httpClient = utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
+			Timeout: 2 * time.Minute, MaxRedirects: 5,
+		})
 	}
 	return &graphClient{
 		baseURL: strings.TrimRight(baseURL, "/"), httpClient: httpClient,
@@ -73,18 +75,10 @@ func (c *graphClient) getDrive(ctx context.Context) (*drive, error) {
 	return &result, nil
 }
 
-func (c *graphClient) getDriveByID(ctx context.Context, driveID string) (*drive, error) {
-	var result drive
-	endpoint := fmt.Sprintf("%s/drives/%s", c.baseURL, url.PathEscape(driveID))
-	if err := c.getJSON(ctx, endpoint, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
 func (c *graphClient) getSiteByURL(ctx context.Context, rawURL string) (*site, error) {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || parsed.RawQuery != "" {
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" ||
+		parsed.User != nil || parsed.Fragment != "" || parsed.RawQuery != "" {
 		return nil, fmt.Errorf("sharepoint site URL must be an absolute HTTPS URL")
 	}
 	host := strings.ToLower(parsed.Hostname())

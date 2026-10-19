@@ -106,13 +106,17 @@ func (h *DataSourceOAuthHandler) Revoke(c *gin.Context) {
 		return
 	}
 	if _, err := h.content.DeleteByDataSource(c.Request.Context(), ds); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Microsoft account disconnected but failed to delete synced knowledge"})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Microsoft account disconnected but failed to delete synced knowledge",
+		})
 		return
 	}
 	// The repository already persists paused state atomically with revocation;
 	// this also removes the in-process cron registration immediately.
 	if err := h.service.PauseDataSource(c.Request.Context(), ds.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Microsoft account disconnected but failed to pause schedule"})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Microsoft account disconnected but failed to pause schedule",
+		})
 		return
 	}
 	c.Status(http.StatusNoContent)

@@ -118,39 +118,57 @@ type FullSyncWithCursor interface {
 	) ([]types.FetchedItem, *types.SyncCursor, error)
 }
 
+// OAuthConnector validates and identifies connectors configured by OAuth.
 type OAuthConnector interface {
 	Connector
 	ValidateStaticConfig(config *types.DataSourceConfig) error
 	OAuthProvider() string
 }
 
+// RuntimeConnector prepares connector state for an individual data-source run.
 type RuntimeConnector interface {
 	Connector
 	PrepareRuntime(ctx context.Context, dataSource *types.DataSource, config *types.DataSourceConfig) error
 }
 
+// ConnectionLifecycleConnector handles cleanup when a source connection ends.
 type ConnectionLifecycleConnector interface {
 	Connector
 	Disconnect(ctx context.Context, dataSource *types.DataSource) error
 }
 
+// SyncLifecycleConnector maintains connector state throughout a sync.
 type SyncLifecycleConnector interface {
 	Connector
-	ReconcileItems(ctx context.Context, dataSource *types.DataSource, items []types.FetchedItem) ([]types.FetchedItem, error)
+	ReconcileItems(
+		ctx context.Context,
+		dataSource *types.DataSource,
+		items []types.FetchedItem,
+	) ([]types.FetchedItem, error)
 	MarkItemIngested(ctx context.Context, dataSource *types.DataSource, item *types.FetchedItem) error
 	MarkItemDeleted(ctx context.Context, dataSource *types.DataSource, item *types.FetchedItem) error
 	IsRunCurrent(ctx context.Context, dataSource *types.DataSource) (bool, error)
 }
 
+// DeferredCommitConnector delays committing a cursor until ingestion succeeds.
 type DeferredCommitConnector interface {
 	Connector
 	DeferCursorUntilIngestionCompletes() bool
 }
 
+// FetchResultConnector returns item warnings alongside fetched items.
 type FetchResultConnector interface {
 	Connector
-	FetchAllResult(ctx context.Context, config *types.DataSourceConfig, resourceIDs []string) (*types.FetchResult, error)
-	FetchIncrementalResult(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) (*types.FetchResult, error)
+	FetchAllResult(
+		ctx context.Context,
+		config *types.DataSourceConfig,
+		resourceIDs []string,
+	) (*types.FetchResult, error)
+	FetchIncrementalResult(
+		ctx context.Context,
+		config *types.DataSourceConfig,
+		cursor *types.SyncCursor,
+	) (*types.FetchResult, error)
 }
 
 // ConnectorRegistry manages the registration and lookup of available connectors

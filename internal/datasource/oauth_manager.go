@@ -110,7 +110,9 @@ func (m *OneDriveOAuthManager) AuthorizeURL(
 		return "", ErrDataSourceNotFound
 	}
 	if ds.Type == types.ConnectorTypeSharePoint {
-		return "", fmt.Errorf("SharePoint uses application authorization with Sites.Selected; interactive authorization is not available")
+		return "", fmt.Errorf(
+			"SharePoint uses application authorization with Sites.Selected; interactive authorization is not available",
+		)
 	}
 	clientID, _, tenant, redirectURI, err := m.delegatedConfiguration()
 	if err != nil {
@@ -488,7 +490,10 @@ func (m *OneDriveOAuthManager) doWithoutRedirects(req *http.Request) (*http.Resp
 	return client.Do(req)
 }
 
-func (m *OneDriveOAuthManager) delegatedConfiguration() (clientID, clientSecret, tenant, redirectURI string, err error) {
+func (m *OneDriveOAuthManager) delegatedConfiguration() (
+	clientID, clientSecret, tenant, redirectURI string,
+	err error,
+) {
 	clientID = firstNonEmptyEnv("MICROSOFT_CLIENT_ID", "ONEDRIVE_CLIENT_ID")
 	clientSecret = firstNonEmptyEnv("MICROSOFT_CLIENT_SECRET", "ONEDRIVE_CLIENT_SECRET")
 	tenant = firstNonEmptyEnv("MICROSOFT_TENANT", "ONEDRIVE_TENANT")
@@ -524,7 +529,7 @@ func (m *OneDriveOAuthManager) applicationConfiguration() (clientID, clientSecre
 	tenant = firstNonEmptyEnv("MICROSOFT_TENANT", "ONEDRIVE_TENANT")
 	if clientID == "" || clientSecret == "" || tenant == "" {
 		return "", "", "", fmt.Errorf(
-			"%w: MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET and a concrete MICROSOFT_TENANT are required for SharePoint",
+			"%w: Microsoft client ID, client secret, and a concrete tenant are required for SharePoint",
 			ErrOAuthNotConfigured,
 		)
 	}

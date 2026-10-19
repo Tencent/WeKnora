@@ -56,22 +56,34 @@ func NewConnector(items interfaces.DataSourceItemRepository, oauth *datasource.O
 
 // NewSharePointConnector creates a SharePoint connector backed by the same
 // Microsoft Graph driveItem and delta implementation as OneDrive.
-func NewSharePointConnector(items interfaces.DataSourceItemRepository, oauth *datasource.OneDriveOAuthManager) *Connector {
-	return &Connector{items: items, oauth: oauth, graphBase: defaultGraphBase, sourceType: types.ConnectorTypeSharePoint}
+func NewSharePointConnector(
+	items interfaces.DataSourceItemRepository,
+	oauth *datasource.OneDriveOAuthManager,
+) *Connector {
+	return &Connector{
+		items: items, oauth: oauth, graphBase: defaultGraphBase,
+		sourceType: types.ConnectorTypeSharePoint,
+	}
 }
 
 // NewConnectorWithClient creates a connector with an injected Graph endpoint for tests.
 func NewConnectorWithClient(
 	items interfaces.DataSourceItemRepository, graphBase string, client *http.Client,
 ) *Connector {
-	return &Connector{items: items, graphBase: strings.TrimRight(graphBase, "/"), httpClient: client, sourceType: types.ConnectorTypeOneDrive}
+	return &Connector{
+		items: items, graphBase: strings.TrimRight(graphBase, "/"), httpClient: client,
+		sourceType: types.ConnectorTypeOneDrive,
+	}
 }
 
 // NewSharePointConnectorWithClient creates a SharePoint connector with an injected Graph endpoint for tests.
 func NewSharePointConnectorWithClient(
 	items interfaces.DataSourceItemRepository, graphBase string, client *http.Client,
 ) *Connector {
-	return &Connector{items: items, graphBase: strings.TrimRight(graphBase, "/"), httpClient: client, sourceType: types.ConnectorTypeSharePoint}
+	return &Connector{
+		items: items, graphBase: strings.TrimRight(graphBase, "/"), httpClient: client,
+		sourceType: types.ConnectorTypeSharePoint,
+	}
 }
 
 // Type returns the connector registry key.
@@ -404,7 +416,9 @@ func (c *Connector) FetchAllResult(
 				return nil, err
 			}
 			for i := range children {
-				if err := c.walk(ctx, client, config, ref.DriveID, &children[i], selectedRoot, generation, result); err != nil {
+				if err := c.walk(
+					ctx, client, config, ref.DriveID, &children[i], selectedRoot, generation, result,
+				); err != nil {
 					return result, err
 				}
 			}

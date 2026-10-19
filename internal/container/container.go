@@ -511,7 +511,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	// Data source sync framework
 	logger.Debugf(ctx, "[Container] Registering data source sync framework...")
-	must(container.Provide(func(items interfaces.DataSourceItemRepository, oauth *datasource.OneDriveOAuthManager) (*datasource.ConnectorRegistry, error) {
+	must(container.Provide(func(
+		items interfaces.DataSourceItemRepository,
+		oauth *datasource.OneDriveOAuthManager,
+	) (*datasource.ConnectorRegistry, error) {
 		return initConnectorRegistryWithOneDrive(items, oauth)
 	}))
 	must(container.Provide(datasource.NewScheduler))
@@ -1945,7 +1948,10 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	return initConnectorRegistryWithOneDrive(nil, nil)
 }
 
-func initConnectorRegistryWithOneDrive(items interfaces.DataSourceItemRepository, oauth *datasource.OneDriveOAuthManager) (*datasource.ConnectorRegistry, error) {
+func initConnectorRegistryWithOneDrive(
+	items interfaces.DataSourceItemRepository,
+	oauth *datasource.OneDriveOAuthManager,
+) (*datasource.ConnectorRegistry, error) {
 	registry := datasource.NewConnectorRegistry()
 
 	var errs error

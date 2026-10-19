@@ -158,7 +158,10 @@ func (r *dataSourceOAuthRepository) RevokeAuthorization(
 			return fmt.Errorf("oauth connection version changed")
 		}
 		if err := tx.Model(&types.DataSource{}).
-			Where("id = ? AND tenant_id = ? AND connection_version = ?", dataSourceID, tenantID, expectedConnectionVersion).
+			Where(
+				"id = ? AND tenant_id = ? AND connection_version = ?",
+				dataSourceID, tenantID, expectedConnectionVersion,
+			).
 			Updates(map[string]interface{}{
 				"connection_version": newVersion,
 				"config":             resetConfig,
@@ -333,5 +336,8 @@ func (r *dataSourceItemRepository) scope(
 	ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64,
 ) *gorm.DB {
 	return r.db.WithContext(ctx).Model(&types.DataSourceItem{}).
-		Where("tenant_id = ? AND data_source_id = ? AND connection_version = ?", tenantID, dataSourceID, connectionVersion)
+		Where(
+			"tenant_id = ? AND data_source_id = ? AND connection_version = ?",
+			tenantID, dataSourceID, connectionVersion,
+		)
 }

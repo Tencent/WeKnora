@@ -265,29 +265,50 @@ type lifecycleTestConnector struct {
 
 func (*lifecycleTestConnector) Type() string                                            { return "test-sync-lifecycle" }
 func (*lifecycleTestConnector) Validate(context.Context, *types.DataSourceConfig) error { return nil }
-func (*lifecycleTestConnector) ListResources(context.Context, *types.DataSourceConfig, string) ([]types.Resource, error) {
+func (*lifecycleTestConnector) ListResources(
+	context.Context, *types.DataSourceConfig, string,
+) ([]types.Resource, error) {
 	return nil, nil
 }
-func (*lifecycleTestConnector) ResolveResourceAncestors(context.Context, *types.DataSourceConfig, []string) ([]string, error) {
+
+func (*lifecycleTestConnector) ResolveResourceAncestors(
+	context.Context, *types.DataSourceConfig, []string,
+) ([]string, error) {
 	return nil, nil
 }
-func (c *lifecycleTestConnector) FetchAll(context.Context, *types.DataSourceConfig, []string) ([]types.FetchedItem, error) {
+
+func (c *lifecycleTestConnector) FetchAll(
+	context.Context, *types.DataSourceConfig, []string,
+) ([]types.FetchedItem, error) {
 	return c.items, nil
 }
-func (c *lifecycleTestConnector) FetchIncremental(context.Context, *types.DataSourceConfig, *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error) {
+
+func (c *lifecycleTestConnector) FetchIncremental(
+	context.Context, *types.DataSourceConfig, *types.SyncCursor,
+) ([]types.FetchedItem, *types.SyncCursor, error) {
 	return c.items, nil, nil
 }
-func (c *lifecycleTestConnector) ReconcileItems(_ context.Context, _ *types.DataSource, items []types.FetchedItem) ([]types.FetchedItem, error) {
+
+func (c *lifecycleTestConnector) ReconcileItems(
+	_ context.Context, _ *types.DataSource, items []types.FetchedItem,
+) ([]types.FetchedItem, error) {
 	return items, nil
 }
-func (c *lifecycleTestConnector) MarkItemIngested(_ context.Context, _ *types.DataSource, item *types.FetchedItem) error {
+
+func (c *lifecycleTestConnector) MarkItemIngested(
+	_ context.Context, _ *types.DataSource, item *types.FetchedItem,
+) error {
 	c.ingested = append(c.ingested, item.ExternalID)
 	return nil
 }
-func (c *lifecycleTestConnector) MarkItemDeleted(_ context.Context, _ *types.DataSource, item *types.FetchedItem) error {
+
+func (c *lifecycleTestConnector) MarkItemDeleted(
+	_ context.Context, _ *types.DataSource, item *types.FetchedItem,
+) error {
 	c.deleted = append(c.deleted, item.ExternalID)
 	return nil
 }
+
 func (*lifecycleTestConnector) IsRunCurrent(context.Context, *types.DataSource) (bool, error) {
 	return true, nil
 }
@@ -296,17 +317,37 @@ func TestProcessSyncAcknowledgesSourceItemLifecycle(t *testing.T) {
 	const connectorType = "test-sync-lifecycle"
 	configJSON, err := (&types.DataSourceConfig{Type: connectorType}).ToJSON()
 	require.NoError(t, err)
-	ds := &types.DataSource{ID: "ds-lifecycle", TenantID: 1, KnowledgeBaseID: "kb-1", Type: connectorType, Config: configJSON, SyncMode: types.SyncModeFull, Status: types.DataSourceStatusActive, SyncDeletions: true}
-	connector := &lifecycleTestConnector{items: []types.FetchedItem{{ExternalID: "drive:file", Content: []byte("content"), FileName: "file.txt"}}}
+	ds := &types.DataSource{
+		ID: "ds-lifecycle", TenantID: 1, KnowledgeBaseID: "kb-1", Type: connectorType,
+		Config: configJSON, SyncMode: types.SyncModeFull, Status: types.DataSourceStatusActive,
+		SyncDeletions: true,
+	}
+	connector := &lifecycleTestConnector{items: []types.FetchedItem{{
+		ExternalID: "drive:file", Content: []byte("content"), FileName: "file.txt",
+	}}}
 	registry := datasource.NewConnectorRegistry()
 	require.NoError(t, registry.Register(connector))
 	repo := &deletionLookupKnowledgeRepo{}
 	knowledge := &sweepFakeKS{repo: repo}
 	logs := &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{}}
-	svc := &DataSourceService{dsRepo: newKBDeleteDSRepo(ds.KnowledgeBaseID, ds), syncLogRepo: logs, knowledgeService: knowledge, kbService: &processSyncKBService{kb: &types.KnowledgeBase{ID: ds.KnowledgeBaseID, TenantID: ds.TenantID}}, connectorRegistry: registry, tenantRepo: &processSyncTenantRepo{tenant: &types.Tenant{ID: ds.TenantID}}, tagService: &processSyncTagService{}}
+	svc := &DataSourceService{
+		dsRepo: newKBDeleteDSRepo(ds.KnowledgeBaseID, ds), syncLogRepo: logs,
+		knowledgeService: knowledge,
+		kbService: &processSyncKBService{kb: &types.KnowledgeBase{
+			ID: ds.KnowledgeBaseID, TenantID: ds.TenantID,
+		}},
+		connectorRegistry: registry,
+		tenantRepo:        &processSyncTenantRepo{tenant: &types.Tenant{ID: ds.TenantID}},
+		tagService:        &processSyncTagService{},
+	}
 	run := func(logID string) {
-		logs.logs[logID] = &types.SyncLog{ID: logID, DataSourceID: ds.ID, TenantID: ds.TenantID, Status: types.SyncLogStatusRunning, StartedAt: time.Now().UTC()}
-		payload, marshalErr := json.Marshal(types.DataSourceSyncPayload{DataSourceID: ds.ID, TenantID: ds.TenantID, SyncLogID: logID, ForceFull: true})
+		logs.logs[logID] = &types.SyncLog{
+			ID: logID, DataSourceID: ds.ID, TenantID: ds.TenantID,
+			Status: types.SyncLogStatusRunning, StartedAt: time.Now().UTC(),
+		}
+		payload, marshalErr := json.Marshal(types.DataSourceSyncPayload{
+			DataSourceID: ds.ID, TenantID: ds.TenantID, SyncLogID: logID, ForceFull: true,
+		})
 		require.NoError(t, marshalErr)
 		require.NoError(t, svc.ProcessSync(context.Background(), asynq.NewTask(types.TypeDataSourceSync, payload)))
 	}
@@ -601,7 +642,9 @@ func TestIngestItemConflictSkipKeepsExistingSourceItem(t *testing.T) {
 		ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1",
 		ConflictStrategy: types.ConflictStrategySkip,
 	}
-	repo := &deletionLookupKnowledgeRepo{knowledge: &types.Knowledge{ID: "existing-knowledge", FileName: "existing.txt"}}
+	repo := &deletionLookupKnowledgeRepo{knowledge: &types.Knowledge{
+		ID: "existing-knowledge", FileName: "existing.txt",
+	}}
 	ks := &sweepFakeKS{repo: repo}
 	svc := &DataSourceService{knowledgeService: ks}
 
