@@ -23,8 +23,19 @@ import (
 
 // CreateKnowledgeFromFile creates a knowledge entry from an uploaded file
 func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
-	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagIDs []string, channel string,
+	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool,
+	customFileName string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
+) (*types.Knowledge, error) {
+	return s.createKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName,
+		tagIDs, channel, processOverrides, nil)
+}
+
+func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
+	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool,
+	customFileName string, tagIDs []string, channel string,
+	processOverrides *types.KnowledgeProcessOverrides,
+	replacement *knowledgeReplacement,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file")
 
@@ -76,10 +87,9 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, ErrInvalidFileType
 	}
 
-	// JSON content validation stays in the HTTP upload handler (and
-	// ReplaceKnowledgeFile), not here: datasource sync may have already
-	// deleted the previous knowledge for this external_id, and IM swallows
-	// create errors — an early 400 would drop the document with no failed row.
+	// Fresh imports keep JSON validation in the HTTP upload handler (IM needs
+	// a failed row for asynchronous parse errors). Replacement entry points
+	// validate JSON before retiring the previous source.
 
 	// Calculate file hash for deduplication
 	logger.Info(ctx, "Calculating file hash")
@@ -106,7 +116,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		checkParams.DataSourceID = metadata["datasource_id"]
 		checkParams.ExternalID = metadata["external_id"]
 	}
-	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, checkParams)
+	exists, existingKnowledge, err := s.checkKnowledgeForCreation(ctx, tenantID, kbID, replacement, checkParams)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to check knowledge existence: %v", err)
 		return nil, err
@@ -123,7 +133,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 
 	// Check storage quota
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if tenantInfo.StorageQuota > 0 && tenantInfo.StorageUsed >= tenantInfo.StorageQuota {
+	if tenantInfo.StorageQuota > 0 && knowledgeCreationStorageUsed(tenantInfo, replacement) >= tenantInfo.StorageQuota {
 		logger.Error(ctx, "Storage quota exceeded")
 		return nil, types.NewStorageQuotaExceededError()
 	}
@@ -203,15 +213,18 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 
 	// Save knowledge record to database after the file is safely stored.
 	logger.Info(ctx, "Saving knowledge record to database")
-	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
+	if err := s.persistKnowledgeForCreation(ctx, knowledge, replacement); err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge record, ID: %s, error: %v", knowledge.ID, err)
-		if deleteErr := fileSvc.DeleteFile(ctx, filePath); deleteErr != nil {
-			logger.Errorf(ctx, "Failed to delete saved file after knowledge creation failed, path: %s, error: %v", filePath, deleteErr)
+		if replacement == nil || !replacement.keepFile {
+			if deleteErr := fileSvc.DeleteFile(context.WithoutCancel(ctx), filePath); deleteErr != nil {
+				logger.Errorf(ctx, "Failed to delete saved file after knowledge creation failed, path: %s, error: %v",
+					filePath, deleteErr)
+			}
 		}
 		return nil, err
 	}
 	// Set tag relations
-	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, tagIDs); err != nil {
+	if err := s.attachCreationTags(ctx, knowledge, tagIDs, replacement); err != nil {
 		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
 		return nil, err
 	}
@@ -307,16 +320,28 @@ func isFileURL(rawURL, fileName, fileType string) bool {
 }
 
 func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
-	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool, title string, tagIDs []string, channel string,
+	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool,
+	title string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
+) (*types.Knowledge, error) {
+	return s.createKnowledgeFromURL(ctx, kbID, rawURL, fileName, fileType, enableMultimodel,
+		title, tagIDs, channel, processOverrides, nil)
+}
+
+func (s *knowledgeService) createKnowledgeFromURL(ctx context.Context,
+	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool,
+	title string, tagIDs []string, channel string,
+	processOverrides *types.KnowledgeProcessOverrides,
+	replacement *knowledgeReplacement,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, rawURL)
 
 	// Route to file_url logic when the URL points to a downloadable file
 	if isFileURL(rawURL, fileName, fileType) {
-		return s.createKnowledgeFromFileURL(
-			ctx, kbID, rawURL, fileName, fileType, enableMultimodel, title, tagIDs, channel, processOverrides,
+		return s.createKnowledgeFromFileURLWithReplacement(
+			ctx, kbID, rawURL, fileName, fileType, enableMultimodel,
+			title, tagIDs, channel, processOverrides, replacement,
 		)
 	}
 
@@ -351,11 +376,12 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	logger.Infof(ctx, "Checking if URL exists, tenant ID: %d", tenantID)
 	fileHash := calculateStr(url)
-	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
-		Type:     "url",
-		URL:      url,
-		FileHash: fileHash,
-	})
+	exists, existingKnowledge, err := s.checkKnowledgeForCreation(ctx, tenantID, kbID, replacement,
+		&types.KnowledgeCheckParams{
+			Type:     "url",
+			URL:      url,
+			FileHash: fileHash,
+		})
 	if err != nil {
 		logger.Errorf(ctx, "Failed to check knowledge existence: %v", err)
 		return nil, err
@@ -374,7 +400,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 
 	// Check storage quota
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if tenantInfo.StorageQuota > 0 && tenantInfo.StorageUsed >= tenantInfo.StorageQuota {
+	if tenantInfo.StorageQuota > 0 && knowledgeCreationStorageUsed(tenantInfo, replacement) >= tenantInfo.StorageQuota {
 		logger.Error(ctx, "Storage quota exceeded")
 		return nil, types.NewStorageQuotaExceededError()
 	}
@@ -405,12 +431,12 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		return nil, err
 	}
 
-	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
+	if err := s.persistKnowledgeForCreation(ctx, knowledge, replacement); err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge record: %v", err)
 		return nil, err
 	}
 	// Set tag relations
-	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, tagIDs); err != nil {
+	if err := s.attachCreationTags(ctx, knowledge, tagIDs, replacement); err != nil {
 		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
 		return nil, err
 	}
@@ -510,18 +536,20 @@ func extractFileNameFromContentDisposition(header string) string {
 }
 
 // createKnowledgeFromFileURL is the internal implementation for file URL knowledge creation.
-// Called by CreateKnowledgeFromURL when the URL is detected as a direct file download.
+// The replacement-aware variant shares the pipeline for datasource updates.
 func (s *knowledgeService) createKnowledgeFromFileURL(
-	ctx context.Context,
-	kbID string,
-	fileURL string,
-	fileName string,
-	fileType string,
-	enableMultimodel *bool,
-	title string,
-	tagIDs []string,
-	channel string,
+	ctx context.Context, kbID, fileURL, fileName, fileType string,
+	enableMultimodel *bool, title string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
+) (*types.Knowledge, error) {
+	return s.createKnowledgeFromFileURLWithReplacement(ctx, kbID, fileURL, fileName, fileType,
+		enableMultimodel, title, tagIDs, channel, processOverrides, nil)
+}
+
+func (s *knowledgeService) createKnowledgeFromFileURLWithReplacement(
+	ctx context.Context, kbID, fileURL, fileName, fileType string,
+	enableMultimodel *bool, title string, tagIDs []string, channel string,
+	processOverrides *types.KnowledgeProcessOverrides, replacement *knowledgeReplacement,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, file URL: %s", kbID, fileURL)
@@ -588,11 +616,12 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 	// Check for duplicate (by URL hash)
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	fileHash := calculateStr(fileURL)
-	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
-		Type:     "file_url",
-		URL:      fileURL,
-		FileHash: fileHash,
-	})
+	exists, existingKnowledge, err := s.checkKnowledgeForCreation(ctx, tenantID, kbID, replacement,
+		&types.KnowledgeCheckParams{
+			Type:     "file_url",
+			URL:      fileURL,
+			FileHash: fileHash,
+		})
 	if err != nil {
 		logger.Errorf(ctx, "Failed to check knowledge existence: %v", err)
 		return nil, err
@@ -610,7 +639,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 
 	// Check storage quota
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if tenantInfo.StorageQuota > 0 && tenantInfo.StorageUsed >= tenantInfo.StorageQuota {
+	if tenantInfo.StorageQuota > 0 && knowledgeCreationStorageUsed(tenantInfo, replacement) >= tenantInfo.StorageQuota {
 		logger.Error(ctx, "Storage quota exceeded")
 		return nil, types.NewStorageQuotaExceededError()
 	}
@@ -648,12 +677,12 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		}
 	}
 
-	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
+	if err := s.persistKnowledgeForCreation(ctx, knowledge, replacement); err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge record: %v", err)
 		return nil, err
 	}
 	// Set tag relations
-	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, tagIDs); err != nil {
+	if err := s.attachCreationTags(ctx, knowledge, tagIDs, replacement); err != nil {
 		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
 		return nil, err
 	}

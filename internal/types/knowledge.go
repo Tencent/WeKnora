@@ -547,6 +547,8 @@ func (k *Knowledge) SetProcessOverrides(o *KnowledgeProcessOverrides) error {
 
 // KnowledgeCheckParams defines parameters used to check if knowledge already exists.
 type KnowledgeCheckParams struct {
+	// ExcludeKnowledgeID ignores only the row being replaced during duplicate checks.
+	ExcludeKnowledgeID string
 	// File parameters
 	FileName string
 	// FileType scopes file-hash deduplication; callers checking file uploads should set it.
