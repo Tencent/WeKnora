@@ -40,23 +40,23 @@ func grantOwner(c *gin.Context) (uint64, string, bool) {
 func (h *MCPServiceHandler) ListAgentGrants(c *gin.Context) {
 	ctx := c.Request.Context()
 	if h.grants == nil {
-		c.Error(errors.NewInternalServerError("agent grants are not configured"))
+		_ = c.Error(errors.NewInternalServerError("agent grants are not configured"))
 		return
 	}
 	tenantID, userID, ok := grantOwner(c)
 	if !ok {
-		c.Error(errors.NewUnauthorizedError("a signed-in user is required"))
+		_ = c.Error(errors.NewUnauthorizedError("a signed-in user is required"))
 		return
 	}
 	sessionID := strings.TrimSpace(c.Query("session_id"))
 	if sessionID == "" {
-		c.Error(errors.NewBadRequestError("session_id is required"))
+		_ = c.Error(errors.NewBadRequestError("session_id is required"))
 		return
 	}
 	grants, err := h.grants.ListGrants(ctx, tenantID, userID, types.AgentGrantScopeSession, sessionID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 	if grants == nil {
@@ -78,22 +78,22 @@ func (h *MCPServiceHandler) ListAgentGrants(c *gin.Context) {
 func (h *MCPServiceHandler) RevokeAgentGrant(c *gin.Context) {
 	ctx := c.Request.Context()
 	if h.grants == nil {
-		c.Error(errors.NewInternalServerError("agent grants are not configured"))
+		_ = c.Error(errors.NewInternalServerError("agent grants are not configured"))
 		return
 	}
 	tenantID, userID, ok := grantOwner(c)
 	if !ok {
-		c.Error(errors.NewUnauthorizedError("a signed-in user is required"))
+		_ = c.Error(errors.NewUnauthorizedError("a signed-in user is required"))
 		return
 	}
 	revoked, err := h.grants.RevokeGrant(ctx, tenantID, userID, c.Param("id"), time.Now())
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 	if !revoked {
-		c.Error(errors.NewNotFoundError("grant not found"))
+		_ = c.Error(errors.NewNotFoundError("grant not found"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
