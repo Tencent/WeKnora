@@ -100,7 +100,8 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	// let a lower-level run's MCP writes through without asking.
 	AccessLevelContextKey: true,
 	// Where the run's grants live. Dropping it only asks again.
-	GrantScopeContextKey: true,
+	GrantScopeContextKey:         true,
+	StandingGrantScopeContextKey: true,
 
 	// ---- Deliberately does not survive a detach ----
 	//

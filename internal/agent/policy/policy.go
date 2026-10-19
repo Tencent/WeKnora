@@ -88,10 +88,22 @@ func Decide(a Action, r Rules) Verdict {
 	}
 }
 
-// Grantable reports whether approving a may be remembered for later calls
-// of the same kind: only recoverable changes the workspace does not require
-// approving every time.
+// Grantable reports whether approving a during a run may be remembered for
+// later calls of the same kind: only recoverable changes the workspace does
+// not require approving every time.
 func Grantable(a Action) bool { return a.Risk == RiskWrite && !a.Always }
+
+// Pregrantable reports whether a standing grant, approved ahead of time
+// for a specific resource, may cover a. Unlike Grantable this includes
+// destructive actions, which only an automation's settings may pre-approve;
+// Always still asks every time.
+func Pregrantable(a Action) bool {
+	return (a.Risk == RiskWrite || a.Risk == RiskDestructive) && !a.Always
+}
+
+// Covers reports whether a grant approved for risk granted applies to a call
+// of risk r: a grant never covers a riskier call than it was approved for.
+func Covers(granted, r Risk) bool { return r.Valid() && !r.Above(granted) }
 
 // Offered reports whether an action of risk should be offered to the model
 // at all under level. A read-only run is not shown changes it cannot make,

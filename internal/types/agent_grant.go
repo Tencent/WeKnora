@@ -38,13 +38,16 @@ type AgentGrant struct {
 	Label    string `json:"label"     gorm:"type:text"`
 	// BindingHash, when set, is the configuration the grant was given
 	// under; a run with a different one does not get it.
-	BindingHash string     `json:"-"            gorm:"type:varchar(64);not null;default:''"`
-	PromptID    string     `json:"prompt_id"    gorm:"type:varchar(36)"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-	LastUsedAt  *time.Time `json:"last_used_at"`
-	ExpiresAt   *time.Time `json:"expires_at"`
-	RevokedAt   *time.Time `json:"revoked_at"`
+	BindingHash string `json:"-"            gorm:"type:varchar(64);not null;default:''"`
+	// Risk is the highest risk the grant was approved for; a call that has
+	// since become riskier is not covered.
+	Risk       string     `json:"risk"         gorm:"type:varchar(16);not null;default:'write'"`
+	PromptID   string     `json:"prompt_id"    gorm:"type:varchar(36)"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+	ExpiresAt  *time.Time `json:"expires_at"`
+	RevokedAt  *time.Time `json:"revoked_at"`
 }
 
 // BeforeCreate sets the ID.
@@ -111,6 +114,19 @@ func WithGrantScope(ctx context.Context, scope GrantScope) context.Context {
 // GrantScopeFromContext is the run's grant scope, if it has one.
 func GrantScopeFromContext(ctx context.Context) (GrantScope, bool) {
 	scope, ok := ctx.Value(GrantScopeContextKey).(GrantScope)
+	return scope, ok && scope.Scope != "" && scope.ScopeID != ""
+}
+
+// WithStandingGrantScope records grants the run may use but never adds to:
+// an automation's, approved in its settings. Approvals given during the run
+// go to the run's own scope.
+func WithStandingGrantScope(ctx context.Context, scope GrantScope) context.Context {
+	return context.WithValue(ctx, StandingGrantScopeContextKey, scope)
+}
+
+// StandingGrantScopeFromContext is the run's standing grant scope, if any.
+func StandingGrantScopeFromContext(ctx context.Context) (GrantScope, bool) {
+	scope, ok := ctx.Value(StandingGrantScopeContextKey).(GrantScope)
 	return scope, ok && scope.Scope != "" && scope.ScopeID != ""
 }
 

@@ -121,6 +121,7 @@ func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 			ToolCallID:         meta.ToolCallID,
 			Grant:              grant,
 			GrantScope:         grantScope,
+			GrantRisk:          t.risk,
 		})
 		if err != nil {
 			return operationFailure(fmt.Sprintf("could not ask the user to confirm %s: %v", t.Name(), err)), nil
@@ -182,9 +183,10 @@ type approvalGranter interface {
 	ApprovalGrant(ctx context.Context, args json.RawMessage) (grant, scope string)
 }
 
-// grant offers a session-wide approval only for recoverable changes.
+// grant names the call for remembered grants. The card offers to remember
+// only recoverable changes; a destructive one can match a standing grant.
 func (t *ConfirmedTool) grant(ctx context.Context, args json.RawMessage) (string, string) {
-	if t.risk != operations.RiskWrite {
+	if !policy.Pregrantable(policy.Action{Risk: t.risk}) {
 		return "", ""
 	}
 	if g, ok := t.inner.(approvalGranter); ok {

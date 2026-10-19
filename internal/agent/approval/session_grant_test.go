@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/hitl"
+	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -241,4 +242,63 @@ func TestRevokedOrRebindedGrantAsksAgain(t *testing.T) {
 	assert.False(t, run(bound("v2")).Granted, "a revoked grant asks again")
 	require.Len(t, *raised, 3)
 	assert.Empty(t, (*raised)[2].GrantLapsed, "the user withdrew it, so nothing to explain")
+}
+
+func TestStandingGrantsCoverOnlyWhatTheyWereApprovedFor(t *testing.T) {
+	g, bus, raised := grantGate(t, Decision{Approved: true, AllowInSession: true})
+	store := g.grants.(*memGrants)
+	standing := types.GrantScope{Scope: types.AgentGrantScopeAutomation, ScopeID: "auto-1", BindingHash: "v1"}
+	runCtx := func() context.Context {
+		ctx := types.WithGrantScope(attended(), types.GrantScope{Scope: types.AgentGrantScopeSession, ScopeID: "run-1"})
+		return types.WithStandingGrantScope(ctx, standing)
+	}
+	require.NoError(t, store.SaveGrant(context.Background(), &types.AgentGrant{
+		TenantID: 7, UserID: "u1", Scope: standing.Scope, ScopeID: standing.ScopeID, BindingHash: "v1",
+		GrantKey: "knowledge.delete knowledge_base:kb1", Risk: string(policy.RiskDestructive),
+	}))
+	require.NoError(t, store.SaveGrant(context.Background(), &types.AgentGrant{
+		TenantID: 7, UserID: "u1", Scope: standing.Scope, ScopeID: standing.ScopeID, BindingHash: "v1",
+		GrantKey: "mcp:svc/purge#abc", Risk: string(policy.RiskWrite),
+	}))
+	ask := func(grant string, risk policy.Risk) Decision {
+		req := grantRequest(bus, "run-1", grant)
+		req.GrantRisk = risk
+		d, err := g.RequestBuiltinApproval(runCtx(), req)
+		require.NoError(t, err)
+		g.MarkExecuted(context.Background(), d.PendingID)
+		return d
+	}
+
+	assert.True(t, ask("knowledge.delete knowledge_base:kb1", policy.RiskDestructive).Granted,
+		"a destructive call pre-approved for this knowledge base runs")
+	assert.Empty(t, *raised)
+
+	assert.False(t, ask("knowledge.delete knowledge_base:kb2", policy.RiskDestructive).Granted,
+		"another knowledge base asks")
+	require.Len(t, *raised, 1)
+	assert.Empty(t, (*raised)[0].GrantScope, "a destructive call is never offered for the rest of the run")
+
+	assert.False(t, ask("mcp:svc/purge#abc", policy.RiskDestructive).Granted,
+		"a grant approved for a write does not cover the tool once it is destructive")
+	assert.Len(t, *raised, 2)
+}
+
+func TestApprovalsDuringAnAutomationRunStayInTheRun(t *testing.T) {
+	g, bus, raised := grantGate(t, Decision{Approved: true, AllowInSession: true})
+	standing := types.GrantScope{Scope: types.AgentGrantScopeAutomation, ScopeID: "auto-1"}
+	run := func(session string) Decision {
+		ctx := types.WithGrantScope(attended(), types.GrantScope{Scope: types.AgentGrantScopeSession, ScopeID: session})
+		ctx = types.WithStandingGrantScope(ctx, standing)
+		d, err := g.RequestBuiltinApproval(ctx, grantRequest(bus, session, "mcp:svc/write#abc"))
+		require.NoError(t, err)
+		g.MarkExecuted(context.Background(), d.PendingID)
+		return d
+	}
+	run("run-1")
+	assert.True(t, run("run-1").Granted, "the run remembers its own approval")
+	assert.False(t, run("run-2").Granted, "the next run does not inherit it")
+	assert.Len(t, *raised, 2)
+	found, err := g.grants.FindGrant(context.Background(), 7, "u1", standing, "mcp:svc/write#abc")
+	require.NoError(t, err)
+	assert.Nil(t, found, "nothing approved during a run becomes a standing grant")
 }

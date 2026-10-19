@@ -556,6 +556,7 @@ func (t *RunOperationTool) confirm(
 			ToolCallID:         meta.ToolCallID,
 			Grant:              grant,
 			GrantScope:         grantScope,
+			GrantRisk:          op.Risk,
 		})
 		if err != nil {
 			msg := fmt.Sprintf("could not ask the user to confirm %s: %v", op.ID, err)
@@ -716,7 +717,7 @@ func (t *RunOperationTool) readTarget(
 func approvalGrant(
 	ctx context.Context, op operations.Operation, params map[string]json.RawMessage, target operations.Projected,
 ) (grant, scope string) {
-	if op.Risk != operations.RiskWrite || op.AlwaysConfirm {
+	if !policy.Pregrantable(policy.Action{Risk: op.Risk, Always: op.AlwaysConfirm}) {
 		return "", ""
 	}
 	declared := func(name string) string {

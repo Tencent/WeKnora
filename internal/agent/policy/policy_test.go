@@ -53,3 +53,17 @@ func TestOffered(t *testing.T) {
 	assert.False(t, Offered(readOnly, RiskDestructive))
 	assert.True(t, Offered(confirm, RiskDestructive))
 }
+
+func TestPregrantableAndCovers(t *testing.T) {
+	assert.True(t, Pregrantable(Action{Risk: RiskWrite}))
+	assert.True(t, Pregrantable(Action{Risk: RiskDestructive}))
+	assert.False(t, Pregrantable(Action{Risk: RiskDestructive, Always: true}))
+	assert.False(t, Pregrantable(Action{Risk: RiskRead}))
+	assert.False(t, Grantable(Action{Risk: RiskDestructive}), "a run's card never remembers a destructive call")
+
+	assert.True(t, Covers(RiskDestructive, RiskWrite))
+	assert.True(t, Covers(RiskWrite, RiskWrite))
+	assert.False(t, Covers(RiskWrite, RiskDestructive))
+	assert.False(t, Covers("", RiskWrite))
+	assert.False(t, Covers(RiskDestructive, "bogus"))
+}

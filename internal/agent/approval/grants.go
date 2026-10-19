@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -36,24 +37,45 @@ func grantScope(ctx context.Context, sessionID string) (types.GrantScope, bool) 
 	return types.GrantScope{Scope: types.AgentGrantScopeSession, ScopeID: sessionID}, true
 }
 
-// granted reports whether the user already allowed calls with req's grant
-// in the run's scope. When they had but it no longer applies, lapse says
-// why; a revoked grant is not reported, since the user withdrew it. Any
-// lookup failure asks again.
+// granted reports whether the user already allowed calls with req's grant,
+// in the run's own scope or its standing one. When they had but it no
+// longer applies, lapse says why; a revoked grant is not reported, since the
+// user withdrew it. Any lookup failure asks again.
 func (g *Gate) granted(ctx context.Context, req PendingRequest) (ok bool, lapse string) {
 	if g.grants == nil || req.Grant == "" || req.UserID == "" || req.TenantID == 0 {
 		return false, ""
 	}
-	scope, ok := grantScope(ctx, req.SessionID)
-	if !ok {
-		return false, ""
+	var scopes []types.GrantScope
+	if scope, ok := grantScope(ctx, req.SessionID); ok {
+		scopes = append(scopes, scope)
 	}
+	if scope, ok := types.StandingGrantScopeFromContext(ctx); ok {
+		scopes = append(scopes, scope)
+	}
+	for _, scope := range scopes {
+		ok, why := g.grantedIn(ctx, req, scope)
+		if ok {
+			return true, ""
+		}
+		if lapse == "" {
+			lapse = why
+		}
+	}
+	return false, lapse
+}
+
+func (g *Gate) grantedIn(ctx context.Context, req PendingRequest, scope types.GrantScope) (bool, string) {
 	grant, err := g.grants.FindGrant(ctx, req.TenantID, req.UserID, scope, req.Grant)
 	if err != nil {
 		logger.Warnf(ctx, "tool approval: read grant: %v", err)
 		return false, ""
 	}
 	if grant == nil {
+		return false, ""
+	}
+	if !policy.Covers(policy.Risk(grant.Risk), req.grantRisk()) {
+		logger.Infof(ctx, "tool approval: grant %s was approved for %s, not %s; asking",
+			grant.ID, grant.Risk, req.grantRisk())
 		return false, ""
 	}
 	now := time.Now()
@@ -66,6 +88,12 @@ func (g *Gate) granted(ctx context.Context, req PendingRequest) (ok bool, lapse 
 	}
 	if err := g.grants.TouchGrant(ctx, grant.ID, now); err != nil {
 		logger.Warnf(ctx, "tool approval: record grant use: %v", err)
+	}
+	if req.grantRisk() == policy.RiskDestructive {
+		logger.GetLogger(ctx).WithFields(logger.Fields{
+			"agent_action": req.Grant, "agent_grant_id": grant.ID, "agent_granted_destructive": true,
+			"agent_acting_via": types.ActingViaFromContext(ctx),
+		}).Info("agent policy decision")
 	}
 	return true, ""
 }
@@ -88,6 +116,7 @@ func (g *Gate) remember(ctx context.Context, d Decision, prompt *types.AgentProm
 		TenantID: prompt.TenantID, UserID: prompt.UserID,
 		Scope: scope.Scope, ScopeID: scope.ScopeID, GrantKey: request.Grant,
 		Label: request.GrantScope, BindingHash: scope.BindingHash, PromptID: prompt.ID,
+		Risk: string(policy.RiskWrite),
 	}
 	if err := g.grants.SaveGrant(context.WithoutCancel(ctx), grant); err != nil {
 		logger.Warnf(ctx, "tool approval: remember grant: %v", err)

@@ -66,10 +66,13 @@ type PendingRequest struct {
 	Description        string
 	Args               json.RawMessage
 	ToolCallID         string
-	// Grant, when set, lets the user allow calls with the same grant for the
-	// rest of the session; see types.ToolApprovalPromptRequest.
+	// Grant, when set, names the kind of call for matching remembered
+	// grants; see types.ToolApprovalPromptRequest. GrantRisk is the call's
+	// risk, empty meaning write: only a write may be remembered from the
+	// card, while a standing grant may also cover a destructive call.
 	Grant      string
 	GrantScope string
+	GrantRisk  policy.Risk
 	// Snapshot, when set, is the run state to resume from: the wait is cut
 	// to the hot-wait window and then suspends instead of timing out.
 	Snapshot        []byte
@@ -240,10 +243,17 @@ func (g *Gate) RequestBuiltinApproval(ctx context.Context, req PendingRequest) (
 // offeredGrantScope is the scope the card offers to allow, which needs both
 // a grant to match later calls and a description for the user.
 func offeredGrantScope(req PendingRequest) string {
-	if req.Grant == "" {
+	if req.Grant == "" || req.grantRisk() != policy.RiskWrite {
 		return ""
 	}
 	return req.GrantScope
+}
+
+func (req PendingRequest) grantRisk() policy.Risk {
+	if req.GrantRisk == "" {
+		return policy.RiskWrite
+	}
+	return req.GrantRisk
 }
 
 func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decision, error) {

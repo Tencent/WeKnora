@@ -213,7 +213,7 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 					decision = t.gate.ResumeDecision(waitCtx, meta.Answered, meta.EventBus)
 				} else {
 					var grant, grantScope string
-					if policy.Grantable(action) {
+					if policy.Pregrantable(action) {
 						grant, grantScope = t.approvalGrant(ctx)
 					}
 					var snapshot []byte
@@ -246,6 +246,7 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 						ToolCallID:         meta.ToolCallID,
 						Grant:              grant,
 						GrantScope:         grantScope,
+						GrantRisk:          action.Risk,
 					})
 				}
 				if waitErr != nil {

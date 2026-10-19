@@ -211,7 +211,7 @@ MCP 注解来自外部服务，只用作默认值，规则如下：
 2. **规则修正与运行模式**（已完成，运行模式 `e97cd5bfb`，其余 `a65b2fde6`）：MCP 风险分级与注解默认值；`read_only` 覆盖 MCP（注册阶段移除，`Decide` 增加 deny）；删除委派一刀切；普通 Agent 档位上限配置；合并运行模式。运行模式从第 1 步移到这里，因为合并必然改变现有行为：非交互运行中，operations 与 `ConfirmedTool` 直接拒绝，MCP 审批却发出审批卡并等待至超时（IM 渠道即如此）；`WithUnattendedRun` 目前没有生产调用方。
 3. **授权统一**（已完成，`a249d8a2d`）：授权表、按根会话匹配的 `session` 作用域、审批卡“本会话允许”扩展到 MCP、查看与撤销界面。
 4. **身份与自动化接入**（已完成，`2e875cca4`）：`ActingVia`、决策日志、`automation` 作用域的 binding 与失效原因。`deferred` 模式在第 2 步已实现。自动化需求只需在运行入口设置模式、`GrantScope` 与 `Principal.ActingVia`。
-5. **自动化授权接入**（未实现，随自动化需求）：网关同时查询 `automation` 与运行会话的 `session` 作用域，运行中只写 `session`（§2.4）；destructive 自动化授权：授权表加 `risk` 列（迁移尚未发布，直接改 `000127_agent_grants` 与 sqlite `000044_agent_grants`），`policy.Grantable` 按作用域区分，自动化设置表单与审批卡支持 destructive 授权。
+5. **自动化授权接入**：后端已完成——授权表 `risk` 列；`policy.Pregrantable`（write 与 destructive，非 `Always`）决定是否生成授权键，`policy.Grantable`（仅 write）决定审批卡是否提供“本会话允许”，`policy.Covers` 保证授权不覆盖风险更高的调用；网关先查运行的 `GrantScope`，再查 `types.WithStandingGrantScope` 设置的长期作用域，运行中的批准只写入前者。自动化设置表单写入长期授权的接口与界面随自动化需求实现。
 
 ## 5. 验收场景
 

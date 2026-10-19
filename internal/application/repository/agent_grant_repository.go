@@ -43,6 +43,9 @@ func (r *agentGrantRepository) SaveGrant(ctx context.Context, grant *types.Agent
 		grant.ScopeID == "" || grant.GrantKey == "" {
 		return errors.New("agent grant identity is required")
 	}
+	if grant.Risk == "" {
+		grant.Risk = "write"
+	}
 	now := time.Now()
 	if grant.CreatedAt.IsZero() {
 		grant.CreatedAt = now
@@ -55,6 +58,7 @@ func (r *agentGrantRepository) SaveGrant(ctx context.Context, grant *types.Agent
 		DoUpdates: clause.Assignments(map[string]interface{}{
 			"label":        grant.Label,
 			"binding_hash": grant.BindingHash,
+			"risk":         grant.Risk,
 			"prompt_id":    grant.PromptID,
 			"created_at":   grant.CreatedAt,
 			"updated_at":   now,

@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS agent_grants (
     grant_key VARCHAR(512) NOT NULL,
     label TEXT,
     binding_hash VARCHAR(64) NOT NULL DEFAULT '',
+    risk VARCHAR(16) NOT NULL DEFAULT 'write',
     prompt_id VARCHAR(36),
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
