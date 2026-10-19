@@ -43,10 +43,12 @@ func TestIsEnvStoreID(t *testing.T) {
 
 func TestQdrantEnvSettings(t *testing.T) {
 	for _, tt := range []struct {
-		name       string
-		env        map[string]string
-		connection ConnectionConfig
-		collection string
+		name               string
+		env                map[string]string
+		connection         ConnectionConfig
+		collection         string
+		scalarQuantization bool
+		vectorsOnDisk      bool
 	}{
 		{
 			name:       "defaults",
@@ -58,14 +60,26 @@ func TestQdrantEnvSettings(t *testing.T) {
 			env: map[string]string{
 				"QDRANT_HOST": "vectors.example", "QDRANT_PORT": "7443",
 				"QDRANT_API_KEY": "secret", "QDRANT_USE_TLS": "true",
-				"QDRANT_COLLECTION": "custom_vectors",
+				"QDRANT_COLLECTION":          "custom_vectors",
+				"QDRANT_SCALAR_QUANTIZATION": "true", "QDRANT_VECTORS_ON_DISK": "1",
 			},
-			connection: ConnectionConfig{Host: "vectors.example", Port: 7443, APIKey: "secret", UseTLS: true},
-			collection: "custom_vectors",
+			connection:         ConnectionConfig{Host: "vectors.example", Port: 7443, APIKey: "secret", UseTLS: true},
+			collection:         "custom_vectors",
+			scalarQuantization: true,
+			vectorsOnDisk:      true,
 		},
 		{
 			name:       "invalid port uses default",
 			env:        map[string]string{"QDRANT_PORT": "invalid"},
+			connection: ConnectionConfig{Host: "localhost", Port: 6334},
+			collection: "weknora_embeddings",
+		},
+		{
+			name: "non-boolean storage flags stay disabled",
+			env: map[string]string{
+				"QDRANT_SCALAR_QUANTIZATION": "yes",
+				"QDRANT_VECTORS_ON_DISK":     "off",
+			},
 			connection: ConnectionConfig{Host: "localhost", Port: 6334},
 			collection: "weknora_embeddings",
 		},
@@ -76,6 +90,8 @@ func TestQdrantEnvSettings(t *testing.T) {
 			assert.Equal(t, tt.connection, store.ConnectionConfig)
 			assert.Equal(t, tt.connection.GetEndpoint(), store.ConnectionConfig.GetEndpoint())
 			assert.Equal(t, tt.collection, store.IndexConfig.GetIndexNameOrDefault(QdrantRetrieverEngineType))
+			assert.Equal(t, tt.scalarQuantization, store.IndexConfig.ScalarQuantizationEnabled)
+			assert.Equal(t, tt.vectorsOnDisk, store.IndexConfig.VectorsOnDisk)
 		})
 	}
 }
@@ -1472,5 +1488,29 @@ func TestOpenSearchRetrieverEngineType_DistinctFromExisting(t *testing.T) {
 	for _, e := range existing {
 		assert.NotEqual(t, e, OpenSearchRetrieverEngineType,
 			"OpenSearch wire value must not collide with %s", e)
+	}
+}
+
+func TestQdrantVectorStoreMetadataIncludesStorageOptions(t *testing.T) {
+	storeTypes := GetVectorStoreTypes()
+	var qdrantType *VectorStoreTypeInfo
+	for i := range storeTypes {
+		if storeTypes[i].Type == "qdrant" {
+			qdrantType = &storeTypes[i]
+			break
+		}
+	}
+	require.NotNil(t, qdrantType)
+
+	fields := make(map[string]VectorStoreFieldInfo, len(qdrantType.IndexFields))
+	for _, field := range qdrantType.IndexFields {
+		fields[field.Name] = field
+	}
+	for _, name := range []string{"scalar_quantization_enabled", "vectors_on_disk"} {
+		field, ok := fields[name]
+		require.True(t, ok, "Qdrant metadata is missing %s", name)
+		assert.Equal(t, "boolean", field.Type)
+		assert.False(t, field.Required)
+		assert.Equal(t, false, field.Default)
 	}
 }
