@@ -58,19 +58,19 @@ const activity = computed(() => {
   mask-position: center;
 }
 .child-task-row.is-running {
-  .child-task-icon { background: var(--td-brand-color); animation: child-task-breathe 1.8s ease-in-out infinite; }
+  .child-task-icon { animation: child-task-breathe 2s ease-in-out infinite; }
   &::before {
     content: '';
     position: absolute;
-    inset: -3px -8px;
+    inset: -2px -6px;
     z-index: -1;
-    border-radius: var(--app-radius-md, 8px);
+    border-radius: var(--app-radius-sm, 6px);
     pointer-events: none;
     background: linear-gradient(100deg,
-      transparent 25%,
-      color-mix(in srgb, var(--td-brand-color) 8%, transparent) 50%,
-      transparent 75%) 0 0 / 250% 100%;
-    animation: child-task-sweep 2.6s ease-in-out infinite;
+      transparent 30%,
+      color-mix(in srgb, var(--td-text-color-primary) 5%, transparent) 50%,
+      transparent 70%) 0 0 / 250% 100%;
+    animation: child-task-sweep 2.8s ease-in-out infinite;
   }
 }
 .child-task-name {
@@ -123,7 +123,7 @@ const activity = computed(() => {
   to { background-position: -50% 0; }
 }
 @keyframes child-task-breathe {
-  50% { opacity: 0.45; }
+  50% { opacity: 0.5; }
 }
 @media (prefers-reduced-motion: reduce) {
   .child-task-name.is-running { animation: none; color: var(--td-text-color-secondary); background: none; }

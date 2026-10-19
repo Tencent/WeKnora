@@ -74,7 +74,7 @@ watch(() => props.activeId, () => nextTick(() => {
 .child-agent-tab-dot.running { background: var(--td-brand-color); animation: child-tab-pulse 1.6s ease-out infinite; }
 .child-agent-tab-dot.succeeded { background: var(--td-success-color); }
 .child-agent-tab-name.is-running {
-  background: linear-gradient(90deg, currentColor 30%, var(--td-brand-color) 50%, currentColor 70%) 0 0 / 300% 100%;
+  background: linear-gradient(90deg, currentColor 30%, var(--td-text-color-placeholder) 50%, currentColor 70%) 0 0 / 300% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
