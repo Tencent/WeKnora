@@ -275,6 +275,8 @@ services:
       - BATCH_EMBED_SIZE=${BATCH_EMBED_SIZE:-}
       # VLM 单次 HTTP 请求超时（秒，默认 180）
       - VLM_HTTP_TIMEOUT_SECONDS=${VLM_HTTP_TIMEOUT_SECONDS:-}
+      # VLM 单次请求的补全 token 预算（默认 5000）
+      - VLM_MAX_TOKENS=${VLM_MAX_TOKENS:-}
       # LLM 流原始转储（排查上下文问题；1 启用，默认目录 ~/.weknora/investigate/llm-stream）
       - WEKNORA_LLM_STREAM_RAW_DUMP=${WEKNORA_LLM_STREAM_RAW_DUMP:-}
       - WEKNORA_LLM_STREAM_RAW_DUMP_DIR=${WEKNORA_LLM_STREAM_RAW_DUMP_DIR:-}
