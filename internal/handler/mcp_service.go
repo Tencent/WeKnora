@@ -828,14 +828,14 @@ func (h *MCPServiceHandler) SetMCPToolApproval(c *gin.Context) {
 		return
 	}
 	if body.RequireApproval == nil && body.Enabled == nil && body.Risk == nil {
-		c.Error(errors.NewBadRequestError("require_approval, enabled or risk is required"))
+		_ = c.Error(errors.NewBadRequestError("require_approval, enabled or risk is required"))
 		return
 	}
 	if err := h.mcpToolApprovalService.SetPolicy(ctx, tenantID, serviceID, toolName, types.MCPToolPolicyPatch{
 		RequireApproval: body.RequireApproval, Enabled: body.Enabled, Risk: body.Risk,
 	}); err != nil {
 		if stderrors.Is(err, types.ErrInvalidMCPToolPolicy) {
-			c.Error(errors.NewBadRequestError(err.Error()))
+			_ = c.Error(errors.NewBadRequestError(err.Error()))
 			return
 		}
 		if strings.Contains(err.Error(), "not found") {
