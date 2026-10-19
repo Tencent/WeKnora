@@ -329,6 +329,10 @@ var allowedRouteAreas = map[string]bool{
 	"faq":                    true,
 	"agents":                 true,
 	"skills":                 true,
+	// The caller's own automations. Runs, grants and notifications live
+	// in other areas or behind routes left unannotated: the owner approves
+	// standing grants themselves.
+	"automations": true,
 	// Model and MCP responses carry endpoints and headers next to the
 	// names; only fields tagged x-agent are projected, so annotate the
 	// identifying ones and nothing else.

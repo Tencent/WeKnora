@@ -208,6 +208,11 @@ type ToolApprovalPromptRequest struct {
 	// GrantLapsed, when set, is why an earlier grant for this call no longer
 	// applies (an AgentGrantLapse value).
 	GrantLapsed string `json:"grant_lapsed,omitempty"`
+	// GrantRisk is the risk Grant would be given for, and GrantLabel its
+	// description, whether or not the card offers it: an automation's owner
+	// may later allow the same call for its future runs.
+	GrantRisk  string `json:"grant_risk,omitempty"`
+	GrantLabel string `json:"grant_label,omitempty"`
 }
 
 // ToolApprovalPromptResponse is the Response of an AgentPromptKindToolApproval.

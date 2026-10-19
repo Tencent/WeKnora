@@ -368,6 +368,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(operations.NewHandlerDispatcher))
 	// Collaboration workers bind SessionService after the dependency graph is built.
 	must(container.Provide(service.NewAgentCollaboration))
+	must(container.Provide(service.NewNotificationService))
+	must(container.Provide(service.NewAutomationService))
 	must(container.Provide(service.NewAgentService))
 
 	// Session service (depends on agent service)
@@ -612,26 +614,39 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(func(
 		sessions *session.Handler, mcp *handler.MCPServiceHandler,
 		broker *hitl.Broker, runs *service.SuspendedRunService, rewind *service.SessionRewindService,
-		collaboration *service.AgentCollaboration,
+		collaboration *service.AgentCollaboration, automations *service.AutomationService,
+		sessionService interfaces.SessionService,
 		messages *handler.MessageHandler, gate *approval.Gate, streams interfaces.StreamManager,
 	) {
 		rewind.SetSuspendedRuns(runs)
 		sessions.SetSuspendedRuns(broker, runs)
 		sessions.SetCollaborationStopper(collaboration.Stop)
-		sessions.SetDelegatedPromptRouter(collaboration.HandlesPrompt)
+		// Automation runs resume under their automation, delegated ones
+		// through the collaboration scheduler; neither as an ordinary chat.
+		sessions.SetDelegatedPromptRouter(func(ctx context.Context, p *types.AgentPrompt) bool {
+			return automations.HandlesPrompt(ctx, p) || collaboration.HandlesPrompt(ctx, p)
+		})
 		messages.DelegatedPrompts = collaboration.PendingPrompts
 		messages.CollaborationStatuses = collaboration.HistoryStatuses
 		collaboration.BindRecovery(broker, gate, streams)
 		collaboration.ParentEvents = sessions.CollaborationEvents
 		collaboration.ChildEvents = sessions.CollaborationEvents
 		collaboration.ParentSteer = sessions.CollaborationSteer
-		runs.RecoverAnswered = collaboration.RecoverAnswered
+		runs.RecoverAnswered = func(ctx context.Context, p *types.AgentPrompt) (bool, error) {
+			if ok, err := automations.RecoverAnswered(ctx, p); ok || err != nil {
+				return ok, err
+			}
+			return collaboration.RecoverAnswered(ctx, p)
+		}
+		automations.Bind(sessionService, broker, runs, streams)
+		automations.Events = sessions.CollaborationEvents
 		broker.SetRunHooks(runs.Hooks())
 		runs.StopDelegation = func(ctx context.Context, p *types.AgentPrompt) error {
 			return collaboration.StopPrompt(ctx, p)
 		}
 		mcp.SetRunResumer(sessions)
 		collaboration.Runtime.Start(context.Background())
+		automations.Start(context.Background())
 	}))
 	// Start only after the delegation close hook is installed.
 	must(container.Invoke(startAgentPromptReaper))
@@ -653,6 +668,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	}))
 	must(container.Provide(handler.NewOrganizationHandler))
 	must(container.Provide(handler.NewMemoryHandler))
+	must(container.Provide(handler.NewAutomationHandler))
 
 	// Data source handler
 	must(container.Provide(handler.NewDataSourceHandler))

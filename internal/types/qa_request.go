@@ -218,6 +218,9 @@ type QARequest struct {
 	GrantSessionID string
 	// Resume, when set, continues a suspended run instead of starting one.
 	Resume *AgentResume
+	// RunNote is appended to the system prompt of this run only: how the
+	// run was started, for runs nobody is watching.
+	RunNote string
 }
 
 // AgentResume is what a resumed run continues from.
