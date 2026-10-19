@@ -92,6 +92,8 @@ type AgentEngine struct {
 	// suspendRequest is saved with the run for that (see EnableSuspension).
 	suspendable    bool
 	suspendRequest []byte
+	// collaborationOnlySuspension limits suspension to collaboration waits.
+	collaborationOnlySuspension bool
 	// interactive: the client renders prompt cards and can answer them.
 	interactive bool
 	progress    turnProgress
@@ -756,7 +758,7 @@ loop:
 	// A suspended run has not finished either; it resumes once the user
 	// answers, so no answer is synthesized for it.
 	if !state.IsComplete && ctx.Err() == nil && state.Suspended == nil {
-		if e.collaboration != nil && e.collaboration.Child == nil {
+		if e.collaboration != nil && e.collaboration.Child == nil && e.collaborationOwnsFailure(ctx) {
 			return state, fmt.Errorf("parent iteration budget exhausted; remaining delegated work was cancelled")
 		}
 		e.handleMaxIterations(ctx, query, state, sessionID, messages)
@@ -983,7 +985,7 @@ func (e *AgentEngine) runReActIteration(
 				e.failTruncatedToolCalls(ctx, response, &step, state.CurrentRound, sessionID)
 			}
 			state.RoundSteps = append(state.RoundSteps, step)
-			if e.collaboration != nil {
+			if e.collaborationOwnsFailure(ctx) {
 				return iterOutcomeBreak, fmt.Errorf("collaboration stopped after repeated output truncation")
 			}
 			e.finishStalledTurn(ctx, state, sessionID, response, true)
@@ -1014,7 +1016,7 @@ func (e *AgentEngine) runReActIteration(
 				guards.consecutiveSameContent+1,
 				response.FinishReason,
 			)
-			if e.collaboration != nil {
+			if e.collaborationOwnsFailure(ctx) {
 				return iterOutcomeBreak, fmt.Errorf("collaboration stopped after repeated responses without progress")
 			}
 			e.finishStalledTurn(ctx, state, sessionID, response, false)
@@ -1114,7 +1116,7 @@ func (e *AgentEngine) runReActIteration(
 			// A fallback answer cannot replace unreviewed child results or mark
 			// an empty child deliverable as successful. Propagate a failure so
 			// runtime cleanup/parent notification follows the normal error path.
-			if e.collaboration != nil {
+			if e.collaborationOwnsFailure(ctx) {
 				return iterOutcomeBreak, fmt.Errorf("collaboration stopped after repeated empty answers")
 			}
 			// Retries exhausted — use fallback message rather than empty answer.

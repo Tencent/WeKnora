@@ -15,9 +15,29 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
+
+// modelMaxOutputTokens returns the configured or cataloged output limit of a
+// chat model, or zero when neither declares one.
+func modelMaxOutputTokens(m *types.Model) int {
+	if m.Parameters.MaxOutputTokens > 0 {
+		return m.Parameters.MaxOutputTokens
+	}
+	if m.Source != types.ModelSourceRemote {
+		return 0
+	}
+	resolved, err := modelruntime.Resolve(modelruntime.Ref{
+		Provider: m.Parameters.Provider, Model: m.Name, BaseURL: m.Parameters.BaseURL,
+		ModelType: types.ModelTypeKnowledgeQA, Extra: m.Parameters.ExtraConfig, Override: m.Parameters.Spec,
+	})
+	if err != nil {
+		return 0
+	}
+	return resolved.Capabilities().MaxOutputTokens
+}
 
 // AgentQA performs agent-based question answering with conversation history and streaming support
 // customAgent is optional - if provided, uses custom agent configuration instead of tenant defaults
@@ -115,6 +135,7 @@ func (s *sessionService) AgentQA(
 		if modelInfo, err := s.modelService.GetModelByID(ctx, effectiveModelID); err == nil && modelInfo != nil {
 			agentModelSupportsVision = modelInfo.Parameters.SupportsVision
 			modelContextWindow = modelInfo.Parameters.ContextWindow
+			agentConfig.ModelMaxOutputTokens = modelMaxOutputTokens(modelInfo)
 		}
 	}
 	agentConfig.ChatModelSupportsVision = agentModelSupportsVision
@@ -306,11 +327,19 @@ func (s *sessionService) AgentQA(
 	if bound, ok := engine.(interface{ HasCollaboration() bool }); ok {
 		collaborating = bound.HasCollaboration()
 	}
-	if req.Suspendable && ((s.cfg != nil && s.cfg.Agent.PromptSuspend()) || collaborating) {
+	promptSuspend := s.cfg != nil && s.cfg.Agent.PromptSuspend()
+	if req.Suspendable && (promptSuspend || collaborating) {
 		if request, err := json.Marshal(resumableAgentRequest(ctx, req)); err != nil {
 			logger.Warnf(ctx, "Run cannot be suspended, encoding its request failed: %v", err)
 		} else {
 			engine.EnableSuspension(request)
+			// Scheduler-owned children always suspend on prompts: their approvals
+			// are forwarded to the parent and resumed by the scheduler.
+			if b := collaboration.FromContext(ctx); !promptSuspend && (b == nil || b.Child == nil) {
+				if restricted, ok := engine.(interface{ RestrictSuspensionToCollaboration() }); ok {
+					restricted.RestrictSuspensionToCollaboration()
+				}
+			}
 		}
 	}
 

@@ -199,6 +199,9 @@ type AgentConfig struct {
 	// DefaultMaxCompletionTokens for this agent's mode and sandbox.
 	// Explicit values are sent as-is.
 	MaxCompletionTokens int `json:"max_completion_tokens,omitempty"`
+	// ModelMaxOutputTokens is the resolved model's per-response output limit,
+	// or zero when unknown. It caps the round budget and is resolved per run.
+	ModelMaxOutputTokens int `json:"-"`
 
 	// Maximum character length for tool output (default: 16000).
 	// Outputs exceeding this limit are truncated with head + tail preservation.

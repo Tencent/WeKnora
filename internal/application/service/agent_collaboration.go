@@ -65,11 +65,116 @@ func NewAgentCollaboration(
 	s.Runtime.WakeParent = s.resumeParent
 	s.Runtime.Reconcile = s.reconcile
 	s.Runtime.ParentInput = s.parentHasInput
+	s.Runtime.Prune = s.prune
 	return s
 }
 
 // Bind attaches the session executor used by child runs.
-func (s *AgentCollaboration) Bind(sessions interfaces.SessionService) { s.sessions = sessions }
+func (s *AgentCollaboration) Bind(sessions interfaces.SessionService) {
+	s.sessions = sessions
+	if owner, ok := sessions.(interface {
+		SetDeletedSessionsHook(func(context.Context, uint64, string, []string))
+	}); ok {
+		owner.SetDeletedSessionsHook(s.forgetSessions)
+	}
+}
+
+// forgetSessions stops collaborations of deleted conversations, soft-deletes
+// their child conversations like the parent, and drops the internal records.
+func (s *AgentCollaboration) forgetSessions(ctx context.Context, tenantID uint64, userID string, sessionIDs []string) {
+	if len(sessionIDs) == 0 {
+		return
+	}
+	var rows []collaboration.Record
+	query := s.db.WithContext(ctx).Where("tenant_id = ? AND session_id IN ?", tenantID, sessionIDs)
+	if userID != "" {
+		query = query.Where("user_id = ?", userID)
+	}
+	if err := query.Find(&rows).Error; err != nil {
+		logger.Warnf(ctx, "List collaborations of deleted sessions: %v", err)
+		return
+	}
+	childIDs := map[string][]string{}
+	groupIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		groupIDs = append(groupIDs, row.ID)
+		scope := collaboration.Scope{TenantID: row.TenantID, UserID: row.UserID, SessionID: row.SessionID, ID: row.ID}
+		if row.Status == "active" || row.Status == "cancelling" {
+			if err := s.Runtime.Cancel(ctx, scope); err != nil && !errors.Is(err, collaboration.ErrHistoryLimit) {
+				logger.Warnf(ctx, "Cancel collaboration %s of deleted session: %v", row.ID, err)
+			}
+		}
+		var g collaboration.Group
+		if err := json.Unmarshal([]byte(row.Data), &g); err != nil {
+			continue
+		}
+		for _, m := range g.Members {
+			childIDs[row.UserID] = append(childIDs[row.UserID], m.SessionID)
+		}
+	}
+	for owner, ids := range childIDs {
+		if err := s.db.WithContext(ctx).
+			Where("tenant_id = ? AND user_id = ? AND kind = ? AND id IN ?",
+				tenantID, owner, types.SessionKindAgentDelegated, ids).
+			Delete(&types.Session{}).Error; err != nil {
+			logger.Warnf(ctx, "Delete child conversations of deleted sessions: %v", err)
+		}
+	}
+	// Active records stay until their workers observe cancellation; the
+	// scheduler's prune removes them once terminal.
+	if len(groupIDs) == 0 {
+		return
+	}
+	if err := s.db.WithContext(ctx).
+		Where("id IN ? AND status IN ?", groupIDs, []string{"completed", "cancelled"}).
+		Delete(&collaboration.Record{}).Error; err != nil {
+		logger.Warnf(ctx, "Delete collaborations of deleted sessions: %v", err)
+	}
+}
+
+// collaborationRetention is how long a terminal record stays untouched before
+// pruning considers it. Recent records still serve history and inheritance.
+const collaborationRetention = time.Hour
+
+// prune bounds durable collaboration storage. It removes terminal records of
+// deleted conversations and terminal records that never delegated, and
+// compacts the remaining old terminal records. Child conversations keep the
+// complete transcripts.
+func (s *AgentCollaboration) prune(ctx context.Context) error {
+	terminal := []string{"completed", "cancelled"}
+	cutoff := time.Now().Add(-collaborationRetention).UTC()
+	if err := s.db.WithContext(ctx).
+		Where("status IN ? AND updated_at < ?", terminal, cutoff).
+		Where("session_id IN (?)", s.db.Table("sessions").Select("id").Where("deleted_at IS NOT NULL")).
+		Delete(&collaboration.Record{}).Error; err != nil {
+		return err
+	}
+	// Each record is revisited only while it is inside this window.
+	var rows []collaboration.Record
+	if err := s.db.WithContext(ctx).
+		Where("status IN ? AND updated_at < ? AND updated_at >= ?", terminal, cutoff, cutoff.Add(-24*time.Hour)).
+		Order("updated_at").Limit(500).Find(&rows).Error; err != nil {
+		return err
+	}
+	for _, row := range rows {
+		var g collaboration.Group
+		if err := json.Unmarshal([]byte(row.Data), &g); err != nil {
+			continue
+		}
+		scope := collaboration.Scope{TenantID: row.TenantID, UserID: row.UserID, SessionID: row.SessionID, ID: row.ID}
+		if len(g.Members) == 0 {
+			if err := s.db.WithContext(ctx).Where("id = ? AND version = ?", row.ID, row.Version).
+				Delete(&collaboration.Record{}).Error; err != nil {
+				return err
+			}
+			continue
+		}
+		if err := s.Runtime.Compact(ctx, scope); err != nil {
+			logger.Warnf(ctx, "Compact collaboration %s: %v", row.ID, err)
+		}
+	}
+	return nil
+}
 
 type delegatedConfig struct {
 	Agent     types.CustomAgent          `json:"agent"`
@@ -249,6 +354,9 @@ func (s *AgentCollaboration) workerContext(ctx context.Context, scope collaborat
 	tenant, err := s.tenants.GetTenantByID(ctx, scope.TenantID)
 	if err != nil {
 		return nil, err
+	}
+	if tenant == nil {
+		return nil, errors.New("delegating workspace is unavailable")
 	}
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, scope.TenantID)
 	ctx = context.WithValue(ctx, types.UserIDContextKey, scope.UserID)

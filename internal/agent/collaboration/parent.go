@@ -79,8 +79,9 @@ func (b *Binding) Start(ctx context.Context) (context.Context, func()) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		tick := time.NewTicker(min(b.Runtime.Poll, b.Runtime.Lease/3))
+		tick := time.NewTicker(b.Runtime.heartbeatInterval())
 		defer tick.Stop()
+		lease := time.Now().Add(b.Runtime.Lease)
 		for {
 			select {
 			case <-ctx.Done():
@@ -97,13 +98,19 @@ func (b *Binding) Start(ctx context.Context) (context.Context, func()) {
 						return ErrClosed
 					}
 					now := time.Now()
-					g.ParentLease = now.Add(b.Runtime.Lease)
-					touchDeadline(g, now)
+					if b.Runtime.renewalDue(g.ParentLease, now) {
+						g.ParentLease = now.Add(b.Runtime.Lease)
+						touchDeadline(g, now)
+					}
+					lease = g.ParentLease
 					return nil
 				})
 				if err == nil && completed {
 					return
 				} // normal completion must not cancel final event delivery
+				if err != nil && !isFenceError(err) && time.Now().Before(lease) && ctx.Err() == nil {
+					continue
+				}
 				if err != nil {
 					cancel()
 					return

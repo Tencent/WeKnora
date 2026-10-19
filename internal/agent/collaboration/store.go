@@ -24,7 +24,19 @@ var (
 	ErrClosed = errors.New("collaboration is closed")
 	// ErrScope indicates that the caller cannot access the requested collaboration.
 	ErrScope = errors.New("collaboration is outside the caller's scope")
+	// ErrHistoryLimit indicates that an active aggregate cannot accept more history.
+	ErrHistoryLimit = errors.New("collaboration history limit reached")
 )
+
+// maxAggregateBytes bounds one serialized collaboration aggregate.
+var maxAggregateBytes = 32 << 20
+
+// isFenceError reports a durable ownership or admission decision, as opposed
+// to a transient store failure that may be retried.
+func isFenceError(err error) bool {
+	return errors.Is(err, ErrConflict) || errors.Is(err, ErrClosed) || errors.Is(err, ErrScope) ||
+		errors.Is(err, ErrHistoryLimit)
+}
 
 // Record is an aggregate with an optimistic concurrency fence. One bounded
 // document makes admission, event publication and the pending-work outbox atomic
@@ -235,26 +247,45 @@ func (s *Store) Read(ctx context.Context, scope Scope) (*Group, error) {
 }
 
 // Change callbacks can be retried: no IO or non-idempotent external actions in fn.
+//
+// An active aggregate that would exceed maxAggregateBytes is closed instead of
+// rejecting every later mutation, including the cancellation that would end it.
+// The caller's mutation is discarded and ErrHistoryLimit is returned.
 func (s *Store) Change(ctx context.Context, scope Scope, fn func(*Group) error) error {
+	forceClose := false
 	for attempt := 0; attempt < 60; attempt++ {
 		row, g, err := s.read(ctx, scope)
 		if err == nil {
 			before := g.StatusView()
 			parentMessageID := g.ParentMessageID
-			if owner, ok := ctx.Value(parentOwnerKey{}).(string); ok &&
-				(g.ParentOwner != owner || time.Now().After(g.ParentLease)) {
-				return ErrConflict
-			}
-			if err = fn(g); err != nil {
-				return err
+			if forceClose {
+				closeForHistoryLimit(g)
+			} else {
+				if owner, ok := ctx.Value(parentOwnerKey{}).(string); ok &&
+					(g.ParentOwner != owner || time.Now().After(g.ParentLease)) {
+					return ErrConflict
+				}
+				if err = fn(g); err != nil {
+					return err
+				}
 			}
 			var b []byte
 			b, err = json.Marshal(g)
-			if err == nil {
-				if len(b) > 32<<20 {
-					return errors.New("collaboration history limit reached")
+			if err == nil && len(b) > maxAggregateBytes {
+				if g.Status == "active" && !forceClose {
+					forceClose = true
+					continue
 				}
+				compactClosed(g)
+				if b, err = json.Marshal(g); err == nil && len(b) > maxAggregateBytes {
+					return ErrHistoryLimit
+				}
+			}
+			if err == nil {
 				if string(b) == row.Data && g.Status == row.Status {
+					if forceClose {
+						return ErrHistoryLimit
+					}
 					return nil
 				}
 				q := s.db.WithContext(ctx).
@@ -274,6 +305,9 @@ func (s *Store) Change(ctx context.Context, scope Scope, fn func(*Group) error) 
 					if s.OnStatus != nil &&
 						(parentMessageID != g.ParentMessageID || !reflect.DeepEqual(before, after)) {
 						s.OnStatus(context.WithoutCancel(ctx), g)
+					}
+					if forceClose {
+						return ErrHistoryLimit
 					}
 					return nil
 				}

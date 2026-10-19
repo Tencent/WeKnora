@@ -138,6 +138,13 @@ func (b *Binding) End(suspended bool) {
 		)
 		return
 	}
+	// A turn that never delegated has nothing to cancel. Completing it keeps
+	// idle children from earlier turns addressable by the next human turn.
+	if delegated, err := b.HasDelegatedWork(ctx); err == nil && !delegated {
+		if done, err := b.Runtime.Finish(b.Context(ctx), b.Scope, b.Seen); err == nil && done {
+			return
+		}
+	}
 	_ = b.Runtime.Cancel(b.Context(ctx), b.Scope)
 }
 
@@ -272,6 +279,20 @@ func (b *Binding) PendingAnswer(ctx context.Context) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// HasDelegatedWork reports whether this execution owns delegated work whose
+// failure must be propagated instead of replaced by a fallback answer. Every
+// child does; a parent does only after it has started a child in this turn.
+func (b *Binding) HasDelegatedWork(ctx context.Context) (bool, error) {
+	if b.Child != nil {
+		return true, nil
+	}
+	g, err := b.Runtime.Store.Read(ctx, b.Scope)
+	if err != nil {
+		return false, err
+	}
+	return currentTurnMemberCount(g) > 0 || g.NextSequence > 0, nil
 }
 
 // DeliveredEvents recovers input omitted by legacy parent snapshots without

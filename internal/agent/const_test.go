@@ -4,8 +4,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 )
+
+// A provider rejects a request for more output than the model can emit, so the
+// round budget and the history reserve both follow the model's limit.
+func TestCompletionBudgetFollowsModelOutputLimit(t *testing.T) {
+	cfg := &types.AgentConfig{}
+	assert.Equal(t, types.DefaultSmartReasoningMaxCompletionTokens, completionTokenBudgetFor(cfg))
+
+	cfg.ModelMaxOutputTokens = 8192
+	assert.Equal(t, 8192, completionTokenBudgetFor(cfg))
+	assert.Less(t, reserveTokensFor(cfg), types.DefaultSmartReasoningMaxCompletionTokens)
+
+	cfg.MaxCompletionTokens = 4096
+	assert.Equal(t, 4096, completionTokenBudgetFor(cfg), "a smaller configured budget is kept")
+	cfg.MaxCompletionTokens = 32000
+	assert.Equal(t, 8192, completionTokenBudgetFor(cfg), "an explicit budget cannot exceed the model")
+}
 
 func TestToolExecutionTimeout(t *testing.T) {
 	// shell_exec and browser human steps keep their longer budgets.

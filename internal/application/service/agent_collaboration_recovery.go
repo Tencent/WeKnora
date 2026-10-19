@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/collaboration"
 	"github.com/Tencent/WeKnora/internal/agent/hitl"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -179,9 +180,35 @@ func (s *AgentCollaboration) HandlesPrompt(ctx context.Context, p *types.AgentPr
 	if p == nil {
 		return false
 	}
-	session, err := s.sessions.GetSession(ctx, p.SessionID)
-	// A failed classification must never fall through to an unfenced HTTP resume.
+	var session *types.Session
+	var err error
+	for attempt := 1; ; attempt++ {
+		session, err = s.sessions.GetSession(ctx, p.SessionID)
+		if err == nil || errors.Is(err, apperrors.ErrSessionNotFound) || attempt == 3 {
+			break
+		}
+		if !sleepCtx(ctx, time.Duration(attempt)*100*time.Millisecond) {
+			break
+		}
+	}
+	if err != nil && !errors.Is(err, apperrors.ErrSessionNotFound) {
+		// A failed classification must never fall through to an unfenced HTTP
+		// resume, which can close the prompt; the prompt reaper retries it.
+		logger.Warnf(ctx, "Classify prompt %s for resume: %v", p.ID, err)
+	}
 	return err != nil || session == nil || session.Kind == types.SessionKindAgentDelegated
+}
+
+// sleepCtx waits for d and reports false when ctx ends first.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
 }
 
 func (s *AgentCollaboration) resumeParent(ctx context.Context, b *collaboration.Binding, data []byte) error {

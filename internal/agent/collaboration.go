@@ -17,6 +17,17 @@ func (e *AgentEngine) SetCollaboration(b *collaboration.Binding) { e.collaborati
 // HasCollaboration reports whether this execution belongs to a collaboration.
 func (e *AgentEngine) HasCollaboration() bool { return e.collaboration != nil }
 
+// collaborationOwnsFailure reports whether a stalled or exhausted turn must fail
+// instead of producing the ordinary fallback answer. A parent that never
+// delegated keeps the ordinary behavior; an unreadable group fails closed.
+func (e *AgentEngine) collaborationOwnsFailure(ctx context.Context) bool {
+	if e.collaboration == nil {
+		return false
+	}
+	delegated, err := e.collaboration.HasDelegatedWork(context.WithoutCancel(ctx))
+	return err != nil || delegated
+}
+
 func appendCollaborationEvents(messages *[]chat.Message, events []collaboration.Event) {
 	for _, evt := range events {
 		*messages = append(*messages, chat.Message{Role: "assistant", Content: formatCollaborationEvent(evt)})

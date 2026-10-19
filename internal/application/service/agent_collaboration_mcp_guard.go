@@ -15,6 +15,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+const delegatedCallInProgressError = "A child task is already handling this call; wait for its result."
+
 // guardDelegatedMCPCall coordinates a parent's new call with approvals already
 // owned by its active children. It neither shares approval nor claims that an
 // approved tool succeeded. All checks are limited to this parent execution.
@@ -99,7 +101,7 @@ func (s *AgentCollaboration) guardDelegatedMCPCall(
 		}
 		return &types.ToolResult{
 			Success: false,
-			Error:   "子任务已在处理该调用，等待其结果",
+			Error:   delegatedCallInProgressError,
 			Data: map[string]interface{}{
 				"code": "delegated_call_in_progress", "task_name": m.Name,
 				"run_id": r.ID, "status": r.State,

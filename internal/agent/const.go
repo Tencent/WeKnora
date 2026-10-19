@@ -207,11 +207,18 @@ func (e *AgentEngine) getCompletionTokenBudget() int {
 func completionTokenBudgetFor(cfg *types.AgentConfig) int {
 	configured := 0
 	sandboxID := ""
+	modelLimit := 0
 	if cfg != nil {
 		configured = cfg.MaxCompletionTokens
 		sandboxID = cfg.SandboxConfigID
+		modelLimit = cfg.ModelMaxOutputTokens
 	}
-	return types.AgentRoundMaxCompletionTokensFor(configured, sandboxID)
+	budget := types.AgentRoundMaxCompletionTokensFor(configured, sandboxID)
+	// Providers reject a request for more output than the model can emit.
+	if modelLimit > 0 {
+		budget = min(budget, modelLimit)
+	}
+	return budget
 }
 
 // contextReserveTokens is the part of the window that history may not occupy,

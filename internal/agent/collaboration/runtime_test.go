@@ -626,8 +626,20 @@ func TestConcurrentMixedOutcomesDrainQueueAndDeliverEachRunOnce(t *testing.T) {
 	}
 	for i, m := range g.Members {
 		require.Equal(t, want[i], current(m).State, m.Name)
+		require.Empty(t, current(m).Result.Answer, "the published event is the only answer copy")
+	}
+	answers := map[string]string{}
+	for _, e := range g.Events {
+		var payload struct {
+			Result Result `json:"result"`
+		}
+		if e.Kind == "succeeded" && json.Unmarshal([]byte(e.Content), &payload) == nil {
+			answers[e.From] = payload.Result.Answer
+		}
+	}
+	for i, m := range g.Members {
 		if want[i] == "succeeded" {
-			require.Equal(t, "result:"+m.Name, current(m).Result.Answer)
+			require.Equal(t, "result:"+m.Name, answers[m.Name])
 		}
 	}
 	parent := &Binding{Runtime: r1, Scope: scope}

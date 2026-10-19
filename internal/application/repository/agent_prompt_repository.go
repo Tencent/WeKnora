@@ -160,6 +160,25 @@ func (r *AgentPromptRepository) ListBySession(
 	return rows, nil
 }
 
+// ListByMessages returns the session's rows in one of statuses raised by one
+// of the assistant messages.
+func (r *AgentPromptRepository) ListByMessages(
+	ctx context.Context, sessionID string, messageIDs, statuses []string,
+) ([]*types.AgentPrompt, error) {
+	var rows []*types.AgentPrompt
+	if len(messageIDs) == 0 {
+		return rows, nil
+	}
+	err := r.db.WithContext(ctx).
+		Where("session_id = ? AND assistant_message_id IN ? AND status IN ?", sessionID, messageIDs, statuses).
+		Order("created_at").
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("list message agent prompts: %w", err)
+	}
+	return rows, nil
+}
+
 // AgentRunSuspensionRepository implements interfaces.AgentRunSuspensionRepository.
 type AgentRunSuspensionRepository struct {
 	db *gorm.DB

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -24,11 +25,24 @@ const (
 	uncertainExecutionError    = "child prompt closed or execution outcome uncertain; not replayed"
 )
 
+// touchDeadline extends the horizon in coarse steps. Every extension rewrites
+// the whole aggregate, so per-heartbeat extensions would multiply writes.
 func touchDeadline(g *Group, now time.Time) {
 	until := now.Add(collaborationHorizon)
-	if g.Deadline.Before(until) {
+	if g.Deadline.Before(until.Add(-collaborationHorizon / 10)) {
 		g.Deadline = until
 	}
+}
+
+// heartbeatInterval is how often an owner checks for cancellation. Checks read
+// the aggregate; renewals write it only when renewalDue.
+func (r *Runtime) heartbeatInterval() time.Duration {
+	return min(max(r.Poll, time.Second), r.Lease/3)
+}
+
+// renewalDue reports whether a lease has used a third of its duration.
+func (r *Runtime) renewalDue(lease, now time.Time) bool {
+	return lease.Sub(now) < r.Lease*2/3
 }
 
 // promptClosedBeforeExecution reports a prompt that ended while the tool had
@@ -59,18 +73,28 @@ type Runtime struct {
 	WakeParent  func(context.Context, *Binding, []byte) error
 	Reconcile   func(context.Context, Scope) error
 	ParentInput func(context.Context, Scope, string) (bool, error)
-	Poll        time.Duration
-	Lease       time.Duration
+	// Prune bounds durable storage; it runs every PruneInterval.
+	Prune         func(context.Context) error
+	PruneInterval time.Duration
+	Poll          time.Duration
+	Lease         time.Duration
+	// Concurrency bounds running children per group; MaxRunning bounds the
+	// child executions this process runs across all groups.
 	Concurrency int
+	MaxRunning  int
 	mu          sync.Mutex
 	cancel      context.CancelFunc
 	done        chan struct{}
 	workers     sync.WaitGroup
+	running     atomic.Int64
 }
 
 // New constructs a runtime with bounded concurrency and lease defaults.
 func New(store *Store, run Runner) *Runtime {
-	return &Runtime{Store: store, Run: run, Poll: 250 * time.Millisecond, Lease: 30 * time.Second, Concurrency: 3}
+	return &Runtime{
+		Store: store, Run: run, Poll: 250 * time.Millisecond, Lease: 30 * time.Second,
+		Concurrency: 3, MaxRunning: 32, PruneInterval: 10 * time.Minute,
+	}
 }
 
 // Spawn idempotently enqueues a new child task in the parent group.
@@ -221,22 +245,71 @@ func (r *Runtime) cancelMessage(ctx context.Context, s Scope, messageID string) 
 		if g.Status == "completed" || g.Status == "cancelled" {
 			return nil
 		}
-		g.Status = "cancelling"
-		g.ParentWait = nil
-		for _, m := range g.Members {
-			v := current(m)
-			if active(v) {
-				v.CancelRequested = true
-				if v.State == "queued" || v.State == "waiting" {
-					v.State = "cancelled"
-					publish(g, m, v)
-				}
-			}
-			m.Mail = nil
-		}
-		settle(g)
+		cancelGroup(g)
 		return nil
 	})
+}
+
+func cancelGroup(g *Group) {
+	g.Status = "cancelling"
+	g.ParentWait = nil
+	for _, m := range g.Members {
+		v := current(m)
+		if active(v) {
+			v.CancelRequested = true
+			if v.State == "queued" || v.State == "waiting" {
+				v.State = "cancelled"
+				publish(g, m, v)
+			}
+		}
+		m.Mail = nil
+	}
+	settle(g)
+}
+
+// Compact drops bulky history from a terminal group.
+func (r *Runtime) Compact(ctx context.Context, s Scope) error {
+	return r.Store.Change(ctx, s, func(g *Group) error {
+		if g.Status != "completed" && g.Status != "cancelled" {
+			return nil
+		}
+		compactClosed(g)
+		return nil
+	})
+}
+
+func closeForHistoryLimit(g *Group) {
+	if g.Status == "active" {
+		cancelGroup(g)
+	}
+}
+
+// compactedResult keeps FINAL_ANSWER envelopes decodable after compaction.
+const compactedResult = `{"result":{"error":"collaboration history limit reached; ` +
+	`the complete result is in the child conversation"}}`
+
+// compactClosed drops bulky history from a group that no longer runs model
+// turns. Child conversations retain the complete transcripts.
+func compactClosed(g *Group) {
+	g.ParentWait = nil
+	for _, m := range g.Members {
+		m.Mail = nil
+		for _, v := range m.Runs {
+			v.Result.Answer, v.Result.Evidence = "", ""
+			v.Query = truncate(v.Query, 2000)
+		}
+	}
+	for i := range g.Events {
+		e := &g.Events[i]
+		if len(e.Content) <= 4096 {
+			continue
+		}
+		if strings.HasPrefix(e.Content, `{"result"`) {
+			e.Content = compactedResult
+		} else {
+			e.Content = truncate(e.Content, 2000)
+		}
+	}
 }
 
 func settle(g *Group) {
@@ -378,8 +451,15 @@ func (r *Runtime) Start(ctx context.Context) {
 		defer close(r.done)
 		tick := time.NewTicker(r.Poll)
 		defer tick.Stop()
+		var lastPrune time.Time
 		for {
 			r.Tick(ctx)
+			if r.Prune != nil && r.PruneInterval > 0 && time.Since(lastPrune) >= r.PruneInterval {
+				lastPrune = time.Now()
+				if err := r.Prune(ctx); err != nil && ctx.Err() == nil {
+					logger.Warnf(ctx, "Collaboration prune failed: %v", err)
+				}
+			}
 			select {
 			case <-ctx.Done():
 				r.workers.Wait()
@@ -425,6 +505,10 @@ func (r *Runtime) Tick(ctx context.Context) {
 			}
 		}
 		r.wakeParent(ctx, s)
+		capacity := -1
+		if r.MaxRunning > 0 {
+			capacity = max(r.MaxRunning-int(r.running.Load()), 0)
+		}
 		var work []Work
 		err = r.Store.Change(ctx, s, func(g *Group) error {
 			work = nil
@@ -463,7 +547,7 @@ func (r *Runtime) Tick(ctx context.Context) {
 					publish(g, m, v)
 					continue
 				}
-				if running >= r.Concurrency {
+				if running >= r.Concurrency || len(work) == capacity {
 					continue
 				}
 				v.State = "running"
@@ -485,7 +569,12 @@ func (r *Runtime) Tick(ctx context.Context) {
 		}
 		for _, w := range work {
 			r.workers.Add(1)
-			go func() { defer r.workers.Done(); r.execute(ctx, w) }()
+			r.running.Add(1)
+			go func() {
+				defer r.workers.Done()
+				defer r.running.Add(-1)
+				r.execute(ctx, w)
+			}()
 		}
 	}
 }
@@ -497,8 +586,9 @@ func (r *Runtime) execute(serverCtx context.Context, w Work) {
 	stopHeartbeat := make(chan struct{})
 	go func() {
 		defer close(heartbeatDone)
-		tick := time.NewTicker(min(r.Poll, r.Lease/3))
+		tick := time.NewTicker(r.heartbeatInterval())
 		defer tick.Stop()
+		lease := w.Run.Lease
 		for {
 			select {
 			case <-stopHeartbeat:
@@ -520,10 +610,18 @@ func (r *Runtime) execute(serverCtx context.Context, w Work) {
 						stop = true
 					}
 					now := time.Now()
-					v.Lease = now.Add(r.Lease)
-					touchDeadline(g, now)
+					if r.renewalDue(v.Lease, now) {
+						v.Lease = now.Add(r.Lease)
+						touchDeadline(g, now)
+					}
+					lease = v.Lease
 					return nil
 				})
+				// A transient store error is retried while the lease still fences
+				// this owner; fencing errors and cancellation stop the run.
+				if err != nil && !isFenceError(err) && time.Now().Before(lease) && ctx.Err() == nil {
+					continue
+				}
 				if err != nil || stop {
 					cancel()
 					return
@@ -585,6 +683,9 @@ func (r *Runtime) execute(serverCtx context.Context, w Work) {
 			}
 		}
 		publish(g, m, v)
+		// The published event is the only reader of the answer; the complete text
+		// also stays in the child conversation. Do not store it twice.
+		v.Result.Answer = ""
 		// A followup accepted at the finishing boundary must have a consumer.
 		var followups []string
 		for _, mail := range m.Mail {

@@ -718,6 +718,61 @@ func TestCollaborationResumeCollectsAllChildrenWithoutToolReplay(t *testing.T) {
 	require.Equal(t, "completed", g.Status)
 }
 
+// Every signed-in reasoning turn is bound to a collaboration. A turn that never
+// delegated must keep the ordinary fallbacks instead of failing.
+func TestCollaborationParentWithoutChildrenKeepsFallbacks(t *testing.T) {
+	for _, mode := range []string{"empty", "repeated_truncation", "max_iterations"} {
+		t.Run(mode, func(t *testing.T) {
+			r, b := engineCollaboration(t)
+			owned, err := r.AcquireParent(t.Context(), b.Scope)
+			require.NoError(t, err)
+			model := &mockChat{}
+			rounds := 8
+			if mode == "max_iterations" {
+				rounds = 2
+			}
+			for range rounds {
+				response := types.StreamResponse{
+					ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: "stop",
+				}
+				switch mode {
+				case "repeated_truncation":
+					response.FinishReason = "length"
+					response.ToolCalls = []types.LLMToolCall{{
+						ID: "cut-off", Type: "function",
+						Function: types.FunctionCall{Name: "write", Arguments: `{"unfinished":`},
+					}}
+				case "max_iterations":
+					response.FinishReason = "tool_calls"
+					response.ToolCalls = []types.LLMToolCall{{
+						ID: "call", Type: "function",
+						Function: types.FunctionCall{Name: "missing_tool", Arguments: `{}`},
+					}}
+				}
+				model.responses = append(model.responses, mockResponse{chunks: []types.StreamResponse{response}})
+			}
+			model.responses = append(model.responses, mockResponse{chunks: []types.StreamResponse{{
+				ResponseType: types.ResponseTypeAnswer, Content: "summary", Done: true, FinishReason: "stop",
+			}}})
+			engine := newTestEngine(t, model)
+			engine.toolRegistry = agenttools.NewToolRegistry()
+			engine.config.MaxIterations = 10
+			if mode == "max_iterations" {
+				engine.config.MaxIterations = 2
+			}
+			engine.SetCollaboration(owned)
+			state := &types.AgentState{}
+			_, err = engine.executeLoop(t.Context(), state, "task", nil, nil, "s", "m")
+			require.NoError(t, err)
+			require.NotEmpty(t, state.FinalAnswer, "the ordinary fallback answer is produced")
+			g, err := r.Store.Read(t.Context(), b.Scope)
+			require.NoError(t, err)
+			require.Equal(t, "completed", g.Status,
+				"a turn without delegated work does not leave a cancellation barrier")
+		})
+	}
+}
+
 func TestCollaborationStalledParentCannotPublishSuccess(t *testing.T) {
 	for _, mode := range []string{"empty", "repeated_response", "repeated_truncation"} {
 		t.Run(mode, func(t *testing.T) {

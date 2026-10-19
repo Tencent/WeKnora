@@ -62,11 +62,11 @@ func NewMessageHandler(
 // prompts raised for the caller are shown; the messages themselves were
 // already scoped to the caller's session.
 func (h *MessageHandler) attachPendingPrompts(ctx context.Context, sessionID string, messages []*types.Message) {
+	ids := make([]string, 0, len(messages))
+	for _, m := range messages {
+		ids = append(ids, m.ID)
+	}
 	if h.CollaborationStatuses != nil {
-		ids := make([]string, 0, len(messages))
-		for _, m := range messages {
-			ids = append(ids, m.ID)
-		}
 		if rows, err := h.CollaborationStatuses(ctx, sessionID, ids); err == nil {
 			for _, m := range messages {
 				m.CollaborationStatus = rows[m.ID]
@@ -83,7 +83,16 @@ func (h *MessageHandler) attachPendingPrompts(ctx context.Context, sessionID str
 	if h.Prompts == nil {
 		return
 	}
-	rows, err := h.Prompts.ListBySession(ctx, sessionID, types.AgentPromptHistoryStatuses)
+	var rows []*types.AgentPrompt
+	var err error
+	// Load only the prompts of this page; history covers every prompt status.
+	if byPage, ok := h.Prompts.(interface {
+		ListByMessages(context.Context, string, []string, []string) ([]*types.AgentPrompt, error)
+	}); ok {
+		rows, err = byPage.ListByMessages(ctx, sessionID, ids, types.AgentPromptHistoryStatuses)
+	} else {
+		rows, err = h.Prompts.ListBySession(ctx, sessionID, types.AgentPromptHistoryStatuses)
+	}
 	if err != nil {
 		logger.Warnf(ctx, "list prompts of session %s: %v", sessionID, err)
 		return

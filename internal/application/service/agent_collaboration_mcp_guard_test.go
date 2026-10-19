@@ -135,7 +135,7 @@ func TestCollaborationMCPGuardOnlyMatchesOwnedActiveCall(t *testing.T) {
 			require.False(t, result.Success)
 			require.Nil(t, result.Suspend)
 			require.Equal(t, "delegated_call_in_progress", result.Data["code"])
-			require.Equal(t, "子任务已在处理该调用，等待其结果", result.Error)
+			require.Equal(t, delegatedCallInProgressError, result.Error)
 			rows, err := s.broker.Store().
 				ListBySession(ctx, scope.SessionID, []string{types.AgentPromptPending, types.AgentPromptSuspended})
 			require.NoError(t, err)

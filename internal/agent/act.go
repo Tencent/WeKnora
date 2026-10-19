@@ -611,7 +611,7 @@ func (e *AgentEngine) runToolCallAnswered(
 		// so MCP tool human-approval (issue #1173) can legitimately block longer.
 		ApprovalCtx: toolCtx,
 		ExecTimeout: execTimeout,
-		Snapshot:    e.snapshotFunc(i),
+		Snapshot:    e.snapshotFunc(i, tc.Function.Name),
 		Answered:    answered,
 		Interactive: e.interactive,
 	})

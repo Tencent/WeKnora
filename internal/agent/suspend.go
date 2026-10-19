@@ -192,10 +192,16 @@ func (e *AgentEngine) recordCall(i int, call types.ToolCall) {
 	}
 }
 
+// RestrictSuspensionToCollaboration keeps durable collaboration waits while
+// prompts raised by ordinary tools block in-process, as the operator configured.
+func (e *AgentEngine) RestrictSuspensionToCollaboration() {
+	e.collaborationOnlySuspension = true
+}
+
 // snapshotFunc returns the ToolExecContext.Snapshot hook for call i, or nil
-// when this run cannot be suspended.
-func (e *AgentEngine) snapshotFunc(i int) func() ([]byte, int, error) {
-	if !e.suspendable {
+// when this call cannot suspend the run.
+func (e *AgentEngine) snapshotFunc(i int, toolName string) func() ([]byte, int, error) {
+	if !e.suspendable || (e.collaborationOnlySuspension && toolName != "wait_agent") {
 		return nil
 	}
 	return func() ([]byte, int, error) {
