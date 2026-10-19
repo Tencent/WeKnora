@@ -95,7 +95,7 @@
             <span class="kb-folder-row__trailing">
               <span class="kb-folder-row__count"
                 :title="t('knowledgeBase.folderTree.countHint', { direct: row.documentCount, total: row.totalCount })">
-                {{ row.documentCount }}
+                {{ row.totalCount }}
               </span>
               <t-popup
                 v-if="canEdit && row.kind === 'folder'"

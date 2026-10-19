@@ -238,17 +238,25 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 		if config.Service.URL == nil || *config.Service.URL == "" {
 			return nil, fmt.Errorf("URL is required for SSE transport")
 		}
+		// SSE keeps its GET response body open for the connection lifetime.
+		// OAuth retains the bounded HTTP client; SSE bounds startup and RPCs
+		// separately without putting an expiration on the event stream.
+		sseHTTPClient := *httpClient
+		sseHTTPClient.Timeout = 0
 		options := []transport.ClientOption{
-			transport.WithHTTPClient(httpClient),
+			transport.WithHTTPClient(&sseHTTPClient),
 			transport.WithHeaders(headers),
+			transport.WithEndpointTimeout(timeout),
+			transport.WithResponseTimeout(timeout),
 		}
 		if useOAuth {
 			options = append(options, transport.WithOAuth(oauthConfig))
 		}
-		connection, err = transport.NewSSE(*config.Service.URL, options...)
+		sse, err := transport.NewSSE(*config.Service.URL, options...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create SSE client: %w", err)
 		}
+		connection = &boundedSSEConnection{SSE: sse, timeout: timeout}
 	case types.MCPTransportHTTPStreamable:
 		if config.Service.URL == nil || *config.Service.URL == "" {
 			return nil, fmt.Errorf("URL is required for HTTP Streamable transport")
@@ -818,11 +826,22 @@ func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string
 		}
 	}
 
+	var callErr error
 	result, err := oauthCall(ctx, c, func() (*mcp.CallToolResult, error) {
-		return c.client.CallTool(ctx, req)
+		result, err := c.client.CallTool(ctx, req)
+		callErr = err
+		return result, err
 	})
 	if err != nil {
 		c.checkErrorAndDisconnectIfNeeded(err)
+		// Inspect the actual call error, not a preflight/refresh error from
+		// oauthCall. A rejected authorization did not execute the tool.
+		if callErr != nil && !IsToolCallRetrySafe(callErr) {
+			return nil, fmt.Errorf(
+				"%w; it may already have completed. Verify the remote outcome before retrying: %w",
+				ErrToolCallOutcomeUnknown, err,
+			)
+		}
 		return nil, fmt.Errorf("failed to call tool: %w", err)
 	}
 

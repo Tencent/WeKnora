@@ -1607,7 +1607,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
               </template>
             </t-button>
             <t-button v-if="details.id" class="header-action-btn" size="small" variant="text" shape="square"
-              theme="default" :title="$t('assistant.askAboutDocument')" @click="assistant.open()">
+              theme="default" :title="$t('assistant.askAboutDocument', { name: assistant.displayName || $t('assistant.title') })" @click="assistant.open()">
               <template #icon>
                 <t-icon name="compass" size="16px" />
               </template>
@@ -3263,6 +3263,8 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
   bottom: 0;
   width: 12px;
   margin-left: -6px;
+  // Its inline right is the drawer width; a docked assistant panel adds to it.
+  margin-right: var(--assistant-dock-width, 0px);
   cursor: col-resize;
   z-index: 2001;
   display: flex;
@@ -3297,6 +3299,8 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
   bottom: 0;
   width: 12px;
   margin-left: -6px;
+  // Its inline right is the drawer width; a docked assistant panel adds to it.
+  margin-right: var(--assistant-dock-width, 0px);
   cursor: col-resize;
   z-index: 2101;
   display: flex;

@@ -333,8 +333,9 @@ func (c *notionClient) GetBlockChildrenAll(ctx context.Context, blockID string) 
 func (c *notionClient) getBlockChildrenRecursive(ctx context.Context, blockID string, depth int) ([]notionBlock, error) {
 	var allBlocks []notionBlock
 	var startCursor string
+	seenCursors := make(map[string]struct{})
 
-	for {
+	for page := 1; ; page++ {
 		path := fmt.Sprintf("/v1/blocks/%s/children", blockID)
 		if startCursor != "" {
 			path += "?start_cursor=" + startCursor
@@ -376,7 +377,14 @@ func (c *notionClient) getBlockChildrenRecursive(ctx context.Context, blockID st
 		if len(allBlocks) >= maxBlocksPerPage || !resp.HasMore || resp.NextCursor == "" {
 			break
 		}
-		startCursor = resp.NextCursor
+		// maxBlocksPerPage counts appended blocks, so an empty page carrying
+		// has_more=true never reaches it. Guard the cursor itself as well: a
+		// repeated one would otherwise be requested forever.
+		next, err := advancePaginationCursor(ctx, seenCursors, resp.NextCursor, page)
+		if err != nil {
+			return nil, fmt.Errorf("get block children for %s: %w", blockID, err)
+		}
+		startCursor = next
 	}
 
 	if depth >= maxBlockDepth {

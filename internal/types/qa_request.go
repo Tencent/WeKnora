@@ -62,16 +62,106 @@ type QuestionOrigin struct {
 // MaxPageContextIssues bounds how many Wiki issues one page context names.
 const MaxPageContextIssues = 20
 
-// PageContext is the WeKnora page the user has open while asking: a
-// knowledge base, optionally a document, a Wiki page or Wiki issues in it.
-// It tells the agent what "this" refers to. Like QuestionOrigin it is only a
-// hint inside the turn's resolved scope: anything outside the search targets
-// is dropped, never added to them.
+// Page identifiers a client may report in PageContext.Page.
+const (
+	PageKnowledgeBase = "knowledge_base"
+	PageWiki          = "wiki"
+	PageAgentEditor   = "agent_editor"
+	PageModelSettings = "settings_models"
+	PageMCPServices   = "mcp_services"
+	PageChat          = "chat"
+)
+
+var pageContextPages = map[string]struct{}{
+	PageKnowledgeBase: {}, PageWiki: {}, PageAgentEditor: {},
+	PageModelSettings: {}, PageMCPServices: {}, PageChat: {},
+}
+
+// IsPageContextPage reports whether page is a known page identifier.
+func IsPageContextPage(page string) bool {
+	_, ok := pageContextPages[page]
+	return ok
+}
+
+// IsPageContextSection reports whether section looks like a UI section key
+// such as "tools" or "knowledge": lowercase words joined by '_' or '-'.
+func IsPageContextSection(section string) bool {
+	if section == "" || len(section) > 32 || section[0] < 'a' || section[0] > 'z' {
+		return false
+	}
+	for _, r := range section {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+// PageContext identifies the open page. Knowledge-base resources must be in
+// the resolved search targets; agents are checked independently in the current tenant.
+// Models, MCP services and chat messages are resolved for the assistant only:
+// the first two in the current tenant, messages through the caller's session read access.
 type PageContext struct {
-	KnowledgeBaseID string   `json:"knowledge_base_id"`
+	Page            string   `json:"page,omitempty"`
+	Section         string   `json:"section,omitempty"` // part of the page in view, e.g. an editor tab
+	AgentID         string   `json:"agent_id,omitempty"`
+	KnowledgeBaseID string   `json:"knowledge_base_id,omitempty"`
 	KnowledgeID     string   `json:"knowledge_id,omitempty"`
 	WikiSlug        string   `json:"wiki_slug,omitempty"`
 	WikiIssueIDs    []string `json:"wiki_issue_ids,omitempty"`
+	ModelID         string   `json:"model_id,omitempty"`
+	MCPServiceID    string   `json:"mcp_service_id,omitempty"`
+	SessionID       string   `json:"session_id,omitempty"`
+	MessageID       string   `json:"message_id,omitempty"`
+	// Title is the page's name as the client's navigation shows it, e.g.
+	// "Agents"; it names pages without an identifier. Assistant only.
+	Title string `json:"title,omitempty"`
+	// View is the title of the dialog or drawer open over the page, as the
+	// page shows it. Assistant only.
+	View string `json:"view,omitempty"`
+	// Selection is the text the user selected on the page. Assistant only.
+	Selection *PageSelection `json:"selection,omitempty"`
+}
+
+// Bounds on the view and selection a page context carries.
+const (
+	PageViewMaxRunes           = 120
+	PageSelectionMaxRunes      = 4000
+	PageSelectionFieldMaxRunes = 200
+)
+
+// PageSelection is text the user selected on the page: in a text field
+// (Field, Ref and the lines are set) or in the page's text.
+type PageSelection struct {
+	Text      string `json:"text"`
+	Field     string `json:"field,omitempty"`      // the field's label
+	Ref       string `json:"ref,omitempty"`        // the field's read_page ref
+	StartLine int    `json:"start_line,omitempty"` // 1-based, multi-line fields only
+	EndLine   int    `json:"end_line,omitempty"`
+}
+
+// Normalize trims and bounds a client-sent selection; nil when nothing is left.
+func (s *PageSelection) Normalize() *PageSelection {
+	if s == nil {
+		return nil
+	}
+	text := truncateRunes(s.Text, PageSelectionMaxRunes)
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	out := &PageSelection{Text: text, Field: truncateRunes(strings.TrimSpace(s.Field), PageSelectionFieldMaxRunes)}
+	if pageRefRE.MatchString(s.Ref) {
+		out.Ref = s.Ref
+	}
+	if s.StartLine > 0 && s.EndLine >= s.StartLine {
+		out.StartLine, out.EndLine = s.StartLine, s.EndLine
+	}
+	return out
+}
+
+// NormalizePageView trims and bounds a client-sent page or view title.
+func NormalizePageView(view string) string {
+	return truncateRunes(strings.Join(strings.Fields(view), " "), PageViewMaxRunes)
 }
 
 // QARequest consolidates all parameters for KnowledgeQA and AgentQA service calls,
@@ -99,6 +189,9 @@ type QARequest struct {
 	Attachments         MessageAttachments // File attachments (processed and ready for prompt injection)
 	QuestionOrigin      *QuestionOrigin    // Source of a picked suggested question; a retrieval hint only
 	PageContext         *PageContext       // Page the user has open; a hint inside the resolved scope only
+	// AssistantAccess is the access level the user picked for the WeKnora
+	// assistant; the workspace ceiling still caps it. Ignored by other agents.
+	AssistantAccess AssistantAccessLevel
 	// SteerSink, when set, enables mid-run message injection for this run:
 	// the engine drains user-appended messages at every round boundary and
 	// persists accepted ones through this sink. A structural interface so

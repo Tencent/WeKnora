@@ -40,6 +40,12 @@ type Decision struct {
 	Reason          string
 	TimedOut        bool
 	ContextCanceled bool
+	// AllowInSession, on approval, also allows later calls with the same
+	// grant in the session.
+	AllowInSession bool
+	// Granted marks an approval given earlier in the session: no prompt was
+	// raised, so there is no PendingID.
+	Granted bool
 	// Suspended is set when no decision arrived during the in-memory wait
 	// and the prompt now outlives the run; the call must not execute.
 	Suspended *types.PromptSuspension
@@ -60,6 +66,10 @@ type PendingRequest struct {
 	Description        string
 	Args               json.RawMessage
 	ToolCallID         string
+	// Grant, when set, lets the user allow calls with the same grant for the
+	// rest of the session; see types.ToolApprovalPromptRequest.
+	Grant      string
+	GrantScope string
 	// Snapshot, when set, is the run state to resume from: the wait is cut
 	// to the hot-wait window and then suspends instead of timing out.
 	Snapshot        []byte
@@ -140,6 +150,10 @@ var (
 	ErrInvalidDecision = hitl.ErrInvalidResponse
 )
 
+// UnattendedApprovalReason is the refusal of a tool approval raised in a run
+// nobody watches (types.WithUnattendedRun).
+const UnattendedApprovalReason = "it needs the user's approval, which nobody can give in this run"
+
 // NewGate builds a gate. checker may be nil (disables gating). cfg may be nil
 // (defaults apply). broker may be nil (process-local prompts, single replica).
 func NewGate(cfg *config.Config, checker Checker, broker *hitl.Broker) *Gate {
@@ -157,6 +171,7 @@ func NewGate(cfg *config.Config, checker Checker, broker *hitl.Broker) *Gate {
 	broker.RegisterKind(types.AgentPromptKindToolApproval, validateToolApprovalResponse)
 	broker.RegisterKind(types.AgentPromptKindMCPOAuth, validateMCPOAuthResponse)
 	broker.RegisterKind(types.AgentPromptKindAskUser, types.ValidateAskUserResponse)
+	broker.RegisterKind(types.AgentPromptKindPageAction, types.ValidatePageActionResponse)
 	// Default fail-close: if the checker errors, require approval (safer for a
 	// HITL feature). Set WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN=true to revert.
 	failClose := !strings.EqualFold(strings.TrimSpace(os.Getenv("WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN")), "true")
@@ -216,10 +231,58 @@ func (g *Gate) RequestBuiltinApproval(ctx context.Context, req PendingRequest) (
 	if g == nil || g.broker == nil {
 		return Decision{}, fmt.Errorf("tool approval is not available")
 	}
+	if g.allowedInSession(ctx, req) {
+		return Decision{Approved: true, Granted: true}, nil
+	}
 	return g.awaitToolApproval(ctx, req)
 }
 
+// offeredGrantScope is the scope the card offers to allow, which needs both
+// a grant to match later calls and a description for the user.
+func offeredGrantScope(req PendingRequest) string {
+	if req.Grant == "" {
+		return ""
+	}
+	return req.GrantScope
+}
+
+// grantedStatuses are the states of an approved prompt whose call ran or is
+// running.
+var grantedStatuses = []string{types.AgentPromptExecuting, types.AgentPromptDone}
+
+// allowedInSession reports whether the user already approved a call with
+// req's grant in this session and chose to allow the rest. Only the same
+// owner's approvals count, and any lookup failure asks again.
+func (g *Gate) allowedInSession(ctx context.Context, req PendingRequest) bool {
+	if req.Grant == "" || req.SessionID == "" || req.UserID == "" || req.TenantID == 0 {
+		return false
+	}
+	prompts, err := g.broker.SessionPrompts(ctx, req.SessionID, grantedStatuses)
+	if err != nil {
+		logger.Warnf(ctx, "tool approval: read session grants: %v", err)
+		return false
+	}
+	for _, p := range prompts {
+		if p.Kind != types.AgentPromptKindToolApproval || p.TenantID != req.TenantID || p.UserID != req.UserID {
+			continue
+		}
+		var request types.ToolApprovalPromptRequest
+		var response types.ToolApprovalPromptResponse
+		if json.Unmarshal(p.Request, &request) != nil || request.Grant != req.Grant ||
+			json.Unmarshal(p.Response, &response) != nil {
+			continue
+		}
+		if response.Approved && response.AllowInSession {
+			return true
+		}
+	}
+	return false
+}
+
 func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decision, error) {
+	if types.IsUnattendedRun(ctx) {
+		return Decision{Reason: UnattendedApprovalReason}, nil
+	}
 	if req.EventBus == nil {
 		return Decision{}, fmt.Errorf("tool approval: EventBus is nil")
 	}
@@ -231,6 +294,8 @@ func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decis
 		RegisteredToolName: req.RegisteredToolName,
 		Description:        req.Description,
 		Args:               req.Args,
+		Grant:              req.Grant,
+		GrantScope:         offeredGrantScope(req),
 	})
 	if err != nil {
 		return Decision{}, fmt.Errorf("encode tool approval: %w", err)
@@ -278,6 +343,7 @@ func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decis
 					Description:        req.Description,
 					Args:               argsObj,
 					ArgsJSON:           string(req.Args),
+					GrantScope:         offeredGrantScope(req),
 					TimeoutSeconds:     timeoutSec,
 					HotWaitSeconds:     timeoutSec,
 					Suspendable:        p.Suspendable,
@@ -506,6 +572,7 @@ func (g *Gate) ResolveForResume(ctx context.Context, req ResolveRequest) (hitl.R
 		r := types.ToolApprovalPromptResponse{Approved: req.Decision.Approved, Reason: req.Decision.Reason}
 		if r.Approved {
 			r.ModifiedArgs = req.Decision.ModifiedArgs
+			r.AllowInSession = req.Decision.AllowInSession
 		}
 		response = r
 	case types.AgentPromptKindMCPOAuth:
@@ -533,6 +600,7 @@ func (g *Gate) ResolveForResume(ctx context.Context, req ResolveRequest) (hitl.R
 var AnswerableKinds = map[string]bool{
 	types.AgentPromptKindAskUser:      true,
 	types.AgentPromptKindToolApproval: true,
+	types.AgentPromptKindPageAction:   true,
 }
 
 // ResolveResponse records a user's answer given as the kind's response
@@ -568,6 +636,7 @@ func toolApprovalDecision(out hitl.Outcome) Decision {
 	if r.Approved && len(r.ModifiedArgs) > 0 {
 		d.ModifiedArgs = r.ModifiedArgs
 	}
+	d.AllowInSession = r.Approved && r.AllowInSession
 	return d
 }
 
@@ -592,13 +661,14 @@ func oauthDecision(out hitl.Outcome) Decision {
 	return d
 }
 
-func validateToolApprovalResponse(_, response json.RawMessage) error {
+func validateToolApprovalResponse(request, response json.RawMessage) error {
 	// Strict decoding with a required "approved": a misspelled or missing
 	// field must not read as a rejection.
 	var r struct {
-		Approved     *bool           `json:"approved"`
-		ModifiedArgs json.RawMessage `json:"modified_args,omitempty"`
-		Reason       string          `json:"reason,omitempty"`
+		Approved       *bool           `json:"approved"`
+		ModifiedArgs   json.RawMessage `json:"modified_args,omitempty"`
+		Reason         string          `json:"reason,omitempty"`
+		AllowInSession bool            `json:"allow_in_session,omitempty"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(response))
 	dec.DisallowUnknownFields()
@@ -607,6 +677,15 @@ func validateToolApprovalResponse(_, response json.RawMessage) error {
 	}
 	if r.Approved == nil {
 		return errors.New(`"approved" is required`)
+	}
+	if r.AllowInSession {
+		if !*r.Approved {
+			return errors.New("allow_in_session is only allowed on approval")
+		}
+		var offered types.ToolApprovalPromptRequest
+		if json.Unmarshal(request, &offered) != nil || offered.Grant == "" || offered.GrantScope == "" {
+			return errors.New("this call cannot be allowed for the rest of the session")
+		}
 	}
 	trimmed := strings.TrimSpace(string(r.ModifiedArgs))
 	if trimmed == "" {

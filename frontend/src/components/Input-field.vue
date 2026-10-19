@@ -543,9 +543,15 @@ const props = defineProps({
     default: false
   },
   // Embedded only: the host owns the model choice (v-model:model-id) so the
-  // main chat's pick is neither read nor overwritten. '' lets the agent
-  // resolve its own model.
+  // main chat's pick is neither read nor overwritten. '' follows
+  // defaultModelId.
   modelId: {
+    type: String,
+    default: ''
+  },
+  // Embedded only: the model used while modelId is empty, normally the open
+  // knowledge base's chat model. Falls back to the first available model.
+  defaultModelId: {
     type: String,
     default: ''
   },
@@ -1117,12 +1123,18 @@ const selectedModel = computed(() => {
   return availableModels.value.find(model => model.id === selectedModelId.value);
 });
 
-// What the composer shows and sends. Embedded, a pick that is no longer
-// available falls back to auto instead of failing the run.
+// What the composer shows and sends. Embedded, an empty or no longer
+// available pick follows the default, which is resolved to a concrete model
+// here so the label always names the model that will answer.
 const EMBEDDED_AUTO_MODEL = '__auto__';
+const embeddedPickedModel = computed(() => props.modelId
+  ? availableModels.value.find(model => model.id === props.modelId) : undefined);
+const embeddedDefaultModel = computed(() =>
+  availableModels.value.find(model => model.id === props.defaultModelId) || availableModels.value[0]);
+const followsDefaultModel = computed(() => props.embeddedMode && !embeddedPickedModel.value);
 const composerModel = computed(() => {
   if (!props.embeddedMode) return selectedModel.value;
-  return props.modelId ? availableModels.value.find(model => model.id === props.modelId) : undefined;
+  return embeddedPickedModel.value || embeddedDefaultModel.value;
 });
 const composerModelId = computed(() => {
   if (!props.embeddedMode) return selectedModelId.value;
@@ -1154,8 +1166,7 @@ watch([selectedModel, reasoningLevels, () => settingsStore.reasoningEffortOverri
 // 模型展示名：本空间列表中有则用名称；若为共享智能体且其 model_id 不在本空间列表中则显示“共享智能体配置的模型”
 const selectedModelDisplayName = computed(() => {
   if (composerModel.value) return modelDisplayName(composerModel.value);
-  if (props.embeddedMode) return t('input.modelAuto');
-  if (!selectedModelId.value) return t('input.notConfigured');
+  if (!selectedModelId.value || props.embeddedMode) return t('input.notConfigured');
   const isSharedAgent = !!settingsStore.selectedAgentSourceTenantId;
   const modelFromAgent = agentModelId.value && agentModelId.value === selectedModelId.value;
   if (isSharedAgent && modelFromAgent) return t('input.sharedAgentModelLabel');
@@ -1164,7 +1175,7 @@ const selectedModelDisplayName = computed(() => {
 
 const modelTriggerTooltip = computed(() => {
   if (isModelLockedByAgent.value) return t('input.modelLockedByAgent');
-  if (props.embeddedMode && !composerModel.value) return t('input.modelAutoHint');
+  if (followsDefaultModel.value) return t('input.modelAutoHint');
   return '';
 });
 
@@ -2741,6 +2752,7 @@ onBeforeRouteUpdate((to, from, next) => {
 
 defineExpose({
   focusInput,
+  getComposerModelId: () => composerModelId.value,
   triggerSend(text: string, options: SendMessageOptions = {}) {
     if (!text.trim()) return;
     query.value = text;
@@ -2976,6 +2988,8 @@ defineExpose({
           </t-tooltip>
           </template>
 
+          <slot name="controls" />
+
           <!-- 模型显示 -->
           <t-tooltip :content="modelTriggerTooltip" :disabled="!modelTriggerTooltip">
             <div class="model-display" :class="{ 'agent-controlled': isModelLockedByAgent }">
@@ -2983,8 +2997,11 @@ defineExpose({
                 <span class="model-selector-name">
                   {{ selectedModelDisplayName }}
                 </span>
+                <span v-if="followsDefaultModel && composerModel" class="model-selector-default">
+                  {{ $t('input.modelAuto') }}
+                </span>
                 <span
-                  v-if="selectedModelContextLabel"
+                  v-else-if="selectedModelContextLabel"
                   class="model-selector-ctx"
                   :class="{ 'is-default': selectedModelContextIsDefault }"
                   :title="selectedModelContextTitle"
@@ -3037,19 +3054,22 @@ defineExpose({
                 </button>
               </div>
               <div class="model-selector-content">
-                <div v-if="embeddedMode" class="model-option" :class="{ selected: !composerModelId }"
+                <div v-if="embeddedMode && embeddedDefaultModel" class="model-option"
+                  :class="{ selected: followsDefaultModel }"
                   :title="$t('input.modelAutoHint')" @click="handleModelChange(EMBEDDED_AUTO_MODEL)">
                   <div class="model-option-left">
                     <div class="model-option-name-wrap">
-                      <span class="model-option-name">{{ $t('input.modelAuto') }}</span>
+                      <span class="model-option-name">{{ $t('input.modelFollowDefault') }}</span>
+                      <span class="model-option-raw-name">{{ modelDisplayName(embeddedDefaultModel) }}</span>
                     </div>
                   </div>
                   <span class="model-option-check">
-                    <t-icon v-if="!composerModelId" name="check" size="14px" />
+                    <t-icon v-if="followsDefaultModel" name="check" size="14px" />
                   </span>
                 </div>
                 <div v-for="model in availableModels" :key="model.id" class="model-option"
-                  :class="{ selected: model.id === composerModelId }" @click="handleModelChange(model.id || '')">
+                  :class="{ selected: !followsDefaultModel && model.id === composerModelId }"
+                  @click="handleModelChange(model.id || '')">
                   <div class="model-option-left">
                     <div class="model-option-name-wrap">
                       <span class="model-option-name">{{ modelDisplayName(model) }}</span>
@@ -3435,6 +3455,22 @@ const getImgSrc = (url: string) => {
 
   &.is-embedded {
     justify-content: flex-end;
+    flex-wrap: nowrap;
+
+    .control-left {
+      flex-wrap: nowrap;
+    }
+
+    // Let long model names shrink before the fixed controls wrap or move.
+    .model-display {
+      flex-shrink: 1;
+      min-width: 0;
+    }
+
+    .model-selector-trigger {
+      min-width: 0;
+      max-width: 100%;
+    }
   }
 }
 
@@ -3990,6 +4026,13 @@ const getImgSrc = (url: string) => {
   &.is-default {
     opacity: 0.85;
   }
+}
+
+.model-selector-default {
+  flex-shrink: 0;
+  font-size: var(--app-text-xs);
+  color: var(--td-text-color-placeholder);
+  font-weight: 400;
 }
 
 .model-dropdown-arrow {

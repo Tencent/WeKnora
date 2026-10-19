@@ -291,7 +291,7 @@ export async function revokeMCPOAuthToken(serviceId: string): Promise<void> {
 
 export async function resolveToolApproval(
   pendingId: string,
-  body: { decision: 'approve' | 'reject'; modified_args?: Record<string, unknown>; reason?: string }
+  body: { decision: 'approve' | 'reject'; modified_args?: Record<string, unknown>; reason?: string; allow_in_session?: boolean }
 ): Promise<{ resumed: boolean }> {
   const res: any = await post(`/api/v1/agent/tool-approvals/${encodeURIComponent(pendingId)}`, body)
   // resumed: the run had been suspended and now continues on the server;

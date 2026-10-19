@@ -89,7 +89,10 @@ async function openDocument(data: ArrayBuffer) {
   pdfjs = lib
   if (disposed) return
   // pdf.js takes ownership of the buffer; keep the caller's copy intact.
-  const task = lib.getDocument({ data: new Uint8Array(data.slice(0)) })
+  const task = lib.getDocument({
+    data: new Uint8Array(data.slice(0)),
+    wasmUrl: `${import.meta.env.BASE_URL}pdfjs/wasm/`,
+  })
   loadingTask = task
   const doc = await task.promise
   if (disposed) {
@@ -161,7 +164,12 @@ async function paintPage(
   entry.task = task
   try {
     await task.promise
-  } catch {
+  } catch (err) {
+    if (rendered.get(pageNumber) === entry) {
+      console.error('PDF page render failed:', err)
+      error.value = t('preview.loadFailed')
+      emit('error', error.value)
+    }
     return // cancelled by a newer render or unrender
   }
   if (rendered.get(pageNumber) !== entry) return

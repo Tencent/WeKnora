@@ -27,6 +27,10 @@ export interface CommandContext {
   close: () => void
 }
 
+function assistantName(t: Composer['t']): string {
+  return useAssistantStore().displayName || t('assistant.title')
+}
+
 /**
  * Build the flat command list. Commands are intentionally static — dynamic
  * entities (KBs / agents / sessions) live in their own result groups.
@@ -36,9 +40,9 @@ export function buildCommands(ctx: CommandContext): CmdkCommand[] {
   return [
     {
       id: 'open-assistant',
-      label: t('commandPalette.quick.assistant'),
+      label: t('commandPalette.quick.assistant', { name: assistantName(t) }),
       icon: 'compass',
-      keywords: ['assistant', 'help', 'weknora', '助手', '帮助', 'ассистент'],
+      keywords: ['assistant', 'help', 'weknora', 'kora', '助手', '帮助', 'ассистент', useAssistantStore().displayName].filter(Boolean),
       run: () => {
         close()
         useAssistantStore().open()

@@ -118,7 +118,7 @@ func (c *Client) Chat(ctx context.Context, messages []api.Message, opts *api.Opt
 		}
 	}
 	defer func() { _ = resp.body.Close() }()
-	raw, err := io.ReadAll(resp.body)
+	raw, err := api.ReadResponseCapped(resp.body, 0)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}

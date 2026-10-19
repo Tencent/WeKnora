@@ -61,6 +61,7 @@ class DocReaderConfig:
     odl_hybrid_mode: str
     odl_hybrid_fallback: bool
     odl_markdown_with_html: bool
+    html_main_content: bool
     pdf_render_max_workers: int
     pdf_render_parallelism: int
     pdf_render_dpi: int
@@ -98,6 +99,12 @@ def load_config() -> DocReaderConfig:
     odl_markdown_with_html = _get_bool(
         ["DOCREADER_ODL_MARKDOWN_WITH_HTML"], False
     )
+    # Index only the main content of an uploaded HTML file, the way the URL
+    # import path already does (trafilatura with a full-page fallback). It is
+    # off by default on purpose, so upgrading never changes what a knowledge
+    # base indexes for documents it already ingests: with it off every
+    # uploaded HTML file is converted in full, exactly as before.
+    html_main_content = _get_bool(["DOCREADER_HTML_MAIN_CONTENT"], False)
     pdf_render_max_workers = _get_int(["DOCREADER_PDF_RENDER_MAX_WORKERS"], 1)
     # Intra-document render parallelism: how many worker processes render the
     # scanned pages of a SINGLE PDF in parallel. pdfium is not thread-safe, so
@@ -140,6 +147,7 @@ def load_config() -> DocReaderConfig:
         odl_hybrid_mode=odl_hybrid_mode,
         odl_hybrid_fallback=odl_hybrid_fallback,
         odl_markdown_with_html=odl_markdown_with_html,
+        html_main_content=html_main_content,
         pdf_render_max_workers=pdf_render_max_workers,
         pdf_render_parallelism=pdf_render_parallelism,
         pdf_render_dpi=pdf_render_dpi,
@@ -168,6 +176,7 @@ def dump_config(mask_secrets: bool = True) -> Dict[str, Any]:
         "DOCREADER_ODL_HYBRID_MODE": cfg.odl_hybrid_mode,
         "DOCREADER_ODL_HYBRID_FALLBACK": cfg.odl_hybrid_fallback,
         "DOCREADER_ODL_MARKDOWN_WITH_HTML": cfg.odl_markdown_with_html,
+        "DOCREADER_HTML_MAIN_CONTENT": cfg.html_main_content,
         "DOCREADER_PDF_RENDER_MAX_WORKERS": cfg.pdf_render_max_workers,
         "DOCREADER_PDF_RENDER_PARALLELISM": cfg.pdf_render_parallelism,
         "DOCREADER_PDF_RENDER_DPI": cfg.pdf_render_dpi,

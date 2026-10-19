@@ -42,11 +42,11 @@ type ModelConcurrencyLimiter interface {
 // deliberately process-local: waiters block in application processes and are
 // not represented in Redis.
 type RuntimeStat struct {
-	ModelID string `json:"model_id"`
-	Name    string `json:"name"`
-	Active  int64  `json:"active"`
-	Waiting int64  `json:"waiting"`
-	Limit   int    `json:"limit"`
+	ModelID string `json:"model_id" extensions:"x-agent"`
+	Name    string `json:"name" extensions:"x-agent"`
+	Active  int64  `json:"active" extensions:"x-agent"`
+	Waiting int64  `json:"waiting" extensions:"x-agent"`
+	Limit   int    `json:"limit" extensions:"x-agent"`
 }
 
 type runtimeInspectable interface {

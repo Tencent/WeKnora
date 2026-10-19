@@ -19,9 +19,15 @@ func (l *langfuseVLM) GetModelName() string { return l.inner.GetModelName() }
 func (l *langfuseVLM) GetModelID() string   { return l.inner.GetModelID() }
 
 func (l *langfuseVLM) Predict(ctx context.Context, imgBytes [][]byte, prompt string) (string, error) {
+	return l.PredictWithOptions(ctx, imgBytes, prompt, nil)
+}
+
+func (l *langfuseVLM) PredictWithOptions(
+	ctx context.Context, imgBytes [][]byte, prompt string, opts *PredictOptions,
+) (string, error) {
 	mgr := langfuse.GetManager()
 	if !mgr.Enabled() {
-		return l.inner.Predict(ctx, imgBytes, prompt)
+		return l.inner.PredictWithOptions(ctx, imgBytes, prompt, opts)
 	}
 
 	totalImgSize := 0
@@ -43,7 +49,7 @@ func (l *langfuseVLM) Predict(ctx context.Context, imgBytes [][]byte, prompt str
 		},
 	})
 
-	result, err := l.inner.Predict(genCtx, imgBytes, prompt)
+	result, err := l.inner.PredictWithOptions(genCtx, imgBytes, prompt, opts)
 
 	// VLMs don't return token usage; approximate prompt tokens for cost
 	// tracking in Langfuse (users can configure per-model pricing in the UI).

@@ -23,19 +23,19 @@ import (
 // "configured / not configured" badge without an additional round-trip.
 type MCPServiceResponse struct {
 	UsageInstructions string                   `json:"usage_instructions"`
-	ID                string                   `json:"id"`
+	ID                string                   `json:"id" extensions:"x-agent=mcp_service_id"`
 	TenantID          uint64                   `json:"tenant_id"`
-	Name              string                   `json:"name"`
-	Description       string                   `json:"description"`
-	Enabled           bool                     `json:"enabled"`
-	TransportType     types.MCPTransportType   `json:"transport_type"`
+	Name              string                   `json:"name" extensions:"x-agent"`
+	Description       string                   `json:"description" extensions:"x-agent"`
+	Enabled           bool                     `json:"enabled" extensions:"x-agent"`
+	TransportType     types.MCPTransportType   `json:"transport_type" extensions:"x-agent"`
 	URL               *string                  `json:"url,omitempty"`
 	Headers           types.MCPHeaders         `json:"headers,omitempty"`
-	AuthConfig        *MCPAuthConfigResponse   `json:"auth_config,omitempty"`
+	AuthConfig        *MCPAuthConfigResponse   `json:"auth_config,omitempty" extensions:"x-agent"`
 	AdvancedConfig    *types.MCPAdvancedConfig `json:"advanced_config,omitempty"`
 	StdioConfig       *types.MCPStdioConfig    `json:"stdio_config,omitempty"`
 	EnvVars           types.MCPEnvVars         `json:"env_vars,omitempty"`
-	IsBuiltin         bool                     `json:"is_builtin"`
+	IsBuiltin         bool                     `json:"is_builtin" extensions:"x-agent"`
 	CreatedAt         time.Time                `json:"created_at"`
 	UpdatedAt         time.Time                `json:"updated_at"`
 	// Credentials is the per-field "configured?" map. Embedded on the main
@@ -62,7 +62,7 @@ type MCPCatalogSummary struct {
 // configuration and are safe to echo back so the UI can render the current
 // strategy.
 type MCPAuthConfigResponse struct {
-	AuthType              types.MCPAuthType `json:"auth_type,omitempty"`
+	AuthType              types.MCPAuthType `json:"auth_type,omitempty" extensions:"x-agent"`
 	APIKeyHeader          string            `json:"api_key_header,omitempty"`
 	CustomHeaders         map[string]string `json:"custom_headers,omitempty"`
 	Scopes                []string          `json:"scopes,omitempty"`

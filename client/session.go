@@ -37,12 +37,14 @@ type SummaryConfig struct {
 // Sessions are now knowledge-base-independent and serve as conversation containers.
 // All configuration comes from custom agent at query time.
 type CreateSessionRequest struct {
+	Kind        string `json:"kind,omitempty"`
 	Title       string `json:"title"`       // Session title (optional)
 	Description string `json:"description"` // Session description (optional)
 }
 
 // Session session information
 type Session struct {
+	Kind        string `json:"kind"`
 	ID          string `json:"id"`
 	TenantID    uint64 `json:"tenant_id"`
 	Title       string `json:"title"`
@@ -97,11 +99,21 @@ func (c *Client) GetSession(ctx context.Context, sessionID string) (*Session, er
 	return &response.Data, nil
 }
 
-// GetSessionsByTenant gets all sessions for a tenant
-func (c *Client) GetSessionsByTenant(ctx context.Context, page int, pageSize int) ([]Session, int, error) {
+// SessionListOptions keeps assistant history opt-in for existing callers.
+type SessionListOptions struct {
+	Kind string
+}
+
+// GetSessionsByTenant gets normal sessions unless an explicit kind is requested.
+func (c *Client) GetSessionsByTenant(
+	ctx context.Context, page int, pageSize int, opts ...SessionListOptions,
+) ([]Session, int, error) {
 	queryParams := url.Values{}
 	queryParams.Add("page", strconv.Itoa(page))
 	queryParams.Add("page_size", strconv.Itoa(pageSize))
+	if len(opts) > 0 {
+		queryParams.Set("kind", opts[0].Kind)
+	}
 	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/sessions", nil, queryParams)
 	if err != nil {
 		return nil, 0, err
@@ -218,13 +230,11 @@ type QuestionOrigin struct {
 	KnowledgeID     string `json:"knowledge_id,omitempty"`
 }
 
-// PageContext is the WeKnora page the user has open while asking an agent: a
-// knowledge base and optionally a document, a Wiki page or Wiki issues in it.
-// The agent uses it to resolve "this document" or "these issues". It is a hint
-// inside the request's retrieval scope and never widens it: a base outside the
-// scope is ignored, and parts that do not exist in the base are dropped.
+// PageContext identifies the open page. Knowledge-base resources must be in
+// the retrieval scope; agents must be visible in the current tenant.
 type PageContext struct {
-	KnowledgeBaseID string   `json:"knowledge_base_id"`
+	AgentID         string   `json:"agent_id,omitempty"`
+	KnowledgeBaseID string   `json:"knowledge_base_id,omitempty"`
 	KnowledgeID     string   `json:"knowledge_id,omitempty"`
 	WikiSlug        string   `json:"wiki_slug,omitempty"`
 	WikiIssueIDs    []string `json:"wiki_issue_ids,omitempty"` // At most 20 are kept

@@ -535,19 +535,16 @@ func (g WikiExtractionGranularity) Normalize() WikiExtractionGranularity {
 // Whether the wiki feature is turned on is controlled by IndexingStrategy.WikiEnabled;
 // this struct only carries wiki-specific tunables.
 type WikiConfig struct {
-	// SynthesisModelID is the LLM model ID used for wiki page generation and updates
-	SynthesisModelID string `yaml:"synthesis_model_id" json:"synthesis_model_id"`
-	// MaxPagesPerIngest limits pages created/updated per ingest operation (0 = no limit)
-	MaxPagesPerIngest int `yaml:"max_pages_per_ingest" json:"max_pages_per_ingest"`
-	// ExtractionGranularity controls how many candidate slugs Pass 0 extracts
-	// per document. Empty / unknown value is treated as WikiExtractionStandard.
-	ExtractionGranularity WikiExtractionGranularity `yaml:"extraction_granularity" json:"extraction_granularity,omitempty"`
-	// ContentInstructions controls tone, structure and emphasis for generated
-	// summary/entity/index prose. Citation and merge rules remain system-owned.
-	ContentInstructions string `yaml:"content_instructions,omitempty" json:"content_instructions,omitempty"`
-	// ExtractionInstructions tells candidate extraction which domain concepts
-	// to emphasize without replacing the stable JSON/citation protocol.
-	ExtractionInstructions string `yaml:"extraction_instructions,omitempty" json:"extraction_instructions,omitempty"`
+	// SynthesisModelID is the model that writes Wiki pages. Empty uses summary_model_id.
+	SynthesisModelID string `yaml:"synthesis_model_id" json:"synthesis_model_id" extensions:"x-agent=wiki_synthesis_model_id"`
+	// MaxPagesPerIngest limits pages created or updated per ingest. 0 means no limit.
+	MaxPagesPerIngest int `yaml:"max_pages_per_ingest" json:"max_pages_per_ingest" minimum:"0" maximum:"1000" extensions:"x-agent=wiki_max_pages"`
+	// ExtractionGranularity is focused, standard or exhaustive. Empty means standard.
+	ExtractionGranularity WikiExtractionGranularity `yaml:"extraction_granularity" json:"extraction_granularity,omitempty" enums:"focused,standard,exhaustive" extensions:"x-agent=wiki_granularity"`
+	// ContentInstructions sets tone and emphasis for generated Wiki prose. Citations stay fixed.
+	ContentInstructions string `yaml:"content_instructions,omitempty" json:"content_instructions,omitempty" extensions:"x-agent=wiki_content_instructions,x-agent-detail,x-agent-max-bytes=4000"`
+	// ExtractionInstructions tells page extraction which concepts to keep. The output format stays fixed.
+	ExtractionInstructions string `yaml:"extraction_instructions,omitempty" json:"extraction_instructions,omitempty" extensions:"x-agent=wiki_extraction_instructions,x-agent-detail,x-agent-max-bytes=4000"`
 
 	// Wiki ingest concurrency is two-level:
 	//   1. batch-level: multiple batches per KB run concurrently in the wiki

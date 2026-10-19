@@ -132,8 +132,10 @@
                                     :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
                                     :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
                                     :can-rewind="canRewindMessage(session.id)"
+                                    :can-ask-assistant="!embeddedMode"
                                     @fork="handleFork"
                                     @rewind="handleRewind"
+                                    @ask-assistant="handleAskAssistant"
                                     @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
                                 </botmsg>
                                 <FollowUpSuggestions v-if="session.answerFullyRendered && !session.steerForked && !session.suggestionsDismissed"
@@ -161,7 +163,7 @@
                         </div>
                     </transition>
                     <PendingPromptDock :embedded-mode="embeddedMode" />
-                    <InputField ref="inputFieldRef" :auto-focus="focusComposerOnMount" :compact="!embeddedMode"
+                    <InputField ref="inputFieldRef" :auto-focus="focusComposerOnMount" compact
                         @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles, options) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles, options)"
                         @steer-msg="(query, mentionedItems, delivery) => handleSteerMsg(query, mentionedItems, delivery)"
                         @promote-steer="handlePromoteSteer"
@@ -171,9 +173,11 @@
                         @stop-confirmed="handleStopConfirmed"
                         @stop-failed="handleStopFailed" :isReplying="isReplying" :composer-locked="composerLocked" :sessionId="session_id"
                         :assistantMessageId="currentAssistantMessageId" :embeddedMode="embeddedMode"
-                        :model-id="modelId" @update:model-id="(id) => emit('update:modelId', id)"
+                        :model-id="modelId" :default-model-id="defaultModelId"
+                        @update:model-id="(id) => emit('update:modelId', id)"
                         :queuedSteers="steerQueue.filter(item => item.delivery === 'after')" :canSteer="isAgentStreamSession()">
                         <template v-if="$slots['composer-chips']" #chips><slot name="composer-chips" /></template>
+                        <template v-if="$slots['composer-controls']" #controls><slot name="composer-controls" /></template>
                     </InputField>
                 </div>
             </div>
@@ -246,6 +250,9 @@ import {
 import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
 import { provideChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
 import { useSessionActivityStore } from '@/stores/sessionActivity';
+import { useAssistantStore } from '@/stores/assistant';
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext';
+import { respondToPageAction } from '@/utils/pageActionResponder';
 import { provideChatSandboxPanel } from '@/composables/useChatSandboxPanel';
 import SandboxSidePanel from '@/components/chat/SandboxSidePanel.vue';
 import BrowserTaskPreview from './components/BrowserTaskPreview.vue';
@@ -268,9 +275,10 @@ const props = defineProps({
     // Embedded only: returns { knowledgeBaseIds, pageContext } for each send,
     // read at send time so the host can follow the page the user is on.
     hostScope: { type: Function, default: null },
-    // Embedded only: the host's model choice (v-model:model-id), '' for the
-    // agent's own.
+    // Embedded only: the host's model choice (v-model:model-id), '' to
+    // follow defaultModelId.
     modelId: { type: String, default: '' },
+    defaultModelId: { type: String, default: '' },
 });
 const emit = defineEmits(['update:modelId']);
 
@@ -346,6 +354,20 @@ const created_at = ref('');
 const limit = ref(20);
 const messagesList = reactive([]);
 providePromptDock(messagesList);
+
+// The answer the user asked the assistant about, until they leave the session.
+const assistant = useAssistantStore();
+const askedMessage = ref({ sessionId: '', messageId: '' });
+useAssistantPageContext(() => {
+    const asked = askedMessage.value;
+    if (props.embeddedMode || !asked.messageId || asked.sessionId !== props.session_id) return null;
+    return { page: 'chat', chatSessionId: asked.sessionId, messageId: asked.messageId };
+});
+function handleAskAssistant(messageId) {
+    askedMessage.value = { sessionId: props.session_id, messageId };
+    assistant.restorePageContext();
+    assistant.open();
+}
 
 function forkAffordanceOf(messageId) {
     if (!messageId) return { canFork: false }
@@ -956,6 +978,11 @@ const {
     isAgentStreamSession,
     scrollToBottom,
     onError: (msg) => MessagePlugin.error(msg),
+    onPageAction: (prompt) => void respondToPageAction(
+        prompt,
+        !props.embeddedMode ? 'unavailable' : assistant.pageAccess ? 'enabled' : 'disabled',
+        { current: () => router.currentRoute.value.fullPath, push: (location) => router.push(location) },
+    ),
     preserveIncompleteStreamReactive: true,
     isFirstEnter,
     scrollContainer,
@@ -1522,8 +1549,9 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         ? (props.agentId && props.agentId !== 'builtin-quick-answer')
         : useSettingsStoreInstance.isAgentStreamMode;
 
-    // Get web search status from settings store
-    const webSearchEnabled = props.embeddedMode ? false : useSettingsStoreInstance.isWebSearchEnabled;
+    // Get web search status from settings store. The embedded assistant has no
+    // toggle of its own; its agent config decides on the server.
+    const webSearchEnabled = props.embeddedMode ? true : useSettingsStoreInstance.isWebSearchEnabled;
 
     // Get knowledge_base_ids from settings store (selected by user via KnowledgeBaseSelector)
     // Merge @mentioned KB/file IDs so retrieval uses the same targets user @mentioned (including shared KBs)
@@ -1579,6 +1607,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         suggestion_attribution: suggestionAttribution || undefined,
         question_origin: options?.questionOrigin,
         page_context: agentEnabled ? (hostScope?.pageContext || undefined) : undefined,
+        assistant_access: agentEnabled ? (hostScope?.assistantAccess || undefined) : undefined,
         method: 'POST',
         url: endpoint,
     });
@@ -1671,6 +1700,24 @@ const resumeSuspendedRun = async (pendingId) => {
 };
 provide(resumeSuspendedRunKey, resumeSuspendedRun);
 
+// The assistant panel's conversation takes messages asked from the page (the
+// selection bubble, the editor toolbar) once its history is in.
+if (props.embeddedMode) {
+    watch([() => assistant.queuedMessage, historyLoading], ([message, pending]) => {
+        if (!message || pending) return;
+        assistant.takeQueuedMessage();
+        if (isReplying.value || loading.value) {
+            // Mid-reply it waits in the input box for the user to send.
+            inputFieldRef.value?.prefill?.(message.query);
+            return;
+        }
+        sendMsg(message.query, inputFieldRef.value?.getComposerModelId?.() || props.modelId);
+    }, { immediate: true });
+    watch(() => assistant.focusRequest, () => {
+        inputFieldRef.value?.focusInput?.();
+    });
+}
+
 watch(error, (newError) => {
     if (!newError) return;
     if (attachingResumedRun) return;
@@ -1758,7 +1805,7 @@ onMounted(async () => {
     if (props.embeddedMode && props.initialQuery) {
         scrollLock.value = true;
         historyLoading.value = false;
-        sendMsg(props.initialQuery, props.modelId);
+        sendMsg(props.initialQuery, inputFieldRef.value?.getComposerModelId?.() || props.modelId);
     } else if (!props.embeddedMode && firstQuery.value) {
         scrollLock.value = true;
         historyLoading.value = false;
@@ -1904,8 +1951,6 @@ onBeforeRouteUpdate((to, from, next) => {
 
     &.is-embedded :deep(.answers-input) .t-textarea__inner {
         width: 100% !important;
-        min-height: 48px !important;
-        padding: 10px 14px;
     }
 }
 
@@ -2152,6 +2197,12 @@ onBeforeRouteUpdate((to, from, next) => {
     &:not(.is-embedded) {
         padding: 0 var(--chat-content-inset, 20px);
         max-width: calc(960px + 2 * var(--chat-content-inset, 20px));
+    }
+
+    // Matches the composer's inset, and keeps text clear of the scrollbar,
+    // which overlays content where the platform uses overlay scrollbars.
+    &.is-embedded {
+        padding: 0 16px;
     }
 
     /*

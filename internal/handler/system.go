@@ -281,25 +281,26 @@ func (h *SystemHandler) emitAdminAudit(
 
 // GetSystemInfoResponse defines the response structure for system info
 type GetSystemInfoResponse struct {
-	Version             string `json:"version"`
-	Edition             string `json:"edition"`
-	CommitID            string `json:"commit_id,omitempty"`
-	BuildTime           string `json:"build_time,omitempty"`
-	GoVersion           string `json:"go_version,omitempty"`
-	KeywordIndexEngine  string `json:"keyword_index_engine,omitempty"`
-	VectorStoreEngine   string `json:"vector_store_engine,omitempty"`
-	GraphDatabaseEngine string `json:"graph_database_engine,omitempty"`
-	MinioEnabled        bool   `json:"minio_enabled,omitempty"`
-	DBVersion           string `json:"db_version,omitempty"`
+	Version             string `json:"version" extensions:"x-agent"`
+	Edition             string `json:"edition" extensions:"x-agent"`
+	CommitID            string `json:"commit_id,omitempty" extensions:"x-agent"`
+	BuildTime           string `json:"build_time,omitempty" extensions:"x-agent"`
+	GoVersion           string `json:"go_version,omitempty" extensions:"x-agent"`
+	KeywordIndexEngine  string `json:"keyword_index_engine,omitempty" extensions:"x-agent"`
+	VectorStoreEngine   string `json:"vector_store_engine,omitempty" extensions:"x-agent"`
+	GraphDatabaseEngine string `json:"graph_database_engine,omitempty" extensions:"x-agent"`
+	MinioEnabled        bool   `json:"minio_enabled,omitempty" extensions:"x-agent"`
+	DBVersion           string `json:"db_version,omitempty" extensions:"x-agent"`
+	DBMigrationFailed   bool   `json:"db_migration_failed" extensions:"x-agent"`
 	// DBMigrationError carries the human-readable error message recorded when
 	// the most recent startup migration attempt failed. Empty when migrations
 	// succeeded; non-empty values let the frontend surface a troubleshooting
 	// banner instead of silently hiding the DB version row (see issue #1319).
 	DBMigrationError string `json:"db_migration_error,omitempty"`
 	// StartedAt is the server process boot time (RFC3339, UTC).
-	StartedAt string `json:"started_at,omitempty"`
+	StartedAt string `json:"started_at,omitempty" extensions:"x-agent"`
 	// UptimeSeconds is seconds elapsed since process start.
-	UptimeSeconds int64 `json:"uptime_seconds,omitempty"`
+	UptimeSeconds int64 `json:"uptime_seconds,omitempty" extensions:"x-agent"`
 }
 
 // 编译时注入的版本信息
@@ -317,7 +318,9 @@ var (
 // @Tags         系统
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  GetSystemInfoResponse  "系统信息"
+// @Success      200  {object}  DataResponse{data=GetSystemInfoResponse}  "系统信息"
+// @x-agent {"id":"system.get_info","risk":"read"}
+// @x-agent-hint "Reads the backend version, edition, build, runtime, database migration status and configured engines. Empty or unknown means unavailable information. Engine configuration does not prove connectivity. Raw migration errors are omitted. Frontend build/version is separate and is not reported by this API; do not infer frontend/backend version agreement or available upgrades."
 // @Router       /system/info [get]
 func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
@@ -370,6 +373,7 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 		MinioEnabled:        minioEnabled,
 		DBVersion:           dbVersion,
 		DBMigrationError:    dbMigrationErr,
+		DBMigrationFailed:   dbMigrationErr != "",
 		StartedAt:           startedAt,
 		UptimeSeconds:       uptimeSec,
 	}
@@ -399,6 +403,8 @@ func (h *SystemHandler) getDocReaderConnInfo() (addr, transport string) {
 // @Tags         系统
 // @Produce      json
 // @Success      200  {object}  handler.ListParserEnginesResponse  "解析引擎列表"
+// @x-agent {"id":"knowledge_base.list_parser_engines","risk":"read"}
+// @x-agent-hint "Lists parser engine names, supported file extensions and availability. Choose an available engine supporting every requested file type before setting parser_engine in knowledge_base.update. Never guess an engine name."
 // @Router       /system/parser-engines [get]
 func (h *SystemHandler) ListParserEngines(c *gin.Context) {
 	var overrides map[string]string
@@ -1463,22 +1469,24 @@ func (h *SystemHandler) RevokeSystemAdmin(c *gin.Context) {
 // Total reflects the underlying COUNT(*), not just the page size, so the front
 // end can render pagination metadata without a follow-up call.
 type ListSystemAdminsResponse struct {
-	Total  int64             `json:"total"`
+	Total  int64             `json:"total" extensions:"x-agent"`
 	Admins []*types.UserInfo `json:"admins"`
 }
 
 // ListSystemAdmins godoc
-// @Summary      List all system administrators
+// @Summary      查询系统管理员（List system administrators）
 // @Description  Retrieve a paginated list of users with system administrator
 // @Description  privileges (SystemAdmin only). Supports `offset` (default 0)
 // @Description  and `limit` (default 50, max 200) query parameters. Walks the
 // @Description  partial-friendly idx_users_is_system_admin index.
 // @Tags         System Admin
 // @Produce      json
-// @Param        offset query int false "Page offset" default(0)
-// @Param        limit  query int false "Page size (max 200)" default(50)
+// @Param        offset query int false "Page offset" default(0) minimum(0) extensions(x-agent,x-agent-maximum=1000000)
+// @Param        limit  query int false "Page size (max 200)" default(50) minimum(1) maximum(200) extensions(x-agent,x-agent-maximum=50)
 // @Success      200  {object}  ListSystemAdminsResponse  "System admins retrieved successfully"
 // @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
+// @x-agent {"id":"system_admin.list_admins","risk":"read","system_admin":true,"root":"admins","max_items":50}
+// @x-agent-hint "Lists platform system administrators across workspaces. Paginate with offset/limit until total is covered. These privileges differ from workspace roles."
 // @Router       /system/admin/list [get]
 func (h *SystemHandler) ListSystemAdmins(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
@@ -1528,22 +1536,24 @@ func (h *SystemHandler) ListSystemAdmins(c *gin.Context) {
 // whether a next page exists (derived by fetching limit+1 rows).
 type ListAllUsersResponse struct {
 	Users   []*types.UserInfo `json:"users"`
-	Offset  int               `json:"offset"`
-	Limit   int               `json:"limit"`
-	HasMore bool              `json:"has_more"`
+	Offset  int               `json:"offset" extensions:"x-agent"`
+	Limit   int               `json:"limit" extensions:"x-agent"`
+	HasMore bool              `json:"has_more" extensions:"x-agent"`
 }
 
 // ListUsers godoc
-// @Summary      List all platform users
+// @Summary      查询平台用户（List platform users）
 // @Description  Retrieve a paginated list of every user across tenants (SystemAdmin only).
 // @Description  Supports `offset` (default 0) and `limit` (default 50, max 200).
 // @Description  Password/hashes are never serialised — only the redacted UserInfo shape.
 // @Tags         System Admin
 // @Produce      json
-// @Param        offset query int false "Page offset" default(0)
-// @Param        limit  query int false "Page size (max 200)" default(50)
+// @Param        offset query int false "Page offset" default(0) minimum(0) extensions(x-agent,x-agent-maximum=1000000)
+// @Param        limit  query int false "Page size (max 200)" default(50) minimum(1) maximum(200) extensions(x-agent,x-agent-maximum=50)
 // @Success      200  {object}  ListAllUsersResponse  "Users retrieved successfully"
 // @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
+// @x-agent {"id":"system_admin.list_users","risk":"read","system_admin":true,"root":"users","max_items":50}
+// @x-agent-hint "Lists platform users across workspaces, including account enabled state and system administrator flag. Follow has_more using offset + limit. tenant_id is the home workspace, not a list of memberships. No search or role filter is supported: paginate before drawing conclusions."
 // @Router       /system/admin/users [get]
 func (h *SystemHandler) ListUsers(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
@@ -1819,25 +1829,28 @@ func (h *SystemHandler) CreateSystemUser(c *gin.Context) {
 // empty table. Each pool reports configured per-process concurrency plus live
 // cluster capacity/active workers aggregated from asynq server heartbeats.
 type RuntimeWorkerPool struct {
-	Name            string  `json:"name"`
-	Concurrency     int     `json:"concurrency"` // configured per instance
-	QueueCount      int     `json:"queue_count"`
-	Instances       int     `json:"instances"`        // live asynq server heartbeats
-	ClusterCapacity int     `json:"cluster_capacity"` // sum of live server concurrency
-	Active          int     `json:"active"`           // live workers assigned to this pool
-	Utilization     float64 `json:"utilization"`      // Active / ClusterCapacity
+	Name            string  `json:"name" extensions:"x-agent"`
+	Concurrency     int     `json:"concurrency" extensions:"x-agent"` // configured per instance
+	QueueCount      int     `json:"queue_count" extensions:"x-agent"`
+	Instances       int     `json:"instances" extensions:"x-agent"`        // live asynq server heartbeats
+	ClusterCapacity int     `json:"cluster_capacity" extensions:"x-agent"` // sum of live server concurrency
+	Active          int     `json:"active" extensions:"x-agent"`           // live workers assigned to this pool
+	Utilization     float64 `json:"utilization" extensions:"x-agent"`      // Active / ClusterCapacity
 }
 
 type RuntimeQueuesResponse struct {
-	Available             bool                       `json:"available"`
-	UpstreamConcurrency   int                        `json:"upstream_concurrency"`
+	QueuesError           bool                       `json:"queues_error" extensions:"x-agent"`
+	WorkersError          bool                       `json:"workers_error" extensions:"x-agent"`
+	ModelsError           bool                       `json:"models_error" extensions:"x-agent"`
+	Available             bool                       `json:"available" extensions:"x-agent"`
+	UpstreamConcurrency   int                        `json:"upstream_concurrency" extensions:"x-agent"`
 	ParseConcurrency      int                        `json:"parse_concurrency"` // compatibility alias for upstream_concurrency
 	WikiConcurrency       int                        `json:"wiki_concurrency"`  // compatibility field
-	Pools                 []RuntimeWorkerPool        `json:"pools"`
-	Queues                []types.QueueStat          `json:"queues"`
-	ModelLimiterAvailable bool                       `json:"model_limiter_available"`
-	Models                []modellimiter.RuntimeStat `json:"models"`
-	Timestamp             int64                      `json:"timestamp"`
+	Pools                 []RuntimeWorkerPool        `json:"pools" extensions:"x-agent"`
+	Queues                []types.QueueStat          `json:"queues" extensions:"x-agent"`
+	ModelLimiterAvailable bool                       `json:"model_limiter_available" extensions:"x-agent"`
+	Models                []modellimiter.RuntimeStat `json:"models" extensions:"x-agent"`
+	Timestamp             int64                      `json:"timestamp" extensions:"x-agent"`
 }
 
 func aggregateRuntimeWorkerPools(pools []RuntimeWorkerPool, servers []types.WorkerServerStat) {
@@ -1896,6 +1909,8 @@ func sameQueueWeights(left, right map[string]int) bool {
 // @Tags         系统管理
 // @Produce      json
 // @Success      200  {object}  RuntimeQueuesResponse
+// @x-agent {"id":"system_admin.get_queues","risk":"read","system_admin":true}
+// @x-agent-hint "Reads platform-wide queue depth, worker pools and model concurrency. available false means unsupported, not healthy or empty. Check queues_error, workers_error and models_error before interpreting counts. failed is today's counter; retry/archived are current depths. Pool concurrency is per instance; cluster_capacity and active reflect live worker heartbeats. Does not control workers or retry tasks."
 // @Router       /system/admin/runtime/queues [get]
 func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
@@ -1932,11 +1947,13 @@ func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
 		if err != nil {
 			logger.Errorf(ctx, "get queue stats failed: %v", err)
 		}
+		resp.QueuesError = err != nil
 		resp.Available = supported
 		if stats != nil {
 			resp.Queues = stats
 		}
 		serverStats, _, serverErr := h.taskInspector.WorkerServerStats(ctx)
+		resp.WorkersError = serverErr != nil
 		if serverErr != nil {
 			logger.Errorf(ctx, "get worker server stats failed: %v", serverErr)
 		} else {
@@ -1952,6 +1969,7 @@ func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
 	if modelErr != nil {
 		logger.Errorf(ctx, "get model concurrency stats failed: %v", modelErr)
 	}
+	resp.ModelsError = modelErr != nil
 	resp.ModelLimiterAvailable = modelSupported
 	resp.Models = modelStats
 
@@ -1959,11 +1977,11 @@ func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
 }
 
 type RuntimeTasksResponse struct {
-	Available  bool                    `json:"available"`
+	Available  bool                    `json:"available" extensions:"x-agent"`
 	Tasks      []types.RuntimeTaskInfo `json:"tasks"`
-	PageSize   int                     `json:"page_size"`
-	HasMore    bool                    `json:"has_more"`
-	NextCursor string                  `json:"next_cursor,omitempty"`
+	PageSize   int                     `json:"page_size" extensions:"x-agent"`
+	HasMore    bool                    `json:"has_more" extensions:"x-agent"`
+	NextCursor string                  `json:"next_cursor,omitempty" extensions:"x-agent"`
 }
 
 func isKnownRuntimeQueue(name string) bool {
@@ -2030,6 +2048,9 @@ func (h *SystemHandler) listRuntimeTasks(c *gin.Context, state types.RuntimeTask
 	if page.Tasks == nil {
 		page.Tasks = []types.RuntimeTaskInfo{}
 	}
+	for i := range page.Tasks {
+		page.Tasks[i].ErrorCategory = runtimeErrorCategory(page.Tasks[i].LastError)
+	}
 	c.JSON(http.StatusOK, RuntimeTasksResponse{
 		Available:  supported,
 		Tasks:      page.Tasks,
@@ -2041,14 +2062,16 @@ func (h *SystemHandler) listRuntimeTasks(c *gin.Context, state types.RuntimeTask
 
 // ListRuntimeTasks returns one live task-state page for the unified operator
 // drawer. Raw task payloads are never included.
-// @Summary      List runtime queue tasks by state
+// @Summary      查询队列任务与失败记录（List runtime queue tasks）
 // @Tags         System Admin
 // @Produce      json
-// @Param        queue path string true "Queue name"
-// @Param        state query string true "Task state" Enums(pending,active,scheduled,retry,archived,completed)
-// @Param        cursor query string false "Opaque continuation cursor"
-// @Param        page_size query int false "Page size" default(20)
+// @Param        queue path string true "Queue name" extensions(x-agent)
+// @Param        state query string true "Task state" Enums(pending,active,scheduled,retry,archived,completed) extensions(x-agent)
+// @Param        cursor query string false "Opaque continuation cursor" extensions(x-agent)
+// @Param        page_size query int false "Page size" default(20) minimum(1) maximum(100) extensions(x-agent,x-agent-maximum=50)
 // @Success      200 {object} RuntimeTasksResponse
+// @x-agent {"id":"system_admin.list_tasks","risk":"read","system_admin":true,"root":"tasks","max_items":50}
+// @x-agent-hint "Lists platform-wide tasks in one queue and state. Choose queue from system_admin.get_queues, never guess. For failures inspect retry and archived; active/pending help diagnose backlog. available false means unsupported. Continue with next_cursor while has_more; on expired cursor restart from the first page. error_category is a heuristic, not the full cause; unknown needs the operator task page/logs. Raw errors, payloads, results and worker addresses are omitted. This operation cannot retry, cancel or delete tasks."
 // @Router       /system/admin/runtime/queues/{queue}/tasks [get]
 func (h *SystemHandler) ListRuntimeTasks(c *gin.Context) {
 	h.listRuntimeTasks(c, types.RuntimeTaskState(c.Query("state")))

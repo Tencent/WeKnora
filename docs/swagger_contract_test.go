@@ -113,6 +113,46 @@ func TestReleaseAPIContracts(t *testing.T) {
 	}
 }
 
+func TestGraphSearchContract(t *testing.T) {
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				Paths       map[string]map[string]any `json:"paths" yaml:"paths"`
+				Definitions map[string]struct {
+					Properties map[string]any `json:"properties" yaml:"properties"`
+				} `json:"definitions" yaml:"definitions"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatal(err)
+			}
+			methods := spec.Paths["/knowledge-bases/{id}/graph-search"]
+			if methods["post"] == nil || len(methods) != 1 {
+				t.Fatal("graph-search must be documented as a POST-only endpoint")
+			}
+			const prefix = "github_com_Tencent_WeKnora_internal_types."
+			for definition, fields := range map[string][]string{
+				"GraphSearchResult":      {"entities", "relationships", "source_chunks", "meta"},
+				"GraphSearchEntity":      {"id", "knowledge_id", "source_chunk_ids"},
+				"GraphSearchRelation":    {"source_id", "target_id", "source_chunk_ids"},
+				"GraphSearchSourceChunk": {"content_truncated", "title_truncated"},
+				"GraphSearchMeta":        {"truncated", "truncation_reasons"},
+			} {
+				properties := spec.Definitions[prefix+definition].Properties
+				for _, field := range fields {
+					if properties[field] == nil {
+						t.Errorf("%s.%s must be documented", definition, field)
+					}
+				}
+				for _, hidden := range []string{"tenant_id", "knowledge_base_id", "element_id"} {
+					if definition != "GraphSearchResult" && properties[hidden] != nil {
+						t.Errorf("%s leaks internal field %s", definition, hidden)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestModelDeleteUsageContract(t *testing.T) {
 	for _, tt := range swaggerDocuments() {
 		t.Run(tt.name, func(t *testing.T) {
