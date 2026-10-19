@@ -204,7 +204,12 @@ export function describeTrigger(trigger: AutomationTrigger, t: Translate, locale
       return t('automation.schedule.describe.monthly', { day: form.day, time })
     case 'once':
       return t('automation.schedule.describe.once', { at: formatInZone(trigger.at, trigger.timezone, locale) })
-    default:
+    default: {
+      const every = /^\*\/(\d+) \* \* \* \*$/.exec(form.expr.trim())
+      if (every) return t('automation.schedule.describe.everyMinutes', { n: Number(every[1]) })
+      const hours = /^0 \*\/(\d+) \* \* \*$/.exec(form.expr.trim())
+      if (hours) return t('automation.schedule.describe.everyHours', { n: Number(hours[1]) })
       return t('automation.schedule.describe.custom', { expr: form.expr })
+    }
   }
 }

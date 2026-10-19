@@ -163,6 +163,25 @@ func (h *AutomationHandler) ValidateTrigger(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": ValidateTriggerResult{NextRuns: times}})
 }
 
+// GetAutomationBySession godoc
+// @Summary      按会话查找自动化
+// @Description  返回这次会话所属的自动化，供会话页跳回
+// @Tags         自动化
+// @Produce      json
+// @Param        session_id  path      string  true  "会话 ID"
+// @Success      200         {object}  handler.DataResponse{data=types.Automation}  "自动化"
+// @Failure      404         {object}  errors.AppError  "不存在"
+// @Security     Bearer
+// @Router       /automations/by-session/{session_id} [get]
+func (h *AutomationHandler) GetAutomationBySession(c *gin.Context) {
+	a, err := h.automations.FindBySession(c.Request.Context(), c.Param("session_id"))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": a})
+}
+
 // GetAutomation godoc
 // @Summary      获取自动化
 // @Tags         自动化

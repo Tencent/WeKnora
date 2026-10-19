@@ -36,6 +36,27 @@ type Schedule struct {
 	trigger  types.AutomationTrigger
 	location *time.Location
 	cron     cron.Schedule
+	once     time.Time
+}
+
+// Wall-clock forms a once trigger accepts, read in its timezone. The first
+// match wins, so a zone suffix is never silently dropped.
+var onceLayouts = []string{
+	time.RFC3339Nano,
+	time.RFC3339,
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04:05",
+	"2006-01-02T15:04",
+	"2006-01-02 15:04",
+}
+
+func parseOnce(at string, loc *time.Location) (time.Time, error) {
+	for _, layout := range onceLayouts {
+		if parsed, err := time.ParseInLocation(layout, at, loc); err == nil {
+			return parsed.UTC(), nil
+		}
+	}
+	return time.Time{}, invalid("cannot read %q as a time; use RFC3339 or \"2006-01-02 15:04\"", at)
 }
 
 func invalid(format string, args ...any) error {
@@ -74,12 +95,18 @@ func Parse(t types.AutomationTrigger) (*Schedule, error) {
 		}
 		s.cron = sched
 	case types.AutomationTriggerOnce:
-		if t.At == nil || t.At.IsZero() {
+		if strings.TrimSpace(t.At) == "" {
 			return nil, invalid("a once trigger needs a time")
 		}
 		if t.Expr != "" {
 			return nil, invalid("a once trigger takes no expression")
 		}
+		at, err := parseOnce(strings.TrimSpace(t.At), loc)
+		if err != nil {
+			return nil, err
+		}
+		s.once = at
+		s.trigger.At = at.Format(time.RFC3339)
 	default:
 		return nil, invalid("unknown trigger type %q", t.Type)
 	}
@@ -93,7 +120,7 @@ func (s *Schedule) Trigger() types.AutomationTrigger { return s.trigger }
 // it never fires again.
 func (s *Schedule) Next(after time.Time) *time.Time {
 	if s.cron == nil {
-		at := s.trigger.At.UTC()
+		at := s.once
 		if at.After(after) {
 			return &at
 		}

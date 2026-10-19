@@ -173,6 +173,7 @@ function onSaved(item: Automation) {
 
 function openEditor(item: Automation | null) {
   editing.value = item
+  detailVisible.value = false
   editorVisible.value = true
 }
 

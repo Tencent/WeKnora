@@ -204,6 +204,27 @@ func (s *AutomationService) Get(ctx context.Context, id string) (*types.Automati
 	return s.load(ctx, id)
 }
 
+// FindBySession returns the caller's automation whose run, or persistent
+// conversation, is sessionID.
+func (s *AutomationService) FindBySession(ctx context.Context, sessionID string) (*types.Automation, error) {
+	query, err := s.owned(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, badAutomation("a session id is required")
+	}
+	var a types.Automation
+	runs := s.db.WithContext(ctx).Model(&types.AutomationRun{}).
+		Select("automation_id").Where("session_id = ?", sessionID)
+	err = query.Where("persistent_session_id = ? OR id IN (?)", sessionID, runs).First(&a).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, apperrors.NewNotFoundError("automation not found")
+	}
+	return &a, err
+}
+
 func badAutomation(format string, args ...any) error {
 	return apperrors.NewBadRequestError(fmt.Sprintf(format, args...))
 }

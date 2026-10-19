@@ -60,6 +60,14 @@ test('describeTrigger names the schedule', () => {
   )
   assert.equal(
     describeTrigger({ type: 'cron', expr: '*/10 * * * *' }, t, 'en-US'),
-    'automation.schedule.describe.custom{"expr":"*/10 * * * *"}',
+    'automation.schedule.describe.everyMinutes{"n":10}',
+  )
+  assert.equal(
+    describeTrigger({ type: 'cron', expr: '0 */2 * * *' }, t, 'en-US'),
+    'automation.schedule.describe.everyHours{"n":2}',
+  )
+  assert.equal(
+    describeTrigger({ type: 'cron', expr: '*/10 9-17 * * *' }, t, 'en-US'),
+    'automation.schedule.describe.custom{"expr":"*/10 9-17 * * *"}',
   )
 })

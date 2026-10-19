@@ -1,153 +1,292 @@
 <template>
-  <t-drawer :visible="visible" :header="automation ? t('automation.editor.editTitle') : t('automation.editor.createTitle')"
-    size="560px" :close-on-overlay-click="false" :footer="true" destroy-on-close @close="close">
-    <t-form label-align="top" class="automation-editor" @submit.prevent>
-      <t-form-item :label="t('automation.fields.name')" required-mark>
-        <t-input v-model="form.name" :maxlength="100" :placeholder="t('automation.editor.namePlaceholder')" />
-      </t-form-item>
-
-      <t-form-item :label="t('automation.fields.agent')">
-        <t-select v-model="form.agent_id" :loading="agentsLoading" filterable>
-          <t-option v-for="agent in agentOptions" :key="agent.id" :value="agent.id" :label="agent.name" />
-        </t-select>
-      </t-form-item>
-
-      <t-form-item :label="t('automation.fields.instruction')" required-mark>
-        <div class="automation-editor__stack">
-          <t-textarea v-model="form.instruction" :autosize="{ minRows: 4, maxRows: 12 }" :maxlength="20000"
-            :placeholder="t('automation.editor.instructionPlaceholder')" />
-          <p class="automation-editor__hint">
-            {{ t('automation.editor.variablesHint') }}
-            <code v-for="tag in VARIABLE_TAGS" :key="tag">{{ tag }}</code>
-          </p>
-          <p class="automation-editor__hint">{{ t('automation.editor.unattendedHint') }}</p>
+  <SettingsModalShell :visible="visible"
+    :title="automation ? t('automation.editor.editTitle') : t('automation.editor.createTitle')"
+    v-model="section" :nav-groups="navGroups" :z-index="1000" @close="modalShell.requestClose">
+    <div class="content-wrapper">
+      <!-- 基本信息 -->
+      <div v-show="section === 'basic'" class="section">
+        <div class="section-header">
+          <h2>{{ t('automation.editor.sections.basic.title') }}</h2>
+          <p class="section-description">{{ t('automation.editor.sections.basic.desc') }}</p>
         </div>
-      </t-form-item>
+        <div class="settings-group">
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ t('automation.fields.name') }}<span class="required">*</span></label>
+              <p class="desc">{{ t('automation.editor.nameDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-input v-model="form.name" :maxlength="100" :placeholder="t('automation.editor.namePlaceholder')" />
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ t('automation.fields.agent') }}</label>
+              <p class="desc">{{ t('automation.editor.agentDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-select v-model="form.agent_id" :loading="agentsLoading" filterable>
+                <t-option v-for="agent in agentOptions" :key="agent.id" :value="agent.id" :label="agent.name" />
+              </t-select>
+            </div>
+          </div>
+          <div class="setting-row setting-row-vertical">
+            <div class="setting-info">
+              <label>{{ t('automation.fields.instruction') }}<span class="required">*</span></label>
+              <p class="desc">{{ t('automation.editor.unattendedHint') }}</p>
+            </div>
+            <div class="setting-control setting-control-full automation-editor__stack">
+              <t-textarea v-model="form.instruction" :autosize="{ minRows: 6, maxRows: 16 }" :maxlength="20000"
+                :placeholder="t('automation.editor.instructionPlaceholder')" />
+              <p class="automation-editor__hint">
+                {{ t('automation.editor.variablesHint') }}
+                <code v-for="tag in VARIABLE_TAGS" :key="tag">{{ tag }}</code>
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
 
-      <t-form-item :label="t('automation.fields.schedule')" required-mark>
-        <div class="automation-editor__stack">
-          <t-radio-group v-model="schedule.kind" variant="default-filled" size="small" class="automation-editor__kinds">
-            <t-radio-button v-for="kind in KINDS" :key="kind" :value="kind">
-              {{ t(`automation.schedule.kinds.${kind}`) }}
-            </t-radio-button>
-          </t-radio-group>
+      <!-- 运行时间 -->
+      <div v-show="section === 'schedule'" class="section">
+        <div class="section-header">
+          <h2>{{ t('automation.editor.sections.schedule.title') }}</h2>
+          <p class="section-description">{{ t('automation.editor.sections.schedule.desc') }}</p>
+        </div>
+        <div class="settings-group">
+          <div class="setting-row setting-row-vertical">
+            <div class="setting-info">
+              <label>{{ t('automation.editor.frequency') }}<span class="required">*</span></label>
+            </div>
+            <div class="setting-control setting-control-full">
+              <t-radio-group v-model="schedule.kind" variant="default-filled">
+                <t-radio-button v-for="kind in KINDS" :key="kind" :value="kind">
+                  {{ t(`automation.schedule.kinds.${kind}`) }}
+                </t-radio-button>
+              </t-radio-group>
+            </div>
+          </div>
 
-          <div class="automation-editor__row">
-            <template v-if="schedule.kind === 'hourly'">
-              <span>{{ t('automation.schedule.atMinute') }}</span>
-              <t-input-number v-model="schedule.minute" :min="0" :max="59" theme="normal" class="automation-editor__num" />
-            </template>
-            <template v-else-if="schedule.kind === 'custom'">
-              <t-input v-model="schedule.expr" class="automation-editor__expr" placeholder="0 9 * * 1-5" />
-            </template>
-            <template v-else-if="schedule.kind === 'once'">
+          <div v-if="schedule.kind === 'weekly'" class="setting-row">
+            <div class="setting-info">
+              <label>{{ t('automation.editor.weekdays') }}</label>
+            </div>
+            <div class="setting-control">
+              <t-checkbox-group v-model="schedule.days" class="automation-editor__days">
+                <t-checkbox v-for="day in WEEK" :key="day" :value="day">{{ weekdayName(day, locale) }}</t-checkbox>
+              </t-checkbox-group>
+            </div>
+          </div>
+
+          <div v-if="schedule.kind === 'monthly'" class="setting-row">
+            <div class="setting-info">
+              <label>{{ t('automation.schedule.dayOfMonth') }}</label>
+              <p class="desc">{{ t('automation.editor.dayOfMonthDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-input-number v-model="schedule.day" :min="1" :max="31" theme="column" />
+            </div>
+          </div>
+
+          <div v-if="schedule.kind === 'hourly'" class="setting-row">
+            <div class="setting-info">
+              <label>{{ t('automation.schedule.atMinute') }}</label>
+            </div>
+            <div class="setting-control">
+              <t-input-number v-model="schedule.minute" :min="0" :max="59" theme="column" />
+            </div>
+          </div>
+
+          <div v-else-if="schedule.kind === 'once'" class="setting-row">
+            <div class="setting-info">
+              <label>{{ t('automation.editor.runAt') }}</label>
+            </div>
+            <div class="setting-control">
               <t-date-picker v-model="schedule.at" enable-time-picker format="YYYY-MM-DD HH:mm"
                 value-type="YYYY-MM-DD HH:mm" :placeholder="t('automation.schedule.pickTime')" />
-            </template>
-            <template v-else>
-              <template v-if="schedule.kind === 'monthly'">
-                <span>{{ t('automation.schedule.dayOfMonth') }}</span>
-                <t-input-number v-model="schedule.day" :min="1" :max="31" theme="normal" class="automation-editor__num" />
-              </template>
-              <t-time-picker v-model="clock" format="HH:mm" :clearable="false" class="automation-editor__clock" />
-            </template>
+            </div>
           </div>
 
-          <t-checkbox-group v-if="schedule.kind === 'weekly'" v-model="schedule.days">
-            <t-checkbox v-for="day in WEEK" :key="day" :value="day">{{ weekdayName(day, locale) }}</t-checkbox>
-          </t-checkbox-group>
-          <p v-if="schedule.kind === 'custom'" class="automation-editor__hint">{{ t('automation.schedule.customHint') }}</p>
-
-          <div class="automation-editor__row">
-            <span>{{ t('automation.fields.timezone') }}</span>
-            <t-select v-model="timezone" filterable class="automation-editor__tz">
-              <t-option v-for="zone in zones" :key="zone" :value="zone" :label="zone" />
-            </t-select>
+          <div v-else-if="schedule.kind === 'custom'" class="setting-row">
+            <div class="setting-info">
+              <label>{{ t('automation.editor.cron') }}</label>
+              <p class="desc">{{ t('automation.schedule.customHint') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-input v-model="schedule.expr" class="automation-editor__mono" placeholder="0 9 * * 1-5" />
+            </div>
           </div>
 
-          <div class="automation-editor__preview" :class="{ 'is-error': previewError }" aria-live="polite">
-            <template v-if="previewError">
-              <t-icon name="error-circle" size="14px" /> {{ previewError }}
-            </template>
-            <template v-else-if="previewRuns.length">
-              <span>{{ t('automation.schedule.nextRuns') }}</span>
-              <span v-for="run in previewRuns" :key="run" class="automation-editor__chip">
-                {{ formatInZone(run, timezone, locale) }}
-              </span>
-            </template>
-            <template v-else-if="previewLoading">{{ t('common.loading') }}</template>
+          <div v-else class="setting-row">
+            <div class="setting-info">
+              <label>{{ t('automation.editor.timeOfDay') }}</label>
+            </div>
+            <div class="setting-control">
+              <t-time-picker v-model="clock" format="HH:mm" :clearable="false" />
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ t('automation.fields.timezone') }}</label>
+              <p class="desc">{{ t('automation.editor.timezoneDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-select v-model="timezone" filterable>
+                <t-option v-for="zone in zones" :key="zone" :value="zone" :label="zone" />
+              </t-select>
+            </div>
+          </div>
+
+          <div class="setting-row setting-row-vertical">
+            <div class="setting-info">
+              <label>{{ t('automation.schedule.nextRuns') }}</label>
+            </div>
+            <div class="setting-control setting-control-full">
+              <div class="automation-editor__preview" :class="{ 'is-error': previewError }" aria-live="polite">
+                <template v-if="previewError">
+                  <t-icon name="error-circle" size="16px" /> {{ previewError }}
+                </template>
+                <ul v-else-if="previewRuns.length" class="automation-editor__runs">
+                  <li v-for="run in previewRuns" :key="run">
+                    <t-icon name="time" size="14px" /> {{ formatInZone(run, timezone, locale) }}
+                  </li>
+                </ul>
+                <span v-else-if="previewLoading">{{ t('common.loading') }}</span>
+                <span v-else class="automation-editor__muted">{{ t('automation.editor.previewEmpty') }}</span>
+              </div>
+            </div>
           </div>
         </div>
-      </t-form-item>
-
-      <t-form-item :label="t('automation.fields.accessLevel')">
-        <div class="automation-editor__stack">
-          <t-radio-group v-model="form.access_level">
-            <t-radio v-for="level in ACCESS_LEVELS" :key="level" :value="level">
-              {{ t(`assistant.access.levels.${level}.label`) }}
-            </t-radio>
-          </t-radio-group>
-          <p class="automation-editor__hint">{{ t(`automation.editor.access.${form.access_level}`) }}</p>
-        </div>
-      </t-form-item>
-
-      <t-collapse :borderless="true" class="automation-editor__advanced">
-        <t-collapse-panel :header="t('automation.editor.advanced')">
-          <t-form-item :label="t('automation.fields.sessionMode')">
-            <div class="automation-editor__stack">
-              <t-radio-group v-model="form.session_mode">
-                <t-radio value="per_run">{{ t('automation.sessionMode.per_run') }}</t-radio>
-                <t-radio value="persistent">{{ t('automation.sessionMode.persistent') }}</t-radio>
-              </t-radio-group>
-              <t-checkbox v-if="form.session_mode === 'per_run'" v-model="form.carry_last_result">
-                {{ t('automation.fields.carryLastResult') }}
-              </t-checkbox>
-            </div>
-          </t-form-item>
-          <t-form-item :label="t('automation.fields.overlapPolicy')">
-            <t-select v-model="form.overlap_policy">
-              <t-option value="skip" :label="t('automation.overlap.skip')" />
-              <t-option value="queue" :label="t('automation.overlap.queue')" />
-            </t-select>
-          </t-form-item>
-          <t-form-item :label="t('automation.fields.misfirePolicy')">
-            <t-select v-model="form.misfire_policy">
-              <t-option value="skip" :label="t('automation.misfire.skip')" />
-              <t-option value="run_once" :label="t('automation.misfire.run_once')" />
-            </t-select>
-          </t-form-item>
-          <t-form-item :label="t('automation.fields.approvalTimeout')"
-            :help="t('automation.editor.approvalTimeoutHelp')">
-            <t-input-number v-model="approvalHours" :min="1" :max="168" theme="normal" :suffix="t('automation.units.hours')" />
-          </t-form-item>
-          <t-form-item :label="t('automation.fields.maxDuration')">
-            <t-input-number v-model="maxMinutes" :min="1" :max="240" theme="normal" :suffix="t('automation.units.minutes')" />
-          </t-form-item>
-          <t-form-item :label="t('automation.fields.notifyOnSuccess')">
-            <div class="automation-editor__stack">
-              <t-switch v-model="form.notify_on_success" />
-              <p class="automation-editor__hint">{{ t('automation.editor.notifyHint') }}</p>
-            </div>
-          </t-form-item>
-        </t-collapse-panel>
-      </t-collapse>
-    </t-form>
-
-    <template #footer>
-      <div class="automation-editor__footer">
-        <t-button variant="outline" @click="close">{{ t('common.cancel') }}</t-button>
-        <t-button theme="primary" :loading="saving" :disabled="!canSave" @click="save">
-          {{ automation ? t('common.save') : t('common.create') }}
-        </t-button>
       </div>
+
+      <!-- 执行方式 -->
+      <div v-show="section === 'execution'" class="section">
+        <div class="section-header">
+          <h2>{{ t('automation.editor.sections.execution.title') }}</h2>
+          <p class="section-description">{{ t('automation.editor.sections.execution.desc') }}</p>
+        </div>
+        <div class="settings-group">
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ t('automation.fields.accessLevel') }}</label>
+              <p class="desc">{{ t(`automation.editor.access.${form.access_level}`) }}</p>
+            </div>
+            <div class="setting-control">
+              <t-select v-model="form.access_level">
+                <t-option v-for="level in ASSISTANT_ACCESS_LEVELS" :key="level" :value="level"
+                  :label="t(`assistant.access.levels.${level}.label`)" />
+              </t-select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ t('automation.fields.sessionMode') }}</label>
+              <p class="desc">{{ t(`automation.editor.sessionModeDesc.${form.session_mode}`) }}</p>
+            </div>
+            <div class="setting-control">
+              <t-select v-model="form.session_mode">
+                <t-option value="per_run" :label="t('automation.sessionMode.per_run')" />
+                <t-option value="persistent" :label="t('automation.sessionMode.persistent')" />
+              </t-select>
+            </div>
+          </div>
+          <div v-if="form.session_mode === 'per_run'" class="setting-row">
+            <div class="setting-info">
+              <label>{{ t('automation.fields.carryLastResult') }}</label>
+              <p class="desc">{{ t('automation.editor.carryDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="form.carry_last_result" />
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ t('automation.fields.overlapPolicy') }}</label>
+            </div>
+            <div class="setting-control">
+              <t-select v-model="form.overlap_policy">
+                <t-option value="skip" :label="t('automation.overlap.skip')" />
+                <t-option value="queue" :label="t('automation.overlap.queue')" />
+              </t-select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ t('automation.fields.misfirePolicy') }}</label>
+              <p class="desc">{{ t('automation.editor.misfireDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-select v-model="form.misfire_policy">
+                <t-option value="skip" :label="t('automation.misfire.skip')" />
+                <t-option value="run_once" :label="t('automation.misfire.run_once')" />
+              </t-select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ t('automation.fields.maxDuration') }}</label>
+              <p class="desc">{{ t('automation.editor.maxDurationDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-input-number v-model="maxMinutes" :min="1" :max="240" theme="column"
+                :suffix="t('automation.units.minutes')" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 审批与通知 -->
+      <div v-show="section === 'notify'" class="section">
+        <div class="section-header">
+          <h2>{{ t('automation.editor.sections.notify.title') }}</h2>
+          <p class="section-description">{{ t('automation.editor.sections.notify.desc') }}</p>
+        </div>
+        <div class="settings-group">
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ t('automation.fields.approvalTimeout') }}</label>
+              <p class="desc">{{ t('automation.editor.approvalTimeoutHelp') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-input-number v-model="approvalHours" :min="1" :max="168" theme="column"
+                :suffix="t('automation.units.hours')" />
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ t('automation.fields.notifyOnSuccess') }}</label>
+              <p class="desc">{{ t('automation.editor.notifyHint') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="form.notify_on_success" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <template #footer-note>
+      <p v-if="previewRuns.length && !previewError" class="settings-footer-note">
+        <t-icon name="time" class="settings-footer-note__icon" />
+        <span><strong>{{ describeCurrent }}</strong>{{ t('automation.nextRunAt', { time: formatInZone(previewRuns[0], timezone, locale) }) }}</span>
+      </p>
     </template>
-  </t-drawer>
+    <template #footer>
+      <t-button theme="default" variant="outline" @click="modalShell.requestClose">{{ t('common.cancel') }}</t-button>
+      <t-button theme="primary" :loading="saving" @click="save">
+        {{ automation ? t('common.save') : t('common.create') }}
+      </t-button>
+    </template>
+  </SettingsModalShell>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
+import SettingsModalShell from '@/components/SettingsModalShell.vue'
+import { useModalShell } from '@/composables/useModalShell'
 import {
   createAutomation,
   updateAutomation,
@@ -159,6 +298,7 @@ import { ASSISTANT_ACCESS_LEVELS } from '@/api/assistant'
 import {
   browserTimezone,
   defaultScheduleForm,
+  describeTrigger,
   formatInZone,
   scheduleFormFromTrigger,
   timezoneOptions,
@@ -179,11 +319,32 @@ const emit = defineEmits<{ 'update:visible': [value: boolean]; saved: [value: Au
 
 const { t, locale } = useI18n()
 
+type Section = 'basic' | 'schedule' | 'execution' | 'notify'
+
 const VARIABLE_TAGS = ['now', 'last_run_at', 'last_success_at', 'run_id', 'automation_name']
   .map((name) => `{{${name}}}`)
 const KINDS: ScheduleKind[] = ['daily', 'weekdays', 'weekly', 'monthly', 'hourly', 'once', 'custom']
 const WEEK = [1, 2, 3, 4, 5, 6, 0]
-const ACCESS_LEVELS = ASSISTANT_ACCESS_LEVELS
+
+const section = ref<Section>('basic')
+const navGroups = computed(() => [
+  {
+    key: 'task',
+    label: t('automation.editor.navGroups.task'),
+    items: [
+      { key: 'basic', label: t('automation.editor.sections.basic.title'), icon: 'edit-1' },
+      { key: 'schedule', label: t('automation.editor.sections.schedule.title'), icon: 'time' },
+    ],
+  },
+  {
+    key: 'run',
+    label: t('automation.editor.navGroups.run'),
+    items: [
+      { key: 'execution', label: t('automation.editor.sections.execution.title'), icon: 'secured' },
+      { key: 'notify', label: t('automation.editor.sections.notify.title'), icon: 'notification' },
+    ],
+  },
+])
 
 const blank = (): Required<Omit<AutomationInput, 'trigger' | 'limits' | 'description'>> => ({
   name: '',
@@ -228,9 +389,23 @@ const clock = computed({
   },
 })
 
+const trigger = computed(() => triggerFromScheduleForm(schedule, timezone.value))
+const describeCurrent = computed(() => (trigger.value ? `${describeTrigger(trigger.value, t, locale.value)} · ` : ''))
+
+function close() {
+  emit('update:visible', false)
+}
+
+const modalShell = useModalShell({
+  visible: () => props.visible,
+  close,
+  snapshot: () => ({ form, schedule, timezone: timezone.value, maxMinutes: maxMinutes.value }),
+})
+
 watch(() => props.visible, (open) => {
   if (!open) return
   const a = props.automation
+  section.value = 'basic'
   Object.assign(form, blank())
   Object.assign(schedule, defaultScheduleForm())
   timezone.value = browserTimezone()
@@ -254,9 +429,8 @@ watch(() => props.visible, (open) => {
   }
   previewRuns.value = []
   previewError.value = ''
+  modalShell.markClean()
 }, { immediate: true })
-
-const trigger = computed(() => triggerFromScheduleForm(schedule, timezone.value))
 
 const previewRuns = ref<string[]>([])
 const previewError = ref('')
@@ -284,19 +458,26 @@ watch([trigger, () => props.visible], () => {
   }, 400)
 }, { deep: true })
 
-const canSave = computed(() => !!form.name.trim() && !!form.instruction.trim() && !!trigger.value && !previewError.value)
-
-function close() {
-  emit('update:visible', false)
+// The first section with a problem, with what to tell the user.
+function firstProblem(): [Section, string] | null {
+  if (!form.name.trim()) return ['basic', t('automation.editor.errors.name')]
+  if (!form.instruction.trim()) return ['basic', t('automation.editor.errors.instruction')]
+  if (!trigger.value || previewError.value) return ['schedule', previewError.value || t('automation.editor.errors.schedule')]
+  return null
 }
 
 async function save() {
-  if (!canSave.value || !trigger.value) return
+  const problem = firstProblem()
+  if (problem) {
+    section.value = problem[0]
+    MessagePlugin.warning(problem[1])
+    return
+  }
   saving.value = true
   const input: AutomationInput = {
     ...form,
     name: form.name.trim(),
-    trigger: trigger.value,
+    trigger: trigger.value!,
     limits: { max_duration_minutes: maxMinutes.value },
   }
   try {
@@ -304,6 +485,7 @@ async function save() {
       ? await updateAutomation(props.automation.id, input)
       : await createAutomation(input)
     MessagePlugin.success(props.automation ? t('common.saveSuccess') : t('common.createSuccess'))
+    modalShell.markClean()
     emit('saved', res.data)
     close()
   } catch (e: any) {
@@ -315,95 +497,182 @@ async function save() {
 </script>
 
 <style scoped lang="less">
-.automation-editor {
-  :deep(.t-form__item) {
-    margin-bottom: var(--app-space-4);
+.content-wrapper {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 28px 40px 48px;
+  box-sizing: border-box;
+}
+
+.section {
+  width: 100%;
+}
+
+.section-header {
+  margin-bottom: 20px;
+
+  h2 {
+    margin: 0 0 6px;
+    color: var(--td-text-color-primary);
+    font-size: var(--app-text-3xl);
+    font-weight: 600;
+  }
+
+  .section-description {
+    margin: 0;
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-base);
+    line-height: 1.5;
+  }
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.setting-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  min-width: 0;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &.setting-row-vertical {
+    flex-direction: column;
+    gap: 12px;
+
+    .setting-info {
+      flex: none;
+      max-width: 100%;
+    }
+  }
+}
+
+.setting-info {
+  flex: 0 0 42%;
+  max-width: 42%;
+  min-width: 0;
+
+  label {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--td-text-color-primary);
+    font-size: var(--app-text-lg);
+    font-weight: 500;
+
+    .required {
+      margin-left: 2px;
+      color: var(--td-error-color);
+    }
+  }
+
+  .desc {
+    margin: 0;
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-md);
+    line-height: 1.5;
+  }
+}
+
+.setting-control {
+  display: flex;
+  flex: 1 1 58%;
+  justify-content: flex-end;
+  align-items: flex-start;
+  min-width: 0;
+  max-width: 58%;
+
+  > :deep(.t-select__wrap),
+  > :deep(.t-input__wrap),
+  > :deep(.t-date-picker) {
+    width: 100%;
+    max-width: 320px;
+  }
+
+  &.setting-control-full {
+    width: 100%;
+    max-width: 100%;
+    justify-content: flex-start;
   }
 }
 
 .automation-editor__stack {
-  display: flex;
   flex-direction: column;
   gap: 8px;
-  width: 100%;
-}
-
-.automation-editor__row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  color: var(--td-text-color-secondary);
-  font-size: var(--app-text-sm);
-}
-
-.automation-editor__kinds {
-  flex-wrap: wrap;
-}
-
-.automation-editor__num {
-  width: 96px;
-}
-
-.automation-editor__clock {
-  width: 120px;
-}
-
-.automation-editor__expr {
-  max-width: 280px;
-  font-family: var(--app-font-mono, monospace);
-}
-
-.automation-editor__tz {
-  flex: 1;
-  min-width: 200px;
 }
 
 .automation-editor__hint {
   margin: 0;
   color: var(--td-text-color-placeholder);
   font-size: var(--app-text-sm);
-  line-height: 1.5;
+  line-height: 1.8;
 
   code {
     margin: 0 2px;
-    padding: 0 4px;
+    padding: 1px 6px;
     border-radius: var(--app-radius-xs);
     background: var(--td-bg-color-secondarycontainer);
     color: var(--td-text-color-secondary);
+    font-size: var(--app-text-xs);
   }
 }
 
-.automation-editor__preview {
-  display: flex;
+.automation-editor__days {
   flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  min-height: 22px;
-  color: var(--td-text-color-secondary);
-  font-size: var(--app-text-sm);
+  justify-content: flex-end;
+  row-gap: 4px;
+}
+
+.automation-editor__mono :deep(input) {
+  font-family: var(--app-font-family-mono);
+}
+
+.automation-editor__preview {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-primary);
+  font-size: var(--app-text-base);
 
   &.is-error {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--td-error-color-light);
     color: var(--td-error-color);
   }
 }
 
-.automation-editor__chip {
-  padding: 1px 8px;
-  border-radius: var(--app-radius-pill);
-  background: var(--td-bg-color-secondarycontainer);
+.automation-editor__runs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
   font-variant-numeric: tabular-nums;
-}
 
-.automation-editor__advanced {
-  :deep(.t-collapse-panel__wrapper .t-collapse-panel__content) {
-    padding: var(--app-space-3) 0 0;
+  li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  :deep(.t-icon) {
+    color: var(--td-brand-color);
   }
 }
 
-.automation-editor__footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+.automation-editor__muted {
+  color: var(--td-text-color-placeholder);
 }
 </style>

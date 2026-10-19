@@ -217,7 +217,7 @@ func TestAutomationCreateValidatesAndSchedules(t *testing.T) {
 		"bad agent":    {AgentID: ptr("builtin-wiki-fixer")},
 		"bad mode":     {SessionMode: ptr("forever")},
 		"once in past": {Trigger: &types.AutomationTrigger{
-			Type: types.AutomationTriggerOnce, At: ptr(f.now.Add(-time.Hour)),
+			Type: types.AutomationTriggerOnce, At: f.now.Add(-time.Hour).Format(time.RFC3339),
 		}},
 	} {
 		p.Name, p.Instruction = ptr("n"), ptr("i")
@@ -532,4 +532,28 @@ func TestAutomationValidateTrigger(t *testing.T) {
 	for i, at := range times {
 		require.Equal(t, time.Monday, at.In(shanghai).Weekday(), fmt.Sprint(i))
 	}
+}
+
+func TestAutomationFindBySession(t *testing.T) {
+	f := newAutomationFixture(t)
+	a := f.create(t, types.AutomationPatch{})
+	require.NoError(t, f.db.Create(&types.AutomationRun{
+		ID: "run-1", AutomationID: a.ID, TenantID: a.TenantID, ScheduledAt: f.now,
+		TriggerKind: types.AutomationRunManual, Status: types.AutomationRunSucceeded, SessionID: "sess-1",
+	}).Error)
+
+	found, err := f.svc.FindBySession(f.ctx, "sess-1")
+	require.NoError(t, err)
+	require.Equal(t, a.ID, found.ID)
+
+	require.NoError(t, f.db.Model(&types.Automation{}).Where("id = ?", a.ID).
+		Update("persistent_session_id", "sess-persistent").Error)
+	found, err = f.svc.FindBySession(f.ctx, "sess-persistent")
+	require.NoError(t, err)
+	require.Equal(t, a.ID, found.ID)
+
+	_, err = f.svc.FindBySession(f.ctx, "missing")
+	var appErr *apperrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, apperrors.ErrNotFound, appErr.Code)
 }

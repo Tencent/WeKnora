@@ -41,11 +41,13 @@ const (
 	openPageAgents         = "agents"
 	openPageKnowledgeBases = "knowledge_bases"
 	openPageOrganizations  = "organizations"
+	openPageAutomations    = "automations"
 )
 
 var openPages = []string{
 	types.PageKnowledgeBase, types.PageWiki, types.PageAgentEditor, types.PageModelSettings, types.PageMCPServices,
 	openPageSettings, openPageToolbox, openPageAgents, openPageKnowledgeBases, openPageOrganizations,
+	openPageAutomations,
 }
 
 type openPageSection struct{ zh, en string }
@@ -189,7 +191,7 @@ const openPageSchema = `{
     "page": {
       "type": "string",
       "enum": ["knowledge_base", "wiki", "agent_editor", "settings_models", "mcp_services",
-        "settings", "toolbox", "agents", "knowledge_bases", "organizations"],
+        "settings", "toolbox", "agents", "knowledge_bases", "organizations", "automations"],
       "description": "Which page to open. ` +
 	`For a model or MCP service use settings_models or mcp_services, which can open one."
     },
@@ -197,6 +199,7 @@ const openPageSchema = `{
     "knowledge_id": {"type": "string", "description": "knowledge_base only: open this document."},
     "wiki_slug": {"type": "string", "description": "wiki only: open this page; omit for the Wiki home."},
     "agent_id": {"type": "string", "description": "agent_editor: the agent to edit."},
+    "automation_id": {"type": "string", "description": "automations only: open this automation's runs."},
     "section": {
       "type": "string",
       "description": "The part of the page to open. ` +
@@ -304,6 +307,7 @@ type openPageInput struct {
 	KnowledgeID     string                   `json:"knowledge_id"`
 	WikiSlug        string                   `json:"wiki_slug"`
 	AgentID         string                   `json:"agent_id"`
+	AutomationID    string                   `json:"automation_id"`
 	Section         string                   `json:"section"`
 	Panel           string                   `json:"panel"`
 	ModelID         string                   `json:"model_id"`
@@ -325,6 +329,7 @@ type OpenPageLink struct {
 	KnowledgeID       string                   `json:"knowledge_id,omitempty"`
 	WikiSlug          string                   `json:"wiki_slug,omitempty"`
 	AgentID           string                   `json:"agent_id,omitempty"`
+	AutomationID      string                   `json:"automation_id,omitempty"`
 	Section           string                   `json:"section,omitempty"`
 	Panel             string                   `json:"panel,omitempty"`
 	ModelID           string                   `json:"model_id,omitempty"`
@@ -354,7 +359,7 @@ func parseOpenPageInput(args json.RawMessage) (openPageInput, error) {
 		}
 	}
 	trim(&input.Page, &input.KnowledgeBaseID, &input.KnowledgeID, &input.WikiSlug, &input.AgentID,
-		&input.Section, &input.Panel, &input.ModelID, &input.MCPServiceID, &input.Note)
+		&input.AutomationID, &input.Section, &input.Panel, &input.ModelID, &input.MCPServiceID, &input.Note)
 	if d := input.ModelDraft; d != nil {
 		trim(&d.Type, &d.Source, &d.Provider, &d.ModelName, &d.DisplayName, &d.BaseURL)
 	}
@@ -374,6 +379,7 @@ func validateOpenPageInput(in openPageInput) error {
 			"wiki_slug": in.WikiSlug != "", "agent_id": in.AgentID != "", "section": in.Section != "",
 			"panel": in.Panel != "", "model_id": in.ModelID != "", "model_draft": in.ModelDraft != nil,
 			"mcp_service_id": in.MCPServiceID != "", "mcp_service_draft": in.MCPServiceDraft != nil,
+			"automation_id": in.AutomationID != "",
 		}
 		for name, present := range set {
 			if present && !slices.Contains(allowed, name) {
@@ -432,6 +438,8 @@ func validateOpenPageInput(in openPageInput) error {
 		return only("section")
 	case openPageAgents, openPageKnowledgeBases, openPageOrganizations:
 		return only()
+	case openPageAutomations:
+		return only("automation_id")
 	default:
 		return fmt.Errorf("page must be one of %s", strings.Join(openPages, ", "))
 	}
@@ -551,7 +559,8 @@ func (t *OpenPageTool) navigate(ctx context.Context, link *OpenPageLink, button 
 		Action: types.PageActionNavigate,
 		Target: &types.PageNavigateTarget{
 			Page: link.Page, KnowledgeBaseID: link.KnowledgeBaseID, KnowledgeID: link.KnowledgeID,
-			WikiSlug: link.WikiSlug, AgentID: link.AgentID, Section: link.Section, Panel: link.Panel,
+			WikiSlug: link.WikiSlug, AgentID: link.AgentID, AutomationID: link.AutomationID,
+			Section: link.Section, Panel: link.Panel,
 			ModelID: link.ModelID, MCPServiceID: link.MCPServiceID,
 		},
 	})
@@ -671,6 +680,16 @@ func (t *OpenPageTool) resolve(ctx context.Context, in openPageInput) (*OpenPage
 		link.Label = pick("知识库", "Knowledge bases")
 	case openPageOrganizations:
 		link.Label = pick("共享空间", "Shared spaces")
+	case openPageAutomations:
+		link.Label = pick("自动化", "Automations")
+		if in.AutomationID != "" {
+			a, blocked := t.read(ctx, "automation.get", map[string]string{"automation_id": in.AutomationID})
+			if blocked != nil {
+				return nil, blocked
+			}
+			link.AutomationID = in.AutomationID
+			link.Detail = firstNonEmpty(a.Label("name"), in.AutomationID)
+		}
 	}
 	return link, nil
 }

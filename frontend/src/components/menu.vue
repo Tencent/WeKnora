@@ -1349,7 +1349,6 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
         .menu_bottom {
             align-items: center;
         }
-
         .menu_top {
             margin-right: 0;
             padding-right: 0;

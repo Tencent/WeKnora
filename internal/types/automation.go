@@ -76,8 +76,9 @@ type AutomationTrigger struct {
 	// Expr is a cron expression: five fields (minute first) or six (seconds
 	// first), or a descriptor such as @daily.
 	Expr string `json:"expr,omitempty" extensions:"x-agent"`
-	// At is when a once trigger fires.
-	At *time.Time `json:"at,omitempty" extensions:"x-agent"`
+	// At is when a once trigger fires, RFC3339 or a wall-clock time in
+	// Timezone, such as "2006-01-02T15:04:05" or "2006-01-02 15:04".
+	At string `json:"at,omitempty" extensions:"x-agent"`
 	// Timezone is an IANA zone, e.g. Asia/Shanghai; empty means UTC.
 	Timezone string `json:"timezone,omitempty" extensions:"x-agent"`
 }

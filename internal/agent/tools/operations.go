@@ -48,6 +48,8 @@ const findOperationsDescription = "" +
 	"workspace's models, MCP services and skills (adding, renaming, enabling, removing, installing a " +
 	"skill from a hub), copying knowledge bases, editing or restoring document chunks, " +
 	"inspecting data sources and sync logs, pausing/resuming sync schedules, triggering syncs, " +
+	"creating and managing the user's automations (an agent runs a task on a schedule as them, " +
+	"for reminders and recurring or later work), " +
 	"configuring document parsing, chunking, OCR and generated questions, " +
 	"batch updating FAQ enabled/recommended states and tags, reading and refreshing saved MCP tool directories, " +
 	"managing saved web search providers and data source sync settings, checking connections and retrieval, " +

@@ -20,6 +20,7 @@ func RegisterAutomationRoutes(r *gin.RouterGroup, h *handler.AutomationHandler, 
 		automations.GET("", h.ListAutomations)
 		automations.POST("", h.CreateAutomation)
 		automations.POST("/validate-trigger", h.ValidateTrigger)
+		automations.GET("/by-session/:session_id", h.GetAutomationBySession)
 		automations.GET("/:id", h.GetAutomation)
 		automations.PUT("/:id", h.UpdateAutomation)
 		automations.DELETE("/:id", h.DeleteAutomation)

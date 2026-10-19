@@ -129,6 +129,10 @@ export function getAutomation(id: string) {
   return get<{ success: boolean; data: Automation }>(`${base}/${enc(id)}`)
 }
 
+export function getAutomationBySession(sessionId: string) {
+  return get<{ success: boolean; data: Automation }>(`${base}/by-session/${enc(sessionId)}`)
+}
+
 export function createAutomation(input: AutomationInput) {
   return post<{ success: boolean; data: Automation }>(base, input)
 }

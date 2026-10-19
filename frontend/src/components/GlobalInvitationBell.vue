@@ -1,16 +1,9 @@
 <template>
-  <!-- 全局右上角铃铛：合并展示"待处理邀请"与站内通知（自动化运行结果、等待审批等）。
-       - 只在有待处理邀请或未读通知时渲染，空收件箱场景不占用角落像素。
-       - 固定定位、z-index 远低于 t-drawer 默认 2500，业务页面右侧抽屉弹出时会自然覆盖铃铛。
-       - 通知靠轮询刷新，页面不可见时暂停。 -->
-  <template v-if="badgeCount > 0">
-    <t-popup v-model:visible="panelVisible" trigger="click" placement="bottom-right" :overlay-inner-style="{ padding: 0 }">
-      <t-badge :count="badgeCount" :max-count="99" :offset="[6, 4]" class="global-invitation-bell">
-        <button type="button" class="global-invitation-bell__btn" :title="$t('notifications.title')"
-          :aria-label="$t('notifications.title')">
-          <t-icon name="notification" size="18px" />
-        </button>
-      </t-badge>
+  <!-- 通知入口：合并展示"待处理邀请"与站内通知（自动化运行结果、等待审批等）。
+       触发区域由调用方通过默认插槽渲染（侧栏底部用户栏右侧），面板向右弹出。
+       通知靠轮询刷新，页面不可见时暂停。 -->
+  <t-popup v-model:visible="panelVisible" trigger="click" placement="right-bottom" :overlay-inner-style="{ padding: 0 }">
+      <slot :count="badgeCount" :open="panelVisible" />
       <template #content>
         <div class="notification-panel">
           <div class="notification-panel__head">
@@ -30,14 +23,13 @@
           </button>
           <button v-for="item in items" :key="item.id" type="button" class="notification-item"
             :class="{ 'is-unread': !item.read_at }" @click="open(item)">
-            <t-icon :name="iconFor(item.kind)" size="16px" class="notification-item__icon"
-              :class="`is-${item.kind.replace('.', '-')}`" />
+            <span class="notification-item__dot" :class="`is-${item.kind.replace('.', '-')}`" aria-hidden="true" />
             <span class="notification-item__body">
-              <span class="notification-item__title">
-                {{ kindLabel(item.kind) }} · {{ item.title }}
-              </span>
+              <span class="notification-item__title">{{ item.title }}</span>
               <span v-if="item.body" class="notification-item__text">{{ item.body }}</span>
-              <span class="notification-item__time">{{ formatTime(item.created_at) }}</span>
+              <span class="notification-item__time">
+                {{ kindLabel(item.kind) }} · {{ formatTime(item.created_at) }}
+              </span>
             </span>
           </button>
           <p v-if="!items.length && pendingInvitationCount === 0" class="notification-panel__empty">
@@ -45,8 +37,7 @@
           </p>
         </div>
       </template>
-    </t-popup>
-  </template>
+  </t-popup>
   <MyInvitationsDialog v-model:visible="dialogVisible" />
 </template>
 
@@ -99,14 +90,6 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisible)
 })
 
-const ICONS: Record<string, string> = {
-  'automation.succeeded': 'check-circle',
-  'automation.failed': 'close-circle',
-  'automation.awaiting_approval': 'help-circle',
-  'automation.paused': 'pause-circle',
-}
-
-const iconFor = (kind: string) => ICONS[kind] ?? 'notification'
 const kindLabel = (kind: string) => {
   const key = `notifications.kinds.${kind.replace('.', '_')}`
   return te(key) ? t(key) : t('notifications.title')
@@ -145,46 +128,9 @@ async function markAllRead() {
 </script>
 
 <style lang="less" scoped>
-.global-invitation-bell {
-  position: fixed;
-  top: 12px;
-  right: calc(16px + var(--assistant-dock-width, 0px));
-  /* 远低于 TDesign 抽屉的默认 z-index (2500)，确保业务页右侧抽屉弹出时能正常盖住铃铛。
-     高于普通页面内容（一般 0~10），避免被列表卡片覆盖。 */
-  z-index: 100;
-}
-
-.global-invitation-bell__btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: var(--app-radius-lg);
-  /* 用 container 背景而非透明，铃铛悬在内容区上方时和不同颜色的页面背景都能看清。 */
-  background: var(--td-bg-color-container);
-  color: var(--td-text-color-secondary);
-  cursor: pointer;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
-  transition: background-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
-
-  &:hover {
-    background-color: var(--td-bg-color-secondarycontainer);
-    color: var(--td-brand-color);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--td-brand-color-focus);
-    outline-offset: 1px;
-  }
-}
-
 .notification-panel {
-  width: 340px;
-  max-height: 440px;
+  width: 360px;
+  max-height: 460px;
   overflow-y: auto;
   padding: 4px 0;
 }
@@ -193,7 +139,9 @@ async function markAllRead() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 12px;
+  margin: 0 4px 4px;
+  padding: 6px 12px 8px;
+  border-bottom: 1px solid var(--td-component-stroke);
   font-weight: 600;
 }
 
@@ -208,9 +156,11 @@ async function markAllRead() {
 .notification-item {
   display: flex;
   gap: 10px;
-  width: 100%;
+  width: calc(100% - 8px);
+  margin: 2px 4px;
   padding: 8px 12px;
   border: 0;
+  border-radius: var(--app-radius-sm);
   background: none;
   color: var(--td-text-color-primary);
   font: inherit;
@@ -221,27 +171,27 @@ async function markAllRead() {
     background: var(--td-bg-color-container-hover);
   }
 
-  &.is-unread .notification-item__title::before {
-    content: '';
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    margin-right: 6px;
-    border-radius: 50%;
-    background: var(--td-brand-color);
-    vertical-align: middle;
+  &.is-unread {
+    background: var(--td-bg-color-secondarycontainer);
+
+    &:hover {
+      background: var(--td-bg-color-secondarycontainer-hover);
+    }
   }
 }
 
-.notification-item__icon {
+.notification-item__dot {
   flex-shrink: 0;
-  margin-top: 2px;
-  color: var(--td-text-color-secondary);
+  width: 6px;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--td-text-color-placeholder);
 
-  &.is-automation-succeeded { color: var(--td-success-color); }
-  &.is-automation-failed { color: var(--td-error-color); }
+  &.is-automation-succeeded { background: var(--td-success-color); }
+  &.is-automation-failed { background: var(--td-error-color); }
   &.is-automation-awaiting_approval,
-  &.is-automation-paused { color: var(--td-warning-color); }
+  &.is-automation-paused { background: var(--td-warning-color); }
 }
 
 .notification-item__body {
@@ -253,7 +203,7 @@ async function markAllRead() {
 
 .notification-item__title {
   overflow: hidden;
-  font-size: var(--app-text-sm);
+  font-size: var(--app-text-md);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -16,7 +16,6 @@ func cronTrigger(expr, tz string) types.AutomationTrigger {
 }
 
 func TestParseRejectsBadTriggers(t *testing.T) {
-	past := time.Now()
 	for name, tr := range map[string]types.AutomationTrigger{
 		"empty type":     {},
 		"no expr":        cronTrigger("", ""),
@@ -24,7 +23,8 @@ func TestParseRejectsBadTriggers(t *testing.T) {
 		"bad timezone":   cronTrigger("0 9 * * *", "Mars/Olympus"),
 		"tz prefix":      cronTrigger("CRON_TZ=Asia/Tokyo 0 9 * * *", ""),
 		"once without":   {Type: types.AutomationTriggerOnce},
-		"once with expr": {Type: types.AutomationTriggerOnce, Expr: "0 9 * * *", At: &past},
+		"once with expr": {Type: types.AutomationTriggerOnce, Expr: "0 9 * * *", At: "2026-10-19T22:09:00Z"},
+		"once nonsense":  {Type: types.AutomationTriggerOnce, At: "tomorrow"},
 	} {
 		_, err := Parse(tr)
 		require.Truef(t, errors.Is(err, ErrInvalidTrigger), "%s: %v", name, err)
@@ -53,13 +53,20 @@ func TestSixFieldsAndDescriptors(t *testing.T) {
 }
 
 func TestOnceFiresOnce(t *testing.T) {
-	at := time.Date(2026, 10, 20, 8, 0, 0, 0, time.FixedZone("x", 3600))
-	s, err := Parse(types.AutomationTrigger{Type: types.AutomationTriggerOnce, At: &at})
-	require.NoError(t, err)
-	from := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
-	require.Equal(t, at.UTC(), *s.Next(from))
-	require.Nil(t, s.Next(at))
-	require.Len(t, s.Upcoming(from, 3), 1)
+	at := time.Date(2026, 10, 20, 7, 0, 0, 0, time.UTC)
+	for _, given := range []types.AutomationTrigger{
+		{Type: types.AutomationTriggerOnce, At: "2026-10-20T08:00:00+01:00"},
+		{Type: types.AutomationTriggerOnce, At: "2026-10-20 15:00", Timezone: "Asia/Shanghai"},
+		{Type: types.AutomationTriggerOnce, At: "2026-10-20T15:00:00", Timezone: "Asia/Shanghai"},
+	} {
+		s, err := Parse(given)
+		require.NoError(t, err, given.At)
+		require.Equal(t, "2026-10-20T07:00:00Z", s.Trigger().At)
+		from := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
+		require.Equal(t, at, *s.Next(from))
+		require.Nil(t, s.Next(at))
+		require.Len(t, s.Upcoming(from, 3), 1)
+	}
 }
 
 func TestCheckInterval(t *testing.T) {
