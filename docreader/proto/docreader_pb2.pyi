@@ -86,6 +86,32 @@ class ReadResponse(_message.Message):
     source_blocks: _containers.RepeatedCompositeFieldContainer[SourceBlock]
     def __init__(self, markdown_content: _Optional[str] = ..., image_refs: _Optional[_Iterable[_Union[ImageRef, _Mapping]]] = ..., image_dir_path: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., error: _Optional[str] = ..., source_blocks: _Optional[_Iterable[_Union[SourceBlock, _Mapping]]] = ...) -> None: ...
 
+class ConvertPreviewRequest(_message.Message):
+    __slots__ = ("file_content", "file_name", "file_type", "request_id")
+    FILE_CONTENT_FIELD_NUMBER: _ClassVar[int]
+    FILE_NAME_FIELD_NUMBER: _ClassVar[int]
+    FILE_TYPE_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    file_content: bytes
+    file_name: str
+    file_type: str
+    request_id: str
+    def __init__(self, file_content: _Optional[bytes] = ..., file_name: _Optional[str] = ..., file_type: _Optional[str] = ..., request_id: _Optional[str] = ...) -> None: ...
+
+class ConvertPreviewResponse(_message.Message):
+    __slots__ = ("file_content", "converted", "skipped_reason", "warnings", "error")
+    FILE_CONTENT_FIELD_NUMBER: _ClassVar[int]
+    CONVERTED_FIELD_NUMBER: _ClassVar[int]
+    SKIPPED_REASON_FIELD_NUMBER: _ClassVar[int]
+    WARNINGS_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    file_content: bytes
+    converted: bool
+    skipped_reason: str
+    warnings: _containers.RepeatedScalarFieldContainer[str]
+    error: str
+    def __init__(self, file_content: _Optional[bytes] = ..., converted: bool = ..., skipped_reason: _Optional[str] = ..., warnings: _Optional[_Iterable[str]] = ..., error: _Optional[str] = ...) -> None: ...
+
 class ReadStreamMeta(_message.Message):
     __slots__ = ("markdown_content", "image_dir_path", "metadata", "error", "image_count", "source_blocks")
     class MetadataEntry(_message.Message):

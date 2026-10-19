@@ -11,6 +11,15 @@ type DocReader interface {
 	Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error)
 }
 
+// PreviewConverter is the optional capability of a document reader to turn a
+// document into a browser-renderable preview copy. It is deliberately separate
+// from DocumentReader: the HTTP transport and test doubles do not have to
+// implement it, and callers fall back to the original file when the concrete
+// reader does not satisfy it.
+type PreviewConverter interface {
+	ConvertPreview(ctx context.Context, req *types.ConvertPreviewRequest) (*types.ConvertPreviewResult, error)
+}
+
 // DocumentReader extends DocReader with transport lifecycle management
 // and remote engine discovery. Used by gRPC/HTTP clients that talk to
 // the Python docreader service.

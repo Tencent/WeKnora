@@ -252,3 +252,35 @@ func (p *GRPCDocumentReader) ListEngines(ctx context.Context, overrides map[stri
 	}
 	return result, nil
 }
+
+// ConvertPreview asks the docreader for a browser-renderable copy of a
+// document. An older docreader answers Unimplemented; callers treat that as a
+// conversion failure and keep serving the original file.
+func (p *GRPCDocumentReader) ConvertPreview(
+	ctx context.Context, req *types.ConvertPreviewRequest,
+) (*types.ConvertPreviewResult, error) {
+	p.mu.RLock()
+	client := p.client
+	p.mu.RUnlock()
+	if client == nil {
+		return nil, errNotConnected
+	}
+
+	resp, err := client.ConvertPreview(ctx, &proto.ConvertPreviewRequest{
+		FileContent: req.FileContent,
+		FileName:    req.FileName,
+		FileType:    req.FileType,
+		RequestId:   req.RequestID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gRPC ConvertPreview failed: %w", err)
+	}
+
+	return &types.ConvertPreviewResult{
+		FileContent:   resp.GetFileContent(),
+		Converted:     resp.GetConverted(),
+		SkippedReason: resp.GetSkippedReason(),
+		Warnings:      resp.GetWarnings(),
+		Error:         resp.GetError(),
+	}, nil
+}

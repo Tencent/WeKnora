@@ -39,6 +39,11 @@ class DocReaderStub(object):
                 request_serializer=docreader__pb2.ReadRequest.SerializeToString,
                 response_deserializer=docreader__pb2.ReadResponse.FromString,
                 _registered_method=True)
+        self.ConvertPreview = channel.unary_unary(
+                '/docreader.DocReader/ConvertPreview',
+                request_serializer=docreader__pb2.ConvertPreviewRequest.SerializeToString,
+                response_deserializer=docreader__pb2.ConvertPreviewResponse.FromString,
+                _registered_method=True)
         self.ReadStream = channel.unary_stream(
                 '/docreader.DocReader/ReadStream',
                 request_serializer=docreader__pb2.ReadRequest.SerializeToString,
@@ -56,6 +61,17 @@ class DocReaderServicer(object):
 
     def Read(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ConvertPreview(self, request, context):
+        """ConvertPreview rewrites a document into a copy the in-browser previewer
+        can render. Today it handles DOCX packages that embed EMF/WMF images:
+        every vector image is rasterized to PNG and the package relationships are
+        pointed at the new part. Files that need no conversion come back with
+        converted=false and no file_content, so callers keep serving the original.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -85,6 +101,11 @@ def add_DocReaderServicer_to_server(servicer, server):
                     servicer.Read,
                     request_deserializer=docreader__pb2.ReadRequest.FromString,
                     response_serializer=docreader__pb2.ReadResponse.SerializeToString,
+            ),
+            'ConvertPreview': grpc.unary_unary_rpc_method_handler(
+                    servicer.ConvertPreview,
+                    request_deserializer=docreader__pb2.ConvertPreviewRequest.FromString,
+                    response_serializer=docreader__pb2.ConvertPreviewResponse.SerializeToString,
             ),
             'ReadStream': grpc.unary_stream_rpc_method_handler(
                     servicer.ReadStream,
@@ -124,6 +145,33 @@ class DocReader(object):
             '/docreader.DocReader/Read',
             docreader__pb2.ReadRequest.SerializeToString,
             docreader__pb2.ReadResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ConvertPreview(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/docreader.DocReader/ConvertPreview',
+            docreader__pb2.ConvertPreviewRequest.SerializeToString,
+            docreader__pb2.ConvertPreviewResponse.FromString,
             options,
             channel_credentials,
             insecure,

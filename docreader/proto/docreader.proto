@@ -6,6 +6,12 @@ option go_package = "github.com/Tencent/WeKnora/internal/docreader/proto";
 
 service DocReader {
   rpc Read(ReadRequest) returns (ReadResponse) {}
+  // ConvertPreview rewrites a document into a copy the in-browser previewer
+  // can render. Today it handles DOCX packages that embed EMF/WMF images:
+  // every vector image is rasterized to PNG and the package relationships are
+  // pointed at the new part. Files that need no conversion come back with
+  // converted=false and no file_content, so callers keep serving the original.
+  rpc ConvertPreview(ConvertPreviewRequest) returns (ConvertPreviewResponse) {}
   // ReadStream is the streaming counterpart of Read. It first emits one
   // ReadStreamResponse carrying the parse metadata (markdown / metadata /
   // error), then emits one message per image. This keeps every gRPC message
@@ -61,6 +67,32 @@ message ReadResponse {
   map<string, string> metadata = 4;
   string error = 5;
   repeated SourceBlock source_blocks = 6;
+}
+
+// ConvertPreviewRequest carries the already-authorized file bytes. The
+// docreader never reads storage: the Go app owns persistence and access
+// control.
+message ConvertPreviewRequest {
+  bytes  file_content = 1;
+  string file_name = 2;
+  string file_type = 3;
+  string request_id = 4;
+}
+
+message ConvertPreviewResponse {
+  // Browser-renderable copy. Empty when converted=false or on error, so the
+  // caller keeps serving the original bytes instead of a partial package.
+  bytes file_content = 1;
+  // True when file_content is a rewritten copy (may still carry warnings).
+  bool converted = 2;
+  // Why no conversion happened (unsupported type, no vector media, missing
+  // converter). Empty when converted=true.
+  string skipped_reason = 3;
+  // Per-image problems where the package was still rebuilt: the affected
+  // image keeps its original bytes, every other vector image is converted.
+  repeated string warnings = 4;
+  // Fatal error. file_content is empty when set.
+  string error = 5;
 }
 
 // Metadata header for a streamed read. Sent exactly once, before any image.

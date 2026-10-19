@@ -106,6 +106,12 @@ type KnowledgeService interface {
 	DeleteKnowledgeList(ctx context.Context, ids []string) error
 	// GetKnowledgeFile retrieves the file associated with the knowledge.
 	GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error)
+	// GetKnowledgePreviewFile retrieves the file for the in-browser previewer.
+	// When preview conversion is enabled it may return a browser-renderable
+	// copy (e.g. DOCX with EMF media rasterized to PNG); otherwise it returns
+	// the original bytes. Implementations must fall back to the original file
+	// when conversion fails.
+	GetKnowledgePreviewFile(ctx context.Context, id string) (*types.KnowledgePreviewFile, error)
 	// UpdateKnowledge updates knowledge information.
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
 	// RegenerateKnowledgeSummary refreshes the document description and summary retrieval chunk.
