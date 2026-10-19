@@ -2449,7 +2449,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
             </div>
           </div>
           <p v-if="kbInfo?.description" class="document-subtitle">{{ kbInfo.description }}</p>
-          <p v-if="unsupportedFileTypes.length" class="parser-hint" @click="goToParserSettings">
+          <p v-if="canEdit && unsupportedFileTypes.length" class="parser-hint" @click="goToParserSettings">
             <t-icon name="info-circle" class="parser-hint-icon" />
             <span>{{$t('knowledgeBase.unsupportedTypesHint', {
               types: unsupportedFileTypes.map(t => '.' + t).join('、')
