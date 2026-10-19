@@ -183,6 +183,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewAgentPromptRepository))
+	must(container.Provide(repository.NewAgentGrantRepository))
 	must(container.Provide(repository.NewAgentRunSuspensionRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
 	must(container.Provide(repository.NewTenantSandboxConfigRepository))
@@ -348,8 +349,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewSuspendedRunService))
 	must(container.Provide(func(
 		cfg *config.Config, s interfaces.MCPToolApprovalService, broker *hitl.Broker,
+		grants interfaces.AgentGrantRepository,
 	) *approval.Gate {
-		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, broker)
+		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, broker).WithGrants(grants)
 	}))
 	// Expose Gate as MCPApproval interface so AgentService and others can depend on the abstraction.
 	must(container.Provide(func(g *approval.Gate) approval.MCPApproval { return g }))
@@ -603,8 +605,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		gate *approval.Gate,
 		models interfaces.ModelService,
 		agents interfaces.AgentShareService,
+		grants interfaces.AgentGrantRepository,
 	) *handler.MCPServiceHandler {
-		return handler.NewMCPServiceHandler(mcpService, toolApprovals, gate, models, agents)
+		return handler.NewMCPServiceHandler(mcpService, toolApprovals, gate, models, agents).WithGrants(grants)
 	}))
 	must(container.Invoke(func(
 		sessions *session.Handler, mcp *handler.MCPServiceHandler,

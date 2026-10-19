@@ -34,6 +34,8 @@ type MCPServiceHandler struct {
 	// runResumer continues a run suspended on an approval once it is
 	// answered. Nil leaves such answers to the reaper, which closes the run.
 	runResumer RunResumer
+	// grants are the callers' remembered agent approvals.
+	grants interfaces.AgentGrantRepository
 }
 
 // RunResumer continues an agent run that ended suspended on prompt, now

@@ -19,7 +19,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/event"
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -79,8 +78,9 @@ type PendingRequest struct {
 
 // MCPApproval is the surface used by MCPTool (mockable in tests).
 type MCPApproval interface {
-	// Verdict decides whether a call of tool may run, must ask, or is denied.
-	Verdict(ctx context.Context, tenantID uint64, serviceID string, tool *types.MCPTool) policy.Verdict
+	// Action is the policy action of calling tool; the caller decides it
+	// under the run's access level.
+	Action(ctx context.Context, tenantID uint64, serviceID string, tool *types.MCPTool) policy.Action
 	IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error)
 	RequestAndWait(ctx context.Context, req PendingRequest) (Decision, error)
 	// ResumeDecision is the decision carried by the answered prompt a resumed
@@ -141,6 +141,7 @@ type Gate struct {
 	hotWait   time.Duration // in-memory wait before a suspendable approval suspends the run
 	broker    *hitl.Broker
 	failClose bool // when true, policy read errors require approval instead of skipping it
+	grants    GrantStore
 }
 
 // Errors returned by Resolve; they alias the prompt broker's errors.
@@ -190,7 +191,7 @@ func NewGate(cfg *config.Config, checker Checker, broker *hitl.Broker) *Gate {
 // always asks.
 func (g *Gate) Verdict(ctx context.Context, tenantID uint64, serviceID string, tool *types.MCPTool) policy.Verdict {
 	rules := policy.Rules{Level: types.AccessLevelFromContext(ctx)}
-	return policy.Decide(g.mcpAction(ctx, tenantID, serviceID, tool), rules)
+	return policy.Decide(g.Action(ctx, tenantID, serviceID, tool), rules)
 }
 
 // requiredByPolicy reports whether the workspace marked the tool as always
@@ -233,9 +234,6 @@ func (g *Gate) RequestBuiltinApproval(ctx context.Context, req PendingRequest) (
 	if g == nil || g.broker == nil {
 		return Decision{}, fmt.Errorf("tool approval is not available")
 	}
-	if g.allowedInSession(ctx, req) {
-		return Decision{Approved: true, Granted: true}, nil
-	}
 	return g.awaitToolApproval(ctx, req)
 }
 
@@ -248,40 +246,10 @@ func offeredGrantScope(req PendingRequest) string {
 	return req.GrantScope
 }
 
-// grantedStatuses are the states of an approved prompt whose call ran or is
-// running.
-var grantedStatuses = []string{types.AgentPromptExecuting, types.AgentPromptDone}
-
-// allowedInSession reports whether the user already approved a call with
-// req's grant in this session and chose to allow the rest. Only the same
-// owner's approvals count, and any lookup failure asks again.
-func (g *Gate) allowedInSession(ctx context.Context, req PendingRequest) bool {
-	if req.Grant == "" || req.SessionID == "" || req.UserID == "" || req.TenantID == 0 {
-		return false
-	}
-	prompts, err := g.broker.SessionPrompts(ctx, req.SessionID, grantedStatuses)
-	if err != nil {
-		logger.Warnf(ctx, "tool approval: read session grants: %v", err)
-		return false
-	}
-	for _, p := range prompts {
-		if p.Kind != types.AgentPromptKindToolApproval || p.TenantID != req.TenantID || p.UserID != req.UserID {
-			continue
-		}
-		var request types.ToolApprovalPromptRequest
-		var response types.ToolApprovalPromptResponse
-		if json.Unmarshal(p.Request, &request) != nil || request.Grant != req.Grant ||
-			json.Unmarshal(p.Response, &response) != nil {
-			continue
-		}
-		if response.Approved && response.AllowInSession {
-			return true
-		}
-	}
-	return false
-}
-
 func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decision, error) {
+	if g.granted(ctx, req) {
+		return Decision{Approved: true, Granted: true}, nil
+	}
 	mode := types.RunModeFromContext(ctx)
 	switch {
 	case mode == types.RunModeUnattended:
@@ -386,7 +354,7 @@ func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decis
 	}
 
 	d := toolApprovalDecision(out)
-	g.consumeDecision(ctx, &d, req.EventBus, req.SessionID, req.AssistantMessageID, req.RequestID)
+	g.consumeDecision(ctx, &d, req.EventBus, out.Prompt)
 	return d, nil
 }
 
@@ -404,13 +372,12 @@ func promptWaitSeconds(p *types.AgentPrompt, wait, fallback time.Duration) int {
 // returned it.
 func (g *Gate) ResumeDecision(ctx context.Context, prompt *types.AgentPrompt, bus *event.EventBus) Decision {
 	d := toolApprovalDecision(hitl.Outcome{Prompt: prompt, Answered: true})
-	g.consumeDecision(ctx, &d, bus, prompt.SessionID, prompt.AssistantMessageID, prompt.RequestID)
+	g.consumeDecision(ctx, &d, bus, prompt)
 	return d
 }
 
-func (g *Gate) consumeDecision(
-	ctx context.Context, d *Decision, bus *event.EventBus, sessionID, assistantMessageID, requestID string,
-) {
+func (g *Gate) consumeDecision(ctx context.Context, d *Decision, bus *event.EventBus, prompt *types.AgentPrompt) {
+	sessionID, assistantMessageID, requestID := prompt.SessionID, prompt.AssistantMessageID, prompt.RequestID
 	// An approved call stays "executing" until MarkExecuted.
 	consumeTo := types.AgentPromptDone
 	if d.Approved {
@@ -428,6 +395,9 @@ func (g *Gate) consumeDecision(
 			return
 		}
 		d.Reason = "could not confirm tool approval; tool was not executed"
+	}
+	if consumed {
+		g.remember(ctx, *d, prompt)
 	}
 	if bus == nil {
 		return

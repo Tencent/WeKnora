@@ -89,8 +89,8 @@ type approvedOAuthGate struct {
 	oauthPrompts *int
 }
 
-func (approvedOAuthGate) Verdict(context.Context, uint64, string, *types.MCPTool) policy.Verdict {
-	return policy.Ask
+func (approvedOAuthGate) Action(context.Context, uint64, string, *types.MCPTool) policy.Action {
+	return policy.Action{Risk: policy.RiskWrite, Always: true}
 }
 
 func (approvedOAuthGate) IsEnabled(context.Context, uint64, string, string) (bool, error) {

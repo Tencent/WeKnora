@@ -3,6 +3,8 @@ package approval
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,10 +16,63 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// memGrants is an in-memory GrantStore keyed like the agent_grants table.
+type memGrants struct {
+	mu     sync.Mutex
+	grants map[string]*types.AgentGrant
+}
+
+func newMemGrants() *memGrants { return &memGrants{grants: map[string]*types.AgentGrant{}} }
+
+func memGrantKey(tenantID uint64, userID string, scope types.GrantScope, key string) string {
+	return fmt.Sprint(tenantID, "|", userID, "|", scope.Scope, "|", scope.ScopeID, "|", key)
+}
+
+func (m *memGrants) FindGrant(
+	_ context.Context, tenantID uint64, userID string, scope types.GrantScope, key string,
+) (*types.AgentGrant, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if g, ok := m.grants[memGrantKey(tenantID, userID, scope, key)]; ok {
+		copied := *g
+		return &copied, nil
+	}
+	return nil, nil
+}
+
+func (m *memGrants) SaveGrant(_ context.Context, g *types.AgentGrant) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	copied := *g
+	copied.ID = memGrantKey(g.TenantID, g.UserID, types.GrantScope{Scope: g.Scope, ScopeID: g.ScopeID}, g.GrantKey)
+	copied.CreatedAt = time.Now()
+	m.grants[copied.ID] = &copied
+	return nil
+}
+
+func (m *memGrants) TouchGrant(_ context.Context, id string, at time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if g, ok := m.grants[id]; ok {
+		g.LastUsedAt = &at
+	}
+	return nil
+}
+
+func (m *memGrants) revokeAll() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	for _, g := range m.grants {
+		g.RevokedAt = &now
+	}
+}
+
 // grantGate answers every approval it raises with answer and counts them.
 func grantGate(t *testing.T, answer Decision) (*Gate, *event.EventBus, *[]event.ToolApprovalRequiredData) {
 	t.Helper()
-	g := NewGate(&config.Config{Agent: &config.AgentConfig{ToolApprovalTimeoutSeconds: 2}}, nil, nil)
+	g := NewGate(&config.Config{Agent: &config.AgentConfig{ToolApprovalTimeoutSeconds: 2}}, nil, nil).
+		WithGrants(newMemGrants())
 	bus := event.NewEventBus()
 	var raised []event.ToolApprovalRequiredData
 	bus.On(event.EventToolApprovalRequired, func(_ context.Context, evt event.Event) error {
@@ -140,4 +195,48 @@ func TestRejectingDropsAllowInSession(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, d.Approved)
 	assert.False(t, d.AllowInSession)
+}
+
+func TestGrantsBelongToTheRunScope(t *testing.T) {
+	g, bus, raised := grantGate(t, Decision{Approved: true, AllowInSession: true})
+	grant := "mcp:svc/write#abc"
+	root := types.GrantScope{Scope: types.AgentGrantScopeSession, ScopeID: "root"}
+	child := func() context.Context { return types.WithGrantScope(attended(), root) }
+
+	d, err := g.RequestBuiltinApproval(child(), grantRequest(bus, "child-1", grant))
+	require.NoError(t, err)
+	g.MarkExecuted(context.Background(), d.PendingID)
+	require.Len(t, *raised, 1)
+
+	d, err = g.RequestBuiltinApproval(child(), grantRequest(bus, "child-2", grant))
+	require.NoError(t, err)
+	assert.True(t, d.Granted, "a sibling child shares the root conversation's grant")
+	d = approveAndRun(t, g, grantRequest(bus, "root", grant))
+	assert.True(t, d.Granted, "so does the root conversation")
+	assert.Len(t, *raised, 1)
+}
+
+func TestRevokedOrRebindedGrantAsksAgain(t *testing.T) {
+	g, bus, raised := grantGate(t, Decision{Approved: true, AllowInSession: true})
+	store := g.grants.(*memGrants)
+	grant := "mcp:svc/write#abc"
+	bound := func(binding string) context.Context {
+		return types.WithGrantScope(attended(), types.GrantScope{
+			Scope: types.AgentGrantScopeAutomation, ScopeID: "auto-1", BindingHash: binding,
+		})
+	}
+	run := func(ctx context.Context) Decision {
+		d, err := g.RequestBuiltinApproval(ctx, grantRequest(bus, "s", grant))
+		require.NoError(t, err)
+		g.MarkExecuted(context.Background(), d.PendingID)
+		return d
+	}
+	run(bound("v1"))
+	assert.True(t, run(bound("v1")).Granted)
+	assert.False(t, run(bound("v2")).Granted, "a changed automation asks again")
+	require.Len(t, *raised, 2)
+
+	store.revokeAll()
+	assert.False(t, run(bound("v2")).Granted, "a revoked grant asks again")
+	assert.Len(t, *raised, 3)
 }

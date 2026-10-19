@@ -58,6 +58,10 @@
               <t-icon class="icon" name="edit-1" />
               <span>{{ t('menu.renameSession') }}</span>
             </button>
+            <button type="button" class="card-menu-item" @click="enterGrantsMode">
+              <t-icon class="icon" name="lock-on" />
+              <span>{{ t('chatHeader.grants.menu') }}</span>
+            </button>
             <button type="button" class="card-menu-item" @click="onMenuAction('copyMarkdown')">
               <t-icon class="icon" name="file-copy" />
               <span>{{ t('chatHeader.copyMarkdown') }}</span>
@@ -67,6 +71,27 @@
               <span>{{ t('chatHeader.deleteSession') }}</span>
             </button>
           </template>
+
+          <div v-else-if="menuMode === 'grants'" class="chat-header-confirm">
+            <div class="chat-header-confirm__title">{{ t('chatHeader.grants.menu') }}</div>
+            <div class="chat-header-confirm__body">{{ t('chatHeader.grants.description') }}</div>
+            <t-loading v-if="grantsLoading" size="small" />
+            <div v-else-if="!grants.length" class="chat-header-grants__empty">{{ t('chatHeader.grants.empty') }}</div>
+            <ul v-else class="chat-header-grants">
+              <li v-for="grant in grants" :key="grant.id" class="chat-header-grants__item">
+                <span class="chat-header-grants__label" :title="grant.label">{{ grant.label }}</span>
+                <button type="button" class="chat-header-confirm__btn" :disabled="revokingId === grant.id"
+                  @click="revokeGrant(grant)">
+                  {{ t('chatHeader.grants.revoke') }}
+                </button>
+              </li>
+            </ul>
+            <div class="chat-header-confirm__footer">
+              <button type="button" class="chat-header-confirm__btn" @click="backToMenu">
+                {{ t('common.back') }}
+              </button>
+            </div>
+          </div>
 
           <div v-else class="chat-header-confirm">
             <div class="chat-header-confirm__title">
@@ -101,6 +126,7 @@ import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { copyToClipboard } from '@/utils/clipboard'
 import { getMessageList } from '@/api/chat'
+import { listAgentGrants, revokeAgentGrant, type AgentGrant } from '@/api/mcp-service'
 import {
   removeSession,
   renameSession,
@@ -120,7 +146,7 @@ interface ChatHeaderSession {
   host_workspace_dir?: string
 }
 
-type MenuMode = 'menu' | 'delete'
+type MenuMode = 'menu' | 'delete' | 'grants'
 
 const props = defineProps<{
   session: ChatHeaderSession | null
@@ -155,6 +181,39 @@ function onMenuVisibleChange(visible: boolean): void {
 
 function enterConfirmMode(mode: 'delete'): void {
   menuMode.value = mode
+}
+
+const grants = ref<AgentGrant[]>([])
+const grantsLoading = ref(false)
+const revokingId = ref('')
+
+async function enterGrantsMode(): Promise<void> {
+  const session = props.session
+  if (!session) return
+  menuMode.value = 'grants'
+  grants.value = []
+  grantsLoading.value = true
+  try {
+    grants.value = await listAgentGrants(session.id)
+  } catch {
+    MessagePlugin.error(t('chatHeader.grants.loadFailed'))
+  } finally {
+    grantsLoading.value = false
+  }
+}
+
+async function revokeGrant(grant: AgentGrant): Promise<void> {
+  if (revokingId.value) return
+  revokingId.value = grant.id
+  try {
+    await revokeAgentGrant(grant.id)
+    grants.value = grants.value.filter((g) => g.id !== grant.id)
+    MessagePlugin.success(t('chatHeader.grants.revoked'))
+  } catch {
+    MessagePlugin.error(t('chatHeader.grants.revokeFailed'))
+  } finally {
+    revokingId.value = ''
+  }
 }
 
 function backToMenu(): void {
@@ -418,6 +477,38 @@ async function submitDeleteSession(): Promise<void> {
   font-size: var(--app-text-base);
   line-height: 1.5;
   word-break: break-word;
+}
+
+.chat-header-grants {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.chat-header-grants__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-header-grants__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--td-text-color-primary);
+  font-size: var(--app-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-header-grants__empty {
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-sm);
 }
 
 .chat-header-confirm__footer {

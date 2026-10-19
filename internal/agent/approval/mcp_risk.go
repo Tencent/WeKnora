@@ -51,8 +51,9 @@ func PendingDowngrade(row *types.MCPToolApproval, declared policy.Risk) bool {
 	return row != nil && !policy.Risk(row.Risk).Valid() && policy.Risk(row.ObservedRisk).Above(declared)
 }
 
-// mcpAction is the policy action of calling tool.
-func (g *Gate) mcpAction(ctx context.Context, tenantID uint64, serviceID string, tool *types.MCPTool) policy.Action {
+// Action is the policy action of calling tool: its risk, and whether the
+// workspace marked it as always requiring approval.
+func (g *Gate) Action(ctx context.Context, tenantID uint64, serviceID string, tool *types.MCPTool) policy.Action {
 	declared := DeclaredRisk(tool)
 	if g == nil || g.checker == nil || tenantID == 0 || serviceID == "" || tool == nil || tool.Name == "" {
 		return policy.Action{Risk: declared}

@@ -26,8 +26,8 @@ func (g *catalogPolicy) IsEnabled(_ context.Context, _ uint64, server, name stri
 	return !g.disabled[server+"/"+name], g.err
 }
 
-func (*catalogPolicy) Verdict(context.Context, uint64, string, *types.MCPTool) policy.Verdict {
-	return policy.Allow
+func (*catalogPolicy) Action(context.Context, uint64, string, *types.MCPTool) policy.Action {
+	return policy.Action{Risk: policy.RiskRead}
 }
 
 func (*catalogPolicy) RequestAndWait(context.Context, approval.PendingRequest) (approval.Decision, error) {

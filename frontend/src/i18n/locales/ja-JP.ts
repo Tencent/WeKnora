@@ -353,6 +353,15 @@ export default {
     noSessions: '会話はまだありません'
   },
   chatHeader: {
+    grants: {
+      menu: '許可済みの操作',
+      description: 'この会話で確認なしに許可された操作です。取り消すと次回また確認されます。',
+      empty: '許可済みの操作はありません',
+      revoke: '取り消す',
+      revoked: '取り消しました',
+      revokeFailed: '取り消しに失敗しました',
+      loadFailed: '読み込みに失敗しました',
+    },
     moreActions: 'その他の会話操作',
     toggleSandboxPanel: 'サンドボックスターミナル',
     copySessionId: 'セッションIDをコピー',

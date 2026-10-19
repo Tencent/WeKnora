@@ -8303,6 +8303,15 @@ export default {
     }
   },
   chatHeader: {
+    grants: {
+      menu: '허용된 작업',
+      description: '이 대화에서 다시 묻지 않도록 허용된 작업입니다. 취소하면 다음에 다시 묻습니다.',
+      empty: '허용된 작업이 없습니다',
+      revoke: '취소',
+      revoked: '취소되었습니다',
+      revokeFailed: '취소하지 못했습니다',
+      loadFailed: '불러오지 못했습니다',
+    },
     moreActions: '대화 추가 작업',
     toggleSandboxPanel: '샌드박스 터미널',
     copySessionId: '세션 ID 복사',

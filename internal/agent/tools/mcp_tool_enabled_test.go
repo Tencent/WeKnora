@@ -18,8 +18,8 @@ type staticPolicyGate struct {
 	err     error
 }
 
-func (g staticPolicyGate) Verdict(context.Context, uint64, string, *types.MCPTool) policy.Verdict {
-	return policy.Allow
+func (g staticPolicyGate) Action(context.Context, uint64, string, *types.MCPTool) policy.Action {
+	return policy.Action{Risk: policy.RiskRead}
 }
 
 func (g staticPolicyGate) IsEnabled(context.Context, uint64, string, string) (bool, error) {

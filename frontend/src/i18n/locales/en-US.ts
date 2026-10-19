@@ -353,6 +353,15 @@ export default {
     noSessions: 'No conversations yet'
   },
   chatHeader: {
+    grants: {
+      menu: 'Allowed actions',
+      description: 'Actions allowed for this conversation without asking again. Revoke one to be asked next time.',
+      empty: 'No allowed actions yet',
+      revoke: 'Revoke',
+      revoked: 'Revoked',
+      revokeFailed: 'Failed to revoke',
+      loadFailed: 'Failed to load',
+    },
     moreActions: 'More conversation actions',
     toggleSandboxPanel: 'Sandbox terminal',
     copySessionId: 'Copy Session ID',

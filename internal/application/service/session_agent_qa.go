@@ -113,6 +113,15 @@ func (s *sessionService) AgentQA(
 		}
 	}
 	ctx = types.WithAccessLevel(ctx, agentConfig.AssistantAccess)
+	if _, scoped := types.GrantScopeFromContext(ctx); !scoped {
+		// Grants given anywhere in a conversation, including by its delegated
+		// children, belong to the root conversation.
+		grantSessionID := req.GrantSessionID
+		if grantSessionID == "" {
+			grantSessionID = sessionID
+		}
+		ctx = types.WithGrantScope(ctx, types.GrantScope{Scope: types.AgentGrantScopeSession, ScopeID: grantSessionID})
+	}
 
 	// Set VLM model ID for tool result image analysis (runtime-only field)
 	if req.CustomAgent != nil && req.CustomAgent.Config.VLMModelID != "" {

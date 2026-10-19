@@ -29,8 +29,8 @@ func (g *proxyApprovalGate) IsEnabled(context.Context, uint64, string, string) (
 	return !g.disabled, nil
 }
 
-func (*proxyApprovalGate) Verdict(context.Context, uint64, string, *types.MCPTool) policy.Verdict {
-	return policy.Ask
+func (*proxyApprovalGate) Action(context.Context, uint64, string, *types.MCPTool) policy.Action {
+	return policy.Action{Risk: policy.RiskWrite, Always: true}
 }
 
 func (g *proxyApprovalGate) RequestAndWait(

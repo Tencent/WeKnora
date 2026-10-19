@@ -19,8 +19,8 @@ func (*resumeMCPGate) IsEnabled(context.Context, uint64, string, string) (bool, 
 	return true, nil
 }
 
-func (*resumeMCPGate) Verdict(context.Context, uint64, string, *types.MCPTool) policy.Verdict {
-	return policy.Ask
+func (*resumeMCPGate) Action(context.Context, uint64, string, *types.MCPTool) policy.Action {
+	return policy.Action{Risk: policy.RiskWrite, Always: true}
 }
 
 func (*resumeMCPGate) RequestAndWait(context.Context, approval.PendingRequest) (approval.Decision, error) {

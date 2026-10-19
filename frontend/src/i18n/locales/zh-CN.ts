@@ -8304,6 +8304,15 @@ export default {
     }
   },
   chatHeader: {
+    grants: {
+      menu: '已允许的操作',
+      description: '本对话中已允许、不再询问的操作。撤销后再次调用时会重新询问。',
+      empty: '暂无已允许的操作',
+      revoke: '撤销',
+      revoked: '已撤销',
+      revokeFailed: '撤销失败',
+      loadFailed: '加载失败',
+    },
     moreActions: '更多对话操作',
     toggleSandboxPanel: '沙箱终端',
     copySessionId: '复制会话 ID',

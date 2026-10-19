@@ -3,6 +3,8 @@ package tools
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -180,7 +182,8 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 	// Human approval gate for dangerous tools (issue #1173)
 	if t.gate != nil {
 		tenantID, _ := types.TenantIDFromContext(ctx)
-		verdict := t.gate.Verdict(ctx, tenantID, t.service.ID, t.mcpTool)
+		action := t.gate.Action(ctx, tenantID, t.service.ID, t.mcpTool)
+		verdict := policy.Decide(action, policy.Rules{Level: types.AccessLevelFromContext(ctx)})
 		if verdict == policy.Deny {
 			return &types.ToolResult{
 				Success: false,
@@ -207,6 +210,10 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 				if resumed {
 					decision = t.gate.ResumeDecision(waitCtx, meta.Answered, meta.EventBus)
 				} else {
+					var grant, grantScope string
+					if policy.Grantable(action) {
+						grant, grantScope = t.approvalGrant(ctx)
+					}
 					var snapshot []byte
 					var snapshotVersion int
 					if meta.Snapshot != nil {
@@ -235,6 +242,8 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 						Description:        t.mcpTool.Description,
 						Args:               args,
 						ToolCallID:         meta.ToolCallID,
+						Grant:              grant,
+						GrantScope:         grantScope,
 					})
 				}
 				if waitErr != nil {
@@ -879,4 +888,16 @@ func SerializeMCPToolResult(result *types.ToolResult) (string, error) {
 	}
 
 	return output, nil
+}
+
+// approvalGrant is what approving a call of this tool may allow for the rest
+// of the session: calls of the same tool while its argument schema stays the
+// same, so a changed tool asks again.
+func (t *MCPTool) approvalGrant(ctx context.Context) (grant, scope string) {
+	sum := sha256.Sum256(t.mcpTool.InputSchema)
+	grant = "mcp:" + t.service.ID + "/" + t.mcpTool.Name + "#" + hex.EncodeToString(sum[:6])
+	if strings.HasPrefix(types.LanguageFromContextOrDefault(ctx), "zh") {
+		return grant, fmt.Sprintf("调用 %s 的工具 %s", t.service.Name, t.mcpTool.Name)
+	}
+	return grant, fmt.Sprintf("Call %s tool %s", t.service.Name, t.mcpTool.Name)
 }

@@ -88,6 +88,11 @@ func Decide(a Action, r Rules) Verdict {
 	}
 }
 
+// Grantable reports whether approving a may be remembered for later calls
+// of the same kind: only recoverable changes the workspace does not require
+// approving every time.
+func Grantable(a Action) bool { return a.Risk == RiskWrite && !a.Always }
+
 // Offered reports whether an action of risk should be offered to the model
 // at all under level. A read-only run is not shown changes it cannot make,
 // nor anything whose risk is unknown.

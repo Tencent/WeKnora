@@ -110,6 +110,8 @@ const (
 	RunModeContextKey ContextKey = "RunMode"
 	// AccessLevelContextKey carries the agent run's effective access level.
 	AccessLevelContextKey ContextKey = "AccessLevel"
+	// GrantScopeContextKey carries the GrantScope of the agent run.
+	GrantScopeContextKey ContextKey = "GrantScope"
 	// ChatParserEngineContextKey carries the resolved parser engine
 	// from the agent's ChatParserEngineRules for chat attachment processing.
 	ChatParserEngineContextKey ContextKey = "ChatParserEngine"

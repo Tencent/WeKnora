@@ -8304,6 +8304,15 @@ export default {
     }
   },
   chatHeader: {
+    grants: {
+      menu: '已允許的操作',
+      description: '本對話中已允許、不再詢問的操作。撤銷後再次呼叫時會重新詢問。',
+      empty: '暫無已允許的操作',
+      revoke: '撤銷',
+      revoked: '已撤銷',
+      revokeFailed: '撤銷失敗',
+      loadFailed: '載入失敗',
+    },
     moreActions: '更多對話操作',
     toggleSandboxPanel: '沙箱終端',
     copySessionId: '複製會話 ID',

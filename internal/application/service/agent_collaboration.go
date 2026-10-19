@@ -85,6 +85,11 @@ func (s *AgentCollaboration) forgetSessions(ctx context.Context, tenantID uint64
 	if len(sessionIDs) == 0 {
 		return
 	}
+	if err := s.db.WithContext(ctx).
+		Where("tenant_id = ? AND scope = ? AND scope_id IN ?", tenantID, types.AgentGrantScopeSession, sessionIDs).
+		Delete(&types.AgentGrant{}).Error; err != nil {
+		logger.Warnf(ctx, "Delete grants of deleted sessions: %v", err)
+	}
 	var rows []collaboration.Record
 	query := s.db.WithContext(ctx).Where("tenant_id = ? AND session_id IN ?", tenantID, sessionIDs)
 	if userID != "" {
