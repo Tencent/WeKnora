@@ -46,12 +46,18 @@ func IsAPISessionOwnerID(ownerID string) bool {
 type Principal struct {
 	Type string
 	ID   string
+	// ActingVia names what acts for this principal without them present,
+	// e.g. "automation:<id>". Empty when the principal acts in person. It
+	// does not change who is authorized or StorageID: the principal still
+	// owns the run and answers its approvals.
+	ActingVia string
 }
 
 func (p Principal) Normalize() Principal {
 	return Principal{
-		Type: strings.TrimSpace(p.Type),
-		ID:   strings.TrimSpace(p.ID),
+		Type:      strings.TrimSpace(p.Type),
+		ID:        strings.TrimSpace(p.ID),
+		ActingVia: strings.TrimSpace(p.ActingVia),
 	}
 }
 

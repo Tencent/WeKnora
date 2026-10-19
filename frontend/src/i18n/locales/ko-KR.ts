@@ -2185,6 +2185,11 @@ export default {
       argsLabel: '인수',
       argsModified: '수정됨',
       allowInSession: '이 대화에서 같은 작업은 모두 허용',
+      grantLapsed: {
+        changed: '이전 허용이 더 이상 적용되지 않습니다. 자동화의 Agent 설정, 역할 또는 권한 상한이 변경되었습니다.',
+        expired: '이전 허용이 만료되었습니다.',
+        idle: '이전 허용이 오랫동안 사용되지 않아 만료되었습니다.',
+      },
       countdownShort: '{seconds}초',
       approve: '승인 후 실행',
       reject: '거부',

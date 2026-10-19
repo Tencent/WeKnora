@@ -183,7 +183,9 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 	if t.gate != nil {
 		tenantID, _ := types.TenantIDFromContext(ctx)
 		action := t.gate.Action(ctx, tenantID, t.service.ID, t.mcpTool)
-		verdict := policy.Decide(action, policy.Rules{Level: types.AccessLevelFromContext(ctx)})
+		rules := policy.Rules{Level: types.AccessLevelFromContext(ctx)}
+		verdict := policy.Decide(action, rules)
+		policy.Record(ctx, "mcp:"+t.service.Name+"/"+t.mcpTool.Name, action, rules, verdict)
 		if verdict == policy.Deny {
 			return &types.ToolResult{
 				Success: false,

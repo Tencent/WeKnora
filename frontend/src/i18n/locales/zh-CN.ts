@@ -2187,6 +2187,11 @@ export default {
       argsLabel: '调用参数',
       argsModified: '已修改',
       allowInSession: '本会话内同类操作都允许',
+      grantLapsed: {
+        changed: '之前的允许已失效：自动化的 Agent 配置、成员角色或权限上限已变化。',
+        expired: '之前的允许已过期。',
+        idle: '之前的允许因长期未使用已失效。',
+      },
       countdownShort: '{seconds}s',
       approve: '通过并执行',
       reject: '拒绝',

@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/operations"
+	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -368,11 +369,15 @@ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*
 		identity.Agent.SessionID = meta.SessionID
 	}
 	identity.Agent.Operation = op.ID
+	identity.Agent.ActingVia = types.ActingViaFromContext(ctx)
 
 	// An answered prompt still governs its blocked call even if the workspace
 	// now allows writes without approval. Preserve declines and edited params.
 	resumed := meta != nil && meta.Answered != nil && meta.Answered.Kind == types.AgentPromptKindToolApproval
-	if resumed || t.rt.Access.NeedsApproval(op) {
+	action := policy.Action{Risk: op.Risk, Always: op.AlwaysConfirm}
+	verdict := policy.Decide(action, t.rt.Access.Rules())
+	policy.Record(ctx, op.ID, action, t.rt.Access.Rules(), verdict)
+	if resumed || verdict != policy.Allow {
 		confirmed, blocked := t.confirm(ctx, op, input, identity)
 		if blocked != nil {
 			return blocked, nil

@@ -205,6 +205,9 @@ type ToolApprovalPromptRequest struct {
 	// derives it from the call; GrantScope describes it to the user.
 	Grant      string `json:"grant,omitempty"`
 	GrantScope string `json:"grant_scope,omitempty"`
+	// GrantLapsed, when set, is why an earlier grant for this call no longer
+	// applies (an AgentGrantLapse value).
+	GrantLapsed string `json:"grant_lapsed,omitempty"`
 }
 
 // ToolApprovalPromptResponse is the Response of an AgentPromptKindToolApproval.

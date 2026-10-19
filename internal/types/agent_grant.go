@@ -2,6 +2,10 @@ package types
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,13 +55,33 @@ func (g *AgentGrant) BeforeCreate(*gorm.DB) error {
 	return nil
 }
 
+// Why a remembered grant no longer applies. The approval card shows it so
+// the user knows why they are asked again.
+const (
+	AgentGrantLapseRevoked = "revoked"
+	AgentGrantLapseExpired = "expired"
+	// AgentGrantLapseChanged: the run's configuration differs from the one
+	// the grant was given under.
+	AgentGrantLapseChanged = "changed"
+	// AgentGrantLapseIdle: an automation grant went unused too long.
+	AgentGrantLapseIdle = "idle"
+)
+
 // ActiveAt reports whether the grant applies at now under binding.
 func (g *AgentGrant) ActiveAt(now time.Time, binding string) bool {
-	if g == nil || g.RevokedAt != nil || g.BindingHash != binding {
-		return false
-	}
-	if g.ExpiresAt != nil && !now.Before(*g.ExpiresAt) {
-		return false
+	return g != nil && g.LapseAt(now, binding) == ""
+}
+
+// LapseAt is why an existing grant does not apply at now under binding, or
+// "" when it does.
+func (g *AgentGrant) LapseAt(now time.Time, binding string) string {
+	switch {
+	case g.RevokedAt != nil:
+		return AgentGrantLapseRevoked
+	case g.ExpiresAt != nil && !now.Before(*g.ExpiresAt):
+		return AgentGrantLapseExpired
+	case g.BindingHash != binding:
+		return AgentGrantLapseChanged
 	}
 	if g.Scope == AgentGrantScopeAutomation {
 		used := g.CreatedAt
@@ -65,10 +89,10 @@ func (g *AgentGrant) ActiveAt(now time.Time, binding string) bool {
 			used = *g.LastUsedAt
 		}
 		if now.Sub(used) >= AgentGrantIdleExpiry {
-			return false
+			return AgentGrantLapseIdle
 		}
 	}
-	return true
+	return ""
 }
 
 // GrantScope is where a run's grants are kept and looked up.
@@ -88,4 +112,27 @@ func WithGrantScope(ctx context.Context, scope GrantScope) context.Context {
 func GrantScopeFromContext(ctx context.Context) (GrantScope, bool) {
 	scope, ok := ctx.Value(GrantScopeContextKey).(GrantScope)
 	return scope, ok && scope.Scope != "" && scope.ScopeID != ""
+}
+
+// AutomationBinding is what an automation's grants were given under. A
+// grant stops applying once any of it changes: the agent's tools, MCP
+// services or instructions, the owner's workspace role, or the agent's
+// access ceiling.
+type AutomationBinding struct {
+	AgentID       string               `json:"agent_id"`
+	Tools         []string             `json:"tools"`
+	MCPServiceIDs []string             `json:"mcp_service_ids"`
+	SystemPrompt  string               `json:"system_prompt"`
+	OwnerRole     TenantRole           `json:"owner_role"`
+	Ceiling       AssistantAccessLevel `json:"ceiling"`
+}
+
+// Hash is the binding as stored in AgentGrant.BindingHash. Tool and
+// service order does not matter.
+func (b AutomationBinding) Hash() string {
+	b.Tools = slices.Sorted(slices.Values(b.Tools))
+	b.MCPServiceIDs = slices.Sorted(slices.Values(b.MCPServiceIDs))
+	data, _ := json.Marshal(b)
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }

@@ -37,6 +37,7 @@
         :autosize="{ minRows: 2, maxRows: 10 }" placeholder="{}" />
     </div>
 
+    <div v-if="grantLapsedText" class="prompt-grant-lapsed">{{ grantLapsedText }}</div>
     <t-checkbox v-if="grantScope" v-model="allowInSession" class="prompt-grant">
       {{ $t('agentStream.toolApproval.allowInSession') }}
       <span class="prompt-grant-scope">{{ grantScope }}</span>
@@ -114,6 +115,8 @@ const props = defineProps<{
   // grantScope, when set, offers to approve calls like this one for the
   // rest of the session and says which calls that covers.
   grantScope?: string
+  // grantLapsed is why an earlier "allow" for this call no longer applies.
+  grantLapsed?: string
   timeoutSeconds?: number
   requestedAt?: number
   resolved?: boolean
@@ -159,6 +162,12 @@ const initialArgs = formatJson(props.argsJson || '{}')
 const argsText = ref(initialArgs)
 const argsExpanded = ref(false)
 const allowInSession = ref(false)
+const GRANT_LAPSE_REASONS = ['changed', 'expired', 'idle']
+const grantLapsedText = computed(() => (
+  props.grantLapsed && GRANT_LAPSE_REASONS.includes(props.grantLapsed)
+    ? t(`agentStream.toolApproval.grantLapsed.${props.grantLapsed}`)
+    : ''
+))
 const submitting = ref(false)
 const { parked, secondsLeft, timerClass, countdownText, parkedText } = usePromptCountdown(props)
 

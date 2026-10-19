@@ -247,7 +247,8 @@ func offeredGrantScope(req PendingRequest) string {
 }
 
 func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decision, error) {
-	if g.granted(ctx, req) {
+	granted, lapse := g.granted(ctx, req)
+	if granted {
 		return Decision{Approved: true, Granted: true}, nil
 	}
 	mode := types.RunModeFromContext(ctx)
@@ -270,6 +271,7 @@ func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decis
 		Args:               req.Args,
 		Grant:              req.Grant,
 		GrantScope:         offeredGrantScope(req),
+		GrantLapsed:        lapse,
 	})
 	if err != nil {
 		return Decision{}, fmt.Errorf("encode tool approval: %w", err)
@@ -322,6 +324,7 @@ func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decis
 					Args:               argsObj,
 					ArgsJSON:           string(req.Args),
 					GrantScope:         offeredGrantScope(req),
+					GrantLapsed:        lapse,
 					TimeoutSeconds:     timeoutSec,
 					HotWaitSeconds:     timeoutSec,
 					Suspendable:        p.Suspendable,

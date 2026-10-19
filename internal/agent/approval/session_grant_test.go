@@ -235,8 +235,10 @@ func TestRevokedOrRebindedGrantAsksAgain(t *testing.T) {
 	assert.True(t, run(bound("v1")).Granted)
 	assert.False(t, run(bound("v2")).Granted, "a changed automation asks again")
 	require.Len(t, *raised, 2)
+	assert.Equal(t, types.AgentGrantLapseChanged, (*raised)[1].GrantLapsed, "the card says why it asks again")
 
 	store.revokeAll()
 	assert.False(t, run(bound("v2")).Granted, "a revoked grant asks again")
-	assert.Len(t, *raised, 3)
+	require.Len(t, *raised, 3)
+	assert.Empty(t, (*raised)[2].GrantLapsed, "the user withdrew it, so nothing to explain")
 }

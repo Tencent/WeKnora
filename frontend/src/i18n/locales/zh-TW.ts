@@ -2187,6 +2187,11 @@ export default {
       argsLabel: '呼叫參數',
       argsModified: '已修改',
       allowInSession: '本會話內同類操作都允許',
+      grantLapsed: {
+        changed: '先前的允許已失效：自動化的 Agent 設定、成員角色或權限上限已變更。',
+        expired: '先前的允許已過期。',
+        idle: '先前的允許因長期未使用已失效。',
+      },
       countdownShort: '{seconds}s',
       approve: '透過並執行',
       reject: '拒絕',

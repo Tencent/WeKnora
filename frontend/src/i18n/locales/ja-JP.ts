@@ -6486,6 +6486,11 @@ export default {
       argsLabel: '引数',
       argsModified: '変更あり',
       allowInSession: 'この会話では同様の操作をすべて許可',
+      grantLapsed: {
+        changed: '以前の許可は無効になりました。自動化の Agent 設定、ロール、または権限上限が変更されました。',
+        expired: '以前の許可は期限切れです。',
+        idle: '以前の許可は長期間使われなかったため無効になりました。',
+      },
       countdownShort: '{seconds}秒',
       approve: '承認して実行',
       reject: '拒否',

@@ -6486,6 +6486,11 @@ export default {
       argsLabel: 'Arguments',
       argsModified: 'Modified',
       allowInSession: 'Allow this for the rest of the conversation',
+      grantLapsed: {
+        changed: 'Your earlier approval no longer applies: the automation\'s agent setup, your role or the access ceiling changed.',
+        expired: 'Your earlier approval has expired.',
+        idle: 'Your earlier approval lapsed after a long time unused.',
+      },
       countdownShort: '{seconds}s',
       approve: 'Approve & run',
       reject: 'Reject',

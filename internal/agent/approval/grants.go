@@ -37,31 +37,37 @@ func grantScope(ctx context.Context, sessionID string) (types.GrantScope, bool) 
 }
 
 // granted reports whether the user already allowed calls with req's grant
-// in the run's scope. Any lookup failure asks again.
-func (g *Gate) granted(ctx context.Context, req PendingRequest) bool {
+// in the run's scope. When they had but it no longer applies, lapse says
+// why; a revoked grant is not reported, since the user withdrew it. Any
+// lookup failure asks again.
+func (g *Gate) granted(ctx context.Context, req PendingRequest) (ok bool, lapse string) {
 	if g.grants == nil || req.Grant == "" || req.UserID == "" || req.TenantID == 0 {
-		return false
+		return false, ""
 	}
 	scope, ok := grantScope(ctx, req.SessionID)
 	if !ok {
-		return false
+		return false, ""
 	}
 	grant, err := g.grants.FindGrant(ctx, req.TenantID, req.UserID, scope, req.Grant)
 	if err != nil {
 		logger.Warnf(ctx, "tool approval: read grant: %v", err)
-		return false
+		return false, ""
+	}
+	if grant == nil {
+		return false, ""
 	}
 	now := time.Now()
-	if !grant.ActiveAt(now, scope.BindingHash) {
-		if grant != nil && grant.RevokedAt == nil {
-			logger.Infof(ctx, "tool approval: grant %s no longer applies; asking again", grant.ID)
+	if lapse := grant.LapseAt(now, scope.BindingHash); lapse != "" {
+		if lapse == types.AgentGrantLapseRevoked {
+			return false, ""
 		}
-		return false
+		logger.Infof(ctx, "tool approval: grant %s %s; asking again", grant.ID, lapse)
+		return false, lapse
 	}
 	if err := g.grants.TouchGrant(ctx, grant.ID, now); err != nil {
 		logger.Warnf(ctx, "tool approval: record grant use: %v", err)
 	}
-	return true
+	return true, ""
 }
 
 // remember stores the grant an approved prompt allowed for the rest of the
