@@ -173,8 +173,12 @@ func (s *Service) decide(
 	}
 	decision := allocation.Decision{Mode: allocation.ModeSession, Reason: allocation.ReasonLegacySessionSandbox}
 	if !legacy {
+		mode, err := s.configMode(ctx, configTenant, configID)
+		if err != nil {
+			return allocation.Assignment{}, "", err
+		}
 		decision = allocation.Decide(allocation.DecideInput{
-			ConfigMode:        s.configMode(ctx, configTenant, configID),
+			ConfigMode:        mode,
 			Purpose:           purpose,
 			Owner:             owner,
 			SessionID:         sess.ID,
@@ -195,24 +199,25 @@ func (s *Service) decide(
 	return a, decision.Reason, nil
 }
 
-// configMode reads the config's switch. Anything unreadable is session: a
-// failure to load must never widen sharing.
-func (s *Service) configMode(ctx context.Context, tenantID uint64, configID string) allocation.Mode {
+// configMode reads the config's switch. A missing row or an unparsable value
+// is session: a failure to load must never widen sharing. A transport error
+// is not a decision — the caller retries instead of storing session mode.
+func (s *Service) configMode(ctx context.Context, tenantID uint64, configID string) (allocation.Mode, error) {
 	if s.configs == nil || configID == "" || configID == types.SandboxConfigIDGlobalDefault {
-		return allocation.ModeSession
+		return allocation.ModeSession, nil
 	}
 	entity, err := s.configs.GetByID(ctx, tenantID, configID)
-	if err != nil || entity == nil || entity.Config == nil {
-		if err != nil {
-			logger.Warnf(ctx, "[sandbox-alloc] read config %d/%s: %v; using session", tenantID, configID, err)
-		}
-		return allocation.ModeSession
+	if err != nil {
+		return "", fmt.Errorf("sandboxalloc: read config %d/%s: %w", tenantID, configID, err)
+	}
+	if entity == nil || entity.Config == nil {
+		return allocation.ModeSession, nil
 	}
 	mode, err := allocation.ParseMode(entity.Config.AllocationMode)
 	if err != nil {
-		return allocation.ModeSession
+		return allocation.ModeSession, nil
 	}
-	return mode
+	return mode, nil
 }
 
 // Lookup returns the stored assignment without creating one. It always reads

@@ -2,6 +2,7 @@ package sandboxalloc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -88,6 +89,27 @@ func enableUserMode(t *testing.T) {
 	t.Helper()
 	allocation.SetUserModeAvailable(true)
 	t.Cleanup(func() { allocation.SetUserModeAvailable(false) })
+}
+
+type errConfigs struct{ err error }
+
+func (e errConfigs) GetByID(context.Context, uint64, string) (*types.TenantSandboxConfigEntity, error) {
+	return nil, e.err
+}
+
+func TestPlaceDoesNotRecordAModeWhenTheConfigReadFails(t *testing.T) {
+	enableUserMode(t)
+	id := uuid.NewString()
+	e := newEnv(t, fakeConfigs{"cfg-a": "user"}, webSession(id))
+	e.svc.configs = errConfigs{err: errors.New("timeout")}
+
+	_, err := e.svc.Place(context.Background(), PlaceRequest{
+		SessionTenantID: 7, SessionID: id, ConfigTenantID: 7, ConfigID: "cfg-a",
+	})
+	require.Error(t, err)
+	row, err := e.svc.repo.GetAssignment(context.Background(), id)
+	require.NoError(t, err)
+	require.Nil(t, row, "a failed config read must be retried, not stored as session mode")
 }
 
 func TestPlacePutsAVerifiedWebUserOnASharedMachineAndPinsIt(t *testing.T) {
