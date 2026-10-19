@@ -1860,7 +1860,7 @@ export default {
       mainConversation: '主对话',
       recentProgress: '最近进展',
       waitFailed: '等待子任务更新失败',
-      assignment: '查看任务分工',
+      assignment: '任务说明',
       "title": "子任务",
       "unnamed": "未命名任务",
       "waiting": "等待子任务更新…",

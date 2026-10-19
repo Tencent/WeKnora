@@ -168,6 +168,7 @@
                     :class="{ 'no-results': !hasActionResult(event) }">
                     <div class="action-title">
                       <BrowserIcon v-if="event.tool_name === 'local_browser'" class="action-title-icon browser-tool-icon" />
+                      <span v-else-if="isCollaborationTool(event.tool_name)" class="action-title-icon icon-mask" :style="maskIconStyle(agentIcon)" aria-hidden="true" />
                       <t-icon v-else-if="event.tool_name" class="action-title-icon"
                         :name="getToolIconName(event.tool_name)" />
                       <t-tooltip v-if="event.tool_name === 'todo_write' && event.tool_data?.steps"
@@ -521,6 +522,7 @@
                   :class="{ 'no-results': !hasActionResult(event) }">
                   <div class="action-title">
                     <BrowserIcon v-if="event.tool_name === 'local_browser'" class="action-title-icon browser-tool-icon" />
+                    <span v-else-if="isCollaborationTool(event.tool_name)" class="action-title-icon icon-mask" :style="maskIconStyle(agentIcon)" aria-hidden="true" />
                     <t-icon v-else-if="event.tool_name" class="action-title-icon" :name="getToolIconName(event.tool_name)" />
                     <t-tooltip v-if="event.tool_name === 'todo_write' && event.tool_data?.steps"
                       :content="t('agent.updatePlan')" placement="top">
@@ -748,7 +750,7 @@ import {
 } from '@/utils/sandboxArtifactRefs';
 import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
-import { getAgentToolIconName } from '@/utils/agent-tool-icons';
+import { getAgentToolIconName, isCollaborationTool } from '@/utils/agent-tool-icons';
 import { getMcpToolDisplayType, getMcpToolTitle, mcpToolResultOutput } from '@/utils/mcpToolDisplay';
 import { getCatalogToolDisplayType, getCatalogToolTitle } from '@/utils/catalogToolDisplay';
 import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';

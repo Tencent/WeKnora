@@ -12,7 +12,7 @@
         :tabindex="activeId === tab.id ? 0 : -1" :title="`${tab.task.displayName} · ${t(`agentStream.collaboration.status.${tab.task.status}`)}`"
         @click="$emit('select', tab.id)" @keydown="navigate($event, index + 1)">
         <span class="child-agent-tab-dot" :class="tab.task.status" aria-hidden="true" />
-        <span class="child-agent-tab-name">{{ tab.task.displayName || t('agentStream.collaboration.unnamed') }}</span>
+        <span class="child-agent-tab-name" :class="{ 'is-running': tab.task.status === 'running' }">{{ tab.task.displayName || t('agentStream.collaboration.unnamed') }}</span>
       </button>
       <button type="button" class="child-agent-tab-close" :aria-label="`${t('common.close')} ${tab.task.displayName}`"
         @click="closeTab(tab.id)"><CloseIcon aria-hidden="true" /></button>
@@ -56,7 +56,9 @@ watch(() => props.activeId, () => nextTick(() => {
 .child-agent-tab-entry { display: flex; align-items: center; flex-shrink: 0; border-radius: var(--app-radius-sm); }
 .child-agent-tab { display: flex; align-items: center; gap: 7px; padding: 7px 10px; border: 0; border-radius: var(--app-radius-sm); background: transparent; color: var(--td-text-color-secondary); font: inherit; font-size: var(--app-text-md); line-height: 1.4; white-space: nowrap; cursor: pointer; flex-shrink: 0; }
 .child-agent-tabs.in-header { flex: 1; min-width: 0; border: 0; padding: 0; gap: 4px; }
-.in-header .child-agent-tab { padding: 6px 8px; font-size: var(--app-text-sm, 13px); }
+.in-header .child-agent-tab { height: 28px; padding: 0 4px 0 10px; font-size: var(--app-text-sm, 13px); }
+.in-header .child-agent-tab-entry { border-radius: var(--app-radius-md, 8px); }
+.in-header .child-agent-tab-close { margin-right: 3px; }
 .in-header .child-agent-tab-name { max-width: 130px; }
 .child-agent-tab-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
 .child-agent-tab.is-active, .child-agent-tab-entry.is-active { background: var(--td-bg-color-secondarycontainer); }
@@ -68,8 +70,30 @@ watch(() => props.activeId, () => nextTick(() => {
 .in-header .child-agent-tab-parent > .child-agent-tab-dot { position: absolute; right: 0; top: 0; }
 .child-agent-tab:focus-visible, .child-agent-tab-close:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: -2px; }
 .child-agent-tab-close { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-right: 5px; padding: 0; border: 0; border-radius: var(--app-radius-xs); background: transparent; color: var(--td-text-color-placeholder); cursor: pointer; font-size: var(--app-text-sm); }
-.child-agent-tab-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--td-text-color-placeholder); flex-shrink: 0; }
-.child-agent-tab-dot.running { background: var(--td-brand-color); }
+.child-agent-tab-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--td-text-color-placeholder); flex-shrink: 0; }
+.child-agent-tab-dot.running { background: var(--td-brand-color); animation: child-tab-pulse 1.6s ease-out infinite; }
+.child-agent-tab-dot.succeeded { background: var(--td-success-color); }
+.child-agent-tab-name.is-running {
+  background: linear-gradient(90deg, currentColor 30%, var(--td-brand-color) 50%, currentColor 70%) 0 0 / 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: child-tab-shimmer 2.4s linear infinite;
+}
+.child-agent-tab-entry .child-agent-tab-close { opacity: 0; transition: opacity var(--app-motion-fast), color var(--app-motion-fast); }
+.child-agent-tab-entry:hover .child-agent-tab-close, .child-agent-tab-entry.is-active .child-agent-tab-close, .child-agent-tab-close:focus-visible { opacity: 1; }
+@keyframes child-tab-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--td-brand-color) 45%, transparent); }
+  100% { box-shadow: 0 0 0 5px transparent; }
+}
+@keyframes child-tab-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: 0 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .child-agent-tab-dot.running, .child-agent-tab-name.is-running { animation: none; }
+  .child-agent-tab-name.is-running { background: none; -webkit-text-fill-color: currentColor; }
+}
 .child-agent-tab-dot.waiting, .child-agent-tab-dot.needs_attention { background: var(--td-warning-color); }
 .child-agent-tab-dot.failed { background: var(--td-error-color); }
 </style>

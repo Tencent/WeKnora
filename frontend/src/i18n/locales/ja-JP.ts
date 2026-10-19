@@ -6615,7 +6615,7 @@ export default {
       mainConversation: 'メインチャット',
       recentProgress: '最近の進捗',
       waitFailed: 'タスク更新の待機に失敗しました',
-      assignment: '担当内容を表示',
+      assignment: 'タスク内容',
       "title": "サブタスク",
       "unnamed": "無名のタスク",
       "waiting": "タスクの更新を待機中…",

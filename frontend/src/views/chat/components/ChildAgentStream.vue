@@ -13,6 +13,7 @@
               {{ t('agentStream.collaboration.assignment') }}
             </span>
             <span v-if="message === latestAssignment" class="child-assignment-status" :class="task.status" role="status">
+              <span class="child-assignment-dot" aria-hidden="true" />
               {{ t(`agentStream.collaboration.status.${task.status}`) }}
             </span>
             <ChevronRightIcon class="child-assignment-chevron" size="16px" aria-hidden="true" />
@@ -118,49 +119,54 @@ onUnmounted(() => { closed = true; clearTimeout(timer); stream.stopStream() })
 @import '../../../components/css/chat-scrollbar.less';
 .child-stream { height: 100%; box-sizing: border-box; overflow-y: auto; overscroll-behavior-y: contain; padding: 18px 16px 24px; font-size: var(--app-text-base); .chat-scrollbar(); }
 .child-assignment {
-  margin: 0 0 20px;
-  border: 1px solid var(--td-component-border);
+  margin: 0 0 16px;
   border-radius: var(--app-radius-md);
-  background: var(--td-bg-color-container);
+  background: color-mix(in srgb, var(--td-text-color-primary) 3%, transparent);
 }
 .child-assignment summary {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 46px;
-  padding: 10px 12px;
+  gap: 12px;
+  min-height: 36px;
+  padding: 6px 10px;
   box-sizing: border-box;
   border-radius: var(--app-radius-md);
-  color: var(--td-text-color-primary);
-  font-size: var(--app-text-base);
-  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+  font-size: var(--agent-step-text-size, 14px);
+  line-height: 1.55;
   list-style: none;
   cursor: pointer;
-  transition: background-color var(--app-motion-fast) ease;
+  transition: color var(--app-motion-fast) ease;
 }
 .child-assignment summary::-webkit-details-marker { display: none; }
-.child-assignment summary:hover { background: var(--td-bg-color-container-hover); }
+.child-assignment summary:hover, .child-assignment[open] summary { color: var(--td-text-color-primary); }
 .child-assignment summary:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: 2px; }
-.child-assignment-label { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
-.child-assignment-icon { flex-shrink: 0; color: var(--td-text-color-secondary); }
-.child-assignment-chevron { margin-left: auto; flex-shrink: 0; color: var(--td-text-color-secondary); transition: transform var(--app-motion-fast) ease; }
+.child-assignment-label { display: inline-flex; align-items: center; gap: 12px; min-width: 0; }
+.child-assignment-icon { flex-shrink: 0; color: var(--agent-step-icon-color, var(--td-text-color-secondary)); }
+.child-assignment-chevron { margin-left: auto; flex-shrink: 0; color: var(--td-text-color-placeholder); transition: transform var(--app-motion-fast) ease; }
 .child-assignment[open] .child-assignment-chevron { transform: rotate(90deg); }
-.child-assignment-status { flex-shrink: 0; padding: 2px 7px; border-radius: var(--app-radius-xs); background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-secondary); font-size: var(--app-text-md); line-height: 1.5; }
-.child-assignment-status.running { color: var(--td-brand-color); background: var(--td-brand-color-light); }
+.child-assignment-status { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; color: var(--td-text-color-placeholder); font-size: var(--agent-step-summary-size, 13px); }
+.child-assignment-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.child-assignment-status.running { color: var(--td-brand-color); }
+.child-assignment-status.running .child-assignment-dot { animation: child-assignment-pulse 1.6s ease-out infinite; }
 .child-assignment-status.waiting, .child-assignment-status.needs_attention { color: var(--td-warning-color); }
 .child-assignment-status.failed { color: var(--td-error-color); }
 .child-assignment-body {
   margin: 0;
-  padding: 12px 16px;
-  border-top: 1px solid var(--td-component-border);
+  padding: 2px 12px 12px 40px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--td-text-color-secondary);
-  font-size: var(--app-text-base);
+  font-size: var(--agent-step-summary-size, 13px);
   line-height: 1.7;
+}
+@keyframes child-assignment-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--td-brand-color) 45%, transparent); }
+  100% { box-shadow: 0 0 0 6px transparent; }
 }
 @media (prefers-reduced-motion: reduce) {
   .child-assignment-chevron, .child-assignment summary { transition: none; }
+  .child-assignment-status.running .child-assignment-dot { animation: none; }
 }
 .child-stream-error { color: var(--td-error-color); margin: 12px 0; }
 </style>

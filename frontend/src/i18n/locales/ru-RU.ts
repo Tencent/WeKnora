@@ -1858,7 +1858,7 @@ export default {
       mainConversation: 'Основной чат',
       recentProgress: 'Последние обновления',
       waitFailed: 'Не удалось дождаться обновлений задач',
-      assignment: 'Показать задание',
+      assignment: 'Задание',
       "title": "Подзадачи",
       "unnamed": "Задача без названия",
       "waiting": "Ожидание обновлений задач…",

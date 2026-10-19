@@ -1,3 +1,10 @@
+const COLLABORATION_TOOLS = new Set(['spawn_agent', 'list_agents', 'send_message', 'followup_task', 'interrupt_agent', 'wait_agent'])
+
+/** Collaboration steps render the agent mark instead of a TDesign icon. */
+export function isCollaborationTool(toolName: string): boolean {
+  return COLLABORATION_TOOLS.has(toolName)
+}
+
 /** TDesign icon names for agent / RAG pipeline tool steps. */
 export function getAgentToolIconName(
   toolName: string,
@@ -68,7 +75,7 @@ export function getAgentToolIconName(
   if (toolName === 'run_operation') {
     return 'terminal'
   }
-  if (['spawn_agent', 'list_agents', 'send_message', 'followup_task', 'interrupt_agent', 'wait_agent'].includes(toolName)) {
+  if (isCollaborationTool(toolName)) {
     return 'chat'
   }
   if (toolName === 'open_page' || toolName === 'view_page') {

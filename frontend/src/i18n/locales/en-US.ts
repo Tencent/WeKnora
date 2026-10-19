@@ -6615,7 +6615,7 @@ export default {
       mainConversation: 'Main chat',
       recentProgress: 'Recent progress',
       waitFailed: 'Could not wait for task updates',
-      assignment: 'View assignment',
+      assignment: 'Task brief',
       "title": "Tasks",
       "unnamed": "Unnamed task",
       "waiting": "Waiting for task updates…",

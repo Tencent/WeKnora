@@ -1858,7 +1858,7 @@ export default {
       mainConversation: '기본 대화',
       recentProgress: '최근 진행 상황',
       waitFailed: '작업 업데이트 대기 실패',
-      assignment: '작업 내용 보기',
+      assignment: '작업 내용',
       "title": "하위 작업",
       "unnamed": "이름 없는 작업",
       "waiting": "작업 업데이트 기다리는 중…",
