@@ -753,6 +753,56 @@ func TestSuspendedFollowupDeliverySurvivesFailedResume(t *testing.T) {
 	require.Positive(t, g.Members[0].Runs[0].Result.ConsumedSequence)
 }
 
+func TestParentHeartbeatExtendsDeadline(t *testing.T) {
+	s, scope := testStore(t)
+	r := New(s, nil)
+	r.Poll = 5 * time.Millisecond
+	r.Lease = time.Second
+	ctx := context.Background()
+	b, err := r.AcquireParent(ctx, scope)
+	require.NoError(t, err)
+	require.NoError(t, s.Change(b.Context(ctx), scope, func(g *Group) error {
+		g.Deadline = time.Now().Add(-time.Minute)
+		return nil
+	}))
+	_, stop := b.Start(ctx)
+	defer stop()
+	require.Eventually(t, func() bool {
+		return read(t, s, scope).Deadline.After(time.Now().Add(30 * time.Minute))
+	}, time.Second, 5*time.Millisecond)
+	r.Tick(context.Background())
+	require.Equal(t, "active", read(t, s, scope).Status)
+}
+
+func TestChildHeartbeatExtendsDeadline(t *testing.T) {
+	s, scope := testStore(t)
+	ctx := context.Background()
+	entered, release := make(chan struct{}), make(chan struct{})
+	defer close(release)
+	r := New(s, func(context.Context, Work) (Result, error) {
+		close(entered)
+		<-release
+		return Result{Answer: "ok"}, nil
+	})
+	r.Poll = 5 * time.Millisecond
+	r.Lease = time.Second
+	_, err := r.Spawn(ctx, scope, "spawn", "one", "a", "{}", "q")
+	require.NoError(t, err)
+	r.Tick(ctx)
+	<-entered
+	require.NoError(t, s.Change(ctx, scope, func(g *Group) error {
+		g.Deadline = time.Now().Add(-time.Minute)
+		return nil
+	}))
+	require.Eventually(t, func() bool {
+		return read(t, s, scope).Deadline.After(time.Now().Add(30 * time.Minute))
+	}, time.Second, 5*time.Millisecond)
+	r.Tick(ctx)
+	g := read(t, s, scope)
+	require.Equal(t, "running", current(g.Members[0]).State)
+	require.Equal(t, "active", g.Status)
+}
+
 func TestCanceledPanickingRunCannotQueueFollowup(t *testing.T) {
 	s, scope := testStore(t)
 	ctx := t.Context()

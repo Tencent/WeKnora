@@ -530,13 +530,37 @@ func delegatedPromptUser(userID string) string {
 	return (types.Principal{Type: types.PrincipalWebUser, ID: userID}).StorageID()
 }
 
-// StopPrompt cancels the owning collaboration, translating prompt principal IDs to account IDs.
+// StopPrompt settles the run that owns a closed prompt. A parent prompt cancels
+// its collaboration. A child prompt lives in the child session, so it is matched
+// through the parent group and only that child is closed.
 func (s *AgentCollaboration) StopPrompt(ctx context.Context, p *types.AgentPrompt) error {
+	if p == nil {
+		return nil
+	}
 	userID, ok := strings.CutPrefix(p.UserID, types.PrincipalWebUser+":")
 	if !ok || userID == "" {
 		return nil
 	}
-	return s.StopOwned(ctx, p.TenantID, userID, p.SessionID, p.AssistantMessageID)
+	if err := s.StopOwned(ctx, p.TenantID, userID, p.SessionID, p.AssistantMessageID); err != nil {
+		return err
+	}
+	return s.stopChildPrompt(ctx, p, userID)
+}
+
+func (s *AgentCollaboration) stopChildPrompt(ctx context.Context, p *types.AgentPrompt, userID string) error {
+	var rows []collaboration.Record
+	if err := s.db.WithContext(ctx).Where("tenant_id = ? AND user_id = ? AND status IN ?",
+		p.TenantID, userID, []string{"active", "cancelling"}).Find(&rows).Error; err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if err := s.Runtime.CloseChildPrompt(ctx, collaboration.Scope{
+			TenantID: p.TenantID, UserID: userID, SessionID: row.SessionID, ID: row.ID,
+		}, p.SessionID, p.AssistantMessageID, p.ID, p.Status); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *AgentCollaboration) parentHasInput(
