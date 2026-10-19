@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/hitl"
+	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -180,9 +181,16 @@ func NewGate(cfg *config.Config, checker Checker, broker *hitl.Broker) *Gate {
 
 // NeedsApproval returns whether execution should pause for human confirmation.
 func (g *Gate) NeedsApproval(ctx context.Context, tenantID uint64, serviceID, toolName string) bool {
-	if hitl.RequiresDelegatedApproval(ctx) {
-		return true
-	}
+	// MCP tools have no risk classification yet, so the access level does not
+	// apply to them: the workspace's per-tool flag and delegation decide.
+	action := policy.Action{Risk: policy.RiskWrite, Always: g.requiredByPolicy(ctx, tenantID, serviceID, toolName)}
+	rules := policy.Rules{Level: types.AssistantAccessAutoWrite, ForceAsk: hitl.RequiresDelegatedApproval(ctx)}
+	return policy.Decide(action, rules) == policy.Ask
+}
+
+// requiredByPolicy reports whether the workspace marked the tool as always
+// requiring approval.
+func (g *Gate) requiredByPolicy(ctx context.Context, tenantID uint64, serviceID, toolName string) bool {
 	if g == nil || g.checker == nil || tenantID == 0 || serviceID == "" || toolName == "" {
 		return false
 	}

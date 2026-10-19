@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/hitl"
 	"github.com/Tencent/WeKnora/internal/agent/operations"
+	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -67,7 +68,7 @@ func (t *ConfirmedTool) Parameters() json.RawMessage { return t.inner.Parameters
 func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	meta, _ := ToolExecFromContext(ctx)
 	resumed := meta != nil && meta.Answered != nil && meta.Answered.Kind == types.AgentPromptKindToolApproval
-	if !resumed && !t.access.NeedsApprovalFor(t.risk) {
+	if !resumed && policy.Decide(policy.Action{Risk: t.risk}, t.access.Rules()) == policy.Allow {
 		return t.inner.Execute(ctx, args)
 	}
 	if t.gate == nil || meta == nil || meta.EventBus == nil || (!meta.Interactive && !resumed) {

@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/collaboration"
 	"github.com/Tencent/WeKnora/internal/agent/hitl"
 	"github.com/Tencent/WeKnora/internal/agent/operations"
+	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -323,8 +324,8 @@ func (s *AgentCollaboration) attach(
 				tool.Name() == "ask_user" {
 				return nil
 			}
-			saved.Access = currentAccess
-			if saved.Access == types.AssistantAccessAutoWrite {
+			write := policy.Action{Risk: policy.RiskWrite}
+			if policy.Decide(write, policy.Rules{Level: currentAccess}) == policy.Allow {
 				return nil
 			}
 			return fmt.Errorf(
@@ -496,7 +497,8 @@ func (s *AgentCollaboration) run(ctx context.Context, w collaboration.Work) (col
 		}
 	}
 	ctx = hitl.WithDelegation(ctx, hitl.Delegation{
-		RequireApproval: saved.Access != types.AssistantAccessAutoWrite,
+		RequireApproval: policy.Decide(policy.Action{Risk: policy.RiskWrite},
+			policy.Rules{Level: saved.Access}) == policy.Ask,
 		Register: func(ctx context.Context, p *types.AgentPrompt) error {
 			if p.TenantID != w.Scope.TenantID || p.UserID != delegatedPromptUser(w.Scope.UserID) ||
 				p.SessionID != session.ID ||
