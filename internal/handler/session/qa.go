@@ -119,6 +119,10 @@ func calledWithAPIKey(ctx context.Context) bool {
 func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 	imageURLs, imageDescription := extractImageURLsAndOCRText(rc.images)
 	interactive := !calledWithAPIKey(rc.ctx)
+	mode := types.RunModeUnattended
+	if interactive {
+		mode = types.RunModeAttended
+	}
 	req := &types.QARequest{
 		Session:             rc.session,
 		Query:               rc.query,
@@ -145,7 +149,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		// Only a caller that can answer the prompt later may leave the run
 		// suspended; an API-key caller would get a turn with no answer.
 		Suspendable: interactive,
-		Interactive: interactive,
+		Mode:        mode,
 		Resume:      rc.resume,
 	}
 	if rc.steerSink != nil {

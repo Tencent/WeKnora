@@ -90,7 +90,7 @@ func (f *collaborationSessions) GetSession(_ context.Context, id string) (*types
 }
 
 func (f *collaborationSessions) AgentQA(ctx context.Context, req *types.QARequest, bus *event.EventBus) error {
-	return f.run(ctx, req, bus)
+	return f.run(types.WithRunMode(ctx, req.Mode), req, bus)
 }
 
 func collaborationService(
@@ -210,7 +210,7 @@ func TestCollaborationResultPublishedAfterTranscriptAndCapturesEventErrors(t *te
 			require.NoError(t, s.Runtime.Store.Ensure(ctx, scope))
 			s.Bind(
 				&collaborationSessions{run: func(ctx context.Context, req *types.QARequest, bus *event.EventBus) error {
-					if !req.Interactive || !req.Suspendable {
+					if req.Mode != types.RunModeAttended || !req.Suspendable {
 						return errors.New("expected suspendable child with forwarded interaction")
 					}
 					if req.Session.ID == scope.SessionID {

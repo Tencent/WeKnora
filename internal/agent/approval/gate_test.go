@@ -43,7 +43,7 @@ func TestGate_RequestAndWait_Approve(t *testing.T) {
 	bus := event.NewEventBus()
 	g := NewGate(&config.Config{Agent: &config.AgentConfig{ToolApprovalTimeoutSeconds: 2}}, &stubChecker{required: true}, nil)
 
-	ctx := context.Background()
+	ctx := attended()
 	req := PendingRequest{
 		TenantID:           1,
 		SessionID:          "s1",
@@ -76,7 +76,7 @@ func TestGate_RequestAndWait_Approve(t *testing.T) {
 
 func TestGate_RequestAndWait_Timeout(t *testing.T) {
 	g := NewGate(&config.Config{Agent: &config.AgentConfig{ToolApprovalTimeoutSeconds: 1}}, &stubChecker{required: true}, nil)
-	ctx := context.Background()
+	ctx := attended()
 	req := PendingRequest{
 		TenantID:           1,
 		SessionID:          "s1",
@@ -108,7 +108,7 @@ func TestGate_UnattendedRunRefusesWithoutAsking(t *testing.T) {
 		ServiceID: "svc", ServiceName: "svcname", MCPToolName: "t", RegisteredToolName: "mcp_svcname_t",
 		Args: json.RawMessage(`{}`),
 	}
-	ctx := types.WithUnattendedRun(context.Background())
+	ctx := types.WithRunMode(context.Background(), types.RunModeUnattended)
 
 	started := time.Now()
 	d, err := g.RequestAndWait(ctx, req)
@@ -157,7 +157,7 @@ func TestGate_Resolve_TenantMismatch(t *testing.T) {
 		}()
 		return nil
 	})
-	d, err := g.RequestAndWait(context.Background(), req)
+	d, err := g.RequestAndWait(attended(), req)
 	require.NoError(t, err)
 	require.False(t, d.Approved)
 }
@@ -178,7 +178,7 @@ func TestGate_Resolve_UserMismatch(t *testing.T) {
 		}()
 		return nil
 	})
-	d, err := g.RequestAndWait(context.Background(), req)
+	d, err := g.RequestAndWait(attended(), req)
 	require.NoError(t, err)
 	require.True(t, d.Approved)
 }
@@ -202,7 +202,7 @@ func TestGate_Resolve_EmptyUserIDRejectedWhenWaiterHasUser(t *testing.T) {
 		}()
 		return nil
 	})
-	d, err := g.RequestAndWait(context.Background(), req)
+	d, err := g.RequestAndWait(attended(), req)
 	require.NoError(t, err)
 	require.False(t, d.Approved)
 }
@@ -228,7 +228,7 @@ func TestGate_Resolve_AlreadyResolvedAfterTimeout(t *testing.T) {
 		lateErr <- resolveFor(g, 1, "", pendingID, Decision{Approved: true})
 	}()
 
-	d, err := g.RequestAndWait(context.Background(), PendingRequest{
+	d, err := g.RequestAndWait(attended(), PendingRequest{
 		TenantID: 1, EventBus: bus, SessionID: "s",
 		ServiceID: "svc", MCPToolName: "t", Args: json.RawMessage(`{}`),
 	})
@@ -260,7 +260,7 @@ func TestGate_ApprovedCallStaysExecutingUntilMarked(t *testing.T) {
 		return nil
 	})
 
-	d, err := g.RequestAndWait(context.Background(), PendingRequest{
+	d, err := g.RequestAndWait(attended(), PendingRequest{
 		TenantID: 1, EventBus: bus, SessionID: "s",
 		ServiceID: "svc", MCPToolName: "t", Args: json.RawMessage(`{}`),
 	})
@@ -300,7 +300,7 @@ func TestGate_Resolve_RaceWinsAlreadyResolved(t *testing.T) {
 		return nil
 	})
 
-	d, err := g.RequestAndWait(context.Background(), PendingRequest{
+	d, err := g.RequestAndWait(attended(), PendingRequest{
 		TenantID: 1, EventBus: bus, SessionID: "s",
 		ServiceID: "svc", MCPToolName: "t", Args: json.RawMessage(`{}`),
 	})
@@ -370,7 +370,7 @@ func TestGate_RequestAndWait_SuspendsAfterHotWait(t *testing.T) {
 		return nil
 	})
 
-	d, err := g.RequestAndWait(context.Background(), PendingRequest{
+	d, err := g.RequestAndWait(attended(), PendingRequest{
 		TenantID: 1, SessionID: "s1", AssistantMessageID: "m1", EventBus: bus,
 		ServiceID: "svc", ServiceName: "svcname", MCPToolName: "t", RegisteredToolName: "mcp_svcname_t",
 		Args: json.RawMessage(`{}`), ToolCallID: "tc1",
@@ -389,12 +389,36 @@ func TestGate_RequestAndWait_SuspendsAfterHotWait(t *testing.T) {
 	require.False(t, resolved, "a suspended approval is still open")
 }
 
+func TestGate_DeferredRunSuspendsAtOnce(t *testing.T) {
+	g := NewGate(&config.Config{Agent: &config.AgentConfig{
+		ToolApprovalTimeoutSeconds: 60, PromptHotWaitSeconds: 30,
+	}}, &stubChecker{required: true}, nil)
+	ctx := types.WithRunMode(context.Background(), types.RunModeDeferred)
+	req := PendingRequest{
+		TenantID: 1, SessionID: "s1", AssistantMessageID: "m1", EventBus: event.NewEventBus(),
+		ServiceID: "svc", ServiceName: "svcname", MCPToolName: "t", RegisteredToolName: "mcp_svcname_t",
+		Args: json.RawMessage(`{}`), ToolCallID: "tc1",
+	}
+
+	d, err := g.RequestAndWait(ctx, req)
+	require.NoError(t, err)
+	require.False(t, d.Approved)
+	require.Equal(t, DeferredApprovalReason, d.Reason, "without saved state the run cannot wait")
+
+	req.Snapshot, req.SnapshotVersion = []byte(`{"version":1}`), 1
+	started := time.Now()
+	d, err = g.RequestAndWait(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, d.Suspended)
+	require.Less(t, time.Since(started), 5*time.Second, "a deferred run skips the hot wait")
+}
+
 func TestGate_ResolveSuspendedThenResumeDecision(t *testing.T) {
 	bus := event.NewEventBus()
 	g := NewGate(&config.Config{Agent: &config.AgentConfig{
 		ToolApprovalTimeoutSeconds: 60, PromptHotWaitSeconds: 1,
 	}}, &stubChecker{required: true}, nil)
-	d, err := g.RequestAndWait(context.Background(), PendingRequest{
+	d, err := g.RequestAndWait(attended(), PendingRequest{
 		TenantID: 1, SessionID: "s1", AssistantMessageID: "m1", EventBus: bus,
 		ServiceID: "svc", ServiceName: "svcname", MCPToolName: "t", RegisteredToolName: "mcp_svcname_t",
 		Args: json.RawMessage(`{"a":1}`), ToolCallID: "tc1",
@@ -506,4 +530,8 @@ func TestAnsweredPromptOnlyCurrentOwnerCanContinue(t *testing.T) {
 			})
 		}
 	}
+}
+
+func attended() context.Context {
+	return types.WithRunMode(context.Background(), types.RunModeAttended)
 }

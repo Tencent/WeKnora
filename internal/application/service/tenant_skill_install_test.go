@@ -3230,7 +3230,7 @@ func (e *installAgentEngine) SetContextCheckpointSink(types.ContextCheckpointSin
 
 func (e *installAgentEngine) EnableSuspension(json.RawMessage) {}
 
-func (e *installAgentEngine) SetInteractive(bool) {}
+func (e *installAgentEngine) SetRunMode(types.RunMode) {}
 
 func (e *installAgentEngine) Resume(context.Context, string, string, []chat.Message,
 	[]byte, *types.AgentPrompt,

@@ -152,8 +152,12 @@ var (
 )
 
 // UnattendedApprovalReason is the refusal of a tool approval raised in a run
-// nobody watches (types.WithUnattendedRun).
+// nobody can answer (types.RunModeUnattended).
 const UnattendedApprovalReason = "it needs the user's approval, which nobody can give in this run"
+
+// DeferredApprovalReason is the refusal of a tool approval raised in a
+// deferred run that cannot save its state to wait for the answer.
+const DeferredApprovalReason = "it needs the user's approval, and this run cannot wait for it"
 
 // NewGate builds a gate. checker may be nil (disables gating). cfg may be nil
 // (defaults apply). broker may be nil (process-local prompts, single replica).
@@ -291,8 +295,12 @@ func (g *Gate) allowedInSession(ctx context.Context, req PendingRequest) bool {
 }
 
 func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decision, error) {
-	if types.IsUnattendedRun(ctx) {
+	mode := types.RunModeFromContext(ctx)
+	switch {
+	case mode == types.RunModeUnattended:
 		return Decision{Reason: UnattendedApprovalReason}, nil
+	case mode == types.RunModeDeferred && req.Snapshot == nil:
+		return Decision{Reason: DeferredApprovalReason}, nil
 	}
 	if req.EventBus == nil {
 		return Decision{}, fmt.Errorf("tool approval: EventBus is nil")
@@ -315,15 +323,19 @@ func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decis
 	if len(req.Args) > 0 {
 		_ = json.Unmarshal(req.Args, &argsObj)
 	}
-	wait := g.timeout
+	wait, fallback := g.timeout, g.timeout
 	var suspend *hitl.SuspendSpec
 	if req.Snapshot != nil {
 		wait = g.hotWait
 		suspend = &hitl.SuspendSpec{Snapshot: req.Snapshot, SnapshotVersion: req.SnapshotVersion}
 	}
+	if mode == types.RunModeDeferred {
+		// Nobody is watching: suspend at once, and never fall back to waiting.
+		wait, fallback = 0, 0
+	}
 	out, err := g.broker.Await(ctx, hitl.Spec{
 		Suspend:         suspend,
-		FallbackTimeout: g.timeout,
+		FallbackTimeout: fallback,
 		Prompt: &types.AgentPrompt{
 			TenantID:           req.TenantID,
 			UserID:             req.UserID,

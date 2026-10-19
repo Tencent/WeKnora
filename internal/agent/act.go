@@ -613,7 +613,7 @@ func (e *AgentEngine) runToolCallAnswered(
 		ExecTimeout: execTimeout,
 		Snapshot:    e.snapshotFunc(i, tc.Function.Name),
 		Answered:    answered,
-		Interactive: e.interactive,
+		Mode:        e.mode,
 	})
 
 	var result *types.ToolResult

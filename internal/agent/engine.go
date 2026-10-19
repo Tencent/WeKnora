@@ -94,9 +94,9 @@ type AgentEngine struct {
 	suspendRequest []byte
 	// collaborationOnlySuspension limits suspension to collaboration waits.
 	collaborationOnlySuspension bool
-	// interactive: the client renders prompt cards and can answer them.
-	interactive bool
-	progress    turnProgress
+	// mode: whether the client renders prompt cards and can answer them.
+	mode     types.RunMode
+	progress turnProgress
 	// Hold speculative parent prose until delegated work has been reviewed.
 	holdCollaborationAnswer bool
 }

@@ -155,7 +155,7 @@ func testChildWikiConfirmation(t *testing.T, name string, level types.AssistantA
 	require.False(t, result.Success)
 	require.False(t, write.called, "missing interactive approval must fail closed")
 	approvedCtx := tools.WithToolExecContext(ctx, &tools.ToolExecContext{
-		EventBus: event.NewEventBus(), Interactive: true, SessionID: g.Members[0].SessionID,
+		EventBus: event.NewEventBus(), Mode: types.RunModeAttended, SessionID: g.Members[0].SessionID,
 		AssistantMessageID: "child-answer", UserID: "web_user:u", ToolCallID: "write-call",
 	})
 	result, err = registry.ExecuteTool(approvedCtx, name, json.RawMessage(`{}`))

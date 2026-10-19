@@ -599,7 +599,8 @@ func (s *AgentCollaboration) run(ctx context.Context, w collaboration.Work) (col
 			ctx,
 			&types.QARequest{
 				Resume:             resume,
-				Interactive:        true,
+				Mode:               types.RunModeAttended,
+				GrantSessionID:     w.Scope.SessionID,
 				Suspendable:        true,
 				Session:            session,
 				Query:              w.Run.Query,

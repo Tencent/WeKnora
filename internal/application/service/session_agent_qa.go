@@ -60,6 +60,7 @@ func (s *sessionService) AgentQA(
 	// Propagate the session ID so stateful sandbox backends (CubeSandbox) can
 	// bind script execution to a per-session MicroVM instance.
 	ctx = types.WithSessionID(ctx, sessionID)
+	ctx = types.WithRunMode(ctx, req.Mode)
 	sessionJSON, err := json.Marshal(req.Session)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to marshal session, session ID: %s, error: %v", sessionID, err)
@@ -322,7 +323,7 @@ func (s *sessionService) AgentQA(
 		engine.SetSteerSink(req.SteerSink)
 	}
 
-	engine.SetInteractive(req.Interactive)
+	engine.SetRunMode(req.Mode)
 	collaborating := false
 	if bound, ok := engine.(interface{ HasCollaboration() bool }); ok {
 		collaborating = bound.HasCollaboration()

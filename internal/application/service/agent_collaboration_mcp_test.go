@@ -157,7 +157,7 @@ func testCollaborationMCPApproval(t *testing.T, inherited bool) {
 					if err := s.attach(ctx, engine, registry, cfg, req.Session.ID, req.AssistantMessageID); err != nil {
 						return err
 					}
-					engine.SetInteractive(true)
+					engine.SetRunMode(types.RunModeAttended)
 					engine.EnableSuspension(json.RawMessage(`{}`))
 					if req.Resume != nil {
 						_, err := engine.Resume(

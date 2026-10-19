@@ -501,7 +501,7 @@ func (t *RunOperationTool) confirm(
 ) (confirmedCall, *types.ToolResult) {
 	meta, _ := ToolExecFromContext(ctx)
 	resumed := meta != nil && meta.Answered != nil && meta.Answered.Kind == types.AgentPromptKindToolApproval
-	if t.rt.Gate == nil || meta == nil || meta.EventBus == nil || (!meta.Interactive && !resumed) {
+	if t.rt.Gate == nil || meta == nil || meta.EventBus == nil || (!meta.CanAsk() && !resumed) {
 		return confirmedCall{}, operationFailure(fmt.Sprintf(
 			"%s changes data and needs the user's confirmation, which cannot be shown here. "+
 				"Tell the user what you would do and let them do it in WeKnora.", op.ID))

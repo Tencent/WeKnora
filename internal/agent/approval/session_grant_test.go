@@ -43,7 +43,7 @@ func grantRequest(bus *event.EventBus, session, grant string) PendingRequest {
 
 func approveAndRun(t *testing.T, g *Gate, req PendingRequest) Decision {
 	t.Helper()
-	d, err := g.RequestBuiltinApproval(context.Background(), req)
+	d, err := g.RequestBuiltinApproval(attended(), req)
 	require.NoError(t, err)
 	g.MarkExecuted(context.Background(), d.PendingID)
 	return d
@@ -70,7 +70,7 @@ func TestSessionGrantSkipsLaterApprovalsOfTheSameKind(t *testing.T) {
 	approveAndRun(t, g, grantRequest(bus, "s2", grant))
 	other := grantRequest(bus, "s1", grant)
 	other.UserID = "u2"
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(attended(), 100*time.Millisecond)
 	defer cancel()
 	d, _ := g.RequestBuiltinApproval(ctx, other)
 	assert.False(t, d.Approved, "u2's prompt is answered by nobody here")
@@ -88,7 +88,7 @@ func TestApprovalWithoutSessionGrantAsksAgain(t *testing.T) {
 
 func TestRequestWithoutGrantCannotBeAllowedForTheSession(t *testing.T) {
 	g, bus, raised := grantGate(t, Decision{Approved: true, AllowInSession: true})
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(attended(), 300*time.Millisecond)
 	defer cancel()
 	d, err := g.RequestBuiltinApproval(ctx, grantRequest(bus, "s1", ""))
 	require.NoError(t, err)
@@ -136,7 +136,7 @@ func TestRejectingDropsAllowInSession(t *testing.T) {
 		}()
 		return nil
 	})
-	d, err := g.RequestBuiltinApproval(context.Background(), grantRequest(bus, "s1", "g"))
+	d, err := g.RequestBuiltinApproval(attended(), grantRequest(bus, "s1", "g"))
 	require.NoError(t, err)
 	assert.False(t, d.Approved)
 	assert.False(t, d.AllowInSession)

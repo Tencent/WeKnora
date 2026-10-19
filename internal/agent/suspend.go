@@ -149,10 +149,10 @@ func (e *AgentEngine) EnableSuspension(request json.RawMessage) {
 	e.suspendable = true
 }
 
-// SetInteractive marks the run's client as able to render and answer
-// prompts such as ask_user, whether or not the run may also suspend.
-func (e *AgentEngine) SetInteractive(interactive bool) {
-	e.interactive = interactive
+// SetRunMode says whether the run's client can render and answer prompts
+// such as ask_user, whether or not the run may also suspend.
+func (e *AgentEngine) SetRunMode(mode types.RunMode) {
+	e.mode = mode.Normalize()
 }
 
 func (e *AgentEngine) beginTurn(query string, imageURLs []string, state *types.AgentState) {

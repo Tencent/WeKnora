@@ -93,9 +93,9 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	// of emitting its one-shot notice, so the failure is a stalled reply.
 	// A detached context has no live client either, which is what this says.
 	MCPOAuthNonInteractiveContextKey: true,
-	// Marks a run nobody watches (an agent trial). Dropping it makes a tool
-	// approval wait out its full timeout for an answer that cannot come.
-	UnattendedRunContextKey: true,
+	// Whether anyone can answer the run's prompts. Dropping it reads as
+	// unattended, which refuses an approval an attended run could have asked.
+	RunModeContextKey: true,
 
 	// ---- Deliberately does not survive a detach ----
 	//
