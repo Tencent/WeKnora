@@ -414,3 +414,25 @@ func TestWebFetchOwnerTimeoutDoesNotCancelSharedFetch(t *testing.T) {
 	assert.Equal(t, "owner page body", longResult.Data["results"].([]map[string]interface{})[0]["raw_content"])
 	assert.Equal(t, 1, fetcher.callCount[rawURL])
 }
+
+type deadlineWebContentFetcher struct {
+	deadline    time.Time
+	hasDeadline bool
+}
+
+func (f *deadlineWebContentFetcher) Fetch(ctx context.Context, _ string) (string, error) {
+	f.deadline, f.hasDeadline = ctx.Deadline()
+	return "page body", nil
+}
+
+func TestStorePageBudgetFollowsWebFetchTimeout(t *testing.T) {
+	t.Setenv("WEKNORA_WEB_FETCH_TIMEOUT", "150s")
+	fetcher := &deadlineWebContentFetcher{}
+	tool := newWebFetchTool(fetcher)
+
+	_, err := tool.storePage(context.Background(), "https://example.com/slow")
+
+	require.NoError(t, err)
+	require.True(t, fetcher.hasDeadline)
+	assert.InDelta(t, 150, time.Until(fetcher.deadline).Seconds(), 2)
+}

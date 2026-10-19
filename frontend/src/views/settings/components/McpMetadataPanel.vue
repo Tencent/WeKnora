@@ -3,24 +3,25 @@
     <div class="section-title-block">
       <div class="metadata-heading">
         <h4 class="setting-drawer__section-title">{{ t('mcpMetadata.tools') }}</h4>
-        <t-button
-          v-if="!busy || snapshot"
-          variant="text"
-          size="small"
-          theme="primary"
-          :loading="refreshing"
-          :disabled="loading || disabled || policyBusy"
-          @click="refresh"
-        >
-          <template #icon><t-icon name="refresh" /></template>
-          {{ t(snapshot ? 'mcpMetadata.refresh' : 'mcpMetadata.fetch') }}
-        </t-button>
+        <t-tooltip v-if="!busy || snapshot" :content="t('mcpMetadata.cacheHint')" placement="top-right"
+          :overlay-inner-style="{ maxWidth: '300px', whiteSpace: 'normal' }">
+          <t-button
+            variant="text"
+            size="small"
+            theme="primary"
+            :loading="refreshing"
+            :disabled="loading || disabled || policyBusy"
+            @click="refresh"
+          >
+            <template #icon><t-icon name="refresh" /></template>
+            {{ t(snapshot ? 'mcpMetadata.refresh' : 'mcpMetadata.fetch') }}
+          </t-button>
+        </t-tooltip>
       </div>
-      <p class="form-desc">{{ t('mcpMetadata.cacheHint') }}</p>
       <p v-if="snapshot" class="snapshot-meta">
-        <span>{{ t('mcpMetadata.toolCount', { count: snapshot.tools.length }) }}</span>
-        <span v-if="snapshot.server_name">{{ snapshot.server_name }} {{ snapshot.server_version }}</span>
-        <span>{{ t('mcpMetadata.syncedAt') }} {{ formatTime(snapshot.synced_at) }}</span>
+        <span class="snapshot-meta__item">{{ t('mcpMetadata.toolCount', { count: snapshot.tools.length }) }}</span>
+        <span v-if="snapshot.server_name" class="snapshot-meta__item">{{ snapshot.server_name }} {{ snapshot.server_version }}</span>
+        <span class="snapshot-meta__item">{{ t('mcpMetadata.syncedAt') }}{{ formatTime(snapshot.synced_at) }}</span>
         <t-tooltip
           v-if="!hasServerDocumentation"
           :content="t('mcpMetadata.noServerDocumentation')"
@@ -67,7 +68,6 @@
         <p v-else-if="snapshot?.stale" class="form-desc form-desc--warn">{{ t('mcpMetadata.stale') }}</p>
         <p v-else-if="!busy && !snapshot" class="form-desc">{{ t('mcpMetadata.notSynced') }}</p>
         <template v-if="snapshot">
-          <p class="form-desc">{{ t('mcpMetadata.policyHint') }}</p>
           <McpToolsList :tools="snapshot.tools" :service-id="snapshot.stale ? undefined : serviceId" @busy="onPolicyBusy" />
         </template>
       </div>
@@ -80,6 +80,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getMCPMetadata, refreshMCPMetadata, type MCPMetadata } from '@/api/mcp-service'
 import McpToolsList from './McpToolsList.vue'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 
 const props = defineProps<{ serviceId: string; disabled?: boolean }>()
 const emit = defineEmits<{ (e: 'busy', value: boolean): void; (e: 'synced', value: boolean): void }>()
@@ -91,6 +92,7 @@ const policyBusy = ref(false)
 const docsOpen = ref(false)
 const error = ref('')
 let generation = 0
+let assistantRead = 0
 const busy = computed(() => loading.value || (refreshing.value && !snapshot.value))
 const hasServerDocumentation = computed(() => !!(snapshot.value?.instructions || snapshot.value?.server_description))
 
@@ -116,6 +118,7 @@ function formatTime(value: string) {
 
 async function refreshFrom(current: number) {
   if (refreshing.value || props.disabled || policyBusy.value) return
+  assistantRead++
   refreshing.value = true
   error.value = ''
   emit('busy', true)
@@ -134,6 +137,7 @@ async function refreshFrom(current: number) {
 
 watch(() => props.serviceId, async id => {
   const current = ++generation
+  const read = ++assistantRead
   setSnapshot(null)
   error.value = ''
   refreshing.value = false
@@ -142,7 +146,7 @@ watch(() => props.serviceId, async id => {
   loading.value = true
   try {
     const saved = await getMCPMetadata(id)
-    if (current !== generation) return
+    if (current !== generation || read !== assistantRead) return
     if (!saved && !props.disabled) {
       loading.value = false
       await refreshFrom(current)
@@ -150,11 +154,26 @@ watch(() => props.serviceId, async id => {
     }
     setSnapshot(saved)
   } catch (e) {
-    if (current === generation) error.value = errorText(e)
+    if (current === generation && read === assistantRead) error.value = errorText(e)
   } finally {
     if (current === generation) loading.value = false
   }
 }, { immediate: true })
+
+// Assistant synchronization already contacted the upstream. Only read the
+// persisted snapshot here so a change event never triggers another refresh.
+useAssistantDataChange(() => {
+  if (!props.serviceId) return
+  const current = generation
+  const read = ++assistantRead
+  void getMCPMetadata(props.serviceId).then(saved => {
+    if (current !== generation || read !== assistantRead || refreshing.value) return
+    setSnapshot(saved)
+    error.value = ''
+  }).catch(e => {
+    if (current === generation && read === assistantRead) error.value = errorText(e)
+  })
+}, { areas: ['mcp_service'] })
 
 function refresh() {
   void refreshFrom(generation)
@@ -205,11 +224,20 @@ onBeforeUnmount(() => { generation++; emit('busy', false); emit('synced', false)
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 10px;
+  gap: 4px 0;
   margin: 4px 0 0;
   font-size: var(--app-text-sm);
   line-height: 1.4;
-  color: var(--td-text-color-secondary);
+  color: var(--td-text-color-placeholder);
+}
+
+.snapshot-meta__item + .snapshot-meta__item::before {
+  content: '·';
+  margin: 0 6px;
+}
+
+.snapshot-meta > :not(.snapshot-meta__item) {
+  margin-left: 8px;
 }
 
 .snapshot-meta__help,

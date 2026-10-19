@@ -80,3 +80,18 @@ for (const selected of [true, false, undefined]) {
     } finally { stream.stopStream() }
   })
 }
+
+test('SSE body carries an agent-only page context', async () => {
+  let stream!: ReturnType<typeof useStream>
+  await renderToString(createSSRApp({ setup() { stream = useStream(); return () => null } }))
+  try {
+    await stream.startStream({
+      session_id: 'session', query: 'Check', method: 'POST', url: '/api/v1/agent-chat',
+      agent_enabled: true, page_context: { agent_id: 'agent-a' },
+    })
+    assert.equal(stream.error.value, null)
+    const body = JSON.parse(transport.requests.at(-1)!.options.body)
+    assert.deepEqual(body.page_context, { agent_id: 'agent-a' })
+    assert.equal(body.assistant_scope, undefined)
+  } finally { stream.stopStream() }
+})

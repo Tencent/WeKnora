@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"context"
 	stderrors "errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -14,6 +16,10 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 )
+
+// oauthConnectionCleanupTimeout bounds reading the OAuth client registration
+// when the callback recycles cached connections.
+const oauthConnectionCleanupTimeout = 5 * time.Second
 
 // MCPOAuthHandler exposes the per-user MCP OAuth2 authorization-code flow:
 // kicking off authorization (discovery + dynamic client registration + PKCE),
@@ -120,6 +126,107 @@ func (h *MCPOAuthHandler) AuthorizeURL(c *gin.Context) {
 	}})
 }
 
+// mcpOAuthAssertionMaxBytes caps the assertion request body. Signed JWT
+// assertions are a few kilobytes at most.
+const mcpOAuthAssertionMaxBytes = 16 << 10
+
+type mcpOAuthAssertionRequest struct {
+	// Assertion is the signed JWT presented to the authorization server with
+	// the JWT bearer grant, for example an ID-JAG issued for the current user.
+	Assertion string `json:"assertion"`
+}
+
+// AssertionGrant obtains the current user's token with the JWT bearer grant
+// (RFC 7523) instead of the browser authorization code flow. It is for
+// applications that run WeKnora behind their own sign-in and call it for
+// their users, where no browser can follow an authorization redirect. The
+// grant uses the OAuth client already registered for the service, and the
+// token is stored exactly like one obtained through the callback.
+//
+// AssertionGrant godoc
+// @Summary      使用断言获取 MCP OAuth 令牌
+// @Description  以 JWT Bearer 授权（RFC 7523）提交调用方签发的断言（如 ID-JAG），为当前用户获取并保存令牌，
+// @Description  无需浏览器跳转。使用该服务已注册的 OAuth 客户端
+// @Tags         MCP服务
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                  true  "MCP 服务 ID"
+// @Param        request  body      map[string]interface{}  true  "{assertion: string}"
+// @Success      200      {object}  handler.DataResponse{data=mcp.OAuthAuthorizationStatus}  "与 oauth/status 相同"
+// @Failure      400      {object}  errors.AppError         "断言无效或被授权服务器拒绝"
+// @Failure      404      {object}  errors.AppError
+// @Security     Bearer
+// @Router       /mcp-services/{id}/oauth/assertion [post]
+func (h *MCPOAuthHandler) AssertionGrant(c *gin.Context) {
+	ctx := c.Request.Context()
+	serviceID := c.Param("id")
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	principal, _ := mcpOAuthPrincipalsFromContext(c)
+	if tenantID == 0 || !principal.Valid() {
+		_ = c.Error(errors.NewUnauthorizedError("authentication required"))
+		return
+	}
+
+	limitJSONBody(c, mcpOAuthAssertionMaxBytes)
+	var req mcpOAuthAssertionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(errors.NewBadRequestError("request body is too large"))
+			return
+		}
+		_ = c.Error(errors.NewBadRequestError("invalid request body"))
+		return
+	}
+	req.Assertion = strings.TrimSpace(req.Assertion)
+	if req.Assertion == "" {
+		_ = c.Error(errors.NewValidationError("assertion is required"))
+		return
+	}
+
+	service, err := h.svc.GetMCPServiceByID(ctx, tenantID, serviceID)
+	if err != nil || service == nil {
+		_ = c.Error(errors.NewNotFoundError("MCP service not found"))
+		return
+	}
+	if !service.AuthConfig.IsOAuth() {
+		_ = c.Error(errors.NewValidationError("MCP service is not configured to use OAuth"))
+		return
+	}
+
+	err = h.oauth.AuthorizeWithAssertion(ctx, service, tenantID, principal, req.Assertion)
+	if err != nil {
+		var rejected *mcp.OAuthGrantRejectedError
+		switch {
+		case stderrors.Is(err, mcp.ErrOAuthClientNotRegistered):
+			_ = c.Error(errors.NewValidationError(err.Error()))
+		case stderrors.As(err, &rejected):
+			logger.Warnf(ctx, "MCP OAuth assertion rejected: service=%s status=%d code=%s",
+				secutils.SanitizeForLog(serviceID), rejected.StatusCode, secutils.SanitizeForLog(rejected.Code))
+			_ = c.Error(errors.NewBadRequestError(rejected.Error()))
+		default:
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"service_id": secutils.SanitizeForLog(serviceID),
+			})
+			_ = c.Error(errors.NewInternalServerError("failed to obtain token with assertion: " + err.Error()))
+		}
+		return
+	}
+	// Recycle connections the same way the callback does, so the user's next
+	// call reconnects with the new token.
+	if h.mcpManager != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthConnectionCleanupTimeout)
+		_ = h.mcpManager.CloseClientsAfterAuthorization(cleanupCtx, tenantID, serviceID, principal)
+		cancel()
+	}
+
+	status, err := h.oauth.AuthorizationStatus(ctx, tenantID, principal, serviceID)
+	if err != nil {
+		_ = c.Error(errors.NewInternalServerError("failed to query authorization status: " + err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": status})
+}
+
 // Callback receives the authorization-server redirect. It is registered as a
 // public (no-bearer) route; the opaque single-use `state` parameter
 // authenticates the request. On completion it redirects the browser back to
@@ -151,7 +258,8 @@ func (h *MCPOAuthHandler) Callback(c *gin.Context) {
 		return
 	}
 
-	frontendRedirect, serviceID, err := h.oauth.CompleteAuthorization(ctx, state, code)
+	result, err := h.oauth.CompleteAuthorization(ctx, state, code)
+	frontendRedirect := result.FrontendRedirect
 	if frontendRedirect == "" {
 		frontendRedirect = fallbackRedirect
 	}
@@ -160,11 +268,16 @@ func (h *MCPOAuthHandler) Callback(c *gin.Context) {
 		c.Redirect(http.StatusFound, frontendRedirect+"#mcp_oauth_error="+urlQueryEscape("authorization_failed"))
 		return
 	}
-	// The old transport may have been created with an OAuth client registration
-	// that was invalidated together with the refresh token. Recreate it against
-	// the freshly persisted token/client on next use.
-	if h.mcpManager != nil && serviceID != "" {
-		_ = h.mcpManager.CloseClient(serviceID)
+	// Recycle the authorizing user's connection and any connection built with
+	// a replaced OAuth client registration. Other users' connections, and the
+	// tool calls in flight on them, are left alone. The browser may leave as
+	// soon as it is redirected, which must not cut this short.
+	if h.mcpManager != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthConnectionCleanupTimeout)
+		_ = h.mcpManager.CloseClientsAfterAuthorization(
+			cleanupCtx, result.TenantID, result.ServiceID, result.Principal,
+		)
+		cancel()
 	}
 	c.Redirect(http.StatusFound, frontendRedirect+"#mcp_oauth_result=success")
 }
@@ -219,7 +332,7 @@ func (h *MCPOAuthHandler) Status(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": status})
 }
 
-// Revoke removes the current user's stored token and recycles connections.
+// Revoke removes the current user's stored token and recycles their connection.
 //
 // Revoke godoc
 // @Summary      撤销 MCP OAuth 授权
@@ -244,8 +357,11 @@ func (h *MCPOAuthHandler) Revoke(c *gin.Context) {
 		c.Error(errors.NewInternalServerError("failed to revoke authorization: " + err.Error()))
 		return
 	}
-	// Recycle any cached connections so a subsequent call re-authorizes.
-	_ = h.mcpManager.CloseClient(serviceID)
+	// Recycle this user's cached connection so a subsequent call re-authorizes.
+	// Other users' connections do not use the revoked token and stay open.
+	if h.mcpManager != nil {
+		_ = h.mcpManager.CloseClientForPrincipal(serviceID, principal)
+	}
 	c.Status(http.StatusNoContent)
 }
 
@@ -271,7 +387,7 @@ type resolveMCPOAuthBody struct {
 // @Produce      json
 // @Param        pending_id  path  string                  true  "待授权 ID"
 // @Param        request     body  map[string]interface{}  true  "{service_id: string}"
-// @Success      200         {object}  map[string]interface{}
+// @Success      200         {object}  handler.SuccessResponse
 // @Failure      400         {object}  errors.AppError
 // @Failure      409         {object}  errors.AppError  "用户尚未完成授权"
 // @Security     Bearer
@@ -308,7 +424,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 
 	switch decision {
 	case "cancel", "reject", "skip":
-		if err := h.gate.Resolve(tenantID, gateUserID, pendingID, approval.Decision{
+		if err := h.resolveOAuthPrompt(c, tenantID, gateUserID, pendingID, approval.Decision{
 			Approved: false,
 			Reason:   "user canceled",
 		}); err != nil {
@@ -350,7 +466,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 		return
 	}
 
-	if err := h.gate.Resolve(tenantID, gateUserID, pendingID, approval.Decision{Approved: true}); err != nil {
+	if err := h.resolveOAuthPrompt(c, tenantID, gateUserID, pendingID, approval.Decision{Approved: true}); err != nil {
 		switch {
 		case stderrors.Is(err, approval.ErrPendingNotFound):
 			c.Error(errors.NewNotFoundError("pending authorization not found or already completed"))
@@ -380,7 +496,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 // @Tags         MCP服务
 // @Produce      json
 // @Param        pending_id  path  string  true  "待授权 ID"
-// @Success      200         {object}  map[string]interface{}
+// @Success      200         {object}  handler.SuccessResponse
 // @Failure      404         {object}  errors.AppError
 // @Security     Bearer
 // @Router       /agent/mcp-oauth-resolutions/{pending_id}/cancel [post]
@@ -398,7 +514,7 @@ func (h *MCPOAuthHandler) CancelMCPOAuth(c *gin.Context) {
 		return
 	}
 
-	if err := h.gate.Resolve(tenantID, gateUserID, pendingID, approval.Decision{
+	if err := h.resolveOAuthPrompt(c, tenantID, gateUserID, pendingID, approval.Decision{
 		Approved: false,
 		Reason:   "user canceled",
 	}); err != nil {
@@ -420,4 +536,19 @@ func (h *MCPOAuthHandler) CancelMCPOAuth(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// resolveOAuthPrompt records a decision on an in-conversation OAuth prompt.
+// The embed routes carry session_id, which pins the prompt to that session.
+func (h *MCPOAuthHandler) resolveOAuthPrompt(
+	c *gin.Context, tenantID uint64, userID, pendingID string, d approval.Decision,
+) error {
+	return h.gate.Resolve(c.Request.Context(), approval.ResolveRequest{
+		TenantID:  tenantID,
+		UserID:    userID,
+		SessionID: c.Param("session_id"),
+		Kind:      types.AgentPromptKindMCPOAuth,
+		PendingID: pendingID,
+		Decision:  d,
+	})
 }

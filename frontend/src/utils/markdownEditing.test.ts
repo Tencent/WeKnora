@@ -20,6 +20,35 @@ test('Enter on an empty item ends the list instead of stacking markers', () => {
   assert.deepEqual(patch, { value: '- first\n', start: 8, end: 8 })
 })
 
+for (const { value, at, expected } of [
+  { value: '- hello', at: 2, expected: '- \n- hello' },
+  { value: '* hello', at: 2, expected: '* \n* hello' },
+  { value: '1. hello', at: 3, expected: '1. \n2. hello' },
+  { value: '- [x] hello', at: 6, expected: '- [x] \n- [ ] hello' },
+  { value: '  - hello', at: 4, expected: '  - \n  - hello' },
+  { value: 'before\n- hello\nafter', at: 9, expected: 'before\n- \n- hello\nafter' },
+]) {
+  test(`Enter before existing list content preserves the marker: ${JSON.stringify(value)}`, () => {
+    const patch = continueListOnEnter(caret(value, at))
+    assert.ok(patch)
+    assert.equal(patch.value, expected)
+    assert.equal(patch.start, expected.indexOf('hello'))
+    assert.equal(patch.end, patch.start)
+  })
+}
+
+test('Enter in the middle of list content splits the item', () => {
+  assert.deepEqual(continueListOnEnter(caret('- hello world', 7)), {
+    value: '- hello\n-  world', start: 10, end: 10,
+  })
+})
+
+test('an empty item with trailing whitespace still exits the list', () => {
+  assert.deepEqual(continueListOnEnter(caret('- first\n-   ', 10)), {
+    value: '- first\n  ', start: 8, end: 8,
+  })
+})
+
 test('Enter outside a list and over a selection is left to the browser', () => {
   assert.equal(continueListOnEnter(caret('plain text', 10)), null)
   assert.equal(continueListOnEnter({ value: '- first', start: 2, end: 7 }), null)
@@ -82,6 +111,45 @@ test('Tab indents every line of a multi-line selection but skips blank ones', ()
   const patch = indentOnTab({ value: 'a\n\nb', start: 0, end: 4 }, false)
   assert.equal(patch?.value, '  a\n\n  b')
   assert.deepEqual([patch?.start, patch?.end], [0, 8])
+})
+
+for (const outdent of [false, true]) {
+  for (const followingLine of ['- second', '']) {
+    test(`${outdent ? 'Shift+Tab' : 'Tab'} excludes a line whose start is the selection end (${followingLine ? 'next item' : 'empty final line'})`, () => {
+      const first = outdent ? '  - first' : '- first'
+      const next = outdent && followingLine ? '  ' + followingLine : followingLine
+      const changed = outdent ? '- first' : '  - first'
+      const value = `${first}\n${next}`
+      const patch = indentOnTab({ value, start: 0, end: first.length + 1 }, outdent)
+      assert.deepEqual(patch, {
+        value: `${changed}\n${next}`,
+        start: 0,
+        end: changed.length + 1,
+      })
+      // Keep the trailing newline selected so repeated Tab works on the same block.
+      assert.ok(patch)
+      const repeated = indentOnTab(patch, outdent)
+      assert.ok(repeated)
+      assert.equal(repeated.value.slice(repeated.end), next)
+    })
+  }
+}
+
+test('a selection ending within the following line still indents that line', () => {
+  assert.deepEqual(indentOnTab({ value: '- first\n- second', start: 0, end: 9 }, false), {
+    value: '  - first\n  - second', start: 0, end: 20,
+  })
+})
+
+test('Tab preserves a newline-ended selection of plain text for repeated indentation', () => {
+  const patch = indentOnTab({ value: 'first\nsecond\nthird', start: 2, end: 13 }, false)
+  assert.deepEqual(patch, {
+    value: '  first\n  second\nthird', start: 0, end: 17,
+  })
+  assert.ok(patch)
+  assert.deepEqual(indentOnTab(patch, false), {
+    value: '    first\n    second\nthird', start: 0, end: 21,
+  })
 })
 
 test('Tab stays a focus move when it would not indent anything', () => {

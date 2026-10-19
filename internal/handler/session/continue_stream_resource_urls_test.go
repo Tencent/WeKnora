@@ -98,6 +98,8 @@ func (s *stubStreamManager) ClearLiveRun(context.Context, string, string) error 
 	return nil
 }
 
+func (s *stubStreamManager) ResetEvents(context.Context, string, string) error { return nil }
+
 // completedAnswerStream is one assistant turn whose answer embeds a knowledge-base
 // image, with the resource handle straddling two deltas as it does in production
 // when the model-context decoder flushes mid-reference.

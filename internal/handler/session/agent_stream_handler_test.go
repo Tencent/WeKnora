@@ -166,6 +166,28 @@ func TestHandleErrorInvalidData(t *testing.T) {
 		"no SSE event should be produced when ErrorData type assertion fails")
 }
 
+// TestAgentStreamHandlerForwardsOperationDataChange verifies handleToolResult
+// forwards a tool's data_change marker onto the SSE event (main's feature,
+// kept alongside the error-ID tests above).
+func TestAgentStreamHandlerForwardsOperationDataChange(t *testing.T) {
+	streams := &capturingStreamManager{}
+	h := NewAgentStreamHandler(
+		context.Background(), "sess-1", "msg-1", "req-1", 1, time.Now(),
+		&types.Message{}, streams, nil, nil, nil, nil,
+	)
+	marker := map[string]any{"operation": "agent.delete", "area": "agent"}
+	err := h.handleToolResult(context.Background(), event.Event{
+		Type: event.EventAgentToolResult,
+		Data: event.AgentToolResultData{
+			ToolName: "run_operation", Success: true, Data: map[string]any{"data_change": marker},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, streams.events, 1)
+	require.Equal(t, types.ResponseTypeToolResult, streams.events[0].Type)
+	require.Equal(t, marker, streams.events[0].Data["data_change"])
+}
+
 // Compile-time assertion that completionEventRecorder satisfies
 // interfaces.StreamManager. Its embedded interface would make the assertion
 // pass trivially anyway, but it also guarantees the recorder's overridden

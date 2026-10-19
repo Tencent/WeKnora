@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,6 +108,23 @@ func (s *resourceCatalogFileService) SaveFile(
 	return ref, nil
 }
 
+// isImagePayload reports whether data should be treated as image content.
+//
+// The rule is deliberately byte-first: two payloads can only be shared when
+// their bytes are equal, so the decision must not hinge on a name the caller
+// chose freely. The extension is still consulted as a fallback because some
+// extracted image formats — SVG above all — have no signature
+// http.DetectContentType recognises, and those are exactly the vector assets a
+// document repeats across pages. A payload is therefore an image when its name
+// maps to an image media type (the same rule register uses to derive Kind) or
+// when its bytes sniff as image/*.
+func isImagePayload(name string, data []byte) bool {
+	if kind, _ := resourceKind(name); kind == "image" {
+		return true
+	}
+	return strings.HasPrefix(http.DetectContentType(data), "image/")
+}
+
 func (s *resourceCatalogFileService) SaveBytes(
 	ctx context.Context,
 	data []byte,
@@ -114,12 +132,35 @@ func (s *resourceCatalogFileService) SaveBytes(
 	fileName string,
 	temp bool,
 ) (string, error) {
+	sum := sha256.Sum256(data)
+	contentHash := hex.EncodeToString(sum[:])
+
+	// Identical bytes pulled out of one document — the same logo or mascot on
+	// several pages — used to be written once per occurrence and registered as
+	// a separate handle each time: duplicated storage, the same picture
+	// captioned repeatedly, and one identical gallery card per copy. Look the
+	// payload up before writing so every occurrence shares one handle.
+	//
+	// Reuse is restricted to images outside temporary scratch space. For a
+	// user upload or a generated artifact the original name is part of what
+	// the caller asked for, and sharing would surface the first name for the
+	// second file; extracted document images are named from a generated UUID,
+	// so sharing one is invisible. Temporary objects are excluded because
+	// their lifecycle is per-use.
+	if !temp && isImagePayload(fileName, data) {
+		ref, ok, err := s.catalog.ReuseByContentHash(ctx, tenantID, contentHash)
+		if err == nil && ok {
+			return ref, nil
+		}
+		// Fail open: a lookup failure or a miss must never stop bytes from
+		// being stored, so fall through to the normal write-and-register path.
+	}
+
 	physical, err := s.inner.SaveBytes(ctx, data, tenantID, fileName, temp)
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(data)
-	return s.register(ctx, physical, tenantID, fileName, int64(len(data)), temp, hex.EncodeToString(sum[:]))
+	return s.register(ctx, physical, tenantID, fileName, int64(len(data)), temp, contentHash)
 }
 
 func (s *resourceCatalogFileService) resolve(ctx context.Context, value string) (string, bool, error) {

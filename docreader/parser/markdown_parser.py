@@ -27,6 +27,9 @@ from docreader.utils import endecode
 logger = logging.getLogger(__name__)
 
 _SEPARATOR_CELL = re.compile(r"^:?-{3,}:?$")
+# A backslash escape, or a bare pipe. Scanning both keeps an escaped pipe
+# (``\|``) out of the cell delimiters without a lookbehind, in linear time.
+_ESCAPE_OR_PIPE = re.compile(r"\\.|\|", re.DOTALL)
 # Cells of a GFM alignment row as matched by the previous ``align_pattern``.
 # Looser than ``_SEPARATOR_CELL``: any non-empty run of ``:``/``-`` qualifies.
 _ALIGNMENT_CELL = re.compile(r"^[:-]+$")
@@ -53,11 +56,21 @@ class MarkdownTableUtil:
 
     @staticmethod
     def _split_row_cells(row_line: str) -> List[str]:
-        """Split a markdown table row into cells, preserving empty cells."""
+        """Split a markdown table row into cells, preserving empty cells.
+
+        As in GFM, a pipe escaped as ``\\|`` is text inside its cell rather
+        than a cell delimiter.
+        """
         inner = row_line.strip()
         if not inner.startswith("|"):
             return []
-        parts = inner.split("|")
+        parts: List[str] = []
+        start = 0
+        for match in _ESCAPE_OR_PIPE.finditer(inner):
+            if match.group() == "|":
+                parts.append(inner[start:match.start()])
+                start = match.end()
+        parts.append(inner[start:])
         if parts and parts[0].strip() == "":
             parts = parts[1:]
         if parts and parts[-1].strip() == "":

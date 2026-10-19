@@ -119,3 +119,21 @@ func TestAttachMCPCatalogs_MarksStaleWithoutCopyingTools(t *testing.T) {
 	require.NotContains(string(body), `"tools"`)
 	require.Contains(string(body), `"tool_count":3`)
 }
+
+func TestMCPServiceResponse_EchoesClientIDButNotItsSecret(t *testing.T) {
+	svc := &types.MCPService{
+		ID:   "svc-1",
+		Name: "svc",
+		AuthConfig: &types.MCPAuthConfig{
+			AuthType:     types.MCPAuthOAuth,
+			ClientID:     "pre-registered",
+			ClientSecret: "client-secret-do-not-leak",
+		},
+	}
+	body, err := json.Marshal(NewMCPServiceResponse(adminContext(), svc))
+	assert.NoError(t, err)
+	s := string(body)
+	assert.NotContains(t, s, "client-secret-do-not-leak")
+	assert.Contains(t, s, `"client_id":"pre-registered"`)
+	assert.Contains(t, s, `"client_secret":{"configured":true}`)
+}

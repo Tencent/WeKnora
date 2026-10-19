@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -172,8 +173,15 @@ func (e Endpoint) roundTrip(req *http.Request, out any) error {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := ReadResponseCapped(resp.Body, 0)
 	if err != nil {
+		// A body over the cap is the vendor answering with something we cannot
+		// use, not the network failing. withRetry retries only TransportError,
+		// and repeating an oversized reply would bill the request again for the
+		// same bytes, so it is returned as-is.
+		if errors.Is(err, ErrResponseTooLarge) {
+			return err
+		}
 		// The connection broke before the reply arrived whole: nothing was
 		// received, so this is the network failing, not the vendor answering.
 		return &TransportError{Op: "read response", Err: err}

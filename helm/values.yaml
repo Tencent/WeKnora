@@ -62,6 +62,18 @@ app:
   # -- Number of replicas
   replicaCount: 1
 
+  # -- App update strategy. `RollingUpdate` needs storage that can be attached
+  # by two Pods at once: with the default `ReadWriteOnce` `data-files` claim an
+  # upgrade fails with `Multi-Attach error` unless this is `Recreate`. Set
+  # `dataFiles.persistence.accessModes` to `ReadWriteMany` to keep rolling
+  # updates with more than one replica.
+  strategy:
+    type: RollingUpdate
+    # -- Only used with RollingUpdate; integers and percentages are supported.
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
   image:
     # -- Image repository
     repository: wechatopenai/weknora-app
@@ -114,6 +126,8 @@ app:
 
   # -- Service configuration
   service:
+    # -- Service name override (empty keeps "app")
+    name: ""
     type: ClusterIP
     port: 8080
 
@@ -181,6 +195,8 @@ frontend:
 
   # -- Service configuration
   service:
+    # -- Service name override (empty keeps "frontend")
+    name: ""
     type: ClusterIP
     port: 80
 
@@ -231,6 +247,8 @@ docreader:
 
   # -- Service configuration
   service:
+    # -- Service name override (empty keeps "docreader")
+    name: ""
     type: ClusterIP
     port: 50051
 
@@ -249,6 +267,10 @@ docreader:
 postgresql:
   # -- Enable PostgreSQL
   enabled: true
+
+  service:
+    # -- Service name override (empty keeps "postgres")
+    name: ""
 
   image:
     # -- Image repository (ParadeDB for vector search)
@@ -295,6 +317,10 @@ postgresql:
 redis:
   # -- Enable Redis
   enabled: true
+
+  service:
+    # -- Service name override (empty keeps "redis")
+    name: ""
 
   image:
     # -- Image repository
@@ -344,6 +370,12 @@ dataFiles:
     enabled: true
     # -- Size of the PVC
     size: 10Gi
+    # -- Access modes for the created `data-files` claim. The chart's default
+    # single-writer claim requires `app.strategy.type: Recreate` (see
+    # `app.strategy`); set `ReadWriteMany` here when the storage class supports
+    # it (NFS, CephFS, EFS, ...) and the App can keep rolling updates.
+    accessModes:
+      - ReadWriteOnce
     # -- Use existing PVC (leave empty to create new)
     existingClaim: ""
 
@@ -445,6 +477,10 @@ minio:
 neo4j:
   # -- Enable Neo4j for GraphRAG
   enabled: false
+
+  service:
+    # -- Service name override (empty keeps "neo4j")
+    name: ""
 
   image:
     # -- Image repository

@@ -102,7 +102,7 @@
             <t-button
               class="skill-header-uninstall"
               theme="danger"
-              variant="outline"
+              variant="text"
               size="small"
               :disabled="!managedSkill || isBusy(managedSkill)"
               :loading="!!managedSkill && deletingId === managedSkill.id"
@@ -645,6 +645,7 @@ import {
 import { installSkillCatalog, type SkillCatalogItem } from '@/api/skill'
 import { installUpgradable, servedPreviousText, upgradeVersions } from '@/utils/skillUpgrade'
 import { MAX_SKILL_BUNDLE_SIZE_BYTES, MAX_SKILL_BUNDLE_SIZE_MB } from '@/utils/index'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import {
   MAX_ENV_VALUE_BYTES,
   addSkillEnvSaveInFlight,
@@ -1232,6 +1233,8 @@ async function loadAll() {
   await Promise.all(tasks)
 }
 
+useAssistantDataChange(() => { void loadSkills(true) }, { areas: ['skill'] })
+
 defineExpose({
   reload: loadAll,
   revealSkill,
@@ -1687,9 +1690,13 @@ onUnmounted(() => {
     min-width: 0;
   }
 
+  :deep(.skill-timeline--compact) {
+    padding: 0;
+  }
+
   :deep(.skill-timeline__guidance) {
     // Include the drawer's 18px side padding and 16px bottom padding.
-    --skill-guidance-gutter: 30px;
+    --skill-guidance-gutter: 18px;
     --skill-guidance-bottom-gap: 16px;
     margin-bottom: -12px;
     padding-bottom: 12px;
@@ -1708,9 +1715,13 @@ onUnmounted(() => {
 
 .skill-manage__row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-container);
 }
 
 .skill-manage__served {
@@ -1724,10 +1735,8 @@ onUnmounted(() => {
 }
 
 .skill-manage__row--upgrade {
-  align-items: center;
-  padding: var(--app-space-2) var(--app-space-3);
-  border-radius: var(--app-radius-sm);
-  background: color-mix(in srgb, var(--td-warning-color) 8%, transparent);
+  border-color: color-mix(in srgb, var(--td-warning-color) 30%, transparent);
+  background: color-mix(in srgb, var(--td-warning-color) 6%, transparent);
 }
 
 .skill-manage__controls {
@@ -1761,13 +1770,13 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: stretch;
   gap: 10px;
-  padding-top: 12px;
-  border-top: 1px solid var(--td-component-stroke);
+  padding-top: 4px;
 
   h4 {
     margin: 0;
-    font-size: var(--app-text-md);
+    font-size: var(--app-text-base);
     font-weight: 600;
+    line-height: 22px;
     color: var(--td-text-color-primary);
   }
 

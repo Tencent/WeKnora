@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>账号登录</title>
+</head>
+<body>
+  <header>
+    <nav><a href="/">首页</a><a href="/help">帮助中心</a></nav>
+  </header>
+  <main>
+    <h1>账号登录</h1>
+    <form action="/login" method="post">
+      <label for="username">用户名</label>
+      <input id="username" name="username" type="text">
+      <label for="password">密码</label>
+      <input id="password" name="password" type="password">
+      <label for="captcha">验证码</label>
+      <input id="captcha" name="captcha" type="text">
+      <button type="submit">登录</button>
+      <a href="/reset">忘记密码？</a>
+    </form>
+  </main>
+  <footer>
+    <p>版权所有 © 2025 示例科技有限公司</p>
+  </footer>
+</body>
+</html>

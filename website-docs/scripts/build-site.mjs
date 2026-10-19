@@ -27,6 +27,10 @@ for (const entry of readdirSync(output)) {
   if (!['index.html', '404.html', 'docs'].includes(entry)) rmSync(resolve(output, entry), { recursive: true, force: true });
 }
 cpSync(resolve(root, '.vitepress/dist'), resolve(output, 'docs'), { recursive: true });
+// The leaderboard is a homepage JSX page exported to /docs/models/. Keep a
+// sibling .html file so /docs/models resolves without a trailing slash.
+const modelsIndex = resolve(output, 'docs/models/index.html');
+if (existsSync(modelsIndex)) cpSync(modelsIndex, resolve(output, 'docs/models.html'));
 run('homepage', 'audit:content');
 const check = spawnSync(process.execPath, ['scripts/check-site.mjs', output], { cwd: root, stdio: 'inherit' });
 if (check.status !== 0) process.exit(check.status || 1);

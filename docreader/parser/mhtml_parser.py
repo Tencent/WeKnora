@@ -13,7 +13,7 @@ from urllib.parse import unquote, urljoin, urlparse
 import uuid
 from typing import Dict
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString
 
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
@@ -289,6 +289,7 @@ class MHTMLParser(BaseParser):
                 self._rewrite_image_sources(soup, image_aliases, base_location)
             self._unwrap_whitespace_only_inline(soup)
             text_fallback = soup.get_text(separator="\n", strip=True)
+            self._escape_table_cell_pipes(soup)
             markdown_text = md(str(soup), heading_style="ATX")
             result = self._normalize_markdown(markdown_text)
             if not result and text_fallback:
@@ -325,6 +326,20 @@ class MHTMLParser(BaseParser):
         for tag in reversed(soup.find_all(_WHITESPACE_DROPPING_INLINE_TAGS)):
             if tag.find(True) is None and not tag.get_text().strip():
                 tag.unwrap()
+
+    @staticmethod
+    def _escape_table_cell_pipes(soup: BeautifulSoup) -> None:
+        """Escape the ``|`` in table cell text, which markdownify writes as is.
+
+        In the GFM table markdownify writes, a bare pipe in a cell's text ends
+        the cell, so the row gains a column and every later cell shifts one
+        column right.
+        """
+        for cell in soup.find_all(["td", "th"]):
+            for text in cell.find_all(string=True):
+                # Comments and other special strings keep their own type
+                if type(text) is NavigableString and "|" in text:
+                    text.replace_with(text.replace("|", "\\|"))
 
     @staticmethod
     def _normalize_markdown(markdown_text: str) -> str:

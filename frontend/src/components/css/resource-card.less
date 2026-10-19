@@ -21,9 +21,13 @@
   cursor: pointer;
   transition: border-color var(--app-motion-fast) ease, box-shadow var(--app-motion-fast) ease;
 
-  &:hover {
-    border-color: color-mix(in srgb, var(--td-brand-color) 40%, var(--td-component-stroke));
-    box-shadow: 0 3px 12px color-mix(in srgb, var(--td-text-color-primary) 6%, transparent);
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      border-color: var(--td-component-border);
+      box-shadow:
+        0 1px 2px color-mix(in srgb, var(--td-text-color-primary) 3%, transparent),
+        0 3px 10px color-mix(in srgb, var(--td-text-color-primary) 4%, transparent);
+    }
   }
   &:focus-visible {
     outline: 2px solid var(--td-brand-color);
@@ -72,6 +76,8 @@
     font-size: var(--app-text-sm);
     line-height: 18px;
     overflow: hidden;
+
+    &.is-empty { color: var(--td-text-color-placeholder); }
   }
   .card-bottom {
     display: flex;
@@ -125,6 +131,102 @@
   @media (prefers-reduced-motion: reduce) { transition: none; }
 }
 
+.resource-card-quiet() {
+  .card-description {
+    font-size: var(--app-text-md);
+    line-height: 20px;
+    &.is-empty { font-size: var(--app-text-sm); }
+  }
+  .card-bottom { border-top: 0; padding-top: 4px; }
+  .resource-card-footer();
+  :deep(.resource-origin-badge) {
+    background: transparent;
+    color: var(--td-text-color-secondary);
+    font-weight: 400;
+  }
+  .agent-favorite-star { .resource-favorite-button(); right: 8px; }
+  &:has(.agent-favorite-star) .more-wrap { right: 38px; }
+  .agent-favorite-star:not(.is-favorited), .more-wrap {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--app-motion-fast), background var(--app-motion-fast);
+  }
+  &:hover, &:focus-visible, &:has(:focus-visible) {
+    .agent-favorite-star, .more-wrap { opacity: 1; pointer-events: auto; }
+    :deep(.resource-card-avatar) { color: var(--td-text-color-primary); }
+  }
+  .more-wrap.active-more { opacity: 1; pointer-events: auto; }
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      --resource-avatar-transform: translateY(-1px) scale(1.12);
+      --resource-member-left: -2px;
+      --resource-member-right: 2px;
+      --resource-member-up: -2px;
+    }
+  }
+  @media (hover: none) {
+    .agent-favorite-star, .more-wrap { opacity: 1; pointer-events: auto; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .agent-favorite-star, .more-wrap { transition: none; }
+  }
+}
+
+// Shared footer metrics and capabilities; scoped to list cards, not dialog previews.
+.resource-card-footer() {
+  .card-bottom {
+    :deep(.resource-origin-badge .badge-icon) { width: 14px; height: 14px; }
+    .builtin-badge .t-icon { width: 14px; height: 14px; }
+    .bottom-left { min-width: 0; flex-wrap: wrap; }
+    .feature-badges { align-items: center; gap: 6px 8px; min-width: 0; }
+    .feature-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      gap: 4px;
+      width: 20px;
+      min-width: 20px;
+      height: 22px;
+      padding: 0;
+      background: transparent;
+      color: var(--td-text-color-placeholder);
+      transition: color var(--app-motion-fast);
+      // Optical sizing: these glyphs have more internal whitespace than the
+      // document, image and help icons. Keep their 20px targets unchanged.
+      &.knowledge, &.stat-kb, &.mcp, &.mode-normal { --footer-icon-size: 15px; }
+      &.web-search { --footer-icon-size: 16px; }
+      .t-icon { color: inherit; font-size: var(--footer-icon-size, 14px); }
+      :deep(svg) {
+        display: block;
+        width: var(--footer-icon-size, 14px);
+        height: var(--footer-icon-size, 14px);
+        flex-shrink: 0;
+      }
+      :deep(.kb-wiki-badge) { color: inherit; }
+      &.is-count {
+        width: auto;
+        min-width: 0;
+        color: var(--td-text-color-secondary);
+        white-space: nowrap;
+      }
+      .badge-count {
+        font-size: var(--app-text-sm);
+        font-weight: 400;
+        line-height: 20px;
+        font-variant-numeric: tabular-nums;
+      }
+      &:not(.is-count):hover, &:not(.is-count):focus-visible {
+        color: var(--td-text-color-primary);
+      }
+      &:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: 2px; }
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .card-bottom .feature-badge { transition: none; }
+  }
+}
+
 .resource-feature-badge() {
   display: inline-flex;
   align-items: center;
@@ -135,6 +237,8 @@
   padding: 0 5px;
   box-sizing: border-box;
   border-radius: 5px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
   font-size: var(--app-text-xs);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
@@ -172,9 +276,10 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  margin: 0 16px 0 0;
+  margin: 0;
   padding: 20px 28px 0;
-  @media (max-width: 720px) { margin: 0; padding: var(--app-space-4) var(--app-space-4) 0; }
+  html.wails-desktop & { padding-top: 42px; }
+  @media (max-width: 720px) { padding: var(--app-space-4) var(--app-space-4) 0; }
 }
 .resource-list-main() {
   flex: 1;
@@ -192,12 +297,21 @@
     .header-title { width: 100%; gap: 4px; }
     .title-row { flex-wrap: wrap; gap: 12px; }
     h2 { margin-right: auto; }
+    .header-actions-lite {
+      max-width: 100%;
+      flex-wrap: wrap;
+      @media (max-width: 720px) {
+        width: 100%;
+        .resource-toolbar { width: 100%; }
+      }
+    }
     .header-subtitle { color: var(--td-text-color-secondary); font-size: var(--app-text-base); }
     .header-action-btn {
       width: auto;
       min-height: 32px;
       padding: 0 12px;
       gap: 6px;
+      font-size: var(--app-text-md);
       box-shadow: none;
       color: var(--td-text-color-primary);
       background: var(--td-bg-color-container);

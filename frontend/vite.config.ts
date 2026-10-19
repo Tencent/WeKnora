@@ -2,6 +2,7 @@ import { fileURLToPath, URL } from 'node:url'
 import { resolve, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
 import { execSync } from 'node:child_process'
+import { copyPdfJsWasm } from './scripts/copy-pdfjs-wasm.mjs'
 import { createRequire } from 'node:module'
 import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
@@ -67,6 +68,23 @@ function resolveVueOfficePptxEntry(): string {
   }
 }
 
+function pdfJsWasmAssets(): Plugin {
+  let wasmSource = ''
+  let wasmOutput = ''
+  return {
+    name: 'pdfjs-wasm-assets',
+    apply: 'build',
+    configResolved(config) {
+      const pdfjsBuild = require.resolve('pdfjs-dist/legacy/build/pdf.mjs')
+      wasmSource = resolve(dirname(pdfjsBuild), '../../wasm')
+      wasmOutput = resolve(config.root, config.build.outDir, 'pdfjs', 'wasm')
+    },
+    closeBundle() {
+      copyPdfJsWasm(wasmSource, wasmOutput)
+    },
+  }
+}
+
 export default defineConfig({
   define: {
     __FRONTEND_VERSION__: JSON.stringify(FRONTEND_VERSION),
@@ -120,6 +138,7 @@ export default defineConfig({
     vue(),
     vueJsx(),
     embedHtmlDevFallback(),
+    pdfJsWasmAssets(),
   ],
   resolve: {
     alias: {

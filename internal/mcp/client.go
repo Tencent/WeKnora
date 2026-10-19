@@ -238,17 +238,25 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 		if config.Service.URL == nil || *config.Service.URL == "" {
 			return nil, fmt.Errorf("URL is required for SSE transport")
 		}
+		// SSE keeps its GET response body open for the connection lifetime.
+		// OAuth retains the bounded HTTP client; SSE bounds startup and RPCs
+		// separately without putting an expiration on the event stream.
+		sseHTTPClient := *httpClient
+		sseHTTPClient.Timeout = 0
 		options := []transport.ClientOption{
-			transport.WithHTTPClient(httpClient),
+			transport.WithHTTPClient(&sseHTTPClient),
 			transport.WithHeaders(headers),
+			transport.WithEndpointTimeout(timeout),
+			transport.WithResponseTimeout(timeout),
 		}
 		if useOAuth {
 			options = append(options, transport.WithOAuth(oauthConfig))
 		}
-		connection, err = transport.NewSSE(*config.Service.URL, options...)
+		sse, err := transport.NewSSE(*config.Service.URL, options...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create SSE client: %w", err)
 		}
+		connection = &boundedSSEConnection{SSE: sse, timeout: timeout}
 	case types.MCPTransportHTTPStreamable:
 		if config.Service.URL == nil || *config.Service.URL == "" {
 			return nil, fmt.Errorf("URL is required for HTTP Streamable transport")
@@ -316,9 +324,10 @@ func discoverProbeTimeout(service *types.MCPService) time.Duration {
 }
 
 // buildOAuthConfig returns the OAuth configuration for an OAuth-enabled MCP
-// service, or (_, false, nil) when the service does not use OAuth. It loads
-// the dynamically-registered client_id and wires a per-user token store so
-// the transport injects the invoking user's bearer token and refreshes it.
+// service, or (_, false, nil) when the service does not use OAuth. It uses the
+// pre-registered client or loads the dynamically-registered client_id, and
+// wires a per-user token store so the transport injects the invoking user's
+// bearer token and refreshes it.
 func buildOAuthConfig(config *ClientConfig, httpClient *http.Client) (transport.OAuthConfig, bool, error) {
 	svc := config.Service
 	if !svc.AuthConfig.IsOAuth() {
@@ -343,7 +352,11 @@ func buildOAuthConfig(config *ClientConfig, httpClient *http.Client) (transport.
 		AuthServerMetadataURL: svc.AuthConfig.AuthServerMetadataURL,
 		HTTPClient:            httpClient,
 	}
-	if regClient, err := config.OAuthRepo.GetClient(context.Background(), config.TenantID, svc.ID); err == nil && regClient != nil {
+	if clientID, clientSecret, ok := preRegisteredClient(svc); ok {
+		oauthCfg.ClientID, oauthCfg.ClientSecret = clientID, clientSecret
+	} else if regClient, err := config.OAuthRepo.GetClient(
+		context.Background(), config.TenantID, svc.ID,
+	); err == nil && regClient != nil {
 		oauthCfg.ClientID = regClient.ClientID
 		oauthCfg.ClientSecret = regClient.ClientSecret
 		oauthCfg.RedirectURI = regClient.RedirectURI
@@ -722,27 +735,52 @@ func (c *mcpGoClient) ListResources(ctx context.Context) ([]*types.MCPResource, 
 		return nil, ErrNotConnected
 	}
 
-	req := mcp.ListResourcesRequest{}
-	result, err := oauthCall(ctx, c, func() (*mcp.ListResourcesResult, error) {
-		return c.client.ListResources(ctx, req)
+	resources, err := oauthCall(ctx, c, func() ([]*types.MCPResource, error) {
+		return c.listResourcePages(ctx)
 	})
 	if err != nil {
 		c.checkErrorAndDisconnectIfNeeded(err)
 		return nil, fmt.Errorf("failed to list resources: %w", err)
 	}
 
-	// Convert to our types
-	resources := make([]*types.MCPResource, len(result.Resources))
-	for i, resource := range result.Resources {
-		resources[i] = &types.MCPResource{
-			URI:         resource.URI,
-			Name:        resource.Name,
-			Description: resource.Description,
-			MimeType:    resource.MIMEType,
-		}
-	}
-
 	return resources, nil
+}
+
+// Like tools/list, resources/list must not keep fetching a looping directory.
+// The SDK's all-pages helper checks cancellation but does not bound page count
+// or reject repeated cursors, so use its single-page operation here.
+const maxResourceListPages = 100
+
+func (c *mcpGoClient) listResourcePages(ctx context.Context) ([]*types.MCPResource, error) {
+	resources := make([]*types.MCPResource, 0)
+	req := mcp.ListResourcesRequest{}
+	seen := make(map[mcp.Cursor]bool)
+	for pages := 0; ; pages++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if pages >= maxResourceListPages {
+			return nil, fmt.Errorf("resources/list exceeded %d pages", maxResourceListPages)
+		}
+		result, err := c.client.ListResourcesByPage(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		for _, resource := range result.Resources {
+			resources = append(resources, &types.MCPResource{
+				URI: resource.URI, Name: resource.Name,
+				Description: resource.Description, MimeType: resource.MIMEType,
+			})
+		}
+		if result.NextCursor == "" {
+			return resources, nil
+		}
+		if seen[result.NextCursor] {
+			return nil, fmt.Errorf("resources/list returned a repeated cursor")
+		}
+		seen[result.NextCursor] = true
+		req.Params.Cursor = result.NextCursor
+	}
 }
 
 // CallTool calls a tool on the MCP service
@@ -788,11 +826,22 @@ func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string
 		}
 	}
 
+	var callErr error
 	result, err := oauthCall(ctx, c, func() (*mcp.CallToolResult, error) {
-		return c.client.CallTool(ctx, req)
+		result, err := c.client.CallTool(ctx, req)
+		callErr = err
+		return result, err
 	})
 	if err != nil {
 		c.checkErrorAndDisconnectIfNeeded(err)
+		// Inspect the actual call error, not a preflight/refresh error from
+		// oauthCall. A rejected authorization did not execute the tool.
+		if callErr != nil && !IsToolCallRetrySafe(callErr) {
+			return nil, fmt.Errorf(
+				"%w; it may already have completed. Verify the remote outcome before retrying: %w",
+				ErrToolCallOutcomeUnknown, err,
+			)
+		}
 		return nil, fmt.Errorf("failed to call tool: %w", err)
 	}
 
@@ -892,6 +941,21 @@ func (c *mcpGoClient) ReadResource(ctx context.Context, uri string) (*ReadResour
 // IsConnected returns true if the client is connected
 func (c *mcpGoClient) IsConnected() bool {
 	return c.connected.Load()
+}
+
+// oauthClientRegistration reports the tenant and dynamically registered OAuth
+// client ID the connection was built with; ok is false for a connection
+// without OAuth or with a pre-registered client. A pre-registered client is
+// service configuration, and changing it closes every connection of the
+// service, so such a connection never holds a replaced registration.
+func (c *mcpGoClient) oauthClientRegistration() (tenantID uint64, clientID string, ok bool) {
+	if c.oauth == nil {
+		return 0, "", false
+	}
+	if _, _, preRegistered := preRegisteredClient(c.service); preRegistered {
+		return 0, "", false
+	}
+	return c.oauth.tenantID, c.oauth.clientID, true
 }
 
 // GetServiceID returns the service ID

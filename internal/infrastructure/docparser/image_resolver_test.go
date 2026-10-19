@@ -18,6 +18,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/stretchr/testify/require"
 )
 
 // createTestPNG generates a minimal PNG image with the given dimensions.
@@ -275,6 +276,42 @@ func TestResolveAndStore_MultipleFormats(t *testing.T) {
 	}
 	if strings.Contains(out, "data:image") {
 		t.Fatalf("data URI still in output after ResolveAndStore")
+	}
+}
+
+func TestResolveAndStoreReturnsImagesInDocumentOrder(t *testing.T) {
+	png := createTestPNG(200, 150)
+	b64 := base64.StdEncoding.EncodeToString(png)
+	var refs []types.ImageRef
+	for _, name := range []string{"a.png", "b.png", "c.png"} {
+		refs = append(refs, types.ImageRef{
+			Filename: name, OriginalRef: "images/" + name, MimeType: "image/png", ImageData: png,
+		})
+	}
+	result := &types.ReadResult{
+		MarkdownContent: strings.Join([]string{
+			`![](images/a.png)`, `![](data:image/png;base64,` + b64 + `)`, `![](images/b.png)`, `![](images/c.png)`,
+		}, "\n\n"),
+		ImageRefs: refs,
+	}
+	out, imgs, err := NewImageResolver().ResolveAndStore(context.Background(), result, &captureSaveBytes{}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 4 {
+		t.Fatalf("expected 4 images but got %d", len(imgs))
+	}
+	if imgs[0].OriginalRef != "images/a.png" || imgs[2].OriginalRef != "images/b.png" ||
+		imgs[3].OriginalRef != "images/c.png" {
+		t.Fatalf("images are not in document order: %+v", imgs)
+	}
+	last := -1
+	for _, img := range imgs {
+		pos := strings.Index(out, img.ServingURL)
+		if pos <= last {
+			t.Fatalf("image %s at %d does not follow %d", img.ServingURL, pos, last)
+		}
+		last = pos
 	}
 }
 
@@ -596,5 +633,24 @@ func TestResolveAndStoreSharedMHTMLContract(t *testing.T) {
 	}
 	if !strings.Contains(out, "```\nline1\n\n\nline2\n```") {
 		t.Fatalf("fenced code blank lines changed: %s", out)
+	}
+}
+
+func TestResolveAndStore_ExportImageRefsBeyondInlineBudget(t *testing.T) {
+	data := createTestPNG(200, 150)
+	result := &types.ReadResult{}
+	for i := 0; i < 61; i++ {
+		ref := fmt.Sprintf("image-%d.png", i)
+		result.MarkdownContent += "![image](" + ref + ")\n"
+		result.ImageRefs = append(result.ImageRefs, types.ImageRef{
+			OriginalRef: ref, Filename: ref, ImageData: data, MimeType: "image/png",
+		})
+	}
+	out, images, err := NewImageResolver().ResolveAndStore(context.Background(), result, &captureSaveBytes{}, 1)
+	require.NoError(t, err)
+	require.Len(t, images, 61, "native export ImageRefs must retain all images beyond the inline URI budget")
+	require.NotContains(t, out, "data:image/")
+	for i := 0; i < 61; i++ {
+		require.NotContains(t, out, fmt.Sprintf("](image-%d.png)", i))
 	}
 }

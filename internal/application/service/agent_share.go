@@ -41,9 +41,9 @@ var (
 // therefore don't need a rerank model configured, even when knowledge bases
 // are attached.
 //
-// When AllowedTools is empty the runtime falls back to
-// tools.DefaultAllowedTools(), which includes search_knowledge, so we treat
-// that case as requiring the reranker.
+// When AllowedTools was never set the runtime uses
+// tools.DefaultAllowedTools(), which includes search_knowledge, so that case
+// requires the reranker; an empty list registers no tool and does not.
 func agentRequiresRerankModel(agent *types.CustomAgent) bool {
 	if agent == nil {
 		return false
@@ -51,16 +51,31 @@ func agentRequiresRerankModel(agent *types.CustomAgent) bool {
 	if agent.Config.KBSelectionMode == "none" {
 		return false
 	}
-	allowed := agent.Config.AllowedTools
-	if len(allowed) == 0 {
-		allowed = tools.DefaultAllowedTools()
-	}
-	for _, t := range allowed {
+	for _, t := range tools.EffectiveAllowedTools(agent.Config.AllowedTools) {
 		if tools.SuccessorToolName(t) == tools.ToolSearchKnowledge {
 			return true
 		}
 	}
 	return false
+}
+
+// pickWorkspaceRerankModelID chooses the rerank model for an agent that
+// cannot be configured with one: the workspace's default active rerank
+// model, else its first active one, else none.
+func pickWorkspaceRerankModelID(models []*types.Model) string {
+	first := ""
+	for _, model := range models {
+		if model == nil || model.Type != types.ModelTypeRerank || model.Status != types.ModelStatusActive {
+			continue
+		}
+		if model.IsDefault {
+			return model.ID
+		}
+		if first == "" {
+			first = model.ID
+		}
+	}
+	return first
 }
 
 // isBuiltinAgent guards sharing. Shares of built-in agents created before

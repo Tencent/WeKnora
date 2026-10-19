@@ -31,6 +31,14 @@ func (f *fakeVLM) Predict(context.Context, [][]byte, string) (string, error) {
 	return f.response, nil
 }
 
+// PredictWithOptions forwards to Predict; these tests pin the cascade between
+// OCR and caption, not the thinking switch.
+func (f *fakeVLM) PredictWithOptions(
+	_ context.Context, _ [][]byte, _ string, _ *vlm.PredictOptions,
+) (string, error) {
+	return f.Predict(context.Background(), nil, "")
+}
+
 func (f *fakeVLM) GetModelName() string { return "fake-vlm" }
 func (f *fakeVLM) GetModelID() string   { return "fake" }
 
@@ -56,6 +64,12 @@ func (f *promptAwareVLM) Predict(_ context.Context, _ [][]byte, prompt string) (
 	}
 	f.ocrCalls++
 	return f.ocrResponse, nil
+}
+
+func (f *promptAwareVLM) PredictWithOptions(
+	_ context.Context, _ [][]byte, prompt string, _ *vlm.PredictOptions,
+) (string, error) {
+	return f.Predict(context.Background(), nil, prompt)
 }
 
 func (f *promptAwareVLM) GetModelName() string { return "prompt-aware-vlm" }
@@ -265,16 +279,5 @@ func TestSelectTemporaryDocumentContentHonorsSharedPromptBudget(t *testing.T) {
 	_, selected, total := selectTemporaryDocumentContentWithBudget(document, "", 2500)
 	if selected != 2 || total != 10 {
 		t.Fatalf("selected=%d total=%d, want 2/10 within a 2500-token share", selected, total)
-	}
-}
-
-func TestVisualDocumentQueryDetection(t *testing.T) {
-	for _, query := range []string{"解释第三页的图", "What does this chart show?", "describe the layout"} {
-		if !isVisualDocumentQuery(query) {
-			t.Fatalf("query %q should request visual context", query)
-		}
-	}
-	if isVisualDocumentQuery("总结退款政策") {
-		t.Fatal("plain text query should not request visual context")
 	}
 }

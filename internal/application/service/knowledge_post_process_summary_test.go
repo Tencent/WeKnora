@@ -145,9 +145,14 @@ func TestKnowledgePostProcessWithoutSummaryCompletionFailure(t *testing.T) {
 				wikiEnqueueFailureKnowledgeRepo: wikiEnqueueFailureKnowledgeRepo{knowledge: knowledge},
 				completionErr:                   tc.err, completionSkipped: tc.skipped,
 			}
+			tracker, db := setupSpanTrackerTest(t)
+			ctx := types.WithTaskRetryMetadata(context.Background(), 0, 3)
+			_, attempt, err := tracker.OpenAttempt(ctx, knowledge.ID, "")
+			require.NoError(t, err)
 			queue := &wikiEnqueueFailureTaskQueue{}
 			svc := &KnowledgePostProcessService{
 				knowledgeRepo: repo,
+				spanTracker:   tracker,
 				kbService: &wikiEnqueueFailureKBService{kb: &types.KnowledgeBase{
 					ID: "kb", TenantID: 7, Type: types.KnowledgeBaseTypeDocument,
 					AutoTagConfig: &types.AutoTagConfig{Enabled: true},
@@ -162,15 +167,24 @@ func TestKnowledgePostProcessWithoutSummaryCompletionFailure(t *testing.T) {
 				TenantID: 7, KnowledgeID: "doc", KnowledgeBaseID: "kb",
 			})
 			require.NoError(t, err)
-			err = svc.Handle(context.Background(), asynq.NewTask(types.TypeKnowledgePostProcess, payload))
+			err = svc.Handle(ctx, asynq.NewTask(types.TypeKnowledgePostProcess, payload))
 			require.ErrorIs(t, err, tc.err)
 			require.Empty(t, queue.taskTypes)
 			require.Equal(t, types.ParseStatusProcessing, knowledge.ParseStatus)
 			if tc.err != nil {
+				status, code, message := rootSpan(t, db, knowledge.ID, attempt)
+				require.Equal(t, types.SpanStatusRunning, status)
+				require.Empty(t, code)
+				require.Empty(t, message)
 				repo.completionErr = nil
+				ctx = types.WithTaskRetryMetadata(ctx, 1, 3)
 				task := asynq.NewTask(types.TypeKnowledgePostProcess, payload)
-				require.NoError(t, svc.Handle(context.Background(), task))
+				require.NoError(t, svc.Handle(ctx, task))
 				require.Equal(t, types.ParseStatusCompleted, knowledge.ParseStatus)
+				status, code, message = rootSpan(t, db, knowledge.ID, attempt)
+				require.Equal(t, types.SpanStatusDone, status)
+				require.Empty(t, code)
+				require.Empty(t, message)
 				require.Equal(t, []string{types.TypeKnowledgeAutoTag}, queue.taskTypes)
 			}
 		})
