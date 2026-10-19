@@ -24,6 +24,7 @@ type PluginDataAnalysis struct {
 	chunkRepo            interfaces.ChunkRepository
 	tenantService        interfaces.TenantService
 	db                   *sql.DB
+	storageResolver      interfaces.StorageBackendResolver
 }
 
 func NewPluginDataAnalysis(
@@ -35,6 +36,7 @@ func NewPluginDataAnalysis(
 	chunkRepo interfaces.ChunkRepository,
 	tenantService interfaces.TenantService,
 	db *sql.DB,
+	storageResolver interfaces.StorageBackendResolver,
 ) *PluginDataAnalysis {
 	p := &PluginDataAnalysis{
 		modelService:         modelService,
@@ -44,6 +46,7 @@ func NewPluginDataAnalysis(
 		chunkRepo:            chunkRepo,
 		tenantService:        tenantService,
 		db:                   db,
+		storageResolver:      storageResolver,
 	}
 	eventManager.Register(p)
 	return p
@@ -89,7 +92,10 @@ func (p *PluginDataAnalysis) OnEvent(
 	}
 
 	// Initialize DataAnalysisTool
-	tool := tools.NewDataAnalysisTool(p.knowledgeBaseService, p.knowledgeService, p.tenantService, p.fileService, p.db, chatManage.SessionID)
+	tool := tools.NewDataAnalysisTool(
+		p.knowledgeBaseService, p.knowledgeService, p.tenantService,
+		p.fileService, p.db, chatManage.SessionID, p.storageResolver,
+	)
 	defer tool.Cleanup(ctx)
 
 	// Load data into DuckDB
@@ -125,14 +131,15 @@ func (p *PluginDataAnalysis) OnEvent(
 	// 5. Store result
 	// Create a new SearchResult for the analysis output
 	analysisResult := &types.SearchResult{
-		ID:                   "analysis_" + knowledge.ID,
-		Content:              toolResult.Output,
-		Score:                1.0,
-		MatchType:            types.MatchTypeDataAnalysis,
-		KnowledgeID:          knowledge.ID,
-		KnowledgeTitle:       knowledge.Title,
-		KnowledgeFilename:    knowledge.FileName,
-		KnowledgeDescription: knowledge.Description,
+		ID:                      "analysis_" + knowledge.ID,
+		Content:                 toolResult.Output,
+		Score:                   1.0,
+		MatchType:               types.MatchTypeDataAnalysis,
+		KnowledgeID:             knowledge.ID,
+		KnowledgeTitle:          knowledge.Title,
+		KnowledgeFilename:       knowledge.FileName,
+		KnowledgeDescription:    knowledge.Description,
+		KnowledgeCustomMetadata: knowledge.CustomMetadataText(),
 	}
 
 	chatManage.MergeResult = append(chatManage.MergeResult, analysisResult)

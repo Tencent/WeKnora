@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/searchutil"
@@ -531,7 +532,6 @@ func EnqueueWikiIngest(
 	kbID, knowledgeID string,
 ) (bool, error) {
 	pendingOp, err := newWikiIngestPendingOp(ctx, tenantID, kbID, knowledgeID)
-
 	// Persist the pending op. A re-ingest of the same knowledge id while
 	// a previous op is still queued simply appends another row; the
 	// peekPendingList consumer collapses by dedup_key (== knowledge_id),
@@ -3052,45 +3052,58 @@ func isTransientLLMError(ctx context.Context, err error) bool {
 // to the DB. A nil result from GetKnowledgeByIDOnly also counts as gone: the
 // repo layer uses GORM First() which filters soft-deleted rows, so a
 // soft-deleted knowledge surfaces as "not found" here — exactly what we want.
-func (s *wikiIngestService) isKnowledgeGone(ctx context.Context, kbID, knowledgeID string) bool {
+// Other lookup errors leave liveness unknown and must reach the caller so it
+// can retry instead of discarding the document's pending work.
+func (s *wikiIngestService) isKnowledgeGone(ctx context.Context, kbID, knowledgeID string) (bool, error) {
 	if knowledgeID == "" {
-		return true
+		return true, nil
 	}
 	if s.redisClient != nil {
 		if exists, err := s.redisClient.Exists(ctx, WikiDeletedTombstoneKey(kbID, knowledgeID)).Result(); err == nil && exists > 0 {
-			return true
+			return true, nil
 		}
 	}
 	kn, err := s.knowledgeSvc.GetKnowledgeByIDOnly(ctx, knowledgeID)
-	if err != nil || kn == nil {
-		return true
+	if errors.Is(err, apprepo.ErrKnowledgeNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("wiki ingest: check knowledge %s: %w", knowledgeID, err)
+	}
+	if kn == nil {
+		return true, nil
 	}
 	switch kn.ParseStatus {
 	case types.ParseStatusDeleting, types.ParseStatusCancelled:
-		return true
+		return true, nil
 	}
-	return false
+	return false, nil
 }
 
 // filterLiveUpdates drops additions/summaries whose source knowledge has been
 // deleted since the Map phase finished. Retract updates are preserved so
 // pages still get cleaned up. Caches per-knowledge results to avoid DB
 // hammering when a single reduce slug carries many updates for the same doc.
-func (s *wikiIngestService) filterLiveUpdates(ctx context.Context, kbID string, updates []SlugUpdate) []SlugUpdate {
+func (s *wikiIngestService) filterLiveUpdates(
+	ctx context.Context, kbID string, updates []SlugUpdate,
+) ([]SlugUpdate, error) {
 	if len(updates) == 0 {
-		return updates
+		return updates, nil
 	}
 	goneCache := make(map[string]bool)
-	isGone := func(kid string) bool {
+	isGone := func(kid string) (bool, error) {
 		if kid == "" {
-			return false
+			return false, nil
 		}
 		if v, ok := goneCache[kid]; ok {
-			return v
+			return v, nil
 		}
-		v := s.isKnowledgeGone(ctx, kbID, kid)
+		v, err := s.isKnowledgeGone(ctx, kbID, kid)
+		if err != nil {
+			return false, err
+		}
 		goneCache[kid] = v
-		return v
+		return v, nil
 	}
 	filtered := make([]SlugUpdate, 0, len(updates))
 	dropped := 0
@@ -3099,7 +3112,11 @@ func (s *wikiIngestService) filterLiveUpdates(ctx context.Context, kbID string, 
 		case "retract", "retractStale":
 			filtered = append(filtered, u)
 		default:
-			if isGone(u.KnowledgeID) {
+			gone, err := isGone(u.KnowledgeID)
+			if err != nil {
+				return nil, err
+			}
+			if gone {
 				dropped++
 				continue
 			}
@@ -3109,7 +3126,7 @@ func (s *wikiIngestService) filterLiveUpdates(ctx context.Context, kbID string, 
 	if dropped > 0 {
 		logger.Infof(ctx, "wiki ingest: reduce dropped %d updates for deleted knowledge(s)", dropped)
 	}
-	return filtered
+	return filtered, nil
 }
 
 // reconstructContent rebuilds document text from chunks.
@@ -3164,6 +3181,134 @@ func reconstructEnrichedContent(
 		return content
 	}
 	return searchutil.EnrichContentWithImageInfo(content, mergedImageInfo)
+}
+
+// appendScannedPageText adds OCR from pages whose parent text is only an
+// image link. reconstructEnrichedContent inlines image_info when that JSON
+// exists; scanned pages often keep the recognized text only on the image_ocr
+// chunk. A document that already has some prose still receives those pages.
+// Disabled chunks, OCR beside real prose, and text already present are left out.
+func appendScannedPageText(content string, chunks []*types.Chunk) string {
+	var b strings.Builder
+	b.WriteString(content)
+	written := content
+	for _, c := range scannedOCRForWiki(chunks) {
+		text := strings.TrimSpace(c.Content)
+		if text == "" || strings.Contains(written, text) {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(text)
+		written = b.String()
+	}
+	return b.String()
+}
+
+// wikiCitationChunks gives the citation pass the scanned-page OCR on the
+// parent text chunk. splitChunksIntoCitationBatches only reads text chunks,
+// so an image-link parent would otherwise be cited without the page text.
+// The returned chunks are copies; stored rows are not changed.
+func wikiCitationChunks(chunks []*types.Chunk) []*types.Chunk {
+	ocrByParent := map[string][]*types.Chunk{}
+	var orphans []*types.Chunk
+	for _, c := range scannedOCRForWiki(chunks) {
+		if c.ParentChunkID == "" {
+			orphans = append(orphans, c)
+			continue
+		}
+		ocrByParent[c.ParentChunkID] = append(ocrByParent[c.ParentChunkID], c)
+	}
+	out := make([]*types.Chunk, 0, len(chunks)+len(orphans))
+	for _, c := range chunks {
+		if c == nil || !c.IsEnabled {
+			continue
+		}
+		if c.ChunkType != types.ChunkTypeText && c.ChunkType != "" {
+			continue
+		}
+		ocrs := ocrByParent[c.ID]
+		if len(ocrs) == 0 || chunkHasExtractableText(c.Content) {
+			out = append(out, c)
+			continue
+		}
+		clone := *c
+		var b strings.Builder
+		b.WriteString(c.Content)
+		for _, o := range ocrs {
+			text := strings.TrimSpace(o.Content)
+			if text == "" || strings.Contains(b.String(), text) {
+				continue
+			}
+			b.WriteByte('\n')
+			b.WriteString(text)
+		}
+		clone.Content = b.String()
+		out = append(out, &clone)
+	}
+	for _, o := range orphans {
+		clone := *o
+		clone.ChunkType = types.ChunkTypeText
+		out = append(out, &clone)
+	}
+	return out
+}
+
+// scannedOCRForWiki returns enabled OCR chunks whose parent is only an image
+// link, ordered by the parent text chunk and then the PDF page.
+func scannedOCRForWiki(chunks []*types.Chunk) []*types.Chunk {
+	parentIndex := make(map[string]int, len(chunks))
+	disabledParent := make(map[string]bool)
+	for _, c := range chunks {
+		if c == nil || (c.ChunkType != types.ChunkTypeText && c.ChunkType != "") {
+			continue
+		}
+		parentIndex[c.ID] = c.ChunkIndex
+		if !c.IsEnabled {
+			disabledParent[c.ID] = true
+		}
+	}
+	enabled := make([]*types.Chunk, 0, len(chunks))
+	for _, c := range chunks {
+		if c == nil || !c.IsEnabled || disabledParent[c.ParentChunkID] {
+			continue
+		}
+		enabled = append(enabled, c)
+	}
+	var ocr []*types.Chunk
+	for _, c := range selectGraphChunks(enabled) {
+		if c != nil && c.ChunkType == types.ChunkTypeImageOCR {
+			ocr = append(ocr, c)
+		}
+	}
+	sort.SliceStable(ocr, func(i, j int) bool {
+		pi, pj := parentIndex[ocr[i].ParentChunkID], parentIndex[ocr[j].ParentChunkID]
+		if pi != pj {
+			return pi < pj
+		}
+		pageI, pageJ := pdfPageOf(ocr[i]), pdfPageOf(ocr[j])
+		if pageI != pageJ {
+			return pageI < pageJ
+		}
+		if ocr[i].ChunkIndex != ocr[j].ChunkIndex {
+			return ocr[i].ChunkIndex < ocr[j].ChunkIndex
+		}
+		return ocr[i].StartAt < ocr[j].StartAt
+	})
+	return ocr
+}
+
+func pdfPageOf(c *types.Chunk) int {
+	if c == nil {
+		return 0
+	}
+	for _, loc := range c.SourceLocators {
+		if loc.Type == types.SourceLocatorPDF && loc.Page > 0 {
+			return loc.Page
+		}
+	}
+	return 0
 }
 
 // slugify creates a URL-friendly slug from a string

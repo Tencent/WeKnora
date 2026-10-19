@@ -74,6 +74,11 @@ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage)
 	// Attribute every page write performed by this tool to the agent so
 	// revision history distinguishes agent edits from pipeline/user ones.
 	ctx = types.WithWikiEditSource(ctx, types.WikiEditSourceAgent)
+	// This tool edits by naming the exact text it removes, so a write that
+	// shortens the page is a deliberate removal — including deleting table
+	// rows, which is a normal request. The whole-page writer is deliberately
+	// NOT marked: there a shorter body is how truncation shows up.
+	ctx = types.WithWikiShrinkAllowed(ctx)
 	var params struct {
 		Slug       string    `json:"slug"`
 		OldText    string    `json:"old_text"`
@@ -98,7 +103,7 @@ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage)
 	params.Slug = normalizedSlug
 
 	// Get the existing page
-	existingPage, _, err := resolveUniqueWikiPage(ctx, t.wikiPageService, params.Slug, t.kbIDs, t.routes)
+	existingPage, kbID, err := resolveUniqueWikiPage(ctx, t.wikiPageService, params.Slug, t.kbIDs, t.routes)
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: fmt.Sprintf("Failed to fetch page %s: %v", params.Slug, err)}, nil
 	}
@@ -135,6 +140,7 @@ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage)
 		Output:  output,
 		Data: map[string]interface{}{
 			"display_type":      "wiki_replace_text",
+			"data_change":       wikiDataChange("replace_text", kbID),
 			"slug":              params.Slug,
 			"title":             existingPage.Title,
 			"old_text":          oldPreview,
@@ -142,4 +148,9 @@ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage)
 			"replacement_count": replacementCount,
 		},
 	}, nil
+}
+
+// ApprovalGrant scopes a session-wide approval to the run's knowledge bases.
+func (t *wikiReplaceTextTool) ApprovalGrant(ctx context.Context, _ json.RawMessage) (string, string) {
+	return wikiApprovalGrant(ctx, t.Name(), t.kbIDs)
 }

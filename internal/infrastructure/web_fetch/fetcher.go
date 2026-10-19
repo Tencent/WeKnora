@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -23,11 +24,35 @@ import (
 )
 
 const (
-	fetchTimeout         = 60 * time.Second
-	pipelineFetchTimeout = 15 * time.Second
-	maxBodySize          = 100 * 1024
-	maxAgentBodySize     = 2 * 1024 * 1024
+	// Bound interactive reads; explicit environment overrides remain supported.
+	defaultPageFetchTimeout = 30 * time.Second
+	pipelineFetchTimeout    = 15 * time.Second
+	maxBodySize             = 100 * 1024
+	maxAgentBodySize        = 2 * 1024 * 1024
 )
+
+// PageFetchTimeout is the shared budget for one agent web_fetch page read.
+// The HTTP client, the fetch context, and chromedp all use this value.
+// Chromedp's deadline is a child of the fetch context, so the budgets do not add.
+//
+// WEKNORA_WEB_FETCH_TIMEOUT accepts a Go duration (150s, 3m) or a bare positive
+// number of seconds (180), the same pattern as WEKNORA_AGENT_LLM_TIMEOUT.
+// Empty, invalid, and non-positive values use defaultPageFetchTimeout.
+func PageFetchTimeout() time.Duration {
+	value := strings.TrimSpace(os.Getenv("WEKNORA_WEB_FETCH_TIMEOUT"))
+	if value == "" {
+		return defaultPageFetchTimeout
+	}
+	timeout, err := time.ParseDuration(value)
+	if err != nil {
+		// Bare number of seconds, for example "180".
+		timeout, err = time.ParseDuration(value + "s")
+	}
+	if err != nil || timeout <= 0 {
+		return defaultPageFetchTimeout
+	}
+	return timeout
+}
 
 // ErrorCode identifies the stage and class of a fetch failure.
 type ErrorCode string
@@ -116,7 +141,7 @@ type httpFetchResult struct {
 
 // NewFetcher creates a production fetcher with DNS and redirect SSRF guards.
 func NewFetcher() *Fetcher {
-	f := newFetcher(fetchTimeout, renderWithChromium)
+	f := newFetcher(PageFetchTimeout(), renderWithChromium)
 	f.markdown = true
 	f.maxBodySize = maxAgentBodySize
 	return f
@@ -282,11 +307,26 @@ func (f *Fetcher) pinnedDialContext() func(context.Context, string, string) (net
 				return nil, fmt.Errorf("connection blocked: %s resolves to restricted IP %s", host, ip)
 			}
 		}
-		pinnedAddress := net.JoinHostPort(ips[0].String(), port)
-		if f.dialContext != nil {
-			return f.dialContext(ctx, network, pinnedAddress)
+		// Try validated addresses without a second DNS lookup. A broken IPv6 route
+		// must not prevent reaching the same public host over IPv4.
+		var lastErr error
+		for _, ip := range ips {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			dial := f.dialContext
+			if dial == nil {
+				dial = (&net.Dialer{KeepAlive: 30 * time.Second}).DialContext
+			}
+			conn, err := dial(dialCtx, network, net.JoinHostPort(ip.String(), port))
+			cancel()
+			if err == nil {
+				return conn, nil
+			}
+			lastErr = err
 		}
-		return (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext(ctx, network, pinnedAddress)
+		return nil, lastErr
 	}
 }
 
@@ -350,7 +390,9 @@ func renderWithChromium(ctx context.Context, target pinnedTarget) (string, error
 	defer cancelAllocator()
 	browserCtx, cancelBrowser := chromedp.NewContext(allocatorCtx)
 	defer cancelBrowser()
-	browserCtx, cancelTimeout := context.WithTimeout(browserCtx, fetchTimeout)
+	// Child of the fetch context: a full PageFetchTimeout here cannot outlive
+	// the parent budget, so HTTP and chromedp share one deadline instead of stacking.
+	browserCtx, cancelTimeout := context.WithTimeout(browserCtx, PageFetchTimeout())
 	defer cancelTimeout()
 	var html string
 	if err := chromedp.Run(browserCtx,

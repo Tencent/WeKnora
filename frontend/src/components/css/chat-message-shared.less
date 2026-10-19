@@ -4,13 +4,16 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 4px;
-  margin-top: 6px;
-  margin-left: -6px;
+  gap: 2px;
+  margin-top: 10px;
+  margin-left: -5px;
   min-height: 28px;
-  color: var(--td-text-color-primary);
+  color: color-mix(in srgb, var(--td-text-color-primary) 55%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--app-motion-fast) ease;
 
-  // 与用户消息的操作键、输入框控制键同规格：28px、6px 圆角
+  // Quiet outline actions, with a full hit target around each icon.
   :deep(.t-button) {
     display: inline-flex;
     align-items: center;
@@ -22,7 +25,8 @@
     border: none;
     border-radius: var(--app-radius-sm);
     background: transparent;
-    color: var(--td-text-color-secondary);
+    color: color-mix(in srgb, var(--td-text-color-primary) 55%, transparent);
+    box-shadow: none;
     transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
     .t-button__content {
@@ -39,40 +43,30 @@
       gap: 0;
     }
 
-    .t-icon {
+    .t-icon, .chat-action-icon {
       display: inline-flex !important;
       visibility: visible !important;
       opacity: 1;
       align-items: center;
       justify-content: center;
-      font-size: var(--app-text-xl);
-      width: 16px;
-      height: 16px;
+      font-size: var(--app-text-2xl);
+      width: 18px;
+      height: 18px;
       flex-shrink: 0;
       color: inherit;
     }
 
     .t-icon svg {
       display: block !important;
-      width: 16px;
-      height: 16px;
+      width: 18px;
+      height: 18px;
       stroke-linecap: round;
       stroke-linejoin: round;
-    }
-
-    .t-icon svg [stroke]:not([stroke='none']) {
-      stroke-width: 1.2;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-    }
-
-    .t-button__text > :not(.t-icon) {
-      display: none;
     }
 
     &:hover:not(:disabled) {
-      background: var(--td-bg-color-container-hover);
-      color: var(--td-text-color-primary);
+      background: color-mix(in srgb, var(--td-text-color-primary) 5%, transparent);
+      color: var(--td-text-color-secondary);
 
       .t-icon {
         opacity: 1;
@@ -81,12 +75,39 @@
     }
 
     &:active:not(:disabled) {
-      background: var(--td-bg-color-container-active);
+      background: color-mix(in srgb, var(--td-text-color-primary) 9%, transparent);
 
       .t-icon {
         opacity: 1;
       }
     }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color-focus);
+      outline-offset: 2px;
+    }
+  }
+}
+
+.answer-toolbar--persistent,
+.bot_msg:hover :deep(.answer-toolbar),
+.bot_msg:focus-within :deep(.answer-toolbar),
+.agent-stream-display:hover .answer-toolbar,
+.agent-stream-display:focus-within .answer-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .answer-toolbar {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .answer-toolbar {
+    transition: none;
   }
 }
 

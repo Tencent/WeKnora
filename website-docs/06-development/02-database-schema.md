@@ -8,7 +8,7 @@ WeKnora 使用版本化迁移维护数据库结构，PostgreSQL 与 SQLite 分�
 
 | `DB_DRIVER` | 说明 |
 | --- | --- |
-| `postgres` | 标准模式。既支持原生 PostgreSQL（+pgvector），也支持 **ParadeDB**（PostgreSQL 分支，内置 `pg_search`/BM25，官方 compose 默认镜像 `paradedb/paradedb:v0.22.6-pg17`）。GORM DSN 由 `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME` 拼装，强制 `sslmode=disable`、`TimeZone=UTC` |
+| `postgres` | 标准模式。既支持原生 PostgreSQL（+pgvector），也支持 **ParadeDB**（PostgreSQL 分支，内置 `pg_search`/BM25，官方 compose 默认镜像 `paradedb/paradedb:v0.25.11-pg17`）。GORM DSN 由 `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME` 拼装，强制 `sslmode=disable`、`TimeZone=UTC` |
 | `sqlite` | Lite 模式。路径取 `DB_PATH`（默认 `./data/weknora.db`），DSN 附加 `_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on`，并加载 `sqlite-vec` 扩展（`sqlite_vec.Auto()`）做向量检索 |
 | 其他值 | 直接报错 `unsupported database driver` |
 
@@ -20,14 +20,14 @@ WeKnora 使用版本化迁移维护数据库结构，PostgreSQL 与 SQLite 分�
 
 ```text
 migrations/
-├── versioned/     # PostgreSQL/ParadeDB 版本化迁移：000000-000110 共 111 版（222 个 .up/.down.sql 文件）
-├── sqlite/        # SQLite 迁移：000000_init（压平的全量 schema）+ 000001-000030 增量版本
+├── versioned/     # PostgreSQL/ParadeDB 版本化迁移：000000-000118 共 119 版（238 个 .up/.down.sql 文件）
+├── sqlite/        # SQLite 迁移：000000_init（压平的全量 schema）+ 000001-000036 增量版本
 ├── paradedb/      # ParadeDB 附加脚本：00-init-db.sql、01-migrate-to-paradedb.sql（存量库切换）
 └── mysql/         # 00-init-db.sql，遗留的一次性 MySQL 建表脚本（未接入代码）
 ```
 
-- PostgreSQL 的 `versioned/` 从 `000000_init` 到 `000110_im_channel_locale`；
-- `sqlite/` 以 `000000_init` 作为压平后的全量初始化（JSONB→TEXT、SERIAL→AUTOINCREMENT 等方言差异已适配），其后追加增量版本（当前到 `000030_im_channel_locale`），同样由 golang-migrate 顺序执行；
+- PostgreSQL 的 `versioned/` 从 `000000_init` 到 `000118_mcp_oauth_timestamp_tz`；
+- `sqlite/` 以 `000000_init` 作为压平后的全量初始化（JSONB→TEXT、SERIAL→AUTOINCREMENT 等方言差异已适配），其后追加增量版本（当前到 `000036_messages_attachment_lookup`），同样由 golang-migrate 顺序执行；
 - `uuid-ossp`、`vector`、`pg_trgm`、`pg_search` 等扩展由 `versioned/` 迁移自行创建（000000、000002）；BM25 索引使用中文 Lindera 分词器建在 `embeddings.content` 上；
 - `paradedb/00-init-db.sql` 除扩展外还含一份旧版建表语句，**没有被 compose 或代码引用**。不要把它挂成数据库 initdb 脚本：它先建出的旧表会让 `000000_init` 失败。
 
@@ -86,6 +86,14 @@ migrations/
 | 000108 | sessions.sandbox_config_tenant_id（BIGINT，默认 0），记录会话所用沙箱配置属于哪个空间；按沙箱配置回填使用共享 Agent 的会话 |
 | 000109 | sessions.host_workspace_dir（VARCHAR(1024)），Lite 桌面版主机沙箱的项目目录，创建后不再修改 |
 | 000110 | im_channels.locale（VARCHAR(16)，默认空串），IM 渠道固定回复语言，空串使用部署默认值 |
+| 000111 | `model_catalog_configs`，管理员目录覆盖与最近版本历史 |
+| 000112 | embeddings 的 knowledge_id、chunk_id 索引；普通建索引，大表升级前可先同名 CONCURRENTLY 建立以降低阻塞 |
+| 000113 | `chunk_images` 图片投影表与同步触发器，从已有 image_info 回填画廊数据 |
+| 000114 | chunks.source_locators，原文引用定位信息 |
+| 000115 | 将适用版本的 pg_search / vector 扩展升级到 0.25.11 / 0.8.4，需先切换配套数据库镜像 |
+| 000116 | 将历史智能推理 Agent 的空 allowed_tools 数组写为显式默认工具列表 |
+| 000117 | messages.attachments 的有效用户消息 GIN 索引，用于附件引用保留查询 |
+| 000118 | MCP OAuth token/client 时间戳改为 timestamptz，旧字面值按 UTC 转换 |
 
 SQLite 版本号独立演进，不能与 PostgreSQL 数字一一对应：
 
@@ -107,8 +115,13 @@ SQLite 版本号独立演进，不能与 PostgreSQL 数字一一对应：
 | 000027 | sessions.sandbox_config_tenant_id（对应 000108；Lite 无共享空间，不回填） |
 | 000028 | 补建 `tenant_skills`、`tenant_skill_snapshots`、`tenant_skill_catalog`、`tenant_user_env_vars`（对应 000086–000090 与 000104）。此前 Lite 缺这四张表，技能读取凭据时报 `no such table` |
 | 000029–000030 | sessions.host_workspace_dir、im_channels.locale（对应 000109–000110） |
+| 000031 | `model_catalog_configs`（对应 000111） |
+| 000032–000033 | `chunk_images` 与 source_locators（对应 000113–000114） |
+| 000034 | 补齐 MCP usage_instructions 与 mcp_metadata（对应 000092） |
+| 000035 | Agent 显式默认工具（对应 000116） |
+| 000036 | 有效用户消息附件查询索引（对应 000117，SQLite 使用普通索引） |
 
-000092（`mcp_metadata`、`mcp_services.usage_instructions`）与 000099（pg_search 升级）没有 SQLite 对应版本。
+PostgreSQL 的 000099、000112、000115、000118 没有 SQLite 对应版本。
 
 基线 schema 与后续增量共同决定新建库和已有库的最终结果；不能只看新增迁移文件名判断 Lite 是否有某张表。
 
@@ -130,6 +143,8 @@ SQLite 版本号独立演进，不能与 PostgreSQL 数字一一对应：
 | `user_resource_favorites` | 用户收藏 | PK（`user_id`,`tenant_id`,`resource_type`,`resource_id`） |
 | `system_settings` | 系统级设置（000053） | `key`、`value`/`value_type`、`category`、`is_secret`、`requires_restart`、`last_modified_by` |
 | `audit_logs` | 审计日志（000044） | `tenant_id`、`actor_user_id`/`actor_role`、`action`、`target_type`/`target_id`/`target_user_id`、`request_path`/`request_method`、`outcome`（success/denied）、`scope_type`/`scope_id`、`details`（JSONB） |
+
+v0.8.3 新增的 `model_catalog_configs` 保存部署级管理员覆盖（单行 id=1）、版本与历史；`chunk_images` 是 `chunks.image_info` 的可查询投影，触发器保持其与分块写入、删除和状态变化一致。附件保留由有效会话消息引用决定，`expires_at` 只清理已经不被引用的过期附件。
 
 ### 模型与知识库 {#_3-2-模型与知识库}
 
@@ -154,7 +169,7 @@ SQLite 版本号独立演进，不能与 PostgreSQL 数字一一对应：
 | `message_artifacts` | 技能生成的文件，一行一个（000103） | `session_id`、`message_id`、`position`（消息内序号，即下载接口的 index；与 `message_id` 唯一）、`url`（存储或 resource:// 引用，不返回客户端）、`file_name`/`file_type`/`file_size`、`content_hash`、`source_path`（同会话同路径视为同一文件的多个版本）、`mod_time`（RFC 3339 文本，保留纳秒精度供采集器比对）、`created_at`、`deleted_at`（000107，用户删除文件后保留墓碑行，保持 `position` 稳定且不被重新采集）。消息被软删除时其文件一并隐藏 |
 | `message_suggestion_sets` | 建议问题集（000067） | `tenant_id`、`session_id`、`assistant_message_id`、`placement`（starter/follow_up）、`config_hash`+`locale`（缓存键，唯一）、`status`、`questions`（JSONB）、token/延迟统计、`lease_until` |
 | `message_suggestion_events` | 建议问题曝光/点击事件 | `suggestion_set_id`（FK，CASCADE）、`question_id`、`event_type`、`actor_id` |
-| `temporary_documents` | 会话内临时文档（000070） | `tenant_id`、`session_id`、`resource_ref`、`file_name`/`file_type`/`file_size`、`status`（uploaded/processing/ready/expired）、`content`、`chunks`（JSONB）、`expires_at` |
+| `temporary_documents` | 会话内临时文档（000070） | `tenant_id`、`session_id`、`resource_ref`、`file_name`/`file_type`/`file_size`、`status`（uploaded/processing/ready/failed）、`content`、`chunks`（JSONB）、`expires_at` |
 
 ### Agent 与 MCP {#_3-4-agent-与-mcp}
 
@@ -413,7 +428,7 @@ make migrate-up
 
 BM25 索引（`USING bm25`、Lindera 中文分词）只在 ParadeDB 可用；原生 Postgres 部署需保证相应迁移的条件分支生效或改用 Elasticsearch 等外部检索引擎。存量原生 Postgres 库切到 ParadeDB 可参考 `migrations/paradedb/01-migrate-to-paradedb.sql`。
 
-官方镜像自 v0.8.2 起为 `paradedb/paradedb:v0.22.6-pg17`。迁移 000099 只把已安装的 pg_search 0.22.2–0.22.5 升级到 0.22.6：若启动日志提示 `pg_search 0.22.6 is not available`，说明数据库镜像还没换，换镜像后手工执行 `ALTER EXTENSION pg_search UPDATE TO '0.22.6'`；其他版本线不会被自动升级或降级。
+官方镜像为 `paradedb/paradedb:v0.25.11-pg17`（v0.8.2 起曾为 `v0.22.6-pg17`）。迁移 000115 在服务器提供对应扩展包时，把已安装的 pg_search 0.22.0–0.25.10 升级到 0.25.11、pgvector 0.8.0–0.8.3 升级到 0.8.4；历史迁移 000099 仅在仍使用 `v0.22.6-pg17` 镜像时生效。其他版本线不会被自动升级或降级。扩展 catalog 必须与镜像版本一致，否则调用部分扩展函数会使数据库崩溃；手工升级见《ParadeDB 存量库升级》，在新镜像上不要执行 `ALTER EXTENSION pg_search UPDATE TO '0.22.6'`。
 
 ### 版本文件冲突 {#_7-5-版本文件冲突}
 

@@ -26,15 +26,19 @@ type flowEmbedSvc struct {
 func (f *flowEmbedSvc) Create(context.Context, uint64, string, *types.EmbedChannel) (*types.EmbedChannel, string, error) {
 	return nil, "", nil
 }
+
 func (f *flowEmbedSvc) ListByAgent(context.Context, uint64, string) ([]*types.EmbedChannel, error) {
 	return nil, nil
 }
+
 func (f *flowEmbedSvc) ListByTenant(context.Context, uint64) ([]*types.EmbedChannel, error) {
 	return nil, nil
 }
+
 func (f *flowEmbedSvc) Update(context.Context, uint64, string, *types.EmbedChannel, *bool, *bool, *bool, *bool, *string, *string, *string) (*types.EmbedChannel, error) {
 	return nil, nil
 }
+
 func (f *flowEmbedSvc) GetOwnedChannel(_ context.Context, tenantID uint64, id string) (*types.EmbedChannel, error) {
 	ch := f.channels[id]
 	if ch == nil || ch.TenantID != tenantID {
@@ -46,6 +50,7 @@ func (f *flowEmbedSvc) Delete(context.Context, uint64, string) error { return ni
 func (f *flowEmbedSvc) RotateToken(context.Context, uint64, string) (*types.EmbedChannel, string, error) {
 	return nil, "", nil
 }
+
 func (f *flowEmbedSvc) LookupForEmbed(_ context.Context, channelID, token string) (*types.EmbedChannel, error) {
 	ch := f.channels[channelID]
 	if ch == nil || ch.PublishToken != token {
@@ -56,30 +61,38 @@ func (f *flowEmbedSvc) LookupForEmbed(_ context.Context, channelID, token string
 	}
 	return ch, nil
 }
+
 func (f *flowEmbedSvc) LookupEnabledChannel(context.Context, string) (*types.EmbedChannel, error) {
 	return nil, nil
 }
+
 func (f *flowEmbedSvc) IssueSessionToken(context.Context, string) (string, int, error) {
 	if f.issueErr != nil {
 		return "", 0, f.issueErr
 	}
 	return f.sessionToken, f.expiresIn, nil
 }
+
 func (f *flowEmbedSvc) IssuePreviewSession(context.Context, uint64, string) (string, int, error) {
 	return f.IssueSessionToken(context.Background(), "")
 }
+
 func (f *flowEmbedSvc) ResolveSessionToken(context.Context, string) (string, error) {
 	return "", nil
 }
+
 func (f *flowEmbedSvc) PublicConfig(context.Context, *types.EmbedChannel) types.EmbedChannelPublicConfig {
 	return types.EmbedChannelPublicConfig{}
 }
+
 func (f *flowEmbedSvc) SuggestedQuestions(context.Context, *types.EmbedChannel, int) ([]types.SuggestedQuestion, error) {
 	return nil, nil
 }
+
 func (f *flowEmbedSvc) EmbedChunk(context.Context, *types.EmbedChannel, string) (*types.Chunk, error) {
 	return nil, nil
 }
+
 func (f *flowEmbedSvc) EmbedDisplayTitle(context.Context, *types.EmbedChannel) string {
 	return "AI Assistant"
 }
@@ -91,12 +104,15 @@ type flowTenantSvc struct {
 func (f *flowTenantSvc) GetTenantByID(context.Context, uint64) (*types.Tenant, error) {
 	return f.tenant, nil
 }
+
 func (f *flowTenantSvc) CreateTenant(context.Context, *types.Tenant) (*types.Tenant, error) {
 	return nil, nil
 }
+
 func (f *flowTenantSvc) GetTenantsByIDs(context.Context, []uint64) (map[uint64]*types.Tenant, error) {
 	return nil, nil
 }
+
 func (f *flowTenantSvc) UpdateTenant(context.Context, *types.Tenant) (*types.Tenant, error) {
 	return nil, nil
 }
@@ -104,18 +120,23 @@ func (f *flowTenantSvc) DeleteTenant(context.Context, uint64) error { return nil
 func (f *flowTenantSvc) ListTenants(context.Context) ([]*types.Tenant, error) {
 	return nil, nil
 }
+
 func (f *flowTenantSvc) ListAllTenants(context.Context) ([]*types.Tenant, error) {
 	return nil, nil
 }
+
 func (f *flowTenantSvc) BulkSetStorageQuota(context.Context, int64) (int64, error) {
 	return 0, nil
 }
+
 func (f *flowTenantSvc) SearchTenants(context.Context, string, uint64, int, int) ([]*types.Tenant, int64, error) {
 	return nil, 0, nil
 }
+
 func (f *flowTenantSvc) GetTenantByIDForUser(context.Context, uint64, string) (*types.Tenant, error) {
 	return f.tenant, nil
 }
+
 func (f *flowTenantSvc) GetWeKnoraCloudCredentials(context.Context) *types.WeKnoraCloudCredentials {
 	return nil
 }
@@ -186,7 +207,8 @@ func TestPatchEmbedChatPayloadInjectsAgentID(t *testing.T) {
 	ch := &types.EmbedChannel{AgentID: "agent-embed-42"}
 	body := `{"query":"hello","agent_id":"client-override","agent_source_tenant_id":84,"web_search_enabled":true,` +
 		`"knowledge_ids":["doc-x"],"tag_ids":["tag-x"],"mentioned_items":[{"id":"kb-x","type":"kb"}],` +
-		`"skill_names":["s"],"summary_model_id":"model-x","question_origin":{"knowledge_base_id":"kb-x"}}`
+		`"skill_names":["s"],"summary_model_id":"model-x","question_origin":{"knowledge_base_id":"kb-x"},` +
+		`"page_context":{"knowledge_base_id":"kb-x"}}`
 
 	patched, err := patchEmbedChatPayload(strings.NewReader(body), ch, false)
 	if err != nil {
@@ -223,7 +245,7 @@ func TestPatchEmbedChatPayloadInjectsAgentID(t *testing.T) {
 			t.Fatalf("%s = %v, want empty", key, payload[key])
 		}
 	}
-	for _, key := range []string{"summary_model_id", "question_origin"} {
+	for _, key := range []string{"summary_model_id", "question_origin", "page_context"} {
 		if _, ok := payload[key]; ok {
 			t.Fatalf("%s = %v, want dropped", key, payload[key])
 		}
@@ -351,3 +373,7 @@ func TestPatchEmbedChatPayloadInvalidBody(t *testing.T) {
 type badReader struct{}
 
 func (badReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+
+func (f *flowTenantSvc) UpdateTenantProfile(context.Context, uint64, *string, *string) (*types.Tenant, error) {
+	panic("unexpected UpdateTenantProfile call")
+}

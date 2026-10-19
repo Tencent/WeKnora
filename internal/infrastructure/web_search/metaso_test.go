@@ -31,8 +31,10 @@ func TestMetasoProviderSearch(t *testing.T) {
 			t.Fatalf("unexpected content options: %+v", request)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"webpages":[
-			{"title":"First","link":"https://example.com/1","summary":"Summary","snippet":"Snippet","date":"2026-08-09"},
+		_, _ = w.Write([]byte(`{"credits":3,"searchParameters":{"q":"WeKnora","scope":"scholar"},
+			"total":3,"scholars":[
+			{"title":"First","link":"https://example.com/1","score":"high","position":1,
+			 "summary":"Summary","snippet":"Snippet","date":"2026-08-09","authors":["Author"]},
 			{"title":"Second","link":"https://example.com/2","snippet":"Fallback snippet","date":"invalid"},
 			{"title":"Third","link":"https://example.com/3","snippet":"must be capped"}
 		]}`))
@@ -58,6 +60,154 @@ func TestMetasoProviderSearch(t *testing.T) {
 	}
 	if results[1].PublishedAt != nil {
 		t.Fatalf("invalid date should be ignored: %v", results[1].PublishedAt)
+	}
+}
+
+func TestMetasoProviderScopeArrays(t *testing.T) {
+	fixtures := map[string]struct {
+		payload string
+		want    int
+	}{
+		"webpage": {
+			payload: `{"total":1,"webpages":[{"title":"W","link":"https://example.com/w",
+				"score":"high","position":1,"summary":"网页摘要","date":"2026-08-09"}]}`,
+			want: 1,
+		},
+		"document": {
+			payload: `{"credits":3,"searchParameters":{"q":"1","scope":"document"},"total":15,
+				"documents":[
+				{"title":"文档标题一","link":"https://example.com/doc/1","score":"high",
+				 "snippet":"文档片段一","position":1,"authors":["作者甲"]},
+				{"title":"文档标题二","link":"https://example.com/doc/2 with space","score":"medium",
+				 "snippet":"文档片段二","position":2,"authors":["作者乙"]}
+			]}`,
+			want: 2,
+		},
+		"scholar": {
+			payload: `{"credits":3,"searchParameters":{"q":"1","scope":"scholar"},"total":43,
+				"scholars":[
+				{"title":"学术标题一","link":"https://example.com/paper?q=1","score":"high",
+				 "snippet":"学术片段一","position":1,"authors":["作者甲"],"date":"2012-10-15"},
+				{"title":"学术标题二","link":"https://example.com/paper?q=2","score":"medium",
+				 "snippet":"","position":2,"date":"2011-10-05"}
+			]}`,
+			want: 2,
+		},
+		"podcast": {
+			payload: `{"total":1,"podcasts":[{"title":"P","link":"https://example.com/p",
+				"score":"medium","position":1,"snippet":"播客片段","authors":["主播"],
+				"date":"2022-10-13","duration":"299"}]}`,
+			want: 1,
+		},
+		"video": {
+			payload: `{"total":1,"videos":[{"title":"V","link":"https://example.com/v",
+				"score":"medium","position":1,"snippet":"视频片段","authors":["UP"],
+				"date":"2024-06-17","duration":"497","coverImage":"https://example.com/v.jpg"}]}`,
+			want: 1,
+		},
+	}
+	for scope, fixture := range fixtures {
+		t.Run(scope, func(t *testing.T) {
+			body := fixture.payload
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(body))
+			}))
+			defer server.Close()
+
+			metaso := &MetasoProvider{
+				client: server.Client(), baseURL: server.URL,
+				apiKey: "mk-test", scope: scope,
+			}
+			results, err := metaso.Search(context.Background(), "q", 5, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(results) != fixture.want {
+				t.Fatalf("scope=%s len(results) = %d, want %d", scope, len(results), fixture.want)
+			}
+			if results[0].Title == "" {
+				t.Fatalf("scope=%s title is empty", scope)
+			}
+			if results[0].URL == "" {
+				t.Fatalf("scope=%s URL is empty", scope)
+			}
+			if results[0].Snippet == "" {
+				t.Fatalf("scope=%s snippet is empty", scope)
+			}
+		})
+	}
+}
+
+func TestMetasoProviderImageScopeHasNoLink(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"credits":3,"searchParameters":{"q":"1","scope":"image"},"total":31,
+			"images":[{"title":"图片一","score":"low","position":1,
+			 "imageUrl":"https://example.com/i.jpg","imageWidth":800,"imageHeight":600}]}`))
+	}))
+	defer server.Close()
+
+	metaso := &MetasoProvider{
+		client: server.Client(), baseURL: server.URL,
+		apiKey: "mk-test", scope: "image",
+	}
+	results, err := metaso.Search(context.Background(), "q", 5, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("len(results) = %d, want 1", len(results))
+	}
+	if results[0].Title == "" {
+		t.Fatalf("title is empty: %+v", results[0])
+	}
+	if results[0].URL != "" {
+		t.Fatalf("URL = %q, want empty: image entries have no link", results[0].URL)
+	}
+}
+
+func TestMetasoProviderToleratesNonStringURLFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"total":1,"webpages":[{"title":"W","link":"https://example.com/w",
+			"snippet":"片段","url":{"href":"https://example.com/obj"},
+			"imageUrl":{"href":"https://example.com/img"}}]}`))
+	}))
+	defer server.Close()
+
+	metaso := &MetasoProvider{
+		client: server.Client(), baseURL: server.URL,
+		apiKey: "mk-test", scope: "webpage",
+	}
+	results, err := metaso.Search(context.Background(), "q", 5, false)
+	if err != nil {
+		t.Fatalf("non-string url fields must not fail the search: %v", err)
+	}
+	if len(results) != 1 || results[0].URL != "https://example.com/w" {
+		t.Fatalf("results = %+v, want one result for https://example.com/w", results)
+	}
+}
+
+func TestMetasoProviderToleratesUnmodelledFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"total":3,"pageSize":10,"webpages":[
+			{"title":"W","link":"https://example.com/w","snippet":"片段",
+			 "score":123,"position":"1","authors":null,"unknownNested":{"a":[1,2]}}]}`))
+	}))
+	defer server.Close()
+
+	metaso := &MetasoProvider{
+		client: server.Client(), baseURL: server.URL,
+		apiKey: "mk-test", scope: "webpage",
+	}
+	results, err := metaso.Search(context.Background(), "q", 5, false)
+	if err != nil {
+		t.Fatalf("unmodelled fields must not fail the search: %v", err)
+	}
+	if len(results) != 1 || results[0].URL != "https://example.com/w" {
+		t.Fatalf("results = %+v, want one result for https://example.com/w", results)
 	}
 }
 

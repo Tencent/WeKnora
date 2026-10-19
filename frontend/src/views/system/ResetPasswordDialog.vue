@@ -1,6 +1,6 @@
 <!--
   ResetPasswordDialog: SystemAdmin "reset user password" in-place popup
-  for the Access row.
+  for a user row.
 
   The trigger button goes in the default slot. The parent owns visibility
   via v-model:visible and relays the `announced` event into its sr-only
@@ -22,8 +22,7 @@
         </p>
         <t-form ref="formRef" :data="form" :rules="rules" label-align="top" class="system-admin-action-popup-form">
           <t-form-item :label="t('system.globalSettings.passwordReset.emailLabel')" name="email">
-            <t-input v-model="form.email" type="text" clearable autocomplete="off" :disabled="submitting"
-              :placeholder="t('system.globalSettings.passwordReset.emailPlaceholder')" />
+            <div class="system-admin-action-popup-target">{{ email }}</div>
           </t-form-item>
           <t-form-item :label="t('system.globalSettings.passwordReset.newPasswordLabel')" name="newPassword">
             <t-input v-model="form.newPassword" type="password" autocomplete="new-password" :disabled="submitting"
@@ -61,15 +60,17 @@ import { getAuthConfig } from '@/api/auth'
 import { newPasswordRules } from '@/utils/passwordPolicy'
 
 // Hide the teleported popup on other tabs without discarding a pending reset.
-const props = defineProps<{ visible: boolean; active: boolean }>()
+const props = defineProps<{ visible: boolean; active: boolean; email: string }>()
 const emit = defineEmits<{
   'update:visible': [boolean]
   announced: [string]
+  'busy-change': [boolean]
 }>()
 
 const { t } = useI18n()
 
 const submitting = ref(false)
+watch(submitting, value => emit('busy-change', value), { flush: 'sync' })
 const formRef = ref<FormInstanceFunctions>()
 const form = reactive({
   email: '',
@@ -106,16 +107,14 @@ const rules = computed<Record<string, FormRule[]>>(() => ({
 }))
 
 function resetFormFields() {
-  form.email = ''
+  form.email = props.email
   form.newPassword = ''
   form.confirmPassword = ''
   formRef.value?.clearValidate?.()
 }
 
 // destroy-on-close remounts the form DOM on every open, so the fields
-// start empty regardless; the explicit reset + clearValidate here just
-// guarantees the reactive state and any stale inline errors are gone too
-// (mirrors the pre-refactor behaviour in SystemSettings).
+// clear passwords and stale inline errors while preserving the selected user.
 watch(() => props.visible, async (visible) => {
   if (!visible) {
     resetFormFields()

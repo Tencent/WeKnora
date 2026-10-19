@@ -174,7 +174,7 @@ const runAnswerCase = () => {
   }
   const state = { fullContent: { value: '' }, doneCount: 0 }
   const process = vm.runInNewContext(
-    ts.transpile(`(message, data, dataPayload) => { switch ('answer') { ${chunk} } }`),
+    ts.transpile(`(message, data, dataPayload) => { const turnPromptEvents = () => message.agentEventStream || []; switch ('answer') { ${chunk} } }`),
     {
       ...state,
       recomposeAgentAnswer: recompose,
@@ -274,7 +274,7 @@ test('the live answer path carries truncated onto the event and the message', ()
   const chunk = source.slice(chunkStart, source.indexOf("case 'artifacts_pending'", chunkStart))
   const state = { fullContent: { value: '' } }
   const process = vm.runInNewContext(
-    ts.transpile(`(message, data, dataPayload) => { switch ('answer') { ${chunk} } }`),
+    ts.transpile(`(message, data, dataPayload) => { const turnPromptEvents = () => message.agentEventStream || []; switch ('answer') { ${chunk} } }`),
     {
       ...state,
       recomposeAgentAnswer: (m) =>

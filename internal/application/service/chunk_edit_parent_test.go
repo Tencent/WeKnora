@@ -125,6 +125,11 @@ func TestSyncEditedChunkImagesDisablesAndRestoresImageChildren(t *testing.T) {
 		ID: "image", TenantID: 1, KnowledgeBaseID: "kb", ParentChunkID: "text",
 		ChunkType: types.ChunkTypeImageOCR, ImageInfo: string(imageInfo),
 		IsEnabled: true, IndexStatus: "ready",
+	}, {
+		// The image's own vector follows the image like its OCR text does.
+		ID: "image-vector", TenantID: 1, KnowledgeBaseID: "kb", ParentChunkID: "text",
+		ChunkType: types.ChunkTypeImageVector, ImageInfo: string(imageInfo),
+		IsEnabled: true, IndexStatus: "ready",
 	}}}
 	service := &chunkService{chunkRepository: repo, kbRepository: editableChunkKBRepo{}}
 	parent := &types.Chunk{ID: "text", TenantID: 1, IsEnabled: true, Content: "image removed"}
@@ -132,16 +137,20 @@ func TestSyncEditedChunkImagesDisablesAndRestoresImageChildren(t *testing.T) {
 	if err := service.syncEditedChunkImages(context.Background(), parent); err != nil {
 		t.Fatalf("disable removed image child: %v", err)
 	}
-	if repo.children[0].IsEnabled || repo.children[0].IndexStatus != "ready" {
-		t.Fatalf("removed image child was not disabled cleanly: %+v", repo.children[0])
+	for _, child := range repo.children {
+		if child.IsEnabled || child.IndexStatus != "ready" {
+			t.Fatalf("removed image child was not disabled cleanly: %+v", child)
+		}
 	}
 
 	parent.Content = "image restored\n![one](resource://one)"
 	if err := service.syncEditedChunkImages(context.Background(), parent); err != nil {
 		t.Fatalf("restore image child: %v", err)
 	}
-	if !repo.children[0].IsEnabled || repo.children[0].IndexStatus != "ready" {
-		t.Fatalf("restored image child was not re-enabled: %+v", repo.children[0])
+	for _, child := range repo.children {
+		if !child.IsEnabled || child.IndexStatus != "ready" {
+			t.Fatalf("restored image child was not re-enabled: %+v", child)
+		}
 	}
 }
 

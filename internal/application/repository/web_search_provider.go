@@ -87,3 +87,43 @@ func (r *webSearchProviderRepository) ClearDefault(ctx context.Context, tenantID
 	}
 	return query.Update("is_default", false).Error
 }
+
+// PatchSettings persists display/default changes without writing connection parameters.
+func (r *webSearchProviderRepository) PatchSettings(
+	ctx context.Context, provider *types.WebSearchProviderEntity, fields []string,
+) error {
+	if provider == nil || provider.ID == "" || provider.TenantID == 0 || len(fields) == 0 {
+		return errors.New("provider identity and settings are required")
+	}
+	values := map[string]any{}
+	for _, field := range fields {
+		switch field {
+		case "name":
+			values[field] = provider.Name
+		case "description":
+			values[field] = provider.Description
+		case "is_default":
+			values[field] = provider.IsDefault
+		default:
+			return errors.New("unsupported provider setting")
+		}
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if values["is_default"] == true {
+			if err := tx.Model(&types.WebSearchProviderEntity{}).
+				Where("tenant_id = ? AND id != ? AND is_default = ?", provider.TenantID, provider.ID, true).
+				Update("is_default", false).Error; err != nil {
+				return err
+			}
+		}
+		result := tx.Model(&types.WebSearchProviderEntity{}).
+			Where("id = ? AND tenant_id = ?", provider.ID, provider.TenantID).Updates(values)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
+}

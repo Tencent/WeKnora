@@ -227,6 +227,19 @@ const yuqueTOCOnly = computed({
   },
 })
 
+// DingTalk ingestion of uploaded Office/PDF files. Like the Yuque switches the
+// key lives in the raw settings bag, and a data source created before this
+// control existed carries no key at all — the getter therefore reports the
+// connector default (off) instead of rendering the checkbox blank, and nothing
+// is written back until the user toggles it, so merely opening an existing
+// source never changes what it syncs.
+const dingtalkIncludeUploadedFiles = computed({
+  get: () => form.value.config.settings?.include_uploaded_files === true,
+  set: (on: boolean) => {
+    form.value.config.settings = { ...form.value.config.settings, include_uploaded_files: on }
+  },
+})
+
 // Step 2: Resources
 const resources = ref<Resource[]>([])
 const loadingResources = ref(false)
@@ -253,6 +266,32 @@ const driveFolderTokenError = ref('')
 const driveRootLoaded = ref(false)
 const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
 const isGitLabConnector = (type: string) => type === 'gitlab'
+// Feishu/Lark wiki + Drive connectors share the docx parse-mode setting.
+const isFeishuFamilyConnector = (type: string) =>
+  type === 'feishu' || type === 'lark' || type === 'feishu_drive' || type === 'lark_drive'
+// An unset legacy setting can inherit export from the server. Display that
+// state without materializing a client-side default on unrelated edits.
+const feishuParseMode = computed({
+  get: () => form.value.config.settings.parse_mode || '',
+  set: (mode: string) => {
+    const settings = { ...form.value.config.settings }
+    if (mode) settings.parse_mode = mode
+    else delete settings.parse_mode
+    form.value.config.settings = settings
+  },
+})
+// Seafile resource IDs are "<repo_id>:<path>"; one data source syncs one
+// library, so the picker refuses a selection that spans two libraries.
+const isSeafileConnector = (type: string) => type === 'seafile'
+const seafileLibraryOf = (id: string) => id.split(':')[0]
+// Seafile IDs encode the hierarchy, so a saved selection whose node has
+// vanished from the tree can still be recognised as living under `parent`.
+function seafileWithin(id: string, parent: string): boolean {
+  const [repo, path] = [seafileLibraryOf(id), id.slice(id.indexOf(':') + 1)]
+  const parentPath = parent.slice(parent.indexOf(':') + 1)
+  return repo === seafileLibraryOf(parent) &&
+    (parentPath === '/' || path === parentPath || path.startsWith(parentPath + '/'))
+}
 
 interface GitLabProjectInput { project_id: string; ref: string; pathsText: string }
 const gitlabProjects = ref<GitLabProjectInput[]>([])
@@ -728,6 +767,14 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'access_token', labelKey: 'datasource.gitlab.accessToken', placeholder: '', secret: true },
     ],
   },
+  {
+    type: 'seafile', available: true, docUrl: 'https://help.seafile.com/',
+    permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
+    fields: [
+      { key: 'base_url', labelKey: 'datasource.seafile.baseUrl', placeholder: 'https://seafile.example.com' },
+      { key: 'api_token', labelKey: 'datasource.seafile.apiToken', placeholder: '', secret: true, hintKey: 'datasource.seafile.apiTokenHint' },
+    ],
+  },
 ])
 
 
@@ -792,7 +839,7 @@ watch(visible, async (v) => {
         resource_ids: editConfig.resource_ids || [],
         settings: props.dataSource.type === 'rss'
           ? hydrateRssFeedUrlsFromConfig(editConfig)
-          : (editConfig.settings || {}),
+          : { ...(editConfig.settings || {}) },
       },
       sync_schedule: props.dataSource.sync_schedule,
       sync_mode: props.dataSource.sync_mode,
@@ -873,6 +920,13 @@ function selectType(def: ConnectorDef) {
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
   form.value.config.credentials = def.type === "confluence" ? { edition: "server" } : {}
+  if (isFeishuFamilyConnector(def.type)) {
+    form.value.config.settings.parse_mode = form.value.config.settings.parse_mode || 'blocks'
+  } else {
+    // Backtracking from a Feishu/Lark type must not leak parse_mode into
+    // other connectors' settings.
+    delete form.value.config.settings.parse_mode
+  }
   if (def.type === 'confluence') {
     form.value.config.settings = { ...form.value.config.settings, edition: 'server' }
   }
@@ -1069,10 +1123,22 @@ function uncheckResource(id: string, cover: Set<string>) {
 
 function toggleResource(id: string) {
   const cover = new Set(selectedResourceIds.value)
+  const seafile = isSeafileConnector(form.value.type)
   if ((checkStates.value.get(id) || 'unchecked') === 'unchecked') {
     checkResource(id, cover)
   } else {
     uncheckResource(id, cover)
+    // Unchecking also drops saved Seafile selections below this node that
+    // the tree no longer lists; otherwise they could never be cleared.
+    if (seafile) {
+      for (const sel of [...cover]) {
+        if (seafileWithin(sel, id)) cover.delete(sel)
+      }
+    }
+  }
+  if (seafile && new Set([...cover].map(seafileLibraryOf)).size > 1) {
+    MessagePlugin.warning(t('datasource.seafile.singleLibraryOnly'))
+    return
   }
   selectedResourceIds.value = [...cover]
 }
@@ -1127,6 +1193,11 @@ async function nextStep() {
       MessagePlugin.warning(t('datasource.gitlab.projectRequired'))
       return
     }
+  }
+  // Seafile has no "whole account" scope: the backend rejects an empty selection.
+  if (step.value === 2 && isSeafileConnector(form.value.type) && selectedResourceIds.value.length === 0) {
+    MessagePlugin.warning(t('datasource.seafile.selectionRequired'))
+    return
   }
   step.value++
   if (step.value === 2) {
@@ -1272,6 +1343,9 @@ const selectedResourceCount = computed(() => {
 const hasExpandableNodes = computed(() => resources.value.some(r => r.has_children))
 
 function resourceIconName(r: Resource): string {
+  // Seafile libraries expand like folders but are the top-level unit a data
+  // source binds to, so they keep the root icon.
+  if (r.type === 'library') return 'root-list'
   if (r.has_children) return 'folder'
   switch (r.type) {
     case 'wiki_space':
@@ -1302,6 +1376,7 @@ const resourceTypeLabelMap: Record<string, string> = {
   wiki_space: 'datasource.resourceType.wikiSpace',
   doc_category: 'datasource.resourceType.docCategory',
   book: 'datasource.resourceType.book',
+  library: 'datasource.resourceType.library',
 }
 
 function resourceTypeLabel(type: string): string {
@@ -1945,9 +2020,58 @@ const drawerConfirmText = computed(() => {
           </div>
         </div>
 
+        <div v-if="isFeishuFamilyConnector(form.type)" class="form-item form-item--flat">
+          <label class="form-label">{{ t('datasource.parseModeLabel') }}</label>
+          <div class="option-group" role="radiogroup" :aria-label="t('datasource.parseModeLabel')">
+            <button
+              v-if="isEdit"
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': feishuParseMode === '' }"
+              role="radio"
+              :aria-checked="feishuParseMode === ''"
+              @click="feishuParseMode = ''"
+            >
+              {{ t('datasource.parseMode.inherit') }}
+            </button>
+            <button
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': feishuParseMode === 'blocks' }"
+              role="radio"
+              :aria-checked="feishuParseMode === 'blocks'"
+              @click="feishuParseMode = 'blocks'"
+            >
+              {{ t('datasource.parseMode.blocks') }}
+            </button>
+            <button
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': feishuParseMode === 'export' }"
+              role="radio"
+              :aria-checked="feishuParseMode === 'export'"
+              @click="feishuParseMode = 'export'"
+            >
+              {{ t('datasource.parseMode.export') }}
+            </button>
+          </div>
+          <p class="form-desc">{{ t('datasource.parseModeHint') }}</p>
+        </div>
+
         <div class="form-item form-item--flat">
           <t-checkbox v-model="form.sync_deletions">{{ t('datasource.syncDeletions') }}</t-checkbox>
         </div>
+      </section>
+
+      <!-- DingTalk only: which extra node types the connector may ingest. -->
+      <section v-if="form.type === 'dingtalk'" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.dingtalkIngestLabel') }}</h4>
+        <div class="form-item form-item--flat">
+          <t-checkbox v-model="dingtalkIncludeUploadedFiles">
+            {{ t('datasource.dingtalkIncludeUploadedFiles') }}
+          </t-checkbox>
+        </div>
+        <p class="form-desc">{{ t('datasource.dingtalkIncludeUploadedFilesHint') }}</p>
       </section>
 
       <!-- Yuque only: how synced documents are laid out, and what may be admitted. -->

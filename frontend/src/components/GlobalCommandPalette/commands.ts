@@ -1,6 +1,7 @@
 import type { Router } from 'vue-router'
 import type { Composer } from 'vue-i18n'
 import { openNewUserGuide } from '@/config/contextualGuides'
+import { useAssistantStore } from '@/stores/assistant'
 
 /**
  * A single command that can be searched and invoked from the palette.
@@ -26,6 +27,10 @@ export interface CommandContext {
   close: () => void
 }
 
+function assistantName(t: Composer['t']): string {
+  return useAssistantStore().displayName || t('assistant.title')
+}
+
 /**
  * Build the flat command list. Commands are intentionally static — dynamic
  * entities (KBs / agents / sessions) live in their own result groups.
@@ -33,6 +38,16 @@ export interface CommandContext {
 export function buildCommands(ctx: CommandContext): CmdkCommand[] {
   const { router, t, close } = ctx
   return [
+    {
+      id: 'open-assistant',
+      label: t('commandPalette.quick.assistant', { name: assistantName(t) }),
+      icon: 'compass',
+      keywords: ['assistant', 'help', 'weknora', 'kora', '助手', '帮助', 'ассистент', useAssistantStore().displayName].filter(Boolean),
+      run: () => {
+        close()
+        useAssistantStore().open()
+      },
+    },
     {
       id: 'new-chat',
       label: t('commandPalette.quick.newChat'),

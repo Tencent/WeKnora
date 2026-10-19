@@ -21,10 +21,12 @@ import jaJP from './locales/ja-JP.ts'
 import koKR from './locales/ko-KR.ts'
 import ruRU from './locales/ru-RU.ts'
 import zhCN from './locales/zh-CN.ts'
+import zhTW from './locales/zh-TW.ts'
 
 export const LOCALE_BUNDLES = {
   'en-US': enUS,
   'zh-CN': zhCN,
+  'zh-TW': zhTW,
   'ko-KR': koKR,
   'ja-JP': jaJP,
   'ru-RU': ruRU,
@@ -66,8 +68,9 @@ const TM_KEY_PATTERNS = [
 ] as const
 
 const EXTRA_PREFIXES = [
+  // Operation labels use IDs supplied by the backend catalog at runtime.
+  'agentStream.operations.names.',
   'system.globalSettings.listConfirm.',
-  'system.globalSettings.admins.confirm.',
   'system.globalSettings.keyLabels.',
   'system.globalSettings.keyDescriptions.',
   'system.globalSettings.enumLabels.',
@@ -109,6 +112,12 @@ const EXTRA_PREFIXES = [
   // so it is registered as a whole prefix: a new backend attribute must keep
   // being translated without touching the audit.
   'imageAttr.',
+  // Image-pipeline panel text is keyed by the registry response too
+  // (imagePipeline.smartocr.label …), likewise runtime-built: a
+  // pipeline or field added in the backend must keep being translated without
+  // touching the audit. The panel's own wording is literal and lives in the
+  // locale files under knowledgeEditor.advanced.multimodal.imagePipeline*.
+  'imagePipeline.',
   // Gallery attribute labels are keyed by the namespaced attribute id from
   // the gallery contract, likewise runtime-built; static labels for the few
   // builtin attributes ship in the locale files as
@@ -527,7 +536,7 @@ export function findAllLocaleMessageCompileErrors(
 
 type LocaleTree = Record<string, unknown>
 
-const LOCALE_ORDER: LocaleName[] = ['en-US', 'zh-CN', 'ko-KR', 'ru-RU', 'ja-JP']
+const LOCALE_ORDER: LocaleName[] = ['en-US', 'zh-CN', 'zh-TW', 'ko-KR', 'ru-RU', 'ja-JP']
 const LOCALES_DIR = join(dirname(fileURLToPath(import.meta.url)), 'locales')
 
 function getLocaleValueAtPathParts(current: unknown, parts: string[]): unknown {

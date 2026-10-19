@@ -51,6 +51,23 @@ func (w *concurrencyEmbedder) BatchEmbedWithPool(
 	return w.inner.BatchEmbedWithPool(ctx, w, texts)
 }
 
+func (w *concurrencyEmbedder) AcceptsImages() bool {
+	_, ok := AsImageEmbedder(w.inner)
+	return ok
+}
+
+func (w *concurrencyEmbedder) ImageLimits() ImageLimits { return imageLimitsOf(w.inner) }
+
+func (w *concurrencyEmbedder) BatchEmbedImages(ctx context.Context, images []Image) ([][]float32, error) {
+	inner, err := imageSide(w.inner)
+	if err != nil {
+		return nil, err
+	}
+	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
+	defer release()
+	return inner.BatchEmbedImages(ctx, images)
+}
+
 func (w *concurrencyEmbedder) GetModelName() string { return w.inner.GetModelName() }
 func (w *concurrencyEmbedder) GetDimensions() int   { return w.inner.GetDimensions() }
 func (w *concurrencyEmbedder) GetModelID() string   { return w.inner.GetModelID() }

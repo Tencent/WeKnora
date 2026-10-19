@@ -368,13 +368,45 @@ const handleQuestionGenerationChange = () => {
   }
 }
 
-.subsection {
-  padding: 16px 20px;
-  margin: 12px 0 0 0;
-  background: var(--td-bg-color-container);
-  border-radius: var(--app-radius-md);
-  border-left: 3px solid var(--td-brand-color);
-  position: relative;
+.kb-advanced-settings:not(.kb-advanced-settings--embedded) {
+  .setting-row:has(> .setting-control > .t-switch) {
+    align-items: center;
+
+    .setting-info {
+      flex: 1;
+      max-width: none;
+    }
+
+    .setting-control {
+      flex: none;
+      max-width: none;
+    }
+  }
+
+  .setting-row:has(+ .subsection) {
+    border-bottom: none;
+    padding-bottom: 12px;
+  }
+
+  .subsection {
+    margin-bottom: 4px;
+    padding: 0 16px;
+    background: var(--td-bg-color-secondarycontainer);
+    border-radius: var(--app-radius-md);
+
+    .setting-row {
+      padding: 14px 0;
+    }
+
+    .setting-row-vertical {
+      gap: 8px;
+    }
+  }
+
+  .subsection + .setting-row {
+    margin-top: 12px;
+    border-top: 1px solid var(--td-component-stroke);
+  }
 }
 
 .required {

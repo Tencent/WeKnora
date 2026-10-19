@@ -62,6 +62,10 @@ const (
 	// page write (user / agent / revert). Absent means the wiki ingest
 	// pipeline. See types.WithWikiEditSource.
 	WikiEditSourceContextKey ContextKey = "WikiEditSource"
+	// WikiShrinkAllowedContextKey marks one wiki page write as allowed to
+	// remove table rows the stored page still has; see
+	// types.WithWikiShrinkAllowed.
+	WikiShrinkAllowedContextKey ContextKey = "WikiShrinkAllowed"
 	// LanguageContextKey is the context key for user language preference (e.g. "zh-CN", "en-US")
 	LanguageContextKey ContextKey = "Language"
 	// EmbedVisitorContextKey is the anonymous visitor id for embed OAuth isolation.
@@ -101,6 +105,10 @@ const (
 	// the agent emits a one-shot authorization notice and continues instead of
 	// blocking until the OAuth wait times out. See IsMCPOAuthNonInteractive.
 	MCPOAuthNonInteractiveContextKey ContextKey = "MCPOAuthNonInteractive"
+	// UnattendedRunContextKey marks a run whose prompts nobody can see, such as
+	// an agent trial. A tool approval it raises is refused at once instead of
+	// waiting out its timeout. See IsUnattendedRun.
+	UnattendedRunContextKey ContextKey = "UnattendedRun"
 	// ChatParserEngineContextKey carries the resolved parser engine
 	// from the agent's ChatParserEngineRules for chat attachment processing.
 	ChatParserEngineContextKey ContextKey = "ChatParserEngine"

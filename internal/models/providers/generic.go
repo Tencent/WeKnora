@@ -120,6 +120,11 @@ func newGenericProvider() *Definition {
 				SendEncodingFormat:          api.Ptr(true),
 				DimensionsField:             api.Ptr("dimensions"),
 				AcceptsTruncatePromptTokens: api.Ptr(true),
+				// Used only when the row declares image input. vLLM, the most
+				// common server behind this vendor, takes images only as a
+				// chat conversation in `messages`; an SGLang row switches to
+				// {"image_format": "object", "image_field": "image"}.
+				ImageFormat: api.Ptr(api.EmbeddingImageMessages),
 			},
 			Rerank: api.RerankCompat{
 				// Any OpenAI-compatible endpoint an operator points here is most

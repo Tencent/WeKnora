@@ -121,6 +121,17 @@ func (c *Client) convertMessages(messages []api.Message) []wireMessage {
 		default:
 			if msg.Content != "" || len(msg.ToolCalls) == 0 {
 				wm.Content = msg.Content
+			} else {
+				// Assistant tool-call turn with empty content: emit an
+				// explicit `"content": ""` instead of omitting the field.
+				// Strict local engines (vLLM / Xinference serving Qwen-family
+				// Jinja chat templates) treat a missing content field as
+				// undefined/null and crash when rendering the assistant turn
+				// for the next round. Issue #1487. The *string keeps
+				// `omitempty` from dropping the field: a non-nil interface
+				// holding a pointer serializes as "".
+				empty := ""
+				wm.Content = &empty
 			}
 		}
 
@@ -187,9 +198,16 @@ const metadataReasoningDetails = "reasoning_details"
 // the encoded JSON is alphabetical, which keeps golden tests stable.
 func (c *Client) buildBody(messages []api.Message, opts *api.Options, stream bool) (map[string]any, error) {
 	s := c.cfg.Settings
+	wireMessages := c.convertMessages(messages)
+	if opts != nil && opts.RuntimeNotice != "" {
+		wireMessages = append(
+			wireMessages,
+			c.convertMessages([]api.Message{{Role: "system", Content: opts.RuntimeNotice}})...,
+		)
+	}
 	body := map[string]any{
 		"model":    c.cfg.Endpoint.Model,
-		"messages": c.convertMessages(messages),
+		"messages": wireMessages,
 	}
 	if stream {
 		body["stream"] = true

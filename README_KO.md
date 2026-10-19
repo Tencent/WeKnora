@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://weknora.weixin.qq.com"><img alt="공식 웹사이트" src="https://img.shields.io/badge/website-weknora.weixin.qq.com-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="https://weknora.weixin.qq.com/docs/"><img alt="문서" src="https://img.shields.io/badge/docs-중국어-b8863b?style=flat-square&labelColor=101f38"></a>
-  <a href="./CHANGELOG.md"><img alt="릴리스" src="https://img.shields.io/badge/release-v0.8.2-b8863b?style=flat-square&labelColor=101f38"></a>
+  <a href="./CHANGELOG.md"><img alt="릴리스" src="https://img.shields.io/badge/release-v0.8.3-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="./LICENSE"><img alt="라이선스" src="https://img.shields.io/badge/license-MIT-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="https://github.com/Tencent/WeKnora/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/Tencent/WeKnora?style=flat-square&labelColor=101f38&color=b8863b"></a>
   <br/>
@@ -58,9 +58,9 @@ https://github.com/user-attachments/assets/5722b10d-d04d-49ed-a6cc-635a8c77d91f
 그 밖에:
 
 - **메모리와 지식 정리**: 크로스 세션 장기 메모리가 사용자가 확인한 프로필, 선호, 사실을 보관합니다. 폴더 업로드는 원래 디렉터리 구조를 유지하고, 검색 청크는 편집·비교·롤백할 수 있습니다.
-- **데이터 소스와 포맷**: Feishu 지식베이스 / Feishu 클라우드 드라이브 / Confluence / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / RSS 자동 동기화(지속 확장 중). PDF, Word, 이미지, Excel, XMind 등 10가지 이상의 포맷을 지원하며, Office 문서는 anydoc으로 프로세스 내 파싱합니다.
+- **데이터 소스와 포맷**: Feishu 지식베이스 / Feishu 클라우드 드라이브 / Confluence / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / Seafile / RSS 자동 동기화(지속 확장 중). PDF, Word, 이미지, Excel, XMind 등 10가지 이상의 포맷을 지원하며, Office 문서는 anydoc으로 프로세스 내 파싱합니다.
 - **채널과 연동**: WeChat Work, Feishu, Slack, Telegram 등 IM에서 바로 Q&A, 웹사이트 임베드 Widget으로 외부 사이트에 에이전트 게시, 내장 MCP Server로 Cursor·Claude 등 AI 도구와 연결, 범위 지정 API 키와 Principal 모델로 프로그램 연동.
-- **모델**: 27개 내장 벤더와 자동 생성 모델 카탈로그. OpenAI, DeepSeek, Qwen(Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, LiteLLM, Ollama 등을 지원합니다.
+- **모델**: 29개 내장 벤더와 자동 생성 모델 카탈로그. OpenAI, DeepSeek, Qwen(Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, LiteLLM, Ollama 등을 지원합니다.
 - **권한과 운영**: 멀티 워크스페이스 RBAC(4단계 역할, 리소스 소유권, 워크스페이스 감사 로그), 워크스페이스별 다중 스토리지 인스턴스, 런타임 작업 큐 대시보드와 Worker 풀 거버넌스, Langfuse를 통한 Agent 단계·토큰 사용량·파이프라인 추적.
 - **배포**: LLM, 벡터 데이터베이스, 스토리지 백엔드를 모두 교체할 수 있습니다. 로컬이나 프라이빗 클라우드에 배포해 데이터를 자체 환경에 둘 수 있습니다.
 
@@ -148,13 +148,13 @@ docker compose down     # 서비스 중지
 기존 배포가 있고 새 release를 다운로드한 경우:
 
 ```bash
-# .env에서 WEKNORA_VERSION을 대상 버전(예: 0.8.2)으로 설정하거나 latest 유지
+# .env에서 WEKNORA_VERSION을 대상 버전(예: 0.8.3)으로 설정하거나 latest 유지
 docker compose pull     # WEKNORA_VERSION에 맞는 이미지 가져오기
 docker compose up -d    # 새 이미지로 컨테이너 재생성
 ```
 
 > [!NOTE]
-> `docker compose up -d`만 실행하면 로컬 캐시 이미지가 재사용되어 Web UI 버전이 다운로드한 release와 일치하지 않을 수 있습니다. v0.8.0에서 업그레이드하기 전에 [업그레이드 안내](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#upgrade-notes)를 확인하세요.
+> `docker compose up -d`만 실행하면 로컬 캐시 이미지가 재사용되어 Web UI 버전이 다운로드한 release와 일치하지 않을 수 있습니다. 업그레이드하기 전에 [업그레이드 안내](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#upgrade-notes)를 확인하세요.
 
 ### 기타 배포 방식
 
@@ -175,6 +175,16 @@ docker compose up -d    # 새 이미지로 컨테이너 재생성
 > - 보안 패치와 개선 사항 적용을 위해 최신 버전으로 정기 업데이트
 
 ## 최신 업데이트
+
+### v0.8.3 <sub>· 2026-10-14 · [릴리스 노트](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
+
+- **[이미지 갤러리](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#images)**: 문서 이미지를 모아 보고 출처, 설명, OCR 및 이미지 속성으로 필터링.
+- **[멀티모달 Embedding](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#multimodal-embedding)**: 텍스트와 이미지를 같은 벡터 공간으로 인코딩하는 모델 지원. Tencent WeMM-Embedding, Qwen3-VL-Embedding 등을 사용할 수 있으며 이미지 벡터 검색과 호환 모델의 이미지 리랭킹을 선택적으로 활성화.
+- **[Wiki 그래프](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#wiki-graph)**: 그룹 배치와 주제 설명을 개선하고 그룹 집중 보기, 그룹 전환 및 전체 그래프 복귀를 지원.
+- **[원문 인용](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#conversation)**: 답변에서 원문의 인용 부분으로 바로 이동.
+- **[대화와 도구](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#tools)**: 샌드박스 없이 첨부 파일을 필요할 때 읽기, 읽지 않은 답변 표시, @ 검색, Docker 터미널, Lite 로컬 스킬과 MCP 호환성 개선.
+- **[관리와 연동](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#administration)**: 플랫폼 사용자 관리, 초대 등록 모드, 관리자 모델 카탈로그, WeMM, TEI/Pinecone/Cohere, Seafile과 번체 중국어.
+- **[안정성](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#other-changes)**: 검색, 파싱, 동기화, Wiki, OAuth와 CLI 수정. 등록 모드, 빈 도구 목록, DB 마이그레이션과 재색인은 [업그레이드 안내](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#upgrade-notes)를 확인하세요.
 
 ### v0.8.2 <sub>· 2026-09-24 · [릴리스 노트](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2)</sub>
 
@@ -323,12 +333,12 @@ docker compose up -d    # 새 이미지로 컨테이너 재생성
 
 | 구성 요소 | 선택지 |
 |-----------|--------|
-| [LLM](https://weknora.weixin.qq.com/docs/03-features/06-models) | 27개 내장 벤더. OpenAI / Azure OpenAI / Anthropic / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / SiliconFlow / OpenRouter / LiteLLM / Ollama 등 |
+| [LLM](https://weknora.weixin.qq.com/docs/03-features/06-models) | 29개 내장 벤더. OpenAI / Azure OpenAI / Anthropic / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / SiliconFlow / OpenRouter / LiteLLM / Ollama 등 |
 | Embedding | Ollama / BGE / GTE / Zhipu / OpenAI 호환 API |
 | 벡터 DB | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / Tencent VectorDB |
 | [오브젝트 스토리지](https://weknora.weixin.qq.com/docs/03-features/19-storage-backends) | 로컬 / Tencent Cloud COS / MinIO / AWS S3 / Volcengine TOS / Alibaba Cloud OSS / Kingsoft Cloud KS3 / Huawei Cloud OBS |
 | [문서 포맷](https://weknora.weixin.qq.com/docs/03-features/03-document-parsing) | PDF / Word / PPT / Excel / CSV / TXT / Markdown / HTML / EPUB / MHTML / JSON / XMind / 이미지 |
-| [데이터 소스](https://weknora.weixin.qq.com/docs/03-features/10-datasource) | Feishu 지식베이스 / Feishu 클라우드 드라이브 / Lark / Confluence / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / RSS |
+| [데이터 소스](https://weknora.weixin.qq.com/docs/03-features/10-datasource) | Feishu 지식베이스 / Feishu 클라우드 드라이브 / Lark / Confluence / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / Seafile / RSS |
 | [IM 통합](https://weknora.weixin.qq.com/docs/03-features/12-im-integration) | WeChat Work / Feishu / Lark / QQBot / Slack / Telegram / DingTalk / Mattermost / WeChat / Yunzhijia |
 | [웹 검색](https://weknora.weixin.qq.com/docs/03-features/11-web-search) | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG / Keenable / Zhipu AI / Exa / Metaso / Bocha / Serply |
 | 배포 | Docker Compose / Kubernetes (Helm) / Lite 단일 바이너리 / 데스크톱 앱. 오프라인·프라이빗 클라우드 배포 지원. UI는 중국어 / 영어 / 일본어 / 한국어 / 러시아어 지원 |
@@ -374,7 +384,7 @@ weknora chat "설계 문서를 요약해 줘"
 | [설정](https://weknora.weixin.qq.com/docs/01-getting-started/04-configuration) | 환경 변수와 모델 설정 |
 | [문제 해결 FAQ](https://weknora.weixin.qq.com/docs/01-getting-started/05-troubleshooting) | 자주 발생하는 문제와 해결 방법 |
 | [API 문서](https://weknora.weixin.qq.com/docs/04-api/01-api-overview) | REST API 개요 |
-| [릴리스 노트](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2) | 버전별 변경 사항 |
+| [릴리스 노트](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3) | 버전별 변경 사항 |
 
 ## 개발자 가이드
 

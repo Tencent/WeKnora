@@ -133,3 +133,45 @@ test('closing or switching service prevents a late AI result from overwriting th
     } finally { f.close() }
   }
 })
+
+test('OAuth payload always carries the client ID and sends its secret only on create', () => {
+  const f = fixture()
+  try {
+    f.vm.formData.auth_config.auth_type = 'oauth'
+    f.vm.formData.auth_config.client_id = '  pre-registered  '
+    f.vm.formData.auth_config.client_secret = 'shh'
+    const created = f.vm.buildPayload(true)
+    assert.equal(created.auth_config.client_id, 'pre-registered')
+    assert.equal(created.auth_config.client_secret, 'shh')
+    const edited = f.vm.buildPayload(false)
+    assert.equal(edited.auth_config.client_id, 'pre-registered')
+    assert.equal('client_secret' in edited.auth_config, false)
+
+    f.vm.formData.auth_config.client_id = ''
+    assert.equal(f.vm.buildPayload(false).auth_config.client_id, '', 'clearing returns to dynamic registration')
+  } finally { f.close() }
+})
+
+test('OAuth client secret is edited through the credentials card', () => {
+  const f = fixture()
+  try {
+    f.vm.formData.auth_config.auth_type = 'oauth'
+    assert.deepEqual(Array.from(f.vm.credentialFields, (field: { key: string }) => field.key), ['client_secret'])
+    f.vm.formData.auth_config.auth_type = 'api_key'
+    assert.deepEqual(Array.from(f.vm.credentialFields, (field: { key: string }) => field.key), ['api_key'])
+    f.vm.formData.auth_config.auth_type = ''
+    assert.equal(f.vm.credentialFields.length, 0)
+  } finally { f.close() }
+})
+
+test('API key payload never carries OAuth client fields', () => {
+  const f = fixture()
+  try {
+    f.vm.formData.auth_config.auth_type = 'api_key'
+    f.vm.formData.auth_config.client_id = 'left-over'
+    f.vm.formData.auth_config.client_secret = 'left-over'
+    const body = f.vm.buildPayload(true)
+    assert.equal('client_id' in body.auth_config, false)
+    assert.equal('client_secret' in body.auth_config, false)
+  } finally { f.close() }
+})

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -128,12 +127,16 @@ func (p *SearxngProvider) Search(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("searxng returned status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("searxng returned status %d: %s", resp.StatusCode, readErrorPreview(resp.Body))
+	}
+
+	bodyBytes, err := readCapped(resp.Body, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
 	var data searxngResponse
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+	if err := json.Unmarshal(bodyBytes, &data); err != nil {
 		p.lastUnresponsive = nil
 		return nil, fmt.Errorf("failed to decode SearXNG response (ensure JSON format is enabled in settings.yml): %w", err)
 	}

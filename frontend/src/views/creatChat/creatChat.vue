@@ -7,7 +7,7 @@
             <!-- 推荐问题 -->
             <div ref="sqContainerRef" class="suggested-questions-container">
                 <!-- 骨架屏占位 -->
-                <div v-if="sqLoading && suggestedQuestions.length === 0" class="suggested-questions-inner">
+                <div v-if="sqInitialLoad && suggestedQuestions.length === 0" class="suggested-questions-inner">
                     <div class="suggested-questions-title"><t-skeleton animation="gradient"
                             :row-col="[{ width: '120px', height: '14px' }]" /></div>
                     <div class="suggested-questions-grid">
@@ -25,7 +25,7 @@
                                 <span class="suggested-questions-title">{{ $t('chat.suggestedQuestions') }}</span>
                                 <button type="button" class="suggested-questions-refresh" :disabled="sqLoading"
                                     :title="$t('chat.refreshSuggestedQuestions')"
-                                    :aria-label="$t('chat.refreshSuggestedQuestions')" @click="fetchSuggestedQuestions">
+                                    :aria-label="$t('chat.refreshSuggestedQuestions')" @click="fetchSuggestedQuestions(true)">
                                     <t-icon :name="sqLoading ? 'loading' : 'refresh'"
                                         :class="{ 'sq-refresh-spin': sqLoading }" />
                                 </button>
@@ -118,11 +118,19 @@ const showChatContextualGuide = computed(() => {
 // ===== 推荐问题 =====
 const suggestedQuestions = ref<SuggestedQuestion[]>([]);
 const sqLoading = ref(true);
+// The skeleton reserves space only until the first answer arrives. Later
+// refetches keep the current content in place, so the composer below does not
+// jump each time the agent or @mention selection changes.
+const sqInitialLoad = ref(true);
 const sqCardsRevealed = ref(false);
 const sqRenderKey = ref(0);
 const sqContainerRef = ref<HTMLElement | null>(null);
 let suggestedQuestionsFetchId = 0;
+let lastSuggestedQuestionsKey = '';
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+const sameSuggestedQuestions = (a: SuggestedQuestion[], b: SuggestedQuestion[]) =>
+    a.length === b.length && a.every((item, i) => item.question === b[i].question && item.source === b[i].source);
 
 // --- 高度平滑过渡钩子 ---
 const onBeforeLeave = () => {
@@ -166,26 +174,39 @@ const onQuestionsEntered = () => {
     nextTick(() => { sqCardsRevealed.value = true; });
 };
 
-const fetchSuggestedQuestions = async () => {
+const fetchSuggestedQuestions = async (force = false) => {
+    const agentId = settingsStore.selectedAgentId;
+    const params = settingsStore.getSuggestedQuestionsParams();
+    const requestKey = JSON.stringify([agentId, params]);
+    if (!force && requestKey === lastSuggestedQuestionsKey) return;
+    lastSuggestedQuestionsKey = requestKey;
+
     const fetchId = ++suggestedQuestionsFetchId;
     sqLoading.value = true;
     try {
-        const agentId = settingsStore.selectedAgentId;
-        if (!agentId) return;
-        const res = await getSuggestedQuestions(agentId, settingsStore.getSuggestedQuestionsParams());
+        if (!agentId) {
+            suggestedQuestions.value = [];
+            return;
+        }
+        const res = await getSuggestedQuestions(agentId, params);
         if (fetchId === suggestedQuestionsFetchId) {
-            sqCardsRevealed.value = false;
-            sqRenderKey.value++;
-            suggestedQuestions.value = res?.data?.questions || [];
+            const next = res?.data?.questions || [];
+            if (!sameSuggestedQuestions(suggestedQuestions.value, next)) {
+                sqCardsRevealed.value = false;
+                sqRenderKey.value++;
+                suggestedQuestions.value = next;
+            }
         }
     } catch (err) {
         console.warn('[SuggestedQuestions] Failed to fetch:', err);
         if (fetchId === suggestedQuestionsFetchId) {
+            lastSuggestedQuestionsKey = '';
             suggestedQuestions.value = [];
         }
     } finally {
         if (fetchId === suggestedQuestionsFetchId) {
             sqLoading.value = false;
+            sqInitialLoad.value = false;
         }
     }
 };
@@ -196,15 +217,13 @@ const debouncedFetch = () => {
     debounceTimer = setTimeout(() => { fetchSuggestedQuestions(); }, 300);
 };
 
-// 监听 Agent / 知识库 / 文件 / 标签 / MCP / Skill @mention
+// 监听 Agent / 知识库 / 文件 / 标签 @mention；MCP 与 Skill 不影响推荐范围
 watch(
     () => ({
         agentId: settingsStore.selectedAgentId,
         kbs: settingsStore.settings.selectedKnowledgeBases,
         files: settingsStore.settings.selectedFiles,
         tags: settingsStore.settings.selectedTags,
-        mcps: settingsStore.settings.selectedMCPServices,
-        skills: settingsStore.settings.selectedSkills,
     }),
     debouncedFetch,
     { deep: true },

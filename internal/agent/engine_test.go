@@ -1155,3 +1155,26 @@ func TestStreamLLMIncompleteFinishIsAStreamError(t *testing.T) {
 	require.Error(t, err, "a stream cut before its finish reason is not a completed turn")
 	require.True(t, isTransientError(err))
 }
+
+func TestWebFetchUnknownReferenceIsAnItemError(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	engine.toolRegistry = agenttools.NewToolRegistry()
+	engine.toolRegistry.RegisterTool(agenttools.NewWebFetchTool())
+	calls := []types.LLMToolCall{{
+		ID: "fetch",
+		Function: types.FunctionCall{
+			Name:      agenttools.ToolWebFetch,
+			Arguments: `{"items":[{"url":"w999"}]}`,
+		},
+	}}
+	engine.modelContext.DecodeToolCalls(calls)
+	require.Equal(t, []string{"w999"}, calls[0].UnresolvedHandles)
+	result := engine.runToolCall(t.Context(), calls[0], 0, 0, 1, "session", "message")
+	require.NotNil(t, result.Result)
+	require.Contains(t, result.Result.Output, "unknown_page_reference")
+	require.NotContains(t, result.Result.Error, "unresolved model handles")
+	// Other namespaces still fail closed before tool execution.
+	calls[0].UnresolvedHandles = []string{"res://9999"}
+	result = engine.runToolCall(t.Context(), calls[0], 0, 0, 1, "session", "message")
+	require.Contains(t, result.Result.Error, "unresolved model handles")
+}

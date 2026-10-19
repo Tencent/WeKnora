@@ -467,17 +467,9 @@ onBeforeUnmount(() => {
 
 <style scoped lang="less">
 @import '@/components/css/artifact-filter-tabs.less';
+@import (reference) '@/components/css/resource-card.less';
 
-.artifact-library {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  margin: 0 16px 0 0;
-  padding: 20px 28px 0;
-}
+.artifact-library { .resource-list-content(); }
 
 .header {
   display: flex;
@@ -523,13 +515,16 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--td-component-stroke);
 }
 
+// 与右侧 32px 的搜索框同高：3px 内边距 × 2 + 26px 按钮
 .category-tabs {
   .artifact-filter-tabs();
+  button { display: inline-flex; align-items: center; height: 26px; padding: 0 12px; }
 }
 
 .search-input {
   width: 260px;
   max-width: 100%;
+  :deep(.t-input) { border-radius: var(--app-radius-sm); }
 }
 
 .library-main {

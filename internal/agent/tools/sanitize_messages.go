@@ -20,9 +20,12 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 
 	result := make([]chat.Message, 0, len(messages))
 	for i, msg := range messages {
+		if msg.Role == "assistant" {
+			msg.Content = withoutProtocolArtifactLines(msg.Content)
+		}
 		// Skip empty non-system messages (some providers reject these)
-		if msg.Content == "" && msg.Role != "system" &&
-			msg.Role != "tool" && len(msg.ToolCalls) == 0 && len(msg.Images) == 0 && len(msg.MultiContent) == 0 {
+		if msg.Content == "" && msg.Role != "system" && msg.Role != "tool" && len(msg.ToolCalls) == 0 &&
+			len(msg.Images) == 0 && len(msg.MultiContent) == 0 {
 			continue
 		}
 
@@ -41,6 +44,11 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 				// write the call it wanted to make as text.
 				merged := prev
 				merged.Content += "\n\n" + msg.Content
+				// Copy instead of appending in place: prev may share its
+				// backing arrays with the caller's slice. Images and content
+				// parts go along for the same reason as tool calls: dropping
+				// them leaves the model reading captions of images it never got.
+				merged.ToolCalls = concatCopy(prev.ToolCalls, msg.ToolCalls)
 				if len(prev.Images)+len(msg.Images)+len(prev.MultiContent)+len(msg.MultiContent) > 0 {
 					// Preserve each message's image/text order in one representation.
 					// Providers prefer MultiContent over Content; retaining only the
@@ -50,14 +58,6 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 					merged.MultiContent = appendSanitizedContent(parts, msg)
 					merged.Content = ""
 					merged.Images = nil
-				}
-				if len(msg.ToolCalls) > 0 {
-					// Copy instead of appending in place: prev may share its
-					// backing array with the caller's slice.
-					calls := make([]chat.ToolCall, 0, len(prev.ToolCalls)+len(msg.ToolCalls))
-					calls = append(calls, prev.ToolCalls...)
-					calls = append(calls, msg.ToolCalls...)
-					merged.ToolCalls = calls
 				}
 				result[len(result)-1] = merged
 				continue
@@ -80,6 +80,14 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 	}
 
 	return result
+}
+
+func concatCopy[T any](a, b []T) []T {
+	if len(b) == 0 {
+		return a
+	}
+	out := make([]T, 0, len(a)+len(b))
+	return append(append(out, a...), b...)
 }
 
 // appendSanitizedContent follows the providers' preference for MultiContent,

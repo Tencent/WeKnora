@@ -756,6 +756,48 @@ func (s *systemSettingService) GetStringList(ctx context.Context, key string, en
 // override are returned as virtual rows using the effective fallback
 // value (ENV/config/default), so merely migrating the schema never
 // changes runtime behaviour.
+// SummarizeSystemSettings excludes unknown rows and secrets. Registry metadata
+// is authoritative, so a stray database row cannot introduce arbitrary config
+// fields into the assistant's catalog. Values remain JSON to preserve type.
+func SummarizeSystemSettings(rows []*types.SystemSetting, key string) []types.SystemSettingSummary {
+	out := []types.SystemSettingSummary{}
+	for _, row := range rows {
+		if row == nil || (key != "" && row.Key != key) {
+			continue
+		}
+		spec, known := registry[row.Key]
+		if !known {
+			continue
+		}
+		item := types.SystemSettingSummary{
+			Key: row.Key, ValueType: spec.Type, Category: spec.Category,
+			Description: spec.Description, RequiresRestart: spec.RequiresRestart, Enum: spec.Enum, ValueHidden: true,
+		}
+		if !row.IsSecret && json.Valid(row.Value) && len(row.Value) <= 4096 {
+			// Check the value against the declared type before returning it.
+			var value any
+			decoder := json.NewDecoder(bytes.NewReader(row.Value))
+			decoder.UseNumber()
+			if decoder.Decode(&value) == nil {
+				if number, ok := value.(json.Number); ok {
+					parsed, err := number.Int64()
+					if err != nil {
+						out = append(out, item)
+						continue
+					}
+					value = parsed
+				}
+				if encoded, err := encodeForType(spec.Type, value); err == nil {
+					item.ValueJSON = string(encoded)
+					item.ValueHidden = false
+				}
+			}
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
 func (s *systemSettingService) List(ctx context.Context) ([]*types.SystemSetting, error) {
 	rows, err := s.repo.List(ctx)
 	if err != nil {

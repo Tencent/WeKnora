@@ -169,7 +169,9 @@ func resolveWithVendor(ref Ref, vendor *Provider) (*Resolved, error) {
 	); err != nil {
 		return nil, err
 	}
-	applyLegacyThinkingControl(&completions, ref.Extra[models.ExtraThinkingControl])
+	legacyThinkingControlApplied := applyLegacyThinkingControl(
+		&completions, ref.Extra[models.ExtraThinkingControl],
+	)
 	out.OpenAICompletions = completions
 
 	responses := api.DefaultOpenAIResponses()
@@ -213,9 +215,9 @@ func resolveWithVendor(ref Ref, vendor *Provider) (*Resolved, error) {
 		return nil, err
 	}
 	out.GoogleGenerativeAI = google
-	// An explicit legacy thinking_control is the operator saying "this row
-	// does think, send the switch this way", so it outranks the catalog.
-	if strings.TrimSpace(ref.Extra[models.ExtraThinkingControl]) == "" {
+	// A non-default legacy thinking_control is an explicit per-row override.
+	// An ignored provider default lets the catalog's reasoning metadata apply.
+	if !legacyThinkingControlApplied {
 		out.silenceThinkingForNonReasoningModel()
 	}
 
@@ -297,6 +299,12 @@ func (r *Resolved) Capabilities() Capabilities {
 		Input:           r.Spec.Input,
 		ContextWindow:   r.Spec.ContextWindow,
 		MaxOutputTokens: r.Spec.MaxOutputTokens,
+	}
+	// Embedding, rerank and ASR references resolve no chat protocol, and an
+	// empty level map reads as "every level supported"; they do not think.
+	if r.API == "" {
+		caps.ThinkingLevels = []api.ReasoningEffort{}
+		return caps
 	}
 	switch r.API {
 	case api.APIOpenAICompletions:
@@ -479,6 +487,22 @@ func resolveEmbeddings(
 		protocol = settings.API
 	}
 	settings.API = protocol
+	if !settings.ImageFormat.Known() {
+		return nil, fmt.Errorf(
+			"catalog: unknown embedding image_format %q on %s/%s (expected %q or %q)",
+			settings.ImageFormat, vendor.ID, spec.ID, api.EmbeddingImageObject, api.EmbeddingImageMessages)
+	}
+	// A row that declares image input on the OpenAI embedding shape still
+	// needs a wire format: that shape has none of its own, and only Jina
+	// names one. vLLM, the usual server behind these gateways, takes one
+	// chat conversation in messages. Jina and SGLang stay explicit
+	// (image_format=object plus image_field). An object format without a
+	// field is left alone, so a half-filled row is refused instead of resent
+	// as messages. Text stays on input unless the row sets text_as_messages.
+	if protocol == api.EmbeddingOpenAI && spec.AcceptsImages() &&
+		settings.ImageFormat == "" && settings.ImageField == "" {
+		settings.ImageFormat = api.EmbeddingImageMessages
+	}
 
 	out := &Resolved{
 		Vendor:       configcopy.Clone(vendor.Definition),

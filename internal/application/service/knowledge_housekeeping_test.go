@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/config"
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
@@ -686,4 +687,62 @@ func (f *countingTaskInspector) QueuedKnowledgeIDs(context.Context) (map[string]
 		}
 	}
 	return out, nil
+}
+
+// A row that reached a terminal state while its attempt was still open used
+// to keep a "running" root span forever: Sweep A only selects non-terminal
+// rows, so nothing ever revisited it and the document timeline showed a
+// permanent spinner. Sweep D closes those spans.
+func TestHousekeeping_ClosesOrphanedSpansOnTerminalRow(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	old := time.Now().Add(-72 * time.Hour)
+
+	insertKnowledge(t, db, "kid-failed-open-span", types.ParseStatusFailed, old)
+	require.NoError(t, db.Exec(
+		`UPDATE knowledges SET error_message = '存储空间不足' WHERE id = ?`,
+		"kid-failed-open-span",
+	).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledge_processing_spans
+		   (knowledge_id, attempt, span_id, name, kind, status, started_at, updated_at)
+		 VALUES (?, 1, 'root', 'knowledge_processing', 'root', 'running', ?, ?)`,
+		"kid-failed-open-span", old, old,
+	).Error)
+
+	svc.runSweep(context.Background())
+
+	var status, code, msg string
+	require.NoError(t, db.Raw(
+		`SELECT status, error_code, error_message FROM knowledge_processing_spans
+		  WHERE knowledge_id = ? AND span_id = 'root'`,
+		"kid-failed-open-span").Row().Scan(&status, &code, &msg))
+	assert.Equal(t, types.SpanStatusCancelled, status)
+	assert.Equal(t, werrors.ErrCodeTaskStalled, code)
+	// The row's own error is carried over so the timeline names the real cause.
+	assert.Equal(t, "存储空间不足", msg)
+}
+
+// Sweep D must not touch a row that is still legitimately in flight: that is
+// Sweep A's call to make, and only after the heartbeat check.
+func TestHousekeeping_KeepsOpenSpansOnInFlightRow(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	now := time.Now()
+
+	insertKnowledge(t, db, "kid-processing", types.ParseStatusProcessing, now)
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledge_processing_spans
+		   (knowledge_id, attempt, span_id, name, kind, status, started_at, updated_at)
+		 VALUES (?, 1, 'root', 'knowledge_processing', 'root', 'running', ?, ?)`,
+		"kid-processing", now, now,
+	).Error)
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT status FROM knowledge_processing_spans WHERE knowledge_id = ?`,
+		"kid-processing").Row().Scan(&status))
+	assert.Equal(t, types.SpanStatusRunning, status)
 }

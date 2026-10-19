@@ -25,10 +25,16 @@ type ResourceRepository interface {
 	GetByID(ctx context.Context, id string) (*types.StoredResource, error)
 	GetByHandle(ctx context.Context, handle string) (*types.StoredResource, error)
 	GetByTenantLocation(ctx context.Context, tenantID uint64, locationHash string) (*types.StoredResource, error)
+	// GetActiveByContentHash finds a live resource holding the exact same
+	// bytes. Unlike location, content is not unique: several rows may carry
+	// the same hash (duplicates registered before this lookup existed), so
+	// the oldest live row wins and the result is stable across calls.
+	GetActiveByContentHash(ctx context.Context, tenantID uint64, contentHash string) (*types.StoredResource, error)
 	MarkDeleted(ctx context.Context, id string) error
 	CreateBinding(ctx context.Context, binding *types.ResourceBinding) error
 	DeleteBinding(ctx context.Context, resourceID, ownerType, ownerID string) error
 	CountBindings(ctx context.Context, resourceID string) (int64, error)
+	ListHandlesByOwner(ctx context.Context, ownerType string, ownerIDs, relations []string) ([]string, error)
 	IsReferencedByKnowledgeBase(
 		ctx context.Context,
 		tenantID uint64,
@@ -58,6 +64,14 @@ type ResourceRegistration struct {
 // locations and manages their access capabilities.
 type ResourceCatalog interface {
 	Register(ctx context.Context, tenantID uint64, physicalPath string, meta ResourceRegistration) (string, error)
+	// ReuseByContentHash returns the reference of a live resource whose bytes
+	// hash to contentHash, letting a caller holding the same payload skip
+	// storing it again. ok is false when the tenant holds no such resource.
+	//
+	// Register only deduplicates by physical location, so bytes that arrive on
+	// a new path — one image extracted from several pages — would otherwise
+	// mint a second handle for a payload the tenant already has.
+	ReuseByContentHash(ctx context.Context, tenantID uint64, contentHash string) (ref string, ok bool, err error)
 	Resolve(ctx context.Context, reference string) (*types.StoredResource, error)
 	ResolvePath(ctx context.Context, value string) (string, *types.StoredResource, error)
 	Bind(ctx context.Context, reference, ownerType, ownerID, relation string) error
@@ -71,6 +85,17 @@ type ResourceCatalog interface {
 	// catalog handle, or the count could not be read), which callers should
 	// treat as "delete as before" rather than as "keep forever".
 	Release(ctx context.Context, reference, ownerType, ownerID string) (remaining int64, err error)
+	// ListReferencesByOwner returns derived resource:// handles still claimed
+	// by any of the given owners (extracted images and markdown attachments).
+	// Source files are omitted: reparse/cleanup must keep the original
+	// document, which knowledge delete removes through FilePath.
+	//
+	// Knowledge-delete paths union this with ImageInfo URLs so markdown-only
+	// images are released even when multimodal never wrote ImageInfo. Cleanup
+	// before a re-index must not: it leaves the knowledge in place, and the
+	// handles it released could not be re-bound once DeleteFile marked them
+	// deleted.
+	ListReferencesByOwner(ctx context.Context, ownerType string, ownerIDs ...string) ([]string, error)
 	MarkDeleted(ctx context.Context, reference string) error
 	CreateAccessGrant(ctx context.Context, reference string, ttl time.Duration) (string, error)
 	ResolveAccessGrant(ctx context.Context, token string) (*types.StoredResource, error)

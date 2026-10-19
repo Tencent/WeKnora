@@ -1,6 +1,7 @@
 package docparser
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"fmt"
@@ -178,9 +179,14 @@ func ensureOriginalImageRef(req *types.ReadRequest, mdContent string, imageRefs 
 }
 
 func csvToMarkdown(data []byte) (string, error) {
-	reader := csv.NewReader(strings.NewReader(string(data)))
+	// Excel's "CSV UTF-8" export starts the file with a byte order mark.
+	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
+	reader := csv.NewReader(bytes.NewReader(data))
 	reader.LazyQuotes = true
 	reader.TrimLeadingSpace = true
+	// Rows may differ in length. The default, the first row's length, made
+	// one short or long row fail the whole file.
+	reader.FieldsPerRecord = -1
 
 	records, err := reader.ReadAll()
 	if err != nil {
@@ -190,34 +196,45 @@ func csvToMarkdown(data []byte) (string, error) {
 		return "", nil
 	}
 
+	// The table is as wide as the widest row, so no field is dropped, and
+	// shorter rows are padded with empty cells.
+	width := 0
+	for _, record := range records {
+		width = max(width, len(record))
+	}
+
 	var sb strings.Builder
+	writeRow := func(record []string) {
+		cells := make([]string, width)
+		for i, cell := range record {
+			cells[i] = csvCellReplacer.Replace(cell)
+		}
+		sb.WriteString("| ")
+		sb.WriteString(strings.Join(cells, " | "))
+		sb.WriteString(" |\n")
+	}
 
 	// Header row
-	header := records[0]
-	sb.WriteString("| ")
-	sb.WriteString(strings.Join(header, " | "))
-	sb.WriteString(" |\n")
+	writeRow(records[0])
 
 	// Separator
 	sb.WriteString("|")
-	for range header {
+	for range width {
 		sb.WriteString(" --- |")
 	}
 	sb.WriteString("\n")
 
 	// Data rows
 	for _, row := range records[1:] {
-		sb.WriteString("| ")
-		// Pad row if shorter than header
-		cells := make([]string, len(header))
-		for i := range cells {
-			if i < len(row) {
-				cells[i] = row[i]
-			}
-		}
-		sb.WriteString(strings.Join(cells, " | "))
-		sb.WriteString(" |\n")
+		writeRow(row)
 	}
 
 	return sb.String(), nil
 }
+
+// csvCellReplacer escapes what would end a GFM table cell or row: a pipe, and
+// the line breaks of a quoted multi-line field. They become <br />, as the
+// html-to-markdown table plugin writes them.
+// Escape existing backslashes too, so a literal backslash before a pipe does
+// not consume the pipe's escape and turn it back into a column separator.
+var csvCellReplacer = strings.NewReplacer(`\`, `\\`, "|", `\|`, "\r\n", "<br />", "\n", "<br />", "\r", "<br />")

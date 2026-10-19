@@ -90,6 +90,10 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 	kbImagesRead := kbImages.With(apiKeyRetrieve(apiKeyFullAccess()))
 	{
 		kbImagesRead.GET("/images", g.Viewer(), g.KBAccessRead("id"), handler.ListImages)
+		// Same listing with the filter as a JSON body: knowledge_ids escapes
+		// the URL-length cap, so the source picker's select-all can name
+		// every document of a large KB.
+		kbImagesRead.POST("/images", g.Viewer(), g.KBAccessRead("id"), handler.ListImagesPost)
 		// Self-describing gallery contract: live attribute sources, the
 		// resolved attribute list (definitions + merged usage) and the
 		// caller's search activation state. Per-KB because KB-defined
@@ -172,6 +176,7 @@ func RegisterFAQRoutes(r *gin.RouterGroup, handler *handler.FAQHandler, g *rbacG
 		faqRead.GET("/entries/export", g.Viewer(), g.KBAccessRead("id"), handler.ExportEntries)
 		faqRead.GET("/entries/:entry_id", g.Viewer(), g.KBAccessRead("id"), handler.GetEntry)
 		faq.POST("/entries", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpsertEntries)
+		faq.PATCH("/entries", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.PatchEntriesBatch)
 		faq.POST("/entry", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateEntry)
 		faq.PUT("/entries/:entry_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateEntry)
 		faq.POST("/entries/:entry_id/similar-questions", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.AddSimilarQuestions)
@@ -229,6 +234,7 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		// 以调用者「自身」租户(c.Keys，未被 KBAccess 改写)校验 kb.TenantID，
 		// 把删除锁死为「所有者租户 + Admin」，共享 editor 无法删除源 KB。
 		kbManagement.PUT("/:id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateKnowledgeBase)
+		kbManagement.PATCH("/:id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.PatchKnowledgeBase)
 		// 立即重新生成知识库 AI 描述 — 与更新知识库同档鉴权；同步执行一次小模型调用。
 		kbManagement.POST("/:id/profile/generate", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"),
 			handler.GenerateKnowledgeBaseProfile)
@@ -276,6 +282,18 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 func RegisterImageAttrRoutes(r *gin.RouterGroup, handler *handler.KnowledgeBaseHandler, g *rbacGuards) {
 	g.apiKeyRoute(r, http.MethodGet, "/image-attrs/schema",
 		apiKeyRetrieve(apiKeyFullAccess()), g.Viewer(), handler.GetImageAttrsSchema)
+	// Same shape and the same audience as the schema above: a read-only list of
+	// what the settings panel can offer, with no KB id, so the Viewer role is
+	// enough. Mounted here rather than under /knowledge-bases because neither
+	// the list nor a pipeline id is knowledge-base-specific.
+	g.apiKeyRoute(r, http.MethodGet, "/image-pipelines",
+		apiKeyRetrieve(apiKeyFullAccess()), g.Viewer(), handler.GetImagePipelines)
+	// The settings panel asks this while the user edits, so that a combination
+	// the pipeline cannot run is pointed out before the save rather than
+	// rejected by it. Read-only, global, and answered from the pipeline's own
+	// rules, so only the Viewer role is required.
+	g.apiKeyRoute(r, http.MethodPost, "/image-pipelines/validate",
+		apiKeyRetrieve(apiKeyFullAccess()), g.Viewer(), handler.ValidateImagePipelines)
 }
 
 // RegisterKnowledgeBaseActivityRoutes exposes the read-only per-KB activity

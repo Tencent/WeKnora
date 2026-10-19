@@ -16,6 +16,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/imageprep"
+	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -60,7 +63,7 @@ type CreateModelRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      CreateModelRequest  true  "模型信息"
-// @Success      201      {object}  map[string]interface{}  "创建的模型"
+// @Success      201      {object}  handler.DataResponse{data=dto.ModelResponse}  "创建的模型"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -132,7 +135,8 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 // name is client-supplied. The model name and credentials come from the
 // stored source row.
 type CopyModelRequest struct {
-	DisplayName string `json:"display_name" binding:"required"`
+	// Display name of the new copy; the upstream model identifier stays unchanged.
+	DisplayName string `json:"display_name" binding:"required" extensions:"x-agent"`
 }
 
 // CopyModel godoc
@@ -141,13 +145,15 @@ type CopyModelRequest struct {
 // @Tags         模型管理
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string           true  "源模型ID"
+// @Param        id       path      string           true  "源模型ID" extensions(x-agent=model_id)
 // @Param        request  body      CopyModelRequest true  "副本展示名"
-// @Success      201      {object}  map[string]interface{}  "复制的模型"
+// @Success      201      {object}  handler.DataResponse{data=dto.ModelResponse}  "复制的模型"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      404      {object}  errors.AppError         "模型不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent {"id":"model.copy","risk":"write","role":"admin","target":"model.get","label":"name"}
+// @x-agent-hint "Copies a workspace-owned model configuration under a required new display_name. Choose model_id from model.list; builtin models cannot be copied. The upstream model name, connection parameters and saved credentials are copied on the backend; never request or resend credentials. The copy is not the default and does not change agent or knowledge base bindings. Active local models are reused without downloading again; copying an unfinished or failed local model starts a background download, so read the returned model_id with model.get until its status is active or download_failed."
 // @Router       /models/{id}/copy [post]
 func (h *ModelHandler) CopyModel(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -204,11 +210,12 @@ func (h *ModelHandler) CopyModel(c *gin.Context) {
 // @Tags         模型管理
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "模型ID"
-// @Success      200  {object}  map[string]interface{}  "模型详情"
+// @Param        id   path      string  true  "模型ID"  extensions(x-agent=model_id)
+// @Success      200  {object}  handler.DataResponse{data=dto.ModelResponse}  "模型详情"
 // @Failure      404  {object}  errors.AppError         "模型不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"model.get","risk":"read"}
 // @Router       /models/{id} [get]
 func (h *ModelHandler) GetModel(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -249,10 +256,12 @@ func (h *ModelHandler) GetModel(c *gin.Context) {
 // @Tags         模型管理
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "模型列表"
+// @Success      200  {object}  handler.DataResponse{data=[]dto.ModelResponse}  "模型列表"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"model.list","risk":"read","max_items":200}
+// @x-agent-hint "Lists the workspace's models by name, type and provider. An agent's chat model must be of type KnowledgeQA. base_url is shown only to users who may manage integrations and is empty for builtin models; keys are never shown. The provider is an id for model.get_provider."
 // @Router       /models [get]
 func (h *ModelHandler) ListModels(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -293,6 +302,9 @@ type ModelDebugOptions struct {
 	Thinking     *bool    `json:"thinking,omitempty"`
 	// ReasoningEffort is the graded level; when set it overrides Thinking.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Similarity makes an embedding test score the documents (and an
+	// optional image) against the input as a search query.
+	Similarity bool `json:"similarity,omitempty"`
 }
 
 func parseModelDebugOptions(raw string) (ModelDebugOptions, error) {
@@ -433,6 +445,18 @@ func consumeModelDebugChatStream(stream <-chan types.StreamResponse) (*modelDebu
 	return result, nil
 }
 
+// Model metadata and the legacy vision switch both allow image chat tests.
+func modelDebugChatAcceptsImages(model *types.Model) bool {
+	if model.Parameters.SupportsVision {
+		return true
+	}
+	if model.Source == types.ModelSourceLocal {
+		return false
+	}
+	resolved, err := chat.Resolve(chat.ConfigFromModel(model, "", ""))
+	return err == nil && resolved.Spec.AcceptsImages()
+}
+
 // DebugModel executes a saved model through the same service constructors used
 // by production calls and returns the complete normalized response. Credentials
 // stay server-side; the request preview contains only non-secret fields.
@@ -516,13 +540,26 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		fileSize = int64(len(fileBytes))
 	}
 
+	var image api.EmbedImage
+	if fileName != "" && model.Type != types.ModelTypeASR {
+		image, err = imageprep.Prepare(fileBytes, imageprep.Limits{})
+		if err != nil {
+			_ = c.Error(errors.NewBadRequestError(err.Error()))
+			return
+		}
+	}
+
 	requestPreview := modelDebugRequestPreview(model, input, documents, opts, fileName, fileSize)
 	observations := gin.H{}
 
 	switch model.Type {
 	case types.ModelTypeKnowledgeQA:
-		if strings.TrimSpace(input) == "" {
-			c.Error(errors.NewBadRequestError("query cannot be empty"))
+		if len(fileBytes) > 0 && !modelDebugChatAcceptsImages(model) {
+			_ = c.Error(errors.NewBadRequestError("chat model does not accept images"))
+			return
+		}
+		if strings.TrimSpace(input) == "" && len(fileBytes) == 0 {
+			_ = c.Error(errors.NewBadRequestError("query cannot be empty"))
 			return
 		}
 		instance, callErr := h.service.GetChatModel(ctx, id)
@@ -534,7 +571,17 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		if strings.TrimSpace(opts.SystemPrompt) != "" {
 			messages = append(messages, chat.Message{Role: "system", Content: opts.SystemPrompt})
 		}
-		messages = append(messages, chat.Message{Role: "user", Content: input})
+		message := chat.Message{Role: "user", Content: input}
+		if len(fileBytes) > 0 {
+			message.Content = ""
+			if strings.TrimSpace(input) != "" {
+				message.MultiContent = append(message.MultiContent, chat.MessageContentPart{Type: "text", Text: input})
+			}
+			message.MultiContent = append(message.MultiContent, chat.MessageContentPart{
+				Type: "image_url", ImageURL: &chat.ImageURL{URL: image.DataURI()},
+			})
+		}
+		messages = append(messages, message)
 		chatOpts := &chat.ChatOptions{}
 		if opts.Temperature != nil {
 			chatOpts.Temperature = *opts.Temperature
@@ -575,8 +622,12 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		}
 		writeModelDebugResult(c, started, requestPreview, resp, callErr, observations)
 	case types.ModelTypeEmbedding:
-		if strings.TrimSpace(input) == "" {
-			c.Error(errors.NewBadRequestError("input cannot be empty"))
+		if opts.Similarity {
+			h.debugEmbeddingSimilarity(c, id, input, documents, fileBytes, started, requestPreview, observations)
+			return
+		}
+		if strings.TrimSpace(input) == "" && len(fileBytes) == 0 {
+			_ = c.Error(errors.NewBadRequestError("input cannot be empty"))
 			return
 		}
 		instance, callErr := h.service.GetEmbeddingModel(ctx, id)
@@ -584,17 +635,60 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
 			return
 		}
+		if len(fileBytes) > 0 {
+			if strings.TrimSpace(input) != "" {
+				_ = c.Error(errors.NewBadRequestError("test either text or an image for embedding"))
+				return
+			}
+			imageModel, ok := embedding.AsImageEmbedder(instance)
+			if !ok {
+				_ = c.Error(errors.NewBadRequestError(embedding.ErrImagesUnsupported.Error()))
+				return
+			}
+			prepared, prepErr := imageprep.Prepare(fileBytes, imageModel.ImageLimits())
+			if prepErr != nil {
+				_ = c.Error(errors.NewBadRequestError(prepErr.Error()))
+				return
+			}
+			vectors, callErr := imageModel.BatchEmbedImages(ctx, []embedding.Image{prepared})
+			observations["result_count"] = len(vectors)
+			if len(vectors) > 0 {
+				observations["dimension"] = len(vectors[0])
+			}
+			writeModelDebugResult(c, started, requestPreview, vectors, callErr, observations)
+			return
+		}
 		vector, callErr := instance.Embed(ctx, input)
 		observations["dimension"] = len(vector)
 		writeModelDebugResult(c, started, requestPreview, vector, callErr, observations)
 	case types.ModelTypeRerank:
-		if strings.TrimSpace(input) == "" || len(documents) == 0 {
-			c.Error(errors.NewBadRequestError("query and documents cannot be empty"))
+		if strings.TrimSpace(input) == "" || (len(documents) == 0 && len(fileBytes) == 0) {
+			_ = c.Error(errors.NewBadRequestError("query and documents cannot be empty"))
 			return
 		}
 		instance, callErr := h.service.GetRerankModel(ctx, id)
 		if callErr != nil {
 			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
+			return
+		}
+		if len(fileBytes) > 0 {
+			if len(documents) > 0 {
+				_ = c.Error(errors.NewBadRequestError("test either text documents or an image for reranking"))
+				return
+			}
+			imageModel, ok := rerank.AsImageReranker(instance)
+			if !ok {
+				_ = c.Error(errors.NewBadRequestError(rerank.ErrImagesUnsupported.Error()))
+				return
+			}
+			prepared, prepErr := imageprep.Prepare(fileBytes, imageModel.ImageLimits())
+			if prepErr != nil {
+				_ = c.Error(errors.NewBadRequestError(prepErr.Error()))
+				return
+			}
+			results, callErr := imageModel.RerankImages(ctx, input, []rerank.Image{prepared})
+			observations["result_count"] = len(results)
+			writeModelDebugResult(c, started, requestPreview, results, callErr, observations)
 			return
 		}
 		results, callErr := instance.Rerank(ctx, input, documents)
@@ -653,7 +747,7 @@ type UpdateModelRequest struct {
 // @Produce      json
 // @Param        id       path      string              true  "模型ID"
 // @Param        request  body      UpdateModelRequest  true  "更新信息"
-// @Success      200      {object}  map[string]interface{}  "更新后的模型"
+// @Success      200      {object}  handler.DataResponse{data=dto.ModelResponse}  "更新后的模型"
 // @Failure      404      {object}  errors.AppError         "模型不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -779,18 +873,93 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	})
 }
 
+// PatchModelRequest is the body of PATCH /models/{id}.
+type PatchModelRequest struct {
+	// 新的显示名称，空字符串表示改回使用模型名
+	DisplayName *string `json:"display_name" extensions:"x-agent"`
+	// 新的描述
+	Description *string `json:"description" extensions:"x-agent"`
+}
+
+// PatchModel godoc
+// @Summary      修改模型显示信息
+// @Description  只修改显示名称和描述；接入配置与凭据保持不变。
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string             true  "模型ID"  extensions(x-agent=model_id)
+// @Param        request  body      PatchModelRequest  true  "要修改的字段"
+// @Success      200      {object}  handler.DataResponse{data=dto.ModelResponse}  "更新后的模型"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Failure      403      {object}  errors.AppError         "内置模型只能由系统管理员修改"
+// @Failure      404      {object}  errors.AppError         "模型不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"model.update","risk":"write","role":"admin","target":"model.get","label":"name"}
+// @x-agent-hint "Renames a model for display or changes its description; its endpoint, key and settings stay as they are. To change those, give the user open_page with model_id."
+// @Router       /models/{id} [patch]
+func (h *ModelHandler) PatchModel(c *gin.Context) {
+	ctx := c.Request.Context()
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		_ = c.Error(errors.NewBadRequestError("Model ID cannot be empty"))
+		return
+	}
+	var req PatchModelRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	if req.DisplayName == nil && req.Description == nil {
+		_ = c.Error(errors.NewBadRequestError("display_name or description is required"))
+		return
+	}
+
+	model, err := h.service.GetModelByID(ctx, id)
+	if err != nil {
+		if err == service.ErrModelNotFound {
+			_ = c.Error(errors.NewNotFoundError("Model not found"))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if req.DisplayName != nil {
+		model.DisplayName = secutils.SanitizeForLog(strings.TrimSpace(*req.DisplayName))
+	}
+	if req.Description != nil {
+		model.Description = *req.Description
+	}
+	if err := h.service.UpdateModel(ctx, model); err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    dto.NewModelResponse(ctx, model),
+	})
+}
+
 // DeleteModel godoc
 // @Summary      删除模型
 // @Description  删除指定的模型
 // @Tags         模型管理
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "模型ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Param        id   path      string  true  "模型ID"  extensions(x-agent=model_id)
+// @Success      200  {object}  handler.MessageResponse  "删除成功"
 // @Failure      400  {object}  errors.AppError         "模型仍被知识库、智能体或长期记忆引用"
 // @Failure      404  {object}  errors.AppError         "模型不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"model.delete","risk":"destructive","role":"admin","target":"model.get","label":"name"}
+// @x-agent-hint "Deletes a model with its saved key. Refused while a knowledge base, agent or long-term memory still uses it; the error names them, so tell the user what to switch first. Cannot be undone."
 // @Router       /models/{id} [delete]
 func (h *ModelHandler) DeleteModel(c *gin.Context) {
 	ctx := c.Request.Context()

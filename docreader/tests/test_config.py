@@ -38,6 +38,23 @@ class DocReaderConfigTest(unittest.TestCase):
         self.assertIn("DOCREADER_PDF_RENDER_DPI", dumped)
         self.assertIn("DOCREADER_PDF_JPEG_QUALITY", dumped)
 
+    def test_html_main_content_is_off_by_default(self):
+        with patch.dict(os.environ, {}, clear=True):
+            cfg = config.load_config()
+
+        self.assertFalse(cfg.html_main_content)
+
+    def test_loads_html_main_content_env(self):
+        with patch.dict(os.environ, {"DOCREADER_HTML_MAIN_CONTENT": "true"}):
+            cfg = config.load_config()
+
+        self.assertTrue(cfg.html_main_content)
+
+    def test_dump_config_includes_html_main_content(self):
+        dumped = config.dump_config()
+
+        self.assertIn("DOCREADER_HTML_MAIN_CONTENT", dumped)
+
 
 if __name__ == "__main__":
     unittest.main()

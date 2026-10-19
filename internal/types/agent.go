@@ -32,10 +32,8 @@ func AgentMaxContextTokens(configured, modelContextWindow int) int {
 }
 
 // DefaultSmartReasoningMaxCompletionTokens is the per-round budget when the
-// agent cannot emit write_sandbox_file / edit_sandbox_file. 4096 matches
-// typical OpenAI-compatible provider defaults and is enough for ordinary
-// tool-call JSON.
-const DefaultSmartReasoningMaxCompletionTokens = 4096
+// agent has no sandbox. Leave room for complete reports as well as tool calls.
+const DefaultSmartReasoningMaxCompletionTokens = 24576
 
 // DefaultAgentMaxCompletionTokens is the per-round budget when the agent
 // can write or edit sandbox files. Those tool calls carry the file body in
@@ -53,7 +51,7 @@ func NeedsSandboxWriteCompletionBudget(sandboxConfigID string) bool {
 }
 
 // DefaultMaxCompletionTokens is the unset-config default for one agent:
-// quick-answer 2048, smart-reasoning 4096, smart-reasoning with a sandbox 24576.
+// quick-answer 2048, smart-reasoning 24576 with or without a sandbox.
 func DefaultMaxCompletionTokens(agentMode, sandboxConfigID string) int {
 	if agentMode == AgentModeSmartReasoning {
 		if NeedsSandboxWriteCompletionBudget(sandboxConfigID) {
@@ -129,6 +127,12 @@ type AgentConfig struct {
 	// in-conversation OAuth authorization before skipping. <=0 falls back to
 	// the gate's configured timeout. The wait is always bounded (no leak).
 	MCPAuthWaitTimeout int `json:"mcp_auth_wait_timeout,omitempty"`
+	// AttachmentParseWaitTimeoutSec bounds how long reading an attachment waits for
+	// a file that is still being parsed. <=0 uses the server default.
+	AttachmentParseWaitTimeoutSec int `json:"-"`
+	// AttachmentSandboxCopies maps a sandbox path staged for this turn to the
+	// attachment:// path of the same stored attachment.
+	AttachmentSandboxCopies map[string]string `json:"-"`
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `json:"thinking"`
 	// ReasoningEffort is the graded thinking level; empty falls back to Thinking.
@@ -162,10 +166,27 @@ type AgentConfig struct {
 	// picked, already checked to be inside KnowledgeBases (runtime only;
 	// rendered into runtime_context as a retrieval hint).
 	QuestionOrigin *QuestionOrigin `json:"-"`
+	// PageContext is the page the user has open, already narrowed to this
+	// turn's search targets (runtime only; rendered into runtime_context).
+	PageContext *PageContext `json:"-"`
 	// SharedAgentReadOnly prevents a shared agent from mutating resources in
 	// its source workspace. It is set from the verified share relation, never
 	// inferred from a client-provided tenant ID.
 	SharedAgentReadOnly bool `json:"-"`
+	// OperationsAgentID, when set, grants this run the WeKnora operation
+	// catalog (find_operations / run_operation) and attributes its changes to
+	// that agent. It is set server-side for built-in management agents only,
+	// never read from an agent record, so a tenant cannot opt a custom agent
+	// into it. Runtime only.
+	OperationsAgentID string `json:"-"`
+	// AssistantAccess is how far an OperationsAgentID run may act without
+	// asking, already capped by the workspace. Runtime only.
+	AssistantAccess AssistantAccessLevel `json:"-"`
+	// AssistantName is what the workspace calls the assistant; empty keeps
+	// the system prompt's. Runtime only.
+	AssistantName string `json:"-"`
+	// ProductDocs grants the bundled WeKnora documentation tools (runtime only).
+	ProductDocs bool `json:"-"`
 	// WritableKBIDs are the SearchTargets KBs this caller may modify (its own
 	// workspace's, or shared to it as editor+). Search targets only need read
 	// access, so tools that write (wiki pages and issues) are limited to this
@@ -178,6 +199,9 @@ type AgentConfig struct {
 	// DefaultMaxCompletionTokens for this agent's mode and sandbox.
 	// Explicit values are sent as-is.
 	MaxCompletionTokens int `json:"max_completion_tokens,omitempty"`
+	// ModelMaxOutputTokens is the resolved model's per-response output limit,
+	// or zero when unknown. It caps the round budget and is resolved per run.
+	ModelMaxOutputTokens int `json:"-"`
 
 	// Maximum character length for tool output (default: 16000).
 	// Outputs exceeding this limit are truncated with head + tail preservation.
@@ -375,7 +399,24 @@ type ToolResult struct {
 	Data        map[string]interface{} `json:"data,omitempty"`   // Structured data for programmatic use
 	Error       string                 `json:"error,omitempty"`  // Error message if execution failed
 	Images      []string               `json:"images,omitempty"` // Base64 data URIs from tool (e.g. MCP image content)
+	// ImageDescriptions is aligned with Images and holds a vision model's
+	// description of each for a chat model that cannot view them ("" when an
+	// image could not be described). Live only.
+	ImageDescriptions []string `json:"-"`
+	// ImageDetail ("brief" or "full") and ImageFocus carry how closely the
+	// model asked to read Images when it cannot view them. Live only.
+	ImageDetail string `json:"-"`
+	ImageFocus  string `json:"-"`
+	// Suspend, when set, means the call did not run: it is waiting on a user
+	// prompt and the run must end so it can be resumed later. Live only.
+	Suspend *PromptSuspension `json:"-"`
 }
+
+// Image description detail levels requested by a file read.
+const (
+	ImageDetailBrief = "brief"
+	ImageDetailFull  = "full"
+)
 
 // ToolCall represents a single tool invocation within an agent step
 type ToolCall struct {
@@ -433,6 +474,9 @@ func IsPipelineToolCallID(id string) bool {
 type AgentStep struct {
 	Iteration int    `json:"iteration"` // Iteration number (0-indexed)
 	Thought   string `json:"thought"`   // LLM's reasoning/thinking (Think phase)
+	// Progress is user-facing commentary from a non-terminal round. Thought stays intact for model replay.
+	Progress        string `json:"progress,omitempty"`
+	ProgressEventID string `json:"progress_event_id,omitempty"`
 	// UserMessagesBefore records consumed steer rows in delivery order, before
 	// this model response. Unlike timestamps, this remains unambiguous on replay.
 	UserMessagesBefore []string `json:"user_messages_before,omitempty"`
@@ -483,6 +527,11 @@ type AgentState struct {
 	FinalAnswer          string          `json:"final_answer"`   // The final answer to the query
 	KnowledgeRefs        []*SearchResult `json:"knowledge_refs"` // Collected knowledge references
 	TurnUsage            TokenUsage      `json:"turn_usage"`     // LLM usage accumulated across this turn
+	// Suspended is set when the run ended waiting on a user prompt.
+	// SuspendedStep is the interrupted round: its thought and the calls
+	// that finished before the blocked one, kept for display.
+	Suspended     *PromptSuspension `json:"-"`
+	SuspendedStep *AgentStep        `json:"-"`
 }
 
 // FunctionDefinition represents a function definition for LLM function calling

@@ -195,27 +195,27 @@ func (c WorkerPoolConcurrency) UpstreamTotal() int {
 // pool) so the UI can group and explain the lanes without the frontend
 // hard-coding the topology.
 type QueueStat struct {
-	Name string `json:"name"`
+	Name string `json:"name" extensions:"x-agent"`
 	// Pool is the independent worker pool that drains this queue.
-	Pool string `json:"pool"`
+	Pool string `json:"pool" extensions:"x-agent"`
 	// Weight is the queue's scheduling weight inside its pool.
-	Weight int `json:"weight"`
+	Weight int `json:"weight" extensions:"x-agent"`
 	// Size is the total number of tasks in the queue (pending + active +
 	// scheduled + retry + aggregating + archived).
-	Size      int `json:"size"`
-	Pending   int `json:"pending"`
-	Active    int `json:"active"`
-	Scheduled int `json:"scheduled"`
-	Retry     int `json:"retry"`
-	Archived  int `json:"archived"`
-	Completed int `json:"completed"`
+	Size      int `json:"size" extensions:"x-agent"`
+	Pending   int `json:"pending" extensions:"x-agent"`
+	Active    int `json:"active" extensions:"x-agent"`
+	Scheduled int `json:"scheduled" extensions:"x-agent"`
+	Retry     int `json:"retry" extensions:"x-agent"`
+	Archived  int `json:"archived" extensions:"x-agent"`
+	Completed int `json:"completed" extensions:"x-agent"`
 	// Processed / Failed are today's counters (reset daily).
-	Processed int `json:"processed"`
-	Failed    int `json:"failed"`
+	Processed int `json:"processed" extensions:"x-agent"`
+	Failed    int `json:"failed" extensions:"x-agent"`
 	// Paused reports whether the queue is paused (tasks not consumed).
-	Paused bool `json:"paused"`
+	Paused bool `json:"paused" extensions:"x-agent"`
 	// LatencyMs is the age of the oldest pending task, in milliseconds.
-	LatencyMs int64 `json:"latency_ms"`
+	LatencyMs int64 `json:"latency_ms" extensions:"x-agent"`
 	// MemoryUsageBytes is the approximate Redis memory the queue occupies.
 	MemoryUsageBytes int64 `json:"memory_usage_bytes"`
 }
@@ -478,15 +478,15 @@ type KnowledgeMoveProgress struct {
 	TaskID     string            `json:"task_id"`
 	SourceKBID string            `json:"source_kb_id"`
 	TargetKBID string            `json:"target_kb_id"`
-	Status     KBCloneTaskStatus `json:"status"`
-	Progress   int               `json:"progress"`   // 0-100
-	Total      int               `json:"total"`      // 总知识数
-	Processed  int               `json:"processed"`  // 已处理数
-	Failed     int               `json:"failed"`     // 失败数
-	Message    string            `json:"message"`    // 状态消息
-	Error      string            `json:"error"`      // 错误信息
-	CreatedAt  int64             `json:"created_at"` // 任务创建时间
-	UpdatedAt  int64             `json:"updated_at"` // 最后更新时间
+	Status     KBCloneTaskStatus `json:"status" extensions:"x-agent"`
+	Progress   int               `json:"progress" extensions:"x-agent"`  // 0-100
+	Total      int               `json:"total" extensions:"x-agent"`     // 总知识数
+	Processed  int               `json:"processed" extensions:"x-agent"` // 已处理数
+	Failed     int               `json:"failed" extensions:"x-agent"`    // 失败数
+	Message    string            `json:"message" extensions:"x-agent"`   // 状态消息
+	Error      string            `json:"error" extensions:"x-agent"`     // 错误信息
+	CreatedAt  int64             `json:"created_at"`                     // 任务创建时间
+	UpdatedAt  int64             `json:"updated_at"`                     // 最后更新时间
 }
 
 // ManualProcessPayload represents the manual knowledge processing task payload.
@@ -510,14 +510,24 @@ type ImageMultimodalPayload struct {
 	ChunkID         string `json:"chunk_id"`         // parent text chunk
 	ImageURL        string `json:"image_url"`        // provider:// URL (e.g. local://..., minio://...)
 	ImageLocalPath  string `json:"image_local_path"` // deprecated: kept for backward compat with in-flight tasks
-	// EnableOCR and EnableCaption are whole-task switches applied on top of the
-	// image-action policy: a step runs only when both this switch and the
-	// policy allow it. Normal parsing leaves both true and lets the observed
-	// attributes decide.
-	EnableOCR       bool   `json:"enable_ocr"`
-	EnableCaption   bool   `json:"enable_caption"`
-	Language        string `json:"language,omitempty"`          // Request locale for {{language}} in prompt templates
-	ImageSourceType string `json:"image_source_type,omitempty"` // Source type of the image (e.g., "scanned_pdf")
+	// ImagePipelineParams carries the tunables of the pipeline this task runs,
+	// resolved from the knowledge base at enqueue time. They are deliberately
+	// not payload fields of their own: two pipelines may each define a field
+	// called "enable_ocr" with a different meaning, so a name only has to be
+	// unambiguous relative to the pipeline that reads it. A key the running
+	// pipeline does not declare is ignored, which is what lets a stored
+	// knowledge base keep working after a pipeline stops reading one.
+	// ImagePipelineID is the pipeline this task runs, resolved from the
+	// knowledge base at enqueue time by types.ResolveImagePipelineID. It
+	// travels in the payload rather than being re-read at handle time for the
+	// same reason ImageAttrsEnabled does: a task already in flight was
+	// enqueued for one pipeline and must not be re-routed by a later edit.
+	ImagePipelineID     ImagePipelineID `json:"image_pipeline,omitempty"`
+	ImagePipelineParams map[string]any  `json:"image_pipeline_params,omitempty"`
+	// Language is the request locale for {{language}} in prompt templates.
+	Language string `json:"language,omitempty"`
+	// ImageSourceType drives the OCR prompt, e.g. "scanned_pdf".
+	ImageSourceType string `json:"image_source_type,omitempty"`
 	// Attempt links this image task back to the parent ProcessDocument
 	// attempt so the worker can record its image[i] subspan under the
 	// same attempt's multimodal stage span.
@@ -527,7 +537,7 @@ type ImageMultimodalPayload struct {
 	// ("multimodal.image[3]") so the timeline preserves order.
 	ImageIndex int `json:"image_index,omitempty"`
 	// ImageAttrsEnabled selects which image pipeline the task runs — see
-	// PipelineModeFor and the PipelineMode constants. True is the
+	// types.ImagePipelineIDFor and the ImagePipelineID constants. True is the
 	// attribute-observed pipeline: the describe round also observes image
 	// attributes, and the attribute policy decides whether OCR runs for it.
 	// False is the upstream behaviour: a plain caption, then OCR, no attribute
@@ -536,6 +546,9 @@ type ImageMultimodalPayload struct {
 	// in the payload rather than being re-read from the knowledge base at handle
 	// time.
 	ImageAttrsEnabled bool `json:"image_attrs_enabled,omitempty"`
+	// ImageVectorEnabled is resolved at enqueue time. nil preserves the KB
+	// fallback for tasks queued before per-document indexing overrides existed.
+	ImageVectorEnabled *bool `json:"image_vector_enabled,omitempty"`
 	// ImageActions is the attribute→work table, resolved from the KB config at
 	// enqueue time. A task without it — one already in flight when attribute
 	// observation shipped — falls back to the conservative policy: run OCR.
@@ -589,15 +602,15 @@ const (
 
 // KBCloneProgress represents the progress of a knowledge base clone task
 type KBCloneProgress struct {
-	TaskID    string            `json:"task_id"`
-	SourceID  string            `json:"source_id"`
-	TargetID  string            `json:"target_id"`
-	Status    KBCloneTaskStatus `json:"status"`
-	Progress  int               `json:"progress"`   // 0-100
-	Total     int               `json:"total"`      // 总知识数
-	Processed int               `json:"processed"`  // 已处理数
-	Message   string            `json:"message"`    // 状态消息
-	Error     string            `json:"error"`      // 错误信息
-	CreatedAt int64             `json:"created_at"` // 任务创建时间
-	UpdatedAt int64             `json:"updated_at"` // 最后更新时间
+	TaskID    string            `json:"task_id" extensions:"x-agent"`
+	SourceID  string            `json:"source_id" extensions:"x-agent=source_knowledge_base_id"`
+	TargetID  string            `json:"target_id" extensions:"x-agent=knowledge_base_id"`
+	Status    KBCloneTaskStatus `json:"status" extensions:"x-agent"`
+	Progress  int               `json:"progress" extensions:"x-agent"`  // 0-100
+	Total     int               `json:"total" extensions:"x-agent"`     // 总知识数
+	Processed int               `json:"processed" extensions:"x-agent"` // 已处理数
+	Message   string            `json:"message" extensions:"x-agent"`   // 状态消息
+	Error     string            `json:"error" extensions:"x-agent"`     // 错误信息
+	CreatedAt int64             `json:"created_at"`                     // 任务创建时间
+	UpdatedAt int64             `json:"updated_at"`                     // 最后更新时间
 }

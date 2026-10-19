@@ -545,7 +545,13 @@ func (t *ReadDocumentTool) buildData(
 	knowledge *types.Knowledge, total int64, rows []readChunkRow,
 ) map[string]interface{} {
 	formatted := make([]map[string]interface{}, 0, len(rows))
+	chunkIDs := make([]string, 0, len(rows))
+	sourceChunkID := ""
 	for i, r := range rows {
+		chunkIDs = append(chunkIDs, r.chunk.ID)
+		if sourceChunkID == "" && len(r.chunk.SourceLocators) > 0 {
+			sourceChunkID = r.chunk.ID
+		}
 		row := chunkDataMap(i+1, r.chunk)
 		if row["knowledge_id"] == "" {
 			row["knowledge_id"] = knowledge.ID
@@ -559,9 +565,13 @@ func (t *ReadDocumentTool) buildData(
 		formatted = append(formatted, row)
 	}
 	return map[string]interface{}{
-		"display_type":    "knowledge_chunks_list",
-		"knowledge_id":    knowledge.ID,
-		"knowledge_title": strings.TrimSpace(knowledge.Title),
+		"display_type":      "knowledge_chunks_list",
+		"knowledge_id":      knowledge.ID,
+		"knowledge_base_id": knowledge.KnowledgeBaseID,
+		"knowledge_title":   strings.TrimSpace(knowledge.Title),
+		// Keep citation identities when chunks are omitted from SSE/history.
+		"chunk_ids":       chunkIDs,
+		"source_chunk_id": sourceChunkID,
 		"total_chunks":    total,
 		"fetched_chunks":  len(formatted),
 		"chunks":          formatted,

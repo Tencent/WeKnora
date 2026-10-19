@@ -93,6 +93,9 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	// of emitting its one-shot notice, so the failure is a stalled reply.
 	// A detached context has no live client either, which is what this says.
 	MCPOAuthNonInteractiveContextKey: true,
+	// Marks a run nobody watches (an agent trial). Dropping it makes a tool
+	// approval wait out its full timeout for an answer that cannot come.
+	UnattendedRunContextKey: true,
 
 	// ---- Deliberately does not survive a detach ----
 	//
@@ -110,6 +113,11 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	// ingest pipeline, which is what detached work should look like; an
 	// inherited "user" would attribute a background rewrite to a person.
 	WikiEditSourceContextKey: false,
+	// One write's licence to remove table rows the stored page still has. A
+	// grant, and a detach must not widen it: the marker is put on the context
+	// immediately around a single write by a caller that knows the removal is
+	// deliberate, so it means nothing on any other context.
+	WikiShrinkAllowedContextKey: false,
 	// The parser engine resolved from one agent's ChatParserEngineRules for
 	// one attachment's file type. Read by the attachment processor on the same
 	// context that set it, and meaningless for anything else.

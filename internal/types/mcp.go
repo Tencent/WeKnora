@@ -21,6 +21,10 @@ const (
 	MCPTransportStdio          MCPTransportType = "stdio"           // Stdio (Standard Input/Output)
 )
 
+// MCPUpdateDropSecrets is an update field-map flag that clears the service's
+// API key, token and custom headers along with the update.
+const MCPUpdateDropSecrets = "drop_secrets"
+
 // MCPService represents an MCP (Model Context Protocol) service configuration
 type MCPService struct {
 	// UsageInstructions is maintained locally and is not overwritten by directory refresh.
@@ -30,7 +34,7 @@ type MCPService struct {
 	TenantID       uint64             `json:"tenant_id"              gorm:"uniqueIndex:idx_tenant_name"`
 	Name           string             `json:"name"                   gorm:"type:varchar(255);not null;uniqueIndex:idx_tenant_name"`
 	Description    string             `json:"description"            gorm:"type:text"`
-	Enabled        bool               `json:"enabled"                gorm:"default:true;index"`
+	Enabled        bool               `json:"enabled"                gorm:"index"`
 	TransportType  MCPTransportType   `json:"transport_type"         gorm:"type:varchar(50);not null"`
 	URL            *string            `json:"url,omitempty"          gorm:"type:varchar(512)"` // Optional: required for SSE/HTTP Streamable
 	Headers        MCPHeaders         `json:"headers"                gorm:"type:json"`
@@ -104,6 +108,15 @@ type MCPAuthConfig struct {
 	// metadata URL. When empty, the server is discovered automatically from
 	// the MCP URL (RFC 9728 / RFC 8414).
 	AuthServerMetadataURL string `json:"auth_server_metadata_url,omitempty"`
+	// ClientID optionally names an OAuth client registered with the
+	// authorization server in advance. When set it is used instead of dynamic
+	// client registration, for servers that offer no registration endpoint or
+	// allow grants only to clients an administrator registered. Non-secret.
+	ClientID string `json:"client_id,omitempty"`
+	// ClientSecret is the secret of ClientID for a confidential client.
+	// Secret: encrypted at rest like APIKey and Token, never returned, and
+	// changed only through the credentials subresource after creation.
+	ClientSecret string `json:"client_secret,omitempty"`
 }
 
 // IsOAuth reports whether this service uses the OAuth strategy.
@@ -129,11 +142,11 @@ type MCPEnvVars map[string]string
 
 // MCPTool represents a tool exposed by an MCP service
 type MCPTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
+	Name        string          `json:"name" extensions:"x-agent"`
+	Description string          `json:"description" extensions:"x-agent,x-agent-max-runes=500"`
 	InputSchema json.RawMessage `json:"inputSchema"` // JSON Schema for tool parameters
 	// RequireApproval when true: agent execution pauses until the user approves in UI (issue #1173).
-	RequireApproval bool `json:"require_approval,omitempty"`
+	RequireApproval bool `json:"require_approval,omitempty" extensions:"x-agent"`
 }
 
 // MCPToolApproval persists per-tool policies for an MCP service, including
@@ -180,14 +193,14 @@ type MCPResource struct {
 
 // MCPTestResult represents the result of testing an MCP service connection
 type MCPTestResult struct {
-	Success     bool   `json:"success"`
-	Message     string `json:"message,omitempty"`
+	Success     bool   `json:"success" extensions:"x-agent"`
+	Message     string `json:"message,omitempty" extensions:"x-agent,x-agent-max-runes=500"`
 	Description string `json:"description,omitempty"`
 	// OAuthRequired is true when the connection failed because the server
 	// requires OAuth authorization (RFC 9728), even though the service was not
 	// configured for OAuth. The UI uses it to guide the user to switch the auth
 	// strategy to OAuth.
-	OAuthRequired bool           `json:"oauth_required,omitempty"`
+	OAuthRequired bool           `json:"oauth_required,omitempty" extensions:"x-agent"`
 	Tools         []*MCPTool     `json:"tools,omitempty"`
 	Resources     []*MCPResource `json:"resources,omitempty"`
 }
@@ -223,7 +236,7 @@ func (h *MCPHeaders) Scan(value interface{}) error {
 
 // Value implements driver.Valuer for MCPAuthConfig.
 //
-// When SYSTEM_AES_KEY is configured, APIKey and Token are AES-256-GCM
+// When SYSTEM_AES_KEY is configured, APIKey, Token and ClientSecret are AES-256-GCM
 // encrypted before serialization — mirroring the ModelParameters /
 // WebSearchProviderParameters pattern so MCP secrets are not the odd
 // resource stored in plaintext. Encryption operates on a local copy to
@@ -243,6 +256,11 @@ func (c *MCPAuthConfig) Value() (driver.Value, error) {
 		if out.Token != "" {
 			if encrypted, err := utils.EncryptAESGCM(out.Token, key); err == nil {
 				out.Token = encrypted
+			}
+		}
+		if out.ClientSecret != "" {
+			if encrypted, err := utils.EncryptAESGCM(out.ClientSecret, key); err == nil {
+				out.ClientSecret = encrypted
 			}
 		}
 	}
@@ -277,6 +295,13 @@ func (c *MCPAuthConfig) Scan(value interface{}) error {
 	} else {
 		log.Printf("[crypto] mcp auth_config token: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
 		c.Token = ""
+	}
+	if plain, ok := utils.DecryptStoredSecretLenient(c.ClientSecret); ok {
+		c.ClientSecret = plain
+	} else {
+		log.Printf("[crypto] mcp auth_config client_secret: decrypt failed " +
+			"(SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+		c.ClientSecret = ""
 	}
 	return nil
 }

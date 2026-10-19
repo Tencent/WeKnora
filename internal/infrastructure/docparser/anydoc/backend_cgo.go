@@ -4,7 +4,6 @@ package anydoc
 
 import (
 	"fmt"
-	"mime"
 	"strings"
 
 	upstream "github.com/firecrawl/anydoc/go"
@@ -183,6 +182,22 @@ func inlineText(inlines []upstream.Inline) string {
 	return strings.TrimSpace(text.String())
 }
 
+// extensionFor returns the extension that the Markdown link for an embedded
+// image carries.
+//
+// This table is one half of a contract with the Rust serializer. The link it
+// writes (`images/image-N<ext>`, see third_party/anydoc-go/src/asset_links.rs)
+// has to equal the ImageRef.OriginalRef built from this name, because
+// ImageResolver looks the link up in a map keyed by that exact string. The
+// media types and extensions below must therefore match `extension_for` in
+// asset_links.rs exactly.
+//
+// It is deliberately a pure table. Asking the platform MIME registry made the
+// answer depend on the host's /etc/mime.types, which is how EMF/WMF ended up
+// as ".emf"/".wmf" here and ".bin" on the Rust side: the link never matched
+// the ref and the image bytes were never stored. Unknown types fall back to
+// ".bin" on both sides, so downstream storage never writes an extension-less
+// blob.
 func extensionFor(mediaType string) string {
 	switch strings.ToLower(strings.TrimSpace(mediaType)) {
 	case "image/jpeg", "image/jpg":
@@ -199,12 +214,10 @@ func extensionFor(mediaType string) string {
 		return ".tiff"
 	case "image/svg+xml":
 		return ".svg"
-	}
-	// Anything else (EMF/WMF drawings, unknown object payloads) keeps
-	// whatever extension the media type registry knows, and .bin otherwise,
-	// so downstream storage never writes an extension-less blob.
-	if exts, err := mime.ExtensionsByType(mediaType); err == nil && len(exts) > 0 {
-		return exts[0]
+	case "image/emf":
+		return ".emf"
+	case "image/wmf":
+		return ".wmf"
 	}
 	return ".bin"
 }

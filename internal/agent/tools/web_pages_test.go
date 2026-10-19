@@ -139,8 +139,11 @@ func TestSearchOptionsAndExplicitPageContent(t *testing.T) {
 	require.Contains(t, model, `status="success" verified="true"`)
 	require.Contains(t, model, rows[0]["full_output_path"])
 	require.Contains(t, model, "still useful")
+	// Only values with no nearest legal alternative stay failures: an unsupported
+	// filter value has nothing to fall back to. An over-maximum count is clamped
+	// instead (see TestAgentWebSearchClampsCountToConfiguredMaximum).
 	for _, args := range []string{
-		`{"query":"q","count":0}`, `{"query":"q","count":6}`,
+		`{"query":"q","count":0}`,
 		`{"query":"q","country":"bad"}`, `{"query":"q","freshness":"tomorrow"}`,
 	} {
 		calls := svc.calls

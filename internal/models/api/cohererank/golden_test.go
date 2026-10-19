@@ -47,6 +47,38 @@ func newClient(t *testing.T, url string, settings api.RerankSettings) *Client {
 	})
 }
 
+// Cohere's v2 reference response, preserving every field and value:
+// https://docs.cohere.com/v2/reference/rerank (2026-10-09).
+// Unlike the other fixtures, it contains no echoed document.
+const cohereV2Response = `{
+  "results": [
+    {"index": 3, "relevance_score": 0.999071},
+    {"index": 4, "relevance_score": 0.7867867},
+    {"index": 0, "relevance_score": 0.32713068}
+  ],
+  "id": "07734bd2-2473-4f07-94e1-0d9f0e6843cf",
+  "meta": {
+    "api_version": {"version": "2", "is_experimental": false},
+    "billed_units": {"search_units": 1}
+  }
+}`
+
+func TestDecodesCohereV2ReferenceResponse(t *testing.T) {
+	server, path, _ := serve(t, cohereV2Response)
+	defer server.Close()
+	c := newClient(t, server.URL+"/v2", api.RerankSettings{})
+	// Only the response is the documented fixture; these five placeholder
+	// documents supply its index range, not the reference's example texts.
+	got, err := c.Rerank(context.Background(), "q", []string{"a", "b", "c", "d", "e"})
+	require.NoError(t, err)
+	assert.Equal(t, "/v2/rerank", *path)
+	assert.Equal(t, []api.RerankResult{
+		{Index: 3, Score: 0.999071},
+		{Index: 4, Score: 0.7867867},
+		{Index: 0, Score: 0.32713068},
+	}, got)
+}
+
 func serve(t *testing.T, payload string) (*httptest.Server, *string, *map[string]any) {
 	t.Helper()
 	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
