@@ -1226,6 +1226,8 @@ export default {
     toolFallback: 'ツール',
     stepsCompleted: '<strong>{steps}</strong>ステップ完了',
     reasoningRounds: '推論<strong>{rounds}</strong>回',
+    earlierSteps: '完了したステップ {count} 件',
+    viewReasoning: '思考を表示',
     toolCalls: 'ツール呼び出し<strong>{tools}</strong>回',
     durationSuffix: '<strong>{duration}</strong>',
     stepSummarySeparator: ' · ',

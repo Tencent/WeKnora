@@ -7239,6 +7239,8 @@ export default {
     toolFallback: '工具',
     stepsCompleted: '已完成 <strong>{steps}</strong> 個步驟',
     reasoningRounds: '思考 <strong>{rounds}</strong> 輪',
+    earlierSteps: '已完成 {count} 個步驟',
+    viewReasoning: '檢視思路',
     toolCalls: '呼叫 <strong>{tools}</strong> 次工具',
     durationSuffix: '耗時 <strong>{duration}</strong>',
     stepSummarySeparator: ' · ',

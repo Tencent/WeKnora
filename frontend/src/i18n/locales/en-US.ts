@@ -1226,6 +1226,8 @@ export default {
     toolFallback: 'Tool',
     stepsCompleted: 'Completed <strong>{steps}</strong> step(s)',
     reasoningRounds: '<strong>{rounds}</strong> reasoning round(s)',
+    earlierSteps: '{count} earlier steps',
+    viewReasoning: 'View reasoning',
     toolCalls: '<strong>{tools}</strong> tool call(s)',
     durationSuffix: '<strong>{duration}</strong>',
     stepSummarySeparator: ' · ',

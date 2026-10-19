@@ -7238,6 +7238,8 @@ export default {
     toolFallback: '도구',
     stepsCompleted: '<strong>{steps}</strong>개 단계 완료',
     reasoningRounds: '사고 <strong>{rounds}</strong>회',
+    earlierSteps: '이전 단계 {count}개',
+    viewReasoning: '사고 과정 보기',
     toolCalls: '도구 <strong>{tools}</strong>회 호출',
     durationSuffix: '소요 시간 <strong>{duration}</strong>',
     stepSummarySeparator: ' · ',

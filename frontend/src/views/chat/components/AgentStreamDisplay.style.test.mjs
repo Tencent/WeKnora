@@ -52,7 +52,9 @@ test('agent steps use compact muted timeline styling', () => {
 })
 
 test('expanded agent step log keeps model thinking in the tool timeline', () => {
-  assert.match(source, /visibleIntermediateEvents\s*=\s*computed\(\(\) => intermediateEvents\.value\)/)
+  assert.match(source, /visibleIntermediateEvents\s*=\s*computed\(\(\) => attachReasoningToTools\(intermediateEvents\.value, canAttachReasoning\)\)/)
+  assert.match(source, /v-for="\(event, index\) in timelineEvents"/)
+  assert.match(source, /class="action-reasoning thinking-detail-content markdown-content"/)
   assert.match(source, /v-for="\(event, index\) in visibleIntermediateEvents"/)
 })
 

@@ -74,7 +74,7 @@
               <div v-if="event.type === 'thinking'" class="tool-event">
                 <div class="action-card thinking-event-card"
                   :class="{ 'action-pending': isThinkingActive(event.event_id) }">
-                  <div class="action-header" @click="toggleEvent(event.event_id)">
+                  <div class="action-header" @click="toggleThinking(event.event_id)">
                     <div class="action-title" :class="{
                       'thinking-inline-title': !event.title && isEventExpanded(event.event_id),
                     }">
@@ -82,7 +82,8 @@
                         aria-hidden="true" />
                       <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
                       <div v-else-if="event.content && isEventExpanded(event.event_id)"
-                        class="thinking-inline-content markdown-content">
+                        class="thinking-inline-content markdown-content"
+                        :class="{ 'thinking-live-window': isLiveThinking(event.event_id) }">
                         <div class="thinking-inline-markdown" v-html="renderMarkdownContent(event.content)"></div>
                       </div>
                       <span v-else-if="getThinkingSummary(event)" class="action-summary">{{ getThinkingSummary(event)
@@ -90,7 +91,8 @@
                     </div>
                   </div>
                   <div v-if="event.title && event.content && isEventExpanded(event.event_id)" class="action-details">
-                    <div class="thinking-detail-content markdown-content">
+                    <div class="thinking-detail-content markdown-content"
+                      :class="{ 'thinking-live-window': isLiveThinking(event.event_id) }">
                       <div v-html="renderMarkdownContent(event.content)"></div>
                     </div>
                   </div>
@@ -182,7 +184,19 @@
                         <span v-if="getSandboxDiffStat(event)?.added" class="diff-add">+{{ getSandboxDiffStat(event)?.added }}</span>
                         <span v-if="getSandboxDiffStat(event)?.removed" class="diff-del">-{{ getSandboxDiffStat(event)?.removed }}</span>
                       </span>
+                      <button v-if="event.reasoning" type="button" class="action-reasoning-toggle"
+                        :class="{ 'is-open': isEventExpanded(event.reasoning.id) }"
+                        :title="t('agent.viewReasoning')" :aria-label="t('agent.viewReasoning')"
+                        :aria-expanded="isEventExpanded(event.reasoning.id)"
+                        @click.stop="toggleEvent(event.reasoning.id)" @keydown.enter.stop @keydown.space.stop>
+                        <span class="icon-mask" :style="maskIconStyle(thinkingIcon, 14)" aria-hidden="true" />
+                      </button>
                     </div>
+                  </div>
+
+                  <div v-if="event.reasoning && isEventExpanded(event.reasoning.id)"
+                    class="action-reasoning thinking-detail-content markdown-content" @click.stop>
+                    <div v-html="renderMarkdownContent(event.reasoning.content)"></div>
                   </div>
 
                   <div v-if="event.pending && getSandboxFilePreview(event)" class="sandbox-file-preview">
@@ -298,8 +312,27 @@
         @toggle="toggleMemory"
         @forget="forgetMemory"
       />
-      <template v-for="(event, index) in displayEvents" :key="getEventKey(event, index)">
-        <div v-if="event && event.type" class="event-item" :class="{
+      <div v-if="earlierStepsCount > 0" class="event-item tree-child earlier-steps-node">
+        <div class="tree-branch"></div>
+        <div class="tree-child-content">
+          <div class="action-card">
+            <div class="action-header" role="button" tabindex="0" :aria-expanded="earlierStepsExpanded"
+              @click="earlierStepsExpanded = !earlierStepsExpanded"
+              @keydown.enter.prevent="earlierStepsExpanded = !earlierStepsExpanded"
+              @keydown.space.prevent="earlierStepsExpanded = !earlierStepsExpanded">
+              <div class="action-title">
+                <t-icon class="action-title-icon" name="ellipsis" />
+                <span class="action-name">{{ t('agent.earlierSteps', { count: earlierStepsCount }) }}</span>
+                <div class="action-show-icon">
+                  <t-icon :name="earlierStepsExpanded ? 'chevron-down' : 'chevron-right'" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <template v-for="(event, index) in timelineEvents" :key="getEventKey(event, index)">
+        <div v-if="event && event.type && !foldedStepKeys.has(getEventKey(event, index))" class="event-item" :class="{
           'event-answer': event.type === 'answer',
           'tree-child': isStreamingTimelineEvent(event),
           'tree-child-progress': event.type === 'child_task',
@@ -347,14 +380,15 @@
             <div v-if="event.type === 'thinking'" class="tool-event">
               <div class="action-card thinking-event-card"
                 :class="{ 'action-pending': isThinkingActive(event.event_id) }">
-                <div class="action-header" @click="toggleEvent(event.event_id)">
+                <div class="action-header" @click="toggleThinking(event.event_id)">
                   <div class="action-title" :class="{
                     'thinking-inline-title': !event.title && isEventExpanded(event.event_id),
                   }">
                     <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)" aria-hidden="true" />
                     <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
                     <div v-else-if="event.content && isEventExpanded(event.event_id)"
-                      class="thinking-inline-content markdown-content">
+                      class="thinking-inline-content markdown-content"
+                      :class="{ 'thinking-live-window': isLiveThinking(event.event_id) }">
                       <div class="thinking-inline-markdown" v-html="renderMarkdownContent(event.content)"></div>
                     </div>
                     <span v-else-if="getThinkingSummary(event) && !isEventExpanded(event.event_id)"
@@ -362,7 +396,8 @@
                   </div>
                 </div>
                 <div v-if="event.title && event.content && isEventExpanded(event.event_id)" class="action-details">
-                  <div class="thinking-detail-content markdown-content">
+                  <div class="thinking-detail-content markdown-content"
+                    :class="{ 'thinking-live-window': isLiveThinking(event.event_id) }">
                     <div v-html="renderMarkdownContent(event.content)"></div>
                   </div>
                 </div>
@@ -537,7 +572,19 @@
                       <span v-if="getSandboxDiffStat(event)?.added" class="diff-add">+{{ getSandboxDiffStat(event)?.added }}</span>
                       <span v-if="getSandboxDiffStat(event)?.removed" class="diff-del">-{{ getSandboxDiffStat(event)?.removed }}</span>
                     </span>
+                    <button v-if="event.reasoning" type="button" class="action-reasoning-toggle"
+                      :class="{ 'is-open': isEventExpanded(event.reasoning.id) }"
+                      :title="t('agent.viewReasoning')" :aria-label="t('agent.viewReasoning')"
+                      :aria-expanded="isEventExpanded(event.reasoning.id)"
+                      @click.stop="toggleEvent(event.reasoning.id)" @keydown.enter.stop @keydown.space.stop>
+                      <span class="icon-mask" :style="maskIconStyle(thinkingIcon, 14)" aria-hidden="true" />
+                    </button>
                   </div>
+                </div>
+
+                <div v-if="event.reasoning && isEventExpanded(event.reasoning.id)"
+                  class="action-reasoning thinking-detail-content markdown-content" @click.stop>
+                  <div v-html="renderMarkdownContent(event.reasoning.content)"></div>
                 </div>
 
                 <div v-if="event.pending && getSandboxFilePreview(event)" class="sandbox-file-preview">
@@ -695,6 +742,7 @@ import { isAssistantTurnComplete } from '@/utils/steerStreamFork';
 import { isAwaitingInput } from '@/composables/useChatStreamHandler';
 import { inject, ref, computed, watch, onMounted, onBeforeUnmount, onUpdated, nextTick } from 'vue';
 import { chatReadingHistoryKey, useDeferredTimelineCompletion } from '@/composables/useChatScrollFollow';
+import { useStreamingHeightFloor } from '@/composables/useStreamingHeightFloor';
 import { useRouter, useRoute } from 'vue-router';
 import { marked } from 'marked';
 import 'katex/dist/katex.min.css';
@@ -706,7 +754,7 @@ import { useChildAgentViewer } from '@/composables/useChildAgentViewer';
 import { defineAsyncComponent } from 'vue';
 const ChildAgentStream = defineAsyncComponent(() => import('./ChildAgentStream.vue'));
 import ProgressUpdates from './ProgressUpdates.vue';
-import { foldProgressIntoThinking, groupProgressUpdates } from '@/utils/agentTimelinePresentation';
+import { attachReasoningToTools, earlierStepKeys, foldProgressIntoThinking, groupProgressUpdates } from '@/utils/agentTimelinePresentation';
 import { isUnresolvedCollaborationPrompt, collaborationActivity, collaborationWaitState, collaborationTimeline, collaborationTasks, countToolCalls } from '@/utils/collaborationDisplay';
 import ToolApprovalCard from './ToolApprovalCard.vue';
 import McpOAuthCard from './McpOAuthCard.vue';
@@ -1576,6 +1624,26 @@ const isThinkingActive = (eventId: string): boolean => {
 
 const deferredThinkingFolds = new Set<string>();
 
+// Auto-expanded reasoning streams inside a short window: letting it grow to
+// full length and then folding it to one line makes the followed viewport
+// jump. Reasoning the user opened is shown in full and is not auto-folded.
+const userExpandedThinking = ref<Set<string>>(new Set());
+const isLiveThinking = (eventId: string): boolean => !userExpandedThinking.value.has(eventId);
+const toggleThinking = (eventId: string) => {
+  if (expandedEvents.value.has(eventId) && !userExpandedThinking.value.has(eventId)) {
+    userExpandedThinking.value.add(eventId);
+    return;
+  }
+  toggleEvent(eventId);
+  if (expandedEvents.value.has(eventId)) userExpandedThinking.value.add(eventId);
+  else userExpandedThinking.value.delete(eventId);
+};
+const markOverflowingLiveThinking = () => {
+  rootElement.value?.querySelectorAll<HTMLElement>('.thinking-live-window').forEach((el) => {
+    el.classList.toggle('is-overflowing', el.scrollHeight > el.clientHeight + 1);
+  });
+};
+
 // Watch event stream to auto-expand thinking events and auto-collapse when non-thinking follows
 watch([eventStream, readingHistory], ([stream]) => {
   if (!stream || !Array.isArray(stream)) return;
@@ -1608,7 +1676,7 @@ watch([eventStream, readingHistory], ([stream]) => {
   }
   if (!readingHistory.value) {
     for (const id of deferredThinkingFolds) {
-      if (!newActiveIds.has(id)) expandedEvents.value.delete(id);
+      if (!newActiveIds.has(id) && !userExpandedThinking.value.has(id)) expandedEvents.value.delete(id);
     }
     deferredThinkingFolds.clear();
   }
@@ -1616,6 +1684,7 @@ watch([eventStream, readingHistory], ([stream]) => {
   activeThinkingVersion.value++;
 
   nextTick(async () => {
+    markOverflowingLiveThinking();
     await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
     await enhanceMarkdownContainer(rootElement.value);
   });
@@ -1662,6 +1731,7 @@ const collaborationWait = computed(() => collaborationWaitState(eventStream.valu
 const childActivity = computed(() => props.ragMode ? undefined : collaborationActivity(eventStream.value, props.session.collaborationStatus, isSegmentDone.value));
 
 const streamingMermaidSvgCache = ref<string[]>([]);
+useStreamingHeightFloor(rootElement, computed(() => !isSegmentDone.value));
 let streamingMermaidRenderTask: Promise<void> | null = null;
 
 const activeAnswerMarkdown = computed(() => {
@@ -1794,8 +1864,8 @@ const showStreamingTimeline = computed(() => {
 
 const lastStreamingTimelineEventIndex = computed(() => {
   if (isConversationDone.value) return -1;
-  for (let i = displayEvents.value.length - 1; i >= 0; i -= 1) {
-    if (isStreamingTimelineEvent(displayEvents.value[i])) return i;
+  for (let i = timelineEvents.value.length - 1; i >= 0; i -= 1) {
+    if (isStreamingTimelineEvent(timelineEvents.value[i])) return i;
   }
   return -1;
 });
@@ -2139,7 +2209,11 @@ const intermediateEvents = computed(() => {
 // Keep reasoning in the same compact timeline as tool calls. The template
 // auto-expands the active reasoning event and folds it again once a tool or
 // answer follows, so tool activity remains the primary structure.
-const visibleIntermediateEvents = computed(() => intermediateEvents.value);
+const visibleIntermediateEvents = computed(() => attachReasoningToTools(intermediateEvents.value, canAttachReasoning));
+
+// A thought still streaming or held open by the reader keeps its own row.
+const canAttachReasoning = (event: any): boolean =>
+  event.thinking !== true && !isThinkingActive(event.event_id) && !isEventExpanded(event.event_id);
 
 // Events to display (non-tree: before answer starts show all, after answer starts show only answer)
 const displayEvents = computed(() => {
@@ -2270,6 +2344,38 @@ const getEventKey = (event: any, index: number): string => {
   if (event.tool_call_id) return `tool-${event.tool_call_id}`;
   return `event-${index}-${event.type || 'unknown'}`;
 };
+
+const timelineEvents = computed(() => attachReasoningToTools(displayEvents.value, canAttachReasoning));
+
+// Long runs keep only their latest steps in view; anything still waiting on
+// the agent or the user stays out of the fold.
+const isStickyStep = (event: any): boolean =>
+  event.pending === true ||
+  event.type === 'child_task' ||
+  isUnresolvedCollaborationPrompt(event) ||
+  (event.type === 'thinking' && (event.thinking === true || isThinkingActive(event.event_id)));
+
+const earlierStepTargets = computed(() => earlierStepKeys(
+  timelineEvents.value.map((event: any, index: number) => ({
+    key: getEventKey(event, index),
+    step: isStreamingTimelineEvent(event),
+    sticky: isStickyStep(event),
+  })),
+));
+
+const earlierStepsExpanded = ref(false);
+const foldedStepKeys = ref<Set<string>>(new Set());
+// Folding more rows under a reader would pull the text they are reading upward.
+watch([earlierStepTargets, readingHistory], ([targets, reading]) => {
+  if (!reading && !earlierStepsExpanded.value) foldedStepKeys.value = new Set(targets);
+}, { immediate: true });
+watch(earlierStepsExpanded, (expanded) => {
+  foldedStepKeys.value = expanded ? new Set() : new Set(earlierStepTargets.value);
+});
+
+const earlierStepsCount = computed(() =>
+  earlierStepsExpanded.value ? earlierStepTargets.value.length : foldedStepKeys.value.size,
+);
 
 const toggleIntermediateSteps = () => {
   showIntermediateSteps.value = !showIntermediateSteps.value;
@@ -3743,6 +3849,44 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 }
 
+.action-reasoning-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-left: -6px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+
+  &:hover,
+  &:focus-visible,
+  &.is-open {
+    opacity: 1;
+    background: var(--td-bg-color-container-hover);
+  }
+}
+
+.action-reasoning {
+  padding-top: 2px;
+  user-select: text;
+  cursor: text;
+}
+
+.earlier-steps-node .action-header {
+  cursor: pointer;
+
+  &:hover .action-name {
+    color: var(--td-text-color-primary);
+  }
+}
+
 .sandbox-file-preview {
   margin: 6px 0 0;
   padding: 8px 10px;
@@ -4043,6 +4187,21 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
     :deep(.thinking-inline-markdown > :last-child) {
       margin-bottom: 0;
+    }
+  }
+
+  // Bottom-aligned so the newest reasoning stays visible as older lines clip.
+  .thinking-inline-content.thinking-live-window,
+  .thinking-detail-content.thinking-live-window {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    max-height: calc(1.6em * 5);
+    overflow: hidden;
+
+    &.is-overflowing {
+      mask-image: linear-gradient(to bottom, transparent, #000 1.6em);
+      -webkit-mask-image: linear-gradient(to bottom, transparent, #000 1.6em);
     }
   }
 

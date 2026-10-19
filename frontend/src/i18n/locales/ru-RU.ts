@@ -7238,6 +7238,8 @@ export default {
     toolFallback: 'Инструмент',
     stepsCompleted: 'Выполнено <strong>{steps}</strong> шаг(ов)',
     reasoningRounds: '<strong>{rounds}</strong> раунд(ов) рассуждений',
+    earlierSteps: 'Предыдущие шаги: {count}',
+    viewReasoning: 'Показать рассуждения',
     toolCalls: '<strong>{tools}</strong> вызов(ов) инструментов',
     durationSuffix: '<strong>{duration}</strong>',
     stepSummarySeparator: ' · ',
