@@ -96,7 +96,9 @@ func (b *Binding) Start(ctx context.Context) (context.Context, func()) {
 					if g.Status != "active" && !closing {
 						return ErrClosed
 					}
-					g.ParentLease = time.Now().Add(b.Runtime.Lease)
+					now := time.Now()
+					g.ParentLease = now.Add(b.Runtime.Lease)
+					touchDeadline(g, now)
 					return nil
 				})
 				if err == nil && completed {

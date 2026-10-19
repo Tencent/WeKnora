@@ -147,6 +147,9 @@ func TestPromptRestartAndCancellationFences(t *testing.T) {
 			if status == "answered" {
 				want = "queued"
 			}
+			if status == "canceled" {
+				want = "interrupted"
+			}
 			require.Equal(t, want, current(read(t, r.Store, w.Scope).Members[0]).State)
 		})
 	}
@@ -166,6 +169,21 @@ func TestPromptRestartAndCancellationFences(t *testing.T) {
 			r.Tick(ctx)
 			r.workers.Wait()
 			require.Zero(t, calls.Load())
+		})
+	}
+}
+
+func TestExpiredWaitingPromptCanBeContinued(t *testing.T) {
+	for _, status := range []string{"expired", "canceled", "superseded"} {
+		t.Run(status, func(t *testing.T) {
+			r, w := promptWork(t)
+			ctx := context.Background()
+			require.NoError(t, r.ReconcilePrompt(ctx, w, PromptState{ID: w.Run.PromptID, Status: status}))
+			g := read(t, r.Store, w.Scope)
+			require.Equal(t, "interrupted", current(g.Members[0]).State)
+			require.Empty(t, current(g.Members[0]).PromptID)
+			_, err := r.Send(ctx, w.Scope, "follow-"+status, w.Member.Name, "continue", "", true)
+			require.NoError(t, err)
 		})
 	}
 }

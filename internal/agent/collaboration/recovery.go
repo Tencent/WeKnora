@@ -204,12 +204,62 @@ func (r *Runtime) ReconcilePrompt(ctx context.Context, w Work, prompt PromptStat
 			v.Owner = ""
 			publishPromptState(g, m, v, "resumed")
 		default:
-			v.State = "needs_attention"
-			v.Result.Error = "child prompt closed or execution outcome uncertain; not replayed"
-			publish(g, m, v)
+			closeChildRun(g, m, v, prompt.Status)
 		}
 		return nil
 	})
+}
+
+// CloseChildPrompt settles the child run that owns a broker prompt. The prompt
+// session is the child conversation, so callers locate the parent group first.
+// A prompt that closed before the tool ran stays continuable; an in-flight or
+// failed execution stays needs_attention and cannot be replayed.
+func (r *Runtime) CloseChildPrompt(
+	ctx context.Context, scope Scope, sessionID, messageID, promptID, status string,
+) error {
+	if sessionID == "" || (messageID == "" && promptID == "") {
+		return nil
+	}
+	return r.Store.Change(ctx, scope, func(g *Group) error {
+		for _, m := range g.Members {
+			if m.SessionID != sessionID {
+				continue
+			}
+			for _, v := range m.Runs {
+				if v.PromptID != promptID && (messageID == "" || v.MessageID != messageID) {
+					continue
+				}
+				if !active(v) && v.PromptID == "" && v.State != "needs_attention" {
+					return nil
+				}
+				closeChildRun(g, m, v, status)
+				return nil
+			}
+		}
+		return nil
+	})
+}
+
+func closeChildRun(g *Group, m *Member, v *Run, status string) {
+	if promptClosedBeforeExecution(status, v.State) {
+		if v.State != "interrupted" {
+			v.State = "interrupted"
+			v.Owner = ""
+			v.CancelRequested = false
+			v.Result.Error = closedBeforeExecutionError
+			publish(g, m, v)
+		}
+	} else if active(v) || v.State == "needs_attention" {
+		if v.State != "needs_attention" {
+			v.State = "needs_attention"
+			v.Owner = ""
+			v.Result.Error = uncertainExecutionError
+			publish(g, m, v)
+		}
+	}
+	v.PromptID = ""
+	v.Prompt = nil
+	settle(g)
 }
 
 // ClearCanceledPrompt removes a canceled run’s prompt after the broker closes it.

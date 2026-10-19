@@ -183,7 +183,7 @@ func (s *Store) ensure(ctx context.Context, scope Scope, members []*Member) erro
 	}
 	g := Group{
 		Scope: scope, Status: "active", Members: members,
-		Requests: map[string]string{}, Deadline: time.Now().Add(time.Hour),
+		Requests: map[string]string{}, Deadline: time.Now().Add(collaborationHorizon),
 	}
 	b, err := json.Marshal(g)
 	if err != nil {

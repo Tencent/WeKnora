@@ -15,6 +15,33 @@ import (
 
 var taskName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,47}$`)
 
+// collaborationHorizon is how long an active parent or child may keep the group
+// open. Abandoned groups still end one horizon after the last lease renewal.
+const collaborationHorizon = time.Hour
+
+const (
+	closedBeforeExecutionError = "child prompt closed before the tool ran; followup_task can continue this child"
+	uncertainExecutionError    = "child prompt closed or execution outcome uncertain; not replayed"
+)
+
+func touchDeadline(g *Group, now time.Time) {
+	until := now.Add(collaborationHorizon)
+	if g.Deadline.Before(until) {
+		g.Deadline = until
+	}
+}
+
+// promptClosedBeforeExecution reports a prompt that ended while the tool had
+// not started. A running turn can still have an uncertain side effect.
+func promptClosedBeforeExecution(status, runState string) bool {
+	switch status {
+	case "expired", "canceled", "superseded":
+		return runState != "running"
+	default:
+		return false
+	}
+}
+
 // Work is a claimed child execution with its scope and ownership lease.
 type Work struct {
 	Scope  Scope
@@ -442,6 +469,7 @@ func (r *Runtime) Tick(ctx context.Context) {
 				v.State = "running"
 				v.Owner = uuid.NewString()
 				v.Lease = now.Add(r.Lease)
+				touchDeadline(g, now)
 				v.Attempt++
 				running++
 				copyMember := *m
@@ -491,7 +519,9 @@ func (r *Runtime) execute(serverCtx context.Context, w Work) {
 					if g.Status != "active" || v.CancelRequested {
 						stop = true
 					}
-					v.Lease = time.Now().Add(r.Lease)
+					now := time.Now()
+					v.Lease = now.Add(r.Lease)
+					touchDeadline(g, now)
 					return nil
 				})
 				if err != nil || stop {
@@ -531,6 +561,7 @@ func (r *Runtime) execute(serverCtx context.Context, w Work) {
 		if result.Suspended && err == nil && g.Status == "active" && !v.CancelRequested && v.PromptID != "" {
 			v.State = "waiting"
 			v.Owner = ""
+			touchDeadline(g, time.Now())
 			publishPromptState(g, m, v, "waiting")
 			return nil
 		}

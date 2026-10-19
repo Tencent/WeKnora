@@ -646,6 +646,103 @@ func TestCompletedCollaborationRestoresAllApprovalHistory(t *testing.T) {
 	)
 }
 
+func TestStopPromptReleasesExpiredChildWithoutStoppingSiblings(t *testing.T) {
+	s, _, _, ctx := collaborationService(t)
+	scope := collaboration.Scope{TenantID: 7, UserID: "u", SessionID: "parent", ID: "parent-message"}
+	require.NoError(t, s.Runtime.Store.Ensure(ctx, scope))
+	require.NoError(t, s.Runtime.Store.Change(ctx, scope, func(g *collaboration.Group) error {
+		g.ParentMessageID = "parent-message"
+		g.Members = []*collaboration.Member{
+			{
+				ID: "child-1", Name: "writer", SessionID: "child-session",
+				Runs: []*collaboration.Run{{
+					ID: "run-1", State: "waiting", PromptID: "prompt-1", MessageID: "child-message",
+				}},
+			},
+			{
+				ID: "child-2", Name: "reader", SessionID: "other-session",
+				Runs: []*collaboration.Run{{ID: "run-2", State: "running"}},
+			},
+		}
+		return nil
+	}))
+	require.NoError(t, s.StopPrompt(ctx, &types.AgentPrompt{
+		ID:                 "prompt-1",
+		TenantID:           7,
+		UserID:             "web_user:u",
+		SessionID:          "child-session",
+		AssistantMessageID: "child-message",
+		Status:             types.AgentPromptExpired,
+	}))
+	g, err := s.Runtime.Store.Read(ctx, scope)
+	require.NoError(t, err)
+	require.Equal(t, "active", g.Status)
+	require.Equal(t, "interrupted", g.Members[0].Runs[0].State)
+	require.Empty(t, g.Members[0].Runs[0].PromptID)
+	require.Equal(t, "running", g.Members[1].Runs[0].State)
+	_, err = s.Runtime.Send(ctx, scope, "follow", "writer", "continue the draft", "", true)
+	require.NoError(t, err)
+	g, err = s.Runtime.Store.Read(ctx, scope)
+	require.NoError(t, err)
+	require.Equal(t, "queued", g.Members[0].Runs[len(g.Members[0].Runs)-1].State)
+}
+
+func TestStopPromptKeepsUncertainChildExecution(t *testing.T) {
+	s, _, _, ctx := collaborationService(t)
+	scope := collaboration.Scope{TenantID: 7, UserID: "u", SessionID: "parent", ID: "parent-message"}
+	require.NoError(t, s.Runtime.Store.Ensure(ctx, scope))
+	require.NoError(t, s.Runtime.Store.Change(ctx, scope, func(g *collaboration.Group) error {
+		g.ParentMessageID = "parent-message"
+		g.Members = []*collaboration.Member{{
+			ID: "child-1", Name: "writer", SessionID: "child-session",
+			Runs: []*collaboration.Run{{
+				ID: "run-1", State: "running", PromptID: "prompt-1", MessageID: "child-message",
+			}},
+		}}
+		return nil
+	}))
+	require.NoError(t, s.StopPrompt(ctx, &types.AgentPrompt{
+		ID:                 "prompt-1",
+		TenantID:           7,
+		UserID:             "web_user:u",
+		SessionID:          "child-session",
+		AssistantMessageID: "child-message",
+		Status:             types.AgentPromptFailed,
+	}))
+	g, err := s.Runtime.Store.Read(ctx, scope)
+	require.NoError(t, err)
+	require.Equal(t, "active", g.Status)
+	require.Equal(t, "needs_attention", g.Members[0].Runs[0].State)
+	_, err = s.Runtime.Send(ctx, scope, "follow", "writer", "retry", "", true)
+	require.Error(t, err)
+}
+
+func TestStopPromptStillCancelsTheParentRun(t *testing.T) {
+	s, _, _, ctx := collaborationService(t)
+	scope := collaboration.Scope{TenantID: 7, UserID: "u", SessionID: "parent", ID: "parent-message"}
+	require.NoError(t, s.Runtime.Store.Ensure(ctx, scope))
+	require.NoError(t, s.Runtime.Store.Change(ctx, scope, func(g *collaboration.Group) error {
+		g.ParentMessageID = "parent-message"
+		g.Members = []*collaboration.Member{{
+			ID: "child-1", Name: "writer", SessionID: "child-session",
+			Runs: []*collaboration.Run{{ID: "run-1", State: "queued"}},
+		}}
+		return nil
+	}))
+	require.NoError(t, s.StopPrompt(ctx, &types.AgentPrompt{
+		ID:                 "parent-prompt",
+		TenantID:           7,
+		UserID:             "web_user:u",
+		SessionID:          "parent",
+		AssistantMessageID: "parent-message",
+		Status:             types.AgentPromptExpired,
+	}))
+	g, err := s.Runtime.Store.Read(ctx, scope)
+	require.NoError(t, err)
+	require.Contains(t, []string{"cancelling", "cancelled"}, g.Status)
+	require.Equal(t, "cancelled", g.Members[0].Runs[0].State)
+}
+
 func TestCollaborationPromptStateUsesBrokerDecisionOnly(t *testing.T) {
 	for _, tc := range []struct{ status, response, decision string }{
 		{"answered", `{"approved":true}`, "approved"},
