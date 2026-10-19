@@ -137,8 +137,11 @@ class ChatAsyncPreflightTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(context, "request-context")
 
     async def asyncSetUp(self):
-        token = REQUEST_CONTEXT.set("request-context")
-        self.addCleanup(REQUEST_CONTEXT.reset, token)
+        self.context_token = REQUEST_CONTEXT.set("request-context")
+
+    async def asyncTearDown(self):
+        # Python 3.10 runs synchronous cleanups outside the async task's Context.
+        REQUEST_CONTEXT.reset(self.context_token)
 
     async def test_chat_resolves_owned_and_shared_names_off_loop(self):
         result = await srv.chat("session", "question", ["Docs", "Shared"])
