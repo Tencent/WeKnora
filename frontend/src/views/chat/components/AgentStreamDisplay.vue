@@ -860,6 +860,7 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   interrupt_agent: 'agentStream.tools.interrupt_agent',
   wait_agent: 'agentStream.tools.wait_agent',
   open_page: 'agentStream.tools.openPage',
+  view_page: 'agentStream.tools.viewPage',
   read_page: 'agentStream.tools.readPage',
   select_tab: 'agentStream.tools.selectTab',
   fill_page: 'agentStream.tools.fillPage',
@@ -2209,7 +2210,7 @@ const displayEvents = computed(() => {
 });
 
 const isPageLinkEvent = (event: any): boolean =>
-  event?.type === 'tool_call' && event.tool_name === 'open_page' && !event.pending &&
+  event?.type === 'tool_call' && (event.tool_name === 'open_page' || event.tool_name === 'view_page') && !event.pending &&
   event.success !== false && isAssistantPageLink(event.tool_data);
 
 // Once the steps fold away, the page buttons move under the final answer:
@@ -2322,7 +2323,7 @@ const isReferenceDrawerTool = (toolName?: string | null): boolean =>
 const hasExpandableResults = (event: any): boolean => {
   if (isReferenceDrawerTool(event?.tool_name)) return false;
   // Its card is the result.
-  if (event?.tool_name === 'open_page' && event.success !== false) return false;
+  if ((event?.tool_name === 'open_page' || event?.tool_name === 'view_page') && event.success !== false) return false;
   if (event?.tool_name === 'fill_page' && event.success !== false) return false;
   // The snapshot is page text for the model, not something to read here.
   if ((event?.tool_name === 'read_page' || event?.tool_name === 'select_tab') && event.success !== false) return false;

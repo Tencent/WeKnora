@@ -136,6 +136,39 @@ func TestAgentStreamHandlerProgressIsSeparateFromReasoningAndFinalAnswer(t *test
 	require.Empty(t, h.eventStartTimes)
 }
 
+func TestPageButtonKeepsTheAnswerBeforeIt(t *testing.T) {
+	h := NewAgentStreamHandler(
+		context.Background(), "s", "m", "r", 1, time.Now(), &types.Message{},
+		&capturingStreamManager{}, nil, nil, nil, nil,
+	)
+	ctx := context.Background()
+	answer := func(id, content string) {
+		require.NoError(t, h.handleFinalAnswer(ctx, event.Event{
+			ID: id, Type: event.EventAgentFinalAnswer, Data: event.AgentFinalAnswerData{Content: content},
+		}))
+	}
+	call := func(name string, args map[string]any) {
+		require.NoError(t, h.handleToolCall(ctx, event.Event{
+			ID: "call", Type: event.EventAgentToolCall,
+			Data: event.AgentToolCallData{ToolCallID: "c-" + name, ToolName: name, Arguments: args},
+		}))
+	}
+
+	answer("a1", "the report")
+	call("open_page", nil)
+	call("open_page", map[string]any{"page": "agents"})
+	require.Equal(t, "the report", h.finalAnswer, "a page button follows the answer")
+
+	call("view_page", map[string]any{"page": "settings"})
+	require.Empty(t, h.finalAnswer, "viewing a page is more work, so the text was a preamble")
+
+	answer("a2", "second report")
+	require.NoError(t, h.handleProgress(ctx, event.Event{
+		ID: "a2", Type: event.EventAgentProgress, Data: event.AgentProgressData{Content: "second report"},
+	}))
+	require.Empty(t, h.finalAnswer, "progress with the answer's id retracts it")
+}
+
 func TestProtocolAnswerReplacementOnlyResetsMatchingSegment(t *testing.T) {
 	streams := &capturingStreamManager{}
 	h := NewAgentStreamHandler(

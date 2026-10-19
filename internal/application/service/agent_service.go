@@ -514,11 +514,10 @@ func (s *agentService) registerOperationTools(
 	}
 	toolRegistry.RegisterTool(tools.NewRunOperationTool(runtime))
 	// Opening a page changes nothing; the user saves any form themselves.
-	openPage := tools.NewOpenPageTool(runtime)
-	toolRegistry.RegisterTool(openPage)
+	toolRegistry.RegisterTool(tools.NewOpenPageTool(runtime))
 	// Filling the page saves nothing either, but read-only runs only look.
 	if actor, ok := s.toolApprovalGate.(approval.PageActor); ok && actor != nil {
-		openPage.WithPageActor(actor)
+		toolRegistry.RegisterTool(tools.NewViewPageTool(runtime, actor))
 		toolRegistry.RegisterTool(tools.NewReadPageTool(actor))
 		toolRegistry.RegisterTool(tools.NewSelectTabTool(actor))
 		if operationAccess.Level != types.AssistantAccessReadOnly {

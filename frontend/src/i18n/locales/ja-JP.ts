@@ -6602,6 +6602,7 @@ export default {
       interrupt_agent: 'エージェントを中断',
       wait_agent: 'エージェントを待機',
       openPage: 'ページを開く',
+      viewPage: 'ページを確認',
       searchWeKnoraDocs: '製品ドキュメントを検索',
       readWeKnoraDoc: '製品ドキュメントを読む',
       readPage: 'ページを確認',
@@ -6610,6 +6611,7 @@ export default {
     },
     collaboration: {
       tabs: 'タスクタブ',
+      updates: '更新 {count} 件',
       mainConversation: 'メインチャット',
       recentProgress: '最近の進捗',
       waitFailed: 'タスク更新の待機に失敗しました',

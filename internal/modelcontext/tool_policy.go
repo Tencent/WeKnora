@@ -185,9 +185,13 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 	"followup_task":   {},
 	"interrupt_agent": {},
 	"wait_agent":      {},
-	// open_page links to a knowledge base or document by the handles the model
-	// was shown; the client needs the real IDs.
+	// open_page and view_page link to a knowledge base or document by the
+	// handles the model was shown; the client needs the real IDs.
 	"open_page": {
+		sourceIDKeys: map[string]struct{}{"knowledge_base_id": {}, "knowledge_id": {}},
+		sourceOutput: true,
+	},
+	"view_page": {
 		sourceIDKeys: map[string]struct{}{"knowledge_base_id": {}, "knowledge_id": {}},
 		sourceOutput: true,
 	},

@@ -516,7 +516,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           events.push({ type: 'answer', event_id: `step-${step.iteration}-answer`,
             content: preambleText, done: true, intermediate_answer: true, timestamp: stepTimestamp || undefined })
         }
-        if (!progressText && preambleText && hasToolCalls) {
+        if (!progressText && preambleText && hasToolCalls && !step.intermediate_answer) {
           events.push({
             type: 'answer',
             event_id: `step-${step.iteration}-preamble`,
@@ -1106,7 +1106,9 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       }
       case 'tool_call': {
         if (dataPayload?.tool_name === 'final_answer') break
-        if (message.agentEventStream) {
+        // A page button follows the answer rather than starting more work; the
+        // server retracts that text with a progress event if the turn goes on.
+        if (message.agentEventStream && dataPayload?.tool_name !== 'open_page') {
           let retracted = false
           for (const ev of message.agentEventStream as ChatMessage[]) {
             if (ev.type === 'answer' && !ev.superseded && ev.content && String(ev.content).trim()) {

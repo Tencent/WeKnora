@@ -1847,6 +1847,7 @@ export default {
       interrupt_agent: '中斷智慧體',
       wait_agent: '等待智慧體',
       openPage: '開啟頁面',
+      viewPage: '查看頁面',
       searchWeKnoraDocs: '搜尋產品文件',
       readWeKnoraDoc: '閱讀產品文件',
       readPage: '查看目前頁面',
@@ -1855,6 +1856,7 @@ export default {
     },
     collaboration: {
       tabs: '任務分頁',
+      updates: '{count} 則進展',
       mainConversation: '主對話',
       recentProgress: '最近進展',
       waitFailed: '等待子任務更新失敗',

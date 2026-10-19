@@ -6602,6 +6602,7 @@ export default {
       interrupt_agent: 'Interrupt agent',
       wait_agent: 'Wait for agent',
       openPage: 'Open page',
+      viewPage: 'View page',
       searchWeKnoraDocs: 'Search product docs',
       readWeKnoraDoc: 'Read product doc',
       readPage: 'View page',
@@ -6610,6 +6611,7 @@ export default {
     },
     collaboration: {
       tabs: 'Task tabs',
+      updates: '{count} updates',
       mainConversation: 'Main chat',
       recentProgress: 'Recent progress',
       waitFailed: 'Could not wait for task updates',

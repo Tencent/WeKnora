@@ -71,7 +71,7 @@ export function getAgentToolIconName(
   if (['spawn_agent', 'list_agents', 'send_message', 'followup_task', 'interrupt_agent', 'wait_agent'].includes(toolName)) {
     return 'chat'
   }
-  if (toolName === 'open_page') {
+  if (toolName === 'open_page' || toolName === 'view_page') {
     return 'jump'
   }
   if (toolName === 'search_weknora_docs') {

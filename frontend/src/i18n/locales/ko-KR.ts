@@ -1845,6 +1845,7 @@ export default {
       interrupt_agent: '에이전트 중단',
       wait_agent: '에이전트 대기',
       openPage: '페이지 열기',
+      viewPage: '페이지 확인',
       searchWeKnoraDocs: '제품 문서 검색',
       readWeKnoraDoc: '제품 문서 읽기',
       readPage: '페이지 보기',
@@ -1853,6 +1854,7 @@ export default {
     },
     collaboration: {
       tabs: '작업 탭',
+      updates: '업데이트 {count}개',
       mainConversation: '기본 대화',
       recentProgress: '최근 진행 상황',
       waitFailed: '작업 업데이트 대기 실패',

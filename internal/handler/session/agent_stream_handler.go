@@ -106,6 +106,21 @@ func (h *AgentStreamHandler) composeFinalAnswer() string {
 	return b.String()
 }
 
+// supersedeAnswerSegments marks the matching streamed segments as superseded
+// and recomposes the answer. Callers must hold h.mu.
+func (h *AgentStreamHandler) supersedeAnswerSegments(match func(*answerSegment) bool) {
+	supersededAny := false
+	for _, seg := range h.answerSegments {
+		if !seg.superseded && seg.content != "" && match(seg) {
+			seg.superseded = true
+			supersededAny = true
+		}
+	}
+	if supersededAny {
+		h.finalAnswer = h.composeFinalAnswer()
+	}
+}
+
 // NewAgentStreamHandler creates a new handler for agent SSE streaming
 func NewAgentStreamHandler(
 	ctx context.Context,
@@ -192,6 +207,10 @@ func (h *AgentStreamHandler) handleProgress(ctx context.Context, evt event.Event
 	if !ok {
 		return nil
 	}
+	// Progress reusing an answer's ID retracts text already streamed as answer.
+	h.mu.Lock()
+	h.supersedeAnswerSegments(func(seg *answerSegment) bool { return seg.id == evt.ID })
+	h.mu.Unlock()
 	return h.streamManager.AppendEvent(ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 		ID: evt.ID, Type: types.ResponseTypeProgress, Content: data.Content, Done: true, Timestamp: time.Now(),
 		Data: map[string]interface{}{"event_id": evt.ID, "iteration": data.Iteration},
@@ -254,23 +273,16 @@ func (h *AgentStreamHandler) handleToolCall(ctx context.Context, evt event.Event
 	}
 
 	h.mu.Lock()
-	_, first := h.eventStartTimes[data.ToolCallID]
-	if !first {
+	if _, seen := h.eventStartTimes[data.ToolCallID]; !seen {
 		h.eventStartTimes[data.ToolCallID] = time.Now()
-		// Any answer text streamed before this tool call was a non-terminal round's
-		// preamble, not the final answer (the agent only ends by stopping naturally
-		// with plain text and no tool calls). Drop those segments from the persisted
-		// answer so the preamble never leaks into Message.Content.
-		supersededAny := false
-		for _, seg := range h.answerSegments {
-			if !seg.superseded && seg.content != "" {
-				seg.superseded = true
-				supersededAny = true
-			}
-		}
-		if supersededAny {
-			h.finalAnswer = h.composeFinalAnswer()
-		}
+	}
+	// Answer text streamed before a tool call was a non-terminal round's
+	// preamble, not the final answer. Drop those segments from the persisted
+	// answer so the preamble never leaks into Message.Content. A page button
+	// follows the answer instead; the engine retracts that text with a progress
+	// event if the turn goes on.
+	if !agenttools.IsPageButtonTool(data.ToolName) {
+		h.supersedeAnswerSegments(func(*answerSegment) bool { return true })
 	}
 	h.mu.Unlock()
 

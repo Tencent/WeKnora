@@ -1097,8 +1097,22 @@ func (e *AgentEngine) runReActIteration(
 		return iterOutcomeBreak, fmt.Errorf("delegated answer revision requested tools despite text-only recovery")
 	}
 
-	// 2. Analyze: Check for stop conditions (natural stop with no tool calls)
-	verdict := e.analyzeResponse(ctx, response, step, state.CurrentRound, sessionID, roundStart)
+	// 2. Analyze: Check for stop conditions (natural stop with no tool calls).
+	// An answer with page buttons stops like a plain answer once the buttons
+	// are offered; if one fails, the round goes on so the model can fix it.
+	analyzed, buttonsRan := response, false
+	if answersWithPageButtons(response) {
+		if e.runRoundTools(ctx, state, response, &step, sessionID, assistantMessageID) {
+			return iterOutcomeBreak, nil
+		}
+		buttonsRan = true
+		if toolCallsSucceeded(step.ToolCalls) {
+			answer := *response
+			answer.ToolCalls, answer.FinishReason = nil, "stop"
+			analyzed = &answer
+		}
+	}
+	verdict := e.analyzeResponse(ctx, analyzed, step, state.CurrentRound, sessionID, roundStart)
 	if verdict.isDone {
 		// Guard against empty content: when the LLM stops naturally with no
 		// content and no tool calls (e.g., thinking-only loop without KB),
@@ -1245,6 +1259,11 @@ func (e *AgentEngine) runReActIteration(
 		}
 		state.FinalAnswer = verdict.finalAnswer
 		state.IsComplete = true
+		if buttonsRan {
+			// The text is the turn's answer; left on the step it would replay
+			// twice in later turns and show again as a step on reload.
+			verdict.step.Thought = ""
+		}
 		state.RoundSteps = append(state.RoundSteps, verdict.step)
 		e.closeAnswerStream(ctx, sessionID, verdict.answerID, verdict.truncated)
 		return iterOutcomeBreak, nil
@@ -1262,8 +1281,11 @@ func (e *AgentEngine) runReActIteration(
 	// Thought.
 	// A tool-bearing response is an intermediate user update. Publish it on its
 	// own channel, never as reasoning or as part of the final deliverable.
+	// Page buttons that failed leave their answer text live, since the stream
+	// handler and the client keep text before a page button; retract it the
+	// same way.
 	progress := agenttools.StripThinkBlocks(response.Content)
-	if e.collaboration != nil && e.collaboration.Child == nil && strings.TrimSpace(progress) != "" {
+	if (buttonsRan || e.collaboration != nil && e.collaboration.Child == nil) && strings.TrimSpace(progress) != "" {
 		step.Progress = progress
 		progressID := response.AnswerEventID
 		if progressID == "" {
@@ -1277,18 +1299,10 @@ func (e *AgentEngine) runReActIteration(
 	}
 
 	// 3. Act: Execute tool calls
-	e.beginRound(step, response.ToolCalls)
-	suspended := e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID, assistantMessageID)
-	e.endRound()
-	toolCallCount = len(step.ToolCalls)
-	if suspended != nil {
-		// The blocked call and the ones after it have not run, so the round
-		// is not part of the transcript yet; it is completed on resume.
-		logger.Infof(ctx, "[Agent][Round-%d] Suspended waiting on prompt %s", round, suspended.PromptID)
-		state.Suspended = suspended
-		state.SuspendedStep = &step
+	if !buttonsRan && e.runRoundTools(ctx, state, response, &step, sessionID, assistantMessageID) {
 		return iterOutcomeBreak, nil
 	}
+	toolCallCount = len(step.ToolCalls)
 
 	// 4. Observe: Add tool results to messages and write to context
 	state.RoundSteps = append(state.RoundSteps, step)
@@ -1300,8 +1314,56 @@ func (e *AgentEngine) runReActIteration(
 		"tool_calls":  toolCallCount,
 		"thought_len": len(step.Thought),
 	})
-
 	return iterOutcomeNext, nil
+}
+
+// runRoundTools executes the round's tool calls and reports whether the run
+// suspended on a prompt.
+func (e *AgentEngine) runRoundTools(
+	ctx context.Context,
+	state *types.AgentState,
+	response *types.ChatResponse,
+	step *types.AgentStep,
+	sessionID, assistantMessageID string,
+) bool {
+	e.beginRound(*step, response.ToolCalls)
+	suspended := e.executeToolCalls(ctx, response, step, state.CurrentRound, sessionID, assistantMessageID)
+	e.endRound()
+	if suspended == nil {
+		return false
+	}
+	// The blocked call and the ones after it have not run, so the round is
+	// not part of the transcript yet; it is completed on resume.
+	logger.Infof(ctx, "[Agent][Round-%d] Suspended waiting on prompt %s",
+		state.CurrentRound+1, suspended.PromptID)
+	state.Suspended = suspended
+	state.SuspendedStep = step
+	return true
+}
+
+// answersWithPageButtons reports whether a reply wrote its answer and only
+// offers page buttons beside it. That is a final answer, not a step: the
+// buttons render under it, and their results tell the model nothing.
+func answersWithPageButtons(response *types.ChatResponse) bool {
+	if len(response.ToolCalls) == 0 || isLengthFinishReason(response.FinishReason) ||
+		strings.TrimSpace(agenttools.StripThinkBlocks(response.Content)) == "" {
+		return false
+	}
+	for _, tc := range response.ToolCalls {
+		if !agenttools.IsPageButtonTool(tc.Function.Name) {
+			return false
+		}
+	}
+	return true
+}
+
+func toolCallsSucceeded(calls []types.ToolCall) bool {
+	for _, tc := range calls {
+		if tc.Result == nil || !tc.Result.Success {
+			return false
+		}
+	}
+	return true
 }
 
 // String returns a stable label for Langfuse output payloads.

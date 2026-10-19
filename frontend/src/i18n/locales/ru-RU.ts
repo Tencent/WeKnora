@@ -1845,6 +1845,7 @@ export default {
       interrupt_agent: 'Прервать агента',
       wait_agent: 'Ожидать агента',
       openPage: 'Открыть страницу',
+      viewPage: 'Просмотр страницы',
       searchWeKnoraDocs: 'Поиск в документации',
       readWeKnoraDoc: 'Чтение документации',
       readPage: 'Просмотр страницы',
@@ -1853,6 +1854,7 @@ export default {
     },
     collaboration: {
       tabs: 'Вкладки задач',
+      updates: 'Обновлений: {count}',
       mainConversation: 'Основной чат',
       recentProgress: 'Последние обновления',
       waitFailed: 'Не удалось дождаться обновлений задач',

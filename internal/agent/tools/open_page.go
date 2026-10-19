@@ -118,13 +118,17 @@ var (
 	openPageAuthTypes    = []string{"", "api_key", "oauth"}
 )
 
+// ToolViewPage opens a WeKnora page in the user's browser and returns what it
+// shows, so the model can answer about it.
+const ToolViewPage = "view_page"
+
 // OpenPageTool checks that what it links to exists and is visible to the
-// user, then hands the link to the client. It changes nothing.
+// user, then hands the link to the client. It changes nothing. As view_page
+// it also opens the page and reads it back.
 type OpenPageTool struct {
 	BaseTool
 	rt OperationsRuntime
-	// actor opens the page in the user's browser for navigate; without it
-	// every link is a button.
+	// actor opens the page in the user's browser; only view_page has one.
 	actor approval.PageActor
 }
 
@@ -136,10 +140,20 @@ func NewOpenPageTool(rt OperationsRuntime) *OpenPageTool {
 	}
 }
 
-// WithPageActor lets navigate open the page in the user's browser.
-func (t *OpenPageTool) WithPageActor(actor approval.PageActor) *OpenPageTool {
-	t.actor = actor
-	return t
+// NewViewPageTool creates view_page, which opens pages through actor.
+func NewViewPageTool(rt OperationsRuntime, actor approval.PageActor) *OpenPageTool {
+	return &OpenPageTool{
+		BaseTool: NewBaseTool(ToolViewPage, viewPageDescription, json.RawMessage(viewPageSchema)),
+		rt:       rt,
+		actor:    actor,
+	}
+}
+
+// IsPageButtonTool reports whether a tool only offers the user a page button.
+// Its result tells the model nothing new, so text written before it in the
+// same reply is the answer rather than a preamble to further work.
+func IsPageButtonTool(name string) bool {
+	return name == ToolOpenPage
 }
 
 const openPageDescription = "" +
@@ -149,21 +163,25 @@ const openPageDescription = "" +
 	"a toolbox tool, or the agent, knowledge base or shared space lists. settings section system-global " +
 	"also takes panel, so a tab such as user management opens directly instead of registration and access. " +
 	"Once the user opens it, " +
-	"read_page can read what it shows. " +
+	"read_page can read what it shows. To look at a page yourself, use view_page instead. " +
 	"It can open an existing model or MCP service for editing, or a new one with the form filled in " +
 	"from model_draft or mcp_service_draft. Use it whenever the next step is the user's on one of these " +
 	"pages: to look at what you created, changed or found (a knowledge base, a document, a Wiki page, " +
 	"an agent), to finish something themselves, or when they ask where something is, instead of " +
 	"describing the way there. Above all use it when the step needs an API key, token or password: " +
 	"never ask for those in chat, and the drafts have no field for them. Offer one button per target, " +
-	"after completing the relevant operations and before writing the final answer; once the tool returns, " +
-	"give the complete answer with the page entry point. Offer none for the page the user already has open. The user " +
+	"once the relevant operations are done: write the complete answer first and call this tool in the " +
+	"same reply. The turn ends there and the button appears under the answer. " +
+	"Offer none for the page the user already has open. The user " +
 	"reviews any form and saves it; nothing is saved by this tool, and the page only opens when they " +
-	"click. Name what they still need to fill in. " +
-	"When you need to look at a page yourself to answer (a setting's current value, what a section shows), " +
-	"set navigate: the page opens for the user now and its content comes back in the result, so you can " +
-	"answer in the same turn. The user can go back from the card. If their page has unsaved changes it is " +
-	"not left and they get the button instead. Not with a draft."
+	"click. Name what they still need to fill in."
+
+const viewPageDescription = "" +
+	"Open a WeKnora page in the user's browser now and get back what it shows, to answer about a page " +
+	"they do not have open: a setting's current value, what a settings section or list shows. It takes " +
+	"the same targets as open_page, without drafts. The user can go back from the card. If their page " +
+	"has unsaved changes it is not left and they get a button instead; then ask them to open it and " +
+	"read it with read_page once they say it is open. To hand the user a page to act on, use open_page."
 
 const openPageSchema = `{
   "type": "object",
@@ -240,16 +258,25 @@ const openPageSchema = `{
       "required": ["name", "transport_type", "url"],
       "additionalProperties": false
     },
-    "note": {"type": "string", "description": "One short line on the button card: what to check or fill in."},
-    "navigate": {
-      "type": "boolean",
-      "description": "Open the page now and return what it shows, instead of a button. ` +
-	`Only to look at it yourself; never with a draft."
-    }
+    "note": {"type": "string", "description": "One short line on the button card: what to check or fill in."}
   },
   "required": ["page"],
   "additionalProperties": false
 }`
+
+// viewPageSchema is open_page's schema without what only a button carries.
+var viewPageSchema = func() string {
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(openPageSchema), &schema); err != nil {
+		panic(err)
+	}
+	properties := schema["properties"].(map[string]any)
+	for _, key := range []string{"model_draft", "mcp_service_draft", "note"} {
+		delete(properties, key)
+	}
+	raw, _ := json.Marshal(schema)
+	return string(raw)
+}()
 
 // OpenPageModelDraft is a new model's form, without credentials.
 type OpenPageModelDraft struct {
@@ -284,7 +311,6 @@ type openPageInput struct {
 	MCPServiceID    string                   `json:"mcp_service_id"`
 	MCPServiceDraft *OpenPageMCPServiceDraft `json:"mcp_service_draft"`
 	Note            string                   `json:"note"`
-	Navigate        bool                     `json:"navigate"`
 }
 
 // OpenPageLink is what the client needs to render the button and open the
@@ -342,9 +368,6 @@ func parseOpenPageInput(args json.RawMessage) (openPageInput, error) {
 }
 
 func validateOpenPageInput(in openPageInput) error {
-	if in.Navigate && (in.ModelDraft != nil || in.MCPServiceDraft != nil) {
-		return errors.New("a form with a draft opens only from its button, for the user to review; drop navigate")
-	}
 	only := func(allowed ...string) error {
 		set := map[string]bool{
 			"knowledge_base_id": in.KnowledgeBaseID != "", "knowledge_id": in.KnowledgeID != "",
@@ -496,6 +519,11 @@ func (t *OpenPageTool) Execute(ctx context.Context, args json.RawMessage) (*type
 	if err != nil {
 		return operationFailure(err.Error()), nil
 	}
+	view := t.Name() == ToolViewPage
+	if view && (input.ModelDraft != nil || input.MCPServiceDraft != nil || input.Note != "") {
+		return operationFailure("view_page takes no draft or note: a form to fill in opens from " +
+			"open_page, for the user to review"), nil
+	}
 	if (input.Page == types.PageModelSettings && (input.ModelID != "" || input.ModelDraft != nil)) ||
 		(input.Page == types.PageMCPServices && (input.MCPServiceID != "" || input.MCPServiceDraft != nil)) {
 		if t.rt.Access.EnforceRole && !t.rt.Access.Role.HasPermission(types.TenantRoleAdmin) {
@@ -507,9 +535,10 @@ func (t *OpenPageTool) Execute(ctx context.Context, args json.RawMessage) (*type
 	if blocked != nil {
 		return blocked, nil
 	}
-	button := fmt.Sprintf("The user now sees a button to open %s. Nothing was opened or saved yet: "+
-		"they open it, review the form and save it themselves.", link.Label)
-	if !input.Navigate {
+	button := fmt.Sprintf("The user now sees a button to open %s under your answer. Nothing was opened or "+
+		"saved yet: they open it, review the form and save it themselves. Your next reply is the answer "+
+		"they read: make it complete.", link.Label)
+	if !view {
 		return openPageResult(link, button), nil
 	}
 	return t.navigate(ctx, link, button), nil

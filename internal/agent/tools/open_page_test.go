@@ -201,14 +201,11 @@ func TestOpenPageRefuses(t *testing.T) {
 	}
 }
 
-func TestOpenPageNavigates(t *testing.T) {
+func TestViewPageNavigates(t *testing.T) {
 	ctx := context.WithValue(pageToolContext(), types.LanguageContextKey, "en-US")
 	run := func(actor approval.PageActor, args string) *types.ToolResult {
-		tool, _ := openPageFixture(types.TenantRoleAdmin)
-		if actor != nil {
-			tool.WithPageActor(actor)
-		}
-		result, err := tool.Execute(ctx, json.RawMessage(args))
+		fixture, _ := openPageFixture(types.TenantRoleAdmin)
+		result, err := NewViewPageTool(fixture.rt, actor).Execute(ctx, json.RawMessage(args))
 		require.NoError(t, err)
 		require.True(t, result.Success, result.Error)
 		return result
@@ -217,7 +214,7 @@ func TestOpenPageNavigates(t *testing.T) {
 	opened := &fakePageActor{res: approval.PageActionResult{Answered: true, Response: types.PageActionPromptResponse{
 		Location: "Settings / General", Snapshot: `select "Font" = "System"`, ReturnPath: "/platform/agents",
 	}}}
-	result := run(opened, `{"page":"settings","section":"general","navigate":true}`)
+	result := run(opened, `{"page":"settings","section":"general"}`)
 	require.Len(t, opened.got, 1)
 	assert.Equal(t, types.PageActionPromptRequest{
 		Action: types.PageActionNavigate,
@@ -227,7 +224,7 @@ func TestOpenPageNavigates(t *testing.T) {
 	users := &fakePageActor{res: approval.PageActionResult{Answered: true, Response: types.PageActionPromptResponse{
 		Location: "Settings / System", Snapshot: `tab "User management" [selected]`,
 	}}}
-	run(users, `{"page":"settings","section":"system-global","panel":"users","navigate":true}`)
+	run(users, `{"page":"settings","section":"system-global","panel":"users"}`)
 	assert.Equal(t, &types.PageNavigateTarget{Page: "settings", Section: "system-global", Panel: "users"},
 		users.got[0].Action.Target)
 	assert.Contains(t, result.Output, "Opened Settings")
@@ -236,7 +233,7 @@ func TestOpenPageNavigates(t *testing.T) {
 	assert.Equal(t, "/platform/agents", result.Data["return_path"])
 
 	agent := &fakePageActor{res: approval.PageActionResult{Answered: true}}
-	run(agent, `{"page":"agent_editor","agent_id":"agent-1","section":"tools","navigate":true}`)
+	run(agent, `{"page":"agent_editor","agent_id":"agent-1","section":"tools"}`)
 	assert.Equal(t, &types.PageNavigateTarget{Page: "agent_editor", AgentID: "agent-1", Section: "tools"},
 		agent.got[0].Action.Target, "the checked link is what the browser opens")
 
@@ -256,19 +253,23 @@ func TestOpenPageNavigates(t *testing.T) {
 		"no browser access": {nil, "could not be opened"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			result := run(tc.actor, `{"page":"settings","section":"general","navigate":true}`)
+			result := run(tc.actor, `{"page":"settings","section":"general"}`)
 			assert.Contains(t, result.Output, tc.want)
 			assert.Contains(t, result.Output, "now sees a button", "the user still gets the button")
 			assert.Nil(t, result.Data["navigated"])
 		})
 	}
 
-	tool, _ := openPageFixture(types.TenantRoleAdmin)
-	result, err := tool.WithPageActor(opened).Execute(ctx,
-		json.RawMessage(`{"page":"settings_models","model_draft":{"type":"chat"},"navigate":true}`))
+	fixture, _ := openPageFixture(types.TenantRoleAdmin)
+	result, err := NewViewPageTool(fixture.rt, opened).Execute(ctx,
+		json.RawMessage(`{"page":"settings_models","model_draft":{"type":"chat"}}`))
 	require.NoError(t, err)
 	assert.False(t, result.Success)
-	assert.Contains(t, result.Error, "drop navigate")
+	assert.Contains(t, result.Error, "takes no draft")
+
+	result, err = fixture.Execute(ctx, json.RawMessage(`{"page":"settings","navigate":true}`))
+	require.NoError(t, err)
+	assert.False(t, result.Success, "open_page only offers a button")
 }
 
 func TestOpenPageModelAndMCPFormsNeedAdmin(t *testing.T) {
