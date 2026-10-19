@@ -28,6 +28,12 @@ test('delegated work keeps progress and approvals in one chronological stream an
     computed, props: { ragMode: false }, hasCollaborationTasks: delegated, showIntermediateSteps: expanded,
     eventStream: stream, isConversationDone: done, intermediateStepsCount: ref(2), readingHistory, timelineCompleted: useDeferredTimelineCompletion(done, readingHistory),
     buildFullEventList: foldProgressIntoThinking, finalContent: ref(null),
+    hideApprovalFromTimeline: (event: { type?: string; kind?: string; host?: unknown; resolved?: boolean }) => {
+      if (event?.type === 'tool_approval_resolved') return true
+      if (event?.type !== 'tool_approval_required') return false
+      const host = event.kind === 'host_command' || event.host != null
+      return host && !event.resolved
+    },
   })
   for (const hasChildren of [false, true]) {
     delegated.value = hasChildren
