@@ -1379,6 +1379,8 @@ export default {
       authWaitTimeout: '授权等待超时（秒）',
       authWaitTimeoutDesc: '对话中触发 OAuth 授权时，等待你完成授权的最长秒数，超时后自动跳过授权提示（仅对使用 OAuth 的 MCP 服务生效）。',
       authWaitTimeoutPlaceholder: '默认 600 秒',
+      accessLevel: '执行权限上限',
+      accessLevelDesc: '修改数据的工具（MCP 工具、Wiki 写入）能否直接执行：只读时不提供这类工具，修改前确认时每次先征求你同意。被标记为需要审批的 MCP 工具始终需要确认。',
       unavailableService: '不可用服务'
     },
     agentType: {

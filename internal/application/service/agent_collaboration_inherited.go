@@ -75,11 +75,16 @@ func inheritedChildSnapshot(ctx context.Context, cfg *types.AgentConfig, toolNam
 		}
 	}
 	// Marshal immediately: later changes to parent config cannot change queued work.
-	data, err := json.Marshal(delegatedConfig{Agent: *source.Agent, Access: cfg.AssistantAccess, Inherited: inherited})
+	data, err := json.Marshal(delegatedConfig{
+		Agent: *source.Agent, Access: cfg.AssistantAccess, AssistantParent: cfg.OperationsAgentID != "",
+		Inherited: inherited,
+	})
 	return string(data), err
 }
 
-func inheritedConfigFromBinding(ctx context.Context) (*delegatedConfig, error) {
+// delegatedConfigFromBinding is the pinned configuration of the delegated
+// child running on ctx, or nil outside one.
+func delegatedConfigFromBinding(ctx context.Context) (*delegatedConfig, error) {
 	b := collaboration.FromContext(ctx)
 	if b == nil || b.Child == nil {
 		return nil, nil
@@ -88,13 +93,19 @@ func inheritedConfigFromBinding(ctx context.Context) (*delegatedConfig, error) {
 	if err := json.Unmarshal([]byte(b.Child.Member.ConfigJSON), &saved); err != nil {
 		return nil, err
 	}
-	if saved.Inherited == nil {
-		return nil, nil
+	return &saved, nil
+}
+
+func inheritedConfigFromBinding(ctx context.Context) (*delegatedConfig, error) {
+	saved, err := delegatedConfigFromBinding(ctx)
+	if err != nil || saved == nil || saved.Inherited == nil {
+		return nil, err
 	}
+	b := collaboration.FromContext(ctx)
 	if saved.Agent.TenantID != b.Scope.TenantID || saved.Inherited.ModelID == "" {
 		return nil, errors.New("invalid inherited execution scope")
 	}
-	return &saved, nil
+	return saved, nil
 }
 
 // restoreInheritedConfig keeps the parent's resolved scope, including document
@@ -109,7 +120,7 @@ func (s *sessionService) restoreInheritedConfig(
 	cfg.SandboxConfigID = snapshot.SandboxConfigID
 	cfg.OperationsAgentID = snapshot.OperationsAgentID
 	cfg.AssistantName = snapshot.AssistantName
-	cfg.AssistantAccess = tenant.AssistantConfig.EffectiveAccessLevel(saved.Access)
+	cfg.AssistantAccess = saved.level(tenant)
 	cfg.ProductDocs = snapshot.ProductDocs
 	cfg.LocalBrowserEnabled = snapshot.LocalBrowserEnabled
 	cfg.AttachmentParseWaitTimeoutSec = snapshot.AttachmentParseWaitTimeoutSec

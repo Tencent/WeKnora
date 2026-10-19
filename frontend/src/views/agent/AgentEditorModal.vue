@@ -1281,6 +1281,20 @@
                 theme="column" :placeholder="$t('agentEditor.mcp.authWaitTimeoutPlaceholder')" />
             </div>
           </div>
+
+          <!-- 执行权限上限：修改数据的工具（MCP、Wiki 写入）能否不经确认直接执行 -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.mcp.accessLevel') }}</label>
+              <p class="desc">{{ $t('agentEditor.mcp.accessLevelDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-select v-model="formData.config.access_level">
+                <t-option v-for="level in ASSISTANT_ACCESS_LEVELS" :key="level" :value="level"
+                  :label="$t(`assistant.access.levels.${level}.label`)" />
+              </t-select>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1907,6 +1921,7 @@ import KBParserSettings, { type ParserEngineRule } from '@/views/knowledge/setti
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
 import { SKILL_ICON } from '@/types/mention';
 import { listEmbedChannels } from '@/api/embed';
+import { ASSISTANT_ACCESS_LEVELS, type AssistantAccessLevel } from '@/api/assistant';
 import { getRootZoom, rectToCssPx } from '@/utils/zoom';
 import { integrationSectionKey } from '@/config/settingsRoute';
 import { toolboxLocation } from '@/config/toolbox';
@@ -2892,6 +2907,8 @@ const defaultFormData = {
     mcp_services: [] as string[],
     // 对话中触发 OAuth 授权时的等待超时（秒），默认 600
     mcp_auth_wait_timeout: 600,
+    // 执行权限上限，默认自动执行
+    access_level: 'auto_write' as AssistantAccessLevel,
     // Skills 设置
     skills_selection_mode: 'none' as 'all' | 'selected' | 'none',
     selected_skills: [] as string[],
@@ -3634,6 +3651,7 @@ watch(() => props.visible, async (val) => {
       if (agentData.config.mcp_auth_wait_timeout == null || agentData.config.mcp_auth_wait_timeout <= 0) {
         agentData.config.mcp_auth_wait_timeout = 600;
       }
+      if (!agentData.config.access_level) agentData.config.access_level = 'auto_write';
       if (!agentData.config.selected_skills) agentData.config.selected_skills = [];
       if (!agentData.config.supported_file_types) agentData.config.supported_file_types = [];
       if (!agentData.config.chat_parser_engine_rules) agentData.config.chat_parser_engine_rules = [];

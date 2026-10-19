@@ -193,9 +193,10 @@ type Access struct {
 	Level types.AssistantAccessLevel
 }
 
-// NeedsApproval reports whether running op must wait for the user.
+// NeedsApproval reports whether running op must wait for the user. An
+// operation the level denies is withheld before it gets here.
 func (a Access) NeedsApproval(op Operation) bool {
-	return policy.Decide(policy.Action{Risk: op.Risk, Always: op.AlwaysConfirm}, a.Rules()) == policy.Ask
+	return policy.Decide(policy.Action{Risk: op.Risk, Always: op.AlwaysConfirm}, a.Rules()) != policy.Allow
 }
 
 // Rules are the execution rules this access gives a run.

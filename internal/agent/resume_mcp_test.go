@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -17,7 +18,11 @@ type resumeMCPGate struct{ resumed bool }
 func (*resumeMCPGate) IsEnabled(context.Context, uint64, string, string) (bool, error) {
 	return true, nil
 }
-func (*resumeMCPGate) NeedsApproval(context.Context, uint64, string, string) bool { return true }
+
+func (*resumeMCPGate) Verdict(context.Context, uint64, string, *types.MCPTool) policy.Verdict {
+	return policy.Ask
+}
+
 func (*resumeMCPGate) RequestAndWait(context.Context, approval.PendingRequest) (approval.Decision, error) {
 	return approval.Decision{Reason: "unexpected new approval"}, nil
 }

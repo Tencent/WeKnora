@@ -1377,6 +1377,8 @@ export default {
       authWaitTimeout: '인증 대기 시간(초)',
       authWaitTimeoutDesc: '대화 중 OAuth 인증이 필요할 때 인증 완료를 기다리는 최대 시간(초)이며, 초과하면 인증 요청을 건너뜁니다(OAuth를 사용하는 MCP 서비스에만 적용).',
       authWaitTimeoutPlaceholder: '기본 600초',
+      accessLevel: '실행 권한 상한',
+      accessLevelDesc: '데이터를 변경하는 도구(MCP 도구, Wiki 쓰기)를 확인 없이 실행할지 여부입니다. 읽기 전용이면 이러한 도구를 제공하지 않고, 변경 전 확인이면 매번 확인을 요청합니다. 승인이 필요하도록 표시된 MCP 도구는 항상 확인합니다.',
       unavailableService: '사용할 수 없는 서비스'
     },
     agentType: {

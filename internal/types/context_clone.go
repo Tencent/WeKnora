@@ -96,6 +96,9 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	// Whether anyone can answer the run's prompts. Dropping it reads as
 	// unattended, which refuses an approval an attended run could have asked.
 	RunModeContextKey: true,
+	// The run's access level. Dropping it reads as auto_write, which would
+	// let a lower-level run's MCP writes through without asking.
+	AccessLevelContextKey: true,
 
 	// ---- Deliberately does not survive a detach ----
 	//

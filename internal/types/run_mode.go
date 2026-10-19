@@ -44,3 +44,18 @@ func RunModeFromContext(ctx context.Context) RunMode {
 	m, _ := ctx.Value(RunModeContextKey).(RunMode)
 	return m.Normalize()
 }
+
+// WithAccessLevel records the run's effective access level.
+func WithAccessLevel(ctx context.Context, level AssistantAccessLevel) context.Context {
+	return context.WithValue(ctx, AccessLevelContextKey, level)
+}
+
+// AccessLevelFromContext is the run's access level. A context that never
+// set one gets AssistantAccessAutoWrite, the level of an agent with no
+// configured ceiling.
+func AccessLevelFromContext(ctx context.Context) AssistantAccessLevel {
+	if level, ok := ctx.Value(AccessLevelContextKey).(AssistantAccessLevel); ok && level.Valid() {
+		return level
+	}
+	return AssistantAccessAutoWrite
+}

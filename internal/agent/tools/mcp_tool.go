@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/hitl"
+	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -178,13 +179,21 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 
 	// Human approval gate for dangerous tools (issue #1173)
 	if t.gate != nil {
+		tenantID, _ := types.TenantIDFromContext(ctx)
+		verdict := t.gate.Verdict(ctx, tenantID, t.service.ID, t.mcpTool)
+		if verdict == policy.Deny {
+			return &types.ToolResult{
+				Success: false,
+				Error: "this tool changes data, which this conversation's read-only access does not allow. " +
+					"Tell the user; do not retry.",
+			}, nil
+		}
 		if meta := execMeta; meta != nil && meta.EventBus != nil {
-			tenantID, _ := types.TenantIDFromContext(ctx)
 			// A resumed call already holds the user's decision. It is honored
 			// even if the tool stopped requiring approval meanwhile, since the
 			// user may have edited the arguments.
 			resumed := meta.Answered != nil && meta.Answered.Kind == types.AgentPromptKindToolApproval
-			if resumed || t.gate.NeedsApproval(ctx, tenantID, t.service.ID, t.mcpTool.Name) {
+			if resumed || verdict == policy.Ask {
 				// Use ApprovalCtx (round-level ctx WITHOUT defaultToolExecTimeout) so
 				// human approval can legitimately wait longer than the per-tool 60s.
 				// User-stop / request cancel still propagates because ApprovalCtx is a

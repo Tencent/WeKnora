@@ -33,6 +33,12 @@ func (r Risk) Valid() bool {
 // Mutates reports whether the action changes data.
 func (r Risk) Mutates() bool { return r == RiskWrite || r == RiskDestructive }
 
+var riskRank = map[Risk]int{RiskRead: 1, RiskProbe: 2, RiskWrite: 3, RiskDestructive: 4}
+
+// Above reports whether r is a higher risk than other. Every known risk is
+// above an unknown or empty one.
+func (r Risk) Above(other Risk) bool { return riskRank[r] > riskRank[other] }
+
 // Action is one call the agent wants to make.
 type Action struct {
 	Risk Risk
@@ -45,9 +51,6 @@ type Action struct {
 type Rules struct {
 	// Level is the run's effective access level.
 	Level types.AssistantAccessLevel
-	// ForceAsk asks for every action. A delegated child sets it when its
-	// parent was not allowed to write without asking.
-	ForceAsk bool
 }
 
 // Verdict is the outcome of Decide.
@@ -58,12 +61,18 @@ const (
 	Allow Verdict = iota
 	// Ask runs the action only after the user approves it.
 	Ask
+	// Deny refuses the action: the run may not make it even with approval.
+	Deny
 )
 
 // Decide returns whether a may run under r. Mutations a read-only run must
-// not make are kept from the model by Offered; one that still arrives asks.
+// not make are kept from the model by Offered; one that still arrives is
+// denied.
 func Decide(a Action, r Rules) Verdict {
-	if a.Always || r.ForceAsk {
+	if !Offered(r.Level, a.Risk) {
+		return Deny
+	}
+	if a.Always {
 		return Ask
 	}
 	switch a.Risk {
@@ -80,7 +89,8 @@ func Decide(a Action, r Rules) Verdict {
 }
 
 // Offered reports whether an action of risk should be offered to the model
-// at all under level. A read-only run is not shown changes it cannot make.
+// at all under level. A read-only run is not shown changes it cannot make,
+// nor anything whose risk is unknown.
 func Offered(level types.AssistantAccessLevel, risk Risk) bool {
-	return level != types.AssistantAccessReadOnly || !risk.Mutates()
+	return level != types.AssistantAccessReadOnly || risk == RiskRead || risk == RiskProbe
 }

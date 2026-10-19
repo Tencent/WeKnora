@@ -104,6 +104,15 @@ func (s *sessionService) AgentQA(
 	if err != nil {
 		return err
 	}
+	if delegated, err := delegatedConfigFromBinding(ctx); err != nil {
+		return err
+	} else if delegated != nil {
+		agentConfig.AssistantAccess = delegated.level(tenantInfo)
+		if agentConfig.AssistantAccess == types.AssistantAccessReadOnly {
+			agentConfig.WritableKBIDs = nil
+		}
+	}
+	ctx = types.WithAccessLevel(ctx, agentConfig.AssistantAccess)
 
 	// Set VLM model ID for tool result image analysis (runtime-only field)
 	if req.CustomAgent != nil && req.CustomAgent.Config.VLMModelID != "" {
@@ -465,7 +474,7 @@ func (s *sessionService) buildAgentConfig(
 		MaxCompletionTokens:           customAgent.Config.MaxCompletionTokens,
 		RetainRetrievalHistory:        customAgent.Config.RetainRetrievalHistory,
 		SharedAgentReadOnly:           req.SharedAgentReadOnly,
-		AssistantAccess:               tenantInfo.AssistantConfig.EffectiveAccessLevel(req.AssistantAccess),
+		AssistantAccess:               types.CapAccessLevel(req.AssistantAccess, customAgent.Config.AccessLevel),
 		// The model is always told it may call tools in parallel; without
 		// this the engine still ran them one by one, so three searches in
 		// one reply cost three sequential embed/retrieve/rerank rounds.
@@ -587,10 +596,10 @@ func (s *sessionService) buildAgentConfig(
 			if cfg := tenantInfo.AssistantConfig; cfg != nil {
 				agentConfig.AssistantName = strings.TrimSpace(cfg.DisplayName)
 			}
-			if agentConfig.AssistantAccess == types.AssistantAccessReadOnly {
-				// Wiki tools write outside the catalog; read-only covers them too.
-				agentConfig.WritableKBIDs = nil
-			}
+		}
+		if agentConfig.AssistantAccess == types.AssistantAccessReadOnly {
+			// Wiki tools write outside the catalog; read-only covers them too.
+			agentConfig.WritableKBIDs = nil
 		}
 	}
 	agentConfig.QuestionOrigin = questionOriginInTargets(ctx, req.QuestionOrigin, searchTargets)

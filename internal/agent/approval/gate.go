@@ -79,7 +79,8 @@ type PendingRequest struct {
 
 // MCPApproval is the surface used by MCPTool (mockable in tests).
 type MCPApproval interface {
-	NeedsApproval(ctx context.Context, tenantID uint64, serviceID, toolName string) bool
+	// Verdict decides whether a call of tool may run, must ask, or is denied.
+	Verdict(ctx context.Context, tenantID uint64, serviceID string, tool *types.MCPTool) policy.Verdict
 	IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error)
 	RequestAndWait(ctx context.Context, req PendingRequest) (Decision, error)
 	// ResumeDecision is the decision carried by the answered prompt a resumed
@@ -139,7 +140,7 @@ type Gate struct {
 	timeout   time.Duration
 	hotWait   time.Duration // in-memory wait before a suspendable approval suspends the run
 	broker    *hitl.Broker
-	failClose bool // when true, NeedsApproval errors block (require approval) instead of skip
+	failClose bool // when true, policy read errors require approval instead of skipping it
 }
 
 // Errors returned by Resolve; they alias the prompt broker's errors.
@@ -183,32 +184,21 @@ func NewGate(cfg *config.Config, checker Checker, broker *hitl.Broker) *Gate {
 	return &Gate{checker: checker, timeout: timeout, hotWait: hotWait, broker: broker, failClose: failClose}
 }
 
-// NeedsApproval returns whether execution should pause for human confirmation.
-func (g *Gate) NeedsApproval(ctx context.Context, tenantID uint64, serviceID, toolName string) bool {
-	// MCP tools have no risk classification yet, so the access level does not
-	// apply to them: the workspace's per-tool flag and delegation decide.
-	action := policy.Action{Risk: policy.RiskWrite, Always: g.requiredByPolicy(ctx, tenantID, serviceID, toolName)}
-	rules := policy.Rules{Level: types.AssistantAccessAutoWrite, ForceAsk: hitl.RequiresDelegatedApproval(ctx)}
-	return policy.Decide(action, rules) == policy.Ask
+// Verdict decides a call of an MCP tool under the run's access level: the
+// tool's risk comes from the workspace's policy and the service's
+// annotations, and a tool the workspace marked as requiring approval
+// always asks.
+func (g *Gate) Verdict(ctx context.Context, tenantID uint64, serviceID string, tool *types.MCPTool) policy.Verdict {
+	rules := policy.Rules{Level: types.AccessLevelFromContext(ctx)}
+	return policy.Decide(g.mcpAction(ctx, tenantID, serviceID, tool), rules)
 }
 
 // requiredByPolicy reports whether the workspace marked the tool as always
-// requiring approval.
+// requiring approval, for checkers that know nothing about risk.
 func (g *Gate) requiredByPolicy(ctx context.Context, tenantID uint64, serviceID, toolName string) bool {
-	if g == nil || g.checker == nil || tenantID == 0 || serviceID == "" || toolName == "" {
-		return false
-	}
 	ok, err := g.checker.IsRequired(ctx, tenantID, serviceID, toolName)
 	if err != nil {
-		// Default fail-close: a transient DB error must NOT silently allow a
-		// dangerous tool to run. Operators can opt into legacy behaviour via
-		// WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN=true.
-		if g.failClose {
-			logger.GetLogger(ctx).Warnf("mcp tool approval check failed (fail-close: requiring approval): %v", err)
-			return true
-		}
-		logger.GetLogger(ctx).Warnf("mcp tool approval check failed (fail-open: skip gate): %v", err)
-		return false
+		return g.failedAction(ctx, err).Always
 	}
 	return ok
 }
@@ -230,9 +220,6 @@ func (g *Gate) IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolNa
 // RequestAndWait emits a UI event, then blocks until Resolve, timeout, or ctx cancellation.
 func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision, error) {
 	if g == nil {
-		return Decision{Approved: true}, nil
-	}
-	if g.checker == nil && !hitl.RequiresDelegatedApproval(ctx) {
 		return Decision{Approved: true}, nil
 	}
 	return g.awaitToolApproval(ctx, req)
@@ -734,10 +721,33 @@ type Adapter struct {
 	Svc interface {
 		IsRequired(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error)
 		IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error)
+		Policy(ctx context.Context, tenantID uint64, serviceID, toolName string) (*types.MCPToolApproval, error)
+		ObserveRisk(ctx context.Context, tenantID uint64, serviceID, toolName string, risk string) error
 	}
 }
 
-var _ Checker = (*Adapter)(nil)
+var (
+	_ Checker     = (*Adapter)(nil)
+	_ RiskChecker = (*Adapter)(nil)
+)
+
+// Policy implements RiskChecker.
+func (a *Adapter) Policy(
+	ctx context.Context, tenantID uint64, serviceID, toolName string,
+) (*types.MCPToolApproval, error) {
+	if a == nil || a.Svc == nil {
+		return nil, nil
+	}
+	return a.Svc.Policy(ctx, tenantID, serviceID, toolName)
+}
+
+// ObserveRisk implements RiskChecker.
+func (a *Adapter) ObserveRisk(ctx context.Context, tenantID uint64, serviceID, toolName string, risk string) error {
+	if a == nil || a.Svc == nil {
+		return nil
+	}
+	return a.Svc.ObserveRisk(ctx, tenantID, serviceID, toolName, risk)
+}
 
 // IsRequired implements Checker.
 func (a *Adapter) IsRequired(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {

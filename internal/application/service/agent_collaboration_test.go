@@ -90,7 +90,11 @@ func (f *collaborationSessions) GetSession(_ context.Context, id string) (*types
 }
 
 func (f *collaborationSessions) AgentQA(ctx context.Context, req *types.QARequest, bus *event.EventBus) error {
-	return f.run(types.WithRunMode(ctx, req.Mode), req, bus)
+	ctx = types.WithRunMode(ctx, req.Mode)
+	if req.AssistantAccess.Valid() {
+		ctx = types.WithAccessLevel(ctx, req.AssistantAccess)
+	}
+	return f.run(ctx, req, bus)
 }
 
 func collaborationService(
@@ -292,7 +296,7 @@ func TestCollaborationPinnedAccessDoesNotAllowImplicitWrite(t *testing.T) {
 	s, _, _, ctx := collaborationService(t)
 	scope := collaboration.Scope{TenantID: 7, UserID: "u", SessionID: "s", ID: "m"}
 	require.NoError(t, s.Runtime.Store.Ensure(ctx, scope))
-	snapshot, err := s.resolve(ctx, "a", types.AssistantAccessConfirm)
+	snapshot, err := s.resolveDelegated(ctx, "a", types.AssistantAccessConfirm, true)
 	require.NoError(t, err)
 	_, err = s.Runtime.Spawn(ctx, scope, "spawn", "one", "a", snapshot, "q")
 	require.NoError(t, err)
@@ -316,13 +320,16 @@ func TestCollaborationPinnedAccessDoesNotAllowImplicitWrite(t *testing.T) {
 		t,
 		s.attach(collaboration.WithBinding(ctx, b), &agent.AgentEngine{}, r, &types.AgentConfig{}, "child", "cm"),
 	)
-	_, err = r.ExecuteTool(ctx, "unsafe_write", json.RawMessage(`{}`))
-	require.ErrorContains(t, err, "requires approval")
+	res, err := r.ExecuteTool(ctx, "unsafe_write", json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.False(t, res.Success, "a write the child cannot get approved here is refused")
 	require.False(t, write.called)
-	snapshot, err = s.resolve(ctx, "a", types.AssistantAccessAutoWrite)
+	snapshot, err = s.resolveDelegated(ctx, "a", types.AssistantAccessAutoWrite, true)
 	require.NoError(t, err)
 	work.Member.ConfigJSON = snapshot
 	s.tenants = &collaborationTenants{level: types.AssistantAccessAutoWrite}
+	r = tools.NewToolRegistry()
+	r.RegisterTool(write)
 	require.NoError(
 		t,
 		s.attach(collaboration.WithBinding(ctx, b), &agent.AgentEngine{}, r, &types.AgentConfig{}, "child", "cm"),

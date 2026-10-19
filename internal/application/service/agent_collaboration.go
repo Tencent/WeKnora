@@ -14,7 +14,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/collaboration"
 	"github.com/Tencent/WeKnora/internal/agent/hitl"
 	"github.com/Tencent/WeKnora/internal/agent/operations"
-	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -178,12 +177,36 @@ func (s *AgentCollaboration) prune(ctx context.Context) error {
 }
 
 type delegatedConfig struct {
-	Agent     types.CustomAgent          `json:"agent"`
-	Access    types.AssistantAccessLevel `json:"access"`
-	Inherited *inheritedAgentConfig      `json:"inherited,omitempty"`
+	Agent  types.CustomAgent          `json:"agent"`
+	Access types.AssistantAccessLevel `json:"access"`
+	// AssistantParent records that the delegating run was the WeKnora
+	// assistant, whose level stays under the workspace's assistant ceiling.
+	AssistantParent bool                  `json:"assistant_parent,omitempty"`
+	Inherited       *inheritedAgentConfig `json:"inherited,omitempty"`
+}
+
+// level is the child's access level: the delegating run's, capped by the
+// child agent's own ceiling and, under an assistant parent, by the
+// workspace's current assistant ceiling.
+func (d *delegatedConfig) level(tenant *types.Tenant) types.AssistantAccessLevel {
+	level := types.CapAccessLevel(d.Access, d.Agent.Config.AccessLevel)
+	if d.AssistantParent || (d.Inherited != nil && d.Inherited.OperationsAgentID != "") {
+		var assistant *types.AssistantConfig
+		if tenant != nil {
+			assistant = tenant.AssistantConfig
+		}
+		level = types.CapAccessLevel(level, assistant.EffectiveAccessLevel(d.Access))
+	}
+	return level
 }
 
 func (s *AgentCollaboration) resolve(ctx context.Context, id string, level types.AssistantAccessLevel) (string, error) {
+	return s.resolveDelegated(ctx, id, level, false)
+}
+
+func (s *AgentCollaboration) resolveDelegated(
+	ctx context.Context, id string, level types.AssistantAccessLevel, assistantParent bool,
+) (string, error) {
 	a, err := s.agents.GetAgentByID(ctx, id)
 	if err != nil {
 		return "", err
@@ -194,7 +217,7 @@ func (s *AgentCollaboration) resolve(ctx context.Context, id string, level types
 		id == types.BuiltinSkillInstallerID {
 		return "", errors.New("only same-workspace reasoning agents without management privileges may be delegated")
 	}
-	data, err := json.Marshal(delegatedConfig{Agent: *a, Access: level})
+	data, err := json.Marshal(delegatedConfig{Agent: *a, Access: level, AssistantParent: assistantParent})
 	return string(data), err
 }
 
@@ -247,7 +270,7 @@ func (s *AgentCollaboration) attach(
 			if strings.TrimSpace(id) == "" {
 				return inheritedChildSnapshot(ctx, cfg, registry.ListTools())
 			}
-			return s.resolve(ctx, id, cfg.AssistantAccess)
+			return s.resolveDelegated(ctx, id, cfg.AssistantAccess, cfg.OperationsAgentID != "")
 		}) {
 		registry.RegisterTool(tool)
 	}
@@ -266,7 +289,12 @@ func (s *AgentCollaboration) attach(
 		if err := json.Unmarshal([]byte(b.Child.Member.ConfigJSON), &pinned); err != nil {
 			return err
 		}
-		cfg.AssistantAccess = pinned.Access
+		workerCtx, err := s.workerContext(ctx, b.Scope)
+		if err != nil {
+			return err
+		}
+		tenant, _ := workerCtx.Value(types.TenantInfoContextKey).(*types.Tenant)
+		cfg.AssistantAccess = pinned.level(tenant)
 		if pinned.Inherited != nil {
 			registry.RestrictTools(append(append([]string(nil), pinned.Inherited.ToolNames...), "send_message"))
 		}
@@ -278,17 +306,15 @@ func (s *AgentCollaboration) attach(
 				}
 			}
 		}
-		// Inherited workers may use arbitrary sandbox tools. Give mutations an
-		// actual approval path instead of the legacy template guard's dead end.
-		if pinned.Inherited != nil {
-			for _, name := range registry.ListTools() {
-				if inheritedToolOwnsPolicy(name) {
-					continue
-				}
-				if err := registry.RequireConfirmation(name, operations.RiskWrite,
-					operations.Access{Level: cfg.AssistantAccess}, s.gate); err != nil {
-					return err
-				}
+		// Workers may use arbitrary sandbox tools. Give mutations the same
+		// approval path as the parent's instead of refusing them.
+		for _, name := range registry.ListTools() {
+			if _, wrapped := assistantWriteToolRisk[name]; wrapped || inheritedToolOwnsPolicy(name) {
+				continue
+			}
+			if err := registry.RequireConfirmation(name, operations.RiskWrite,
+				operations.Access{Level: cfg.AssistantAccess}, s.gate); err != nil {
+				return err
 			}
 		}
 		registry.SetExecutionGuard(func(ctx context.Context, tool types.Tool) error {
@@ -310,28 +336,10 @@ func (s *AgentCollaboration) attach(
 				return nil
 			}
 			currentTenant, _ := currentCtx.Value(types.TenantInfoContextKey).(*types.Tenant)
-			currentAccess := currentTenant.AssistantConfig.EffectiveAccessLevel(saved.Access)
-			if currentAccess != cfg.AssistantAccess {
+			if saved.level(currentTenant) != cfg.AssistantAccess {
 				return errors.New("delegated access changed; start a newly authorized turn")
 			}
-			if _, writes := assistantWriteToolRisk[tool.Name()]; writes {
-				return nil
-			}
-			if saved.Inherited != nil {
-				return nil // Registered tools own their policy or were wrapped above.
-			}
-			if strings.HasPrefix(tool.Name(), "mcp_") || tool.Name() == tools.ToolCallMCPTool ||
-				tool.Name() == "ask_user" {
-				return nil
-			}
-			write := policy.Action{Risk: policy.RiskWrite}
-			if policy.Decide(write, policy.Rules{Level: currentAccess}) == policy.Allow {
-				return nil
-			}
-			return fmt.Errorf(
-				"delegated tool %s requires approval in the parent conversation; this child cannot grant approval",
-				tool.Name(),
-			)
+			return nil // Registered tools own their policy or were wrapped above.
 		})
 	}
 	return nil
@@ -497,8 +505,6 @@ func (s *AgentCollaboration) run(ctx context.Context, w collaboration.Work) (col
 		}
 	}
 	ctx = hitl.WithDelegation(ctx, hitl.Delegation{
-		RequireApproval: policy.Decide(policy.Action{Risk: policy.RiskWrite},
-			policy.Rules{Level: saved.Access}) == policy.Ask,
 		Register: func(ctx context.Context, p *types.AgentPrompt) error {
 			if p.TenantID != w.Scope.TenantID || p.UserID != delegatedPromptUser(w.Scope.UserID) ||
 				p.SessionID != session.ID ||

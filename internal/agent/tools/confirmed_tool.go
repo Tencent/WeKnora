@@ -68,7 +68,13 @@ func (t *ConfirmedTool) Parameters() json.RawMessage { return t.inner.Parameters
 func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	meta, _ := ToolExecFromContext(ctx)
 	resumed := meta != nil && meta.Answered != nil && meta.Answered.Kind == types.AgentPromptKindToolApproval
-	if !resumed && policy.Decide(policy.Action{Risk: t.risk}, t.access.Rules()) == policy.Allow {
+	verdict := policy.Decide(policy.Action{Risk: t.risk}, t.access.Rules())
+	if verdict == policy.Deny {
+		return operationFailure(fmt.Sprintf(
+			"%s changes data, which this conversation's read-only access does not allow. "+
+				"Tell the user; do not retry.", t.Name())), nil
+	}
+	if !resumed && verdict == policy.Allow {
 		return t.inner.Execute(ctx, args)
 	}
 	if t.gate == nil || meta == nil || meta.EventBus == nil || (!meta.CanAsk() && !resumed) {

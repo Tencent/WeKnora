@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -28,6 +29,12 @@ type stubChecker struct {
 func (s *stubChecker) IsRequired(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
 	return s.required, s.err
 }
+
+func (s *stubChecker) Policy(context.Context, uint64, string, string) (*types.MCPToolApproval, error) {
+	return &types.MCPToolApproval{RequireApproval: s.required}, s.err
+}
+
+func (s *stubChecker) ObserveRisk(context.Context, uint64, string, string, string) error { return nil }
 
 func (s *stubChecker) IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
 	if s.enabledErr != nil {
@@ -131,9 +138,9 @@ func TestGate_UnattendedRunRefusesWithoutAsking(t *testing.T) {
 	require.Empty(t, prompts, "no prompt is left pending")
 }
 
-func TestGate_NeedsApproval_NoChecker(t *testing.T) {
+func TestGate_Verdict_NoChecker(t *testing.T) {
 	g := NewGate(nil, nil, nil)
-	require.False(t, g.NeedsApproval(context.Background(), 1, "x", "y"))
+	require.Equal(t, policy.Allow, g.Verdict(context.Background(), 1, "x", &types.MCPTool{Name: "y"}))
 }
 
 func TestGate_Resolve_NotFound(t *testing.T) {

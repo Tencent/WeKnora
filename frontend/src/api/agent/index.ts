@@ -1,4 +1,5 @@
 import { get, post, put, del } from "../../utils/request";
+import type { AssistantAccessLevel } from "../assistant";
 
 // 智能体配置
 // 智能推理下的智能体类型预设 ID
@@ -63,6 +64,8 @@ export interface CustomAgentConfig {
   // 对话中触发 OAuth 授权时的等待超时（秒）：到点后自动跳过授权提示。
   // <=0 时使用服务端默认超时。仅对使用 OAuth 的 MCP 服务生效。
   mcp_auth_wait_timeout?: number;
+  // 执行权限上限：修改数据的工具能否不经确认直接执行。未设置等同 auto_write。
+  access_level?: AssistantAccessLevel;
 
   // ===== Skills设置（仅Agent模式）=====
   // Skills选择模式：all=全部预装, selected=指定, none=不使用

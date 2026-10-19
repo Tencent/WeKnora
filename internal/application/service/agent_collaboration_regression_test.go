@@ -161,6 +161,11 @@ func testChildWikiConfirmation(t *testing.T, name string, level types.AssistantA
 	result, err = registry.ExecuteTool(approvedCtx, name, json.RawMessage(`{}`))
 	require.NoError(t, err)
 	require.False(t, result.Success)
+	if level == types.AssistantAccessReadOnly {
+		require.False(t, write.called, "a read-only child cannot write even with approval")
+		require.Zero(t, gate.requests, "a read-only child does not ask for a write")
+		return
+	}
 	require.False(t, write.called, "denied approval must not execute")
 	require.Equal(t, 1, gate.requests)
 	gate.approved = true

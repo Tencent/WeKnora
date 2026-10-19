@@ -36,6 +36,23 @@ func (r *MCPToolApprovalRepository) ListByService(ctx context.Context, tenantID 
 	return rows, nil
 }
 
+// Get returns the stored policy of a tool, or nil when it has none.
+func (r *MCPToolApprovalRepository) Get(
+	ctx context.Context, tenantID uint64, serviceID, toolName string,
+) (*types.MCPToolApproval, error) {
+	var row types.MCPToolApproval
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND service_id = ? AND tool_name = ?", tenantID, serviceID, toolName).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get mcp tool policy: %w", err)
+	}
+	return &row, nil
+}
+
 // IsRequired returns true when a row exists with require_approval = true.
 func (r *MCPToolApprovalRepository) IsRequired(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
 	var row types.MCPToolApproval
@@ -79,8 +96,8 @@ func (r *MCPToolApprovalRepository) UpsertPolicy(
 	if serviceID == "" || toolName == "" {
 		return errors.New("service_id and tool_name are required")
 	}
-	if patch.RequireApproval == nil && patch.Enabled == nil {
-		return errors.New("require_approval or enabled is required")
+	if patch.RequireApproval == nil && patch.Enabled == nil && patch.Risk == nil && patch.ObservedRisk == nil {
+		return errors.New("an MCP tool policy field is required")
 	}
 
 	now := time.Now()
@@ -100,6 +117,15 @@ func (r *MCPToolApprovalRepository) UpsertPolicy(
 	if patch.Enabled != nil {
 		updates["enabled"] = *patch.Enabled
 	}
+	risk, observed := "", ""
+	if patch.Risk != nil {
+		risk = *patch.Risk
+		updates["risk"] = risk
+	}
+	if patch.ObservedRisk != nil {
+		observed = *patch.ObservedRisk
+		updates["observed_risk"] = observed
+	}
 
 	row := map[string]interface{}{
 		"id":               uuid.New().String(),
@@ -108,6 +134,8 @@ func (r *MCPToolApprovalRepository) UpsertPolicy(
 		"tool_name":        toolName,
 		"require_approval": requireApproval,
 		"enabled":          enabled,
+		"risk":             risk,
+		"observed_risk":    observed,
 		"created_at":       now,
 		"updated_at":       now,
 	}
