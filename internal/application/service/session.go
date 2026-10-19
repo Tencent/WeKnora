@@ -864,6 +864,7 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 		logger.Error(ctx, "Failed to generate title: session cannot be empty")
 		return "", stderrors.New("session cannot be empty")
 	}
+	ctx = types.WithSessionID(ctx, session.ID)
 
 	// Skip if title already exists
 	if session.Title != "" {

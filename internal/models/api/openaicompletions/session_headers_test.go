@@ -34,10 +34,14 @@ func TestConversationHeadersAcrossTurnsAndToolResults(t *testing.T) {
 				requests = append(requests, body)
 				if body["stream"] == true {
 					w.Header().Set("Content-Type", "text/event-stream")
-					_, _ = w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+					_, _ = w.Write([]byte("data: " +
+						`{"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}` +
+						"\n\ndata: [DONE]\n\n"))
 					return
 				}
-				_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+				_, _ = w.Write([]byte(
+					`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`,
+				))
 			}))
 			defer server.Close()
 			settings := api.DefaultOpenAICompletions()
@@ -57,11 +61,16 @@ func TestConversationHeadersAcrossTurnsAndToolResults(t *testing.T) {
 			ctx = types.WithSessionID(context.Background(), "business-session")
 			stream, err := client.ChatStream(ctx, messages, opts)
 			require.NoError(t, err)
-			for range stream {
+			var streamedContent string
+			for chunk := range stream {
+				streamedContent += chunk.Content
 			}
+			assert.Equal(t, "ok", streamedContent)
 
 			messages = append(messages,
-				api.Message{Role: "assistant", ToolCalls: []api.ToolCall{{ID: "call-1", Type: "function", Function: api.FunctionCall{Name: "search", Arguments: `{}`}}}},
+				api.Message{Role: "assistant", ToolCalls: []api.ToolCall{{
+					ID: "call-1", Type: "function", Function: api.FunctionCall{Name: "search", Arguments: `{}`},
+				}}},
 				api.Message{Role: "tool", ToolCallID: "call-1", Content: "Search result"},
 			)
 			_, err = client.Chat(ctx, messages, opts)

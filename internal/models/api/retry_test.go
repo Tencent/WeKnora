@@ -54,7 +54,8 @@ func TestPostJSONWithRetrySucceedsAfterATransportFailure(t *testing.T) {
 
 	var out map[string]any
 	err := Endpoint{}.PostJSONWithRetry(
-		types.WithSessionID(context.Background(), "retry-session"), server.URL, map[string]any{}, &out, fastPolicy(), "test",
+		types.WithSessionID(context.Background(), "retry-session"),
+		server.URL, map[string]any{}, &out, fastPolicy(), "test",
 	)
 	require.NoError(t, err)
 	assert.Equal(t, true, out["ok"])

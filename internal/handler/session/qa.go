@@ -764,6 +764,9 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 	// borrowed tenant above drives everything else, because DeleteSession tears
 	// that sandbox down from a request that only knows the session's tenant.
 	baseCtx = types.WithSandboxTenantID(baseCtx, reqCtx.session.TenantID)
+	// Attachment analysis and title generation run before the QA service.
+	// Give all asynchronous work the same business conversation identity.
+	baseCtx = types.WithSessionID(baseCtx, reqCtx.session.ID)
 
 	// An agent that opted out of long-term memory has to be opted out of the
 	// write path too, not just recall. The two run from different contexts:
