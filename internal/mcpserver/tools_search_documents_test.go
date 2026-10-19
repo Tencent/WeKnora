@@ -65,7 +65,8 @@ func (s *documentSearchKBService) HybridSearch(
 		}
 		passesThreshold := (!params.DisableVectorMatch && row.Score >= params.VectorThreshold) ||
 			(!params.DisableKeywordsMatch && row.Score >= params.KeywordThreshold)
-		if inKB && passesThreshold && (len(params.KnowledgeIDs) == 0 || slices.Contains(params.KnowledgeIDs, row.KnowledgeID)) {
+		inDocumentScope := len(params.KnowledgeIDs) == 0 || slices.Contains(params.KnowledgeIDs, row.KnowledgeID)
+		if inKB && passesThreshold && inDocumentScope {
 			rows = append(rows, row)
 		}
 	}
@@ -106,7 +107,9 @@ func newDocumentSearchFixture(t *testing.T) (*Server, *gin.Engine, *documentSear
 	}
 	srv := NewServer(kbService, &stubKnowledgeService{docs: docs}, nil, nil, nil, nil, nil,
 		&stubKBShareService{shared: map[string]types.OrgMemberRole{"kb-shared": types.OrgRoleViewer}},
-		nil, nil, nil, &config.Config{Conversation: &config.ConversationConfig{EmbeddingTopK: 1, VectorThreshold: 0.95, KeywordThreshold: 0.95}},
+		nil, nil, nil, &config.Config{Conversation: &config.ConversationConfig{
+			EmbeddingTopK: 1, VectorThreshold: 0.95, KeywordThreshold: 0.95,
+		}},
 		nil, nil, nil, nil)
 	ep := &types.MCPEndpoint{
 		ID: "ep-1", TenantID: 1, Enabled: true,
