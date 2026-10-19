@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"sync"
 	"testing"
@@ -62,7 +63,9 @@ func (s *documentSearchKBService) HybridSearch(
 		if len(params.KnowledgeBaseIDs) > 0 {
 			inKB = slices.Contains(params.KnowledgeBaseIDs, row.KnowledgeBaseID)
 		}
-		if inKB && (len(params.KnowledgeIDs) == 0 || slices.Contains(params.KnowledgeIDs, row.KnowledgeID)) {
+		passesThreshold := (!params.DisableVectorMatch && row.Score >= params.VectorThreshold) ||
+			(!params.DisableKeywordsMatch && row.Score >= params.KeywordThreshold)
+		if inKB && passesThreshold && (len(params.KnowledgeIDs) == 0 || slices.Contains(params.KnowledgeIDs, row.KnowledgeID)) {
 			rows = append(rows, row)
 		}
 	}
@@ -103,7 +106,7 @@ func newDocumentSearchFixture(t *testing.T) (*Server, *gin.Engine, *documentSear
 	}
 	srv := NewServer(kbService, &stubKnowledgeService{docs: docs}, nil, nil, nil, nil, nil,
 		&stubKBShareService{shared: map[string]types.OrgMemberRole{"kb-shared": types.OrgRoleViewer}},
-		nil, nil, nil, &config.Config{Conversation: &config.ConversationConfig{EmbeddingTopK: 1}},
+		nil, nil, nil, &config.Config{Conversation: &config.ConversationConfig{EmbeddingTopK: 1, VectorThreshold: 0.95, KeywordThreshold: 0.95}},
 		nil, nil, nil, nil)
 	ep := &types.MCPEndpoint{
 		ID: "ep-1", TenantID: 1, Enabled: true,
@@ -155,6 +158,8 @@ func TestMCPSearchKnowledgeDocumentScopeBeforeRetrieval(t *testing.T) {
 			require.Equal(t, 1, call.params.MatchCount)
 			require.Equal(t, mode == "keyword", call.params.DisableVectorMatch)
 			require.Equal(t, mode == "semantic", call.params.DisableKeywordsMatch)
+			require.Zero(t, call.params.VectorThreshold)
+			require.Zero(t, call.params.KeywordThreshold)
 		})
 	}
 }
@@ -234,6 +239,8 @@ func TestMCPSearchKnowledgeOmittedDocumentScopeAndGrepKeepWholeKBTargets(t *test
 			require.Len(t, kbService.calls, 1)
 			require.Empty(t, kbService.calls[0].params.KnowledgeIDs)
 			require.Equal(t, []string{"kb-own"}, kbService.calls[0].params.KnowledgeBaseIDs)
+			require.Equal(t, 0.95, kbService.calls[0].params.VectorThreshold)
+			require.Equal(t, 0.95, kbService.calls[0].params.KeywordThreshold)
 		})
 	}
 }
@@ -251,6 +258,7 @@ func TestMCPSearchKnowledgeDocumentScopeSchema(t *testing.T) {
 		property := schema["properties"].(map[string]any)["knowledge_ids"].(map[string]any)
 		require.Equal(t, "array", property["type"])
 		require.EqualValues(t, 1, property["minItems"])
+		require.EqualValues(t, 100, property["maxItems"])
 		require.Equal(t, "string", property["items"].(map[string]any)["type"])
 		require.NotContains(t, schema["required"], "knowledge_ids")
 		return
@@ -282,6 +290,46 @@ func TestMCPSearchKnowledgeRechecksEndpointAndShareRestrictions(t *testing.T) {
 			require.NotContains(t, response, "error")
 			require.Equal(t, true, response["result"].(map[string]any)["isError"])
 			require.Empty(t, kbService.calls)
+		})
+	}
+}
+
+// Count lookups to ensure oversized requests are rejected before any document I/O.
+type countingDocumentService struct {
+	*stubKnowledgeService
+	lookups int
+}
+
+func (s *countingDocumentService) GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error) {
+	s.lookups++
+	return s.stubKnowledgeService.GetKnowledgeByIDOnly(ctx, id)
+}
+
+func TestMCPSearchKnowledgeDocumentScopeSizeLimit(t *testing.T) {
+	for _, count := range []int{100, 101} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			srv, _, kbService, ep := newDocumentSearchFixture(t)
+			service := &countingDocumentService{stubKnowledgeService: srv.knowledgeService.(*stubKnowledgeService)}
+			srv.knowledgeService = service
+			ids := make([]string, count)
+			for i := range ids {
+				ids[i] = fmt.Sprintf("selected-%d", i)
+				service.docs[ids[i]] = &types.Knowledge{ID: ids[i], KnowledgeBaseID: "kb-own", TenantID: 1}
+			}
+			result, err := srv.handleSearchKnowledge(mcpCallContext(1, ep), mcp.CallToolRequest{
+				Params: mcp.CallToolParams{Arguments: map[string]any{"query": "contract", "knowledge_ids": ids}},
+			})
+			require.NoError(t, err)
+			if count == 100 {
+				require.False(t, result.IsError)
+				require.Equal(t, count, service.lookups)
+				require.Len(t, kbService.calls, 1)
+				require.Len(t, kbService.calls[0].params.KnowledgeIDs, count)
+			} else {
+				require.True(t, result.IsError)
+				require.Zero(t, service.lookups)
+				require.Empty(t, kbService.calls)
+			}
 		})
 	}
 }

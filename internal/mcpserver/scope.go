@@ -172,6 +172,9 @@ func searchTargetsFor(kbs []*types.KnowledgeBase) types.SearchTargets {
 	return targets
 }
 
+// maxSearchKnowledgeDocuments bounds validation lookups and backend filter size.
+const maxSearchKnowledgeDocuments = 100
+
 // documentSearchTargets narrows an already authorized KB selection to explicit
 // documents. Never leave whole-KB targets for bases with no selected documents.
 func (s *Server) documentSearchTargets(
@@ -180,6 +183,9 @@ func (s *Server) documentSearchTargets(
 	if len(knowledgeIDs) == 0 {
 		return nil, fmt.Errorf("knowledge_ids must contain at least one document id; " +
 			"omit it to search whole knowledge bases")
+	}
+	if len(knowledgeIDs) > maxSearchKnowledgeDocuments {
+		return nil, fmt.Errorf("knowledge_ids must contain at most %d document ids", maxSearchKnowledgeDocuments)
 	}
 	targets := make(types.SearchTargets, 0)
 	byKB := make(map[string]*types.SearchTarget)
@@ -200,6 +206,7 @@ func (s *Server) documentSearchTargets(
 		if target == nil {
 			target = &types.SearchTarget{
 				Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: kb.ID, TenantID: kb.TenantID,
+				DisableRecallThresholds: true,
 			}
 			byKB[kb.ID] = target
 			targets = append(targets, target)

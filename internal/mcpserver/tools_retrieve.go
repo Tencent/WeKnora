@@ -53,8 +53,8 @@ func searchKnowledgeTool() mcp.Tool {
 		mcp.WithArray("knowledge_base_ids", mcp.WithStringItems(),
 			mcp.Description("Optional knowledge base ids or names to restrict the search; defaults to every "+
 				"knowledge base in scope")),
-		mcp.WithArray("knowledge_ids", mcp.MinItems(1), mcp.WithStringItems(mcp.MinLength(1)),
-			mcp.Description("Optional non-empty list of document ids from list_documents or search results. "+
+		mcp.WithArray("knowledge_ids", mcp.MinItems(1), mcp.MaxItems(maxSearchKnowledgeDocuments), mcp.WithStringItems(mcp.MinLength(1)),
+			mcp.Description("Optional list of 1 to 100 document ids from list_documents or search results. "+
 				"Restricts retrieval before ranking; every document must be in scope and belong to the selected "+
 				"knowledge bases. Omit to search whole knowledge bases; invalid or conflicting ids return an error.")),
 		readOnlyEndpointAnnotations(),
