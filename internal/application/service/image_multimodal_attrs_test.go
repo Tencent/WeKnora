@@ -295,7 +295,7 @@ func TestDecideOCR(t *testing.T) {
 func TestProcessImageObservesAndDescribes(t *testing.T) {
 	t.Parallel()
 
-	fileSvc := &attrsFileService{body: []byte("table-bytes")}
+	fileSvc := &attrsFileService{body: testPNG(t)}
 	repo := &attrsChunkRepo{}
 	svc := newAttrsTestService(fileSvc, repo)
 
@@ -369,7 +369,7 @@ func TestProcessImageObservesAndDescribes(t *testing.T) {
 func TestProcessImageMarksObservationFailed(t *testing.T) {
 	t.Parallel()
 
-	fileSvc := &attrsFileService{body: []byte("bytes")}
+	fileSvc := &attrsFileService{body: testPNG(t)}
 	repo := &attrsChunkRepo{}
 	svc := newAttrsTestService(fileSvc, repo)
 
@@ -420,7 +420,7 @@ func TestProcessImageMarksObservationFailed(t *testing.T) {
 func TestProcessImageSkipsOCRForQuietAttr(t *testing.T) {
 	t.Parallel()
 
-	fileSvc := &attrsFileService{body: []byte("decorative-bytes")}
+	fileSvc := &attrsFileService{body: testPNG(t)}
 	repo := &attrsChunkRepo{}
 	svc := newAttrsTestService(fileSvc, repo)
 
@@ -476,7 +476,7 @@ func TestProcessImageSkipsOCRForQuietAttr(t *testing.T) {
 func TestProcessImageKeepsAttrsButDropsCaptionWhenCaptionsAreOff(t *testing.T) {
 	t.Parallel()
 
-	fileSvc := &attrsFileService{body: []byte("chart-bytes")}
+	fileSvc := &attrsFileService{body: testPNG(t)}
 	repo := &attrsChunkRepo{}
 	svc := newAttrsTestService(fileSvc, repo)
 
@@ -536,7 +536,7 @@ func TestProcessImageKeepsAttrsButDropsCaptionWhenCaptionsAreOff(t *testing.T) {
 func TestProcessImageProseAnswerIsStillCaptionedAndOCRed(t *testing.T) {
 	t.Parallel()
 
-	fileSvc := &attrsFileService{body: []byte("bytes")}
+	fileSvc := &attrsFileService{body: testPNG(t)}
 	repo := &attrsChunkRepo{}
 	svc := newAttrsTestService(fileSvc, repo)
 
@@ -602,7 +602,7 @@ func TestProcessImageProseAnswerIsStillCaptionedAndOCRed(t *testing.T) {
 func TestProcessImageLabelOnlyAnswerKeepsAttrsWithoutCaption(t *testing.T) {
 	t.Parallel()
 
-	fileSvc := &attrsFileService{body: []byte("bytes")}
+	fileSvc := &attrsFileService{body: testPNG(t)}
 	repo := &attrsChunkRepo{}
 	svc := newAttrsTestService(fileSvc, repo)
 
@@ -653,7 +653,7 @@ func TestProcessImageLabelOnlyAnswerKeepsAttrsWithoutCaption(t *testing.T) {
 func TestProcessImageCaptionOCRPipeline(t *testing.T) {
 	t.Parallel()
 
-	fileSvc := &attrsFileService{body: []byte("bytes")}
+	fileSvc := &attrsFileService{body: testPNG(t)}
 	repo := &attrsChunkRepo{}
 	svc := newAttrsTestService(fileSvc, repo)
 
