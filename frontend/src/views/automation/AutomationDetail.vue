@@ -195,6 +195,7 @@ import {
   type AutomationRun,
 } from '@/api/automation'
 import { describeTrigger, formatInZone, hasEndedOnceSchedule } from '@/utils/automationSchedule'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import AutomationStatusTag from './AutomationStatusTag.vue'
 import ChatActionIcon from '@/components/ChatActionIcon.vue'
@@ -231,6 +232,8 @@ const instructionCanExpand = ref(false)
 const instructionExpanded = ref(false)
 const INSTRUCTION_PREVIEW_HEIGHT = 160
 let poll: ReturnType<typeof setInterval> | undefined
+let detailVersion = 0
+let refreshRunsAfterLoad = false
 
 function updateInstructionOverflow() {
   const el = instructionScroller.value
@@ -294,28 +297,43 @@ function close() {
 async function loadRuns(reset: boolean) {
   const a = props.automation
   if (!a) return
+  const version = detailVersion
   runsLoading.value = true
   try {
     const page = reset ? 1 : runsPage.value + 1
     const res = await listAutomationRuns(a.id, page, PAGE)
+    if (version !== detailVersion) return
     const items = res.data ?? []
     runs.value = reset ? items : [...runs.value, ...items]
     runsTotal.value = res.total ?? runs.value.length
     runsPage.value = page
   } catch (e: any) {
-    MessagePlugin.error(e?.message || t('common.operationFailed'))
+    if (version === detailVersion) MessagePlugin.error(e?.message || t('common.operationFailed'))
   } finally {
-    runsLoading.value = false
+    if (version === detailVersion) {
+      runsLoading.value = false
+      if (refreshRunsAfterLoad) {
+        refreshRunsAfterLoad = false
+        void refreshActive(true)
+      }
+    }
   }
 }
 
 // Refresh the first page in place while a run is in flight, so its status
 // moves without the user reopening the drawer.
-async function refreshActive() {
+async function refreshActive(force = false) {
   const a = props.automation
-  if (!a || runsLoading.value || !runs.value.some(cancellable)) return
+  if (!props.visible || !a) return
+  if (runsLoading.value) {
+    if (force) refreshRunsAfterLoad = true
+    return
+  }
+  if (!force && !runs.value.some(cancellable)) return
+  const version = detailVersion
   try {
     const res = await listAutomationRuns(a.id, 1, PAGE)
+    if (version !== detailVersion) return
     const fresh = new Map((res.data ?? []).map((run) => [run.id, run]))
     const known = new Set(runs.value.map((run) => run.id))
     runs.value = [
@@ -327,6 +345,10 @@ async function refreshActive() {
     // The next tick tries again.
   }
 }
+
+useAssistantDataChange(changes => {
+  if (changes.some(change => change.operation === 'automation.run_now')) void refreshActive(true)
+}, { areas: ['automation'] })
 
 async function loadGrants() {
   const a = props.automation
@@ -343,7 +365,9 @@ async function loadGrants() {
   }
 }
 
-watch(() => [props.visible, props.automation?.id] as const, ([open, id]) => {
+watch([() => props.visible, () => props.automation?.id], ([open, id]) => {
+  ++detailVersion
+  refreshRunsAfterLoad = false
   instructionExpanded.value = false
   clearInterval(poll)
   if (!open || !id) return
@@ -357,7 +381,10 @@ watch(() => [props.visible, props.automation?.id] as const, ([open, id]) => {
   poll = setInterval(refreshActive, 5000)
 }, { immediate: true })
 
-onBeforeUnmount(() => clearInterval(poll))
+onBeforeUnmount(() => {
+  ++detailVersion
+  clearInterval(poll)
+})
 
 async function runNow() {
   if (busy.value) return

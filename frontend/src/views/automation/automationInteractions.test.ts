@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 import test, { type TestContext } from 'node:test'
 import { compileScript, compileTemplate, parse } from '@vue/compiler-sfc'
 import * as vue from 'vue'
-import { fixture, flush } from '../../test-utils/vueFixture.ts'
+import { change, fixture, flush } from '../../test-utils/vueFixture.ts'
 import * as schedule from '../../utils/automationSchedule.ts'
 
 const require = createRequire(import.meta.url)
@@ -46,7 +46,7 @@ function setup(t: TestContext, file: string, api: Record<string, unknown>, props
     vue: { ...vue, resolveComponent: (name: string) => name === 't-popup' ? { name } : name, resolveDynamicComponent: (name: string) => name,
       withCtx: (fn: unknown) => fn, withDirectives: (node: unknown) => node },
   })
-  return { ...page, mount: f.mount, render: () => render(page.vm, [], props, page.vm, {}, {}) }
+  return { ...page, mount: f.mount, emit: f.emit, render: () => render(page.vm, [], props, page.vm, {}, {}) }
 }
 
 function nodes(node: any): any[] {
@@ -57,6 +57,92 @@ function nodes(node: any): any[] {
     : children && typeof children === 'object'
       ? Object.values(children).flatMap(slot => typeof slot === 'function' ? nodes(slot()) : []) : [])]
 }
+
+test('assistant mutations refresh the automation list and open detail without replacing an editor draft', async t => {
+  let items = [{ ...automation }]
+  let calls = 0
+  const { vm, emit, close } = setup(t, './AutomationList.vue', {
+    listAutomations: async () => { calls++; return { data: items } },
+  }, {})
+  await flush()
+  vm.openDetail(vm.automations[0])
+  vm.query = 'Reminder'
+  vm.editing = { ...automation, name: 'Unsaved draft' }
+  vm.editorVisible = true
+  items = [{ ...automation, name: 'Updated reminder', enabled: false }, { ...automation, id: 'new' }]
+  emit(change('agent.update'))
+  t.mock.timers.tick(300)
+  assert.equal(calls, 1)
+  emit(change('automation.create'))
+  emit(change('automation.update'))
+  emit(change('automation.pause'))
+  t.mock.timers.tick(300)
+  await flush()
+  assert.equal(calls, 2, 'one request per burst')
+  assert.equal(vm.automations.length, 2)
+  assert.equal(vm.detail.name, 'Updated reminder')
+  assert.equal(vm.detail.enabled, false)
+  assert.equal(vm.detailVisible, true)
+  assert.equal(vm.query, 'Reminder')
+  assert.equal(vm.editing.name, 'Unsaved draft')
+  assert.equal(vm.editorVisible, true)
+  items = []
+  emit(change('automation.delete'))
+  t.mock.timers.tick(300)
+  await flush()
+  assert.equal(vm.detailVisible, false)
+  assert.equal(vm.detail, null)
+  close()
+  emit(change('automation.create'))
+  t.mock.timers.tick(300)
+  assert.equal(calls, 3, 'unmounted pages unsubscribe')
+})
+
+test('a stale automation list response cannot overwrite a newer assistant refresh', async t => {
+  const requests: Array<(result: unknown) => void> = []
+  const { vm, emit } = setup(t, './AutomationList.vue', {
+    listAutomations: () => new Promise(resolve => requests.push(resolve)),
+  }, {})
+  emit(change('automation.update'))
+  t.mock.timers.tick(300)
+  assert.equal(requests.length, 2)
+  requests[1]({ data: [{ ...automation, name: 'Fresh' }] })
+  await flush()
+  requests[0]({ data: [{ ...automation, name: 'Stale' }] })
+  await flush()
+  assert.equal(vm.automations[0].name, 'Fresh')
+})
+
+test('assistant run-now refreshes idle history after any in-flight load and preserves earlier pages', async t => {
+  let first!: (value: unknown) => void
+  let calls = 0
+  const oldRun = { id: 'old', status: 'succeeded', scheduled_at: '2026-10-20T10:00:00Z' }
+  const newRun = { id: 'new', status: 'queued', scheduled_at: '2026-10-20T11:00:00Z' }
+  const { vm, emit } = setup(t, './AutomationDetail.vue', {
+    listAutomationRuns: () => ++calls === 1 ? new Promise(resolve => { first = resolve })
+      : Promise.resolve({ data: [newRun, oldRun], total: 3 }),
+    listAutomationGrants: async () => ({ data: [] }),
+    listAutomationGrantCandidates: async () => ({ data: [] }),
+  }, { visible: true, automation, agentName: 'Assistant' })
+  emit(change('automation.run_now'))
+  t.mock.timers.tick(300)
+  assert.equal(calls, 1, 'wait for the initial page before merging newer runs')
+  first({ data: [oldRun, { ...oldRun, id: 'earlier' }], total: 2 })
+  await flush()
+  assert.equal(calls, 2)
+  assert.deepEqual(Array.from(vm.runs, (run: any) => run.id), ['new', 'old', 'earlier'])
+  assert.equal(vm.runsTotal, 3)
+  vm.instructionExpanded = true
+  vm.$.props.automation = { ...automation, name: 'Updated name' }
+  await vue.nextTick()
+  assert.equal(calls, 2, 'refreshing the same automation does not reset loaded history')
+  assert.equal(vm.instructionExpanded, true)
+  vm.$.props.visible = false
+  await vue.nextTick()
+  emit(change('automation.run_now'))
+  t.mock.timers.tick(300)
+  assert.equal(calls, 2, 'closed detail does not fetch history')
+})
 
 test('task content fades only while more text remains below the scroll position', async t => {
   const { vm, render } = setup(t, './AutomationDetail.vue', {},

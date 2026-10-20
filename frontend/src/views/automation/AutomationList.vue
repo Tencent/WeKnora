@@ -100,7 +100,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
@@ -116,6 +116,7 @@ import {
 } from '@/api/automation'
 import { useAuthStore } from '@/stores/auth'
 import { describeTrigger, formatInZone, hasEndedOnceSchedule } from '@/utils/automationSchedule'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import AutomationEditor from './AutomationEditor.vue'
 import AutomationDetail from './AutomationDetail.vue'
 import AutomationStatusTag from './AutomationStatusTag.vue'
@@ -139,6 +140,7 @@ const editing = ref<Automation | null>(null)
 const detailVisible = ref(false)
 const detail = ref<Automation | null>(null)
 const focusRunId = ref('')
+let loadVersion = 0
 
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase()
@@ -151,15 +153,28 @@ const agentName = (id: string) =>
   agents.value.find((a) => a.id === id)?.name ?? t('automation.agentUnavailable')
 
 async function load() {
+  const version = ++loadVersion
   try {
     const res = await listAutomations()
+    if (version !== loadVersion) return
     automations.value = res.data ?? []
+    if (detail.value) {
+      const fresh = automations.value.find(item => item.id === detail.value?.id)
+      if (fresh) detail.value = fresh
+      else {
+        detailVisible.value = false
+        detail.value = null
+      }
+    }
   } catch (e: any) {
-    MessagePlugin.error(e?.message || t('common.operationFailed'))
+    if (version === loadVersion) MessagePlugin.error(e?.message || t('common.operationFailed'))
   } finally {
-    loading.value = false
+    if (version === loadVersion) loading.value = false
   }
 }
+
+useAssistantDataChange(() => { void load() }, { areas: ['automation'] })
+onBeforeUnmount(() => { ++loadVersion })
 
 async function loadAgents() {
   agentsLoading.value = true
