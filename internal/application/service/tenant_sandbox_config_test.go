@@ -2356,7 +2356,9 @@ type recordingAdmission struct {
 	order *[]string
 }
 
-func (r recordingAdmission) Close(ctx context.Context, scope admission.Scope, ttl time.Duration) (admission.Barrier, error) {
+func (r recordingAdmission) Close(
+	ctx context.Context, scope admission.Scope, ttl time.Duration,
+) (admission.Barrier, error) {
 	*r.order = append(*r.order, "Close("+scope.Name+")")
 	b, err := r.Registry.Close(ctx, scope, ttl)
 	if err != nil || b == nil {
@@ -2671,35 +2673,52 @@ func (c *sealRemoteClient) Create(context.Context, sandbox.RemoteCreateRequest) 
 	n := c.creates.Add(1)
 	return sealHandle{id: fmt.Sprintf("sb-%d", n)}, nil
 }
-func (c *sealRemoteClient) Connect(_ context.Context, req sandbox.RemoteConnectRequest) (sandbox.RemoteSandboxHandle, error) {
+
+func (c *sealRemoteClient) Connect(
+	_ context.Context, req sandbox.RemoteConnectRequest,
+) (sandbox.RemoteSandboxHandle, error) {
 	return sealHandle{id: req.SandboxID}, nil
 }
+
 func (c *sealRemoteClient) Get(context.Context, string) (*sandbox.RemoteSandboxSummary, error) {
 	return nil, nil
 }
+
 func (c *sealRemoteClient) List(context.Context, sandbox.RemoteListFilter) ([]sandbox.RemoteSandboxSummary, error) {
 	return nil, nil
 }
 func (c *sealRemoteClient) Delete(context.Context, string) error { return nil }
-func (c *sealRemoteClient) Exec(context.Context, sandbox.RemoteSandboxHandle, sandbox.RemoteExecRequest) (*sandbox.RemoteExecResult, error) {
+func (c *sealRemoteClient) Exec(
+	context.Context, sandbox.RemoteSandboxHandle, sandbox.RemoteExecRequest,
+) (*sandbox.RemoteExecResult, error) {
 	return &sandbox.RemoteExecResult{}, nil
 }
+
 func (c *sealRemoteClient) WriteFile(context.Context, sandbox.RemoteSandboxHandle, string, []byte) error {
 	return nil
 }
+
 func (c *sealRemoteClient) ReadFile(context.Context, sandbox.RemoteSandboxHandle, string) ([]byte, error) {
 	return nil, nil
 }
-func (c *sealRemoteClient) ListDir(context.Context, sandbox.RemoteSandboxHandle, string) ([]sandbox.RemoteDirEntry, error) {
+
+func (c *sealRemoteClient) ListDir(
+	context.Context, sandbox.RemoteSandboxHandle, string,
+) ([]sandbox.RemoteDirEntry, error) {
 	return nil, nil
 }
+
 func (c *sealRemoteClient) MakeDir(context.Context, sandbox.RemoteSandboxHandle, string) error {
 	return nil
 }
+
 func (c *sealRemoteClient) Remove(context.Context, sandbox.RemoteSandboxHandle, string) error {
 	return nil
 }
-func (c *sealRemoteClient) Stat(context.Context, sandbox.RemoteSandboxHandle, string) (*sandbox.RemoteStatEntry, error) {
+
+func (c *sealRemoteClient) Stat(
+	context.Context, sandbox.RemoteSandboxHandle, string,
+) (*sandbox.RemoteStatEntry, error) {
 	return nil, nil
 }
 
@@ -2737,7 +2756,9 @@ func (r userMachineAllocRepo) GetUserMachine(_ context.Context, digest string) (
 	return r.byDigest[digest], nil
 }
 
-func (r userMachineAllocRepo) ListUserMachinesByConfig(context.Context, uint64, string) ([]*types.SandboxUserMachine, error) {
+func (r userMachineAllocRepo) ListUserMachinesByConfig(
+	context.Context, uint64, string,
+) ([]*types.SandboxUserMachine, error) {
 	return r.byConfig, nil
 }
 
@@ -2779,8 +2800,14 @@ func TestListUserMachinesHidesOtherWorkspacesAndClocksRetention(t *testing.T) {
 	}}
 	alloc := userMachineAllocRepo{
 		byConfig: []*types.SandboxUserMachine{
-			{MachineDigest: "d-own", OwnerTenantID: 7, OwnerID: "u-1", ConfigTenantID: 7, ConfigID: "cfg-a", EmptySince: &empty},
-			{MachineDigest: "d-borrow", OwnerTenantID: 9, OwnerID: "secret-owner", ConfigTenantID: 7, ConfigID: "cfg-a"},
+			{
+				MachineDigest: "d-own", OwnerTenantID: 7, OwnerID: "u-1",
+				ConfigTenantID: 7, ConfigID: "cfg-a", EmptySince: &empty,
+			},
+			{
+				MachineDigest: "d-borrow", OwnerTenantID: 9, OwnerID: "secret-owner",
+				ConfigTenantID: 7, ConfigID: "cfg-a",
+			},
 		},
 		live: map[string]int64{"d-own": 2},
 	}
@@ -2805,7 +2832,10 @@ func TestListUserMachinesUsesDefaultRetentionWhenUnset(t *testing.T) {
 		Config: &types.TenantSandboxConfig{UserSandboxEmptyRetentionDays: 0},
 	}}
 	alloc := userMachineAllocRepo{byConfig: []*types.SandboxUserMachine{
-		{MachineDigest: "d-1", OwnerTenantID: 7, OwnerID: "u-1", ConfigTenantID: 7, ConfigID: "cfg-a", EmptySince: &empty},
+		{
+			MachineDigest: "d-1", OwnerTenantID: 7, OwnerID: "u-1",
+			ConfigTenantID: 7, ConfigID: "cfg-a", EmptySince: &empty,
+		},
 	}}
 	svc := newTestConfigService(t, repo, nil, stubAgentRepo{}).WithAllocationRepo(alloc)
 

@@ -297,8 +297,8 @@ func readDesktopSecret(
 	}
 	logger.Warnf(ctx, "[sandbox-desktop] ensure failed; resetting stack session=%s: %v",
 		sessionID, err)
-	if _, resetErr := exec.ExecShellCommandWithOptions(ctx, sessionID,
-		sandbox.DesktopResetListenersCmd(), desktopSkipPrepOpts(desktopProbeTimeout, expectedSandboxID)); resetErr != nil {
+	if _, resetErr := exec.ExecShellCommandWithOptions(ctx, sessionID, sandbox.DesktopResetListenersCmd(),
+		desktopSkipPrepOpts(desktopProbeTimeout, expectedSandboxID)); resetErr != nil {
 		return "", fmt.Errorf("%w: reset desktop stack: %v", ErrDesktopStartFailed, resetErr)
 	}
 	return runDesktopEnsure(ctx, exec, sessionID, expectedSandboxID)

@@ -200,8 +200,8 @@ var ErrSkillSnapshotBlocksTemplateChange = stderrors.New(
 // row is recoverable; leaking a billable snapshot is not.
 var ErrSkillSnapshotReleaseFailed = stderrors.New("failed to release skill snapshots")
 
-// ErrSandboxConfigCreatesInFlight: a sandbox of this config is still being
-// created; retry the deletion once it finishes.
+// ErrSandboxConfigCreatesInFlight is returned while a sandbox of this config
+// is still being created; retry the deletion once it finishes.
 var ErrSandboxConfigCreatesInFlight = stderrors.New("sandbox config still has sandboxes being created")
 
 // SkillSnapshotReleaseFailedError names the snapshots that are still on the
@@ -361,7 +361,9 @@ func NewTenantSandboxConfigService(
 }
 
 // WithAllocationRepo lets config deletion drop the user machine registry.
-func (s *TenantSandboxConfigService) WithAllocationRepo(repo interfaces.SandboxAllocationRepository) *TenantSandboxConfigService {
+func (s *TenantSandboxConfigService) WithAllocationRepo(
+	repo interfaces.SandboxAllocationRepository,
+) *TenantSandboxConfigService {
 	s.allocations = repo
 	return s
 }
@@ -372,8 +374,9 @@ func (s *TenantSandboxConfigService) WithAdmission(reg admission.Registry) *Tena
 	return s
 }
 
-// ErrUserSandboxBusy: a terminal, desktop or command is still running on the
-// machine; the admin is asked to retry once the user has closed it.
+// ErrUserSandboxBusy is returned while a terminal, desktop or command is
+// still running on the machine; the admin is asked to retry once the user
+// has closed it.
 var ErrUserSandboxBusy = stderrors.New("user sandbox is busy")
 
 // UserMachineReleaser deletes one shared machine. It returns false when a
@@ -425,8 +428,10 @@ func (s *TenantSandboxConfigService) ListUserMachines(
 		if err != nil {
 			return nil, err
 		}
-		v := UserMachineView{Digest: r.MachineDigest, OwnerTenantID: r.OwnerTenantID,
-			LiveSessions: live, EmptySince: r.EmptySince}
+		v := UserMachineView{
+			Digest: r.MachineDigest, OwnerTenantID: r.OwnerTenantID,
+			LiveSessions: live, EmptySince: r.EmptySince,
+		}
 		if r.OwnerTenantID == tenantID {
 			v.OwnerID = r.OwnerID
 		}

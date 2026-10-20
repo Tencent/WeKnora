@@ -19,7 +19,9 @@ import (
 // perConfigRetention answers each config's retention from a map.
 type perConfigRetention map[string]int
 
-func (p perConfigRetention) GetByID(_ context.Context, tenantID uint64, id string) (*types.TenantSandboxConfigEntity, error) {
+func (p perConfigRetention) GetByID(
+	_ context.Context, tenantID uint64, id string,
+) (*types.TenantSandboxConfigEntity, error) {
 	return &types.TenantSandboxConfigEntity{ID: id, TenantID: tenantID, Config: &types.TenantSandboxConfig{
 		AllocationMode: "user", UserSandboxEmptyRetentionDays: p[id],
 	}}, nil
@@ -27,7 +29,9 @@ func (p perConfigRetention) GetByID(_ context.Context, tenantID uint64, id strin
 
 type retentionConfigs struct{ days *int }
 
-func (r retentionConfigs) GetByID(_ context.Context, tenantID uint64, id string) (*types.TenantSandboxConfigEntity, error) {
+func (r retentionConfigs) GetByID(
+	_ context.Context, tenantID uint64, id string,
+) (*types.TenantSandboxConfigEntity, error) {
 	days := 0
 	if r.days != nil {
 		days = *r.days
@@ -45,7 +49,9 @@ type reclaimRecorder struct {
 	reclaims                int
 }
 
-func (r *reclaimRecorder) ReclaimUserMachine(ctx context.Context, _ allocation.UserMachine, check func(context.Context) (bool, error)) (bool, error) {
+func (r *reclaimRecorder) ReclaimUserMachine(
+	ctx context.Context, _ allocation.UserMachine, check func(context.Context) (bool, error),
+) (bool, error) {
 	if r.beforeCheck != nil {
 		r.beforeCheck()
 	}
@@ -75,7 +81,8 @@ func TestGCReclaimsOnlyAfterRetention(t *testing.T) {
 	seven := 7
 	e, _ := releasedMachine(t)
 	ops := &reclaimRecorder{}
-	gc := NewUserMachineGC(e.svc, NewWorkspaceCleaner(e.svc, fakeResolver{mgr: ops}), retentionConfigs{days: &seven}, nil)
+	gc := NewUserMachineGC(e.svc, NewWorkspaceCleaner(e.svc, fakeResolver{mgr: ops}),
+		retentionConfigs{days: &seven}, nil)
 
 	gc.now = func() time.Time { return time.Now().UTC().Add(6 * 24 * time.Hour) }
 	report, err := gc.RunOnce(context.Background())
@@ -86,7 +93,8 @@ func TestGCReclaimsOnlyAfterRetention(t *testing.T) {
 	report, err = gc.RunOnce(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, 1, report.Reclaimed)
-	rows, _ := e.svc.repo.ListEmptyUserMachines(context.Background(), time.Now().UTC().Add(30*24*time.Hour), interfaces.EmptyMachineCursor{}, 10)
+	rows, _ := e.svc.repo.ListEmptyUserMachines(context.Background(),
+		time.Now().UTC().Add(30*24*time.Hour), interfaces.EmptyMachineCursor{}, 10)
 	require.Empty(t, rows, "the registry row goes with the machine")
 }
 
@@ -137,7 +145,8 @@ func TestGCReadsRetentionFreshEachRun(t *testing.T) {
 	days := 30
 	e, _ := releasedMachine(t)
 	ops := &reclaimRecorder{}
-	gc := NewUserMachineGC(e.svc, NewWorkspaceCleaner(e.svc, fakeResolver{mgr: ops}), retentionConfigs{days: &days}, nil)
+	gc := NewUserMachineGC(e.svc, NewWorkspaceCleaner(e.svc, fakeResolver{mgr: ops}),
+		retentionConfigs{days: &days}, nil)
 	gc.now = func() time.Time { return time.Now().UTC().Add(48 * time.Hour) }
 	_, _ = gc.RunOnce(context.Background())
 	require.Zero(t, ops.reclaims)
@@ -195,7 +204,8 @@ func TestGCResumesFromItsCursorWhenARunIsCapped(t *testing.T) {
 	}
 	ops := &reclaimRecorder{}
 	thirty := 30
-	gc := NewUserMachineGC(e.svc, NewWorkspaceCleaner(e.svc, fakeResolver{mgr: ops}), retentionConfigs{days: &thirty}, nil)
+	gc := NewUserMachineGC(e.svc, NewWorkspaceCleaner(e.svc, fakeResolver{mgr: ops}),
+		retentionConfigs{days: &thirty}, nil)
 	gc.batch, gc.maxRun = 1, 2
 	gc.now = func() time.Time { return time.Now().UTC().Add(48 * time.Hour) }
 

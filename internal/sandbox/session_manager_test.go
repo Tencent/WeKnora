@@ -1124,7 +1124,9 @@ func integrationEnv(t *testing.T, name string) string {
 // allocation directory. An empty redisAddr starts miniredis; otherwise both
 // replicas dial that address. Each run uses its own namespace so a shared
 // Redis needs no cleanup.
-func multiReplicaPair(t *testing.T, redisAddr string, assignments ...allocation.Assignment) (*userHarness, *userHarness, *redis.Client) {
+func multiReplicaPair(
+	t *testing.T, redisAddr string, assignments ...allocation.Assignment,
+) (*userHarness, *userHarness, *redis.Client) {
 	t.Helper()
 	if redisAddr == "" {
 		redisAddr = miniredis.RunT(t).Addr()
@@ -1658,7 +1660,8 @@ func TestWorkspaceForkStopsAfterTheLeaseIsLost(t *testing.T) {
 	require.NoError(t, err)
 	defer fork.Release()
 	machine, _ := userAssignmentFor(userSessionA).UserMachine()
-	h.admission.ExpireMember(admission.MachineScope(machine.Digest("weknora")), fork.(interface{ Member() string }).Member())
+	h.admission.ExpireMember(admission.MachineScope(machine.Digest("weknora")),
+		fork.(interface{ Member() string }).Member())
 
 	require.Eventually(t, func() bool {
 		_, err := fork.Copy(userSessionB, strings.Repeat("c", 40), nil)
@@ -1680,7 +1683,7 @@ func TestUserModeTerminalCreatesTheSessionDirectoryFirst(t *testing.T) {
 
 	term, err := h.mgr.OpenSessionTerminal(ctx, userSessionB, RemoteTerminalOptions{})
 	require.NoError(t, err)
-	defer term.Close()
+	defer func() { _ = term.Close() }()
 
 	cmd := lastExecRequest(t, h.client).Command
 	require.Contains(t, cmd, "mkdir -p")
@@ -1695,7 +1698,7 @@ func TestUserModeTerminalNeverReattachesAClientPID(t *testing.T) {
 	require.NoError(t, err)
 	term, err := h.mgr.OpenSessionTerminal(ctx, userSessionA, RemoteTerminalOptions{AttachPID: 4242})
 	require.NoError(t, err)
-	defer term.Close()
+	defer func() { _ = term.Close() }()
 	opts := h.client.lastTerminalOptions()
 	require.Zero(t, opts.AttachPID, "a PID on a shared machine may belong to another session")
 	require.Equal(t, "/workspace/sessions/"+userSessionA, opts.Cwd)

@@ -1558,7 +1558,9 @@ const rewindExclusiveWait = 5 * time.Second
 // machine, the session's exclusive window, so no other operation of the
 // session touches its work tree during the reset. Run the reset with the
 // returned context. On a per-session sandbox the context is ctx itself.
-func (m *SessionBoundManager) LockRewindSession(ctx context.Context, sessionID string) (context.Context, func(), error) {
+func (m *SessionBoundManager) LockRewindSession(
+	ctx context.Context, sessionID string,
+) (context.Context, func(), error) {
 	unlockRewind, err := m.TryLockRewind(ctx, sessionID)
 	if err != nil {
 		return nil, nil, err
@@ -2200,9 +2202,9 @@ func (m *SessionBoundManager) UserMachineKey(machine allocation.UserMachine) Ses
 
 const sessionWorkspaceCleanupTimeout = 60 * time.Second
 
-// ErrMachineAbsenceUnprovable: a user machine has no binding and the provider
-// cannot list by metadata, so it may still exist. Directory cleanups keep
-// their task instead of treating the machine as gone.
+// ErrMachineAbsenceUnprovable is returned when a user machine has no binding
+// and the provider cannot list by metadata, so it may still exist. Directory
+// cleanups keep their task instead of treating the machine as gone.
 var ErrMachineAbsenceUnprovable = errors.New("sandbox: cannot prove the user machine is gone")
 
 // DeleteSessionWorkspaces removes the work trees and checkpoint repositories
@@ -2237,7 +2239,8 @@ func (m *SessionBoundManager) DeleteSessionWorkspaces(
 	if err != nil {
 		return nil, err
 	}
-	lease, err := m.holdWithWait(ctx, admission.MachineScope(digest), admission.SessionMember(sessionIDs[0], "cleanup", token))
+	lease, err := m.holdWithWait(ctx, admission.MachineScope(digest),
+		admission.SessionMember(sessionIDs[0], "cleanup", token))
 	if err != nil {
 		return nil, err
 	}
@@ -2608,8 +2611,10 @@ func (m *SessionBoundManager) BeginWorkspaceFork(ctx context.Context, sourceSess
 		return nil, ErrNoLiveSessionSandbox
 	}
 	exempt := admissionExemptFrom(opCtx)
-	return &workspaceFork{m: m, ctx: opCtx, source: sc.layout, handle: handle,
-		member: exempt[len(exempt)-1], release: release}, nil
+	return &workspaceFork{
+		m: m, ctx: opCtx, source: sc.layout, handle: handle,
+		member: exempt[len(exempt)-1], release: release,
+	}, nil
 }
 
 func (f *workspaceFork) SandboxID() string        { return f.handle.ID() }

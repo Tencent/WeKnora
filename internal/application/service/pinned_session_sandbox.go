@@ -165,7 +165,9 @@ func (a *PinnedSessionSandbox) HasRewindLock(ctx context.Context, sessionID stri
 
 // BeginWorkspaceFork opens a shared-machine fork through the session's
 // pinned manager. Backends without shared machines cannot.
-func (a *PinnedSessionSandbox) BeginWorkspaceFork(ctx context.Context, sourceSessionID string) (sandbox.WorkspaceFork, error) {
+func (a *PinnedSessionSandbox) BeginWorkspaceFork(
+	ctx context.Context, sourceSessionID string,
+) (sandbox.WorkspaceFork, error) {
 	mgr := a.manager(ctx, sourceSessionID)
 	starter, ok := mgr.(interface {
 		BeginWorkspaceFork(context.Context, string) (sandbox.WorkspaceFork, error)

@@ -461,7 +461,7 @@ func (h *SandboxConfigHandler) Inventory(c *gin.Context) {
 
 // ListUserSandboxes godoc
 // @Summary      List shared user sandboxes
-// @Description  List the config's shared user machines, with live session counts and the empty-retention clock. Owners borrowed from another workspace are not named.
+// @Description  List the config's shared user machines with live session counts and the empty-retention clock.
 // @Tags         SandboxConfig
 // @Produce      json
 // @Param        id   path      string  true  "Sandbox config ID"
@@ -476,7 +476,7 @@ func (h *SandboxConfigHandler) ListUserSandboxes(c *gin.Context) {
 	}
 	rows, err := h.service.ListUserMachines(c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"))
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": rows})
@@ -484,7 +484,7 @@ func (h *SandboxConfigHandler) ListUserSandboxes(c *gin.Context) {
 
 // ReleaseUserSandbox godoc
 // @Summary      Release a shared user sandbox
-// @Description  Delete one shared user machine now. Sessions keep their assignments and receive a new machine on next use. Refused while a terminal, desktop, or command is still running.
+// @Description  Delete one shared user machine now; each session gets a fresh machine on next use. Refused while busy.
 // @Tags         SandboxConfig
 // @Produce      json
 // @Param        id      path      string  true  "Sandbox config ID"
@@ -505,7 +505,7 @@ func (h *SandboxConfigHandler) ReleaseUserSandbox(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})

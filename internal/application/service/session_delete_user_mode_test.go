@@ -54,7 +54,9 @@ func (m *recordingUserMachine) DestroySession(_ context.Context, id string) erro
 	return nil
 }
 
-func (m *recordingUserMachine) DeleteSessionWorkspaces(_ context.Context, _ allocation.UserMachine, ids []string) ([]string, error) {
+func (m *recordingUserMachine) DeleteSessionWorkspaces(
+	_ context.Context, _ allocation.UserMachine, ids []string,
+) ([]string, error) {
 	if m.onDelete != nil {
 		m.onDelete()
 	}
@@ -65,7 +67,9 @@ func (m *recordingUserMachine) DeleteSessionWorkspaces(_ context.Context, _ allo
 	return copied, nil
 }
 
-func (m *recordingUserMachine) ReclaimUserMachine(context.Context, allocation.UserMachine, func(context.Context) (bool, error)) (bool, error) {
+func (m *recordingUserMachine) ReclaimUserMachine(
+	context.Context, allocation.UserMachine, func(context.Context) (bool, error),
+) (bool, error) {
 	if m.onReclaim != nil {
 		m.onReclaim()
 	}
@@ -90,7 +94,9 @@ func (m *recordingUserMachine) destroyedIDs() []string {
 
 type allocationModeConfig string
 
-func (m allocationModeConfig) GetByID(_ context.Context, tenantID uint64, id string) (*types.TenantSandboxConfigEntity, error) {
+func (m allocationModeConfig) GetByID(
+	_ context.Context, tenantID uint64, id string,
+) (*types.TenantSandboxConfigEntity, error) {
 	return &types.TenantSandboxConfigEntity{
 		ID: id, TenantID: tenantID,
 		Config: &types.TenantSandboxConfig{AllocationMode: string(m)},
@@ -128,7 +134,7 @@ func newUserDeleteFixture(t *testing.T, mode string, retireErr error) *userDelet
 		&types.Session{}, &types.SessionSandboxAssignment{}, &types.SandboxUserMachine{}, &types.Message{},
 	))
 
-	var repo interfaces.SandboxAllocationRepository = repository.NewSandboxAllocationRepository(db)
+	repo := repository.NewSandboxAllocationRepository(db)
 	if retireErr != nil {
 		repo = retireErrorRepo{SandboxAllocationRepository: repo, err: retireErr}
 	}
@@ -360,7 +366,9 @@ type insertAfterListRepo struct {
 	lateID string
 }
 
-func (r *insertAfterListRepo) GetByTenantID(ctx context.Context, tenantID uint64, userID string) ([]*types.Session, error) {
+func (r *insertAfterListRepo) GetByTenantID(
+	ctx context.Context, tenantID uint64, userID string,
+) ([]*types.Session, error) {
 	listed, err := r.SessionRepository.GetByTenantID(ctx, tenantID, userID)
 	if err != nil {
 		return nil, err

@@ -39,7 +39,8 @@ func TestDesktopMachineDoesNotPinASessionOwnedSandbox(t *testing.T) {
 	machineID, sandboxID, err := mgr.DesktopMachine(ctx, "sess-live")
 	require.NoError(t, err)
 	require.Equal(t, "sess-live", machineID)
-	require.Empty(t, sandboxID, "session mode must resolve, including a stale rebuild, instead of pinning the current id")
+	require.Empty(t, sandboxID,
+		"session mode must resolve, including a stale rebuild, instead of pinning the current id")
 }
 
 func TestOpenSessionDesktopNoLiveSandbox(t *testing.T) {

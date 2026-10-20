@@ -89,7 +89,8 @@ func TestCreateForkedWithAssignmentPersistsPlacementAndRollsBackARepeat(t *testi
 		ConfigTenantID: 1, ConfigID: "cfg-1",
 	}
 
-	require.NoError(t, repo.(*sessionRepository).CreateForkedWithAssignment(ctx, session, messages, assignment, machine))
+	require.NoError(t,
+		repo.(*sessionRepository).CreateForkedWithAssignment(ctx, session, messages, assignment, machine))
 
 	var row types.SessionSandboxAssignment
 	require.NoError(t, db.Where("session_id = ?", sessionID).Take(&row).Error)

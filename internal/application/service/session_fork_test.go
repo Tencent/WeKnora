@@ -1239,7 +1239,9 @@ func (f *fakeForkAllocations) Lookup(context.Context, string) (allocation.Assign
 	return f.assignment, f.found, nil
 }
 
-func (f *fakeForkAllocations) ForkAssignment(source allocation.Assignment, targetSessionID string) allocation.Assignment {
+func (f *fakeForkAllocations) ForkAssignment(
+	source allocation.Assignment, targetSessionID string,
+) allocation.Assignment {
 	child := source
 	child.SessionID = targetSessionID
 	child.ReleasedAt = nil
@@ -1307,14 +1309,20 @@ func TestForkOnSharedMachineCopiesAndInheritsAssignment(t *testing.T) {
 func TestForkOnSharedMachineKeepsOnlyReachableMatchingCheckpoints(t *testing.T) {
 	history := []*types.Message{
 		{ID: "u1", SessionID: "src", Role: "user", CreatedAt: forkBase},
-		{ID: "a1", SessionID: "src", Role: "assistant", CreatedAt: forkBase.Add(time.Second), IsCompleted: true,
-			SandboxCheckpoint: &types.SandboxCheckpoint{SandboxID: "sb-1", CommitSHA: "sha1"}},
+		{
+			ID: "a1", SessionID: "src", Role: "assistant", CreatedAt: forkBase.Add(time.Second), IsCompleted: true,
+			SandboxCheckpoint: &types.SandboxCheckpoint{SandboxID: "sb-1", CommitSHA: "sha1"},
+		},
 		{ID: "u2", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(2 * time.Second)},
-		{ID: "a2", SessionID: "src", Role: "assistant", CreatedAt: forkBase.Add(3 * time.Second), IsCompleted: true,
-			SandboxCheckpoint: &types.SandboxCheckpoint{SandboxID: "sb-old", CommitSHA: "sha2"}},
+		{
+			ID: "a2", SessionID: "src", Role: "assistant", CreatedAt: forkBase.Add(3 * time.Second), IsCompleted: true,
+			SandboxCheckpoint: &types.SandboxCheckpoint{SandboxID: "sb-old", CommitSHA: "sha2"},
+		},
 		{ID: "u3", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(4 * time.Second)},
-		{ID: "a3", SessionID: "src", Role: "assistant", CreatedAt: forkBase.Add(5 * time.Second), IsCompleted: true,
-			SandboxCheckpoint: &types.SandboxCheckpoint{SandboxID: "sb-1", CommitSHA: "sha3"}},
+		{
+			ID: "a3", SessionID: "src", Role: "assistant", CreatedAt: forkBase.Add(5 * time.Second), IsCompleted: true,
+			SandboxCheckpoint: &types.SandboxCheckpoint{SandboxID: "sb-1", CommitSHA: "sha3"},
+		},
 		{ID: "u-fork", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(6 * time.Second)},
 	}
 	port := &fakeForkSandboxPort{
@@ -1426,7 +1434,9 @@ func TestForkOnSharedMachineRechecksTheTurnInsideTheWindow(t *testing.T) {
 func TestForkOnSharedMachineRejectionIsAnErrorNotADegradedBranch(t *testing.T) {
 	turn := checkpointedTurn("u-msg-1", "a-msg-1", "sb-1", "sha1", 0)
 	messages := append(turn, userForkPoint())
-	for _, beginErr := range []error{sandbox.ErrUserAllocationRejected, sandbox.ErrSandboxSessionDeleted, admission.ErrLeaseLost} {
+	for _, beginErr := range []error{
+		sandbox.ErrUserAllocationRejected, sandbox.ErrSandboxSessionDeleted, admission.ErrLeaseLost,
+	} {
 		beginErr := beginErr
 		t.Run(beginErr.Error(), func(t *testing.T) {
 			port := &fakeForkSandboxPort{beginErr: beginErr}

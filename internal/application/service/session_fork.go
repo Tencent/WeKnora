@@ -53,7 +53,7 @@ const (
 	// does not support it.
 	ForkDegradeSnapshotUnsupported ForkDegradeReason = "SNAPSHOT_UNSUPPORTED"
 
-	// ForkDegradeCopyFailed: the shared machine could not copy the source
+	// ForkDegradeCopyFailed means the shared machine could not copy the source
 	// session's checkpoint into the new session's directory.
 	ForkDegradeCopyFailed ForkDegradeReason = "COPY_FAILED"
 )

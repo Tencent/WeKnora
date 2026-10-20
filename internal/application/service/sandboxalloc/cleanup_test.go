@@ -20,7 +20,9 @@ type fakeMachineOps struct {
 	busy     map[string]bool
 }
 
-func (f *fakeMachineOps) DeleteSessionWorkspaces(_ context.Context, _ allocation.UserMachine, ids []string) ([]string, error) {
+func (f *fakeMachineOps) DeleteSessionWorkspaces(
+	_ context.Context, _ allocation.UserMachine, ids []string,
+) ([]string, error) {
 	if f.failNext != nil {
 		err := f.failNext
 		f.failNext = nil
@@ -36,7 +38,9 @@ func (f *fakeMachineOps) DeleteSessionWorkspaces(_ context.Context, _ allocation
 	return done, nil
 }
 
-func (f *fakeMachineOps) ReclaimUserMachine(context.Context, allocation.UserMachine, func(context.Context) (bool, error)) (bool, error) {
+func (f *fakeMachineOps) ReclaimUserMachine(
+	context.Context, allocation.UserMachine, func(context.Context) (bool, error),
+) (bool, error) {
 	return true, nil
 }
 
@@ -95,7 +99,9 @@ type deleteOnlyMachine struct {
 	deleted [][]string
 }
 
-func (d *deleteOnlyMachine) DeleteSessionWorkspaces(_ context.Context, _ allocation.UserMachine, ids []string) ([]string, error) {
+func (d *deleteOnlyMachine) DeleteSessionWorkspaces(
+	_ context.Context, _ allocation.UserMachine, ids []string,
+) ([]string, error) {
 	copied := append([]string(nil), ids...)
 	d.deleted = append(d.deleted, copied)
 	return copied, nil
@@ -234,7 +240,9 @@ func TestReleaseMachineReclaimsAnEmptyMachine(t *testing.T) {
 // second path that deletes the machine anyway.
 type busyReclaimer struct{ fakeMachineOps }
 
-func (busyReclaimer) ReclaimUserMachine(context.Context, allocation.UserMachine, func(context.Context) (bool, error)) (bool, error) {
+func (busyReclaimer) ReclaimUserMachine(
+	context.Context, allocation.UserMachine, func(context.Context) (bool, error),
+) (bool, error) {
 	return false, nil
 }
 

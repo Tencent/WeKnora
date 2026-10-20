@@ -47,7 +47,9 @@ type gatingReclaim struct {
 	once    sync.Once
 }
 
-func (g *gatingReclaim) ReclaimUserMachine(ctx context.Context, m allocation.UserMachine, check func(context.Context) (bool, error)) (bool, error) {
+func (g *gatingReclaim) ReclaimUserMachine(
+	ctx context.Context, m allocation.UserMachine, check func(context.Context) (bool, error),
+) (bool, error) {
 	g.once.Do(func() { close(g.entered) })
 	select {
 	case <-g.release:
