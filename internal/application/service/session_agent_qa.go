@@ -431,6 +431,7 @@ func (s *sessionService) AgentQA(
 // run elsewhere. Session, attachments and images are reloaded from storage.
 func resumableAgentRequest(ctx context.Context, req *types.QARequest) types.ResumableAgentRequest {
 	r := types.ResumableAgentRequest{
+		ActingVia:           types.ActingViaFromContext(ctx),
 		Query:               req.Query,
 		SummaryModelID:      req.SummaryModelID,
 		ReasoningEffort:     req.ReasoningEffort,

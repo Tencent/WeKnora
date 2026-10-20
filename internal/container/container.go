@@ -640,6 +640,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		}
 		automations.Bind(sessionService, broker, runs, streams)
 		automations.Events = sessions.CollaborationEvents
+		automations.StopDelegation = collaboration.StopOwned
 		broker.SetRunHooks(runs.Hooks())
 		runs.StopDelegation = func(ctx context.Context, p *types.AgentPrompt) error {
 			return collaboration.StopPrompt(ctx, p)

@@ -170,6 +170,9 @@ type AutomationRun struct {
 	Resume bool `json:"-" gorm:"not null;default:false"`
 	// CancelRequested stops the run at its next check.
 	CancelRequested bool `json:"cancel_requested" gorm:"not null;default:false"`
+	// ExecutionDurationMS accumulates execution segments across approvals;
+	// queued time and time spent waiting for an answer do not consume it.
+	ExecutionDurationMS int64 `json:"-" gorm:"not null;default:0"`
 	// Answer is the start of the final answer, for listings.
 	Answer     string     `json:"answer"      gorm:"type:text;not null;default:''" extensions:"x-agent,x-agent-response"`
 	Error      string     `json:"error"       gorm:"type:text;not null;default:''" extensions:"x-agent,x-agent-response"`

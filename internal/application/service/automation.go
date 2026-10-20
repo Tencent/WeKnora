@@ -80,6 +80,8 @@ type AutomationService struct {
 	// Events publishes a run to its message's event stream; see
 	// AgentCollaboration.ChildEvents.
 	Events func(context.Context, *types.Session, *types.Message, *event.EventBus) func(context.Context) error
+	// StopDelegation fences children and discards recoverable parent waits.
+	StopDelegation func(context.Context, uint64, string, string, string) error
 
 	cfg      AutomationConfig
 	instance string
@@ -621,14 +623,35 @@ func (s *AutomationService) cancelRun(ctx context.Context, run *types.Automation
 			Update("cancel_requested", true).Error; err != nil {
 			return err
 		}
+		stopErr := s.stopRunDelegation(ctx, run)
 		s.mu.Lock()
 		cancel := s.running[run.ID]
 		s.mu.Unlock()
 		if cancel != nil {
 			cancel()
 		}
+		return stopErr
 	}
 	return nil
+}
+
+func (s *AutomationService) stopRunDelegation(ctx context.Context, run *types.AutomationRun) error {
+	if s.StopDelegation == nil {
+		return nil
+	}
+	// The caller may hold the row from before the executor created its turn.
+	var current types.AutomationRun
+	if err := s.db.WithContext(ctx).Where("id = ?", run.ID).Take(&current).Error; err != nil {
+		return err
+	}
+	if current.SessionID == "" || current.AssistantMessageID == "" {
+		return nil
+	}
+	a, err := s.automationOf(ctx, &current)
+	if err != nil {
+		return err
+	}
+	return s.StopDelegation(ctx, a.TenantID, a.OwnerUserID, current.SessionID, current.AssistantMessageID)
 }
 
 // closePrompt ends the open prompt id a run waits on and completes the

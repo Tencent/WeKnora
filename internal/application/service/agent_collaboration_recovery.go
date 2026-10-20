@@ -223,6 +223,11 @@ func (s *AgentCollaboration) resumeParent(ctx context.Context, b *collaboration.
 	if err = json.Unmarshal(snap.Request, &saved); err != nil {
 		return err
 	}
+	if saved.ActingVia != "" {
+		// Automation leases, cancellation and duration belong to their own
+		// scheduler. Never revive one through ordinary parent recovery.
+		return errors.New("scheduler-owned parent cannot resume through collaboration recovery")
+	}
 	if saved.AgentID == "" || saved.SharedAgentReadOnly {
 		return errors.New("invalid parent recovery identity")
 	}
