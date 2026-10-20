@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -38,6 +40,45 @@ func newAllocationRepo(t *testing.T) (*sandboxAllocationRepository, *gorm.DB) {
 		&types.Session{}, &types.SessionSandboxAssignment{}, &types.SandboxUserMachine{}, &types.Message{},
 	))
 	return NewSandboxAllocationRepository(db).(*sandboxAllocationRepository), db
+}
+
+// integrationEnv returns an integration dependency's address. Missing, the
+// test is skipped — unless WEKNORA_REQUIRE_INTEGRATION=1, which turns the
+// skip into a failure so an enablement run cannot pass by skipping.
+func integrationEnv(t *testing.T, name string) string {
+	t.Helper()
+	v := strings.TrimSpace(os.Getenv(name))
+	if v != "" {
+		return v
+	}
+	if os.Getenv("WEKNORA_REQUIRE_INTEGRATION") == "1" {
+		t.Fatalf("%s is required when WEKNORA_REQUIRE_INTEGRATION=1", name)
+	}
+	t.Skipf("set %s to run against a real dependency", name)
+	return ""
+}
+
+// allocationBackends runs fn on SQLite and, when a disposable Postgres is
+// configured, on Postgres. Session ids in fn must be unique: the Postgres
+// database is shared and is not cleaned between runs.
+func allocationBackends(t *testing.T, fn func(t *testing.T, repo *sandboxAllocationRepository, db *gorm.DB)) {
+	t.Helper()
+	t.Run("sqlite", func(t *testing.T) {
+		repo, db := newAllocationRepo(t)
+		fn(t, repo, db)
+	})
+	t.Run("postgres", func(t *testing.T) {
+		dsn := integrationEnv(t, "WEKNORA_REPOSITORY_TEST_POSTGRES_DSN")
+		db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+		require.NoError(t, err)
+		sqlDB, err := db.DB()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = sqlDB.Close() })
+		require.NoError(t, db.AutoMigrate(
+			&types.Session{}, &types.SessionSandboxAssignment{}, &types.SandboxUserMachine{}, &types.Message{},
+		))
+		fn(t, NewSandboxAllocationRepository(db).(*sandboxAllocationRepository), db)
+	})
 }
 
 func seedSession(t *testing.T, db *gorm.DB, id string, pin interfaces.PlacementPin) {
@@ -105,38 +146,41 @@ func TestClaimPlacementWritesAssignmentAndPinTogether(t *testing.T) {
 }
 
 func TestClaimPlacementFirstWriterWinsAndPinFollowsTheWinner(t *testing.T) {
-	repo, db := newAllocationRepo(t)
-	ctx := context.Background()
-	seedSession(t, db, "s-1", interfaces.PlacementPin{})
-	var wg sync.WaitGroup
-	results := make(chan string, 8)
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			a := userAssignment("s-1", "d-1")
-			if i%2 == 1 {
-				a.MachineDigest, a.ConfigID = "", "cfg-b"
-			}
-			w, err := claim(ctx, repo, a, interfaces.PlacementPin{})
-			if errors.Is(err, interfaces.ErrPlacementConflict) {
-				// The winner already pinned the row; a racer that re-reads adopts it.
-				w, err = claim(ctx, repo, a, readPin(t, db, "s-1"))
-			}
-			require.NoError(t, err)
-			results <- w.ConfigID
-		}(i)
-	}
-	wg.Wait()
-	close(results)
-	winner := ""
-	for c := range results {
-		if winner == "" {
-			winner = c
+	allocationBackends(t, func(t *testing.T, repo *sandboxAllocationRepository, db *gorm.DB) {
+		ctx := context.Background()
+		id := uuid.NewString()
+		digest := "d-" + uuid.NewString()
+		seedSession(t, db, id, interfaces.PlacementPin{})
+		var wg sync.WaitGroup
+		results := make(chan string, 8)
+		for i := 0; i < 8; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				a := userAssignment(id, digest)
+				if i%2 == 1 {
+					a.MachineDigest, a.ConfigID = "", "cfg-b"
+				}
+				w, err := claim(ctx, repo, a, interfaces.PlacementPin{})
+				if errors.Is(err, interfaces.ErrPlacementConflict) {
+					// The winner already pinned the row; a racer that re-reads adopts it.
+					w, err = claim(ctx, repo, a, readPin(t, db, id))
+				}
+				require.NoError(t, err)
+				results <- w.ConfigID
+			}(i)
 		}
-		require.Equal(t, winner, c, "every racer ends on one persisted placement")
-	}
-	require.Equal(t, winner, readPin(t, db, "s-1").ConfigID, "the pin is the winner's projection")
+		wg.Wait()
+		close(results)
+		winner := ""
+		for c := range results {
+			if winner == "" {
+				winner = c
+			}
+			require.Equal(t, winner, c, "every racer ends on one persisted placement")
+		}
+		require.Equal(t, winner, readPin(t, db, id).ConfigID, "the pin is the winner's projection")
+	})
 }
 
 func TestClaimPlacementRefusesAStalePinRead(t *testing.T) {
@@ -191,27 +235,29 @@ func TestRetireWithoutAnAssignmentBlocksALaterPlacement(t *testing.T) {
 }
 
 func TestRetireAndPlacementInEitherOrderLeaveNothingLive(t *testing.T) {
-	repo, db := newAllocationRepo(t)
-	ctx := context.Background()
+	allocationBackends(t, func(t *testing.T, repo *sandboxAllocationRepository, db *gorm.DB) {
+		ctx := context.Background()
+		digest := "d-" + uuid.NewString()
 
-	placedFirst := uuid.NewString()
-	seedSession(t, db, placedFirst, interfaces.PlacementPin{})
-	_, err := claim(ctx, repo, userAssignment(placedFirst, "d-race"), interfaces.PlacementPin{})
-	require.NoError(t, err)
-	out, err := repo.RetireSessions(ctx, []string{placedFirst}, time.Now().UTC())
-	require.NoError(t, err)
-	require.NotNil(t, out[0].Assignment.CleanupDueAt, "a placement that won is released with its cleanup")
+		placedFirst := uuid.NewString()
+		seedSession(t, db, placedFirst, interfaces.PlacementPin{})
+		_, err := claim(ctx, repo, userAssignment(placedFirst, digest), interfaces.PlacementPin{})
+		require.NoError(t, err)
+		out, err := repo.RetireSessions(ctx, []string{placedFirst}, time.Now().UTC())
+		require.NoError(t, err)
+		require.NotNil(t, out[0].Assignment.CleanupDueAt, "a placement that won is released with its cleanup")
 
-	retiredFirst := uuid.NewString()
-	seedSession(t, db, retiredFirst, interfaces.PlacementPin{})
-	_, err = repo.RetireSessions(ctx, []string{retiredFirst}, time.Now().UTC())
-	require.NoError(t, err)
-	_, err = claim(ctx, repo, userAssignment(retiredFirst, "d-race"), interfaces.PlacementPin{})
-	require.ErrorIs(t, err, interfaces.ErrSessionRetired, "a placement that lost never lands")
+		retiredFirst := uuid.NewString()
+		seedSession(t, db, retiredFirst, interfaces.PlacementPin{})
+		_, err = repo.RetireSessions(ctx, []string{retiredFirst}, time.Now().UTC())
+		require.NoError(t, err)
+		_, err = claim(ctx, repo, userAssignment(retiredFirst, digest), interfaces.PlacementPin{})
+		require.ErrorIs(t, err, interfaces.ErrSessionRetired, "a placement that lost never lands")
 
-	live, err := repo.CountLiveAssignments(ctx, "d-race")
-	require.NoError(t, err)
-	require.Zero(t, live)
+		live, err := repo.CountLiveAssignments(ctx, digest)
+		require.NoError(t, err)
+		require.Zero(t, live)
+	})
 }
 
 func TestRetireSessionsDedupesAndKeepsOrder(t *testing.T) {
@@ -227,6 +273,68 @@ func TestRetireSessionsDedupesAndKeepsOrder(t *testing.T) {
 	require.Len(t, out, 2, "duplicates are retired once")
 	require.Equal(t, "s-2", out[0].SessionID, "results keep the caller's order")
 	require.True(t, out[1].MachineEmpty)
+}
+
+func TestRetireOwnerSessionsEmptiesEveryMachineAndBlocksNewPlacements(t *testing.T) {
+	repo, db := newAllocationRepo(t)
+	ctx := context.Background()
+	seedSession(t, db, "s-1", interfaces.PlacementPin{})
+	seedSession(t, db, "s-2", interfaces.PlacementPin{})
+	seedSession(t, db, "s-3", interfaces.PlacementPin{}) // not placed yet
+	_, err := claim(ctx, repo, userAssignment("s-1", "d-1"), interfaces.PlacementPin{})
+	require.NoError(t, err)
+	other := userAssignment("s-2", "d-2")
+	other.ConfigID = "cfg-b"
+	_, err = claim(ctx, repo, other, interfaces.PlacementPin{})
+	require.NoError(t, err)
+
+	out, err := repo.RetireOwnerSessions(ctx, "u-1", time.Now().UTC())
+	require.NoError(t, err)
+	require.Len(t, out, 3)
+	_, err = claim(ctx, repo, userAssignment("s-3", "d-1"), interfaces.PlacementPin{})
+	require.ErrorIs(t, err, interfaces.ErrSessionRetired, "a request in flight cannot place after the account is gone")
+	for _, d := range []string{"d-1", "d-2"} {
+		m, _ := repo.GetUserMachine(ctx, d)
+		require.NotNil(t, m.EmptySince, d)
+		live, _ := repo.CountLiveAssignments(ctx, d)
+		require.Zero(t, live, d)
+	}
+}
+
+// A session row can leave the account while its live assignment stays on the
+// account's machine. Retiring the account must release that assignment too,
+// and a session of the account in another tenant is retired with the rest.
+func TestRetireOwnerSessionsReleasesStrandedAssignmentsAndOtherTenants(t *testing.T) {
+	repo, db := newAllocationRepo(t)
+	ctx := context.Background()
+	seedSession(t, db, "s-own", interfaces.PlacementPin{})
+	_, err := claim(ctx, repo, userAssignment("s-own", "d-1"), interfaces.PlacementPin{})
+	require.NoError(t, err)
+
+	stranded := &types.Session{ID: "s-stranded", TenantID: 8, UserID: "u-2"}
+	require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(stranded).Error)
+	_, err = claim(ctx, repo, userAssignment("s-stranded", "d-1"), interfaces.PlacementPin{})
+	require.NoError(t, err)
+
+	otherTenant := &types.Session{ID: "s-other-tenant", TenantID: 9, UserID: "u-1"}
+	require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(otherTenant).Error)
+
+	out, err := repo.RetireOwnerSessions(ctx, "u-1", time.Now().UTC())
+	require.NoError(t, err)
+	got := make([]string, 0, len(out))
+	for _, row := range out {
+		got = append(got, row.SessionID)
+	}
+	require.ElementsMatch(t, []string{"s-own", "s-stranded", "s-other-tenant"}, got)
+
+	_, err = claim(ctx, repo, userAssignment("s-other-tenant", "d-1"), interfaces.PlacementPin{})
+	require.ErrorIs(t, err, interfaces.ErrSessionRetired)
+	live, err := repo.CountLiveAssignments(ctx, "d-1")
+	require.NoError(t, err)
+	require.Zero(t, live)
+	m, err := repo.GetUserMachine(ctx, "d-1")
+	require.NoError(t, err)
+	require.NotNil(t, m.EmptySince)
 }
 
 func TestListEmptyUserMachinesPagesPastSkippedCandidates(t *testing.T) {
@@ -253,41 +361,47 @@ func TestListEmptyUserMachinesPagesPastSkippedCandidates(t *testing.T) {
 }
 
 func TestReleaseRecordsCleanupIntentAndEmptiesTheLastSession(t *testing.T) {
-	repo, db := newAllocationRepo(t)
-	ctx := context.Background()
-	for _, id := range []string{"s-1", "s-2"} {
-		seedSession(t, db, id, interfaces.PlacementPin{})
-		_, err := claim(ctx, repo, userAssignment(id, "d-1"), interfaces.PlacementPin{})
+	allocationBackends(t, func(t *testing.T, repo *sandboxAllocationRepository, db *gorm.DB) {
+		ctx := context.Background()
+		firstID, secondID := uuid.NewString(), uuid.NewString()
+		digest := "d-" + uuid.NewString()
+		for _, id := range []string{firstID, secondID} {
+			seedSession(t, db, id, interfaces.PlacementPin{})
+			_, err := claim(ctx, repo, userAssignment(id, digest), interfaces.PlacementPin{})
+			require.NoError(t, err)
+		}
+		now := time.Now().UTC().Truncate(time.Second)
+
+		a, empty, err := retireOne(ctx, repo, firstID, now)
 		require.NoError(t, err)
-	}
-	now := time.Now().UTC().Truncate(time.Second)
+		require.NotNil(t, a.ReleasedAt)
+		require.False(t, empty)
+		require.NotNil(t, a.CleanupDueAt, "the cleanup intent is written with the release")
 
-	a, empty, err := retireOne(ctx, repo, "s-1", now)
-	require.NoError(t, err)
-	require.NotNil(t, a.ReleasedAt)
-	require.False(t, empty)
-	require.NotNil(t, a.CleanupDueAt, "the cleanup intent is written with the release")
+		_, empty, err = retireOne(ctx, repo, secondID, now)
+		require.NoError(t, err)
+		require.True(t, empty)
+		m, _ := repo.GetUserMachine(ctx, digest)
+		require.NotNil(t, m.EmptySince)
 
-	_, empty, err = retireOne(ctx, repo, "s-2", now)
-	require.NoError(t, err)
-	require.True(t, empty)
-	m, _ := repo.GetUserMachine(ctx, "d-1")
-	require.NotNil(t, m.EmptySince)
+		require.NoError(t, repo.CompleteWorkspaceCleanup(ctx, secondID))
+		_, _, err = retireOne(ctx, repo, secondID, now.Add(time.Hour))
+		require.NoError(t, err)
+		row, _ := repo.GetAssignment(ctx, secondID)
+		require.Nil(t, row.CleanupDueAt, "a second release records nothing new")
+		require.True(t, row.ReleasedAt.Equal(now), "nor moves the release time")
+		require.NoError(t, repo.RetryWorkspaceCleanup(ctx, secondID, now))
+		row, _ = repo.GetAssignment(ctx, secondID)
+		require.Nil(t, row.CleanupDueAt, "a completed cleanup is not revived by a late retry")
 
-	require.NoError(t, repo.CompleteWorkspaceCleanup(ctx, "s-2"))
-	_, _, err = retireOne(ctx, repo, "s-2", now.Add(time.Hour))
-	require.NoError(t, err)
-	row, _ := repo.GetAssignment(ctx, "s-2")
-	require.Nil(t, row.CleanupDueAt, "a second release records nothing new")
-	require.True(t, row.ReleasedAt.Equal(now), "nor moves the release time")
-	require.NoError(t, repo.RetryWorkspaceCleanup(ctx, "s-2", now))
-	row, _ = repo.GetAssignment(ctx, "s-2")
-	require.Nil(t, row.CleanupDueAt, "a completed cleanup is not revived by a late retry")
-
-	due, err := repo.ListDueWorkspaceCleanups(ctx, now.Add(time.Second), 10)
-	require.NoError(t, err)
-	require.Len(t, due, 1)
-	require.Equal(t, "s-1", due[0].SessionID)
+		// Read this session back. A limited ListDueWorkspaceCleanups page is
+		// filled by older due rows left on a shared Postgres.
+		first, err := repo.GetAssignment(ctx, firstID)
+		require.NoError(t, err)
+		require.NotNil(t, first)
+		require.NotNil(t, first.CleanupDueAt)
+		require.False(t, first.CleanupDueAt.After(now.Add(time.Second)))
+	})
 }
 
 func TestReleaseOfASessionModeAssignmentHasNoCleanup(t *testing.T) {
@@ -305,27 +419,30 @@ func TestReleaseOfASessionModeAssignmentHasNoCleanup(t *testing.T) {
 }
 
 func TestDeleteUserMachineIfEmptySinceComparesTheClock(t *testing.T) {
-	repo, db := newAllocationRepo(t)
-	ctx := context.Background()
-	seedSession(t, db, "s-1", interfaces.PlacementPin{})
-	_, _ = claim(ctx, repo, userAssignment("s-1", "d-1"), interfaces.PlacementPin{})
-	first := time.Now().UTC().Add(-10 * 24 * time.Hour).Truncate(time.Second)
-	_, _, err := retireOne(ctx, repo, "s-1", first)
-	require.NoError(t, err)
+	allocationBackends(t, func(t *testing.T, repo *sandboxAllocationRepository, db *gorm.DB) {
+		ctx := context.Background()
+		firstID, secondID := uuid.NewString(), uuid.NewString()
+		digest := "d-" + uuid.NewString()
+		seedSession(t, db, firstID, interfaces.PlacementPin{})
+		_, _ = claim(ctx, repo, userAssignment(firstID, digest), interfaces.PlacementPin{})
+		first := time.Now().UTC().Add(-10 * 24 * time.Hour).Truncate(time.Second)
+		_, _, err := retireOne(ctx, repo, firstID, first)
+		require.NoError(t, err)
 
-	// Someone joined and left after the reclaimer read the row: a new clock.
-	seedSession(t, db, "s-2", interfaces.PlacementPin{})
-	_, _ = claim(ctx, repo, userAssignment("s-2", "d-1"), interfaces.PlacementPin{})
-	second := time.Now().UTC().Truncate(time.Second)
-	_, _, _ = retireOne(ctx, repo, "s-2", second)
+		// Someone joined and left after the reclaimer read the row: a new clock.
+		seedSession(t, db, secondID, interfaces.PlacementPin{})
+		_, _ = claim(ctx, repo, userAssignment(secondID, digest), interfaces.PlacementPin{})
+		second := time.Now().UTC().Truncate(time.Second)
+		_, _, _ = retireOne(ctx, repo, secondID, second)
 
-	deleted, err := repo.DeleteUserMachineIfEmptySince(ctx, "d-1", first)
-	require.NoError(t, err)
-	require.False(t, deleted, "the verified clock is gone; the new empty period must run its full window")
+		deleted, err := repo.DeleteUserMachineIfEmptySince(ctx, digest, first)
+		require.NoError(t, err)
+		require.False(t, deleted, "the verified clock is gone; the new empty period must run its full window")
 
-	deleted, err = repo.DeleteUserMachineIfEmptySince(ctx, "d-1", second)
-	require.NoError(t, err)
-	require.True(t, deleted)
+		deleted, err = repo.DeleteUserMachineIfEmptySince(ctx, digest, second)
+		require.NoError(t, err)
+		require.True(t, deleted)
+	})
 }
 
 func TestWorkspaceCleanupRetryAndComplete(t *testing.T) {
@@ -589,4 +706,94 @@ func TestSandboxAllocationOnTheMigratedSQLiteSchema(t *testing.T) {
 	deleted, err := repo.DeleteUserMachineIfEmptySince(ctx, "d-1", *m.EmptySince)
 	require.NoError(t, err)
 	require.True(t, deleted)
+}
+
+func TestPostgresRetireRacingFirstPlacementNeverLeavesALiveAssignment(t *testing.T) {
+	dsn := integrationEnv(t, "WEKNORA_REPOSITORY_TEST_POSTGRES_DSN")
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	require.NoError(t, db.AutoMigrate(&types.Session{}, &types.SessionSandboxAssignment{},
+		&types.SandboxUserMachine{}))
+	repo := NewSandboxAllocationRepository(db).(*sandboxAllocationRepository)
+	ctx := context.Background()
+	digest := "d-" + uuid.NewString()
+	for i := 0; i < 50; i++ {
+		id := uuid.NewString()
+		seedSession(t, db, id, interfaces.PlacementPin{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, err := claim(ctx, repo, userAssignment(id, digest), interfaces.PlacementPin{})
+			if err != nil {
+				require.ErrorIs(t, err, interfaces.ErrSessionRetired)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			_, err := repo.RetireSessions(ctx, []string{id}, time.Now().UTC())
+			require.NoError(t, err)
+		}()
+		wg.Wait()
+	}
+	live, err := repo.CountLiveAssignments(ctx, digest)
+	require.NoError(t, err)
+	require.Zero(t, live, "whichever commits first, every session ends retired with nothing live")
+}
+
+func TestLockEmptyMachineRejectsAClearedClock(t *testing.T) {
+	repo, db := newAllocationRepo(t)
+	ctx := context.Background()
+	since := time.Now().UTC().Truncate(time.Microsecond)
+	row := &types.SandboxUserMachine{
+		MachineDigest: "d-cleared", OwnerTenantID: 7, OwnerID: "u-1",
+		ConfigTenantID: 7, ConfigID: "cfg-a", EmptySince: &since,
+	}
+	require.NoError(t, db.Create(row).Error)
+	require.NoError(t, db.Exec(
+		"UPDATE sandbox_user_machines SET empty_since = NULL WHERE machine_digest = ?", row.MachineDigest,
+	).Error)
+
+	lock, err := repo.LockEmptyMachine(ctx, row.MachineDigest)
+	require.NoError(t, err)
+	if lock != nil {
+		lock.Abort()
+	}
+	require.Nil(t, lock)
+
+	var kept types.SandboxUserMachine
+	require.NoError(t, db.Where("machine_digest = ?", row.MachineDigest).Take(&kept).Error)
+	require.Nil(t, kept.EmptySince)
+}
+
+func TestDeleteUserMachinesAndSandboxConfigRollsBackWhenTheConfigIsGone(t *testing.T) {
+	_, db := newAllocationRepo(t)
+	require.NoError(t, db.AutoMigrate(&types.TenantSandboxConfigEntity{}))
+	ctx := context.Background()
+	require.NoError(t, db.Create(&types.SandboxUserMachine{
+		MachineDigest: "d-orphan", OwnerTenantID: 7, OwnerID: "u-1",
+		ConfigTenantID: 7, ConfigID: "missing",
+	}).Error)
+	require.NoError(t, db.Create(&types.TenantSandboxConfigEntity{
+		ID: "cfg-a", TenantID: 7, Name: "prod", SandboxType: "docker",
+	}).Error)
+	require.NoError(t, db.Create(&types.SandboxUserMachine{
+		MachineDigest: "d-cfg", OwnerTenantID: 7, OwnerID: "u-1",
+		ConfigTenantID: 7, ConfigID: "cfg-a",
+	}).Error)
+
+	err := DeleteUserMachinesAndSandboxConfig(ctx, db, 7, "missing")
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	var orphan types.SandboxUserMachine
+	require.NoError(t, db.Where("machine_digest = ?", "d-orphan").Take(&orphan).Error)
+
+	require.NoError(t, DeleteUserMachinesAndSandboxConfig(ctx, db, 7, "cfg-a"))
+	var n int64
+	require.NoError(t, db.Model(&types.SandboxUserMachine{}).Where("config_id = ?", "cfg-a").Count(&n).Error)
+	require.Zero(t, n)
+	var cfg types.TenantSandboxConfigEntity
+	require.ErrorIs(t, db.Where("id = ?", "cfg-a").Take(&cfg).Error, gorm.ErrRecordNotFound)
 }

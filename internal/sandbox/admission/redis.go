@@ -157,13 +157,9 @@ func (r *RedisRegistry) Close(ctx context.Context, scope Scope, ttl time.Duratio
 	b := &barrier{signal: newSignal()}
 	b.extend(sent, ttl)
 	renewCtx, stop := context.WithCancel(context.WithoutCancel(ctx))
-	b.release = func() {
-		stop()
-		relCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = redislock.Release(relCtx, r.client, key, token)
-	}
+	renewDone := make(chan struct{})
 	go func() {
+		defer close(renewDone)
 		ticker := time.NewTicker(renewInterval(ttl))
 		defer ticker.Stop()
 		for {
@@ -187,6 +183,21 @@ func (r *RedisRegistry) Close(ctx context.Context, scope Scope, ttl time.Duratio
 			}
 		}
 	}()
+	// Wait for the renewal goroutine to leave before touching the key, so a
+	// PEXPIRE cannot land after PERSIST and put the TTL back.
+	finishKey := func(persist bool) {
+		stop()
+		<-renewDone
+		relCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if persist {
+			_ = r.client.Persist(relCtx, key).Err()
+			return
+		}
+		_, _ = redislock.Release(relCtx, r.client, key, token)
+	}
+	b.release = func() { finishKey(false) }
+	b.seal = func() { finishKey(true) }
 	return b, nil
 }
 

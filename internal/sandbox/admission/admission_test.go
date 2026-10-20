@@ -351,3 +351,46 @@ func TestRedisShortHoldNeverShortensALongerLease(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, n, "the long lease is still registered")
 }
+
+func TestSealKeepsTheScopeClosedWithoutReportingLoss(t *testing.T) {
+	ctx := context.Background()
+	scope := ConfigCreateScope(7, "cfg-a")
+
+	t.Run("memory", func(t *testing.T) {
+		reg := NewMemory()
+		barrier, err := reg.Close(ctx, scope, time.Minute)
+		require.NoError(t, err)
+		barrier.Seal()
+		barrier.Seal()
+		_, err = reg.Hold(ctx, scope, "create:again", time.Minute)
+		require.ErrorIs(t, err, ErrClosed)
+		_, err = reg.Close(ctx, scope, time.Minute)
+		require.ErrorIs(t, err, ErrClosed)
+		select {
+		case <-barrier.Lost():
+			t.Fatal("seal must not report the barrier lost")
+		default:
+		}
+		require.NoError(t, barrier.Check())
+	})
+
+	t.Run("redis", func(t *testing.T) {
+		reg, mini := newRedis(t)
+		barrier, err := reg.Close(ctx, scope, 300*time.Millisecond)
+		require.NoError(t, err)
+		barrier.Seal()
+		time.Sleep(400 * time.Millisecond)
+		mini.FastForward(time.Second)
+		key := prefix + "{config:7:cfg-a}:create:closed"
+		require.True(t, mini.Exists(key), "seal persists the closed flag past its TTL")
+		require.Equal(t, time.Duration(0), mini.TTL(key))
+		_, err = reg.Hold(ctx, scope, "create:again", time.Minute)
+		require.ErrorIs(t, err, ErrClosed)
+		select {
+		case <-barrier.Lost():
+			t.Fatal("seal must not report the barrier lost")
+		default:
+		}
+		require.NoError(t, barrier.Check())
+	})
+}

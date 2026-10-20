@@ -9,9 +9,19 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/Tencent/WeKnora/internal/sandbox/workspace"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+// errWebUserDeleted means the canonical web user row is already soft-deleted.
+// Session create returns it as-is. ClaimPlacement maps it to ErrSessionRetired.
+var errWebUserDeleted = errors.New("repository: web user is deleted")
+
+// afterWebUserLock runs after lockLiveWebUser has locked a users row and
+// before it returns. Tests insert a session on that same transaction; they
+// clear the hook with t.Cleanup.
+var afterWebUserLock func(tx *gorm.DB)
 
 type sandboxAllocationRepository struct{ db *gorm.DB }
 
@@ -89,23 +99,72 @@ func InsertSandboxAssignmentTx(
 	return true, err
 }
 
+// lockLiveWebUser locks a canonical web user's row. Other owner ids are
+// not web accounts and must not touch the users table. No row means this
+// id is not a web account. A soft-deleted row returns errWebUserDeleted
+// while the lock is still held.
+func lockLiveWebUser(tx *gorm.DB, userID string) error {
+	if !workspace.IsCanonicalUUID(userID) {
+		return nil
+	}
+	var row struct {
+		ID        string
+		DeletedAt gorm.DeletedAt
+	}
+	err := forUpdate(tx.Unscoped().Model(&types.User{})).
+		Select("id", "deleted_at").
+		Where("id = ?", userID).
+		Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if afterWebUserLock != nil {
+		afterWebUserLock(tx)
+	}
+	if row.DeletedAt.Valid {
+		return errWebUserDeleted
+	}
+	return nil
+}
+
 func (r *sandboxAllocationRepository) ClaimPlacement(
 	ctx context.Context, a *types.SessionSandboxAssignment, machine *types.SandboxUserMachine,
 	expected interfaces.PlacementPin,
 ) (*types.SessionSandboxAssignment, error) {
 	var out *types.SessionSandboxAssignment
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// The owner row comes before the session row. Reading user_id without
+		// a lock is what makes that order possible: the session lock is next.
+		var owner struct {
+			UserID string `gorm:"column:user_id"`
+		}
+		res := tx.Model(&types.Session{}).
+			Select("user_id").
+			Where("id = ?", a.SessionID).
+			Take(&owner)
+		if res.Error != nil {
+			return res.Error // gorm.ErrRecordNotFound for a missing or soft-deleted session
+		}
+		if err := lockLiveWebUser(tx, owner.UserID); err != nil {
+			if errors.Is(err, errWebUserDeleted) {
+				return interfaces.ErrSessionRetired
+			}
+			return err
+		}
 		// Lock the session row: the pin lives on it, and an older replica's
 		// conditional pin update waits on this lock instead of interleaving.
 		var row struct {
 			SandboxConfigID       *string
 			SandboxConfigTenantID uint64
 		}
-		res := forUpdate(tx.Model(&types.Session{})).
+		res = forUpdate(tx.Model(&types.Session{})).
 			Select("sandbox_config_id", "sandbox_config_tenant_id").
 			Where("id = ?", a.SessionID).Take(&row)
 		if res.Error != nil {
-			return res.Error // gorm.ErrRecordNotFound for a missing or soft-deleted session
+			return res.Error
 		}
 		current := interfaces.PlacementPin{TenantID: row.SandboxConfigTenantID}
 		if row.SandboxConfigID != nil {
@@ -190,11 +249,48 @@ func (r *sandboxAllocationRepository) RetireSessions(
 	return out, err
 }
 
+// RetireOwnerSessions retires every session of a deleted Web account and
+// releases their assignments in one transaction. The account's own sessions
+// (any source, including ones never placed) and any session whose live
+// assignment is on one of its machines are included: a session row may have
+// been reassigned onto a machine this account still owns.
+func (r *sandboxAllocationRepository) RetireOwnerSessions(
+	ctx context.Context, ownerID string, at time.Time,
+) ([]interfaces.RetiredSession, error) {
+	var out []interfaces.RetiredSession
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		ids, err := ownerSessionIDs(tx, ownerID)
+		if err != nil {
+			return err
+		}
+		out, err = RetireSessionsTx(tx, ids, at)
+		return err
+	})
+	return out, err
+}
+
+// ownerSessionIDs is the account's own sessions, including ones never placed,
+// plus any session whose live assignment still sits on one of its machines.
+func ownerSessionIDs(tx *gorm.DB, ownerID string) ([]string, error) {
+	var ids []string
+	if err := tx.Unscoped().Model(&types.Session{}).
+		Where("user_id = ?", ownerID).Pluck("id", &ids).Error; err != nil {
+		return nil, err
+	}
+	var assigned []string
+	if err := tx.Table("session_sandbox_assignments AS a").
+		Joins("JOIN sandbox_user_machines AS m ON m.machine_digest = a.machine_digest").
+		Where("m.owner_id = ? AND a.released_at IS NULL", ownerID).
+		Pluck("a.session_id", &assigned).Error; err != nil {
+		return nil, err
+	}
+	return append(ids, assigned...), nil
+}
+
 // RetireSessionsTx is RetireSessions inside the caller's transaction (T14
-// retires a deleted account's sessions with it). Locks are taken in a fixed
-// order — every session row by id, then every machine row by digest — which
-// is the order ClaimPlacement uses for one session, so the two cannot
-// deadlock.
+// retires a deleted account's sessions with it). Locks are session rows by
+// id, then machine rows by digest. A caller that also locks the user row
+// must do that first: user, then sessions, then machines.
 func RetireSessionsTx(tx *gorm.DB, sessionIDs []string, at time.Time) ([]interfaces.RetiredSession, error) {
 	at = at.UTC().Truncate(time.Microsecond)
 	seen := make(map[string]bool, len(sessionIDs))
@@ -391,6 +487,124 @@ func (r *sandboxAllocationRepository) DeleteUserMachinesByConfig(
 	return r.db.WithContext(ctx).
 		Where("config_tenant_id = ? AND config_id = ?", configTenantID, configID).
 		Delete(&types.SandboxUserMachine{}).Error
+}
+
+// GormDB is the database this repository writes, so a caller can delete
+// machine rows and another table in one transaction.
+func (r *sandboxAllocationRepository) GormDB() *gorm.DB { return r.db }
+
+// LockEmptyMachine locks a machine that is actually empty. See the interface.
+func (r *sandboxAllocationRepository) LockEmptyMachine(
+	ctx context.Context, digest string,
+) (interfaces.MachineReclaimLock, error) {
+	tx := r.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	fail := func(err error) (interfaces.MachineReclaimLock, error) {
+		tx.Rollback()
+		return nil, err
+	}
+	if err := lockMachineRow(tx, digest); err != nil {
+		return fail(err)
+	}
+	var row types.SandboxUserMachine
+	err := tx.Where("machine_digest = ?", digest).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && row.EmptySince == nil) {
+		tx.Rollback()
+		return nil, nil
+	}
+	if err != nil {
+		return fail(err)
+	}
+	live, err := countLive(tx, digest)
+	if err != nil {
+		return fail(err)
+	}
+	if live > 0 {
+		tx.Rollback()
+		return nil, nil
+	}
+	since := *row.EmptySince
+	return &machineReclaimLock{
+		tx: tx, digest: digest, emptySince: since,
+		configTenantID: row.ConfigTenantID, configID: row.ConfigID,
+	}, nil
+}
+
+// machineReclaimLock holds one registry row until the provider delete finishes.
+type machineReclaimLock struct {
+	tx             *gorm.DB
+	digest         string
+	emptySince     time.Time
+	configTenantID uint64
+	configID       string
+	done           bool
+}
+
+func (l *machineReclaimLock) Claim() interfaces.EmptyMachineClaim {
+	return interfaces.EmptyMachineClaim{
+		EmptySince: l.emptySince, ConfigTenantID: l.configTenantID, ConfigID: l.configID,
+	}
+}
+
+func (l *machineReclaimLock) Abort() {
+	if l == nil || l.done {
+		return
+	}
+	l.done = true
+	l.tx.Rollback()
+}
+
+func (l *machineReclaimLock) CommitDelete() (bool, error) {
+	if l == nil || l.done {
+		return false, errors.New("sandbox allocation: reclaim lock is already closed")
+	}
+	l.done = true
+	live, err := countLive(l.tx, l.digest)
+	if err != nil {
+		l.tx.Rollback()
+		return false, err
+	}
+	if live > 0 {
+		l.tx.Rollback()
+		return false, nil
+	}
+	res := l.tx.Where("machine_digest = ? AND empty_since = ?", l.digest, l.emptySince).
+		Delete(&types.SandboxUserMachine{})
+	if res.Error != nil || res.RowsAffected == 0 {
+		l.tx.Rollback()
+		return false, res.Error
+	}
+	if err := l.tx.Commit().Error; err != nil {
+		l.tx.Rollback()
+		return false, err
+	}
+	return true, nil
+}
+
+// DeleteUserMachinesAndSandboxConfig removes the config's user-machine rows
+// and soft-deletes the config in one transaction. A missing config rolls
+// the machine delete back, so a failed config delete cannot leave sessions
+// pointing at a registry that cleanup treats as already gone.
+func DeleteUserMachinesAndSandboxConfig(
+	ctx context.Context, db *gorm.DB, tenantID uint64, configID string,
+) error {
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("config_tenant_id = ? AND config_id = ?", tenantID, configID).
+			Delete(&types.SandboxUserMachine{}).Error; err != nil {
+			return err
+		}
+		res := tx.Where("tenant_id = ? AND id = ?", tenantID, configID).
+			Delete(&types.TenantSandboxConfigEntity{})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
 }
 
 func (r *sandboxAllocationRepository) ListDueWorkspaceCleanups(

@@ -32,6 +32,23 @@ type EmptyMachineCursor struct {
 	Digest     string
 }
 
+// EmptyMachineClaim is the identity a reclaimer verified under the row lock.
+type EmptyMachineClaim struct {
+	EmptySince     time.Time
+	ConfigTenantID uint64
+	ConfigID       string
+}
+
+// MachineReclaimLock is the open row lock from LockEmptyMachine.
+type MachineReclaimLock interface {
+	Claim() EmptyMachineClaim
+	// Abort releases the lock without deleting the row.
+	Abort()
+	// CommitDelete drops the row only if it is still empty at the same
+	// empty_since, then releases the lock. False means the row stayed.
+	CommitDelete() (bool, error)
+}
+
 // PlacementPin is the (sandbox_config_id, sandbox_config_tenant_id) pair on
 // the sessions row. A zero ConfigID means the session has no pin.
 type PlacementPin struct {
@@ -61,6 +78,14 @@ type SandboxAllocationRepository interface {
 	// placement racing the deletion cannot land after it. Idempotent; results
 	// are in sessionIDs order.
 	RetireSessions(ctx context.Context, sessionIDs []string, at time.Time) ([]RetiredSession, error)
+	// RetireOwnerSessions retires every session of a Web account in one
+	// transaction: the account's own sessions in every tenant (including
+	// sessions that were never placed) and any session whose live assignment
+	// is on one of that account's machines. It releases those assignments,
+	// writes the cleanup task of a user-mode one, and sets empty_since on a
+	// machine this leaves empty. A later ClaimPlacement returns
+	// ErrSessionRetired.
+	RetireOwnerSessions(ctx context.Context, ownerID string, at time.Time) ([]RetiredSession, error)
 	HasSandboxCheckpoint(ctx context.Context, sessionID string) (bool, error)
 
 	ListUserMachinesByConfig(
@@ -82,6 +107,13 @@ type SandboxAllocationRepository interface {
 	// emptySince — the value the reclaimer verified — so a machine that was
 	// joined and emptied again meanwhile keeps its row and its new clock.
 	DeleteUserMachineIfEmptySince(ctx context.Context, digest string, emptySince time.Time) (bool, error)
+	// LockEmptyMachine locks the registry row when the machine has no live
+	// assignment and a non-nil empty_since. A nil lock means it is not
+	// reclaimable (missing row, a live session, or a cleared clock — a join
+	// clears the clock). The lock is held until Abort or CommitDelete, and
+	// that span must cover the provider delete: a placement takes the same
+	// row lock before its assignment exists.
+	LockEmptyMachine(ctx context.Context, digest string) (MachineReclaimLock, error)
 	DeleteUserMachinesByConfig(ctx context.Context, configTenantID uint64, configID string) error
 
 	// ListDueWorkspaceCleanups returns released assignments whose directory

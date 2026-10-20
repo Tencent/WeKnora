@@ -12,6 +12,7 @@ package admission
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -43,6 +44,13 @@ func SessionScope(digest, sessionID string) Scope {
 	return Scope{Tag: digest, Name: "session:" + sessionID}
 }
 
+// ConfigCreateScope registers provider creates of one sandbox config, so a
+// config deletion can stop new creates and wait for running ones before it
+// takes inventory.
+func ConfigCreateScope(configTenantID uint64, configID string) Scope {
+	return Scope{Tag: "config:" + strconv.FormatUint(configTenantID, 10) + ":" + configID, Name: "create"}
+}
+
 // SessionMember names one operation of sessionID: kind is "turn", "shell",
 // "file", "exec", "pty", "desktop", "fork" or "cleanup". token is unique per
 // hold — including turns, which may nest — so releasing one hold never
@@ -72,8 +80,13 @@ type Lease interface {
 // Barrier is an exclusive close of a scope.
 type Barrier interface {
 	Signal
-	// Release reopens the scope. Idempotent.
+	// Release reopens the scope. Idempotent, and exclusive with Seal:
+	// whichever runs first wins.
 	Release()
+	// Seal stops renewal and leaves the scope closed. It does not remove
+	// the closed flag, so new creates of this scope stay refused. Idempotent,
+	// and exclusive with Release.
+	Seal()
 }
 
 // Bind returns a context cancelled with ErrLeaseLost as soon as any of
@@ -121,10 +134,13 @@ type Registry interface {
 // signal is the shared Lost/deadline/Release bookkeeping of leases and
 // barriers. A zero deadline (the memory registry) never expires on its own.
 type signal struct {
-	lost        chan struct{}
-	lostOnce    sync.Once
-	releaseOnce sync.Once
-	release     func()
+	lost       chan struct{}
+	lostOnce   sync.Once
+	finishOnce sync.Once
+	release    func()
+	// seal stops renewal without reopening. Nil on a memory barrier: the
+	// scope stays in the barrier map.
+	seal func()
 
 	mu       sync.Mutex
 	deadline time.Time
@@ -220,8 +236,14 @@ func (s *signal) currentDeadline() time.Time {
 	return s.deadline
 }
 
-func (s *signal) Release() {
-	s.releaseOnce.Do(func() {
+func (s *signal) Release() { s.finish(true) }
+
+// Seal stops the local deadline timer the same way Release does, so it
+// cannot mark the barrier lost, and runs the non-reopening callback.
+func (b *barrier) Seal() { b.finish(false) }
+
+func (s *signal) finish(reopen bool) {
+	s.finishOnce.Do(func() {
 		s.mu.Lock()
 		s.stopped = true
 		if s.timer != nil {
@@ -229,8 +251,14 @@ func (s *signal) Release() {
 			s.timer = nil
 		}
 		s.mu.Unlock()
-		if s.release != nil {
-			s.release()
+		if reopen {
+			if s.release != nil {
+				s.release()
+			}
+			return
+		}
+		if s.seal != nil {
+			s.seal()
 		}
 	})
 }
@@ -240,6 +268,11 @@ func (s *signal) Check() error {
 	defer s.mu.Unlock()
 	if s.lostClosed() {
 		return ErrLeaseLost
+	}
+	// Release and Seal both stop the deadline. A stopped signal is not a
+	// loss, even if the old deadline has since passed.
+	if s.stopped {
+		return nil
 	}
 	if d := s.deadline; !d.IsZero() && !time.Now().Before(d) {
 		s.closeLostLocked()
