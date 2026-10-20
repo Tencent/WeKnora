@@ -54,8 +54,7 @@ func TestSelectSessionBindingStoreUserModeNeedsRedisAndEnv(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 	_, _, err = selectSessionBindingStore(client, true)
 	require.NoError(t, err)
-	require.Equal(t, userModeRuntimeReady, allocation.UserModeAvailable(),
-		"env opt-in with Redis opens the gate only once the manager can run user-mode sessions")
+	require.True(t, allocation.UserModeAvailable(), "env opt-in with Redis opens the gate")
 
 	t.Setenv(allocation.UserModeEnvVar, "")
 	_, _, err = selectSessionBindingStore(client, true)

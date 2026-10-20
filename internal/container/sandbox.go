@@ -40,14 +40,6 @@ func sandboxRedisNamespace() string {
 	return namespace
 }
 
-// userModeRuntimeReady stays false until a deleted user-mode session is
-// retired, fork and rewind take the shared machine's exclusive window, and
-// the desktop slot is per machine (plan T12–T18). T10 can already place and
-// run those sessions, but opening the gate before the rest leaves a shared
-// machine that is never released, forked, or exclusively rewound. The gate
-// also needs Redis and the env opt-in; without those it stays closed.
-const userModeRuntimeReady = false
-
 func selectSessionBindingStore(
 	redisClient *redis.Client,
 	requireRedis bool,
@@ -59,14 +51,10 @@ func selectSessionBindingStore(
 		if err != nil {
 			return nil, "", fmt.Errorf("build redis binding store: %w", err)
 		}
-		allocation.SetUserModeAvailable(requested && userModeRuntimeReady)
-		switch {
-		case requested && !userModeRuntimeReady:
-			logger.Warnf(context.Background(),
-				"[sandbox] %s is set but this build cannot run user-mode sessions yet; "+
-					"user-mode allocation stays disabled",
-				allocation.UserModeEnvVar)
-		case requested:
+		// User mode needs both the env opt-in and Redis; without Redis the
+		// leases that coordinate one machine across replicas do not exist.
+		allocation.SetUserModeAvailable(requested)
+		if requested {
 			logger.Infof(context.Background(), "[sandbox] user-mode allocation enabled (%s)", allocation.UserModeEnvVar)
 		}
 		return store, "redis", nil
@@ -149,6 +137,7 @@ func newTenantSandboxResolver(
 	sessionRepo interfaces.SessionRepository,
 	bootstrapper sandbox.SessionBootstrapper,
 	alloc *sandboxalloc.Service,
+	reg admission.Registry,
 ) sandbox.TenantSandboxResolver {
 	ctx := context.Background()
 
@@ -168,7 +157,7 @@ func newTenantSandboxResolver(
 		Checker:         sessionExistenceCheckerFor(sessionRepo),
 		Bootstrapper:    bootstrapper,
 		Allocations:     alloc,
-		Admission:       newAdmissionRegistry(redisClient),
+		Admission:       reg,
 		Namespace:       sandboxRedisNamespace(),
 		SharedTransport: sandbox.NewGuardedTransport(),
 	})

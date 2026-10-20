@@ -97,6 +97,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/admission"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/stream"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -234,6 +235,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		}
 		return b
 	}))
+	must(container.Provide(newAdmissionRegistry))
 	must(container.Provide(newTenantSandboxResolver))
 	// The resolver admits user-mode sessions, so the allocation service has to
 	// exist before the first Invoke that builds a TenantSandboxResolver
@@ -340,6 +342,15 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewStorageBackendServiceWithResources))
 	must(container.Provide(func(s *service.StorageBackendService) interfaces.StorageBackendService { return s }))
 	must(container.Provide(func(s *service.StorageBackendService) interfaces.StorageBackendResolver { return s }))
+	// Config deletion drains in-flight creates on the same admission registry
+	// the resolver injects into managers, then drops that config's machines.
+	must(container.Invoke(func(
+		svc *service.TenantSandboxConfigService,
+		repo interfaces.SandboxAllocationRepository,
+		reg admission.Registry,
+	) {
+		svc.WithAllocationRepo(repo).WithAdmission(reg)
+	}))
 
 	// Agent service layer (requires event bus, web search service)
 	// SessionService is passed as parameter to CreateAgentEngine method when creating AgentService
@@ -456,6 +467,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		return pinned
 	}))
 	must(container.Provide(service.NewSessionForkServiceFromRepos))
+	must(container.Invoke(func(f *service.SessionForkService, a *sandboxalloc.Service) {
+		f.WithAllocations(a)
+	}))
 	must(container.Provide(func(
 		mgr sandbox.Manager,
 		pinned *service.PinnedSessionSandbox,
@@ -566,6 +580,53 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		p.WithPlacer(a)
 		skills.WithPlacer(a)
 	}))
+	// Tombstones are allocation rows. Wire the cleaner only where a remote
+	// sandbox config can be resolved. Lite and host stay unwired, so a delete
+	// there does not write one.
+	must(container.Provide(sandboxalloc.NewWorkspaceCleaner))
+	must(container.Invoke(func(
+		s interfaces.SessionService,
+		c *sandboxalloc.WorkspaceCleaner,
+		resolver sandbox.TenantSandboxResolver,
+	) {
+		if handler.Edition == "lite" || resolver == nil {
+			return
+		}
+		if svc, ok := s.(interface {
+			WithWorkspaceCleaner(*sandboxalloc.WorkspaceCleaner)
+		}); ok {
+			svc.WithWorkspaceCleaner(c)
+		}
+	}))
+	// Deleting a Web account retires that account's sessions before the user
+	// row goes. Lite and host stay unwired, same as session deletion, so a
+	// delete there does not write allocation rows.
+	must(container.Invoke(func(
+		u interfaces.UserService,
+		c *sandboxalloc.WorkspaceCleaner,
+		resolver sandbox.TenantSandboxResolver,
+	) {
+		if handler.Edition == "lite" || resolver == nil {
+			return
+		}
+		if svc, ok := u.(interface {
+			WithSandboxReleaser(service.SandboxOwnerReleaser)
+		}); ok {
+			svc.WithSandboxReleaser(c)
+		}
+	}))
+	// Admin release uses the same cleaner. Lite and host stay unwired, so
+	// those editions do not gain a path that writes allocation rows.
+	must(container.Invoke(func(
+		cfgSvc *service.TenantSandboxConfigService,
+		cleaner *sandboxalloc.WorkspaceCleaner,
+		resolver sandbox.TenantSandboxResolver,
+	) {
+		if handler.Edition == "lite" || resolver == nil {
+			return
+		}
+		cfgSvc.WithUserMachineReleaser(cleaner)
+	}))
 	must(container.Invoke(startTenantSkillReaper))
 	logger.Debugf(ctx, "[Container] Tenant skill reaper registered")
 	must(
@@ -591,6 +652,18 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	}))
 	must(container.Invoke(startForkSnapshotReaper))
 	logger.Debugf(ctx, "[Container] Fork snapshot reaper registered")
+	must(container.Provide(func(
+		svc *sandboxalloc.Service, cleaner *sandboxalloc.WorkspaceCleaner,
+		configs repository.TenantSandboxConfigRepository, redisClient *redis.Client,
+	) *sandboxalloc.UserMachineGC {
+		var client redis.UniversalClient
+		if redisClient != nil {
+			client = redisClient
+		}
+		return sandboxalloc.NewUserMachineGC(svc, cleaner, configs, client)
+	}))
+	must(container.Invoke(startUserMachineGC))
+	logger.Debugf(ctx, "[Container] User machine GC registered")
 
 	// HTTP handlers layer
 	logger.Debugf(ctx, "[Container] Registering HTTP handlers...")
@@ -2125,6 +2198,35 @@ func startAgentPromptReaper(runs *service.SuspendedRunService, cleaner interface
 		}
 	}()
 	cleaner.RegisterWithName("AgentPromptReaper", func() error {
+		close(stop)
+		return nil
+	})
+}
+
+// startUserMachineGC reclaims empty user machines hourly. Every replica runs
+// the ticker; the Redis lock inside RunOnce lets one of them scan.
+func startUserMachineGC(gc *sandboxalloc.UserMachineGC, cleaner interfaces.ResourceCleaner) {
+	if gc == nil || cleaner == nil {
+		logger.Warnf(context.Background(), "[Container] user machine GC unavailable")
+		return
+	}
+	stop := make(chan struct{})
+	go func() {
+		timer := time.NewTimer(2 * time.Minute)
+		defer timer.Stop()
+		for {
+			select {
+			case <-timer.C:
+				if _, err := gc.RunOnce(context.Background()); err != nil {
+					logger.Warnf(context.Background(), "[UserMachineGC] run failed: %v", err)
+				}
+				timer.Reset(sandboxalloc.UserMachineGCInterval)
+			case <-stop:
+				return
+			}
+		}
+	}()
+	cleaner.RegisterWithName("UserMachineGC", func() error {
 		close(stop)
 		return nil
 	})
