@@ -467,7 +467,7 @@ async function clearRead() {
 }
 .notification-banner-enter-active,
 .notification-banner-leave-active,
-.notification-banner-move { transition: opacity 180ms ease, transform 180ms ease; }
+.notification-banner-move { transition: opacity var(--app-motion-base) ease, transform var(--app-motion-base) ease; }
 .notification-banner-enter-from,
 .notification-banner-leave-to { opacity: 0; transform: translateX(16px); }
 @media (max-width: 480px) { .notification-banners { top: max(12px, env(safe-area-inset-top)); right: 16px; } }
