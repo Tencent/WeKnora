@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"path"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -42,6 +43,38 @@ func TestCleanWriteFileInSharedAllowsTheWholeMachine(t *testing.T) {
 	require.Equal(t, "/workspace/sessions/11111111-2222-4333-8444-555555555555/a.md", got)
 	_, err = CleanWriteFileIn(l, l.InputDir+"/x")
 	require.ErrorContains(t, err, "read-only")
+}
+
+func TestSharedWritesProtectEverySessionInput(t *testing.T) {
+	l := userLayout(t)
+	sibling, err := UserSession("7c9e6679-7425-40de-944b-e07fc1f90ae7")
+	require.NoError(t, err)
+	for _, p := range []string{
+		l.InputDir + "/original.txt",
+		sibling.InputDir,
+		sibling.InputDir + "/original.txt",
+		sibling.InputDir + "/nested/original.txt",
+		sibling.Root + "/output/../input/original.txt",
+		"../" + path.Base(sibling.Root) + "/input/original.txt",
+		InputDir + "/original.txt",
+	} {
+		_, err := CleanWriteFileIn(l, p)
+		require.ErrorContains(t, err, "read-only", p)
+	}
+	for _, p := range []string{
+		sibling.Root + "/notes.txt",
+		sibling.OutputDir + "/report.txt",
+		sibling.Root + "/input-copy/original.txt",
+		sibling.Root + "/project/input/data.txt",
+	} {
+		got, err := CleanWriteFileIn(l, p)
+		require.NoError(t, err, p)
+		require.Equal(t, p, got)
+	}
+	// A host project may legitimately contain a sessions/name/input tree.
+	host := Layout{Origin: OriginHost, Root: Root}
+	require.Empty(t, host.ReadOnlyInputRoot(sibling.InputDir+"/data.txt"))
+	require.Empty(t, Remote().ReadOnlyInputRoot(sibling.InputDir+"/data.txt"))
 }
 
 func TestCleanWorkDirIn(t *testing.T) {

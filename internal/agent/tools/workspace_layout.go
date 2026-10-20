@@ -122,7 +122,7 @@ func resolveIn(l sandbox.WorkspaceLayout, p string) string {
 // and must not sit under the read-only attachment directory. When several
 // roots match, the most specific one is reported.
 func writableRootIn(l sandbox.WorkspaceLayout, clean string) (string, bool) {
-	if l.InputDir != "" && isUnderRoot(clean, l.InputDir) {
+	if l.ReadOnlyInputRoot(clean) != "" {
 		return "", false
 	}
 	best := ""
@@ -165,6 +165,11 @@ func inspectRoot(l sandbox.WorkspaceLayout, clean string) (string, bool) {
 }
 
 func writeScopeErrorIn(l sandbox.WorkspaceLayout, requested string) string {
+	if l.IsSharedRemote() {
+		if input := l.ReadOnlyInputRoot(resolveIn(l, requested)); input != "" {
+			return fmt.Sprintf("session input %s is read-only; write a copy outside attachment directories", input)
+		}
+	}
 	scope := layoutScopeName(l)
 	if strings.TrimSpace(l.InputDir) == "" {
 		return fmt.Sprintf(

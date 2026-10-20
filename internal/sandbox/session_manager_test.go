@@ -1205,6 +1205,25 @@ func TestUserSessionMayUseTheWholeMachine(t *testing.T) {
 	require.NoError(t, err, "reads of a sibling's tree go through to the provider")
 }
 
+func TestUserSessionWorkspaceWritesPreserveSiblingInputs(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
+	ctx := ownerCtx()
+	input := userSessionRoot(userSessionB) + "/input/original.txt"
+	require.NoError(t, h.mgr.WriteSessionInputFile(ctx, userSessionB, input, []byte("original")),
+		"application attachment staging remains allowed")
+	writesBefore := len(h.client.writeFiles)
+	err := h.mgr.WriteSessionWorkspaceFile(ctx, userSessionA, input, []byte("modified"))
+	require.ErrorContains(t, err, "read-only")
+	err = h.mgr.WriteSessionWorkspaceFiles(ctx, userSessionA, []SessionWorkspaceFile{
+		{Path: userSessionRoot(userSessionB) + "/output/report.txt", Content: []byte("report")},
+		{Path: userSessionRoot(userSessionB) + "/output/../input/original.txt", Content: []byte("modified")},
+	})
+	require.ErrorContains(t, err, "read-only")
+	require.Len(t, h.client.writeFiles, writesBefore, "reject the entire batch before writing any files")
+	_, err = h.mgr.ReadSessionFile(ctx, userSessionA, input)
+	require.NoError(t, err, "sibling inputs remain readable")
+}
+
 func TestValidityIsReadFreshNotCached(t *testing.T) {
 	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
 	ctx := ownerCtx()

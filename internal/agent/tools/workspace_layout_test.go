@@ -576,6 +576,49 @@ func TestSharedLayoutAllowsInspectingTheWholeMachine(t *testing.T) {
 	require.Equal(t, []string{"/"}, tool.workDirRootsFor(sandbox.RemoteWorkspaceLayout()))
 }
 
+func TestSharedFileToolsProtectSiblingAttachments(t *testing.T) {
+	l, err := sandbox.UserWorkspaceLayout("0f8fad5b-d9cb-469f-a165-70867728950e")
+	require.NoError(t, err)
+	sibling, err := sandbox.UserWorkspaceLayout("7c9e6679-7425-40de-944b-e07fc1f90ae7")
+	require.NoError(t, err)
+	for _, file := range []string{
+		sibling.InputDir + "/original.txt",
+		sibling.Root + "/output/../input/original.txt",
+	} {
+		t.Run(file, func(t *testing.T) {
+			target := sibling.InputDir + "/original.txt"
+			sink := &layoutFileSink{layout: l}
+			sink.files = map[string][]byte{target: []byte("original")}
+			writer := NewWriteSandboxFileTool(sink, 0)
+			editor := NewEditSandboxFileTool(sink)
+			for _, mode := range []string{"overwrite", "append"} {
+				args, err := json.Marshal(WriteSandboxFileInput{Path: file, Content: "modified", Mode: mode})
+				require.NoError(t, err)
+				result, err := writer.Execute(sandboxFileTestContext(), args)
+				require.NoError(t, err)
+				require.False(t, result.Success)
+				require.Contains(t, result.Error, sibling.InputDir+" is read-only")
+			}
+			result, err := editor.Execute(sandboxFileTestContext(), mustEditSandboxArgs(file, "original", "modified", false))
+			require.NoError(t, err)
+			require.False(t, result.Success)
+			require.Contains(t, result.Error, sibling.InputDir+" is read-only")
+			require.Zero(t, sink.calls)
+			require.Equal(t, "original", string(sink.files[target]))
+
+			// Ordinary sibling files remain writable with both tools.
+			work := sibling.OutputDir + "/report.txt"
+			result, err = writer.Execute(sandboxFileTestContext(), mustWriteSandboxArgs(work, "original"))
+			require.NoError(t, err)
+			require.True(t, result.Success, result.Error)
+			result, err = editor.Execute(sandboxFileTestContext(), mustEditSandboxArgs(work, "original", "modified", false))
+			require.NoError(t, err)
+			require.True(t, result.Success, result.Error)
+			require.Equal(t, "modified", string(sink.files[work]))
+		})
+	}
+}
+
 func TestSharedLayoutToolCopyKeepsSessionPathsIntact(t *testing.T) {
 	l, err := sandbox.UserWorkspaceLayout("0f8fad5b-d9cb-469f-a165-70867728950e")
 	require.NoError(t, err)

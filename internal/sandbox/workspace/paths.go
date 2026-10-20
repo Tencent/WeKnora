@@ -36,6 +36,35 @@ func underAny(p string, roots []string) bool {
 	return false
 }
 
+// ReadOnlyInputRoot returns the attachment root containing a clean absolute
+// path. Shared machines reserve every session's input tree, not only the
+// caller's: widening file access must not make another session's originals
+// writable. This is a lexical tool rule, not an OS permission boundary.
+func (l Layout) ReadOnlyInputRoot(clean string) string {
+	if l.InputDir != "" && IsUnder(clean, l.InputDir) {
+		return l.InputDir
+	}
+	if !l.IsSharedRemote() {
+		return ""
+	}
+	if IsUnder(clean, InputDir) {
+		return InputDir
+	}
+	relative, ok := strings.CutPrefix(clean, UserSessionsRoot+"/")
+	if !ok {
+		return ""
+	}
+	name, _, ok := strings.Cut(relative, "/")
+	if !ok || name == "" {
+		return ""
+	}
+	input := path.Join(UserSessionsRoot, name, "input")
+	if IsUnder(clean, input) {
+		return input
+	}
+	return ""
+}
+
 // CleanWriteFileIn normalizes a model-authored sandbox write and protects the
 // attachment tree. The rule is the same on a session-owned and a shared
 // machine: tools enforce WriteRoots at the tool layer.
@@ -47,8 +76,8 @@ func CleanWriteFileIn(l Layout, filePath string) (string, error) {
 	if clean == l.Root || clean == l.OutputDir || clean == l.InputDir {
 		return "", fmt.Errorf("sandbox: workspace write path %q is a directory, not a file", filePath)
 	}
-	if l.InputDir != "" && strings.HasPrefix(clean, l.InputDir+"/") {
-		return "", fmt.Errorf("sandbox: session input %s is read-only", l.InputDir)
+	if input := l.ReadOnlyInputRoot(clean); input != "" {
+		return "", fmt.Errorf("sandbox: session input %s is read-only", input)
 	}
 	return clean, nil
 }
