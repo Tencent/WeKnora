@@ -90,7 +90,7 @@ type AutomationLimits struct {
 	MaxDurationMinutes int `json:"max_duration_minutes,omitempty" extensions:"x-agent"`
 }
 
-// Automation is a task an agent runs on a schedule on its owner's behalf.
+// Automation is a task the WeKnora assistant runs on a schedule on its owner's behalf.
 type Automation struct {
 	ID       string `json:"id"        gorm:"type:varchar(36);primaryKey" extensions:"x-agent=automation_id,x-agent-response"`
 	TenantID uint64 `json:"tenant_id" gorm:"not null;index:idx_automations_owner"`
@@ -99,10 +99,7 @@ type Automation struct {
 	Name        string `json:"name"          gorm:"type:varchar(255);not null" extensions:"x-agent"`
 	Description string `json:"description"   gorm:"type:text" extensions:"x-agent"`
 	Enabled     bool   `json:"enabled"       gorm:"not null;default:true;index:idx_automations_due" extensions:"x-agent,x-agent-response"`
-	// AgentID is the agent that runs it; the WeKnora assistant's ID runs the
-	// assistant.
-	AgentID string `json:"agent_id" gorm:"type:varchar(64);not null" extensions:"x-agent"`
-	// ModelID overrides the agent's chat model; empty follows the agent default.
+	// ModelID overrides the assistant's chat model; empty follows the assistant default.
 	ModelID string `json:"model_id" gorm:"type:varchar(64);not null;default:''" extensions:"x-agent"`
 	// Instruction is the task, sent as the user message of each run after
 	// its variables are filled in.
@@ -118,7 +115,7 @@ type Automation struct {
 	MisfirePolicy   string `json:"misfire_policy"    gorm:"type:varchar(16);not null;default:'skip'" extensions:"x-agent"`
 	OverlapPolicy   string `json:"overlap_policy"    gorm:"type:varchar(16);not null;default:'skip'" extensions:"x-agent"`
 	// AccessLevel is how far runs may change data without asking, capped by
-	// the agent's and the workspace's ceilings.
+	// the workspace's assistant ceiling.
 	AccessLevel AssistantAccessLevel `json:"access_level" gorm:"type:varchar(16);not null;default:'confirm'" extensions:"x-agent"`
 	// ApprovalTimeoutMinutes is how long a run waits for an approval before
 	// it fails.
@@ -200,9 +197,7 @@ type AutomationPatch struct {
 	Name *string `json:"name" extensions:"x-agent"`
 	// What it is for
 	Description *string `json:"description" extensions:"x-agent"`
-	// Agent that runs it, from agent.list; empty runs the WeKnora assistant
-	AgentID *string `json:"agent_id" extensions:"x-agent"`
-	// Optional chat model from model.list; empty follows the agent default
+	// Optional chat model from model.list; empty follows the assistant default
 	ModelID *string `json:"model_id" extensions:"x-agent"`
 	// The task, sent as the user message of each run. May name now,
 	// last_run_at, last_success_at, run_id or automation_name inside double

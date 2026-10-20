@@ -127,19 +127,17 @@ export default {
   automation: {
     conversationNotice: "この会話は自動化タスクが実行します。手動でメッセージは送信できません。保留中のリクエストは上で対応してください。",
     title: 'オートメーション',
-    description: 'エージェントにスケジュールどおりあなたとしてタスクを実行させます。結果と承認待ちは通知されます。',
+    description: 'WeKnora アシスタントがあなたに代わって定期的にタスクを実行します。結果と承認待ちの操作を通知します。',
     add: '新規オートメーション',
     addHint: 'WeKnora アシスタントに作成を頼むこともできます',
     paused: '一時停止中',
     scheduleEnded: '終了',
     scheduleEndedHint: 'この一回限りのスケジュールは終了しました。今すぐ実行するか、実行日時を変更してから再開してください。',
     nextRunAt: '次回 {time}',
-    agentUnavailable: 'エージェントを利用できません',
     runConfirm: '「{name}」を今すぐ実行しますか？スケジュールを変更せずに追加で実行します。',
     deleteBody: '実行中の処理を停止し、「{name}」の実行履歴・会話・継続承認を削除します。元に戻せません。',
     fields: {
       name: '名前',
-      agent: '実行エージェント',
       instruction: 'タスク',
       schedule: 'スケジュール',
       timezone: 'タイムゾーン',
@@ -156,16 +154,15 @@ export default {
     },
     editor: {
       model: "実行モデル",
-      modelHelp: "エージェントの既定モデルを使うか、この自動化専用のモデルを選択します。変更は次回以降の実行に適用されます。",
-      modelDefault: "エージェントの既定モデル",
+      modelHelp: 'アシスタントの既定モデルを使うか、このタスク用に指定します。委任先のエージェントはそれぞれのモデルを使います。変更は次回以降の実行に適用されます。',
+      modelDefault: 'アシスタントの既定モデル',
       createTitle: '新規オートメーション',
       editTitle: 'オートメーションを編集',
       namePlaceholder: '例：毎日のナレッジベース要約',
       instructionPlaceholder: '何をするか、どの資料を使うか、結果をどう出すかを書いてください',
       variablesHint: '使える変数：',
-      unattendedHint: '実行中は誰も見ていないため、エージェントは質問できません。承認が必要な操作は一時停止して通知します。',
+      unattendedHint: '実行中は誰も見ていないため、アシスタントは質問できません。承認が必要な操作は一時停止して通知します。',
       nameDesc: '一覧と通知に表示され、タスクを見分けるのに使います',
-      agentDesc: 'タスクを実行するエージェント。そのナレッジベース、ツール、スキルを使えます',
       frequency: '繰り返し',
       weekdays: '曜日',
       dayOfMonthDesc: 'その日がない月は月末に実行します',
@@ -184,7 +181,7 @@ export default {
       sections: {
         basic: {
           title: '基本情報',
-          desc: 'タスクに名前を付け、実行するエージェントを選び、やることを書きます。',
+          desc: 'WeKnora アシスタントがタスクを実行します。他のエージェントに委任する場合は、タスクに委任先と作業内容を記載してください。',
         },
         schedule: {
           title: '実行スケジュール',
@@ -201,7 +198,7 @@ export default {
       },
       sessionModeDesc: {
         per_run: '実行ごとに新しい会話を開きます',
-        persistent: 'すべての実行が同じ会話で行われ、以前の内容を参照できます',
+        persistent: 'すべての実行で同じ会話を使い、アシスタントが過去の内容を参照できます',
       },
       errors: {
         name: '名前を入力してください',

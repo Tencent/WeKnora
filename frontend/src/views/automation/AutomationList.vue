@@ -66,7 +66,6 @@
           </p>
           <div class="automation-card__footer">
             <div class="automation-card__meta">
-              <span>{{ agentName(item.agent_id) }}</span>
               <span v-if="item.enabled && item.next_run_at">
                 {{ t('automation.nextRunAt', { time: formatInZone(item.next_run_at, item.trigger.timezone, locale) }) }}
               </span>
@@ -92,9 +91,8 @@
       </div>
     </section>
 
-    <AutomationEditor v-model:visible="editorVisible" :automation="editing" :agents="agents"
-      :agents-loading="agentsLoading" :default-agent-id="BUILTIN_WEKNORA_ASSISTANT_ID" @saved="onSaved" />
-    <AutomationDetail v-model:visible="detailVisible" :automation="detail" :agent-name="detail ? agentName(detail.agent_id) : ''"
+    <AutomationEditor v-model:visible="editorVisible" :automation="editing" @saved="onSaved" />
+    <AutomationDetail v-model:visible="detailVisible" :automation="detail"
       :focus-run-id="focusRunId" @changed="onSaved" @edit="openEditor" />
   </main>
 </template>
@@ -104,7 +102,6 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { BUILTIN_WEKNORA_ASSISTANT_ID } from '@/api/agent'
 import {
   deleteAutomation,
   getAutomation,
@@ -114,7 +111,6 @@ import {
   runAutomationNow,
   type Automation,
 } from '@/api/automation'
-import { useAuthStore } from '@/stores/auth'
 import { describeTrigger, formatInZone, hasEndedOnceSchedule } from '@/utils/automationSchedule'
 import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import AutomationEditor from './AutomationEditor.vue'
@@ -122,19 +118,15 @@ import AutomationDetail from './AutomationDetail.vue'
 import AutomationStatusTag from './AutomationStatusTag.vue'
 import ChatActionIcon from '@/components/ChatActionIcon.vue'
 import ResourceIcon from '@/components/icons/ResourceIcon.vue'
-import { loadAutomationAgents, type AutomationAgentOption } from './agents'
 
 const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const authStore = useAuthStore()
 
 const automations = ref<Automation[]>([])
 const loading = ref(true)
 const query = ref('')
 const busy = ref(new Set<string>())
-const agents = ref<AutomationAgentOption[]>([])
-const agentsLoading = ref(false)
 const editorVisible = ref(false)
 const editing = ref<Automation | null>(null)
 const detailVisible = ref(false)
@@ -148,9 +140,6 @@ const filtered = computed(() => {
   return automations.value.filter((a) =>
     a.name.toLowerCase().includes(q) || a.instruction.toLowerCase().includes(q))
 })
-
-const agentName = (id: string) =>
-  agents.value.find((a) => a.id === id)?.name ?? t('automation.agentUnavailable')
 
 async function load() {
   const version = ++loadVersion
@@ -175,17 +164,6 @@ async function load() {
 
 useAssistantDataChange(() => { void load() }, { areas: ['automation'] })
 onBeforeUnmount(() => { ++loadVersion })
-
-async function loadAgents() {
-  agentsLoading.value = true
-  try {
-    agents.value = await loadAutomationAgents(authStore.currentTenantId, t('assistant.title'))
-  } catch {
-    agents.value = [{ id: BUILTIN_WEKNORA_ASSISTANT_ID, name: t('assistant.title') }]
-  } finally {
-    agentsLoading.value = false
-  }
-}
 
 function replace(item: Automation) {
   const index = automations.value.findIndex((a) => a.id === item.id)
@@ -285,7 +263,6 @@ async function remove(item: Automation) {
 }
 
 onMounted(async () => {
-  void loadAgents()
   await load()
   await openFromRoute()
 })

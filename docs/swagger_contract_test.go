@@ -64,6 +64,36 @@ func TestKnowledgeSearchRouteContract(t *testing.T) {
 	}
 }
 
+func TestAutomationAssistantContract(t *testing.T) {
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				Definitions map[string]struct {
+					Properties map[string]any `json:"properties" yaml:"properties"`
+				} `json:"definitions" yaml:"definitions"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{
+				"internal_handler.CreateAutomationRequest",
+				"github_com_Tencent_WeKnora_internal_types.AutomationPatch",
+				"github_com_Tencent_WeKnora_internal_types.Automation",
+			} {
+				properties := spec.Definitions[name].Properties
+				if _, ok := properties["agent_id"]; ok {
+					t.Errorf("%s must not expose executor selection", name)
+				}
+				for _, field := range []string{"instruction", "model_id"} {
+					if _, ok := properties[field]; !ok {
+						t.Errorf("%s must expose %s", name, field)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestReleaseAPIContracts(t *testing.T) {
 	for _, tt := range swaggerDocuments() {
 		t.Run(tt.name, func(t *testing.T) {

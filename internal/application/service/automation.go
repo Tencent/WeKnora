@@ -240,9 +240,6 @@ func applyAutomationPatch(a *types.Automation, p *types.AutomationPatch) {
 	if p.Description != nil {
 		a.Description = strings.TrimSpace(*p.Description)
 	}
-	if p.AgentID != nil {
-		a.AgentID = strings.TrimSpace(*p.AgentID)
-	}
 	if p.ModelID != nil {
 		a.ModelID = strings.TrimSpace(*p.ModelID)
 	}
@@ -286,10 +283,7 @@ func (s *AutomationService) validate(ctx context.Context, a *types.Automation) (
 	if a.Instruction == "" || len([]rune(a.Instruction)) > maxAutomationInstructionRune {
 		return nil, badAutomation("instruction is required, at most %d characters", maxAutomationInstructionRune)
 	}
-	if a.AgentID == "" {
-		a.AgentID = types.BuiltinWeKnoraAssistantID
-	}
-	if _, err := s.runnableAgent(ctx, a.AgentID, a.TenantID); err != nil {
+	if _, err := s.runnableAssistant(ctx); err != nil {
 		return nil, apperrors.NewBadRequestError(err.Error())
 	}
 	if err := s.validateModel(ctx, a.ModelID, a.TenantID); err != nil {
@@ -346,23 +340,14 @@ func (s *AutomationService) validate(ctx context.Context, a *types.Automation) (
 	return sched, nil
 }
 
-// runnableAgent loads agent id for a run in tenantID: a smart-reasoning
-// agent of the workspace, or the WeKnora assistant. ctx must carry tenantID.
-func (s *AutomationService) runnableAgent(ctx context.Context, id string, tenantID uint64) (*types.CustomAgent, error) {
-	if id == types.BuiltinWikiFixerID || id == types.BuiltinSkillInstallerID {
-		return nil, errors.New("this built-in agent cannot run automations")
+// runnableAssistant loads the workspace assistant, the sole automation executor.
+// Tasks may ask it to delegate work to other agents through the instruction.
+func (s *AutomationService) runnableAssistant(ctx context.Context) (*types.CustomAgent, error) {
+	assistant, err := s.agents.GetAgentByID(ctx, types.BuiltinWeKnoraAssistantID)
+	if err != nil || assistant == nil || !types.GrantsOperationCatalog(assistant) || !assistant.IsAgentMode() {
+		return nil, errors.New("the WeKnora assistant is unavailable in this workspace")
 	}
-	agent, err := s.agents.GetAgentByID(ctx, id)
-	if err != nil || agent == nil {
-		return nil, fmt.Errorf("agent %s is not available in this workspace", id)
-	}
-	if !types.GrantsOperationCatalog(agent) && agent.TenantID != tenantID {
-		return nil, fmt.Errorf("agent %s is not available in this workspace", id)
-	}
-	if !agent.IsAgentMode() {
-		return nil, fmt.Errorf("agent %s must use smart reasoning to run automations", id)
-	}
-	return agent, nil
+	return assistant, nil
 }
 
 func (s *AutomationService) validateModel(ctx context.Context, id string, tenantID uint64) error {
@@ -415,7 +400,7 @@ func (s *AutomationService) Create(ctx context.Context, p *types.AutomationPatch
 }
 
 var automationEditable = []string{
-	"name", "description", "agent_id", "model_id", "instruction", "trigger_config", "session_mode", "carry_last_result",
+	"name", "description", "model_id", "instruction", "trigger_config", "session_mode", "carry_last_result",
 	"misfire_policy", "overlap_policy", "access_level", "approval_timeout_minutes", "limits",
 	"notify_on_success", "enabled", "next_run_at", "paused_reason", "consecutive_failures", "version",
 	"updated_at",
@@ -728,7 +713,7 @@ type AutomationGrantCandidate struct {
 
 // binding is what a's standing grants are given under right now.
 func (s *AutomationService) binding(ctx context.Context, a *types.Automation) (string, error) {
-	agent, err := s.runnableAgent(ctx, a.AgentID, a.TenantID)
+	agent, err := s.runnableAssistant(ctx)
 	if err != nil {
 		return "", err
 	}

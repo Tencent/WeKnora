@@ -12,7 +12,7 @@ const useInputNumber = require('tdesign-vue-next/cjs/input-number/hooks/useInput
 const numberProps = require('tdesign-vue-next/cjs/input-number/props.js').default
 
 const automation = {
-  id: 'automation-1', name: 'Reminder', instruction: 'Take a break', agent_id: 'assistant',
+  id: 'automation-1', name: 'Reminder', instruction: 'Take a break',
   trigger: { type: 'cron', expr: '0 9 * * *', timezone: 'Asia/Shanghai' },
   approval_timeout_minutes: 1440, limits: { max_duration_minutes: 30 },
   enabled: true, session_mode: 'per_run', access_level: 'confirm',
@@ -27,11 +27,8 @@ function setup(t: TestContext, file: string, api: Record<string, unknown>, props
     'vue-router': { useRoute: () => ({ params: {}, query: {} }), useRouter: () => ({ replace() {}, push() {} }) },
     'tdesign-vue-next': { MessagePlugin: { success() {}, error() {}, warning() {} } },
     '@/api/automation': api,
-    '@/api/agent': { BUILTIN_WEKNORA_ASSISTANT_ID: 'assistant' },
     '@/api/assistant': { ASSISTANT_ACCESS_LEVELS: ['read_only', 'confirm', 'auto_write'] },
-    '@/stores/auth': { useAuthStore: () => ({ currentTenantId: 'tenant' }) },
     '@/stores/ui': { useUIStore: () => ({ openSettings() {} }) },
-    './agents': { loadAutomationAgents: async () => [] },
     '@/utils/automationSchedule': schedule,
     '@/composables/useModalShell': { useModalShell: () => ({ markClean() {}, requestClose() {} }) },
   }, props)
@@ -123,7 +120,7 @@ test('assistant run-now refreshes idle history after any in-flight load and pres
       : Promise.resolve({ data: [newRun, oldRun], total: 3 }),
     listAutomationGrants: async () => ({ data: [] }),
     listAutomationGrantCandidates: async () => ({ data: [] }),
-  }, { visible: true, automation, agentName: 'Assistant' })
+  }, { visible: true, automation })
   emit(change('automation.run_now'))
   t.mock.timers.tick(300)
   assert.equal(calls, 1, 'wait for the initial page before merging newer runs')
@@ -146,7 +143,7 @@ test('assistant run-now refreshes idle history after any in-flight load and pres
 
 test('task content fades only while more text remains below the scroll position', async t => {
   const { vm, render } = setup(t, './AutomationDetail.vue', {},
-    { visible: false, automation, agentName: 'Assistant' })
+    { visible: false, automation })
   const scroller = vue.markRaw({ scrollHeight: 320, clientHeight: 160, scrollTop: 0 })
   vm.instructionScroller = scroller
   await vue.nextTick()
@@ -184,7 +181,7 @@ test('task content fades only while more text remains below the scroll position'
 
 test('approval hours update in both directions and save as minutes, without resetting on an empty edit', async t => {
   let saved: any
-  const props = { visible: false, automation, agents: [], defaultAgentId: 'assistant' }
+  const props = { visible: false, automation }
   const { vm, render, mount } = setup(t, './AutomationEditor.vue', {
     updateAutomation: async (_id: string, input: unknown) => { saved = input; return { data: automation } },
     validateAutomationTrigger: async () => ({ data: { next_runs: [] } }),
@@ -229,7 +226,7 @@ test('the editor preserves, changes, and clears an automation model override', a
   const { vm } = setup(t, './AutomationEditor.vue', {
     updateAutomation: async (_id: string, input: unknown) => { saved.push(input); return { data: automation } },
     validateAutomationTrigger: async () => ({ data: { next_runs: [] } }),
-  }, { visible: false, automation: { ...automation, model_id: 'model-one' }, agents: [], defaultAgentId: 'assistant' })
+  }, { visible: false, automation: { ...automation, model_id: 'model-one' } })
   vm.$.props.visible = true
   await vue.nextTick()
   assert.equal(vm.form.model_id, 'model-one')
@@ -238,7 +235,7 @@ test('the editor preserves, changes, and clears an automation model override', a
   assert.equal(saved[0].model_id, 'model-two')
   vm.form.model_id = ''
   await vm.save()
-  assert.equal(saved[1].model_id, '', 'clearing restores the agent default instead of omitting the patch')
+  assert.equal(saved[1].model_id, '', 'clearing restores the assistant default instead of omitting the patch')
 })
 
 test('list run and delete actions call APIs only after their inline confirmation', async t => {
@@ -270,7 +267,7 @@ test('list run and delete actions call APIs only after their inline confirmation
 
 test('run history groups by the automation timezone and drawer run requires confirmation', async t => {
   let runCalls = 0
-  const props = { visible: false, automation, agentName: 'Assistant' }
+  const props = { visible: false, automation }
   const { vm, render } = setup(t, './AutomationDetail.vue', {
     runAutomationNow: async () => { runCalls++; return { data: { id: 'new-run' } } },
   }, props)
@@ -299,7 +296,7 @@ test('grant popup preserves history and dismisses when starting a run or reopeni
     listAutomationGrantCandidates: async () => ({ data: [{ prompt_id: 'approval-1', label: 'Update document', risk: 'write' }] }),
     listAutomationRuns: async () => ({ data: [], total: 0 }),
     runAutomationNow: async () => ({ data: { id: 'new-run' } }),
-  }, { visible: false, automation, agentName: 'Assistant' })
+  }, { visible: false, automation })
   assert.equal(vm.grantsVisible, false)
   const popup = nodes(render()).find(node => node.type?.name === 't-popup')
   popup.props['onUpdate:visible'](true)
@@ -326,7 +323,7 @@ for (const file of ['./AutomationList.vue', './AutomationDetail.vue']) {
     const { vm, render } = setup(t, file, {
       listAutomations: async () => ({ data: [item] }),
       resumeAutomation: async () => { resumeCalls++; return { data: { ...item, enabled: true } } },
-    }, { visible: false, automation: item, agentName: 'Assistant' })
+    }, { visible: false, automation: item })
     await flush()
     const resumeButton = () => nodes(render()).find(node => node.type === 'button'
       && (node.props?.role === 'switch' || node.props?.['aria-label'] === 'automation.actions.resume'))

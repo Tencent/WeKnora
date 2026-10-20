@@ -39,7 +39,6 @@ export interface Automation {
   name: string
   description: string
   enabled: boolean
-  agent_id: string
   model_id: string
   instruction: string
   trigger: AutomationTrigger
@@ -66,7 +65,6 @@ export interface Automation {
 export type AutomationInput = Partial<Pick<Automation,
   | 'name'
   | 'description'
-  | 'agent_id'
   | 'model_id'
   | 'instruction'
   | 'trigger'

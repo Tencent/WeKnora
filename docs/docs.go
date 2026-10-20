@@ -2048,7 +2048,7 @@ const docTemplate = `{
                     "max_items": 100,
                     "risk": "read"
                 },
-                "x-agent-hint": "Lists the user's automations: scheduled tasks an agent runs on their behalf, with next and last run."
+                "x-agent-hint": "Lists the user's automations: scheduled tasks the WeKnora assistant runs on their behalf, with next and last run."
             },
             "post": {
                 "security": [
@@ -2056,7 +2056,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "创建一个按计划由 Agent 以当前用户身份运行的任务",
+                "description": "创建一个按计划由 WeKnora 助手以当前用户身份运行的任务",
                 "consumes": [
                     "application/json"
                 ],
@@ -2111,7 +2111,7 @@ const docTemplate = `{
                     "risk": "write",
                     "role": "viewer"
                 },
-                "x-agent-hint": "Creates an automation the user runs as. Turn the user's wording into a cron expression (five fields, minute first) and an IANA timezone, and check it with automation.validate_trigger first, telling the user the next run times it returns. Runs are unattended: write the instruction as a complete task, since nobody can answer questions during a run. access_level defaults to confirm, where each change waits for the user's approval; only set auto_write when the user asks for it."
+                "x-agent-hint": "Creates an automation the WeKnora assistant runs as the user. If work requires other agents, name them and their assignments in the instruction so the assistant can delegate. Turn the user's wording into a cron expression (five fields, minute first) and an IANA timezone, and check it with automation.validate_trigger first, telling the user the next run times it returns. Runs are unattended: write the instruction as a complete task, since nobody can answer questions during a run. access_level defaults to confirm, where each change waits for the user's approval; only set auto_write when the user asks for it."
             }
         },
         "/automations/validate-trigger": {
@@ -26259,17 +26259,12 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "access_level": {
-                    "description": "AccessLevel is how far runs may change data without asking, capped by\nthe agent's and the workspace's ceilings.",
+                    "description": "AccessLevel is how far runs may change data without asking, capped by\nthe workspace's assistant ceiling.",
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel"
                         }
                     ],
-                    "x-agent": true
-                },
-                "agent_id": {
-                    "description": "AgentID is the agent that runs it; the WeKnora assistant's ID runs the\nassistant.",
-                    "type": "string",
                     "x-agent": true
                 },
                 "approval_timeout_minutes": {
@@ -26331,7 +26326,7 @@ const docTemplate = `{
                     "x-agent": true
                 },
                 "model_id": {
-                    "description": "ModelID overrides the agent's chat model; empty follows the agent default.",
+                    "description": "ModelID overrides the assistant's chat model; empty follows the assistant default.",
                     "type": "string",
                     "x-agent": true
                 },
@@ -26412,11 +26407,6 @@ const docTemplate = `{
                     ],
                     "x-agent": true
                 },
-                "agent_id": {
-                    "description": "Agent that runs it, from agent.list; empty runs the WeKnora assistant",
-                    "type": "string",
-                    "x-agent": true
-                },
                 "approval_timeout_minutes": {
                     "description": "How long a run waits for an approval before it fails, in minutes",
                     "type": "integer",
@@ -26455,7 +26445,7 @@ const docTemplate = `{
                     "x-agent": true
                 },
                 "model_id": {
-                    "description": "Optional chat model from model.list; empty follows the agent default",
+                    "description": "Optional chat model from model.list; empty follows the assistant default",
                     "type": "string",
                     "x-agent": true
                 },
@@ -37365,11 +37355,6 @@ const docTemplate = `{
                     ],
                     "x-agent": true
                 },
-                "agent_id": {
-                    "description": "Agent that runs it, from agent.list; empty runs the WeKnora assistant",
-                    "type": "string",
-                    "x-agent": true
-                },
                 "approval_timeout_minutes": {
                     "description": "How long a run waits for an approval before it fails, in minutes; default 1440",
                     "type": "integer",
@@ -37401,6 +37386,11 @@ const docTemplate = `{
                         "skip",
                         "run_once"
                     ],
+                    "x-agent": true
+                },
+                "model_id": {
+                    "description": "Optional chat model from model.list; empty follows the assistant default",
+                    "type": "string",
                     "x-agent": true
                 },
                 "name": {

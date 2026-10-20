@@ -43,7 +43,6 @@
           <div class="automation-detail__brief-context">
             <h3>{{ t('automation.detail.task') }}</h3>
             <div class="automation-detail__execution">
-              <span :title="t('automation.fields.agent')">{{ agentName }}</span>
               <span :title="t('automation.fields.accessLevel')">{{ t(`assistant.access.levels.${automation.access_level}.label`) }}</span>
               <span :title="t('automation.fields.sessionMode')">{{ t(`automation.sessionMode.${automation.session_mode}`) }}</span>
             </div>
@@ -203,7 +202,6 @@ import ChatActionIcon from '@/components/ChatActionIcon.vue'
 const props = defineProps<{
   visible: boolean
   automation: Automation | null
-  agentName: string
   focusRunId?: string
 }>()
 const emit = defineEmits<{

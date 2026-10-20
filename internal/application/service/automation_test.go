@@ -103,6 +103,18 @@ func complete(ctx context.Context, bus *event.EventBus, data event.AgentComplete
 	return bus.Emit(ctx, event.Event{Type: event.EventAgentComplete, Data: data})
 }
 
+type automationAgents struct {
+	interfaces.CustomAgentService
+	agent *types.CustomAgent
+}
+
+func (f *automationAgents) GetAgentByID(_ context.Context, id string) (*types.CustomAgent, error) {
+	if id != types.BuiltinWeKnoraAssistantID {
+		return nil, errors.New("automations must load the WeKnora assistant")
+	}
+	return f.agent, nil
+}
+
 type automationFixture struct {
 	svc      *AutomationService
 	db       *gorm.DB
@@ -110,7 +122,7 @@ type automationFixture struct {
 	messages *automationMessages
 	users    *collaborationUsers
 	members  *collaborationMembers
-	agents   *collaborationAgents
+	agents   *automationAgents
 	broker   *hitl.Broker
 	now      time.Time
 	ctx      context.Context
@@ -133,8 +145,8 @@ func newAutomationFixture(t *testing.T) *automationFixture {
 		messages: &automationMessages{rows: map[string]*types.Message{}},
 		users:    &collaborationUsers{active: true},
 		members:  &collaborationMembers{active: true},
-		agents: &collaborationAgents{agent: &types.CustomAgent{
-			ID: "a", TenantID: automationTenant,
+		agents: &automationAgents{agent: &types.CustomAgent{
+			ID: types.BuiltinWeKnoraAssistantID, IsBuiltin: true,
 			Config: types.CustomAgentConfig{AgentMode: types.AgentModeSmartReasoning, AllowedTools: []string{"x"}},
 		}},
 		broker: hitl.NewBroker(nil, nil),
@@ -164,9 +176,6 @@ func (f *automationFixture) create(t *testing.T, p types.AutomationPatch) *types
 	}
 	if p.Instruction == nil {
 		p.Instruction = ptr("summarize {{automation_name}} at {{now}}")
-	}
-	if p.AgentID == nil {
-		p.AgentID = ptr("a")
 	}
 	if p.Trigger == nil {
 		p.Trigger = &types.AutomationTrigger{Type: types.AutomationTriggerCron, Expr: "0 9 * * *"}
@@ -214,16 +223,12 @@ func TestAutomationCreateValidatesAndSchedules(t *testing.T) {
 
 	for name, p := range map[string]types.AutomationPatch{
 		"too frequent": {Trigger: &types.AutomationTrigger{Type: types.AutomationTriggerCron, Expr: "* * * * *"}},
-		"bad agent":    {AgentID: ptr("builtin-wiki-fixer")},
 		"bad mode":     {SessionMode: ptr("forever")},
 		"once in past": {Trigger: &types.AutomationTrigger{
 			Type: types.AutomationTriggerOnce, At: f.now.Add(-time.Hour).Format(time.RFC3339),
 		}},
 	} {
 		p.Name, p.Instruction = ptr("n"), ptr("i")
-		if p.AgentID == nil {
-			p.AgentID = ptr("a")
-		}
 		if p.Trigger == nil {
 			p.Trigger = &types.AutomationTrigger{Type: types.AutomationTriggerCron, Expr: "0 9 * * *"}
 		}
@@ -292,6 +297,7 @@ func TestAutomationRunSucceedsAsOwnerUnattended(t *testing.T) {
 	require.Equal(t, types.AutomationRunSucceeded, done.Status)
 	require.Equal(t, "done", done.Answer)
 	call := f.sessions.last()
+	require.Equal(t, types.BuiltinWeKnoraAssistantID, call.req.CustomAgent.ID)
 	require.Equal(t, types.RunModeDeferred, call.mode)
 	require.Equal(t, types.AutomationActingVia(a.ID), call.via)
 	require.Equal(t, types.GrantScope{
@@ -306,6 +312,7 @@ func TestAutomationRunSucceedsAsOwnerUnattended(t *testing.T) {
 	var session types.Session
 	require.NoError(t, f.db.Where("id = ?", done.SessionID).First(&session).Error)
 	require.Equal(t, types.SessionKindAutomation, session.Kind)
+	require.Equal(t, types.BuiltinWeKnoraAssistantID, session.LastRequestState.AgentID)
 	require.Equal(t, "u", session.UserID)
 	stored := f.reload(t, a.ID)
 	require.Equal(t, types.AutomationRunSucceeded, stored.LastRunStatus)
@@ -324,6 +331,19 @@ func TestAutomationPersistentSessionCarriesAcrossRuns(t *testing.T) {
 	r2 := f.settleRun(t, second.ID)
 	require.Equal(t, r1.SessionID, r2.SessionID)
 	require.Equal(t, r1.SessionID, f.reload(t, a.ID).PersistentSessionID)
+}
+
+func TestAutomationPausesWhenAssistantUnavailable(t *testing.T) {
+	f := newAutomationFixture(t)
+	a := f.create(t, types.AutomationPatch{})
+	f.agents.agent = nil
+	queued, err := f.svc.RunNow(f.ctx, a.ID)
+	require.NoError(t, err)
+	run := f.settleRun(t, queued.ID)
+	require.Equal(t, types.AutomationRunFailed, run.Status)
+	require.Contains(t, run.Error, "WeKnora assistant is unavailable")
+	require.False(t, f.reload(t, a.ID).Enabled)
+	require.Empty(t, f.sessions.calls)
 }
 
 func TestAutomationCarriesLastResult(t *testing.T) {

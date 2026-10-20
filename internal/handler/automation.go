@@ -44,8 +44,8 @@ type CreateAutomationRequest struct {
 	Name string `json:"name" binding:"required" extensions:"x-agent"`
 	// What it is for
 	Description string `json:"description" extensions:"x-agent"`
-	// Agent that runs it, from agent.list; empty runs the WeKnora assistant
-	AgentID string `json:"agent_id" extensions:"x-agent"`
+	// Optional chat model from model.list; empty follows the assistant default
+	ModelID string `json:"model_id" extensions:"x-agent"`
 	// The task, sent as the user message of each run. May name now,
 	// last_run_at, last_success_at, run_id or automation_name inside double
 	// curly braces to have it filled in
@@ -71,7 +71,7 @@ type CreateAutomationRequest struct {
 
 func (r CreateAutomationRequest) patch() *types.AutomationPatch {
 	return &types.AutomationPatch{
-		Name: &r.Name, Description: &r.Description, AgentID: &r.AgentID, Instruction: &r.Instruction,
+		Name: &r.Name, Description: &r.Description, ModelID: &r.ModelID, Instruction: &r.Instruction,
 		Trigger: &r.Trigger, SessionMode: &r.SessionMode, CarryLastResult: &r.CarryLastResult,
 		MisfirePolicy: &r.MisfirePolicy, OverlapPolicy: &r.OverlapPolicy, AccessLevel: &r.AccessLevel,
 		ApprovalTimeoutMinutes: &r.ApprovalTimeoutMinutes, Limits: &r.Limits, NotifyOnSuccess: &r.NotifyOnSuccess,
@@ -86,7 +86,7 @@ func (r CreateAutomationRequest) patch() *types.AutomationPatch {
 // @Success      200  {object}  handler.DataResponse{data=[]types.Automation}  "自动化列表"
 // @Security     Bearer
 // @x-agent      {"id":"automation.list","risk":"read","max_items":100}
-// @x-agent-hint "Lists the user's automations: scheduled tasks an agent runs on their behalf, with next and last run."
+// @x-agent-hint "Lists the user's automations: scheduled tasks the WeKnora assistant runs on their behalf, with next and last run."
 // @Router       /automations [get]
 func (h *AutomationHandler) ListAutomations(c *gin.Context) {
 	list, err := h.automations.List(c.Request.Context())
@@ -99,7 +99,7 @@ func (h *AutomationHandler) ListAutomations(c *gin.Context) {
 
 // CreateAutomation godoc
 // @Summary      创建自动化
-// @Description  创建一个按计划由 Agent 以当前用户身份运行的任务
+// @Description  创建一个按计划由 WeKnora 助手以当前用户身份运行的任务
 // @Tags         自动化
 // @Accept       json
 // @Produce      json
@@ -108,7 +108,7 @@ func (h *AutomationHandler) ListAutomations(c *gin.Context) {
 // @Failure      400      {object}  errors.AppError  "参数不合法"
 // @Security     Bearer
 // @x-agent      {"id":"automation.create","role":"viewer","risk":"write","label_param":"name","always_confirm":true}
-// @x-agent-hint "Creates an automation the user runs as. Turn the user's wording into a cron expression (five fields, minute first) and an IANA timezone, and check it with automation.validate_trigger first, telling the user the next run times it returns. Runs are unattended: write the instruction as a complete task, since nobody can answer questions during a run. access_level defaults to confirm, where each change waits for the user's approval; only set auto_write when the user asks for it."
+// @x-agent-hint "Creates an automation the WeKnora assistant runs as the user. If work requires other agents, name them and their assignments in the instruction so the assistant can delegate. Turn the user's wording into a cron expression (five fields, minute first) and an IANA timezone, and check it with automation.validate_trigger first, telling the user the next run times it returns. Runs are unattended: write the instruction as a complete task, since nobody can answer questions during a run. access_level defaults to confirm, where each change waits for the user's approval; only set auto_write when the user asks for it."
 // @Router       /automations [post]
 func (h *AutomationHandler) CreateAutomation(c *gin.Context) {
 	var req CreateAutomationRequest

@@ -21,17 +21,6 @@
           </div>
           <div class="setting-row">
             <div class="setting-info">
-              <label>{{ t('automation.fields.agent') }}</label>
-              <p class="desc">{{ t('automation.editor.agentDesc') }}</p>
-            </div>
-            <div class="setting-control">
-              <t-select v-model="form.agent_id" :loading="agentsLoading" filterable>
-                <t-option v-for="agent in agentOptions" :key="agent.id" :value="agent.id" :label="agent.name" />
-              </t-select>
-            </div>
-          </div>
-          <div class="setting-row">
-            <div class="setting-info">
               <label>{{ t('automation.editor.model') }}</label>
               <p class="desc">{{ t('automation.editor.modelHelp') }}</p>
             </div>
@@ -323,16 +312,12 @@ import {
   weekdayName,
   type ScheduleKind,
 } from '@/utils/automationSchedule'
-import type { AutomationAgentOption } from './agents'
 import ModelSelector from '@/components/ModelSelector.vue'
 import { useUIStore } from '@/stores/ui'
 
 const props = defineProps<{
   visible: boolean
   automation: Automation | null
-  agents: AutomationAgentOption[]
-  agentsLoading?: boolean
-  defaultAgentId: string
 }>()
 const emit = defineEmits<{ 'update:visible': [value: boolean]; saved: [value: Automation] }>()
 
@@ -368,7 +353,6 @@ const navGroups = computed(() => [
 
 const blank = (): Required<Omit<AutomationInput, 'trigger' | 'limits' | 'description'>> => ({
   name: '',
-  agent_id: props.defaultAgentId,
   model_id: '',
   instruction: '',
   session_mode: 'per_run',
@@ -387,14 +371,6 @@ const maxMinutes = ref(30)
 const saving = ref(false)
 
 const zones = computed(() => timezoneOptions(timezone.value))
-
-const agentOptions = computed(() => {
-  const list = [...props.agents]
-  if (form.agent_id && !list.some((a) => a.id === form.agent_id)) {
-    list.push({ id: form.agent_id, name: t('automation.agentUnavailable') })
-  }
-  return list
-})
 
 const approvalHours = computed({
   get: () => Math.max(1, Math.round(form.approval_timeout_minutes / 60)),
@@ -436,7 +412,6 @@ watch(() => props.visible, (open) => {
   if (a) {
     Object.assign(form, {
       name: a.name,
-      agent_id: a.agent_id,
       model_id: a.model_id || '',
       instruction: a.instruction,
       session_mode: a.session_mode,

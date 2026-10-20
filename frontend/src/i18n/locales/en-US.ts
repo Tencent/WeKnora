@@ -127,19 +127,17 @@ export default {
   automation: {
     conversationNotice: "This conversation is run by an automation. Manual messages are unavailable; handle pending requests above.",
     title: 'Automations',
-    description: 'Have an agent run tasks on a schedule as you. You are notified of results and pending approvals.',
+    description: 'Have the WeKnora assistant run tasks on a schedule as you. You are notified of results and pending approvals.',
     add: 'New automation',
     addHint: 'Or ask the WeKnora assistant to set one up',
     paused: 'Paused',
     scheduleEnded: 'Ended',
     scheduleEndedHint: 'This one-time schedule has ended. Run it now, or edit the run time before resuming.',
     nextRunAt: 'Next {time}',
-    agentUnavailable: 'Agent unavailable',
     runConfirm: 'Run "{name}" now? This starts an extra run without changing its schedule.',
     deleteBody: 'Stops any run in progress and deletes the runs, conversations and standing approvals of "{name}". This cannot be undone.',
     fields: {
       name: 'Name',
-      agent: 'Agent',
       instruction: 'Task',
       schedule: 'Schedule',
       timezone: 'Timezone',
@@ -156,16 +154,15 @@ export default {
     },
     editor: {
       model: "Run model",
-      modelHelp: "Use the agent’s default model or choose one for this automation. Changes apply to future runs.",
-      modelDefault: "Use agent default",
+      modelHelp: 'Use the assistant’s default model or choose one for this task. Delegated agents use their own models. Changes apply to future runs.',
+      modelDefault: 'Use assistant default',
       createTitle: 'New automation',
       editTitle: 'Edit automation',
       namePlaceholder: 'e.g. Daily knowledge base digest',
       instructionPlaceholder: 'Say what to do, which sources to use and how to present the result',
       variablesHint: 'Variables:',
-      unattendedHint: 'Nobody is watching a run, so the agent cannot ask you questions. Actions that need approval pause it and notify you.',
+      unattendedHint: 'Nobody is watching a run, so the assistant cannot ask you questions. Actions that need approval pause it and notify you.',
       nameDesc: 'Shown in the list and in notifications so you can tell it apart',
-      agentDesc: 'The agent that does the task, with its knowledge bases, tools and skills',
       frequency: 'Repeats',
       weekdays: 'Days',
       dayOfMonthDesc: 'In months without this day, it runs on the last day',
@@ -184,7 +181,7 @@ export default {
       sections: {
         basic: {
           title: 'Basics',
-          desc: 'Name the task, pick the agent that runs it and describe what to do.',
+          desc: 'The WeKnora assistant runs each task. To delegate work, name the agents and their assignments in the task.',
         },
         schedule: {
           title: 'Schedule',
@@ -201,7 +198,7 @@ export default {
       },
       sessionModeDesc: {
         per_run: 'Each run starts a new conversation',
-        persistent: 'All runs share one conversation, so the agent sees earlier ones',
+        persistent: 'All runs share one conversation, so the assistant sees earlier ones',
       },
       errors: {
         name: 'Enter a name',
