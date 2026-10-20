@@ -599,7 +599,9 @@ func TestSharedFileToolsProtectSiblingAttachments(t *testing.T) {
 				require.False(t, result.Success)
 				require.Contains(t, result.Error, sibling.InputDir+" is read-only")
 			}
-			result, err := editor.Execute(sandboxFileTestContext(), mustEditSandboxArgs(file, "original", "modified", false))
+			result, err := editor.Execute(
+				sandboxFileTestContext(), mustEditSandboxArgs(file, "original", "modified", false),
+			)
 			require.NoError(t, err)
 			require.False(t, result.Success)
 			require.Contains(t, result.Error, sibling.InputDir+" is read-only")
@@ -611,7 +613,9 @@ func TestSharedFileToolsProtectSiblingAttachments(t *testing.T) {
 			result, err = writer.Execute(sandboxFileTestContext(), mustWriteSandboxArgs(work, "original"))
 			require.NoError(t, err)
 			require.True(t, result.Success, result.Error)
-			result, err = editor.Execute(sandboxFileTestContext(), mustEditSandboxArgs(work, "original", "modified", false))
+			result, err = editor.Execute(
+				sandboxFileTestContext(), mustEditSandboxArgs(work, "original", "modified", false),
+			)
 			require.NoError(t, err)
 			require.True(t, result.Success, result.Error)
 			require.Equal(t, "modified", string(sink.files[work]))
