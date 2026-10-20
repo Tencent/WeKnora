@@ -1173,10 +1173,10 @@ func TestUserSessionsShareOneMachineWithSeparateDirectories(t *testing.T) {
 
 	creates, _, _, _, _ := h.client.counts()
 	require.Equal(t, 1, creates)
-	require.Equal(t, "/workspace/sessions/"+userSessionA, reqA.WorkDir)
-	require.Equal(t, "/workspace/sessions/"+userSessionB, reqB.WorkDir)
-	require.Equal(t, "/workspace/sessions/"+userSessionB+"/output", reqB.Env["WEKNORA_SKILL_OUTPUT_DIR"])
-	require.Equal(t, "/workspace/sessions/"+userSessionB+"/input", reqB.Env["WEKNORA_SESSION_INPUT_DIR"])
+	require.Equal(t, userSessionRoot(userSessionA), reqA.WorkDir)
+	require.Equal(t, userSessionRoot(userSessionB), reqB.WorkDir)
+	require.Equal(t, userSessionRoot(userSessionB)+"/output", reqB.Env["WEKNORA_SKILL_OUTPUT_DIR"])
+	require.Equal(t, userSessionRoot(userSessionB)+"/input", reqB.Env["WEKNORA_SESSION_INPUT_DIR"])
 
 	idA, ok := h.mgr.BoundSandboxID(ctx, userSessionA)
 	require.True(t, ok)
@@ -1197,11 +1197,11 @@ func TestUserSessionCannotLeaveItsWorkspace(t *testing.T) {
 	ctx := ownerCtx()
 	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "/workspace", time.Second, nil)
 	require.ErrorContains(t, err, "outside allowed roots")
-	err = h.mgr.WriteSessionWorkspaceFile(ctx, userSessionA, "/workspace/sessions/"+userSessionB+"/x", []byte("x"))
+	err = h.mgr.WriteSessionWorkspaceFile(ctx, userSessionA, userSessionRoot(userSessionB)+"/x", []byte("x"))
 	require.ErrorContains(t, err, "outside the session workspace")
 	err = h.mgr.WriteSessionInputFile(ctx, userSessionA, "/workspace/input/a.pdf", []byte("x"))
 	require.Error(t, err)
-	_, err = h.mgr.ReadSessionFile(ctx, userSessionA, "/workspace/sessions/"+userSessionB+"/x")
+	_, err = h.mgr.ReadSessionFile(ctx, userSessionA, userSessionRoot(userSessionB)+"/x")
 	require.ErrorContains(t, err, "outside the session workspace")
 }
 
@@ -1214,7 +1214,7 @@ func TestValidityIsReadFreshNotCached(t *testing.T) {
 	h.allocs.release(userSessionA) // deleted by another replica after this manager cached the address
 	_, err = h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
 	require.ErrorIs(t, err, ErrSandboxSessionDeleted)
-	_, err = h.mgr.ListSessionFiles(ctx, userSessionA, "/workspace/sessions/"+userSessionA+"/output")
+	_, err = h.mgr.ListSessionFiles(ctx, userSessionA, userSessionRoot(userSessionA)+"/output")
 	require.ErrorIs(t, err, ErrSandboxSessionDeleted, "lookup-only reads are admitted the same way")
 }
 
@@ -1464,6 +1464,14 @@ func TestLockRewindSessionOnAPerSessionSandboxKeepsTheContext(t *testing.T) {
 	require.Equal(t, 1, got.Value(struct{ k string }{"marker"}))
 }
 
+func userSessionRoot(id string) string {
+	l, err := UserWorkspaceLayout(id)
+	if err != nil {
+		panic(err)
+	}
+	return l.Root
+}
+
 func TestUploadedScriptsStayInTheSessionDirectory(t *testing.T) {
 	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
 	script := filepath.Join(t.TempDir(), "run.py")
@@ -1473,7 +1481,7 @@ func TestUploadedScriptsStayInTheSessionDirectory(t *testing.T) {
 	h.client.mu.Lock()
 	defer h.client.mu.Unlock()
 	require.NotEmpty(t, h.client.writeFiles)
-	require.Equal(t, "/workspace/sessions/"+userSessionA+"/.weknora/scripts/run.py",
+	require.Equal(t, userSessionRoot(userSessionA)+"/.weknora/scripts/run.py",
 		h.client.writeFiles[len(h.client.writeFiles)-1].path)
 }
 
@@ -1526,8 +1534,10 @@ func TestDeleteSessionWorkspacesWaitsForTheSessionAndRemovesOnlyIt(t *testing.T)
 	require.Greater(t, connectsAfter, connectsBefore, "deleting a session connects (and resumes) the machine")
 	require.Zero(t, deletes, "the shared machine itself stays")
 	cmd := lastExecRequest(t, h.client).Command
-	require.Contains(t, cmd, "/workspace/sessions/"+userSessionA)
-	require.Contains(t, cmd, "/var/lib/weknora/sessions/"+userSessionA+".git")
+	layout, err := h.mgr.SessionWorkspaceLayout(context.Background(), userSessionA)
+	require.NoError(t, err)
+	require.Contains(t, cmd, layout.Root)
+	require.Contains(t, cmd, layout.GitDir)
 	require.NotContains(t, cmd, userSessionB)
 	require.Contains(t, cmd, "-L", "symlinked parents are refused, not followed")
 }
@@ -1557,7 +1567,7 @@ func TestDeleteSessionWorkspacesReadoptsAMachineWhoseBindingWasLost(t *testing.T
 	deleted, err := h.mgr.DeleteSessionWorkspaces(ctx, m, []string{userSessionA})
 	require.NoError(t, err)
 	require.Equal(t, []string{userSessionA}, deleted)
-	require.Contains(t, lastExecRequest(t, h.client).Command, "/workspace/sessions/"+userSessionA,
+	require.Contains(t, lastExecRequest(t, h.client).Command, userSessionRoot(userSessionA),
 		"the files are really deleted on the machine B will keep using")
 	rebound, _ := h.mgr.BoundSandboxID(ctx, userSessionB)
 	require.Equal(t, sandboxID, rebound, "re-adopted, not recreated")
@@ -1633,8 +1643,8 @@ func TestWorkspaceForkHoldsLeasesAndCopiesWithOneGuardedScript(t *testing.T) {
 	require.Equal(t, map[string]bool{sha: true, older: true}, reachable)
 	req := lastExecRequest(t, h.client)
 	require.Equal(t, "root", req.User)
-	require.Contains(t, req.Command, "/var/lib/weknora/sessions/"+userSessionA+".git")
-	require.Contains(t, req.Command, "/workspace/sessions/"+userSessionB)
+	require.Contains(t, req.Command, "/var/lib/weknora/sessions/c812e1edb644.git")
+	require.Contains(t, req.Command, userSessionRoot(userSessionB))
 	require.Contains(t, req.Command, "core.hooksPath=/dev/null")
 	require.Contains(t, req.Command, `"160000"`, "gitlinks are refused")
 	require.Contains(t, req.Command, "merge-base --is-ancestor")
@@ -1645,7 +1655,7 @@ func TestWorkspaceForkHoldsLeasesAndCopiesWithOneGuardedScript(t *testing.T) {
 	require.Error(t, err)
 
 	require.NoError(t, fork.Remove(userSessionB))
-	require.Contains(t, lastExecRequest(t, h.client).Command, "/workspace/sessions/"+userSessionB)
+	require.Contains(t, lastExecRequest(t, h.client).Command, userSessionRoot(userSessionB))
 	fork.Release()
 	active, _ = h.admission.ActiveExcept(ctx, admission.MachineScope(machine.Digest("weknora")))
 	require.Zero(t, active)
@@ -1687,8 +1697,8 @@ func TestUserModeTerminalCreatesTheSessionDirectoryFirst(t *testing.T) {
 
 	cmd := lastExecRequest(t, h.client).Command
 	require.Contains(t, cmd, "mkdir -p")
-	require.Contains(t, cmd, "/workspace/sessions/"+userSessionB)
-	require.Equal(t, "/workspace/sessions/"+userSessionB, h.client.lastTerminalOptions().Cwd)
+	require.Contains(t, cmd, userSessionRoot(userSessionB))
+	require.Equal(t, userSessionRoot(userSessionB), h.client.lastTerminalOptions().Cwd)
 }
 
 func TestUserModeTerminalNeverReattachesAClientPID(t *testing.T) {
@@ -1701,7 +1711,7 @@ func TestUserModeTerminalNeverReattachesAClientPID(t *testing.T) {
 	defer func() { _ = term.Close() }()
 	opts := h.client.lastTerminalOptions()
 	require.Zero(t, opts.AttachPID, "a PID on a shared machine may belong to another session")
-	require.Equal(t, "/workspace/sessions/"+userSessionA, opts.Cwd)
+	require.Equal(t, userSessionRoot(userSessionA), opts.Cwd)
 }
 
 func TestMultiReplicaRealRedisFirstAllocationCreatesOneMachine(t *testing.T) {

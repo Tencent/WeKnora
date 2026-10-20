@@ -2294,7 +2294,10 @@ func (m *SessionBoundManager) DeleteSessionWorkspaces(
 	}
 	var targets []string
 	for _, id := range ready {
-		l, _ := UserWorkspaceLayout(id)
+		l, err := UserWorkspaceLayout(id)
+		if err != nil {
+			return nil, err
+		}
 		targets = append(targets, ShellQuote(l.Root), ShellQuote(l.GitDir))
 	}
 	// Refuse a symlinked parent instead of following it: an agent on this

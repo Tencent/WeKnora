@@ -25,7 +25,10 @@ func TestRemoteLayoutKeepsTheHistoricalContract(t *testing.T) {
 func TestUserSessionLayoutScopesEveryPathToTheSession(t *testing.T) {
 	l, err := UserSession(testSessionID)
 	require.NoError(t, err)
-	root := "/workspace/sessions/" + testSessionID
+	name, err := SessionDirName(testSessionID)
+	require.NoError(t, err)
+	require.Equal(t, "c812e1edb644", name, "the first 12 hex chars of the id's SHA-256")
+	root := "/workspace/sessions/" + name
 	require.Equal(t, OriginRemoteShared, l.Origin)
 	require.True(t, l.IsSharedRemote())
 	require.False(t, l.IsHost())
@@ -35,7 +38,7 @@ func TestUserSessionLayoutScopesEveryPathToTheSession(t *testing.T) {
 	require.Equal(t, []string{root, root + "/output"}, l.WriteRoots)
 	require.Equal(t, []string{root + "/output", root + "/input", root, SkillsImageRoot}, l.ReadRoots)
 	require.Equal(t, []string{root, TmpRoot, SkillsImageRoot}, l.WorkDirRoots)
-	require.Equal(t, "/var/lib/weknora/sessions/"+testSessionID+".git", l.GitDir)
+	require.Equal(t, "/var/lib/weknora/sessions/"+name+".git", l.GitDir)
 	require.Equal(t, root, l.Hint)
 }
 
