@@ -506,6 +506,7 @@ func TestForkHappyPathTakesSnapshotAndCopiesHistory(t *testing.T) {
 	}
 	port := &fakeForkSandboxPort{boundID: "sbx-1", bound: true, snapshotID: "snap-1"}
 	svc, sessions, _ := newForkFixture(t, port, append(turn, forkPoint))
+	sessions.source.OwnerAuthSource = "web"
 
 	got, err := svc.Fork(context.Background(), 1, "u1", "src", "u-msg-2", "")
 
@@ -520,6 +521,7 @@ func TestForkHappyPathTakesSnapshotAndCopiesHistory(t *testing.T) {
 	require.Equal(t, "u-msg-2", created.ForkedFromMessageID)
 	require.Equal(t, "cfg-1", created.SandboxConfigID, "必须继承 sandbox_config_id，否则可能落到别的 backend")
 	require.Equal(t, "原会话（分支）", created.Title)
+	require.Equal(t, "web", created.OwnerAuthSource)
 	require.NotNil(t, created.ForkBootstrap)
 	require.Equal(t, "snap-1", created.ForkBootstrap.SnapshotID)
 	require.Equal(t, "sha1", created.ForkBootstrap.CommitSHA)

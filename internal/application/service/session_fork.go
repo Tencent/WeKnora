@@ -259,6 +259,7 @@ func (s *SessionForkService) Fork(
 		TenantID:         source.TenantID,
 		Kind:             source.Kind,
 		UserID:           source.UserID,
+		OwnerAuthSource:  source.OwnerAuthSource,
 		Title:            forkTitle(title, source.Title),
 		Description:      source.Description,
 		LastRequestState: source.LastRequestState,

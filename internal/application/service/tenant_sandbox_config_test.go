@@ -17,6 +17,7 @@ import (
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -2190,6 +2191,42 @@ func (s deleteFileService) DeleteFile(ctx context.Context, ref string) error {
 
 func (deleteFileService) CopyFile(context.Context, string, uint64, string) (string, error) {
 	return "", nil
+}
+
+func allocationTestConfig(mode string, days int) *types.TenantSandboxConfig {
+	cfg := e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300)
+	cfg.AllocationMode = mode
+	cfg.UserSandboxEmptyRetentionDays = days
+	return cfg
+}
+
+func TestSanitizeSandboxConfigAllocationPolicy(t *testing.T) {
+	// e2bCfg carries an API key. Sanitize refuses secrets when SYSTEM_AES_KEY
+	// is unset, before allocation policy is checked.
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
+	t.Cleanup(func() { allocation.SetUserModeAvailable(false) })
+
+	allocation.SetUserModeAvailable(false)
+	_, err := SanitizeSandboxConfig(allocationTestConfig("user", 0), nil)
+	require.ErrorContains(t, err, "allocation_mode=user is not enabled")
+
+	// A config already saved as user stays saveable after the gate closes, so
+	// an unrelated edit does not fail; allocation falls back at decide time.
+	_, err = SanitizeSandboxConfig(allocationTestConfig("user", 0), allocationTestConfig("user", 0))
+	require.NoError(t, err)
+
+	allocation.SetUserModeAvailable(true)
+	out, err := SanitizeSandboxConfig(allocationTestConfig("user", 14), nil)
+	require.NoError(t, err)
+	require.Equal(t, "user", out.AllocationMode)
+	require.Equal(t, 14, out.UserSandboxEmptyRetentionDays)
+
+	_, err = SanitizeSandboxConfig(allocationTestConfig("machine", 0), nil)
+	require.ErrorContains(t, err, "invalid allocation_mode")
+	_, err = SanitizeSandboxConfig(allocationTestConfig("session", 91), nil)
+	require.ErrorContains(t, err, "between 1 and 90")
+	_, err = SanitizeSandboxConfig(allocationTestConfig("session", -1), nil)
+	require.Error(t, err)
 }
 
 var (

@@ -14,6 +14,7 @@ import (
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -27,20 +28,50 @@ func newSandboxManager(
 	return sandbox.NewDisabledManager()
 }
 
-func selectSessionBindingStore(
-	redisClient *redis.Client,
-	requireRedis bool,
-) (sandbox.SessionSandboxBindingStore, string, error) {
+// sandboxRedisNamespace is the Redis key prefix shared by session bindings
+// and user-machine digests. An empty env var means the historical default.
+func sandboxRedisNamespace() string {
 	namespace := strings.TrimSpace(os.Getenv("WEKNORA_REDIS_NAMESPACE"))
 	if namespace == "" {
 		namespace = "weknora"
 	}
+	return namespace
+}
+
+// userModeRuntimeReady is false until the session manager places sessions by
+// their assignment (plan T10). Until then a user-mode assignment would be
+// recorded for life while the session still runs on a machine of its own in
+// /workspace, so the gate stays closed whatever the env says.
+const userModeRuntimeReady = false
+
+func selectSessionBindingStore(
+	redisClient *redis.Client,
+	requireRedis bool,
+) (sandbox.SessionSandboxBindingStore, string, error) {
+	namespace := sandboxRedisNamespace()
+	requested := allocation.UserModeRequestedByEnv()
 	if redisClient != nil {
 		store, err := sandbox.NewRedisSessionSandboxBindingStore(redisClient, namespace)
 		if err != nil {
 			return nil, "", fmt.Errorf("build redis binding store: %w", err)
 		}
+		allocation.SetUserModeAvailable(requested && userModeRuntimeReady)
+		switch {
+		case requested && !userModeRuntimeReady:
+			logger.Warnf(context.Background(),
+				"[sandbox] %s is set but this build cannot run user-mode sessions yet; "+
+					"user-mode allocation stays disabled",
+				allocation.UserModeEnvVar)
+		case requested:
+			logger.Infof(context.Background(), "[sandbox] user-mode allocation enabled (%s)", allocation.UserModeEnvVar)
+		}
 		return store, "redis", nil
+	}
+	allocation.SetUserModeAvailable(false)
+	if requested {
+		logger.Errorf(context.Background(),
+			"[sandbox] %s is set but Redis is not configured; user-mode allocation stays disabled",
+			allocation.UserModeEnvVar)
 	}
 	_ = requireRedis
 	logger.Warnf(context.Background(),

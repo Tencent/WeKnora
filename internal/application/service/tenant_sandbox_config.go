@@ -40,6 +40,7 @@ import (
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -399,6 +400,9 @@ func SanitizeSandboxConfig(
 	if err := validateSkillRollout(merged.SkillRollout); err != nil {
 		return nil, err
 	}
+	if err := validateAllocationPolicy(merged, existing); err != nil {
+		return nil, err
+	}
 	return merged, nil
 }
 
@@ -409,6 +413,27 @@ func validateSkillRollout(value string) error {
 	default:
 		return apperrors.NewBadRequestError("invalid skill_rollout")
 	}
+}
+
+// validateAllocationPolicy checks allocation_mode and the retention window.
+// Switching a config TO user needs the deployment gate; a config already
+// saved as user stays saveable so unrelated edits do not fail after an
+// operator closes the gate (allocation then falls back per session).
+func validateAllocationPolicy(merged, existing *types.TenantSandboxConfig) error {
+	mode, err := allocation.ParseMode(merged.AllocationMode)
+	if err != nil {
+		return apperrors.NewBadRequestError("invalid allocation_mode")
+	}
+	alreadyUser := existing != nil && strings.TrimSpace(existing.AllocationMode) == types.SandboxAllocationUser
+	if mode == allocation.ModeUser && !alreadyUser && !allocation.UserModeAvailable() {
+		return apperrors.NewBadRequestError(
+			"allocation_mode=user is not enabled on this deployment " +
+				"(set " + allocation.UserModeEnvVar + "=enabled on every replica; Redis is required)")
+	}
+	if err := allocation.ValidateRetentionDays(merged.UserSandboxEmptyRetentionDays); err != nil {
+		return apperrors.NewBadRequestError(err.Error())
+	}
+	return nil
 }
 
 func validateNamedSandboxBackend(cfg *types.TenantSandboxConfig) error {

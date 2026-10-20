@@ -22,6 +22,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/application/service/sandboxalloc"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -29,6 +30,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -1901,6 +1903,28 @@ func TestStartMaintenanceSessionMarksAndScopesTheSession(t *testing.T) {
 	require.Equal(t, types.SkillMaintenanceSessionMarker+"install", sess.Description)
 	require.Equal(t, "admin-1", sess.UserID)
 	require.Equal(t, "Skill install", sess.Title)
+}
+
+type failingPlacer struct{}
+
+func (failingPlacer) Place(context.Context, sandboxalloc.PlaceRequest) (allocation.Assignment, error) {
+	return allocation.Assignment{}, errors.New("db unavailable")
+}
+
+func (failingPlacer) Lookup(context.Context, string) (allocation.Assignment, bool, error) {
+	return allocation.Assignment{}, false, nil
+}
+
+// A placement failure aborts the operation and must not leave the hidden
+// maintenance session row behind.
+func TestStartMaintenanceSessionRemovesTheSessionWhenPlacementFails(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.svc.WithPlacer(failingPlacer{})
+	ctx := context.WithValue(ctxWithTenant(7), types.UserIDContextKey, "admin-1")
+
+	_, _, err := fx.svc.startMaintenanceSession(ctx, 7, "cfg-1", "install")
+	require.ErrorContains(t, err, "record install sandbox placement")
+	require.Equal(t, []string{"CreateSession", "DeleteSession"}, fx.sessionCalls)
 }
 
 const installSkillDir = "/opt/weknora/tenant/skills/pdf-tools"

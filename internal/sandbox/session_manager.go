@@ -34,18 +34,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/sandbox/workspace"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // SessionInputRoot is reserved for durable user attachments restored from
 // file storage. Generated artifacts must remain under SessionOutputRoot.
-const SessionInputRoot = "/workspace/input"
+const SessionInputRoot = workspace.InputDir
 
 // SessionOutputRoot is where skill scripts write artifacts for collection.
 // The skills manager injects this path via skillOutputEnvVar; Execute
 // materialises the directory via envd before the script runs so scripts
 // do not depend on the template user being able to mkdir under /workspace.
-const SessionOutputRoot = "/workspace/output"
+const SessionOutputRoot = workspace.OutputDir
 
 // skillOutputEnvVar matches the skills manager's WEKNORA_SKILL_OUTPUT_DIR.
 const skillOutputEnvVar = "WEKNORA_SKILL_OUTPUT_DIR"
@@ -58,7 +59,7 @@ const sessionInputEnvVar = "WEKNORA_SESSION_INPUT_DIR"
 
 // SessionWorkspaceRoot is the writable workspace root inside remote sandboxes.
 // shell_exec work_dir must stay underneath this path.
-const SessionWorkspaceRoot = "/workspace"
+const SessionWorkspaceRoot = workspace.Root
 
 // SessionGitDir is the git metadata directory for per-turn workspace
 // checkpoints. It lives on the sandbox root filesystem so a fork snapshot
@@ -70,7 +71,7 @@ const SessionWorkspaceRoot = "/workspace"
 // provisioned before this constant existed still hold theirs there. The
 // shared git preamble adopts that repository on first use so SHAs recorded
 // before the move keep resolving; see gitWorkspaceAdoptLegacyRepo.
-const SessionGitDir = "/var/lib/weknora/workspace.git"
+const SessionGitDir = workspace.GitDir
 
 // sessionArtifactDirBootstrapTimeout bounds directory creation and access
 // checks, performed with the execution identity.
@@ -1503,58 +1504,20 @@ func (m *SessionBoundManager) requireRemoteBackend() error {
 }
 
 func cleanSessionInputPath(filePath string) (string, error) {
-	clean := path.Clean(strings.TrimSpace(filePath))
-	if clean == SessionInputRoot || strings.HasPrefix(clean, SessionInputRoot+"/") {
-		return clean, nil
-	}
-	return "", fmt.Errorf(
-		"sandbox: session input path %q is outside %s",
-		filePath, SessionInputRoot,
-	)
+	return workspace.CleanInputPathIn(RemoteWorkspaceLayout(), filePath)
 }
 
 // cleanSessionWorkspaceWritePath normalizes model-authored sandbox writes and
 // protects staged attachments. The remote session binding isolates the files.
 func cleanSessionWorkspaceWritePath(filePath string) (string, error) {
-	clean := ResolveWorkspacePathIn(RemoteWorkspaceLayout(), filePath)
-	if !path.IsAbs(clean) || clean == "." || clean == "/" {
-		return "", fmt.Errorf("sandbox: workspace write path %q must be an absolute file path", filePath)
-	}
-	if clean == SessionWorkspaceRoot || clean == SessionOutputRoot || clean == SessionInputRoot {
-		return "", fmt.Errorf("sandbox: workspace write path %q is a directory, not a file", filePath)
-	}
-	if strings.HasPrefix(clean, SessionInputRoot+"/") {
-		return "", fmt.Errorf("sandbox: session input %s is read-only", SessionInputRoot)
-	}
-	return clean, nil
+	return workspace.CleanWriteFileIn(RemoteWorkspaceLayout(), filePath)
 }
 
 // cleanSessionWorkDir requires an absolute sandbox-local working directory.
 // Ordinary calls may work anywhere; the install/maintenance option retains its
 // explicit workspace/skills scope. Neither check changes filesystem privileges.
 func cleanSessionWorkDir(workDir string, allowSkillsRoot bool) (string, error) {
-	clean := path.Clean(strings.TrimSpace(workDir))
-	if !path.IsAbs(clean) {
-		return "", fmt.Errorf("sandbox: work dir %q must be absolute", workDir)
-	}
-	if !allowSkillsRoot {
-		return clean, nil
-	}
-	if clean == SessionWorkspaceRoot || strings.HasPrefix(clean, SessionWorkspaceRoot+"/") {
-		return clean, nil
-	}
-	if allowSkillsRoot &&
-		(clean == SkillsImageRoot || strings.HasPrefix(clean, SkillsImageRoot+"/")) {
-		return clean, nil
-	}
-	allowed := SessionWorkspaceRoot
-	if allowSkillsRoot {
-		allowed = SessionWorkspaceRoot + ", " + SkillsImageRoot
-	}
-	return "", fmt.Errorf(
-		"sandbox: work dir %q is outside allowed roots (%s)",
-		workDir, allowed,
-	)
+	return workspace.CleanWorkDirIn(RemoteWorkspaceLayout(), workDir, allowSkillsRoot)
 }
 
 // buildSessionCreateRequest projects Config into a provider-neutral remote

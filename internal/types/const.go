@@ -26,6 +26,9 @@ const (
 	UserIDContextKey ContextKey = "UserID"
 	// PrincipalContextKey is the context key for the terminal caller principal.
 	PrincipalContextKey ContextKey = "Principal"
+	// PrincipalAuthSourceContextKey records how the auth middleware verified
+	// the principal (web session, API key mode, embed, IM, MCP endpoint).
+	PrincipalAuthSourceContextKey ContextKey = "PrincipalAuthSource"
 	// TenantAPIKeyScopeContextKey carries per-API-key operation and KB scopes.
 	TenantAPIKeyScopeContextKey ContextKey = "TenantAPIKeyScope"
 	// AuditAPIKeyContextKey carries the API key id/name for activity

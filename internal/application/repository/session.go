@@ -345,8 +345,9 @@ func (r *sessionRepository) SetOwnerID(ctx context.Context, tenantID uint64, id,
 		Model(&types.Session{}).
 		Where("tenant_id = ? AND id = ?", tenantID, id).
 		Updates(map[string]interface{}{
-			"user_id":    ownerID,
-			"updated_at": time.Now(),
+			"user_id":           ownerID,
+			"owner_auth_source": types.AuthSourceForBoundOwnerID(ownerID),
+			"updated_at":        time.Now(),
 		})
 	return res.RowsAffected, res.Error
 }
