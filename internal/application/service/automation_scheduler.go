@@ -48,7 +48,10 @@ func (s *AutomationService) tick(ctx context.Context) {
 			logger.Errorf(ctx, "Automation scheduler panicked: %v", r)
 		}
 	}()
-	now := s.now()
+	// The clock is normalized to UTC: next_run_at is persisted as UTC, and
+	// SQLite compares DATETIME as text, so a zoned now (e.g. +08:00) would
+	// order future tasks as due.
+	now := s.now().UTC()
 	steps := []struct {
 		name string
 		run  func(context.Context, time.Time) error
@@ -94,6 +97,11 @@ func (s *AutomationService) claim(ctx context.Context, a *types.Automation, now 
 		return s.pause(ctx, a, "the trigger is no longer valid: "+err.Error())
 	}
 	dueAt := a.NextRunAt.UTC()
+	// Never claim a task before its time, whatever the query matched: the
+	// stored text may compare as due while the instant is still future.
+	if dueAt.After(now) {
+		return nil
+	}
 	next := sched.Next(now)
 	kind := types.AutomationRunSchedule
 	if now.Sub(dueAt) > s.misfireGrace() {
@@ -120,10 +128,13 @@ func (s *AutomationService) claim(ctx context.Context, a *types.Automation, now 
 		} else if reason != "" {
 			run.Status, run.Error, run.FinishedAt = types.AutomationRunSkipped, reason, &now
 		}
-		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(run).Error; err != nil {
-			return err
+		ins := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(run)
+		if ins.Error != nil {
+			return ins.Error
 		}
-		queued = run.Status == types.AutomationRunQueued
+		// A conflicting slot inserted nothing; waking on it would hot-loop
+		// the scheduler without any new run to execute.
+		queued = ins.RowsAffected > 0 && run.Status == types.AutomationRunQueued
 		return nil
 	})
 	if err == nil && queued {
