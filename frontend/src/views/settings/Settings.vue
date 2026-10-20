@@ -252,6 +252,7 @@ import {
   normalizeSettingsSection as normalizeSettingsSectionFromQuery,
   settingsQueryUnchanged,
 } from '@/config/settingsRoute'
+import { resolveSettingsCloseNavigation } from './settingsCloseNavigation'
 
 const route = useRoute()
 const router = useRouter()
@@ -491,14 +492,18 @@ const handleClose = () => {
     document.activeElement.blur()
   }
   uiStore.closeSettings()
-  // 如果当前路由是设置页，返回上一页
-  if (route.path === '/platform/settings') {
-    const sec = route.query.section
-    if (sec === 'model-catalog' || sec === 'system-global' || sec === 'runtime-queues' || sec === 'platform-api-keys' || sec === 'system-audit-log') {
-      router.push('/platform/knowledge-bases')
-    } else {
-      router.back()
-    }
+  // Go back only when Vue Router recorded an in-app previous location.
+  // A directly opened settings URL has history.state.back == null, and
+  // router.back() would leave the app.
+  const navigation = resolveSettingsCloseNavigation(
+    route.path,
+    route.query.section,
+    window.history.state,
+  )
+  if (navigation.type === 'push') {
+    router.push(navigation.to)
+  } else if (navigation.type === 'back') {
+    router.back()
   }
 }
 
