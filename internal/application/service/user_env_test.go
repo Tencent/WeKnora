@@ -73,6 +73,12 @@ func (r *userEnvConfigRepo) SetCordon(context.Context, uint64, string, time.Time
 func (r *userEnvConfigRepo) ClearCordon(context.Context, uint64, string) error {
 	panic("ClearCordon is outside the user env surface")
 }
+func (r *userEnvConfigRepo) RefreshCordon(context.Context, uint64, string, time.Time, time.Time) error {
+	panic("RefreshCordon is outside the user env surface")
+}
+func (r *userEnvConfigRepo) ClearCordonIf(context.Context, uint64, string, time.Time) error {
+	panic("ClearCordonIf is outside the user env surface")
+}
 
 var _ repository.TenantSandboxConfigRepository = (*userEnvConfigRepo)(nil)
 
