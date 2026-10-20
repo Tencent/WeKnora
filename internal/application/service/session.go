@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
+	"github.com/Tencent/WeKnora/internal/application/service/sandboxalloc"
 	"github.com/Tencent/WeKnora/internal/config"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
@@ -176,6 +177,11 @@ type sessionService struct {
 	busyGate      *SessionBusyGate
 	// deletedSessionsHook releases collaboration state of deleted conversations.
 	deletedSessionsHook func(context.Context, uint64, string, []string)
+	// workspaceCleaner retires sessions on delete and removes a user-mode
+	// session's directory from the shared machine. Nil (Lite, host, or no
+	// remote resolver) keeps the historical delete path and writes no
+	// allocation rows.
+	workspaceCleaner *sandboxalloc.WorkspaceCleaner
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -543,6 +549,11 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 		return err
 	}
 
+	handled, err := s.releaseUserWorkspaces(ctx, []string{id})
+	if err != nil {
+		return fmt.Errorf("release sandbox workspace: %w", err)
+	}
+
 	// Cleanup chat history knowledge entries for this session (async, best-effort).
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.
 	bgCtx := context.WithoutCancel(ctx)
@@ -579,7 +590,9 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 		}
 	}
 
-	s.destroyBoundSandbox(ctx, id)
+	if !handled[id] {
+		s.destroyBoundSandbox(ctx, id)
+	}
 	// Delete session from repository
 	rows, err := s.sessionRepo.Delete(ctx, tenantID, session.UserID, id)
 	if err != nil {
@@ -595,6 +608,7 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 
 	s.releaseForkSnapshot(ctx, session)
 	s.notifyDeletedSessions(ctx, tenantID, session.UserID, []string{id})
+	s.runUserWorkspaceCleanups(ctx, handled)
 	return nil
 }
 
@@ -638,6 +652,11 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 		return apperrors.ErrSessionNotFound
 	}
 
+	handled, err := s.releaseUserWorkspaces(ctx, visibleIDs)
+	if err != nil {
+		return fmt.Errorf("release sandbox workspace: %w", err)
+	}
+
 	// Cleanup associated resources for each session
 	bgCtx := context.WithoutCancel(ctx)
 	for _, id := range visibleIDs {
@@ -663,7 +682,12 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 	}
 
 	// Tear down sandboxes while session rows (and pins) are still readable.
+	// A session on a shared machine keeps that machine; only its directory
+	// is removed after the rows are gone.
 	for _, id := range visibleIDs {
+		if handled[id] {
+			continue
+		}
 		s.destroyBoundSandbox(ctx, id)
 	}
 
@@ -689,6 +713,7 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 	for ownerID, ownerIDs := range idsByOwner {
 		s.notifyDeletedSessions(ctx, tenantID, ownerID, ownerIDs)
 	}
+	s.runUserWorkspaceCleanups(ctx, handled)
 	return nil
 }
 
@@ -700,47 +725,74 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 
 	sessions, err := s.sessionRepo.GetByTenantID(ctx, tenantID, userID)
 	if err != nil {
+		// A failed list is not an empty list. Deleting anyway would drop rows
+		// that were never retired and would leave their assignments live.
 		logger.Warnf(ctx, "Failed to list sessions for cleanup: %v", err)
-	} else {
-		bgCtx := context.WithoutCancel(ctx)
-		for _, session := range sessions {
-			// Cleanup chat history knowledge entries (async, best-effort)
-			go func(sessionID string) {
-				knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(bgCtx, sessionID)
-				if err != nil {
-					logger.Warnf(bgCtx, "Failed to get knowledge IDs for session %s: %v", sessionID, err)
-					return
-				}
-				if len(knowledgeIDs) > 0 {
-					if err := deleteReferencedKnowledge(bgCtx, s.knowledgeService, "", knowledgeIDs); err != nil {
-						logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", sessionID, err)
-					}
-				}
-			}(session.ID)
-
-			if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, session.ID); err != nil {
-				logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", session.ID, err)
-			}
-			// Artifact blobs are kept alongside soft-deleted messages — see
-			// DeleteSession for the rationale.
+		return err
+	}
+	ids := make([]string, 0, len(sessions))
+	idsByOwner := make(map[string][]string)
+	for _, session := range sessions {
+		if session == nil || session.ID == "" {
+			continue
 		}
+		ids = append(ids, session.ID)
+		idsByOwner[session.UserID] = append(idsByOwner[session.UserID], session.ID)
+	}
+	handled, releaseErr := s.releaseUserWorkspaces(ctx, ids)
+	if releaseErr != nil {
+		return fmt.Errorf("release sandbox workspace: %w", releaseErr)
+	}
+	bgCtx := context.WithoutCancel(ctx)
+	for _, session := range sessions {
+		if session == nil || session.ID == "" {
+			continue
+		}
+		// Cleanup chat history knowledge entries (async, best-effort)
+		go func(sessionID string) {
+			knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(bgCtx, sessionID)
+			if err != nil {
+				logger.Warnf(bgCtx, "Failed to get knowledge IDs for session %s: %v", sessionID, err)
+				return
+			}
+			if len(knowledgeIDs) > 0 {
+				if err := deleteReferencedKnowledge(bgCtx, s.knowledgeService, "", knowledgeIDs); err != nil {
+					logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", sessionID, err)
+				}
+			}
+		}(session.ID)
+
+		if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, session.ID); err != nil {
+			logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", session.ID, err)
+		}
+		// Artifact blobs are kept alongside soft-deleted messages — see
+		// DeleteSession for the rationale.
 	}
 
 	// Tear down sandboxes while session rows (and pins) are still readable.
-	if sessions != nil {
-		for _, session := range sessions {
-			s.destroyBoundSandbox(ctx, session.ID)
+	for _, session := range sessions {
+		if session == nil || session.ID == "" || handled[session.ID] {
+			continue
 		}
+		s.destroyBoundSandbox(ctx, session.ID)
 	}
 
-	if _, err := s.sessionRepo.DeleteAllByTenantID(ctx, tenantID, userID); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id": tenantID,
-		})
-		return err
+	// Only the listed ids were retired. A session inserted after the list
+	// stays, instead of DeleteAllByTenantID removing every current row.
+	for ownerID, ownerIDs := range idsByOwner {
+		if _, err := s.sessionRepo.BatchDelete(ctx, tenantID, ownerID, ownerIDs); err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"session_ids": ownerIDs,
+				"tenant_id":   tenantID,
+			})
+			return err
+		}
 	}
-	if s.suggestionRepo != nil && sessions != nil {
+	if s.suggestionRepo != nil {
 		for _, session := range sessions {
+			if session == nil || session.ID == "" {
+				continue
+			}
 			if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, session.ID); err != nil {
 				logger.Warnf(ctx, "Failed to delete suggestions for session %s: %v", session.ID, err)
 			}
@@ -748,15 +800,67 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 	}
 
 	s.releaseForkSnapshots(ctx, sessions)
-	idsByOwner := make(map[string][]string)
-	for _, session := range sessions {
-		idsByOwner[session.UserID] = append(idsByOwner[session.UserID], session.ID)
-	}
 	for ownerID, ownerIDs := range idsByOwner {
 		s.notifyDeletedSessions(ctx, tenantID, ownerID, ownerIDs)
 	}
+	// One detached goroutine: reclaim empty machines before directory cleanup.
+	// Cleanup holds a machine admission member, so starting it first makes
+	// reclaim see the machine as busy and leave it until retention.
+	// A machine another session still occupies fails the in-lock check and
+	// stays; its retired directories are cleaned afterwards. A reclaimed
+	// machine has no registry row, and execute completes those tasks.
+	if s.workspaceCleaner != nil && userID != "" {
+		ids := make([]string, 0, len(handled))
+		for id := range handled {
+			ids = append(ids, id)
+		}
+		bg := context.WithoutCancel(ctx)
+		go func() {
+			machines, err := s.workspaceCleaner.OwnerMachines(bg, tenantID, userID)
+			if err != nil {
+				logger.Warnf(bg, "Failed to list user sandboxes of %s: %v", userID, err)
+			} else {
+				s.workspaceCleaner.ReclaimOwnerMachines(bg, machines)
+			}
+			if len(ids) > 0 {
+				s.workspaceCleaner.RunCleanups(bg, ids)
+			}
+		}()
+	} else {
+		s.runUserWorkspaceCleanups(ctx, handled)
+	}
 	logger.Infof(ctx, "All sessions deleted for tenant %d", tenantID)
 	return nil
+}
+
+// WithWorkspaceCleaner enables user-mode session teardown.
+func (s *sessionService) WithWorkspaceCleaner(c *sandboxalloc.WorkspaceCleaner) {
+	s.workspaceCleaner = c
+}
+
+// releaseUserWorkspaces releases the user-mode sessions in ids (C5). An
+// error must abort the deletion: a session deleted without its release would
+// keep its shared-machine directory and stay admissible.
+func (s *sessionService) releaseUserWorkspaces(ctx context.Context, ids []string) (map[string]bool, error) {
+	if s.workspaceCleaner == nil || len(ids) == 0 {
+		return nil, nil
+	}
+	return s.workspaceCleaner.ReleaseSessions(ctx, ids)
+}
+
+// runUserWorkspaceCleanups deletes released directories after the rows are
+// gone. It waits for each session's operations to drain, so it runs detached
+// from the request; anything left is retried by the user machine GC (T13).
+func (s *sessionService) runUserWorkspaceCleanups(ctx context.Context, handled map[string]bool) {
+	if s.workspaceCleaner == nil || len(handled) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(handled))
+	for id := range handled {
+		ids = append(ids, id)
+	}
+	bg := context.WithoutCancel(ctx)
+	go s.workspaceCleaner.RunCleanups(bg, ids)
 }
 
 // destroyBoundSandbox tears down the sandbox MicroVM bound to sessionID, if
