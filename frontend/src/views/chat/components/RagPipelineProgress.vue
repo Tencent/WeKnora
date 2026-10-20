@@ -26,7 +26,7 @@
             <div class="action-card action-pending">
               <div class="action-header no-results">
                 <div class="action-title">
-                  <ChatTimelineIcon class="action-title-icon" name="lightbulb" />
+                  <ChatTimelineIcon class="action-title-icon" name="lightbulb" :active="true" />
                   <span class="action-name">{{ t('chat.preparingAnswer') }}</span>
                 </div>
               </div>
@@ -71,7 +71,7 @@
                 :class="{ 'no-results': !step.canOpenReferences }"
               >
                 <div class="action-title">
-                  <ChatTimelineIcon class="action-title-icon" :name="step.iconName" />
+                  <ChatTimelineIcon class="action-title-icon" :name="step.iconName" :active="step.pending && !hasAnswer && !session?.is_completed" />
                   <span class="action-name" :class="{ 'is-running': step.pending }">{{ step.title }}</span>
                 </div>
               </div>
@@ -93,7 +93,7 @@
             <div class="action-card" :class="{ 'action-pending': !waitStepStalled }">
               <div class="action-header no-results">
                 <div class="action-title">
-                  <ChatTimelineIcon class="action-title-icon" name="lightbulb" />
+                  <ChatTimelineIcon class="action-title-icon" name="lightbulb" :active="!waitStepStalled" />
                   <span class="action-name">{{ waitStepText }}</span>
                 </div>
               </div>
@@ -110,7 +110,7 @@
             <div class="action-card" :class="{ 'action-pending': thinkingPending }">
               <div class="action-header" :class="{ 'no-results': !thinkingContent }" @click="toggleThinking">
                 <div class="action-title">
-                  <ChatTimelineIcon class="action-title-icon" name="lightbulb" />
+                  <ChatTimelineIcon class="action-title-icon" name="lightbulb" :active="thinkingActive" />
                   <span class="action-name">{{ t('agent.think') }}</span>
                 </div>
               </div>
@@ -196,7 +196,7 @@
                   :class="{ 'no-results': !step.canOpenReferences }"
                 >
                   <div class="action-title">
-                    <ChatTimelineIcon class="action-title-icon" :name="step.iconName" />
+                    <ChatTimelineIcon class="action-title-icon" :name="step.iconName" :active="step.pending && !hasAnswer && !session?.is_completed" />
                     <span class="action-name" :class="{ 'is-running': step.pending }">{{ step.title }}</span>
                   </div>
                 </div>
@@ -215,7 +215,7 @@
               <div class="action-card" :class="{ 'action-pending': thinkingPending }">
                 <div class="action-header" :class="{ 'no-results': !thinkingContent }" @click="toggleThinking">
                   <div class="action-title">
-                    <ChatTimelineIcon class="action-title-icon" name="lightbulb" />
+                    <ChatTimelineIcon class="action-title-icon" name="lightbulb" :active="thinkingActive" />
                     <span class="action-name">{{ t('agent.think') }}</span>
                   </div>
                 </div>
@@ -455,6 +455,10 @@ const showPrePipelineWait = computed(() => {
 // Only show the thinking row once the backend actually streams thinking events.
 // Do not pre-empt during the model phase — that flashes "思考" even when thinking is disabled.
 const showThinkingStep = computed(() => hasThinkingEvent.value)
+
+const thinkingActive = computed(
+  () => showThinkingStep.value && !hasAnswer.value && !props.session?.is_completed,
+)
 
 const thinkingPending = computed(
   () =>

@@ -1,6 +1,6 @@
 <template>
   <button class="child-task-row" :class="{ 'is-running': task.status === 'running' }" type="button" :disabled="!task.sessionId || disabled" @click="$emit('open', task)">
-    <ChatTimelineIcon class="child-task-icon" name="agent" />
+    <ChatTimelineIcon class="child-task-icon" name="agent" :active="task.status === 'running' && !motionPaused" />
     <span class="child-task-name" :class="{ 'is-running': task.status === 'running' }">{{ task.displayName || t('agentStream.collaboration.unnamed') }}</span>
     <span class="child-task-activity" :class="task.status">{{ activity }}</span>
     <ChatTimelineIcon class="child-task-chevron" name="chevron-right" width="14" height="14" />
@@ -11,7 +11,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue'
 import type { CollaborationTaskView } from '@/utils/collaborationDisplay'
-const props = defineProps<{ task: CollaborationTaskView; disabled?: boolean; toolLabel: (name: string) => string }>()
+const props = defineProps<{ task: CollaborationTaskView; disabled?: boolean; motionPaused?: boolean; toolLabel: (name: string) => string }>()
 defineEmits<{ open: [task: CollaborationTaskView] }>()
 const { t } = useI18n()
 const activity = computed(() => {

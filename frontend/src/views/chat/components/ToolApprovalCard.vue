@@ -63,7 +63,7 @@
   <div v-else class="action-card interaction-inline approval-inline" :class="{ 'action-pending': open }">
     <div class="action-header no-results">
       <div class="action-title">
-        <ChatTimelineIcon class="action-title-icon" :name="headerIcon" />
+        <ChatTimelineIcon class="action-title-icon" :name="headerIcon" :active="open" />
         <component :is="hasArgs ? 'button' : 'span'" class="approval-heading"
           :type="hasArgs ? 'button' : undefined" :aria-expanded="hasArgs ? argsExpanded : undefined"
           @click.stop="hasArgs && toggleArgs()">

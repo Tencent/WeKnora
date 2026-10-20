@@ -60,7 +60,7 @@
   <div v-else class="action-card interaction-inline ask-inline" :class="{ 'action-pending': open }">
     <div class="action-header no-results">
       <div class="action-title">
-        <ChatTimelineIcon class="action-title-icon" :name="headerIcon" />
+        <ChatTimelineIcon class="action-title-icon" :name="headerIcon" :active="open" />
         <span class="action-name">{{ $t('agentStream.askUser.title') }}</span>
         <span class="ask-status" role="status">
           {{ awaitingInDock ? $t('agentStream.promptDock.waiting') : statusLine }}

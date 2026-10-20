@@ -35,7 +35,7 @@
             :class="{ 'tree-child-last': !isSegmentDone && index === visibleIntermediateEvents.length - 1, 'tree-child-progress': event.type === 'child_task' }">
             <div class="tree-branch"></div>
             <div class="tree-child-content">
-              <CollaborationTasks v-if="event.type === 'child_task'" :task="event.task" :disabled="!!embedToken" :tool-label="getLocalizedToolName" @open="openChildTask" />
+              <CollaborationTasks v-if="event.type === 'child_task'" :task="event.task" :motion-paused="isSegmentDone" :disabled="!!embedToken" :tool-label="getLocalizedToolName" @open="openChildTask" />
 
               <!-- Plan Task Change Event -->
               <div v-if="event.type === 'plan_task_change'" class="plan-task-change-event">
@@ -77,7 +77,7 @@
                     <div class="action-title" :class="{
                       'thinking-inline-title': !event.title && isEventExpanded(event.event_id),
                     }">
-                      <ChatTimelineIcon class="action-title-icon" name="lightbulb" />
+                      <ChatTimelineIcon class="action-title-icon" name="lightbulb" :active="!isSegmentDone && isThinkingActive(event.event_id)" />
                       <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
                       <div v-else-if="event.content && isEventExpanded(event.event_id)"
                         class="thinking-inline-content markdown-content"
@@ -103,7 +103,7 @@
                   :class="{ 'action-pending': event.pending || isThinkingActive(event.tool_call_id) }">
                   <div class="action-header" @click="toggleEvent(event.tool_call_id)">
                     <div class="action-title">
-                      <ChatTimelineIcon class="action-title-icon" name="lightbulb" />
+                      <ChatTimelineIcon class="action-title-icon" name="lightbulb" :active="!isSegmentDone && (event.pending || isThinkingActive(event.tool_call_id))" />
                       <span class="action-name">{{ $t('agent.think') }}</span>
                       <span v-if="event.tool_data?.thought_number" class="action-badge">{{
                         event.tool_data.thought_number }}/{{ event.tool_data.total_thoughts }}</span>
@@ -167,7 +167,7 @@
                     :class="{ 'no-results': !hasActionResult(event) }">
                     <div class="action-title">
                       <ChatTimelineIcon v-if="event.tool_name" class="action-title-icon"
-                        :name="getToolIconName(event.tool_name)" />
+                        :name="getToolIconName(event.tool_name)" :active="!isSegmentDone && event.pending" />
                       <t-tooltip v-if="event.tool_name === 'todo_write' && event.tool_data?.steps"
                         :content="t('agent.updatePlan')" placement="top">
                         <span class="action-name">{{ $t('agent.updatePlan') }}</span>
@@ -336,7 +336,7 @@
           <div v-if="isStreamingTimelineEvent(event)" class="tree-branch"></div>
           <div :class="{ 'tree-child-content': isStreamingTimelineEvent(event) }">
 
-            <CollaborationTasks v-if="event.type === 'child_task'" :task="event.task" :disabled="!!embedToken" :tool-label="getLocalizedToolName" @open="openChildTask" />
+            <CollaborationTasks v-if="event.type === 'child_task'" :task="event.task" :motion-paused="isSegmentDone" :disabled="!!embedToken" :tool-label="getLocalizedToolName" @open="openChildTask" />
 
               <!-- Plan Task Change Event -->
             <div v-if="event.type === 'plan_task_change'" class="plan-task-change-event">
@@ -378,7 +378,7 @@
                   <div class="action-title" :class="{
                     'thinking-inline-title': !event.title && isEventExpanded(event.event_id),
                   }">
-                    <ChatTimelineIcon class="action-title-icon" name="lightbulb" />
+                    <ChatTimelineIcon class="action-title-icon" name="lightbulb" :active="!isSegmentDone && isThinkingActive(event.event_id)" />
                     <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
                     <div v-else-if="event.content && isEventExpanded(event.event_id)"
                       class="thinking-inline-content markdown-content"
@@ -433,7 +433,7 @@
                 :class="{ 'action-pending': event.pending || isThinkingActive(event.tool_call_id) }">
                 <div class="action-header" @click="toggleEvent(event.tool_call_id)">
                   <div class="action-title">
-                    <ChatTimelineIcon class="action-title-icon" name="lightbulb" />
+                    <ChatTimelineIcon class="action-title-icon" name="lightbulb" :active="!isSegmentDone && (event.pending || isThinkingActive(event.tool_call_id))" />
                     <span class="action-name">{{ $t('agent.think') }}</span>
                     <span v-if="event.tool_data?.thought_number" class="action-badge">{{ event.tool_data.thought_number
                     }}/{{ event.tool_data.total_thoughts }}</span>
@@ -550,7 +550,7 @@
                 <div class="action-header" @click.stop="handleActionHeaderClick(event)"
                   :class="{ 'no-results': !hasActionResult(event) }">
                   <div class="action-title">
-                    <ChatTimelineIcon v-if="event.tool_name" class="action-title-icon" :name="getToolIconName(event.tool_name)" />
+                    <ChatTimelineIcon v-if="event.tool_name" class="action-title-icon" :name="getToolIconName(event.tool_name)" :active="!isSegmentDone && event.pending" />
                     <t-tooltip v-if="event.tool_name === 'todo_write' && event.tool_data?.steps"
                       :content="t('agent.updatePlan')" placement="top">
                       <span class="action-name">
@@ -670,7 +670,7 @@
           <div class="action-card action-pending">
             <div class="action-header no-results">
               <div class="action-title">
-                <ChatTimelineIcon class="action-title-icon" name="lightbulb" />
+                <ChatTimelineIcon class="action-title-icon" name="lightbulb" :active="!isSegmentDone" />
                 <span class="action-name">{{ t(childActivity === 'approval' ? 'agentStream.collaboration.status.waiting' : childActivity ? 'agentStream.collaboration.waiting' : 'chat.thinkingAlt') }}</span>
               </div>
             </div>

@@ -21,7 +21,7 @@
   <div v-else class="action-card interaction-inline" :class="{ 'action-pending': !resolved }">
     <div class="action-header no-results">
       <div class="action-title">
-        <ChatTimelineIcon class="action-title-icon" :name="headerIcon" />
+        <ChatTimelineIcon class="action-title-icon" :name="headerIcon" :active="open" />
         <span class="action-name">{{ mainTitle }}</span>
       </div>
     </div>
