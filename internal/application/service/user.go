@@ -104,6 +104,7 @@ type userService struct {
 	memberService    interfaces.TenantMemberService
 	config           *config.Config
 	systemSettingSvc interfaces.SystemSettingService
+	sandboxReleaser  SandboxOwnerReleaser
 }
 
 // NewUserService creates a new user service instance
@@ -717,9 +718,44 @@ func (s *userService) UpdateUserPreferences(
 	return merged, nil
 }
 
-// DeleteUser deletes a user
+// SandboxOwnerReleaser frees a deleted account's user machines.
+type SandboxOwnerReleaser interface {
+	ReleaseOwnerAssignments(ctx context.Context, ownerID string) error
+	ReclaimOwner(ctx context.Context, ownerID string)
+}
+
+// WithSandboxReleaser wires user-machine release into DeleteUser.
+func (s *userService) WithSandboxReleaser(r SandboxOwnerReleaser) { s.sandboxReleaser = r }
+
+// DeleteUser deletes a user. When a releaser is wired onto the allocation
+// repository, one transaction locks the user, retires every session, and
+// soft-deletes the row. A repository without that method (in-memory doubles)
+// still releases assignments, then deletes, then reclaims. Reclaim after the
+// row is gone is best-effort.
 func (s *userService) DeleteUser(ctx context.Context, id string) error {
-	return s.userRepo.DeleteUser(ctx, id)
+	if s.sandboxReleaser != nil {
+		if retiring, ok := s.userRepo.(interface {
+			DeleteUserRetiringSessions(context.Context, string, time.Time) error
+		}); ok {
+			if err := retiring.DeleteUserRetiringSessions(ctx, id, time.Now()); err != nil {
+				return fmt.Errorf("release user sandboxes: %w", err)
+			}
+			bg := context.WithoutCancel(ctx)
+			go s.sandboxReleaser.ReclaimOwner(bg, id)
+			return nil
+		}
+		if err := s.sandboxReleaser.ReleaseOwnerAssignments(ctx, id); err != nil {
+			return fmt.Errorf("release user sandboxes: %w", err)
+		}
+	}
+	if err := s.userRepo.DeleteUser(ctx, id); err != nil {
+		return err
+	}
+	if s.sandboxReleaser != nil {
+		bg := context.WithoutCancel(ctx)
+		go s.sandboxReleaser.ReclaimOwner(bg, id)
+	}
+	return nil
 }
 
 // ChangePassword changes user password after verifying the current

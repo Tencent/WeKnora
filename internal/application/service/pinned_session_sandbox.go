@@ -129,17 +129,25 @@ func (a *PinnedSessionSandbox) HasActiveTurn(ctx context.Context, sessionID stri
 	return false, nil
 }
 
-// TryLockRewind takes an exclusive rewind lock through the session's pinned
-// manager. Managers that do not expose the method succeed as a no-op.
-func (a *PinnedSessionSandbox) TryLockRewind(ctx context.Context, sessionID string) (func(), error) {
+// TryLockRewind locks rewind through the session's pinned manager. A manager
+// that can take the session exclusively returns the context to reset with;
+// one with only the rewind lock keeps ctx; others succeed as a no-op.
+func (a *PinnedSessionSandbox) TryLockRewind(ctx context.Context, sessionID string) (context.Context, func(), error) {
 	mgr := a.manager(ctx, sessionID)
+	type exclusiveLocker interface {
+		LockRewindSession(context.Context, string) (context.Context, func(), error)
+	}
+	if l, ok := mgr.(exclusiveLocker); ok {
+		return l.LockRewindSession(ctx, sessionID)
+	}
 	type locker interface {
 		TryLockRewind(context.Context, string) (func(), error)
 	}
 	if l, ok := mgr.(locker); ok {
-		return l.TryLockRewind(ctx, sessionID)
+		unlock, err := l.TryLockRewind(ctx, sessionID)
+		return ctx, unlock, err
 	}
-	return func() {}, nil
+	return ctx, func() {}, nil
 }
 
 // HasRewindLock reports whether rewind currently holds the session on the
@@ -153,6 +161,19 @@ func (a *PinnedSessionSandbox) HasRewindLock(ctx context.Context, sessionID stri
 		return reader.HasRewindLock(ctx, sessionID)
 	}
 	return false, nil
+}
+
+// BeginWorkspaceFork opens a shared-machine fork through the session's
+// pinned manager. Backends without shared machines cannot.
+func (a *PinnedSessionSandbox) BeginWorkspaceFork(ctx context.Context, sourceSessionID string) (sandbox.WorkspaceFork, error) {
+	mgr := a.manager(ctx, sourceSessionID)
+	starter, ok := mgr.(interface {
+		BeginWorkspaceFork(context.Context, string) (sandbox.WorkspaceFork, error)
+	})
+	if !ok {
+		return nil, sandbox.ErrSharedSandbox
+	}
+	return starter.BeginWorkspaceFork(ctx, sourceSessionID)
 }
 
 // CreateForkSnapshot snapshots the session's already-bound sandbox through the
@@ -235,5 +256,3 @@ var _ WorkspaceVersioning = (*PinnedSessionSandbox)(nil)
 var _ sandbox.SessionWorkspaceLayoutProvider = (*PinnedSessionSandbox)(nil)
 
 var _ SessionForkSandboxPort = (*sandbox.SessionBoundManager)(nil)
-
-var _ SessionRewindSandboxPort = (*sandbox.SessionBoundManager)(nil)
