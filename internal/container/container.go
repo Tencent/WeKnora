@@ -558,13 +558,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// it), but Invoke constructs the whole chain. SessionService needs
 	// *chatpipeline.EventManager, which only exists after the pipeline
 	// block above — starting the reaper any earlier panics.
-	must(container.Provide(func(
-		repo interfaces.SandboxAllocationRepository,
-		configs repository.TenantSandboxConfigRepository,
-		sessions interfaces.SessionRepository,
-	) *sandboxalloc.Service {
-		return sandboxalloc.New(repo, configs, sessions, sandboxRedisNamespace())
-	}))
+	// The allocation service itself is provided before the resolver: the
+	// pipeline Invokes above construct SessionService, which needs it.
 	must(container.Invoke(func(
 		p *service.SessionSandboxPinner, skills *service.TenantSkillService, a *sandboxalloc.Service,
 	) {
