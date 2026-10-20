@@ -250,7 +250,8 @@ func (h *Handler) SandboxDesktopWS(c *gin.Context) {
 		return
 	}
 	defer releaseSlot()
-	slotHold := mergeDesktopHolds(legacyHold, machineHold, opCtx)
+	slotHold, stopSlotHold := mergeDesktopHolds(legacyHold, machineHold, opCtx)
+	defer stopSlotHold()
 
 	// Start, dial on the fixed sandbox. The relay context is detached only
 	// after the browser socket is upgraded. Losing either slot or the
@@ -570,8 +571,11 @@ func desktopMachineSlotKey(machineID string) string {
 }
 
 // mergeDesktopHolds ends as soon as any hold ends. Nil holds (no Redis) are
-// ignored; with none left it returns nil, as a single missing hold did.
-func mergeDesktopHolds(holds ...context.Context) context.Context {
+// ignored; with none left it returns nil, as a single missing hold did. The
+// stop function ends the merged context; the caller defers it once the relay
+// is done, which also satisfies go vet's lostcancel check on cancel vars
+// whose only other use sits inside a loop body.
+func mergeDesktopHolds(holds ...context.Context) (context.Context, func()) {
 	var live []context.Context
 	for _, h := range holds {
 		if h != nil {
@@ -579,13 +583,13 @@ func mergeDesktopHolds(holds ...context.Context) context.Context {
 		}
 	}
 	if len(live) == 0 {
-		return nil
+		return nil, func() {}
 	}
 	merged, cancel := context.WithCancelCause(context.Background())
 	for _, h := range live {
 		context.AfterFunc(h, func() { cancel(context.Cause(h)) })
 	}
-	return merged
+	return merged, func() { cancel(context.Canceled) }
 }
 
 // desktopLimiter caps one key to one desktop within this process. The key is

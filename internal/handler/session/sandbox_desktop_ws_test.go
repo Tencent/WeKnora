@@ -113,10 +113,13 @@ func TestMergeDesktopHoldsEndsWithAnyHold(t *testing.T) {
 	a, cancelA := context.WithCancel(context.Background())
 	b, cancelB := context.WithCancel(context.Background())
 	defer cancelB()
-	merged := mergeDesktopHolds(a, nil, b)
+	merged, stopMerged := mergeDesktopHolds(a, nil, b)
+	defer stopMerged()
 	cancelA()
 	require.Eventually(t, func() bool { return merged.Err() != nil }, time.Second, 5*time.Millisecond)
-	require.Nil(t, mergeDesktopHolds(nil, nil))
+	none, stopNone := mergeDesktopHolds(nil, nil)
+	require.Nil(t, none)
+	stopNone()
 }
 
 func TestDesktopSlotReleaseIsIdempotent(t *testing.T) {
