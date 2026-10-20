@@ -355,6 +355,11 @@ func (h *Handler) handleAgentEventsForSSE(
 
 	lastOffset := 0
 	log := logger.GetLogger(ctx)
+	// Agent mode releases the sandbox turn lease, and therefore cancels ctx,
+	// before the completion event is published. Polling Redis with that
+	// context drops the terminal event and the client waits at the end of
+	// the answer. Client disconnect is still observed on the request below.
+	pollCtx := context.WithoutCancel(ctx)
 
 	log.Infof("Starting pull-based SSE streaming for session=%s, message=%s", sessionID, assistantMessageID)
 
@@ -374,7 +379,7 @@ func (h *Handler) handleAgentEventsForSSE(
 			c.Writer.Flush()
 		case <-ticker.C:
 			// Get new events from StreamManager using offset
-			events, newOffset, err := h.streamManager.GetEvents(ctx, sessionID, assistantMessageID, lastOffset)
+			events, newOffset, err := h.streamManager.GetEvents(pollCtx, sessionID, assistantMessageID, lastOffset)
 			if err != nil {
 				log.Warnf("Failed to get events from stream: %v", err)
 				continue

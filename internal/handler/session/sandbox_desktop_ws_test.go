@@ -93,6 +93,32 @@ func TestDesktopSlotIsExclusivePerSession(t *testing.T) {
 	third()
 }
 
+func TestDesktopSlotIsExclusivePerMachineAcrossSessions(t *testing.T) {
+	h, _, _ := newDesktopSlotHandler(t)
+	ctx := context.Background()
+	key := desktopMachineSlotKey("machine-1")
+	release, got, _, err := h.acquireDesktopSlot(ctx, key)
+	require.NoError(t, err)
+	require.True(t, got)
+	_, got, _, err = h.acquireDesktopSlot(ctx, key)
+	require.NoError(t, err)
+	require.False(t, got, "a second session on the same machine gets DESKTOP_BUSY")
+	release()
+	_, got, _, err = h.acquireDesktopSlot(ctx, desktopMachineSlotKey("machine-2"))
+	require.NoError(t, err)
+	require.True(t, got)
+}
+
+func TestMergeDesktopHoldsEndsWithAnyHold(t *testing.T) {
+	a, cancelA := context.WithCancel(context.Background())
+	b, cancelB := context.WithCancel(context.Background())
+	defer cancelB()
+	merged := mergeDesktopHolds(a, nil, b)
+	cancelA()
+	require.Eventually(t, func() bool { return merged.Err() != nil }, time.Second, 5*time.Millisecond)
+	require.Nil(t, mergeDesktopHolds(nil, nil))
+}
+
 func TestDesktopSlotReleaseIsIdempotent(t *testing.T) {
 	release, ok := sessionDesktopLimiter.acquire("sess-idem")
 	require.True(t, ok)
@@ -125,7 +151,7 @@ func TestDesktopSlotRenewSurvivesTransientRedisError(t *testing.T) {
 	h, mini, client := newDesktopSlotHandler(t)
 	ctx := context.Background()
 
-	release, got, hold, err := h.acquireDesktopSlot(ctx, "sess-blip")
+	release, got, hold, err := h.acquireDesktopSlot(ctx, desktopSlotKey("sess-blip"))
 	require.NoError(t, err)
 	require.True(t, got)
 	require.NotNil(t, hold)
@@ -146,7 +172,7 @@ func TestDesktopSlotRenewSurvivesTransientRedisError(t *testing.T) {
 	}
 	require.NotEmpty(t, client.Get(ctx, desktopSlotKey("sess-blip")).Val())
 
-	_, got, _, err = h.acquireDesktopSlot(ctx, "sess-blip")
+	_, got, _, err = h.acquireDesktopSlot(ctx, desktopSlotKey("sess-blip"))
 	require.NoError(t, err)
 	require.False(t, got, "the original relay must still own the slot after a blip")
 }
@@ -156,7 +182,7 @@ func TestDesktopSlotCancelsHoldWhenRedisStaysDownPastLease(t *testing.T) {
 	h, mini, _ := newDesktopSlotHandler(t)
 	ctx := context.Background()
 
-	release, got, hold, err := h.acquireDesktopSlot(ctx, "sess-down")
+	release, got, hold, err := h.acquireDesktopSlot(ctx, desktopSlotKey("sess-down"))
 	require.NoError(t, err)
 	require.True(t, got)
 	defer release()
@@ -175,7 +201,7 @@ func TestDesktopSlotCancelsHoldWhenOwnershipIsStolen(t *testing.T) {
 	h, _, client := newDesktopSlotHandler(t)
 	ctx := context.Background()
 
-	release, got, hold, err := h.acquireDesktopSlot(ctx, "sess-stolen")
+	release, got, hold, err := h.acquireDesktopSlot(ctx, desktopSlotKey("sess-stolen"))
 	require.NoError(t, err)
 	require.True(t, got)
 	defer release()
@@ -187,7 +213,7 @@ func TestDesktopSlotCancelsHoldWhenOwnershipIsStolen(t *testing.T) {
 		t.Fatal("losing the redis key must cancel the hold so the relay can drop")
 	}
 
-	second, got, secondHold, err := h.acquireDesktopSlot(ctx, "sess-stolen")
+	second, got, secondHold, err := h.acquireDesktopSlot(ctx, desktopSlotKey("sess-stolen"))
 	require.NoError(t, err)
 	require.False(t, got, "the thief still owns the key; we must not overwrite it")
 	_ = second
@@ -199,7 +225,7 @@ func TestDesktopSlotCancelsHoldWhenKeyExpires(t *testing.T) {
 	h, _, client := newDesktopSlotHandler(t)
 	ctx := context.Background()
 
-	release, got, hold, err := h.acquireDesktopSlot(ctx, "sess-expired")
+	release, got, hold, err := h.acquireDesktopSlot(ctx, desktopSlotKey("sess-expired"))
 	require.NoError(t, err)
 	require.True(t, got)
 	defer release()
@@ -211,7 +237,7 @@ func TestDesktopSlotCancelsHoldWhenKeyExpires(t *testing.T) {
 		t.Fatal("an expired slot must cancel the hold; otherwise a second client can join")
 	}
 
-	second, got, secondHold, err := h.acquireDesktopSlot(ctx, "sess-expired")
+	second, got, secondHold, err := h.acquireDesktopSlot(ctx, desktopSlotKey("sess-expired"))
 	require.NoError(t, err)
 	require.True(t, got, "after the first hold is lost the session must accept one new desktop")
 	defer second()
@@ -259,7 +285,9 @@ func TestSandboxDesktopWSLookupIsOptInProvision(t *testing.T) {
 	require.NoError(t, err)
 	text := string(src)
 	require.Contains(t, text, `allowProvision := terminalFlagParam(c.Query("provision"))`)
-	require.Contains(t, text, `h.terminalProvisionPin(ensureCtx, c, allowProvision)`)
+	// Locate runs before either slot exists, so the pin uses the request
+	// context. Start is what ensureCtx (the slot hold) cancels.
+	require.Contains(t, text, `h.terminalProvisionPin(ctx, c, allowProvision)`)
 	require.NotContains(t, text, `terminalProvisionPin(ctx, c, true)`)
 	// The JS WebSocket API never exposes a failed handshake's HTTP status.
 	// Overlay states (not bound / paused) have to ride a close reason after
