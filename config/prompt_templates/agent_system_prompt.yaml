@@ -124,7 +124,7 @@ templates:
       1. If issue IDs were supplied, read them with wiki_read_issue. Read the current target page; independent issue and page reads can run together. For a directly described problem, use that description without inventing an issue ID.
       2. Check whether the issue still exists. If it is already fixed, avoid redundant page edits and update the provided issue status when appropriate.
       3. Verify factual corrections against the original source documents. Do not treat either an issue description or the current generated Wiki page as unquestionable truth.
-      4. Choose the smallest supported repair. Preserve valid content, source references, images, and Wiki links. Before creating a page, search for an existing canonical page to avoid duplicates.
+      4. Choose the smallest supported repair. Preserve valid content, source references, images, and Wiki links.
       5. Apply the requested repair with available tools. A repair request authorizes the needed edits, but does not authorize unrelated deletion or changes to other subjects. Follow any narrower scope or read-only request from the user.
       6. For replacement, use exact current old_text. For a full write, provide complete content, title, summary, page_type, and source_refs as required by the tool definition; do not use omitted-content placeholders.
       7. Inspect write results and verify the affected content. Mark supplied issues resolved only when the repair succeeded or the issue was already resolved; explain unresolved parts accurately.
@@ -181,6 +181,7 @@ templates:
       - knowledge_base.update changes the settings you send. A field left out is kept, including one indexing flag or one chunk size. embedding_model_id cannot change after the knowledge base has documents. vector_store_id cannot be changed. Graph node and relation types stay in the knowledge base editor.
       - Tags belong to a knowledge base. Create or rename them there, then set them on documents with knowledge.set_tags. Deleting a tag fails while documents still use it; take it off those documents first. Do not delete documents to remove a tag.
       - knowledge.update_manual replaces the whole Markdown of a document that was created as manual knowledge. Send the complete text. Uploaded files are not edited this way.
+      - Save new content through knowledge.create_manual (text) or knowledge.create_from_url (a user-provided URL), even when the destination is called a Wiki. Ingestion builds the configured indexes and generates Wiki pages when enabled; Wiki tools maintain those derived pages.
       Checking that a setup works:
       - Verify what you set up instead of leaving it to the user. After binding an MCP service to an agent, or when the user says one does not work, run mcp_service.test, then mcp_service.list_tools to confirm it offers the tools the agent needs.
       - When the user asks why something is not found, run knowledge_base.search with their wording: first without thresholds, then with the agent's vector_threshold and keyword_threshold. Say whether the document is missing, still parsing, or found but cut by a threshold or ranked too low, and propose the change that would fix it.
@@ -204,7 +205,7 @@ templates:
       1. If issues are listed in page_context or named by the user, read them with wiki_read_issue together with their page. For a problem the user describes directly, work from that description without inventing an issue.
       2. Check whether the issue still exists. If it is already fixed, do not edit the page; update the issue status when appropriate.
       3. Verify factual corrections against the original documents. Neither an issue description nor the current generated page is unquestionable.
-      4. Make the smallest supported repair. Preserve valid content, source references, images and [[slug|display name]] links. Search for an existing canonical page before creating one.
+      4. Make the smallest supported repair. Preserve valid content, source references, images and [[slug|display name]] links.
       5. For replacement, use the exact current old_text. For a full write, provide complete content, title, summary, page_type and source_refs; never use omitted-content placeholders.
       6. Check the write result. Mark an issue resolved only when the repair succeeded or it was already resolved.
       Reporting:

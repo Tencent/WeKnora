@@ -8245,7 +8245,7 @@
                     "risk": "write",
                     "target": "knowledge_base.get"
                 },
-                "x-agent-hint": "Creates a Markdown document. Send the full content, and status draft to keep it out of search or publish to index it."
+                "x-agent-hint": "Creates a source document from complete Markdown. Set status publish to start asynchronous ingestion; omitted status defaults to draft without indexing. Use draft only when requested. Check knowledge.get_parse_progress."
             }
         },
         "/knowledge-bases/{id}/knowledge/url": {
@@ -8327,7 +8327,7 @@
                     "risk": "write",
                     "target": "knowledge_base.get"
                 },
-                "x-agent-hint": "Fetches a public web page or file into the knowledge base and parses it in the background; follow with knowledge.get_parse_progress. Only use a URL the user gave."
+                "x-agent-hint": "Imports a user-provided public web page or file URL as a source document; ingests asynchronously. Check knowledge.get_parse_progress."
             }
         },
         "/knowledge-bases/{id}/move-targets": {
