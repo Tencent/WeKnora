@@ -255,6 +255,7 @@ func (s *AutomationService) runOnce(ctx context.Context, run *types.AutomationRu
 	defer cancel()
 
 	var resume *types.AgentResume
+	modelID := a.ModelID
 	session, userMsg, answer, query := (*types.Session)(nil), (*types.Message)(nil), (*types.Message)(nil), ""
 	if run.Resume {
 		var stop func()
@@ -268,6 +269,11 @@ func (s *AutomationService) runOnce(ctx context.Context, run *types.AutomationRu
 		defer stop()
 		if snap, err := agent.DecodeRunSnapshot(resume.Snapshot); err == nil {
 			query = snap.Query
+			// A settings edit affects future runs, not an approval already in flight.
+			var original types.ResumableAgentRequest
+			if err := json.Unmarshal(snap.Request, &original); err == nil {
+				modelID = original.SummaryModelID
+			}
 		}
 	} else {
 		session, err = s.runSession(ctx, a, run)
@@ -285,10 +291,21 @@ func (s *AutomationService) runOnce(ctx context.Context, run *types.AutomationRu
 			return failed("could not record the run: " + err.Error())
 		}
 	}
+	if err := s.validateModel(ctx, modelID, a.TenantID); err != nil {
+		return failed(err.Error())
+	}
+	if modelID != "" {
+		// Keep the shared agent configuration untouched. The per-run copy also
+		// allows an explicit model when the agent's default is no longer available.
+		configured := *agentConfig
+		configured.Config.ModelID = modelID
+		agentConfig = &configured
+	}
 	loc := scheduleLocation(a.Trigger)
 	req := &types.QARequest{
 		Session: session, Query: query, AssistantMessageID: answer.ID, UserMessageID: userMsg.ID,
 		CustomAgent: agentConfig, WebSearchEnabled: agentConfig.Config.WebSearchEnabled,
+		SummaryModelID:  modelID,
 		AssistantAccess: a.AccessLevel, Mode: types.RunModeDeferred, Suspendable: true, Resume: resume,
 		RunNote: automation.RunNote(a.Name, run.ScheduledAt, loc),
 	}
@@ -345,7 +362,9 @@ func (s *AutomationService) runSession(
 	session := &types.Session{
 		ID: uuid.NewString(), TenantID: a.TenantID, UserID: a.OwnerUserID, Kind: types.SessionKindAutomation,
 		Title: clipRunes(title, 200), CreatedAt: now, UpdatedAt: now,
-		LastRequestState: &types.SessionLastRequestState{AgentID: a.AgentID, AgentEnabled: true},
+		LastRequestState: &types.SessionLastRequestState{
+			AgentID: a.AgentID, AgentEnabled: true, ModelID: a.ModelID,
+		},
 	}
 	if err := s.db.WithContext(ctx).Session(&gorm.Session{SkipHooks: true}).
 		Clauses(clause.OnConflict{DoNothing: true}).Create(session).Error; err != nil {

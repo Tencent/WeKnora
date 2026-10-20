@@ -102,6 +102,8 @@ type Automation struct {
 	// AgentID is the agent that runs it; the WeKnora assistant's ID runs the
 	// assistant.
 	AgentID string `json:"agent_id" gorm:"type:varchar(64);not null" extensions:"x-agent"`
+	// ModelID overrides the agent's chat model; empty follows the agent default.
+	ModelID string `json:"model_id" gorm:"type:varchar(64);not null;default:''" extensions:"x-agent"`
 	// Instruction is the task, sent as the user message of each run after
 	// its variables are filled in.
 	Instruction string            `json:"instruction" gorm:"type:text;not null" extensions:"x-agent,x-agent-detail"`
@@ -200,6 +202,8 @@ type AutomationPatch struct {
 	Description *string `json:"description" extensions:"x-agent"`
 	// Agent that runs it, from agent.list; empty runs the WeKnora assistant
 	AgentID *string `json:"agent_id" extensions:"x-agent"`
+	// Optional chat model from model.list; empty follows the agent default
+	ModelID *string `json:"model_id" extensions:"x-agent"`
 	// The task, sent as the user message of each run. May name now,
 	// last_run_at, last_success_at, run_id or automation_name inside double
 	// curly braces to have it filled in

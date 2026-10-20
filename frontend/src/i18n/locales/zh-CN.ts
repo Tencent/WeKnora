@@ -125,6 +125,7 @@ export default {
     "historyNoOverrides": "无管理员修改",
   },
   automation: {
+    conversationNotice: "此会话由自动化任务运行，不能手动发送消息。请在上方处理待审批事项。",
     title: '自动化',
     description: '让智能体按计划以你的身份执行任务，结果和待审批事项会通知你。',
     add: '新建自动化',
@@ -154,6 +155,9 @@ export default {
       enabled: '启用',
     },
     editor: {
+      model: "运行模型",
+      modelHelp: "默认沿用智能体的模型设置，也可以为此自动化单独指定。修改后用于后续运行。",
+      modelDefault: "跟随智能体默认模型",
       createTitle: '新建自动化',
       editTitle: '编辑自动化',
       namePlaceholder: '例如：每日知识库周报',

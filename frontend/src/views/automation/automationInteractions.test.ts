@@ -30,6 +30,7 @@ function setup(t: TestContext, file: string, api: Record<string, unknown>, props
     '@/api/agent': { BUILTIN_WEKNORA_ASSISTANT_ID: 'assistant' },
     '@/api/assistant': { ASSISTANT_ACCESS_LEVELS: ['read_only', 'confirm', 'auto_write'] },
     '@/stores/auth': { useAuthStore: () => ({ currentTenantId: 'tenant' }) },
+    '@/stores/ui': { useUIStore: () => ({ openSettings() {} }) },
     './agents': { loadAutomationAgents: async () => [] },
     '@/utils/automationSchedule': schedule,
     '@/composables/useModalShell': { useModalShell: () => ({ markClean() {}, requestClose() {} }) },
@@ -97,6 +98,23 @@ test('approval hours update in both directions and save as minutes, without rese
   update(4)
   await vm.save()
   assert.equal(saved.approval_timeout_minutes, 240)
+})
+
+test('the editor preserves, changes, and clears an automation model override', async t => {
+  const saved: any[] = []
+  const { vm } = setup(t, './AutomationEditor.vue', {
+    updateAutomation: async (_id: string, input: unknown) => { saved.push(input); return { data: automation } },
+    validateAutomationTrigger: async () => ({ data: { next_runs: [] } }),
+  }, { visible: false, automation: { ...automation, model_id: 'model-one' }, agents: [], defaultAgentId: 'assistant' })
+  vm.$.props.visible = true
+  await vue.nextTick()
+  assert.equal(vm.form.model_id, 'model-one')
+  vm.form.model_id = 'model-two'
+  await vm.save()
+  assert.equal(saved[0].model_id, 'model-two')
+  vm.form.model_id = ''
+  await vm.save()
+  assert.equal(saved[1].model_id, '', 'clearing restores the agent default instead of omitting the patch')
 })
 
 test('list run and delete actions call APIs only after their inline confirmation', async t => {

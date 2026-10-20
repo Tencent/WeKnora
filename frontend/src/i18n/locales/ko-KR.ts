@@ -125,6 +125,7 @@ export default {
     "historyNoOverrides": "관리자 변경 없음",
   },
   automation: {
+    conversationNotice: "자동화 작업이 실행하는 대화입니다. 메시지를 직접 보낼 수 없습니다. 대기 중인 요청은 위에서 처리하세요.",
     title: '자동화',
     description: '에이전트가 일정에 따라 사용자 본인으로 작업을 실행합니다. 결과와 승인 대기 항목은 알림으로 받습니다.',
     add: '새 자동화',
@@ -154,6 +155,9 @@ export default {
       enabled: '사용',
     },
     editor: {
+      model: "실행 모델",
+      modelHelp: "에이전트의 기본 모델을 사용하거나 이 자동화에 사용할 모델을 선택하세요. 변경 사항은 다음 실행부터 적용됩니다.",
+      modelDefault: "에이전트 기본 모델 사용",
       createTitle: '새 자동화',
       editTitle: '자동화 편집',
       namePlaceholder: '예: 매일 지식 베이스 요약',

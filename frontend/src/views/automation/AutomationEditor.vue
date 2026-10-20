@@ -30,6 +30,16 @@
               </t-select>
             </div>
           </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ t('automation.editor.model') }}</label>
+              <p class="desc">{{ t('automation.editor.modelHelp') }}</p>
+            </div>
+            <div class="setting-control">
+              <ModelSelector v-model:selected-model-id="form.model_id" model-type="KnowledgeQA" clearable
+                :placeholder="t('automation.editor.modelDefault')" @add-model="uiStore.openSettings('models', 'llm')" />
+            </div>
+          </div>
           <div class="setting-row setting-row-vertical">
             <div class="setting-info">
               <label>{{ t('automation.fields.instruction') }}<span class="required">*</span></label>
@@ -314,6 +324,8 @@ import {
   type ScheduleKind,
 } from '@/utils/automationSchedule'
 import type { AutomationAgentOption } from './agents'
+import ModelSelector from '@/components/ModelSelector.vue'
+import { useUIStore } from '@/stores/ui'
 
 const props = defineProps<{
   visible: boolean
@@ -325,6 +337,7 @@ const props = defineProps<{
 const emit = defineEmits<{ 'update:visible': [value: boolean]; saved: [value: Automation] }>()
 
 const { t, locale } = useI18n()
+const uiStore = useUIStore()
 
 type Section = 'basic' | 'schedule' | 'execution' | 'notify'
 
@@ -356,6 +369,7 @@ const navGroups = computed(() => [
 const blank = (): Required<Omit<AutomationInput, 'trigger' | 'limits' | 'description'>> => ({
   name: '',
   agent_id: props.defaultAgentId,
+  model_id: '',
   instruction: '',
   session_mode: 'per_run',
   carry_last_result: false,
@@ -423,6 +437,7 @@ watch(() => props.visible, (open) => {
     Object.assign(form, {
       name: a.name,
       agent_id: a.agent_id,
+      model_id: a.model_id || '',
       instruction: a.instruction,
       session_mode: a.session_mode,
       carry_last_result: a.carry_last_result,

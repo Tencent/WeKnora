@@ -26318,6 +26318,11 @@ const docTemplate = `{
                     "type": "string",
                     "x-agent": true
                 },
+                "model_id": {
+                    "description": "ModelID overrides the agent's chat model; empty follows the agent default.",
+                    "type": "string",
+                    "x-agent": true
+                },
                 "name": {
                     "type": "string",
                     "x-agent": true
@@ -26435,6 +26440,11 @@ const docTemplate = `{
                         "skip",
                         "run_once"
                     ],
+                    "x-agent": true
+                },
+                "model_id": {
+                    "description": "Optional chat model from model.list; empty follows the agent default",
+                    "type": "string",
                     "x-agent": true
                 },
                 "name": {

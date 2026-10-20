@@ -125,6 +125,7 @@ export default {
     "historyNoOverrides": "無管理員修改",
   },
   automation: {
+    conversationNotice: "此對話由自動化任務執行，無法手動傳送訊息。請在上方處理待審批事項。",
     title: '自動化',
     description: '讓智慧代理按排程以你的身分執行任務，結果與待審批事項會通知你。',
     add: '新增自動化',
@@ -154,6 +155,9 @@ export default {
       enabled: '啟用',
     },
     editor: {
+      model: "執行模型",
+      modelHelp: "預設沿用智慧體的模型設定，也可以為此自動化單獨指定。修改後用於後續執行。",
+      modelDefault: "跟隨智慧體預設模型",
       createTitle: '新增自動化',
       editTitle: '編輯自動化',
       namePlaceholder: '例如：每日知識庫週報',

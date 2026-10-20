@@ -51,7 +51,7 @@
                             </div>
                         </div>
                         <!-- 推荐问题卡片 - 仅在新会话（无消息）时展示 -->
-                        <div v-if="!embeddedMode && messagesList.length === 0 && !loading"
+                        <div v-if="!embeddedMode && currentSession && !isAutomationSession && messagesList.length === 0 && !loading"
                             class="suggested-questions-container"
                             :class="{ 'has-questions': suggestedQuestions.length > 0 || suggestedQuestionsLoading }">
                             <!-- 骨架屏占位 -->
@@ -140,7 +140,7 @@
                                     @ask-assistant="handleAskAssistant"
                                     @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
                                 </botmsg>
-                                <FollowUpSuggestions v-if="session.answerFullyRendered && !session.steerForked && !session.suggestionsDismissed"
+                                <FollowUpSuggestions v-if="!isAutomationSession && session.answerFullyRendered && !session.steerForked && !session.suggestionsDismissed"
                                     :suggestion-set="session.suggestionSet"
                                     :loading="session.suggestionLoading"
                                     :allow-regenerate="session.suggestionSet?.allow_regenerate"
@@ -165,7 +165,11 @@
                         </div>
                     </transition>
                     <PendingPromptDock :embedded-mode="embeddedMode" />
-                    <InputField ref="inputFieldRef" :auto-focus="focusComposerOnMount" compact
+                    <div v-if="isAutomationSession" class="automation-session-notice" role="note">
+                        <t-icon name="time" size="14px" />
+                        <span>{{ t('automation.conversationNotice') }}</span>
+                    </div>
+                    <InputField v-else-if="embeddedMode || currentSession" ref="inputFieldRef" :auto-focus="focusComposerOnMount" compact
                         @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles, options) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles, options)"
                         @steer-msg="(query, mentionedItems, delivery) => handleSteerMsg(query, mentionedItems, delivery)"
                         @promote-steer="handlePromoteSteer"
@@ -341,6 +345,7 @@ const router = useRouter();
 const session_id = ref(props.session_id || route.params.chatid);
 watch(session_id, () => childTabs.reset(), { flush: 'sync' });
 const currentSession = ref(null);
+const isAutomationSession = computed(() => currentSession.value?.kind === 'automation');
 
 // 拉 session 详情，并按其 last_request_state 把输入栏状态恢复到当时的发起态。
 // 嵌入式（embeddedMode）由宿主页面注入 agent/KB，所以跳过整套恢复逻辑，
@@ -385,7 +390,7 @@ function handleAskAssistant(messageId) {
 }
 
 function forkAffordanceOf(messageId) {
-    if (!messageId) return { canFork: false }
+    if (isAutomationSession.value || !messageId) return { canFork: false }
     return resolveForkAffordance(messagesList, messageId)
 }
 
@@ -397,7 +402,7 @@ const rewindableIds = computed(() => rewindableMessageIds(messagesList, {
 }))
 
 function canRewindMessage(messageId) {
-    return Boolean(messageId) && rewindableIds.value.has(String(messageId))
+    return !isAutomationSession.value && Boolean(messageId) && rewindableIds.value.has(String(messageId))
 }
 
 const FORK_PREFILL_KEY = 'weknora:fork-prefill'
@@ -405,7 +410,7 @@ let forkInFlight = false
 const rewindInFlight = ref(false)
 const rewindLockSessionId = ref('')
 const composerLocked = computed(() =>
-    rewindInFlight.value && String(session_id.value || '') === rewindLockSessionId.value
+    isAutomationSession.value || (rewindInFlight.value && String(session_id.value || '') === rewindLockSessionId.value)
 )
 
 function stashForkLanding(sessionId, text) {
@@ -757,6 +762,7 @@ const handleAnswerRenderComplete = (message, ready) => {
 };
 
 const loadFollowUpSuggestions = async (message, ensure = false, regenerate = false) => {
+    if (isAutomationSession.value) return;
     const messageId = resolveAssistantMessageId(message);
     const targetSessionId = session_id.value;
     if (!messageId || !targetSessionId || message.suggestionsDismissed) return;
@@ -1417,6 +1423,10 @@ const attachSteerFollowUp = async (completedAssistantId) => {
 };
 
 const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = [], options = {}) => {
+    if (!props.embeddedMode && !currentSession.value) {
+        await loadSessionAndHydrate(session_id.value);
+        if (!currentSession.value) return;
+    }
     if (composerLocked.value) return
     const reasoningEffort = props.embeddedMode ? undefined : (useSettingsStoreInstance.reasoningEffortOverride || undefined);
     stopStream();
@@ -2155,6 +2165,19 @@ onBeforeRouteUpdate((to, from, next) => {
         box-sizing: border-box;
         overflow-x: clip;
     }
+}
+
+.automation-session-notice {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 16px 0;
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-sm);
+    line-height: 1.6;
+
+    > .t-icon { flex-shrink: 0; }
 }
 
 .msg_list {

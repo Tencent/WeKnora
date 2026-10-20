@@ -125,6 +125,7 @@ export default {
     "historyNoOverrides": "No administrator changes",
   },
   automation: {
+    conversationNotice: "This conversation is run by an automation. Manual messages are unavailable; handle pending requests above.",
     title: 'Automations',
     description: 'Have an agent run tasks on a schedule as you. You are notified of results and pending approvals.',
     add: 'New automation',
@@ -154,6 +155,9 @@ export default {
       enabled: 'Enabled',
     },
     editor: {
+      model: "Run model",
+      modelHelp: "Use the agent’s default model or choose one for this automation. Changes apply to future runs.",
+      modelDefault: "Use agent default",
       createTitle: 'New automation',
       editTitle: 'Edit automation',
       namePlaceholder: 'e.g. Daily knowledge base digest',

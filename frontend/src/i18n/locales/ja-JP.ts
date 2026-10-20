@@ -125,6 +125,7 @@ export default {
     "historyNoOverrides": "管理者の変更なし",
   },
   automation: {
+    conversationNotice: "この会話は自動化タスクが実行します。手動でメッセージは送信できません。保留中のリクエストは上で対応してください。",
     title: 'オートメーション',
     description: 'エージェントにスケジュールどおりあなたとしてタスクを実行させます。結果と承認待ちは通知されます。',
     add: '新規オートメーション',
@@ -154,6 +155,9 @@ export default {
       enabled: '有効',
     },
     editor: {
+      model: "実行モデル",
+      modelHelp: "エージェントの既定モデルを使うか、この自動化専用のモデルを選択します。変更は次回以降の実行に適用されます。",
+      modelDefault: "エージェントの既定モデル",
       createTitle: '新規オートメーション',
       editTitle: 'オートメーションを編集',
       namePlaceholder: '例：毎日のナレッジベース要約',

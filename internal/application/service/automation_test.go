@@ -145,7 +145,7 @@ func newAutomationFixture(t *testing.T) *automationFixture {
 	}
 	f.sessions = &automationSessions{db: db, run: done}
 	f.svc = NewAutomationService(db, f.agents, f.users, f.members, &collaborationTenants{},
-		f.messages, repository.NewAgentGrantRepository(db), NewNotificationService(db))
+		f.messages, repository.NewAgentGrantRepository(db), NewNotificationService(db), nil)
 	f.svc.now = func() time.Time { return f.now }
 	f.svc.Bind(f.sessions, f.broker, nil, nil)
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, automationTenant)
@@ -354,7 +354,10 @@ func (f *automationFixture) suspendOnApproval(t *testing.T, grant string) {
 		}
 		require.NoError(t, f.broker.Store().Create(ctx, prompt))
 		require.NoError(t, f.db.Create(prompt).Error)
-		snap, _ := json.Marshal(agent.RunSnapshot{Version: agent.RunSnapshotVersion, Query: req.Query})
+		resumable, _ := json.Marshal(types.ResumableAgentRequest{SummaryModelID: req.SummaryModelID})
+		snap, _ := json.Marshal(agent.RunSnapshot{
+			Version: agent.RunSnapshotVersion, Query: req.Query, Request: resumable,
+		})
 		require.NoError(t, f.broker.Suspensions().Save(ctx, &types.AgentRunSuspension{
 			AssistantMessageID: req.AssistantMessageID, PromptID: prompt.ID, SessionID: req.Session.ID,
 			Snapshot: snap,

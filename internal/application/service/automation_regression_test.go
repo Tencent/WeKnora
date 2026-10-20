@@ -385,6 +385,7 @@ func TestAutomationApprovalResumeUsesRemainingExecutionBudget(t *testing.T) {
 		f.messages,
 		f.svc.grants,
 		f.svc.notices,
+		f.svc.models,
 	)
 	restarted.Configure(AutomationConfig{DefaultMaxDuration: time.Second})
 	restarted.now = func() time.Time { return f.now }
