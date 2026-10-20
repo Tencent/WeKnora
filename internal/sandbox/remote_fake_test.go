@@ -489,6 +489,7 @@ func (s *fakeRemoteTerminal) Write(context.Context, []byte) error { return nil }
 func (s *fakeRemoteTerminal) Resize(context.Context, uint32, uint32) error {
 	return nil
 }
+
 func (s *fakeRemoteTerminal) Close() error {
 	if s.client != nil {
 		s.client.ptyClosed.Store(true)

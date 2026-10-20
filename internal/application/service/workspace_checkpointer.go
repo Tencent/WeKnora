@@ -86,7 +86,9 @@ git_ws rev-parse HEAD`, gitWorkspacePreambleFor(l), gitWorkspaceEnsureRepo(), me
 }
 
 func checkpointScript(workspace, gitDir, messageID string) string {
-	return checkpointScriptFor(sandbox.WorkspaceLayout{Origin: sandbox.WorkspaceOriginRemote, Root: workspace, GitDir: gitDir}, messageID)
+	return checkpointScriptFor(sandbox.WorkspaceLayout{
+		Origin: sandbox.WorkspaceOriginRemote, Root: workspace, GitDir: gitDir,
+	}, messageID)
 }
 
 // Checkpoint commits /workspace and returns the resulting checkpoint, or nil

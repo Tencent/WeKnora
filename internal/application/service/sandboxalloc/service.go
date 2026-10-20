@@ -320,7 +320,8 @@ func (s *Service) VerifySessionAllocation(
 		return fmt.Errorf("%w: session %s was re-addressed", sandbox.ErrUserAllocationRejected, sessionID)
 	}
 	sess, err := s.sessions.GetByID(ctx, sessionTenantID, sessionID)
-	if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, apperrors.ErrSessionNotFound) || (err == nil && sess == nil) {
+	if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, apperrors.ErrSessionNotFound) ||
+		(err == nil && sess == nil) {
 		return sandbox.ErrSandboxSessionDeleted
 	}
 	if err != nil {
@@ -345,7 +346,9 @@ func (s *Service) VerifySessionAllocation(
 }
 
 // UserMachinesByConfig implements sandbox.AllocationDirectory.
-func (s *Service) UserMachinesByConfig(ctx context.Context, configTenantID uint64, configID string) ([]allocation.UserMachine, error) {
+func (s *Service) UserMachinesByConfig(
+	ctx context.Context, configTenantID uint64, configID string,
+) ([]allocation.UserMachine, error) {
 	rows, err := s.repo.ListUserMachinesByConfig(ctx, configTenantID, configID)
 	if err != nil {
 		return nil, err

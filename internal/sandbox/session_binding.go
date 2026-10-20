@@ -49,7 +49,8 @@ func (k SessionSandboxKey) Machine() SessionSandboxKey {
 func (k SessionSandboxKey) String() string {
 	if k.IsUserScoped() {
 		if k.SessionID == "" {
-			return fmt.Sprintf("user-machine(tenant=%d,config=%d/%s)", k.TenantID, k.User.ConfigTenantID, k.User.ConfigID)
+			return fmt.Sprintf("user-machine(tenant=%d,config=%d/%s)",
+				k.TenantID, k.User.ConfigTenantID, k.User.ConfigID)
 		}
 		return fmt.Sprintf("user-session(tenant=%d,session=%s)", k.TenantID, k.SessionID)
 	}

@@ -991,7 +991,9 @@ func (f *fakeAllocations) SessionAllocation(_ context.Context, id string) (alloc
 
 // VerifySessionAllocation mirrors the sandboxalloc check: same assignment,
 // still live. Tests change the owner with setOwner to exercise C15.
-func (f *fakeAllocations) VerifySessionAllocation(_ context.Context, _ uint64, id string, expected allocation.Assignment) error {
+func (f *fakeAllocations) VerifySessionAllocation(
+	_ context.Context, _ uint64, id string, expected allocation.Assignment,
+) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	a, ok := f.byID[id]
@@ -1000,7 +1002,8 @@ func (f *fakeAllocations) VerifySessionAllocation(_ context.Context, _ uint64, i
 		return ErrSandboxSessionDeleted
 	case f.ownerOverride[id] != "" && f.ownerOverride[id] != expected.Machine.OwnerID:
 		return ErrUserAllocationRejected
-	case a.Machine != expected.Machine || a.ConfigTenantID != expected.ConfigTenantID || a.ConfigID != expected.ConfigID:
+	case a.Machine != expected.Machine || a.ConfigTenantID != expected.ConfigTenantID ||
+		a.ConfigID != expected.ConfigID:
 		return ErrUserAllocationRejected
 	case a.IsUser() && f.ineligible[id]:
 		return ErrUserAllocationRejected
@@ -1284,7 +1287,7 @@ func TestTerminalIsClosedWhenItsLeaseIsLost(t *testing.T) {
 	require.NoError(t, err)
 	term, err := h.mgr.OpenSessionTerminal(ctx, userSessionA, RemoteTerminalOptions{})
 	require.NoError(t, err)
-	defer term.Close()
+	defer func() { _ = term.Close() }()
 	scope := admission.MachineScope(machineDigest(t, userSessionA))
 	member := term.(*heldTerminalSession).member
 	h.admission.ExpireMember(scope, member)

@@ -302,7 +302,8 @@ func TestReleaseWithoutASessionIDIsAnError(t *testing.T) {
 
 func (e *testEnv) updateSession(t *testing.T, id string, cols map[string]any) {
 	t.Helper()
-	require.NoError(t, e.db.Session(&gorm.Session{SkipHooks: true}).Model(&types.Session{}).Where("id = ?", id).Updates(cols).Error)
+	require.NoError(t, e.db.Session(&gorm.Session{SkipHooks: true}).
+		Model(&types.Session{}).Where("id = ?", id).Updates(cols).Error)
 }
 
 var _ sandbox.AllocationDirectory = (*Service)(nil)

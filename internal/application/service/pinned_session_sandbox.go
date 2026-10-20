@@ -196,7 +196,9 @@ func (a *PinnedSessionSandbox) DeleteForkSnapshot(
 // SessionWorkspaceLayout forwards the pinned manager's layout. manager does
 // not return the lookup error (it degrades to nil), so a missing pin keeps
 // the /workspace contract instead of failing the checkpoint closed.
-func (a *PinnedSessionSandbox) SessionWorkspaceLayout(ctx context.Context, sessionID string) (sandbox.WorkspaceLayout, error) {
+func (a *PinnedSessionSandbox) SessionWorkspaceLayout(
+	ctx context.Context, sessionID string,
+) (sandbox.WorkspaceLayout, error) {
 	mgr := a.manager(ctx, sessionID)
 	if provider, ok := mgr.(sandbox.SessionWorkspaceLayoutProvider); ok && provider != nil {
 		return provider.SessionWorkspaceLayout(ctx, sessionID)

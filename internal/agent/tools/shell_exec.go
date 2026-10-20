@@ -187,8 +187,10 @@ const sharedShellExecDescriptionTemplate = `Execute a command in this session's 
 This machine is shared with the owner's other sessions; this session's files are only under %s.
 - CWD defaults to %s on every call; cd does not persist.
   work_dir must be that directory, /tmp, or the skills root (` + sandbox.SkillsImageRoot + `); other paths are rejected.
-- Use ls/find to discover files, grep/awk to search, and cat/head/tail/sed to inspect text. Read known paths directly; no mandatory discovery call.
-- Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. Commands are limited to 8192 bytes. Execution is synchronous (no nohup or trailing &).
+- Use ls/find to discover files, grep/awk to search, and cat/head/tail/sed to inspect text.
+  Read known paths directly; no mandatory discovery call.
+- Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes.
+  Commands are limited to 8192 bytes. Execution is synchronous (no nohup or trailing &).
 - skill_name selects a listed skill for this call. Installed skills use their Python virtualenv and Node modules;
   host resources are staged automatically and use the system runtime until a local .venv is created.
   Scoped credentials apply to both. Example: skill_name="pdf", command="python3 report.py".
@@ -202,8 +204,12 @@ This machine is shared with the owner's other sessions; this session's files are
   If .venv is absent, create it with python3 -m venv --without-pip "${WEKNORA_SKILL_DIR:?}/.venv".
   Without uv, run the venv Python with -m ensurepip --upgrade before -m pip install.
   Deleting this session removes its directory, not the machine.
-- Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. Transport failures/timeouts are tool failures. Changing tools does not change permissions; do not repeat a denied operation through another tool.
-- stdout/stderr have independent byte limits, preserving head and tail when truncated. Full output is not automatically saved; redirect verbose commands to a workspace log when it must be retained. Binary bytes are suppressed.
+- Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful.
+  Transport failures/timeouts are tool failures. Changing tools does not change permissions;
+  do not repeat a denied operation through another tool.
+- stdout/stderr have independent byte limits, preserving head and tail when truncated.
+  Full output is not automatically saved; redirect verbose commands to a workspace log when it must be retained.
+  Binary bytes are suppressed.
 - Use ![description](sandbox:<file name>) with exact links from Output files, never stdout or temporary paths.`
 
 const hostShellExecDescription = "Execute a command in %s. The process is OS-sandboxed on this machine.\n" +

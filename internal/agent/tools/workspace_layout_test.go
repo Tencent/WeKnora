@@ -580,7 +580,8 @@ func TestSharedLayoutToolCopyKeepsSessionPathsIntact(t *testing.T) {
 	require.Contains(t, text, l.InputDir)
 	require.Contains(t, text, l.OutputDir)
 	require.Contains(t, text, l.Root)
-	require.NotContains(t, text, l.Root+"/sessions/", "substituting /workspace must not rewrite a path that already names the session")
+	require.NotContains(t, text, l.Root+"/sessions/",
+		"substituting /workspace must not rewrite a path that already names the session")
 }
 
 func TestSharedLayoutShellDescriptionStatesTheWorkDirRestriction(t *testing.T) {

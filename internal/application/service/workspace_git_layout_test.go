@@ -335,7 +335,9 @@ func (r *layoutRunner) SessionWorkspaceLayout(context.Context, string) (sandbox.
 	return r.layout, nil
 }
 
-func (r *layoutRunner) ExecShellCommand(_ context.Context, _ string, command, workDir string, _ time.Duration, _ map[string]string) (*sandbox.ExecuteResult, error) {
+func (r *layoutRunner) ExecShellCommand(
+	_ context.Context, _ string, command, workDir string, _ time.Duration, _ map[string]string,
+) (*sandbox.ExecuteResult, error) {
 	r.cmds = append(r.cmds, command)
 	r.dirs = append(r.dirs, workDir)
 	return &sandbox.ExecuteResult{ExitCode: r.exitCode, Stdout: strings.Repeat("a", 40) + "\n"}, nil
@@ -347,7 +349,8 @@ func TestCheckpointUsesTheSessionLayout(t *testing.T) {
 	l, err := sandbox.UserWorkspaceLayout("0f8fad5b-d9cb-469f-a165-70867728950e")
 	require.NoError(t, err)
 	runner := &layoutRunner{layout: l}
-	cp := NewWorkspaceCheckpointer(runner).Checkpoint(context.Background(), l.Root[len("/workspace/sessions/"):], "sb-1", "m-1")
+	cp := NewWorkspaceCheckpointer(runner).Checkpoint(
+		context.Background(), l.Root[len("/workspace/sessions/"):], "sb-1", "m-1")
 	require.NotNil(t, cp)
 	require.Contains(t, runner.cmds[0], "WORK_TREE='"+l.Root+"'")
 	require.Contains(t, runner.cmds[0], "GIT_DIR='"+l.GitDir+"'")

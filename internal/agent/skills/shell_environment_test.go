@@ -91,7 +91,8 @@ func TestPrepareShellEnvironmentUsesSharedSessionPaths(t *testing.T) {
 	l, err := sandbox.UserWorkspaceLayout("0f8fad5b-d9cb-469f-a165-70867728950e")
 	require.NoError(t, err)
 	m := newShellEnvManager(t, l)
-	_, env, err := m.PrepareShellEnvironment(context.Background(), "0f8fad5b-d9cb-469f-a165-70867728950e", "pdf", "true", nil)
+	_, env, err := m.PrepareShellEnvironment(
+		context.Background(), "0f8fad5b-d9cb-469f-a165-70867728950e", "pdf", "true", nil)
 	require.NoError(t, err)
 	require.Equal(t, l.OutputDir, env[artifactOutputEnvVar])
 	require.Equal(t, l.OutputDir, env[artifactHistoryEnvVar])

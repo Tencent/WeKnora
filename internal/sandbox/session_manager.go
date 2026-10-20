@@ -134,7 +134,9 @@ type AllocationDirectory interface {
 	// owner and still eligible to share. It returns ErrSandboxSessionDeleted
 	// or ErrUserAllocationRejected for those cases, other errors for
 	// failures to verify.
-	VerifySessionAllocation(ctx context.Context, sessionTenantID uint64, sessionID string, expected allocation.Assignment) error
+	VerifySessionAllocation(
+		ctx context.Context, sessionTenantID uint64, sessionID string, expected allocation.Assignment,
+	) error
 	UserMachinesByConfig(ctx context.Context, configTenantID uint64, configID string) ([]allocation.UserMachine, error)
 }
 
@@ -729,7 +731,9 @@ func (m *SessionBoundManager) WriteSessionWorkspaceFiles(
 		return err
 	}
 	if sc.user {
-		if err := m.prepareSessionDirs(ctx, handle, DefaultSandboxExecUser, sc.layout.InputDir, sc.layout.OutputDir); err != nil {
+		if err := m.prepareSessionDirs(
+			ctx, handle, DefaultSandboxExecUser, sc.layout.InputDir, sc.layout.OutputDir,
+		); err != nil {
 			return err
 		}
 	} else if err := m.ensureSessionWorkspaceDirs(ctx, handle, SessionOutputRoot); err != nil {
@@ -1940,7 +1944,9 @@ func (m *SessionBoundManager) verifyLive(ctx context.Context, sc sessionScope) e
 // provider call of the operation. It adds this operation's member to the
 // exemptions already on ctx (a turn's own members), never a member guessed
 // from the session id (C6). Session-mode scopes pass through untouched.
-func (m *SessionBoundManager) admitUser(ctx context.Context, sc sessionScope, kind string) (context.Context, func(), error) {
+func (m *SessionBoundManager) admitUser(
+	ctx context.Context, sc sessionScope, kind string,
+) (context.Context, func(), error) {
 	if !sc.user {
 		return ctx, func() {}, nil
 	}
@@ -2034,7 +2040,9 @@ func (m *SessionBoundManager) acquireExclusive(
 // Use the returned context for the exclusive work; it is cancelled with
 // admission.ErrLeaseLost if the window is lost. Call the function to end the
 // window. Session-mode sessions get ctx back unchanged.
-func (m *SessionBoundManager) AcquireSessionExclusive(ctx context.Context, sessionID string) (context.Context, func(), error) {
+func (m *SessionBoundManager) AcquireSessionExclusive(
+	ctx context.Context, sessionID string,
+) (context.Context, func(), error) {
 	return m.acquireSessionExclusive(ctx, sessionID, m.admissionWait)
 }
 
@@ -2082,7 +2090,9 @@ func (m *SessionBoundManager) acquireSessionExclusive(
 // HoldSessionOperation registers a long-lived operation (desktop relay) of
 // sessionID; ctx is cancelled if the lease is lost. A no-op for per-session
 // machines.
-func (m *SessionBoundManager) HoldSessionOperation(ctx context.Context, sessionID, kind string) (context.Context, func(), error) {
+func (m *SessionBoundManager) HoldSessionOperation(
+	ctx context.Context, sessionID, kind string,
+) (context.Context, func(), error) {
 	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
 		return nil, nil, err

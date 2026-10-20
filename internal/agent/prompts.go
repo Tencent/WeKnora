@@ -398,7 +398,8 @@ func formatToolGuidanceForMode(names []string, skillInstallMode bool, layout san
 			if root != "" && input != "" && output != "" {
 				b.WriteString("Session workspace: " + root + ". Preserve uploaded originals in " + input + ". ")
 				b.WriteString(output + " is the only directory collected for download, " +
-					"so it takes finished deliverables only; keep drafts and intermediate files in another directory under " +
+					"so it takes finished deliverables only; " +
+					"keep drafts and intermediate files in another directory under " +
 					root + ". Commands start from " + root + " unless work_dir names a subdirectory. " +
 					"Your other conversations share this machine under /workspace/sessions; " +
 					"do not read, modify or delete them. Installed packages are shared with those conversations.\n")

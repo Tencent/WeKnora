@@ -21,15 +21,15 @@ import (
 )
 
 var (
-	// ErrSharedSandbox: the session lives on its owner's shared machine, so
-	// destroying "its" sandbox would destroy every sibling session's
+	// ErrSharedSandbox is returned when the session lives on its owner's shared
+	// machine, so destroying its sandbox would destroy every sibling session's
 	// workspace. Delete the session workspace instead.
 	ErrSharedSandbox = errors.New("sandbox: session shares its owner's machine")
-	// ErrSessionWorkspaceBusy: the session's workspace is held exclusively,
-	// or has operations that an exclusive request must not cut off.
+	// ErrSessionWorkspaceBusy is returned when the session's workspace is held
+	// exclusively, or has operations that an exclusive request must not cut off.
 	ErrSessionWorkspaceBusy = errors.New("sandbox: session workspace is busy")
-	// ErrUserAllocationRejected: a stored user-mode assignment whose owner
-	// identity is not (or no longer) eligible to share a machine.
+	// ErrUserAllocationRejected is returned when a stored user-mode assignment's
+	// owner identity is not, or is no longer, eligible to share a machine.
 	ErrUserAllocationRejected = errors.New("sandbox: user-mode allocation rejected for this owner")
 )
 
