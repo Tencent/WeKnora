@@ -14498,7 +14498,7 @@ paths:
         tool_approval 为 {approved: bool, modified_args?: object, reason?: string, allow_in_session?: bool}；
         page_action 为 {declined?, error?, location?, snapshot?, applied?: [{ref, label?, summary?}],
         stayed?, return_path?}。
-        返回 resumed=true 表示运行已挂起并在本次回答后恢复，客户端需重新接入该消息的事件流
+        返回 resumed=true 表示挂起的运行已请求恢复（自动化由调度器恢复），客户端需携带 resume_pending_id 重新接入该消息的事件流
       parameters:
       - description: 交互 ID（事件中的 pending_id）
         in: path
@@ -26448,6 +26448,10 @@ paths:
         name: message_id
         required: true
         type: string
+      - description: 等待此审批恢复后的事件流
+        in: query
+        name: resume_pending_id
+        type: string
       - default: handle
         description: 文件引用形式，public 返回可加载直链
         enum:
@@ -26465,6 +26469,10 @@ paths:
             type: string
         "404":
           description: 会话或消息不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: 审批恢复后的事件流尚未就绪
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:

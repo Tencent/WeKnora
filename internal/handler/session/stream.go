@@ -26,9 +26,11 @@ import (
 // @Produce      text/event-stream
 // @Param        session_id     path      string  true   "会话ID"
 // @Param        message_id     query     string  true   "消息ID"
+// @Param        resume_pending_id query  string  false  "等待此审批恢复后的事件流"
 // @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
 // @Success      200            {string}  string  "SSE 事件流"
 // @Failure      404         {object}  errors.AppError         "会话或消息不存在"
+// @Failure      409         {object}  errors.AppError         "审批恢复后的事件流尚未就绪"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /sessions/continue-stream/{session_id} [get]
@@ -127,6 +129,23 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 			"error":   "No stream events found",
 		})
 		return
+	}
+
+	// A scheduler may not have reset the previous segment yet. Never replay
+	// its terminal event as if the just-approved continuation had completed.
+	if pendingID := c.Query("resume_pending_id"); pendingID != "" && !message.IsCompleted {
+		ready := false
+		for _, evt := range events {
+			if (evt.Type == types.ResponseTypeAgentQuery && evt.Data["resume_pending_id"] == pendingID) ||
+				(evt.Type == types.ResponseTypeRunResumed && evt.Data["pending_id"] == pendingID) {
+				ready = true
+				break
+			}
+		}
+		if !ready {
+			c.JSON(http.StatusConflict, gin.H{"success": false, "error": "The resumed stream is not ready yet"})
+			return
+		}
 	}
 
 	logger.Infof(

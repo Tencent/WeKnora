@@ -661,6 +661,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 			return collaboration.StopPrompt(ctx, p)
 		}
 		mcp.SetRunResumer(sessions)
+		mcp.SetScheduledPromptRouter(automations.HandlesPrompt)
 		collaboration.Runtime.Start(context.Background())
 		automations.Start(context.Background())
 	}))

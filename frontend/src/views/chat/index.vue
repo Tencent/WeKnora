@@ -1682,7 +1682,7 @@ const resumeSuspendedRun = async (pendingId) => {
     currentAssistantMessageId.value = resumeId;
     attachingResumedRun = true;
     try {
-        for (let attempt = 0; attempt < 10; attempt++) {
+        for (let attempt = 0; attempt < 60; attempt++) {
             await new Promise((resolve) => setTimeout(resolve, 500));
             if (session_id.value !== sessionId) return;
             await startStream({
@@ -1690,6 +1690,7 @@ const resumeSuspendedRun = async (pendingId) => {
                 query: resumeId,
                 method: 'GET',
                 url: '/api/v1/sessions/continue-stream',
+                resume_pending_id: pendingId,
             });
             if (!error.value) return;
         }

@@ -269,7 +269,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "回答 Agent 运行中发起的交互（ask_user 提问、工具审批，或由浏览器自动应答的页面读写）。\nkind 须与交互一致，response 为该类型的回答 JSON（不接受未知字段）：\nask_user 为 {selected?, values?, text?, declined?}；\ntool_approval 为 {approved: bool, modified_args?: object, reason?: string, allow_in_session?: bool}；\npage_action 为 {declined?, error?, location?, snapshot?, applied?: [{ref, label?, summary?}],\nstayed?, return_path?}。\n返回 resumed=true 表示运行已挂起并在本次回答后恢复，客户端需重新接入该消息的事件流",
+                "description": "回答 Agent 运行中发起的交互（ask_user 提问、工具审批，或由浏览器自动应答的页面读写）。\nkind 须与交互一致，response 为该类型的回答 JSON（不接受未知字段）：\nask_user 为 {selected?, values?, text?, declined?}；\ntool_approval 为 {approved: bool, modified_args?: object, reason?: string, allow_in_session?: bool}；\npage_action 为 {declined?, error?, location?, snapshot?, applied?: [{ref, label?, summary?}],\nstayed?, return_path?}。\n返回 resumed=true 表示挂起的运行已请求恢复（自动化由调度器恢复），客户端需携带 resume_pending_id 重新接入该消息的事件流",
                 "consumes": [
                     "application/json"
                 ],
@@ -17769,6 +17769,12 @@
                         "required": true
                     },
                     {
+                        "type": "string",
+                        "description": "等待此审批恢复后的事件流",
+                        "name": "resume_pending_id",
+                        "in": "query"
+                    },
+                    {
                         "enum": [
                             "handle",
                             "public"
@@ -17789,6 +17795,12 @@
                     },
                     "404": {
                         "description": "会话或消息不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "审批恢复后的事件流尚未就绪",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
