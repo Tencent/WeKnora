@@ -72,7 +72,9 @@ func (c *WorkspaceCleaner) machineOps(ctx context.Context, m allocation.UserMach
 // from directory cleanup. machineOps stays the narrower assert so a manager
 // that can delete directories still can, before it learns how to reclaim.
 type userMachineReclaimer interface {
-	ReclaimUserMachine(ctx context.Context, machine allocation.UserMachine, check func(context.Context) (bool, error)) (bool, error)
+	ReclaimUserMachine(
+		ctx context.Context, machine allocation.UserMachine, check func(context.Context) (bool, error),
+	) (bool, error)
 }
 
 func (c *WorkspaceCleaner) reclaimOps(ctx context.Context, m allocation.UserMachine) (userMachineReclaimer, error) {
@@ -82,7 +84,8 @@ func (c *WorkspaceCleaner) reclaimOps(ctx context.Context, m allocation.UserMach
 	}
 	reclaimer, ok := ops.(userMachineReclaimer)
 	if !ok {
-		return nil, fmt.Errorf("sandboxalloc: config %d/%s does not reclaim user machines", m.ConfigTenantID, m.ConfigID)
+		return nil, fmt.Errorf("sandboxalloc: config %d/%s does not reclaim user machines",
+			m.ConfigTenantID, m.ConfigID)
 	}
 	return reclaimer, nil
 }
@@ -215,7 +218,9 @@ func (c *WorkspaceCleaner) ReclaimOwner(ctx context.Context, ownerID string) {
 }
 
 // OwnerMachines lists ownerID's machines in one tenant (0 = every tenant).
-func (c *WorkspaceCleaner) OwnerMachines(ctx context.Context, ownerTenantID uint64, ownerID string) ([]allocation.UserMachine, error) {
+func (c *WorkspaceCleaner) OwnerMachines(
+	ctx context.Context, ownerTenantID uint64, ownerID string,
+) ([]allocation.UserMachine, error) {
 	rows, err := c.svc.repo.ListUserMachinesByOwner(ctx, ownerTenantID, ownerID)
 	if err != nil {
 		return nil, err
@@ -273,6 +278,14 @@ func (c *WorkspaceCleaner) destroyIfEmpty(ctx context.Context, m allocation.User
 	}
 	if err != nil || !ok {
 		return false, err
+	}
+	if lock == nil {
+		// The manager reported the machine reclaimable without ever running
+		// the check that takes its row lock; nothing was provably deleted,
+		// so no registry row may be dropped.
+		return false, fmt.Errorf(
+			"sandboxalloc: manager of config %d/%s skipped the reclaim check",
+			m.ConfigTenantID, m.ConfigID)
 	}
 	deleted, delErr := lock.CommitDelete()
 	if delErr != nil {

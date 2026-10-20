@@ -50,9 +50,13 @@ type UserMachineGC struct {
 
 // NewUserMachineGC wires the GC. A nil redis client runs unlocked, which is
 // only correct for a single process (user mode is never enabled without Redis).
-func NewUserMachineGC(svc *Service, cleaner *WorkspaceCleaner, configs ConfigReader, client redis.UniversalClient) *UserMachineGC {
-	return &UserMachineGC{svc: svc, cleaner: cleaner, configs: configs, redis: client,
-		now: func() time.Time { return time.Now().UTC() }, batch: gcBatch, maxRun: gcMaxPerRun}
+func NewUserMachineGC(
+	svc *Service, cleaner *WorkspaceCleaner, configs ConfigReader, client redis.UniversalClient,
+) *UserMachineGC {
+	return &UserMachineGC{
+		svc: svc, cleaner: cleaner, configs: configs, redis: client,
+		now: func() time.Time { return time.Now().UTC() }, batch: gcBatch, maxRun: gcMaxPerRun,
+	}
 }
 
 // RunOnce performs one scan unless another replica holds the lock. The lock
@@ -82,7 +86,8 @@ func (g *UserMachineGC) RunOnce(ctx context.Context) (GCReport, error) {
 			case <-scanCtx.Done():
 				return
 			case <-t.C:
-				if renewed, err := redislock.Renew(scanCtx, g.redis, UserMachineGCLockKey, token, gcLockLease); err != nil || !renewed {
+				renewed, err := redislock.Renew(scanCtx, g.redis, UserMachineGCLockKey, token, gcLockLease)
+				if err != nil || !renewed {
 					cancel()
 					return
 				}
@@ -178,6 +183,13 @@ func (g *UserMachineGC) reclaimCandidate(ctx context.Context, row *types.Sandbox
 		logger.Warnf(ctx, "[sandbox-gc] reclaim machine %s: %v", digestPrefix(digest), err)
 	case !ok:
 		report.Busy++
+	case lock == nil:
+		// The manager reported the machine reclaimable without ever running
+		// the check that takes its row lock; nothing was provably deleted,
+		// so the registry row stays for the next scan.
+		report.Failed++
+		logger.Warnf(ctx, "[sandbox-gc] reclaim machine %s: manager skipped the reclaim check",
+			digestPrefix(digest))
 	default:
 		deleted, delErr := lock.CommitDelete()
 		if delErr != nil {
