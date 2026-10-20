@@ -31,10 +31,22 @@ func TestDecideMatrix(t *testing.T) {
 	}{
 		{"web user shares", func(in *DecideInput) { in.Owner = web }, ModeUser, ReasonNone},
 		{"signed external user shares", func(in *DecideInput) { in.Owner = ext }, ModeUser, ReasonNone},
-		{"direct external user shares", func(in *DecideInput) { in.Owner = ext; in.Owner.Source = SourceAPIDirectHeader }, ModeUser, ReasonNone},
-		{"session config never shares", func(in *DecideInput) { in.Owner = web; in.ConfigMode = ModeSession }, ModeSession, ReasonNone},
-		{"maintenance first", func(in *DecideInput) { in.Owner = web; in.Purpose = PurposeMaintenance }, ModeSession, ReasonMaintenanceDedicated},
-		{"gate off", func(in *DecideInput) { in.Owner = web; in.UserModeAvailable = false }, ModeSession, ReasonUserModeUnavailable},
+		{"direct external user shares", func(in *DecideInput) {
+			in.Owner = ext
+			in.Owner.Source = SourceAPIDirectHeader
+		}, ModeUser, ReasonNone},
+		{"session config never shares", func(in *DecideInput) {
+			in.Owner = web
+			in.ConfigMode = ModeSession
+		}, ModeSession, ReasonNone},
+		{"maintenance first", func(in *DecideInput) {
+			in.Owner = web
+			in.Purpose = PurposeMaintenance
+		}, ModeSession, ReasonMaintenanceDedicated},
+		{"gate off", func(in *DecideInput) {
+			in.Owner = web
+			in.UserModeAvailable = false
+		}, ModeSession, ReasonUserModeUnavailable},
 		{"tenant api key", func(in *DecideInput) {
 			in.Owner = Owner{TenantID: 7, ID: "api_tenant_key:7:3", Kind: KindAPITenantKey, Source: SourceAPITenantKey}
 		}, ModeSession, ReasonSharedAPIKey},
@@ -44,15 +56,38 @@ func TestDecideMatrix(t *testing.T) {
 		{"mcp endpoint", func(in *DecideInput) {
 			in.Owner = Owner{TenantID: 7, ID: "mcp_endpoint:7:e", Kind: KindMCPEndpoint, Source: SourceMCPEndpoint}
 		}, ModeSession, ReasonSharedMCPEndpoint},
-		{"embed", func(in *DecideInput) { in.Owner = Owner{TenantID: 7, ID: "embed_session:7:c:s", Kind: KindEmbed} }, ModeSession, ReasonChannelIdentity},
-		{"im", func(in *DecideInput) { in.Owner = Owner{TenantID: 7, ID: "x", Kind: KindIM} }, ModeSession, ReasonChannelIdentity},
-		{"empty owner", func(in *DecideInput) { in.Owner = Owner{TenantID: 7} }, ModeSession, ReasonOwnerIdentityUnverified},
-		{"web without web source", func(in *DecideInput) { in.Owner = web; in.Owner.Source = SourceInternal }, ModeSession, ReasonOwnerIdentityUnverified},
-		{"external with unknown source", func(in *DecideInput) { in.Owner = ext; in.Owner.Source = SourceUnknown }, ModeSession, ReasonOwnerIdentityUnverified},
-		{"unknown kind", func(in *DecideInput) { in.Owner = Owner{TenantID: 7, ID: "u", Source: SourceWeb} }, ModeSession, ReasonOwnerIdentityUnverified},
-		{"owner with braces", func(in *DecideInput) { in.Owner = web; in.Owner.ID = "u{1}" }, ModeSession, ReasonOwnerIdentityInvalid},
-		{"owner too long", func(in *DecideInput) { in.Owner = web; in.Owner.ID = strings.Repeat("a", 513) }, ModeSession, ReasonOwnerIdentityInvalid},
-		{"session id not uuid", func(in *DecideInput) { in.Owner = web; in.SessionID = "abc" }, ModeSession, ReasonSessionIDNotUUID},
+		{"embed", func(in *DecideInput) {
+			in.Owner = Owner{TenantID: 7, ID: "embed_session:7:c:s", Kind: KindEmbed}
+		}, ModeSession, ReasonChannelIdentity},
+		{"im", func(in *DecideInput) {
+			in.Owner = Owner{TenantID: 7, ID: "x", Kind: KindIM}
+		}, ModeSession, ReasonChannelIdentity},
+		{"empty owner", func(in *DecideInput) {
+			in.Owner = Owner{TenantID: 7}
+		}, ModeSession, ReasonOwnerIdentityUnverified},
+		{"web without web source", func(in *DecideInput) {
+			in.Owner = web
+			in.Owner.Source = SourceInternal
+		}, ModeSession, ReasonOwnerIdentityUnverified},
+		{"external with unknown source", func(in *DecideInput) {
+			in.Owner = ext
+			in.Owner.Source = SourceUnknown
+		}, ModeSession, ReasonOwnerIdentityUnverified},
+		{"unknown kind", func(in *DecideInput) {
+			in.Owner = Owner{TenantID: 7, ID: "u", Source: SourceWeb}
+		}, ModeSession, ReasonOwnerIdentityUnverified},
+		{"owner with braces", func(in *DecideInput) {
+			in.Owner = web
+			in.Owner.ID = "u{1}"
+		}, ModeSession, ReasonOwnerIdentityInvalid},
+		{"owner too long", func(in *DecideInput) {
+			in.Owner = web
+			in.Owner.ID = strings.Repeat("a", 513)
+		}, ModeSession, ReasonOwnerIdentityInvalid},
+		{"session id not uuid", func(in *DecideInput) {
+			in.Owner = web
+			in.SessionID = "abc"
+		}, ModeSession, ReasonSessionIDNotUUID},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -139,7 +139,9 @@ func (p *SessionSandboxPinner) placeAndResolve(
 	if winner.ConfigID == candidate.ConfigID && winner.TenantOr(sessionTenant) == candidate.TenantOr(sessionTenant) {
 		return candidateMgr, winner, nil
 	}
-	mgr, err := resolveTenantSandboxForConfig(ctx, resolver, fallback, winner.TenantOr(sessionTenant), winner.ConfigID, policy)
+	mgr, err := resolveTenantSandboxForConfig(
+		ctx, resolver, fallback, winner.TenantOr(sessionTenant), winner.ConfigID, policy,
+	)
 	return mgr, winner, err
 }
 

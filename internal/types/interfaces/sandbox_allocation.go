@@ -8,12 +8,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// ErrPlacementConflict: the session's pin changed between the caller's read
-// and the placement transaction. Re-read the session and decide again.
+// ErrPlacementConflict is returned when the session's pin changed between the
+// caller's read and the placement transaction. Re-read the session and decide again.
 var ErrPlacementConflict = errors.New("sandbox placement conflict")
 
-// ErrSessionRetired: the session is being deleted (or its owner was); it may
-// never get a sandbox placement again.
+// ErrSessionRetired is returned when the session is being deleted (or its
+// owner was). It may never get a sandbox placement again.
 var ErrSessionRetired = errors.New("sandbox: session is retired")
 
 // RetiredSession is one session's outcome of RetireSessions. Assignment is
@@ -39,6 +39,7 @@ type PlacementPin struct {
 	TenantID uint64
 }
 
+// SandboxAllocationRepository persists session placements and shared machines.
 type SandboxAllocationRepository interface {
 	// GetAssignment returns the session's row, tombstones included.
 	GetAssignment(ctx context.Context, sessionID string) (*types.SessionSandboxAssignment, error)
@@ -62,12 +63,18 @@ type SandboxAllocationRepository interface {
 	RetireSessions(ctx context.Context, sessionIDs []string, at time.Time) ([]RetiredSession, error)
 	HasSandboxCheckpoint(ctx context.Context, sessionID string) (bool, error)
 
-	ListUserMachinesByConfig(ctx context.Context, configTenantID uint64, configID string) ([]*types.SandboxUserMachine, error)
-	ListUserMachinesByOwner(ctx context.Context, ownerTenantID uint64, ownerID string) ([]*types.SandboxUserMachine, error)
+	ListUserMachinesByConfig(
+		ctx context.Context, configTenantID uint64, configID string,
+	) ([]*types.SandboxUserMachine, error)
+	ListUserMachinesByOwner(
+		ctx context.Context, ownerTenantID uint64, ownerID string,
+	) ([]*types.SandboxUserMachine, error)
 	// ListEmptyUserMachines pages the machines empty since before emptyBefore
 	// in (empty_since, machine_digest) order, strictly after the cursor, so a
 	// candidate that is skipped never hides the ones behind it.
-	ListEmptyUserMachines(ctx context.Context, emptyBefore time.Time, after EmptyMachineCursor, limit int) ([]*types.SandboxUserMachine, error)
+	ListEmptyUserMachines(
+		ctx context.Context, emptyBefore time.Time, after EmptyMachineCursor, limit int,
+	) ([]*types.SandboxUserMachine, error)
 	GetUserMachine(ctx context.Context, digest string) (*types.SandboxUserMachine, error)
 	CountLiveAssignments(ctx context.Context, digest string) (int64, error)
 	// DeleteUserMachineIfEmptySince drops the registry row only while it

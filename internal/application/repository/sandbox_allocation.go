@@ -23,7 +23,7 @@ func NewSandboxAllocationRepository(db *gorm.DB) interfaces.SandboxAllocationRep
 // forUpdate adds a row lock where the dialect has one. SQLite serializes
 // writers already.
 func forUpdate(tx *gorm.DB) *gorm.DB {
-	switch tx.Dialector.Name() {
+	switch tx.Name() {
 	case "postgres", "mysql":
 		return tx.Clauses(clause.Locking{Strength: "UPDATE"})
 	default:
@@ -31,7 +31,9 @@ func forUpdate(tx *gorm.DB) *gorm.DB {
 	}
 }
 
-func (r *sandboxAllocationRepository) GetAssignment(ctx context.Context, sessionID string) (*types.SessionSandboxAssignment, error) {
+func (r *sandboxAllocationRepository) GetAssignment(
+	ctx context.Context, sessionID string,
+) (*types.SessionSandboxAssignment, error) {
 	return getAssignment(r.db.WithContext(ctx), sessionID)
 }
 
@@ -50,7 +52,9 @@ func getAssignment(tx *gorm.DB, sessionID string) (*types.SessionSandboxAssignme
 // InsertSandboxAssignmentTx inserts a unless the session already has one, and
 // for a user-mode row registers (or re-opens) machine. The fork path shares it
 // so a forked session and its assignment commit together.
-func InsertSandboxAssignmentTx(tx *gorm.DB, a *types.SessionSandboxAssignment, machine *types.SandboxUserMachine) (bool, error) {
+func InsertSandboxAssignmentTx(
+	tx *gorm.DB, a *types.SessionSandboxAssignment, machine *types.SandboxUserMachine,
+) (bool, error) {
 	if (a.MachineDigest == "") != (machine == nil) || (machine != nil && machine.MachineDigest != a.MachineDigest) {
 		return false, errors.New("sandbox assignment and its machine disagree")
 	}
@@ -343,7 +347,9 @@ func (r *sandboxAllocationRepository) ListEmptyUserMachines(
 	return rows, err
 }
 
-func (r *sandboxAllocationRepository) GetUserMachine(ctx context.Context, digest string) (*types.SandboxUserMachine, error) {
+func (r *sandboxAllocationRepository) GetUserMachine(
+	ctx context.Context, digest string,
+) (*types.SandboxUserMachine, error) {
 	var m types.SandboxUserMachine
 	err := r.db.WithContext(ctx).Where("machine_digest = ?", digest).Take(&m).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -401,7 +407,9 @@ func (r *sandboxAllocationRepository) CompleteWorkspaceCleanup(ctx context.Conte
 		Where("session_id = ?", sessionID).Update("cleanup_due_at", nil).Error
 }
 
-func (r *sandboxAllocationRepository) RetryWorkspaceCleanup(ctx context.Context, sessionID string, next time.Time) error {
+func (r *sandboxAllocationRepository) RetryWorkspaceCleanup(
+	ctx context.Context, sessionID string, next time.Time,
+) error {
 	// Only a cleanup still pending moves; a completed one stays done.
 	return r.db.WithContext(ctx).Model(&types.SessionSandboxAssignment{}).
 		Where("session_id = ? AND cleanup_due_at IS NOT NULL", sessionID).

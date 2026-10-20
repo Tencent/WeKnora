@@ -42,21 +42,27 @@ func newAllocationRepo(t *testing.T) (*sandboxAllocationRepository, *gorm.DB) {
 
 func seedSession(t *testing.T, db *gorm.DB, id string, pin interfaces.PlacementPin) {
 	t.Helper()
-	s := &types.Session{ID: id, TenantID: 7, UserID: "u-1",
-		SandboxConfigID: pin.ConfigID, SandboxConfigTenantID: pin.TenantID}
+	s := &types.Session{
+		ID: id, TenantID: 7, UserID: "u-1",
+		SandboxConfigID: pin.ConfigID, SandboxConfigTenantID: pin.TenantID,
+	}
 	require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(s).Error)
 }
 
 func userAssignment(sessionID, digest string) *types.SessionSandboxAssignment {
-	return &types.SessionSandboxAssignment{SessionID: sessionID, ConfigTenantID: 7, ConfigID: "cfg", MachineDigest: digest}
+	return &types.SessionSandboxAssignment{
+		SessionID: sessionID, ConfigTenantID: 7, ConfigID: "cfg", MachineDigest: digest,
+	}
 }
 
 func userMachine(digest string) *types.SandboxUserMachine {
 	if digest == "" {
 		return nil
 	}
-	return &types.SandboxUserMachine{MachineDigest: digest, OwnerTenantID: 7, OwnerID: "u-1",
-		ConfigTenantID: 7, ConfigID: "cfg"}
+	return &types.SandboxUserMachine{
+		MachineDigest: digest, OwnerTenantID: 7, OwnerID: "u-1",
+		ConfigTenantID: 7, ConfigID: "cfg",
+	}
 }
 
 // claim places a with the machine its digest names.
@@ -421,13 +427,13 @@ func firstIndexContaining(sqls []string, needle string) int {
 // ClaimPlacement locks the session row before it writes the machine row.
 func TestClaimPlacementTouchesSessionBeforeMachine(t *testing.T) {
 	repo, db := newAllocationRepo(t)
-	cap := &sqlCapture{Interface: logger.Discard}
-	db.Logger = cap
+	captured := &sqlCapture{Interface: logger.Discard}
+	db.Logger = captured
 	seedSession(t, db, "s-1", interfaces.PlacementPin{})
-	cap.reset()
+	captured.reset()
 	_, err := claim(context.Background(), repo, userAssignment("s-1", "d-1"), interfaces.PlacementPin{})
 	require.NoError(t, err)
-	sqls := cap.snapshot()
+	sqls := captured.snapshot()
 	sessionIdx := firstIndexContaining(sqls, "FROM `sessions`")
 	machineIdx := firstIndexContaining(sqls, "sandbox_user_machines")
 	require.GreaterOrEqual(t, sessionIdx, 0)
@@ -443,13 +449,13 @@ func TestClaimPlacementLocksTheMachineBeforeInsertingTheAssignment(t *testing.T)
 	_, err := claim(ctx, repo, userAssignment("s-0", "d-1"), interfaces.PlacementPin{})
 	require.NoError(t, err)
 
-	cap := &sqlCapture{Interface: logger.Discard}
-	db.Logger = cap
+	captured := &sqlCapture{Interface: logger.Discard}
+	db.Logger = captured
 	seedSession(t, db, "s-1", interfaces.PlacementPin{})
-	cap.reset()
+	captured.reset()
 	_, err = claim(ctx, repo, userAssignment("s-1", "d-1"), interfaces.PlacementPin{})
 	require.NoError(t, err)
-	sqls := cap.snapshot()
+	sqls := captured.snapshot()
 	lock := -1
 	for i, sql := range sqls {
 		if strings.Contains(sql, "SELECT") && strings.Contains(sql, "FROM `sandbox_user_machines`") {
@@ -466,18 +472,18 @@ func TestClaimPlacementLocksTheMachineBeforeInsertingTheAssignment(t *testing.T)
 // digest in sorted order — the same sessions-then-machines order as ClaimPlacement.
 func TestRetireLocksSessionsBeforeMachines(t *testing.T) {
 	repo, db := newAllocationRepo(t)
-	cap := &sqlCapture{Interface: logger.Discard}
-	db.Logger = cap
+	captured := &sqlCapture{Interface: logger.Discard}
+	db.Logger = captured
 	ctx := context.Background()
 	for _, pair := range []struct{ id, digest string }{{"s-2", "d-b"}, {"s-1", "d-a"}} {
 		seedSession(t, db, pair.id, interfaces.PlacementPin{})
 		_, err := claim(ctx, repo, userAssignment(pair.id, pair.digest), interfaces.PlacementPin{})
 		require.NoError(t, err)
 	}
-	cap.reset()
+	captured.reset()
 	_, err := repo.RetireSessions(ctx, []string{"s-2", "s-1"}, time.Now().UTC())
 	require.NoError(t, err)
-	sqls := cap.snapshot()
+	sqls := captured.snapshot()
 
 	var sessionLocks, machineLocks []string
 	lastSessionLock := -1
@@ -575,7 +581,9 @@ func TestSandboxAllocationOnTheMigratedSQLiteSchema(t *testing.T) {
 	m, err := repo.GetUserMachine(ctx, "d-1")
 	require.NoError(t, err)
 	require.NotNil(t, m.EmptySince)
-	empty, err := repo.ListEmptyUserMachines(ctx, time.Now().UTC().Add(time.Second), interfaces.EmptyMachineCursor{}, 10)
+	empty, err := repo.ListEmptyUserMachines(
+		ctx, time.Now().UTC().Add(time.Second), interfaces.EmptyMachineCursor{}, 10,
+	)
 	require.NoError(t, err)
 	require.Len(t, empty, 1)
 	deleted, err := repo.DeleteUserMachineIfEmptySince(ctx, "d-1", *m.EmptySince)

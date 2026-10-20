@@ -24,6 +24,7 @@ type SessionSandboxAssignment struct {
 	CleanupDueAt *time.Time `gorm:"column:cleanup_due_at"`
 }
 
+// TableName is the assignments table.
 func (SessionSandboxAssignment) TableName() string { return "session_sandbox_assignments" }
 
 // IsTombstone reports a row written only to retire a session that was never
@@ -43,4 +44,5 @@ type SandboxUserMachine struct {
 	EmptySince     *time.Time `gorm:"column:empty_since"`
 }
 
+// TableName is the shared-machine registry table.
 func (SandboxUserMachine) TableName() string { return "sandbox_user_machines" }

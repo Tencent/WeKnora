@@ -109,7 +109,9 @@ func TestRedisRenewNeverResurrectsAnExpiredMember(t *testing.T) {
 
 func TestRedisLeaseIsLostWhenRedisIsUnreachable(t *testing.T) {
 	reg, mini := newRedis(t)
-	lease, err := reg.Hold(context.Background(), MachineScope("d-1"), SessionMember("s", "shell", "1"), 300*time.Millisecond)
+	lease, err := reg.Hold(
+		context.Background(), MachineScope("d-1"), SessionMember("s", "shell", "1"), 300*time.Millisecond,
+	)
 	require.NoError(t, err)
 	defer lease.Release()
 	mini.Close()
@@ -130,6 +132,7 @@ func (h stallHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 		return next(ctx, cmd)
 	}
 }
+
 func (h stallHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
 	return next
 }

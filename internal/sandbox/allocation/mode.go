@@ -33,6 +33,8 @@ func ParseMode(raw string) (Mode, error) {
 // Purpose is why a session uses a sandbox.
 type Purpose string
 
+// Placement purposes. PurposeChat is an ordinary session.
+// PurposeMaintenance is a skill-install session and stays on its own machine.
 const (
 	PurposeChat        Purpose = "chat"
 	PurposeMaintenance Purpose = "maintenance"
@@ -42,6 +44,7 @@ const (
 // values are stable, non-sensitive tokens safe to show an admin.
 type FallbackReason string
 
+// Reasons a placement stayed on a per-session machine.
 const (
 	ReasonNone                    FallbackReason = ""
 	ReasonMaintenanceDedicated    FallbackReason = "MAINTENANCE_DEDICATED"

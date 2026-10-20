@@ -21,6 +21,7 @@ func NewMemory() *MemoryRegistry {
 	return &MemoryRegistry{members: map[Scope]map[string]*lease{}, barriers: map[Scope]*barrier{}}
 }
 
+// Hold registers member until Release. The memory registry does not expire on its own.
 func (r *MemoryRegistry) Hold(_ context.Context, scope Scope, member string, _ time.Duration) (Lease, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -44,6 +45,7 @@ func (r *MemoryRegistry) Hold(_ context.Context, scope Scope, member string, _ t
 	return l, nil
 }
 
+// ActiveExcept counts members of scope other than except.
 func (r *MemoryRegistry) ActiveExcept(_ context.Context, scope Scope, except ...string) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -60,6 +62,7 @@ func (r *MemoryRegistry) ActiveExcept(_ context.Context, scope Scope, except ...
 	return n, nil
 }
 
+// Close stops new holds on scope until the barrier is released.
 func (r *MemoryRegistry) Close(_ context.Context, scope Scope, _ time.Duration) (Barrier, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

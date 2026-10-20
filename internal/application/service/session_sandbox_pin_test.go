@@ -509,8 +509,10 @@ func TestPinnerReadPrefersTheAssignmentsConfig(t *testing.T) {
 	// The pin column still names the legacy owner tenant; the assignment is authoritative.
 	fx.setPin(t, SandboxPin{ConfigID: "cfg-a"})
 	placer := &recordingPlacer{lookup: map[string]allocation.Assignment{
-		fx.sessionID: {SessionID: fx.sessionID, ConfigTenantID: 9, ConfigID: "cfg-a",
-			Machine: allocation.UserMachine{OwnerTenantID: 7, OwnerID: "u-1", ConfigTenantID: 9, ConfigID: "cfg-a"}},
+		fx.sessionID: {
+			SessionID: fx.sessionID, ConfigTenantID: 9, ConfigID: "cfg-a",
+			Machine: allocation.UserMachine{OwnerTenantID: 7, OwnerID: "u-1", ConfigTenantID: 9, ConfigID: "cfg-a"},
+		},
 	}}
 	fx.pinner.WithPlacer(placer)
 	got, err := fx.pinner.Read(fx.ctx, fx.sessionID)
@@ -521,7 +523,9 @@ func TestPinnerReadPrefersTheAssignmentsConfig(t *testing.T) {
 
 func TestLookupOnlyPathsNeverPlace(t *testing.T) {
 	fx := newPinFixture(t)
-	placer := &recordingPlacer{answer: func(sandboxalloc.PlaceRequest) allocation.Assignment { return allocation.Assignment{} }}
+	placer := &recordingPlacer{answer: func(sandboxalloc.PlaceRequest) allocation.Assignment {
+		return allocation.Assignment{}
+	}}
 	fx.pinner.WithPlacer(placer)
 	_, err := sandboxConfigForExistingSandbox(fx.ctx, fx.pinner, fx.sessionID)
 	require.NoError(t, err)

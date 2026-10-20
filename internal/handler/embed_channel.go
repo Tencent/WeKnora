@@ -686,7 +686,9 @@ func (h *EmbedChannelHandler) ensureEmbedSession(c *gin.Context) error {
 	// as shareable, credential-free URLs. Pinning it here covers both the
 	// `?resource_urls=public` query parameter and a deployment-wide
 	// RESOURCE_URL_MODE=public default.
-	ctx = storageurl.WithForcedHandleMode(types.WithPrincipalAuthSource(types.WithPrincipal(ctx, principal), types.AuthSourceEmbed))
+	ctx = storageurl.WithForcedHandleMode(types.WithPrincipalAuthSource(
+		types.WithPrincipal(ctx, principal), types.AuthSourceEmbed,
+	))
 	c.Request = c.Request.WithContext(ctx)
 	return nil
 }

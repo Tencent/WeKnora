@@ -10,7 +10,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const redisNowLua = `local t = redis.call('TIME'); local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)`
+const redisNowLua = "local t = redis.call('TIME'); " +
+	"local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)"
 
 // KEYS[1] ops zset, KEYS[2] closed flag. ARGV[1] member, ARGV[2] ttl ms.
 var holdScript = redis.NewScript(redisNowLua + `
@@ -71,6 +72,7 @@ func (r *RedisRegistry) key(scope Scope, suffix string) string {
 	return r.prefix + "{" + scope.Tag + "}:" + scope.Name + ":" + suffix
 }
 
+// Hold registers member until Release or until the lease can no longer be renewed.
 func (r *RedisRegistry) Hold(ctx context.Context, scope Scope, member string, ttl time.Duration) (Lease, error) {
 	if ttl <= 0 {
 		ttl = DefaultHoldTTL
@@ -124,6 +126,7 @@ func (r *RedisRegistry) renewLease(ctx context.Context, l *lease, ops string, tt
 	}
 }
 
+// ActiveExcept counts members of scope other than except.
 func (r *RedisRegistry) ActiveExcept(ctx context.Context, scope Scope, except ...string) (int, error) {
 	args := make([]any, len(except))
 	for i, m := range except {
@@ -136,6 +139,7 @@ func (r *RedisRegistry) ActiveExcept(ctx context.Context, scope Scope, except ..
 	return n, nil
 }
 
+// Close stops new holds on scope until the barrier is released.
 func (r *RedisRegistry) Close(ctx context.Context, scope Scope, ttl time.Duration) (Barrier, error) {
 	token, err := redislock.NewToken()
 	if err != nil {

@@ -59,7 +59,8 @@ func selectSessionBindingStore(
 		switch {
 		case requested && !userModeRuntimeReady:
 			logger.Warnf(context.Background(),
-				"[sandbox] %s is set but this build cannot run user-mode sessions yet; user-mode allocation stays disabled",
+				"[sandbox] %s is set but this build cannot run user-mode sessions yet; "+
+					"user-mode allocation stays disabled",
 				allocation.UserModeEnvVar)
 		case requested:
 			logger.Infof(context.Background(), "[sandbox] user-mode allocation enabled (%s)", allocation.UserModeEnvVar)

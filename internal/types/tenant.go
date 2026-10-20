@@ -853,10 +853,11 @@ const (
 )
 
 const (
-	// SandboxAllocationSession and SandboxAllocationUser are the stored
-	// allocation_mode values; allocation.ParseMode reads the same strings.
+	// SandboxAllocationSession is one sandbox per session.
 	SandboxAllocationSession = "session"
-	SandboxAllocationUser    = "user"
+	// SandboxAllocationUser shares one sandbox across a user's sessions.
+	// allocation.ParseMode reads the same strings.
+	SandboxAllocationUser = "user"
 )
 
 // RebuildsExistingOnSkillChange reports whether an install or removal should

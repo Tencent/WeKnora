@@ -2,13 +2,15 @@ package sandbox
 
 import "github.com/Tencent/WeKnora/internal/sandbox/workspace"
 
-// WorkspaceOrigin and WorkspaceLayout live in the workspace subpackage; these
-// aliases keep every existing caller compiling unchanged.
-type (
-	WorkspaceOrigin = workspace.Origin
-	WorkspaceLayout = workspace.Layout
-)
+// WorkspaceOrigin is where a workspace path is rooted. The type lives in the
+// workspace subpackage; this alias keeps existing callers compiling.
+type WorkspaceOrigin = workspace.Origin
 
+// WorkspaceLayout is the set of roots a session may read and write. The type
+// lives in the workspace subpackage; this alias keeps existing callers compiling.
+type WorkspaceLayout = workspace.Layout
+
+// Workspace origins re-exported for callers that do not import the subpackage.
 const (
 	WorkspaceOriginUnspecified  = workspace.OriginUnspecified
 	WorkspaceOriginRemote       = workspace.OriginRemote

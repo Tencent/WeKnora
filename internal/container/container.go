@@ -555,7 +555,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	) *sandboxalloc.Service {
 		return sandboxalloc.New(repo, configs, sessions, sandboxRedisNamespace())
 	}))
-	must(container.Invoke(func(p *service.SessionSandboxPinner, skills *service.TenantSkillService, a *sandboxalloc.Service) {
+	must(container.Invoke(func(
+		p *service.SessionSandboxPinner, skills *service.TenantSkillService, a *sandboxalloc.Service,
+	) {
 		p.WithPlacer(a)
 		skills.WithPlacer(a)
 	}))

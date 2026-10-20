@@ -36,21 +36,33 @@ type Service struct {
 	now       func() time.Time
 }
 
-// ErrMachineUnregistered: a user-mode assignment names a machine whose
-// registry row is gone (its config was deleted). The session cannot run, and
-// must never be mistaken for one with a machine of its own.
+// ErrMachineUnregistered is returned when a user-mode assignment names a
+// machine whose registry row is gone (its config was deleted). The session
+// cannot run, and must never be mistaken for one with a machine of its own.
 var ErrMachineUnregistered = errors.New("sandboxalloc: shared machine is not registered")
 
 // New wires the service. namespace must be the Redis binding namespace.
-func New(repo interfaces.SandboxAllocationRepository, configs ConfigReader, sessions SessionReader, namespace string) *Service {
-	return &Service{repo: repo, configs: configs, sessions: sessions, namespace: namespace,
-		now: func() time.Time { return time.Now().UTC().Truncate(time.Microsecond) }}
+func New(
+	repo interfaces.SandboxAllocationRepository, configs ConfigReader,
+	sessions SessionReader, namespace string,
+) *Service {
+	return &Service{
+		repo: repo, configs: configs, sessions: sessions, namespace: namespace,
+		now: func() time.Time { return time.Now().UTC().Truncate(time.Microsecond) },
+	}
 }
 
-func (s *Service) Namespace() string                            { return s.namespace }
-func (s *Service) Digest(m allocation.UserMachine) string       { return m.Digest(s.namespace) }
+// Namespace is the deployment namespace machine digests use.
+func (s *Service) Namespace() string { return s.namespace }
+
+// Digest is the shared-machine digest of m in this deployment.
+func (s *Service) Digest(m allocation.UserMachine) string { return m.Digest(s.namespace) }
+
+// Repo is the allocation repository.
 func (s *Service) Repo() interfaces.SandboxAllocationRepository { return s.repo }
-func (s *Service) Now() time.Time                               { return s.now() }
+
+// Now is the clock placements and releases use.
+func (s *Service) Now() time.Time { return s.now() }
 
 // PlaceRequest names the session and the config address the caller resolved
 // as its candidate.
@@ -74,7 +86,9 @@ func (s *Service) Place(ctx context.Context, req PlaceRequest) (allocation.Assig
 
 // place is Place that also reports why a placement it recorded differs from
 // the config's mode. The reason is logged, not stored.
-func (s *Service) place(ctx context.Context, req PlaceRequest) (allocation.Assignment, allocation.FallbackReason, error) {
+func (s *Service) place(
+	ctx context.Context, req PlaceRequest,
+) (allocation.Assignment, allocation.FallbackReason, error) {
 	for attempt := 0; attempt < placeAttempts; attempt++ {
 		existing, ok, err := s.Lookup(ctx, req.SessionID)
 		if err != nil {
@@ -269,7 +283,9 @@ func (s *Service) Release(ctx context.Context, sessionID string) (interfaces.Ret
 		return interfaces.RetiredSession{}, err
 	}
 	if len(out) != 1 {
-		return interfaces.RetiredSession{}, fmt.Errorf("sandboxalloc: retiring %s returned %d results", sessionID, len(out))
+		return interfaces.RetiredSession{}, fmt.Errorf(
+			"sandboxalloc: retiring %s returned %d results", sessionID, len(out),
+		)
 	}
 	return out[0], nil
 }

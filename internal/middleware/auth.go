@@ -604,7 +604,9 @@ func attachAPIKeyAuthContext(
 	applyAuthSession(c, session)
 }
 
-func resolveAPIPrincipal(ctx context.Context, tenant *types.Tenant, header http.Header) (types.Principal, string, error) {
+func resolveAPIPrincipal(
+	ctx context.Context, tenant *types.Tenant, header http.Header,
+) (types.Principal, string, error) {
 	tenantID := uint64(0)
 	if tenant != nil {
 		tenantID = tenant.ID

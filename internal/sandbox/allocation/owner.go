@@ -11,6 +11,7 @@ import (
 // OwnerKind classifies who sessions.user_id names.
 type OwnerKind string
 
+// Kinds derived from owner_auth_source and the shape of user_id.
 const (
 	KindUnknown         OwnerKind = ""
 	KindWebUser         OwnerKind = "web_user"
@@ -26,6 +27,7 @@ const (
 // created or its owner was first bound. It is recorded server-side only.
 type AuthSource string
 
+// Sources stamped by the server. SourceUnknown is an empty or legacy row.
 const (
 	SourceUnknown         AuthSource = "unknown"
 	SourceWeb             AuthSource = "web"

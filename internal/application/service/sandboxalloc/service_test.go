@@ -22,8 +22,10 @@ import (
 type fakeConfigs map[string]string // config id -> allocation_mode
 
 func (f fakeConfigs) GetByID(_ context.Context, tenantID uint64, id string) (*types.TenantSandboxConfigEntity, error) {
-	return &types.TenantSandboxConfigEntity{ID: id, TenantID: tenantID,
-		Config: &types.TenantSandboxConfig{AllocationMode: f[id]}}, nil
+	return &types.TenantSandboxConfigEntity{
+		ID: id, TenantID: tenantID,
+		Config: &types.TenantSandboxConfig{AllocationMode: f[id]},
+	}, nil
 }
 
 type testEnv struct {
@@ -63,7 +65,9 @@ func (e *testEnv) place(t *testing.T, sessionID, configID string) allocation.Ass
 	return a
 }
 
-func (e *testEnv) placeWithReason(t *testing.T, sessionID, configID string) (allocation.Assignment, allocation.FallbackReason) {
+func (e *testEnv) placeWithReason(
+	t *testing.T, sessionID, configID string,
+) (allocation.Assignment, allocation.FallbackReason) {
 	t.Helper()
 	a, reason, err := e.svc.place(context.Background(), PlaceRequest{
 		SessionTenantID: 7, SessionID: sessionID, ConfigTenantID: 7, ConfigID: configID,
@@ -138,10 +142,14 @@ func TestPlaceDerivesTheOwnerKindFromItsSource(t *testing.T) {
 	enableUserMode(t)
 	ext, webWithColon, unknown := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	e := newEnv(t, fakeConfigs{"cfg-a": "user"},
-		&types.Session{ID: ext, TenantID: 7, UserID: "api_external_user:7:alice",
-			OwnerAuthSource: types.AuthSourceAPISignedToken},
-		&types.Session{ID: webWithColon, TenantID: 7, UserID: "api_tenant_key:7:3",
-			OwnerAuthSource: types.AuthSourceWeb},
+		&types.Session{
+			ID: ext, TenantID: 7, UserID: "api_external_user:7:alice",
+			OwnerAuthSource: types.AuthSourceAPISignedToken,
+		},
+		&types.Session{
+			ID: webWithColon, TenantID: 7, UserID: "api_tenant_key:7:3",
+			OwnerAuthSource: types.AuthSourceWeb,
+		},
 		&types.Session{ID: unknown, TenantID: 7, UserID: "system-7"})
 
 	require.Equal(t, allocation.ModeUser, e.place(t, ext, "cfg-a").Mode())
@@ -201,13 +209,16 @@ func TestPlaceFallbacks(t *testing.T) {
 	forkRow := webSession(fork)
 	forkRow.ForkBootstrap = &types.ForkBootstrap{SnapshotID: "snap"}
 	e := newEnv(t, fakeConfigs{"cfg-a": "user"},
-		&types.Session{ID: apiKey, TenantID: 7, UserID: "api_tenant_key:7:3",
-			OwnerAuthSource: types.AuthSourceAPITenantKey},
+		&types.Session{
+			ID: apiKey, TenantID: 7, UserID: "api_tenant_key:7:3",
+			OwnerAuthSource: types.AuthSourceAPITenantKey,
+		},
 		legacyRow, maintRow, forkRow)
 
 	require.Equal(t, allocation.ReasonSharedAPIKey, e.reason(t, apiKey, "cfg-a"))
 	got, reason := e.placeWithReason(t, legacy, "cfg-a")
-	require.Equal(t, allocation.ModeSession, got.Mode(), "a session that already has a pin keeps its per-session sandbox")
+	require.Equal(t, allocation.ModeSession, got.Mode(),
+		"a session that already has a pin keeps its per-session sandbox")
 	require.Equal(t, allocation.ReasonLegacySessionSandbox, reason)
 	require.Equal(t, allocation.ReasonMaintenanceDedicated, e.reason(t, maint, "cfg-a"))
 	require.Equal(t, allocation.ReasonLegacySessionSandbox, e.reason(t, fork, "cfg-a"),
