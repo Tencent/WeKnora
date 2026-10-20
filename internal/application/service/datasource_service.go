@@ -790,13 +790,16 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	// Auto-tag: find or create a tag for this data source so synced items are easily identifiable
 	autoTagIDs := s.resolveAutoTagIDs(ctx, ds)
 
+	nonBlockingFailures := 0
 	for _, item := range items {
 		item := item
-		s.applyFetchedItem(withKBActivitySuppressed(ctx), ds, &item, autoTagIDs, result)
+		if s.applyFetchedItem(withKBActivitySuppressed(ctx), ds, &item, autoTagIDs, result) {
+			nonBlockingFailures++
+		}
 	}
 
 	resultJSON, _ := result.ToJSON()
-	if err := allFetchedItemsFailedError(result); err != nil {
+	if err := allFetchedItemsFailedError(result, nonBlockingFailures); err != nil {
 		logger.Errorf(ctx, "data source sync failed while processing fetched items: %v", err)
 		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused)
 		return err
@@ -895,10 +898,12 @@ func fetchFailureSyncError(item *types.FetchedItem, rawMsg string) types.SyncIte
 // updates result counters. It is the shared core of the batch loop and the
 // streaming handler so item classification (deleted / empty / ingest outcome)
 // stays identical across both fetch paths.
+// The return value identifies an explicitly classified oversized download:
+// report the file failure without disabling future scheduled syncs.
 func (s *DataSourceService) applyFetchedItem(
 	ctx context.Context, ds *types.DataSource, item *types.FetchedItem,
 	tagIDs []string, result *types.SyncResult,
-) {
+) (nonBlockingFailure bool) {
 	if item.IsDeleted {
 		if !ds.SyncDeletions {
 			// Sync deletion disabled: neither count nor delete.
@@ -970,6 +975,7 @@ func (s *DataSourceService) applyFetchedItem(
 			logger.Warnf(ctx, "item %q (external_id=%s) fetch failed: %s", item.Title, item.ExternalID, errMsg)
 			result.Failed++
 			recordSyncError(result, fetchFailureSyncError(item, errMsg))
+			return item.Metadata["error_reason_code"] == "dingtalk_document_too_large"
 		} else {
 			logger.Infof(ctx, "skipping item %q (external_id=%s): no content or URL", item.Title, item.ExternalID)
 			result.Skipped++
@@ -999,6 +1005,7 @@ func (s *DataSourceService) applyFetchedItem(
 	} else {
 		result.Created++
 	}
+	return
 }
 
 // streamStartCursor decides which cursor a streaming fetch should resume from.
@@ -1083,6 +1090,8 @@ type streamSyncHandler struct {
 	tagIDs  []string
 	result  *types.SyncResult
 	syncLog *types.SyncLog
+	// Keep an exact count independently of the bounded error sample.
+	nonBlockingFailures int
 }
 
 // Emit ingests one streamed item. A canceled context aborts the stream so the
@@ -1094,7 +1103,9 @@ func (h *streamSyncHandler) Emit(ctx context.Context, item types.FetchedItem) er
 		return err
 	}
 	h.result.Total++
-	h.svc.applyFetchedItem(withKBActivitySuppressed(ctx), h.ds, &item, h.tagIDs, h.result)
+	if h.svc.applyFetchedItem(withKBActivitySuppressed(ctx), h.ds, &item, h.tagIDs, h.result) {
+		h.nonBlockingFailures++
+	}
 	return nil
 }
 
@@ -1214,7 +1225,7 @@ func (s *DataSourceService) processSyncStreaming(
 	}
 
 	resultJSON, _ := result.ToJSON()
-	if err := allFetchedItemsFailedError(result); err != nil {
+	if err := allFetchedItemsFailedError(result, handler.nonBlockingFailures); err != nil {
 		logger.Errorf(ctx, "streaming sync failed while processing fetched items: %v", err)
 		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused)
 		return err
@@ -1311,12 +1322,19 @@ func (s *DataSourceService) updateSyncRunResult(
 		})
 }
 
-func allFetchedItemsFailedError(result *types.SyncResult) error {
+func allFetchedItemsFailedError(result *types.SyncResult, nonBlockingFailures int) error {
 	if result == nil || result.Total == 0 {
 		return nil
 	}
 	if result.Failed != result.Total || result.Created != 0 || result.Updated != 0 ||
 		result.Deleted != 0 || result.Skipped != 0 {
+		return nil
+	}
+	// An oversized file will not recover by replaying the same task. Keep its
+	// failure visible as a partial run and let the connector retain its revision
+	// for a future sync after the file is compressed or split. Any other failure
+	// still follows the existing failure/retry path, even beyond the sample cap.
+	if nonBlockingFailures == result.Failed {
 		return nil
 	}
 

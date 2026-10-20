@@ -1443,6 +1443,7 @@ export default {
     },
     syncError: {
       dingtalk_document_failed: 'DingTalk 문서를 읽을 수 없습니다. 접근 권한을 확인하고 동기화를 다시 시도하세요.',
+      dingtalk_document_too_large: 'DingTalk 파일이 64 MiB 다운로드 제한을 초과하여 이번 동기화에서 건너뛰었습니다. 압축하거나 분할해 주세요.',
       dingtalk_resource_failed: 'DingTalk 리소스를 사용할 수 없습니다. 접근 권한과 선택한 리소스를 확인한 후 다시 시도하세요.',
       deletion_lookup_failed: '삭제 전 항목 조회에 실패했습니다. 서버 로그를 확인하세요',
       deletion_failed: '삭제에 실패했습니다. 서버 로그를 확인하세요',
