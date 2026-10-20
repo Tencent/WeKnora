@@ -169,6 +169,9 @@
             :message="$t('settings.sandbox.sandboxesStillLive', { count: inventory?.sandbox_count ?? 0 })">
             <template #description>
               <p>{{ $t('settings.sandbox.blockedHint') }}</p>
+              <p v-if="inventory?.user_sandbox_count" class="section-help">
+                {{ $t('settings.sandbox.userSandboxesInInventory', { count: inventory.user_sandbox_count }) }}
+              </p>
             </template>
           </t-alert>
         </div>
@@ -198,6 +201,30 @@
           <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.inventoryAgentsTitle') }}</h4>
           <p class="inventory-agents">{{ inventoryAgents.join('、') }}</p>
         </section>
+
+        <section v-if="showUserSandboxes" class="setting-drawer__section inventory-section">
+          <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.userSandboxesTitle') }}</h4>
+          <div class="user-sandbox-table">
+            <t-table
+              row-key="digest"
+              size="small"
+              :data="userSandboxes"
+              :columns="userSandboxColumns"
+              :loading="userSandboxesLoading"
+            >
+              <template #owner="{ row }">
+                {{ row.owner_id || $t('settings.sandbox.userSandboxOwnerOtherWorkspace') }}
+              </template>
+              <template #empty_since="{ row }">{{ formatSandboxTime(row.empty_since) }}</template>
+              <template #reclaim_after="{ row }">{{ formatSandboxTime(row.reclaim_after) }}</template>
+              <template #op="{ row }">
+                <t-button size="small" theme="danger" variant="text" @click="askRelease(row)">
+                  {{ $t('settings.sandbox.userSandboxRelease') }}
+                </t-button>
+              </template>
+            </t-table>
+          </div>
+        </section>
       </t-loading>
 
       <!--
@@ -216,6 +243,20 @@
         </t-popconfirm>
       </template>
     </SettingDrawer>
+
+    <t-dialog
+      v-model:visible="releaseDialogVisible"
+      :header="$t('settings.sandbox.userSandboxRelease')"
+      :confirm-btn="{
+        content: $t('settings.sandbox.userSandboxRelease'),
+        theme: 'danger',
+        loading: releasing,
+      }"
+      :cancel-btn="$t('common.cancel')"
+      @confirm="confirmRelease"
+    >
+      <p class="user-sandbox-release-confirm">{{ $t('settings.sandbox.userSandboxReleaseConfirm') }}</p>
+    </t-dialog>
   </div>
 </template>
 
@@ -230,6 +271,7 @@ import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { getSession } from '@/api/chat/index'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
+import { formatStringDate } from '@/utils'
 import { docsUrl } from '@/utils/docsUrl'
 import { matchesResourceQuery } from '@/utils/resourceListSearch'
 import {
@@ -237,11 +279,14 @@ import {
   getSandboxConfigInventory,
   isNamedSandboxBackend,
   listSandboxConfigs,
+  listUserSandboxes,
   NAMED_SANDBOX_BACKEND_TYPES,
   parseSandboxConflict,
+  releaseUserSandbox,
   setSandboxWorkspacePolicy,
   type SandboxConfigRecord,
   type SandboxInventory,
+  type UserSandbox,
 } from '@/api/system'
 
 const { t } = useI18n()
@@ -329,6 +374,81 @@ const inventorySubtitle = computed(() => {
 
 const inventorySessions = computed(() => inventory.value?.session_ids || [])
 const inventoryAgents = computed(() => inventory.value?.agent_names || [])
+const showUserSandboxes = computed(() => inventoryRecord.value?.config?.allocation_mode === 'user')
+const userSandboxes = ref<UserSandbox[]>([])
+const userSandboxesLoading = ref(false)
+const releaseTarget = ref<UserSandbox | null>(null)
+const releaseDialogVisible = ref(false)
+const releasing = ref(false)
+const userSandboxColumns = computed(() => [
+  { colKey: 'owner', title: t('settings.sandbox.userSandboxOwner'), ellipsis: true, minWidth: 120 },
+  { colKey: 'live_sessions', title: t('settings.sandbox.userSandboxLiveSessions'), width: 88 },
+  { colKey: 'empty_since', title: t('settings.sandbox.userSandboxEmptySince'), width: 160 },
+  { colKey: 'reclaim_after', title: t('settings.sandbox.userSandboxReclaimAfter'), width: 160 },
+  { colKey: 'op', title: t('settings.sandbox.userSandboxRelease'), width: 80 },
+])
+
+function formatSandboxTime(value?: string): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return formatStringDate(value)
+}
+
+function isUserSandboxBusy(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false
+  const body = err as { status?: number; error?: unknown; $httpStatus?: number }
+  return body.status === 409 || body.$httpStatus === 409 || body.error === 'USER_SANDBOX_BUSY'
+}
+
+async function loadUserSandboxes(configId: string) {
+  if (inventoryRecord.value?.config?.allocation_mode !== 'user') {
+    userSandboxes.value = []
+    return
+  }
+  userSandboxesLoading.value = true
+  try {
+    const res = await listUserSandboxes(configId)
+    userSandboxes.value = res?.data || []
+  } catch (e: any) {
+    userSandboxes.value = []
+    MessagePlugin.error(e?.message || t('settings.sandbox.inventoryFailed'))
+  } finally {
+    userSandboxesLoading.value = false
+  }
+}
+
+function askRelease(row: UserSandbox) {
+  releaseTarget.value = row
+  releaseDialogVisible.value = true
+}
+
+async function confirmRelease() {
+  const row = releaseTarget.value
+  const record = inventoryRecord.value
+  if (!row || !record) return
+  releasing.value = true
+  try {
+    await releaseUserSandbox(record.id, row.digest)
+    releaseDialogVisible.value = false
+    releaseTarget.value = null
+    try {
+      const res = await getSandboxConfigInventory(record.id)
+      inventory.value = res?.data || inventory.value
+    } catch {
+      // The shared-machine table is refreshed below either way.
+    }
+    await loadUserSandboxes(record.id)
+  } catch (e: any) {
+    if (isUserSandboxBusy(e)) {
+      MessagePlugin.warning(t('settings.sandbox.userSandboxBusy'))
+      return
+    }
+    MessagePlugin.error(e?.message || t('settings.sandbox.inventoryFailed'))
+  } finally {
+    releasing.value = false
+  }
+}
 
 const sessionTitles = ref<Record<string, string>>({})
 
@@ -533,10 +653,16 @@ async function openInventory(record: SandboxConfigRecord) {
   inventoryLoading.value = true
   inventory.value = null
   sessionTitles.value = {}
+  userSandboxes.value = []
+  releaseDialogVisible.value = false
+  releaseTarget.value = null
   try {
     const res = await getSandboxConfigInventory(record.id)
     inventory.value = res?.data || null
-    await loadSessionTitles(inventory.value?.session_ids || [])
+    await Promise.all([
+      loadSessionTitles(inventory.value?.session_ids || []),
+      loadUserSandboxes(record.id),
+    ])
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('settings.sandbox.inventoryFailed'))
     showInventory.value = false
@@ -580,7 +706,11 @@ function showRefusal(
   inventory.value = inv || { sandbox_count: 0, unverifiable: notice === 'unverifiable' }
   inventoryLoading.value = false
   showInventory.value = true
+  userSandboxes.value = []
+  releaseDialogVisible.value = false
+  releaseTarget.value = null
   void loadSessionTitles(inventory.value.session_ids || [])
+  void loadUserSandboxes(record.id)
 }
 
 async function forceRemove(record: SandboxConfigRecord) {
@@ -830,6 +960,22 @@ onMounted(async () => {
   margin: 0;
   color: var(--td-text-color-secondary);
   font-size: var(--app-text-md);
+  line-height: 1.5;
+}
+
+.section-help {
+  margin: 8px 0 0;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+}
+
+.user-sandbox-table {
+  overflow-x: auto;
+}
+
+.user-sandbox-release-confirm {
+  margin: 0;
   line-height: 1.5;
 }
 </style>

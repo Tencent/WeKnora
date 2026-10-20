@@ -414,6 +414,8 @@ func TestSandboxConfigRoutesRequireFullAccessOnly(t *testing.T) {
 		{http.MethodPut, "/api/v1/sandbox-configs/:id"},
 		{http.MethodDelete, "/api/v1/sandbox-configs/:id"},
 		{http.MethodGet, "/api/v1/sandbox-configs/:id/sandboxes"},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/user-sandboxes"},
+		{http.MethodPost, "/api/v1/sandbox-configs/:id/user-sandboxes/:digest/release"},
 		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills"},
 		{http.MethodPost, "/api/v1/sandbox-configs/:id/skills"},
 		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId"},
