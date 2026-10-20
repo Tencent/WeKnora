@@ -249,6 +249,55 @@ func (r *sandboxAllocationRepository) RetireSessions(
 	return out, err
 }
 
+// DeleteSessionsRetiring uses the same session-before-machine lock order as
+// placement. Ownership is checked under the session locks so a stale service
+// lookup cannot retire a session that has moved to another owner or tenant.
+func (r *sandboxAllocationRepository) DeleteSessionsRetiring(
+	ctx context.Context, tenantID uint64, idsByOwner map[string][]string, at time.Time,
+) ([]interfaces.RetiredSession, error) {
+	owners := make(map[string]string)
+	for owner, ids := range idsByOwner {
+		for _, id := range ids {
+			owners[id] = owner
+		}
+	}
+	ids := make([]string, 0, len(owners))
+	for id := range owners {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	var retired []interfaces.RetiredSession
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		live := make([]string, 0, len(ids))
+		for _, id := range ids {
+			var found []string
+			q := tx.Model(&types.Session{}).Where("tenant_id = ? AND id = ?", tenantID, id)
+			if owner := owners[id]; owner != "" {
+				q = q.Where("user_id = ?", owner)
+			} else {
+				q = q.Where("user_id IS NULL OR user_id = ''")
+			}
+			if err := forUpdate(q).Pluck("id", &found).Error; err != nil {
+				return err
+			}
+			live = append(live, found...)
+		}
+		if len(live) == 0 {
+			return nil
+		}
+		var err error
+		retired, err = RetireSessionsTx(tx, live, at)
+		if err != nil {
+			return err
+		}
+		return tx.Where("tenant_id = ? AND id IN ?", tenantID, live).Delete(&types.Session{}).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return retired, nil
+}
+
 // RetireOwnerSessions retires every session of a deleted Web account and
 // releases their assignments in one transaction. The account's own sessions
 // (any source, including ones never placed) and any session whose live

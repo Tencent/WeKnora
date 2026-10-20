@@ -17,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/sandboxalloc"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/admission"
 	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -112,6 +113,12 @@ func (r retireErrorRepo) RetireSessions(context.Context, []string, time.Time) ([
 	return nil, r.err
 }
 
+func (r retireErrorRepo) DeleteSessionsRetiring(
+	context.Context, uint64, map[string][]string, time.Time,
+) ([]interfaces.RetiredSession, error) {
+	return nil, r.err
+}
+
 type userDeleteFixture struct {
 	svc   *sessionService
 	alloc *sandboxalloc.Service
@@ -203,6 +210,113 @@ func TestDeleteSessionFailsWhenTheReleaseCannotBePersisted(t *testing.T) {
 	require.Nil(t, f.assignment(t, userDeleteSessionID).ReleasedAt)
 	require.Empty(t, f.ops.destroyedIDs())
 	require.Empty(t, f.ops.workspaceDeletes())
+}
+
+func TestSessionDeleteFailureRollsBackRetirement(t *testing.T) {
+	for _, operation := range []string{"single", "batch", "all"} {
+		t.Run(operation, func(t *testing.T) {
+			f := newUserDeleteFixture(t, "user", nil)
+			f.place(t, userDeleteSessionID)
+			ids := []string{userDeleteSessionID}
+			if operation != "single" {
+				ids = append(ids, uuid.NewString())
+				f.place(t, ids[1])
+			}
+			// Fail the actual soft delete after retirement has written its rows.
+			require.NoError(t, f.db.Exec(`CREATE TRIGGER reject_session_delete
+BEFORE UPDATE OF deleted_at ON sessions
+BEGIN SELECT RAISE(ABORT, 'injected session delete failure'); END`).Error)
+			ctx := testSessionScopeContext(7, "u-1")
+			var err error
+			switch operation {
+			case "single":
+				err = f.svc.DeleteSession(ctx, ids[0])
+			case "batch":
+				err = f.svc.BatchDeleteSessions(ctx, ids)
+			case "all":
+				err = f.svc.DeleteAllSessions(ctx)
+			}
+			require.ErrorContains(t, err, "injected session delete failure")
+			for _, id := range ids {
+				_, err := f.svc.sessionRepo.GetByID(ctx, 7, id)
+				require.NoError(t, err, "the failed deletion must leave the session usable")
+				row := f.assignment(t, id)
+				require.Nil(t, row.ReleasedAt)
+				require.Nil(t, row.CleanupDueAt, "GC must not remove files of the surviving session")
+				machine, err := f.alloc.Repo().GetUserMachine(ctx, row.MachineDigest)
+				require.NoError(t, err)
+				require.Nil(t, machine.EmptySince)
+				a, found, err := f.alloc.Lookup(ctx, id)
+				require.NoError(t, err)
+				require.True(t, found)
+				require.NoError(t, f.alloc.VerifySessionAllocation(ctx, 7, id, a))
+			}
+			require.Empty(t, f.ops.workspaceDeletes())
+			require.Empty(t, f.ops.destroyedIDs())
+		})
+	}
+}
+
+type reclaimLifecycleClient struct {
+	sealRemoteClient
+	deleted []string
+}
+
+func (c *reclaimLifecycleClient) Delete(_ context.Context, id string) error {
+	c.deleted = append(c.deleted, id)
+	return nil
+}
+
+func TestUserMachineReclaimCommitsWithRealManagerAndRepository(t *testing.T) {
+	for _, operation := range []string{"release", "gc"} {
+		t.Run(operation, func(t *testing.T) {
+			f := newUserDeleteFixture(t, "user", nil)
+			f.place(t, userDeleteSessionID)
+			client := &reclaimLifecycleClient{}
+			cfg := sandbox.DefaultConfig()
+			cfg.Type = sandbox.SandboxTypeCube
+			cfg.CubeTemplate = "tpl-test"
+			mgr, err := sandbox.NewSessionBoundManager(sandbox.SessionBoundManagerConfig{
+				Config: cfg, Client: client, Store: sandbox.NewMemorySessionSandboxBindingStore(),
+				Checker: alwaysExistsChecker{}, SkipHealthProbe: true,
+				ConfigID: "cfg-a", ConfigTenantID: 7, Namespace: "weknora",
+				Allocations: f.alloc, Admission: admission.NewMemory(),
+			})
+			require.NoError(t, err)
+			ctx := types.WithSandboxTenantID(context.Background(), 7)
+			_, err = mgr.ExecShellCommand(ctx, userDeleteSessionID, "true", "", time.Second, nil)
+			require.NoError(t, err)
+			sandboxID, found := mgr.BoundSandboxID(ctx, userDeleteSessionID)
+			require.True(t, found)
+			a, found, err := f.alloc.Lookup(ctx, userDeleteSessionID)
+			require.NoError(t, err)
+			require.True(t, found)
+			machine, ok := a.UserMachine()
+			require.True(t, ok)
+			_, err = f.alloc.Retire(ctx, []string{userDeleteSessionID})
+			require.NoError(t, err)
+			digest := f.alloc.Digest(machine)
+			require.NoError(t, f.db.Model(&types.SandboxUserMachine{}).
+				Where("machine_digest = ?", digest).
+				Update("empty_since", time.Now().Add(-8*24*time.Hour)).Error)
+			cleaner := sandboxalloc.NewWorkspaceCleaner(f.alloc, stubSandboxResolver{mgr: mgr})
+			if operation == "release" {
+				deleted, err := cleaner.ReleaseMachine(ctx, machine)
+				require.NoError(t, err)
+				require.True(t, deleted)
+			} else {
+				gc := sandboxalloc.NewUserMachineGC(f.alloc, cleaner, allocationModeConfig("user"), nil)
+				report, err := gc.RunOnce(ctx)
+				require.NoError(t, err)
+				require.Zero(t, report.Failed)
+				require.Equal(t, 1, report.Reclaimed)
+			}
+			require.Equal(t, []string{sandboxID}, client.deleted)
+			row, err := f.alloc.Repo().GetUserMachine(ctx, digest)
+			require.NoError(t, err)
+			require.Nil(t, row, "provider deletion and registry deletion must both complete")
+		})
+	}
 }
 
 func TestDeleteSessionOnPerSessionSandboxStillDestroys(t *testing.T) {

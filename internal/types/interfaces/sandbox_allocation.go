@@ -78,6 +78,11 @@ type SandboxAllocationRepository interface {
 	// placement racing the deletion cannot land after it. Idempotent; results
 	// are in sessionIDs order.
 	RetireSessions(ctx context.Context, sessionIDs []string, at time.Time) ([]RetiredSession, error)
+	// DeleteSessionsRetiring soft-deletes the listed owner-scoped sessions and
+	// retires their assignments in one transaction. Missing rows are skipped.
+	// An error rolls back the entire batch, including queued workspace cleanup.
+	DeleteSessionsRetiring(ctx context.Context, tenantID uint64, idsByOwner map[string][]string,
+		at time.Time) ([]RetiredSession, error)
 	// RetireOwnerSessions retires every session of a Web account in one
 	// transaction: the account's own sessions in every tenant (including
 	// sessions that were never placed) and any session whose live assignment

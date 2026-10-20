@@ -549,9 +549,9 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 		return err
 	}
 
-	handled, err := s.releaseUserWorkspaces(ctx, []string{id})
+	handled, err := s.userWorkspaceSessions(ctx, []string{id})
 	if err != nil {
-		return fmt.Errorf("release sandbox workspace: %w", err)
+		return fmt.Errorf("read sandbox workspace: %w", err)
 	}
 
 	// Cleanup chat history knowledge entries for this session (async, best-effort).
@@ -594,7 +594,15 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 		s.destroyBoundSandbox(ctx, id)
 	}
 	// Delete session from repository
-	rows, err := s.sessionRepo.Delete(ctx, tenantID, session.UserID, id)
+	var rows int64
+	if s.workspaceCleaner != nil {
+		var count int
+		handled, count, err = s.workspaceCleaner.DeleteSessions(
+			ctx, tenantID, map[string][]string{session.UserID: {id}})
+		rows = int64(count)
+	} else {
+		rows, err = s.sessionRepo.Delete(ctx, tenantID, session.UserID, id)
+	}
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": id,
@@ -652,9 +660,9 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 		return apperrors.ErrSessionNotFound
 	}
 
-	handled, err := s.releaseUserWorkspaces(ctx, visibleIDs)
+	handled, err := s.userWorkspaceSessions(ctx, visibleIDs)
 	if err != nil {
-		return fmt.Errorf("release sandbox workspace: %w", err)
+		return fmt.Errorf("read sandbox workspace: %w", err)
 	}
 
 	// Cleanup associated resources for each session
@@ -692,14 +700,9 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 	}
 
 	// Batch delete sessions from repository
-	for ownerID, ownerIDs := range idsByOwner {
-		if _, err := s.sessionRepo.BatchDelete(ctx, tenantID, ownerID, ownerIDs); err != nil {
-			logger.ErrorWithFields(ctx, err, map[string]interface{}{
-				"session_ids": ownerIDs,
-				"tenant_id":   tenantID,
-			})
-			return err
-		}
+	handled, err = s.deleteSessionBatch(ctx, tenantID, idsByOwner)
+	if err != nil {
+		return err
 	}
 	if s.suggestionRepo != nil {
 		for _, id := range visibleIDs {
@@ -725,8 +728,7 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 
 	sessions, err := s.sessionRepo.GetByTenantID(ctx, tenantID, userID)
 	if err != nil {
-		// A failed list is not an empty list. Deleting anyway would drop rows
-		// that were never retired and would leave their assignments live.
+		// A failed list is not an empty list; do not delete any rows.
 		logger.Warnf(ctx, "Failed to list sessions for cleanup: %v", err)
 		return err
 	}
@@ -739,9 +741,9 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 		ids = append(ids, session.ID)
 		idsByOwner[session.UserID] = append(idsByOwner[session.UserID], session.ID)
 	}
-	handled, releaseErr := s.releaseUserWorkspaces(ctx, ids)
-	if releaseErr != nil {
-		return fmt.Errorf("release sandbox workspace: %w", releaseErr)
+	handled, err := s.userWorkspaceSessions(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("read sandbox workspace: %w", err)
 	}
 	bgCtx := context.WithoutCancel(ctx)
 	for _, session := range sessions {
@@ -777,16 +779,11 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 		s.destroyBoundSandbox(ctx, session.ID)
 	}
 
-	// Only the listed ids were retired. A session inserted after the list
+	// Retire and delete only the listed ids. A session inserted after the list
 	// stays, instead of DeleteAllByTenantID removing every current row.
-	for ownerID, ownerIDs := range idsByOwner {
-		if _, err := s.sessionRepo.BatchDelete(ctx, tenantID, ownerID, ownerIDs); err != nil {
-			logger.ErrorWithFields(ctx, err, map[string]interface{}{
-				"session_ids": ownerIDs,
-				"tenant_id":   tenantID,
-			})
-			return err
-		}
+	handled, err = s.deleteSessionBatch(ctx, tenantID, idsByOwner)
+	if err != nil {
+		return err
 	}
 	if s.suggestionRepo != nil {
 		for _, session := range sessions {
@@ -838,14 +835,30 @@ func (s *sessionService) WithWorkspaceCleaner(c *sandboxalloc.WorkspaceCleaner) 
 	s.workspaceCleaner = c
 }
 
-// releaseUserWorkspaces releases the user-mode sessions in ids (C5). An
-// error must abort the deletion: a session deleted without its release would
-// keep its shared-machine directory and stay admissible.
-func (s *sessionService) releaseUserWorkspaces(ctx context.Context, ids []string) (map[string]bool, error) {
+// userWorkspaceSessions identifies shared machines before legacy teardown.
+// This lookup does not retire anything; retirement commits with row deletion.
+func (s *sessionService) userWorkspaceSessions(ctx context.Context, ids []string) (map[string]bool, error) {
 	if s.workspaceCleaner == nil || len(ids) == 0 {
 		return nil, nil
 	}
-	return s.workspaceCleaner.ReleaseSessions(ctx, ids)
+	return s.workspaceCleaner.UserSessions(ctx, ids)
+}
+
+// deleteSessionBatch commits every listed owner's deletion and retirement
+// together. Lite/host retain their existing repository-only deletion path.
+func (s *sessionService) deleteSessionBatch(
+	ctx context.Context, tenantID uint64, idsByOwner map[string][]string,
+) (map[string]bool, error) {
+	if s.workspaceCleaner != nil {
+		handled, _, err := s.workspaceCleaner.DeleteSessions(ctx, tenantID, idsByOwner)
+		return handled, err
+	}
+	for ownerID, ids := range idsByOwner {
+		if _, err := s.sessionRepo.BatchDelete(ctx, tenantID, ownerID, ids); err != nil {
+			return nil, err
+		}
+	}
+	return nil, nil
 }
 
 // runUserWorkspaceCleanups deletes released directories after the rows are

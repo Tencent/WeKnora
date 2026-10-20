@@ -90,6 +90,80 @@ func seedSession(t *testing.T, db *gorm.DB, id string, pin interfaces.PlacementP
 	require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(s).Error)
 }
 
+func TestDeleteSessionsRetiringChecksTenantAndOwner(t *testing.T) {
+	allocationBackends(t, func(t *testing.T, repo *sandboxAllocationRepository, db *gorm.DB) {
+		ctx := context.Background()
+		own, otherOwner, otherTenant, legacy := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+		for _, row := range []*types.Session{
+			{ID: own, TenantID: 7, UserID: "u-1"},
+			{ID: otherOwner, TenantID: 7, UserID: "u-2"},
+			{ID: otherTenant, TenantID: 8, UserID: "u-1"},
+			{ID: legacy, TenantID: 7, UserID: ""},
+		} {
+			require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(row).Error)
+		}
+		retired, err := repo.DeleteSessionsRetiring(ctx, 7, map[string][]string{
+			"u-1": {own, own, otherOwner, otherTenant, uuid.NewString()},
+			"":    {legacy},
+		}, time.Now())
+		require.NoError(t, err)
+		require.Len(t, retired, 2)
+		for _, id := range []string{own, legacy} {
+			var row types.Session
+			require.ErrorIs(t, db.Where("id = ?", id).Take(&row).Error, gorm.ErrRecordNotFound)
+			a, err := repo.GetAssignment(ctx, id)
+			require.NoError(t, err)
+			require.True(t, a.IsTombstone())
+		}
+		for _, id := range []string{otherOwner, otherTenant} {
+			var row types.Session
+			require.NoError(t, db.Where("id = ?", id).Take(&row).Error)
+			a, err := repo.GetAssignment(ctx, id)
+			require.NoError(t, err)
+			require.Nil(t, a, "out-of-scope sessions must not even acquire retirement tombstones")
+		}
+	})
+}
+
+func TestDeleteSessionsRetiringRollsBackEveryOwnerOnDeleteFailure(t *testing.T) {
+	allocationBackends(t, func(t *testing.T, repo *sandboxAllocationRepository, db *gorm.DB) {
+		ctx := context.Background()
+		placed, unplaced, digest := uuid.NewString(), uuid.NewString(), uuid.NewString()
+		seedSession(t, db, placed, interfaces.PlacementPin{})
+		require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(&types.Session{
+			ID: unplaced, TenantID: 7, UserID: "u-2",
+		}).Error)
+		_, err := claim(ctx, repo, userAssignment(placed, digest), interfaces.PlacementPin{})
+		require.NoError(t, err)
+		boom := errors.New("injected soft-delete failure")
+		require.NoError(t, db.Callback().Delete().Before("gorm:delete").Register(
+			"reject_session_delete", func(tx *gorm.DB) {
+				if tx.Statement.Table == "sessions" {
+					_ = tx.AddError(boom)
+				}
+			}))
+		retired, err := repo.DeleteSessionsRetiring(ctx, 7, map[string][]string{
+			"u-1": {placed}, "u-2": {unplaced},
+		}, time.Now())
+		require.ErrorIs(t, err, boom)
+		require.Nil(t, retired)
+		for _, id := range []string{placed, unplaced} {
+			var row types.Session
+			require.NoError(t, db.Where("id = ?", id).Take(&row).Error)
+		}
+		a, err := repo.GetAssignment(ctx, placed)
+		require.NoError(t, err)
+		require.Nil(t, a.ReleasedAt)
+		require.Nil(t, a.CleanupDueAt)
+		a, err = repo.GetAssignment(ctx, unplaced)
+		require.NoError(t, err)
+		require.Nil(t, a, "rollback must remove the new tombstone too")
+		m, err := repo.GetUserMachine(ctx, digest)
+		require.NoError(t, err)
+		require.Nil(t, m.EmptySince)
+	})
+}
+
 func userAssignment(sessionID, digest string) *types.SessionSandboxAssignment {
 	return &types.SessionSandboxAssignment{
 		SessionID: sessionID, ConfigTenantID: 7, ConfigID: "cfg", MachineDigest: digest,

@@ -160,8 +160,10 @@ func (g *UserMachineGC) reclaimCandidate(ctx context.Context, row *types.Sandbox
 		return
 	}
 	var lock interfaces.MachineReclaimLock
-	ok, err := ops.ReclaimUserMachine(ctx, m, func(ctx context.Context) (bool, error) {
+	ok, err := ops.ReclaimUserMachine(ctx, m, func(_ context.Context) (bool, error) {
 		var lockErr error
+		// The manager cancels its provider context before returning. The row
+		// lock must instead live until this scan commits or aborts the delete.
 		lock, lockErr = g.svc.repo.LockEmptyMachine(ctx, digest)
 		if lockErr != nil || lock == nil {
 			return false, lockErr

@@ -109,6 +109,40 @@ func (c *WorkspaceCleaner) ReleaseSessions(ctx context.Context, sessionIDs []str
 	return handled, nil
 }
 
+// UserSessions classifies existing placements without retiring them. Retirement
+// must commit with the session deletion, not with this pre-delete lookup.
+func (c *WorkspaceCleaner) UserSessions(ctx context.Context, ids []string) (map[string]bool, error) {
+	handled := make(map[string]bool)
+	for _, id := range ids {
+		row, err := c.svc.repo.GetAssignment(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if row != nil && row.MachineDigest != "" {
+			handled[id] = true
+		}
+	}
+	return handled, nil
+}
+
+// DeleteSessions atomically removes the authorized session rows and records
+// retirement and cleanup intent. Only committed retirements may trigger cleanup.
+func (c *WorkspaceCleaner) DeleteSessions(
+	ctx context.Context, tenantID uint64, idsByOwner map[string][]string,
+) (map[string]bool, int, error) {
+	retired, err := c.svc.repo.DeleteSessionsRetiring(ctx, tenantID, idsByOwner, c.now())
+	if err != nil {
+		return nil, 0, err
+	}
+	handled := make(map[string]bool)
+	for _, r := range retired {
+		if r.Assignment != nil && r.Assignment.MachineDigest != "" {
+			handled[r.SessionID] = true
+		}
+	}
+	return handled, len(retired), nil
+}
+
 // RunCleanups runs the due cleanup of these sessions now, one command per
 // machine. Anything not done stays due for RetryDue.
 func (c *WorkspaceCleaner) RunCleanups(ctx context.Context, sessionIDs []string) {
@@ -265,8 +299,10 @@ func (c *WorkspaceCleaner) destroyIfEmpty(ctx context.Context, m allocation.User
 	}
 	digest := c.svc.Digest(m)
 	var lock interfaces.MachineReclaimLock
-	ok, err := ops.ReclaimUserMachine(ctx, m, func(ctx context.Context) (bool, error) {
+	ok, err := ops.ReclaimUserMachine(ctx, m, func(_ context.Context) (bool, error) {
 		var lockErr error
+		// The transaction outlives the manager's guarded provider context.
+		// Keep caller cancellation, but hold the row lock through CommitDelete.
 		lock, lockErr = c.svc.repo.LockEmptyMachine(ctx, digest)
 		if lockErr != nil || lock == nil {
 			return false, lockErr
