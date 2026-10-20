@@ -22,6 +22,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/admission"
 	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/stream"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -784,7 +785,21 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 	}
 
 	eventBus := event.NewEventBus()
-	asyncCtx, cancel := context.WithCancel(logger.CloneContext(baseCtx))
+	asyncCtx, cancelCause := context.WithCancelCause(logger.CloneContext(baseCtx))
+	// Detach HTTP cancellation, but keep the turn's lease-loss signal: once
+	// admission is lost another session may rebuild the shared machine.
+	propagateLeaseLoss := func() {
+		if cause := context.Cause(baseCtx); stderrors.Is(cause, admission.ErrLeaseLost) {
+			cancelCause(cause)
+		}
+	}
+	stopLeaseWatch := context.AfterFunc(baseCtx, propagateLeaseLoss)
+	// An already-lost lease must cancel QA before any async work starts.
+	propagateLeaseLoss()
+	cancel := func() {
+		stopLeaseWatch()
+		cancelCause(context.Canceled)
+	}
 
 	streamCtx := &sseStreamContext{
 		eventBus:         eventBus,
