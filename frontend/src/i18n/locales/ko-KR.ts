@@ -322,6 +322,7 @@ export default {
     clearRead: "읽은 알림 삭제",
     clearReadConfirm: "읽은 알림을 삭제할까요? 실행 기록, 대화 및 처리 대기 항목은 유지됩니다.",
     handle: "열기",
+    viewResult: "결과 보기",
     review: "승인 검토",
     unreadCount: "읽지 않음 {count}개",
     unread: "읽지 않음",

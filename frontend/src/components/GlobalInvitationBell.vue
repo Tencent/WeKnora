@@ -78,6 +78,38 @@
     </template>
   </t-popup>
   <MyInvitationsDialog v-model:visible="dialogVisible" />
+  <Teleport to="body">
+    <TransitionGroup name="notification-banner" tag="div" class="notification-banners" aria-live="polite"
+      :aria-label="t('notifications.title')" @mouseenter="setBannerHover(true)" @mouseleave="setBannerHover(false)"
+      @focusin="setBannerFocus" @focusout="setBannerFocus">
+      <article v-for="banner in banners" :key="banner.key" class="notification-banner"
+        :class="{ 'is-pending': banner.type === 'pending' }">
+        <button type="button" class="notification-banner__content" :disabled="busy" @click="openBanner(banner)">
+          <span class="notification-banner__icon" :class="{
+            'is-success': banner.item.kind === 'automation.succeeded',
+            'is-error': banner.item.kind === 'automation.failed',
+            'is-warning': banner.type === 'pending' || banner.item.kind === 'automation.paused',
+          }">
+            <t-icon :name="banner.type === 'pending' ? 'secured' : historyIcon(banner.item.kind)" size="18px" />
+          </span>
+          <span class="notification-banner__body">
+            <span class="notification-banner__label">
+              {{ banner.type === 'pending' ? pendingLabel(banner.item.kind) : kindLabel(banner.item.kind) }}
+            </span>
+            <span class="notification-banner__title">{{ banner.item.title }}</span>
+            <span v-if="banner.type === 'result' && banner.item.body" class="notification-banner__summary">{{ banner.item.body }}</span>
+            <span class="notification-banner__action">
+              {{ banner.type === 'pending' ? t('notifications.handle') : t('notifications.viewResult') }}
+              <t-icon name="arrow-right" size="12px" />
+            </span>
+          </span>
+        </button>
+        <button type="button" class="notification-banner__close" :aria-label="t('common.close')" @click="dismissBanner(banner.key)">
+          <t-icon name="close" size="14px" />
+        </button>
+      </article>
+    </TransitionGroup>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -110,6 +142,83 @@ const dialogVisible = ref(false)
 const panelVisible = ref(false)
 let version = 0
 let timer: ReturnType<typeof setInterval> | undefined
+type NotificationBanner = { key: string } & (
+  { type: 'pending'; item: PendingNotification } | { type: 'result'; item: AppNotification }
+)
+const banners = ref<NotificationBanner[]>([])
+const seenBanners = new Set<string>()
+const bannerTimers = new Map<string, ReturnType<typeof setTimeout>>()
+let bannersInitialized = false
+let newestNotificationTime = 0
+let bannersPaused = false
+let bannerHovered = false
+let bannerFocused = false
+
+function setBannerHover(hovered: boolean) {
+  bannerHovered = hovered
+  if (bannerHovered || bannerFocused) pauseBanners()
+  else resumeBanners()
+}
+function setBannerFocus(event: FocusEvent) {
+  bannerFocused = event.type === 'focusin' || !!(event.currentTarget as HTMLElement).contains(event.relatedTarget as Node | null)
+  if (bannerHovered || bannerFocused) pauseBanners()
+  else resumeBanners()
+}
+
+function dismissBanner(key: string) {
+  clearTimeout(bannerTimers.get(key))
+  bannerTimers.delete(key)
+  banners.value = banners.value.filter(banner => banner.key !== key)
+}
+function pauseBanners() {
+  bannersPaused = true
+  for (const timeout of bannerTimers.values()) clearTimeout(timeout)
+  bannerTimers.clear()
+}
+function resumeBanners() {
+  pauseBanners()
+  bannersPaused = false
+  for (const banner of banners.value) {
+    bannerTimers.set(banner.key, setTimeout(() => dismissBanner(banner.key), 10_000))
+  }
+}
+function clearBanners() {
+  pauseBanners()
+  banners.value = []
+  bannersPaused = false
+  bannerHovered = bannerFocused = false
+}
+function updateBanners(page: NotificationPage) {
+  const livePending = new Set((page.pending ?? []).map(item => item.id))
+  const read = new Set((page.items ?? []).filter(item => item.read_at).map(item => item.id))
+  for (const banner of banners.value) {
+    if (banner.type === 'pending' ? !livePending.has(banner.item.id) : read.has(banner.item.id)) dismissBanner(banner.key)
+  }
+  const candidates: NotificationBanner[] = [
+    ...(page.pending ?? []).map(item => ({ key: `pending:${item.id}`, type: 'pending' as const, item })),
+    ...(page.items ?? []).map(item => ({ key: `result:${item.id}`, type: 'result' as const, item })),
+  ]
+  const fresh = candidates.filter(banner => !seenBanners.has(banner.key) &&
+    (banner.type === 'pending' || (!banner.item.read_at && Date.parse(banner.item.created_at) >= newestNotificationTime)))
+  for (const banner of candidates) seenBanners.add(banner.key)
+  for (const item of page.items ?? []) newestNotificationTime = Math.max(newestNotificationTime, Date.parse(item.created_at) || 0)
+  // Seed the first successful response without replaying historical notifications.
+  if (bannersInitialized && !panelVisible.value && fresh.length) {
+    const next = [...fresh, ...banners.value]
+      .sort((a, b) => Number(b.type === 'pending') - Number(a.type === 'pending')).slice(0, 3)
+    const retained = new Set(next.map(banner => banner.key))
+    for (const banner of banners.value) if (!retained.has(banner.key)) dismissBanner(banner.key)
+    banners.value = next
+    if (!bannersPaused) resumeBanners()
+  }
+  bannersInitialized = true
+}
+function openBanner(banner: NotificationBanner) {
+  if (busy.value) return
+  dismissBanner(banner.key)
+  if (banner.type === 'pending') openPending(banner.item)
+  else void open(banner.item)
+}
 
 function applyCounts(page: NotificationPage) {
   pending.value = page.pending ?? []
@@ -124,6 +233,7 @@ async function refresh(reset = false) {
   try {
     const { data } = await listNotifications(20)
     if (request !== version) return
+    updateBanners(data)
     applyCounts(data)
     if (reset || !historyExpanded.value || !panelVisible.value) {
       items.value = data.items ?? []
@@ -171,7 +281,12 @@ function retry() {
 }
 
 const onVisible = () => { if (document.visibilityState === 'visible') void refresh() }
-watch(panelVisible, open => { if (open) void refresh(true) })
+watch(panelVisible, open => {
+  if (open) {
+    clearBanners()
+    void refresh(true)
+  }
+})
 watch(() => [authStore.effectiveTenantId, authStore.user?.id], () => {
   ++version
   items.value = []
@@ -181,6 +296,10 @@ watch(() => [authStore.effectiveTenantId, authStore.user?.id], () => {
   historyExpanded.value = hasNew.value = loading.value = busy.value = false
   loadError.value = ''
   panelVisible.value = false
+  clearBanners()
+  seenBanners.clear()
+  bannersInitialized = false
+  newestNotificationTime = 0
   if (authStore.user) void refresh(true)
 })
 onMounted(() => {
@@ -191,6 +310,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   ++version
   clearInterval(timer)
+  clearBanners()
   document.removeEventListener('visibilitychange', onVisible)
 })
 
@@ -243,6 +363,7 @@ async function markAllRead() {
   await mutate(() => markNotificationsRead(), () => {
     const now = new Date().toISOString()
     items.value = items.value.map(item => ({ ...item, read_at: item.read_at ?? now }))
+    for (const banner of banners.value) if (banner.type === 'result') dismissBanner(banner.key)
   })
 }
 async function clearRead() {
@@ -253,6 +374,114 @@ async function clearRead() {
 </script>
 
 <style lang="less" scoped>
+.notification-banners {
+  position: fixed;
+  top: max(20px, env(safe-area-inset-top));
+  right: max(24px, env(safe-area-inset-right));
+  z-index: 5000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(380px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  padding: 12px;
+  margin: -12px;
+  pointer-events: none;
+  font-family: var(--app-font-family);
+}
+.notification-banner {
+  position: relative;
+  flex-shrink: 0;
+  border-radius: var(--app-radius-lg);
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
+  box-shadow: 0 4px 24px rgb(0 0 0 / 10%), 0 1px 4px rgb(0 0 0 / 5%);
+  pointer-events: auto;
+  &.is-pending { background: color-mix(in srgb, var(--td-warning-color) 4%, var(--td-bg-color-container)); }
+  button:focus-visible { outline: 2px solid var(--td-brand-color-focus); outline-offset: 2px; }
+}
+.notification-banner__content {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  padding: 16px 36px 14px 16px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  &:disabled { cursor: default; }
+}
+.notification-banner__icon {
+  display: flex;
+  flex-shrink: 0;
+  padding-top: 2px;
+  color: var(--td-text-color-secondary);
+  &.is-success { color: var(--td-success-color); }
+  &.is-error { color: var(--td-error-color); }
+  &.is-warning { color: var(--td-warning-color); }
+}
+.notification-banner__body { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
+.notification-banner__label { color: var(--td-text-color-secondary); font-size: var(--app-text-xs); line-height: 1.5; }
+.is-pending .notification-banner__label { color: var(--td-warning-color); }
+.notification-banner__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--app-text-md);
+  font-weight: 600;
+  line-height: 1.5;
+}
+.notification-banner__summary {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  line-height: 1.6;
+}
+.notification-banner__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: var(--app-text-xs);
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+}
+.notification-banner__content:hover .notification-banner__action { color: var(--td-text-color-primary); }
+.notification-banner__close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  cursor: pointer;
+  &:hover { color: var(--td-text-color-primary); background: var(--td-bg-color-container-hover); }
+}
+.notification-banner-enter-active,
+.notification-banner-leave-active,
+.notification-banner-move { transition: opacity 180ms ease, transform 180ms ease; }
+.notification-banner-enter-from,
+.notification-banner-leave-to { opacity: 0; transform: translateX(16px); }
+@media (max-width: 480px) { .notification-banners { top: max(12px, env(safe-area-inset-top)); right: 16px; } }
+@media (prefers-reduced-motion: reduce) {
+  .notification-banner-enter-active,
+  .notification-banner-leave-active,
+  .notification-banner-move { transition: none; }
+}
 .notification-panel {
   width: min(380px, calc(100vw - 32px));
   display: flex;

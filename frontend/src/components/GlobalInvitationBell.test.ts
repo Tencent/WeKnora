@@ -122,3 +122,104 @@ test('failed read and clear requests preserve unread state and history', async t
   assert.equal(vm.items.length, 2)
   assert.equal(errors.length, 2)
 })
+
+test('banners skip the initial backlog, deduplicate polls, and prioritize new approvals', async t => {
+  let response = page([notice('old')])
+  const { vm } = setup(t, { listNotifications: async () => response })
+  await vm.refresh()
+  assert.equal(vm.banners.length, 0)
+  response = page([notice('new-1'), notice('new-2'), notice('new-3'), notice('old')], {
+    pending: [approval, { ...approval, id: 'new-approval' }],
+  })
+  await vm.refresh()
+  assert.deepEqual(Array.from(vm.banners, (banner: any) => banner.key),
+    ['pending:new-approval', 'result:new-1', 'result:new-2'])
+  assert.equal(vm.banners[0].type, 'pending')
+  await vm.refresh()
+  assert.equal(vm.banners.length, 3)
+  const unread = vm.unread
+  vm.dismissBanner('result:new-1')
+  assert.equal(vm.unread, unread, 'dismissing a banner does not mark the notification read')
+  vm.dismissBanner('pending:new-approval')
+  assert.equal(vm.pending.length, 2, 'dismissing a banner never resolves an approval')
+  await vm.refresh()
+  assert.equal(vm.banners.length, 1, 'dismissed or overflow banners do not replay on the next poll')
+})
+
+test('banners expire after ten seconds and pause while being read', async t => {
+  let response = page()
+  const { vm } = setup(t, { listNotifications: async () => response })
+  await vm.refresh()
+  response = page([notice('new')])
+  await vm.refresh()
+  t.mock.timers.tick(9_000)
+  assert.equal(vm.banners.length, 1)
+  vm.setBannerHover(true)
+  t.mock.timers.tick(20_000)
+  assert.equal(vm.banners.length, 1)
+  vm.setBannerFocus({ type: 'focusin' })
+  vm.setBannerHover(false)
+  t.mock.timers.tick(20_000)
+  assert.equal(vm.banners.length, 1, 'keyboard focus keeps the banner visible after the pointer leaves')
+  vm.setBannerFocus({ type: 'focusout', currentTarget: { contains: () => false }, relatedTarget: null })
+  t.mock.timers.tick(10_000)
+  assert.equal(vm.banners.length, 0)
+  assert.equal(vm.unread, 1)
+})
+
+test('clicking a result banner opens and marks it read; an approval only opens its conversation', async t => {
+  let response = page()
+  const marked: string[][] = []
+  const { vm, routes } = setup(t, {
+    listNotifications: async () => response,
+    markNotificationsRead: async (ids: string[]) => { marked.push(ids) },
+  })
+  await vm.refresh()
+  response = page([notice('new')], { pending: [approval, { ...approval, id: 'new-approval' }] })
+  await vm.refresh()
+  vm.openBanner(vm.banners[0])
+  assert.equal(routes.at(-1), approval.link)
+  assert.equal(marked.length, 0)
+  vm.openBanner(vm.banners[0])
+  await flush()
+  assert.equal(routes.at(-1), '/platform/automations/new')
+  assert.deepEqual(marked.map(ids => Array.from(ids)), [['new']])
+})
+
+test('resolved approvals and read results disappear, and opening the inbox suppresses duplicate banners', async t => {
+  let response = page()
+  const { vm } = setup(t, { listNotifications: async () => response })
+  await vm.refresh()
+  response = page([notice('new')], { pending: [{ ...approval, id: 'new-approval' }] })
+  await vm.refresh()
+  assert.equal(vm.banners.length, 2)
+  response = page([notice('new', true)], { pending: [] })
+  await vm.refresh()
+  assert.equal(vm.banners.length, 0)
+  response = page([notice('another')])
+  await vm.refresh()
+  assert.equal(vm.banners.length, 1)
+  vm.panelVisible = true
+  await flush()
+  assert.equal(vm.banners.length, 0)
+  response = page([notice('while-open'), notice('another')])
+  await vm.refresh()
+  vm.panelVisible = false
+  await vm.refresh()
+  assert.equal(vm.banners.length, 0)
+})
+
+test('workspace switches reset banners, and older results revealed by clearing history are not new arrivals', async t => {
+  let response = page([notice('initial')])
+  const { vm, auth } = setup(t, { listNotifications: async () => response })
+  await vm.refresh()
+  response = page([notice('new')])
+  await vm.refresh()
+  assert.equal(vm.banners.length, 1)
+  auth.effectiveTenantId = 2
+  await flush()
+  assert.equal(vm.banners.length, 0, 'the new workspace is seeded without replaying history')
+  response = page([{ ...notice('older'), created_at: '2026-10-19T00:00:00Z' }])
+  await vm.refresh()
+  assert.equal(vm.banners.length, 0)
+})

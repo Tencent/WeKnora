@@ -322,6 +322,7 @@ export default {
     clearRead: "清理已讀",
     clearReadConfirm: "清理已讀通知？不會刪除執行記錄、對話或待處理事項。",
     handle: "去處理",
+    viewResult: "查看結果",
     review: "去審批",
     unreadCount: "{count} 則未讀",
     unread: "未讀",
