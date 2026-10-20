@@ -206,6 +206,22 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "oauth2",
 		Capabilities: []string{"incremental", "deletion_sync"},
 	},
+	types.ConnectorTypeFeishuLingo: {
+		Type:         types.ConnectorTypeFeishuLingo,
+		Name:         "Feishu Lingo (飞书词典)",
+		Description:  "Sync dictionary terms from Feishu Lingo into a knowledge base folder",
+		Priority:     1,
+		AuthType:     "api_key",
+		Capabilities: []string{"incremental", "deletion_sync"},
+	},
+	types.ConnectorTypeLarkLingo: {
+		Type:         types.ConnectorTypeLarkLingo,
+		Name:         "Lark Lingo",
+		Description:  "Sync dictionary terms from Lark Lingo into a knowledge base folder",
+		Priority:     1,
+		AuthType:     "api_key",
+		Capabilities: []string{"incremental", "deletion_sync"},
+	},
 	types.ConnectorTypeNotion: {
 		Type:         types.ConnectorTypeNotion,
 		Name:         "Notion",

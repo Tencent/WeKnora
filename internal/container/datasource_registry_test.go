@@ -21,6 +21,22 @@ func TestConnectorRegistryIncludesDingTalk(t *testing.T) {
 	}
 }
 
+func TestConnectorRegistryIncludesFeishuLingo(t *testing.T) {
+	registry, err := initConnectorRegistry()
+	if err != nil {
+		t.Fatalf("initConnectorRegistry() error = %v", err)
+	}
+	for _, connectorType := range []string{types.ConnectorTypeFeishuLingo, types.ConnectorTypeLarkLingo} {
+		connector, err := registry.Get(connectorType)
+		if err != nil {
+			t.Fatalf("%s connector is not registered: %v", connectorType, err)
+		}
+		if connector.Type() != connectorType {
+			t.Fatalf("connector.Type() = %q, want %q", connector.Type(), connectorType)
+		}
+	}
+}
+
 func TestConnectorRegistryIncludesSeafile(t *testing.T) {
 	registry, err := initConnectorRegistry()
 	if err != nil {

@@ -15,6 +15,12 @@ export const datasourceIconMap: Record<string, string> = {
   // Drive (云盘) connectors reuse the wiki icons - same product, same brand.
   feishu_drive: feishuIcon,
   lark_drive: larkIcon,
+  // Lingo (词典) is the same product and brand as wiki/drive.
+  feishu_lingo: feishuIcon,
+  lark_lingo: larkIcon,
+  // Lingo (词典) reuses the Feishu/Lark brand icons.
+  feishu_lingo: feishuIcon,
+  lark_lingo: larkIcon,
   notion: notionIcon,
   yuque: yuqueIcon,
   dingtalk: dingtalkIcon,
