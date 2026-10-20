@@ -349,6 +349,21 @@ function sniffFromMagic(bytes: Uint8Array): FilePreviewSniff | null {
     if (tag === 'AVI ') return { kind: 'video', ext: 'avi' }
   }
   if (bytes.length >= 8 && asciiTag(bytes, 4, 4) === 'ftyp') {
+    // ISO base media containers also carry images and audio. Compatible
+    // brands matter when the major brand is generic (for example, mif1).
+    const brands = new Set([asciiTag(bytes, 8, 4)])
+    if (bytes.length >= 16) {
+      const boxSize = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0)
+      const end = Math.min(boxSize, bytes.length, SNIFF_BYTES)
+      for (let offset = 16; offset + 4 <= end; offset += 4) {
+        brands.add(asciiTag(bytes, offset, 4))
+      }
+    }
+    if (brands.has('avif') || brands.has('avis')) return { kind: 'image', ext: 'avif' }
+    if (['heic', 'heix', 'hevc', 'hevx'].some(brand => brands.has(brand))) {
+      return { kind: 'image', ext: 'heic' }
+    }
+    if (brands.has('M4A ') || brands.has('M4B ')) return { kind: 'audio', ext: 'm4a' }
     return { kind: 'video', ext: 'mp4' }
   }
   if (bytes.length >= 4 && bytes[0] === 0x1A && bytes[1] === 0x45 && bytes[2] === 0xDF && bytes[3] === 0xA3) {
