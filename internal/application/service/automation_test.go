@@ -373,9 +373,12 @@ func TestAutomationSuspendsAndResumesAfterApproval(t *testing.T) {
 	run := f.settleRun(t, queued.ID)
 	require.Equal(t, types.AutomationRunAwaitingApproval, run.Status)
 	require.NotEmpty(t, run.PendingPromptID)
-	page, err := NewNotificationService(f.db).List(f.ctx, 10, false)
+	notices := NewNotificationService(f.db)
+	notices.now = func() time.Time { return f.now }
+	page, err := notices.List(f.ctx, 10, false, "")
 	require.NoError(t, err)
-	require.Equal(t, types.NotificationAutomationAwaitingApproval, page.Items[0].Kind)
+	require.Len(t, page.Pending, 1)
+	require.Equal(t, types.AgentPromptKindToolApproval, page.Pending[0].Kind)
 
 	prompt, _ := f.broker.Store().Get(f.ctx, run.PendingPromptID)
 	require.True(t, f.svc.HandlesPrompt(f.ctx, prompt), "an automation prompt is not resumed as a chat")

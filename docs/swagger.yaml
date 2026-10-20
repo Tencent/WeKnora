@@ -24091,6 +24091,10 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: 上一页返回的 next_cursor
+        in: query
+        name: cursor
+        type: string
       - description: 只看未读
         in: query
         name: unread
@@ -24099,7 +24103,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: '{items, unread}'
+          description: '{items, pending, unread, read_count, next_cursor}'
           schema:
             additionalProperties: true
             type: object
@@ -24109,10 +24113,24 @@ paths:
       tags:
       - 通知
   /notifications/read:
+    delete:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 清理已读通知
+      tags:
+      - 通知
     post:
       consumes:
       - application/json
-      description: ids 为空时全部标记已读
+      description: ids 为空时将全部通知记录标为已读，不改变待处理事项
       parameters:
       - description: '{ids}'
         in: body

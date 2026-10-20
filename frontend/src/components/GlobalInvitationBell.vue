@@ -1,91 +1,195 @@
 <template>
-  <!-- 通知入口：合并展示"待处理邀请"与站内通知（自动化运行结果、等待审批等）。
-       触发区域由调用方通过默认插槽渲染（侧栏底部用户栏右侧），面板向右弹出。
-       通知靠轮询刷新，页面不可见时暂停。 -->
   <t-popup v-model:visible="panelVisible" trigger="click" placement="right-bottom" :overlay-inner-style="{ padding: 0 }">
-      <slot :count="badgeCount" :open="panelVisible" />
-      <template #content>
-        <div class="notification-panel">
-          <div class="notification-panel__head">
-            <span>{{ $t('notifications.title') }}</span>
-            <t-button v-if="unread > 0" size="small" variant="text" theme="primary" @click="markAllRead">
-              {{ $t('notifications.markAllRead') }}
-            </t-button>
+    <slot :count="badgeCount" :open="panelVisible" />
+    <template #content>
+      <div class="notification-panel" :aria-label="t('notifications.title')">
+        <div class="notification-panel__head">
+          <span>{{ t('notifications.title') }}</span>
+          <div class="notification-panel__actions">
+            <button v-if="unread > 0" type="button" :disabled="busy" @click="markAllRead">{{ t('notifications.markAllRead') }}</button>
+            <t-popconfirm v-if="readCount > 0" :content="t('notifications.clearReadConfirm')" theme="default" placement="bottom-right"
+              :confirm-btn="{ content: t('notifications.clearRead'), theme: 'primary' }" :cancel-btn="t('common.cancel')"
+              :popup-props="{ disabled: busy }" @confirm="clearRead">
+              <button type="button" :disabled="busy">{{ t('notifications.clearRead') }}</button>
+            </t-popconfirm>
           </div>
-          <button v-if="pendingInvitationCount > 0" type="button" class="notification-item" @click="openInvitations">
-            <t-icon name="usergroup-add" size="16px" class="notification-item__icon" />
-            <span class="notification-item__body">
-              <span class="notification-item__title">{{ $t('tenantInvitation.inboxTooltip') }}</span>
-              <span class="notification-item__text">
-                {{ $t('notifications.pendingInvitations', { count: pendingInvitationCount }) }}
-              </span>
-            </span>
-          </button>
-          <button v-for="item in items" :key="item.id" type="button" class="notification-item"
-            :class="{ 'is-unread': !item.read_at }" @click="open(item)">
-            <span class="notification-item__dot" :class="`is-${item.kind.replace('.', '-')}`" aria-hidden="true" />
-            <span class="notification-item__body">
-              <span class="notification-item__title">{{ item.title }}</span>
-              <span v-if="item.body" class="notification-item__text">{{ item.body }}</span>
-              <span class="notification-item__time">
-                {{ kindLabel(item.kind) }} · {{ formatTime(item.created_at) }}
-              </span>
-            </span>
-          </button>
-          <p v-if="!items.length && pendingInvitationCount === 0" class="notification-panel__empty">
-            {{ $t('notifications.empty') }}
-          </p>
         </div>
-      </template>
+        <div class="notification-panel__scroll">
+          <section v-if="pendingCount" class="notification-panel__pending">
+            <h3>{{ t('notifications.pending') }}<span>{{ pendingCount }}</span></h3>
+            <button v-if="pendingInvitationCount > 0" type="button" class="notification-task" @click="openInvitations">
+              <span class="notification-item__body">
+                <span class="notification-item__heading">
+                  <t-icon name="usergroup-add" size="16px" class="notification-task__icon" />
+                  <span class="notification-item__title">{{ t('tenantInvitation.inboxTooltip') }}</span>
+                </span>
+                <span class="notification-item__text">{{ t('notifications.pendingInvitations', { count: pendingInvitationCount }) }}</span>
+                <span class="notification-task__action">{{ t('notifications.handle') }}<t-icon name="chevron-right" size="12px" /></span>
+              </span>
+            </button>
+            <button v-for="item in pending" :key="item.id" type="button" class="notification-task" @click="openPending(item)">
+              <span class="notification-item__body">
+                <span class="notification-item__heading">
+                  <t-icon :name="item.kind === 'tool_approval' ? 'secured' : 'chat'" size="16px" class="notification-task__icon" />
+                  <span class="notification-item__title">{{ item.title }}</span>
+                </span>
+                <span class="notification-item__footer">
+                  <span>{{ pendingLabel(item.kind) }}</span>
+                  <span class="notification-task__action">{{ item.kind === 'tool_approval' ? t('notifications.review') : t('notifications.handle') }}<t-icon name="chevron-right" size="12px" /></span>
+                </span>
+              </span>
+            </button>
+          </section>
+          <section class="notification-panel__history">
+            <h3>{{ t('notifications.history') }}<span v-if="unread">{{ t('notifications.unreadCount', { count: unread }) }}</span></h3>
+            <button v-if="hasNew" type="button" class="notification-panel__refresh" :disabled="loading || busy" @click="refresh(true)">
+              {{ t('notifications.newItems') }}
+            </button>
+            <button v-for="item in items" :key="item.id" type="button" class="notification-item"
+              :class="{ 'is-unread': !item.read_at }" :disabled="busy" @click="open(item)">
+              <span class="notification-item__body">
+                <span class="notification-item__heading">
+                  <span class="notification-item__title">{{ item.title }}</span>
+                  <span v-if="!item.read_at" class="notification-item__unread">{{ t('notifications.unread') }}</span>
+                </span>
+                <span v-if="item.body" class="notification-item__text">{{ item.body }}</span>
+                <span class="notification-item__footer">
+                  <span class="notification-item__status">
+                    <t-icon :name="historyIcon(item.kind)" size="14px" class="notification-item__icon"
+                      :class="{ 'is-success': item.kind === 'automation.succeeded', 'is-error': item.kind === 'automation.failed', 'is-warning': item.kind === 'automation.paused' }" />
+                    {{ kindLabel(item.kind) }}
+                  </span>
+                  <time class="notification-item__time" :datetime="item.created_at">{{ formatTime(item.created_at) }}</time>
+                </span>
+              </span>
+            </button>
+            <p v-if="!items.length && !loading && !loadError" class="notification-panel__empty">{{ t('notifications.empty') }}</p>
+            <div v-if="loadError" class="notification-panel__error" role="status">
+              {{ t('notifications.loadError') }}
+              <button type="button" :disabled="loading || busy" @click="retry">{{ t('common.retry') }}</button>
+            </div>
+            <div v-if="loading" class="notification-panel__loading"><t-loading size="small" /></div>
+            <button v-else-if="nextCursor && !loadError" type="button" class="notification-panel__more" :disabled="busy" @click="loadMore">
+              {{ t('common.loadMore') }}
+            </button>
+          </section>
+        </div>
+      </div>
+    </template>
   </t-popup>
   <MyInvitationsDialog v-model:visible="dialogVisible" />
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { MessagePlugin } from 'tdesign-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import MyInvitationsDialog from '@/components/MyInvitationsDialog.vue'
-import { listNotifications, markNotificationsRead, type AppNotification } from '@/api/automation'
+import { clearReadNotifications, listNotifications, markNotificationsRead, type AppNotification, type NotificationPage, type PendingNotification } from '@/api/automation'
 
 const POLL_MS = 60_000
-
 const authStore = useAuthStore()
 const router = useRouter()
 const { t, te, locale } = useI18n()
-
 const pendingInvitationCount = computed(() => authStore.pendingInvitationCount)
 const items = ref<AppNotification[]>([])
+const pending = ref<PendingNotification[]>([])
 const unread = ref(0)
-const badgeCount = computed(() => pendingInvitationCount.value + unread.value)
-
+const readCount = ref(0)
+const pendingCount = computed(() => pendingInvitationCount.value + pending.value.length)
+const badgeCount = computed(() => pendingCount.value + unread.value)
+const nextCursor = ref('')
+const historyExpanded = ref(false)
+const hasNew = ref(false)
+const loading = ref(false)
+const busy = ref(false)
+const loadError = ref<'' | 'refresh' | 'more'>('')
 const dialogVisible = ref(false)
 const panelVisible = ref(false)
+let version = 0
 let timer: ReturnType<typeof setInterval> | undefined
 
-async function refresh() {
-  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+function applyCounts(page: NotificationPage) {
+  pending.value = page.pending ?? []
+  unread.value = page.unread ?? 0
+  readCount.value = page.read_count ?? 0
+}
+
+async function refresh(reset = false) {
+  if (busy.value || (loading.value && !reset) || document.visibilityState === 'hidden') return
+  const request = ++version
+  loading.value = true
   try {
-    const res = await listNotifications(20)
-    items.value = res.data?.items ?? []
-    unread.value = res.data?.unread ?? 0
+    const { data } = await listNotifications(20)
+    if (request !== version) return
+    applyCounts(data)
+    if (reset || !historyExpanded.value || !panelVisible.value) {
+      items.value = data.items ?? []
+      nextCursor.value = data.next_cursor ?? ''
+      historyExpanded.value = false
+      hasNew.value = false
+    } else {
+      // Keep the cursor and reading position while browsing older pages.
+      // New arrivals are revealed explicitly, so a busy feed cannot create gaps.
+      const known = new Set(items.value.map(item => item.id))
+      hasNew.value = (data.items ?? []).some(item => !known.has(item.id))
+      const fresh = new Map((data.items ?? []).map(item => [item.id, item]))
+      items.value = items.value.map(item => fresh.get(item.id) ?? item)
+    }
+    loadError.value = ''
   } catch {
-    // Polling retries on the next tick.
+    if (request === version) loadError.value = 'refresh'
+  } finally {
+    if (request === version) loading.value = false
   }
 }
 
-const onVisible = () => {
-  if (document.visibilityState === 'visible') void refresh()
+async function loadMore() {
+  if (!nextCursor.value || loading.value || busy.value) return
+  const request = ++version
+  loading.value = true
+  try {
+    const { data } = await listNotifications(20, nextCursor.value)
+    if (request !== version) return
+    const known = new Set(items.value.map(item => item.id))
+    items.value.push(...(data.items ?? []).filter(item => !known.has(item.id)))
+    nextCursor.value = data.next_cursor ?? ''
+    historyExpanded.value = true
+    applyCounts(data)
+    loadError.value = ''
+  } catch {
+    if (request === version) loadError.value = 'more'
+  } finally {
+    if (request === version) loading.value = false
+  }
 }
 
+function retry() {
+  return loadError.value === 'more' ? loadMore() : refresh(true)
+}
+
+const onVisible = () => { if (document.visibilityState === 'visible') void refresh() }
+watch(panelVisible, open => { if (open) void refresh(true) })
+watch(() => [authStore.effectiveTenantId, authStore.user?.id], () => {
+  ++version
+  items.value = []
+  pending.value = []
+  unread.value = readCount.value = 0
+  nextCursor.value = ''
+  historyExpanded.value = hasNew.value = loading.value = busy.value = false
+  loadError.value = ''
+  panelVisible.value = false
+  if (authStore.user) void refresh(true)
+})
 onMounted(() => {
   void refresh()
-  timer = setInterval(refresh, POLL_MS)
+  timer = setInterval(() => { void refresh() }, POLL_MS)
   document.addEventListener('visibilitychange', onVisible)
 })
-
 onBeforeUnmount(() => {
+  ++version
   clearInterval(timer)
   document.removeEventListener('visibilitychange', onVisible)
 })
@@ -94,121 +198,192 @@ const kindLabel = (kind: string) => {
   const key = `notifications.kinds.${kind.replace('.', '_')}`
   return te(key) ? t(key) : t('notifications.title')
 }
+const pendingLabel = (kind: string) => t(kind === 'tool_approval' ? 'notifications.awaitingApproval'
+  : kind === 'mcp_oauth' ? 'notifications.awaitingAuthorization' : 'notifications.awaitingReply')
+const historyIcon = (kind: string) => kind === 'automation.succeeded' ? 'check-circle'
+  : kind === 'automation.failed' ? 'error-circle' : kind === 'automation.paused' ? 'pause-circle' : 'notification'
 const formatTime = (iso: string) => {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return ''
   return new Intl.DateTimeFormat(locale.value, { dateStyle: 'short', timeStyle: 'short' }).format(date)
 }
-
-const openInvitations = () => {
+const openInvitations = () => { panelVisible.value = false; dialogVisible.value = true }
+function navigate(link: string) {
   panelVisible.value = false
-  dialogVisible.value = true
+  if (link.startsWith('/') && !link.startsWith('//')) void router.push(link)
 }
+function openPending(item: PendingNotification) { navigate(item.link) }
 
-async function open(item: AppNotification) {
-  panelVisible.value = false
-  if (!item.read_at) {
-    item.read_at = new Date().toISOString()
-    unread.value = Math.max(0, unread.value - 1)
-    markNotificationsRead([item.id]).catch(() => {})
-  }
-  if (item.link.startsWith('/')) void router.push(item.link)
-}
-
-async function markAllRead() {
+async function mutate(action: () => Promise<unknown>, onSuccess: () => void, reset = false) {
+  if (busy.value) return
+  const request = ++version
+  busy.value = true
+  loading.value = false
   try {
-    await markNotificationsRead()
-    const now = new Date().toISOString()
-    items.value = items.value.map((item) => ({ ...item, read_at: item.read_at ?? now }))
-    unread.value = 0
+    await action()
+    if (request !== version) return
+    onSuccess()
   } catch {
-    // Left unread; the next poll shows the real state.
+    if (request === version) MessagePlugin.error(t('common.operationFailed'))
+  } finally {
+    if (request === version) {
+      busy.value = false
+      await refresh(reset)
+    }
   }
+}
+async function open(item: AppNotification) {
+  if (busy.value) return
+  navigate(item.link)
+  if (!item.read_at) await mutate(() => markNotificationsRead([item.id]), () => {
+    item.read_at = new Date().toISOString()
+  })
+}
+async function markAllRead() {
+  await mutate(() => markNotificationsRead(), () => {
+    const now = new Date().toISOString()
+    items.value = items.value.map(item => ({ ...item, read_at: item.read_at ?? now }))
+  })
+}
+async function clearRead() {
+  await mutate(clearReadNotifications, () => {
+    items.value = items.value.filter(item => !item.read_at)
+  }, true)
 }
 </script>
 
 <style lang="less" scoped>
 .notification-panel {
-  width: 360px;
-  max-height: 460px;
-  overflow-y: auto;
-  padding: 4px 0;
+  width: min(380px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  max-height: min(560px, calc(100vh - 48px));
+  color: var(--td-text-color-primary);
+  font-family: var(--app-font-family);
+  font-size: var(--app-text-md);
+  font-weight: 400;
+  line-height: 1.5;
 }
-
 .notification-panel__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 0 4px 4px;
-  padding: 6px 12px 8px;
+  gap: 12px;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--td-component-stroke);
+  font-size: var(--app-text-base);
   font-weight: 600;
+  flex-shrink: 0;
 }
-
-.notification-panel__empty {
-  margin: 0;
-  padding: 16px 12px;
-  color: var(--td-text-color-placeholder);
-  font-size: var(--app-text-sm);
-  text-align: center;
-}
-
-.notification-item {
+.notification-panel__actions {
   display: flex;
+  align-items: center;
   gap: 10px;
-  width: calc(100% - 8px);
-  margin: 2px 4px;
-  padding: 8px 12px;
+}
+.notification-panel__actions button,
+.notification-panel__error button,
+.notification-panel__more,
+.notification-panel__refresh {
   border: 0;
   border-radius: var(--app-radius-sm);
-  background: none;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font: inherit;
+  font-size: var(--app-text-sm);
+  font-weight: 400;
+  cursor: pointer;
+  padding: 4px;
+  &:hover:not(:disabled) { color: var(--td-text-color-primary); background: var(--td-bg-color-container-hover); }
+  &:disabled { cursor: default; opacity: 0.5; }
+}
+.notification-panel__scroll { min-height: 0; overflow-y: auto; padding: 12px 8px; overscroll-behavior: contain; }
+.notification-panel h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 12px 8px;
+  font-size: var(--app-text-xs);
+  font-weight: 500;
+  color: var(--td-text-color-secondary);
+  > span { font-weight: 400; }
+}
+.notification-panel__pending { margin-bottom: 20px; }
+.notification-task,
+.notification-item {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px;
+  border: 0;
+  border-radius: var(--app-radius-md);
   color: var(--td-text-color-primary);
   font: inherit;
   text-align: left;
   cursor: pointer;
-
-  &:hover {
-    background: var(--td-bg-color-container-hover);
-  }
-
-  &.is-unread {
-    background: var(--td-bg-color-secondarycontainer);
-
-    &:hover {
-      background: var(--td-bg-color-secondarycontainer-hover);
-    }
-  }
+  transition: background-color 0.15s ease;
 }
-
-.notification-item__dot {
-  flex-shrink: 0;
-  width: 6px;
-  height: 6px;
-  margin-top: 6px;
-  border-radius: 50%;
-  background: var(--td-text-color-placeholder);
-
-  &.is-automation-succeeded { background: var(--td-success-color); }
-  &.is-automation-failed { background: var(--td-error-color); }
-  &.is-automation-awaiting_approval,
-  &.is-automation-paused { background: var(--td-warning-color); }
+.notification-task {
+  margin-bottom: 6px;
+  background: color-mix(in srgb, var(--td-warning-color) 4%, var(--td-bg-color-container));
+  &:hover { background: color-mix(in srgb, var(--td-warning-color) 7%, var(--td-bg-color-container)); }
 }
-
-.notification-item__body {
-  display: flex;
-  flex-direction: column;
+.notification-task__icon { flex-shrink: 0; color: var(--td-warning-color); }
+.notification-task__action {
+  display: inline-flex;
+  align-items: center;
   gap: 2px;
-  min-width: 0;
+  flex-shrink: 0;
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+  color: var(--td-text-color-primary);
 }
-
+.notification-item {
+  background: transparent;
+  &:hover:not(:disabled) { background: color-mix(in srgb, var(--td-bg-color-container-hover) 55%, var(--td-bg-color-container)); }
+  .notification-item__title { font-weight: 400; }
+  &.is-unread {
+    background: color-mix(in srgb, var(--td-bg-color-container-hover) 65%, var(--td-bg-color-container));
+    .notification-item__title { font-weight: 600; }
+    &:hover:not(:disabled) { background: var(--td-bg-color-container-hover); }
+  }
+  &:disabled { cursor: default; }
+  & + & { margin-top: 4px; }
+}
+.notification-item__icon {
+  flex-shrink: 0;
+  color: var(--td-text-color-secondary);
+  &.is-success { color: var(--td-success-color); }
+  &.is-error { color: var(--td-error-color); }
+  &.is-warning { color: var(--td-warning-color); }
+}
+.notification-item__body { display: flex; flex: 1; flex-direction: column; gap: 6px; min-width: 0; }
+.notification-item__heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .notification-item__title {
+  min-width: 0;
   overflow: hidden;
   font-size: var(--app-text-md);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
+.notification-item__unread {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-xs);
+  font-weight: 400;
+  &::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--td-brand-color);
+  }
+}
 .notification-item__text {
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -216,13 +391,26 @@ async function markAllRead() {
   line-clamp: 2;
   overflow: hidden;
   color: var(--td-text-color-secondary);
-  font-size: var(--app-text-xs);
-  line-height: 1.5;
+  font-size: var(--app-text-md);
+  font-weight: 400;
+  line-height: 1.6;
   overflow-wrap: anywhere;
 }
-
-.notification-item__time {
-  color: var(--td-text-color-placeholder);
+.notification-item__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  color: var(--td-text-color-secondary);
   font-size: var(--app-text-xs);
 }
+.notification-item__status { display: inline-flex; align-items: center; gap: 4px; }
+.notification-item__time { font-variant-numeric: tabular-nums; }
+.notification-panel__empty,
+.notification-panel__error { margin: 0; padding: 16px 8px; color: var(--td-text-color-secondary); font-size: var(--app-text-xs); text-align: center; }
+.notification-panel__loading { display: flex; justify-content: center; padding: 12px; }
+.notification-panel__more,
+.notification-panel__refresh { width: 100%; padding: 8px; margin-top: 6px; }
+.notification-panel button:focus-visible { outline: 2px solid var(--td-brand-color-focus); outline-offset: 1px; }
 </style>

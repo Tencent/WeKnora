@@ -443,13 +443,14 @@ func (h *AutomationHandler) AddAutomationGrant(c *gin.Context) {
 // @Tags         通知
 // @Produce      json
 // @Param        limit   query     int   false  "条数，最多 100"
+// @Param        cursor  query     string  false  "上一页返回的 next_cursor"
 // @Param        unread  query     bool  false  "只看未读"
-// @Success      200     {object}  map[string]interface{}  "{items, unread}"
+// @Success      200     {object}  map[string]interface{}  "{items, pending, unread, read_count, next_cursor}"
 // @Security     Bearer
 // @Router       /notifications [get]
 func (h *AutomationHandler) ListNotifications(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	page, err := h.notifications.List(c.Request.Context(), limit, c.Query("unread") == "true")
+	page, err := h.notifications.List(c.Request.Context(), limit, c.Query("unread") == "true", c.Query("cursor"))
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -463,7 +464,7 @@ type markNotificationsReadRequest struct {
 
 // MarkNotificationsRead godoc
 // @Summary      标记通知已读
-// @Description  ids 为空时全部标记已读
+// @Description  ids 为空时将全部通知记录标为已读，不改变待处理事项
 // @Tags         通知
 // @Accept       json
 // @Produce      json
@@ -475,6 +476,21 @@ func (h *AutomationHandler) MarkNotificationsRead(c *gin.Context) {
 	var req markNotificationsReadRequest
 	_ = c.ShouldBindJSON(&req)
 	if err := h.notifications.MarkRead(c.Request.Context(), req.IDs); err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// ClearReadNotifications removes read notification history without changing work.
+// @Summary      清理已读通知
+// @Tags         通知
+// @Produce      json
+// @Success      200 {object} map[string]interface{}
+// @Security     Bearer
+// @Router       /notifications/read [delete]
+func (h *AutomationHandler) ClearReadNotifications(c *gin.Context) {
+	if err := h.notifications.ClearRead(c.Request.Context()); err != nil {
 		h.fail(c, err)
 		return
 	}

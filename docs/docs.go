@@ -15138,6 +15138,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "上一页返回的 next_cursor",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
                         "type": "boolean",
                         "description": "只看未读",
                         "name": "unread",
@@ -15146,7 +15152,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "{items, unread}",
+                        "description": "{items, pending, unread, read_count, next_cursor}",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -15162,7 +15168,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "ids 为空时全部标记已读",
+                "description": "ids 为空时将全部通知记录标为已读，不改变待处理事项",
                 "consumes": [
                     "application/json"
                 ],
@@ -15186,6 +15192,29 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "结果",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "通知"
+                ],
+                "summary": "清理已读通知",
+                "responses": {
+                    "200": {
+                        "description": "OK",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true

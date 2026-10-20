@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   describeTrigger,
+  hasEndedOnceSchedule,
   scheduleFormFromTrigger,
   triggerFromScheduleForm,
   wallClockToISO,
@@ -70,4 +71,14 @@ test('describeTrigger names the schedule', () => {
     describeTrigger({ type: 'cron', expr: '*/10 9-17 * * *' }, t, 'en-US'),
     'automation.schedule.describe.custom{"expr":"*/10 9-17 * * *"}',
   )
+})
+
+test('only disabled one-shot schedules with no future occurrence have ended', () => {
+  const now = Date.parse('2026-10-20T08:00:00Z')
+  const once = (at: string, enabled = false) => ({ enabled, trigger: { type: 'once' as const, at } })
+  assert.equal(hasEndedOnceSchedule(once('2026-10-20T15:59:59+08:00'), now), true)
+  assert.equal(hasEndedOnceSchedule(once('2026-10-20T16:00:00+08:00'), now), true)
+  assert.equal(hasEndedOnceSchedule(once('2026-10-20T16:00:01+08:00'), now), false)
+  assert.equal(hasEndedOnceSchedule(once('2026-10-20T15:59:59+08:00', true), now), false)
+  assert.equal(hasEndedOnceSchedule({ enabled: false, trigger: { type: 'cron', expr: '0 9 * * *' } }, now), false)
 })

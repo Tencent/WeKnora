@@ -330,3 +330,25 @@ func swaggerInteger(value any) int {
 		return 0
 	}
 }
+
+func TestNotificationInboxContract(t *testing.T) {
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				Paths map[string]map[string]swaggerOperation `json:"paths" yaml:"paths"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := spec.Paths["/notifications/read"]["delete"]; !ok {
+				t.Fatal("missing clear-read notification endpoint")
+			}
+			for _, parameter := range spec.Paths["/notifications"]["get"].Parameters {
+				if parameter.Name == "cursor" && parameter.In == "query" && parameter.Type == "string" {
+					return
+				}
+			}
+			t.Fatal("notification listing must document its history cursor")
+		})
+	}
+}

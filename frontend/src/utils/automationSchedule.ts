@@ -1,8 +1,14 @@
-import type { AutomationTrigger } from '@/api/automation'
+import type { Automation, AutomationTrigger } from '@/api/automation'
 
 // The editor offers a few schedule shapes and falls back to a raw cron
 // expression for anything else. Cron here is the server's five-field form,
 // minute first, evaluated in the trigger's timezone.
+
+/** An elapsed one-shot schedule has no future occurrence to resume. */
+export function hasEndedOnceSchedule(automation: Pick<Automation, 'enabled' | 'trigger'>, now = Date.now()): boolean {
+  return !automation.enabled && automation.trigger.type === 'once'
+    && Date.parse(automation.trigger.at || '') <= now
+}
 
 export type ScheduleKind = 'hourly' | 'daily' | 'weekdays' | 'weekly' | 'monthly' | 'once' | 'custom'
 

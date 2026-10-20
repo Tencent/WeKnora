@@ -36,20 +36,28 @@
             <div class="automation-card__badge" aria-hidden="true"><t-icon name="time" size="14px" /></div>
             <h3 class="automation-card__title" :title="item.name">{{ item.name }}</h3>
             <div class="automation-card__actions">
-              <button type="button" class="automation-card__icon-btn" :title="t('automation.actions.runNow')"
-                :aria-label="`${item.name} · ${t('automation.actions.runNow')}`" :disabled="busy.has(item.id)"
-                @click="runNow(item)">
-                <t-icon name="play-circle" size="14px" />
-              </button>
+              <t-popconfirm :content="t('automation.runConfirm', { name: item.name })"
+                :confirm-btn="{ content: t('automation.actions.runNow'), theme: 'primary' }"
+                :cancel-btn="t('common.cancel')" theme="default" placement="bottom"
+                :popup-props="{ disabled: busy.has(item.id) }" @confirm="runNow(item)">
+                <button type="button" class="automation-card__icon-btn" :title="t('automation.actions.runNow')"
+                  :aria-label="`${item.name} · ${t('automation.actions.runNow')}`" :disabled="busy.has(item.id)">
+                  <ChatActionIcon name="play" />
+                </button>
+              </t-popconfirm>
               <button type="button" class="automation-card__icon-btn" :title="t('common.edit')"
                 :aria-label="`${item.name} · ${t('common.edit')}`" @click="openEditor(item)">
-                <t-icon name="edit" size="14px" />
+                <ChatActionIcon name="edit" />
               </button>
-              <button type="button" class="automation-card__icon-btn automation-card__icon-btn--danger"
-                :title="t('common.delete')" :aria-label="`${item.name} · ${t('common.delete')}`"
-                :disabled="busy.has(item.id)" @click="remove(item)">
-                <t-icon name="delete" size="14px" />
-              </button>
+              <t-popconfirm :content="t('automation.deleteBody', { name: item.name })"
+                :confirm-btn="{ content: t('common.delete'), theme: 'danger' }"
+                :cancel-btn="t('common.cancel')" theme="danger" placement="bottom"
+                :popup-props="{ disabled: busy.has(item.id) }" @confirm="remove(item)">
+                <button type="button" class="automation-card__icon-btn" :title="t('common.delete')"
+                  :aria-label="`${item.name} · ${t('common.delete')}`" :disabled="busy.has(item.id)">
+                  <ChatActionIcon name="delete" />
+                </button>
+              </t-popconfirm>
             </div>
           </div>
           <p class="automation-card__schedule">{{ describeTrigger(item.trigger, t, locale) }}</p>
@@ -64,7 +72,10 @@
               </span>
               <AutomationStatusTag :status="item.last_run_status" />
             </div>
-            <button type="button" role="switch" class="automation-card__status" :class="{ 'is-enabled': item.enabled }"
+            <span v-if="hasEndedOnceSchedule(item)" class="automation-card__status is-ended" :title="t('automation.scheduleEndedHint')">
+              {{ t('automation.scheduleEnded') }}
+            </span>
+            <button v-else type="button" role="switch" class="automation-card__status" :class="{ 'is-enabled': item.enabled }"
               :aria-checked="item.enabled" :aria-label="`${item.name} · ${t('automation.fields.enabled')}`"
               :disabled="busy.has(item.id)" @click="toggle(item)">
               <t-loading v-if="busy.has(item.id)" size="12px" />
@@ -92,7 +103,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin } from 'tdesign-vue-next'
 import { BUILTIN_WEKNORA_ASSISTANT_ID } from '@/api/agent'
 import {
   deleteAutomation,
@@ -104,10 +115,11 @@ import {
   type Automation,
 } from '@/api/automation'
 import { useAuthStore } from '@/stores/auth'
-import { describeTrigger, formatInZone } from '@/utils/automationSchedule'
+import { describeTrigger, formatInZone, hasEndedOnceSchedule } from '@/utils/automationSchedule'
 import AutomationEditor from './AutomationEditor.vue'
 import AutomationDetail from './AutomationDetail.vue'
 import AutomationStatusTag from './AutomationStatusTag.vue'
+import ChatActionIcon from '@/components/ChatActionIcon.vue'
 import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import { loadAutomationAgents, type AutomationAgentOption } from './agents'
 
@@ -212,6 +224,11 @@ watch(detailVisible, (open) => {
 })
 
 async function toggle(item: Automation) {
+  if (busy.value.has(item.id)) return
+  if (hasEndedOnceSchedule(item)) {
+    MessagePlugin.warning(t('automation.scheduleEndedHint'))
+    return
+  }
   busy.value.add(item.id)
   try {
     const res = item.enabled ? await pauseAutomation(item.id) : await resumeAutomation(item.id)
@@ -224,6 +241,7 @@ async function toggle(item: Automation) {
 }
 
 async function runNow(item: Automation) {
+  if (busy.value.has(item.id)) return
   busy.value.add(item.id)
   try {
     const res = await runAutomationNow(item.id)
@@ -236,27 +254,19 @@ async function runNow(item: Automation) {
   }
 }
 
-function remove(item: Automation) {
-  const dialog = DialogPlugin.confirm({
-    header: t('automation.deleteTitle'),
-    body: t('automation.deleteBody', { name: item.name }),
-    theme: 'danger',
-    confirmBtn: { content: t('common.delete'), theme: 'danger' },
-    onConfirm: async () => {
-      dialog.hide()
-      busy.value.add(item.id)
-      try {
-        await deleteAutomation(item.id)
-        automations.value = automations.value.filter((a) => a.id !== item.id)
-        if (detail.value?.id === item.id) detailVisible.value = false
-        MessagePlugin.success(t('common.deleteSuccess'))
-      } catch (e: any) {
-        MessagePlugin.error(e?.message || t('common.deleteFailed'))
-      } finally {
-        busy.value.delete(item.id)
-      }
-    },
-  })
+async function remove(item: Automation) {
+  if (busy.value.has(item.id)) return
+  busy.value.add(item.id)
+  try {
+    await deleteAutomation(item.id)
+    automations.value = automations.value.filter((a) => a.id !== item.id)
+    if (detail.value?.id === item.id) detailVisible.value = false
+    MessagePlugin.success(t('common.deleteSuccess'))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('common.deleteFailed'))
+  } finally {
+    busy.value.delete(item.id)
+  }
 }
 
 onMounted(async () => {
@@ -308,7 +318,12 @@ onMounted(async () => {
 }
 
 .automation-page__search {
-  width: 240px;
+  width: 260px;
+  max-width: 100%;
+
+  :deep(.t-input) {
+    border-radius: var(--app-radius-sm);
+  }
 }
 
 .automation-page__add.t-button {
@@ -321,7 +336,12 @@ onMounted(async () => {
   color: var(--td-text-color-primary);
 
   :deep(.t-icon) {
-    color: var(--td-brand-color);
+    color: var(--td-text-color-secondary);
+  }
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+    border-color: var(--td-component-stroke);
   }
 }
 
@@ -367,10 +387,9 @@ onMounted(async () => {
   border: 1px solid var(--td-component-stroke);
   border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
-  transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease;
+  transition: background-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease;
 
   &:hover:not(.automation-card--add) {
-    border-color: color-mix(in srgb, var(--td-brand-color) 40%, var(--td-component-stroke));
     box-shadow: 0 3px 12px color-mix(in srgb, var(--td-text-color-primary) 6%, transparent);
   }
 
@@ -392,9 +411,10 @@ onMounted(async () => {
 
     &:hover,
     &:focus-visible {
-      color: var(--td-brand-color);
-      border-color: var(--td-brand-color);
-      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
+      color: var(--td-text-color-primary);
+      border-color: var(--td-component-border);
+      background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 15%, var(--td-bg-color-container));
+      box-shadow: 0 3px 12px color-mix(in srgb, var(--td-text-color-primary) 5%, transparent);
     }
 
     &__icon {
@@ -474,23 +494,22 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: 0;
   border-radius: var(--app-radius-sm);
   background: none;
-  color: var(--td-text-color-placeholder);
+  color: color-mix(in srgb, var(--td-text-color-primary) 55%, transparent);
   cursor: pointer;
 
   &:hover:not(:disabled) {
-    color: var(--td-text-color-primary);
-    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-secondary);
+    background: color-mix(in srgb, var(--td-text-color-primary) 5%, transparent);
   }
 
-  &--danger:hover:not(:disabled) {
-    color: var(--td-error-color);
-    background: color-mix(in srgb, var(--td-error-color) 8%, transparent);
+  &:active:not(:disabled) {
+    background: color-mix(in srgb, var(--td-text-color-primary) 9%, transparent);
   }
 
   &:disabled {
@@ -550,7 +569,9 @@ onMounted(async () => {
     color: var(--td-success-color);
   }
 
-  &:hover:not(:disabled) {
+  &.is-ended { cursor: default; }
+
+  &:hover:not(:disabled):not(.is-ended) {
     background: var(--td-bg-color-container-hover);
   }
 
@@ -568,7 +589,7 @@ onMounted(async () => {
 
 .automation-card button:focus-visible,
 .automation-card--add:focus-visible {
-  outline: 2px solid var(--td-brand-color);
+  outline: 2px solid var(--td-text-color-secondary);
   outline-offset: -2px;
 }
 </style>
