@@ -82,6 +82,19 @@ func (e *testEnv) reason(t *testing.T, sessionID, configID string) allocation.Fa
 	return r
 }
 
+func (e *testEnv) addSession(t *testing.T, s *types.Session) {
+	t.Helper()
+	require.NoError(t, e.db.Session(&gorm.Session{SkipHooks: true}).Create(s).Error)
+}
+
+func (e *testEnv) digest(t *testing.T, sessionID string) string {
+	t.Helper()
+	row, err := e.svc.repo.GetAssignment(context.Background(), sessionID)
+	require.NoError(t, err)
+	require.NotNil(t, row)
+	return row.MachineDigest
+}
+
 func (e *testEnv) pin(t *testing.T, sessionID string) (string, uint64) {
 	t.Helper()
 	var s types.Session
