@@ -30,7 +30,11 @@ func TestAutomationDelegatedExecutionKeepsIdentity(t *testing.T) {
 			var err error
 			if inherited {
 				parent = context.WithValue(parent, childSourceKey{}, childSource{Agent: agents.agent, ModelID: "model"})
-				snapshot, err = inheritedChildSnapshot(parent, &types.AgentConfig{AssistantAccess: types.AssistantAccessAutoWrite}, nil)
+				snapshot, err = inheritedChildSnapshot(
+					parent,
+					&types.AgentConfig{AssistantAccess: types.AssistantAccessAutoWrite},
+					nil,
+				)
 			} else {
 				snapshot, err = svc.resolve(parent, "a", types.AssistantAccessAutoWrite)
 			}
@@ -47,19 +51,26 @@ func TestAutomationDelegatedExecutionKeepsIdentity(t *testing.T) {
 				return nil
 			}))
 			called := false
-			svc.Bind(&collaborationSessions{run: func(child context.Context, req *types.QARequest, bus *event.EventBus) error {
-				called = true
-				require.Equal(t, via, types.ActingViaFromContext(child))
-				require.Equal(t, types.RunModeDeferred, req.Mode)
-				require.False(t, req.Mode.Attended(), "ask_user must stay unavailable")
-				_, _, err := automationOwner(child)
-				require.Error(t, err, "delegation must not bypass the automation management guard")
-				return complete(child, bus, event.AgentCompleteData{FinalAnswer: "done"})
-			}})
+			svc.Bind(
+				&collaborationSessions{
+					run: func(child context.Context, req *types.QARequest, bus *event.EventBus) error {
+						called = true
+						require.Equal(t, via, types.ActingViaFromContext(child))
+						require.Equal(t, types.RunModeDeferred, req.Mode)
+						require.False(t, req.Mode.Attended(), "ask_user must stay unavailable")
+						_, _, err := automationOwner(child)
+						require.Error(t, err, "delegation must not bypass the automation management guard")
+						return complete(child, bus, event.AgentCompleteData{FinalAnswer: "done"})
+					},
+				},
+			)
 			g, err := svc.Runtime.Store.Read(ctx, scope)
 			require.NoError(t, err)
 			// A scheduler starts from its own context, not the parent's request context.
-			_, err = svc.run(context.Background(), collaboration.Work{Scope: scope, Member: *g.Members[0], Run: *g.Members[0].Runs[0]})
+			_, err = svc.run(
+				context.Background(),
+				collaboration.Work{Scope: scope, Member: *g.Members[0], Run: *g.Members[0].Runs[0]},
+			)
 			require.NoError(t, err)
 			require.True(t, called)
 		})
@@ -75,8 +86,13 @@ func TestAutomationCancelStopsDelegationAndRecovery(t *testing.T) {
 	queued, err := f.svc.RunNow(f.ctx, a.ID)
 	require.NoError(t, err)
 	entered := make(chan collaboration.Scope, 1)
-	f.sessions.run = func(ctx context.Context, req *types.QARequest, bus *event.EventBus) error {
-		scope := collaboration.Scope{TenantID: automationTenant, UserID: "u", SessionID: req.Session.ID, ID: req.AssistantMessageID}
+	f.sessions.run = func(ctx context.Context, req *types.QARequest, _ *event.EventBus) error {
+		scope := collaboration.Scope{
+			TenantID:  automationTenant,
+			UserID:    "u",
+			SessionID: req.Session.ID,
+			ID:        req.AssistantMessageID,
+		}
 		b, err := delegated.Runtime.AcquireParent(ctx, scope)
 		if err != nil {
 			return err
@@ -97,7 +113,9 @@ func TestAutomationCancelStopsDelegationAndRecovery(t *testing.T) {
 			return err
 		}
 		saved := resumableAgentRequest(ctx, req)
-		data, err := json.Marshal(agent.RunSnapshot{Version: agent.RunSnapshotVersion, Request: mustJSON(t, saved), CollaborationWait: true})
+		data, err := json.Marshal(
+			agent.RunSnapshot{Version: agent.RunSnapshotVersion, Request: mustJSON(t, saved), CollaborationWait: true},
+		)
 		if err != nil {
 			return err
 		}
@@ -148,14 +166,29 @@ func TestAutomationParentRecoveryDoesNotEscapeScheduler(t *testing.T) {
 	t.Cleanup(func() { b.End(false) })
 	require.NoError(t, messages.UpdateMessage(ctx, &types.Message{ID: scope.ID, SessionID: scope.SessionID}))
 	svc.streams = &collaborationStreams{}
-	svc.ParentEvents = func(context.Context, *types.Session, *types.Message, *event.EventBus) func(context.Context) error {
+	svc.ParentEvents = func(
+		context.Context, *types.Session, *types.Message, *event.EventBus,
+	) func(context.Context) error {
 		return func(context.Context) error { return nil }
 	}
 	called := false
-	svc.Bind(&collaborationSessions{run: func(context.Context, *types.QARequest, *event.EventBus) error { called = true; return nil }})
-	ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalWebUser, ID: "u", ActingVia: types.AutomationActingVia("a")})
-	req := resumableAgentRequest(ctx, &types.QARequest{CustomAgent: &types.CustomAgent{ID: "a"}, Mode: types.RunModeDeferred})
-	snapshot := mustJSON(t, agent.RunSnapshot{Version: agent.RunSnapshotVersion, Request: mustJSON(t, req), CollaborationWait: true})
+	svc.Bind(
+		&collaborationSessions{
+			run: func(context.Context, *types.QARequest, *event.EventBus) error { called = true; return nil },
+		},
+	)
+	ctx = types.WithPrincipal(
+		ctx,
+		types.Principal{Type: types.PrincipalWebUser, ID: "u", ActingVia: types.AutomationActingVia("a")},
+	)
+	req := resumableAgentRequest(
+		ctx,
+		&types.QARequest{CustomAgent: &types.CustomAgent{ID: "a"}, Mode: types.RunModeDeferred},
+	)
+	snapshot := mustJSON(
+		t,
+		agent.RunSnapshot{Version: agent.RunSnapshotVersion, Request: mustJSON(t, req), CollaborationWait: true},
+	)
 	err = svc.resumeParent(context.Background(), b, snapshot)
 	require.ErrorContains(t, err, "scheduler-owned parent")
 	require.False(t, called)
@@ -165,14 +198,30 @@ func TestAutomationStartSerializesDifferentRunsAcrossInstances(t *testing.T) {
 	f := newAutomationFixture(t)
 	a := f.create(t, types.AutomationPatch{OverlapPolicy: ptr(types.AutomationPolicyQueue)})
 	rows := []*types.AutomationRun{
-		{AutomationID: a.ID, TenantID: automationTenant, ScheduledAt: f.now.Add(-time.Hour), TriggerKind: types.AutomationRunSchedule, Status: types.AutomationRunQueued, Resume: true},
-		{AutomationID: a.ID, TenantID: automationTenant, ScheduledAt: f.now, TriggerKind: types.AutomationRunSchedule, Status: types.AutomationRunQueued},
+		{
+			AutomationID: a.ID,
+			TenantID:     automationTenant,
+			ScheduledAt:  f.now.Add(-time.Hour),
+			TriggerKind:  types.AutomationRunSchedule,
+			Status:       types.AutomationRunQueued,
+			Resume:       true,
+		},
+		{
+			AutomationID: a.ID,
+			TenantID:     automationTenant,
+			ScheduledAt:  f.now,
+			TriggerKind:  types.AutomationRunSchedule,
+			Status:       types.AutomationRunQueued,
+		},
 	}
 	for _, r := range rows {
 		require.NoError(t, f.db.Create(r).Error)
 	}
 	// A separate connection pool represents another scheduler process.
-	db, err := gorm.Open(sqlite.Open(f.db.Dialector.(*sqlite.Dialector).DSN), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	db, err := gorm.Open(
+		sqlite.Open(f.db.Dialector.(*sqlite.Dialector).DSN),
+		&gorm.Config{Logger: logger.Default.LogMode(logger.Silent)},
+	)
 	require.NoError(t, err)
 	raw, err := db.DB()
 	require.NoError(t, err)
@@ -182,7 +231,8 @@ func TestAutomationStartSerializesDifferentRunsAcrossInstances(t *testing.T) {
 	release := make(chan struct{})
 	for _, db := range []*gorm.DB{f.db, db} {
 		require.NoError(t, db.Callback().Query().After("gorm:query").Register("admission_barrier", func(db *gorm.DB) {
-			if n, ok := db.Statement.Dest.(*int64); ok && *n == 0 && db.Statement.Table == "automation_runs" && strings.Contains(db.Statement.SQL.String(), "count(*)") {
+			if n, ok := db.Statement.Dest.(*int64); ok && *n == 0 && db.Statement.Table == "automation_runs" &&
+				strings.Contains(db.Statement.SQL.String(), "count(*)") {
 				arrived <- struct{}{}
 				<-release
 			}
@@ -213,16 +263,39 @@ func TestAutomationStartSerializesDifferentRunsAcrossInstances(t *testing.T) {
 	require.True(t, started[0])
 	require.False(t, started[1])
 	var active int64
-	require.NoError(t, f.db.Model(&types.AutomationRun{}).Where("automation_id = ? AND status = ?", a.ID, types.AutomationRunRunning).Count(&active).Error)
+	require.NoError(
+		t,
+		f.db.Model(&types.AutomationRun{}).
+			Where("automation_id = ? AND status = ?", a.ID, types.AutomationRunRunning).
+			Count(&active).
+			Error,
+	)
 	require.EqualValues(t, 1, active)
 }
 
 func TestAutomationQueuedRunsSkipBlockedHead(t *testing.T) {
 	f := newAutomationFixture(t)
 	for i := 0; i < 16; i++ {
-		a := f.create(t, types.AutomationPatch{Name: ptr(fmt.Sprintf("blocked%d", i)), OverlapPolicy: ptr(types.AutomationPolicyQueue)})
+		a := f.create(
+			t,
+			types.AutomationPatch{
+				Name:          ptr(fmt.Sprintf("blocked%d", i)),
+				OverlapPolicy: ptr(types.AutomationPolicyQueue),
+			},
+		)
 		for j, status := range []string{types.AutomationRunAwaitingApproval, types.AutomationRunQueued} {
-			require.NoError(t, f.db.Create(&types.AutomationRun{AutomationID: a.ID, TenantID: automationTenant, ScheduledAt: f.now.Add(time.Duration(j-2) * time.Hour), TriggerKind: types.AutomationRunSchedule, Status: status}).Error)
+			require.NoError(
+				t,
+				f.db.Create(
+					&types.AutomationRun{
+						AutomationID: a.ID,
+						TenantID:     automationTenant,
+						ScheduledAt:  f.now.Add(time.Duration(j-2) * time.Hour),
+						TriggerKind:  types.AutomationRunSchedule,
+						Status:       status,
+					},
+				).Error,
+			)
 		}
 	}
 	a := f.create(t, types.AutomationPatch{Name: ptr("runnable")})
@@ -231,7 +304,8 @@ func TestAutomationQueuedRunsSkipBlockedHead(t *testing.T) {
 	require.NoError(t, f.svc.startQueued(context.Background(), f.now))
 	require.Eventually(t, func() bool {
 		var row types.AutomationRun
-		return f.db.First(&row, "id = ?", r.ID).Error == nil && row.Status == types.AutomationRunSucceeded && len(f.svc.slots) == 0
+		return f.db.First(&row, "id = ?", r.ID).Error == nil && row.Status == types.AutomationRunSucceeded &&
+			len(f.svc.slots) == 0
 	}, 5*time.Second, 10*time.Millisecond)
 }
 
@@ -246,14 +320,26 @@ func TestAutomationApprovalReconciliationVisitsEveryBatch(t *testing.T) {
 			timeout = 5
 			updated = f.now.Add(-10 * time.Minute)
 		}
-		a := f.create(t, types.AutomationPatch{Name: ptr(fmt.Sprintf("approval%d", i)), ApprovalTimeoutMinutes: ptr(timeout)})
+		a := f.create(
+			t,
+			types.AutomationPatch{Name: ptr(fmt.Sprintf("approval%d", i)), ApprovalTimeoutMinutes: ptr(timeout)},
+		)
 		status := types.AgentPromptSuspended
 		if i == 0 || i == 101 {
 			status = types.AgentPromptAnswered
 		}
 		p := &types.AgentPrompt{ID: fmt.Sprintf("p%d", i), Status: status}
 		require.NoError(t, f.broker.Store().Create(f.ctx, p))
-		r := &types.AutomationRun{ID: fmt.Sprintf("run-%03d", i), AutomationID: a.ID, TenantID: automationTenant, ScheduledAt: updated, TriggerKind: types.AutomationRunSchedule, Status: types.AutomationRunAwaitingApproval, PendingPromptID: p.ID, UpdatedAt: updated}
+		r := &types.AutomationRun{
+			ID:              fmt.Sprintf("run-%03d", i),
+			AutomationID:    a.ID,
+			TenantID:        automationTenant,
+			ScheduledAt:     updated,
+			TriggerKind:     types.AutomationRunSchedule,
+			Status:          types.AutomationRunAwaitingApproval,
+			PendingPromptID: p.ID,
+			UpdatedAt:       updated,
+		}
 		require.NoError(t, f.db.Create(r).Error)
 		if i == 100 {
 			expired = r
@@ -290,13 +376,24 @@ func TestAutomationApprovalResumeUsesRemainingExecutionBudget(t *testing.T) {
 	require.Equal(t, types.AutomationRunAwaitingApproval, suspended.Status)
 	// Approval waiting is free, even across service restarts.
 	f.now = f.now.Add(12 * time.Hour)
-	restarted := NewAutomationService(f.db, f.agents, f.users, f.members, f.svc.tenants, f.messages, f.svc.grants, f.svc.notices)
+	restarted := NewAutomationService(
+		f.db,
+		f.agents,
+		f.users,
+		f.members,
+		f.svc.tenants,
+		f.messages,
+		f.svc.grants,
+		f.svc.notices,
+	)
 	restarted.Configure(AutomationConfig{DefaultMaxDuration: time.Second})
 	restarted.now = func() time.Time { return f.now }
 	restarted.Bind(f.sessions, f.broker, nil, nil)
 	f.svc = restarted
 	ok, err := f.broker.Store().Transition(f.ctx, suspended.PendingPromptID, types.AgentPromptTransition{
-		From: []string{types.AgentPromptSuspended}, To: types.AgentPromptAnswered, Response: types.JSON(`{"approved":true}`),
+		From:     []string{types.AgentPromptSuspended},
+		To:       types.AgentPromptAnswered,
+		Response: types.JSON(`{"approved":true}`),
 	})
 	require.NoError(t, err)
 	require.True(t, ok)
@@ -316,11 +413,25 @@ func TestAutomationStaleFinalizerDoesNotCancelResumedDelegation(t *testing.T) {
 	}).Error)
 	stopped := false
 	f.svc.StopDelegation = func(context.Context, uint64, string, string, string) error { stopped = true; return nil }
-	ok, err := f.svc.finishRun(f.ctx, r, []string{types.AutomationRunAwaitingApproval}, types.AutomationRunFailed, "stale timeout", nil)
+	ok, err := f.svc.finishRun(
+		f.ctx,
+		r,
+		[]string{types.AutomationRunAwaitingApproval},
+		types.AutomationRunFailed,
+		"stale timeout",
+		nil,
+	)
 	require.NoError(t, err)
 	require.False(t, ok)
 	require.False(t, stopped)
-	ok, err = f.svc.finishRun(f.ctx, r, []string{types.AutomationRunRunning}, types.AutomationRunNeedsAttention, "executor lost", nil)
+	ok, err = f.svc.finishRun(
+		f.ctx,
+		r,
+		[]string{types.AutomationRunRunning},
+		types.AutomationRunNeedsAttention,
+		"executor lost",
+		nil,
+	)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.True(t, stopped)
@@ -338,7 +449,9 @@ func TestAutomationCancellationWinsApprovalRace(t *testing.T) {
 	// before it records the approval suspension. Do not resume that run.
 	require.NoError(t, f.db.Model(r).Update("cancel_requested", true).Error)
 	ok, err := f.broker.Store().Transition(f.ctx, r.PendingPromptID, types.AgentPromptTransition{
-		From: []string{types.AgentPromptSuspended}, To: types.AgentPromptAnswered, Response: types.JSON(`{"approved":true}`),
+		From:     []string{types.AgentPromptSuspended},
+		To:       types.AgentPromptAnswered,
+		Response: types.JSON(`{"approved":true}`),
 	})
 	require.NoError(t, err)
 	require.True(t, ok)

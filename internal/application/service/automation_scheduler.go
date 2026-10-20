@@ -351,7 +351,8 @@ func (s *AutomationService) reconcileRun(ctx context.Context, run *types.Automat
 // queue, to continue from the answer.
 func (s *AutomationService) queueResume(ctx context.Context, runID, promptID string) error {
 	res := s.db.WithContext(ctx).Model(&types.AutomationRun{}).
-		Where("id = ? AND status = ? AND pending_prompt_id = ? AND cancel_requested = ?", runID, types.AutomationRunAwaitingApproval, promptID, false).
+		Where("id = ? AND status = ? AND pending_prompt_id = ? AND cancel_requested = ?",
+			runID, types.AutomationRunAwaitingApproval, promptID, false).
 		Updates(map[string]any{"status": types.AutomationRunQueued, "resume": true, "updated_at": s.now()})
 	if res.Error == nil && res.RowsAffected > 0 {
 		s.Wake()
