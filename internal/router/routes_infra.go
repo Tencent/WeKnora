@@ -210,6 +210,9 @@ func RegisterMCPServiceRoutes(
 		// Same tenant-member (Viewer+) gating rationale as tool-approvals.
 		agentTool.POST("/mcp-oauth-resolutions/:pending_id", g.Viewer(), oauthHandler.ResolveMCPOAuth)
 		agentTool.POST("/mcp-oauth-resolutions/:pending_id/cancel", g.Viewer(), oauthHandler.CancelMCPOAuth)
+		// The caller's own remembered approvals; same gating.
+		agentTool.GET("/grants", g.Viewer(), handler.ListAgentGrants)
+		agentTool.DELETE("/grants/:id", g.Viewer(), handler.RevokeAgentGrant)
 	}
 }
 

@@ -139,6 +139,9 @@ type AgentQueryData struct {
 
 // AgentCompleteData represents agent completion event data
 type AgentCompleteData struct {
+	// Artifacts contains runtime-delivered child files (types.MessageArtifacts).
+	// Internal only: stream handlers publish sanitized metadata after persistence.
+	Artifacts       interface{}            `json:"-"`
 	SessionID       string                 `json:"session_id"`
 	TotalSteps      int                    `json:"total_steps"`
 	FinalAnswer     string                 `json:"final_answer"`
@@ -163,6 +166,13 @@ type AgentThoughtData struct {
 	Content   string `json:"content"`
 	Iteration int    `json:"iteration"`
 	Done      bool   `json:"done"`
+}
+
+// AgentProgressData is a complete user-facing update, separate from reasoning.
+// ID identifies the update across stream replay; Content is a snapshot, not a delta.
+type AgentProgressData struct {
+	Content   string `json:"content"`
+	Iteration int    `json:"iteration"`
 }
 
 // AgentToolCallData represents agent tool call notification data
@@ -201,6 +211,8 @@ type MemoryRecalledData struct {
 
 // AgentFinalAnswerData represents final answer streaming data
 type AgentFinalAnswerData struct {
+	// Replace retracts only this event ID after explicit provider protocol evidence.
+	Replace    bool   `json:"replace,omitempty"`
 	Content    string `json:"content"`
 	Done       bool   `json:"done"`
 	IsFallback bool   `json:"is_fallback,omitempty"` // True when response is a fallback (no knowledge base match)
@@ -287,6 +299,9 @@ type ToolApprovalRequiredData struct {
 	// GrantScope, when set, offers to allow calls like this one for the rest
 	// of the session, and describes which calls that covers.
 	GrantScope string `json:"grant_scope,omitempty"`
+	// GrantLapsed, when set, is why an earlier grant for this call no longer
+	// applies; see types.ToolApprovalPromptRequest.
+	GrantLapsed string `json:"grant_lapsed,omitempty"`
 }
 
 // ToolApprovalResolvedData confirms the user decision (or timeout/cancel).

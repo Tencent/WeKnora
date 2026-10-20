@@ -40,11 +40,14 @@ test('artifact count is a top-right overlay instead of t-badge', () => {
   assert.doesNotMatch(agentStream, /<t-badge/)
 })
 
-test('artifact toolbar opens the sandbox panel artifacts tab', () => {
+test('artifact toolbar supports the sandbox panel and session-local drawer', () => {
   assert.match(botMessage, /sandboxPanel.open\('artifacts'/)
   assert.match(agentStream, /sandboxPanel.open\('artifacts'/)
   assert.match(botMessage, /v-if="hasArtifacts && embeddedMode"/)
-  assert.match(agentStream, /v-if="hasArtifacts && embeddedMode/)
+  // Child and standalone viewers also need a drawer. Routing behavior and
+  // child session identity are covered by AgentStreamDisplay.artifacts.test.
+  assert.match(agentStream, /v-if="hasArtifacts && useArtifactDrawer/)
+  assert.match(agentStream, /if \(sandboxPanel && !useArtifactDrawer\.value\)/)
 })
 
 test('artifact toolbar uses a folder icon and replaces it while collecting', () => {

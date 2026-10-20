@@ -8,10 +8,14 @@
       @start="startResize" @resize="resize" @end="resizing = false" />
 
     <header class="assistant-panel__header">
-      <span class="assistant-panel__header-icon" aria-hidden="true">
-        <t-icon name="compass" />
-      </span>
-      <span class="assistant-panel__title">{{ assistantName }}</span>
+      <ChildAgentTabBar header-mode :tabs="childTabs.tabs.value"
+        :active-id="childTabs.activeId.value" :attention="childTabs.attention.value"
+        @select="selectConversationTab" @close="childTabs.close">
+        <template #parent>
+          <span class="assistant-panel__header-icon" aria-hidden="true"><t-icon name="compass" /></span>
+          <span class="assistant-panel__title">{{ assistantName }}</span>
+        </template>
+      </ChildAgentTabBar>
       <t-tooltip :content="t('assistant.newConversation')" placement="bottom">
         <button type="button" class="assistant-panel__action" :disabled="!assistant.sessionId || starting"
           :aria-label="t('assistant.newConversation')" @click="startNewConversation">
@@ -121,10 +125,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import ChatView from '@/views/chat/index.vue'
+import ChildAgentTabBar from '@/views/chat/components/ChildAgentTabBar.vue'
+import { createChildAgentTabs, childAgentTabsKey } from '@/composables/useChildAgentTabs'
 import InputField from '@/components/Input-field.vue'
 import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
 import AssistantContextMenu from './AssistantContextMenu.vue'
@@ -147,6 +153,8 @@ import { removeSession, SESSION_MUTATION_EVENT, type SessionMutationDetail } fro
 import type { PageContextPayload } from '@/api/chat/streame'
 
 const { t } = useI18n()
+const childTabs = createChildAgentTabs()
+provide(childAgentTabsKey, childTabs)
 const assistant = useAssistantStore()
 const auth = useAuthStore()
 useAssistantDataChange(() => { void auth.refreshFromAuthMe() }, { areas: ['workspace'] })
@@ -227,8 +235,8 @@ const starters = computed(() => {
   return [t('assistant.starters.agents'), t('assistant.starters.formats'), t('assistant.starters.createWiki')]
 })
 
-// The backend only honours a page context inside the run's search scope, so
-// the page's knowledge base travels with it.
+// Page context is a hint, not an explicit retrieval selection. The backend
+// validates it against the agent's scope; only user selections narrow that scope.
 const hostScope = () => {
   const context = assistant.contextAttached ? assistant.pageContext : null
   const title = assistant.contextAttached ? assistant.pageTitle : ''
@@ -245,7 +253,7 @@ const hostScope = () => {
   if (view) pageContext.view = view
   if (selection) pageContext.selection = toPageSelectionPayload(selection)
   return {
-    knowledgeBaseIds: context?.knowledgeBaseId ? [context.knowledgeBaseId] : [],
+    knowledgeBaseIds: [],
     pageContext,
     assistantAccess,
   }
@@ -286,6 +294,7 @@ watch(() => [assistant.visible, assistant.pendingRequest] as const, ([visible, r
 }, { immediate: true })
 
 const showHistory = ref(false)
+const selectConversationTab = (id: string) => { showHistory.value = false; childTabs.select(id) }
 const history = ref<SessionSummary[]>([])
 const historyPage = ref(0)
 const historyTotal = ref(0)
@@ -390,11 +399,13 @@ async function validateSession(id: string) {
 }
 
 watch(() => assistant.sessionId, (id) => {
+  childTabs.reset()
   if (id !== initialMessage.value?.sessionId) initialMessage.value = null
   void validateSession(id)
 }, { immediate: true })
 
 watch(conversationOwner, () => {
+  childTabs.reset()
   ++historyGeneration
   history.value = []
   historyTotal.value = 0
@@ -713,13 +724,13 @@ onUnmounted(() => {
 
 <style lang="less">
 html.has-assistant-dock {
-  .t-drawer:not(.t-drawer--attach),
+  .t-drawer:not(.t-drawer--attach):not(.chat-artifacts-drawer),
   .t-dialog__ctx--fixed .t-dialog__mask,
   .t-dialog__ctx--fixed .t-dialog__wrap {
     width: calc(100% - var(--assistant-dock-width));
   }
 
-  .t-drawer--right:not(.t-drawer--attach) {
+  .t-drawer--right:not(.t-drawer--attach):not(.chat-artifacts-drawer) {
     right: var(--assistant-dock-width);
   }
 }

@@ -184,7 +184,7 @@ type CustomAgentConfig struct {
 	Temperature float64 `yaml:"temperature" json:"temperature"`
 	// Maximum completion tokens. Quick-answer uses this for the RAG answer.
 	// Smart-reasoning ReAct rounds send this value as-is (zero becomes
-	// DefaultMaxCompletionTokens at call time: 4096, or 24576 with a sandbox).
+	// DefaultMaxCompletionTokens at call time: 24576 for smart reasoning).
 	MaxCompletionTokens int `yaml:"max_completion_tokens" json:"max_completion_tokens"`
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `yaml:"thinking" json:"thinking"`
@@ -212,6 +212,11 @@ type CustomAgentConfig struct {
 	// MCPAuthWaitTimeout is how many seconds to wait for in-conversation OAuth
 	// authorization before skipping. <=0 uses the gate's configured timeout.
 	MCPAuthWaitTimeout int `yaml:"mcp_auth_wait_timeout,omitempty" json:"mcp_auth_wait_timeout,omitempty"`
+	// AccessLevel is the highest access level a run of this agent gets: how
+	// far it may change data (MCP tools, Wiki writes) without asking. Empty
+	// means auto_write. The WeKnora assistant uses the workspace's assistant
+	// ceiling instead.
+	AccessLevel AssistantAccessLevel `yaml:"access_level,omitempty" json:"access_level,omitempty"`
 
 	// ===== Skills Settings (only for smart-reasoning mode) =====
 	// Skills selection mode: "all" = all installed skills, "selected" = specific skills, "none" = no skills
@@ -558,7 +563,19 @@ func reasoningEffortEnablesThinking(level string) (enabled, known bool) {
 	return false, false
 }
 
-// EnsureDefaults sets default values for the agent
+// EnsureCreationDefaults applies new-agent preferences without changing the
+// iteration fallback used when reading existing configurations.
+func (a *CustomAgent) EnsureCreationDefaults() {
+	if a.Config.AgentMode == "" {
+		a.Config.AgentMode = AgentModeSmartReasoning
+	}
+	if a.Config.AgentMode == AgentModeSmartReasoning && a.Config.MaxIterations == 0 {
+		a.Config.MaxIterations = UnlimitedMaxIterations
+	}
+	a.EnsureDefaults()
+}
+
+// EnsureDefaults sets default values for the agent.
 func (a *CustomAgent) EnsureDefaults() {
 	if a == nil {
 		return

@@ -85,6 +85,88 @@ const docTemplate = `{
                 }
             }
         },
+        "/agent/grants": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "列出当前用户在某个会话（根会话）中通过“本会话允许”记住的授权，包括其委派子任务上批准的授权。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent"
+                ],
+                "summary": "列出会话内的 Agent 授权",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "根会话 ID",
+                        "name": "session_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "授权列表",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/grants/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "撤销当前用户的一条授权；之后同类调用会重新询问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent"
+                ],
+                "summary": "撤销 Agent 授权",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "授权 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "撤销结果",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "授权不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/agent/mcp-oauth-resolutions/{pending_id}": {
             "post": {
                 "security": [
@@ -1832,6 +1914,801 @@ const docTemplate = `{
                 }
             }
         },
+        "/automation-runs/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "自动化"
+                ],
+                "summary": "获取运行记录",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "运行 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "运行记录",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationRun"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/automation-runs/{id}/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "排队或等待审批的运行立即结束；执行中的运行在下一次检查时停止",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "自动化"
+                ],
+                "summary": "停止运行",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "运行 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "运行记录",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationRun"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/automations": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "列出当前用户在本空间创建的自动化（定时任务），最新的在前",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "自动化"
+                ],
+                "summary": "列出我的自动化",
+                "responses": {
+                    "200": {
+                        "description": "自动化列表",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Automation"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "automation.list",
+                    "max_items": 100,
+                    "risk": "read"
+                },
+                "x-agent-hint": "Lists the user's automations: scheduled tasks an agent runs on their behalf, with next and last run."
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "创建一个按计划由 Agent 以当前用户身份运行的任务",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "自动化"
+                ],
+                "summary": "创建自动化",
+                "parameters": [
+                    {
+                        "description": "自动化",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.CreateAutomationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "创建的自动化",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Automation"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "参数不合法",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "always_confirm": true,
+                    "id": "automation.create",
+                    "label_param": "name",
+                    "risk": "write",
+                    "role": "viewer"
+                },
+                "x-agent-hint": "Creates an automation the user runs as. Turn the user's wording into a cron expression (five fields, minute first) and an IANA timezone, and check it with automation.validate_trigger first, telling the user the next run times it returns. Runs are unattended: write the instruction as a complete task, since nobody can answer questions during a run. access_level defaults to confirm, where each change waits for the user's approval; only set auto_write when the user asks for it."
+            }
+        },
+        "/automations/validate-trigger": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "校验 cron 或一次性触发器，返回未来 3 次触发时间",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "自动化"
+                ],
+                "summary": "校验触发器",
+                "parameters": [
+                    {
+                        "description": "触发器",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.ValidateTriggerRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "未来触发时间",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.ValidateTriggerResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "触发器不合法",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "automation.validate_trigger",
+                    "risk": "probe"
+                },
+                "x-agent-hint": "Checks a trigger and returns its next three run times in UTC; convert them to the trigger's timezone for the user."
+            }
+        },
+        "/automations/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "自动化"
+                ],
+                "summary": "获取自动化",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "automation_id",
+                        "description": "自动化 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "自动化",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Automation"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "automation.get",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Returns one automation, including its instruction."
+            },
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "只修改请求中出现的字段，其余保持不变",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "自动化"
+                ],
+                "summary": "修改自动化",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "automation_id",
+                        "description": "自动化 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "要修改的字段",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationPatch"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "修改后的自动化",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Automation"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "参数不合法",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "always_confirm": true,
+                    "id": "automation.update",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "viewer",
+                    "target": "automation.get"
+                },
+                "x-agent-hint": "Changes the listed fields of an automation; a field left out is kept. Check a new trigger with automation.validate_trigger first. Use automation.pause and automation.resume to switch it off and on."
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "停止进行中的运行，删除自动化及其运行记录、会话和长期授权",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "自动化"
+                ],
+                "summary": "删除自动化",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "automation_id",
+                        "description": "自动化 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "删除成功",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.SuccessResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "automation.delete",
+                    "label": "name",
+                    "risk": "destructive",
+                    "role": "viewer",
+                    "target": "automation.get"
+                },
+                "x-agent-hint": "Deletes an automation with its run history and conversations. Cannot be undone; automation.pause keeps it."
+            }
+        },
+        "/automations/{id}/grant-candidates": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "列出本自动化的运行请求过审批、尚未长期授权的调用；需每次审批的调用不在其中",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "自动化"
+                ],
+                "summary": "列出可设为长期授权的调用",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "自动化 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "候选调用",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/automations/{id}/grants": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "列出以后的运行无需确认即可执行的调用，以及失效原因",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "自动化"
+                ],
+                "summary": "列出自动化的长期授权",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "自动化 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "长期授权",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "让以后的运行无需确认即可执行某次运行请求过审批的调用；Agent 配置或所有者角色变化后失效",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "自动化"
+                ],
+                "summary": "添加长期授权",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "自动化 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "{prompt_id}",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "授权",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/automations/{id}/pause": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "停止按计划触发；进行中的运行不受影响",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "自动化"
+                ],
+                "summary": "暂停自动化",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "automation_id",
+                        "description": "自动化 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "暂停后的自动化",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Automation"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "automation.pause",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "viewer",
+                    "target": "automation.get"
+                },
+                "x-agent-hint": "Stops an automation from running on schedule until automation.resume."
+            }
+        },
+        "/automations/{id}/resume": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "从现在起重新按计划触发，并清零连续失败计数",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "自动化"
+                ],
+                "summary": "恢复自动化",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "automation_id",
+                        "description": "自动化 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "恢复后的自动化",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Automation"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "x-agent": {
+                    "always_confirm": true,
+                    "id": "automation.resume",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "viewer",
+                    "target": "automation.get"
+                },
+                "x-agent-hint": "Schedules a paused automation again from now; missed runs are not caught up."
+            }
+        },
+        "/automations/{id}/run": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "排队一次手动运行；已有运行在排队或进行中时拒绝",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "自动化"
+                ],
+                "summary": "立即运行自动化",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "automation_id",
+                        "description": "自动化 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "排队的运行",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationRun"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "409": {
+                        "description": "已有运行",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "always_confirm": true,
+                    "id": "automation.run_now",
+                    "label": "name",
+                    "risk": "write",
+                    "role": "viewer",
+                    "target": "automation.get"
+                },
+                "x-agent-hint": "Queues a run now, in the background; follow it with automation.list_runs."
+            }
+        },
+        "/automations/{id}/runs": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "自动化"
+                ],
+                "summary": "列出运行记录",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "automation_id",
+                        "description": "自动化 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "x-agent": true,
+                        "description": "页码，从 1 开始",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "x-agent": true,
+                        "x-agent-maximum": "20",
+                        "description": "每页条数，最多 100",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "运行记录",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.PageResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationRun"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "automation.list_runs",
+                    "risk": "read"
+                },
+                "x-agent-hint": "Lists an automation's runs, newest first, with status, error and the start of the answer."
+            }
+        },
         "/chunker/preview": {
             "post": {
                 "security": [
@@ -2597,7 +3474,7 @@ const docTemplate = `{
                     "id": "data_source.get_sync_log",
                     "risk": "read"
                 },
-                "x-agent-hint": "Read the current status, counts and errors of a sync_log_id returned by data_source.sync or data_source.list_sync_logs. A started job is not a completed sync."
+                "x-agent-hint": "Read the current status and counts of a sync_log_id returned by data_source.sync or data_source.list_sync_logs. A started job is not a completed sync. Raw upstream errors are omitted; detailed failures remain on the data source settings page."
             }
         },
         "/datasource/types": {
@@ -2710,7 +3587,7 @@ const docTemplate = `{
                     "id": "data_source.get",
                     "risk": "read"
                 },
-                "x-agent-hint": "Read a configured data source and its sync state; credentials and connector configuration are not returned."
+                "x-agent-hint": "Read a configured data source and its sync state; credentials, connector settings and raw upstream errors are omitted. For detailed failures use the data source settings page."
             },
             "put": {
                 "description": "Update an existing data source configuration",
@@ -2854,7 +3731,7 @@ const docTemplate = `{
                     "id": "data_source.list_sync_logs",
                     "risk": "read"
                 },
-                "x-agent-hint": "Read recent sync results, counts and errors. Use limit and offset for older records."
+                "x-agent-hint": "Read recent sync status and counts. Use limit and offset for older records. Raw upstream errors are omitted; detailed failures remain on the data source settings page."
             }
         },
         "/datasource/{id}/pause": {
@@ -12091,7 +12968,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "为指定 MCP 服务下的某个工具更新启用状态和/或人工审批要求。至少提供 require_approval 或 enabled 之一；省略的字段保持原值。",
+                "description": "为指定 MCP 服务下的某个工具更新启用状态、人工审批要求和/或风险等级。\n至少提供 require_approval、enabled、risk 之一；省略的字段保持原值。\nrisk 为 read/probe/write/destructive，空字符串表示改回按服务注解推断。",
                 "consumes": [
                     "application/json"
                 ],
@@ -12118,7 +12995,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "{require_approval?: bool, enabled?: bool}",
+                        "description": "{require_approval?: bool, enabled?: bool, risk?: string}",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -14237,6 +15114,84 @@ const docTemplate = `{
                     "target": "model.get"
                 },
                 "x-agent-hint": "Copies a workspace-owned model configuration under a required new display_name. Choose model_id from model.list; builtin models cannot be copied. The upstream model name, connection parameters and saved credentials are copied on the backend; never request or resend credentials. The copy is not the default and does not change agent or knowledge base bindings. Active local models are reused without downloading again; copying an unfinished or failed local model starts a background download, so read the returned model_id with model.get until its status is active or download_failed."
+            }
+        },
+        "/notifications": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "通知"
+                ],
+                "summary": "列出我的通知",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "条数，最多 100",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "只看未读",
+                        "name": "unread",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "{items, unread}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/notifications/read": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "ids 为空时全部标记已读",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "通知"
+                ],
+                "summary": "标记通知已读",
+                "parameters": [
+                    {
+                        "description": "{ids}",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "结果",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
             }
         },
         "/organizations": {
@@ -24762,6 +25717,13 @@ const docTemplate = `{
                     "description": "Iteration number (0-indexed)",
                     "type": "integer"
                 },
+                "progress": {
+                    "description": "Progress is user-facing commentary from a non-terminal round. Thought stays intact for model replay.",
+                    "type": "string"
+                },
+                "progress_event_id": {
+                    "type": "string"
+                },
                 "reasoning_content": {
                     "description": "ReasoningContent stores the OpenAI-protocol reasoning_content emitted by the\nmodel in this round. Persisted on AgentStep so cross-turn replay can put it\nback on the assistant message — required by MiMo / DeepSeek V3.2+ thinking\nmode, ignored by providers that don't recognize the field.",
                     "type": "string"
@@ -25249,6 +26211,346 @@ const docTemplate = `{
                     "description": "SkipIfTagged leaves a document alone when it already has tags. Empty means yes.",
                     "type": "boolean",
                     "x-agent": "auto_tag_skip_if_tagged"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.Automation": {
+            "type": "object",
+            "properties": {
+                "access_level": {
+                    "description": "AccessLevel is how far runs may change data without asking, capped by\nthe agent's and the workspace's ceilings.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel"
+                        }
+                    ],
+                    "x-agent": true
+                },
+                "agent_id": {
+                    "description": "AgentID is the agent that runs it; the WeKnora assistant's ID runs the\nassistant.",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "approval_timeout_minutes": {
+                    "description": "ApprovalTimeoutMinutes is how long a run waits for an approval before\nit fails.",
+                    "type": "integer",
+                    "x-agent": true
+                },
+                "carry_last_result": {
+                    "description": "CarryLastResult adds the last successful answer to each per-run\nconversation.",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "consecutive_failures": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "id": {
+                    "type": "string",
+                    "x-agent": "automation_id",
+                    "x-agent-response": true
+                },
+                "instruction": {
+                    "description": "Instruction is the task, sent as the user message of each run after\nits variables are filled in.",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-detail": true
+                },
+                "last_run_at": {
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "last_run_status": {
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "last_success_at": {
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "limits": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationLimits"
+                },
+                "misfire_policy": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "name": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "next_run_at": {
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "notify_on_success": {
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "overlap_policy": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "owner_user_id": {
+                    "description": "OwnerUserID is the account the automation runs as.",
+                    "type": "string"
+                },
+                "paused_reason": {
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "persistent_session_id": {
+                    "description": "PersistentSessionID is the conversation of a persistent automation,\ncreated on its first run.",
+                    "type": "string"
+                },
+                "session_mode": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "trigger": {
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationTrigger"
+                        }
+                    ],
+                    "x-agent": true
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.AutomationLimits": {
+            "type": "object",
+            "properties": {
+                "max_duration_minutes": {
+                    "description": "MaxDurationMinutes caps a run's execution time, not counting time spent\nwaiting for approval. 0 uses the default.",
+                    "type": "integer",
+                    "x-agent": true
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.AutomationPatch": {
+            "type": "object",
+            "properties": {
+                "access_level": {
+                    "description": "How far runs may change data without asking",
+                    "enum": [
+                        "read_only",
+                        "confirm",
+                        "auto_write"
+                    ],
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel"
+                        }
+                    ],
+                    "x-agent": true
+                },
+                "agent_id": {
+                    "description": "Agent that runs it, from agent.list; empty runs the WeKnora assistant",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "approval_timeout_minutes": {
+                    "description": "How long a run waits for an approval before it fails, in minutes",
+                    "type": "integer",
+                    "x-agent": true
+                },
+                "carry_last_result": {
+                    "description": "Whether each per_run conversation gets the last successful answer",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "description": {
+                    "description": "What it is for",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "enabled": {
+                    "description": "Whether it is scheduled; on update use pause and resume instead",
+                    "type": "boolean"
+                },
+                "instruction": {
+                    "description": "The task, sent as the user message of each run. May name now,\nlast_run_at, last_success_at, run_id or automation_name inside double\ncurly braces to have it filled in",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-bytes": "32000"
+                },
+                "limits": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationLimits"
+                },
+                "misfire_policy": {
+                    "description": "What happens to runs missed while the service was down or paused",
+                    "type": "string",
+                    "enum": [
+                        "skip",
+                        "run_once"
+                    ],
+                    "x-agent": true
+                },
+                "name": {
+                    "description": "What the automation is called",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "notify_on_success": {
+                    "description": "Whether a successful run notifies the owner",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "overlap_policy": {
+                    "description": "What happens when a run is due while the previous one is still going",
+                    "type": "string",
+                    "enum": [
+                        "skip",
+                        "queue"
+                    ],
+                    "x-agent": true
+                },
+                "session_mode": {
+                    "description": "per_run starts a new conversation each run; persistent keeps one",
+                    "type": "string",
+                    "enum": [
+                        "per_run",
+                        "persistent"
+                    ],
+                    "x-agent": true
+                },
+                "trigger": {
+                    "description": "When it runs",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationTrigger"
+                        }
+                    ],
+                    "x-agent": true
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.AutomationRun": {
+            "type": "object",
+            "properties": {
+                "answer": {
+                    "description": "Answer is the start of the final answer, for listings.",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "assistant_message_id": {
+                    "type": "string"
+                },
+                "automation_id": {
+                    "type": "string"
+                },
+                "cancel_requested": {
+                    "description": "CancelRequested stops the run at its next check.",
+                    "type": "boolean"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "finished_at": {
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "id": {
+                    "type": "string",
+                    "x-agent": "run_id",
+                    "x-agent-response": true
+                },
+                "pending_prompt_id": {
+                    "description": "PendingPromptID is the approval a waiting run is suspended on.",
+                    "type": "string"
+                },
+                "scheduled_at": {
+                    "description": "ScheduledAt is when the run was due; for a manual run, when it was\nasked for.",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "session_id": {
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "started_at": {
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "status": {
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "trigger_kind": {
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "usage": {
+                    "type": "object"
+                },
+                "user_message_id": {
+                    "description": "UserMessageID and AssistantMessageID are the run's turn in SessionID.",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.AutomationTrigger": {
+            "type": "object",
+            "properties": {
+                "at": {
+                    "description": "At is when a once trigger fires.",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "expr": {
+                    "description": "Expr is a cron expression: five fields (minute first) or six (seconds\nfirst), or a descriptor such as @daily.",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "timezone": {
+                    "description": "Timezone is an IANA zone, e.g. Asia/Shanghai; empty means UTC.",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "type": {
+                    "description": "Type is cron or once.",
+                    "type": "string",
+                    "x-agent": true
                 }
             }
         },
@@ -26055,6 +27357,14 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.CustomAgentConfig": {
             "type": "object",
             "properties": {
+                "access_level": {
+                    "description": "AccessLevel is the highest access level a run of this agent gets: how\nfar it may change data (MCP tools, Wiki writes) without asking. Empty\nmeans auto_write. The WeKnora assistant uses the workspace's assistant\nceiling instead.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel"
+                        }
+                    ]
+                },
                 "agent_mode": {
                     "description": "===== Basic Settings =====\nAgent mode: \"quick-answer\" for RAG mode, \"smart-reasoning\" for ReAct agent mode",
                     "type": "string",
@@ -26194,7 +27504,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "max_completion_tokens": {
-                    "description": "Maximum completion tokens. Quick-answer uses this for the RAG answer.\nSmart-reasoning ReAct rounds send this value as-is (zero becomes\nDefaultMaxCompletionTokens at call time: 4096, or 24576 with a sandbox).",
+                    "description": "Maximum completion tokens. Quick-answer uses this for the RAG answer.\nSmart-reasoning ReAct rounds send this value as-is (zero becomes\nDefaultMaxCompletionTokens at call time: 24576 for smart reasoning).",
                     "type": "integer"
                 },
                 "max_iterations": {
@@ -29501,6 +30811,14 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.MCPTool": {
             "type": "object",
             "properties": {
+                "annotations": {
+                    "description": "Annotations are the hints the service declares in tools/list. They come\nfrom outside and only seed the tool's risk.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPToolAnnotations"
+                        }
+                    ]
+                },
                 "description": {
                     "type": "string",
                     "x-agent": true,
@@ -29518,6 +30836,17 @@ const docTemplate = `{
                     "description": "RequireApproval when true: agent execution pauses until the user approves in UI (issue #1173).",
                     "type": "boolean",
                     "x-agent": true
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.MCPToolAnnotations": {
+            "type": "object",
+            "properties": {
+                "destructiveHint": {
+                    "type": "boolean"
+                },
+                "readOnlyHint": {
+                    "type": "boolean"
                 }
             }
         },
@@ -29952,6 +31281,10 @@ const docTemplate = `{
                     "description": "Channel indicates the source channel of this message (e.g., \"web\", \"api\", \"im\")",
                     "type": "string"
                 },
+                "collaboration_status": {
+                    "description": "CollaborationStatus is projected from durable collaboration state at read\ntime, including completed tasks after the transient stream has expired.",
+                    "type": "object"
+                },
                 "content": {
                     "description": "Message text content",
                     "type": "string",
@@ -29964,6 +31297,12 @@ const docTemplate = `{
                     "type": "string",
                     "x-agent": true,
                     "x-agent-response": true
+                },
+                "delegated_prompts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.PendingPromptView"
+                    }
                 },
                 "deleted_at": {
                     "description": "Soft delete timestamp",
@@ -30017,12 +31356,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "pending_prompt": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.PendingPromptView"
+                },
+                "prompt_history": {
                     "description": "PendingPrompt is the prompt an awaiting_input message waits on. The\nmessage list fills it in for the prompt's owner; it is never stored.",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.PendingPromptView"
-                        }
-                    ]
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.PendingPromptView"
+                    }
                 },
                 "request_id": {
                     "description": "Request identifier for tracking API requests",
@@ -31320,7 +32661,13 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.PendingPromptView": {
             "type": "object",
             "properties": {
+                "close_reason": {
+                    "type": "string"
+                },
                 "created_at": {
+                    "type": "string"
+                },
+                "delegated_task": {
                     "type": "string"
                 },
                 "expires_at": {
@@ -31334,6 +32681,12 @@ const docTemplate = `{
                 },
                 "request": {
                     "type": "object"
+                },
+                "response": {
+                    "type": "object"
+                },
+                "status": {
+                    "type": "string"
                 },
                 "tool_call_id": {
                     "type": "string"
@@ -35939,6 +37292,105 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.CreateAutomationRequest": {
+            "type": "object",
+            "required": [
+                "instruction",
+                "name",
+                "trigger"
+            ],
+            "properties": {
+                "access_level": {
+                    "description": "How far runs may change data without asking; default confirm",
+                    "enum": [
+                        "read_only",
+                        "confirm",
+                        "auto_write"
+                    ],
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel"
+                        }
+                    ],
+                    "x-agent": true
+                },
+                "agent_id": {
+                    "description": "Agent that runs it, from agent.list; empty runs the WeKnora assistant",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "approval_timeout_minutes": {
+                    "description": "How long a run waits for an approval before it fails, in minutes; default 1440",
+                    "type": "integer",
+                    "x-agent": true
+                },
+                "carry_last_result": {
+                    "description": "Whether each per_run conversation gets the last successful answer",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "description": {
+                    "description": "What it is for",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "instruction": {
+                    "description": "The task, sent as the user message of each run. May name now,\nlast_run_at, last_success_at, run_id or automation_name inside double\ncurly braces to have it filled in",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-bytes": "32000"
+                },
+                "limits": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationLimits"
+                },
+                "misfire_policy": {
+                    "description": "What happens to runs missed while the service was down; default skip",
+                    "type": "string",
+                    "enum": [
+                        "skip",
+                        "run_once"
+                    ],
+                    "x-agent": true
+                },
+                "name": {
+                    "description": "What the automation is called",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "notify_on_success": {
+                    "description": "Whether a successful run notifies the owner; failures always do",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "overlap_policy": {
+                    "description": "What happens when a run is due while the previous one is still going; default skip",
+                    "type": "string",
+                    "enum": [
+                        "skip",
+                        "queue"
+                    ],
+                    "x-agent": true
+                },
+                "session_mode": {
+                    "description": "per_run (default) starts a new conversation each run; persistent keeps one",
+                    "type": "string",
+                    "enum": [
+                        "per_run",
+                        "persistent"
+                    ],
+                    "x-agent": true
+                },
+                "trigger": {
+                    "description": "When it runs",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationTrigger"
+                        }
+                    ],
+                    "x-agent": true
+                }
+            }
+        },
         "internal_handler.CreateKnowledgeFromURLRequest": {
             "type": "object",
             "required": [
@@ -39642,6 +41094,36 @@ const docTemplate = `{
                 },
                 "user": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo"
+                }
+            }
+        },
+        "internal_handler.ValidateTriggerRequest": {
+            "type": "object",
+            "required": [
+                "trigger"
+            ],
+            "properties": {
+                "trigger": {
+                    "description": "The trigger to check",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationTrigger"
+                        }
+                    ],
+                    "x-agent": true
+                }
+            }
+        },
+        "internal_handler.ValidateTriggerResult": {
+            "type": "object",
+            "properties": {
+                "next_runs": {
+                    "description": "The next times the trigger fires, in UTC",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true
                 }
             }
         },

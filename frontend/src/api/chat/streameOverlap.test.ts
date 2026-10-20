@@ -118,3 +118,114 @@ test('the current stream failing still reports the error and stops', async () =>
   a.resolve()
   await first
 })
+
+test('a disconnected accepted agent POST resumes by GET without executing the query twice', async () => {
+  let stream!: ReturnType<typeof useStream>
+  await renderToString(createSSRApp({ setup() { stream = useStream(); return () => null } }))
+  const base = transport.calls.length
+  const run = stream.startStream({ session_id: 'parent', query: 'spawn children', method: 'POST', url: '/api/v1/agent-chat' })
+  const post = await nextCall(base + 1)
+  post.options.onmessage({ data: JSON.stringify({ response_type: 'agent_query', id: 'r1', assistant_message_id: 'answer-1' }) })
+  post.reject(new Error('server restarted'))
+  await new Promise(r => setTimeout(r, 1050))
+  const resumed = await nextCall(base + 2)
+  assert.match(resumed.url, /\/sessions\/continue-stream\/parent\?message_id=answer-1$/)
+  assert.equal((resumed.options as any).method, 'GET')
+  assert.equal((resumed.options as any).body, null)
+  assert.equal(stream.isStreaming.value, true)
+  assert.equal(stream.error.value, null)
+  resumed.options.onmessage({ data: JSON.stringify({ response_type: 'complete', id: 'r1' }) })
+  resumed.options.onclose()
+  resumed.resolve()
+  await run
+  assert.equal(stream.isStreaming.value, false)
+})
+
+test('stop during reconnect backoff prevents the old parent from attaching again', async () => {
+  let stream!: ReturnType<typeof useStream>
+  await renderToString(createSSRApp({ setup() { stream = useStream(); return () => null } }))
+  const base = transport.calls.length
+  const run = stream.startStream({ session_id: 'parent', query: 'spawn children', method: 'POST', url: '/api/v1/agent-chat' })
+  const post = await nextCall(base + 1)
+  post.options.onmessage({ data: JSON.stringify({ response_type: 'agent_query', assistant_message_id: 'answer-1' }) })
+  post.reject(new Error('connection reset'))
+  await new Promise(r => setTimeout(r, 20))
+  stream.stopStream()
+  await run
+  await new Promise(r => setTimeout(r, 1050))
+  assert.equal(transport.calls.length, base + 1)
+  assert.equal(stream.isStreaming.value, false)
+  assert.equal(stream.error.value, null)
+})
+
+test('EOF without complete attaches to the original message rather than declaring completion', async () => {
+  let stream!: ReturnType<typeof useStream>
+  await renderToString(createSSRApp({ setup() { stream = useStream(); return () => null } }))
+  const base = transport.calls.length
+  const run = stream.startStream({ session_id: 'parent', query: 'work', method: 'POST', url: '/api/v1/agent-chat' })
+  const post = await nextCall(base + 1)
+  post.options.onmessage({ data: JSON.stringify({ response_type: 'agent_query', assistant_message_id: 'answer-1' }) })
+  try { post.options.onclose(); assert.fail('an incomplete EOF must request recovery') }
+  catch (error) { post.reject(error) }
+  await new Promise(r => setTimeout(r, 1050))
+  const resumed = await nextCall(base + 2)
+  assert.equal((resumed.options as any).method, 'GET')
+  resumed.options.onmessage({ data: JSON.stringify({ response_type: 'complete' }) })
+  resumed.options.onclose()
+  resumed.resolve()
+  await run
+  assert.equal(stream.error.value, null)
+})
+
+test('a new stream supersedes an old reconnect without being stopped or receiving old output', async () => {
+  let stream!: ReturnType<typeof useStream>
+  await renderToString(createSSRApp({ setup() { stream = useStream(); return () => null } }))
+  const base = transport.calls.length
+  const first = stream.startStream({ session_id: 'parent', query: 'old', method: 'POST', url: '/api/v1/agent-chat' })
+  const post = await nextCall(base + 1)
+  post.options.onmessage({ data: JSON.stringify({ response_type: 'agent_query', assistant_message_id: 'old-answer' }) })
+  post.reject(new Error('server restarted'))
+  await new Promise(r => setTimeout(r, 20))
+  const second = stream.startStream({ session_id: 'another-session', query: 'new', method: 'POST', url: '/api/v1/agent-chat' })
+  const current = await nextCall(base + 2)
+  await first
+  assert.equal(transport.calls.length, base + 2)
+  assert.equal(current.options.signal.aborted, false)
+  assert.equal(stream.isStreaming.value, true)
+  assert.equal(stream.error.value, null)
+  current.options.onmessage({ data: JSON.stringify({ response_type: 'complete' }) })
+  current.options.onclose()
+  current.resolve()
+  await second
+})
+
+test('a silent broken proxy connection times out and resumes by GET; heartbeats stay out of chat', async (t) => {
+  let stream!: ReturnType<typeof useStream>
+  await renderToString(createSSRApp({ setup() { stream = useStream(); return () => null } }))
+  const chunks: unknown[] = []
+  stream.onChunk(value => chunks.push(value))
+  const base = transport.calls.length
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const run = stream.startStream({ session_id: 'parent', query: 'work', method: 'POST', url: '/api/v1/agent-chat' })
+  const post = transport.calls[base]
+  post.options.onmessage({ data: JSON.stringify({ response_type: 'agent_query', assistant_message_id: 'answer-1' }) })
+  t.mock.timers.tick(20000)
+  post.options.onmessage({ data: JSON.stringify({ response_type: 'heartbeat' }) })
+  assert.equal(chunks.length, 1)
+  t.mock.timers.tick(20000)
+  assert.equal(post.options.signal.aborted, false)
+  t.mock.timers.tick(10001)
+  for (let i = 0; i < 20; i++) await Promise.resolve()
+  assert.equal(post.options.signal.aborted, true)
+  t.mock.timers.tick(1000)
+  for (let i = 0; i < 20; i++) await Promise.resolve()
+  const resumed = transport.calls[base + 1]
+  assert.ok(resumed)
+  assert.equal((resumed.options as any).method, 'GET')
+  resumed.options.onmessage({ data: JSON.stringify({ response_type: 'complete' }) })
+  resumed.options.onclose()
+  resumed.resolve()
+  await run
+  assert.equal(stream.isStreaming.value, false)
+  assert.equal(stream.error.value, null)
+})

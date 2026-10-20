@@ -299,6 +299,28 @@ export async function resolveToolApproval(
   return { resumed: Boolean(res?.resumed) }
 }
 
+// A remembered "allow for this conversation" approval.
+export interface AgentGrant {
+  id: string
+  scope: string
+  scope_id: string
+  grant_key: string
+  label: string
+  created_at: string
+  last_used_at?: string
+}
+
+// The current user's grants in a conversation, including those approved in
+// its delegated sub-tasks.
+export async function listAgentGrants(sessionId: string): Promise<AgentGrant[]> {
+  const res: any = await get(`/api/v1/agent/grants?session_id=${encodeURIComponent(sessionId)}`)
+  return Array.isArray(res?.data) ? res.data : []
+}
+
+export async function revokeAgentGrant(id: string): Promise<void> {
+  await del(`/api/v1/agent/grants/${encodeURIComponent(id)}`)
+}
+
 // Answer a prompt the agent raised (ask_user, tool approval) with the kind's
 // response object.
 export async function resolveAgentPrompt(

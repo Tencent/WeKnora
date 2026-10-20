@@ -57,9 +57,12 @@ function resolveVueOfficePptxEntry(): string {
   try {
     const pkgDir = dirname(require.resolve('@vue-office/pptx/package.json'))
     const candidates = [
+      // Use ESM so setup hooks and render helpers share the application's Vue
+      // runtime. The UMD entry's require('vue') can produce a second runtime in
+      // Vite's dev optimizer, leaving template refs null and PPTX previews blank.
+      resolve(pkgDir, 'lib/v3/vue-office-pptx.mjs'),
       resolve(pkgDir, 'lib/v3/index.js'),
       resolve(pkgDir, 'lib/index.js'),
-      resolve(pkgDir, 'lib/v3/vue-office-pptx.mjs'),
     ]
     const matched = candidates.find((candidate) => existsSync(candidate))
     return matched ?? '@vue-office/pptx'
@@ -141,6 +144,7 @@ export default defineConfig({
     pdfJsWasmAssets(),
   ],
   resolve: {
+    dedupe: ['vue', 'vue-demi'],
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
       '@vue-office/pptx': resolveVueOfficePptxEntry(),

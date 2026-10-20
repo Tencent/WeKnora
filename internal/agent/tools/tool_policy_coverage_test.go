@@ -47,7 +47,7 @@ func TestEveryBuiltInToolDeclaresAModelHandlePolicy(t *testing.T) {
 		ToolWikiUpdateIssue,
 		ToolFindOperations,
 		ToolRunOperation,
-		ToolTryAgent,
+		"spawn_agent", "list_agents", "send_message", "followup_task", "interrupt_agent", "wait_agent",
 		ToolReadPage,
 		ToolSelectTab,
 		ToolFillPage,

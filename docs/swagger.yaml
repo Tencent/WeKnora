@@ -1344,6 +1344,12 @@ definitions:
       iteration:
         description: Iteration number (0-indexed)
         type: integer
+      progress:
+        description: Progress is user-facing commentary from a non-terminal round.
+          Thought stays intact for model replay.
+        type: string
+      progress_event_id:
+        type: string
       reasoning_content:
         description: |-
           ReasoningContent stores the OpenAI-protocol reasoning_content emitted by the
@@ -1743,6 +1749,280 @@ definitions:
           Empty means yes.
         type: boolean
         x-agent: auto_tag_skip_if_tagged
+    type: object
+  github_com_Tencent_WeKnora_internal_types.Automation:
+    properties:
+      access_level:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel'
+        description: |-
+          AccessLevel is how far runs may change data without asking, capped by
+          the agent's and the workspace's ceilings.
+        x-agent: true
+      agent_id:
+        description: |-
+          AgentID is the agent that runs it; the WeKnora assistant's ID runs the
+          assistant.
+        type: string
+        x-agent: true
+      approval_timeout_minutes:
+        description: |-
+          ApprovalTimeoutMinutes is how long a run waits for an approval before
+          it fails.
+        type: integer
+        x-agent: true
+      carry_last_result:
+        description: |-
+          CarryLastResult adds the last successful answer to each per-run
+          conversation.
+        type: boolean
+        x-agent: true
+      consecutive_failures:
+        type: integer
+      created_at:
+        type: string
+      description:
+        type: string
+        x-agent: true
+      enabled:
+        type: boolean
+        x-agent: true
+        x-agent-response: true
+      id:
+        type: string
+        x-agent: automation_id
+        x-agent-response: true
+      instruction:
+        description: |-
+          Instruction is the task, sent as the user message of each run after
+          its variables are filled in.
+        type: string
+        x-agent: true
+        x-agent-detail: true
+      last_run_at:
+        type: string
+        x-agent: true
+        x-agent-response: true
+      last_run_status:
+        type: string
+        x-agent: true
+        x-agent-response: true
+      last_success_at:
+        type: string
+        x-agent: true
+        x-agent-response: true
+      limits:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationLimits'
+      misfire_policy:
+        type: string
+        x-agent: true
+      name:
+        type: string
+        x-agent: true
+      next_run_at:
+        type: string
+        x-agent: true
+        x-agent-response: true
+      notify_on_success:
+        type: boolean
+        x-agent: true
+      overlap_policy:
+        type: string
+        x-agent: true
+      owner_user_id:
+        description: OwnerUserID is the account the automation runs as.
+        type: string
+      paused_reason:
+        type: string
+        x-agent: true
+        x-agent-response: true
+      persistent_session_id:
+        description: |-
+          PersistentSessionID is the conversation of a persistent automation,
+          created on its first run.
+        type: string
+      session_mode:
+        type: string
+        x-agent: true
+      tenant_id:
+        type: integer
+      trigger:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationTrigger'
+        x-agent: true
+      updated_at:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.AutomationLimits:
+    properties:
+      max_duration_minutes:
+        description: |-
+          MaxDurationMinutes caps a run's execution time, not counting time spent
+          waiting for approval. 0 uses the default.
+        type: integer
+        x-agent: true
+    type: object
+  github_com_Tencent_WeKnora_internal_types.AutomationPatch:
+    properties:
+      access_level:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel'
+        description: How far runs may change data without asking
+        enum:
+        - read_only
+        - confirm
+        - auto_write
+        x-agent: true
+      agent_id:
+        description: Agent that runs it, from agent.list; empty runs the WeKnora assistant
+        type: string
+        x-agent: true
+      approval_timeout_minutes:
+        description: How long a run waits for an approval before it fails, in minutes
+        type: integer
+        x-agent: true
+      carry_last_result:
+        description: Whether each per_run conversation gets the last successful answer
+        type: boolean
+        x-agent: true
+      description:
+        description: What it is for
+        type: string
+        x-agent: true
+      enabled:
+        description: Whether it is scheduled; on update use pause and resume instead
+        type: boolean
+      instruction:
+        description: |-
+          The task, sent as the user message of each run. May name now,
+          last_run_at, last_success_at, run_id or automation_name inside double
+          curly braces to have it filled in
+        type: string
+        x-agent: true
+        x-agent-max-bytes: "32000"
+      limits:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationLimits'
+      misfire_policy:
+        description: What happens to runs missed while the service was down or paused
+        enum:
+        - skip
+        - run_once
+        type: string
+        x-agent: true
+      name:
+        description: What the automation is called
+        type: string
+        x-agent: true
+      notify_on_success:
+        description: Whether a successful run notifies the owner
+        type: boolean
+        x-agent: true
+      overlap_policy:
+        description: What happens when a run is due while the previous one is still
+          going
+        enum:
+        - skip
+        - queue
+        type: string
+        x-agent: true
+      session_mode:
+        description: per_run starts a new conversation each run; persistent keeps
+          one
+        enum:
+        - per_run
+        - persistent
+        type: string
+        x-agent: true
+      trigger:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationTrigger'
+        description: When it runs
+        x-agent: true
+    type: object
+  github_com_Tencent_WeKnora_internal_types.AutomationRun:
+    properties:
+      answer:
+        description: Answer is the start of the final answer, for listings.
+        type: string
+        x-agent: true
+        x-agent-response: true
+      assistant_message_id:
+        type: string
+      automation_id:
+        type: string
+      cancel_requested:
+        description: CancelRequested stops the run at its next check.
+        type: boolean
+      created_at:
+        type: string
+      error:
+        type: string
+        x-agent: true
+        x-agent-response: true
+      finished_at:
+        type: string
+        x-agent: true
+        x-agent-response: true
+      id:
+        type: string
+        x-agent: run_id
+        x-agent-response: true
+      pending_prompt_id:
+        description: PendingPromptID is the approval a waiting run is suspended on.
+        type: string
+      scheduled_at:
+        description: |-
+          ScheduledAt is when the run was due; for a manual run, when it was
+          asked for.
+        type: string
+        x-agent: true
+        x-agent-response: true
+      session_id:
+        type: string
+        x-agent: true
+        x-agent-response: true
+      started_at:
+        type: string
+        x-agent: true
+        x-agent-response: true
+      status:
+        type: string
+        x-agent: true
+        x-agent-response: true
+      tenant_id:
+        type: integer
+      trigger_kind:
+        type: string
+        x-agent: true
+        x-agent-response: true
+      updated_at:
+        type: string
+      usage:
+        type: object
+      user_message_id:
+        description: UserMessageID and AssistantMessageID are the run's turn in SessionID.
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.AutomationTrigger:
+    properties:
+      at:
+        description: At is when a once trigger fires.
+        type: string
+        x-agent: true
+      expr:
+        description: |-
+          Expr is a cron expression: five fields (minute first) or six (seconds
+          first), or a descriptor such as @daily.
+        type: string
+        x-agent: true
+      timezone:
+        description: Timezone is an IANA zone, e.g. Asia/Shanghai; empty means UTC.
+        type: string
+        x-agent: true
+      type:
+        description: Type is cron or once.
+        type: string
+        x-agent: true
     type: object
   github_com_Tencent_WeKnora_internal_types.COSEngineConfig:
     properties:
@@ -2392,6 +2672,14 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.CustomAgentConfig:
     properties:
+      access_level:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel'
+        description: |-
+          AccessLevel is the highest access level a run of this agent gets: how
+          far it may change data (MCP tools, Wiki writes) without asking. Empty
+          means auto_write. The WeKnora assistant uses the workspace's assistant
+          ceiling instead.
       agent_mode:
         description: |-
           ===== Basic Settings =====
@@ -2554,7 +2842,7 @@ definitions:
         description: |-
           Maximum completion tokens. Quick-answer uses this for the RAG answer.
           Smart-reasoning ReAct rounds send this value as-is (zero becomes
-          DefaultMaxCompletionTokens at call time: 4096, or 24576 with a sandbox).
+          DefaultMaxCompletionTokens at call time: 24576 for smart reasoning).
         type: integer
       max_iterations:
         description: |-
@@ -5156,6 +5444,12 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.MCPTool:
     properties:
+      annotations:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPToolAnnotations'
+        description: |-
+          Annotations are the hints the service declares in tools/list. They come
+          from outside and only seed the tool's risk.
       description:
         type: string
         x-agent: true
@@ -5171,6 +5465,13 @@ definitions:
           user approves in UI (issue #1173).'
         type: boolean
         x-agent: true
+    type: object
+  github_com_Tencent_WeKnora_internal_types.MCPToolAnnotations:
+    properties:
+      destructiveHint:
+        type: boolean
+      readOnlyHint:
+        type: boolean
     type: object
   github_com_Tencent_WeKnora_internal_types.MCPTransportType:
     enum:
@@ -5551,6 +5852,11 @@ definitions:
         description: Channel indicates the source channel of this message (e.g., "web",
           "api", "im")
         type: string
+      collaboration_status:
+        description: |-
+          CollaborationStatus is projected from durable collaboration state at read
+          time, including completed tasks after the transient stream has expired.
+        type: object
       content:
         description: Message text content
         type: string
@@ -5562,6 +5868,10 @@ definitions:
         type: string
         x-agent: true
         x-agent-response: true
+      delegated_prompts:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.PendingPromptView'
+        type: array
       deleted_at:
         allOf:
         - $ref: '#/definitions/gorm.DeletedAt'
@@ -5606,11 +5916,14 @@ definitions:
           turn. It is useful for reproducibility and suggestion generation.
         type: string
       pending_prompt:
-        allOf:
-        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.PendingPromptView'
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.PendingPromptView'
+      prompt_history:
         description: |-
           PendingPrompt is the prompt an awaiting_input message waits on. The
           message list fills it in for the prompt's owner; it is never stored.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.PendingPromptView'
+        type: array
       request_id:
         description: Request identifier for tracking API requests
         type: string
@@ -6597,7 +6910,11 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.PendingPromptView:
     properties:
+      close_reason:
+        type: string
       created_at:
+        type: string
+      delegated_task:
         type: string
       expires_at:
         type: string
@@ -6607,6 +6924,10 @@ definitions:
         type: string
       request:
         type: object
+      response:
+        type: object
+      status:
+        type: string
       tool_call_id:
         type: string
     type: object
@@ -10284,6 +10605,87 @@ definitions:
     required:
     - name
     type: object
+  internal_handler.CreateAutomationRequest:
+    properties:
+      access_level:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel'
+        description: How far runs may change data without asking; default confirm
+        enum:
+        - read_only
+        - confirm
+        - auto_write
+        x-agent: true
+      agent_id:
+        description: Agent that runs it, from agent.list; empty runs the WeKnora assistant
+        type: string
+        x-agent: true
+      approval_timeout_minutes:
+        description: How long a run waits for an approval before it fails, in minutes;
+          default 1440
+        type: integer
+        x-agent: true
+      carry_last_result:
+        description: Whether each per_run conversation gets the last successful answer
+        type: boolean
+        x-agent: true
+      description:
+        description: What it is for
+        type: string
+        x-agent: true
+      instruction:
+        description: |-
+          The task, sent as the user message of each run. May name now,
+          last_run_at, last_success_at, run_id or automation_name inside double
+          curly braces to have it filled in
+        type: string
+        x-agent: true
+        x-agent-max-bytes: "32000"
+      limits:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationLimits'
+      misfire_policy:
+        description: What happens to runs missed while the service was down; default
+          skip
+        enum:
+        - skip
+        - run_once
+        type: string
+        x-agent: true
+      name:
+        description: What the automation is called
+        type: string
+        x-agent: true
+      notify_on_success:
+        description: Whether a successful run notifies the owner; failures always
+          do
+        type: boolean
+        x-agent: true
+      overlap_policy:
+        description: What happens when a run is due while the previous one is still
+          going; default skip
+        enum:
+        - skip
+        - queue
+        type: string
+        x-agent: true
+      session_mode:
+        description: per_run (default) starts a new conversation each run; persistent
+          keeps one
+        enum:
+        - per_run
+        - persistent
+        type: string
+        x-agent: true
+      trigger:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationTrigger'
+        description: When it runs
+        x-agent: true
+    required:
+    - instruction
+    - name
+    - trigger
+    type: object
   internal_handler.CreateKnowledgeFromURLRequest:
     properties:
       channel:
@@ -12950,6 +13352,25 @@ definitions:
       user:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo'
     type: object
+  internal_handler.ValidateTriggerRequest:
+    properties:
+      trigger:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationTrigger'
+        description: The trigger to check
+        x-agent: true
+    required:
+    - trigger
+    type: object
+  internal_handler.ValidateTriggerResult:
+    properties:
+      next_runs:
+        description: The next times the trigger fires, in UTC
+        items:
+          type: string
+        type: array
+        x-agent: true
+    type: object
   internal_handler.WebSearchProviderTestResponse:
     properties:
       error:
@@ -13941,6 +14362,58 @@ paths:
       summary: Agent问答
       tags:
       - 问答
+  /agent/grants:
+    get:
+      description: 列出当前用户在某个会话（根会话）中通过“本会话允许”记住的授权，包括其委派子任务上批准的授权。
+      parameters:
+      - description: 根会话 ID
+        in: query
+        name: session_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 授权列表
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 列出会话内的 Agent 授权
+      tags:
+      - Agent
+  /agent/grants/{id}:
+    delete:
+      description: 撤销当前用户的一条授权；之后同类调用会重新询问。
+      parameters:
+      - description: 授权 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 撤销结果
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 授权不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 撤销 Agent 授权
+      tags:
+      - Agent
   /agent/mcp-oauth-resolutions/{pending_id}:
     post:
       consumes:
@@ -15072,6 +15545,509 @@ paths:
       summary: 验证令牌
       tags:
       - 认证
+  /automation-runs/{id}:
+    get:
+      parameters:
+      - description: 运行 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 运行记录
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationRun'
+              type: object
+      security:
+      - Bearer: []
+      summary: 获取运行记录
+      tags:
+      - 自动化
+  /automation-runs/{id}/cancel:
+    post:
+      description: 排队或等待审批的运行立即结束；执行中的运行在下一次检查时停止
+      parameters:
+      - description: 运行 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 运行记录
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationRun'
+              type: object
+      security:
+      - Bearer: []
+      summary: 停止运行
+      tags:
+      - 自动化
+  /automations:
+    get:
+      description: 列出当前用户在本空间创建的自动化（定时任务），最新的在前
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 自动化列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Automation'
+                  type: array
+              type: object
+      security:
+      - Bearer: []
+      summary: 列出我的自动化
+      tags:
+      - 自动化
+      x-agent:
+        id: automation.list
+        max_items: 100
+        risk: read
+      x-agent-hint: 'Lists the user''s automations: scheduled tasks an agent runs
+        on their behalf, with next and last run.'
+    post:
+      consumes:
+      - application/json
+      description: 创建一个按计划由 Agent 以当前用户身份运行的任务
+      parameters:
+      - description: 自动化
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.CreateAutomationRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 创建的自动化
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Automation'
+              type: object
+        "400":
+          description: 参数不合法
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 创建自动化
+      tags:
+      - 自动化
+      x-agent:
+        always_confirm: true
+        id: automation.create
+        label_param: name
+        risk: write
+        role: viewer
+      x-agent-hint: 'Creates an automation the user runs as. Turn the user''s wording
+        into a cron expression (five fields, minute first) and an IANA timezone, and
+        check it with automation.validate_trigger first, telling the user the next
+        run times it returns. Runs are unattended: write the instruction as a complete
+        task, since nobody can answer questions during a run. access_level defaults
+        to confirm, where each change waits for the user''s approval; only set auto_write
+        when the user asks for it.'
+  /automations/{id}:
+    delete:
+      description: 停止进行中的运行，删除自动化及其运行记录、会话和长期授权
+      parameters:
+      - description: 自动化 ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: automation_id
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 删除成功
+          schema:
+            $ref: '#/definitions/internal_handler.SuccessResponse'
+        "404":
+          description: 不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 删除自动化
+      tags:
+      - 自动化
+      x-agent:
+        id: automation.delete
+        label: name
+        risk: destructive
+        role: viewer
+        target: automation.get
+      x-agent-hint: Deletes an automation with its run history and conversations.
+        Cannot be undone; automation.pause keeps it.
+    get:
+      parameters:
+      - description: 自动化 ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: automation_id
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 自动化
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Automation'
+              type: object
+        "404":
+          description: 不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 获取自动化
+      tags:
+      - 自动化
+      x-agent:
+        id: automation.get
+        risk: read
+      x-agent-hint: Returns one automation, including its instruction.
+    put:
+      consumes:
+      - application/json
+      description: 只修改请求中出现的字段，其余保持不变
+      parameters:
+      - description: 自动化 ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: automation_id
+      - description: 要修改的字段
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationPatch'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 修改后的自动化
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Automation'
+              type: object
+        "400":
+          description: 参数不合法
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 修改自动化
+      tags:
+      - 自动化
+      x-agent:
+        always_confirm: true
+        id: automation.update
+        label: name
+        risk: write
+        role: viewer
+        target: automation.get
+      x-agent-hint: Changes the listed fields of an automation; a field left out is
+        kept. Check a new trigger with automation.validate_trigger first. Use automation.pause
+        and automation.resume to switch it off and on.
+  /automations/{id}/grant-candidates:
+    get:
+      description: 列出本自动化的运行请求过审批、尚未长期授权的调用；需每次审批的调用不在其中
+      parameters:
+      - description: 自动化 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 候选调用
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 列出可设为长期授权的调用
+      tags:
+      - 自动化
+  /automations/{id}/grants:
+    get:
+      description: 列出以后的运行无需确认即可执行的调用，以及失效原因
+      parameters:
+      - description: 自动化 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 长期授权
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 列出自动化的长期授权
+      tags:
+      - 自动化
+    post:
+      consumes:
+      - application/json
+      description: 让以后的运行无需确认即可执行某次运行请求过审批的调用；Agent 配置或所有者角色变化后失效
+      parameters:
+      - description: 自动化 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: '{prompt_id}'
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 授权
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 添加长期授权
+      tags:
+      - 自动化
+  /automations/{id}/pause:
+    post:
+      description: 停止按计划触发；进行中的运行不受影响
+      parameters:
+      - description: 自动化 ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: automation_id
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 暂停后的自动化
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Automation'
+              type: object
+      security:
+      - Bearer: []
+      summary: 暂停自动化
+      tags:
+      - 自动化
+      x-agent:
+        id: automation.pause
+        label: name
+        risk: write
+        role: viewer
+        target: automation.get
+      x-agent-hint: Stops an automation from running on schedule until automation.resume.
+  /automations/{id}/resume:
+    post:
+      description: 从现在起重新按计划触发，并清零连续失败计数
+      parameters:
+      - description: 自动化 ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: automation_id
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 恢复后的自动化
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Automation'
+              type: object
+      security:
+      - Bearer: []
+      summary: 恢复自动化
+      tags:
+      - 自动化
+      x-agent:
+        always_confirm: true
+        id: automation.resume
+        label: name
+        risk: write
+        role: viewer
+        target: automation.get
+      x-agent-hint: Schedules a paused automation again from now; missed runs are
+        not caught up.
+  /automations/{id}/run:
+    post:
+      description: 排队一次手动运行；已有运行在排队或进行中时拒绝
+      parameters:
+      - description: 自动化 ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: automation_id
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: 排队的运行
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationRun'
+              type: object
+        "409":
+          description: 已有运行
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 立即运行自动化
+      tags:
+      - 自动化
+      x-agent:
+        always_confirm: true
+        id: automation.run_now
+        label: name
+        risk: write
+        role: viewer
+        target: automation.get
+      x-agent-hint: Queues a run now, in the background; follow it with automation.list_runs.
+  /automations/{id}/runs:
+    get:
+      parameters:
+      - description: 自动化 ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: automation_id
+      - description: 页码，从 1 开始
+        in: query
+        name: page
+        type: integer
+        x-agent: true
+      - description: 每页条数，最多 100
+        in: query
+        name: page_size
+        type: integer
+        x-agent: true
+        x-agent-maximum: "20"
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 运行记录
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.PageResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationRun'
+                  type: array
+              type: object
+      security:
+      - Bearer: []
+      summary: 列出运行记录
+      tags:
+      - 自动化
+      x-agent:
+        id: automation.list_runs
+        risk: read
+      x-agent-hint: Lists an automation's runs, newest first, with status, error and
+        the start of the answer.
+  /automations/validate-trigger:
+    post:
+      consumes:
+      - application/json
+      description: 校验 cron 或一次性触发器，返回未来 3 次触发时间
+      parameters:
+      - description: 触发器
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ValidateTriggerRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 未来触发时间
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ValidateTriggerResult'
+              type: object
+        "400":
+          description: 触发器不合法
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 校验触发器
+      tags:
+      - 自动化
+      x-agent:
+        id: automation.validate_trigger
+        risk: probe
+      x-agent-hint: Checks a trigger and returns its next three run times in UTC;
+        convert them to the trigger's timezone for the user.
   /chunker/preview:
     post:
       consumes:
@@ -15599,8 +16575,9 @@ paths:
       x-agent:
         id: data_source.get
         risk: read
-      x-agent-hint: Read a configured data source and its sync state; credentials
-        and connector configuration are not returned.
+      x-agent-hint: Read a configured data source and its sync state; credentials,
+        connector settings and raw upstream errors are omitted. For detailed failures
+        use the data source settings page.
     put:
       consumes:
       - application/json
@@ -15679,8 +16656,9 @@ paths:
       x-agent:
         id: data_source.list_sync_logs
         risk: read
-      x-agent-hint: Read recent sync results, counts and errors. Use limit and offset
-        for older records.
+      x-agent-hint: Read recent sync status and counts. Use limit and offset for older
+        records. Raw upstream errors are omitted; detailed failures remain on the
+        data source settings page.
   /datasource/{id}/pause:
     post:
       description: Pause a data source's scheduled syncs
@@ -15966,9 +16944,10 @@ paths:
       x-agent:
         id: data_source.get_sync_log
         risk: read
-      x-agent-hint: Read the current status, counts and errors of a sync_log_id returned
-        by data_source.sync or data_source.list_sync_logs. A started job is not a
-        completed sync.
+      x-agent-hint: Read the current status and counts of a sync_log_id returned by
+        data_source.sync or data_source.list_sync_logs. A started job is not a completed
+        sync. Raw upstream errors are omitted; detailed failures remain on the data
+        source settings page.
   /datasource/types:
     get:
       description: Get list of available data source connectors
@@ -21733,8 +22712,10 @@ paths:
     put:
       consumes:
       - application/json
-      description: 为指定 MCP 服务下的某个工具更新启用状态和/或人工审批要求。至少提供 require_approval 或 enabled
-        之一；省略的字段保持原值。
+      description: |-
+        为指定 MCP 服务下的某个工具更新启用状态、人工审批要求和/或风险等级。
+        至少提供 require_approval、enabled、risk 之一；省略的字段保持原值。
+        risk 为 read/probe/write/destructive，空字符串表示改回按服务注解推断。
       parameters:
       - description: MCP 服务 ID
         in: path
@@ -21746,7 +22727,7 @@ paths:
         name: tool_name
         required: true
         type: string
-      - description: '{require_approval?: bool, enabled?: bool}'
+      - description: '{require_approval?: bool, enabled?: bool, risk?: string}'
         in: body
         name: request
         required: true
@@ -23103,6 +24084,54 @@ paths:
       summary: 检查 WeKnoraCloud 凭证状态
       tags:
       - WeKnoraCloud
+  /notifications:
+    get:
+      parameters:
+      - description: 条数，最多 100
+        in: query
+        name: limit
+        type: integer
+      - description: 只看未读
+        in: query
+        name: unread
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '{items, unread}'
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 列出我的通知
+      tags:
+      - 通知
+  /notifications/read:
+    post:
+      consumes:
+      - application/json
+      description: ids 为空时全部标记已读
+      parameters:
+      - description: '{ids}'
+        in: body
+        name: request
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 结果
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 标记通知已读
+      tags:
+      - 通知
   /organizations:
     get:
       description: 获取当前空间所属的所有组织，并附带各空间内知识库/智能体数量

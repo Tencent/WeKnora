@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -79,6 +80,8 @@ func (e *AgentEngine) streamLLMToEventBus(
 	chunkCount := 0
 	responseTypeCounts := make(map[string]int)
 	firstChunkTime := time.Time{}
+	answerGuard := &agenttools.ProtocolAnswerGuard{}
+	var protocolErr error
 	answerDecoder := e.modelContext.StreamDecoder()
 	thinkingDecoder := e.modelContext.StreamDecoder()
 
@@ -117,6 +120,17 @@ func (e *AgentEngine) streamLLMToEventBus(
 				chunk.Content += answerDecoder.Flush()
 			}
 		}
+		if chunk.ResponseType == types.ResponseTypeAnswer {
+			chunk.Content = answerGuard.Feed(chunk.Content)
+			if chunk.Done {
+				tail, guardErr := answerGuard.Flush()
+				if guardErr != nil {
+					protocolErr = guardErr
+				} else {
+					chunk.Content += tail
+				}
+			}
+		}
 		e.modelContext.DecodeToolCalls(chunk.ToolCalls)
 
 		if chunk.Content != "" {
@@ -152,13 +166,23 @@ func (e *AgentEngine) streamLLMToEventBus(
 			emitFunc(&chunk, result.Content)
 		}
 	}
-	answerTail := answerDecoder.Flush()
+	guardTail, guardErr := answerGuard.Flush()
+	if guardErr != nil {
+		protocolErr = guardErr
+	}
+	if protocolErr != nil {
+		return nil, protocolErr
+	}
+	answerTail := guardTail + answerDecoder.Flush()
 	thinkingTail := thinkingDecoder.Flush()
 	result.Content += answerTail
 	result.ReasoningContent += thinkingTail
 	if emitFunc != nil {
 		if thinkingTail != "" {
-			emitFunc(&types.StreamResponse{ResponseType: types.ResponseTypeThinking, Content: thinkingTail}, result.Content)
+			emitFunc(
+				&types.StreamResponse{ResponseType: types.ResponseTypeThinking, Content: thinkingTail},
+				result.Content,
+			)
 		}
 		if answerTail != "" {
 			emitFunc(&types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Content: answerTail}, result.Content)
@@ -269,13 +293,23 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	tools []chat.Tool,
 	iteration int,
 	sessionID string,
+	runtimeNotices ...string,
 ) (*types.ChatResponse, error) {
-	budget := e.clampCompletionBudgetToContext(e.tokenEstimator.EstimateMessages(messages))
+	runtimeNotice := strings.Join(runtimeNotices, "\n")
+	budgetMessages := messages
+	if runtimeNotice != "" {
+		budgetMessages = append(
+			append([]chat.Message(nil), messages...),
+			chat.Message{Role: "system", Content: runtimeNotice},
+		)
+	}
+	budget := e.clampCompletionBudgetToContext(e.tokenEstimator.EstimateMessages(budgetMessages))
 	logger.Debugf(ctx, "[Agent][Thinking] Iteration-%d: temp=%.2f, tools=%d, thinking=%v, max_tokens=%d",
 		iteration+1, e.config.Temperature, len(tools), e.config.Thinking, budget)
 
 	parallelToolCalls := true
 	opts := &chat.ChatOptions{
+		RuntimeNotice:       runtimeNotice,
 		Temperature:         e.config.Temperature,
 		MaxCompletionTokens: budget,
 		Tools:               tools,
@@ -331,6 +365,9 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		}
 	}
 	emitAnswer := func(content string) {
+		if e.holdCollaborationAnswer {
+			return
+		}
 		if content == "" {
 			return
 		}
@@ -443,6 +480,16 @@ func (e *AgentEngine) streamThinkingToEventBus(
 			// to the thought area instead.
 			if chunk.Content != "" {
 				thinkPart, answerPart := splitter.Feed(chunk.Content)
+				if splitter.TakeAnswerReset() && answerStreamed {
+					_ = e.eventBus.Emit(
+						ctx,
+						event.Event{
+							ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
+							Data: event.AgentFinalAnswerData{Replace: true},
+						},
+					)
+					answerStreamed = false
+				}
 				if thinkPart != "" {
 					thinkingOpen = true
 					emitThought(thinkPart, false)
@@ -469,7 +516,8 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	logger.Infof(ctx, "[Agent][Thinking] Iteration-%d completed: content=%d chars, tool_calls=%d, emitted_events=%v",
 		iteration+1, len(llmResult.Content), len(llmResult.ToolCalls), emittedEventTypes)
 
-	fullContent := agenttools.StripThinkBlocks(llmResult.Content)
+	inlineReasoning, cleanContent := agenttools.SplitThinkContent(llmResult.Content)
+	fullContent := strings.TrimSpace(cleanContent)
 
 	// Use actual finish_reason from LLM stream instead of hardcoding "stop".
 	// Fallback to "stop" when the stream did not report a finish_reason
@@ -481,7 +529,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 
 	resp := &types.ChatResponse{
 		Content:            fullContent,
-		ReasoningContent:   llmResult.ReasoningContent,
+		ReasoningContent:   llmResult.ReasoningContent + inlineReasoning,
 		ReasoningSignature: llmResult.ReasoningSignature,
 		ReasoningMetadata:  llmResult.ReasoningMetadata,
 		ToolCalls:          llmResult.ToolCalls,
@@ -508,6 +556,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 func (e *AgentEngine) callLLMWithRetry(
 	ctx context.Context, messagesPtr *[]chat.Message, tools []chat.Tool,
 	state *types.AgentState, query string, iteration int, sessionID string,
+	runtimeNotices ...string,
 ) (*types.ChatResponse, error) {
 	round := iteration + 1
 	messages := *messagesPtr
@@ -552,7 +601,7 @@ func (e *AgentEngine) callLLMWithRetry(
 	// Sanitize messages before sending to LLM (fix consecutive roles, orphaned tool results)
 	messages = agenttools.SanitizeMessages(messages)
 
-	response, err := e.streamThinkingToEventBus(ctx, messages, tools, iteration, sessionID)
+	response, err := e.streamThinkingToEventBus(ctx, messages, tools, iteration, sessionID, runtimeNotices...)
 
 	// A rejected-for-size request is neither transient nor fatal, and reading
 	// it as either is wrong in a specific way: retried unchanged it fails
@@ -572,7 +621,30 @@ func (e *AgentEngine) callLLMWithRetry(
 		*messagesPtr = compacted
 		messages = agenttools.SanitizeMessages(compacted)
 		e.lastSentMsgCount = len(compacted)
-		response, err = e.streamThinkingToEventBus(ctx, messages, tools, iteration, sessionID)
+		response, err = e.streamThinkingToEventBus(ctx, messages, tools, iteration, sessionID, runtimeNotices...)
+	}
+
+	// Invalid protocol text is not an answer or executable tool request. Retry
+	// the model once using the already-collected evidence; do not replay tools.
+	if errors.Is(err, agenttools.ErrProtocolArtifact) && ctx.Err() == nil {
+		logger.Warnf(ctx, "[Agent][Round-%d] Invalid provider protocol output; retrying once", round)
+		notice := "<runtime_event>{\"source\":\"runtime\",\"type\":\"invalid_response_retry\",\"message\":\"Th" +
+			"e previous model response was invalid provider protocol data, not an answer. " +
+			"Continue from the existing tool and delegated results and provide the actual " +
+			"requested response. Do not repeat completed operations or output internal " +
+			"serialization metadata.\"}</runtime_event>"
+		response, err = e.streamThinkingToEventBus(
+			ctx,
+			messages,
+			tools,
+			iteration,
+			sessionID,
+			strings.Join(runtimeNotices, "\n"),
+			notice,
+		)
+	}
+	if errors.Is(err, agenttools.ErrProtocolArtifact) {
+		return nil, fmt.Errorf("model response remained invalid after recovery: %w", err)
 	}
 
 	if err != nil && isTransientError(err) {
@@ -591,7 +663,7 @@ func (e *AgentEngine) callLLMWithRetry(
 				break
 			}
 
-			response, err = e.streamThinkingToEventBus(ctx, messages, tools, iteration, sessionID)
+			response, err = e.streamThinkingToEventBus(ctx, messages, tools, iteration, sessionID, runtimeNotices...)
 			if err == nil || !isTransientError(err) {
 				break
 			}

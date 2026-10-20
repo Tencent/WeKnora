@@ -121,7 +121,7 @@ type agentService struct {
 	toolApprovalGate      approval.MCPApproval
 	customAgentService    interfaces.CustomAgentService
 	operationDispatcher   operations.Dispatcher
-	trialRunner           tools.AgentTrialRunner
+	collaboration         *AgentCollaboration
 	sandboxMgr            sandbox.Manager
 	sandboxResolver       sandbox.TenantSandboxResolver
 	sandboxPinner         *SessionSandboxPinner
@@ -163,7 +163,7 @@ func NewAgentService(
 	graphRepo interfaces.RetrieveGraphRepository,
 	operationDispatcher *operations.HandlerDispatcher,
 	customAgentService interfaces.CustomAgentService,
-	trialRunner *AgentTrialRunner,
+	collaboration *AgentCollaboration,
 ) interfaces.AgentService {
 	svc := &agentService{
 		customAgentService:   customAgentService,
@@ -201,8 +201,9 @@ func NewAgentService(
 		svc.hostSkillsRoot = hostSandbox.SkillTree.Root()
 		svc.hostSkillVersionsRoot = hostSandbox.SkillTree.VersionsRoot()
 	}
-	if trialRunner != nil {
-		svc.trialRunner = trialRunner
+	svc.collaboration = collaboration
+	if collaboration != nil {
+		collaboration.artifactFiles = svc.collaborationArtifactFiles
 	}
 	return svc
 }
@@ -338,6 +339,11 @@ func (s *agentService) CreateAgentEngine(
 		toolRegistry.RegisterTool(tools.NewBrowserSkillTool(s.browserSkill, scope, sessionID, instructions))
 	}
 
+	if s.collaboration != nil {
+		if err := s.collaboration.attach(ctx, engine, toolRegistry, config, sessionID, assistantMessageID); err != nil {
+			return nil, err
+		}
+	}
 	toolRegistry.BindSession(sessionID)
 	engine.SetWorkspaceLayout(s.lookupSessionWorkspaceLayout(ctx, sessionID, config))
 
@@ -355,10 +361,17 @@ func (s *agentService) registerMCPTools(
 		tenantID = tid
 	}
 	if tenantID == 0 || s.mcpServiceService == nil || s.mcpManager == nil {
+		config.MCPSelectionMode = "none"
+		config.MCPServices = nil
 		return
 	}
 
+	// Freeze "all" to the services resolved for this turn. A child must not
+	// silently gain services added after its parent started.
 	mcpMode := config.MCPSelectionMode
+	config.MCPSelectionMode = "selected"
+	selectedIDs := append([]string(nil), config.MCPServices...)
+	config.MCPServices = nil
 	if mcpMode == "" {
 		mcpMode = "all"
 	}
@@ -371,11 +384,11 @@ func (s *agentService) registerMCPTools(
 	var err error
 
 	if mcpMode == "selected" {
-		if len(config.MCPServices) == 0 {
+		if len(selectedIDs) == 0 {
 			logger.Infof(ctx, "MCP services disabled by agent config (mode: selected, no services)")
 			return
 		}
-		mcpServices, err = s.mcpServiceService.ListMCPServicesByIDs(ctx, tenantID, config.MCPServices)
+		mcpServices, err = s.mcpServiceService.ListMCPServicesByIDs(ctx, tenantID, selectedIDs)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to list selected MCP services: %v", err)
 			return
@@ -393,6 +406,7 @@ func (s *agentService) registerMCPTools(
 	for _, svc := range mcpServices {
 		if svc != nil && svc.Enabled {
 			enabledServices = append(enabledServices, svc)
+			config.MCPServices = append(config.MCPServices, svc.ID)
 		}
 	}
 	if len(enabledServices) > 0 {
@@ -500,22 +514,15 @@ func (s *agentService) registerOperationTools(
 	}
 	toolRegistry.RegisterTool(tools.NewRunOperationTool(runtime))
 	// Opening a page changes nothing; the user saves any form themselves.
-	openPage := tools.NewOpenPageTool(runtime)
-	toolRegistry.RegisterTool(openPage)
+	toolRegistry.RegisterTool(tools.NewOpenPageTool(runtime))
 	// Filling the page saves nothing either, but read-only runs only look.
 	if actor, ok := s.toolApprovalGate.(approval.PageActor); ok && actor != nil {
-		openPage.WithPageActor(actor)
+		toolRegistry.RegisterTool(tools.NewViewPageTool(runtime, actor))
 		toolRegistry.RegisterTool(tools.NewReadPageTool(actor))
 		toolRegistry.RegisterTool(tools.NewSelectTabTool(actor))
 		if operationAccess.Level != types.AssistantAccessReadOnly {
 			toolRegistry.RegisterTool(tools.NewFillPageTool(actor))
 		}
-	}
-	// A trial spends model calls and runs the agent's own tools, so it is
-	// a change for the access level to approve.
-	if s.trialRunner != nil && operationAccess.Level != types.AssistantAccessReadOnly {
-		toolRegistry.RegisterTool(tools.NewConfirmedTool(
-			tools.NewTryAgentTool(s.trialRunner), operations.RiskWrite, operationAccess, gate))
 	}
 }
 
@@ -1430,7 +1437,8 @@ func (s *agentService) registerTools(
 			if toolToRegister.Name() != toolName {
 				logger.Warnf(ctx, "Tool name mismatch: expected %s, got %s", toolName, toolToRegister.Name())
 			}
-			if risk, writes := assistantWriteToolRisk[toolName]; writes && config.OperationsAgentID != "" {
+			confirms := config.OperationsAgentID != "" || config.AssistantAccess != types.AssistantAccessAutoWrite
+			if risk, writes := assistantWriteToolRisk[toolName]; writes && confirms {
 				gate, _ := s.toolApprovalGate.(approval.BuiltinApproval)
 				toolToRegister = tools.NewConfirmedTool(toolToRegister, risk,
 					operations.Access{Level: config.AssistantAccess}, gate)

@@ -7,6 +7,7 @@ import { compileScript, parse } from '@vue/compiler-sfc'
 import * as vue from 'vue'
 import * as pinia from 'pinia'
 import ts from 'typescript'
+import * as childAgentTabs from '../../composables/useChildAgentTabs'
 
 const filename = fileURLToPath(new URL('./AssistantPanel.vue', import.meta.url))
 const { descriptor } = parse(readFileSync(filename, 'utf8'), { filename })
@@ -94,6 +95,8 @@ async function fixture(
       DialogPlugin: { confirm: (options: any) => { dialogs.push(options); return { destroy() {} } } },
     },
     '@/views/chat/index.vue': ChatView,
+    '@/views/chat/components/ChildAgentTabBar.vue': emptyComponent,
+    '@/composables/useChildAgentTabs': childAgentTabs,
     '@/components/Input-field.vue': emptyComponent,
     '@/components/PanelResizeHandle.vue': emptyComponent,
     './AssistantContextMenu.vue': emptyComponent,
@@ -479,6 +482,8 @@ test('the open dialog and the selection go with the message, the selection only 
     f.assistant.setPageSelection({ text: 'Run setup.', field: 'Content', ref: 'e2', startLine: 7, endLine: 7 })
     f.assistant.open({ query: 'Polish this' })
     await flush()
+    assert.deepEqual(Array.from(f.sent[0].scope.knowledgeBaseIds), [],
+      'the current page must not become an explicit KB selection')
     assert.equal(JSON.stringify(f.sent[0].scope.pageContext), JSON.stringify({
       knowledge_base_id: 'kb-a', view: 'Edit Markdown',
       selection: { text: 'Run setup.', field: 'Content', ref: 'e2', start_line: 7, end_line: 7 },

@@ -398,7 +398,7 @@ func renderFileContent(
 	}
 	page := paginateSandboxFile(string(data), input.Offset, input.Limit, maxBytes, maxRunes)
 	if (page.lineTooLarge || input.LineOffset != 0) &&
-		(rootDir == types.AttachmentPathScheme || rootDir == "web://") {
+		(rootDir == types.AttachmentPathScheme || rootDir == "web://" || rootDir == types.ResourceScheme) {
 		return renderFileLinePage(input, string(data), clean, resultData, maxBytes, maxRunes)
 	}
 

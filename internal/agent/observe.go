@@ -465,7 +465,7 @@ func (e *AgentEngine) analyzeResponse(
 			answerID = response.AnswerEventID
 		} else {
 			answerID = generateEventID("answer")
-			if response.Content != "" {
+			if response.Content != "" && !e.holdCollaborationAnswer {
 				e.eventBus.Emit(ctx, event.Event{
 					ID:        answerID,
 					Type:      event.EventAgentFinalAnswer,
@@ -533,7 +533,10 @@ func (e *AgentEngine) analyzeResponse(
 		// text already went out, otherwise emit it once here. Done is left to
 		// the caller so a loop-end steer inject can still continue the turn.
 		answerID := response.AnswerEventID
-		if !response.AnswerStreamed || answerID == "" {
+		if e.holdCollaborationAnswer && answerID == "" {
+			answerID = generateEventID("answer")
+		}
+		if (!response.AnswerStreamed || answerID == "") && !e.holdCollaborationAnswer {
 			answerID = generateEventID("answer")
 			_ = e.eventBus.Emit(ctx, event.Event{
 				ID:        answerID,
@@ -1104,6 +1107,10 @@ func (e *AgentEngine) appendToolResults(
 		}
 
 		messages = append(messages, toolMsg)
+	}
+
+	if step.IntermediateAnswer {
+		messages = e.appendCollaborationDeliveryBoundary(messages, step.Thought)
 	}
 
 	return messages

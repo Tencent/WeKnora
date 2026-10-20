@@ -20,6 +20,9 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 
 	result := make([]chat.Message, 0, len(messages))
 	for i, msg := range messages {
+		if msg.Role == "assistant" {
+			msg.Content = withoutProtocolArtifactLines(msg.Content)
+		}
 		// Skip empty non-system messages (some providers reject these)
 		if msg.Content == "" && msg.Role != "system" && msg.Role != "tool" && len(msg.ToolCalls) == 0 &&
 			len(msg.Images) == 0 && len(msg.MultiContent) == 0 {

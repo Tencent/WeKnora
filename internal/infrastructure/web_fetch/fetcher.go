@@ -24,11 +24,8 @@ import (
 )
 
 const (
-	// defaultPageFetchTimeout is the agent web_fetch page budget when
-	// WEKNORA_WEB_FETCH_TIMEOUT is empty, invalid, or not positive. Three
-	// minutes covers a slow browser render plus HTTP fallback: a 150s cap is
-	// still shorter than the 150036ms success reported for this timeout.
-	defaultPageFetchTimeout = 3 * time.Minute
+	// Bound interactive reads; explicit environment overrides remain supported.
+	defaultPageFetchTimeout = 30 * time.Second
 	pipelineFetchTimeout    = 15 * time.Second
 	maxBodySize             = 100 * 1024
 	maxAgentBodySize        = 2 * 1024 * 1024
@@ -310,11 +307,26 @@ func (f *Fetcher) pinnedDialContext() func(context.Context, string, string) (net
 				return nil, fmt.Errorf("connection blocked: %s resolves to restricted IP %s", host, ip)
 			}
 		}
-		pinnedAddress := net.JoinHostPort(ips[0].String(), port)
-		if f.dialContext != nil {
-			return f.dialContext(ctx, network, pinnedAddress)
+		// Try validated addresses without a second DNS lookup. A broken IPv6 route
+		// must not prevent reaching the same public host over IPv4.
+		var lastErr error
+		for _, ip := range ips {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			dial := f.dialContext
+			if dial == nil {
+				dial = (&net.Dialer{KeepAlive: 30 * time.Second}).DialContext
+			}
+			conn, err := dial(dialCtx, network, net.JoinHostPort(ip.String(), port))
+			cancel()
+			if err == nil {
+				return conn, nil
+			}
+			lastErr = err
 		}
-		return (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext(ctx, network, pinnedAddress)
+		return nil, lastErr
 	}
 }
 

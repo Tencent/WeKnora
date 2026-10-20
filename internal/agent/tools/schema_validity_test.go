@@ -20,6 +20,7 @@ func TestBuiltInToolSchemasAreValidJSON(t *testing.T) {
 	static[wikiSearch.Name()] = wikiSearch.Parameters()
 	static[wikiRead.Name()] = wikiRead.Parameters()
 	static[ToolOpenPage] = NewOpenPageTool(OperationsRuntime{}).Parameters()
+	static[ToolViewPage] = NewViewPageTool(OperationsRuntime{}, nil).Parameters()
 	static[ToolReadPage] = NewReadPageTool(nil).Parameters()
 	static[ToolSelectTab] = NewSelectTabTool(nil).Parameters()
 	static[ToolFillPage] = NewFillPageTool(nil).Parameters()

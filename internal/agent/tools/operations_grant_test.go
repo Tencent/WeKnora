@@ -61,7 +61,11 @@ func TestRunOperationGrantFollowsTheTargetScope(t *testing.T) {
 			map[string]any{"agent_id": "a1", "name": "Bot"},
 			"agent.update agent:a1", `(only for agent "Support bot")`,
 		},
-		{"deletion", "knowledge.delete", map[string]any{"knowledge_id": "k1"}, "", ""},
+		{
+			"deletion, matched only by a standing grant", "knowledge.delete",
+			map[string]any{"knowledge_id": "k1"},
+			"knowledge.delete knowledge_base:kb1", "(only in the knowledge bases this call touches)",
+		},
 		{"creation without a scope", "knowledge_base.create", map[string]any{"name": "New"}, "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -117,15 +121,12 @@ func TestConfirmedToolOffersGrantsOnlyForRecoverableChanges(t *testing.T) {
 	}
 	_, err = NewConfirmedTool(del, operations.RiskDestructive, access, gate).Execute(ctx, json.RawMessage(`{}`))
 	require.NoError(t, err)
-	trial := NewTryAgentTool(&fakeTrialRunner{trial: &AgentTrial{}})
-	_, err = NewConfirmedTool(trial, operations.RiskWrite, access, gate).Execute(ctx,
-		json.RawMessage(`{"agent_id":"a1","question":"q"}`))
-	require.NoError(t, err)
 
-	require.Len(t, gate.requests, 3)
+	require.Len(t, gate.requests, 2)
 	assert.Equal(t, ToolWikiReplaceText+" knowledge_base:kb1,kb2", gate.requests[0].Grant)
 	assert.Equal(t, "Edit Wiki page text", gate.requests[0].GrantScope)
-	assert.Empty(t, gate.requests[1].Grant, "a deletion always asks")
-	assert.Equal(t, ToolTryAgent+" agent:a1", gate.requests[2].Grant)
-	assert.Equal(t, `Try agent "Support bot"`, gate.requests[2].GrantScope)
+	assert.Equal(t, ToolWikiDeletePage+" knowledge_base:kb1", gate.requests[1].Grant,
+		"a deletion is named so a standing grant can match it")
+	assert.Equal(t, operations.RiskDestructive, gate.requests[1].GrantRisk,
+		"and the gate never offers to remember it from the card")
 }

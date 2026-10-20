@@ -53,7 +53,8 @@
                 </div>
             </div>
             <!-- 复制和添加到知识库按钮 - 非 Agent 模式下显示 -->
-            <div v-if="answerFullyRendered && (content || session.content)" class="answer-toolbar">
+            <div v-if="answerFullyRendered && (content || session.content)" class="answer-toolbar"
+                :class="{ 'answer-toolbar--persistent': hasArtifacts || artifactsCollecting }">
                 <t-tooltip v-if="canFork" :content="forkTooltip">
                     <t-button size="small" variant="outline" shape="round" @click.stop="emitFork">
                         <ChatActionIcon name="git-branch" />
@@ -169,6 +170,7 @@ import {
     hydrateArtifactImages,
     isArtifactRefHref,
     renderArtifactReference,
+    installArtifactLinkRenderer,
 } from '@/utils/sandboxArtifactRefs';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
@@ -398,6 +400,13 @@ const markdownRenderer = createChatMarkdownRenderer({
     invalidImageHtml: () => `<p>${t('error.invalidImageLink')}</p>`,
     isValidImageUrl: (href) => isArtifactRefHref(href) || isValidImageURL(href),
 });
+
+installArtifactLinkRenderer(markdownRenderer, () => ({
+    artifacts: artifactList.value,
+    labels: artifactRefLabels.value,
+    context: artifactRefContext.value,
+    streaming: !props.session?.is_completed,
+}));
 
 // 计算属性：将 Markdown 文本转换为 tokens
 const mentionedItems = computed(() => {
