@@ -6,6 +6,19 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// ExistingDocumentAdopter is an optional connector capability used for one-time
+// migration. Some connectors import documents that were created before the data
+// source existed (for example by a standalone script using the knowledge API).
+// Those rows have no datasource_id/external_id metadata, so a normal sync would
+// create duplicates. The service calls ExternalIDFromDocument for each existing
+// document on the first sync and binds the ones this connector recognises.
+type ExistingDocumentAdopter interface {
+	// ExternalIDFromDocument returns the source external ID represented by an
+	// already-ingested document, or "" when the document is not from this source.
+	// content is the document's readable content as stored by WeKnora.
+	ExternalIDFromDocument(ctx context.Context, config *types.DataSourceConfig, title string, content []byte) string
+}
+
 // Connector is the interface that all external data source connectors must implement.
 // Each connector (Feishu, Notion, Confluence, etc.) provides an implementation of this interface.
 type Connector interface {

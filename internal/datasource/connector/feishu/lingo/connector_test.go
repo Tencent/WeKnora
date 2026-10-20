@@ -278,6 +278,29 @@ func TestResolveResourceAncestors(t *testing.T) {
 	}
 }
 
+func TestExternalIDFromDocument(t *testing.T) {
+	connector := NewConnector(core.RegionFeishuLingo)
+	config := testConfig()
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{name: "colon with space", content: "# OT\n\n飞书词条 ID：enterprise_123", want: "enterprise_123"},
+		{name: "no space", content: "飞书词条ID: enterprise_456\n", want: "enterprise_456"},
+		{name: "absent", content: "# OT\n\nno traceability line", want: ""},
+		{name: "empty id", content: "飞书词条 ID：\n", want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := connector.ExternalIDFromDocument(context.Background(), config, "OT", []byte(tc.content))
+			if got != tc.want {
+				t.Fatalf("ExternalIDFromDocument() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestValidateRejectsBadCredentials(t *testing.T) {
 	config := &types.DataSourceConfig{Type: types.ConnectorTypeFeishuLingo}
 	err := newTestConnector(&fakeLingoAPI{}).Validate(context.Background(), config)

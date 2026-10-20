@@ -3,6 +3,7 @@ package lingo
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -13,7 +14,14 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-var _ datasource.Connector = (*Connector)(nil)
+var (
+	_ datasource.Connector               = (*Connector)(nil)
+	_ datasource.ExistingDocumentAdopter = (*Connector)(nil)
+)
+
+// feishuEntityIDPattern matches the traceability line this connector (and the
+// legacy Python sync tool) writes into every document body.
+var feishuEntityIDPattern = regexp.MustCompile(`飞书词条\s*ID\s*[：:]\s*([A-Za-z0-9_-]+)`)
 
 // Connector implements datasource.Connector for Feishu Lingo and, with the same
 // code, for Lark. A core.Region picks the cloud, exactly like the wiki/drive
@@ -30,6 +38,20 @@ func NewConnector(region core.Region) *Connector {
 
 // Type returns the connector type identifier.
 func (c *Connector) Type() string { return c.region.ConnectorType }
+
+// ExternalIDFromDocument recognises documents imported before this data source
+// existed. Both this connector and the earlier Python sync tool write
+// "飞书词条 ID：<entity_id>" into the body, so the first native sync can bind
+// those rows instead of creating duplicate knowledge.
+func (c *Connector) ExternalIDFromDocument(
+	_ context.Context, _ *types.DataSourceConfig, _ string, content []byte,
+) string {
+	match := feishuEntityIDPattern.FindSubmatch(content)
+	if len(match) != 2 {
+		return ""
+	}
+	return string(match[1])
+}
 
 // Validate verifies credentials and the Lingo read scope with a one-item page.
 func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig) error {
