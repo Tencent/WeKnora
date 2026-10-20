@@ -11,6 +11,7 @@ import (
 	"time"
 
 	openSearchRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/opensearch"
+	weaviateRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/weaviate"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -20,9 +21,6 @@ import (
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/tencent/vectordatabase-sdk-go/tcvectordb"
-	"github.com/weaviate/weaviate-go-client/v5/weaviate"
-	"github.com/weaviate/weaviate-go-client/v5/weaviate/auth"
-	wgrpc "github.com/weaviate/weaviate-go-client/v5/weaviate/grpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -264,34 +262,40 @@ func testWeaviateConnection(ctx context.Context, config types.ConnectionConfig) 
 		scheme = "http"
 	}
 
-	weaviateCfg := weaviate.Config{
-		Host:             host,
-		ConnectionClient: secutils.NewSSRFSafeHTTPClient(secutils.DefaultSSRFSafeHTTPClientConfig()),
-		GrpcConfig: &wgrpc.Config{
-			Host: grpcAddress,
-		},
-		Scheme: scheme,
-	}
-	if config.APIKey != "" {
-		weaviateCfg.AuthConfig = auth.ApiKey{Value: config.APIKey}
+	// The v6 client builds its own HTTP and gRPC transports, so the SSRF-safe
+	// HTTP client this test used to inject cannot be passed in any more. Apply
+	// the same whitelist-first policy before dialing instead: env and saved
+	// stores reach this test without validateAndTestConnection, and a saved
+	// store's DNS may have changed since it was created.
+	if err := validateConnectionAddrSSRF(types.WeaviateRetrieverEngineType, types.ConnectionConfig{
+		Host:        host,
+		GrpcAddress: grpcAddress,
+	}); err != nil {
+		return "", err
 	}
 
-	// Weaviate Go client v5 does not expose a Close() method;
-	// it uses HTTP + gRPC transports that are managed internally.
-	client, err := weaviate.NewClient(weaviateCfg)
+	// The client reads /v1/meta while it connects, so an unreachable server
+	// fails here.
+	client, err := weaviateRepo.NewClient(testCtx, weaviateRepo.ClientConfig{
+		Host:        host,
+		GrpcAddress: grpcAddress,
+		Scheme:      scheme,
+		APIKey:      config.APIKey,
+	})
 	if err != nil {
 		logger.Warnf(ctx, "Weaviate connection test failed: %v", err)
 		return "", errors.NewBadRequestError("failed to create weaviate client: invalid configuration")
 	}
+	defer func() { _ = client.Close() }()
 
-	isReady, err := client.Misc().ReadyChecker().Do(testCtx)
+	isReady, err := client.IsReady(testCtx)
 	if err != nil || !isReady {
 		logger.Warnf(ctx, "Weaviate connection test failed: ready=%v, err=%v", isReady, err)
 		return "", errors.NewBadRequestError("failed to connect to weaviate: server not ready or authentication failed")
 	}
 
 	// Detect version via /v1/meta
-	meta, err := client.Misc().MetaGetter().Do(testCtx)
+	meta, err := client.Metadata(testCtx)
 	if err != nil || meta == nil {
 		return "", nil // connected but version unknown
 	}

@@ -3,7 +3,7 @@ package weaviate
 import (
 	"sync"
 
-	"github.com/weaviate/weaviate-go-client/v5/weaviate"
+	"github.com/weaviate/weaviate-go-client/v6"
 )
 
 type weaviateRepository struct {

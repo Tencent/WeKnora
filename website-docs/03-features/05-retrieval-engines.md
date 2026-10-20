@@ -36,7 +36,7 @@
 | OpenSearch | `opensearch` | k-NN 插件 knn（HNSW） | match（BM25） | BM25 | OS analyzer | knn_vector 声明式 mapping + 指纹校验 | k-NN 原生 | 中 | 需审计/别名/reindex 的生产 ES 系方案；版本 2.11+/3.x |
 | Qdrant | `qdrant` | 原生 HNSW Cosine | 全文索引 MatchText（token OR） | 无打分（Scroll 命中即回，靠 RRF rank） | 多语言 tokenizer | 每维一个 collection | score_threshold 原生 | 中 | 纯向量为主、需 payload 过滤的场景 |
 | Milvus | `milvus` | HNSW（IP/COSINE/L2） | BM25 Function 稀疏向量 | BM25 | Milvus analyzer | 每维一个 collection | 应用侧 | 中高 | 大规模向量、需要原生 BM25 混检 |
-| Weaviate | `weaviate` | nearVector（certainty） | 原生 BM25 | BM25 | Weaviate tokenizer | 动态 Class | certainty 原生 | 中 | GraphQL 生态、需副本/分片配置 |
+| Weaviate | `weaviate` | nearVector（certainty） | 原生 BM25 | BM25 | Weaviate tokenizer | 动态 Class | certainty 原生 | 中 | gRPC 检索、需副本/分片配置 |
 | Doris | `doris` | ANN HNSW inner_product/cosine | 倒排索引 MATCH_ANY | 倒排命中 | 建表声明 chinese parser | 每维一张表 | SQL 内 | 高 | 已有 Doris 数仓，检索与分析一体 |
 | 腾讯云 VectorDB | `tencent_vectordb` | HNSW COSINE | 稀疏向量 BM25（SPARSE_INVERTED） | BM25 | SDK SparseEncoder | 每维一个 collection | 应用侧 | 低（云托管） | 腾讯云托管、免运维 |
 
@@ -203,12 +203,15 @@ flowchart TD
 
 #### Weaviate {#_2-8-weaviate}
 
-`internal/application/repository/retriever/weaviate/repository.go`。HTTP + gRPC 双通道。
+`internal/application/repository/retriever/weaviate/repository.go`，基于 weaviate-go-client v6。检索、批量写入与批量删除走 gRPC，Schema 与单对象更新走 REST，不使用 GraphQL。要求 Weaviate ≥ 1.33。
 
-- **类管理**：动态创建 Class（`WEAVIATE_COLLECTION` 解析），支持 ReplicationConfig / ShardingConfig。
-- **向量检索**：GraphQL `nearVector` + certainty 阈值下推；certainty = `(2-distance)/2 = (1+cos)/2`。驱动下推 `(1+threshold)/2`，返回时换回 cosine 相似度（`2*certainty-1`），与其他引擎同一尺度。
-- **关键词检索**：GraphQL **BM25** 查询（`Bm25ArgBuilder`）。
-- **过滤**：GraphQL where 过滤 KB/knowledge/tag/is_enabled。
+- **类管理**：动态创建 Class（`WEAVIATE_COLLECTION` 解析），支持 ReplicationConfig / ShardingConfig。`content` 使用 gse 分词，服务端需设置 `ENABLE_TOKENIZER_GSE=true`。
+- **向量检索**：gRPC `nearVector`（命名向量 `embedding`）+ certainty 阈值下推；certainty = `(2-distance)/2 = (1+cos)/2`。驱动下推 `(1+threshold)/2`，返回时换回 cosine 相似度（`2*certainty-1`），与其他引擎同一尺度。
+- **关键词检索**：gRPC **BM25** 查询。
+- **过滤**：KB/knowledge/tag/is_enabled 过滤，排除项使用 `ContainsNone`。
+- **遥测**：所有请求携带 `X-Weaviate-Client-Integration: weknora/<版本>` 头。
+- **对象 ID**：切片正文以切片 ID 存储，每个生成问题使用独立的确定性 UUID；启用状态与标签更新按 `chunk_id` 作用于该切片的全部对象。
+- **升级**：低于 1.33 的服务端会在连接时被拒绝并给出明确报错。旧版客户端写入的数据无需迁移即可继续使用，但 Weaviate 每次只能升级一个 minor 版本（如 1.28 → 1.29 → … → 1.40）。gRPC 端口（默认 50051）必须可达，检索不再经由 REST。
 - 配置：`WEAVIATE_HOST` / `WEAVIATE_GRPC_ADDRESS` / `WEAVIATE_SCHEME` / `WEAVIATE_AUTH_ENABLED` + `WEAVIATE_API_KEY`。
 
 #### Apache Doris（4.1+） {#_2-9-apache-doris-4-1}

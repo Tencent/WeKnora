@@ -2,48 +2,40 @@ package weaviate
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"maps"
-	"net/http"
-	"net/http/httptest"
-	"regexp"
 	"slices"
-	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	sdk "github.com/weaviate/weaviate-go-client/v5/weaviate"
+	pb "github.com/weaviate/weaviate/grpc/generated/protocol/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const copyTestCollection = "Copy_64"
 
-// cursorConflictMessage is what weaviate v1.37.3 answers when a Get combines a
+// cursorConflictMessage is what weaviate answers when a query combines a
 // filter with the cursor API (entities/filters/cursor_validator.go).
 const cursorConflictMessage = "where cannot be set with after and limit parameters"
 
-var (
-	afterArgPattern = regexp.MustCompile(`after:\s*"([^"]*)"`)
-	limitArgPattern = regexp.MustCompile(`limit:\s*(\d+)`)
-	chunkArgPattern = regexp.MustCompile(`path: \["chunk_id"\] valueText: \[([^\]]*)\]`)
-	quotedPattern   = regexp.MustCompile(`"([^"]*)"`)
-)
-
-// copySourceRow is one source vector, in the shape a GraphQL Get answers with.
-func copySourceRow(id, chunkID, sourceID string) map[string]any {
-	return map[string]any{
-		fieldContent:         "content of " + sourceID,
-		fieldSourceID:        sourceID,
-		fieldSourceType:      1,
-		fieldChunkID:         chunkID,
-		fieldKnowledgeID:     "know-1",
-		fieldKnowledgeBaseID: "kb-src",
-		fieldTagID:           "",
-		"_additional":        map[string]any{"id": id, "vector": []any{0.5, 0.25}},
+// copySourceRow is one source vector, in the shape a search answers with.
+func copySourceRow(id, chunkID, sourceID string) fakeRow {
+	return fakeRow{
+		id: id,
+		properties: map[string]any{
+			fieldContent:         "content of " + sourceID,
+			fieldSourceID:        sourceID,
+			fieldSourceType:      1,
+			fieldChunkID:         chunkID,
+			fieldKnowledgeID:     "know-1",
+			fieldKnowledgeBaseID: "kb-src",
+			fieldTagID:           "",
+		},
+		vector: []float32{0.5, 0.25},
 	}
 }
 
@@ -54,16 +46,16 @@ type copyWrittenObject struct {
 }
 
 // copyPageServer stands in for a Weaviate data node holding the source
-// vectors. It answers Get the way the real one does - with the rows whose
+// vectors. It answers a search the way the real one does - with the rows whose
 // chunk_id is in the ContainsAny list the query asked for, cut off at the
 // query's limit - and it validates the cursor API the way the real one does,
-// so a query that combines `where` with `after` fails here exactly as it fails
+// so a query that combines a filter with `after` fails here exactly as it fails
 // in production.
 type copyPageServer struct {
 	mu sync.Mutex
 	// rows holds each chunk's vectors: one for the chunk content plus one per
 	// generated question, all sharing the chunk_id.
-	rows  map[string][]map[string]any
+	rows  map[string][]fakeRow
 	order []string
 
 	// queryLimit is the server's QUERY_MAXIMUM_RESULTS; 0 means no refusal.
@@ -71,28 +63,24 @@ type copyPageServer struct {
 	// ignoreChunkFilter answers every query with the same page, the way a
 	// source whose pages repeat themselves behaves.
 	ignoreChunkFilter bool
-	// queryError, when set, is the GraphQL error every Get is answered with.
+	// queryError, when set, is the error every search is answered with.
 	queryError string
-	// omitData answers every Get with a data object that carries no Get key.
-	omitData bool
-	// omitCollection answers with a Get object that carries no key for the
-	// queried collection.
-	omitCollection bool
+	// omitIDs answers with rows that carry no object ID.
+	omitIDs bool
 
-	queries    int
-	limits     []int
-	requested  [][]string
-	rejected   []string
-	batches    int
-	written    []copyWrittenObject
-	unexpected []string
+	queries   int
+	limits    []int
+	requested [][]string
+	rejected  []string
+	batches   int
+	written   []copyWrittenObject
 }
 
 // copyTestStore builds a source whose chunks hold the given vectors. Each
 // entry maps a chunk ID to its source IDs: the chunk's own content vector
 // first, then one per generated question.
 func copyTestStore(vectors map[string][]string) *copyPageServer {
-	s := &copyPageServer{rows: make(map[string][]map[string]any)}
+	s := &copyPageServer{rows: make(map[string][]fakeRow)}
 	next := 0
 	for _, chunkID := range slices.Sorted(maps.Keys(vectors)) {
 		for _, sourceID := range vectors[chunkID] {
@@ -105,7 +93,7 @@ func copyTestStore(vectors map[string][]string) *copyPageServer {
 }
 
 func copyTestUUID(i int) string {
-	return fmt.Sprintf("00000000-0000-0000-0000-%012d", i)
+	return fmt.Sprintf("00000000-0000-0000-0001-%012d", i)
 }
 
 // copyTestChunkMap maps size chunks onto target chunks.
@@ -126,134 +114,79 @@ func copyTestSingleVectorChunks(chunkIDs ...string) *copyPageServer {
 	return copyTestStore(vectors)
 }
 
-// serve starts an httptest server for s and returns a repository pointed at
-// it. The copy's own query limit is left at its default; tests that need the
+// serve starts a fake Weaviate for s and returns a repository pointed at it.
+// The copy's own query limit is left at its default; tests that need the
 // truncation path lower it on the returned repository.
 func (s *copyPageServer) serve(t *testing.T) *weaviateRepository {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(s.handle))
-	t.Cleanup(server.Close)
-	client, err := sdk.NewClient(sdk.Config{Scheme: "http", Host: strings.TrimPrefix(server.URL, "http://")})
-	require.NoError(t, err)
-	return &weaviateRepository{client: client, collectionBaseName: "Copy"}
+	fake := &fakeWeaviate{search: s.resolve, batchObjects: s.write}
+	return fake.repository(t, "Copy")
 }
 
-func (s *copyPageServer) handle(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	switch {
-	case r.Method == http.MethodPost && r.URL.Path == "/v1/graphql":
-		var body struct {
-			Query string `json:"query"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(s.resolve(body.Query))
-	case r.Method == http.MethodPost && r.URL.Path == "/v1/batch/objects":
-		var body struct {
-			Objects []struct {
-				Properties map[string]any `json:"properties"`
-			} `json:"objects"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		s.mu.Lock()
-		s.batches++
-		for _, obj := range body.Objects {
-			s.written = append(s.written, copyWrittenObject{
-				sourceID:      fmt.Sprint(obj.Properties[fieldSourceID]),
-				targetChunkID: fmt.Sprint(obj.Properties[fieldChunkID]),
-			})
-		}
-		s.mu.Unlock()
-		_, _ = w.Write([]byte(`[]`))
-	case r.Method == http.MethodGet && r.URL.Path == "/v1/meta":
-		_, _ = w.Write([]byte(`{"version":"1.37.3"}`))
-	default:
-		s.mu.Lock()
-		s.unexpected = append(s.unexpected, r.Method+" "+r.URL.Path)
-		s.mu.Unlock()
-		w.WriteHeader(http.StatusNotFound)
+func (s *copyPageServer) write(req *pb.BatchObjectsRequest) (*pb.BatchObjectsReply, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.batches++
+	for _, obj := range req.GetObjects() {
+		props := obj.GetProperties().GetNonRefProperties().GetFields()
+		s.written = append(s.written, copyWrittenObject{
+			sourceID:      props[fieldSourceID].GetStringValue(),
+			targetChunkID: props[fieldChunkID].GetStringValue(),
+		})
 	}
+	return &pb.BatchObjectsReply{}, nil
 }
 
-// resolve answers one GraphQL Get the way Weaviate does. A query it refused
-// comes back as a successful call carrying an errors array, which is what the
-// copy has to read as a failure.
-func (s *copyPageServer) resolve(query string) map[string]any {
+// resolve answers one search the way Weaviate does.
+func (s *copyPageServer) resolve(req *pb.SearchRequest) (*pb.SearchReply, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.queries++
 
-	limit := 0
-	if match := limitArgPattern.FindStringSubmatch(query); match != nil {
-		limit, _ = strconv.Atoi(match[1])
-	}
+	limit := int(req.GetLimit())
 	s.limits = append(s.limits, limit)
 
-	// The cursor API refuses a filtered query: a Get that asks for rows after a
-	// cursor cannot also carry where and limit.
-	if strings.Contains(query, "where:") {
-		if afterArgPattern.MatchString(query) {
-			s.rejected = append(s.rejected, query)
-			return graphQLError("cursor api: invalid 'after' parameter: " + cursorConflictMessage)
-		}
+	// The cursor API refuses a filtered query: a search that asks for rows
+	// after a cursor cannot also carry a filter and a limit.
+	if req.GetFilters() != nil && req.GetAfter() != "" {
+		s.rejected = append(s.rejected, req.String())
+		return nil, status.Error(codes.InvalidArgument,
+			"cursor api: invalid 'after' parameter: "+cursorConflictMessage)
 	}
 
-	switch {
-	case s.queryError != "":
-		return graphQLError(s.queryError)
-	case s.omitData:
-		return map[string]any{"data": map[string]any{}}
-	case s.omitCollection:
-		return map[string]any{"data": map[string]any{"Get": map[string]any{}}}
+	if s.queryError != "" {
+		return nil, status.Error(codes.Unknown, s.queryError)
 	}
 
 	if s.queryLimit > 0 && limit > s.queryLimit {
-		return graphQLError(fmt.Sprintf(
+		return nil, status.Error(codes.Unknown, fmt.Sprintf(
 			"query maximum results exceeded: the total limit calculated from the provided offset '0' "+
 				"and limit '%d' exceeds the configured value for QUERY_MAXIMUM_RESULTS '%d'. "+
 				"If you've supplied a negative offset or limit, this may be an underflow error",
 			limit, s.queryLimit))
 	}
 
-	chunkIDs := copyRequestedChunkIDs(query)
+	chunkIDs := filterTexts(filterCondition(req.GetFilters(), fieldChunkID))
 	s.requested = append(s.requested, chunkIDs)
 
 	order := chunkIDs
 	if s.ignoreChunkFilter {
 		order = s.order
 	}
-	rows := make([]any, 0, len(s.rows))
+	var rows []fakeRow
 	for _, chunkID := range order {
-		for _, row := range s.rows[chunkID] {
-			rows = append(rows, row)
-		}
+		rows = append(rows, s.rows[chunkID]...)
 	}
 	if limit > 0 && len(rows) > limit {
 		rows = rows[:limit]
 	}
-	return map[string]any{"data": map[string]any{"Get": map[string]any{copyTestCollection: rows}}}
-}
-
-func graphQLError(message string) map[string]any {
-	return map[string]any{"errors": []any{map[string]any{"message": message}}}
-}
-
-// copyRequestedChunkIDs pulls the chunk_id ContainsAny values out of a query.
-func copyRequestedChunkIDs(query string) []string {
-	match := chunkArgPattern.FindStringSubmatch(query)
-	if match == nil {
-		return nil
+	reply := searchReply(rows...)
+	if s.omitIDs {
+		for _, result := range reply.Results {
+			result.Metadata.Id, result.Metadata.IdAsBytes = "", nil
+		}
 	}
-	var ids []string
-	for _, quoted := range quotedPattern.FindAllStringSubmatch(match[1], -1) {
-		ids = append(ids, quoted[1])
-	}
-	return ids
+	return reply, nil
 }
 
 func (s *copyPageServer) queryCount() int {
@@ -291,14 +224,13 @@ func (s *copyPageServer) summary() string {
 		s.queries, s.limits, s.requested, len(s.written), len(s.rejected))
 }
 
-// check states the invariants every copy test depends on: no Get ever combined
-// where with after, and every Get named the chunk IDs it wanted.
+// check states the invariants every copy test depends on: no search ever
+// combined a filter with after, and every search named the chunk IDs it wanted.
 func (s *copyPageServer) check(t *testing.T) {
 	t.Helper()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	assert.Empty(t, s.rejected, "a source query combined where with after; weaviate refuses that")
-	assert.Empty(t, s.unexpected, "the copy called an endpoint it should not have")
+	assert.Empty(t, s.rejected, "a source query combined a filter with after; weaviate refuses that")
 	for i, batch := range s.requested {
 		assert.NotEmpty(t, batch, "query %d did not name the chunks it wanted", i)
 	}
@@ -315,7 +247,7 @@ func copyTestRun(t *testing.T, source *copyPageServer, repo *weaviateRepository,
 }
 
 // CopyIndices has to read the source by the chunk IDs the mapping names. A
-// filtered Get that carries `after` is refused by Weaviate ("where cannot be
+// filtered query that carries `after` is refused by Weaviate ("where cannot be
 // set with after and limit parameters"), which the cursor walk this replaces
 // provoked on its very first page, and the fake server refuses it the same way.
 func TestCopyIndicesQueriesByChunkIDWithoutACursor(t *testing.T) {
@@ -437,49 +369,49 @@ func TestCopyIndicesLowersTheQueryLimitWhenTheServerRefuses(t *testing.T) {
 	assert.Equal(t, 2, source.queryCount(), "only the first read pays for the refusal")
 }
 
-// A query Weaviate could not run comes back as HTTP 200 with an errors array and
-// no data, so the SDK reports no Go error. Reading that as "the source has no
-// more objects" turns a failed query into a successful, silently truncated copy
-// - and the response type check used to panic before it could even get there.
+// A query Weaviate could not run must stop the copy. Reading it as "the source
+// has no more objects" turns a failed query into a successful, silently
+// truncated copy.
 func TestCopyIndicesReportsAQueryError(t *testing.T) {
 	const failure = "class Weknora_embeddings_64 does not exist"
 	source := copyTestSingleVectorChunks("chunk-0")
 	source.queryError = failure
 	repo := source.serve(t)
-	defer func() {
-		if r := recover(); r != nil {
-			t.Fatalf("CopyIndices panicked on a query that could not run: %v", r)
-		}
-	}()
 
 	require.ErrorContains(t, copyTestRun(t, source, repo, copyTestChunkMap(1)), failure)
 	assert.Equal(t, 1, source.queryCount(), "the walk must stop on the failed query")
 	assert.Zero(t, len(source.writtenObjects()), "a failed query must not be reported as a finished copy")
 }
 
-// A response the walk cannot read must be reported, not turned into a panic by
-// an unchecked assertion on the response shape.
-func TestCopyIndicesRejectsAResponseWithoutData(t *testing.T) {
-	brokenResponses := map[string]func(*copyPageServer){
-		"no data object":       func(s *copyPageServer) { s.omitData = true },
-		"no collection in Get": func(s *copyPageServer) { s.omitCollection = true },
-	}
-	for name, breakResponse := range brokenResponses {
-		t.Run(name, func(t *testing.T) {
-			source := copyTestSingleVectorChunks("chunk-0")
-			breakResponse(source)
-			repo := source.serve(t)
-			defer func() {
-				if r := recover(); r != nil {
-					t.Fatalf("CopyIndices panicked on a response without data: %v", r)
-				}
-			}()
+// A row the copy cannot identify is a response it does not understand, and
+// must not be counted towards a copy reported as complete.
+func TestCopyIndicesRejectsARowWithoutAnID(t *testing.T) {
+	source := copyTestSingleVectorChunks("chunk-0")
+	source.omitIDs = true
+	repo := source.serve(t)
 
-			require.ErrorContains(t, copyTestRun(t, source, repo, copyTestChunkMap(1)), "invalid response")
-			assert.Equal(t, 1, source.queryCount(), "the walk must stop on the unreadable response")
-			assert.Zero(t, len(source.writtenObjects()), "nothing may be reported as copied")
-		})
+	require.ErrorContains(t, copyTestRun(t, source, repo, copyTestChunkMap(1)), "has no id")
+	assert.Equal(t, 1, source.queryCount(), "the walk must stop on the unreadable response")
+	assert.Zero(t, len(source.writtenObjects()), "nothing may be reported as copied")
+}
+
+// Objects the server refuses come back next to a successful batch call. A copy
+// that drops them must fail instead of reporting every row as copied.
+func TestCopyIndicesReportsRefusedObjects(t *testing.T) {
+	source := copyTestSingleVectorChunks("chunk-0", "chunk-1")
+	fake := &fakeWeaviate{
+		search: source.resolve,
+		batchObjects: func(*pb.BatchObjectsRequest) (*pb.BatchObjectsReply, error) {
+			return &pb.BatchObjectsReply{Errors: []*pb.BatchObjectsReply_BatchError{
+				{Index: 1, Error: "vector lengths don't match"},
+			}}, nil
+		},
 	}
+	repo := fake.repository(t, "Copy")
+
+	err := copyTestRun(t, source, repo, copyTestChunkMap(2))
+	require.ErrorContains(t, err, "batch upsert failed")
+	require.ErrorContains(t, err, "vector lengths don't match", "the server's reason must reach the caller")
 }
 
 func keysOf[V any](m map[string]V) []string {
