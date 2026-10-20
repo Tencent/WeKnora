@@ -200,12 +200,55 @@ func (s *AutomationService) List(ctx context.Context) ([]*types.Automation, erro
 		return nil, err
 	}
 	out := []*types.Automation{}
-	return out, query.Order("created_at DESC").Find(&out).Error
+	if err := query.Order("created_at DESC").Find(&out).Error; err != nil {
+		return nil, err
+	}
+	return out, s.populateActiveRunStatus(ctx, out)
 }
 
 // Get returns one of the caller's automations.
 func (s *AutomationService) Get(ctx context.Context, id string) (*types.Automation, error) {
-	return s.load(ctx, id)
+	a, err := s.load(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return a, s.populateActiveRunStatus(ctx, []*types.Automation{a})
+}
+
+// populateActiveRunStatus batches only the caller's already-authorized automations.
+// Running or approval-waiting work takes precedence over a queued future run.
+func (s *AutomationService) populateActiveRunStatus(ctx context.Context, automations []*types.Automation) error {
+	if len(automations) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(automations))
+	byID := make(map[string]*types.Automation, len(automations))
+	for _, a := range automations {
+		ids = append(ids, a.ID)
+		byID[a.ID] = a
+		a.ActiveRunStatus = ""
+	}
+	var runs []struct {
+		AutomationID string
+		Status       string
+	}
+	if err := s.db.WithContext(ctx).Model(&types.AutomationRun{}).
+		Select("automation_id, status").Distinct().
+		Where("automation_id IN ? AND status IN ?", ids, []string{
+			types.AutomationRunQueued, types.AutomationRunRunning, types.AutomationRunAwaitingApproval,
+		}).Find(&runs).Error; err != nil {
+		return err
+	}
+	priority := map[string]int{
+		types.AutomationRunQueued: 1, types.AutomationRunRunning: 2, types.AutomationRunAwaitingApproval: 3,
+	}
+	for _, run := range runs {
+		a := byID[run.AutomationID]
+		if priority[run.Status] > priority[a.ActiveRunStatus] {
+			a.ActiveRunStatus = run.Status
+		}
+	}
+	return nil
 }
 
 // FindBySession returns the caller's automation whose run, or persistent

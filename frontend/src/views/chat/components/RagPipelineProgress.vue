@@ -26,7 +26,7 @@
             <div class="action-card action-pending">
               <div class="action-header no-results">
                 <div class="action-title">
-                  <t-icon class="action-title-icon" name="lightbulb" />
+                  <ChatTimelineIcon class="action-title-icon" name="lightbulb" />
                   <span class="action-name">{{ t('chat.preparingAnswer') }}</span>
                 </div>
               </div>
@@ -71,7 +71,7 @@
                 :class="{ 'no-results': !step.canOpenReferences }"
               >
                 <div class="action-title">
-                  <t-icon class="action-title-icon" :name="step.iconName" />
+                  <ChatTimelineIcon class="action-title-icon" :name="step.iconName" />
                   <span class="action-name" :class="{ 'is-running': step.pending }">{{ step.title }}</span>
                 </div>
               </div>
@@ -93,7 +93,7 @@
             <div class="action-card" :class="{ 'action-pending': !waitStepStalled }">
               <div class="action-header no-results">
                 <div class="action-title">
-                  <t-icon class="action-title-icon" name="lightbulb" />
+                  <ChatTimelineIcon class="action-title-icon" name="lightbulb" />
                   <span class="action-name">{{ waitStepText }}</span>
                 </div>
               </div>
@@ -110,7 +110,7 @@
             <div class="action-card" :class="{ 'action-pending': thinkingPending }">
               <div class="action-header" :class="{ 'no-results': !thinkingContent }" @click="toggleThinking">
                 <div class="action-title">
-                  <t-icon class="action-title-icon" name="lightbulb" />
+                  <ChatTimelineIcon class="action-title-icon" name="lightbulb" />
                   <span class="action-name">{{ t('agent.think') }}</span>
                 </div>
               </div>
@@ -129,7 +129,7 @@
             <div class="action-card">
               <div class="action-header no-results">
                 <div class="action-title">
-                  <t-icon class="action-title-icon" name="check-circle" />
+                  <ChatTimelineIcon class="action-title-icon" name="check-circle" />
                   <span class="action-name">{{ t('common.finish') }}</span>
                 </div>
               </div>
@@ -157,7 +157,7 @@
               >
                 {{ referenceSummaryText }}
               </span>
-              <t-icon
+              <ChatTimelineIcon width="14" height="14"
                 class="tree-root-expand__icon"
                 :name="showExpandedTimeline ? 'chevron-down' : 'chevron-right'"
               />
@@ -196,7 +196,7 @@
                   :class="{ 'no-results': !step.canOpenReferences }"
                 >
                   <div class="action-title">
-                    <t-icon class="action-title-icon" :name="step.iconName" />
+                    <ChatTimelineIcon class="action-title-icon" :name="step.iconName" />
                     <span class="action-name" :class="{ 'is-running': step.pending }">{{ step.title }}</span>
                   </div>
                 </div>
@@ -215,7 +215,7 @@
               <div class="action-card" :class="{ 'action-pending': thinkingPending }">
                 <div class="action-header" :class="{ 'no-results': !thinkingContent }" @click="toggleThinking">
                   <div class="action-title">
-                    <t-icon class="action-title-icon" name="lightbulb" />
+                    <ChatTimelineIcon class="action-title-icon" name="lightbulb" />
                     <span class="action-name">{{ t('agent.think') }}</span>
                   </div>
                 </div>
@@ -234,7 +234,7 @@
               <div class="action-card">
                 <div class="action-header no-results">
                   <div class="action-title">
-                    <t-icon class="action-title-icon" name="check-circle" />
+                    <ChatTimelineIcon class="action-title-icon" name="check-circle" />
                     <span class="action-name">{{ t('common.finish') }}</span>
                   </div>
                 </div>
@@ -248,6 +248,7 @@
 </template>
 
 <script setup lang="ts">
+import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ChatMemoryStep from './ChatMemoryStep.vue'
@@ -581,13 +582,11 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped lang="less">
+@import (reference) '@/components/css/chat-timeline-theme.less';
 @import '@/components/css/chat-timeline-loading.less';
 
 .rag-pipeline-progress {
-  --agent-step-text-size: 14px;
-  --agent-step-summary-size: 13px;
-  --agent-step-line-color: color-mix(in srgb, var(--td-text-color-primary) 16%, transparent);
-  --agent-step-icon-color: var(--td-text-color-placeholder);
+  .chat-timeline-theme();
 
   margin: 0;
 }
@@ -689,14 +688,14 @@ onBeforeUnmount(() => {
   position: relative;
   padding-left: 42px;
   padding-bottom: 0;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 
   &::before {
     content: '';
     position: absolute;
     left: 9px;
     top: 22px;
-    bottom: -18px;
+    bottom: -14px;
     width: 0;
     border-left: 1px solid var(--agent-step-line-color);
   }
@@ -725,6 +724,7 @@ onBeforeUnmount(() => {
       cursor: pointer;
 
       &:hover {
+        .action-title-icon,
         .action-name,
         .results-summary-text {
           color: var(--td-text-color-primary);
@@ -774,7 +774,7 @@ onBeforeUnmount(() => {
     font-size: var(--agent-step-text-size);
     line-height: 1.55;
     font-weight: 400;
-    color: var(--td-text-color-secondary);
+    color: var(--agent-step-color);
     word-break: break-word;
     max-width: min(820px, 100%);
   }
@@ -786,11 +786,11 @@ onBeforeUnmount(() => {
   .results-summary-text {
     font-size: var(--agent-step-summary-size);
     font-weight: 400;
-    color: var(--td-text-color-secondary);
+    color: var(--agent-step-color);
     line-height: 1.5;
 
     :deep(strong) {
-      color: var(--td-text-color-secondary);
+      color: var(--agent-step-color);
       font-weight: 500;
     }
   }
@@ -802,7 +802,7 @@ onBeforeUnmount(() => {
     padding: 0;
     font-size: var(--agent-step-summary-size);
     font-weight: 400;
-    color: var(--td-text-color-placeholder);
+    color: var(--agent-step-color);
     line-height: 1.55;
     white-space: pre-wrap;
     word-break: break-word;
@@ -811,7 +811,7 @@ onBeforeUnmount(() => {
   }
 
   .action-pending .action-name {
-    color: var(--td-text-color-secondary);
+    color: var(--agent-step-color);
   }
 }
 

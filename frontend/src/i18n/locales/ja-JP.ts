@@ -7145,6 +7145,11 @@ export default {
       loadFailed: '読み込みに失敗しました',
       noKbForWiki: '関連するナレッジベースを特定できないため、Wikiを開けません。'
     },
+    entityLink: {
+      kb: 'ナレッジベース',
+      doc: 'ドキュメント',
+      chunk: 'チャンク'
+    },
     toolSummary: {
       getDocument: 'ドキュメントを取得: {title}',
       document: 'ドキュメント',

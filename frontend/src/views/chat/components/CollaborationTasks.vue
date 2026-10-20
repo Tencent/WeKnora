@@ -1,18 +1,16 @@
 <template>
   <button class="child-task-row" :class="{ 'is-running': task.status === 'running' }" type="button" :disabled="!task.sessionId || disabled" @click="$emit('open', task)">
-    <span class="child-task-icon" :style="iconStyle" aria-hidden="true" />
+    <ChatTimelineIcon class="child-task-icon" name="agent" />
     <span class="child-task-name" :class="{ 'is-running': task.status === 'running' }">{{ task.displayName || t('agentStream.collaboration.unnamed') }}</span>
     <span class="child-task-activity" :class="task.status">{{ activity }}</span>
-    <ChevronRightIcon class="child-task-chevron" aria-hidden="true" />
+    <ChatTimelineIcon class="child-task-chevron" name="chevron-right" width="14" height="14" />
   </button>
 </template>
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronRightIcon } from 'tdesign-icons-vue-next'
-import agentIcon from '@/assets/img/agent.svg'
+import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue'
 import type { CollaborationTaskView } from '@/utils/collaborationDisplay'
-const iconStyle = { maskImage: `url("${agentIcon}")`, WebkitMaskImage: `url("${agentIcon}")` }
 const props = defineProps<{ task: CollaborationTaskView; disabled?: boolean; toolLabel: (name: string) => string }>()
 defineEmits<{ open: [task: CollaborationTaskView] }>()
 const { t } = useI18n()
@@ -39,10 +37,10 @@ const activity = computed(() => {
   background: transparent;
   text-align: left;
   font: inherit;
-  color: var(--td-text-color-secondary);
+  color: var(--agent-step-color, var(--td-text-color-secondary));
   cursor: pointer;
   &:hover:not(:disabled) {
-    .child-task-name { color: var(--td-text-color-primary); }
+    .child-task-name, .child-task-icon { color: var(--td-text-color-primary); }
     .child-task-chevron { opacity: 1; transform: translateX(1px); }
   }
   &:disabled { cursor: default; }
@@ -52,13 +50,9 @@ const activity = computed(() => {
   width: 18px;
   height: 18px;
   flex-shrink: 0;
-  background: var(--agent-step-icon-color, var(--td-text-color-secondary));
-  mask-size: contain;
-  mask-repeat: no-repeat;
-  mask-position: center;
+  color: inherit;
 }
 .child-task-row.is-running {
-  .child-task-icon { animation: child-task-breathe 2s ease-in-out infinite; }
   &::before {
     content: '';
     position: absolute;
@@ -85,9 +79,9 @@ const activity = computed(() => {
 }
 .child-task-name.is-running {
   background: linear-gradient(90deg,
-    var(--td-text-color-secondary) 30%,
+    var(--agent-step-color, var(--td-text-color-secondary)) 30%,
     var(--td-text-color-primary) 50%,
-    var(--td-text-color-secondary) 70%) 0 0 / 300% 100%;
+    var(--agent-step-color, var(--td-text-color-secondary)) 70%) 0 0 / 300% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -122,12 +116,8 @@ const activity = computed(() => {
   from { background-position: 100% 0; }
   to { background-position: -50% 0; }
 }
-@keyframes child-task-breathe {
-  50% { opacity: 0.5; }
-}
 @media (prefers-reduced-motion: reduce) {
-  .child-task-name.is-running { animation: none; color: var(--td-text-color-secondary); background: none; }
-  .child-task-row.is-running .child-task-icon { animation: none; }
+  .child-task-name.is-running { animation: none; color: var(--agent-step-color, var(--td-text-color-secondary)); background: none; }
   .child-task-row.is-running::before { display: none; }
   .child-task-chevron { transition: none; }
 }

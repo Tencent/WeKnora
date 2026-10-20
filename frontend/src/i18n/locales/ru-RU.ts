@@ -2022,6 +2022,11 @@ export default {
       loadFailed: 'Ошибка загрузки',
       noKbForWiki: 'Не удалось определить связанную базу знаний, Wiki не может быть открыта'
     },
+    entityLink: {
+      kb: 'База знаний',
+      doc: 'Документ',
+      chunk: 'Фрагмент'
+    },
     tools: {
       searchKnowledge: 'Поиск по базе знаний',
       grepChunks: 'Поиск по текстовому шаблону',

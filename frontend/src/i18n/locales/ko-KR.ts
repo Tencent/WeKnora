@@ -2022,6 +2022,11 @@ export default {
       loadFailed: '로드 실패',
       noKbForWiki: '연결된 지식베이스를 식별할 수 없어 Wiki를 열 수 없습니다'
     },
+    entityLink: {
+      kb: '지식베이스',
+      doc: '문서',
+      chunk: '청크'
+    },
     tools: {
       searchKnowledge: '지식베이스 검색',
       grepChunks: '텍스트 패턴 검색',

@@ -153,15 +153,18 @@ test('task content fades only while more text remains below the scroll position'
     node.props?.class === 'automation-detail__instruction-toggle')
   assert.equal(vm.instructionHasMore, true)
   assert.match(scrollNode().props.class, /instruction-scroll--more/)
+  assert.doesNotMatch(scrollNode().props.class, /instruction-scroll--expanded/)
   assert.equal(toggle().props['aria-expanded'], false)
   toggle().props.onClick()
   await vue.nextTick()
   assert.equal(scrollNode().props.style.maxHeight, 'none')
+  assert.match(scrollNode().props.class, /instruction-scroll--expanded/)
   assert.equal(vm.instructionHasMore, false, 'expanded text is not faded')
   assert.equal(toggle().props['aria-expanded'], true)
   toggle().props.onClick()
   await vue.nextTick()
   assert.equal(scrollNode().props.style.maxHeight, '160px')
+  assert.doesNotMatch(scrollNode().props.class, /instruction-scroll--expanded/)
   assert.equal(vm.instructionHasMore, true)
 
   scroller.scrollTop = 160
@@ -177,6 +180,84 @@ test('task content fades only while more text remains below the scroll position'
   vm.updateInstructionOverflow()
   assert.equal(vm.instructionHasMore, false, 'short content has no fade')
   assert.equal(toggle(), undefined, 'short content has no expand control')
+})
+
+test('cards refresh live run states and return to the last result after completion', async t => {
+  let state = { ...automation, active_run_status: '', last_run_status: 'succeeded' }
+  let calls = 0
+  const { vm, render, close } = setup(t, './AutomationList.vue', {
+    listAutomations: async () => { calls++; return { data: [{ ...state }] } },
+  }, {})
+  await flush()
+  const status = () => nodes(render()).find(node => node.props && 'status' in node.props)?.props.status
+  assert.equal(status(), 'succeeded')
+  vm.openDetail(vm.automations[0])
+  vm.editing = { ...automation, name: 'Unsaved draft' }
+  vm.editorVisible = true
+  for (const active of ['queued', 'running', 'awaiting_approval', '']) {
+    state = { ...state, active_run_status: active }
+    t.mock.timers.tick(5000)
+    await flush()
+    assert.equal(status(), active || 'succeeded')
+    assert.equal(vm.detail.active_run_status, active)
+    assert.equal(vm.editing.name, 'Unsaved draft')
+    assert.equal(vm.loading, false, 'background refresh keeps cards visible')
+  }
+  assert.equal(calls, 5)
+  close()
+  t.mock.timers.tick(15000)
+  await flush()
+  assert.equal(calls, 5, 'leaving the list stops polling')
+})
+
+test('list polling waits for a slow response and does not restart after unmount', async t => {
+  let resolve!: (value: unknown) => void
+  let calls = 0
+  const { close } = setup(t, './AutomationList.vue', {
+    listAutomations: () => {
+      calls++
+      return new Promise(done => { resolve = done })
+    },
+  }, {})
+  t.mock.timers.tick(15000)
+  assert.equal(calls, 1, 'no overlapping polling requests')
+  resolve({ data: [automation] })
+  await flush()
+  t.mock.timers.tick(5000)
+  assert.equal(calls, 2)
+  close()
+  resolve({ data: [automation] })
+  await flush()
+  t.mock.timers.tick(15000)
+  assert.equal(calls, 2)
+})
+
+test('a stale poll cannot restore a deleted card and polling recovers from errors', async t => {
+  let resolve!: (value: unknown) => void
+  let calls = 0
+  const { vm } = setup(t, './AutomationList.vue', {
+    listAutomations: async () => {
+      calls++
+      if (calls === 1) return { data: [automation] }
+      if (calls === 2) return new Promise(done => { resolve = done })
+      if (calls === 3) throw new Error('Temporarily unavailable')
+      return { data: [] }
+    },
+    deleteAutomation: async () => {},
+  }, {})
+  await flush()
+  t.mock.timers.tick(5000)
+  await vm.remove(vm.automations[0])
+  resolve({ data: [automation] })
+  await flush()
+  assert.equal(vm.automations.length, 0)
+  t.mock.timers.tick(5000)
+  await flush()
+  assert.equal(calls, 3)
+  t.mock.timers.tick(5000)
+  await flush()
+  assert.equal(calls, 4)
+  assert.equal(vm.automations.length, 0)
 })
 
 test('approval hours update in both directions and save as minutes, without resetting on an empty edit', async t => {
@@ -242,7 +323,7 @@ test('list run and delete actions call APIs only after their inline confirmation
   let runCalls = 0
   let deleteCalls = 0
   const { vm, render } = setup(t, './AutomationList.vue', {
-    listAutomations: async () => ({ data: [automation] }),
+    listAutomations: async () => ({ data: [{ ...automation, active_run_status: runCalls ? 'queued' : '' }] }),
     runAutomationNow: async () => { runCalls++; return { data: { id: 'run-1' } } },
     deleteAutomation: async () => { deleteCalls++ },
   }, {})
@@ -258,8 +339,10 @@ test('list run and delete actions call APIs only after their inline confirmation
   assert.equal(runCalls, 0)
   assert.equal(deleteCalls, 0)
   await popups[0].props.onConfirm()
+  await flush()
   assert.equal(runCalls, 1)
   assert.equal(vm.detailVisible, true)
+  assert.equal(vm.automations[0].active_run_status, 'queued', 'manual runs refresh without waiting for the next poll')
   await popups[1].props.onConfirm()
   assert.equal(deleteCalls, 1)
   assert.equal(vm.automations.length, 0)

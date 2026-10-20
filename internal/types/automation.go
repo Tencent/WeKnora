@@ -123,12 +123,14 @@ type Automation struct {
 	Limits                 AutomationLimits `json:"limits"                   gorm:"serializer:json;type:text;not null"`
 	NotifyOnSuccess        bool             `json:"notify_on_success"        gorm:"not null;default:false" extensions:"x-agent"`
 
-	NextRunAt           *time.Time `json:"next_run_at"     gorm:"index:idx_automations_due" extensions:"x-agent,x-agent-response"`
-	LastRunAt           *time.Time `json:"last_run_at"     extensions:"x-agent,x-agent-response"`
-	LastSuccessAt       *time.Time `json:"last_success_at" extensions:"x-agent,x-agent-response"`
-	LastRunStatus       string     `json:"last_run_status" gorm:"type:varchar(32);not null;default:''" extensions:"x-agent,x-agent-response"`
-	ConsecutiveFailures int        `json:"consecutive_failures" gorm:"not null;default:0"`
-	PausedReason        string     `json:"paused_reason"   gorm:"type:text;not null;default:''" extensions:"x-agent,x-agent-response"`
+	NextRunAt     *time.Time `json:"next_run_at"     gorm:"index:idx_automations_due" extensions:"x-agent,x-agent-response"`
+	LastRunAt     *time.Time `json:"last_run_at"     extensions:"x-agent,x-agent-response"`
+	LastSuccessAt *time.Time `json:"last_success_at" extensions:"x-agent,x-agent-response"`
+	LastRunStatus string     `json:"last_run_status" gorm:"type:varchar(32);not null;default:''" extensions:"x-agent,x-agent-response"`
+	// ActiveRunStatus is projected from live runs and is not persisted.
+	ActiveRunStatus     string `json:"active_run_status" gorm:"-" extensions:"x-agent,x-agent-response"`
+	ConsecutiveFailures int    `json:"consecutive_failures" gorm:"not null;default:0"`
+	PausedReason        string `json:"paused_reason"   gorm:"type:text;not null;default:''" extensions:"x-agent,x-agent-response"`
 	// Version guards claiming a due run against other instances.
 	Version   int64          `json:"-"          gorm:"not null;default:0"`
 	CreatedAt time.Time      `json:"created_at"`

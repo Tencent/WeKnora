@@ -2024,6 +2024,11 @@ export default {
       loadFailed: '載入失敗',
       noKbForWiki: '無法識別關聯的知識庫，無法打開 Wiki'
     },
+    entityLink: {
+      kb: '知識庫',
+      doc: '文件',
+      chunk: '片段'
+    },
     tools: {
       searchKnowledge: '知識庫檢索',
       grepChunks: '搜尋關鍵字',

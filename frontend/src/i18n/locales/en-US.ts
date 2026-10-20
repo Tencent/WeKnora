@@ -7145,6 +7145,11 @@ export default {
       loadFailed: 'Failed to load',
       noKbForWiki: 'Unable to identify associated knowledge base. Cannot open Wiki.'
     },
+    entityLink: {
+      kb: 'Knowledge base',
+      doc: 'Document',
+      chunk: 'Passage'
+    },
     toolSummary: {
       getDocument: 'Get document: {title}',
       document: 'Document',

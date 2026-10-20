@@ -2024,6 +2024,11 @@ export default {
       loadFailed: '加载失败',
       noKbForWiki: '无法识别关联的知识库，无法打开 Wiki'
     },
+    entityLink: {
+      kb: '知识库',
+      doc: '文档',
+      chunk: '片段'
+    },
     tools: {
       searchKnowledge: '知识库检索',
       grepChunks: '搜索关键词',

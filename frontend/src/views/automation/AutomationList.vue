@@ -69,7 +69,7 @@
               <span v-if="item.enabled && item.next_run_at">
                 {{ t('automation.nextRunAt', { time: formatInZone(item.next_run_at, item.trigger.timezone, locale) }) }}
               </span>
-              <AutomationStatusTag :status="item.last_run_status" />
+              <AutomationStatusTag :status="item.active_run_status || item.last_run_status" />
             </div>
             <span v-if="hasEndedOnceSchedule(item)" class="automation-card__status is-ended" :title="t('automation.scheduleEndedHint')">
               {{ t('automation.scheduleEnded') }}
@@ -133,6 +133,8 @@ const detailVisible = ref(false)
 const detail = ref<Automation | null>(null)
 const focusRunId = ref('')
 let loadVersion = 0
+let poll: ReturnType<typeof setTimeout> | undefined
+let disposed = false
 
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase()
@@ -141,7 +143,14 @@ const filtered = computed(() => {
     a.name.toLowerCase().includes(q) || a.instruction.toLowerCase().includes(q))
 })
 
-async function load() {
+function schedulePoll() {
+  clearTimeout(poll)
+  if (!disposed) poll = setTimeout(() => { void load(true) }, 5000)
+}
+
+async function load(silent = false) {
+  if (disposed) return
+  clearTimeout(poll)
   const version = ++loadVersion
   try {
     const res = await listAutomations()
@@ -156,14 +165,21 @@ async function load() {
       }
     }
   } catch (e: any) {
-    if (version === loadVersion) MessagePlugin.error(e?.message || t('common.operationFailed'))
+    if (version === loadVersion && !silent) MessagePlugin.error(e?.message || t('common.operationFailed'))
   } finally {
-    if (version === loadVersion) loading.value = false
+    if (version === loadVersion) {
+      loading.value = false
+      schedulePoll()
+    }
   }
 }
 
 useAssistantDataChange(() => { void load() }, { areas: ['automation'] })
-onBeforeUnmount(() => { ++loadVersion })
+onBeforeUnmount(() => {
+  disposed = true
+  ++loadVersion
+  clearTimeout(poll)
+})
 
 function replace(item: Automation) {
   const index = automations.value.findIndex((a) => a.id === item.id)
@@ -174,6 +190,7 @@ function replace(item: Automation) {
 
 function onSaved(item: Automation) {
   replace(item)
+  void load(true)
 }
 
 function openEditor(item: Automation | null) {
@@ -225,7 +242,7 @@ async function toggle(item: Automation) {
   busy.value.add(item.id)
   try {
     const res = item.enabled ? await pauseAutomation(item.id) : await resumeAutomation(item.id)
-    replace(res.data)
+    onSaved(res.data)
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('common.operationFailed'))
   } finally {
@@ -240,6 +257,7 @@ async function runNow(item: Automation) {
     const res = await runAutomationNow(item.id)
     MessagePlugin.success(t('automation.messages.queued'))
     openDetail(item, res.data?.id ?? '')
+    void load(true)
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('common.operationFailed'))
   } finally {
@@ -252,6 +270,8 @@ async function remove(item: Automation) {
   busy.value.add(item.id)
   try {
     await deleteAutomation(item.id)
+    ++loadVersion
+    schedulePoll()
     automations.value = automations.value.filter((a) => a.id !== item.id)
     if (detail.value?.id === item.id) detailVisible.value = false
     MessagePlugin.success(t('common.deleteSuccess'))

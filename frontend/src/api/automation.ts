@@ -55,6 +55,7 @@ export interface Automation {
   last_run_at: string | null
   last_success_at: string | null
   last_run_status: AutomationRunStatus | ''
+  active_run_status?: 'queued' | 'running' | 'awaiting_approval' | ''
   consecutive_failures: number
   paused_reason: string
   created_at: string

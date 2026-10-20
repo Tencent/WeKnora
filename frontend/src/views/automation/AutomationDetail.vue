@@ -100,7 +100,10 @@
         <div
           ref="instructionScroller"
           class="automation-detail__instruction-scroll"
-          :class="{ 'automation-detail__instruction-scroll--more': instructionHasMore }"
+          :class="{
+            'automation-detail__instruction-scroll--more': instructionHasMore,
+            'automation-detail__instruction-scroll--expanded': instructionExpanded,
+          }"
           :style="{ maxHeight: instructionExpanded ? 'none' : `${INSTRUCTION_PREVIEW_HEIGHT}px` }"
           @scroll="updateInstructionOverflow"
         >
@@ -636,6 +639,11 @@ async function revoke(grant: AutomationGrant) {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
+
+  &--expanded {
+    overflow: visible;
+    overscroll-behavior: auto;
+  }
 }
 
 .automation-detail__instruction-scroll--more {

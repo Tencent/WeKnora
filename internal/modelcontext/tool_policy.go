@@ -74,8 +74,8 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 		sourceIDKeys: map[string]struct{}{"knowledge_base_ids": {}},
 		sourceOutput: true,
 	},
-	// read_document takes one id that may name a document (dN) or a chunk
-	// (cN); the "id" key resolves against both handle tables.
+	// read_document takes one id that may name a document (doc://N) or a chunk
+	// (chunk://N); the "id" key resolves against both handle tables.
 	"read_document": {
 		sourceIDKeys: map[string]struct{}{"id": {}},
 		sourceOutput: true,
@@ -251,6 +251,17 @@ func sourceArgumentAllowed(toolName, key string) bool {
 	return ok
 }
 
+// sourceBareTextAllowed reports structured-text arguments (SQL) whose handles
+// must decode to bare durable IDs rather than weknora:// URIs.
+func sourceBareTextAllowed(toolName, key string) bool {
+	policy, ok := toolHandlePolicies[toolName]
+	if !ok {
+		return false
+	}
+	_, ok = policy.sourceTextKeys[strings.ToLower(key)]
+	return ok
+}
+
 func sourceOutputAllowed(toolName string) bool {
 	if toolName == "" {
 		// Preserve the generic low-level facade for non-Agent callers. Agent
@@ -269,23 +280,20 @@ func sourceCompactionAllowed(toolName string) bool {
 	return ok && !policy.opaqueOutput
 }
 
-// decodeToolPolicies handles the deliberately small set of arguments whose
-// model handles are embedded in structured text or belong to a tool-private
-// identity space. Generic free text is never rewritten.
+// decodeToolPolicies handles arguments whose model handles belong to a
+// tool-private identity space. Source handles are decoded for every tool by
+// the source codec, because their scheme syntax cannot collide with prose.
 func (r *Registry) decodeToolPolicies(call *types.LLMToolCall) {
 	if r == nil || call == nil {
 		return
 	}
 	policy, ok := toolHandlePolicies[call.Function.Name]
-	if !ok {
+	if !ok || len(policy.decodedIssueIDKeys) == 0 {
 		return
 	}
 	call.Function.Arguments = rewriteJSONStringValues(
 		call.Function.Arguments,
 		func(key, value string) string {
-			if _, ok := policy.sourceTextKeys[key]; ok {
-				return r.sources.DecodeKnownQuotedText(value)
-			}
 			if _, ok := policy.decodedIssueIDKeys[key]; ok && issueHandleShapeRE.MatchString(strings.TrimSpace(value)) {
 				if durable, ok := r.issues.Resolve(value); ok {
 					return durable
@@ -327,15 +335,12 @@ func (r *Registry) unresolvedPrivateToolHandles(toolName, raw string) []string {
 		return nil
 	}
 	policy, ok := toolHandlePolicies[toolName]
-	if !ok || (len(policy.decodedIssueIDKeys) == 0 && len(policy.sourceTextKeys) == 0) {
+	if !ok || len(policy.decodedIssueIDKeys) == 0 {
 		return nil
 	}
 	var unresolved []string
 	_ = walkJSONStringValues(raw, func(key, value string) string {
 		value = strings.TrimSpace(value)
-		if _, ok := policy.sourceTextKeys[key]; ok {
-			unresolved = append(unresolved, r.sources.UnresolvedQuotedTextHandles(value)...)
-		}
 		if _, ok := policy.decodedIssueIDKeys[key]; ok && issueHandleShapeRE.MatchString(value) {
 			if _, ok := r.issues.Resolve(value); !ok {
 				unresolved = append(unresolved, value)
@@ -419,7 +424,7 @@ func walkJSONValue(key string, value interface{}, rewrite func(key, value string
 }
 
 // Some providers double-encode items. Unwrap only this built-in's array before
-// resolving source handles; doing it at Execute time leaves nested wN values
+// resolving source handles; doing it at Execute time leaves nested url://N values
 // unresolved. ModelArguments has already retained the exact provider payload.
 func normalizeWebFetchItems(calls []types.LLMToolCall) {
 	for i := range calls {

@@ -24,7 +24,7 @@
     <div v-if="hasArgs" class="prompt-args">
       <button type="button" class="prompt-args-toggle" :aria-expanded="argsExpanded" @click="toggleArgs">
         <span>{{ $t('agentStream.toolApproval.argsLabel') }}</span>
-        <t-icon class="args-toggle-icon" :name="argsExpanded ? 'chevron-down' : 'chevron-right'" />
+        <ChatTimelineIcon width="14" height="14" class="args-toggle-icon" :name="argsExpanded ? 'chevron-down' : 'chevron-right'" />
         <span v-if="!isJsonValid" class="args-status args-invalid">
           <t-icon name="error-circle" />
           {{ $t('agentStream.toolApproval.invalidJson') }}
@@ -63,7 +63,7 @@
   <div v-else class="action-card interaction-inline approval-inline" :class="{ 'action-pending': open }">
     <div class="action-header no-results">
       <div class="action-title">
-        <t-icon class="action-title-icon" :name="headerIcon" />
+        <ChatTimelineIcon class="action-title-icon" :name="headerIcon" />
         <component :is="hasArgs ? 'button' : 'span'" class="approval-heading"
           :type="hasArgs ? 'button' : undefined" :aria-expanded="hasArgs ? argsExpanded : undefined"
           @click.stop="hasArgs && toggleArgs()">
@@ -72,7 +72,7 @@
           <span class="approval-status" role="status">
             {{ awaitingInDock ? $t('agentStream.promptDock.waiting') : statusLine }}
           </span>
-          <t-icon v-if="hasArgs" class="args-toggle-icon" :name="argsExpanded ? 'chevron-down' : 'chevron-right'" />
+          <ChatTimelineIcon v-if="hasArgs" width="14" height="14" class="args-toggle-icon" :name="argsExpanded ? 'chevron-down' : 'chevron-right'" />
         </component>
         <button v-if="awaitingInDock" type="button" class="inline-action is-primary" @click.stop="dock?.focus(pendingId)">
           {{ $t('agentStream.promptDock.handle') }}
@@ -84,7 +84,7 @@
       <button v-if="open" type="button" class="approval-args-toggle" :aria-expanded="argsExpanded" @click.stop="toggleArgs">
         <span>{{ $t('agentStream.toolApproval.argsLabel') }}</span>
         <span v-if="!argsExpanded && argumentSummary" class="approval-args-summary">{{ argumentSummary }}</span>
-        <t-icon class="args-toggle-icon" :name="argsExpanded ? 'chevron-down' : 'chevron-right'" />
+        <ChatTimelineIcon width="14" height="14" class="args-toggle-icon" :name="argsExpanded ? 'chevron-down' : 'chevron-right'" />
       </button>
       <div v-else class="approval-args-label">{{ $t('agentStream.toolApproval.argsLabel') }}</div>
       <pre v-if="argsExpanded" class="approval-args-content">{{ argsText }}</pre>
@@ -93,6 +93,7 @@
 </template>
 
 <script setup lang="ts">
+import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue'
 import { ref, computed, inject, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'

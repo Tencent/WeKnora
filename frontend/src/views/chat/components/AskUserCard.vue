@@ -60,7 +60,7 @@
   <div v-else class="action-card interaction-inline ask-inline" :class="{ 'action-pending': open }">
     <div class="action-header no-results">
       <div class="action-title">
-        <t-icon class="action-title-icon" :name="headerIcon" />
+        <ChatTimelineIcon class="action-title-icon" :name="headerIcon" />
         <span class="action-name">{{ $t('agentStream.askUser.title') }}</span>
         <span class="ask-status" role="status">
           {{ awaitingInDock ? $t('agentStream.promptDock.waiting') : statusLine }}
@@ -81,6 +81,7 @@
 </template>
 
 <script setup lang="ts">
+import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue'
 import { computed, inject, reactive, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { CheckIcon } from 'tdesign-icons-vue-next'
