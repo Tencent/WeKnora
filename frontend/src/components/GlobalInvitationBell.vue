@@ -85,23 +85,20 @@
       <article v-for="banner in banners" :key="banner.key" class="notification-banner"
         :class="{ 'is-pending': banner.type === 'pending' }">
         <button type="button" class="notification-banner__content" :disabled="busy" @click="openBanner(banner)">
-          <span class="notification-banner__icon" :class="{
-            'is-success': banner.item.kind === 'automation.succeeded',
-            'is-error': banner.item.kind === 'automation.failed',
-            'is-warning': banner.type === 'pending' || banner.item.kind === 'automation.paused',
-          }">
-            <t-icon :name="banner.type === 'pending' ? 'secured' : historyIcon(banner.item.kind)" size="18px" />
-          </span>
           <span class="notification-banner__body">
-            <span class="notification-banner__label">
-              {{ banner.type === 'pending' ? pendingLabel(banner.item.kind) : kindLabel(banner.item.kind) }}
+            <span class="notification-banner__meta">
+              <t-icon class="notification-banner__icon" :class="{
+                'is-success': banner.item.kind === 'automation.succeeded',
+                'is-error': banner.item.kind === 'automation.failed',
+                'is-warning': banner.type === 'pending' || banner.item.kind === 'automation.paused',
+              }" :name="banner.type === 'pending' ? 'secured' : historyIcon(banner.item.kind)" size="13px" />
+              <span class="notification-banner__label">
+                {{ banner.type === 'pending' ? pendingLabel(banner.item.kind) : kindLabel(banner.item.kind) }}
+              </span>
+              <time class="notification-banner__time" :datetime="banner.item.created_at">{{ bannerTime(banner.item.created_at) }}</time>
             </span>
             <span class="notification-banner__title">{{ banner.item.title }}</span>
-            <span v-if="banner.type === 'result' && banner.item.body" class="notification-banner__summary">{{ banner.item.body }}</span>
-            <span class="notification-banner__action">
-              {{ banner.type === 'pending' ? t('notifications.handle') : t('notifications.viewResult') }}
-              <t-icon name="arrow-right" size="12px" />
-            </span>
+            <span v-if="banner.type === 'result' && banner.item.body" class="notification-banner__summary">{{ notificationPreview(banner.item.body) }}</span>
           </span>
         </button>
         <button type="button" class="notification-banner__close" :aria-label="t('common.close')" @click="dismissBanner(banner.key)">
@@ -119,6 +116,7 @@ import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import MyInvitationsDialog from '@/components/MyInvitationsDialog.vue'
+import { notificationPreview } from '@/utils/notificationPreview'
 import { clearReadNotifications, listNotifications, markNotificationsRead, type AppNotification, type NotificationPage, type PendingNotification } from '@/api/automation'
 
 const POLL_MS = 60_000
@@ -327,6 +325,12 @@ const formatTime = (iso: string) => {
   if (Number.isNaN(date.getTime())) return ''
   return new Intl.DateTimeFormat(locale.value, { dateStyle: 'short', timeStyle: 'short' }).format(date)
 }
+const bannerTime = (iso: string) => {
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat(locale.value, {
+    hour: '2-digit', minute: '2-digit',
+  }).format(date)
+}
 const openInvitations = () => { panelVisible.value = false; dialogVisible.value = true }
 function navigate(link: string) {
   panelVisible.value = false
@@ -382,7 +386,7 @@ async function clearRead() {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  width: min(380px, calc(100vw - 32px));
+  width: min(352px, calc(100vw - 32px));
   max-height: calc(100dvh - 40px);
   overflow-y: auto;
   padding: 12px;
@@ -393,19 +397,19 @@ async function clearRead() {
 .notification-banner {
   position: relative;
   flex-shrink: 0;
-  border-radius: var(--app-radius-lg);
-  background: var(--td-bg-color-container);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--td-bg-color-container) 94%, transparent);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
   color: var(--td-text-color-primary);
-  box-shadow: 0 4px 24px rgb(0 0 0 / 10%), 0 1px 4px rgb(0 0 0 / 5%);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 9%), 0 1px 3px rgb(0 0 0 / 4%);
   pointer-events: auto;
-  &.is-pending { background: color-mix(in srgb, var(--td-warning-color) 4%, var(--td-bg-color-container)); }
   button:focus-visible { outline: 2px solid var(--td-brand-color-focus); outline-offset: 2px; }
 }
 .notification-banner__content {
   display: flex;
-  gap: 12px;
   width: 100%;
-  padding: 16px 36px 14px 16px;
+  padding: 12px 16px 14px;
   border: 0;
   border-radius: inherit;
   background: transparent;
@@ -416,16 +420,16 @@ async function clearRead() {
   &:disabled { cursor: default; }
 }
 .notification-banner__icon {
-  display: flex;
   flex-shrink: 0;
-  padding-top: 2px;
   color: var(--td-text-color-secondary);
   &.is-success { color: var(--td-success-color); }
   &.is-error { color: var(--td-error-color); }
   &.is-warning { color: var(--td-warning-color); }
 }
-.notification-banner__body { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
-.notification-banner__label { color: var(--td-text-color-secondary); font-size: var(--app-text-xs); line-height: 1.5; }
+.notification-banner__body { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
+.notification-banner__meta { display: flex; align-items: center; gap: 5px; padding-right: 20px; margin-bottom: 4px; }
+.notification-banner__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--td-text-color-secondary); font-size: var(--app-text-xs); line-height: 1.5; }
+.notification-banner__time { margin-left: auto; flex-shrink: 0; color: var(--td-text-color-placeholder); font-size: var(--app-text-xs); font-variant-numeric: tabular-nums; }
 .is-pending .notification-banner__label { color: var(--td-warning-color); }
 .notification-banner__title {
   overflow: hidden;
@@ -443,18 +447,8 @@ async function clearRead() {
   overflow-wrap: anywhere;
   color: var(--td-text-color-secondary);
   font-size: var(--app-text-sm);
-  line-height: 1.6;
+  line-height: 1.55;
 }
-.notification-banner__action {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 4px;
-  font-size: var(--app-text-xs);
-  line-height: 1.5;
-  color: var(--td-text-color-secondary);
-}
-.notification-banner__content:hover .notification-banner__action { color: var(--td-text-color-primary); }
 .notification-banner__close {
   position: absolute;
   top: 8px;

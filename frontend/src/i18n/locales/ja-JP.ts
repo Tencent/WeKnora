@@ -322,7 +322,6 @@ export default {
     clearRead: "既読を削除",
     clearReadConfirm: "既読の通知を削除しますか？実行履歴、会話、未対応の項目は保持されます。",
     handle: "対応する",
-    viewResult: "結果を見る",
     review: "承認を確認",
     unreadCount: "未読 {count} 件",
     unread: "未読",

@@ -322,7 +322,6 @@ export default {
     clearRead: "Clear read",
     clearReadConfirm: "Clear read notifications? Run records, conversations, and pending actions will be kept.",
     handle: "Open",
-    viewResult: "View result",
     review: "Review",
     unreadCount: "{count} unread",
     unread: "Unread",

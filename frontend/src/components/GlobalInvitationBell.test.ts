@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import * as vue from 'vue'
 import { fixture, flush } from '../test-utils/vueFixture.ts'
+import { notificationPreview } from '../utils/notificationPreview.ts'
 
 const notice = (id: string, read = false) => ({ id, kind: 'automation.succeeded', title: id, body: 'done',
   link: `/platform/automations/${id}`, read_at: read ? '2026-10-20T00:00:00Z' : null, created_at: '2026-10-20T00:00:00Z' })
@@ -24,6 +25,7 @@ function setup(t: TestContext, api: Record<string, unknown>) {
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key, te: () => true, locale: vue.ref('en-US') }) },
     'tdesign-vue-next': { MessagePlugin: { error: (message: string) => { errors.push(message) } } },
     '@/stores/auth': { useAuthStore: () => auth }, '@/api/automation': api,
+    '@/utils/notificationPreview': { notificationPreview },
   })
   return { ...component, auth, routes, errors }
 }
