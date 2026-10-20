@@ -58,6 +58,31 @@ function nodes(node: any): any[] {
       ? Object.values(children).flatMap(slot => typeof slot === 'function' ? nodes(slot()) : []) : [])]
 }
 
+test('task content fades only while more text remains below the scroll position', async t => {
+  const { vm, render } = setup(t, './AutomationDetail.vue', {},
+    { visible: false, automation, agentName: 'Assistant' })
+  const scroller = vue.markRaw({ scrollHeight: 320, clientHeight: 160, scrollTop: 0 })
+  vm.instructionScroller = scroller
+  await vue.nextTick()
+  const scrollNode = () => nodes(render()).find(node =>
+    String(node.props?.class).includes('automation-detail__instruction-scroll'))
+  assert.equal(vm.instructionHasMore, true)
+  assert.match(scrollNode().props.class, /instruction-scroll--more/)
+
+  scroller.scrollTop = 160
+  scrollNode().props.onScroll()
+  assert.equal(vm.instructionHasMore, false, 'the last line is fully visible at the bottom')
+  assert.doesNotMatch(scrollNode().props.class, /instruction-scroll--more/)
+
+  scroller.scrollTop = 50
+  scrollNode().props.onScroll()
+  assert.equal(vm.instructionHasMore, true)
+  scroller.scrollHeight = 100
+  scroller.scrollTop = 0
+  vm.updateInstructionOverflow()
+  assert.equal(vm.instructionHasMore, false, 'short content has no fade')
+})
+
 test('approval hours update in both directions and save as minutes, without resetting on an empty edit', async t => {
   let saved: any
   const props = { visible: false, automation, agents: [], defaultAgentId: 'assistant' }

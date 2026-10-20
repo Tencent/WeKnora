@@ -98,7 +98,14 @@
             </template>
           </t-popup>
         </div>
-        <p class="automation-detail__instruction">{{ automation.instruction }}</p>
+        <div
+          ref="instructionScroller"
+          class="automation-detail__instruction-scroll"
+          :class="{ 'automation-detail__instruction-scroll--more': instructionHasMore }"
+          @scroll="updateInstructionOverflow"
+        >
+          <p ref="instructionContent" class="automation-detail__instruction">{{ automation.instruction }}</p>
+        </div>
       </section>
 
       <section class="automation-detail__history" :aria-label="t('automation.detail.runs')">
@@ -205,7 +212,28 @@ const runsLoading = ref(false)
 const grants = ref<AutomationGrant[]>([])
 const candidates = ref<AutomationGrantCandidate[]>([])
 const grantsLoading = ref(false)
+const instructionScroller = ref<HTMLElement | null>(null)
+const instructionContent = ref<HTMLElement | null>(null)
+const instructionHasMore = ref(false)
 let poll: ReturnType<typeof setInterval> | undefined
+
+function updateInstructionOverflow() {
+  const el = instructionScroller.value
+  instructionHasMore.value = !!el && el.scrollHeight - el.clientHeight - el.scrollTop > 1
+}
+
+watch(
+  [instructionScroller, instructionContent, () => props.visible, () => props.automation?.instruction],
+  (_, __, onCleanup) => {
+    updateInstructionOverflow()
+    if (!props.visible || !instructionScroller.value || !instructionContent.value) return
+    const observer = new ResizeObserver(updateInstructionOverflow)
+    observer.observe(instructionScroller.value)
+    observer.observe(instructionContent.value)
+    onCleanup(() => observer.disconnect())
+  },
+  { flush: 'post' },
+)
 
 const when = (iso: string | null) => formatInZone(iso, props.automation?.trigger.timezone, locale.value)
 const runDateFormatter = computed(() => new Intl.DateTimeFormat(locale.value, {
@@ -554,12 +582,19 @@ async function revoke(grant: AutomationGrant) {
   font-weight: 600;
 }
 
-.automation-detail__instruction {
+.automation-detail__instruction-scroll {
   box-sizing: border-box;
   max-height: 160px;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
+}
+
+.automation-detail__instruction-scroll--more {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+}
+
+.automation-detail__instruction {
   margin: 0;
   color: var(--td-text-color-primary);
   font-size: var(--app-text-md);
