@@ -94,6 +94,7 @@ type fakeRemoteClient struct {
 	createHook  func(context.Context, RemoteCreateRequest) error
 	afterCreate func(RemoteSandboxHandle)
 	deleteHook  func(context.Context, string) error
+	execHook    func(RemoteExecRequest) (*RemoteExecResult, error)
 
 	makeDirPaths        []string
 	failMakeDirIfExists bool
@@ -106,6 +107,10 @@ type fakeRemoteClient struct {
 
 	// ptyClosed is set when a fake PTY opened on this client is closed.
 	ptyClosed atomic.Bool
+
+	// terminalOptions records OpenTerminal arguments so tests can see the
+	// options the manager actually passed through.
+	terminalOptions []RemoteTerminalOptions
 
 	// openTerminalHook, when set, runs instead of opening immediately. It
 	// sees the context the manager passed, so a test can block the dial
@@ -335,6 +340,9 @@ func (c *fakeRemoteClient) Exec(
 	c.mu.Lock()
 	c.execRequests = append(c.execRequests, request)
 	c.mu.Unlock()
+	if c.execHook != nil {
+		return c.execHook(request)
+	}
 	return &RemoteExecResult{ExitCode: 0}, nil
 }
 
@@ -458,6 +466,23 @@ func (c *fakeRemoteClient) addSandbox(
 	}
 }
 
+// addSandboxWithMetadata registers a running sandbox that already carries
+// metadata, the way a failed create can leave a duplicate behind.
+func (c *fakeRemoteClient) addSandboxWithMetadata(metadata map[string]string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.nextID++
+	id := fmt.Sprintf("%s-%d", c.provider, c.nextID)
+	c.sandboxes[id] = &fakeRemoteRecord{
+		id:        id,
+		state:     RemoteStateRunning,
+		rawState:  string(RemoteStateRunning),
+		metadata:  cloneStringMap(metadata),
+		startedAt: time.Now().UTC(),
+	}
+	return id
+}
+
 func (c *fakeRemoteClient) counts() (creates, connects, gets, lists, deletes int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -465,14 +490,26 @@ func (c *fakeRemoteClient) counts() (creates, connects, gets, lists, deletes int
 }
 
 func (c *fakeRemoteClient) OpenTerminal(
-	ctx context.Context, _ RemoteSandboxHandle, _ RemoteTerminalOptions,
+	ctx context.Context, _ RemoteSandboxHandle, opts RemoteTerminalOptions,
 ) (RemoteTerminalSession, error) {
 	if c.openTerminalHook != nil {
 		if err := c.openTerminalHook(ctx); err != nil {
 			return nil, err
 		}
 	}
+	c.mu.Lock()
+	c.terminalOptions = append(c.terminalOptions, opts)
+	c.mu.Unlock()
 	return &fakeRemoteTerminal{client: c}, nil
+}
+
+func (c *fakeRemoteClient) lastTerminalOptions() RemoteTerminalOptions {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.terminalOptions) == 0 {
+		return RemoteTerminalOptions{}
+	}
+	return c.terminalOptions[len(c.terminalOptions)-1]
 }
 
 func (c *fakeRemoteClient) terminalClosed() bool { return c.ptyClosed.Load() }

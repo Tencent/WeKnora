@@ -1388,6 +1388,13 @@ func normalizeCubeError(op string, err error) error {
 			kind = RemoteErrorKindUnavailable
 		}
 	}
+	// Cube's file List wraps a missing path as a plain error ("path not
+	// found" / "no such file"), not NotFoundError. A new session on a shared
+	// machine has no directory yet; listing it must stay NotFound so callers
+	// can treat the tree as empty instead of failing the turn.
+	if kind == RemoteErrorKindInternal && op == "ListDir" && isSDKNotFound(err) {
+		kind = RemoteErrorKindNotFound
+	}
 	kind = snapshotDeleteKind(op, kind, err.Error())
 	remoteErr := NewRemoteError(SandboxTypeCube, op, kind, err.Error(), err)
 	remoteErr.StatusCode = status

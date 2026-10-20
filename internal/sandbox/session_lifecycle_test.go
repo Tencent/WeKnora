@@ -1386,6 +1386,7 @@ func newUserLifecycleFixture(t *testing.T) *userLifecycleFixture {
 		}},
 		time.Minute, "cfg-1", nil,
 		withUserMachines("weknora", reg),
+		withConfigCreateGate(reg, 42),
 	)
 	require.NoError(t, err)
 	return &userLifecycleFixture{
@@ -1396,6 +1397,37 @@ func newUserLifecycleFixture(t *testing.T) *userLifecycleFixture {
 
 func (f *userLifecycleFixture) sessionKey(sessionID string) SessionSandboxKey {
 	return SessionSandboxKey{TenantID: 42, SessionID: sessionID, User: f.machine}
+}
+
+func TestCreateRegistersWithTheConfigAndIsRefusedOnceItIsClosed(t *testing.T) {
+	f := newUserLifecycleFixture(t)
+	ctx := context.Background()
+	scope := admission.ConfigCreateScope(42, "cfg-1")
+	var during int
+	f.client.createHook = func(context.Context, RemoteCreateRequest) error {
+		n, err := f.admission.ActiveExcept(ctx, scope)
+		require.NoError(t, err)
+		during = n
+		return nil
+	}
+	_, err := f.lifecycle.Resolve(ctx, f.sessionKey(userSessionA))
+	require.NoError(t, err)
+	require.Equal(t, 1, during, "the provider Create runs inside a config-level registration")
+	n, _ := f.admission.ActiveExcept(ctx, scope)
+	require.Zero(t, n, "released once the binding is written")
+
+	barrier, err := f.admission.Close(ctx, scope, time.Minute)
+	require.NoError(t, err)
+	defer barrier.Release()
+	creates, _, _, _, _ := f.client.counts()
+	// A second session of the same owner reuses the machine and never calls
+	// Create. Another owner is a new machine, so Resolve has to register again.
+	other := f.machine
+	other.OwnerID = "u-2"
+	_, err = f.lifecycle.Resolve(ctx, SessionSandboxKey{TenantID: 42, SessionID: userSessionB, User: other})
+	require.ErrorIs(t, err, ErrSandboxConfigCordoned)
+	after, _, _, _, _ := f.client.counts()
+	require.Equal(t, creates, after, "nothing reaches the provider after the close")
 }
 
 func TestUserMachineIsSharedBySessions(t *testing.T) {
@@ -1431,6 +1463,63 @@ func TestUserMachineSurvivesAMissingSession(t *testing.T) {
 	require.Equal(t, first.ID(), again.ID())
 	_, _, _, _, deletes := f.client.counts()
 	require.Zero(t, deletes)
+}
+
+// A provider that issues the inbound token only at create time cannot hand it
+// back when the binding is gone. Session mode still deletes that sandbox and
+// starts another. A user machine must not: deleting it takes every sibling
+// session's files, and binding the empty token wedges every later call.
+func TestUserMachineTokenlessAdoptionKeepsTheMachineAndDoesNotBindAnEmptyToken(t *testing.T) {
+	closed := false
+
+	t.Run("resolve", func(t *testing.T) {
+		f := newUserLifecycleFixture(t)
+		f.lifecycle.createRequest.Network = RemoteNetworkPolicy{AllowPublicTraffic: &closed}
+		f.client.trafficAccessToken = "create-token"
+		ctx := context.Background()
+		first, err := f.lifecycle.Resolve(ctx, f.sessionKey(userSessionA))
+		require.NoError(t, err)
+		machineKey := f.sessionKey(userSessionA).Machine()
+		deleted, err := f.bindings.DeleteIfMatch(ctx, machineKey, f.client.Provider(), first.ID())
+		require.NoError(t, err)
+		require.True(t, deleted)
+
+		_, err = f.lifecycle.Resolve(ctx, f.sessionKey(userSessionB))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "inbound traffic token")
+		require.True(t, f.client.hasSandbox(first.ID()), "the shared machine stays")
+		creates, _, _, _, deletes := f.client.counts()
+		require.Equal(t, 1, creates, "resolve must not start a second machine")
+		require.Zero(t, deletes)
+		binding, err := f.bindings.Get(ctx, machineKey)
+		require.NoError(t, err)
+		require.Nil(t, binding, "an empty token must not be persisted")
+	})
+
+	t.Run("cleanup", func(t *testing.T) {
+		h := newUserManagerHarness(t, userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
+		h.mgr.lifecycle.createRequest.Network = RemoteNetworkPolicy{AllowPublicTraffic: &closed}
+		h.client.trafficAccessToken = "create-token"
+		ctx := ownerCtx()
+		_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+		require.NoError(t, err)
+		m, _ := userAssignmentFor(userSessionA).UserMachine()
+		sandboxID, ok := h.mgr.BoundSandboxID(ctx, userSessionA)
+		require.True(t, ok)
+		_, err = h.mgr.bindings.DeleteIfMatch(ctx, h.mgr.UserMachineKey(m), h.client.Provider(), sandboxID)
+		require.NoError(t, err)
+
+		deleted, err := h.mgr.DeleteSessionWorkspaces(ctx, m, []string{userSessionA})
+		require.NoError(t, err)
+		require.Equal(t, []string{userSessionA}, deleted, "the directory command still completes")
+		require.True(t, h.client.hasSandbox(sandboxID), "the shared machine stays")
+		creates, _, _, _, deletes := h.client.counts()
+		require.Equal(t, 1, creates)
+		require.Zero(t, deletes)
+		binding, err := h.mgr.bindings.Get(ctx, h.mgr.UserMachineKey(m))
+		require.NoError(t, err)
+		require.Nil(t, binding, "a successful cleanup must not persist an empty token")
+	})
 }
 
 func TestUserMachineRecoversFromLostBindingByDigest(t *testing.T) {
@@ -1515,4 +1604,117 @@ func TestUserKeyWithoutAdmissionIsRefused(t *testing.T) {
 		User: allocation.UserMachine{OwnerTenantID: 42, OwnerID: "u", ConfigTenantID: 42, ConfigID: "cfg-1"},
 	})
 	require.ErrorContains(t, err, "admission")
+}
+
+func TestReclaimUserMachineRespectsAdmissionAndTheCheck(t *testing.T) {
+	f := newUserLifecycleFixture(t)
+	ctx := context.Background()
+	h, err := f.lifecycle.Resolve(ctx, f.sessionKey(userSessionA))
+	require.NoError(t, err)
+	machine := f.sessionKey(userSessionA).Machine()
+	scope := admission.MachineScope(f.machine.Digest("weknora"))
+
+	pty, err := f.admission.Hold(ctx, scope, admission.SessionMember(userSessionB, "pty", "t"), time.Minute)
+	require.NoError(t, err)
+	ok, err := f.lifecycle.reclaimUserMachine(ctx, machine, func(context.Context) (bool, error) {
+		t.Fatal("the check must not run while an operation is registered")
+		return true, nil
+	})
+	require.NoError(t, err)
+	require.False(t, ok, "an attached terminal blocks reclaim")
+	pty.Release()
+
+	ok, err = f.lifecycle.reclaimUserMachine(ctx, machine, func(context.Context) (bool, error) { return false, nil })
+	require.NoError(t, err)
+	require.False(t, ok, "the in-lock recheck cancels reclaim")
+	require.True(t, f.client.hasSandbox(h.ID()))
+
+	ok, err = f.lifecycle.reclaimUserMachine(ctx, machine, func(context.Context) (bool, error) { return true, nil })
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.False(t, f.client.hasSandbox(h.ID()))
+	got, err := f.bindings.Get(ctx, machine)
+	require.NoError(t, err)
+	require.Nil(t, got)
+}
+
+func TestReclaimUserMachineStopsWhenTheBarrierIsLost(t *testing.T) {
+	f := newUserLifecycleFixture(t)
+	ctx := context.Background()
+	_, err := f.lifecycle.Resolve(ctx, f.sessionKey(userSessionA))
+	require.NoError(t, err)
+	machine := f.sessionKey(userSessionA).Machine()
+	scope := admission.MachineScope(f.machine.Digest("weknora"))
+	f.client.deleteHook = func(context.Context, string) error {
+		f.admission.LoseBarrier(scope)
+		return nil
+	}
+	_, _, _, listsBefore, _ := f.client.counts()
+
+	ok, err := f.lifecycle.reclaimUserMachine(ctx, machine, func(context.Context) (bool, error) { return true, nil })
+	require.ErrorIs(t, err, admission.ErrLeaseLost)
+	require.False(t, ok)
+	_, _, _, listsAfter, _ := f.client.counts()
+	require.Equal(t, listsBefore, listsAfter, "no metadata sweep after the barrier is gone")
+}
+
+func TestReclaimUserMachineChecksTheBarrierBeforeEachMetadataDelete(t *testing.T) {
+	f := newUserLifecycleFixture(t)
+	ctx := context.Background()
+	first, err := f.lifecycle.Resolve(ctx, f.sessionKey(userSessionA))
+	require.NoError(t, err)
+	machine := f.sessionKey(userSessionA).Machine()
+	_, err = f.bindings.DeleteIfMatch(ctx, machine, SandboxTypeCube, first.ID())
+	require.NoError(t, err)
+	second := f.client.addSandboxWithMetadata(f.lifecycle.metadata(machine)) // a duplicate left by a failed create
+	scope := admission.MachineScope(f.machine.Digest("weknora"))
+	deletes := 0
+	f.client.deleteHook = func(context.Context, string) error {
+		deletes++
+		f.admission.LoseBarrier(scope) // lost after the first delete
+		return nil
+	}
+	_, err = f.lifecycle.reclaimUserMachine(ctx, machine, func(context.Context) (bool, error) { return true, nil })
+	require.ErrorIs(t, err, admission.ErrLeaseLost)
+	require.Equal(t, 1, deletes, "no further delete after the barrier is gone")
+	_ = second
+}
+
+func TestReclaimUserMachineMetadataDeleteStopsWhenTheBarrierIsLost(t *testing.T) {
+	f := newUserLifecycleFixture(t)
+	ctx := context.Background()
+	first, err := f.lifecycle.Resolve(ctx, f.sessionKey(userSessionA))
+	require.NoError(t, err)
+	machine := f.sessionKey(userSessionA).Machine()
+	_, err = f.bindings.DeleteIfMatch(ctx, machine, SandboxTypeCube, first.ID())
+	require.NoError(t, err)
+	scope := admission.MachineScope(f.machine.Digest("weknora"))
+
+	f.client.deleteHook = func(hookCtx context.Context, _ string) error {
+		f.admission.LoseBarrier(scope)
+		select {
+		case <-hookCtx.Done():
+			return nil
+		case <-time.After(time.Second):
+			t.Error("metadata delete kept running after the barrier was lost")
+			return context.DeadlineExceeded
+		}
+	}
+	_, err = f.lifecycle.reclaimUserMachine(ctx, machine, func(context.Context) (bool, error) { return true, nil })
+	require.ErrorIs(t, err, admission.ErrLeaseLost)
+}
+
+func TestReclaimUserMachineDeletesAnUnboundMachineByMetadata(t *testing.T) {
+	f := newUserLifecycleFixture(t)
+	ctx := context.Background()
+	h, err := f.lifecycle.Resolve(ctx, f.sessionKey(userSessionA))
+	require.NoError(t, err)
+	machine := f.sessionKey(userSessionA).Machine()
+	_, err = f.bindings.DeleteIfMatch(ctx, machine, SandboxTypeCube, h.ID()) // Redis lost it
+	require.NoError(t, err)
+
+	ok, err := f.lifecycle.reclaimUserMachine(ctx, machine, func(context.Context) (bool, error) { return true, nil })
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.False(t, f.client.hasSandbox(h.ID()), "a paused machine with no binding must not bill forever")
 }

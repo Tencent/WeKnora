@@ -24,11 +24,15 @@ package sandbox
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -116,6 +120,11 @@ type SessionBoundManager struct {
 	// admissionWait bounds waiting for a closed scope (rebuild, exclusive).
 	admissionWait time.Duration
 
+	// rewindWait bounds the exclusive window rewind takes on a shared machine.
+	// It is shorter than admissionWait: an open terminal should fail rewind
+	// quickly instead of holding the HTTP request for a rebuild-length wait.
+	rewindWait time.Duration
+
 	// mu guards Cleanup's idempotency flag.
 	mu     sync.RWMutex
 	closed bool
@@ -153,6 +162,10 @@ type SessionBoundManagerConfig struct {
 	// stamped onto sandbox metadata so cleanup can target one config without
 	// touching another that shares the same provider account.
 	ConfigID string
+
+	// ConfigTenantID is the workspace that owns ConfigID. The resolver fills
+	// it so provider creates register on that config's admission scope.
+	ConfigTenantID uint64
 
 	// SkipHealthProbe skips the construction-time Health() round-trip.
 	// Set by the per-tenant resolver, which builds a manager per request.
@@ -240,6 +253,7 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 	var lifecycleOpts []lifecycleOption
 	if deps.Admission != nil {
 		lifecycleOpts = append(lifecycleOpts, withUserMachines(deps.Namespace, deps.Admission))
+		lifecycleOpts = append(lifecycleOpts, withConfigCreateGate(deps.Admission, deps.ConfigTenantID))
 	}
 	lifecycle, err := newRemoteSessionLifecycle(
 		client,
@@ -269,6 +283,7 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 		admission:     deps.Admission,
 		namespace:     deps.Namespace,
 		admissionWait: 30 * time.Second,
+		rewindWait:    rewindExclusiveWait,
 	}
 
 	// Per-tenant managers are rebuilt on every request, so probing here would
@@ -1294,6 +1309,18 @@ func (m *SessionBoundManager) OpenSessionTerminal(
 		}
 		return abandon(ErrNoLiveSessionSandbox)
 	}
+	// A shared machine already exists for the owner's other sessions. This
+	// session's directory is created by the first shell command, not by
+	// attaching a PTY, so opening the terminal first would start a shell in
+	// a directory that is not there yet.
+	if sc.user {
+		if err := m.prepareSessionDirs(
+			callCtx, handle, DefaultSandboxExecUser,
+			sc.layout.InputDir, sc.layout.OutputDir, opts.Cwd,
+		); err != nil {
+			return abandon(err)
+		}
+	}
 	session, err := terminal.OpenTerminal(callCtx, handle, opts)
 	if err != nil {
 		return abandon(err)
@@ -1523,6 +1550,28 @@ func (m *SessionBoundManager) HasActiveTurn(ctx context.Context, sessionID strin
 	}
 	active, _, err := leaser.TurnState(ctx, sc.key)
 	return active, err
+}
+
+const rewindExclusiveWait = 5 * time.Second
+
+// LockRewindSession takes the session's rewind lock and, on a shared
+// machine, the session's exclusive window, so no other operation of the
+// session touches its work tree during the reset. Run the reset with the
+// returned context. On a per-session sandbox the context is ctx itself.
+func (m *SessionBoundManager) LockRewindSession(ctx context.Context, sessionID string) (context.Context, func(), error) {
+	unlockRewind, err := m.TryLockRewind(ctx, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	exCtx, release, err := m.acquireSessionExclusive(ctx, sessionID, m.rewindWait)
+	if err != nil {
+		unlockRewind()
+		return nil, nil, err
+	}
+	return exCtx, func() {
+		release()
+		unlockRewind()
+	}, nil
 }
 
 // TryLockRewind takes an exclusive rewind lock for sessionID. Stores that do
@@ -2087,6 +2136,40 @@ func (m *SessionBoundManager) acquireSessionExclusive(
 	}, nil
 }
 
+// DesktopMachine names the physical machine behind sessionID's desktop and
+// the sandbox it currently is. Sessions on one shared machine contend for one
+// control slot; a rebuilt machine, or a sandbox of another deployment,
+// provider or config, never shares a key. Call it while holding the session's
+// operation so the binding cannot change underneath the caller.
+func (m *SessionBoundManager) DesktopMachine(ctx context.Context, sessionID string) (string, string, error) {
+	sc, err := m.scope(ctx, sessionID)
+	if err != nil {
+		return "", "", err
+	}
+	if !sc.user {
+		// A per-session machine rebuilds a stale image on the next resolve.
+		// Pinning the current sandbox id would make the desktop's ensure
+		// command lookup-only and skip that rebuild.
+		return sessionID, "", nil
+	}
+	binding, err := m.bindings.Get(ctx, sc.machine())
+	if err != nil {
+		return "", "", err
+	}
+	if binding == nil || binding.SandboxID == "" || binding.Provider != m.client.Provider() {
+		return "", "", ErrNoLiveSessionSandbox
+	}
+	parts := []string{
+		m.namespace,
+		string(m.client.Provider()),
+		strconv.FormatUint(binding.ConfigTenantID, 10),
+		NormalizeConfigID(m.configID),
+		binding.SandboxID,
+	}
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return hex.EncodeToString(sum[:]), binding.SandboxID, nil
+}
+
 // HoldSessionOperation registers a long-lived operation (desktop relay) of
 // sessionID; ctx is cancelled if the lease is lost. A no-op for per-session
 // machines.
@@ -2113,6 +2196,150 @@ func (m *SessionBoundManager) Namespace() string { return m.namespace }
 // UserMachineKey is the machine-level key of a shared user machine.
 func (m *SessionBoundManager) UserMachineKey(machine allocation.UserMachine) SessionSandboxKey {
 	return SessionSandboxKey{TenantID: machine.OwnerTenantID, User: machine}
+}
+
+const sessionWorkspaceCleanupTimeout = 60 * time.Second
+
+// ErrMachineAbsenceUnprovable: a user machine has no binding and the provider
+// cannot list by metadata, so it may still exist. Directory cleanups keep
+// their task instead of treating the machine as gone.
+var ErrMachineAbsenceUnprovable = errors.New("sandbox: cannot prove the user machine is gone")
+
+// DeleteSessionWorkspaces removes the work trees and checkpoint repositories
+// of retired sessions from their shared machine. It registers on the machine
+// first, then takes each session's scope exclusively so work admitted before
+// the retirement finishes before its directory goes; a session whose
+// operations do not leave in time is skipped and reported as not deleted.
+// Every hold is bound into the command's context, so a lost hold stops the
+// deletion (C3). A machine whose binding was lost is re-adopted by metadata,
+// never created; only a provider that lists nothing proves it is gone (C5).
+// Connect resumes a paused machine: a deleted session's files must not
+// linger on its disk.
+func (m *SessionBoundManager) DeleteSessionWorkspaces(
+	ctx context.Context, machine allocation.UserMachine, sessionIDs []string,
+) ([]string, error) {
+	if err := m.requireRemoteBackend(); err != nil {
+		return nil, err
+	}
+	if m.admission == nil {
+		return nil, errors.New("sandbox: user machines require the admission registry")
+	}
+	if len(sessionIDs) == 0 {
+		return nil, nil
+	}
+	for _, id := range sessionIDs {
+		if _, err := UserWorkspaceLayout(id); err != nil {
+			return nil, err
+		}
+	}
+	digest := machine.Digest(m.namespace)
+	token, err := redislock.NewToken()
+	if err != nil {
+		return nil, err
+	}
+	lease, err := m.holdWithWait(ctx, admission.MachineScope(digest), admission.SessionMember(sessionIDs[0], "cleanup", token))
+	if err != nil {
+		return nil, err
+	}
+	defer lease.Release()
+
+	signals := []admission.Signal{lease}
+	var barriers []admission.Barrier
+	defer func() {
+		for _, b := range barriers {
+			b.Release()
+		}
+	}()
+	var ready []string
+	for _, id := range sessionIDs {
+		_, barrier, err := m.acquireExclusive(ctx, digest, id, m.admissionWait)
+		if errors.Is(err, ErrSessionWorkspaceBusy) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		barriers = append(barriers, barrier)
+		signals = append(signals, barrier)
+		ready = append(ready, id)
+	}
+	if len(ready) == 0 {
+		return nil, nil
+	}
+	guarded, stop := admission.Bind(ctx, signals...)
+	defer stop()
+	lost := func(err error) error {
+		if cause := context.Cause(guarded); errors.Is(cause, admission.ErrLeaseLost) {
+			return cause
+		}
+		return err
+	}
+
+	key := m.UserMachineKey(machine)
+	handle, found, err := m.lookupSessionHandleForKey(guarded, key, "")
+	if err != nil {
+		return nil, lost(err)
+	}
+	if !found {
+		handle, found, err = m.lifecycle.recoverWithoutCreating(guarded, key)
+		if err != nil {
+			return nil, lost(err)
+		}
+		if !found {
+			return ready, nil
+		}
+	}
+	var targets []string
+	for _, id := range ready {
+		l, _ := UserWorkspaceLayout(id)
+		targets = append(targets, ShellQuote(l.Root), ShellQuote(l.GitDir))
+	}
+	// Refuse a symlinked parent instead of following it: an agent on this
+	// machine runs as root and may have replaced one.
+	script := `set -eu
+for p in /workspace /workspace/sessions /var/lib/weknora /var/lib/weknora/sessions; do
+  if [ -L "$p" ]; then echo "refusing to clean through symlinked $p" >&2; exit 4; fi
+done
+for t in ` + strings.Join(targets, " ") + `; do
+  if [ -L "$t" ]; then rm -f -- "$t"; else rm -rf -- "$t"; fi
+done`
+	result, err := m.client.Exec(guarded, handle, RemoteExecRequest{
+		Shell: true, Command: script, User: "root", Timeout: sessionWorkspaceCleanupTimeout,
+	})
+	if err != nil {
+		return nil, lost(fmt.Errorf("sandbox: delete session workspaces: %w", err))
+	}
+	if result == nil || result.ExitCode != 0 || result.Killed {
+		detail := "no result"
+		if result != nil {
+			detail = fmt.Sprintf("exit=%d stderr=%s", result.ExitCode, strings.TrimSpace(result.Stderr))
+		}
+		return nil, fmt.Errorf("sandbox: delete session workspaces: %s", detail)
+	}
+	if err := lost(nil); err != nil {
+		return nil, err
+	}
+	// A re-adopted machine whose token could not be recovered is bound only
+	// once the directories are actually gone. ensureBinding is a no-op when
+	// the binding was already there.
+	if err := m.lifecycle.ensureBinding(guarded, key, handle); err != nil {
+		return nil, lost(err)
+	}
+	if err := lost(nil); err != nil {
+		return nil, err
+	}
+	return ready, nil
+}
+
+// ReclaimUserMachine deletes a shared user machine; see
+// remoteSessionLifecycle.reclaimUserMachine for the safety rules.
+func (m *SessionBoundManager) ReclaimUserMachine(
+	ctx context.Context, machine allocation.UserMachine, check func(context.Context) (bool, error),
+) (bool, error) {
+	if err := m.requireRemoteBackend(); err != nil {
+		return false, err
+	}
+	return m.lifecycle.reclaimUserMachine(ctx, m.UserMachineKey(machine), check)
 }
 
 // withSessionEnv overlays the session's input/output paths. On a shared
@@ -2314,6 +2541,188 @@ func effectiveHTTPTimeout(provider RemoteProvider, cfg *Config) time.Duration {
 	default:
 		return DefaultCubeHTTPTimeout
 	}
+}
+
+var forkCommitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+const (
+	forkCopyTimeout   = 5 * time.Minute
+	forkMaxCandidates = 2000
+)
+
+// WorkspaceFork is an open fork of a session on a shared machine. It holds
+// the machine's and the source session's admission until Release, so the
+// machine named by SandboxID is the one every step runs on. Its steps fail
+// with admission.ErrLeaseLost once that hold is lost.
+type WorkspaceFork interface {
+	SandboxID() string
+	// Context is cancelled with admission.ErrLeaseLost once the hold is
+	// lost. Run every step of the fork with it, database steps included.
+	Context() context.Context
+	// Copy materializes sha of the source's checkpoint repository as
+	// targetSessionID's workspace and reports which of candidates are sha
+	// or its ancestors, i.e. which checkpoints exist in the new repository.
+	Copy(targetSessionID, sha string, candidates []string) (map[string]bool, error)
+	// Remove deletes targetSessionID's work tree and repository.
+	Remove(targetSessionID string) error
+	Release()
+}
+
+type workspaceFork struct {
+	m       *SessionBoundManager
+	ctx     context.Context
+	source  WorkspaceLayout
+	handle  RemoteSandboxHandle
+	member  string
+	release func()
+}
+
+// BeginWorkspaceFork opens a fork of sourceSessionID on its shared machine.
+// It never creates the machine: a source without one has nothing to copy.
+func (m *SessionBoundManager) BeginWorkspaceFork(ctx context.Context, sourceSessionID string) (WorkspaceFork, error) {
+	if err := m.requireRemoteBackend(); err != nil {
+		return nil, err
+	}
+	sc, err := m.scope(ctx, sourceSessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !sc.user {
+		return nil, ErrSharedSandbox
+	}
+	opCtx, release, err := m.admitUser(ctx, sc, "fork")
+	if err != nil {
+		// admitUser releases anything it acquired and returns a nil func.
+		if release != nil {
+			release()
+		}
+		return nil, err
+	}
+	handle, found, err := m.lookupSessionHandleForKey(opCtx, sc.machine(), "")
+	if err != nil {
+		release()
+		return nil, err
+	}
+	if !found {
+		release()
+		return nil, ErrNoLiveSessionSandbox
+	}
+	exempt := admissionExemptFrom(opCtx)
+	return &workspaceFork{m: m, ctx: opCtx, source: sc.layout, handle: handle,
+		member: exempt[len(exempt)-1], release: release}, nil
+}
+
+func (f *workspaceFork) SandboxID() string        { return f.handle.ID() }
+func (f *workspaceFork) Context() context.Context { return f.ctx }
+func (f *workspaceFork) Member() string           { return f.member }
+func (f *workspaceFork) Release()                 { f.release() }
+
+func (f *workspaceFork) alive() error {
+	if err := context.Cause(f.ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (f *workspaceFork) run(script string) (*RemoteExecResult, error) {
+	if err := f.alive(); err != nil {
+		return nil, err
+	}
+	result, err := f.m.client.Exec(f.ctx, f.handle, RemoteExecRequest{
+		Shell: true, Command: script, User: "root", Timeout: forkCopyTimeout,
+	})
+	if cause := f.alive(); cause != nil {
+		return nil, cause
+	}
+	if err != nil {
+		return nil, err
+	}
+	if result == nil || result.ExitCode != 0 || result.Killed {
+		detail := "no result"
+		if result != nil {
+			detail = fmt.Sprintf("exit=%d stderr=%s", result.ExitCode, strings.TrimSpace(result.Stderr))
+		}
+		return nil, errors.New(detail)
+	}
+	return result, nil
+}
+
+func (f *workspaceFork) Copy(targetSessionID, sha string, candidates []string) (map[string]bool, error) {
+	if !forkCommitPattern.MatchString(sha) {
+		return nil, fmt.Errorf("sandbox: invalid fork commit %q", sha)
+	}
+	target, err := UserWorkspaceLayout(targetSessionID)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var quoted []string
+	for _, c := range candidates {
+		if forkCommitPattern.MatchString(c) && !seen[c] && len(quoted) < forkMaxCandidates {
+			seen[c] = true
+			quoted = append(quoted, ShellQuote(c))
+		}
+	}
+	script := fmt.Sprintf(`set -eu
+SRC_GIT=%s
+DST_TREE=%s
+DST_GIT=%s
+SHA=%s
+for p in /workspace /workspace/sessions /var/lib/weknora /var/lib/weknora/sessions; do
+  if [ -L "$p" ]; then echo "refusing symlinked $p" >&2; exit 4; fi
+done
+if [ -e "$DST_TREE" ] || [ -e "$DST_GIT" ]; then echo "fork target exists" >&2; exit 5; fi
+mkdir -p /var/lib/weknora/sessions /workspace/sessions
+tmp=$(mktemp -d /var/lib/weknora/sessions/.fork.XXXXXX)
+trap 'rm -rf -- "$tmp"' EXIT
+g() { git -c safe.directory='*' -c core.hooksPath=/dev/null "$@"; }
+g --git-dir="$SRC_GIT" cat-file -e "$SHA^{commit}"
+if g --git-dir="$SRC_GIT" ls-tree -r "$SHA" | awk '$1=="160000"{f=1} END{exit !f}'; then
+  echo "checkpoint contains a gitlink" >&2; exit 6
+fi
+g init -q --bare "$tmp/repo.git"
+g -c uploadpack.allowAnySHA1InWant=true --git-dir="$tmp/repo.git" fetch -q --no-tags "$SRC_GIT" "$SHA:refs/heads/main"
+g --git-dir="$tmp/repo.git" symbolic-ref HEAD refs/heads/main
+g --git-dir="$tmp/repo.git" config core.bare false
+g --git-dir="$tmp/repo.git" config user.email agent@weknora.local
+g --git-dir="$tmp/repo.git" config user.name 'WeKnora Agent'
+mkdir -p "$tmp/tree"
+g --git-dir="$tmp/repo.git" --work-tree="$tmp/tree" checkout -q -f main
+mkdir -p "$tmp/tree/input" "$tmp/tree/output"
+mv -- "$tmp/repo.git" "$DST_GIT"
+mv -- "$tmp/tree" "$DST_TREE"
+for c in %s; do
+  if g --git-dir="$DST_GIT" merge-base --is-ancestor "$c" "$SHA" 2>/dev/null; then echo "R $c"; fi
+done
+`, ShellQuote(f.source.GitDir), ShellQuote(target.Root), ShellQuote(target.GitDir), ShellQuote(sha),
+		strings.Join(quoted, " "))
+	result, err := f.run(script)
+	if err != nil {
+		return nil, fmt.Errorf("sandbox: copy session workspace: %w", err)
+	}
+	reachable := map[string]bool{}
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		if c, ok := strings.CutPrefix(strings.TrimSpace(line), "R "); ok && seen[c] {
+			reachable[c] = true
+		}
+	}
+	return reachable, nil
+}
+
+func (f *workspaceFork) Remove(targetSessionID string) error {
+	target, err := UserWorkspaceLayout(targetSessionID)
+	if err != nil {
+		return err
+	}
+	_, err = f.run(fmt.Sprintf(`set -eu
+for p in /workspace /workspace/sessions /var/lib/weknora /var/lib/weknora/sessions; do
+  if [ -L "$p" ]; then echo "refusing symlinked $p" >&2; exit 4; fi
+done
+rm -rf -- %s %s`, ShellQuote(target.Root), ShellQuote(target.GitDir)))
+	if err != nil {
+		return fmt.Errorf("sandbox: remove forked workspace: %w", err)
+	}
+	return nil
 }
 
 var (

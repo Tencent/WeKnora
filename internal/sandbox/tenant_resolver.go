@@ -200,6 +200,7 @@ func (r *tenantSandboxResolver) Resolve(
 			Checker:         r.deps.Checker,
 			SkipHealthProbe: true,
 			ConfigID:        configID,
+			ConfigTenantID:  tenantID,
 			Bootstrapper:    r.deps.Bootstrapper,
 			Allocations:     r.deps.Allocations,
 			Admission:       r.deps.Admission,
