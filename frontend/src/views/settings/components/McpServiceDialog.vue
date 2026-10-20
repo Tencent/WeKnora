@@ -49,6 +49,19 @@
 
     <t-form ref="formRef" :data="formData" :rules="rules" label-align="top" class="mcp-editor-form">
       <div v-show="step === 0" class="connection-step">
+      <McpPresetPicker v-if="mode === 'add' && !currentService?.id"
+        :selected-id="selectedPreset?.id" @select="selectPreset" @custom="clearPreset" />
+      <section v-if="selectedPreset && mode === 'add' && !currentService?.id"
+        class="setting-drawer__section mcp-preset-onboarding">
+        <p class="form-desc">{{ t('mcpServiceDialog.presets.account') }}</p>
+        <a :href="mcpPresetPlatformLink(selectedPreset, 'key')" target="_blank" rel="noopener noreferrer">
+          {{ t('mcpServiceDialog.presets.getKey') }}
+        </a>
+        <a :href="mcpPresetPlatformLink(selectedPreset, 'pricing')" target="_blank" rel="noopener noreferrer">
+          {{ t('mcpServiceDialog.presets.pricing') }}
+        </a>
+        <p class="form-desc">{{ t('mcpServiceDialog.presets.credentialHint') }}</p>
+      </section>
       <!--
         从代码导入：粘贴标准 mcpServers JSON，纯前端解析后填回表单。
         不自动提交；用户检查后再点保存。
@@ -400,6 +413,10 @@ import {
 } from '@/api/mcp-service'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import McpMetadataPanel from './McpMetadataPanel.vue'
+import McpPresetPicker from '@/components/settings/McpPresetPicker.vue'
+import {
+  mcpPresetDraft, mcpPresetBearer, mcpPresetPlatformLink, type McpServicePreset,
+} from '@/utils/mcpServicePresets'
 import CredentialResource, {
   type CredentialFieldDef,
   type CredentialResourceApi,
@@ -475,6 +492,25 @@ const formData = ref({
   },
 })
 
+const selectedPreset = ref<McpServicePreset | null>(null)
+function selectPreset(preset: McpServicePreset) {
+  if (props.mode !== 'add' || currentService.value?.id) return
+  resetForm()
+  const draft = mcpPresetDraft(preset, locale.value)
+  formData.value.name = draft.name
+  formData.value.url = draft.url
+  formData.value.transport_type = draft.transport_type
+  formData.value.usage_instructions = draft.usage_instructions
+  formData.value.auth_config.auth_type = draft.auth_config.auth_type
+  formData.value.auth_config.api_key_header = draft.auth_config.api_key_header
+  selectedPreset.value = preset
+}
+function clearPreset() {
+  if (currentService.value?.id) return
+  selectedPreset.value = null
+  resetForm()
+}
+
 // ---- Custom headers (key/value editor, same UX as ModelEditorDialog) ----
 const addCustomHeader = () => {
   formData.value.headers.push({ key: '', value: '' })
@@ -490,6 +526,7 @@ const codeImportError = ref('')
 
 // Map a raw MCP server config object onto the form. Stdio is rejected.
 function applyServerConfig(name: string, cfg: Record<string, unknown>) {
+  selectedPreset.value = null
   if (cfg.command) {
     codeImportError.value = t('mcpServiceDialog.codeImport.errors.stdioUnsupported')
     return false
@@ -794,8 +831,20 @@ const rules: Record<string, FormRule[]> = {
 
 const dialogVisible = computed({
   get: () => props.visible,
-  set: (value) => emit('update:visible', value),
+  set: (value) => {
+    if (!value) clearCredentialDraft()
+    emit('update:visible', value)
+  },
 })
+
+// Keep unsaved secrets only while the drawer needs them. This clears local
+// state, never the service's stored credential or its /credentials resource.
+function clearCredentialDraft() {
+  formData.value.auth_config.api_key = ''
+  formData.value.auth_config.token = ''
+  formData.value.auth_config.client_secret = ''
+  codeImportText.value = ''
+}
 
 // ---- Advanced numeric inputs (text-bound proxies) ----
 // We bind text instead of v-model directly to advanced_config.<n> so the
@@ -863,7 +912,12 @@ const resetForm = () => {
 watch(
   () => [props.visible, props.service] as const,
   ([visible, service], previous) => {
-    if (!visible) { usageGeneration++; generatingUsage.value = false; return }
+    if (!visible) {
+      usageGeneration++
+      generatingUsage.value = false
+      clearCredentialDraft()
+      return
+    }
     const opening = !previous?.[0]
     if (!opening && service?.id && savedService.value?.id === service.id) {
       savedService.value = service
@@ -878,6 +932,7 @@ watch(
     codeImportOpen.value = false
     codeImportText.value = ''
     codeImportError.value = ''
+    selectedPreset.value = null
     if (service) {
       const transportType = service.transport_type === 'stdio' ? 'sse' : (service.transport_type || 'sse')
       formData.value = {
@@ -942,6 +997,11 @@ function buildPayload(asCreate: boolean): Partial<MCPService> {
     url: formData.value.url || undefined,
     headers: headersMap,
   }
+  // Persist reviewed preset instructions with the initial service. The parent
+  // reloads the saved row before step two, so a local-only value would be lost.
+  if (asCreate && selectedPreset.value) {
+    data.usage_instructions = formData.value.usage_instructions.trim()
+  }
 
   // Non-secret auth config (strategy + OAuth params) flows through the main body.
   const auth: NonNullable<MCPService['auth_config']> = {
@@ -963,7 +1023,11 @@ function buildPayload(asCreate: boolean): Partial<MCPService> {
     }
   }
   if (asCreate && !isOAuth.value) {
-    if (formData.value.auth_config.api_key) auth.api_key = formData.value.auth_config.api_key
+    const rawKey = formData.value.auth_config.api_key
+    if (rawKey) auth.api_key = selectedPreset.value &&
+      formData.value.auth_config.auth_type === 'api_key' &&
+      formData.value.auth_config.api_key_header.toLowerCase() === 'authorization'
+      ? mcpPresetBearer(rawKey) : rawKey
     if (formData.value.auth_config.token) auth.token = formData.value.auth_config.token
   }
   data.auth_config = auth
@@ -974,6 +1038,10 @@ async function saveConnection(): Promise<MCPService | null> {
   if (submitting.value) return null
   const valid = await formRef.value?.validate()
   if (valid !== true) return null
+  if (!currentService.value?.id && selectedPreset.value && !formData.value.auth_config.api_key.trim()) {
+    MessagePlugin.warning(t('mcpServiceDialog.presets.keyRequired'))
+    return null
+  }
   if (!formData.value.name.trim()) { MessagePlugin.warning(t('mcpServiceDialog.rules.nameRequired')); return null }
   try { const url = new URL(formData.value.url); if (!['https:', 'http:'].includes(url.protocol)) throw new Error('url') }
   catch { MessagePlugin.warning(t('mcpServiceDialog.rules.urlInvalid')); return null }
@@ -982,6 +1050,7 @@ async function saveConnection(): Promise<MCPService | null> {
     const id = currentService.value?.id
     const saved = id ? await updateMCPService(id, buildPayload(false)) : await createMCPService(buildPayload(true))
     savedService.value = saved
+    clearCredentialDraft()
     emit('created', saved)
     return saved
   } catch (error) {
@@ -1012,7 +1081,7 @@ async function handleGenerateUsage() {
   }
 }
 
-onBeforeUnmount(() => { usageGeneration++ })
+onBeforeUnmount(() => { usageGeneration++; clearCredentialDraft() })
 
 const handleSubmit = async () => {
   const id = currentService.value?.id

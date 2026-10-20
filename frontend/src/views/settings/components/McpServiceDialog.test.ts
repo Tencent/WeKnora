@@ -16,19 +16,27 @@ const script = compileScript(descriptor, { id: 'mcp-dialog-test' }).content
   .replace('return __returned__', '__expose(__returned__); return __returned__')
 const compiled = ts.transpileModule(script, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 
-function fixture(generate: () => Promise<string> = async () => 'Query logs by module and time.', initialStep: 0 | 1 = 0) {
+function fixture(generate: () => Promise<string> = async () => 'Query logs by module and time.', initialStep: 0 | 1 = 0, addMode = false,
+  create?: (data: Record<string, unknown>) => Promise<any>) {
   const updates: Array<{ id: string; data: Record<string, unknown> }> = []
   const warnings: string[] = []
-  const props = reactive({ visible: true, service: { id: 'one', name: 'Logs', description: 'Legacy usage', transport_type: 'sse', url: 'https://example.com/mcp' }, mode: 'edit', initialStep })
+  const errors: string[] = []
+  const creates: Array<Record<string, unknown>> = []
+  const props = reactive({ visible: true, service: addMode ? null as any : { id: 'one', name: 'Logs', description: 'Legacy usage', transport_type: 'sse', url: 'https://example.com/mcp' }, mode: addMode ? 'add' : 'edit', initialStep })
   const exports: any = {}
   runInNewContext(compiled, {
     exports,
     require(name: string) {
       if (name === 'vue') return require('vue')
+      if (name === '@/utils/mcpServicePresets') return require('../../../utils/mcpServicePresets.ts')
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key, locale: ref('zh-CN') }) }
-      if (name === 'tdesign-vue-next') return { MessagePlugin: { warning: (text: string) => warnings.push(text), success() {}, error() {} } }
+      if (name === 'tdesign-vue-next') return { MessagePlugin: { warning: (text: string) => warnings.push(text), success() {}, error: (text: string) => errors.push(text) } }
       if (name === '@/api/mcp-service') return {
         generateMCPUsageInstructions: generate,
+        createMCPService: async (data: Record<string, unknown>) => {
+          creates.push(data)
+          return create ? create(data) : { ...data, id: 'created-preset' }
+        },
         updateMCPService: async (id: string, data: Record<string, unknown>) => {
           updates.push({ id, data })
           return { ...props.service, ...data }
@@ -48,7 +56,7 @@ function fixture(generate: () => Promise<string> = async () => 'Query logs by mo
   const instance = ref<any>()
   const app = renderer.createApp({ render: () => h(component, { ...props, ref: instance }) })
   app.mount({})
-  return { vm: instance.value, props, updates, warnings, close: () => app.unmount() }
+  return { vm: instance.value, props, updates, warnings, errors, creates, close: () => app.unmount() }
 }
 
 test('tool shortcut opens the saved service directly without resaving its connection', () => {
@@ -173,5 +181,122 @@ test('API key payload never carries OAuth client fields', () => {
     const body = f.vm.buildPayload(true)
     assert.equal('client_id' in body.auth_config, false)
     assert.equal('client_secret' in body.auth_config, false)
+  } finally { f.close() }
+})
+
+test('selecting a service preset is local-only and requires the user’s own credential', () => {
+  const f = fixture(undefined, 0, true)
+  const { MCP_SERVICE_PRESETS } = require('../../../utils/mcpServicePresets.ts')
+  try {
+    f.vm.selectPreset(MCP_SERVICE_PRESETS[0])
+    assert.equal(f.updates.length, 0, 'choosing a preset must not save or connect')
+    assert.equal(f.vm.formData.name, 'Suno by Ace Data Cloud')
+    assert.equal(f.vm.formData.url, 'https://suno.mcp.acedata.cloud/mcp')
+    assert.equal(f.vm.formData.auth_config.api_key, '')
+    assert.equal(f.vm.formData.auth_config.api_key_header, 'Authorization')
+    f.vm.formData.auth_config.api_key = 'test-key'
+    const body = f.vm.buildPayload(true)
+    assert.equal(body.auth_config.api_key, 'Bearer test-key')
+    assert.equal(body.usage_instructions, f.vm.formData.usage_instructions.trim(),
+      'preset guidance must survive the saved row reload before step two')
+    assert.equal(body.headers.Authorization, undefined, 'credential must not enter ordinary headers')
+    assert.equal(body.url.includes('test-key'), false)
+    f.vm.formData.auth_config.api_key = 'Bearer test-key'
+    assert.equal(f.vm.buildPayload(true).auth_config.api_key, 'Bearer test-key')
+    f.vm.selectPreset(MCP_SERVICE_PRESETS[1])
+    assert.equal(f.vm.formData.auth_config.api_key, '', 'switching services must clear the prior key')
+    assert.equal(f.vm.formData.name, 'Seedance by Ace Data Cloud')
+    f.vm.clearPreset()
+    assert.equal(f.vm.selectedPreset, null)
+    assert.equal(f.vm.formData.url, '', 'custom setup remains available')
+  } finally { f.close() }
+})
+
+test('a preset cannot overwrite an existing saved connection', () => {
+  const f = fixture()
+  const { MCP_SERVICE_PRESETS } = require('../../../utils/mcpServicePresets.ts')
+  try {
+    f.vm.selectPreset(MCP_SERVICE_PRESETS[0])
+    assert.equal(f.vm.formData.name, 'Logs')
+    assert.equal(f.vm.formData.url, 'https://example.com/mcp')
+    assert.equal(f.updates.length, 0)
+  } finally { f.close() }
+})
+
+test('cancel and external close erase unsaved keys and pasted credential JSON without saving', async () => {
+  for (const externalClose of [false, true]) {
+    const f = fixture(undefined, 0, true)
+    const { MCP_SERVICE_PRESETS } = require('../../../utils/mcpServicePresets.ts')
+    try {
+      f.vm.selectPreset(MCP_SERVICE_PRESETS[0])
+      f.vm.formData.auth_config.api_key = 'unsaved-key'
+      f.vm.formData.auth_config.token = 'unsaved-token'
+      f.vm.formData.auth_config.client_secret = 'unsaved-client-secret'
+      f.vm.codeImportText = '{"headers":{"Authorization":"Bearer pasted-key"}}'
+      if (externalClose) f.props.visible = false
+      else f.vm.handleClose()
+      await nextTick()
+      assert.equal(f.vm.formData.auth_config.api_key, '')
+      assert.equal(f.vm.formData.auth_config.token, '')
+      assert.equal(f.vm.formData.auth_config.client_secret, '')
+      assert.equal(f.vm.codeImportText, '')
+      assert.equal(f.creates.length, 0)
+      assert.equal(f.updates.length, 0)
+    } finally { f.close() }
+  }
+})
+
+test('preset create errors preserve retry input but show no raw error or credential', async () => {
+  const f = fixture(undefined, 0, true, async () => { throw new Error('upstream echoed private-retry-key') })
+  const { MCP_SERVICE_PRESETS } = require('../../../utils/mcpServicePresets.ts')
+  try {
+    f.vm.selectPreset(MCP_SERVICE_PRESETS[0])
+    f.vm.formRef = { validate: async () => true, clearValidate() {} }
+    f.vm.formData.auth_config.api_key = 'private-retry-key'
+    await f.vm.handleNext()
+    assert.equal(f.creates.length, 1)
+    assert.equal(f.vm.step, 0)
+    assert.equal(f.vm.submitting, false)
+    assert.equal(f.vm.formData.auth_config.api_key, 'private-retry-key')
+    assert.deepEqual(f.errors, ['mcpServiceDialog.toasts.updateFailed'])
+    assert.equal(JSON.stringify(f.errors).includes('private-retry-key'), false)
+  } finally { f.close() }
+})
+
+test('a new preset requires the user key while custom MCP services retain optional authentication', async () => {
+  const f = fixture(undefined, 0, true)
+  const { MCP_SERVICE_PRESETS } = require('../../../utils/mcpServicePresets.ts')
+  try {
+    f.vm.selectPreset(MCP_SERVICE_PRESETS[0])
+    f.vm.formRef = { validate: async () => true, clearValidate() {} }
+    f.vm.formData.auth_config.api_key = '  '
+    await f.vm.handleNext()
+    assert.equal(f.creates.length, 0)
+    assert.equal(f.vm.step, 0)
+    assert.deepEqual(f.warnings, ['mcpServiceDialog.presets.keyRequired'])
+    f.vm.clearPreset()
+    f.vm.formData.name = 'Custom public service'
+    f.vm.formData.url = 'https://example.com/mcp'
+    await f.vm.handleNext()
+    assert.equal(f.creates.length, 1)
+    assert.equal((f.creates[0]!.auth_config as any).auth_type, '')
+  } finally { f.close() }
+})
+
+test('successful preset create persists its private credential once and clears the draft', async () => {
+  const f = fixture(undefined, 0, true)
+  const { MCP_SERVICE_PRESETS } = require('../../../utils/mcpServicePresets.ts')
+  try {
+    f.vm.selectPreset(MCP_SERVICE_PRESETS[0])
+    f.vm.formRef = { validate: async () => true, clearValidate() {} }
+    f.vm.formData.auth_config.api_key = 'accepted-test-key'
+    f.vm.codeImportText = '{"Authorization":"Bearer pasted-test-key"}'
+    await f.vm.handleNext()
+    assert.equal(f.creates.length, 1)
+    assert.equal((f.creates[0]!.auth_config as any).api_key, 'Bearer accepted-test-key')
+    assert.equal(f.vm.step, 1)
+    assert.equal(f.vm.currentService.id, 'created-preset')
+    assert.equal(f.vm.formData.auth_config.api_key, '')
+    assert.equal(f.vm.codeImportText, '')
   } finally { f.close() }
 })

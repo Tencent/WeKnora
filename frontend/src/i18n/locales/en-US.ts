@@ -5932,6 +5932,22 @@ export default {
       "saveNext": "Save and continue"
   },
     mcpServiceDialog: {
+      presets: {
+        keyRequired: "Enter your own Ace Data Cloud API key before saving this preset.",
+        "title": "Find a service preset",
+        "hint": "Choose an independently configured service, or add a custom MCP server. These integrations are provided by Ace Data Cloud; they are not official apps from the model brands.",
+        "search": "Search Suno, Seedance, HappyHorse, GPT Image or Nano Banana",
+        "custom": "Configure a custom MCP service",
+        "account": "Sign in to Ace Data Cloud → Applications → General application. Copy an existing API key or create a dedicated one; verify service access, balance and current pricing.",
+        "getKey": "Open Ace Data Cloud API keys",
+        "pricing": "Check current service pricing",
+        "credentialHint": "Paste your key in the private Token field below. The preset adds the Bearer prefix when saving. Selecting a preset sends no request; generation remains billable.",
+        "suno": "Music generation and same-task audio retrieval",
+        "seedance": "Video generation and task retrieval",
+        "happyhorse": "Video creation and same-task results",
+        "gptImage": "Image generation and asynchronous results",
+        "nanoBanana": "Image creation and editing"
+      },
       addTitle: 'Add MCP Service',
       addDesc: 'Connect an external MCP service so agents can call its tools.',
       editTitle: 'Edit MCP Service',

@@ -3155,6 +3155,22 @@ export default {
     "saveNext": "저장하고 다음"
 },
   mcpServiceDialog: {
+      presets: {
+        keyRequired: "이 프리셋을 저장하기 전에 본인의 Ace Data Cloud API 키를 입력하세요.",
+        "title": "서비스 프리셋 찾기",
+        "hint": "각 서비스를 개별로 설정하거나 사용자 지정 MCP를 추가하세요. 이 통합은 Ace Data Cloud가 제공하며 모델 브랜드의 공식 앱이 아닙니다.",
+        "search": "Suno, Seedance, HappyHorse, GPT Image 또는 Nano Banana 검색",
+        "custom": "사용자 지정 MCP 서비스 설정",
+        "account": "Ace Data Cloud에 로그인한 뒤 Applications → General application에서 기존 API 키를 복사하거나 전용 키를 만드세요. 서비스 권한, 잔액과 현재 가격을 확인하세요.",
+        "getKey": "Ace Data Cloud API 키 열기",
+        "pricing": "현재 서비스 가격 확인",
+        "credentialHint": "아래 비공개 Token 필드에 키를 붙여 넣으세요. 저장할 때 Bearer 접두사가 추가됩니다. 프리셋 선택만으로 요청을 보내지 않으며 생성 작업에는 요금이 부과됩니다.",
+        "suno": "음악 생성 및 동일 작업의 오디오 조회",
+        "seedance": "동영상 생성 및 작업 조회",
+        "happyhorse": "동영상 제작 및 동일 작업 결과 조회",
+        "gptImage": "이미지 생성 및 비동기 결과 조회",
+        "nanoBanana": "이미지 생성 및 편집"
+      },
     addTitle: 'MCP 서비스 추가',
     addDesc: '외부 MCP 서비스를 연결하면 에이전트가 해당 도구를 호출할 수 있습니다.',
     editTitle: 'MCP 서비스 편집',

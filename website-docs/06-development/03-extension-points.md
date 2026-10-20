@@ -296,7 +296,7 @@ type Definition struct {
     Name         string
     Names        map[string]string // 按语言的名称，如 "zh-CN"
     Website      string
-    Icon         []byte            // SVG
+    Icon         []byte            // SVG or PNG (built-in brand assets)
     API          api.API           // 默认对话协议
     RerankAPI    api.RerankAPI     // 未声明时默认 cohere-rerank
     EmbeddingAPI api.EmbeddingAPI  // 未声明时默认 openai-embeddings
@@ -341,7 +341,7 @@ type Transcriber interface {
 
 ### 现有实现
 
-- **厂商**：`internal/models/providers/` 定义 30 个内置厂商，一个厂商一份（`aliyun.go`、`deepseek.go`、`generic.go`、`weknoracloud.go` 等），由 `builtin.go` 的 `Builtins()` 显式列出；图标在 `providers/assets/<id>.svg`。
+- **厂商**：`internal/models/providers/` 定义 31 个内置厂商，一个厂商一份（`acedatacloud.go`、`aliyun.go`、`deepseek.go`、`generic.go`、`weknoracloud.go` 等），由 `builtin.go` 的 `Builtins()` 显式列出；图标在 `providers/assets/`，内置品牌素材可为 SVG 或 PNG。
 - **协议**：`internal/models/api/<protocol>`。对话 `openaicompletions`、`openairesponses`、`anthropicmessages`、`googlegenai`；向量 `openaiembeddings`、`dashscopeembeddings`、`arkembeddings`、`googleembeddings`；重排 `cohererank`、`dashscoperank`、`nimrerank`、`tencentlkeap`、`volcengineknowledge`、`teirank`、`pineconerank`；语音 `openaitranscriptions`、`openaichataudio`。
 - **模型目录**：`internal/models/catalog/data/seed.json`（模型元数据）+ `overrides.json`（协议、思考映射与 compat 修正）→ 由脚本生成 `models.generated.json`，编译时嵌入。
 - **运行时**：`internal/models/runtime` 组合厂商定义与目录（`New()`），应用部署叠加 `config/models.json`，并为每个模型行解析出协议、端点和兼容设置。
@@ -349,7 +349,7 @@ type Transcriber interface {
 ### 新增步骤
 
 1. **新建厂商定义**：`internal/models/providers/<id>.go`，声明名称、支持的模型类型、各类型默认地址、鉴权方式、协议默认值及特殊端点钩子，并在包注释中写明官方文档依据；
-2. **注册点一：`internal/models/providers/builtin.go`** — 把 `new<Id>Provider()` 加进 `Builtins()`；图标放入 `providers/assets/<id>.svg`；
+2. **注册点一：`internal/models/providers/builtin.go`** — 把 `new<Id>Provider()` 加进 `Builtins()`；将品牌原始 SVG 或 PNG 图标放入 `providers/assets/`；
 3. **注册点二：模型目录** — 在 `internal/models/catalog/data/seed.json` 中为该厂商加一个条目（即使暂时没有模型也要有空列表，运行时按厂商 ID 读取目录），维护模型元数据；协议、思考映射与 compat 修正写在 `overrides.json`。模型键包含类型与 id / match，同名的对话和向量模型可以共存；
 4. **生成目录**：执行 `make model-catalog-generate`。生成文件不要手改；
 5. **新协议（可选）**：已有协议能覆盖时直接复用；确需新协议时新增 `internal/models/api/<protocol>` 包，并在对应工厂的协议分支中接入（对话 `internal/models/chat/chat.go` 的 `NewRemoteChat`、向量 `internal/models/embedding/protocol.go`、重排 `internal/models/rerank/reranker.go`、语音 `internal/models/asr/protocol.go`）；

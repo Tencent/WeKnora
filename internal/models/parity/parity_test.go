@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -485,8 +486,15 @@ func TestCatalogInvariants(t *testing.T) {
 			assert.NotEmpty(t, v.Description, "vendor needs a description for the picker")
 			assert.True(t, v.API.Known(), "unknown default API %q", v.API)
 			assert.NotEmpty(t, v.ModelTypes, "vendor supports no model type")
-			assert.True(t, strings.HasPrefix(strings.TrimSpace(string(v.Icon)), "<svg"), "icon must be an SVG")
-			assert.LessOrEqual(t, len(v.Icon), 6*1024, "icon over the 6 KB budget")
+			if bytes.HasPrefix(v.Icon, []byte("\x89PNG\r\n\x1a\n")) {
+				_, err := png.DecodeConfig(bytes.NewReader(v.Icon))
+				assert.NoError(t, err, "invalid built-in PNG icon")
+				assert.LessOrEqual(t, len(v.Icon), 128*1024, "PNG icon over the 128 KB budget")
+			} else {
+				assert.True(t, strings.HasPrefix(strings.TrimSpace(string(v.Icon)), "<svg"),
+					"icon must be an SVG or PNG")
+				assert.LessOrEqual(t, len(v.Icon), 6*1024, "SVG icon over the 6 KB budget")
+			}
 			if v.RequiresAuth {
 				assert.NotEmpty(t, v.Auth, "RequiresAuth without an auth style")
 			}
