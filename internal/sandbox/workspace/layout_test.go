@@ -22,7 +22,7 @@ func TestRemoteLayoutKeepsTheHistoricalContract(t *testing.T) {
 	require.False(t, l.IsSharedRemote())
 }
 
-func TestUserSessionLayoutScopesEveryPathToTheSession(t *testing.T) {
+func TestUserSessionLayoutUsesMachineWideWriteRoots(t *testing.T) {
 	l, err := UserSession(testSessionID)
 	require.NoError(t, err)
 	name, err := SessionDirName(testSessionID)
@@ -35,9 +35,10 @@ func TestUserSessionLayoutScopesEveryPathToTheSession(t *testing.T) {
 	require.Equal(t, root, l.Root)
 	require.Equal(t, root+"/input", l.InputDir)
 	require.Equal(t, root+"/output", l.OutputDir)
-	require.Equal(t, []string{root, root + "/output"}, l.WriteRoots)
+	require.Equal(t, []string{Root, OutputDir}, l.WriteRoots,
+		"tools treat the machine like a session-owned one: the whole /workspace is writable")
 	require.Equal(t, []string{root + "/output", root + "/input", root, SkillsImageRoot}, l.ReadRoots)
-	require.Equal(t, []string{root, TmpRoot, SkillsImageRoot}, l.WorkDirRoots)
+	require.Empty(t, l.WorkDirRoots, "no work_dir whitelist: any absolute directory is allowed")
 	require.Equal(t, "/var/lib/weknora/sessions/"+name+".git", l.GitDir)
 	require.Equal(t, root, l.Hint)
 }

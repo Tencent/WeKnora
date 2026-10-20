@@ -153,12 +153,12 @@ func inspectableRootIn(l sandbox.WorkspaceLayout, clean string) (string, bool) {
 
 // inspectRoot reports the metadata root for a read/list. A session-owned
 // remote sandbox labels misses as "/" and still inspects (tmp, installed
-// skills). Host layouts and shared remote machines allow ReadRoots only.
+// skills). Host layouts allow ReadRoots only.
 func inspectRoot(l sandbox.WorkspaceLayout, clean string) (string, bool) {
 	if root, ok := inspectableRootIn(l, clean); ok {
 		return root, true
 	}
-	if l.IsHost() || l.IsSharedRemote() {
+	if l.IsHost() {
 		return "", false
 	}
 	return "/", true

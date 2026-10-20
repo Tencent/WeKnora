@@ -31,16 +31,15 @@ func TestCleanWriteFileInRemoteMatchesHistoricalErrors(t *testing.T) {
 	require.EqualError(t, err, `sandbox: workspace write path "/" must be an absolute file path`)
 }
 
-func TestCleanWriteFileInSharedStaysInsideTheSession(t *testing.T) {
+func TestCleanWriteFileInSharedAllowsTheWholeMachine(t *testing.T) {
 	l := userLayout(t)
 	got, err := CleanWriteFileIn(l, "report.md")
 	require.NoError(t, err)
 	require.Equal(t, l.Root+"/report.md", got)
 
-	_, err = CleanWriteFileIn(l, "/workspace/sessions/11111111-2222-4333-8444-555555555555/a.md")
-	require.ErrorContains(t, err, "outside the session workspace")
-	_, err = CleanWriteFileIn(l, "../11111111-2222-4333-8444-555555555555/a.md")
-	require.ErrorContains(t, err, "outside the session workspace")
+	got, err = CleanWriteFileIn(l, "/workspace/sessions/11111111-2222-4333-8444-555555555555/a.md")
+	require.NoError(t, err, "a sibling session's directory is not refused any more")
+	require.Equal(t, "/workspace/sessions/11111111-2222-4333-8444-555555555555/a.md", got)
 	_, err = CleanWriteFileIn(l, l.InputDir+"/x")
 	require.ErrorContains(t, err, "read-only")
 }
@@ -57,14 +56,13 @@ func TestCleanWorkDirIn(t *testing.T) {
 	require.EqualError(t, err, `sandbox: work dir "rel" must be absolute`)
 
 	shared := userLayout(t)
-	for _, ok := range []string{shared.Root, shared.Root + "/src", "/tmp", "/tmp/x", SkillsImageRoot + "/pdf"} {
+	for _, ok := range []string{shared.Root, "/workspace", "/workspace/sessions", "/tmp", "/opt", "/"} {
 		_, err := CleanWorkDirIn(shared, ok, false)
 		require.NoError(t, err, ok)
 	}
-	for _, bad := range []string{"/workspace", "/workspace/sessions", "/opt", "/"} {
-		_, err := CleanWorkDirIn(shared, bad, false)
-		require.Error(t, err, bad)
-	}
+	_, err = CleanWorkDirIn(shared, "/opt/build", true)
+	require.EqualError(t, err,
+		`sandbox: work dir "/opt/build" is outside allowed roots (`+shared.Root+`, /opt/weknora/tenant/skills)`)
 }
 
 func TestCleanInputPathIn(t *testing.T) {

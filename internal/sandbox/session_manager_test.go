@@ -1192,17 +1192,17 @@ func TestUserSessionsShareOneMachineWithSeparateDirectories(t *testing.T) {
 	require.Zero(t, n, "every operation released its leases")
 }
 
-func TestUserSessionCannotLeaveItsWorkspace(t *testing.T) {
+func TestUserSessionMayUseTheWholeMachine(t *testing.T) {
 	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
 	ctx := ownerCtx()
 	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "/workspace", time.Second, nil)
-	require.ErrorContains(t, err, "outside allowed roots")
+	require.NoError(t, err, "work_dir is not clamped to the session directory")
 	err = h.mgr.WriteSessionWorkspaceFile(ctx, userSessionA, userSessionRoot(userSessionB)+"/x", []byte("x"))
-	require.ErrorContains(t, err, "outside the session workspace")
+	require.NoError(t, err, "a sibling session's directory is not refused any more")
 	err = h.mgr.WriteSessionInputFile(ctx, userSessionA, "/workspace/input/a.pdf", []byte("x"))
-	require.Error(t, err)
+	require.Error(t, err, "the legacy attachment root stays reserved")
 	_, err = h.mgr.ReadSessionFile(ctx, userSessionA, userSessionRoot(userSessionB)+"/x")
-	require.ErrorContains(t, err, "outside the session workspace")
+	require.NoError(t, err, "reads of a sibling's tree go through to the provider")
 }
 
 func TestValidityIsReadFreshNotCached(t *testing.T) {

@@ -396,13 +396,18 @@ func formatToolGuidanceForMode(names []string, skillInstallMode bool, layout san
 			input := sandbox.PromptSafePath(layout.InputDir)
 			output := sandbox.PromptSafePath(layout.OutputDir)
 			if root != "" && input != "" && output != "" {
-				b.WriteString("Session workspace: " + root + ". Preserve uploaded originals in " + input + ". ")
-				b.WriteString(output + " is the only directory collected for download, " +
-					"so it takes finished deliverables only; " +
-					"keep drafts and intermediate files in another directory under " +
-					root + ". Commands start from " + root + " unless work_dir names a subdirectory. " +
-					"Your other conversations share this machine under /workspace/sessions; " +
-					"do not read, modify or delete them. Installed packages are shared with those conversations.\n")
+				b.WriteString("Session workspace: ")
+				b.WriteString(root)
+				b.WriteString(". Preserve uploaded originals in ")
+				b.WriteString(input)
+				b.WriteString(". ")
+				b.WriteString(output)
+				b.WriteString(" is the only directory collected for download, so it takes finished " +
+					"deliverables only; keep drafts and intermediate files in another directory under ")
+				b.WriteString(root)
+				b.WriteString(". Commands start from ")
+				b.WriteString(root)
+				b.WriteString(" unless work_dir names a subdirectory.\n")
 				b.WriteString(sandboxArtifactReferenceGuidance())
 			}
 		} else {

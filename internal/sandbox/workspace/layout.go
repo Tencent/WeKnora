@@ -123,7 +123,9 @@ func Remote() Layout {
 // UserSession is the layout of sessionID on a machine its owner's sessions
 // share. Only canonical lower-case UUIDs are accepted, so the id can never
 // carry a path segment of its own. The directory name is SessionDirName, not
-// the full UUID: the model sees this path on every turn.
+// the full UUID: the model sees this path on every turn. The session root
+// anchors commands and artifact collection; it is not a tool-layer access
+// boundary — tools treat the machine like a session-owned one.
 func UserSession(sessionID string) (Layout, error) {
 	name, err := SessionDirName(sessionID)
 	if err != nil {
@@ -133,15 +135,14 @@ func UserSession(sessionID string) (Layout, error) {
 	input := path.Join(root, "input")
 	output := path.Join(root, "output")
 	return Layout{
-		Origin:       OriginRemoteShared,
-		Root:         root,
-		WriteRoots:   []string{root, output},
-		ReadRoots:    []string{output, input, root, SkillsImageRoot},
-		InputDir:     input,
-		OutputDir:    output,
-		Hint:         root,
-		GitDir:       path.Join(UserGitRoot, name+".git"),
-		WorkDirRoots: []string{root, TmpRoot, SkillsImageRoot},
+		Origin:     OriginRemoteShared,
+		Root:       root,
+		WriteRoots: []string{Root, OutputDir},
+		ReadRoots:  []string{output, input, root, SkillsImageRoot},
+		InputDir:   input,
+		OutputDir:  output,
+		Hint:       root,
+		GitDir:     path.Join(UserGitRoot, name+".git"),
 	}, nil
 }
 

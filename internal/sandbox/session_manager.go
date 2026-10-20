@@ -626,9 +626,6 @@ func (m *SessionBoundManager) EnsureSessionDir(ctx context.Context, sessionID, d
 	if err != nil {
 		return err
 	}
-	if !sc.allowsPath(dir) {
-		return fmt.Errorf("sandbox: path %q is outside the session workspace %s", dir, sc.layout.Root)
-	}
 	ctx, release, err := m.admitUser(ctx, sc, "file")
 	if err != nil {
 		return err
@@ -826,9 +823,6 @@ func (m *SessionBoundManager) ListSessionFiles(
 	if err != nil {
 		return nil, err
 	}
-	if !sc.allowsPath(dir) {
-		return nil, fmt.Errorf("sandbox: path %q is outside the session workspace %s", dir, sc.layout.Root)
-	}
 	ctx, release, err := m.admitUser(ctx, sc, "file")
 	if err != nil {
 		return nil, err
@@ -857,9 +851,6 @@ func (m *SessionBoundManager) StatSessionFile(
 	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
 		return nil, err
-	}
-	if !sc.allowsPath(filePath) {
-		return nil, fmt.Errorf("sandbox: path %q is outside the session workspace %s", filePath, sc.layout.Root)
 	}
 	ctx, release, err := m.admitUser(ctx, sc, "file")
 	if err != nil {
@@ -890,9 +881,6 @@ func (m *SessionBoundManager) ReadSessionFile(
 	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
 		return nil, err
-	}
-	if !sc.allowsPath(filePath) {
-		return nil, fmt.Errorf("sandbox: path %q is outside the session workspace %s", filePath, sc.layout.Root)
 	}
 	ctx, release, err := m.admitUser(ctx, sc, "file")
 	if err != nil {
@@ -2358,21 +2346,6 @@ func withSessionEnv(env map[string]string, layout WorkspaceLayout) map[string]st
 	out[skillOutputEnvVar] = layout.OutputDir
 	out[sessionInputEnvVar] = layout.InputDir
 	return out
-}
-
-// allowsPath reports whether a shared-machine file access stays in the
-// session's scope (its read roots, /tmp, the skills image).
-func (s sessionScope) allowsPath(p string) bool {
-	if !s.user {
-		return true
-	}
-	clean := path.Clean(strings.TrimSpace(p))
-	for _, root := range append(append([]string{}, s.layout.ReadRoots...), s.layout.WorkDirRoots...) {
-		if workspace.IsUnder(clean, root) {
-			return true
-		}
-	}
-	return false
 }
 
 // userScriptDir is where an uploaded skill script lands on a shared machine.

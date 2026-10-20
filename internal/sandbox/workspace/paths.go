@@ -37,9 +37,8 @@ func underAny(p string, roots []string) bool {
 }
 
 // CleanWriteFileIn normalizes a model-authored sandbox write and protects the
-// attachment tree. A session-owned machine keeps today's rule (tools enforce
-// WriteRoots); a shared machine additionally refuses anything outside the
-// session's WriteRoots, so one session cannot write into a sibling's tree.
+// attachment tree. The rule is the same on a session-owned and a shared
+// machine: tools enforce WriteRoots at the tool layer.
 func CleanWriteFileIn(l Layout, filePath string) (string, error) {
 	clean := ResolvePathIn(l, filePath)
 	if !path.IsAbs(clean) || clean == "." || clean == "/" {
@@ -50,9 +49,6 @@ func CleanWriteFileIn(l Layout, filePath string) (string, error) {
 	}
 	if l.InputDir != "" && strings.HasPrefix(clean, l.InputDir+"/") {
 		return "", fmt.Errorf("sandbox: session input %s is read-only", l.InputDir)
-	}
-	if l.IsSharedRemote() && !underAny(clean, l.WriteRoots) {
-		return "", fmt.Errorf("sandbox: workspace write path %q is outside the session workspace %s", filePath, l.Root)
 	}
 	return clean, nil
 }
@@ -67,27 +63,22 @@ func CleanInputPathIn(l Layout, filePath string) (string, error) {
 }
 
 // CleanWorkDirIn requires an absolute working directory. Install calls keep
-// the workspace/skills scope; a shared machine limits ordinary calls to
-// WorkDirRoots; a session-owned machine allows any directory. None of these
-// checks changes filesystem privileges.
+// the workspace/skills scope; every other layout allows any directory on the
+// machine. None of these checks changes filesystem privileges.
 func CleanWorkDirIn(l Layout, workDir string, allowSkillsRoot bool) (string, error) {
 	clean := path.Clean(strings.TrimSpace(workDir))
 	if !path.IsAbs(clean) {
 		return "", fmt.Errorf("sandbox: work dir %q must be absolute", workDir)
 	}
-	var allowed []string
-	switch {
-	case allowSkillsRoot:
-		allowed = []string{l.Root, SkillsImageRoot}
-	case l.IsSharedRemote():
-		allowed = l.WorkDirRoots
-	default:
-		return clean, nil
+	if allowSkillsRoot {
+		allowed := []string{l.Root, SkillsImageRoot}
+		if underAny(clean, allowed) {
+			return clean, nil
+		}
+		return "", fmt.Errorf("sandbox: work dir %q is outside allowed roots (%s)",
+			workDir, strings.Join(allowed, ", "))
 	}
-	if underAny(clean, allowed) {
-		return clean, nil
-	}
-	return "", fmt.Errorf("sandbox: work dir %q is outside allowed roots (%s)", workDir, strings.Join(allowed, ", "))
+	return clean, nil
 }
 
 // ValidOutputDirIn reports whether dir may be used as the artifact directory.
