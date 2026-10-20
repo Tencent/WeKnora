@@ -66,8 +66,20 @@ test('task content fades only while more text remains below the scroll position'
   await vue.nextTick()
   const scrollNode = () => nodes(render()).find(node =>
     String(node.props?.class).includes('automation-detail__instruction-scroll'))
+  const toggle = () => nodes(render()).find(node =>
+    node.props?.class === 'automation-detail__instruction-toggle')
   assert.equal(vm.instructionHasMore, true)
   assert.match(scrollNode().props.class, /instruction-scroll--more/)
+  assert.equal(toggle().props['aria-expanded'], false)
+  toggle().props.onClick()
+  await vue.nextTick()
+  assert.equal(scrollNode().props.style.maxHeight, 'none')
+  assert.equal(vm.instructionHasMore, false, 'expanded text is not faded')
+  assert.equal(toggle().props['aria-expanded'], true)
+  toggle().props.onClick()
+  await vue.nextTick()
+  assert.equal(scrollNode().props.style.maxHeight, '160px')
+  assert.equal(vm.instructionHasMore, true)
 
   scroller.scrollTop = 160
   scrollNode().props.onScroll()
@@ -81,6 +93,7 @@ test('task content fades only while more text remains below the scroll position'
   scroller.scrollTop = 0
   vm.updateInstructionOverflow()
   assert.equal(vm.instructionHasMore, false, 'short content has no fade')
+  assert.equal(toggle(), undefined, 'short content has no expand control')
 })
 
 test('approval hours update in both directions and save as minutes, without resetting on an empty edit', async t => {

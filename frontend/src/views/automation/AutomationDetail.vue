@@ -102,10 +102,22 @@
           ref="instructionScroller"
           class="automation-detail__instruction-scroll"
           :class="{ 'automation-detail__instruction-scroll--more': instructionHasMore }"
+          :style="{ maxHeight: instructionExpanded ? 'none' : `${INSTRUCTION_PREVIEW_HEIGHT}px` }"
           @scroll="updateInstructionOverflow"
         >
           <p ref="instructionContent" class="automation-detail__instruction">{{ automation.instruction }}</p>
         </div>
+        <button
+          v-if="instructionCanExpand"
+          type="button"
+          class="automation-detail__instruction-toggle"
+          :aria-label="t(instructionExpanded ? 'common.collapse' : 'common.expand')"
+          :title="t(instructionExpanded ? 'common.collapse' : 'common.expand')"
+          :aria-expanded="instructionExpanded"
+          @click="toggleInstruction"
+        >
+          <t-icon :name="instructionExpanded ? 'chevron-up' : 'chevron-down'" size="16px" />
+        </button>
       </section>
 
       <section class="automation-detail__history" :aria-label="t('automation.detail.runs')">
@@ -215,12 +227,23 @@ const grantsLoading = ref(false)
 const instructionScroller = ref<HTMLElement | null>(null)
 const instructionContent = ref<HTMLElement | null>(null)
 const instructionHasMore = ref(false)
+const instructionCanExpand = ref(false)
+const instructionExpanded = ref(false)
+const INSTRUCTION_PREVIEW_HEIGHT = 160
 let poll: ReturnType<typeof setInterval> | undefined
 
 function updateInstructionOverflow() {
   const el = instructionScroller.value
-  instructionHasMore.value = !!el && el.scrollHeight - el.clientHeight - el.scrollTop > 1
+  instructionCanExpand.value = !!el && el.scrollHeight > INSTRUCTION_PREVIEW_HEIGHT + 1
+  instructionHasMore.value = !instructionExpanded.value && !!el && el.scrollHeight - el.clientHeight - el.scrollTop > 1
 }
+
+function toggleInstruction() {
+  instructionExpanded.value = !instructionExpanded.value
+  if (instructionScroller.value) instructionScroller.value.scrollTop = 0
+}
+
+watch(instructionExpanded, updateInstructionOverflow, { flush: 'post' })
 
 watch(
   [instructionScroller, instructionContent, () => props.visible, () => props.automation?.instruction],
@@ -321,6 +344,7 @@ async function loadGrants() {
 }
 
 watch(() => [props.visible, props.automation?.id] as const, ([open, id]) => {
+  instructionExpanded.value = false
   clearInterval(poll)
   if (!open || !id) return
   grantsVisible.value = false
@@ -584,7 +608,6 @@ async function revoke(grant: AutomationGrant) {
 
 .automation-detail__instruction-scroll {
   box-sizing: border-box;
-  max-height: 160px;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -592,6 +615,31 @@ async function revoke(grant: AutomationGrant) {
 
 .automation-detail__instruction-scroll--more {
   mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+}
+
+.automation-detail__instruction-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 24px;
+  margin: 6px auto -6px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--app-radius-md);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+
+  &:hover {
+    color: var(--td-text-color-primary);
+    background: var(--td-bg-color-container);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-text-color-secondary);
+    outline-offset: 2px;
+  }
 }
 
 .automation-detail__instruction {
