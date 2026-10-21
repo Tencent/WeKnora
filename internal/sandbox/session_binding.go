@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Tencent/WeKnora/internal/background"
 	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/sandbox/workspace"
 )
@@ -369,6 +370,7 @@ type MemorySessionSandboxBindingStore struct {
 	locks    map[SessionSandboxKey]*memoryLifecycleLock
 	turns    map[SessionSandboxKey]*memoryTurnLease
 	rewinds  map[SessionSandboxKey]struct{}
+	activity *background.MemoryActivityRegistry
 }
 
 // NewMemorySessionSandboxBindingStore creates an empty in-memory store.
@@ -378,6 +380,7 @@ func NewMemorySessionSandboxBindingStore() *MemorySessionSandboxBindingStore {
 		locks:    make(map[SessionSandboxKey]*memoryLifecycleLock),
 		turns:    make(map[SessionSandboxKey]*memoryTurnLease),
 		rewinds:  make(map[SessionSandboxKey]struct{}),
+		activity: background.NewMemoryActivityRegistry(nil),
 	}
 }
 
@@ -632,7 +635,7 @@ func (s *MemorySessionSandboxBindingStore) BeginTurn(
 		s.turns[key] = lease
 	}
 	if lease.refs == 0 {
-		lease.rebuildOnce = true
+		lease.rebuildOnce = !s.hasSessionActivityLocked(ctx, key)
 	}
 	lease.refs++
 	return nil
@@ -679,6 +682,9 @@ func (s *MemorySessionSandboxBindingStore) TryLockRewind(
 	if lease := s.turns[key]; lease != nil && lease.refs > 0 {
 		return nil, ErrSessionTurnActive
 	}
+	if s.hasSessionActivityLocked(ctx, key) {
+		return nil, ErrSessionWorkActive
+	}
 	if _, held := s.rewinds[key]; held {
 		return nil, ErrSessionRewindLocked
 	}
@@ -721,6 +727,9 @@ func (s *MemorySessionSandboxBindingStore) TurnState(
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.hasSessionActivityLocked(ctx, key) {
+		return true, false, nil
+	}
 	lease := s.turns[key]
 	if lease == nil || lease.refs <= 0 {
 		return false, false, nil

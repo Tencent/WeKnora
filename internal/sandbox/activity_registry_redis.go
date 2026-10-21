@@ -3,7 +3,6 @@ package sandbox
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -40,19 +39,42 @@ local function live_count(key, now)
 end
 `
 
-// KEYS[1] activity hash. ARGV[1] id, ARGV[2] kind, ARGV[3] title,
+// Every write refreshes the hash until its latest member expires. A shared
+// machine mirrors each session's leases in a machine hash, in the same script
+// and Redis slot, so sibling sessions cannot rebuild underneath them.
+const activityWriteLua = `
+local function save_activity(key, id, value, now, grace)
+	redis.call('HSET', key, id, cjson.encode(value))
+	local raw = redis.call('HGETALL', key)
+	local maxd = now
+	for i = 1, #raw, 2 do
+		local d = tonumber(cjson.decode(raw[i + 1])['deadline_ms'])
+		if d > maxd then maxd = d end
+	end
+	redis.call('PEXPIRE', key, maxd - now + grace)
+end
+`
+
+// KEYS: session activity, machine activity, rewind, machine close, session close.
+// ARGV[1] id, ARGV[2] kind, ARGV[3] title,
 // ARGV[4] started_at_ms, ARGV[5] lease_ms, ARGV[6] kind cap (<=0 unlimited),
-// ARGV[7] key grace ms. Returns 1 on success, 0 when the cap is reached.
-var addActivityScript = redis.NewScript(activityLiveCountLua + `
+// ARGV[7] key grace ms, ARGV[8] machine member. Returns 1 on success, 0 at the cap.
+var addActivityScript = redis.NewScript(activityLiveCountLua + activityWriteLua + `
 local now = now_ms()
 live_count(KEYS[1], now)
 local deadline = now + tonumber(ARGV[5])
 local existing = redis.call('HGET', KEYS[1], ARGV[1])
+local v
 if existing then
-	local v = cjson.decode(existing)
+	v = cjson.decode(existing)
 	v['deadline_ms'] = deadline
-	redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(v))
 else
+	if redis.call('EXISTS', KEYS[3]) == 1 then
+		return redis.error_reply('ERR_SESSION_REWIND_LOCKED')
+	end
+	if redis.call('EXISTS', KEYS[4]) == 1 or redis.call('EXISTS', KEYS[5]) == 1 then
+		return redis.error_reply('ERR_SCOPE_CLOSED')
+	end
 	local cap = tonumber(ARGV[6])
 	if cap > 0 then
 		local raw = redis.call('HGETALL', KEYS[1])
@@ -66,41 +88,48 @@ else
 			return 0
 		end
 	end
-	redis.call('HSET', KEYS[1], ARGV[1], cjson.encode({
+	v = {
 		kind = ARGV[2], title = ARGV[3],
 		started_at_ms = tonumber(ARGV[4]), deadline_ms = deadline,
-	}))
+	}
 end
-local raw = redis.call('HGETALL', KEYS[1])
-local maxd = deadline
-for i = 1, #raw, 2 do
-	local d = tonumber(cjson.decode(raw[i + 1])['deadline_ms'])
-	if d > maxd then maxd = d end
+save_activity(KEYS[1], ARGV[1], v, now, tonumber(ARGV[7]))
+if KEYS[2] ~= KEYS[1] then
+	live_count(KEYS[2], now)
+	save_activity(KEYS[2], ARGV[8], v, now, tonumber(ARGV[7]))
 end
-redis.call('PEXPIRE', KEYS[1], maxd - now + tonumber(ARGV[7]))
 return 1
 `)
 
-// KEYS[1] activity hash. ARGV[1] id, ARGV[2] lease_ms, ARGV[3] key grace ms.
+// KEYS: session activity, machine activity.
+// ARGV: id, lease_ms, key grace ms, machine member.
 // Returns 1 when renewed, 0 when the item is missing or expired.
-var renewActivityScript = redis.NewScript(activityLiveCountLua + `
+var renewActivityScript = redis.NewScript(activityLiveCountLua + activityWriteLua + `
 local now = now_ms()
 live_count(KEYS[1], now)
 local existing = redis.call('HGET', KEYS[1], ARGV[1])
 if not existing then
+	if KEYS[2] ~= KEYS[1] then redis.call('HDEL', KEYS[2], ARGV[4]) end
 	return 0
 end
 local v = cjson.decode(existing)
 v['deadline_ms'] = now + tonumber(ARGV[2])
-redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(v))
-local raw = redis.call('HGETALL', KEYS[1])
-local maxd = 0
-for i = 1, #raw, 2 do
-	local d = tonumber(cjson.decode(raw[i + 1])['deadline_ms'])
-	if d > maxd then maxd = d end
+save_activity(KEYS[1], ARGV[1], v, now, tonumber(ARGV[3]))
+if KEYS[2] ~= KEYS[1] then
+	live_count(KEYS[2], now)
+	save_activity(KEYS[2], ARGV[4], v, now, tonumber(ARGV[3]))
 end
-redis.call('PEXPIRE', KEYS[1], maxd - now + tonumber(ARGV[3]))
 return 1
+`)
+
+var removeActivityScript = redis.NewScript(`
+redis.call('HDEL', KEYS[1], ARGV[1])
+if KEYS[2] ~= KEYS[1] then redis.call('HDEL', KEYS[2], ARGV[2]) end
+return 1
+`)
+
+var countActivityScript = redis.NewScript(activityLiveCountLua + `
+return live_count(KEYS[1], now_ms())
 `)
 
 // KEYS[1] activity hash. Returns the live fields as a flat [id, json, ...] list.
@@ -119,7 +148,8 @@ type redisActivityValue struct {
 // RedisActivityRegistry is the multi-replica ActivityRegistry. It shares the
 // binding store's client and hash tag so the turn-lease scripts can read it.
 type RedisActivityRegistry struct {
-	store *RedisSessionSandboxBindingStore
+	store       *RedisSessionSandboxBindingStore
+	allocations AllocationDirectory
 }
 
 var _ interfaces.ActivityRegistry = (*RedisActivityRegistry)(nil)
@@ -129,34 +159,79 @@ func NewRedisActivityRegistry(store *RedisSessionSandboxBindingStore) *RedisActi
 	return &RedisActivityRegistry{store: store}
 }
 
-func (s *RedisSessionSandboxBindingStore) activityKey(key SessionSandboxKey) string {
-	return "weknora:sandbox:session:{" + s.hashTag(key) + "}:activity"
+// WithAllocations uses each session's recorded placement to address shared
+// machine leases. Configure it before using the registry.
+func (r *RedisActivityRegistry) WithAllocations(allocations AllocationDirectory) *RedisActivityRegistry {
+	r.allocations = allocations
+	return r
 }
 
-func (r *RedisActivityRegistry) key(s interfaces.SessionRef) (string, error) {
+func (s *RedisSessionSandboxBindingStore) activityKey(key SessionSandboxKey) string {
+	if key.IsUserScoped() && key.SessionID != "" {
+		return s.keyBase(key) + ":session:" + key.SessionID + ":activity"
+	}
+	return s.keyBase(key) + ":activity"
+}
+
+func (r *RedisActivityRegistry) key(ctx context.Context, s interfaces.SessionRef) (SessionSandboxKey, error) {
 	k := SessionSandboxKey{TenantID: s.TenantID, SessionID: s.SessionID}
 	if err := k.Validate(); err != nil {
-		return "", err
+		return k, err
 	}
-	if strings.TrimSpace(s.SessionID) == "" {
-		return "", errors.New("activity registry requires a session id")
+	if r.allocations != nil {
+		a, found, err := r.allocations.SessionAllocation(ctx, s.SessionID)
+		if err != nil {
+			return k, fmt.Errorf("read background work allocation: %w", err)
+		}
+		if found && a.IsUser() {
+			k.User = a.Machine
+		}
 	}
-	return r.store.activityKey(k), nil
+	return k, k.Validate()
+}
+
+func (r *RedisActivityRegistry) keys(key SessionSandboxKey) []string {
+	return []string{r.store.activityKey(key), r.store.activityKey(key.Machine())}
+}
+
+func activityMachineMember(key SessionSandboxKey, id string) string {
+	return key.SessionID + ":" + id
+}
+
+// hasBackgroundActivity includes every sibling session on a shared machine.
+func (s *RedisSessionSandboxBindingStore) hasBackgroundActivity(
+	ctx context.Context, key SessionSandboxKey,
+) (bool, error) {
+	n, err := countActivityScript.Run(ctx, s.client, []string{s.activityKey(key.Machine())}).Int64()
+	return n > 0, err
 }
 
 // Add implements interfaces.ActivityRegistry.
 func (r *RedisActivityRegistry) Add(
 	ctx context.Context, s interfaces.SessionRef, a interfaces.BackgroundActivity, lease time.Duration, kindCap int,
 ) error {
-	key, err := r.key(s)
+	key, err := r.key(ctx, s)
 	if err != nil {
 		return err
 	}
-	ok, err := addActivityScript.Run(ctx, r.store.client, []string{key},
+	keys := append(r.keys(key), r.store.rewindKey(key))
+	if key.IsUserScoped() {
+		base := r.store.keyBase(key)
+		keys = append(keys, base+":machine:closed", base+":session:"+key.SessionID+":closed")
+	} else {
+		keys = append(keys, r.store.rewindKey(key), r.store.rewindKey(key))
+	}
+	ok, err := addActivityScript.Run(ctx, r.store.client, keys,
 		a.ID, a.Kind, a.Title, a.StartedAt.UnixMilli(), lease.Milliseconds(), kindCap,
-		activityKeyGrace.Milliseconds(),
+		activityKeyGrace.Milliseconds(), activityMachineMember(key, a.ID),
 	).Int64()
 	if err != nil {
+		if isRewindLockedRedisErr(err) {
+			return ErrSessionRewindLocked
+		}
+		if strings.Contains(err.Error(), "ERR_SCOPE_CLOSED") {
+			return ErrSessionWorkspaceBusy
+		}
 		return fmt.Errorf("add background activity: %w", err)
 	}
 	if ok == 0 {
@@ -169,12 +244,12 @@ func (r *RedisActivityRegistry) Add(
 func (r *RedisActivityRegistry) Renew(
 	ctx context.Context, s interfaces.SessionRef, id string, lease time.Duration,
 ) (bool, error) {
-	key, err := r.key(s)
+	key, err := r.key(ctx, s)
 	if err != nil {
 		return false, err
 	}
-	ok, err := renewActivityScript.Run(ctx, r.store.client, []string{key},
-		id, lease.Milliseconds(), activityKeyGrace.Milliseconds(),
+	ok, err := renewActivityScript.Run(ctx, r.store.client, r.keys(key),
+		id, lease.Milliseconds(), activityKeyGrace.Milliseconds(), activityMachineMember(key, id),
 	).Int64()
 	if err != nil {
 		return false, fmt.Errorf("renew background activity: %w", err)
@@ -184,11 +259,12 @@ func (r *RedisActivityRegistry) Renew(
 
 // Remove implements interfaces.ActivityRegistry.
 func (r *RedisActivityRegistry) Remove(ctx context.Context, s interfaces.SessionRef, id string) error {
-	key, err := r.key(s)
+	key, err := r.key(ctx, s)
 	if err != nil {
 		return err
 	}
-	if err := r.store.client.HDel(ctx, key, id).Err(); err != nil {
+	err = removeActivityScript.Run(ctx, r.store.client, r.keys(key), id, activityMachineMember(key, id)).Err()
+	if err != nil {
 		return fmt.Errorf("remove background activity: %w", err)
 	}
 	return nil
@@ -198,11 +274,11 @@ func (r *RedisActivityRegistry) Remove(ctx context.Context, s interfaces.Session
 func (r *RedisActivityRegistry) List(
 	ctx context.Context, s interfaces.SessionRef,
 ) ([]interfaces.BackgroundActivity, error) {
-	key, err := r.key(s)
+	key, err := r.key(ctx, s)
 	if err != nil {
 		return nil, err
 	}
-	flat, err := listActivityScript.Run(ctx, r.store.client, []string{key}).StringSlice()
+	flat, err := listActivityScript.Run(ctx, r.store.client, []string{r.store.activityKey(key)}).StringSlice()
 	if err != nil {
 		return nil, fmt.Errorf("list background activity: %w", err)
 	}

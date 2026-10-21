@@ -183,7 +183,7 @@ func (t *WorkWaitTool) Execute(ctx context.Context, raw json.RawMessage) (*types
 		Detailed: true, RunID: t.runID, OutputBudget: workOutputBudget / len(ids),
 	})
 	if err != nil {
-		return nil, err
+		return workReadError(ids, err)
 	}
 	if waitSec > 0 {
 		t.rememberRunning(results)
@@ -239,10 +239,16 @@ func (t *WorkWaitTool) poll(
 		if workStopped(callErr) {
 			return false, false, callErr
 		}
+		if errors.Is(callErr, interfaces.ErrWorkNotFound) {
+			return false, false, nil
+		}
 		// A failed cheap read is not "everything finished". Keep waiting; the
 		// final detailed read is what the model sees.
 		if callErr == nil {
-			results = checkWorkResults(ids, results, nil)
+			results, callErr = checkWorkResults(ids, results, nil)
+			if callErr != nil {
+				return false, false, callErr
+			}
 			var unknown []string
 			for _, r := range results {
 				if r.State == interfaces.WorkStateUnknown && !probed[r.ID] {
@@ -259,8 +265,14 @@ func (t *WorkWaitTool) poll(
 				if workStopped(probeErr) {
 					return false, false, probeErr
 				}
+				if errors.Is(probeErr, interfaces.ErrWorkNotFound) {
+					return false, false, nil
+				}
 				if probeErr == nil {
-					probe = checkWorkResults(unknown, probe, nil)
+					probe, probeErr = checkWorkResults(unknown, probe, nil)
+					if probeErr != nil {
+						return false, false, probeErr
+					}
 					byID := make(map[string]interfaces.WorkResult, len(probe))
 					for _, r := range probe {
 						byID[r.ID] = r
@@ -317,10 +329,7 @@ func (t *WorkWaitTool) status(
 	ctx context.Context, ids []string, opts interfaces.StatusOptions,
 ) ([]interfaces.WorkResult, error) {
 	results, err := t.handler.Status(ctx, t.session, ids, opts)
-	if workStopped(err) {
-		return nil, err
-	}
-	return checkWorkResults(ids, results, err), nil
+	return checkWorkResults(ids, results, err)
 }
 
 // workStopped reports a cancelled or timed-out call. Those are not a lost
@@ -358,10 +367,10 @@ func (t *WorkCancelTool) Execute(ctx context.Context, raw json.RawMessage) (*typ
 		return workError(err.Error()), nil
 	}
 	results, err := t.handler.Cancel(ctx, t.session, ids)
-	if workStopped(err) {
-		return nil, err
+	results, err = checkWorkResults(ids, results, err)
+	if err != nil {
+		return workReadError(ids, err)
 	}
-	results = checkWorkResults(ids, results, err)
 	markTerminal(t.marks, results)
 	note := ""
 	if anyRunning(results) {
@@ -373,7 +382,7 @@ func (t *WorkCancelTool) Execute(ctx context.Context, raw json.RawMessage) (*typ
 // checkWorkResults enforces the WorkHandler contract of one result per ID in
 // input order. Results are matched by position, so a reordered reply would
 // hand one item's state to another; it fails the batch instead (D14).
-func checkWorkResults(ids []string, results []interfaces.WorkResult, err error) []interfaces.WorkResult {
+func checkWorkResults(ids []string, results []interfaces.WorkResult, err error) ([]interfaces.WorkResult, error) {
 	if err == nil && len(results) != len(ids) {
 		err = fmt.Errorf("handler returned %d results for %d ids", len(results), len(ids))
 	}
@@ -383,23 +392,32 @@ func checkWorkResults(ids []string, results []interfaces.WorkResult, err error) 
 		}
 	}
 	if err != nil {
-		reason := err.Error()
-		if errors.Is(err, interfaces.ErrWorkNotFound) {
-			reason = "work not found in this session"
-		}
-		out := make([]interfaces.WorkResult, len(ids))
-		for i, id := range ids {
-			out[i] = interfaces.WorkResult{
-				ID: id, State: interfaces.WorkStateLost, Terminal: true,
-				Payload: map[string]any{"error": reason},
-			}
-		}
-		return out
+		return nil, err
 	}
 	for i := range results {
 		results[i].Terminal = interfaces.IsTerminalWorkState(results[i].State)
 	}
-	return results
+	return results, nil
+}
+
+// workReadError never acknowledges IDs from a failed batch. Even
+// ErrWorkNotFound may refer to only one of several requested IDs; it does not
+// confirm that the other jobs ended or that their results reached the model.
+func workReadError(ids []string, err error) (*types.ToolResult, error) {
+	if !errors.Is(err, interfaces.ErrWorkNotFound) {
+		return nil, err
+	}
+	if len(ids) > 1 {
+		return workError("One or more work IDs were not found in this session; check them individually."), nil
+	}
+	results := make([]interfaces.WorkResult, len(ids))
+	for i, id := range ids {
+		results[i] = interfaces.WorkResult{
+			ID: id, State: interfaces.WorkStateLost, Terminal: true,
+			Payload: map[string]any{"error": "work not found in this session"},
+		}
+	}
+	return renderWork(results, "", false, false), nil
 }
 
 func normalizeWorkIDs(raw []string) ([]string, error) {

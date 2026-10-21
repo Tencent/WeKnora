@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/background"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
@@ -19,13 +20,15 @@ var workSession = interfaces.SessionRef{TenantID: 1, SessionID: "s"}
 // fakeWorkHandler serves a scripted sequence of cheap states per ID; the last
 // entry repeats. Detailed reads return detailed[id] (default "running").
 type fakeWorkHandler struct {
-	mu        sync.Mutex
-	cheap     map[string][]string
-	detailed  map[string]string
-	calls     []interfaces.StatusOptions
-	err       error
-	reverse   bool
-	cancelled [][]string
+	mu          sync.Mutex
+	cheap       map[string][]string
+	detailed    map[string]string
+	calls       []interfaces.StatusOptions
+	err         error
+	detailedErr error
+	reverse     bool
+	omitLast    bool
+	cancelled   [][]string
 }
 
 func (h *fakeWorkHandler) Status(
@@ -39,6 +42,9 @@ func (h *fakeWorkHandler) Status(
 	}
 	if h.err != nil {
 		return nil, h.err
+	}
+	if opts.Detailed && h.detailedErr != nil {
+		return nil, h.detailedErr
 	}
 	out := make([]interfaces.WorkResult, 0, len(ids))
 	for _, id := range ids {
@@ -63,6 +69,9 @@ func (h *fakeWorkHandler) Status(
 			out[i], out[j] = out[j], out[i]
 		}
 	}
+	if h.omitLast && len(out) > 0 {
+		out = out[:len(out)-1]
+	}
 	return out, nil
 }
 
@@ -71,6 +80,9 @@ func (h *fakeWorkHandler) Cancel(
 ) ([]interfaces.WorkResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if h.err != nil {
+		return nil, h.err
 	}
 	h.cancelled = append(h.cancelled, ids)
 	out := make([]interfaces.WorkResult, 0, len(ids))
@@ -239,23 +251,83 @@ func TestWorkWaitProbesUnknownOnceWithoutMovingTheReadPosition(t *testing.T) {
 	}, h.calls)
 }
 
-func TestWorkWaitTurnsBadHandlerRepliesIntoLost(t *testing.T) {
+func TestWorkWaitFailedReadsDoNotAcknowledgeNotices(t *testing.T) {
 	for name, h := range map[string]*fakeWorkHandler{
-		"error":     {err: errors.New("sandbox unreachable")},
-		"not found": {err: fmt.Errorf("wrap: %w", interfaces.ErrWorkNotFound)},
-		"reordered": {reverse: true},
+		"error":      {err: errors.New("sandbox unreachable")},
+		"not found":  {err: fmt.Errorf("wrap: %w", interfaces.ErrWorkNotFound)},
+		"reordered":  {reverse: true},
+		"incomplete": {omitLast: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			tool, _ := newTestWorkWait(h, &recordingMarks{}, nil)
+			ctx := context.Background()
+			inbox := background.NewMemoryNoticeInbox(nil)
+			marks := background.NewRunNotices(workSession, background.NewMemoryActivityRegistry(nil), inbox)
+			tool, _ := newTestWorkWait(h, marks, nil)
 
-			res, err := tool.Execute(context.Background(), json.RawMessage(`{"work_ids":["sj_1","sj_2"],"wait_sec":0}`))
+			res, err := tool.Execute(ctx, json.RawMessage(`{"work_ids":["sj_1","sj_2"],"wait_sec":0}`))
 
+			if errors.Is(h.err, interfaces.ErrWorkNotFound) {
+				require.NoError(t, err)
+				require.False(t, res.Success)
+				require.Empty(t, res.Output, "a missing ID must not turn unrelated IDs into lost jobs")
+			} else {
+				require.Error(t, err)
+				require.Nil(t, res)
+			}
+			require.Empty(t, marks.TakeSeen(), "a failed batch must not acknowledge any requested ID")
+			_, err = inbox.Push(ctx, workSession, interfaces.BackgroundNotice{
+				ID: "sj_1", Text: "build succeeded", FinishedAt: time.Now(),
+			})
 			require.NoError(t, err)
-			view := decodeWork(t, res.Output)
-			require.Equal(t, "sj_1", view.Items[0].WorkID)
-			require.Equal(t, interfaces.WorkStateLost, view.Items[0].State)
-			require.Equal(t, interfaces.WorkStateLost, view.Items[1].State)
+			delivery, err := marks.RoundStart(ctx)
+			require.NoError(t, err)
+			require.Equal(t, "build succeeded", delivery.Text, "the later real completion must still reach the model")
 		})
+	}
+}
+
+func TestWorkWaitMissingWorkReturnsWithoutSleeping(t *testing.T) {
+	for _, mode := range []string{"all", "any"} {
+		for _, source := range []string{"cheap", "probe"} {
+			t.Run(mode+"/"+source, func(t *testing.T) {
+				missing := fmt.Errorf("status: %w", interfaces.ErrWorkNotFound)
+				h := &fakeWorkHandler{err: missing}
+				wantCalls := 2
+				if source == "probe" {
+					h = &fakeWorkHandler{
+						cheap: map[string][]string{"missing": {interfaces.WorkStateUnknown}}, detailedErr: missing,
+					}
+					wantCalls = 3
+				}
+				marks := &recordingMarks{}
+				tool, sleeps := newTestWorkWait(h, marks, nil)
+				res, err := tool.Execute(context.Background(), json.RawMessage(
+					fmt.Sprintf(`{"work_ids":["missing"],"wait_sec":300,"mode":%q}`, mode)))
+				require.NoError(t, err)
+				require.Zero(t, *sleeps)
+				require.Len(t, h.calls, wantCalls)
+				require.True(t, h.calls[wantCalls-1].Detailed)
+				require.Equal(t, "run-1", h.calls[wantCalls-1].RunID, "always finish with the run's detailed read")
+				require.Equal(t, interfaces.WorkStateLost, decodeWork(t, res.Output).Items[0].State)
+				require.Empty(t, marks.seen)
+			})
+		}
+	}
+}
+
+func TestWorkCancelFailedReadsDoNotAcknowledgeNotices(t *testing.T) {
+	for _, callErr := range []error{errors.New("connection interrupted"), interfaces.ErrWorkNotFound} {
+		marks := &recordingMarks{}
+		tool := NewWorkCancelTool(&fakeWorkHandler{err: callErr}, workSession, marks)
+		res, err := tool.Execute(context.Background(), json.RawMessage(`{"work_ids":["sj_1","sj_2"]}`))
+		if errors.Is(callErr, interfaces.ErrWorkNotFound) {
+			require.NoError(t, err)
+			require.False(t, res.Success)
+			require.Empty(t, res.Output)
+		} else {
+			require.ErrorIs(t, err, callErr)
+		}
+		require.Empty(t, marks.seen)
 	}
 }
 

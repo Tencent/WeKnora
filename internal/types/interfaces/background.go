@@ -119,7 +119,8 @@ type WorkResult struct {
 type WorkHandler interface {
 	// Status returns one result per ID in input order. An ID that does not
 	// belong to s must yield ErrWorkNotFound for the whole call or be reported
-	// with State=WorkStateLost; callers treat both the same way.
+	// with State=WorkStateLost. A batch error does not confirm the states of
+	// the other requested IDs or acknowledge their completion notices.
 	Status(ctx context.Context, s SessionRef, ids []string, opts StatusOptions) ([]WorkResult, error)
 	// Cancel requests cancellation and returns the state observed at that time.
 	Cancel(ctx context.Context, s SessionRef, ids []string) ([]WorkResult, error)

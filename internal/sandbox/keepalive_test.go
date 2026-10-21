@@ -198,6 +198,39 @@ func TestKeepAliveSessionExpectedDoesNotRefreshADifferentSandbox(t *testing.T) {
 	require.Empty(t, client.calls(), "a different sandbox is not refreshed and not replaced")
 }
 
+func TestKeepAliveSessionRefreshesSharedUserMachine(t *testing.T) {
+	for _, expected := range []bool{false, true} {
+		t.Run(map[bool]string{false: "session", true: "expected"}[expected], func(t *testing.T) {
+			h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+			ctx := ownerCtx()
+			_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+			require.NoError(t, err)
+			id, found := h.mgr.BoundSandboxID(ctx, userSessionA)
+			require.True(t, found)
+			keeper := &keepAliveFakeClient{fakeRemoteClient: h.client}
+			h.mgr.client = wrapLangfuseRemoteClient(keeper)
+			creates, _, _, _, _ := keeper.counts()
+
+			var next time.Duration
+			if expected {
+				next, err = h.mgr.KeepAliveSessionExpected(ctx, userSessionA, id)
+			} else {
+				next, err = h.mgr.KeepAliveSession(ctx, userSessionA)
+			}
+			require.NoError(t, err)
+			require.Positive(t, next)
+			require.Equal(t, []keepAliveCall{{sandboxID: id, ttl: next * keepAliveRefreshDivisor}}, keeper.calls())
+			after, _, _, _, _ := keeper.counts()
+			require.Equal(t, creates, after, "keeping a shared machine alive must not create a session sandbox")
+
+			next, err = h.mgr.KeepAliveSessionExpected(ctx, userSessionA, "another-machine")
+			require.NoError(t, err)
+			require.Zero(t, next)
+			require.Len(t, keeper.calls(), 1, "a mismatched shared binding must not be refreshed")
+		})
+	}
+}
+
 func TestKeepAliveSessionReportsProviderFailure(t *testing.T) {
 	client := &keepAliveFakeClient{fakeRemoteClient: newFakeRemoteClient(SandboxTypeCube)}
 	client.keepErr = errors.New("provider down")

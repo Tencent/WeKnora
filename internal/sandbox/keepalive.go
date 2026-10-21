@@ -79,11 +79,11 @@ func (m *SessionBoundManager) keepAliveSession(
 	if ttl <= 0 {
 		return 0, nil
 	}
-	key, err := m.sessionKey(ctx, sessionID)
+	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
 		return 0, err
 	}
-	handle, found, err := m.lookupSessionHandleForKey(ctx, key, expectedSandboxID)
+	handle, found, err := m.lookupSessionHandleForKey(ctx, sc.machine(), expectedSandboxID)
 	if err != nil {
 		// A mismatched expected id is "not this sandbox", not a failure to refresh
 		// and not a reason to allocate a replacement.
