@@ -191,7 +191,45 @@ func (c *Client) reasoningText(m rawMessage) string {
 	return ""
 }
 
-func (c *Client) decodeToolCalls(raws []json.RawMessage) ([]types.LLMToolCall, []api.ToolCallDelta, error) {
+// streamToolIndex gives index-less streamed tool calls a stable index.
+//
+// OpenAI numbers the calls of a response with "index". Some compatible servers
+// (Gemini's OpenAI endpoint among them) leave it out and send each parallel
+// call whole in its own chunk, which would put every call at the position it
+// has inside its chunk, index 0, and merge them into one. Without an index a
+// fragment that carries an id different from the previous call's starts a new
+// call; one without an id, or repeating the id, continues the previous call.
+type streamToolIndex struct {
+	started bool
+	lastID  string
+	last    int
+	next    int
+}
+
+func (s *streamToolIndex) resolve(explicit *int, id string) int {
+	if explicit != nil {
+		s.started, s.last = true, *explicit
+		if id != "" {
+			s.lastID = id
+		}
+		s.next = max(s.next, *explicit+1)
+		return *explicit
+	}
+	if !s.started || (id != "" && id != s.lastID) {
+		s.started = true
+		s.last = s.next
+		s.next++
+	}
+	if id != "" {
+		s.lastID = id
+	}
+	return s.last
+}
+
+// decodeToolCalls decodes the tool calls of a message or of a streamed delta.
+// For a stream, pass the stream's streamToolIndex to number index-less calls
+// across chunks; without it a missing index falls back to the position in raws.
+func (c *Client) decodeToolCalls(raws []json.RawMessage, indexes *streamToolIndex) ([]types.LLMToolCall, []api.ToolCallDelta, error) {
 	calls := make([]types.LLMToolCall, 0, len(raws))
 	deltas := make([]api.ToolCallDelta, 0, len(raws))
 	for i, raw := range raws {
@@ -203,7 +241,9 @@ func (c *Client) decodeToolCalls(raws []json.RawMessage) ([]types.LLMToolCall, [
 			return nil, nil, fmt.Errorf("decode tool call %d: %w", i, err)
 		}
 		idx := i
-		if tc.Index != nil {
+		if indexes != nil {
+			idx = indexes.resolve(tc.Index, tc.ID)
+		} else if tc.Index != nil {
 			idx = *tc.Index
 		}
 		call := types.LLMToolCall{
@@ -265,7 +305,7 @@ func (c *Client) parseResponse(raw []byte) (*types.ChatResponse, error) {
 		result.ReasoningMetadata = types.ProviderMetadata{metadataReasoningDetails: choice.Message.ReasoningDetails}
 	}
 	if len(choice.Message.ToolCalls) > 0 {
-		calls, _, err := c.decodeToolCalls(choice.Message.ToolCalls)
+		calls, _, err := c.decodeToolCalls(choice.Message.ToolCalls, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -304,6 +344,7 @@ func (c *Client) processStream(
 	assembler := api.NewStreamAssembler(ctx, c.cfg.Endpoint.Model)
 	reader := api.NewSSEReader(body)
 	var reasoningDetails []json.RawMessage
+	toolIndexes := &streamToolIndex{}
 
 	finish := func(end func(chan<- types.StreamResponse)) {
 		if len(reasoningDetails) > 0 {
@@ -377,7 +418,7 @@ func (c *Client) processStream(
 			}
 		}
 		if len(choice.Delta.ToolCalls) > 0 {
-			_, deltas, err := c.decodeToolCalls(choice.Delta.ToolCalls)
+			_, deltas, err := c.decodeToolCalls(choice.Delta.ToolCalls, toolIndexes)
 			if err != nil {
 				assembler.Fail(ch, err)
 				return
