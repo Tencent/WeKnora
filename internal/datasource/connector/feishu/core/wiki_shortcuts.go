@@ -23,7 +23,9 @@ func (c *Client) ListWikiNodesWithShortcuts(ctx context.Context, spaceID, nodeTo
 	return c.expandWikiShortcuts(ctx, spaceID, nodes, failures)
 }
 
-func (c *Client) expandWikiShortcuts(ctx context.Context, spaceID string, nodes []WikiNode, failures []WikiNodeListFailure) ([]WikiNode, error) {
+func (c *Client) expandWikiShortcuts(
+	ctx context.Context, spaceID string, nodes []WikiNode, failures []WikiNodeListFailure,
+) ([]WikiNode, error) {
 	if err := ctx.Err(); err != nil {
 		return nodes, err
 	}
