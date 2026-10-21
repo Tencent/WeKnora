@@ -30,8 +30,10 @@ func NewConnector(region core.Region) *Connector {
 
 // Feishu supports resumable streaming sync; the service prefers FetchStream over
 // FetchAll/FetchIncremental when a connector implements StreamingConnector.
-var _ datasource.StreamingConnector = (*Connector)(nil)
-var _ datasource.FullStreamingConnector = (*Connector)(nil)
+var (
+	_ datasource.StreamingConnector     = (*Connector)(nil)
+	_ datasource.FullStreamingConnector = (*Connector)(nil)
+)
 
 // Type returns the connector type identifier.
 func (c *Connector) Type() string {
@@ -246,9 +248,10 @@ func (c *Connector) FetchFullStream(
 // being synced; Fetch reads it. runSync processes one resource at a time, so
 // the mutation is race-free.
 type wikiOps struct {
-	region    core.Region
-	parseMode string
-	dirPaths  map[string]string
+	recursiveState *core.RecursiveState
+	region         core.Region
+	parseMode      string
+	dirPaths       map[string]string
 	// spacePrefixes caches spaceID → sanitized folder prefix for the run, so
 	// syncing K selected spaces costs one ListWikiSpaces paging pass total
 	// instead of one per space (failures cache "" and do not retry mid-run).
@@ -348,10 +351,14 @@ func (o *wikiOps) Fetch(
 	if err != nil {
 		return nil, err
 	}
+	linked, err := o.RefreshUnchanged(ctx, client, n, resourceID)
+	if err != nil {
+		return nil, err
+	}
 	// P1 directory mapping: prefix the FileName with the node's cleaned
 	// directory path so ingestion derives the KB folder_path from it.
 	qualifyItemFileNames(items, o.dirPaths[n.NodeToken])
-	return items, nil
+	return append(items, linked...), nil
 }
 
 func (o *wikiOps) ListFailureItems(resourceID string, partial error) []types.FetchedItem {
@@ -373,11 +380,17 @@ func (o *wikiOps) DecodeCursorTimes(m map[string]interface{}) map[string]map[str
 	var prev core.FeishuCursor
 	b, _ := json.Marshal(m)
 	_ = json.Unmarshal(b, &prev)
+	if state := o.RecursiveSyncState(); state != nil {
+		state.LoadPrevious(prev.RecursiveExternalIDs)
+	}
 	return prev.SpaceNodeTimes
 }
 
 func (o *wikiOps) EncodeCursor(times map[string]map[string]string, lastSync time.Time) *types.SyncCursor {
 	fc := core.FeishuCursor{LastSyncTime: lastSync, SpaceNodeTimes: times}
+	if state := o.RecursiveSyncState(); state != nil {
+		fc.RecursiveExternalIDs = state.CursorIDs()
+	}
 	m := make(map[string]interface{})
 	b, _ := json.Marshal(fc)
 	_ = json.Unmarshal(b, &m)

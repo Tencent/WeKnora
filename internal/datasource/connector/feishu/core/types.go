@@ -274,6 +274,10 @@ type FeishuCursor struct {
 	// SpaceNodeTimes maps space_id -> node_token -> last known edit time.
 	// Used to detect which nodes have changed since last sync.
 	SpaceNodeTimes map[string]map[string]string `json:"space_node_times,omitempty"`
+
+	// RecursiveExternalIDs records linked resources seen in the last
+	// successful recursive traversal, used to detect removed links.
+	RecursiveExternalIDs []string `json:"recursive_external_ids,omitempty"`
 }
 
 // --- Drive (云盘) file listing types (feishu_drive / lark_drive connectors) ---
@@ -373,4 +377,8 @@ type FeishuDriveCursor struct {
 	// FileTimes maps resourceID -> file_token -> last known modified_time.
 	// Used to detect which files have changed since last sync.
 	FileTimes map[string]map[string]string `json:"file_times,omitempty"`
+
+	// RecursiveExternalIDs records linked resources seen in the last
+	// successful recursive traversal, used to detect removed links.
+	RecursiveExternalIDs []string `json:"recursive_external_ids,omitempty"`
 }

@@ -31,6 +31,27 @@ import (
 
 // NodeOps adapts one connector's node type to the shared sync engine. Every
 // method is a pure accessor or a thin wrapper - no engine logic lives here.
+// UnchangedNodeRefresher 是可选能力。
+//
+// 正常增量同步遇到“父节点编辑时间没变化”会直接跳过 Fetch。
+// 飞书递归场景不同：父 Bitable/Sheet 本身没改，并不代表它链接到的
+// 二级/三级文档没有变化，因此允许 connector 在 fast-path 中仅刷新
+// 子资源，而不重新 Emit 父资源本身。
+type UnchangedNodeRefresher[N any] interface {
+	RefreshUnchanged(
+		ctx context.Context,
+		client *Client,
+		n N,
+		resourceID string,
+	) ([]*types.FetchedItem, error)
+}
+
+// RecursiveStateProvider exposes the optional recursive-link state owned by
+// Feishu Wiki / Drive adapters. Other connectors do not implement it.
+type RecursiveStateProvider interface {
+	RecursiveSyncState() *RecursiveState
+}
+
 type NodeOps[N any] interface {
 	// List returns every syncable node under resourceID. A non-nil partial
 	// (with err == nil) signals a partial listing: nodes is still usable and
@@ -133,6 +154,12 @@ func runSync[N any](
 			return nil, fmt.Errorf("list %s for resource %s: %w", ops.ResourceNoun(), resourceID, err)
 		}
 		if partial != nil {
+			if provider, ok := any(ops).(RecursiveStateProvider); ok {
+				if state := provider.RecursiveSyncState(); state != nil {
+					state.MarkIncomplete()
+				}
+			}
+
 			for _, item := range ops.ListFailureItems(resourceID, partial) {
 				if eerr := h.Emit(ctx, item); eerr != nil {
 					return nil, eerr
@@ -160,12 +187,55 @@ func runSync[N any](
 			// and Skip re-fetching.
 			if !forceFull && hadPrev && prevEdit == editTimeStr {
 				newTimes[resourceID][tok] = editTimeStr
+
+				// 普通 connector 到这里仍然直接跳过。
+				// 实现了 UnchangedNodeRefresher 的 connector 可以只检查
+				// 父资源内部链接指向的二级/三级资源。
+				if refresher, ok := any(ops).(UnchangedNodeRefresher[N]); ok {
+					refreshItems, rerr := refresher.RefreshUnchanged(
+						ctx,
+						client,
+						node,
+						resourceID,
+					)
+
+					if rerr != nil {
+						if ctx.Err() != nil {
+							return nil, ctx.Err()
+						}
+
+						logger.Warnf(
+							ctx,
+							"%s unchanged recursive refresh failed token=%s: %v",
+							ops.LogTag(),
+							tok,
+							rerr,
+						)
+					} else {
+						for _, it := range refreshItems {
+							if it == nil {
+								continue
+							}
+
+							if eerr := h.Emit(ctx, *it); eerr != nil {
+								return nil, eerr
+							}
+						}
+					}
+				}
+
 				continue
 			}
 
 			items, ferr := ops.Fetch(ctx, client, node, resourceID)
 			if ferr != nil {
 				tally.fail()
+
+				if provider, ok := any(ops).(RecursiveStateProvider); ok {
+					if state := provider.RecursiveSyncState(); state != nil {
+						state.MarkIncomplete()
+					}
+				}
 				// Do NOT advance the cursor: the content was never fetched.
 				// Retain the prior edit time (if any) so prev != current next
 				// run and the node is retried, instead of being permanently
@@ -234,6 +304,52 @@ func runSync[N any](
 			}
 		}
 		logger.Infof(ctx, "%s stream summary resource=%s %s", ops.LogTag(), resourceID, tally.summary())
+	}
+
+	// Reconcile recursively linked resources only after the whole source tree
+	// was traversed. If any listing/discovery step was incomplete, preserve the
+	// old set and suppress deletions to avoid destructive false positives.
+	if RecursiveLinksEnabled() {
+		if provider, ok := any(ops).(RecursiveStateProvider); ok {
+			if state := provider.RecursiveSyncState(); state != nil {
+				if state.Incomplete {
+					state.PreservePreviousAndPresent()
+
+					logger.Warnf(
+						ctx,
+						"%s recursive traversal incomplete; deletion reconciliation suppressed",
+						ops.LogTag(),
+					)
+				} else {
+					deleted := 0
+
+					for externalID := range state.Previous {
+						if _, stillPresent := state.Present[externalID]; stillPresent {
+							continue
+						}
+
+						if err := h.Emit(ctx, types.FetchedItem{
+							ExternalID: externalID,
+							IsDeleted:  true,
+						}); err != nil {
+							return nil, err
+						}
+
+						deleted++
+					}
+
+					state.CommitPresent()
+
+					logger.Infof(
+						ctx,
+						"%s recursive reconciliation present=%d deleted=%d",
+						ops.LogTag(),
+						len(state.Present),
+						deleted,
+					)
+				}
+			}
+		}
 	}
 
 	return ops.EncodeCursor(newTimes, lastSync), nil
