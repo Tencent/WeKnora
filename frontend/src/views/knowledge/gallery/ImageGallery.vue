@@ -47,6 +47,9 @@ const sortPanelVisible = ref(false)
 const scrollEl = ref<HTMLElement | null>(null)
 const gridEl = ref<HTMLElement | null>(null)
 const loadMoreEl = ref<HTMLElement | null>(null)
+// Measured aspect ratios, keyed by image id. Read once per card in the
+// template, so writes are batched (see scheduleFlush) rather than applied one
+// by one.
 const imageRatios = ref<Record<string, number>>({})
 let gridObserver: ResizeObserver | undefined
 let observedGrid: HTMLElement | null = null
@@ -142,6 +145,37 @@ const blobByRawUrl = new Map<string, string>()
 // once share one request.
 const inflight = new Map<string, Promise<string>>()
 
+// The grid renders from one render effect, and every card reads both its
+// object URL and its aspect ratio from reactive state. Writing either one is
+// therefore a full rebuild of every card — a page brings 24+ thumbnails and
+// each one used to cost two rebuilds of ~500 cards. Writes accumulate here and
+// land in one flush per burst instead: same UI, a handful of renders.
+const pendingThumbs: Record<string, string> = {}
+const pendingRatios: Record<string, number> = {}
+let flushTimer: ReturnType<typeof setTimeout> | undefined
+
+function scheduleFlush(): void {
+  if (flushTimer) return
+  flushTimer = setTimeout(() => {
+    flushTimer = undefined
+    if (Object.keys(pendingThumbs).length) {
+      Object.assign(thumbUrls.value, pendingThumbs)
+      for (const key of Object.keys(pendingThumbs)) delete pendingThumbs[key]
+    }
+    if (Object.keys(pendingRatios).length) {
+      Object.assign(imageRatios.value, pendingRatios)
+      for (const key of Object.keys(pendingRatios)) delete pendingRatios[key]
+    }
+  }, 80)
+}
+
+function clearPendingWrites(): void {
+  if (flushTimer) clearTimeout(flushTimer)
+  flushTimer = undefined
+  for (const key of Object.keys(pendingThumbs)) delete pendingThumbs[key]
+  for (const key of Object.keys(pendingRatios)) delete pendingRatios[key]
+}
+
 /** Revoke every cached object URL whose raw URL is not in keep. */
 function releaseBlobs(keep: Set<string> = new Set()): void {
   for (const [raw, objectUrl] of blobByRawUrl) {
@@ -180,16 +214,17 @@ async function resolveThumbnails(imgs: ImageAsset[], token: number) {
   await Promise.all(imgs.map(async (img) => {
     const url = await resolveImageSrc(img.url)
     if (token !== listToken) return
-    thumbUrls.value[img.id] = url
+    pendingThumbs[img.id] = url
+    scheduleFlush()
   }))
   if (token === listToken) releaseBlobs(new Set(items.value.map((img) => img.url)))
 }
 
 function onThumbLoad(id: string, event: Event) {
   const image = event.target as HTMLImageElement
-  if (image.naturalWidth && image.naturalHeight) {
-    imageRatios.value[id] = image.naturalWidth / image.naturalHeight
-  }
+  if (!image.naturalWidth || !image.naturalHeight) return
+  pendingRatios[id] = image.naturalWidth / image.naturalHeight
+  scheduleFlush()
 }
 
 // Masonry without measuring every card. The grid's rows are 1px tall with a
@@ -701,6 +736,7 @@ function resetResults() {
   thumbUrls.value = {}
   thumbBroken.value = {}
   imageRatios.value = {}
+  clearPendingWrites()
   scrollEl.value?.scrollTo({ top: 0 })
 }
 
