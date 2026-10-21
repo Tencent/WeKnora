@@ -182,6 +182,7 @@ type sessionService struct {
 	// remote resolver) keeps the historical delete path and writes no
 	// allocation rows.
 	workspaceCleaner *sandboxalloc.WorkspaceCleaner
+	background       *BackgroundWork
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -208,6 +209,7 @@ func NewSessionService(cfg *config.Config,
 	sandboxConfigRepo repository.TenantSandboxConfigRepository,
 	tenantSkillRepo repository.TenantSkillRepository,
 	busyGate *SessionBusyGate,
+	backgroundWork *BackgroundWork,
 ) interfaces.SessionService {
 	return &sessionService{
 		cfg:                   cfg,
@@ -235,6 +237,7 @@ func NewSessionService(cfg *config.Config,
 		sandboxConfigRepo:     sandboxConfigRepo,
 		tenantSkillRepo:       tenantSkillRepo,
 		busyGate:              busyGate,
+		background:            backgroundWork,
 	}
 }
 
@@ -590,6 +593,7 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 		}
 	}
 
+	s.notifyBackgroundDelete(ctx, session)
 	if !handled[id] {
 		s.destroyBoundSandbox(ctx, id)
 	}
@@ -692,6 +696,9 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 	// Tear down sandboxes while session rows (and pins) are still readable.
 	// A session on a shared machine keeps that machine; only its directory
 	// is removed after the rows are gone.
+	for _, session := range visible {
+		s.notifyBackgroundDelete(ctx, session)
+	}
 	for _, id := range visibleIDs {
 		if handled[id] {
 			continue
@@ -773,7 +780,11 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 
 	// Tear down sandboxes while session rows (and pins) are still readable.
 	for _, session := range sessions {
-		if session == nil || session.ID == "" || handled[session.ID] {
+		if session == nil || session.ID == "" {
+			continue
+		}
+		s.notifyBackgroundDelete(ctx, session)
+		if handled[session.ID] {
 			continue
 		}
 		s.destroyBoundSandbox(ctx, session.ID)
@@ -874,6 +885,18 @@ func (s *sessionService) runUserWorkspaceCleanups(ctx context.Context, handled m
 	}
 	bg := context.WithoutCancel(ctx)
 	go s.workspaceCleaner.RunCleanups(bg, ids)
+}
+
+// notifyBackgroundDelete lets background features stop their work for a
+// session about to be deleted, then clears its activity items and notices.
+// Call it before destroyBoundSandbox, while features can still reach the
+// sandbox, and while the session row is still readable.
+func (s *sessionService) notifyBackgroundDelete(ctx context.Context, session *types.Session) {
+	if s.background == nil || s.background.Listeners == nil || session == nil {
+		return
+	}
+	s.background.Listeners.NotifyDelete(context.WithoutCancel(ctx),
+		interfaces.SessionRef{TenantID: session.TenantID, SessionID: session.ID})
 }
 
 // destroyBoundSandbox tears down the sandbox MicroVM bound to sessionID, if

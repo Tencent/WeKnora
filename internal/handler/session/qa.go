@@ -1488,39 +1488,39 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 					types.TenantIDContextKey, reqCtx.session.TenantID,
 				)
 
-				// Claim any follow-up before completing this row. liveAgentRun
-				// treats a completed assistant as idle and would ClearLiveRun
-				// the old marker — exactly the new_run window. The follow-up
-				// SetLiveRun's first; this run's CAS ClearLiveRun then no-ops.
-				if streamCtx.asyncCtx.Err() != nil {
-					// The turn was cancelled — a user stop. Stopping means
-					// stopping: queued follow-ups are dropped rather than
-					// fired off as a brand-new run the user did not ask for.
-					injected := map[string]struct{}{}
-					if streamCtx.steerSink != nil {
-						injected = streamCtx.steerSink.InjectedIDs()
-					}
-					h.discardSteerBacklog(updateCtx, sessionID, streamCtx.assistantMessage.ID, injected)
-					h.completeStreamAssistantMessage(
-						updateCtx, streamCtx, reqCtx.query, reqCtx.userMessageID,
-					)
-				} else {
-					kicked := h.kickNextRunFromSteerBacklog(updateCtx, reqCtx, streamCtx)
-					h.completeStreamAssistantMessage(
-						updateCtx, streamCtx, reqCtx.query, reqCtx.userMessageID,
-					)
-					// A /steer that landed while we were completing still sits
-					// on this run. Claim it before ClearLiveRun so it is not
-					// stranded on a list nobody will drain.
-					if !kicked {
-						h.kickNextRunFromSteerBacklog(updateCtx, reqCtx, streamCtx)
-					}
+			// Claim any follow-up before completing this row. liveAgentRun
+			// treats a completed assistant as idle and would ClearLiveRun
+			// the old marker — exactly the new_run window. The follow-up
+			// SetLiveRun's first; this run's CAS ClearLiveRun then no-ops.
+			if streamCtx.asyncCtx.Err() != nil {
+				// The turn was cancelled — a user stop. Stopping means
+				// stopping: queued follow-ups are dropped rather than
+				// fired off as a brand-new run the user did not ask for.
+				injected := map[string]struct{}{}
+				if streamCtx.steerSink != nil {
+					injected = streamCtx.steerSink.InjectedIDs()
 				}
-				if err := h.streamManager.ClearLiveRun(
-					updateCtx, sessionID, streamCtx.assistantMessage.ID,
-				); err != nil {
-					logger.Warnf(updateCtx, "live run cleanup failed for session %s: %v", sessionID, err)
+				h.discardSteerBacklog(updateCtx, sessionID, streamCtx.assistantMessage.ID, injected)
+				h.completeStreamAssistantMessage(
+					updateCtx, streamCtx, reqCtx.query, reqCtx.userMessageID,
+				)
+			} else {
+				kicked := h.kickNextRunFromSteerBacklog(updateCtx, reqCtx, streamCtx)
+				h.completeStreamAssistantMessage(
+					updateCtx, streamCtx, reqCtx.query, reqCtx.userMessageID,
+				)
+				// A /steer that landed while we were completing still sits
+				// on this run. Claim it before ClearLiveRun so it is not
+				// stranded on a list nobody will drain.
+				if !kicked {
+					h.kickNextRunFromSteerBacklog(updateCtx, reqCtx, streamCtx)
 				}
+			}
+			if err := h.streamManager.ClearLiveRun(
+				updateCtx, sessionID, streamCtx.assistantMessage.ID,
+			); err != nil {
+				logger.Warnf(updateCtx, "live run cleanup failed for session %s: %v", sessionID, err)
+			}
 				logger.Infof(streamCtx.asyncCtx, "Agent QA service completed for session: %s", sessionID)
 			}
 			// Knowledge mode normally releases on EventAgentFinalAnswer Done.
@@ -2168,6 +2168,7 @@ func (h *Handler) completeAssistantMessage(
 		logger.Errorf(ctx, "Failed to persist assistant message %s: %v", assistantMessage.ID, err)
 		return err
 	}
+	h.ackBackgroundNotices(ctx, assistantMessage)
 
 	// Asynchronously index the Q&A pair into the chat history knowledge base for vector search.
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.
