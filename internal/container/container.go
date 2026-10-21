@@ -983,6 +983,20 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	var sqliteDBPath string
 	switch os.Getenv("DB_DRIVER") {
 	case "postgres":
+		sslMode := os.Getenv("DB_SSLMODE")
+		if sslMode == "" {
+			sslMode = "disable"
+		}
+		if !slices.Contains([]string{"disable", "allow", "prefer", "require", "verify-ca", "verify-full"}, sslMode) {
+			return nil, fmt.Errorf("invalid DB_SSLMODE: %q", sslMode)
+		}
+		searchExtension := os.Getenv("POSTGRES_SEARCH_EXTENSION")
+		if searchExtension == "" {
+			searchExtension = "pg_search"
+		}
+		if !slices.Contains([]string{"pg_search", "pg_textsearch"}, searchExtension) {
+			return nil, fmt.Errorf("invalid POSTGRES_SEARCH_EXTENSION: %q", searchExtension)
+		}
 		// DSN for GORM (key-value format)
 		gormDSN := fmt.Sprintf(
 			"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=UTC",
@@ -991,7 +1005,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 			os.Getenv("DB_USER"),
 			os.Getenv("DB_PASSWORD"),
 			os.Getenv("DB_NAME"),
-			"disable",
+			sslMode,
 		)
 		dialector = postgres.Open(gormDSN)
 
@@ -1009,13 +1023,16 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		logger.Infof(context.Background(), "Skip embedding: %s", skipEmbedding)
 
 		migrateDSN = fmt.Sprintf(
-			"postgres://%s:%s@%s:%s/%s?sslmode=disable&options=-c%%20app.skip_embedding=%s",
+			"postgres://%s:%s@%s:%s/%s?sslmode=%s&options="+
+				"-c%%20app.skip_embedding=%s%%20-c%%20app.postgres_search_extension=%s",
 			os.Getenv("DB_USER"),
 			encodedPassword, // Use encoded password
 			os.Getenv("DB_HOST"),
 			os.Getenv("DB_PORT"),
 			os.Getenv("DB_NAME"),
+			sslMode,
 			skipEmbedding,
+			searchExtension,
 		)
 
 		// Debug log (don't log password)
@@ -1090,6 +1107,9 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		// Run base migrations (all versioned migrations including embeddings)
 		// The embeddings migration will be conditionally executed based on skip_embedding parameter in DSN
 		if err := database.RunMigrationsWithOptions(migrateDSN, migrationOpts); err != nil {
+			if os.Getenv("POSTGRES_SEARCH_EXTENSION") == "pg_textsearch" {
+				return nil, fmt.Errorf("pg_textsearch migration failed: %w", err)
+			}
 			// Log warning but don't fail startup - migrations might be handled externally
 			logger.Warnf(context.Background(), "Database migration failed: %v", err)
 			logger.Warnf(
@@ -1113,6 +1133,12 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		}
 	} else {
 		logger.Infof(context.Background(), "Auto-migration is disabled (AUTO_MIGRATE=false)")
+	}
+	if os.Getenv("DB_DRIVER") == "postgres" && os.Getenv("POSTGRES_SEARCH_EXTENSION") == "pg_textsearch" &&
+		slices.Contains(strings.Split(os.Getenv("RETRIEVE_DRIVER"), ","), "postgres") {
+		if err := postgresRepo.BackfillTextSearch(context.Background(), db); err != nil {
+			return nil, err
+		}
 	}
 
 	// Get underlying SQL DB object

@@ -3,7 +3,8 @@
 
 DO $$
 BEGIN
-    IF current_setting('app.skip_embedding', true) = 'true' THEN
+    IF current_setting('app.skip_embedding', true) = 'true'
+        OR current_setting('app.postgres_search_extension', true) = 'pg_textsearch' THEN
         RAISE NOTICE 'Skipping pg_search update (app.skip_embedding=true)';
         RETURN;
     END IF;
