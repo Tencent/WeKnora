@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -121,6 +122,56 @@ func TestImageControlsPreserveOtherParamsAndRespectNamespace(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "default", result.Config.ImageProcessingConfig.ImagePipelineID)
+}
+
+func TestImageControlsPatchProjectsEffectiveSwitches(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		caption bool
+		ocr     bool
+	}{
+		{name: "caption only", caption: true, ocr: false},
+		{name: "OCR only", caption: false, ocr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kb := &types.KnowledgeBase{ID: "kb1", ImageProcessingConfig: types.ImageProcessingConfig{
+				ImagePipelineID: "default", ImagePipelineParams: map[string]any{
+					"enable_caption":         !tc.caption,
+					"enable_ocr":             !tc.ocr,
+					"default.enable_caption": !tc.caption,
+					"default.enable_ocr":     !tc.ocr,
+					"private_token":          "secret",
+				},
+			}}
+			patch, err := json.Marshal(map[string]bool{
+				"image_caption_enabled": tc.caption,
+				"image_ocr_enabled":     tc.ocr,
+			})
+			require.NoError(t, err)
+			result, err := parsingPatch(t, kb, string(patch))
+			require.NoError(t, err)
+			kb.ImageProcessingConfig = *result.Config.ImageProcessingConfig
+			body, err := json.Marshal(map[string]any{"data": kb})
+			require.NoError(t, err)
+			for _, operationID := range []string{"knowledge_base.get", "knowledge_base.update"} {
+				t.Run(operationID, func(t *testing.T) {
+					op, ok := operations.Builtin().Get(operationID)
+					require.True(t, ok)
+					projected, err := op.Project(body)
+					require.NoError(t, err)
+					fields, ok := projected.Data.(map[string]any)
+					require.True(t, ok)
+					assert.Equal(t, tc.caption, fields["default.caption_enabled"])
+					assert.Equal(t, tc.ocr, fields["default.ocr_enabled"])
+					for _, key := range []string{
+						"enable_caption", "enable_ocr", "default.enable_caption", "default.enable_ocr", "private_token",
+					} {
+						assert.NotContains(t, fields, key)
+					}
+				})
+			}
+		})
+	}
 }
 
 func TestParsingPatchKeepsVLMAndQuestionOptions(t *testing.T) {

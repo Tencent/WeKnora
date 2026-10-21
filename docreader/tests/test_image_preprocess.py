@@ -1,9 +1,7 @@
 """Unit tests for the page-straightening geometry in parser/image_preprocess.
 
-Every function tested here is pure: it takes boxes or points and returns numbers,
-so the tests build their own inputs and never load RapidOCR. The three functions
-that need the engine (detect, rec_score, preprocess) are exercised end to end
-instead — see the R22 handover document and the smoke scripts under works/.
+Geometry tests build their own boxes and points. Engine isolation is exercised
+with a mutable recognizer double, so these tests never load RapidOCR models.
 
 The values that matter most are the ones a wrong answer would hide:
 
@@ -14,11 +12,16 @@ The values that matter most are the ones a wrong answer would hide:
   * fit_quad must enclose every box it was given — a quad that cuts a line off
     is the failure the padding and the supporting lines exist to prevent.
 """
+from concurrent.futures import ThreadPoolExecutor
+import threading
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 import cv2
 import numpy as np
 
+from docreader.parser import image_preprocess
 from docreader.parser.image_preprocess import (
     ANG_TOL,
     DEFAULT_PAD,
@@ -66,6 +69,54 @@ def line(cx, cy, length, angle_deg=0.0, height=8.0, score=0.9):
 def grid(xs, ys):
     """The point set a box list turns into after the alignment transform."""
     return np.array([(float(x), float(y)) for x in xs for y in ys], "float32")
+
+
+class EngineIsolationTest(unittest.TestCase):
+    def test_concurrent_detection_cannot_enable_recognition_classification(self):
+        scoring_started = threading.Event()
+        detection_finished = threading.Event()
+
+        class MutableRecognizer:
+            def __call__(self, img, *, use_cls):
+                self.use_cls = use_cls
+                if not use_cls:
+                    scoring_started.set()
+                    if not detection_finished.wait(timeout=5):
+                        raise TimeoutError("concurrent detection did not finish")
+                # Classification would make the recognition score insensitive
+                # to orientation. Expose another call changing this flag.
+                score = 0.9 if use_cls or not self.use_cls else 0.1
+                return SimpleNamespace(boxes=[box(50, 50, 100, 10)], scores=[score])
+
+        img = np.zeros((10, 10, 3), "uint8")
+
+        def score_page():
+            engine = image_preprocess._engine()
+            score, count = image_preprocess.rec_score(img)
+            return engine, image_preprocess._engine(), score, count
+
+        def detect_page():
+            try:
+                return image_preprocess._engine(), image_preprocess.detect(img)
+            finally:
+                detection_finished.set()
+
+        with patch.object(image_preprocess, "RapidOCR", side_effect=MutableRecognizer):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                scoring = pool.submit(score_page)
+                try:
+                    self.assertTrue(scoring_started.wait(timeout=5))
+                    detecting = pool.submit(detect_page)
+                    detection_engine, boxes = detecting.result(timeout=5)
+                    score_engine, reused_engine, score, count = scoring.result(timeout=5)
+                finally:
+                    detection_finished.set()
+
+        self.assertAlmostEqual(score, 0.9, places=6)
+        self.assertEqual(count, 1)
+        self.assertEqual(len(boxes), 1)
+        self.assertIs(score_engine, reused_engine, "one worker should reuse its engine")
+        self.assertIsNot(score_engine, detection_engine, "workers must not share mutable OCR state")
 
 
 class BoxAngleTest(unittest.TestCase):
@@ -194,6 +245,29 @@ class LeastSquaresTest(unittest.TestCase):
 
 
 class BoundaryLineTest(unittest.TestCase):
+    def test_sloped_sides_are_fitted_across_both_axes(self):
+        # A perspective-distorted page narrows from 100 to 60 pixels. Its side
+        # slopes are within the accepted range and span the full page height.
+        pts = np.array([(x, y) for y in range(0, 201, 5)
+                        for x in (0.1 * y, 100 - 0.1 * y)], "float32")
+        for axis, points in ((0, pts), (1, pts[:, ::-1])):
+            for side, expected_slope, expected_intercept in (("min", 0.1, 0), ("max", -0.1, 100)):
+                with self.subTest(axis=axis, side=side):
+                    slope, intercept = _boundary_line(points, axis, side)
+                    self.assertAlmostEqual(slope, expected_slope, places=5)
+                    self.assertAlmostEqual(intercept, expected_intercept, places=4)
+                    residual = points[:, axis] - (slope * points[:, 1 - axis] + intercept)
+                    if side == "min":
+                        self.assertGreaterEqual(float(residual.min()), -1e-4)
+                    else:
+                        self.assertLessEqual(float(residual.max()), 1e-4)
+
+    def test_a_short_extreme_band_does_not_extrapolate_its_slope(self):
+        pts = np.array([(0.1 * y, y) for y in range(10)] + [(100, 100)], "float32")
+        slope, intercept = _boundary_line(pts, 0, "min")
+        self.assertEqual(slope, 0.0)
+        self.assertEqual(intercept, 0.0)
+
     def test_the_min_side_encloses_every_point(self):
         pts = grid((0, 50, 100), (0, 40, 80))
         slope, intercept = _boundary_line(pts, 1, "min")
@@ -234,6 +308,15 @@ class OrderPointsTest(unittest.TestCase):
 
 
 class FitQuadTest(unittest.TestCase):
+    def test_perspective_edges_produce_a_trapezoid_instead_of_a_bounding_box(self):
+        pts = np.array([(x, y) for y in range(0, 201, 5)
+                        for x in (0.1 * y, 100 - 0.1 * y)], "float32")
+        quad = fit_quad(pts)
+        self.assertIsNotNone(quad)
+        np.testing.assert_allclose(quad, [[0, 0], [100, 0], [80, 200], [20, 200]], atol=1e-4)
+        for x, y in pts:
+            self.assertGreaterEqual(cv2.pointPolygonTest(quad, (float(x), float(y)), True), -1e-4)
+
     def test_the_quad_encloses_every_point_it_was_given(self):
         pts = grid(range(0, 101, 10), range(0, 81, 10))
         quad = fit_quad(pts)
@@ -260,6 +343,17 @@ class FitQuadTest(unittest.TestCase):
 
 
 class WarpTest(unittest.TestCase):
+    def test_fitted_perspective_edges_become_straight_after_warp(self):
+        pts = np.array([(x + 50, y + 50) for y in range(0, 201, 5)
+                        for x in (0.1 * y, 100 - 0.1 * y)], "float32")
+        img = np.zeros((300, 200, 3), "uint8")
+        cv2.fillConvexPoly(img, np.array([[50, 50], [150, 50], [130, 250], [70, 250]]), (255, 255, 255))
+        rect, _ = warp(img, fit_quad(pts), pad=0)
+        # A bounding-box crop retains black wedges beside the narrower end.
+        # Rectification must fill both sides throughout the page height.
+        self.assertGreater(float(rect[5:-5, 5:10].mean()), 250)
+        self.assertGreater(float(rect[5:-5, -10:-5].mean()), 250)
+
     def test_the_result_is_the_quad_plus_its_padding(self):
         img = np.full((300, 300, 3), 255, "uint8")
         quad = np.array([(50.0, 50.0), (150.0, 50.0), (150.0, 100.0), (50.0, 100.0)], "float32")

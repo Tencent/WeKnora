@@ -117,14 +117,14 @@ def effective_thresholds() -> dict:
 # instance (update_params -> setattr), so calling ocr(img, use_cls=...) changes
 # what every later call sees. The gRPC server handles requests concurrently, so
 # one instance is shared per thread rather than globally.
-_tls = threading.local()
+_ocr_local = threading.local()
 
 
 def _engine() -> "RapidOCR":
-    engine = getattr(_tls, "engine", None)
+    engine = getattr(_ocr_local, "engine", None)
     if engine is None:
         engine = RapidOCR()
-        _tls.engine = engine
+        _ocr_local.engine = engine
     return engine
 
 
@@ -251,13 +251,18 @@ def _boundary_line(pts, axis, side, frac=0.10, max_slope=0.12):
     quad always ENCLOSES every detected box (the plain band fit cut 550px off).
     """
     other = pts[:, 1 - axis]
-    lo, hi = float(other.min()), float(other.max())
-    if hi - lo < 1e-6:
+    span = float(np.ptp(other))
+    if span < 1e-6:
         return None
+    # Select the outer band across the boundary, then measure its coverage
+    # along the boundary. Using the same axis for both makes the 50% coverage
+    # requirement impossible for a 10% band.
+    coord = pts[:, axis]
+    lo, hi = float(coord.min()), float(coord.max())
     band = (hi - lo) * frac
-    sel = pts[other <= lo + band] if side == "min" else pts[other >= hi - band]
+    sel = pts[coord <= lo + band] if side == "min" else pts[coord >= hi - band]
     m = 0.0
-    if len(sel) >= 5 and (sel[:, 1 - axis].max() - sel[:, 1 - axis].min()) >= 0.5 * (hi - lo):
+    if len(sel) >= 5 and np.ptp(sel[:, 1 - axis]) >= 0.5 * span:
         m = float(np.polyfit(sel[:, 1 - axis], sel[:, axis], 1)[0])
         if abs(m) > max_slope:
             m = 0.0

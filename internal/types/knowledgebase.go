@@ -574,7 +574,7 @@ type ImageProcessingConfig struct {
 	// SlotKey and read back by ImagePipelineParam. The map travels whole: a key
 	// a pipeline no longer declares is dropped when the run reads it, so an old
 	// stored config stays loadable rather than being rewritten on save.
-	ImagePipelineParams map[string]any `yaml:"image_pipeline_params,omitempty" json:"image_pipeline_params,omitempty" extensions:"x-agent,x-agent-response,x-agent-keys=enable_caption|enable_ocr|default.enable_caption|default.enable_ocr"`
+	ImagePipelineParams map[string]any `yaml:"image_pipeline_params,omitempty" json:"image_pipeline_params,omitempty" extensions:"x-agent,x-agent-response,x-agent-keys=default.caption_enabled|default.ocr_enabled"`
 	// ImageVectorEnabled lets a knowledge base whose embedding model takes
 	// images index each image by its own vector and recall it with one. It
 	// is off by default on purpose: a model that takes images is also used
