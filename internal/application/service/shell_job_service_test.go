@@ -345,7 +345,9 @@ func TestMaintenanceExecsLeaveWorkDirToTheSessionLayout(t *testing.T) {
 	svc, _, _, _ := newRemoteServiceFixture(t)
 	var execOpts []sandbox.ShellExecOptions
 	inner := svc.remoteExec
-	record := func(ctx context.Context, sid, cmd string, opts sandbox.ShellExecOptions) (*sandbox.ExecuteResult, error) {
+	record := func(
+		ctx context.Context, sid, cmd string, opts sandbox.ShellExecOptions,
+	) (*sandbox.ExecuteResult, error) {
 		execOpts = append(execOpts, opts)
 		return inner(ctx, sid, cmd, opts)
 	}
@@ -801,7 +803,9 @@ func TestSubmitIgnoresStderrWhenParsingTheEpilogue(t *testing.T) {
 		t.Fatal("a parsed epilogue must not fall through to a status read")
 		return nil, nil
 	}
-	svc.remoteExec = func(_ context.Context, _ string, script string, opts sandbox.ShellExecOptions) (*sandbox.ExecuteResult, error) {
+	svc.remoteExec = func(
+		_ context.Context, _ string, script string, opts sandbox.ShellExecOptions,
+	) (*sandbox.ExecuteResult, error) {
 		marker := shellJobMarkerInScript.FindString(script)
 		require.NotEmpty(t, marker)
 		stdout := "hello\n" + marker + "\n" + `{"state":"succeeded","exit_code":0}` + "\n4 5\n"
@@ -838,7 +842,9 @@ func TestSubmitParsesEpilogueFromExecResultWhenOnOutputIsSilent(t *testing.T) {
 		t.Fatal("buffered stdout must be parsed without a status read")
 		return nil, nil
 	}
-	svc.remoteExec = func(_ context.Context, _ string, script string, _ sandbox.ShellExecOptions) (*sandbox.ExecuteResult, error) {
+	svc.remoteExec = func(
+		_ context.Context, _ string, script string, _ sandbox.ShellExecOptions,
+	) (*sandbox.ExecuteResult, error) {
 		marker := shellJobMarkerInScript.FindString(script)
 		require.NotEmpty(t, marker)
 		stdout := "hello\n" + marker + "\n" + `{"state":"succeeded","exit_code":0}` + "\n4 5\n"
@@ -923,7 +929,9 @@ func TestShellJobCursorIsSharedAcrossReplicas(t *testing.T) {
 
 	var script string
 	var opts sandbox.ShellExecOptions
-	svcB.remoteExec = func(_ context.Context, _ string, got string, gotOpts sandbox.ShellExecOptions) (*sandbox.ExecuteResult, error) {
+	svcB.remoteExec = func(
+		_ context.Context, _ string, got string, gotOpts sandbox.ShellExecOptions,
+	) (*sandbox.ExecuteResult, error) {
 		script = got
 		opts = gotOpts
 		return &sandbox.ExecuteResult{ExitCode: 0}, nil
@@ -952,7 +960,9 @@ func TestSweepKillsOrphansWhenTheWatcherDies(t *testing.T) {
 	}))
 	var script string
 	var opts sandbox.ShellExecOptions
-	svc.remoteExec = func(_ context.Context, _ string, got string, gotOpts sandbox.ShellExecOptions) (*sandbox.ExecuteResult, error) {
+	svc.remoteExec = func(
+		_ context.Context, _ string, got string, gotOpts sandbox.ShellExecOptions,
+	) (*sandbox.ExecuteResult, error) {
 		script = got
 		opts = gotOpts
 		return &sandbox.ExecuteResult{ExitCode: 0}, nil

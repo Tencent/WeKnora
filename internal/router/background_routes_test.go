@@ -1,3 +1,4 @@
+// Package router registers the HTTP API, including background-work routes.
 package router
 
 import (

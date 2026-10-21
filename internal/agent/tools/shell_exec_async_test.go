@@ -223,7 +223,8 @@ func TestShellExecAsyncCapturesSkillEnvWhenTheJobFinishesInTheWindow(t *testing.
 		WithSkillEnvironment(shellTestSkillEnvironment(t)).
 		WithEnvCapture(recorder.capture)
 	result, err := tool.Execute(asyncTestCtx(), json.RawMessage(
-		`{"command":"export USER_TOKEN=from-command; python x.py","skill_name":"pdf-tools","env":{"EXTRA_TOKEN":"from-tool"}}`,
+		`{"command":"export USER_TOKEN=from-command; python x.py",`+
+			`"skill_name":"pdf-tools","env":{"EXTRA_TOKEN":"from-tool"}}`,
 	))
 	require.NoError(t, err)
 	require.True(t, result.Success)
@@ -281,7 +282,8 @@ func TestShellExecAsyncDoesNotRewriteResolvedSkillEnv(t *testing.T) {
 		WithSkillEnvironment(shellTestSkillEnvironment(t)).
 		WithEnvCapture(recorder.capture)
 	result, err := tool.Execute(asyncTestCtx(), json.RawMessage(
-		`{"command":"export USER_TOKEN=from-command; python x.py","skill_name":"pdf-tools","env":{"EXTRA_TOKEN":"from-tool"}}`,
+		`{"command":"export USER_TOKEN=from-command; python x.py",`+
+			`"skill_name":"pdf-tools","env":{"EXTRA_TOKEN":"from-tool"}}`,
 	))
 	require.NoError(t, err)
 	require.True(t, result.Success)

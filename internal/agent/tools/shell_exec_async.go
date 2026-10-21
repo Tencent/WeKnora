@@ -79,6 +79,9 @@ func init() {
 	backgroundSubmissionTools = append(backgroundSubmissionTools, ToolShellExecAsync)
 }
 
+// NewShellExecAsyncTool builds shell_exec_async. submitter starts a background
+// job, executor runs a command that finishes inside the yield window, and
+// envResolver supplies skill credentials.
 func NewShellExecAsyncTool(submitter ShellJobSubmitter, executor SandboxCommandExecutor,
 	envResolver skills.SkillEnvResolver,
 ) *ShellExecAsyncTool {

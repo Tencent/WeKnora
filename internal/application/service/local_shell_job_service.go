@@ -882,3 +882,55 @@ func (s *LocalShellJobService) pruneCursorsLocked(now time.Time) {
 		}
 	}
 }
+
+func applyHostOutputFiles(result interfaces.WorkResult, meta sandbox.ShellJobMeta) interfaces.WorkResult {
+	if !result.Terminal || !meta.OutputSeen || meta.OutputDir == "" {
+		return result
+	}
+	after, err := listHostOutputFiles(meta.OutputDir)
+	if err != nil {
+		return result
+	}
+	links := tools.ChangedOutputFileLinks(meta.OutputDir, sandbox.EntriesFromStamps(meta.OutputBefore), after)
+	result.OutputFiles = links
+	if payload, ok := result.Payload.(ShellJobPayload); ok {
+		payload.OutputFiles = links
+		result.Payload = payload
+	}
+	return result
+}
+
+func listHostOutputFiles(dir string) ([]sandbox.RemoteDirEntry, error) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return nil, errors.New("output dir is empty")
+	}
+	var out []sandbox.RemoteDirEntry
+	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if p == dir && os.IsNotExist(walkErr) {
+				return nil
+			}
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if len(out) > 200 {
+			return errors.New("output dir listing is too large")
+		}
+		info, infoErr := d.Info()
+		if infoErr != nil {
+			return infoErr
+		}
+		out = append(out, sandbox.RemoteDirEntry{
+			Name: d.Name(), Path: p, Type: sandbox.RemoteEntryFile,
+			Size: info.Size(), ModTime: info.ModTime(),
+		})
+		return nil
+	})
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	return out, nil
+}

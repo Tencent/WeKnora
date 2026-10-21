@@ -322,7 +322,9 @@ func selectTail(previous, current []byte, total int64, tailBudget int) ([]byte, 
 	return text, total - int64(len(text))
 }
 
-func joinHeadTail(head []byte, headStart int64, headFromFile bool, tail []byte, tailStart int64) ([]byte, int64, int64) {
+func joinHeadTail(
+	head []byte, headStart int64, headFromFile bool, tail []byte, tailStart int64,
+) ([]byte, int64, int64) {
 	if len(head) == 0 {
 		return tail, tailStart, 0
 	}

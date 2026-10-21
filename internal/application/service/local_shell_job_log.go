@@ -53,9 +53,11 @@ func (l *localJobLog) Write(p []byte) (int, error) {
 }
 
 func (l *localJobLog) rotate() error {
-	if _, err := os.Stat(l.path + ".head"); err == nil {
-		// head already kept from an earlier rotation
-	} else if os.IsNotExist(err) {
+	_, statErr := os.Stat(l.path + ".head")
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return statErr
+	}
+	if os.IsNotExist(statErr) {
 		in, err := os.Open(l.path)
 		if err != nil {
 			return err
@@ -69,8 +71,6 @@ func (l *localJobLog) rotate() error {
 		if err := os.WriteFile(l.path+".head", head, 0o600); err != nil {
 			return err
 		}
-	} else {
-		return err
 	}
 	if err := l.file.Close(); err != nil {
 		return err
@@ -96,9 +96,9 @@ func writeLocalRotated(path string, value int64) error {
 		return err
 	}
 	name := f.Name()
-	defer os.Remove(name)
+	defer func() { _ = os.Remove(name) }()
 	if _, err := fmt.Fprint(f, strconv.FormatInt(value, 10)); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err := f.Close(); err != nil {

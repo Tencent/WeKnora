@@ -15,13 +15,13 @@ const shellJobMarkerPrefix = "__WEKNORA_SJ__"
 
 // shellJobRotateFunc keeps an 8 KiB head and rotates a stream at 16 MiB.
 // Truncating with `: >` leaves no sparse hole; writers only append.
-const shellJobRotateFunc = `r(){ F="$D/$1"; S=$(wc -c < "$F" 2>/dev/null || echo 0);
-  if [ "$S" -ge 16777216 ]; then
-    [ -f "$F.head" ] || head -c 8192 "$F" > "$F.head";
+var shellJobRotateFunc = fmt.Sprintf(`r(){ F="$D/$1"; S=$(wc -c < "$F" 2>/dev/null || echo 0);
+  if [ "$S" -ge %d ]; then
+    [ -f "$F.head" ] || head -c %d "$F" > "$F.head";
     cp "$F" "$F.1"; R=$(cat "$F.rotated" 2>/dev/null || echo 0);
     echo $(( R + S )) > "$F.rotated.tmp" && mv "$F.rotated.tmp" "$F.rotated";
     : > "$F";
-  fi; }`
+  fi; }`, shellJobSegmentBytes, shellJobHeadBytes)
 
 // shellJobForwardLoop is the submit-side poll. It copies new bytes until the
 // watcher leaves "running" or the yield deadline passes. It does not wait on
@@ -348,7 +348,8 @@ if [ "$PGID" -gt 1 ] && [ -d "/proc/$PGID" ]; then
   sleep 0.2
   kill -KILL -$PGID 2>/dev/null || true
 fi
-if [ "$TOUCH" -gt 1 ] && [ -r "/proc/$TOUCH/cmdline" ] && tr '\0' ' ' < "/proc/$TOUCH/cmdline" | grep -F -q weknora-sandbox-activity; then
+if [ "$TOUCH" -gt 1 ] && [ -r "/proc/$TOUCH/cmdline" ] &&
+  tr '\0' ' ' < "/proc/$TOUCH/cmdline" | grep -F -q weknora-sandbox-activity; then
   kill -KILL "$TOUCH" 2>/dev/null || true
 fi
 true
@@ -415,7 +416,8 @@ func ShellJobBatchReadScriptFor(sandboxID string, ids []string, from map[string]
 				ef = strconv.FormatInt(off.Stderr, 10)
 			}
 		}
-		fmt.Fprintf(&b, "J=%s; D=%s; SF=%s; EF=%s;\n", shQuote(id), shQuote(ShellJobsRoot+"/"+id), shQuote(sf), shQuote(ef))
+		fmt.Fprintf(&b, "J=%s; D=%s; SF=%s; EF=%s;\n",
+			shQuote(id), shQuote(ShellJobsRoot+"/"+id), shQuote(sf), shQuote(ef))
 		b.WriteString(shellJobBatchHead)
 		b.WriteString(shellJobBatchTail)
 	}
@@ -512,21 +514,24 @@ func decodeB64(s string) []byte {
 	return raw
 }
 
-// shellJobMarkerStream strips the trailing marker line and everything after it
+// ShellJobMarkerStream strips the trailing marker line and everything after it
 // from forwarded output, holding back at most len(marker)-1 bytes so a marker
 // split across chunks is never leaked into the preview or the result body.
-type shellJobMarkerStream struct {
+type ShellJobMarkerStream struct {
 	marker string
 	held   []byte
 	found  bool
 	after  []byte
 }
 
-func NewShellJobMarkerStream(marker string) *shellJobMarkerStream {
-	return &shellJobMarkerStream{marker: marker}
+// NewShellJobMarkerStream splits forwarded output on marker.
+func NewShellJobMarkerStream(marker string) *ShellJobMarkerStream {
+	return &ShellJobMarkerStream{marker: marker}
 }
 
-func (s *shellJobMarkerStream) Feed(chunk []byte) (body, tail []byte) {
+// Feed returns output that is safe to forward and any bytes still held
+// because they might be the start of the marker.
+func (s *ShellJobMarkerStream) Feed(chunk []byte) (body, tail []byte) {
 	if s.found {
 		s.after = append(s.after, chunk...)
 		return nil, nil
@@ -554,7 +559,8 @@ func (s *shellJobMarkerStream) Feed(chunk []byte) (body, tail []byte) {
 	return buf, nil
 }
 
-func (s *shellJobMarkerStream) Final() (body, epilogue string) {
+// Final returns the held body when no marker arrived, or the epilogue after it.
+func (s *ShellJobMarkerStream) Final() (body, epilogue string) {
 	if !s.found {
 		return string(s.held), ""
 	}
@@ -565,6 +571,8 @@ func indexOf(buf []byte, marker string) int {
 	return bytes.Index(buf, []byte(marker))
 }
 
+// ParseShellJobEpilogue reads the status JSON and the offset line that follow
+// a shell-job marker. ok is false when the epilogue is not that pair.
 func ParseShellJobEpilogue(epilogue string) (ShellJobStatus, ShellJobOffsets, bool) {
 	var lines []string
 	for _, line := range strings.Split(epilogue, "\n") {

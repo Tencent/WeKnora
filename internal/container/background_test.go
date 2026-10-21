@@ -150,7 +150,10 @@ func TestShellJobSweeperStartsOnlyWhenRemoteAvailable(t *testing.T) {
 	mini := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mini.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
-	remoteBG := service.NewBackgroundWork(background.NewMemoryActivityRegistry(nil), background.NewMemoryNoticeInbox(nil))
+	remoteBG := service.NewBackgroundWork(
+		background.NewMemoryActivityRegistry(nil),
+		background.NewMemoryNoticeInbox(nil),
+	)
 	remote := newRemoteShellJobService(client, &service.PinnedSessionSandbox{}, remoteBG, nil)
 	require.True(t, remote.RemoteAvailable())
 	startShellJobSweeper(remote, cleaner)

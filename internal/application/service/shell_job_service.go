@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,7 +23,7 @@ import (
 
 const (
 	shellJobYieldDefault = 10 * time.Second
-	shellJobYieldMin     = 250 * time.Millisecond
+	shellJobYieldFloor   = 250 * time.Millisecond
 	shellJobYieldMax     = 30 * time.Second
 	shellJobKindCap      = 64
 	// shellJobRenewLease outlives several 5s sweeper ticks so one missed round
@@ -51,7 +50,9 @@ const (
 // LocalShellJobs is the Lite host implementation contract. The remote service
 // delegates to it for host sessions.
 type LocalShellJobs interface {
-	SubmitShellJob(context.Context, interfaces.SessionRef, tools.ShellJobSubmitRequest) (tools.ShellJobSubmission, error)
+	SubmitShellJob(
+		context.Context, interfaces.SessionRef, tools.ShellJobSubmitRequest,
+	) (tools.ShellJobSubmission, error)
 	Status(context.Context, interfaces.SessionRef, []string, interfaces.StatusOptions) ([]interfaces.WorkResult, error)
 	Cancel(context.Context, interfaces.SessionRef, []string) ([]interfaces.WorkResult, error)
 	OnDelete(context.Context, interfaces.SessionRef) error
@@ -726,11 +727,12 @@ func (s *ShellJobService) Cancel(ctx context.Context, ref interfaces.SessionRef,
 	}
 	out := make([]interfaces.WorkResult, len(ids))
 	for i, id := range ids {
-		res, err := s.remoteExec(maintenanceCtx(ctx, ref), ref.SessionID, shellJobCancelScript(id), sandbox.ShellExecOptions{
-			ExpectedSandboxID: sandboxID,
-			Timeout:           10 * time.Second,
-			SkipWorkspacePrep: true,
-		})
+		res, err := s.remoteExec(
+			maintenanceCtx(ctx, ref), ref.SessionID, shellJobCancelScript(id), sandbox.ShellExecOptions{
+				ExpectedSandboxID: sandboxID,
+				Timeout:           10 * time.Second,
+				SkipWorkspacePrep: true,
+			})
 		if err != nil || res == nil || res.ExitCode != 0 {
 			out[i] = lostResult(sandbox.ShellJobMeta{ID: id}, "cancel exec failed")
 			continue
@@ -1356,23 +1358,6 @@ func (s *ShellJobService) listOutputFiles(
 	return s.pinned.ListSessionFiles(ctx, sessionID, dir)
 }
 
-func applyHostOutputFiles(result interfaces.WorkResult, meta sandbox.ShellJobMeta) interfaces.WorkResult {
-	if !result.Terminal || !meta.OutputSeen || meta.OutputDir == "" {
-		return result
-	}
-	after, err := listHostOutputFiles(meta.OutputDir)
-	if err != nil {
-		return result
-	}
-	links := tools.ChangedOutputFileLinks(meta.OutputDir, sandbox.EntriesFromStamps(meta.OutputBefore), after)
-	result.OutputFiles = links
-	if payload, ok := result.Payload.(ShellJobPayload); ok {
-		payload.OutputFiles = links
-		result.Payload = payload
-	}
-	return result
-}
-
 // skillEnvCaptures holds in-memory credential write-backs keyed by session and job.
 type skillEnvCaptures struct {
 	mu  sync.Mutex
@@ -1451,41 +1436,6 @@ func (c *skillEnvCaptures) take(ref interfaces.SessionRef, jobID string) func(co
 	run := c.fns[key]
 	delete(c.fns, key)
 	return run
-}
-
-func listHostOutputFiles(dir string) ([]sandbox.RemoteDirEntry, error) {
-	dir = strings.TrimSpace(dir)
-	if dir == "" {
-		return nil, errors.New("output dir is empty")
-	}
-	var out []sandbox.RemoteDirEntry
-	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			if p == dir && os.IsNotExist(walkErr) {
-				return nil
-			}
-			return walkErr
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if len(out) > 200 {
-			return errors.New("output dir listing is too large")
-		}
-		info, infoErr := d.Info()
-		if infoErr != nil {
-			return infoErr
-		}
-		out = append(out, sandbox.RemoteDirEntry{
-			Name: d.Name(), Path: p, Type: sandbox.RemoteEntryFile,
-			Size: info.Size(), ModTime: info.ModTime(),
-		})
-		return nil
-	})
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (s *ShellJobService) setCursorsLocked(ref interfaces.SessionRef, runID, workID string,
@@ -1643,8 +1593,8 @@ func clampYieldTime(d time.Duration) time.Duration {
 	if d <= 0 {
 		return shellJobYieldDefault
 	}
-	if d < shellJobYieldMin {
-		return shellJobYieldMin
+	if d < shellJobYieldFloor {
+		return shellJobYieldFloor
 	}
 	if d > shellJobYieldMax {
 		return shellJobYieldMax

@@ -20,11 +20,14 @@ const (
 	shellJobHandoffSec  = 5 // index score = yield_until + 5s (D1)
 )
 
+// ShellJobIndex is the Redis schedule of shell jobs waiting to be swept.
 type ShellJobIndex struct {
 	client    redis.UniversalClient
 	namespace string
 }
 
+// ShellJobIndexEntry is one scheduled job: which session and sandbox it
+// belongs to, and when its yield window ends.
 type ShellJobIndexEntry struct {
 	SessionRef interfaces.SessionRef
 	WorkID     string
@@ -32,6 +35,7 @@ type ShellJobIndexEntry struct {
 	YieldUntil time.Time
 }
 
+// NewShellJobIndex schedules shell jobs in client. An empty namespace is "weknora".
 func NewShellJobIndex(client redis.UniversalClient, namespace string) *ShellJobIndex {
 	if strings.TrimSpace(namespace) == "" {
 		namespace = "weknora"
@@ -62,6 +66,7 @@ func (x *ShellJobIndex) parseMember(member string) (ShellJobIndexEntry, bool) {
 	}, true
 }
 
+// Add schedules e for a sweep five seconds after its yield window.
 func (x *ShellJobIndex) Add(ctx context.Context, e ShellJobIndexEntry) error {
 	score := float64(e.YieldUntil.Unix()) + shellJobHandoffSec
 	return x.client.ZAdd(ctx, shellJobIndexKey, redis.Z{
@@ -69,10 +74,12 @@ func (x *ShellJobIndex) Add(ctx context.Context, e ShellJobIndexEntry) error {
 	}).Err()
 }
 
+// Requeue puts e back on the schedule with its current yield time.
 func (x *ShellJobIndex) Requeue(ctx context.Context, e ShellJobIndexEntry) error {
 	return x.Add(ctx, e)
 }
 
+// Due lists jobs whose sweep time has arrived.
 func (x *ShellJobIndex) Due(ctx context.Context, now time.Time) ([]ShellJobIndexEntry, error) {
 	scored, err := x.client.ZRangeByScoreWithScores(ctx, shellJobIndexKey, &redis.ZRangeBy{
 		Min: "-inf", Max: fmt.Sprintf("%d", now.Unix()),
@@ -98,6 +105,7 @@ func (x *ShellJobIndex) Due(ctx context.Context, now time.Time) ([]ShellJobIndex
 	return out, nil
 }
 
+// Claim takes the due jobs of every session this replica can lock.
 func (x *ShellJobIndex) Claim(ctx context.Context, now time.Time, replica string) (
 	map[interfaces.SessionRef][]ShellJobIndexEntry, error,
 ) {
@@ -125,6 +133,7 @@ func (x *ShellJobIndex) Claim(ctx context.Context, now time.Time, replica string
 	return out, nil
 }
 
+// Release drops the session sweep lock when this replica still holds it.
 func (x *ShellJobIndex) Release(ctx context.Context, s interfaces.SessionRef, replica string) error {
 	key := fmt.Sprintf(shellJobSweepKeyFmt, x.hashTag(s))
 	current, err := x.client.Get(ctx, key).Result()
@@ -140,6 +149,7 @@ func (x *ShellJobIndex) Release(ctx context.Context, s interfaces.SessionRef, re
 	return x.client.Del(ctx, key).Err()
 }
 
+// ClaimWork removes one job from the schedule so another replica will not sweep it.
 func (x *ShellJobIndex) ClaimWork(ctx context.Context, s interfaces.SessionRef, workID string) (bool, error) {
 	// Member carries the sandbox id; ZREM by the session+work pair alone is not
 	// possible, so remove by range: find the member first.
@@ -197,6 +207,7 @@ func (x *ShellJobIndex) sessionPrefix(s interfaces.SessionRef) string {
 	return fmt.Sprintf("%s:%d:%s:", x.namespace, s.TenantID, s.SessionID)
 }
 
+// RemoveSession drops every scheduled job for s.
 func (x *ShellJobIndex) RemoveSession(ctx context.Context, s interfaces.SessionRef) error {
 	members, err := x.client.ZRange(ctx, shellJobIndexKey, 0, -1).Result()
 	if err != nil {
@@ -234,6 +245,7 @@ func (x *ShellJobIndex) RecordOutcome(ctx context.Context, s interfaces.SessionR
 	return x.client.Set(ctx, x.outcomeKey(s, workID), state, interfaces.NoticeRetention).Err()
 }
 
+// Outcome returns the terminal state recorded for one job.
 func (x *ShellJobIndex) Outcome(ctx context.Context, s interfaces.SessionRef, workID string) (string, bool, error) {
 	if x == nil || workID == "" {
 		return "", false, nil
@@ -293,6 +305,7 @@ func (x *ShellJobIndex) PutCursor(ctx context.Context, s interfaces.SessionRef, 
 	return err
 }
 
+// GetCursor returns a run's stored read offset for one job.
 func (x *ShellJobIndex) GetCursor(ctx context.Context, s interfaces.SessionRef, runID, workID string) (
 	sandbox.ShellJobOffsets, bool, error,
 ) {
@@ -315,7 +328,9 @@ func (x *ShellJobIndex) GetCursor(ctx context.Context, s interfaces.SessionRef, 
 
 // TouchRunCursors extends every cursor for one run. EndShellJobRun calls it
 // so the offsets live for an hour after the run, not after the last read.
-func (x *ShellJobIndex) TouchRunCursors(ctx context.Context, s interfaces.SessionRef, runID string, ttl time.Duration) error {
+func (x *ShellJobIndex) TouchRunCursors(
+	ctx context.Context, s interfaces.SessionRef, runID string, ttl time.Duration,
+) error {
 	if x == nil || runID == "" {
 		return nil
 	}
