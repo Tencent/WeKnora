@@ -229,7 +229,9 @@ func (s *streamToolIndex) resolve(explicit *int, id string) int {
 // decodeToolCalls decodes the tool calls of a message or of a streamed delta.
 // For a stream, pass the stream's streamToolIndex to number index-less calls
 // across chunks; without it a missing index falls back to the position in raws.
-func (c *Client) decodeToolCalls(raws []json.RawMessage, indexes *streamToolIndex) ([]types.LLMToolCall, []api.ToolCallDelta, error) {
+func (c *Client) decodeToolCalls(
+	raws []json.RawMessage, indexes *streamToolIndex,
+) ([]types.LLMToolCall, []api.ToolCallDelta, error) {
 	calls := make([]types.LLMToolCall, 0, len(raws))
 	deltas := make([]api.ToolCallDelta, 0, len(raws))
 	for i, raw := range raws {

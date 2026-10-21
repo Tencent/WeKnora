@@ -18,7 +18,7 @@ import (
 func streamCalls(t *testing.T, lines ...string) []types.LLMToolCall {
 	t.Helper()
 	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		for _, l := range lines {
 			_, _ = w.Write([]byte("data: " + l + "\n\n"))
@@ -55,7 +55,9 @@ func TestChatStream_IndexedToolCallsStayApart(t *testing.T) {
 	calls := streamCalls(t,
 		toolChunk(`{"index":0,"id":"a","type":"function","function":{"name":"get_weather","arguments":""}}`, ""),
 		toolChunk(`{"index":0,"function":{"arguments":"{\"city\":\"Paris\"}"}}`, ""),
-		toolChunk(`{"index":1,"id":"b","type":"function","function":{"name":"get_time","arguments":"{}"}}`, "tool_calls"),
+		toolChunk(
+			`{"index":1,"id":"b","type":"function","function":{"name":"get_time","arguments":"{}"}}`,
+			"tool_calls"),
 	)
 	require.Len(t, calls, 2)
 	assert.Equal(t, "get_weather", calls[0].Function.Name)
@@ -66,8 +68,12 @@ func TestChatStream_IndexedToolCallsStayApart(t *testing.T) {
 func TestChatStream_ParallelCallsWithoutIndexStayApart(t *testing.T) {
 	// Each call arrives whole in its own chunk and no chunk has an index.
 	calls := streamCalls(t,
-		toolChunk(`{"id":"a","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}`, ""),
-		toolChunk(`{"id":"b","type":"function","function":{"name":"get_time","arguments":"{\"tz\":\"UTC\"}"}}`, "tool_calls"),
+		toolChunk(
+			`{"id":"a","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}`,
+			""),
+		toolChunk(
+			`{"id":"b","type":"function","function":{"name":"get_time","arguments":"{\"tz\":\"UTC\"}"}}`,
+			"tool_calls"),
 	)
 	require.Len(t, calls, 2)
 	assert.Equal(t, "a", calls[0].ID)
