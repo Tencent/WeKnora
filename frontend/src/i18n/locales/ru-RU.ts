@@ -1352,6 +1352,8 @@ export default {
       confluenceEditionCloud: 'Cloud',
       confluenceBaseUrl: 'URL Confluence',
       confluenceUsername: 'Имя пользователя или эл. почта',
+      confluencePat: 'Персональный токен Server/DC (PAT)',
+      confluencePatHint: 'Необязательно. При указании используется Bearer-аутентификация; имя пользователя и пароль не требуются.',
       confluencePassword: 'Пароль Server/DC',
       confluenceApiToken: 'API-токен Cloud',
       clientId: 'Client ID',

@@ -7877,6 +7877,8 @@ export default {
       confluenceEditionCloud: 'Cloud',
       confluenceBaseUrl: 'Confluence URL',
       confluenceUsername: 'Username or email',
+      confluencePat: 'Server/DC personal access token (PAT)',
+      confluencePatHint: 'Optional. When provided, uses Bearer authentication; username and password are not required.',
       confluencePassword: 'Server/DC password',
       confluenceApiToken: 'Cloud API token',
       imaClientId: 'IMA ClientID',

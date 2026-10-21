@@ -1352,6 +1352,8 @@ export default {
       confluenceEditionCloud: 'Cloud',
       confluenceBaseUrl: 'Confluence URL',
       confluenceUsername: '사용자 이름 또는 이메일',
+      confluencePat: 'Server/DC 개인 액세스 토큰(PAT)',
+      confluencePatHint: '선택 사항입니다. 입력하면 Bearer 인증을 사용하며 사용자 이름과 비밀번호가 필요하지 않습니다.',
       confluencePassword: 'Server/DC 비밀번호',
       confluenceApiToken: 'Cloud API 토큰',
       clientId: 'Client ID',

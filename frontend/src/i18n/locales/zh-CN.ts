@@ -1354,6 +1354,8 @@ export default {
       confluenceEditionCloud: 'Cloud',
       confluenceBaseUrl: 'Confluence 地址',
       confluenceUsername: '用户名或邮箱',
+      confluencePat: 'Server/DC 个人访问令牌（PAT）',
+      confluencePatHint: '选填。填写后使用 Bearer 认证，无需用户名和密码。',
       confluencePassword: 'Server/DC 密码',
       confluenceApiToken: 'Cloud API 令牌',
       clientId: 'Client ID',

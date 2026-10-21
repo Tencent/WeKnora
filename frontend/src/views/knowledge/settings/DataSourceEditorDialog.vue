@@ -698,6 +698,7 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     fields: [
       { key: 'base_url', labelKey: 'datasource.field.confluenceBaseUrl', placeholder: 'https://confluence.example.com or https://team.atlassian.net/wiki' },
       { key: 'username', labelKey: 'datasource.field.confluenceUsername', placeholder: 'name or email' },
+      { key: 'token', labelKey: 'datasource.field.confluencePat', placeholder: 'Server/DC PAT', secret: true, optional: true, hintKey: 'datasource.field.confluencePatHint' },
       { key: 'password', labelKey: 'datasource.field.confluencePassword', placeholder: 'Server/DC password', secret: true },
       { key: 'api_token', labelKey: 'datasource.field.confluenceApiToken', placeholder: 'Cloud API token', secret: true },
     ],
@@ -785,9 +786,16 @@ const displayedCredentialFields = computed(() => {
   if (form.value.type !== "confluence") return fields
 
   return fields.filter((field) => {
-    if (field.key === "password") return form.value.config.credentials.edition !== "cloud"
+    if (field.key === "password" || field.key === "token") return form.value.config.credentials.edition !== "cloud"
     if (field.key === "api_token") return form.value.config.credentials.edition === "cloud"
     return true
+  }).map((field) => {
+    const hasPAT = form.value.config.credentials.edition !== "cloud" &&
+      !!String(form.value.config.credentials.token || "").trim()
+    if (field.key === "username" || field.key === "password") {
+      return { ...field, optional: hasPAT }
+    }
+    return field
   })
 })
 

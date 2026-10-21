@@ -7877,6 +7877,8 @@ export default {
       confluenceEditionCloud: 'Cloud',
       confluenceBaseUrl: 'Confluence URL',
       confluenceUsername: 'ユーザー名またはメールアドレス',
+      confluencePat: 'Server/DC 個人アクセストークン（PAT）',
+      confluencePatHint: '任意。指定すると Bearer 認証を使用し、ユーザー名とパスワードは不要です。',
       confluencePassword: 'Server/DC パスワード',
       confluenceApiToken: 'Cloud API トークン',
       imaClientId: 'IMA ClientID',
