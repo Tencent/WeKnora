@@ -55,7 +55,32 @@ export type SourceLocateRequest = {
 // break matching.
 
 const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u
-const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+const GRAPHEMES = typeof Intl.Segmenter === 'function'
+  ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+  : undefined
+
+function* normalizationSpans(raw: string): Iterable<{ segment: string; index: number }> {
+  if (GRAPHEMES) {
+    yield* GRAPHEMES.segment(raw)
+    return
+  }
+  // Older browsers can normalize NFC without supporting Intl.Segmenter. Keep
+  // marks with their base and join adjacent starters only when they compose
+  // (notably Hangul L/V/T). These are normalization spans, not full graphemes.
+  let segment = '', index = 0
+  for (const ch of raw) {
+    if (segment && !/\p{M}/u.test(ch)) {
+      const boundary = segment.normalize('NFC') + ch.normalize('NFC')
+      if (boundary.normalize('NFC') === boundary) {
+        yield { segment, index }
+        index += segment.length
+        segment = ''
+      }
+    }
+    segment += ch
+  }
+  if (segment) yield { segment, index }
+}
 
 export function foldChar(ch: string): string {
   if (!LETTER_OR_DIGIT.test(ch)) return ''
@@ -72,10 +97,10 @@ export function normalizeWithPositions(text: string): { norm: string; pos: numbe
   const canonical = raw.normalize('NFC')
   const chars = Array.from(canonical)
   const starts: number[] = [], ends: number[] = []
-  // Most text is already NFC. Only build the grapheme map when composition or
+  // Most text is already NFC. Only build the span map when composition or
   // combining marks require a different span than one original code point.
   if (canonical !== raw || /\p{M}/u.test(raw)) {
-    for (const { segment, index } of GRAPHEMES.segment(raw)) {
+    for (const { segment, index } of normalizationSpans(raw)) {
       const length = Array.from(segment.normalize('NFC')).length
       for (let j = 0; j < length; j++) {
         starts.push(index)
