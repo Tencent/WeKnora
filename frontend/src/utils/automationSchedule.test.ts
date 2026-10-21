@@ -82,3 +82,37 @@ test('only disabled one-shot schedules with no future occurrence have ended', ()
   assert.equal(hasEndedOnceSchedule(once('2026-10-20T15:59:59+08:00', true), now), false)
   assert.equal(hasEndedOnceSchedule({ enabled: false, trigger: { type: 'cron', expr: '0 9 * * *' } }, now), false)
 })
+
+
+test('once triggers reject wall-clock times skipped by a timezone transition', () => {
+  for (const [local, zone] of [
+    ['2026-03-08 02:30', 'America/New_York'],
+    ['2026-10-04 02:15', 'Australia/Lord_Howe'],
+    ['2011-12-30 12:00', 'Pacific/Apia'],
+  ]) {
+    assert.equal(wallClockToISO(local, zone), '', `${local} in ${zone}`)
+    assert.equal(triggerFromScheduleForm({ ...defaultScheduleForm(), kind: 'once', at: local }, zone), null)
+  }
+})
+
+test('once triggers reject invalid calendar dates, clock fields and timezone names', () => {
+  for (const local of ['2026-02-29 09:00', '2026-04-31 09:00', '2026-13-01 09:00',
+    '2026-01-00 09:00', '2026-01-01 24:00', '2026-01-01 09:60', '2026-01-01 09:00oops']) {
+    assert.equal(wallClockToISO(local, 'UTC'), '', local)
+  }
+  assert.equal(wallClockToISO('2026-01-01 09:00', 'Invalid/Timezone'), '')
+})
+
+test('valid leap days and times adjacent to transitions retain the requested wall clock', () => {
+  for (const [local, zone] of [
+    ['2028-02-29 09:00', 'UTC'],
+    ['2026-03-08 01:30', 'America/New_York'],
+    ['2026-03-08 03:30', 'America/New_York'],
+    ['2026-11-01 01:30', 'America/New_York'],
+    ['2026-10-04 02:30', 'Australia/Lord_Howe'],
+  ]) {
+    const iso = wallClockToISO(local, zone)
+    assert.ok(iso, `${local} in ${zone}`)
+    assert.equal(zonedWallClock(iso, zone), local)
+  }
+})
