@@ -236,6 +236,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		return b
 	}))
 	must(container.Provide(newAdmissionRegistry))
+	must(container.Provide(newSessionBindingStore))
 	must(container.Provide(newTenantSandboxResolver))
 	// The resolver admits user-mode sessions, so the allocation service has to
 	// exist before the first Invoke that builds a TenantSandboxResolver
@@ -247,6 +248,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	) *sandboxalloc.Service {
 		return sandboxalloc.New(repo, configs, sessions, sandboxRedisNamespace())
 	}))
+	must(container.Provide(newBackgroundActivityRegistry))
+	must(container.Provide(newBackgroundNoticeInbox))
+	must(container.Provide(service.NewBackgroundWork))
 
 	// Business service layer
 	logger.Debugf(ctx, "[Container] Registering business services...")
@@ -436,11 +440,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(func(
 		mgr sandbox.Manager,
 		pinned *service.PinnedSessionSandbox,
+		activity interfaces.ActivityRegistry,
 	) *service.WorkspaceCheckpointer {
 		if runner, ok := mgr.(service.SandboxShellRunner); ok {
-			return service.NewWorkspaceCheckpointer(runner)
+			return service.NewWorkspaceCheckpointer(runner).WithActivityRegistry(activity)
 		}
-		return service.NewWorkspaceCheckpointer(pinned)
+		return service.NewWorkspaceCheckpointer(pinned).WithActivityRegistry(activity)
 	}))
 	must(container.Provide(func(
 		mgr sandbox.Manager,
