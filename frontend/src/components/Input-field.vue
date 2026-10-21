@@ -3255,6 +3255,10 @@ const getImgSrc = (url: string) => {
   background: var(--td-bg-color-container);
   border-radius: 11px 11px 0 0;
   /* 与 .rich-input-container 内缘上边圆角一致（12px - 1px 边框） */
+  /* 知识库/文件 chip 过多时限制高度（约 3 行 chip），内部滚动，避免输入框
+     无限撑高遮挡对话（issue #4545） */
+  max-height: 90px;
+  overflow-y: auto;
 }
 
 .rich-input-container:has(.selected-tags-inline) :deep(.t-textarea__inner) {
