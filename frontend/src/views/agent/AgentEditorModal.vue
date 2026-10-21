@@ -3820,7 +3820,10 @@ const initMcpSelectionMode = () => {
     // 有指定 MCP 服务
     mcpSelectionMode.value = 'selected';
   } else {
-    mcpSelectionMode.value = 'none';
+    // Legacy configs with no mode run with every enabled MCP service for the
+    // owner (registerMCPTools treats "" as "all"). Show that actual runtime
+    // behaviour so the editor matches what the agent can call.
+    mcpSelectionMode.value = 'all';
   }
 };
 
@@ -3888,6 +3891,10 @@ watch(kbSelectionMode, (mode) => {
 
 // 监听 MCP 选择模式变化
 watch(mcpSelectionMode, (mode) => {
+  // Hydration may map a legacy empty mode to "all" for display only; do not
+  // persist that translation or clear the stored service list until the user
+  // actually changes the radio group.
+  if (isInitializing.value) return;
   formData.value.config.mcp_selection_mode = mode;
   if (mode === 'none') {
     // 不使用 MCP，清空相关配置

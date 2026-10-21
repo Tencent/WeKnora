@@ -185,3 +185,24 @@ test('retrieval strategy settings are hidden in agent mode, where search_knowled
   const modeWatch = source.match(/watch\(isAgentMode, \(isAgent\) => \{([\s\S]*?)^\}\);/m)?.[1] ?? ''
   assert.match(modeWatch, /isAgent && \([^)]*currentSection\.value === 'retrieval'/)
 })
+
+test('legacy empty MCP config opens as all, matching the owner runtime', () => {
+  const init = source.match(/const initMcpSelectionMode = \(\) => \{([\s\S]*?)^\};/m)?.[1]
+  assert.ok(init, 'expected to find initMcpSelectionMode')
+  assert.match(
+    init,
+    /mcpSelectionMode\.value = 'all'/,
+    'empty mode must not display disabled while registerMCPTools loads every service',
+  )
+  assert.match(init, /mcp_selection_mode\)/, 'an explicitly saved mode still wins')
+  assert.match(init, /'selected'/, 'a non-empty service list still opens as selected')
+})
+test('MCP mode hydration does not persist the display-only translation', () => {
+  const watchBlock = source.match(/watch\(mcpSelectionMode, \(mode\) => \{([\s\S]*?)^\}\);/m)?.[1]
+  assert.ok(watchBlock, 'expected to find the MCP selection watcher')
+  assert.match(
+    watchBlock,
+    /if \(isInitializing\.value\) return;/,
+    'opening a legacy agent must not rewrite its stored MCP config',
+  )
+})
