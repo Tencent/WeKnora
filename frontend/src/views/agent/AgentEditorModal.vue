@@ -3893,7 +3893,7 @@ watch(kbSelectionMode, (mode) => {
 watch(mcpSelectionMode, (mode) => {
   // Hydration may map a legacy empty mode to "all" for display only; do not
   // persist that translation or clear the stored service list until the user
-  // actually changes the radio group.
+  // actually edits the MCP selection.
   if (isInitializing.value) return;
   formData.value.config.mcp_selection_mode = mode;
   if (mode === 'none') {
@@ -3905,6 +3905,14 @@ watch(mcpSelectionMode, (mode) => {
   }
   // selected 模式保持 mcp_services 不变
 });
+
+// Editing a legacy list is an explicit selection even if the radio was
+// already displayed as "selected". An empty list must also stay selected,
+// since an unset mode would allow every enabled service at runtime.
+watch(() => formData.value.config.mcp_services, () => {
+  if (isInitializing.value || mcpSelectionMode.value !== 'selected') return;
+  formData.value.config.mcp_selection_mode = 'selected';
+}, { deep: true });
 
 watch(() => formData.value.config.sandbox_config_id, async () => {
   if (!props.visible) return
