@@ -306,18 +306,16 @@ func (s *tenantService) GetTenantByIDForUser(ctx context.Context, tenantID uint6
 }
 
 func (s *tenantService) GetWeKnoraCloudCredentials(ctx context.Context) *types.WeKnoraCloudCredentials {
-	// Try to get tenant info from context first (already loaded by middleware).
-	// CredentialsConfig.Scan handles decryption, so credentials are ready to use.
-	if tenant, ok := types.TenantInfoFromContext(ctx); ok {
-		if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
-			return creds
-		}
-	}
-
-	// Fallback: load tenant from repo by tenantID
 	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
 		return nil
+	}
+	// Model initialization may run for a shared KB's owner while middleware
+	// still carries the caller's tenant info. Never reuse another tenant's credentials.
+	if tenant, ok := types.TenantInfoFromContext(ctx); ok && tenant != nil && tenant.ID == tenantID {
+		if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
+			return creds
+		}
 	}
 
 	tenant, err := s.repo.GetTenantByID(ctx, tenantID)
