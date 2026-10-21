@@ -1237,6 +1237,23 @@ def _render_scanned_pages(
     return out
 
 
+def _encode_rendered_page_images(rendered: dict, base_name: str) -> dict:
+    """Encode rendered pages while releasing each raw JPEG immediately.
+
+    ``_render_scanned_pages`` returns raw JPEG bytes because the render workers
+    need that representation.  Keeping the raw mapping alive while building a
+    second base64 mapping temporarily doubles the image memory for a scanned
+    document.  Pop each page before encoding it so the parser retains only the
+    representation that the gRPC response needs.
+    """
+    encoded = {}
+    for index in sorted(rendered):
+        image_bytes = rendered.pop(index)
+        ref_path = f"images/{base_name}_page_{index + 1}.jpg"
+        encoded[ref_path] = base64.b64encode(image_bytes).decode("utf-8")
+    return encoded
+
+
 def _select_embedded_images(
     meta: list,
     num_text_pages: int,
@@ -1491,6 +1508,7 @@ class PDFScannedParser(BaseParser):
 
             source_blocks = []
             offset = 0
+            images.update(_encode_rendered_page_images(rendered, base_name))
             for i in range(page_count):
                 page_filename = f"{base_name}_page_{i+1}.jpg"
                 ref_path = f"images/{page_filename}"
@@ -1506,7 +1524,6 @@ class PDFScannedParser(BaseParser):
                     }
                 )
                 offset += len(line)
-                images[ref_path] = base64.b64encode(rendered[i]).decode("utf-8")
 
             text = "\n\n".join(markdown_lines)
             return Document(
@@ -1672,9 +1689,7 @@ class PDFParser(BaseParser):
                         quality,
                         CONFIG.pdf_render_max_edge,
                     )
-                for i, img_bytes in rendered.items():
-                    ref_path = f"images/{base_name}_page_{i+1}.jpg"
-                    images[ref_path] = base64.b64encode(img_bytes).decode("utf-8")
+                images.update(_encode_rendered_page_images(rendered, base_name))
 
             # Pass 3: extract embedded figures from native text pages so the Go
             # App can OCR/caption them (logos/watermarks/tiny images filtered).
