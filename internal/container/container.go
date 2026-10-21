@@ -1048,6 +1048,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		NowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
+		Logger: newGormLogger(os.Stdout),
 	})
 	if err != nil {
 		return nil, err
