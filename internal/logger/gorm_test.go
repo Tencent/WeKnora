@@ -5,12 +5,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	gormlogger "gorm.io/gorm/logger"
 )
 
 // The slow-query path must keep its diagnostics: the statement and the elapsed
 // time are what an operator needs to triage a heavy batch. Only the bind
 // values are withheld, because those carry chunk text and embedding payloads.
-func TestNewGORMLogsSlowQueriesWithoutBindValues(t *testing.T) {
+func TestNewGORMKeepsSlowQueryDiagnostics(t *testing.T) {
 	var out strings.Builder
 	lg := NewGORMTo(&out)
 
@@ -50,5 +52,18 @@ func TestNewGORMParameterizesSQL(t *testing.T) {
 	}
 	if len(vars) != 0 {
 		t.Fatalf("parameterized mode must drop bind values, got %v", vars)
+	}
+
+	// Prove the assertion is meaningful: the same statement with bind values
+	// does render the sensitive payload, while the filtered form never does.
+	withValues := gormlogger.ExplainSQL(sql, nil, `'`, "SECRET_CHUNK_TEXT", "VECTOR_PAYLOAD")
+	if !strings.Contains(withValues, "SECRET_CHUNK_TEXT") ||
+		!strings.Contains(withValues, "VECTOR_PAYLOAD") {
+		t.Fatalf("control render did not include bind values: %q", withValues)
+	}
+	withoutValues := gormlogger.ExplainSQL(sql, nil, `'`, vars...)
+	if strings.Contains(withoutValues, "SECRET_CHUNK_TEXT") ||
+		strings.Contains(withoutValues, "VECTOR_PAYLOAD") {
+		t.Fatalf("parameterized render leaked bind values: %q", withoutValues)
 	}
 }
