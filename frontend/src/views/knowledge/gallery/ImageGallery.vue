@@ -504,10 +504,22 @@ function toggleShowMeta(): void {
   persistViewPrefs()
 }
 
-// Slider stops live-track the layout width so every stop changes the grid:
-// as many columns as fit between ~150px and ~360px per card.
-const minCols = computed(() => Math.max(1, Math.floor(gridWidth.value / 360)))
-const maxCols = computed(() => Math.max(minCols.value, Math.ceil(gridWidth.value / 150)))
+// Slider stops live-track the layout width: the top stop is a hard floor of
+// ~150px per card, the bottom stop starts at one card per ~360px of width.
+const CARD_MIN_WIDTH = 150
+const CARD_MAX_WIDTH = 360
+const minCols = computed(() => Math.max(1, Math.floor(gridWidth.value / CARD_MAX_WIDTH)))
+// The upper stop is a real floor of CARD_MIN_WIDTH per card, so the column
+// count has to satisfy (w - gap * (n - 1)) / n >= CARD_MIN_WIDTH, i.e.
+// n <= (w + gap) / (CARD_MIN_WIDTH + gap). Rounding w / 150 up instead allowed
+// one column too many and squeezed cards below that floor, which is what a
+// narrow window used to look like (520px wide gave four 127px columns).
+const maxCols = computed(() =>
+  Math.max(
+    minCols.value,
+    Math.floor((gridWidth.value + GRID_GAP) / (CARD_MIN_WIDTH + GRID_GAP)),
+  ),
+)
 const effCols = computed(() => {
   const base = thumbCols.value > 0 ? thumbCols.value : Math.round(gridWidth.value / THUMB_AUTO_WIDTH)
   return Math.min(maxCols.value, Math.max(minCols.value, base))
