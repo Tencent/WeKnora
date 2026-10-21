@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
+	"unicode"
 
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -18,13 +20,14 @@ import (
 
 // pgRepository implements PostgreSQL-based retrieval operations
 type pgRepository struct {
-	db *gorm.DB // Database connection
+	db         *gorm.DB // Database connection
+	textSearch bool
 }
 
 // NewPostgresRetrieveEngineRepository creates a new PostgreSQL retriever repository
 func NewPostgresRetrieveEngineRepository(db *gorm.DB) interfaces.RetrieveEngineRepository {
 	logger.GetLogger(context.Background()).Info("[Postgres] Initializing PostgreSQL retriever engine repository")
-	return &pgRepository{db: db}
+	return &pgRepository{db: db, textSearch: os.Getenv("POSTGRES_SEARCH_EXTENSION") == "pg_textsearch"}
 }
 
 // EngineType returns the retriever engine type (PostgreSQL)
@@ -66,7 +69,7 @@ func (g *pgRepository) EstimateStorageSize(
 ) int64 {
 	var totalStorageSize int64 = 0
 	for _, indexInfo := range indexInfoList {
-		embeddingDB := toDBVectorEmbedding(indexInfo, additionalParams)
+		embeddingDB := toDBVectorEmbedding(indexInfo, additionalParams, g.textSearch)
 		totalStorageSize += g.calculateIndexStorageSize(embeddingDB)
 	}
 	logger.GetLogger(ctx).Infof(
@@ -84,14 +87,14 @@ var upsertBySource = clause.OnConflict{
 	Columns: []clause.Column{{Name: "source_id"}, {Name: "source_type"}},
 	DoUpdates: clause.AssignmentColumns([]string{
 		"chunk_id", "knowledge_id", "knowledge_base_id", "tag_id",
-		"content", "dimension", "embedding", "is_enabled", "updated_at",
+		"content", "search_content", "dimension", "embedding", "is_enabled", "updated_at",
 	}),
 }
 
 // Save stores a single index entry
 func (g *pgRepository) Save(ctx context.Context, indexInfo *types.IndexInfo, additionalParams map[string]any) error {
 	logger.GetLogger(ctx).Debugf("[Postgres] Saving index for source ID: %s", indexInfo.SourceID)
-	embeddingDB := toDBVectorEmbedding(indexInfo, additionalParams)
+	embeddingDB := toDBVectorEmbedding(indexInfo, additionalParams, g.textSearch)
 	err := g.db.WithContext(ctx).Clauses(upsertBySource).Create(embeddingDB).Error
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("[Postgres] Failed to save index: %v", err)
@@ -115,7 +118,7 @@ func (g *pgRepository) BatchSave(
 	positions := make(map[sourceKey]int, len(indexInfoList))
 	indexInfoDBList := make([]*pgVector, 0, len(indexInfoList))
 	for _, indexInfo := range indexInfoList {
-		row := toDBVectorEmbedding(indexInfo, additionalParams)
+		row := toDBVectorEmbedding(indexInfo, additionalParams, g.textSearch)
 		key := sourceKey{id: row.SourceID, typ: row.SourceType}
 		if i, ok := positions[key]; ok {
 			indexInfoDBList[i] = row
@@ -220,36 +223,58 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 		})
 	}
 
-	// Use ParadeDB's ||| operator for matching any token
-	conds = append(conds, clause.Expr{
-		SQL:  "content ||| ?",
-		Vars: []interface{}{params.Query},
-	})
-
-	// Filter by is_enabled = true or NULL (NULL means enabled for historical data)
-	conds = append(conds, clause.Expr{
-		SQL:  "(is_enabled IS NULL OR is_enabled = ?)",
-		Vars: []interface{}{true},
-	})
-	conds = append(conds, clause.OrderBy{Columns: []clause.OrderByColumn{
-		{Column: clause.Column{Name: "score"}, Desc: true},
-	}})
-
 	var embeddingDBList []pgVectorWithScore
-	err := g.db.WithContext(ctx).Clauses(conds...).
-		Select([]string{
-			"paradedb.score(id) as score",
-			"id",
-			"content",
-			"source_id",
-			"source_type",
-			"chunk_id",
-			"knowledge_id",
-			"knowledge_base_id",
-			"tag_id",
-		}).
-		Limit(int(params.TopK)).
-		Find(&embeddingDBList).Error
+	var err error
+	if g.textSearch {
+		query := keywordText(params.Query)
+		hasTerm := strings.IndexFunc(query, func(r rune) bool {
+			return unicode.IsLetter(r) || unicode.IsNumber(r)
+		}) >= 0
+		if !hasTerm || params.TopK <= 0 {
+			return nil, nil
+		}
+		ranked := g.db.WithContext(ctx).Model(&pgVector{}).Clauses(conds...).
+			Where("(is_enabled IS NULL OR is_enabled = ?)", true).
+			Select("id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id, tag_id, "+
+				"search_content <@> to_bm25query(?, 'embeddings_textsearch_idx') AS bm25_distance", query).
+			Clauses(clause.OrderBy{Expression: clause.Expr{
+				SQL: "search_content <@> to_bm25query(?, 'embeddings_textsearch_idx') ASC", Vars: []any{query},
+			}}).Limit(int(params.TopK))
+		// Materialize top-k before removing zero-score nonmatches; keep higher-is-better scores for fusion.
+		err = g.db.WithContext(ctx).Raw(`WITH ranked AS MATERIALIZED (?)
+			SELECT ranked.*, -bm25_distance AS score FROM ranked
+			WHERE bm25_distance < 0 ORDER BY bm25_distance ASC`, ranked).Scan(&embeddingDBList).Error
+	} else {
+		// Use ParadeDB's ||| operator for matching any token
+		conds = append(conds, clause.Expr{
+			SQL:  "content ||| ?",
+			Vars: []interface{}{params.Query},
+		})
+
+		// Filter by is_enabled = true or NULL (NULL means enabled for historical data)
+		conds = append(conds, clause.Expr{
+			SQL:  "(is_enabled IS NULL OR is_enabled = ?)",
+			Vars: []interface{}{true},
+		})
+		conds = append(conds, clause.OrderBy{Columns: []clause.OrderByColumn{
+			{Column: clause.Column{Name: "score"}, Desc: true},
+		}})
+
+		err = g.db.WithContext(ctx).Clauses(conds...).
+			Select([]string{
+				"paradedb.score(id) as score",
+				"id",
+				"content",
+				"source_id",
+				"source_type",
+				"chunk_id",
+				"knowledge_id",
+				"knowledge_base_id",
+				"tag_id",
+			}).
+			Limit(int(params.TopK)).
+			Find(&embeddingDBList).Error
+	}
 
 	if err == gorm.ErrRecordNotFound {
 		logger.GetLogger(ctx).Warnf("[Postgres] No records found for keywords query: %s", params.Query)
@@ -610,6 +635,7 @@ func (g *pgRepository) CopyIndices(ctx context.Context,
 			// Create new vector index, copy the content and vector of the source index
 			targetVector := &pgVector{
 				Content:         sourceVector.Content,
+				SearchContent:   sourceVector.SearchContent,
 				SourceID:        targetSourceID, // Handle SourceID transformation properly
 				SourceType:      sourceVector.SourceType,
 				ChunkID:         targetChunkID,         // Update to target chunk ID
@@ -618,6 +644,10 @@ func (g *pgRepository) CopyIndices(ctx context.Context,
 				Dimension:       sourceVector.Dimension,
 				Embedding:       sourceVector.Embedding, // Copy the vector embedding directly, avoid recalculation
 				IsEnabled:       sourceVector.IsEnabled,
+			}
+			if g.textSearch && targetVector.SearchContent == nil {
+				content := keywordText(targetVector.Content)
+				targetVector.SearchContent = &content
 			}
 
 			targetVectors = append(targetVectors, targetVector)

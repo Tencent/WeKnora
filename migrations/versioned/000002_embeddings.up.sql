@@ -2,6 +2,8 @@
 -- Description: Create embeddings table and indexes (only for postgres retrieve driver)
 
 DO $$
+DECLARE
+    search_extension TEXT := COALESCE(NULLIF(current_setting('app.postgres_search_extension', true), ''), 'pg_search');
 BEGIN
     -- Check if we should skip this migration
     IF current_setting('app.skip_embedding', true) = 'true' THEN
@@ -15,7 +17,14 @@ BEGIN
     -- Create required extensions
     CREATE EXTENSION IF NOT EXISTS vector;
     CREATE EXTENSION IF NOT EXISTS pg_trgm;
-    CREATE EXTENSION IF NOT EXISTS pg_search;
+    IF search_extension = 'pg_textsearch' THEN
+        IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_search') THEN
+            RAISE EXCEPTION 'pg_textsearch requires a target database without pg_search; keep the source database unchanged';
+        END IF;
+        CREATE EXTENSION IF NOT EXISTS pg_textsearch;
+    ELSE
+        CREATE EXTENSION IF NOT EXISTS pg_search;
+    END IF;
 
     -- Create embeddings table
     RAISE NOTICE '[Conditional Migration: embeddings] Creating indexes for embeddings (this may take a while)...';
@@ -31,6 +40,7 @@ BEGIN
         knowledge_id VARCHAR(64),
         knowledge_base_id VARCHAR(64),
         content TEXT,
+        search_content TEXT,
         dimension INTEGER NOT NULL,
         embedding halfvec
     );
@@ -38,7 +48,10 @@ BEGIN
     CREATE UNIQUE INDEX IF NOT EXISTS embeddings_unique_source ON embeddings(source_id, source_type);
 
     -- Create BM25 search index (check if exists first)
-    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'embeddings_search_idx') THEN
+    IF search_extension = 'pg_textsearch' THEN
+        CREATE INDEX IF NOT EXISTS embeddings_textsearch_idx ON embeddings
+            USING bm25 (search_content) WITH (text_config = 'simple');
+    ELSIF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'embeddings_search_idx') THEN
         CREATE INDEX embeddings_search_idx ON embeddings
         USING bm25 (id, knowledge_base_id, content, knowledge_id, chunk_id)
         WITH (
