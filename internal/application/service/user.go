@@ -721,6 +721,11 @@ func (s *userService) UpdateUserPreferences(
 			}
 			g.ThumbCols = w
 		}
+		// nil keeps whatever was recorded: "not sent" and "sent false" are
+		// different answers here, so the pointer is the wire format.
+		if patch.Gallery.ShowMeta != nil {
+			g.ShowMeta = patch.Gallery.ShowMeta
+		}
 		merged.Gallery = g
 	}
 

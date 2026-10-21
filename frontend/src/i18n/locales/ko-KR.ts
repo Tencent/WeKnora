@@ -5346,6 +5346,8 @@ export default {
         viewWaterfall: '워터폴',
         viewCard: '카드',
         thumbSize: '썸네일 크기',
+        viewInfo: '이미지 정보',
+        viewInfoShow: '캡션과 출처 표시',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).

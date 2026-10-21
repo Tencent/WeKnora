@@ -55,6 +55,9 @@ type GalleryPolicyTier struct {
 	// ThumbCols is the user-tier preferred thumbnail column count.
 	// 0 = not recorded (the client derives a count from its own width).
 	ThumbCols int `json:"thumb_cols,omitempty"`
+	// ShowMeta is the user-tier caption/source visibility. nil = not
+	// recorded, which resolves to shown. Only meaningful in the user tier.
+	ShowMeta *bool `json:"show_meta,omitempty"`
 }
 
 // Gallery resolved-config constants.
@@ -119,6 +122,9 @@ type GalleryResolvedConfig struct {
 	// the client derives a count from its current layout width, because a
 	// server-side default cannot know the viewport.
 	ThumbCols int `json:"thumb_cols"`
+	// ShowMeta renders the caption and source document under each
+	// thumbnail. True unless the user switched them off.
+	ShowMeta bool `json:"show_meta"`
 }
 
 // galleryUsageFrom labels for UsageFrom, ordered low -> high.
@@ -140,6 +146,7 @@ func ResolveGalleryConfig(kbID string, system, kb, user *GalleryPolicyTier) *Gal
 		Attributes:       []GalleryResolvedAttr{},
 		Mode:             GalleryModeAll,
 		ViewMode:         GalleryViewWaterfall,
+		ShowMeta:         true,
 	}
 
 	// Source on/off: the highest tier that mentions the source wins.
@@ -189,6 +196,9 @@ func ResolveGalleryConfig(kbID string, system, kb, user *GalleryPolicyTier) *Gal
 		}
 		if user.ThumbCols >= 1 && user.ThumbCols <= GalleryThumbColsMax {
 			res.ThumbCols = user.ThumbCols
+		}
+		if user.ShowMeta != nil {
+			res.ShowMeta = *user.ShowMeta
 		}
 	}
 	return res

@@ -3833,6 +3833,8 @@ export default {
         viewWaterfall: 'ウォーターフォール',
         viewCard: 'カード',
         thumbSize: 'サムネイルサイズ',
+        viewInfo: '画像情報',
+        viewInfoShow: 'キャプションと出典を表示',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).

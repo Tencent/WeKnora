@@ -80,3 +80,44 @@ func TestGalleryViewPreferencesValidation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, prefs.Gallery.ThumbCols, "negative values clamp to the lowest stop")
 }
+
+func TestGalleryMetaVisibilityPreference(t *testing.T) {
+	repo := &switchTenantUserRepo{users: map[string]types.User{
+		"alice": {ID: "alice"},
+	}}
+	users := &userService{userRepo: repo}
+	ctx := t.Context()
+	hide, show := false, true
+
+	// Off is recorded explicitly; nil (key not sent) is not the same answer.
+	prefs, err := users.UpdateUserPreferences(ctx, "alice", types.UserPreferences{
+		Gallery: &types.GalleryUserPrefs{ShowMeta: &hide},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, prefs.Gallery.ShowMeta)
+	require.False(t, *prefs.Gallery.ShowMeta)
+
+	// A view patch that does not mention the key keeps the recorded answer.
+	prefs, err = users.UpdateUserPreferences(ctx, "alice", types.UserPreferences{
+		Gallery: &types.GalleryUserPrefs{ViewMode: types.GalleryViewCard},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, prefs.Gallery.ShowMeta)
+	require.False(t, *prefs.Gallery.ShowMeta, "an unrelated view patch must not resurrect the caption block")
+
+	// Turning it back on is likewise a real record.
+	prefs, err = users.UpdateUserPreferences(ctx, "alice", types.UserPreferences{
+		Gallery: &types.GalleryUserPrefs{ShowMeta: &show},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, prefs.Gallery.ShowMeta)
+	require.True(t, *prefs.Gallery.ShowMeta)
+
+	// It also survives the DB JSON round-trip.
+	raw, err := prefs.Value()
+	require.NoError(t, err)
+	var decoded types.UserPreferences
+	require.NoError(t, decoded.Scan(raw))
+	require.NotNil(t, decoded.Gallery.ShowMeta)
+	require.True(t, *decoded.Gallery.ShowMeta)
+}

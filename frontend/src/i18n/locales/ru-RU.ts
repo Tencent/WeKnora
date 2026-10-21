@@ -5346,6 +5346,8 @@ export default {
         viewWaterfall: 'Водопад',
         viewCard: 'Карточки',
         thumbSize: 'Размер миниатюр',
+        viewInfo: 'Сведения об изображении',
+        viewInfoShow: 'Показывать подпись и источник',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).

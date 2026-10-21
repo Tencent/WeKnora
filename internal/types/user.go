@@ -78,6 +78,10 @@ type GalleryUserPrefs struct {
 	// ThumbCols is the preferred thumbnail column count recorded by the
 	// view slider. 0 = never recorded (client derives one from its width).
 	ThumbCols int `json:"thumb_cols,omitempty"`
+	// ShowMeta keeps the caption and the source document under each
+	// thumbnail. nil = never recorded, which reads back as shown, so a
+	// user who never touched the switch never sees a bare grid.
+	ShowMeta *bool `json:"show_meta,omitempty"`
 }
 
 // Value implements driver.Valuer so GORM persists UserPreferences as

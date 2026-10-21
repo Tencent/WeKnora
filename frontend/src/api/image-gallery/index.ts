@@ -231,6 +231,8 @@ export interface GalleryConfig {
   view_mode: 'waterfall' | 'card';
   /** Preferred thumbnail column count; 0 = unset (client derives one). */
   thumb_cols: number;
+  /** Whether cards show the caption and source document (default true). */
+  show_meta: boolean;
 }
 
 /** Fetch the gallery contract for a knowledge base. */
@@ -245,5 +247,6 @@ export async function fetchGalleryConfig(kbId: string): Promise<GalleryConfig> {
     status: res.data.status ?? {},
     view_mode: res.data.view_mode === 'card' ? 'card' : 'waterfall',
     thumb_cols: res.data.thumb_cols ?? 0,
+    show_meta: res.data.show_meta !== false,
   };
 }

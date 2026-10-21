@@ -5347,6 +5347,8 @@ export default {
         viewWaterfall: '瀑布流',
         viewCard: '卡片',
         thumbSize: '縮圖大小',
+        viewInfo: '圖片資訊',
+        viewInfoShow: '顯示摘要與來源',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).

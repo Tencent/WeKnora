@@ -62,12 +62,16 @@ const sourcePickerVisible = ref(false)
 // id -> literal values (OR within the attribute, AND across attributes).
 const attrSelections = ref<Record<string, string[]>>({})
 
-// View preferences: the layout mode and the thumbnail column count. The
-// slider picks how many cards a row holds, with its stops derived live from
-// the layout width (min = floor(w/360), max = ceil(w/150)), so every stop
-// always changes the layout. 0 = never recorded (auto: ~280px columns).
+// View preferences: the layout mode, the thumbnail column count and whether
+// the caption/source block is shown. The slider picks how many cards a row
+// holds, with its stops derived live from the layout width (min =
+// floor(w/360), max = ceil(w/150)), so every stop always changes the layout.
+// 0 = never recorded (auto: ~280px columns).
 const viewMode = ref<'waterfall' | 'card'>('waterfall')
 const thumbCols = ref(0)
+// When off, cards are the thumbnail alone: no caption, no source document.
+// Independent of the layout, so it works in both modes.
+const showMeta = ref(true)
 const gridWidth = ref(0)
 const THUMB_AUTO_WIDTH = 280
 const viewPanelVisible = ref(false)
@@ -92,6 +96,7 @@ const config = ref<GalleryConfig>({
   status: {},
   view_mode: 'waterfall',
   thumb_cols: 0,
+  show_meta: true,
 })
 const searchMode = ref<'all' | 'custom'>('all')
 // Per-attribute search toggle, keyed by namespaced attr id ("on"/"off").
@@ -205,15 +210,18 @@ function measureCardBox(): void {
   const meta = card?.querySelector<HTMLElement>('.ig-card__meta')
   const width = gridWidth.value
   const cols = renderCols.value || effCols.value || 0
-  if (!card || !thumb || !meta || !width || !cols) return
+  if (!card || !thumb || !width || !cols) return
   const track = (width - GRID_GAP * (cols - 1)) / cols
   const thumbRect = thumb.getBoundingClientRect()
-  const metaRect = meta.getBoundingClientRect()
   const cardRect = card.getBoundingClientRect()
+  // What the DOM actually shows right now (0 while the block is hidden), and
+  // what to remember for when it comes back.
+  const rendered = meta ? meta.getBoundingClientRect().height : 0
+  const remembered = meta ? rendered : (cardBox.value?.meta ?? DEFAULT_CARD_BOX.meta)
   cardBox.value = {
     thumbInset: Math.max(0, track - thumbRect.width),
-    meta: metaRect.height,
-    chrome: Math.max(0, cardRect.height - thumbRect.height - metaRect.height),
+    meta: remembered,
+    chrome: Math.max(0, cardRect.height - thumbRect.height - rendered),
   }
 }
 
@@ -229,7 +237,10 @@ function cardSpanStyle(id: string): { gridRowEnd: string } | undefined {
   if (!width || !cols) return undefined
   const track = (width - GRID_GAP * (cols - 1)) / cols
   const ratio = imageRatios.value[id] || FALLBACK_RATIO
-  const height = Math.max(1, (track - box.thumbInset) / ratio) + box.meta + box.chrome
+  // Hiding the caption/source block is a span input, not a CSS detail: the
+  // card really is that much shorter.
+  const meta = showMeta.value ? box.meta : 0
+  const height = Math.max(1, (track - box.thumbInset) / ratio) + meta + box.chrome
   return { gridRowEnd: `span ${Math.max(1, Math.ceil((height + GRID_GAP) / SPAN_STEP))}` }
 }
 
@@ -467,20 +478,30 @@ function isLastSearchField(attrId: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// View prefs (layout mode + thumbnail column count, persisted like the
-// search prefs: debounced PATCH of the gallery block, view keys only)
+// View prefs (layout mode, thumbnail column count, caption/source visibility;
+// persisted like the search prefs: debounced PATCH of the gallery block)
 // ---------------------------------------------------------------------------
 let viewPrefsTimer: ReturnType<typeof setTimeout> | undefined
 function persistViewPrefs() {
   if (!configLoaded.value) return
   if (viewPrefsTimer) clearTimeout(viewPrefsTimer)
   viewPrefsTimer = setTimeout(() => {
-    const gallery: { view_mode: 'waterfall' | 'card'; thumb_cols?: number } = {
+    const gallery: {
+      view_mode: 'waterfall' | 'card'
+      thumb_cols?: number
+      show_meta: boolean
+    } = {
       view_mode: viewMode.value,
+      show_meta: showMeta.value,
     }
     if (thumbCols.value > 0) gallery.thumb_cols = thumbCols.value
     void updateMyPreferences({ gallery })
   }, 500)
+}
+
+function toggleShowMeta(): void {
+  showMeta.value = !showMeta.value
+  persistViewPrefs()
 }
 
 // Slider stops live-track the layout width so every stop changes the grid:
@@ -518,6 +539,9 @@ const gridColsStyle = computed(() => ({ '--ig-cols': String(renderCols.value || 
 // track, same two-line caption), so it is also the moment worth re-measuring
 // the one card the spans are calibrated from.
 watch(renderCols, () => void nextTick(measureCardBox))
+// Showing or hiding the caption/source block changes what the spans are
+// calibrated from (the block's height becomes part of — or leaves — the card).
+watch(showMeta, () => void nextTick(measureCardBox))
 
 // Slider presentation runs small-on-left: its position mirrors the column
 // count inside [minCols, maxCols], so left = many small cards, right = few
@@ -775,6 +799,7 @@ async function initGallery() {
     status: {},
     view_mode: 'waterfall',
     thumb_cols: 0,
+    show_meta: true,
   }
   loading.value = true
   try {
@@ -785,6 +810,8 @@ async function initGallery() {
     searchStatus.value = { ...cfg.status }
     viewMode.value = cfg.view_mode === 'card' ? 'card' : 'waterfall'
     thumbCols.value = cfg.thumb_cols > 0 ? cfg.thumb_cols : 0
+    // Only an explicit false hides the caption/source block.
+    showMeta.value = cfg.show_meta !== false
     configLoaded.value = true
   } catch {
     if (token !== initToken) return
@@ -1026,6 +1053,20 @@ watch(
                   />
                 </div>
               </section>
+              <section class="ig-sort-group">
+                <div class="ig-sort-group__label">{{ t(`${NS}.viewInfo`) }}</div>
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  class="ig-sort-option"
+                  :class="{ active: showMeta }"
+                  :aria-checked="showMeta"
+                  @click="toggleShowMeta"
+                >
+                  <span>{{ t(`${NS}.viewInfoShow`) }}</span>
+                  <t-icon v-if="showMeta" name="check" size="14px" />
+                </button>
+              </section>
             </div>
           </template>
         </t-popup>
@@ -1146,7 +1187,7 @@ watch(
                 {{ t(`${NS}.attr.builtin_is_enabled_value_false`) }}
               </span>
             </div>
-            <div class="ig-card__meta">
+            <div v-if="showMeta" class="ig-card__meta">
               <div class="ig-card__caption" :class="{ 'is-empty': !img.caption }">
                 {{ img.caption || t(`${NS}.noCaption`) }}
               </div>

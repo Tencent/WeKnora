@@ -83,7 +83,7 @@ func TestUpdateMyPreferencesPassesGalleryBlockThrough(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("PUT", "/auth/me/preferences", strings.NewReader(
-		`{"gallery":{"view_mode":"card","thumb_cols":6}}`,
+		`{"gallery":{"view_mode":"card","thumb_cols":6,"show_meta":false}}`,
 	))
 	c.Request.Header.Set("Content-Type", "application/json")
 	h.UpdateMyPreferences(c)
@@ -91,4 +91,6 @@ func TestUpdateMyPreferencesPassesGalleryBlockThrough(t *testing.T) {
 	require.NotNil(t, users.patch.Gallery, "gallery block must reach the preference service")
 	require.Equal(t, types.GalleryViewCard, users.patch.Gallery.ViewMode)
 	require.Equal(t, 6, users.patch.Gallery.ThumbCols)
+	require.NotNil(t, users.patch.Gallery.ShowMeta, "show_meta=false must survive the whitelist")
+	require.False(t, *users.patch.Gallery.ShowMeta)
 }

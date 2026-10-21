@@ -1498,6 +1498,7 @@ func (h *KnowledgeHandler) resolveGalleryConfig(ctx context.Context, kbID string
 					Status:    g.Status,
 					ViewMode:  g.ViewMode,
 					ThumbCols: g.ThumbCols,
+					ShowMeta:  g.ShowMeta,
 				}
 			}
 		}
@@ -1537,6 +1538,7 @@ func (h *KnowledgeHandler) GetGalleryConfig(c *gin.Context) {
 			"status":            status,
 			"view_mode":         resolved.ViewMode,
 			"thumb_cols":        resolved.ThumbCols,
+			"show_meta":         resolved.ShowMeta,
 		},
 	})
 }

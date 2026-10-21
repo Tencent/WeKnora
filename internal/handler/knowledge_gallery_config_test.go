@@ -48,9 +48,10 @@ func newGalleryConfigRouter(userSvc interfaces.UserService) *gin.Engine {
 // through: a missing key here silently reverts the gallery UI to defaults on
 // every reload even though the write path persisted the preference.
 func TestGetGalleryConfigPassesViewPrefsThrough(t *testing.T) {
+	hide := false
 	svc := &stubGalleryUserSvc{user: &types.User{
 		Preferences: types.UserPreferences{
-			Gallery: &types.GalleryUserPrefs{ViewMode: "card", ThumbCols: 6},
+			Gallery: &types.GalleryUserPrefs{ViewMode: "card", ThumbCols: 6, ShowMeta: &hide},
 		},
 	}}
 	r := newGalleryConfigRouter(svc)
@@ -65,6 +66,7 @@ func TestGetGalleryConfigPassesViewPrefsThrough(t *testing.T) {
 		Data struct {
 			ViewMode  string `json:"view_mode"`
 			ThumbCols int    `json:"thumb_cols"`
+			ShowMeta  *bool  `json:"show_meta"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
@@ -73,6 +75,9 @@ func TestGetGalleryConfigPassesViewPrefsThrough(t *testing.T) {
 	if body.Data.ViewMode != "card" || body.Data.ThumbCols != 6 {
 		t.Fatalf("view prefs not passed through: view_mode=%q thumb_cols=%d",
 			body.Data.ViewMode, body.Data.ThumbCols)
+	}
+	if body.Data.ShowMeta == nil || *body.Data.ShowMeta {
+		t.Fatalf("show_meta = %v, want false", body.Data.ShowMeta)
 	}
 }
 
@@ -91,6 +96,7 @@ func TestGetGalleryConfigDefaultsWhenNoPrefs(t *testing.T) {
 		Data struct {
 			ViewMode  string `json:"view_mode"`
 			ThumbCols int    `json:"thumb_cols"`
+			ShowMeta  *bool  `json:"show_meta"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
@@ -99,5 +105,8 @@ func TestGetGalleryConfigDefaultsWhenNoPrefs(t *testing.T) {
 	if body.Data.ViewMode != "waterfall" || body.Data.ThumbCols != 0 {
 		t.Fatalf("unexpected defaults: view_mode=%q thumb_cols=%d",
 			body.Data.ViewMode, body.Data.ThumbCols)
+	}
+	if body.Data.ShowMeta == nil || !*body.Data.ShowMeta {
+		t.Fatalf("show_meta = %v, want true", body.Data.ShowMeta)
 	}
 }
