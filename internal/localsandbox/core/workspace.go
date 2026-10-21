@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 )
@@ -56,7 +55,8 @@ var ErrProjectDirRevoked = errors.New("localsandbox: session project directory i
 // DirLayout names the roots the resolver allocates under.
 type DirLayout struct {
 	// SessionRoot is where session workspaces are created, by default
-	// ~/Documents/WeKnoraLite. It is user-visible on purpose.
+	// ~/.weknora/sessions. Each one is <root>/session-<id>, so the path
+	// follows from the session ID alone.
 	SessionRoot string
 }
 
@@ -68,13 +68,12 @@ type WorkspaceResolver interface {
 type workspaceResolver struct {
 	layout   DirLayout
 	projects ProjectLookup
-	now      func() time.Time
 }
 
 // NewWorkspaceResolver returns a resolver that prefers a bound project
 // directory and otherwise allocates under layout.SessionRoot.
 func NewWorkspaceResolver(layout DirLayout, projects ProjectLookup) WorkspaceResolver {
-	return &workspaceResolver{layout: layout, projects: projects, now: time.Now}
+	return &workspaceResolver{layout: layout, projects: projects}
 }
 
 func (r *workspaceResolver) Resolve(ctx context.Context, sessionID string) (Workspace, error) {
@@ -106,7 +105,6 @@ func (r *workspaceResolver) Resolve(ctx context.Context, sessionID string) (Work
 		}
 	}
 
-	day := r.now().Format("2006-01-02")
 	seg := sanitizeSegment(sessionID)
 	if existing, ok := r.existingSessionDir(seg); ok {
 		logger.Infof(ctx, "[LocalSandbox] workspace session=%s kind=session root=%s", sessionID, existing)
@@ -116,11 +114,17 @@ func (r *workspaceResolver) Resolve(ctx context.Context, sessionID string) (Work
 			ProtectGit: false,
 		}, nil
 	}
-	root := filepath.Join(r.layout.SessionRoot, day, "session-"+seg)
+	root := filepath.Join(r.layout.SessionRoot, "session-"+seg)
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		logger.Errorf(ctx, "[LocalSandbox] create session workspace session=%s root=%s: %v",
 			sessionID, root, err)
 		return Workspace{}, fmt.Errorf("localsandbox: create session workspace: %w", err)
+	}
+	// MkdirAll accepts a symlink to a directory as already present.
+	if info, err := os.Lstat(root); err != nil || info.Mode()&os.ModeSymlink != 0 {
+		logger.Errorf(ctx, "[LocalSandbox] session workspace is not a real directory session=%s root=%s",
+			sessionID, root)
+		return Workspace{}, fmt.Errorf("localsandbox: session workspace %q is not a real directory", root)
 	}
 	if err := os.Chmod(root, 0o700); err != nil {
 		return Workspace{}, fmt.Errorf("localsandbox: restrict session workspace: %w", err)
@@ -164,15 +168,14 @@ func (r *workspaceResolver) existingSessionDir(seg string) (string, bool) {
 	if r.layout.SessionRoot == "" || seg == "" {
 		return "", false
 	}
-	matches, err := filepath.Glob(filepath.Join(r.layout.SessionRoot, "*", "session-"+seg))
-	if err != nil || len(matches) == 0 {
-		return "", false
-	}
-	info, err := os.Lstat(matches[0])
+	// Only a real directory counts: a symlink planted in the session tree
+	// must not redirect a workspace elsewhere.
+	path := filepath.Join(r.layout.SessionRoot, "session-"+seg)
+	info, err := os.Lstat(path)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return "", false
 	}
-	resolved, err := filepath.EvalSymlinks(matches[0])
+	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return "", false
 	}

@@ -6,6 +6,7 @@ import * as finalContent from '../utils/finalArtifactContent.ts'
 import * as history from '../utils/rag-pipeline-history.ts'
 import * as timestamps from '../utils/messageTimestamp.ts'
 import * as steering from '../utils/steerStreamFork.ts'
+import * as hostApproval from '../views/chat/components/hostApproval.ts'
 import { change, fixture } from '../test-utils/vueFixture.ts'
 
 function setup(t: TestContext) {
@@ -19,6 +20,7 @@ function setup(t: TestContext) {
     '@/utils/messageTimestamp': timestamps,
     '@/utils/steerStreamFork': steering,
     '@/utils/assistantDataChange': f.dataChange,
+    '@/views/chat/components/hostApproval': hostApproval,
   })
   const handler = useChatStreamHandler({
     messagesList: vue.reactive([]), loading: vue.ref(false), isReplying: vue.ref(false),
