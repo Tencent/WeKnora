@@ -124,7 +124,9 @@ func TestWorkWaitZeroReadsOnceInDetail(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, res.Success)
 	require.Zero(t, *sleeps)
-	require.Equal(t, []interfaces.StatusOptions{{Detailed: true, RunID: "run-1", OutputBudget: workOutputBudget}}, h.calls)
+	require.Equal(t, []interfaces.StatusOptions{{
+		Detailed: true, RunID: "run-1", OutputBudget: workOutputBudget,
+	}}, h.calls)
 	view := decodeWork(t, res.Output)
 	require.Equal(t, interfaces.WorkStateSucceeded, view.Items[0].State)
 	require.Empty(t, view.Note)
@@ -150,7 +152,9 @@ func TestWorkWaitAllWaitsForEveryID(t *testing.T) {
 	require.False(t, view.TimedOut)
 	require.Equal(t, []string{"sj_1", "sj_2"}, marks.seen)
 	final := h.calls[len(h.calls)-1]
-	require.Equal(t, interfaces.StatusOptions{Detailed: true, RunID: "run-1", OutputBudget: workOutputBudget / 2}, final)
+	require.Equal(t, interfaces.StatusOptions{
+		Detailed: true, RunID: "run-1", OutputBudget: workOutputBudget / 2,
+	}, final)
 }
 
 func TestWorkWaitAnyReturnsOnTheFirstFinish(t *testing.T) {
@@ -305,7 +309,9 @@ func TestWorkWaitOutputLimitCoversTheMarshaledBudget(t *testing.T) {
 func TestWorkWaitRejectsBadArguments(t *testing.T) {
 	tool, _ := newTestWorkWait(&fakeWorkHandler{}, &recordingMarks{}, nil)
 	tooMany := `{"work_ids":["a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q"]}`
-	for _, args := range []string{`{"work_ids":[]}`, `{"work_ids":["  "]}`, tooMany, `{"work_ids":["a"],"mode":"some"}`} {
+	for _, args := range []string{
+		`{"work_ids":[]}`, `{"work_ids":["  "]}`, tooMany, `{"work_ids":["a"],"mode":"some"}`,
+	} {
 		res, err := tool.Execute(context.Background(), json.RawMessage(args))
 		require.NoError(t, err)
 		require.False(t, res.Success, args)

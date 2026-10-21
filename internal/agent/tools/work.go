@@ -71,7 +71,7 @@ type WorkMarks interface {
 type WorkWaitInput struct {
 	WorkIDs []string `json:"work_ids" jsonschema:"IDs of the background work to wait for"`
 	WaitSec int      `json:"wait_sec,omitempty" jsonschema:"Seconds to wait, default 60, max 300; 0 returns at once"`
-	Mode    string   `json:"mode,omitempty" jsonschema:"all (default) waits for every ID; any returns when one finishes"`
+	Mode    string   `json:"mode,omitempty" jsonschema:"all (default) waits for every ID; any returns when one ends"`
 }
 
 // WorkCancelInput documents the work_cancel arguments for the schema.
