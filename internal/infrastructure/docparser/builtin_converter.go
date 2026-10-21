@@ -188,8 +188,11 @@ func ensureOriginalImageRef(req *types.ReadRequest, mdContent string, imageRefs 
 // (Comma delimited)". Taken as UTF-8, such a file reached the index as
 // invalid bytes. The order follows decode_bytes in docreader/utils/endecode.py,
 // which docreader's Markdown parser reads text with: UTF-8, then GB18030 (a
-// superset of GBK and GB2312), then Latin-1, which decodes any byte. A UTF-8
-// file, byte order mark included, is returned unchanged.
+// superset of GBK and GB2312), then Latin-1, which decodes any byte. Before
+// Latin-1 comes Windows-1252, what Western Windows tools save as "ANSI": it
+// differs from Latin-1 only in bytes 0x80-0x9F, which Latin-1 reads as
+// control characters where Windows-1252 has the curly quotes, dashes and
+// euro sign. A UTF-8 file, byte order mark included, is returned unchanged.
 func decodeText(data []byte) []byte {
 	if bytes.HasPrefix(data, []byte{0xff, 0xfe}) || bytes.HasPrefix(data, []byte{0xfe, 0xff}) {
 		if text, err := unicode.UTF16(unicode.BigEndian, unicode.ExpectBOM).NewDecoder().Bytes(data); err == nil {
@@ -202,6 +205,12 @@ func decodeText(data []byte) []byte {
 	// The decoder writes U+FFFD for a byte sequence GB18030 does not define
 	// instead of failing, so that marks a file in some other encoding.
 	text, err := simplifiedchinese.GB18030.NewDecoder().Bytes(data)
+	if err == nil && !bytes.ContainsRune(text, utf8.RuneError) {
+		return text
+	}
+	// Windows-1252 leaves five bytes undefined and writes U+FFFD for them;
+	// Latin-1 then reads the file.
+	text, err = charmap.Windows1252.NewDecoder().Bytes(data)
 	if err == nil && !bytes.ContainsRune(text, utf8.RuneError) {
 		return text
 	}

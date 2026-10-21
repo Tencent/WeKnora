@@ -39,7 +39,14 @@ func TestSimpleFormatReaderDecodesTextEncodings(t *testing.T) {
 		{"GBK CSV from Excel", "csv", gbk("姓名,城市\n张三,北京\n"), "| 姓名 | 城市 |\n| --- | --- |\n| 张三 | 北京 |\n"},
 		{"UTF-16LE with BOM", "txt", utf16(unicode.LittleEndian, "Hello 世界"), "Hello 世界"},
 		{"UTF-16BE with BOM", "txt", utf16(unicode.BigEndian, "Hello 世界"), "Hello 世界"},
-		{"Latin-1 fallback", "txt", []byte("caf\xe9"), "café"},
+		{"Latin-1 fallback", "txt", []byte("caf\xe9 \x81 menu"), "café \u0081 menu"},
+		// Notepad's "ANSI" on a Western Windows: GB18030 rejects the bytes
+		// around the quotes, and Latin-1 read them as control characters.
+		{
+			"Windows-1252 punctuation", "txt",
+			[]byte("\x93Quoted\x94 text \x96 costs 5 \x80."),
+			"\u201cQuoted\u201d text \u2013 costs 5 \u20ac.",
+		},
 		{"UTF-8 unchanged", "txt", []byte("plain UTF-8 文本"), "plain UTF-8 文本"},
 		// Kept byte for byte: the source locators map a verbatim UTF-8 text
 		// file onto itself and count past its byte order mark.
