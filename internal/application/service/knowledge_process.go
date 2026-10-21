@@ -351,6 +351,13 @@ func (s *knowledgeService) deleteUnindexedChunks(ctx context.Context, knowledge 
 	}
 }
 
+// supersededChunkPurger is intentionally narrower than ChunkRepository: only
+// persistent repositories that can prove a newer active replacement should
+// physically reclaim soft-deleted chunk history.
+type supersededChunkPurger interface {
+	PurgeSupersededChunksByKnowledgeID(context.Context, uint64, string) (int64, error)
+}
+
 // processChunks processes chunks and creates embeddings for knowledge content
 func (s *knowledgeService) processChunks(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []types.ParsedChunk,
@@ -818,6 +825,20 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	if s.currentAttemptSuperseded(ctx, knowledge.ID) {
 		logger.Infof(ctx, "Parse attempt superseded, skipping completion: %s", knowledge.ID)
 		return nil
+	}
+
+	// Reparse has now written the replacement chunks and, when enabled, their
+	// replacement indexes. Only at this successful point is it safe to reclaim
+	// old soft-deleted rows. Keep this optional at the interface boundary so
+	// existing non-SQL repositories and narrow test doubles retain their
+	// lifecycle behavior; the concrete SQL chunk repository implements it.
+	if purger, ok := s.chunkRepo.(supersededChunkPurger); ok {
+		purged, purgeErr := purger.PurgeSupersededChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID)
+		if purgeErr != nil {
+			logger.Warnf(ctx, "Failed to purge superseded chunks for knowledge %s: %v", knowledge.ID, purgeErr)
+		} else if purged > 0 {
+			logger.Infof(ctx, "Purged %d superseded chunks for knowledge %s", purged, knowledge.ID)
+		}
 	}
 
 	now := time.Now()
