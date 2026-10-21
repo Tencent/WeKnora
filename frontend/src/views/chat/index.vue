@@ -182,7 +182,12 @@
                         :model-id="modelId" :default-model-id="defaultModelId"
                         @update:model-id="(id) => emit('update:modelId', id)"
                         :queuedSteers="steerQueue.filter(item => item.delivery === 'after')" :canSteer="isAgentStreamSession()">
-                        <template v-if="$slots['composer-chips']" #chips><slot name="composer-chips" /></template>
+                        <template v-if="$slots['composer-chips']" #chips>
+                            <slot name="composer-chips" />
+                        </template>
+                        <template v-if="backgroundItems.length" #background-work>
+                            <BackgroundWorkChip :items="backgroundItems" @view="openWorkOutput" @cancel="onCancelWork" />
+                        </template>
                         <template v-if="$slots['composer-controls']" #controls><slot name="composer-controls" /></template>
                     </InputField>
                 </div>
@@ -209,6 +214,10 @@
         :shift-width="referencesPanelWidth"
         :artifacts="sessionArtifacts" :artifacts-collecting="sessionArtifactsCollecting"
         @artifact-deleted="handleArtifactDeleted" />
+    <t-dialog v-model:visible="workOutputVisible" :header="viewingWorkTitle" :footer="false" width="720px">
+        <BackgroundWorkResults v-if="workOutputVisible && viewingWorkId && session_id" :session-id="String(session_id)"
+            :work-id="viewingWorkId" />
+    </t-dialog>
 </template>
 <script setup>
 import ChildAgentTabBar from './components/ChildAgentTabBar.vue';
@@ -269,6 +278,10 @@ import { provideChatSandboxPanel } from '@/composables/useChatSandboxPanel';
 import SandboxSidePanel from '@/components/chat/SandboxSidePanel.vue';
 import BrowserTaskPreview from './components/BrowserTaskPreview.vue';
 import PendingPromptDock from './components/PendingPromptDock.vue';
+import BackgroundWorkChip from './components/BackgroundWorkChip.vue';
+import BackgroundWorkResults from './components/BackgroundWorkResults.vue';
+import { cancelBackgroundWork, listBackgroundWork } from '@/api/chat/background-work';
+import { createBackgroundWorkPoller, mergeBackgroundWork } from '@/utils/backgroundWork';
 import { providePromptDock } from '@/composables/usePromptDock';
 import { collectSessionArtifacts, markSessionArtifactDeleted } from '@/utils/sessionArtifacts';
 import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
@@ -346,6 +359,81 @@ const session_id = ref(props.session_id || route.params.chatid);
 watch(session_id, () => childTabs.reset(), { flush: 'sync' });
 const currentSession = ref(null);
 const isAutomationSession = computed(() => currentSession.value?.kind === 'automation');
+const backgroundItems = ref([]);
+const viewingWorkId = ref('');
+const workOutputVisible = ref(false);
+const viewingWorkTitle = computed(() => {
+    const item = backgroundItems.value.find((row) => row.work_id === viewingWorkId.value);
+    return item?.title || viewingWorkId.value || '';
+});
+
+function replaceBackgroundItems(incoming) {
+    const merged = mergeBackgroundWork(backgroundItems.value, incoming);
+    const ids = new Set(incoming.map((item) => item.work_id));
+    const next = merged.filter((item) => ids.has(item.work_id));
+    if (
+        next.length === backgroundItems.value.length
+        && next.every((item, index) => item === backgroundItems.value[index])
+    ) {
+        return;
+    }
+    backgroundItems.value = next;
+}
+
+const backgroundPoller = createBackgroundWorkPoller({
+    sessionId: () => String(session_id.value || ''),
+    list: (id, signal) => listBackgroundWork(id, signal),
+    onUpdate: replaceBackgroundItems,
+    onError() {
+        // A failed first load must not keep an empty chip polling.
+        if (backgroundItems.value.length === 0) backgroundPoller.stop();
+    },
+});
+
+function startBackgroundWork() {
+    if (!session_id.value) {
+        backgroundItems.value = [];
+        return;
+    }
+    backgroundPoller.start();
+}
+
+async function refreshBackgroundWork() {
+    const id = String(session_id.value || '');
+    if (!id) return;
+    const items = await listBackgroundWork(id);
+    replaceBackgroundItems(items);
+    if (items.length === 0) backgroundPoller.stop();
+    else backgroundPoller.start();
+}
+
+function openWorkOutput(workId) {
+    viewingWorkId.value = workId;
+    workOutputVisible.value = true;
+}
+
+async function onCancelWork(workId) {
+    const id = String(session_id.value || '');
+    if (!id || !workId) return;
+    try {
+        await cancelBackgroundWork(id, workId);
+    } catch {
+        // Refresh anyway so a rejected stop can leave the row running.
+    }
+    try {
+        await refreshBackgroundWork();
+    } catch {
+        // Keep the last chip. A non-empty list is still on the 5s poller.
+    }
+}
+
+watch(session_id, (id) => {
+    backgroundPoller.stop();
+    backgroundItems.value = [];
+    viewingWorkId.value = '';
+    workOutputVisible.value = false;
+    if (id) backgroundPoller.start();
+});
 
 // 拉 session 详情，并按其 last_request_state 把输入栏状态恢复到当时的发起态。
 // 嵌入式（embeddedMode）由宿主页面注入 agent/KB，所以跳过整套恢复逻辑，
@@ -388,6 +476,16 @@ function handleAskAssistant(messageId) {
     assistant.restorePageContext();
     assistant.open();
 }
+
+const backgroundWorkStamp = computed(() => messagesList.map((message) => {
+    const work = message?.background_work;
+    if (!work || typeof work !== 'object') return '';
+    return Object.entries(work).map(([id, row]) => `${id}:${row?.state || ''}`).join(',');
+}).join('|'));
+watch(backgroundWorkStamp, (stamp, previous) => {
+    if (!stamp || stamp === previous) return;
+    refreshBackgroundWork().catch(() => {});
+});
 
 function forkAffordanceOf(messageId) {
     if (isAutomationSession.value || !messageId) return { canFork: false }
@@ -1807,6 +1905,7 @@ onMounted(async () => {
     // 初始化状态：加载历史消息时不应显示loading
     loading.value = false;
     isReplying.value = false;
+    startBackgroundWork();
 
     if (props.embeddedMode && props.initialQuery) {
         scrollLock.value = true;
@@ -1852,6 +1951,7 @@ onUnmounted(() => {
     activitySessionId.value = '';
     window.removeEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
     if (recoverPollTimer) { clearTimeout(recoverPollTimer); recoverPollTimer = null; }
+    backgroundPoller.stop();
 });
 // An embedded view outlives the page behind it: a route change must not stop
 // its stream or restore the main chat's defaults.

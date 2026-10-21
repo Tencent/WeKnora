@@ -4483,6 +4483,12 @@ export default {
     noKnowledgeBases: 'No knowledge bases available',
     enterDescription: 'Enter description',
     rawOutputLabel: 'Raw output',
+    backgroundWork: {
+      running: 'No background tasks | {count} background task | {count} background tasks',
+      stop: 'Stop',
+      loading: 'Loading output…',
+      unavailable: 'Output is unavailable',
+    },
     wikiWritePageTitle: 'Wiki Page Write',
     wikiReplaceTextTitle: 'Wiki Text Replace',
     wikiRenamePageTitle: 'Wiki Page Rename',

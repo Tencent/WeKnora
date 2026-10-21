@@ -4483,6 +4483,12 @@ export default {
     noKnowledgeBases: '利用可能なナレッジベースがありません',
     enterDescription: '説明を入力',
     rawOutputLabel: '生の出力',
+    backgroundWork: {
+      running: 'バックグラウンドの作業はありません | バックグラウンドの作業 {count} 件 | バックグラウンドの作業 {count} 件',
+      stop: '停止',
+      loading: '出力を読み込んでいます…',
+      unavailable: '出力を表示できません',
+    },
     wikiWritePageTitle: 'Wikiページの書き込み',
     wikiReplaceTextTitle: 'Wikiテキストの置換',
     wikiRenamePageTitle: 'Wikiページの名前変更',
