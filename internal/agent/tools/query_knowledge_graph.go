@@ -24,14 +24,14 @@ var queryKnowledgeGraphTool = BaseTool{
 	description: "Query the knowledge graph of graph-enabled knowledge bases to explore how entities relate " +
 		"(for example \"relationship between Docker and Kubernetes\"). Put the entity names in query. Returns " +
 		"the matching entities' relations and the chunks they were extracted from, then chunks found by text " +
-		"search, with cN handles.\nUse search_knowledge for ordinary text retrieval and " +
-		"read_document(id=cN, context=k) to read around a chunk.",
+		"search, with chunk://N handles.\nUse search_knowledge for ordinary text retrieval and " +
+		"read_document(id=chunk://N, context=k) to read around a chunk.",
 	schema: utils.GenerateSchema[QueryKnowledgeGraphInput](),
 }
 
 // QueryKnowledgeGraphInput defines the input parameters for query knowledge graph tool
 type QueryKnowledgeGraphInput struct {
-	KnowledgeBaseIDs []string `json:"knowledge_base_ids" jsonschema:"Array of short bN knowledge base IDs to query"`
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids" jsonschema:"Array of kb://N knowledge base handles to query"`
 	Query            string   `json:"query" jsonschema:"Query content (entity name or query text)"`
 }
 

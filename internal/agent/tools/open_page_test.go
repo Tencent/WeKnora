@@ -25,6 +25,7 @@ func openPageFixture(role types.TenantRole) (*OpenPageTool, *fakeDispatcher) {
 		"/api/v1/agents/agent-1":       `{"success":true,"data":{"id":"agent-1","name":"Support bot"}}`,
 		"/api/v1/models/m-1":           `{"success":true,"data":{"id":"m-1","name":"qwen-max","display_name":"Qwen"}}`,
 		"/api/v1/mcp-services/mcp-1":   `{"success":true,"data":{"id":"mcp-1","name":"Jira"}}`,
+		"/api/v1/automations/auto-1":   `{"success":true,"data":{"id":"auto-1","name":"Morning digest"}}`,
 	}
 	responses["/api/v1/knowledgebase/kb-1/wiki/pages/entity/acme"] = `{"slug":"entity/acme","title":"Acme"}`
 	d := &fakeDispatcher{responses: map[string]*operations.Response{}}
@@ -113,6 +114,13 @@ func TestOpenPageLinksCheckedTargets(t *testing.T) {
 			name: "agent list",
 			args: `{"page":"agents"}`,
 			want: map[string]any{"page": "agents", "label": "Agents"},
+		},
+		{
+			name: "automation",
+			args: `{"page":"automations","automation_id":"auto-1"}`,
+			want: map[string]any{
+				"page": "automations", "label": "Automations", "detail": "Morning digest", "automation_id": "auto-1",
+			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

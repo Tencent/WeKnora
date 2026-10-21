@@ -53,6 +53,7 @@ type AgentEngine struct {
 	sessionID            string                  // Session ID for logging and event emission
 	systemPromptTemplate string                  // System prompt template (optional, uses default if empty)
 	memoryPrompt         string                  // Long-term memory envelope appended to the system prompt
+	runNote              string                  // How this run was started; see SetRunNote
 	skillsManager        *skills.Manager         // Skills manager for Progressive Disclosure (optional)
 	appConfig            *appconfig.Config       // Application config for prompt template resolution (optional)
 	imageDescriber       ImageDescriberFunc      // VLM function for describing images in tool results (optional)
@@ -94,9 +95,9 @@ type AgentEngine struct {
 	suspendRequest []byte
 	// collaborationOnlySuspension limits suspension to collaboration waits.
 	collaborationOnlySuspension bool
-	// interactive: the client renders prompt cards and can answer them.
-	interactive bool
-	progress    turnProgress
+	// mode: whether the client renders prompt cards and can answer them.
+	mode     types.RunMode
+	progress turnProgress
 	// Hold speculative parent prose until delegated work has been reviewed.
 	holdCollaborationAnswer bool
 }
@@ -230,7 +231,16 @@ func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
 	for _, section := range sections {
 		logger.Debugf(ctx, "[Agent][Prompt] section=%s bytes=%d", section.Name, len(section.Content))
 	}
-	return renderSystemPromptSections(sections) + e.collaborationGuidance()
+	prompt := renderSystemPromptSections(sections) + e.collaborationGuidance()
+	if e.runNote != "" {
+		prompt += "\n\n" + e.runNote
+	}
+	return prompt
+}
+
+// SetRunNote adds note to the end of this run's system prompt.
+func (e *AgentEngine) SetRunNote(note string) {
+	e.runNote = strings.TrimSpace(note)
 }
 
 // SetMemoryPrompt supplies the long-term memory envelope for this run. Empty

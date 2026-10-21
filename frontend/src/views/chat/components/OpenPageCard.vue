@@ -78,6 +78,7 @@ const icon = computed(() => {
     case 'toolbox': return 'tools'
     case 'agents': return 'robot'
     case 'organizations': return 'usergroup'
+    case 'automations': return 'time'
     default: return props.link.knowledge_id ? 'file' : 'folder'
   }
 })

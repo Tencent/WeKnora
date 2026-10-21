@@ -425,6 +425,7 @@ func (h *EmbedChannelHandler) CreateEmbedSession(c *gin.Context) {
 		logger.Warnf(ctx, "failed to assign embed session owner for %s: %v", created.ID, err)
 	} else {
 		created.UserID = ownerID
+		created.OwnerAuthSource = types.AuthSourceForBoundOwnerID(ownerID)
 	}
 	// Hand back a signed handle bound to this session; the widget must echo it
 	// (X-Embed-Session header) on every subsequent load/chat call.
@@ -685,7 +686,9 @@ func (h *EmbedChannelHandler) ensureEmbedSession(c *gin.Context) error {
 	// as shareable, credential-free URLs. Pinning it here covers both the
 	// `?resource_urls=public` query parameter and a deployment-wide
 	// RESOURCE_URL_MODE=public default.
-	ctx = storageurl.WithForcedHandleMode(types.WithPrincipal(ctx, principal))
+	ctx = storageurl.WithForcedHandleMode(types.WithPrincipalAuthSource(
+		types.WithPrincipal(ctx, principal), types.AuthSourceEmbed,
+	))
 	c.Request = c.Request.WithContext(ctx)
 	return nil
 }

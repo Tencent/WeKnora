@@ -236,7 +236,7 @@ func TestWebFetchRejectsInvalidRequestsWithoutNetwork(t *testing.T) {
 	fetcher := newStubWebContentFetcher(nil, nil)
 	tool := newWebFetchTool(fetcher)
 	for _, item := range []WebFetchItem{
-		{URL: "w123"},
+		{URL: "url://123"},
 		{URL: "file:///etc/passwd"},
 		{URL: "https://example.com", Offset: -1},
 		{URL: "https://example.com", Limit: 8001},
@@ -260,7 +260,7 @@ func TestWebFetchHandleRoundTripAndContinuation(t *testing.T) {
 	registry := NewToolRegistry()
 	registry.RegisterTool(newWebFetchTool(fetcher))
 	// Exercise double-encoded items through the real model-context and registry boundaries.
-	raw := `{"items":"[{\"url\":\"w1\",\"limit\":5}]"}`
+	raw := `{"items":"[{\"url\":\"url://1\",\"limit\":5}]"}`
 	calls := []types.LLMToolCall{{Function: types.FunctionCall{Name: ToolWebFetch, Arguments: raw}}}
 	source.DecodeToolCalls(calls)
 	assert.Equal(t, raw, calls[0].ModelArguments)
@@ -269,7 +269,7 @@ func TestWebFetchHandleRoundTripAndContinuation(t *testing.T) {
 	require.True(t, result.Success, result.Error)
 	output := source.ModelToolResultForTool(ToolWebFetch, result)
 	assert.Contains(t, output, "first")
-	assert.Contains(t, output, `url="w1" next_offset="5"`)
+	assert.Contains(t, output, `url="url://1" next_offset="5"`)
 	assert.NotContains(t, output, rawURL)
 	assert.Equal(t, 1, fetcher.callCount[rawURL])
 }
@@ -500,7 +500,7 @@ func TestWebFetchTimeoutKeepsSuccessfulItemsAndCancelsSlowFetch(t *testing.T) {
 	result, err := tool.Execute(t.Context(), webFetchArgs(
 		WebFetchItem{URL: "https://example.com/fast"},
 		WebFetchItem{URL: "https://example.com/slow"},
-		WebFetchItem{URL: "w999"},
+		WebFetchItem{URL: "url://999"},
 	))
 	require.NoError(t, err)
 	require.True(t, result.Success)
@@ -536,7 +536,7 @@ func TestWebFetchMixedResolvedAndUnknownReferences(t *testing.T) {
 	registry.RegisterWeb(u, "Page")
 	calls := []types.LLMToolCall{{Function: types.FunctionCall{
 		Name:      ToolWebFetch,
-		Arguments: `{"items":[{"url":"w1"},{"url":"w2"}]}`,
+		Arguments: `{"items":[{"url":"url://1"},{"url":"url://2"}]}`,
 	}}}
 	registry.DecodeToolCalls(calls)
 	fetcher := newStubWebContentFetcher(map[string]string{u: "good evidence"}, nil)

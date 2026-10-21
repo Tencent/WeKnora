@@ -117,6 +117,17 @@ type TenantSkillService struct {
 	// nothing to cancel, and StopSkill then only rewrites the stuck row.
 	runCancelMu sync.Mutex
 	runCancels  map[string]*skillRunCancel
+
+	// placer records the maintenance session's sandbox assignment. Nil keeps
+	// today's behaviour: the session row carries the pin and no assignment.
+	placer SessionPlacer
+}
+
+// WithPlacer attaches the allocation service. Without one, maintenance
+// sessions keep today's behaviour.
+func (s *TenantSkillService) WithPlacer(p SessionPlacer) *TenantSkillService {
+	s.placer = p
+	return s
 }
 
 // NewTenantSkillService wires the repositories and runtimes the install and

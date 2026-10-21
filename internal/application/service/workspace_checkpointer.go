@@ -76,13 +76,19 @@ func NewWorkspaceCheckpointer(runner SandboxShellRunner) *WorkspaceCheckpointer 
 //     message with no checkpoint and making it unusable as a fork point. With
 //     it, every turn has exactly one checkpoint and fork boundaries are always
 //     resolvable.
-func checkpointScript(workspace, gitDir, messageID string) string {
+func checkpointScriptFor(l sandbox.WorkspaceLayout, messageID string) string {
 	return fmt.Sprintf(`set -e
 %s
 %s
 git_ws add -A
 git_ws commit -q --allow-empty -m 'turn:%s'
-git_ws rev-parse HEAD`, gitWorkspacePreamble(workspace, gitDir), gitWorkspaceEnsureRepo(), messageID)
+git_ws rev-parse HEAD`, gitWorkspacePreambleFor(l), gitWorkspaceEnsureRepo(), messageID)
+}
+
+func checkpointScript(workspace, gitDir, messageID string) string {
+	return checkpointScriptFor(sandbox.WorkspaceLayout{
+		Origin: sandbox.WorkspaceOriginRemote, Root: workspace, GitDir: gitDir,
+	}, messageID)
 }
 
 // Checkpoint commits /workspace and returns the resulting checkpoint, or nil
@@ -106,19 +112,23 @@ func (c *WorkspaceCheckpointer) Checkpoint(
 		return nil
 	}
 
+	layout, err := workspaceLayoutFor(ctx, c.runner, sessionID)
+	if err != nil {
+		logger.Warnf(ctx, "[WorkspaceCheckpointer] layout unavailable session=%s: %v", sessionID, err)
+		return nil
+	}
+	command := checkpointScriptFor(layout, messageID)
 	var result *sandbox.ExecuteResult
-	var err error
-	command := checkpointScript(sandbox.SessionWorkspaceRoot, sandbox.SessionGitDir, messageID)
 	if runner, ok := c.runner.(sandbox.SessionInstallShellExecutor); ok {
 		// Git operates on the existing workspace. Do not prepare artifact/input
 		// directories or let a late checkpoint provision a replacement sandbox.
 		result, err = runner.ExecShellCommandWithOptions(ctx, sessionID, command, sandbox.ShellExecOptions{
-			WorkDir: sandbox.SessionWorkspaceRoot, Timeout: workspaceCheckpointTimeout,
+			WorkDir: layout.Root, Timeout: workspaceCheckpointTimeout,
 			SkipWorkspacePrep: true, ExpectedSandboxID: sandboxID,
 		})
 	} else {
 		result, err = c.runner.ExecShellCommand(ctx, sessionID, command,
-			sandbox.SessionWorkspaceRoot, workspaceCheckpointTimeout, nil)
+			layout.Root, workspaceCheckpointTimeout, nil)
 	}
 	if err != nil {
 		logger.Warnf(ctx, "[WorkspaceCheckpointer] exec failed session=%s message=%s: %v",

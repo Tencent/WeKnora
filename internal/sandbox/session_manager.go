@@ -24,28 +24,36 @@ package sandbox
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/common/redislock"
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/sandbox/admission"
+	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
+	"github.com/Tencent/WeKnora/internal/sandbox/workspace"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // SessionInputRoot is reserved for durable user attachments restored from
 // file storage. Generated artifacts must remain under SessionOutputRoot.
-const SessionInputRoot = "/workspace/input"
+const SessionInputRoot = workspace.InputDir
 
 // SessionOutputRoot is where skill scripts write artifacts for collection.
 // The skills manager injects this path via skillOutputEnvVar; Execute
 // materialises the directory via envd before the script runs so scripts
 // do not depend on the template user being able to mkdir under /workspace.
-const SessionOutputRoot = "/workspace/output"
+const SessionOutputRoot = workspace.OutputDir
 
 // skillOutputEnvVar matches the skills manager's WEKNORA_SKILL_OUTPUT_DIR.
 const skillOutputEnvVar = "WEKNORA_SKILL_OUTPUT_DIR"
@@ -58,7 +66,7 @@ const sessionInputEnvVar = "WEKNORA_SESSION_INPUT_DIR"
 
 // SessionWorkspaceRoot is the writable workspace root inside remote sandboxes.
 // shell_exec work_dir must stay underneath this path.
-const SessionWorkspaceRoot = "/workspace"
+const SessionWorkspaceRoot = workspace.Root
 
 // SessionGitDir is the git metadata directory for per-turn workspace
 // checkpoints. It lives on the sandbox root filesystem so a fork snapshot
@@ -70,7 +78,7 @@ const SessionWorkspaceRoot = "/workspace"
 // provisioned before this constant existed still hold theirs there. The
 // shared git preamble adopts that repository on first use so SHAs recorded
 // before the move keep resolving; see gitWorkspaceAdoptLegacyRepo.
-const SessionGitDir = "/var/lib/weknora/workspace.git"
+const SessionGitDir = workspace.GitDir
 
 // sessionArtifactDirBootstrapTimeout bounds directory creation and access
 // checks, performed with the execution identity.
@@ -99,9 +107,46 @@ type SessionBoundManager struct {
 	// activeType is the effective sandbox type callers observe.
 	activeType SandboxType
 
+	configID    string
+	allocations AllocationDirectory
+	admission   admission.Registry
+	namespace   string
+
+	// addresses caches user-mode assignments for this manager's lifetime
+	// (one request). Only the address is trusted from it; validity is read
+	// fresh by admitUser.
+	addresses sync.Map
+
+	// admissionWait bounds waiting for a closed scope (rebuild, exclusive).
+	admissionWait time.Duration
+
+	// rewindWait bounds the exclusive window rewind takes on a shared machine.
+	// It is shorter than admissionWait: an open terminal should fail rewind
+	// quickly instead of holding the HTTP request for a rebuild-length wait.
+	rewindWait time.Duration
+
 	// mu guards Cleanup's idempotency flag.
 	mu     sync.RWMutex
 	closed bool
+}
+
+// AllocationDirectory resolves a session's recorded placement. Implemented by
+// internal/application/service/sandboxalloc; nil keeps every session on the
+// historical per-session path.
+type AllocationDirectory interface {
+	// SessionAllocation is the session's address. The manager caches it for
+	// one request; it is never trusted for validity.
+	SessionAllocation(ctx context.Context, sessionID string) (allocation.Assignment, bool, error)
+	// VerifySessionAllocation reads the database on every call and returns
+	// nil only if expected is still the session's live assignment and the
+	// session exists, is not retired, and its current owner is expected's
+	// owner and still eligible to share. It returns ErrSandboxSessionDeleted
+	// or ErrUserAllocationRejected for those cases, other errors for
+	// failures to verify.
+	VerifySessionAllocation(
+		ctx context.Context, sessionTenantID uint64, sessionID string, expected allocation.Assignment,
+	) error
+	UserMachinesByConfig(ctx context.Context, configTenantID uint64, configID string) ([]allocation.UserMachine, error)
 }
 
 // SessionBoundManagerConfig bundles the wired dependencies. Test helpers and
@@ -118,6 +163,10 @@ type SessionBoundManagerConfig struct {
 	// touching another that shares the same provider account.
 	ConfigID string
 
+	// ConfigTenantID is the workspace that owns ConfigID. The resolver fills
+	// it so provider creates register on that config's admission scope.
+	ConfigTenantID uint64
+
 	// SkipHealthProbe skips the construction-time Health() round-trip.
 	// Set by the per-tenant resolver, which builds a manager per request.
 	// See NewSessionBoundManager.
@@ -126,6 +175,12 @@ type SessionBoundManagerConfig struct {
 	// Bootstrapper customises the first sandbox create of individual sessions
 	// (session fork). Optional: nil is the ordinary path.
 	Bootstrapper SessionBootstrapper
+
+	// Allocations, Admission and Namespace enable shared user machines. All
+	// three are optional; a user-mode assignment is refused without them.
+	Allocations AllocationDirectory
+	Admission   admission.Registry
+	Namespace   string
 }
 
 // NewSessionBoundManager wires the manager with an explicit RemoteSandboxClient
@@ -195,6 +250,11 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 		bootstrapper = withClient.WithClient(client)
 	}
 
+	var lifecycleOpts []lifecycleOption
+	if deps.Admission != nil {
+		lifecycleOpts = append(lifecycleOpts, withUserMachines(deps.Namespace, deps.Admission))
+		lifecycleOpts = append(lifecycleOpts, withConfigCreateGate(deps.Admission, deps.ConfigTenantID))
+	}
 	lifecycle, err := newRemoteSessionLifecycle(
 		client,
 		deps.Store,
@@ -203,20 +263,27 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 		sessionLifecycleCleanupTimeout,
 		deps.ConfigID,
 		bootstrapper,
+		lifecycleOpts...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("session bound manager: %w", err)
 	}
 
 	m := &SessionBoundManager{
-		config:     cfg,
-		validator:  NewScriptValidator(),
-		client:     client,
-		bindings:   deps.Store,
-		checker:    deps.Checker,
-		lifecycle:  lifecycle,
-		ephemeral:  NewRemoteSandbox(client, createRequest),
-		activeType: provider,
+		config:        cfg,
+		validator:     NewScriptValidator(),
+		client:        client,
+		bindings:      deps.Store,
+		checker:       deps.Checker,
+		lifecycle:     lifecycle,
+		ephemeral:     NewRemoteSandbox(client, createRequest),
+		activeType:    provider,
+		configID:      deps.ConfigID,
+		allocations:   deps.Allocations,
+		admission:     deps.Admission,
+		namespace:     deps.Namespace,
+		admissionWait: 30 * time.Second,
+		rewindWait:    rewindExclusiveWait,
 	}
 
 	// Per-tenant managers are rebuilt on every request, so probing here would
@@ -303,15 +370,32 @@ func (m *SessionBoundManager) Execute(ctx context.Context, cfg *ExecuteConfig) (
 	if strings.TrimSpace(cfg.SessionID) == "" {
 		return m.ephemeral.Execute(ctx, cfg)
 	}
-
-	handle, err := m.resolveSession(ctx, cfg.SessionID)
+	sc, err := m.scope(ctx, cfg.SessionID)
 	if err != nil {
 		return nil, err
 	}
-	if err := m.ensureSessionWorkspaceDirs(ctx, handle, executionOutputDir(cfg)); err != nil {
+	ctx, release, err := m.admitUser(ctx, sc, "exec")
+	if err != nil {
 		return nil, err
 	}
-	return m.ephemeral.ExecuteOnHandle(ctx, handle, cfg)
+	defer release()
+	handle, err := m.resolveScope(ctx, sc)
+	if err != nil {
+		return nil, err
+	}
+	outputDir := executionOutputDir(cfg)
+	if sc.user {
+		outputDir = sc.layout.OutputDir
+	}
+	if err := m.prepareSessionDirs(ctx, handle, DefaultSandboxExecUser, sc.layout.InputDir, outputDir); err != nil {
+		return nil, err
+	}
+	if !sc.user {
+		return m.ephemeral.ExecuteOnHandle(ctx, handle, cfg)
+	}
+	userCfg := *cfg
+	userCfg.Env = withSessionEnv(cfg.Env, sc.layout)
+	return m.ephemeral.ExecuteOnHandleIn(ctx, handle, &userCfg, sc.layout.Root, userScriptDir(sc.layout))
 }
 
 // ensureSessionWorkspaceDirs prepares the shared execution layout as the same
@@ -410,11 +494,14 @@ func (m *SessionBoundManager) DestroySession(ctx context.Context, sessionID stri
 	if m.remoteDisabled() {
 		return nil
 	}
-	key, err := m.sessionKey(ctx, sessionID)
+	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
 		return err
 	}
-	return m.lifecycle.Destroy(ctx, key)
+	if sc.user {
+		return ErrSharedSandbox
+	}
+	return m.lifecycle.Destroy(ctx, sc.key)
 }
 
 // InvalidateConfigSandboxes marks every session sandbox this config owns stale,
@@ -431,7 +518,32 @@ func (m *SessionBoundManager) InvalidateConfigSandboxes(
 	if err := m.requireRemoteBackend(); err != nil {
 		return 0, err
 	}
-	return m.bindings.InvalidateByConfig(ctx, tenantID, configID)
+	marked, err := m.bindings.InvalidateByConfig(ctx, tenantID, configID)
+	if m.allocations == nil {
+		return marked, err
+	}
+	// tenantID is the config's owner, so this covers every borrower's machine.
+	machines, listErr := m.allocations.UserMachinesByConfig(ctx, tenantID, NormalizeConfigID(configID))
+	if listErr != nil {
+		return marked, errors.Join(err, fmt.Errorf("list user machines: %w", listErr))
+	}
+	n, markErr := m.InvalidateConfigSandboxesForMachines(ctx, configID, machines)
+	return marked + n, errors.Join(err, markErr)
+}
+
+// InvalidateConfigSandboxesForMachines marks the listed user machines stale.
+func (m *SessionBoundManager) InvalidateConfigSandboxesForMachines(
+	ctx context.Context, configID string, machines []allocation.UserMachine,
+) (int, error) {
+	scanner, ok := m.bindings.(tenantBindingScanner)
+	if !ok {
+		return 0, nil
+	}
+	keys := make([]SessionSandboxKey, 0, len(machines))
+	for _, machine := range machines {
+		keys = append(keys, m.UserMachineKey(machine))
+	}
+	return markBindingKeysStale(ctx, scanner, keys, configID)
 }
 
 // CreateSnapshot forwards provider snapshot creation for the live sandbox bound
@@ -447,7 +559,16 @@ func (m *SessionBoundManager) CreateSnapshot(
 	if !ok || !m.client.Capabilities().SupportsSnapshots {
 		return RemoteSnapshotRef{}, errors.New("sandbox: remote provider does not support snapshots")
 	}
-	handle, err := m.resolveSession(ctx, sessionID)
+	sc, err := m.scope(ctx, sessionID)
+	if err != nil {
+		return RemoteSnapshotRef{}, err
+	}
+	ctx, release, err := m.admitUser(ctx, sc, "exec")
+	if err != nil {
+		return RemoteSnapshotRef{}, err
+	}
+	defer release()
+	handle, err := m.resolveScope(ctx, sc)
 	if err != nil {
 		return RemoteSnapshotRef{}, err
 	}
@@ -498,6 +619,18 @@ func (m *SessionBoundManager) EnsureSessionDir(ctx context.Context, sessionID, d
 	if strings.TrimSpace(dir) == "" {
 		return nil
 	}
+	if m.remoteDisabled() || strings.TrimSpace(sessionID) == "" {
+		return nil
+	}
+	sc, err := m.scope(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	ctx, release, err := m.admitUser(ctx, sc, "file")
+	if err != nil {
+		return err
+	}
+	defer release()
 	handle, ok, err := m.lookupSessionHandle(ctx, sessionID)
 	if err != nil || !ok {
 		return err
@@ -521,11 +654,23 @@ func (m *SessionBoundManager) WriteSessionInputFile(
 	if strings.TrimSpace(sessionID) == "" {
 		return errors.New("sandbox: session ID required for input staging")
 	}
-	clean, err := cleanSessionInputPath(filePath)
+	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
 		return err
 	}
-	handle, err := m.resolveSession(ctx, sessionID)
+	clean, err := cleanSessionInputPath(filePath)
+	if sc.user {
+		clean, err = workspace.CleanInputPathIn(sc.layout, filePath)
+	}
+	if err != nil {
+		return err
+	}
+	ctx, release, err := m.admitUser(ctx, sc, "file")
+	if err != nil {
+		return err
+	}
+	defer release()
+	handle, err := m.resolveScope(ctx, sc)
 	if err != nil {
 		return err
 	}
@@ -565,6 +710,10 @@ func (m *SessionBoundManager) WriteSessionWorkspaceFiles(
 	if len(files) == 0 {
 		return nil
 	}
+	sc, err := m.scope(ctx, sessionID)
+	if err != nil {
+		return err
+	}
 	type item struct {
 		path    string
 		content []byte
@@ -572,18 +721,34 @@ func (m *SessionBoundManager) WriteSessionWorkspaceFiles(
 	items := make([]item, 0, len(files))
 	parents := make(map[string]struct{}, len(files))
 	for _, file := range files {
+		// Session mode keeps the historical cleaner, which is pinned to
+		// /workspace and ignores a host WEKNORA_SKILL_OUTPUT_DIR overlay.
 		clean, err := cleanSessionWorkspaceWritePath(file.Path)
+		if sc.user {
+			clean, err = workspace.CleanWriteFileIn(sc.layout, file.Path)
+		}
 		if err != nil {
 			return err
 		}
 		items = append(items, item{path: clean, content: file.Content})
 		parents[path.Dir(clean)] = struct{}{}
 	}
-	handle, err := m.resolveSession(ctx, sessionID)
+	ctx, release, err := m.admitUser(ctx, sc, "file")
 	if err != nil {
 		return err
 	}
-	if err := m.ensureSessionWorkspaceDirs(ctx, handle, SessionOutputRoot); err != nil {
+	defer release()
+	handle, err := m.resolveScope(ctx, sc)
+	if err != nil {
+		return err
+	}
+	if sc.user {
+		if err := m.prepareSessionDirs(
+			ctx, handle, DefaultSandboxExecUser, sc.layout.InputDir, sc.layout.OutputDir,
+		); err != nil {
+			return err
+		}
+	} else if err := m.ensureSessionWorkspaceDirs(ctx, handle, SessionOutputRoot); err != nil {
 		return err
 	}
 	for parent := range parents {
@@ -610,10 +775,28 @@ func (m *SessionBoundManager) RemoveSessionInputPath(
 	if err := m.requireRemoteBackend(); err != nil {
 		return err
 	}
-	clean, err := cleanSessionInputPath(targetPath)
+	if strings.TrimSpace(sessionID) == "" {
+		if _, err := cleanSessionInputPath(targetPath); err != nil {
+			return err
+		}
+		return nil
+	}
+	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
 		return err
 	}
+	clean, err := cleanSessionInputPath(targetPath)
+	if sc.user {
+		clean, err = workspace.CleanInputPathIn(sc.layout, targetPath)
+	}
+	if err != nil {
+		return err
+	}
+	ctx, release, err := m.admitUser(ctx, sc, "file")
+	if err != nil {
+		return err
+	}
+	defer release()
 	handle, ok, err := m.lookupSessionHandle(ctx, sessionID)
 	if err != nil || !ok {
 		return err
@@ -633,6 +816,18 @@ func (m *SessionBoundManager) ListSessionFiles(
 	if strings.TrimSpace(dir) == "" {
 		return nil, errors.New("sandbox: dir required for ListSessionFiles")
 	}
+	if m.remoteDisabled() || strings.TrimSpace(sessionID) == "" {
+		return nil, nil
+	}
+	sc, err := m.scope(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	ctx, release, err := m.admitUser(ctx, sc, "file")
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	handle, ok, err := m.lookupSessionHandle(ctx, sessionID)
 	if err != nil || !ok {
 		return nil, err
@@ -650,6 +845,18 @@ func (m *SessionBoundManager) StatSessionFile(
 	if strings.TrimSpace(filePath) == "" {
 		return nil, errors.New("sandbox: path required for StatSessionFile")
 	}
+	if m.remoteDisabled() || strings.TrimSpace(sessionID) == "" {
+		return nil, fmt.Errorf("sandbox: no live sandbox for session %s", sessionID)
+	}
+	sc, err := m.scope(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	ctx, release, err := m.admitUser(ctx, sc, "file")
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	handle, ok, err := m.lookupSessionHandle(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -668,6 +875,18 @@ func (m *SessionBoundManager) ReadSessionFile(
 	if strings.TrimSpace(filePath) == "" {
 		return nil, errors.New("sandbox: path required for ReadSessionFile")
 	}
+	if m.remoteDisabled() || strings.TrimSpace(sessionID) == "" {
+		return nil, fmt.Errorf("sandbox: no live sandbox for session %s", sessionID)
+	}
+	sc, err := m.scope(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	ctx, release, err := m.admitUser(ctx, sc, "file")
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	handle, ok, err := m.lookupSessionHandle(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -691,12 +910,21 @@ func (m *SessionBoundManager) WriteSessionFile(
 	if strings.TrimSpace(sessionID) == "" {
 		return errors.New("sandbox: session ID required for file staging")
 	}
+	sc, err := m.scope(ctx, sessionID)
+	if err != nil {
+		return err
+	}
 	clean := path.Clean(strings.TrimSpace(filePath))
 	if clean != SkillsImageRoot && !strings.HasPrefix(clean, SkillsImageRoot+"/") {
 		return fmt.Errorf("sandbox: install file path %q is outside %s", filePath, SkillsImageRoot)
 	}
+	ctx, release, err := m.admitUser(ctx, sc, "file")
+	if err != nil {
+		return err
+	}
+	defer release()
 	ctx = withMaintenanceFilesystem(ctx)
-	handle, err := m.resolveSession(ctx, sessionID)
+	handle, err := m.resolveScope(ctx, sc)
 	if err != nil {
 		return err
 	}
@@ -783,11 +1011,7 @@ type ShellOutputSnapshot struct {
 func (m *SessionBoundManager) ExecShellCommandWithOutputSnapshot(
 	ctx context.Context, sessionID, command string, opts ShellExecOptions, outputDir string,
 ) (*ExecuteResult, *ShellOutputSnapshot, error) {
-	clean, ok := ValidatedSessionOutputDir(outputDir)
-	if !ok {
-		return nil, nil, errors.New("sandbox: invalid output directory")
-	}
-	return m.execShellCommandWithOutputSnapshot(ctx, sessionID, command, opts, clean)
+	return m.execShellCommandWithOutputSnapshot(ctx, sessionID, command, opts, outputDir)
 }
 
 func (m *SessionBoundManager) execShellCommandWithOutputSnapshot(
@@ -813,30 +1037,55 @@ func (m *SessionBoundManager) execShellCommandWithOutputSnapshot(
 		timeout = DefaultTimeout
 	}
 
-	workDir := strings.TrimSpace(opts.WorkDir)
-	if workDir == "" {
-		workDir = SessionWorkspaceRoot
-	}
-	workDir, err := cleanSessionWorkDir(workDir, opts.AllowSkillsRoot)
+	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
 		return nil, nil, err
 	}
+	if outputDir != "" {
+		clean, ok := ValidatedOutputDirIn(sc.layout, outputDir)
+		if !sc.user {
+			clean, ok = ValidatedSessionOutputDir(outputDir)
+		}
+		if !ok {
+			return nil, nil, errors.New("sandbox: invalid output directory")
+		}
+		outputDir = clean
+	}
+	workDir := strings.TrimSpace(opts.WorkDir)
+	if workDir == "" {
+		workDir = sc.layout.Root
+	}
+	workDir, err = workspace.CleanWorkDirIn(sc.layout, workDir, opts.AllowSkillsRoot)
+	if !sc.user {
+		fallback := SessionWorkspaceRoot
+		if strings.TrimSpace(opts.WorkDir) != "" {
+			fallback = strings.TrimSpace(opts.WorkDir)
+		}
+		workDir, err = cleanSessionWorkDir(fallback, opts.AllowSkillsRoot)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	ctx, release, err := m.admitUser(ctx, sc, "shell")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer release()
+
 	var handle RemoteSandboxHandle
 	if opts.ExpectedSandboxID != "" {
-		key, keyErr := m.sessionKey(ctx, sessionID)
-		if keyErr != nil {
-			return nil, nil, keyErr
-		}
-		exists, checkErr := m.checker.SessionExists(ctx, key)
-		if checkErr != nil {
-			return nil, nil, checkErr
-		}
-		if !exists {
-			return nil, nil, ErrSandboxSessionDeleted
+		if !sc.user {
+			exists, checkErr := m.checker.SessionExists(ctx, sc.sessionKeyOnly())
+			if checkErr != nil {
+				return nil, nil, checkErr
+			}
+			if !exists {
+				return nil, nil, ErrSandboxSessionDeleted
+			}
 		}
 		var found bool
 		// Maintenance must recheck the binding even inside a file-operation scope.
-		handle, found, err = m.lookupSessionHandleForKey(ctx, key, opts.ExpectedSandboxID)
+		handle, found, err = m.lookupSessionHandleForKey(ctx, sc.machine(), opts.ExpectedSandboxID)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -844,7 +1093,7 @@ func (m *SessionBoundManager) execShellCommandWithOutputSnapshot(
 			return nil, nil, errors.New("sandbox: bound sandbox changed before maintenance command")
 		}
 	} else {
-		handle, err = m.resolveSession(ctx, sessionID)
+		handle, err = m.resolveScope(ctx, sc)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -866,13 +1115,21 @@ func (m *SessionBoundManager) execShellCommandWithOutputSnapshot(
 			if err := m.prepareSessionDirs(ctx, handle, user, workDir); err != nil {
 				return nil, nil, err
 			}
-		} else {
+		} else if sc.user {
 			if err := m.prepareSessionDirs(
-				ctx, handle, user, SessionInputRoot, SessionOutputRoot, workDir,
+				ctx, handle, user, sc.layout.InputDir, sc.layout.OutputDir, workDir,
 			); err != nil {
 				return nil, nil, err
 			}
+		} else if err := m.prepareSessionDirs(
+			ctx, handle, user, SessionInputRoot, SessionOutputRoot, workDir,
+		); err != nil {
+			return nil, nil, err
 		}
+	}
+	env := opts.Env
+	if sc.user {
+		env = withSessionEnv(opts.Env, sc.layout)
 	}
 
 	start := time.Now()
@@ -880,7 +1137,7 @@ func (m *SessionBoundManager) execShellCommandWithOutputSnapshot(
 		Command:  command,
 		OnOutput: commandOutputCallback(ctx, opts.OnOutput),
 		Shell:    true,
-		Env:      opts.Env,
+		Env:      env,
 		WorkDir:  workDir,
 		User:     user,
 		Timeout:  timeout,
@@ -913,12 +1170,20 @@ func (m *SessionBoundManager) SessionInstallShellExecutor() SessionInstallShellE
 	return m
 }
 
-// SessionWorkspaceLayout reports the /workspace contract every remote
-// session shares. sessionID is ignored: remote layouts are not per-session.
-// A validated WEKNORA_SKILL_OUTPUT_DIR overlays OutputDir and the matching
-// ReadRoots entry; RemoteWorkspaceLayout itself stays the constant baseline.
-func (m *SessionBoundManager) SessionWorkspaceLayout(context.Context, string) (WorkspaceLayout, error) {
-	return withValidatedSkillOutputDir(RemoteWorkspaceLayout()), nil
+// SessionWorkspaceLayout reports where sessionID's files live. A session-owned
+// machine keeps the /workspace contract (a validated WEKNORA_SKILL_OUTPUT_DIR
+// overlays OutputDir). A shared machine reports that session's directory.
+// Lookups do not admit and do not require a tenant: tool descriptions call
+// this before any provider operation.
+func (m *SessionBoundManager) SessionWorkspaceLayout(ctx context.Context, sessionID string) (WorkspaceLayout, error) {
+	a, ok, err := m.addressFor(ctx, strings.TrimSpace(sessionID))
+	if err != nil {
+		return WorkspaceLayout{}, err
+	}
+	if !ok || !a.IsUser() {
+		return withValidatedSkillOutputDir(RemoteWorkspaceLayout()), nil
+	}
+	return a.Layout()
 }
 
 func withValidatedSkillOutputDir(layout WorkspaceLayout) WorkspaceLayout {
@@ -990,19 +1255,115 @@ func (m *SessionBoundManager) OpenSessionTerminal(
 	if !ok {
 		return nil, ErrTerminalUnsupported
 	}
-	if !opts.AllowResume {
-		if err := m.RequireRunningSessionSandbox(ctx, sessionID); err != nil {
-			return nil, err
-		}
-	}
-	handle, found, err := m.lookupSessionHandle(ctx, sessionID)
+	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	if !found {
-		return nil, ErrNoLiveSessionSandbox
+	if sc.user {
+		if strings.TrimSpace(opts.Cwd) == "" {
+			opts.Cwd = sc.layout.Root
+		}
+		opts.Envs = withSessionEnv(opts.Envs, sc.layout)
+		// C10: PIDs on a shared machine belong to every session of the
+		// owner; a client-supplied PID could attach another session's shell.
+		opts.AttachPID = 0
 	}
-	return terminal.OpenTerminal(ctx, handle, opts)
+	// The PTY outlives this call: admit it on a context detached from the
+	// HTTP request; heldTerminalSession releases it on Close.
+	opCtx, release, err := m.admitUser(context.WithoutCancel(ctx), sc, "pty")
+	if err != nil {
+		return nil, err
+	}
+	// The dial and the stream both stop if the lease is lost. callCtx lives
+	// as long as the terminal: cancelling it when this function returns
+	// would close a PTY that has only just opened.
+	callCtx, cancelCall := context.WithCancelCause(ctx)
+	stopCall := context.AfterFunc(opCtx, func() { cancelCall(context.Cause(opCtx)) })
+	abandon := func(err error) (RemoteTerminalSession, error) {
+		stopCall()
+		cancelCall(err)
+		release()
+		return nil, err
+	}
+	if !opts.AllowResume {
+		if err := m.RequireRunningSessionSandbox(callCtx, sessionID); err != nil {
+			return abandon(err)
+		}
+	}
+	handle, found, err := m.lookupSessionHandle(callCtx, sessionID)
+	if err != nil || !found {
+		if err != nil {
+			return abandon(err)
+		}
+		return abandon(ErrNoLiveSessionSandbox)
+	}
+	// A shared machine already exists for the owner's other sessions. This
+	// session's directory is created by the first shell command, not by
+	// attaching a PTY, so opening the terminal first would start a shell in
+	// a directory that is not there yet.
+	if sc.user {
+		if err := m.prepareSessionDirs(
+			callCtx, handle, DefaultSandboxExecUser,
+			sc.layout.InputDir, sc.layout.OutputDir, opts.Cwd,
+		); err != nil {
+			return abandon(err)
+		}
+	}
+	session, err := terminal.OpenTerminal(callCtx, handle, opts)
+	if err != nil {
+		return abandon(err)
+	}
+	if !sc.user {
+		stopCall()
+		release()
+		return session, nil
+	}
+	held := &heldTerminalSession{
+		RemoteTerminalSession: session,
+		release:               release,
+		cancelStream:          cancelCall,
+		stopLeaseWatch:        stopCall,
+	}
+	if exempt := admissionExemptFrom(opCtx); len(exempt) > 0 {
+		held.member = exempt[len(exempt)-1]
+	}
+	// C3: once the lease is lost another replica may rebuild or reclaim the
+	// machine, so the PTY must not keep writing to it.
+	held.stopWatch = context.AfterFunc(opCtx, func() { _ = held.Close() })
+	return held, nil
+}
+
+// heldTerminalSession keeps the shared machine's admission for as long as
+// the PTY is attached, so a rebuild or reclaim waits for the user to close
+// the terminal.
+type heldTerminalSession struct {
+	RemoteTerminalSession
+	once           sync.Once
+	closeErr       error
+	release        func()
+	cancelStream   func(error)
+	stopLeaseWatch func() bool
+	stopWatch      func() bool
+	member         string // the PTY's admission member; tests use it to inject loss
+}
+
+// Close closes the PTY and releases its admission. It runs at most once,
+// whether the user closed the terminal or the lease was lost.
+func (s *heldTerminalSession) Close() error {
+	s.once.Do(func() {
+		if s.stopWatch != nil {
+			s.stopWatch()
+		}
+		if s.stopLeaseWatch != nil {
+			s.stopLeaseWatch()
+		}
+		s.closeErr = s.RemoteTerminalSession.Close()
+		if s.cancelStream != nil {
+			s.cancelStream(context.Canceled)
+		}
+		s.release()
+	})
+	return s.closeErr
 }
 
 var _ SessionTerminalProvider = (*SessionBoundManager)(nil)
@@ -1118,39 +1479,46 @@ func (m *SessionBoundManager) Cleanup(_ context.Context) error {
 
 // --- internal helpers --------------------------------------------------------
 
-// BeginSessionTurn opens the chat-turn lease for sessionID. The first
-// resolve after this may rebuild a stale image; later resolves of the same
-// turn keep the sandbox.
-func (m *SessionBoundManager) BeginSessionTurn(ctx context.Context, sessionID string) error {
+// BeginSessionTurn opens one chat-turn hold for sessionID. The first resolve
+// after this may rebuild a stale image; later resolves of the same turn keep
+// the sandbox. end closes exactly this hold.
+func (m *SessionBoundManager) BeginSessionTurn(ctx context.Context, sessionID string) (context.Context, func(), error) {
+	noop := func() {}
 	if m == nil {
-		return nil
+		return ctx, noop, nil
 	}
 	leaser, ok := m.bindings.(sessionTurnLeaseStore)
 	if !ok {
-		return nil
+		return ctx, noop, nil
 	}
-	key, err := m.sessionKey(ctx, sessionID)
+	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	return leaser.BeginTurn(ctx, key)
-}
-
-// EndSessionTurn closes the chat-turn lease. It ignores request cancellation
-// so a disconnected client still releases the lease.
-func (m *SessionBoundManager) EndSessionTurn(ctx context.Context, sessionID string) error {
-	if m == nil {
-		return nil
+	if err := leaser.BeginTurn(ctx, sc.key); err != nil {
+		return nil, nil, err
 	}
-	leaser, ok := m.bindings.(sessionTurnLeaseStore)
-	if !ok {
-		return nil
+	endLease := func() {
+		if err := leaser.EndTurn(context.WithoutCancel(ctx), sc.key); err != nil {
+			logger.Warnf(ctx, "[sandbox] end turn for session %s failed: %v", sessionID, err)
+		}
 	}
-	key, err := m.sessionKey(ctx, sessionID)
+	if !sc.user {
+		var once sync.Once
+		return ctx, func() { once.Do(endLease) }, nil
+	}
+	turnCtx, release, err := m.admitUser(ctx, sc, "turn")
 	if err != nil {
-		return err
+		endLease()
+		return nil, nil, err
 	}
-	return leaser.EndTurn(context.WithoutCancel(ctx), key)
+	var once sync.Once
+	return turnCtx, func() {
+		once.Do(func() {
+			release()
+			endLease()
+		})
+	}, nil
 }
 
 // HasActiveTurn reports whether an agent turn currently holds the session's
@@ -1164,12 +1532,36 @@ func (m *SessionBoundManager) HasActiveTurn(ctx context.Context, sessionID strin
 	if !ok {
 		return false, nil
 	}
-	key, err := m.sessionKey(ctx, sessionID)
+	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
 		return false, err
 	}
-	active, _, err := leaser.TurnState(ctx, key)
+	active, _, err := leaser.TurnState(ctx, sc.key)
 	return active, err
+}
+
+const rewindExclusiveWait = 5 * time.Second
+
+// LockRewindSession takes the session's rewind lock and, on a shared
+// machine, the session's exclusive window, so no other operation of the
+// session touches its work tree during the reset. Run the reset with the
+// returned context. On a per-session sandbox the context is ctx itself.
+func (m *SessionBoundManager) LockRewindSession(
+	ctx context.Context, sessionID string,
+) (context.Context, func(), error) {
+	unlockRewind, err := m.TryLockRewind(ctx, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	exCtx, release, err := m.acquireSessionExclusive(ctx, sessionID, m.rewindWait)
+	if err != nil {
+		unlockRewind()
+		return nil, nil, err
+	}
+	return exCtx, func() {
+		release()
+		unlockRewind()
+	}, nil
 }
 
 // TryLockRewind takes an exclusive rewind lock for sessionID. Stores that do
@@ -1186,11 +1578,11 @@ func (m *SessionBoundManager) TryLockRewind(ctx context.Context, sessionID strin
 	if !ok {
 		return noop, nil
 	}
-	key, err := m.sessionKey(ctx, sessionID)
+	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	return locker.TryLockRewind(ctx, key)
+	return locker.TryLockRewind(ctx, sc.key)
 }
 
 // HasRewindLock reports whether rewind currently holds sessionID.
@@ -1204,11 +1596,11 @@ func (m *SessionBoundManager) HasRewindLock(ctx context.Context, sessionID strin
 	if !ok {
 		return false, nil
 	}
-	key, err := m.sessionKey(ctx, sessionID)
+	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
 		return false, err
 	}
-	return reader.HasRewindLock(ctx, key)
+	return reader.HasRewindLock(ctx, sc.key)
 }
 
 // CreateForkSnapshot snapshots the session's already-bound sandbox. It never
@@ -1223,6 +1615,13 @@ func (m *SessionBoundManager) CreateForkSnapshot(
 	snapshots, ok := SnapshotManagerFrom(m.client)
 	if !ok || !m.client.Capabilities().SupportsSnapshots {
 		return "", errors.New("sandbox: remote provider does not support snapshots")
+	}
+	sc, err := m.scope(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	if sc.user {
+		return "", errors.New("sandbox: shared machines are forked by copying the session workspace")
 	}
 	sandboxID, bound := m.BoundSandboxID(ctx, sessionID)
 	if !bound || sandboxID == "" {
@@ -1266,11 +1665,11 @@ func (m *SessionBoundManager) resolveSession(
 	ctx context.Context,
 	sessionID string,
 ) (RemoteSandboxHandle, error) {
-	key, err := m.sessionKey(ctx, sessionID)
+	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	return m.lifecycle.Resolve(ctx, key)
+	return m.resolveScope(ctx, sc)
 }
 
 // peekBoundSandboxState reads provider listing for the bound sandbox without
@@ -1285,10 +1684,11 @@ func (m *SessionBoundManager) peekBoundSandboxState(
 	if m.remoteDisabled() || strings.TrimSpace(sessionID) == "" {
 		return "", false, nil
 	}
-	key, err := m.sessionKey(ctx, sessionID)
+	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
 		return "", false, err
 	}
+	key := sc.machine()
 	binding, err := m.bindings.Get(ctx, key)
 	if err != nil {
 		return "", false, fmt.Errorf("sandbox: read session binding: %w", err)
@@ -1297,10 +1697,7 @@ func (m *SessionBoundManager) peekBoundSandboxState(
 		return "", false, nil
 	}
 	summaries, err := m.client.List(ctx, RemoteListFilter{
-		Metadata: map[string]string{
-			remoteMetadataTenantID:  strconv.FormatUint(key.TenantID, 10),
-			remoteMetadataSessionID: key.SessionID,
-		},
+		Metadata: m.lifecycle.stateFilter(sc.key),
 		States: []RemoteSandboxState{
 			RemoteStateRunning,
 			RemoteStatePaused,
@@ -1330,11 +1727,11 @@ func (m *SessionBoundManager) BoundSandboxID(
 	if m.remoteDisabled() || strings.TrimSpace(sessionID) == "" {
 		return "", false
 	}
-	key, err := m.sessionKey(ctx, sessionID)
+	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
 		return "", false
 	}
-	binding, err := m.bindings.Get(ctx, key)
+	binding, err := m.bindings.Get(ctx, sc.machine())
 	if err != nil {
 		return "", false
 	}
@@ -1358,10 +1755,11 @@ func (m *SessionBoundManager) lookupSessionHandle(
 	if m.remoteDisabled() || strings.TrimSpace(sessionID) == "" {
 		return nil, false, nil
 	}
-	key, err := m.sessionKey(ctx, sessionID)
+	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
 		return nil, false, err
 	}
+	key := sc.machine()
 	// Serialise scope lookups so even concurrent reads connect only once.
 	// The scope is owned by one operation, not by this long-lived manager.
 	if scope, ok := ctx.Value(sessionFileOperationKey{}).(*sessionFileOperation); ok {
@@ -1455,6 +1853,506 @@ func (m *SessionBoundManager) walkSessionFiles(
 	return files, nil
 }
 
+// sessionScope is where one session's state lives.
+type sessionScope struct {
+	key        SessionSandboxKey
+	layout     WorkspaceLayout
+	assignment allocation.Assignment
+	user       bool
+}
+
+func (s sessionScope) machine() SessionSandboxKey { return s.key.Machine() }
+
+func (s sessionScope) sessionKeyOnly() SessionSandboxKey {
+	return SessionSandboxKey{TenantID: s.key.TenantID, SessionID: s.key.SessionID}
+}
+
+func (s sessionScope) digest(namespace string) string { return s.key.User.Digest(namespace) }
+
+// addressFor returns the session's recorded placement. User-mode rows are
+// cached as addresses; session-mode rows and misses are not, because a turn
+// may record the placement after this manager was built.
+func (m *SessionBoundManager) addressFor(ctx context.Context, sessionID string) (allocation.Assignment, bool, error) {
+	if m == nil || m.allocations == nil || strings.TrimSpace(sessionID) == "" {
+		return allocation.Assignment{}, false, nil
+	}
+	if cached, ok := m.addresses.Load(sessionID); ok {
+		return cached.(allocation.Assignment), true, nil
+	}
+	a, ok, err := m.allocations.SessionAllocation(ctx, sessionID)
+	if err != nil {
+		return allocation.Assignment{}, false, fmt.Errorf("sandbox: read session allocation: %w", err)
+	}
+	if ok && a.IsUser() {
+		m.addresses.Store(sessionID, a)
+	}
+	return a, ok, nil
+}
+
+// scope resolves where sessionID's state lives. Every exported per-session
+// method goes through here.
+func (m *SessionBoundManager) scope(ctx context.Context, sessionID string) (sessionScope, error) {
+	key, err := m.sessionKey(ctx, sessionID)
+	if err != nil {
+		return sessionScope{}, err
+	}
+	a, ok, err := m.addressFor(ctx, key.SessionID)
+	if err != nil {
+		return sessionScope{}, err
+	}
+	if !ok || !a.IsUser() {
+		return sessionScope{key: key, layout: withValidatedSkillOutputDir(RemoteWorkspaceLayout()), assignment: a}, nil
+	}
+	// Eligibility is not in the assignment (C17); admitUser verifies it
+	// from the session row before any provider call.
+	if a.Machine.OwnerTenantID != key.TenantID {
+		return sessionScope{}, fmt.Errorf("sandbox: session %s belongs to tenant %d, not %d",
+			key.SessionID, a.Machine.OwnerTenantID, key.TenantID)
+	}
+	if NormalizeConfigID(a.ConfigID) != NormalizeConfigID(m.configID) {
+		return sessionScope{}, fmt.Errorf("sandbox: session %s is assigned to config %s, not %s",
+			key.SessionID, a.ConfigID, m.configID)
+	}
+	if m.admission == nil {
+		return sessionScope{}, errors.New("sandbox: a user-mode session requires the admission registry")
+	}
+	layout, err := a.Layout()
+	if err != nil {
+		return sessionScope{}, err
+	}
+	machine, _ := a.UserMachine()
+	return sessionScope{
+		key:        SessionSandboxKey{TenantID: key.TenantID, SessionID: key.SessionID, User: machine},
+		layout:     layout,
+		assignment: a,
+		user:       true,
+	}, nil
+}
+
+type exclusiveSessionKey struct{}
+
+// withExclusiveSession marks ctx as the holder of scope's exclusive window,
+// so the holder's own operations skip the session lease it closed.
+func withExclusiveSession(ctx context.Context, scope admission.Scope) context.Context {
+	return context.WithValue(ctx, exclusiveSessionKey{}, scope)
+}
+
+func holdsExclusive(ctx context.Context, scope admission.Scope) bool {
+	held, ok := ctx.Value(exclusiveSessionKey{}).(admission.Scope)
+	return ok && held == scope
+}
+
+// holdWithWait registers member on scope, waiting out a closed scope for at
+// most admissionWait.
+func (m *SessionBoundManager) holdWithWait(
+	ctx context.Context, scope admission.Scope, member string,
+) (admission.Lease, error) {
+	deadline := time.Now().Add(m.admissionWait)
+	for {
+		lease, err := m.admission.Hold(ctx, scope, member, admission.DefaultHoldTTL)
+		if err == nil {
+			return lease, nil
+		}
+		if !errors.Is(err, admission.ErrClosed) || time.Now().After(deadline) {
+			return nil, fmt.Errorf("sandbox: shared machine is busy: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}
+
+// verifyLive re-reads, from the database, everything that makes the cached
+// address usable now (C4, C15): the same live assignment, and a session that
+// exists, is not retired, and whose current owner is the assignment's owner.
+func (m *SessionBoundManager) verifyLive(ctx context.Context, sc sessionScope) error {
+	if err := m.allocations.VerifySessionAllocation(ctx, sc.key.TenantID, sc.key.SessionID, sc.assignment); err != nil {
+		if errors.Is(err, ErrSandboxSessionDeleted) || errors.Is(err, ErrUserAllocationRejected) {
+			return err
+		}
+		return fmt.Errorf("sandbox: verify session allocation: %w", err)
+	}
+	return nil
+}
+
+// admitUser registers one operation of a user-mode session (C4): machine
+// lease, then session lease, then a fresh validity check. The returned
+// context is cancelled when either lease is lost (C3); pass it to every
+// provider call of the operation. It adds this operation's member to the
+// exemptions already on ctx (a turn's own members), never a member guessed
+// from the session id (C6). Session-mode scopes pass through untouched.
+func (m *SessionBoundManager) admitUser(
+	ctx context.Context, sc sessionScope, kind string,
+) (context.Context, func(), error) {
+	if !sc.user {
+		return ctx, func() {}, nil
+	}
+	token, err := redislock.NewToken()
+	if err != nil {
+		return nil, nil, err
+	}
+	member := admission.SessionMember(sc.key.SessionID, kind, token)
+	digest := sc.digest(m.namespace)
+	machineLease, err := m.holdWithWait(ctx, admission.MachineScope(digest), member)
+	if err != nil {
+		return nil, nil, err
+	}
+	leases := []admission.Lease{machineLease}
+	sessionLeaseScope := admission.SessionScope(digest, sc.key.SessionID)
+	if !holdsExclusive(ctx, sessionLeaseScope) {
+		sessionLease, err := m.holdWithWait(ctx, sessionLeaseScope, member)
+		if err != nil {
+			machineLease.Release()
+			if errors.Is(err, admission.ErrClosed) {
+				return nil, nil, fmt.Errorf("%w: %v", ErrSessionWorkspaceBusy, err)
+			}
+			return nil, nil, err
+		}
+		leases = append(leases, sessionLease)
+	}
+	releaseLeases := func() {
+		for i := len(leases) - 1; i >= 0; i-- {
+			leases[i].Release()
+		}
+	}
+	if err := m.verifyLive(ctx, sc); err != nil {
+		releaseLeases()
+		return nil, nil, err
+	}
+	signals := make([]admission.Signal, 0, len(leases))
+	for _, l := range leases {
+		signals = append(signals, l)
+	}
+	opCtx, stop := admission.Bind(ctx, signals...)
+	// Exempt this operation; a turn's own members arrive through ctx.
+	opCtx = withAdmissionExempt(opCtx, member)
+	var once sync.Once
+	return opCtx, func() {
+		once.Do(func() {
+			stop()
+			releaseLeases()
+		})
+	}, nil
+}
+
+// acquireExclusive closes sessionID's session scope and waits (bounded) for
+// its registered operations to leave. The returned context lets this
+// caller's own operations run inside the window.
+func (m *SessionBoundManager) acquireExclusive(
+	ctx context.Context, digest, sessionID string, wait time.Duration,
+) (context.Context, admission.Barrier, error) {
+	scope := admission.SessionScope(digest, sessionID)
+	barrier, err := m.admission.Close(ctx, scope, admission.DefaultHoldTTL)
+	if errors.Is(err, admission.ErrClosed) {
+		return nil, nil, ErrSessionWorkspaceBusy
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		n, err := m.admission.ActiveExcept(ctx, scope)
+		if err != nil {
+			barrier.Release()
+			return nil, nil, err
+		}
+		if n == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			barrier.Release()
+			return nil, nil, ErrSessionWorkspaceBusy
+		}
+		select {
+		case <-ctx.Done():
+			barrier.Release()
+			return nil, nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return withExclusiveSession(ctx, scope), barrier, nil
+}
+
+// AcquireSessionExclusive is acquireExclusive for one user-mode session.
+// Use the returned context for the exclusive work; it is cancelled with
+// admission.ErrLeaseLost if the window is lost. Call the function to end the
+// window. Session-mode sessions get ctx back unchanged.
+func (m *SessionBoundManager) AcquireSessionExclusive(
+	ctx context.Context, sessionID string,
+) (context.Context, func(), error) {
+	return m.acquireSessionExclusive(ctx, sessionID, m.admissionWait)
+}
+
+func (m *SessionBoundManager) acquireSessionExclusive(
+	ctx context.Context, sessionID string, wait time.Duration,
+) (context.Context, func(), error) {
+	sc, err := m.scope(ctx, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !sc.user {
+		return ctx, func() {}, nil
+	}
+	// C4: the exclusive window is itself a machine member. Rebuild and reclaim
+	// only count the machine scope, so a session barrier alone does not stop
+	// them deleting the machine under a rewind or a directory delete.
+	token, err := redislock.NewToken()
+	if err != nil {
+		return nil, nil, err
+	}
+	digest := sc.digest(m.namespace)
+	lease, err := m.holdWithWait(ctx, admission.MachineScope(digest),
+		admission.SessionMember(sc.key.SessionID, "exclusive", token))
+	if err != nil {
+		return nil, nil, err
+	}
+	exCtx, barrier, err := m.acquireExclusive(ctx, digest, sc.key.SessionID, wait)
+	if err != nil {
+		lease.Release()
+		return nil, nil, err
+	}
+	// The machine lease stays out of the exemption list: this request's own
+	// later exec must not rebuild the machine out from under the window.
+	bound, stop := admission.Bind(exCtx, lease, barrier)
+	var once sync.Once
+	return bound, func() {
+		once.Do(func() {
+			stop()
+			lease.Release()
+			barrier.Release()
+		})
+	}, nil
+}
+
+// DesktopMachine names the physical machine behind sessionID's desktop and
+// the sandbox it currently is. Sessions on one shared machine contend for one
+// control slot; a rebuilt machine, or a sandbox of another deployment,
+// provider or config, never shares a key. Call it while holding the session's
+// operation so the binding cannot change underneath the caller.
+func (m *SessionBoundManager) DesktopMachine(ctx context.Context, sessionID string) (string, string, error) {
+	sc, err := m.scope(ctx, sessionID)
+	if err != nil {
+		return "", "", err
+	}
+	if !sc.user {
+		// A per-session machine rebuilds a stale image on the next resolve.
+		// Pinning the current sandbox id would make the desktop's ensure
+		// command lookup-only and skip that rebuild.
+		return sessionID, "", nil
+	}
+	binding, err := m.bindings.Get(ctx, sc.machine())
+	if err != nil {
+		return "", "", err
+	}
+	if binding == nil || binding.SandboxID == "" || binding.Provider != m.client.Provider() {
+		return "", "", ErrNoLiveSessionSandbox
+	}
+	parts := []string{
+		m.namespace,
+		string(m.client.Provider()),
+		strconv.FormatUint(binding.ConfigTenantID, 10),
+		NormalizeConfigID(m.configID),
+		binding.SandboxID,
+	}
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return hex.EncodeToString(sum[:]), binding.SandboxID, nil
+}
+
+// HoldSessionOperation registers a long-lived operation (desktop relay) of
+// sessionID; ctx is cancelled if the lease is lost. A no-op for per-session
+// machines.
+func (m *SessionBoundManager) HoldSessionOperation(
+	ctx context.Context, sessionID, kind string,
+) (context.Context, func(), error) {
+	sc, err := m.scope(ctx, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return m.admitUser(ctx, sc, kind)
+}
+
+// resolveScope resolves (or lazily creates) the scope's machine. Callers
+// admit user-mode scopes first; a deleted user-mode session never reaches
+// the lifecycle, which never destroys a shared machine for one session.
+func (m *SessionBoundManager) resolveScope(ctx context.Context, sc sessionScope) (RemoteSandboxHandle, error) {
+	return m.lifecycle.Resolve(ctx, sc.key)
+}
+
+// Namespace is the deployment namespace user machine digests use.
+func (m *SessionBoundManager) Namespace() string { return m.namespace }
+
+// UserMachineKey is the machine-level key of a shared user machine.
+func (m *SessionBoundManager) UserMachineKey(machine allocation.UserMachine) SessionSandboxKey {
+	return SessionSandboxKey{TenantID: machine.OwnerTenantID, User: machine}
+}
+
+const sessionWorkspaceCleanupTimeout = 60 * time.Second
+
+// ErrMachineAbsenceUnprovable is returned when a user machine has no binding
+// and the provider cannot list by metadata, so it may still exist. Directory
+// cleanups keep their task instead of treating the machine as gone.
+var ErrMachineAbsenceUnprovable = errors.New("sandbox: cannot prove the user machine is gone")
+
+// DeleteSessionWorkspaces removes the work trees and checkpoint repositories
+// of retired sessions from their shared machine. It registers on the machine
+// first, then takes each session's scope exclusively so work admitted before
+// the retirement finishes before its directory goes; a session whose
+// operations do not leave in time is skipped and reported as not deleted.
+// Every hold is bound into the command's context, so a lost hold stops the
+// deletion (C3). A machine whose binding was lost is re-adopted by metadata,
+// never created; only a provider that lists nothing proves it is gone (C5).
+// Connect resumes a paused machine: a deleted session's files must not
+// linger on its disk.
+func (m *SessionBoundManager) DeleteSessionWorkspaces(
+	ctx context.Context, machine allocation.UserMachine, sessionIDs []string,
+) ([]string, error) {
+	if err := m.requireRemoteBackend(); err != nil {
+		return nil, err
+	}
+	if m.admission == nil {
+		return nil, errors.New("sandbox: user machines require the admission registry")
+	}
+	if len(sessionIDs) == 0 {
+		return nil, nil
+	}
+	for _, id := range sessionIDs {
+		if _, err := UserWorkspaceLayout(id); err != nil {
+			return nil, err
+		}
+	}
+	digest := machine.Digest(m.namespace)
+	token, err := redislock.NewToken()
+	if err != nil {
+		return nil, err
+	}
+	lease, err := m.holdWithWait(ctx, admission.MachineScope(digest),
+		admission.SessionMember(sessionIDs[0], "cleanup", token))
+	if err != nil {
+		return nil, err
+	}
+	defer lease.Release()
+
+	signals := []admission.Signal{lease}
+	var barriers []admission.Barrier
+	defer func() {
+		for _, b := range barriers {
+			b.Release()
+		}
+	}()
+	var ready []string
+	for _, id := range sessionIDs {
+		_, barrier, err := m.acquireExclusive(ctx, digest, id, m.admissionWait)
+		if errors.Is(err, ErrSessionWorkspaceBusy) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		barriers = append(barriers, barrier)
+		signals = append(signals, barrier)
+		ready = append(ready, id)
+	}
+	if len(ready) == 0 {
+		return nil, nil
+	}
+	guarded, stop := admission.Bind(ctx, signals...)
+	defer stop()
+	lost := func(err error) error {
+		if cause := context.Cause(guarded); errors.Is(cause, admission.ErrLeaseLost) {
+			return cause
+		}
+		return err
+	}
+
+	key := m.UserMachineKey(machine)
+	handle, found, err := m.lookupSessionHandleForKey(guarded, key, "")
+	if err != nil {
+		return nil, lost(err)
+	}
+	if !found {
+		handle, found, err = m.lifecycle.recoverWithoutCreating(guarded, key)
+		if err != nil {
+			return nil, lost(err)
+		}
+		if !found {
+			return ready, nil
+		}
+	}
+	var targets []string
+	for _, id := range ready {
+		l, err := UserWorkspaceLayout(id)
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, ShellQuote(l.Root), ShellQuote(l.GitDir))
+	}
+	// Refuse a symlinked parent instead of following it: an agent on this
+	// machine runs as root and may have replaced one.
+	script := `set -eu
+for p in /workspace /workspace/sessions /var/lib/weknora /var/lib/weknora/sessions; do
+  if [ -L "$p" ]; then echo "refusing to clean through symlinked $p" >&2; exit 4; fi
+done
+for t in ` + strings.Join(targets, " ") + `; do
+  if [ -L "$t" ]; then rm -f -- "$t"; else rm -rf -- "$t"; fi
+done`
+	result, err := m.client.Exec(guarded, handle, RemoteExecRequest{
+		Shell: true, Command: script, User: "root", Timeout: sessionWorkspaceCleanupTimeout,
+	})
+	if err != nil {
+		return nil, lost(fmt.Errorf("sandbox: delete session workspaces: %w", err))
+	}
+	if result == nil || result.ExitCode != 0 || result.Killed {
+		detail := "no result"
+		if result != nil {
+			detail = fmt.Sprintf("exit=%d stderr=%s", result.ExitCode, strings.TrimSpace(result.Stderr))
+		}
+		return nil, fmt.Errorf("sandbox: delete session workspaces: %s", detail)
+	}
+	if err := lost(nil); err != nil {
+		return nil, err
+	}
+	// A re-adopted machine whose token could not be recovered is bound only
+	// once the directories are actually gone. ensureBinding is a no-op when
+	// the binding was already there.
+	if err := m.lifecycle.ensureBinding(guarded, key, handle); err != nil {
+		return nil, lost(err)
+	}
+	if err := lost(nil); err != nil {
+		return nil, err
+	}
+	return ready, nil
+}
+
+// ReclaimUserMachine deletes a shared user machine; see
+// remoteSessionLifecycle.reclaimUserMachine for the safety rules.
+func (m *SessionBoundManager) ReclaimUserMachine(
+	ctx context.Context, machine allocation.UserMachine, check func(context.Context) (bool, error),
+) (bool, error) {
+	if err := m.requireRemoteBackend(); err != nil {
+		return false, err
+	}
+	return m.lifecycle.reclaimUserMachine(ctx, m.UserMachineKey(machine), check)
+}
+
+// withSessionEnv overlays the session's input/output paths. On a shared
+// machine they are reserved: no config or caller value may redirect them.
+func withSessionEnv(env map[string]string, layout WorkspaceLayout) map[string]string {
+	out := make(map[string]string, len(env)+2)
+	for k, v := range env {
+		out[k] = v
+	}
+	out[skillOutputEnvVar] = layout.OutputDir
+	out[sessionInputEnvVar] = layout.InputDir
+	return out
+}
+
+// userScriptDir is where an uploaded skill script lands on a shared machine.
+func userScriptDir(layout WorkspaceLayout) string {
+	return path.Join(layout.Root, ".weknora", "scripts")
+}
+
 // sessionKey resolves the tenant-scoped binding key. Tenant ID comes from the
 // request context; empty tenant is treated as a caller error to keep session
 // bindings globally addressable in Redis.
@@ -1503,58 +2401,20 @@ func (m *SessionBoundManager) requireRemoteBackend() error {
 }
 
 func cleanSessionInputPath(filePath string) (string, error) {
-	clean := path.Clean(strings.TrimSpace(filePath))
-	if clean == SessionInputRoot || strings.HasPrefix(clean, SessionInputRoot+"/") {
-		return clean, nil
-	}
-	return "", fmt.Errorf(
-		"sandbox: session input path %q is outside %s",
-		filePath, SessionInputRoot,
-	)
+	return workspace.CleanInputPathIn(RemoteWorkspaceLayout(), filePath)
 }
 
 // cleanSessionWorkspaceWritePath normalizes model-authored sandbox writes and
 // protects staged attachments. The remote session binding isolates the files.
 func cleanSessionWorkspaceWritePath(filePath string) (string, error) {
-	clean := ResolveWorkspacePathIn(RemoteWorkspaceLayout(), filePath)
-	if !path.IsAbs(clean) || clean == "." || clean == "/" {
-		return "", fmt.Errorf("sandbox: workspace write path %q must be an absolute file path", filePath)
-	}
-	if clean == SessionWorkspaceRoot || clean == SessionOutputRoot || clean == SessionInputRoot {
-		return "", fmt.Errorf("sandbox: workspace write path %q is a directory, not a file", filePath)
-	}
-	if strings.HasPrefix(clean, SessionInputRoot+"/") {
-		return "", fmt.Errorf("sandbox: session input %s is read-only", SessionInputRoot)
-	}
-	return clean, nil
+	return workspace.CleanWriteFileIn(RemoteWorkspaceLayout(), filePath)
 }
 
 // cleanSessionWorkDir requires an absolute sandbox-local working directory.
 // Ordinary calls may work anywhere; the install/maintenance option retains its
 // explicit workspace/skills scope. Neither check changes filesystem privileges.
 func cleanSessionWorkDir(workDir string, allowSkillsRoot bool) (string, error) {
-	clean := path.Clean(strings.TrimSpace(workDir))
-	if !path.IsAbs(clean) {
-		return "", fmt.Errorf("sandbox: work dir %q must be absolute", workDir)
-	}
-	if !allowSkillsRoot {
-		return clean, nil
-	}
-	if clean == SessionWorkspaceRoot || strings.HasPrefix(clean, SessionWorkspaceRoot+"/") {
-		return clean, nil
-	}
-	if allowSkillsRoot &&
-		(clean == SkillsImageRoot || strings.HasPrefix(clean, SkillsImageRoot+"/")) {
-		return clean, nil
-	}
-	allowed := SessionWorkspaceRoot
-	if allowSkillsRoot {
-		allowed = SessionWorkspaceRoot + ", " + SkillsImageRoot
-	}
-	return "", fmt.Errorf(
-		"sandbox: work dir %q is outside allowed roots (%s)",
-		workDir, allowed,
-	)
+	return workspace.CleanWorkDirIn(RemoteWorkspaceLayout(), workDir, allowSkillsRoot)
 }
 
 // buildSessionCreateRequest projects Config into a provider-neutral remote
@@ -1660,6 +2520,190 @@ func effectiveHTTPTimeout(provider RemoteProvider, cfg *Config) time.Duration {
 	default:
 		return DefaultCubeHTTPTimeout
 	}
+}
+
+var forkCommitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+const (
+	forkCopyTimeout   = 5 * time.Minute
+	forkMaxCandidates = 2000
+)
+
+// WorkspaceFork is an open fork of a session on a shared machine. It holds
+// the machine's and the source session's admission until Release, so the
+// machine named by SandboxID is the one every step runs on. Its steps fail
+// with admission.ErrLeaseLost once that hold is lost.
+type WorkspaceFork interface {
+	SandboxID() string
+	// Context is cancelled with admission.ErrLeaseLost once the hold is
+	// lost. Run every step of the fork with it, database steps included.
+	Context() context.Context
+	// Copy materializes sha of the source's checkpoint repository as
+	// targetSessionID's workspace and reports which of candidates are sha
+	// or its ancestors, i.e. which checkpoints exist in the new repository.
+	Copy(targetSessionID, sha string, candidates []string) (map[string]bool, error)
+	// Remove deletes targetSessionID's work tree and repository.
+	Remove(targetSessionID string) error
+	Release()
+}
+
+type workspaceFork struct {
+	m       *SessionBoundManager
+	ctx     context.Context
+	source  WorkspaceLayout
+	handle  RemoteSandboxHandle
+	member  string
+	release func()
+}
+
+// BeginWorkspaceFork opens a fork of sourceSessionID on its shared machine.
+// It never creates the machine: a source without one has nothing to copy.
+func (m *SessionBoundManager) BeginWorkspaceFork(ctx context.Context, sourceSessionID string) (WorkspaceFork, error) {
+	if err := m.requireRemoteBackend(); err != nil {
+		return nil, err
+	}
+	sc, err := m.scope(ctx, sourceSessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !sc.user {
+		return nil, ErrSharedSandbox
+	}
+	opCtx, release, err := m.admitUser(ctx, sc, "fork")
+	if err != nil {
+		// admitUser releases anything it acquired and returns a nil func.
+		if release != nil {
+			release()
+		}
+		return nil, err
+	}
+	handle, found, err := m.lookupSessionHandleForKey(opCtx, sc.machine(), "")
+	if err != nil {
+		release()
+		return nil, err
+	}
+	if !found {
+		release()
+		return nil, ErrNoLiveSessionSandbox
+	}
+	exempt := admissionExemptFrom(opCtx)
+	return &workspaceFork{
+		m: m, ctx: opCtx, source: sc.layout, handle: handle,
+		member: exempt[len(exempt)-1], release: release,
+	}, nil
+}
+
+func (f *workspaceFork) SandboxID() string        { return f.handle.ID() }
+func (f *workspaceFork) Context() context.Context { return f.ctx }
+func (f *workspaceFork) Member() string           { return f.member }
+func (f *workspaceFork) Release()                 { f.release() }
+
+func (f *workspaceFork) alive() error {
+	if err := context.Cause(f.ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (f *workspaceFork) run(script string) (*RemoteExecResult, error) {
+	if err := f.alive(); err != nil {
+		return nil, err
+	}
+	result, err := f.m.client.Exec(f.ctx, f.handle, RemoteExecRequest{
+		Shell: true, Command: script, User: "root", Timeout: forkCopyTimeout,
+	})
+	if cause := f.alive(); cause != nil {
+		return nil, cause
+	}
+	if err != nil {
+		return nil, err
+	}
+	if result == nil || result.ExitCode != 0 || result.Killed {
+		detail := "no result"
+		if result != nil {
+			detail = fmt.Sprintf("exit=%d stderr=%s", result.ExitCode, strings.TrimSpace(result.Stderr))
+		}
+		return nil, errors.New(detail)
+	}
+	return result, nil
+}
+
+func (f *workspaceFork) Copy(targetSessionID, sha string, candidates []string) (map[string]bool, error) {
+	if !forkCommitPattern.MatchString(sha) {
+		return nil, fmt.Errorf("sandbox: invalid fork commit %q", sha)
+	}
+	target, err := UserWorkspaceLayout(targetSessionID)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var quoted []string
+	for _, c := range candidates {
+		if forkCommitPattern.MatchString(c) && !seen[c] && len(quoted) < forkMaxCandidates {
+			seen[c] = true
+			quoted = append(quoted, ShellQuote(c))
+		}
+	}
+	script := fmt.Sprintf(`set -eu
+SRC_GIT=%s
+DST_TREE=%s
+DST_GIT=%s
+SHA=%s
+for p in /workspace /workspace/sessions /var/lib/weknora /var/lib/weknora/sessions; do
+  if [ -L "$p" ]; then echo "refusing symlinked $p" >&2; exit 4; fi
+done
+if [ -e "$DST_TREE" ] || [ -e "$DST_GIT" ]; then echo "fork target exists" >&2; exit 5; fi
+mkdir -p /var/lib/weknora/sessions /workspace/sessions
+tmp=$(mktemp -d /var/lib/weknora/sessions/.fork.XXXXXX)
+trap 'rm -rf -- "$tmp"' EXIT
+g() { git -c safe.directory='*' -c core.hooksPath=/dev/null "$@"; }
+g --git-dir="$SRC_GIT" cat-file -e "$SHA^{commit}"
+if g --git-dir="$SRC_GIT" ls-tree -r "$SHA" | awk '$1=="160000"{f=1} END{exit !f}'; then
+  echo "checkpoint contains a gitlink" >&2; exit 6
+fi
+g init -q --bare "$tmp/repo.git"
+g -c uploadpack.allowAnySHA1InWant=true --git-dir="$tmp/repo.git" fetch -q --no-tags "$SRC_GIT" "$SHA:refs/heads/main"
+g --git-dir="$tmp/repo.git" symbolic-ref HEAD refs/heads/main
+g --git-dir="$tmp/repo.git" config core.bare false
+g --git-dir="$tmp/repo.git" config user.email agent@weknora.local
+g --git-dir="$tmp/repo.git" config user.name 'WeKnora Agent'
+mkdir -p "$tmp/tree"
+g --git-dir="$tmp/repo.git" --work-tree="$tmp/tree" checkout -q -f main
+mkdir -p "$tmp/tree/input" "$tmp/tree/output"
+mv -- "$tmp/repo.git" "$DST_GIT"
+mv -- "$tmp/tree" "$DST_TREE"
+for c in %s; do
+  if g --git-dir="$DST_GIT" merge-base --is-ancestor "$c" "$SHA" 2>/dev/null; then echo "R $c"; fi
+done
+`, ShellQuote(f.source.GitDir), ShellQuote(target.Root), ShellQuote(target.GitDir), ShellQuote(sha),
+		strings.Join(quoted, " "))
+	result, err := f.run(script)
+	if err != nil {
+		return nil, fmt.Errorf("sandbox: copy session workspace: %w", err)
+	}
+	reachable := map[string]bool{}
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		if c, ok := strings.CutPrefix(strings.TrimSpace(line), "R "); ok && seen[c] {
+			reachable[c] = true
+		}
+	}
+	return reachable, nil
+}
+
+func (f *workspaceFork) Remove(targetSessionID string) error {
+	target, err := UserWorkspaceLayout(targetSessionID)
+	if err != nil {
+		return err
+	}
+	_, err = f.run(fmt.Sprintf(`set -eu
+for p in /workspace /workspace/sessions /var/lib/weknora /var/lib/weknora/sessions; do
+  if [ -L "$p" ]; then echo "refusing symlinked $p" >&2; exit 4; fi
+done
+rm -rf -- %s %s`, ShellQuote(target.Root), ShellQuote(target.GitDir)))
+	if err != nil {
+		return fmt.Errorf("sandbox: remove forked workspace: %w", err)
+	}
+	return nil
 }
 
 var (

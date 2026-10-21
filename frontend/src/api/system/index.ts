@@ -787,6 +787,8 @@ export interface SandboxConfig {
   volume_mount?: SandboxVolumeMountConfig
   skill_image?: SandboxSkillImage
   skill_rollout?: 'next_turn' | 'new_session'
+  allocation_mode?: 'session' | 'user'
+  user_sandbox_empty_retention_days?: number
   network?: SandboxNetworkPolicy
   cube?: SandboxCubeConfig
   e2b?: SandboxE2BConfig
@@ -925,6 +927,17 @@ export interface SandboxInventory {
   session_ids?: string[]
   agent_names?: string[]
   unverifiable?: boolean
+  /** Shared user machines among sandbox_count, not sessions on those machines. */
+  user_sandbox_count?: number
+}
+
+export interface UserSandbox {
+  digest: string
+  owner_tenant_id: number
+  owner_id?: string
+  live_sessions: number
+  empty_since?: string
+  reclaim_after?: string
 }
 
 /** Sandbox backends managed as named workspace configurations. */
@@ -990,6 +1003,14 @@ export function getSandboxConfigInventory(id: string): Promise<{ data: SandboxIn
   return get(`/api/v1/sandbox-configs/${id}/sandboxes`) as unknown as Promise<{
     data: SandboxInventory
   }>
+}
+
+export function listUserSandboxes(configId: string) {
+  return get<{ success: boolean; data: UserSandbox[] }>(`/api/v1/sandbox-configs/${configId}/user-sandboxes`)
+}
+
+export function releaseUserSandbox(configId: string, digest: string) {
+  return post<{ success: boolean }>(`/api/v1/sandbox-configs/${configId}/user-sandboxes/${digest}/release`)
 }
 
 /**

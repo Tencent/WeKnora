@@ -1437,7 +1437,8 @@ func (s *agentService) registerTools(
 			if toolToRegister.Name() != toolName {
 				logger.Warnf(ctx, "Tool name mismatch: expected %s, got %s", toolName, toolToRegister.Name())
 			}
-			if risk, writes := assistantWriteToolRisk[toolName]; writes && config.OperationsAgentID != "" {
+			confirms := config.OperationsAgentID != "" || config.AssistantAccess != types.AssistantAccessAutoWrite
+			if risk, writes := assistantWriteToolRisk[toolName]; writes && confirms {
 				gate, _ := s.toolApprovalGate.(approval.BuiltinApproval)
 				toolToRegister = tools.NewConfirmedTool(toolToRegister, risk,
 					operations.Access{Level: config.AssistantAccess}, gate)

@@ -126,6 +126,7 @@ export function pendingPromptEvents(prompt: unknown): ChatMessage[] {
       ? JSON.stringify(response.modified_args)
       : request.args === undefined ? '' : JSON.stringify(request.args),
     grant_scope: request.grant_scope,
+    grant_lapsed: request.grant_lapsed,
     tool_call_id: p.tool_call_id,
     requested_at: requestedAt,
     suspendable: true,
@@ -985,6 +986,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           delegated_task: d.delegated_task,
           args_json: d.args_json,
           grant_scope: d.grant_scope,
+          grant_lapsed: d.grant_lapsed,
           timeout_seconds: d.timeout_seconds,
           hot_wait_seconds: d.hot_wait_seconds,
           suspendable: d.suspendable,

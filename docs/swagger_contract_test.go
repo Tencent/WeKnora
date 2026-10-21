@@ -64,6 +64,36 @@ func TestKnowledgeSearchRouteContract(t *testing.T) {
 	}
 }
 
+func TestAutomationAssistantContract(t *testing.T) {
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				Definitions map[string]struct {
+					Properties map[string]any `json:"properties" yaml:"properties"`
+				} `json:"definitions" yaml:"definitions"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{
+				"internal_handler.CreateAutomationRequest",
+				"github_com_Tencent_WeKnora_internal_types.AutomationPatch",
+				"github_com_Tencent_WeKnora_internal_types.Automation",
+			} {
+				properties := spec.Definitions[name].Properties
+				if _, ok := properties["agent_id"]; ok {
+					t.Errorf("%s must not expose executor selection", name)
+				}
+				for _, field := range []string{"instruction", "model_id"} {
+					if _, ok := properties[field]; !ok {
+						t.Errorf("%s must expose %s", name, field)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestReleaseAPIContracts(t *testing.T) {
 	for _, tt := range swaggerDocuments() {
 		t.Run(tt.name, func(t *testing.T) {
@@ -328,5 +358,27 @@ func swaggerInteger(value any) int {
 		return int(number)
 	default:
 		return 0
+	}
+}
+
+func TestNotificationInboxContract(t *testing.T) {
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				Paths map[string]map[string]swaggerOperation `json:"paths" yaml:"paths"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := spec.Paths["/notifications/read"]["delete"]; !ok {
+				t.Fatal("missing clear-read notification endpoint")
+			}
+			for _, parameter := range spec.Paths["/notifications"]["get"].Parameters {
+				if parameter.Name == "cursor" && parameter.In == "query" && parameter.Type == "string" {
+					return
+				}
+			}
+			t.Fatal("notification listing must document its history cursor")
+		})
 	}
 }

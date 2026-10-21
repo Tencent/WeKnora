@@ -695,9 +695,10 @@ func (c *mcpGoClient) listRawTools(ctx context.Context) ([]*types.MCPTool, error
 		}
 		var page struct {
 			Tools []struct {
-				Name        string          `json:"name"`
-				Description string          `json:"description"`
-				InputSchema json.RawMessage `json:"inputSchema"`
+				Name        string                    `json:"name"`
+				Description string                    `json:"description"`
+				InputSchema json.RawMessage           `json:"inputSchema"`
+				Annotations *types.MCPToolAnnotations `json:"annotations"`
 			} `json:"tools"`
 			NextCursor string `json:"nextCursor"`
 		}
@@ -712,7 +713,10 @@ func (c *mcpGoClient) listRawTools(ctx context.Context) ([]*types.MCPTool, error
 			}
 			tools = append(
 				tools,
-				&types.MCPTool{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema},
+				&types.MCPTool{
+					Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema,
+					Annotations: tool.Annotations,
+				},
 			)
 		}
 		if len(tools) > maxToolsPerService {

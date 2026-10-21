@@ -127,16 +127,23 @@ var shellExecBlacklist = []struct {
 
 var shellExecTool = BaseTool{
 	name:        ToolShellExec,
-	description: legacyShellExecDescription,
+	description: shellExecDescription(sandbox.RemoteWorkspaceLayout()),
 	schema:      utils.GenerateSchema[ShellExecInput](),
 }
 
-// legacyShellExecDescription is the remote /workspace prompt text. Host
-// layouts rewrite the same copy through shellExecDescription.
-const legacyShellExecDescription = `Execute a command in the current session's isolated sandbox as root.
-The sandbox belongs to this session alone; nothing here runs on the host.
+// The shell_exec copy is written against /workspace; the scope claim and the
+// lifetime line differ between a machine one session owns and a machine
+// several sessions share; everything else is the same words for both.
+const (
+	shellExecScopeOwned = `Execute a command in the current session's isolated sandbox as root.
+The sandbox belongs to this session alone; nothing here runs on the host.`
+	shellExecScopeShared    = `Execute a command in this session's directory as root.`
+	shellExecLifetimeOwned  = `  Changes live and die with this session.`
+	shellExecLifetimeShared = `  Deleting this session removes its directory, not the machine.`
+
+	shellExecBodyTemplate = `%s
 - CWD defaults to /workspace on every call; cd does not persist.
-  work_dir selects any directory inside the session sandbox; missing directories are created as the same user.
+  work_dir selects any directory on the machine; missing directories are created as the same user.
 - Use ls/find to discover files, grep/awk to search, and cat/head/tail/sed to inspect text. Read known paths directly; no mandatory discovery call.
 - Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. Commands are limited to 8192 bytes. Execution is synchronous (no nohup or trailing &).
 - skill_name selects a listed skill for this call. Installed skills use their Python virtualenv and Node modules;
@@ -151,17 +158,22 @@ The sandbox belongs to this session alone; nothing here runs on the host.
   ` + "`" + skillNodePackageInstallCommand + "`" + `.
   If .venv is absent, create it with python3 -m venv --without-pip "${WEKNORA_SKILL_DIR:?}/.venv".
   Without uv, run the venv Python with -m ensurepip --upgrade before -m pip install.
-  Changes live and die with this session.
+%s
 - Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. Transport failures/timeouts are tool failures. Changing tools does not change permissions; do not repeat a denied operation through another tool.
 - stdout/stderr have independent byte limits, preserving head and tail when truncated. Full output is not automatically saved; redirect verbose commands to a workspace log when it must be retained. Binary bytes are suppressed.
 - Use ![description](sandbox:<file name>) with exact links from Output files, never stdout or temporary paths.`
+)
 
 func shellExecDescription(l sandbox.WorkspaceLayout) string {
 	if l.IsHost() {
 		root := layoutRootOrGeneric(l)
 		return fmt.Sprintf(hostShellExecDescription, root, root, root)
 	}
-	return rewriteRemoteWorkspaceCopy(legacyShellExecDescription, l)
+	scope, lifetime := shellExecScopeOwned, shellExecLifetimeOwned
+	if l.IsSharedRemote() {
+		scope, lifetime = shellExecScopeShared, shellExecLifetimeShared
+	}
+	return rewriteRemoteWorkspaceCopy(fmt.Sprintf(shellExecBodyTemplate, scope, lifetime), l)
 }
 
 const hostShellExecDescription = "Execute a command in %s. The process is OS-sandboxed on this machine.\n" +

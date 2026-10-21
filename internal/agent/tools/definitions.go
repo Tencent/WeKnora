@@ -294,14 +294,17 @@ func RetiredToolReplacement(name string) string {
 		return "knowledge_search is no longer available; use search_knowledge(query=..., mode=\"semantic\"|\"hybrid\")"
 	case LegacyToolGrepChunks:
 		return "grep_chunks is no longer available; use search_knowledge(query=..., mode=\"keyword\") for exact " +
-			"terms, or read_document(id=dN, query=...) to search inside one document"
+			"terms, or read_document(id=doc://N, query=...) to search inside one document"
 	case LegacyToolListKnowledgeChunks:
-		return "list_knowledge_chunks is no longer available; use read_document(id=dN or cN, offset=..., limit=...)"
+		return "list_knowledge_chunks is no longer available; use " +
+			"read_document(id=doc://N or chunk://N, offset=..., limit=...)"
 	case LegacyToolGetDocumentInfo:
-		return "get_document_info is no longer available; read_document(id=dN) returns the document metadata " +
+		return "get_document_info is no longer available; read_document(id=doc://N) " +
+			"returns the document metadata " +
 			"with its first page"
 	case LegacyToolWikiReadSourceDoc:
-		return "wiki_read_source_doc is no longer available; use read_document(id=dN, query=... or offset=...)"
+		return "wiki_read_source_doc is no longer available; use " +
+			"read_document(id=doc://N, query=... or offset=...)"
 	default:
 		return ""
 	}

@@ -27,6 +27,9 @@ test('operation titles follow the UI locale for live events, history, and status
   const event = { tool_name: 'run_operation', arguments: { operation: 'model.list' } }
   assert.equal(getCatalogToolTitle(global.t, event), '执行操作：获取模型列表')
   assert.equal(getCatalogToolTitle(global.t, {
+    tool_name: 'run_operation', arguments: { operation: 'automation.validate_trigger' },
+  }), '执行操作：校验运行时间')
+  assert.equal(getCatalogToolTitle(global.t, {
     tool_name: 'run_operation', output: JSON.stringify({ operation: 'agent.list' }),
   }), '执行操作：获取智能体列表')
   for (const status of [{ pending: true }, { success: false }]) {
