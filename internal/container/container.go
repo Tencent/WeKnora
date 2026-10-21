@@ -322,7 +322,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewStorageBackendRepository))
 	must(container.Provide(repository.NewResourceRepository))
 	must(container.Provide(repository.NewTemporaryDocumentRepository))
-	must(container.Provide(service.NewResourceCatalog))
+	must(container.Provide(service.NewResourceCatalogWithStorage))
 	// TenantStoreOwnership adapter used by the retriever factory functions
 	// to verify that a resolved VectorStore belongs to the caller's tenant.
 	must(container.Provide(retriever.NewVectorStoreRepoOwnership))
@@ -1337,7 +1337,10 @@ func initFileService(cfg *config.Config, catalog interfaces.ResourceCatalog) (in
 	if err != nil {
 		return nil, err
 	}
-	return file.NewResourceCatalogFileService(inner, catalog), nil
+	if _, dummy := inner.(*file.DummyFileService); dummy {
+		return file.NewResourceCatalogFileService(inner, catalog), nil
+	}
+	return file.NewGlobalResourceCatalogFileService(inner, catalog), nil
 }
 
 func initRawFileService(_ *config.Config) (interfaces.FileService, error) {

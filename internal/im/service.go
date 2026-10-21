@@ -207,9 +207,16 @@ func newIMFileServiceResolver(
 // Every platform and output mode uses the same resource-aware resolver. Keep
 // it scoped to the reply so shared KB images select their owner's backend and
 // multiple images on the same instance reuse its client during streaming.
-func (s *Service) newOutboundFileServiceResolver(tenant *types.Tenant) *storageurl.FileServiceResolver {
+func (s *Service) newOutboundFileServiceResolver(
+	tenant *types.Tenant,
+	agent *types.CustomAgent,
+	kbIDs []string,
+) *storageurl.FileServiceResolver {
 	return newIMFileServiceResolver(tenant, s.defaultFileSvc, s.storageResolver).
-		WithResources(s.resourceCatalog, s.tenantService)
+		WithResources(s.resourceCatalog, s.tenantService).
+		WithAuthorization(func(ctx context.Context, reference string) error {
+			return s.authorizeOutboundResource(ctx, tenant, agent, kbIDs, reference)
+		})
 }
 
 func buildIMFileServiceForProvider(
@@ -306,7 +313,8 @@ type Service struct {
 	knowledgeService interfaces.KnowledgeService
 
 	// kbService is used by slash-commands (/info) to list and inspect knowledge bases.
-	kbService interfaces.KnowledgeBaseService
+	kbService      interfaces.KnowledgeBaseService
+	kbShareService interfaces.KBShareService
 
 	// oauthManager builds MCP OAuth authorization URLs so IM users can authorize
 	// OAuth-enabled MCP services out-of-band (IM cannot resolve the in-conversation
@@ -868,6 +876,7 @@ func NewService(
 	appCfg *config.Config,
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
+	kbShareService interfaces.KBShareService,
 ) *Service {
 	// Resolve IM configuration with defaults.
 	workers, maxQueue, maxPerUser, globalMaxWorkers, rlWindow, rlMax := resolveIMConfig(appCfg)
@@ -894,6 +903,7 @@ func NewService(
 		documentReader:   documentReader,
 		storageResolver:  storageResolver,
 		resourceCatalog:  resourceCatalog,
+		kbShareService:   kbShareService,
 		oauthManager:     oauthManager,
 		cmdRegistry:      registry,
 		channels:         make(map[string]*channelState),
@@ -2016,7 +2026,8 @@ func (s *Service) executeQARequest(req *qaRequest) {
 
 	outCtx := imOutboundContext(ctx)
 	reply := &ReplyMessage{
-		Content: formatIMOutboundAnswerOrFallback(outCtx, answer, s.newOutboundFileServiceResolver(req.tenant)),
+		Content: formatIMOutboundAnswerOrFallback(outCtx, answer,
+			s.newOutboundFileServiceResolver(req.tenant, req.agent, kbIDs)),
 		IsFinal: true,
 	}
 	if err := req.adapter.SendReply(outCtx, req.msg, reply); err != nil {
@@ -2064,7 +2075,8 @@ func (s *Service) handleMessageFullOutput(
 	// QA (and /stop) may have cancelled ctx. Platform updates must still run so
 	// the thinking card is replaced instead of hanging forever.
 	outCtx := imOutboundContext(ctx)
-	finalContent := formatIMOutboundAnswerOrFallback(outCtx, answer, s.newOutboundFileServiceResolver(tenant))
+	finalContent := formatIMOutboundAnswerOrFallback(outCtx, answer,
+		s.newOutboundFileServiceResolver(tenant, customAgent, kbIDs))
 
 	finalizeErr := streamer.FinalizeStream(outCtx, msg, streamID, finalContent)
 	if finalizeErr != nil {
@@ -2840,7 +2852,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	// XML tags that straddle a chunk boundary (see holdbackCutoff).
 	ticker := time.NewTicker(streamFlushInterval)
 	defer ticker.Stop()
-	fileResolver := s.newOutboundFileServiceResolver(tenant)
+	fileResolver := s.newOutboundFileServiceResolver(tenant, customAgent, kbIDs)
 
 	flush := func() {
 		bufMu.Lock()
@@ -2961,7 +2973,8 @@ func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, s
 
 	outCtx := imOutboundContext(ctx)
 	return adapter.SendReply(outCtx, msg, &ReplyMessage{
-		Content: formatIMOutboundAnswerOrFallback(outCtx, answer, s.newOutboundFileServiceResolver(tenant)),
+		Content: formatIMOutboundAnswerOrFallback(outCtx, answer,
+			s.newOutboundFileServiceResolver(tenant, customAgent, kbIDs)),
 		IsFinal: true,
 	})
 }

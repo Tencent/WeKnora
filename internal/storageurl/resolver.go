@@ -41,6 +41,7 @@ type FileServiceResolver struct {
 	ctx             context.Context
 	cache           map[fileServiceKey]interfaces.FileService
 	owners          map[uint64]*types.Tenant
+	authorize       func(context.Context, string) error
 }
 
 // NewFileServiceResolver builds a resolver for tenant. defaultSvc is the
@@ -76,6 +77,13 @@ func (r *FileServiceResolver) WithResources(
 	return r
 }
 
+// WithAuthorization gates every reference before any storage credentials are
+// selected. Model output and editable Markdown are not authorization evidence.
+func (r *FileServiceResolver) WithAuthorization(authorize func(context.Context, string) error) *FileServiceResolver {
+	r.authorize = authorize
+	return r
+}
+
 // WithContext sets the context used for backend lookups and their logs.
 func (r *FileServiceResolver) WithContext(ctx context.Context) *FileServiceResolver {
 	if ctx != nil {
@@ -86,6 +94,12 @@ func (r *FileServiceResolver) WithContext(ctx context.Context) *FileServiceResol
 
 // ResolveFileService implements Resolver.
 func (r *FileServiceResolver) ResolveFileService(filePath string) interfaces.FileService {
+	if r.authorize != nil {
+		if err := r.authorize(r.ctx, filePath); err != nil {
+			logger.Warnf(r.ctx, "resource URL access denied: src=%s err=%v", filePath, err)
+			return nil
+		}
+	}
 	if _, ok := types.ParseResourcePath(filePath); ok {
 		if r.resourceCatalog != nil {
 			return r.resolveResource(filePath)
@@ -106,7 +120,11 @@ func (r *FileServiceResolver) ResolveFileService(filePath string) interfaces.Fil
 }
 
 func (r *FileServiceResolver) resolveResource(reference string) interfaces.FileService {
-	resource, err := r.resourceCatalog.Resolve(r.ctx, reference)
+	resolve := r.resourceCatalog.Resolve
+	if bindings, ok := r.resourceCatalog.(interfaces.ResourceStorageBindingResolver); ok {
+		resolve = bindings.ResolveStorageBinding
+	}
+	resource, err := resolve(r.ctx, reference)
 	if err != nil || resource == nil || resource.TenantID == 0 {
 		logger.Warnf(r.ctx, "resolve resource storage failed: src=%s err=%v", reference, err)
 		return nil
@@ -127,6 +145,9 @@ func (r *FileServiceResolver) resolveResource(reference string) interfaces.FileS
 	backendID := resource.StorageBackendID
 	if backendID == "" {
 		backendID, _, _ = types.ParseStorageBackendPath(resource.PhysicalPath)
+	}
+	if backendID == "" {
+		return nil
 	}
 	provider := resource.Provider
 	if provider == "" {
