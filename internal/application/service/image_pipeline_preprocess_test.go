@@ -67,6 +67,35 @@ func textPage() types.ImageAttrs {
 	}}
 }
 
+func TestPreprocessRequiresExplicitOptIn(t *testing.T) {
+	for _, params := range []map[string]any{
+		nil,
+		{},
+		{"default.preprocess.mode": types.PreprocessModeAlways},
+	} {
+		stub := &stubPreprocessor{rectified: []byte("changed")}
+		r := preprocessRun("", stub, types.ImageAttrs{Attrs: map[string]any{
+			"contain.text": "block", "layout.margin": "large", "layout.upright": false,
+		}})
+		r.params = params
+		if got := r.preprocessMode(); got != types.PreprocessModeOff {
+			t.Fatalf("unset preprocessing mode = %q, want off", got)
+		}
+		if types.PreprocessObservesGeometry(r.preprocessMode()) {
+			t.Fatal("an untouched knowledge base must not request geometry observations")
+		}
+		if err := runPreprocessAction(context.Background(), r); err != nil {
+			t.Fatal(err)
+		}
+		if stub.calls != 0 || string(r.imageBytes) != "original bytes" {
+			t.Fatal("an untouched knowledge base must not preprocess its images")
+		}
+		if got := r.out[keyPreprocessResult]; got != "skipped_off" {
+			t.Fatalf("preprocess.result = %v, want skipped_off", got)
+		}
+	}
+}
+
 // TestPreprocessSkipReasonFollowsTheSetting pins which reason a skipped
 // preprocessing step reports. The vocabulary exists so a reader of a trace can
 // tell "the user switched this off" from "this deployment cannot do it", so the

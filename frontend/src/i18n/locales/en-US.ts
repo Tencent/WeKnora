@@ -8780,7 +8780,7 @@ export default {
         mode: {
           label: 'Document preprocessing',
           description:
-            'Straighten and crop a photographed page before OCR reads it. Auto asks the describe round whether the page needs it; Off never does; Always does it unconditionally.',
+            'Off by default. Straightening and cropping before OCR adds processing time. Auto uses the observed attributes; Always tries preprocessing for every image selected for OCR. Busy or resource-limited requests use the original image.',
           options: {
             auto: 'Auto',
             off: 'Off',

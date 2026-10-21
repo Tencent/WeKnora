@@ -192,6 +192,12 @@ func TestTheRunReadsTheSettingItsTraceEchoes(t *testing.T) {
 		{
 			"an untouched pipeline runs the default it declares",
 			nil,
+			types.PreprocessModeOff,
+			false,
+		},
+		{
+			"explicit auto still observes geometry",
+			map[string]any{"smartocr.preprocess.mode": types.PreprocessModeAuto},
 			types.PreprocessModeAuto,
 			true,
 		},

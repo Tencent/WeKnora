@@ -288,7 +288,7 @@ var SharedImageActions = []ImageActionSpec{
 				// meaning.
 				Key:     ActionParam(ImageActionPreprocess, "mode"),
 				Type:    ImageFieldTypeEnum,
-				Default: PreprocessModeAuto,
+				Default: PreprocessModeOff,
 				Label:   "Document preprocessing",
 				Description: "Straighten and crop a photographed page before OCR reads it. " +
 					"Auto asks the describe round whether the page needs it; Off never does; " +

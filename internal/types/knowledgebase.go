@@ -586,10 +586,10 @@ type ImageProcessingConfig struct {
 
 // The modes the preprocessing action's own switch accepts, and what each means:
 //
-//	auto   (default) the describe round also observes the page's geometry
+//	auto   the describe round also observes the page's geometry
 //	       (layout.margin / layout.upright) and the page is straightened
 //	       and cropped only when those say it is worth it;
-//	off    never preprocess, and leave the describe prompt exactly as it was
+//	off    (default) never preprocess, and leave the describe prompt exactly as it was
 //	       before this feature existed;
 //	always preprocess every readable page without asking, and likewise leave
 //	       the describe prompt untouched.

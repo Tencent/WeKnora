@@ -35,6 +35,8 @@ import cv2
 import numpy as np
 from rapidocr import RapidOCR
 
+from docreader.config import CONFIG
+
 logger = logging.getLogger(__name__)
 
 # The thresholds, tuned on the 17-image benchmark (see the R22 handover
@@ -123,7 +125,10 @@ _ocr_local = threading.local()
 def _engine() -> "RapidOCR":
     engine = getattr(_ocr_local, "engine", None)
     if engine is None:
-        engine = RapidOCR()
+        engine = RapidOCR(params={
+            "EngineConfig.onnxruntime.intra_op_num_threads": CONFIG.preprocess_threads,
+            "EngineConfig.onnxruntime.inter_op_num_threads": 1,
+        })
         _ocr_local.engine = engine
     return engine
 

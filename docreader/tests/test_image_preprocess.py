@@ -77,6 +77,9 @@ class EngineIsolationTest(unittest.TestCase):
         detection_finished = threading.Event()
 
         class MutableRecognizer:
+            def __init__(self, **kwargs):
+                pass
+
             def __call__(self, img, *, use_cls):
                 self.use_cls = use_cls
                 if not use_cls:
@@ -117,6 +120,18 @@ class EngineIsolationTest(unittest.TestCase):
         self.assertEqual(len(boxes), 1)
         self.assertIs(score_engine, reused_engine, "one worker should reuse its engine")
         self.assertIsNot(score_engine, detection_engine, "workers must not share mutable OCR state")
+
+    def test_engine_limits_native_threads(self):
+        def create():
+            return image_preprocess._engine()
+
+        with patch.object(image_preprocess, "RapidOCR") as factory:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                pool.submit(create).result(timeout=5)
+        params = factory.call_args.kwargs["params"]
+        self.assertEqual(params["EngineConfig.onnxruntime.intra_op_num_threads"],
+                         image_preprocess.CONFIG.preprocess_threads)
+        self.assertEqual(params["EngineConfig.onnxruntime.inter_op_num_threads"], 1)
 
 
 class BoxAngleTest(unittest.TestCase):
