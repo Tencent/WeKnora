@@ -1,3 +1,4 @@
+// Package logger provides the application structured logging, including the explicitly configured GORM SQL logger.
 package logger
 
 import (
