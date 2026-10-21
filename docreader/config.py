@@ -83,6 +83,7 @@ class DocReaderConfig:
     preprocess_memory_mb: int
     preprocess_max_pixels: int
     preprocess_max_edge: int
+    preprocess_probe_edge: int
 
     # Proxy
     external_http_proxy: str
@@ -175,6 +176,7 @@ def load_config() -> DocReaderConfig:
         preprocess_memory_mb=_positive_int("DOCREADER_PREPROCESS_MEMORY_MB", 2048),
         preprocess_max_pixels=_positive_int("DOCREADER_PREPROCESS_MAX_PIXELS", 16_000_000),
         preprocess_max_edge=_positive_int("DOCREADER_PREPROCESS_MAX_EDGE", 2000),
+        preprocess_probe_edge=_positive_int("DOCREADER_PREPROCESS_PROBE_EDGE", 2000),
         external_http_proxy=external_http_proxy,
         external_https_proxy=external_https_proxy,
         image_output_dir=image_output_dir,
@@ -210,6 +212,7 @@ def dump_config(mask_secrets: bool = True) -> Dict[str, Any]:
         "DOCREADER_PREPROCESS_MEMORY_MB": cfg.preprocess_memory_mb,
         "DOCREADER_PREPROCESS_MAX_PIXELS": cfg.preprocess_max_pixels,
         "DOCREADER_PREPROCESS_MAX_EDGE": cfg.preprocess_max_edge,
+        "DOCREADER_PREPROCESS_PROBE_EDGE": cfg.preprocess_probe_edge,
         "DOCREADER_EXTERNAL_HTTP_PROXY": cfg.external_http_proxy,
         "DOCREADER_EXTERNAL_HTTPS_PROXY": cfg.external_https_proxy,
         "DOCREADER_IMAGE_OUTPUT_DIR": cfg.image_output_dir,
