@@ -48,7 +48,8 @@ const scrollEl = ref<HTMLElement | null>(null)
 const gridEl = ref<HTMLElement | null>(null)
 const loadMoreEl = ref<HTMLElement | null>(null)
 const imageRatios = ref<Record<string, number>>({})
-let cardObserver: ResizeObserver | undefined
+let gridObserver: ResizeObserver | undefined
+let observedGrid: HTMLElement | null = null
 let scrollObserver: ResizeObserver | undefined
 
 // Source-document restriction (the "filter by document" picker). An empty
@@ -177,33 +178,59 @@ function onThumbLoad(id: string, event: Event) {
   }
 }
 
-// Keep DOM order (and keyboard/viewer order) while cards span only the rows
-// their natural image height needs. Existing cards stay put when appending.
-// In card mode every thumbnail shares one 3:2 frame, so no row math is
-// needed and any recorded span is cleared instead.
-function sizeCards(cards: HTMLElement[]) {
-  const spans = cards.map((card) => Math.ceil((card.getBoundingClientRect().height + 12) / 13))
-  cards.forEach((card, index) => {
-    card.style.gridRowEnd = `span ${spans[index]}`
-  })
-}
+// Masonry without measuring every card. The grid's rows are 1px tall with a
+// 12px gap, so a card whose box is H high occupies ceil((H + 12) / 13) rows.
+// H only needs two inputs: the thumbnail height (track width / aspect ratio)
+// and the fixed meta block below it. Both are arithmetic, so a width change
+// re-spans the whole grid in the same render as the new column count — no
+// ResizeObserver round trip, no per-card getBoundingClientRect, and therefore
+// no second layout to jump to.
+const GRID_GAP = 12
+const GRID_ROW = 1
+const SPAN_STEP = GRID_ROW + GRID_GAP
+const FALLBACK_RATIO = 4 / 3
+// Used until the first card has been measured; calibration runs in the same
+// tick as the first render, so this is never painted.
+const DEFAULT_CARD_BOX = { thumbInset: 2, meta: 96, chrome: 2 }
 
-function applyCardSpans(cards: HTMLElement[]) {
-  if (viewMode.value === 'waterfall') {
-    sizeCards(cards)
-    return
+// Geometry of one real card: how much narrower the thumbnail is than its grid
+// track (borders), how tall the meta block is, and what is left over for the
+// card's own box. Measuring one card keeps box-sizing, borders and the meta
+// padding out of this file — every card shares the same numbers.
+const cardBox = ref<{ thumbInset: number; meta: number; chrome: number } | null>(null)
+
+function measureCardBox(): void {
+  const card = gridEl.value?.querySelector<HTMLElement>('.ig-card')
+  const thumb = card?.querySelector<HTMLElement>('.ig-card__thumb')
+  const meta = card?.querySelector<HTMLElement>('.ig-card__meta')
+  const width = gridWidth.value
+  const cols = renderCols.value || effCols.value || 0
+  if (!card || !thumb || !meta || !width || !cols) return
+  const track = (width - GRID_GAP * (cols - 1)) / cols
+  const thumbRect = thumb.getBoundingClientRect()
+  const metaRect = meta.getBoundingClientRect()
+  const cardRect = card.getBoundingClientRect()
+  cardBox.value = {
+    thumbInset: Math.max(0, track - thumbRect.width),
+    meta: metaRect.height,
+    chrome: Math.max(0, cardRect.height - thumbRect.height - metaRect.height),
   }
-  cards.forEach((card) => {
-    card.style.gridRowEnd = ''
-  })
 }
 
-function observeCards() {
-  measureGrid()
-  cardObserver?.disconnect()
-  const cards = Array.from(gridEl.value?.querySelectorAll<HTMLElement>('.ig-card') ?? [])
-  applyCardSpans(cards)
-  cards.forEach((card) => cardObserver?.observe(card))
+/**
+ * Row span for one card, or nothing in card mode (one 3:2 frame for every
+ * thumbnail, so the rows line up on their own).
+ */
+function cardSpanStyle(id: string): { gridRowEnd: string } | undefined {
+  if (viewMode.value !== 'waterfall') return undefined
+  const box = cardBox.value || DEFAULT_CARD_BOX
+  const width = gridWidth.value
+  const cols = renderCols.value || effCols.value || 0
+  if (!width || !cols) return undefined
+  const track = (width - GRID_GAP * (cols - 1)) / cols
+  const ratio = imageRatios.value[id] || FALLBACK_RATIO
+  const height = Math.max(1, (track - box.thumbInset) / ratio) + box.meta + box.chrome
+  return { gridRowEnd: `span ${Math.max(1, Math.ceil((height + GRID_GAP) / SPAN_STEP))}` }
 }
 
 function checkLoadMore() {
@@ -487,6 +514,10 @@ watch([gridWidth, viewMode], () => {
   renderCols.value = effCols.value
 })
 const gridColsStyle = computed(() => ({ '--ig-cols': String(renderCols.value || effCols.value) }))
+// Column count is the only thing that can move the meta block's height (wider
+// track, same two-line caption), so it is also the moment worth re-measuring
+// the one card the spans are calibrated from.
+watch(renderCols, () => void nextTick(measureCardBox))
 
 // Slider presentation runs small-on-left: its position mirrors the column
 // count inside [minCols, maxCols], so left = many small cards, right = few
@@ -511,6 +542,15 @@ function measureGrid() {
   gridWidth.value = gridEl.value?.clientWidth ?? 0
 }
 
+/** Keep the single grid observer attached to the element actually rendered. */
+function syncGridObserver() {
+  const el = gridEl.value
+  if (!gridObserver || !el || el === observedGrid) return
+  gridObserver.disconnect()
+  gridObserver.observe(el)
+  observedGrid = el
+}
+
 function setThumbCols() {
   // The 80ms trailing mirror in the thumbCols watcher applies the layout;
   // persisting here only records the user's choice.
@@ -521,9 +561,6 @@ function selectViewMode(mode: 'waterfall' | 'card') {
   if (viewMode.value === mode) return
   viewMode.value = mode
   persistViewPrefs()
-  void nextTick(() => {
-    applyCardSpans(Array.from(gridEl.value?.querySelectorAll<HTMLElement>('.ig-card') ?? []))
-  })
 }
 
 // ---------------------------------------------------------------------------
@@ -579,13 +616,19 @@ async function fetchNextPage(): Promise<boolean> {
     if (token !== listToken) return false
     const existing = new Set(items.value.map((img) => img.id))
     const incoming = res.items.filter((img) => !existing.has(img.id))
+    // The grid is about to render cards: make sure the observer is on the
+    // current element (the empty state may have re-created it) and that the
+    // width is known before the first card asks for a column count.
+    syncGridObserver()
+    measureGrid()
     items.value.push(...incoming)
     page.value = nextPage
     total.value = res.total
     exhausted.value = res.items.length === 0
     void resolveThumbnails(incoming, token)
     await nextTick()
-    observeCards()
+    measureGrid()
+    measureCardBox()
     return true
   } catch (e) {
     if (token === listToken) error.value = e instanceof Error ? e.message : String(e)
@@ -695,7 +738,8 @@ onBeforeUnmount(() => {
   // Orphan any in-flight listing so it cannot map new blobs after unmount.
   listToken++
   initToken++
-  cardObserver?.disconnect()
+  gridObserver?.disconnect()
+  observedGrid = null
   scrollObserver?.disconnect()
   window.removeEventListener('resize', measureGrid)
   releaseBlobs()
@@ -754,13 +798,14 @@ async function initGallery() {
 }
 
 onMounted(() => {
-  cardObserver = new ResizeObserver((entries) => {
-    // Card mode needs no row math; only waterfall re-spans as cards resize.
-    if (viewMode.value === 'waterfall') {
-      sizeCards(entries.map((entry) => entry.target as HTMLElement))
-    }
+  // One observer on the container replaces the per-card one: any width change
+  // (window, sidebar, tab layout) re-derives every span from arithmetic, so
+  // there is nothing per-card left to observe.
+  gridObserver = new ResizeObserver(() => {
+    measureGrid()
     void nextTick(checkLoadMore)
   })
+  syncGridObserver()
   scrollObserver = new ResizeObserver(checkLoadMore)
   if (scrollEl.value) scrollObserver.observe(scrollEl.value)
   measureGrid()
@@ -1076,6 +1121,7 @@ watch(
             type="button"
             class="ig-card"
             :class="{ 'is-disabled': !img.is_enabled }"
+            :style="cardSpanStyle(img.id)"
             @click="openViewer(idx)"
           >
             <div
@@ -1592,7 +1638,10 @@ watch(
 
   &__caption {
     display: -webkit-box;
-    min-height: calc(2 * 1.5em);
+    // Always two lines tall, even for a one-line or missing caption: the
+    // masonry span is arithmetic over this block, so its height must not
+    // depend on the text.
+    height: calc(2 * 1.5em);
     overflow: hidden;
     color: var(--td-text-color-primary);
     font-size: var(--app-text-md);
