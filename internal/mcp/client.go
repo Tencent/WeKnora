@@ -238,17 +238,25 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 		if config.Service.URL == nil || *config.Service.URL == "" {
 			return nil, fmt.Errorf("URL is required for SSE transport")
 		}
+		// SSE keeps its GET response body open for the connection lifetime.
+		// OAuth retains the bounded HTTP client; SSE bounds startup and RPCs
+		// separately without putting an expiration on the event stream.
+		sseHTTPClient := *httpClient
+		sseHTTPClient.Timeout = 0
 		options := []transport.ClientOption{
-			transport.WithHTTPClient(httpClient),
+			transport.WithHTTPClient(&sseHTTPClient),
 			transport.WithHeaders(headers),
+			transport.WithEndpointTimeout(timeout),
+			transport.WithResponseTimeout(timeout),
 		}
 		if useOAuth {
 			options = append(options, transport.WithOAuth(oauthConfig))
 		}
-		connection, err = transport.NewSSE(*config.Service.URL, options...)
+		sse, err := transport.NewSSE(*config.Service.URL, options...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create SSE client: %w", err)
 		}
+		connection = &boundedSSEConnection{SSE: sse, timeout: timeout}
 	case types.MCPTransportHTTPStreamable:
 		if config.Service.URL == nil || *config.Service.URL == "" {
 			return nil, fmt.Errorf("URL is required for HTTP Streamable transport")
@@ -316,9 +324,10 @@ func discoverProbeTimeout(service *types.MCPService) time.Duration {
 }
 
 // buildOAuthConfig returns the OAuth configuration for an OAuth-enabled MCP
-// service, or (_, false, nil) when the service does not use OAuth. It loads
-// the dynamically-registered client_id and wires a per-user token store so
-// the transport injects the invoking user's bearer token and refreshes it.
+// service, or (_, false, nil) when the service does not use OAuth. It uses the
+// pre-registered client or loads the dynamically-registered client_id, and
+// wires a per-user token store so the transport injects the invoking user's
+// bearer token and refreshes it.
 func buildOAuthConfig(config *ClientConfig, httpClient *http.Client) (transport.OAuthConfig, bool, error) {
 	svc := config.Service
 	if !svc.AuthConfig.IsOAuth() {
@@ -343,7 +352,11 @@ func buildOAuthConfig(config *ClientConfig, httpClient *http.Client) (transport.
 		AuthServerMetadataURL: svc.AuthConfig.AuthServerMetadataURL,
 		HTTPClient:            httpClient,
 	}
-	if regClient, err := config.OAuthRepo.GetClient(context.Background(), config.TenantID, svc.ID); err == nil && regClient != nil {
+	if clientID, clientSecret, ok := preRegisteredClient(svc); ok {
+		oauthCfg.ClientID, oauthCfg.ClientSecret = clientID, clientSecret
+	} else if regClient, err := config.OAuthRepo.GetClient(
+		context.Background(), config.TenantID, svc.ID,
+	); err == nil && regClient != nil {
 		oauthCfg.ClientID = regClient.ClientID
 		oauthCfg.ClientSecret = regClient.ClientSecret
 		oauthCfg.RedirectURI = regClient.RedirectURI
@@ -682,9 +695,10 @@ func (c *mcpGoClient) listRawTools(ctx context.Context) ([]*types.MCPTool, error
 		}
 		var page struct {
 			Tools []struct {
-				Name        string          `json:"name"`
-				Description string          `json:"description"`
-				InputSchema json.RawMessage `json:"inputSchema"`
+				Name        string                    `json:"name"`
+				Description string                    `json:"description"`
+				InputSchema json.RawMessage           `json:"inputSchema"`
+				Annotations *types.MCPToolAnnotations `json:"annotations"`
 			} `json:"tools"`
 			NextCursor string `json:"nextCursor"`
 		}
@@ -699,7 +713,10 @@ func (c *mcpGoClient) listRawTools(ctx context.Context) ([]*types.MCPTool, error
 			}
 			tools = append(
 				tools,
-				&types.MCPTool{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema},
+				&types.MCPTool{
+					Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema,
+					Annotations: tool.Annotations,
+				},
 			)
 		}
 		if len(tools) > maxToolsPerService {
@@ -813,11 +830,22 @@ func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string
 		}
 	}
 
+	var callErr error
 	result, err := oauthCall(ctx, c, func() (*mcp.CallToolResult, error) {
-		return c.client.CallTool(ctx, req)
+		result, err := c.client.CallTool(ctx, req)
+		callErr = err
+		return result, err
 	})
 	if err != nil {
 		c.checkErrorAndDisconnectIfNeeded(err)
+		// Inspect the actual call error, not a preflight/refresh error from
+		// oauthCall. A rejected authorization did not execute the tool.
+		if callErr != nil && !IsToolCallRetrySafe(callErr) {
+			return nil, fmt.Errorf(
+				"%w; it may already have completed. Verify the remote outcome before retrying: %w",
+				ErrToolCallOutcomeUnknown, err,
+			)
+		}
 		return nil, fmt.Errorf("failed to call tool: %w", err)
 	}
 
@@ -919,10 +947,16 @@ func (c *mcpGoClient) IsConnected() bool {
 	return c.connected.Load()
 }
 
-// oauthClientRegistration reports the tenant and OAuth client ID the
-// connection was built with; ok is false for a connection without OAuth.
+// oauthClientRegistration reports the tenant and dynamically registered OAuth
+// client ID the connection was built with; ok is false for a connection
+// without OAuth or with a pre-registered client. A pre-registered client is
+// service configuration, and changing it closes every connection of the
+// service, so such a connection never holds a replaced registration.
 func (c *mcpGoClient) oauthClientRegistration() (tenantID uint64, clientID string, ok bool) {
 	if c.oauth == nil {
+		return 0, "", false
+	}
+	if _, _, preRegistered := preRegisteredClient(c.service); preRegistered {
 		return 0, "", false
 	}
 	return c.oauth.tenantID, c.oauth.clientID, true

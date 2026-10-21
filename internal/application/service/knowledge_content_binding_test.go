@@ -38,6 +38,12 @@ func (c *resolvingCatalog) Register(
 	return "", errors.New("unused")
 }
 
+// ReuseByContentHash stays a miss so the catalog under test is only consulted
+// through the resolution paths these tests cover.
+func (c *resolvingCatalog) ReuseByContentHash(context.Context, uint64, string) (string, bool, error) {
+	return "", false, nil
+}
+
 func (c *resolvingCatalog) ResolvePath(
 	_ context.Context, value string,
 ) (string, *types.StoredResource, error) {

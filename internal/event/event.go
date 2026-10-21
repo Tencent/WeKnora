@@ -49,6 +49,7 @@ const (
 	EventAgentComplete EventType = "agent.complete" // Agent 完成
 
 	// Agent streaming events (for real-time feedback)
+	EventAgentProgress      EventType = "progress"       // User-facing intermediate update
 	EventAgentThought       EventType = "thought"        // Agent 思考过程
 	EventAgentCommandOutput EventType = "command_output" // bounded command output
 	EventAgentToolCall      EventType = "tool_call"      // 工具调用通知
@@ -60,6 +61,11 @@ const (
 	// MCP tool human approval (issue #1173)
 	EventToolApprovalRequired EventType = "tool_approval_required"
 	EventToolApprovalResolved EventType = "tool_approval_resolved"
+
+	// EventAgentPromptRequired requests user input (ask_user). The request and answer travel as the
+	// prompt kind's JSON, so a new kind needs no new event.
+	EventAgentPromptRequired EventType = "agent_prompt_required"
+	EventAgentPromptResolved EventType = "agent_prompt_resolved"
 
 	// MCP OAuth in-conversation authorization prompt: emitted when an
 	// OAuth-enabled MCP service is invoked but the current user has not

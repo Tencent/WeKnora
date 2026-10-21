@@ -16,9 +16,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/service/sandboxalloc"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/admission"
+	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -49,6 +52,10 @@ const (
 	// ForkDegradeSnapshotUnsupported means snapshotting failed or the backend
 	// does not support it.
 	ForkDegradeSnapshotUnsupported ForkDegradeReason = "SNAPSHOT_UNSUPPORTED"
+
+	// ForkDegradeCopyFailed means the shared machine could not copy the source
+	// session's checkpoint into the new session's directory.
+	ForkDegradeCopyFailed ForkDegradeReason = "COPY_FAILED"
 )
 
 var (
@@ -141,11 +148,27 @@ type forkMessageStore interface {
 	) ([]*types.Message, error)
 }
 
+type forkAllocations interface {
+	Lookup(ctx context.Context, sessionID string) (allocation.Assignment, bool, error)
+	ForkAssignment(source allocation.Assignment, targetSessionID string) allocation.Assignment
+	Digest(m allocation.UserMachine) string
+}
+
+type forkWorkspaceStarter interface {
+	BeginWorkspaceFork(ctx context.Context, sourceSessionID string) (sandbox.WorkspaceFork, error)
+}
+
+type forkWithAssignmentStore interface {
+	CreateForkedWithAssignment(ctx context.Context, session *types.Session, messages []*types.Message,
+		assignment *types.SessionSandboxAssignment, machine *types.SandboxUserMachine) error
+}
+
 // SessionForkService implements the fork decision chain.
 type SessionForkService struct {
-	sessions forkSessionStore
-	messages forkMessageStore
-	sandbox  SessionForkSandboxPort
+	sessions    forkSessionStore
+	messages    forkMessageStore
+	sandbox     SessionForkSandboxPort
+	allocations forkAllocations
 }
 
 // NewSessionForkService wires the service. A nil sandbox port makes every fork
@@ -166,6 +189,12 @@ func NewSessionForkServiceFromRepos(
 	sandboxPort SessionForkSandboxPort,
 ) *SessionForkService {
 	return NewSessionForkService(sessions, messages, sandboxPort)
+}
+
+// WithAllocations enables user-mode forks.
+func (s *SessionForkService) WithAllocations(a forkAllocations) *SessionForkService {
+	s.allocations = a
+	return s
 }
 
 // Fork branches sourceSessionID at messageID.
@@ -231,16 +260,22 @@ func (s *SessionForkService) Fork(
 		}
 	}
 
-	history, err := s.messages.ListMessagesBySessionUpTo(
-		ctx, sourceSessionID, forkPoint.CreatedAt, forkPoint.ID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("session fork: load history: %w", err)
-	}
-	history = historyThroughForkPoint(history, forkPoint)
-
 	workCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), forkSnapshotTimeout)
 	defer cancel()
+	if s.allocations != nil {
+		srcAssign, ok, err := s.allocations.Lookup(workCtx, source.ID)
+		if err != nil {
+			return nil, fmt.Errorf("session fork: read source allocation: %w", err)
+		}
+		if ok && srcAssign.IsUser() {
+			return s.forkOnSharedMachine(workCtx, source, forkPoint, title, srcAssign)
+		}
+	}
+
+	history, err := s.loadForkHistory(ctx, sourceSessionID, forkPoint)
+	if err != nil {
+		return nil, err
+	}
 
 	bootstrap, reason, createdSnapshot, prepErr := s.prepareBootstrap(workCtx, source, history)
 	if prepErr != nil {
@@ -257,7 +292,9 @@ func (s *SessionForkService) Fork(
 	newSession := &types.Session{
 		ID:               uuid.New().String(),
 		TenantID:         source.TenantID,
+		Kind:             source.Kind,
 		UserID:           source.UserID,
+		OwnerAuthSource:  source.OwnerAuthSource,
 		Title:            forkTitle(title, source.Title),
 		Description:      source.Description,
 		LastRequestState: source.LastRequestState,
@@ -291,6 +328,145 @@ func (s *SessionForkService) Fork(
 		Degraded:  reason != "",
 		Reason:    reason,
 	}, nil
+}
+
+// loadForkHistory lists the source's messages through the fork point.
+func (s *SessionForkService) loadForkHistory(
+	ctx context.Context, sourceSessionID string, forkPoint *types.Message,
+) ([]*types.Message, error) {
+	history, err := s.messages.ListMessagesBySessionUpTo(ctx, sourceSessionID, forkPoint.CreatedAt, forkPoint.ID)
+	if err != nil {
+		return nil, fmt.Errorf("session fork: load history: %w", err)
+	}
+	return historyThroughForkPoint(history, forkPoint), nil
+}
+
+// forkOnSharedMachine branches a user-mode session (C9). The workspace is
+// copied before the database commit, so nothing runs in the new directory
+// before the session exists; the fork handle keeps the source machine fixed
+// from the history read to the compensation.
+func (s *SessionForkService) forkOnSharedMachine(
+	ctx context.Context, source *types.Session, forkPoint *types.Message,
+	title string, srcAssign allocation.Assignment,
+) (*ForkResult, error) {
+	newID := uuid.New().String()
+	reason := ForkDegradeReason("")
+	var reachable map[string]bool
+	var fork sandbox.WorkspaceFork
+
+	starter, ok := s.sandbox.(forkWorkspaceStarter)
+	if !ok {
+		return nil, errors.New("session fork: this sandbox backend cannot fork a shared-machine session")
+	}
+	f, err := starter.BeginWorkspaceFork(ctx, source.ID)
+	switch {
+	case err == nil:
+		fork = f
+		defer fork.Release()
+	case errors.Is(err, sandbox.ErrSessionWorkspaceBusy), errors.Is(err, admission.ErrClosed):
+		return nil, ErrForkSourceBusy
+	case errors.Is(err, sandbox.ErrNoLiveSessionSandbox):
+		reason = ForkDegradeSandboxGone
+	default:
+		// Identity rejected, session deleted or retired, lease or infra
+		// failure: not a file-copy problem, so no branch is created (C9).
+		return nil, fmt.Errorf("session fork: open shared-machine fork: %w", err)
+	}
+	stepCtx := ctx
+	if fork != nil {
+		stepCtx = fork.Context()
+		busy, err := s.sandbox.HasActiveTurn(stepCtx, source.ID)
+		if err != nil {
+			return nil, fmt.Errorf("session fork: recheck source turn state: %w", err)
+		}
+		if busy {
+			return nil, ErrForkSourceBusy
+		}
+	}
+
+	history, err := s.loadForkHistory(stepCtx, source.ID, forkPoint)
+	if err != nil {
+		return nil, err
+	}
+	checkpoint := latestCheckpoint(history)
+	switch {
+	case checkpoint == nil && !hasAssistantMessage(history):
+		reason = ""
+	case checkpoint == nil:
+		reason = ForkDegradeNoCheckpoint
+	case fork == nil:
+	case checkpoint.SandboxID != fork.SandboxID():
+		reason = ForkDegradeSandboxReplaced
+	default:
+		candidates := make([]string, 0, len(history))
+		for _, m := range history {
+			if m.SandboxCheckpoint != nil {
+				candidates = append(candidates, m.SandboxCheckpoint.CommitSHA)
+			}
+		}
+		reachable, err = fork.Copy(newID, checkpoint.CommitSHA, candidates)
+		if err != nil {
+			if lost := forkLeaseLost(stepCtx, err); lost != nil {
+				return nil, fmt.Errorf("session fork: lost the source machine during copy: %w", lost)
+			}
+			logger.Warnf(ctx, "[SessionFork] copy workspace source=%s: %v", source.ID, err)
+			reason, reachable = ForkDegradeCopyFailed, nil
+		}
+	}
+
+	messages := copyMessagesInto(newID, history)
+	for _, m := range messages {
+		cp := m.SandboxCheckpoint
+		if cp != nil && (fork == nil || cp.SandboxID != fork.SandboxID() || !reachable[cp.CommitSHA]) {
+			m.SandboxCheckpoint = nil
+		}
+	}
+	newSession := &types.Session{
+		ID: newID, TenantID: source.TenantID, UserID: source.UserID,
+		OwnerAuthSource: source.OwnerAuthSource,
+		Title:           forkTitle(title, source.Title), Description: source.Description,
+		LastRequestState: source.LastRequestState,
+		SandboxConfigID:  source.SandboxConfigID, SandboxConfigTenantID: source.SandboxConfigTenantID,
+		ParentSessionID: source.ID, ForkedFromMessageID: forkPoint.ID,
+	}
+	child := s.allocations.ForkAssignment(srcAssign, newID)
+	machine, _ := child.UserMachine()
+	entity, machineRow := sandboxalloc.ToEntity(child, s.allocations.Digest(machine))
+
+	store, ok := s.sessions.(forkWithAssignmentStore)
+	if !ok {
+		return nil, errors.New("session fork: store cannot persist a user-mode fork")
+	}
+	if fork != nil {
+		if cause := context.Cause(stepCtx); cause != nil {
+			// Lost before the commit: the copy may already be gone with the
+			// machine, and the compensation could not run safely either.
+			return nil, fmt.Errorf("session fork: lost the source machine before commit: %w", cause)
+		}
+	}
+	if err := store.CreateForkedWithAssignment(stepCtx, newSession, messages, entity, machineRow); err != nil {
+		if reachable != nil {
+			if rmErr := fork.Remove(newID); rmErr != nil {
+				logger.Warnf(ctx, "[SessionFork] remove orphan workspace %s: %v", newID, rmErr)
+			}
+		}
+		return nil, fmt.Errorf("session fork: persist forked session: %w", err)
+	}
+	logger.Infof(ctx, "[SessionFork] shared-machine source=%s fork_point=%s new=%s degraded=%v reason=%s",
+		source.ID, forkPoint.ID, newID, reason != "", reason)
+	return &ForkResult{SessionID: newID, Degraded: reason != "", Reason: reason}, nil
+}
+
+// forkLeaseLost reports a lost admission hold. A copy that failed for any
+// other reason is a file problem and degrades; losing the lease is not.
+func forkLeaseLost(ctx context.Context, err error) error {
+	if cause := context.Cause(ctx); cause != nil {
+		return cause
+	}
+	if errors.Is(err, admission.ErrLeaseLost) {
+		return err
+	}
+	return nil
 }
 
 // prepareBootstrap decides whether the fork can carry the source sandbox's

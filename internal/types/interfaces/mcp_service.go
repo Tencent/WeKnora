@@ -78,11 +78,12 @@ type MCPServiceService interface {
 	// Implementations MUST close any active MCP client connection for this
 	// service so the next upstream call reconnects with the new credential.
 	UpdateMCPCredentials(
-		ctx context.Context, tenantID uint64, id string, apiKey *string, token *string,
+		ctx context.Context, tenantID uint64, id string, apiKey, token, clientSecret *string,
 	) (*types.MCPService, error)
 
 	// ClearMCPCredential removes a single credential field. field must be
-	// "api_key" or "token"; other values must be rejected by the caller.
+	// "api_key", "token" or "client_secret"; other values must be rejected by
+	// the caller.
 	// Implementations MUST close any active MCP client connection for this
 	// service. Clearing a field that is already empty is a no-op (no error).
 	ClearMCPCredential(ctx context.Context, tenantID uint64, id, field string) error

@@ -120,9 +120,9 @@ func TestStreamLLMSummarySlugSurvivesDocumentCompaction(t *testing.T) {
 	}}}}
 
 	engine := newTestEngine(t, model)
-	// The document UUID is registered as citation alias d1, exactly as the RAG
-	// context (<document id="d1">…) would have registered it upstream.
-	require.Equal(t, "d1", engine.modelContext.RegisterDocument(knowledgeID))
+	// The document UUID is registered as citation alias doc://1, exactly as the RAG
+	// context (<document id="doc://1">…) would have registered it upstream.
+	require.Equal(t, "doc://1", engine.modelContext.RegisterDocument(knowledgeID))
 
 	toolMsg := chat.Message{
 		Role:    "tool",
@@ -150,9 +150,12 @@ func TestStreamLLMSummarySlugSurvivesDocumentCompaction(t *testing.T) {
 // unrelated FAQ entries injected by the bound-KB directory.
 func TestStreamMCPAnswerRejectsUnretrievedKnowledgeCitations(t *testing.T) {
 	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
-		{ResponseType: types.ResponseTypeAnswer, Content: `KM文章<ref id="c`},
-		{ResponseType: types.ResponseTypeAnswer, Content: `3"/><ref id="c1"/><ref id="c2"/> 正确来源<ref id="w`},
-		{ResponseType: types.ResponseTypeAnswer, Content: `1"/>`, Done: true, FinishReason: "stop"},
+		{ResponseType: types.ResponseTypeAnswer, Content: `KM文章<ref id="chunk://`},
+		{
+			ResponseType: types.ResponseTypeAnswer,
+			Content:      `3"/><ref id="chunk://1"/><ref id="chunk://2"/> 正确来源<ref id="url:/`,
+		},
+		{ResponseType: types.ResponseTypeAnswer, Content: `/1"/>`, Done: true, FinishReason: "stop"},
 	}}}}
 	engine := newTestEngine(t, model)
 	engine.knowledgeBasesInfo = []*KnowledgeBaseInfo{{
@@ -178,8 +181,8 @@ func TestStreamMCPAnswerRejectsUnretrievedKnowledgeCitations(t *testing.T) {
 	want := `KM文章 正确来源<web url="` + article + `" title="" />`
 	require.Equal(t, want, result.Content)
 	require.Equal(t, want, emitted.String(), "invalid references must not reach SSE even transiently")
-	require.Contains(t, model.calls[0][2].Content, `<source id="w1"`)
-	require.Contains(t, model.calls[0][1].Content, `chunk_id="c1"`, "FAQ handles remain available for retrieval")
+	require.Contains(t, model.calls[0][2].Content, `<source id="url://1"`)
+	require.Contains(t, model.calls[0][1].Content, `chunk_id="chunk://1"`, "FAQ handles remain available for retrieval")
 }
 
 // Reproduces the round that ended a 40-round conversation: the stream broke
@@ -219,7 +222,7 @@ func TestStreamLLMToEventBus_ErrorAfterContent_IsNotASuccessfulTurn(t *testing.T
 func TestStreamLLMChunkReferenceExpandsBeforeEmission(t *testing.T) {
 	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
 		{ResponseType: types.ResponseTypeAnswer, Content: `answer <ref id="`},
-		{ResponseType: types.ResponseTypeAnswer, Content: `c1"/>`, Done: true},
+		{ResponseType: types.ResponseTypeAnswer, Content: `chunk://1"/>`, Done: true},
 	}}}}
 	engine := newTestEngine(t, model)
 	engine.modelContext.RegisterChunk(modelcontext.ChunkReference{
@@ -244,11 +247,11 @@ func TestRunToolCallRejectsUnresolvedHandlesBeforeExecution(t *testing.T) {
 			ID: "call-1",
 			Function: types.FunctionCall{
 				Name:      tool.Name(),
-				Arguments: `{"id":"d99"}`,
+				Arguments: `{"id":"doc://99"}`,
 			},
-			ModelArguments:     `{"id":"d99"}`,
+			ModelArguments:     `{"id":"doc://99"}`,
 			ArgumentResolution: modelcontext.ArgumentResolutionUnresolved,
-			UnresolvedHandles:  []string{"d99"},
+			UnresolvedHandles:  []string{"doc://99"},
 		},
 		0, 0, 1, "session", "message",
 	)
@@ -272,8 +275,8 @@ func TestRunToolCallDecodesHandlesAfterJSONRepair(t *testing.T) {
 		context.Background(),
 		types.LLMToolCall{
 			ID:             "call-unknown",
-			Function:       types.FunctionCall{Name: unknownTool.Name(), Arguments: `{"id":"d99",}`},
-			ModelArguments: `{"id":"d99",}`,
+			Function:       types.FunctionCall{Name: unknownTool.Name(), Arguments: `{"id":"doc://99",}`},
+			ModelArguments: `{"id":"doc://99",}`,
 		},
 		0, 0, 1, "session", "message",
 	)
@@ -287,8 +290,8 @@ func TestRunToolCallDecodesHandlesAfterJSONRepair(t *testing.T) {
 		context.Background(),
 		types.LLMToolCall{
 			ID:             "call-known",
-			Function:       types.FunctionCall{Name: knownTool.Name(), Arguments: `{"id":"d1",}`},
-			ModelArguments: `{"id":"d1",}`,
+			Function:       types.FunctionCall{Name: knownTool.Name(), Arguments: `{"id":"doc://1",}`},
+			ModelArguments: `{"id":"doc://1",}`,
 		},
 		0, 0, 1, "session", "message",
 	)
@@ -1154,4 +1157,27 @@ func TestStreamLLMIncompleteFinishIsAStreamError(t *testing.T) {
 
 	require.Error(t, err, "a stream cut before its finish reason is not a completed turn")
 	require.True(t, isTransientError(err))
+}
+
+func TestWebFetchUnknownReferenceIsAnItemError(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	engine.toolRegistry = agenttools.NewToolRegistry()
+	engine.toolRegistry.RegisterTool(agenttools.NewWebFetchTool())
+	calls := []types.LLMToolCall{{
+		ID: "fetch",
+		Function: types.FunctionCall{
+			Name:      agenttools.ToolWebFetch,
+			Arguments: `{"items":[{"url":"url://999"}]}`,
+		},
+	}}
+	engine.modelContext.DecodeToolCalls(calls)
+	require.Equal(t, []string{"url://999"}, calls[0].UnresolvedHandles)
+	result := engine.runToolCall(t.Context(), calls[0], 0, 0, 1, "session", "message")
+	require.NotNil(t, result.Result)
+	require.Contains(t, result.Result.Output, "unknown_page_reference")
+	require.NotContains(t, result.Result.Error, "unresolved model handles")
+	// Other namespaces still fail closed before tool execution.
+	calls[0].UnresolvedHandles = []string{"res://9999"}
+	result = engine.runToolCall(t.Context(), calls[0], 0, 0, 1, "session", "message")
+	require.Contains(t, result.Result.Error, "unresolved model handles")
 }

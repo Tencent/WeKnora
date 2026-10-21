@@ -18,6 +18,8 @@ type WebSearchProviderRepository interface {
 	List(ctx context.Context, tenantID uint64) ([]*types.WebSearchProviderEntity, error)
 	// Update updates a web search provider
 	Update(ctx context.Context, provider *types.WebSearchProviderEntity) error
+	// PatchSettings updates only explicitly selected display/default fields.
+	PatchSettings(ctx context.Context, provider *types.WebSearchProviderEntity, fields []string) error
 	// Delete deletes a web search provider (soft delete)
 	Delete(ctx context.Context, tenantID uint64, id string) error
 	// ClearDefault clears the default flag for all providers of a tenant, optionally excluding one
@@ -34,6 +36,8 @@ type WebSearchProviderService interface {
 	// UpdateProvider updates an existing provider.
 	// provider.TenantID must be set by the caller (handler) for the repository WHERE clause.
 	UpdateProvider(ctx context.Context, provider *types.WebSearchProviderEntity) error
+	// PatchProviderSettings preserves connection parameters and omitted settings.
+	PatchProviderSettings(ctx context.Context, provider *types.WebSearchProviderEntity, fields []string) error
 	// DeleteProvider deletes a provider by tenant + id.
 	DeleteProvider(ctx context.Context, tenantID uint64, id string) error
 

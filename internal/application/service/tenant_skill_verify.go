@@ -94,7 +94,8 @@ func (s *TenantSkillService) verifySkill(
 	if err != nil {
 		return notes, err
 	}
-	return notes, s.verifyRuntimePrerequisites(ctx, mgr, sessionID, skillDir)
+	runtimeNotes, err := s.verifyRuntimePrerequisites(ctx, mgr, sessionID, skillDir)
+	return append(notes, runtimeNotes...), err
 }
 
 // verifySkillTree confirms the files the agent was given are still the files

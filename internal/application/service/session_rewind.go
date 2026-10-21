@@ -95,7 +95,10 @@ type RewindResult struct {
 type SessionRewindSandboxPort interface {
 	BoundSandboxID(ctx context.Context, sessionID string) (string, bool)
 	HasActiveTurn(ctx context.Context, sessionID string) (bool, error)
-	TryLockRewind(ctx context.Context, sessionID string) (unlock func(), err error)
+	// TryLockRewind locks the session for rewind. Run the workspace reset
+	// with the returned context: on a shared machine it carries the
+	// session's exclusive window.
+	TryLockRewind(ctx context.Context, sessionID string) (context.Context, func(), error)
 	SandboxShellRunner
 }
 
@@ -170,7 +173,12 @@ type SessionRewindService struct {
 	snapshots   ForkSnapshotDeleter
 	liveRuns    rewindLiveRunReader
 	busyGate    *SessionBusyGate
+	// suspendedRuns closes runs suspended on prompts before the cut.
+	suspendedRuns *SuspendedRunService
 }
+
+// SetSuspendedRuns lets rewind close the session's suspended runs.
+func (s *SessionRewindService) SetSuspendedRuns(runs *SuspendedRunService) { s.suspendedRuns = runs }
 
 // NewSessionRewindService wires the service. A nil sandbox port skips the
 // workspace reset with NO_SANDBOX, which is the correct behaviour for a
@@ -243,6 +251,13 @@ func (s *SessionRewindService) Rewind(
 	if userID == "" || source.UserID != userID {
 		return nil, ErrRewindSessionNotFound
 	}
+	// Rewinding moves on from a prompt still waiting for an answer; its run
+	// is completed first so it does not read as a turn in progress.
+	if s.suspendedRuns != nil {
+		if _, err := s.suspendedRuns.SupersedeSession(ctx, sessionID); err != nil {
+			return nil, fmt.Errorf("session rewind: supersede suspended runs: %w", err)
+		}
+	}
 
 	rewindPoint, err := s.messages.GetMessage(ctx, sessionID, messageID)
 	if err != nil {
@@ -274,14 +289,14 @@ func (s *SessionRewindService) Rewind(
 	// Once we are past the cheap busy reject, finish reset+truncate even if
 	// the HTTP request is gone.
 	persistCtx := context.WithoutCancel(ctx)
-	unlock, err := s.lockRewind(persistCtx, sessionID)
+	workCtx, unlock, err := s.lockRewind(persistCtx, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	defer unlock()
 
 	var abandonedBootstrap *types.ForkBootstrap
-	workspaceReset, reason, resetErr := s.resetWorkspaceIfPossible(persistCtx, sessionID, history)
+	workspaceReset, reason, resetErr := s.resetWorkspaceIfPossible(workCtx, sessionID, history)
 	if resetErr != nil {
 		return nil, resetErr
 	}
@@ -381,9 +396,13 @@ func (s *SessionRewindService) resetWorkspaceIfPossible(
 		if err := s.rejectIfBusy(ctx, sessionID); err != nil {
 			return false, "", err
 		}
-		workCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceResetTimeout)
+		workCtx, cancel := context.WithTimeout(ctx, workspaceResetTimeout)
 		defer cancel()
 		if err := resetWorkspaceToEmpty(workCtx, s.sandbox, sessionID, currentID); err != nil {
+			if errors.Is(err, errWorkspaceCommitMissing) {
+				// Checked before git touched any file: nothing changed.
+				return false, "", ErrRewindNoCheckpoint
+			}
 			return false, "", fmt.Errorf("session rewind: reset workspace: %w", err)
 		}
 		return true, "", nil
@@ -398,11 +417,15 @@ func (s *SessionRewindService) resetWorkspaceIfPossible(
 		return false, "", err
 	}
 
-	workCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceResetTimeout)
+	workCtx, cancel := context.WithTimeout(ctx, workspaceResetTimeout)
 	defer cancel()
 	if err := resetWorkspaceToCommit(
 		workCtx, s.sandbox, sessionID, checkpoint.CommitSHA, checkpoint.SandboxID,
 	); err != nil {
+		if errors.Is(err, errWorkspaceCommitMissing) {
+			// Checked before git touched any file: nothing changed.
+			return false, "", ErrRewindNoCheckpoint
+		}
 		return false, "", fmt.Errorf("session rewind: reset workspace: %w", err)
 	}
 	return true, "", nil
@@ -439,28 +462,33 @@ func (s *SessionRewindService) deleteMessagesFrom(
 	return nil, lastErr
 }
 
-func (s *SessionRewindService) lockRewind(ctx context.Context, sessionID string) (func(), error) {
+func (s *SessionRewindService) lockRewind(ctx context.Context, sessionID string) (context.Context, func(), error) {
 	unlockGate, err := s.busyGate.TryLockRewind(sessionID)
 	if err != nil {
-		return nil, ErrRewindSourceBusy
+		return nil, nil, ErrRewindSourceBusy
 	}
+	workCtx := ctx
 	unlockPort := func() {}
 	if s.sandbox != nil {
-		unlock, err := s.sandbox.TryLockRewind(ctx, sessionID)
+		locked, unlock, err := s.sandbox.TryLockRewind(ctx, sessionID)
 		if err != nil {
 			unlockGate()
 			if errors.Is(err, sandbox.ErrSessionRewindLocked) ||
 				errors.Is(err, sandbox.ErrSessionTurnActive) ||
+				errors.Is(err, sandbox.ErrSessionWorkspaceBusy) ||
 				errors.Is(err, ErrRewindSourceBusy) {
-				return nil, ErrRewindSourceBusy
+				return nil, nil, ErrRewindSourceBusy
 			}
-			return nil, fmt.Errorf("session rewind: lock session: %w", err)
+			return nil, nil, fmt.Errorf("session rewind: lock session: %w", err)
 		}
 		if unlock != nil {
 			unlockPort = unlock
 		}
+		if locked != nil {
+			workCtx = locked
+		}
 	}
-	return func() {
+	return workCtx, func() {
 		unlockPort()
 		unlockGate()
 	}, nil

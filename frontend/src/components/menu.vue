@@ -7,6 +7,12 @@
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
             </div>
             <div class="logo_actions">
+                <t-tooltip v-if="assistantStore.entry === 'sidebar'" :content="assistantName" placement="bottom">
+                    <div class="header-icon-btn" :class="{ 'is-active': assistantStore.visible }"
+                        :aria-label="assistantName" @click="assistantStore.toggle()">
+                        <t-icon name="compass" size="18px" />
+                    </div>
+                </t-tooltip>
                 <t-tooltip placement="bottom">
                     <template #content>
                         <span class="cmdk-tip">
@@ -77,6 +83,16 @@
                         </div>
                     </div>
                 </t-tooltip>
+                <t-tooltip v-if="assistantStore.entry === 'sidebar'" :content="assistantName" placement="right">
+                    <div class="menu_item menu_item--cmdk" :class="{ 'menu_item_active': assistantStore.visible }"
+                        :aria-label="assistantName" @click="assistantStore.toggle()">
+                        <div class="menu_item-box">
+                            <div class="menu_icon">
+                                <t-icon name="compass" size="18px" />
+                            </div>
+                        </div>
+                    </div>
+                </t-tooltip>
             </div>
             <div class="menu_box" :class="{ 'menu_box--sticky': item.children && !uiStore.sidebarCollapsed }"
                 v-for="(item, index) in topMenuItems" :key="index">
@@ -87,7 +103,7 @@
                         <div class="menu_item-box">
                             <div class="menu_icon" :class="`menu_icon--${item.icon}`">
                                 <img class="icon"
-                                    :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'artifact' ? artifactIcon : item.icon == 'toolbox' ? toolboxIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
+                                    :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'artifact' ? artifactIcon : item.icon == 'automation' ? automationIcon : item.icon == 'toolbox' ? toolboxIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
                                     alt="">
                             </div>
                             <template v-if="!uiStore.sidebarCollapsed">
@@ -163,6 +179,7 @@
                                     <div class="session-list-row__body">
                                         <SessionSidebarRow :item="subitem" :batch-mode="batchMode"
                                             :running="Boolean(sessionActivityEntries[subitem.id])"
+                                            :unread="Boolean(sessionUnread[subitem.id])"
                                             :active-path="currentSecondpath" :selected-ids="batchSelectedIds"
                                             :menu-options="buildSessionMenuOptions(subitem)"
                                             @navigate="gotopage(subitem.path)"
@@ -273,6 +290,7 @@ import { useBrowserConnectionStore } from '@/stores/browserConnection';
 import { useOrganizationStore } from '@/stores/organization';
 import { useUIStore } from '@/stores/ui';
 import { useCommandPaletteStore } from '@/stores/commandPalette';
+import { useAssistantStore } from '@/stores/assistant';
 import { MessagePlugin, DialogPlugin, Icon as TIcon } from "tdesign-vue-next";
 import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
@@ -310,7 +328,7 @@ const platformLogo = (p: string): string => (p ? PLATFORM_LOGO[p] || '' : '');
 const { t } = useI18n();
 const usemenuStore = useMenuStore();
 const sessionActivity = useSessionActivityStore();
-const { entries: sessionActivityEntries } = storeToRefs(sessionActivity);
+const { entries: sessionActivityEntries, unread: sessionUnread } = storeToRefs(sessionActivity);
 let sessionActivityTimer: ReturnType<typeof setInterval> | undefined;
 const authStore = useAuthStore();
 const deploymentCapabilities = useDeploymentCapabilitiesStore();
@@ -332,6 +350,8 @@ watch(() => uiStore.sidebarBrowserStatus && toolboxPreview.value.some((tool) => 
     if (visible && !browserConnection.loaded) browserConnection.refresh().catch(() => {});
 }, { immediate: true });
 const commandPaletteStore = useCommandPaletteStore();
+const assistantStore = useAssistantStore();
+const assistantName = computed(() => assistantStore.displayName || t('assistant.title'));
 
 // Platform-aware label for the ⌘K hint. navigator.platform is deprecated but
 // the alternatives (userAgentData.platform) aren't universally available yet;
@@ -450,6 +470,8 @@ const isMenuItemActive = (itemPath: string): boolean => {
             return currentRoute === 'toolbox';
         case 'artifacts':
             return currentRoute === 'artifactLibrary';
+        case 'automations':
+            return currentRoute === 'automationList';
         case 'organizations':
             return currentRoute === 'organizationList';
         case 'creatChat':
@@ -478,7 +500,7 @@ const getIconActiveState = (itemPath: string) => {
 };
 
 // 分离上下两部分菜单（使用 visibleMenuArr 以便 lite 模式过滤 logout）
-const TOP_MENU_PATHS = new Set(['creatChat', 'knowledge-bases', 'artifacts', 'agents', 'toolbox', 'organizations']);
+const TOP_MENU_PATHS = new Set(['creatChat', 'knowledge-bases', 'artifacts', 'agents', 'automations', 'toolbox', 'organizations']);
 
 const topMenuItems = computed<MenuItem[]>(() => {
     return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => TOP_MENU_PATHS.has(item.path));
@@ -1033,7 +1055,7 @@ const loadSessionOriginMeta = async () => {
 const handleSessionMutation = (event: Event) => {
     const detail = (event as CustomEvent<SessionMutationDetail>).detail;
     if (!detail?.sessionId) return;
-    if (detail.removed || detail.messagesCleared) sessionActivity.update(detail.sessionId, false);
+    if (detail.removed || detail.messagesCleared) sessionActivity.dismiss(detail.sessionId);
     if (detail.patch) {
         updateSessionInBuckets(detail.sessionId, {
             ...detail.patch,
@@ -1050,6 +1072,8 @@ const handleSessionMutation = (event: Event) => {
 };
 
 onMounted(async () => {
+    sessionActivity.restore();
+    void sessionActivity.refresh();
     sessionActivityTimer = setInterval(() => { void sessionActivity.refresh(); }, 5000);
     const routeName = typeof route.name === 'string' ? route.name : (route.name ? String(route.name) : '')
     currentpath.value = routeName;
@@ -1121,6 +1145,7 @@ let settingIcon = ref('setting.svg');
 let agentIcon = ref('agent.svg');
 let artifactIcon = ref('artifact.svg');
 let toolboxIcon = ref('toolbox.svg');
+let automationIcon = ref('automation.svg');
 let organizationIcon = ref('organization.svg');
 let pathPrefix = ref(route.name)
 const getIcon = (path: string) => {
@@ -1142,6 +1167,7 @@ const getIcon = (path: string) => {
     artifactIcon.value = artifactsActiveState ? 'artifact-green.svg' : 'artifact.svg';
 
     toolboxIcon.value = route.name === 'toolbox' ? 'toolbox-green.svg' : 'toolbox.svg';
+    automationIcon.value = route.name === 'automationList' ? 'automation-green.svg' : 'automation.svg';
 
     // 组织图标：只在组织页面显示绿色
     organizationIcon.value = organizationsActiveState ? 'organization-green.svg' : 'organization.svg';
@@ -1323,7 +1349,6 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
         .menu_bottom {
             align-items: center;
         }
-
         .menu_top {
             margin-right: 0;
             padding-right: 0;
@@ -1730,11 +1755,6 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
             overflow: hidden;
         }
 
-        .session-running-indicator {
-            flex: 0 0 16px;
-            flex-shrink: 0;
-        }
-
         .submenu_title-text {
             flex: 1 1 auto;
             min-width: 0;
@@ -1836,6 +1856,11 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
 
     &:hover {
         background: var(--td-bg-color-container-hover);
+    }
+
+    &.is-active {
+        background: var(--td-bg-color-container-hover);
+        color: var(--td-brand-color);
     }
 
     .header-icon-img {

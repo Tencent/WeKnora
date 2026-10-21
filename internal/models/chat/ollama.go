@@ -123,6 +123,11 @@ func (c *OllamaChat) buildChatRequest(messages []Message, opts *ChatOptions, isS
 		Options:  make(map[string]interface{}),
 	}
 
+	// Keep request-scoped notices out of the system prefix and stored history.
+	if opts != nil && opts.RuntimeNotice != "" {
+		chatReq.Messages = append(chatReq.Messages, ollamaapi.Message{Role: "user", Content: opts.RuntimeNotice})
+	}
+
 	// 添加可选参数
 	if opts != nil {
 		chatReq.Options["temperature"] = opts.Temperature

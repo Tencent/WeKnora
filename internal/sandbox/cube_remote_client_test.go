@@ -642,6 +642,10 @@ func TestNormalizeCubeError(t *testing.T) {
 		{"template not found", "Create", cubesandbox.ErrTemplateNotFound, RemoteErrorKindInvalidRequest},
 		{"authentication", "Health", cubesandbox.ErrAuthentication, RemoteErrorKindAuthentication},
 		{"path not found", "Stat", &cubesandbox.NotFoundError{Path: "/x"}, RemoteErrorKindNotFound},
+		{"list missing session dir", "ListDir", errors.New(
+			"failed to list /workspace/sessions/f2e82fcb-abf8-4677-9567-5e20d6cbcb1f/input: " +
+				"path not found: lstat /workspace/sessions/f2e82fcb-abf8-4677-9567-5e20d6cbcb1f: " +
+				"no such file or directory"), RemoteErrorKindNotFound},
 		{"gone", "Get", &cubesandbox.APIError{StatusCode: http.StatusGone}, RemoteErrorKindTerminal},
 		{"conflict", "Connect", &cubesandbox.APIError{StatusCode: http.StatusConflict}, RemoteErrorKindConflict},
 		{"rate limited", "Create", &cubesandbox.APIError{StatusCode: http.StatusTooManyRequests}, RemoteErrorKindCapacity},

@@ -2,9 +2,11 @@ package wiki
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +31,7 @@ func NewConnector(region core.Region) *Connector {
 // Feishu supports resumable streaming sync; the service prefers FetchStream over
 // FetchAll/FetchIncremental when a connector implements StreamingConnector.
 var _ datasource.StreamingConnector = (*Connector)(nil)
+var _ datasource.FullStreamingConnector = (*Connector)(nil)
 
 // Type returns the connector type identifier.
 func (c *Connector) Type() string {
@@ -171,7 +174,8 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 		return nil, err
 	}
 	client := core.NewClient(feishuConfig)
-	return core.FetchAllEngine(ctx, client, config, resourceIDs, wikiOps{region: c.region})
+	return core.FetchAllEngine(ctx, client, config, resourceIDs,
+		&wikiOps{region: c.region, parseMode: feishuConfig.ParseMode})
 }
 
 // FetchIncremental performs an incremental sync by comparing node edit times
@@ -185,7 +189,7 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 		return nil, nil, err
 	}
 	client := core.NewClient(feishuConfig)
-	ops := wikiOps{region: c.region}
+	ops := &wikiOps{region: c.region, parseMode: feishuConfig.ParseMode}
 	if len(config.ResourceIDs) == 0 {
 		return nil, nil, errors.New(ops.EmptyResourceIDsError())
 	}
@@ -209,56 +213,148 @@ func (c *Connector) FetchStream(
 		return nil, err
 	}
 	client := core.NewClient(feishuConfig)
-	ops := wikiOps{region: c.region}
+	ops := &wikiOps{region: c.region, parseMode: feishuConfig.ParseMode}
 	if len(config.ResourceIDs) == 0 {
 		return nil, errors.New(ops.EmptyResourceIDsError())
 	}
 	return core.FetchStreamEngine(ctx, client, config, cursor, h, ops)
 }
 
-// wikiOps adapts the wiki Connector to the generic sync engine. It carries the
-// region (for URL rendering) and encodes/decodes the wiki cursor wire format
-// (core.FeishuCursor / space_node_times) so the engine can stay format-agnostic.
-type wikiOps struct {
-	region core.Region
+// FetchFullStream refetches content without discarding the deletion baseline.
+func (c *Connector) FetchFullStream(
+	ctx context.Context, config *types.DataSourceConfig,
+	cursor *types.SyncCursor, h datasource.StreamHandler,
+) (*types.SyncCursor, error) {
+	feishuConfig, err := core.ParseFeishuConfig(config, c.region)
+	if err != nil {
+		return nil, err
+	}
+	client := core.NewClient(feishuConfig)
+	ops := &wikiOps{region: c.region, parseMode: feishuConfig.ParseMode}
+	if len(config.ResourceIDs) == 0 {
+		return nil, errors.New(ops.EmptyResourceIDsError())
+	}
+	return core.FetchFullStreamEngine(ctx, client, config, cursor, h, ops)
 }
 
-func (o wikiOps) List(ctx context.Context, client *core.Client, resourceID string) ([]core.WikiNode, error, error) {
+// wikiOps adapts the wiki Connector to the generic sync engine. It carries the
+// region (for URL rendering), encodes/decodes the wiki cursor wire format
+// (core.FeishuCursor / space_node_times), and holds the per-run directory
+// mapping state (P1): dirPaths maps node token → cleaned directory prefix
+// rooted at the space's own name, so every synced space lands in a top-level
+// KB folder named after the space. List builds the state for the resource
+// being synced; Fetch reads it. runSync processes one resource at a time, so
+// the mutation is race-free.
+type wikiOps struct {
+	region    core.Region
+	parseMode string
+	dirPaths  map[string]string
+	// spacePrefixes caches spaceID → sanitized folder prefix for the run, so
+	// syncing K selected spaces costs one ListWikiSpaces paging pass total
+	// instead of one per space (failures cache "" and do not retry mid-run).
+	spacePrefixes map[string]string
+}
+
+// spaceDirPrefix resolves the synced space's display name (sanitized) as the
+// top-level KB folder for this run, cached per space for the whole run.
+// An unresolved name yields "" and the documents fall back to landing at the
+// KB root (pre-mirror behaviour) rather than failing the sync.
+func (o *wikiOps) spaceDirPrefix(ctx context.Context, client *core.Client, spaceID string) string {
+	if o.spacePrefixes == nil {
+		o.spacePrefixes = make(map[string]string)
+	}
+	if prefix, ok := o.spacePrefixes[spaceID]; ok {
+		return prefix
+	}
+	prefix := ""
+	spaces, err := client.ListWikiSpaces(ctx)
+	if err != nil {
+		logger.Warnf(ctx, "[Feishu] list wiki spaces for space folder prefix %s: %v", spaceID, err)
+	} else {
+		for _, s := range spaces {
+			if s.SpaceID == spaceID && s.Name != "" {
+				prefix = core.SanitizeFileName(s.Name)
+				break
+			}
+		}
+	}
+	o.spacePrefixes[spaceID] = prefix
+	return prefix
+}
+
+func (o *wikiOps) List(ctx context.Context, client *core.Client, resourceID string) ([]core.WikiNode, error, error) {
 	spaceID, nodeToken := parseWikiResourceID(resourceID)
 	nodes, err := client.ListWikiNodesRecursiveFrom(ctx, spaceID, nodeToken)
-	if err == nil {
-		return nodes, nil, nil
-	}
-	var partial *core.PartialWikiNodeListError
-	if errors.As(err, &partial) {
+	if err != nil {
+		var partial *core.PartialWikiNodeListError
+		if !errors.As(err, &partial) {
+			// Total listing failure: nothing usable — abort the sync.
+			return nodes, nil, err
+		}
 		// Partial listing: nodes are still usable; the failed sub-trees are
 		// surfaced via ListFailureItems, and the sync continues.
+	}
+	// On a partial listing the original's descendants may be missing even
+	// when the original node itself is present. Keep the accessible shortcut.
+	if err == nil {
+		nodes = filterShortcutSubtrees(nodes)
+	}
+	o.prepareDirPaths(nodes, o.spaceDirPrefix(ctx, client, spaceID))
+	if err != nil {
 		return nodes, err, nil
 	}
-	return nodes, nil, err
+	return nodes, nil, nil
 }
 
-func (o wikiOps) Token(n core.WikiNode) string   { return n.NodeToken }
-func (o wikiOps) Title(n core.WikiNode) string   { return n.Title }
-func (o wikiOps) ObjType(n core.WikiNode) string { return n.ObjType }
+func (o *wikiOps) Token(n core.WikiNode) string   { return n.NodeToken }
+func (o *wikiOps) Title(n core.WikiNode) string   { return n.Title }
+func (o *wikiOps) ObjType(n core.WikiNode) string { return n.ObjType }
 
-// EditTime is the change-detection timestamp: ObjEditTime (document content)
-// with a NodeEditTime fallback for nodes that lack obj_edit_time. It drives the
-// cursor comparison and, parsed, FetchedItem.UpdatedAt (see contentEditTime),
-// so the persisted source_updated_at tracks content edits, not node moves.
-func (o wikiOps) EditTime(n core.WikiNode) string {
-	if n.ObjEditTime != "" {
+// EditTime is an opaque change key including the effective destination path.
+// An ancestor rename/move changes that path without touching this node's times.
+// Timestamp-only legacy cursors refresh once; source_updated_at still uses
+// contentEditTime and never contains the path fingerprint.
+func (o *wikiOps) EditTime(n core.WikiNode) string {
+	timestamp := core.DocxChangeKey(wikiNodeEditTime(n), n.ObjType, o.parseMode)
+	if dir, ok := o.dirPaths[n.NodeToken]; ok {
+		pathHash := sha256.Sum256([]byte(dir + "\x00" + core.SanitizeFileName(n.Title)))
+		return fmt.Sprintf("%s:%x", timestamp, pathHash)
+	}
+	return timestamp
+}
+
+func wikiNodeEditTime(n core.WikiNode) string {
+	obj, objErr := strconv.ParseInt(n.ObjEditTime, 10, 64)
+	node, nodeErr := strconv.ParseInt(n.NodeEditTime, 10, 64)
+	switch {
+	case objErr != nil && nodeErr != nil:
+		return n.ObjEditTime
+	case objErr != nil:
+		return n.NodeEditTime
+	case nodeErr != nil:
+		return n.ObjEditTime
+	case node > obj:
+		return n.NodeEditTime
+	default:
 		return n.ObjEditTime
 	}
-	return n.NodeEditTime
 }
 
-func (o wikiOps) Fetch(ctx context.Context, client *core.Client, n core.WikiNode, resourceID string, multimodal bool) ([]*types.FetchedItem, error) {
+func (o *wikiOps) Fetch(
+	ctx context.Context, client *core.Client, n core.WikiNode, resourceID string,
+) ([]*types.FetchedItem, error) {
 	spaceID, _ := parseWikiResourceID(resourceID)
-	return fetchNodeContent(ctx, client, n, spaceID, resourceID, multimodal, o.region)
+	items, err := fetchNodeContent(ctx, client, n, spaceID, resourceID, o.region, o.parseMode)
+	if err != nil {
+		return nil, err
+	}
+	// P1 directory mapping: prefix the FileName with the node's cleaned
+	// directory path so ingestion derives the KB folder_path from it.
+	qualifyItemFileNames(items, o.dirPaths[n.NodeToken])
+	return items, nil
 }
 
-func (o wikiOps) ListFailureItems(resourceID string, partial error) []types.FetchedItem {
+func (o *wikiOps) ListFailureItems(resourceID string, partial error) []types.FetchedItem {
 	spaceID, _ := parseWikiResourceID(resourceID)
 	var pe *core.PartialWikiNodeListError
 	if errors.As(partial, &pe) {
@@ -267,20 +363,20 @@ func (o wikiOps) ListFailureItems(resourceID string, partial error) []types.Fetc
 	return nil
 }
 
-func (o wikiOps) ResourceNoun() string { return "nodes" }
-func (o wikiOps) EmptyResourceIDsError() string {
+func (o *wikiOps) ResourceNoun() string { return "nodes" }
+func (o *wikiOps) EmptyResourceIDsError() string {
 	return "no resource IDs (wiki space IDs or wiki node IDs) configured"
 }
-func (o wikiOps) LogTag() string { return "[Feishu]" }
+func (o *wikiOps) LogTag() string { return "[Feishu]" }
 
-func (o wikiOps) DecodeCursorTimes(m map[string]interface{}) map[string]map[string]string {
+func (o *wikiOps) DecodeCursorTimes(m map[string]interface{}) map[string]map[string]string {
 	var prev core.FeishuCursor
 	b, _ := json.Marshal(m)
 	_ = json.Unmarshal(b, &prev)
 	return prev.SpaceNodeTimes
 }
 
-func (o wikiOps) EncodeCursor(times map[string]map[string]string, lastSync time.Time) *types.SyncCursor {
+func (o *wikiOps) EncodeCursor(times map[string]map[string]string, lastSync time.Time) *types.SyncCursor {
 	fc := core.FeishuCursor{LastSyncTime: lastSync, SpaceNodeTimes: times}
 	m := make(map[string]interface{})
 	b, _ := json.Marshal(fc)
@@ -319,7 +415,10 @@ func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, r
 //   - file       → drive download → original file (PDF/Word/image/etc.)
 //   - mindnote   → Skip (no API)
 //   - slides     → Skip (no API)
-func fetchNodeContent(ctx context.Context, client *core.Client, node core.WikiNode, spaceID string, resourceID string, multimodalEnabled bool, region core.Region) ([]*types.FetchedItem, error) {
+func fetchNodeContent(
+	ctx context.Context, client *core.Client, node core.WikiNode,
+	spaceID string, resourceID string, region core.Region, parseMode string,
+) ([]*types.FetchedItem, error) {
 	if !core.IsSupportedDocType(node.ObjType) {
 		return nil, nil
 	}
@@ -339,15 +438,15 @@ func fetchNodeContent(ctx context.Context, client *core.Client, node core.WikiNo
 	switch node.ObjType {
 	case "docx":
 		return core.FetchDocxWithBlocks(ctx, client, core.DocxFetchInput{
-			DocToken:          node.NodeToken,
-			ObjToken:          node.ObjToken,
-			Title:             node.Title,
-			URL:               region.WikiURL(node.NodeToken),
-			ResourceID:        resourceID,
-			EditTime:          editTime,
-			CreateTime:        createTime,
-			BaseMeta:          baseMeta,
-			MultimodalEnabled: multimodalEnabled,
+			DocToken:   node.NodeToken,
+			ObjToken:   node.ObjToken,
+			Title:      node.Title,
+			URL:        region.WikiURL(node.NodeToken),
+			ResourceID: resourceID,
+			EditTime:   editTime,
+			CreateTime: createTime,
+			ParseMode:  parseMode,
+			BaseMeta:   baseMeta,
 		})
 	case "doc", "sheet", "bitable":
 		item, err := fetchViaExport(ctx, client, node, resourceID, editTime, baseMeta, region)
@@ -409,7 +508,7 @@ func fetchDriveFile(ctx context.Context, client *core.Client, node core.WikiNode
 	}
 
 	// Use the node title as file name; it usually preserves the original extension
-	fileName := node.Title
+	fileName := core.SanitizeFileName(node.Title)
 	if fileName == "" {
 		fileName = node.ObjToken
 	}

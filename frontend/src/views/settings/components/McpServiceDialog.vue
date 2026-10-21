@@ -192,11 +192,33 @@
           </div>
         </div>
 
-        <!-- OAuth 2.0：零配置（自动发现 + 动态客户端注册），按用户授权 -->
+        <!-- OAuth 2.0：默认零配置（自动发现 + 动态客户端注册），也可填写预注册客户端；按用户授权 -->
         <template v-if="isOAuth">
           <div class="form-item">
             <label class="form-label">{{ t('mcpServiceDialog.oauthScopes', 'Scopes（可选，空格分隔）') }}</label>
             <t-input v-model="oauthScopesText" :placeholder="t('mcpServiceDialog.optional')" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">{{ t('mcpServiceDialog.oauthClientId', 'Client ID（可选）') }}</label>
+            <t-input v-model="formData.auth_config.client_id" :placeholder="t('mcpServiceDialog.optional')" />
+            <p class="form-desc">{{ t('mcpServiceDialog.oauthClientIdDesc', '填写在授权服务器预先注册的客户端；留空则自动进行动态客户端注册。更换 Client ID 时请同时更新 Client Secret。') }}</p>
+          </div>
+          <div class="form-item">
+            <label class="form-label">{{ t('mcpServiceDialog.oauthClientSecret', 'Client Secret（可选）') }}</label>
+            <CredentialResource
+              v-if="mode === 'edit' && currentService?.id"
+              :api="credentialApi"
+              :fields="credentialFields"
+              :meta="credentialMeta"
+            />
+            <t-input
+              v-else
+              v-model="formData.auth_config.client_secret"
+              type="password"
+              :placeholder="t('mcpServiceDialog.optional')"
+            >
+              <template #prefix-icon><t-icon name="lock-on" /></template>
+            </t-input>
           </div>
           <div class="form-item">
             <label class="form-label">{{ t('mcpServiceDialog.oauthAuthorization', '授权状态') }}</label>
@@ -335,16 +357,18 @@
           <div class="form-item">
             <div class="usage-heading">
               <label class="form-label required">{{ t('mcpMetadata.usageInstructions') }}</label>
-              <t-button variant="text" theme="primary" size="small" :loading="generatingUsage"
-                :disabled="!toolsSynced || metadataBusy || submitting" @click="handleGenerateUsage">
-                <template #icon><t-icon name="lightbulb" /></template>
-                {{ t('mcpMetadata.generateUsage') }}
-              </t-button>
+              <t-tooltip :content="t('mcpMetadata.generateHint')" placement="top-right"
+                :overlay-inner-style="{ maxWidth: '300px', whiteSpace: 'normal' }">
+                <t-button variant="text" theme="primary" size="small" :loading="generatingUsage"
+                  :disabled="!toolsSynced || metadataBusy || submitting" @click="handleGenerateUsage">
+                  <template #icon><t-icon name="lightbulb" /></template>
+                  {{ t('mcpMetadata.generateUsage') }}
+                </t-button>
+              </t-tooltip>
             </div>
-            <t-textarea v-model="formData.usage_instructions" :maxlength="16000" :autosize="{ minRows: 3, maxRows: 8 }"
+            <t-textarea v-model="formData.usage_instructions" class="usage-textarea" :maxlength="16000" :autosize="{ minRows: 3, maxRows: 8 }"
               :disabled="generatingUsage || submitting"
               :placeholder="t('mcpMetadata.instructionsPlaceholder')" />
-            <p class="form-desc">{{ t('mcpMetadata.generateHint') }}</p>
           </div>
         </section>
         <McpMetadataPanel v-if="currentService?.id" :key="currentService.id" :service-id="currentService.id"
@@ -439,6 +463,10 @@ const formData = ref({
     // OAuth-only, non-secret config.
     scopes: [] as string[],
     auth_server_metadata_url: '',
+    // Pre-registered OAuth client; empty means dynamic client registration.
+    client_id: '',
+    // Only used in add-mode; in edit-mode the CredentialResource owns it.
+    client_secret: '',
   },
   advanced_config: {
     timeout: 30,
@@ -520,6 +548,8 @@ function applyServerConfig(name: string, cfg: Record<string, unknown>) {
   formData.value.auth_config.api_key = apiKey
   formData.value.auth_config.api_key_header = apiKeyHeader
   formData.value.auth_config.scopes = []
+  formData.value.auth_config.client_id = ''
+  formData.value.auth_config.client_secret = ''
 
   return true
 }
@@ -612,18 +642,38 @@ const oauthAuthorized = ref(false)
 const oauthTokenState = ref<MCPOAuthTokenState>('reauth_required')
 const oauthChecking = ref(false)
 const oauthAuthorizing = ref(false)
+let oauthGeneration = 0
+let oauthPollTimer: number | null = null
+
+// The drawer is reused; cancellation must also invalidate requests already in flight.
+function cancelOAuthRequests() {
+  oauthGeneration++
+  if (oauthPollTimer !== null) window.clearInterval(oauthPollTimer)
+  oauthPollTimer = null
+  oauthChecking.value = false
+  oauthAuthorizing.value = false
+}
+
+function isCurrentOAuthRequest(generation: number, serviceId: string) {
+  return generation === oauthGeneration && props.visible && isOAuth.value
+    && currentService.value?.id === serviceId
+}
 
 async function refreshOAuthStatus() {
-  if (props.mode !== 'edit' || !currentService.value?.id || !isOAuth.value) return
+  if (props.mode !== 'edit' || !currentService.value?.id || !isOAuth.value || !props.visible) return
+  const serviceId = currentService.value.id
+  const generation = oauthGeneration
   oauthChecking.value = true
   try {
     const status = await getMCPOAuthAuthorizationStatus(currentService.value.id)
+    if (!isCurrentOAuthRequest(generation, serviceId)) return
     oauthAuthorized.value = status.authorized
     oauthTokenState.value = status.state
   } catch (e) {
+    if (!isCurrentOAuthRequest(generation, serviceId)) return
     console.error('Failed to query MCP OAuth status:', e)
   } finally {
-    oauthChecking.value = false
+    if (isCurrentOAuthRequest(generation, serviceId)) oauthChecking.value = false
   }
 }
 
@@ -631,7 +681,9 @@ async function refreshOAuthStatus() {
 // completion against that service id (independent of props, which may be
 // re-bound by the parent after a save).
 async function startAuthorize(serviceId: string) {
-  if (!serviceId) return
+  if (!serviceId || !isCurrentOAuthRequest(oauthGeneration, serviceId)) return
+  cancelOAuthRequests()
+  const generation = oauthGeneration
   oauthAuthorizing.value = true
   try {
     const redirectUri = window.location.origin + MCP_OAUTH_CALLBACK_PATH
@@ -643,6 +695,7 @@ async function startAuthorize(serviceId: string) {
       redirect_uri: redirectUri,
       frontend_redirect: frontendRedirect,
     })
+    if (!isCurrentOAuthRequest(generation, serviceId)) return
     if (!authorization.authorizationUrl || !authorization.authorizationAttempt) {
       MessagePlugin.error(t('mcpServiceDialog.toasts.authorizeFailed', '发起授权失败') as string)
       oauthAuthorizing.value = false
@@ -650,22 +703,28 @@ async function startAuthorize(serviceId: string) {
     }
     const popup = window.open(authorization.authorizationUrl, 'mcp_oauth', 'width=600,height=720')
     // Poll for completion: either the popup closes or the status flips.
-    const timer = window.setInterval(async () => {
+    oauthPollTimer = window.setInterval(async () => {
+      if (!isCurrentOAuthRequest(generation, serviceId)) return
       const closed = !popup || popup.closed
+      let authorized: boolean | undefined
       try {
-        oauthAuthorized.value = await getMCPOAuthStatus(serviceId, authorization.authorizationAttempt)
-        if (oauthAuthorized.value) oauthTokenState.value = 'authorized'
+        authorized = await getMCPOAuthStatus(serviceId, authorization.authorizationAttempt)
       } catch { /* keep polling */ }
-      if (oauthAuthorized.value || closed) {
-        window.clearInterval(timer)
-        oauthAuthorizing.value = false
-        if (oauthAuthorized.value) {
+      if (!isCurrentOAuthRequest(generation, serviceId)) return
+      if (authorized !== undefined) {
+        oauthAuthorized.value = authorized
+        if (authorized) oauthTokenState.value = 'authorized'
+      }
+      if (authorized || closed) {
+        cancelOAuthRequests()
+        if (authorized) {
           try { popup?.close() } catch { /* cross-origin close may throw */ }
           MessagePlugin.success(t('mcpServiceDialog.toasts.authorized', '授权成功') as string)
         }
       }
     }, 1500)
   } catch (e) {
+    if (!isCurrentOAuthRequest(generation, serviceId)) return
     console.error('Failed to start MCP OAuth authorization:', e)
     MessagePlugin.error(t('mcpServiceDialog.toasts.authorizeFailed', '发起授权失败') as string)
     oauthAuthorizing.value = false
@@ -678,18 +737,24 @@ async function startAuthorize(serviceId: string) {
 // "MCP service is not configured to use OAuth". The drawer stays open the whole
 // time — the parent re-binds the (now saved) service via the `created` event.
 async function handleAuthorize() {
+  const generation = oauthGeneration
   const saved = await saveConnection()
-  if (saved) await startAuthorize(saved.id)
+  if (saved && generation === oauthGeneration) await startAuthorize(saved.id)
 }
 
 async function handleRevokeOAuth() {
   if (!currentService.value?.id) return
+  const serviceId = currentService.value.id
+  cancelOAuthRequests()
+  const generation = oauthGeneration
   try {
-    await revokeMCPOAuthToken(currentService.value.id)
+    await revokeMCPOAuthToken(serviceId)
+    if (!isCurrentOAuthRequest(generation, serviceId)) return
     oauthAuthorized.value = false
     oauthTokenState.value = 'reauth_required'
     MessagePlugin.success(t('mcpServiceDialog.toasts.revoked', '已撤销授权') as string)
   } catch (e) {
+    if (!isCurrentOAuthRequest(generation, serviceId)) return
     console.error('Failed to revoke MCP OAuth token:', e)
     MessagePlugin.error(t('mcpServiceDialog.toasts.revokeFailed', '撤销失败') as string)
   }
@@ -705,11 +770,14 @@ const transportLabel = computed(() => {
 // MCP so other resources don't accidentally inherit "API Key" / "Bearer
 // Token" labels via the shared component.
 // The unified credential strategy stores its secret in the api_key field
-// (placed verbatim into the configured header). None / OAuth carry no static
-// secret, so the credential card is only shown for the api_key strategy.
+// (placed verbatim into the configured header). OAuth's only static secret is
+// the optional secret of a pre-registered client; none carries no secret.
 const credentialFields = computed<CredentialFieldDef<McpCredentialField>[]>(() => {
   if (formData.value.auth_config.auth_type === 'api_key') {
     return [{ key: 'api_key', label: t('mcpServiceDialog.credentialValue', '密钥值 / Token') }]
+  }
+  if (isOAuth.value) {
+    return [{ key: 'client_secret', label: t('mcpServiceDialog.oauthClientSecret', 'Client Secret（可选）') }]
   }
   return []
 })
@@ -736,6 +804,7 @@ const credentialApi = computed<CredentialResourceApi<McpCredentialField>>(() => 
 const credentialMeta = computed(() => currentService.value?.credentials ?? {
   api_key: { configured: false },
   token: { configured: false },
+  client_secret: { configured: false },
 })
 
 const rules: Record<string, FormRule[]> = {
@@ -817,7 +886,10 @@ const resetForm = () => {
     transport_type: 'sse',
     url: '',
     headers: [],
-    auth_config: { auth_type: '', api_key: '', api_key_header: '', token: '', scopes: [], auth_server_metadata_url: '' },
+    auth_config: {
+      auth_type: '', api_key: '', api_key_header: '', token: '', scopes: [], auth_server_metadata_url: '',
+      client_id: '', client_secret: '',
+    },
     advanced_config: { timeout: 30, retry_count: 3, retry_delay: 1 },
   }
   formRef.value?.clearValidate()
@@ -826,12 +898,13 @@ const resetForm = () => {
 watch(
   () => [props.visible, props.service] as const,
   ([visible, service], previous) => {
-    if (!visible) { usageGeneration++; generatingUsage.value = false; return }
+    if (!visible) { cancelOAuthRequests(); usageGeneration++; generatingUsage.value = false; return }
     const opening = !previous?.[0]
     if (!opening && service?.id && savedService.value?.id === service.id) {
       savedService.value = service
       return
     }
+    cancelOAuthRequests()
     usageGeneration++
     generatingUsage.value = false
     savedService.value = service
@@ -865,6 +938,8 @@ watch(
           token: '',
           scopes: service.auth_config?.scopes ? [...service.auth_config.scopes] : [],
           auth_server_metadata_url: service.auth_config?.auth_server_metadata_url || '',
+          client_id: service.auth_config?.client_id || '',
+          client_secret: '',
         },
         advanced_config: {
           timeout: service.advanced_config?.timeout || 30,
@@ -915,6 +990,12 @@ function buildPayload(asCreate: boolean): Partial<MCPService> {
     auth.scopes = formData.value.auth_config.scopes
     if (formData.value.auth_config.auth_server_metadata_url) {
       auth.auth_server_metadata_url = formData.value.auth_config.auth_server_metadata_url
+    }
+    // Always sent so clearing the field returns the service to dynamic
+    // client registration.
+    auth.client_id = formData.value.auth_config.client_id.trim()
+    if (asCreate && formData.value.auth_config.client_secret) {
+      auth.client_secret = formData.value.auth_config.client_secret
     }
   }
   if (asCreate && !isOAuth.value) {
@@ -967,7 +1048,9 @@ async function handleGenerateUsage() {
   }
 }
 
-onBeforeUnmount(() => { usageGeneration++ })
+watch(isOAuth, (enabled) => { if (!enabled) cancelOAuthRequests() })
+
+onBeforeUnmount(() => { cancelOAuthRequests(); usageGeneration++ })
 
 const handleSubmit = async () => {
   const id = currentService.value?.id
@@ -1003,6 +1086,20 @@ const handleClose = () => {
   gap: 12px;
 
   .form-label { margin-bottom: 0; }
+}
+
+.usage-textarea {
+  :deep(.t-textarea__inner) {
+    font-size: var(--app-text-md);
+    line-height: 1.65;
+    padding: 8px 10px;
+  }
+
+  :deep(.t-textarea__info_wrapper),
+  :deep(.t-textarea__limit) {
+    font-size: var(--app-text-xs);
+    color: var(--td-text-color-placeholder);
+  }
 }
 
 .mcp-steps {

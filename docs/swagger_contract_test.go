@@ -3,6 +3,7 @@ package docs_test
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	docs "github.com/Tencent/WeKnora/docs"
@@ -59,6 +60,125 @@ func TestKnowledgeSearchRouteContract(t *testing.T) {
 	for _, tt := range swaggerDocuments() {
 		t.Run(tt.name, func(t *testing.T) {
 			assertKnowledgeSearchRouteContract(t, tt.loadSpec(t), tt.parse)
+		})
+	}
+}
+
+func TestAutomationAssistantContract(t *testing.T) {
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				Definitions map[string]struct {
+					Properties map[string]any `json:"properties" yaml:"properties"`
+				} `json:"definitions" yaml:"definitions"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{
+				"internal_handler.CreateAutomationRequest",
+				"github_com_Tencent_WeKnora_internal_types.AutomationPatch",
+				"github_com_Tencent_WeKnora_internal_types.Automation",
+			} {
+				properties := spec.Definitions[name].Properties
+				if _, ok := properties["agent_id"]; ok {
+					t.Errorf("%s must not expose executor selection", name)
+				}
+				for _, field := range []string{"instruction", "model_id"} {
+					if _, ok := properties[field]; !ok {
+						t.Errorf("%s must expose %s", name, field)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestReleaseAPIContracts(t *testing.T) {
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				BasePath    string                    `json:"basePath" yaml:"basePath"`
+				Paths       map[string]map[string]any `json:"paths" yaml:"paths"`
+				Definitions map[string]struct {
+					Properties map[string]struct {
+						Type string `json:"type" yaml:"type"`
+					} `json:"properties" yaml:"properties"`
+				} `json:"definitions" yaml:"definitions"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatal(err)
+			}
+			if spec.BasePath != "/api/v1" {
+				t.Fatalf("unexpected API base path %q", spec.BasePath)
+			}
+			for path := range spec.Paths {
+				if strings.HasPrefix(path, spec.BasePath+"/") {
+					t.Errorf("route %s repeats the API base path", path)
+				}
+			}
+			for path, methods := range map[string][]string{
+				"/knowledge/{id}/spans":               {"get"},
+				"/knowledge-bases/{id}/images":        {"get", "post"},
+				"/wiki-search":                        {"post"},
+				"/agents/tools":                       {"get"},
+				"/system/admin/users":                 {"get"},
+				"/system/admin/users/status":          {"post"},
+				"/system/admin/model-catalog":         {"get", "put"},
+				"/system/admin/model-catalog/preview": {"post"},
+			} {
+				for _, method := range methods {
+					if _, ok := spec.Paths[path][method]; !ok {
+						t.Errorf("missing %s %s", method, path)
+					}
+				}
+			}
+			for _, name := range []string{"CatalogUpdate", "CatalogState", "CatalogRevision"} {
+				definition := "github_com_Tencent_WeKnora_internal_application_service." + name
+				if spec.Definitions[definition].Properties["overlay"].Type != "object" {
+					t.Errorf("%s.overlay must be a JSON object", name)
+				}
+			}
+		})
+	}
+}
+
+func TestGraphSearchContract(t *testing.T) {
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				Paths       map[string]map[string]any `json:"paths" yaml:"paths"`
+				Definitions map[string]struct {
+					Properties map[string]any `json:"properties" yaml:"properties"`
+				} `json:"definitions" yaml:"definitions"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatal(err)
+			}
+			methods := spec.Paths["/knowledge-bases/{id}/graph-search"]
+			if methods["post"] == nil || len(methods) != 1 {
+				t.Fatal("graph-search must be documented as a POST-only endpoint")
+			}
+			const prefix = "github_com_Tencent_WeKnora_internal_types."
+			for definition, fields := range map[string][]string{
+				"GraphSearchResult":      {"entities", "relationships", "source_chunks", "meta"},
+				"GraphSearchEntity":      {"id", "knowledge_id", "source_chunk_ids"},
+				"GraphSearchRelation":    {"source_id", "target_id", "source_chunk_ids"},
+				"GraphSearchSourceChunk": {"content_truncated", "title_truncated"},
+				"GraphSearchMeta":        {"truncated", "truncation_reasons"},
+			} {
+				properties := spec.Definitions[prefix+definition].Properties
+				for _, field := range fields {
+					if properties[field] == nil {
+						t.Errorf("%s.%s must be documented", definition, field)
+					}
+				}
+				for _, hidden := range []string{"tenant_id", "knowledge_base_id", "element_id"} {
+					if definition != "GraphSearchResult" && properties[hidden] != nil {
+						t.Errorf("%s leaks internal field %s", definition, hidden)
+					}
+				}
+			}
 		})
 	}
 }
@@ -238,5 +358,27 @@ func swaggerInteger(value any) int {
 		return int(number)
 	default:
 		return 0
+	}
+}
+
+func TestNotificationInboxContract(t *testing.T) {
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				Paths map[string]map[string]swaggerOperation `json:"paths" yaml:"paths"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := spec.Paths["/notifications/read"]["delete"]; !ok {
+				t.Fatal("missing clear-read notification endpoint")
+			}
+			for _, parameter := range spec.Paths["/notifications"]["get"].Parameters {
+				if parameter.Name == "cursor" && parameter.In == "query" && parameter.Type == "string" {
+					return
+				}
+			}
+			t.Fatal("notification listing must document its history cursor")
+		})
 	}
 }

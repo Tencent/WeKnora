@@ -31,7 +31,11 @@ type fakeRewindSandboxPort struct {
 	execBlock          func()
 	rewindMu           sync.Mutex
 	rewindHeld         bool
+	lockErr            error
+	resetLockMarker    any
 }
+
+type rewindLockMarker struct{}
 
 func newFakeRewindPort() *fakeRewindSandboxPort {
 	return &fakeRewindSandboxPort{
@@ -58,18 +62,30 @@ func (f *fakeRewindSandboxPort) HasActiveTurn(context.Context, string) (bool, er
 	return f.activeTurn, nil
 }
 
-func (f *fakeRewindSandboxPort) TryLockRewind(context.Context, string) (func(), error) {
+func (f *fakeRewindSandboxPort) TryLockRewind(ctx context.Context, _ string) (context.Context, func(), error) {
+	if f.lockErr != nil {
+		return nil, nil, f.lockErr
+	}
 	f.rewindMu.Lock()
 	defer f.rewindMu.Unlock()
 	if f.rewindHeld {
-		return nil, ErrRewindSourceBusy
+		return nil, nil, ErrRewindSourceBusy
 	}
 	f.rewindHeld = true
-	return func() {
+	return context.WithValue(ctx, rewindLockMarker{}, true), func() {
 		f.rewindMu.Lock()
 		f.rewindHeld = false
 		f.rewindMu.Unlock()
 	}, nil
+}
+
+func (f *fakeRewindSandboxPort) ExecShellCommandWithOptions(
+	ctx context.Context, sessionID, command string, opts sandbox.ShellExecOptions,
+) (*sandbox.ExecuteResult, error) {
+	if ctx != nil {
+		f.resetLockMarker = ctx.Value(rewindLockMarker{})
+	}
+	return f.ExecShellCommand(ctx, sessionID, command, opts.WorkDir, opts.Timeout, opts.Env)
 }
 
 func (f *fakeRewindSandboxPort) ExecShellCommand(
@@ -762,7 +778,7 @@ func TestRewindBlocksLocalSendWithoutSandbox(t *testing.T) {
 	svc.busyGate = gate
 	sessionSvc := &sessionService{busyGate: gate}
 
-	release, err := sessionSvc.holdSandboxTurn(context.Background(), "src", "")
+	_, release, err := sessionSvc.holdSandboxTurn(context.Background(), "src", "")
 	require.NoError(t, err)
 
 	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
@@ -858,6 +874,47 @@ func TestRewindUnopenedForkBootstrapClearFailureDoesNotDeleteMessages(t *testing
 	require.Equal(t, []string{"u-1", "a-1"}, messageIDs(msgs.messages))
 	require.NotNil(t, sessions.source.ForkBootstrap)
 	require.False(t, sessions.bootstrapCleared)
+}
+
+func TestRewindRunsTheResetInsideTheLockWindow(t *testing.T) {
+	turn1 := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	later := rewindCompletedTurn("u-2", "a-2", "sbx-1", rewindSHA2, 10*time.Second)
+	port := newFakeRewindPort()
+	svc, _ := newRewindFixture(t, port, append(turn1, later...))
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
+
+	require.NoError(t, err)
+	require.True(t, got.WorkspaceReset)
+	require.Equal(t, true, port.resetLockMarker)
+}
+
+func TestRewindReportsBusyWhenTheSessionCannotBeTakenExclusively(t *testing.T) {
+	turn1 := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	later := rewindCompletedTurn("u-2", "a-2", "sbx-1", rewindSHA2, 10*time.Second)
+	port := newFakeRewindPort()
+	port.lockErr = sandbox.ErrSessionWorkspaceBusy
+	svc, msgs := newRewindFixture(t, port, append(turn1, later...))
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
+
+	require.ErrorIs(t, err, ErrRewindSourceBusy)
+	require.Nil(t, got)
+	require.Empty(t, port.runner.calls)
+	require.Equal(t, 0, msgs.deleteFromCalls)
+}
+
+func TestRewindRefusesACheckpointMissingFromTheSessionRepository(t *testing.T) {
+	turn := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	port := newFakeRewindPort()
+	port.runner.result = &sandbox.ExecuteResult{ExitCode: 3}
+	svc, msgs := newRewindFixture(t, port, turn)
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "a-1")
+
+	require.ErrorIs(t, err, ErrRewindNoCheckpoint)
+	require.Nil(t, got)
+	require.Equal(t, 0, msgs.deleteFromCalls)
 }
 
 func messageIDs(messages []*types.Message) []string {

@@ -13,10 +13,11 @@
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `title` | string | 否 | 标题 |
+| `kind` | string | 否 | 空值（默认）为普通会话；`assistant` 为 WeKnora 助手会话；其他值返回 400 |
 | `description` | string | 否 | 描述 |
 | `project_dir` | string | 否 | 仅桌面版：把会话绑定到用户已批准的本机项目目录（绝对路径，须与批准列表完全一致），否则返回 400 |
 
-响应：201 `{"success":true,"data":{Session}}`（`id,title,description,tenant_id,user_id,is_pinned,last_request_state,created_at,...`）
+响应：201 `{"success":true,"data":{Session}}`（`id,kind,title,description,tenant_id,user_id,is_pinned,last_request_state,created_at,...`）
 
 ```bash
 curl -X POST $BASE/api/v1/sessions -H "X-API-Key: $API_KEY" \
@@ -31,6 +32,7 @@ curl -X POST $BASE/api/v1/sessions -H "X-API-Key: $API_KEY" \
 | --- | --- | --- | --- |
 | `page` / `page_size` | int | 否 | 分页 |
 | `keyword` | string | 否 | 标题模糊搜索 |
+| `kind` | string | 否 | 缺省或空值仅返回普通会话，适用于所有来源；`assistant` 仅返回调用者本人的助手会话（管理员也不能跨用户），按 `updated_at DESC` 排序；其他值返回 400 |
 | `source` | string | 否 | 来源过滤（web/embed/api/feishu/wechat/slack/...） |
 | `agent_id` | string | 否 | 按 Agent 过滤（IM 会话） |
 
@@ -73,7 +75,7 @@ curl -X DELETE $BASE/api/v1/sessions/s-1 -H "Authorization: Bearer $TOKEN"
 
 ### DELETE /api/v1/sessions/batch
 
-用途：批量删除会话。请求体：`{"ids":["s-1"],"delete_all":false}`（二选一：`ids` 或 `delete_all:true`）。
+用途：批量删除会话。`delete_all:true` 保留助手会话；指定 ID 删除仍按原有归属规则处理。请求体：`{"ids":["s-1"],"delete_all":false}`（二选一：`ids` 或 `delete_all:true`）。
 
 响应：200 `{"success":true,"message":"Sessions deleted successfully"}`
 
@@ -268,13 +270,15 @@ Handler: `internal/handler/session/temporary_document.go`
 
 ### POST /api/v1/sessions/:session_id/attachments
 
-用途：上传会话级临时文档（异步解析）。multipart 字段：`file`（必填）、`agent_id`（可选，决定解析引擎/ASR 模型）、`parser_engine`（可选；使用共享智能体时忽略，由智能体的解析规则决定）。
+用途：上传并保存会话附件。保存后立即排入后台解析队列，上传完成不代表已解析。快速问答在回答流建立后等待未完成的解析；智能推理通过 `read_file` 按需读取正文，读取时才等待未就绪的文档。单独上传的图片在启用图片上传时会先等待就绪。multipart 字段：`file`（必填）、`agent_id`（可选，决定解析引擎/ASR 模型）、`parser_engine`（可选；使用共享智能体时忽略，由智能体的解析规则决定）。
 
 响应：202 `{"success":true,"data":{TemporaryDocument}}`（`id,session_id,file_name,file_type,file_size,status(uploaded/processing/ready/failed),resource_ref,...`）
 
 ```bash
 curl -X POST $BASE/api/v1/sessions/s-1/attachments -H "Authorization: Bearer $TOKEN" -F 'file=@notes.pdf'
 ```
+
+`uploaded` 是可发送的已存储状态，客户端不应强制等到 `ready` 才允许提问。附件被有效会话消息（含分叉）引用期间不受默认 24 小时 TTL 清理；未引用的过期文件才由后台清理。
 
 ### GET /api/v1/sessions/:id/attachments
 
@@ -370,7 +374,7 @@ Handler: `internal/handler/session/qa.go`。API key：聊天需 `chat`/full；`k
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `query` | string | 是（`binding:"required"`） | 用户问题；为空、仅含空白、含控制字符或非法 UTF-8 时返回 400 |
+| `query` | string | 通常必填 | 用户问题；带非空内联 `images[].data` 或 `attachment_uploads[].data` 时可不输入文字，系统生成默认问题。仅传 `attachment_ids` 或图片 URL 不能省略文字；非法字符、无内容请求返回 400 |
 | `knowledge_base_ids` | []string | 否 | 检索的 KB |
 | `knowledge_ids` | []string | 否 | 限定知识文件 |
 | `agent_enabled` | bool | 否 | 是否启用 Agent 模式 |
@@ -391,6 +395,8 @@ Handler: `internal/handler/session/qa.go`。API key：聊天需 `chat`/full；`k
 | `channel` | string | 否 | 来源渠道 |
 | `suggestion_attribution` | object | 否 | 点击建议的归因信息 |
 | `question_origin` | object | 否 | 用户点选的建议问题来自哪里：`knowledge_base_id`、可选 `knowledge_id`。仅智能推理模式使用，智能体会先检索该来源；来源不在本轮检索范围内时忽略，不会扩大范围 |
+| `page_context` | object | 否 | 当前页面：`knowledge_base_id`、可选 `knowledge_id`、`wiki_slug`、`wiki_issue_ids`（最多保留 20 项），或 `agent_id`。知识库必须属于本轮检索范围；智能体独立校验，必须在当前租户可见（支持内置智能体）。无效部分丢弃，不扩大检索权限 |
+| `assistant_access` | string | 否 | WeKnora 助手权限等级：`read_only`、`confirm`、`auto_write`，默认 `confirm`，受空间上限约束 |
 
 所选 `reasoning_effort` 会写入会话的 `last_request_state.reasoning_effort`，重新打开会话时前端据此恢复。
 
@@ -577,6 +583,8 @@ curl -X DELETE "$BASE/api/v1/artifacts?session_id=session-1&message_id=message-1
 ### 每轮用量
 
 消息返回持久化的 usage，Agent 完成事件携带 turn_usage；包含本轮各用途模型调用聚合结果。工具调用自身并不都产生 Token，用量以提供商返回或后端已采集的记录为准。字段见[可观测性](../03-features/16-observability.md)。
+
+智能体模式的完成事件在 `data.model_id` 中携带本轮实际运行的对话模型 ID（产生本轮用量的模型），可据此通过模型接口取得模型信息、按单价换算用量。消息记录中的 `model_id` 是请求时绑定的模型，请求指定的模型无效而回退到智能体模型时两者不同。快速问答的完成事件暂不携带该字段。
 
 ## 实现参考
 

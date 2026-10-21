@@ -53,7 +53,9 @@ async function fixture() {
       if (name === 'vue' || name === 'marked') return require(name)
       if (name === 'vue-router') return { useRouter: () => ({}), useRoute: () => ({ query: {} }) }
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
-      if (name === '@/stores/menu') return { useMenuStore: () => ({}) }
+      if (name === '@/stores/assistant') return { useAssistantStore: () => ({ visible: false }) }
+      if (name === '@/composables/useAssistantPageContext') return { useAssistantPageContext() {} }
+      if (name === '@/utils/assistantDataChange') return { useAssistantDataChange() {} }
       if (name === '@/stores/settings') return { useSettingsStore: () => ({}) }
       if (name === '@/api/wiki') return api
       if (name === 'tdesign-vue-next') return { MessagePlugin: { success() {}, error() {} } }

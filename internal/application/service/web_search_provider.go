@@ -56,15 +56,15 @@ func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider 
 		return fmt.Errorf("invalid provider type: %s", provider.Provider)
 	}
 
-	if provider.IsDefault {
-		if err := s.repo.ClearDefault(ctx, provider.TenantID, provider.ID); err != nil {
-			logger.Warnf(ctx, "Failed to clear default providers: %v", err)
-		}
-	}
-
 	if provider.Provider != "" {
 		if err := validateProviderParameters(provider.Provider, provider.Parameters); err != nil {
 			return err
+		}
+	}
+
+	if provider.IsDefault {
+		if err := s.repo.ClearDefault(ctx, provider.TenantID, provider.ID); err != nil {
+			logger.Warnf(ctx, "Failed to clear default providers: %v", err)
 		}
 	}
 
@@ -216,4 +216,20 @@ func validateProviderParameters(provider types.WebSearchProviderType, params typ
 
 func validateOptionalProxyURL(proxyURL string) error {
 	return infra_web_search.ValidateProxyURL(proxyURL)
+}
+
+// PatchProviderSettings validates the saved provider but writes only selected settings.
+func (s *webSearchProviderService) PatchProviderSettings(
+	ctx context.Context, provider *types.WebSearchProviderEntity, fields []string,
+) error {
+	if provider == nil || provider.TenantID == 0 {
+		return fmt.Errorf("tenant ID is required")
+	}
+	if !isValidProviderType(provider.Provider) {
+		return fmt.Errorf("invalid provider type: %s", provider.Provider)
+	}
+	if err := validateProviderParameters(provider.Provider, provider.Parameters); err != nil {
+		return err
+	}
+	return s.repo.PatchSettings(ctx, provider, fields)
 }

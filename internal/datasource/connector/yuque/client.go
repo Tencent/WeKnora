@@ -23,6 +23,15 @@ const (
 	// maxJSONResponseBytes bounds every API response body. Listings and document
 	// payloads are small; a larger body means a broken or hostile server.
 	maxJSONResponseBytes = 16 << 20
+
+	// maxPaginationHops bounds every offset-paginated walk in this file. The
+	// only natural exit is a short page, which a gateway, CDN, or self-hosted
+	// deployment that answers every offset with a full page never produces;
+	// /users/{login}/repos carries no meta.total to stop on either. Without the
+	// cap such a walk keeps calling the API until the sync task hits its
+	// deadline, with `all` growing all the way. Mirrors the guard Notion,
+	// Confluence, GitLab, and IMA already carry.
+	maxPaginationHops = 10000
 )
 
 // client wraps the Yuque Open API.
@@ -273,7 +282,12 @@ func (c *client) ListGroupRepos(ctx context.Context, login string) ([]v2Repo, er
 func (c *client) listReposPaginated(ctx context.Context, basePath string) ([]v2Repo, error) {
 	var all []v2Repo
 	offset := 0
-	for {
+	lastFirstID := int64(0)
+	for hop := 0; ; hop++ {
+		if hop >= maxPaginationHops {
+			logger.Warnf(ctx, "[Yuque] %s pagination exceeded %d pages; aborting", basePath, maxPaginationHops)
+			return nil, fmt.Errorf("yuque %s pagination exceeded %d pages", basePath, maxPaginationHops)
+		}
 		q := buildQuery(map[string]string{
 			"type":   "Book",
 			"offset": fmt.Sprintf("%d", offset),
@@ -287,6 +301,15 @@ func (c *client) listReposPaginated(ctx context.Context, basePath string) ([]v2R
 		if len(resp.Data) < defaultPageSize {
 			break
 		}
+		// A full page whose first id repeats the previous page means the server
+		// is answering the same page for a growing offset; following it would
+		// append the same repos forever.
+		firstID := resp.Data[0].ID
+		if firstID != 0 && firstID == lastFirstID {
+			logger.Warnf(ctx, "[Yuque] %s pagination repeated page at offset %d; aborting", basePath, offset)
+			return nil, fmt.Errorf("yuque %s pagination repeated page at offset %d", basePath, offset)
+		}
+		lastFirstID = firstID
 		offset += defaultPageSize
 	}
 	return all, nil
@@ -298,7 +321,12 @@ func (c *client) ListBookDocs(ctx context.Context, bookID int64) ([]v2Doc, error
 	basePath := fmt.Sprintf("/api/v2/repos/%d/docs", bookID)
 	var all []v2Doc
 	offset := 0
-	for {
+	lastFirstID := int64(0)
+	for hop := 0; ; hop++ {
+		if hop >= maxPaginationHops {
+			logger.Warnf(ctx, "[Yuque] %s pagination exceeded %d pages; aborting", basePath, maxPaginationHops)
+			return nil, fmt.Errorf("yuque %s pagination exceeded %d pages", basePath, maxPaginationHops)
+		}
 		q := buildQuery(map[string]string{
 			"offset": fmt.Sprintf("%d", offset),
 			"limit":  fmt.Sprintf("%d", defaultPageSize),
@@ -311,6 +339,19 @@ func (c *client) ListBookDocs(ctx context.Context, bookID int64) ([]v2Doc, error
 		if len(resp.Data) < defaultPageSize {
 			break
 		}
+		// meta.total counts the whole listing, so a page that reaches it is the
+		// last one; asking for the next offset would only fetch an empty page.
+		if resp.Meta.Total > 0 && offset+len(resp.Data) >= resp.Meta.Total {
+			break
+		}
+		// Same repeated-page guard as the repo listing: a gateway that ignores
+		// offset hands back the identical full page forever.
+		firstID := resp.Data[0].ID
+		if firstID != 0 && firstID == lastFirstID {
+			logger.Warnf(ctx, "[Yuque] %s pagination repeated page at offset %d; aborting", basePath, offset)
+			return nil, fmt.Errorf("yuque %s pagination repeated page at offset %d", basePath, offset)
+		}
+		lastFirstID = firstID
 		offset += defaultPageSize
 	}
 	return all, nil

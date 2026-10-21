@@ -197,6 +197,7 @@ func (a *Adapter) VerifyCallback(c *gin.Context) error {
 		return fmt.Errorf("webhook verification secret is required")
 	}
 
+	im.LimitWebhookBody(c)
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		return fmt.Errorf("read body: %w", err)
@@ -236,6 +237,7 @@ func (a *Adapter) VerifyCallback(c *gin.Context) error {
 
 // HandleURLVerification handles the Feishu URL verification challenge.
 func (a *Adapter) HandleURLVerification(c *gin.Context) bool {
+	im.LimitWebhookBody(c)
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		return false
@@ -311,6 +313,7 @@ type feishuSenderID struct {
 
 // ParseCallback parses a Feishu event callback into a unified IncomingMessage.
 func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
+	im.LimitWebhookBody(c)
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)

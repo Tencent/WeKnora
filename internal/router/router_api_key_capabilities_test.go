@@ -158,6 +158,7 @@ func TestAgentReadRoutesDeclareReadAgentsCapability(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/v1/agents/placeholders"},
 		{http.MethodGet, "/api/v1/agents/type-presets"},
+		{http.MethodGet, "/api/v1/agents/tools"},
 		{http.MethodGet, "/api/v1/agents"},
 		{http.MethodGet, "/api/v1/agents/:id"},
 		{http.MethodGet, "/api/v1/agents/:id/suggested-questions"},
@@ -228,6 +229,7 @@ func TestKnowledgeBaseManagementRoutesDeclareManageKBsCapability(t *testing.T) {
 		path   string
 	}{
 		{http.MethodPut, "/api/v1/knowledge-bases/:id"},
+		{http.MethodPatch, "/api/v1/knowledge-bases/:id"},
 		{http.MethodDelete, "/api/v1/knowledge-bases/:id"},
 		{http.MethodPost, "/api/v1/initialization/initialize/:kbId"},
 		{http.MethodPut, "/api/v1/initialization/config/:kbId"},
@@ -371,6 +373,7 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 			http.MethodPost, "/api/v1/mcp-services/:id/usage-instructions/generate",
 			types.APIKeyCapabilityManageMCPServices,
 		},
+		{http.MethodPost, "/api/v1/mcp-services/:id/oauth/assertion", types.APIKeyCapabilityManageMCPServices},
 		{http.MethodGet, "/api/v1/web-search-providers", types.APIKeyCapabilityManageWebSearch},
 		{http.MethodGet, "/api/v1/vector-stores", types.APIKeyCapabilityManageVectorStores},
 		{http.MethodGet, "/api/v1/storage-backends", types.APIKeyCapabilityManageStorageBackends},
@@ -411,6 +414,8 @@ func TestSandboxConfigRoutesRequireFullAccessOnly(t *testing.T) {
 		{http.MethodPut, "/api/v1/sandbox-configs/:id"},
 		{http.MethodDelete, "/api/v1/sandbox-configs/:id"},
 		{http.MethodGet, "/api/v1/sandbox-configs/:id/sandboxes"},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/user-sandboxes"},
+		{http.MethodPost, "/api/v1/sandbox-configs/:id/user-sandboxes/:digest/release"},
 		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills"},
 		{http.MethodPost, "/api/v1/sandbox-configs/:id/skills"},
 		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId"},

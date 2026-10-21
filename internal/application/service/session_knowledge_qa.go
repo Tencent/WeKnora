@@ -46,11 +46,12 @@ func (s *sessionService) KnowledgeQA(
 		if req.CustomAgent != nil {
 			configID = req.CustomAgent.Config.SandboxConfigID
 		}
-		releaseTurn, holdErr := s.holdSandboxTurn(ctx, req.Session.ID, configID)
+		turnCtx, releaseTurn, holdErr := s.holdSandboxTurn(ctx, req.Session.ID, configID)
 		if holdErr != nil {
 			return holdErr
 		}
 		defer releaseTurn()
+		ctx = turnCtx
 	}
 
 	// Span the request setup (KB / model resolution, search target building,
@@ -692,6 +693,7 @@ func intersectStrings(left []string, right []string) []string {
 func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 	chatManage *types.ChatManage, eventList []types.EventType,
 ) error {
+	ctx = types.WithSessionID(ctx, chatManage.SessionID)
 	logger.Info(ctx, "Start processing knowledge base question answering through events")
 	logger.Infof(ctx, "Knowledge base question answering parameters, session ID: %s, query: %s",
 		chatManage.SessionID, chatManage.Query)

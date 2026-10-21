@@ -1454,6 +1454,51 @@
           "image"
         ],
         "source": "https://huggingface.co/Qwen/Qwen3-VL-Embedding-8B"
+      },
+      {
+        "id": "tencent/WeMM-Embedding-2B",
+        "match": "*/WeMM-Embedding-2B",
+        "type": "Embedding",
+        "name": "WeMM-Embedding-2B",
+        "aliases": [
+          "WeMM-Embedding-2B"
+        ],
+        "input": [
+          "text",
+          "image"
+        ],
+        "dimension": 2048,
+        "source": "https://huggingface.co/tencent/WeMM-Embedding-2B"
+      },
+      {
+        "id": "tencent/WeMM-Embedding-4B",
+        "match": "*/WeMM-Embedding-4B",
+        "type": "Embedding",
+        "name": "WeMM-Embedding-4B",
+        "aliases": [
+          "WeMM-Embedding-4B"
+        ],
+        "input": [
+          "text",
+          "image"
+        ],
+        "dimension": 2560,
+        "source": "https://huggingface.co/tencent/WeMM-Embedding-4B"
+      },
+      {
+        "id": "tencent/WeMM-Embedding-9B",
+        "match": "*/WeMM-Embedding-9B",
+        "type": "Embedding",
+        "name": "WeMM-Embedding-9B",
+        "aliases": [
+          "WeMM-Embedding-9B"
+        ],
+        "input": [
+          "text",
+          "image"
+        ],
+        "dimension": 4096,
+        "source": "https://huggingface.co/tencent/WeMM-Embedding-9B"
       }
     ],
     "gpustack": [],
