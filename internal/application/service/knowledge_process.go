@@ -439,20 +439,19 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// 幂等性处理：清理旧的chunks和索引数据，避免重复数据
 	logger.Infof(ctx, "Cleaning up existing chunks and index data for knowledge: %s", knowledge.ID)
 
-	// 删除旧的chunks
+	// Delete existing chunks and index data before writing a replacement set.
 	if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
-		// 不返回错误，继续处理（可能没有旧数据）
+		return s.failKnowledge(ctx, knowledge, isLastRetry,
+			"failed to delete existing chunks for knowledge %s: %v", knowledge.ID, err)
 	}
 
-	// 删除旧的索引数据 — only when vector/keyword indexing is enabled
+	// Delete old index data — only when vector/keyword indexing is enabled.
 	if embeddingModel != nil {
 		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
-			logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
-			// 不返回错误，继续处理（可能没有旧数据）
-		} else {
-			logger.Infof(ctx, "Successfully deleted existing index data for knowledge: %s", knowledge.ID)
+			return s.failKnowledge(ctx, knowledge, isLastRetry,
+				"failed to delete existing index data for knowledge %s: %v", knowledge.ID, err)
 		}
+		logger.Infof(ctx, "Successfully deleted existing index data for knowledge: %s", knowledge.ID)
 	}
 
 	// 删除知识图谱数据（如果存在）

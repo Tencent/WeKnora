@@ -23,17 +23,19 @@ func (r *indexRetryKnowledgeRepo) UpdateKnowledge(_ context.Context, k *types.Kn
 
 type indexRetryChunkRepo struct {
 	parentChildChunkService
-	deletes int
+	deletes   int
+	deleteErr error
 }
 
 func (s *indexRetryChunkRepo) DeleteChunksByKnowledgeID(context.Context, uint64, string) error {
 	s.deletes++
-	return nil
+	return s.deleteErr
 }
 
 type failingIndexEngine struct {
 	parentChildRetrieveEngine
 	err          error
+	deleteErr    error
 	indexDeletes int
 }
 
@@ -45,11 +47,11 @@ func (e *failingIndexEngine) BatchIndex(
 
 func (e *failingIndexEngine) DeleteByKnowledgeIDList(context.Context, []string, int, string) error {
 	e.indexDeletes++
-	return nil
+	return e.deleteErr
 }
 
 func runProcessChunksWithFailingIndex(
-	ctx context.Context, t *testing.T, tracker SpanTracker,
+	ctx context.Context, t *testing.T, tracker SpanTracker, cleanupErrors ...error,
 ) (*indexRetryKnowledgeRepo, *indexRetryChunkRepo, *failingIndexEngine, error) {
 	t.Helper()
 	knowledge := &types.Knowledge{
@@ -61,6 +63,12 @@ func runProcessChunksWithFailingIndex(
 	repo := &indexRetryKnowledgeRepo{parentChildKnowledgeRepo: parentChildKnowledgeRepo{knowledge: knowledge}}
 	chunks := &indexRetryChunkRepo{}
 	engine := &failingIndexEngine{err: errors.New("embedding endpoint unavailable")}
+	if len(cleanupErrors) > 0 {
+		chunks.deleteErr = cleanupErrors[0]
+	}
+	if len(cleanupErrors) > 1 {
+		engine.deleteErr = cleanupErrors[1]
+	}
 	tenant := &types.Tenant{
 		ID: 1,
 		RetrieverEngines: types.RetrieverEngines{Engines: []types.RetrieverEngineParams{{
@@ -89,6 +97,62 @@ func runProcessChunksWithFailingIndex(
 		{Content: "document body", Seq: 0, Start: 0, End: 13, ParentIndex: -1},
 	})
 	return repo, chunks, engine, err
+}
+
+func TestProcessChunksFailsBeforeWritingWhenChunkCleanupFails(t *testing.T) {
+	cleanupErr := errors.New("chunk cleanup unavailable")
+	_, chunks, engine, err := runProcessChunksWithFailingIndex(context.Background(), t, nil, cleanupErr)
+
+	require.NoError(t, err)
+	require.Empty(t, chunks.created)
+	require.Zero(t, engine.indexDeletes)
+}
+
+func TestProcessChunksFailsBeforeWritingWhenIndexCleanupFails(t *testing.T) {
+	cleanupErr := errors.New("index cleanup unavailable")
+	_, chunks, engine, err := runProcessChunksWithFailingIndex(context.Background(), t, nil, nil, cleanupErr)
+
+	require.NoError(t, err)
+	require.Empty(t, chunks.created)
+	require.Equal(t, 1, engine.indexDeletes)
+}
+
+func TestProcessChunksFailsKnowledgeOnChunkCleanupFailure(t *testing.T) {
+	ctx := types.WithTaskRetryMetadata(context.Background(), 3, 3)
+	cleanupErr := errors.New("chunk cleanup unavailable")
+	tracker, db := setupSpanTrackerTest(t)
+	_, attempt, err := tracker.OpenAttempt(ctx, "knowledge-1", "")
+	require.NoError(t, err)
+	ctx = withAttempt(ctx, attempt)
+	repo, chunks, engine, err := runProcessChunksWithFailingIndex(ctx, t, tracker, cleanupErr)
+
+	require.NoError(t, err)
+	status, code, message := rootSpan(t, db, "knowledge-1", attempt)
+	require.Equal(t, types.SpanStatusFailed, status)
+	require.Equal(t, werrors.ErrCodeChunkingFailed, code)
+	require.Contains(t, message, "failed to delete existing chunks")
+	require.Equal(t, types.ParseStatusFailed, repo.updates[len(repo.updates)-1].ParseStatus)
+	require.Empty(t, chunks.created)
+	require.Zero(t, engine.indexDeletes)
+}
+
+func TestProcessChunksFailsKnowledgeOnIndexCleanupFailure(t *testing.T) {
+	ctx := types.WithTaskRetryMetadata(context.Background(), 3, 3)
+	cleanupErr := errors.New("index cleanup unavailable")
+	tracker, db := setupSpanTrackerTest(t)
+	_, attempt, err := tracker.OpenAttempt(ctx, "knowledge-1", "")
+	require.NoError(t, err)
+	ctx = withAttempt(ctx, attempt)
+	repo, chunks, engine, err := runProcessChunksWithFailingIndex(ctx, t, tracker, nil, cleanupErr)
+
+	require.NoError(t, err)
+	status, code, message := rootSpan(t, db, "knowledge-1", attempt)
+	require.Equal(t, types.SpanStatusFailed, status)
+	require.Equal(t, werrors.ErrCodeChunkingFailed, code)
+	require.Contains(t, message, "failed to delete existing index data")
+	require.Equal(t, types.ParseStatusFailed, repo.updates[len(repo.updates)-1].ParseStatus)
+	require.Empty(t, chunks.created)
+	require.Equal(t, 1, engine.indexDeletes)
 }
 
 // A transient embedding or vector-store outage must reach the task queue while
