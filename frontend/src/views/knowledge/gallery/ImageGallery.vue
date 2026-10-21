@@ -76,6 +76,15 @@ const gridWidth = ref(0)
 const THUMB_AUTO_WIDTH = 280
 const viewPanelVisible = ref(false)
 
+// Each toolbar popup owns its own visible flag and the popups are individually
+// controlled, so nothing closes the others when a second trigger is clicked —
+// two panels could sit on top of each other. Opening one closes the rest.
+function closeOtherPanels(keep: 'filter' | 'view' | 'sort'): void {
+  if (keep !== 'filter') filterPanelVisible.value = false
+  if (keep !== 'view') viewPanelVisible.value = false
+  if (keep !== 'sort') sortPanelVisible.value = false
+}
+
 // Per-value verdicts, namespaced attr id -> value -> "off" | "on". An absent
 // key is the neutral position: an image carrying that value stays exactly as
 // visible as it was, which is what makes the default state show everything.
@@ -929,6 +938,7 @@ watch(
             class="ig-tool-btn"
             :class="{ active: filterPanelVisible || activeFilterCount > 0 }"
             :aria-expanded="filterPanelVisible"
+            @click="closeOtherPanels('filter')"
           >
             <t-icon name="filter" size="16px" />
             {{ t(`${NS}.filters`) }}
@@ -1025,6 +1035,7 @@ watch(
             :class="{ active: viewPanelVisible }"
             :aria-expanded="viewPanelVisible"
             :aria-label="t(`${NS}.viewOptions`)"
+            @click="closeOtherPanels('view')"
           >
             <t-icon name="view-module" size="16px" />
             <span class="ig-sort-trigger__label">{{ t(`${NS}.viewOptions`) }}</span>
@@ -1096,6 +1107,7 @@ watch(
             class="ig-tool-btn ig-sort-trigger"
             :class="{ active: sortPanelVisible }"
             :aria-label="`${t(`${NS}.sort`)}: ${sortFieldLabel}`"
+            @click="closeOtherPanels('sort')"
           >
             <t-icon name="filter-sort" size="16px" />
             <span class="ig-sort-trigger__label">{{ t(`${NS}.sort`) }} · {{ sortFieldLabel }}</span>
