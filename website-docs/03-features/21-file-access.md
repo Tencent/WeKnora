@@ -48,6 +48,8 @@ Web 前端将 `resource://` 和 `provider://` 引用转换为鉴权代理地址�
 
 IM 平台无法携带 WeKnora 凭证，需要可公开访问的 HTTP(S) URL。发送消息前，系统根据存储与部署配置生成外链：
 
+`resource://` 使用资源实际绑定的存储实例，共享资源使用其所属空间的实例。知识库已绑定 OSS 等对象存储时，无需同步修改全局 `STORAGE_TYPE`。绑定实例不可用时保留原引用并记录告警，不使用其他实例或全局存储代替。
+
 1. **存储后端本身公网可达**——对象存储用公网 endpoint，或把 `MINIO_ENDPOINT` 设成公网 host。此时回退到存储预签名 URL，不需要额外配置；
 2. **配置 `APP_EXTERNAL_URL`**——引用被改写成 `<APP_EXTERNAL_URL>/r/<token>`，请求经 nginx 的 `location ^~ /r/` 反代回 app。官方前端镜像已内置该 location，自建反代必须补上，否则请求落进 SPA fallback 返回空白页。
 
