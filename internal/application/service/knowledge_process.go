@@ -441,15 +441,13 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// Delete existing chunks and index data before writing a replacement set.
 	if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
-		return s.failKnowledge(ctx, knowledge, isLastRetry,
-			"failed to delete existing chunks for knowledge %s: %v", knowledge.ID, err)
+		return fmt.Errorf("failed to delete existing chunks for knowledge %s: %w", knowledge.ID, err)
 	}
 
 	// Delete old index data — only when vector/keyword indexing is enabled.
 	if embeddingModel != nil {
 		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
-			return s.failKnowledge(ctx, knowledge, isLastRetry,
-				"failed to delete existing index data for knowledge %s: %v", knowledge.ID, err)
+			return fmt.Errorf("failed to delete existing index data for knowledge %s: %w", knowledge.ID, err)
 		}
 		logger.Infof(ctx, "Successfully deleted existing index data for knowledge: %s", knowledge.ID)
 	}
