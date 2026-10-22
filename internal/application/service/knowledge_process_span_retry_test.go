@@ -9,6 +9,7 @@ import (
 	"testing/iotest"
 
 	werrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
@@ -59,6 +60,10 @@ func TestConvertFailureSpanMatchesTaskOutcome(t *testing.T) {
 		{name: "file fetch fails", getErr: transient, retryable: true, code: werrors.ErrCodeDocReaderParseFailed},
 		{name: "file read fails", readErr: transient, retryable: true, code: werrors.ErrCodeDocReaderParseFailed},
 		{name: "reader call fails", rpcErr: transient, retryable: true, code: werrors.ErrCodeDocReaderParseFailed},
+		{
+			name: "CSV expansion budget exceeded", rpcErr: docparser.ErrCSVMarkdownTooLarge,
+			code: werrors.ErrCodeDocReaderParseFailed,
+		},
 	} {
 		for _, retried := range []int{0, 3} {
 			name := tc.name + "/retry_available"

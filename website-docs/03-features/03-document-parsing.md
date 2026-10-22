@@ -75,6 +75,8 @@ Go 侧客户端在 `docreader/client/auth.go`（`LoadAuthConfigFromEnv` 读取�
 
 Go App 中 `internal/application/service/knowledge_process.go` 在文档入库流水线的 docreader stage 调用解析（超时由 `docreader_call_timeout` 配置控制，防止挂死的 docreader 长时间占用 worker）。注意：**md/markdown/txt/csv/json/图片/音频由 Go 侧 `SimpleFormatReader` 原生处理，不经过 docreader**（见 `internal/infrastructure/docparser/builtin_converter.go` 的 `simpleFormats`）。
 
+CSV 使用 Go `simple` 解析器时，转换后的 Markdown 上限为 **64 MiB**，与原始上传文件大小限制分别检查。解析器会在生成表格前核算全部行按最大列数补齐后的大小，以及单元格转义后的字节数；超过上限会明确失败，不返回截断内容，也不会自动重试同一份文件。可按行或列拆分 CSV 后重新上传。正常规模的长短行仍会补齐空单元格并保留全部字段。
+
 ```mermaid
 sequenceDiagram
     participant U as "用户 / 前端"

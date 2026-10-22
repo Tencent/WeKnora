@@ -4262,6 +4262,10 @@ func (s *knowledgeService) convert(
 	}
 
 	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
+	// Expansion limits are permanent document rejections, not transient reader failures.
+	if errors.Is(err, docparser.ErrCSVMarkdownTooLarge) {
+		result, err = &types.ReadResult{Error: err.Error()}, nil
+	}
 	if err != nil {
 		code, message := docReaderFailure(err)
 		logger.Errorf(ctx, "[convert] DocReader failed knowledge=%s code=%s: %v", knowledge.ID, code, err)
