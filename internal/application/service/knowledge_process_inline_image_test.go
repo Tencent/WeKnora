@@ -486,6 +486,12 @@ func (m *inlineLifecycleVLM) Predict(_ context.Context, _ [][]byte, prompt strin
 	return inlineLifecycleCaptionText, nil
 }
 
+func (m *inlineLifecycleVLM) PredictWithOptions(
+	ctx context.Context, imgBytes [][]byte, prompt string, _ *vlm.PredictOptions,
+) (string, error) {
+	return m.Predict(ctx, imgBytes, prompt)
+}
+
 func (*inlineLifecycleVLM) GetModelName() string { return "inline-lifecycle-vlm" }
 func (*inlineLifecycleVLM) GetModelID() string   { return "inline-lifecycle-vlm" }
 

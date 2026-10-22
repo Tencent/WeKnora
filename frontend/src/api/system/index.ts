@@ -292,24 +292,11 @@ export interface SystemAdminUser {
   updated_at: string
 }
 
-export interface PromoteUserRequest {
-  user_id: string
-}
-
-export interface RevokeSystemAdminRequest {
-  user_id: string
-}
-
-export interface ListSystemAdminsResponse {
-  total: number
-  admins: SystemAdminUser[]
-}
-
 /**
  * Promote a user to system administrator.
  *
  * Identify the target either by user_id (UUID, for API clients) or
- * email (the human-friendly path used by the SystemAdmin UI). Backend
+ * email (supported by the backend for API clients). Backend
  * accepts whichever is provided; user_id wins when both are set.
  *
  * Backend handler (system.go) returns the updated UserInfo directly as
@@ -346,22 +333,42 @@ export async function revokeSystemAdmin(userId: string): Promise<SystemAdminUser
   return response as unknown as SystemAdminUser
 }
 
+export interface SetUserStatusRequest {
+  user_id: string
+  is_active: boolean
+}
+
 /**
- * List all system administrators (paginated).
- * Returns {total, admins[]} directly — no {data: ...} wrapping.
+ * Enable/disable a platform user account (SystemAdmin only).
+ * Disabling immediately revokes the target's active sessions.
  */
-export async function listSystemAdmins(
+export async function setUserStatus(
+  req: SetUserStatusRequest,
+): Promise<{ message: string; is_active: boolean }> {
+  const response = await post('/api/v1/system/admin/users/status', req)
+  return response as unknown as { message: string; is_active: boolean }
+}
+
+export interface ListAllUsersResponse {
+  users: SystemAdminUser[]
+  offset: number
+  limit: number
+  has_more: boolean
+}
+
+/**
+ * List every platform user across tenants (SystemAdmin only, paginated).
+ * Returns {users, offset, limit, has_more} directly (no data wrapping).
+ */
+export async function listAllUsers(
   params?: { offset?: number; limit?: number },
-): Promise<ListSystemAdminsResponse> {
-  // The shared `get` helper doesn't accept a config object, so we
-  // assemble the query string manually. Both params are optional;
-  // the server applies sane defaults (offset=0, limit=50, max=200).
+): Promise<ListAllUsersResponse> {
   const qs = new URLSearchParams()
   if (params?.offset != null) qs.set('offset', String(params.offset))
   if (params?.limit != null) qs.set('limit', String(params.limit))
   const suffix = qs.toString() ? `?${qs.toString()}` : ''
-  const response = await get(`/api/v1/system/admin/list${suffix}`)
-  return response as unknown as ListSystemAdminsResponse
+  const response = await get(`/api/v1/system/admin/users${suffix}`)
+  return response as unknown as ListAllUsersResponse
 }
 
 export interface ResetUserPasswordRequest {
@@ -780,6 +787,8 @@ export interface SandboxConfig {
   volume_mount?: SandboxVolumeMountConfig
   skill_image?: SandboxSkillImage
   skill_rollout?: 'next_turn' | 'new_session'
+  allocation_mode?: 'session' | 'user'
+  user_sandbox_empty_retention_days?: number
   network?: SandboxNetworkPolicy
   cube?: SandboxCubeConfig
   e2b?: SandboxE2BConfig
@@ -918,6 +927,17 @@ export interface SandboxInventory {
   session_ids?: string[]
   agent_names?: string[]
   unverifiable?: boolean
+  /** Shared user machines among sandbox_count, not sessions on those machines. */
+  user_sandbox_count?: number
+}
+
+export interface UserSandbox {
+  digest: string
+  owner_tenant_id: number
+  owner_id?: string
+  live_sessions: number
+  empty_since?: string
+  reclaim_after?: string
 }
 
 /** Sandbox backends managed as named workspace configurations. */
@@ -983,6 +1003,14 @@ export function getSandboxConfigInventory(id: string): Promise<{ data: SandboxIn
   return get(`/api/v1/sandbox-configs/${id}/sandboxes`) as unknown as Promise<{
     data: SandboxInventory
   }>
+}
+
+export function listUserSandboxes(configId: string) {
+  return get<{ success: boolean; data: UserSandbox[] }>(`/api/v1/sandbox-configs/${configId}/user-sandboxes`)
+}
+
+export function releaseUserSandbox(configId: string, digest: string) {
+  return post<{ success: boolean }>(`/api/v1/sandbox-configs/${configId}/user-sandboxes/${digest}/release`)
 }
 
 /**

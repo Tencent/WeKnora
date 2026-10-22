@@ -29,6 +29,7 @@ type EmbeddingsCompat struct {
 	ImageFormat                 *EmbeddingImageFormat `json:"image_format,omitempty"`
 	ImagePrompt                 *string               `json:"image_prompt,omitempty"`
 	TextAsMessages              *bool                 `json:"text_as_messages,omitempty"`
+	BatchMessages               *bool                 `json:"batch_messages,omitempty"`
 }
 
 // EmbeddingImageFormat is how an image travels on the OpenAI embedding
@@ -41,8 +42,8 @@ const (
 	EmbeddingImageObject EmbeddingImageFormat = "object"
 	// EmbeddingImageMessages sends a chat conversation in `messages` instead
 	// of `input`, which is how vLLM serves multimodal embedding models
-	// (https://docs.vllm.ai/en/latest/models/pooling_models.html). One
-	// conversation yields one vector, so every image is its own request.
+	// (https://docs.vllm.ai/en/latest/models/pooling_models/embed/). Each
+	// conversation yields one vector; BatchMessages can batch conversations.
 	EmbeddingImageMessages EmbeddingImageFormat = "messages"
 )
 
@@ -106,11 +107,14 @@ type EmbeddingsSettings struct {
 	// some chat templates (VLM2Vec's) expect an instruction there. Empty
 	// sends the image alone.
 	ImagePrompt string `json:",omitempty"`
-	// TextAsMessages sends texts in the messages format too, one per
-	// request. A model whose chat template frames its inputs only places a
-	// text and an image in the same space when both pass through it; a
-	// plain `input` string skips the template.
+	// TextAsMessages sends texts in the messages format too. A model whose
+	// chat template frames its inputs only places text and images in the same
+	// space when both pass through it; a plain `input` skips the template.
 	TextAsMessages bool `json:",omitempty"`
+	// BatchMessages enables independent conversations in a two-dimensional
+	// messages array (vLLM 0.29 supports this). False preserves the one-input
+	// request shape for older servers. Single inputs always keep that shape.
+	BatchMessages bool `json:",omitempty"`
 }
 
 // OpenAIImageFormat is the effective image format on the OpenAI shape, empty

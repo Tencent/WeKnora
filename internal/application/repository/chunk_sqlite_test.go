@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"unicode/utf8"
 
@@ -475,4 +476,32 @@ func TestUpdateChunkFieldsByIDs_ScopesByTenantAndSetsUpdatedAt(t *testing.T) {
 	// Empty inputs are no-ops.
 	require.NoError(t, repo.UpdateChunkFieldsByIDs(ctx, 1, nil, map[string]interface{}{"status": 0}))
 	require.NoError(t, repo.UpdateChunkFieldsByIDs(ctx, 1, []string{mine.ID}, nil))
+}
+
+// Exercise the actual batch insert used by FAQ imports, including a second SQL batch.
+func TestCreateChunks_PreservesExplicitEnabledState(t *testing.T) {
+	for _, count := range []int{2, createChunksBatchSize + 2} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			db := setupChunkTestDB(t)
+			repo := NewChunkRepository(db)
+			chunks := make([]*types.Chunk, count)
+			for i := range chunks {
+				chunks[i] = makeChunk("kb-enabled", "faq-enabled", types.ChunkTypeFAQ)
+				chunks[i].IsEnabled = i%2 == 0
+				chunks[i].ChunkIndex = i
+			}
+			require.NoError(t, repo.CreateChunks(context.Background(), chunks))
+			var saved []types.Chunk
+			require.NoError(t, db.Order("chunk_index").Find(&saved).Error)
+			require.Len(t, saved, count)
+			for i, chunk := range saved {
+				assert.Equal(t, i%2 == 0, chunk.IsEnabled, "stored chunk %d", i)
+				assert.Equal(t, i%2 == 0, chunks[i].IsEnabled, "caller chunk %d", i)
+				assert.Equal(t, chunks[i].SeqID, chunk.SeqID)
+				assert.Positive(t, chunk.SeqID)
+				assert.False(t, chunks[i].CreatedAt.IsZero())
+				assert.True(t, chunks[i].CreatedAt.Equal(chunk.CreatedAt))
+			}
+		})
+	}
 }

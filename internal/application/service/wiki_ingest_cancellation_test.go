@@ -163,6 +163,12 @@ func (wikiLookupEmptyChunks) ListChunksByKnowledgeID(context.Context, uint64, st
 	return nil, nil
 }
 
+func (wikiLookupEmptyChunks) ListChunksByKnowledgeIDAndTypes(
+	context.Context, uint64, string, []types.ChunkType,
+) ([]*types.Chunk, error) {
+	return nil, nil
+}
+
 func newWikiLookupRecoveryService(t *testing.T, kbID string, rdb *redis.Client) (*wikiIngestService, *gorm.DB) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

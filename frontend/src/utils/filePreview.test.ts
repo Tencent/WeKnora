@@ -77,3 +77,38 @@ test('mime and highlight maps cover skill-generated html/csv', () => {
   assert.equal(getHighlightLang('html'), 'xml')
   assert.equal(getHighlightLang('ts'), 'typescript')
 })
+
+function ftyp(major: string, compatible: string[] = []) {
+  const brands = major + String.fromCharCode(0, 0, 0, 0) + compatible.join('')
+  const bytes = new Uint8Array(8 + brands.length)
+  new DataView(bytes.buffer).setUint32(0, bytes.length)
+  bytes.set(new TextEncoder().encode('ftyp'), 4)
+  bytes.set(new TextEncoder().encode(brands), 8)
+  return bytes
+}
+
+test('sniffPreview distinguishes images and audio in ISO base media files', () => {
+  for (const brand of ['avif', 'avis']) {
+    assert.deepEqual(sniffPreview(ftyp(brand)), { kind: 'image', ext: 'avif' })
+  }
+  for (const brand of ['heic', 'heix', 'hevc', 'hevx']) {
+    assert.deepEqual(sniffPreview(ftyp(brand)), { kind: 'image', ext: 'heic' })
+  }
+  for (const brand of ['M4A ', 'M4B ']) {
+    assert.deepEqual(sniffPreview(ftyp(brand)), { kind: 'audio', ext: 'm4a' })
+  }
+})
+
+test('sniffPreview checks compatible image brands when the major brand is generic', () => {
+  assert.deepEqual(sniffPreview(ftyp('mif1', ['miaf', 'avif'])), { kind: 'image', ext: 'avif' })
+  assert.deepEqual(sniffPreview(ftyp('mif1', ['heic'])), { kind: 'image', ext: 'heic' })
+})
+
+test('sniffPreview retains video fallback and confines brands to the ftyp box', () => {
+  assert.deepEqual(sniffPreview(ftyp('isom', ['mp42'])), { kind: 'video', ext: 'mp4' })
+  const video = ftyp('isom')
+  const withTrailingBytes = new Uint8Array(video.length + 4)
+  withTrailingBytes.set(video)
+  withTrailingBytes.set(new TextEncoder().encode('avif'), video.length)
+  assert.deepEqual(sniffPreview(withTrailingBytes), { kind: 'video', ext: 'mp4' })
+})

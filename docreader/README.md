@@ -84,9 +84,32 @@ docreader:
 - `DOCREADER_PDF_RENDER_DPI`: 扫描 PDF 渲染 DPI（默认：200）
 - `DOCREADER_PDF_JPEG_QUALITY`: 扫描 PDF 输出 JPEG 质量（默认：85，范围会自动限制在 1-95）
 
+### 上传 HTML 的正文抽取
+
+- `DOCREADER_HTML_MAIN_CONTENT`: 上传的 `.html` / `.htm` 文件是否只索引正文（默认：`false`）。开启后用 trafilatura 抽取正文，与 URL 导入路径一致，导航栏 / 侧栏 / 页脚不再进入索引；抽取结果过短（< 250 字符）、不足整页转换的 15%，或抽取器额外重复正文段落时自动回退整页转换。默认关闭，升级后既有行为不变。 正文图片引用会保留在 Markdown 中，供 Go 侧解析；Python 侧不会下载远程图片。
+
 ### OCR / VLM
 
-DocReader 自身不再内置 OCR 与 VLM 后端。扫描 PDF 会被渲染为 JPEG 图片后交由 Go App 侧调用 OCR/VLM 服务处理，相关配置请参考主项目文档。
+扫描 PDF 会被渲染为 JPEG 图片后交由 Go App 调用 VLM 提取文字。DocReader 可选用 RapidOCR 为文档照片做几何预处理，返回摆正、裁剪后的图片；最终文字识别仍由 Go App 的 VLM 完成。
+
+在知识库的「图像处理 → 智能模式 → 文档预处理」中显式选择「自动」或「总是」才会启用。默认「关闭」，未保存该设置的旧知识库也保持关闭。「总是」仍受前面的 OCR 策略限制。此功能需要 gRPC docreader；HTTP/云端 reader 使用原图。
+
+预处理使用独立的 RPC 执行器和受限子进程，不占用普通 `Read` / `ReadStream` 的工作线程。没有可用子进程时立即返回原图，不等待推理队列。一个子进程串行复用一套模型，空闲 60 秒后退出，释放模型内存。关闭服务、请求取消或超过本地/RPC 中较短的截止时间时，终止并回收对应子进程，后续请求会创建替代进程。
+
+| 环境变量 | 默认值 | 含义 |
+|---|---:|---|
+| `DOCREADER_PREPROCESS_MAX_WORKERS` | `1` | 每个 docreader 实例最多同时运行的预处理子进程 |
+| `DOCREADER_PREPROCESS_TIMEOUT_SECONDS` | `30` | 单次处理上限，含启动、模型加载和编码；RPC 截止时间可以进一步缩短 |
+| `DOCREADER_PREPROCESS_THREADS` | `2` | 每个 ONNX 模型的算子内线程数及 OpenCV/数值库线程设置；算子间线程数为 1 |
+| `DOCREADER_PREPROCESS_MEMORY_MB` | `2048` | 每个子进程的内存预算，单位 MiB；Linux 同时设置硬地址空间上限 `RLIMIT_AS`，父进程监测 RSS，超额即终止 |
+| `DOCREADER_PREPROCESS_MAX_PIXELS` | `16000000` | 解码前检查图片头的像素上限，过大的输入直接回退 |
+| `DOCREADER_PREPROCESS_MAX_EDGE` | `2000` | 进入几何预处理前按比例缩小图片的最长边，输出也基于此工作图 |
+
+所有限制必须为正数；非法值回落到默认值，`0` 不会关闭限制。编码后的输入最多为 20 MiB。未启用此功能时不启动子进程、不加载 RapidOCR 模型。
+
+内存预算按子进程计算，部署时还需为主进程和普通解析预留空间。Linux 的地址空间上限包含共享库与映射文件，可能在 RSS 达到预算前拒绝分配；这类失败也会回退原图。macOS 开发环境使用 RSS 监测，监测间隔约 50 ms，不能代替容器的总内存限制。提高并发会同时放大模型内存和 CPU 开销。
+
+`PreprocessImageResponse.status` 会区分 `busy`、`timeout`、`cancelled`、`memory_limit`、`image_too_large`、`worker_failed` 等回退原因。Go 侧沿用原图 OCR 的降级路径。几何阈值 `WEKNORA_PREPROCESS_*` 在预处理子进程启动时记录。
 
 ### 存储配置
 

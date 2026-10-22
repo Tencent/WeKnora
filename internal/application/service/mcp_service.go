@@ -161,8 +161,8 @@ func (s *mcpServiceService) UpdateMCPService(
 	// existing.URL = service.URL, after which any post-merge comparison
 	// between service.URL and existing.URL would trivially match.
 	//
-	// AuthConfig is intentionally NOT snapshotted/compared here — credential
-	// changes now flow through the dedicated /credentials subresource which
+	// Only the non-secret AuthConfig fields below are snapshotted — credential
+	// changes flow through the dedicated /credentials subresource which
 	// handles its own CloseClient call. Main PUT does not accept secret
 	// fields (see handler comment on UpdateMCPService).
 	preURL := ""
@@ -185,9 +185,11 @@ func (s *mcpServiceService) UpdateMCPService(
 
 	preAuthType := types.MCPAuthNone
 	preAPIKeyHeader := ""
+	preClientID := ""
 	if existing.AuthConfig != nil {
 		preAuthType = existing.AuthConfig.AuthType
 		preAPIKeyHeader = existing.AuthConfig.APIKeyHeader
+		preClientID = existing.AuthConfig.ClientID
 	}
 
 	// CustomHeaders flows through main PUT (it's structural, not a secret) —
@@ -220,6 +222,11 @@ func (s *mcpServiceService) UpdateMCPService(
 		if service.AuthConfig.AuthServerMetadataURL != "" {
 			existing.AuthConfig.AuthServerMetadataURL = service.AuthConfig.AuthServerMetadataURL
 		}
+		// Empty means dynamic client registration, so only an explicitly
+		// sent client_id may clear it.
+		if updateFields["client_id"] {
+			existing.AuthConfig.ClientID = service.AuthConfig.ClientID
+		}
 	}
 
 	// Scalar zero values cannot distinguish omission from an explicit update,
@@ -250,6 +257,15 @@ func (s *mcpServiceService) UpdateMCPService(
 	}
 	if service.AdvancedConfig != nil {
 		existing.AdvancedConfig = service.AdvancedConfig
+	}
+	if updateFields[types.MCPUpdateDropSecrets] {
+		// Empty rather than nil: the repository skips nil maps.
+		existing.Headers = types.MCPHeaders{}
+		if existing.AuthConfig != nil {
+			existing.AuthConfig.APIKey = ""
+			existing.AuthConfig.Token = ""
+			existing.AuthConfig.CustomHeaders = nil
+		}
 	}
 
 	// Update timestamp
@@ -298,9 +314,12 @@ func (s *mcpServiceService) UpdateMCPService(
 	if !maps.Equal(currHeaders, preHeaders) {
 		configChanged = true
 	}
+	// Connections built with a pre-registered OAuth client hold its ID, so
+	// they are rebuilt when it changes.
 	if existing.AuthConfig != nil &&
 		(existing.AuthConfig.AuthType != preAuthType ||
-			existing.AuthConfig.APIKeyHeader != preAPIKeyHeader) {
+			existing.AuthConfig.APIKeyHeader != preAPIKeyHeader ||
+			existing.AuthConfig.ClientID != preClientID) {
 		configChanged = true
 	}
 	name := secutils.SanitizeForLog(existing.Name)
@@ -430,6 +449,8 @@ func (s *mcpServiceService) TestMCPService(
 		}
 		logger.GetLogger(ctx).Warnf("Failed to list tools: %v", err)
 		tools = []*types.MCPTool{}
+	} else if s.mcpManager != nil {
+		s.mcpManager.InvalidateToolSchemas(service.ID, client)
 	}
 
 	resources, err := client.ListResources(testCtx)
@@ -498,7 +519,7 @@ func (s *mcpServiceService) GetMCPServiceTools(
 //   - Always re-fetches existing AuthConfig before merge to avoid clobbering
 //     CustomHeaders or the unrelated credential field.
 func (s *mcpServiceService) UpdateMCPCredentials(
-	ctx context.Context, tenantID uint64, id string, apiKey *string, token *string,
+	ctx context.Context, tenantID uint64, id string, apiKey, token, clientSecret *string,
 ) (*types.MCPService, error) {
 	existing, err := s.mcpServiceRepo.GetByID(ctx, tenantID, id)
 	if err != nil {
@@ -521,6 +542,10 @@ func (s *mcpServiceService) UpdateMCPCredentials(
 	}
 	if token != nil && *token != "" && *token != existing.AuthConfig.Token {
 		existing.AuthConfig.Token = *token
+		changed = true
+	}
+	if clientSecret != nil && *clientSecret != "" && *clientSecret != existing.AuthConfig.ClientSecret {
+		existing.AuthConfig.ClientSecret = *clientSecret
 		changed = true
 	}
 	if !changed {
@@ -570,6 +595,11 @@ func (s *mcpServiceService) ClearMCPCredential(
 	case "token":
 		if existing.AuthConfig.Token != "" {
 			existing.AuthConfig.Token = ""
+			changed = true
+		}
+	case "client_secret":
+		if existing.AuthConfig.ClientSecret != "" {
+			existing.AuthConfig.ClientSecret = ""
 			changed = true
 		}
 	default:

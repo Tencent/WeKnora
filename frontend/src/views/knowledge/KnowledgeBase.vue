@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAssistantDataChange } from '@/utils/assistantDataChange';
 import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick } from "vue";
 import { MessagePlugin } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
@@ -67,7 +68,9 @@ import { resolveKnowledgeDownloadFileName } from './knowledgeDownloadFileName';
 import {
   buildUploadFileName,
   canMoveFolderTo,
+  childFolders,
   folderBreadcrumbs as buildFolderBreadcrumbs,
+  folderDocumentCounts,
   folderPathExists as folderExistsInTree,
   isFilteringDocuments,
   ROOT_FOLDER_PATH,
@@ -82,6 +85,7 @@ import {
 } from './documentSorting';
 import { useI18n } from 'vue-i18n';
 import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext';
 import type { ParserEngineInfo } from '@/api/system';
 const route = useRoute();
 const { t } = useI18n();
@@ -281,7 +285,8 @@ const isOwner = computed(() => {
   // those as tenant-owned so the role gate applies (Admin+ can manage,
   // Viewer cannot).
   if (!creatorId) return false;
-  return creatorId === userId;
+  // A creator demoted to Viewer no longer manages it (access.CreatorRoleFloor).
+  return creatorId === userId && authStore.hasRole('contributor');
 });
 
 // Current KB's shared record (when accessed via organization share)
@@ -312,7 +317,7 @@ const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value
 // the KB. The backend's RBAC middleware authorizes based on the active
 // tenant, not on creator_id, so a creator viewing their own KB from a
 // different tenant context will be 403'd on write. Otherwise: KB creator
-// (any role) or tenant Admin+ in the home tenant.
+// (Contributor+) or tenant Admin+ in the home tenant.
 //
 // A resolved cross-tenant permission (org share or shared-agent visibility,
 // already capped server-side by effective = min(share, org_role, tenant_role))
@@ -433,6 +438,18 @@ const onCardMoreVisibleChange = (visible: boolean, item: KnowledgeCard) => {
   }
 };
 let isCardDetails = ref(false);
+useAssistantPageContext(() => {
+  if (!kbId.value) return null;
+  const docOpen = isCardDetails.value && !!details.id;
+  return {
+    page: 'knowledge_base',
+    knowledgeBaseId: kbId.value,
+    knowledgeBaseName: kbInfo.value?.id === kbId.value ? kbInfo.value?.name : undefined,
+    chatModelId: kbInfo.value?.id === kbId.value ? kbInfo.value?.summary_model_id || undefined : undefined,
+    knowledgeId: docOpen ? details.id : undefined,
+    knowledgeTitle: docOpen ? details.title : undefined,
+  };
+});
 let timeout: ReturnType<typeof setTimeout> | null = null;
 let knowledgeScroll = ref()
 let page = 1;
@@ -802,7 +819,50 @@ const isFiltering = computed(() =>
 );
 // A row's folder is worth showing only when the list can span folders.
 const showDocumentFolderPath = computed(() => hasFolders.value && isFiltering.value);
+// Browsing a folder lists its direct sub-folders as entries, the way a file
+// manager does. Filtering returns matching documents from the whole subtree,
+// so folder entries would be noise there.
+const visibleSubFolders = computed(() =>
+  isFiltering.value ? [] : childFolders(folderTree.value, selectedFolderPath.value),
+);
 const folderBreadcrumbs = computed(() => buildFolderBreadcrumbs(selectedFolderPath.value));
+// What the breadcrumb reports is the folder's own contents the way a file
+// manager counts them: the documents this list can show plus its direct
+// sub-folders, which the sidebar tree lists as rows. A recursive document total
+// here would not match what the page shows, so that number stays on the tree row
+// and in the empty state below. Filtering searches the subtree instead and
+// reports only the flat result set, so it adds no folder number.
+const folderContentsCount = computed<{ documents: number; folders: number }>(() => ({
+  documents: total.value,
+  folders: isFiltering.value ? 0 : childFolders(folderTree.value, selectedFolderPath.value).length,
+}));
+// A folder with no sub-folders would otherwise end the breadcrumb with
+// "/ 0 folders"; the document-only message is the whole truth there.
+const showFolderContentsCount = computed(
+  () => !isFiltering.value && folderContentsCount.value.folders > 0,
+);
+const folderContentsMessage = computed(() => ({
+  documents: folderContentsCount.value.documents,
+  folders: folderContentsCount.value.folders,
+  // vue-i18n selects the plural form from `count`; folders are the noun that
+  // changes with the number.
+  count: folderContentsCount.value.folders,
+}));
+// Documents below the selected folder rather than directly inside it; this is
+// what tells "documents live in the sub-folders" apart from "nothing here yet".
+const folderSubfolderDocumentCount = computed(() => {
+  const counts = folderDocumentCounts(folderTree.value, selectedFolderPath.value);
+  if (!counts) return 0;
+  return Math.max(0, counts.total - counts.direct);
+});
+// Which empty state the document list needs: a search without matches, a folder
+// whose documents are all below it, a plain empty folder, or the onboarding
+// panel for a knowledge base that has no folders at all.
+const folderEmptyState = computed<'search' | 'subfolders' | 'folder' | 'none'>(() => {
+  if (isFiltering.value) return 'search';
+  if (folderSubfolderDocumentCount.value > 0) return 'subfolders';
+  return hasFolders.value || selectedFolderPath.value ? 'folder' : 'none';
+});
 
 const filterParams = computed(() => {
   const [start, end] = updatedTimeRange.value || [];
@@ -1490,6 +1550,81 @@ const updateStatus = (analyzeList: KnowledgeCard[], delay = 1500) => {
 const closeDoc = () => {
   isCardDetails.value = false;
 };
+
+useAssistantDataChange((changes) => {
+  const targetKbId = kbId.value;
+  if (!targetKbId) return;
+  const relevant = changes.filter(change => change.ids.knowledgeBaseIds.includes(targetKbId)
+    || (['knowledge', 'chunk'].includes(change.area) && change.ids.knowledgeIds.some(id =>
+      cardList.value.some(item => item.id === id) || (isCardDetails.value && details.id === id)))
+    // ID-only operations may affect a document outside the loaded folder or page.
+    || (change.area === 'knowledge' && change.ids.knowledgeBaseIds.length === 0));
+  if (!relevant.length) return;
+  if (relevant.some(change => change.operation === 'knowledge_base.delete')) {
+    MessagePlugin.warning(t('knowledgeBase.assistantDeleted'));
+    handleNavigateToKbList();
+    return;
+  }
+  if (isCardDetails.value && relevant.some(change => change.ids.knowledgeIds.includes(details.id))) {
+    if (relevant.some(change => change.ids.knowledgeIds.includes(details.id)
+      && LEAVING_OPERATIONS.includes(change.operation))) {
+      closeDoc();
+    } else {
+      getCardDetails({ id: details.id });
+    }
+  }
+  const reload = () => {
+    if (!isCurrentKb(targetKbId)) return;
+    resetPage();
+    void loadKnowledgeFiles(targetKbId);
+    void loadFolderTree(targetKbId);
+    void loadTags(targetKbId, true);
+  };
+  if (relevant.some(change => change.area === 'knowledge_base')) {
+    resetPage();
+    void loadKnowledgeBaseInfo(targetKbId, true);
+  } else {
+    reload();
+  }
+  // Deletes and moves only start here; the list changes once they finish.
+  const loaded = new Set(cardList.value.map(item => item.id));
+  const leaving = new Set<string>();
+  const arriving = new Set<string>();
+  for (const change of relevant) {
+    if (!LEAVING_OPERATIONS.includes(change.operation) && change.operation !== 'knowledge.move') continue;
+    for (const id of change.ids.knowledgeIds) {
+      if (change.operation === 'knowledge.move' && !loaded.has(id)) arriving.add(id);
+      else leaving.add(id);
+    }
+  }
+  if (leaving.size || arriving.size) void settleThenReload(targetKbId, [...leaving], [...arriving], reload);
+}, { areas: ['knowledge_base', 'knowledge', 'chunk'] });
+
+const LEAVING_OPERATIONS = ['knowledge.delete', 'knowledge.batch_delete', 'knowledge.move'];
+
+const settleThenReload = async (
+  targetKbId: string, leaving: string[], arriving: string[], reload: () => void,
+) => {
+  const isActive = () => isCurrentKb(targetKbId);
+  const fetchRows = async (ids: string[]) => {
+    const query = new URLSearchParams();
+    ids.forEach(id => query.append('ids', id));
+    return await batchQueryKnowledge(query.toString(), targetKbId) as any;
+  };
+  try {
+    if (leaving.length) await waitForKnowledgeDeletion(leaving, fetchRows, { isActive });
+    for (let i = 0; arriving.length && i < 30 && isActive(); i++) {
+      const res = await fetchRows(arriving);
+      const present = new Set(((res?.data ?? []) as KnowledgeCard[]).map(row => row.id));
+      if (arriving.every(id => present.has(id))) break;
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  } catch {
+    // Reload whatever the server shows now.
+  }
+  reload();
+};
+
 const openCardDetails = (item: KnowledgeCard) => {
   isCardDetails.value = true;
   getCardDetails(item);
@@ -2367,7 +2502,11 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                     <span v-if="index === folderBreadcrumbs.length - 1" class="doc-folder-path__crumb is-current" :title="crumb.name" aria-current="page">{{ crumb.name }}</span>
                     <button v-else type="button" class="doc-folder-path__crumb" :title="crumb.name" @click="handleFolderSelect(crumb.path)">{{ crumb.name }}</button>
                   </template>
-                  <span v-if="!docListLoading" class="doc-folder-path__count">{{ $t(isFiltering ? 'knowledgeBase.folderTree.filteredCount' : 'knowledgeBase.documentCount', { count: total }) }}</span>
+                  <span v-if="!docListLoading" class="doc-folder-path__count">
+                    <template v-if="isFiltering">{{ $t('knowledgeBase.folderTree.filteredCount', { count: folderContentsCount.documents }) }}</template>
+                    <template v-else-if="showFolderContentsCount">{{ $t('knowledgeBase.folderTree.folderContentsCount', folderContentsMessage) }}</template>
+                    <template v-else>{{ $t('knowledgeBase.documentCount', { count: folderContentsCount.documents }) }}</template>
+                  </span>
                   <t-tooltip v-if="showFolderTree && isFiltering" :content="$t('knowledgeBase.folderTree.searchingSubtree')">
                     <t-icon name="info-circle" class="doc-folder-path__sep" />
                   </t-tooltip>
@@ -2500,7 +2639,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
               </div>
               <div class="doc-scroll-container"
                 :class="{
-                  'is-empty': !cardList.length && !docListLoading,
+                  'is-empty': !cardList.length && !visibleSubFolders.length && !docListLoading,
                   'is-marquee-active': docMarqueeVisible,
                 }"
                 ref="knowledgeScroll" @scroll="handleScroll" @mousedown="onDocMarqueeMouseDown">
@@ -2528,10 +2667,11 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                     </div>
                   </div>
                 </div>
-                <template v-else-if="cardList.length && viewMode === 'grid'">
+                <template v-else-if="(cardList.length || visibleSubFolders.length) && viewMode === 'grid'">
                   <DocumentCardView :kb-id="kbId"
                     :items="cardList"
                     :folder-options="folderOptions"
+                    :sub-folders="visibleSubFolders"
                     :selected-ids="selectedIds"
                     :batch-mode="batchMode"
                     :can-edit="canEdit"
@@ -2558,8 +2698,9 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                     @update:move-mode="(mode: any) => moveMode = mode"
                   />
                 </template>
-                <template v-else-if="cardList.length && viewMode === 'list'">
+                <template v-else-if="(cardList.length || visibleSubFolders.length) && viewMode === 'list'">
                   <DocumentListView :kb-id="kbId" :items="cardList" :folder-options="folderOptions"
+                    :sub-folders="visibleSubFolders"
                     :selected-ids="selectedIds"
                     :can-edit="canEdit" :can-download="canDownloadKnowledge" :can-mutate-knowledge="canMutateKnowledge"
                     :trace-visible-ids="traceAvailableById"
@@ -2584,10 +2725,14 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                 </template>
                 <template v-else-if="!docListLoading">
                   <div class="doc-empty-state">
-                    <p v-if="hasFolders || selectedFolderPath || isFiltering" class="doc-empty-folder">
-                      {{ isFiltering
-                        ? $t('knowledgeBase.folderTree.emptySearch')
-                        : $t('knowledgeBase.folderTree.emptyFolder') }}
+                    <p v-if="folderEmptyState === 'search'" class="doc-empty-folder">
+                      {{ $t('knowledgeBase.folderTree.emptySearch') }}
+                    </p>
+                    <p v-else-if="folderEmptyState === 'subfolders'" class="doc-empty-folder">
+                      {{ $t('knowledgeBase.folderTree.emptyFolderWithSubfolders', { count: folderSubfolderDocumentCount }) }}
+                    </p>
+                    <p v-else-if="folderEmptyState === 'folder'" class="doc-empty-folder">
+                      {{ $t('knowledgeBase.folderTree.emptyFolder') }}
                     </p>
                     <EmptyKnowledge v-else />
                   </div>

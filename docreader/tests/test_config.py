@@ -38,6 +38,44 @@ class DocReaderConfigTest(unittest.TestCase):
         self.assertIn("DOCREADER_PDF_RENDER_DPI", dumped)
         self.assertIn("DOCREADER_PDF_JPEG_QUALITY", dumped)
 
+    def test_html_main_content_is_off_by_default(self):
+        with patch.dict(os.environ, {}, clear=True):
+            cfg = config.load_config()
+
+        self.assertFalse(cfg.html_main_content)
+
+    def test_loads_html_main_content_env(self):
+        with patch.dict(os.environ, {"DOCREADER_HTML_MAIN_CONTENT": "true"}):
+            cfg = config.load_config()
+
+        self.assertTrue(cfg.html_main_content)
+
+    def test_dump_config_includes_html_main_content(self):
+        dumped = config.dump_config()
+
+        self.assertIn("DOCREADER_HTML_MAIN_CONTENT", dumped)
+
+    def test_preprocess_limits_are_independent_and_bounded(self):
+        with patch.dict(os.environ, {"DOCREADER_GRPC_MAX_WORKERS": "8"}, clear=True):
+            cfg = config.load_config()
+        self.assertEqual(cfg.preprocess_max_workers, 1)
+        self.assertEqual(cfg.preprocess_threads, 2)
+        self.assertEqual(cfg.preprocess_timeout_seconds, 30)
+        self.assertEqual(cfg.preprocess_memory_mb, 2048)
+        self.assertEqual(cfg.preprocess_max_pixels, 16_000_000)
+        self.assertEqual(cfg.preprocess_max_edge, 2000)
+
+    def test_preprocess_limits_cannot_be_disabled_by_invalid_values(self):
+        for name in ("MAX_WORKERS", "THREADS", "TIMEOUT_SECONDS", "MEMORY_MB", "MAX_PIXELS", "MAX_EDGE"):
+            key = f"DOCREADER_PREPROCESS_{name}"
+            for value in ("0", "-1", "invalid"):
+                with self.subTest(key=key, value=value), patch.dict(os.environ, {key: value}, clear=True):
+                    cfg = config.load_config()
+                    self.assertGreater(getattr(cfg, f"preprocess_{name.lower()}"), 0)
+            with self.subTest(key=key), patch.dict(os.environ, {key: "7"}, clear=True):
+                self.assertEqual(getattr(config.load_config(), f"preprocess_{name.lower()}"), 7)
+            self.assertIn(key, config.dump_config())
+
 
 if __name__ == "__main__":
     unittest.main()

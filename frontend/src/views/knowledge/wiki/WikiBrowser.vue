@@ -5,8 +5,31 @@
       <div class="wiki-graph">
         <div ref="graphRef" class="wiki-graph-canvas"></div>
 
+        <div v-if="graphReady" class="graph-navigation-hint">
+          {{ $t('knowledgeEditor.wikiBrowser.graphNavigationHint') }}
+        </div>
+
+        <div v-if="graphReady && graphFocusGroup" class="graph-focus-bar"
+          :class="{ 'focus-bar-shifted': graphDrawerVisible }">
+          <t-dropdown v-if="graphGroupMenu.length" :options="graphGroupMenu" trigger="click" placement="top"
+            attach="body" :max-height="320" @click="(item: any) => focusGraphGroup(String(item.value))">
+            <button type="button" class="graph-focus-name" :title="$t('knowledgeEditor.wikiBrowser.focusGroupSwitch')">
+              <span>{{ $t('knowledgeEditor.wikiBrowser.focusGroupViewing', { name: graphFocusGroup.name }) }}</span>
+              <t-icon name="chevron-up" />
+            </button>
+          </t-dropdown>
+          <span v-else class="graph-focus-name" :title="graphFocusGroup.name">
+            {{ $t('knowledgeEditor.wikiBrowser.focusGroupViewing', { name: graphFocusGroup.name }) }}
+          </span>
+          <button type="button" class="graph-focus-back" @click="exitGraphFocus">
+            <t-icon name="rollback" />
+            <span>{{ $t('knowledgeEditor.wikiBrowser.focusGroupBack') }}</span>
+            <kbd>Esc</kbd>
+          </button>
+        </div>
+
         <!-- Graph Search Overlay -->
-        <div v-if="graphReady" class="wiki-graph-search-container">
+        <div v-if="graphControlsVisible" class="wiki-graph-search-container">
           <div class="wiki-graph-search-row">
             <div class="wiki-graph-search">
               <t-select v-model="graphSearchValue" filterable :options="graphSearchEffectiveOptions"
@@ -47,7 +70,7 @@
         </div>
 
         <!-- Legend Overlay -->
-        <div v-if="graphReady" class="wiki-graph-legend" :class="{ 'legend-shifted': graphDrawerVisible }">
+        <div v-if="graphControlsVisible" class="wiki-graph-legend" :class="{ 'legend-shifted': graphDrawerVisible }">
           <div class="legend-items">
             <div class="legend-item clickable" :class="{ disabled: !graphFilterTypes.has('summary') }"
               @click="toggleGraphFilterType('summary')">
@@ -81,6 +104,11 @@
           </div>
           <div class="legend-divider"></div>
           <div class="legend-actions">
+            <button v-if="graphUnlinkedSlugs.size > 0" type="button" class="legend-action graph-unlinked-toggle"
+              :aria-pressed="showUnlinkedNodes" @click="toggleUnlinkedNodes">
+              <span class="legend-action-icon"><t-icon :name="showUnlinkedNodes ? 'browse-off' : 'browse'" /></span>
+              <span>{{ $t(showUnlinkedNodes ? 'knowledgeEditor.wikiBrowser.hideUnlinked' : 'knowledgeEditor.wikiBrowser.showUnlinked', { count: graphUnlinkedSlugs.size }) }}</span>
+            </button>
             <div class="legend-action" @click="fitGraphToView" title="Fit to View">
               <span class="legend-action-icon"><t-icon name="focus" /></span>
               <span>{{ $t('knowledgeEditor.wikiBrowser.fitView') || '适应屏幕' }}</span>
@@ -718,13 +746,6 @@
       </div>
     </t-drawer>
 
-    <!-- Fix Chat Drawer -->
-    <t-drawer v-model:visible="showFixDrawer" :header="$t('knowledgeEditor.wikiBrowser.fixAssistantTitle')" size="700px"
-      :footer="false" class="wiki-fix-drawer">
-      <ChatView v-if="showFixDrawer" :session_id="currentFixSessionId" agentId="builtin-wiki-fixer"
-        :kbIds="[props.knowledgeBaseId]" :embeddedMode="true" />
-    </t-drawer>
-
     <!-- Revision history drawer -->
     <WikiRevisionDrawer v-model:visible="showRevisionDrawer" :kb-id="props.knowledgeBaseId"
       :slug="selectedPage?.slug || ''" :current-page="selectedPage" :can-edit="props.canEdit"
@@ -791,9 +812,9 @@
 </template>
 
 <script setup lang="ts">
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import { ref, computed, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useMenuStore } from '@/stores/menu'
 import { useSettingsStore } from '@/stores/settings'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
@@ -810,9 +831,10 @@ import {
   expandWikiDirectoryPath,
 } from './wikiDirectoryState'
 import { resolveWikiBacklinkTitle } from './wikiBacklinkTitles'
+import { buildGraphLayout, graphNodeRadius, stepGraphLayout, visibleGraphLabels, graphPointBounds, initialGraphViewport, graphClusterOutline, graphLandmarkTitle, type GraphBounds, type GraphCluster } from './wikiGraphLayout'
 import { getKnowledgeDetails } from '@/api/knowledge-base'
-import { createSessions } from '@/api/chat'
-import ChatView from '@/views/chat/index.vue'
+import { useAssistantStore } from '@/stores/assistant'
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import {
   listWikiPages,
   listWikiFolders,
@@ -841,7 +863,7 @@ import {
 
 const router = useRouter()
 const route = useRoute()
-const menuStore = useMenuStore()
+const assistant = useAssistantStore()
 const settingsStore = useSettingsStore()
 
 ensureLiteralSingleTildeOnGlobalMarked()
@@ -982,10 +1004,19 @@ const activeSystemView = ref<'' | 'index'>('')
 const searchResults = ref<WikiPage[] | null>(null)
 const pageIssues = ref<WikiPageIssue[]>([])
 const showIssuesBox = ref(false)
-const showFixDrawer = ref(false)
+useAssistantPageContext(() => {
+  const page = selectedPage.value
+  if (!page) return null
+  return {
+    page: 'wiki',
+    knowledgeBaseId: props.knowledgeBaseId,
+    wikiSlug: page.slug,
+    wikiTitle: page.title,
+    wikiIssueIds: pageIssues.value.map(issue => issue.id),
+  }
+})
 const showGlobalIssuesDrawer = ref(false)
 const globalIssues = ref<WikiPageIssue[]>([])
-const currentFixSessionId = ref('')
 const stats = ref<WikiStats | null>(null)
 const graphData = ref<WikiGraphData | null>(null)
 const searchQuery = ref('')
@@ -996,7 +1027,25 @@ const drawerBodyRef = ref<HTMLElement | null>(null)
 const loading = ref(false)
 const graphLoading = ref(false)
 const graphReady = ref(false)
+// Search and type filters must survive an empty or failed render, otherwise
+// the user has no way to leave that state.
+const graphControlsVisible = computed(() => graphReady.value || (!graphLoading.value && graphData.value !== null))
 const showArrows = ref(true)
+const showUnlinkedNodes = ref(true)
+const graphUnlinkedSlugs = computed(() => {
+  const data = graphData.value
+  const endpoints = new Set((data?.edges ?? []).flatMap(e => [e.source, e.target]))
+  return new Set((data?.nodes ?? []).filter(n => n.link_count === 0 && !endpoints.has(n.slug)).map(n => n.slug))
+})
+function toggleUnlinkedNodes() {
+  showUnlinkedNodes.value = !showUnlinkedNodes.value
+  if (!showUnlinkedNodes.value && graphSelectedSlug.value && graphUnlinkedSlugs.value.has(graphSelectedSlug.value)) {
+    graphSelectedSlug.value = null
+    graphHighlightSlug.value = null
+    graphDrawerVisible.value = false
+  }
+  renderGraph()
+}
 
 // Graph filtering
 const graphFilterTypes = ref<Set<string>>(new Set(['summary', 'entity', 'concept', 'synthesis', 'comparison', 'index']))
@@ -1012,16 +1061,18 @@ const GRAPH_OVERVIEW_LIMIT = 500
 const GRAPH_EGO_LIMIT = 500
 const GRAPH_EGO_DEFAULT_DEPTH = 1
 
-watch(showGlobalIssuesDrawer, async (val) => {
-  if (val) {
-    try {
-      const res = await listWikiIssues(props.knowledgeBaseId, '', 'pending')
-      globalIssues.value = (res as any).data || res as any || []
-    } catch (e) {
-      console.error('Failed to load global wiki issues:', e)
-      globalIssues.value = []
-    }
+async function loadGlobalIssues() {
+  try {
+    const res = await listWikiIssues(props.knowledgeBaseId, '', 'pending')
+    globalIssues.value = (res as any).data || res as any || []
+  } catch (e) {
+    console.error('Failed to load global wiki issues:', e)
+    globalIssues.value = []
   }
+}
+
+watch(showGlobalIssuesDrawer, (val) => {
+  if (val) void loadGlobalIssues()
 })
 
 async function navigateToSlugAndFix(slug: string) {
@@ -1092,9 +1143,38 @@ function applyGraphFilters() {
   // node/edge membership when the allow-list changes.
 }
 
+// Group focus is entered from a landmark caption. Leaving it restores the
+// viewport the user had before the first focus, not a fit-to-view.
+const graphFocusGroup = ref<{ key: string; name: string } | null>(null)
+let graphFocusReturnViewport: { scale: number; x: number; y: number } | null = null
+// Every focusable group, so the focus bar can switch to groups off screen.
+const graphGroups = ref<{ key: string; name: string; count: number }[]>([])
+let graphGroupFocusers = new Map<string, () => void>()
+const graphGroupMenu = computed(() => graphGroups.value
+  .filter(group => group.key !== graphFocusGroup.value?.key)
+  .map(group => ({ value: group.key, content: `${group.name} · ${group.count}` })))
+
+function focusGraphGroup(key: string) {
+  graphGroupFocusers.get(key)?.()
+}
+
+function exitGraphFocus() {
+  if (!graphFocusGroup.value) return
+  graphFocusedSlugs.clear()
+  graphFocusGroup.value = null
+  const back = graphFocusReturnViewport
+  graphFocusReturnViewport = null
+  clearHighlight(graphNodeElsRef, graphEdgeElsRef)
+  if (back && graphPanZoomRef) graphPanZoomRef.flyTo(back.x, back.y, back.scale, 500)
+}
+
 // Fit graph to view
 function fitGraphToView() {
+  graphFocusedSlugs.clear()
+  graphFocusGroup.value = null
+  graphFocusReturnViewport = null
   if (!graphReady.value || !graphPanZoomRef || !graphRef.value || graphNodes.length === 0) return
+  clearHighlight(graphNodeElsRef, graphEdgeElsRef)
 
   const container = graphRef.value
   const width = container.clientWidth
@@ -1116,21 +1196,33 @@ function fitGraphToView() {
 
   if (visibleCount === 0) return // No visible nodes
 
+  // Include the separate shelves as well as the live node coordinates.
+  if (graphLayoutBounds) {
+    minX = Math.min(minX, graphLayoutBounds.left)
+    minY = Math.min(minY, graphLayoutBounds.top)
+    maxX = Math.max(maxX, graphLayoutBounds.right)
+    maxY = Math.max(maxY, graphLayoutBounds.bottom)
+  }
+
   // Calculate center of the bounding box
   const cx = (minX + maxX) / 2
   const cy = (minY + maxY) / 2
 
   // Calculate scale to fit the bounding box (with some padding)
-  const padding = 60
-  const boxWidth = Math.max(maxX - minX, 100) + padding * 2
-  const boxHeight = Math.max(maxY - minY, 100) + padding * 2
+  const padding = 100
+  const boxWidth = Math.max(maxX - minX, 100)
+  const boxHeight = Math.max(maxY - minY, 100)
 
-  const scaleX = width / boxWidth
-  const scaleY = height / boxHeight
-  const targetScale = Math.max(0.2, Math.min(2, Math.min(scaleX, scaleY))) // Limit scale between 0.2 and 2
+  // Reserve room for the legend or page drawer instead of fitting nodes
+  // underneath them. The canvas still pans freely into the reserved space.
+  const sidebarWidth = graphDrawerVisible.value ? 480 : Math.min(240, width * 0.25)
+  const availableWidth = Math.max(160, width - sidebarWidth)
+  const scaleX = Math.max(100, availableWidth - padding * 2) / boxWidth
+  const scaleY = Math.max(100, height - padding * 2) / boxHeight
+  const targetScale = Math.max(0.005, Math.min(2, Math.min(scaleX, scaleY)))
 
   // Offset center if drawer is open
-  const targetCx = width / 2 - (graphDrawerVisible.value ? 240 : 0)
+  const targetCx = availableWidth / 2
   const targetCy = height / 2
 
   // Target translation
@@ -1495,14 +1587,17 @@ const graphStatusCard = computed((): { icon: string; title: string; primary: str
     }
   }
   if (meta.mode === 'overview') {
-    const secondary = meta.truncated
+    const hiddenCount = showUnlinkedNodes.value ? 0 : graphUnlinkedSlugs.value.size
+    const secondary = hiddenCount > 0
+      ? t('knowledgeEditor.wikiBrowser.unlinkedHidden', { count: hiddenCount })
+      : meta.truncated
       ? t('knowledgeEditor.wikiBrowser.cardOverviewHintTruncated')
       : t('knowledgeEditor.wikiBrowser.cardOverviewHintFull')
     return {
       icon: 'chart-bubble',
       title: t('knowledgeEditor.wikiBrowser.cardOverviewTitle'),
       primary: t('knowledgeEditor.wikiBrowser.cardOverviewPrimary', {
-        returned: meta.returned,
+        returned: data.nodes.length - hiddenCount,
         total: meta.total,
       }),
       secondary,
@@ -3209,6 +3304,7 @@ async function loadGraph() {
 // loadGraph() again.
 async function loadEgoGraph(slug: string, depth = GRAPH_EGO_DEFAULT_DEPTH) {
   if (!slug) return
+  showUnlinkedNodes.value = true
   graphLoading.value = true
   graphReady.value = false
   if (graphFilterSelectsNothing()) {
@@ -3236,13 +3332,16 @@ async function loadEgoGraph(slug: string, depth = GRAPH_EGO_DEFAULT_DEPTH) {
     // generation counter — we're no longer accumulating on top of the
     // previous canvas, so every node belongs to generation 0.
     resetBloomGenerations(graphData.value?.nodes)
+    // Select before rendering so the new center also receives its highlight.
+    graphSelectedSlug.value = slug
+    graphHighlightSlug.value = null
     await nextTick()
     renderGraph()
-    // After a fresh ego render, preselect the center so the highlight /
-    // drawer context matches what the user just asked for.
-    graphSelectedSlug.value = slug
   } catch (e) {
     console.error(`Failed to load ego graph for ${slug}:`, e)
+    // Keep showing the previous graph; the caller still opens the page.
+    await nextTick()
+    renderGraph()
   } finally {
     graphLoading.value = false
   }
@@ -3316,7 +3415,7 @@ async function loadBloomNeighbors(anchorSlug: string, depth = GRAPH_EGO_DEFAULT_
 
     graphData.value = merged
     await nextTick()
-    renderGraph({ preserveLayout: true, anchorSlug })
+    renderGraph({ preserveLayout: true })
   } catch (e) {
     console.error(`Failed to bloom neighbors for ${anchorSlug}:`, e)
   } finally {
@@ -3519,9 +3618,7 @@ async function growFrontier() {
 
     graphData.value = merged
     await nextTick()
-    // anchorSlug intentionally omitted — new nodes have no single natural
-    // landing point, so we fall back to random canvas-center placement
-    // and let the force simulation untangle them.
+    // Place each new node near an existing neighbor, retaining the old layout.
     renderGraph({ preserveLayout: true })
   } finally {
     graphLoading.value = false
@@ -3607,57 +3704,30 @@ async function handleIssueIgnore(issueId: string) {
   }
 }
 
-async function startFixSession(prompt: string) {
-  try {
-    const res = await createSessions({})
-    if (res && (res as any).data && (res as any).data.id) {
-      const sessionId = (res as any).data.id
-      const now = new Date().toISOString()
-
-      menuStore.updataMenuChildren({
-        title: t('knowledgeEditor.wikiBrowser.fixAssistantTitle'),
-        path: `chat/${sessionId}`,
-        id: sessionId,
-        isMore: false,
-        isNoTitle: true,
-        created_at: now,
-        updated_at: now
-      })
-
-      menuStore.changeIsFirstSession(true)
-      menuStore.changeFirstQuery(prompt, [], '', [])
-
-      currentFixSessionId.value = sessionId
-      showFixDrawer.value = true
-      showIssuesBox.value = false // Hide issues box
-    } else {
-      MessagePlugin.error(t('knowledgeEditor.wikiBrowser.fixStartError'))
-    }
-  } catch (e) {
-    console.error('Failed to create fix session', e)
-    MessagePlugin.error(t('knowledgeEditor.wikiBrowser.fixStartError'))
-  }
-}
-
 function triggerFixIssue(issue: WikiPageIssue) {
   if (!selectedPage.value) return
-  const prompt = t('knowledgeEditor.wikiBrowser.issueFixPromptSingle', {
-    slug: selectedPage.value.slug,
-    id: issue.id
+  showIssuesBox.value = false
+  assistant.open({
+    query: t('knowledgeEditor.wikiBrowser.issueFixPromptSingle', { description: issue.description }),
+    focus: { wikiIssueIds: [issue.id] },
   })
-  startFixSession(prompt)
 }
 
 function triggerAutoFix() {
   if (!selectedPage.value || pageIssues.value.length === 0) return
-  let prompt = t('knowledgeEditor.wikiBrowser.issueFixPromptAutoStart', { slug: selectedPage.value.slug }) + '\n\n'
-
-  pageIssues.value.forEach((issue, idx) => {
-    prompt += `${idx + 1}. Issue ID: ${issue.id}\n`
+  showIssuesBox.value = false
+  assistant.open({
+    query: t('knowledgeEditor.wikiBrowser.issueFixPromptAll', { count: pageIssues.value.length }),
+    focus: { wikiIssueIds: pageIssues.value.map(issue => issue.id) },
   })
-
-  startFixSession(prompt)
 }
+
+// The assistant may have rewritten the page or resolved its issues.
+watch(() => assistant.visible, (visible, wasVisible) => {
+  if (!wasVisible || visible || editingPage.value) return
+  void refreshSelectedPage()
+  void loadStats()
+})
 
 async function doSearch() {
   if (!searchQuery.value.trim()) {
@@ -3690,6 +3760,7 @@ function toggleArrows() {
       e.line.removeAttribute('marker-start')
     }
   }
+  refreshGraphLabels()
 }
 
 function formatDate(dateStr: string) {
@@ -3712,12 +3783,23 @@ interface GNode {
   slug: string; title: string; type: string
   linkCount: number; pinned: boolean
   familiar: boolean
+  labelWidth: number
 }
 
 // Persistent graph state so it survives re-renders
 let graphNodes: GNode[] = []
+let graphLayoutBounds: GraphBounds | null = null
+let graphClusterEls: { group: SVGGElement; cluster: GraphCluster; anchorSlug: string; labelWidth: number; priority: number }[] = []
+let graphContourEls: { path: SVGPathElement; cluster: GraphCluster; scale?: number; positions?: number[] }[] = []
+let graphSectionEls: { text: SVGTextElement; top: number }[] = []
+let graphImportantSlugs = new Set<string>()
+let graphFocusedSlugs = new Set<string>()
+let graphHoverSuppressedUntil = 0
 let graphSvg: SVGSVGElement | null = null
 let graphAnimFrame = 0
+let refreshGraphLabels = () => {}
+let graphEdgeMarkersVisible = true
+let disposeGraphPanZoom = () => {}
 // Shared timer for debouncing node mouseleave -> mouseenter transitions.
 // Prevents flickering when the pointer quickly moves between adjacent nodes.
 let graphHoverLeaveTimer: ReturnType<typeof setTimeout> | null = null
@@ -3728,7 +3810,8 @@ let graphPanZoomRef: {
   setTranslate: (x: number, y: number) => void,
   apply: () => void,
   flyTo: (x: number, y: number, s?: number, duration?: number) => void,
-  getScale: () => number
+  getScale: () => number,
+  getTranslate: () => { x: number; y: number }
 } | null = null
 
 const graphHighlightSlug = ref<string | null>(null)
@@ -3739,36 +3822,48 @@ const nodeColorMap: Record<string, string> = {
   summary: '#0052d9', entity: '#2ba471', concept: '#e37318',
   synthesis: '#0594fa', comparison: '#d54941', index: '#8c8c8c',
 }
+const graphEdgeColor = '#aeb5c0'
+const graphEdgeWidth = '0.8'
+const graphEdgeOpacity = '0.42'
 
-// RenderGraphOpts tweaks how renderGraph initializes node positions when
-// repainting the canvas. The default (no opts) does a full layout reset —
-// every node gets a fresh circular starting position and the force
-// simulation runs from scratch. With `preserveLayout: true` we reuse the
-// x/y/vx/vy of any node that already existed in the previous graphNodes
-// list, and only new nodes get initial positions. This is what the
-// "bloom neighbors" interaction needs: when the user expands a second
-// ego around a neighbor, the nodes they already see don't jump to new
-// positions — only the newly arrived neighbors fly in.
+// Incremental expansion preserves existing positions and the viewport.
 interface RenderGraphOpts {
   preserveLayout?: boolean
-  // anchorSlug: if set and the node is new, it is placed near the anchor
-  // with a small random jitter so related nodes visually land together.
-  anchorSlug?: string
 }
 
 function renderGraph(opts: RenderGraphOpts = {}) {
   const container = graphRef.value
   const data = graphData.value
   if (!container) return
-  if (!data || !data.nodes?.length) {
-    container.innerHTML = ''
-    return
-  }
-  const graph = data
-
-  // Stop any previous animation
   if (graphAnimFrame) { cancelAnimationFrame(graphAnimFrame); graphAnimFrame = 0 }
   if (graphHoverLeaveTimer) { clearTimeout(graphHoverLeaveTimer); graphHoverLeaveTimer = null }
+  const previousViewport = opts.preserveLayout && graphPanZoomRef
+    ? { scale: graphPanZoomRef.getScale(), ...graphPanZoomRef.getTranslate() } : undefined
+  disposeGraphPanZoom()
+  refreshGraphLabels = () => {}
+  graphPanZoomRef = null
+  graphSvg = null
+  graphLayoutBounds = null
+  graphClusterEls = []
+  graphContourEls = []
+  graphSectionEls = []
+  graphFocusedSlugs.clear()
+  graphFocusGroup.value = null
+  graphFocusReturnViewport = null
+  graphGroups.value = []
+  graphGroupFocusers = new Map()
+  graphReady.value = false
+  if (!data || !data.nodes?.length) {
+    container.innerHTML = ''
+    graphNodes = []
+    graphNodeElsRef = []
+    graphEdgeElsRef = []
+    graphAdjacencyRef = new Map()
+    return
+  }
+  const graph = showUnlinkedNodes.value ? data : {
+    ...data, nodes: data.nodes.filter(n => !graphUnlinkedSlugs.value.has(n.slug)),
+  }
 
   const width = container.clientWidth || 800
   const height = container.clientHeight || 600
@@ -3776,10 +3871,10 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   // Snapshot prior node coordinates before we rebuild graphNodes. Used
   // when preserveLayout is true to avoid the whole canvas jumping during
   // an incremental bloom.
-  const priorCoords = new Map<string, { x: number; y: number; vx: number; vy: number; pinned: boolean }>()
+  const priorCoords = new Map<string, { x: number; y: number; pinned: boolean }>()
   if (opts.preserveLayout) {
     for (const n of graphNodes) {
-      priorCoords.set(n.slug, { x: n.x, y: n.y, vx: n.vx, vy: n.vy, pinned: n.pinned })
+      priorCoords.set(n.slug, { x: n.x, y: n.y, pinned: n.pinned })
     }
   }
 
@@ -3788,6 +3883,8 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`)
   svg.style.width = '100%'
   svg.style.height = '100%'
+  svg.style.cursor = 'grab'
+  svg.style.userSelect = 'none'
   container.innerHTML = ''
   container.appendChild(svg)
   graphSvg = svg
@@ -3799,6 +3896,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
 
   // Edge group (below nodes)
   const edgeG = document.createElementNS('http://www.w3.org/2000/svg', 'g')
+  edgeG.setAttribute('pointer-events', 'none')
   rootG.appendChild(edgeG)
 
   // Node group (above edges)
@@ -3814,65 +3912,146 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     adjacency.get(edge.target)!.add(edge.source)
   }
 
-  // Locate the anchor's prior coordinates so new nodes land near it in
-  // bloom mode. Falls back to canvas center if the anchor is itself new
-  // (e.g. ego was pivoted rather than bloomed).
-  const anchorCoord = opts.anchorSlug ? priorCoords.get(opts.anchorSlug) : undefined
-  const anchorX = anchorCoord?.x ?? width / 2
-  const anchorY = anchorCoord?.y ?? height / 2
-
-  // Build nodes
-  const nodeMap = new Map<string, GNode>()
-  graphNodes = graph.nodes.map((n, i) => {
-    const prior = opts.preserveLayout ? priorCoords.get(n.slug) : undefined
-    let x: number
-    let y: number
-    let vx: number
-    let vy: number
-    let pinned: boolean
-    if (prior) {
-      // Reuse the node's existing position so the user's mental map of
-      // the canvas stays stable across bloom iterations.
-      x = prior.x
-      y = prior.y
-      vx = prior.vx
-      vy = prior.vy
-      pinned = prior.pinned
-    } else if (opts.preserveLayout && opts.anchorSlug) {
-      // New node arriving during a bloom — spawn it right next to the
-      // anchor with a small random kick so the force simulation pushes
-      // it into place alongside its siblings.
-      const jitterR = 40
-      const angle = Math.random() * Math.PI * 2
-      x = anchorX + jitterR * Math.cos(angle)
-      y = anchorY + jitterR * Math.sin(angle)
-      vx = 0
-      vy = 0
-      pinned = false
-    } else {
-      // Full repaint — classic circular layout.
-      const angle = (2 * Math.PI * i) / graph.nodes.length
-      const r = Math.min(width, height) * 0.35
-      x = width / 2 + r * Math.cos(angle) + (Math.random() - 0.5) * 50
-      y = height / 2 + r * Math.sin(angle) + (Math.random() - 0.5) * 50
-      vx = 0
-      vy = 0
-      pinned = false
+  const layout = buildGraphLayout(graph.nodes, graph.edges, width, height, priorCoords)
+  const regions = layout.sections
+  if (regions.length) graphLayoutBounds = {
+    left: Math.min(...regions.map(r => r.left)), top: Math.min(...regions.map(r => r.top)),
+    right: Math.max(...regions.map(r => r.right)), bottom: Math.max(...regions.map(r => r.bottom)),
+  }
+  graphImportantSlugs = new Set([...graph.nodes]
+    .sort((a, b) => b.link_count - a.link_count)
+    .slice(0, Math.max(1, Math.min(12, Math.ceil(graph.nodes.length / 30))))
+    .map(n => n.slug))
+  // Outlines separate groups in the overview. Ego exploration shows only
+  // nodes and links, including after pivoting or expanding a neighborhood.
+  const overviewClusters = graphMode.value === 'overview' ? layout.clusters : []
+  for (const cluster of overviewClusters) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    path.classList.add('graph-cluster-outline')
+    path.setAttribute('fill', 'var(--td-bg-color-secondarycontainer)')
+    path.setAttribute('data-cluster', cluster.representative)
+    path.setAttribute('stroke', 'var(--td-component-border)')
+    path.setAttribute('stroke-width', '1')
+    path.setAttribute('vector-effect', 'non-scaling-stroke')
+    path.setAttribute('pointer-events', 'visiblePainted')
+    rootG.insertBefore(path, edgeG)
+    graphContourEls.push({ path, cluster })
+  }
+  if (overviewClusters.length) {
+    const clusterBySlug = new Map(overviewClusters.flatMap(c => c.slugs.map(slug => [slug, c.representative] as const)))
+    let hoveredCluster: string | null = null
+    const highlightCluster = (cluster: string | null) => {
+      if (cluster === hoveredCluster) return
+      hoveredCluster = cluster
+      for (const { path, cluster: group } of graphContourEls) path.classList.toggle('is-hovered', group.representative === cluster)
     }
+    // Delegation keeps the region highlighted while moving between its
+    // background, nodes and labels. The background still accepts canvas pan.
+    svg.addEventListener('mousemove', e => {
+      const target = e.target as Element
+      const slug = target.closest('[data-graph-node]')?.getAttribute('data-graph-node')
+        ?? target.closest('[data-representative]')?.getAttribute('data-representative')
+      highlightCluster(slug ? clusterBySlug.get(slug) ?? null
+        : target.closest('[data-cluster]')?.getAttribute('data-cluster') ?? null)
+    })
+    svg.addEventListener('mouseleave', () => highlightCluster(null))
+  }
+  // Each landmark names its own page; no individual page is presented as
+  // the title of the entire connected component.
+  if (graphMode.value === 'overview') {
+    const pageBySlug = new Map(graph.nodes.map(n => [n.slug, n]))
+    for (const cluster of layout.clusters) {
+      if (cluster.slugs.length < 5) continue
+      const focus = () => {
+        if (!graphPanZoomRef) return
+        if (graphFocusGroup.value?.key === cluster.representative) { exitGraphFocus(); return }
+        if (!graphFocusGroup.value) graphFocusReturnViewport = { scale: graphPanZoomRef.getScale(), ...graphPanZoomRef.getTranslate() }
+        graphFocusGroup.value = { key: cluster.representative,
+          name: graphLandmarkTitle(pageBySlug.get(cluster.anchors[0]!)!.title) }
+        graphFocusedSlugs = new Set(cluster.slugs)
+        graphSelectedSlug.value = null
+        graphHighlightSlug.value = null
+        graphDrawerVisible.value = false
+        graphHoverSuppressedUntil = performance.now() + 500
+        clearHighlight(graphNodeElsRef, graphEdgeElsRef)
+        const availableWidth = Math.max(160, width - Math.min(240, width * 0.25))
+        const members = new Set(cluster.slugs)
+        const bounds = graphPointBounds(graphNodes.filter(n => members.has(n.slug)))
+        const scale = Math.min(1.75, Math.max(0.4, Math.min(
+          (availableWidth - 160) / Math.max(100, bounds.right - bounds.left),
+          (height - 180) / Math.max(100, bounds.bottom - bounds.top))))
+        graphPanZoomRef.flyTo(availableWidth / 2 - (bounds.left + bounds.right) / 2 * scale,
+          height / 2 - (bounds.top + bounds.bottom) / 2 * scale, scale)
+      }
+      const addCaption = (anchorSlug: string, rank: number) => {
+        const label = graphLandmarkTitle(pageBySlug.get(anchorSlug)!.title)
+        const caption = document.createElementNS('http://www.w3.org/2000/svg', 'g')
+        caption.classList.add('graph-cluster-caption')
+        caption.setAttribute('data-representative', anchorSlug)
+        caption.setAttribute('role', 'button')
+        caption.setAttribute('tabindex', '0')
+        caption.setAttribute('aria-label', `${label} · ${t('knowledgeEditor.wikiBrowser.focusGroup')}`)
+        const title = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+        title.textContent = label.length > 20 ? label.slice(0, 20) + '…' : label
+        title.setAttribute('text-anchor', 'middle')
+        title.setAttribute('font-size', '13')
+        title.setAttribute('font-weight', '600')
+        title.setAttribute('fill', 'var(--td-text-color-primary)')
+        // Pill shown while another group is focused, so names read as targets.
+        const pill = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+        pill.classList.add('graph-caption-pill')
+        caption.append(pill, title)
+        rootG.appendChild(caption)
+        const textWidth = title.getComputedTextLength() || title.textContent.length * 13
+        pill.setAttribute('x', String(-textWidth / 2 - 12))
+        pill.setAttribute('y', '-17')
+        pill.setAttribute('width', String(textWidth + 24))
+        pill.setAttribute('height', '24')
+        pill.setAttribute('rx', '12')
+        graphClusterEls.push({ group: caption, cluster, anchorSlug,
+          labelWidth: textWidth + 24,
+          priority: 100000 + cluster.slugs.length - rank })
+        caption.addEventListener('click', e => { e.stopPropagation(); focus() })
+        caption.addEventListener('keydown', e => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); focus() }
+        })
+      }
+      cluster.anchors.forEach((slug, rank) => addCaption(slug, rank))
+      graphGroupFocusers.set(cluster.representative, focus)
+      graphGroups.value.push({ key: cluster.representative, count: cluster.slugs.length,
+        name: graphLandmarkTitle(pageBySlug.get(cluster.anchors[0]!)!.title) })
+    }
+  }
+  // Section captions describe why these pages have no visible neighbors.
+  for (const section of layout.sections) {
+    const caption = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+    caption.setAttribute('x', String(section.left + 16))
+    caption.setAttribute('y', String(section.top + 20))
+    caption.setAttribute('font-size', '13')
+    caption.setAttribute('fill', 'var(--td-text-color-secondary)')
+    caption.setAttribute('pointer-events', 'none')
+    caption.textContent = t(section.kind === 'unlinked'
+      ? 'knowledgeEditor.wikiBrowser.unlinkedSection'
+      : 'knowledgeEditor.wikiBrowser.offscreenSection', { count: section.count })
+    rootG.insertBefore(caption, edgeG)
+    graphSectionEls.push({ text: caption, top: section.top })
+  }
+
+  const nodeMap = new Map<string, GNode>()
+  graphNodes = graph.nodes.map(n => {
+    const prior = priorCoords.get(n.slug)
+    const placement = layout.placements.get(n.slug)!
     const node: GNode = {
-      x, y, vx, vy,
+      x: placement.x, y: placement.y, vx: 0, vy: 0,
       slug: n.slug, title: n.title, type: n.page_type,
-      linkCount: n.link_count || 0, pinned,
+      linkCount: n.link_count || 0, pinned: prior?.pinned ?? false,
       familiar: !!n.familiar,
+      labelWidth: Math.min(n.title.length, 15) * 11,
     }
     nodeMap.set(n.slug, node)
     return node
   })
-
-  // Node radius based on link count (logarithmic scale to prevent overly large nodes)
-  function nodeRadius(n: GNode) {
-    return Math.max(8, Math.min(24, 8 + Math.log(n.linkCount + 1) * 4))
-  }
+  const nodeRadius = (n: GNode) => graphNodeRadius(n.linkCount)
 
   // Define arrow markers in SVG <defs>
   const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs')
@@ -3888,7 +4067,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   markerEnd.setAttribute('orient', 'auto')
   const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
   arrowPath.setAttribute('d', 'M0,0 L10,3 L0,6 L2,3 Z')
-  arrowPath.setAttribute('fill', '#c0c4cc')
+  arrowPath.setAttribute('fill', graphEdgeColor)
   markerEnd.appendChild(arrowPath)
   defs.appendChild(markerEnd)
 
@@ -3903,7 +4082,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   markerStart.setAttribute('orient', 'auto')
   const arrowPathStart = document.createElementNS('http://www.w3.org/2000/svg', 'path')
   arrowPathStart.setAttribute('d', 'M10,0 L0,3 L10,6 L8,3 Z')
-  arrowPathStart.setAttribute('fill', '#c0c4cc')
+  arrowPathStart.setAttribute('fill', graphEdgeColor)
   markerStart.appendChild(arrowPathStart)
   defs.appendChild(markerStart)
 
@@ -3955,12 +4134,13 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     const bidir = edgePairSet.has(`${edge.target}→${edge.source}`)
 
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'line')
-    line.setAttribute('stroke', '#c0c4cc')
-    line.setAttribute('stroke-width', '1.2')
-    line.setAttribute('stroke-opacity', '0.4')
-    line.setAttribute('marker-end', 'url(#arrow-end)')
+    line.setAttribute('stroke', graphEdgeColor)
+    line.setAttribute('stroke-width', graphEdgeWidth)
+    line.setAttribute('stroke-opacity', graphEdgeOpacity)
+    line.setAttribute('stroke-linecap', 'round')
+    if (showArrows.value) line.setAttribute('marker-end', 'url(#arrow-end)')
     line.style.transition = 'stroke 0.2s, stroke-width 0.2s, stroke-opacity 0.2s'
-    if (bidir) {
+    if (bidir && showArrows.value) {
       line.setAttribute('marker-start', 'url(#arrow-start)')
     }
     edgeG.appendChild(line)
@@ -3972,6 +4152,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   for (const n of graphNodes) {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g')
     g.style.cursor = 'pointer'
+    g.setAttribute('data-graph-node', n.slug)
 
     const r = nodeRadius(n)
 
@@ -3993,7 +4174,9 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     const visibleNeighbors = adjacency.get(n.slug)?.size ?? 0
     const hiddenNeighbors = Math.max(0, n.linkCount - visibleNeighbors)
     const isEgoCenter = graph.meta?.mode === 'ego' && graph.meta.center === n.slug
-    const showExpansionRing = hiddenNeighbors > 0 && !isEgoCenter
+    // In the overview nearly every page has neighbors beyond the top-N
+    // slice, so the ring would only add noise; it guides ego exploration.
+    const showExpansionRing = graph.meta?.mode === 'ego' && hiddenNeighbors > 0 && !isEgoCenter
     const expansionRing = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
     expansionRing.setAttribute('r', String(r + 3))
     expansionRing.setAttribute('fill', 'none')
@@ -4036,7 +4219,8 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     circle.setAttribute('r', String(r))
     circle.setAttribute('fill', nodeColorMap[n.type] || '#8c8c8c')
     circle.setAttribute('stroke', '#fff')
-    circle.setAttribute('stroke-width', '2')
+    circle.setAttribute('stroke-width', '1.5')
+    circle.classList.add('node-circle')
     // circle.setAttribute('filter', 'url(#node-shadow)')
     circle.style.transition = 'r 0.2s, stroke-width 0.2s, opacity 0.2s'
     g.appendChild(circle)
@@ -4122,6 +4306,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     // one node to the next doesn't flash through the fully-unhighlighted state
     // (which is what caused the whole-graph flickering).
     g.addEventListener('mouseenter', () => {
+      if (performance.now() < graphHoverSuppressedUntil) return
       if (graphHoverLeaveTimer) {
         clearTimeout(graphHoverLeaveTimer)
         graphHoverLeaveTimer = null
@@ -4230,86 +4415,24 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     nodeEls.push({ g, circle, text, activeRing, node: n })
   }
 
-  // Pan & zoom on SVG background
-  setupPanZoom(svg, rootG)
+  // Measure after all DOM writes to avoid forcing a layout for every node.
+  for (const { text, node } of nodeEls) node.labelWidth = text.getComputedTextLength() || node.labelWidth
 
-  // Animated force simulation
+  // Pan & zoom on SVG background
+  const centerNode = nodeMap.get(graphCenter.value)
+  const initialFocus = centerNode ?? layout.clusters[0] ?? graphNodes[0]
+  const availableWidth = Math.max(160, width - (graphDrawerVisible.value ? 480 : Math.min(240, width * 0.25)))
+  setupPanZoom(svg, rootG, previousViewport ?? initialGraphViewport(graphNodes, availableWidth, height, initialFocus))
+
+  // Links and repulsion determine the shape without a circular boundary.
+  // Existing nodes stay still during incremental expansion, including pins.
+  const retained = new Set(priorCoords.keys())
   let alpha = 1.0
+  let frame = 0
   function tick() {
     alpha *= 0.985
-    if (alpha < 0.02) { graphAnimFrame = 0; return }
-
-    // Repulsion: Optimized using 1D spatial sorting (X-axis) to reduce O(n²) to O(n log n)
-    // This allows smooth rendering even for > 1000 nodes
-    const sortedNodes = [...graphNodes].sort((a, b) => a.x - b.x)
-    const MAX_REPULSION_DIST = 300 // Only calculate repulsion for nodes within 300px
-    const MAX_REPULSION_DIST_SQ = MAX_REPULSION_DIST * MAX_REPULSION_DIST
-
-    for (let i = 0; i < sortedNodes.length; i++) {
-      const n1 = sortedNodes[i]
-      for (let j = i + 1; j < sortedNodes.length; j++) {
-        const n2 = sortedNodes[j]
-        const dx = n2.x - n1.x
-
-        // Because nodes are sorted by X, if dx > MAX_REPULSION_DIST, 
-        // all subsequent n2 nodes will also be too far on the X axis, so we can break early
-        if (dx > MAX_REPULSION_DIST) break
-
-        const dy = n2.y - n1.y
-        if (Math.abs(dy) > MAX_REPULSION_DIST) continue // Too far on Y axis
-
-        const distSq = dx * dx + dy * dy
-        if (distSq > MAX_REPULSION_DIST_SQ) continue
-
-        const dist = Math.sqrt(distSq) || 1
-        // Prevent extremely high repulsion when nodes are very close
-        const force = (200 * alpha) / Math.max(distSq, 100) * 60
-        const fx = (dx / dist) * force
-        const fy = (dy / dist) * force
-
-        if (!n1.pinned) { n1.vx -= fx; n1.vy -= fy }
-        if (!n2.pinned) { n2.vx += fx; n2.vy += fy }
-      }
-    }
-
-    // Attraction along edges
-    for (const edge of graph.edges) {
-      const s = nodeMap.get(edge.source)
-      const t = nodeMap.get(edge.target)
-      if (!s || !t) continue
-      const dx = t.x - s.x
-      const dy = t.y - s.y
-      const dist = Math.sqrt(dx * dx + dy * dy) || 1
-      const force = (dist - 120) * 0.005 * alpha
-      const fx = (dx / dist) * force
-      const fy = (dy / dist) * force
-      if (!s.pinned) { s.vx += fx; s.vy += fy }
-      if (!t.pinned) { t.vx -= fx; t.vy -= fy }
-    }
-
-    // Center gravity
-    // Increase gravity slightly when there are more nodes to prevent the graph from expanding too much
-    const gravityStrength = Math.min(0.01, 0.001 + graphNodes.length * 0.00002)
-    for (const n of graphNodes) {
-      if (n.pinned) continue
-      n.vx += (width / 2 - n.x) * gravityStrength * alpha
-      n.vy += (height / 2 - n.y) * gravityStrength * alpha
-    }
-
-    // Apply velocity
-    for (const n of graphNodes) {
-      if (n.pinned) continue
-      n.vx *= 0.6
-      n.vy *= 0.6
-      // Cap velocity to prevent nodes from flying off screen during initial explosive layout
-      const v = Math.sqrt(n.vx * n.vx + n.vy * n.vy)
-      if (v > 20) {
-        n.vx = (n.vx / v) * 20
-        n.vy = (n.vy / v) * 20
-      }
-      n.x += n.vx
-      n.y += n.vy
-    }
+    if (alpha < 0.02) { refreshGraphLabels(); graphAnimFrame = 0; return }
+    stepGraphLayout(graphNodes, graph.edges, layout.placements, alpha, retained)
 
     // Update SVG positions
     for (const { g, node } of nodeEls) {
@@ -4323,6 +4446,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
       }
     }
 
+    if (++frame % 6 === 0) refreshGraphLabels()
     graphAnimFrame = requestAnimationFrame(tick)
   }
 
@@ -4345,8 +4469,12 @@ function renderGraph(opts: RenderGraphOpts = {}) {
 
   applyGraphFilters()
 
-  graphAnimFrame = requestAnimationFrame(tick)
+  if (graphNodes.length) graphAnimFrame = requestAnimationFrame(tick)
   graphReady.value = true
+  if (graphSelectedSlug.value && nodeMap.has(graphSelectedSlug.value)) {
+    applyHighlight(graphSelectedSlug.value, adjacency, nodeEls, edgeEls)
+  }
+  refreshGraphLabels()
 }
 
 // Set edge line positions, shortened to stop at node circle boundary so arrows are visible
@@ -4357,9 +4485,11 @@ function setEdgePositions(line: SVGLineElement, s: GNode, t: GNode, nodeRadius: 
   const ux = dx / dist
   const uy = dy / dist
 
-  // Shorten each end by the node radius + arrow margin
-  const rS = nodeRadius(s) + 4
-  const rT = nodeRadius(t) + 4
+  // Shorten each end by the node radius, plus a margin only while arrowheads
+  // are drawn; otherwise the gaps form a ring of line ends around every node.
+  const margin = graphEdgeMarkersVisible ? 4 : 0
+  const rS = nodeRadius(s) + margin
+  const rT = nodeRadius(t) + margin
 
   line.setAttribute('x1', String(s.x + ux * rS))
   line.setAttribute('y1', String(s.y + uy * rS))
@@ -4377,6 +4507,7 @@ function setupDrag(
 ) {
   let dragging = false
   let startX = 0, startY = 0
+  let pointerStartX = 0, pointerStartY = 0, moved = false
 
   function getPoint(e: MouseEvent | Touch) {
     const svg = graphSvg
@@ -4396,23 +4527,27 @@ function setupDrag(
     if (e.button !== 0) return
     e.stopPropagation()
     dragging = true
+    moved = false
+    pointerStartX = e.clientX; pointerStartY = e.clientY
     node.pinned = true
     const p = getPoint(e)
     startX = p.x - node.x
     startY = p.y - node.y
-    g.querySelector('circle')?.setAttribute('stroke', nodeColorMap[node.type] || '#8c8c8c')
-    g.querySelector('circle')?.setAttribute('stroke-width', '3')
+    g.querySelector('.node-circle')?.setAttribute('stroke', nodeColorMap[node.type] || '#8c8c8c')
+    g.querySelector('.node-circle')?.setAttribute('stroke-width', '2.5')
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onEnd)
   }
 
   function onMove(e: MouseEvent) {
     if (!dragging) return
+    if (Math.hypot(e.clientX - pointerStartX, e.clientY - pointerStartY) > 4) moved = true
     const p = getPoint(e)
     node.x = p.x - startX
     node.y = p.y - startY
     node.vx = 0; node.vy = 0
     g.setAttribute('transform', `translate(${node.x},${node.y})`)
+    refreshGraphLabels()
     // Update connected edges immediately
     for (const edge of edgeEls) {
       if (edge.source === node.slug || edge.target === node.slug) {
@@ -4426,19 +4561,22 @@ function setupDrag(
   function onEnd() {
     dragging = false
     // Keep pinned after drag so the node stays where user placed it
-    g.querySelector('circle')?.setAttribute('stroke', '#fff')
-    g.querySelector('circle')?.setAttribute('stroke-width', '2')
+    g.querySelector('.node-circle')?.setAttribute('stroke', '#fff')
+    g.querySelector('.node-circle')?.setAttribute('stroke-width', '1.5')
     window.removeEventListener('mousemove', onMove)
     window.removeEventListener('mouseup', onEnd)
   }
 
   g.addEventListener('mousedown', onStart)
+  g.addEventListener('click', e => {
+    if (moved) { e.preventDefault(); e.stopImmediatePropagation(); moved = false }
+  }, true)
 }
 
 // ─── Pan & Zoom ───
-function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement) {
-  let scale = 1
-  let translateX = 0, translateY = 0
+function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale: number; x: number; y: number }) {
+  let scale = viewport?.scale ?? 1
+  let translateX = viewport?.x ?? 0, translateY = viewport?.y ?? 0
   let panning = false
   let panStartX = 0, panStartY = 0
   let dragStartX = 0, dragStartY = 0
@@ -4449,28 +4587,85 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement) {
   }
 
   function updateLabelsVisibility() {
-    // Hide labels when zoomed out too much or hide less important labels
-    // We only want to show labels for important nodes (high link count) when zoomed out
-    for (const { text, node } of graphNodeElsRef) {
-      if (node.slug === graphSelectedSlug.value || node.slug === graphHighlightSlug.value) {
-        text.style.opacity = '1' // Always show selected/highlighted
-        continue
-      }
-
-      let visibilityThreshold = 0.5 // Default: need to zoom in to at least 0.5 to see all labels
-
-      // Highly connected nodes get their labels shown earlier
-      if (node.linkCount > 10) visibilityThreshold = 0.2
-      else if (node.linkCount > 5) visibilityThreshold = 0.35
-      else if (node.linkCount > 2) visibilityThreshold = 0.45
-
-      if (scale < visibilityThreshold) {
-        text.style.opacity = '0'
-      } else {
-        text.style.opacity = '1'
+    // Arrowheads shrink to specks around every node when zoomed out.
+    rootG.classList.toggle('hide-edge-markers', scale < 0.8)
+    const markersVisible = showArrows.value && scale >= 0.8
+    if (markersVisible !== graphEdgeMarkersVisible) {
+      graphEdgeMarkersVisible = markersVisible
+      const bySlug = new Map(graphNodes.map(n => [n.slug, n]))
+      for (const e of graphEdgeElsRef) {
+        const s = bySlug.get(e.source), t = bySlug.get(e.target)
+        if (s && t) setEdgePositions(e.line, s, t, n => graphNodeRadius(n.linkCount))
       }
     }
+    // Hide labels when zoomed out too much or hide less important labels
+    // We only want to show labels for important nodes (high link count) when zoomed out
+    for (const { text, top } of graphSectionEls) {
+      text.setAttribute('font-size', String(13 / scale))
+      text.setAttribute('y', String(top - 12 / scale))
+    }
+    const positionsBySlug = new Map(graphNodes.map(n => [n.slug, n]))
+    for (const contour of graphContourEls) {
+      const { path, cluster } = contour
+      const members = cluster.slugs.flatMap(slug => positionsBySlug.has(slug) ? [positionsBySlug.get(slug)!] : [])
+      // Panning and hover do not change geometry. Rebuild only after zoom or
+      // node movement, keeping the more detailed contour cheap to interact with.
+      if (contour.scale !== scale || contour.positions?.length !== members.length * 2
+        || members.some((n, i) => contour.positions![i * 2] !== n.x || contour.positions![i * 2 + 1] !== n.y)) {
+        path.setAttribute('d', graphClusterOutline(members.map(n => ({ ...n, radius: graphNodeRadius(n.linkCount) })), scale))
+        contour.scale = scale
+        contour.positions = members.flatMap(n => [n.x, n.y])
+      }
+      path.classList.toggle('is-dimmed', graphFocusedSlugs.size > 0 && !graphFocusedSlugs.has(cluster.representative))
+    }
+    const groupLabels = graphClusterEls.flatMap(({ group, cluster, anchorSlug, labelWidth, priority }) => {
+      const anchor = positionsBySlug.get(anchorSlug)
+      // While a group is focused, every other group keeps exactly its name,
+      // at any zoom, as the way to switch to it.
+      const outside = graphFocusedSlugs.size > 0 && !graphFocusedSlugs.has(cluster.representative)
+      group.classList.toggle('is-outside-focus', outside)
+      const shown = !!anchor && (outside ? anchorSlug === cluster.anchors[0] : scale < 1.2)
+      group.style.display = shown ? '' : 'none'
+      if (!shown || !anchor) return []
+      const labelX = anchor.x
+      const labelY = anchor.y + graphNodeRadius(anchor.linkCount) + 18 / scale
+      const x = labelX * scale, y = labelY * scale
+      group.setAttribute('transform', `translate(${labelX},${labelY}) scale(${1 / scale})`)
+      return [{ slug: `anchor:${anchorSlug}`, priority,
+        required: outside || anchor.slug === graphSelectedSlug.value || anchor.slug === graphHighlightSlug.value,
+        left: x - labelWidth / 2 - 8, right: x + labelWidth / 2 + 8, top: y - 16, bottom: y + 5 }]
+    })
+    const captionedSlugs = new Set(groupLabels.map(label => label.slug.slice('anchor:'.length)))
+    const candidates = graphNodeElsRef.flatMap(({ text, node }) => {
+      const required = node.slug === graphSelectedSlug.value || node.slug === graphHighlightSlug.value
+      // Keep text legible in screen pixels. At overview scale show a few
+      // landmarks; zooming in reveals the individual page labels.
+      text.setAttribute('font-size', String(12 / scale))
+      text.setAttribute('dy', String(graphNodeRadius(node.linkCount) + 16 / scale))
+      // The representative caption replaces its ordinary label at overview
+      // scales, including hover/selection, so the page name appears only once.
+      if (captionedSlugs.has(node.slug)) return []
+      // Reveal names after a modest zoom from the overview. Screen-space
+      // collision filtering below controls clutter, regardless of graph size.
+      const showDetail = scale >= 0.5 || (graphFocusedSlugs.has(node.slug) && scale >= 0.4)
+      const landmark = graphImportantSlugs.has(node.slug) && (groupLabels.length === 0 || scale >= 0.4)
+      if (!required && !showDetail && !landmark) return []
+      const halfWidth = node.labelWidth * 12 / 11 / 2 + 5
+      const baseline = (node.y + graphNodeRadius(node.linkCount)) * scale + 16
+      return [{ slug: node.slug, priority: node.linkCount, required,
+        left: node.x * scale - halfWidth, right: node.x * scale + halfWidth,
+        top: baseline - 15, bottom: baseline + 4 }]
+    })
+    const visible = visibleGraphLabels([...groupLabels, ...candidates])
+    for (const { group, anchorSlug } of graphClusterEls) {
+      const shown = visible.has(`anchor:${anchorSlug}`)
+      group.style.visibility = shown ? 'visible' : 'hidden'
+      group.setAttribute('tabindex', shown ? '0' : '-1')
+    }
+    for (const { text, node } of graphNodeElsRef) text.style.opacity = visible.has(node.slug) ? '1' : '0'
+
   }
+  refreshGraphLabels = updateLabelsVisibility
 
   // Export methods for programmatic pan/zoom
   let animId = 0
@@ -4479,6 +4674,7 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement) {
     setTranslate: (x: number, y: number) => { translateX = x; translateY = y },
     apply: applyTransform,
     getScale: () => scale,
+    getTranslate: () => ({ x: translateX, y: translateY }),
     flyTo: (tx: number, ty: number, s?: number, duration = 400) => {
       cancelAnimationFrame(animId)
       const startX = translateX, startY = translateY, startScale = scale
@@ -4501,8 +4697,9 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement) {
   // Zoom with mouse wheel
   svg.addEventListener('wheel', (e) => {
     e.preventDefault()
+    cancelAnimationFrame(animId)
     const zoomFactor = e.deltaY > 0 ? 0.92 : 1.08
-    const newScale = Math.max(0.2, Math.min(5, scale * zoomFactor))
+    const newScale = Math.max(0.005, Math.min(5, scale * zoomFactor))
 
     // Zoom towards cursor
     const rect = svg.getBoundingClientRect()
@@ -4518,7 +4715,8 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement) {
   svg.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return
     // Only pan if clicking the SVG background, not a node
-    if ((e.target as Element).tagName === 'svg' || (e.target as Element).tagName === 'SVG') {
+    if (!(e.target as Element).closest('[data-graph-node], .graph-cluster-caption')) {
+      cancelAnimationFrame(animId)
       panning = true
       panStartX = e.clientX - translateX
       panStartY = e.clientY - translateY
@@ -4528,30 +4726,48 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement) {
     }
   })
 
-  window.addEventListener('mousemove', (e) => {
+  const onMouseMove = (e: MouseEvent) => {
     if (!panning) return
     translateX = e.clientX - panStartX
     translateY = e.clientY - panStartY
     applyTransform()
-  })
+  }
 
-  window.addEventListener('mouseup', (e) => {
+  const onMouseUp = (e: MouseEvent) => {
     if (panning) {
       panning = false
-      svg.style.cursor = 'default'
+      svg.style.cursor = 'grab'
 
       // If we barely moved, consider it a click to clear selection
       const dx = e.clientX - dragStartX
       const dy = e.clientY - dragStartY
       if (Math.abs(dx) < 5 && Math.abs(dy) < 5) {
-        if ((e.target as Element).tagName === 'svg' || (e.target as Element).tagName === 'SVG') {
-          graphSelectedSlug.value = null
-          graphDrawerVisible.value = false
-          clearHighlight(graphNodeElsRef, graphEdgeElsRef)
+        if (!(e.target as Element).closest('[data-graph-node], .graph-cluster-caption')) {
+          // Clear the innermost state first: a selection, then the group focus.
+          if (graphSelectedSlug.value || graphDrawerVisible.value) {
+            graphSelectedSlug.value = null
+            graphDrawerVisible.value = false
+            clearHighlight(graphNodeElsRef, graphEdgeElsRef)
+          } else exitGraphFocus()
         }
       }
     }
-  })
+  }
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || !graphFocusGroup.value || graphDrawerVisible.value) return
+    if (e.target instanceof Element && e.target.closest('input, textarea, [contenteditable="true"]')) return
+    exitGraphFocus()
+  }
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+  window.addEventListener('keydown', onKeyDown)
+  disposeGraphPanZoom = () => {
+    cancelAnimationFrame(animId)
+    window.removeEventListener('mousemove', onMouseMove)
+    window.removeEventListener('mouseup', onMouseUp)
+    window.removeEventListener('keydown', onKeyDown)
+  }
+  applyTransform()
 }
 
 // ─── Hover Highlight ───
@@ -4562,29 +4778,30 @@ function applyHighlight(
   edgeEls: { line: SVGLineElement; source: string; target: string; bidir: boolean }[],
   hoverSlug?: string
 ) {
+  refreshGraphLabels()
   const neighbors = adjacency.get(slug) || new Set()
   const hoverNeighbors = hoverSlug ? (adjacency.get(hoverSlug) || new Set()) : new Set()
 
   // Helper to get consistent radius
-  const getRadius = (n: GNode) => Math.max(8, Math.min(24, 8 + Math.log(n.linkCount + 1) * 4))
+  const getRadius = (n: GNode) => graphNodeRadius(n.linkCount)
 
   for (const { g, circle, activeRing, node } of nodeEls) {
     const r = getRadius(node)
     if (node.slug === slug) {
       circle.setAttribute('r', String(r + 3))
-      circle.setAttribute('stroke-width', '3')
+      circle.setAttribute('stroke-width', '2.5')
       g.style.opacity = '1'
     } else if (hoverSlug && node.slug === hoverSlug) {
       circle.setAttribute('r', String(r + 3))
-      circle.setAttribute('stroke-width', '3')
+      circle.setAttribute('stroke-width', '2.5')
       g.style.opacity = '1'
     } else if (neighbors.has(node.slug) || (hoverSlug && hoverNeighbors.has(node.slug))) {
       circle.setAttribute('r', String(r))
-      circle.setAttribute('stroke-width', '2')
+      circle.setAttribute('stroke-width', '1.5')
       g.style.opacity = '1'
     } else {
       circle.setAttribute('r', String(r))
-      circle.setAttribute('stroke-width', '2')
+      circle.setAttribute('stroke-width', '1.5')
       g.style.opacity = '0.2'
     }
 
@@ -4596,8 +4813,8 @@ function applyHighlight(
   }
   for (const e of edgeEls) {
     if (e.source === slug || e.target === slug || (hoverSlug && (e.source === hoverSlug || e.target === hoverSlug))) {
-      e.line.setAttribute('stroke-opacity', '0.9')
-      e.line.setAttribute('stroke-width', '2')
+      e.line.setAttribute('stroke-opacity', '0.85')
+      e.line.setAttribute('stroke-width', '1.5')
 
       // Determine which node is driving the highlight color
       const focusSlug = (hoverSlug && (e.source === hoverSlug || e.target === hoverSlug)) ? hoverSlug : slug
@@ -4606,16 +4823,25 @@ function applyHighlight(
       ] || '#0052d9'
 
       e.line.setAttribute('stroke', hlColor)
-      e.line.setAttribute('marker-end', 'url(#arrow-end-hl)')
-      if (e.bidir) e.line.setAttribute('marker-start', 'url(#arrow-start-hl)')
+      setEdgeMarkers(e, '-hl')
     } else {
+      e.line.setAttribute('stroke', graphEdgeColor)
       e.line.setAttribute('stroke-opacity', '0.08')
-      e.line.setAttribute('stroke-width', '1')
-      e.line.setAttribute('marker-end', 'url(#arrow-end)')
-      if (e.bidir) e.line.setAttribute('marker-start', 'url(#arrow-start)')
-      else e.line.removeAttribute('marker-start')
+      e.line.setAttribute('stroke-width', graphEdgeWidth)
+      setEdgeMarkers(e)
     }
   }
+}
+
+function setEdgeMarkers(e: { line: SVGLineElement; bidir: boolean }, suffix = '') {
+  if (!showArrows.value) {
+    e.line.removeAttribute('marker-end')
+    e.line.removeAttribute('marker-start')
+    return
+  }
+  e.line.setAttribute('marker-end', `url(#arrow-end${suffix})`)
+  if (e.bidir) e.line.setAttribute('marker-start', `url(#arrow-start${suffix})`)
+  else e.line.removeAttribute('marker-start')
 }
 
 function clearHighlight(
@@ -4627,21 +4853,21 @@ function clearHighlight(
     return
   }
 
-  const getRadius = (n: GNode) => Math.max(8, Math.min(24, 8 + Math.log(n.linkCount + 1) * 4))
+  refreshGraphLabels()
+  const getRadius = (n: GNode) => graphNodeRadius(n.linkCount)
 
   for (const { g, circle, activeRing, node } of nodeEls) {
     circle.setAttribute('r', String(getRadius(node)))
-    circle.setAttribute('stroke-width', '2')
-    g.style.opacity = '1'
+    circle.setAttribute('stroke-width', '1.5')
+    g.style.opacity = graphFocusedSlugs.size && !graphFocusedSlugs.has(node.slug) ? '0.12' : '1'
     activeRing.style.opacity = '0'
   }
   for (const e of edgeEls) {
-    e.line.setAttribute('stroke', '#c0c4cc')
-    e.line.setAttribute('stroke-width', '1.2')
-    e.line.setAttribute('stroke-opacity', '0.4')
-    e.line.setAttribute('marker-end', 'url(#arrow-end)')
-    if (e.bidir) e.line.setAttribute('marker-start', 'url(#arrow-start)')
-    else e.line.removeAttribute('marker-start')
+    e.line.setAttribute('stroke', graphEdgeColor)
+    e.line.setAttribute('stroke-width', graphEdgeWidth)
+    const outsideFocus = graphFocusedSlugs.size && (!graphFocusedSlugs.has(e.source) || !graphFocusedSlugs.has(e.target))
+    e.line.setAttribute('stroke-opacity', outsideFocus ? '0.05' : graphEdgeOpacity)
+    setEdgeMarkers(e)
   }
 }
 
@@ -4727,6 +4953,11 @@ let graphAdjacencyRef = new Map<string, Set<string>>()
 // the target sits in the link_count ranking.
 async function handleGraphSearchSelect(value: string) {
   if (!value) return
+  // A search result must remain reachable even when its shelf was collapsed.
+  if (!showUnlinkedNodes.value && graphUnlinkedSlugs.value.has(value)) {
+    showUnlinkedNodes.value = true
+    renderGraph()
+  }
 
   let node = graphNodes.find(n => n.slug === value)
   if (!node) {
@@ -4847,6 +5078,14 @@ watch(() => route.query.slug, (newSlug) => {
   }
 })
 
+useAssistantDataChange((changes) => {
+  if (!changes.some(change => change.ids.knowledgeBaseIds.includes(props.knowledgeBaseId))) return
+  void loadPages()
+  void refreshSelectedPage()
+  void loadStats()
+  if (showGlobalIssuesDrawer.value) void loadGlobalIssues()
+}, { areas: ['wiki'] })
+
 onMounted(() => {
   loadPages()
   loadStats()
@@ -4854,6 +5093,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  disposeGraphPanZoom()
   if (statsTimer) {
     clearInterval(statsTimer)
   }
@@ -6071,6 +6311,209 @@ onUnmounted(() => {
 }
 
 // ── Graph ──
+.graph-navigation-hint {
+  position: absolute;
+  left: 20px;
+  bottom: 16px;
+  pointer-events: none;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-sm);
+  padding: 5px 9px;
+  background: var(--td-bg-color-container);
+  border-radius: var(--app-radius-xs);
+  z-index: 1;
+}
+
+.graph-focus-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - 360px);
+  padding: 6px 6px 6px 14px;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-pill);
+  box-shadow: var(--td-shadow-1);
+  font-size: var(--app-text-md);
+  color: var(--td-text-color-primary);
+  z-index: 2;
+  transition: left var(--app-motion-base) ease;
+
+  &.focus-bar-shifted {
+    left: calc(50% - 240px);
+  }
+}
+
+.graph-focus-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 1px;
+  }
+}
+
+span.graph-focus-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+
+  &:hover {
+    background: transparent;
+  }
+}
+
+.graph-focus-back {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--app-radius-pill);
+  background: var(--td-brand-color-light);
+  color: var(--td-brand-color);
+  font: inherit;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--td-brand-color-focus);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 1px;
+  }
+
+  kbd {
+    padding: 0 4px;
+    border: 1px solid currentColor;
+    border-radius: var(--app-radius-xs);
+    font: inherit;
+    font-size: var(--app-text-xs);
+    line-height: 16px;
+    opacity: 0.7;
+  }
+}
+
+.wiki-graph-canvas :deep(.graph-cluster-outline) {
+  fill-opacity: 0.45;
+  stroke-opacity: 0;
+  transition: fill-opacity var(--app-motion-fast) ease, stroke-opacity var(--app-motion-fast) ease, opacity var(--app-motion-fast) ease;
+
+  &.is-hovered {
+    fill-opacity: 0.8;
+    stroke-opacity: 0.8;
+  }
+
+  &.is-dimmed {
+    opacity: 0.3;
+  }
+
+  // Previews the group a switch target leads to.
+  &.is-dimmed.is-hovered {
+    opacity: 1;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+}
+
+.wiki-graph-canvas :deep(.hide-edge-markers line) {
+  marker-start: none;
+  marker-end: none;
+}
+
+.wiki-graph-canvas :deep(.graph-cluster-caption) {
+  cursor: zoom-in;
+  outline: none;
+
+  text {
+    paint-order: stroke;
+    stroke: var(--td-bg-color-container);
+    stroke-width: 4px;
+    stroke-linejoin: round;
+  }
+
+  .graph-caption-pill {
+    display: none;
+  }
+
+  &:hover text,
+  &:focus-visible text {
+    fill: var(--td-brand-color);
+    text-decoration: underline;
+  }
+
+  &.is-outside-focus {
+    cursor: pointer;
+
+    .graph-caption-pill {
+      display: inline;
+      fill: var(--td-bg-color-container);
+      stroke: var(--td-component-border);
+      stroke-width: 1px;
+      transition: stroke var(--app-motion-instant) ease;
+    }
+
+    text {
+      fill: var(--td-text-color-secondary);
+      font-weight: 500;
+      stroke: none;
+    }
+
+    &:hover,
+    &:focus-visible {
+      .graph-caption-pill {
+        stroke: var(--td-brand-color);
+      }
+
+      text {
+        fill: var(--td-brand-color);
+        text-decoration: none;
+      }
+    }
+  }
+}
+
+.graph-unlinked-toggle {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
 .wiki-graph {
   flex: 1;
   position: relative;
@@ -6550,44 +6993,4 @@ onUnmounted(() => {
 }
 </style>
 
-<style lang="less">
-/* Fix Embedded Chat UI (unscoped because drawer attaches to body) */
-.wiki-fix-drawer {
-  .t-drawer__body {
-    padding: 20px !important;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    overflow: hidden;
-  }
-
-  .chat {
-    max-width: 100% !important;
-    min-width: 100% !important;
-    padding: 0 !important;
-    height: 100% !important;
-    flex: 1 !important;
-    border-radius: 0 !important;
-  }
-
-  .chat_scroll_box {
-    padding: 0 !important;
-  }
-
-  .chat>.input-container {
-    padding: 16px 0 0 0 !important;
-    box-sizing: border-box;
-    width: 100% !important;
-    max-width: 100% !important;
-    margin: 0 !important;
-    overflow-x: hidden;
-  }
-
-  .msg_list {
-    max-width: 100% !important;
-    padding-bottom: 0 !important;
-    margin: 0 !important;
-  }
-}
-</style>
 <style lang="less" src="@/components/css/wiki-graph-drawer.less"></style>

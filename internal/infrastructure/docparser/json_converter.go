@@ -1,6 +1,7 @@
 package docparser
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -52,8 +53,14 @@ func jsonToMarkdown(data []byte) (string, error) {
 	}
 	data = trimBOM(data)
 
+	// UseNumber keeps each number as written. Decoded into a float64, an id
+	// above 2^53 changed digits: 12345678901234567890 came out as
+	// 12345678901234567000. ValidateJSONContent above has already rejected
+	// anything after the value.
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
 	var parsed interface{}
-	if err := json.Unmarshal(data, &parsed); err != nil {
+	if err := decoder.Decode(&parsed); err != nil {
 		return "", fmt.Errorf("failed to parse JSON: %w", err)
 	}
 
@@ -206,7 +213,7 @@ func listToDictPreprocess(data interface{}) interface{} {
 
 // jsonSize returns the serialized JSON byte length of a value.
 func jsonSize(v interface{}) int {
-	b, err := json.Marshal(v)
+	b, err := marshalJSON(v, "")
 	if err != nil {
 		return 0
 	}
@@ -215,11 +222,26 @@ func jsonSize(v interface{}) int {
 
 // formatValue formats a JSON value with indentation.
 func formatValue(v interface{}) string {
-	b, err := json.MarshalIndent(v, "", "  ")
+	b, err := marshalJSON(v, "  ")
 	if err != nil {
-		b, _ = json.Marshal(v)
+		b, _ = marshalJSON(v, "")
 	}
 	return string(b)
+}
+
+// marshalJSON encodes v like json.Marshal, indented when indent is set, but
+// leaves <, > and & as they are. json.Marshal writes them as \u003c, \u003e
+// and \u0026, which is meant for embedding in HTML and only garbles the text
+// a chunk is read and searched as.
+func marshalJSON(v interface{}, indent string) ([]byte, error) {
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", indent)
+	if err := encoder.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }
 
 // wrapCodeBlock wraps content in a fenced JSON code block.

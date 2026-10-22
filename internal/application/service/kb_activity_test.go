@@ -181,6 +181,44 @@ func TestRecordKBActivityOmitsAPIKeyForJWTUser(t *testing.T) {
 	}
 }
 
+func TestRecordKBActivityAttributesAgentActionsThroughTasks(t *testing.T) {
+	submit := types.WithAuditAgentAction(
+		types.TaskInitiator{UserID: "user-1", Role: types.TenantRoleContributor}.Apply(context.Background()),
+		types.AuditAgentAction{
+			SessionID: "s-1", AgentID: types.BuiltinWeKnoraAssistantID, Operation: "knowledge.delete",
+			ActingVia: "automation:a-1",
+		},
+	)
+	// The worker only sees what the task payload carried.
+	payload, err := json.Marshal(types.TaskInitiatorFromContext(submit))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var initiator types.TaskInitiator
+	if err := json.Unmarshal(payload, &initiator); err != nil {
+		t.Fatal(err)
+	}
+	audit := &captureKBActivityAudit{}
+	recordKBActivity(initiator.Apply(context.Background()), audit, 7, "kb-1", types.AuditActionKnowledgeDeleted,
+		"knowledge", "k-1", types.AuditOutcomeSuccess, nil)
+
+	if audit.entry == nil || audit.entry.ActorUserID != "user-1" {
+		t.Fatalf("the user stays the actor, got %#v", audit.entry)
+	}
+	var details map[string]any
+	if err := json.Unmarshal(audit.entry.Details, &details); err != nil {
+		t.Fatalf("unmarshal details: %v", err)
+	}
+	if details["via"] != "agent" || details["agent_session_id"] != "s-1" ||
+		details["agent_id"] != types.BuiltinWeKnoraAssistantID || details["agent_operation"] != "knowledge.delete" ||
+		details["agent_acting_via"] != "automation:a-1" {
+		t.Fatalf("details = %#v", details)
+	}
+	if details["trigger"] != nil {
+		t.Fatalf("agent attribution must not overwrite trigger: %#v", details)
+	}
+}
+
 func TestRecordWikiContentActivityUsesUnifiedActivityFeed(t *testing.T) {
 	audit := &captureKBActivityAudit{}
 	RecordWikiContentActivity(context.Background(), audit, 7, "kb-1", map[string]int{

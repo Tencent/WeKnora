@@ -23,6 +23,7 @@ export type SandboxTerminalControlFrame = {
   message?: string
   pty_id?: number
   backend?: string
+  reattachable?: boolean
   exit_code?: number | null
   cols?: number
   rows?: number
@@ -66,7 +67,9 @@ function statusFromErrorCode(
   if (code === 'SANDBOX_NOT_BOUND') {
     return provisionAttempted ? 'no_sandbox' : 'needs_provision'
   }
-  if (code === 'SANDBOX_PAUSED') return 'paused'
+  // SANDBOX_STOPPED 是不会暂停的后端（Docker）的同一状态：同样要用户确认才
+  // 启动，只是提示文案不同，见 sandboxMayBeReclaimed。
+  if (code === 'SANDBOX_PAUSED' || code === 'SANDBOX_STOPPED') return 'paused'
   if (code === 'TERMINAL_UNSUPPORTED') return 'unsupported'
   if (code === 'IDLE_DISCONNECTED') return 'idle'
   if (code === 'AUTH_REVOKED') return 'unauthorized'
@@ -75,6 +78,18 @@ function statusFromErrorCode(
 
 export type SandboxTerminalSession = {
   status: Ref<SandboxTerminalStatus>
+  /**
+   * status 为 paused 时，沙箱是否可能已被回收（后端回的是 SANDBOX_STOPPED）。
+   * Docker 没有暂停：没在运行的容器要么是停止了，要么已被空闲回收删掉，
+   * 启动后可能是一个全新的沙箱，不能对用户说"唤醒"。
+   */
+  sandboxMayBeReclaimed: Ref<boolean>
+  /**
+   * 最近一次 ready 帧声明的：断线后重连能否接回同一个 shell。Docker 为
+   * false：断开即结束 shell，重连只会得到新 shell，所以不自动重连，
+   * 由用户点"重新连接"。
+   */
+  reattachable: Ref<boolean>
   /**
    * 由 SandboxTerminal.vue 注入：PTY 输出写入 xterm。
    * 在 handler 注册前到达的二进制帧会先入队，避免 bash 提示符在 xterm
@@ -108,9 +123,14 @@ export function useSandboxTerminal(
   agentSourceTenantId: Ref<string | number | null | undefined> = ref(undefined),
 ): SandboxTerminalSession {
   const status = ref<SandboxTerminalStatus>('connecting')
+  const sandboxMayBeReclaimed = ref(false)
+  const reattachable = ref(true)
 
   let ws: WebSocket | null = null
   let opening = false
+  // 当前这条连接是否已收到 ready。ready 之前断线时服务端未必开了 shell，
+  // 照常自动重连；ready 之后断线是否重连取决于 reattachable。
+  let readyReceived = false
   let outputHandler: ((data: Uint8Array) => void) | null = null
   let pendingOutput: Uint8Array[] = []
   let pendingOutputBytes = 0
@@ -169,6 +189,7 @@ export function useSandboxTerminal(
     if (!sid) return
 
     opening = true
+    readyReceived = false
     status.value = 'connecting'
     try {
       const ticket = await mintTerminalTicket(sid)
@@ -241,11 +262,13 @@ export function useSandboxTerminal(
         event.code === 1008
         || reason === 'SANDBOX_NOT_BOUND'
         || reason === 'SANDBOX_PAUSED'
+        || reason === 'SANDBOX_STOPPED'
         || reason === 'TERMINAL_UNSUPPORTED'
         || reason === 'IDLE_DISCONNECTED'
         || reason === 'AUTH_REVOKED'
       ) {
         if (reason) {
+          sandboxMayBeReclaimed.value = reason === 'SANDBOX_STOPPED'
           status.value = statusFromErrorCode(reason, allowProvision)
         } else if (status.value === 'ready' || status.value === 'connecting') {
           status.value = 'error'
@@ -267,6 +290,7 @@ export function useSandboxTerminal(
         && status.value !== 'unauthorized'
       ) {
         status.value = 'error'
+        if (readyReceived && !reattachable.value) return
         scheduleReconnect()
       }
     }
@@ -286,6 +310,8 @@ export function useSandboxTerminal(
     switch (frame.type) {
       case 'ready':
         status.value = 'ready'
+        readyReceived = true
+        reattachable.value = frame.reattachable !== false
         rememberPid(typeof frame.pty_id === 'number' ? frame.pty_id : null)
         reconnectAttempt = 0
         // 创建意图到此为止。它只用来解释 SANDBOX_NOT_BOUND：连上之前是"还没
@@ -303,6 +329,7 @@ export function useSandboxTerminal(
         break
       }
       case 'error': {
+        sandboxMayBeReclaimed.value = frame.code === 'SANDBOX_STOPPED'
         status.value = statusFromErrorCode(frame.code, allowProvision)
         if (status.value !== 'idle' && status.value !== 'unauthorized' && status.value !== 'paused') {
           rememberPid(null)
@@ -342,6 +369,8 @@ export function useSandboxTerminal(
 
   const session: SandboxTerminalSession = {
     status,
+    sandboxMayBeReclaimed,
+    reattachable,
     onOutput(handler) {
       outputHandler = handler
       if (!handler) return

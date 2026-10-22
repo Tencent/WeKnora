@@ -15,8 +15,14 @@ func recordSelection(ctx context.Context, input []*types.SearchResult, res *Resu
 	scoredAsImage map[int]bool,
 ) {
 	out := summarizeSelection(input, res, opts, scoredAsImage)
-	logger.GetLogger(ctx).WithFields(logger.Fields(out)).Info("rerank selection")
-	_, span := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{Name: "rerank.selection"})
+	const name = "diagnostics.rerank.selection"
+	logger.GetLogger(ctx).WithFields(logger.Fields(out)).Info(name)
+	_, span := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
+		Name: name,
+		Metadata: map[string]interface{}{
+			"observation_kind": "diagnostic", "sample_scope": "image_vectors",
+		},
+	})
 	span.Finish(out, nil, nil)
 }
 

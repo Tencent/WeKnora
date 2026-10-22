@@ -206,7 +206,13 @@ The 0.2.4 lockfile removes calamine and five exclusive dependencies, retains
 ([upstream fix](https://github.com/RustCrypto/stream-ciphers/pull/580)); other
 transitive versions are retained.
 
-`cargo audit` on 2026-09-29 reports no vulnerabilities and one allowed warning:
+The local patch raises anydoc 0.2.4's `zip` requirement from `8.6.0` to `9`,
+with `9.0.4` pinned in `Cargo.lock`. This fixes
+`RUSTSEC-2026-0367`, `RUSTSEC-2026-0368`, and `RUSTSEC-2026-0369`; zip 8.x has
+no patched release. The patch cache marker includes a revision so existing
+`patched-anydoc/` copies are regenerated when the local patches change.
+
+`cargo audit` on 2026-10-17 reports no vulnerabilities and one allowed warning:
 `ttf-parser` 0.25.1 is
 unmaintained (`RUSTSEC-2026-0192`), pulled in transitively by the PDF stack. It
 is not a vulnerability and nothing here can fix it, so warnings report without

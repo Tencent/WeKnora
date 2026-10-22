@@ -331,6 +331,18 @@ func (s *knowledgeService) endStage(ctx context.Context, kid, name string, outpu
 }
 
 func (s *knowledgeService) failStage(ctx context.Context, kid, name, code, msg string, err error) {
+	s.failStageWithRetry(ctx, kid, name, code, msg, err, false)
+}
+
+// failStageRetryable is for failures returned to the task runner. Remaining
+// retry budget alone is insufficient: terminal failures acknowledge the task.
+func (s *knowledgeService) failStageRetryable(ctx context.Context, kid, name, code, msg string, err error) {
+	s.failStageWithRetry(ctx, kid, name, code, msg, err, true)
+}
+
+func (s *knowledgeService) failStageWithRetry(
+	ctx context.Context, kid, name, code, msg string, err error, retryable bool,
+) {
 	a := attemptFromCtx(ctx)
 	if a <= 0 {
 		return
@@ -339,7 +351,11 @@ func (s *knowledgeService) failStage(ctx context.Context, kid, name, code, msg s
 	if span == nil {
 		return
 	}
-	s.tracker().FailSpan(ctx, span, code, msg, err)
+	if retryable {
+		s.tracker().FailSpanRetryable(ctx, span, code, msg, err)
+	} else {
+		s.tracker().FailSpan(ctx, span, code, msg, err)
+	}
 }
 
 func (s *knowledgeService) skipStage(ctx context.Context, kid, name, reason string) {

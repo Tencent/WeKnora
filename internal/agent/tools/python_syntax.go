@@ -93,7 +93,11 @@ func firstBrokenPythonQuote(src string) (int, bool) {
 			for j < len(src) && (src[j] == ' ' || src[j] == '\t' || src[j] == '\r') {
 				j++
 			}
-			if ident, isKw := peekPythonIdent(src, j); ident != "" && !isKw {
+			// Prefixes on an adjacent literal are legal implicit concatenation,
+			// not a bare identifier after an accidentally closed quote. The next
+			// loop iteration still scans that literal for unterminated quotes.
+			_, _, _, _, adjacentLiteral := pythonStringStart(src, j)
+			if ident, isKw := peekPythonIdent(src, j); ident != "" && !isKw && !adjacentLiteral {
 				return endLine, true
 			}
 		}

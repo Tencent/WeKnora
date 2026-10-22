@@ -7,6 +7,7 @@ import DocumentFileIcon from './DocumentFileIcon.vue';
 import DocumentActionMenu from './DocumentActionMenu.vue';
 import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue';
 import { shownStall } from '@/utils/knowledgeProcessingStall';
+import type { FolderEntry } from '../folderTree';
 
 interface Tag {
   id: string;
@@ -46,6 +47,12 @@ const props = defineProps<{
   /** Every folder of the knowledge base, for the "move to folder" picker. */
   folderOptions?: FolderOption[];
   /**
+   * Direct sub-folders of the folder being browsed. They are listed ahead of
+   * the documents, the way a file manager shows folders before files. Filtering
+   * searches the subtree for documents, so the caller passes an empty list.
+   */
+  subFolders?: FolderEntry[];
+  /**
    * Show each row's folder under its name. Only useful when the list spans
    * several folders, i.e. while filtering; inside one folder the path would be
    * identical on every row.
@@ -79,6 +86,8 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const tagEditorId = ref<string | null>(null);
+const subFolderRows = computed(() => props.subFolders || []);
+const openFolder = (folder: FolderEntry) => emit('open-folder', folder.path);
 
 const formatTime = (time?: string) => {
   if (!time) return '--';
@@ -278,6 +287,28 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
     </div>
 
     <div class="doc-list-body" role="rowgroup">
+      <div v-for="folder in subFolderRows" :key="`folder:${folder.path}`" class="doc-list-row folder-row"
+        :data-folder-path="folder.path" role="row" @click="openFolder(folder)">
+        <!-- Folders are navigation entries, not documents: no batch checkbox. -->
+        <div class="cell cell-check" role="cell"></div>
+
+        <div class="cell cell-name" role="cell">
+          <span class="folder-row-icon" aria-hidden="true">
+            <t-icon name="folder" size="26px" />
+          </span>
+          <div class="row-file-text">
+            <div class="row-title-line">
+              <button type="button" class="row-file-name" :title="folder.path"
+                @click.stop="openFolder(folder)">{{ folder.name }}</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="cell cell-tags" role="cell"></div>
+        <div class="cell cell-status" role="cell"></div>
+        <div class="cell cell-actions" role="cell"></div>
+      </div>
+
       <div v-for="item in items" :key="item.id" class="doc-list-row"
         :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id }" :data-select-id="item.id"
         role="row" @click="emit('open', item)">
@@ -543,6 +574,22 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   &.selected .row-more-btn {
     opacity: 1;
   }
+}
+
+/* A folder is an entry in the same grid as a document, so every column stays
+   aligned; only the cells a folder has no value for stay empty. */
+.folder-row {
+  min-height: 56px;
+}
+
+.folder-row-icon {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--td-warning-color);
 }
 
 .cell {

@@ -59,6 +59,9 @@ func buildImageAssetQuery(filter *types.ImageListFilter, page *types.Pagination)
 	}
 	q.Keyword = strings.TrimSpace(filter.Keyword)
 	q.IsEnabled = filter.IsEnabled
+	if len(filter.KnowledgeIDs) > 0 {
+		q.KnowledgeIDs = filter.KnowledgeIDs
+	}
 
 	searchIn := filter.SearchIn
 	if len(searchIn) == 0 {

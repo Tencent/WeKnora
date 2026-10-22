@@ -1,7 +1,7 @@
 // @ts-nocheck
 <script setup lang="ts">
 import { indexEmbeddedSourceImages } from '@/utils/sourceImage';
-import { ref, shallowRef, watch, onMounted, onUnmounted, nextTick, defineAsyncComponent } from 'vue';
+import { ref, shallowRef, watch, onMounted, onUnmounted, onErrorCaptured, nextTick, defineAsyncComponent } from 'vue';
 import { previewKnowledgeFile } from '@/api/knowledge-base/index';
 import { previewTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { downloadArtifact } from '@/api/chat';
@@ -9,7 +9,7 @@ import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
-import { sanitizeHTML, sanitizeMarkdownHTML } from '@/utils/security';
+import { sanitizeHTML, sanitizeMarkdownHTML, hydrateProtectedFileImages } from '@/utils/security';
 import { preparePptxPreview, isCompletePptxRender } from '@/utils/pptxPreview';
 import { findMarkdownSourceRange } from '@/utils/markdownSourceLocate';
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown';
@@ -79,6 +79,14 @@ const emit = defineEmits<{
 
 const loading = ref(false);
 const error = ref('');
+// Async renderer setup/mount failures do not emit the renderer's `error` event.
+// Surface them in the preview instead of leaving an empty document area.
+onErrorCaptured((err) => {
+  error.value = t('preview.loadFailed');
+  loading.value = false;
+  console.error('Document renderer failed:', err);
+  return false;
+});
 const previewType = ref<FilePreviewKind>('unsupported');
 const blobUrl = ref('');
 const textContent = ref('');
@@ -486,6 +494,10 @@ async function loadPreview() {
       }
       case 'markdown': {
         await renderMarkdown(blob);
+        // Markdown 里的 resource:// 等受保护图片需要带鉴权换 blob（无 override
+        // 时走应用默认鉴权面：登录态 /files 代理）。已换过的元素幂等跳过。
+        await nextTick();
+        await hydrateProtectedFileImages(previewContent.value);
         break;
       }
       case 'pptx': {
@@ -1493,6 +1505,32 @@ onUnmounted(() => {
   }
   ul, ol { padding-left: 24px; margin: 8px 0; }
   li { margin: 4px 0; }
+  ul li:has(> .task-checkbox) { list-style: none; }
+  .task-checkbox {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    margin-right: 6px;
+    border: 1px solid @border-color;
+    border-radius: var(--app-radius-xs);
+    vertical-align: -2px;
+    position: relative;
+    &.checked {
+      background: @accent;
+      border-color: @accent;
+      &::after {
+        content: '';
+        position: absolute;
+        left: 4px;
+        top: 1px;
+        width: 4px;
+        height: 8px;
+        border: solid #fff;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+      }
+    }
+  }
 
   table {
     .preview-table(@bg-muted; var(--td-bg-color-container-hover));
@@ -1686,16 +1724,32 @@ mark.source-locate-mark {
   background-color: var(--app-source-highlight-bg);
   color: inherit;
   border-radius: var(--app-radius-xs);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .source-locate-block {
   background-color: var(--app-source-highlight-soft-bg) !important;
-  outline: 1px solid var(--app-source-highlight-border);
-  outline-offset: 2px;
-  border-radius: var(--app-radius-xs);
+  box-shadow: inset 3px 0 var(--app-source-highlight-border);
+}
+
+/* Cell backgrounds can obscure a row's marker. Paint each cell once and
+   keep the accent on the leading edge, without boxing every table row. */
+tr.source-locate-block {
+  background-color: transparent !important;
+  box-shadow: none;
 }
 
 tr.source-locate-block > td {
   background-color: var(--app-source-highlight-soft-bg) !important;
+}
+
+tr.source-locate-block > td:first-child {
+  box-shadow: inset 3px 0 var(--app-source-highlight-border);
+}
+
+img.source-locate-block {
+  outline: 1px solid var(--app-source-highlight-border);
+  outline-offset: 2px;
 }
 </style>

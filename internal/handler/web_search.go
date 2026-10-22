@@ -22,7 +22,7 @@ func NewWebSearchHandler() *WebSearchHandler {
 // @Description  返回所有已注册的网络搜索 provider（含元数据）
 // @Tags         网络搜索
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "provider 列表"
+// @Success      200  {object}  handler.DataResponse{data=[]types.WebSearchProviderTypeInfo}  "provider 列表"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /web-search/providers [get]

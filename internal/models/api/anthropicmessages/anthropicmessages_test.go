@@ -114,6 +114,23 @@ func TestBuildRequestBody_AdaptiveEffort(t *testing.T) {
 	assert.False(t, hasEffort)
 }
 
+func TestBuildRequestBody_ThinkingOffType(t *testing.T) {
+	c := newClient(t, "https://api.anthropic.com/v1", func(cfg *Config) {
+		cfg.Settings.ThinkingMode = api.AnthropicThinkingAdaptive
+		cfg.Settings.SupportsEffort = true
+		cfg.Settings.ThinkingOffType = "between_tools"
+	})
+	off := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
+		&api.Options{ReasoningEffort: api.ReasoningOff}, false)
+	assert.Equal(t, map[string]any{"type": "between_tools"}, off["thinking"])
+	_, hasEffort := off["output_config"]
+	assert.False(t, hasEffort)
+
+	on := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
+		&api.Options{ReasoningEffort: api.ReasoningHigh}, false)
+	assert.Equal(t, map[string]any{"type": "adaptive"}, on["thinking"])
+}
+
 func TestBuildRequestBody_NoThinkingKeepsSampling(t *testing.T) {
 	c := newClient(t, "https://api.anthropic.com/v1", nil)
 	out := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},

@@ -422,6 +422,7 @@ func (h *Handler) writeAgentQueryEvent(
 	sessionID, userMessageID string,
 	userCreatedAt time.Time,
 	assistantMessage *types.Message,
+	resume *types.AgentResume,
 ) {
 	assistantMessageID := ""
 	var assistantCreatedAt time.Time
@@ -432,6 +433,10 @@ func (h *Handler) writeAgentQueryEvent(
 	agentQueryEvent := createAgentQueryEvent(
 		sessionID, assistantMessageID, userMessageID, userCreatedAt, assistantCreatedAt,
 	)
+	if resume != nil && resume.Prompt != nil {
+		agentQueryEvent.Data["resume_pending_id"] = resume.Prompt.ID
+		agentQueryEvent.Data["resume_tool_call_id"] = resume.Prompt.ToolCallID
+	}
 	if err := h.streamManager.AppendEvent(ctx, sessionID, assistantMessageID, agentQueryEvent); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": sessionID,
@@ -463,22 +468,25 @@ func getFloat64(m map[string]interface{}, key string) float64 {
 // through JSON/Redis serialization, preserving all fields including metadata.
 func searchResultFromMap(refMap map[string]interface{}) *types.SearchResult {
 	sr := &types.SearchResult{
-		ID:                   getString(refMap, "id"),
-		Content:              getString(refMap, "content"),
-		KnowledgeID:          getString(refMap, "knowledge_id"),
-		ChunkIndex:           int(getFloat64(refMap, "chunk_index")),
-		KnowledgeTitle:       getString(refMap, "knowledge_title"),
-		StartAt:              int(getFloat64(refMap, "start_at")),
-		EndAt:                int(getFloat64(refMap, "end_at")),
-		Seq:                  int(getFloat64(refMap, "seq")),
-		Score:                getFloat64(refMap, "score"),
-		ChunkType:            getString(refMap, "chunk_type"),
-		ParentChunkID:        getString(refMap, "parent_chunk_id"),
-		ImageInfo:            getString(refMap, "image_info"),
-		KnowledgeFilename:    getString(refMap, "knowledge_filename"),
-		KnowledgeSource:      getString(refMap, "knowledge_source"),
-		KnowledgeDescription: getString(refMap, "knowledge_description"),
-		KnowledgeBaseID:      getString(refMap, "knowledge_base_id"),
+		ID:                      getString(refMap, "id"),
+		Content:                 getString(refMap, "content"),
+		KnowledgeID:             getString(refMap, "knowledge_id"),
+		ChunkIndex:              int(getFloat64(refMap, "chunk_index")),
+		KnowledgeTitle:          getString(refMap, "knowledge_title"),
+		StartAt:                 int(getFloat64(refMap, "start_at")),
+		EndAt:                   int(getFloat64(refMap, "end_at")),
+		Seq:                     int(getFloat64(refMap, "seq")),
+		Score:                   getFloat64(refMap, "score"),
+		ChunkType:               getString(refMap, "chunk_type"),
+		ParentChunkID:           getString(refMap, "parent_chunk_id"),
+		ImageInfo:               getString(refMap, "image_info"),
+		KnowledgeFilename:       getString(refMap, "knowledge_filename"),
+		KnowledgeSource:         getString(refMap, "knowledge_source"),
+		KnowledgeChannel:        getString(refMap, "knowledge_channel"),
+		KnowledgeDescription:    getString(refMap, "knowledge_description"),
+		KnowledgeCustomMetadata: getString(refMap, "knowledge_custom_metadata"),
+		MatchedContent:          getString(refMap, "matched_content"),
+		KnowledgeBaseID:         getString(refMap, "knowledge_base_id"),
 	}
 	if meta, ok := refMap["metadata"].(map[string]interface{}); ok {
 		metadata := make(map[string]string)

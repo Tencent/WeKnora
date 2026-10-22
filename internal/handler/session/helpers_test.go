@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -62,23 +63,26 @@ func TestValidateUnscopedTagIDs(t *testing.T) {
 // survive.
 func TestSearchResultFromMap_RoundTrip(t *testing.T) {
 	original := &types.SearchResult{
-		ID:                   "chunk-1",
-		Content:              "first part\nsecond part",
-		KnowledgeID:          "knowledge-1",
-		ChunkIndex:           3,
-		KnowledgeTitle:       "title",
-		StartAt:              10,
-		EndAt:                20,
-		Seq:                  2,
-		Score:                4.5,
-		ChunkType:            "text",
-		ParentChunkID:        "parent-1",
-		ImageInfo:            `[{"url":"cdn.example.com"}]`,
-		KnowledgeFilename:    "doc.txt",
-		KnowledgeSource:      "upload",
-		KnowledgeDescription: "desc",
-		KnowledgeBaseID:      "kb-1",
-		Metadata:             map[string]string{"page": "3"},
+		ID:                      "chunk-1",
+		Content:                 "first part\nsecond part",
+		KnowledgeID:             "knowledge-1",
+		ChunkIndex:              3,
+		KnowledgeTitle:          "title",
+		StartAt:                 10,
+		EndAt:                   20,
+		Seq:                     2,
+		Score:                   4.5,
+		ChunkType:               "text",
+		ParentChunkID:           "parent-1",
+		ImageInfo:               `[{"url":"cdn.example.com"}]`,
+		KnowledgeFilename:       "doc.txt",
+		KnowledgeSource:         "upload",
+		KnowledgeChannel:        "api",
+		KnowledgeDescription:    "desc",
+		KnowledgeCustomMetadata: "course_url: https://example.com/course\nlesson_url: https://example.com/lesson",
+		MatchedContent:          "matched question",
+		KnowledgeBaseID:         "kb-1",
+		Metadata:                map[string]string{"page": "3"},
 		MatchedImages: []types.MatchedImage{
 			{ChunkID: "image-1", KnowledgeBaseID: "kb-1", URL: "resource://image"},
 		},
@@ -110,6 +114,9 @@ func TestSearchResultFromMap_RoundTrip(t *testing.T) {
 	assert.Equal(t, original.KnowledgeFilename, got.KnowledgeFilename)
 	assert.Equal(t, original.KnowledgeSource, got.KnowledgeSource)
 	assert.Equal(t, original.KnowledgeDescription, got.KnowledgeDescription)
+	assert.Equal(t, original.KnowledgeChannel, got.KnowledgeChannel)
+	assert.Equal(t, original.KnowledgeCustomMetadata, got.KnowledgeCustomMetadata)
+	assert.Equal(t, original.MatchedContent, got.MatchedContent)
 	assert.Equal(t, original.KnowledgeBaseID, got.KnowledgeBaseID)
 	assert.Equal(t, original.Metadata, got.Metadata)
 	assert.Equal(t, original.SourceLocators, got.SourceLocators)
@@ -138,4 +145,23 @@ func TestCreateAgentQueryEventOmitsZeroTimestamps(t *testing.T) {
 	assert.False(t, hasUserID)
 	assert.False(t, hasUserAt)
 	assert.False(t, hasAssistantAt)
+}
+
+func TestQueryEventMarksApprovalResumeGeneration(t *testing.T) {
+	resumes := []*types.AgentResume{nil, {Prompt: &types.AgentPrompt{ID: "approval", ToolCallID: "blocked"}}}
+	for _, resume := range resumes {
+		recorder := &completionEventRecorder{}
+		h := &Handler{streamManager: recorder}
+		h.writeAgentQueryEvent(
+			context.Background(), "session", "user", time.Time{}, &types.Message{ID: "answer"}, resume,
+		)
+		require.Len(t, recorder.events, 1)
+		data := recorder.events[0].Data
+		if resume == nil {
+			require.NotContains(t, data, "resume_pending_id")
+		} else {
+			require.Equal(t, "approval", data["resume_pending_id"])
+			require.Equal(t, "blocked", data["resume_tool_call_id"])
+		}
+	}
 }

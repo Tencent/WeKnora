@@ -83,6 +83,7 @@ export function rewindableMessageIds(
   if (opts.embeddedMode || opts.outgoingWork) {
     return ids
   }
+  let tail: { id: string; role: unknown } | null = null
   for (const message of messages) {
     if (message.role === 'assistant' && message.is_completed === false) {
       return new Set<string>()
@@ -90,7 +91,12 @@ export function rewindableMessageIds(
     const id = String(message.id || '')
     if (id && (message.role === 'assistant' || message.role === 'user')) {
       ids.add(id)
+      tail = { id, role: message.role }
     }
+  }
+  // Rewinding to the newest answer would delete nothing.
+  if (tail?.role === 'assistant') {
+    ids.delete(tail.id)
   }
   return ids
 }

@@ -118,6 +118,8 @@ type Tenant struct {
 	RetrievalConfig *RetrievalConfig `yaml:"retrieval_config" json:"retrieval_config" gorm:"type:jsonb"`
 	// Memory config: workspace switch for cross-session long-term memory
 	MemoryConfig *MemoryConfig `yaml:"memory_config" json:"memory_config" gorm:"type:jsonb"`
+	// Assistant config: display name and access ceiling of the WeKnora assistant
+	AssistantConfig *AssistantConfig `yaml:"assistant_config" json:"assistant_config" gorm:"type:jsonb"`
 	// API principal config: controls how X-API-Key requests map to terminal principals.
 	APIPrincipalConfig *APIPrincipalConfig `yaml:"api_principal_config" json:"-" gorm:"type:jsonb"`
 	// Creation time
@@ -687,6 +689,18 @@ type TenantSandboxConfig struct {
 	// afterwards boot the new snapshot.
 	SkillRollout string `json:"skill_rollout,omitempty"`
 
+	// AllocationMode decides how a session that has not yet used a sandbox
+	// of this config is placed: "session" (default) gives it a machine of its
+	// own, "user" lets one verified owner's sessions share a machine. A
+	// session never changes mode after its first use; see
+	// internal/sandbox/allocation.
+	AllocationMode string `json:"allocation_mode,omitempty"`
+
+	// UserSandboxEmptyRetentionDays is how long a user machine with no live
+	// session is kept before the reclaim job deletes it. 0 means the default
+	// (7); values above 90 are rejected.
+	UserSandboxEmptyRetentionDays int `json:"user_sandbox_empty_retention_days,omitempty"`
+
 	// Network is the outbound/inbound network policy applied to every sandbox
 	// created from this config — chat sessions, skill installs and deep
 	// connectivity probes alike. nil and the zero value mean the same thing:
@@ -836,6 +850,14 @@ const (
 	// SkillRolloutNewSession leaves live sandboxes on the previous image.
 	// Only a session that starts after the install or removal boots the new one.
 	SkillRolloutNewSession = "new_session"
+)
+
+const (
+	// SandboxAllocationSession is one sandbox per session.
+	SandboxAllocationSession = "session"
+	// SandboxAllocationUser shares one sandbox across a user's sessions.
+	// allocation.ParseMode reads the same strings.
+	SandboxAllocationUser = "user"
 )
 
 // RebuildsExistingOnSkillChange reports whether an install or removal should

@@ -19,12 +19,24 @@ const (
 	maxChunkLimit       = 100
 )
 
+// readOnlyEndpointAnnotations overrides mcp.NewTool's defaults. Those defaults
+// set destructiveHint and openWorldHint to true, so a read-only hint alone
+// still advertises the tool as destructive.
+func readOnlyEndpointAnnotations() mcp.ToolOption {
+	return func(t *mcp.Tool) {
+		mcp.WithReadOnlyHintAnnotation(true)(t)
+		mcp.WithDestructiveHintAnnotation(false)(t)
+		mcp.WithIdempotentHintAnnotation(true)(t)
+		mcp.WithOpenWorldHintAnnotation(false)(t)
+	}
+}
+
 func listKnowledgeBasesTool() mcp.Tool {
 	return mcp.NewTool(types.MCPEndpointToolListKnowledgeBases,
 		mcp.WithDescription("List the knowledge bases this endpoint can access, with their id, name, description "+
 			"and which retrieval modes (semantic, keyword, wiki) each supports. Call this first to learn what is in "+
 			"scope; other tools accept either the id or the exact name."),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyEndpointAnnotations(),
 	)
 }
 
@@ -41,7 +53,7 @@ func searchKnowledgeTool() mcp.Tool {
 		mcp.WithArray("knowledge_base_ids", mcp.WithStringItems(),
 			mcp.Description("Optional knowledge base ids or names to restrict the search; defaults to every "+
 				"knowledge base in scope")),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyEndpointAnnotations(),
 	)
 }
 
@@ -56,7 +68,7 @@ func grepChunksTool() mcp.Tool {
 		mcp.WithNumber("limit", mcp.Description("Maximum passages to return, default 10, max 30")),
 		mcp.WithArray("knowledge_base_ids", mcp.WithStringItems(),
 			mcp.Description("Optional knowledge base ids or names to restrict the search")),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyEndpointAnnotations(),
 	)
 }
 
@@ -68,21 +80,26 @@ func listDocumentsTool() mcp.Tool {
 		mcp.WithString("keyword", mcp.Description("Optional substring to filter document titles")),
 		mcp.WithNumber("page", mcp.Description("1-based page number, default 1")),
 		mcp.WithNumber("page_size", mcp.Description("Documents per page, default 20, max 100")),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyEndpointAnnotations(),
 	)
 }
 
 func readDocumentTool() mcp.Tool {
 	return mcp.NewTool(types.MCPEndpointToolReadDocument,
 		mcp.WithDescription("Read a document's metadata and its text chunks in order. Page through long documents "+
-			"with offset and limit, or pass query to return only the chunks containing a phrase (with one chunk "+
-			"of context on each side)."),
+			"with offset and limit, or pass query to find chunks containing every whitespace-separated word, "+
+			"case-insensitively and in any order. Query mode returns at most 20 matches plus one chunk of "+
+			"context on each side, subject to the output size budget; limit does not apply. If truncated, "+
+			"continue with offset=next_offset from the response."),
 		mcp.WithString("knowledge_id", mcp.Required(),
 			mcp.Description("Document id from search results or list_documents")),
-		mcp.WithNumber("offset", mcp.Description("Chunk offset to start from, default 0")),
-		mcp.WithNumber("limit", mcp.Description("Number of chunks to return, default 20, max 100")),
-		mcp.WithString("query", mcp.Description("Optional case-insensitive phrase to find inside the document")),
-		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithNumber("offset", mcp.Description("0-based position in document reading order, default 0; "+
+			"use returned next_offset to continue")),
+		mcp.WithNumber("limit", mcp.Description("Chunks per page without query, default 20, max 100; "+
+			"ignored in query mode; output size budget may reduce the page")),
+		mcp.WithString("query", mcp.Description("Optional case-insensitive keywords split on whitespace; "+
+			"every word must occur in the chunk, in any order (not an exact phrase)")),
+		readOnlyEndpointAnnotations(),
 	)
 }
 

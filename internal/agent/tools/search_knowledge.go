@@ -52,8 +52,10 @@ var searchKnowledgeTool = BaseTool{
 		"profile fits the question. When nothing passes the relevance check, rephrase with terms the documents " +
 		"would use; repeating the same query in another mode usually does not help. For identifiers, error " +
 		"codes or exact names retry with mode=keyword.\n" +
-		"Every chunk carries a cN handle and belongs to a dN document. Use read_document(id=cN, context=k) to " +
-		"read the text around a chunk, and read_document(id=dN) to read a document from its start. Retrieval " +
+		"Every chunk carries a chunk://N handle and belongs to a doc://N " +
+		"document. Use read_document(id=chunk://N, context=k) to " +
+		"read the text around a chunk, and read_document(id=doc://N) to read a " +
+		"document from its start. Retrieval " +
 		"matches chunk text; the relevance model also " +
 		"sees the document title. To find a document by its title or file name use list_documents(keyword=...).",
 	schema: json.RawMessage(`{
@@ -71,7 +73,7 @@ var searchKnowledgeTool = BaseTool{
     },
     "knowledge_base_ids": {
       "type": "array",
-      "description": "Optional bN knowledge-base handles from the runtime context to restrict the search",
+      "description": "Optional kb://N knowledge-base handles from the runtime context to restrict the search",
       "items": { "type": "string" },
       "maxItems": 10
     },
@@ -759,7 +761,7 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 						DisableKeywordsMatch: usedMode == SearchModeSemantic,
 						// Neighbor, parent and related chunks came back as
 						// extra rows that were never retrieved, tripling the
-						// rerank input; read_document(cN, context=k) serves
+						// rerank input; read_document(chunk://N, context=k) serves
 						// surrounding text on demand.
 						SkipContextEnrichment: true,
 					})
@@ -797,7 +799,7 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 						DisableKeywordsMatch: usedMode == SearchModeSemantic,
 						// Neighbor, parent and related chunks came back as
 						// extra rows that were never retrieved, tripling the
-						// rerank input; read_document(cN, context=k) serves
+						// rerank input; read_document(chunk://N, context=k) serves
 						// surrounding text on demand.
 						SkipContextEnrichment: true,
 					})
@@ -1073,8 +1075,10 @@ func (t *SearchKnowledgeTool) formatOutput(
 			tag = "faq"
 			idAttr = fmt.Sprintf("faq_id=\"%s\" index=\"%d\"", xmlEscape(result.ID), result.ChunkIndex)
 		}
-		fmt.Fprintf(&ob, "<%s rank=\"%d\" %s knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\">\n",
-			tag, i+1, idAttr, xmlEscape(result.KnowledgeBaseID), xmlEscape(result.KnowledgeTitle), result.Score)
+		fmt.Fprintf(&ob, "<%s rank=\"%d\" %s knowledge_base_id=\"%s\" "+
+			"knowledge_title=\"%s\" chunk_type=\"%s\" score=\"%.3f\">\n",
+			tag, i+1, idAttr, xmlEscape(result.KnowledgeBaseID),
+			xmlEscape(result.KnowledgeTitle), xmlEscape(result.ChunkType), result.Score)
 		if snippet != "" {
 			fmt.Fprintf(&ob, "<match_snippet>%s</match_snippet>\n", xmlEscape(snippet))
 		}
@@ -1098,6 +1102,7 @@ func (t *SearchKnowledgeTool) formatOutput(
 		row := map[string]interface{}{
 			"result_index":        i + 1,
 			"content":             result.Content,
+			"chunk_type":          result.ChunkType,
 			"knowledge_id":        result.KnowledgeID,
 			"knowledge_base_id":   result.KnowledgeBaseID,
 			"knowledge_title":     result.KnowledgeTitle,

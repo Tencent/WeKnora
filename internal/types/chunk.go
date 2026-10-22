@@ -131,54 +131,54 @@ type VideoInfo struct {
 // Chunks can be independently embedded as vectors and retrieved, supporting precise content localization
 type Chunk struct {
 	// Unique identifier of the chunk, using UUID format
-	ID string `json:"id"                       gorm:"type:varchar(36);primaryKey"`
+	ID string `json:"id"                       gorm:"type:varchar(36);primaryKey" extensions:"x-agent=chunk_id"`
 	// SeqID is an auto-increment integer ID for external API usage (FAQ entries)
 	SeqID int64 `json:"seq_id"                   gorm:"type:bigint;uniqueIndex;autoIncrement"`
 	// Tenant ID, used for multi-tenant isolation
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the parent knowledge, associated with the Knowledge model
-	KnowledgeID string `json:"knowledge_id"`
+	KnowledgeID string `json:"knowledge_id" extensions:"x-agent"`
 	// ID of the knowledge base, for quick location
-	KnowledgeBaseID string `json:"knowledge_base_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id" extensions:"x-agent"`
 	// Optional tag ID for categorization within a knowledge base (used for FAQ)
 	TagID string `json:"tag_id"                   gorm:"type:varchar(36);index"`
 	// Actual text content of the chunk
-	Content string `json:"content"`
+	Content string `json:"content" extensions:"x-agent"`
 	// SourceContent is the immutable parser output. Legacy rows are lazily
 	// backfilled from Content on the first manual edit.
 	SourceContent string `json:"-"`
 	// ContentRevision is incremented for every user edit or rollback.
-	ContentRevision int `json:"content_revision" gorm:"not null;default:0"`
+	ContentRevision int `json:"content_revision" gorm:"not null;default:0" extensions:"x-agent"`
 	// IndexStatus reports whether the current content is reflected in the
 	// retrieval stores: ready | processing | failed.
-	IndexStatus string `json:"index_status" gorm:"type:varchar(16);not null;default:'ready'"`
+	IndexStatus string `json:"index_status" gorm:"type:varchar(16);not null;default:'ready'" extensions:"x-agent"`
 	// LastEditorID records the actor that produced the current revision.
 	LastEditorID string `json:"last_editor_id" gorm:"type:varchar(64);not null;default:''"`
 	// Index position of the chunk in the original document
-	ChunkIndex int `json:"chunk_index"`
+	ChunkIndex int `json:"chunk_index" extensions:"x-agent"`
 	// Whether the chunk is enabled, can be used to temporarily disable certain chunks
-	IsEnabled bool `json:"is_enabled"               gorm:"default:true"`
+	IsEnabled bool `json:"is_enabled"               gorm:"default:true" extensions:"x-agent"`
 	// Flags 存储多个布尔状态的位标志（如推荐状态等）
 	// 默认值为 ChunkFlagRecommended (1)，表示默认可推荐
 	Flags ChunkFlags `json:"flags"                    gorm:"default:1"`
 	// Status of the chunk
 	Status int `json:"status"                   gorm:"default:0"`
 	// Starting character position in the original text
-	StartAt int `json:"start_at"`
+	StartAt int `json:"start_at" extensions:"x-agent"`
 	// Ending character position in the original text
-	EndAt int `json:"end_at"`
+	EndAt int `json:"end_at" extensions:"x-agent"`
 	// Previous chunk ID
 	PreChunkID string `json:"pre_chunk_id"`
 	// Next chunk ID
 	NextChunkID string `json:"next_chunk_id"`
 	// Chunk 类型，用于区分不同类型的 Chunk
-	ChunkType ChunkType `json:"chunk_type"               gorm:"type:varchar(20);default:'text'"`
+	ChunkType ChunkType `json:"chunk_type"               gorm:"type:varchar(20);default:'text'" extensions:"x-agent"`
 	// 父 Chunk ID，用于关联图片 Chunk 和原始文本 Chunk
 	ParentChunkID string `json:"parent_chunk_id"          gorm:"type:varchar(36);index"`
 	// 关系 Chunk ID，用于关联关系 Chunk 和原始文本 Chunk
-	RelationChunks JSON `json:"relation_chunks"          gorm:"type:json"`
+	RelationChunks JSON `json:"relation_chunks"          gorm:"type:json" swaggertype:"array,string"`
 	// 间接关系 Chunk ID，用于关联间接关系 Chunk 和原始文本 Chunk
-	IndirectRelationChunks JSON `json:"indirect_relation_chunks" gorm:"type:json"`
+	IndirectRelationChunks JSON `json:"indirect_relation_chunks" gorm:"type:json" swaggertype:"array,string"`
 	// Metadata 存储 chunk 级别的扩展信息，例如 FAQ 元数据
 	Metadata JSON `json:"metadata"                 gorm:"type:json"`
 	// ContentHash 存储内容的 hash 值，用于快速匹配（主要用于 FAQ）
@@ -207,13 +207,13 @@ type ChunkRevision struct {
 	TenantID        uint64    `json:"tenant_id" gorm:"index"`
 	KnowledgeBaseID string    `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
 	KnowledgeID     string    `json:"knowledge_id" gorm:"type:varchar(36);index"`
-	ChunkID         string    `json:"chunk_id" gorm:"type:varchar(36);uniqueIndex:idx_chunk_revision"`
-	Revision        int       `json:"revision" gorm:"uniqueIndex:idx_chunk_revision"`
-	Content         string    `json:"content" gorm:"type:text"`
-	IsEnabled       bool      `json:"is_enabled"`
+	ChunkID         string    `json:"chunk_id" gorm:"type:varchar(36);uniqueIndex:idx_chunk_revision" extensions:"x-agent"`
+	Revision        int       `json:"revision" gorm:"uniqueIndex:idx_chunk_revision" extensions:"x-agent"`
+	Content         string    `json:"content" gorm:"type:text" extensions:"x-agent"`
+	IsEnabled       bool      `json:"is_enabled" extensions:"x-agent"`
 	EditorID        string    `json:"editor_id" gorm:"type:varchar(64)"`
-	EditSource      string    `json:"edit_source" gorm:"type:varchar(16)"`
-	EditedAt        time.Time `json:"edited_at"`
+	EditSource      string    `json:"edit_source" gorm:"type:varchar(16)" extensions:"x-agent"`
+	EditedAt        time.Time `json:"edited_at" extensions:"x-agent"`
 	CreatedAt       time.Time `json:"created_at"`
 }
 

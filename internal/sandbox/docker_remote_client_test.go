@@ -53,7 +53,23 @@ type fakeDockerEngine struct {
 	execStdout  string
 	execStderr  string
 	execExit    int
-	execErr     error
+	// execCreateHook observes each ExecCreate from whatever goroutine issued
+	// it, so a test can wait for a background exec (the terminal's marker
+	// refresh) without racing on the execOptions slice.
+	execCreateHook func(client.ExecCreateOptions)
+	// execInspectPID is what ExecInspect reports as the running process PID,
+	// used by the terminal's best-effort PID lookup.
+	execInspectPID int
+	// execInspectRunning is how many ExecInspect calls still report the exec
+	// as running before it reports the exit, which is how a daemon that has
+	// not recorded the exit code yet when the TTY stream hits EOF looks.
+	execInspectRunning atomic.Int32
+	execInspects       atomic.Int32
+	// execStarts records every ExecStart, so a test can prove the terminal's
+	// terminate exec was launched (detached) at close.
+	execStarts   []execStartCall
+	execStartErr error
+	execErr      error
 	// execNotRunningOnce makes the first ExecCreate fail the way the daemon
 	// does when the container has not reached State.Running yet.
 	execNotRunningOnce bool
@@ -63,6 +79,22 @@ type fakeDockerEngine struct {
 	// gives up on it. execStream is the stream handed to the last attach.
 	execStreamStalls bool
 	execStream       *stalledReader
+
+	// PTY (terminal) path. attachedOptions records every ExecAttach so a test
+	// can assert TTY was requested; execResizes records ExecResize calls.
+	// terminalStream, when set, is handed to a TTY attach verbatim (no stdcopy
+	// framing — that is exactly what a real TTY attach looks like).
+	attachedOptions []client.ExecAttachOptions
+	execResizes     []client.ExecResizeOptions
+	execResizeErr   error
+	terminalStream  io.Reader
+	// terminalBlocks makes a TTY attach return a stream that only ends when
+	// the hijacked connection is closed, mirroring a live shell.
+	terminalBlocks bool
+	// terminalConn, when set, is the hijacked connection of a TTY attach,
+	// both halves: a test holding the peer of a net.Pipe gets real deadline
+	// and back-pressure semantics.
+	terminalConn net.Conn
 
 	statResult map[string]container.PathStat
 	// statHook lets a test answer differently per call, which is how the
@@ -189,6 +221,9 @@ func (f *fakeDockerEngine) ExecCreate(
 	_ context.Context, _ string, options client.ExecCreateOptions,
 ) (client.ExecCreateResult, error) {
 	f.execOptions = append(f.execOptions, options)
+	if f.execCreateHook != nil {
+		f.execCreateHook(options)
+	}
 	if f.execNotRunningOnce && len(f.execOptions) == 1 {
 		return client.ExecCreateResult{}, cerrdefs.ErrConflict.WithMessage(
 			"container is not running")
@@ -200,8 +235,34 @@ func (f *fakeDockerEngine) ExecCreate(
 }
 
 func (f *fakeDockerEngine) ExecAttach(
-	_ context.Context, _ string, _ client.ExecAttachOptions,
+	_ context.Context, _ string, options client.ExecAttachOptions,
 ) (client.ExecAttachResult, error) {
+	f.attachedOptions = append(f.attachedOptions, options)
+	// A TTY attach is a raw byte stream: the daemon does not prepend the
+	// stdcopy 8-byte frame headers. Hand back exactly what the test supplied.
+	if options.TTY {
+		if f.terminalConn != nil {
+			return client.ExecAttachResult{HijackedResponse: client.HijackedResponse{
+				Conn:   f.terminalConn,
+				Reader: bufio.NewReader(f.terminalConn),
+			}}, nil
+		}
+		if f.terminalBlocks {
+			release := make(chan struct{})
+			return client.ExecAttachResult{HijackedResponse: client.HijackedResponse{
+				Conn:   &fakeHijackedConn{stdin: &f.execStdin, release: release},
+				Reader: bufio.NewReader(&terminalHijackReader{release: release, tail: f.terminalStream}),
+			}}, nil
+		}
+		stream := f.terminalStream
+		if stream == nil {
+			stream = strings.NewReader(f.execStdout)
+		}
+		return client.ExecAttachResult{HijackedResponse: client.HijackedResponse{
+			Conn:   &fakeHijackedConn{stdin: &f.execStdin},
+			Reader: bufio.NewReader(stream),
+		}}, nil
+	}
 	if f.execStreamStalls {
 		release := make(chan struct{})
 		f.execStream = &stalledReader{release: release}
@@ -217,6 +278,23 @@ func (f *fakeDockerEngine) ExecAttach(
 		Conn:   &fakeHijackedConn{stdin: &f.execStdin},
 		Reader: bufio.NewReader(&framed),
 	}}, nil
+}
+
+// terminalHijackReader is the raw-stream sibling of stalledReader: it blocks
+// until the paired hijacked connection closes, then yields tail (if any) before
+// EOF. That is how a real TTY attach ends when the client detaches.
+type terminalHijackReader struct {
+	release <-chan struct{}
+	once    sync.Once
+	tail    io.Reader
+}
+
+func (r *terminalHijackReader) Read(p []byte) (int, error) {
+	r.once.Do(func() { <-r.release })
+	if r.tail == nil {
+		return 0, io.EOF
+	}
+	return r.tail.Read(p)
 }
 
 // stalledReader blocks until the hijacked connection it is paired with is
@@ -250,10 +328,34 @@ func (r *stalledReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+func (f *fakeDockerEngine) ExecStart(
+	_ context.Context, execID string, options client.ExecStartOptions,
+) (client.ExecStartResult, error) {
+	f.execStarts = append(f.execStarts, execStartCall{execID: execID, options: options})
+	return client.ExecStartResult{}, f.execStartErr
+}
+
+// execStartCall is one recorded ExecStart.
+type execStartCall struct {
+	execID  string
+	options client.ExecStartOptions
+}
+
 func (f *fakeDockerEngine) ExecInspect(
 	_ context.Context, _ string, _ client.ExecInspectOptions,
 ) (client.ExecInspectResult, error) {
-	return client.ExecInspectResult{ExitCode: f.execExit}, nil
+	f.execInspects.Add(1)
+	if f.execInspectRunning.Add(-1) >= 0 {
+		return client.ExecInspectResult{Running: true, PID: f.execInspectPID}, nil
+	}
+	return client.ExecInspectResult{ExitCode: f.execExit, PID: f.execInspectPID}, nil
+}
+
+func (f *fakeDockerEngine) ExecResize(
+	_ context.Context, _ string, options client.ExecResizeOptions,
+) (client.ExecResizeResult, error) {
+	f.execResizes = append(f.execResizes, options)
+	return client.ExecResizeResult{}, f.execResizeErr
 }
 
 func (f *fakeDockerEngine) ContainerStatPath(
@@ -1065,6 +1167,10 @@ func TestDockerClientCapabilities(t *testing.T) {
 		"the daemon has no TTL to refresh; reclamation is WeKnora's own sweep")
 	require.True(t, caps.SupportsSnapshots,
 		"docker commit is the skill-image snapshot; without this flag install is refused")
+	require.True(t, caps.SupportsTerminals,
+		"the PTY is a hijacked TTY exec; without this flag the terminal tab shows unsupported")
+	require.False(t, caps.SupportsDesktop,
+		"desktop relaying is not scheduled for the docker backend yet")
 	require.False(t, caps.SupportsVolumes)
 }
 

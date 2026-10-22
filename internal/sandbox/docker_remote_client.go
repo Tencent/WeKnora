@@ -216,7 +216,9 @@ func (c *DockerRemoteClient) Provider() RemoteProvider { return SandboxTypeDocke
 // refresh: idle reclamation is WeKnora's own sweep, not a provider feature.
 // SupportsVolumes is false until the volume-mount surface is mapped onto
 // Docker named volumes; advertising it early would let a workspace configure
-// a mount that silently never appears.
+// a mount that silently never appears. SupportsDesktop stays false: the
+// desktop needs a way to reach the container's websockify port, which this
+// backend has no gateway for yet.
 func (c *DockerRemoteClient) Capabilities() RemoteSandboxCapabilities {
 	return RemoteSandboxCapabilities{
 		SupportsReconnect:             true,
@@ -230,6 +232,8 @@ func (c *DockerRemoteClient) Capabilities() RemoteSandboxCapabilities {
 		// filesystem-only (no memory) and lives on this daemon.
 		SupportsSnapshots: true,
 		SupportsVolumes:   false,
+		// The terminal is a hijacked TTY exec; see docker_terminal.go.
+		SupportsTerminals: true,
 	}
 }
 
@@ -719,6 +723,19 @@ func (c *DockerRemoteClient) Exec(
 		result.Killed = true
 	}
 	return result, nil
+}
+
+// dockerKeepAliveTimeout bounds the no-op exec KeepAlive runs.
+const dockerKeepAliveTimeout = 10 * time.Second
+
+// KeepAlive runs a no-op exec. dockerExecCommand touches the activity marker on
+// every exec, and the marker's mtime is all the idle sweeper reads, so ttl is
+// not needed here.
+func (c *DockerRemoteClient) KeepAlive(ctx context.Context, handle RemoteSandboxHandle, _ time.Duration) error {
+	_, err := c.Exec(ctx, handle, RemoteExecRequest{
+		Command: "true", Timeout: dockerKeepAliveTimeout, User: DefaultSandboxExecUser,
+	})
+	return err
 }
 
 // dockerExecGrace is the slack between the in-container timeout and the

@@ -216,7 +216,7 @@ pipeline = types.NewPipelineBuilder().
 
 **PluginRerank**（`rerank.go`，720 行）：
 
-1. **Passage 清洗** `cleanPassageForRerank`：重排模型做的是语义相似度，Markdown 结构语法是噪声。代码块与 `$$...$$` 公式块**只脱掉围栏、保留内部正文**（早期实现整块删除，纯代码或纯公式的候选会被清成空串而丢分）；HTML 标签、图片引用、链接标记（保留文字）、裸 URL、表格分隔行（数据行转逗号拼接）、标题/引用/加粗/列表标记按序剥离，最后压缩多余空行。
+1. **Passage 清洗** `reranking.CleanPassage`：重排模型做的是语义相似度，Markdown 结构语法是噪声。顶层反引号或波浪线代码围栏只移除开闭标记，正文不再经过 HTML、URL 或 Markdown 清洗，避免 XML 标签、接口地址和代码运算符被删除；匹配围栏类型和长度，未闭合围栏保护到分块末尾。这里只识别至多三个前导空格的顶层围栏，不覆盖行内代码、缩进代码或引用/列表容器中的代码块。围栏外的 `$$...$$` 公式块脱掉定界符、保留正文；HTML 标签、图片引用、链接标记（保留文字）、裸 URL、表格分隔行（数据行转逗号拼接）、标题/引用/加粗/列表标记按序剥离，并压缩围栏外的多余空行。整个 passage 仍去除首尾空白；原始分块正文不变。
 2. **Passage 增强** `getEnrichedPassage`：拼入 `ImageInfo` 的 Caption/OCR 文本与 `ChunkMetadata` 中的生成问题（GeneratedQuestions）；与正文相同的图片文本（OCR / 描述分块自身）不重复拼接。模型配置了单篇或单次请求长度上限时，超长 passage 从尾部截到上限；候选按检索分最多取 200 条送去打分。
 3. 调用 `rerankModel.Rerank(ctx, RewriteQuery, passages)`，按 `RerankThreshold` 过滤：
    - 全部低于阈值且 top1 ≥ `rerankFallbackMinScore`（默认 0.15；用户显式圈定标签/文档范围时为 0，保留权威范围的最佳候选）→ 保留 top1 兜底；
@@ -228,7 +228,7 @@ pipeline = types.NewPipelineBuilder().
      - 诊断里记录 `images_scored` / `images_kept`。
 4. **复合打分** `compositeScore`：`0.6*模型分 + 0.3*检索基础分 + 0.1*来源权重`（web_search 来源权重 0.95，其余 1.0），clamp 到 [0,1]。图谱实体检索命中的 chunk 没有检索分，基础分用模型分代替。基础分/模型分/复合分记录在 `Metadata["base_score"]` / `["model_score"]` / `["composite_score"]`。早期版本还会乘一个「越靠文档前部越高」的位置先验（±0.05），因为它与分块编辑后的偏移变化耦合且收益不明确，已被移除。
 5. **FAQ 加权**：`FAQPriorityEnabled` 且 `FAQScoreBoost > 1.0` 时，FAQ chunk 分数乘以 boost，记 `Metadata["faq_boosted"]`。结果不封顶到 1.0——封顶会让高分 FAQ 全部并列 1.0，彼此顺序退化为 tie-breaker。
-6. **MMR 多样性选择** `applyMMR`（λ=0.7，k=`RerankTopK`）：`mmr = 0.7*relevance - 0.3*max_jaccard_redundancy`，用 `searchutil.TokenizeSimple` + `Jaccard` 并行预计算 token 集合，迭代贪心选出 `RerankResult`。
+6. **MMR 多样性选择** `reranking.SelectMMR`（λ=0.7，k=`RerankTopK`）：`mmr = 0.7*relevance - 0.3*max_jaccard_redundancy`。对增强后的分块正文用 `searchutil.TokenizeSimple` 分词一次，再构建「token → 候选下标」倒排索引。每轮只累计与新选中分块共享 token 的候选交集，用 `交集 / (两侧 token 数之和 - 交集)` 计算 Jaccard，并更新最大冗余缓存；没有共享 token 的候选无需比较。索引使用连续数组存储，额外空间与候选 token 总数成正比，选择结果和平分时的输入顺序保持不变。`k=1` 时直接按相关性选择，跳过正文清洗、分词和索引构建。聊天、Agent 检索工具和检索 API 共用这一实现。
 
 **PluginMemoryAffinity**（`memory_affinity.go`）注册在链的最内层，同样先 `next()` 再后置处理：对该调用者过往回答中至少引用过 2 次的文档，按使用次数对数增长加权，最高 ×1.15，只用于在相近候选之间打破平局。随后才轮到 WikiBoost 的后置加权。
 

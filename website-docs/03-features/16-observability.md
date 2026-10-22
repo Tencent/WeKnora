@@ -136,6 +136,23 @@ flowchart LR
     G --> H["Generation: embedding / vlm / chat"]
 ```
 
+#### 检索调用与诊断记录
+
+`embedding.embed`、`retrieve`、`rerank` 分别记录 query 向量计算、实际检索阶段和重排模型调用的耗时。以 `diagnostics.` 开头的节点只记录已有结果的统计和筛选判定，不会额外发起检索或模型请求，也不应当作独立调用统计。
+
+| 诊断节点 | 含义 |
+| --- | --- |
+| `diagnostics.retrieval.vector.result_pool.initial` | 向量检索首次返回的结果池 |
+| `diagnostics.retrieval.keywords.result_pool.initial` | 关键词检索首次返回的结果池 |
+| `diagnostics.retrieval.<vector/keywords>.result_pool.refill` | 补充检索返回的结果池，仅在实际发生补充检索时出现 |
+| `diagnostics.retrieval.<vector/keywords>.filter_decision` | 应用过滤前的结果池及保留/淘汰判定 |
+| `diagnostics.retrieval.fusion.candidate_selection` | 融合后按候选数量上限截断的判定 |
+| `diagnostics.rerank.selection` | 重排后的保留/淘汰判定 |
+
+这些结果池包含文本、摘要、图片描述、OCR 和原图向量等符合查询范围的记录，并非只检索图片。总数统计覆盖全部候选，`image_samples` 只抽样展示原图向量命中；metadata 中用 `observation_kind=diagnostic` 和 `sample_scope=image_vectors` 标明用途。没有补充检索时，`result_pool.initial` 和 `filter_decision` 的样本可能相同，表示同一批数据在两个阶段被观察。
+
+命名调整只影响新产生的追踪；历史记录保留原来的 `retrieval.image_*` 和 `rerank.selection` 名称。按节点名称过滤的仪表盘或查询需同步调整。
+
 #### 每轮用量、调用用途与缓存
 
 每次模型调用继续生成独立 Generation；消息的 usage 保存本轮聚合 Token 用量，Agent 完成事件通过 turn_usage 返回，重开历史消息仍可读取。prompt_tokens、completion_tokens、total_tokens 为总计；cached_tokens 是 cache_read_tokens 的兼容别名，cache_read/write/miss 是输入 Token 的细分，不能再加到 prompt_tokens 上。
