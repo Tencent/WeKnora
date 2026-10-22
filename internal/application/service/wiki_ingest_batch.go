@@ -1384,7 +1384,9 @@ func (s *wikiIngestService) mapOneDocument(
 	// first maxContentForWiki runes are not lost. Single-call prompts
 	// (summary, legacy fallback, retraction) get a bounded head/middle/tail
 	// sample instead of a head-only cut.
-	segments, segmentsTruncated := splitWikiContent(fullContent, maxContentForWiki, wikiContentSegmentOverlap, batchCtx.contentSegmentLimit())
+	segments, segmentsTruncated := splitWikiContent(
+		fullContent, maxContentForWiki, wikiContentSegmentOverlap, batchCtx.contentSegmentLimit(),
+	)
 	content := sampleLongContent(fullContent, maxContentForWiki)
 	logger.Infof(ctx, "wiki ingest: doc %s chunks=%d content_len(raw=%d,sampled=%d) segments=%d segments_truncated=%v",
 		knowledgeID, len(chunks), rawRuneCount, utf8.RuneCountInString(content), len(segments), segmentsTruncated)
@@ -1434,14 +1436,17 @@ func (s *wikiIngestService) mapOneDocument(
 		pass0Failed       bool
 		segmentsFailed    int
 	)
-	logger.Infof(ctx, "wiki ingest: pass 0 — extracting candidate slugs for %s (%d segments)", knowledgeID, len(segments))
+	logger.Infof(ctx, "wiki ingest: pass 0 — extracting candidate slugs for %s (%d segments)",
+		knowledgeID, len(segments))
 	extractSpan := s.tracker().BeginSubSpan(ctx, wikiSpan, "postprocess.wiki.extract", types.SpanKindSubSpan, types.JSONMap{
 		"content_chars":      rawRuneCount,
 		"segments":           len(segments),
 		"segments_truncated": segmentsTruncated,
 		"old_pages":          len(oldPageSlugs),
 	})
-	extractedEntities, extractedConcepts, slugItems, segmentsFailed, err = s.extractCandidateSlugs(ctx, chatModel, payload.KnowledgeBaseID, segments, lang, oldPageSlugs, batchCtx)
+	extractedEntities, extractedConcepts, slugItems, segmentsFailed, err = s.extractCandidateSlugs(
+		ctx, chatModel, payload.KnowledgeBaseID, segments, lang, oldPageSlugs, batchCtx,
+	)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: pass 0 failed for %s (%v) — falling back to legacy extractor", knowledgeID, err)
 		pass0Failed = true

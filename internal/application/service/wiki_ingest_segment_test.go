@@ -68,7 +68,10 @@ func TestMergeCombinedExtractionsUnionsBySlug(t *testing.T) {
 		{Entities: []extractedItem{{Name: "Tencent", Slug: "entity/tencent", Aliases: []string{"腾讯"}}}},
 		{
 			Entities: []extractedItem{
-				{Name: "Tencent Holdings", Slug: "entity/tencent", Aliases: []string{"腾讯", "TCEHY"}, Description: "company"},
+				{
+					Name: "Tencent Holdings", Slug: "entity/tencent",
+					Aliases: []string{"腾讯", "TCEHY"}, Description: "company",
+				},
 				{Name: "WeKnora", Slug: "entity/weknora"},
 			},
 			Concepts: []extractedItem{{Name: "RAG", Slug: "concept/rag"}},
@@ -95,7 +98,11 @@ type segmentKeyedChatModel struct {
 	calls     int
 }
 
-func (m *segmentKeyedChatModel) Chat(_ context.Context, messages []chat.Message, _ *chat.ChatOptions) (*types.ChatResponse, error) {
+func (m *segmentKeyedChatModel) Chat(
+	_ context.Context,
+	messages []chat.Message,
+	_ *chat.ChatOptions,
+) (*types.ChatResponse, error) {
 	m.mu.Lock()
 	m.calls++
 	m.mu.Unlock()
@@ -111,7 +118,11 @@ func (m *segmentKeyedChatModel) Chat(_ context.Context, messages []chat.Message,
 	return &types.ChatResponse{Content: `{"entities":[],"concepts":[]}`}, nil
 }
 
-func (m *segmentKeyedChatModel) ChatStream(context.Context, []chat.Message, *chat.ChatOptions) (<-chan types.StreamResponse, error) {
+func (m *segmentKeyedChatModel) ChatStream(
+	context.Context,
+	[]chat.Message,
+	*chat.ChatOptions,
+) (<-chan types.StreamResponse, error) {
 	return nil, nil
 }
 
@@ -120,8 +131,9 @@ func (m *segmentKeyedChatModel) GetModelID() string   { return "segment" }
 
 func TestExtractCandidateSlugsReadsEverySegment(t *testing.T) {
 	model := &segmentKeyedChatModel{responses: map[string]string{
-		"SEGMENT_ONE":   `{"entities":[{"name":"Alpha","slug":"entity/alpha"}],"concepts":[]}`,
-		"SEGMENT_TWO":   `{"entities":[{"name":"Alpha","slug":"entity/alpha","aliases":["A"]}],"concepts":[{"name":"Late Idea","slug":"concept/late-idea"}]}`,
+		"SEGMENT_ONE": `{"entities":[{"name":"Alpha","slug":"entity/alpha"}],"concepts":[]}`,
+		"SEGMENT_TWO": `{"entities":[{"name":"Alpha","slug":"entity/alpha","aliases":["A"]}],` +
+			`"concepts":[{"name":"Late Idea","slug":"concept/late-idea"}]}`,
 		"SEGMENT_THREE": `not json`,
 	}}
 	svc := &wikiIngestService{}

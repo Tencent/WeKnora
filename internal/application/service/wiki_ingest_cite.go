@@ -111,7 +111,9 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	g.SetLimit(maxCitationBatchConcurrency)
 	for i, segment := range segments {
 		g.Go(func() error {
-			results[i], errs[i] = s.extractCandidateSlugsFromSegment(ctx, chatModel, segment, lang, prevSlugsText, batchCtx)
+			results[i], errs[i] = s.extractCandidateSlugsFromSegment(
+				ctx, chatModel, segment, lang, prevSlugsText, batchCtx,
+			)
 			return nil
 		})
 	}
@@ -126,7 +128,8 @@ func (s *wikiIngestService) extractCandidateSlugs(
 			if firstErr == nil {
 				firstErr = errs[i]
 			}
-			logger.Warnf(ctx, "wiki ingest: candidate slug extraction failed for segment %d/%d: %v", i+1, len(segments), errs[i])
+			logger.Warnf(ctx, "wiki ingest: candidate slug extraction failed for segment %d/%d: %v",
+				i+1, len(segments), errs[i])
 			continue
 		}
 		merged = append(merged, r)
