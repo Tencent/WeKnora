@@ -55,6 +55,17 @@ func TestLoadFromExcelRetriesFailedCreate(t *testing.T) {
 	tool := &DataAnalysisTool{db: newTestDuckDB(t), sessionID: "test-excel-load-retry"}
 	t.Cleanup(func() { tool.Cleanup(ctx) })
 	path := filepath.Join(t.TempDir(), "retry.xlsx")
+	writeWorkbook(t, path, map[string][][]any{
+		"Sales": {{"id", "amount"}, {1, 10}},
+	}, []string{"Sales"})
+	// Keep the workbook directory readable so the failure reaches CREATE.
+	// A missing file now fails earlier, during worksheet discovery.
+	rewriteExcelParts(t, path, func(name string, data []byte) (string, []byte) {
+		if strings.HasPrefix(name, "xl/worksheets/sheet") && strings.HasSuffix(name, ".xml") {
+			data = []byte(`<worksheet><sheetData>`)
+		}
+		return name, data
+	})
 
 	if _, err := tool.LoadFromExcel(ctx, path, "excel_retry"); err == nil ||
 		!strings.Contains(err.Error(), "failed to create table from Excel") {
