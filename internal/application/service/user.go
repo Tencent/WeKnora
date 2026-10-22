@@ -707,6 +707,25 @@ func (s *userService) UpdateUserPreferences(
 			}
 			g.Status = status
 		}
+		if patch.Gallery.ViewMode == types.GalleryViewWaterfall ||
+			patch.Gallery.ViewMode == types.GalleryViewCard {
+			g.ViewMode = patch.Gallery.ViewMode
+		}
+		if patch.Gallery.ThumbCols != 0 {
+			w := patch.Gallery.ThumbCols
+			if w < 1 {
+				w = 1
+			}
+			if w > types.GalleryThumbColsMax {
+				w = types.GalleryThumbColsMax
+			}
+			g.ThumbCols = w
+		}
+		// nil keeps whatever was recorded: "not sent" and "sent false" are
+		// different answers here, so the pointer is the wire format.
+		if patch.Gallery.ShowMeta != nil {
+			g.ShowMeta = patch.Gallery.ShowMeta
+		}
 		merged.Gallery = g
 	}
 

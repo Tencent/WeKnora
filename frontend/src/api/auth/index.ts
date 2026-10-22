@@ -102,11 +102,14 @@ export interface UserPreferences {
   last_active_tenant_id?: number | null
   // oidc_only_login 为 true 表示账号由 OIDC 自动开通且用户尚未设置已知密码。
   oidc_only_login?: boolean
-  // gallery 记录图库的个人状态：搜索激活模式与逐字段开/关（按属性 ID）。
-  // 每次变更整体覆盖该块；后端会校验 mode 与 status 取值。
+  // gallery 记录图库的个人状态：搜索激活模式与逐字段开/关（按属性 ID），
+  // 以及视图偏好（布局模式与缩略图列数档位）。每次变更整体覆盖该块；后端
+  // 会校验 mode / status / view_mode 取值并夹取 thumb_cols。
   gallery?: {
     mode?: 'all' | 'custom'
     status?: Record<string, string>
+    view_mode?: 'waterfall' | 'card'
+    thumb_cols?: number
   }
 }
 

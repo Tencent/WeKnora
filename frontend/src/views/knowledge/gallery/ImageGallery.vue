@@ -47,8 +47,12 @@ const sortPanelVisible = ref(false)
 const scrollEl = ref<HTMLElement | null>(null)
 const gridEl = ref<HTMLElement | null>(null)
 const loadMoreEl = ref<HTMLElement | null>(null)
+// Measured aspect ratios, keyed by image id. Read once per card in the
+// template, so writes are batched (see scheduleFlush) rather than applied one
+// by one.
 const imageRatios = ref<Record<string, number>>({})
-let cardObserver: ResizeObserver | undefined
+let gridObserver: ResizeObserver | undefined
+let observedGrid: HTMLElement | null = null
 let scrollObserver: ResizeObserver | undefined
 
 // Source-document restriction (the "filter by document" picker). An empty
@@ -60,6 +64,29 @@ const sourcePickerVisible = ref(false)
 // Attribute selections for free-text ("keywords") attributes: namespaced attr
 // id -> literal values (OR within the attribute, AND across attributes).
 const attrSelections = ref<Record<string, string[]>>({})
+
+// View preferences: the layout mode, the thumbnail column count and whether
+// the caption/source block is shown. The slider picks how many cards a row
+// holds, with its stops derived live from the layout width (min =
+// floor(w/360), max = ceil(w/150)), so every stop always changes the layout.
+// 0 = never recorded (auto: ~280px columns).
+const viewMode = ref<'waterfall' | 'card'>('waterfall')
+const thumbCols = ref(0)
+// When off, cards are the thumbnail alone: no caption, no source document.
+// Independent of the layout, so it works in both modes.
+const showMeta = ref(true)
+const gridWidth = ref(0)
+const THUMB_AUTO_WIDTH = 280
+const viewPanelVisible = ref(false)
+
+// Each toolbar popup owns its own visible flag and the popups are individually
+// controlled, so nothing closes the others when a second trigger is clicked —
+// two panels could sit on top of each other. Opening one closes the rest.
+function closeOtherPanels(keep: 'filter' | 'view' | 'sort'): void {
+  if (keep !== 'filter') filterPanelVisible.value = false
+  if (keep !== 'view') viewPanelVisible.value = false
+  if (keep !== 'sort') sortPanelVisible.value = false
+}
 
 // Per-value verdicts, namespaced attr id -> value -> "off" | "on". An absent
 // key is the neutral position: an image carrying that value stays exactly as
@@ -79,6 +106,9 @@ const config = ref<GalleryConfig>({
   attributes: [],
   mode: 'all',
   status: {},
+  view_mode: 'waterfall',
+  thumb_cols: 0,
+  show_meta: true,
 })
 const searchMode = ref<'all' | 'custom'>('all')
 // Per-attribute search toggle, keyed by namespaced attr id ("on"/"off").
@@ -114,6 +144,37 @@ const blobByRawUrl = new Map<string, string>()
 // Fetches in flight, so the grid and the viewer asking for the same image at
 // once share one request.
 const inflight = new Map<string, Promise<string>>()
+
+// The grid renders from one render effect, and every card reads both its
+// object URL and its aspect ratio from reactive state. Writing either one is
+// therefore a full rebuild of every card — a page brings 24+ thumbnails and
+// each one used to cost two rebuilds of ~500 cards. Writes accumulate here and
+// land in one flush per burst instead: same UI, a handful of renders.
+const pendingThumbs: Record<string, string> = {}
+const pendingRatios: Record<string, number> = {}
+let flushTimer: ReturnType<typeof setTimeout> | undefined
+
+function scheduleFlush(): void {
+  if (flushTimer) return
+  flushTimer = setTimeout(() => {
+    flushTimer = undefined
+    if (Object.keys(pendingThumbs).length) {
+      Object.assign(thumbUrls.value, pendingThumbs)
+      for (const key of Object.keys(pendingThumbs)) delete pendingThumbs[key]
+    }
+    if (Object.keys(pendingRatios).length) {
+      Object.assign(imageRatios.value, pendingRatios)
+      for (const key of Object.keys(pendingRatios)) delete pendingRatios[key]
+    }
+  }, 80)
+}
+
+function clearPendingWrites(): void {
+  if (flushTimer) clearTimeout(flushTimer)
+  flushTimer = undefined
+  for (const key of Object.keys(pendingThumbs)) delete pendingThumbs[key]
+  for (const key of Object.keys(pendingRatios)) delete pendingRatios[key]
+}
 
 /** Revoke every cached object URL whose raw URL is not in keep. */
 function releaseBlobs(keep: Set<string> = new Set()): void {
@@ -153,32 +214,78 @@ async function resolveThumbnails(imgs: ImageAsset[], token: number) {
   await Promise.all(imgs.map(async (img) => {
     const url = await resolveImageSrc(img.url)
     if (token !== listToken) return
-    thumbUrls.value[img.id] = url
+    pendingThumbs[img.id] = url
+    scheduleFlush()
   }))
   if (token === listToken) releaseBlobs(new Set(items.value.map((img) => img.url)))
 }
 
 function onThumbLoad(id: string, event: Event) {
   const image = event.target as HTMLImageElement
-  if (image.naturalWidth && image.naturalHeight) {
-    imageRatios.value[id] = image.naturalWidth / image.naturalHeight
+  if (!image.naturalWidth || !image.naturalHeight) return
+  pendingRatios[id] = image.naturalWidth / image.naturalHeight
+  scheduleFlush()
+}
+
+// Masonry without measuring every card. The grid's rows are 1px tall with a
+// 12px gap, so a card whose box is H high occupies ceil((H + 12) / 13) rows.
+// H only needs two inputs: the thumbnail height (track width / aspect ratio)
+// and the fixed meta block below it. Both are arithmetic, so a width change
+// re-spans the whole grid in the same render as the new column count — no
+// ResizeObserver round trip, no per-card getBoundingClientRect, and therefore
+// no second layout to jump to.
+const GRID_GAP = 12
+const GRID_ROW = 1
+const SPAN_STEP = GRID_ROW + GRID_GAP
+const FALLBACK_RATIO = 4 / 3
+// Used until the first card has been measured; calibration runs in the same
+// tick as the first render, so this is never painted.
+const DEFAULT_CARD_BOX = { thumbInset: 2, meta: 96, chrome: 2 }
+
+// Geometry of one real card: how much narrower the thumbnail is than its grid
+// track (borders), how tall the meta block is, and what is left over for the
+// card's own box. Measuring one card keeps box-sizing, borders and the meta
+// padding out of this file — every card shares the same numbers.
+const cardBox = ref<{ thumbInset: number; meta: number; chrome: number } | null>(null)
+
+function measureCardBox(): void {
+  const card = gridEl.value?.querySelector<HTMLElement>('.ig-card')
+  const thumb = card?.querySelector<HTMLElement>('.ig-card__thumb')
+  const meta = card?.querySelector<HTMLElement>('.ig-card__meta')
+  const width = gridWidth.value
+  const cols = renderCols.value || effCols.value || 0
+  if (!card || !thumb || !width || !cols) return
+  const track = (width - GRID_GAP * (cols - 1)) / cols
+  const thumbRect = thumb.getBoundingClientRect()
+  const cardRect = card.getBoundingClientRect()
+  // What the DOM actually shows right now (0 while the block is hidden), and
+  // what to remember for when it comes back.
+  const rendered = meta ? meta.getBoundingClientRect().height : 0
+  const remembered = meta ? rendered : (cardBox.value?.meta ?? DEFAULT_CARD_BOX.meta)
+  cardBox.value = {
+    thumbInset: Math.max(0, track - thumbRect.width),
+    meta: remembered,
+    chrome: Math.max(0, cardRect.height - thumbRect.height - rendered),
   }
 }
 
-// Keep DOM order (and keyboard/viewer order) while cards span only the rows
-// their natural image height needs. Existing cards stay put when appending.
-function sizeCards(cards: HTMLElement[]) {
-  const spans = cards.map((card) => Math.ceil((card.getBoundingClientRect().height + 12) / 13))
-  cards.forEach((card, index) => {
-    card.style.gridRowEnd = `span ${spans[index]}`
-  })
-}
-
-function observeCards() {
-  cardObserver?.disconnect()
-  const cards = Array.from(gridEl.value?.querySelectorAll<HTMLElement>('.ig-card') ?? [])
-  sizeCards(cards)
-  cards.forEach((card) => cardObserver?.observe(card))
+/**
+ * Row span for one card, or nothing in card mode (one 3:2 frame for every
+ * thumbnail, so the rows line up on their own).
+ */
+function cardSpanStyle(id: string): { gridRowEnd: string } | undefined {
+  if (viewMode.value !== 'waterfall') return undefined
+  const box = cardBox.value || DEFAULT_CARD_BOX
+  const width = gridWidth.value
+  const cols = renderCols.value || effCols.value || 0
+  if (!width || !cols) return undefined
+  const track = (width - GRID_GAP * (cols - 1)) / cols
+  const ratio = imageRatios.value[id] || FALLBACK_RATIO
+  // Hiding the caption/source block is a span input, not a CSS detail: the
+  // card really is that much shorter.
+  const meta = showMeta.value ? box.meta : 0
+  const height = Math.max(1, (track - box.thumbInset) / ratio) + meta + box.chrome
+  return { gridRowEnd: `span ${Math.max(1, Math.ceil((height + GRID_GAP) / SPAN_STEP))}` }
 }
 
 function checkLoadMore() {
@@ -415,6 +522,128 @@ function isLastSearchField(attrId: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// View prefs (layout mode, thumbnail column count, caption/source visibility;
+// persisted like the search prefs: debounced PATCH of the gallery block)
+// ---------------------------------------------------------------------------
+let viewPrefsTimer: ReturnType<typeof setTimeout> | undefined
+function persistViewPrefs() {
+  if (!configLoaded.value) return
+  if (viewPrefsTimer) clearTimeout(viewPrefsTimer)
+  viewPrefsTimer = setTimeout(() => {
+    const gallery: {
+      view_mode: 'waterfall' | 'card'
+      thumb_cols?: number
+      show_meta: boolean
+    } = {
+      view_mode: viewMode.value,
+      show_meta: showMeta.value,
+    }
+    if (thumbCols.value > 0) gallery.thumb_cols = thumbCols.value
+    void updateMyPreferences({ gallery })
+  }, 500)
+}
+
+function toggleShowMeta(): void {
+  showMeta.value = !showMeta.value
+  persistViewPrefs()
+}
+
+// Slider stops live-track the layout width: the top stop is a hard floor of
+// ~150px per card, the bottom stop starts at one card per ~360px of width.
+const CARD_MIN_WIDTH = 150
+const CARD_MAX_WIDTH = 360
+const minCols = computed(() => Math.max(1, Math.floor(gridWidth.value / CARD_MAX_WIDTH)))
+// The upper stop is a real floor of CARD_MIN_WIDTH per card, so the column
+// count has to satisfy (w - gap * (n - 1)) / n >= CARD_MIN_WIDTH, i.e.
+// n <= (w + gap) / (CARD_MIN_WIDTH + gap). Rounding w / 150 up instead allowed
+// one column too many and squeezed cards below that floor, which is what a
+// narrow window used to look like (520px wide gave four 127px columns).
+const maxCols = computed(() =>
+  Math.max(
+    minCols.value,
+    Math.floor((gridWidth.value + GRID_GAP) / (CARD_MIN_WIDTH + GRID_GAP)),
+  ),
+)
+const effCols = computed(() => {
+  const base = thumbCols.value > 0 ? thumbCols.value : Math.round(gridWidth.value / THUMB_AUTO_WIDTH)
+  return Math.min(maxCols.value, Math.max(minCols.value, base))
+})
+
+// The grid consumes the column count through a throttled mirror: the slider
+// updates its model on every pixel, and re-laying out hundreds of cards per
+// tick janks the page. Applied at most every ~80ms while dragging.
+const renderCols = ref(0)
+let colsApplyTimer: ReturnType<typeof setTimeout> | undefined
+function flushCols() {
+  colsApplyTimer = undefined
+  renderCols.value = effCols.value
+}
+watch(thumbCols, () => {
+  if (colsApplyTimer) return
+  colsApplyTimer = setTimeout(flushCols, 80)
+})
+watch([gridWidth, viewMode], () => {
+  // Width-driven changes re-layout anyway; follow without throttling.
+  if (colsApplyTimer) {
+    clearTimeout(colsApplyTimer)
+    colsApplyTimer = undefined
+  }
+  renderCols.value = effCols.value
+})
+const gridColsStyle = computed(() => ({ '--ig-cols': String(renderCols.value || effCols.value) }))
+// Column count is the only thing that can move the meta block's height (wider
+// track, same two-line caption), so it is also the moment worth re-measuring
+// the one card the spans are calibrated from.
+watch(renderCols, () => void nextTick(measureCardBox))
+// Showing or hiding the caption/source block changes what the spans are
+// calibrated from (the block's height becomes part of — or leaves — the card).
+watch(showMeta, () => void nextTick(measureCardBox))
+
+// Slider presentation runs small-on-left: its position mirrors the column
+// count inside [minCols, maxCols], so left = many small cards, right = few
+// large ones. The bound value is the clamped effCols — never the raw stored
+// count, which a narrower window can push past max (an out-of-range value
+// makes TDesign draw the filled track past its own rail). Marks dot every
+// available stop, and the :key remounts the slider when the range moves so
+// its internal geometry cannot go stale.
+const sliderCols = computed(() => minCols.value + maxCols.value - effCols.value)
+const colsMarks = computed(() => {
+  const marks: Record<number, string> = {}
+  for (let n = minCols.value; n <= maxCols.value; n += 1) marks[n] = ''
+  return marks
+})
+function onSliderCols(v: number | number[]) {
+  const pos = Array.isArray(v) ? v[0] : v
+  thumbCols.value = minCols.value + maxCols.value - pos
+  setThumbCols()
+}
+
+function measureGrid() {
+  gridWidth.value = gridEl.value?.clientWidth ?? 0
+}
+
+/** Keep the single grid observer attached to the element actually rendered. */
+function syncGridObserver() {
+  const el = gridEl.value
+  if (!gridObserver || !el || el === observedGrid) return
+  gridObserver.disconnect()
+  gridObserver.observe(el)
+  observedGrid = el
+}
+
+function setThumbCols() {
+  // The 80ms trailing mirror in the thumbCols watcher applies the layout;
+  // persisting here only records the user's choice.
+  persistViewPrefs()
+}
+
+function selectViewMode(mode: 'waterfall' | 'card') {
+  if (viewMode.value === mode) return
+  viewMode.value = mode
+  persistViewPrefs()
+}
+
+// ---------------------------------------------------------------------------
 // Sort
 // ---------------------------------------------------------------------------
 const sortFieldLabel = computed(() => {
@@ -467,13 +696,19 @@ async function fetchNextPage(): Promise<boolean> {
     if (token !== listToken) return false
     const existing = new Set(items.value.map((img) => img.id))
     const incoming = res.items.filter((img) => !existing.has(img.id))
+    // The grid is about to render cards: make sure the observer is on the
+    // current element (the empty state may have re-created it) and that the
+    // width is known before the first card asks for a column count.
+    syncGridObserver()
+    measureGrid()
     items.value.push(...incoming)
     page.value = nextPage
     total.value = res.total
     exhausted.value = res.items.length === 0
     void resolveThumbnails(incoming, token)
     await nextTick()
-    observeCards()
+    measureGrid()
+    measureCardBox()
     return true
   } catch (e) {
     if (token === listToken) error.value = e instanceof Error ? e.message : String(e)
@@ -501,6 +736,7 @@ function resetResults() {
   thumbUrls.value = {}
   thumbBroken.value = {}
   imageRatios.value = {}
+  clearPendingWrites()
   scrollEl.value?.scrollTo({ top: 0 })
 }
 
@@ -583,8 +819,10 @@ onBeforeUnmount(() => {
   // Orphan any in-flight listing so it cannot map new blobs after unmount.
   listToken++
   initToken++
-  cardObserver?.disconnect()
+  gridObserver?.disconnect()
+  observedGrid = null
   scrollObserver?.disconnect()
+  window.removeEventListener('resize', measureGrid)
   releaseBlobs()
 })
 
@@ -611,7 +849,15 @@ async function initGallery() {
   sourcePickerVisible.value = false
   releaseBlobs()
   configLoaded.value = false
-  config.value = { attribute_sources: [], attributes: [], mode: 'all', status: {} }
+  config.value = {
+    attribute_sources: [],
+    attributes: [],
+    mode: 'all',
+    status: {},
+    view_mode: 'waterfall',
+    thumb_cols: 0,
+    show_meta: true,
+  }
   loading.value = true
   try {
     const cfg = await fetchGalleryConfig(props.knowledgeBaseId)
@@ -619,6 +865,10 @@ async function initGallery() {
     config.value = cfg
     searchMode.value = cfg.mode
     searchStatus.value = { ...cfg.status }
+    viewMode.value = cfg.view_mode === 'card' ? 'card' : 'waterfall'
+    thumbCols.value = cfg.thumb_cols > 0 ? cfg.thumb_cols : 0
+    // Only an explicit false hides the caption/source block.
+    showMeta.value = cfg.show_meta !== false
     configLoaded.value = true
   } catch {
     if (token !== initToken) return
@@ -632,12 +882,18 @@ async function initGallery() {
 }
 
 onMounted(() => {
-  cardObserver = new ResizeObserver((entries) => {
-    sizeCards(entries.map((entry) => entry.target as HTMLElement))
+  // One observer on the container replaces the per-card one: any width change
+  // (window, sidebar, tab layout) re-derives every span from arithmetic, so
+  // there is nothing per-card left to observe.
+  gridObserver = new ResizeObserver(() => {
+    measureGrid()
     void nextTick(checkLoadMore)
   })
+  syncGridObserver()
   scrollObserver = new ResizeObserver(checkLoadMore)
   if (scrollEl.value) scrollObserver.observe(scrollEl.value)
+  measureGrid()
+  window.addEventListener('resize', measureGrid, { passive: true })
   void initGallery()
 })
 
@@ -718,6 +974,7 @@ watch(
             class="ig-tool-btn"
             :class="{ active: filterPanelVisible || activeFilterCount > 0 }"
             :aria-expanded="filterPanelVisible"
+            @click="closeOtherPanels('filter')"
           >
             <t-icon name="filter" size="16px" />
             {{ t(`${NS}.filters`) }}
@@ -802,6 +1059,78 @@ watch(
         </t-popup>
 
         <t-popup
+          v-model:visible="viewPanelVisible"
+          trigger="click"
+          placement="bottom-right"
+          overlay-class-name="gallery-toolbar-popup"
+          :overlay-inner-style="{ padding: 0 }"
+        >
+          <button
+            type="button"
+            class="ig-tool-btn"
+            :class="{ active: viewPanelVisible }"
+            :aria-expanded="viewPanelVisible"
+            :aria-label="t(`${NS}.viewOptions`)"
+            @click="closeOtherPanels('view')"
+          >
+            <t-icon name="view-module" size="16px" />
+            <span class="ig-sort-trigger__label">{{ t(`${NS}.viewOptions`) }}</span>
+          </button>
+          <template #content>
+            <div class="ig-view-panel" role="menu" :aria-label="t(`${NS}.viewOptions`)">
+              <section class="ig-sort-group">
+                <div class="ig-sort-group__label">{{ t(`${NS}.viewMode`) }}</div>
+                <div class="ig-view-modes">
+                  <button
+                    v-for="m in (['waterfall', 'card'] as const)"
+                    :key="m"
+                    type="button"
+                    role="menuitemradio"
+                    class="ig-sort-option"
+                    :class="{ active: viewMode === m }"
+                    :aria-checked="viewMode === m"
+                    @click="selectViewMode(m)"
+                  >
+                    <span>{{ t(m === 'waterfall' ? `${NS}.viewWaterfall` : `${NS}.viewCard`) }}</span>
+                    <t-icon v-if="viewMode === m" name="check" size="14px" />
+                  </button>
+                </div>
+              </section>
+              <section class="ig-sort-group">
+                <div class="ig-sort-group__label">{{ t(`${NS}.thumbSize`) }}</div>
+                <div class="ig-thumb-slider">
+                  <t-slider
+                    :key="`${minCols}-${maxCols}`"
+                    :value="sliderCols"
+                    :min="minCols"
+                    :max="maxCols"
+                    :step="1"
+                    :label="false"
+                    :marks="colsMarks"
+                    :disabled="minCols >= maxCols"
+                    @change="onSliderCols"
+                  />
+                </div>
+              </section>
+              <section class="ig-sort-group">
+                <div class="ig-sort-group__label">{{ t(`${NS}.viewInfo`) }}</div>
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  class="ig-sort-option"
+                  :class="{ active: showMeta }"
+                  :aria-checked="showMeta"
+                  @click="toggleShowMeta"
+                >
+                  <span>{{ t(`${NS}.viewInfoShow`) }}</span>
+                  <t-icon v-if="showMeta" name="check" size="14px" />
+                </button>
+              </section>
+            </div>
+          </template>
+        </t-popup>
+
+        <t-popup
           v-if="sortAttrs.length"
           v-model:visible="sortPanelVisible"
           trigger="click"
@@ -814,6 +1143,7 @@ watch(
             class="ig-tool-btn ig-sort-trigger"
             :class="{ active: sortPanelVisible }"
             :aria-label="`${t(`${NS}.sort`)}: ${sortFieldLabel}`"
+            @click="closeOtherPanels('sort')"
           >
             <t-icon name="filter-sort" size="16px" />
             <span class="ig-sort-trigger__label">{{ t(`${NS}.sort`) }} · {{ sortFieldLabel }}</span>
@@ -879,21 +1209,32 @@ watch(
           <t-button v-if="isNarrowed" variant="outline" @click="clearAll">{{ t(`${NS}.clearFilters`) }}</t-button>
         </EmptyState>
 
-        <div v-else ref="gridEl" class="ig-grid">
+        <div
+          v-else
+          ref="gridEl"
+          class="ig-grid"
+          :class="{ 'is-card': viewMode === 'card' }"
+          :style="gridColsStyle"
+        >
           <button
             v-for="(img, idx) in items"
             :key="img.id"
             type="button"
             class="ig-card"
             :class="{ 'is-disabled': !img.is_enabled }"
+            :style="cardSpanStyle(img.id)"
             @click="openViewer(idx)"
           >
-            <div class="ig-card__thumb" :style="{ aspectRatio: imageRatios[img.id] || 4 / 3 }">
+            <div
+              class="ig-card__thumb"
+              :style="viewMode === 'waterfall' ? { aspectRatio: imageRatios[img.id] || 4 / 3 } : undefined"
+            >
               <img
                 v-if="thumbUrls[img.id] && !thumbBroken[img.id]"
                 :src="thumbUrls[img.id]"
                 :alt="img.caption"
                 loading="lazy"
+                decoding="async"
                 draggable="false"
                 @load="onThumbLoad(img.id, $event)"
                 @error="onThumbError(img.id)"
@@ -906,7 +1247,7 @@ watch(
                 {{ t(`${NS}.attr.builtin_is_enabled_value_false`) }}
               </span>
             </div>
-            <div class="ig-card__meta">
+            <div v-if="showMeta" class="ig-card__meta">
               <div class="ig-card__caption" :class="{ 'is-empty': !img.caption }">
                 {{ img.caption || t(`${NS}.noCaption`) }}
               </div>
@@ -1293,11 +1634,27 @@ watch(
 
 .ig-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr));
+  // Fixed column count (the slider's stop), not auto-fill: every slider
+  // stop maps to a distinct grid, so dragging always changes the layout.
+  grid-template-columns: repeat(var(--ig-cols, 4), minmax(0, 1fr));
   grid-auto-rows: 1px;
   gap: 12px;
   align-items: start;
   align-content: start;
+
+  // Card mode: every thumbnail shares one 3:2 frame (the center of even a
+  // very narrow image stays visible), so rows align without row-span math.
+  &.is-card {
+    grid-auto-rows: auto;
+
+    .ig-card__thumb {
+      aspect-ratio: 3 / 2;
+
+      img {
+        object-fit: cover;
+      }
+    }
+  }
 }
 
 .ig-card {
@@ -1337,6 +1694,9 @@ watch(
     align-items: center;
     justify-content: center;
     overflow: hidden;
+    // Layout+paint containment keeps each thumbnail's internal relayout
+    // local while the slider drags the whole grid through new sizes.
+    contain: layout paint;
     background: var(--td-bg-color-secondarycontainer);
 
     img {
@@ -1379,7 +1739,10 @@ watch(
 
   &__caption {
     display: -webkit-box;
-    min-height: calc(2 * 1.5em);
+    // Always two lines tall, even for a one-line or missing caption: the
+    // masonry span is arithmetic over this block, so its height must not
+    // depend on the text.
+    height: calc(2 * 1.5em);
     overflow: hidden;
     color: var(--td-text-color-primary);
     font-size: var(--app-text-md);
@@ -1407,6 +1770,31 @@ watch(
       white-space: nowrap;
     }
   }
+}
+
+// View panel — same shape as the sort panel.
+.ig-view-panel {
+  width: 280px;
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  box-sizing: border-box;
+  color: var(--td-text-color-primary);
+}
+
+.ig-view-modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.ig-sort-group__label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ig-thumb-slider {
+  padding: 2px 10px 10px;
 }
 
 .ig-load-more {
