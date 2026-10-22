@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"mime/multipart"
@@ -116,7 +117,8 @@ func (s *createKnowledgeFileServiceStub) CopyFile(ctx context.Context, srcPath s
 }
 
 type createKnowledgeTaskEnqueuerStub struct {
-	calls int
+	calls    int
+	lastTask *asynq.Task
 }
 
 func (s *createKnowledgeTaskEnqueuerStub) Enqueue(
@@ -124,7 +126,46 @@ func (s *createKnowledgeTaskEnqueuerStub) Enqueue(
 	opts ...asynq.Option,
 ) (*asynq.TaskInfo, error) {
 	s.calls++
+	s.lastTask = task
 	return &asynq.TaskInfo{ID: "task-1", Queue: "default"}, nil
+}
+
+func TestCreateKnowledgeFromSQLFileEnqueuesDocumentProcessing(t *testing.T) {
+	t.Parallel()
+
+	for _, fileType := range []string{"sql", "SQL"} {
+		t.Run(fileType, func(t *testing.T) {
+			repo := &createKnowledgeFileRepoStub{}
+			fileSvc := &createKnowledgeFileServiceStub{}
+			task := &createKnowledgeTaskEnqueuerStub{}
+			svc := &knowledgeService{
+				repo:      repo,
+				kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+				fileSvc:   fileSvc,
+				task:      task,
+			}
+			filename := "schema." + fileType
+
+			knowledge, err := svc.CreateKnowledgeFromFile(
+				newCreateKnowledgeFileContext(), "kb-1",
+				newMultipartFileHeader(t, filename, "-- marker\nSELECT 1 AS marker;\n"),
+				nil, nil, "", nil, "", nil,
+			)
+
+			require.NoError(t, err)
+			require.NotNil(t, knowledge)
+			require.Equal(t, 1, fileSvc.saveCalls)
+			require.Equal(t, 1, repo.createCalls)
+			require.Equal(t, fileType, repo.createdKnowledge.FileType)
+			require.Equal(t, 1, task.calls)
+			require.Equal(t, types.TypeDocumentProcess, task.lastTask.Type())
+			var payload types.DocumentProcessPayload
+			require.NoError(t, json.Unmarshal(task.lastTask.Payload(), &payload))
+			require.Equal(t, filename, payload.FileName)
+			require.Equal(t, fileType, payload.FileType)
+			require.Equal(t, knowledge.ID, payload.KnowledgeID)
+		})
+	}
 }
 
 func TestCreateKnowledgeFromFileDoesNotPersistWhenStorageSaveFails(t *testing.T) {
