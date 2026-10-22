@@ -89,6 +89,10 @@ const sessionArtifactDirBootstrapTimeout = 15 * time.Second
 // disappearance).
 const sessionLifecycleCleanupTimeout = 30 * time.Second
 
+// ErrBoundSandboxChanged confirms that a maintenance command's original
+// sandbox is gone. Transport failures must not be treated as this condition.
+var ErrBoundSandboxChanged = errors.New("sandbox: bound sandbox changed before maintenance command")
+
 // SessionBoundManager is a sandbox.Manager that binds one remote sandbox per
 // tenant session. Concrete provider work is delegated to RemoteSandboxClient;
 // this type owns validation and the mapping between application concepts
@@ -1090,7 +1094,7 @@ func (m *SessionBoundManager) execShellCommandWithOutputSnapshot(
 			return nil, nil, err
 		}
 		if !found || handle.ID() != opts.ExpectedSandboxID {
-			return nil, nil, errors.New("sandbox: bound sandbox changed before maintenance command")
+			return nil, nil, ErrBoundSandboxChanged
 		}
 	} else {
 		handle, err = m.resolveScope(ctx, sc)
@@ -1789,7 +1793,7 @@ func (m *SessionBoundManager) lookupSessionHandleForKey(
 		return nil, false, nil
 	}
 	if expectedID != "" && binding.SandboxID != expectedID {
-		return nil, false, errors.New("sandbox: bound sandbox changed before maintenance command")
+		return nil, false, ErrBoundSandboxChanged
 	}
 	handle, err := m.client.Connect(ctx, RemoteConnectRequest{
 		SandboxID:          binding.SandboxID,

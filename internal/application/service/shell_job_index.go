@@ -9,6 +9,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/Tencent/WeKnora/internal/common/redislock"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -74,6 +75,56 @@ func (x *ShellJobIndex) Add(ctx context.Context, e ShellJobIndexEntry) error {
 	}).Err()
 }
 
+func (x *ShellJobIndex) reservationKey(s interfaces.SessionRef, id string) string {
+	return fmt.Sprintf("weknora:background:shelljob:reserved:%s:%d:%s:%s", x.namespace, s.TenantID, s.SessionID, id)
+}
+
+// ReserveID arbitrates submissions across replicas before Lifecycle.Begin can
+// touch an existing activity. Keep the handle reserved through notice retention
+// and refresh it for live jobs; even a directory collision must not reuse it.
+func (x *ShellJobIndex) ReserveID(ctx context.Context, s interfaces.SessionRef, id string) (bool, error) {
+	ok, err := x.client.SetNX(ctx, x.reservationKey(s, id), "1", interfaces.NoticeRetention).Result()
+	if err != nil || !ok {
+		return false, err
+	}
+	// Also recognize jobs submitted before reservation keys were introduced.
+	entries, err := x.Entries(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, e := range entries {
+		if e.SessionRef == s && e.WorkID == id {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// Entries includes jobs still in their yield window, which need protection
+// while another session's maintenance exec is blocked.
+func (x *ShellJobIndex) Entries(ctx context.Context) ([]ShellJobIndexEntry, error) {
+	return x.entries(ctx, "+inf")
+}
+
+// WithSessionLock prevents deletion racing a launch or a late sweep result.
+// A renewable lock also covers maintenance execs longer than the sweep claim.
+func (x *ShellJobIndex) WithSessionLock(
+	ctx context.Context, s interfaces.SessionRef, fn func(context.Context) error,
+) error {
+	key := fmt.Sprintf("weknora:background:shelljob:lifecycle:{%s}", x.hashTag(s))
+	return redislock.WithRenewableLock(ctx, x.client, key, time.Minute, 10*time.Second, fn)
+}
+
+func (x *ShellJobIndex) closedKey(s interfaces.SessionRef) string {
+	return fmt.Sprintf("weknora:background:shelljob:closed:{%s}", x.hashTag(s))
+}
+
+// SessionClosed reports whether deletion has closed the session's submission gate.
+func (x *ShellJobIndex) SessionClosed(ctx context.Context, s interfaces.SessionRef) (bool, error) {
+	n, err := x.client.Exists(ctx, x.closedKey(s)).Result()
+	return n != 0, err
+}
+
 // Requeue puts e back on the schedule with its current yield time.
 func (x *ShellJobIndex) Requeue(ctx context.Context, e ShellJobIndexEntry) error {
 	return x.Add(ctx, e)
@@ -81,8 +132,12 @@ func (x *ShellJobIndex) Requeue(ctx context.Context, e ShellJobIndexEntry) error
 
 // Due lists jobs whose sweep time has arrived.
 func (x *ShellJobIndex) Due(ctx context.Context, now time.Time) ([]ShellJobIndexEntry, error) {
+	return x.entries(ctx, fmt.Sprintf("%d", now.Unix()))
+}
+
+func (x *ShellJobIndex) entries(ctx context.Context, maxScore string) ([]ShellJobIndexEntry, error) {
 	scored, err := x.client.ZRangeByScoreWithScores(ctx, shellJobIndexKey, &redis.ZRangeBy{
-		Min: "-inf", Max: fmt.Sprintf("%d", now.Unix()),
+		Min: "-inf", Max: maxScore,
 	}).Result()
 	if err != nil {
 		return nil, err

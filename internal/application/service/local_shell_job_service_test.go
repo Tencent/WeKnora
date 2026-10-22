@@ -318,7 +318,7 @@ func TestLocalSkillEnvCaptureRunsOnlyAfterSuccess(t *testing.T) {
 	svc.skillCapture.settle(context.Background(), ref, "sj_ab12", interfaces.WorkStateFailed)
 	require.Zero(t, calls)
 	svc.HoldSkillEnvCapture(ref, "sj_ab12", func(context.Context) { calls++ })
-	svc.OnDelete(context.Background(), ref)
+	require.NoError(t, svc.OnDelete(context.Background(), ref))
 	svc.skillCapture.settle(context.Background(), ref, "sj_ab12", interfaces.WorkStateSucceeded)
 	require.Zero(t, calls)
 	svc.HoldSkillEnvCapture(ref, "sj_ab12", func(context.Context) { calls++ })

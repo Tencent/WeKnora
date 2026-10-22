@@ -186,7 +186,7 @@
                             <slot name="composer-chips" />
                         </template>
                         <template v-if="backgroundItems.length" #background-work>
-                            <BackgroundWorkChip :items="backgroundItems" @view="openWorkOutput" @cancel="onCancelWork" />
+                            <BackgroundWorkChip :items="backgroundItems" :cancel-work="onCancelWork" @view="openWorkOutput" />
                         </template>
                         <template v-if="$slots['composer-controls']" #controls><slot name="composer-controls" /></template>
                     </InputField>
@@ -399,12 +399,8 @@ function startBackgroundWork() {
 }
 
 async function refreshBackgroundWork() {
-    const id = String(session_id.value || '');
-    if (!id) return;
-    const items = await listBackgroundWork(id);
-    replaceBackgroundItems(items);
-    if (items.length === 0) backgroundPoller.stop();
-    else backgroundPoller.start();
+    if (!session_id.value) return;
+    await backgroundPoller.refresh();
 }
 
 function openWorkOutput(workId) {
@@ -421,7 +417,7 @@ async function onCancelWork(workId) {
         // Refresh anyway so a rejected stop can leave the row running.
     }
     try {
-        await refreshBackgroundWork();
+        if (String(session_id.value || '') === id) await refreshBackgroundWork();
     } catch {
         // Keep the last chip. A non-empty list is still on the 5s poller.
     }
@@ -1951,7 +1947,7 @@ onUnmounted(() => {
     activitySessionId.value = '';
     window.removeEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
     if (recoverPollTimer) { clearTimeout(recoverPollTimer); recoverPollTimer = null; }
-    backgroundPoller.stop();
+    backgroundPoller.dispose();
 });
 // An embedded view outlives the page behind it: a route change must not stop
 // its stream or restore the main chat's defaults.

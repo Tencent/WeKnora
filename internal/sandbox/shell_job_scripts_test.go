@@ -175,7 +175,8 @@ func TestShellJobBatchReadScriptEmitsDecodableJSON(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
 	snaps := ParseShellJobBatch(string(out))
-	require.Len(t, snaps, 1)
+	require.Len(t, snaps, 2)
+	require.True(t, snaps[1].Missing)
 	require.Equal(t, id, snaps[0].Meta.ID)
 	require.Equal(t, "make", snaps[0].Meta.Command)
 	require.Equal(t, "running", snaps[0].Status.State)
@@ -331,4 +332,34 @@ func TestParseShellJobBatchDecodesLinesWithoutMissingPlaceholders(t *testing.T) 
 	require.False(t, snaps[1].Missing)
 	require.Empty(t, ParseShellJobBatch(""))
 	require.Empty(t, ParseShellJobBatch("\n\n"))
+}
+
+func TestShellJobCursorCountsRawBytesBeforeSanitizingUTF8(t *testing.T) {
+	// /w== is one invalid UTF-8 byte, followed by a valid 'x' in /3g=.
+	snaps := ParseShellJobBatch(`{"meta":{"work_id":"sj_0123"},"status":{"state":"running"},` +
+		`"stdout":{"slices":true,"total_bytes":1000,"from":100,"omitted_bytes":99,"body_b64":"/3g="}}`)
+	require.Len(t, snaps, 1)
+	require.Equal(t, "x", snaps[0].Stdout.Text)
+	require.NotNil(t, snaps[0].Stdout.NextBytes)
+	require.Equal(t, int64(102), *snaps[0].Stdout.NextBytes)
+}
+
+func TestShellJobLocalOutputBudgetIncludesBothStreams(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "sj_0123")
+	require.NoError(t, os.Mkdir(dir, 0o700))
+	require.NoError(t, WriteShellJobJSON(filepath.Join(dir, "meta.json"), ShellJobMeta{ID: "sj_0123"}))
+	require.NoError(t, WriteShellJobJSON(filepath.Join(dir, "status.json"), ShellJobStatus{State: "succeeded"}))
+	for _, name := range []string{"stdout", "stderr"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(strings.Repeat(name, 5000)), 0o600))
+	}
+	for _, budget := range []int{1, 2, 3, 2048} {
+		for _, from := range []*ShellJobOffsets{nil, {Stdout: 1, Stderr: 1}} {
+			snap, err := ReadShellJob(root, ShellJobRead{ID: "sj_0123", OutputBudget: budget, From: from})
+			require.NoError(t, err)
+			require.LessOrEqual(t, len(snap.Stdout.Text)+len(snap.Stderr.Text), budget)
+			require.True(t, snap.Stdout.Truncated)
+			require.True(t, snap.Stderr.Truncated)
+		}
+	}
 }

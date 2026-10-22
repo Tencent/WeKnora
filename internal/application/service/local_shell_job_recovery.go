@@ -42,7 +42,7 @@ func readLocalJobJSON(path string, target any) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	return json.NewDecoder(io.LimitReader(file, 64*1024)).Decode(target)
 }
 

@@ -462,3 +462,77 @@ func clipForLog(s string) string {
 	}
 	return s[:limit] + "...(truncated)"
 }
+
+func TestShellJobSharedMachineCancelChecksOwnerAndStopsStubbornProcess(t *testing.T) {
+	client := dockerIntegrationClient(t)
+	handle := dockerIntegrationHandle(t, client)
+	jobs := []ShellJobMeta{
+		{
+			ID: "sj_a111", TenantID: 7, SessionID: "session-a", SandboxID: handle.ID(),
+			Command: `trap '' TERM; while :; do sleep 1; done`,
+		},
+		{ID: "sj_b111", TenantID: 7, SessionID: "session-b", SandboxID: handle.ID(), Command: "sleep 60"},
+	}
+	for _, job := range jobs {
+		script, _ := ShellJobSubmitScript(job, job.Command, 250)
+		res := dockerIntegrationExec(t, client, handle, script, 10*time.Second)
+		require.Equal(t, 0, res.ExitCode, res.Stderr)
+	}
+	// Even if ownership changed after the host-side read, the signal exec must
+	// verify persisted tenant, session and sandbox identity again.
+	for _, wrong := range []ShellJobMeta{
+		{ID: jobs[1].ID, TenantID: 7, SessionID: "session-a", SandboxID: handle.ID()},
+		{ID: jobs[1].ID, TenantID: 70, SessionID: "session-b", SandboxID: handle.ID()},
+		{ID: jobs[1].ID, TenantID: 7, SessionID: "session-b", SandboxID: "replaced"},
+	} {
+		res := dockerIntegrationExec(t, client, handle, ShellJobCancelScript(wrong, true), 10*time.Second)
+		require.Equal(t, 3, res.ExitCode)
+	}
+	res := dockerIntegrationExec(t, client, handle, ShellJobCancelScript(jobs[0], true), 10*time.Second)
+	require.Equal(t, 0, res.ExitCode, res.Stderr)
+	require.Contains(t, res.Stdout, `"state":"cancelled"`)
+	snapshots := ParseShellJobBatch(dockerIntegrationExec(t, client, handle,
+		ShellJobBatchReadScript(handle.ID(), []string{jobs[0].ID, jobs[1].ID}), 10*time.Second).Stdout)
+	require.Len(t, snapshots, 2)
+	require.Equal(t, "cancelled", snapshots[0].Status.State)
+	require.Equal(t, "running", snapshots[1].Status.State)
+	require.True(t, snapshots[1].WatcherAlive, "another chat on the same machine keeps running")
+}
+
+func TestShellJobBudgetedIncrementalReadAfterRotation(t *testing.T) {
+	client := dockerIntegrationClient(t)
+	handle := dockerIntegrationHandle(t, client)
+	id := "sj_c111"
+	script := `D=/var/lib/weknora/jobs/sj_c111; mkdir -p "$D"
+printf '%s' '{"work_id":"sj_c111"}' > "$D/meta.json"
+printf '%s' '{"state":"succeeded"}' > "$D/status.json"
+printf 65536 > "$D/stdout.rotated"
+head -c 20000 /dev/zero | tr '\0' x > "$D/stdout.1"
+printf FINAL-DIAGNOSTIC > "$D/stdout"
+printf STDERR > "$D/stderr"
+`
+	require.Equal(t, 0, dockerIntegrationExec(t, client, handle, script, 10*time.Second).ExitCode)
+	offsets := ShellJobOffsets{Stdout: 1}
+	var output strings.Builder
+	for i := 0; i < 5; i++ {
+		readScript := ShellJobBatchReadScriptWithBudget(
+			handle.ID(), []string{id}, map[string]ShellJobOffsets{id: offsets}, 12000,
+		)
+		res := dockerIntegrationExec(t, client, handle, readScript, 10*time.Second)
+		require.Equal(t, 0, res.ExitCode, res.Stderr)
+		snapshots := ParseShellJobBatch(res.Stdout)
+		require.Len(t, snapshots, 1)
+		snap := snapshots[0]
+		require.LessOrEqual(t, len(snap.Stdout.Text)+len(snap.Stderr.Text), 12000)
+		if i == 0 {
+			require.Positive(t, snap.Stdout.OmittedBytes)
+		}
+		output.WriteString(snap.Stdout.Text)
+		require.NotNil(t, snap.Stdout.NextBytes)
+		offsets = ShellJobOffsets{Stdout: *snap.Stdout.NextBytes, Stderr: *snap.Stderr.NextBytes}
+		if offsets.Stdout == snap.Stdout.TotalBytes {
+			break
+		}
+	}
+	require.Equal(t, strings.Repeat("x", 20000)+"FINAL-DIAGNOSTIC", output.String())
+}

@@ -400,12 +400,16 @@ func (s *LocalShellJobService) watch(j *localJob, out, errLog *localJobLog, onOu
 		close(copiesDone)
 	}()
 	exitCh := make(chan localsandbox.ExitStatus, 1)
-	go func() {
+	go func(drained <-chan struct{}) {
+		// exec.Cmd.Wait closes StdoutPipe/StderrPipe. Drain both first, even
+		// when forwarding output is slower than the command. The select below
+		// continues to handle cancellation and renew the lease while draining.
+		<-drained
 		// Wait's ctx is the application ctx. Cancelling it kills a real process
 		// tree; the submitting run's ctx is never passed here.
 		st, _ := j.proc.Wait(s.appCtx)
 		exitCh <- st
-	}()
+	}(copiesDone)
 
 	var exit localsandbox.ExitStatus
 	copiesClosed := false
@@ -725,6 +729,14 @@ func (s *LocalShellJobService) Cancel(
 		out[i] = s.memoryResult(j)
 	}
 	return out, nil
+}
+
+// OnDeleteAborted reopens a session whose repository deletion failed.
+func (s *LocalShellJobService) OnDeleteAborted(_ context.Context, ref interfaces.SessionRef) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.blocked, ref)
+	return nil
 }
 
 // OnDelete refuses later submits for the session, suppresses a late notice,

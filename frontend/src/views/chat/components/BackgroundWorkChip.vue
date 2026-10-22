@@ -38,8 +38,11 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import type { BackgroundWorkItem } from '@/api/chat/background-work'
 
-const props = defineProps<{ items: BackgroundWorkItem[] }>()
-const emit = defineEmits<{ view: [workId: string]; cancel: [workId: string] }>()
+const props = defineProps<{
+  items: BackgroundWorkItem[]
+  cancelWork: (workId: string) => Promise<void>
+}>()
+const emit = defineEmits<{ view: [workId: string] }>()
 const cancelling = ref(new Set<string>())
 const open = ref(false)
 const now = ref(Date.now())
@@ -74,12 +77,20 @@ function openOutput(workId: string) {
   emit('view', workId)
 }
 
-function onCancel(workId: string) {
+async function onCancel(workId: string) {
   if (cancelling.value.has(workId)) return
   const next = new Set(cancelling.value)
   next.add(workId)
   cancelling.value = next
-  emit('cancel', workId)
+  try {
+    await props.cancelWork(workId)
+  } finally {
+    // The request may fail while the job remains running. Always permit retry
+    // after it settles; only an in-flight request should disable the button.
+    const remaining = new Set(cancelling.value)
+    remaining.delete(workId)
+    cancelling.value = remaining
+  }
 }
 
 function formatDuration(ms: number): string {

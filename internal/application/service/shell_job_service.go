@@ -97,9 +97,11 @@ type ShellJobService struct {
 	// remoteRead, remoteExec and boundSandbox are the seams tests replace.
 	// Production installs them from pinned. The command is a separate argument
 	// of remoteExec; ShellExecOptions has no Command field.
-	remoteRead   remoteReadFunc
-	remoteExec   remoteExecFunc
-	boundSandbox boundSandboxFunc
+	newJobID          func() (string, error)
+	heartbeatInterval time.Duration
+	remoteRead        remoteReadFunc
+	remoteExec        remoteExecFunc
+	boundSandbox      boundSandboxFunc
 	// listFiles overrides output-directory listing in tests.
 	listFiles    func(context.Context, string, string) ([]sandbox.RemoteDirEntry, error)
 	skillCapture skillEnvCaptures
@@ -115,9 +117,8 @@ type shellJobCursor struct {
 }
 
 // remoteRead returns one snapshot per id, in order. errs carries per-id
-// failures. A sandbox-group failure must be expanded onto that group's ids
-// and must not fail the whole call: work_wait treats a call error as every
-// id lost.
+// failures. Preserve typed errors so callers can distinguish confirmed loss
+// from a transport failure without acknowledging an unread completion.
 type remoteReadFunc func(ctx context.Context, s interfaces.SessionRef,
 	ids []string, sandboxIDs map[string]string) ([]sandbox.ShellJobSnapshot, map[string]error)
 
@@ -147,13 +148,15 @@ func NewShellJobService(pinned *PinnedSessionSandbox, bg *BackgroundWork,
 	keeper interfaces.SessionKeepAliver,
 ) *ShellJobService {
 	svc := &ShellJobService{
-		pinned:  pinned,
-		bg:      bg,
-		index:   index,
-		events:  events,
-		keeper:  keeper,
-		replica: fmt.Sprintf("%s-%d", hostname(), osGetpid()),
-		cursors: make(map[string]shellJobCursor),
+		pinned:            pinned,
+		bg:                bg,
+		index:             index,
+		events:            events,
+		keeper:            keeper,
+		replica:           fmt.Sprintf("%s-%d", hostname(), osGetpid()),
+		cursors:           make(map[string]shellJobCursor),
+		newJobID:          sandbox.NewShellJobID,
+		heartbeatInterval: 5 * time.Second,
 	}
 	if bg != nil {
 		svc.lifecycle = background.Lifecycle{
@@ -211,6 +214,28 @@ func (s *ShellJobService) SubmitShellJob(ctx context.Context, ref interfaces.Ses
 	if !s.RemoteAvailable() {
 		return tools.ShellJobSubmission{}, fmt.Errorf("remote shell jobs are unavailable")
 	}
+	var result tools.ShellJobSubmission
+	err := s.index.WithSessionLock(context.WithoutCancel(ctx), ref, func(lockCtx context.Context) error {
+		closed, err := s.index.SessionClosed(lockCtx, ref)
+		if err != nil {
+			return err
+		}
+		if closed {
+			return interfaces.ErrWorkNotFound
+		}
+		submitCtx, cancel := context.WithCancel(ctx)
+		stop := context.AfterFunc(lockCtx, cancel)
+		defer stop()
+		defer cancel()
+		result, err = s.submitRemoteShellJob(submitCtx, ref, req)
+		return err
+	})
+	return result, err
+}
+
+func (s *ShellJobService) submitRemoteShellJob(ctx context.Context, ref interfaces.SessionRef,
+	req tools.ShellJobSubmitRequest,
+) (tools.ShellJobSubmission, error) {
 	// E2B exec does not extend the provider timer. Missing wiring has to fail
 	// here, before Begin, or the sandbox pauses and the job shows up later as lost.
 	if s.keeper == nil {
@@ -255,9 +280,17 @@ func (s *ShellJobService) SubmitShellJob(ctx context.Context, ref interfaces.Ses
 		finished = nil
 		degraded = false
 		unparsed = false
-		jobID, err = sandbox.NewShellJobID()
+		jobID, err = s.newJobID()
 		if err != nil {
 			return tools.ShellJobSubmission{}, err
+		}
+		reserved, reserveErr := s.index.ReserveID(ctx, ref, jobID)
+		if reserveErr != nil {
+			return tools.ShellJobSubmission{}, reserveErr
+		}
+		if !reserved {
+			err = errShellJobIDTaken
+			continue
 		}
 		meta = sandbox.ShellJobMeta{
 			ID: jobID, TenantID: ref.TenantID, SandboxTenantID: ref.TenantID,
@@ -425,6 +458,13 @@ func (s *ShellJobService) SubmitShellJob(ctx context.Context, ref interfaces.Ses
 		return tools.ShellJobSubmission{}, err
 	}
 	if finished != nil {
+		if forwarded.Stdout > preview.stdout.total || forwarded.Stderr > preview.stderr.total {
+			results, readErr := s.Status(ctx, ref, []string{jobID}, interfaces.StatusOptions{Detailed: true})
+			if readErr == nil && len(results) == 1 && results[0].Terminal &&
+				results[0].State != interfaces.WorkStateLost {
+				finished.Result = results[0]
+			}
+		}
 		finCtx, finSpan := langfuse.GetManager().StartChildSpan(ctx, langfuse.SpanOptions{
 			Name:  "shelljob.finish_cleanup",
 			Input: map[string]interface{}{"work_id": jobID},
@@ -466,7 +506,7 @@ func (s *ShellJobService) SubmitShellJob(ctx context.Context, ref interfaces.Ses
 	})
 	statusSpan.Finish(map[string]interface{}{"results": len(first)}, nil, err)
 	if err != nil {
-		return tools.ShellJobSubmission{}, err
+		return runningSubmission(meta, &preview), nil
 	}
 	if len(first) == 0 {
 		return tools.ShellJobSubmission{}, fmt.Errorf("shell job %s has no status", jobID)
@@ -497,8 +537,8 @@ func runningSubmission(meta sandbox.ShellJobMeta, preview *shellJobPreview) tool
 		},
 	}
 	if preview != nil {
-		snap.Stdout.Text = preview.stdout.String()
-		snap.Stderr.Text = preview.stderr.String()
+		snap.Stdout = preview.stdout.stream(preview.stdout.total)
+		snap.Stderr = preview.stderr.stream(preview.stderr.total)
 	}
 	return tools.ShellJobSubmission{Result: ShellJobResult(snap, false), Background: true}
 }
@@ -522,9 +562,8 @@ func (s *ShellJobService) finishedBeforeRegistering(
 	if len(results) != 1 || !interfaces.IsTerminalWorkState(results[0].State) {
 		return tools.ShellJobSubmission{}, false
 	}
-	// lost is also how a failed read is reported. Keep the registration for it:
-	// the sweeper retries, so a transient read failure must not destroy a job
-	// that is still running.
+	// Only a readable terminal record can produce an inline result. Leave an
+	// absent record to the sweeper, which also owns process cleanup.
 	if results[0].State == interfaces.WorkStateLost {
 		return tools.ShellJobSubmission{}, false
 	}
@@ -541,31 +580,47 @@ func (s *ShellJobService) finishedBeforeRegistering(
 	return tools.ShellJobSubmission{Result: result, Background: false}, true
 }
 
-// shellJobPreview keeps the yield-window bytes OnOutput already forwarded.
-// The batch-read script publishes sizes only, so this is the first segment
-// the submit result can actually show.
+// shellJobPreview retains a bounded head and tail of the bytes forwarded
+// during the yield window, keeping short jobs to a single exec.
 type shellJobPreview struct {
-	stdout strings.Builder
-	stderr strings.Builder
+	stdout shellPreviewStream
+	stderr shellPreviewStream
+}
+
+type shellPreviewStream struct {
+	head  []byte
+	tail  []byte
+	total int64
+}
+
+func (p *shellPreviewStream) add(body []byte, budget int) {
+	p.total += int64(len(body))
+	headN := min(len(body), budget/4-len(p.head))
+	p.head = append(p.head, body[:headN]...)
+	p.tail = append(p.tail, body[headN:]...)
+	if len(p.tail) > budget-budget/4 {
+		p.tail = append([]byte(nil), p.tail[len(p.tail)-(budget-budget/4):]...)
+	}
+}
+
+func (p *shellPreviewStream) String() string {
+	return strings.ToValidUTF8(string(p.head)+string(p.tail), "")
+}
+
+func (p *shellPreviewStream) stream(total int64) sandbox.ShellJobStream {
+	omitted := max(0, total-int64(len(p.head)+len(p.tail)))
+	return sandbox.ShellJobStream{
+		Text: p.String(), TotalBytes: total,
+		OmittedBytes: omitted, Truncated: omitted > 0,
+	}
 }
 
 func (p *shellJobPreview) add(stream string, body []byte) {
 	if stream == "stderr" {
-		appendLimited(&p.stderr, body, 8*1024)
+		p.stderr.add(body, 8*1024)
 		return
 	}
-	appendLimited(&p.stdout, body, 16*1024)
-}
-
-func appendLimited(b *strings.Builder, body []byte, limit int) {
-	if b == nil || b.Len() >= limit || len(body) == 0 {
-		return
-	}
-	room := limit - b.Len()
-	if len(body) > room {
-		body = body[:room]
-	}
-	b.Write(body)
+	p.stdout.add(body, 16*1024)
 }
 
 func fillShellJobPreview(result interfaces.WorkResult, preview *shellJobPreview) interfaces.WorkResult {
@@ -606,18 +661,28 @@ func (s *ShellJobService) Status(ctx context.Context, ref interfaces.SessionRef,
 		return nil, fmt.Errorf("remote shell jobs are unavailable")
 	}
 	readCtx := context.WithValue(maintenanceCtx(ctx, ref), shellReadRunKey{}, opts.RunID)
+	readCtx = context.WithValue(readCtx, shellReadBudgetKey{}, opts.OutputBudget)
 	snapshots, errs := s.remoteRead(readCtx, ref, ids, s.sandboxFor(ctx, ref, ids))
 	if len(snapshots) != len(ids) {
 		return nil, fmt.Errorf("shell job batch read returned %d of %d", len(snapshots), len(ids))
 	}
+	for i, snap := range snapshots {
+		if err := errs[ids[i]]; err != nil && !shellSandboxGone(err) {
+			return nil, fmt.Errorf("read shell job %s: %w", ids[i], err)
+		}
+		if errs[ids[i]] == nil && !snap.Missing && !belongsToOtherSession(snap.Meta, ref) &&
+			snap.Status.State != interfaces.WorkStateRunning && !interfaces.IsTerminalWorkState(snap.Status.State) {
+			return nil, fmt.Errorf("read shell job %s: unreadable status", ids[i])
+		}
+	}
 	out := make([]interfaces.WorkResult, len(ids))
 	for i, snap := range snapshots {
 		if errs != nil && errs[ids[i]] != nil {
-			out[i] = lostResult(snapMetaOrID(snap.Meta, ids[i]), errs[ids[i]].Error())
+			out[i] = lostResult(sandbox.ShellJobMeta{ID: ids[i]}, errs[ids[i]].Error())
 			continue
 		}
 		if snap.Missing || belongsToOtherSession(snap.Meta, ref) {
-			out[i] = lostResult(snapMetaOrID(snap.Meta, ids[i]), "job directory missing or belongs to another session")
+			out[i] = lostResult(sandbox.ShellJobMeta{ID: ids[i]}, "job directory missing or belongs to another session")
 			continue
 		}
 		out[i] = s.applyOutputFiles(ctx, ref, ShellJobResult(snap, false), snap.Meta)
@@ -718,52 +783,67 @@ func (s *ShellJobService) Cancel(ctx context.Context, ref interfaces.SessionRef,
 	if err := validateShellJobIDs(ids); err != nil {
 		return nil, err
 	}
-	if s.boundSandbox == nil || s.remoteExec == nil {
-		return nil, interfaces.ErrWorkNotFound
-	}
-	sandboxID, ok := s.boundSandbox(maintenanceCtx(ctx, ref), ref.SessionID)
-	if !ok || sandboxID == "" {
-		return nil, interfaces.ErrWorkNotFound
-	}
+	sandboxIDs := s.sandboxFor(ctx, ref, ids)
 	out := make([]interfaces.WorkResult, len(ids))
 	for i, id := range ids {
-		res, err := s.remoteExec(
-			maintenanceCtx(ctx, ref), ref.SessionID, shellJobCancelScript(id), sandbox.ShellExecOptions{
-				ExpectedSandboxID: sandboxID,
-				Timeout:           10 * time.Second,
-				SkipWorkspacePrep: true,
-			})
-		if err != nil || res == nil || res.ExitCode != 0 {
-			out[i] = lostResult(sandbox.ShellJobMeta{ID: id}, "cancel exec failed")
-			continue
+		result, err := s.cancelRemoteJob(ctx, ref, id, sandboxIDs[id], false)
+		if err != nil {
+			return nil, err
 		}
-		var status sandbox.ShellJobStatus
-		if json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &status) != nil || status.State == "" {
-			out[i] = lostResult(sandbox.ShellJobMeta{ID: id}, "cancel status unreadable")
-			continue
-		}
-		out[i] = interfaces.WorkResult{
-			ID: id, State: status.State, Title: id,
-			Terminal: interfaces.IsTerminalWorkState(status.State),
-		}
+		out[i] = result
 	}
 	return out, nil
 }
 
-// shellJobCancelScript signals a running watcher, then always prints
-// status.json. An already-finished job, or a watcher whose cmdline does not
-// match, must come back as the state on disk. Exiting 0 with an empty body
-// used to be reported as cancelled.
-func shellJobCancelScript(id string) string {
-	return fmt.Sprintf(
-		`D=%s/%s; [ -f "$D/status.json" ] || exit 1; `+
-			`if grep -q '"state":"running"' "$D/status.json"; then `+
-			`W=$(sed -n 's/.*"watcher_pid":\([0-9]*\).*/\1/p' "$D/status.json"); `+
-			`if [ -n "$W" ] && grep -F -q -- %s "/proc/$W/cmdline" 2>/dev/null; then `+
-			`kill -TERM "$W"; sleep 0.3; `+
-			`fi; fi; cat "$D/status.json"`,
-		sandbox.ShellJobsRoot, id, sandbox.ShellQuote(id),
-	)
+func (s *ShellJobService) cancelRemoteJob(ctx context.Context, ref interfaces.SessionRef,
+	id, sandboxID string, force bool,
+) (interfaces.WorkResult, error) {
+	if sandboxID == "" {
+		return interfaces.WorkResult{}, errors.New("session has no readable bound sandbox")
+	}
+	if s.remoteRead == nil || s.remoteExec == nil {
+		return interfaces.WorkResult{}, fmt.Errorf("remote shell jobs are unavailable")
+	}
+	snapshots, errs := s.remoteRead(maintenanceCtx(ctx, ref), ref, []string{id}, map[string]string{id: sandboxID})
+	if err := errs[id]; err != nil {
+		return interfaces.WorkResult{}, err
+	}
+	if len(snapshots) != 1 {
+		return interfaces.WorkResult{}, fmt.Errorf("unreadable cancellation status for %s", id)
+	}
+	snap := snapshots[0]
+	if snap.Missing || snap.Meta.ID != id || snap.Meta.TenantID != ref.TenantID ||
+		snap.Meta.SessionID != ref.SessionID || snap.Meta.SandboxID != sandboxID {
+		return interfaces.WorkResult{}, interfaces.ErrWorkNotFound
+	}
+	if interfaces.IsTerminalWorkState(snap.Status.State) {
+		return interfaces.WorkResult{ID: id, State: snap.Status.State, Terminal: true}, nil
+	}
+	if snap.Status.State != interfaces.WorkStateRunning {
+		return interfaces.WorkResult{}, fmt.Errorf("unreadable cancellation status for %s", id)
+	}
+	res, err := s.remoteExec(maintenanceCtx(ctx, ref), ref.SessionID,
+		sandbox.ShellJobCancelScript(snap.Meta, force), sandbox.ShellExecOptions{
+			ExpectedSandboxID: sandboxID, Timeout: 10 * time.Second, SkipWorkspacePrep: true,
+		})
+	if err != nil {
+		return interfaces.WorkResult{}, err
+	}
+	if res != nil && res.ExitCode == 3 {
+		return interfaces.WorkResult{}, interfaces.ErrWorkNotFound
+	}
+	if res == nil || res.ExitCode != 0 || res.Error != "" || res.Killed {
+		return interfaces.WorkResult{}, fmt.Errorf("cancel exec failed for %s; retry cancellation", id)
+	}
+	var status sandbox.ShellJobStatus
+	if json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &status) != nil ||
+		(status.State != interfaces.WorkStateRunning && !interfaces.IsTerminalWorkState(status.State)) {
+		return interfaces.WorkResult{}, fmt.Errorf("cancel status unreadable for %s; retry cancellation", id)
+	}
+	return interfaces.WorkResult{
+		ID: id, State: status.State, Title: snap.Meta.Title,
+		Terminal: interfaces.IsTerminalWorkState(status.State),
+	}, nil
 }
 
 // sandboxFor is the expected sandbox of each id. The index member wins.
@@ -822,6 +902,8 @@ func (s *ShellJobService) batchReadViaPinned(ctx context.Context, ref interfaces
 	for sandboxID, groupIDs := range groups {
 		if sandboxID == "" {
 			for _, id := range groupIDs {
+				// The lookup-only binding API can also return false on a storage
+				// outage. Only a pinned maintenance exec can confirm replacement.
 				errs[id] = errors.New("session has no bound sandbox")
 			}
 			continue
@@ -832,13 +914,16 @@ func (s *ShellJobService) batchReadViaPinned(ctx context.Context, ref interfaces
 			}
 			continue
 		}
-		script := sandbox.ShellJobBatchReadScriptFor(sandboxID, groupIDs, s.cursorsFor(ctx, ref, groupIDs))
+		budget, _ := ctx.Value(shellReadBudgetKey{}).(int)
+		script := sandbox.ShellJobBatchReadScriptWithBudget(
+			sandboxID, groupIDs, s.cursorsFor(ctx, ref, groupIDs), budget,
+		)
 		res, err := s.remoteExec(ctx, ref.SessionID, script, sandbox.ShellExecOptions{
 			ExpectedSandboxID: sandboxID,
 			Timeout:           30 * time.Second,
 			SkipWorkspacePrep: true,
 		})
-		if err != nil || res == nil || res.ExitCode != 0 {
+		if err != nil || res == nil || res.ExitCode != 0 || res.Error != "" || res.Killed {
 			reason := fmt.Sprintf("batch read on sandbox %s failed", sandboxID)
 			if err != nil {
 				reason = err.Error()
@@ -846,7 +931,11 @@ func (s *ShellJobService) batchReadViaPinned(ctx context.Context, ref interfaces
 				reason = res.Error
 			}
 			for _, id := range groupIDs {
-				errs[id] = errors.New(reason)
+				if err != nil {
+					errs[id] = fmt.Errorf("%s: %w", reason, err)
+				} else {
+					errs[id] = errors.New(reason)
+				}
 			}
 			continue
 		}
@@ -861,9 +950,7 @@ func (s *ShellJobService) batchReadViaPinned(ctx context.Context, ref interfaces
 		}
 		for _, id := range groupIDs {
 			if !seen[id] {
-				snapshots[byID[id]] = sandbox.ShellJobSnapshot{
-					Missing: true, Meta: sandbox.ShellJobMeta{ID: id},
-				}
+				errs[id] = fmt.Errorf("unreadable batch response for shell job %s", id)
 			}
 		}
 	}
@@ -892,6 +979,44 @@ func (s *ShellJobService) StartSweeper(ctx context.Context, interval time.Durati
 	}()
 }
 
+// protectScheduledJobs renews leases independently of remote execs and session
+// locks. A blocked read must not leave any queued session unprotected.
+func (s *ShellJobService) protectScheduledJobs(ctx context.Context) func() {
+	ctx, cancel := context.WithCancel(ctx)
+	renew := func() {
+		entries, err := s.index.Entries(ctx)
+		if err != nil || s.bg == nil || s.bg.Registry == nil {
+			return
+		}
+		for _, e := range entries {
+			// Renew only: a snapshot taken before a terminal claim must not
+			// resurrect a discarded activity or a deleted session.
+			if _, err := s.bg.Registry.Renew(ctx, e.SessionRef, e.WorkID, shellJobRenewLease); err != nil {
+				logger.Warnf(ctx, "[ShellJob] heartbeat id=%s: %v", e.WorkID, err)
+			}
+			_ = s.index.client.Expire(
+				ctx, s.index.reservationKey(e.SessionRef, e.WorkID), interfaces.NoticeRetention,
+			).Err()
+		}
+	}
+	renew()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(s.heartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				renew()
+			}
+		}
+	}()
+	return func() { cancel(); <-done }
+}
+
 // SweepOnce claims due jobs, grouped by session, and reports or renews each one.
 func (s *ShellJobService) SweepOnce(ctx context.Context) error {
 	if s == nil || s.index == nil {
@@ -899,6 +1024,8 @@ func (s *ShellJobService) SweepOnce(ctx context.Context) error {
 	}
 	s.swept.Lock()
 	defer s.swept.Unlock()
+	stopHeartbeat := s.protectScheduledJobs(ctx)
+	defer stopHeartbeat()
 	s.settleCapturedOutcomes(ctx)
 	now := time.Now().UTC()
 	claimed, err := s.index.Claim(ctx, now, s.replica)
@@ -906,7 +1033,13 @@ func (s *ShellJobService) SweepOnce(ctx context.Context) error {
 		return err
 	}
 	for ref, entries := range claimed {
-		if err := s.sweepSession(ctx, ref, entries); err != nil {
+		if err := s.index.WithSessionLock(ctx, ref, func(lockCtx context.Context) error {
+			closed, err := s.index.SessionClosed(lockCtx, ref)
+			if err != nil || closed {
+				return err
+			}
+			return s.sweepSession(lockCtx, ref, entries)
+		}); err != nil {
 			logger.Warnf(ctx, "[ShellJob] sweep session=%s: %v", ref.SessionID, err)
 		}
 		if err := s.index.Release(ctx, ref, s.replica); err != nil {
@@ -938,6 +1071,9 @@ func (s *ShellJobService) sweepSession(ctx context.Context, ref interfaces.Sessi
 		return fmt.Errorf("remote shell jobs are unavailable")
 	}
 	snapshots, errs := s.remoteRead(maintenanceCtx(ctx, ref), ref, ids, sandboxIDs)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if len(snapshots) != len(ids) {
 		return fmt.Errorf("sweep batch read returned %d of %d", len(snapshots), len(ids))
 	}
@@ -954,9 +1090,13 @@ func (s *ShellJobService) sweepSession(ctx context.Context, ref interfaces.Sessi
 	for _, id := range ids {
 		snap := byID[id]
 		entry := entryByID[id]
+		parentMessageID := snap.Meta.ParentMessageID
+		if belongsToOtherSession(snap.Meta, ref) {
+			parentMessageID = ""
+		}
 		switch {
-		case errs != nil && errs[id] != nil && entry.SandboxID == "":
-			s.finishLost(ctx, ref, entry, errs[id].Error(), snap.Meta.ParentMessageID)
+		case errs != nil && errs[id] != nil && (entry.SandboxID == "" || shellSandboxGone(errs[id])):
+			s.finishLost(ctx, ref, entry, errs[id].Error(), parentMessageID)
 		case errs != nil && errs[id] != nil:
 			// A timed-out or paused sandbox read is not evidence the watcher
 			// died. Dropping the index member and the activity lease here lets
@@ -966,14 +1106,14 @@ func (s *ShellJobService) sweepSession(ctx context.Context, ref interfaces.Sessi
 			// can never be read, so that case is still lost.
 			logger.Warnf(ctx, "[ShellJob] sweep read id=%s: %v", id, errs[id])
 			s.renewRunning(ctx, ref, id, snap)
-		case snap.Missing || snap.Meta.SandboxID == "" ||
+		case snap.Missing || belongsToOtherSession(snap.Meta, ref) || snap.Meta.SandboxID == "" ||
 			(entry.SandboxID != "" && snap.Meta.SandboxID != entry.SandboxID):
-			s.finishLost(ctx, ref, entry, "job directory missing or sandbox replaced", snap.Meta.ParentMessageID)
-		case snap.Status.State != interfaces.WorkStateRunning:
+			s.finishLost(ctx, ref, entry, "job directory missing or sandbox replaced", parentMessageID)
+		case interfaces.IsTerminalWorkState(snap.Status.State):
 			s.finishTerminal(ctx, ref, entry, snap)
-		case !snap.WatcherAlive:
+		case snap.Status.State == interfaces.WorkStateRunning && !snap.WatcherAlive:
 			s.stopOrphanedJob(ctx, ref, entry, snap.Status)
-			s.finishLost(ctx, ref, entry, "watcher process is gone", snap.Meta.ParentMessageID)
+			s.finishLost(ctx, ref, entry, "watcher process is gone", parentMessageID)
 		default:
 			s.renewRunning(ctx, ref, id, snap)
 		}
@@ -1132,32 +1272,70 @@ func (s *ShellJobService) renewRunning(ctx context.Context, ref interfaces.Sessi
 // submit tool early; the watcher keeps running.
 func (s *ShellJobService) OnStop(context.Context, interfaces.SessionRef) error { return nil }
 
-// OnDelete drops the session's index members. The sandbox itself is destroyed
-// by the session delete path.
+// OnDelete stops detached jobs before the session's shared-machine workspace
+// or pin disappears. Failed cancellation leaves tracking intact and aborts deletion.
 func (s *ShellJobService) OnDelete(ctx context.Context, ref interfaces.SessionRef) error {
 	if s.local != nil && s.onHostSession(ctx, ref) {
-		if err := s.local.OnDelete(ctx, ref); err != nil {
+		return s.local.OnDelete(ctx, ref)
+	}
+	if s.index == nil {
+		return nil
+	}
+	return s.index.WithSessionLock(ctx, ref, func(ctx context.Context) error {
+		entries, err := s.index.Entries(ctx)
+		if err != nil {
 			return err
 		}
-	}
-	s.skillCapture.dropSession(ref)
-	if s.index != nil {
+		for _, e := range entries {
+			if e.SessionRef != ref {
+				continue
+			}
+			result, err := s.cancelRemoteJob(ctx, ref, e.WorkID, e.SandboxID, true)
+			if err != nil && !errors.Is(err, interfaces.ErrWorkNotFound) && !shellSandboxGone(err) {
+				return err
+			}
+			if err == nil && !result.Terminal {
+				return fmt.Errorf("shell job %s is still stopping; retry session deletion", e.WorkID)
+			}
+		}
+		if err := s.index.client.Set(ctx, s.index.closedKey(ref), "1", interfaces.NoticeRetention).Err(); err != nil {
+			return err
+		}
 		if err := s.index.RemoveSession(ctx, ref); err != nil {
 			return err
 		}
 		if err := s.index.DeleteSessionCursors(ctx, ref); err != nil {
 			return err
 		}
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	prefix := fmt.Sprintf("%d\x00%s\x00", ref.TenantID, ref.SessionID)
-	for key := range s.cursors {
-		if strings.HasPrefix(key, prefix) {
-			delete(s.cursors, key)
+		s.skillCapture.dropSession(ref)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		prefix := fmt.Sprintf("%d\x00%s\x00", ref.TenantID, ref.SessionID)
+		for key := range s.cursors {
+			if strings.HasPrefix(key, prefix) {
+				delete(s.cursors, key)
+			}
 		}
+		return nil
+	})
+}
+
+// OnDeleteAborted allows new jobs after a failed session deletion.
+func (s *ShellJobService) OnDeleteAborted(ctx context.Context, ref interfaces.SessionRef) error {
+	if s.local != nil && s.onHostSession(ctx, ref) {
+		if rollback, ok := s.local.(interface {
+			OnDeleteAborted(context.Context, interfaces.SessionRef) error
+		}); ok {
+			return rollback.OnDeleteAborted(ctx, ref)
+		}
+		return nil
 	}
-	return nil
+	if s.index == nil {
+		return nil
+	}
+	return s.index.WithSessionLock(ctx, ref, func(ctx context.Context) error {
+		return s.index.client.Del(ctx, s.index.closedKey(ref)).Err()
+	})
 }
 
 // EndShellJobRun keeps the run's output cursors for another hour so a late
@@ -1272,8 +1450,8 @@ func shellTerminalResult(meta sandbox.ShellJobMeta, status sandbox.ShellJobStatu
 		Stderr: sandbox.ShellJobStream{TotalBytes: offsets.Stderr},
 	}
 	if preview != nil {
-		snap.Stdout.Text = preview.stdout.String()
-		snap.Stderr.Text = preview.stderr.String()
+		snap.Stdout = preview.stdout.stream(offsets.Stdout)
+		snap.Stderr = preview.stderr.stream(offsets.Stderr)
 	}
 	return ShellJobResult(snap, lite)
 }
@@ -1468,7 +1646,14 @@ func cursorKey(ref interfaces.SessionRef, runID, workID string) string {
 	return fmt.Sprintf("%d\x00%s\x00%s\x00%s", ref.TenantID, ref.SessionID, runID, workID)
 }
 
-type shellReadRunKey struct{}
+type (
+	shellReadRunKey    struct{}
+	shellReadBudgetKey struct{}
+)
+
+func shellSandboxGone(err error) bool {
+	return errors.Is(err, sandbox.ErrBoundSandboxChanged) || errors.Is(err, sandbox.ErrSandboxSessionDeleted)
+}
 
 func (s *ShellJobService) cursorsFor(
 	ctx context.Context, ref interfaces.SessionRef, ids []string,
@@ -1528,6 +1713,9 @@ func (s *ShellJobService) noteReadCursor(
 }
 
 func nextStreamOffset(st sandbox.ShellJobStream) int64 {
+	if st.NextBytes != nil {
+		return *st.NextBytes
+	}
 	end := st.FromBytes + int64(len(st.Text))
 	if st.OmittedBytes > 0 && st.FromBytes == 0 {
 		return st.TotalBytes
@@ -1619,13 +1807,6 @@ func belongsToOtherSession(meta sandbox.ShellJobMeta, ref interfaces.SessionRef)
 		return true
 	}
 	return false
-}
-
-func snapMetaOrID(meta sandbox.ShellJobMeta, id string) sandbox.ShellJobMeta {
-	if meta.ID == "" {
-		meta.ID = id
-	}
-	return meta
 }
 
 func shellJobDurationMS(status sandbox.ShellJobStatus) int64 {

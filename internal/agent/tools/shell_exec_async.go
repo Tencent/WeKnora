@@ -35,8 +35,9 @@ Arguments: same as shell_exec, plus description (short label shown to the user) 
 yield_time_ms.`
 
 // shellExecAsyncOutputLimit keeps a finished job's stdout, stderr and JSON
-// envelope intact. The generic 24000-rune cap would split that envelope.
-const shellExecAsyncOutputLimit = 96 * 1024
+// envelope intact, including the six-character JSON escape for a control byte.
+// The generic 24000-rune cap would split that envelope.
+const shellExecAsyncOutputLimit = (16+8)*1024*6 + 8*1024
 
 // ShellExecAsyncInput is the model-facing argument object.
 type ShellExecAsyncInput struct {
@@ -471,11 +472,9 @@ func commandInWorkDir(workDir, command string) string {
 	if workDir == "" {
 		return command
 	}
-	body := strings.TrimSpace(command)
-	if !strings.HasSuffix(body, ";") {
-		body += ";"
-	}
-	return "cd " + sandbox.ShellQuote(workDir) + " && { " + body + " }"
+	// A newline terminates comments and heredoc delimiters without changing
+	// the command's shell grammar (an appended semicolon does not).
+	return "cd " + sandbox.ShellQuote(workDir) + " && {\n" + command + "\n}"
 }
 
 func shellJobLabel(description, command string) string {

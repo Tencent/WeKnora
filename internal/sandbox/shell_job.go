@@ -133,6 +133,9 @@ type ShellJobStream struct {
 	TotalBytes   int64  `json:"total_bytes"`
 	OmittedBytes int64  `json:"omitted_bytes"`
 	Truncated    bool   `json:"truncated"`
+	// NextBytes is the absolute end of the bytes consumed by this view, before
+	// UTF-8 sanitization. Nil is reserved for older snapshot producers.
+	NextBytes *int64 `json:"next_bytes,omitempty"`
 }
 
 // ShellJobSnapshot is a point-in-time read of one job directory.
@@ -245,10 +248,11 @@ func watcherAlive(dir string, pid int, jobID string) bool {
 
 func streamBudget(which string, budget int) int {
 	if budget > 0 {
+		stderr := budget / 3
 		if which == "Stderr" {
-			return budget / 2
+			return stderr
 		}
-		return budget
+		return budget - stderr
 	}
 	if which == "Stderr" {
 		return shellJobStderrBudget
@@ -274,6 +278,10 @@ func readShellStream(dir, name string, from *ShellJobOffsets, which string, budg
 		out.Truncated = true
 	}
 	out.Text = sanitizeText(text)
+	// The local reader selects head and tail when over budget, so it has
+	// consumed the end even if some middle bytes were deliberately omitted.
+	next := total
+	out.NextBytes = &next
 	return out
 }
 
@@ -450,7 +458,7 @@ func collectStream(
 }
 
 func capToBudget(out *ShellJobStream, text []byte, budget int) []byte {
-	if budget <= 0 || len(text) <= budget {
+	if len(text) <= budget {
 		return text
 	}
 	headN := budget / 4

@@ -162,7 +162,7 @@ echo "{\"state\":\"$STATE\",\"watcher_pid\":$$,\"pgid\":$C,\"exit_code\":$X,\
   > "$D/status.json.tmp" && mv "$D/status.json.tmp" "$D/status.json";`
 
 // One batch-read body. $J and $D are set by the caller. A missing status
-// prints nothing so the host can mark that id Missing. Stream totals are
+// produces an explicit Missing record, distinct from a broken response. Totals are
 // .rotated plus the live segment (shellJobAbsoluteSizes).
 const shellJobBatchHead = `if [ -f "$D/status.json" ]; then
   META=$(cat "$D/meta.json" 2>/dev/null || printf '%s' '{}')
@@ -182,12 +182,14 @@ const shellJobBatchTail = `
   printf '%s' ',"status":'
   printf '%s' "$ST"
   printf '%s' ',"stdout":'
-  stream_json stdout 4096 12288 "$SF"
+  stream_json stdout "$OH" "$OT" "$SF"
   printf '%s' ',"stderr":'
-  stream_json stderr 2048 6144 "$EF"
+  stream_json stderr "$EH" "$ET" "$EF"
   printf '%s' ',"watcher_alive":'
   printf '%s' "$ALIVE"
   printf '}\n'
+else
+  printf '{"meta":{"work_id":"%s"},"missing":true}\n' "$J"
 fi
 `
 
@@ -388,7 +390,7 @@ func shQuote(s string) string {
 // ShellJobBatchReadScript is the sweeper / detail-read script. For each valid
 // id it cats meta.json and status.json, sends a bounded head and tail (or the
 // bytes after a cursor), checks /proc/<watcher_pid>/cmdline for the job id,
-// and prints one JSON object. Ids with no status.json produce no line.
+// and prints one JSON object. Ids with no status.json produce a Missing record.
 // sandboxID is the caller's exec target; the script runs inside that sandbox
 // and does not embed it. from is nil for a first read.
 func ShellJobBatchReadScript(sandboxID string, ids []string) string {
@@ -398,6 +400,13 @@ func ShellJobBatchReadScript(sandboxID string, ids []string) string {
 // ShellJobBatchReadScriptFor is ShellJobBatchReadScript with a per-id cursor.
 // A missing id in from is a first read. A present offset, including 0, is incremental.
 func ShellJobBatchReadScriptFor(sandboxID string, ids []string, from map[string]ShellJobOffsets) string {
+	return ShellJobBatchReadScriptWithBudget(sandboxID, ids, from, 0)
+}
+
+// ShellJobBatchReadScriptWithBudget bounds the combined stream bytes per job.
+func ShellJobBatchReadScriptWithBudget(
+	sandboxID string, ids []string, from map[string]ShellJobOffsets, budget int,
+) string {
 	_ = sandboxID
 	var b strings.Builder
 	wrote := false
@@ -407,6 +416,9 @@ func ShellJobBatchReadScriptFor(sandboxID string, ids []string, from map[string]
 		}
 		if !wrote {
 			b.WriteString(shellJobBatchPrelude)
+			stdout, stderr := streamBudget("Stdout", budget), streamBudget("Stderr", budget)
+			fmt.Fprintf(&b, "OH=%d; OT=%d; EH=%d; ET=%d;\n",
+				stdout/4, stdout-stdout/4, stderr/4, stderr-stderr/4)
 			wrote = true
 		}
 		sf, ef := "", ""
@@ -428,8 +440,8 @@ func ShellJobBatchReadScriptFor(sandboxID string, ids []string, from map[string]
 }
 
 // ParseShellJobBatch decodes one JSON snapshot per non-empty line.
-// Lines that are not objects are skipped. Absent ids are not filled in;
-// the caller supplies Missing placeholders for those. Slice fields are
+// Lines that are not objects are skipped. Missing records are explicit; an
+// absent or malformed line is a read failure for the caller. Slice fields are
 // assembled with the same head/tail rules as ReadShellJob.
 func ParseShellJobBatch(stdout string) []ShellJobSnapshot {
 	out := make([]ShellJobSnapshot, 0)
@@ -443,7 +455,7 @@ func ParseShellJobBatch(stdout string) []ShellJobSnapshot {
 			continue
 		}
 		snap := ShellJobSnapshot{
-			Meta: raw.Meta, Status: raw.Status, WatcherAlive: raw.WatcherAlive,
+			Meta: raw.Meta, Status: raw.Status, WatcherAlive: raw.WatcherAlive, Missing: raw.Missing,
 		}
 		snap.Stdout = raw.Stdout.stream()
 		snap.Stderr = raw.Stderr.stream()
@@ -453,6 +465,7 @@ func ParseShellJobBatch(stdout string) []ShellJobSnapshot {
 }
 
 type batchLine struct {
+	Missing      bool           `json:"missing"`
 	Meta         ShellJobMeta   `json:"meta"`
 	Status       ShellJobStatus `json:"status"`
 	WatcherAlive bool           `json:"watcher_alive"`
@@ -480,6 +493,8 @@ func (b batchStream) stream() ShellJobStream {
 	}
 	if b.From != nil {
 		body := decodeB64(b.BodyB64)
+		next := min(b.TotalBytes, *b.From+int64(len(body)))
+		out.NextBytes = &next
 		out.FromBytes = *b.From
 		out.OmittedBytes = b.Omitted
 		out.Text = sanitizeText(body)
@@ -489,6 +504,8 @@ func (b batchStream) stream() ShellJobStream {
 		return out
 	}
 	head := decodeB64(b.HeadB64)
+	next := b.TotalBytes
+	out.NextBytes = &next
 	tail := decodeB64(b.TailB64)
 	text, textStart, gap := joinHeadTail(head, b.HeadStart, b.HeadFromFile, tail, b.TailStart)
 	out.FromBytes = textStart
@@ -600,4 +617,46 @@ func ParseShellJobEpilogue(epilogue string) (ShellJobStatus, ShellJobOffsets, bo
 		return ShellJobStatus{}, ShellJobOffsets{}, false
 	}
 	return status, ShellJobOffsets{Stdout: so, Stderr: se}, true
+}
+
+// ShellJobCancelScript rechecks ownership in the exec that signals the process. The
+// directory is global on shared machines; a valid handle alone is insufficient.
+func ShellJobCancelScript(meta ShellJobMeta, force bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "D=%s/%s; [ -f \"$D/status.json\" ] || exit 3;\n", ShellJobsRoot, meta.ID)
+	for _, field := range []struct {
+		name  string
+		value any
+	}{
+		{"work_id", meta.ID},
+		{"tenant_id", meta.TenantID},
+		{"session_id", meta.SessionID},
+		{"sandbox_id", meta.SandboxID},
+	} {
+		raw, _ := json.Marshal(field.value)
+		// Meta is written atomically with json.Marshal, and each of these
+		// fields is followed by a comma. This also separates tenant 7 from 70.
+		pattern := fmt.Sprintf("%q:%s,", field.name, raw)
+		fmt.Fprintf(&b, "grep -F -q -- %s \"$D/meta.json\" || exit 3;\n", ShellQuote(pattern))
+	}
+	b.WriteString(`if grep -q '"state":"running"' "$D/status.json"; then
+  W=$(sed -n 's/.*"watcher_pid":\([0-9]*\).*/\1/p' "$D/status.json")
+`)
+	fmt.Fprintf(&b, `  if [ -n "$W" ] && grep -F -q -- %s "/proc/$W/cmdline" 2>/dev/null; then
+    kill -TERM "$W" 2>/dev/null || true
+    sleep 0.3
+`, ShellQuote(meta.ID))
+	if force {
+		b.WriteString(`    if grep -q '"state":"running"' "$D/status.json"; then
+      C=$(sed -n 's/.*"pgid":\([0-9]*\).*/\1/p' "$D/status.json")
+      if [ -n "$C" ] && [ "$C" -gt 1 ]; then kill -KILL -"$C" 2>/dev/null || true; fi
+      sleep 0.3
+    fi
+`)
+	}
+	b.WriteString(`  fi
+fi
+cat "$D/status.json"
+`)
+	return b.String()
 }

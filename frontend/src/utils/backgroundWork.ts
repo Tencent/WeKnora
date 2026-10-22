@@ -68,11 +68,14 @@ function asWorkItems(
   return []
 }
 
-export function createBackgroundWorkPoller(options: PollerOptions): { start(): void; stop(): void } {
+export function createBackgroundWorkPoller(options: PollerOptions): {
+  start(): void; stop(): void; refresh(): Promise<void>; dispose(): void
+} {
   const intervalMs = options.intervalMs ?? 5000
   let timer: ReturnType<typeof setTimeout> | null = null
   let abort: AbortController | null = null
   let running = false
+  let disposed = false
 
   const stop = () => {
     running = false
@@ -85,7 +88,7 @@ export function createBackgroundWorkPoller(options: PollerOptions): { start(): v
   }
 
   const tick = async () => {
-    if (!running) return
+    if (!running || disposed) return
     const sessionId = readSessionId(options.sessionId)
     const controller = new AbortController()
     abort?.abort()
@@ -116,10 +119,22 @@ export function createBackgroundWorkPoller(options: PollerOptions): { start(): v
 
   return {
     start() {
-      if (running) return
+      if (running || disposed) return
       running = true
       void tick()
     },
     stop,
+    async refresh() {
+      if (disposed) return
+      // Manual refreshes use the same abort/generation boundary as polling.
+      // A newer request, session switch or unmount invalidates their results.
+      stop()
+      running = true
+      await tick()
+    },
+    dispose() {
+      disposed = true
+      stop()
+    },
   }
 }

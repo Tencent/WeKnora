@@ -342,7 +342,7 @@ func TestSweepReportsTerminalAndClaimsOnce(t *testing.T) {
 // 任一维护 exec 显式指定 "/" 或旧 "/workspace" 都会被 CleanWorkDirIn
 // 拒绝，把 shell_exec_async 的提交、取消与 work_wait 全部打断。
 func TestMaintenanceExecsLeaveWorkDirToTheSessionLayout(t *testing.T) {
-	svc, _, _, _ := newRemoteServiceFixture(t)
+	svc, reader, _, _ := newRemoteServiceFixture(t)
 	var execOpts []sandbox.ShellExecOptions
 	inner := svc.remoteExec
 	record := func(
@@ -373,6 +373,10 @@ func TestMaintenanceExecsLeaveWorkDirToTheSessionLayout(t *testing.T) {
 	}
 
 	execOpts = nil
+	reader.snapshots["sj_0123"] = ownedRunningShellSnapshot("sj_0123", "s", "sbx1")
+	inner = func(context.Context, string, string, sandbox.ShellExecOptions) (*sandbox.ExecuteResult, error) {
+		return &sandbox.ExecuteResult{Stdout: `{"state":"cancelled"}`}, nil
+	}
 	_, err = svc.Cancel(context.Background(), ref, []string{"sj_0123"})
 	require.NoError(t, err)
 	require.NotEmpty(t, execOpts)
@@ -445,8 +449,9 @@ func TestSweepMarksLostWhenTheIndexHasNoSandbox(t *testing.T) {
 }
 
 func TestCancelReportsTheStatusItRead(t *testing.T) {
-	svc, _, _, _ := newRemoteServiceFixture(t)
+	svc, reader, _, _ := newRemoteServiceFixture(t)
 	ref := interfaces.SessionRef{TenantID: 7, SessionID: "s"}
+	reader.snapshots["sj_0123"] = ownedRunningShellSnapshot("sj_0123", "s", "sbx1")
 	svc.remoteExec = func(context.Context, string, string, sandbox.ShellExecOptions) (*sandbox.ExecuteResult, error) {
 		return &sandbox.ExecuteResult{
 			ExitCode: 0,
@@ -460,19 +465,19 @@ func TestCancelReportsTheStatusItRead(t *testing.T) {
 }
 
 func TestCancelDoesNotInventCancelledWithoutAStatus(t *testing.T) {
-	svc, _, _, _ := newRemoteServiceFixture(t)
+	svc, reader, _, _ := newRemoteServiceFixture(t)
 	ref := interfaces.SessionRef{TenantID: 7, SessionID: "s"}
+	reader.snapshots["sj_0123"] = ownedRunningShellSnapshot("sj_0123", "s", "sbx1")
 	svc.remoteExec = func(context.Context, string, string, sandbox.ShellExecOptions) (*sandbox.ExecuteResult, error) {
 		return &sandbox.ExecuteResult{ExitCode: 0, Stdout: ""}, nil
 	}
 	results, err := svc.Cancel(context.Background(), ref, []string{"sj_0123"})
-	require.NoError(t, err)
-	require.Equal(t, interfaces.WorkStateLost, results[0].State)
-	require.NotEqual(t, interfaces.WorkStateCancelled, results[0].State)
+	require.ErrorContains(t, err, "cancel status unreadable")
+	require.Empty(t, results)
 }
 
 func TestCancelScriptPrintsStatusInsteadOfExitingEarly(t *testing.T) {
-	script := shellJobCancelScript("sj_0123")
+	script := sandbox.ShellJobCancelScript(sandbox.ShellJobMeta{ID: "sj_0123"}, false)
 	require.NotContains(t, script, "exit 0")
 	require.Contains(t, script, `cat "$D/status.json"`)
 	require.Contains(t, script, "kill -TERM")
@@ -532,7 +537,11 @@ func TestBatchReadLocksExpectedSandbox(t *testing.T) {
 		opts sandbox.ShellExecOptions,
 	) (*sandbox.ExecuteResult, error) {
 		calls = append(calls, opts)
-		return &sandbox.ExecuteResult{ExitCode: 0}, nil
+		return &sandbox.ExecuteResult{
+			ExitCode: 0,
+			Stdout: `{"meta":{"work_id":"sj_0123"},"missing":true}` + "\n" +
+				`{"meta":{"work_id":"sj_ab01"},"missing":true}`,
+		}, nil
 	}
 	snapshots, errs := svc.batchReadViaPinned(context.Background(), ref,
 		[]string{"sj_0123", "sj_ab01"},
@@ -550,8 +559,7 @@ func TestBatchReadLocksExpectedSandbox(t *testing.T) {
 	require.True(t, seen["sbx-a"] && seen["sbx-b"])
 }
 
-// D1 钉子：expected 不匹配（沙盒被换）必须是组内逐条 lost，不是整调用错误
-// ——work_wait 终读的 checkWorkResults 会把整调用错误判成全批 lost。
+// A confirmed replacement is per-item lost; transient errors remain retryable.
 func TestBatchReadSandboxChangedIsPerIDLost(t *testing.T) {
 	svc, _, _, _ := newRemoteServiceFixture(t)
 	ref := interfaces.SessionRef{TenantID: 7, SessionID: "s"}
@@ -561,9 +569,13 @@ func TestBatchReadSandboxChangedIsPerIDLost(t *testing.T) {
 		if opts.ExpectedSandboxID == "sbx-gone" {
 			// SessionBoundManager 对 expected 不匹配返回真 Go 错误
 			//（session_manager.go:843-845），不包装进 ExecuteResult。
-			return nil, errors.New("sandbox: bound sandbox changed before maintenance command")
+			return nil, sandbox.ErrBoundSandboxChanged
 		}
-		return &sandbox.ExecuteResult{ExitCode: 0}, nil
+		return &sandbox.ExecuteResult{
+			ExitCode: 0,
+			Stdout: `{"meta":{"work_id":"sj_0123"},"missing":true}` + "\n" +
+				`{"meta":{"work_id":"sj_ab01"},"missing":true}`,
+		}, nil
 	}
 	snapshots, errs := svc.batchReadViaPinned(context.Background(), ref,
 		[]string{"sj_0123", "sj_ab01"},
@@ -582,12 +594,12 @@ func TestBatchReadSandboxChangedIsPerIDLost(t *testing.T) {
 				Meta:   sandbox.ShellJobMeta{ID: ids[1]},
 				Status: sandbox.ShellJobStatus{State: interfaces.WorkStateRunning},
 			},
-		}, map[string]error{ids[0]: errors.New("sandbox: bound sandbox changed")}
+		}, map[string]error{ids[0]: sandbox.ErrBoundSandboxChanged}
 	}
 	results, err := svc.Status(context.Background(), ref,
 		[]string{"sj_0123", "sj_ab01"},
 		interfaces.StatusOptions{Detailed: true})
-	require.NoError(t, err, "整调用错误会被 work_wait 判成全批 lost，必须逐条")
+	require.NoError(t, err, "confirmed loss must not obscure the healthy item")
 	require.Equal(t, interfaces.WorkStateLost, results[0].State)
 	require.Equal(t, interfaces.WorkStateRunning, results[1].State)
 }
@@ -598,7 +610,11 @@ func TestBatchReadEmptySandboxIsPerIDLostWithoutExec(t *testing.T) {
 	var calls int
 	svc.remoteExec = func(context.Context, string, string, sandbox.ShellExecOptions) (*sandbox.ExecuteResult, error) {
 		calls++
-		return &sandbox.ExecuteResult{ExitCode: 0}, nil
+		return &sandbox.ExecuteResult{
+			ExitCode: 0,
+			Stdout: `{"meta":{"work_id":"sj_0123"},"missing":true}` + "\n" +
+				`{"meta":{"work_id":"sj_ab01"},"missing":true}`,
+		}, nil
 	}
 	snapshots, errs := svc.batchReadViaPinned(context.Background(), ref,
 		[]string{"sj_0123", "sj_ab01"},
@@ -934,7 +950,7 @@ func TestShellJobCursorIsSharedAcrossReplicas(t *testing.T) {
 	) (*sandbox.ExecuteResult, error) {
 		script = got
 		opts = gotOpts
-		return &sandbox.ExecuteResult{ExitCode: 0}, nil
+		return &sandbox.ExecuteResult{ExitCode: 0, Stdout: `{"meta":{"work_id":"sj_0123"},"missing":true}`}, nil
 	}
 	readCtx := context.WithValue(context.Background(), shellReadRunKey{}, "m1")
 	_, errs := svcB.batchReadViaPinned(readCtx, ref, []string{id}, map[string]string{id: "sbx1"})
