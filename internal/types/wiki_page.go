@@ -583,6 +583,23 @@ type WikiConfig struct {
 	// this knob trades a single KB's peak throughput for cross-KB fairness.
 	// Set it >= the wiki pool size to effectively disable the cap.
 	IngestMaxInflight int `yaml:"ingest_max_inflight" json:"ingest_max_inflight,omitempty"`
+
+	// IngestMaxContentSegments caps how many content windows Pass 0
+	// (candidate slug extraction) reads per document. Each window is one LLM
+	// call of up to ~32k runes, so this bounds the per-document extraction
+	// cost: text past the last window is not scanned for candidates (the
+	// chunk-citation pass still reads every chunk). 0 falls back to the
+	// hard-coded default (8).
+	IngestMaxContentSegments int `yaml:"ingest_max_content_segments" json:"ingest_max_content_segments,omitempty"`
+}
+
+// IngestMaxContentSegmentsOrDefault returns IngestMaxContentSegments when
+// set (> 0), otherwise the hard-coded fallback.
+func (c *WikiConfig) IngestMaxContentSegmentsOrDefault(fallback int) int {
+	if c == nil || c.IngestMaxContentSegments <= 0 {
+		return fallback
+	}
+	return c.IngestMaxContentSegments
 }
 
 // IngestBatchSizeOrDefault returns IngestBatchSize when set (> 0),

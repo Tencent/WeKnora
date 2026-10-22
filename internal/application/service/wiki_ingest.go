@@ -1464,6 +1464,11 @@ type WikiBatchContext struct {
 	ContentInstructions    string
 	ExtractionInstructions string
 
+	// MaxContentSegments caps the Pass 0 content windows per document.
+	// Resolved from WikiConfig.IngestMaxContentSegments; <= 0 means the
+	// default (see contentSegmentLimit).
+	MaxContentSegments int
+
 	// PlannedFolderID holds the per-slug wiki_folders.id assigned by the batch
 	// taxonomy planning pass (planBatchTaxonomy + folder resolution), keyed by
 	// page slug. Reduce applies it only to pages that aren't already filed
