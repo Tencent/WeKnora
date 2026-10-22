@@ -13,6 +13,10 @@ async function setup(t: TestContext) {
     getCardDetails: t.mock.fn(), getfDetails() {}, onVisibleChange() {},
   }
   const listKnowledgeFolders = t.mock.fn(async (_id: string) => ({ data: { folders: [] } }))
+  const batchQueryKnowledge = t.mock.fn(async (query: string) => {
+    const ids = new URLSearchParams(query).getAll('ids')
+    return { success: true, data: hook.cardList.value.filter(card => ids.includes(card.id)).map(card => ({ ...card })) }
+  })
   const fetchKnowledgeBaseById = t.mock.fn(async (_id: string, _force: boolean) => ({ id: 'kb', type: 'document' }))
   let settle: () => void = () => {}
   const waitForKnowledgeDeletion = t.mock.fn((_ids: string[]) => new Promise<string>((resolve) => {
@@ -21,7 +25,7 @@ async function setup(t: TestContext) {
   const page = f.component(new URL('./KnowledgeBase.vue', import.meta.url), {
     'vue-router': { useRoute: () => route, useRouter: () => ({ replace() {} }) },
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
-    'tdesign-vue-next': { MessagePlugin: {} },
+    'tdesign-vue-next': { MessagePlugin: { success() {}, error() {}, info() {}, warning() {} } },
     '@/hooks/useKnowledgeBase': () => hook,
     '@/stores/ui': { useUIStore: () => ({ clearSelectedTagIds() {} }) },
     '@/stores/organization': { useOrganizationStore: () => ({ sharedKnowledgeBases: [], getKBPermission: () => 'owner' }) },
@@ -36,7 +40,11 @@ async function setup(t: TestContext) {
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
     '@/utils/kbPermission': {}, '@/utils/knowledgeDeletion': { waitForKnowledgeDeletion }, '@/utils/knowledgeTrace': {},
     '@/utils/knowledgeProcessingStall': stall, '@/api/wiki': {}, '@/api/knowledge-base': {},
-    '@/api/knowledge-base/index': { listKnowledgeFolders, listKnowledgeTags: async () => ({ data: { data: [], total: 0 } }) },
+    '@/api/knowledge-base/index': {
+      listKnowledgeFolders, listKnowledgeTags: async () => ({ data: { data: [], total: 0 } }),
+      batchReparseKnowledge: async () => ({ success: true }),
+      batchQueryKnowledge,
+    },
   })
   await flush()
   page.vm.isCardDetails = true
@@ -44,7 +52,7 @@ async function setup(t: TestContext) {
   listKnowledgeFolders.mock.resetCalls()
   fetchKnowledgeBaseById.mock.resetCalls()
   return {
-    ...f, ...page, route, hook, listKnowledgeFolders, fetchKnowledgeBaseById, waitForKnowledgeDeletion,
+    ...f, ...page, route, hook, listKnowledgeFolders, fetchKnowledgeBaseById, waitForKnowledgeDeletion, batchQueryKnowledge,
     settleDeletion: () => settle(),
   }
 }
@@ -140,5 +148,101 @@ test('uses the current route when a queued change fires', async t => {
   f.hook.getKnowled.mock.resetCalls()
   f.vm.isCardDetails = false
   t.mock.timers.tick(300)
+  assert.equal(f.hook.getKnowled.mock.callCount(), 0)
+})
+
+test('batch reparse preserves loaded pages and updates statuses without reloading the list', async t => {
+  const f = await setup(t)
+  f.hook.cardList.value = Array.from({ length: 70 }, (_, i) => ({ id: `doc-${i}`, parse_status: 'completed' }))
+  await flush()
+  const cards = f.hook.cardList.value
+  f.vm.selectedIds = new Set(['doc-69'])
+  await f.vm.confirmBatchReparse()
+  await flush()
+  assert.equal(cards[69].parse_status, 'pending')
+  t.mock.timers.tick(1500)
+  await flush()
+  assert.equal(f.vm.pendingReparseAck.has('doc-69'), false)
+  assert.equal(f.batchQueryKnowledge.mock.calls[0].arguments[0], 'ids=doc-69&')
+  assert.equal(f.hook.getKnowled.mock.callCount(), 0)
+  assert.equal(f.hook.cardList.value, cards)
+  assert.equal(cards.length, 70)
+  assert.equal(f.vm.docListLoading, false)
+})
+
+test('an older batch acknowledgement timeout does not clear a newer batch', async t => {
+  const f = await setup(t)
+  f.vm.pendingReparseAck = new Set(['older'])
+  const older = f.vm.awaitBatchReparseReflection(['older'])
+  for (let i = 0; i < 29; i++) {
+    await flush()
+    t.mock.timers.tick(400)
+  }
+  f.vm.pendingReparseAck.add('newer')
+  await flush()
+  t.mock.timers.tick(400)
+  await older
+  assert.equal(f.vm.pendingReparseAck.has('older'), false)
+  assert.equal(f.vm.pendingReparseAck.has('newer'), true)
+  assert.equal(f.hook.getKnowled.mock.callCount(), 0)
+})
+
+test('batch acknowledgement waits stop once their own IDs are acknowledged', async t => {
+  const f = await setup(t)
+  f.vm.pendingReparseAck = new Set(['older', 'newer'])
+  let finished = false
+  const older = f.vm.awaitBatchReparseReflection(['older']).then(() => { finished = true })
+  await flush()
+  f.vm.pendingReparseAck.delete('older')
+  t.mock.timers.tick(400)
+  await flush()
+  assert.equal(finished, true)
+  await older
+  assert.equal(f.vm.pendingReparseAck.has('newer'), true)
+})
+
+test('accepts a rebuild completed between polls after the bounded acknowledgement window', async t => {
+  const f = await setup(t)
+  f.hook.cardList.value = [{ id: 'doc', parse_status: 'completed' }]
+  f.batchQueryKnowledge.mock.mockImplementation(async () => ({
+    success: true, data: [{ id: 'doc', parse_status: 'completed' }],
+  }))
+  f.vm.selectedIds = new Set(['doc'])
+  await f.vm.confirmBatchReparse()
+  await flush()
+  for (let i = 0; i < 29; i++) {
+    t.mock.timers.tick(400)
+    await flush()
+  }
+  assert.equal(f.hook.cardList.value[0].parse_status, 'pending')
+  t.mock.timers.tick(400)
+  await flush()
+  assert.equal(f.vm.pendingReparseAck.has('doc'), false)
+  t.mock.timers.tick(1500)
+  await flush()
+  assert.equal(f.hook.cardList.value[0].parse_status, 'completed')
+  assert.equal(f.hook.getKnowled.mock.callCount(), 0)
+})
+
+test('a pending rebuild does not reload another folder or KB after navigation or unmount', async t => {
+  const f = await setup(t)
+  f.hook.cardList.value = [{ id: 'doc', parse_status: 'completed' }]
+  f.vm.selectedIds = new Set(['doc'])
+  await f.vm.confirmBatchReparse()
+  await flush()
+  f.vm.selectedFolderPath = '/other-folder'
+  await flush()
+  f.route.params.kbId = 'other'
+  await flush()
+  f.hook.getKnowled.mock.resetCalls()
+  for (let i = 0; i < 5; i++) {
+    t.mock.timers.tick(400)
+    await flush()
+  }
+  f.close()
+  for (let i = 0; i < 30; i++) {
+    t.mock.timers.tick(400)
+    await flush()
+  }
   assert.equal(f.hook.getKnowled.mock.callCount(), 0)
 })
