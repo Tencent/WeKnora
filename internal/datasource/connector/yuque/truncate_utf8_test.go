@@ -10,7 +10,7 @@ import (
 // text is often Chinese, so the cut can land inside a multi-byte rune; these
 // previews reach sync_logs and data_sources through the sync error message, and
 // PostgreSQL rejects the invalid UTF-8 that a partial rune produces.
-func TesttruncateKeepsValidUTF8AcrossCaps(t *testing.T) {
+func TestTruncateKeepsValidUTF8AcrossCaps(t *testing.T) {
 	body := strings.Repeat("错", 400)
 	for _, maxLen := range []int{499, 500, 501, 1000, 1} {
 		got := truncate(body, maxLen)
@@ -27,7 +27,7 @@ func TesttruncateKeepsValidUTF8AcrossCaps(t *testing.T) {
 	}
 }
 
-func TesttruncateLeavesShortAndASCIIInputAlone(t *testing.T) {
+func TestTruncateLeavesShortAndASCIIInputAlone(t *testing.T) {
 	for _, s := range []string{"", "ok", "服务返回 500", "短"} {
 		if got := truncate(s, 500); got != s {
 			t.Fatalf("%s(%q, 500) = %q, want the input unchanged", "truncate", s, got)
