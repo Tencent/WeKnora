@@ -52,13 +52,19 @@
     >
       <div class="url-import-form">
         <div class="url-input-label">{{ t('knowledgeBase.urlLabel') }}</div>
-        <t-input
+        <t-textarea
           v-model="urlInputValue"
           :placeholder="t('knowledgeBase.urlPlaceholder')"
-          clearable
+          :autosize="{ minRows: 3, maxRows: 10 }"
           autofocus
-          @enter="handleUrlDialogConfirm"
         />
+        <div v-if="urlPreviewParts.length > 0" class="url-input-preview">
+          <span
+            v-for="part in urlPreviewParts"
+            :key="part.key"
+            :class="['url-input-preview-item', { 'is-warning': part.warning }]"
+          >{{ part.text }}</span>
+        </div>
         <div class="url-input-tip">{{ t('knowledgeBase.urlTip') }}</div>
       </div>
     </t-dialog>
@@ -71,6 +77,7 @@ import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon, FileAddIcon, UploadIcon, FolderAddIcon, LinkIcon, EditIcon } from 'tdesign-icons-vue-next'
 import { filterUploadFiles } from '../utils/uploadSources'
+import { parseImportUrls, summarizeImportUrls } from '@/utils/youtube'
 
 const props = withDefaults(defineProps<{
   acceptFileTypes?: string
@@ -95,7 +102,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   files: [files: File[]]
-  url: [url: string]
+  urls: [urls: string[]]
   manual: []
 }>()
 
@@ -105,6 +112,29 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const folderInputRef = ref<HTMLInputElement | null>(null)
 const urlDialogVisible = ref(false)
 const urlInputValue = ref('')
+
+// Live preview of how the pasted links will be imported, so it is visible
+// before confirming which lines are recognised as YouTube videos or playlists.
+const urlPreviewParts = computed(() => {
+  const summary = summarizeImportUrls(urlInputValue.value)
+  const parts: Array<{ key: string; text: string; warning?: boolean }> = []
+  if (summary.webPages > 0) {
+    parts.push({ key: 'web', text: t('knowledgeBase.urlPreviewWebPages', { count: summary.webPages }) })
+  }
+  if (summary.youTubeVideos > 0) {
+    parts.push({ key: 'video', text: t('knowledgeBase.urlPreviewYouTubeVideos', { count: summary.youTubeVideos }) })
+  }
+  if (summary.youTubePlaylists > 0) {
+    parts.push({
+      key: 'playlist',
+      text: t('knowledgeBase.urlPreviewYouTubePlaylists', { count: summary.youTubePlaylists }),
+    })
+  }
+  if (summary.invalid > 0) {
+    parts.push({ key: 'invalid', text: t('knowledgeBase.urlPreviewInvalid', { count: summary.invalid }), warning: true })
+  }
+  return parts
+})
 
 const tooltipText = computed(() => props.tooltip || t('knowledgeBase.addDocument'))
 
@@ -153,8 +183,7 @@ const handleActionSelect = (data: { value: string }) => {
       folderInputRef.value?.click()
       break
     case 'importURL':
-      urlInputValue.value = ''
-      urlDialogVisible.value = true
+      openUrlDialog()
       break
     case 'manualCreate':
       emit('manual')
@@ -202,20 +231,21 @@ const handleFilesChange = (event: Event, fromFolder: boolean) => {
 }
 
 const handleUrlDialogConfirm = () => {
-  const url = urlInputValue.value.trim()
-  if (!url) {
+  if (!urlInputValue.value.trim()) {
     MessagePlugin.warning(t('knowledgeBase.urlRequired'))
     return
   }
-  try {
-    new URL(url)
-  } catch {
+  const { urls, invalid } = parseImportUrls(urlInputValue.value)
+  if (urls.length === 0) {
     MessagePlugin.warning(t('knowledgeBase.invalidURL'))
     return
   }
+  if (invalid.length > 0) {
+    MessagePlugin.warning(t('knowledgeBase.invalidURLsSkipped', { count: invalid.length }))
+  }
   urlDialogVisible.value = false
   urlInputValue.value = ''
-  emit('url', url)
+  emit('urls', urls)
 }
 
 const handleUrlDialogCancel = () => {
@@ -254,6 +284,27 @@ defineExpose({ openUrlDialog })
     font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
+  }
+
+  .url-input-preview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .url-input-preview-item {
+    padding: 2px 8px;
+    border-radius: var(--app-radius-lg);
+    font-size: var(--app-text-sm);
+    line-height: 18px;
+    color: var(--td-brand-color);
+    background: var(--td-brand-color-light);
+
+    &.is-warning {
+      color: var(--td-warning-color);
+      background: var(--td-warning-color-light);
+    }
   }
 
   .url-input-tip {

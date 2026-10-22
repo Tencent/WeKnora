@@ -107,6 +107,9 @@ FROM debian:12.12-slim
 WORKDIR /app
 
 ARG APK_MIRROR_ARG
+# Pinned so two builds of the same commit ship the same yt-dlp (and deno).
+# Bump it per release, or override with --build-arg YTDLP_VERSION=<version>.
+ARG YTDLP_VERSION=2026.8.19
 
 # Pairing derives the gateway URL from the user's page origin by default.
 ENV BROWSERSKILL_BINARY=/opt/weknora/browserskill/bsk \
@@ -134,6 +137,10 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
         gosu \
         ffmpeg && \
     python3 -m pip install --break-system-packages --upgrade pip setuptools wheel && \
+    # yt-dlp powers YouTube knowledge import; the deno extra provides the JS
+    # runtime YouTube extraction needs. YouTube changes break old yt-dlp
+    # releases, so bump YTDLP_VERSION when imports start failing.
+    python3 -m pip install --break-system-packages "yt-dlp[default,deno]==${YTDLP_VERSION}" && \
     mkdir -p /home/appuser/.local/bin && \
     curl -LsSf https://astral.sh/uv/install.sh | CARGO_HOME=/home/appuser/.cargo UV_INSTALL_DIR=/home/appuser/.local/bin sh && \
     chown -R appuser:appuser /home/appuser && \
