@@ -114,7 +114,10 @@ func (s *knowledgeService) cloneKnowledge(
 		}
 		stored, loadErr := s.repo.GetKnowledgeByID(ctx, dst.TenantID, dst.ID)
 		if errors.Is(loadErr, repository.ErrKnowledgeNotFound) {
-			cleanupCopiedObjects(ctx, s.resolveFileService(ctx, targetKB), copiedFilePaths)
+			cleanupCopiedObjects(
+				ctx, s.resolveFileService(ctx, targetKB),
+				knowledgeResourceOwners(s.resourceCatalog, dst.ID), copiedFilePaths,
+			)
 			return
 		}
 		// An uncertain save/read must not delete objects that may be referenced.
