@@ -43,6 +43,7 @@ const (
 	ConnectorTypeGitLab      = "gitlab"
 	ConnectorTypeIMA         = "ima"
 	ConnectorTypeSeafile     = "seafile"
+	ConnectorTypeNextcloud   = "nextcloud"
 
 	// Sync modes
 	SyncModeIncremental = "incremental"
