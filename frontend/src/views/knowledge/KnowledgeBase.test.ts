@@ -13,6 +13,7 @@ async function setup(t: TestContext) {
     getCardDetails: t.mock.fn(), getfDetails() {}, onVisibleChange() {},
   }
   const listKnowledgeFolders = t.mock.fn(async (_id: string) => ({ data: { folders: [] } }))
+  const batchReparseKnowledge = t.mock.fn(async () => ({ success: true }))
   const fetchKnowledgeBaseById = t.mock.fn(async (_id: string, _force: boolean) => ({ id: 'kb', type: 'document' }))
   let settle: () => void = () => {}
   const waitForKnowledgeDeletion = t.mock.fn((_ids: string[]) => new Promise<string>((resolve) => {
@@ -21,7 +22,7 @@ async function setup(t: TestContext) {
   const page = f.component(new URL('./KnowledgeBase.vue', import.meta.url), {
     'vue-router': { useRoute: () => route, useRouter: () => ({ replace() {} }) },
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
-    'tdesign-vue-next': { MessagePlugin: {} },
+    'tdesign-vue-next': { MessagePlugin: { error() {}, success() {}, warning() {}, info() {} } },
     '@/hooks/useKnowledgeBase': () => hook,
     '@/stores/ui': { useUIStore: () => ({ clearSelectedTagIds() {} }) },
     '@/stores/organization': { useOrganizationStore: () => ({ sharedKnowledgeBases: [], getKBPermission: () => 'owner' }) },
@@ -36,7 +37,11 @@ async function setup(t: TestContext) {
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
     '@/utils/kbPermission': {}, '@/utils/knowledgeDeletion': { waitForKnowledgeDeletion }, '@/utils/knowledgeTrace': {},
     '@/utils/knowledgeProcessingStall': stall, '@/api/wiki': {}, '@/api/knowledge-base': {},
-    '@/api/knowledge-base/index': { listKnowledgeFolders, listKnowledgeTags: async () => ({ data: { data: [], total: 0 } }) },
+    '@/api/knowledge-base/index': {
+      batchReparseKnowledge,
+      listKnowledgeFolders,
+      listKnowledgeTags: async () => ({ data: { data: [], total: 0 } }),
+    },
   })
   await flush()
   page.vm.isCardDetails = true
@@ -44,10 +49,29 @@ async function setup(t: TestContext) {
   listKnowledgeFolders.mock.resetCalls()
   fetchKnowledgeBaseById.mock.resetCalls()
   return {
-    ...f, ...page, route, hook, listKnowledgeFolders, fetchKnowledgeBaseById, waitForKnowledgeDeletion,
+    ...f, ...page, route, hook, batchReparseKnowledge, listKnowledgeFolders, fetchKnowledgeBaseById, waitForKnowledgeDeletion,
     settleDeletion: () => settle(),
   }
 }
+
+
+test('does not reload the document list after a batch reparse is accepted', async t => {
+  const f = await setup(t)
+  // Finish the initial KB load before adding the currently displayed row.
+  // The mocked loader does not populate rows itself.
+  await f.vm.loadKnowledgeBaseInfo('kb')
+  await flush()
+  f.hook.getKnowled.mock.resetCalls()
+  f.hook.cardList.value.push({ id: 'doc', parse_status: 'completed' })
+  f.vm.selectedIds.add('doc')
+
+  await f.vm.confirmBatchReparse()
+  await flush()
+
+  assert.equal(f.batchReparseKnowledge.mock.callCount(), 1)
+  assert.equal(f.hook.cardList.value[0].parse_status, 'pending')
+  assert.equal(f.hook.getKnowled.mock.callCount(), 0)
+})
 
 test('refreshes files and folders for the open KB and ignores unrelated areas and KBs', async t => {
   const f = await setup(t)

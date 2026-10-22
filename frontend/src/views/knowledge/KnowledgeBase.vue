@@ -592,18 +592,6 @@ const syncReparseAckFromServer = (ids: string[]) => {
   }
 };
 
-const awaitBatchReparseReflection = async (ids: string[]) => {
-  const maxPolls = 30;
-  const delayMs = 400;
-  for (let i = 0; i < maxPolls && pendingReparseAck.value.size > 0; i++) {
-    await loadKnowledgeFiles(kbId.value);
-    syncReparseAckFromServer(ids);
-    applyOptimisticBatchReparse(Array.from(pendingReparseAck.value));
-    await new Promise<void>((r) => setTimeout(r, delayMs));
-  }
-  pendingReparseAck.value.clear();
-};
-
 const confirmBatchReparse = async () => {
   if (batchReparsing.value || batchDeleting.value || batchDownloading.value || selectedIds.value.size === 0) return;
   const allIds = Array.from(selectedIds.value);
@@ -628,7 +616,6 @@ const confirmBatchReparse = async () => {
       clearSelection();
       batchMode.value = false;
       scheduleWikiStatusProbes();
-      void awaitBatchReparseReflection(ids);
     } else {
       MessagePlugin.error(res?.message || t('knowledgeBase.batchReparseFailed'));
     }
