@@ -103,7 +103,7 @@ func TestProcessChunksFailsBeforeWritingWhenChunkCleanupFails(t *testing.T) {
 	cleanupErr := errors.New("chunk cleanup unavailable")
 	_, chunks, engine, err := runProcessChunksWithFailingIndex(context.Background(), t, nil, cleanupErr)
 
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "failed to delete existing chunks")
 	require.Empty(t, chunks.created)
 	require.Zero(t, engine.indexDeletes)
 }
@@ -112,7 +112,7 @@ func TestProcessChunksFailsBeforeWritingWhenIndexCleanupFails(t *testing.T) {
 	cleanupErr := errors.New("index cleanup unavailable")
 	_, chunks, engine, err := runProcessChunksWithFailingIndex(context.Background(), t, nil, nil, cleanupErr)
 
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "failed to delete existing index data")
 	require.Empty(t, chunks.created)
 	require.Equal(t, 1, engine.indexDeletes)
 }
@@ -126,7 +126,7 @@ func TestProcessChunksFailsKnowledgeOnChunkCleanupFailure(t *testing.T) {
 	ctx = withAttempt(ctx, attempt)
 	repo, chunks, engine, err := runProcessChunksWithFailingIndex(ctx, t, tracker, cleanupErr)
 
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "failed to delete existing chunks")
 	status, code, message := rootSpan(t, db, "knowledge-1", attempt)
 	require.Equal(t, types.SpanStatusFailed, status)
 	require.Equal(t, werrors.ErrCodeChunkingFailed, code)
@@ -145,7 +145,7 @@ func TestProcessChunksFailsKnowledgeOnIndexCleanupFailure(t *testing.T) {
 	ctx = withAttempt(ctx, attempt)
 	repo, chunks, engine, err := runProcessChunksWithFailingIndex(ctx, t, tracker, nil, cleanupErr)
 
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "failed to delete existing index data")
 	status, code, message := rootSpan(t, db, "knowledge-1", attempt)
 	require.Equal(t, types.SpanStatusFailed, status)
 	require.Equal(t, werrors.ErrCodeChunkingFailed, code)
