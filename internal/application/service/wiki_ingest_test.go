@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -311,9 +312,75 @@ func TestMaskImageURLs(t *testing.T) {
 	})
 }
 
+func TestUnmaskImageURLsRewrittenPlaceholders(t *testing.T) {
+	const realURL = "resource://image-10"
+	urlMap := map[string]string{"wkimg:0010": realURL}
+	variants := []string{
+		"wkimg:0010", "wkimg/0010", "wkimg_0010", "wkimg-0010", "wkimg 0010",
+		"wkimg：0010", "WKIMG/0010", "wkimg : 0010", "wkimg\t0010",
+		"wkimg0010", "wkimg/10", "wkimg:000010",
+	}
+	contexts := []struct {
+		name   string
+		format string
+	}{
+		{"markdown", "Before ![Diagnostics page](%s) after"},
+		{"attribute", `<image url="%s">caption</image>`},
+		{"json", `{"details":"Before ![Diagnostics page](%s) after"}`},
+		{"bare", "Before %s after"},
+	}
+	for _, variant := range variants {
+		for _, context := range contexts {
+			t.Run(context.name+"/"+variant, func(t *testing.T) {
+				input := fmt.Sprintf(context.format, variant)
+				want := fmt.Sprintf(context.format, realURL)
+				require.Equal(t, want, unmaskImageURLs(input, urlMap))
+			})
+		}
+	}
+}
+
+func TestUnmaskImageURLsDropsRewrittenUnknownPlaceholders(t *testing.T) {
+	urlMap := map[string]string{"wkimg:0010": "resource://image-10"}
+	variants := []string{
+		"wkimg/9999", "WKIMG_9999", "wkimg-9999", "wkimg 9999", "wkimg：9999",
+		"wkimg/0010extra", "wkimg:0010-extra", "wkimg//0010", "wkimg:bad", "wkimg/0010.png",
+		"wkimg/0000", "wkimg:999999999999999999999999999999",
+	}
+	for _, variant := range variants {
+		t.Run(variant, func(t *testing.T) {
+			require.Equal(t, "Before  after", unmaskImageURLs("Before ![bad]("+variant+") after", urlMap))
+			require.Equal(t, "Before  after", unmaskImageURLs("Before "+variant+" after", urlMap))
+		})
+	}
+	t.Run("no image map", func(t *testing.T) {
+		require.Equal(t, "Before  after", unmaskImageURLs("Before ![bad](wkimg/0010) after", nil))
+	})
+	t.Run("unrecognizable image URL", func(t *testing.T) {
+		require.Equal(t, "Before  after", unmaskImageURLs("Before ![bad](WKIMG?0010) after", urlMap))
+	})
+}
+
+func TestUnmaskImageURLsPreservesCaptionsAndRealURLs(t *testing.T) {
+	urlMap := map[string]string{"wkimg:0010": "resource://image-10", "wkimg:10000": "resource://image-10000"}
+	input := `![WKIMG/0010](wkimg/0010) ![real](https://example.com/wkimg/0010)
+<image url="https://example.com/wkimg:0010">caption</image>
+https://example.com/?image=wkimg/0010
+resource://wkimg:0010
+embeddedwkimg/0010
+![large](wkimg/10000)`
+	want := `![WKIMG/0010](resource://image-10) ![real](https://example.com/wkimg/0010)
+<image url="https://example.com/wkimg:0010">caption</image>
+https://example.com/?image=wkimg/0010
+resource://wkimg:0010
+embeddedwkimg/0010
+![large](resource://image-10000)`
+	require.Equal(t, want, unmaskImageURLs(input, urlMap))
+}
+
 func TestUnmaskImageURLsDropsUnknownPlaceholders(t *testing.T) {
 	urlMap := map[string]string{"wkimg:0001": "minio://kb/exports/real.jpg"}
-	input := `{"details":"keep ![ok](wkimg:0001) drop ![bad](wkimg:001) and wkimg:9999"}`
+	input := `{"details":"keep ![ok](wkimg:0001) drop ![bad](wkimg:9998) and wkimg:9999"}`
 	got := unmaskImageURLs(input, urlMap)
 
 	if !strings.Contains(got, "![ok](minio://kb/exports/real.jpg)") {
@@ -327,7 +394,7 @@ func TestUnmaskImageURLsDropsUnknownPlaceholders(t *testing.T) {
 func TestGenerateWithTemplateMasksImageURLsBeforeLLM(t *testing.T) {
 	const realURL = "minio://kb/10000/exports/4135-aaaa-bbbb-cccc/page_1.jpg"
 	model := &templateCaptureChatModel{
-		response: `{"details":"Model kept ![caption](wkimg:0001)"}`,
+		response: `{"details":"Model kept ![caption](wkimg/0001)"}`,
 	}
 	service := &wikiIngestService{}
 
