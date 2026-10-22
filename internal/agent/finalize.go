@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -48,11 +49,29 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	answerDoneEmitted := false
 	splitter := agenttools.NewThinkStreamSplitter()
 
-	budget := e.clampCompletionBudgetToContext(
-		e.tokenEstimator.EstimateMessages(
-			append(append([]chat.Message(nil), messages...), chat.Message{Role: "system", Content: runtimeNotice}),
-		),
+	inputTokens := e.tokenEstimator.EstimateMessages(
+		append(append([]chat.Message(nil), messages...), chat.Message{Role: "system", Content: runtimeNotice}),
 	)
+	budget := e.clampCompletionBudgetToContext(inputTokens)
+	// The completion budget clamps to 1 when nothing fits in the window, but a
+	// clamped-to-1 budget does not make an oversized request legal: the
+	// provider rejects it outright. Refuse to send such a request instead of
+	// emitting it with no recovery path.
+	if e.config != nil && e.config.MaxContextTokens > 0 &&
+		inputTokens+budget > e.config.MaxContextTokens {
+		err := fmt.Errorf(
+			"final answer synthesis refused: estimated input %d tokens plus completion budget %d exceeds context window %d",
+			inputTokens, budget, e.config.MaxContextTokens,
+		)
+		logger.Errorf(ctx, "[Agent][FinalAnswer] %v", err)
+		common.PipelineError(ctx, "Agent", "final_answer_input_too_large", map[string]interface{}{
+			"session_id": sessionID,
+			"input":      inputTokens,
+			"budget":     budget,
+			"window":     e.config.MaxContextTokens,
+		})
+		return err
+	}
 	llmResult, err := e.streamLLMToEventBus(
 		ctx,
 		messages,
@@ -153,9 +172,12 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 
 // handleMaxIterations generates a final answer when the agent loop exhausted all iterations
 // without the LLM producing a natural stop. It marks state.IsComplete = true.
+// A synthesis failure is reported to the caller instead of being swallowed:
+// the generic fallback answer still reaches the UI, but the returned error
+// keeps the failure observable.
 func (e *AgentEngine) handleMaxIterations(
 	ctx context.Context, query string, state *types.AgentState, sessionID string, messages []chat.Message,
-) {
+) error {
 	logger.Info(ctx, "Reached max iterations, generating final answer")
 	common.PipelineWarn(ctx, "Agent", "max_iterations_reached", map[string]interface{}{
 		"iterations": state.CurrentRound,
@@ -169,8 +191,11 @@ func (e *AgentEngine) handleMaxIterations(
 			"error": err.Error(),
 		})
 		state.FinalAnswer = "Sorry, I was unable to generate a complete answer."
+		state.IsComplete = true
+		return fmt.Errorf("failed to synthesize final answer after max iterations: %w", err)
 	}
 	state.IsComplete = true
+	return nil
 }
 
 // emitCompletionEvent emits the EventAgentComplete event with execution summary.
