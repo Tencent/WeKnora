@@ -14,8 +14,8 @@ import (
 func TestBuildImageAssetQuery_Defaults(t *testing.T) {
 	q := buildImageAssetQuery(nil, &types.Pagination{Page: 3, PageSize: 24})
 
-	require.Equal(t, types.ImageAssetField{Builtin: "created_at"}, q.SortField)
-	require.True(t, q.SortDesc, "newest first")
+	require.Equal(t, types.ImageAssetField{Builtin: "source_page"}, q.SortField)
+	require.False(t, q.SortDesc, "PDF page order is ascending by default")
 	require.Equal(t, 48, q.Offset)
 	require.Equal(t, 24, q.Limit)
 
@@ -51,7 +51,7 @@ func TestBuildImageAssetQuery_TranslatesNamespacedIDs(t *testing.T) {
 }
 
 func TestBuildImageAssetQuery_LegacySortNames(t *testing.T) {
-	for _, name := range []string{"created_at", "updated_at", "caption"} {
+	for _, name := range []string{"source_page", "created_at", "updated_at", "caption"} {
 		q := buildImageAssetQuery(&types.ImageListFilter{SortBy: name}, &types.Pagination{})
 		require.Equal(t, types.ImageAssetField{Builtin: name}, q.SortField, name)
 	}

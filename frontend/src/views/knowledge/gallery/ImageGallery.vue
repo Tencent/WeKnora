@@ -444,7 +444,7 @@ function buildParams(): ImageListParams {
     keyword: keyword.value.trim() || undefined,
     searchIn: activeSearchIds.value,
     sortBy: sortBy.value || undefined,
-    sortOrder: sortOrder.value,
+    sortOrder: sortBy.value ? sortOrder.value : undefined,
     attrFilters: Object.keys(selections).length ? selections : undefined,
     attrRules: Object.keys(rules).length ? rules : undefined,
     knowledgeIds: sourceDocIds.value.length ? sourceDocIds.value : undefined,
@@ -588,9 +588,10 @@ onBeforeUnmount(() => {
   releaseBlobs()
 })
 
-// Newest first unless the contract no longer offers it; picking by id keeps
-// the default independent of source registration order.
-const DEFAULT_SORT_ID = 'builtin:created_at'
+// PDF page order is the useful gallery default; picking by id keeps it
+// independent of source registration order and falls back gracefully when an
+// older server does not yet expose the field.
+const DEFAULT_SORT_ID = 'builtin:source_page'
 
 let initToken = 0
 
@@ -626,7 +627,9 @@ async function initGallery() {
     // default search still work.
   }
   if (!sortBy.value && sortAttrs.value.length) {
-    sortBy.value = sortAttrs.value.find((a) => a.id === DEFAULT_SORT_ID)?.id ?? sortAttrs.value[0].id
+    const defaultSort = sortAttrs.value.find((a) => a.id === DEFAULT_SORT_ID) ?? sortAttrs.value[0]
+    sortBy.value = defaultSort.id
+    sortOrder.value = defaultSort.id === DEFAULT_SORT_ID ? 'asc' : 'desc'
   }
   await reload()
 }
@@ -902,6 +905,9 @@ watch(
                 <t-icon name="image-error" size="20px" />
                 <span>{{ t(`${NS}.imageLoadError`) }}</span>
               </div>
+              <span v-if="img.source_page" class="ig-card__page">
+                {{ t(`${NS}.pageNumber`, { page: img.source_page }) }}
+              </span>
               <span v-if="!img.is_enabled" class="ig-card__badge">
                 {{ t(`${NS}.attr.builtin_is_enabled_value_false`) }}
               </span>
@@ -1358,6 +1364,7 @@ watch(
     text-align: center;
   }
 
+  &__page,
   &__badge {
     position: absolute;
     top: 8px;

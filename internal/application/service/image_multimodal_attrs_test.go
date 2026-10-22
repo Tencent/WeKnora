@@ -328,6 +328,10 @@ func TestProcessImageObservesAndDescribes(t *testing.T) {
 		KnowledgeBaseID: "kb-1",
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
+		SourceLocators: types.SourceLocators{
+			{Type: types.SourceLocatorPDF, Page: 7},
+			{Type: types.SourceLocatorPDF, Page: 3},
+		},
 		ImagePipelineParams: map[string]any{
 			observeCaptionKey: true,
 		},
@@ -368,6 +372,9 @@ func TestProcessImageObservesAndDescribes(t *testing.T) {
 		}
 		if images[0].SHA256 != fmt.Sprintf("%x", sha256.Sum256(fileSvc.body)) {
 			t.Fatal("stored image fingerprint does not identify the bytes sent to OCR")
+		}
+		if images[0].SourcePage != 3 {
+			t.Fatalf("source page = %d, want the earliest PDF page 3", images[0].SourcePage)
 		}
 	}
 	if got := persistedAttrCounts(t, repo.created, "contain.text"); !equalCounts(got, map[string]int{"block": 2}) {

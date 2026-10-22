@@ -3804,6 +3804,8 @@ export default {
         details: 'Basic information',
         dimensions: 'Size',
         status: 'Status',
+        page: 'Page',
+        pageNumber: 'Page {page}',
         openSource: 'Open source document',
         copy: 'Copy',
         zoomIn: 'Zoom in (+)',

@@ -241,6 +241,7 @@ func (s *chunkService) ListImagesByKnowledgeBaseID(
 			ChunkID:     row.ChunkID,
 			KnowledgeID: row.KnowledgeID,
 			ChunkType:   row.ChunkType,
+			SourcePage:  row.SourcePage,
 			URL:         row.URL,
 			OriginalURL: row.OriginalURL,
 			Caption:     row.Caption,

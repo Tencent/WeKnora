@@ -506,6 +506,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                 <span>{{ current.source_name || current.knowledge_id }}</span>
               </button>
             </dd>
+            <template v-if="current.source_page">
+              <dt>{{ t(`${NS}.page`) }}</dt>
+              <dd>{{ t(`${NS}.pageNumber`, { page: current.source_page }) }}</dd>
+            </template>
             <template v-if="natural">
               <dt>{{ t(`${NS}.dimensions`) }}</dt>
               <dd>{{ natural.w }} × {{ natural.h }}</dd>

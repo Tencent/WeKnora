@@ -4,18 +4,18 @@ import test from 'node:test'
 import vm from 'node:vm'
 import ts from 'typescript'
 import * as vue from 'vue'
-import type { ImageAsset, ImageListParams, ImageListResult } from '@/api/image-gallery'
+import type { GalleryConfig, ImageAsset, ImageListParams, ImageListResult } from '@/api/image-gallery'
 
 // Exercise the component's actual loading and viewer logic with deferred API
 // responses so races and retries are deterministic, without a live backend.
 const source = readFileSync(new URL('./ImageGallery.vue', import.meta.url), 'utf8')
   .split('<script setup lang="ts">')[1].split('</script>')[0]
 const compiled = ts.transpileModule(`${source}\nexport {
-  items, page, total, loading, error, keyword, hasMore, viewerIndex, viewerOpen,
+  items, page, total, loading, error, keyword, sortBy, sortOrder, hasMore, viewerIndex, viewerOpen,
   reload, loadMore, openViewer, onViewerLoadMore, initGallery,
 }`, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 
-function setup() {
+function setup(galleryConfig: GalleryConfig = { attributes: [], attribute_sources: [], mode: 'all', status: {} }) {
   const calls: Array<{
     kb: string; params: ImageListParams
     resolve: (value: ImageListResult) => void; reject: (reason: Error) => void
@@ -28,7 +28,7 @@ function setup() {
       listGalleryImages: (kb: string, params: ImageListParams) => new Promise((resolve, reject) => {
         calls.push({ kb, params, resolve, reject })
       }),
-      fetchGalleryConfig: async () => ({ attributes: [], attribute_sources: [], mode: 'all', status: {} }),
+      fetchGalleryConfig: async () => galleryConfig,
     },
     '@/api/auth': { updateMyPreferences: async () => {} },
     './galleryImageSrc': { galleryImageRequest: () => null },
@@ -49,6 +49,32 @@ function setup() {
   const ids = () => Array.from(state.items.value, (img: ImageAsset) => img.id)
   return { state, calls, props, respond, ids }
 }
+
+test('the gallery defaults to PDF page order when the backend exposes it', async () => {
+  const { state, calls, respond } = setup({
+    attribute_sources: ['builtin'],
+    attributes: [{
+      id: 'builtin:source_page', source: 'builtin', name: 'source_page', type: 'number',
+      label: 'PDF page', usage: { in_filter: false, in_searchfield: false, in_sortfield: true }, usage_from: 'source',
+    }],
+    mode: 'all',
+    status: {},
+  })
+  const init = state.initGallery()
+  // initGallery fetches its contract before issuing the first list request.
+  // Wait for that observable boundary rather than relying on Vue's nextTick
+  // ordering relative to the mocked async fetch.
+  for (let attempt = 0; calls.length === 0 && attempt < 10; attempt++) {
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  assert.equal(calls.length, 1)
+  assert.equal(state.sortBy.value, 'builtin:source_page')
+  assert.equal(state.sortOrder.value, 'asc')
+  assert.equal(calls[0].params.sortBy, 'builtin:source_page')
+  assert.equal(calls[0].params.sortOrder, 'asc')
+  respond(0, ['page-1'], 1)
+  await init
+})
 
 test('scroll appends unique images, serializes requests, and stops at the total', async () => {
   const { state, calls, respond, ids } = setup()

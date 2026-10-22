@@ -3804,6 +3804,8 @@ export default {
         details: '基本情報',
         dimensions: 'サイズ',
         status: '状態',
+        page: 'ページ',
+        pageNumber: '第 {page} ページ',
         openSource: '元のドキュメントを開く',
         copy: 'コピー',
         zoomIn: '拡大 (+)',

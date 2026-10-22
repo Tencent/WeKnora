@@ -5323,6 +5323,8 @@ export default {
         details: 'Основная информация',
         dimensions: 'Размер',
         status: 'Статус',
+        page: 'Страница',
+        pageNumber: 'Страница {page}',
         openSource: 'Открыть исходный документ',
         copy: 'Копировать',
         zoomIn: 'Увеличить (+)',

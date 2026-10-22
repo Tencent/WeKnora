@@ -5324,6 +5324,8 @@ export default {
         details: '基本信息',
         dimensions: '尺寸',
         status: '状态',
+        page: '页码',
+        pageNumber: '第 {page} 页',
         openSource: '打开来源文档',
         copy: '复制',
         zoomIn: '放大 (+)',

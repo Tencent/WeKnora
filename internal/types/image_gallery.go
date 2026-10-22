@@ -38,6 +38,9 @@ type ImageAsset struct {
 	CreatedAt time.Time `json:"created_at"`
 	// UpdatedAt is the owning chunk's last update time.
 	UpdatedAt time.Time `json:"updated_at"`
+	// SourcePage is the 1-based PDF page that produced the image. Zero means
+	// the source did not provide a stable PDF page.
+	SourcePage int `json:"source_page,omitempty"`
 }
 
 // ImageListFilter holds the gallery query constraints coming from the UI.
@@ -86,7 +89,7 @@ type ImageListFilter struct {
 // filter or sort on. Exactly one of the two is set.
 type ImageAssetField struct {
 	// Builtin is one of the builtin source's fields: "caption", "ocr_text",
-	// "created_at", "updated_at" or "is_enabled".
+	// "source_page", "created_at", "updated_at" or "is_enabled".
 	Builtin string
 	// Attr is a source-local attribute name read from image_info attrs
 	// (e.g. "contain.text").
@@ -132,6 +135,7 @@ type ImageAssetRow struct {
 	ChunkID     string    `gorm:"column:chunk_id"`
 	KnowledgeID string    `gorm:"column:knowledge_id"`
 	ChunkType   string    `gorm:"column:chunk_type"`
+	SourcePage  int       `gorm:"column:source_page"`
 	IsEnabled   bool      `gorm:"column:is_enabled"`
 	Status      int       `gorm:"column:status"`
 	CreatedAt   time.Time `gorm:"column:created_at"`

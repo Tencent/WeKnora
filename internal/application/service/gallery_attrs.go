@@ -49,8 +49,7 @@ func galleryField(id string) (types.ImageAssetField, bool) {
 // request always produces the same statement.
 func buildImageAssetQuery(filter *types.ImageListFilter, page *types.Pagination) *types.ImageAssetQuery {
 	q := &types.ImageAssetQuery{
-		SortField: types.ImageAssetField{Builtin: "created_at"},
-		SortDesc:  true,
+		SortField: types.ImageAssetField{Builtin: "source_page"},
 		Offset:    page.Offset(),
 		Limit:     page.GetPageSize(),
 	}
@@ -112,7 +111,7 @@ func buildImageAssetQuery(filter *types.ImageListFilter, page *types.Pagination)
 
 	switch filter.SortBy {
 	case "":
-	case "created_at", "updated_at", "caption":
+	case "source_page", "created_at", "updated_at", "caption":
 		// Legacy bare field names map onto their builtin ids.
 		q.SortField = types.ImageAssetField{Builtin: filter.SortBy}
 	default:

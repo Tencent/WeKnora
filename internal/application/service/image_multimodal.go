@@ -256,6 +256,16 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 	return handleErr
 }
 
+func firstPDFSourcePage(locators types.SourceLocators) int {
+	page := 0
+	for _, locator := range locators {
+		if locator.Type == types.SourceLocatorPDF && locator.Page > 0 && (page == 0 || locator.Page < page) {
+			page = locator.Page
+		}
+	}
+	return page
+}
+
 // processImage runs one image pipeline for one image. The pipeline is chosen
 // from the payload switches and owns the whole control flow; this function only
 // hands it the run context and closes the span afterwards. The observation must
@@ -366,6 +376,7 @@ func (s *ImageMultimodalService) processImage(
 		SHA256:      fmt.Sprintf("%x", sha256.Sum256(imgBytes)),
 		URL:         payload.ImageURL,
 		OriginalURL: payload.ImageURL,
+		SourcePage:  firstPDFSourcePage(payload.SourceLocators),
 	}
 
 	// The pipeline runs to completion, including the decision it makes about
