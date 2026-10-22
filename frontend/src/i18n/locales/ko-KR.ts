@@ -5323,6 +5323,8 @@ export default {
         details: '기본 정보',
         dimensions: '크기',
         status: '상태',
+        page: '페이지',
+        pageNumber: '{page}페이지',
         openSource: '원본 문서 열기',
         copy: '복사',
         zoomIn: '확대 (+)',

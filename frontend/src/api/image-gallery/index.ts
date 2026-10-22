@@ -28,6 +28,8 @@ export interface ImageAsset {
   source_name: string;
   /** Owning chunk type; empty for images discovered on a text (document) chunk. */
   chunk_type: string;
+  /** 1-based PDF page that produced the image; omitted when unavailable. */
+  source_page?: number;
   /** Rendered image URL. */
   url: string;
   /** Pre-transform source reference, when different. */

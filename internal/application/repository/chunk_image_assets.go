@@ -44,8 +44,8 @@ func (r *chunkRepository) ListImageAssets(
 	}
 	// Ties (every image of one chunk shares its timestamps) follow the sort
 	// direction, so a created_at listing is one backward walk of the index.
-	order := d.sortKey(q.SortField) + dir + ", i.chunk_id" + dir + ", i.image_index" + dir
-	query := "SELECT i.chunk_id, i.knowledge_id, i.chunk_type, i.is_enabled, i.status, i.created_at, " +
+	order := d.sortOrder(q.SortField, dir) + ", i.chunk_id" + dir + ", i.image_index" + dir
+	query := "SELECT i.chunk_id, i.knowledge_id, i.chunk_type, i.source_page, i.is_enabled, i.status, i.created_at, " +
 		"i.updated_at, i.image_index, i.url, i.original_url, i.caption, i.ocr_text, " + d.attrsText() +
 		" AS attrs_json, (" + count + ") AS total_count " +
 		"FROM chunk_images i WHERE " + where + " ORDER BY " + order + " LIMIT ? OFFSET ?"
@@ -178,6 +178,17 @@ func (d imageAssetDialect) anyCarries(sets []types.ImageAssetValueSet) (string, 
 		args = append(args, set.Values)
 	}
 	return strings.Join(clauses, " OR "), args
+}
+
+// sortOrder is the SQL order prefix for one gallery field. Page-less images
+// always follow numbered PDF pages; the page sequence itself follows dir.
+func (d imageAssetDialect) sortOrder(f types.ImageAssetField, dir string) string {
+	if f.Builtin == "source_page" {
+		// Keep unlocated images after numbered PDF pages, but preserve the
+		// gallery's historical newest-first order inside that fallback group.
+		return "CASE WHEN i.source_page > 0 THEN 0 ELSE 1 END ASC, i.source_page" + dir + ", i.created_at DESC"
+	}
+	return d.sortKey(f) + dir
 }
 
 // sortKey is the value images are ordered by. An image without a value for

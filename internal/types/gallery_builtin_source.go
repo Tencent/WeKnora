@@ -29,6 +29,12 @@ func init() {
 				Usage:       GalleryUsage{InSearchField: true},
 			},
 			{
+				Name:  "source_page",
+				Type:  "number",
+				Label: "PDF page",
+				Usage: GalleryUsage{InSortField: true},
+			},
+			{
 				Name:  "created_at",
 				Type:  "date",
 				Label: "Created at",

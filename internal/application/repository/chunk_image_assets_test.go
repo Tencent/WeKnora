@@ -49,13 +49,27 @@ func imageAssetBackends(t *testing.T, fn func(t *testing.T, db *gorm.DB)) {
 // backfill.
 func applyChunkImagesMigration(t *testing.T, db *gorm.DB) {
 	t.Helper()
-	path := "../../../migrations/sqlite/000032_chunk_images.up.sql"
-	if db.Name() == "postgres" {
-		path = "../../../migrations/versioned/000113_chunk_images.up.sql"
+	paths := []string{
+		"../../../migrations/sqlite/000032_chunk_images.up.sql",
+		"../../../migrations/sqlite/000051_chunk_image_source_page.up.sql",
 	}
-	sql, err := os.ReadFile(path)
-	require.NoError(t, err)
-	require.NoError(t, db.Exec(string(sql)).Error)
+	if db.Name() == "postgres" {
+		paths = []string{
+			"../../../migrations/versioned/000113_chunk_images.up.sql",
+			"../../../migrations/versioned/000134_chunk_image_source_page.up.sql",
+		}
+	}
+	for index, path := range paths {
+		// SQLite cannot add an existing column. Re-running the base migration
+		// still exercises its image-info backfill, and its rebuilt insert trigger
+		// continues to invoke the already-installed page companion trigger.
+		if index == 1 && db.Name() == "sqlite" && db.Migrator().HasColumn("chunk_images", "source_page") {
+			continue
+		}
+		sql, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.NoError(t, db.Exec(string(sql)).Error)
+	}
 }
 
 // imageFixture writes chunks for one fresh knowledge base; every test gets its
@@ -90,13 +104,25 @@ func (f fixtureImage) MarshalJSON() ([]byte, error) {
 
 // add inserts one chunk carrying images, updated minute minutes after base.
 func (fx *imageFixture) add(chunkType string, minute int, images ...fixtureImage) *types.Chunk {
+	return fx.addWithLocators(chunkType, minute, nil, images...)
+}
+
+func (fx *imageFixture) addWithLocators(
+	chunkType string, minute int, locators types.SourceLocators, images ...fixtureImage,
+) *types.Chunk {
 	fx.t.Helper()
 	raw, err := json.Marshal(images)
 	require.NoError(fx.t, err)
-	return fx.addRaw(chunkType, minute, string(raw))
+	return fx.addRawWithLocators(chunkType, minute, locators, string(raw))
 }
 
 func (fx *imageFixture) addRaw(chunkType string, minute int, imageInfo string) *types.Chunk {
+	return fx.addRawWithLocators(chunkType, minute, nil, imageInfo)
+}
+
+func (fx *imageFixture) addRawWithLocators(
+	chunkType string, minute int, locators types.SourceLocators, imageInfo string,
+) *types.Chunk {
 	fx.t.Helper()
 	at := fx.base.Add(time.Duration(minute) * time.Minute)
 	c := &types.Chunk{
@@ -108,6 +134,7 @@ func (fx *imageFixture) addRaw(chunkType string, minute int, imageInfo string) *
 		ChunkType:       chunkType,
 		IsEnabled:       true,
 		ImageInfo:       imageInfo,
+		SourceLocators:  locators,
 		CreatedAt:       at,
 		UpdatedAt:       at,
 	}
@@ -215,6 +242,41 @@ func TestListImageAssets_PagesStablyThroughTies(t *testing.T) {
 		rows, total := fx.list(types.ImageAssetQuery{Offset: 10, Limit: 2})
 		require.Empty(t, rows)
 		require.EqualValues(t, 5, total, "a page past the end still reports the total")
+	})
+}
+
+func TestListImageAssets_SortsPDFPagesBeforeUnlocatedImages(t *testing.T) {
+	imageAssetBackends(t, func(t *testing.T, db *gorm.DB) {
+		fx := newImageFixture(t, db)
+		page5 := fx.addWithLocators("image_caption", 5, types.SourceLocators{{Type: types.SourceLocatorPDF, Page: 5}},
+			fixtureImage{URL: "local://page-5.png"})
+		page2 := fx.addWithLocators("image_caption", 1, types.SourceLocators{{Type: types.SourceLocatorPDF, Page: 2}},
+			fixtureImage{URL: "local://page-2.png"})
+		fx.add("image_caption", 9, fixtureImage{URL: "local://no-page.png"})
+
+		rows, total := fx.list(types.ImageAssetQuery{
+			SortField: types.ImageAssetField{Builtin: "source_page"},
+			Limit:     10,
+		})
+		require.EqualValues(t, 3, total)
+		require.Equal(t, []string{"local://page-2.png", "local://page-5.png", "local://no-page.png"}, rowURLs(t, rows))
+		require.Equal(t, []int{2, 5, 0}, []int{rows[0].SourcePage, rows[1].SourcePage, rows[2].SourcePage})
+
+		// Re-projecting a chunk must retain source_page. The existing gallery
+		// trigger replaces its rows when image_info changes, so the companion
+		// trigger has to populate the new row as well.
+		updatedImageInfo := `[{"url":"local://page-2.png","original_url":"local://page-2.png","caption":"updated"}]`
+		require.NoError(t, db.Model(&types.Chunk{}).Where("id = ?", page2.ID).Update("image_info", updatedImageInfo).Error)
+		var got types.ImageAssetRow
+		require.NoError(t, db.Raw("SELECT source_page FROM chunk_images WHERE chunk_id = ?", page2.ID).Scan(&got).Error)
+		require.Equal(t, 2, got.SourcePage)
+
+		// A later locator edit must also update the derived page without
+		// requiring an image_info rewrite.
+		updatedLocators := types.SourceLocators{{Type: types.SourceLocatorPDF, Page: 4}}
+		require.NoError(t, db.Model(&types.Chunk{}).Where("id = ?", page5.ID).Update("source_locators", updatedLocators).Error)
+		require.NoError(t, db.Raw("SELECT source_page FROM chunk_images WHERE chunk_id = ?", page5.ID).Scan(&got).Error)
+		require.Equal(t, 4, got.SourcePage)
 	})
 }
 

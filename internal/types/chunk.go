@@ -109,6 +109,9 @@ type ImageInfo struct {
 	Caption string `json:"caption"`
 	// 图片OCR文本
 	OCRText string `json:"ocr_text"`
+	// SourcePage is the 1-based PDF page that produced the image. Zero means
+	// the source did not provide a stable PDF page.
+	SourcePage int `json:"source_page,omitempty"`
 	// Attrs 是描述轮给出的图片属性观察结果（取值见 ImageAttrs / ImageAttrRegistry）。
 	// 只记录模型确实回答了的属性：观察失败或取值非法的属性不会写入默认值，而是直接缺键，
 	// 因此读取方必须用 ImageAttrs.Observed 区分「未观察到」与「观察到了负值」。

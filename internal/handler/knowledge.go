@@ -1197,8 +1197,8 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 // @Param        page_size   query     int     false "每页数量，默认 20，最大 1000"
 // @Param        keyword     query     string  false "关键字，对 search_in 指定字段做不区分大小写的子串匹配"
 // @Param        search_in   query     string  false "参与搜索的属性 ID（逗号分隔）；须为 in_searchfield=true"
-// @Param        sort_by     query     string  false "排序属性 ID；须为 in_sortfield=true，默认 created_at"
-// @Param        sort_order  query     string  false "排序方向：asc / desc，默认 desc"
+// @Param        sort_by     query     string  false "排序属性 ID；须为 in_sortfield=true，默认 source_page"
+// @Param        sort_order  query     string  false "排序方向：asc / desc；默认页码升序"
 // @Param        is_enabled  query     bool    false "仅包含启用状态的图片"
 // @Param        knowledge_ids query  string  false "来源文档 ID 列表（逗号分隔，最多 50 个），仅返回这些文档的图片"
 // @Param        attr_filters query    string  false "属性筛选 JSON，同一属性多值 OR、属性间 AND"
@@ -1223,10 +1223,17 @@ func (h *KnowledgeHandler) ListImages(c *gin.Context) {
 		return
 	}
 
+	sortBy := strings.TrimSpace(c.Query("sort_by"))
+	sortOrder := c.DefaultQuery("sort_order", "desc")
+	if sortBy == "" && c.Query("sort_order") == "" {
+		// The gallery's default is stable PDF page order. Existing callers that
+		// choose another field without an order retain the historical desc default.
+		sortOrder = "asc"
+	}
 	filter := &types.ImageListFilter{
 		Keyword:   strings.TrimSpace(c.Query("keyword")),
-		SortBy:    strings.TrimSpace(c.Query("sort_by")),
-		SortOrder: c.DefaultQuery("sort_order", "desc"),
+		SortBy:    sortBy,
+		SortOrder: sortOrder,
 	}
 	if v := c.Query("is_enabled"); v != "" {
 		enabled := v == "true"
@@ -1411,14 +1418,19 @@ func (h *KnowledgeHandler) ListImagesPost(c *gin.Context) {
 			ids = append(ids, id)
 		}
 	}
+	sortBy := strings.TrimSpace(body.SortBy)
 	sortOrder := body.SortOrder
 	if sortOrder == "" {
-		sortOrder = "desc"
+		if sortBy == "" {
+			sortOrder = "asc"
+		} else {
+			sortOrder = "desc"
+		}
 	}
 	filter := &types.ImageListFilter{
 		Keyword:      strings.TrimSpace(body.Keyword),
 		SearchIn:     body.SearchIn,
-		SortBy:       strings.TrimSpace(body.SortBy),
+		SortBy:       sortBy,
 		SortOrder:    sortOrder,
 		IsEnabled:    body.IsEnabled,
 		KnowledgeIDs: ids,
