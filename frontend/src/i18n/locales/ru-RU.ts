@@ -5714,6 +5714,7 @@ export default {
     historyUntitled: "Чат без названия",
     historyClear: "Очистить локальную историю",
     historyClearConfirm: "Очистить историю и начать новый чат? Сообщения на сервере сохранятся.",
+    historyRetry: "Повторить",
     historyLoadFailed: "Не удалось открыть чат. Повторите попытку.",
     historyUnavailable: "Чат недоступен и удалён из локальной истории.",
 

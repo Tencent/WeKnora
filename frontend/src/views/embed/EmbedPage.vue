@@ -1,6 +1,9 @@
 <template>
   <div class="embed-page" :style="pageStyle">
-    <div v-if="loadError" class="embed-error">{{ loadError }}</div>
+    <div v-if="loadError" class="embed-error">
+      <p>{{ loadError }}</p>
+      <t-button :loading="bootstrapping" @click="retryBootstrap">{{ $t('embedPublish.historyRetry') }}</t-button>
+    </div>
     <template v-else-if="config">
       <header v-if="sessionId" class="embed-header">
         <span class="embed-header__badge" :style="badgeStyle">
@@ -125,6 +128,7 @@ const {
   bootstrapping,
   hostContext,
   startNewSession,
+  retryBootstrap,
   sessionHistory,
   sessionBusy,
   historyError,

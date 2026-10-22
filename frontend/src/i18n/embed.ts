@@ -9,6 +9,7 @@ const messages = {
       historyUntitled: "未命名对话",
       historyClear: "清除本地历史",
       historyClearConfirm: "清除此浏览器的历史并开启新对话？服务端消息将保留。",
+      historyRetry: "重试",
       historyLoadFailed: "无法打开对话，请稍后重试。",
       historyUnavailable: "该对话已不可用，已从本地历史中移除。",
 
@@ -606,6 +607,7 @@ const messages = {
       historyUntitled: "未命名對話",
       historyClear: "清除本機歷史",
       historyClearConfirm: "清除此瀏覽器的歷史並開啟新對話？伺服器訊息將保留。",
+      historyRetry: "重試",
       historyLoadFailed: "無法開啟對話，請稍後重試。",
       historyUnavailable: "此對話已無法使用，已從本機歷史移除。",
 
@@ -1203,6 +1205,7 @@ const messages = {
       historyUntitled: "無題のチャット",
       historyClear: "ローカル履歴を消去",
       historyClearConfirm: "履歴を消去して新しいチャットを開始しますか？サーバーのメッセージは保持されます。",
+      historyRetry: "再試行",
       historyLoadFailed: "チャットを開けませんでした。もう一度お試しください。",
       historyUnavailable: "このチャットは利用できないため、ローカル履歴から削除しました。",
 
@@ -1800,6 +1803,7 @@ const messages = {
       historyUntitled: "Untitled chat",
       historyClear: "Clear local history",
       historyClearConfirm: "Clear this browser’s history and start a new chat? Server messages will be kept.",
+      historyRetry: "Retry",
       historyLoadFailed: "Could not open the chat. Please try again.",
       historyUnavailable: "This chat is no longer available and was removed from local history.",
 
@@ -2422,6 +2426,7 @@ const koEmbedPublish = {
     historyUntitled: "제목 없는 대화",
     historyClear: "로컬 기록 지우기",
     historyClearConfirm: "기록을 지우고 새 대화를 시작할까요? 서버 메시지는 유지됩니다.",
+    historyRetry: "다시 시도",
     historyLoadFailed: "대화를 열 수 없습니다. 다시 시도해 주세요.",
     historyUnavailable: "사용할 수 없는 대화이므로 로컬 기록에서 삭제했습니다.",
 
@@ -2570,6 +2575,7 @@ const ruEmbedPublish = {
     historyUntitled: "Чат без названия",
     historyClear: "Очистить локальную историю",
     historyClearConfirm: "Очистить историю и начать новый чат? Сообщения на сервере сохранятся.",
+    historyRetry: "Повторить",
     historyLoadFailed: "Не удалось открыть чат. Повторите попытку.",
     historyUnavailable: "Чат недоступен и удалён из локальной истории.",
 

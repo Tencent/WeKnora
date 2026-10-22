@@ -63,3 +63,19 @@ export function rememberEmbedSession(
   const others = [...previous, ...readEmbedHistory(scope, storage)].filter(item => item.id !== entry.id)
   return saveEmbedHistory(scope, [entry, ...others], storage)
 }
+
+// A durable clear marker lets suspended tabs detect a clear before writing again.
+export function embedHistoryRevisionKey(scope: EmbedHistoryScope): string {
+  return `${embedHistoryStorageKey(scope)}:revision`
+}
+
+export function readEmbedHistoryRevision(scope: EmbedHistoryScope, storage = browserStorage()): string {
+  try { return storage?.getItem(embedHistoryRevisionKey(scope)) || '' } catch { return '' }
+}
+
+export function clearEmbedHistory(scope: EmbedHistoryScope, storage = browserStorage()): EmbedHistoryEntry[] {
+  try {
+    storage?.setItem(embedHistoryRevisionKey(scope), `${Date.now()}:${Math.random()}`)
+  } catch { /* Storage is best-effort, just like saved handles. */ }
+  return saveEmbedHistory(scope, [], storage)
+}

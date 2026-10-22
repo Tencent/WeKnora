@@ -3348,6 +3348,7 @@ export default {
     historyUntitled: "Untitled chat",
     historyClear: "Clear local history",
     historyClearConfirm: "Clear this browser’s history and start a new chat? Server messages will be kept.",
+    historyRetry: "Retry",
     historyLoadFailed: "Could not open the chat. Please try again.",
     historyUnavailable: "This chat is no longer available and was removed from local history.",
 

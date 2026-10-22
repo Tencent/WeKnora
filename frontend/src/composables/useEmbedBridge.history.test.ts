@@ -47,7 +47,7 @@ function setup(t: TestContext) {
   let bridge!: ReturnType<typeof useEmbedBridge>
   const channel = vue.ref('channel')
   const mounted = f.mount(vue.defineComponent({ setup() { bridge = exports.useEmbedBridge(channel); return {} } }))
-  return { bridge: () => bridge, storage, values, loads, channel, close: mounted.close,
+  return { bridge: () => bridge, storage, values, loads, channel, close: mounted.close, history, window: f.window,
     create: (fn: typeof create) => { create = fn }, load: (fn: typeof load) => { load = fn } }
 }
 
@@ -134,4 +134,133 @@ test('a legacy current handle is validated and added to history only after messa
   b.setSessionHasMessages(true)
   assert.equal(b.sessionHistory.value.length, 2)
   assert.equal(JSON.parse(f.storage.getItem('current:channel')!).visitorId, 'visitor')
+})
+
+for (const failure of [{ $httpStatus: 503 }, { $httpStatus: 429 }, { $httpStatus: 401 }, new Error('timeout')]) {
+  test(`bootstrap preserves the signed handle on ${JSON.stringify(failure)} and retries without creating a session`, async t => {
+    const f = setup(t)
+    const stored = { id: 'legacy', sig: 'legacy-signature', agentId: 'agent', visitorId: 'visitor' }
+    f.storage.setItem('current:channel', JSON.stringify(stored))
+    f.load(async () => { throw failure })
+    await flush()
+    const b = f.bridge()
+    assert.equal(b.sessionId.value, '')
+    assert.ok(b.loadError.value)
+    assert.equal(JSON.parse(f.storage.getItem('current:channel')!).id, 'legacy')
+    f.create(async () => { assert.fail('temporary failures must never create a replacement') })
+    f.load(async () => ({ success: true, data: [] }))
+    await b.retryBootstrap()
+    assert.equal(b.sessionId.value, 'legacy')
+    assert.equal(b.loadError.value, '')
+  })
+}
+
+test('bootstrap replaces a definitively unavailable signed handle', async t => {
+  const f = setup(t)
+  f.storage.setItem('current:channel', JSON.stringify({ id: 'gone', sig: 'sig', agentId: 'agent' }))
+  f.load(async () => { throw { $httpStatus: 404 } })
+  await flush()
+  assert.equal(f.bridge().sessionId.value, 'new-1')
+  assert.equal(f.bridge().loadError.value, '')
+})
+
+for (const deliverEvent of [false, true]) {
+  test(`another tab clears history without stale handles being resurrected (storage event: ${deliverEvent})`, async t => {
+    const f = setup(t)
+    await flush()
+    const b = f.bridge()
+    b.setSessionHasMessages(true)
+    b.rememberCurrentSession('Current')
+    const scope = { channelId: 'channel', agentId: 'agent', visitorId: 'visitor' }
+    f.history.clearEmbedHistory(scope)
+    if (deliverEvent) {
+      const event = new Event('storage')
+      Object.defineProperty(event, 'key', { value: f.history.embedHistoryRevisionKey(scope) })
+      f.window.dispatchEvent(event)
+      assert.equal(b.sessionHistory.value.length, 0)
+    }
+    // Covers a suspended tab whose storage event is still queued, and late title events.
+    b.rememberCurrentSession('Late title')
+    b.setSessionHasMessages(true)
+    assert.equal(b.sessionHistory.value.length, 0)
+    assert.equal(b.sessionId.value, 'new-1', 'the open chat stays usable')
+    assert.equal(f.history.readEmbedHistory(scope).length, 0)
+    await b.startNewSession()
+    b.setSessionHasMessages(true)
+    assert.deepEqual(Array.from(b.sessionHistory.value, entry => entry.id), ['new-2'])
+  })
+}
+
+test('storage events refresh only the matching scope and stop after unmount', async t => {
+  const f = setup(t)
+  await flush()
+  const b = f.bridge()
+  const scope = { channelId: 'channel', agentId: 'agent', visitorId: 'visitor' }
+  f.history.saveEmbedHistory(scope, [{ id: 'other-tab', sig: 'sig', title: 'Other', updatedAt: 2 }])
+  const emit = (key: string) => {
+    const event = new Event('storage')
+    Object.defineProperty(event, 'key', { value: key })
+    f.window.dispatchEvent(event)
+  }
+  emit('unrelated')
+  assert.equal(b.sessionHistory.value[0]?.id, 'old')
+  emit(f.history.embedHistoryStorageKey(scope))
+  assert.equal(b.sessionHistory.value[0]?.id, 'other-tab')
+  f.close()
+  f.history.saveEmbedHistory(scope, [])
+  emit(f.history.embedHistoryStorageKey(scope))
+  assert.equal(b.sessionHistory.value[0]?.id, 'other-tab')
+})
+
+for (const deliverEvent of [false, true]) {
+  test(`a pending switch cannot restore a handle cleared in another tab (storage event: ${deliverEvent})`, async t => {
+    const f = setup(t)
+    await flush()
+    const b = f.bridge()
+    const pending = deferred<any>()
+    f.load(() => pending.promise)
+    const switching = b.switchHistorySession('old')
+    const scope = { channelId: 'channel', agentId: 'agent', visitorId: 'visitor' }
+    f.history.clearEmbedHistory(scope)
+    if (deliverEvent) {
+      const event = new Event('storage')
+      Object.defineProperty(event, 'key', { value: f.history.embedHistoryRevisionKey(scope) })
+      f.window.dispatchEvent(event)
+    }
+    pending.resolve({ success: true, data: [] })
+    assert.equal(await switching, false)
+    assert.equal(b.sessionId.value, 'new-1')
+    assert.equal(b.sessionHistory.value.length, 0)
+    assert.equal(b.sessionBusy.value, false)
+  })
+}
+
+test('a clear during bootstrap validation prevents restoring the old signed handle', async t => {
+  const f = setup(t)
+  f.storage.setItem('current:channel', JSON.stringify({ id: 'legacy', sig: 'sig', agentId: 'agent' }))
+  const pending = deferred<any>()
+  f.load(() => pending.promise)
+  await flush()
+  assert.equal(f.loads.length, 1)
+  f.history.clearEmbedHistory({ channelId: 'channel', agentId: 'agent', visitorId: 'visitor' })
+  pending.resolve({ success: true, data: [] })
+  await flush()
+  assert.equal(f.bridge().sessionId.value, 'new-1')
+  assert.equal(f.bridge().sessionHistory.value.length, 0)
+})
+
+test('a late denial cannot write a stale history list after another tab clears it', async t => {
+  const f = setup(t)
+  await flush()
+  const b = f.bridge()
+  b.setSessionHasMessages(true)
+  const pending = deferred<any>()
+  f.load(() => pending.promise)
+  const switching = b.switchHistorySession('old')
+  const scope = { channelId: 'channel', agentId: 'agent', visitorId: 'visitor' }
+  f.history.clearEmbedHistory(scope)
+  pending.reject({ $httpStatus: 403 })
+  assert.equal(await switching, false)
+  assert.equal(f.history.readEmbedHistory(scope).length, 0)
+  assert.equal(b.sessionHistory.value.length, 0)
 })

@@ -5715,6 +5715,7 @@ export default {
     historyUntitled: "未命名對話",
     historyClear: "清除本機歷史",
     historyClearConfirm: "清除此瀏覽器的歷史並開啟新對話？伺服器訊息將保留。",
+    historyRetry: "重試",
     historyLoadFailed: "無法開啟對話，請稍後重試。",
     historyUnavailable: "此對話已無法使用，已從本機歷史移除。",
 

@@ -5714,6 +5714,7 @@ export default {
     historyUntitled: "제목 없는 대화",
     historyClear: "로컬 기록 지우기",
     historyClearConfirm: "기록을 지우고 새 대화를 시작할까요? 서버 메시지는 유지됩니다.",
+    historyRetry: "다시 시도",
     historyLoadFailed: "대화를 열 수 없습니다. 다시 시도해 주세요.",
     historyUnavailable: "사용할 수 없는 대화이므로 로컬 기록에서 삭제했습니다.",
 
