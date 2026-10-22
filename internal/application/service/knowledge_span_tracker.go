@@ -928,7 +928,7 @@ func (noopSpanTracker) EndSpan(_ context.Context, _ *Span, _ types.JSONMap)     
 func (noopSpanTracker) FailSpan(_ context.Context, _ *Span, _, _ string, _ error)          {}
 func (noopSpanTracker) FailSpanRetryable(_ context.Context, _ *Span, _, _ string, _ error) {}
 func (noopSpanTracker) SkipSpan(_ context.Context, _ *Span, _ string)                      {}
-func (noopSpanTracker) LookupStage(_ context.Context, _ string, _ int, _ string) *Span { return nil }
+func (noopSpanTracker) LookupStage(_ context.Context, _ string, _ int, _ string) *Span     { return nil }
 
 func (noopSpanTracker) LookupSpanByName(_ context.Context, _ string, _ int, _ string) *Span {
 	return nil
