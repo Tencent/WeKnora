@@ -24,3 +24,21 @@ test('XMind uploads work before engine discovery and respect discovered capabili
     assert.equal(shouldRejectKnowledgeFileType(filename, ['pdf']), true)
   }
 })
+
+// The backend accepts these Office/ODF/image variants (see
+// internal/utils/import_filetypes.go), so the client fallback used before
+// engine discovery must not reject them (#4598).
+test('fallback whitelist covers every backend-accepted extension', () => {
+  const accepted = [
+    'xlsm', 'XLSM', 'docm', 'pptm', 'odt', 'ods', 'odp', 'rtf',
+    'bmp', 'tiff', 'webp', 'gif', 'json', 'markdown',
+  ]
+  for (const ext of accepted) {
+    assert.equal(
+      shouldRejectKnowledgeFileType(`report.${ext}`),
+      false,
+      `${ext} should pass the fallback whitelist`,
+    )
+  }
+  assert.equal(shouldRejectKnowledgeFileType('payload.exe'), true)
+})
