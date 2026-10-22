@@ -1757,13 +1757,7 @@ definitions:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel'
         description: |-
           AccessLevel is how far runs may change data without asking, capped by
-          the agent's and the workspace's ceilings.
-        x-agent: true
-      agent_id:
-        description: |-
-          AgentID is the agent that runs it; the WeKnora assistant's ID runs the
-          assistant.
-        type: string
+          the workspace's assistant ceiling.
         x-agent: true
       approval_timeout_minutes:
         description: |-
@@ -1814,6 +1808,11 @@ definitions:
       limits:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationLimits'
       misfire_policy:
+        type: string
+        x-agent: true
+      model_id:
+        description: ModelID overrides the assistant's chat model; empty follows the
+          assistant default.
         type: string
         x-agent: true
       name:
@@ -1873,10 +1872,6 @@ definitions:
         - confirm
         - auto_write
         x-agent: true
-      agent_id:
-        description: Agent that runs it, from agent.list; empty runs the WeKnora assistant
-        type: string
-        x-agent: true
       approval_timeout_minutes:
         description: How long a run waits for an approval before it fails, in minutes
         type: integer
@@ -1907,6 +1902,11 @@ definitions:
         enum:
         - skip
         - run_once
+        type: string
+        x-agent: true
+      model_id:
+        description: Optional chat model from model.list; empty follows the assistant
+          default
         type: string
         x-agent: true
       name:
@@ -4100,13 +4100,14 @@ definitions:
       image_pipeline_params:
         additionalProperties: {}
         description: |-
-          ImagePipelineParams holds the tunables of ImagePipelineID, keyed by the
-          field's own key. The map travels whole: a key a pipeline no longer
-          declares is dropped when the run reads it, so an old stored config stays
-          loadable rather than being rewritten on save.
+          ImagePipelineParams holds the tunables of ImagePipelineID, keyed by each
+          field's slot — the pipeline id joined to the field's own key, built by
+          SlotKey and read back by ImagePipelineParam. The map travels whole: a key
+          a pipeline no longer declares is dropped when the run reads it, so an old
+          stored config stays loadable rather than being rewritten on save.
         type: object
         x-agent: true
-        x-agent-keys: enable_caption|enable_ocr|default.enable_caption|default.enable_ocr
+        x-agent-keys: default.caption_enabled|default.ocr_enabled
         x-agent-response: true
       image_vector_enabled:
         description: |-
@@ -10616,10 +10617,6 @@ definitions:
         - confirm
         - auto_write
         x-agent: true
-      agent_id:
-        description: Agent that runs it, from agent.list; empty runs the WeKnora assistant
-        type: string
-        x-agent: true
       approval_timeout_minutes:
         description: How long a run waits for an approval before it fails, in minutes;
           default 1440
@@ -10649,6 +10646,11 @@ definitions:
         enum:
         - skip
         - run_once
+        type: string
+        x-agent: true
+      model_id:
+        description: Optional chat model from model.list; empty follows the assistant
+          default
         type: string
         x-agent: true
       name:
@@ -14488,7 +14490,7 @@ paths:
         tool_approval 为 {approved: bool, modified_args?: object, reason?: string, allow_in_session?: bool}；
         page_action 为 {declined?, error?, location?, snapshot?, applied?: [{ref, label?, summary?}],
         stayed?, return_path?}。
-        返回 resumed=true 表示运行已挂起并在本次回答后恢复，客户端需重新接入该消息的事件流
+        返回 resumed=true 表示挂起的运行已请求恢复（自动化由调度器恢复），客户端需携带 resume_pending_id 重新接入该消息的事件流
       parameters:
       - description: 交互 ID（事件中的 pending_id）
         in: path
@@ -15622,12 +15624,12 @@ paths:
         id: automation.list
         max_items: 100
         risk: read
-      x-agent-hint: 'Lists the user''s automations: scheduled tasks an agent runs
-        on their behalf, with next and last run.'
+      x-agent-hint: 'Lists the user''s automations: scheduled tasks the WeKnora assistant
+        runs on their behalf, with next and last run.'
     post:
       consumes:
       - application/json
-      description: 创建一个按计划由 Agent 以当前用户身份运行的任务
+      description: 创建一个按计划由 WeKnora 助手以当前用户身份运行的任务
       parameters:
       - description: 自动化
         in: body
@@ -15662,13 +15664,14 @@ paths:
         label_param: name
         risk: write
         role: viewer
-      x-agent-hint: 'Creates an automation the user runs as. Turn the user''s wording
-        into a cron expression (five fields, minute first) and an IANA timezone, and
-        check it with automation.validate_trigger first, telling the user the next
-        run times it returns. Runs are unattended: write the instruction as a complete
-        task, since nobody can answer questions during a run. access_level defaults
-        to confirm, where each change waits for the user''s approval; only set auto_write
-        when the user asks for it.'
+      x-agent-hint: 'Creates an automation the WeKnora assistant runs as the user.
+        If work requires other agents, name them and their assignments in the instruction
+        so the assistant can delegate. Turn the user''s wording into a cron expression
+        (five fields, minute first) and an IANA timezone, and check it with automation.validate_trigger
+        first, telling the user the next run times it returns. Runs are unattended:
+        write the instruction as a complete task, since nobody can answer questions
+        during a run. access_level defaults to confirm, where each change waits for
+        the user''s approval; only set auto_write when the user asks for it.'
   /automations/{id}:
     delete:
       description: 停止进行中的运行，删除自动化及其运行记录、会话和长期授权
@@ -19565,8 +19568,9 @@ paths:
         label: name
         risk: write
         target: knowledge_base.get
-      x-agent-hint: Creates a Markdown document. Send the full content, and status
-        draft to keep it out of search or publish to index it.
+      x-agent-hint: Creates a source document from complete Markdown. Set status publish
+        to start asynchronous ingestion; omitted status defaults to draft without
+        indexing. Use draft only when requested. Check knowledge.get_parse_progress.
   /knowledge-bases/{id}/knowledge/url:
     post:
       consumes:
@@ -19617,9 +19621,8 @@ paths:
         label: name
         risk: write
         target: knowledge_base.get
-      x-agent-hint: Fetches a public web page or file into the knowledge base and
-        parses it in the background; follow with knowledge.get_parse_progress. Only
-        use a URL the user gave.
+      x-agent-hint: Imports a user-provided public web page or file URL as a source
+        document; ingests asynchronously. Check knowledge.get_parse_progress.
   /knowledge-bases/{id}/move-targets:
     get:
       description: 返回与源知识库 Type 一致、EmbeddingModelID 一致、非临时且不是自身的目标知识库列表
@@ -24091,6 +24094,10 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: 上一页返回的 next_cursor
+        in: query
+        name: cursor
+        type: string
       - description: 只看未读
         in: query
         name: unread
@@ -24099,7 +24106,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: '{items, unread}'
+          description: '{items, pending, unread, read_count, next_cursor}'
           schema:
             additionalProperties: true
             type: object
@@ -24109,10 +24116,24 @@ paths:
       tags:
       - 通知
   /notifications/read:
+    delete:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 清理已读通知
+      tags:
+      - 通知
     post:
       consumes:
       - application/json
-      description: ids 为空时全部标记已读
+      description: ids 为空时将全部通知记录标为已读，不改变待处理事项
       parameters:
       - description: '{ids}'
         in: body
@@ -26420,6 +26441,10 @@ paths:
         name: message_id
         required: true
         type: string
+      - description: 等待此审批恢复后的事件流
+        in: query
+        name: resume_pending_id
+        type: string
       - default: handle
         description: 文件引用形式，public 返回可加载直链
         enum:
@@ -26437,6 +26462,10 @@ paths:
             type: string
         "404":
           description: 会话或消息不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: 审批恢复后的事件流尚未就绪
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:

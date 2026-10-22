@@ -16,13 +16,49 @@ export interface ImageProcessingEdits {
   imageAttrsEnabled: boolean
   /** Index and recall images by their own vectors (off unless opted in). */
   imageVectorEnabled: boolean
-  onUnobserved: boolean
   /** The registry's current default OCR conditions (GET /image-attrs/schema). */
   defaultOn: ImageAttrConditionLike[]
   /** The pipeline picked in the panel; empty means multimodal is off and the fields go away. */
   pipelineId: string
-  /** That pipeline's private tunables, keyed by field. */
+  /**
+   * Every pipeline's private tunables, each stored under the slot of the
+   * pipeline that owns it — see pipelineParamKey. Switching the pick therefore
+   * finds the other pipeline's own answers rather than inheriting this one's.
+   */
   pipelineParams: Record<string, unknown>
+}
+
+/**
+ * The key one pipeline setting is stored under. Mirrors the backend's
+ * types.SlotKey: the pipeline that owns the setting namespaces it, unless the
+ * key already carries that namespace (an action scoped to one pipeline, whose
+ * id is "<pipeline>.<action>"), in which case it is left alone so the id is
+ * never doubled.
+ *
+ * Panel and run must agree on this or a saved switch is never read back, which
+ * is the whole reason it is a function here and in Go rather than a spelling
+ * both sides repeat.
+ */
+export function pipelineParamKey(pipelineId: string, key: string): string {
+  if (!pipelineId || key.startsWith(`${pipelineId}.`)) return key
+  return `${pipelineId}.${key}`
+}
+
+/**
+ * Reads one pipeline setting the way the backend's types.ImagePipelineParam
+ * does: out of the running pipeline's slot, and out of nowhere else.
+ * `undefined` means the setting was never stored, and the caller falls back to
+ * the field's declared default — which is the answer the run gives for the same
+ * config, because it falls back the same way.
+ */
+export function readPipelineParam(
+  params: Record<string, unknown> | null | undefined,
+  pipelineId: string,
+  key: string,
+): unknown {
+  if (!params) return undefined
+  const stored = params[pipelineParamKey(pipelineId, key)]
+  return stored === undefined || stored === null ? undefined : stored
 }
 
 /** The pipeline fields an overrides payload carries, with the empties dropped. */
@@ -60,8 +96,7 @@ export function buildPipelineFields(
   pipelineParams: Record<string, unknown> | null | undefined,
 ): PipelineFields {
   if (!pipelineId) return {}
-  const fields: PipelineFields = {}
-  if (pipelineId) fields.image_pipeline = pipelineId
+  const fields: PipelineFields = { image_pipeline: pipelineId }
   if (pipelineParams && Object.keys(pipelineParams).length > 0) {
     fields.image_pipeline_params = pipelineParams
   }
@@ -73,34 +108,35 @@ export function buildPipelineFields(
  * changed. The backend replaces the whole object, so every field the editor
  * does not own (model_id, ...) is carried over from the snapshot.
  *
- * The editor only edits the observation switch and on_unobserved, but
- * on_unobserved must travel with a non-empty `on`: the backend adopts a custom
- * OCR clause only when `on` is set. A knowledge base whose `on` was customised
- * through the API keeps it; one without a custom list gets the registry's
- * current default, so it still follows the default as it evolves.
+ * The editor owns the observation switch, the pick and its parameters. The
+ * condition list travels with a non-empty `on`: the backend adopts a custom
+ * list only when `on` is set, and a knowledge base without one gets the
+ * registry's current default so it still follows the default as it evolves.
  *
- * The pipeline and its parameters are written too. They are the panel's own
- * settings; the observation switch is kept in step with the pick so a base that
- * was edited through the UI still reads the same way through the older switch.
- * image_vector_enabled is written only when it is on or was already stored:
- * a knowledge base that never touched the switch reads as off on the
- * backend, so writing `false` into it would be a change for nothing.
+ * The OCR clause is rebuilt as the condition list alone. What to do about an
+ * image whose attributes were NOT observed is a setting of the pipeline that
+ * schedules OCR now, so a `on_unobserved` left in this table by an older client
+ * is dropped rather than carried forward as a key nothing reads.
+ *
+ * The pipeline and its parameters are written as one unit. image_vector_enabled
+ * is written only when it is on or was already stored: a knowledge base that
+ * never touched the switch reads as off on the backend, so writing `false` into
+ * it would be a change for nothing.
  */
 export function buildImageProcessingConfig(
   snapshot: Record<string, unknown> | null | undefined,
   edits: ImageProcessingEdits,
 ): Record<string, unknown> | null {
   const snap = snapshot || {}
-  const storedOn = (snap.image_actions as { ocr?: { on?: unknown } } | undefined)?.ocr?.on
+  const storedOCR = (snap.image_actions as { ocr?: Record<string, unknown> } | undefined)?.ocr
+  const storedOn = storedOCR?.on
   const on = Array.isArray(storedOn) && storedOn.length > 0 ? storedOn : edits.defaultOn
   const built: Record<string, unknown> = {
     ...snap,
     image_attrs_enabled: edits.imageAttrsEnabled,
     image_actions: {
-      ocr: {
-        on,
-        on_unobserved: edits.onUnobserved,
-      },
+      ...(snap.image_actions as Record<string, unknown> | undefined),
+      ocr: { on },
     },
   }
   // The pick carries the panel's own answer, so it replaces whatever the

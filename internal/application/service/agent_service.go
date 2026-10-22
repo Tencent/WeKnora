@@ -17,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/attachment"
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/background"
 	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/event"
@@ -131,6 +132,18 @@ type agentService struct {
 	hostSkillInstaller    sandbox.Manager
 	hostSkillsRoot        string
 	hostSkillVersionsRoot string
+	background            *BackgroundWork
+	// shellJobs is an interface so registration can assert ShellJobSubmitter.
+	// *ShellJobService is the production value. && binds tighter than ||, so
+	// the availability check groups RemoteAvailable and LocalAvailable.
+	shellJobs shellJobSource
+}
+
+// shellJobSource is the part of *ShellJobService the agent asks about
+// availability. Submit is asserted to tools.ShellJobSubmitter at registration.
+type shellJobSource interface {
+	RemoteAvailable() bool
+	LocalAvailable() bool
 }
 
 // NewAgentService creates a new agent service
@@ -161,6 +174,8 @@ func NewAgentService(
 	browserSkill *browserskill.Manager,
 	userRepo interfaces.UserRepository,
 	graphRepo interfaces.RetrieveGraphRepository,
+	backgroundWork *BackgroundWork,
+	shellJobs *ShellJobService,
 	operationDispatcher *operations.HandlerDispatcher,
 	customAgentService interfaces.CustomAgentService,
 	collaboration *AgentCollaboration,
@@ -195,6 +210,8 @@ func NewAgentService(
 		sandboxPolicy:        sandboxPolicy,
 		hostSandbox:          hostSandbox.Manager,
 		hostDesktop:          hostSandbox.Desktop,
+		background:           backgroundWork,
+		shellJobs:            shellJobs,
 	}
 	if hostSandbox.SkillsAvailable() {
 		svc.hostSkillInstaller = hostSandbox.SkillInstaller
@@ -344,10 +361,59 @@ func (s *agentService) CreateAgentEngine(
 			return nil, err
 		}
 	}
+	s.attachBackgroundWork(ctx, engine, toolRegistry, sessionID, assistantMessageID)
 	toolRegistry.BindSession(sessionID)
 	engine.SetWorkspaceLayout(s.lookupSessionWorkspaceLayout(ctx, sessionID, config))
 
 	return engine, nil
+}
+
+// attachBackgroundWork gives the run its background-notice tracker and, when
+// the run can submit background work, the work_wait and work_cancel tools.
+// Tools are decided here, once per run, and never change mid-run (D10).
+func (s *agentService) attachBackgroundWork(
+	ctx context.Context, engine *agent.AgentEngine, registry *tools.ToolRegistry,
+	sessionID, assistantMessageID string,
+) {
+	if !s.background.Enabled() {
+		return
+	}
+	tenantID, ok := types.SandboxTenantIDFromContext(ctx)
+	if !ok || tenantID == 0 {
+		return
+	}
+	ref := interfaces.SessionRef{TenantID: tenantID, SessionID: sessionID}
+	run := background.NewRunNotices(ref, s.background.Registry, s.background.Inbox)
+	engine.SetBackgroundRun(run)
+
+	submitters := tools.RegisteredBackgroundSubmitters(registry)
+	if len(submitters) == 0 {
+		return
+	}
+	for _, name := range submitters {
+		tool, err := registry.GetTool(name)
+		if err != nil {
+			continue
+		}
+		if async, ok := tool.(*tools.ShellExecAsyncTool); ok {
+			async.BindBackgroundRun(ref, assistantMessageID, run)
+			continue
+		}
+		// Tests wrap the real tool. The method is the same one: the run's
+		// SessionRef and RunNotices, whose MarkStarted records a running handle.
+		if binder, ok := tool.(interface {
+			BindBackgroundRun(interfaces.SessionRef, string, interface{ MarkStarted(string) })
+		}); ok {
+			binder.BindBackgroundRun(ref, assistantMessageID, run)
+		}
+	}
+	pending := func(ctx context.Context) bool {
+		return engine.HasPendingInput(ctx, sessionID, assistantMessageID)
+	}
+	registry.RegisterTool(tools.NewWorkWaitTool(
+		s.background.Handler, ref, assistantMessageID, run, pending, submitters,
+	))
+	registry.RegisterTool(tools.NewWorkCancelTool(s.background.Handler, ref, run))
 }
 
 // registerMCPTools registers MCP tools from enabled services for this tenant.
@@ -827,6 +893,11 @@ func (s *agentService) initializeSkillsManager(
 			shellEnabled = true
 		}
 	}
+	if tool, err := toolRegistry.GetTool(tools.ToolShellExecAsync); err == nil {
+		if async, ok := tool.(*tools.ShellExecAsyncTool); ok {
+			async.WithSkillEnvironment(skillsManager)
+		}
+	}
 	if config.SkillsEnabled {
 		var reader *tools.ReadFileTool
 		if tool, err := toolRegistry.GetTool(tools.ToolReadFile); err == nil {
@@ -925,7 +996,7 @@ func (s *agentService) loadInstalledSkillBundle(
 // config-wide variables are injected into every execution, skills or not.
 //
 // The repository is constructed from s.db here rather than injected:
-// NewAgentService already takes 23 parameters, and this is the only place in
+// NewAgentService already takes 24 parameters, and this is the only place in
 // the agent path that touches the user env table.
 func (s *agentService) userEnvResolver(
 	ctx context.Context, config *types.AgentConfig,
@@ -1109,8 +1180,30 @@ func (s *agentService) registerSandboxShellTool(
 			tools.NewShellExecTool(executor, resolver).WithEnvCapture(s.skillEnvCapture(config)),
 		)
 		logger.Infof(ctx, "Registered shell_exec tool")
+		s.registerShellExecAsync(ctx, toolRegistry, executor, resolver, config)
 	} else {
 		logger.Infof(ctx, "Sandbox backend does not advertise remote shell capability; shell_exec not registered")
+	}
+}
+
+// registerShellExecAsync registers the background shell when this process can
+// submit a job. The submitter assertion and the availability check are both
+// required. && binds tighter than ||, so the availability disjunction is grouped.
+func (s *agentService) registerShellExecAsync(
+	ctx context.Context,
+	toolRegistry *tools.ToolRegistry,
+	executor tools.SandboxCommandExecutor,
+	resolver skills.SkillEnvResolver,
+	config *types.AgentConfig,
+) {
+	if s == nil || !s.background.Enabled() || s.shellJobs == nil {
+		return
+	}
+	if submitter, ok := s.shellJobs.(tools.ShellJobSubmitter); ok &&
+		(s.shellJobs.RemoteAvailable() || s.shellJobs.LocalAvailable()) {
+		toolRegistry.RegisterTool(tools.NewShellExecAsyncTool(submitter, executor, resolver).
+			WithEnvCapture(s.skillEnvCapture(config)))
+		logger.Infof(ctx, "Registered shell_exec_async tool")
 	}
 }
 

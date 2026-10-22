@@ -36,6 +36,7 @@ type runOutcome struct {
 	answer   string
 	usage    *types.TokenUsage
 	promptID string
+	elapsed  time.Duration
 	// pause, when set, pauses the automation with this reason.
 	pause string
 }
@@ -56,6 +57,7 @@ func (s *AutomationService) execute(parent context.Context, run *types.Automatio
 	}()
 	go s.heartbeat(ctx, run.ID, cancel)
 
+	started := time.Now()
 	out := func() (out runOutcome) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -64,11 +66,15 @@ func (s *AutomationService) execute(parent context.Context, run *types.Automatio
 		}()
 		return s.runOnce(ctx, run)
 	}()
-	if ctx.Err() != nil && out.status != types.AutomationRunAwaitingApproval {
+	out.elapsed = time.Since(started)
+	if ctx.Err() != nil {
 		var row types.AutomationRun
 		if err := s.db.WithContext(context.WithoutCancel(ctx)).Select("cancel_requested").
 			Where("id = ?", run.ID).Take(&row).Error; err == nil && row.CancelRequested {
 			out.status, out.reason = types.AutomationRunCancelled, "cancelled by the owner"
+			if out.promptID != "" {
+				s.closePrompt(context.WithoutCancel(ctx), out.promptID, types.AgentPromptCanceled, out.reason)
+			}
 		}
 	}
 	s.record(ctx, run, out)
@@ -109,7 +115,10 @@ func (s *AutomationService) heartbeat(ctx context.Context, runID string, cancel 
 func (s *AutomationService) record(ctx context.Context, run *types.AutomationRun, out runOutcome) {
 	ctx = context.WithoutCancel(ctx)
 	run.Answer = clipRunes(out.answer, maxStoredAnswerRunes)
-	updates := map[string]any{"answer": run.Answer, "updated_at": s.now()}
+	updates := map[string]any{
+		"answer": run.Answer, "updated_at": s.now(),
+		"execution_duration_ms": gorm.Expr("execution_duration_ms + ?", out.elapsed.Milliseconds()),
+	}
 	if out.usage != nil {
 		if data, err := json.Marshal(out.usage); err == nil {
 			updates["usage"] = types.JSON(data)
@@ -204,6 +213,7 @@ func (s *AutomationService) ownerContext(ctx context.Context, a *types.Automatio
 
 // runOnce executes run, or continues it from its answered approval.
 func (s *AutomationService) runOnce(ctx context.Context, run *types.AutomationRun) runOutcome {
+	started := time.Now()
 	if s.sessions == nil {
 		return failed("the agent executor is unavailable")
 	}
@@ -221,7 +231,7 @@ func (s *AutomationService) runOnce(ctx context.Context, run *types.AutomationRu
 		}
 		return failed(err.Error())
 	}
-	agentConfig, err := s.runnableAgent(ctx, a.AgentID, a.TenantID)
+	agentConfig, err := s.runnableAssistant(ctx)
 	if err != nil {
 		return runOutcome{status: types.AutomationRunFailed, reason: err.Error(), pause: err.Error()}
 	}
@@ -234,10 +244,18 @@ func (s *AutomationService) runOnce(ctx context.Context, run *types.AutomationRu
 	if m := a.Limits.MaxDurationMinutes; m > 0 {
 		limit = time.Duration(m) * time.Minute
 	}
-	ctx, cancel := context.WithTimeout(ctx, limit)
+	remaining := limit - time.Duration(run.ExecutionDurationMS)*time.Millisecond - time.Since(started)
+	if remaining <= 0 {
+		if run.Resume && run.PendingPromptID != "" {
+			s.closePrompt(ctx, run.PendingPromptID, types.AgentPromptFailed, "execution time limit exceeded")
+		}
+		return failed(fmt.Sprintf("the run took longer than %s", limit))
+	}
+	ctx, cancel := context.WithTimeout(ctx, remaining)
 	defer cancel()
 
 	var resume *types.AgentResume
+	modelID := a.ModelID
 	session, userMsg, answer, query := (*types.Session)(nil), (*types.Message)(nil), (*types.Message)(nil), ""
 	if run.Resume {
 		var stop func()
@@ -251,6 +269,11 @@ func (s *AutomationService) runOnce(ctx context.Context, run *types.AutomationRu
 		defer stop()
 		if snap, err := agent.DecodeRunSnapshot(resume.Snapshot); err == nil {
 			query = snap.Query
+			// A settings edit affects future runs, not an approval already in flight.
+			var original types.ResumableAgentRequest
+			if err := json.Unmarshal(snap.Request, &original); err == nil {
+				modelID = original.SummaryModelID
+			}
 		}
 	} else {
 		session, err = s.runSession(ctx, a, run)
@@ -268,10 +291,21 @@ func (s *AutomationService) runOnce(ctx context.Context, run *types.AutomationRu
 			return failed("could not record the run: " + err.Error())
 		}
 	}
+	if err := s.validateModel(ctx, modelID, a.TenantID); err != nil {
+		return failed(err.Error())
+	}
+	if modelID != "" {
+		// Keep the shared agent configuration untouched. The per-run copy also
+		// allows an explicit model when the agent's default is no longer available.
+		configured := *agentConfig
+		configured.Config.ModelID = modelID
+		agentConfig = &configured
+	}
 	loc := scheduleLocation(a.Trigger)
 	req := &types.QARequest{
 		Session: session, Query: query, AssistantMessageID: answer.ID, UserMessageID: userMsg.ID,
 		CustomAgent: agentConfig, WebSearchEnabled: agentConfig.Config.WebSearchEnabled,
+		SummaryModelID:  modelID,
 		AssistantAccess: a.AccessLevel, Mode: types.RunModeDeferred, Suspendable: true, Resume: resume,
 		RunNote: automation.RunNote(a.Name, run.ScheduledAt, loc),
 	}
@@ -328,7 +362,9 @@ func (s *AutomationService) runSession(
 	session := &types.Session{
 		ID: uuid.NewString(), TenantID: a.TenantID, UserID: a.OwnerUserID, Kind: types.SessionKindAutomation,
 		Title: clipRunes(title, 200), CreatedAt: now, UpdatedAt: now,
-		LastRequestState: &types.SessionLastRequestState{AgentID: a.AgentID, AgentEnabled: true},
+		LastRequestState: &types.SessionLastRequestState{
+			AgentID: types.BuiltinWeKnoraAssistantID, AgentEnabled: true, ModelID: a.ModelID,
+		},
 	}
 	if err := s.db.WithContext(ctx).Session(&gorm.Session{SkipHooks: true}).
 		Clauses(clause.OnConflict{DoNothing: true}).Create(session).Error; err != nil {
@@ -524,7 +560,10 @@ func (s *AutomationService) agentQA(
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	answer.IsCompleted = suspended == nil
+	answer.IsCompleted = suspended == nil || err != nil
+	if answer.IsCompleted {
+		answer.RunState = ""
+	}
 	answer.UpdatedAt = s.now()
 	if err != nil && answer.Content == "" {
 		answer.Content = err.Error()

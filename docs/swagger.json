@@ -269,7 +269,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "回答 Agent 运行中发起的交互（ask_user 提问、工具审批，或由浏览器自动应答的页面读写）。\nkind 须与交互一致，response 为该类型的回答 JSON（不接受未知字段）：\nask_user 为 {selected?, values?, text?, declined?}；\ntool_approval 为 {approved: bool, modified_args?: object, reason?: string, allow_in_session?: bool}；\npage_action 为 {declined?, error?, location?, snapshot?, applied?: [{ref, label?, summary?}],\nstayed?, return_path?}。\n返回 resumed=true 表示运行已挂起并在本次回答后恢复，客户端需重新接入该消息的事件流",
+                "description": "回答 Agent 运行中发起的交互（ask_user 提问、工具审批，或由浏览器自动应答的页面读写）。\nkind 须与交互一致，response 为该类型的回答 JSON（不接受未知字段）：\nask_user 为 {selected?, values?, text?, declined?}；\ntool_approval 为 {approved: bool, modified_args?: object, reason?: string, allow_in_session?: bool}；\npage_action 为 {declined?, error?, location?, snapshot?, applied?: [{ref, label?, summary?}],\nstayed?, return_path?}。\n返回 resumed=true 表示挂起的运行已请求恢复（自动化由调度器恢复），客户端需携带 resume_pending_id 重新接入该消息的事件流",
                 "consumes": [
                     "application/json"
                 ],
@@ -2041,7 +2041,7 @@
                     "max_items": 100,
                     "risk": "read"
                 },
-                "x-agent-hint": "Lists the user's automations: scheduled tasks an agent runs on their behalf, with next and last run."
+                "x-agent-hint": "Lists the user's automations: scheduled tasks the WeKnora assistant runs on their behalf, with next and last run."
             },
             "post": {
                 "security": [
@@ -2049,7 +2049,7 @@
                         "Bearer": []
                     }
                 ],
-                "description": "创建一个按计划由 Agent 以当前用户身份运行的任务",
+                "description": "创建一个按计划由 WeKnora 助手以当前用户身份运行的任务",
                 "consumes": [
                     "application/json"
                 ],
@@ -2104,7 +2104,7 @@
                     "risk": "write",
                     "role": "viewer"
                 },
-                "x-agent-hint": "Creates an automation the user runs as. Turn the user's wording into a cron expression (five fields, minute first) and an IANA timezone, and check it with automation.validate_trigger first, telling the user the next run times it returns. Runs are unattended: write the instruction as a complete task, since nobody can answer questions during a run. access_level defaults to confirm, where each change waits for the user's approval; only set auto_write when the user asks for it."
+                "x-agent-hint": "Creates an automation the WeKnora assistant runs as the user. If work requires other agents, name them and their assignments in the instruction so the assistant can delegate. Turn the user's wording into a cron expression (five fields, minute first) and an IANA timezone, and check it with automation.validate_trigger first, telling the user the next run times it returns. Runs are unattended: write the instruction as a complete task, since nobody can answer questions during a run. access_level defaults to confirm, where each change waits for the user's approval; only set auto_write when the user asks for it."
             }
         },
         "/automations/validate-trigger": {
@@ -8245,7 +8245,7 @@
                     "risk": "write",
                     "target": "knowledge_base.get"
                 },
-                "x-agent-hint": "Creates a Markdown document. Send the full content, and status draft to keep it out of search or publish to index it."
+                "x-agent-hint": "Creates a source document from complete Markdown. Set status publish to start asynchronous ingestion; omitted status defaults to draft without indexing. Use draft only when requested. Check knowledge.get_parse_progress."
             }
         },
         "/knowledge-bases/{id}/knowledge/url": {
@@ -8327,7 +8327,7 @@
                     "risk": "write",
                     "target": "knowledge_base.get"
                 },
-                "x-agent-hint": "Fetches a public web page or file into the knowledge base and parses it in the background; follow with knowledge.get_parse_progress. Only use a URL the user gave."
+                "x-agent-hint": "Imports a user-provided public web page or file URL as a source document; ingests asynchronously. Check knowledge.get_parse_progress."
             }
         },
         "/knowledge-bases/{id}/move-targets": {
@@ -15131,6 +15131,12 @@
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "上一页返回的 next_cursor",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
                         "type": "boolean",
                         "description": "只看未读",
                         "name": "unread",
@@ -15139,7 +15145,7 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "{items, unread}",
+                        "description": "{items, pending, unread, read_count, next_cursor}",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -15155,7 +15161,7 @@
                         "Bearer": []
                     }
                 ],
-                "description": "ids 为空时全部标记已读",
+                "description": "ids 为空时将全部通知记录标为已读，不改变待处理事项",
                 "consumes": [
                     "application/json"
                 ],
@@ -15179,6 +15185,29 @@
                 "responses": {
                     "200": {
                         "description": "结果",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "通知"
+                ],
+                "summary": "清理已读通知",
+                "responses": {
+                    "200": {
+                        "description": "OK",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -17740,6 +17769,12 @@
                         "required": true
                     },
                     {
+                        "type": "string",
+                        "description": "等待此审批恢复后的事件流",
+                        "name": "resume_pending_id",
+                        "in": "query"
+                    },
+                    {
                         "enum": [
                             "handle",
                             "public"
@@ -17760,6 +17795,12 @@
                     },
                     "404": {
                         "description": "会话或消息不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "审批恢复后的事件流尚未就绪",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -26211,17 +26252,12 @@
             "type": "object",
             "properties": {
                 "access_level": {
-                    "description": "AccessLevel is how far runs may change data without asking, capped by\nthe agent's and the workspace's ceilings.",
+                    "description": "AccessLevel is how far runs may change data without asking, capped by\nthe workspace's assistant ceiling.",
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel"
                         }
                     ],
-                    "x-agent": true
-                },
-                "agent_id": {
-                    "description": "AgentID is the agent that runs it; the WeKnora assistant's ID runs the\nassistant.",
-                    "type": "string",
                     "x-agent": true
                 },
                 "approval_timeout_minutes": {
@@ -26279,6 +26315,11 @@
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutomationLimits"
                 },
                 "misfire_policy": {
+                    "type": "string",
+                    "x-agent": true
+                },
+                "model_id": {
+                    "description": "ModelID overrides the assistant's chat model; empty follows the assistant default.",
                     "type": "string",
                     "x-agent": true
                 },
@@ -26359,11 +26400,6 @@
                     ],
                     "x-agent": true
                 },
-                "agent_id": {
-                    "description": "Agent that runs it, from agent.list; empty runs the WeKnora assistant",
-                    "type": "string",
-                    "x-agent": true
-                },
                 "approval_timeout_minutes": {
                     "description": "How long a run waits for an approval before it fails, in minutes",
                     "type": "integer",
@@ -26399,6 +26435,11 @@
                         "skip",
                         "run_once"
                     ],
+                    "x-agent": true
+                },
+                "model_id": {
+                    "description": "Optional chat model from model.list; empty follows the assistant default",
+                    "type": "string",
                     "x-agent": true
                 },
                 "name": {
@@ -29081,11 +29122,11 @@
                     "x-agent": true
                 },
                 "image_pipeline_params": {
-                    "description": "ImagePipelineParams holds the tunables of ImagePipelineID, keyed by the\nfield's own key. The map travels whole: a key a pipeline no longer\ndeclares is dropped when the run reads it, so an old stored config stays\nloadable rather than being rewritten on save.",
+                    "description": "ImagePipelineParams holds the tunables of ImagePipelineID, keyed by each\nfield's slot — the pipeline id joined to the field's own key, built by\nSlotKey and read back by ImagePipelineParam. The map travels whole: a key\na pipeline no longer declares is dropped when the run reads it, so an old\nstored config stays loadable rather than being rewritten on save.",
                     "type": "object",
                     "additionalProperties": {},
                     "x-agent": true,
-                    "x-agent-keys": "enable_caption|enable_ocr|default.enable_caption|default.enable_ocr",
+                    "x-agent-keys": "default.caption_enabled|default.ocr_enabled",
                     "x-agent-response": true
                 },
                 "image_vector_enabled": {
@@ -37307,11 +37348,6 @@
                     ],
                     "x-agent": true
                 },
-                "agent_id": {
-                    "description": "Agent that runs it, from agent.list; empty runs the WeKnora assistant",
-                    "type": "string",
-                    "x-agent": true
-                },
                 "approval_timeout_minutes": {
                     "description": "How long a run waits for an approval before it fails, in minutes; default 1440",
                     "type": "integer",
@@ -37343,6 +37379,11 @@
                         "skip",
                         "run_once"
                     ],
+                    "x-agent": true
+                },
+                "model_id": {
+                    "description": "Optional chat model from model.list; empty follows the assistant default",
+                    "type": "string",
                     "x-agent": true
                 },
                 "name": {

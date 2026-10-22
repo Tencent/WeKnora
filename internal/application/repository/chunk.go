@@ -67,6 +67,18 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 		}
 	}
 
+	// GORM substitutes default:true for a zero bool even with Select("*").
+	// A non-nil pointer makes both true and false explicit on insert, while
+	// embedding the original chunk keeps generated seq_ids and timestamps on it.
+	type chunkInsert struct {
+		*types.Chunk
+		IsEnabled *bool
+	}
+	rows := make([]chunkInsert, len(chunks))
+	for i, chunk := range chunks {
+		rows[i] = chunkInsert{Chunk: chunk, IsEnabled: &chunk.IsEnabled}
+	}
+
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// SQLite doesn't support autoIncrement on non-PK columns, so SeqIDs are
 		// pre-assigned from MAX(seq_id). Doing it inside the write transaction
@@ -78,10 +90,8 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 			}
 		}
 
-		// Select("*") ensures zero-value fields (IsEnabled=false, Flags=0) are
-		// explicitly inserted, bypassing GORM's default value behavior.
 		// SeqID=0 is skipped by GORM automatically (autoIncrement tag).
-		return tx.Select("*").CreateInBatches(chunks, createChunksBatchSize).Error
+		return tx.Table("chunks").Select("*").CreateInBatches(rows, createChunksBatchSize).Error
 	})
 }
 

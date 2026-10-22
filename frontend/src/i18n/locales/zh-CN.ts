@@ -125,19 +125,19 @@ export default {
     "historyNoOverrides": "无管理员修改",
   },
   automation: {
+    conversationNotice: "此会话由自动化任务运行，不能手动发送消息。请在上方处理待审批事项。",
     title: '自动化',
-    description: '让智能体按计划以你的身份执行任务，结果和待审批事项会通知你。',
+    description: '让 WeKnora 助手按计划以你的身份执行任务，结果和待审批事项会通知你。',
     add: '新建自动化',
     addHint: '也可以直接让 WeKnora 助手帮你创建',
     paused: '已暂停',
+    scheduleEnded: '已结束',
+    scheduleEndedHint: '一次性计划已结束。可立即运行，或修改运行时间后恢复。',
     nextRunAt: '下次 {time}',
-    notScheduled: '未排程',
-    agentUnavailable: '智能体不可用',
-    deleteTitle: '删除自动化',
+    runConfirm: '立即运行「{name}」？这将启动一次额外运行，不影响原有计划。',
     deleteBody: '将停止进行中的运行，并删除「{name}」的运行记录、对话和长期授权。此操作无法撤销。',
     fields: {
       name: '名称',
-      agent: '执行智能体',
       instruction: '任务',
       schedule: '运行时间',
       timezone: '时区',
@@ -153,14 +153,16 @@ export default {
       enabled: '启用',
     },
     editor: {
+      model: "运行模型",
+      modelHelp: '默认沿用助手的模型设置，也可以单独指定。委派的智能体使用各自的模型。修改后用于后续运行。',
+      modelDefault: '跟随助手默认模型',
       createTitle: '新建自动化',
       editTitle: '编辑自动化',
       namePlaceholder: '例如：每日知识库周报',
       instructionPlaceholder: '写清楚要做什么、用哪些资料、结果如何输出',
       variablesHint: '可用变量：',
-      unattendedHint: '运行时无人在场，智能体不能向你提问；需要审批的操作会暂停并通知你。',
+      unattendedHint: '运行时无人在场，助手不能向你提问；需要审批的操作会暂停并通知你。',
       nameDesc: '在列表和通知里显示，方便你认出这项任务',
-      agentDesc: '由哪个智能体执行任务，它的知识库、工具和技能都可用',
       frequency: '重复频率',
       weekdays: '星期',
       dayOfMonthDesc: '当月没有这一天时，在最后一天运行',
@@ -179,7 +181,7 @@ export default {
       sections: {
         basic: {
           title: '基本信息',
-          desc: '给任务起个名字，选择执行的智能体，并写下要做的事。',
+          desc: '任务由 WeKnora 助手执行。需要其他智能体时，请在任务中写明委派对象和工作。',
         },
         schedule: {
           title: '运行时间',
@@ -196,7 +198,7 @@ export default {
       },
       sessionModeDesc: {
         per_run: '每次运行开一个新对话，互不影响',
-        persistent: '所有运行都在同一个对话里，智能体能看到之前的内容',
+        persistent: '所有运行都在同一个对话里，助手能看到之前的内容',
       },
       errors: {
         name: '请填写名称',
@@ -280,8 +282,6 @@ export default {
       stop: '停止',
     },
     detail: {
-      overview: '概览',
-      lastRun: '上次运行',
       pausedBecause: '已暂停：{reason}',
       runs: '运行记录',
       noRuns: '还没有运行过',
@@ -314,6 +314,20 @@ export default {
     },
   },
   notifications: {
+    pending: "待处理",
+    history: "通知记录",
+    clearRead: "清理已读",
+    clearReadConfirm: "清理已读通知？不会删除运行记录、对话或待处理事项。",
+    handle: "去处理",
+    review: "去审批",
+    unreadCount: "{count} 条未读",
+    unread: "未读",
+    newItems: "有新通知，点击刷新",
+    loadError: "通知加载失败",
+    awaitingApproval: "等待你确认操作",
+    awaitingAuthorization: "等待你完成授权",
+    awaitingReply: "等待你回复",
+
     title: '通知',
     markAllRead: '全部已读',
     pendingInvitations: '{count} 个待处理邀请',
@@ -1340,6 +1354,8 @@ export default {
       confluenceEditionCloud: 'Cloud',
       confluenceBaseUrl: 'Confluence 地址',
       confluenceUsername: '用户名或邮箱',
+      confluencePat: 'Server/DC 个人访问令牌（PAT）',
+      confluencePatHint: '选填。填写后使用 Bearer 认证，无需用户名和密码。',
       confluencePassword: 'Server/DC 密码',
       confluenceApiToken: 'Cloud API 令牌',
       clientId: 'Client ID',
@@ -2009,6 +2025,11 @@ export default {
       notFound: '未找到内容',
       loadFailed: '加载失败',
       noKbForWiki: '无法识别关联的知识库，无法打开 Wiki'
+    },
+    entityLink: {
+      kb: '知识库',
+      doc: '文档',
+      chunk: '片段'
     },
     tools: {
       searchKnowledge: '知识库检索',
@@ -4815,6 +4836,12 @@ export default {
     noKnowledgeBases: '没有可用的知识库',
     enterDescription: '输入描述',
     rawOutputLabel: '原始输出',
+    backgroundWork: {
+      running: '没有后台任务 | {count} 个后台任务 | {count} 个后台任务',
+      stop: '停止',
+      loading: '正在加载输出…',
+      unavailable: '暂时无法查看输出',
+    },
     wikiWritePageTitle: 'Wiki 页面写入',
     wikiReplaceTextTitle: 'Wiki 文本替换',
     wikiRenamePageTitle: 'Wiki 页面重命名',
@@ -4883,14 +4910,14 @@ export default {
         imagePipelineSectionLabel: '图片解析方案',
         imagePipelineSectionDescription: '多模态解析开启后，可以根据需要选择图片的解析方案',
         imagePipelineLabel: '选择解析方案',
+        advancedSettingsLabel: '高级设置',
+        notesLabel: '附加说明',
         imagePipelinePlaceholder: '请选择解析方案',
         imagePipelineLoading: '正在读取流水线…',
         imagePipelineLoadError: '读取流水线失败',
-          imagePipelineValidateError: '无法校验当前设置，保存时后端会再次检查。',
+        imagePipelineValidateError: '无法校验当前设置，保存时后端会再次检查。',
         imageAttrsOcrConditions: '根据观察到的属性条件触发 OCR',
         imageAttrsOcrConditionsDesc: '当观察到的属性满足以下条件时，对图片进行 OCR',
-        imageAttrsOcrOnUnobserved: '图片属性观察失败时仍执行 OCR',
-        imageAttrsOcrOnUnobservedDesc: '当模型未能正确观察到图片属性时，默认仍执行 OCR 兜底，以免漏掉正文文字；关闭则跳过。（采用 4B 等小参数视觉模型，或自定义的图片解析提示词与系统提示词冲突时，可能造成观察失败；8B 及以上模型的失败概率很低，不建议关闭）',
         imagePipelineKbNote: '默认跟随知识库设置，可针对本次任务调整'
       },
       tableMetadataInstructions: {
@@ -6977,6 +7004,23 @@ export default {
       skillRolloutNextTurn: '已有会话在下一轮提问时重建沙箱',
       skillRolloutNewSession: '已有会话保持原沙箱，仅新会话使用新镜像',
       skillRolloutSaveFailed: '保存生效方式失败',
+      allocationMode: '沙箱分配方式',
+      allocationModeHint: '只影响还没有用过沙箱的会话；已有会话保持原来的分配，不会搬迁文件。',
+      allocationModeSession: '每个会话一台沙箱（默认）',
+      allocationModeUser: '同一用户的会话共用一台沙箱',
+      allocationModeUnavailable: '当前部署未开启共用沙箱（需在所有实例设置 WEKNORA_SANDBOX_USER_ALLOCATION=enabled，并配置 Redis）。',
+      userSandboxRetentionDays: '空置沙箱保留天数',
+      userSandboxRetentionHint: '某台共用沙箱上的会话全部删除后，空置满这个天数会被自动删除（1–90 天）。这不是文件最少保留时间：Docker 空闲回收或服务商故障可能更早删除。',
+      userSandboxesInInventory: '其中 {count} 台是用户共用沙箱，影响该用户在此配置下的全部会话。',
+      userSandboxesTitle: '用户共用沙箱',
+      userSandboxOwner: '用户',
+      userSandboxOwnerOtherWorkspace: '其他空间的用户',
+      userSandboxLiveSessions: '会话数',
+      userSandboxEmptySince: '空置起点',
+      userSandboxReclaimAfter: '预计回收',
+      userSandboxRelease: '释放',
+      userSandboxReleaseConfirm: '释放后，该用户在此配置下全部会话的文件和已安装的包都会丢失，下次使用时会新建沙箱。确定释放？',
+      userSandboxBusy: '这台沙箱上还有终端、桌面或命令在运行，请稍后再试。',
       skillInstallGroup: '安装新技能',
       skillInstalledGroup: '已安装',
       skillUploadClick: '点击上传 zip 压缩包',
@@ -8672,6 +8716,25 @@ export default {
         'true': { label: '是', description: '是 —— 图表、曲线或示意图' },
         'false': { label: '否', description: '否 —— 照片、插画、图标或装饰图' }
       }
+    },
+    layout_margin: {
+      label: '版面留白',
+      description:
+        '文字内容之外的部分（桌面、背景、空白）占整张画面的比例。留白大意味着可以在 OCR 之前把页面裁得更紧。',
+      values: {
+        'none': { label: '无留白', description: '文字几乎铺满画面' },
+        'small': { label: '少量留白', description: '边缘只有一条窄边' },
+        'large': { label: '大片留白', description: '有大片非文字区域 —— 桌面、房间，或拍进来的周边环境' }
+      }
+    },
+    layout_upright: {
+      label: '文字朝向',
+      description:
+        '图中文字是否正立。歪斜或倒置的页面，值得在 OCR 之前摆正。',
+      values: {
+        'true': { label: '正立', description: '文字方向正常' },
+        'false': { label: '非正立', description: '文字被旋转、倾斜拍摄或倒置' }
+      }
     }
   },
   // 流水线选择面板的覆盖文案：按流水线 id 与字段 key 索引（后端注册表给出
@@ -8683,43 +8746,70 @@ export default {
     },
     default: {
       name: '传统',
+      note_actions: {
+        label: '两项动作互相独立',
+        description:
+          '两项各自开关：关掉识别，图片仍会被描述；关掉描述，文字仍会被识别。只有两个都关掉时这张图才不会被处理 —— 所以面板不允许这种组合。',
+      },
       description: '用户根据任务需要手动选择解析动作开关。',
-      enable_caption: {
+      caption_enabled: {
         label: '图片描述',
         description: '让模型为每张图片生成一句内容描述，作为图片的说明文字。'
       },
-      enable_ocr: {
+      ocr_enabled: {
         label: '文字识别',
         description: '提取图片中出现的文字。'
       },
       caption: {
-        thinking: {
+        thinking_enabled: {
           label: '图片描述时开启思考',
           description: '让模型在写描述前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '文字识别时开启思考',
           description: '让模型在提取文字前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。',
         },
       }
     },
     smartocr: {
+      ocr_on_unobserved: {
+        label: '图片属性观察失败时仍执行 OCR',
+        description:
+          '当模型未能正确观察到图片属性时，默认仍执行 OCR 兜底，以免漏掉正文文字；关闭则跳过。（采用 4B 等小参数视觉模型，或自定义的图片解析提示词与系统提示词冲突时，可能造成观察失败；8B 及以上模型的失败概率很低，不建议关闭）',
+      },
       name: '智能模式',
-      caption: {
-        thinking: {
+      note_flow: {
+        label: '由观察结果决定',
+        description:
+          '先描述图片并观察属性，由属性决定是否值得再为它花一次 OCR。属性显示页面需要摆正时，会先摆正并裁掉周围环境再识别；若该步骤不可用或判定不适用，则直接用原图，绝不会比不启用更差。',
+      },
+      preprocess: {
+        mode: {
+          label: '文档预处理',
+          description:
+            '默认关闭。开启后，会在 OCR 前摆正并裁剪页面，增加处理耗时。自动：按观察结果判断；总是：对进入 OCR 的图片都尝试预处理；繁忙或超限时使用原图。',
+          options: {
+            auto: '自动',
+            off: '关闭',
+            always: '总是',
+          },
+        },
+      },
+      observation: {
+        thinking_enabled: {
           label: '描述时开启思考',
           description: '让模型在描述图片并观察属性前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '文字识别时开启思考',
           description: '让模型在提取文字前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。',
         },
       },
-      description: '先观察图片特征并进行图片描述，再根据图片特征决定是否调用OCR对图片进行识别，以节省模型调用次数并提升解析速度。'
+      description: '先观察图片特征并进行图片描述，再根据图片特征决定是否调用OCR对图片进行识别，以节省模型调用次数并提升解析速度。当识别到图片为可校正的文档或标签页照片时，会在识别前自动摆正并裁剪页面，以提升 OCR 准确率；若校正失败则直接使用原图。'
     }
   }
 }

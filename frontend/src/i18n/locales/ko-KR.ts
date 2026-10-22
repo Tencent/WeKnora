@@ -125,19 +125,19 @@ export default {
     "historyNoOverrides": "관리자 변경 없음",
   },
   automation: {
+    conversationNotice: "자동화 작업이 실행하는 대화입니다. 메시지를 직접 보낼 수 없습니다. 대기 중인 요청은 위에서 처리하세요.",
     title: '자동화',
-    description: '에이전트가 일정에 따라 사용자 본인으로 작업을 실행합니다. 결과와 승인 대기 항목은 알림으로 받습니다.',
+    description: 'WeKnora 도우미가 예약된 시간에 사용자를 대신해 작업을 실행합니다. 결과와 승인 대기 항목을 알려드립니다.',
     add: '새 자동화',
     addHint: 'WeKnora 어시스턴트에게 만들어 달라고 할 수도 있습니다',
     paused: '일시 중지됨',
+    scheduleEnded: '종료됨',
+    scheduleEndedHint: '일회성 일정이 종료되었습니다. 지금 실행하거나 실행 시간을 변경한 후 재개하세요.',
     nextRunAt: '다음 {time}',
-    notScheduled: '예약 없음',
-    agentUnavailable: '에이전트를 사용할 수 없음',
-    deleteTitle: '자동화 삭제',
+    runConfirm: '"{name}"을(를) 지금 실행할까요? 기존 일정을 변경하지 않고 추가로 실행합니다.',
     deleteBody: '진행 중인 실행을 중지하고 "{name}"의 실행 기록, 대화, 상시 승인을 삭제합니다. 되돌릴 수 없습니다.',
     fields: {
       name: '이름',
-      agent: '실행 에이전트',
       instruction: '작업',
       schedule: '일정',
       timezone: '시간대',
@@ -153,14 +153,16 @@ export default {
       enabled: '사용',
     },
     editor: {
+      model: "실행 모델",
+      modelHelp: '도우미의 기본 모델을 사용하거나 이 작업에 사용할 모델을 선택하세요. 위임받은 에이전트는 각자의 모델을 사용합니다. 변경 사항은 이후 실행에 적용됩니다.',
+      modelDefault: '도우미 기본 모델 사용',
       createTitle: '새 자동화',
       editTitle: '자동화 편집',
       namePlaceholder: '예: 매일 지식 베이스 요약',
       instructionPlaceholder: '무엇을 할지, 어떤 자료를 쓸지, 결과를 어떻게 낼지 적어 주세요',
       variablesHint: '사용 가능한 변수:',
-      unattendedHint: '실행 중에는 아무도 보고 있지 않으므로 에이전트가 질문할 수 없습니다. 승인이 필요한 작업은 일시 중지되고 알림이 갑니다.',
+      unattendedHint: '실행 중에는 사용자가 없으므로 도우미가 질문할 수 없습니다. 승인이 필요한 작업은 일시 중지되고 알림이 전송됩니다.',
       nameDesc: '목록과 알림에 표시되어 작업을 구분하는 데 쓰입니다',
-      agentDesc: '작업을 실행할 에이전트. 해당 지식베이스, 도구, 스킬을 사용할 수 있습니다',
       frequency: '반복',
       weekdays: '요일',
       dayOfMonthDesc: '해당 날짜가 없는 달에는 마지막 날에 실행합니다',
@@ -179,7 +181,7 @@ export default {
       sections: {
         basic: {
           title: '기본 정보',
-          desc: '작업 이름을 정하고, 실행할 에이전트를 고른 뒤 할 일을 적습니다.',
+          desc: 'WeKnora 도우미가 작업을 실행합니다. 다른 에이전트에 위임하려면 작업에 에이전트와 맡길 일을 명시하세요.',
         },
         schedule: {
           title: '실행 시간',
@@ -196,7 +198,7 @@ export default {
       },
       sessionModeDesc: {
         per_run: '실행마다 새 대화를 엽니다',
-        persistent: '모든 실행이 같은 대화에서 진행되어 이전 내용을 볼 수 있습니다',
+        persistent: '모든 실행이 하나의 대화를 공유하므로 도우미가 이전 내용을 볼 수 있습니다',
       },
       errors: {
         name: '이름을 입력하세요',
@@ -280,8 +282,6 @@ export default {
       stop: '중지',
     },
     detail: {
-      overview: '개요',
-      lastRun: '마지막 실행',
       pausedBecause: '일시 중지됨: {reason}',
       runs: '실행 기록',
       noRuns: '아직 실행되지 않았습니다',
@@ -314,6 +314,20 @@ export default {
     },
   },
   notifications: {
+    pending: "처리 필요",
+    history: "알림 기록",
+    clearRead: "읽은 알림 삭제",
+    clearReadConfirm: "읽은 알림을 삭제할까요? 실행 기록, 대화 및 처리 대기 항목은 유지됩니다.",
+    handle: "열기",
+    review: "승인 검토",
+    unreadCount: "읽지 않음 {count}개",
+    unread: "읽지 않음",
+    newItems: "새 알림이 있습니다. 새로고침",
+    loadError: "알림을 불러오지 못했습니다",
+    awaitingApproval: "작업 승인 대기 중",
+    awaitingAuthorization: "인증 완료 대기 중",
+    awaitingReply: "답변 대기 중",
+
     title: '알림',
     markAllRead: '모두 읽음',
     pendingInvitations: '대기 중인 초대 {count}개',
@@ -1338,6 +1352,8 @@ export default {
       confluenceEditionCloud: 'Cloud',
       confluenceBaseUrl: 'Confluence URL',
       confluenceUsername: '사용자 이름 또는 이메일',
+      confluencePat: 'Server/DC 개인 액세스 토큰(PAT)',
+      confluencePatHint: '선택 사항입니다. 입력하면 Bearer 인증을 사용하며 사용자 이름과 비밀번호가 필요하지 않습니다.',
       confluencePassword: 'Server/DC 비밀번호',
       confluenceApiToken: 'Cloud API 토큰',
       clientId: 'Client ID',
@@ -2007,6 +2023,11 @@ export default {
       notFound: '콘텐츠를 찾을 수 없습니다',
       loadFailed: '로드 실패',
       noKbForWiki: '연결된 지식베이스를 식별할 수 없어 Wiki를 열 수 없습니다'
+    },
+    entityLink: {
+      kb: '지식베이스',
+      doc: '문서',
+      chunk: '청크'
     },
     tools: {
       searchKnowledge: '지식베이스 검색',
@@ -4813,6 +4834,12 @@ export default {
     noKnowledgeBases: '사용 가능한 지식베이스 없음',
     enterDescription: '설명 입력',
     rawOutputLabel: '원시 출력',
+    backgroundWork: {
+      running: '백그라운드 작업 없음 | 백그라운드 작업 {count}개 | 백그라운드 작업 {count}개',
+      stop: '중지',
+      loading: '출력을 불러오는 중…',
+      unavailable: '출력을 볼 수 없습니다',
+    },
     wikiWritePageTitle: 'Wiki 페이지 작성',
     wikiReplaceTextTitle: 'Wiki 텍스트 교체',
     wikiRenamePageTitle: 'Wiki 페이지 이름 변경',
@@ -4882,14 +4909,14 @@ export default {
         imagePipelineSectionDescription:
           '멀티모달 분석이 켜져 있으면 이미지의 분석 방식을 필요에 따라 선택할 수 있습니다.',
         imagePipelineLabel: '분석 방식',
+        advancedSettingsLabel: '고급 설정',
+        notesLabel: '추가 설명',
         imagePipelinePlaceholder: '분석 방식 선택',
         imagePipelineLoading: '파이프라인을 불러오는 중…',
         imagePipelineLoadError: '파이프라인을 불러오지 못했습니다',
-          imagePipelineValidateError: '현재 설정을 검증할 수 없습니다. 저장 시 백엔드가 다시 검사합니다.',
+        imagePipelineValidateError: '현재 설정을 검증할 수 없습니다. 저장 시 백엔드가 다시 검사합니다.',
         imageAttrsOcrConditions: '관찰된 속성 조건에 따라 OCR 실행',
         imageAttrsOcrConditionsDesc: '관찰된 속성이 아래 조건을 충족하면 해당 이미지에 OCR을 실행합니다',
-        imageAttrsOcrOnUnobserved: '이미지 속성 관찰에 실패해도 OCR 실행',
-        imageAttrsOcrOnUnobservedDesc: '모델이 이미지 속성을 올바르게 관찰하지 못하면 본문 텍스트 손실을 막기 위해 기본적으로 OCR을 실행합니다. 끄면 건너뜁니다. (4B 등 소형 비전 모델을 쓰거나, 사용자 지정 이미지 지시문이 시스템 프롬프트와 충돌할 때 관찰에 실패할 수 있습니다. 8B 이상은 실패 가능성이 낮아 끄지 않는 것을 권장합니다)',
         imagePipelineKbNote: '기본값은 지식베이스 설정을 따르며 이번 작업에 맞게 조정할 수 있습니다'
       },
       tableMetadataInstructions: {
@@ -6976,6 +7003,23 @@ export default {
       skillRolloutNextTurn: '이미 열린 세션은 다음 대화 턴에서 샌드박스를 다시 만듭니다',
       skillRolloutNewSession: '이미 열린 세션은 기존 샌드박스를 유지하고, 새 세션만 새 이미지를 사용합니다',
       skillRolloutSaveFailed: '적용 방식 저장에 실패했습니다',
+      allocationMode: 'Sandbox allocation',
+      allocationModeHint: 'Only affects sessions that have not used a sandbox yet; existing sessions keep their placement and files are never moved.',
+      allocationModeSession: 'One sandbox per session (default)',
+      allocationModeUser: "Share one sandbox across a user's sessions",
+      allocationModeUnavailable: 'Shared sandboxes are not enabled on this deployment (set WEKNORA_SANDBOX_USER_ALLOCATION=enabled on every replica; Redis is required).',
+      userSandboxRetentionDays: 'Keep an empty shared sandbox for (days)',
+      userSandboxRetentionHint: 'After every session on a shared sandbox is deleted, it is removed once it has been empty this long (1–90 days). This is not a minimum file retention: Docker idle cleanup or provider failures may remove it sooner.',
+      userSandboxesInInventory: "{count} of them are shared user sandboxes; each affects all of that user's sessions on this config.",
+      userSandboxesTitle: 'Shared user sandboxes',
+      userSandboxOwner: 'Owner',
+      userSandboxOwnerOtherWorkspace: 'A user from another workspace',
+      userSandboxLiveSessions: 'Sessions',
+      userSandboxEmptySince: 'Empty since',
+      userSandboxReclaimAfter: 'Reclaimed after',
+      userSandboxRelease: 'Release',
+      userSandboxReleaseConfirm: "Releasing deletes the files and installed packages of all of this user's sessions on this config; a new sandbox is created on next use. Release it?",
+      userSandboxBusy: 'A terminal, desktop or command is still running on this sandbox. Try again later.',
       skillInstallGroup: '새 스킬 설치',
       skillInstalledGroup: '설치됨',
       skillUploadClick: 'zip 파일을 클릭해 업로드',
@@ -8671,6 +8715,25 @@ export default {
         'true': { label: '예', description: '예 —— 차트, 그래프, 도표' },
         'false': { label: '아니오', description: '아니오 —— 사진, 삽화, 아이콘, 장식' }
       }
+    },
+    layout_margin: {
+      label: '여백',
+      description:
+        '내용 바깥(책상, 배경, 여백)이 화면 전체에서 차지하는 비율. 여백이 크면 OCR 전에 페이지를 더 타이트하게 잘라낼 수 있습니다.',
+      values: {
+        'none': { label: '없음', description: '글자가 화면을 거의 채움' },
+        'small': { label: '적음', description: '가장자리에 얇은 띠' },
+        'large': { label: '많음', description: '비텍스트 영역이 넓음 — 책상, 방, 거의 빈 페이지' }
+      }
+    },
+    layout_upright: {
+      label: '글자 방향',
+      description:
+        '이미지 속 글자가 똑바로 서 있는지. 기울거나 뒤집힌 페이지는 OCR 전에 바르게 펴는 것이 좋습니다.',
+      values: {
+        'true': { label: '정립', description: '글자가 정상 방향' },
+        'false': { label: '비정립', description: '회전·기울임 촬영·뒤집힘' }
+      }
     }
   },
   // 파이프라인 패널의 오버레이 문구: 파이프라인 id와 필드 key로 색인합니다
@@ -8683,44 +8746,71 @@ export default {
     },
     default: {
       name: '수동',
+      note_actions: {
+        label: '두 동작은 서로 독립적입니다',
+        description:
+          '각각 따로 켜고 끌 수 있습니다. 인식을 끄면 이미지는 여전히 설명되고, 설명을 끄면 글자는 여전히 추출됩니다. 둘 다 끄면 이미지가 아무것도 처리되지 않으므로 패널은 그 조합을 허용하지 않습니다.',
+      },
       description: '작업에 맞게 분석 동작 스위치를 직접 켜거나 끕니다.',
-      enable_caption: {
+      caption_enabled: {
         label: '이미지 설명',
         description: '각 이미지에 대한 한 줄 설명을 생성해 캡션으로 저장합니다.'
       },
-      enable_ocr: {
+      ocr_enabled: {
         label: '문자 인식',
         description: '이미지 속에 나타나는 텍스트를 추출합니다.'
       },
       caption: {
-        thinking: {
+        thinking_enabled: {
           label: '설명 시 사고 사용',
           description: '설명을 쓰기 전에 모델이 먼저 추론하도록 합니다. 일반적으로 사고는 필요하지 않습니다. 켜면 분석이 느려질 뿐 아니라 사고가 너무 길어져 본문이 잘려서 작업이 실패할 수 있습니다. 꼭 필요하다고 판단될 때만 켜세요.',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: 'OCR 시 사고 사용',
           description: '텍스트를 추출하기 전에 모델이 먼저 추론하도록 합니다. 일반적으로 사고는 필요하지 않습니다. 켜면 분석이 느려질 뿐 아니라 사고가 너무 길어져 본문이 잘려서 작업이 실패할 수 있습니다. 꼭 필요하다고 판단될 때만 켜세요.',
         },
       }
     },
     smartocr: {
+      ocr_on_unobserved: {
+        label: '이미지 속성 관찰에 실패해도 OCR 실행',
+        description:
+          '모델이 이미지 속성을 올바르게 관찰하지 못하면 본문 텍스트 손실을 막기 위해 기본적으로 OCR을 실행합니다. 끄면 건너뜁니다. (4B 등 소형 비전 모델을 쓰거나, 사용자 지정 이미지 지시문이 시스템 프롬프트와 충돌할 때 관찰에 실패할 수 있습니다. 8B 이상은 실패 가능성이 낮아 끄지 않는 것을 권장합니다)',
+      },
       name: '스마트',
-      caption: {
-        thinking: {
+      note_flow: {
+        label: '관찰 결과가 결정합니다',
+        description:
+          '먼저 이미지를 설명하고 속성을 관찰한 뒤, 돌아온 속성이 OCR을 한 번 더 할 가치가 있는지 결정합니다. 페이지를 반듯하게 펴야 한다고 속성이 알리면 먼저 펴고 주변을 잘라낸 뒤 읽습니다. 그 단계를 쓸 수 없으면 원본 사진을 그대로 읽으며, 더 나빠지지 않습니다.',
+      },
+      preprocess: {
+        mode: {
+          label: '문서 전처리',
+          description:
+            '기본값은 끄기입니다. 켜면 OCR 전에 페이지를 보정하고 잘라내므로 처리 시간이 늘어납니다. 자동: 관찰 결과로 판단 / 항상: OCR 대상으로 선택된 이미지를 매번 전처리합니다. 처리 중이거나 제한을 초과하면 원본 이미지를 사용합니다.',
+          options: {
+            auto: '자동',
+            off: '끄기',
+            always: '항상',
+          },
+        },
+      },
+      observation: {
+        thinking_enabled: {
           label: '설명 시 사고 사용',
           description: '이미지를 설명하고 속성을 보고하기 전에 모델이 먼저 추론하도록 합니다. 일반적으로 사고는 필요하지 않습니다. 켜면 분석이 느려질 뿐 아니라 사고가 너무 길어져 본문이 잘려서 작업이 실패할 수 있습니다. 꼭 필요하다고 판단될 때만 켜세요.',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '문자 인식 시 사고 사용',
           description: '텍스트를 추출하기 전에 모델이 먼저 추론하도록 합니다. 일반적으로 사고는 필요하지 않습니다. 켜면 분석이 느려질 뿐 아니라 사고가 너무 길어져 본문이 잘려서 작업이 실패할 수 있습니다. 꼭 필요하다고 판단될 때만 켜세요.',
         },
       },
       description:
-        '먼저 이미지 특징을 관찰하여 설명을 생성하고, 그 특징을 바탕으로 OCR 실행 여부를 결정합니다. 모델 호출을 절약하고 분석 속도를 높입니다.'
+        '먼저 이미지 특징을 관찰하여 설명을 생성하고, 그 특징을 바탕으로 OCR 실행 여부를 결정합니다. 모델 호출을 절약하고 분석 속도를 높입니다 이미지가 보정 가능한 문서나 라벨 사진으로 인식되면 인식 전에 페이지를 자동으로 정렬하고 잘라내어 OCR 정확도를 높입니다. 보정에 실패하면 원본 이미지를 사용합니다.'
     }
   }
 }

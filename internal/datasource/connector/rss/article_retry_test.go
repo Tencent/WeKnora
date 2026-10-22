@@ -2,6 +2,7 @@ package rss
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -130,5 +131,48 @@ func TestIncrementalCachesEntryWithoutArticleLink(t *testing.T) {
 	items, _ = f.sync(t, cursor)
 	require.Empty(t, items)
 	require.Zero(t, f.articleReads.Load())
+	require.EqualValues(t, 1, f.healthyReads.Load())
+}
+
+func TestIncrementalPreservesFullTextDuringRefreshFailure(t *testing.T) {
+	f := newArticleRetryFeed(t)
+	f.status.Store(http.StatusOK)
+	items, cursor := f.sync(t, nil)
+	require.Len(t, items, 2)
+	require.Contains(t, string(items[0].Content), "reasonably long article")
+
+	decode := func(cursor *types.SyncCursor) rssCursor {
+		t.Helper()
+		data, err := json.Marshal(cursor.ConnectorCursor)
+		require.NoError(t, err)
+		var state rssCursor
+		require.NoError(t, json.Unmarshal(data, &state))
+		return state
+	}
+	original := decode(cursor)
+	feedURL := f.server.URL + "/feed.xml"
+	require.NotEmpty(t, original.FeedSignals[feedURL]["retry"])
+
+	f.summary = "Changed summary while the article is unavailable"
+	f.status.Store(http.StatusServiceUnavailable)
+	for attempt := 0; attempt < 2; attempt++ {
+		items, cursor = f.sync(t, cursor)
+		require.Empty(t, items, "a transient failure must not replace the full text with the summary")
+		state := decode(cursor)
+		require.Equal(t, original.FeedItems, state.FeedItems, "preserve the stored full-text fingerprint")
+		require.Equal(t, original.FeedSignals, state.FeedSignals, "keep the previous signal for repeated retries")
+		require.EqualValues(t, attempt+2, f.articleReads.Load())
+		require.EqualValues(t, 1, f.healthyReads.Load(), "successful sibling should stay cached")
+	}
+
+	f.status.Store(http.StatusOK)
+	items, cursor = f.sync(t, cursor)
+	require.Empty(t, items, "the recovered full text is unchanged and must not be ingested again")
+	require.Equal(t, original.FeedItems, decode(cursor).FeedItems)
+	require.NotEqual(t, original.FeedSignals[feedURL]["retry"], decode(cursor).FeedSignals[feedURL]["retry"])
+	require.EqualValues(t, 4, f.articleReads.Load())
+	items, _ = f.sync(t, cursor)
+	require.Empty(t, items)
+	require.EqualValues(t, 4, f.articleReads.Load(), "recovery should cache the changed feed signal")
 	require.EqualValues(t, 1, f.healthyReads.Load())
 }

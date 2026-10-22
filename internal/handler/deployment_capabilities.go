@@ -25,6 +25,7 @@ var DeploymentCapabilityKeys = []string{
 	"settings.sandbox.docker",
 	"settings.sandbox.host",
 	"settings.sandbox.remote",
+	"settings.sandbox.user_allocation",
 }
 
 // DeploymentCapability describes whether a deployment exposes a feature route.
@@ -41,20 +42,21 @@ type DeploymentCapabilitiesData struct {
 
 // DeploymentFeatureAvailability mirrors injected backend handlers/services.
 type DeploymentFeatureAvailability struct {
-	Organizations bool
-	Agents        bool
-	IM            bool
-	Embed         bool
-	API           bool
-	MCPServer     bool
-	MCP           bool
-	WebSearch     bool
-	VectorStore   bool
-	Storage       bool
-	Sandbox       bool
-	SandboxDocker bool
-	SandboxHost   bool
-	SandboxRemote bool
+	Organizations         bool
+	Agents                bool
+	IM                    bool
+	Embed                 bool
+	API                   bool
+	MCPServer             bool
+	MCP                   bool
+	WebSearch             bool
+	VectorStore           bool
+	Storage               bool
+	Sandbox               bool
+	SandboxDocker         bool
+	SandboxHost           bool
+	SandboxRemote         bool
+	SandboxUserAllocation bool
 }
 
 func supportedDeploymentCapability(supported bool) DeploymentCapability {
@@ -101,23 +103,34 @@ func BuildDeploymentCapabilities(
 		sandboxRemote.Reason = "route_not_registered"
 	}
 
+	sandboxUserAllocation := DeploymentCapability{
+		Supported: sandboxRemote.Supported && available.SandboxUserAllocation,
+	}
+	if !sandboxUserAllocation.Supported {
+		sandboxUserAllocation.Reason = "deployment_gate_off"
+		if !sandboxRemote.Supported {
+			sandboxUserAllocation.Reason = sandboxRemote.Reason
+		}
+	}
+
 	return DeploymentCapabilitiesData{
 		Edition: edition,
 		Capabilities: map[string]DeploymentCapability{
-			"organizations":           organizations,
-			"agents":                  supportedDeploymentCapability(available.Agents),
-			"integrations.im":         supportedDeploymentCapability(available.IM),
-			"integrations.embed":      supportedDeploymentCapability(available.Embed),
-			"integrations.api":        supportedDeploymentCapability(available.API),
-			"integrations.mcpserver":  supportedDeploymentCapability(available.MCPServer),
-			"settings.mcp":            supportedDeploymentCapability(available.MCP),
-			"settings.websearch":      supportedDeploymentCapability(available.WebSearch),
-			"settings.vectorstore":    supportedDeploymentCapability(available.VectorStore),
-			"settings.storage":        supportedDeploymentCapability(available.Storage),
-			"settings.sandbox":        supportedDeploymentCapability(available.Sandbox),
-			"settings.sandbox.docker": sandboxDocker,
-			"settings.sandbox.host":   sandboxHost,
-			"settings.sandbox.remote": sandboxRemote,
+			"organizations":                    organizations,
+			"agents":                           supportedDeploymentCapability(available.Agents),
+			"integrations.im":                  supportedDeploymentCapability(available.IM),
+			"integrations.embed":               supportedDeploymentCapability(available.Embed),
+			"integrations.api":                 supportedDeploymentCapability(available.API),
+			"integrations.mcpserver":           supportedDeploymentCapability(available.MCPServer),
+			"settings.mcp":                     supportedDeploymentCapability(available.MCP),
+			"settings.websearch":               supportedDeploymentCapability(available.WebSearch),
+			"settings.vectorstore":             supportedDeploymentCapability(available.VectorStore),
+			"settings.storage":                 supportedDeploymentCapability(available.Storage),
+			"settings.sandbox":                 supportedDeploymentCapability(available.Sandbox),
+			"settings.sandbox.docker":          sandboxDocker,
+			"settings.sandbox.host":            sandboxHost,
+			"settings.sandbox.remote":          sandboxRemote,
+			"settings.sandbox.user_allocation": sandboxUserAllocation,
 		},
 	}
 }

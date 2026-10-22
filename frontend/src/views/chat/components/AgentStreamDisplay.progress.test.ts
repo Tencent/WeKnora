@@ -75,7 +75,7 @@ test('live child waiting uses the timeline tail icon and existing pending shimme
   assert.match(tail, /class="tree-child tree-child-last streaming-loading-node"/)
   assert.match(tail, /role="status" aria-live="polite"/)
   assert.match(tail, /class="action-card action-pending"/)
-  assert.match(tail, /class="action-title-icon icon-mask"/)
+  assert.match(tail, /<ChatTimelineIcon class="action-title-icon" name="lightbulb"/)
   assert.match(tail, /class="action-name"/)
   assert.match(template, /!showAgentActivityIndicator && !childActivity && index === lastStreamingTimelineEventIndex/)
   assert.doesNotMatch(template, /agent-child-activity|child-wait-spinner|child_wait/)

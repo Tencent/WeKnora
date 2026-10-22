@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -1325,7 +1326,13 @@ func allFetchedItemsFailedError(result *types.SyncResult) error {
 		detail = result.Errors[0].Display()
 		const maxDetailLen = 500
 		if len(detail) > maxDetailLen {
-			detail = detail[:maxDetailLen] + "..."
+			// Back off to a rune boundary: a partial multi-byte rune is invalid
+			// UTF-8, which PostgreSQL rejects when the error is persisted.
+			cut := maxDetailLen
+			for cut > 0 && !utf8.RuneStart(detail[cut]) {
+				cut--
+			}
+			detail = detail[:cut] + "..."
 		}
 	}
 	if detail == "" {

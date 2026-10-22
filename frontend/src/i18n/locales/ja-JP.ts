@@ -125,19 +125,19 @@ export default {
     "historyNoOverrides": "管理者の変更なし",
   },
   automation: {
+    conversationNotice: "この会話は自動化タスクが実行します。手動でメッセージは送信できません。保留中のリクエストは上で対応してください。",
     title: 'オートメーション',
-    description: 'エージェントにスケジュールどおりあなたとしてタスクを実行させます。結果と承認待ちは通知されます。',
+    description: 'WeKnora アシスタントがあなたに代わって定期的にタスクを実行します。結果と承認待ちの操作を通知します。',
     add: '新規オートメーション',
     addHint: 'WeKnora アシスタントに作成を頼むこともできます',
     paused: '一時停止中',
+    scheduleEnded: '終了',
+    scheduleEndedHint: 'この一回限りのスケジュールは終了しました。今すぐ実行するか、実行日時を変更してから再開してください。',
     nextRunAt: '次回 {time}',
-    notScheduled: '予定なし',
-    agentUnavailable: 'エージェントを利用できません',
-    deleteTitle: 'オートメーションを削除',
+    runConfirm: '「{name}」を今すぐ実行しますか？スケジュールを変更せずに追加で実行します。',
     deleteBody: '実行中の処理を停止し、「{name}」の実行履歴・会話・継続承認を削除します。元に戻せません。',
     fields: {
       name: '名前',
-      agent: '実行エージェント',
       instruction: 'タスク',
       schedule: 'スケジュール',
       timezone: 'タイムゾーン',
@@ -153,14 +153,16 @@ export default {
       enabled: '有効',
     },
     editor: {
+      model: "実行モデル",
+      modelHelp: 'アシスタントの既定モデルを使うか、このタスク用に指定します。委任先のエージェントはそれぞれのモデルを使います。変更は次回以降の実行に適用されます。',
+      modelDefault: 'アシスタントの既定モデル',
       createTitle: '新規オートメーション',
       editTitle: 'オートメーションを編集',
       namePlaceholder: '例：毎日のナレッジベース要約',
       instructionPlaceholder: '何をするか、どの資料を使うか、結果をどう出すかを書いてください',
       variablesHint: '使える変数：',
-      unattendedHint: '実行中は誰も見ていないため、エージェントは質問できません。承認が必要な操作は一時停止して通知します。',
+      unattendedHint: '実行中は誰も見ていないため、アシスタントは質問できません。承認が必要な操作は一時停止して通知します。',
       nameDesc: '一覧と通知に表示され、タスクを見分けるのに使います',
-      agentDesc: 'タスクを実行するエージェント。そのナレッジベース、ツール、スキルを使えます',
       frequency: '繰り返し',
       weekdays: '曜日',
       dayOfMonthDesc: 'その日がない月は月末に実行します',
@@ -179,7 +181,7 @@ export default {
       sections: {
         basic: {
           title: '基本情報',
-          desc: 'タスクに名前を付け、実行するエージェントを選び、やることを書きます。',
+          desc: 'WeKnora アシスタントがタスクを実行します。他のエージェントに委任する場合は、タスクに委任先と作業内容を記載してください。',
         },
         schedule: {
           title: '実行スケジュール',
@@ -196,7 +198,7 @@ export default {
       },
       sessionModeDesc: {
         per_run: '実行ごとに新しい会話を開きます',
-        persistent: 'すべての実行が同じ会話で行われ、以前の内容を参照できます',
+        persistent: 'すべての実行で同じ会話を使い、アシスタントが過去の内容を参照できます',
       },
       errors: {
         name: '名前を入力してください',
@@ -280,8 +282,6 @@ export default {
       stop: '停止',
     },
     detail: {
-      overview: '概要',
-      lastRun: '前回の実行',
       pausedBecause: '一時停止中：{reason}',
       runs: '実行履歴',
       noRuns: 'まだ実行されていません',
@@ -314,6 +314,20 @@ export default {
     },
   },
   notifications: {
+    pending: "対応が必要",
+    history: "通知履歴",
+    clearRead: "既読を削除",
+    clearReadConfirm: "既読の通知を削除しますか？実行履歴、会話、未対応の項目は保持されます。",
+    handle: "対応する",
+    review: "承認を確認",
+    unreadCount: "未読 {count} 件",
+    unread: "未読",
+    newItems: "新しい通知があります。更新",
+    loadError: "通知を読み込めませんでした",
+    awaitingApproval: "操作の承認待ち",
+    awaitingAuthorization: "認可の完了待ち",
+    awaitingReply: "返信待ち",
+
     title: '通知',
     markAllRead: 'すべて既読',
     pendingInvitations: '保留中の招待 {count} 件',
@@ -1998,6 +2012,23 @@ export default {
       skillRolloutNextTurn: '開いているセッションは次のやり取りでサンドボックスを再構築する',
       skillRolloutNewSession: '開いているセッションは現在のサンドボックスのままにし、新しいセッションのみ新しいイメージを使用する',
       skillRolloutSaveFailed: '反映設定の保存に失敗しました',
+      allocationMode: 'Sandbox allocation',
+      allocationModeHint: 'Only affects sessions that have not used a sandbox yet; existing sessions keep their placement and files are never moved.',
+      allocationModeSession: 'One sandbox per session (default)',
+      allocationModeUser: "Share one sandbox across a user's sessions",
+      allocationModeUnavailable: 'Shared sandboxes are not enabled on this deployment (set WEKNORA_SANDBOX_USER_ALLOCATION=enabled on every replica; Redis is required).',
+      userSandboxRetentionDays: 'Keep an empty shared sandbox for (days)',
+      userSandboxRetentionHint: 'After every session on a shared sandbox is deleted, it is removed once it has been empty this long (1–90 days). This is not a minimum file retention: Docker idle cleanup or provider failures may remove it sooner.',
+      userSandboxesInInventory: "{count} of them are shared user sandboxes; each affects all of that user's sessions on this config.",
+      userSandboxesTitle: 'Shared user sandboxes',
+      userSandboxOwner: 'Owner',
+      userSandboxOwnerOtherWorkspace: 'A user from another workspace',
+      userSandboxLiveSessions: 'Sessions',
+      userSandboxEmptySince: 'Empty since',
+      userSandboxReclaimAfter: 'Reclaimed after',
+      userSandboxRelease: 'Release',
+      userSandboxReleaseConfirm: "Releasing deletes the files and installed packages of all of this user's sessions on this config; a new sandbox is created on next use. Release it?",
+      userSandboxBusy: 'A terminal, desktop or command is still running on this sandbox. Try again later.',
       skillInstallGroup: '新しいスキルをインストール',
       skillInstalledGroup: 'インストール済み',
       skillUploadClick: 'クリックしてzipバンドルをアップロード',
@@ -4261,14 +4292,14 @@ export default {
         imagePipelineSectionDescription:
           'マルチモーダル解析が有効な場合、画像の解析方式を選択できます。',
         imagePipelineLabel: '解析方式',
+        advancedSettingsLabel: '詳細設定',
+        notesLabel: '補足説明',
         imagePipelinePlaceholder: '解析方式を選択',
         imagePipelineLoading: 'パイプラインを読み込み中…',
         imagePipelineLoadError: 'パイプラインの読み込みに失敗しました',
-          imagePipelineValidateError: '現在の設定を検証できませんでした。保存時にバックエンドが再度检查します。',
+        imagePipelineValidateError: '現在の設定を検証できませんでした。保存時にバックエンドが再度チェックします。',
         imageAttrsOcrConditions: '観察した属性条件に基づいて OCR を実行',
         imageAttrsOcrConditionsDesc: '観察した属性が以下の条件を満たす場合、その画像に OCR を実行します',
-        imageAttrsOcrOnUnobserved: '画像属性の観察に失敗した場合も OCR を実行',
-        imageAttrsOcrOnUnobservedDesc: 'モデルが画像属性を正しく観察できなかった場合、本文テキストを逃さないようデフォルトで OCR を実行します。オフにするとスキップします。（4B など小規模な視覚モデルを使う場合や、カスタムの画像指示がシステムプロンプトと衝突する場合に観察が失敗することがあります。8B 以上は失敗の可能性が低く、オフは推奨しません）',
         imagePipelineKbNote: 'デフォルトはナレッジベースの設定に従い、今回のタスク向けに調整できます'
       }
     }
@@ -4461,6 +4492,12 @@ export default {
     noKnowledgeBases: '利用可能なナレッジベースがありません',
     enterDescription: '説明を入力',
     rawOutputLabel: '生の出力',
+    backgroundWork: {
+      running: 'バックグラウンドの作業はありません | バックグラウンドの作業 {count} 件 | バックグラウンドの作業 {count} 件',
+      stop: '停止',
+      loading: '出力を読み込んでいます…',
+      unavailable: '出力を表示できません',
+    },
     wikiWritePageTitle: 'Wikiページの書き込み',
     wikiReplaceTextTitle: 'Wikiテキストの置換',
     wikiRenamePageTitle: 'Wikiページの名前変更',
@@ -7123,6 +7160,11 @@ export default {
       loadFailed: '読み込みに失敗しました',
       noKbForWiki: '関連するナレッジベースを特定できないため、Wikiを開けません。'
     },
+    entityLink: {
+      kb: 'ナレッジベース',
+      doc: 'ドキュメント',
+      chunk: 'チャンク'
+    },
     toolSummary: {
       getDocument: 'ドキュメントを取得: {title}',
       document: 'ドキュメント',
@@ -7850,6 +7892,8 @@ export default {
       confluenceEditionCloud: 'Cloud',
       confluenceBaseUrl: 'Confluence URL',
       confluenceUsername: 'ユーザー名またはメールアドレス',
+      confluencePat: 'Server/DC 個人アクセストークン（PAT）',
+      confluencePatHint: '任意。指定すると Bearer 認証を使用し、ユーザー名とパスワードは不要です。',
       confluencePassword: 'Server/DC パスワード',
       confluenceApiToken: 'Cloud API トークン',
       imaClientId: 'IMA ClientID',
@@ -8671,6 +8715,25 @@ export default {
         'true': { label: 'はい', description: 'はい —— グラフ・図表・ダイアグラム' },
         'false': { label: 'いいえ', description: 'いいえ —— 写真・イラスト・アイコン・装飾' }
       }
+    },
+    layout_margin: {
+      label: '版面の余白',
+      description:
+        '内容の外側（机・背景・余白）が画面全体に占める割合。余白が大きいほど、OCR の前にページをより詰めて切り出せます。',
+      values: {
+        'none': { label: '余白なし', description: '文字がほぼ画面いっぱい' },
+        'small': { label: '余白少', description: '縁に細い帯だけ' },
+        'large': { label: '余白大', description: '非文字領域が広い —— 机・部屋・ほぼ空白のページ' }
+      }
+    },
+    layout_upright: {
+      label: '文字の向き',
+      description:
+        '画像内の文字が正立しているか。傾いた・逆さまのページは OCR の前に傾き補正する価値があります。',
+      values: {
+        'true': { label: '正立', description: '文字が通常の向き' },
+        'false': { label: '非正立', description: '回転・傾き撮影・逆さま' }
+      }
     }
   },
   // パイプラインパネルの上書き文言：パイプライン id とフィールド key で索引
@@ -8683,44 +8746,71 @@ export default {
     },
     default: {
       name: 'マニュアル',
+      note_actions: {
+        label: '2 つの動作は独立しています',
+        description:
+          'それぞれ個別に切り替えられます。識別をオフにしても画像は説明され、説明をオフにしても文字は抽出されます。両方をオフにしたときだけ画像は何も処理されないため、パネルはその組み合わせを許可しません。',
+      },
       description: 'タスクに合わせて解析アクションのスイッチを手動でオン/オフします。',
-      enable_caption: {
+      caption_enabled: {
         label: '画像説明',
         description: '各画像について一言の説明を生成し、キャプションとして保存します。'
       },
-      enable_ocr: {
+      ocr_enabled: {
         label: '文字認識',
         description: '画像内に出現するテキストを抽出します。'
       },
       caption: {
-        thinking: {
+        thinking_enabled: {
           label: '説明時に思考を有効',
           description: '説明を書く前にモデルに考えさせます。基本的に思考は必要ありません。有効にすると解析が遅くなるだけでなく、思考が長くなりすぎて本文が切り詰められ、タスクが失敗する可能性があります。必要だと判断した場合のみ有効にしてください。',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '文字認識時に思考を有効',
           description: 'テキストを抽出する前にモデルに考えさせます。基本的に思考は必要ありません。有効にすると解析が遅くなるだけでなく、思考が長くなりすぎて本文が切り詰められ、タスクが失敗する可能性があります。必要だと判断した場合のみ有効にしてください。',
         },
       }
     },
     smartocr: {
+      ocr_on_unobserved: {
+        label: '画像属性の観察に失敗した場合も OCR を実行',
+        description:
+          'モデルが画像属性を正しく観察できなかった場合、本文テキストを逃さないようデフォルトで OCR を実行します。オフにするとスキップします。（4B など小規模な視覚モデルを使う場合や、カスタムの画像指示がシステムプロンプトと衝突する場合に観察が失敗することがあります。8B 以上は失敗の可能性が低く、オフは推奨しません）',
+      },
       name: 'スマート',
-      caption: {
-        thinking: {
+      note_flow: {
+        label: '観察結果が決めます',
+        description:
+          'まず画像を説明し属性を観察し、返ってきた属性が OCR をもう一度行う価値があるかを決めます。ページを傾き補正すべきと属性が示した場合は、補正して周囲を切り落としてから読み取ります。その手順が利用できない場合は元の写真をそのまま読み取り、悪化することはありません。',
+      },
+      preprocess: {
+        mode: {
+          label: '文書の前処理',
+          description:
+            '初期設定はオフです。有効にすると OCR 前にページを補正・切り抜くため、処理時間が増えます。自動：観察結果で判断／常に：OCR 対象の画像を毎回前処理。処理中や制限超過の場合は元の画像を使用します。',
+          options: {
+            auto: '自動',
+            off: 'オフ',
+            always: '常に',
+          },
+        },
+      },
+      observation: {
+        thinking_enabled: {
           label: '説明時に思考を有効',
           description: '画像を説明し属性を報告する前にモデルに考えさせます。基本的に思考は必要ありません。有効にすると解析が遅くなるだけでなく、思考が長くなりすぎて本文が切り詰められ、タスクが失敗する可能性があります。必要だと判断した場合のみ有効にしてください。',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '文字認識時に思考を有効',
           description: 'テキストを抽出する前にモデルに考えさせます。基本的に思考は必要ありません。有効にすると解析が遅くなるだけでなく、思考が長くなりすぎて本文が切り詰められ、タスクが失敗する可能性があります。必要だと判断した場合のみ有効にしてください。',
         },
       },
       description:
-        'まず画像の特徴を観察して説明を生成し、その特徴に基づいて OCR を実行するかどうかを判断します。モデル呼び出しを節約し、解析速度を向上させます。'
+        'まず画像の特徴を観察して説明を生成し、その特徴に基づいて OCR を実行するかどうかを判断します。モデル呼び出しを節約し、解析速度を向上させます 画像が補正可能な書類やラベルの写真と判定された場合、認識前にページを傾き補正・トリミングして OCR 精度を高めます。補正に失敗した場合は元の画像を使用します。'
     }
   }
 }

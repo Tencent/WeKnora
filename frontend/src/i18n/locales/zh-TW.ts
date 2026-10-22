@@ -125,19 +125,19 @@ export default {
     "historyNoOverrides": "無管理員修改",
   },
   automation: {
+    conversationNotice: "此對話由自動化任務執行，無法手動傳送訊息。請在上方處理待審批事項。",
     title: '自動化',
-    description: '讓智慧代理按排程以你的身分執行任務，結果與待審批事項會通知你。',
+    description: '讓 WeKnora 助手按排程以你的身分執行任務，結果與待審批事項會通知你。',
     add: '新增自動化',
     addHint: '也可以直接請 WeKnora 助手幫你建立',
     paused: '已暫停',
+    scheduleEnded: '已結束',
+    scheduleEndedHint: '一次性排程已結束。可立即執行，或修改執行時間後恢復。',
     nextRunAt: '下次 {time}',
-    notScheduled: '未排程',
-    agentUnavailable: '智慧代理不可用',
-    deleteTitle: '刪除自動化',
+    runConfirm: '立即執行「{name}」？這會啟動一次額外執行，不影響原有排程。',
     deleteBody: '將停止進行中的執行，並刪除「{name}」的執行紀錄、對話與長期授權。此操作無法復原。',
     fields: {
       name: '名稱',
-      agent: '執行智慧代理',
       instruction: '任務',
       schedule: '執行時間',
       timezone: '時區',
@@ -153,14 +153,16 @@ export default {
       enabled: '啟用',
     },
     editor: {
+      model: "執行模型",
+      modelHelp: '預設沿用助手的模型設定，也可以單獨指定。受委派的智慧代理使用各自的模型。修改後用於後續執行。',
+      modelDefault: '跟隨助手預設模型',
       createTitle: '新增自動化',
       editTitle: '編輯自動化',
       namePlaceholder: '例如：每日知識庫週報',
       instructionPlaceholder: '寫清楚要做什麼、用哪些資料、結果如何輸出',
       variablesHint: '可用變數：',
-      unattendedHint: '執行時無人在場，智慧代理不能向你提問；需要審批的操作會暫停並通知你。',
+      unattendedHint: '執行時無人在場，助手不能向你提問；需要審批的操作會暫停並通知你。',
       nameDesc: '在列表和通知中顯示，方便你認出這項任務',
-      agentDesc: '由哪個智慧體執行任務，它的知識庫、工具和技能都可用',
       frequency: '重複頻率',
       weekdays: '星期',
       dayOfMonthDesc: '當月沒有這一天時，在最後一天執行',
@@ -179,7 +181,7 @@ export default {
       sections: {
         basic: {
           title: '基本資訊',
-          desc: '為任務命名，選擇執行的智慧體，並寫下要做的事。',
+          desc: '任務由 WeKnora 助手執行。需要其他智慧代理時，請在任務中寫明委派對象與工作。',
         },
         schedule: {
           title: '執行時間',
@@ -196,7 +198,7 @@ export default {
       },
       sessionModeDesc: {
         per_run: '每次執行開一個新對話，互不影響',
-        persistent: '所有執行都在同一個對話中，智慧體能看到先前的內容',
+        persistent: '所有執行都在同一個對話裡，助手能看到之前的內容',
       },
       errors: {
         name: '請填寫名稱',
@@ -280,8 +282,6 @@ export default {
       stop: '停止',
     },
     detail: {
-      overview: '概覽',
-      lastRun: '上次執行',
       pausedBecause: '已暫停：{reason}',
       runs: '執行紀錄',
       noRuns: '還沒有執行過',
@@ -314,6 +314,20 @@ export default {
     },
   },
   notifications: {
+    pending: "待處理",
+    history: "通知記錄",
+    clearRead: "清理已讀",
+    clearReadConfirm: "清理已讀通知？不會刪除執行記錄、對話或待處理事項。",
+    handle: "去處理",
+    review: "去審批",
+    unreadCount: "{count} 則未讀",
+    unread: "未讀",
+    newItems: "有新通知，點擊重新整理",
+    loadError: "通知載入失敗",
+    awaitingApproval: "等待你確認操作",
+    awaitingAuthorization: "等待你完成授權",
+    awaitingReply: "等待你回覆",
+
     title: '通知',
     markAllRead: '全部已讀',
     pendingInvitations: '{count} 個待處理邀請',
@@ -1340,6 +1354,8 @@ export default {
       confluenceEditionCloud: 'Cloud',
       confluenceBaseUrl: 'Confluence 地址',
       confluenceUsername: '使用者名或電子信箱',
+      confluencePat: 'Server/DC 個人存取權杖（PAT）',
+      confluencePatHint: '選填。填寫後使用 Bearer 驗證，無需使用者名稱和密碼。',
       confluencePassword: 'Server/DC 密碼',
       confluenceApiToken: 'Cloud API 權杖',
       clientId: 'Client ID',
@@ -2009,6 +2025,11 @@ export default {
       notFound: '未找到內容',
       loadFailed: '載入失敗',
       noKbForWiki: '無法識別關聯的知識庫，無法打開 Wiki'
+    },
+    entityLink: {
+      kb: '知識庫',
+      doc: '文件',
+      chunk: '片段'
     },
     tools: {
       searchKnowledge: '知識庫檢索',
@@ -4815,6 +4836,12 @@ export default {
     noKnowledgeBases: '沒有可用的知識庫',
     enterDescription: '輸入描述',
     rawOutputLabel: '原始輸出',
+    backgroundWork: {
+      running: '沒有背景工作 | {count} 個背景工作 | {count} 個背景工作',
+      stop: '停止',
+      loading: '正在載入輸出…',
+      unavailable: '暫時無法查看輸出',
+    },
     wikiWritePageTitle: 'Wiki 頁面寫入',
     wikiReplaceTextTitle: 'Wiki 文字取代',
     wikiRenamePageTitle: 'Wiki 頁面重新命名',
@@ -4882,11 +4909,11 @@ export default {
         imageAttrsSchemaDescription: '模型會觀察以下屬性（由後端登錄檔定義）以驅動 OCR 策略',
         imageAttrsOcrConditions: '根據觀察到的屬性條件觸發 OCR',
         imageAttrsOcrConditionsDesc: '當觀察到的屬性滿足以下條件時，對圖片進行 OCR',
-        imageAttrsOcrOnUnobserved: '圖片屬性觀察失敗時仍執行 OCR',
-        imageAttrsOcrOnUnobservedDesc: '當模型未能正確觀察到圖片屬性時，預設仍執行 OCR 兜底，以免漏掉正文文字；關閉則跳過。（採用 4B 等小參數視覺模型，或自定義的圖片解析提示語與系統提示語衝突時，可能造成觀察失敗；8B 及以上模型的失敗概率很低，不建議關閉）',
         imagePipelineSectionLabel: '圖片解析方案',
         imagePipelineSectionDescription: '多模態解析開啟後，可以根據需要選擇圖片的解析方案',
         imagePipelineLabel: '選擇解析方案',
+        advancedSettingsLabel: '進階設定',
+        notesLabel: '附加說明',
         imagePipelinePlaceholder: '請選擇解析方案',
         imagePipelineLoading: '正在讀取流水線…',
         imagePipelineLoadError: '讀取流水線失敗',
@@ -6977,6 +7004,23 @@ export default {
       skillRolloutNextTurn: '已有會話在下一輪提問時重建沙箱',
       skillRolloutNewSession: '已有會話保持原沙箱，僅新會話使用新映像',
       skillRolloutSaveFailed: '儲存生效方式失敗',
+      allocationMode: '沙箱分配方式',
+      allocationModeHint: '只影響還沒有用過沙箱的會話；已有會話保持原來的分配，不會搬遷檔案。',
+      allocationModeSession: '每個會話一台沙箱（預設）',
+      allocationModeUser: '同一使用者的會話共用一台沙箱',
+      allocationModeUnavailable: '目前部署未開啟共用沙箱（需在所有實例設定 WEKNORA_SANDBOX_USER_ALLOCATION=enabled，並設定 Redis）。',
+      userSandboxRetentionDays: '空置沙箱保留天數',
+      userSandboxRetentionHint: '某台共用沙箱上的會話全部刪除後，空置滿這個天數會被自動刪除（1–90 天）。這不是檔案最少保留時間：Docker 空閒回收或服務商故障可能更早刪除。',
+      userSandboxesInInventory: '其中 {count} 台是使用者共用沙箱，影響該使用者在此設定下的全部會話。',
+      userSandboxesTitle: '使用者共用沙箱',
+      userSandboxOwner: '使用者',
+      userSandboxOwnerOtherWorkspace: '其他空間的使用者',
+      userSandboxLiveSessions: '會話數',
+      userSandboxEmptySince: '空置起點',
+      userSandboxReclaimAfter: '預計回收',
+      userSandboxRelease: '釋放',
+      userSandboxReleaseConfirm: '釋放後，該使用者在此設定下全部會話的檔案和已安裝的套件都會遺失，下次使用時會新建沙箱。確定釋放？',
+      userSandboxBusy: '這台沙箱上還有終端、桌面或命令在執行，請稍後再試。',
       skillInstallGroup: '安裝新技能',
       skillInstalledGroup: '已安裝',
       skillUploadClick: '點擊上傳 zip 壓縮包',
@@ -8672,6 +8716,25 @@ export default {
         'true': { label: '是', description: '是 ── 圖表、曲線或示意圖' },
         'false': { label: '否', description: '否 ── 照片、插畫、圖示或裝飾圖' }
       }
+    },
+    layout_margin: {
+      label: '版面留白',
+      description:
+        '文字內容之外的部分（桌面、背景、空白）占整張畫面的比例。留白越大，越能在 OCR 之前把頁面裁得更緊。',
+      values: {
+        'none': { label: '無留白', description: '文字幾乎鋪滿畫面' },
+        'small': { label: '少量留白', description: '邊緣只有一條窄邊' },
+        'large': { label: '大片留白', description: '有大片非文字區域 —— 桌面、房間，或拍進來的周邊環境' }
+      }
+    },
+    layout_upright: {
+      label: '文字朝向',
+      description:
+        '圖中文字是否正立。歪斜或倒置的頁面，值得在 OCR 之前擺正。',
+      values: {
+        'true': { label: '正立', description: '文字方向正常' },
+        'false': { label: '非正立', description: '文字被旋轉、傾斜拍攝或倒置' }
+      }
     }
   },
   imagePipeline: {
@@ -8680,43 +8743,70 @@ export default {
     },
     default: {
       name: '傳統',
+      note_actions: {
+        label: '兩項動作互相獨立',
+        description:
+          '兩項各自開關：關掉識別，圖片仍會被描述；關掉描述，文字仍會被識別。只有兩個都關掉時這張圖才不會被處理 —— 所以面板不允許這種組合。',
+      },
       description: '使用者根據任務需要手動選擇解析動作開關。',
-      enable_caption: {
+      caption_enabled: {
         label: '圖片描述',
         description: '讓模型為每張圖片生成一句內容描述，作為圖片的說明文字。',
       },
-      enable_ocr: {
+      ocr_enabled: {
         label: '文字辨識',
         description: '提取圖片中出現的文字。',
       },
       caption: {
-        thinking: {
+        thinking_enabled: {
           label: '圖片描述時開啟思考',
           description: '讓模型在寫描述前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '文字辨識時開啟思考',
           description: '讓模型在提取文字前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
         },
       },
     },
     smartocr: {
+      ocr_on_unobserved: {
+        label: '圖片屬性觀察失敗時仍執行 OCR',
+        description:
+          '當模型未能正確觀察到圖片屬性時，預設仍執行 OCR 兜底，以免漏掉正文文字；關閉則跳過。（採用 4B 等小參數視覺模型，或自定義的圖片解析提示語與系統提示語衝突時，可能造成觀察失敗；8B 及以上模型的失敗概率很低，不建議關閉）',
+      },
       name: '智能模式',
-      caption: {
-        thinking: {
+      note_flow: {
+        label: '由觀察結果決定',
+        description:
+          '先描述圖片並觀察屬性，由屬性決定是否值得再為它花一次 OCR。屬性顯示頁面需要擺正時，會先擺正並裁掉周圍環境再識別；若該步驟不可用或判定不適用，則直接用原圖，絕不會比不啟用更差。',
+      },
+      preprocess: {
+        mode: {
+          label: '文件預處理',
+          description:
+            '預設關閉。啟用後，會在 OCR 前擺正並裁剪頁面，增加處理時間。自動：依觀察結果判斷；總是：對進入 OCR 的圖片都嘗試預處理；忙碌或超限時使用原圖。',
+          options: {
+            auto: '自動',
+            off: '關閉',
+            always: '總是',
+          },
+        },
+      },
+      observation: {
+        thinking_enabled: {
           label: '描述時開啟思考',
           description: '讓模型在描述圖片並觀察屬性前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '文字辨識時開啟思考',
           description: '讓模型在提取文字前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
         },
       },
-      description: '先觀察圖片特徵並進行圖片描述，再根據圖片特徵決定是否呼叫 OCR 對圖片進行辨識，以節省模型呼叫次數並提升解析速度。',
+      description: '先觀察圖片特徵並進行圖片描述，再根據圖片特徵決定是否呼叫 OCR 對圖片進行辨識，以節省模型呼叫次數並提升解析速度。當辨識到圖片為可校正的文件或標籤頁照片時，會在辨識前自動擺正並裁切頁面，以提升 OCR 準確率；若校正失敗則直接使用原圖。',
     },
   },
 }

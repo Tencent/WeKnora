@@ -125,19 +125,19 @@ export default {
     "historyNoOverrides": "Нет изменений администратора",
   },
   automation: {
+    conversationNotice: "Этот диалог выполняется автоматизацией. Отправка сообщений вручную недоступна. Обработайте ожидающие запросы выше.",
     title: 'Автоматизации',
-    description: 'Агент выполняет задачи по расписанию от вашего имени. О результатах и ожидающих подтверждениях вы получите уведомление.',
+    description: 'Помощник WeKnora выполняет задачи по расписанию от вашего имени. О результатах и ожидающих подтверждениях вы получите уведомление.',
     add: 'Новая автоматизация',
     addHint: 'Или попросите ассистента WeKnora создать её',
     paused: 'Приостановлена',
+    scheduleEnded: 'Завершено',
+    scheduleEndedHint: 'Время однократного запуска прошло. Запустите сейчас или измените время перед возобновлением.',
     nextRunAt: 'Далее {time}',
-    notScheduled: 'Не запланировано',
-    agentUnavailable: 'Агент недоступен',
-    deleteTitle: 'Удалить автоматизацию',
+    runConfirm: 'Запустить «{name}» сейчас? Дополнительный запуск не изменит расписание.',
     deleteBody: 'Текущий запуск будет остановлен, а запуски, беседы и постоянные разрешения «{name}» удалены. Это действие необратимо.',
     fields: {
       name: 'Название',
-      agent: 'Агент',
       instruction: 'Задача',
       schedule: 'Расписание',
       timezone: 'Часовой пояс',
@@ -153,14 +153,16 @@ export default {
       enabled: 'Включена',
     },
     editor: {
+      model: "Модель запуска",
+      modelHelp: 'Используйте модель помощника по умолчанию или выберите другую для этой задачи. Агенты, которым поручена работа, используют свои модели. Изменения применяются к последующим запускам.',
+      modelDefault: 'Модель помощника по умолчанию',
       createTitle: 'Новая автоматизация',
       editTitle: 'Изменить автоматизацию',
       namePlaceholder: 'Например: ежедневная сводка базы знаний',
       instructionPlaceholder: 'Опишите, что сделать, какие источники использовать и как оформить результат',
       variablesHint: 'Переменные:',
-      unattendedHint: 'За запуском никто не следит, поэтому агент не может задавать вопросы. Действия, требующие подтверждения, приостанавливают запуск и присылают уведомление.',
+      unattendedHint: 'За запуском никто не следит, поэтому помощник не может задавать вопросы. Действия, требующие подтверждения, приостанавливают запуск и присылают уведомление.',
       nameDesc: 'Показывается в списке и уведомлениях, чтобы отличать задачу',
-      agentDesc: 'Агент, который выполняет задачу, со своими базами знаний, инструментами и навыками',
       frequency: 'Повтор',
       weekdays: 'Дни недели',
       dayOfMonthDesc: 'В месяцы без этого дня запуск будет в последний день',
@@ -179,7 +181,7 @@ export default {
       sections: {
         basic: {
           title: 'Основное',
-          desc: 'Назовите задачу, выберите агента и опишите, что нужно сделать.',
+          desc: 'Задачи выполняет помощник WeKnora. Для делегирования укажите в задаче агентов и порученную им работу.',
         },
         schedule: {
           title: 'Расписание',
@@ -196,7 +198,7 @@ export default {
       },
       sessionModeDesc: {
         per_run: 'Каждый запуск открывает новый диалог',
-        persistent: 'Все запуски идут в одном диалоге, агент видит прошлые',
+        persistent: 'Все запуски используют один диалог, поэтому помощник видит предыдущие сообщения',
       },
       errors: {
         name: 'Введите название',
@@ -280,8 +282,6 @@ export default {
       stop: 'Остановить',
     },
     detail: {
-      overview: 'Обзор',
-      lastRun: 'Последний запуск',
       pausedBecause: 'Приостановлена: {reason}',
       runs: 'Запуски',
       noRuns: 'Запусков пока нет',
@@ -314,6 +314,20 @@ export default {
     },
   },
   notifications: {
+    pending: "Требуют внимания",
+    history: "История уведомлений",
+    clearRead: "Удалить прочитанные",
+    clearReadConfirm: "Удалить прочитанные уведомления? История запусков, диалоги и ожидающие действия сохранятся.",
+    handle: "Открыть",
+    review: "Рассмотреть",
+    unreadCount: "Непрочитанных: {count}",
+    unread: "Не прочитано",
+    newItems: "Новые уведомления — обновить",
+    loadError: "Не удалось загрузить уведомления",
+    awaitingApproval: "Ожидается ваше одобрение",
+    awaitingAuthorization: "Ожидается авторизация",
+    awaitingReply: "Ожидается ваш ответ",
+
     title: 'Уведомления',
     markAllRead: 'Прочитать все',
     pendingInvitations: 'Ожидающих приглашений: {count}',
@@ -1338,6 +1352,8 @@ export default {
       confluenceEditionCloud: 'Cloud',
       confluenceBaseUrl: 'URL Confluence',
       confluenceUsername: 'Имя пользователя или эл. почта',
+      confluencePat: 'Персональный токен Server/DC (PAT)',
+      confluencePatHint: 'Необязательно. При указании используется Bearer-аутентификация; имя пользователя и пароль не требуются.',
       confluencePassword: 'Пароль Server/DC',
       confluenceApiToken: 'API-токен Cloud',
       clientId: 'Client ID',
@@ -2007,6 +2023,11 @@ export default {
       notFound: 'Содержимое не найдено',
       loadFailed: 'Ошибка загрузки',
       noKbForWiki: 'Не удалось определить связанную базу знаний, Wiki не может быть открыта'
+    },
+    entityLink: {
+      kb: 'База знаний',
+      doc: 'Документ',
+      chunk: 'Фрагмент'
     },
     tools: {
       searchKnowledge: 'Поиск по базе знаний',
@@ -4813,6 +4834,12 @@ export default {
     noKnowledgeBases: 'Нет доступных баз знаний',
     enterDescription: 'Введите описание',
     rawOutputLabel: 'Исходный вывод',
+    backgroundWork: {
+      running: 'Нет фоновых задач | {count} фоновая задача | {count} фоновых задач',
+      stop: 'Остановить',
+      loading: 'Загрузка вывода…',
+      unavailable: 'Вывод недоступен',
+    },
     wikiWritePageTitle: 'Запись страницы Wiki',
     wikiReplaceTextTitle: 'Замена текста Wiki',
     wikiRenamePageTitle: 'Переименование страницы Wiki',
@@ -4882,14 +4909,14 @@ export default {
         imagePipelineSectionDescription:
           'Когда включён мультимодальный разбор, можно выбрать способ разбора изображений.',
         imagePipelineLabel: 'Способ разбора',
+        advancedSettingsLabel: 'Дополнительные настройки',
+        notesLabel: 'Дополнительные пояснения',
         imagePipelinePlaceholder: 'Выберите способ разбора',
         imagePipelineLoading: 'Загрузка пайплайнов…',
         imagePipelineLoadError: 'Не удалось загрузить пайплайны',
-          imagePipelineValidateError: 'Текущие настройки не удалось проверить; бэкенд проверит их при сохранении.',
+        imagePipelineValidateError: 'Текущие настройки не удалось проверить; бэкенд проверит их при сохранении.',
         imageAttrsOcrConditions: 'Запуск OCR по наблюдаемым условиям атрибутов',
         imageAttrsOcrConditionsDesc: 'Когда наблюдаемые атрибуты соответствуют условиям ниже, для изображения выполняется OCR',
-        imageAttrsOcrOnUnobserved: 'Запускать OCR при сбое наблюдения атрибутов изображения',
-        imageAttrsOcrOnUnobservedDesc: 'Если модель не смогла корректно наблюдать атрибуты изображения, OCR по умолчанию всё равно выполняется, чтобы не потерять текст; выключите, чтобы пропустить. (Небольшая визуальная модель вроде 4B или пользовательские инструкции к изображениям, конфликтующие с системным промптом, могут привести к сбою наблюдения; модели 8B и выше ошибаются редко, поэтому отключать не рекомендуется)',
         imagePipelineKbNote: 'По умолчанию следуют настройкам базы знаний; можно изменить для этой задачи'
       },
       tableMetadataInstructions: {
@@ -6976,6 +7003,23 @@ export default {
       skillRolloutNextTurn: 'Пересоздать песочницу открытых сессий на следующем ходе диалога',
       skillRolloutNewSession: 'Оставить открытые сессии на текущей песочнице; новый образ только у новых сессий',
       skillRolloutSaveFailed: 'Не удалось сохранить способ применения',
+      allocationMode: 'Sandbox allocation',
+      allocationModeHint: 'Only affects sessions that have not used a sandbox yet; existing sessions keep their placement and files are never moved.',
+      allocationModeSession: 'One sandbox per session (default)',
+      allocationModeUser: "Share one sandbox across a user's sessions",
+      allocationModeUnavailable: 'Shared sandboxes are not enabled on this deployment (set WEKNORA_SANDBOX_USER_ALLOCATION=enabled on every replica; Redis is required).',
+      userSandboxRetentionDays: 'Keep an empty shared sandbox for (days)',
+      userSandboxRetentionHint: 'After every session on a shared sandbox is deleted, it is removed once it has been empty this long (1–90 days). This is not a minimum file retention: Docker idle cleanup or provider failures may remove it sooner.',
+      userSandboxesInInventory: "{count} of them are shared user sandboxes; each affects all of that user's sessions on this config.",
+      userSandboxesTitle: 'Shared user sandboxes',
+      userSandboxOwner: 'Owner',
+      userSandboxOwnerOtherWorkspace: 'A user from another workspace',
+      userSandboxLiveSessions: 'Sessions',
+      userSandboxEmptySince: 'Empty since',
+      userSandboxReclaimAfter: 'Reclaimed after',
+      userSandboxRelease: 'Release',
+      userSandboxReleaseConfirm: "Releasing deletes the files and installed packages of all of this user's sessions on this config; a new sandbox is created on next use. Release it?",
+      userSandboxBusy: 'A terminal, desktop or command is still running on this sandbox. Try again later.',
       skillInstallGroup: 'Установить навык',
       skillInstalledGroup: 'Установленные',
       skillUploadClick: 'Нажмите, чтобы загрузить zip',
@@ -8671,6 +8715,25 @@ export default {
         'true': { label: 'Да', description: 'да —— график, диаграмма или схема' },
         'false': { label: 'Нет', description: 'нет —— фото, рисунок, значок или декор' }
       }
+    },
+    layout_margin: {
+      label: 'Поля вокруг текста',
+      description:
+        'Какая часть кадра занята не текстом (стол, фон, пустое место). Большие поля означают, что страницу можно обрезать плотнее перед OCR.',
+      values: {
+        'none': { label: 'Нет', description: 'текст доходит до краёв' },
+        'small': { label: 'Мало', description: 'узкая полоса фона' },
+        'large': { label: 'Много', description: 'много места без текста: стол, комната, почти пустая страница' }
+      }
+    },
+    layout_upright: {
+      label: 'Ориентация текста',
+      description:
+        'Читается ли текст в нормальном положении. Повёрнутую или перевёрнутую страницу стоит выпрямить перед OCR.',
+      values: {
+        'true': { label: 'Прямо', description: 'текст в обычной ориентации' },
+        'false': { label: 'Повёрнут', description: 'текст повёрнут, наклонён или перевёрнут' }
+      }
     }
   },
   // Текст панели пайплайнов: индексируется по id пайплайна и ключу поля
@@ -8683,44 +8746,71 @@ export default {
     },
     default: {
       name: 'Ручной',
+      note_actions: {
+        label: 'Два действия независимы',
+        description:
+          'Каждое включается отдельно: без OCR изображение всё равно описывается, без описания его текст всё равно распознаётся. Только выключив оба, изображение остаётся необработанным — поэтому панель запрещает такую комбинацию.',
+      },
       description: 'Пользователь сам включает или выключает действия разбора под задачу.',
-      enable_caption: {
+      caption_enabled: {
         label: 'Описание изображения',
         description: 'Генерирует однострочное описание каждого изображения и сохраняет его как подпись.'
       },
-      enable_ocr: {
+      ocr_enabled: {
         label: 'Распознавание текста',
         description: 'Извлекает текст, присутствующий на изображении.'
       },
       caption: {
-        thinking: {
+        thinking_enabled: {
           label: 'С размышлением при описании',
           description: 'Дать модели поразмышлять перед тем, как писать описание. Как правило, в этом нет необходимости: включение размышлений замедляет обработку и слишком длинные размышления могут вытеснить основной текст, из-за чего задача завершится неудачей. Включайте только если вы уверены, что это необходимо.',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: 'С размышлением при распознавании',
           description: 'Дать модели поразмышлять перед расшифровкой текста. Как правило, в этом нет необходимости: включение размышлений замедляет обработку и слишком длинные размышления могут вытеснить основной текст, из-за чего задача завершится неудачей. Включайте только если вы уверены, что это необходимо.',
         },
       }
     },
     smartocr: {
+      ocr_on_unobserved: {
+        label: 'Запускать OCR при сбое наблюдения атрибутов изображения',
+        description:
+          'Если модель не смогла корректно наблюдать атрибуты изображения, OCR по умолчанию всё равно выполняется, чтобы не потерять текст; выключите, чтобы пропустить. (Небольшая визуальная модель вроде 4B или пользовательские инструкции к изображениям, конфликтующие с системным промптом, могут привести к сбою наблюдения; модели 8B и выше ошибаются редко, поэтому отключать не рекомендуется)',
+      },
       name: 'Умный',
-      caption: {
-        thinking: {
+      note_flow: {
+        label: 'Решает наблюдение',
+        description:
+          'Сначала изображение описывается и наблюдается, и полученные атрибуты решают, стоит ли тратить на него ещё один проход OCR. Если они говорят, что страницу нужно выпрямить, её выпрямляют и обрезают окружающий фон перед чтением; если этот шаг недоступен или отказывается, читается исходный снимок — хуже не будет.',
+      },
+      preprocess: {
+        mode: {
+          label: 'Предобработка документа',
+          description:
+            'По умолчанию выключено. Выравнивание и обрезка перед OCR увеличивают время обработки. Авто: по результатам наблюдения; Всегда: для всех изображений, выбранных для OCR. При занятости или превышении лимитов используется оригинал.',
+          options: {
+            auto: 'Авто',
+            off: 'Выкл.',
+            always: 'Всегда',
+          },
+        },
+      },
+      observation: {
+        thinking_enabled: {
           label: 'С размышлением при описании',
           description: 'Дать модели поразмышлять перед описанием изображения и отчётом о его признаках. Как правило, в этом нет необходимости: включение размышлений замедляет обработку и слишком длинные размышления могут вытеснить основной текст, из-за чего задача завершится неудачей. Включайте только если вы уверены, что это необходимо.',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: 'С размышлением при распознавании текста',
           description: 'Дать модели поразмышлять перед расшифровкой текста. Как правило, в этом нет необходимости: включение размышлений замедляет обработку и слишком длинные размышления могут вытеснить основной текст, из-за чего задача завершится неудачей. Включайте только если вы уверены, что это необходимо.',
         },
       },
       description:
-        'Сначала наблюдаются признаки изображения и создаётся его описание, затем по этим признакам решается, вызывать ли OCR. Экономит вызовы модели и ускоряет разбор.'
+        'Сначала наблюдаются признаки изображения и создаётся его описание, затем по этим признакам решается, вызывать ли OCR. Экономит вызовы модели и ускоряет разбор Если изображение распознано как фотография выравниваемой страницы или этикетки, перед распознаванием оно автоматически выравнивается и обрезается для повышения точности OCR; при неудаче используется исходное изображение.'
     }
   }
 }
