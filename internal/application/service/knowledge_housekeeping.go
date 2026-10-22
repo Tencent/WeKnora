@@ -21,6 +21,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/Tencent/WeKnora/internal/common"
 	"os"
 	"strings"
 	"sync"
@@ -875,7 +876,7 @@ func (h *HousekeepingService) reapTerminalSpans(ctx context.Context) {
 			msg = strings.TrimSpace(*r.ErrorMessage)
 		}
 		if len(msg) > 1024 {
-			msg = msg[:1024]
+			msg = common.TruncateUTF8Bytes(msg, 1024)
 		}
 		res := h.db.WithContext(ctx).Model(&types.KnowledgeProcessingSpan{}).
 			Where("id = ? AND status IN ?", r.ID, openSpanStatuses).

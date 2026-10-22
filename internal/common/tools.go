@@ -291,3 +291,21 @@ func truncatePipelineValue(content string) string {
 func TruncateForLog(content string) string {
 	return truncatePipelineValue(content)
 }
+
+// TruncateUTF8Bytes shortens s to at most maxBytes bytes without splitting a
+// multi-byte rune. Plain string slicing cuts UTF-8 in the middle of a rune,
+// which leaves invalid text in error messages that are persisted or returned
+// to API clients. maxBytes <= 0 returns an empty string.
+func TruncateUTF8Bytes(s string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(s) <= maxBytes {
+		return s
+	}
+	end := maxBytes
+	for end > 0 && !utf8.RuneStart(s[end]) {
+		end--
+	}
+	return s[:end]
+}

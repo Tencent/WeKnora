@@ -28,6 +28,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"github.com/Tencent/WeKnora/internal/common"
 	"strings"
 	"sync"
 	"time"
@@ -520,11 +521,11 @@ func (t *spanTracker) failSpan(
 	if errorDetail != nil {
 		detail = errorDetail.Error()
 		if len(detail) > 8192 {
-			detail = detail[:8192]
+			detail = common.TruncateUTF8Bytes(detail, 8192)
 		}
 	}
 	if len(errorMessage) > 1024 {
-		errorMessage = errorMessage[:1024]
+		errorMessage = common.TruncateUTF8Bytes(errorMessage, 1024)
 	}
 	row := &types.KnowledgeProcessingSpan{
 		KnowledgeID:  span.KnowledgeID,
@@ -844,7 +845,7 @@ func (t *spanTracker) FinalizeAttempt(ctx context.Context, knowledgeID string, a
 		dur = now.Sub(started).Milliseconds()
 	}
 	if len(errorMessage) > 1024 {
-		errorMessage = errorMessage[:1024]
+		errorMessage = common.TruncateUTF8Bytes(errorMessage, 1024)
 	}
 	row := &types.KnowledgeProcessingSpan{
 		KnowledgeID:  root.KnowledgeID,
