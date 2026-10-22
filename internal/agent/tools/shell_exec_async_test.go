@@ -85,6 +85,7 @@ func TestShellExecAsyncClampsYieldAndPassesContext(t *testing.T) {
 	require.Equal(t, "tc1", submitter.requests[0].ToolCallID)
 	require.Equal(t, "build", submitter.requests[0].Description)
 	require.Equal(t, "cd /workspace && {\nmake build\n}", submitter.requests[0].Command)
+	require.Equal(t, "make build", submitter.requests[0].DisplayCommand)
 	require.Equal(t, "/workspace", submitter.requests[0].WorkDir)
 	require.Equal(t, interfaces.SessionRef{TenantID: 7, SessionID: "session-1"}, submitter.refs[0])
 }
@@ -162,6 +163,7 @@ func TestShellExecAsyncWrapsStdinBeforeSubmit(t *testing.T) {
 		"printf %s " + sandbox.ShellQuote(encoded) +
 		" | base64 -d | /bin/bash --noprofile --norc -c " + sandbox.ShellQuote("cat") + "\n}"
 	require.Equal(t, want, submitter.requests[0].Command)
+	require.Equal(t, "cat", submitter.requests[0].DisplayCommand)
 	require.Equal(t, sandbox.SessionWorkspaceRoot, submitter.requests[0].WorkDir)
 }
 

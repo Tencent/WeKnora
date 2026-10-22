@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,7 +42,10 @@ func readLocalJobJSON(path string, target any) error {
 		return err
 	}
 	defer func() { _ = file.Close() }()
-	return json.NewDecoder(io.LimitReader(file, 64*1024)).Decode(target)
+	// The private job directory contains metadata written by this service.
+	// Legacy stdin wrappers and output baselines can exceed 64 KiB; recovery
+	// must accept the same metadata as the normal ReadShellJob path.
+	return json.NewDecoder(file).Decode(target)
 }
 
 // recoverJobs is the ONLY writer allowed besides the watcher: the previous

@@ -311,19 +311,40 @@ func TestLocalShutdownKillsAndRecordsLost(t *testing.T) {
 }
 
 func TestLocalSkillEnvCaptureRunsOnlyAfterSuccess(t *testing.T) {
-	svc := &LocalShellJobService{blocked: map[interfaces.SessionRef]bool{}}
-	ref := interfaces.SessionRef{TenantID: 1, SessionID: "session-1"}
-	calls := 0
-	svc.HoldSkillEnvCapture(ref, "sj_ab12", func(context.Context) { calls++ })
-	svc.skillCapture.settle(context.Background(), ref, "sj_ab12", interfaces.WorkStateFailed)
-	require.Zero(t, calls)
-	svc.HoldSkillEnvCapture(ref, "sj_ab12", func(context.Context) { calls++ })
-	require.NoError(t, svc.OnDelete(context.Background(), ref))
-	svc.skillCapture.settle(context.Background(), ref, "sj_ab12", interfaces.WorkStateSucceeded)
-	require.Zero(t, calls)
-	svc.HoldSkillEnvCapture(ref, "sj_ab12", func(context.Context) { calls++ })
-	svc.skillCapture.settle(context.Background(), ref, "sj_ab12", interfaces.WorkStateSucceeded)
-	require.Equal(t, 1, calls)
+	for _, mode := range []string{"success", "failure", "delete"} {
+		t.Run(mode, func(t *testing.T) {
+			svc, proc, _ := localFixture(t)
+			if mode == "failure" {
+				proc.exit.Code = 1
+			}
+			ref := interfaces.SessionRef{TenantID: 7, SessionID: "s"}
+			sub, err := svc.SubmitShellJob(t.Context(), ref, tools.ShellJobSubmitRequest{
+				Command: "true", YieldTime: time.Millisecond,
+			})
+			require.NoError(t, err)
+			job, err := svc.ownedJob(ref, sub.Result.ID)
+			require.NoError(t, err)
+			calls := 0
+			svc.HoldSkillEnvCapture(ref, sub.Result.ID, func(context.Context) { calls++ })
+			if mode == "delete" {
+				require.NoError(t, svc.OnDelete(t.Context(), ref))
+				svc.HoldSkillEnvCapture(ref, sub.Result.ID, func(context.Context) { calls++ })
+			} else {
+				proc.finish()
+			}
+			select {
+			case <-job.reported:
+			case <-time.After(time.Second):
+				t.Fatal("watcher did not finish reporting")
+			}
+			want := 0
+			if mode == "success" {
+				want = 1
+			}
+			require.Equal(t, want, calls)
+			require.Empty(t, svc.skillCapture.pending())
+		})
+	}
 }
 
 // r0 取该会话唯一的 job id（测试辅助）。

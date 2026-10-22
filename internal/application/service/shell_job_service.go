@@ -18,7 +18,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 const (
@@ -215,7 +214,7 @@ func (s *ShellJobService) SubmitShellJob(ctx context.Context, ref interfaces.Ses
 		return tools.ShellJobSubmission{}, fmt.Errorf("remote shell jobs are unavailable")
 	}
 	var result tools.ShellJobSubmission
-	err := s.index.WithSessionLock(context.WithoutCancel(ctx), ref, func(lockCtx context.Context) error {
+	err := s.index.WithSessionLock(ctx, ref, func(lockCtx context.Context) error {
 		closed, err := s.index.SessionClosed(lockCtx, ref)
 		if err != nil {
 			return err
@@ -294,7 +293,7 @@ func (s *ShellJobService) submitRemoteShellJob(ctx context.Context, ref interfac
 		}
 		meta = sandbox.ShellJobMeta{
 			ID: jobID, TenantID: ref.TenantID, SandboxTenantID: ref.TenantID,
-			SessionID: ref.SessionID, Command: utils.MaskCommandAssignments(req.Command),
+			SessionID: ref.SessionID, Command: req.MaskedCommand(),
 			WorkDir: req.WorkDir, SandboxID: sandboxID, CreatedAt: now,
 			YieldUntil: now.Add(yield), ParentMessageID: req.ParentMessageID,
 			ToolCallID: req.ToolCallID, Title: req.Description,
@@ -983,20 +982,59 @@ func (s *ShellJobService) StartSweeper(ctx context.Context, interval time.Durati
 // locks. A blocked read must not leave any queued session unprotected.
 func (s *ShellJobService) protectScheduledJobs(ctx context.Context) func() {
 	ctx, cancel := context.WithCancel(ctx)
+	var providers sync.WaitGroup
+	var mu sync.Mutex
+	inFlight := make(map[interfaces.SessionRef]bool)
+	refreshProvider := func(ref interfaces.SessionRef) {
+		if s.keeper == nil || ctx.Err() != nil {
+			return
+		}
+		mu.Lock()
+		if inFlight[ref] {
+			mu.Unlock()
+			return
+		}
+		inFlight[ref] = true
+		mu.Unlock()
+		providers.Add(1)
+		go func() {
+			defer providers.Done()
+			defer func() {
+				mu.Lock()
+				delete(inFlight, ref)
+				mu.Unlock()
+			}()
+			refreshCtx, stop := context.WithTimeout(ctx, backgroundKeepAliveTimeout)
+			defer stop()
+			if err := s.keeper.KeepAlive(refreshCtx, ref); err != nil && refreshCtx.Err() == nil {
+				logger.Warnf(ctx, "[ShellJob] provider heartbeat session=%s: %v", ref.SessionID, err)
+			}
+		}()
+	}
 	renew := func() {
 		entries, err := s.index.Entries(ctx)
 		if err != nil || s.bg == nil || s.bg.Registry == nil {
 			return
 		}
+		sessions := make(map[interfaces.SessionRef]bool)
 		for _, e := range entries {
 			// Renew only: a snapshot taken before a terminal claim must not
 			// resurrect a discarded activity or a deleted session.
-			if _, err := s.bg.Registry.Renew(ctx, e.SessionRef, e.WorkID, shellJobRenewLease); err != nil {
+			found, err := s.bg.Registry.Renew(ctx, e.SessionRef, e.WorkID, shellJobRenewLease)
+			if err != nil {
 				logger.Warnf(ctx, "[ShellJob] heartbeat id=%s: %v", e.WorkID, err)
+			}
+			if found {
+				sessions[e.SessionRef] = true
 			}
 			_ = s.index.client.Expire(
 				ctx, s.index.reservationKey(e.SessionRef, e.WorkID), interfaces.NoticeRetention,
 			).Err()
+		}
+		// Provider TTLs are independent of Redis leases. A slow provider must
+		// not block lease renewal or keep another session from being refreshed.
+		for ref := range sessions {
+			refreshProvider(ref)
 		}
 	}
 	renew()
@@ -1014,7 +1052,11 @@ func (s *ShellJobService) protectScheduledJobs(ctx context.Context) func() {
 			}
 		}
 	}()
-	return func() { cancel(); <-done }
+	return func() {
+		cancel()
+		<-done
+		providers.Wait()
+	}
 }
 
 // SweepOnce claims due jobs, grouped by session, and reports or renews each one.

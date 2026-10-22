@@ -384,10 +384,6 @@ const backgroundPoller = createBackgroundWorkPoller({
     sessionId: () => String(session_id.value || ''),
     list: (id, signal) => listBackgroundWork(id, signal),
     onUpdate: replaceBackgroundItems,
-    onError() {
-        // A failed first load must not keep an empty chip polling.
-        if (backgroundItems.value.length === 0) backgroundPoller.stop();
-    },
 });
 
 function startBackgroundWork() {

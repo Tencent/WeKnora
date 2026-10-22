@@ -22,7 +22,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 const (
@@ -96,7 +95,30 @@ func (s *LocalShellJobService) HoldSkillEnvCapture(
 	if s == nil || run == nil || jobID == "" {
 		return
 	}
+	s.mu.Lock()
+	j := s.jobs[jobID]
+	if s.closing || s.blocked[ref] || j == nil || localRef(j.meta) != ref {
+		s.mu.Unlock()
+		return
+	}
+	s.mu.Unlock()
+	// Serialize registration with reporting and suppression. The watcher may
+	// have reported before SubmitShellJob returned its background handle.
+	j.reportMu.Lock()
+	defer j.reportMu.Unlock()
+	s.mu.Lock()
+	blocked := s.closing || s.blocked[ref]
+	s.mu.Unlock()
+	if blocked || j.suppress {
+		return
+	}
 	s.skillCapture.put(ref, jobID, run)
+	j.mu.Lock()
+	state := j.status.State
+	j.mu.Unlock()
+	if interfaces.IsTerminalWorkState(state) {
+		s.skillCapture.settle(context.Background(), ref, jobID, state)
+	}
 }
 
 // NewLocalShellJobService starts the host watcher runtime. root is the absolute
@@ -196,7 +218,7 @@ func (s *LocalShellJobService) SubmitShellJob(
 		meta: sandbox.ShellJobMeta{
 			ID: id, TenantID: ref.TenantID, SandboxTenantID: ref.TenantID,
 			SessionID: ref.SessionID, Root: ws.Root,
-			Command: utils.MaskCommandAssignments(req.Command), WorkDir: req.WorkDir,
+			Command: req.MaskedCommand(), WorkDir: req.WorkDir,
 			CreatedAt: now, YieldUntil: now.Add(req.YieldTime),
 			ParentMessageID: req.ParentMessageID, ToolCallID: req.ToolCallID,
 			Title:     req.Description,

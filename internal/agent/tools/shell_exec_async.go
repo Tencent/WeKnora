@@ -34,10 +34,10 @@ forever. Pass the flags that skip questions (apt-get -y, DEBIAN_FRONTEND=noninte
 Arguments: same as shell_exec, plus description (short label shown to the user) and
 yield_time_ms.`
 
-// shellExecAsyncOutputLimit keeps a finished job's stdout, stderr and JSON
-// envelope intact, including the six-character JSON escape for a control byte.
+// shellExecAsyncOutputLimit keeps a finished job's stdout, stderr, original
+// command and JSON envelope intact, including six-character control-byte escapes.
 // The generic 24000-rune cap would split that envelope.
-const shellExecAsyncOutputLimit = (16+8)*1024*6 + 8*1024
+const shellExecAsyncOutputLimit = ((16+8)*1024+shellExecMaxCommandBytes)*6 + 8*1024
 
 // ShellExecAsyncInput is the model-facing argument object.
 type ShellExecAsyncInput struct {
@@ -246,15 +246,16 @@ func (t *ShellExecAsyncTool) Execute(ctx context.Context, args json.RawMessage) 
 	execCommand = commandInWorkDir(workDir, execCommand)
 
 	request := ShellJobSubmitRequest{
-		Command:      execCommand,
-		WorkDir:      workDir,
-		Env:          env,
-		Description:  shellJobLabel(input.Description, command),
-		YieldTime:    time.Duration(clampYieldMS(input.YieldTimeMS)) * time.Millisecond,
-		RunID:        t.backgroundRun,
-		OutputDir:    outputDir,
-		OutputSeen:   outputSeen,
-		OutputBefore: outputBefore,
+		Command:        execCommand,
+		DisplayCommand: command,
+		WorkDir:        workDir,
+		Env:            env,
+		Description:    shellJobLabel(input.Description, command),
+		YieldTime:      time.Duration(clampYieldMS(input.YieldTimeMS)) * time.Millisecond,
+		RunID:          t.backgroundRun,
+		OutputDir:      outputDir,
+		OutputSeen:     outputSeen,
+		OutputBefore:   outputBefore,
 	}
 	if meta, ok := ToolExecFromContext(ctx); ok && meta != nil {
 		request.ParentMessageID = meta.AssistantMessageID
