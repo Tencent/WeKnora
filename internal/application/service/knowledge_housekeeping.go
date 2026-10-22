@@ -21,7 +21,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"github.com/Tencent/WeKnora/internal/common"
 	"os"
 	"strings"
 	"sync"
@@ -36,6 +35,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
+
+	"github.com/Tencent/WeKnora/internal/common"
 )
 
 // HousekeepingService runs background sweeps to recover stuck rows.

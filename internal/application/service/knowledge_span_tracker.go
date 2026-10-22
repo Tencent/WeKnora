@@ -28,7 +28,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"github.com/Tencent/WeKnora/internal/common"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +38,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"gorm.io/gorm"
+
+	"github.com/Tencent/WeKnora/internal/common"
 )
 
 // maxSpanNameLen matches knowledge_processing_spans.name (varchar(255)).
@@ -919,6 +920,7 @@ func (noopSpanTracker) LatestAttempt(_ context.Context, _ string) int { return 0
 func (noopSpanTracker) BeginStage(_ context.Context, _ string, _ int, _ string, _ types.JSONMap) *Span {
 	return nil
 }
+
 func (noopSpanTracker) BeginSubSpan(_ context.Context, _ *Span, _, _ string, _ types.JSONMap) *Span {
 	return nil
 }
@@ -926,10 +928,12 @@ func (noopSpanTracker) EndSpan(_ context.Context, _ *Span, _ types.JSONMap)     
 func (noopSpanTracker) FailSpan(_ context.Context, _ *Span, _, _ string, _ error)          {}
 func (noopSpanTracker) FailSpanRetryable(_ context.Context, _ *Span, _, _ string, _ error) {}
 func (noopSpanTracker) SkipSpan(_ context.Context, _ *Span, _ string)                      {}
-func (noopSpanTracker) LookupStage(_ context.Context, _ string, _ int, _ string) *Span     { return nil }
+func (noopSpanTracker) LookupStage(_ context.Context, _ string, _ int, _ string) *Span { return nil }
+
 func (noopSpanTracker) LookupSpanByName(_ context.Context, _ string, _ int, _ string) *Span {
 	return nil
 }
+
 func (noopSpanTracker) FinalizeAttempt(_ context.Context, _ string, _ int, _ string, _ types.JSONMap, _, _ string) {
 }
 func (noopSpanTracker) AbortAttempt(_ context.Context, _ string, _ int, _, _, _ string) {}
