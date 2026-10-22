@@ -51,6 +51,80 @@ func (c *managedMCPClient) ServerInstructions() string {
 	return ""
 }
 
+func (c *managedMCPClient) ServerInfo() ServerInfo {
+	if provider, ok := c.MCPClient.(interface{ ServerInfo() ServerInfo }); ok {
+		return provider.ServerInfo()
+	}
+	return ServerInfo{}
+}
+
+func (c *managedMCPClient) InitializedAt() time.Time {
+	if provider, ok := c.MCPClient.(interface{ InitializedAt() time.Time }); ok {
+		return provider.InitializedAt()
+	}
+	return time.Time{}
+}
+
+// ServerDirectory is what one fresh connection reported about a server.
+type ServerDirectory struct {
+	Initialize *InitializeResult
+	Tools      []*types.MCPTool
+}
+
+// ReadDirectory opens a separate connection to service with the settings a
+// cached connection would use, reads its initialize result and complete tool
+// list, and closes it. Cached connections are reused for as long as they stay
+// open, and a stateless server that was redeployed does not close them, so
+// only a fresh connection is sure to report the server's current identity and
+// instructions. Cached connections stay open. The header-schema cache of the
+// one this principal uses is dropped, because the listing may have changed
+// tool schemas; other principals' caches are left alone, so that each user's
+// re-list does not make every other user's next call list the tools again.
+func (m *MCPManager) ReadDirectory(ctx context.Context, service *types.MCPService) (*ServerDirectory, error) {
+	if !service.Enabled {
+		return nil, fmt.Errorf("MCP service %s is not enabled", service.Name)
+	}
+	if service.TransportType == types.MCPTransportStdio {
+		return nil, fmt.Errorf("stdio transport is disabled for security reasons")
+	}
+	config := &ClientConfig{Service: service, OAuthRepo: m.oauthRepo}
+	if service.AuthConfig.IsOAuth() {
+		config.TenantID, _ = types.TenantIDFromContext(ctx)
+		config.Principal = types.MCPOAuthPrincipalFromContext(ctx)
+		if !config.Principal.Valid() {
+			return nil, fmt.Errorf("principal context is required to connect to OAuth MCP service %s", service.Name)
+		}
+	}
+	client, err := NewMCPClient(config)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = client.Disconnect() }()
+	if err := client.Connect(ctx); err != nil {
+		return nil, err
+	}
+	initialized, err := client.Initialize(ctx)
+	if err != nil {
+		return nil, err
+	}
+	listed, err := client.ListTools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m.dropCachedToolSchemas(service, config.Principal)
+	return &ServerDirectory{Initialize: initialized, Tools: listed}, nil
+}
+
+// dropCachedToolSchemas clears the header-schema cache of the connection one
+// principal holds to service (the shared connection of a non-OAuth service).
+func (m *MCPManager) dropCachedToolSchemas(service *types.MCPService, principal types.Principal) {
+	m.clientsMu.RLock()
+	defer m.clientsMu.RUnlock()
+	if cached := m.clients[cacheKey(service, principal)]; cached != nil {
+		dropToolSchemas(cached)
+	}
+}
+
 // NewMCPManager creates a new MCP manager. oauthRepo is used to wire per-user
 // OAuth token stores for OAuth-enabled MCP services.
 func NewMCPManager(oauthRepo interfaces.MCPOAuthRepository) *MCPManager {
@@ -418,15 +492,21 @@ func (m *MCPManager) InvalidateToolSchemas(serviceID string, listedBy MCPClient)
 		if client == listedBy {
 			continue
 		}
-		if managed, ok := client.(*managedMCPClient); ok {
-			if managed.MCPClient == listedBy {
-				continue
-			}
-			client = managed.MCPClient
+		if managed, ok := client.(*managedMCPClient); ok && managed.MCPClient == listedBy {
+			continue
 		}
-		if cached, ok := client.(interface{ invalidateToolSchemas() }); ok {
-			cached.invalidateToolSchemas()
-		}
+		dropToolSchemas(client)
+	}
+}
+
+// dropToolSchemas clears a cached connection's header-schema cache, so its next
+// modern CallTool reloads the directory.
+func dropToolSchemas(client MCPClient) {
+	if managed, ok := client.(*managedMCPClient); ok {
+		client = managed.MCPClient
+	}
+	if cached, ok := client.(interface{ invalidateToolSchemas() }); ok {
+		cached.invalidateToolSchemas()
 	}
 }
 

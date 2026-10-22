@@ -60,6 +60,10 @@ type AgentConfig struct {
 	// PromptExpireSeconds is how long a suspended prompt stays answerable.
 	// 0 means default 604800 (7 days); a negative value never expires.
 	PromptExpireSeconds int `yaml:"prompt_expire_seconds" json:"prompt_expire_seconds"`
+	// MCPDirectoryMaxAgeSeconds is how old a saved MCP tool directory may
+	// become before its next use re-lists it from the server. 0 means default
+	// 3600 (1 hour); a negative value turns the age check off.
+	MCPDirectoryMaxAgeSeconds int `yaml:"mcp_directory_max_age_seconds" json:"mcp_directory_max_age_seconds"`
 }
 
 // Defaults for suspendable agent prompts.
@@ -67,6 +71,27 @@ const (
 	DefaultPromptHotWait = 120 * time.Second
 	DefaultPromptExpire  = 7 * 24 * time.Hour
 )
+
+// DefaultMCPDirectoryMaxAge is the default age at which a saved MCP tool
+// directory is re-listed on its next use. A stateless MCP server that is
+// redeployed keeps its existing connections open, so for those servers this
+// age is how soon new tools and instructions reach saved directories. One
+// re-list per user, service and hour costs a connection, an initialize and a
+// tools/list, made in the background.
+const DefaultMCPDirectoryMaxAge = time.Hour
+
+// MCPDirectoryMaxAge returns the age at which a saved MCP tool directory is
+// re-listed on its next use; zero means the age check is off.
+func (c *AgentConfig) MCPDirectoryMaxAge() time.Duration {
+	switch {
+	case c == nil || c.MCPDirectoryMaxAgeSeconds == 0:
+		return DefaultMCPDirectoryMaxAge
+	case c.MCPDirectoryMaxAgeSeconds < 0:
+		return 0
+	default:
+		return time.Duration(c.MCPDirectoryMaxAgeSeconds) * time.Second
+	}
+}
 
 // PromptSuspend reports whether suspendable prompts may suspend their run.
 func (c *AgentConfig) PromptSuspend() bool {
@@ -867,6 +892,16 @@ func applyAgentEnvOverrides(cfg *Config) {
 			cfg.Agent.ToolApprovalTimeoutSeconds = int(d.Seconds())
 		} else if d, err := time.ParseDuration(value + "s"); err == nil {
 			cfg.Agent.ToolApprovalTimeoutSeconds = int(d.Seconds())
+		}
+	}
+	// Age at which a saved MCP tool directory is re-listed on its next use.
+	// Accepts a Go duration or a bare number of seconds; a negative value
+	// turns the age check off.
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_AGENT_MCP_DIRECTORY_MAX_AGE")); value != "" {
+		if d, err := time.ParseDuration(value); err == nil {
+			cfg.Agent.MCPDirectoryMaxAgeSeconds = int(d.Seconds())
+		} else if d, err := time.ParseDuration(value + "s"); err == nil {
+			cfg.Agent.MCPDirectoryMaxAgeSeconds = int(d.Seconds())
 		}
 	}
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_AGENT_PROMPT_SUSPEND")); value != "" {
