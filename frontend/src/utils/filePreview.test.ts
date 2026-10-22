@@ -71,6 +71,35 @@ test('pretty-print helpers only rewrite canonical JSON documents', () => {
   assert.equal(prettyPrintJson('not json'), 'not json')
 })
 
+test('JSON preview preserves numeric literals instead of rounding or replacing them', () => {
+  for (const number of [
+    '9007199254740993', '-9007199254740993', '9223372036854775807',
+    '0.1234567890123456789012345', '1e400', '1e-400', '-0', '1.2300',
+  ]) {
+    assert.equal(prettyPrintJson(`{"value":${number}}`), `{\n  "value": ${number}\n}`, number)
+  }
+})
+
+test('JSON preview formats nested containers without rewriting string contents', () => {
+  // Strings containing JSON punctuation and escaped quotes are indivisible tokens.
+  const ordinary = '{"items":[1,{"text":"a, b: [c] {d}","empty":[]}],"object":{},"ok":true,"nil":null}'
+  assert.equal(prettyPrintJson(ordinary), JSON.stringify(JSON.parse(ordinary), null, 2))
+  const escaped = String.raw`{"text":"comma, colon: quote\" slash\\ newline\n","id":9007199254740993}`
+  assert.equal(prettyPrintJson(escaped), String.raw`{
+  "text": "comma, colon: quote\" slash\\ newline\n",
+  "id": 9007199254740993
+}`)
+})
+
+test('JSON preview preserves top-level values and leaves invalid JSON unchanged', () => {
+  for (const value of ['9007199254740993', '1e400', '-0', 'null', 'true', '"text"', '[]', '{}']) {
+    assert.equal(prettyPrintJson(`  ${value}\n`), value)
+  }
+  for (const value of ['  {"id":01}', '{"id":1,}', '{"id":NaN}', '{"unfinished":', '  \n']) {
+    assert.equal(prettyPrintJson(value), value)
+  }
+})
+
 test('mime and highlight maps cover skill-generated html/csv', () => {
   assert.equal(getPreviewMimeType('html'), 'text/html')
   assert.equal(getPreviewMimeType('csv'), 'text/csv')

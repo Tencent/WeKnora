@@ -277,10 +277,42 @@ export function prettyPrintJson(text: string): string {
   const trimmed = text.trim()
   if (!trimmed) return text
   try {
-    return JSON.stringify(JSON.parse(trimmed), null, 2)
+    // Validate the document, but format its original tokens: serializing the
+    // parsed value rounds large IDs/decimals and turns overflowing numbers into null.
+    JSON.parse(trimmed)
   } catch {
     return text
   }
+  const tokens = trimmed.match(/"(?:\\.|[^"\\])*"|[{}\[\],:]|[^\s{}\[\],:]+/g)!
+  const output: string[] = []
+  let depth = 0
+  const newline = () => output.push('\n', '  '.repeat(depth))
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]
+    if (token === '{' || token === '[') {
+      output.push(token)
+      const closing = token === '{' ? '}' : ']'
+      if (tokens[i + 1] === closing) {
+        output.push(closing)
+        i++
+      } else {
+        depth++
+        newline()
+      }
+    } else if (token === '}' || token === ']') {
+      depth--
+      newline()
+      output.push(token)
+    } else if (token === ',') {
+      output.push(token)
+      newline()
+    } else if (token === ':') {
+      output.push(': ')
+    } else {
+      output.push(token)
+    }
+  }
+  return output.join('')
 }
 
 /**
