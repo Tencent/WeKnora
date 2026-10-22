@@ -38,6 +38,16 @@ func TestIsSupportedImportExtension(t *testing.T) {
 	}{
 		{name: "xlsx", ext: "xlsx", want: true},
 		{name: "xls", ext: "xls", want: true},
+		{name: "xlsm", ext: "xlsm", want: true},
+		{name: "docm", ext: "docm", want: true},
+		{name: "pptm", ext: "pptm", want: true},
+		{name: "odt", ext: "odt", want: true},
+		{name: "ods", ext: "ods", want: true},
+		{name: "odp", ext: "odp", want: true},
+		{name: "rtf", ext: "rtf", want: true},
+		{name: "bmp", ext: "bmp", want: true},
+		{name: "tiff", ext: "tiff", want: true},
+		{name: "webp", ext: "webp", want: true},
 		{name: "csv", ext: "csv", want: true},
 		{name: "dot prefix", ext: ".xlsx", want: true},
 		{name: "uppercase", ext: "XLSX", want: true},
@@ -65,9 +75,10 @@ func TestIsSupportedImportExtension(t *testing.T) {
 // The set is pinned so moving it to internal/utils cannot silently change it.
 func TestImportExtensionSetIsSharedAcrossPaths(t *testing.T) {
 	want := []string{
-		"csv", "doc", "docx", "epub", "flac", "gif", "htm", "html", "jpeg", "jpg",
-		"json", "m4a", "markdown", "md", "mhtml", "mp3", "ogg", "pdf", "png", "ppt",
-		"pptx", "txt", "wav", "xls", "xlsx", "xmind",
+		"bmp", "csv", "doc", "docm", "docx", "epub", "flac", "gif", "htm", "html",
+		"jpeg", "jpg", "json", "m4a", "markdown", "md", "mhtml", "mp3", "odp", "ods",
+		"odt", "ogg", "pdf", "png", "ppt", "pptm", "pptx", "rtf", "tiff", "txt", "wav",
+		"webp", "xls", "xlsm", "xlsx", "xmind",
 	}
 	exts := secutils.SupportedImportExtensions()
 	if !slices.Equal(exts, want) {
