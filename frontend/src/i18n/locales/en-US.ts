@@ -6375,6 +6375,8 @@ export default {
       }
     },
     preview: {
+      tooLarge: 'This spreadsheet is too large to preview safely',
+      tooLargeHint: 'Please use the download button to open it in a local spreadsheet application',
       tab: 'Preview',
       loading: 'Loading document preview...',
       loadFailed: 'Failed to load document preview',
