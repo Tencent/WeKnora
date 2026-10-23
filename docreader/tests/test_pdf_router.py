@@ -1,8 +1,13 @@
 import io
+import os
 import unittest
+from contextlib import contextmanager
+from dataclasses import replace
+from unittest.mock import patch
 
 from PIL import Image
 
+import docreader.parser.pdf_parser as pdf_parser
 from docreader.parser.pdf_parser import (
     PDFParser,
     _classify_page,
@@ -70,6 +75,212 @@ class RenderedPageEncodingTest(unittest.TestCase):
                 "images/scan_page_2.jpg": "cGFnZS10d28=",
             },
         )
+
+
+class PDFStreamTest(unittest.TestCase):
+    def test_router_streams_scanned_pages_without_materializing_images(self):
+        content = _make_image_only_pdf(2)
+        real_render = pdf_parser._render_page_to_jpeg
+
+        with patch.object(
+            pdf_parser,
+            "CONFIG",
+            replace(pdf_parser.CONFIG, pdf_render_parallelism=1),
+        ):
+            with patch.object(
+                pdf_parser,
+                "_render_page_to_jpeg",
+                wraps=real_render,
+            ) as render:
+                stream = PDFParser(file_name="scan.pdf").parse_stream(content)
+                try:
+                    self.assertEqual(stream.image_count, 2)
+                    self.assertEqual(stream.document.images, {})
+                    self.assertEqual(
+                        stream.document.metadata["scanned_page_count"], 2
+                    )
+                    self.assertEqual(render.call_count, 0)
+
+                    image = next(stream.images)
+                    self.assertEqual(image.ref_path, "images/scan_page_1.jpg")
+                    self.assertEqual(render.call_count, 1)
+                finally:
+                    stream.close()
+
+    def test_scanned_pages_are_rendered_lazily_in_bounded_batches(self):
+        content = _make_image_only_pdf(40)
+        real_render = pdf_parser._render_page_to_jpeg
+
+        with patch.object(
+            pdf_parser,
+            "CONFIG",
+            replace(pdf_parser.CONFIG, pdf_render_parallelism=1),
+        ):
+            with patch.object(
+                pdf_parser,
+                "_render_page_to_jpeg",
+                wraps=real_render,
+            ) as render:
+                stream = PDFParser(
+                    file_name="scan.pdf", pdf_force_scanned=True
+                ).parse_stream(content)
+                try:
+                    self.assertEqual(stream.image_count, 40)
+                    self.assertEqual(stream.document.images, {})
+                    self.assertEqual(render.call_count, 0)
+
+                    first = next(stream.images)
+                    self.assertEqual(first.ref_path, "images/scan_page_1.jpg")
+                    self.assertTrue(first.image_data.startswith(b"\xff\xd8"))
+                    self.assertEqual(render.call_count, 1)
+
+                    for _ in range(pdf_parser.PDF_STREAM_RENDER_BATCH_PAGES - 1):
+                        next(stream.images)
+                    self.assertEqual(
+                        render.call_count, pdf_parser.PDF_STREAM_RENDER_BATCH_PAGES
+                    )
+
+                    next_batch = next(stream.images)
+                    expected_next_page = (
+                        pdf_parser.PDF_STREAM_RENDER_BATCH_PAGES + 1
+                    )
+                    self.assertEqual(
+                        next_batch.ref_path,
+                        f"images/scan_page_{expected_next_page}.jpg",
+                    )
+                    self.assertEqual(
+                        render.call_count,
+                        pdf_parser.PDF_STREAM_RENDER_BATCH_PAGES + 1,
+                    )
+                finally:
+                    stream.close()
+
+    def test_parallel_stream_bounds_in_flight_render_results(self):
+        tracker = {
+            "submitted": 0,
+            "pending": 0,
+            "max_pending": 0,
+            "shutdown": False,
+        }
+        events = []
+
+        @contextmanager
+        def tracking_limit(*args, **kwargs):
+            events.append("limit-enter")
+            try:
+                yield
+            finally:
+                events.append("limit-exit")
+
+        class Future:
+            def __init__(self, value):
+                self.value = value
+                self.pending = True
+
+            def result(self):
+                if self.pending:
+                    self.pending = False
+                    tracker["pending"] -= 1
+                return self.value
+
+            def cancel(self):
+                if self.pending:
+                    self.pending = False
+                    tracker["pending"] -= 1
+                return True
+
+        class Executor:
+            def __init__(self, **kwargs):
+                pass
+
+            def submit(self, _fn, args):
+                index = args[0]
+                tracker["submitted"] += 1
+                tracker["pending"] += 1
+                tracker["max_pending"] = max(
+                    tracker["max_pending"], tracker["pending"]
+                )
+                return Future((index, b"jpeg"))
+
+            def shutdown(self, **kwargs):
+                tracker["shutdown"] = True
+                events.append("shutdown")
+
+        with patch.object(pdf_parser, "_select_mp_context", return_value=object()):
+            with patch("concurrent.futures.ProcessPoolExecutor", Executor):
+                with patch.object(
+                    pdf_parser, "parser_worker_limit", tracking_limit
+                ):
+                    images = pdf_parser._iter_scanned_pages_from_path(
+                        "unused.pdf",
+                        list(range(100)),
+                        "scan",
+                        1.0,
+                        85,
+                        0,
+                        4,
+                    )
+                    try:
+                        first = next(images)
+                        self.assertEqual(first.ref_path, "images/scan_page_1.jpg")
+                        self.assertEqual(tracker["submitted"], 9)
+                        self.assertEqual(tracker["pending"], 8)
+                        self.assertEqual(tracker["max_pending"], 8)
+
+                        second = next(images)
+                        self.assertEqual(second.ref_path, "images/scan_page_2.jpg")
+                        self.assertLessEqual(tracker["pending"], 8)
+                    finally:
+                        images.close()
+
+        self.assertEqual(tracker["pending"], 0)
+        self.assertTrue(tracker["shutdown"])
+        self.assertLess(events.index("shutdown"), events.index("limit-exit"))
+
+    def test_unconsumed_stream_removes_temporary_pdf(self):
+        content = _make_image_only_pdf(2)
+        real_write = pdf_parser._write_pdf_temp_file
+        created_paths = []
+
+        def record_temp_path(pdf_bytes):
+            path = real_write(pdf_bytes)
+            created_paths.append(path)
+            return path
+
+        with patch.object(
+            pdf_parser,
+            "CONFIG",
+            replace(pdf_parser.CONFIG, pdf_render_parallelism=1),
+        ):
+            with patch.object(
+                pdf_parser,
+                "_write_pdf_temp_file",
+                side_effect=record_temp_path,
+            ):
+                stream = PDFParser(
+                    file_name="scan.pdf", pdf_force_scanned=True
+                ).parse_stream(content)
+                temp_path = created_paths[0]
+                try:
+                    self.assertTrue(os.path.exists(temp_path))
+                finally:
+                    stream.close()
+                self.assertFalse(os.path.exists(temp_path))
+
+    def test_unary_pdf_parser_still_collects_scanned_images(self):
+        content = _make_image_only_pdf(2)
+        with patch.object(
+            pdf_parser,
+            "CONFIG",
+            replace(pdf_parser.CONFIG, pdf_render_parallelism=1),
+        ):
+            document = PDFParser(
+                file_name="scan.pdf", pdf_force_scanned=True
+            ).parse_into_text(content)
+
+        self.assertEqual(len(document.images), 2)
+        self.assertIn("images/scan_page_1.jpg", document.images)
+        self.assertIn("images/scan_page_2.jpg", document.images)
 
 
 class StripRepeatingLinesTest(unittest.TestCase):
