@@ -1339,6 +1339,112 @@ func (h *KnowledgeBaseHandler) GenerateKnowledgeBaseProfile(c *gin.Context) {
 // model call.
 const knowledgeBaseProfileRequestTimeout = 2 * time.Minute
 
+// RebuildKBIndex godoc
+// @Summary      重建知识库索引
+// @Description  把知识库内全部文档重新入队解析（跳过迁移中的条目），以应用最新的索引策略；后台异步执行
+// @Tags         知识库
+// @Produce      json
+// @Param        id   path      string  true  "知识库ID"  extensions(x-agent=knowledge_base_id)
+// @Success      200  {object}  handler.SubmittedTaskResponse  "任务已提交"
+// @Failure      400  {object}  errors.AppError  "请求参数错误"
+// @Failure      403  {object}  errors.AppError  "无权更新知识库"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge_base.rebuild_index","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Reparses every document of the knowledge base in the background to apply changed indexing strategy toggles (vector/keyword/wiki/graph); check progress afterwards with knowledge.list parse_status. Search results change meanwhile."
+// @Router       /knowledge-bases/{id}/rebuild-index [post]
+func (h *KnowledgeBaseHandler) RebuildKBIndex(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// Same admission shape as the other KB write routes: the route guards
+	// (OwnedKBOrAdmin + KBAccessWrite) already ran; here we re-check the
+	// resolved permission and switch to the KB's owning tenant so shared-KB
+	// editors list and enqueue against the owner's documents.
+	_, kbID, effectiveTenantID, permission, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		_ = c.Error(apperrors.NewForbiddenError("No permission to update knowledge base"))
+		return
+	}
+	ctx = types.WithExecutionTenant(ctx, effectiveTenantID)
+
+	knowledgeList, err := h.knowledgeService.ListKnowledgeByKnowledgeBaseID(ctx, kbID)
+	if err != nil {
+		logger.Errorf(ctx, "failed to list knowledge for index rebuild, kb_id: %s, err: %v",
+			secutils.SanitizeForLog(kbID), err)
+		_ = c.Error(apperrors.NewInternalServerError("failed to list knowledge for index rebuild"))
+		return
+	}
+
+	// Documents mid-transfer are skipped rather than failing the whole
+	// rebuild, mirroring the per-document admission in the reparse route.
+	ids := make([]string, 0, len(knowledgeList))
+	skippedMoving := 0
+	for _, k := range knowledgeList {
+		if err := access.RejectMovingKnowledge(k); err != nil {
+			skippedMoving++
+			continue
+		}
+		ids = append(ids, k.ID)
+	}
+
+	// Enqueue in batches sized like the batch-reparse API cap; nil process
+	// overrides keep each document's upload-time parse settings, while the
+	// KB-level indexing strategy is read fresh by the processing pipeline.
+	const rebuildBatchSize = 200
+	taskIDs := make([]string, 0, (len(ids)+rebuildBatchSize-1)/rebuildBatchSize)
+	for start := 0; start < len(ids); start += rebuildBatchSize {
+		end := start + rebuildBatchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		payload := types.KnowledgeListReparsePayload{
+			KnowledgeBaseID: kbID,
+			TenantID:        effectiveTenantID,
+			KnowledgeIDs:    ids[start:end],
+			Initiator:       types.TaskInitiatorFromContext(ctx),
+		}
+		langfuse.InjectTracing(ctx, &payload)
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			logger.Errorf(ctx, "failed to marshal rebuild payload, kb_id: %s, err: %v",
+				secutils.SanitizeForLog(kbID), err)
+			_ = c.Error(apperrors.NewInternalServerError("Failed to enqueue rebuild index task"))
+			return
+		}
+		task := asynq.NewTask(types.TypeKnowledgeListReparse, payloadBytes,
+			asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(3), asynq.Timeout(time.Hour))
+		info, err := h.asynqClient.Enqueue(task)
+		if err != nil {
+			logger.Errorf(ctx, "failed to enqueue index rebuild task, kb_id: %s, err: %v",
+				secutils.SanitizeForLog(kbID), err)
+			_ = c.Error(apperrors.NewInternalServerError("Failed to enqueue rebuild index task"))
+			return
+		}
+		taskIDs = append(taskIDs, info.ID)
+	}
+
+	logger.Infof(ctx, "Index rebuild tasks enqueued: kb_id: %s, tasks: %d, documents: %d, skipped: %d",
+		secutils.SanitizeForLog(kbID), len(taskIDs), len(ids), skippedMoving)
+
+	data := gin.H{
+		"document_count": len(ids),
+		"skipped_moving": skippedMoving,
+		"task_count":     len(taskIDs),
+	}
+	if len(taskIDs) > 0 {
+		data["task_id"] = taskIDs[0]
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Rebuild index tasks submitted",
+		"data":    data,
+	})
+}
+
 // DeleteKnowledgeBase godoc
 // @Summary      删除知识库
 // @Description  删除指定的知识库及其所有内容
