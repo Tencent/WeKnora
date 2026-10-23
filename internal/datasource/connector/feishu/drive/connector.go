@@ -31,8 +31,10 @@ func NewDriveConnector(region core.Region) *DriveConnector {
 
 // Drive supports resumable streaming sync; the service prefers FetchStream over
 // FetchAll/FetchIncremental when a connector implements StreamingConnector.
-var _ datasource.StreamingConnector = (*DriveConnector)(nil)
-var _ datasource.FullStreamingConnector = (*DriveConnector)(nil)
+var (
+	_ datasource.StreamingConnector     = (*DriveConnector)(nil)
+	_ datasource.FullStreamingConnector = (*DriveConnector)(nil)
+)
 
 // Type returns the connector type identifier.
 func (c *DriveConnector) Type() string {
@@ -309,11 +311,12 @@ func (c *DriveConnector) FetchFullStream(
 // being synced. List builds the state; Fetch reads it. runSync processes one
 // resource at a time, so the mutation is race-free.
 type driveOps struct {
-	region      core.Region
-	parseMode   string
-	folderNames map[string]string
-	dirPaths    map[string]string
-	rootEntries map[string][]core.DriveFile // successful shallow listings, per run
+	recursiveState *core.RecursiveState
+	region         core.Region
+	parseMode      string
+	folderNames    map[string]string
+	dirPaths       map[string]string
+	rootEntries    map[string][]core.DriveFile // successful shallow listings, per run
 }
 
 func (o *driveOps) List(ctx context.Context, client *core.Client, resourceID string) ([]core.DriveFile, error, error) {
@@ -342,10 +345,14 @@ func (o *driveOps) Fetch(
 	if err != nil {
 		return nil, err
 	}
+	linked, err := o.RefreshUnchanged(ctx, client, n, resourceID)
+	if err != nil {
+		return nil, err
+	}
 	// P1 directory mapping: prefix the FileName with the containing folder's
 	// cleaned directory path so ingestion derives the KB folder_path from it.
 	qualifyItemFileNames(items, o.dirPaths[n.ParentToken])
-	return items, nil
+	return append(items, linked...), nil
 }
 
 func (o *driveOps) ListFailureItems(resourceID string, partial error) []types.FetchedItem {
@@ -373,11 +380,17 @@ func (o *driveOps) DecodeCursorTimes(m map[string]interface{}) map[string]map[st
 	var prev core.FeishuDriveCursor
 	b, _ := json.Marshal(m)
 	_ = json.Unmarshal(b, &prev)
+	if state := o.RecursiveSyncState(); state != nil {
+		state.LoadPrevious(prev.RecursiveExternalIDs)
+	}
 	return prev.FileTimes
 }
 
 func (o *driveOps) EncodeCursor(times map[string]map[string]string, lastSync time.Time) *types.SyncCursor {
 	fc := core.FeishuDriveCursor{LastSyncTime: lastSync, FileTimes: times}
+	if state := o.RecursiveSyncState(); state != nil {
+		fc.RecursiveExternalIDs = state.CursorIDs()
+	}
 	m := make(map[string]interface{})
 	b, _ := json.Marshal(fc)
 	_ = json.Unmarshal(b, &m)
