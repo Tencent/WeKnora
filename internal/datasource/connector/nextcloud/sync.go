@@ -46,8 +46,10 @@ func (*Connector) runSync(
 	if err != nil {
 		return nil, err
 	}
-	r := &syncRun{ctx: ctx, client: newClient(cfg), cfg: cfg, h: h, cur: cur,
-		seen: make(map[string]bool), limit: utils.GetMaxFileSize(), unsaved: 1}
+	r := &syncRun{
+		ctx: ctx, client: newClient(cfg), cfg: cfg, h: h, cur: cur,
+		seen: make(map[string]bool), limit: utils.GetMaxFileSize(), unsaved: 1,
+	}
 	defer r.client.http.CloseIdleConnections()
 	for _, root := range roots {
 		if err := r.scanRoot(root); err != nil {
@@ -241,12 +243,14 @@ func fetchReason(err error) string {
 }
 
 func (r *syncRun) identity(e entry) types.FetchedItem {
-	return types.FetchedItem{ExternalID: externalID(r.cur.Scope, e.Path),
-		Title: "Nextcloud" + e.Path, FileName: knowledgeFileName(e.Path), UpdatedAt: e.ModifiedAt,
+	return types.FetchedItem{
+		ExternalID: externalID(r.cur.Scope, e.Path),
+		Title:      "Nextcloud" + e.Path, FileName: knowledgeFileName(e.Path), UpdatedAt: e.ModifiedAt,
 		SourceResourceID: "/", Metadata: map[string]string{
 			"channel": types.ChannelNextcloud, "source_type": "nextcloud", "nextcloud_path": e.Path,
 			"nextcloud_file_id": e.FileID, "nextcloud_etag": e.ETag, "nextcloud_size": strconv.FormatInt(e.Size, 10),
-		}}
+		},
+	}
 }
 
 // Only a complete traversal can establish absence. Persist additions before

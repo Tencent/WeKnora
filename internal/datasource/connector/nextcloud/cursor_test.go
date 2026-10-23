@@ -22,7 +22,8 @@ func TestCursorBindingAndSchema(t *testing.T) {
 		t.Fatalf("account switch = %v", err)
 	}
 	for _, fields := range []map[string]any{
-		{"schema_version": 99}, {"schema_version": 1, "files": "wrong"},
+		{"schema_version": 99},
+		{"schema_version": 1, "files": "wrong"},
 		{"schema_version": 1, "files": map[string]string{"/../outside": "v1"}},
 	} {
 		_, err := decodeCursor(&types.SyncCursor{ConnectorCursor: fields})

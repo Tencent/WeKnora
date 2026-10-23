@@ -82,8 +82,10 @@ func (*Connector) ListResources(
 		if e.Path == "/" {
 			name = "Nextcloud"
 		}
-		out = append(out, types.Resource{ExternalID: e.Path, Name: name, Type: kind,
-			ParentID: parentID, HasChildren: e.IsDir, ModifiedAt: e.ModifiedAt})
+		out = append(out, types.Resource{
+			ExternalID: e.Path, Name: name, Type: kind,
+			ParentID: parentID, HasChildren: e.IsDir, ModifiedAt: e.ModifiedAt,
+		})
 	}
 	return out, nil
 }
@@ -127,9 +129,9 @@ func (c *Connector) FetchAll(
 	if ds == nil {
 		return nil, datasource.ErrInvalidConfig
 	}
-	copy := *ds
-	copy.ResourceIDs = ids
-	items, _, err := c.FetchIncremental(ctx, &copy, nil)
+	configCopy := *ds
+	configCopy.ResourceIDs = ids
+	items, _, err := c.FetchIncremental(ctx, &configCopy, nil)
 	return items, err
 }
 

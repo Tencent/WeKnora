@@ -16,8 +16,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-const testPassword = "app-password-for-tests"
-const testDAVPrefix = "/cloud/remote.php/dav/files/alice"
+const (
+	testPassword  = "app-password-for-tests"
+	testDAVPrefix = "/cloud/remote.php/dav/files/alice"
+)
 
 type fakeNode struct {
 	dir                bool

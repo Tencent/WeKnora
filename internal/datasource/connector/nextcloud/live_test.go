@@ -11,8 +11,10 @@ import (
 // folder with at least one supported, non-empty file. No environment values or
 // live filenames are printed. Private deployments use the normal SSRF policy.
 func TestLive(t *testing.T) {
-	for _, key := range []string{"NEXTCLOUD_LIVE_URL", "NEXTCLOUD_LIVE_USER",
-		"NEXTCLOUD_LIVE_APP_PASSWORD", "NEXTCLOUD_LIVE_ROOT"} {
+	for _, key := range []string{
+		"NEXTCLOUD_LIVE_URL", "NEXTCLOUD_LIVE_USER",
+		"NEXTCLOUD_LIVE_APP_PASSWORD", "NEXTCLOUD_LIVE_ROOT",
+	} {
 		if os.Getenv(key) == "" {
 			t.Skip("set all NEXTCLOUD_LIVE_* variables to enable the read-only live test")
 		}

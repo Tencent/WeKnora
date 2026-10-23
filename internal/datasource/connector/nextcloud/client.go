@@ -29,11 +29,11 @@ const (
 )
 
 var (
-	errInvalidResponse = errors.New("Nextcloud returned an invalid or incomplete WebDAV response")
-	errSSRFBlocked     = errors.New("Nextcloud request blocked by SSRF policy")
-	errTooLarge        = errors.New("Nextcloud file exceeds the size limit")
-	errEmptyFile       = errors.New("Nextcloud file is empty")
-	errSourceChanged   = errors.New("Nextcloud file changed while being fetched")
+	errInvalidResponse = errors.New("nextcloud returned an invalid or incomplete WebDAV response")
+	errSSRFBlocked     = errors.New("nextcloud request blocked by SSRF policy")
+	errTooLarge        = errors.New("nextcloud file exceeds the size limit")
+	errEmptyFile       = errors.New("nextcloud file is empty")
+	errSourceChanged   = errors.New("nextcloud file changed while being fetched")
 )
 
 type client struct {
@@ -49,8 +49,10 @@ func newClient(cfg config) *client {
 	// Basic credentials must never follow redirects to another origin, even
 	// when that origin is explicitly allowed by the shared SSRF whitelist.
 	policy.SameOriginRedirectsOnly = true
-	return &client{base: u, davPrefix: u.Path + "/remote.php/dav/files/" + cfg.username,
-		username: cfg.username, password: cfg.password, http: utils.NewSSRFSafeHTTPClient(policy)}
+	return &client{
+		base: u, davPrefix: u.Path + "/remote.php/dav/files/" + cfg.username,
+		username: cfg.username, password: cfg.password, http: utils.NewSSRFSafeHTTPClient(policy),
+	}
 }
 
 // httpError exposes only an operation and status. Response bodies and URL
@@ -226,8 +228,10 @@ func (c *client) parseEntry(response davResponse) (entry, error) {
 			props.Resource = stat.Prop.Resource
 		}
 		for _, pair := range [][2]**string{
-			{&props.ETag, &stat.Prop.ETag}, {&props.Modified, &stat.Prop.Modified},
-			{&props.Size, &stat.Prop.Size}, {&props.FileID, &stat.Prop.FileID},
+			{&props.ETag, &stat.Prop.ETag},
+			{&props.Modified, &stat.Prop.Modified},
+			{&props.Size, &stat.Prop.Size},
+			{&props.FileID, &stat.Prop.FileID},
 		} {
 			if *pair[1] != nil {
 				if *pair[0] != nil && **pair[0] != **pair[1] {
