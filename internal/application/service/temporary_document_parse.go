@@ -110,7 +110,7 @@ func (s *temporaryDocumentService) Process(ctx context.Context, task *asynq.Task
 		}
 		message := parseErr.Error()
 		if len(message) > 2000 {
-			message = message[:2000]
+			message = common.TruncateUTF8Bytes(message, 2000)
 		}
 		_ = s.repo.MarkFailed(ctx, payload.TenantID, payload.DocumentID, message)
 		logger.Errorf(ctx, "temporary document parse failed: document_id=%s err=%v", payload.DocumentID, parseErr)

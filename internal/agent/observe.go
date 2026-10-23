@@ -358,7 +358,7 @@ func isNaturalStopFinishReason(reason string) bool {
 // validation (missing path, unexpected end of JSON, etc.).
 func isLengthFinishReason(reason string) bool {
 	switch strings.ToLower(strings.TrimSpace(reason)) {
-	case "length", "max_tokens", "max_output_tokens":
+	case "length", "max_tokens", "max_output_tokens", "model_context_window_exceeded":
 		return true
 	default:
 		return false

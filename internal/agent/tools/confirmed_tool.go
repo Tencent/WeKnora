@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/hitl"
 	"github.com/Tencent/WeKnora/internal/agent/operations"
+	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -67,10 +68,18 @@ func (t *ConfirmedTool) Parameters() json.RawMessage { return t.inner.Parameters
 func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	meta, _ := ToolExecFromContext(ctx)
 	resumed := meta != nil && meta.Answered != nil && meta.Answered.Kind == types.AgentPromptKindToolApproval
-	if !resumed && !t.access.NeedsApprovalFor(t.risk) {
+	action := policy.Action{Risk: t.risk}
+	verdict := policy.Decide(action, t.access.Rules())
+	policy.Record(ctx, t.Name(), action, t.access.Rules(), verdict)
+	if verdict == policy.Deny {
+		return operationFailure(fmt.Sprintf(
+			"%s changes data, which this conversation's read-only access does not allow. "+
+				"Tell the user; do not retry.", t.Name())), nil
+	}
+	if !resumed && verdict == policy.Allow {
 		return t.inner.Execute(ctx, args)
 	}
-	if t.gate == nil || meta == nil || meta.EventBus == nil || (!meta.Interactive && !resumed) {
+	if t.gate == nil || meta == nil || meta.EventBus == nil || (!meta.CanAsk() && !resumed) {
 		return operationFailure(fmt.Sprintf(
 			"%s changes data and needs the user's confirmation, which cannot be shown here. "+
 				"Tell the user what you would do and let them do it in WeKnora.", t.Name())), nil
@@ -112,6 +121,7 @@ func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 			ToolCallID:         meta.ToolCallID,
 			Grant:              grant,
 			GrantScope:         grantScope,
+			GrantRisk:          t.risk,
 		})
 		if err != nil {
 			return operationFailure(fmt.Sprintf("could not ask the user to confirm %s: %v", t.Name(), err)), nil
@@ -173,9 +183,10 @@ type approvalGranter interface {
 	ApprovalGrant(ctx context.Context, args json.RawMessage) (grant, scope string)
 }
 
-// grant offers a session-wide approval only for recoverable changes.
+// grant names the call for remembered grants. The card offers to remember
+// only recoverable changes; a destructive one can match a standing grant.
 func (t *ConfirmedTool) grant(ctx context.Context, args json.RawMessage) (string, string) {
-	if t.risk != operations.RiskWrite {
+	if !policy.Pregrantable(policy.Action{Risk: t.risk}) {
 		return "", ""
 	}
 	if g, ok := t.inner.(approvalGranter); ok {

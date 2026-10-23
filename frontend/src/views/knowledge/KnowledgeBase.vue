@@ -582,26 +582,17 @@ const applyOptimisticBatchReparse = (ids: string[]) => {
   }
 };
 
-const syncReparseAckFromServer = (ids: string[]) => {
-  for (const id of ids) {
-    if (!pendingReparseAck.value.has(id)) continue;
-    const card = cardList.value.find((c) => c.id === id);
-    if (card && isParseInFlight(card.parse_status)) {
-      pendingReparseAck.value.delete(id);
-    }
-  }
-};
-
 const awaitBatchReparseReflection = async (ids: string[]) => {
+  // updateStatus already polls in-flight rows and acknowledges the worker.
+  // Only bound the optimistic window here: reloading page 1 discards loaded
+  // pages, flashes the list spinner and can refresh a different folder/KB.
   const maxPolls = 30;
   const delayMs = 400;
-  for (let i = 0; i < maxPolls && pendingReparseAck.value.size > 0; i++) {
-    await loadKnowledgeFiles(kbId.value);
-    syncReparseAckFromServer(ids);
-    applyOptimisticBatchReparse(Array.from(pendingReparseAck.value));
+  for (let i = 0; i < maxPolls && ids.some(id => pendingReparseAck.value.has(id)); i++) {
     await new Promise<void>((r) => setTimeout(r, delayMs));
   }
-  pendingReparseAck.value.clear();
+  // Another batch may have been submitted while this one was waiting.
+  ids.forEach(id => pendingReparseAck.value.delete(id));
 };
 
 const confirmBatchReparse = async () => {
@@ -2449,7 +2440,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
             </div>
           </div>
           <p v-if="kbInfo?.description" class="document-subtitle">{{ kbInfo.description }}</p>
-          <p v-if="unsupportedFileTypes.length" class="parser-hint" @click="goToParserSettings">
+          <p v-if="canEdit && unsupportedFileTypes.length" class="parser-hint" @click="goToParserSettings">
             <t-icon name="info-circle" class="parser-hint-icon" />
             <span>{{$t('knowledgeBase.unsupportedTypesHint', {
               types: unsupportedFileTypes.map(t => '.' + t).join('、')
@@ -2912,16 +2903,28 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
   container-name: doc-card-area;
 }
 
-// One navigation row; filters open in a single anchored panel.
+// Wrap by content as well as pane width: long paths must not squeeze out actions.
 .doc-filter-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   flex-shrink: 0;
   padding: 0 0 16px;
   border-bottom: 1px solid var(--td-component-stroke);
-  &__trailing { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  &__trailing {
+    display: flex;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: 0;
+    max-width: 100%;
+    margin-left: auto;
+    > :not(.doc-search-input) { flex-shrink: 0; }
+  }
   .doc-search-input { width: 220px; min-width: 100px; }
   :deep(.doc-search-input .t-input) {
     background: transparent;
@@ -2940,6 +2943,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 }
 .doc-folder-path {
   display: flex;
+  flex: 1 1 auto;
   align-items: baseline;
   gap: 6px;
   min-width: 0;

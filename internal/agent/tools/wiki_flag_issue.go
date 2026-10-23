@@ -50,7 +50,8 @@ This will log an issue for human review or automated maintenance.`,
     "suspected_knowledge_ids": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Optional list of short dN document IDs from the <sources> block that you suspect are causing the pollution or error."
+      "description": "Optional list of doc://N document handles from the <sources> `+
+				`block that you suspect are causing the pollution or error."
     }
   },
   "required": ["slug", "issue_type", "description"]

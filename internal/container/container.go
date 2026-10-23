@@ -56,6 +56,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/memory"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/application/service/sandboxalloc"
 	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -96,6 +97,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/admission"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/stream"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -183,6 +185,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewAgentPromptRepository))
+	must(container.Provide(repository.NewAgentGrantRepository))
 	must(container.Provide(repository.NewAgentRunSuspensionRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
 	must(container.Provide(repository.NewTenantSandboxConfigRepository))
@@ -202,6 +205,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMemoryRepository))
 	must(container.Provide(repository.NewTaskPendingOpsRepository))
 	must(container.Provide(repository.NewTaskDeadLetterRepository))
+	must(container.Provide(repository.NewSandboxAllocationRepository))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
@@ -231,7 +235,22 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		}
 		return b
 	}))
+	must(container.Provide(newAdmissionRegistry))
+	must(container.Provide(newSessionBindingStore))
 	must(container.Provide(newTenantSandboxResolver))
+	// The resolver admits user-mode sessions, so the allocation service has to
+	// exist before the first Invoke that builds a TenantSandboxResolver
+	// (the chat pipeline plugins construct SessionService, which does).
+	must(container.Provide(func(
+		repo interfaces.SandboxAllocationRepository,
+		configs repository.TenantSandboxConfigRepository,
+		sessions interfaces.SessionRepository,
+	) *sandboxalloc.Service {
+		return sandboxalloc.New(repo, configs, sessions, sandboxRedisNamespace())
+	}))
+	must(container.Provide(newBackgroundActivityRegistry))
+	must(container.Provide(newBackgroundNoticeInbox))
+	must(container.Provide(service.NewBackgroundWork))
 
 	// Business service layer
 	logger.Debugf(ctx, "[Container] Registering business services...")
@@ -307,7 +326,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewStorageBackendRepository))
 	must(container.Provide(repository.NewResourceRepository))
 	must(container.Provide(repository.NewTemporaryDocumentRepository))
-	must(container.Provide(service.NewResourceCatalog))
+	must(container.Provide(service.NewResourceCatalogWithStorage))
 	// TenantStoreOwnership adapter used by the retriever factory functions
 	// to verify that a resolved VectorStore belongs to the caller's tenant.
 	must(container.Provide(retriever.NewVectorStoreRepoOwnership))
@@ -327,6 +346,15 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewStorageBackendServiceWithResources))
 	must(container.Provide(func(s *service.StorageBackendService) interfaces.StorageBackendService { return s }))
 	must(container.Provide(func(s *service.StorageBackendService) interfaces.StorageBackendResolver { return s }))
+	// Config deletion drains in-flight creates on the same admission registry
+	// the resolver injects into managers, then drops that config's machines.
+	must(container.Invoke(func(
+		svc *service.TenantSandboxConfigService,
+		repo interfaces.SandboxAllocationRepository,
+		reg admission.Registry,
+	) {
+		svc.WithAllocationRepo(repo).WithAdmission(reg)
+	}))
 
 	// Agent service layer (requires event bus, web search service)
 	// SessionService is passed as parameter to CreateAgentEngine method when creating AgentService
@@ -348,8 +376,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewSuspendedRunService))
 	must(container.Provide(func(
 		cfg *config.Config, s interfaces.MCPToolApprovalService, broker *hitl.Broker,
+		grants interfaces.AgentGrantRepository,
 	) *approval.Gate {
-		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, broker)
+		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, broker).WithGrants(grants)
 	}))
 	// Expose Gate as MCPApproval interface so AgentService and others can depend on the abstraction.
 	must(container.Provide(func(g *approval.Gate) approval.MCPApproval { return g }))
@@ -366,6 +395,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(operations.NewHandlerDispatcher))
 	// Collaboration workers bind SessionService after the dependency graph is built.
 	must(container.Provide(service.NewAgentCollaboration))
+	must(container.Provide(service.NewNotificationService))
+	must(container.Provide(service.NewAutomationService))
 	must(container.Provide(service.NewAgentService))
 
 	// Session service (depends on agent service)
@@ -406,14 +437,16 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	) *service.PinnedSessionSandbox {
 		return service.NewPinnedSessionSandbox(pinner, resolver, mgr, host)
 	}))
+	must(container.Provide(newShellJobService))
 	must(container.Provide(func(
 		mgr sandbox.Manager,
 		pinned *service.PinnedSessionSandbox,
+		activity interfaces.ActivityRegistry,
 	) *service.WorkspaceCheckpointer {
 		if runner, ok := mgr.(service.SandboxShellRunner); ok {
-			return service.NewWorkspaceCheckpointer(runner)
+			return service.NewWorkspaceCheckpointer(runner).WithActivityRegistry(activity)
 		}
-		return service.NewWorkspaceCheckpointer(pinned)
+		return service.NewWorkspaceCheckpointer(pinned).WithActivityRegistry(activity)
 	}))
 	must(container.Provide(func(
 		mgr sandbox.Manager,
@@ -440,6 +473,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		return pinned
 	}))
 	must(container.Provide(service.NewSessionForkServiceFromRepos))
+	must(container.Invoke(func(f *service.SessionForkService, a *sandboxalloc.Service) {
+		f.WithAllocations(a)
+	}))
 	must(container.Provide(func(
 		mgr sandbox.Manager,
 		pinned *service.PinnedSessionSandbox,
@@ -542,6 +578,61 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// it), but Invoke constructs the whole chain. SessionService needs
 	// *chatpipeline.EventManager, which only exists after the pipeline
 	// block above — starting the reaper any earlier panics.
+	// The allocation service itself is provided before the resolver: the
+	// pipeline Invokes above construct SessionService, which needs it.
+	must(container.Invoke(func(
+		p *service.SessionSandboxPinner, skills *service.TenantSkillService, a *sandboxalloc.Service,
+	) {
+		p.WithPlacer(a)
+		skills.WithPlacer(a)
+	}))
+	// Tombstones are allocation rows. Wire the cleaner only where a remote
+	// sandbox config can be resolved. Lite and host stay unwired, so a delete
+	// there does not write one.
+	must(container.Provide(sandboxalloc.NewWorkspaceCleaner))
+	must(container.Invoke(func(
+		s interfaces.SessionService,
+		c *sandboxalloc.WorkspaceCleaner,
+		resolver sandbox.TenantSandboxResolver,
+	) {
+		if handler.Edition == "lite" || resolver == nil {
+			return
+		}
+		if svc, ok := s.(interface {
+			WithWorkspaceCleaner(*sandboxalloc.WorkspaceCleaner)
+		}); ok {
+			svc.WithWorkspaceCleaner(c)
+		}
+	}))
+	// Deleting a Web account retires that account's sessions before the user
+	// row goes. Lite and host stay unwired, same as session deletion, so a
+	// delete there does not write allocation rows.
+	must(container.Invoke(func(
+		u interfaces.UserService,
+		c *sandboxalloc.WorkspaceCleaner,
+		resolver sandbox.TenantSandboxResolver,
+	) {
+		if handler.Edition == "lite" || resolver == nil {
+			return
+		}
+		if svc, ok := u.(interface {
+			WithSandboxReleaser(service.SandboxOwnerReleaser)
+		}); ok {
+			svc.WithSandboxReleaser(c)
+		}
+	}))
+	// Admin release uses the same cleaner. Lite and host stay unwired, so
+	// those editions do not gain a path that writes allocation rows.
+	must(container.Invoke(func(
+		cfgSvc *service.TenantSandboxConfigService,
+		cleaner *sandboxalloc.WorkspaceCleaner,
+		resolver sandbox.TenantSandboxResolver,
+	) {
+		if handler.Edition == "lite" || resolver == nil {
+			return
+		}
+		cfgSvc.WithUserMachineReleaser(cleaner)
+	}))
 	must(container.Invoke(startTenantSkillReaper))
 	logger.Debugf(ctx, "[Container] Tenant skill reaper registered")
 	must(
@@ -567,6 +658,18 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	}))
 	must(container.Invoke(startForkSnapshotReaper))
 	logger.Debugf(ctx, "[Container] Fork snapshot reaper registered")
+	must(container.Provide(func(
+		svc *sandboxalloc.Service, cleaner *sandboxalloc.WorkspaceCleaner,
+		configs repository.TenantSandboxConfigRepository, redisClient *redis.Client,
+	) *sandboxalloc.UserMachineGC {
+		var client redis.UniversalClient
+		if redisClient != nil {
+			client = redisClient
+		}
+		return sandboxalloc.NewUserMachineGC(svc, cleaner, configs, client)
+	}))
+	must(container.Invoke(startUserMachineGC))
+	logger.Debugf(ctx, "[Container] User machine GC registered")
 
 	// HTTP handlers layer
 	logger.Debugf(ctx, "[Container] Registering HTTP handlers...")
@@ -603,32 +706,48 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		gate *approval.Gate,
 		models interfaces.ModelService,
 		agents interfaces.AgentShareService,
+		grants interfaces.AgentGrantRepository,
 	) *handler.MCPServiceHandler {
-		return handler.NewMCPServiceHandler(mcpService, toolApprovals, gate, models, agents)
+		return handler.NewMCPServiceHandler(mcpService, toolApprovals, gate, models, agents).WithGrants(grants)
 	}))
 	must(container.Invoke(func(
 		sessions *session.Handler, mcp *handler.MCPServiceHandler,
 		broker *hitl.Broker, runs *service.SuspendedRunService, rewind *service.SessionRewindService,
-		collaboration *service.AgentCollaboration,
+		collaboration *service.AgentCollaboration, automations *service.AutomationService,
+		sessionService interfaces.SessionService,
 		messages *handler.MessageHandler, gate *approval.Gate, streams interfaces.StreamManager,
 	) {
 		rewind.SetSuspendedRuns(runs)
 		sessions.SetSuspendedRuns(broker, runs)
 		sessions.SetCollaborationStopper(collaboration.Stop)
-		sessions.SetDelegatedPromptRouter(collaboration.HandlesPrompt)
+		// Automation runs resume under their automation, delegated ones
+		// through the collaboration scheduler; neither as an ordinary chat.
+		sessions.SetDelegatedPromptRouter(func(ctx context.Context, p *types.AgentPrompt) bool {
+			return automations.HandlesPrompt(ctx, p) || collaboration.HandlesPrompt(ctx, p)
+		})
 		messages.DelegatedPrompts = collaboration.PendingPrompts
 		messages.CollaborationStatuses = collaboration.HistoryStatuses
 		collaboration.BindRecovery(broker, gate, streams)
 		collaboration.ParentEvents = sessions.CollaborationEvents
 		collaboration.ChildEvents = sessions.CollaborationEvents
 		collaboration.ParentSteer = sessions.CollaborationSteer
-		runs.RecoverAnswered = collaboration.RecoverAnswered
+		runs.RecoverAnswered = func(ctx context.Context, p *types.AgentPrompt) (bool, error) {
+			if ok, err := automations.RecoverAnswered(ctx, p); ok || err != nil {
+				return ok, err
+			}
+			return collaboration.RecoverAnswered(ctx, p)
+		}
+		automations.Bind(sessionService, broker, runs, streams)
+		automations.Events = sessions.CollaborationEvents
+		automations.StopDelegation = collaboration.StopOwned
 		broker.SetRunHooks(runs.Hooks())
 		runs.StopDelegation = func(ctx context.Context, p *types.AgentPrompt) error {
 			return collaboration.StopPrompt(ctx, p)
 		}
 		mcp.SetRunResumer(sessions)
+		mcp.SetScheduledPromptRouter(automations.HandlesPrompt)
 		collaboration.Runtime.Start(context.Background())
+		automations.Start(context.Background())
 	}))
 	// Start only after the delegation close hook is installed.
 	must(container.Invoke(startAgentPromptReaper))
@@ -650,6 +769,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	}))
 	must(container.Provide(handler.NewOrganizationHandler))
 	must(container.Provide(handler.NewMemoryHandler))
+	must(container.Provide(handler.NewAutomationHandler))
 
 	// Data source handler
 	must(container.Provide(handler.NewDataSourceHandler))
@@ -690,6 +810,14 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// the daemon alive until the process is killed.
 	must(container.Invoke(func(cleaner interfaces.ResourceCleaner, _ *browserskill.Manager) {
 		cleaner.Promote("BrowserSkill")
+	}))
+	must(container.Invoke(startShellJobSweeper))
+	// Background shell jobs shut down before the database and streams: their
+	// watchers write terminal state locally and must not race the cleanup that
+	// follows. Cleanup runs in reverse, so promote runs them first. A missing
+	// name is a no-op, so the web build can invoke this without a local hook.
+	must(container.Invoke(func(cleaner interfaces.ResourceCleaner, _ *service.ShellJobService) {
+		cleaner.Promote("LocalShellJobs")
 	}))
 
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
@@ -934,6 +1062,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		NowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
+		Logger: newGormLogger(os.Stdout),
 	})
 	if err != nil {
 		return nil, err
@@ -1223,7 +1352,10 @@ func initFileService(cfg *config.Config, catalog interfaces.ResourceCatalog) (in
 	if err != nil {
 		return nil, err
 	}
-	return file.NewResourceCatalogFileService(inner, catalog), nil
+	if _, dummy := inner.(*file.DummyFileService); dummy {
+		return file.NewResourceCatalogFileService(inner, catalog), nil
+	}
+	return file.NewGlobalResourceCatalogFileService(inner, catalog), nil
 }
 
 func initRawFileService(_ *config.Config) (interfaces.FileService, error) {
@@ -2085,6 +2217,35 @@ func startAgentPromptReaper(runs *service.SuspendedRunService, cleaner interface
 		}
 	}()
 	cleaner.RegisterWithName("AgentPromptReaper", func() error {
+		close(stop)
+		return nil
+	})
+}
+
+// startUserMachineGC reclaims empty user machines hourly. Every replica runs
+// the ticker; the Redis lock inside RunOnce lets one of them scan.
+func startUserMachineGC(gc *sandboxalloc.UserMachineGC, cleaner interfaces.ResourceCleaner) {
+	if gc == nil || cleaner == nil {
+		logger.Warnf(context.Background(), "[Container] user machine GC unavailable")
+		return
+	}
+	stop := make(chan struct{})
+	go func() {
+		timer := time.NewTimer(2 * time.Minute)
+		defer timer.Stop()
+		for {
+			select {
+			case <-timer.C:
+				if _, err := gc.RunOnce(context.Background()); err != nil {
+					logger.Warnf(context.Background(), "[UserMachineGC] run failed: %v", err)
+				}
+				timer.Reset(sandboxalloc.UserMachineGCInterval)
+			case <-stop:
+				return
+			}
+		}
+	}()
+	cleaner.RegisterWithName("UserMachineGC", func() error {
 		close(stop)
 		return nil
 	})

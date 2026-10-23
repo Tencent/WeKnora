@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -30,14 +31,20 @@ func NewSessionRepository(db *gorm.DB) interfaces.SessionRepository {
 	return &sessionRepository{db: db}
 }
 
-// Create creates a new session
+// Create creates a new session. A canonical web owner is locked first so the
+// insert cannot land between account deletion's session list and the user
+// row's soft-delete. A deleted owner returns errWebUserDeleted.
 func (r *sessionRepository) Create(ctx context.Context, session *types.Session) (*types.Session, error) {
 	session.CreatedAt = time.Now()
 	session.UpdatedAt = time.Now()
-	if err := r.db.WithContext(ctx).Create(session).Error; err != nil {
+	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockLiveWebUser(tx, session.UserID); err != nil {
+			return err
+		}
+		return tx.Create(session).Error
+	}); err != nil {
 		return nil, err
 	}
-	// Return the session with generated ID
 	return session, nil
 }
 
@@ -345,8 +352,9 @@ func (r *sessionRepository) SetOwnerID(ctx context.Context, tenantID uint64, id,
 		Model(&types.Session{}).
 		Where("tenant_id = ? AND id = ?", tenantID, id).
 		Updates(map[string]interface{}{
-			"user_id":    ownerID,
-			"updated_at": time.Now(),
+			"user_id":           ownerID,
+			"owner_auth_source": types.AuthSourceForBoundOwnerID(ownerID),
+			"updated_at":        time.Now(),
 		})
 	return res.RowsAffected, res.Error
 }
@@ -414,7 +422,25 @@ func (r *sessionRepository) DeleteAllByTenantID(ctx context.Context, tenantID ui
 func (r *sessionRepository) CreateForked(
 	ctx context.Context, session *types.Session, messages []*types.Message,
 ) error {
+	return r.CreateForkedWithAssignment(ctx, session, messages, nil, nil)
+}
+
+// CreateForkedWithAssignment additionally records the fork's inherited
+// sandbox assignment in the same transaction, so a user-mode branch can never
+// exist without its placement. A nil assignment is CreateForked.
+//
+// The canonical web user is locked before the session row, and the machine
+// row is locked inside InsertSandboxAssignmentTx after that insert. If this
+// session already has an assignment, the insert fails and this transaction's
+// session row is rolled back.
+func (r *sessionRepository) CreateForkedWithAssignment(
+	ctx context.Context, session *types.Session, messages []*types.Message,
+	assignment *types.SessionSandboxAssignment, machine *types.SandboxUserMachine,
+) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockLiveWebUser(tx, session.UserID); err != nil {
+			return err
+		}
 		now := time.Now()
 		session.CreatedAt = now
 		session.UpdatedAt = now
@@ -424,14 +450,26 @@ func (r *sessionRepository) CreateForked(
 		if err := tx.Session(&gorm.Session{SkipHooks: true}).Create(session).Error; err != nil {
 			return err
 		}
-		if len(messages) == 0 {
+		if len(messages) > 0 {
+			if err := tx.Session(&gorm.Session{SkipHooks: true}).
+				CreateInBatches(messages, 100).Error; err != nil {
+				return err
+			}
+			if err := insertMessageArtifacts(tx, messages); err != nil {
+				return err
+			}
+		}
+		if assignment == nil {
 			return nil
 		}
-		if err := tx.Session(&gorm.Session{SkipHooks: true}).
-			CreateInBatches(messages, 100).Error; err != nil {
+		created, err := InsertSandboxAssignmentTx(tx, assignment, machine)
+		if err != nil {
 			return err
 		}
-		return insertMessageArtifacts(tx, messages)
+		if !created {
+			return fmt.Errorf("fork %s already has a sandbox assignment", session.ID)
+		}
+		return nil
 	})
 }
 

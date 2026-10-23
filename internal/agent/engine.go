@@ -53,6 +53,7 @@ type AgentEngine struct {
 	sessionID            string                  // Session ID for logging and event emission
 	systemPromptTemplate string                  // System prompt template (optional, uses default if empty)
 	memoryPrompt         string                  // Long-term memory envelope appended to the system prompt
+	runNote              string                  // How this run was started; see SetRunNote
 	skillsManager        *skills.Manager         // Skills manager for Progressive Disclosure (optional)
 	appConfig            *appconfig.Config       // Application config for prompt template resolution (optional)
 	imageDescriber       ImageDescriberFunc      // VLM function for describing images in tool results (optional)
@@ -87,23 +88,27 @@ type AgentEngine struct {
 	steerSink         types.SteerSink
 	allowSteerOverrun bool // one extra ReAct round after a loop-end inject past MaxIterations
 	steerOverruns     int  // how many times this turn has already used the extra round
-	workspaceLayout   sandbox.WorkspaceLayout
+	// backgroundRun, when set, supplies background-work notices and reminders
+	// at the same two boundaries as steer. Nil disables them.
+	backgroundRun   BackgroundRun
+	workspaceLayout sandbox.WorkspaceLayout
 	// suspendable lets a user prompt end the run so it can be resumed later;
 	// suspendRequest is saved with the run for that (see EnableSuspension).
 	suspendable    bool
 	suspendRequest []byte
 	// collaborationOnlySuspension limits suspension to collaboration waits.
 	collaborationOnlySuspension bool
-	// interactive: the client renders prompt cards and can answer them.
-	interactive bool
-	progress    turnProgress
+	// mode: whether the client renders prompt cards and can answer them.
+	mode     types.RunMode
+	progress turnProgress
 	// Hold speculative parent prose until delegated work has been reviewed.
 	holdCollaborationAnswer bool
 }
 
 // maxSteerOverruns caps loop-end injects past MaxIterations. One extra round
-// lets a last-moment nudge revise the answer; further injects stay queued for
-// a follow-up turn instead of stretching the same run indefinitely.
+// lets a last-moment nudge (a steered message or a background reminder) revise
+// the answer; further injects stay queued for a follow-up turn instead of
+// stretching the same run indefinitely.
 const maxSteerOverruns = 1
 
 // ImageDescriberFunc generates a text description of an image.
@@ -230,7 +235,16 @@ func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
 	for _, section := range sections {
 		logger.Debugf(ctx, "[Agent][Prompt] section=%s bytes=%d", section.Name, len(section.Content))
 	}
-	return renderSystemPromptSections(sections) + e.collaborationGuidance()
+	prompt := renderSystemPromptSections(sections) + e.collaborationGuidance()
+	if e.runNote != "" {
+		prompt += "\n\n" + e.runNote
+	}
+	return prompt
+}
+
+// SetRunNote adds note to the end of this run's system prompt.
+func (e *AgentEngine) SetRunNote(note string) {
+	e.runNote = strings.TrimSpace(note)
 }
 
 // SetMemoryPrompt supplies the long-term memory envelope for this run. Empty
@@ -880,6 +894,9 @@ func (e *AgentEngine) runReActIteration(
 	if guards.childAnswerRevised {
 		tools = nil
 	}
+	// Background-work context rides the same boundary for the same reasons,
+	// after the user's own messages.
+	e.injectBackground(ctx, state, messagesPtr, false)
 
 	logger.Infof(ctx, "[Agent][Round-%d/%s] Starting: %d messages, %d tools, est_tokens=%d",
 		round, e.maxIterationsDisplay(), len(*messagesPtr), len(tools), currentTokens)
@@ -1030,16 +1047,18 @@ func (e *AgentEngine) runReActIteration(
 
 	// Create agent step
 	step := types.AgentStep{
-		UserMessagesBefore: state.PendingSteerMessages,
-		Iteration:          state.CurrentRound,
-		Thought:            response.Content,
-		ReasoningContent:   response.ReasoningContent,
-		ReasoningSignature: response.ReasoningSignature,
-		ReasoningMetadata:  response.ReasoningMetadata,
-		ToolCalls:          make([]types.ToolCall, 0),
-		Timestamp:          time.Now(),
+		UserMessagesBefore:   state.PendingSteerMessages,
+		BackgroundInjections: state.PendingBackground,
+		Iteration:            state.CurrentRound,
+		Thought:              response.Content,
+		ReasoningContent:     response.ReasoningContent,
+		ReasoningSignature:   response.ReasoningSignature,
+		ReasoningMetadata:    response.ReasoningMetadata,
+		ToolCalls:            make([]types.ToolCall, 0),
+		Timestamp:            time.Now(),
 	}
 	state.PendingSteerMessages = nil
+	state.PendingBackground = nil
 
 	// If the request was cancelled while the LLM was streaming (e.g. the
 	// user pressed "stop"), the stream driver still returns a usable
@@ -1054,7 +1073,8 @@ func (e *AgentEngine) runReActIteration(
 	if ctx.Err() != nil {
 		logger.Warnf(ctx, "[Agent][Round-%d] Context cancelled during LLM call; preserving partial step",
 			round)
-		if step.Thought != "" || len(step.ToolCalls) > 0 || len(step.UserMessagesBefore) > 0 {
+		if step.Thought != "" || len(step.ToolCalls) > 0 || len(step.UserMessagesBefore) > 0 ||
+			len(step.BackgroundInjections) > 0 {
 			state.RoundSteps = append(state.RoundSteps, step)
 		}
 		return iterOutcomeBreak, nil
@@ -1122,6 +1142,7 @@ func (e *AgentEngine) runReActIteration(
 			guards.emptyRetries++
 			if guards.emptyRetries <= maxEmptyResponseRetries {
 				state.PendingSteerMessages = step.UserMessagesBefore
+				state.PendingBackground = step.BackgroundInjections
 				logger.Warnf(ctx, "[Agent][Round-%d] Empty content with stop - retrying (%d/%d)",
 					round, guards.emptyRetries, maxEmptyResponseRetries)
 				guards.pendingRuntimeNotice = emptyResponseRetryNotice
@@ -1166,7 +1187,8 @@ func (e *AgentEngine) runReActIteration(
 			return iterOutcomeBreak, nil
 		}
 		// Loop-end inject: a user message queued while this finishing round
-		// ran should keep the agent going instead of emitting a final answer.
+		// ran, or background work this run started that is still running,
+		// keeps the agent going instead of emitting a final answer.
 		// Content-filter stops are terminal and do not take this path.
 		// Past MaxIterations only the first inject gets an extra round;
 		// anything after that stays in the queue for a follow-up turn.
@@ -1182,6 +1204,7 @@ func (e *AgentEngine) runReActIteration(
 					ReasoningMetadata:  response.ReasoningMetadata,
 				})
 				injected := e.drainSteerMessages(ctx, state, messagesPtr, sessionID, assistantMessageID)
+				injected += e.injectBackground(ctx, state, messagesPtr, true)
 				if injected > 0 {
 					*messagesPtr = e.appendCollaborationDeliveryBoundary(*messagesPtr, verdict.finalAnswer)
 					verdict.step.IntermediateAnswer = true
@@ -1329,6 +1352,7 @@ func (e *AgentEngine) runRoundTools(
 	e.beginRound(*step, response.ToolCalls)
 	suspended := e.executeToolCalls(ctx, response, step, state.CurrentRound, sessionID, assistantMessageID)
 	e.endRound()
+	step.BackgroundSeenIDs = e.takeBackgroundSeen()
 	if suspended == nil {
 		return false
 	}

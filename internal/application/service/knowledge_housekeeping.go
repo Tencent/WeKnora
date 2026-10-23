@@ -35,6 +35,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
+
+	"github.com/Tencent/WeKnora/internal/common"
 )
 
 // HousekeepingService runs background sweeps to recover stuck rows.
@@ -875,7 +877,7 @@ func (h *HousekeepingService) reapTerminalSpans(ctx context.Context) {
 			msg = strings.TrimSpace(*r.ErrorMessage)
 		}
 		if len(msg) > 1024 {
-			msg = msg[:1024]
+			msg = common.TruncateUTF8Bytes(msg, 1024)
 		}
 		res := h.db.WithContext(ctx).Model(&types.KnowledgeProcessingSpan{}).
 			Where("id = ? AND status IN ?", r.ID, openSpanStatuses).

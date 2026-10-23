@@ -21,8 +21,8 @@ const maxRetrievalPoolSize = 500
 
 // GetQueryEmbedding computes the query embedding using the embedding model
 // associated with the given knowledge base. Callers can pre-compute and reuse
-// the result across multiple KBs that share the same embedding model to avoid
-// redundant embedding API calls.
+// the result across multiple KBs that share the same embedding model and
+// configured vector dimension to avoid redundant embedding API calls.
 func (s *knowledgeBaseService) GetQueryEmbedding(ctx context.Context, kbID string, queryText string) ([]float32, error) {
 	kb, err := s.repo.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
@@ -77,8 +77,10 @@ func validateQueryEmbeddingDimension(model embedding.Embedder, actual int) error
 }
 
 // ResolveEmbeddingModelKeys resolves embedding model IDs to their actual model
-// identity key (name + endpoint). KBs using the same underlying model across
-// different tenants will share the same key, enabling optimal grouping.
+// identity key (name + endpoint + configured vector dimension). KBs using the
+// same underlying model and vector space across different tenants will share
+// the same key, enabling optimal grouping without reusing a query embedding
+// across incompatible index dimensions.
 func (s *knowledgeBaseService) ResolveEmbeddingModelKeys(ctx context.Context, kbs []*types.KnowledgeBase) map[string]string {
 	type modelRef struct {
 		ModelID  string
@@ -94,7 +96,9 @@ func (s *knowledgeBaseService) ResolveEmbeddingModelKeys(ctx context.Context, kb
 		kbRefs[kb.ID] = ref
 	}
 
-	// Resolve each unique (modelID, tenantID) to a model identity key
+	// Resolve each unique (modelID, tenantID) to a model identity key. The
+	// configured dimension is part of the key because providers such as OpenAI
+	// support multiple output widths for one model name and endpoint.
 	resolvedKeys := make(map[modelRef]string, len(uniqueRefs))
 	for ref := range uniqueRefs {
 		tenantCtx := types.WithExecutionTenant(ctx, ref.TenantID)
@@ -104,7 +108,8 @@ func (s *knowledgeBaseService) ResolveEmbeddingModelKeys(ctx context.Context, kb
 			resolvedKeys[ref] = ref.ModelID
 			continue
 		}
-		resolvedKeys[ref] = model.Name + "|" + model.Parameters.BaseURL
+		resolvedKeys[ref] = fmt.Sprintf("%s|%s|%d", model.Name, model.Parameters.BaseURL,
+			model.Parameters.EmbeddingParameters.Dimension)
 	}
 
 	result := make(map[string]string, len(kbs))

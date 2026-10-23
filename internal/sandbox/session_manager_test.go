@@ -3,12 +3,21 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/sandbox/admission"
+	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -364,9 +373,10 @@ func TestSessionBoundManagerEndSessionTurnIgnoresCancel(t *testing.T) {
 	require.NoError(t, err)
 
 	cancelled, cancel := context.WithCancel(ctx)
-	require.NoError(t, mgr.BeginSessionTurn(cancelled, "sess-1"))
+	_, end, err := mgr.BeginSessionTurn(cancelled, "sess-1")
+	require.NoError(t, err)
 	cancel()
-	require.NoError(t, mgr.EndSessionTurn(cancelled, "sess-1"))
+	end()
 
 	active, _, err := store.TurnState(ctx, SessionSandboxKey{TenantID: 10000, SessionID: "sess-1"})
 	require.NoError(t, err)
@@ -633,7 +643,9 @@ func TestHasActiveTurnReportsLeaseState(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, busy)
 
-	require.NoError(t, mgr.BeginSessionTurn(ctx, "sess-1"))
+	_, endTurn, err := mgr.BeginSessionTurn(ctx, "sess-1")
+	require.NoError(t, err)
+	defer endTurn()
 	busy, err = mgr.HasActiveTurn(ctx, "sess-1")
 	require.NoError(t, err)
 	require.True(t, busy)
@@ -679,9 +691,12 @@ func TestBeginSessionTurnFailsWhenRewindLocked(t *testing.T) {
 	held, err := mgr.HasRewindLock(ctx, "sess-1")
 	require.NoError(t, err)
 	require.True(t, held)
-	require.ErrorIs(t, mgr.BeginSessionTurn(ctx, "sess-1"), ErrSessionRewindLocked)
+	_, _, err = mgr.BeginSessionTurn(ctx, "sess-1")
+	require.ErrorIs(t, err, ErrSessionRewindLocked)
 	unlock()
-	require.NoError(t, mgr.BeginSessionTurn(ctx, "sess-1"))
+	_, endTurn, err := mgr.BeginSessionTurn(ctx, "sess-1")
+	require.NoError(t, err)
+	endTurn()
 }
 
 func TestTryLockRewindFailsWhenTurnActive(t *testing.T) {
@@ -698,10 +713,11 @@ func TestTryLockRewindFailsWhenTurnActive(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, mgr.BeginSessionTurn(ctx, "sess-1"))
+	_, endTurn, err := mgr.BeginSessionTurn(ctx, "sess-1")
+	require.NoError(t, err)
 	_, err = mgr.TryLockRewind(ctx, "sess-1")
 	require.ErrorIs(t, err, ErrSessionTurnActive)
-	require.NoError(t, mgr.EndSessionTurn(ctx, "sess-1"))
+	endTurn()
 	unlock, err := mgr.TryLockRewind(ctx, "sess-1")
 	require.NoError(t, err)
 	unlock()
@@ -957,4 +973,862 @@ func TestNewSessionBoundManagerBindsBootstrapperToClient(t *testing.T) {
 // optional turn-lease type assert fails.
 type leaseFreeBindingStore struct {
 	SessionSandboxBindingStore
+}
+
+type fakeAllocations struct {
+	mu            sync.Mutex
+	byID          map[string]allocation.Assignment
+	ownerOverride map[string]string // session id -> the session's current owner
+	ineligible    map[string]bool   // session id -> its current auth source no longer qualifies
+	machines      []allocation.UserMachine
+}
+
+func (f *fakeAllocations) SessionAllocation(_ context.Context, id string) (allocation.Assignment, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	a, ok := f.byID[id]
+	return a, ok, nil
+}
+
+// VerifySessionAllocation mirrors the sandboxalloc check: same assignment,
+// still live. Tests change the owner with setOwner to exercise C15.
+func (f *fakeAllocations) VerifySessionAllocation(
+	_ context.Context, _ uint64, id string, expected allocation.Assignment,
+) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	a, ok := f.byID[id]
+	switch {
+	case !ok || a.Released():
+		return ErrSandboxSessionDeleted
+	case f.ownerOverride[id] != "" && f.ownerOverride[id] != expected.Machine.OwnerID:
+		return ErrUserAllocationRejected
+	case a.Machine != expected.Machine || a.ConfigTenantID != expected.ConfigTenantID ||
+		a.ConfigID != expected.ConfigID:
+		return ErrUserAllocationRejected
+	case a.IsUser() && f.ineligible[id]:
+		return ErrUserAllocationRejected
+	}
+	return nil
+}
+
+func (f *fakeAllocations) setIneligible(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ineligible == nil {
+		f.ineligible = map[string]bool{}
+	}
+	f.ineligible[id] = true
+}
+
+func (f *fakeAllocations) setOwner(id, owner string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ownerOverride == nil {
+		f.ownerOverride = map[string]string{}
+	}
+	f.ownerOverride[id] = owner
+}
+
+func (f *fakeAllocations) UserMachinesByConfig(context.Context, uint64, string) ([]allocation.UserMachine, error) {
+	return f.machines, nil
+}
+
+func (f *fakeAllocations) release(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	a := f.byID[id]
+	now := time.Now()
+	a.ReleasedAt = &now
+	f.byID[id] = a
+}
+
+func userAssignmentFor(sessionID string) allocation.Assignment {
+	return allocation.Assignment{
+		SessionID: sessionID, ConfigTenantID: 42, ConfigID: "cfg-1",
+		Machine: allocation.UserMachine{OwnerTenantID: 42, OwnerID: "u-1", ConfigTenantID: 42, ConfigID: "cfg-1"},
+	}
+}
+
+type userHarness struct {
+	mgr       *SessionBoundManager
+	client    *fakeRemoteClient
+	allocs    *fakeAllocations
+	admission *admission.MemoryRegistry
+}
+
+func newUserManagerHarness(t *testing.T, assignments ...allocation.Assignment) *userHarness {
+	t.Helper()
+	client := newFakeRemoteClient(SandboxTypeCube)
+	// The shared fake does not advertise PTYs; session-mode tests rely on that.
+	// User-mode terminal coverage needs the flag without changing those tests.
+	client.capabilities.SupportsTerminals = true
+	return newUserManagerHarnessWith(t, client, NewMemorySessionSandboxBindingStore(),
+		admission.NewMemory(), assignments...)
+}
+
+func newFakeAllocations(assignments ...allocation.Assignment) *fakeAllocations {
+	allocs := &fakeAllocations{byID: map[string]allocation.Assignment{}}
+	for _, a := range assignments {
+		allocs.byID[a.SessionID] = a
+	}
+	return allocs
+}
+
+func newUserManagerHarnessWith(
+	t *testing.T, client *fakeRemoteClient, store SessionSandboxBindingStore, reg admission.Registry,
+	assignments ...allocation.Assignment,
+) *userHarness {
+	t.Helper()
+	return newUserManagerHarnessWithDirectory(t, client, store, reg, newFakeAllocations(assignments...), "weknora")
+}
+
+// newUserManagerHarnessWithDirectory is newUserManagerHarnessWith with the
+// allocation directory and Redis namespace passed in, so two replicas can
+// share one directory the way production replicas share one database.
+func newUserManagerHarnessWithDirectory(
+	t *testing.T, client *fakeRemoteClient, store SessionSandboxBindingStore, reg admission.Registry,
+	allocs *fakeAllocations, namespace string,
+) *userHarness {
+	t.Helper()
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config: cfg, Client: client, Store: store,
+		Checker: &fakeSessionExistenceChecker{exists: true}, SkipHealthProbe: true,
+		ConfigID: "cfg-1", Allocations: allocs, Admission: reg, Namespace: namespace,
+	})
+	require.NoError(t, err)
+	mgr.admissionWait = 200 * time.Millisecond
+	mem, _ := reg.(*admission.MemoryRegistry)
+	return &userHarness{mgr: mgr, client: client, allocs: allocs, admission: mem}
+}
+
+// integrationEnv returns an integration dependency's address. Missing, the
+// test is skipped — unless WEKNORA_REQUIRE_INTEGRATION=1, which turns the
+// skip into a failure so an enablement run cannot pass by skipping.
+func integrationEnv(t *testing.T, name string) string {
+	t.Helper()
+	v := strings.TrimSpace(os.Getenv(name))
+	if v != "" {
+		return v
+	}
+	if os.Getenv("WEKNORA_REQUIRE_INTEGRATION") == "1" {
+		t.Fatalf("%s is required when WEKNORA_REQUIRE_INTEGRATION=1", name)
+	}
+	t.Skipf("set %s to run against a real dependency", name)
+	return ""
+}
+
+// multiReplicaPair builds two managers that share one provider and one
+// allocation directory. An empty redisAddr starts miniredis; otherwise both
+// replicas dial that address. Each run uses its own namespace so a shared
+// Redis needs no cleanup.
+func multiReplicaPair(
+	t *testing.T, redisAddr string, assignments ...allocation.Assignment,
+) (*userHarness, *userHarness, *redis.Client) {
+	t.Helper()
+	if redisAddr == "" {
+		redisAddr = miniredis.RunT(t).Addr()
+	}
+	ns := "weknora-it-" + uuid.NewString()[:8]
+	client := newFakeRemoteClient(SandboxTypeCube)
+	allocs := newFakeAllocations(assignments...)
+	replica := func() *userHarness {
+		rc := redis.NewClient(&redis.Options{Addr: redisAddr})
+		t.Cleanup(func() { _ = rc.Close() })
+		store, err := NewRedisSessionSandboxBindingStore(rc, ns)
+		require.NoError(t, err)
+		return newUserManagerHarnessWithDirectory(t, client, store,
+			admission.NewRedis(rc, ns+":sandbox:user:"), allocs, ns)
+	}
+	raw := redis.NewClient(&redis.Options{Addr: redisAddr})
+	t.Cleanup(func() { _ = raw.Close() })
+	return replica(), replica(), raw
+}
+
+func ownerCtx() context.Context {
+	return types.WithSandboxTenantID(context.Background(), 42)
+}
+
+func machineDigest(t *testing.T, sessionID string) string {
+	t.Helper()
+	m, ok := userAssignmentFor(sessionID).UserMachine()
+	require.True(t, ok)
+	return m.Digest("weknora")
+}
+
+func TestUserSessionsShareOneMachineWithSeparateDirectories(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
+	ctx := ownerCtx()
+
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	reqA := lastExecRequest(t, h.client)
+	_, err = h.mgr.ExecShellCommand(ctx, userSessionB, "true", "", time.Second, map[string]string{
+		"WEKNORA_SKILL_OUTPUT_DIR": "/workspace/output", // a config value must not win
+	})
+	require.NoError(t, err)
+	reqB := lastExecRequest(t, h.client)
+
+	creates, _, _, _, _ := h.client.counts()
+	require.Equal(t, 1, creates)
+	require.Equal(t, userSessionRoot(userSessionA), reqA.WorkDir)
+	require.Equal(t, userSessionRoot(userSessionB), reqB.WorkDir)
+	require.Equal(t, userSessionRoot(userSessionB)+"/output", reqB.Env["WEKNORA_SKILL_OUTPUT_DIR"])
+	require.Equal(t, userSessionRoot(userSessionB)+"/input", reqB.Env["WEKNORA_SESSION_INPUT_DIR"])
+
+	idA, ok := h.mgr.BoundSandboxID(ctx, userSessionA)
+	require.True(t, ok)
+	idB, _ := h.mgr.BoundSandboxID(ctx, userSessionB)
+	require.Equal(t, idA, idB)
+
+	layout, err := h.mgr.SessionWorkspaceLayout(context.Background(), userSessionA)
+	require.NoError(t, err, "layout lookups run without a tenant (tool Description)")
+	require.True(t, layout.IsSharedRemote())
+
+	n, err := h.admission.ActiveExcept(ctx, admission.MachineScope(machineDigest(t, userSessionA)))
+	require.NoError(t, err)
+	require.Zero(t, n, "every operation released its leases")
+}
+
+func TestUserSessionMayUseTheWholeMachine(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "/workspace", time.Second, nil)
+	require.NoError(t, err, "work_dir is not clamped to the session directory")
+	err = h.mgr.WriteSessionWorkspaceFile(ctx, userSessionA, userSessionRoot(userSessionB)+"/x", []byte("x"))
+	require.NoError(t, err, "a sibling session's directory is not refused any more")
+	err = h.mgr.WriteSessionInputFile(ctx, userSessionA, "/workspace/input/a.pdf", []byte("x"))
+	require.Error(t, err, "the legacy attachment root stays reserved")
+	_, err = h.mgr.ReadSessionFile(ctx, userSessionA, userSessionRoot(userSessionB)+"/x")
+	require.NoError(t, err, "reads of a sibling's tree go through to the provider")
+}
+
+func TestUserSessionWorkspaceWritesPreserveSiblingInputs(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
+	ctx := ownerCtx()
+	input := userSessionRoot(userSessionB) + "/input/original.txt"
+	require.NoError(t, h.mgr.WriteSessionInputFile(ctx, userSessionB, input, []byte("original")),
+		"application attachment staging remains allowed")
+	writesBefore := len(h.client.writeFiles)
+	err := h.mgr.WriteSessionWorkspaceFile(ctx, userSessionA, input, []byte("modified"))
+	require.ErrorContains(t, err, "read-only")
+	err = h.mgr.WriteSessionWorkspaceFiles(ctx, userSessionA, []SessionWorkspaceFile{
+		{Path: userSessionRoot(userSessionB) + "/output/report.txt", Content: []byte("report")},
+		{Path: userSessionRoot(userSessionB) + "/output/../input/original.txt", Content: []byte("modified")},
+	})
+	require.ErrorContains(t, err, "read-only")
+	require.Len(t, h.client.writeFiles, writesBefore, "reject the entire batch before writing any files")
+	_, err = h.mgr.ReadSessionFile(ctx, userSessionA, input)
+	require.NoError(t, err, "sibling inputs remain readable")
+}
+
+func TestValidityIsReadFreshNotCached(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+
+	h.allocs.release(userSessionA) // deleted by another replica after this manager cached the address
+	_, err = h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.ErrorIs(t, err, ErrSandboxSessionDeleted)
+	_, err = h.mgr.ListSessionFiles(ctx, userSessionA, userSessionRoot(userSessionA)+"/output")
+	require.ErrorIs(t, err, ErrSandboxSessionDeleted, "lookup-only reads are admitted the same way")
+}
+
+func TestUserSessionDestroyIsRefused(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	require.ErrorIs(t, h.mgr.DestroySession(ctx, userSessionA), ErrSharedSandbox)
+	_, _, _, _, deletes := h.client.counts()
+	require.Zero(t, deletes)
+}
+
+func TestIneligibleStoredUserAssignmentIsRejected(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	// The session's current auth source no longer qualifies (C15, C17).
+	h.allocs.setIneligible(userSessionA)
+	_, err := h.mgr.ExecShellCommand(ownerCtx(), userSessionA, "true", "", time.Second, nil)
+	require.ErrorIs(t, err, ErrUserAllocationRejected)
+}
+
+func TestSessionModeAssignmentKeepsHistoricalPath(t *testing.T) {
+	a := userAssignmentFor(userSessionA)
+	a.Machine = allocation.UserMachine{} // no machine: a machine of its own
+	h := newUserManagerHarness(t, a)
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	req := lastExecRequest(t, h.client)
+	require.Equal(t, SessionWorkspaceRoot, req.WorkDir)
+	require.Equal(t, userSessionA, h.client.lastCreateRequest.Metadata[remoteMetadataSessionID])
+}
+
+func TestUserTurnHoldsAreIndependentAndTravelInTheirContext(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	scope := admission.MachineScope(machineDigest(t, userSessionA))
+
+	outerCtx, endOuter, err := h.mgr.BeginSessionTurn(ctx, userSessionA)
+	require.NoError(t, err)
+	innerCtx, endInner, err := h.mgr.BeginSessionTurn(outerCtx, userSessionA) // nested send hold
+	require.NoError(t, err)
+	n, _ := h.admission.ActiveExcept(ctx, scope)
+	require.Equal(t, 2, n, "each hold registers its own member")
+
+	n, _ = h.admission.ActiveExcept(ctx, scope, admissionExemptFrom(innerCtx)...)
+	require.Zero(t, n, "a tool call of this turn exempts exactly the turn's own holds")
+	n, _ = h.admission.ActiveExcept(ctx, scope, admissionExemptFrom(ctx)...)
+	require.Equal(t, 2, n, "a request outside the turn exempts nothing")
+
+	endOuter()
+	n, _ = h.admission.ActiveExcept(ctx, scope)
+	require.Equal(t, 1, n, "ending one hold never removes another")
+	endInner()
+	endInner() // idempotent
+	n, _ = h.admission.ActiveExcept(ctx, scope)
+	require.Zero(t, n)
+}
+
+func TestUserTurnExemptionSurvivesCloneContext(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	turnCtx, end, err := h.mgr.BeginSessionTurn(ownerCtx(), userSessionA)
+	require.NoError(t, err)
+	defer end()
+	detached := logger.CloneContext(turnCtx) // how setupSSEStream builds the async QA context
+	require.Equal(t, admissionExemptFrom(turnCtx), admissionExemptFrom(detached))
+}
+
+func TestUserTurnContextEndsWhenItsLeaseIsLost(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	turnCtx, end, err := h.mgr.BeginSessionTurn(ctx, userSessionA)
+	require.NoError(t, err)
+	defer end()
+	scope := admission.MachineScope(machineDigest(t, userSessionA))
+	h.admission.ExpireMember(scope, admissionExemptFrom(turnCtx)[0])
+	select {
+	case <-turnCtx.Done():
+		require.ErrorIs(t, context.Cause(turnCtx), admission.ErrLeaseLost)
+	case <-time.After(time.Second):
+		t.Fatal("the turn kept running after its registration was lost")
+	}
+}
+
+func TestVerifyRejectsASessionWhoseOwnerChanged(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	h.allocs.setOwner(userSessionA, "u-2")
+	_, err = h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.ErrorIs(t, err, ErrUserAllocationRejected, "the assignment snapshot is not enough (C15)")
+}
+
+func TestUserTerminalDialStopsWhenTheLeaseIsLost(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	started := make(chan struct{})
+	h.client.openTerminalHook = func(dialCtx context.Context) error {
+		close(started)
+		<-dialCtx.Done()
+		return context.Cause(dialCtx)
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		_, openErr := h.mgr.OpenSessionTerminal(ctx, userSessionA, RemoteTerminalOptions{})
+		errCh <- openErr
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dial did not start")
+	}
+	h.admission.ExpireScope(admission.MachineScope(machineDigest(t, userSessionA)))
+	select {
+	case err := <-errCh:
+		require.ErrorIs(t, err, admission.ErrLeaseLost)
+	case <-time.After(2 * time.Second):
+		t.Fatal("dial kept running after its lease was lost")
+	}
+}
+
+func TestTerminalIsClosedWhenItsLeaseIsLost(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	term, err := h.mgr.OpenSessionTerminal(ctx, userSessionA, RemoteTerminalOptions{})
+	require.NoError(t, err)
+	defer func() { _ = term.Close() }()
+	scope := admission.MachineScope(machineDigest(t, userSessionA))
+	member := term.(*heldTerminalSession).member
+	h.admission.ExpireMember(scope, member)
+	require.Eventually(t, func() bool { return h.client.terminalClosed() }, time.Second, 10*time.Millisecond,
+		"a PTY must not keep running on a machine another replica may now rebuild")
+}
+
+func TestLostLeaseCancelsTheOperation(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	opCtx, release, err := h.mgr.HoldSessionOperation(ctx, userSessionA, "desktop")
+	require.NoError(t, err)
+	defer release()
+	members := admissionExemptFrom(opCtx)
+	require.NotEmpty(t, members)
+	h.admission.ExpireMember(admission.MachineScope(machineDigest(t, userSessionA)), members[0])
+	select {
+	case <-opCtx.Done():
+		require.ErrorIs(t, context.Cause(opCtx), admission.ErrLeaseLost)
+	case <-time.After(time.Second):
+		t.Fatal("an operation whose lease is lost must be cancelled")
+	}
+}
+
+func TestSessionExclusiveWaitsAndOwnerKeepsWorking(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	_, release, err := h.mgr.HoldSessionOperation(ctx, userSessionA, "pty")
+	require.NoError(t, err)
+
+	_, _, err = h.mgr.AcquireSessionExclusive(ctx, userSessionA)
+	require.ErrorIs(t, err, ErrSessionWorkspaceBusy, "an attached terminal blocks exclusive work")
+	release()
+
+	exCtx, unlock, err := h.mgr.AcquireSessionExclusive(ctx, userSessionA)
+	require.NoError(t, err)
+	defer unlock()
+	_, err = h.mgr.ExecShellCommand(exCtx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err, "the exclusive owner's own commands do not lock themselves out")
+	_, err = h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.ErrorContains(t, err, "busy", "everyone else waits for the exclusive window")
+}
+
+func TestExclusiveWindowIsAMachineMemberAndBlocksRebuild(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	first, _ := h.mgr.BoundSandboxID(ctx, userSessionA)
+	_, _, _, _, deletesBefore := h.client.counts()
+
+	_, unlock, err := h.mgr.AcquireSessionExclusive(ctx, userSessionA)
+	require.NoError(t, err)
+
+	scope := admission.MachineScope(machineDigest(t, userSessionA))
+	n, err := h.admission.ActiveExcept(ctx, scope)
+	require.NoError(t, err)
+	require.Equal(t, 1, n, "rewind and directory delete must be visible to machine rebuild and reclaim")
+
+	m, _ := userAssignmentFor(userSessionA).UserMachine()
+	_, err = h.mgr.InvalidateConfigSandboxesForMachines(ctx, "cfg-1", []allocation.UserMachine{m})
+	require.NoError(t, err)
+	_, err = h.mgr.ExecShellCommand(ctx, userSessionB, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	kept, _ := h.mgr.BoundSandboxID(ctx, userSessionB)
+	require.Equal(t, first, kept, "a stale rebuild must not delete the machine during the exclusive window")
+	_, _, _, _, deletesAfter := h.client.counts()
+	require.Equal(t, deletesBefore, deletesAfter)
+
+	unlock()
+	n, err = h.admission.ActiveExcept(ctx, scope)
+	require.NoError(t, err)
+	require.Zero(t, n, "ending the window releases the machine member")
+}
+
+func TestLockRewindSessionIsExclusiveForTheSessionOnly(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
+	ctx := ownerCtx()
+	h.mgr.admissionWait = 50 * time.Millisecond
+	h.mgr.rewindWait = 50 * time.Millisecond
+
+	_, closePTY, err := h.mgr.HoldSessionOperation(ctx, userSessionA, "pty")
+	require.NoError(t, err)
+	_, _, err = h.mgr.LockRewindSession(ctx, userSessionA)
+	require.ErrorIs(t, err, ErrSessionWorkspaceBusy, "A's open terminal blocks A's rewind")
+	locked, err := h.mgr.HasRewindLock(ctx, userSessionA)
+	require.NoError(t, err)
+	require.False(t, locked, "a failed exclusive window releases the rewind lock too")
+	closePTY()
+
+	exCtx, unlock, err := h.mgr.LockRewindSession(ctx, userSessionA)
+	require.NoError(t, err)
+	_, err = h.mgr.ExecShellCommand(exCtx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err, "the rewind's own reset runs inside its window")
+	_, err = h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.ErrorIs(t, err, ErrSessionWorkspaceBusy, "anything else of A waits for the rewind")
+	_, err = h.mgr.ExecShellCommand(ctx, userSessionB, "true", "", time.Second, nil)
+	require.NoError(t, err, "B on the same machine is unaffected")
+	unlock()
+
+	_, err = h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+}
+
+func TestLockRewindSessionOnAPerSessionSandboxKeepsTheContext(t *testing.T) {
+	mgr, _ := newSessionManagerExecTestHarness(t)
+	// sessionKey refuses a context with no tenant; the marker still has to
+	// come back on the same context session mode returns unchanged.
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	ctx = context.WithValue(ctx, struct{ k string }{"marker"}, 1)
+	got, unlock, err := mgr.LockRewindSession(ctx, "sess-1")
+	require.NoError(t, err)
+	defer unlock()
+	require.Equal(t, ctx, got)
+	require.Equal(t, 1, got.Value(struct{ k string }{"marker"}))
+}
+
+func userSessionRoot(id string) string {
+	l, err := UserWorkspaceLayout(id)
+	if err != nil {
+		panic(err)
+	}
+	return l.Root
+}
+
+func TestUploadedScriptsStayInTheSessionDirectory(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	script := filepath.Join(t.TempDir(), "run.py")
+	require.NoError(t, os.WriteFile(script, []byte("print(1)"), 0o600))
+	_, err := h.mgr.Execute(ownerCtx(), &ExecuteConfig{SessionID: userSessionA, Script: script, SkipValidation: true})
+	require.NoError(t, err)
+	h.client.mu.Lock()
+	defer h.client.mu.Unlock()
+	require.NotEmpty(t, h.client.writeFiles)
+	require.Equal(t, userSessionRoot(userSessionA)+"/.weknora/scripts/run.py",
+		h.client.writeFiles[len(h.client.writeFiles)-1].path)
+}
+
+func TestMultiReplicaAdmissionBlocksRebuildAcrossManagers(t *testing.T) {
+	r1, r2, _ := multiReplicaPair(t, "",
+		userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
+	ctx := ownerCtx()
+
+	_, err := r1.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	first, _ := r1.mgr.BoundSandboxID(ctx, userSessionA)
+
+	_, release, err := r2.mgr.HoldSessionOperation(ctx, userSessionB, "desktop")
+	require.NoError(t, err)
+	m, _ := userAssignmentFor(userSessionA).UserMachine()
+	_, err = r1.mgr.InvalidateConfigSandboxesForMachines(ctx, "cfg-1", []allocation.UserMachine{m})
+	require.NoError(t, err)
+
+	_, err = r1.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	kept, _ := r1.mgr.BoundSandboxID(ctx, userSessionA)
+	require.Equal(t, first, kept, "a desktop on another replica blocks the rebuild")
+
+	release()
+	_, err = r1.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	rebuilt, _ := r1.mgr.BoundSandboxID(ctx, userSessionA)
+	require.NotEqual(t, first, rebuilt)
+}
+
+func TestDeleteSessionWorkspacesWaitsForTheSessionAndRemovesOnlyIt(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	_, connectsBefore, _, _, _ := h.client.counts()
+	m, _ := userAssignmentFor(userSessionA).UserMachine()
+
+	_, releasePTY, err := h.mgr.HoldSessionOperation(ctx, userSessionA, "pty")
+	require.NoError(t, err)
+	deleted, err := h.mgr.DeleteSessionWorkspaces(ctx, m, []string{userSessionA})
+	require.NoError(t, err)
+	require.Empty(t, deleted, "an attached terminal of A keeps A's directory until it leaves")
+	releasePTY()
+
+	deleted, err = h.mgr.DeleteSessionWorkspaces(ctx, m, []string{userSessionA})
+	require.NoError(t, err)
+	require.Equal(t, []string{userSessionA}, deleted)
+	_, connectsAfter, _, _, deletes := h.client.counts()
+	require.Greater(t, connectsAfter, connectsBefore, "deleting a session connects (and resumes) the machine")
+	require.Zero(t, deletes, "the shared machine itself stays")
+	cmd := lastExecRequest(t, h.client).Command
+	layout, err := h.mgr.SessionWorkspaceLayout(context.Background(), userSessionA)
+	require.NoError(t, err)
+	require.Contains(t, cmd, layout.Root)
+	require.Contains(t, cmd, layout.GitDir)
+	require.NotContains(t, cmd, userSessionB)
+	require.Contains(t, cmd, "-L", "symlinked parents are refused, not followed")
+}
+
+func TestDeleteSessionWorkspacesCompletesOnlyWhenTheMachineIsProvablyGone(t *testing.T) {
+	h := newUserManagerHarness(t)
+	m, _ := userAssignmentFor(userSessionA).UserMachine()
+	deleted, err := h.mgr.DeleteSessionWorkspaces(ownerCtx(), m, []string{userSessionA})
+	require.NoError(t, err)
+	require.Equal(t, []string{userSessionA}, deleted, "the provider lists nothing with this identity")
+}
+
+func TestDeleteSessionWorkspacesReadoptsAMachineWhoseBindingWasLost(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
+	// DefaultConfig closes inbound. This case is the provider that does not
+	// require a token, so re-adoption restores the same sandbox. A closed
+	// inbound policy must not bind the empty token; that is covered separately.
+	h.mgr.lifecycle.createRequest.Network.AllowPublicTraffic = nil
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	m, _ := userAssignmentFor(userSessionA).UserMachine()
+	sandboxID, _ := h.mgr.BoundSandboxID(ctx, userSessionA)
+	_, err = h.mgr.bindings.DeleteIfMatch(ctx, h.mgr.UserMachineKey(m), h.client.provider, sandboxID) // Redis lost it
+	require.NoError(t, err)
+
+	deleted, err := h.mgr.DeleteSessionWorkspaces(ctx, m, []string{userSessionA})
+	require.NoError(t, err)
+	require.Equal(t, []string{userSessionA}, deleted)
+	require.Contains(t, lastExecRequest(t, h.client).Command, userSessionRoot(userSessionA),
+		"the files are really deleted on the machine B will keep using")
+	rebound, _ := h.mgr.BoundSandboxID(ctx, userSessionB)
+	require.Equal(t, sandboxID, rebound, "re-adopted, not recreated")
+}
+
+func TestDeleteSessionWorkspacesKeepsTheTaskWhenAbsenceCannotBeProven(t *testing.T) {
+	h := newUserManagerHarness(t)
+	h.client.capabilities.SupportsListSandboxes = false
+	m, _ := userAssignmentFor(userSessionA).UserMachine()
+	deleted, err := h.mgr.DeleteSessionWorkspaces(ownerCtx(), m, []string{userSessionA})
+	require.ErrorIs(t, err, ErrMachineAbsenceUnprovable)
+	require.Empty(t, deleted)
+}
+
+func TestDeleteSessionWorkspacesStopsTheCommandWhenALeaseIsLost(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	m, _ := userAssignmentFor(userSessionA).UserMachine()
+	h.client.execHook = func(req RemoteExecRequest) (*RemoteExecResult, error) {
+		if strings.Contains(req.Command, "rm -rf") {
+			h.admission.LoseBarrier(admission.SessionScope(m.Digest("weknora"), userSessionA))
+			time.Sleep(50 * time.Millisecond) // the cancellation reaches the call
+			return nil, context.Canceled
+		}
+		return &RemoteExecResult{}, nil
+	}
+	deleted, err := h.mgr.DeleteSessionWorkspaces(ctx, m, []string{userSessionA})
+	require.ErrorIs(t, err, admission.ErrLeaseLost)
+	require.Empty(t, deleted, "a deletion that may not have run is retried, not completed")
+}
+
+func TestInvalidateConfigSandboxesMarksUserMachines(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	m, _ := userAssignmentFor(userSessionA).UserMachine()
+	h.allocs.machines = []allocation.UserMachine{m}
+
+	n, err := h.mgr.InvalidateConfigSandboxes(ctx, 42, "cfg-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	b, err := h.mgr.bindings.Get(ctx, h.mgr.UserMachineKey(m))
+	require.NoError(t, err)
+	require.NotNil(t, b.StaleAt)
+}
+
+func TestWorkspaceForkHoldsLeasesAndCopiesWithOneGuardedScript(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	sha, older, foreign := strings.Repeat("c", 40), strings.Repeat("b", 40), strings.Repeat("e", 40)
+	h.client.execHook = func(req RemoteExecRequest) (*RemoteExecResult, error) {
+		if strings.Contains(req.Command, "uploadpack.allowAnySHA1InWant") {
+			return &RemoteExecResult{Stdout: "R " + sha + "\nR " + older + "\n"}, nil
+		}
+		return &RemoteExecResult{}, nil
+	}
+
+	fork, err := h.mgr.BeginWorkspaceFork(ctx, userSessionA)
+	require.NoError(t, err)
+	require.NotEmpty(t, fork.SandboxID())
+	machine, _ := userAssignmentFor(userSessionA).UserMachine()
+	active, err := h.admission.ActiveExcept(ctx, admission.MachineScope(machine.Digest("weknora")))
+	require.NoError(t, err)
+	require.Equal(t, 1, active, "the fork holds the machine until Release")
+
+	reachable, err := fork.Copy(userSessionB, sha, []string{sha, older, foreign})
+	require.NoError(t, err)
+	require.Equal(t, map[string]bool{sha: true, older: true}, reachable)
+	req := lastExecRequest(t, h.client)
+	require.Equal(t, "root", req.User)
+	require.Contains(t, req.Command, "/var/lib/weknora/sessions/c812e1edb644.git")
+	require.Contains(t, req.Command, userSessionRoot(userSessionB))
+	require.Contains(t, req.Command, "core.hooksPath=/dev/null")
+	require.Contains(t, req.Command, `"160000"`, "gitlinks are refused")
+	require.Contains(t, req.Command, "merge-base --is-ancestor")
+
+	_, err = fork.Copy("not-a-uuid", sha, nil)
+	require.Error(t, err)
+	_, err = fork.Copy(userSessionB, "abc", nil)
+	require.Error(t, err)
+
+	require.NoError(t, fork.Remove(userSessionB))
+	require.Contains(t, lastExecRequest(t, h.client).Command, userSessionRoot(userSessionB))
+	fork.Release()
+	active, _ = h.admission.ActiveExcept(ctx, admission.MachineScope(machine.Digest("weknora")))
+	require.Zero(t, active)
+}
+
+func TestWorkspaceForkStopsAfterTheLeaseIsLost(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	fork, err := h.mgr.BeginWorkspaceFork(ctx, userSessionA)
+	require.NoError(t, err)
+	defer fork.Release()
+	machine, _ := userAssignmentFor(userSessionA).UserMachine()
+	h.admission.ExpireMember(admission.MachineScope(machine.Digest("weknora")),
+		fork.(interface{ Member() string }).Member())
+
+	require.Eventually(t, func() bool {
+		_, err := fork.Copy(userSessionB, strings.Repeat("c", 40), nil)
+		return errors.Is(err, admission.ErrLeaseLost)
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestWorkspaceForkWithoutAMachineReportsNoLiveSandbox(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	_, err := h.mgr.BeginWorkspaceFork(ownerCtx(), userSessionA)
+	require.ErrorIs(t, err, ErrNoLiveSessionSandbox, "fork never creates the source's machine")
+}
+
+func TestUserModeTerminalCreatesTheSessionDirectoryFirst(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+
+	term, err := h.mgr.OpenSessionTerminal(ctx, userSessionB, RemoteTerminalOptions{})
+	require.NoError(t, err)
+	defer func() { _ = term.Close() }()
+
+	cmd := lastExecRequest(t, h.client).Command
+	require.Contains(t, cmd, "mkdir -p")
+	require.Contains(t, cmd, userSessionRoot(userSessionB))
+	require.Equal(t, userSessionRoot(userSessionB), h.client.lastTerminalOptions().Cwd)
+}
+
+func TestUserModeTerminalNeverReattachesAClientPID(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	term, err := h.mgr.OpenSessionTerminal(ctx, userSessionA, RemoteTerminalOptions{AttachPID: 4242})
+	require.NoError(t, err)
+	defer func() { _ = term.Close() }()
+	opts := h.client.lastTerminalOptions()
+	require.Zero(t, opts.AttachPID, "a PID on a shared machine may belong to another session")
+	require.Equal(t, userSessionRoot(userSessionA), opts.Cwd)
+}
+
+func TestMultiReplicaRealRedisFirstAllocationCreatesOneMachine(t *testing.T) {
+	r1, r2, _ := multiReplicaPair(t, integrationEnv(t, "WEKNORA_TEST_REDIS_ADDR"),
+		userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
+	ctx := ownerCtx()
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			h, sid := r1, userSessionA
+			if i%2 == 1 {
+				h, sid = r2, userSessionB
+			}
+			_, err := h.mgr.ExecShellCommand(ctx, sid, "true", "", time.Second, nil)
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	creates, _, _, _, _ := r1.client.counts()
+	require.Equal(t, 1, creates, "two replicas racing the first exec create one shared machine")
+	a, okA := r1.mgr.BoundSandboxID(ctx, userSessionA)
+	b, okB := r2.mgr.BoundSandboxID(ctx, userSessionB)
+	require.True(t, okA)
+	require.True(t, okB)
+	require.NotEmpty(t, a)
+	require.Equal(t, a, b)
+}
+
+func TestMultiReplicaRealRedisLeaseBlocksRebuildAndReclaim(t *testing.T) {
+	r1, r2, _ := multiReplicaPair(t, integrationEnv(t, "WEKNORA_TEST_REDIS_ADDR"),
+		userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
+	ctx := ownerCtx()
+	_, err := r1.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	first, _ := r1.mgr.BoundSandboxID(ctx, userSessionA)
+	m, _ := userAssignmentFor(userSessionA).UserMachine()
+
+	_, closePTY, err := r2.mgr.HoldSessionOperation(ctx, userSessionB, "pty")
+	require.NoError(t, err)
+
+	_, err = r1.mgr.InvalidateConfigSandboxesForMachines(ctx, "cfg-1", []allocation.UserMachine{m})
+	require.NoError(t, err)
+	_, err = r1.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	kept, _ := r1.mgr.BoundSandboxID(ctx, userSessionA)
+	require.Equal(t, first, kept, "replica 2's terminal blocks replica 1's rebuild")
+
+	ok, err := r1.mgr.ReclaimUserMachine(ctx, m, func(context.Context) (bool, error) { return true, nil })
+	require.NoError(t, err)
+	require.False(t, ok, "and blocks reclaim")
+
+	closePTY()
+	_, err = r1.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	rebuilt, _ := r1.mgr.BoundSandboxID(ctx, userSessionA)
+	require.NotEqual(t, first, rebuilt)
+}
+
+func TestMultiReplicaRealRedisLostLeaseStopsTheHolderAndFreesTheMachine(t *testing.T) {
+	r1, r2, raw := multiReplicaPair(t, integrationEnv(t, "WEKNORA_TEST_REDIS_ADDR"),
+		userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
+	ctx := ownerCtx()
+	_, err := r1.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	m, _ := userAssignmentFor(userSessionA).UserMachine()
+
+	opCtx, release, err := r2.mgr.HoldSessionOperation(ctx, userSessionB, "desktop")
+	require.NoError(t, err)
+	defer release()
+
+	// Fault injection: the admission keys vanish (failover to a replica that
+	// had not received them, or an operator FLUSHDB).
+	keys, err := raw.Keys(ctx, "*"+m.Digest(r1.mgr.Namespace())+"*:ops").Result()
+	require.NoError(t, err)
+	require.NotEmpty(t, keys)
+	require.NoError(t, raw.Del(ctx, keys...).Err())
+
+	// HoldSessionOperation uses admission.DefaultHoldTTL. Renewal is ttl/3 and
+	// is not configurable from the test, so the wait is bounded by that TTL:
+	// a failed confirmation inside the margin reports the lease lost.
+	select {
+	case <-opCtx.Done():
+		require.ErrorIs(t, context.Cause(opCtx), admission.ErrLeaseLost)
+	case <-time.After(admission.DefaultHoldTTL):
+		t.Fatal("the holder kept running after its lease was gone")
+	}
+	n, err := raw.Exists(ctx, keys...).Result()
+	require.NoError(t, err)
+	require.Zero(t, n, "renewal must not resurrect a lost member")
+
+	ok, err := r1.mgr.ReclaimUserMachine(ctx, m, func(context.Context) (bool, error) { return true, nil })
+	require.NoError(t, err)
+	require.True(t, ok, "with the holder gone the machine can be reclaimed")
 }

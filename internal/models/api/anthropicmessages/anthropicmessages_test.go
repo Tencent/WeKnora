@@ -661,3 +661,28 @@ func TestRedactedThinkingSurvivesAnUnsignedNeighbour(t *testing.T) {
 	require.Equal(t, []string{"redacted_thinking", "tool_use"}, blockTypes(blocks))
 	assert.Equal(t, "opaque-1", blocks[0].(map[string]any)["data"])
 }
+
+func TestMapStopReason(t *testing.T) {
+	tests := []struct {
+		name       string
+		reason     string
+		toolCalls  int
+		incomplete bool
+		want       string
+	}{
+		{"max tokens is length", "max_tokens", 0, false, "length"},
+		{"context window exceeded is length", "model_context_window_exceeded", 0, false, "length"},
+		{"context window exceeded with tool calls is length", "model_context_window_exceeded", 2, false, "length"},
+		{"tool use", "tool_use", 1, false, "tool_calls"},
+		{"end turn with tool calls", "end_turn", 1, false, "tool_calls"},
+		{"end turn", "end_turn", 0, false, "end_turn"},
+		{"refusal", "refusal", 0, false, "content_filter"},
+		{"incomplete stream", "max_tokens", 0, true, types.FinishReasonIncomplete},
+		{"empty reason", "", 0, false, types.FinishReasonIncomplete},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, mapStopReason(tt.reason, tt.toolCalls, tt.incomplete))
+		})
+	}
+}

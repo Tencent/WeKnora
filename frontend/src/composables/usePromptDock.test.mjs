@@ -91,7 +91,7 @@ test('both chat views mount the dock above their composer and feed it their mess
   const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8')
   const chat = read('../views/chat/index.vue')
   assert.match(chat, /providePromptDock\(messagesList\)/)
-  assert.match(chat, /<PendingPromptDock[^>]*\/>\s*<InputField/)
+  assert.match(chat, /<PendingPromptDock[^>]*\/>[\s\S]*?<InputField/)
 
   const embed = read('../views/embed/EmbedChatCore.vue')
   assert.match(embed, /providePromptDock\(messagesList\)/)

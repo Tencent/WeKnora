@@ -1,6 +1,8 @@
 // Package cohererank implements the rerank shape Cohere defined and almost
 // every other vendor copied: POST {base}/rerank with {model, query,
 // documents} answering {results: [{index, relevance_score, document}]}.
+// A bare array of the same result objects is accepted too: self-hosted
+// runtimes such as SGLang return that shape instead of the envelope.
 //
 // Jina, Zhipu, SiliconFlow, Qianfan, GPUStack, WeKnora Cloud and any
 // OpenAI-compatible gateway that serves rerank all speak it. Their
@@ -10,6 +12,7 @@
 package cohererank
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -185,12 +188,20 @@ func (c *Client) RerankImages(ctx context.Context, query string, images []api.Em
 }
 
 func (c *Client) post(ctx context.Context, body map[string]any, count int) ([]api.RerankResult, error) {
-	var decoded response
-	if err := c.cfg.Endpoint.PostJSON(ctx, c.url(), body, &decoded); err != nil {
+	// Decode into raw JSON first: some Cohere-shaped runtimes (SGLang, for
+	// one) answer the same request with a bare array instead of the
+	// {"results": [...]} envelope. Both shapes mean the same thing, so the
+	// envelope is not part of the contract callers may rely on.
+	var raw json.RawMessage
+	if err := c.cfg.Endpoint.PostJSON(ctx, c.url(), body, &raw); err != nil {
 		return nil, err
 	}
-	out := make([]api.RerankResult, 0, len(decoded.Results))
-	for _, item := range decoded.Results {
+	results, err := decodeResults(raw)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]api.RerankResult, 0, len(results))
+	for _, item := range results {
 		if item.Index < 0 || item.Index >= count {
 			return nil, fmt.Errorf("rerank index %d out of range for %d documents", item.Index, count)
 		}
@@ -201,6 +212,24 @@ func (c *Client) post(ctx context.Context, body map[string]any, count int) ([]ap
 		})
 	}
 	return out, nil
+}
+
+// decodeResults accepts both documented envelopes: the Cohere object
+// {"results": [...]} and the bare array some self-hosted runtimes return.
+func decodeResults(raw []byte) ([]result, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		var results []result
+		if err := json.Unmarshal(trimmed, &results); err != nil {
+			return nil, fmt.Errorf("decode response: %w", err)
+		}
+		return results, nil
+	}
+	var decoded response
+	if err := json.Unmarshal(trimmed, &decoded); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return decoded.Results, nil
 }
 
 // firstNonNil picks relevance_score, falling back to score: the field is

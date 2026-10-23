@@ -55,6 +55,32 @@ export type SourceLocateRequest = {
 // break matching.
 
 const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u
+const GRAPHEMES = typeof Intl.Segmenter === 'function'
+  ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+  : undefined
+
+function* normalizationSpans(raw: string): Iterable<{ segment: string; index: number }> {
+  if (GRAPHEMES) {
+    yield* GRAPHEMES.segment(raw)
+    return
+  }
+  // Older browsers can normalize NFC without supporting Intl.Segmenter. Keep
+  // marks with their base and join adjacent starters only when they compose
+  // (notably Hangul L/V/T). These are normalization spans, not full graphemes.
+  let segment = '', index = 0
+  for (const ch of raw) {
+    if (segment && !/\p{M}/u.test(ch)) {
+      const boundary = segment.normalize('NFC') + ch.normalize('NFC')
+      if (boundary.normalize('NFC') === boundary) {
+        yield { segment, index }
+        index += segment.length
+        segment = ''
+      }
+    }
+    segment += ch
+  }
+  if (segment) yield { segment, index }
+}
 
 export function foldChar(ch: string): string {
   if (!LETTER_OR_DIGIT.test(ch)) return ''
@@ -66,10 +92,24 @@ export function normalizeForMatch(text: string): string {
   return normalizeWithPositions(text).norm
 }
 
-export function normalizeWithPositions(text: string): { norm: string; pos: number[] } {
-  const chars = Array.from(String(text || ''))
+export function normalizeWithPositions(text: string): { norm: string; pos: number[]; endPos: number[] } {
+  const raw = String(text || '')
+  const canonical = raw.normalize('NFC')
+  const chars = Array.from(canonical)
+  const starts: number[] = [], ends: number[] = []
+  // Most text is already NFC. Only build the span map when composition or
+  // combining marks require a different span than one original code point.
+  if (canonical !== raw || /\p{M}/u.test(raw)) {
+    for (const { segment, index } of normalizationSpans(raw)) {
+      const length = Array.from(segment.normalize('NFC')).length
+      for (let j = 0; j < length; j++) {
+        starts.push(index)
+        ends.push(index + segment.length)
+      }
+    }
+  }
   let norm = ''
-  const pos: number[] = []
+  const pos: number[] = [], endPos: number[] = []
   let offset = 0
   for (let i = 0; i < chars.length; i++) {
     const ch = chars[i]!
@@ -87,10 +127,13 @@ export function normalizeWithPositions(text: string): { norm: string; pos: numbe
     }
     norm += folded
     // Offsets throughout this module are UTF-16, including supplementary letters.
-    for (let j = 0; j < folded.length; j++) pos.push(offset)
+    for (let j = 0; j < folded.length; j++) {
+      pos.push(starts[i] ?? offset)
+      endPos.push(ends[i] ?? offset + ch.length)
+    }
     offset += ch.length
   }
-  return { norm, pos }
+  return { norm, pos, endPos }
 }
 
 export type NormalizedMatch = { start: number; end: number; score: number }
@@ -132,11 +175,10 @@ export function findNormalized(haystack: string, quote: string): NormalizedMatch
 }
 
 export function findTextMatches(text: string, quote: string): TextMatch[] {
-  const { norm, pos } = normalizeWithPositions(text)
-  return findNormalizedMatches(norm, quote).map((m) => {
-    const start = pos[m.start]!, last = pos[m.end - 1]!
-    return { start, end: last + (text.codePointAt(last)! > 0xffff ? 2 : 1) }
-  })
+  const { norm, pos, endPos } = normalizeWithPositions(text)
+  return findNormalizedMatches(norm, quote).map((m) => ({
+    start: pos[m.start]!, end: endPos[m.end - 1]!,
+  }))
 }
 
 /** Locate a quote in raw text; returns UTF-16 offsets into `text`. */

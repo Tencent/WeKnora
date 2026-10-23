@@ -186,6 +186,7 @@ func TestRecordKBActivityAttributesAgentActionsThroughTasks(t *testing.T) {
 		types.TaskInitiator{UserID: "user-1", Role: types.TenantRoleContributor}.Apply(context.Background()),
 		types.AuditAgentAction{
 			SessionID: "s-1", AgentID: types.BuiltinWeKnoraAssistantID, Operation: "knowledge.delete",
+			ActingVia: "automation:a-1",
 		},
 	)
 	// The worker only sees what the task payload carried.
@@ -209,7 +210,8 @@ func TestRecordKBActivityAttributesAgentActionsThroughTasks(t *testing.T) {
 		t.Fatalf("unmarshal details: %v", err)
 	}
 	if details["via"] != "agent" || details["agent_session_id"] != "s-1" ||
-		details["agent_id"] != types.BuiltinWeKnoraAssistantID || details["agent_operation"] != "knowledge.delete" {
+		details["agent_id"] != types.BuiltinWeKnoraAssistantID || details["agent_operation"] != "knowledge.delete" ||
+		details["agent_acting_via"] != "automation:a-1" {
 		t.Fatalf("details = %#v", details)
 	}
 	if details["trigger"] != nil {

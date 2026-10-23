@@ -298,28 +298,17 @@ func WithMCPOAuthNonInteractive(ctx context.Context) context.Context {
 }
 
 // IsMCPOAuthNonInteractive reports whether ctx was marked non-interactive for
-// MCP OAuth (see WithMCPOAuthNonInteractive).
+// MCP OAuth (see WithMCPOAuthNonInteractive), or belongs to an agent run
+// whose mode is not attended.
 func IsMCPOAuthNonInteractive(ctx context.Context) bool {
 	if ctx == nil {
 		return false
 	}
-	v, _ := ctx.Value(MCPOAuthNonInteractiveContextKey).(bool)
-	return v
-}
-
-// WithUnattendedRun marks ctx as a run whose prompts nobody can answer. See
-// UnattendedRunContextKey.
-func WithUnattendedRun(ctx context.Context) context.Context {
-	return context.WithValue(ctx, UnattendedRunContextKey, true)
-}
-
-// IsUnattendedRun reports whether ctx was marked by WithUnattendedRun.
-func IsUnattendedRun(ctx context.Context) bool {
-	if ctx == nil {
-		return false
+	if v, _ := ctx.Value(MCPOAuthNonInteractiveContextKey).(bool); v {
+		return true
 	}
-	v, _ := ctx.Value(UnattendedRunContextKey).(bool)
-	return v
+	m, set := ctx.Value(RunModeContextKey).(RunMode)
+	return set && !m.Attended()
 }
 
 // WithBackgroundTask marks ctx as originating from an asynq background worker

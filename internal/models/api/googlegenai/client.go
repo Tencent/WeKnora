@@ -276,7 +276,8 @@ func mapFinishReason(reason string, hasToolCalls bool) string {
 		return "stop"
 	case "MAX_TOKENS":
 		return "length"
-	case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT":
+	case "SAFETY", "RECITATION", "LANGUAGE", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII",
+		"IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT", "IMAGE_RECITATION":
 		return "content_filter"
 	default:
 		return strings.ToLower(reason)

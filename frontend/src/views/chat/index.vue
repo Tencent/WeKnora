@@ -51,7 +51,7 @@
                             </div>
                         </div>
                         <!-- 推荐问题卡片 - 仅在新会话（无消息）时展示 -->
-                        <div v-if="!embeddedMode && messagesList.length === 0 && !loading"
+                        <div v-if="!embeddedMode && currentSession && !isAutomationSession && messagesList.length === 0 && !loading"
                             class="suggested-questions-container"
                             :class="{ 'has-questions': suggestedQuestions.length > 0 || suggestedQuestionsLoading }">
                             <!-- 骨架屏占位 -->
@@ -140,7 +140,7 @@
                                     @ask-assistant="handleAskAssistant"
                                     @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
                                 </botmsg>
-                                <FollowUpSuggestions v-if="session.answerFullyRendered && !session.steerForked && !session.suggestionsDismissed"
+                                <FollowUpSuggestions v-if="!isAutomationSession && session.answerFullyRendered && !session.steerForked && !session.suggestionsDismissed"
                                     :suggestion-set="session.suggestionSet"
                                     :loading="session.suggestionLoading"
                                     :allow-regenerate="session.suggestionSet?.allow_regenerate"
@@ -165,7 +165,11 @@
                         </div>
                     </transition>
                     <PendingPromptDock :embedded-mode="embeddedMode" />
-                    <InputField ref="inputFieldRef" :auto-focus="focusComposerOnMount" compact
+                    <div v-if="isAutomationSession" class="automation-session-notice" role="note">
+                        <t-icon name="time" size="14px" />
+                        <span>{{ t('automation.conversationNotice') }}</span>
+                    </div>
+                    <InputField v-else-if="embeddedMode || currentSession" ref="inputFieldRef" :auto-focus="focusComposerOnMount" compact
                         @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles, options) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles, options)"
                         @steer-msg="(query, mentionedItems, delivery) => handleSteerMsg(query, mentionedItems, delivery)"
                         @promote-steer="handlePromoteSteer"
@@ -178,7 +182,12 @@
                         :model-id="modelId" :default-model-id="defaultModelId"
                         @update:model-id="(id) => emit('update:modelId', id)"
                         :queuedSteers="steerQueue.filter(item => item.delivery === 'after')" :canSteer="isAgentStreamSession()">
-                        <template v-if="$slots['composer-chips']" #chips><slot name="composer-chips" /></template>
+                        <template v-if="$slots['composer-chips']" #chips>
+                            <slot name="composer-chips" />
+                        </template>
+                        <template v-if="backgroundItems.length" #background-work>
+                            <BackgroundWorkChip :items="backgroundItems" :cancel-work="onCancelWork" @view="openWorkOutput" />
+                        </template>
                         <template v-if="$slots['composer-controls']" #controls><slot name="composer-controls" /></template>
                     </InputField>
                 </div>
@@ -205,6 +214,10 @@
         :shift-width="referencesPanelWidth"
         :artifacts="sessionArtifacts" :artifacts-collecting="sessionArtifactsCollecting"
         @artifact-deleted="handleArtifactDeleted" />
+    <t-dialog v-model:visible="workOutputVisible" :header="viewingWorkTitle" :footer="false" width="720px">
+        <BackgroundWorkResults v-if="workOutputVisible && viewingWorkId && session_id" :session-id="String(session_id)"
+            :work-id="viewingWorkId" />
+    </t-dialog>
 </template>
 <script setup>
 import ChildAgentTabBar from './components/ChildAgentTabBar.vue';
@@ -265,6 +278,10 @@ import { provideChatSandboxPanel } from '@/composables/useChatSandboxPanel';
 import SandboxSidePanel from '@/components/chat/SandboxSidePanel.vue';
 import BrowserTaskPreview from './components/BrowserTaskPreview.vue';
 import PendingPromptDock from './components/PendingPromptDock.vue';
+import BackgroundWorkChip from './components/BackgroundWorkChip.vue';
+import BackgroundWorkResults from './components/BackgroundWorkResults.vue';
+import { cancelBackgroundWork, listBackgroundWork } from '@/api/chat/background-work';
+import { createBackgroundWorkPoller, mergeBackgroundWork } from '@/utils/backgroundWork';
 import { providePromptDock } from '@/composables/usePromptDock';
 import { collectSessionArtifacts, markSessionArtifactDeleted } from '@/utils/sessionArtifacts';
 import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
@@ -341,6 +358,74 @@ const router = useRouter();
 const session_id = ref(props.session_id || route.params.chatid);
 watch(session_id, () => childTabs.reset(), { flush: 'sync' });
 const currentSession = ref(null);
+const isAutomationSession = computed(() => currentSession.value?.kind === 'automation');
+const backgroundItems = ref([]);
+const viewingWorkId = ref('');
+const workOutputVisible = ref(false);
+const viewingWorkTitle = computed(() => {
+    const item = backgroundItems.value.find((row) => row.work_id === viewingWorkId.value);
+    return item?.title || viewingWorkId.value || '';
+});
+
+function replaceBackgroundItems(incoming) {
+    const merged = mergeBackgroundWork(backgroundItems.value, incoming);
+    const ids = new Set(incoming.map((item) => item.work_id));
+    const next = merged.filter((item) => ids.has(item.work_id));
+    if (
+        next.length === backgroundItems.value.length
+        && next.every((item, index) => item === backgroundItems.value[index])
+    ) {
+        return;
+    }
+    backgroundItems.value = next;
+}
+
+const backgroundPoller = createBackgroundWorkPoller({
+    sessionId: () => String(session_id.value || ''),
+    list: (id, signal) => listBackgroundWork(id, signal),
+    onUpdate: replaceBackgroundItems,
+});
+
+function startBackgroundWork() {
+    if (!session_id.value) {
+        backgroundItems.value = [];
+        return;
+    }
+    backgroundPoller.start();
+}
+
+async function refreshBackgroundWork() {
+    if (!session_id.value) return;
+    await backgroundPoller.refresh();
+}
+
+function openWorkOutput(workId) {
+    viewingWorkId.value = workId;
+    workOutputVisible.value = true;
+}
+
+async function onCancelWork(workId) {
+    const id = String(session_id.value || '');
+    if (!id || !workId) return;
+    try {
+        await cancelBackgroundWork(id, workId);
+    } catch {
+        // Refresh anyway so a rejected stop can leave the row running.
+    }
+    try {
+        if (String(session_id.value || '') === id) await refreshBackgroundWork();
+    } catch {
+        // Keep the last chip. A non-empty list is still on the 5s poller.
+    }
+}
+
+watch(session_id, (id) => {
+    backgroundPoller.stop();
+    backgroundItems.value = [];
+    viewingWorkId.value = '';
+    workOutputVisible.value = false;
+    if (id) backgroundPoller.start();
+});
 
 // 拉 session 详情，并按其 last_request_state 把输入栏状态恢复到当时的发起态。
 // 嵌入式（embeddedMode）由宿主页面注入 agent/KB，所以跳过整套恢复逻辑，
@@ -384,8 +469,18 @@ function handleAskAssistant(messageId) {
     assistant.open();
 }
 
+const backgroundWorkStamp = computed(() => messagesList.map((message) => {
+    const work = message?.background_work;
+    if (!work || typeof work !== 'object') return '';
+    return Object.entries(work).map(([id, row]) => `${id}:${row?.state || ''}`).join(',');
+}).join('|'));
+watch(backgroundWorkStamp, (stamp, previous) => {
+    if (!stamp || stamp === previous) return;
+    refreshBackgroundWork().catch(() => {});
+});
+
 function forkAffordanceOf(messageId) {
-    if (!messageId) return { canFork: false }
+    if (isAutomationSession.value || !messageId) return { canFork: false }
     return resolveForkAffordance(messagesList, messageId)
 }
 
@@ -397,7 +492,7 @@ const rewindableIds = computed(() => rewindableMessageIds(messagesList, {
 }))
 
 function canRewindMessage(messageId) {
-    return Boolean(messageId) && rewindableIds.value.has(String(messageId))
+    return !isAutomationSession.value && Boolean(messageId) && rewindableIds.value.has(String(messageId))
 }
 
 const FORK_PREFILL_KEY = 'weknora:fork-prefill'
@@ -405,7 +500,7 @@ let forkInFlight = false
 const rewindInFlight = ref(false)
 const rewindLockSessionId = ref('')
 const composerLocked = computed(() =>
-    rewindInFlight.value && String(session_id.value || '') === rewindLockSessionId.value
+    isAutomationSession.value || (rewindInFlight.value && String(session_id.value || '') === rewindLockSessionId.value)
 )
 
 function stashForkLanding(sessionId, text) {
@@ -757,6 +852,7 @@ const handleAnswerRenderComplete = (message, ready) => {
 };
 
 const loadFollowUpSuggestions = async (message, ensure = false, regenerate = false) => {
+    if (isAutomationSession.value) return;
     const messageId = resolveAssistantMessageId(message);
     const targetSessionId = session_id.value;
     if (!messageId || !targetSessionId || message.suggestionsDismissed) return;
@@ -1417,6 +1513,10 @@ const attachSteerFollowUp = async (completedAssistantId) => {
 };
 
 const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = [], options = {}) => {
+    if (!props.embeddedMode && !currentSession.value) {
+        await loadSessionAndHydrate(session_id.value);
+        if (!currentSession.value) return;
+    }
     if (composerLocked.value) return
     const reasoningEffort = props.embeddedMode ? undefined : (useSettingsStoreInstance.reasoningEffortOverride || undefined);
     stopStream();
@@ -1672,7 +1772,7 @@ const resumeSuspendedRun = async (pendingId) => {
     currentAssistantMessageId.value = resumeId;
     attachingResumedRun = true;
     try {
-        for (let attempt = 0; attempt < 10; attempt++) {
+        for (let attempt = 0; attempt < 60; attempt++) {
             await new Promise((resolve) => setTimeout(resolve, 500));
             if (session_id.value !== sessionId) return;
             await startStream({
@@ -1680,6 +1780,7 @@ const resumeSuspendedRun = async (pendingId) => {
                 query: resumeId,
                 method: 'GET',
                 url: '/api/v1/sessions/continue-stream',
+                resume_pending_id: pendingId,
             });
             if (!error.value) return;
         }
@@ -1796,6 +1897,7 @@ onMounted(async () => {
     // 初始化状态：加载历史消息时不应显示loading
     loading.value = false;
     isReplying.value = false;
+    startBackgroundWork();
 
     if (props.embeddedMode && props.initialQuery) {
         scrollLock.value = true;
@@ -1841,6 +1943,7 @@ onUnmounted(() => {
     activitySessionId.value = '';
     window.removeEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
     if (recoverPollTimer) { clearTimeout(recoverPollTimer); recoverPollTimer = null; }
+    backgroundPoller.dispose();
 });
 // An embedded view outlives the page behind it: a route change must not stop
 // its stream or restore the main chat's defaults.
@@ -2155,6 +2258,19 @@ onBeforeRouteUpdate((to, from, next) => {
         box-sizing: border-box;
         overflow-x: clip;
     }
+}
+
+.automation-session-notice {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 16px 0;
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-sm);
+    line-height: 1.6;
+
+    > .t-icon { flex-shrink: 0; }
 }
 
 .msg_list {

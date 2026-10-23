@@ -24,8 +24,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// copyOwnedObject copies srcPath into a NEW object owned by the destination
-// tenant, returning the new provider:// (resource) path.
+// copyOwnedObject copies srcPath for the destination tenant and claims the
+// returned resource for its knowledge. Identical images may reuse a catalog blob.
 //
 // Extracted/embedded chunk images MUST land in the tenant's exports/ namespace,
 // because GET /knowledge-bases/:id/files only serves objects that pass
@@ -35,7 +35,7 @@ import (
 // produced images that could no longer be rendered. Instead, read the source
 // bytes and re-save them via SaveBytes, exactly mirroring how the original
 // images were persisted during ingestion (see image_resolver.saveReferencedImage),
-// so the copy is a genuine independent object in the servable namespace.
+// so the copy is in the servable namespace.
 func copyOwnedObject(
 	ctx context.Context,
 	srcSvc, dstSvc interfaces.FileService,
@@ -122,8 +122,8 @@ func isImageExt(ext string) bool {
 }
 
 // cloneChunkImageInfo parses a chunk's image_info JSON, copies every referenced
-// object into a NEW object owned by (tenantID, knowledgeID), and returns the
-// re-serialized image_info plus the list of newly-created object URLs (for
+// object for (tenantID, knowledgeID), and returns the re-serialized image_info
+// plus copied resource URLs (including reused images, for ownership-aware
 // rollback on failure). urlCache dedups identical source objects across chunks
 // so the same source image is copied at most once per clone AND accumulates the
 // full old->new URL mapping so callers can rewrite in-content Markdown image
@@ -213,22 +213,13 @@ func rewriteContentImageURLs(content string, urlCache map[string]string) string 
 	return content
 }
 
-// cleanupCopiedObjects deletes objects that were newly created during a clone
-// that subsequently failed, to avoid orphaning storage. It is best-effort:
-// delete errors are logged but never returned (the original clone error wins).
-func cleanupCopiedObjects(ctx context.Context, svc interfaces.FileService, paths []string) {
+// cleanupCopiedObjects releases a failed clone's claims before deleting any
+// unreferenced bytes. SaveBytes may have reused another owner's image.
+func cleanupCopiedObjects(ctx context.Context, svc interfaces.FileService, releaser *resourceReleaser, paths []string) {
 	if len(paths) == 0 || svc == nil {
 		return
 	}
-	logger.Infof(ctx, "Cleaning up %d copied objects after clone failure", len(paths))
-	for _, p := range paths {
-		if p == "" {
-			continue
-		}
-		if err := svc.DeleteFile(ctx, p); err != nil {
-			logger.Errorf(ctx, "Failed to clean up copied object %s: %v", p, err)
-		}
-	}
+	deleteExtractedImages(ctx, svc, releaser, paths)
 }
 
 func (s *knowledgeService) CloneKnowledgeBase(ctx context.Context, srcID, dstID string) error {
@@ -339,7 +330,10 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 				return
 			}
 		}
-		cleanupCopiedObjects(ctx, dstSvc, copiedURLs)
+		// The source file is already owned by this destination before chunk
+		// cloning. An identical embedded image must not release that claim.
+		copiedURLs = slices.DeleteFunc(copiedURLs, func(ref string) bool { return ref == stored.FilePath })
+		cleanupCopiedObjects(ctx, dstSvc, knowledgeResourceOwners(s.resourceCatalog, dst.ID), copiedURLs)
 	}()
 
 	now := time.Now()
@@ -673,12 +667,6 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 	// new objects for best-effort cleanup if the clone fails partway through.
 	dstSvc := s.resolveFileService(ctx, dstKB)
 	imageURLCache := map[string]string{}
-	var copiedImageURLs []string
-	defer func() {
-		if retErr != nil {
-			cleanupCopiedObjects(ctx, dstSvc, copiedImageURLs)
-		}
-	}()
 
 	// Get source FAQ knowledge first (FAQ KB has exactly one Knowledge entry)
 	srcKnowledgeList, err := s.repo.ListKnowledgeByKnowledgeBaseID(ctx, srcKB.TenantID, srcKB.ID)
@@ -831,6 +819,42 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 		handleError(progress, err, "Failed to prepare FAQ knowledge entry")
 		return err
 	}
+	// Bind is idempotent per knowledge, so rollback must preserve claims that
+	// predate this incremental clone as well as images in persisted batches.
+	retainedImages := map[string]bool{}
+	if s.resourceCatalog != nil {
+		refs, err := s.resourceCatalog.ListReferencesByOwner(ctx, types.ResourceOwnerKnowledge, dstKnowledge.ID)
+		if err != nil {
+			handleError(progress, err, "Failed to load existing FAQ resource claims")
+			return fmt.Errorf("load existing FAQ resource claims: %w", err)
+		}
+		for _, ref := range refs {
+			retainedImages[ref] = true
+		}
+	}
+	var copiedImageURLs []string
+	defer func() {
+		if retErr == nil || len(copiedImageURLs) == 0 {
+			return
+		}
+		// A failed CreateChunks may have committed before its acknowledgement
+		// was lost. Inspect persisted rows, keeping all bytes on an uncertain read.
+		rows, err := s.chunkRepo.ListAllChunksByKnowledgeID(ctx, dstKB.TenantID, dstKnowledge.ID)
+		if err != nil {
+			logger.Warnf(ctx, "Keeping copied FAQ images: failed to read saved chunks: %v", err)
+			return
+		}
+		for _, row := range rows {
+			for _, ref := range collectImageURLs(ctx, []string{row.ImageInfo}) {
+				retainedImages[ref] = true
+			}
+			for _, ref := range types.ScanResourceReferences(row.Content) {
+				retainedImages[ref] = true
+			}
+		}
+		copiedImageURLs = slices.DeleteFunc(copiedImageURLs, func(ref string) bool { return retainedImages[ref] })
+		cleanupCopiedObjects(ctx, dstSvc, knowledgeResourceOwners(s.resourceCatalog, dstKnowledge.ID), copiedImageURLs)
+	}()
 
 	// Clone FAQ chunks from source to destination
 	batch := 50
@@ -859,13 +883,13 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 			// FAQ knowledge so deleting the source never breaks this clone.
 			newImageInfo, copied, copyErr := cloneChunkImageInfo(
 				ctx, dstSvc, srcChunk.ImageInfo, dstKB.TenantID, dstKnowledge.ID, imageURLCache, s.resourceCatalog)
+			copiedImageURLs = append(copiedImageURLs, copied...)
 			if copyErr != nil {
 				logger.Errorf(ctx, "Failed to copy FAQ chunk images: %v", copyErr)
 				handleError(progress, copyErr, "Failed to copy FAQ entry images")
 				retErr = copyErr
 				return retErr
 			}
-			copiedImageURLs = append(copiedImageURLs, copied...)
 
 			newChunk := &types.Chunk{
 				ID:              uuid.New().String(),

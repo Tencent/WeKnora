@@ -26,8 +26,8 @@ func TestSQLiteIMReplyLanguageUpgradeAndRollback(t *testing.T) {
 		VALUES ('mapping', 'feishu', 'user', 'session', 1, 'channel')`)
 	require.NoError(t, err)
 
-	upgradeRoot := copySQLiteMigrationsThrough(t, repoRoot, 42)
-	downFile := filepath.Join("migrations", "sqlite", "000042_im_follow_user_language.down.sql")
+	upgradeRoot := copySQLiteMigrationsThrough(t, repoRoot, 51)
+	downFile := filepath.Join("migrations", "sqlite", "000051_im_follow_user_language.down.sql")
 	downSQL, err := os.ReadFile(filepath.Join(repoRoot, downFile))
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(upgradeRoot, downFile), downSQL, 0o600))
@@ -36,7 +36,7 @@ func TestSQLiteIMReplyLanguageUpgradeAndRollback(t *testing.T) {
 	// Repeated startup must not replay the ALTER TABLE statements.
 	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", opts))
 	version, dirty := sqliteMigrationState(t, db)
-	require.Equal(t, 42, version)
+	require.Equal(t, 51, version)
 	require.False(t, dirty)
 	var name, locale, mode, language, sessionID string
 	require.NoError(t, db.QueryRow(`SELECT name, locale, language_mode FROM im_channels
@@ -66,7 +66,7 @@ func TestSQLiteIMReplyLanguageUpgradeAndRollback(t *testing.T) {
 	t.Cleanup(func() { _, _ = m.Close() })
 	require.NoError(t, m.Steps(-1))
 	version, dirty = sqliteMigrationState(t, db)
-	require.Equal(t, 41, version)
+	require.Equal(t, 50, version)
 	require.False(t, dirty)
 	require.False(t, sqliteColumnExists(t, db, "im_channels", "language_mode"))
 	require.False(t, sqliteColumnExists(t, db, "im_channel_sessions", "last_detected_language"))
@@ -79,7 +79,7 @@ func TestSQLiteIMReplyLanguageUpgradeAndRollback(t *testing.T) {
 	require.Equal(t, "session", sessionID)
 	require.NoError(t, m.Steps(1))
 	version, dirty = sqliteMigrationState(t, db)
-	require.Equal(t, 42, version)
+	require.Equal(t, 51, version)
 	require.False(t, dirty)
 	require.NoError(t, db.QueryRow(`SELECT language_mode FROM im_channels
 		WHERE id = 'channel'`).Scan(&mode))
