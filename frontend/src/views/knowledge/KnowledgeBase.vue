@@ -2903,16 +2903,28 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
   container-name: doc-card-area;
 }
 
-// One navigation row; filters open in a single anchored panel.
+// Wrap by content as well as pane width: long paths must not squeeze out actions.
 .doc-filter-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   flex-shrink: 0;
   padding: 0 0 16px;
   border-bottom: 1px solid var(--td-component-stroke);
-  &__trailing { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  &__trailing {
+    display: flex;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: 0;
+    max-width: 100%;
+    margin-left: auto;
+    > :not(.doc-search-input) { flex-shrink: 0; }
+  }
   .doc-search-input { width: 220px; min-width: 100px; }
   :deep(.doc-search-input .t-input) {
     background: transparent;
@@ -2931,6 +2943,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 }
 .doc-folder-path {
   display: flex;
+  flex: 1 1 auto;
   align-items: baseline;
   gap: 6px;
   min-width: 0;
