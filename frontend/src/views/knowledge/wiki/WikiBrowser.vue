@@ -4235,7 +4235,6 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     text.setAttribute('font-size', '11')
     text.setAttribute('fill', 'var(--td-text-color-secondary)')
     text.setAttribute('pointer-events', 'none')
-    text.style.transition = 'opacity 0.2s' // Smooth fade in/out
     text.style.textShadow = '0 1px 3px var(--td-bg-color-container), 0 -1px 3px var(--td-bg-color-container), 1px 0 3px var(--td-bg-color-container), -1px 0 3px var(--td-bg-color-container)'
     text.textContent = n.title.length > 14 ? n.title.substring(0, 14) + '…' : n.title
     g.appendChild(text)
@@ -4638,10 +4637,6 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
     const captionedSlugs = new Set(groupLabels.map(label => label.slug.slice('anchor:'.length)))
     const candidates = graphNodeElsRef.flatMap(({ text, node }) => {
       const required = node.slug === graphSelectedSlug.value || node.slug === graphHighlightSlug.value
-      // Keep text legible in screen pixels. At overview scale show a few
-      // landmarks; zooming in reveals the individual page labels.
-      text.setAttribute('font-size', String(12 / scale))
-      text.setAttribute('dy', String(graphNodeRadius(node.linkCount) + 16 / scale))
       // The representative caption replaces its ordinary label at overview
       // scales, including hover/selection, so the page name appears only once.
       if (captionedSlugs.has(node.slug)) return []
@@ -4650,19 +4645,34 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
       const showDetail = scale >= 0.5 || (graphFocusedSlugs.has(node.slug) && scale >= 0.4)
       const landmark = graphImportantSlugs.has(node.slug) && (groupLabels.length === 0 || scale >= 0.4)
       if (!required && !showDetail && !landmark) return []
-      const halfWidth = node.labelWidth * 12 / 11 / 2 + 5
+      const fontSize = 12 / scale
+      const dy = graphNodeRadius(node.linkCount) + 16 / scale
+      const halfWidth = node.labelWidth * fontSize / 11 / 2 + 5
       const baseline = (node.y + graphNodeRadius(node.linkCount)) * scale + 16
       return [{ slug: node.slug, priority: node.linkCount, required,
         left: node.x * scale - halfWidth, right: node.x * scale + halfWidth,
-        top: baseline - 15, bottom: baseline + 4 }]
+        top: baseline - 15, bottom: baseline + 4,
+        apply: () => {
+          text.setAttribute('font-size', String(fontSize))
+          text.setAttribute('dy', String(dy))
+        } }]
     })
     const visible = visibleGraphLabels([...groupLabels, ...candidates])
+    for (const candidate of candidates) {
+      if (visible.has(candidate.slug)) candidate.apply()
+    }
     for (const { group, anchorSlug } of graphClusterEls) {
       const shown = visible.has(`anchor:${anchorSlug}`)
       group.style.visibility = shown ? 'visible' : 'hidden'
       group.setAttribute('tabindex', shown ? '0' : '-1')
     }
-    for (const { text, node } of graphNodeElsRef) text.style.opacity = visible.has(node.slug) ? '1' : '0'
+    for (const { text, node } of graphNodeElsRef) {
+      const shown = visible.has(node.slug)
+      // Collision-rejected labels otherwise remain in the SVG layout tree even
+      // at overview scale, where nearly all of them are hidden. Removing them
+      // from display avoids paying layout and paint costs on every zoom event.
+      text.style.display = shown ? '' : 'none'
+    }
 
   }
   refreshGraphLabels = updateLabelsVisibility
