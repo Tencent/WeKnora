@@ -4647,7 +4647,9 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
       if (!required && !showDetail && !landmark) return []
       const fontSize = 12 / scale
       const dy = graphNodeRadius(node.linkCount) + 16 / scale
-      const halfWidth = node.labelWidth * fontSize / 11 / 2 + 5
+      // fontSize is inversely scaled so labels keep their on-screen size.
+      // Keep the collision box in screen pixels as well.
+      const halfWidth = node.labelWidth * 12 / 11 / 2 + 5
       const baseline = (node.y + graphNodeRadius(node.linkCount)) * scale + 16
       return [{ slug: node.slug, priority: node.linkCount, required,
         left: node.x * scale - halfWidth, right: node.x * scale + halfWidth,
