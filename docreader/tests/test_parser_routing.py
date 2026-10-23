@@ -38,6 +38,17 @@ class ParserRoutingTest(unittest.TestCase):
 
         self.assertIs(parser_class, XMindParser)
 
+    def test_xlsm_falls_back_to_markitdown_parser(self):
+        # builtin only registers xlsx/xls for ExcelParser, so xlsm has to take
+        # the type-level markitdown fallback. Without it the upload gate would
+        # accept the file and the docreader would then fail to resolve a parser
+        # (#4598).
+        for engine in (BUILTIN_ENGINE, "", "anydoc"):
+            with self.subTest(engine=engine):
+                parser_class = registry.get_parser_class(engine, "xlsm")
+
+                self.assertIs(parser_class, MarkitdownParser)
+
     def test_legacy_doc_payload_renamed_to_docx_uses_doc_parser(self):
         registry = _RecordingRegistry()
         parser = Parser()

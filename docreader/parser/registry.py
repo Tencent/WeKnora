@@ -24,11 +24,18 @@ BUILTIN_ENGINE = "builtin"
 
 # File types that builtin does not implement natively. When the requested
 # engine (including empty / builtin) cannot parse them, route to this engine
-# instead of raising ValueError — PPT/PPTX/CSV are markitdown-only.
+# instead of raising ValueError — PPT/PPTX/CSV/XLSM are markitdown-only.
 _DEFAULT_ENGINE_BY_TYPE = {
     "ppt": "markitdown",
     "pptx": "markitdown",
     "csv": "markitdown",
+    # .xlsm is an xlsx container with VBA; MarkitdownParser already strips the
+    # unreadable ranges and non-conforming styles before converting it, but
+    # builtin's ExcelParser is only registered for xlsx/xls. Registering the
+    # fallback here keeps xlsm parseable when the anydoc engine is not linked
+    # into the app binary (WITH_ANYDOC=0), instead of failing to resolve a
+    # parser for a file the upload gate now accepts (#4598).
+    "xlsm": "markitdown",
 }
 
 
@@ -190,6 +197,7 @@ def _build_default_registry() -> ParserEngineRegistry:
             "ppt": MarkitdownParser,
             "xlsx": MarkitdownParser,
             "xls": MarkitdownParser,
+            "xlsm": MarkitdownParser,
             "csv": MarkitdownParser,
         },
         description="MarkItDown 解析引擎（微软 MarkItDown 库）",
