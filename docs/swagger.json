@@ -2107,6 +2107,58 @@
                 "x-agent-hint": "Creates an automation the WeKnora assistant runs as the user. If work requires other agents, name them and their assignments in the instruction so the assistant can delegate. Turn the user's wording into a cron expression (five fields, minute first) and an IANA timezone, and check it with automation.validate_trigger first, telling the user the next run times it returns. Runs are unattended: write the instruction as a complete task, since nobody can answer questions during a run. access_level defaults to confirm, where each change waits for the user's approval; only set auto_write when the user asks for it."
             }
         },
+        "/automations/by-session/{session_id}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "返回这次会话所属的自动化，供会话页跳回",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "自动化"
+                ],
+                "summary": "按会话查找自动化",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "自动化",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Automation"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/automations/validate-trigger": {
             "post": {
                 "security": [
@@ -8555,6 +8607,63 @@
                     "target": "knowledge_base.get"
                 },
                 "x-agent-hint": "Regenerates the AI summary of what the knowledge base covers, with one model call. A description the user wrote is kept."
+            }
+        },
+        "/knowledge-bases/{id}/rebuild-index": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "把知识库内全部文档重新入队解析（跳过迁移中的条目），以应用最新的索引策略；后台异步执行",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库"
+                ],
+                "summary": "重建知识库索引",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "knowledge_base_id",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "任务已提交",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.SubmittedTaskResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "无权更新知识库",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "knowledge_base.rebuild_index",
+                    "label": "name",
+                    "risk": "write",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Reparses every document of the knowledge base in the background to apply changed indexing strategy toggles (vector/keyword/wiki/graph); check progress afterwards with knowledge.list parse_status. Search results change meanwhile."
             }
         },
         "/knowledge-bases/{id}/shares": {
@@ -17544,6 +17653,110 @@
                 }
             }
         },
+        "/sandbox-configs/{id}/user-sandboxes": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "List the config's shared user machines with live session counts and the empty-retention clock.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "List shared user sandboxes",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Shared user sandboxes",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}/user-sandboxes/{digest}/release": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Delete one shared user machine now; each session gets a fresh machine on next use. Refused while busy.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Release a shared user sandbox",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "User machine digest",
+                        "name": "digest",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Released",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "User sandbox is busy",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/sessions": {
             "get": {
                 "security": [
@@ -24152,6 +24365,10 @@
                 "unverifiable": {
                     "description": "Unverifiable reports that SandboxCount is unknown rather than zero\nbecause the provider could not be reached. The management page must say\nso instead of rendering a reassuring \"0 sandboxes\".",
                     "type": "boolean"
+                },
+                "user_sandbox_count": {
+                    "description": "UserSandboxCount is how many of SandboxCount are shared user machines.\nThey carry no session id, so SessionIDs alone under-reports what a\ncredential change would affect.",
+                    "type": "integer"
                 }
             }
         },
@@ -25743,6 +25960,20 @@
         "github_com_Tencent_WeKnora_internal_types.AgentStep": {
             "type": "object",
             "properties": {
+                "background_injections": {
+                    "description": "BackgroundInjections are background-work messages delivered before this\nmodel response, after the step's steered messages, in delivery order.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.BackgroundInjection"
+                    }
+                },
+                "background_seen_ids": {
+                    "description": "BackgroundSeenIDs are finished background items whose results this\nstep's tool calls (work_wait, work_cancel) returned to the model.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "intermediate_answer": {
                     "description": "IntermediateAnswer preserves a plain answer followed by a loop-end steer.\nThe canonical final answer is still stored in Message.Content.",
                     "type": "boolean"
@@ -25934,6 +26165,17 @@
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.AttrInject": {
+            "type": "string",
+            "enum": [
+                "always",
+                "on_demand"
+            ],
+            "x-enum-varnames": [
+                "AttrInjectAlways",
+                "AttrInjectOnDemand"
+            ]
+        },
         "github_com_Tencent_WeKnora_internal_types.AttrSpec": {
             "type": "object",
             "properties": {
@@ -25947,6 +26189,18 @@
                 "description": {
                     "description": "one line explaining what the attribute measures",
                     "type": "string"
+                },
+                "inject": {
+                    "description": "Inject says whether this attribute is always part of the describe round's\nstanding questions, or only asked when something is going to act on it.\nAn empty value means AttrInjectAlways, so attributes registered before\nthis field existed keep their behaviour.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AttrInject"
+                        }
+                    ]
+                },
+                "internal": {
+                    "description": "Internal marks an attribute that steers this pipeline's own scheduling\nrather than describing what the image holds. Such attributes are still\nobserved and persisted — the values are what justify a scheduling\ndecision after the fact — but they are kept out of the gallery's filter\nsurface, where they would only add noise: no operator wants to filter a\nlibrary by \"how much margin is left around the text\".",
+                    "type": "boolean"
                 },
                 "label": {
                     "description": "human-readable name for the settings panel",
@@ -26260,6 +26514,12 @@
                     ],
                     "x-agent": true
                 },
+                "active_run_status": {
+                    "description": "ActiveRunStatus is projected from live runs and is not persisted.",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
                 "approval_timeout_minutes": {
                     "description": "ApprovalTimeoutMinutes is how long a run waits for an approval before\nit fails.",
                     "type": "integer",
@@ -26567,7 +26827,7 @@
             "type": "object",
             "properties": {
                 "at": {
-                    "description": "At is when a once trigger fires.",
+                    "description": "At is when a once trigger fires, RFC3339 or a wall-clock time in\nTimezone, such as \"2006-01-02T15:04:05\" or \"2006-01-02 15:04\".",
                     "type": "string",
                     "x-agent": true
                 },
@@ -26585,6 +26845,20 @@
                     "description": "Type is cron or once.",
                     "type": "string",
                     "x-agent": true
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.BackgroundInjection": {
+            "type": "object",
+            "properties": {
+                "ack_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "content": {
+                    "type": "string"
                 }
             }
         },
@@ -29074,10 +29348,6 @@
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ImageAttrCondition"
                     }
-                },
-                "on_unobserved": {
-                    "description": "OnUnobserved is the OCR decision used when the observation does not\nanswer for one of the attributes the policy reads — the attribute is\nabsent because the model skipped the line, or because the value it wrote\nwas not one of the allowed ones. The default is true: an incomplete\nobservation keeps extracting, so a missed block of text costs one extra\ncall instead of being lost. Turn it off only with a model reliable enough\nto answer every attribute line.",
-                    "type": "boolean"
                 }
             }
         },
@@ -29100,7 +29370,7 @@
             "type": "object",
             "properties": {
                 "image_actions": {
-                    "description": "ImageActions overrides the built-in attribute→work table (see\nDefaultImageActions). A nil value keeps the conservative default: run OCR\nfor block text, data visuals, and unobserved images.",
+                    "description": "ImageActions overrides the built-in attribute→work table (see\nDefaultImageActions). A nil value keeps the conservative default: run OCR\nfor block text and data visuals. What to do about an image whose\nattributes were NOT observed is deliberately not part of this table — it\nis a scheduling decision, so it belongs to the pipeline that observes\n(`ocr_on_unobserved` in that pipeline's slot).",
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ImageActionsConfig"
@@ -33498,6 +33768,10 @@
         "github_com_Tencent_WeKnora_internal_types.SandboxCheckpoint": {
             "type": "object",
             "properties": {
+                "background_active": {
+                    "description": "BackgroundActive marks a commit taken while background work was live in\nthe session. The work may have been mid-write, so fork and rewind never\nroll a workspace back to it.",
+                    "type": "boolean"
+                },
                 "commit_sha": {
                     "type": "string"
                 },
@@ -33855,6 +34129,10 @@
                         }
                     ]
                 },
+                "owner_auth_source": {
+                    "description": "OwnerAuthSource records, server-side, how UserID was authenticated when\nthe session was created or its owner first bound (AuthSource*).\nPer-user sandbox allocation reads it; client input never sets it\n(CreateSession overwrites). Empty on rows created before the column\nexisted, which means \"unknown\".",
+                    "type": "string"
+                },
                 "parent_session_id": {
                     "description": "ParentSessionID names the session this one was forked from. Empty for\nordinary sessions. Deliberately not a foreign key: the parent may be\ndeleted while the branch lives on, and a branch must not cascade away\nwith it. A dangling value simply renders as an ordinary session.",
                     "type": "string"
@@ -34011,6 +34289,10 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SessionLastRequestState"
                         }
                     ]
+                },
+                "owner_auth_source": {
+                    "description": "OwnerAuthSource records, server-side, how UserID was authenticated when\nthe session was created or its owner first bound (AuthSource*).\nPer-user sandbox allocation reads it; client input never sets it\n(CreateSession overwrites). Empty on rows created before the column\nexisted, which means \"unknown\".",
+                    "type": "string"
                 },
                 "parent_session_id": {
                     "description": "ParentSessionID names the session this one was forked from. Empty for\nordinary sessions. Deliberately not a foreign key: the parent may be\ndeleted while the branch lives on, and a branch must not cascade away\nwith it. A dangling value simply renders as an ordinary session.",
@@ -35108,6 +35390,10 @@
         "github_com_Tencent_WeKnora_internal_types.TenantSandboxConfig": {
             "type": "object",
             "properties": {
+                "allocation_mode": {
+                    "description": "AllocationMode decides how a session that has not yet used a sandbox\nof this config is placed: \"session\" (default) gives it a machine of its\nown, \"user\" lets one verified owner's sessions share a machine. A\nsession never changes mode after its first use; see\ninternal/sandbox/allocation.",
+                    "type": "string"
+                },
                 "allow_private_endpoints": {
                     "description": "AllowPrivateEndpoints permits this workspace config to reach RFC1918 or\nloopback cluster endpoints. Link-local/cloud-metadata addresses remain\nblocked. It is explicit in the UI instead of hidden in process env.",
                     "type": "boolean"
@@ -35162,6 +35448,10 @@
                 },
                 "terminal_idle_disconnect_sec": {
                     "description": "TerminalIdleDisconnectSec is how long an interactive terminal or\ndesktop may go without user activity before WeKnora closes the\nconnection so the sandbox can pause on its provider TTL. Terminal\ncounts keystrokes and PTY output; desktop counts mouse and keyboard.\n0 uses the built-in default (15 minutes). Not an identity field.",
+                    "type": "integer"
+                },
+                "user_sandbox_empty_retention_days": {
+                    "description": "UserSandboxEmptyRetentionDays is how long a user machine with no live\nsession is kept before the reclaim job deletes it. 0 means the default\n(7); values above 90 are rejected.",
                     "type": "integer"
                 },
                 "volume_mount": {
