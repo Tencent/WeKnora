@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"mime/multipart"
-	"net/textproto"
 	"reflect"
 	"slices"
 	"strings"
@@ -1600,12 +1599,7 @@ func bytesToFileHeader(data []byte, filename string) (*multipart.FileHeader, err
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
-	// Create a form file part
-	partHeader := make(textproto.MIMEHeader)
-	partHeader.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, filename))
-	partHeader.Set("Content-Type", "application/octet-stream")
-
-	part, err := writer.CreatePart(partHeader)
+	part, err := writer.CreateFormFile("file", filename)
 	if err != nil {
 		return nil, fmt.Errorf("create multipart part: %w", err)
 	}
