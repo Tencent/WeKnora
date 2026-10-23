@@ -114,7 +114,9 @@ func TestParseCallbackGroupMentionGate(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			body := `{"header":{"event_type":"im.message.receive_v1"},"event":{"message":{"message_id":"om_1","message_type":"text","chat_type":"group","chat_id":"oc_group","content":"{\"text\":\"@_user_1 hello\"}","mentions":` + test.mentions + `}}}`
+			body := `{"header":{"event_type":"im.message.receive_v1"},"event":{"message":{` +
+				`"message_id":"om_1","message_type":"text","chat_type":"group","chat_id":"oc_group",` +
+				`"content":"{\"text\":\"@_user_1 hello\"}","mentions":` + test.mentions + `}}}`
 			recorder := httptest.NewRecorder()
 			ctx, _ := gin.CreateTestContext(recorder)
 			ctx.Request = httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))

@@ -123,7 +123,7 @@ func (a *Adapter) BotOpenID(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("request bot info: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Code int    `json:"code"`
@@ -419,11 +419,13 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	if msg.ChatType == "group" {
 		botOpenID, err := a.BotOpenID(c.Request.Context())
 		if err != nil {
-			logger.Warnf(c.Request.Context(), "[%s] failed to resolve bot open_id; ignoring group message: %v", a.region.Label, err)
+			logger.Warnf(c.Request.Context(),
+				"[%s] failed to resolve bot open_id; ignoring group message: %v", a.region.Label, err)
 			return nil, nil
 		}
 		if !mentionsBot(botOpenID, msg.Mentions) {
-			logger.Infof(c.Request.Context(), "[%s] ignoring group message without this bot mention: msg_id=%q", a.region.Label, msg.MessageID)
+			logger.Infof(c.Request.Context(),
+				"[%s] ignoring group message without this bot mention: msg_id=%q", a.region.Label, msg.MessageID)
 			return nil, nil
 		}
 	}

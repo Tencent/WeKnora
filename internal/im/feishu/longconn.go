@@ -155,7 +155,8 @@ func convertEvent(region Region, botOpenID string, event *larkim.P2MessageReceiv
 	// delivers (or doesn't). This is the single chokepoint for all message
 	// types — adding it here catches text/file/image/post uniformly.
 	logger.Infof(context.Background(),
-		"[%s][RX] msg_type=%q chat_type=%q chat_id=%q msg_id=%q root_id=%q parent_id=%q thread_id=%q content=%q mentions=%v",
+		"[%s][RX] msg_type=%q chat_type=%q chat_id=%q msg_id=%q root_id=%q parent_id=%q "+
+			"thread_id=%q content=%q mentions=%v",
 		region.Label,
 		ptrStr(msg.MessageType), ptrStr(msg.ChatType), ptrStr(msg.ChatId),
 		ptrStr(msg.MessageId), ptrStr(msg.RootId), ptrStr(msg.ParentId),
@@ -175,7 +176,8 @@ func convertEvent(region Region, botOpenID string, event *larkim.P2MessageReceiv
 	// compare the mention open_id with this app's own bot open_id.
 	isGroup := msg.ChatType != nil && *msg.ChatType == "group"
 	if isGroup && !mentionsBot(botOpenID, msg.Mentions) {
-		logger.Infof(context.Background(), "[%s][RX] ignoring group message without this bot mention: msg_id=%q", region.Label, ptrStr(msg.MessageId))
+		logger.Infof(context.Background(),
+			"[%s][RX] ignoring group message without this bot mention: msg_id=%q", region.Label, ptrStr(msg.MessageId))
 		return nil
 	}
 
