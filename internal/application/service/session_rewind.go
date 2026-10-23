@@ -175,6 +175,7 @@ type SessionRewindService struct {
 	busyGate    *SessionBusyGate
 	// suspendedRuns closes runs suspended on prompts before the cut.
 	suspendedRuns *SuspendedRunService
+	activity      interfaces.ActivityRegistry
 }
 
 // SetSuspendedRuns lets rewind close the session's suspended runs.
@@ -211,6 +212,7 @@ func NewSessionRewindServiceFromRepos(
 	fallback sandbox.Manager,
 	streams interfaces.StreamManager,
 	busyGate *SessionBusyGate,
+	activity interfaces.ActivityRegistry,
 ) *SessionRewindService {
 	s := NewSessionRewindService(sessions, messages, sandboxPort, knowledge, suggestions)
 	s.snapshots = NewResolverForkSnapshotDeleter(resolver, fallback)
@@ -218,6 +220,7 @@ func NewSessionRewindServiceFromRepos(
 	if busyGate != nil {
 		s.busyGate = busyGate
 	}
+	s.activity = activity
 	return s
 }
 
@@ -279,6 +282,9 @@ func (s *SessionRewindService) Rewind(
 	if err := s.rejectIfBusy(ctx, sessionID); err != nil {
 		return nil, err
 	}
+	if err := s.rejectIfBackgroundActive(ctx, source); err != nil {
+		return nil, err
+	}
 
 	history, err := s.keptCheckpointHistory(ctx, sessionID, rewindPoint)
 	if err != nil {
@@ -294,6 +300,11 @@ func (s *SessionRewindService) Rewind(
 		return nil, err
 	}
 	defer unlock()
+	// Re-check under the lock. The busy gate now holds off new turns, so no
+	// new background work can start before the truncate lands.
+	if err := s.rejectIfBackgroundActive(persistCtx, source); err != nil {
+		return nil, err
+	}
 
 	var abandonedBootstrap *types.ForkBootstrap
 	workspaceReset, reason, resetErr := s.resetWorkspaceIfPossible(workCtx, sessionID, history)
@@ -476,6 +487,7 @@ func (s *SessionRewindService) lockRewind(ctx context.Context, sessionID string)
 			if errors.Is(err, sandbox.ErrSessionRewindLocked) ||
 				errors.Is(err, sandbox.ErrSessionTurnActive) ||
 				errors.Is(err, sandbox.ErrSessionWorkspaceBusy) ||
+				errors.Is(err, sandbox.ErrSessionWorkActive) ||
 				errors.Is(err, ErrRewindSourceBusy) {
 				return nil, nil, ErrRewindSourceBusy
 			}
@@ -492,6 +504,24 @@ func (s *SessionRewindService) lockRewind(ctx context.Context, sessionID string)
 		unlockPort()
 		unlockGate()
 	}, nil
+}
+
+// rejectIfBackgroundActive refuses while background work is live in the
+// session. On Web the rewind lock refuses as well (tryLockRewindScript); this
+// check is what covers Lite, which has no turn leases, and where rewind would
+// truncate the conversation a pending completion notice still refers to.
+func (s *SessionRewindService) rejectIfBackgroundActive(ctx context.Context, source *types.Session) error {
+	if s.activity == nil {
+		return nil
+	}
+	live, err := s.activity.List(ctx, interfaces.SessionRef{TenantID: source.TenantID, SessionID: source.ID})
+	if err != nil {
+		return fmt.Errorf("session rewind: check background work: %w", err)
+	}
+	if len(live) > 0 {
+		return ErrRewindSourceBusy
+	}
+	return nil
 }
 
 func (s *SessionRewindService) rejectIfBusy(ctx context.Context, sessionID string) error {

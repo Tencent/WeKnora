@@ -1043,14 +1043,17 @@ func applyKnowledgeBasePatch(
 		if image.ImagePipelineParams == nil {
 			image.ImagePipelineParams = map[string]any{}
 		}
+		// The switch is stored under the slot of the pipeline that declares it,
+		// and nowhere else: a second spelling would be a setting with two homes,
+		// and the run reads only the slot. The keys come from the pipeline's own
+		// declaration rather than being spelled here, so a rename cannot leave
+		// this call site writing something nothing reads.
 		for key, value := range map[string]*bool{
-			"enable_caption": patch.ImageCaptionEnabled,
-			"enable_ocr":     patch.ImageOCREnabled,
+			service.ImageCaptionSwitchKey: patch.ImageCaptionEnabled,
+			service.ImageOCRSwitchKey:     patch.ImageOCREnabled,
 		} {
 			if value != nil {
-				// Namespaced values take precedence at execution time.
-				image.ImagePipelineParams["default."+key] = *value
-				image.ImagePipelineParams[key] = *value
+				image.ImagePipelineParams[types.SlotKey(string(types.ImagePipelineDefault), key)] = *value
 			}
 		}
 		used = true

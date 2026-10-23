@@ -582,26 +582,17 @@ const applyOptimisticBatchReparse = (ids: string[]) => {
   }
 };
 
-const syncReparseAckFromServer = (ids: string[]) => {
-  for (const id of ids) {
-    if (!pendingReparseAck.value.has(id)) continue;
-    const card = cardList.value.find((c) => c.id === id);
-    if (card && isParseInFlight(card.parse_status)) {
-      pendingReparseAck.value.delete(id);
-    }
-  }
-};
-
 const awaitBatchReparseReflection = async (ids: string[]) => {
+  // updateStatus already polls in-flight rows and acknowledges the worker.
+  // Only bound the optimistic window here: reloading page 1 discards loaded
+  // pages, flashes the list spinner and can refresh a different folder/KB.
   const maxPolls = 30;
   const delayMs = 400;
-  for (let i = 0; i < maxPolls && pendingReparseAck.value.size > 0; i++) {
-    await loadKnowledgeFiles(kbId.value);
-    syncReparseAckFromServer(ids);
-    applyOptimisticBatchReparse(Array.from(pendingReparseAck.value));
+  for (let i = 0; i < maxPolls && ids.some(id => pendingReparseAck.value.has(id)); i++) {
     await new Promise<void>((r) => setTimeout(r, delayMs));
   }
-  pendingReparseAck.value.clear();
+  // Another batch may have been submitted while this one was waiting.
+  ids.forEach(id => pendingReparseAck.value.delete(id));
 };
 
 const confirmBatchReparse = async () => {

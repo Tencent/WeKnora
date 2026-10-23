@@ -63,7 +63,7 @@ func extractFileOps(previousSummary string, groups ...[]chat.Message) fileOps {
 	ops.inherit(previousSummary)
 	for _, group := range groups {
 		for _, msg := range group {
-			ops.inherit(msg.Content)
+			ops.inherit(messageText(msg))
 			for _, tc := range msg.ToolCalls {
 				path := toolCallPath(tc.Function.Arguments)
 				if path == "" {

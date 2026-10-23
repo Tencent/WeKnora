@@ -338,13 +338,27 @@ func executeRecovered(
 	return tool.Execute(ctx, args)
 }
 
-// Cleanup cleans up all registered tools that implement the types.Cleanable interface.
-// This is called at the end of agent sessions to release tool-specific resources.
+// errorCleanable is Cleanup that reports a failure. types.Cleanable takes no
+// error, and one method cannot satisfy both signatures. shell_exec_async uses
+// the error form so a failed cursor update is visible.
+type errorCleanable interface {
+	Cleanup(ctx context.Context) error
+}
+
+// Cleanup cleans up all registered tools that implement types.Cleanable or
+// errorCleanable. This is called at the end of agent sessions to release
+// tool-specific resources, including shell-job output cursors.
 func (r *ToolRegistry) Cleanup(ctx context.Context) {
 	for name, tool := range r.tools {
-		if cleanable, ok := tool.(types.Cleanable); ok {
+		switch cleanable := tool.(type) {
+		case types.Cleanable:
 			logger.Infof(ctx, "[ToolRegistry] Cleaning up tool: %s", name)
 			cleanable.Cleanup(ctx)
+		case errorCleanable:
+			logger.Infof(ctx, "[ToolRegistry] Cleaning up tool: %s", name)
+			if err := cleanable.Cleanup(ctx); err != nil {
+				logger.Warnf(ctx, "[ToolRegistry] cleanup %s: %v", name, err)
+			}
 		}
 	}
 }

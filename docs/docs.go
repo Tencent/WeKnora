@@ -29129,11 +29129,11 @@ const docTemplate = `{
                     "x-agent": true
                 },
                 "image_pipeline_params": {
-                    "description": "ImagePipelineParams holds the tunables of ImagePipelineID, keyed by the\nfield's own key. The map travels whole: a key a pipeline no longer\ndeclares is dropped when the run reads it, so an old stored config stays\nloadable rather than being rewritten on save.",
+                    "description": "ImagePipelineParams holds the tunables of ImagePipelineID, keyed by each\nfield's slot — the pipeline id joined to the field's own key, built by\nSlotKey and read back by ImagePipelineParam. The map travels whole: a key\na pipeline no longer declares is dropped when the run reads it, so an old\nstored config stays loadable rather than being rewritten on save.",
                     "type": "object",
                     "additionalProperties": {},
                     "x-agent": true,
-                    "x-agent-keys": "enable_caption|enable_ocr|default.enable_caption|default.enable_ocr",
+                    "x-agent-keys": "default.caption_enabled|default.ocr_enabled",
                     "x-agent-response": true
                 },
                 "image_vector_enabled": {

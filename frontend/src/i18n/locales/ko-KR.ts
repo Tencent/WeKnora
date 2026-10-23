@@ -1352,6 +1352,8 @@ export default {
       confluenceEditionCloud: 'Cloud',
       confluenceBaseUrl: 'Confluence URL',
       confluenceUsername: '사용자 이름 또는 이메일',
+      confluencePat: 'Server/DC 개인 액세스 토큰(PAT)',
+      confluencePatHint: '선택 사항입니다. 입력하면 Bearer 인증을 사용하며 사용자 이름과 비밀번호가 필요하지 않습니다.',
       confluencePassword: 'Server/DC 비밀번호',
       confluenceApiToken: 'Cloud API 토큰',
       clientId: 'Client ID',
@@ -4832,6 +4834,12 @@ export default {
     noKnowledgeBases: '사용 가능한 지식베이스 없음',
     enterDescription: '설명 입력',
     rawOutputLabel: '원시 출력',
+    backgroundWork: {
+      running: '백그라운드 작업 없음 | 백그라운드 작업 {count}개 | 백그라운드 작업 {count}개',
+      stop: '중지',
+      loading: '출력을 불러오는 중…',
+      unavailable: '출력을 볼 수 없습니다',
+    },
     wikiWritePageTitle: 'Wiki 페이지 작성',
     wikiReplaceTextTitle: 'Wiki 텍스트 교체',
     wikiRenamePageTitle: 'Wiki 페이지 이름 변경',
@@ -4901,14 +4909,14 @@ export default {
         imagePipelineSectionDescription:
           '멀티모달 분석이 켜져 있으면 이미지의 분석 방식을 필요에 따라 선택할 수 있습니다.',
         imagePipelineLabel: '분석 방식',
+        advancedSettingsLabel: '고급 설정',
+        notesLabel: '추가 설명',
         imagePipelinePlaceholder: '분석 방식 선택',
         imagePipelineLoading: '파이프라인을 불러오는 중…',
         imagePipelineLoadError: '파이프라인을 불러오지 못했습니다',
-          imagePipelineValidateError: '현재 설정을 검증할 수 없습니다. 저장 시 백엔드가 다시 검사합니다.',
+        imagePipelineValidateError: '현재 설정을 검증할 수 없습니다. 저장 시 백엔드가 다시 검사합니다.',
         imageAttrsOcrConditions: '관찰된 속성 조건에 따라 OCR 실행',
         imageAttrsOcrConditionsDesc: '관찰된 속성이 아래 조건을 충족하면 해당 이미지에 OCR을 실행합니다',
-        imageAttrsOcrOnUnobserved: '이미지 속성 관찰에 실패해도 OCR 실행',
-        imageAttrsOcrOnUnobservedDesc: '모델이 이미지 속성을 올바르게 관찰하지 못하면 본문 텍스트 손실을 막기 위해 기본적으로 OCR을 실행합니다. 끄면 건너뜁니다. (4B 등 소형 비전 모델을 쓰거나, 사용자 지정 이미지 지시문이 시스템 프롬프트와 충돌할 때 관찰에 실패할 수 있습니다. 8B 이상은 실패 가능성이 낮아 끄지 않는 것을 권장합니다)',
         imagePipelineKbNote: '기본값은 지식베이스 설정을 따르며 이번 작업에 맞게 조정할 수 있습니다'
       },
       tableMetadataInstructions: {
@@ -8698,6 +8706,25 @@ export default {
         'true': { label: '예', description: '예 —— 차트, 그래프, 도표' },
         'false': { label: '아니오', description: '아니오 —— 사진, 삽화, 아이콘, 장식' }
       }
+    },
+    layout_margin: {
+      label: '여백',
+      description:
+        '내용 바깥(책상, 배경, 여백)이 화면 전체에서 차지하는 비율. 여백이 크면 OCR 전에 페이지를 더 타이트하게 잘라낼 수 있습니다.',
+      values: {
+        'none': { label: '없음', description: '글자가 화면을 거의 채움' },
+        'small': { label: '적음', description: '가장자리에 얇은 띠' },
+        'large': { label: '많음', description: '비텍스트 영역이 넓음 — 책상, 방, 거의 빈 페이지' }
+      }
+    },
+    layout_upright: {
+      label: '글자 방향',
+      description:
+        '이미지 속 글자가 똑바로 서 있는지. 기울거나 뒤집힌 페이지는 OCR 전에 바르게 펴는 것이 좋습니다.',
+      values: {
+        'true': { label: '정립', description: '글자가 정상 방향' },
+        'false': { label: '비정립', description: '회전·기울임 촬영·뒤집힘' }
+      }
     }
   },
   // 파이프라인 패널의 오버레이 문구: 파이프라인 id와 필드 key로 색인합니다
@@ -8710,44 +8737,71 @@ export default {
     },
     default: {
       name: '수동',
+      note_actions: {
+        label: '두 동작은 서로 독립적입니다',
+        description:
+          '각각 따로 켜고 끌 수 있습니다. 인식을 끄면 이미지는 여전히 설명되고, 설명을 끄면 글자는 여전히 추출됩니다. 둘 다 끄면 이미지가 아무것도 처리되지 않으므로 패널은 그 조합을 허용하지 않습니다.',
+      },
       description: '작업에 맞게 분석 동작 스위치를 직접 켜거나 끕니다.',
-      enable_caption: {
+      caption_enabled: {
         label: '이미지 설명',
         description: '각 이미지에 대한 한 줄 설명을 생성해 캡션으로 저장합니다.'
       },
-      enable_ocr: {
+      ocr_enabled: {
         label: '문자 인식',
         description: '이미지 속에 나타나는 텍스트를 추출합니다.'
       },
       caption: {
-        thinking: {
+        thinking_enabled: {
           label: '설명 시 사고 사용',
           description: '설명을 쓰기 전에 모델이 먼저 추론하도록 합니다. 일반적으로 사고는 필요하지 않습니다. 켜면 분석이 느려질 뿐 아니라 사고가 너무 길어져 본문이 잘려서 작업이 실패할 수 있습니다. 꼭 필요하다고 판단될 때만 켜세요.',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: 'OCR 시 사고 사용',
           description: '텍스트를 추출하기 전에 모델이 먼저 추론하도록 합니다. 일반적으로 사고는 필요하지 않습니다. 켜면 분석이 느려질 뿐 아니라 사고가 너무 길어져 본문이 잘려서 작업이 실패할 수 있습니다. 꼭 필요하다고 판단될 때만 켜세요.',
         },
       }
     },
     smartocr: {
+      ocr_on_unobserved: {
+        label: '이미지 속성 관찰에 실패해도 OCR 실행',
+        description:
+          '모델이 이미지 속성을 올바르게 관찰하지 못하면 본문 텍스트 손실을 막기 위해 기본적으로 OCR을 실행합니다. 끄면 건너뜁니다. (4B 등 소형 비전 모델을 쓰거나, 사용자 지정 이미지 지시문이 시스템 프롬프트와 충돌할 때 관찰에 실패할 수 있습니다. 8B 이상은 실패 가능성이 낮아 끄지 않는 것을 권장합니다)',
+      },
       name: '스마트',
-      caption: {
-        thinking: {
+      note_flow: {
+        label: '관찰 결과가 결정합니다',
+        description:
+          '먼저 이미지를 설명하고 속성을 관찰한 뒤, 돌아온 속성이 OCR을 한 번 더 할 가치가 있는지 결정합니다. 페이지를 반듯하게 펴야 한다고 속성이 알리면 먼저 펴고 주변을 잘라낸 뒤 읽습니다. 그 단계를 쓸 수 없으면 원본 사진을 그대로 읽으며, 더 나빠지지 않습니다.',
+      },
+      preprocess: {
+        mode: {
+          label: '문서 전처리',
+          description:
+            '기본값은 끄기입니다. 켜면 OCR 전에 페이지를 보정하고 잘라내므로 처리 시간이 늘어납니다. 자동: 관찰 결과로 판단 / 항상: OCR 대상으로 선택된 이미지를 매번 전처리합니다. 처리 중이거나 제한을 초과하면 원본 이미지를 사용합니다.',
+          options: {
+            auto: '자동',
+            off: '끄기',
+            always: '항상',
+          },
+        },
+      },
+      observation: {
+        thinking_enabled: {
           label: '설명 시 사고 사용',
           description: '이미지를 설명하고 속성을 보고하기 전에 모델이 먼저 추론하도록 합니다. 일반적으로 사고는 필요하지 않습니다. 켜면 분석이 느려질 뿐 아니라 사고가 너무 길어져 본문이 잘려서 작업이 실패할 수 있습니다. 꼭 필요하다고 판단될 때만 켜세요.',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '문자 인식 시 사고 사용',
           description: '텍스트를 추출하기 전에 모델이 먼저 추론하도록 합니다. 일반적으로 사고는 필요하지 않습니다. 켜면 분석이 느려질 뿐 아니라 사고가 너무 길어져 본문이 잘려서 작업이 실패할 수 있습니다. 꼭 필요하다고 판단될 때만 켜세요.',
         },
       },
       description:
-        '먼저 이미지 특징을 관찰하여 설명을 생성하고, 그 특징을 바탕으로 OCR 실행 여부를 결정합니다. 모델 호출을 절약하고 분석 속도를 높입니다.'
+        '먼저 이미지 특징을 관찰하여 설명을 생성하고, 그 특징을 바탕으로 OCR 실행 여부를 결정합니다. 모델 호출을 절약하고 분석 속도를 높입니다 이미지가 보정 가능한 문서나 라벨 사진으로 인식되면 인식 전에 페이지를 자동으로 정렬하고 잘라내어 OCR 정확도를 높입니다. 보정에 실패하면 원본 이미지를 사용합니다.'
     }
   }
 }

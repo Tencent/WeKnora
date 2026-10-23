@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/sandbox/admission"
 	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
 )
 
@@ -1509,4 +1510,39 @@ func TestForkOfSessionModeSourceStillSnapshots(t *testing.T) {
 	require.Zero(t, sessions.assignCalls)
 	require.NotNil(t, sessions.created.ForkBootstrap)
 	require.Equal(t, "snap-1", sessions.created.ForkBootstrap.SnapshotID)
+}
+
+func TestForkLiveBackgroundWorkIsBusy(t *testing.T) {
+	turn := checkpointedTurn("u-msg-1", "a-msg-1", "sbx-1", "sha1", 0)
+	forkPoint := &types.Message{
+		ID: "u-msg-2", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(10 * time.Second),
+	}
+	port := &fakeForkSandboxPort{boundID: "sbx-1", bound: true, snapshotID: "snap-1"}
+	svc, sessions, _ := newForkFixture(t, port, append(turn, forkPoint))
+	svc.activity = liveActivityRegistry(t, interfaces.SessionRef{TenantID: 1, SessionID: "src"})
+
+	got, err := svc.Fork(context.Background(), 1, "u1", "src", "u-msg-2", "")
+
+	require.ErrorIs(t, err, ErrForkSourceBusy)
+	require.Nil(t, got)
+	require.Zero(t, port.snapshotCalls)
+	require.Nil(t, sessions.created)
+}
+
+func TestForkDegradesWhenCheckpointWasTakenWhileBackgroundWorkRan(t *testing.T) {
+	turn := checkpointedTurn("u-msg-1", "a-msg-1", "sbx-1", "sha1", 0)
+	turn[1].SandboxCheckpoint.BackgroundActive = true
+	forkPoint := &types.Message{
+		ID: "u-msg-2", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(10 * time.Second),
+	}
+	port := &fakeForkSandboxPort{boundID: "sbx-1", bound: true, snapshotID: "snap-1"}
+	svc, sessions, _ := newForkFixture(t, port, append(turn, forkPoint))
+
+	got, err := svc.Fork(context.Background(), 1, "u1", "src", "u-msg-2", "")
+
+	require.NoError(t, err)
+	require.True(t, got.Degraded)
+	require.Equal(t, ForkDegradeNoCheckpoint, got.Reason)
+	require.Zero(t, port.snapshotCalls)
+	require.Nil(t, sessions.created.ForkBootstrap)
 }

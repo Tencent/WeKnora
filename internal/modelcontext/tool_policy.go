@@ -222,7 +222,10 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 	"execute_skill_script": {},
 	// Sandbox shell/file tools return whatever a skill script produced, so they
 	// carry the same unknown-shape caveat as skill output above.
-	"shell_exec":         {},
+	"shell_exec": {},
+	// shell_exec_async results carry opaque work handles (sj_...) that the
+	// work_wait / work_cancel tools consume; they are not source identities.
+	"shell_exec_async":   {},
 	"list_sandbox_files": {},
 	"read_sandbox_file":  {},
 	"write_sandbox_file": {},
@@ -231,6 +234,10 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 	// caveat: they echo paths and byte counts, never knowledge identifiers.
 	"write_skill_file": {},
 	"edit_skill_file":  {},
+	// Background-work tools echo work IDs, states and command output; they
+	// never carry knowledge identifiers.
+	"work_wait":   {},
+	"work_cancel": {},
 }
 
 // HasToolPolicy reports whether a tool has an explicit model-handle policy.

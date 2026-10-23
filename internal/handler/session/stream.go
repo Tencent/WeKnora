@@ -349,6 +349,7 @@ func (h *Handler) StopSession(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Stop event written successfully for session: %s, message: %s", sessionID, assistantMessageID)
+	h.notifyBackgroundStop(ctx, session)
 	c.JSON(200, gin.H{
 		"success": true,
 		"message": "Generation stopped",

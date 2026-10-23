@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
 )
 
@@ -948,4 +949,83 @@ func TestRewindKeepsForkSnapshotWhenDeleteFails(t *testing.T) {
 		"the snapshot must survive a truncate that did not happen")
 	require.True(t, sessions.bootstrapCleared,
 		"the column write stays ahead of the delete so the fork cannot boot ahead of the transcript")
+}
+
+func rewindBusyFixture(t *testing.T) (*SessionRewindService, *fakeMessageStore, *fakeRewindSandboxPort) {
+	t.Helper()
+	turn := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	laterUser := &types.Message{
+		ID: "u-2", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(10 * time.Second),
+	}
+	port := newFakeRewindPort()
+	svc, msgs := newRewindFixture(t, port, append(turn, laterUser))
+	return svc, msgs, port
+}
+
+func TestRewindLiveBackgroundWorkIsBusy(t *testing.T) {
+	svc, msgs, port := rewindBusyFixture(t)
+	svc.activity = liveActivityRegistry(t, interfaces.SessionRef{TenantID: 1, SessionID: "src"})
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
+
+	require.ErrorIs(t, err, ErrRewindSourceBusy)
+	require.Nil(t, got)
+	require.Equal(t, 0, msgs.deleteFromCalls)
+	require.Empty(t, port.runner.calls)
+}
+
+func TestRewindBackgroundWorkElsewhereIsNotBusy(t *testing.T) {
+	svc, _, _ := rewindBusyFixture(t)
+	svc.activity = liveActivityRegistry(t,
+		interfaces.SessionRef{TenantID: 1, SessionID: "other"},
+		interfaces.SessionRef{TenantID: 2, SessionID: "src"},
+	)
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
+
+	require.NoError(t, err)
+	require.Equal(t, 1, got.DeletedMessages)
+}
+
+func TestRewindBackgroundLookupFailureIsAnError(t *testing.T) {
+	svc, msgs, _ := rewindBusyFixture(t)
+	svc.activity = failingActivityRegistry{err: errors.New("redis down")}
+
+	_, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrRewindSourceBusy)
+	require.Equal(t, 0, msgs.deleteFromCalls)
+}
+
+func TestRewindLockRefusedByBackgroundWorkIsBusy(t *testing.T) {
+	svc, msgs, port := rewindBusyFixture(t)
+	port.lockErr = sandbox.ErrSessionWorkActive
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
+
+	require.ErrorIs(t, err, ErrRewindSourceBusy)
+	require.Nil(t, got)
+	require.Equal(t, 0, msgs.deleteFromCalls)
+}
+
+func TestRewindSkipsCheckpointTakenWhileBackgroundWorkRan(t *testing.T) {
+	turn1 := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	turn2 := rewindCompletedTurn("u-2", "a-2", "sbx-1", rewindSHA2, 10*time.Second)
+	turn2[1].SandboxCheckpoint.BackgroundActive = true
+	laterUser := &types.Message{
+		ID: "u-3", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(20 * time.Second),
+	}
+	port := newFakeRewindPort()
+	messages := append(append(turn1, turn2...), laterUser)
+	svc, msgs := newRewindFixture(t, port, messages)
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-3")
+
+	require.NoError(t, err)
+	require.True(t, got.WorkspaceReset)
+	require.Len(t, port.runner.calls, 1)
+	require.Contains(t, port.runner.calls[0], rewindSHA1)
+	require.NotContains(t, port.runner.calls[0], rewindSHA2)
+	require.Equal(t, []string{"u-1", "a-1", "u-2", "a-2"}, messageIDs(msgs.messages))
 }

@@ -3,10 +3,12 @@ package docs_test
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
 	docs "github.com/Tencent/WeKnora/docs"
+	"github.com/Tencent/WeKnora/internal/types"
 	"gopkg.in/yaml.v3"
 )
 
@@ -60,6 +62,39 @@ func TestKnowledgeSearchRouteContract(t *testing.T) {
 	for _, tt := range swaggerDocuments() {
 		t.Run(tt.name, func(t *testing.T) {
 			assertKnowledgeSearchRouteContract(t, tt.loadSpec(t), tt.parse)
+		})
+	}
+}
+
+func TestImagePipelineAgentKeysContract(t *testing.T) {
+	const want = "default.caption_enabled|default.ocr_enabled"
+	field, ok := reflect.TypeOf(types.ImageProcessingConfig{}).FieldByName("ImagePipelineParams")
+	if !ok {
+		t.Fatal("ImagePipelineParams field is missing")
+	}
+	if !strings.Contains(
+		","+field.Tag.Get("extensions")+",",
+		",x-agent-keys="+want+",",
+	) {
+		t.Fatalf("ImagePipelineParams must expose the active switch slots: %s", field.Tag)
+	}
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				Definitions map[string]struct {
+					Properties map[string]struct {
+						AgentKeys string `json:"x-agent-keys" yaml:"x-agent-keys"`
+					} `json:"properties" yaml:"properties"`
+				} `json:"definitions" yaml:"definitions"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatal(err)
+			}
+			got := spec.Definitions["github_com_Tencent_WeKnora_internal_types.ImageProcessingConfig"].
+				Properties["image_pipeline_params"].AgentKeys
+			if got != want {
+				t.Errorf("image_pipeline_params agent keys = %q, want %q", got, want)
+			}
 		})
 	}
 }
