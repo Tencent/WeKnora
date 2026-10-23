@@ -812,6 +812,7 @@
 </template>
 
 <script setup lang="ts">
+import { useProtectedImageLifecycle } from '@/composables/useProtectedImageLifecycle'
 import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import { ref, computed, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
@@ -1024,6 +1025,9 @@ const graphSearchValue = ref('')
 const graphRef = ref<HTMLElement | null>(null)
 const readerBodyRef = ref<HTMLElement | null>(null)
 const drawerBodyRef = ref<HTMLElement | null>(null)
+useProtectedImageLifecycle(() => drawerBodyRef.value)
+useProtectedImageLifecycle(() => readerBodyRef.value)
+useProtectedImageLifecycle(() => indexBodyRef.value)
 const loading = ref(false)
 const graphLoading = ref(false)
 const graphReady = ref(false)

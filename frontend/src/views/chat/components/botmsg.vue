@@ -148,6 +148,7 @@
     </div>
 </template>
 <script setup>
+import { useProtectedImageLifecycle } from '@/composables/useProtectedImageLifecycle'
 import { onMounted, onBeforeUnmount, watch, computed, ref, reactive, nextTick, onUpdated } from 'vue';
 import 'katex/dist/katex.min.css';
 import docInfo from './docInfo.vue';
@@ -215,6 +216,7 @@ const emit = defineEmits(['scroll-bottom', 'render-complete-change', 'fork', 're
 const { t } = useI18n()
 const uiStore = useUIStore();
 let parentMd = ref()
+useProtectedImageLifecycle(() => parentMd.value)
 let reviewUrl = ref('')
 let reviewImg = ref(false)
 let isImgLoading = ref(false);

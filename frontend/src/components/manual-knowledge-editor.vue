@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useProtectedImageLifecycle } from '@/composables/useProtectedImageLifecycle'
 import { ref, reactive, computed, watch, nextTick, onBeforeUnmount, h } from 'vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { marked } from 'marked'
@@ -478,6 +479,7 @@ const handleToolbarMenuSelect = (menu: ToolbarMenu, selected: unknown) => {
 }
 
 const previewRoot = ref<HTMLElement | null>(null)
+useProtectedImageLifecycle(() => previewRoot.value)
 
 const viewOptions = computed(() => [
   { value: 'edit' as ViewMode, icon: 'edit-1', label: t('manualEditor.view.edit'), disabled: false, tooltip: t('manualEditor.view.edit') },

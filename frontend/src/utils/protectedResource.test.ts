@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
-import { clearProtectedFileFailureCache, hydrateProtectedFileImages, protectProviderImageSrcInHTML } from './security.ts'
+import { clearProtectedFileCache, clearProtectedFileFailureCache, hydrateProtectedFileImages, protectProviderImageSrcInHTML, releaseProtectedFileImages } from './security.ts'
+import { effectScope, nextTick, shallowRef } from 'vue'
+import { useProtectedImageLifecycle } from '../composables/useProtectedImageLifecycle.ts'
 import { responseFileName } from './protectedResource.ts'
 import { applyFinalArtifactContent } from './finalArtifactContent.ts'
 
@@ -30,20 +32,39 @@ test('download filenames preserve Unicode and remove path components', () => {
 // Minimal DOM adapter exercises the actual hydration/fetch pipeline without
 // adding a browser-emulation dependency to the application.
 function imageRoot(source: string) {
-  const root: any = { replacement: null, removed: false, querySelectorAll: () => root.replacement || root.removed ? [] : [img] }
-  const attrs: Record<string, string> = { src: source }
-  const img: any = {
-    alt: '比赛 PPT', dataset: {}, style: { display: '' },
-    get src() { return attrs.src },
-    set src(value: string) { attrs.src = value },
-    getAttribute: (key: string) => attrs[key] || '',
-    setAttribute: (key: string, value: string) => { attrs[key] = value },
-    removeAttribute: (key: string) => { delete attrs[key] },
-    replaceWith: (link: any) => { root.replacement = link },
-    remove: () => { root.removed = true },
-    ownerDocument: { createElement: (tag: string) => ({ tag, dataset: {}, addEventListener() {} }) },
+  const root: any = {
+    replacement: null, image: null, removed: false, isConnected: true,
+    querySelectorAll: (selector: string) => {
+      if (root.removed) return []
+      if (selector.startsWith('a.')) return root.replacement ? [root.replacement] : []
+      return root.replacement ? [] : [root.image]
+    },
   }
-  return { root, img }
+  const document = { createElement: (tag: string): any => {
+    if (tag === 'img') return createImage('')
+    const element: any = {
+      tag, dataset: {}, ownerDocument: document,
+      getAttribute: (key: string) => element[key] || '',
+      replaceWith: (img: any) => { root.replacement = null; root.image = img },
+    }
+    return element
+  } }
+  function createImage(src: string): any {
+    const attrs: Record<string, string> = { src }
+    return {
+      alt: '比赛 PPT', dataset: {}, style: { display: '' },
+      get src() { return attrs.src },
+      set src(value: string) { attrs.src = value },
+      getAttribute: (key: string) => attrs[key] || '',
+      setAttribute: (key: string, value: string) => { attrs[key] = value },
+      removeAttribute: (key: string) => { delete attrs[key] },
+      replaceWith: (link: any) => { root.replacement = link },
+      remove: () => { root.removed = true },
+      ownerDocument: document,
+    }
+  }
+  root.image = createImage(source)
+  return { root, get img() { return root.image } }
 }
 
 test('cross-turn files hydrate as downloadable preview cards; images remain images; denied requests do not render files', async () => {
@@ -89,6 +110,7 @@ test('cross-turn files hydrate as downloadable preview cards; images remain imag
     assert.doesNotMatch(rewritten, /data-img-loading/)
     assert.doesNotMatch(rewritten, /<img/i)
   } finally {
+    clearProtectedFileCache()
     globalThis.fetch = originalFetch
     ;(globalThis as any).window = originalWindow
   }
@@ -98,11 +120,11 @@ function hydrationEnvironment(t: TestContext) {
   const originalWindow = (globalThis as any).window
   const originalFetch = globalThis.fetch
   ;(globalThis as any).window = { location: { origin: 'http://localhost' }, addEventListener() {} }
-  clearProtectedFileFailureCache()
+  clearProtectedFileCache()
   t.after(() => {
     globalThis.fetch = originalFetch
     ;(globalThis as any).window = originalWindow
-    clearProtectedFileFailureCache()
+    clearProtectedFileCache()
   })
 }
 
@@ -227,4 +249,197 @@ test('revoked sharing remains denied and completion retries are bounded', async 
   assert.equal(image.img.dataset.authHydrated, '0')
   await hydrateProtectedFileImages(image.root, messageAccess)
   assert.equal(calls, 2, 'denial cooldown is retained')
+})
+
+test('shared images stay readable until the last rendering root releases them', async t => {
+  hydrationEnvironment(t)
+  const source = 'local://2/exports/shared-lifecycle.png'
+  const first = imageRoot(source), second = imageRoot(source)
+  const fetchBlob = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = async () => { calls++; return pngResponse() }
+  const revoke = t.mock.method(URL, 'revokeObjectURL')
+  await Promise.all([
+    hydrateProtectedFileImages(first.root, messageAccess),
+    hydrateProtectedFileImages(second.root, messageAccess),
+  ])
+  const url = first.img.src
+  assert.equal(calls, 1)
+  assert.equal(second.img.src, url)
+  releaseProtectedFileImages(first.root)
+  assert.equal(revoke.mock.callCount(), 0)
+  assert.equal(await (await fetchBlob(url)).text(), 'png bytes')
+  await hydrateProtectedFileImages(second.root, messageAccess)
+  assert.equal(calls, 1)
+  releaseProtectedFileImages(second.root)
+  releaseProtectedFileImages(second.root)
+  assert.equal(revoke.mock.callCount(), 1)
+  assert.equal(revoke.mock.calls[0].arguments[0], url)
+  await assert.rejects(fetchBlob(url))
+  assert.doesNotMatch(protectProviderImageSrcInHTML(`<img src="${source}">`), /src="blob:/)
+})
+
+test('a released request cannot repopulate the cache or delete a newer shared request', async t => {
+  hydrationEnvironment(t)
+  const source = 'local://2/exports/late-lifecycle.png'
+  const first = imageRoot(source), second = imageRoot(source), third = imageRoot(source)
+  const responses: Array<(response: Response) => void> = []
+  const signals: AbortSignal[] = []
+  globalThis.fetch = async (_url, init) => {
+    signals.push(init!.signal!)
+    // Deliberately ignore abort, as a response/body may already be queued.
+    return new Promise<Response>(resolve => responses.push(resolve))
+  }
+  const create = t.mock.method(URL, 'createObjectURL')
+  const old = hydrateProtectedFileImages(first.root, messageAccess)
+  const shared = hydrateProtectedFileImages(second.root, messageAccess)
+  releaseProtectedFileImages(first.root)
+  assert.equal(signals[0].aborted, false)
+  releaseProtectedFileImages(second.root)
+  assert.equal(signals[0].aborted, true)
+  const fresh = hydrateProtectedFileImages(second.root, messageAccess)
+  responses[0](pngResponse())
+  await Promise.all([old, shared])
+  assert.equal(create.mock.callCount(), 0)
+  const another = hydrateProtectedFileImages(third.root, messageAccess)
+  assert.equal(signals.length, 2, 'old finally must not delete the new in-flight request')
+  responses[1](pngResponse())
+  await Promise.all([fresh, another])
+  assert.equal(create.mock.callCount(), 1)
+  assert.equal(second.img.src, third.img.src)
+  assert.match(first.img.src, /^data:image\/gif/)
+})
+
+test('release during body decoding prevents allocating an object URL', async t => {
+  hydrationEnvironment(t)
+  const image = imageRoot('local://2/exports/late-body.png')
+  let finishBody!: (blob: Blob) => void
+  let readingBody!: () => void
+  const bodyStarted = new Promise<void>(resolve => { readingBody = resolve })
+  globalThis.fetch = async () => ({
+    ok: true, headers: new Headers(),
+    blob: () => { readingBody(); return new Promise<Blob>(resolve => { finishBody = resolve }) },
+  } as Response)
+  const create = t.mock.method(URL, 'createObjectURL')
+  const pending = hydrateProtectedFileImages(image.root, messageAccess)
+  await bodyStarted
+  releaseProtectedFileImages(image.root)
+  finishBody(new Blob(['png'], { type: 'image/png' }))
+  await pending
+  assert.equal(create.mock.callCount(), 0)
+})
+
+test('removing an image from an existing root releases its cache entry', async t => {
+  hydrationEnvironment(t)
+  const image = imageRoot('local://2/exports/removed-image.png')
+  globalThis.fetch = async () => pngResponse()
+  const revoke = t.mock.method(URL, 'revokeObjectURL')
+  await hydrateProtectedFileImages(image.root, messageAccess)
+  const url = image.img.src
+  image.root.removed = true
+  await hydrateProtectedFileImages(image.root, messageAccess)
+  assert.deepEqual(revoke.mock.calls.map(call => call.arguments[0]), [url])
+})
+
+test('download cards keep owning their URL after replacing the image element', async t => {
+  hydrationEnvironment(t)
+  const image = imageRoot('local://2/exports/owned-card.txt')
+  globalThis.fetch = async () => new Response(new Blob(['document'], { type: 'text/plain' }))
+  const revoke = t.mock.method(URL, 'revokeObjectURL')
+  await hydrateProtectedFileImages(image.root, messageAccess)
+  const url = image.root.replacement.href
+  await hydrateProtectedFileImages(image.root, messageAccess)
+  assert.equal(revoke.mock.callCount(), 0)
+  releaseProtectedFileImages(image.root)
+  assert.deepEqual(revoke.mock.calls.map(call => call.arguments[0]), [url])
+})
+
+test('session cleanup releases loaded files and cancels pending fetches without poisoning retries', async t => {
+  hydrationEnvironment(t)
+  const loaded = imageRoot('local://2/exports/logout-loaded.png')
+  const pending = imageRoot('local://2/exports/logout-pending.png')
+  globalThis.fetch = async () => pngResponse()
+  await hydrateProtectedFileImages(loaded.root, messageAccess)
+  const url = loaded.img.src
+  const revoke = t.mock.method(URL, 'revokeObjectURL')
+  let signal!: AbortSignal
+  globalThis.fetch = async (_url, init) => {
+    signal = init!.signal!
+    return new Promise<Response>((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+    })
+  }
+  const task = hydrateProtectedFileImages(pending.root, messageAccess)
+  clearProtectedFileCache()
+  assert.equal(signal.aborted, true)
+  await task
+  assert.deepEqual(revoke.mock.calls.map(call => call.arguments[0]), [url])
+  globalThis.fetch = async () => pngResponse()
+  await hydrateProtectedFileImages(pending.root, messageAccess)
+  assert.match(pending.img.src, /^blob:/)
+  await hydrateProtectedFileImages(loaded.root, messageAccess)
+  assert.notEqual(loaded.img.src, url, 'old DOM hydration flags must not skip reloading')
+})
+
+test('Vue root replacement and scope disposal release resources; late detached hydration is ignored', async t => {
+  hydrationEnvironment(t)
+  const first = imageRoot('local://2/exports/first-root.png')
+  const second = imageRoot('local://2/exports/second-root.png')
+  const root = shallowRef<ParentNode | null>(first.root)
+  const scope = effectScope()
+  scope.run(() => useProtectedImageLifecycle(() => root.value))
+  t.after(() => scope.stop())
+  let calls = 0
+  globalThis.fetch = async () => { calls++; return pngResponse() }
+  const revoke = t.mock.method(URL, 'revokeObjectURL')
+  await hydrateProtectedFileImages(first.root, messageAccess)
+  const firstURL = first.img.src
+  root.value = second.root
+  await nextTick()
+  assert.deepEqual(revoke.mock.calls.map(call => call.arguments[0]), [firstURL])
+  await hydrateProtectedFileImages(second.root, messageAccess)
+  const secondURL = second.img.src
+  scope.stop()
+  assert.deepEqual(revoke.mock.calls.map(call => call.arguments[0]), [firstURL, secondURL])
+  second.root.isConnected = false
+  await hydrateProtectedFileImages(second.root, messageAccess)
+  assert.equal(calls, 2)
+})
+
+test('a pre-rendered card reloads after its previous root released the cached URL', async t => {
+  hydrationEnvironment(t)
+  const source = 'local://2/exports/transferred-card.txt'
+  const first = imageRoot(source), second = imageRoot(source)
+  let calls = 0
+  globalThis.fetch = async () => {
+    calls++
+    return new Response(new Blob(['document'], { type: 'text/plain' }))
+  }
+  await hydrateProtectedFileImages(first.root, messageAccess)
+  const oldURL = first.root.replacement.href
+  const card = second.img.ownerDocument.createElement('a')
+  card.href = oldURL
+  card.dataset.protectedResource = source
+  card.textContent = 'Original label'
+  second.root.replacement = card
+  releaseProtectedFileImages(first.root)
+  await hydrateProtectedFileImages(second.root, messageAccess)
+  assert.equal(calls, 2)
+  assert.notEqual(second.root.replacement.href, oldURL)
+  assert.equal(second.root.replacement.textContent, 'Original label')
+  await hydrateProtectedFileImages(second.root, messageAccess)
+  assert.equal(calls, 2, 'the recovered card remains cached')
+})
+
+test('detached owners are discarded before a late response allocates a Blob URL', async t => {
+  hydrationEnvironment(t)
+  const image = imageRoot('local://2/exports/detached-response.png')
+  let finish!: (response: Response) => void
+  globalThis.fetch = async () => new Promise<Response>(resolve => { finish = resolve })
+  const create = t.mock.method(URL, 'createObjectURL')
+  const pending = hydrateProtectedFileImages(image.root, messageAccess)
+  image.root.isConnected = false
+  finish(pngResponse())
+  await pending
+  assert.equal(create.mock.callCount(), 0)
 })

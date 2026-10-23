@@ -729,6 +729,7 @@
 </template>
 
 <script setup lang="ts">
+import { useProtectedImageLifecycle } from '@/composables/useProtectedImageLifecycle'
 import { readDocumentReferences } from '@/utils/readDocumentReferences';
 import { isAssistantTurnComplete } from '@/utils/steerStreamFork';
 import { isAwaitingInput } from '@/composables/useChatStreamHandler';
@@ -976,6 +977,7 @@ const sanitizeForDisplay = (text: string): string => {
 
 // 根元素引用
 const rootElement = ref<HTMLElement | null>(null);
+useProtectedImageLifecycle(() => rootElement.value)
 
 function escapeHtml(value: string): string {
   return String(value)
@@ -1004,6 +1006,7 @@ const closeImagePreview = () => {
 const wikiDrawerVisible = ref(false);
 const wikiDrawerPage = ref<WikiPage | null>(null);
 const wikiDrawerBodyRef = ref<HTMLElement | null>(null);
+useProtectedImageLifecycle(() => wikiDrawerBodyRef.value)
 const currentWikiKbId = ref<string>('');
 
 function getTypeTheme(type: string): string {
