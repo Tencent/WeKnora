@@ -197,7 +197,8 @@ func TestProcessChunksIndexesEveryTextChild(t *testing.T) {
 		}
 	}
 	require.Len(t, textChunkIDs, 2)
-	require.Equal(t, 1, chunkService.purges, "successful processing must reclaim superseded history only after indexing")
+	require.Equal(t, 1, chunkService.purges,
+		"successful processing must reclaim superseded history only after indexing")
 
 	indexedSourceIDs := make([]string, 0, len(retrieveEngine.indexed))
 	for _, info := range retrieveEngine.indexed {
