@@ -283,6 +283,22 @@ cd docreader && uv sync --locked && bash scripts/generate_proto.sh && uv run -m 
 
 配置文件查找顺序（`internal/config/config.go` 的 `LoadConfig`）：当前目录 → `./config` → `$HOME/.appname` → `/etc/appname/`，文件名 `config.yaml`。
 
+### 标准版可选托管前端
+
+标准版默认仅提供 API，前端由独立服务提供。若希望由同一个标准版进程提供 Web UI，可显式设置 `WEKNORA_WEB_DIR`，指向已构建的前端目录；该目录必须包含 `index.html`。未设置该变量时保持默认行为，目录不存在或缺少 `index.html` 时也不会启用前端托管。
+
+以下命令从仓库根目录执行，要求已安装 Go 1.26、CGO 所需工具与依赖、Node.js 和 npm，并已提供标准版所需的数据库、Redis、存储、模型服务及所用解析服务等配置与依赖：
+
+```bash
+(cd frontend && npm ci && npm run build)
+make build-prod
+SERVER_HOST=127.0.0.1 WEKNORA_WEB_DIR="$PWD/frontend/dist" ./WeKnora
+```
+
+启动后通过 `http://127.0.0.1:8080` 访问（使用默认 `SERVER_PORT` 时）。`WEKNORA_WEB_DIR` 目录仅应包含前端构建产物，不要放入数据、配置或密钥；其中的文件会作为静态资源提供。现有 API 的认证与授权规则保持不变。
+
+此选项可省去独立前端服务，不会替代数据库、Redis 等后端依赖。需要 SQLite + 内存队列的最小化无 Docker 部署时，请参考现有的 [Lite 运行时](#_7-1-lite-运行时-零外部依赖)。
+
 ## 常见部署拓扑
 
 ```mermaid
