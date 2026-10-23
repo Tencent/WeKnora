@@ -28,7 +28,8 @@ func TestTruncateSkillErrorKeepsValidUTF8(t *testing.T) {
 	} {
 		got := truncateSkillError(msg)
 
-		require.True(t, utf8.ValidString(got), "truncateSkillError: result is not valid UTF-8 for a %d-byte body", len(msg))
+		require.True(t, utf8.ValidString(got),
+			"truncateSkillError: result is not valid UTF-8 for a %d-byte body", len(msg))
 		require.LessOrEqual(t, len(got), 200, "truncateSkillError: result is %d bytes, want at most 200", len(got))
 		require.True(t, strings.HasPrefix(msg, got), "truncateSkillError: result is not a prefix of the body")
 	}
