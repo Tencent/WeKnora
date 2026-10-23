@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { DOMParser } from '@xmldom/xmldom'
 import { vStableHtml } from './stableHtml.ts'
-import { clearProtectedFileFailureCache, hydrateProtectedFileImages } from '../utils/security.ts'
+import { clearProtectedFileCache, clearProtectedFileFailureCache, hydrateProtectedFileImages } from '../utils/security.ts'
 
 // Use real parsed trees and the complete directive. Adapt the small browser
 // surface absent from xmldom rather than extracting the morph implementation.
@@ -35,8 +35,15 @@ function parse(html: string): any {
         el.setAttribute('style', `${rest}${value ? `;display:${value}` : ''}`)
       },
     }
-    el.querySelectorAll = (selector: string) => Array.from(el.getElementsByTagName('img'))
-      .filter((img: any) => selector.includes('src^=') || img.hasAttribute('data-protected-src'))
+    el.querySelectorAll = (selector: string) => {
+      if (selector === 'a.protected-resource-card[data-protected-resource]') {
+        return Array.from(el.getElementsByTagName('a')).filter((link: any) =>
+          link.classList.contains('protected-resource-card') && link.hasAttribute('data-protected-resource'))
+      }
+      assert.ok(selector.startsWith('img'), `Unsupported test selector: ${selector}`)
+      return Array.from(el.getElementsByTagName('img'))
+        .filter((img: any) => selector.includes('src^=') || img.hasAttribute('data-protected-src'))
+    }
     for (const child of el.children) adapt(child)
   }
   adapt(root)
@@ -59,7 +66,7 @@ test('missing image and paragraph stay hidden across streaming morphs, then reco
     },
     window: { location: { origin: 'http://localhost' }, addEventListener() {} },
   })
-  t.after(() => { Object.assign(globalThis, previous); clearProtectedFileFailureCache() })
+  t.after(() => { clearProtectedFileCache(); Object.assign(globalThis, previous) })
   const source = 'local://2/exports/morph-hidden.png'
   const imageHTML = `<p><img src="${source}" data-protected-src="${source}" style="max-width:80%" /></p>`
   const root = parse(`${imageHTML}<p>first</p>`)
