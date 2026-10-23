@@ -74,6 +74,17 @@ func (a *PinnedSessionSandbox) manager(ctx context.Context, sessionID string) sa
 	return mgr
 }
 
+// BackendIsDocker reports whether the session's pinned manager is the Docker
+// backend. The container id is not a backend name, so callers must not infer
+// this from the sandbox id. A missing pin is not Docker.
+func (a *PinnedSessionSandbox) BackendIsDocker(ctx context.Context, sessionID string) bool {
+	mgr := a.manager(ctx, sessionID)
+	if mgr == nil {
+		return false
+	}
+	return mgr.GetType() == sandbox.SandboxTypeDocker
+}
+
 // BoundSandboxID reports the sandbox currently bound to sessionID without
 // provisioning one. A session with no pin or no live binding reports
 // ok=false.
@@ -127,6 +138,52 @@ func (a *PinnedSessionSandbox) HasActiveTurn(ctx context.Context, sessionID stri
 		return checker.HasActiveTurn(ctx, sessionID)
 	}
 	return false, nil
+}
+
+// KeepAliveSession refreshes the provider idle timer of the session's pinned
+// sandbox. Managers without the method (host, disabled) have nothing to keep
+// alive and report (0, nil).
+func (a *PinnedSessionSandbox) KeepAliveSession(ctx context.Context, sessionID string) (time.Duration, error) {
+	mgr := a.manager(ctx, sessionID)
+	type keepAliver interface {
+		KeepAliveSession(context.Context, string) (time.Duration, error)
+	}
+	if k, ok := mgr.(keepAliver); ok {
+		return k.KeepAliveSession(ctx, sessionID)
+	}
+	return 0, nil
+}
+
+// KeepAliveSessionExpected refreshes the provider timer of the bound sandbox
+// only when it still is expectedID. Managers without the method have nothing
+// to refresh and report (0, nil).
+func (a *PinnedSessionSandbox) KeepAliveSessionExpected(
+	ctx context.Context, sessionID, expectedID string,
+) (time.Duration, error) {
+	mgr := a.manager(ctx, sessionID)
+	type expectedKeepAliver interface {
+		KeepAliveSessionExpected(context.Context, string, string) (time.Duration, error)
+	}
+	if k, ok := mgr.(expectedKeepAliver); ok {
+		return k.KeepAliveSessionExpected(ctx, sessionID, expectedID)
+	}
+	return 0, nil
+}
+
+// ListSessionFiles walks dir in the session sandbox. A manager without the
+// method reports an error so callers skip output-file inspection.
+func (a *PinnedSessionSandbox) ListSessionFiles(
+	ctx context.Context, sessionID, dir string,
+) ([]sandbox.RemoteDirEntry, error) {
+	mgr := a.manager(ctx, sessionID)
+	type lister interface {
+		ListSessionFiles(context.Context, string, string) ([]sandbox.RemoteDirEntry, error)
+	}
+	files, ok := mgr.(lister)
+	if !ok || files == nil {
+		return nil, errors.New("sandbox: session files cannot be listed")
+	}
+	return files.ListSessionFiles(ctx, sessionID, dir)
 }
 
 // TryLockRewind locks rewind through the session's pinned manager. A manager

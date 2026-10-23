@@ -69,6 +69,14 @@ const (
 	// keys it on SkillsEnabled (or install mode), so the shell follows the
 	// skills switch and not a per-agent tool checkbox.
 	ToolShellExec = "shell_exec"
+	// ToolShellExecAsync submits a shell command as background work (plan 4).
+	// Like shell_exec it is registered per run, not in AvailableToolDefinitions.
+	ToolShellExecAsync = "shell_exec_async"
+	// ToolWorkWait / ToolWorkCancel wait on and stop background work. They are
+	// registered per run, only when the run can submit background work, so
+	// they are absent from AvailableToolDefinitions like shell_exec.
+	ToolWorkWait   = "work_wait"
+	ToolWorkCancel = "work_cancel"
 	// Wiki-related tools (only available when wiki KBs are in scope)
 	ToolWikiReadPage    = "wiki_read_page"
 	ToolWikiWritePage   = "wiki_write_page"
@@ -177,6 +185,7 @@ func SwitchManagedTools() []string {
 		ToolWebFetch,
 		ToolSearchMemory,
 		ToolShellExec,
+		ToolShellExecAsync,
 		ToolReadFile,
 		ToolListSandboxFiles,
 		ToolWriteSandboxFile,

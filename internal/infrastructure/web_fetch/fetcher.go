@@ -21,6 +21,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/chromedp/chromedp"
+	"golang.org/x/net/html/charset"
+	"golang.org/x/text/encoding"
 )
 
 const (
@@ -270,15 +272,38 @@ func (f *Fetcher) fetchHTTP(ctx context.Context, rawURL string, parsedURL *url.U
 	if f.markdown && int64(len(body)) > f.maxBodySize {
 		return nil, newFetchError(ErrorBodyTooLarge, false, "page exceeds the %d byte download limit", f.maxBodySize)
 	}
-	contentType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	rawContentType := resp.Header.Get("Content-Type")
+	contentType, _, _ := mime.ParseMediaType(rawContentType)
 	if contentType == "" {
 		contentType, _, _ = mime.ParseMediaType(http.DetectContentType(body))
+	}
+	if isHTMLContent(contentType) {
+		body = decodeHTMLBody(body, rawContentType)
 	}
 	finalURL := rawURL
 	if resp.Request != nil && resp.Request.URL != nil {
 		finalURL = resp.Request.URL.String()
 	}
 	return &httpFetchResult{body: body, finalURL: finalURL, contentType: contentType}, nil
+}
+
+// decodeHTMLBody converts an HTML body to UTF-8 when the page declares a
+// different charset through a BOM, the Content-Type header, or a <meta> tag.
+// Valid UTF-8 and undeclared bodies are returned unchanged: the HTML default
+// (windows-1252) would corrupt undeclared UTF-8 pages with an ASCII-only head.
+func decodeHTMLBody(body []byte, contentType string) []byte {
+	if utf8.Valid(body) {
+		return body
+	}
+	enc, name, certain := charset.DetermineEncoding(body, contentType)
+	if enc == encoding.Nop || (!certain && name == "windows-1252") {
+		return body
+	}
+	decoded, err := enc.NewDecoder().Bytes(body)
+	if err != nil {
+		return body
+	}
+	return decoded
 }
 
 func (f *Fetcher) pinnedDialContext() func(context.Context, string, string) (net.Conn, error) {

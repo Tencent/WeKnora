@@ -2168,6 +2168,7 @@ func (h *Handler) completeAssistantMessage(
 		logger.Errorf(ctx, "Failed to persist assistant message %s: %v", assistantMessage.ID, err)
 		return err
 	}
+	h.ackBackgroundNotices(ctx, assistantMessage)
 
 	// Asynchronously index the Q&A pair into the chat history knowledge base for vector search.
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.

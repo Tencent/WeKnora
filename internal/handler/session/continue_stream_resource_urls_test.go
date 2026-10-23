@@ -22,9 +22,15 @@ import (
 
 type stubSessionService struct {
 	interfaces.SessionService
+	// session, when set, is the row GetSession returns. Background-work tests
+	// use it so the handler must key work by session.TenantID.
+	session *types.Session
 }
 
 func (s *stubSessionService) GetSession(_ context.Context, id string) (*types.Session, error) {
+	if s != nil && s.session != nil {
+		return s.session, nil
+	}
 	return &types.Session{ID: id, TenantID: 1}, nil
 }
 

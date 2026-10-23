@@ -320,6 +320,12 @@ func (l *remoteSessionLifecycle) rebuildStale(
 	if err != nil || others > 0 {
 		return false, nil
 	}
+	// A sibling may have registered background work after the first check
+	// and ended its turn before we closed admission. Registration is now
+	// blocked, so recheck the machine's leases before destroying it.
+	if l.hasLiveMachineActivity(guarded, key) {
+		return false, nil
+	}
 	if err := barrier.Check(); err != nil {
 		return false, err
 	}
@@ -1161,12 +1167,30 @@ func (l *remoteSessionLifecycle) shouldRebuildStaleBinding(
 	if !key.IsUserScoped() {
 		return true
 	}
+	if l.hasLiveMachineActivity(ctx, key) {
+		return false
+	}
 	others, err := l.admission.ActiveExcept(ctx, admission.MachineScope(l.digest(key)), admissionExemptFrom(ctx)...)
 	if err != nil {
 		log.Printf("[sandbox] admission of %s unavailable (%v); keeping the current sandbox", key, err)
 		return false
 	}
 	return others == 0
+}
+
+func (l *remoteSessionLifecycle) hasLiveMachineActivity(ctx context.Context, key SessionSandboxKey) bool {
+	store, ok := l.bindings.(interface {
+		hasBackgroundActivity(context.Context, SessionSandboxKey) (bool, error)
+	})
+	if !ok {
+		return false
+	}
+	active, err := store.hasBackgroundActivity(ctx, key)
+	if err != nil {
+		log.Printf("[sandbox] background activity of %s unavailable (%v); keeping the current sandbox", key, err)
+		return true
+	}
+	return active
 }
 
 func (l *remoteSessionLifecycle) consumeTurnRebuild(

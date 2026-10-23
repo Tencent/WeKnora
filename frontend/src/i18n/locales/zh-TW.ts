@@ -1354,6 +1354,8 @@ export default {
       confluenceEditionCloud: 'Cloud',
       confluenceBaseUrl: 'Confluence 地址',
       confluenceUsername: '使用者名或電子信箱',
+      confluencePat: 'Server/DC 個人存取權杖（PAT）',
+      confluencePatHint: '選填。填寫後使用 Bearer 驗證，無需使用者名稱和密碼。',
       confluencePassword: 'Server/DC 密碼',
       confluenceApiToken: 'Cloud API 權杖',
       clientId: 'Client ID',
@@ -4834,6 +4836,12 @@ export default {
     noKnowledgeBases: '沒有可用的知識庫',
     enterDescription: '輸入描述',
     rawOutputLabel: '原始輸出',
+    backgroundWork: {
+      running: '沒有背景工作 | {count} 個背景工作 | {count} 個背景工作',
+      stop: '停止',
+      loading: '正在載入輸出…',
+      unavailable: '暫時無法查看輸出',
+    },
     wikiWritePageTitle: 'Wiki 頁面寫入',
     wikiReplaceTextTitle: 'Wiki 文字取代',
     wikiRenamePageTitle: 'Wiki 頁面重新命名',
@@ -4901,11 +4909,11 @@ export default {
         imageAttrsSchemaDescription: '模型會觀察以下屬性（由後端登錄檔定義）以驅動 OCR 策略',
         imageAttrsOcrConditions: '根據觀察到的屬性條件觸發 OCR',
         imageAttrsOcrConditionsDesc: '當觀察到的屬性滿足以下條件時，對圖片進行 OCR',
-        imageAttrsOcrOnUnobserved: '圖片屬性觀察失敗時仍執行 OCR',
-        imageAttrsOcrOnUnobservedDesc: '當模型未能正確觀察到圖片屬性時，預設仍執行 OCR 兜底，以免漏掉正文文字；關閉則跳過。（採用 4B 等小參數視覺模型，或自定義的圖片解析提示語與系統提示語衝突時，可能造成觀察失敗；8B 及以上模型的失敗概率很低，不建議關閉）',
         imagePipelineSectionLabel: '圖片解析方案',
         imagePipelineSectionDescription: '多模態解析開啟後，可以根據需要選擇圖片的解析方案',
         imagePipelineLabel: '選擇解析方案',
+        advancedSettingsLabel: '進階設定',
+        notesLabel: '附加說明',
         imagePipelinePlaceholder: '請選擇解析方案',
         imagePipelineLoading: '正在讀取流水線…',
         imagePipelineLoadError: '讀取流水線失敗',
@@ -8699,6 +8707,25 @@ export default {
         'true': { label: '是', description: '是 ── 圖表、曲線或示意圖' },
         'false': { label: '否', description: '否 ── 照片、插畫、圖示或裝飾圖' }
       }
+    },
+    layout_margin: {
+      label: '版面留白',
+      description:
+        '文字內容之外的部分（桌面、背景、空白）占整張畫面的比例。留白越大，越能在 OCR 之前把頁面裁得更緊。',
+      values: {
+        'none': { label: '無留白', description: '文字幾乎鋪滿畫面' },
+        'small': { label: '少量留白', description: '邊緣只有一條窄邊' },
+        'large': { label: '大片留白', description: '有大片非文字區域 —— 桌面、房間，或拍進來的周邊環境' }
+      }
+    },
+    layout_upright: {
+      label: '文字朝向',
+      description:
+        '圖中文字是否正立。歪斜或倒置的頁面，值得在 OCR 之前擺正。',
+      values: {
+        'true': { label: '正立', description: '文字方向正常' },
+        'false': { label: '非正立', description: '文字被旋轉、傾斜拍攝或倒置' }
+      }
     }
   },
   imagePipeline: {
@@ -8707,43 +8734,70 @@ export default {
     },
     default: {
       name: '傳統',
+      note_actions: {
+        label: '兩項動作互相獨立',
+        description:
+          '兩項各自開關：關掉識別，圖片仍會被描述；關掉描述，文字仍會被識別。只有兩個都關掉時這張圖才不會被處理 —— 所以面板不允許這種組合。',
+      },
       description: '使用者根據任務需要手動選擇解析動作開關。',
-      enable_caption: {
+      caption_enabled: {
         label: '圖片描述',
         description: '讓模型為每張圖片生成一句內容描述，作為圖片的說明文字。',
       },
-      enable_ocr: {
+      ocr_enabled: {
         label: '文字辨識',
         description: '提取圖片中出現的文字。',
       },
       caption: {
-        thinking: {
+        thinking_enabled: {
           label: '圖片描述時開啟思考',
           description: '讓模型在寫描述前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '文字辨識時開啟思考',
           description: '讓模型在提取文字前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
         },
       },
     },
     smartocr: {
+      ocr_on_unobserved: {
+        label: '圖片屬性觀察失敗時仍執行 OCR',
+        description:
+          '當模型未能正確觀察到圖片屬性時，預設仍執行 OCR 兜底，以免漏掉正文文字；關閉則跳過。（採用 4B 等小參數視覺模型，或自定義的圖片解析提示語與系統提示語衝突時，可能造成觀察失敗；8B 及以上模型的失敗概率很低，不建議關閉）',
+      },
       name: '智能模式',
-      caption: {
-        thinking: {
+      note_flow: {
+        label: '由觀察結果決定',
+        description:
+          '先描述圖片並觀察屬性，由屬性決定是否值得再為它花一次 OCR。屬性顯示頁面需要擺正時，會先擺正並裁掉周圍環境再識別；若該步驟不可用或判定不適用，則直接用原圖，絕不會比不啟用更差。',
+      },
+      preprocess: {
+        mode: {
+          label: '文件預處理',
+          description:
+            '預設關閉。啟用後，會在 OCR 前擺正並裁剪頁面，增加處理時間。自動：依觀察結果判斷；總是：對進入 OCR 的圖片都嘗試預處理；忙碌或超限時使用原圖。',
+          options: {
+            auto: '自動',
+            off: '關閉',
+            always: '總是',
+          },
+        },
+      },
+      observation: {
+        thinking_enabled: {
           label: '描述時開啟思考',
           description: '讓模型在描述圖片並觀察屬性前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '文字辨識時開啟思考',
           description: '讓模型在提取文字前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
         },
       },
-      description: '先觀察圖片特徵並進行圖片描述，再根據圖片特徵決定是否呼叫 OCR 對圖片進行辨識，以節省模型呼叫次數並提升解析速度。',
+      description: '先觀察圖片特徵並進行圖片描述，再根據圖片特徵決定是否呼叫 OCR 對圖片進行辨識，以節省模型呼叫次數並提升解析速度。當辨識到圖片為可校正的文件或標籤頁照片時，會在辨識前自動擺正並裁切頁面，以提升 OCR 準確率；若校正失敗則直接使用原圖。',
     },
   },
 }

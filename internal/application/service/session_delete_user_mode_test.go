@@ -216,6 +216,8 @@ func TestSessionDeleteFailureRollsBackRetirement(t *testing.T) {
 	for _, operation := range []string{"single", "batch", "all"} {
 		t.Run(operation, func(t *testing.T) {
 			f := newUserDeleteFixture(t, "user", nil)
+			_, _, jobIndex, bg := newRemoteServiceFixture(t)
+			f.svc.background = bg
 			f.place(t, userDeleteSessionID)
 			ids := []string{userDeleteSessionID}
 			if operation != "single" {
@@ -240,6 +242,9 @@ BEGIN SELECT RAISE(ABORT, 'injected session delete failure'); END`).Error)
 			for _, id := range ids {
 				_, err := f.svc.sessionRepo.GetByID(ctx, 7, id)
 				require.NoError(t, err, "the failed deletion must leave the session usable")
+				closed, err := jobIndex.SessionClosed(ctx, interfaces.SessionRef{TenantID: 7, SessionID: id})
+				require.NoError(t, err)
+				require.False(t, closed, "failed repository deletion must reopen background submissions")
 				row := f.assignment(t, id)
 				require.Nil(t, row.ReleasedAt)
 				require.Nil(t, row.CleanupDueAt, "GC must not remove files of the surviving session")
