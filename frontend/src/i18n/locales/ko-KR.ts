@@ -3304,6 +3304,7 @@ export default {
   modelSettings: {
     title: '모델 설정',
     description: '다양한 유형의 AI 모델을 관리합니다. Ollama 로컬 모델과 원격 API를 지원합니다',
+    defaultHint: '현재 워크스페이스에서 같은 유형의 기본 모델입니다. 새 설정과 모델을 지정하지 않은 기능에 사용되며 기존 모델 연결은 유지됩니다.',
     copySuffix: ' 사본',
     builtinTag: '기본제공',
     confirmDelete: '모델 "{name}"을(를) 삭제하시겠습니까?',
@@ -3395,6 +3396,8 @@ export default {
       viewGuide: '기본 제공 모델 관리 가이드 보기'
     },
     toasts: {
+      defaultUpdated: '기본 모델이 업데이트되었습니다',
+      defaultFailed: '기본 모델 설정 실패',
       nameRequired: '모델 이름은 비워둘 수 없습니다',
       nameTooLong: '모델 이름은 100자를 초과할 수 없습니다',
       displayNameTooLong: '표시 이름은 100자를 초과할 수 없습니다',
@@ -3444,6 +3447,7 @@ export default {
       custom: '사용자 지정'
     },
     actions: {
+      setDefault: '기본값으로 설정',
       addModel: '모델 추가',
       debugModel: '모델 테스트'
     },

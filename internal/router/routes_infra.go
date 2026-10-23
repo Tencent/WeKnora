@@ -34,6 +34,8 @@ func RegisterModelRoutes(
 		models.POST("/:id/debug", g.Admin(), handler.DebugModel)
 		// 复制模型配置（含已存凭证）— Admin+
 		models.POST("/:id/copy", g.Admin(), handler.CopyModel)
+		// Default selection belongs to this workspace, including builtin models.
+		models.PUT("/:id/default", g.Admin(), handler.SetDefaultModel)
 		// 获取单个模型 — Viewer+
 		models.GET("/:id", g.Viewer(), handler.GetModel)
 		// 更新模型 — Admin+；内置模型仍由服务层额外限定为 SystemAdmin。

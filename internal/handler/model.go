@@ -243,11 +243,54 @@ func (h *ModelHandler) GetModel(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Retrieved model successfully, ID: %s, Name: %s", model.ID, model.Name)
+	// The model row retains the deployment/legacy flag. Return the same
+	// effective workspace default as GET /models without changing that row.
+	models, err := h.service.ListModels(ctx)
+	if err != nil {
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	view := *model
+	view.IsDefault = false
+	for _, candidate := range models {
+		if candidate.ID == model.ID {
+			view.IsDefault = candidate.IsDefault
+			break
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewModelResponse(ctx, model),
+		"data":    dto.NewModelResponse(ctx, &view),
 	})
+}
+
+// SetDefaultModel godoc
+// @Summary      设置空间默认模型
+// @Description  按模型类型设置当前空间的默认模型，不修改内置模型或已有资源的模型绑定。
+// @Tags         模型管理
+// @Produce      json
+// @Param        id   path      string  true  "模型ID"
+// @Success      200  {object}  handler.DataResponse{data=dto.ModelResponse}  "默认模型"
+// @Failure      400  {object}  errors.AppError  "模型不可用"
+// @Failure      404  {object}  errors.AppError  "模型不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /models/{id}/default [put]
+func (h *ModelHandler) SetDefaultModel(c *gin.Context) {
+	ctx := c.Request.Context()
+	model, err := h.service.SetDefaultModel(ctx, secutils.SanitizeForLog(c.Param("id")))
+	if err != nil {
+		if err == service.ErrModelNotFound {
+			_ = c.Error(errors.NewNotFoundError("Model not found"))
+		} else if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+		} else {
+			_ = c.Error(errors.NewInternalServerError(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": dto.NewModelResponse(ctx, model)})
 }
 
 // ListModels godoc

@@ -314,6 +314,28 @@ func (s *modelService) ListModels(ctx context.Context) ([]*types.Model, error) {
 	return models, nil
 }
 
+// SetDefaultModel changes only the current workspace's selection. In
+// particular, choosing a builtin model never edits the shared model row.
+func (s *modelService) SetDefaultModel(ctx context.Context, id string) (*types.Model, error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	model, err := s.repo.GetByID(ctx, tenantID, id)
+	if err != nil {
+		return nil, err
+	}
+	if model == nil {
+		return nil, ErrModelNotFound
+	}
+	if model.Status != types.ModelStatusActive {
+		return nil, apperrors.NewBadRequestError("only active models can be selected as default")
+	}
+	if err := s.repo.SetDefault(ctx, tenantID, model.Type, model.ID); err != nil {
+		return nil, err
+	}
+	result := *model
+	result.IsDefault = true
+	return &result, nil
+}
+
 // UpdateModel updates an existing model in the repository
 func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) error {
 	logger.Info(ctx, "Start updating model")
@@ -755,9 +777,6 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 
 	return vlmModel, nil
 }
-
-// Note: default model selection logic has been removed; models no longer
-// maintain a per-type default flag at the service layer.
 
 // GetASRModel retrieves and initializes an automatic speech recognition model instance.
 func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR, error) {

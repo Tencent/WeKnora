@@ -45,6 +45,10 @@ func (s *stubCopyModelRepo) ClearDefaultByType(context.Context, uint, types.Mode
 	return nil
 }
 
+func (s *stubCopyModelRepo) SetDefault(context.Context, uint64, types.ModelType, string) error {
+	return nil
+}
+
 func TestCopyModel_CopiesCredentialsAndKeepsName(t *testing.T) {
 	source := &types.Model{
 		ID:          "src",

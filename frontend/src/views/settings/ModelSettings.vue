@@ -104,6 +104,11 @@
             <div class="model-card__body">
               <div class="model-card__header">
                 <h3 class="model-card__title" :title="modelDisplayName(model)">{{ modelDisplayName(model) }}</h3>
+                <t-tooltip v-if="model.isDefault" :content="$t('modelSettings.defaultHint')">
+                  <t-tag size="small" theme="primary" variant="light" class="model-card__default">
+                    {{ $t('model.defaultTag') }}
+                  </t-tag>
+                </t-tooltip>
                 <span v-if="model.isBuiltin" class="model-card__lock" :title="$t('modelSettings.builtinTag')"
                   :aria-label="$t('modelSettings.builtinTag')">
                   <t-icon :name="authStore.isSystemAdmin ? 'edit-1' : 'lock-on'" />
@@ -323,6 +328,7 @@ import {
   listModels,
   createModel,
   copyModelConfig,
+  setDefaultModel as setDefaultModelAPI,
   updateModel as updateModelAPI,
   deleteModel as deleteModelAPI,
   ModelInUseError,
@@ -395,6 +401,7 @@ watch(
 // 模型列表数据
 const allModels = ref<ModelConfig[]>([])
 const copyingModelId = ref<string | null>(null)
+const defaultingModelId = ref<string | null>(null)
 
 // 后端 type → 前端分组 type 的映射
 const backendTypeToModelType: Record<string, ModelType> = {
@@ -423,6 +430,8 @@ function convertToLegacyFormat(model: ModelConfig) {
     dimension: model.parameters.embedding_parameters?.dimension,
     supportsDimensionOverride: model.parameters.embedding_parameters?.supports_dimension_override || false,
     isBuiltin: model.is_builtin || false,
+    isDefault: model.is_default || false,
+    status: model.status,
     supportsVision: model.parameters.supports_vision || false,
     contextWindow: model.parameters.context_window || undefined,
     maxConcurrency: model.parameters.max_concurrency,
@@ -588,7 +597,10 @@ const canEditModel = (model: any) =>
 
 const isModelCardClickable = (model: any) => canEditModel(model)
 
-const canManageModel = (model: any) => canEditModel(model)
+const canSetDefaultModel = (model: any) =>
+  authStore.hasRole('admin') && model.status === 'active' && !model.isDefault
+
+const canManageModel = (model: any) => canEditModel(model) || canSetDefaultModel(model)
 
 // Built-in lifecycle remains deployment-managed (YAML / SQL). The UI only
 // exposes configuration and credential editing to SystemAdmin.
@@ -842,6 +854,14 @@ const openUsageResource = async (
 const getModelOptions = (type: ModelType, model: any) => {
   const options: any[] = []
 
+  if (canSetDefaultModel(model)) {
+    options.push({
+      content: t('modelSettings.actions.setDefault'),
+      value: `default-${type}-${model.id}`,
+      disabled: defaultingModelId.value !== null,
+    })
+  }
+
   if (model.isBuiltin) {
     if (authStore.isSystemAdmin) {
       options.push({
@@ -881,6 +901,25 @@ const handleMenuAction = (data: { value: string }, type: ModelType, model: any) 
     editModel(type, model)
   } else if (value.indexOf('copy-') === 0) {
     copyModel(type, model.id)
+  } else if (value.indexOf('default-') === 0) {
+    setDefaultModel(model)
+  }
+}
+
+const setDefaultModel = async (model: any) => {
+  if (!canSetDefaultModel(model) || defaultingModelId.value) return
+  defaultingModelId.value = model.id
+  try {
+    const selected = await setDefaultModelAPI(model.id)
+    allModels.value = allModels.value.map(item => item.type === selected.type
+      ? { ...item, is_default: item.id === selected.id }
+      : item)
+    chatResources.replaceModels(allModels.value)
+    MessagePlugin.success(t('modelSettings.toasts.defaultUpdated'))
+  } catch (error: any) {
+    MessagePlugin.error(error.message || t('modelSettings.toasts.defaultFailed'))
+  } finally {
+    defaultingModelId.value = null
   }
 }
 
@@ -1275,6 +1314,10 @@ useAssistantDataChange(() => { void loadModels() }, { areas: ['model'] })
 
 .model-card__title {
   .provider-card-title();
+}
+
+.model-card__default {
+  flex-shrink: 0;
 }
 
 /*

@@ -5723,6 +5723,7 @@ export default {
     modelSettings: {
       title: 'モデル設定',
       description: 'ローカルのOllamaやリモートAPIなど、さまざまな種類のAIモデルを管理します',
+      defaultHint: '現在のワークスペースで、この種類のモデルの既定の選択です。新しい設定やモデル未指定の機能に使用され、既存のモデル設定は維持されます。',
       typeShort: {
         chat: 'チャット',
         embedding: '埋め込み',
@@ -5731,6 +5732,7 @@ export default {
         asr: '音声'
       },
       actions: {
+        setDefault: '既定に設定',
         addModel: 'モデルを追加',
         debugModel: 'モデルテスト'
       },
@@ -5765,6 +5767,8 @@ export default {
         empty: 'ASRモデルがありません'
       },
       toasts: {
+        defaultUpdated: '既定のモデルを更新しました',
+        defaultFailed: '既定のモデルの設定に失敗しました',
         nameRequired: 'モデル名を入力してください',
         nameTooLong: 'モデル名は100文字以内で入力してください',
         displayNameTooLong: '表示名は100文字以内で入力してください',

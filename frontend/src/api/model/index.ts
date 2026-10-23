@@ -195,6 +195,15 @@ export function updateModel(id: string, data: Partial<ModelConfig>): Promise<Mod
   });
 }
 
+// A workspace preference, including when the selected model is shared.
+export async function setDefaultModel(id: string): Promise<ModelConfig> {
+  const response = await put(`/api/v1/models/${id}/default`) as any;
+  if (!response.success || !response.data) {
+    throw new Error(response.message || t('modelSettings.toasts.defaultFailed'));
+  }
+  return response.data;
+}
+
 // 删除模型
 export function deleteModel(id: string): Promise<void> {
   return new Promise((resolve, reject) => {

@@ -23,6 +23,8 @@ type ModelService interface {
 	GetModelByID(ctx context.Context, id string) (*types.Model, error)
 	// ListModels lists all models
 	ListModels(ctx context.Context) ([]*types.Model, error)
+	// SetDefaultModel selects an active visible model for the current workspace.
+	SetDefaultModel(ctx context.Context, id string) (*types.Model, error)
 	// UpdateModel updates a model
 	UpdateModel(ctx context.Context, model *types.Model) error
 	// DeleteModel deletes a model
@@ -65,6 +67,8 @@ type ModelRepository interface {
 	) ([]*types.Model, error)
 	// Update updates a model
 	Update(ctx context.Context, model *types.Model) error
+	// SetDefault saves a workspace preference without changing the model row.
+	SetDefault(ctx context.Context, tenantID uint64, modelType types.ModelType, id string) error
 	// Delete deletes a model
 	Delete(ctx context.Context, tenantID uint64, id string) error
 	// ClearDefaultByType clears the default flag for all models of a specific type

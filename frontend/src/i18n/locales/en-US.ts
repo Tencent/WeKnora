@@ -5723,6 +5723,7 @@ export default {
     modelSettings: {
       title: 'Model Settings',
       description: 'Manage different types of AI models, including local Ollama and remote APIs',
+      defaultHint: 'Default for this model type in the current workspace. Used for new configurations and features without an explicit model; existing model bindings are kept.',
       typeShort: {
         chat: 'Chat',
         embedding: 'Embedding',
@@ -5731,6 +5732,7 @@ export default {
         asr: 'Speech'
       },
       actions: {
+        setDefault: 'Set as default',
         addModel: 'Add Model',
         debugModel: 'Model Test'
       },
@@ -5765,6 +5767,8 @@ export default {
         empty: 'No ASR models'
       },
       toasts: {
+        defaultUpdated: 'Default model updated',
+        defaultFailed: 'Failed to set default model',
         nameRequired: 'Model name cannot be empty',
         nameTooLong: 'Model name cannot exceed 100 characters',
         displayNameTooLong: 'Display name cannot exceed 100 characters',
