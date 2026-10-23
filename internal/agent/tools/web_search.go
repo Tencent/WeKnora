@@ -49,7 +49,7 @@ var webSearchTool = BaseTool{
 type WebSearchInput struct {
 	Query     string `json:"query" jsonschema:"Search query string"`
 	Count     *int   `json:"count,omitempty" jsonschema:"Number of results to return (1 to the configured maximum)"`
-	Country   string `json:"country,omitempty" jsonschema:"Two-letter code or ALL (Brave, Serply, Firecrawl); omit for default"`
+	Country   string `json:"country,omitempty" jsonschema:"2-letter code or ALL (Brave, Serply, Firecrawl); optional"`
 	Freshness string `json:"freshness,omitempty" jsonschema:"pd/pw/pm/py; Brave also accepts YYYY-MM-DDtoYYYY-MM-DD"`
 	Content   bool   `json:"content,omitempty" jsonschema:"Fetch page excerpts; default false"`
 }
