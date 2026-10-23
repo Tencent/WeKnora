@@ -95,10 +95,12 @@ func newConflictSkipHarness(
 	require.NoError(t, registry.Register(conflictSkipConnector{}))
 
 	svc := &DataSourceService{
-		dsRepo:            newKBDeleteDSRepo(ds.KnowledgeBaseID, ds),
-		syncLogRepo:       &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{syncLog.ID: syncLog}},
-		knowledgeService:  ks,
-		kbService:         &processSyncKBService{kb: &types.KnowledgeBase{ID: ds.KnowledgeBaseID, TenantID: ds.TenantID}},
+		dsRepo:           newKBDeleteDSRepo(ds.KnowledgeBaseID, ds),
+		syncLogRepo:      &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{syncLog.ID: syncLog}},
+		knowledgeService: ks,
+		kbService: &processSyncKBService{
+			kb: &types.KnowledgeBase{ID: ds.KnowledgeBaseID, TenantID: ds.TenantID},
+		},
 		connectorRegistry: registry,
 		tenantRepo:        &processSyncTenantRepo{tenant: &types.Tenant{ID: ds.TenantID}},
 		tagService:        &processSyncTagService{},
@@ -106,7 +108,12 @@ func newConflictSkipHarness(
 	return svc, ds, repo, ks, syncLog
 }
 
-func runConflictSkipSync(t *testing.T, svc *DataSourceService, ds *types.DataSource, syncLog *types.SyncLog) *types.SyncLog {
+func runConflictSkipSync(
+	t *testing.T,
+	svc *DataSourceService,
+	ds *types.DataSource,
+	syncLog *types.SyncLog,
+) *types.SyncLog {
 	t.Helper()
 	payload, err := json.Marshal(types.DataSourceSyncPayload{
 		DataSourceID: ds.ID,

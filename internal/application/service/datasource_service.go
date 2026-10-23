@@ -1430,10 +1430,16 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			// via the shared DuplicateKnowledgeError path (Tencent/WeKnora#4640 —
 			// this strategy was silently ignored and the item was overwritten).
 			if ds.ConflictStrategy == types.ConflictStrategySkip {
-				logger.Infof(ctx, "item %q (external_id=%s) already exists as knowledge %s, conflict strategy skip → skipping",
-					item.Title, item.ExternalID, existing.ID)
+				logger.Infof(
+					ctx,
+					"item %q (external_id=%s) already exists as knowledge %s, conflict strategy skip → skipping",
+					item.Title, item.ExternalID, existing.ID,
+				)
 				return false, &types.DuplicateKnowledgeError{
-					Message:   fmt.Sprintf("knowledge already exists for external_id %s (conflict strategy: skip)", item.ExternalID),
+					Message: fmt.Sprintf(
+						"knowledge already exists for external_id %s (conflict strategy: skip)",
+						item.ExternalID,
+					),
 					Knowledge: existing,
 				}
 			}
