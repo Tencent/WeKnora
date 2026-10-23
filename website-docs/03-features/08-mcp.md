@@ -35,6 +35,8 @@ MCP 管理页支持按服务名称和卡片显示的用途说明搜索。搜索�
 
 在「设置 → 发布集成 → MCP Server」新建端点：填写名称、选择可访问的知识库（留空为全部）、勾选要暴露的工具，并按需指定 `ask` 使用的默认 Agent（留空时使用内置快速问答）和每分钟调用上限（默认 60 次）。创建后会一次性展示令牌和地址 `/mcp/<endpoint_id>`，页面同时给出 Cursor / VS Code / Claude Desktop 的 `mcpServers` 配置、Claude Code 的一行命令，以及仅支持 stdio 的客户端通过 `mcp-remote` 桥接的写法。
 
+`ask` 是同步调用，服务端时限默认 4 分钟，可用 `WEKNORA_MCP_ASK_TIMEOUT` 调整（Go duration，如 `10m`，也接受纯秒数，如 `600`）。客户端在请求 `_meta.progressToken` 中提供 token 后，服务端会立即发送进度通知，并在运行期间约每 15 秒发送一次 `notifications/progress`；不提供 token 时不发通知。进度通知是尽力发送，不能替代客户端或反向代理自身的超时配置；超时值只控制 WeKnora 服务端等待本次问答的时长。
+
 使用自定义反向代理时，除 `/api/` 外，还需将 `/mcp/` 原路径转发到 WeKnora 后端，保留 `Authorization` 和 MCP 协议头，并关闭响应缓冲、为长连接设置足够的读写超时。仓库自带的 Nginx、Vite 开发及预览配置已包含该代理，可直接使用网站域名连接，无需另行暴露后端 8080 端口。
 
 <Screenshot
