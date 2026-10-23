@@ -83,8 +83,8 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-debug}
       # 日志文件路径（留空则只输出 stdout）；LLM_DEBUG_LOG 开启时同目录写 llm_debug.log
       - LOG_PATH=${LOG_PATH:-}
-      # 自定义日志格式模板（留空用内置默认格式）
-      - LOG_FORMAT=${LOG_FORMAT:-}
+      # 自定义日志格式模板，必须包含 %msg；显式留空用默认格式，未设置时兼容旧变量
+      - WEKNORA_LOG_FORMAT=${WEKNORA_LOG_FORMAT-${LOG_FORMAT:-}}
       # LLM 调试日志：true 写 LOG_PATH 同目录 llm_debug.log，或指定路径；留空关闭
       - LLM_DEBUG_LOG=${LLM_DEBUG_LOG:-false}
       # ========== 运行时基础 ==========
