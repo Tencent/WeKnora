@@ -142,7 +142,8 @@ func isValidProviderType(provider types.WebSearchProviderType) bool {
 		types.WebSearchProviderTypeZhipu,
 		types.WebSearchProviderTypeExa,
 		types.WebSearchProviderTypeBocha,
-		types.WebSearchProviderTypeSerply:
+		types.WebSearchProviderTypeSerply,
+		types.WebSearchProviderTypeYou:
 		return true
 	default:
 		return false
@@ -203,6 +204,8 @@ func validateProviderParameters(provider types.WebSearchProviderType, params typ
 		// No API key required
 	case types.WebSearchProviderTypeKeenable:
 		// No API key required (keyless by default; an optional key lifts the rate limit)
+	case types.WebSearchProviderTypeYou:
+		// No API key required (keyless by default; an optional key raises the daily limit)
 	case types.WebSearchProviderTypeSearxng:
 		if err := infra_web_search.ValidateSearxngBaseURL(params.BaseURL); err != nil {
 			return err

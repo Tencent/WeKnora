@@ -66,6 +66,20 @@ func TestEmptyTestResultsError_Keenable(t *testing.T) {
 	}
 }
 
+func TestEmptyTestResultsError_You(t *testing.T) {
+	err := EmptyTestResultsError(string(types.WebSearchProviderTypeYou), nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "you returned 0 results") {
+		t.Fatalf("unexpected message: %q", msg)
+	}
+	if !strings.Contains(msg, "100 searches a day") {
+		t.Fatalf("you message should hint at the keyless daily limit: %q", msg)
+	}
+}
+
 func TestEmptyTestResultsError_Exa(t *testing.T) {
 	err := EmptyTestResultsError(string(types.WebSearchProviderTypeExa), nil)
 	if err == nil {
