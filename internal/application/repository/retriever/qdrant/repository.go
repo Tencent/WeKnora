@@ -313,8 +313,8 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 	for _, embedding := range embeddingList {
 		embeddingDB := toQdrantVectorEmbedding(embedding, additionalParams)
 		if len(embeddingDB.Embedding) == 0 {
-			log.Warnf("[Qdrant] Skipping empty embedding for chunk ID: %s", embedding.ChunkID)
-			continue
+			return fmt.Errorf("empty embedding vector for chunk ID: %s (source ID: %s)",
+				embedding.ChunkID, embedding.SourceID)
 		}
 
 		dimension := len(embeddingDB.Embedding)
@@ -325,11 +325,6 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 		}
 		pointsByDimension[dimension] = append(pointsByDimension[dimension], point)
 		log.Debugf("[Qdrant] Added chunk ID %s to batch request (dimension: %d)", embedding.ChunkID, dimension)
-	}
-
-	if len(pointsByDimension) == 0 {
-		log.Warn("[Qdrant] No valid points to save after filtering")
-		return nil
 	}
 
 	// Save points to each dimension-specific collection
