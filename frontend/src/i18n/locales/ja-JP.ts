@@ -3831,11 +3831,14 @@ export default {
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).
+        sourcePage: '{page} ページ',
         attr: {
           builtin_caption: '説明',
           builtin_caption_description: 'モデルが生成した画像の説明',
           builtin_ocr_text: 'OCR テキスト',
           builtin_ocr_text_description: 'OCR で画像から抽出した文字',
+          builtin_page: '文書のページ',
+          builtin_page_description: '元の文書ごとに PDF のページ順で表示します。ページ不明の画像は各文書の末尾に表示します。',
           builtin_created_at: '作成日時',
           builtin_created_at_description: '所属ドキュメントチャンクの作成日時',
           builtin_updated_at: '更新日時',
