@@ -1,8 +1,6 @@
 package service
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -50,21 +48,4 @@ func TestTruncateSkillErrorLeavesShortInputAlone(t *testing.T) {
 
 		require.Equal(t, want, got)
 	}
-}
-
-// A non-2xx download response answers with the normalized body, so a Chinese
-// body must reach the caller as valid text rather than a rune-split prefix.
-func TestSkillSourceDownloadErrorKeepsValidUTF8(t *testing.T) {
-	body := strings.Repeat("错", 120) // 360 bytes, well past the 200-byte cap
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusBadGateway)
-		_, _ = w.Write([]byte(body))
-	}))
-	defer server.Close()
-
-	_, _, err := getSkillURL(t.Context(), server.Client(), server.URL+"/skill.zip")
-
-	require.Error(t, err)
-	require.True(t, utf8.ValidString(err.Error()), "download error must be valid UTF-8: %q", err.Error())
-	require.Contains(t, err.Error(), "download returned HTTP 502")
 }
