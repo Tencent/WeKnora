@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
+	"github.com/Tencent/WeKnora/internal/mcpserver"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -47,8 +48,10 @@ func TestNewRouterFrontendStaticEditionOptIn(t *testing.T) {
 			t.Cleanup(func() { handler.Edition = previousEdition })
 
 			r := NewRouter(RouterParams{
-				Config:        &config.Config{},
-				SystemHandler: &handler.SystemHandler{},
+				Config:             &config.Config{},
+				SystemHandler:      &handler.SystemHandler{},
+				MCPServer:          &mcpserver.Server{},
+				MCPEndpointService: &stubMCPEndpointServiceForRoutes{},
 			})
 			for _, path := range []string{"/", "/login", "/assets/app-test.js"} {
 				recorder := httptest.NewRecorder()
@@ -70,6 +73,60 @@ func TestNewRouterFrontendStaticEditionOptIn(t *testing.T) {
 			r.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil))
 			require.Equal(t, http.StatusUnauthorized, recorder.Code)
 			require.Contains(t, recorder.Body.String(), "missing authentication")
+
+			// Anonymous requests must be rejected before the unused MCP transport.
+			for _, request := range []struct {
+				method string
+				path   string
+			}{
+				{method: http.MethodGet, path: "/mcp/endpoint"},
+				{method: http.MethodHead, path: "/mcp/endpoint"},
+				{method: http.MethodGet, path: "/mcp/endpoint/unknown"},
+			} {
+				t.Run(request.method+" "+request.path, func(t *testing.T) {
+					recorder := httptest.NewRecorder()
+					r.ServeHTTP(recorder, httptest.NewRequest(request.method, request.path, nil))
+					require.Equal(t, http.StatusUnauthorized, recorder.Code)
+					require.Contains(t, recorder.Header().Get("Content-Type"), "application/json")
+					if request.method == http.MethodGet && request.path == "/mcp/endpoint" {
+						require.Equal(t, `Bearer realm="weknora-mcp"`, recorder.Header().Get("WWW-Authenticate"))
+						require.Contains(t, recorder.Body.String(), "missing bearer token")
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestFrontendStaticDoesNotInterceptMatchedBackendRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	webDir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(webDir, "backend"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(webDir, "index.html"), []byte("spa"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(webDir, "backend", "collision"), []byte("static file"), 0o600))
+	t.Setenv("WEKNORA_WEB_DIR", webDir)
+
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		t.Run(method, func(t *testing.T) {
+			r := gin.New()
+			serveFrontendStatic(r)
+			authCalled := false
+			handlerCalled := false
+			r.Handle(method, "/backend/:id", func(c *gin.Context) {
+				authCalled = true
+				c.AbortWithStatus(http.StatusUnauthorized)
+			}, func(c *gin.Context) {
+				handlerCalled = true
+				c.Status(http.StatusOK)
+			})
+
+			recorder := httptest.NewRecorder()
+			r.ServeHTTP(recorder, httptest.NewRequest(method, "/backend/collision", nil))
+
+			require.Equal(t, http.StatusUnauthorized, recorder.Code)
+			require.True(t, authCalled, "matched backend authentication must run before static serving")
+			require.False(t, handlerCalled, "authentication rejection must stop the backend handler")
+			require.Empty(t, recorder.Header().Get("Cache-Control"))
 		})
 	}
 }

@@ -295,7 +295,7 @@ make build-prod
 SERVER_HOST=127.0.0.1 WEKNORA_WEB_DIR="$PWD/frontend/dist" ./WeKnora
 ```
 
-启动后通过 `http://127.0.0.1:8080` 访问（使用默认 `SERVER_PORT` 时）。`WEKNORA_WEB_DIR` 目录仅应包含前端构建产物，不要放入数据、配置或密钥；其中的文件会作为静态资源提供。现有 API 的认证与授权规则保持不变。
+启动后通过 `http://127.0.0.1:8080` 访问（使用默认 `SERVER_PORT` 时）。`WEKNORA_WEB_DIR` 目录仅应包含前端构建产物，不要放入数据、配置或密钥；其中的文件会作为静态资源提供。已注册的后端路由（包括 `/mcp/` 端点）优先于静态文件和 SPA 回退，现有 API 的认证与授权规则保持不变。
 
 此选项可省去独立前端服务，不会替代数据库、Redis 等后端依赖。需要 SQLite + 内存队列的最小化无 Docker 部署时，请参考现有的 [Lite 运行时](#_7-1-lite-运行时-零外部依赖)。
 
