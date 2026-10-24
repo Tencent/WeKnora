@@ -95,8 +95,8 @@ func (r *organizationRepository) ListSearchable(ctx context.Context, query strin
 		// 支持按名称、描述或空间 ID 搜索，便于区分同名空间
 		if r.db.Name() == "sqlite" {
 			q = q.Where(
-				"LOWER(name) LIKE LOWER(?) ESCAPE ? OR " +
-					"LOWER(description) LIKE LOWER(?) ESCAPE ? OR " +
+				"LOWER(name) LIKE LOWER(?) ESCAPE ? OR "+
+					"LOWER(description) LIKE LOWER(?) ESCAPE ? OR "+
 					"LOWER(CAST(id AS TEXT)) LIKE LOWER(?) ESCAPE ?",
 				pattern, likeEscapeChar, pattern, likeEscapeChar, pattern, likeEscapeChar,
 			)
