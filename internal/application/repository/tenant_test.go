@@ -16,7 +16,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.TenantMember{}))
+	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.TenantMember{}, &types.User{}))
 	return db
 }
 
@@ -54,4 +54,38 @@ func TestDeleteTenant_SoftDeletesMemberships(t *testing.T) {
 	var rawMemberCount int64
 	require.NoError(t, db.Unscoped().Model(&types.TenantMember{}).Count(&rawMemberCount).Error)
 	assert.Equal(t, int64(1), rawMemberCount)
+}
+
+func TestDeleteTenant_ClearsHomeTenantPointer(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+	repo := NewTenantRepository(db)
+
+	tenant := &types.Tenant{Name: "home", Status: "active"}
+	require.NoError(t, db.Create(tenant).Error)
+
+	user := &types.User{
+		ID:           "home-owner",
+		Username:     "home-owner",
+		Email:        "home-owner@example.com",
+		PasswordHash: "hashed",
+		TenantID:     tenant.ID,
+		IsActive:     true,
+	}
+	require.NoError(t, db.Create(user).Error)
+
+	require.NoError(t, repo.DeleteTenant(ctx, tenant.ID))
+
+	// The dangling home pointer is cleared so login never resolves to the
+	// soft-deleted tenant; the read hydrates SQL NULL back as the zero value.
+	var stored types.User
+	require.NoError(t, db.First(&stored, "id = ?", user.ID).Error)
+	assert.Equal(t, uint64(0), stored.TenantID)
+
+	// Stored as NULL, not 0 — users.tenant_id is nullable and FK-checked in
+	// PostgreSQL (see userRepository.UpdateUser).
+	var nullCount int64
+	require.NoError(t, db.Table("users").
+		Where("id = ? AND tenant_id IS NULL", user.ID).Count(&nullCount).Error)
+	assert.Equal(t, int64(1), nullCount)
 }
