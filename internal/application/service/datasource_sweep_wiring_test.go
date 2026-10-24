@@ -120,7 +120,7 @@ func TestIngestItem_ReplacesSubtreeSweepsStaleChildrenAfterCreate(t *testing.T) 
 		ReplacesSubtree: true,
 	}
 
-	if _, err := s.ingestItem(context.Background(), ds, item, nil); err != nil {
+	if _, _, err := s.ingestItem(context.Background(), ds, item, nil); err != nil {
 		t.Fatalf("ingestItem error: %v", err)
 	}
 
@@ -173,7 +173,7 @@ func TestIngestItem_ReplacesSubtreeSweepsOnDuplicateParent(t *testing.T) {
 
 	// ingestItem surfaces the dup error to the caller (applyFetchedItem counts it
 	// Skipped), but the sweep must still have run.
-	_, err := s.ingestItem(context.Background(), ds, item, nil)
+	_, _, err := s.ingestItem(context.Background(), ds, item, nil)
 	var dupErr *types.DuplicateKnowledgeError
 	if !errors.As(err, &dupErr) {
 		t.Fatalf("want DuplicateKnowledgeError, got %v", err)
@@ -207,7 +207,7 @@ func TestIngestItem_NoSweepWhenDuplicateIsDifferentNode(t *testing.T) {
 		ReplacesSubtree: true,
 	}
 
-	_, err := s.ingestItem(context.Background(), ds, item, nil)
+	_, _, err := s.ingestItem(context.Background(), ds, item, nil)
 	var dupErr *types.DuplicateKnowledgeError
 	if !errors.As(err, &dupErr) {
 		t.Fatalf("want DuplicateKnowledgeError, got %v", err)
@@ -252,7 +252,7 @@ func TestIngestItem_SubtreeKeepPreservesPresentChild(t *testing.T) {
 		SubtreeKeep: []string{"nt-parent#file#present"},
 	}
 
-	if _, err := s.ingestItem(context.Background(), ds, item, nil); err != nil {
+	if _, _, err := s.ingestItem(context.Background(), ds, item, nil); err != nil {
 		t.Fatalf("ingestItem error: %v", err)
 	}
 	if len(ks.deleted) != 1 || ks.deleted[0] != "child-gone" {
@@ -276,7 +276,7 @@ func TestIngestItem_SubtreeSweepSkipsOtherDataSourceChildren(t *testing.T) {
 		ReplacesSubtree: true,
 	}
 
-	if _, err := s.ingestItem(context.Background(), ds, item, nil); err != nil {
+	if _, _, err := s.ingestItem(context.Background(), ds, item, nil); err != nil {
 		t.Fatalf("ingestItem error: %v", err)
 	}
 	if len(ks.deleted) != 1 || ks.deleted[0] != "own-child" {
@@ -299,7 +299,7 @@ func TestIngestItem_NoSweepWhenFlagUnset(t *testing.T) {
 		// ReplacesSubtree deliberately false
 	}
 
-	if _, err := s.ingestItem(context.Background(), ds, item, nil); err != nil {
+	if _, _, err := s.ingestItem(context.Background(), ds, item, nil); err != nil {
 		t.Fatalf("ingestItem error: %v", err)
 	}
 	if len(repo.prefixCalls) != 0 {

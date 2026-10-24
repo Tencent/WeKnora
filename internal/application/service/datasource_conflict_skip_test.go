@@ -171,7 +171,7 @@ func TestIngestItem_SkipStrategyShortCircuitsAsDuplicate(t *testing.T) {
 	}
 	svc := &DataSourceService{knowledgeService: ks}
 
-	isUpdate, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
+	isUpdate, _, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
 		ExternalID:  "file:exists",
 		Title:       "Existing Doc",
 		Content:     []byte("# v2\n"),
@@ -202,7 +202,7 @@ func TestIngestItem_SkipStrategyKeepsExistingURLItem(t *testing.T) {
 	}
 	svc := &DataSourceService{knowledgeService: ks}
 
-	isUpdate, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
+	isUpdate, _, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
 		ExternalID: "url:1",
 		URL:        "https://example.com/doc",
 		Title:      "Existing URL Doc",
