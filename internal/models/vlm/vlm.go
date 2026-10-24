@@ -57,6 +57,9 @@ type Config struct {
 	// MaxConcurrency caps concurrent background calls to this model; 0 falls
 	// back to the process-wide default (see limiter.GateN).
 	MaxConcurrency int
+	// MaxOutputTokens is the model's declared per-response output limit; 0
+	// means unknown. It caps the default VLM output budget.
+	MaxOutputTokens int
 	// Spec carries per-row catalog overrides (protocol, compat, levels). VLM
 	// calls now go through the chat factory, so the override has to travel
 	// with them — otherwise /models reports capabilities computed WITH the
@@ -86,20 +89,33 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *Config {
 		}
 	}
 	return &Config{
-		ModelID:        m.ID,
-		APIKey:         m.Parameters.APIKey,
-		BaseURL:        m.Parameters.BaseURL,
-		ModelName:      m.Name,
-		Source:         m.Source,
-		InterfaceType:  ifType,
-		Provider:       m.Parameters.Provider,
-		MaxConcurrency: m.Parameters.MaxConcurrency,
-		Spec:           m.Parameters.Spec,
-		Extra:          stringMapToAnyMap(m.Parameters.ExtraConfig),
-		CustomHeaders:  m.Parameters.CustomHeaders,
-		AppID:          appID,
-		AppSecret:      appSecret,
+		ModelID:         m.ID,
+		APIKey:          m.Parameters.APIKey,
+		BaseURL:         m.Parameters.BaseURL,
+		ModelName:       m.Name,
+		Source:          m.Source,
+		InterfaceType:   ifType,
+		Provider:        m.Parameters.Provider,
+		MaxConcurrency:  m.Parameters.MaxConcurrency,
+		MaxOutputTokens: maxOutputTokens(m.Parameters),
+		Spec:            m.Parameters.Spec,
+		Extra:           stringMapToAnyMap(m.Parameters.ExtraConfig),
+		CustomHeaders:   m.Parameters.CustomHeaders,
+		AppID:           appID,
+		AppSecret:       appSecret,
 	}
+}
+
+// maxOutputTokens returns the row's output limit, preferring the row field and
+// falling back to the catalog override pinned on the row.
+func maxOutputTokens(p types.ModelParameters) int {
+	if p.MaxOutputTokens > 0 {
+		return p.MaxOutputTokens
+	}
+	if p.Spec != nil {
+		return p.Spec.MaxOutputTokens
+	}
+	return 0
 }
 
 func stringMapToAnyMap(in map[string]string) map[string]any {
