@@ -22,6 +22,7 @@
 | `embedding_model_id` | string | 否 | Embedding 模型 ID |
 | `chunking_config` | object | 否 | 分块配置（chunk_size/overlap/separators/strategy…） |
 | `image_processing_config` | object | 否 | 图片处理配置：`model_id` / `image_attrs_enabled` / `image_actions`（`{ ocr: { on: [...], on_unobserved: bool } }`）/ `image_vector_enabled`（图片向量索引与召回，默认 false，见[知识库功能](../03-features/02-knowledge-base.md)） |
+| `vlm_config` | object | 否 | 图片理解配置：`enabled`（默认 false）与 `model_id`（已创建的多模态模型 ID）须同时设置才能启用；可选 `description_language`、`custom_instructions`（≤4000 字） |
 | `storage_provider_config` | object | 否 | 存储配置 |
 | `vector_store_id` | string | 否 | 向量库绑定（非法返回 code 2200/2201） |
 | `faq_config` / `wiki_config` / `extract_config` / `indexing_strategy` | object | 否 | 类型相关配置 |
@@ -36,6 +37,23 @@
 curl -X POST $BASE/api/v1/knowledge-bases -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"name":"产品文档","type":"document"}'
 ```
+
+需要对图片或扫描件生成 OCR 文本、图片描述时，在创建请求的顶层设置 `vlm_config`。`image_processing_config` 用于图片处理策略，**只设置 `image_processing_config.model_id` 不会启用图片理解**。例如（将模型 ID 替换为当前空间中已配置的对应模型）：
+
+```bash
+curl -X POST "$BASE/api/v1/knowledge-bases" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{
+    "name": "扫描文档",
+    "type": "document",
+    "embedding_model_id": "embedding-model-id",
+    "vlm_config": {
+      "enabled": true,
+      "model_id": "vlm-model-id"
+    }
+  }'
+```
+
+已有知识库可通过下文的 `PATCH /api/v1/knowledge-bases/:id` 补充 `vlm_config`。配置更新不会自动重解析旧文档；对已导入的图片或扫描件，再调用 `POST /api/v1/knowledge/:id/reparse`。
 
 ### POST /api/v1/knowledge-bases/:id/graph-search {#graph-search}
 
