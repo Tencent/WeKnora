@@ -299,9 +299,7 @@ const {
   hostContext: hostContextRef,
   onMessagesChange: (has) => emit('messages-state', has),
   onSessionTitle: (title) => {
-    if (props.useSessionHeaderTitle) {
-      emit('session-title', title)
-    }
+    emit('session-title', title)
   },
   onTurnComplete: (message) => { void loadFollowUpSuggestions(message, true) },
   onMessagesLoaded: loadPersistedFollowUps,

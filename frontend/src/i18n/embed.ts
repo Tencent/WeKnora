@@ -3,6 +3,16 @@ import { createI18n } from 'vue-i18n'
 const messages = {
   "zh-CN": {
     "embedPublish": {
+      history: "对话历史",
+      historyHint: "最近 30 个对话，仅保存在此浏览器。清除记录不会删除服务端消息。",
+      historyEmpty: "暂无对话记录",
+      historyUntitled: "未命名对话",
+      historyClear: "清除本地历史",
+      historyClearConfirm: "清除此浏览器的历史并开启新对话？服务端消息将保留。",
+      historyRetry: "重试",
+      historyLoadFailed: "无法打开对话，请稍后重试。",
+      historyUnavailable: "该对话已不可用，已从本地历史中移除。",
+
       "title": "网页嵌入",
       "description": "将智能体嵌入到您的网页，访客可通过页面内聊天窗口或右下角浮窗发起对话。",
       "create": "新建嵌入渠道",
@@ -591,6 +601,16 @@ const messages = {
   },
   "zh-TW": {
     "embedPublish": {
+      history: "對話歷史",
+      historyHint: "最近 30 個對話，僅儲存在此瀏覽器。清除紀錄不會刪除伺服器訊息。",
+      historyEmpty: "暫無對話紀錄",
+      historyUntitled: "未命名對話",
+      historyClear: "清除本機歷史",
+      historyClearConfirm: "清除此瀏覽器的歷史並開啟新對話？伺服器訊息將保留。",
+      historyRetry: "重試",
+      historyLoadFailed: "無法開啟對話，請稍後重試。",
+      historyUnavailable: "此對話已無法使用，已從本機歷史移除。",
+
       "title": "網頁內嵌",
       "description": "將智慧代理內嵌到您的網頁，訪客可透過頁面內聊天視窗或右下角浮窗發起對話。",
       "create": "新建內嵌通路",
@@ -1179,6 +1199,16 @@ const messages = {
   },
   "ja-JP": {
     "embedPublish": {
+      history: "チャット履歴",
+      historyHint: "最新 30 件をこのブラウザーに保存します。履歴を消去してもサーバーのメッセージは削除されません。",
+      historyEmpty: "保存済みのチャットはありません",
+      historyUntitled: "無題のチャット",
+      historyClear: "ローカル履歴を消去",
+      historyClearConfirm: "履歴を消去して新しいチャットを開始しますか？サーバーのメッセージは保持されます。",
+      historyRetry: "再試行",
+      historyLoadFailed: "チャットを開けませんでした。もう一度お試しください。",
+      historyUnavailable: "このチャットは利用できないため、ローカル履歴から削除しました。",
+
       "title": "Webページ埋め込み",
       "description": "このエージェントを自社サイトに埋め込むと、訪問者はページ内のチャットウィンドウやフローティングウィジェットから会話できます。",
       "create": "埋め込みチャネルを作成",
@@ -1767,6 +1797,16 @@ const messages = {
   },
   "en-US": {
     "embedPublish": {
+      history: "Chat history",
+      historyHint: "The latest 30 chats are saved in this browser only. Clearing history does not delete server messages.",
+      historyEmpty: "No saved chats",
+      historyUntitled: "Untitled chat",
+      historyClear: "Clear local history",
+      historyClearConfirm: "Clear this browser’s history and start a new chat? Server messages will be kept.",
+      historyRetry: "Retry",
+      historyLoadFailed: "Could not open the chat. Please try again.",
+      historyUnavailable: "This chat is no longer available and was removed from local history.",
+
       "title": "Web Page Embed",
       "description": "Embed this agent on your website so visitors can chat via an in-page window or a floating launcher.",
       "create": "New embed channel",
@@ -2380,6 +2420,16 @@ function deepMerge<T extends MessageTree>(base: T, patch: MessageTree): T {
 
 const koEmbedPublish = {
   embedPublish: {
+    history: "대화 기록",
+    historyHint: "최근 대화 30개가 이 브라우저에만 저장됩니다. 기록을 지워도 서버 메시지는 삭제되지 않습니다.",
+    historyEmpty: "저장된 대화 없음",
+    historyUntitled: "제목 없는 대화",
+    historyClear: "로컬 기록 지우기",
+    historyClearConfirm: "기록을 지우고 새 대화를 시작할까요? 서버 메시지는 유지됩니다.",
+    historyRetry: "다시 시도",
+    historyLoadFailed: "대화를 열 수 없습니다. 다시 시도해 주세요.",
+    historyUnavailable: "사용할 수 없는 대화이므로 로컬 기록에서 삭제했습니다.",
+
     title: '웹 페이지 임베드',
     description: '에이전트를 웹 페이지에 임베드하여 방문자가 페이지 내 채팅창 또는 플로팅 버튼으로 대화할 수 있게 합니다.',
     create: '새 임베드 채널',
@@ -2519,6 +2569,16 @@ const koEmbedPublish = {
 
 const ruEmbedPublish = {
   embedPublish: {
+    history: "История чатов",
+    historyHint: "Последние 30 чатов сохраняются только в этом браузере. Очистка истории не удаляет сообщения на сервере.",
+    historyEmpty: "Нет сохранённых чатов",
+    historyUntitled: "Чат без названия",
+    historyClear: "Очистить локальную историю",
+    historyClearConfirm: "Очистить историю и начать новый чат? Сообщения на сервере сохранятся.",
+    historyRetry: "Повторить",
+    historyLoadFailed: "Не удалось открыть чат. Повторите попытку.",
+    historyUnavailable: "Чат недоступен и удалён из локальной истории.",
+
     title: 'Встраивание на веб-страницу',
     description: 'Встройте агента на свою веб-страницу: посетители смогут общаться через встроенное окно чата или плавающую кнопку.',
     create: 'Новый канал встраивания',

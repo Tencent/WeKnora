@@ -5709,6 +5709,16 @@ export default {
     }
   },
   embedPublish: {
+    history: "对话历史",
+    historyHint: "最近 30 个对话，仅保存在此浏览器。清除记录不会删除服务端消息。",
+    historyEmpty: "暂无对话记录",
+    historyUntitled: "未命名对话",
+    historyClear: "清除本地历史",
+    historyClearConfirm: "清除此浏览器的历史并开启新对话？服务端消息将保留。",
+    historyRetry: "重试",
+    historyLoadFailed: "无法打开对话，请稍后重试。",
+    historyUnavailable: "该对话已不可用，已从本地历史中移除。",
+
     create: '新建嵌入渠道',
     channelsTitle: '嵌入渠道',
     disabled: '已停用',
