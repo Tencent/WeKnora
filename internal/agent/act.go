@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -213,7 +214,8 @@ func formatToolHint(name string, args map[string]any) string {
 	for _, v := range args {
 		if s, ok := v.(string); ok {
 			if len(s) > 40 {
-				s = s[:40] + "…"
+				// Cut at 40 bytes, dropping a multi-byte character the cut splits.
+				s = strings.ToValidUTF8(s[:40], "") + "…"
 			}
 			return fmt.Sprintf(`%s("%s")`, displayName, s)
 		}
