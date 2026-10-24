@@ -54,6 +54,45 @@ test('Enter outside a list and over a selection is left to the browser', () => {
   assert.equal(continueListOnEnter({ value: '- first', start: 2, end: 7 }), null)
 })
 
+for (const { name, before, item } of [
+  { name: 'backtick fence', before: '```sh', item: '- literal' },
+  { name: 'tilde fence', before: '~~~text', item: '1. literal' },
+  { name: 'empty task inside a fence', before: '```markdown', item: '- [ ] ' },
+  { name: 'indented fence', before: '   ```yaml', item: '  - literal' },
+  { name: 'shorter delimiter', before: '````md\n```', item: '- literal' },
+  { name: 'different delimiter', before: '```md\n~~~', item: '- literal' },
+  { name: 'delimiter with trailing text', before: '```md\n```not-a-close', item: '- literal' },
+  { name: 'CRLF fence', before: '```sh\r', item: '- literal' },
+]) {
+  test(`Enter preserves literal list text inside a ${name}`, () => {
+    const value = `${before}\n${item}`
+    assert.equal(continueListOnEnter(caret(value, value.length)), null)
+  })
+}
+
+for (const before of [
+  '```sh\n- code\n```',
+  '~~~text\n1. code\n~~~~  ',
+  '   ````md\n- code\n   `````',
+  '```sh\r\n- code\r\n```\r',
+  '    ```not-a-fence',
+  '```invalid`info',
+  '`inline code`',
+]) {
+  test(`Enter continues a real list after ${JSON.stringify(before)}`, () => {
+    const value = `${before}\n- item`
+    assert.deepEqual(continueListOnEnter(caret(value, value.length)), {
+      value: `${value}\n- `, start: value.length + 3, end: value.length + 3,
+    })
+  })
+}
+
+test('Enter inside a closed code block checks only lines before the caret', () => {
+  const value = '```sh\n- literal\n```\n- real list'
+  const at = value.indexOf('\n```', 6)
+  assert.equal(continueListOnEnter(caret(value, at)), null)
+})
+
 test('Tab indents a list line and Shift+Tab takes it back out', () => {
   const indented = indentOnTab(caret('- item', 6), false)
   assert.deepEqual(indented, { value: '  - item', start: 8, end: 8 })
@@ -159,4 +198,35 @@ test('Tab stays a focus move when it would not indent anything', () => {
 test('countContent reports characters and lines', () => {
   assert.deepEqual(countContent('one\ntwo'), { characters: 7, lines: 2 })
   assert.deepEqual(countContent(''), { characters: 0, lines: 0 })
+})
+
+for (const { name, opening, body, closing } of [
+  { name: 'bullet', opening: '- ```md', body: '  - literal', closing: '  ```' },
+  { name: 'ordered', opening: '10. ~~~md', body: '    1. literal', closing: '    ~~~' },
+  { name: 'nested', opening: '- outer\n  - ```md', body: '    - literal', closing: '    ```' },
+  { name: 'tabbed nested', opening: '- outer\n\t- ```md', body: '\t  - literal', closing: '\t  ```' },
+  { name: 'continuation', opening: '- outer\n  ```md', body: '  - literal', closing: '  ```' },
+  { name: 'literal list-prefixed delimiter', opening: '- ```md\n  - ```', body: '  - literal', closing: '  ```' },
+]) {
+  test(`Enter respects a fence in a ${name} list container`, () => {
+    const inside = `${opening}\n${body}`
+    assert.equal(continueListOnEnter(caret(inside, inside.length)), null)
+    const after = `${inside}\n${closing}\n- next`
+    assert.deepEqual(continueListOnEnter(caret(after, after.length)), {
+      value: `${after}\n- `, start: after.length + 3, end: after.length + 3,
+    })
+  })
+}
+
+test('leaving a list container ends its unclosed fence', () => {
+  const value = '- ```md\n  - literal\n- next'
+  assert.deepEqual(continueListOnEnter(caret(value, value.length)), {
+    value: `${value}\n- `, start: value.length + 3, end: value.length + 3,
+  })
+})
+
+test('Enter inside a closed list-prefixed fence checks only lines before the caret', () => {
+  const value = '- ```md\n  - literal\n  ```\n- next'
+  const at = value.indexOf('\n  ```')
+  assert.equal(continueListOnEnter(caret(value, at)), null)
 })
