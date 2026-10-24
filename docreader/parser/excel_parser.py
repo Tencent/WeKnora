@@ -194,6 +194,7 @@ def _stable_header_labels(values: List[object]) -> List[str]:
     from openpyxl.utils import get_column_letter
 
     labels: List[str] = []
+    used_labels: set[str] = set()
     counts: dict[str, int] = {}
     for index, value in enumerate(values, start=1):
         label = ""
@@ -203,8 +204,13 @@ def _stable_header_labels(values: List[object]) -> List[str]:
             label = get_column_letter(index)
 
         count = counts.get(label, 0) + 1
+        unique_label = label if count == 1 else f"{label}_{count}"
+        while unique_label in used_labels:
+            count += 1
+            unique_label = f"{label}_{count}"
         counts[label] = count
-        labels.append(label if count == 1 else f"{label}_{count}")
+        used_labels.add(unique_label)
+        labels.append(unique_label)
     return labels
 
 
