@@ -41,6 +41,14 @@ services:
       args:
         - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
         - WITH_ANYDOC=${WITH_ANYDOC:-1}
+        # Build metadata shown on the system-info page. start_all.sh injects
+        # these from git and the VERSION file; with a plain `docker compose
+        # build` leave them unset (version falls back to the VERSION file,
+        # the rest to "unknown").
+        - VERSION_ARG=${VERSION_ARG:-}
+        - COMMIT_ID_ARG=${COMMIT_ID_ARG:-}
+        - BUILD_TIME_ARG=${BUILD_TIME_ARG:-}
+        - GO_VERSION_ARG=${GO_VERSION_ARG:-}
     container_name: WeKnora-app
     ports:
       - "${APP_PORT:-8080}:8080"
