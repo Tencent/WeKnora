@@ -40,6 +40,8 @@ from docx.image.exceptions import (
     UnrecognizedImageError,
 )
 from docx.oxml.ns import qn
+from docx.table import Table
+from docx.text.run import Run
 from PIL import Image
 
 from docreader.config import CONFIG
@@ -51,6 +53,96 @@ logger = logging.getLogger(__name__)
 
 _W_P = qn("w:p")
 _W_TBL = qn("w:tbl")
+_W_R = qn("w:r")
+_W_SDT = qn("w:sdt")
+_W_SDT_PR = qn("w:sdtPr")
+_W_SDT_CONTENT = qn("w:sdtContent")
+_W_CUSTOM_XML = qn("w:customXml")
+
+# Inline wrappers whose runs Word shows as part of the paragraph. python-docx's
+# Paragraph.text reads only w:r and w:hyperlink children, so the text of a
+# tracked insertion (w:ins) or move destination (w:moveTo), a smart tag,
+# custom XML markup or a simple field was dropped, and that of an inline
+# content control (w:sdt, read through _sdt_content). Deletions (w:del,
+# w:moveFrom) hold their text in w:delText, not w:t, and stay out, which is
+# the document as it reads with changes accepted.
+_INLINE_TEXT_CONTAINERS = frozenset(
+    qn(tag)
+    for tag in (
+        "w:hyperlink",
+        "w:ins",
+        "w:moveTo",
+        "w:smartTag",
+        "w:customXml",
+        "w:fldSimple",
+    )
+)
+
+
+def _sdt_content(sdt: Any) -> Optional[Any]:
+    """The w:sdtContent of a content control that holds document text, or None.
+
+    A control still showing its placeholder ("Click or tap here to enter
+    text.") holds none, and a table of contents repeats the headings with
+    their page numbers, so both are left out as before.
+    """
+    props = sdt.find(_W_SDT_PR)
+    if props is not None:
+        if props.find(qn("w:showingPlcHdr")) is not None:
+            return None
+        gallery = props.find(f"{qn('w:docPartObj')}/{qn('w:docPartGallery')}")
+        if gallery is not None and gallery.get(qn("w:val")) == "Table of Contents":
+            return None
+    return sdt.find(_W_SDT_CONTENT)
+
+
+def _paragraph_text(p_element: Any) -> str:
+    """The text of a w:p as Word shows it, wrapped runs included."""
+    parts: List[str] = []
+
+    def walk(parent: Any) -> None:
+        for child in parent:
+            if child.tag == _W_R:
+                parts.append(Run(child, None).text)
+            elif child.tag == _W_SDT:
+                content = _sdt_content(child)
+                if content is not None:
+                    walk(content)
+            elif child.tag in _INLINE_TEXT_CONTAINERS:
+                walk(child)
+
+    walk(p_element)
+    return "".join(parts)
+
+
+def _block_children(container: Any):
+    """Yield the paragraphs and tables of a body or cell in document order.
+
+    A block content control (w:sdt) and block custom XML hold paragraphs and
+    tables of their own, which Word shows in place; they are opened instead of
+    skipped. Yields ``(element, direct)``, where ``direct`` is False for an
+    element found inside one of them.
+    """
+    for child in container:
+        if child.tag in (_W_P, _W_TBL):
+            yield child, True
+        elif child.tag == _W_SDT:
+            content = _sdt_content(child)
+            if content is not None:
+                for element, _ in _block_children(content):
+                    yield element, False
+        elif child.tag == _W_CUSTOM_XML:
+            for element, _ in _block_children(child):
+                yield element, False
+
+
+def _cell_text(cell: Any) -> str:
+    """A table cell's paragraph text, content controls and insertions included."""
+    return "\n".join(
+        _paragraph_text(element)
+        for element, _ in _block_children(cell._tc)
+        if element.tag == _W_P
+    )
 
 
 def _gfm_cell_text(text: Optional[str]) -> str:
@@ -67,7 +159,7 @@ def table_to_gfm_markdown(table: Any) -> str:
     """
     rows: List[List[str]] = []
     for row in table.rows:
-        cells = [_gfm_cell_text(cell.text) for cell in row.cells]
+        cells = [_gfm_cell_text(_cell_text(cell)) for cell in row.cells]
         if cells:
             rows.append(cells)
     if not rows:
@@ -1082,28 +1174,26 @@ class Docx:
         max_allowed = max(allowed) if allowed else -1
 
         parts: List[str] = []
+        # Counts the body's own paragraphs, the ones the page mapping indexes.
         para_i = 0
-        tbl_i = 0
-        paragraphs = self.doc.paragraphs
-        tables = self.doc.tables
 
-        for child in self.doc.element.body:
+        def in_page_range() -> bool:
+            return not allowed or min_allowed <= para_i <= max_allowed + 1
+
+        for child, direct in _block_children(self.doc.element.body):
             if child.tag == _W_P:
-                if para_i in allowed and para_i < len(paragraphs):
-                    text = (paragraphs[para_i].text or "").strip()
+                # Paragraphs inside a content control are not in the page
+                # mapping; they follow the range of the paragraphs around them.
+                include = para_i in allowed if direct else in_page_range()
+                if direct:
+                    para_i += 1
+                if include:
+                    text = _paragraph_text(child).strip()
                     if text:
                         parts.append(text)
-                para_i += 1
                 continue
-            if child.tag != _W_TBL:
-                continue
-            include_table = False
-            if not allowed:
-                include_table = True
-            elif min_allowed <= para_i <= max_allowed + 1:
-                include_table = True
-            if include_table and tbl_i < len(tables):
-                table = tables[tbl_i]
+            if in_page_range():
+                table = Table(child, self.doc._body)
                 if not (
                     len(table.rows) == 0
                     or all(len(row.cells) == 0 for row in table.rows)
@@ -1111,7 +1201,6 @@ class Docx:
                     markdown = table_to_gfm_markdown(table)
                     if markdown:
                         parts.append(markdown)
-            tbl_i += 1
 
         return "\n\n".join(parts)
 
