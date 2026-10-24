@@ -137,3 +137,16 @@ test('the root row shows the knowledge base total, not the root-level count', as
   assert.match(row, /kb-folder-row__count[^>]*>17</)
   assert.doesNotMatch(row, /kb-folder-row__count[^>]*>3</)
 })
+
+test('only editable folders can be dragged, never the knowledge base root', async () => {
+  const html = await renderTree({ tree: folderTree, selectedPath: '', canEdit: true })
+  assert.match(rowHtml(html, 'title="天诛渗透攻防"'), /draggable="true"/)
+  assert.match(rowHtml(html, 'is-root'), /draggable="false"/)
+})
+
+test('read-only, loading and moving trees cannot start another drag', async () => {
+  for (const state of [{ canEdit: false }, { canEdit: true, busy: true }, { canEdit: true, loading: true }]) {
+    const html = await renderTree({ tree: folderTree, selectedPath: '', ...state })
+    assert.doesNotMatch(html, /draggable="true"/)
+  }
+})

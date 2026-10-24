@@ -1,5 +1,5 @@
 <template>
-  <aside class="kb-folder-tree" :class="{ 'is-collapsed': collapsed }">
+  <aside ref="treeElement" class="kb-folder-tree" :class="{ 'is-collapsed': collapsed }" :aria-busy="busy" @keydown.esc="cancelDrag(); closeFolderMenu()">
     <div class="kb-folder-tree__header">
       <template v-if="!collapsed">
         <span class="kb-folder-tree__title">{{ t('knowledgeBase.folderTree.title') }}</span>
@@ -46,11 +46,20 @@
             'is-root': row.kind === 'root',
             'is-editable': canEdit && row.kind === 'folder',
             'is-menu-open': menuOpenPath === row.path,
+            'is-dragging': draggingPath === row.path,
+            'is-drop-target': dropTarget === row.path,
           }"
           :style="{ '--kb-folder-depth': row.depth }"
           :title="row.kind === 'root' ? t('knowledgeBase.folderTree.rootRowTip') : row.path"
           role="button"
           tabindex="0"
+          :data-folder-path="row.path"
+          :draggable="canEdit && !busy && !loading && row.kind === 'folder' && !isRenaming(row)"
+          @dragstart.stop="startDrag($event, row)"
+          @dragover="overFolder($event, row)"
+          @dragleave="leaveFolder($event, row)"
+          @drop="dropFolder($event, row)"
+          @dragend.stop="cancelDrag"
           @click="emit('select', row.path)"
           @keydown.enter.self="emit('select', row.path)"
           @keydown.space.prevent.self="emit('select', row.path)"
@@ -111,16 +120,34 @@
                   class="kb-folder-row__more"
                   :class="{ 'is-open': menuOpenPath === row.path }"
                   :aria-label="t('knowledgeBase.columnActions')"
+                  :aria-expanded="menuOpenPath === row.path"
+                  :data-folder-action-path="row.path"
+                  :disabled="busy"
                   @click.stop
                 >
                   <t-icon name="more" />
                 </button>
                 <template #content>
-                  <div class="popup-menu kb-folder-row__menu" @click.stop>
-                    <div class="popup-menu-item" @click="onFolderMenuRename(row)">
+                  <div :ref="setMenuElement" class="popup-menu kb-folder-row__menu" @click.stop @keydown.esc.stop.prevent="closeFolderMenu">
+                    <template v-if="movingPath === row.path">
+                      <button type="button" class="popup-menu-item folder-action" @click="showMoveTargets(null)">{{ t('common.back') }}</button>
+                      <p class="kb-folder-row__move-hint">{{ t('knowledgeBase.folderTree.moveHint') }}</p>
+                      <button v-for="target in moveTargets(row.path)" :key="target.path" type="button"
+                        class="popup-menu-item folder-action" @click="requestMove(row.path, target.path)">
+                        <t-icon name="folder" class="menu-icon" />
+                        <span>{{ target.path || rootLabel || t('knowledgeBase.folderTree.rootRow') }}</span>
+                      </button>
+                      <p v-if="!moveTargets(row.path).length" class="kb-folder-row__move-hint">{{ t('knowledgeBase.folderTree.noMoveTarget') }}</p>
+                    </template>
+                    <template v-else>
+                    <button type="button" class="popup-menu-item folder-action" @click="onFolderMenuRename(row)">
                       <t-icon name="edit" class="menu-icon" />
                       <span>{{ t('knowledgeBase.folderTree.rename') }}</span>
-                    </div>
+                    </button>
+                    <button type="button" class="popup-menu-item folder-action" @click="showMoveTargets(row.path)">
+                      <t-icon name="folder-move" class="menu-icon" /><span>{{ t('knowledgeBase.moveToFolder.action') }}</span>
+                    </button>
+                    </template>
                   </div>
                 </template>
               </t-popup>
@@ -130,13 +157,17 @@
         </div>
       </template>
     </div>
+    <p v-if="canEdit && !collapsed" class="kb-folder-tree__hint" role="status" aria-live="polite">
+      {{ moveStatus }}
+    </p>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { KnowledgeFolderTree } from '@/api/knowledge-base/index'
+import { folderDropDestination } from '../folderDrop'
 import {
   buildFolderRows,
   folderAncestorPaths,
@@ -153,16 +184,19 @@ const props = withDefaults(defineProps<{
   loading?: boolean
   collapsed?: boolean
   canEdit?: boolean
+  busy?: boolean
 }>(), {
   loading: false,
   collapsed: false,
   canEdit: false,
+  busy: false,
 })
 
 const emit = defineEmits<{
   select: [path: string]
   'update:collapsed': [collapsed: boolean]
   rename: [payload: { from: string; to: string }]
+  move: [payload: { from: string; to: string }]
 }>()
 
 const { t } = useI18n()
@@ -175,6 +209,108 @@ const renamingPath = ref<string | null>(null)
 const menuOpenPath = ref<string | null>(null)
 const renameValue = ref('')
 const renameInputRef = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
+const treeElement = ref<HTMLElement | null>(null)
+const menuElement = ref<HTMLElement | null>(null)
+const draggingPath = ref<string | null>(null)
+const dropTarget = ref<string | null>(null)
+const movingPath = ref<string | null>(null)
+const focusMenu = async () => {
+  await nextTick()
+  const menu = menuElement.value
+  // Popper reveals the teleported container asynchronously. Wait for an
+  // actual visible frame, not a fixed delay that races slow rendering.
+  const focusWhenVisible = (attempt = 0) => {
+    if (!menu?.isConnected || menuOpenPath.value === null) return
+    const button = menu.querySelector<HTMLButtonElement>('button')
+    if (button && getComputedStyle(button).visibility === 'visible') button.focus()
+    else if (attempt < 30) requestAnimationFrame(() => focusWhenVisible(attempt + 1))
+  }
+  requestAnimationFrame(() => focusWhenVisible())
+}
+// The popup content is teleported and mounts after visible-change fires.
+// Focus on mount, rather than racing that deferred render with a timer.
+const setMenuElement = (element: Element | ComponentPublicInstance | null) => {
+  const next = element instanceof HTMLElement ? element : null
+  if (next === menuElement.value) return
+  menuElement.value = next
+  if (next) void focusMenu()
+}
+const showMoveTargets = (path: string | null) => {
+  movingPath.value = path
+  void focusMenu()
+}
+const moveStatus = computed(() => {
+  if (props.busy) return t('knowledgeBase.folderTree.moving')
+  if (dropTarget.value !== null) return t('knowledgeBase.folderTree.dropTarget', {
+    folder: dropTarget.value || props.rootLabel || t('knowledgeBase.folderTree.rootRow'),
+  })
+  return t(draggingPath.value ? 'knowledgeBase.folderTree.dragHint' : 'knowledgeBase.folderTree.reparentHint')
+})
+const closeFolderMenu = async () => {
+  const path = menuOpenPath.value
+  menuOpenPath.value = null
+  movingPath.value = null
+  if (path === null) return
+  await nextTick()
+  Array.from(treeElement.value?.querySelectorAll<HTMLButtonElement>('.kb-folder-row__more') || [])
+    .find(button => button.dataset.folderActionPath === path)?.focus()
+}
+const allRows = computed(() => {
+  const paths = new Set<string>([''])
+  const visit = (nodes: KnowledgeFolderTree['folders']) => nodes.forEach(node => {
+    paths.add(node.path)
+    visit(node.children || [])
+  })
+  visit(props.tree?.folders || [])
+  return buildFolderRows(props.tree, paths)
+})
+const destination = (from: string, parent: string) => folderDropDestination(from, parent, allRows.value.map(row => row.path))
+const moveTargets = (from: string) => allRows.value.filter(row => destination(from, row.path) !== null)
+const cancelDrag = () => { draggingPath.value = null; dropTarget.value = null }
+const startDrag = (event: DragEvent, row: FolderRow) => {
+  if (!props.canEdit || props.busy || props.loading || row.kind !== 'folder' || isRenaming(row)) {
+    event.preventDefault()
+    return
+  }
+  draggingPath.value = row.path
+  menuOpenPath.value = null
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('application/x-weknora-folder', row.path)
+  }
+}
+const overFolder = (event: DragEvent, row: FolderRow) => {
+  if (!draggingPath.value) return // leave file uploads to the existing upload flow
+  event.stopPropagation()
+  const valid = props.canEdit && !props.busy && !props.loading && destination(draggingPath.value, row.path) !== null
+  dropTarget.value = valid ? row.path : null
+  if (event.dataTransfer) event.dataTransfer.dropEffect = valid ? 'move' : 'none'
+  if (valid) event.preventDefault()
+}
+const leaveFolder = (event: DragEvent, row: FolderRow) => {
+  if (!(event.currentTarget as HTMLElement).contains(event.relatedTarget as Node | null) && dropTarget.value === row.path) dropTarget.value = null
+}
+const requestMove = (from: string, parent: string) => {
+  if (!props.canEdit || props.busy || props.loading) return
+  const to = destination(from, parent)
+  if (to === null) return
+  menuOpenPath.value = null
+  movingPath.value = null
+  cancelDrag()
+  emit('move', { from, to })
+}
+const dropFolder = (event: DragEvent, row: FolderRow) => {
+  if (!draggingPath.value) return
+  event.preventDefault()
+  event.stopPropagation()
+  requestMove(draggingPath.value, row.path)
+  cancelDrag()
+}
+watch(() => [props.tree, props.canEdit, props.busy, props.loading], () => {
+  cancelDrag()
+  menuOpenPath.value = null
+  movingPath.value = null
+})
 
 const rows = computed(() => buildFolderRows(props.tree, expanded.value))
 
@@ -201,7 +337,10 @@ const startRename = async (row: FolderRow) => {
 }
 
 const onFolderMenuVisible = (path: string, visible: boolean) => {
+  if (visible && (!props.canEdit || props.busy || props.loading)) return
+  movingPath.value = null
   menuOpenPath.value = visible ? path : null
+  if (visible) void focusMenu()
 }
 
 const onFolderMenuRename = async (row: FolderRow) => {
@@ -489,7 +628,19 @@ watch(
 
 .kb-folder-row__menu {
   min-width: 140px;
+  max-width: 280px;
+  max-height: 320px;
+  overflow: auto;
 }
+.folder-action { border: 0; background: transparent; width: 100%; text-align: left; font: inherit; }
+.folder-action span { overflow-wrap: anywhere; white-space: normal; }
+.folder-action:focus-visible, .kb-folder-row__more:focus-visible { outline: 2px solid var(--app-focus-border); outline-offset: -2px; }
+.kb-folder-row__move-hint, .kb-folder-tree__hint { margin: 6px 4px; font-size: var(--app-text-xs); line-height: 1.6; color: var(--td-text-color-secondary); }
+.kb-folder-row.is-dragging { opacity: .55; }
+.kb-folder-row.is-drop-target { background: var(--app-selection-bg); outline: 2px dashed var(--td-brand-color); outline-offset: -2px; }
+.kb-folder-row[draggable="true"] { cursor: grab; }
+.kb-folder-row__more:disabled { opacity: .4; cursor: wait; }
+@media (hover: none) { .kb-folder-row.is-editable .kb-folder-row__more { opacity: 1; pointer-events: auto; } }
 
 .kb-folder-row__rename {
   flex: 1;

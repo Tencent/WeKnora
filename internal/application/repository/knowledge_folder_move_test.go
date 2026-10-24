@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -9,6 +10,20 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestRenameKnowledgeFolderRejectsTruncatedSubtreeAtomically(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	kbID := uuid.New().String()
+	parent := insertKnowledgeInFolder(t, db, 1, kbID, "docs", "intro.md")
+	child := insertKnowledgeInFolder(t, db, 1, kbID, "docs/spec/v2", "design.md")
+	target := strings.Repeat("level/", 15) + "docs"
+	affected, err := repo.RenameKnowledgeFolderPath(context.Background(), 1, kbID, "docs", target)
+	require.Error(t, err)
+	assert.Zero(t, affected)
+	assert.Equal(t, "docs", folderPathOf(t, db, parent))
+	assert.Equal(t, "docs/spec/v2", folderPathOf(t, db, child))
+}
 
 // folderPathOf reads a row's stored folder_path directly so the assertions do
 // not depend on the list filters.

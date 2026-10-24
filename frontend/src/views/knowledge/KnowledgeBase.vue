@@ -788,6 +788,7 @@ const writeStoredFlag = (key: string, value: boolean) => {
 };
 const folderTree = ref<KnowledgeFolderTree | null>(null);
 const folderTreeLoading = ref(false);
+const folderMoving = ref(false);
 // The folder being browsed; ROOT_FOLDER_PATH ('') is the knowledge base top
 // level, a real node of the tree rather than a separate mode.
 const selectedFolderPath = ref<string>(ROOT_FOLDER_PATH);
@@ -986,21 +987,25 @@ const moveKnowledgeIntoFolder = async (ids: string[], folderPath: string) => {
   }
 };
 
-const handleFolderRename = async ({ from, to }: { from: string; to: string }) => {
-  if (!kbId.value || !to || from === to) return;
+const handleFolderRename = async ({ from, to }: { from: string; to: string }, moving = false) => {
+  if (!canEdit.value || folderMoving.value || !kbId.value || !to || from === to) return;
   if (!canMoveFolderTo(from, to)) {
     MessagePlugin.warning(t('knowledgeBase.folderTree.renameInvalid'));
     return;
   }
+  const knowledgeBaseID = kbId.value;
+  const failureMessage = t(moving ? 'knowledgeBase.folderTree.moveFailed' : 'knowledgeBase.folderTree.renameFailed');
+  folderMoving.value = true;
   try {
-    const res: any = await renameKnowledgeFolder(kbId.value, from, to);
+    const res: any = await renameKnowledgeFolder(knowledgeBaseID, from, to);
+    if (kbId.value !== knowledgeBaseID) return;
     const movedCount = res?.data?.moved_count ?? 0;
     if (movedCount === 0) {
-      MessagePlugin.warning(t('knowledgeBase.folderTree.renameFailed'));
-      await loadFolderTree(kbId.value);
+      MessagePlugin.warning(failureMessage);
+      await loadFolderTree(knowledgeBaseID);
       return;
     }
-    MessagePlugin.success(t('knowledgeBase.folderTree.renameSuccess'));
+    MessagePlugin.success(t(moving ? 'knowledgeBase.folderTree.moveSuccess' : 'knowledgeBase.folderTree.renameSuccess'));
     // Follow the folder to its new path so the user stays where they were.
     if (selectedFolderPath.value === from) {
       selectedFolderPath.value = to;
@@ -1008,10 +1013,13 @@ const handleFolderRename = async ({ from, to }: { from: string; to: string }) =>
       selectedFolderPath.value = to + selectedFolderPath.value.slice(from.length);
     }
     resetPage();
-    await loadKnowledgeFiles(kbId.value);
-    await loadFolderTree(kbId.value);
+    await loadKnowledgeFiles(knowledgeBaseID);
+    if (kbId.value !== knowledgeBaseID) return;
+    await loadFolderTree(knowledgeBaseID);
   } catch (error: any) {
-    MessagePlugin.error(error?.message || t('knowledgeBase.folderTree.renameFailed'));
+    if (kbId.value === knowledgeBaseID) MessagePlugin.error(error?.message || failureMessage);
+  } finally {
+    folderMoving.value = false;
   }
 };
 
@@ -2471,9 +2479,9 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
       <template v-if="activeKbTab === 'documents' || (!isWiki && activeKbTab !== 'gallery')">
         <div class="knowledge-main">
           <KbFolderTree v-if="showFolderTree && !folderTreeCollapsed" :tree="folderTree" :selected-path="selectedFolderPath"
-            :loading="folderTreeLoading" :can-edit="canEdit" :root-label="kbInfo?.name"
+            :loading="folderTreeLoading" :busy="folderMoving" :can-edit="canEdit" :root-label="kbInfo?.name"
             @select="handleFolderSelect" @update:collapsed="handleFolderTreeCollapsedChange"
-            @rename="handleFolderRename" />
+            @rename="handleFolderRename" @move="handleFolderRename($event, true)" />
           <div class="tag-content">
             <div class="doc-card-area">
               <div class="doc-filter-bar">
