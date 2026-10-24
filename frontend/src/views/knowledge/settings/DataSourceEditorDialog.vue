@@ -678,6 +678,37 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    // Feishu Lingo (词典): dictionary terms are synced as Markdown knowledge.
+    // The app must also be added to the Lingo admin console to read entries.
+    type: 'feishu_lingo',
+    available: true,
+    docUrl: 'https://open.feishu.cn/app',
+    permissionDocUrl: 'https://open.feishu.cn/document/lingo-v1/overview',
+    permissionPageUrl: 'https://open.feishu.cn/app',
+    // TODO(confirm): keep this in sync with the scope key shown in the Feishu
+    // developer console; the connector only needs the read-only Lingo scope.
+    requiredPermissions: ['lingo:entity:readonly'],
+    fields: [
+      { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.feishu.cn', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
+  {
+    // Lark Lingo: international counterpart of feishu_lingo.
+    type: 'lark_lingo',
+    available: true,
+    docUrl: 'https://open.larksuite.com/app',
+    permissionDocUrl: 'https://open.larksuite.com/document/lingo-v1/overview',
+    permissionPageUrl: 'https://open.larksuite.com/app',
+    requiredPermissions: ['lingo:entity:readonly'],
+    fields: [
+      { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.larksuite.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
+  {
     type: 'notion',
     available: true,
     docUrl: 'https://www.notion.so/my-integrations',

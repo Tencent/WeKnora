@@ -66,6 +66,7 @@ import (
 	dingtalkConnector "github.com/Tencent/WeKnora/internal/datasource/connector/dingtalk"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/drive"
+	lingoConnector "github.com/Tencent/WeKnora/internal/datasource/connector/feishu/lingo"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/wiki"
 	gitlabConnector "github.com/Tencent/WeKnora/internal/datasource/connector/gitlab"
 	imaConnector "github.com/Tencent/WeKnora/internal/datasource/connector/ima"
@@ -2084,6 +2085,14 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	}
 	if err := registry.Register(drive.NewDriveConnector(core.RegionLarkDrive)); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register lark_drive connector: %w", err))
+	}
+	// Feishu/Lark Lingo (词典): same app credentials as the wiki connector,
+	// separate connector type so the registry dispatches to the Lingo package.
+	if err := registry.Register(lingoConnector.NewConnector(core.RegionFeishuLingo)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register feishu_lingo connector: %w", err))
+	}
+	if err := registry.Register(lingoConnector.NewConnector(core.RegionLarkLingo)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register lark_lingo connector: %w", err))
 	}
 	if err := registry.Register(notionConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register notion connector: %w", err))

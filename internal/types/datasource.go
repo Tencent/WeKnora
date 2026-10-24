@@ -43,6 +43,12 @@ const (
 	ConnectorTypeGitLab      = "gitlab"
 	ConnectorTypeIMA         = "ima"
 	ConnectorTypeSeafile     = "seafile"
+	// ConnectorTypeFeishuLingo syncs Feishu Lingo (飞书词典) terms. It shares
+	// the Feishu app credentials/token flow but has its own connector type so
+	// the registry dispatches to the Lingo connector.
+	ConnectorTypeFeishuLingo = "feishu_lingo"
+	// ConnectorTypeLarkLingo is the Lark (international) counterpart.
+	ConnectorTypeLarkLingo = "lark_lingo"
 
 	// Sync modes
 	SyncModeIncremental = "incremental"
