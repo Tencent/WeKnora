@@ -7994,6 +7994,7 @@ export default {
     daysAgo: '{n}d ago',
     syncError: {
       dingtalk_document_failed: 'DingTalk document could not be read; check access and retry the sync.',
+      dingtalk_document_too_large: 'DingTalk file exceeds the 64 MiB download limit; skipped for this sync. Compress or split the file.',
       dingtalk_resource_failed: 'DingTalk resource is unavailable; check access and the saved selection, then retry.',
       deletion_lookup_failed: 'Failed to look up the item before deletion; see server logs',
       deletion_failed: 'Deletion failed; see server logs',

@@ -1461,6 +1461,7 @@ export default {
     },
     syncError: {
       dingtalk_document_failed: '無法讀取釘釘文件，請檢查存取權限後重試同步。',
+      dingtalk_document_too_large: '釘釘檔案超過 64 MiB 下載上限，本次已略過，請壓縮或分割後再同步。',
       dingtalk_resource_failed: '釘釘資源不可用，請檢查存取權限和已選資源後重試。',
       deletion_lookup_failed: '刪除前尋找文件失敗，請查看伺服器日誌',
       deletion_failed: '刪除失敗，請查看伺服器日誌',
