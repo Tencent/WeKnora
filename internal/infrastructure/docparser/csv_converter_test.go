@@ -50,6 +50,46 @@ func TestCSVToMarkdown(t *testing.T) {
 			want: "| name | qty |\n| --- | --- |\n| pen | 2 |\n",
 		},
 		{
+			// Excel writes a semicolon where the comma is the decimal separator.
+			// Read with commas, the file was one column, cut at every decimal comma.
+			name: "semicolon separated with decimal commas",
+			in:   "Produkt;Preis;Menge\nApfel;3,50;2\nBirne;2;10\n",
+			want: "| Produkt | Preis | Menge |\n| --- | --- | --- |\n| Apfel | 3,50 | 2 |\n| Birne | 2 | 10 |\n",
+		},
+		{
+			// Read with commas, every data row splits in two while the header
+			// stays whole, so the comma cannot be the separator.
+			name: "semicolon separated, a decimal comma on every row",
+			in:   "Produkt;Preis\nApfel;3,50\nBirne;2,10\n",
+			want: "| Produkt | Preis |\n| --- | --- |\n| Apfel | 3,50 |\n| Birne | 2,10 |\n",
+		},
+		{
+			name: "tab separated",
+			in:   "name\tqty\npen\t2\n",
+			want: "| name | qty |\n| --- | --- |\n| pen | 2 |\n",
+		},
+		{
+			name: "pipe separated",
+			in:   "name|qty\npen|2\n",
+			want: "| name | qty |\n| --- | --- |\n| pen | 2 |\n",
+		},
+		{
+			name: "semicolon inside a comma file stays in its cell",
+			in:   "name,note\npen,\"a;b\"\nink,c\n",
+			want: "| name | note |\n| --- | --- |\n| pen | a;b |\n| ink | c |\n",
+		},
+		{
+			// Both separators give two fields on every line; the comma wins.
+			name: "comma wins a tie",
+			in:   "a,b;c\nd,e;f\n",
+			want: "| a | b;c |\n| --- | --- |\n| d | e;f |\n",
+		},
+		{
+			name: "single column",
+			in:   "name\npen\n",
+			want: "| name |\n| --- |\n| pen |\n",
+		},
+		{
 			name: "empty file",
 			in:   "",
 			want: "",
