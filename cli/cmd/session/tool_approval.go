@@ -199,7 +199,16 @@ func runResolve(ctx context.Context, opts *ResolveOptions, fopts *cmdutil.Format
 		return err
 	}
 	decision := decisionOf(opts.Reject)
+	// The retry argv is the exact argv that would proceed (AGENTS.md exit-10
+	// contract): the decision-relevant flags belong in it, or the envelope
+	// advertises an approval of the original arguments.
 	retryCmd := append([]string{"weknora", "session", "tool-approval", "resolve", opts.PendingID}, retryArgOf(opts.Reject)...)
+	if opts.ModifiedArgs != "" {
+		retryCmd = append(retryCmd, "--modified-args", opts.ModifiedArgs)
+	}
+	if opts.Reason != "" {
+		retryCmd = append(retryCmd, "--reason", opts.Reason)
+	}
 	retryCmd = append(retryCmd, "-y")
 	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), decision, "tool call", opts.PendingID, "session.tool_approval.resolve", retryCmd); err != nil {
 		return err
