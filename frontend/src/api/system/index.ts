@@ -205,6 +205,8 @@ export interface StorageEngineConfig {
     path_prefix: string
   }
   oss: {
+    auth_type?: 'access_key' | 'ecs_ram_role'
+    role_name?: string
     endpoint: string
     region: string
     access_key: string

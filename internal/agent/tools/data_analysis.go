@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -1011,6 +1012,9 @@ func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, k
 		resolvedSvc, resolvedProvider, err := t.storageResolver.ResolveFileService(
 			ctx, tenant, backendID, provider, t.localBaseDir,
 		)
+		if errors.Is(err, types.ErrOSSRoleRequiresEnvironment) {
+			return filesvc.NewUnavailableFileService(err)
+		}
 		if err == nil {
 			logger.Infof(ctx, "[Tool][DataAnalysis][storage] resolved storage backend: session_id=%s knowledge_id=%s kb_id=%s backend_id=%s provider=%s",
 				t.sessionID, knowledge.ID, kbID, backendID, resolvedProvider)
@@ -1038,6 +1042,9 @@ func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, k
 	baseDir := t.localBaseDir
 
 	resolvedSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, storageConfig, baseDir)
+	if errors.Is(err, types.ErrOSSRoleRequiresEnvironment) {
+		return filesvc.NewUnavailableFileService(err)
+	}
 	if err != nil {
 		logger.Warnf(ctx, "[Tool][DataAnalysis][storage] create file service failed, fallback default: session_id=%s knowledge_id=%s kb_id=%s provider=%s err=%v",
 			t.sessionID, knowledge.ID, kbID, provider, err)

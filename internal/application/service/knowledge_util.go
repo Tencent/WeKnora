@@ -355,6 +355,9 @@ func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.Kno
 	if s.storageResolver != nil && tenant != nil {
 		baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
 		svc, resolvedProvider, err := s.storageResolver.ResolveFileService(ctx, tenant, backendID, provider, baseDir)
+		if errors.Is(err, types.ErrOSSRoleRequiresEnvironment) {
+			return filesvc.NewUnavailableFileService(err)
+		}
 		if err == nil && svc != nil {
 			logger.Infof(ctx, "[storage] resolveFileService selected instance: kb=%s backend=%s provider=%s", kb.ID, backendID, resolvedProvider)
 			return svc
@@ -376,6 +379,9 @@ func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.Kno
 	sec := tenant.StorageEngineConfig
 	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
 	svc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, sec, baseDir)
+	if errors.Is(err, types.ErrOSSRoleRequiresEnvironment) {
+		return filesvc.NewUnavailableFileService(err)
+	}
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create %s file service from tenant config: %v, falling back to default", provider, err)
 		return s.fileSvc
@@ -401,6 +407,9 @@ func (s *knowledgeService) resolveFileServiceForPath(ctx context.Context, kb *ty
 				if resolved, _, resolveErr := s.storageResolver.ResolveFileService(ctx, ownerTenant, resource.StorageBackendID, resource.Provider, baseDir); resolveErr == nil && resolved != nil {
 					return resolved
 				} else if resolveErr != nil {
+					if errors.Is(resolveErr, types.ErrOSSRoleRequiresEnvironment) {
+						return filesvc.NewUnavailableFileService(resolveErr)
+					}
 					logger.Warnf(ctx, "[storage] failed to resolve resource owner backend: resource=%s tenant=%d err=%v", resource.Handle, resource.TenantID, resolveErr)
 				}
 			}
@@ -415,11 +424,17 @@ func (s *knowledgeService) resolveFileServiceForPath(ctx context.Context, kb *ty
 			if resolved, _, err := s.storageResolver.ResolveFileService(ctx, tenant, backendID, provider, baseDir); err == nil {
 				return resolved
 			} else {
+				if errors.Is(err, types.ErrOSSRoleRequiresEnvironment) {
+					return filesvc.NewUnavailableFileService(err)
+				}
 				logger.Warnf(ctx, "[storage] failed to resolve backend from file path: backend=%s err=%v", backendID, err)
 			}
 		}
 	}
 	svc := s.resolveFileService(ctx, kb)
+	if filesvc.IsUnavailableFileService(svc) {
+		return svc
+	}
 	if filePath == "" {
 		return svc
 	}

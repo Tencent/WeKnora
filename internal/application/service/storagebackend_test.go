@@ -79,3 +79,42 @@ func TestResolveFileServiceFallsBackToEnvWhenWorkspaceHasNoBackend(t *testing.T)
 	assert.Equal(t, "local", provider)
 	require.NotNil(t, svc)
 }
+
+func TestOSSRoleTenantOperationsDeniedBeforeConnectivity(t *testing.T) {
+	t.Setenv("STORAGE_ALLOW_LIST", "")
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.StorageBackend{}))
+	repo := repository.NewStorageBackendRepository(db)
+	svc := service.NewStorageBackendService(repo, db)
+	config := types.StorageBackendConfig{
+		Endpoint: "https://oss-cn-beijing.aliyuncs.com", Region: "cn-beijing", BucketName: "system-bucket",
+		AuthType: types.OSSAuthECSRAMRole, RoleName: "system-role",
+	}
+	backend := &types.StorageBackend{
+		TenantID: 7, Name: "tenant role", Provider: "oss", Config: config,
+		Source: types.StorageBackendSourceEnv,
+	} // A forged source must not survive Create.
+	require.ErrorIs(t, svc.Create(context.Background(), backend), types.ErrOSSRoleRequiresEnvironment)
+	require.Equal(t, types.StorageBackendSourceUser, backend.Source)
+	require.ErrorIs(t, svc.Test(context.Background(), backend), types.ErrOSSRoleRequiresEnvironment)
+	// Persist an old tenant-controlled role row directly to exercise runtime checks.
+	require.NoError(t, repo.Create(context.Background(), backend))
+	_, _, err = svc.ResolveFileService(context.Background(), &types.Tenant{ID: 7}, backend.ID, "oss", "")
+	require.ErrorIs(t, err, types.ErrOSSRoleRequiresEnvironment)
+	backend.Source = types.StorageBackendSourceEnv
+	require.ErrorIs(t, svc.Update(context.Background(), backend), types.ErrOSSRoleRequiresEnvironment)
+	stored, err := repo.GetByID(context.Background(), 7, backend.ID)
+	require.NoError(t, err)
+	require.Equal(t, types.StorageBackendSourceUser, stored.Source)
+	require.NoError(t, db.Model(stored).Update("status", types.StorageBackendStatusDisabled).Error)
+	_, _, err = svc.ResolveFileService(context.Background(), &types.Tenant{ID: 7}, backend.ID, "oss", "")
+	require.ErrorIs(t, err, types.ErrOSSRoleRequiresEnvironment, "disabled rows must not turn a denial into a fallback")
+
+	tenant := &types.Tenant{ID: 7, StorageEngineConfig: backend.ToStorageEngineConfig()}
+	_, _, err = svc.ResolveFileService(context.Background(), tenant, "", "oss", "")
+	require.ErrorIs(t, err, types.ErrOSSRoleRequiresEnvironment)
+	tenantService := service.NewTenantService(repository.NewTenantRepository(db), repo)
+	_, err = tenantService.UpdateTenant(context.Background(), tenant)
+	require.ErrorIs(t, err, types.ErrOSSRoleRequiresEnvironment)
+}
