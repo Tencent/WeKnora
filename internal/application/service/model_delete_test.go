@@ -157,6 +157,10 @@ func (s *stubModelRepoForDelete) ClearDefaultByType(context.Context, uint, types
 	return nil
 }
 
+func (s *stubModelRepoForDelete) SetDefault(context.Context, uint64, types.ModelType, string) error {
+	return nil
+}
+
 func TestDeleteModel_RejectsWhenReferenced(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 	modelID := "model-in-use"

@@ -24087,6 +24087,41 @@ paths:
       summary: 检查 WeKnoraCloud 凭证状态
       tags:
       - WeKnoraCloud
+  /models/{id}/default:
+    put:
+      description: 按模型类型设置当前空间的默认模型，不修改内置模型或已有资源的模型绑定。
+      parameters:
+      - description: 模型ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 默认模型
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.ModelResponse'
+              type: object
+        "400":
+          description: 模型不可用
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 模型不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 设置空间默认模型
+      tags:
+      - 模型管理
   /notifications:
     get:
       parameters:

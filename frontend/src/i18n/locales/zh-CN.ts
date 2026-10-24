@@ -3306,6 +3306,7 @@ export default {
   modelSettings: {
     title: '模型配置',
     description: '管理不同类型的 AI 模型，支持 Ollama 本地模型和远程 API',
+    defaultHint: '当前空间同类模型的默认选择，用于新建配置和未指定模型的功能；已有模型绑定保持不变。',
     copySuffix: ' 副本',
     builtinTag: '内置',
     confirmDelete: '确定删除模型「{name}」吗？',
@@ -3397,6 +3398,8 @@ export default {
       viewGuide: '查看内置模型管理指南'
     },
     toasts: {
+      defaultUpdated: '默认模型已更新',
+      defaultFailed: '设置默认模型失败',
       nameRequired: '模型名称不能为空',
       nameTooLong: '模型名称不能超过100个字符',
       displayNameTooLong: '显示名称不能超过100个字符',
@@ -3446,6 +3449,7 @@ export default {
       custom: '自定义'
     },
     actions: {
+      setDefault: '设为默认',
       addModel: '添加模型',
       debugModel: '模型测试'
     },

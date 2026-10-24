@@ -53,6 +53,10 @@ type stubModelService struct {
 	availableModels []*types.Model
 }
 
+func (s *stubModelService) SetDefaultModel(context.Context, string) (*types.Model, error) {
+	panic("unexpected default model change")
+}
+
 func TestEmitKnowledgeReferencesEventIgnoresCitationOutputSetting(t *testing.T) {
 	bus := event.NewEventBus()
 	var emitted []event.Event

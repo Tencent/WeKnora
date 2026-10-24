@@ -7,6 +7,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // modelRepository implements the model repository interface
@@ -51,15 +52,54 @@ func (r *modelRepository) List(
 		query = query.Where("type = ?", modelType)
 	}
 
-	if source != "" {
-		query = query.Where("source = ?", source)
-	}
-
-	if err := query.Find(&models).Error; err != nil {
+	if err := query.Order("created_at ASC NULLS LAST").Order("id ASC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 
+	var preferences []types.ModelDefault
+	if err := r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Find(&preferences).Error; err != nil {
+		return nil, err
+	}
+	preferred := make(map[types.ModelType]string, len(preferences))
+	for _, preference := range preferences {
+		preferred[preference.Type] = preference.ModelID
+	}
+	// Historical choices are backfilled by the migration. Runtime selection
+	// uses only the workspace preference, falling back to the first active model
+	// when that preference is absent or unavailable.
+	selected := make(map[types.ModelType]*types.Model)
+	for _, model := range models {
+		if model.Status != types.ModelStatusActive {
+			continue
+		}
+		if selected[model.Type] == nil || preferred[model.Type] == model.ID {
+			selected[model.Type] = model
+		}
+	}
+	for _, model := range models {
+		model.IsDefault = selected[model.Type] == model
+	}
+	// Resolve against all sources before filtering, so a source-specific list
+	// cannot label another model as the workspace default.
+	if source != "" {
+		filtered := make([]*types.Model, 0, len(models))
+		for _, model := range models {
+			if model.Source == source {
+				filtered = append(filtered, model)
+			}
+		}
+		models = filtered
+	}
+
 	return models, nil
+}
+
+func (r *modelRepository) SetDefault(ctx context.Context, tenantID uint64, modelType types.ModelType, id string) error {
+	preference := types.ModelDefault{TenantID: tenantID, Type: modelType, ModelID: id}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "tenant_id"}, {Name: "model_type"}},
+		DoUpdates: clause.AssignmentColumns([]string{"model_id"}),
+	}).Create(&preference).Error
 }
 
 // Update updates a model
