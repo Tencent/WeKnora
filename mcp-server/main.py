@@ -73,8 +73,9 @@ def parse_arguments():
   
 环境变量:
   WEKNORA_BASE_URL       WeKnora API 基础 URL (默认: http://localhost:8080/api/v1)
-  WEKNORA_API_KEY        WeKnora API 密钥
-  MCP_SERVER_AUTH_TOKEN  SSE/HTTP 传输必填，客户端通过 Authorization: Bearer 传递
+  WEKNORA_API_KEY        WeKnora API 密钥 (未携带个人 key 时的回落身份)
+  MCP_REQUIRE_USER_KEY   设为 1 时, 无个人 key 的网络请求将被拒绝
+  MCP_USER_API_KEY_HEADER 个人 key 的自定义入站头名 (默认: X-WeKnora-Key)
         """,
     )
 
