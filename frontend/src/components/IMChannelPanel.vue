@@ -208,8 +208,9 @@
 
           <div class="form-item">
             <label class="form-label">{{ $t('agentEditor.im.replyLanguage') }}</label>
-            <t-select v-model="formData.locale" :options="localeOptions" />
-            <p class="form-desc">{{ $t('agentEditor.im.replyLanguageHint') }}</p>
+            <t-select v-model="formData.language_mode" :options="languageModeOptions" />
+            <t-select v-if="formData.language_mode === 'fixed'" v-model="formData.locale" :options="localeOptions" />
+            <p class="form-desc">{{ formData.language_mode === 'follow_user' ? $t('agentEditor.im.replyLanguageFollowHint') : $t('agentEditor.im.replyLanguageHint') }}</p>
           </div>
         </section>
 
@@ -691,6 +692,11 @@ const localeOptions = computed(() => ([
   { value: 'ru-RU' as IMLocale, label: 'Русский' },
 ]));
 
+const languageModeOptions = computed(() => ([
+  { value: 'fixed', label: t('agentEditor.im.replyLanguageFixed') },
+  { value: 'follow_user', label: t('agentEditor.im.replyLanguageFollowUser') },
+]));
+
 // Feishu and Lark are the same product on separate clouds, so each has its own
 // open platform console. Bots must be created on the one matching the channel.
 const openPlatformConsole = computed(() =>
@@ -748,6 +754,7 @@ const formData = ref({
   mode: 'websocket' as 'webhook' | 'websocket' | 'longpoll',
   output_mode: 'stream' as 'stream' | 'full',
   locale: '' as IMLocale,
+  language_mode: 'fixed' as 'fixed' | 'follow_user',
   session_mode: 'user' as 'user' | 'thread',
   knowledge_base_id: '',
   credentials: defaultCredentials(),
@@ -1004,6 +1011,7 @@ async function editChannel(channel: IMChannel | IMChannelOverview) {
     mode: fullChannel.mode,
     output_mode: fullChannel.output_mode,
     locale: fullChannel.locale || '',
+    language_mode: fullChannel.language_mode || 'fixed',
     session_mode: fullChannel.session_mode || 'user',
     knowledge_base_id: fullChannel.knowledge_base_id || '',
     credentials: { ...fullChannel.credentials },
@@ -1029,6 +1037,7 @@ function resetForm() {
     mode: 'websocket',
     output_mode: 'stream',
     locale: '',
+    language_mode: 'fixed',
     session_mode: 'user',
     knowledge_base_id: '',
     credentials: defaultCredentials(),
@@ -1059,6 +1068,7 @@ async function handleSave() {
         mode: formData.value.mode,
         output_mode: formData.value.output_mode,
         locale: formData.value.locale,
+        language_mode: formData.value.language_mode,
         session_mode: formData.value.session_mode,
         knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
         credentials: formData.value.credentials,
@@ -1078,6 +1088,7 @@ async function handleSave() {
         mode: formData.value.mode,
         output_mode: formData.value.output_mode,
         locale: formData.value.locale,
+        language_mode: formData.value.language_mode,
         session_mode: formData.value.session_mode,
         knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
         credentials: formData.value.credentials,
