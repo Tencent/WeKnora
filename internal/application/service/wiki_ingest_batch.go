@@ -254,6 +254,7 @@ func (s *wikiIngestService) newWikiBatchContext(
 		ExtractionGranularity:  granularity,
 		ContentInstructions:    contentInstructions,
 		ExtractionInstructions: extractionInstructions,
+		MaxContentSegments:     wikiConfig.IngestMaxContentSegmentsOrDefault(defaultWikiContentSegments),
 	}
 }
 
@@ -1374,21 +1375,27 @@ func (s *wikiIngestService) mapOneDocument(
 		return nil, nil, nil
 	}
 
-	content := appendScannedPageText(
+	fullContent := appendScannedPageText(
 		reconstructEnrichedContent(ctx, s.chunkRepo, payload.TenantID, chunks),
 		chunks,
 	)
-	rawRuneCount := len([]rune(content))
-	if len([]rune(content)) > maxContentForWiki {
-		content = string([]rune(content)[:maxContentForWiki])
-	}
-	logger.Infof(ctx, "wiki ingest: doc %s chunks=%d content_len(raw=%d,truncated=%d)", knowledgeID, len(chunks), rawRuneCount, len([]rune(content)))
+	rawRuneCount := utf8.RuneCountInString(fullContent)
+	// Pass 0 reads the document window by window so candidates past the
+	// first maxContentForWiki runes are not lost. Single-call prompts
+	// (summary, legacy fallback, retraction) get a bounded head/middle/tail
+	// sample instead of a head-only cut.
+	segments, segmentsTruncated := splitWikiContent(
+		fullContent, maxContentForWiki, wikiContentSegmentOverlap, batchCtx.contentSegmentLimit(),
+	)
+	content := sampleLongContent(fullContent, maxContentForWiki)
+	logger.Infof(ctx, "wiki ingest: doc %s chunks=%d content_len(raw=%d,sampled=%d) segments=%d segments_truncated=%v",
+		knowledgeID, len(chunks), rawRuneCount, utf8.RuneCountInString(content), len(segments), segmentsTruncated)
 
 	// Refuse to run LLM-based extraction when the document carries no real
 	// text — e.g. a scanned PDF whose pages were converted to images but where
 	// VLM OCR produced nothing usable. Without this guard the LLM would have
 	// only image markup left and would happily fabricate entities/concepts.
-	if !hasSufficientTextContent(content) {
+	if !hasSufficientTextContent(fullContent) {
 		logger.Warnf(ctx,
 			"wiki ingest: doc %s has insufficient text content after stripping image markup (raw_len=%d), skipping LLM extraction",
 			knowledgeID, rawRuneCount,
@@ -1427,13 +1434,19 @@ func (s *wikiIngestService) mapOneDocument(
 		extractedConcepts []extractedItem
 		slugItems         map[string]extractedItem
 		pass0Failed       bool
+		segmentsFailed    int
 	)
-	logger.Infof(ctx, "wiki ingest: pass 0 — extracting candidate slugs for %s", knowledgeID)
+	logger.Infof(ctx, "wiki ingest: pass 0 — extracting candidate slugs for %s (%d segments)",
+		knowledgeID, len(segments))
 	extractSpan := s.tracker().BeginSubSpan(ctx, wikiSpan, "postprocess.wiki.extract", types.SpanKindSubSpan, types.JSONMap{
-		"content_chars": utf8.RuneCountInString(content),
-		"old_pages":     len(oldPageSlugs),
+		"content_chars":      rawRuneCount,
+		"segments":           len(segments),
+		"segments_truncated": segmentsTruncated,
+		"old_pages":          len(oldPageSlugs),
 	})
-	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
+	extractedEntities, extractedConcepts, slugItems, segmentsFailed, err = s.extractCandidateSlugs(
+		ctx, chatModel, payload.KnowledgeBaseID, segments, lang, oldPageSlugs, batchCtx,
+	)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: pass 0 failed for %s (%v) — falling back to legacy extractor", knowledgeID, err)
 		pass0Failed = true
@@ -1449,6 +1462,7 @@ func (s *wikiIngestService) mapOneDocument(
 		"entities":         len(extractedEntities),
 		"concepts":         len(extractedConcepts),
 		"pass0_fallback":   pass0Failed,
+		"segments_failed":  segmentsFailed,
 		"entities_preview": previewExtractedItems(extractedEntities, 8),
 		"concepts_preview": previewExtractedItems(extractedConcepts, 8),
 	})
