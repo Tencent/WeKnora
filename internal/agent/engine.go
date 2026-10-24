@@ -103,6 +103,9 @@ type AgentEngine struct {
 	progress turnProgress
 	// Hold speculative parent prose until delegated work has been reviewed.
 	holdCollaborationAnswer bool
+	// chatAttachments is the allowlist of chat-uploaded spreadsheets shared
+	// with data_schema / data_analysis. Nil when those tools are not registered.
+	chatAttachments *agenttools.ChatTabularAttachments
 }
 
 // maxSteerOverruns caps loop-end injects past MaxIterations. One extra round
@@ -178,6 +181,29 @@ func (e *AgentEngine) SetPageContext(page *PageContextInfo) {
 // keeps the one in the system prompt.
 func (e *AgentEngine) SetAssistantName(name string) {
 	e.assistantName = name
+}
+
+// BindChatAttachments shares the tool allowlist with the prompt. The store is
+// filled by the service before Execute; rendering registers each ID as a dN
+// document handle.
+func (e *AgentEngine) BindChatAttachments(store *agenttools.ChatTabularAttachments) {
+	if e == nil {
+		return
+	}
+	e.chatAttachments = store
+}
+
+// SetChatAttachments replaces the turn's chat-upload allowlist. It creates a
+// store when the engine was built without data-analysis tools, which tests use
+// to assert handle registration. Production binds the store the tools hold.
+func (e *AgentEngine) SetChatAttachments(items []agenttools.ChatTabularAttachment) {
+	if e == nil {
+		return
+	}
+	if e.chatAttachments == nil {
+		e.chatAttachments = agenttools.NewChatTabularAttachments()
+	}
+	e.chatAttachments.Set(items)
 }
 
 // SetPinnedMentions sets per-turn @mention scope for MCP services and skills.

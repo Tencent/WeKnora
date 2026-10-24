@@ -253,6 +253,13 @@ func (s *sessionService) AgentQA(
 	// durable storage URL — not the ephemeral sandbox path — remains the
 	// source of truth. Gated on the sandbox manager advertising a session
 	// filesystem capability so provider-neutral remote wiring stays here.
+	// The same list feeds data_schema / data_analysis so a spreadsheet from
+	// an earlier turn in this session still has a document handle.
+	var sessionAttachments types.MessageAttachments
+	var sessionAttachmentsErr error
+	if s.messageRepo != nil {
+		sessionAttachments, sessionAttachmentsErr = s.messageRepo.GetSessionAttachments(ctx, sessionID)
+	}
 	var stagedAttachments []stagedSessionAttachment
 	stager, ok := s.agentService.(sessionAttachmentStager)
 	if !ok {
@@ -274,9 +281,11 @@ func (s *sessionService) AgentQA(
 		ctx, sessionID, mgr, layoutErr, s.hostSandbox, agentConfig.SandboxConfigID,
 	)
 	if inputStore != nil && strings.TrimSpace(layout.InputDir) != "" {
-		sessionAttachments, loadErr := s.messageRepo.GetSessionAttachments(ctx, sessionID)
-		if loadErr != nil {
-			return fmt.Errorf("load session attachments for sandbox staging: %w", loadErr)
+		if s.messageRepo == nil {
+			return errors.New("load session attachments for sandbox staging: message repository is unavailable")
+		}
+		if sessionAttachmentsErr != nil {
+			return fmt.Errorf("load session attachments for sandbox staging: %w", sessionAttachmentsErr)
 		}
 		stagedAttachments, err = stager.stageSessionAttachments(
 			ctx, sessionID, agentConfig.SandboxConfigID, req.Session.TenantID, sessionAttachments, layout,
@@ -293,7 +302,12 @@ func (s *sessionService) AgentQA(
 			}
 			agentConfig.AttachmentSandboxCopies[staged.Path] = staged.AttachmentPath
 		}
+	} else if sessionAttachmentsErr != nil {
+		logger.Warnf(ctx, "Failed to load session attachments for data analysis: %v", sessionAttachmentsErr)
+		sessionAttachments = nil
 	}
+	agentConfig.ChatUploads = mergeChatUploads(req.Attachments, sessionAttachments)
+	agentConfig.ChatUploadTenantID = req.Session.TenantID
 
 	pin, err := sandboxConfigForExistingSandbox(ctx, s.sandboxPinner, sessionID)
 	if err != nil {

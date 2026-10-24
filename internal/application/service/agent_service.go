@@ -289,6 +289,7 @@ func (s *agentService) CreateAgentEngine(
 		kbInfos, selectedDocs, sessionID,
 		systemPromptTemplate,
 	)
+	s.attachChatUploads(ctx, engine, toolRegistry, config, sessionID)
 	engine.SetAppConfig(s.cfg)
 	pinnedMCP := s.resolvePinnedMCPServiceInfos(ctx, config)
 	s.attachPinnedMCPToolNames(toolRegistry, pinnedMCP)
@@ -1303,6 +1304,13 @@ func (s *agentService) registerTools(
 		if !config.WebSearchEnabled {
 			kbTools[tools.ToolTodoWrite] = true
 		}
+		// A chat-uploaded spreadsheet is not a knowledge-base row, but it is
+		// exactly what data_schema / data_analysis query. Keep those tools when
+		// the turn has one, even if no KB is in scope.
+		if hasTabularChatUpload(config.ChatUploads) {
+			delete(kbTools, tools.ToolDataAnalysis)
+			delete(kbTools, tools.ToolDataSchema)
+		}
 
 		for _, toolName := range allowedTools {
 			if !kbTools[toolName] {
@@ -1415,6 +1423,18 @@ func (s *agentService) registerTools(
 	// Deduplicate while preserving original order.
 	allowedTools = dedupStrings(allowedTools)
 
+	// One loader for both tools. data_schema reads the DuckDB schema of a chat
+	// upload and data_analysis queries that same table; separate loaders would
+	// try to create the table twice.
+	var chatAttachments *tools.ChatTabularAttachments
+	var sharedAnalysis *tools.DataAnalysisTool
+	if slices.Contains(allowedTools, tools.ToolDataAnalysis) || slices.Contains(allowedTools, tools.ToolDataSchema) {
+		chatAttachments = tools.NewChatTabularAttachments()
+		sharedAnalysis = tools.NewDataAnalysisTool(
+			s.knowledgeBaseService, s.knowledgeService, s.tenantService, s.fileService, s.duckdb, sessionID, s.storageResolver,
+		).WithSearchTargets(config.SearchTargets).WithChatAttachments(chatAttachments)
+	}
+
 	// logger.Infof(ctx, "Registering tools: %v, webSearchEnabled: %v", allowedTools, config.WebSearchEnabled)
 	// Register each allowed tool
 	for _, toolName := range allowedTools {
@@ -1479,13 +1499,17 @@ func (s *agentService) registerTools(
 			logger.Infof(ctx, "Registered web_fetch tool for session: %s", sessionID)
 
 		case tools.ToolDataAnalysis:
-			toolToRegister = tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, s.fileService, s.duckdb, sessionID, s.storageResolver).
-				WithSearchTargets(config.SearchTargets)
+			toolToRegister = sharedAnalysis
 			logger.Infof(ctx, "Registered data_analysis tool for session: %s", sessionID)
 
 		case tools.ToolDataSchema:
-			toolToRegister = tools.NewDataSchemaTool(s.knowledgeService, s.chunkService.GetRepository()).
-				WithSearchTargets(config.SearchTargets)
+			var chunkRepo interfaces.ChunkRepository
+			if s.chunkService != nil {
+				chunkRepo = s.chunkService.GetRepository()
+			}
+			toolToRegister = tools.NewDataSchemaTool(s.knowledgeService, chunkRepo).
+				WithSearchTargets(config.SearchTargets).
+				WithDataAnalysis(sharedAnalysis)
 			logger.Infof(ctx, "Registered data_schema tool")
 
 		// Wiki tools — only registered when wiki KBs are detected
