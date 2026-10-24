@@ -6335,6 +6335,8 @@ export default {
     extractFailed: '实体关系提取失败',
     exampleLoaded: '示例已加载',
     exampleCleared: '示例已清除',
+    checkingAvailability: '正在检查知识图谱服务…',
+    checkAvailabilityFailed: '无法检查知识图谱服务，请重试。',
     disabledWarning: '知识图谱数据库未启用，实体关系提取功能将无法使用',
     howToEnable: '如何启用知识图谱？'
   },
