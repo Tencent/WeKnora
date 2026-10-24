@@ -1,0 +1,18 @@
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "edition": "community",
+    "capabilities": {
+      "organizations": {
+        "supported": true
+      },
+      "integrations.api": {
+        "supported": true
+      },
+      "settings.vectorstore": {
+        "supported": true
+      }
+    }
+  }
+}
