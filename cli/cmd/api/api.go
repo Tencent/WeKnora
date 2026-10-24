@@ -104,9 +104,11 @@ Examples:
 					}
 					// Surface the parsed body in the plan so agents can grep
 					// meta.plan.body for shape; resolveBody has already validated
-					// it as JSON.
+					// it as JSON. UseNumber keeps large ids exact in the echo.
 					var parsed any
-					if json.Unmarshal(contents, &parsed) == nil {
+					decoder := json.NewDecoder(bytes.NewReader(contents))
+					decoder.UseNumber()
+					if decoder.Decode(&parsed) == nil {
 						body = parsed
 					} else {
 						body = string(contents)
@@ -405,7 +407,13 @@ func emitRawBody(body []byte, fopts *cmdutil.FormatOptions) error {
 	if fopts.WantsJSON() {
 		var bodyAny any
 		if len(body) > 0 {
-			if err := json.Unmarshal(body, &bodyAny); err != nil {
+			// UseNumber: the envelope re-marshals this value, so decoding into
+			// float64 would rewrite server ids above 2^53 (e.g. tenant_id
+			// 9007199254740993 arrives as ...992). Pass the server's exact
+			// digits through instead.
+			decoder := json.NewDecoder(bytes.NewReader(body))
+			decoder.UseNumber()
+			if err := decoder.Decode(&bodyAny); err != nil {
 				bodyAny = string(body)
 			}
 		}
