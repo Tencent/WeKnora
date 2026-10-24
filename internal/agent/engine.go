@@ -775,7 +775,9 @@ loop:
 		if e.collaboration != nil && e.collaboration.Child == nil && e.collaborationOwnsFailure(ctx) {
 			return state, fmt.Errorf("parent iteration budget exhausted; remaining delegated work was cancelled")
 		}
-		e.handleMaxIterations(ctx, query, state, sessionID, messages)
+		if err := e.handleMaxIterations(ctx, query, state, sessionID, messages); err != nil {
+			return state, err
+		}
 	}
 
 	return state, nil
