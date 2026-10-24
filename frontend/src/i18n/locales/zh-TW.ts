@@ -1098,6 +1098,8 @@ export default {
         list_documentsDesc: '分頁列出某個知識庫下的文件',
         read_document: '閱讀文件',
         read_documentDesc: '按順序讀取文件的元資訊和切塊內容',
+        list_tags: '列出標籤',
+        list_tagsDesc: '列出某個知識庫下的標籤，回傳的標籤 ID 可用於約束問答的檢索範圍',
         ask: '問答',
         askDesc: '運行端點設定的預設 Agent，返回帶引用的完整回答，支持多輪續聊',
         wiki_search: '搜尋 Wiki',

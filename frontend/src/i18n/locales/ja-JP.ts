@@ -8074,6 +8074,8 @@ export default {
         list_documentsDesc: 'ナレッジベース内のドキュメントをページ単位で一覧します',
         read_document: 'ドキュメントを読む',
         read_documentDesc: 'ドキュメントのメタ情報とチャンクを順に読みます',
+        list_tags: 'タグ一覧',
+        list_tagsDesc: 'ナレッジベース内のタグを一覧します。タグ ID で ask の検索範囲を絞り込めます',
         ask: '質問する',
         askDesc: 'エンドポイントに設定されたエージェントを実行し、引用付きの回答を返します。続きの質問にも対応',
         wiki_search: 'Wiki を検索',

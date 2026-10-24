@@ -100,7 +100,7 @@ func TestPublishedMCPRouteProtocolAndAuthorization(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
 	srv := mcpserver.NewServer(&protocolKBService{}, nil, nil, &protocolWikiService{}, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil, nil, nil, nil)
+		nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	r := NewRouter(RouterParams{
 		Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
 		MCPServer: srv, MCPEndpointService: &protocolEndpointService{}, TenantService: &protocolTenantService{},
@@ -308,7 +308,7 @@ type stubMCPEndpointServiceForRoutes struct {
 func TestMCPServerRoutesAreMountedAndReported(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
-	srv := mcpserver.NewServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	srv := mcpserver.NewServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	RegisterMCPServerRoutes(engine, srv, &stubMCPEndpointServiceForRoutes{}, nil)
 
 	routes := map[string]bool{}

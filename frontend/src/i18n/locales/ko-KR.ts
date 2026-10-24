@@ -1098,6 +1098,8 @@ export default {
         list_documentsDesc: '지식 베이스의 문서를 페이지 단위로 나열합니다',
         read_document: '문서 읽기',
         read_documentDesc: '문서의 메타데이터와 청크를 순서대로 읽습니다',
+        list_tags: '태그 목록',
+        list_tagsDesc: '지식 베이스의 태그를 나열합니다. 태그 ID로 ask 검색 범위를 좁힐 수 있습니다',
         ask: '질문하기',
         askDesc: '엔드포인트에 설정된 에이전트를 실행하여 인용이 포함된 답변을 반환합니다. 후속 질문 지원',
         wiki_search: 'Wiki 검색',

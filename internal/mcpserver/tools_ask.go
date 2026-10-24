@@ -36,6 +36,11 @@ func askTool() mcp.Tool {
 		mcp.WithArray("knowledge_base_ids", mcp.WithStringItems(),
 			mcp.Description("Optional knowledge base ids or names to retrieve from; defaults to the "+
 				"endpoint scope or the agent's own configuration")),
+		mcp.WithArray("tag_scopes",
+			mcp.Description("Optional per-knowledge-base tag scopes constraining retrieval: an array of "+
+				"objects {\"knowledge_base_id\": id-or-name, \"tag_ids\": [tag id, ...]}. Tag ids come from "+
+				"list_tags. Retrieval then only considers documents carrying those tags; use it to narrow a "+
+				"large knowledge base. Ignored entries with no tag ids are rejected.")),
 		// Not read-only: it creates a session and messages, and the configured
 		// agent may run its own tools. Clients must not auto-approve it.
 		mcp.WithReadOnlyHintAnnotation(false),
@@ -78,12 +83,16 @@ func (s *Server) handleAsk(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	tagScopes, err := s.resolveAskTagScopes(ctx, ep, req)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	session, err := s.resolveAskSession(ctx, ep, req.GetString("session_id", ""), question)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	answer, refs, err := s.runQA(ctx, session, agent, question, kbIDs)
+	answer, refs, err := s.runQA(ctx, session, agent, question, kbIDs, tagScopes)
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("failed to answer", err), nil
 	}
@@ -212,7 +221,8 @@ func (s *Server) resolveAskSession(
 // runQA executes one turn synchronously and returns the final answer and
 // the references it cited. It mirrors the IM channel's non-streaming path.
 func (s *Server) runQA(
-	ctx context.Context, session *types.Session, agent *types.CustomAgent, question string, kbIDs []string,
+	ctx context.Context, session *types.Session, agent *types.CustomAgent, question string,
+	kbIDs []string, tagScopes []types.TagScope,
 ) (string, []askReference, error) {
 	ctx, cancel := context.WithTimeout(ctx, askTimeout)
 	defer cancel()
@@ -326,6 +336,7 @@ func (s *Server) runQA(
 			UserMessageID:      userMsg.ID,
 			CustomAgent:        agent,
 			KnowledgeBaseIDs:   kbIDs,
+			TagScopes:          tagScopes,
 			// Web search is never enabled from the MCP surface: the builtin
 			// quick-answer agent turns it on by default, which would make an
 			// otherwise read-only endpoint reach the public internet.
@@ -398,6 +409,69 @@ func (s *Server) runQA(
 		logger.Warnf(ctx, "[mcpserver] failed to persist assistant message: %v", err)
 	}
 	return text, summarizeReferences(collected), nil
+}
+
+// resolveAskTagScopes parses the optional tag_scopes argument — an array of
+// {knowledge_base_id, tag_ids} objects — and resolves each knowledge base
+// selector (id or name) against the endpoint scope, the same way explicit
+// knowledge_base_ids are validated. Tag ids are passed through verbatim;
+// unknown ids simply match no documents at retrieval time.
+func (s *Server) resolveAskTagScopes(
+	ctx context.Context, ep *types.MCPEndpoint, req mcp.CallToolRequest,
+) ([]types.TagScope, error) {
+	raw := req.GetArguments()["tag_scopes"]
+	if raw == nil {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("tag_scopes must be an array of {knowledge_base_id, tag_ids} objects")
+	}
+	var parsed []struct {
+		KnowledgeBaseID string   `json:"knowledge_base_id"`
+		TagIDs          []string `json:"tag_ids"`
+	}
+	if err := json.Unmarshal(encoded, &parsed); err != nil {
+		return nil, fmt.Errorf("tag_scopes must be an array of {knowledge_base_id, tag_ids} objects")
+	}
+	if len(parsed) == 0 {
+		return nil, nil
+	}
+	selectors := make([]string, 0, len(parsed))
+	cleanedTagIDs := make([][]string, len(parsed))
+	for i, scope := range parsed {
+		kbSel := strings.TrimSpace(scope.KnowledgeBaseID)
+		if kbSel == "" {
+			return nil, fmt.Errorf("every tag scope needs a knowledge_base_id")
+		}
+		cleaned := make([]string, 0, len(scope.TagIDs))
+		for _, id := range scope.TagIDs {
+			if id = strings.TrimSpace(id); id != "" {
+				cleaned = append(cleaned, id)
+			}
+		}
+		if len(cleaned) == 0 {
+			return nil, fmt.Errorf("tag scope for knowledge base %q has no tag ids; "+
+				"call list_tags to see the available tags", kbSel)
+		}
+		selectors = append(selectors, kbSel)
+		cleanedTagIDs[i] = cleaned
+	}
+	kbs, err := s.selectKnowledgeBases(ctx, ep, selectors)
+	if err != nil {
+		return nil, err
+	}
+	scopes := make([]types.TagScope, 0, len(parsed))
+	for i, scope := range parsed {
+		kbSel := strings.TrimSpace(scope.KnowledgeBaseID)
+		kb := matchKnowledgeBase(kbs, kbSel)
+		if kb == nil {
+			return nil, fmt.Errorf("knowledge base %q was not found or is outside this endpoint's scope; "+
+				"call list_knowledge_bases to see what is available", kbSel)
+		}
+		scopes = append(scopes, types.TagScope{KnowledgeBaseID: kb.ID, TagIDs: cleanedTagIDs[i]})
+	}
+	return scopes, nil
 }
 
 func collectReferences(dst *[]*types.SearchResult, raw interface{}) {

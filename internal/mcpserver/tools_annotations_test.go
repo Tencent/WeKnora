@@ -13,6 +13,7 @@ func TestReadOnlyEndpointToolsAreNotDestructive(t *testing.T) {
 		grepChunksTool(),
 		listDocumentsTool(),
 		readDocumentTool(),
+		listTagsTool(),
 		wikiSearchTool(),
 		wikiReadPageTool(),
 		wikiIndexTool(),
