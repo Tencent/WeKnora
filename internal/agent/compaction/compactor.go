@@ -328,7 +328,10 @@ func validateSummary(content, finishReason string) error {
 	switch strings.ToLower(strings.TrimSpace(finishReason)) {
 	case types.FinishReasonIncomplete:
 		return errors.New(types.StreamEndedEarlyError)
-	case "length", "max_tokens", "max_output_tokens":
+	// model_context_window_exceeded is z.ai's length stop; #4589 normalized it
+	// for the engine and the Anthropic adapter, and a truncated summary is
+	// exactly as unusable here.
+	case "length", "max_tokens", "max_output_tokens", "model_context_window_exceeded":
 		return errors.New("generation hit the token cap and the summary is incomplete")
 	}
 	return nil
