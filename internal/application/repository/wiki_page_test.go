@@ -243,6 +243,47 @@ func TestList_CategoryPathFilterMatchesOnSQLite(t *testing.T) {
 	assert.Equal(t, "entity/in-people", got[0].Slug)
 }
 
+func TestList_QuerySearchesSQLiteTextFieldsAndEscapesWildcards(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	title := makeWikiPage("kb-search", "entity/title", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	title.Title = "SQLite Search Guide"
+	content := makeWikiPage("kb-search", "entity/content", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	content.Title = "Content page"
+	content.Content = "The important phrase is stored in CONTENT."
+	alias := makeWikiPage("kb-search", "entity/alias", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	alias.Title = "Alias page"
+	alias.Aliases = types.StringArray{"SQLiteAlias"}
+	wildcard := makeWikiPage("kb-search", "entity/wildcard", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	wildcard.Title = "literal_%_token"
+	for _, page := range []*types.WikiPage{title, content, alias, wildcard} {
+		require.NoError(t, repo.Create(ctx, page))
+	}
+
+	for _, tc := range []struct {
+		query string
+		slug  string
+	}{
+		{query: "search guide", slug: "entity/title"},
+		{query: "important phrase", slug: "entity/content"},
+		{query: "sqlitealias", slug: "entity/alias"},
+		{query: "literal_%", slug: "entity/wildcard"},
+	} {
+		pages, total, err := repo.List(ctx, &types.WikiPageListRequest{
+			KnowledgeBaseID: "kb-search",
+			Query:           tc.query,
+			Page:            1,
+			PageSize:        10,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), total, tc.query)
+		require.Len(t, pages, 1, tc.query)
+		assert.Equal(t, tc.slug, pages[0].Slug, tc.query)
+	}
+}
+
 // TestFolderTree_CRUDAndChildListing exercises the wiki_folders repository:
 // child listing ordered by sort_order/name, find-by-name, page counting under
 // a folder, and that ListDistinctCategoryPaths reflects the folder paths.
