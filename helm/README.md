@@ -189,6 +189,45 @@ for the chart's database or other components. Object storage is another option
 only after configuring the provider and checking that all paths needed by your
 deployment are accessible to every replica.
 
+### Mounting Extra Volumes into the App Pod
+
+The chart mounts a single `data-files` volume by default. Use
+`app.extraVolumes` and `app.extraVolumeMounts` to attach additional ConfigMaps,
+Secrets, PVCs, `emptyDir` or any other volume type to the backend container —
+for example a CA bundle, a config file, or a credentials Secret:
+
+```yaml
+app:
+  extraVolumes:
+    - name: ca-bundle
+      configMap:
+        name: my-ca-bundle
+    - name: credentials
+      secret:
+        secretName: my-credentials
+  extraVolumeMounts:
+    - name: ca-bundle
+      mountPath: /etc/ssl/certs/custom
+      readOnly: true
+    - name: credentials
+      mountPath: /etc/credentials
+      readOnly: true
+```
+
+Both lists are rendered verbatim, so any field Kubernetes accepts in
+`spec.template.spec.volumes` and in a container's `volumeMounts` may be used.
+
+**Requirements and caveats:**
+
+- The referenced ConfigMap, Secret or PVC must already exist in the namespace.
+  The chart does not create them.
+- Each `name` in `extraVolumeMounts` must match a `name` in `extraVolumes`;
+  otherwise the API server rejects the Pod.
+- `dataFiles.persistence.enabled` still governs only the built-in `data-files`
+  volume. Extra volumes are unaffected by it.
+- Verify the rendering before applying:
+  `helm template weknora ./helm -f values-production.yaml | grep -A5 extraVolume`
+
 ## Configuration
 
 ### Service names
@@ -260,6 +299,8 @@ pre-existing Service name does not automatically transfer its ownership to Helm.
 | `app.resources` | Resource limits | See values.yaml |
 | `app.env` | Environment variables | See values.yaml |
 | `app.extraEnv` | Additional env vars | `[]` |
+| `app.extraVolumes` | Additional Pod volumes (rendered verbatim into `spec.template.spec.volumes`) | `[]` |
+| `app.extraVolumeMounts` | Additional volume mounts for the app container (names must match `extraVolumes`) | `[]` |
 
 ### Frontend
 
