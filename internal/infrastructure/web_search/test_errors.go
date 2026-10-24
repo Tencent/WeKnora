@@ -35,6 +35,11 @@ func EmptyTestResultsError(providerType string, provider any) error {
 		return fmt.Errorf(
 			"keenable returned 0 results; keyless requests are rate-limited, so verify network connectivity or set an API key to lift the cap",
 		)
+	case types.WebSearchProviderTypeYou:
+		return fmt.Errorf(
+			"you returned 0 results; keyless requests are limited to 100 searches a day, " +
+				"so verify network connectivity or set an API key to raise the limit",
+		)
 	case types.WebSearchProviderTypeExa:
 		return fmt.Errorf(
 			"exa returned 0 results; verify the API key, account quota, network connectivity, and proxy settings",

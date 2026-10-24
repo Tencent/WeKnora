@@ -97,3 +97,17 @@ func TestValidateProviderParametersSerply(t *testing.T) {
 		t.Fatal("blank Serply API key was accepted")
 	}
 }
+
+func TestValidateProviderParametersYou(t *testing.T) {
+	if !isValidProviderType(types.WebSearchProviderTypeYou) {
+		t.Fatal("You.com provider type is not accepted")
+	}
+	keyless := types.WebSearchProviderParameters{}
+	if err := validateProviderParameters(types.WebSearchProviderTypeYou, keyless); err != nil {
+		t.Fatalf("keyless You.com parameters rejected: %v", err)
+	}
+	keyed := types.WebSearchProviderParameters{APIKey: "ydc-test"}
+	if err := validateProviderParameters(types.WebSearchProviderTypeYou, keyed); err != nil {
+		t.Fatalf("keyed You.com parameters rejected: %v", err)
+	}
+}

@@ -117,3 +117,21 @@ func TestGetWebSearchProviderTypesIncludesSerply(t *testing.T) {
 		t.Fatalf("unexpected Serply metadata: %+v", serply)
 	}
 }
+
+func TestGetWebSearchProviderTypesIncludesYou(t *testing.T) {
+	var you *WebSearchProviderTypeInfo
+	providerTypes := GetWebSearchProviderTypes()
+	for i := range providerTypes {
+		if providerTypes[i].ID == string(WebSearchProviderTypeYou) {
+			you = &providerTypes[i]
+			break
+		}
+	}
+	if you == nil {
+		t.Fatal("You.com provider type not found")
+	}
+	if you.RequiresAPIKey || !you.SupportsOptionalAPIKey || !you.SupportsProxy ||
+		you.RequiresEngineID || you.RequiresBaseURL {
+		t.Fatalf("unexpected You.com metadata: %+v", you)
+	}
+}
