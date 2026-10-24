@@ -321,6 +321,24 @@ test('Seafile picker texts and sync error codes remain localized after pruning',
   }
 })
 
+test('Nextcloud configuration, picker and sync errors are localized and survive pruning', () => {
+  const keys = [
+    'connector.nextcloud', 'connectorDesc.nextcloud', 'nextcloud.baseUrl', 'nextcloud.baseUrlHint',
+    'nextcloud.username', 'nextcloud.appPassword', 'nextcloud.appPasswordHint', 'nextcloud.selectionRequired',
+    'nextcloud.includeExtensions', 'nextcloud.excludeExtensions', 'nextcloud.extensionsHint',
+    'noResourcesDesc_nextcloud', ...[1, 2, 3].map(step => `guideStep${step}_nextcloud`),
+    ...['permission_denied', 'not_found', 'file_too_large', 'empty_file', 'source_changed',
+      'invalid_response', 'ssrf_blocked', 'fetch_failed'].map(code => `syncError.nextcloud_${code}`),
+  ].map(key => `datasource.${key}`)
+  keys.push('knowledgeBase.channelNextcloud')
+  for (const key of keys) {
+    assert.ok(referencedKeys.has(key), `pruning would remove ${key}`)
+    for (const [locale, bundle] of Object.entries(LOCALE_BUNDLES)) {
+      assert.equal(typeof getLocaleValueAtPath(bundle, key), 'string', `${locale}: missing ${key}`)
+    }
+  }
+})
+
 test('DingTalk configuration and sync failures remain localized after pruning', () => {
   const keys = [
     'connector.dingtalk', 'connectorDesc.dingtalk',

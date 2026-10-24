@@ -35,6 +35,7 @@
 | 腾讯 IMA | `ima` | 知识库中的文件与笔记 |
 | GitLab | `gitlab` | 仓库指定分支/标签下的目录 |
 | Seafile | `seafile` | 资料库中的目录与文件 |
+| Nextcloud | `nextcloud` | WebDAV 目录与文件，见 [Nextcloud data source](26-nextcloud.md) |
 | RSS / Atom | `rss` | 订阅源文章 |
 
 各连接器支持的格式、认证与删除检测见参考部分。
@@ -313,7 +314,7 @@ flowchart LR
 
 - **防御性取消**：数据源或知识库已被删除时，把 SyncLog 置为 `canceled` 并返回 nil（不再重试）。
 - **两条抓取路径**：连接器实现了 `StreamingConnector` 走 `processSyncStreaming`（流式）；否则按 `ForceFull || SyncMode==full` 走 `FetchAll`，或带上 `ParseSyncCursor()` 的游标走 `FetchIncremental`（批量）。
-- **流式路径的游标策略**（`streamStartCursor`）：用户触发的全量同步在**首次尝试**时丢弃游标全量抓取；Asynq **重试**（attempt > 0）以及所有增量同步都从最后一个 checkpoint 续传。实现了 `FullStreamingConnector` 的连接器（包括 Feishu/Lark Wiki 与云盘、Seafile、Confluence）在全量同步时改走 `FetchFullStream`：重新抓取全部条目，同时保留旧游标作为删除对账基线。
+- **流式路径的游标策略**（`streamStartCursor`）：用户触发的全量同步在**首次尝试**时丢弃游标全量抓取；Asynq **重试**（attempt > 0）以及所有增量同步都从最后一个 checkpoint 续传。实现了 `FullStreamingConnector` 的连接器（包括 Feishu/Lark Wiki 与云盘、Seafile、Nextcloud、Confluence）在全量同步时改走 `FetchFullStream`：重新抓取全部条目，同时保留旧游标作为删除对账基线。
 - **入库核心 `applyFetchedItem` → `ingestItem`**：
   - `IsDeleted=true` 且 `sync_deletions=true` 时，按租户、知识库、数据源 ID 和 external_id 查找并真实删除对应知识；关闭同步删除则保留已有知识。删除能力还取决于连接器是否提供可靠的删除检测；
   - 有 `Content` 字节 → 包装成 `multipart.FileHeader` 走 `KnowledgeService.CreateKnowledgeFromFile`（完整文档解析流水线）；只有 `URL` → 走 `CreateKnowledgeFromURL` 由 WeKnora 下载解析；
@@ -457,7 +458,7 @@ type StreamingConnector interface {
 }
 ```
 
-任务超时后可从最近的 checkpoint 继续处理。Asynq 同步任务超时为 2 小时，流式路径按条目推进，避免缓存全部文件正文。Feishu/Lark（知识库与云盘）、GitLab 和 Confluence 连接器实现了 `StreamingConnector`；Feishu/Lark、Seafile 和 Confluence 另实现 `FullStreamingConnector`，全量同步也能对账删除。钉钉目前走 batch `FetchAll`/`FetchIncremental`/`FetchAllFromCursor`，超大知识库建议使用增量模式以免一次装入全部 Markdown。
+任务超时后可从最近的 checkpoint 继续处理。Asynq 同步任务超时为 2 小时，流式路径按条目推进，避免缓存全部文件正文。Feishu/Lark（知识库与云盘）、GitLab 和 Confluence 连接器实现了 `StreamingConnector`；Feishu/Lark、Seafile、Nextcloud 和 Confluence 另实现 `FullStreamingConnector`，全量同步也能对账删除。钉钉目前走 batch `FetchAll`/`FetchIncremental`/`FetchAllFromCursor`，超大知识库建议使用增量模式以免一次装入全部 Markdown。
 
 #### ConnectorRegistry：注册与查找
 
@@ -476,9 +477,10 @@ registry.Register(imaConnector.NewConnector())                      // ima
 registry.Register(rssConnector.NewConnector())                      // rss
 registry.Register(gitlabConnector.NewConnector())                   // gitlab
 registry.Register(seafileConnector.NewConnector())                  // seafile
+registry.Register(nextcloudConnector.NewConnector())                // nextcloud
 ```
 
-> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`confluence`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`、`seafile`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
+> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`confluence`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`、`seafile`、`nextcloud`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
 
 ### 数据模型（internal/types/datasource.go）
 
