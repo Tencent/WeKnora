@@ -17,6 +17,10 @@ import (
 
 const weKnoraCloudVLMPath = "/api/v1/chat/completions"
 
+// weKnoraCloudMaxToks keeps the WeKnoraCloud request budget at its previous
+// value; the larger default for self-configured endpoints doesn't apply here.
+const weKnoraCloudMaxToks = 5000
+
 // WeKnoraCloudVLM implements VLM via the WeKnoraCloud API.
 type WeKnoraCloudVLM struct {
 	modelName       string
@@ -130,7 +134,7 @@ func (v *WeKnoraCloudVLM) PredictWithOptions(
 				Content: parts,
 			},
 		},
-		MaxTokens:   defaultMaxToks,
+		MaxTokens:   weKnoraCloudMaxToks,
 		Temperature: float64(defaultTemp),
 		Stream:      false,
 	}
