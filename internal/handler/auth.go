@@ -112,6 +112,48 @@ func (h *AuthHandler) resolveRegistrationMode(ctx context.Context) string {
 	return h.systemSettingSvc.GetString(ctx, "auth.registration_mode", "", def)
 }
 
+// firstRegistrationOpen reports whether the deployment is still in its
+// pre-setup state — zero user accounts — and therefore lets the very
+// first registration through even when auth.registration_mode is closed.
+//
+// Why this exists (issue #1866): DISABLE_REGISTRATION=true forces
+// registration_mode=invite_only at startup, and every account-creation
+// path except public registration needs an existing system admin
+// (AdminCreateUser is admin-gated; OIDC first-login needs a configured
+// provider). On a fresh deployment that combination is a chicken-and-egg
+// deadlock — no way in at all. The documented bootstrap flow ("sign up
+// first, then set WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL and restart")
+// never gets past its first step, so the env var waits forever for a
+// user that cannot exist.
+//
+// The bypass stays faithful to the documented bootstrap design: the
+// first account is still created through the normal public registration
+// flow — no shadow account creation, no password in an env var. Once a
+// single user exists the gate closes again and behaves exactly as
+// before. Concurrent first registrations are resolved by the unique
+// constraints on email/username (first writer wins, second gets a
+// validation error).
+//
+// Lock-step with /auth/config matters: the login page reads the
+// first_registration_open flag to decide whether to show the sign-up
+// tab, so the UI gate can never disagree with the API gate.
+func (h *AuthHandler) firstRegistrationOpen(ctx context.Context) bool {
+	// A self_serve deployment is not gated in the first place — nothing
+	// to bypass, and the flag stays false so the UI logic is unchanged.
+	if h.resolveRegistrationMode(ctx) == config.AuthRegistrationModeSelfServe {
+		return false
+	}
+	if h.userService == nil {
+		return false
+	}
+	users, _, err := h.userService.ListAllUsers(ctx, 0, 1)
+	if err != nil {
+		// Fail closed: an unknown user count must never open the gate.
+		return false
+	}
+	return len(users) == 0
+}
+
 // resolveDefaultTenantMode returns the provisioning policy for a new
 // local user account.
 // Priority: DB system_settings > cfg.Auth > hard default (create_personal).
@@ -183,10 +225,22 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	// Only self_serve permits registration without an invitation. Resolve
 	// each request so system-settings changes take effect immediately.
+	//
+	// Exception: a deployment that still has zero accounts is in its
+	// setup phase — DISABLE_REGISTRATION is documented as a post-setup
+	// step, but nothing stops an operator from setting it on a fresh
+	// deploy, which used to be a deadlock (issue #1866): every
+	// account-creation path needed an existing account. See
+	// firstRegistrationOpen for the full rationale.
 	if h.resolveRegistrationMode(ctx) != config.AuthRegistrationModeSelfServe {
-		logger.Warn(ctx, "Public registration rejected by auth.registration_mode")
-		_ = c.Error(errors.NewForbiddenError("Public registration is disabled"))
-		return
+		if !h.firstRegistrationOpen(ctx) {
+			logger.Warn(ctx, "Public registration rejected by auth.registration_mode")
+			_ = c.Error(errors.NewForbiddenError("Public registration is disabled"))
+			return
+		}
+		logger.Info(ctx,
+			"First registration allowed on a fresh deployment with zero accounts; "+
+				"the registration gate closes again once this account exists")
 	}
 
 	var req types.RegisterRequest
@@ -832,9 +886,15 @@ func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
 		h.configInfo,
 		h.systemSettingSvc,
 	)
+	// first_registration_open mirrors the Register gate's fresh-deployment
+	// bypass (issue #1866) so the login page can show the sign-up tab in
+	// lock-step with the API. Deliberately NOT folded into registration_mode
+	// itself: the mode stays the operator's configured value (it is shown
+	// in admin settings), while this flag is the *effective* setup state.
 	c.JSON(http.StatusOK, gin.H{
 		"success":                  true,
 		"registration_mode":        mode,
+		"first_registration_open":  h.firstRegistrationOpen(c.Request.Context()),
 		"complex_password_enabled": complexPasswordEnabled,
 	})
 }

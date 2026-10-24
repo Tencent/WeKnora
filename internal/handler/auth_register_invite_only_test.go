@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,11 +23,23 @@ import (
 // branching logic without dragging in the entire user service surface.
 type stubRegisterUserService struct {
 	interfaces.UserService
-	register func(ctx context.Context, req *types.RegisterRequest) (*types.User, error)
+	register  func(ctx context.Context, req *types.RegisterRequest) (*types.User, error)
+	listUsers func(ctx context.Context, offset, limit int) ([]*types.User, bool, error)
 }
 
 func (s *stubRegisterUserService) Register(ctx context.Context, req *types.RegisterRequest) (*types.User, error) {
 	return s.register(ctx, req)
+}
+
+// ListAllUsers drives the fresh-deployment bypass (issue #1866). The
+// default is a non-empty deployment so every pre-existing invite_only
+// expectation (403) keeps its original meaning; tests targeting the
+// bypass install a zero-user (or failing) override.
+func (s *stubRegisterUserService) ListAllUsers(ctx context.Context, offset, limit int) ([]*types.User, bool, error) {
+	if s.listUsers != nil {
+		return s.listUsers(ctx, offset, limit)
+	}
+	return []*types.User{{ID: "existing"}}, false, nil
 }
 
 // errorCapture mirrors gin's default ErrorHandler behaviour for tests:
@@ -98,6 +111,121 @@ func TestRegister_InviteOnlyRejects(t *testing.T) {
 	}
 	if called {
 		t.Fatalf("UserService.Register must not be called when invite_only blocks the request")
+	}
+}
+
+// TestRegister_FreshDeploymentAllowsFirstRegistration is the regression
+// for #1866: DISABLE_REGISTRATION=true on a fresh deploy used to be a
+// deadlock — invite_only blocked /auth/register while every other
+// account-creation path needed an existing account. With zero accounts
+// the gate now lets exactly one registration through so the operator can
+// complete the documented bootstrap flow (sign up → set the env var →
+// restart → promoted by bootstrapSystemAdmin, which still never creates
+// users itself).
+func TestRegister_FreshDeploymentAllowsFirstRegistration(t *testing.T) {
+	called := false
+	us := &stubRegisterUserService{
+		listUsers: func(context.Context, int, int) ([]*types.User, bool, error) {
+			return nil, false, nil // fresh deployment: no accounts yet
+		},
+		register: func(context.Context, *types.RegisterRequest) (*types.User, error) {
+			called = true
+			return &types.User{ID: "u1", Email: "alice@example.com"}, nil
+		},
+	}
+	h := NewAuthHandler(&config.Config{
+		Auth: &config.AuthConfig{RegistrationMode: config.AuthRegistrationModeInviteOnly},
+	}, us, nil, nil, nil)
+
+	w := doRegister(t, newRegisterTestRouter(h), validRegisterBody())
+	if w.Code != http.StatusCreated {
+		t.Fatalf("fresh deployment must allow the first registration, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !called {
+		t.Fatalf("UserService.Register should have been invoked on a fresh deployment")
+	}
+}
+
+// The bypass is strictly a zero-users window: as soon as one account
+// exists the closed gate rejects exactly as before.
+func TestRegister_InviteOnlyStillRejectsWithExistingUsers(t *testing.T) {
+	us := &stubRegisterUserService{
+		listUsers: func(context.Context, int, int) ([]*types.User, bool, error) {
+			return []*types.User{{ID: "existing"}}, false, nil
+		},
+	}
+	h := NewAuthHandler(&config.Config{
+		Auth: &config.AuthConfig{RegistrationMode: config.AuthRegistrationModeInviteOnly},
+	}, us, nil, nil, nil)
+
+	w := doRegister(t, newRegisterTestRouter(h), validRegisterBody())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("invite_only with existing accounts must still return 403, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// An unknown user count must fail closed — a DB error can never open the
+// registration gate.
+func TestRegister_UserCountErrorFailsClosed(t *testing.T) {
+	us := &stubRegisterUserService{
+		listUsers: func(context.Context, int, int) ([]*types.User, bool, error) {
+			return nil, false, errors.New("db unreachable")
+		},
+	}
+	h := NewAuthHandler(&config.Config{
+		Auth: &config.AuthConfig{RegistrationMode: config.AuthRegistrationModeInviteOnly},
+	}, us, nil, nil, nil)
+
+	w := doRegister(t, newRegisterTestRouter(h), validRegisterBody())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("user-count failure must fail closed with 403, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// /auth/config must expose the effective first-registration state in
+// lock-step with the Register gate (issue #1866), while registration_mode
+// itself stays the operator's configured value.
+func TestGetAuthConfigExposesFirstRegistrationOpen(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	serve := func(h *AuthHandler) map[string]any {
+		r := gin.New()
+		r.GET("/auth/config", h.GetAuthConfig)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/auth/config", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+		var out map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatalf("unmarshal auth config: %v", err)
+		}
+		return out
+	}
+	newHandler := func(listUsers func(context.Context, int, int) ([]*types.User, bool, error)) *AuthHandler {
+		return &AuthHandler{
+			configInfo: &config.Config{Auth: &config.AuthConfig{
+				RegistrationMode: config.AuthRegistrationModeInviteOnly,
+			}},
+			systemSettingSvc: &registrationModeSettings{mode: config.AuthRegistrationModeInviteOnly},
+			userService:      &stubRegisterUserService{listUsers: listUsers},
+		}
+	}
+
+	out := serve(newHandler(func(context.Context, int, int) ([]*types.User, bool, error) {
+		return nil, false, nil
+	}))
+	if out["first_registration_open"] != true {
+		t.Fatalf("fresh deployment must expose first_registration_open=true: %v", out)
+	}
+	if out["registration_mode"] != config.AuthRegistrationModeInviteOnly {
+		t.Fatalf("registration_mode must stay the configured value: %v", out)
+	}
+
+	out = serve(newHandler(func(context.Context, int, int) ([]*types.User, bool, error) {
+		return []*types.User{{ID: "existing"}}, false, nil
+	}))
+	if out["first_registration_open"] != false {
+		t.Fatalf("deployment with accounts must expose first_registration_open=false: %v", out)
 	}
 }
 

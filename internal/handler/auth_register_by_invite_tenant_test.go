@@ -40,6 +40,13 @@ func (s *invitedRegistrationUserService) GenerateTokens(context.Context, *types.
 	return "access", "refresh", nil
 }
 
+// ListAllUsers reports a non-empty deployment so the invite_only gate in
+// TestRegistrationModeChangesApplyImmediately keeps rejecting — the
+// fresh-deployment bypass (issue #1866) requires zero users.
+func (s *invitedRegistrationUserService) ListAllUsers(context.Context, int, int) ([]*types.User, bool, error) {
+	return []*types.User{{ID: "existing"}}, false, nil
+}
+
 type invitedRegistrationInvitationService struct {
 	interfaces.TenantInvitationService
 	acceptErr error
