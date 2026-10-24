@@ -17,9 +17,17 @@ import (
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/hibiken/asynq"
 )
+
+// AttachmentImageUnderstandingOptions 将智能体的 VLM OCR 配置传递给同步行内附件处理。
+type AttachmentImageUnderstandingOptions struct {
+	VLMModelID         string
+	ImageUnderstanding bool
+	OCRMaxPages        int
+}
 
 const (
 	// defaultTemporaryDocumentImageOCRMaxPages caps how many page images a
@@ -55,6 +63,43 @@ func temporaryDocumentImageOCRMaxPages() int {
 // WEKNORA_CHAT_ATTACHMENT_OCR_CONCURRENCY.
 func temporaryDocumentOCRConcurrency() int {
 	return envPositiveInt("WEKNORA_CHAT_ATTACHMENT_OCR_CONCURRENCY", defaultTemporaryDocumentOCRConcurrency)
+}
+
+// EnrichAttachmentImageContent 在图片引用被改写为存储 URL 前，为行内附件复用临时文档的低文本 OCR 回退。
+// 返回值中的布尔值表示 OCR 是否为内容补充了文本。
+func EnrichAttachmentImageContent(
+	ctx context.Context,
+	modelService interfaces.ModelService,
+	fileType string,
+	options AttachmentImageUnderstandingOptions,
+	imageRefs []types.ImageRef,
+	content string,
+) (string, bool) {
+	if !strings.EqualFold(strings.TrimPrefix(fileType, "."), "pdf") ||
+		modelService == nil || options.VLMModelID == "" || !options.ImageUnderstanding {
+		return content, false
+	}
+
+	maxOCRPages := temporaryDocumentImageOCRMaxPages()
+	if options.OCRMaxPages > 0 {
+		maxOCRPages = options.OCRMaxPages
+	}
+	pageImages := collectImageBytes(imageRefs, maxOCRPages)
+	if len(pageImages) == 0 {
+		return content, false
+	}
+
+	service := temporaryDocumentService{modelService: modelService}
+	createOptions := types.TemporaryDocumentCreateOptions{
+		VLMModelID:         options.VLMModelID,
+		ImageUnderstanding: options.ImageUnderstanding,
+		OCRMaxPages:        options.OCRMaxPages,
+	}
+	enriched := service.applyImageUnderstanding(ctx, fileType, createOptions, nil, pageImages, content)
+	if enriched == "" {
+		return content, false
+	}
+	return enriched, true
 }
 
 // envPositiveInt reads a positive integer from the environment, falling back to
