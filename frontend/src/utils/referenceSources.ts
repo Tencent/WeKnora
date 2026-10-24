@@ -37,6 +37,10 @@ export type ReferenceListItem = {
   sourceChunkId?: string
   knowledgeId?: string
   knowledgeBaseId?: string
+  knowledgeSource?: string
+  chunkType?: string
+  wikiSlug?: string
+  wikiPageId?: string
   content?: string
 }
 
@@ -187,6 +191,10 @@ function buildDocumentItem(item: KnowledgeReferenceLike, index: number): Referen
     sourceChunkId: item.source_chunk_id,
     knowledgeId: item.knowledge_id,
     knowledgeBaseId: item.knowledge_base_id,
+    knowledgeSource: item.knowledge_source,
+    chunkType: item.chunk_type,
+    wikiSlug: item.metadata?.wiki_slug,
+    wikiPageId: item.metadata?.wiki_page_id,
     snippet: truncateText(item.content || '', 220) || undefined,
     content: item.content,
   }
@@ -351,6 +359,8 @@ export type ReferenceSourceTarget = {
   fileName?: string
   knowledgeSource?: string
   chunkType?: string
+  wikiSlug?: string
+  wikiPageId?: string
   /** The chunk's own text; absent when only its document is known. */
   content?: string
   locators?: SourceLocator[]
@@ -385,6 +395,8 @@ export function resolveReferenceSource(
     fileName: ref.knowledge_filename,
     knowledgeSource: ref.knowledge_source,
     chunkType: ref.chunk_type,
+    wikiSlug: ref.metadata?.wiki_slug,
+    wikiPageId: ref.metadata?.wiki_page_id,
     // A grouped match belongs to another chunk of the same document.
     content: exact ? exact.content : undefined,
     locators: exact ? exact.source_locators : undefined,
@@ -440,4 +452,20 @@ export function resolveReferenceHighlightKey(
   }
 
   return null
+}
+
+
+export function isWikiReferenceSource(target: Partial<ReferenceSourceTarget>): boolean {
+  return target.knowledgeSource === 'wiki' || target.chunkType === 'wiki_page'
+}
+
+/** Wiki scopes are retrieval artifacts, never document-detail identifiers. */
+export function referenceSourceRoute(target: Partial<ReferenceSourceTarget>) {
+  if (!target.knowledgeBaseId) return null
+  const path = `/platform/knowledge-bases/${target.knowledgeBaseId}`
+  if (isWikiReferenceSource(target)) {
+    const slug = target.wikiSlug?.trim()
+    return slug ? { path, query: { tab: 'graph', slug } } : null
+  }
+  return { path, query: target.knowledgeId ? { knowledge_id: target.knowledgeId } : {} }
 }
