@@ -238,6 +238,10 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 		newEditTimes[pages[i].ID] = pages[i].LastEditedTime
 		pageByID[pages[i].ID] = &pages[i]
 	}
+	newDatabaseRecordIDs := make(map[string][]string, len(prevCursor.DatabaseRecordIDs))
+	for databaseID, recordIDs := range prevCursor.DatabaseRecordIDs {
+		newDatabaseRecordIDs[databaseID] = append([]string(nil), recordIDs...)
+	}
 
 	var changedItems []types.FetchedItem
 	changedCount := 0
@@ -248,37 +252,49 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 
 	for pageID, newTime := range newEditTimes {
 		prevTime, existed := prevCursor.PageEditTimes[pageID]
-		if existed && newTime.Equal(prevTime) {
-			continue
-		}
 		if fetchVisited[pageID] {
 			continue
 		}
-		changedCount++
 		pg := pageByID[pageID]
 		if pg == nil {
 			continue
 		}
-		logger.Debugf(ctx, "[Notion] changed: %s (%s, %s)", pg.Title, pg.ID, pg.Object)
+		timestampChanged := !existed || !newTime.Equal(prevTime)
 		if pg.isDatabase() {
-			// Incremental database sync: query records, diff against cursor,
-			// only fetch blocks for records whose edit time actually changed.
-			items, recordEditTimes, truncated := c.fetchDatabaseIncremental(
-				ctx, client, pg.ID, prevCursor.PageEditTimes, fetchVisited)
-			queryTruncated = queryTruncated || truncated
-			changedItems = append(changedItems, items...)
-			// Merge record-level edit times into the cursor
-			for rid, rt := range recordEditTimes {
-				newEditTimes[rid] = rt
-			}
-		} else {
-			items, truncated, err := c.fetchPage(ctx, client, pg, fetchVisited)
+			// A database timestamp does not necessarily change when one of its rows is
+			// archived. Query membership every round so the aggregate document can be
+			// rebuilt even when the database object itself looks unchanged.
+			previousRecordIDs, hasPreviousMembership := prevCursor.DatabaseRecordIDs[pageID]
+			items, recordEditTimes, recordIDs, truncated, err := c.fetchDatabaseIncremental(
+				ctx, client, pg.ID, prevCursor.PageEditTimes, previousRecordIDs,
+				hasPreviousMembership, fetchVisited)
 			if err != nil {
 				return nil, nil, err
 			}
 			queryTruncated = queryTruncated || truncated
 			changedItems = append(changedItems, items...)
+			for rid, rt := range recordEditTimes {
+				newEditTimes[rid] = rt
+			}
+			if !truncated {
+				newDatabaseRecordIDs[pageID] = recordIDs
+			}
+			if timestampChanged || len(items) > 0 {
+				changedCount++
+			}
+			continue
 		}
+		if !timestampChanged {
+			continue
+		}
+		changedCount++
+		logger.Debugf(ctx, "[Notion] changed: %s (%s, %s)", pg.Title, pg.ID, pg.Object)
+		items, truncated, err := c.fetchPage(ctx, client, pg, fetchVisited)
+		if err != nil {
+			return nil, nil, err
+		}
+		queryTruncated = queryTruncated || truncated
+		changedItems = append(changedItems, items...)
 	}
 
 	// Detect deletions. Only emit IsDeleted for pages that previously belonged
@@ -317,13 +333,20 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 		logger.Infof(ctx, "[Notion] incremental: %d changed, %d total items", changedCount, len(changedItems))
 	}
 
-	return changedItems, buildCursor(newEditTimes), nil
+	return changedItems, buildCursorWithDatabaseRecords(newEditTimes, newDatabaseRecordIDs), nil
 }
 
 func buildCursor(editTimes map[string]time.Time) *types.SyncCursor {
+	return buildCursorWithDatabaseRecords(editTimes, nil)
+}
+
+func buildCursorWithDatabaseRecords(
+	editTimes map[string]time.Time, databaseRecordIDs map[string][]string,
+) *types.SyncCursor {
 	now := time.Now()
 	cursorData := notionCursor{
-		PageEditTimes: editTimes,
+		PageEditTimes:     editTimes,
+		DatabaseRecordIDs: databaseRecordIDs,
 	}
 	cursorBytes, _ := json.Marshal(cursorData)
 	var cursorMap map[string]interface{}
@@ -518,25 +541,32 @@ func (c *Connector) fetchDatabase(
 // Returns fetched items, a map of record_id → edit_time for cursor update, and whether the
 // record query was truncated at a vendor limit (in which case absence proves nothing).
 func (c *Connector) fetchDatabaseIncremental(
-	ctx context.Context, client *notionClient, id string, prevEditTimes map[string]time.Time, visited map[string]bool,
-) ([]types.FetchedItem, map[string]time.Time, bool) {
+	ctx context.Context,
+	client *notionClient,
+	id string,
+	prevEditTimes map[string]time.Time,
+	previousRecordIDs []string,
+	hasPreviousMembership bool,
+	visited map[string]bool,
+) ([]types.FetchedItem, map[string]time.Time, []string, bool, error) {
 	if visited[id] {
-		return nil, nil, false
+		return nil, nil, nil, false, nil
 	}
 	visited[id] = true
 
 	records, dbTitle, queryID, truncated, err := c.queryDatabaseRecords(ctx, client, id)
 	if err != nil {
-		return nil, nil, false
+		return nil, nil, nil, false, fmt.Errorf("query notion database %s: %w", id, err)
 	}
 	if queryID != "" && queryID != id {
 		if visited[queryID] {
-			return nil, nil, truncated
+			return nil, nil, nil, truncated, nil
 		}
 		visited[queryID] = true
 	}
 
 	recordEditTimes := make(map[string]time.Time, len(records))
+	recordIDs := make([]string, 0, len(records))
 	changedCount := 0
 
 	for _, record := range records {
@@ -545,6 +575,7 @@ func (c *Connector) fetchDatabaseIncremental(
 		if record.InTrash {
 			continue
 		}
+		recordIDs = append(recordIDs, record.ID)
 		recordEditTimes[record.ID] = record.LastEditedTime
 
 		prevTime, existed := prevEditTimes[record.ID]
@@ -552,6 +583,8 @@ func (c *Connector) fetchDatabaseIncremental(
 			changedCount++
 		}
 	}
+	sort.Strings(recordIDs)
+	membershipChanged := !truncated && (!hasPreviousMembership || !equalStringSlices(previousRecordIDs, recordIDs))
 
 	if truncated {
 		logger.Warnf(ctx, "[Notion] database %s incremental: %d changed out of %d records "+
@@ -561,15 +594,36 @@ func (c *Connector) fetchDatabaseIncremental(
 			id, changedCount, len(records))
 	}
 
-	// Rebuild the entire database table if any record changed, or if we don't have previous times (first sync)
-	if changedCount > 0 || len(prevEditTimes) == 0 {
+	// Rebuild the entire database table if a record changed or membership changed.
+	// Missing membership in a legacy cursor deliberately triggers one rebuild and
+	// records the snapshot for future incremental rounds.
+	if changedCount > 0 || membershipChanged || len(prevEditTimes) == 0 {
+		if len(recordIDs) == 0 && membershipChanged {
+			return []types.FetchedItem{{
+				ExternalID: id,
+				IsDeleted:  true,
+				Metadata:   map[string]string{"channel": types.ChannelNotion},
+			}}, recordEditTimes, recordIDs, truncated, nil
+		}
 		item := c.buildDatabaseItem(ctx, client, id, dbTitle, records)
 		if item != nil {
-			return []types.FetchedItem{*item}, recordEditTimes, truncated
+			return []types.FetchedItem{*item}, recordEditTimes, recordIDs, truncated, nil
 		}
 	}
 
-	return nil, recordEditTimes, truncated
+	return nil, recordEditTimes, recordIDs, truncated, nil
+}
+
+func equalStringSlices(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // queryDatabaseRecords resolves the database ID and queries all records.
