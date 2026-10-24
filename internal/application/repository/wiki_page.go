@@ -371,13 +371,17 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 			// SQLite does not provide PostgreSQL's full-text functions or casts.
 			// Search the same user-visible fields with a case-insensitive LIKE.
 			query = query.Where(
-				"(LOWER(COALESCE(title, '')) LIKE LOWER(?) ESCAPE ? OR LOWER(COALESCE(content, '')) LIKE LOWER(?) ESCAPE ? OR LOWER(CAST(aliases AS TEXT)) LIKE LOWER(?) ESCAPE ?)",
+				"(LOWER(COALESCE(title, '')) LIKE LOWER(?) ESCAPE ? OR " +
+					"LOWER(COALESCE(content, '')) LIKE LOWER(?) ESCAPE ? OR " +
+					"LOWER(CAST(aliases AS TEXT)) LIKE LOWER(?) ESCAPE ?)",
 				pattern, likeEscapeChar, pattern, likeEscapeChar, pattern, likeEscapeChar,
 			)
 		} else {
 			// Use PostgreSQL full-text search + ILIKE for aliases.
 			query = query.Where(
-				"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ? ESCAPE ?)",
+				"(to_tsvector('simple', coalesce(title, '') || ' ' || " +
+					"coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR " +
+					"aliases::text ILIKE ? ESCAPE ?)",
 				req.Query, pattern, likeEscapeChar,
 			)
 		}
