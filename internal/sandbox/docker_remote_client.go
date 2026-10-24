@@ -47,6 +47,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
@@ -1334,12 +1335,18 @@ func dockerEnvSlice(env map[string]string) []string {
 }
 
 // firstNonEmptyLine trims a command's stderr down to something a user-facing
-// error can carry.
+// error can carry. The byte cap keeps one runaway line out of the error, and
+// the trailing partial rune (if the cap lands inside a multi-byte character)
+// is dropped so the surfaced message stays valid UTF-8.
 func firstNonEmptyLine(output string) string {
 	for _, line := range strings.Split(output, "\n") {
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
 			if len(trimmed) > 200 {
-				return trimmed[:200] + "…"
+				cut := trimmed[:200]
+				for len(cut) > 0 && !utf8.ValidString(cut) {
+					cut = cut[:len(cut)-1]
+				}
+				return cut + "…"
 			}
 			return trimmed
 		}
