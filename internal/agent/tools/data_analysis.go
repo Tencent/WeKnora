@@ -577,8 +577,8 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 // Multi-sheet workbooks are supported: XLSX sheets containing only formatting
 // are skipped; rows from the remaining sheets are unioned (UNION ALL BY NAME) into a
 // single table. A synthetic '__sheet_name' column is added so downstream SQL
-// can filter / aggregate per sheet. If sheet enumeration fails for any
-// reason, we fall back to reading just the first sheet (original behavior).
+// can filter / aggregate per sheet. If spatial metadata is unavailable, sheet
+// names are read from the workbook itself rather than silently omitting sheets.
 //
 // Parameters:
 //   - ctx: context for cancellation and timeout
@@ -589,8 +589,8 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 //   - *TableSchema: schema information of the created table
 //   - error: any error that occurred during the operation
 //
-// Note: requires the DuckDB 'excel' extension (for read_xlsx) and the
-// 'spatial' extension (for st_read_meta used to enumerate sheets).
+// Note: requires the DuckDB 'excel' extension (for read_xlsx). Sheet discovery
+// uses 'spatial' (st_read_meta) when available, with OOXML metadata as a fallback.
 //
 // Binary BIFF .xls workbooks are rejected with an actionable error before
 // DuckDB is touched: the excel extension only reads the ZIP-based OOXML
@@ -612,12 +612,9 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 		t.recordCreatedTable(tableName)
 		sheetNames, enumErr := t.listExcelSheets(ctx, filename)
 		if enumErr != nil {
-			logger.Warnf(ctx,
-				"[Tool][DataAnalysis] Could not enumerate sheets for '%s' (session=%s): %v. Falling back to first sheet only.",
-				filename, t.sessionID, enumErr,
-			)
+			return nil, fmt.Errorf("failed to enumerate Excel worksheets: %w", enumErr)
 		}
-		if enumErr == nil && len(sheetNames) > 0 && strings.EqualFold(filepath.Ext(filename), ".xlsx") {
+		if len(sheetNames) > 0 && strings.EqualFold(filepath.Ext(filename), ".xlsx") {
 			filtered, err := filterEmptyExcelSheets(ctx, filename, sheetNames)
 			switch {
 			case err != nil && ctx.Err() != nil:
@@ -653,14 +650,36 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 	return t.LoadFromTable(ctx, tableName)
 }
 
-// listExcelSheets returns the names of every sheet (layer) inside the given
-// Excel workbook by querying DuckDB's spatial st_read_meta table function.
-// The returned slice preserves the on-disk order of sheets.
+// listExcelSheets preserves workbook order and recovers from unavailable or
+// empty spatial metadata by reading sheet names from the OOXML container.
+func (t *DataAnalysisTool) listExcelSheets(ctx context.Context, filename string) ([]string, error) {
+	names, metaErr := t.listExcelSheetsFromSpatial(ctx, filename)
+	if metaErr == nil && len(names) > 0 {
+		return names, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if metaErr == nil {
+		metaErr = fmt.Errorf("spatial metadata contains no worksheets")
+	}
+	names, err := listExcelSheetsFromWorkbook(ctx, filename)
+	if err != nil {
+		return nil, fmt.Errorf("spatial metadata: %v; workbook metadata: %w", metaErr, err)
+	}
+	logger.Warnf(ctx,
+		"[Tool][DataAnalysis] Using workbook metadata for '%s' after spatial enumeration failed: %v",
+		filename, metaErr,
+	)
+	return names, nil
+}
+
+// listExcelSheetsFromSpatial queries DuckDB's spatial st_read_meta function.
 //
 // st_read_meta returns a single row whose `layers` column is a LIST of
 // STRUCTs (one per layer / sheet). We UNNEST that list and project the
 // struct's `name` field to get a flat list of sheet names.
-func (t *DataAnalysisTool) listExcelSheets(ctx context.Context, filename string) ([]string, error) {
+func (t *DataAnalysisTool) listExcelSheetsFromSpatial(ctx context.Context, filename string) ([]string, error) {
 	metaSQL := fmt.Sprintf(
 		"SELECT UNNEST(layers).name FROM st_read_meta('%s')",
 		sqlSingleQuoteEscape(filename),
@@ -695,7 +714,7 @@ func (t *DataAnalysisTool) listExcelSheets(ctx context.Context, filename string)
 func buildExcelCreateTableSQL(tableName, filename string, sheetNames []string) string {
 	escFile := sqlSingleQuoteEscape(filename)
 
-	// No sheet info (enumeration failed or empty): read the first sheet only.
+	// Without an explicit sheet selection, retain the default read_xlsx SQL form.
 	if len(sheetNames) == 0 {
 		return fmt.Sprintf(
 			"CREATE TABLE \"%s\" AS SELECT * FROM read_xlsx('%s', header=true, all_varchar=true)",
