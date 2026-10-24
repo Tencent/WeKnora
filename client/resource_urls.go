@@ -18,12 +18,13 @@ const (
 
 // ResourceURLOptions carries the optional resource_urls query parameter shared
 // by chat, message-history, knowledge-search, and hybrid-search endpoints.
+// Empty inherits the deployment default; either explicit mode overrides it.
 type ResourceURLOptions struct {
 	ResourceURLs ResourceURLMode
 }
 
 func applyResourceURLQuery(q url.Values, opts *ResourceURLOptions) {
-	if opts == nil || opts.ResourceURLs == "" || opts.ResourceURLs == ResourceURLModeHandle {
+	if opts == nil || opts.ResourceURLs == "" {
 		return
 	}
 	q.Set("resource_urls", string(opts.ResourceURLs))
