@@ -4219,8 +4219,16 @@ export default {
       modelDescription: 'Speech-to-text model for audio (e.g. OpenAI Whisper)',
       modelPlaceholder: 'Select an ASR model',
       languageLabel: 'Audio language hint',
-      languageDescription: 'Optional. A primary language hint can improve some ASR models; leave empty for auto-detection.',
-      languagePlaceholder: 'For example zh or en; empty means auto-detect'
+      languageAutoDetect: 'Auto-detect',
+      languageOptions: {
+        zh: 'Chinese',
+        en: 'English',
+        ja: 'Japanese',
+        ko: 'Korean',
+        ru: 'Russian',
+      },
+      languageDescription: 'Optional. A primary language hint can improve some ASR models; leave empty for auto-detection. Languages missing from the list can be typed in as a language code (e.g. es, yue).',
+      languagePlaceholder: 'Select a language; empty means auto-detect'
     },
     advanced: {
       title: 'Advanced Settings',

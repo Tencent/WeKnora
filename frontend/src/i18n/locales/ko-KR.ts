@@ -4964,8 +4964,16 @@ export default {
       modelDescription: '오디오의 음성을 텍스트로 전사하는 모델 (예: OpenAI Whisper)',
       modelPlaceholder: 'ASR 모델을 선택해주세요',
       languageLabel: '오디오 언어 힌트',
-      languageDescription: '선택 사항입니다. 기본 언어를 지정하면 일부 ASR 모델의 인식이 향상되며, 비워 두면 자동 감지합니다.',
-      languagePlaceholder: '예: zh, en; 비워 두면 자동 감지'
+      languageAutoDetect: '자동 감지',
+      languageOptions: {
+        zh: '중국어',
+        en: '영어',
+        ja: '일본어',
+        ko: '한국어',
+        ru: '러시아어',
+      },
+      languageDescription: '선택 사항입니다. 기본 언어를 지정하면 일부 ASR 모델의 인식이 향상되며, 비워 두면 자동 감지합니다. 목록에 없는 언어는 언어 코드(예: es, yue)를 직접 입력할 수 있습니다.',
+      languagePlaceholder: '언어 선택; 비워 두면 자동 감지'
     },
     multimodal: {
       title: '이미지 처리 설정',

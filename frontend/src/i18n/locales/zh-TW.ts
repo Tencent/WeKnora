@@ -4965,8 +4965,16 @@ export default {
       modelDescription: '用於音訊中語音轉文字的識別模型（如 OpenAI Whisper）',
       modelPlaceholder: '請選擇 ASR 模型',
       languageLabel: '音訊語言提示',
-      languageDescription: '可選；指定主要語種可提高部分 ASR 模型的識別穩定性，留空時自動檢測',
-      languagePlaceholder: '例如 zh、en，留空自動檢測'
+      languageAutoDetect: '自動檢測',
+      languageOptions: {
+        zh: '中文',
+        en: '英語',
+        ja: '日語',
+        ko: '韓語',
+        ru: '俄語',
+      },
+      languageDescription: '可選；指定主要語種可提高部分 ASR 模型的辨識穩定性，留空時自動檢測。清單裡沒有的語種可以直接輸入語言代碼（如 es、yue）。',
+      languagePlaceholder: '選擇語言；留空自動檢測'
     },
     multimodal: {
       title: '影像處理設定',

@@ -4219,8 +4219,16 @@ export default {
       modelDescription: '音声をテキストに変換するモデル（例: OpenAI Whisper）',
       modelPlaceholder: 'ASRモデルを選択',
       languageLabel: '音声の言語ヒント',
-      languageDescription: '任意。主要な言語のヒントを指定すると、一部のASRモデルで精度が向上します。空欄の場合は自動判定します。',
-      languagePlaceholder: '例: zh、en。空欄の場合は自動判定'
+      languageAutoDetect: '自動判定',
+      languageOptions: {
+        zh: '中国語',
+        en: '英語',
+        ja: '日本語',
+        ko: '韓国語',
+        ru: 'ロシア語',
+      },
+      languageDescription: '任意。主要な言語のヒントを指定すると、一部のASRモデルで精度が向上します。空欄の場合は自動判定します。リストにない言語は言語コード（例: es、yue）を直接入力できます。',
+      languagePlaceholder: '言語を選択。空欄の場合は自動判定'
     },
     advanced: {
       title: '詳細設定',

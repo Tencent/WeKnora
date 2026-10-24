@@ -78,3 +78,57 @@ test('uses section navigation with inline chunking controls and advanced options
   assert.match(dialog, /data-section="multimodal"/)
   assert.doesNotMatch(dialog, /<KBChunkingSettings/)
 })
+
+// The ASR language used to be a free-text box, so users had to recall vendor codes
+// such as `zh` themselves. It is now a dropdown with the common languages, while
+// `creatable` keeps es / fr / yue and friends typeable for anything not listed.
+test('offers the ASR language as a dropdown instead of a free-text field', () => {
+  assert.doesNotMatch(dialog, /v-model="uiState\.asrConfig\.language"/)
+  assert.match(dialog, /<t-select[\s\S]{0,200}v-model="asrLanguageModel"/)
+  assert.match(dialog, /:options="asrLanguageOptions"/)
+  assert.match(dialog, /(?<![-\w])filterable(?![-\w])/)
+  assert.match(dialog, /(?<![-\w])creatable(?![-\w])/)
+  assert.match(dialog, /(?<![-\w])clearable(?![-\w])/)
+})
+
+test('keeps vendor language codes as the option values', () => {
+  const optionBlock = dialog.slice(
+    dialog.indexOf('const asrLanguageOptions'),
+    dialog.indexOf('const asrLanguageModel'),
+  )
+  for (const code of ['zh', 'en', 'ja', 'ko', 'ru']) {
+    assert.match(optionBlock, new RegExp(`value: '${code}'`))
+  }
+  // Display names come from i18n, never from the stored code (no `value: 'Chinese'`).
+  assert.doesNotMatch(optionBlock, /value: '(Chinese|English|Japanese|Korean|Russian)'/)
+  assert.match(optionBlock, /value: ASR_LANGUAGE_AUTO/)
+})
+
+test('stores the ASR language through the normalising model so clearing means auto-detect', () => {
+  assert.match(dialog, /fromAsrLanguageModel\(selected\)/)
+  assert.match(dialog, /toAsrLanguageModel\(uiState\.value\.asrConfig\.language\)/)
+  assert.match(dialog, /language: state\.asrConfig\.language/)
+  assert.match(dialog, /if \(o\.asr_config\.language != null\) s\.asrConfig\.language = o\.asr_config\.language/)
+})
+
+test('labels every ASR language option in all six locale bundles', () => {
+  const localeKeys = [
+    "languageAutoDetect:",
+    "languageOptions: {",
+    "zh:",
+    "en:",
+    "ja:",
+    "ko:",
+    "ru:",
+  ]
+  for (const locale of ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'ko-KR', 'ru-RU']) {
+    const bundle = readFileSync(new URL(`../../../i18n/locales/${locale}.ts`, import.meta.url), 'utf8')
+    const labelAt = bundle.indexOf('      languageLabel:')
+    const placeholderAt = bundle.indexOf('      languagePlaceholder:', labelAt)
+    assert.ok(labelAt >= 0 && placeholderAt > labelAt, `${locale} has no ASR language block`)
+    const asrBlock = bundle.slice(labelAt, placeholderAt)
+    for (const key of localeKeys) {
+      assert.ok(asrBlock.includes(key), `${locale} is missing ${key}`)
+    }
+  }
+})
