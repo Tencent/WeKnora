@@ -739,8 +739,11 @@ services:
     profiles:
       - milvus
 
+  # Weaviate 每次只支持升级一个 minor 版本。weaviate_data 卷中已有旧版本数据时，
+  # 请逐个 minor 升级（1.28 → 1.29 → … → 1.39，每步使用该 minor 的最新 patch），
+  # 或备份后清空该卷、重新导入知识库。
   weaviate:
-    image: semitechnologies/weaviate:1.28.4
+    image: semitechnologies/weaviate:1.39.13
     container_name: WeKnora-weaviate
     environment:
       - PERSISTENCE_DATA_PATH=/var/lib/weaviate
