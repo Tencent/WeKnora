@@ -437,6 +437,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	) *service.PinnedSessionSandbox {
 		return service.NewPinnedSessionSandbox(pinner, resolver, mgr, host)
 	}))
+	must(container.Provide(newShellJobService))
 	must(container.Provide(func(
 		mgr sandbox.Manager,
 		pinned *service.PinnedSessionSandbox,
@@ -809,6 +810,14 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// the daemon alive until the process is killed.
 	must(container.Invoke(func(cleaner interfaces.ResourceCleaner, _ *browserskill.Manager) {
 		cleaner.Promote("BrowserSkill")
+	}))
+	must(container.Invoke(startShellJobSweeper))
+	// Background shell jobs shut down before the database and streams: their
+	// watchers write terminal state locally and must not race the cleanup that
+	// follows. Cleanup runs in reverse, so promote runs them first. A missing
+	// name is a no-op, so the web build can invoke this without a local hook.
+	must(container.Invoke(func(cleaner interfaces.ResourceCleaner, _ *service.ShellJobService) {
+		cleaner.Promote("LocalShellJobs")
 	}))
 
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")

@@ -30,6 +30,7 @@ from docreader.proto.docreader_pb2 import (
 )
 from docreader.source_wire import source_blocks_to_proto
 from docreader.utils.request import init_logging_request_id, request_id_context
+from docreader.utils.request_memory import RequestThreadPoolExecutor, track_request_size
 
 _SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
 
@@ -192,16 +193,18 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
             return result, request.url
 
         file_type = request.file_type or os.path.splitext(request.file_name)[1][1:]
+        file_content = request.file_content
+        track_request_size(len(file_content))
         logger.info(
             "Read(File): file=%s, type=%s, size=%d bytes",
             request.file_name,
             file_type,
-            len(request.file_content),
+            len(file_content),
         )
         result = self.parser.parse_file(
             request.file_name,
             file_type,
-            request.file_content,
+            file_content,
             parser_engine=parser_engine,
             engine_overrides=engine_overrides,
         )
@@ -317,7 +320,7 @@ def main():
     interceptors = [AuthInterceptor()]
 
     server = grpc.server(
-        futures.ThreadPoolExecutor(max_workers=CONFIG.grpc_max_workers),
+        RequestThreadPoolExecutor(max_workers=CONFIG.grpc_max_workers),
         options=[
             ("grpc.max_send_message_length", CONFIG.grpc_max_file_size_mb),
             ("grpc.max_receive_message_length", CONFIG.grpc_max_file_size_mb),

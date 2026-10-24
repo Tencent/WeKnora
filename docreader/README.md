@@ -103,7 +103,8 @@ docreader:
 | `DOCREADER_PREPROCESS_THREADS` | `2` | 每个 ONNX 模型的算子内线程数及 OpenCV/数值库线程设置；算子间线程数为 1 |
 | `DOCREADER_PREPROCESS_MEMORY_MB` | `2048` | 每个子进程的内存预算，单位 MiB；Linux 同时设置硬地址空间上限 `RLIMIT_AS`，父进程监测 RSS，超额即终止 |
 | `DOCREADER_PREPROCESS_MAX_PIXELS` | `16000000` | 解码前检查图片头的像素上限，过大的输入直接回退 |
-| `DOCREADER_PREPROCESS_MAX_EDGE` | `2000` | 进入几何预处理前按比例缩小图片的最长边，输出也基于此工作图 |
+| `DOCREADER_PREPROCESS_PROBE_EDGE` | `2000` | 仅用于检测的工作图最长边；RapidOCR 自身也把检测器限在 2000，裁切仍回原图 |
+| `DOCREADER_PREPROCESS_MAX_EDGE` | `2000` | 裁切结果的最长边上限，超过才按比例缩小；不改写原图分辨率 |
 
 所有限制必须为正数；非法值回落到默认值，`0` 不会关闭限制。编码后的输入最多为 20 MiB。未启用此功能时不启动子进程、不加载 RapidOCR 模型。
 

@@ -18,6 +18,7 @@ from ebooklib import epub
 
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
+from docreader.parser.mhtml_parser import MHTMLParser
 
 logger = logging.getLogger(__name__)
 
@@ -254,9 +255,10 @@ class EPUBParser(BaseParser):
             if image_aliases:
                 self._rewrite_image_sources(soup, image_aliases, base_path)
             markdown_text = md(str(soup), heading_style="ATX")
-            return "\n".join(
-                line.strip() for line in markdown_text.split("\n") if line.strip()
-            )
+            # Keep the blank lines and indentation that delimit Markdown blocks
+            # (paragraphs, quotes, lists, tables, fenced code) and only collapse
+            # runs of blank lines, as the MHTML and static HTML parsers do.
+            return MHTMLParser._normalize_markdown(markdown_text)
         except ImportError:
             logger.warning("markdownify not available, using HTML as-is")
             return f"```html\n{html_content}\n```"

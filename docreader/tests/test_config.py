@@ -64,9 +64,10 @@ class DocReaderConfigTest(unittest.TestCase):
         self.assertEqual(cfg.preprocess_memory_mb, 2048)
         self.assertEqual(cfg.preprocess_max_pixels, 16_000_000)
         self.assertEqual(cfg.preprocess_max_edge, 2000)
+        self.assertEqual(cfg.preprocess_probe_edge, 2000)
 
     def test_preprocess_limits_cannot_be_disabled_by_invalid_values(self):
-        for name in ("MAX_WORKERS", "THREADS", "TIMEOUT_SECONDS", "MEMORY_MB", "MAX_PIXELS", "MAX_EDGE"):
+        for name in ("MAX_WORKERS", "THREADS", "TIMEOUT_SECONDS", "MEMORY_MB", "MAX_PIXELS", "MAX_EDGE", "PROBE_EDGE"):
             key = f"DOCREADER_PREPROCESS_{name}"
             for value in ("0", "-1", "invalid"):
                 with self.subTest(key=key, value=value), patch.dict(os.environ, {key: value}, clear=True):

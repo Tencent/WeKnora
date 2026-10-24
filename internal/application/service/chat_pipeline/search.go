@@ -361,10 +361,10 @@ func targetReportsEmbedFailure(kb *types.KnowledgeBase) bool {
 }
 
 // searchByTargets performs KB searches using pre-computed SearchTargets.
-// Targets sharing the same underlying embedding model (identified by model
-// name + endpoint, not just model ID) are grouped so the query embedding is
-// computed once per model AND all full-KB targets in a group are combined into
-// a single retrieval call, reducing both embedding API calls and DB round-trips.
+// Targets sharing the same model name, endpoint and configured vector dimension
+// are grouped even across model IDs. Each group computes one query embedding
+// and combines all full-KB targets into a single retrieval call, reducing both
+// embedding API calls and DB round-trips.
 func (p *PluginSearch) searchByTargets(
 	ctx context.Context,
 	chatManage *types.ChatManage,
@@ -397,8 +397,9 @@ func (p *PluginSearch) searchByTargets(
 		})
 	}
 
-	// Resolve actual model identities (name + endpoint) so that cross-tenant
-	// KBs backed by the same physical model share one embedding computation.
+	// Resolve actual model identities (name + endpoint + configured dimension)
+	// so that cross-tenant KBs backed by the same vector space share one
+	// embedding computation.
 	modelKeyMap := p.knowledgeBaseService.ResolveEmbeddingModelKeys(ctx, kbList)
 
 	groups := make(map[string][]*types.SearchTarget)

@@ -147,12 +147,12 @@ The sandbox belongs to this session alone; nothing here runs on the host.`
 - Use ls/find to discover files, grep/awk to search, and cat/head/tail/sed to inspect text. Read known paths directly; no mandatory discovery call.
 - Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. Commands are limited to 8192 bytes. Execution is synchronous (no nohup or trailing &).
 - skill_name selects a listed skill for this call. Installed skills use their Python virtualenv and Node modules;
-  host resources are staged automatically and use the system runtime until a local .venv is created.
+  host-staged resources use the system runtime until a local .venv exists.
   Scoped credentials apply to both. Example: skill_name="pdf", command="python3 report.py".
   Run bundled scripts via "$WEKNORA_SKILL_DIR/scripts/...". Omit skill_name for system commands.
 - /workspace/input contains user attachments: preserve originals. /workspace/output is the only directory collected
   for download, so it takes finished deliverables only; keep scratch and intermediate files elsewhere under /workspace.
-  apt-get is available when the sandbox network policy allows it; permanent dependencies belong in the skill installer.
+  apt-get works when the network policy allows it; permanent dependencies belong in the skill installer.
 - Install extras with skill_name set and the default work_dir:
   ` + "`" + skillPythonPackageInstallCommand + "`" + ` (no pip needed), or
   ` + "`" + skillNodePackageInstallCommand + "`" + `.
@@ -161,7 +161,9 @@ The sandbox belongs to this session alone; nothing here runs on the host.`
 %s
 - Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. Transport failures/timeouts are tool failures. Changing tools does not change permissions; do not repeat a denied operation through another tool.
 - stdout/stderr have independent byte limits, preserving head and tail when truncated. Full output is not automatically saved; redirect verbose commands to a workspace log when it must be retained. Binary bytes are suppressed.
-- Use ![description](sandbox:<file name>) with exact links from Output files, never stdout or temporary paths.`
+- Use ![description](sandbox:<file name>) with exact links from Output files, never stdout or temporary paths.
+- For anything that may run longer than a couple of minutes use ` +
+		"`shell_exec_async`" + ` instead: short commands still return their result directly.`
 )
 
 func shellExecDescription(l sandbox.WorkspaceLayout) string {
@@ -187,7 +189,9 @@ const hostShellExecDescription = "Execute a command in %s. The process is OS-san
 	"- Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. " +
 	"Do not bypass permission or policy denials through another tool.\n" +
 	"- stdout/stderr have independent byte limits. " +
-	"Redirect verbose commands to a workspace log when output must be kept."
+	"Redirect verbose commands to a workspace log when output must be kept.\n" +
+	"- If you are not sure the command finishes within a couple of minutes, use " +
+	"`shell_exec_async` instead: short commands still return their result directly.\n"
 
 // ShellExecInput defines the input parameters for shell_exec.
 type ShellExecInput struct {
@@ -753,17 +757,25 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 func (t *ShellExecTool) maybeCaptureSkillEnv(
 	ctx context.Context, skillName string, pairs map[string]string, res *sandbox.ExecuteResult,
 ) {
-	if t == nil || t.envCapture == nil || t.isInstallMode() {
+	if t == nil || t.isInstallMode() {
 		return
 	}
-	if res == nil || res.ExitCode != 0 {
+	captureUsedSkillEnv(ctx, t.envCapture, skillName, pairs, res != nil && res.ExitCode == 0)
+}
+
+// captureUsedSkillEnv persists credentials a successful skill command brought
+// with it. pairs must already exclude names that were stored before the call.
+func captureUsedSkillEnv(
+	ctx context.Context, capture SkillEnvCapture, skillName string, pairs map[string]string, succeeded bool,
+) {
+	if !succeeded || capture == nil {
 		return
 	}
 	skillName = strings.TrimSpace(skillName)
 	if !sandbox.IsValidSkillName(skillName) || len(pairs) == 0 {
 		return
 	}
-	t.envCapture(ctx, skillName, pairs)
+	capture(ctx, skillName, pairs)
 }
 
 // stillMissing removes from missing every name this call supplied itself.

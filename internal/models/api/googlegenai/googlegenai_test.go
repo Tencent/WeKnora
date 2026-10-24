@@ -765,3 +765,34 @@ func TestUsageWithoutTotalSumsToolUsePromptTokens(t *testing.T) {
 		t.Errorf("PromptTokens/TotalTokens = %d/%d, want 16/21", got.PromptTokens, got.TotalTokens)
 	}
 }
+
+func TestMapFinishReason(t *testing.T) {
+	tests := []struct {
+		reason       string
+		hasToolCalls bool
+		want         string
+	}{
+		{"", false, ""},
+		{"STOP", false, "stop"},
+		{"STOP", true, "tool_calls"},
+		{"MAX_TOKENS", false, "length"},
+		{"SAFETY", false, "content_filter"},
+		{"RECITATION", false, "content_filter"},
+		{"LANGUAGE", false, "content_filter"},
+		{"BLOCKLIST", false, "content_filter"},
+		{"PROHIBITED_CONTENT", false, "content_filter"},
+		{"SPII", false, "content_filter"},
+		{"IMAGE_SAFETY", false, "content_filter"},
+		{"IMAGE_PROHIBITED_CONTENT", false, "content_filter"},
+		{"IMAGE_RECITATION", false, "content_filter"},
+		{"OTHER", false, "other"},
+		{"MALFORMED_FUNCTION_CALL", false, "malformed_function_call"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.reason, func(t *testing.T) {
+			if got := mapFinishReason(tt.reason, tt.hasToolCalls); got != tt.want {
+				t.Fatalf("mapFinishReason(%q, %v) = %q, want %q", tt.reason, tt.hasToolCalls, got, tt.want)
+			}
+		})
+	}
+}

@@ -140,7 +140,7 @@ flowchart LR
 | 名称 | 默认值 | 说明 |
 | --- | --- | --- |
 | `GIN_MODE` | release | `debug` 开发模式（启用 Swagger）/ `release` 生产 |
-| `LOG_LEVEL` / `LOG_PATH` / `LOG_FORMAT` | debug / 空 / 空 | 日志级别、文件路径（空则仅 stdout）、自定义格式 |
+| `LOG_LEVEL` / `LOG_PATH` / `WEKNORA_LOG_FORMAT` | debug / 空 / 空 | 日志级别、文件路径（空则仅 stdout）、自定义格式（非空须含 `%msg`；未设置时兼容旧 `LOG_FORMAT`，显式空值禁用回退；不支持 `json` 关键字） |
 | `LLM_DEBUG_LOG` | false | true 时在 LOG_PATH 同目录写 `llm_debug.log` |
 | `TZ` | Asia/Shanghai | 时区 |
 | `DEFAULT_LOCALE` | 空 | 前端界面默认语言（frontend 容器读取）：`zh-CN` / `en-US` / `ru-RU` / `ko-KR` / `ja-JP`，非法值忽略。仅影响未手动切换过语言的用户，优先级：用户已选语言 > 本变量 > `zh-CN`；改完重启 frontend 容器即可，无需重建镜像 |

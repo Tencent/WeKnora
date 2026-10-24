@@ -13,6 +13,10 @@ import (
 // (vendored under third_party/anydoc-go until they are published as a module).
 // Conversion runs in-process: no subprocess, no HTTP hop, no Python.
 
+// *ConvertError must keep implementing resourceLimiter so Convert can classify
+// a parser budget failure without this file's build tag.
+var _ resourceLimiter = (*upstream.ConvertError)(nil)
+
 func backendAvailable() bool { return true }
 
 func backendUnavailableReason() string { return "" }

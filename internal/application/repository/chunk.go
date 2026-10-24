@@ -645,11 +645,68 @@ func (r *chunkRepository) DeleteChunks(ctx context.Context, tenantID uint64, ids
 	return nil
 }
 
-// DeleteChunksByKnowledgeID deletes all chunks for a knowledge ID
+// DeleteChunksByKnowledgeID soft-deletes all active chunks for a knowledge ID.
+// The rows remain available for recovery until a later successful replacement
+// proves that a newer chunk with the same document position is now active.
 func (r *chunkRepository) DeleteChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error {
 	return r.db.WithContext(ctx).Where(
 		"tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID,
 	).Delete(&types.Chunk{}).Error
+}
+
+// PurgeSupersededChunksByKnowledgeID permanently removes only soft-deleted
+// chunks that have an active replacement from a later parse at the same
+// document position and chunk type. This intentionally does not purge an
+// arbitrary soft-deleted row: a user-deleted chunk, or a row from a failed or
+// cancelled replacement, remains recoverable until a successful replacement
+// supersedes it.
+//
+// The revision snapshots belong to the obsolete chunk ID and are removed in
+// the same transaction. SQLite's chunk_images projection is maintained by its
+// existing DELETE trigger; other stores have already removed their indexes
+// before this method is called.
+func (r *chunkRepository) PurgeSupersededChunksByKnowledgeID(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+) (int64, error) {
+	var chunkIDs []string
+	var purged int64
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// A replacement must have been created after the previous row was
+		// soft-deleted. Comparing against deleted_at avoids treating a manual
+		// delete as superseded merely because an older live chunk has the same
+		// index. COALESCE keeps legacy NULL chunk_type rows comparable.
+		if err := tx.Unscoped().Model(&types.Chunk{}).Where(
+			`chunks.tenant_id = ? AND chunks.knowledge_id = ?
+				AND chunks.deleted_at IS NOT NULL
+				AND EXISTS (
+					SELECT 1 FROM chunks AS replacement
+					WHERE replacement.tenant_id = chunks.tenant_id
+						AND replacement.knowledge_id = chunks.knowledge_id
+						AND replacement.deleted_at IS NULL
+						AND replacement.chunk_index = chunks.chunk_index
+						AND COALESCE(replacement.chunk_type, '') = COALESCE(chunks.chunk_type, '')
+						AND replacement.created_at >= chunks.deleted_at
+				)`,
+			tenantID, knowledgeID,
+		).Pluck("chunks.id", &chunkIDs).Error; err != nil {
+			return err
+		}
+		if len(chunkIDs) == 0 {
+			return nil
+		}
+
+		if err := tx.Where("chunk_id IN ?", chunkIDs).Delete(&types.ChunkRevision{}).Error; err != nil {
+			return err
+		}
+		result := tx.Unscoped().Where("id IN ?", chunkIDs).Delete(&types.Chunk{})
+		if result.Error != nil {
+			return result.Error
+		}
+		purged = result.RowsAffected
+		return nil
+	})
+	return purged, err
 }
 
 // ListImageInfoByKnowledgeIDs returns non-empty image_info values for the given knowledge IDs.

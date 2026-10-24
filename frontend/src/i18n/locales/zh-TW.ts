@@ -4836,6 +4836,12 @@ export default {
     noKnowledgeBases: '沒有可用的知識庫',
     enterDescription: '輸入描述',
     rawOutputLabel: '原始輸出',
+    backgroundWork: {
+      running: '沒有背景工作 | {count} 個背景工作 | {count} 個背景工作',
+      stop: '停止',
+      loading: '正在載入輸出…',
+      unavailable: '暫時無法查看輸出',
+    },
     wikiWritePageTitle: 'Wiki 頁面寫入',
     wikiReplaceTextTitle: 'Wiki 文字取代',
     wikiRenamePageTitle: 'Wiki 頁面重新命名',
