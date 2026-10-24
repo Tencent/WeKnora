@@ -1300,8 +1300,9 @@ export default {
     confirmManual: '作成して解析',
     titleReparse: '再解析の確認',
     confirmReparse: '確定して再解析',
+    resetToKnowledgeBase: 'ナレッジベースの現在の設定に戻す',
     reparseSource: '再解析するドキュメント',
-    reparseHint: '前回の解析設定を引き継ぎます。ここで変更できます',
+    reparseHint: '変更していない項目はナレッジベースの現在の設定に従います。文書ごとに変えた項目は、リセットするまで残ります。',
     manualCharCount: '{count}文字'
   },
   knowledgeStages: {

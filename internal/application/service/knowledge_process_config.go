@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -253,13 +254,21 @@ func ApplyKnowledgeProcessOverrides(
 	fileTypes []string,
 	enableMultimodel *bool,
 ) (types.EffectiveProcessConfig, error) {
+	// A non-nil request replaces the stored snapshot. Compacting first drops
+	// fields that only repeat the knowledge base, and a request that compacts
+	// to nothing clears a snapshot left by an earlier confirm.
+	replacing := processOverrides != nil
+	processOverrides = compactProcessOverrides(kb, processOverrides)
 	eff := ResolveProcessConfig(kb, processOverrides)
 	if enableMultimodel != nil && (processOverrides == nil || processOverrides.EnableMultimodel == nil) {
 		eff.EnableMultimodel = *enableMultimodel
 	}
-	if processOverrides == nil {
+	if !replacing {
 		return eff, nil
 	}
+	// Validate the config the task will actually run, after compacting and
+	// after the legacy multimodal flag is applied. A compact result of nil
+	// still has to be written back so an older snapshot is cleared.
 	if err := validateEffectiveProcessOverrides(eff, fileTypes); err != nil {
 		return eff, err
 	}
@@ -365,6 +374,94 @@ func mergeExtractConfig(base types.ExtractConfig, override *types.ExtractConfig)
 		result.CustomInstructions = override.CustomInstructions
 	}
 	return result
+}
+
+// compactProcessOverrides keeps only the override fields that change the
+// effective parse config relative to the knowledge base. The confirm dialog
+// submits a full snapshot of the form, including values the user never
+// touched. Persisting that snapshot makes a later knowledge-base edit
+// invisible to reparse. Fields that do not move the merged result are
+// dropped. Parser-engine key/value overrides are not part of the merged
+// config, so a non-empty map is kept as-is.
+//
+// A nil result means nothing should be stored. Callers that are replacing an
+// existing snapshot (reparse) must write that nil back so the old snapshot
+// is cleared.
+func compactProcessOverrides(
+	kb *types.KnowledgeBase, in *types.KnowledgeProcessOverrides,
+) *types.KnowledgeProcessOverrides {
+	if kb == nil || in == nil {
+		return in
+	}
+	target := comparableProcessConfig(ResolveProcessConfig(kb, in))
+	out := *in
+	for _, clear := range processOverrideClearers() {
+		trial := out
+		clear(&trial)
+		got := comparableProcessConfig(ResolveProcessConfig(kb, &trial))
+		if reflect.DeepEqual(got, target) {
+			clear(&out)
+		}
+	}
+	if len(out.ParserEngineOverrides) == 0 {
+		out.ParserEngineOverrides = nil
+	}
+	if processOverridesBlank(&out) {
+		return nil
+	}
+	return &out
+}
+
+func processOverrideClearers() []func(*types.KnowledgeProcessOverrides) {
+	return []func(*types.KnowledgeProcessOverrides){
+		func(o *types.KnowledgeProcessOverrides) { o.SummaryEnabled = nil },
+		func(o *types.KnowledgeProcessOverrides) { o.ParserEngineRules = nil },
+		func(o *types.KnowledgeProcessOverrides) { o.ChunkingConfig = nil },
+		func(o *types.KnowledgeProcessOverrides) { o.EnableMultimodel = nil },
+		func(o *types.KnowledgeProcessOverrides) { o.VLMConfig = nil },
+		func(o *types.KnowledgeProcessOverrides) { o.ASRConfig = nil },
+		func(o *types.KnowledgeProcessOverrides) { o.QuestionGenerationConfig = nil },
+		func(o *types.KnowledgeProcessOverrides) { o.GraphEnabled = nil },
+		func(o *types.KnowledgeProcessOverrides) { o.ImageAttrsEnabled = nil },
+		func(o *types.KnowledgeProcessOverrides) {
+			o.ImagePipelineID = nil
+			o.ImagePipelineParams = nil
+		},
+		func(o *types.KnowledgeProcessOverrides) { o.ImageVectorEnabled = nil },
+		func(o *types.KnowledgeProcessOverrides) { o.ImageActions = nil },
+		func(o *types.KnowledgeProcessOverrides) { o.ExtractConfig = nil },
+	}
+}
+
+func processOverridesBlank(o *types.KnowledgeProcessOverrides) bool {
+	if o == nil {
+		return true
+	}
+	return o.SummaryEnabled == nil &&
+		len(o.ParserEngineRules) == 0 &&
+		o.ChunkingConfig == nil &&
+		o.EnableMultimodel == nil &&
+		o.VLMConfig == nil &&
+		o.ASRConfig == nil &&
+		o.QuestionGenerationConfig == nil &&
+		o.GraphEnabled == nil &&
+		o.ImageAttrsEnabled == nil &&
+		o.ImagePipelineID == nil &&
+		len(o.ImagePipelineParams) == 0 &&
+		o.ImageVectorEnabled == nil &&
+		o.ImageActions == nil &&
+		o.ExtractConfig == nil &&
+		len(o.ParserEngineOverrides) == 0
+}
+
+// comparableProcessConfig makes question-count 0 and the enqueue default of 3
+// compare equal, so a form that fills in 3 does not become a stored override.
+func comparableProcessConfig(eff types.EffectiveProcessConfig) types.EffectiveProcessConfig {
+	if eff.QuestionGenerationConfig.QuestionCount <= 0 {
+		eff.QuestionGenerationConfig.QuestionCount = 3
+	}
+	eff.QuestionGenerationConfig.CustomInstructions = strings.TrimSpace(eff.QuestionGenerationConfig.CustomInstructions)
+	return eff
 }
 
 // MergeParserEngineOverrides merges upload overrides on top of tenant overrides safely.

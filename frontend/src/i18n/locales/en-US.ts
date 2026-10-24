@@ -1300,8 +1300,9 @@ export default {
     confirmManual: 'Publish and parse',
     titleReparse: 'Confirm reparse',
     confirmReparse: 'Confirm and reparse',
+    resetToKnowledgeBase: 'Use current knowledge base settings',
     reparseSource: 'Document to reparse',
-    reparseHint: 'Reuses the last parse settings; adjust them here',
+    reparseHint: 'Unchanged fields follow the knowledge base. Earlier per-document changes are kept until you reset them.',
     manualCharCount: '{count} characters'
   },
   knowledgeStages: {

@@ -649,6 +649,14 @@
                 </div>
 
               <footer class="modal-footer">
+                <t-button
+                  v-if="mode === 'reparse'"
+                  theme="default"
+                  variant="text"
+                  @click="resetReparseToKnowledgeBase"
+                >
+                  {{ t('uploadConfirm.resetToKnowledgeBase') }}
+                </t-button>
                 <t-button theme="default" variant="outline" @click="handleCancel">
                   {{ t('uploadConfirm.cancel') }}
                 </t-button>
@@ -690,6 +698,7 @@ import {
 import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue'
 import { folderOptionFromPath, sortFolderOptions } from '../folderTree'
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
+import { diffProcessOverrides } from '@/utils/processOverrides'
 import type {
   UploadConfirmManualSource,
   UploadConfirmMode,
@@ -829,6 +838,7 @@ const tagsLoadFailed = ref(false)
 const chunkingMoreOpen = ref(false)
 const activeSection = ref<ConfigSectionKey>('tags')
 const uiState = ref<UploadUIState>(createDefaultUIState())
+const kbOverrideBaseline = ref<KnowledgeProcessOverrides>({})
 // Destination folder for this batch. Pre-filled from the sidebar tree, but
 // editable here so browsing a folder never silently decides where files land.
 const localTargetFolder = ref('')
@@ -1301,7 +1311,7 @@ function initFromKbInfo(kb: any) {
       language: kb.asr_config?.language || '',
     },
     questionGenerationConfig: {
-      enabled: kb.question_generation_config?.enabled ?? true,
+      enabled: !!kb.question_generation_config?.enabled,
       questionCount: kb.question_generation_config?.question_count || 3,
       customInstructions: kb.question_generation_config?.custom_instructions || '',
     },
@@ -1524,6 +1534,7 @@ watch(
     pendingFolderPaths.value = []
     destinationPickerVisible.value = false
     initFromKbInfo(props.kbInfo)
+    kbOverrideBaseline.value = buildProcessOverrides()
     if (props.mode === 'reparse') {
       applyOverridesToState(props.reparsePreview?.processOverrides)
     }
@@ -1643,6 +1654,11 @@ const handleCancel = () => {
 // 面板报上来的「选中的方案一个动作都没开」；多模态开启时阻止确认。
 const imagePipelineInvalid = ref(false)
 
+function resetReparseToKnowledgeBase() {
+  initFromKbInfo(props.kbInfo)
+  kbOverrideBaseline.value = buildProcessOverrides()
+}
+
 const handleConfirm = () => {
   if (props.mode === 'file' && batchItemCount.value === 0) {
     MessagePlugin.warning(t('uploadConfirm.noItems'))
@@ -1654,7 +1670,7 @@ const handleConfirm = () => {
     return
   }
 
-  const processConfig = buildProcessOverrides()
+  const processConfig = diffProcessOverrides(kbOverrideBaseline.value, buildProcessOverrides())
   if (props.mode === 'manual' && props.manualPreview) {
     emit('confirm', {
       processConfig,
