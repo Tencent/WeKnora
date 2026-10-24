@@ -263,6 +263,41 @@ func TestDeriveParentChildConfigs_DefaultSizes(t *testing.T) {
 	}
 }
 
+func TestDeriveParentChildConfigs_UsesConfiguredChildOverlap(t *testing.T) {
+	base := DefaultConfig()
+	zero := 0
+	parent, child := DeriveParentChildConfigs(base, 4096, 384, &zero)
+	if parent.ChunkOverlap != base.ChunkOverlap {
+		t.Fatalf("parent overlap: got %d want %d", parent.ChunkOverlap, base.ChunkOverlap)
+	}
+	if child.ChunkOverlap != 0 {
+		t.Fatalf("explicit zero child overlap: got %d want 0", child.ChunkOverlap)
+	}
+	if got := NormalizeSplitterConfig(child).ChunkOverlap; got != 0 {
+		t.Fatalf("normalized explicit zero overlap: got %d want 0", got)
+	}
+	if got := ensureDefaults(child).ChunkOverlap; got != 0 {
+		t.Fatalf("splitter explicit zero overlap: got %d want 0", got)
+	}
+
+	custom := 24
+	_, child = DeriveParentChildConfigs(base, 4096, 384, &custom)
+	if child.ChunkOverlap != custom {
+		t.Fatalf("configured child overlap: got %d want %d", child.ChunkOverlap, custom)
+	}
+
+	_, child = DeriveParentChildConfigs(base, 4096, 384, nil)
+	if child.ChunkOverlap != 384/5 {
+		t.Fatalf("legacy default child overlap: got %d want %d", child.ChunkOverlap, 384/5)
+	}
+
+	negative := -1
+	_, child = DeriveParentChildConfigs(base, 4096, 384, &negative)
+	if child.ChunkOverlap != 0 {
+		t.Fatalf("negative configured child overlap: got %d want 0", child.ChunkOverlap)
+	}
+}
+
 func TestDeriveParentChildConfigs_AppliesEmbeddingTokenLimitOnlyToChildren(t *testing.T) {
 	const (
 		parentSize = 4096

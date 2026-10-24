@@ -328,6 +328,9 @@ func mergeChunkingConfig(base types.ChunkingConfig, override *types.ChunkingConf
 	if override.ChildChunkSize != 0 {
 		result.ChildChunkSize = override.ChildChunkSize
 	}
+	if override.ChildChunkOverlap != nil {
+		result.ChildChunkOverlap = override.ChildChunkOverlap
+	}
 	if override.Strategy != "" {
 		result.Strategy = override.Strategy
 	}

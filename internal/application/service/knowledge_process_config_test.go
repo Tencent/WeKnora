@@ -37,6 +37,26 @@ func TestResolveProcessConfig_OverridesChunkSize(t *testing.T) {
 	require.Equal(t, 50, eff.ChunkingConfig.ChunkOverlap)
 }
 
+func TestResolveProcessConfig_ChildChunkOverlapOverrideCanBeZero(t *testing.T) {
+	t.Parallel()
+
+	baseOverlap := 40
+	zeroOverlap := 0
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{ChildChunkOverlap: &baseOverlap},
+	}
+	eff := ResolveProcessConfig(kb, &types.KnowledgeProcessOverrides{
+		ChunkingConfig: &types.ChunkingConfig{ChildChunkOverlap: &zeroOverlap},
+	})
+	require.NotNil(t, eff.ChunkingConfig.ChildChunkOverlap)
+	require.Zero(t, *eff.ChunkingConfig.ChildChunkOverlap)
+
+	withoutOverride := ResolveProcessConfig(kb, &types.KnowledgeProcessOverrides{
+		ChunkingConfig: &types.ChunkingConfig{},
+	})
+	require.Equal(t, baseOverlap, *withoutOverride.ChunkingConfig.ChildChunkOverlap)
+}
+
 func TestResolveProcessConfig_OverrideTogglesParentChild(t *testing.T) {
 	t.Parallel()
 
@@ -549,6 +569,26 @@ func TestBuildParentChildConfigs_PropagatesStrategy(t *testing.T) {
 	require.Equal(t, 512/5, child.ChunkOverlap)
 	require.Equal(t, base.Separators, parent.Separators)
 	require.Equal(t, base.Separators, child.Separators)
+}
+
+func TestBuildParentChildConfigs_PreservesExplicitZeroChildOverlap(t *testing.T) {
+	t.Parallel()
+
+	zero := 0
+	cc := types.ChunkingConfig{
+		EnableParentChild: true,
+		ParentChunkSize:   4096,
+		ChildChunkSize:    512,
+		ChildChunkOverlap: &zero,
+	}
+	base := chunker.NormalizeSplitterConfig(chunker.SplitterConfig{
+		ChunkSize:    512,
+		ChunkOverlap: 80,
+	})
+
+	_, child := buildParentChildConfigs(cc, base)
+	require.Zero(t, child.ChunkOverlap)
+	require.True(t, child.ChunkOverlapExplicit)
 }
 
 // A knowledge base can override the OCR action wholesale, and a single upload
