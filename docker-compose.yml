@@ -352,6 +352,8 @@ services:
       - WEKNORA_AGENT_LLM_TIMEOUT=${WEKNORA_AGENT_LLM_TIMEOUT:-}
       # web_fetch 单页抓取预算（Go duration 或纯数字秒，默认 3m；HTTP 与 chromedp 共用，不叠加）
       - WEKNORA_WEB_FETCH_TIMEOUT=${WEKNORA_WEB_FETCH_TIMEOUT:-}
+      # Built-in MCP ask deadline (Go duration or bare seconds; defaults to 4m).
+      - WEKNORA_MCP_ASK_TIMEOUT=${WEKNORA_MCP_ASK_TIMEOUT:-}
       - WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT=${WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT:-}
       # MCP 工具人工审批失败时是否放行（true 放行 / 默认 fail-close 拒绝）
       - WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN=${WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN:-}
