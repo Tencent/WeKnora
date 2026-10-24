@@ -31,6 +31,19 @@ var defaultHeaderHooks = []headerTrackerHook{
 		endPattern: regexp.MustCompile(`(?si)^\s*$|^\s*[^|\s].*$`),
 		priority:   15,
 	},
+	{
+		// HTML table (issue #4272): "<table>" + first (header) row, kept as a
+		// single unit by protectedPatterns. NormalizeHTMLTables leaves
+		// merged-cell tables as raw HTML with one <tr> per line; without this
+		// hook, chunks after the first carry orphaned <tr><td> rows with no
+		// header and no container. The header stays active until </table>.
+		// The prepended header stays unclosed on purpose: buildChunk closes
+		// any chunk that ends inside an HTML table, so the carried rows sit
+		// inside the container too.
+		startPattern: regexp.MustCompile(`(?is)^\s*<table\b[^>]*>.*?<tr\b[^>]*>.*?</tr\s*>`),
+		endPattern:   regexp.MustCompile(`(?is)^\s*</\s*table\s*>`),
+		priority:     htmlTableHookPriority,
+	},
 }
 
 // tableRowPattern matches a single Markdown table row: "| cell | cell | ... |\n"
@@ -38,6 +51,9 @@ var tableRowPattern = regexp.MustCompile(`(?m)^\s*(?:\|[^|\n]*)+\|\s*$`)
 
 // markdownTableHookPriority matches DEFAULT_CONFIGS / defaultHeaderHooks table hook.
 const markdownTableHookPriority = 15
+
+// htmlTableHookPriority matches the HTML table hook in defaultHeaderHooks.
+const htmlTableHookPriority = 14
 
 // headerTracker maintains the state of active headers across split units.
 type headerTracker struct {
