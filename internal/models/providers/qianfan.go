@@ -101,9 +101,13 @@ func newQianfanProvider() *Definition {
 				// https://cloud.baidu.com/doc/qianfan-api/s/Fm7u3ropn: model,
 				// input, user, encoding_format ("当前只支持float"). The model list
 				// (https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j) caps a request
-				// at 16 texts; tao-8k takes one.
+				// at 16 texts; tao-8k takes one. Per-text the same page states
+				// "文本token数不超过384且长度不超过1000个字符" for Embedding-V1 and
+				// "不超过512且长度不超过2000个字符" for bge-large-zh/en; 1000 is the
+				// floor across the rows this catalog lists.
 				SendEncodingFormat: api.Ptr(true),
 				MaxBatchSize:       api.Ptr(16),
+				MaxInputChars:      api.Ptr(1000),
 			},
 			Rerank: api.RerankCompat{
 				// "文本数量不超过64"; query "长度不超过1600个字符"; each document

@@ -83,10 +83,16 @@ func newSiliconflowProvider() *Definition {
 				// https://api-docs.siliconflow.cn/docs/api/embeddings-post: model,
 				// input, encoding_format, and dimensions "仅 Qwen/Qwen3 系列支持"
 				// — the bge-m3 entry turns it off. The input array schema says
-				// "当前最大数组大小为 32" (maxItems 32).
+				// "当前最大数组大小为 32" (maxItems 32). Per-text the same page
+				// states "每个字符串不得超过模型的最大tokens限制（BAAI/bge-m3 模型
+				// 为8192tokens，其余模型为512tokens）"; the rows this catalog
+				// lists are bge-m3 and the Qwen3 Embedding family (32K native,
+				// https://www.siliconflow.com/zh/models/qwen3-embedding-8b), so
+				// 8192 is their documented floor.
 				SendEncodingFormat: api.Ptr(true),
 				DimensionsField:    api.Ptr("dimensions"),
 				MaxBatchSize:       api.Ptr(32),
+				MaxInputChars:      api.Ptr(8192),
 			},
 			OpenAICompletions: api.OpenAICompletionsCompat{
 				MaxTokensField:          api.Ptr("max_tokens"),

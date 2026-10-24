@@ -210,11 +210,17 @@ func newVolcengineProvider() *Definition {
 			// 1024; encoding_format defaults to float and the reference's own
 			// curl sends it. `instructions` is documented too and deliberately
 			// not declared: like Jina's task it changes the document vectors
-			// (Tencent/WeKnora#1401).
+			// (Tencent/WeKnora#1401). The text reference
+			// (https://docs.volcengine.com/docs/ark/TextVectorizationAPI)
+			// lists "输入token数上限 4096" for the Doubao-embedding text
+			// models, and the vision manual caps one text at 4096 tokens as
+			// well; the vendor counts tokens, not runes — runes are the
+			// closest count without a tokenizer.
 			Embeddings: api.EmbeddingsCompat{
 				SendEncodingFormat: api.Ptr(true),
 				DimensionsField:    api.Ptr("dimensions"),
 				MaxBatchSize:       api.Ptr(1),
+				MaxInputChars:      api.Ptr(4096),
 			},
 			Rerank: api.RerankCompat{
 				// datas "数组长度不超过 200"
