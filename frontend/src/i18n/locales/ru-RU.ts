@@ -5350,11 +5350,14 @@ export default {
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).
+        sourcePage: 'Страница {page}',
         attr: {
           builtin_caption: 'Описание',
           builtin_caption_description: 'Описание изображения, сгенерированное моделью.',
           builtin_ocr_text: 'OCR-текст',
           builtin_ocr_text_description: 'Текст, извлечённый из изображения OCR.',
+          builtin_page: 'Страница документа',
+          builtin_page_description: 'Группировка по исходному документу, затем по странице PDF; изображения без номера страницы идут в конце документа.',
           builtin_created_at: 'Время создания',
           builtin_created_at_description: 'Когда был создан фрагмент исходного документа.',
           builtin_updated_at: 'Время изменения',

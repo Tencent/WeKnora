@@ -154,7 +154,7 @@ func (r *ImageResolver) ResolveAndStore(
 	markdown = md4
 
 	if len(result.ImageRefs) == 0 {
-		return markdown, sortImagesByPosition(markdown, images), nil
+		return markdown, SortImagesByPosition(markdown, images), nil
 	}
 
 	// Build a map of original_ref -> image ref for fast lookup
@@ -198,14 +198,13 @@ func (r *ImageResolver) ResolveAndStore(
 	markdown = md5
 	images = append(images, imgRelativeHTML...)
 
-	return markdown, sortImagesByPosition(markdown, images), nil
+	return markdown, SortImagesByPosition(markdown, images), nil
 }
 
-// sortImagesByPosition orders images by where they first appear in markdown,
-// since each resolution pass collects its own kind and references are
-// rewritten back to front. Callers number images by this order. Images not
-// found in markdown keep their relative order at the end.
-func sortImagesByPosition(markdown string, images []StoredImage) []StoredImage {
+// SortImagesByPosition 按最终 Markdown 中首次出现的位置原地稳定排序。
+// 各来源会分批、倒序收集图片；合并后调用可让任务序号保持文档顺序。
+// 未出现在 Markdown 中的图片保留相对顺序并排在末尾。
+func SortImagesByPosition(markdown string, images []StoredImage) []StoredImage {
 	position := func(image StoredImage) int {
 		if i := strings.Index(markdown, image.ServingURL); image.ServingURL != "" && i >= 0 {
 			return i

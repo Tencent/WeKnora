@@ -45,9 +45,12 @@ func (r *chunkRepository) ListImageAssets(
 	// Ties (every image of one chunk shares its timestamps) follow the sort
 	// direction, so a created_at listing is one backward walk of the index.
 	order := d.sortKey(q.SortField) + dir + ", i.chunk_id" + dir + ", i.image_index" + dir
+	if q.SortField.Builtin == "page" {
+		order = d.sourcePageOrder(dir)
+	}
 	query := "SELECT i.chunk_id, i.knowledge_id, i.chunk_type, i.is_enabled, i.status, i.created_at, " +
 		"i.updated_at, i.image_index, i.url, i.original_url, i.caption, i.ocr_text, " + d.attrsText() +
-		" AS attrs_json, (" + count + ") AS total_count " +
+		" AS attrs_json, " + d.sourcePage() + " AS source_page, (" + count + ") AS total_count " +
 		"FROM chunk_images i WHERE " + where + " ORDER BY " + order + " LIMIT ? OFFSET ?"
 
 	var rows []types.ImageAssetRow
