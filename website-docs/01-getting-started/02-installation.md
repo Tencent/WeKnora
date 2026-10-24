@@ -185,7 +185,7 @@ PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST=https://your-playwright-mirror.example.com \
 | `scripts/build_images.sh` | 构建镜像并注入版本（git tag / commit / build time），支持跨架构 |
 | `scripts/build_frontend_dist.sh` | 宿主机构建前端静态产物 `frontend/dist`（Lite / 桌面打包等非 Docker 场景；UI 镜像改由 Dockerfile 多阶段构建） |
 | `scripts/migrate.sh` | golang-migrate 封装 |
-| `scripts/docker-entrypoint.sh` | app 容器入口（属主修复 + docker.sock GID 补组 + gosu 降权） |
+| `scripts/docker-entrypoint.sh` | app 容器入口（属主修复 + 在不修改 socket 权限的前提下按可读写 GID 补组 + gosu 降权，兼容 Docker Desktop 的 `root:root 0660` 映射） |
 | `scripts/package-lite.sh` / `package-mac-app.sh` | Lite tarball / macOS .app 打包 |
 
 ## 六、Helm 部署（helm/）
