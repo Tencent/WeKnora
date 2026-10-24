@@ -9,6 +9,10 @@ import (
 	"gorm.io/gorm"
 )
 
+// webSearchDefaultLockClass namespaces the advisory-lock key space used to
+// serialize default-provider transitions per workspace on PostgreSQL.
+const webSearchDefaultLockClass = 97001
+
 // webSearchProviderRepository implements the WebSearchProviderRepository interface
 type webSearchProviderRepository struct {
 	db *gorm.DB
@@ -19,9 +23,58 @@ func NewWebSearchProviderRepository(db *gorm.DB) interfaces.WebSearchProviderRep
 	return &webSearchProviderRepository{db: db}
 }
 
-// Create creates a new web search provider
+func (r *webSearchProviderRepository) isPostgres() bool {
+	return r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "postgres"
+}
+
+// webSearchDefaultLockKey derives the advisory-lock key for one workspace's
+// default slot. Tenant IDs beyond 32 bits fold into the same key space, which
+// can only over-serialize distinct workspaces, never under-serialize one.
+func webSearchDefaultLockKey(tenantID uint64) int64 {
+	return int64(webSearchDefaultLockClass)<<32 | int64(tenantID&0xffffffff)
+}
+
+// lockDefaultSlot serializes default-provider transitions for a workspace.
+// PostgreSQL needs an explicit advisory lock: two READ COMMITTED transactions
+// can both clear the old default and both insert a new one, because an UPDATE
+// never sees rows committed after its statement snapshot. SQLite serializes
+// writers on its own, so the surrounding transaction is sufficient there.
+func (r *webSearchProviderRepository) lockDefaultSlot(tx *gorm.DB, tenantID uint64) error {
+	if !r.isPostgres() {
+		return nil
+	}
+	return tx.Exec("SELECT pg_advisory_xact_lock(?)", webSearchDefaultLockKey(tenantID)).Error
+}
+
+// clearDefaultTx demotes every current default of a tenant inside an ongoing
+// transaction, optionally excluding one provider.
+func clearDefaultTx(tx *gorm.DB, tenantID uint64, excludeID string) error {
+	query := tx.Model(&types.WebSearchProviderEntity{}).Where(
+		"tenant_id = ? AND is_default = ?", tenantID, true,
+	)
+	if excludeID != "" {
+		query = query.Where("id != ?", excludeID)
+	}
+	return query.Update("is_default", false).Error
+}
+
+// Create creates a new web search provider. A default-provider creation is a
+// single atomic transition: the previous default is demoted and the new row
+// inserted in one transaction, so a failed insert leaves the previous default
+// untouched and concurrent transitions cannot leave two defaults.
 func (r *webSearchProviderRepository) Create(ctx context.Context, provider *types.WebSearchProviderEntity) error {
-	return r.db.WithContext(ctx).Create(provider).Error
+	if !provider.IsDefault {
+		return r.db.WithContext(ctx).Create(provider).Error
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := r.lockDefaultSlot(tx, provider.TenantID); err != nil {
+			return err
+		}
+		if err := clearDefaultTx(tx, provider.TenantID, ""); err != nil {
+			return err
+		}
+		return tx.WithContext(ctx).Create(provider).Error
+	})
 }
 
 // GetByID retrieves a web search provider by ID within a tenant scope
@@ -63,11 +116,26 @@ func (r *webSearchProviderRepository) List(ctx context.Context, tenantID uint64)
 	return providers, nil
 }
 
-// Update updates a web search provider
+// Update updates a web search provider. Promoting it to the default is a
+// single atomic transition: other defaults are demoted and this row updated
+// in one transaction, with the same per-workspace serialization as Create.
 func (r *webSearchProviderRepository) Update(ctx context.Context, provider *types.WebSearchProviderEntity) error {
-	return r.db.WithContext(ctx).Model(&types.WebSearchProviderEntity{}).Where(
-		"id = ? AND tenant_id = ?", provider.ID, provider.TenantID,
-	).Select("*").Updates(provider).Error
+	if !provider.IsDefault {
+		return r.db.WithContext(ctx).Model(&types.WebSearchProviderEntity{}).Where(
+			"id = ? AND tenant_id = ?", provider.ID, provider.TenantID,
+		).Select("*").Updates(provider).Error
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := r.lockDefaultSlot(tx, provider.TenantID); err != nil {
+			return err
+		}
+		if err := clearDefaultTx(tx, provider.TenantID, provider.ID); err != nil {
+			return err
+		}
+		return tx.WithContext(ctx).Model(&types.WebSearchProviderEntity{}).Where(
+			"id = ? AND tenant_id = ?", provider.ID, provider.TenantID,
+		).Select("*").Updates(provider).Error
+	})
 }
 
 // Delete soft-deletes a web search provider
@@ -79,13 +147,7 @@ func (r *webSearchProviderRepository) Delete(ctx context.Context, tenantID uint6
 
 // ClearDefault clears the default flag for all providers of a tenant, optionally excluding one
 func (r *webSearchProviderRepository) ClearDefault(ctx context.Context, tenantID uint64, excludeID string) error {
-	query := r.db.WithContext(ctx).Model(&types.WebSearchProviderEntity{}).Where(
-		"tenant_id = ? AND is_default = ?", tenantID, true,
-	)
-	if excludeID != "" {
-		query = query.Where("id != ?", excludeID)
-	}
-	return query.Update("is_default", false).Error
+	return clearDefaultTx(r.db.WithContext(ctx), tenantID, excludeID)
 }
 
 // PatchSettings persists display/default changes without writing connection parameters.
@@ -110,9 +172,10 @@ func (r *webSearchProviderRepository) PatchSettings(
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if values["is_default"] == true {
-			if err := tx.Model(&types.WebSearchProviderEntity{}).
-				Where("tenant_id = ? AND id != ? AND is_default = ?", provider.TenantID, provider.ID, true).
-				Update("is_default", false).Error; err != nil {
+			if err := r.lockDefaultSlot(tx, provider.TenantID); err != nil {
+				return err
+			}
+			if err := clearDefaultTx(tx, provider.TenantID, provider.ID); err != nil {
 				return err
 			}
 		}
