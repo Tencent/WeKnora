@@ -39,7 +39,8 @@ func TestListSearchableSQLiteSupportsCaseInsensitiveIDAndEscapedSearch(t *testin
 	repo := &organizationRepository{db: db}
 	ctx := context.Background()
 	orgs := []*types.Organization{
-		{ID: "org-alpha", Name: "Data Platform", Description: "Shared search space", OwnerID: "owner", Searchable: true},
+		{ID: "org-alpha", Name: "Data Platform", Description: "Shared search space", OwnerID: "owner",
+			Searchable: true},
 		{ID: "org-beta", Name: "A_B testing", Description: "Literal wildcard", OwnerID: "owner", Searchable: true},
 		{ID: "org-hidden", Name: "Data Platform", Description: "Hidden", OwnerID: "owner", Searchable: false},
 	}
@@ -74,7 +75,9 @@ func TestUpdateJoinRequestStatusSQLiteSetsReviewedAt(t *testing.T) {
         (id, organization_id, user_id, tenant_id, status, requested_role, request_type)
         VALUES ('req-1', 'org-1', 'user-1', 1, 'pending', 'viewer', 'join')`).Error)
 
-	require.NoError(t, repo.UpdateJoinRequestStatus(ctx, "req-1", types.JoinRequestStatusApproved, "reviewer", "welcome"))
+	require.NoError(t, repo.UpdateJoinRequestStatus(
+		ctx, "req-1", types.JoinRequestStatusApproved, "reviewer", "welcome",
+	))
 	var request types.OrganizationJoinRequest
 	require.NoError(t, db.First(&request, "id = ?", "req-1").Error)
 	assert.Equal(t, types.JoinRequestStatusApproved, request.Status)
