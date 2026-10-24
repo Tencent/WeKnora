@@ -2,9 +2,9 @@
 
 知识图谱在文档入库时提取实体与关系，并在问答时沿关联关系检索更多相关片段。它可与向量和关键词检索共同使用，为回答补充关系上下文。
 
-该功能适用于人物、组织、产品或条款之间关系较多的资料。启用后会增加入库阶段的模型调用，并需要部署 Neo4j。
+该功能适用于人物、组织、产品或条款之间关系较多的资料。启用后会增加入库阶段的模型调用，并需要部署 Neo4j 或 Memgraph。
 
-图谱存储使用 Neo4j，并依赖 APOC 插件。
+图谱存储支持 Neo4j 与 Memgraph，通过 Bolt/Cypher 连接。Neo4j 仍使用 APOC（写入 `apoc.merge.node` / `apoc.merge.relationship`，删除 `apoc.periodic.iterate`）；Memgraph 没有 APOC，改用两者共有的 Cypher，删除在应用侧分批、每批单独提交。引擎由 `GRAPH_DATABASE_ENGINE` 选择，标签、检索与结果解析两者共用。
 
 ## 开启配置
 
@@ -17,13 +17,69 @@
 | 名称 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `NEO4J_ENABLE` | string | 空（关闭） | 置为 `true` 启用图谱；`internal/container/container.go` 的 `initNeo4jClient` 与任务入队 / 检索管线都会检查它 |
-| `NEO4J_URI` | string | `bolt://neo4j:7687` | Neo4j 连接地址 |
+| `NEO4J_URI` | string | `bolt://neo4j:7687` | 图数据库 Bolt 连接地址；Memgraph 使用 `bolt://memgraph:7687` |
 | `NEO4J_USERNAME` | string | `neo4j` | 用户名 |
 | `NEO4J_PASSWORD` | string | `password` | 密码 |
+| `GRAPH_DATABASE_ENGINE` | string | `neo4j` | 图数据库类型：`neo4j` 或 `memgraph`。`NEO4J_ENABLE` 仍是图谱功能开关，旧部署无需修改 |
 
-`initNeo4jClient` 启动时最多重试 30 次（间隔 2s）建立并验证连接；未启用时返回 `nil` driver，此时原有构建、删除及内部 `SearchNode` 路径降级为 no-op（日志 `NOT SUPPORT RETRIEVE GRAPH`）。独立公共查询接口则明确返回 503，不把未配置后端伪装成“没有匹配”。`GET /system` 信息接口通过 `getGraphDatabaseEngine()` 报告 `"Neo4j"` 或 `"Not Enabled"`（`internal/handler/system.go`）。
+`initNeo4jClient` 启动时最多重试 30 次（间隔 2s）建立并验证连接；未启用时返回 `nil` driver，此时原有构建、删除及内部 `SearchNode` 路径降级为 no-op（日志 `NOT SUPPORT RETRIEVE GRAPH`）。独立公共查询接口则明确返回 503，不把未配置后端伪装成“没有匹配”。`GET /api/v1/system/info` 信息接口通过 `getGraphDatabaseEngine()` 报告 `"Neo4j"`、`"Memgraph"` 或 `"Not Enabled"`（`internal/handler/system.go`）。
 
-docker-compose 的 `neo4j` 服务预装 APOC：`NEO4JLABS_PLUGINS=["apoc"]`（图谱写入依赖 `apoc.merge.node` / `apoc.merge.relationship`，删除依赖 `apoc.periodic.iterate`）。
+docker-compose 的 `neo4j` 服务预装 APOC：`NEO4JLABS_PLUGINS=["apoc"]`（图谱写入依赖 `apoc.merge.node` /
+`apoc.merge.relationship`，删除依赖 `apoc.periodic.iterate`）。Memgraph 不需要插件。
+
+Docker Compose 另有可选的 `memgraph` profile，Neo4j 仍是默认引擎。切到 Memgraph 时在 `.env` 里设置：
+
+```bash
+# .env
+NEO4J_ENABLE=true
+GRAPH_DATABASE_ENGINE=memgraph
+NEO4J_URI=bolt://memgraph:7687
+NEO4J_USERNAME=weknora        # 在 Memgraph 里用 CREATE USER 建的用户
+NEO4J_PASSWORD=<密码>
+```
+
+```bash
+# 先启动数据库并配置用户，再启动 app
+docker compose --profile memgraph up -d memgraph
+docker compose exec memgraph mgconsole
+```
+
+在 `mgconsole` 中执行（将占位符替换为与 `.env` 一致的密码）：
+
+```cypher
+CREATE USER weknora IDENTIFIED BY '<密码>';
+```
+
+退出 `mgconsole`，然后运行 `docker compose --profile memgraph up -d`。
+
+Memgraph 默认不建用户、不启用认证。Compose 的 app 服务总会传 `NEO4J_USERNAME` / `NEO4J_PASSWORD`
+（未设置或显式留空时，`${VAR:-default}` 都会取上表的 Neo4j 默认值）。这些变量只配置客户端，
+**不会自动创建 Memgraph 用户或开启服务端认证**；未建用户的实例可能接受任意客户端凭据。
+因此应先在 Memgraph 中建立匹配用户，再启动 app。上述示例用于全新实例的第一个用户（自动获得管理权限）；
+已有用户的实例应由管理员创建并授予应用所需权限。重用已有数据卷时，不要重复创建已有用户。
+Memgraph 的宿主端口默认只绑定 `127.0.0.1`；只有配置好认证与网络访问控制后，才考虑修改
+`MEMGRAPH_BIND_ADDRESS`。同一 Compose 网络里的 app 仍使用 `bolt://memgraph:7687`。
+
+不经 Compose 跑 app（见开发指南）时，使用 `NEO4J_URI=bolt://127.0.0.1:7687`。
+仅限本地隔离测试的无认证实例可将用户名和密码同时留空；配置了用户的实例应填写对应凭据。
+启动检查对 Neo4j 保留 `VerifyAuthentication`，对 Memgraph 使用 `VerifyConnectivity`，
+后者仍通过 Bolt 握手验证已配置的凭据。
+
+### Memgraph 回归验证
+
+仅对可丢弃的测试实例执行。以下测试会创建并清理独立命名空间，勿指向生产数据库：
+
+```bash
+export WEKNORA_MEMGRAPH_URI=bolt://127.0.0.1:7687
+# 已配置用户时，另外设置 WEKNORA_MEMGRAPH_USERNAME 和 WEKNORA_MEMGRAPH_PASSWORD
+go test -count=1 ./internal/container -run '^TestInitMemgraphClientIntegration$'
+go test -count=1 ./internal/application/repository/retriever/neo4j -run '^TestMemgraph'
+```
+
+第一条测试经过应用实际的 `initNeo4jClient` 并执行 `RETURN 1`；填写用户名时还会验证错误密码被拒绝。
+第二条覆盖写入、内部检索、公共 graph-search 和跨批次删除。应分别验证无认证和已建用户两种配置。
+这些测试不等同于完整 Compose 应用启动；仍需用本分支构建的 app 镜像启动服务，确认健康检查与
+`GET /api/v1/system/info` 返回的图数据库类型。旧版发行镜像不会因设置环境变量而获得本 PR 的功能。
 
 ### 知识库级开关：IndexingStrategy + ExtractConfig {#_2-知识库级开关-indexingstrategy-extractconfig}
 
@@ -136,6 +192,10 @@ Agent 模式则提供 `query_knowledge_graph` 工具（`internal/agent/tools/que
 外部应用可使用 `POST /api/v1/knowledge-bases/{id}/graph-search`，按区分大小写的实体名子串读取实体、定向关系及有效来源分块。它是单 KB 的只读接口，不调用模型、不修改默认问答/检索管线，亦不是可执行任意 Cypher 的入口。
 
 该接口使用独立的有界读取契约：保留无关系实体，返回结果/候选/字段截断标记，并在输出属性与关系前验证完整来源。删除或禁用任一引用分块会使相关实体与关系被保守省略。权限、请求参数、响应字段和上限见 [graph-search API](../04-api/02-api-knowledge.md#graph-search)。
+
+Memgraph 3.7.1 的字符串函数按字节计数。公共查询会先按 UTF-8 最坏情况限制传输字节数，再恢复原有字符上限，
+避免截断中文或其他多字节字符。名称长度的次级排序仍采用数据库原生 `size()`，因此混合文字的候选顺序
+可能与 Neo4j 不同；名称精确匹配优先级、候选数量上限和知识库隔离保持不变。
 
 ## 流程图
 
