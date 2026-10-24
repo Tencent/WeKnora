@@ -6101,6 +6101,28 @@ export default {
   file: {
     upload: '上傳檔案'
   },
+  mentionBrowser: {
+    browse: "按目錄瀏覽",
+    path: "目錄路徑",
+    root: "根目錄",
+    searchFolder: "搜尋目前目錄",
+    searchKb: "搜尋知識庫",
+    subtree: "搜尋包含目前目錄及其子目錄。",
+    wholeKb: "目前仍選取整個知識庫，選取單一檔案不會縮小範圍。",
+    tags: "既有標籤仍會篩選所選檔案。",
+    folderCount: "含子目錄共 {count} 個文件",
+    selected: "已選取",
+    deleting: "正在刪除",
+    unsupported: "目前代理不支援此格式",
+    forbidden: "你已無權存取此內容。",
+    missing: "目錄已失效，請返回並重新選取。",
+    error: "目錄載入失敗，請重試。",
+    retry: "重試",
+    empty: "目前檢視沒有檔案。",
+    previous: "上一頁",
+    next: "下一頁",
+    page: "第 {page} 頁 · 共 {total} 個文件",
+  },
   mentionDetail: {
     readOnlyFromAgent: '僅在此對話中唯讀，不顯示在知識庫清單中',
     faqCount: '共 {count} 條問答',

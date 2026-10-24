@@ -6100,6 +6100,28 @@ export default {
   file: {
     upload: '파일 업로드'
   },
+  mentionBrowser: {
+    browse: "폴더별 탐색",
+    path: "폴더 경로",
+    root: "루트",
+    searchFolder: "이 폴더 검색",
+    searchKb: "지식베이스 검색",
+    subtree: "하위 폴더도 검색합니다.",
+    wholeKb: "전체 지식베이스가 선택되어 있습니다. 파일을 선택해도 범위가 좁아지지 않습니다.",
+    tags: "기존 태그가 선택한 파일을 계속 필터링합니다.",
+    folderCount: "하위 폴더 포함 문서 {count}개",
+    selected: "선택됨",
+    deleting: "삭제 중",
+    unsupported: "이 에이전트에서 지원하지 않는 형식",
+    forbidden: "이 콘텐츠에 접근할 권한이 없습니다.",
+    missing: "폴더가 더 이상 유효하지 않습니다. 돌아가서 다시 선택하세요.",
+    error: "폴더를 불러오지 못했습니다. 다시 시도하세요.",
+    retry: "다시 시도",
+    empty: "이 보기에 파일이 없습니다.",
+    previous: "이전",
+    next: "다음",
+    page: "{page}페이지 · 문서 {total}개",
+  },
   mentionDetail: {
     readOnlyFromAgent: '이 대화에서는 읽기 전용이며 지식베이스 목록에는 표시되지 않습니다.',
     faqCount: 'Q&A {count}개',

@@ -6101,6 +6101,28 @@ export default {
   file: {
     upload: '上传文件'
   },
+  mentionBrowser: {
+    browse: "按目录浏览",
+    path: "目录路径",
+    root: "根目录",
+    searchFolder: "搜索当前目录",
+    searchKb: "搜索知识库",
+    subtree: "搜索包含当前目录及其子目录。",
+    wholeKb: "当前仍选中了整库，选择单文件不会缩小该范围。",
+    tags: "已有标签仍会过滤所选文件。",
+    folderCount: "含子目录共 {count} 个文档",
+    selected: "已选择",
+    deleting: "正在删除",
+    unsupported: "当前智能体不支持此格式",
+    forbidden: "你已无权访问此内容。",
+    missing: "目录已失效，请返回并重新选择。",
+    error: "目录加载失败，请重试。",
+    retry: "重试",
+    empty: "当前视图没有文件。",
+    previous: "上一页",
+    next: "下一页",
+    page: "第 {page} 页 · 共 {total} 个文档",
+  },
   mentionDetail: {
     readOnlyFromAgent: '仅在此对话中只读，不显示在知识库列表中',
     faqCount: '共 {count} 条问答',

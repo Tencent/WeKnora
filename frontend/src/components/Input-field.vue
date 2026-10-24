@@ -18,6 +18,8 @@ import { chatSubmitShortcut } from '@/utils/chatSubmitShortcut';
 import { useOrganizationStore } from '@/stores/organization';
 import KnowledgeBaseSelector from './KnowledgeBaseSelector.vue';
 import MentionSelector from './MentionSelector.vue';
+import { useAuthStore } from '@/stores/auth';
+import type { BrowserKnowledgeBase } from '@/utils/mentionFileBrowser';
 import AgentSelector from './AgentSelector.vue';
 import { getCaretCoordinates } from '@/utils/caret';
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom';
@@ -60,6 +62,7 @@ import { supportedLevels, levelLabelKey, levelFromLegacy, clampLevel, type Reaso
 const route = useRoute();
 const router = useRouter();
 const settingsStore = useSettingsStore();
+const mentionAuth = useAuthStore();
 const browserConnection = useBrowserConnectionStore();
 const uiStore = useUIStore();
 const orgStore = useOrganizationStore();
@@ -498,6 +501,7 @@ const mentionGroupCounts = ref<Partial<Record<MentionItemType, number>>>({});
 // 当前 @ 会话可见的 KB ID 集合（含工具兼容性过滤），分页加载文件时复用，
 // 避免 append 请求把不兼容 KB 的文件漏进来。`null` 表示"不受限制"（非智能体场景）
 const mentionAllowedKbIds = ref<Set<string> | null>(null);
+const mentionBrowserKbs = ref<BrowserKnowledgeBase[]>([]);
 const mentionLoading = ref(false);
 const mentionOffset = ref(0);
 const MENTION_PAGE_SIZE = 20;
@@ -1318,6 +1322,30 @@ const updateModelDropdownPosition = () => {
 let lastMentionQuery = '';
 // 关键词变化时旧请求可能晚于新请求返回；只采纳最新一次加载的结果
 let mentionLoadSeq = 0;
+const mentionBrowserContext = computed(() => ({
+  key: JSON.stringify([mentionAuth.user?.id, mentionAuth.selectedTenantId, mentionAuth.tenant?.id,
+    props.sessionId, selectedAgentId.value, settingsStore.selectedAgentSourceTenantId,
+    agentKBSelectionMode.value, [...agentKnowledgeBases.value].sort(), [...agentAllowedTools.value].sort(),
+    [...agentSupportedFileTypes.value].sort()]),
+  agent_id: settingsStore.selectedAgentSourceTenantId ? selectedAgentId.value || undefined : undefined,
+  agent_source_tenant_id: settingsStore.selectedAgentSourceTenantId || undefined,
+}));
+watch(() => mentionBrowserContext.value.key, () => {
+  showMention.value = false;
+  ++mentionLoadSeq;
+  mentionBrowserKbs.value = [];
+  mentionItems.value = [];
+  mentionLoading.value = false;
+}, { flush: 'sync' });
+watch(showMention, visible => {
+  if (!visible) {
+    ++mentionLoadSeq;
+    if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
+    mentionSearchTimer = null;
+    mentionBrowserKbs.value = [];
+    mentionLoading.value = false;
+  }
+}, { flush: 'sync' });
 const loadMentionItems = async (q: string, resetIndex = true, append = false) => {
   console.log('[Mention] loadMentionItems called with query:', q, 'append:', append);
 
@@ -1341,6 +1369,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       // 共享智能体：按 agent_id 拉取该智能体配置的知识库范围（后端从共享关系解析空间）
       try {
         const list = await chatResources.ensureAgentKnowledgeBases(agentId, sourceTenantId);
+        if (isStale()) return;
         const orgLabel = sharedAgentOrgName.value || '';
         // 保留 capabilities / indexing_strategy，后面过滤时要用
         availableKbs = list.map((kb: any) => ({
@@ -1361,6 +1390,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
           chunk_count: kb.chunk_count
         }));
       } catch (e) {
+        if (isStale()) return;
         console.error('[Mention] listKnowledgeBases(agent_id) error:', e);
         availableKbs = [];
         sharedAgentKbList.value = [];
@@ -1418,6 +1448,10 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       ? new Set(availableKbs.map((kb: any) => String(kb.id)))
       : null;
 
+    if (isStale()) return;
+    const canBrowseFiles = !hasAgentConfig.value || (agentKBSelectionMode.value !== 'none' && toolsConsumeFiles(agentAllowedTools.value));
+    mentionBrowserKbs.value = canBrowseFiles ? availableKbs.filter((kb: any) => !kb.type || kb.type === 'document')
+      .map((kb: any) => ({ id: String(kb.id), name: kb.name, orgName: kb.org_name })) : [];
     const kbs = availableKbs.filter((kb: any) =>
       !q || (kb.name && kb.name.toLowerCase().includes(q.toLowerCase()))
     );
@@ -1830,6 +1864,7 @@ const triggerMention = () => {
 };
 
 const onMentionSelect = (item: any) => {
+  if (!showMention.value) return;
   if (item.type === 'kb') {
     settingsStore.addKnowledgeBase(item.id);
   } else if (item.type === 'file') {
@@ -3122,7 +3157,10 @@ defineExpose({
       <MentionSelector ref="mentionSelectorRef" :visible="showMention" :style="mentionStyle" :items="mentionItems" :hasMore="mentionHasMore"
         :loading="mentionLoading" :emptyHint="mentionEmptyHint" :query="mentionQuery" :searchable="isMentionTriggeredByButton"
         :group-counts="mentionGroupCounts" v-model:activeIndex="mentionActiveIndex"
-        @update:query="onMentionSearchInput" @close="closeMentionFromPopup"
+        :browser-knowledge-bases="mentionBrowserKbs" :browser-context="mentionBrowserContext"
+        :browser-file-types="agentSupportedFileTypes" :browser-selected-ids="selectedFileIds"
+        :browser-whole-kb-ids="settingsStore.getSelectedKnowledgeBases()" :browser-tag-kb-ids="selectedTags.map(tag => tag.kbId)"
+        @update:query="onMentionSearchInput" @close="closeMentionFromPopup" @focus-input="getTextareaEl()?.focus()"
         @select="onMentionSelect" @loadMore="loadMoreMentionItems" />
     </Teleport>
 
