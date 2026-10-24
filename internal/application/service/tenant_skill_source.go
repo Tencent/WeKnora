@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -913,8 +914,9 @@ func looksLikeSkillMarkdown(body []byte) bool {
 
 func truncateSkillError(msg string) string {
 	msg = strings.Join(strings.Fields(msg), " ")
-	if len(msg) > 200 {
-		return msg[:200]
-	}
-	return msg
+	// Back off to a rune boundary: the body comes from a third-party host, so a
+	// Chinese error page would otherwise be split mid-rune and the 400 response
+	// this produces would carry an invalid trailing byte. Same rule as the
+	// provider error previews and common.TruncateUTF8Bytes.
+	return common.TruncateUTF8Bytes(msg, 200)
 }
