@@ -7,6 +7,7 @@ import * as history from '../utils/rag-pipeline-history.ts'
 import * as timestamps from '../utils/messageTimestamp.ts'
 import * as steering from '../utils/steerStreamFork.ts'
 import { fixture } from '../test-utils/vueFixture.ts'
+import * as thinkBlocks from '../utils/thinkBlocks.ts'
 
 function setup(t: TestContext) {
   const f = fixture(t)
@@ -16,6 +17,7 @@ function setup(t: TestContext) {
     '@/utils/rag-pipeline-history': history,
     '@/utils/messageTimestamp': timestamps,
     '@/utils/steerStreamFork': steering,
+    '@/utils/thinkBlocks': thinkBlocks,
     '@/utils/assistantDataChange': f.dataChange,
   })
   const messagesList = vue.reactive<any[]>([])
