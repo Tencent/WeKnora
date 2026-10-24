@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api/cohererank"
 	"github.com/Tencent/WeKnora/internal/models/api/dashscoperank"
 	"github.com/Tencent/WeKnora/internal/models/api/nimrerank"
+	"github.com/Tencent/WeKnora/internal/models/api/pairwiserank"
 	"github.com/Tencent/WeKnora/internal/models/api/pineconerank"
 	"github.com/Tencent/WeKnora/internal/models/api/teirank"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
@@ -207,6 +208,8 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 		client = pineconerank.New(pineconerank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankTEI:
 		client = teirank.New(teirank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
+	case api.RerankPairwise:
+		client = pairwiserank.New(pairwiserank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankTencentLKEAP:
 		client, err = newLKEAPClient(config, resolved)
 	case api.RerankVolcengineKnowledge:
@@ -226,11 +229,12 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 	}
 
 	return &protocolReranker{
-		inner:     client,
-		images:    images,
-		settings:  resolved.Rerank,
-		endpoint:  resolved.BaseURL,
-		modelName: config.ModelName,
-		modelID:   config.ModelID,
+		inner:            client,
+		images:           images,
+		settings:         resolved.Rerank,
+		endpoint:         resolved.BaseURL,
+		modelName:        config.ModelName,
+		modelID:          config.ModelID,
+		queryPerDocument: resolved.RerankAPI == api.RerankPairwise,
 	}, nil
 }
