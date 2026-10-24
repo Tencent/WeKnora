@@ -39,8 +39,10 @@ func TestListSearchableSQLiteSupportsCaseInsensitiveIDAndEscapedSearch(t *testin
 	repo := &organizationRepository{db: db}
 	ctx := context.Background()
 	orgs := []*types.Organization{
-		{ID: "org-alpha", Name: "Data Platform", Description: "Shared search space", OwnerID: "owner",
-			Searchable: true},
+		{
+			ID: "org-alpha", Name: "Data Platform", Description: "Shared search space", OwnerID: "owner",
+			Searchable: true,
+		},
 		{ID: "org-beta", Name: "A_B testing", Description: "Literal wildcard", OwnerID: "owner", Searchable: true},
 		{ID: "org-hidden", Name: "Data Platform", Description: "Hidden", OwnerID: "owner", Searchable: false},
 	}
