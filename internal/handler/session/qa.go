@@ -1434,6 +1434,9 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 					return nil
 				}
 				completionHandled = true
+				if usage, ok := data.Usage.(*types.TokenUsage); ok && usage != nil {
+					streamCtx.assistantMessage.Usage = usage
+				}
 
 				logger.Infof(streamCtx.asyncCtx, "Knowledge QA service completed for session: %s", sessionID)
 				updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, reqCtx.session.TenantID)
@@ -2044,12 +2047,16 @@ func (h *Handler) completeQuickAnswerTurn(
 		// MessageID is what handleComplete keys on. Leave FinalAnswer empty:
 		// KnowledgeQA already accumulated the answer on the message, and
 		// handleComplete would append FinalAnswer a second time.
+		complete := event.AgentCompleteData{MessageID: streamCtx.assistantMessage.ID}
+		if streamCtx.assistantMessage.Usage != nil {
+			// Same contract as Agent turns: handleComplete promotes it to the
+			// response's top-level usage.
+			complete.Usage = streamCtx.assistantMessage.Usage
+		}
 		_ = streamCtx.eventBus.Emit(ctx, event.Event{
 			Type:      event.EventAgentComplete,
 			SessionID: streamCtx.assistantMessage.SessionID,
-			Data: event.AgentCompleteData{
-				MessageID: streamCtx.assistantMessage.ID,
-			},
+			Data:      complete,
 		})
 	}
 	h.completeStreamAssistantMessage(ctx, streamCtx, query, userMessageID)
