@@ -5,6 +5,7 @@ package chunker
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -183,17 +184,16 @@ func protectedSpans(text string) []span {
 		return nil
 	}
 
-	// Sort by start, then by length descending
-	for i := 1; i < len(all); i++ {
-		for j := i; j > 0; j-- {
-			if all[j].start < all[j-1].start ||
-				(all[j].start == all[j-1].start && (all[j].end-all[j].start) > (all[j-1].end-all[j-1].start)) {
-				all[j], all[j-1] = all[j-1], all[j]
-			} else {
-				break
-			}
+	// Matches are ordered within each pattern, but not across patterns.
+	// Insertion sorting made tables with many inline-code/link matches
+	// quadratic: later pattern groups repeatedly moved past earlier rows.
+	// Preserve the longest-match-first overlap rule in O(n log n) time.
+	sort.SliceStable(all, func(i, j int) bool {
+		if all[i].start != all[j].start {
+			return all[i].start < all[j].start
 		}
-	}
+		return all[i].end > all[j].end
+	})
 
 	// Remove overlaps
 	var result []span
