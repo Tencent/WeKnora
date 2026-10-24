@@ -23553,6 +23553,35 @@ paths:
         risk: read
       x-agent-hint: The latest messages of one of the user's conversations, oldest
         first. For earlier ones, pass the created_at of the first message as before_time.
+  /messages/chat-history-index/clear:
+    post:
+      description: 暂停消息索引，删除索引知识、分块和向量，保留原始会话和消息。失败后保持暂停，可重试。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ChatHistoryKBStats'
+              type: object
+        "403":
+          description: 需要空间管理权限
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "500":
+          description: 清理未完成，查看当前状态后可重试
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 清空当前空间的历史消息索引
+      tags:
+      - 消息
   /messages/chat-history-stats:
     get:
       consumes:

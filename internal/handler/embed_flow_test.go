@@ -116,6 +116,9 @@ func (f *flowTenantSvc) GetTenantsByIDs(context.Context, []uint64) (map[uint64]*
 func (f *flowTenantSvc) UpdateTenant(context.Context, *types.Tenant) (*types.Tenant, error) {
 	return nil, nil
 }
+func (f *flowTenantSvc) SetChatHistoryConfig(context.Context, uint64, *types.ChatHistoryConfig) error {
+	panic("unexpected chat history configuration write")
+}
 func (f *flowTenantSvc) DeleteTenant(context.Context, uint64) error { return nil }
 func (f *flowTenantSvc) ListTenants(context.Context) ([]*types.Tenant, error) {
 	return nil, nil
