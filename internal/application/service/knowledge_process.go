@@ -4084,12 +4084,19 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 	}
 	sanitizeReadResult(convertResult)
+	normalizeStarted := time.Now()
 	if convertResult != nil {
 		convertResult.MarkdownContent = chunker.NormalizeLineEndings(convertResult.MarkdownContent)
 		if convertResult.MarkdownContent != "" {
 			convertResult.MarkdownContent = docparser.NormalizeHTMLTables(convertResult.MarkdownContent)
 		}
 	}
+	normalizedBytes := 0
+	if convertResult != nil {
+		normalizedBytes = len(convertResult.MarkdownContent)
+	}
+	logger.Infof(ctx, "Document text normalization completed in %s (knowledge=%s input_bytes=%d output_bytes=%d)",
+		time.Since(normalizeStarted), knowledge.ID, len(parsedMarkdown), normalizedBytes)
 
 	// Step 2: Store images and update markdown references
 	var storedImages []docparser.StoredImage
@@ -4162,6 +4169,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// Step 3: Split into chunks using Go chunker. Line endings and inline
 	// HTML tables were normalized before image resolution above.
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
+	chunkStarted := time.Now()
 
 	multimodalImages := imagesForMultimodal(storedImages)
 	processOpts := ProcessChunksOptions{
@@ -4215,6 +4223,8 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 		logger.Infof(ctx, "Split document into %d chunks for knowledge %s", len(chunks), knowledge.ID)
 	}
+	logger.Infof(ctx, "Document chunking completed in %s (knowledge=%s input_bytes=%d chunks=%d)",
+		time.Since(chunkStarted), knowledge.ID, len(convertResult.MarkdownContent), len(chunks))
 
 	// Step 4: Process chunks (vectorize + index + enqueue async tasks)
 	return s.processChunks(ctx, kb, knowledge, chunks, processOpts)
