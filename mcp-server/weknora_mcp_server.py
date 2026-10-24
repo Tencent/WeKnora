@@ -225,6 +225,24 @@ class WeKnoraClient:
         """List knowledge bases shared from other workspaces"""
         return self._request("GET", "/shared-knowledge-bases")
 
+    def list_tags(
+        self,
+        kb_id: str,
+        page: int = 1,
+        page_size: int = 50,
+        keyword: str = "",
+    ) -> Dict:
+        """List tags defined under one knowledge base.
+
+        Tags partition a knowledge base's documents (e.g. by region or
+        project); their IDs can be passed as *tag_ids* to chat() and
+        agent_chat() to constrain retrieval to those documents.
+        """
+        params: Dict[str, Any] = {"page": page, "page_size": page_size}
+        if keyword:
+            params["keyword"] = keyword
+        return self._request("GET", f"/knowledge-bases/{kb_id}/tags", params=params)
+
     def get_knowledge_base(self, kb_id: str) -> Dict:
         """Get knowledge base details"""
         return self._request("GET", f"/knowledge-bases/{kb_id}")
@@ -591,11 +609,15 @@ class WeKnoraClient:
         query: str,
         knowledge_base_ids: list = None,
         web_search_enabled: bool = False,
+        tag_ids: list = None,
     ) -> Dict:
         """Send a message to the RAG pipeline (knowledge-chat) and return the assembled answer.
 
         Provide *knowledge_base_ids* (UUID or name) so the backend can retrieve
         relevant chunks before summarising with the LLM.
+        *tag_ids* (from list_tags) constrains retrieval to documents carrying
+        those tags; the backend requires them to be scoped to a single
+        knowledge base for one request.
         For agentic tool-calling use agent_chat() instead.
         """
         url = f"{self.base_url}/knowledge-chat/{session_id}"
@@ -604,6 +626,8 @@ class WeKnoraClient:
             body["knowledge_base_ids"] = knowledge_base_ids
         if web_search_enabled:
             body["web_search_enabled"] = True
+        if tag_ids:
+            body["tag_ids"] = tag_ids
         result = self._consume_sse_stream(url, body)
         result["session_id"] = session_id
         return result
@@ -615,6 +639,7 @@ class WeKnoraClient:
         agent_id: str,
         knowledge_base_ids: list = None,
         web_search_enabled: bool = False,
+        tag_ids: list = None,
     ) -> Dict:
         """Send a message to the agentic pipeline (agent-chat) and return the assembled answer.
 
@@ -622,6 +647,9 @@ class WeKnoraClient:
         tool selection (knowledge_search, web_search, SQL, etc.).
         The agent autonomously decides which knowledge bases to query;
         pass *knowledge_base_ids* to override or supplement the agent's default KBs.
+        *tag_ids* (from list_tags) constrains retrieval to documents carrying
+        those tags; the backend requires them to be scoped to a single
+        knowledge base for one request.
         """
         url = f"{self.base_url}/agent-chat/{session_id}"
         body: Dict[str, Any] = {"query": query, "agent_id": agent_id, "channel": "api"}
@@ -629,6 +657,8 @@ class WeKnoraClient:
             body["knowledge_base_ids"] = knowledge_base_ids
         if web_search_enabled:
             body["web_search_enabled"] = True
+        if tag_ids:
+            body["tag_ids"] = tag_ids
         result = self._consume_sse_stream(url, body)
         result["session_id"] = session_id
         return result
@@ -749,6 +779,25 @@ def list_knowledge_bases() -> dict:
 def list_shared_knowledge_bases() -> dict:
     """List knowledge bases shared from other workspaces."""
     return client.list_shared_knowledge_bases()
+
+
+@mcp.tool()
+def list_tags(
+    kb_id: str,
+    keyword: str = "",
+    page: int = 1,
+    page_size: int = 50,
+) -> dict:
+    """List tags defined under a knowledge base.
+
+    kb_id may be a UUID or a knowledge-base name (resolved automatically).
+    Tags partition a knowledge base's documents (e.g. by region or project);
+    pass tag IDs returned here as tag_ids on chat or agent_chat to constrain
+    retrieval to the tagged documents. Use keyword to search tags by name.
+    """
+    return client.list_tags(
+        client.resolve_kb_id(kb_id), page=page, page_size=page_size, keyword=keyword
+    )
 
 
 @mcp.tool()
@@ -960,12 +1009,16 @@ async def chat(
     query: str,
     knowledge_base_ids: list[str] | None = None,
     web_search_enabled: bool = False,
+    tag_ids: list[str] | None = None,
 ) -> dict:
     """RAG pipeline chat: retrieve relevant chunks from knowledge bases, then summarise with LLM.
 
     ALWAYS provide knowledge_base_ids (names like 'my-knowledge-base' or UUIDs) so
     retrieval can run — without them the answer is based on LLM knowledge only.
     Use list_knowledge_bases or list_shared_knowledge_bases to discover available knowledge bases.
+    tag_ids (from list_tags) restricts retrieval to documents carrying those tags;
+    provide exactly one knowledge_base_id alongside them, as the backend scopes
+    tag IDs to a single knowledge base per request.
     For multi-step reasoning or tool-calling use agent_chat instead.
     """
     kb_ids = (
@@ -979,6 +1032,7 @@ async def chat(
         query,
         knowledge_base_ids=kb_ids,
         web_search_enabled=web_search_enabled,
+        tag_ids=tag_ids,
     )
     # get_running_loop() is the correct API inside async functions.
     return await asyncio.get_running_loop().run_in_executor(None, fn)
@@ -991,6 +1045,7 @@ async def agent_chat(
     agent_id: str,
     knowledge_base_ids: list[str] | None = None,
     web_search_enabled: bool = False,
+    tag_ids: list[str] | None = None,
 ) -> dict:
     """Agentic pipeline chat: the agent autonomously calls tools (knowledge_search, web_search, SQL, etc.).
 
@@ -1000,6 +1055,9 @@ async def agent_chat(
     with 'no search targets available'. Use get_agent to inspect an agent's
     kb_selection_mode and knowledge_bases before calling. If kb_selection_mode is
     'none' or 'selected' with an empty list, always provide knowledge_base_ids.
+    tag_ids (from list_tags) restricts retrieval to documents carrying those tags;
+    provide exactly one knowledge_base_id alongside them, as the backend scopes
+    tag IDs to a single knowledge base per request.
     """
     resolved_agent_id = await asyncio.to_thread(client.resolve_agent_id, agent_id)
     kb_ids = (
@@ -1053,6 +1111,7 @@ async def agent_chat(
         resolved_agent_id,
         knowledge_base_ids=kb_ids,
         web_search_enabled=web_search_enabled,
+        tag_ids=tag_ids,
     )
     return await asyncio.get_running_loop().run_in_executor(None, fn)
 
