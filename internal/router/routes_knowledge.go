@@ -238,6 +238,12 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		// 立即重新生成知识库 AI 描述 — 与更新知识库同档鉴权；同步执行一次小模型调用。
 		kbManagement.POST("/:id/profile/generate", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"),
 			handler.GenerateKnowledgeBaseProfile)
+		// 重建知识库索引 — 与更新知识库同档鉴权；把 KB 内全部文档重新入队解析，
+		// 以应用刚保存的索引策略（向量/关键词/Wiki/图谱开关）。前端
+		// rebuildKBIndex()（KnowledgeBaseEditorModal 保存后提示）一直在调用
+		// 该路由，后端此前未注册（404，Tencent/WeKnora#4607）。
+		kbManagement.POST("/:id/rebuild-index", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"),
+			handler.RebuildKBIndex)
 		kbManagement.DELETE("/:id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.DeleteKnowledgeBase)
 		// 置顶/取消置顶知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
 		// Pin state is now per-(user, kb) (migration 000050). Anyone with
