@@ -24,7 +24,7 @@ const tree = { success: true, data: { root_document_count: 1, total_document_cou
     { path: '中文/%_+#/child', name: 'child', document_count: 1, total_count: 1 },
   ] }] } };
 const document = (id = 'one', path = '', kbId = 'kb') => ({ id, knowledge_base_id: kbId,
-  folder_path: path, file_name: 'Same.pdf', file_type: 'pdf', parse_status: 'processing' });
+  folder_path: path, file_name: 'Same.pdf', file_type: 'pdf', title: '', type: 'file', parse_status: 'processing' });
 const page = (data = [document()], number = 1, total = data.length) => ({ success: true, data, page: number, page_size: 20, total });
 function deferred<T = unknown>() {
   let resolve!: (value: T) => void, reject!: (value: unknown) => void;
@@ -87,9 +87,21 @@ test('file capability follows formats, aliases and deletion, not parse completio
   const file = adaptFilePage(page(), kb).items[0]!;
   assert.equal(fileDisabledReason(file, []), '');
   assert.equal(fileDisabledReason(file, ['csv']), 'unsupported');
-  assert.equal(fileDisabledReason({ ...file, fileType: 'xls' }, ['xlsx']), '');
+  assert.equal(fileDisabledReason({ ...file, fileName: 'sheet.xls' }, ['xlsx']), '');
   assert.equal(fileDisabledReason({ ...file, parseStatus: 'deleting' }, []), 'deleting');
   assert.equal(fileDisabledReason(file, [], [file.id]), 'selected');
+});
+
+test('file format eligibility matches global search filenames, not editable titles or parser types', () => {
+  const file = (name: string, title: string, type: string, source = 'file') => adaptFilePage(page([
+    { ...document(), file_name: name, title, file_type: type, type: source },
+  ]), kb).items[0]!;
+  assert.equal(fileDisabledReason(file('report.csv', 'report.pdf', 'pdf'), ['pdf']), 'unsupported');
+  assert.equal(fileDisabledReason(file('report.PDF', 'Report', ''), ['.PDF']), '');
+  assert.equal(fileDisabledReason(file('pdf', 'Report', 'pdf'), ['pdf']), 'unsupported');
+  assert.equal(fileDisabledReason(file('sheet.XLS', 'Report', 'text'), ['xlsx']), '');
+  assert.equal(fileDisabledReason(file('', 'Web page', 'html', 'url'), ['html']), '');
+  assert.equal(fileDisabledReason(file('page.html', 'Web page', 'html'), ['html']), 'unsupported');
 });
 
 test('pagination uses server pages even when most rows cannot be selected; requests are bounded', async () => {

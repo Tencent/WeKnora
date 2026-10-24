@@ -19,6 +19,7 @@ export interface BrowserFile extends MentionItem {
   type: 'file';
   kbId: string;
   folderPath: string;
+  fileName: string;
   fileType: string;
   sourceType: string;
   parseStatus: string;
@@ -46,7 +47,8 @@ export function adaptFilePage(response: unknown, kb: BrowserKnowledgeBase) {
       typeof file.folder_path !== 'string' || typeof (file.title || file.file_name) !== 'string') throw new Error('Invalid file');
     return {
       id: file.id, name: file.title || file.file_name, type: 'file', kbId: kb.id, kbName: kb.name,
-      orgName: kb.orgName, folderPath: file.folder_path, fileType: file.file_type || '',
+      orgName: kb.orgName, folderPath: file.folder_path, fileName: typeof file.file_name === 'string' ? file.file_name : '',
+      fileType: file.file_type || '',
       sourceType: file.type || '', parseStatus: file.parse_status || '',
     };
   });
@@ -65,9 +67,15 @@ export function fileDisabledReason(file: BrowserFile, supported: readonly string
     const ext = type.replace(/^\./, '').toLowerCase();
     return [ext, ...(aliases[ext] || [])];
   }));
-  if ((types.has('url') || types.has('html')) && (file.sourceType === 'url' || file.fileType === 'html')) return '';
-  const extension = file.name.split('.').pop()?.toLowerCase() || '';
-  return types.has(file.fileType.toLowerCase()) || types.has(extension) ? '' : 'unsupported';
+  // SearchKnowledgeInScopes treats url/html as URL sources, and all other
+  // formats as filename suffixes. Display titles and parser types are editable
+  // metadata and must not make an otherwise incompatible file selectable.
+  if ((types.has('url') || types.has('html')) && file.sourceType === 'url') return '';
+  types.delete('url');
+  types.delete('html');
+  const dot = file.fileName.lastIndexOf('.');
+  const extension = dot >= 0 ? file.fileName.slice(dot + 1).toLowerCase() : '';
+  return types.has(extension) ? '' : 'unsupported';
 }
 
 export function browserErrorKind(error: unknown): 'forbidden' | 'missing' | 'error' {

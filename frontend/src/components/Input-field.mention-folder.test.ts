@@ -62,3 +62,46 @@ test('whole-KB selection retains its original immediate behavior', () => {
   assert.deepEqual(h.kbs, ['kb']); assert.deepEqual(h.ids, []);
   assert.deepEqual(JSON.parse(JSON.stringify(h.request())), { knowledge_base_ids: ['kb'] });
 });
+
+for (const stage of ['kb', 'tags', 'capabilities', 'skills']) {
+  test(`invalidating a mention during ${stage} loading does not restart file search or loading`, async () => {
+    let release!: (value?: unknown) => void;
+    const pending = new Promise(resolve => { release = resolve; });
+    const calls: string[] = [];
+    const pause = async (name: string, result: unknown) => {
+      calls.push(name);
+      if (name === stage) await pending;
+      return result;
+    };
+    const loading = ref(false);
+    const globals = {
+      ref, console: { log() {}, error() {} }, mentionLoading: loading,
+      mentionGroupCounts: ref({}), mentionOffset: ref(0), mentionItems: ref([]),
+      mentionHasMore: ref(false), mentionActiveIndex: ref(0), mentionAllowedKbIds: ref(null),
+      mentionBrowserKbs: ref([]), sharedAgentKbList: ref([]), sharedAgentOrgName: ref(''),
+      settingsStore: {}, selectedAgentId: ref('agent'), knowledgeBases: ref([{ id: 'kb', name: 'Library' }]),
+      orgStore: { sharedKnowledgeBases: [] }, hasAgentConfig: ref(false),
+      agentKBSelectionMode: ref('all'), agentAllowedTools: ref([]), agentSupportedFileTypes: ref([]),
+      toolsConsumeFiles: () => true,
+      chatResources: { fetchKnowledgeBaseById: () => pause('kb', { knowledge_count: 1 }) },
+      listKnowledgeTags: () => pause('tags', { data: [] }),
+      agentMCPSelectionMode: ref('none'), agentSkillsSelectionMode: ref('all'),
+      deploymentCapabilities: { ensureLoaded: () => pause('capabilities', undefined), isSupported: () => true },
+      editorResources: { ensureSkills: () => pause('skills', undefined), skills: [] },
+      hostSkillsOnly: () => true, mentionSkillTargetId: () => 'host', currentAgentConfig: ref({}), currentAgentScope: ref({}),
+      searchKnowledge: async () => { calls.push('files'); return { data: [] }; },
+      MENTION_PAGE_SIZE: 20,
+    };
+    const loader = source.slice(source.indexOf('const loadMentionItems ='), source.indexOf('const loadMoreMentionItems ='));
+    const h = runInNewContext(ts.transpile(`let mentionLoadSeq = 0, lastMentionQuery = '';\n${loader}\n({load: loadMentionItems, invalidate: () => ++mentionLoadSeq})`), globals);
+    const request = h.load('');
+    // Allow the real loader to reach the selected asynchronous boundary.
+    for (let turn = 0; turn < 20 && !calls.includes(stage); turn++) await Promise.resolve();
+    assert(calls.includes(stage));
+    h.invalidate();
+    release();
+    await request;
+    assert.equal(calls.includes('files'), false);
+    assert.equal(loading.value, false);
+  });
+}

@@ -1475,6 +1475,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         orgName: kb.org_name || sharedAgentOrgName.value || undefined
       };
     }));
+    if (isStale()) return;
     nextGroupCounts.kb = kbItems.length;
 
     const tagKeyword = q.trim();
@@ -1498,6 +1499,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       console.error('[Mention] listKnowledgeTags error:', e);
       tagItems = [];
     }
+    if (isStale()) return;
 
     const mcpMode = agentMCPSelectionMode.value;
     if (mcpMode !== 'none') {
@@ -1513,6 +1515,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       // workspace, where they are actually installed. Lite agents store no
       // sandbox config id; their skills live on the host target.
       await deploymentCapabilities.ensureLoaded();
+      if (isStale()) return;
       await editorResources.ensureSkills(
         mentionSkillTargetId(
           hostSkillsOnly(
@@ -1523,6 +1526,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         ),
         currentAgentScope.value,
       );
+      if (isStale()) return;
       skillItems = editorResources.skills
         .filter(skill => isSkillAllowedByAgent(skill.name))
         .map(skill => ({
@@ -1542,6 +1546,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
   }
 
   // Fetch Files from API
+  if (isStale()) return;
   // 仅当满足以下两点才加载文件：
   //   1. 智能体确实会用到知识库（kb_selection_mode !== 'none'）；
   //   2. 智能体启用的工具里至少有一个能消费 @ 的文件 ID
