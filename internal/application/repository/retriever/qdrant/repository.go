@@ -44,6 +44,8 @@ func NewQdrantRetrieveEngineRepository(client *qdrant.Client, indexCfg *types.In
 		collectionBaseName: collectionBaseName,
 		shardNumber:        indexCfg.GetShardNumber(0),
 		replicationFactor:  indexCfg.GetReplicationFactor(0),
+		scalarQuantization: indexCfg != nil && indexCfg.ScalarQuantizationEnabled,
+		vectorsOnDisk:      indexCfg != nil && indexCfg.VectorsOnDisk,
 	}
 
 	log.Info("[Qdrant] Successfully initialized repository")
@@ -140,30 +142,103 @@ func (q *qdrantRepository) deletePoints(ctx context.Context, dimension int, coll
 	return nil
 }
 
+// scalarQuantizationParams returns the SQ8 configuration recommended by
+// Qdrant. Memory overrides the deprecated always_ram field on Qdrant 1.19+;
+// always_ram is still sent so older servers keep the quantized vectors in RAM.
+func (q *qdrantRepository) scalarQuantizationParams() *qdrant.ScalarQuantization {
+	if !q.scalarQuantization {
+		return nil
+	}
+	quantile := float32(0.99)
+	alwaysRAM := true
+	pinnedMemory := qdrant.Memory_Pinned
+	return &qdrant.ScalarQuantization{
+		Type:      qdrant.QuantizationType_Int8,
+		Quantile:  &quantile,
+		AlwaysRam: &alwaysRAM,
+		Memory:    &pinnedMemory,
+	}
+}
+
+func (q *qdrantRepository) scalarQuantizationConfig() *qdrant.QuantizationConfig {
+	params := q.scalarQuantizationParams()
+	if params == nil {
+		return nil
+	}
+	return qdrant.NewQuantizationScalar(params)
+}
+
+func (q *qdrantRepository) vectorParams(dimension int) *qdrant.VectorParams {
+	params := &qdrant.VectorParams{
+		Size:     uint64(dimension),
+		Distance: qdrant.Distance_Cosine,
+	}
+	if q.vectorsOnDisk {
+		onDisk := true
+		coldMemory := qdrant.Memory_Cold
+		params.OnDisk = &onDisk
+		params.Memory = &coldMemory
+	}
+	return params
+}
+
+// updateCollectionConfig patches an existing collection in place. It never
+// recreates the collection, so existing vectors and payload indexes are kept.
+func (q *qdrantRepository) updateCollectionConfig(ctx context.Context, collectionName string) error {
+	if !q.scalarQuantization && !q.vectorsOnDisk {
+		return nil
+	}
+
+	request := &qdrant.UpdateCollection{
+		CollectionName: collectionName,
+	}
+	if params := q.scalarQuantizationParams(); params != nil {
+		request.QuantizationConfig = qdrant.NewQuantizationDiffScalar(params)
+	}
+	if q.vectorsOnDisk {
+		onDisk := true
+		coldMemory := qdrant.Memory_Cold
+		request.VectorsConfig = qdrant.NewVectorsConfigDiff(&qdrant.VectorParamsDiff{
+			OnDisk: &onDisk,
+			Memory: &coldMemory,
+		})
+	}
+
+	if err := q.client.UpdateCollection(ctx, request); err != nil {
+		return fmt.Errorf("failed to update collection config: %w", err)
+	}
+	return nil
+}
+
 // ensureCollection ensures the collection exists for the given dimension
 func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) error {
 	collectionName := q.getCollectionName(dimension)
 
 	log := logger.GetLogger(ctx)
 
-	// Cached dimensions and existing collections need no creation work.
+	// Collection configuration is static for the lifetime of this repository.
+	// Once a dimension is initialized, subsequent writes must not repeat the
+	// existence probe or the online configuration PATCH.
+	if _, ok := q.initializedCollections.Load(dimension); ok {
+		return nil
+	}
+
 	exists, err := q.collectionExists(ctx, dimension)
 	if err != nil {
 		log.Errorf("[Qdrant] Failed to check collection existence: %v", err)
 		return err
 	}
 
+	created := false
 	if !exists {
 		log.Infof("[Qdrant] Creating collection %s with dimension %d", collectionName, dimension)
 
 		err = q.client.CreateCollection(ctx, &qdrant.CreateCollection{
-			CollectionName: collectionName,
-			VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
-				Size:     uint64(dimension),
-				Distance: qdrant.Distance_Cosine,
-			}),
-			ShardNumber:       types.OptionalUint32(q.shardNumber),
-			ReplicationFactor: types.OptionalUint32(q.replicationFactor),
+			CollectionName:     collectionName,
+			VectorsConfig:      qdrant.NewVectorsConfig(q.vectorParams(dimension)),
+			QuantizationConfig: q.scalarQuantizationConfig(),
+			ShardNumber:        types.OptionalUint32(q.shardNumber),
+			ReplicationFactor:  types.OptionalUint32(q.replicationFactor),
 		})
 		// The first batches written at a new dimension are saved by several
 		// workers at once, so another one (or another replica) may have
@@ -176,6 +251,8 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 		} else if err != nil {
 			log.Errorf("[Qdrant] Failed to create collection: %v", err)
 			return fmt.Errorf("failed to create collection: %w", err)
+		} else {
+			created = true
 		}
 
 		// Create payload indexes for filtering
@@ -222,6 +299,16 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 		}
 
 		log.Infof("[Qdrant] Collection %s is ready", collectionName)
+	}
+
+	// Existing collections are patched in place. This also covers losing the
+	// create race, where another worker may have created an unconfigured
+	// collection.
+	if !created {
+		if err := q.updateCollectionConfig(ctx, collectionName); err != nil {
+			log.Errorf("[Qdrant] Failed to update collection config: %v", err)
+			return err
+		}
 	}
 
 	// Mark as initialized

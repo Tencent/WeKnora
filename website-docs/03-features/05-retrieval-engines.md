@@ -173,7 +173,9 @@ flowchart TD
 - **关键词检索**：`tokenizeQuery` 本地分词后对每个 token 构造 `MatchText(content, token)` 的 **should（OR）过滤**，用 `Scroll` 遍历所有匹配维度的 collection 取回；无 BM25 打分（命中即回，分数由上层 RRF 的 rank 决定）。
 - **过滤**：`getBaseFilter` 用 `MatchKeywords` 精确过滤 KB/knowledge/tag/is_enabled。
 - **写入与删除**：字符串 payload 中的非法 UTF-8 与 NUL 字符在写入前清理；删除时对应维度的 collection 尚不存在（首次写入前先删旧向量，或 Qdrant 被清空后）按"无可删"处理，不再阻断随后的写入；启停与标签批量更新逐 collection 执行，任一失败都会返回错误，而不是只记日志。
-- 配置：`QDRANT_HOST` / `QDRANT_PORT` / `QDRANT_API_KEY` / `QDRANT_USE_TLS`。
+- **存储配置**：`QDRANT_SCALAR_QUANTIZATION=true` 时为新建集合写入 SQ8（`int8`、`quantile=0.99`，使用 `memory=pinned` 让量化向量常驻内存）；`QDRANT_VECTORS_ON_DISK=true` 时原始 float32 向量使用 `memory=cold` 存磁盘并按需缓存。两个开关默认关闭。只开 SQ8 会额外保留一份 int8 向量，通常要同时把原始向量放到磁盘才能明显降低内存占用。
+- **已有集合**：发现 `{prefix}_{dim}` 已存在时，通过 `UpdateCollection` 在线 PATCH 对应配置，不删除、不重建，保留已有向量和 payload 索引。配置作用于该维度共享集合，不按单个知识库隔离。go-client v1.19.4 会同时发送 `memory` 和旧的 `always_ram` / `on_disk` 别名以兼容旧版 Qdrant；检索侧暂不下推 `rescore` / `oversampling`。
+- 连接配置：`QDRANT_HOST` / `QDRANT_PORT` / `QDRANT_API_KEY` / `QDRANT_USE_TLS`。
 
 #### Milvus {#_2-7-milvus}
 

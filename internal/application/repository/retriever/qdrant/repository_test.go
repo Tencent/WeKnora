@@ -940,3 +940,177 @@ func TestEnsureCollectionReturnsOtherCreateErrors(t *testing.T) {
 		t.Fatalf("no payload index should be created after a failed create, got %v", *indexed)
 	}
 }
+
+type collectionConfigRPCs struct {
+	exists                bool
+	createErr             error
+	updateErr             error
+	collectionExistsCalls int
+	createCalls           int
+	updateCalls           int
+	createRequest         *qdrant.CreateCollection
+	updateRequest         *qdrant.UpdateCollection
+	indexed               []string
+}
+
+func newCollectionConfigTestRepository(t *testing.T, rpcs *collectionConfigRPCs) *qdrantRepository {
+	t.Helper()
+	client := newInterceptedQdrantClient(t, func(
+		_ context.Context, method string, req, reply any, _ *grpc.ClientConn,
+		_ grpc.UnaryInvoker, _ ...grpc.CallOption,
+	) error {
+		switch request := req.(type) {
+		case *qdrant.CollectionExistsRequest:
+			rpcs.collectionExistsCalls++
+			reply.(*qdrant.CollectionExistsResponse).Result = &qdrant.CollectionExists{Exists: rpcs.exists}
+			return nil
+		case *qdrant.CreateCollection:
+			rpcs.createCalls++
+			rpcs.createRequest = request
+			return rpcs.createErr
+		case *qdrant.UpdateCollection:
+			rpcs.updateCalls++
+			rpcs.updateRequest = request
+			return rpcs.updateErr
+		case *qdrant.CreateFieldIndexCollection:
+			rpcs.indexed = append(rpcs.indexed, request.GetFieldName())
+			return nil
+		default:
+			return fmt.Errorf("unexpected RPC %s", method)
+		}
+	})
+	return &qdrantRepository{client: client, collectionBaseName: "vectors"}
+}
+
+func TestEnsureCollectionCreatesWithQdrantStorageOptions(t *testing.T) {
+	rpcs := &collectionConfigRPCs{}
+	repo := newCollectionConfigTestRepository(t, rpcs)
+	repo.scalarQuantization = true
+	repo.vectorsOnDisk = true
+
+	if err := repo.ensureCollection(context.Background(), 1024); err != nil {
+		t.Fatalf("ensureCollection: %v", err)
+	}
+	if rpcs.createCalls != 1 || rpcs.updateCalls != 0 {
+		t.Fatalf("RPC calls = create %d, update %d; want create 1, update 0", rpcs.createCalls, rpcs.updateCalls)
+	}
+	if rpcs.createRequest == nil {
+		t.Fatal("CreateCollection request was not captured")
+	}
+	if got := rpcs.createRequest.GetCollectionName(); got != "vectors_1024" {
+		t.Fatalf("collection = %q, want vectors_1024", got)
+	}
+	vectorParams := rpcs.createRequest.GetVectorsConfig().GetParams()
+	if vectorParams == nil {
+		t.Fatal("CreateCollection has no vector params")
+	}
+	if vectorParams.GetSize() != 1024 || vectorParams.GetDistance() != qdrant.Distance_Cosine {
+		t.Fatalf("vector params = size %d distance %v", vectorParams.GetSize(), vectorParams.GetDistance())
+	}
+	if !vectorParams.GetOnDisk() {
+		t.Fatal("CreateCollection did not set vectors on_disk")
+	}
+	if vectorParams.GetMemory() != qdrant.Memory_Cold {
+		t.Fatalf("vector memory = %v, want cold", vectorParams.GetMemory())
+	}
+	scalar := rpcs.createRequest.GetQuantizationConfig().GetScalar()
+	if scalar == nil {
+		t.Fatal("CreateCollection has no scalar quantization config")
+	}
+	if scalar.GetType() != qdrant.QuantizationType_Int8 {
+		t.Fatalf("quantization type = %v, want int8", scalar.GetType())
+	}
+	if scalar.GetQuantile() != 0.99 {
+		t.Fatalf("quantile = %v, want 0.99", scalar.GetQuantile())
+	}
+	if !scalar.GetAlwaysRam() {
+		t.Fatal("scalar quantization must set always_ram")
+	}
+	if scalar.GetMemory() != qdrant.Memory_Pinned {
+		t.Fatalf("scalar quantization memory = %v, want pinned", scalar.GetMemory())
+	}
+}
+
+func TestEnsureCollectionUpdatesExistingQdrantStorageOptions(t *testing.T) {
+	rpcs := &collectionConfigRPCs{exists: true}
+	repo := newCollectionConfigTestRepository(t, rpcs)
+	repo.scalarQuantization = true
+	repo.vectorsOnDisk = true
+
+	if err := repo.ensureCollection(context.Background(), 1024); err != nil {
+		t.Fatalf("ensureCollection: %v", err)
+	}
+	if rpcs.createCalls != 0 || rpcs.updateCalls != 1 {
+		t.Fatalf("RPC calls = create %d, update %d; want create 0, update 1", rpcs.createCalls, rpcs.updateCalls)
+	}
+	if rpcs.updateRequest == nil {
+		t.Fatal("UpdateCollection request was not captured")
+	}
+	scalar := rpcs.updateRequest.GetQuantizationConfig().GetScalar()
+	if scalar == nil || scalar.GetType() != qdrant.QuantizationType_Int8 {
+		t.Fatalf("update quantization = %v, want scalar int8", scalar)
+	}
+	if !scalar.GetAlwaysRam() {
+		t.Fatal("updated scalar quantization must set always_ram")
+	}
+	if scalar.GetMemory() != qdrant.Memory_Pinned {
+		t.Fatalf("updated scalar quantization memory = %v, want pinned", scalar.GetMemory())
+	}
+	vectorDiff := rpcs.updateRequest.GetVectorsConfig().GetParams()
+	if vectorDiff == nil || !vectorDiff.GetOnDisk() {
+		t.Fatalf("update vector params = %v, want on_disk=true", vectorDiff)
+	}
+	if vectorDiff.GetMemory() != qdrant.Memory_Cold {
+		t.Fatalf("updated vector memory = %v, want cold", vectorDiff.GetMemory())
+	}
+	if _, ok := repo.initializedCollections.Load(1024); !ok {
+		t.Fatal("successful online update must cache the dimension")
+	}
+}
+
+func TestEnsureCollectionWithoutStorageOptionsSkipsUpdate(t *testing.T) {
+	rpcs := &collectionConfigRPCs{exists: true}
+	repo := newCollectionConfigTestRepository(t, rpcs)
+
+	if err := repo.ensureCollection(context.Background(), 1024); err != nil {
+		t.Fatalf("ensureCollection: %v", err)
+	}
+	if rpcs.createCalls != 0 || rpcs.updateCalls != 0 {
+		t.Fatalf("RPC calls = create %d, update %d; want none", rpcs.createCalls, rpcs.updateCalls)
+	}
+	if _, ok := repo.initializedCollections.Load(1024); !ok {
+		t.Fatal("dimension must be cached after checking the existing collection")
+	}
+}
+
+func TestEnsureCollectionUpdateFailureDoesNotCache(t *testing.T) {
+	updateErr := errors.New("online update failed")
+	rpcs := &collectionConfigRPCs{exists: true, updateErr: updateErr}
+	repo := newCollectionConfigTestRepository(t, rpcs)
+	repo.scalarQuantization = true
+
+	err := repo.ensureCollection(context.Background(), 1024)
+	if !errors.Is(err, updateErr) {
+		t.Fatalf("ensureCollection error = %v, want %v", err, updateErr)
+	}
+	if rpcs.updateCalls != 1 {
+		t.Fatalf("UpdateCollection calls = %d, want 1", rpcs.updateCalls)
+	}
+	if _, ok := repo.initializedCollections.Load(1024); ok {
+		t.Fatal("a failed online update must not cache the dimension")
+	}
+}
+
+func TestEnsureCollectionCachedDimensionSkipsAllRPCs(t *testing.T) {
+	rpcs := &collectionConfigRPCs{}
+	repo := newCollectionConfigTestRepository(t, rpcs)
+	repo.initializedCollections.Store(1024, true)
+
+	if err := repo.ensureCollection(context.Background(), 1024); err != nil {
+		t.Fatalf("ensureCollection: %v", err)
+	}
+	if rpcs.collectionExistsCalls != 0 || rpcs.createCalls != 0 || rpcs.updateCalls != 0 {
+		t.Fatalf("cached ensureCollection made RPCs: exists %d, create %d, update %d",
+			rpcs.collectionExistsCalls, rpcs.createCalls, rpcs.updateCalls)
+	}
+}
