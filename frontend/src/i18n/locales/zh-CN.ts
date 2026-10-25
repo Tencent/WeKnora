@@ -4836,6 +4836,12 @@ export default {
     noKnowledgeBases: '没有可用的知识库',
     enterDescription: '输入描述',
     rawOutputLabel: '原始输出',
+    backgroundWork: {
+      running: '没有后台任务 | {count} 个后台任务 | {count} 个后台任务',
+      stop: '停止',
+      loading: '正在加载输出…',
+      unavailable: '暂时无法查看输出',
+    },
     wikiWritePageTitle: 'Wiki 页面写入',
     wikiReplaceTextTitle: 'Wiki 文本替换',
     wikiRenamePageTitle: 'Wiki 页面重命名',

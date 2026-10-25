@@ -39,7 +39,7 @@ function render(kind: string | null, embeddedMode = false) {
     embeddedMode, userHasScrolledUp: false, onClickScrollToBottom() {}, t: (key: string) => key,
     focusComposerOnMount: false, isReplying: false, composerLocked: false, session_id: 'session',
     currentAssistantMessageId: '', modelId: '', defaultModelId: '', steerQueue: [],
-    isAgentStreamSession: () => true, $slots: {},
+    isAgentStreamSession: () => true, $slots: {}, backgroundItems: [],
   }, []))
 }
 

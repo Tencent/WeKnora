@@ -78,7 +78,7 @@ env:
   GO_VERSION: "1.26"
   GOPROXY: https://proxy.golang.org,direct
   # Keep tests independent of a developer machine's custom log template.
-  LOG_FORMAT: ""
+  WEKNORA_LOG_FORMAT: ""
   BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
 
 jobs:

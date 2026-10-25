@@ -89,6 +89,10 @@ const sessionArtifactDirBootstrapTimeout = 15 * time.Second
 // disappearance).
 const sessionLifecycleCleanupTimeout = 30 * time.Second
 
+// ErrBoundSandboxChanged confirms that a maintenance command's original
+// sandbox is gone. Transport failures must not be treated as this condition.
+var ErrBoundSandboxChanged = errors.New("sandbox: bound sandbox changed before maintenance command")
+
 // SessionBoundManager is a sandbox.Manager that binds one remote sandbox per
 // tenant session. Concrete provider work is delegated to RemoteSandboxClient;
 // this type owns validation and the mapping between application concepts
@@ -670,10 +674,30 @@ func (m *SessionBoundManager) WriteSessionInputFile(
 		return err
 	}
 	defer release()
-	handle, err := m.resolveScope(ctx, sc)
-	if err != nil {
-		return err
+	var handle RemoteSandboxHandle
+	for attempt := 0; attempt < 2; attempt++ {
+		handle, err = m.resolveScope(ctx, sc)
+		if err != nil {
+			return err
+		}
+		err = m.writeSessionInputOnHandle(ctx, handle, clean, content)
+		if err == nil || attempt == 1 || !sessionBindingLost(err) {
+			return err
+		}
+		// The idle sweep can delete the container after resolve and before
+		// mkdir. The binding still points at that container, so drop it and
+		// provision once more. A missing path inside a live container does
+		// not take this branch.
+		if dropErr := m.dropBoundSandbox(ctx, sc.machine(), handle.ID()); dropErr != nil {
+			return err
+		}
 	}
+	return err
+}
+
+func (m *SessionBoundManager) writeSessionInputOnHandle(
+	ctx context.Context, handle RemoteSandboxHandle, clean string, content []byte,
+) error {
 	if err := ignoreExistingDir(m.client.MakeDir(ctx, handle, path.Dir(clean))); err != nil {
 		return fmt.Errorf("sandbox: create input directory: %w", err)
 	}
@@ -681,6 +705,29 @@ func (m *SessionBoundManager) WriteSessionInputFile(
 		return fmt.Errorf("sandbox: write session input %s: %w", clean, err)
 	}
 	return nil
+}
+
+// sessionBindingLost reports a sandbox that is gone. A missing path inside a
+// live container is also NotFound ("does not exist"); rebinding on that
+// would discard the session.
+func sessionBindingLost(err error) bool {
+	if !CanReplaceRemoteBinding(err) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "does not exist") && !strings.Contains(msg, "vanished") {
+		return false
+	}
+	return true
+}
+
+func (m *SessionBoundManager) dropBoundSandbox(ctx context.Context, key SessionSandboxKey, sandboxID string) error {
+	binding, err := m.bindings.Get(ctx, key)
+	if err != nil || binding == nil || binding.SandboxID != sandboxID || binding.Provider != m.client.Provider() {
+		return err
+	}
+	_, err = m.bindings.DeleteIfMatch(ctx, key, binding.Provider, binding.SandboxID)
+	return err
 }
 
 // WriteSessionWorkspaceFile writes a model-authored file into the session's
@@ -1090,7 +1137,7 @@ func (m *SessionBoundManager) execShellCommandWithOutputSnapshot(
 			return nil, nil, err
 		}
 		if !found || handle.ID() != opts.ExpectedSandboxID {
-			return nil, nil, errors.New("sandbox: bound sandbox changed before maintenance command")
+			return nil, nil, ErrBoundSandboxChanged
 		}
 	} else {
 		handle, err = m.resolveScope(ctx, sc)
@@ -1789,7 +1836,7 @@ func (m *SessionBoundManager) lookupSessionHandleForKey(
 		return nil, false, nil
 	}
 	if expectedID != "" && binding.SandboxID != expectedID {
-		return nil, false, errors.New("sandbox: bound sandbox changed before maintenance command")
+		return nil, false, ErrBoundSandboxChanged
 	}
 	handle, err := m.client.Connect(ctx, RemoteConnectRequest{
 		SandboxID:          binding.SandboxID,

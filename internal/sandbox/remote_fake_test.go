@@ -96,10 +96,12 @@ type fakeRemoteClient struct {
 	deleteHook  func(context.Context, string) error
 	execHook    func(RemoteExecRequest) (*RemoteExecResult, error)
 
-	makeDirPaths        []string
-	failMakeDirIfExists bool
-	execRequests        []RemoteExecRequest
-	writeFiles          []fakeRemoteWriteFile
+	makeDirPaths         []string
+	failMakeDirIfExists  bool
+	vanishOnFirstMakeDir bool
+	missingPathMakeDir   bool
+	execRequests         []RemoteExecRequest
+	writeFiles           []fakeRemoteWriteFile
 
 	// snapshots maps snapshotID -> source sandboxID.
 	snapshots   map[string]string
@@ -377,9 +379,19 @@ func (c *fakeRemoteClient) ListDir(
 	return nil, nil
 }
 
-func (c *fakeRemoteClient) MakeDir(_ context.Context, _ RemoteSandboxHandle, path string) error {
+func (c *fakeRemoteClient) MakeDir(_ context.Context, handle RemoteSandboxHandle, path string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.missingPathMakeDir {
+		return NewRemoteError(c.provider, "MakeDir", RemoteErrorKindNotFound, path+" does not exist", nil)
+	}
+	if c.vanishOnFirstMakeDir {
+		c.vanishOnFirstMakeDir = false
+		if handle != nil {
+			delete(c.sandboxes, handle.ID())
+		}
+		return NewRemoteError(c.provider, "MakeDir", RemoteErrorKindNotFound, "container vanished mid-op", nil)
+	}
 	if c.failMakeDirIfExists {
 		for _, existing := range c.makeDirPaths {
 			if existing == path {

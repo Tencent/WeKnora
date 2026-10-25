@@ -527,7 +527,7 @@ func mapStopReason(reason string, toolCalls int, incomplete bool) string {
 	switch {
 	case incomplete, reason == "":
 		return types.FinishReasonIncomplete
-	case reason == "max_tokens":
+	case reason == "max_tokens", reason == "model_context_window_exceeded":
 		return "length"
 	case reason == "tool_use" || (toolCalls > 0 && reason == "end_turn"):
 		return "tool_calls"

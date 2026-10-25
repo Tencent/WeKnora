@@ -2,6 +2,8 @@ package logger
 
 import (
 	"context"
+	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +11,93 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/sirupsen/logrus"
 )
+
+func TestResolveLogFormatFromEnv(t *testing.T) {
+	const preferred = "%level | %msg"
+	const legacy = "legacy: %msg"
+	cases := []struct {
+		name      string
+		preferred string
+		setNew    bool
+		legacy    string
+		want      string
+		warning   string
+	}{
+		{name: "default"},
+		{name: "preferred", setNew: true, preferred: preferred, want: preferred},
+		{name: "preferred overrides legacy", setNew: true, preferred: preferred, legacy: legacy, want: preferred},
+		{
+			name: "preferred overrides inherited json", setNew: true,
+			preferred: preferred, legacy: "json", want: preferred,
+		},
+		{name: "empty disables legacy", setNew: true, legacy: legacy},
+		{name: "whitespace disables legacy", setNew: true, preferred: " \t ", legacy: "json"},
+		{name: "trim template", setNew: true, preferred: "  " + preferred + "\n", want: preferred},
+		{
+			name: "legacy compatibility", legacy: legacy, want: legacy,
+			warning: "LOG_FORMAT is deprecated; use WEKNORA_LOG_FORMAT instead",
+		},
+		{name: "legacy json preserves messages", legacy: "json", warning: "LOG_FORMAT must contain %msg"},
+		{
+			name: "preferred json preserves messages", setNew: true, preferred: "json", legacy: legacy,
+			warning: "WEKNORA_LOG_FORMAT must contain %msg",
+		},
+		{
+			name: "metadata only preserves messages", setNew: true, preferred: "%d %level",
+			warning: "WEKNORA_LOG_FORMAT must contain %msg",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LOG_FORMAT", tc.legacy)
+			t.Setenv("WEKNORA_LOG_FORMAT", tc.preferred)
+			if !tc.setNew {
+				if err := os.Unsetenv("WEKNORA_LOG_FORMAT"); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Capture startup diagnostics independently of the configured logger.
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = r.Close() }()
+			defer func() { _ = w.Close() }()
+			originalStderr := os.Stderr
+			os.Stderr = w
+			defer func() { os.Stderr = originalStderr }()
+			got := resolveLogFormatFromEnv()
+			os.Stderr = originalStderr
+			if err := w.Close(); err != nil {
+				t.Fatal(err)
+			}
+			warning, err := io.ReadAll(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("template = %q, want %q", got, tc.want)
+			}
+			if tc.warning == "" && len(warning) != 0 {
+				t.Errorf("unexpected warning: %s", warning)
+			} else if tc.warning != "" && !strings.Contains(string(warning), tc.warning) {
+				t.Errorf("warning = %q, want %q", warning, tc.warning)
+			}
+			formatter := &CustomFormatter{Template: got}
+			entry := newEntry(logrus.WarnLevel, "partial retrieve failure", logrus.Fields{"kb_count": 2})
+			out, err := formatter.Format(entry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{"partial retrieve failure", "kb_count=2"} {
+				if !strings.Contains(string(out), want) {
+					t.Errorf("log output lost %q: %s", want, out)
+				}
+			}
+		})
+	}
+}
 
 func newEntry(level logrus.Level, msg string, data logrus.Fields) *logrus.Entry {
 	e := logrus.NewEntry(logrus.New())

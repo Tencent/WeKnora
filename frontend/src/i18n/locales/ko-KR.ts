@@ -4834,6 +4834,12 @@ export default {
     noKnowledgeBases: '사용 가능한 지식베이스 없음',
     enterDescription: '설명 입력',
     rawOutputLabel: '원시 출력',
+    backgroundWork: {
+      running: '백그라운드 작업 없음 | 백그라운드 작업 {count}개 | 백그라운드 작업 {count}개',
+      stop: '중지',
+      loading: '출력을 불러오는 중…',
+      unavailable: '출력을 볼 수 없습니다',
+    },
     wikiWritePageTitle: 'Wiki 페이지 작성',
     wikiReplaceTextTitle: 'Wiki 텍스트 교체',
     wikiRenamePageTitle: 'Wiki 페이지 이름 변경',
