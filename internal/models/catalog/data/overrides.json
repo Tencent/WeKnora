@@ -2122,6 +2122,32 @@
           "dimensions_field": ""
         }
       }
+    ],
+    "runcrate": [
+      {
+        "id": "zai-org/GLM-5.3",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "zai-org/GLM-5.3-Flash",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "Qwen/Qwen3.8-Flash",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "openai/gpt-oss-120b",
+        "thinking_levels": {
+          "off": null
+        }
+      }
     ]
   }
 }
