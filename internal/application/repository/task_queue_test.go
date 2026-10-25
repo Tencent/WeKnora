@@ -1066,7 +1066,7 @@ func TestTaskPendingOps_DiscardUnclaimedPreservesLiveKeys(t *testing.T) {
 	).Error)
 
 	require.NoError(t, discarder.DiscardUnclaimed(
-		ctx, types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1", WikiOpRetract, staleBefore,
+		ctx, types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1", "retract", staleBefore,
 	))
 
 	var rows []types.TaskPendingOp
@@ -1084,7 +1084,7 @@ func TestTaskPendingOps_DiscardUnclaimedPreservesLiveKeys(t *testing.T) {
 		"kb-2/retract/k-other-kb",
 	}, got)
 
-	assert.Error(t, discarder.DiscardUnclaimed(ctx, "", types.TaskScopeKnowledgeBase, "kb-1", WikiOpRetract, staleBefore))
+	assert.Error(t, discarder.DiscardUnclaimed(ctx, "", types.TaskScopeKnowledgeBase, "kb-1", "retract", staleBefore))
 }
 
 func TestTaskPendingOps_ClaimableCountMatchesClaimBatch(t *testing.T) {
