@@ -77,7 +77,6 @@ func (r *organizationRepository) ListByTenantID(ctx context.Context, tenantID ui
 		Where("otm.tenant_id = ?", tenantID).
 		Order("organizations.created_at DESC").
 		Find(&orgs).Error
-
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +203,6 @@ func (r *organizationRepository) ListTenantMembers(ctx context.Context, orgID st
 		Where("organization_id = ?", orgID).
 		Order("created_at ASC").
 		Find(&members).Error
-
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +218,6 @@ func (r *organizationRepository) GetTenantMember(ctx context.Context, orgID stri
 	err := r.db.WithContext(ctx).
 		Where("organization_id = ? AND tenant_id = ?", orgID, tenantID).
 		First(&member).Error
-
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrOrgMemberNotFound
