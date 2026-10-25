@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -203,6 +204,19 @@ func csvToMarkdown(data []byte) (string, error) {
 		width = max(width, len(record))
 	}
 
+	// Padding every row out to the widest row amplifies a ragged file
+	// quadratically: a few wide rows among many narrow ones turn
+	// rows × columns cells into output. Budget the exact rendered size
+	// before building the table and reject the blowup with an error
+	// instead of allocating it.
+	if size := projectedCSVTableSize(records, width); size > maxCSVMarkdownBytes {
+		return "", fmt.Errorf(
+			"csv table would render %d bytes (padding %d rows to %d columns) from %d bytes of input; "+
+				"the conversion limit is %d bytes — flatten or split the file before uploading",
+			size, len(records), width, len(data), maxCSVMarkdownBytes,
+		)
+	}
+
 	var sb strings.Builder
 	writeRow := func(record []string) {
 		cells := make([]string, width)
@@ -230,6 +244,31 @@ func csvToMarkdown(data []byte) (string, error) {
 	}
 
 	return sb.String(), nil
+}
+
+// maxCSVMarkdownBytes caps the rendered size of one CSV upload's table.
+// A legitimate conversion renders roughly the input size plus table
+// syntax, and uploads default to 50 MB (MAX_FILE_SIZE_MB), so a table
+// anywhere near 64 MB means widest-row padding is amplifying a
+// pathological file rather than preserving its fields.
+const maxCSVMarkdownBytes = 64 << 20
+
+// projectedCSVTableSize returns the exact byte length of the GFM table
+// csvToMarkdown renders for these records padded to width cells —
+// including the escaping csvCellReplacer applies — without allocating
+// the output.
+func projectedCSVTableSize(records [][]string, width int) int64 {
+	// A rendered row is "| " + width cells joined by " | " + " |\n";
+	// the separator line is "|" + width times " --- |" + "\n".
+	total := int64(len("|") + width*len(" --- |") + len("\n"))
+	for _, record := range records {
+		total += int64(len("| ") + len(" |\n") + 3*(width-1))
+		for _, cell := range record {
+			n, _ := csvCellReplacer.WriteString(io.Discard, cell)
+			total += int64(n)
+		}
+	}
+	return total
 }
 
 // csvCellReplacer escapes what would end a GFM table cell or row: a pipe, and
