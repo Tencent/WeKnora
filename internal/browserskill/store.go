@@ -79,6 +79,16 @@ type Store struct {
 // NewStore enables durable authorization with current membership checks.
 func NewStore(db *gorm.DB) *Store { return &Store{db: db, checkMember: true} }
 
+// inactiveTime represents an expired authorization window or released lease.
+// Strict MySQL rejects Go's zero time; the Unix epoch has the same expired
+// semantics and fits DATETIME without changing the other dialects' storage.
+func (s *Store) inactiveTime() time.Time {
+	if s.db.Dialector.Name() == "mysql" {
+		return time.Unix(0, 0).UTC()
+	}
+	return time.Time{}
+}
+
 func (s *Store) member(ctx context.Context, scope Scope) error {
 	if !s.checkMember {
 		return nil
@@ -132,6 +142,12 @@ func (s *Store) exchange(ctx context.Context, oldHash string, r DeviceRecord) (*
 			return ErrAuthorization
 		}
 		r.ScopeKey, r.Tenant, r.User = p.ScopeKey, p.Tenant, p.User
+		if r.PreviousUntil.IsZero() {
+			r.PreviousUntil = s.inactiveTime()
+		}
+		if r.LeaseUntil.IsZero() {
+			r.LeaseUntil = s.inactiveTime()
+		}
 		return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "scope_key"}}, UpdateAll: true}).
 			Create(&r).
 			Error
@@ -206,7 +222,9 @@ func (s *Store) revoke(ctx context.Context, scope Scope) error {
 		}
 		return tx.Model(&DeviceRecord{}).
 			Where("scope_key = ?", scope.key()).
-			Updates(map[string]any{"revoked_at": time.Now(), "owner": "", "owner_url": "", "lease_until": time.Time{}}).
+			Updates(map[string]any{
+				"revoked_at": time.Now(), "owner": "", "owner_url": "", "lease_until": s.inactiveTime(),
+			}).
 			Error
 	})
 }
@@ -256,7 +274,7 @@ func (s *Store) release(ctx context.Context, id, leaseKey string) error {
 	return s.db.WithContext(ctx).
 		Model(&DeviceRecord{}).
 		Where("id = ? AND lease_key = ?", id, leaseKey).
-		Updates(map[string]any{"owner": "", "owner_url": "", "lease_until": time.Time{}}).
+		Updates(map[string]any{"owner": "", "owner_url": "", "lease_until": s.inactiveTime()}).
 		Error
 }
 
@@ -284,6 +302,6 @@ func (s *Store) releaseOwner(ctx context.Context, owner string) error {
 	return s.db.WithContext(ctx).
 		Model(&DeviceRecord{}).
 		Where("owner = ?", owner).
-		Updates(map[string]any{"owner": "", "owner_url": "", "lease_until": time.Time{}}).
+		Updates(map[string]any{"owner": "", "owner_url": "", "lease_until": s.inactiveTime()}).
 		Error
 }

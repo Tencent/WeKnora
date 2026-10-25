@@ -5,6 +5,19 @@ SPDX-License-Identifier: MIT
 WeKnora Backend API Server Deployment and Service.
 */}}
 {{- if .Values.app.enabled }}
+{{- $dbDriver := .Values.database.driver | default "postgres" }}
+{{- if not (has $dbDriver (list "postgres" "mysql")) }}
+{{- fail "database.driver must be postgres or mysql" }}
+{{- end }}
+{{- $dbHost := .Values.database.host | default (include "weknora.serviceName" (dict "component" "postgresql" "context" .)) }}
+{{- $dbPort := .Values.database.port | default "5432" }}
+{{- if eq $dbDriver "mysql" }}
+{{- if .Values.postgresql.enabled }}
+{{- fail "database.driver=mysql requires postgresql.enabled=false" }}
+{{- end }}
+{{- $dbHost = required "database.host is required for mysql" .Values.database.host }}
+{{- $dbPort = .Values.database.port | default "3306" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -61,11 +74,21 @@ spec:
               value: {{ .Values.global.maxFileSizeMB | quote }}
             # Database configuration
             - name: DB_DRIVER
-              value: "postgres"
+              value: {{ $dbDriver | quote }}
             - name: DB_HOST
-              value: {{ include "weknora.serviceName" (dict "component" "postgresql" "context" .) | quote }}
+              value: {{ $dbHost | quote }}
             - name: DB_PORT
-              value: "5432"
+              value: {{ $dbPort | quote }}
+            {{- if eq $dbDriver "mysql" }}
+            - name: DB_MYSQL_TLS
+              value: {{ .Values.database.mysqlTLS | quote }}
+            - name: DB_CONNECT_TIMEOUT
+              value: {{ .Values.database.connectTimeout | quote }}
+            - name: DB_READ_TIMEOUT
+              value: {{ .Values.database.readTimeout | quote }}
+            - name: DB_WRITE_TIMEOUT
+              value: {{ .Values.database.writeTimeout | quote }}
+            {{- end }}
             - name: DB_USER
               valueFrom:
                 secretKeyRef:

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -19,6 +20,17 @@ func NewResourceRepository(db *gorm.DB) interfaces.ResourceRepository {
 }
 
 func (r *resourceRepository) Create(ctx context.Context, resource *types.StoredResource) error {
+	if r.db.Name() == "mysql" && resource.StorageBackendID != "" {
+		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var backend types.StorageBackend
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").
+				Where("id = ? AND tenant_id = ? AND status = ?", resource.StorageBackendID, resource.TenantID, types.StorageBackendStatusActive).
+				First(&backend).Error; err != nil {
+				return fmt.Errorf("resource storage backend binding: %w", err)
+			}
+			return tx.Create(resource).Error
+		})
+	}
 	return r.db.WithContext(ctx).Create(resource).Error
 }
 

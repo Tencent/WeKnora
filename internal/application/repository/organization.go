@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -93,7 +94,12 @@ func (r *organizationRepository) ListSearchable(ctx context.Context, query strin
 	if query != "" {
 		pattern := "%" + query + "%"
 		// 支持按名称、描述或空间 ID 搜索，便于区分同名空间
-		q = q.Where("name ILIKE ? OR description ILIKE ? OR id::text ILIKE ?", pattern, pattern, pattern)
+		if r.db.Name() == "mysql" {
+			pattern = strings.ToLower(pattern)
+			q = q.Where("LOWER(name) LIKE ? OR LOWER(description) LIKE ? OR LOWER(id) LIKE ?", pattern, pattern, pattern)
+		} else {
+			q = q.Where("name ILIKE ? OR description ILIKE ? OR id::text ILIKE ?", pattern, pattern, pattern)
+		}
 	}
 	err := q.Order("created_at DESC").Limit(limit).Find(&orgs).Error
 	if err != nil {

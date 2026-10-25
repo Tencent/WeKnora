@@ -740,6 +740,9 @@ func TestSandboxAllocationOnTheMigratedSQLiteSchema(t *testing.T) {
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	repo := NewSandboxAllocationRepository(db).(*sandboxAllocationRepository)
 	ctx := context.Background()
 

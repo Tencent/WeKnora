@@ -1,0 +1,99 @@
+name: MySQL database
+
+on:
+  push:
+    branches: [main]
+    paths: &mysql_paths
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'migrations/**'
+      - 'config/**'
+      - 'docker/Dockerfile.app'
+      - '.dockerignore'
+      - 'docker-compose*.yml'
+      - 'scripts/migrate.sh'
+      - 'helm/**'
+      - 'docs/mysql-database.md'
+      - '.github/workflows/mysql.yml'
+  pull_request:
+    paths: *mysql_paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mysql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mysql: ['8.0.46', '8.4.8']
+    services:
+      mysql:
+        image: mysql:${{ matrix.mysql }}
+        env:
+          MYSQL_ROOT_PASSWORD: mysql-test-password
+          MYSQL_ROOT_HOST: '%'
+          MYSQL_DATABASE: weknora_mysql_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pmysql-test-password"
+          --health-interval=10s --health-timeout=5s --health-retries=12
+    env:
+      WEKNORA_MYSQL_TEST_DSN: root:mysql-test-password@tcp(127.0.0.1:3306)/weknora_mysql_test?parseTime=true&loc=UTC&time_zone=%27%2B00%3A00%27&multiStatements=true
+      LOG_FORMAT: ''
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential libsqlite3-dev
+      - name: Shared connection configuration and migration coverage
+        run: go test ./cmd/database-dsn ./internal/database -count=1
+      - name: Configure migration trigger permissions as in standalone Compose
+        run: >-
+          docker exec -e MYSQL_PWD=mysql-test-password ${{ job.services.mysql.id }}
+          mysql -uroot -e 'SET GLOBAL log_bin_trust_function_creators = 1'
+      - name: MySQL migrations, queries, and concurrency
+        run: >-
+          go test -tags mysqlintegration ./internal/database
+          ./internal/application/repository ./internal/application/service
+          ./internal/application/service/memory ./internal/container
+          ./internal/agent/collaboration
+          ./internal/browserskill
+          -run MySQL -count=1 -timeout=20m
+      - name: Compose dependency graph and migration script
+        env:
+          DB_USER: weknora
+          DB_NAME: WeKnora
+          DB_PASSWORD: compose-test
+          MYSQL_ROOT_PASSWORD: compose-root-test
+          REDIS_PASSWORD: compose-redis-test
+          JWT_SECRET: compose-jwt-test
+          SYSTEM_AES_KEY: '01234567890123456789012345678901'
+        run: |
+          bash -n scripts/migrate.sh
+          docker compose -f docker-compose.mysql.yml config --quiet
+          docker compose -f docker-compose.mysql.yml config --format json > "$RUNNER_TEMP/mysql-compose.json"
+          jq -e '.services.app.environment.DB_DRIVER == "mysql" and (.services | has("postgres") | not) and (.services.app.depends_on | has("postgres") | not) and (.services | has("qdrant"))' "$RUNNER_TEMP/mysql-compose.json"
+          jq -e '.services.mysql.command | index("--log-bin-trust-function-creators=1") != null' "$RUNNER_TEMP/mysql-compose.json"
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Render PostgreSQL and external MySQL Helm configurations
+        run: |
+          helm template weknora ./helm --set secrets.existingSecret=test-secret > "$RUNNER_TEMP/postgres.yaml"
+          helm template weknora ./helm --set secrets.existingSecret=test-secret \
+            --set database.driver=mysql --set database.host=mysql.example \
+            --set postgresql.enabled=false --set app.env.RETRIEVE_DRIVER=qdrant > "$RUNNER_TEMP/mysql.yaml"
+          ! grep -q 'name: weknora-postgres' "$RUNNER_TEMP/mysql.yaml"

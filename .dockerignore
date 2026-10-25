@@ -56,6 +56,7 @@ test/data/mswag.txt
 # 敏感文件
 .env
 .env.lite
+.env.mysql
 *.pem
 *.key
 *.crt

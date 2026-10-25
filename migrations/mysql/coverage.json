@@ -1,0 +1,677 @@
+{
+  "main_commit": "e28c68cf552cc1aba2fc923a73b0ab23a33bcb55",
+  "postgres_head": 133,
+  "mysql_baseline": "000000_init",
+  "postgres_migrations": [
+    {
+      "file": "000000_init.up.sql",
+      "sha256": "c0c6d377469525fa1d34ee4efb6325c05936fb857d167350d19ed1a2fd268526",
+      "effect": "Consolidated final metadata schema/seed/constraints: init. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000001_agent.up.sql",
+      "sha256": "c68596ebe86fc9fe9039c6544c8f708eb3c2ceb5dce740b3c0f0f658f87cffed",
+      "effect": "Consolidated final metadata schema/seed/constraints: agent. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000002_embeddings.up.sql",
+      "sha256": "8fa21195be5633c922a37f532a2b074edc09427d4a2dacd16a915b4f9ae91a93",
+      "effect": "PostgreSQL knowledge vector schema; MySQL uses an external knowledge retriever."
+    },
+    {
+      "file": "000003_chunk_flags.up.sql",
+      "sha256": "434d362963f9f048458b5b38c423d02e53a6412cd4a716d3c054b54bea93de78",
+      "effect": "Consolidated final metadata schema/seed/constraints: chunk flags. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000004_drop_vlm_model_id.up.sql",
+      "sha256": "6575c2be6c211cef3182d07aa873eeae30e68813bcac4f61137cc1a7acb4cf5f",
+      "effect": "Consolidated final metadata schema/seed/constraints: drop vlm model id. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000005_mentioned_items.up.sql",
+      "sha256": "2d1fae17dedfaa888b5cf4ba0e22d04e296727717e7693a175a3e9404a53d385",
+      "effect": "Consolidated final metadata schema/seed/constraints: mentioned items. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000006_custom_agents.up.sql",
+      "sha256": "6392bafb3ebcdce8af1b69ec9fcc4d2f6420ba330b6d6f3170d462226ced76d4",
+      "effect": "Consolidated final metadata schema/seed/constraints: custom agents. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000007_embeddings_tag_id.up.sql",
+      "sha256": "14bacf9b89ffa5fbd774bc2fcd29c21b6a3a42c22fae91c3e09b451178db2582",
+      "effect": "Consolidated final metadata schema/seed/constraints: embeddings tag id. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000008_migrate_untagged_faq.up.sql",
+      "sha256": "322e453f6fd767a295ef8f8414b4ed954d9881ed2be70c52558a0574bbf203c7",
+      "effect": "Consolidated final metadata schema/seed/constraints: migrate untagged faq. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000009_add_last_faq_import_result.up.sql",
+      "sha256": "6f466355bd491d7adf5a2c9552f3045cd9cbc248743437ab3b6242a97299109a",
+      "effect": "Consolidated final metadata schema/seed/constraints: add last faq import result. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000010_add_seq_id.up.sql",
+      "sha256": "8a2cbd5788fae5fd242d633d5a29b0579fa50e9b5719399ecb6a3bb061550d15",
+      "effect": "Consolidated final metadata schema/seed/constraints: add seq id. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000011_pg_search_update.up.sql",
+      "sha256": "425c2dcc9b359ed454eb0c325e8bc392ea4def9afb8e69169de4d765dc8fe019",
+      "effect": "PostgreSQL pg_search extension upgrade; not a MySQL metadata object."
+    },
+    {
+      "file": "000012_organizations.up.sql",
+      "sha256": "bdd4aa1f8127ce79a67bf1fbb275d599660d2d17864a8c5ffff2bd2ab2c7764c",
+      "effect": "Consolidated final metadata schema/seed/constraints: organizations. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000013_engine_configs.up.sql",
+      "sha256": "5b5bb8b79b147ea1fbda76022e3cafab143473eaca5e8c7d97d322b98d916ca1",
+      "effect": "Consolidated final metadata schema/seed/constraints: engine configs. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000014_storage_provider_config.up.sql",
+      "sha256": "76b31dc4c975664ae109a292e2012d5bb5f80140a87b1532cc82ce4ce31ba844",
+      "effect": "Consolidated final metadata schema/seed/constraints: storage provider config. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000015_add_is_fallback.up.sql",
+      "sha256": "6df167f85850fbb85446575376090e50b8824eeac14dabcff2a0cc62dade5211",
+      "effect": "Consolidated final metadata schema/seed/constraints: add is fallback. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000016_add_kb_pinned.up.sql",
+      "sha256": "12b372db58e99c8f5926d0b5c88581eaf007e4a0b0e7bde50f0876f68f4531af",
+      "effect": "Consolidated final metadata schema/seed/constraints: add kb pinned. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000017_mcp_builtin.up.sql",
+      "sha256": "a76745b7a34721887de51e2baea92fc96283b69cd2316593cff6ce6a55d67a6d",
+      "effect": "Consolidated final metadata schema/seed/constraints: mcp builtin. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000018_extend_tenant_api_key.up.sql",
+      "sha256": "94988781f14e5c9ca49212e8e7fb900d2967f5144610799d1d5454ba587268ca",
+      "effect": "Consolidated final metadata schema/seed/constraints: extend tenant api key. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000019_add_agent_duration_ms.up.sql",
+      "sha256": "e88465e3c97a7b0e51ba47722244fa50e7f484d4c5c13e16542d346bb361c83c",
+      "effect": "Consolidated final metadata schema/seed/constraints: add agent duration ms. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000020_add_message_knowledge_id.up.sql",
+      "sha256": "35c99ca286bd0c8d3d89c42fdc6593196fc871bacb650933572d0ec4dfb1204f",
+      "effect": "Consolidated final metadata schema/seed/constraints: add message knowledge id. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000021_im_channel.up.sql",
+      "sha256": "c1da806a65568f1151aa587fb7fb731f031c1726806567d4c3297d44758c4a36",
+      "effect": "Consolidated final metadata schema/seed/constraints: im channel. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000022_message_images.up.sql",
+      "sha256": "84b1a3afcaa212eb6472e84d3c003c95995e231f32ad60bbc064cc000a0b4ece",
+      "effect": "Consolidated final metadata schema/seed/constraints: message images. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000023_im_channel_kb_id.up.sql",
+      "sha256": "57185ad9b109e59308d7257a816e438137b860a12955c8503e3c3b8d5e6d6387",
+      "effect": "Consolidated final metadata schema/seed/constraints: im channel kb id. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000024_im_channel_bot_identity.up.sql",
+      "sha256": "fe9235dca8083c650854f16fa9db523b024988f8f843c782e09e21a710f94d49",
+      "effect": "Consolidated final metadata schema/seed/constraints: im channel bot identity. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000025_message_channel.up.sql",
+      "sha256": "3bee13124343845244338e39ebf885339a3f4c88fd2f39c99cc4da30225dcafb",
+      "effect": "Consolidated final metadata schema/seed/constraints: message channel. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000026_chunks_query_indexes.up.sql",
+      "sha256": "a81ebbfa0d9490c26e5c281f05f4b01db5cea3c2959ebef060963cb6a17f0a6d",
+      "effect": "Consolidated final metadata schema/seed/constraints: chunks query indexes. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000027_message_rendered_content.up.sql",
+      "sha256": "49fb858a4f6a8cbc1c58128c0ce793f9a05a4f83ecbbaecbf34ccf79016a1543",
+      "effect": "Consolidated final metadata schema/seed/constraints: message rendered content. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000028_im_thread_session.up.sql",
+      "sha256": "ebb89c37e9852a01049a87415848b367fd6afd966749c899fff69837925abd56",
+      "effect": "Consolidated final metadata schema/seed/constraints: im thread session. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000029_datasource_tables.up.sql",
+      "sha256": "6b02245df127709a55b2136197083acee72982bbf4cf0616f1a38a2927ffe991",
+      "effect": "Consolidated final metadata schema/seed/constraints: datasource tables. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000030_web_search_providers.up.sql",
+      "sha256": "cae59d84edcab7470f65b0e7ffb3fa427bf16f8998d468a13e7e8406a82fa87f",
+      "effect": "Consolidated final metadata schema/seed/constraints: web search providers. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000031_add_asr_config.up.sql",
+      "sha256": "4a48b17e623709634afd50a455acd229c036864c16fef2279c1f7b0d28a0acd6",
+      "effect": "Consolidated final metadata schema/seed/constraints: add asr config. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000032_vector_stores.up.sql",
+      "sha256": "eca3636b5ecb8178a0045cf1ada0ace6b03e8fdbadf9624315688e64f94b720d",
+      "effect": "Consolidated final metadata schema/seed/constraints: vector stores. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000033_add_video_info_to_chunks.up.sql",
+      "sha256": "908cdc5962ffb6e39cbc3bda59b422fd98e0cf9e032279d6263267709ad717bd",
+      "effect": "Consolidated final metadata schema/seed/constraints: add video info to chunks. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000034_add_attachments.up.sql",
+      "sha256": "cfe65e8c1cb2902ddede93c3162d88c2977c1e719a7f527c6c0edbac8b0f4951",
+      "effect": "Consolidated final metadata schema/seed/constraints: add attachments. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000035_add_credentials.up.sql",
+      "sha256": "eb2ca395c096fa707c0574ab69dc76963fe7d4d3ee1bb81b76fee05da9cfe4f5",
+      "effect": "Consolidated final metadata schema/seed/constraints: add credentials. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000036_kb_vector_store_id.up.sql",
+      "sha256": "31a96239c6fad4b3dc61799e56ef17e2f9a600d47613d24de35e4fea2f6bbe6f",
+      "effect": "Consolidated final metadata schema/seed/constraints: kb vector store id. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000037_wiki_and_indexing.up.sql",
+      "sha256": "07141b0891185bef09350e2dfacf55a99974affc0a85452ae4ee623988549120",
+      "effect": "Consolidated final metadata schema/seed/constraints: wiki and indexing. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000038_im_session_agent_id.up.sql",
+      "sha256": "b4f6ebab0629334910c54b44d3c27ee7e40400f08e821257bb6d2400251a32b6",
+      "effect": "Consolidated final metadata schema/seed/constraints: im session agent id. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000039_session_user_id_and_pin.up.sql",
+      "sha256": "452a97e726c58cb75075a5e25781b5afa1486cb235af96a4eb3aea79414f9a82",
+      "effect": "Consolidated final metadata schema/seed/constraints: session user id and pin. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000040_wiki_log_entries.up.sql",
+      "sha256": "409338664d412726da8e6a51e1dc0a31626cb2468f972d28d81e043528657376",
+      "effect": "Historical wiki_log_entries table is removed by migration 000077 and is absent from the final MySQL baseline."
+    },
+    {
+      "file": "000041_task_queue_and_wiki_indexes.up.sql",
+      "sha256": "1f0863288fa4d76a50bfd0de520a06c78c6687c401700daad2ddd89cefcbbae3",
+      "effect": "Consolidated final metadata schema/seed/constraints: task queue and wiki indexes. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000042_mcp_tool_approval.up.sql",
+      "sha256": "29472f75e2b7350a4cb8a6581eeefd2396870a7e003edfafea3c6d0e1073e402",
+      "effect": "Consolidated final metadata schema/seed/constraints: mcp tool approval. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000043_tenant_rbac.up.sql",
+      "sha256": "5eb2223f1396c005802193cfb3be4a9b570935a69d2521b42f5870bb3e6dd374",
+      "effect": "Consolidated final metadata schema/seed/constraints: tenant rbac. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000044_audit_log.up.sql",
+      "sha256": "9fe4bfeec076591edb9a924bc08c3db3539d79345fbcba86bdfb96ea9d0e792c",
+      "effect": "Consolidated final metadata schema/seed/constraints: audit log. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000045_org_tenant_members.up.sql",
+      "sha256": "fedcca2bab4adb86e717e5499a6678c4654367f935d49ee28f85c1be2ebebf92",
+      "effect": "organization_tenant_members final membership table and indexes replace per-user organization_members; historical backfill and empty organization_members_pre_plan3 rollback archive are omitted on fresh MySQL installs."
+    },
+    {
+      "file": "000046_org_owner_tenant_id.up.sql",
+      "sha256": "9cacc7c174be628d85c95f4acd714dc0ae310c736f4fb3ed8f58994ba1e7124f",
+      "effect": "Consolidated final metadata schema/seed/constraints: org owner tenant id. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000047_user_resource_favorites.up.sql",
+      "sha256": "4800339da2e03b12f95e83c69a0ed2997c184d58833dc622be7a56cf44b08158",
+      "effect": "Consolidated final metadata schema/seed/constraints: user resource favorites. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000048_tenant_invitations.up.sql",
+      "sha256": "f899bbb30d3e13e35dae6d800bd431b906d6c2ced648f4d06bbc48aaa0bbb71c",
+      "effect": "Consolidated final metadata schema/seed/constraints: tenant invitations. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000049_user_preferences.up.sql",
+      "sha256": "a4cc322e84d96f826f1686ea177811de36b99fbf22de4fee914966f487ece9aa",
+      "effect": "Consolidated final metadata schema/seed/constraints: user preferences. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000050_user_kb_pins.up.sql",
+      "sha256": "dc348e057ca0e2c94508089c84d0c3e536531b17befeff828957453441160fb2",
+      "effect": "Consolidated final metadata schema/seed/constraints: user kb pins. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000051_custom_agents_creator_backfill.up.sql",
+      "sha256": "c28a7d2e7ac1f434ad150c57b55e4c85c7373c5fea7302e7c989401d38d5463a",
+      "effect": "Consolidated final metadata schema/seed/constraints: custom agents creator backfill. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000052_models_managed_by.up.sql",
+      "sha256": "e80aa224eb5cee5ca044179cddf11881189f67a764ecb8f24164738a3c41007d",
+      "effect": "Consolidated final metadata schema/seed/constraints: models managed by. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000053_system_admin_and_settings.up.sql",
+      "sha256": "edd654795dc3ea4b4d806b25b33b669cab125bc22f9de6c12f8e6861b00ffb02",
+      "effect": "Consolidated final metadata schema/seed/constraints: system admin and settings. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000054_invitation_tokens.up.sql",
+      "sha256": "94885454b39cc64ecd4ad460f6df33a02edfd20b35a0a46f432d9965870f1897",
+      "effect": "Consolidated final metadata schema/seed/constraints: invitation tokens. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000055_knowledge_processing_spans.up.sql",
+      "sha256": "3e685ea93dfa63b35cd16da2943cfde37f910a976354e80f8bae17d814a5702a",
+      "effect": "Consolidated final metadata schema/seed/constraints: knowledge processing spans. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000056_knowledge_pending_subtasks.up.sql",
+      "sha256": "82b589921644d5ae97e386656b8145641a6aaeb4d7f56f781ac5f633f213a031",
+      "effect": "Consolidated final metadata schema/seed/constraints: knowledge pending subtasks. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000057_models_display_name.up.sql",
+      "sha256": "c7df8ed83341280992d627b37a86a76f5d14796de7a38f443ea12f91a62b6817",
+      "effect": "Consolidated final metadata schema/seed/constraints: models display name. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000058_expand_knowledge_source.up.sql",
+      "sha256": "6dd4acc7f615ba80ceac7e8fa04132e4c905fe0a056d0e5022e7d54483393899",
+      "effect": "Consolidated final metadata schema/seed/constraints: expand knowledge source. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000059_embeddings_hnsw_1024.up.sql",
+      "sha256": "32078eeada1bb7dccae690ee6cbfa4ac531eda7f94e39766b8f2d7fc3d28b764",
+      "effect": "PostgreSQL HNSW/halfvec index; external knowledge retrieval on MySQL."
+    },
+    {
+      "file": "000060_embed_channels.up.sql",
+      "sha256": "ded65698b8e5409e407ea5f731addb292a7f25d7383042aae635a68ea7e97de0",
+      "effect": "Consolidated final metadata schema/seed/constraints: embed channels. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000061_wiki_page_hierarchy.up.sql",
+      "sha256": "ac64226a2678695c7a1e360ad4b46a9407c191e962bea952205ff81ad9eb51ae",
+      "effect": "Consolidated final metadata schema/seed/constraints: wiki page hierarchy. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000062_mcp_oauth.up.sql",
+      "sha256": "ee34e01d42b4341b674eafcbc35c1a210dc5462cb27601c1c1b3dab3e40a455b",
+      "effect": "Consolidated final metadata schema/seed/constraints: mcp oauth. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000063_knowledge_multi_tags.up.sql",
+      "sha256": "b5323e0650708d0552df9b29a84c80c74562449ff7932dc47fb01364d923bc88",
+      "effect": "Consolidated final metadata schema/seed/constraints: knowledge multi tags. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000064_principal_model.up.sql",
+      "sha256": "610b6ccaa527c8531adb8e3ce436894dba1d20590c84e969766b58ca4dd26ec1",
+      "effect": "Consolidated final metadata schema/seed/constraints: principal model. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000065_tenant_api_keys.up.sql",
+      "sha256": "fadb1bad5dd60fa95c23bcc0722137bae7436b19299e556b36fc1252ac77142a",
+      "effect": "Consolidated final metadata schema/seed/constraints: tenant api keys. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000066_expand_knowledge_span_name.up.sql",
+      "sha256": "0e4e63bb11743284145859f8731c3b877eb47b176a1aef43ed99c41da54e8a82",
+      "effect": "Consolidated final metadata schema/seed/constraints: expand knowledge span name. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000067_question_suggestions.up.sql",
+      "sha256": "ec187b6188943e0cad21cccbd213fec2e808fecd8bf0b6cbcc191cadf42b3d25",
+      "effect": "Consolidated final metadata schema/seed/constraints: question suggestions. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000068_storage_backends.up.sql",
+      "sha256": "2e9a4ac262dcc7747dff253f0b2fef1d538fe834b45b58d8afbc019933f73a8d",
+      "effect": "Consolidated final metadata schema/seed/constraints: storage backends. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000069_resource_registry.up.sql",
+      "sha256": "99aa302e6cb421c9f72d3c0c2f4e66d29e77613ec7f24a842c36c67f528807ad",
+      "effect": "Consolidated final metadata schema/seed/constraints: resource registry. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000070_temporary_documents.up.sql",
+      "sha256": "c9f53bd5fad989fc97e71378348c9aa61e5918aa787d925eadcdd97daa35b2e9",
+      "effect": "Consolidated final metadata schema/seed/constraints: temporary documents. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000071_platform_api_keys.up.sql",
+      "sha256": "3eba4faca192068904c8ebed5800ad3961bb82456ffeefbe1d11853c3c7548f9",
+      "effect": "Consolidated final metadata schema/seed/constraints: platform api keys. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000072_auth_timestamp_tz.up.sql",
+      "sha256": "9cdf994495fb5ad3fd511b0367ac189cd287109bc6e8aa1c406a84ffcf0de3bf",
+      "effect": "Consolidated final metadata schema/seed/constraints: auth timestamp tz. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000073_kb_activity_scope.up.sql",
+      "sha256": "8dfb0d349ad25e2050a166b06e1dfcf1b2d2ea74e59490c2dc323c4ad7ab878f",
+      "effect": "Consolidated final metadata schema/seed/constraints: kb activity scope. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000074_mcp_oauth_refresh_lease.up.sql",
+      "sha256": "e4f6160564d5907c4531ff71dec20b33a57878a771fda7d2b4a167193e330d3c",
+      "effect": "Consolidated final metadata schema/seed/constraints: mcp oauth refresh lease. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000075_wiki_page_revisions.up.sql",
+      "sha256": "60f6c25c3331d2f1088b3838efcc0d0e3d75ec96272f863a67aa460a1beda1e1",
+      "effect": "Consolidated final metadata schema/seed/constraints: wiki page revisions. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000076_knowledge_metadata_external_id_index.up.sql",
+      "sha256": "bf180fa2f223d35eac294848993a915975fe33273975d33e0b7ed3ec87debcf4",
+      "effect": "Consolidated final metadata schema/seed/constraints: knowledge metadata external id index. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000077_remove_wiki_log.up.sql",
+      "sha256": "ce67743466cf0d1cc43f5562c4c32a63366e09cc9922f7e95b4f0ab65cd4b0bf",
+      "effect": "Final baseline omits the removed wiki_log_entries table and indexes."
+    },
+    {
+      "file": "000078_chunk_editing_and_custom_metadata.up.sql",
+      "sha256": "09a90a9be0767fcf37a66a7ade380140b95ced5df2a0e3ada01d91e3712730ff",
+      "effect": "Consolidated final metadata schema/seed/constraints: chunk editing and custom metadata. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000079_knowledge_folder_path.up.sql",
+      "sha256": "e4e4c989fe422a9e345a9d60d9d8e8a4ef102888b7071bbf0364ac7053372f95",
+      "effect": "Consolidated final metadata schema/seed/constraints: knowledge folder path. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000080_knowledge_base_auto_tag_config.up.sql",
+      "sha256": "3353d707866acb45eb722bc9a67b3ab3b71cf47f7bd6b96d1bea53d3ca67a216",
+      "effect": "Consolidated final metadata schema/seed/constraints: knowledge base auto tag config. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000081_message_artifacts.up.sql",
+      "sha256": "45574794595cc6d81ef99935c3a00476d2b0a83e9516f47d0a53beb9db7e4b78",
+      "effect": "Consolidated final metadata schema/seed/constraints: message artifacts. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000082_tenant_sandbox_config.up.sql",
+      "sha256": "6e5d72aded12eee7eb8e5a0dfa09a38bb6a1534c7cc92053bded400e095f1147",
+      "effect": "Consolidated final metadata schema/seed/constraints: tenant sandbox config. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000083_session_sandbox_config.up.sql",
+      "sha256": "60217ca0cf1387b3db943a3485e49db5dfaaba6006bcf2a5d1f630ad96772c19",
+      "effect": "sessions.sandbox_config_id is nullable VARCHAR(36), preserving NULL for no live sandbox and the deployment-default sentinel."
+    },
+    {
+      "file": "000084_memory.up.sql",
+      "sha256": "984f145831984dc8b03274fc3a9575cd7675bdde3140ce37d68d396f33565e5b",
+      "effect": "Consolidated final metadata schema/seed/constraints: memory. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000085_message_usage.up.sql",
+      "sha256": "9ab7e5c2400fe1980579cd2151d323b251ab4732b34198ecb63638628536a3b9",
+      "effect": "Consolidated final metadata schema/seed/constraints: message usage. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000086_tenant_skills.up.sql",
+      "sha256": "5d459ad999d0e1b9abe7b1e4c6cf95db4e7381947abf6c695036b6adb3a551b2",
+      "effect": "Consolidated final metadata schema/seed/constraints: tenant skills. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000087_skill_install_transcript.up.sql",
+      "sha256": "e4dc30c236284a5220363186e8f8b1f64bf08e2a4f13b6ff972b13487bba7327",
+      "effect": "Consolidated final metadata schema/seed/constraints: skill install transcript. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000088_skill_snapshot_planned_name.up.sql",
+      "sha256": "d2ee35959d488deb2f1ec7554462d8cc1494c10cd4f730bf7b9274518db58867",
+      "effect": "Consolidated final metadata schema/seed/constraints: skill snapshot planned name. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000089_env_vars.up.sql",
+      "sha256": "5cea1e73506a3dd129beaf814a4e16f8b213fa9969efba92712e73bdacda445b",
+      "effect": "Consolidated final metadata schema/seed/constraints: env vars. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000090_skill_catalog.up.sql",
+      "sha256": "488ff113c8f5a43428f4d158ee3f8c2e4802f6f281100bf686f92dfd87ad1631",
+      "effect": "Consolidated final metadata schema/seed/constraints: skill catalog. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000091_mcp_tool_enabled.up.sql",
+      "sha256": "8f5c3753cc72c672d9971f8643900059f5e2857008dcc11b6ec096bc1d744b32",
+      "effect": "Consolidated final metadata schema/seed/constraints: mcp tool enabled. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000092_mcp_metadata.up.sql",
+      "sha256": "bb1bd37b18f3cb69077009b45506ba4b2024ba195cf7139ad31ef0dfa9df64b4",
+      "effect": "Consolidated final metadata schema/seed/constraints: mcp metadata. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000093_browser_authorization.up.sql",
+      "sha256": "4ee5f23a33e69d2228dec1d78d62f257f21db23fcc6b2a13c75d6559eaaa7a2d",
+      "effect": "Consolidated final metadata schema/seed/constraints: browser authorization. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000094_memory_consistency.up.sql",
+      "sha256": "08eef89e0ac37dfd1bfd11fbe6201200a69150e49450f6d51baa263d63509fe7",
+      "effect": "Consolidated final metadata schema/seed/constraints: memory consistency. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000095_memory_vector_search.up.sql",
+      "sha256": "98df6d094ea719563773a71572d2a8cbd9bc688cac916d3c8a8a1c428524ca6b",
+      "effect": "PostgreSQL native Memory vector acceleration; MySQL stores the vector blob and uses rankInProcess."
+    },
+    {
+      "file": "000096_dingtalk_stream_only.up.sql",
+      "sha256": "fab958abe7efc7a662e8a591fb2749ee5813098bcf6fad7c89d2fde8998745cf",
+      "effect": "Consolidated final metadata schema/seed/constraints: dingtalk stream only. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000097_session_fork.up.sql",
+      "sha256": "29af511c097a2155eb62cdf5f8bb09057ba8ad2e4606ef07313ca7ef2117650d",
+      "effect": "Consolidated final metadata schema/seed/constraints: session fork. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000098_fork_snapshot_lease.up.sql",
+      "sha256": "479f54559032d54913ed6cea34e19bec049d4a113f6a55aba16c1e5d07f582a1",
+      "effect": "Consolidated final metadata schema/seed/constraints: fork snapshot lease. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000099_pg_search_0226.up.sql",
+      "sha256": "ea346fb7dd319cfb341eec6a96622971f1d3e54f64a56cddc44abbd90a85d293",
+      "effect": "PostgreSQL pg_search extension upgrade; not a MySQL metadata object."
+    },
+    {
+      "file": "000100_chunks_index_diet.up.sql",
+      "sha256": "6b0034b4cc49d9bfaba8e15d367668da9ba40f2d3e833d282e00cdc540d2e9b7",
+      "effect": "Chunk metadata indexes retained/removed according to current query usage; PostgreSQL-specific text-search indexes remain on the external retriever."
+    },
+    {
+      "file": "000101_knowledge_profiles.up.sql",
+      "sha256": "672e2f9743f7df83632bce9edf075defda844bca4c609e0f5d54be539d147690",
+      "effect": "Consolidated final metadata schema/seed/constraints: knowledge profiles. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000102_mcp_endpoints.up.sql",
+      "sha256": "edcccdeda7822524d9adc58a97847eb82f6ef2338b4afadeddadff6ed7a8c522",
+      "effect": "Consolidated final metadata schema/seed/constraints: mcp endpoints. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000103_message_artifacts_table.up.sql",
+      "sha256": "f3e64d1c4f4f422f5d8621ad1732c85c3952b7ded1986b974dc475d1647392ae",
+      "effect": "Consolidated final metadata schema/seed/constraints: message artifacts table. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000104_skill_served_version.up.sql",
+      "sha256": "7dad54d12a034eb9dfc1dd396e71cf2c8e08224582734c3d1ae9decddc91c47b",
+      "effect": "Consolidated final metadata schema/seed/constraints: skill served version. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000105_message_context_checkpoint.up.sql",
+      "sha256": "ed33ba16a6a255ba2c072ab8cb51487f543a62093778a7a186b0ae875cd621c1",
+      "effect": "Consolidated final metadata schema/seed/constraints: message context checkpoint. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000106_messages_session_created_index.up.sql",
+      "sha256": "7f36c9e8d5cf09a204ef633f5390d3d22a6adf3b1f2f6afa11fbf977ab6c99b4",
+      "effect": "Consolidated final metadata schema/seed/constraints: messages session created index. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000107_message_artifacts_deleted_at.up.sql",
+      "sha256": "d50da4b32e3fcbad38ecf5914cf0d7062c262d8b9e37450e91b900fb78f88e2f",
+      "effect": "Consolidated final metadata schema/seed/constraints: message artifacts deleted at. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000108_session_sandbox_config_tenant.up.sql",
+      "sha256": "47d373183d4e2956dc3d134f66c786e3711f74aa6bd7295cb9ea6762128d3fb5",
+      "effect": "Consolidated final metadata schema/seed/constraints: session sandbox config tenant. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000109_session_host_workspace_dir.up.sql",
+      "sha256": "cf07fe2f3773b19b8a0da1f025a2d62dd457945a8862970db70278635f50378c",
+      "effect": "Consolidated final metadata schema/seed/constraints: session host workspace dir. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000110_im_channel_locale.up.sql",
+      "sha256": "d1cbc4b305915add305d1a1f81281de616cc044a71cae1604d4687ba2bb770d9",
+      "effect": "Consolidated final metadata schema/seed/constraints: im channel locale. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000111_model_catalog_config.up.sql",
+      "sha256": "3ef145d75b47382e5d7b6c5db01cf36833510d50190ef0433a10d7715ce69d39",
+      "effect": "Consolidated final metadata schema/seed/constraints: model catalog config. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000112_embeddings_knowledge_chunk_index.up.sql",
+      "sha256": "b6802317829bfb9da39703dd1c3d9e051704d87b4addc464f79d89b495a006f2",
+      "effect": "PostgreSQL embeddings index; external knowledge retrieval on MySQL."
+    },
+    {
+      "file": "000113_chunk_images.up.sql",
+      "sha256": "04411d4a17c28ea23dcbb274f2dfc1dee9829e65bb4930968527ae48123aeff0",
+      "effect": "Consolidated final metadata schema/seed/constraints: chunk images. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000114_chunk_source_locators.up.sql",
+      "sha256": "ab0c9457d2d323524d62add03a080c13b4e3bc64e9f53f5f3acb86f6c0a2d9d6",
+      "effect": "Consolidated final metadata schema/seed/constraints: chunk source locators. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000115_pg_search_02511.up.sql",
+      "sha256": "4a15c5b9316097b8b5a8c86e504f06986eb0d9fec1c578290ed0305f0d16f69a",
+      "effect": "PostgreSQL pg_search extension upgrade; not a MySQL metadata object."
+    },
+    {
+      "file": "000116_agent_allowed_tools_explicit_defaults.up.sql",
+      "sha256": "0180da5eaff5713e391aab22761968635f8acf35b50e09034c43ec908ed82412",
+      "effect": "Historical empty smart-reasoning allowed_tools backfill has no rows on fresh install; current config is persisted without transforming explicit empty lists."
+    },
+    {
+      "file": "000117_messages_attachment_lookup.up.sql",
+      "sha256": "e0dad1d516ecfcce1a02b802e3c96d5a38842ec6dcb0984485701c2ed73b48f0",
+      "effect": "Consolidated final metadata schema/seed/constraints: messages attachment lookup. Historical backfills are not replayed into a fresh database."
+    },
+    {
+      "file": "000118_mcp_oauth_timestamp_tz.up.sql",
+      "sha256": "6c4df8e489f598ab46fd08eee25db4f5c10cf1ef8299a6c9f13868ef3ed01eb0",
+      "effect": "MCP OAuth expires_at/created_at/updated_at use DATETIME(6); MySQL connections enforce UTC for the timestamptz-equivalent contract. No existing timestamps on a fresh install."
+    },
+    {
+      "file": "000119_agent_prompts.up.sql",
+      "sha256": "7337778c49ca0844d90c5ddaf6bc74af9b52948b8af99fa61c06e94361fce834",
+      "effect": "agent_prompts and agent_run_suspensions tables, prompt lease/expiry/session/message indexes, and messages.run_state are included in the baseline."
+    },
+    {
+      "file": "000120_tenant_assistant_config.up.sql",
+      "sha256": "54cca1562ad94fc01a87e91aa36f339a82f37a6406fab39f0023424ccb472d20",
+      "effect": "tenants.assistant_config is a nullable JSON column."
+    },
+    {
+      "file": "000121_session_kind.up.sql",
+      "sha256": "f9412129ca66af85817906ec987d3ea13053a9e792015384f2aa61e09ae98e03",
+      "effect": "sessions.kind defaults to empty and tenant/kind/user/updated_at/deleted_at index supports live assistant listings. Assistant-kind legacy backfill has no rows on a fresh install."
+    },
+    {
+      "file": "000122_feishu_deep_adaptation_resync.up.sql",
+      "sha256": "6f3e275a7afac26368d73c79209ec8150c36bd9a405706ef7367efd597ea276c",
+      "effect": "Data-only legacy Feishu/Lark resync_required backfill; fresh database has no data_sources rows and requires no schema or seed change."
+    },
+    {
+      "file": "000123_resource_content_hash_index.up.sql",
+      "sha256": "866711a576484179f461c8f87cd8b4536a2e72b98d408ae44e4706e74d83ef9e",
+      "effect": "Nonunique resources(tenant_id, content_hash, deleted_at) index supports live content-hash lookups; MySQL includes deleted/empty rows in this nonunique index."
+    },
+    {
+      "file": "000124_agent_collaborations.up.sql",
+      "sha256": "bbc3a305d9d452e68f00c1bdd070841fd320395cfbace0b3c09d58044cd8f3bb",
+      "effect": "agent_collaborations table plus status/owner indexes; generated nullable active_parent implements PostgreSQL uniqueness across active and cancelling parent runs."
+    },
+    {
+      "file": "000125_remove_empty_image_chunks.up.sql",
+      "sha256": "755a523c4fe5ecf7b5608c44dd0d09a8cb912e6bce8772029f7ab25ac39811fd",
+      "effect": "Data-only cleanup of pre-existing single-image chunks with the empty SHA-256; fresh database has no chunks to clean. Existing chunk_images projection triggers remain installed."
+    },
+    {
+      "file": "000126_mcp_tool_risk.up.sql",
+      "sha256": "55df8378e1534defd106aac84b0ae390cd8bae5d1a36b15332db5c520806b432",
+      "effect": "mcp_tool_approvals.risk and observed_risk are nonnull VARCHAR(16) with empty defaults."
+    },
+    {
+      "file": "000127_agent_grants.up.sql",
+      "sha256": "75cd980a0e5a25353039bd9c33e9128baa741efcdda332a503f35faf52aed21b",
+      "effect": "agent_grants table, full case-sensitive tenant/user/scope/scope_id/grant_key uniqueness and scope lookup index."
+    },
+    {
+      "file": "000128_automations.up.sql",
+      "sha256": "0cc1228d92b1833027133d672837bb45e0aa5b3d90f58ec7bfdc7fb007af3aa4",
+      "effect": "automations, automation_runs, notifications final tables and due/owner/deleted/user/status indexes; automation slot uniqueness includes microsecond scheduled_at and trigger_kind."
+    },
+    {
+      "file": "000129_session_owner_auth_source.up.sql",
+      "sha256": "05a0a43b627638788716158ee10dbd3f6dbcf609024c368552faea0fd80e13d7",
+      "effect": "sessions.owner_auth_source is nonnull VARCHAR(32) with empty default for unknown owners."
+    },
+    {
+      "file": "000130_sandbox_user_allocation.up.sql",
+      "sha256": "41811161f3d7c6e81fb4bba5c73372630155fc2f08609cfc7235cb04d5f3dd09",
+      "effect": "session_sandbox_assignments and sandbox_user_machines tables with placement/config/owner/retention lookup indexes. Nonunique MySQL indexes include rows excluded by PostgreSQL partial predicates."
+    },
+    {
+      "file": "000131_automation_execution_duration.up.sql",
+      "sha256": "84f42034688868554e68999dcc31e54b89a47e1fe6023a1b9c3fdefa05054b49",
+      "effect": "automation_runs.execution_duration_ms is nonnull BIGINT default 0."
+    },
+    {
+      "file": "000132_automation_model.up.sql",
+      "sha256": "27d166063534797dbfe5b3e6bd8bbf18eb8e0f568f643f345eef2075afd7edc6",
+      "effect": "automations.model_id is nonnull VARCHAR(64) default empty."
+    },
+    {
+      "file": "000133_automation_assistant.up.sql",
+      "sha256": "eb100aacf6bb1321ea865e1205d415dd851a200b372ad56547628b159cb14d8f",
+      "effect": "Final automations schema omits agent_id; the assistant and optional model_id drive automation execution."
+    }
+  ]
+}

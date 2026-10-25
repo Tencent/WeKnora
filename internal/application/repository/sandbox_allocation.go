@@ -2,10 +2,12 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"sort"
 	"time"
 
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -39,6 +41,21 @@ func forUpdate(tx *gorm.DB) *gorm.DB {
 	default:
 		return tx
 	}
+}
+
+// sandboxTxOptions keeps the placement and reclamation protocol on fresh reads.
+// MySQL's default REPEATABLE READ keeps pre-lock snapshots and locks gaps for
+// missing machine rows, which can deadlock concurrent first placements. Set
+// isolation on the outer transaction; a nested savepoint cannot change it.
+func sandboxTxOptions(db *gorm.DB) *sql.TxOptions {
+	if db.Name() == "mysql" {
+		return &sql.TxOptions{Isolation: sql.LevelReadCommitted}
+	}
+	return nil
+}
+
+func sandboxTransaction(db *gorm.DB, fn func(*gorm.DB) error) error {
+	return db.Transaction(fn, sandboxTxOptions(db))
 }
 
 func (r *sandboxAllocationRepository) GetAssignment(
@@ -79,9 +96,22 @@ func InsertSandboxAssignmentTx(
 			return false, err
 		}
 	}
-	res := tx.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "session_id"}}, DoNothing: true,
-	}).Create(a)
+	var res *gorm.DB
+	if tx.Name() == "mysql" {
+		// ON DUPLICATE KEY's no-op update reports one affected row with
+		// clientFoundRows, just like a fresh insert. A plain INSERT lets the
+		// primary-key collision distinguish an existing placement without
+		// reopening its machine's empty-retention clock.
+		res = tx.Create(a)
+		var duplicate *mysqldriver.MySQLError
+		if errors.As(res.Error, &duplicate) && duplicate.Number == 1062 {
+			return false, nil
+		}
+	} else {
+		res = tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "session_id"}}, DoNothing: true,
+		}).Create(a)
+	}
 	if res.Error != nil {
 		return false, res.Error
 	}
@@ -135,7 +165,7 @@ func (r *sandboxAllocationRepository) ClaimPlacement(
 	expected interfaces.PlacementPin,
 ) (*types.SessionSandboxAssignment, error) {
 	var out *types.SessionSandboxAssignment
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := sandboxTransaction(r.db.WithContext(ctx), func(tx *gorm.DB) error {
 		// The owner row comes before the session row. Reading user_id without
 		// a lock is what makes that order possible: the session lock is next.
 		var owner struct {
@@ -241,7 +271,7 @@ func (r *sandboxAllocationRepository) RetireSessions(
 	ctx context.Context, sessionIDs []string, at time.Time,
 ) ([]interfaces.RetiredSession, error) {
 	var out []interfaces.RetiredSession
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := sandboxTransaction(r.db.WithContext(ctx), func(tx *gorm.DB) error {
 		var err error
 		out, err = RetireSessionsTx(tx, sessionIDs, at)
 		return err
@@ -267,7 +297,7 @@ func (r *sandboxAllocationRepository) DeleteSessionsRetiring(
 	}
 	sort.Strings(ids)
 	var retired []interfaces.RetiredSession
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := sandboxTransaction(r.db.WithContext(ctx), func(tx *gorm.DB) error {
 		live := make([]string, 0, len(ids))
 		for _, id := range ids {
 			var found []string
@@ -307,7 +337,7 @@ func (r *sandboxAllocationRepository) RetireOwnerSessions(
 	ctx context.Context, ownerID string, at time.Time,
 ) ([]interfaces.RetiredSession, error) {
 	var out []interfaces.RetiredSession
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := sandboxTransaction(r.db.WithContext(ctx), func(tx *gorm.DB) error {
 		ids, err := ownerSessionIDs(tx, ownerID)
 		if err != nil {
 			return err
@@ -514,7 +544,7 @@ func (r *sandboxAllocationRepository) DeleteUserMachineIfEmptySince(
 	ctx context.Context, digest string, emptySince time.Time,
 ) (bool, error) {
 	var deleted bool
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := sandboxTransaction(r.db.WithContext(ctx), func(tx *gorm.DB) error {
 		if err := lockMachineRow(tx, digest); err != nil {
 			return err
 		}
@@ -546,7 +576,7 @@ func (r *sandboxAllocationRepository) GormDB() *gorm.DB { return r.db }
 func (r *sandboxAllocationRepository) LockEmptyMachine(
 	ctx context.Context, digest string,
 ) (interfaces.MachineReclaimLock, error) {
-	tx := r.db.WithContext(ctx).Begin()
+	tx := r.db.WithContext(ctx).Begin(sandboxTxOptions(r.db))
 	if tx.Error != nil {
 		return nil, tx.Error
 	}
@@ -639,7 +669,7 @@ func (l *machineReclaimLock) CommitDelete() (bool, error) {
 func DeleteUserMachinesAndSandboxConfig(
 	ctx context.Context, db *gorm.DB, tenantID uint64, configID string,
 ) error {
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return sandboxTransaction(db.WithContext(ctx), func(tx *gorm.DB) error {
 		if err := tx.Where("config_tenant_id = ? AND config_id = ?", tenantID, configID).
 			Delete(&types.SandboxUserMachine{}).Error; err != nil {
 			return err

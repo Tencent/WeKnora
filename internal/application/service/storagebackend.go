@@ -124,6 +124,35 @@ func (s *StorageBackendService) Update(ctx context.Context, incoming *types.Stor
 		return apperrors.NewBadRequestError("storage connection test failed").WithDetails(secutils.SanitizeStorageConnectivityError(err))
 	}
 	incoming.UpdatedAt = time.Now()
+	if s.db.Name() == "mysql" {
+		return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var current types.StorageBackend
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("tenant_id = ? AND id = ?", incoming.TenantID, incoming.ID).First(&current).Error; err != nil {
+				return err
+			}
+			if incoming.Status == types.StorageBackendStatusDisabled {
+				// Recheck after acquiring the same lock as KB/resource writes and
+				// SetDefault. The preflight check above can become stale during Test.
+				var references int64
+				queries := []*gorm.DB{
+					tx.Model(&types.Tenant{}).Where("id = ? AND default_storage_backend_id = ?", incoming.TenantID, incoming.ID),
+					tx.Model(&types.KnowledgeBase{}).Where("tenant_id = ? AND storage_backend_id = ?", incoming.TenantID, incoming.ID),
+					tx.Model(&types.StoredResource{}).Where("tenant_id = ? AND storage_backend_id = ? AND state = ?", incoming.TenantID, incoming.ID, types.ResourceStateActive),
+				}
+				for _, query := range queries {
+					if err := query.Count(&references).Error; err != nil {
+						return err
+					}
+					if references > 0 {
+						return apperrors.NewBadRequestError("a default or bound storage backend cannot be disabled")
+					}
+				}
+			}
+			return tx.Model(&types.StorageBackend{}).Where("tenant_id = ? AND id = ?", incoming.TenantID, incoming.ID).
+				Select("name", "config", "status", "updated_at").Updates(incoming).Error
+		})
+	}
 	return s.repo.Update(ctx, incoming)
 }
 
@@ -131,7 +160,7 @@ func (s *StorageBackendService) Delete(ctx context.Context, tenantID uint64, id 
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var backend types.StorageBackend
 		query := tx.Where("tenant_id = ? AND id = ?", tenantID, id)
-		if tx.Dialector.Name() == "postgres" {
+		if tx.Dialector.Name() == "postgres" || tx.Dialector.Name() == "mysql" {
 			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := query.First(&backend).Error; err != nil {
@@ -177,7 +206,7 @@ func (s *StorageBackendService) SetDefault(ctx context.Context, tenantID uint64,
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var backend types.StorageBackend
 		query := tx.Where("tenant_id = ? AND id = ?", tenantID, id)
-		if tx.Dialector.Name() == "postgres" {
+		if tx.Dialector.Name() == "postgres" || tx.Dialector.Name() == "mysql" {
 			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := query.First(&backend).Error; err != nil {

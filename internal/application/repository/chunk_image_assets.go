@@ -26,7 +26,7 @@ func (r *chunkRepository) ListImageAssets(
 	}
 	offset := max(q.Offset, 0)
 
-	d := imageAssetDialect{postgres: r.db.Name() == "postgres"}
+	d := imageAssetDialect{postgres: r.db.Name() == "postgres", mysql: r.db.Name() == "mysql"}
 	where, args, filtered := d.where(tenantID, kbID, q)
 	// Unfiltered, the total is the number of distinct images, which the
 	// copies index answers without probing every row.
@@ -90,6 +90,7 @@ const scopedWinnerClause = "NOT EXISTS (SELECT 1 FROM chunk_images o " +
 // differently: reading the attrs JSON and matching the keyword.
 type imageAssetDialect struct {
 	postgres bool
+	mysql    bool
 }
 
 // where is the predicate selecting the query's images: the listed copy of
@@ -123,12 +124,17 @@ func (d imageAssetDialect) where(
 				// ILIKE with the default backslash escape, the form the
 				// trigram indexes on caption / ocr_text can serve.
 				matches = append(matches, expr+" ILIKE ?")
+			} else if d.mysql {
+				matches = append(matches, "LOWER("+expr+") LIKE LOWER(?) ESCAPE ?")
 			} else {
 				// sqlite's LIKE folds ASCII case only, so non-ASCII keywords
 				// match case-sensitively there.
 				matches = append(matches, expr+" LIKE ? ESCAPE '"+likeEscapeChar+"'")
 			}
 			args = append(args, pattern)
+			if d.mysql {
+				args = append(args, likeEscapeChar)
+			}
 		}
 		if len(matches) == 0 {
 			matches = []string{"1 = 0"}
@@ -217,6 +223,10 @@ func (d imageAssetDialect) value(f types.ImageAssetField) (string, bool) {
 		return "(i.attrs->>'" + name + "')", true
 	}
 	path := `'$."` + name + `"'`
+	if d.mysql {
+		extract := "JSON_EXTRACT(i.attrs, " + path + ")"
+		return "(CASE WHEN JSON_TYPE(" + extract + ") COLLATE utf8mb4_bin = 'NULL' THEN NULL ELSE JSON_UNQUOTE(" + extract + ") COLLATE utf8mb4_bin END)", true
+	}
 	return "(CASE json_type(i.attrs, " + path + ") WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' " +
 		"ELSE CAST(json_extract(i.attrs, " + path + ") AS TEXT) END)", true
 }

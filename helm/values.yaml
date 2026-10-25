@@ -264,6 +264,18 @@ docreader:
 # -----------------------------------------------------------------------------
 # PostgreSQL (ParadeDB - Vector + BM25 Search)
 # -----------------------------------------------------------------------------
+# -- Application metadata database. MySQL uses an externally managed server;
+# disable postgresql.enabled and provide database.host when selecting mysql.
+database:
+  driver: postgres
+  host: ""
+  # Empty selects 5432 for postgres or 3306 for mysql.
+  port: ""
+  mysqlTLS: false
+  connectTimeout: 5s
+  readTimeout: 30s
+  writeTimeout: 30s
+
 postgresql:
   # -- Enable PostgreSQL
   enabled: true

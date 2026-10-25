@@ -107,7 +107,14 @@ func (r *mcpOAuthRepository) SaveTokenForPrincipal(ctx context.Context, token *t
 	// before migration 000118 is applied.
 	token.ExpiresAt = token.ExpiresAt.UTC()
 	token.UpdatedAt = time.Now().UTC()
-	return r.db.WithContext(ctx).
+	query := r.db.WithContext(ctx)
+	if r.db.Name() == "mysql" && token.ExpiresAt.IsZero() {
+		// Providers may issue tokens without an expiry. Persist NULL rather
+		// than a zero date rejected by MySQL's strict mode. The upsert's
+		// VALUES(expires_at) also clears an earlier expiry to the NULL default.
+		query = query.Omit("expires_at")
+	}
+	return query.
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{
 				{Name: "tenant_id"},

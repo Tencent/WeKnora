@@ -29,6 +29,9 @@ func (r *mcpServiceRepository) GetMetadata(
 }
 
 func metadataToolCountExpr(db *gorm.DB) string {
+	if db.Name() == "mysql" {
+		return "JSON_LENGTH(tools)"
+	}
 	if db.Name() == "postgres" {
 		return "jsonb_array_length(tools)"
 	}
@@ -53,6 +56,19 @@ func (r *mcpServiceRepository) ListMetadataSummaries(
 }
 
 func (r *mcpServiceRepository) SaveMetadata(ctx context.Context, snapshot *types.MCPMetadata) error {
+	if r.db.Name() == "mysql" {
+		// MySQL ignores OnConflict.Where. Guard every assignment instead; update
+		// synced_at last because assignments are evaluated from left to right.
+		columns := []string{"config_fingerprint", "tools", "instructions", "server_name", "server_version", "server_description", "synced_at"}
+		updates := make(clause.Set, 0, len(columns))
+		for _, column := range columns {
+			updates = append(updates, clause.Assignment{
+				Column: clause.Column{Name: column},
+				Value:  gorm.Expr("IF(`synced_at` <= VALUES(`synced_at`), VALUES(`" + column + "`), `" + column + "`)"),
+			})
+		}
+		return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoUpdates: updates}).Create(snapshot).Error
+	}
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "tenant_id"}, {Name: "service_id"}, {Name: "principal"}},
 		DoUpdates: clause.AssignmentColumns(

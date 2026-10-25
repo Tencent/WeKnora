@@ -157,6 +157,9 @@ func createOpenSearchEngine(
 }
 
 func createPostgresEngine(store types.VectorStore, db *gorm.DB) (interfaces.RetrieveEngineService, error) {
+	if db.Name() == "mysql" {
+		return nil, fmt.Errorf("postgres retrieval cannot use the mysql metadata connection")
+	}
 	if store.ConnectionConfig.UseDefaultConnection {
 		repo := postgresRepo.NewPostgresRetrieveEngineRepository(db)
 		return retriever.NewKVHybridRetrieveEngine(repo, types.PostgresRetrieverEngineType), nil
@@ -167,6 +170,9 @@ func createPostgresEngine(store types.VectorStore, db *gorm.DB) (interfaces.Retr
 }
 
 func createSQLiteEngine(_ types.VectorStore, db *gorm.DB) (interfaces.RetrieveEngineService, error) {
+	if db.Name() == "mysql" {
+		return nil, fmt.Errorf("sqlite retrieval cannot use the mysql metadata connection")
+	}
 	repo := sqliteRetrieverRepo.NewSQLiteRetrieveEngineRepository(db)
 	return retriever.NewKVHybridRetrieveEngine(repo, types.SQLiteRetrieverEngineType), nil
 }

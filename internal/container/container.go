@@ -32,6 +32,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/dig"
 	"google.golang.org/grpc"
+	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -1046,6 +1047,18 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		sqliteDBPath = dbPath
 		migrateDSN = "sqlite3://" + dbPath
 		logger.Infof(context.Background(), "DB Config: driver=sqlite path=%s", dbPath)
+	case "mysql":
+		if err := database.ValidateMySQLRetrievalDrivers(os.Getenv("RETRIEVE_DRIVER")); err != nil {
+			return nil, err
+		}
+		appDSN, mysqlMigrationDSN, err := database.MySQLDSNs(os.Getenv)
+		if err != nil {
+			return nil, err
+		}
+		dialector = gormmysql.Open(appDSN)
+		migrateDSN = mysqlMigrationDSN
+		logger.Infof(context.Background(), "DB Config: driver=mysql host=%s port=%s dbname=%s",
+			os.Getenv("DB_HOST"), os.Getenv("DB_PORT"), os.Getenv("DB_NAME"))
 	default:
 		return nil, fmt.Errorf("unsupported database driver: %s", os.Getenv("DB_DRIVER"))
 	}
@@ -1058,6 +1071,14 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	initialized := false
+	defer func() {
+		if !initialized && db.Name() == "mysql" {
+			if sqlDB, err := db.DB(); err == nil {
+				_ = sqlDB.Close()
+			}
+		}
+	}()
 
 	// Sanity check: dialect-specific code in services (notably the
 	// vector_stores delete guard) compares Dialector.Name() to "postgres" /
@@ -1065,10 +1086,10 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	// different name (e.g., a wrapper dialect for managed PG) would silently
 	// fall back to the SQLite path, dropping the row-level X-lock. Catching
 	// the mismatch at startup is loud and inexpensive.
-	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" {
+	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" && name != "mysql" {
 		return nil, fmt.Errorf(
-			"unsupported gorm dialector %q; expected postgres or sqlite "+
-				"(see vectorStoreService.isPostgres for impact)", name)
+			"unsupported gorm dialector %q; expected postgres, sqlite or mysql "+
+				"(see vectorStoreService.supportsRowLocks for impact)", name)
 	}
 
 	if os.Getenv("DB_DRIVER") == "sqlite" {
@@ -1080,6 +1101,17 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 			return nil, fmt.Errorf("failed to ping SQLite database: %w", err)
 		}
 	}
+	if db.Name() == "mysql" {
+		sqlDB, err := db.DB()
+		if err != nil {
+			return nil, err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := database.ValidateMySQLServer(ctx, sqlDB); err != nil {
+			return nil, err
+		}
+	}
 
 	// Run database migrations automatically (optional, can be disabled via env var)
 	// To disable auto-migration, set AUTO_MIGRATE=false
@@ -1088,6 +1120,9 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		logger.Infof(context.Background(), "Running database migrations...")
 
 		autoRecover := os.Getenv("AUTO_RECOVER_DIRTY") != "false"
+		if db.Name() == "mysql" {
+			autoRecover = false
+		}
 		migrationOpts := database.MigrationOptions{
 			AutoRecoverDirty: autoRecover,
 			SQLiteDBPath:     sqliteDBPath,
@@ -1096,6 +1131,9 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		// Run base migrations (all versioned migrations including embeddings)
 		// The embeddings migration will be conditionally executed based on skip_embedding parameter in DSN
 		if err := database.RunMigrationsWithOptions(migrateDSN, migrationOpts); err != nil {
+			if db.Name() == "mysql" {
+				return nil, fmt.Errorf("MySQL database migration failed: %w", err)
+			}
 			// Log warning but don't fail startup - migrations might be handled externally
 			logger.Warnf(context.Background(), "Database migration failed: %v", err)
 			logger.Warnf(
@@ -1138,6 +1176,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	}
 	sqlDB.SetConnMaxLifetime(time.Duration(10) * time.Minute)
 
+	initialized = true
 	return db, nil
 }
 
@@ -1151,9 +1190,13 @@ func resolveStorageProviderPending(db *gorm.DB) {
 	}
 	storageType = strings.ToLower(storageType)
 
+	providerText := "storage_provider_config->>'provider'"
+	if db.Name() == "mysql" {
+		providerText = "JSON_UNQUOTE(JSON_EXTRACT(storage_provider_config, '$.provider'))"
+	}
 	result := db.Exec(
 		"UPDATE knowledge_bases SET storage_provider_config = ? WHERE "+
-			"storage_provider_config IS NOT NULL AND storage_provider_config->>'provider' = "+
+			"storage_provider_config IS NOT NULL AND "+providerText+" = "+
 			"'__pending_env__'",
 		fmt.Sprintf(`{"provider":"%s"}`, storageType),
 	)

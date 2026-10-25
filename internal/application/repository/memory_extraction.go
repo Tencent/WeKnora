@@ -55,7 +55,23 @@ func enqueueExtractionSession(tx *gorm.DB, subject *types.MemorySubject, id stri
 			"revision": gorm.Expr("memory_extraction_sessions.revision + 1"), "pending": true, "updated_at": time.Now(),
 		})
 	}
+	if tx.Name() == "mysql" {
+		// An unset cursor is SQL NULL. Strict MySQL rejects Go's year-zero
+		// encoding; allowing zero dates would lose the boundary semantics.
+		omit := []string{"failed_from_at", "failed_to_at"}
+		if row.Cursor.At.IsZero() {
+			omit = append(omit, "cursor_at")
+		}
+		tx = tx.Omit(omit...)
+	}
 	return tx.Clauses(conflict).Create(&row).Error
+}
+
+func memoryCursorTime(db *gorm.DB, at time.Time) interface{} {
+	if db.Name() == "mysql" && at.IsZero() {
+		return nil
+	}
+	return at
 }
 
 func importLegacySessions(tx *gorm.DB, subject *types.MemorySubject) error {
@@ -159,7 +175,7 @@ func (r *memoryRepository) CheckpointExtraction(ctx context.Context, scope inter
 		// Updating just this row rotates unfinished work without rewriting the
 		// subject's entire history. Completed cursors remain small indexed records.
 		updates := map[string]interface{}{
-			"cursor_at": progress.Cursor.At, "cursor_id": progress.Cursor.ID,
+			"cursor_at": memoryCursorTime(tx, progress.Cursor.At), "cursor_id": progress.Cursor.ID,
 			"pending": !drained || progress.Revision != session.Revision, "updated_at": time.Now(),
 		}
 		if progress.FailedAt == nil {
@@ -191,8 +207,8 @@ func (r *memoryRepository) RecordExtractionFailure(
 		updates := map[string]interface{}{
 			"failure_count": attempts, "failure_code": failure.Code, "updated_at": time.Now(),
 			"failed_at":      nil,
-			"failed_from_at": progress.Cursor.At, "failed_from_id": progress.Cursor.ID,
-			"failed_to_at": failure.End.At, "failed_to_id": failure.End.ID,
+			"failed_from_at": memoryCursorTime(tx, progress.Cursor.At), "failed_from_id": progress.Cursor.ID,
+			"failed_to_at": memoryCursorTime(tx, failure.End.At), "failed_to_id": failure.End.ID,
 		}
 		if skip {
 			updates["failed_at"] = time.Now()
