@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/golang-migrate/migrate/v4"
+	// Register the MySQL migration driver for runtime database selection.
 	_ "github.com/golang-migrate/migrate/v4/database/mysql"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
@@ -169,7 +170,10 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	if oldDirty {
 		logger.Warnf(ctx, "Database is in dirty state at version %d", oldVersion)
 		if isMySQL {
-			return captureMigrationFailure(m, fmt.Errorf("MySQL database is in dirty state at version %d; automatic recovery is disabled because DDL implicitly commits. Inspect and repair partially applied changes, then explicitly set the verified migration version", oldVersion))
+			return captureMigrationFailure(m, fmt.Errorf(
+				"MySQL database is in dirty state at version %d; automatic recovery is disabled "+
+					"because DDL implicitly commits. Inspect and repair partially applied changes, "+
+					"then explicitly set the verified migration version", oldVersion))
 		}
 		if opts.AutoRecoverDirty {
 			logger.Infof(ctx, "AutoRecoverDirty is enabled, attempting recovery...")
@@ -210,7 +214,11 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 		if versionCheckErr == nil && currentDirty {
 			logger.Warnf(ctx, "Migration caused dirty state at version %d", currentVersion)
 			if isMySQL {
-				return captureMigrationFailure(m, fmt.Errorf("MySQL migration failed and database is in dirty state at version %d; automatic recovery is disabled because DDL implicitly commits. Inspect and repair partially applied changes before explicitly setting the verified migration version: %w", currentVersion, err))
+				return captureMigrationFailure(m, fmt.Errorf(
+					"MySQL migration failed and database is in dirty state at version %d; "+
+						"automatic recovery is disabled because DDL implicitly commits. "+
+						"Inspect and repair partially applied changes before explicitly setting "+
+						"the verified migration version: %w", currentVersion, err))
 			}
 			if opts.AutoRecoverDirty {
 				logger.Infof(ctx, "Attempting to recover from dirty state...")

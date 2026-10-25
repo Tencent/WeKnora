@@ -24,7 +24,8 @@ func (r *resourceRepository) Create(ctx context.Context, resource *types.StoredR
 		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			var backend types.StorageBackend
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").
-				Where("id = ? AND tenant_id = ? AND status = ?", resource.StorageBackendID, resource.TenantID, types.StorageBackendStatusActive).
+				Where("id = ? AND tenant_id = ? AND status = ?",
+					resource.StorageBackendID, resource.TenantID, types.StorageBackendStatusActive).
 				First(&backend).Error; err != nil {
 				return fmt.Errorf("resource storage backend binding: %w", err)
 			}

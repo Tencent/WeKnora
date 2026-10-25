@@ -162,7 +162,7 @@ func (r *taskPendingOpsRepository) SeedKnowledgeFinalizingWithPendingOp(
 		query := tx.Model(&types.KnowledgeBase{}).
 			Select("id").
 			Where("id = ? AND tenant_id = ?", op.ScopeID, op.TenantID)
-		if tx.Dialector.Name() == "postgres" || tx.Dialector.Name() == "mysql" {
+		if tx.Name() == "postgres" || tx.Name() == "mysql" {
 			query = query.Clauses(clause.Locking{Strength: "SHARE"})
 		}
 		var kb types.KnowledgeBase
@@ -291,7 +291,7 @@ func (r *taskPendingOpsRepository) ClaimBatch(
 		//    Keys with a fresh claim are excluded WHOLESALE so a late sibling
 		//    of an in-flight document never gets claimed on its own.
 		var keys []string
-		if tx.Dialector.Name() == "postgres" {
+		if tx.Name() == "postgres" {
 			// Lock the anchor (least-failed, earliest eligible) row of each
 			// key with SKIP LOCKED so concurrent claimers get disjoint KEY
 			// sets, then map the locked anchors back to their dedup_keys. The
@@ -424,7 +424,8 @@ func (r *taskPendingOpsRepository) DrainUnclaimedAndRelease(
 		var removed []string
 		if tx.Name() == "mysql" {
 			fresh := tx.Model(&types.TaskPendingOp{}).Select("dedup_key").
-				Where("task_type = ? AND scope = ? AND scope_id = ? AND claimed_at >= ?", taskType, scope, scopeID, staleBefore)
+				Where("task_type = ? AND scope = ? AND scope_id = ? AND claimed_at >= ?",
+					taskType, scope, scopeID, staleBefore)
 			var rows []types.TaskPendingOp
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 				Where("task_type = ? AND scope = ? AND scope_id = ? AND op = ?", taskType, scope, scopeID, op).
@@ -489,7 +490,8 @@ func (r *taskPendingOpsRepository) IncrFailCount(ctx context.Context, id int64) 
 		var count int
 		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			var row types.TaskPendingOp
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "fail_count").Where("id = ?", id).Take(&row).Error; err != nil {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "fail_count").
+				Where("id = ?", id).Take(&row).Error; err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return nil
 				}
@@ -515,12 +517,15 @@ func (r *taskPendingOpsRepository) IncrFailCount(ctx context.Context, id int64) 
 // lane. Processing runs after commit, so workers still consume disjoint batches
 // concurrently. A stable lane row avoids changing per-document anchor rows when
 // a lower-failure sibling is enqueued while another worker is claiming its key.
-func (r *taskPendingOpsRepository) queueTransaction(ctx context.Context, taskType, scope, scopeID string, fn func(*gorm.DB) error) error {
+func (r *taskPendingOpsRepository) queueTransaction(
+	ctx context.Context, taskType, scope, scopeID string, fn func(*gorm.DB) error,
+) error {
 	if r.db.Name() != "mysql" {
 		return r.db.WithContext(ctx).Transaction(fn)
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec("INSERT INTO task_queue_lanes (task_type, scope, scope_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE scope_id = VALUES(scope_id)", taskType, scope, scopeID).Error; err != nil {
+		if err := tx.Exec("INSERT INTO task_queue_lanes (task_type, scope, scope_id) VALUES (?, ?, ?) "+
+			"ON DUPLICATE KEY UPDATE scope_id = VALUES(scope_id)", taskType, scope, scopeID).Error; err != nil {
 			return err
 		}
 		return fn(tx)

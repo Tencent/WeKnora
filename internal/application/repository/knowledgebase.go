@@ -51,7 +51,8 @@ func lockMySQLKnowledgeBaseParents(tx *gorm.DB, kb *types.KnowledgeBase) error {
 	if kb.StorageBackendID != nil && *kb.StorageBackendID != "" {
 		var backend types.StorageBackend
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").
-			Where("id = ? AND tenant_id = ? AND status = ?", *kb.StorageBackendID, kb.TenantID, types.StorageBackendStatusActive).
+			Where("id = ? AND tenant_id = ? AND status = ?",
+				*kb.StorageBackendID, kb.TenantID, types.StorageBackendStatusActive).
 			First(&backend).Error; err != nil {
 			return fmt.Errorf("knowledge base storage backend binding: %w", err)
 		}

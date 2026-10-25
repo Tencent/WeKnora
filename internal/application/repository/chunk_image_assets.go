@@ -225,7 +225,8 @@ func (d imageAssetDialect) value(f types.ImageAssetField) (string, bool) {
 	path := `'$."` + name + `"'`
 	if d.mysql {
 		extract := "JSON_EXTRACT(i.attrs, " + path + ")"
-		return "(CASE WHEN JSON_TYPE(" + extract + ") COLLATE utf8mb4_bin = 'NULL' THEN NULL ELSE JSON_UNQUOTE(" + extract + ") COLLATE utf8mb4_bin END)", true
+		return "(CASE WHEN JSON_TYPE(" + extract + ") COLLATE utf8mb4_bin = 'NULL' THEN NULL " +
+			"ELSE JSON_UNQUOTE(" + extract + ") COLLATE utf8mb4_bin END)", true
 	}
 	return "(CASE json_type(i.attrs, " + path + ") WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' " +
 		"ELSE CAST(json_extract(i.attrs, " + path + ") AS TEXT) END)", true

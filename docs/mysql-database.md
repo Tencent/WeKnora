@@ -1,6 +1,6 @@
 # MySQL 主业务数据库
 
-本分支从 main `e28c68cf552cc1aba2fc923a73b0ab23a33bcb55` 重建。该基线的 PostgreSQL 迁移头为 `000133`；MySQL 保存业务元数据，空库基线以当前 main 的最终结构为目标，逐项对应关系记录在 `migrations/mysql/coverage.json`。发布前须核对清单中的 `main_commit`、`postgres_head` 与实际迁移文件一致。检索数据使用独立向量引擎。
+本分支已同步 main `e1f9a6166a593a4804a2f99f1d942919c9cc8ea7`。该基线的 PostgreSQL 迁移头为 `000133`；MySQL 保存业务元数据，空库基线以该提交的最终结构为目标，逐项对应关系记录在 `migrations/mysql/coverage.json`。发布前须核对清单中的 `main_commit`、`postgres_head` 与实际迁移文件一致。检索数据使用独立向量引擎。
 
 ## 版本和验证边界
 
@@ -8,7 +8,7 @@
 
 连接校验接受 MySQL 8.0.17 及以上的 8.0 补丁版本，以及 8.4；基线使用的 utf8mb4_0900_bin 决定了这个下界，见 [MySQL 8.0.17 发布说明](https://dev.mysql.com/doc/relnotes/mysql/8.0/en/news-8-0-17.html)。拒绝 MariaDB、未经覆盖的版本系列。必须启用严格 SQL 模式，连接会统一到 UTC。
 
-本轮针对该 main / `000133` 基线，在独立的 **MySQL 8.0.18 / 8.4.8** 实例上完成专项验证，涵盖空库迁移、重复 up、down/up、约束、业务查询、并发与应用数据库初始化；最后的查询和序号分批修复另做了两版本回归。普通包回归、主程序编译及 Compose/Helm 配置渲染也已通过。真实数据库测试结果没有借用此前 `000117` 的记录。
+此前基于 main `e28c68cf` / PostgreSQL `000133`，在独立的 **MySQL 8.0.18 / 8.4.8** 实例上完成专项验证，涵盖空库迁移、重复 up、down/up、约束、业务查询、并发与应用数据库初始化；查询和序号分批修复另做了两版本回归。同步 main `e1f9a616` 后，已重新通过 MySQL 8.4.8 六包集成测试、相关普通包回归、LF 源码快照的迁移清单测试、Compose/Helm 配置检查，以及 golangci-lint v2.12.2 差异检查。两次 main 基线的 PostgreSQL 迁移均为 `000133`；未将此前 `000117` 的结果计入本轮。
 
 CI 配置固定为 **8.0.46 / 8.4.8**，Compose 固定为 **8.4.8**。2026-10-25 已从本分支源码构建 app、frontend、Docreader，启动全部六个服务，并在 MySQL 8.4.8 上通过六个包的专项测试。普通库级应用账号完成空库初始化，迁移状态为 clean；真实文本上传、2048 维 embedding、Qdrant 召回和 DeepSeek 问答均通过。删除并重建测试容器及网络、保留数据卷后，原账号、会话、文档检索与问答仍可用。GitHub Actions 和性能测试未执行。8.4.8 镜像标签可在 [MySQL 官方 Docker Hub](https://hub.docker.com/_/mysql/tags?name=8.4.8) 核对。
 

@@ -83,7 +83,7 @@ func NewStore(db *gorm.DB) *Store { return &Store{db: db, checkMember: true} }
 // Strict MySQL rejects Go's zero time; the Unix epoch has the same expired
 // semantics and fits DATETIME without changing the other dialects' storage.
 func (s *Store) inactiveTime() time.Time {
-	if s.db.Dialector.Name() == "mysql" {
+	if s.db.Name() == "mysql" {
 		return time.Unix(0, 0).UTC()
 	}
 	return time.Time{}

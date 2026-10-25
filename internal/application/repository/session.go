@@ -527,7 +527,8 @@ func (r *sessionRepository) ListUnconsumedForks(
 func forkBootstrapJSONText(db *gorm.DB, key string) string {
 	if db.Name() == "mysql" {
 		expr := "JSON_EXTRACT(fork_bootstrap, '$." + key + "')"
-		return "CASE WHEN JSON_TYPE(" + expr + ") COLLATE utf8mb4_bin = 'NULL' THEN NULL ELSE JSON_UNQUOTE(" + expr + ") COLLATE utf8mb4_bin END"
+		return "CASE WHEN JSON_TYPE(" + expr + ") COLLATE utf8mb4_bin = 'NULL' THEN NULL " +
+			"ELSE JSON_UNQUOTE(" + expr + ") COLLATE utf8mb4_bin END"
 	}
 	if db.Name() == "postgres" {
 		return "fork_bootstrap ->> '" + key + "'"

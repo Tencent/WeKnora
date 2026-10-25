@@ -111,7 +111,8 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 					ID    string
 					SeqID int64
 				}
-				if err := tx.Model(&types.Chunk{}).Select("id", "seq_id").Where("id IN ?", ids[start:end]).Find(&rows).Error; err != nil {
+				if err := tx.Model(&types.Chunk{}).Select("id", "seq_id").
+					Where("id IN ?", ids[start:end]).Find(&rows).Error; err != nil {
 					return err
 				}
 				for _, row := range rows {

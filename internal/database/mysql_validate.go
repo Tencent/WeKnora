@@ -11,6 +11,7 @@ import (
 
 var mysqlServerVersion = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)`)
 
+// ValidateMySQLVersionString checks that the server belongs to a supported MySQL release.
 func ValidateMySQLVersionString(version string) error {
 	parts := mysqlServerVersion.FindStringSubmatch(version)
 	if len(parts) != 4 || strings.Contains(strings.ToLower(version), "mariadb") {
@@ -25,9 +26,11 @@ func ValidateMySQLVersionString(version string) error {
 	return fmt.Errorf("unsupported MySQL server version %q; use MySQL 8.0.17+ or 8.4", version)
 }
 
+// ValidateMySQLServer verifies the server version and required session settings.
 func ValidateMySQLServer(ctx context.Context, db *sql.DB) error {
 	var version, zone, mode string
-	if err := db.QueryRowContext(ctx, "SELECT VERSION(), @@session.time_zone, @@session.sql_mode").Scan(&version, &zone, &mode); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT VERSION(), @@session.time_zone, @@session.sql_mode").
+		Scan(&version, &zone, &mode); err != nil {
 		return fmt.Errorf("inspect MySQL server: %w", err)
 	}
 	if err := ValidateMySQLVersionString(version); err != nil {

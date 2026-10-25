@@ -1095,7 +1095,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	// different name (e.g., a wrapper dialect for managed PG) would silently
 	// fall back to the SQLite path, dropping the row-level X-lock. Catching
 	// the mismatch at startup is loud and inexpensive.
-	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" && name != "mysql" {
+	if name := db.Name(); name != "postgres" && name != "sqlite" && name != "mysql" {
 		return nil, fmt.Errorf(
 			"unsupported gorm dialector %q; expected postgres, sqlite or mysql "+
 				"(see vectorStoreService.supportsRowLocks for impact)", name)

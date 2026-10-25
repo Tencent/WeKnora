@@ -59,7 +59,10 @@ func (r *mcpServiceRepository) SaveMetadata(ctx context.Context, snapshot *types
 	if r.db.Name() == "mysql" {
 		// MySQL ignores OnConflict.Where. Guard every assignment instead; update
 		// synced_at last because assignments are evaluated from left to right.
-		columns := []string{"config_fingerprint", "tools", "instructions", "server_name", "server_version", "server_description", "synced_at"}
+		columns := []string{
+			"config_fingerprint", "tools", "instructions", "server_name",
+			"server_version", "server_description", "synced_at",
+		}
 		updates := make(clause.Set, 0, len(columns))
 		for _, column := range columns {
 			updates = append(updates, clause.Assignment{

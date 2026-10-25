@@ -9,7 +9,10 @@ import (
 )
 
 func TestMigrationDSNUsesSharedMySQLConfig(t *testing.T) {
-	values := map[string]string{"DB_DRIVER": "mysql", "DB_HOST": "::1", "DB_USER": "user+name", "DB_PASSWORD": "a@b:'$()#%+", "DB_NAME": "test"}
+	values := map[string]string{
+		"DB_DRIVER": "mysql", "DB_HOST": "::1", "DB_USER": "user+name",
+		"DB_PASSWORD": "a@b:'$()#%+", "DB_NAME": "test",
+	}
 	lookup := func(k string) string { return values[k] }
 	_, want, err := database.MySQLDSNs(lookup)
 	if err != nil {

@@ -77,7 +77,8 @@ func (r *messageSuggestionRepository) AcquireGeneration(
 		// With clientFoundRows, MySQL's id=id conflict update reports 1 for
 		// both a new row and a cache hit. A plain INSERT distinguishes ownership.
 		var duplicate *mysql.MySQLError
-		if errors.Is(result.Error, gorm.ErrDuplicatedKey) || (errors.As(result.Error, &duplicate) && duplicate.Number == 1062) {
+		if errors.Is(result.Error, gorm.ErrDuplicatedKey) ||
+			(errors.As(result.Error, &duplicate) && duplicate.Number == 1062) {
 			result.Error = nil
 			result.RowsAffected = 0
 		}

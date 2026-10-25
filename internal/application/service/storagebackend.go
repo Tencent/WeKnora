@@ -136,9 +136,13 @@ func (s *StorageBackendService) Update(ctx context.Context, incoming *types.Stor
 				// SetDefault. The preflight check above can become stale during Test.
 				var references int64
 				queries := []*gorm.DB{
-					tx.Model(&types.Tenant{}).Where("id = ? AND default_storage_backend_id = ?", incoming.TenantID, incoming.ID),
-					tx.Model(&types.KnowledgeBase{}).Where("tenant_id = ? AND storage_backend_id = ?", incoming.TenantID, incoming.ID),
-					tx.Model(&types.StoredResource{}).Where("tenant_id = ? AND storage_backend_id = ? AND state = ?", incoming.TenantID, incoming.ID, types.ResourceStateActive),
+					tx.Model(&types.Tenant{}).
+						Where("id = ? AND default_storage_backend_id = ?", incoming.TenantID, incoming.ID),
+					tx.Model(&types.KnowledgeBase{}).
+						Where("tenant_id = ? AND storage_backend_id = ?", incoming.TenantID, incoming.ID),
+					tx.Model(&types.StoredResource{}).
+						Where("tenant_id = ? AND storage_backend_id = ? AND state = ?",
+							incoming.TenantID, incoming.ID, types.ResourceStateActive),
 				}
 				for _, query := range queries {
 					if err := query.Count(&references).Error; err != nil {
@@ -160,7 +164,7 @@ func (s *StorageBackendService) Delete(ctx context.Context, tenantID uint64, id 
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var backend types.StorageBackend
 		query := tx.Where("tenant_id = ? AND id = ?", tenantID, id)
-		if tx.Dialector.Name() == "postgres" || tx.Dialector.Name() == "mysql" {
+		if tx.Name() == "postgres" || tx.Name() == "mysql" {
 			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := query.First(&backend).Error; err != nil {
@@ -206,7 +210,7 @@ func (s *StorageBackendService) SetDefault(ctx context.Context, tenantID uint64,
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var backend types.StorageBackend
 		query := tx.Where("tenant_id = ? AND id = ?", tenantID, id)
-		if tx.Dialector.Name() == "postgres" || tx.Dialector.Name() == "mysql" {
+		if tx.Name() == "postgres" || tx.Name() == "mysql" {
 			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := query.First(&backend).Error; err != nil {

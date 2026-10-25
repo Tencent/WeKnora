@@ -381,12 +381,14 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	if req.Query != "" {
 		if r.wikiDialect() == "mysql" {
 			pattern := "%" + escapeLikePattern(req.Query) + "%"
-			query = query.Where("(LOWER(title) LIKE LOWER(?) ESCAPE ? OR LOWER(content) LIKE LOWER(?) ESCAPE ? OR LOWER(CAST(aliases AS CHAR)) LIKE LOWER(?) ESCAPE ?)",
+			query = query.Where("(LOWER(title) LIKE LOWER(?) ESCAPE ? OR LOWER(content) LIKE LOWER(?) ESCAPE ? OR "+
+				"LOWER(CAST(aliases AS CHAR)) LIKE LOWER(?) ESCAPE ?)",
 				pattern, likeEscapeChar, pattern, likeEscapeChar, pattern, likeEscapeChar)
 		} else {
 			// Use PostgreSQL full-text search + ILIKE for aliases
 			query = query.Where(
-				"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
+				"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) "+
+					"@@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
 				req.Query,
 				"%"+req.Query+"%",
 			)
@@ -1122,7 +1124,8 @@ func (r *wikiPageRepository) FindSimilarPages(
 	if r.wikiDialect() == "mysql" {
 		err := r.db.WithContext(ctx).Model(&types.WikiPage{}).
 			Select("slug, title, page_type, status, aliases, out_links").
-			Where("knowledge_base_id = ? AND page_type IN ? AND status <> ?", kbID, pageTypes, types.WikiPageStatusArchived).
+			Where("knowledge_base_id = ? AND page_type IN ? AND status <> ?",
+				kbID, pageTypes, types.WikiPageStatusArchived).
 			Where("LOWER(title) LIKE ? ESCAPE ?", "%"+escapeLikePattern(q)+"%", likeEscapeChar).
 			Order("updated_at DESC, slug ASC").Limit(limit).Scan(&rows).Error
 		if err != nil {

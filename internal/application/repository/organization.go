@@ -96,7 +96,8 @@ func (r *organizationRepository) ListSearchable(ctx context.Context, query strin
 		// 支持按名称、描述或空间 ID 搜索，便于区分同名空间
 		if r.db.Name() == "mysql" {
 			pattern = strings.ToLower(pattern)
-			q = q.Where("LOWER(name) LIKE ? OR LOWER(description) LIKE ? OR LOWER(id) LIKE ?", pattern, pattern, pattern)
+			q = q.Where("LOWER(name) LIKE ? OR LOWER(description) LIKE ? OR LOWER(id) LIKE ?",
+				pattern, pattern, pattern)
 		} else {
 			q = q.Where("name ILIKE ? OR description ILIKE ? OR id::text ILIKE ?", pattern, pattern, pattern)
 		}

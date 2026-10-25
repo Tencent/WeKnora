@@ -439,7 +439,8 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 	case "file":
 		if params.DataSourceID != "" && params.ExternalID != "" {
 			if r.db.Name() == "mysql" {
-				query = query.Where("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.datasource_id')) = ? AND JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.external_id')) = ?",
+				query = query.Where("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.datasource_id')) = ? AND "+
+					"JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.external_id')) = ?",
 					params.DataSourceID, params.ExternalID)
 			} else {
 				query = query.Where("metadata->>'datasource_id' = ? AND metadata->>'external_id' = ?",
@@ -924,7 +925,8 @@ func (r *knowledgeRepository) FindByDataSourceExternalID(
 	query := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID)
 	if r.db.Name() == "mysql" {
-		query = query.Where("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.datasource_id')) = ? AND JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.external_id')) = ?", dataSourceID, externalID)
+		query = query.Where("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.datasource_id')) = ? AND "+
+			"JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.external_id')) = ?", dataSourceID, externalID)
 	} else {
 		query = query.Where("metadata->>'datasource_id' = ? AND metadata->>'external_id' = ?", dataSourceID, externalID)
 	}

@@ -79,7 +79,10 @@ func ValidateMySQLRetrievalDrivers(raw string) error {
 	for _, part := range strings.Split(raw, ",") {
 		switch strings.ToLower(strings.TrimSpace(part)) {
 		case "postgres", "sqlite":
-			return fmt.Errorf("DB_DRIVER=mysql cannot reuse its connection for RETRIEVE_DRIVER=%s; configure an external vector store", strings.TrimSpace(part))
+			return fmt.Errorf(
+				"DB_DRIVER=mysql cannot reuse its connection for RETRIEVE_DRIVER=%s; "+
+					"configure an external vector store",
+				strings.TrimSpace(part))
 		}
 	}
 	return nil
