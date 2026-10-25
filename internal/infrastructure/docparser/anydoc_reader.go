@@ -103,7 +103,9 @@ func pptxHasVectorMedia(data []byte) bool {
 
 func (r *AnydocReader) readVectorPPTX(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
 	if !r.canFallback() {
-		return nil, fmt.Errorf("anydoc conversion of %q with EMF/WMF images requires a connected docreader with MarkItDown and ImageMagick", req.FileName)
+		return nil, fmt.Errorf(
+			"anydoc conversion of %q with EMF/WMF images requires a connected docreader with MarkItDown and ImageMagick",
+			req.FileName)
 	}
 	logger.Infof(ctx, "[anydoc] %q contains EMF/WMF images, falling back to markitdown for rasterization", req.FileName)
 	fallbackReq := *req

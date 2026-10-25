@@ -46,7 +46,9 @@ func TestAnydocReaderRoutesPPTXVectorMedia(t *testing.T) {
 			original := *req
 			want := &types.ReadResult{
 				MarkdownContent: "![chart](images/chart.png)",
-				ImageRefs:       []types.ImageRef{{Filename: "chart.png", OriginalRef: "images/chart.png", ImageData: []byte("png")}},
+				ImageRefs: []types.ImageRef{{
+					Filename: "chart.png", OriginalRef: "images/chart.png", ImageData: []byte("png"),
+				}},
 			}
 			fallback := &stubDocReader{result: want}
 			got, err := NewAnydocReader(nil, fallback).Read(context.Background(), req)
