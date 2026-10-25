@@ -5503,6 +5503,8 @@ export default {
       synthesisModelLabel: 'Wiki 合成模型',
       synthesisModelPlaceholder: '選擇用於 Wiki 生成的 LLM 模型',
       synthesisModelTip: '不設定時將回退使用摘要模型',
+      autoGenerateLabel: '自動生成 Wiki 頁面',
+      autoGenerateTip: '關閉後仍可瀏覽和手動維護 Wiki 頁面，但文件處理不會自動呼叫 LLM 生成或更新頁面',
       extractionGranularityLabel: '提取粒度',
       contentInstructionsLabel: 'Wiki 內容生成要求',
       contentInstructionsTip: '控制摘要、頁面和首頁的表達重點；引用、合併與防幻覺規則由系統固定維護。修改後需重新解析才能影響已有內容。',

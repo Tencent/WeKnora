@@ -384,6 +384,20 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		exitStatus = "kb_not_wiki_enabled"
 		return s.releaseIngestForUnavailableWiki(ctx, kb.ID, "wiki disabled")
 	}
+	if !kb.IsWikiAutoGenerateEnabled() {
+		exitStatus = "auto_generation_disabled"
+		if err := s.releaseIngestForUnavailableWiki(ctx, kb.ID, "automatic generation disabled"); err != nil {
+			return err
+		}
+		// Source deletion already reconciles page references synchronously.
+		// Its queued prose rewrites must not run later and overwrite manual pages.
+		discarder, ok := s.pendingRepo.(interfaces.TaskPendingOpsDiscarder)
+		if !ok {
+			return errors.New("wiki manual mode requires unclaimed operation cleanup")
+		}
+		return discarder.DiscardUnclaimed(ctx, wikiTaskType, wikiTaskScope, kb.ID,
+			WikiOpRetract, time.Now().Add(-wikiClaimStaleAfter))
+	}
 
 	var synthesisModelID string
 	if kb.WikiConfig != nil {
@@ -1133,9 +1147,27 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		return fmt.Errorf("wiki finalize: get KB: %w", err)
 	}
 
+	// Manual-only Wiki keeps the page APIs and retrieval available, but it must
+	// not apply queued automatic changes after the setting is disabled. Drain
+	// the finalize rows without running index rebuild, link cleanup, or folder
+	// pruning. A queued finalize task can outlive the configuration update, so
+	// checking only at enqueue time would leave those changes in flight.
+	if !kb.IsWikiAutoGenerateEnabled() {
+		ids := make([]int64, 0, len(rows))
+		for _, r := range rows {
+			ids = append(ids, r.ID)
+		}
+		drainCtx, drainCancel := wikiIngestCleanupContext(ctx)
+		err := s.trimPendingList(drainCtx, ids)
+		drainCancel()
+		if err != nil {
+			return fmt.Errorf("wiki finalize: trim automatic lane: %w", err)
+		}
+		return nil
+	}
+
 	// Aggregate the drained rows into: affected slugs (dedup), fresh cross-link
-	// refs, and the index-intro change description. We collect ids up front so
-	// we can drain the lane even on the KB-disabled short-circuit below.
+	// refs, and the index-intro change description.
 	ids := make([]int64, 0, len(rows))
 	pruneRowIDs := make([]int64, 0)
 	affectedSet := make(map[string]struct{}, len(rows))
@@ -1179,18 +1211,6 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		}
 	}
 
-	// KB flipped away from wiki (deleted / type change) — drain the lane so the
-	// rows don't accumulate, then stop.
-	if !kb.IsWikiEnabled() {
-		drainCtx, drainCancel := wikiIngestCleanupContext(ctx)
-		err := s.trimPendingList(drainCtx, ids)
-		drainCancel()
-		if err != nil {
-			return fmt.Errorf("wiki finalize: trim disabled lane: %w", err)
-		}
-		return nil
-	}
-
 	synthesisModelID := ""
 	if kb.WikiConfig != nil {
 		synthesisModelID = kb.WikiConfig.SynthesisModelID
@@ -1208,7 +1228,7 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 	lang := types.LanguageNameFromContext(ctx)
 
 	indexRebuilt := false
-	if changeDesc.Len() > 0 && synthesisModelID != "" {
+	if kb.IsWikiAutoGenerateEnabled() && changeDesc.Len() > 0 && synthesisModelID != "" {
 		chatModel, mErr := s.modelService.GetChatModel(ctx, synthesisModelID)
 		if mErr != nil {
 			logger.Warnf(ctx, "wiki finalize: get chat model failed: %v", mErr)

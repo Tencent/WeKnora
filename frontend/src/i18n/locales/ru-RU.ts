@@ -5502,6 +5502,8 @@ export default {
       synthesisModelLabel: 'Модель синтеза',
       synthesisModelPlaceholder: 'Выберите LLM модель для генерации Wiki',
       synthesisModelTip: 'Если не указано, используется модель суммаризации',
+      autoGenerateLabel: 'Автоматически создавать страницы Wiki',
+      autoGenerateTip: 'При отключении страницы Wiki остаются доступными для просмотра и ручного редактирования, но обработка документов не будет вызывать LLM для их создания или обновления',
       extractionGranularityLabel: 'Детализация извлечения',
       contentInstructionsLabel: 'Инструкции для Wiki-контента',
       contentInstructionsTip: 'Задайте акценты и стиль сводок, страниц и индекса. Правила цитирования и слияния остаются системными.',

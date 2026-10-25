@@ -991,6 +991,12 @@ func (kb *KnowledgeBase) IsWikiEnabled() bool {
 	return kb.IndexingStrategy.WikiEnabled
 }
 
+// IsWikiAutoGenerateEnabled controls background generation independently of
+// access to existing pages and manual Wiki editing.
+func (kb *KnowledgeBase) IsWikiAutoGenerateEnabled() bool {
+	return kb.IsWikiEnabled() && kb.WikiConfig.IsAutoGenerateEnabled()
+}
+
 // IsVectorEnabled checks if vector (semantic) search is enabled.
 func (kb *KnowledgeBase) IsVectorEnabled() bool {
 	return kb != nil && kb.IndexingStrategy.VectorEnabled

@@ -5502,6 +5502,8 @@ export default {
       synthesisModelLabel: '합성 모델',
       synthesisModelPlaceholder: 'Wiki 생성에 사용할 LLM 모델을 선택하세요',
       synthesisModelTip: '설정하지 않으면 요약 모델로 대체됩니다',
+      autoGenerateLabel: 'Wiki 페이지 자동 생성',
+      autoGenerateTip: '사용하지 않아도 Wiki 페이지를 탐색하고 수동으로 편집할 수 있지만, 문서 처리 중 LLM으로 페이지를 생성하거나 업데이트하지 않습니다',
       extractionGranularityLabel: '추출 세분화 수준',
       contentInstructionsLabel: 'Wiki 콘텐츠 생성 지침',
       contentInstructionsTip: '요약, 페이지 및 인덱스의 강조점과 문체를 지정합니다. 인용 및 병합 규칙은 시스템에서 유지합니다.',

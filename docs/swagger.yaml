@@ -9571,6 +9571,13 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.WikiConfig:
     properties:
+      auto_generate:
+        default: true
+        description: |-
+          AutoGenerate disables background Wiki generation when false. Omitted means true.
+          Manual page APIs and Wiki retrieval remain available while Wiki is enabled.
+        type: boolean
+        x-agent: wiki_auto_generate
       content_instructions:
         description: ContentInstructions sets tone and emphasis for generated Wiki
           prose. Citations stay fixed.

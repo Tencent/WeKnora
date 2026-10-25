@@ -81,6 +81,12 @@
               </p>
             </div>
 
+            <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
+              <label class="form-label" for="wiki-auto-generate">{{ $t('knowledgeEditor.wiki.autoGenerateLabel') }}</label>
+              <p class="form-tip">{{ $t('knowledgeEditor.wiki.autoGenerateTip') }}</p>
+              <t-switch id="wiki-auto-generate" v-model="formData.wikiConfig.autoGenerate" />
+            </div>
+
             <!-- Wiki 提取粒度 (仅当 Wiki 启用时显示) -->
             <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
               <label class="form-label">{{ $t('knowledgeEditor.wiki.extractionGranularityLabel') }}</label>
@@ -1008,6 +1014,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       customInstructions: ''
     },
     wikiConfig: {
+      autoGenerate: true,
       synthesisModelId: '',
       maxPagesPerIngest: 0,
       extractionGranularity: 'standard' as 'focused' | 'standard' | 'exhaustive',
@@ -1177,6 +1184,7 @@ const loadKBData = async (
         customInstructions: kb.profile_config?.custom_instructions || ''
       },
       wikiConfig: {
+        autoGenerate: kb.wiki_config?.auto_generate ?? true,
         synthesisModelId: kb.wiki_config?.synthesis_model_id || '',
         maxPagesPerIngest: kb.wiki_config?.max_pages_per_ingest || 0,
         extractionGranularity: (
@@ -1641,6 +1649,7 @@ const buildSubmitData = () => {
   // wiki_config only holds wiki-specific tunables.
   if (formData.value.type !== 'faq') {
     data.wiki_config = {
+      auto_generate: formData.value.wikiConfig?.autoGenerate ?? true,
       synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
       max_pages_per_ingest: formData.value.wikiConfig?.maxPagesPerIngest || 0,
       extraction_granularity: formData.value.wikiConfig?.extractionGranularity || 'standard',
@@ -1746,6 +1755,7 @@ const doSubmit = async () => {
       }
       if (formData.value.wikiConfig && formData.value.type !== 'faq') {
         updateConfig.wiki_config = {
+          auto_generate: formData.value.wikiConfig.autoGenerate ?? true,
           synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
           max_pages_per_ingest: formData.value.wikiConfig.maxPagesPerIngest || 0,
           extraction_granularity: formData.value.wikiConfig.extractionGranularity || 'standard',

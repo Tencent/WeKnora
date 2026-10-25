@@ -352,6 +352,7 @@ export function createKnowledgeBase(data: {
   extract_config?: any;
   faq_config?: { index_mode: string; question_index_mode?: string };
   wiki_config?: {
+    auto_generate?: boolean;
     synthesis_model_id?: string;
     max_pages_per_ingest?: number;
     extraction_granularity?: 'focused' | 'standard' | 'exhaustive';
@@ -384,6 +385,7 @@ export function updateKnowledgeBase(id: string, data: {
     image_processing_config?: ImageProcessingConfig;
     faq_config?: any;
     wiki_config?: {
+      auto_generate?: boolean;
       synthesis_model_id?: string;
       max_pages_per_ingest?: number;
       extraction_granularity?: 'focused' | 'standard' | 'exhaustive';

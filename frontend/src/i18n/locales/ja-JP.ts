@@ -3665,6 +3665,8 @@ export default {
       synthesisModelLabel: 'Wiki生成モデル',
       synthesisModelPlaceholder: 'Wiki生成に使用するLLMモデルを選択',
       synthesisModelTip: '未設定の場合は要約モデルが使用されます',
+      autoGenerateLabel: 'Wikiページを自動生成',
+      autoGenerateTip: '無効にしてもWikiページの閲覧と手動編集は利用できますが、ドキュメント処理でLLMによるページの生成や更新は行われません',
       extractionGranularityLabel: '抽出の粒度',
       contentInstructionsLabel: 'Wiki本文の生成指示',
       contentInstructionsTip: '要約・ページ・インデックスの重点やトーンを制御します。引用、統合、事実性のルールはシステム側で固定されます。変更を反映するには既存コンテンツを再処理してください。',

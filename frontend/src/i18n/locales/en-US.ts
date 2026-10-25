@@ -3665,6 +3665,8 @@ export default {
       synthesisModelLabel: 'Wiki Synthesis Model',
       synthesisModelPlaceholder: 'Select the LLM model for Wiki generation',
       synthesisModelTip: 'Falls back to the summary model if not set',
+      autoGenerateLabel: 'Automatically generate Wiki pages',
+      autoGenerateTip: 'When disabled, Wiki pages remain available for browsing and manual editing, but document processing will not call the LLM to generate or update pages',
       extractionGranularityLabel: 'Extraction Granularity',
       contentInstructionsLabel: 'Wiki Content Instructions',
       contentInstructionsTip: 'Control emphasis and tone for summaries, pages, and the index. Citation, merge, and factuality rules remain system-owned. Reprocess existing content to apply changes.',
