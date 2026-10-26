@@ -37,36 +37,15 @@ func max(a, b int) int {
 }
 
 func splitSentences(text string) []string {
-	// 编译正则表达式（匹配中文句号或英文句号）
-	re := regexp.MustCompile(`([。.])`)
-
-	// 分割文本并保留分隔符用于定位
-	split := re.Split(text, -1)
-
+	parts := strings.FieldsFunc(text, func(r rune) bool {
+		return r == '。' || r == '.'
+	})
 	var sentences []string
-	current := strings.Builder{}
-
-	for i, s := range split {
-		// 交替获取文本段和分隔符（奇数为分隔符）
-		if i%2 == 0 {
-			current.WriteString(s)
-		} else {
-			// 当遇到分隔符时，完成当前句子
-			if current.Len() > 0 {
-				sentence := strings.TrimSpace(current.String())
-				if sentence != "" {
-					sentences = append(sentences, sentence)
-				}
-				current.Reset()
-			}
+	for _, part := range parts {
+		if sentence := strings.TrimSpace(part); sentence != "" {
+			sentences = append(sentences, sentence)
 		}
 	}
-
-	// 处理最后一个无分隔符的文本段
-	if remaining := strings.TrimSpace(current.String()); remaining != "" {
-		sentences = append(sentences, remaining)
-	}
-
 	return sentences
 }
 
