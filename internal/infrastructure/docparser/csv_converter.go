@@ -120,7 +120,8 @@ func csvToMarkdownContext(ctx context.Context, data []byte, limit int) (string, 
 }
 
 func csvSizeError(limit int) error {
-	return fmt.Errorf("%w (%d bytes); reduce the number of rows or columns", ErrCSVMarkdownTooLarge, limit)
+	return fmt.Errorf("%w: table would render beyond the limit (%d bytes); reduce the number of rows or columns",
+		ErrCSVMarkdownTooLarge, limit)
 }
 
 // A row needs 3*width+2 framing bytes; the separator needs 6*width+2.

@@ -49,8 +49,16 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 				// parts go along for the same reason as tool calls: dropping
 				// them leaves the model reading captions of images it never got.
 				merged.ToolCalls = concatCopy(prev.ToolCalls, msg.ToolCalls)
-				merged.Images = concatCopy(prev.Images, msg.Images)
-				merged.MultiContent = concatCopy(prev.MultiContent, msg.MultiContent)
+				if len(prev.Images)+len(msg.Images)+len(prev.MultiContent)+len(msg.MultiContent) > 0 {
+					// Preserve each message's image/text order in one representation.
+					// Providers prefer MultiContent over Content; retaining only the
+					// latter would lose the appended text and images on the wire.
+					parts := appendSanitizedContent(nil, prev)
+					parts = append(parts, chat.MessageContentPart{Type: "text", Text: "\n\n"})
+					merged.MultiContent = appendSanitizedContent(parts, msg)
+					merged.Content = ""
+					merged.Images = nil
+				}
 				result[len(result)-1] = merged
 				continue
 			}
@@ -80,6 +88,24 @@ func concatCopy[T any](a, b []T) []T {
 	}
 	out := make([]T, 0, len(a)+len(b))
 	return append(append(out, a...), b...)
+}
+
+// appendSanitizedContent follows the providers' preference for MultiContent,
+// expanding the legacy Content/Images representation only when needed.
+// The destination is separate from the input messages' backing arrays.
+func appendSanitizedContent(parts []chat.MessageContentPart, msg chat.Message) []chat.MessageContentPart {
+	if len(msg.MultiContent) > 0 {
+		return append(parts, msg.MultiContent...)
+	}
+	for _, url := range msg.Images {
+		parts = append(parts, chat.MessageContentPart{
+			Type: "image_url", ImageURL: &chat.ImageURL{URL: url, Detail: "auto"},
+		})
+	}
+	if msg.Content != "" {
+		parts = append(parts, chat.MessageContentPart{Type: "text", Text: msg.Content})
+	}
+	return parts
 }
 
 // hasMatchingToolCall checks if any preceding assistant message has a tool call with the given ID.

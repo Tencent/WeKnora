@@ -17,6 +17,9 @@ test('links use the deep links each page reads', () => {
   assert.deepEqual(pageLinkLocation(link({ page: 'settings_models', model_id: 'm' })),
     { path: '/platform/settings', query: { section: 'models', model_id: 'm' } })
   assert.deepEqual(pageLinkLocation(link({ page: 'mcp_services' })), { path: '/platform/toolbox/mcp', query: {} })
+  assert.deepEqual(pageLinkLocation(link({ page: 'automations', automation_id: 'a/1' })),
+    { path: '/platform/automations/a%2F1', query: {} })
+  assert.deepEqual(pageLinkLocation(link({ page: 'automations' })), { path: '/platform/automations', query: {} })
   assert.equal(pageLinkLocation(link({ page: 'agent_editor' })), null, 'a link without its target goes nowhere')
 })
 

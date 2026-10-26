@@ -11,9 +11,8 @@ type delegationKey struct{}
 // Delegation is installed by the worker, never from model arguments. Register
 // durably associates a prompt with the current run before it can be answered.
 type Delegation struct {
-	Register        func(context.Context, *types.AgentPrompt) error
-	Check           func(context.Context) error
-	RequireApproval bool
+	Register func(context.Context, *types.AgentPrompt) error
+	Check    func(context.Context) error
 }
 
 // WithDelegation attaches child prompt ownership checks to the execution context.
@@ -30,10 +29,4 @@ func CheckDelegation(ctx context.Context) error {
 		return d.Check(ctx)
 	}
 	return nil
-}
-
-// RequiresDelegatedApproval reports whether the child must request explicit tool approval.
-func RequiresDelegatedApproval(ctx context.Context) bool {
-	d, _ := ctx.Value(delegationKey{}).(Delegation)
-	return d.RequireApproval
 }

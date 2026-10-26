@@ -9,7 +9,7 @@ export interface AssistantPageLink {
   display_type: 'open_page'
   page:
     | 'knowledge_base' | 'wiki' | 'agent_editor' | 'settings_models' | 'mcp_services'
-    | 'settings' | 'toolbox' | 'agents' | 'knowledge_bases' | 'organizations'
+    | 'settings' | 'toolbox' | 'agents' | 'knowledge_bases' | 'organizations' | 'automations'
   label: string
   detail?: string
   note?: string
@@ -17,6 +17,7 @@ export interface AssistantPageLink {
   knowledge_id?: string
   wiki_slug?: string
   agent_id?: string
+  automation_id?: string
   section?: string
   /** A tab inside a settings section, e.g. system-global's users. */
   panel?: string
@@ -95,6 +96,13 @@ export function pageLinkLocation(link: AssistantPageLink): PageLinkLocation | nu
       return { path: '/platform/knowledge-bases', query: {} }
     case 'organizations':
       return { path: '/platform/organizations', query: {} }
+    case 'automations':
+      return {
+        path: link.automation_id
+          ? `/platform/automations/${encodeURIComponent(link.automation_id)}`
+          : '/platform/automations',
+        query: {},
+      }
     default:
       return null
   }

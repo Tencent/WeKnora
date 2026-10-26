@@ -16,14 +16,13 @@ import (
 // the anydoc converter instead of the Python docreader service.
 //
 // Embedded images are rendered in place from the document model. PDFs with no
-// text layer (scanned exam papers) cannot be converted by anydoc; when a
-// fallback reader is configured (typically the builtin docreader) those files
-// are handed off so pages can be rasterized for OCR.
+// text layer or a structure anydoc rejects are handed to the configured
+// fallback reader (typically the builtin docreader).
 type AnydocReader struct {
 	// extractImages controls whether embedded images are parsed and placed
 	// in the markdown. Off halves parse time for text-only indexing.
 	extractImages bool
-	// fallback is used when a PDF has no extractable text. Nil means the
+	// fallback is used when a PDF needs OCR or has an invalid structure. Nil means the
 	// conversion error is returned to the caller.
 	fallback interfaces.DocReader
 }
@@ -52,8 +51,11 @@ func (r *AnydocReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 		Format:     format,
 		WithAssets: r.extractImages,
 	})
+	if format == "pdf" && anydoc.PDFInvalidStructure(err) {
+		return r.readPDFFallback(ctx, req, err, "invalid_structure")
+	}
 	if format == "pdf" && (anydoc.PDFNeedsOCR(err) || pdfMarkdownIsEmpty(converted, err)) {
-		return r.readScannedPDF(ctx, req, err)
+		return r.readPDFFallback(ctx, req, err, "scanned_pdf")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("anydoc conversion failed for %q: %w", req.FileName, err)
@@ -81,7 +83,9 @@ func pdfMarkdownIsEmpty(converted *anydoc.Result, err error) bool {
 	return strings.TrimSpace(converted.Markdown) == ""
 }
 
-func (r *AnydocReader) readScannedPDF(ctx context.Context, req *types.ReadRequest, convertErr error) (*types.ReadResult, error) {
+func (r *AnydocReader) readPDFFallback(
+	ctx context.Context, req *types.ReadRequest, convertErr error, reason string,
+) (*types.ReadResult, error) {
 	if !r.canFallback() {
 		if convertErr != nil {
 			return nil, fmt.Errorf("anydoc conversion failed for %q: %w", req.FileName, convertErr)
@@ -89,16 +93,15 @@ func (r *AnydocReader) readScannedPDF(ctx context.Context, req *types.ReadReques
 		return nil, fmt.Errorf("anydoc conversion failed for %q: PDF has no extractable text; OCR is required", req.FileName)
 	}
 
-	logger.Infof(ctx, "[anydoc] %q contains pages requiring OCR, falling back to builtin for scanned-PDF OCR",
-		req.FileName)
+	logger.Infof(ctx, "[anydoc] falling back to builtin for %q: %s", req.FileName, reason)
 	fallbackReq := *req
 	fallbackReq.ParserEngine = BuiltinEngineName
 	result, err := r.fallback.Read(ctx, &fallbackReq)
 	if err != nil {
-		return nil, fmt.Errorf("anydoc scanned-PDF fallback failed for %q: %w", req.FileName, err)
+		return nil, fmt.Errorf("anydoc PDF fallback (%s) failed for %q: %w", reason, req.FileName, err)
 	}
 	if result == nil {
-		return nil, fmt.Errorf("anydoc scanned-PDF fallback returned no result for %q", req.FileName)
+		return nil, fmt.Errorf("anydoc PDF fallback (%s) returned no result for %q", reason, req.FileName)
 	}
 	if result.Metadata == nil {
 		result.Metadata = map[string]string{}
@@ -106,8 +109,8 @@ func (r *AnydocReader) readScannedPDF(ctx context.Context, req *types.ReadReques
 	if result.Metadata["parser"] == "" {
 		result.Metadata["parser"] = BuiltinEngineName
 	}
-	result.Metadata["anydoc_fallback"] = "scanned_pdf"
-	if result.Metadata["image_source_type"] == "" {
+	result.Metadata["anydoc_fallback"] = reason
+	if reason == "scanned_pdf" && result.Metadata["image_source_type"] == "" {
 		result.Metadata["image_source_type"] = "scanned_pdf"
 	}
 	return result, nil

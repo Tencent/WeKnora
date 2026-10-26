@@ -124,6 +124,221 @@ export default {
     "historyModels": "{count} models changed",
     "historyNoOverrides": "No administrator changes",
   },
+  automation: {
+    conversationNotice: "This conversation is run by an automation. Manual messages are unavailable; handle pending requests above.",
+    title: 'Automations',
+    description: 'Have the WeKnora assistant run tasks on a schedule as you. You are notified of results and pending approvals.',
+    add: 'New automation',
+    addHint: 'Or ask the WeKnora assistant to set one up',
+    paused: 'Paused',
+    scheduleEnded: 'Ended',
+    scheduleEndedHint: 'This one-time schedule has ended. Run it now, or edit the run time before resuming.',
+    nextRunAt: 'Next {time}',
+    runConfirm: 'Run "{name}" now? This starts an extra run without changing its schedule.',
+    deleteBody: 'Stops any run in progress and deletes the runs, conversations and standing approvals of "{name}". This cannot be undone.',
+    fields: {
+      name: 'Name',
+      instruction: 'Task',
+      schedule: 'Schedule',
+      timezone: 'Timezone',
+      accessLevel: 'Access',
+      sessionMode: 'Conversation',
+      carryLastResult: 'Include the last successful result',
+      overlapPolicy: 'If the last run is still going',
+      misfirePolicy: 'Missed runs',
+      approvalTimeout: 'Approval wait',
+      maxDuration: 'Max run time',
+      notifyOnSuccess: 'Notify on success',
+      nextRun: 'Next run',
+      enabled: 'Enabled',
+    },
+    editor: {
+      model: "Run model",
+      modelHelp: 'Use the assistant’s default model or choose one for this task. Delegated agents use their own models. Changes apply to future runs.',
+      modelDefault: 'Use assistant default',
+      createTitle: 'New automation',
+      editTitle: 'Edit automation',
+      namePlaceholder: 'e.g. Daily knowledge base digest',
+      instructionPlaceholder: 'Say what to do, which sources to use and how to present the result',
+      variablesHint: 'Variables:',
+      unattendedHint: 'Nobody is watching a run, so the assistant cannot ask you questions. Actions that need approval pause it and notify you.',
+      nameDesc: 'Shown in the list and in notifications so you can tell it apart',
+      frequency: 'Repeats',
+      weekdays: 'Days',
+      dayOfMonthDesc: 'In months without this day, it runs on the last day',
+      runAt: 'Run at',
+      cron: 'Cron expression',
+      timeOfDay: 'Time',
+      timezoneDesc: 'Runs by the clock in this time zone, daylight saving included',
+      previewEmpty: 'Once the time is set, the next few runs show up here',
+      carryDesc: 'Starts each new conversation with the last successful result, for incremental summaries',
+      misfireDesc: 'What to do with runs missed while the service was down',
+      maxDurationDesc: 'A run still going after this long is stopped',
+      navGroups: {
+        task: 'Task',
+        run: 'Running',
+      },
+      sections: {
+        basic: {
+          title: 'Basics',
+          desc: 'The WeKnora assistant runs each task. To delegate work, name the agents and their assignments in the task.',
+        },
+        schedule: {
+          title: 'Schedule',
+          desc: 'When the task runs. Runs are at least 5 minutes apart.',
+        },
+        execution: {
+          title: 'Execution',
+          desc: 'What a run may change, which conversation it uses, and what happens on overlap or missed runs.',
+        },
+        notify: {
+          title: 'Approvals and notifications',
+          desc: 'Results and actions waiting for approval appear in the notifications at the top right.',
+        },
+      },
+      sessionModeDesc: {
+        per_run: 'Each run starts a new conversation',
+        persistent: 'All runs share one conversation, so the assistant sees earlier ones',
+      },
+      errors: {
+        name: 'Enter a name',
+        instruction: 'Describe the task to run',
+        schedule: 'Set a valid schedule',
+      },
+      approvalTimeoutHelp: 'A run still waiting after this fails',
+      notifyHint: 'Failures, pending approvals and automatic pauses always notify you',
+      access: {
+        read_only: 'Only reads; changes nothing.',
+        confirm: 'Each change pauses the run for your approval. Recurring ones can be allowed for good in the details.',
+        auto_write: 'Reversible changes run directly; deletions and similar still pause for approval.',
+      },
+    },
+    schedule: {
+      kinds: {
+        daily: 'Daily',
+        weekdays: 'Weekdays',
+        weekly: 'Weekly',
+        monthly: 'Monthly',
+        hourly: 'Hourly',
+        once: 'Once',
+        custom: 'Custom cron',
+      },
+      atMinute: 'Minute past the hour',
+      dayOfMonth: 'Day of month',
+      pickTime: 'Pick a time',
+      customHint: 'Five fields: minute hour day month weekday. 0 9 * * 1-5 is 9:00 on weekdays. At least 5 minutes apart.',
+      nextRuns: 'Next:',
+      invalid: 'Invalid schedule',
+      describe: {
+        hourly: 'Every hour at :{minute}',
+        daily: 'Every day at {time}',
+        weekdays: 'Weekdays at {time}',
+        weekly: 'Every {days} at {time}',
+        monthly: 'Monthly on day {day} at {time}',
+        once: 'Once at {at}',
+        custom: 'cron: {expr}',
+        everyMinutes: 'Every {n} minutes',
+        everyHours: 'Every {n} hours',
+      },
+    },
+    sessionMode: {
+      per_run: 'New conversation each run',
+      persistent: 'One ongoing conversation',
+    },
+    overlap: {
+      skip: 'Skip this run',
+      queue: 'Queue it until the last one ends',
+    },
+    misfire: {
+      skip: 'Skip them',
+      run_once: 'Run once on recovery',
+    },
+    units: {
+      hours: 'hours',
+      minutes: 'minutes',
+    },
+    status: {
+      queued: 'Queued',
+      running: 'Running',
+      awaiting_approval: 'Awaiting approval',
+      succeeded: 'Succeeded',
+      failed: 'Failed',
+      cancelled: 'Stopped',
+      skipped: 'Skipped',
+      needs_attention: 'Needs attention',
+      paused: 'Paused',
+    },
+    runTrigger: {
+      schedule: 'Scheduled',
+      manual: 'Manual',
+      misfire: 'Catch-up',
+    },
+    actions: {
+      runNow: 'Run now',
+      pause: 'Pause',
+      resume: 'Resume',
+      review: 'Review',
+      openConversation: 'Open conversation',
+      stop: 'Stop',
+    },
+    detail: {
+      pausedBecause: 'Paused: {reason}',
+      runs: 'Runs',
+      noRuns: 'No runs yet',
+      stopping: 'Stopping',
+      grants: 'Standing approvals',
+      task: 'Task',
+      durationSeconds: '{n}s',
+      durationMinutes: '{n} min',
+    },
+    grants: {
+      intro: 'Later runs make these calls without asking. Each covers specific resources and lapses when the agent or your workspace role changes. Tools that always need approval never appear here.',
+      active: 'Allowed',
+      none: 'Nothing allowed yet',
+      lapsed: 'The setup changed, so this no longer applies',
+      revoke: 'Revoke',
+      candidates: 'Asked for approval in past runs',
+      noCandidates: 'Nothing to allow yet',
+      allow: 'Always allow',
+      allowTitle: 'Allow in future runs',
+      allowBody: 'Later runs will do "{label}" without pausing for approval.',
+      allowDestructiveBody: '"{label}" deletes or overwrites data and cannot be undone. Once allowed, later runs do it without asking.',
+    },
+    risk: {
+      write: 'Change',
+      destructive: 'Delete/overwrite',
+    },
+    messages: {
+      queued: 'Run started',
+      notFound: 'The automation no longer exists',
+    },
+  },
+  notifications: {
+    pending: "Needs attention",
+    history: "Notification history",
+    clearRead: "Clear read",
+    clearReadConfirm: "Clear read notifications? Run records, conversations, and pending actions will be kept.",
+    handle: "Open",
+    review: "Review",
+    unreadCount: "{count} unread",
+    unread: "Unread",
+    newItems: "New notifications — refresh",
+    loadError: "Could not load notifications",
+    awaitingApproval: "Waiting for your approval",
+    awaitingAuthorization: "Waiting for authorization",
+    awaitingReply: "Waiting for your reply",
+
+    title: 'Notifications',
+    markAllRead: 'Mark all read',
+    pendingInvitations: '{count} pending invitations',
+    empty: 'No notifications',
+    kinds: {
+      automation_succeeded: 'Automation finished',
+      automation_failed: 'Automation failed',
+      automation_awaiting_approval: 'Automation needs approval',
+      automation_paused: 'Automation paused',
+    },
+  },
   toolbox: {
     "title": "Toolbox",
     "description": "Manage skills, external tools, and browser connections for your agents.",
@@ -327,6 +542,7 @@ export default {
     sessionUnread: 'New reply',
     knowledgeBase: 'Knowledge Base',
     agents: 'Agents',
+    automations: 'Automations',
     artifacts: 'Artifacts',
     organizations: 'Shared Spaces',
     newChat: 'New Chat',
@@ -353,6 +569,17 @@ export default {
     noSessions: 'No conversations yet'
   },
   chatHeader: {
+    grants: {
+      menu: 'Allowed actions',
+      description: 'Actions allowed for this conversation without asking again. Revoke one to be asked next time.',
+      empty: 'No allowed actions yet',
+      revoke: 'Revoke',
+      revoked: 'Revoked',
+      revokeFailed: 'Failed to revoke',
+      loadFailed: 'Failed to load',
+    },
+    automationTask: 'Automation',
+    automationOpen: 'Open automation "{name}"',
     moreActions: 'More conversation actions',
     toggleSandboxPanel: 'Sandbox terminal',
     copySessionId: 'Copy Session ID',
@@ -1217,6 +1444,8 @@ export default {
     toolFallback: 'Tool',
     stepsCompleted: 'Completed <strong>{steps}</strong> step(s)',
     reasoningRounds: '<strong>{rounds}</strong> reasoning round(s)',
+    earlierSteps: '{count} earlier steps',
+    viewReasoning: 'View reasoning',
     toolCalls: '<strong>{tools}</strong> tool call(s)',
     durationSuffix: '<strong>{duration}</strong>',
     stepSummarySeparator: ' · ',
@@ -1783,12 +2012,30 @@ export default {
       skillRolloutNextTurn: 'Rebuild open sessions on the next chat turn',
       skillRolloutNewSession: 'Keep open sessions on their current sandbox; only new sessions use the new image',
       skillRolloutSaveFailed: 'Failed to save the rollout setting',
+      allocationMode: 'Sandbox allocation',
+      allocationModeHint: 'Only affects sessions that have not used a sandbox yet; existing sessions keep their placement and files are never moved.',
+      allocationModeSession: 'One sandbox per session (default)',
+      allocationModeUser: "Share one sandbox across a user's sessions",
+      allocationModeUnavailable: 'Shared sandboxes are not enabled on this deployment (set WEKNORA_SANDBOX_USER_ALLOCATION=enabled on every replica; Redis is required).',
+      userSandboxRetentionDays: 'Keep an empty shared sandbox for (days)',
+      userSandboxRetentionHint: 'After every session on a shared sandbox is deleted, it is removed once it has been empty this long (1–90 days). This is not a minimum file retention: Docker idle cleanup or provider failures may remove it sooner.',
+      userSandboxesInInventory: "{count} of them are shared user sandboxes; each affects all of that user's sessions on this config.",
+      userSandboxesTitle: 'Shared user sandboxes',
+      userSandboxOwner: 'Owner',
+      userSandboxOwnerOtherWorkspace: 'A user from another workspace',
+      userSandboxLiveSessions: 'Sessions',
+      userSandboxEmptySince: 'Empty since',
+      userSandboxReclaimAfter: 'Reclaimed after',
+      userSandboxRelease: 'Release',
+      userSandboxReleaseConfirm: "Releasing deletes the files and installed packages of all of this user's sessions on this config; a new sandbox is created on next use. Release it?",
+      userSandboxBusy: 'A terminal, desktop or command is still running on this sandbox. Try again later.',
       skillInstallGroup: 'Install a new skill',
       skillInstalledGroup: 'Installed',
       skillUploadClick: 'Click to upload a zip bundle',
       skillUploadDrag: 'or drop a file here',
       skillUploadHint: 'Install writes the skill onto the current image and takes a new snapshot. This can take several minutes. The current chat turn is not interrupted; open sessions rebuild their sandbox on the next turn, which clears the session workspace scratch.',
       skillUploadHintNewSession: 'Install writes the skill onto the current image and takes a new snapshot. This can take several minutes. Already-open sessions keep their current sandbox until they end; only newly started sessions pick up this install.',
+      skillUploadHintShared: 'Installing builds a new image and may take several minutes. Existing shared sandboxes stay unchanged; only newly created sandboxes use the new image.',
       skillSourceSection: 'Install from a source',
       skillSourceSectionHint: 'Paste a ClawHub, GitHub or SkillHub link, or {\'@\'}owner/slug. The bundle cannot exceed {size} MB.',
       skillUploadSection: 'Upload a local bundle',
@@ -1811,6 +2058,7 @@ export default {
       skillDisableHint: 'Disable = the skill is invisible to the agent, files stay in the image. Changes take effect on the session\'s next execution.',
       skillDeleteHint: 'Delete removes the skill directory from the image and takes a new snapshot. The current chat turn is not interrupted; open sessions rebuild their sandbox on the next turn, which clears the session workspace scratch.',
       skillDeleteHintNewSession: 'Delete removes the skill directory from the image and takes a new snapshot. Already-open sessions keep their current sandbox until they end; only newly started sessions lose this skill.',
+      skillDeleteHintShared: 'Deleting removes the skill from the image and builds a new image. Files in existing shared sandboxes stay unchanged; only newly created sandboxes use the new image.',
       skillRemoveInProgress: 'Uninstalling',
       skillRemoveWaiting: 'Uninstall from the image has started. Waiting for progress…',
       skillRemoveDone: 'Uninstalled “{name}” from this sandbox. It remains in the catalog, so you can install it again later.',
@@ -4037,14 +4285,14 @@ export default {
         imagePipelineSectionDescription:
           'With multimodal parsing on, pick how images are parsed.',
         imagePipelineLabel: 'Scheme',
+        advancedSettingsLabel: 'Advanced settings',
+        notesLabel: 'Additional notes',
         imagePipelinePlaceholder: 'Select a scheme',
         imagePipelineLoading: 'Loading pipelines…',
         imagePipelineLoadError: 'Could not load pipelines',
-          imagePipelineValidateError: 'The current settings could not be checked; the backend re-checks them on save.',
+        imagePipelineValidateError: 'The current settings could not be checked; the backend re-checks them on save.',
         imageAttrsOcrConditions: 'Trigger OCR based on the observed attribute conditions',
         imageAttrsOcrConditionsDesc: 'When the observed attributes match the conditions below, OCR runs on the image',
-        imageAttrsOcrOnUnobserved: 'Run OCR when image-attribute observation fails',
-        imageAttrsOcrOnUnobservedDesc: 'When the model fails to observe the image attributes correctly, OCR runs by default so body text is never lost; turn off to skip. (A small vision model such as 4B, or custom image-instruction prompts that conflict with the system prompt, can cause the observation to fail; 8B and above rarely fail, so leaving this on is recommended)',
         imagePipelineKbNote: 'Defaults follow the knowledge base settings; adjust them for this task'
       }
     }
@@ -4237,6 +4485,12 @@ export default {
     noKnowledgeBases: 'No knowledge bases available',
     enterDescription: 'Enter description',
     rawOutputLabel: 'Raw output',
+    backgroundWork: {
+      running: 'No background tasks | {count} background task | {count} background tasks',
+      stop: 'Stop',
+      loading: 'Loading output…',
+      unavailable: 'Output is unavailable',
+    },
     wikiWritePageTitle: 'Wiki Page Write',
     wikiReplaceTextTitle: 'Wiki Text Replace',
     wikiRenamePageTitle: 'Wiki Page Rename',
@@ -6477,6 +6731,11 @@ export default {
       argsLabel: 'Arguments',
       argsModified: 'Modified',
       allowInSession: 'Allow this for the rest of the conversation',
+      grantLapsed: {
+        changed: 'Your earlier approval no longer applies: the automation\'s agent setup, your role or the access ceiling changed.',
+        expired: 'Your earlier approval has expired.',
+        idle: 'Your earlier approval lapsed after a long time unused.',
+      },
       countdownShort: '{seconds}s',
       approve: 'Approve & run',
       reject: 'Reject',
@@ -6844,6 +7103,18 @@ export default {
           get_catalog: "Get workspace skill details",
           install_catalog: "Install catalog skill onto sandboxes",
         },
+        automation: {
+          list: "List automations",
+          create: "Create automation",
+          validate_trigger: "Check schedule",
+          get: "Get automation",
+          update: "Update automation",
+          delete: "Delete automation",
+          pause: "Pause automation",
+          resume: "Resume automation",
+          run_now: "Run automation now",
+          list_runs: "List automation runs",
+        },
         session: {
           list: "List conversations",
         },
@@ -6881,6 +7152,11 @@ export default {
       notFound: 'Content not found',
       loadFailed: 'Failed to load',
       noKbForWiki: 'Unable to identify associated knowledge base. Cannot open Wiki.'
+    },
+    entityLink: {
+      kb: 'Knowledge base',
+      doc: 'Document',
+      chunk: 'Passage'
     },
     toolSummary: {
       getDocument: 'Get document: {title}',
@@ -7313,6 +7589,8 @@ export default {
       authWaitTimeout: 'Authentication Wait Timeout (s)',
       authWaitTimeoutDesc: 'Maximum seconds to wait for you to complete OAuth authentication when prompted during a conversation; the prompt is skipped after it elapses (only affects OAuth MCP services).',
       authWaitTimeoutPlaceholder: 'Default 600 seconds',
+      accessLevel: 'Access level',
+      accessLevelDesc: 'Whether tools that change data (MCP tools, Wiki writes) run without asking. Read-only leaves them out; confirm asks you each time. MCP tools marked as requiring approval always ask.',
       unavailableService: 'Unavailable service'
     },
     llmCallTimeout: {
@@ -7607,6 +7885,8 @@ export default {
       confluenceEditionCloud: 'Cloud',
       confluenceBaseUrl: 'Confluence URL',
       confluenceUsername: 'Username or email',
+      confluencePat: 'Server/DC personal access token (PAT)',
+      confluencePatHint: 'Optional. When provided, uses Bearer authentication; username and password are not required.',
       confluencePassword: 'Server/DC password',
       confluenceApiToken: 'Cloud API token',
       imaClientId: 'IMA ClientID',
@@ -8434,6 +8714,25 @@ export default {
         'true': { label: 'Yes', description: 'a chart, graph or diagram with plotted values' },
         'false': { label: 'No', description: 'a photo, drawing, icon or decoration' }
       }
+    },
+    layout_margin: {
+      label: 'Non-text area',
+      description:
+        'How much background surrounds the content. Large margins mean the page can be cropped tighter before OCR reads it.',
+      values: {
+        'none': { label: 'None', description: 'the text reaches the edges' },
+        'small': { label: 'Small', description: 'a thin band of background' },
+        'large': { label: 'Large', description: 'plenty of non-text area: a desk, a room, a mostly empty page' }
+      }
+    },
+    layout_upright: {
+      label: 'Text orientation',
+      description:
+        'Whether the text reads the right way up. A rotated or upside-down page is worth straightening before OCR reads it.',
+      values: {
+        'true': { label: 'Upright', description: 'text reads in its normal orientation' },
+        'false': { label: 'Rotated', description: 'text is turned, tilted or upside down' }
+      }
     }
   },
   // Overlay wording for the pipeline panel, indexed by pipeline id and field
@@ -8446,44 +8745,71 @@ export default {
     },
     default: {
       name: 'Manual',
+      note_actions: {
+        label: 'The two actions are independent',
+        description:
+          'Each can be switched separately: with OCR off the image is still described, with caption off its text is still read. Only switching both off leaves an image untouched, which is why the panel refuses that combination.',
+      },
       description: 'Turn the parsing actions on or off to fit the task.',
-      enable_caption: {
+      caption_enabled: {
         label: 'Image caption',
         description: 'Ask the model for a one-line description of every image and store it as the caption.'
       },
-      enable_ocr: {
+      ocr_enabled: {
         label: 'OCR',
         description: 'Extract the text that appears in the image.'
       },
       caption: {
-        thinking: {
+        thinking_enabled: {
           label: 'Caption with thinking',
           description: 'Let the model think before it writes the caption. In general you do not need thinking; enabling it makes parsing slower and may make the model overthink, so overly long reasoning can run past the limit and truncate the caption, failing the task. Only enable it when you have confirmed it is necessary.',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: 'OCR with thinking',
           description: 'Let the model think before it transcribes the text. In general you do not need thinking; enabling it makes parsing slower and may make the model overthink, so overly long reasoning can run past the limit and truncate the transcribed text, failing the task. Only enable it when you have confirmed it is necessary.',
         },
       }
     },
     smartocr: {
+      ocr_on_unobserved: {
+        label: 'Run OCR when image-attribute observation fails',
+        description:
+          'When the model fails to observe the image attributes correctly, OCR runs by default so body text is never lost; turn off to skip. (A small vision model such as 4B, or custom image-instruction prompts that conflict with the system prompt, can cause the observation to fail; 8B and above rarely fail, so leaving this on is recommended)',
+      },
       name: 'Smart',
-      caption: {
-        thinking: {
+      note_flow: {
+        label: 'The observation decides',
+        description:
+          'The image is described and observed first, and the attributes that come back decide whether OCR is worth a second pass. When they say the page needs straightening, it is straightened and its surroundings cropped before reading; when that step is unavailable or declines, the original photograph is read instead — never something worse.',
+      },
+      preprocess: {
+        mode: {
+          label: 'Document preprocessing',
+          description:
+            'Off by default. Straightening and cropping before OCR adds processing time. Auto uses the observed attributes; Always tries preprocessing for every image selected for OCR. Busy or resource-limited requests use the original image.',
+          options: {
+            auto: 'Auto',
+            off: 'Off',
+            always: 'Always',
+          },
+        },
+      },
+      observation: {
+        thinking_enabled: {
           label: 'Describe with thinking',
           description: 'Let the model think before it describes the image and reports its attributes. In general you do not need thinking; enabling it makes parsing slower and may make the model overthink, so overly long reasoning can run past the limit and truncate the description, failing the task. Only enable it when you have confirmed it is necessary.',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: 'Text recognition with thinking',
           description: 'Let the model think before it transcribes the text. In general you do not need thinking; enabling it makes parsing slower and may make the model overthink, so overly long reasoning can run past the limit and truncate the transcribed text, failing the task. Only enable it when you have confirmed it is necessary.',
         },
       },
       description:
-        'Observe the image attributes and describe the image first, then decide from the attributes whether to run OCR, saving model calls and speeding up parsing.'
+        'Observe the image attributes and describe the image first, then decide from the attributes whether to run OCR, saving model calls and speeding up parsing. When the image is recognised as a photograph of a correctable page or label, it is straightened and cropped before recognition to improve OCR accuracy; if that fails, the original image is used.'
     }
   }
 }

@@ -617,7 +617,7 @@ func (e *AgentEngine) callLLMWithRetry(
 		// into the summary envelope, where the next compaction cannot read it
 		// back out. The provider gets the sanitized view; the engine keeps the
 		// structured one.
-		compacted := e.forceCompaction(ctx, messages, round)
+		compacted := e.forceCompaction(ctx, *messagesPtr, round)
 		*messagesPtr = compacted
 		messages = agenttools.SanitizeMessages(compacted)
 		e.lastSentMsgCount = len(compacted)

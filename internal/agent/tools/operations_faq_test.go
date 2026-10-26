@@ -133,7 +133,7 @@ func TestRunOperationFAQUpdateRechecksApprovedTarget(t *testing.T) {
 			switch scenario {
 			case "resumed":
 				meta, _ := ToolExecFromContext(ctx)
-				meta.Interactive = false
+				meta.Mode = types.RunModeUnattended
 				meta.Answered = &types.AgentPrompt{Kind: types.AgentPromptKindToolApproval}
 				d.responses["GET "+faqEntryPath] = long
 			case "edited target":

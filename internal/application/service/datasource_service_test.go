@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -219,6 +220,20 @@ func TestAllFetchedItemsFailedErrorTruncatesLongDetail(t *testing.T) {
 	require.Error(t, err)
 	assert.LessOrEqual(t, len(err.Error()), 560)
 	assert.Contains(t, err.Error(), "...")
+}
+
+func TestAllFetchedItemsFailedErrorTruncatesChineseDetailAtRuneBoundary(t *testing.T) {
+	// 499 ASCII bytes put byte 500 inside the first three-byte rune.
+	message := strings.Repeat("x", 499) + strings.Repeat("导出失败", 50)
+	err := allFetchedItemsFailedError(&types.SyncResult{
+		Total:  1,
+		Failed: 1,
+		Errors: []types.SyncItemError{{Message: message}},
+	})
+	require.Error(t, err)
+	assert.True(t, utf8.ValidString(err.Error()), "error message must be valid UTF-8")
+	assert.LessOrEqual(t, len(err.Error()), 560)
+	assert.True(t, strings.HasSuffix(err.Error(), strings.Repeat("x", 499)+"..."))
 }
 
 const deletedItemConnectorType = "test-sync-deletion"

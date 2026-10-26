@@ -155,12 +155,17 @@ func testChildWikiConfirmation(t *testing.T, name string, level types.AssistantA
 	require.False(t, result.Success)
 	require.False(t, write.called, "missing interactive approval must fail closed")
 	approvedCtx := tools.WithToolExecContext(ctx, &tools.ToolExecContext{
-		EventBus: event.NewEventBus(), Interactive: true, SessionID: g.Members[0].SessionID,
+		EventBus: event.NewEventBus(), Mode: types.RunModeAttended, SessionID: g.Members[0].SessionID,
 		AssistantMessageID: "child-answer", UserID: "web_user:u", ToolCallID: "write-call",
 	})
 	result, err = registry.ExecuteTool(approvedCtx, name, json.RawMessage(`{}`))
 	require.NoError(t, err)
 	require.False(t, result.Success)
+	if level == types.AssistantAccessReadOnly {
+		require.False(t, write.called, "a read-only child cannot write even with approval")
+		require.Zero(t, gate.requests, "a read-only child does not ask for a write")
+		return
+	}
 	require.False(t, write.called, "denied approval must not execute")
 	require.Equal(t, 1, gate.requests)
 	gate.approved = true

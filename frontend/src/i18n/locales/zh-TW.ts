@@ -124,6 +124,221 @@ export default {
     "historyModels": "修改了 {count} 個模型",
     "historyNoOverrides": "無管理員修改",
   },
+  automation: {
+    conversationNotice: "此對話由自動化任務執行，無法手動傳送訊息。請在上方處理待審批事項。",
+    title: '自動化',
+    description: '讓 WeKnora 助手按排程以你的身分執行任務，結果與待審批事項會通知你。',
+    add: '新增自動化',
+    addHint: '也可以直接請 WeKnora 助手幫你建立',
+    paused: '已暫停',
+    scheduleEnded: '已結束',
+    scheduleEndedHint: '一次性排程已結束。可立即執行，或修改執行時間後恢復。',
+    nextRunAt: '下次 {time}',
+    runConfirm: '立即執行「{name}」？這會啟動一次額外執行，不影響原有排程。',
+    deleteBody: '將停止進行中的執行，並刪除「{name}」的執行紀錄、對話與長期授權。此操作無法復原。',
+    fields: {
+      name: '名稱',
+      instruction: '任務',
+      schedule: '執行時間',
+      timezone: '時區',
+      accessLevel: '執行權限',
+      sessionMode: '對話形式',
+      carryLastResult: '把上次成功的結果帶入本次對話',
+      overlapPolicy: '上次仍在執行時',
+      misfirePolicy: '錯過的執行',
+      approvalTimeout: '審批等待期限',
+      maxDuration: '單次執行時長上限',
+      notifyOnSuccess: '成功時也通知',
+      nextRun: '下次執行',
+      enabled: '啟用',
+    },
+    editor: {
+      model: "執行模型",
+      modelHelp: '預設沿用助手的模型設定，也可以單獨指定。受委派的智慧代理使用各自的模型。修改後用於後續執行。',
+      modelDefault: '跟隨助手預設模型',
+      createTitle: '新增自動化',
+      editTitle: '編輯自動化',
+      namePlaceholder: '例如：每日知識庫週報',
+      instructionPlaceholder: '寫清楚要做什麼、用哪些資料、結果如何輸出',
+      variablesHint: '可用變數：',
+      unattendedHint: '執行時無人在場，助手不能向你提問；需要審批的操作會暫停並通知你。',
+      nameDesc: '在列表和通知中顯示，方便你認出這項任務',
+      frequency: '重複頻率',
+      weekdays: '星期',
+      dayOfMonthDesc: '當月沒有這一天時，在最後一天執行',
+      runAt: '執行時間',
+      cron: 'Cron 表達式',
+      timeOfDay: '時間',
+      timezoneDesc: '依此時區的鐘點執行，夏令時間會自動換算',
+      previewEmpty: '設定好時間後，這裡會顯示接下來幾次的執行時間',
+      carryDesc: '新對話開頭附上上次成功執行的結果，適合做增量彙總',
+      misfireDesc: '服務停機期間錯過的執行，恢復後如何處理',
+      maxDurationDesc: '超過這個時長仍未完成，本次執行會被終止',
+      navGroups: {
+        task: '任務',
+        run: '執行',
+      },
+      sections: {
+        basic: {
+          title: '基本資訊',
+          desc: '任務由 WeKnora 助手執行。需要其他智慧代理時，請在任務中寫明委派對象與工作。',
+        },
+        schedule: {
+          title: '執行時間',
+          desc: '設定任務何時執行，兩次執行至少間隔 5 分鐘。',
+        },
+        execution: {
+          title: '執行方式',
+          desc: '執行時可以做哪些修改、在哪個對話中進行，以及重疊和錯過時的處理。',
+        },
+        notify: {
+          title: '審批與通知',
+          desc: '執行結果和待審批的操作會出現在右上角的通知中。',
+        },
+      },
+      sessionModeDesc: {
+        per_run: '每次執行開一個新對話，互不影響',
+        persistent: '所有執行都在同一個對話裡，助手能看到之前的內容',
+      },
+      errors: {
+        name: '請填寫名稱',
+        instruction: '請填寫要執行的任務',
+        schedule: '請設定有效的執行時間',
+      },
+      approvalTimeoutHelp: '超過期限仍未審批，本次執行記為失敗',
+      notifyHint: '失敗、等待審批與自動暫停總會通知你',
+      access: {
+        read_only: '只檢視，不做任何修改。',
+        confirm: '每次修改前暫停並通知你審批；可在詳情裡把常用操作設為長期授權。',
+        auto_write: '可復原的修改直接執行；刪除等操作仍暫停等待審批。',
+      },
+    },
+    schedule: {
+      kinds: {
+        daily: '每天',
+        weekdays: '工作日',
+        weekly: '每週',
+        monthly: '每月',
+        hourly: '每小時',
+        once: '僅一次',
+        custom: '自訂 cron',
+      },
+      atMinute: '每小時的第幾分鐘',
+      dayOfMonth: '每月幾號',
+      pickTime: '選擇時間',
+      customHint: '五段式：分 時 日 月 週，例如 0 9 * * 1-5 表示工作日 9:00。最短間隔 5 分鐘。',
+      nextRuns: '接下來：',
+      invalid: '觸發時間不合法',
+      describe: {
+        hourly: '每小時第 {minute} 分',
+        daily: '每天 {time}',
+        weekdays: '工作日 {time}',
+        weekly: '每週 {days} {time}',
+        monthly: '每月 {day} 日 {time}',
+        once: '僅在 {at}',
+        custom: 'cron：{expr}',
+        everyMinutes: '每 {n} 分鐘',
+        everyHours: '每 {n} 小時',
+      },
+    },
+    sessionMode: {
+      per_run: '每次新對話',
+      persistent: '始終同一對話',
+    },
+    overlap: {
+      skip: '跳過本次',
+      queue: '排隊，等上次結束後執行',
+    },
+    misfire: {
+      skip: '跳過',
+      run_once: '恢復後補跑一次',
+    },
+    units: {
+      hours: '小時',
+      minutes: '分鐘',
+    },
+    status: {
+      queued: '排隊中',
+      running: '執行中',
+      awaiting_approval: '等待審批',
+      succeeded: '成功',
+      failed: '失敗',
+      cancelled: '已停止',
+      skipped: '已跳過',
+      needs_attention: '需要檢查',
+      paused: '已暫停',
+    },
+    runTrigger: {
+      schedule: '按排程',
+      manual: '手動',
+      misfire: '補跑',
+    },
+    actions: {
+      runNow: '立即執行',
+      pause: '暫停',
+      resume: '恢復',
+      review: '去審批',
+      openConversation: '檢視對話',
+      stop: '停止',
+    },
+    detail: {
+      pausedBecause: '已暫停：{reason}',
+      runs: '執行紀錄',
+      noRuns: '還沒有執行過',
+      stopping: '正在停止',
+      grants: '長期授權',
+      task: '任務內容',
+      durationSeconds: '{n} 秒',
+      durationMinutes: '{n} 分鐘',
+    },
+    grants: {
+      intro: '這裡的操作在以後的執行中無需再次審批。只針對具體資源；更換智慧代理或你的空間角色變化後自動失效。需要每次審批的工具不會出現在這裡。',
+      active: '已授權',
+      none: '暫無長期授權',
+      lapsed: '設定已變化，此授權暫不生效',
+      revoke: '撤銷',
+      candidates: '執行中請求過審批的操作',
+      noCandidates: '還沒有可設為長期授權的操作',
+      allow: '以後都允許',
+      allowTitle: '設為長期授權',
+      allowBody: '以後的執行進行「{label}」時將不再暫停等待審批。',
+      allowDestructiveBody: '「{label}」會刪除或覆寫資料，且無法復原。確認後，以後的執行將直接進行，不再詢問。',
+    },
+    risk: {
+      write: '修改',
+      destructive: '刪除/覆寫',
+    },
+    messages: {
+      queued: '已開始執行',
+      notFound: '自動化不存在或已刪除',
+    },
+  },
+  notifications: {
+    pending: "待處理",
+    history: "通知記錄",
+    clearRead: "清理已讀",
+    clearReadConfirm: "清理已讀通知？不會刪除執行記錄、對話或待處理事項。",
+    handle: "去處理",
+    review: "去審批",
+    unreadCount: "{count} 則未讀",
+    unread: "未讀",
+    newItems: "有新通知，點擊重新整理",
+    loadError: "通知載入失敗",
+    awaitingApproval: "等待你確認操作",
+    awaitingAuthorization: "等待你完成授權",
+    awaitingReply: "等待你回覆",
+
+    title: '通知',
+    markAllRead: '全部已讀',
+    pendingInvitations: '{count} 個待處理邀請',
+    empty: '暫無通知',
+    kinds: {
+      automation_succeeded: '自動化已完成',
+      automation_failed: '自動化失敗',
+      automation_awaiting_approval: '自動化等待審批',
+      automation_paused: '自動化已暫停',
+    },
+  },
   toolbox: {
     "title": "工具箱",
     "description": "管理智慧代理可用的技能、外部工具和瀏覽器連結。",
@@ -1139,6 +1354,8 @@ export default {
       confluenceEditionCloud: 'Cloud',
       confluenceBaseUrl: 'Confluence 地址',
       confluenceUsername: '使用者名或電子信箱',
+      confluencePat: 'Server/DC 個人存取權杖（PAT）',
+      confluencePatHint: '選填。填寫後使用 Bearer 驗證，無需使用者名稱和密碼。',
       confluencePassword: 'Server/DC 密碼',
       confluenceApiToken: 'Cloud API 權杖',
       clientId: 'Client ID',
@@ -1379,6 +1596,8 @@ export default {
       authWaitTimeout: '授權等待超時（秒）',
       authWaitTimeoutDesc: '對話中觸發 OAuth 授權時，等待你完成授權的最長秒數，超時後自動跳過授權提示（僅對使用 OAuth 的 MCP 服務生效）。',
       authWaitTimeoutPlaceholder: '預設 600 秒',
+      accessLevel: '執行權限上限',
+      accessLevelDesc: '修改資料的工具（MCP 工具、Wiki 寫入）能否直接執行：唯讀時不提供這類工具，修改前確認時每次先徵求你同意。被標記為需要審批的 MCP 工具始終需要確認。',
       unavailableService: '不可用服務'
     },
     agentType: {
@@ -1807,6 +2026,11 @@ export default {
       loadFailed: '載入失敗',
       noKbForWiki: '無法識別關聯的知識庫，無法打開 Wiki'
     },
+    entityLink: {
+      kb: '知識庫',
+      doc: '文件',
+      chunk: '片段'
+    },
     tools: {
       searchKnowledge: '知識庫檢索',
       grepChunks: '搜尋關鍵字',
@@ -2089,6 +2313,18 @@ export default {
           get_catalog: "取得工作空間技能詳細資訊",
           install_catalog: "將目錄技能安裝至沙箱",
         },
+        automation: {
+          list: "取得自動化列表",
+          create: "建立自動化",
+          validate_trigger: "檢查執行時間",
+          get: "取得自動化詳情",
+          update: "更新自動化",
+          delete: "刪除自動化",
+          pause: "暫停自動化",
+          resume: "恢復自動化",
+          run_now: "立即執行自動化",
+          list_runs: "取得自動化執行記錄",
+        },
         session: {
           list: "取得對話清單",
         },
@@ -2185,6 +2421,11 @@ export default {
       argsLabel: '呼叫參數',
       argsModified: '已修改',
       allowInSession: '本會話內同類操作都允許',
+      grantLapsed: {
+        changed: '先前的允許已失效：自動化的 Agent 設定、成員角色或權限上限已變更。',
+        expired: '先前的允許已過期。',
+        idle: '先前的允許因長期未使用已失效。',
+      },
       countdownShort: '{seconds}s',
       approve: '透過並執行',
       reject: '拒絕',
@@ -4595,6 +4836,12 @@ export default {
     noKnowledgeBases: '沒有可用的知識庫',
     enterDescription: '輸入描述',
     rawOutputLabel: '原始輸出',
+    backgroundWork: {
+      running: '沒有背景工作 | {count} 個背景工作 | {count} 個背景工作',
+      stop: '停止',
+      loading: '正在載入輸出…',
+      unavailable: '暫時無法查看輸出',
+    },
     wikiWritePageTitle: 'Wiki 頁面寫入',
     wikiReplaceTextTitle: 'Wiki 文字取代',
     wikiRenamePageTitle: 'Wiki 頁面重新命名',
@@ -4662,11 +4909,11 @@ export default {
         imageAttrsSchemaDescription: '模型會觀察以下屬性（由後端登錄檔定義）以驅動 OCR 策略',
         imageAttrsOcrConditions: '根據觀察到的屬性條件觸發 OCR',
         imageAttrsOcrConditionsDesc: '當觀察到的屬性滿足以下條件時，對圖片進行 OCR',
-        imageAttrsOcrOnUnobserved: '圖片屬性觀察失敗時仍執行 OCR',
-        imageAttrsOcrOnUnobservedDesc: '當模型未能正確觀察到圖片屬性時，預設仍執行 OCR 兜底，以免漏掉正文文字；關閉則跳過。（採用 4B 等小參數視覺模型，或自定義的圖片解析提示語與系統提示語衝突時，可能造成觀察失敗；8B 及以上模型的失敗概率很低，不建議關閉）',
         imagePipelineSectionLabel: '圖片解析方案',
         imagePipelineSectionDescription: '多模態解析開啟後，可以根據需要選擇圖片的解析方案',
         imagePipelineLabel: '選擇解析方案',
+        advancedSettingsLabel: '進階設定',
+        notesLabel: '附加說明',
         imagePipelinePlaceholder: '請選擇解析方案',
         imagePipelineLoading: '正在讀取流水線…',
         imagePipelineLoadError: '讀取流水線失敗',
@@ -6748,12 +6995,30 @@ export default {
       skillRolloutNextTurn: '已有會話在下一輪提問時重建沙箱',
       skillRolloutNewSession: '已有會話保持原沙箱，僅新會話使用新映像',
       skillRolloutSaveFailed: '儲存生效方式失敗',
+      allocationMode: '沙箱分配方式',
+      allocationModeHint: '只影響還沒有用過沙箱的會話；已有會話保持原來的分配，不會搬遷檔案。',
+      allocationModeSession: '每個會話一台沙箱（預設）',
+      allocationModeUser: '同一使用者的會話共用一台沙箱',
+      allocationModeUnavailable: '目前部署未開啟共用沙箱（需在所有實例設定 WEKNORA_SANDBOX_USER_ALLOCATION=enabled，並設定 Redis）。',
+      userSandboxRetentionDays: '空置沙箱保留天數',
+      userSandboxRetentionHint: '某台共用沙箱上的會話全部刪除後，空置滿這個天數會被自動刪除（1–90 天）。這不是檔案最少保留時間：Docker 空閒回收或服務商故障可能更早刪除。',
+      userSandboxesInInventory: '其中 {count} 台是使用者共用沙箱，影響該使用者在此設定下的全部會話。',
+      userSandboxesTitle: '使用者共用沙箱',
+      userSandboxOwner: '使用者',
+      userSandboxOwnerOtherWorkspace: '其他空間的使用者',
+      userSandboxLiveSessions: '會話數',
+      userSandboxEmptySince: '空置起點',
+      userSandboxReclaimAfter: '預計回收',
+      userSandboxRelease: '釋放',
+      userSandboxReleaseConfirm: '釋放後，該使用者在此設定下全部會話的檔案和已安裝的套件都會遺失，下次使用時會新建沙箱。確定釋放？',
+      userSandboxBusy: '這台沙箱上還有終端、桌面或命令在執行，請稍後再試。',
       skillInstallGroup: '安裝新技能',
       skillInstalledGroup: '已安裝',
       skillUploadClick: '點擊上傳 zip 壓縮包',
       skillUploadDrag: '或將檔案拖到此處',
       skillUploadHint: '安裝會在當前映像上生成新快照，可能需要數分鐘。當前這一輪對話不會中斷；下一輪提問時才會按新映像重建沙箱，會話工作區草稿會在那時清空。',
       skillUploadHintNewSession: '安裝會在當前映像上生成新快照，可能需要數分鐘。已打開的會話繼續使用原沙箱，直到該會話結束；只有新打開的會話才會帶上這次安裝的技能。',
+      skillUploadHintShared: '安裝會產生新映像，可能需要數分鐘。已有共用沙箱保持不變，新映像只用於之後新建的沙箱。',
       skillSourceSection: '從來源安裝',
       skillSourceSectionHint: '貼上 ClawHub、GitHub 或 SkillHub 連結，或 {\'@\'}owner/slug。壓縮包不超過 {size} MB。',
       skillUploadSection: '上傳本地壓縮包',
@@ -6776,6 +7041,7 @@ export default {
       skillDisableHint: '停用後該技能對智慧代理不可見，檔案仍保留在映像中。變更將在會話下一次執行時生效。',
       skillDeleteHint: '刪除會從映像中移除該技能目錄並生成新快照。當前這一輪對話不會中斷；下一輪提問時才會按新映像重建沙箱，會話工作區草稿會在那時清空。',
       skillDeleteHintNewSession: '刪除會從映像中移除該技能目錄並生成新快照。已打開的會話繼續使用原沙箱，直到該會話結束；只有新打開的會話才會去掉該技能。',
+      skillDeleteHintShared: '刪除會從映像中移除技能並產生新映像。已有共用沙箱中的檔案保持不變，新映像只用於之後新建的沙箱。',
       skillRemoveInProgress: '正在解除安裝',
       skillRemoveWaiting: '已開始從映像解除安裝，正在等待進度…',
       skillRemoveDone: '已從沙箱解除安裝「{name}」。技能仍在目錄裡，可以稍後再裝回去。',
@@ -7232,6 +7498,8 @@ export default {
     toolFallback: '工具',
     stepsCompleted: '已完成 <strong>{steps}</strong> 個步驟',
     reasoningRounds: '思考 <strong>{rounds}</strong> 輪',
+    earlierSteps: '已完成 {count} 個步驟',
+    viewReasoning: '檢視思路',
     toolCalls: '呼叫 <strong>{tools}</strong> 次工具',
     durationSuffix: '耗時 <strong>{duration}</strong>',
     stepSummarySeparator: ' · ',
@@ -8302,6 +8570,17 @@ export default {
     }
   },
   chatHeader: {
+    grants: {
+      menu: '已允許的操作',
+      description: '本對話中已允許、不再詢問的操作。撤銷後再次呼叫時會重新詢問。',
+      empty: '暫無已允許的操作',
+      revoke: '撤銷',
+      revoked: '已撤銷',
+      revokeFailed: '撤銷失敗',
+      loadFailed: '載入失敗',
+    },
+    automationTask: '自動化',
+    automationOpen: '開啟自動化「{name}」',
     moreActions: '更多對話操作',
     toggleSandboxPanel: '沙箱終端',
     copySessionId: '複製會話 ID',
@@ -8383,6 +8662,7 @@ export default {
     sessionUnread: '有新回覆',
     knowledgeBase: '知識庫',
     agents: '智慧代理',
+    automations: '自動化',
     artifacts: '產物',
     organizations: '共享空間',
     newChat: '新對話',
@@ -8429,6 +8709,25 @@ export default {
         'true': { label: '是', description: '是 ── 圖表、曲線或示意圖' },
         'false': { label: '否', description: '否 ── 照片、插畫、圖示或裝飾圖' }
       }
+    },
+    layout_margin: {
+      label: '版面留白',
+      description:
+        '文字內容之外的部分（桌面、背景、空白）占整張畫面的比例。留白越大，越能在 OCR 之前把頁面裁得更緊。',
+      values: {
+        'none': { label: '無留白', description: '文字幾乎鋪滿畫面' },
+        'small': { label: '少量留白', description: '邊緣只有一條窄邊' },
+        'large': { label: '大片留白', description: '有大片非文字區域 —— 桌面、房間，或拍進來的周邊環境' }
+      }
+    },
+    layout_upright: {
+      label: '文字朝向',
+      description:
+        '圖中文字是否正立。歪斜或倒置的頁面，值得在 OCR 之前擺正。',
+      values: {
+        'true': { label: '正立', description: '文字方向正常' },
+        'false': { label: '非正立', description: '文字被旋轉、傾斜拍攝或倒置' }
+      }
     }
   },
   imagePipeline: {
@@ -8437,43 +8736,70 @@ export default {
     },
     default: {
       name: '傳統',
+      note_actions: {
+        label: '兩項動作互相獨立',
+        description:
+          '兩項各自開關：關掉識別，圖片仍會被描述；關掉描述，文字仍會被識別。只有兩個都關掉時這張圖才不會被處理 —— 所以面板不允許這種組合。',
+      },
       description: '使用者根據任務需要手動選擇解析動作開關。',
-      enable_caption: {
+      caption_enabled: {
         label: '圖片描述',
         description: '讓模型為每張圖片生成一句內容描述，作為圖片的說明文字。',
       },
-      enable_ocr: {
+      ocr_enabled: {
         label: '文字辨識',
         description: '提取圖片中出現的文字。',
       },
       caption: {
-        thinking: {
+        thinking_enabled: {
           label: '圖片描述時開啟思考',
           description: '讓模型在寫描述前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '文字辨識時開啟思考',
           description: '讓模型在提取文字前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
         },
       },
     },
     smartocr: {
+      ocr_on_unobserved: {
+        label: '圖片屬性觀察失敗時仍執行 OCR',
+        description:
+          '當模型未能正確觀察到圖片屬性時，預設仍執行 OCR 兜底，以免漏掉正文文字；關閉則跳過。（採用 4B 等小參數視覺模型，或自定義的圖片解析提示語與系統提示語衝突時，可能造成觀察失敗；8B 及以上模型的失敗概率很低，不建議關閉）',
+      },
       name: '智能模式',
-      caption: {
-        thinking: {
+      note_flow: {
+        label: '由觀察結果決定',
+        description:
+          '先描述圖片並觀察屬性，由屬性決定是否值得再為它花一次 OCR。屬性顯示頁面需要擺正時，會先擺正並裁掉周圍環境再識別；若該步驟不可用或判定不適用，則直接用原圖，絕不會比不啟用更差。',
+      },
+      preprocess: {
+        mode: {
+          label: '文件預處理',
+          description:
+            '預設關閉。啟用後，會在 OCR 前擺正並裁剪頁面，增加處理時間。自動：依觀察結果判斷；總是：對進入 OCR 的圖片都嘗試預處理；忙碌或超限時使用原圖。',
+          options: {
+            auto: '自動',
+            off: '關閉',
+            always: '總是',
+          },
+        },
+      },
+      observation: {
+        thinking_enabled: {
           label: '描述時開啟思考',
           description: '讓模型在描述圖片並觀察屬性前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '文字辨識時開啟思考',
           description: '讓模型在提取文字前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
         },
       },
-      description: '先觀察圖片特徵並進行圖片描述，再根據圖片特徵決定是否呼叫 OCR 對圖片進行辨識，以節省模型呼叫次數並提升解析速度。',
+      description: '先觀察圖片特徵並進行圖片描述，再根據圖片特徵決定是否呼叫 OCR 對圖片進行辨識，以節省模型呼叫次數並提升解析速度。當辨識到圖片為可校正的文件或標籤頁照片時，會在辨識前自動擺正並裁切頁面，以提升 OCR 準確率；若校正失敗則直接使用原圖。',
     },
   },
 }

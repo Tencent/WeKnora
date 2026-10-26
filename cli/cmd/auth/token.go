@@ -3,6 +3,7 @@ package auth
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -99,7 +100,11 @@ func runToken(f *cmdutil.Factory, fopts *cmdutil.FormatOptions) error {
 		if kind == "WEKNORA_API_KEY" {
 			mode = ModeAPIKey
 		}
-		return emitToken(fopts, os.Getenv(kind), mode, "(env)")
+		// EnvCredential gates on the trimmed value and buildClientFromEnv
+		// trims before authenticating - emit the same trimmed credential, or
+		// stray padding/newlines (common in CI secret stores) only break the
+		// captured $(weknora auth token) output, not the CLI's own calls.
+		return emitToken(fopts, strings.TrimSpace(os.Getenv(kind)), mode, "(env)")
 	}
 	cfg, err := f.Config()
 	if err != nil {

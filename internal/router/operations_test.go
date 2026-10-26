@@ -45,6 +45,7 @@ func registerOperationAreas(v1 *gin.RouterGroup, g *rbacGuards) {
 		g,
 	)
 	RegisterDataSourceRoutes(v1, &handler.DataSourceHandler{}, &handler.DataSourceCredentialsHandler{}, g)
+	RegisterAutomationRoutes(v1, &handler.AutomationHandler{}, g)
 }
 
 // TestBuiltinOperationsMatchRegisteredRoutes requires every operation to

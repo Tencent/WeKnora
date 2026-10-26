@@ -1237,6 +1237,23 @@ def _render_scanned_pages(
     return out
 
 
+def _encode_rendered_page_images(rendered: dict, base_name: str) -> dict:
+    """Encode rendered pages while releasing each raw JPEG immediately.
+
+    ``_render_scanned_pages`` returns raw JPEG bytes because the render workers
+    need that representation.  Keeping the raw mapping alive while building a
+    second base64 mapping temporarily doubles the image memory for a scanned
+    document.  Pop each page before encoding it so the parser retains only the
+    representation that the gRPC response needs.
+    """
+    encoded = {}
+    for index in sorted(rendered):
+        image_bytes = rendered.pop(index)
+        ref_path = f"images/{base_name}_page_{index + 1}.jpg"
+        encoded[ref_path] = base64.b64encode(image_bytes).decode("utf-8")
+    return encoded
+
+
 def _select_embedded_images(
     meta: list,
     num_text_pages: int,
@@ -1339,7 +1356,7 @@ def _extract_embedded_images(pdf, classes, raw, base_name: str, quality: int) ->
     if not text_indices:
         return {}
 
-    candidates: list = []  # parallel to meta; holds heavy pixel data
+    candidates: list = []
     meta: list = []
     for i in text_indices:
         page = pdf[i]
@@ -1348,7 +1365,7 @@ def _extract_embedded_images(pdf, classes, raw, base_name: str, quality: int) ->
             page_area = float(width) * float(height)
             if page_area <= 0:
                 continue
-            for obj in page.get_objects():
+            for object_index, obj in enumerate(page.get_objects()):
                 if obj.type != raw.FPDF_PAGEOBJ_IMAGE:
                     continue
                 try:
@@ -1362,17 +1379,20 @@ def _extract_embedded_images(pdf, classes, raw, base_name: str, quality: int) ->
                     pil = _decode_embedded_image_pil(obj)
                 except Exception:
                     continue
-                content_hash = hashlib.md5(pil.tobytes()).hexdigest()
-                candidates.append((i, top, pil))
-                meta.append(
-                    {
-                        "page": i,
-                        "width": pil.width,
-                        "height": pil.height,
-                        "area_ratio": area_ratio,
-                        "hash": content_hash,
-                    }
-                )
+                try:
+                    content_hash = hashlib.md5(pil.tobytes()).hexdigest()
+                    candidates.append((i, object_index, top))
+                    meta.append(
+                        {
+                            "page": i,
+                            "width": pil.width,
+                            "height": pil.height,
+                            "area_ratio": area_ratio,
+                            "hash": content_hash,
+                        }
+                    )
+                finally:
+                    pil.close()
         finally:
             _close_pdfium_resource(page)
 
@@ -1386,22 +1406,40 @@ def _extract_embedded_images(pdf, classes, raw, base_name: str, quality: int) ->
     per_page_count: dict = defaultdict(int)
     max_edge = CONFIG.pdf_render_max_edge
     for idx in kept_idx:
-        page_i, y_top, pil = candidates[idx]
-        if pil.mode not in ("RGB", "L"):
-            pil = pil.convert("RGB")
-        if max_edge > 0 and max(pil.size) > max_edge:
-            ratio = max_edge / max(pil.size)
-            pil = pil.resize(
-                (max(1, int(pil.width * ratio)), max(1, int(pil.height * ratio)))
-            )
-        buf = io.BytesIO()
-        pil.save(buf, format="JPEG", quality=quality, optimize=True)
-        per_page_count[page_i] += 1
-        fname = f"{base_name}_p{page_i+1}_img{per_page_count[page_i]}.jpg"
-        ref_path = f"images/{fname}"
-        result[page_i].append(
-            (ref_path, base64.b64encode(buf.getvalue()).decode("utf-8"), y_top)
-        )
+        # Reopen only selected figures so rejected candidates do not retain pixels.
+        page_i, object_index, y_top = candidates[idx]
+        page = pdf[page_i]
+        pil = None
+        try:
+            for index, obj in enumerate(page.get_objects()):
+                if index == object_index:
+                    pil = _decode_embedded_image_pil(obj)
+                    break
+            if pil is None:
+                raise ValueError("Selected embedded image is no longer available")
+            if pil.mode not in ("RGB", "L"):
+                converted = pil.convert("RGB")
+                pil.close()
+                pil = converted
+            if max_edge > 0 and max(pil.size) > max_edge:
+                ratio = max_edge / max(pil.size)
+                resized = pil.resize(
+                    (max(1, int(pil.width * ratio)), max(1, int(pil.height * ratio)))
+                )
+                pil.close()
+                pil = resized
+            with io.BytesIO() as buf:
+                pil.save(buf, format="JPEG", quality=quality, optimize=True)
+                per_page_count[page_i] += 1
+                fname = f"{base_name}_p{page_i+1}_img{per_page_count[page_i]}.jpg"
+                ref_path = f"images/{fname}"
+                result[page_i].append(
+                    (ref_path, base64.b64encode(buf.getvalue()).decode("utf-8"), y_top)
+                )
+        finally:
+            if pil is not None:
+                pil.close()
+            _close_pdfium_resource(page)
 
     # Top-to-bottom within each page (PDF y grows upward, so larger y first).
     for page_i in result:
@@ -1491,6 +1529,7 @@ class PDFScannedParser(BaseParser):
 
             source_blocks = []
             offset = 0
+            images.update(_encode_rendered_page_images(rendered, base_name))
             for i in range(page_count):
                 page_filename = f"{base_name}_page_{i+1}.jpg"
                 ref_path = f"images/{page_filename}"
@@ -1506,7 +1545,6 @@ class PDFScannedParser(BaseParser):
                     }
                 )
                 offset += len(line)
-                images[ref_path] = base64.b64encode(rendered[i]).decode("utf-8")
 
             text = "\n\n".join(markdown_lines)
             return Document(
@@ -1672,9 +1710,7 @@ class PDFParser(BaseParser):
                         quality,
                         CONFIG.pdf_render_max_edge,
                     )
-                for i, img_bytes in rendered.items():
-                    ref_path = f"images/{base_name}_page_{i+1}.jpg"
-                    images[ref_path] = base64.b64encode(img_bytes).decode("utf-8")
+                images.update(_encode_rendered_page_images(rendered, base_name))
 
             # Pass 3: extract embedded figures from native text pages so the Go
             # App can OCR/caption them (logos/watermarks/tiny images filtered).

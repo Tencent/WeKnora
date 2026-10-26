@@ -124,6 +124,221 @@ export default {
     "historyModels": "{count} 件のモデルを変更",
     "historyNoOverrides": "管理者の変更なし",
   },
+  automation: {
+    conversationNotice: "この会話は自動化タスクが実行します。手動でメッセージは送信できません。保留中のリクエストは上で対応してください。",
+    title: 'オートメーション',
+    description: 'WeKnora アシスタントがあなたに代わって定期的にタスクを実行します。結果と承認待ちの操作を通知します。',
+    add: '新規オートメーション',
+    addHint: 'WeKnora アシスタントに作成を頼むこともできます',
+    paused: '一時停止中',
+    scheduleEnded: '終了',
+    scheduleEndedHint: 'この一回限りのスケジュールは終了しました。今すぐ実行するか、実行日時を変更してから再開してください。',
+    nextRunAt: '次回 {time}',
+    runConfirm: '「{name}」を今すぐ実行しますか？スケジュールを変更せずに追加で実行します。',
+    deleteBody: '実行中の処理を停止し、「{name}」の実行履歴・会話・継続承認を削除します。元に戻せません。',
+    fields: {
+      name: '名前',
+      instruction: 'タスク',
+      schedule: 'スケジュール',
+      timezone: 'タイムゾーン',
+      accessLevel: '実行権限',
+      sessionMode: '会話の形式',
+      carryLastResult: '前回成功した結果を引き継ぐ',
+      overlapPolicy: '前回の実行が続いている場合',
+      misfirePolicy: '実行されなかった回',
+      approvalTimeout: '承認の待機期限',
+      maxDuration: '1 回の最大実行時間',
+      notifyOnSuccess: '成功時も通知',
+      nextRun: '次回実行',
+      enabled: '有効',
+    },
+    editor: {
+      model: "実行モデル",
+      modelHelp: 'アシスタントの既定モデルを使うか、このタスク用に指定します。委任先のエージェントはそれぞれのモデルを使います。変更は次回以降の実行に適用されます。',
+      modelDefault: 'アシスタントの既定モデル',
+      createTitle: '新規オートメーション',
+      editTitle: 'オートメーションを編集',
+      namePlaceholder: '例：毎日のナレッジベース要約',
+      instructionPlaceholder: '何をするか、どの資料を使うか、結果をどう出すかを書いてください',
+      variablesHint: '使える変数：',
+      unattendedHint: '実行中は誰も見ていないため、アシスタントは質問できません。承認が必要な操作は一時停止して通知します。',
+      nameDesc: '一覧と通知に表示され、タスクを見分けるのに使います',
+      frequency: '繰り返し',
+      weekdays: '曜日',
+      dayOfMonthDesc: 'その日がない月は月末に実行します',
+      runAt: '実行日時',
+      cron: 'Cron 式',
+      timeOfDay: '時刻',
+      timezoneDesc: 'このタイムゾーンの時刻で実行します。夏時間も自動で考慮します',
+      previewEmpty: '時刻を設定すると、この先の実行予定がここに表示されます',
+      carryDesc: '新しい会話の冒頭に前回成功した結果を添えます。差分の要約に便利です',
+      misfireDesc: 'サービス停止中に逃した実行を、復旧後にどう扱うか',
+      maxDurationDesc: 'この時間を過ぎても終わらない実行は停止します',
+      navGroups: {
+        task: 'タスク',
+        run: '実行',
+      },
+      sections: {
+        basic: {
+          title: '基本情報',
+          desc: 'WeKnora アシスタントがタスクを実行します。他のエージェントに委任する場合は、タスクに委任先と作業内容を記載してください。',
+        },
+        schedule: {
+          title: '実行スケジュール',
+          desc: 'タスクを実行するタイミング。実行間隔は 5 分以上です。',
+        },
+        execution: {
+          title: '実行方法',
+          desc: '実行時に許可する変更、使う会話、重複や実行漏れ時の扱い。',
+        },
+        notify: {
+          title: '承認と通知',
+          desc: '実行結果と承認待ちの操作は右上の通知に表示されます。',
+        },
+      },
+      sessionModeDesc: {
+        per_run: '実行ごとに新しい会話を開きます',
+        persistent: 'すべての実行で同じ会話を使い、アシスタントが過去の内容を参照できます',
+      },
+      errors: {
+        name: '名前を入力してください',
+        instruction: '実行するタスクを入力してください',
+        schedule: '有効なスケジュールを設定してください',
+      },
+      approvalTimeoutHelp: 'この期限を過ぎても未承認の実行は失敗になります',
+      notifyHint: '失敗・承認待ち・自動停止は常に通知されます',
+      access: {
+        read_only: '閲覧のみで、何も変更しません。',
+        confirm: '変更のたびに一時停止して承認を求めます。よく使う操作は詳細で継続承認にできます。',
+        auto_write: '元に戻せる変更はそのまま実行し、削除などは引き続き承認を待ちます。',
+      },
+    },
+    schedule: {
+      kinds: {
+        daily: '毎日',
+        weekdays: '平日',
+        weekly: '毎週',
+        monthly: '毎月',
+        hourly: '毎時',
+        once: '1 回のみ',
+        custom: 'カスタム cron',
+      },
+      atMinute: '毎時の何分',
+      dayOfMonth: '毎月の日付',
+      pickTime: '日時を選択',
+      customHint: '5 項目：分 時 日 月 曜日。0 9 * * 1-5 は平日 9:00。最短間隔は 5 分です。',
+      nextRuns: '次回：',
+      invalid: 'スケジュールが不正です',
+      describe: {
+        hourly: '毎時 {minute} 分',
+        daily: '毎日 {time}',
+        weekdays: '平日 {time}',
+        weekly: '毎週 {days} {time}',
+        monthly: '毎月 {day} 日 {time}',
+        once: '{at} に 1 回',
+        custom: 'cron：{expr}',
+        everyMinutes: '{n} 分ごと',
+        everyHours: '{n} 時間ごと',
+      },
+    },
+    sessionMode: {
+      per_run: '毎回新しい会話',
+      persistent: '同じ会話を継続',
+    },
+    overlap: {
+      skip: '今回はスキップ',
+      queue: '前回の終了後に実行',
+    },
+    misfire: {
+      skip: 'スキップ',
+      run_once: '復旧後に 1 回実行',
+    },
+    units: {
+      hours: '時間',
+      minutes: '分',
+    },
+    status: {
+      queued: '待機中',
+      running: '実行中',
+      awaiting_approval: '承認待ち',
+      succeeded: '成功',
+      failed: '失敗',
+      cancelled: '停止済み',
+      skipped: 'スキップ',
+      needs_attention: '要確認',
+      paused: '一時停止中',
+    },
+    runTrigger: {
+      schedule: 'スケジュール',
+      manual: '手動',
+      misfire: '補完実行',
+    },
+    actions: {
+      runNow: '今すぐ実行',
+      pause: '一時停止',
+      resume: '再開',
+      review: '承認する',
+      openConversation: '会話を開く',
+      stop: '停止',
+    },
+    detail: {
+      pausedBecause: '一時停止中：{reason}',
+      runs: '実行履歴',
+      noRuns: 'まだ実行されていません',
+      stopping: '停止中',
+      grants: '継続承認',
+      task: 'タスク内容',
+      durationSeconds: '{n} 秒',
+      durationMinutes: '{n} 分',
+    },
+    grants: {
+      intro: 'ここにある操作は以降の実行で再承認不要です。特定のリソースに限られ、エージェントやワークスペースでのロールが変わると無効になります。毎回承認が必要なツールは表示されません。',
+      active: '承認済み',
+      none: '継続承認はありません',
+      lapsed: '設定が変わったため、現在は無効です',
+      revoke: '取り消す',
+      candidates: '過去の実行で承認を求めた操作',
+      noCandidates: '継続承認にできる操作はまだありません',
+      allow: '今後は常に許可',
+      allowTitle: '以降の実行で許可',
+      allowBody: '以降の実行では「{label}」を承認待ちなしで行います。',
+      allowDestructiveBody: '「{label}」はデータを削除または上書きし、元に戻せません。許可すると、以降の実行は確認なしで行います。',
+    },
+    risk: {
+      write: '変更',
+      destructive: '削除/上書き',
+    },
+    messages: {
+      queued: '実行を開始しました',
+      notFound: 'オートメーションは存在しないか削除されました',
+    },
+  },
+  notifications: {
+    pending: "対応が必要",
+    history: "通知履歴",
+    clearRead: "既読を削除",
+    clearReadConfirm: "既読の通知を削除しますか？実行履歴、会話、未対応の項目は保持されます。",
+    handle: "対応する",
+    review: "承認を確認",
+    unreadCount: "未読 {count} 件",
+    unread: "未読",
+    newItems: "新しい通知があります。更新",
+    loadError: "通知を読み込めませんでした",
+    awaitingApproval: "操作の承認待ち",
+    awaitingAuthorization: "認可の完了待ち",
+    awaitingReply: "返信待ち",
+
+    title: '通知',
+    markAllRead: 'すべて既読',
+    pendingInvitations: '保留中の招待 {count} 件',
+    empty: '通知はありません',
+    kinds: {
+      automation_succeeded: 'オートメーション完了',
+      automation_failed: 'オートメーション失敗',
+      automation_awaiting_approval: 'オートメーション承認待ち',
+      automation_paused: 'オートメーション一時停止',
+    },
+  },
   toolbox: {
     "title": "ツールボックス",
     "description": "エージェントのスキル、外部ツール、ブラウザー接続を管理します。",
@@ -327,6 +542,7 @@ export default {
     sessionUnread: '新しい回答',
     knowledgeBase: 'ナレッジベース',
     agents: 'エージェント',
+    automations: 'オートメーション',
     artifacts: '成果物',
     organizations: '共有スペース',
     newChat: '新しいチャット',
@@ -353,6 +569,17 @@ export default {
     noSessions: '会話はまだありません'
   },
   chatHeader: {
+    grants: {
+      menu: '許可済みの操作',
+      description: 'この会話で確認なしに許可された操作です。取り消すと次回また確認されます。',
+      empty: '許可済みの操作はありません',
+      revoke: '取り消す',
+      revoked: '取り消しました',
+      revokeFailed: '取り消しに失敗しました',
+      loadFailed: '読み込みに失敗しました',
+    },
+    automationTask: '自動化',
+    automationOpen: '自動化「{name}」を開く',
     moreActions: 'その他の会話操作',
     toggleSandboxPanel: 'サンドボックスターミナル',
     copySessionId: 'セッションIDをコピー',
@@ -1217,6 +1444,8 @@ export default {
     toolFallback: 'ツール',
     stepsCompleted: '<strong>{steps}</strong>ステップ完了',
     reasoningRounds: '推論<strong>{rounds}</strong>回',
+    earlierSteps: '完了したステップ {count} 件',
+    viewReasoning: '思考を表示',
     toolCalls: 'ツール呼び出し<strong>{tools}</strong>回',
     durationSuffix: '<strong>{duration}</strong>',
     stepSummarySeparator: ' · ',
@@ -1783,12 +2012,30 @@ export default {
       skillRolloutNextTurn: '開いているセッションは次のやり取りでサンドボックスを再構築する',
       skillRolloutNewSession: '開いているセッションは現在のサンドボックスのままにし、新しいセッションのみ新しいイメージを使用する',
       skillRolloutSaveFailed: '反映設定の保存に失敗しました',
+      allocationMode: 'Sandbox allocation',
+      allocationModeHint: 'Only affects sessions that have not used a sandbox yet; existing sessions keep their placement and files are never moved.',
+      allocationModeSession: 'One sandbox per session (default)',
+      allocationModeUser: "Share one sandbox across a user's sessions",
+      allocationModeUnavailable: 'Shared sandboxes are not enabled on this deployment (set WEKNORA_SANDBOX_USER_ALLOCATION=enabled on every replica; Redis is required).',
+      userSandboxRetentionDays: 'Keep an empty shared sandbox for (days)',
+      userSandboxRetentionHint: 'After every session on a shared sandbox is deleted, it is removed once it has been empty this long (1–90 days). This is not a minimum file retention: Docker idle cleanup or provider failures may remove it sooner.',
+      userSandboxesInInventory: "{count} of them are shared user sandboxes; each affects all of that user's sessions on this config.",
+      userSandboxesTitle: 'Shared user sandboxes',
+      userSandboxOwner: 'Owner',
+      userSandboxOwnerOtherWorkspace: 'A user from another workspace',
+      userSandboxLiveSessions: 'Sessions',
+      userSandboxEmptySince: 'Empty since',
+      userSandboxReclaimAfter: 'Reclaimed after',
+      userSandboxRelease: 'Release',
+      userSandboxReleaseConfirm: "Releasing deletes the files and installed packages of all of this user's sessions on this config; a new sandbox is created on next use. Release it?",
+      userSandboxBusy: 'A terminal, desktop or command is still running on this sandbox. Try again later.',
       skillInstallGroup: '新しいスキルをインストール',
       skillInstalledGroup: 'インストール済み',
       skillUploadClick: 'クリックしてzipバンドルをアップロード',
       skillUploadDrag: 'またはここにファイルをドロップ',
       skillUploadHint: 'インストールすると、現在のイメージにスキルが書き込まれ、新しいスナップショットが作成されます。数分かかる場合があります。現在のやり取りは中断されません。開いているセッションは次のやり取りでサンドボックスを再構築するため、セッションのワークスペースの一時ファイルは消去されます。',
       skillUploadHintNewSession: 'インストールすると、現在のイメージにスキルが書き込まれ、新しいスナップショットが作成されます。数分かかる場合があります。すでに開いているセッションは終了するまで現在のサンドボックスを使い続け、新しく開始したセッションのみがこのインストールを反映します。',
+      skillUploadHintShared: 'インストールで新しいイメージを作成します。数分かかる場合があります。既存の共有サンドボックスは変更されず、新しいイメージは今後作成するサンドボックスにのみ適用されます。',
       skillSourceSection: 'ソースからインストール',
       skillSourceSectionHint: 'ClawHub、GitHub、SkillHubのリンク、または{\'@\'}owner/slugを貼り付けてください。バンドルのサイズは{size} MB以下にしてください。',
       skillUploadSection: 'ローカルのバンドルをアップロード',
@@ -1811,6 +2058,7 @@ export default {
       skillDisableHint: '無効化すると、スキルはエージェントから見えなくなりますが、ファイルはイメージ内に残ります。変更はセッションの次回実行時に反映されます。',
       skillDeleteHint: '削除すると、イメージからスキルのディレクトリが取り除かれ、新しいスナップショットが作成されます。現在のやり取りは中断されません。開いているセッションは次のやり取りでサンドボックスを再構築するため、セッションのワークスペースの一時ファイルは消去されます。',
       skillDeleteHintNewSession: '削除すると、イメージからスキルのディレクトリが取り除かれ、新しいスナップショットが作成されます。すでに開いているセッションは終了するまで現在のサンドボックスを使い続け、新しく開始したセッションのみでこのスキルが使えなくなります。',
+      skillDeleteHintShared: '削除するとイメージからスキルを取り除き、新しいイメージを作成します。既存の共有サンドボックス内のファイルは変更されず、新しいイメージは今後作成するサンドボックスにのみ適用されます。',
       skillRemoveInProgress: 'アンインストール中',
       skillRemoveWaiting: 'イメージからのアンインストールを開始しました。進捗を待っています…',
       skillRemoveDone: 'このサンドボックスから「{name}」をアンインストールしました。カタログには残っているため、後で再インストールできます。',
@@ -4037,14 +4285,14 @@ export default {
         imagePipelineSectionDescription:
           'マルチモーダル解析が有効な場合、画像の解析方式を選択できます。',
         imagePipelineLabel: '解析方式',
+        advancedSettingsLabel: '詳細設定',
+        notesLabel: '補足説明',
         imagePipelinePlaceholder: '解析方式を選択',
         imagePipelineLoading: 'パイプラインを読み込み中…',
         imagePipelineLoadError: 'パイプラインの読み込みに失敗しました',
-          imagePipelineValidateError: '現在の設定を検証できませんでした。保存時にバックエンドが再度检查します。',
+        imagePipelineValidateError: '現在の設定を検証できませんでした。保存時にバックエンドが再度チェックします。',
         imageAttrsOcrConditions: '観察した属性条件に基づいて OCR を実行',
         imageAttrsOcrConditionsDesc: '観察した属性が以下の条件を満たす場合、その画像に OCR を実行します',
-        imageAttrsOcrOnUnobserved: '画像属性の観察に失敗した場合も OCR を実行',
-        imageAttrsOcrOnUnobservedDesc: 'モデルが画像属性を正しく観察できなかった場合、本文テキストを逃さないようデフォルトで OCR を実行します。オフにするとスキップします。（4B など小規模な視覚モデルを使う場合や、カスタムの画像指示がシステムプロンプトと衝突する場合に観察が失敗することがあります。8B 以上は失敗の可能性が低く、オフは推奨しません）',
         imagePipelineKbNote: 'デフォルトはナレッジベースの設定に従い、今回のタスク向けに調整できます'
       }
     }
@@ -4237,6 +4485,12 @@ export default {
     noKnowledgeBases: '利用可能なナレッジベースがありません',
     enterDescription: '説明を入力',
     rawOutputLabel: '生の出力',
+    backgroundWork: {
+      running: 'バックグラウンドの作業はありません | バックグラウンドの作業 {count} 件 | バックグラウンドの作業 {count} 件',
+      stop: '停止',
+      loading: '出力を読み込んでいます…',
+      unavailable: '出力を表示できません',
+    },
     wikiWritePageTitle: 'Wikiページの書き込み',
     wikiReplaceTextTitle: 'Wikiテキストの置換',
     wikiRenamePageTitle: 'Wikiページの名前変更',
@@ -6477,6 +6731,11 @@ export default {
       argsLabel: '引数',
       argsModified: '変更あり',
       allowInSession: 'この会話では同様の操作をすべて許可',
+      grantLapsed: {
+        changed: '以前の許可は無効になりました。自動化の Agent 設定、ロール、または権限上限が変更されました。',
+        expired: '以前の許可は期限切れです。',
+        idle: '以前の許可は長期間使われなかったため無効になりました。',
+      },
       countdownShort: '{seconds}秒',
       approve: '承認して実行',
       reject: '拒否',
@@ -6844,6 +7103,18 @@ export default {
           get_catalog: "ワークスペースのスキルの詳細を取得",
           install_catalog: "カタログのスキルをサンドボックスにインストール",
         },
+        automation: {
+          list: "自動化の一覧を取得",
+          create: "自動化を作成",
+          validate_trigger: "実行時刻を確認",
+          get: "自動化の詳細を取得",
+          update: "自動化を更新",
+          delete: "自動化を削除",
+          pause: "自動化を一時停止",
+          resume: "自動化を再開",
+          run_now: "自動化を今すぐ実行",
+          list_runs: "自動化の実行履歴を取得",
+        },
         session: {
           list: "会話一覧を取得",
         },
@@ -6881,6 +7152,11 @@ export default {
       notFound: 'コンテンツが見つかりません',
       loadFailed: '読み込みに失敗しました',
       noKbForWiki: '関連するナレッジベースを特定できないため、Wikiを開けません。'
+    },
+    entityLink: {
+      kb: 'ナレッジベース',
+      doc: 'ドキュメント',
+      chunk: 'チャンク'
     },
     toolSummary: {
       getDocument: 'ドキュメントを取得: {title}',
@@ -7313,6 +7589,8 @@ export default {
       authWaitTimeout: '認証待機タイムアウト（秒）',
       authWaitTimeoutDesc: '会話中にOAuth認証を求められた際、完了を待機する最大秒数です。この時間を過ぎると、認証の確認は自動的にスキップされます（OAuthを使用するMCPサービスのみに影響します）。',
       authWaitTimeoutPlaceholder: 'デフォルト600秒',
+      accessLevel: '実行権限の上限',
+      accessLevelDesc: 'データを変更するツール（MCP ツール、Wiki への書き込み）を確認なしで実行できるかどうか。読み取り専用ではこれらのツールを提供せず、変更前に確認では毎回確認します。承認が必要と設定された MCP ツールは常に確認します。',
       unavailableService: '利用できないサービス'
     },
     llmCallTimeout: {
@@ -7607,6 +7885,8 @@ export default {
       confluenceEditionCloud: 'Cloud',
       confluenceBaseUrl: 'Confluence URL',
       confluenceUsername: 'ユーザー名またはメールアドレス',
+      confluencePat: 'Server/DC 個人アクセストークン（PAT）',
+      confluencePatHint: '任意。指定すると Bearer 認証を使用し、ユーザー名とパスワードは不要です。',
       confluencePassword: 'Server/DC パスワード',
       confluenceApiToken: 'Cloud API トークン',
       imaClientId: 'IMA ClientID',
@@ -8428,6 +8708,25 @@ export default {
         'true': { label: 'はい', description: 'はい —— グラフ・図表・ダイアグラム' },
         'false': { label: 'いいえ', description: 'いいえ —— 写真・イラスト・アイコン・装飾' }
       }
+    },
+    layout_margin: {
+      label: '版面の余白',
+      description:
+        '内容の外側（机・背景・余白）が画面全体に占める割合。余白が大きいほど、OCR の前にページをより詰めて切り出せます。',
+      values: {
+        'none': { label: '余白なし', description: '文字がほぼ画面いっぱい' },
+        'small': { label: '余白少', description: '縁に細い帯だけ' },
+        'large': { label: '余白大', description: '非文字領域が広い —— 机・部屋・ほぼ空白のページ' }
+      }
+    },
+    layout_upright: {
+      label: '文字の向き',
+      description:
+        '画像内の文字が正立しているか。傾いた・逆さまのページは OCR の前に傾き補正する価値があります。',
+      values: {
+        'true': { label: '正立', description: '文字が通常の向き' },
+        'false': { label: '非正立', description: '回転・傾き撮影・逆さま' }
+      }
     }
   },
   // パイプラインパネルの上書き文言：パイプライン id とフィールド key で索引
@@ -8440,44 +8739,71 @@ export default {
     },
     default: {
       name: 'マニュアル',
+      note_actions: {
+        label: '2 つの動作は独立しています',
+        description:
+          'それぞれ個別に切り替えられます。識別をオフにしても画像は説明され、説明をオフにしても文字は抽出されます。両方をオフにしたときだけ画像は何も処理されないため、パネルはその組み合わせを許可しません。',
+      },
       description: 'タスクに合わせて解析アクションのスイッチを手動でオン/オフします。',
-      enable_caption: {
+      caption_enabled: {
         label: '画像説明',
         description: '各画像について一言の説明を生成し、キャプションとして保存します。'
       },
-      enable_ocr: {
+      ocr_enabled: {
         label: '文字認識',
         description: '画像内に出現するテキストを抽出します。'
       },
       caption: {
-        thinking: {
+        thinking_enabled: {
           label: '説明時に思考を有効',
           description: '説明を書く前にモデルに考えさせます。基本的に思考は必要ありません。有効にすると解析が遅くなるだけでなく、思考が長くなりすぎて本文が切り詰められ、タスクが失敗する可能性があります。必要だと判断した場合のみ有効にしてください。',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '文字認識時に思考を有効',
           description: 'テキストを抽出する前にモデルに考えさせます。基本的に思考は必要ありません。有効にすると解析が遅くなるだけでなく、思考が長くなりすぎて本文が切り詰められ、タスクが失敗する可能性があります。必要だと判断した場合のみ有効にしてください。',
         },
       }
     },
     smartocr: {
+      ocr_on_unobserved: {
+        label: '画像属性の観察に失敗した場合も OCR を実行',
+        description:
+          'モデルが画像属性を正しく観察できなかった場合、本文テキストを逃さないようデフォルトで OCR を実行します。オフにするとスキップします。（4B など小規模な視覚モデルを使う場合や、カスタムの画像指示がシステムプロンプトと衝突する場合に観察が失敗することがあります。8B 以上は失敗の可能性が低く、オフは推奨しません）',
+      },
       name: 'スマート',
-      caption: {
-        thinking: {
+      note_flow: {
+        label: '観察結果が決めます',
+        description:
+          'まず画像を説明し属性を観察し、返ってきた属性が OCR をもう一度行う価値があるかを決めます。ページを傾き補正すべきと属性が示した場合は、補正して周囲を切り落としてから読み取ります。その手順が利用できない場合は元の写真をそのまま読み取り、悪化することはありません。',
+      },
+      preprocess: {
+        mode: {
+          label: '文書の前処理',
+          description:
+            '初期設定はオフです。有効にすると OCR 前にページを補正・切り抜くため、処理時間が増えます。自動：観察結果で判断／常に：OCR 対象の画像を毎回前処理。処理中や制限超過の場合は元の画像を使用します。',
+          options: {
+            auto: '自動',
+            off: 'オフ',
+            always: '常に',
+          },
+        },
+      },
+      observation: {
+        thinking_enabled: {
           label: '説明時に思考を有効',
           description: '画像を説明し属性を報告する前にモデルに考えさせます。基本的に思考は必要ありません。有効にすると解析が遅くなるだけでなく、思考が長くなりすぎて本文が切り詰められ、タスクが失敗する可能性があります。必要だと判断した場合のみ有効にしてください。',
         },
       },
       ocr: {
-        thinking: {
+        thinking_enabled: {
           label: '文字認識時に思考を有効',
           description: 'テキストを抽出する前にモデルに考えさせます。基本的に思考は必要ありません。有効にすると解析が遅くなるだけでなく、思考が長くなりすぎて本文が切り詰められ、タスクが失敗する可能性があります。必要だと判断した場合のみ有効にしてください。',
         },
       },
       description:
-        'まず画像の特徴を観察して説明を生成し、その特徴に基づいて OCR を実行するかどうかを判断します。モデル呼び出しを節約し、解析速度を向上させます。'
+        'まず画像の特徴を観察して説明を生成し、その特徴に基づいて OCR を実行するかどうかを判断します。モデル呼び出しを節約し、解析速度を向上させます 画像が補正可能な書類やラベルの写真と判定された場合、認識前にページを傾き補正・トリミングして OCR 精度を高めます。補正に失敗した場合は元の画像を使用します。'
     }
   }
 }

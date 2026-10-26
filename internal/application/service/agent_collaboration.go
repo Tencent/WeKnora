@@ -85,6 +85,11 @@ func (s *AgentCollaboration) forgetSessions(ctx context.Context, tenantID uint64
 	if len(sessionIDs) == 0 {
 		return
 	}
+	if err := s.db.WithContext(ctx).
+		Where("tenant_id = ? AND scope = ? AND scope_id IN ?", tenantID, types.AgentGrantScopeSession, sessionIDs).
+		Delete(&types.AgentGrant{}).Error; err != nil {
+		logger.Warnf(ctx, "Delete grants of deleted sessions: %v", err)
+	}
 	var rows []collaboration.Record
 	query := s.db.WithContext(ctx).Where("tenant_id = ? AND session_id IN ?", tenantID, sessionIDs)
 	if userID != "" {
@@ -177,12 +182,61 @@ func (s *AgentCollaboration) prune(ctx context.Context) error {
 }
 
 type delegatedConfig struct {
-	Agent     types.CustomAgent          `json:"agent"`
-	Access    types.AssistantAccessLevel `json:"access"`
-	Inherited *inheritedAgentConfig      `json:"inherited,omitempty"`
+	Agent  types.CustomAgent          `json:"agent"`
+	Access types.AssistantAccessLevel `json:"access"`
+	// Durable execution identity follows children across scheduler instances
+	// and approval resumes; it must not turn an automation into a human turn.
+	ActingVia string        `json:"acting_via,omitempty"`
+	Mode      types.RunMode `json:"mode,omitempty"`
+	// AssistantParent records that the delegating run was the WeKnora
+	// assistant, whose level stays under the workspace's assistant ceiling.
+	AssistantParent bool                  `json:"assistant_parent,omitempty"`
+	Inherited       *inheritedAgentConfig `json:"inherited,omitempty"`
+}
+
+func (d *delegatedConfig) captureExecution(ctx context.Context) {
+	d.ActingVia = types.ActingViaFromContext(ctx)
+	d.Mode = types.RunModeAttended
+	if mode, ok := ctx.Value(types.RunModeContextKey).(types.RunMode); ok {
+		d.Mode = mode.Normalize()
+	}
+	if d.ActingVia != "" {
+		d.Mode = types.RunModeDeferred
+	}
+}
+
+func (d *delegatedConfig) runMode() types.RunMode {
+	if d.ActingVia != "" {
+		return types.RunModeDeferred
+	}
+	if d.Mode == "" {
+		return types.RunModeAttended // snapshots created before mode was stored
+	}
+	return d.Mode.Normalize()
+}
+
+// level is the child's access level: the delegating run's, capped by the
+// child agent's own ceiling and, under an assistant parent, by the
+// workspace's current assistant ceiling.
+func (d *delegatedConfig) level(tenant *types.Tenant) types.AssistantAccessLevel {
+	level := types.CapAccessLevel(d.Access, d.Agent.Config.AccessLevel)
+	if d.AssistantParent || (d.Inherited != nil && d.Inherited.OperationsAgentID != "") {
+		var assistant *types.AssistantConfig
+		if tenant != nil {
+			assistant = tenant.AssistantConfig
+		}
+		level = types.CapAccessLevel(level, assistant.EffectiveAccessLevel(d.Access))
+	}
+	return level
 }
 
 func (s *AgentCollaboration) resolve(ctx context.Context, id string, level types.AssistantAccessLevel) (string, error) {
+	return s.resolveDelegated(ctx, id, level, false)
+}
+
+func (s *AgentCollaboration) resolveDelegated(
+	ctx context.Context, id string, level types.AssistantAccessLevel, assistantParent bool,
+) (string, error) {
 	a, err := s.agents.GetAgentByID(ctx, id)
 	if err != nil {
 		return "", err
@@ -193,7 +247,9 @@ func (s *AgentCollaboration) resolve(ctx context.Context, id string, level types
 		id == types.BuiltinSkillInstallerID {
 		return "", errors.New("only same-workspace reasoning agents without management privileges may be delegated")
 	}
-	data, err := json.Marshal(delegatedConfig{Agent: *a, Access: level})
+	saved := delegatedConfig{Agent: *a, Access: level, AssistantParent: assistantParent}
+	saved.captureExecution(ctx)
+	data, err := json.Marshal(saved)
 	return string(data), err
 }
 
@@ -246,7 +302,7 @@ func (s *AgentCollaboration) attach(
 			if strings.TrimSpace(id) == "" {
 				return inheritedChildSnapshot(ctx, cfg, registry.ListTools())
 			}
-			return s.resolve(ctx, id, cfg.AssistantAccess)
+			return s.resolveDelegated(ctx, id, cfg.AssistantAccess, cfg.OperationsAgentID != "")
 		}) {
 		registry.RegisterTool(tool)
 	}
@@ -265,7 +321,12 @@ func (s *AgentCollaboration) attach(
 		if err := json.Unmarshal([]byte(b.Child.Member.ConfigJSON), &pinned); err != nil {
 			return err
 		}
-		cfg.AssistantAccess = pinned.Access
+		workerCtx, err := s.workerContext(ctx, b.Scope)
+		if err != nil {
+			return err
+		}
+		tenant, _ := workerCtx.Value(types.TenantInfoContextKey).(*types.Tenant)
+		cfg.AssistantAccess = pinned.level(tenant)
 		if pinned.Inherited != nil {
 			registry.RestrictTools(append(append([]string(nil), pinned.Inherited.ToolNames...), "send_message"))
 		}
@@ -277,17 +338,15 @@ func (s *AgentCollaboration) attach(
 				}
 			}
 		}
-		// Inherited workers may use arbitrary sandbox tools. Give mutations an
-		// actual approval path instead of the legacy template guard's dead end.
-		if pinned.Inherited != nil {
-			for _, name := range registry.ListTools() {
-				if inheritedToolOwnsPolicy(name) {
-					continue
-				}
-				if err := registry.RequireConfirmation(name, operations.RiskWrite,
-					operations.Access{Level: cfg.AssistantAccess}, s.gate); err != nil {
-					return err
-				}
+		// Workers may use arbitrary sandbox tools. Give mutations the same
+		// approval path as the parent's instead of refusing them.
+		for _, name := range registry.ListTools() {
+			if _, wrapped := assistantWriteToolRisk[name]; wrapped || inheritedToolOwnsPolicy(name) {
+				continue
+			}
+			if err := registry.RequireConfirmation(name, operations.RiskWrite,
+				operations.Access{Level: cfg.AssistantAccess}, s.gate); err != nil {
+				return err
 			}
 		}
 		registry.SetExecutionGuard(func(ctx context.Context, tool types.Tool) error {
@@ -309,28 +368,10 @@ func (s *AgentCollaboration) attach(
 				return nil
 			}
 			currentTenant, _ := currentCtx.Value(types.TenantInfoContextKey).(*types.Tenant)
-			currentAccess := currentTenant.AssistantConfig.EffectiveAccessLevel(saved.Access)
-			if currentAccess != cfg.AssistantAccess {
+			if saved.level(currentTenant) != cfg.AssistantAccess {
 				return errors.New("delegated access changed; start a newly authorized turn")
 			}
-			if _, writes := assistantWriteToolRisk[tool.Name()]; writes {
-				return nil
-			}
-			if saved.Inherited != nil {
-				return nil // Registered tools own their policy or were wrapped above.
-			}
-			if strings.HasPrefix(tool.Name(), "mcp_") || tool.Name() == tools.ToolCallMCPTool ||
-				tool.Name() == "ask_user" {
-				return nil
-			}
-			saved.Access = currentAccess
-			if saved.Access == types.AssistantAccessAutoWrite {
-				return nil
-			}
-			return fmt.Errorf(
-				"delegated tool %s requires approval in the parent conversation; this child cannot grant approval",
-				tool.Name(),
-			)
+			return nil // Registered tools own their policy or were wrapped above.
 		})
 	}
 	return nil
@@ -363,7 +404,11 @@ func (s *AgentCollaboration) workerContext(ctx context.Context, scope collaborat
 	ctx = context.WithValue(ctx, types.TenantRoleContextKey, membership.Role)
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 	ctx = types.WithCaller(ctx, types.Caller{TenantID: scope.TenantID, UserID: scope.UserID, Role: membership.Role})
-	ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalWebUser, ID: scope.UserID})
+	principal := types.Principal{Type: types.PrincipalWebUser, ID: scope.UserID}
+	if previous, ok := types.PrincipalFromContext(ctx); ok && previous.ID == scope.UserID {
+		principal.ActingVia = previous.ActingVia
+	}
+	ctx = types.WithPrincipal(ctx, principal)
 	return ctx, nil
 }
 
@@ -383,6 +428,10 @@ func (s *AgentCollaboration) run(ctx context.Context, w collaboration.Work) (col
 	if err = json.Unmarshal([]byte(w.Member.ConfigJSON), &saved); err != nil {
 		return result, err
 	}
+	ctx = types.WithPrincipal(ctx, types.Principal{
+		Type: types.PrincipalWebUser, ID: w.Scope.UserID, ActingVia: saved.ActingVia,
+	})
+	ctx = types.WithRunMode(ctx, saved.runMode())
 	// Both modes pin configuration, but reauthorize the source before each turn.
 	if saved.Inherited == nil {
 		if _, err = s.resolve(ctx, w.Member.AgentID, types.AssistantAccessReadOnly); err != nil {
@@ -399,7 +448,7 @@ func (s *AgentCollaboration) run(ctx context.Context, w collaboration.Work) (col
 		}
 	}
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	saved.Access = tenant.AssistantConfig.EffectiveAccessLevel(saved.Access)
+	saved.Access = saved.level(tenant)
 	// Store the attenuated permission in this worker's private binding too.
 	configJSON, err := json.Marshal(saved)
 	if err != nil {
@@ -496,7 +545,6 @@ func (s *AgentCollaboration) run(ctx context.Context, w collaboration.Work) (col
 		}
 	}
 	ctx = hitl.WithDelegation(ctx, hitl.Delegation{
-		RequireApproval: saved.Access != types.AssistantAccessAutoWrite,
 		Register: func(ctx context.Context, p *types.AgentPrompt) error {
 			if p.TenantID != w.Scope.TenantID || p.UserID != delegatedPromptUser(w.Scope.UserID) ||
 				p.SessionID != session.ID ||
@@ -597,7 +645,8 @@ func (s *AgentCollaboration) run(ctx context.Context, w collaboration.Work) (col
 			ctx,
 			&types.QARequest{
 				Resume:             resume,
-				Interactive:        true,
+				Mode:               saved.runMode(),
+				GrantSessionID:     w.Scope.SessionID,
 				Suspendable:        true,
 				Session:            session,
 				Query:              w.Run.Query,

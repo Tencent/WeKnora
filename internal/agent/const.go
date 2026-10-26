@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/browserskill"
 	webfetch "github.com/Tencent/WeKnora/internal/infrastructure/web_fetch"
 	"github.com/Tencent/WeKnora/internal/models/api"
@@ -47,6 +48,9 @@ const (
 	// shared page-fetch budget. Same 5s headroom as shell_exec, so web_fetch can
 	// return its own timeout result instead of being cancelled first.
 	webFetchToolSlack = 5 * time.Second
+	// workWaitToolSlack is added to work_wait's own wait so the final detailed
+	// read still fits after the wait elapses (D3).
+	workWaitToolSlack = 30 * time.Second
 
 	// maxLLMRetries is the maximum number of retries for transient LLM errors.
 	maxLLMRetries = 2
@@ -65,6 +69,10 @@ const (
 	// "Identical" includes an identical lack of content: consecutive empty
 	// rounds are the clearest stuck loop there is.
 	maxRepeatedResponseRounds = 2
+
+	// maxConsecutiveFailedToolCalls is the number of identical failed tool
+	// calls allowed before the model is asked to switch tools or strategies.
+	maxConsecutiveFailedToolCalls = 3
 
 	// maxConsecutiveLengthRounds is how many rounds in a row may be cut off at
 	// the completion-token cap before the loop gives up. A truncated answer
@@ -102,6 +110,13 @@ func toolExecutionTimeout(toolName string, arguments ...string) time.Duration {
 		if json.Unmarshal([]byte(arguments[0]), &input) == nil && browserskill.IsHumanStep(input.Method) {
 			return browserskill.HumanStepTimeout
 		}
+	}
+	if toolName == agenttools.ToolWorkWait {
+		raw := ""
+		if len(arguments) > 0 {
+			raw = arguments[0]
+		}
+		return time.Duration(agenttools.WorkWaitSeconds(raw))*time.Second + workWaitToolSlack
 	}
 	switch toolName {
 	case "shell_exec":

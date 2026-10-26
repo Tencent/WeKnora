@@ -642,18 +642,38 @@ const oauthAuthorized = ref(false)
 const oauthTokenState = ref<MCPOAuthTokenState>('reauth_required')
 const oauthChecking = ref(false)
 const oauthAuthorizing = ref(false)
+let oauthGeneration = 0
+let oauthPollTimer: number | null = null
+
+// The drawer is reused; cancellation must also invalidate requests already in flight.
+function cancelOAuthRequests() {
+  oauthGeneration++
+  if (oauthPollTimer !== null) window.clearInterval(oauthPollTimer)
+  oauthPollTimer = null
+  oauthChecking.value = false
+  oauthAuthorizing.value = false
+}
+
+function isCurrentOAuthRequest(generation: number, serviceId: string) {
+  return generation === oauthGeneration && props.visible && isOAuth.value
+    && currentService.value?.id === serviceId
+}
 
 async function refreshOAuthStatus() {
-  if (props.mode !== 'edit' || !currentService.value?.id || !isOAuth.value) return
+  if (props.mode !== 'edit' || !currentService.value?.id || !isOAuth.value || !props.visible) return
+  const serviceId = currentService.value.id
+  const generation = oauthGeneration
   oauthChecking.value = true
   try {
     const status = await getMCPOAuthAuthorizationStatus(currentService.value.id)
+    if (!isCurrentOAuthRequest(generation, serviceId)) return
     oauthAuthorized.value = status.authorized
     oauthTokenState.value = status.state
   } catch (e) {
+    if (!isCurrentOAuthRequest(generation, serviceId)) return
     console.error('Failed to query MCP OAuth status:', e)
   } finally {
-    oauthChecking.value = false
+    if (isCurrentOAuthRequest(generation, serviceId)) oauthChecking.value = false
   }
 }
 
@@ -661,7 +681,9 @@ async function refreshOAuthStatus() {
 // completion against that service id (independent of props, which may be
 // re-bound by the parent after a save).
 async function startAuthorize(serviceId: string) {
-  if (!serviceId) return
+  if (!serviceId || !isCurrentOAuthRequest(oauthGeneration, serviceId)) return
+  cancelOAuthRequests()
+  const generation = oauthGeneration
   oauthAuthorizing.value = true
   try {
     const redirectUri = window.location.origin + MCP_OAUTH_CALLBACK_PATH
@@ -673,6 +695,7 @@ async function startAuthorize(serviceId: string) {
       redirect_uri: redirectUri,
       frontend_redirect: frontendRedirect,
     })
+    if (!isCurrentOAuthRequest(generation, serviceId)) return
     if (!authorization.authorizationUrl || !authorization.authorizationAttempt) {
       MessagePlugin.error(t('mcpServiceDialog.toasts.authorizeFailed', '发起授权失败') as string)
       oauthAuthorizing.value = false
@@ -680,22 +703,28 @@ async function startAuthorize(serviceId: string) {
     }
     const popup = window.open(authorization.authorizationUrl, 'mcp_oauth', 'width=600,height=720')
     // Poll for completion: either the popup closes or the status flips.
-    const timer = window.setInterval(async () => {
+    oauthPollTimer = window.setInterval(async () => {
+      if (!isCurrentOAuthRequest(generation, serviceId)) return
       const closed = !popup || popup.closed
+      let authorized: boolean | undefined
       try {
-        oauthAuthorized.value = await getMCPOAuthStatus(serviceId, authorization.authorizationAttempt)
-        if (oauthAuthorized.value) oauthTokenState.value = 'authorized'
+        authorized = await getMCPOAuthStatus(serviceId, authorization.authorizationAttempt)
       } catch { /* keep polling */ }
-      if (oauthAuthorized.value || closed) {
-        window.clearInterval(timer)
-        oauthAuthorizing.value = false
-        if (oauthAuthorized.value) {
+      if (!isCurrentOAuthRequest(generation, serviceId)) return
+      if (authorized !== undefined) {
+        oauthAuthorized.value = authorized
+        if (authorized) oauthTokenState.value = 'authorized'
+      }
+      if (authorized || closed) {
+        cancelOAuthRequests()
+        if (authorized) {
           try { popup?.close() } catch { /* cross-origin close may throw */ }
           MessagePlugin.success(t('mcpServiceDialog.toasts.authorized', '授权成功') as string)
         }
       }
     }, 1500)
   } catch (e) {
+    if (!isCurrentOAuthRequest(generation, serviceId)) return
     console.error('Failed to start MCP OAuth authorization:', e)
     MessagePlugin.error(t('mcpServiceDialog.toasts.authorizeFailed', '发起授权失败') as string)
     oauthAuthorizing.value = false
@@ -708,18 +737,24 @@ async function startAuthorize(serviceId: string) {
 // "MCP service is not configured to use OAuth". The drawer stays open the whole
 // time — the parent re-binds the (now saved) service via the `created` event.
 async function handleAuthorize() {
+  const generation = oauthGeneration
   const saved = await saveConnection()
-  if (saved) await startAuthorize(saved.id)
+  if (saved && generation === oauthGeneration) await startAuthorize(saved.id)
 }
 
 async function handleRevokeOAuth() {
   if (!currentService.value?.id) return
+  const serviceId = currentService.value.id
+  cancelOAuthRequests()
+  const generation = oauthGeneration
   try {
-    await revokeMCPOAuthToken(currentService.value.id)
+    await revokeMCPOAuthToken(serviceId)
+    if (!isCurrentOAuthRequest(generation, serviceId)) return
     oauthAuthorized.value = false
     oauthTokenState.value = 'reauth_required'
     MessagePlugin.success(t('mcpServiceDialog.toasts.revoked', '已撤销授权') as string)
   } catch (e) {
+    if (!isCurrentOAuthRequest(generation, serviceId)) return
     console.error('Failed to revoke MCP OAuth token:', e)
     MessagePlugin.error(t('mcpServiceDialog.toasts.revokeFailed', '撤销失败') as string)
   }
@@ -863,12 +898,13 @@ const resetForm = () => {
 watch(
   () => [props.visible, props.service] as const,
   ([visible, service], previous) => {
-    if (!visible) { usageGeneration++; generatingUsage.value = false; return }
+    if (!visible) { cancelOAuthRequests(); usageGeneration++; generatingUsage.value = false; return }
     const opening = !previous?.[0]
     if (!opening && service?.id && savedService.value?.id === service.id) {
       savedService.value = service
       return
     }
+    cancelOAuthRequests()
     usageGeneration++
     generatingUsage.value = false
     savedService.value = service
@@ -1012,7 +1048,9 @@ async function handleGenerateUsage() {
   }
 }
 
-onBeforeUnmount(() => { usageGeneration++ })
+watch(isOAuth, (enabled) => { if (!enabled) cancelOAuthRequests() })
+
+onBeforeUnmount(() => { cancelOAuthRequests(); usageGeneration++ })
 
 const handleSubmit = async () => {
   const id = currentService.value?.id
