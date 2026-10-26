@@ -116,6 +116,12 @@ const repeatedToolRoundNotice = "<runtime_event>\n" +
 	"will not produce new information. Change the approach, or give a final " +
 	"response based on what has already been gathered.\"}\n</runtime_event>"
 
+// repeatedToolRoundsStoppedAnswer is delivered when the repeated-tool guard
+// ends the turn, so the user learns why instead of seeing a generic failure.
+const repeatedToolRoundsStoppedAnswer = "I stopped because I kept running the same tool calls " +
+	"and getting the same results, without making progress. Try rephrasing the request " +
+	"or giving more specific details."
+
 func toolExecutionTimeout(toolName string, arguments ...string) time.Duration {
 	if toolName == "local_browser" && len(arguments) > 0 {
 		var input struct {

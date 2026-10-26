@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -569,24 +571,27 @@ type loopGuards struct {
 	repeatedToolRounds int
 }
 
-// toolRoundSignature fingerprints a tool round by each call's name,
-// arguments, success flag and output. Two rounds with the same signature
-// asked for the same thing and learned nothing new.
+// toolRoundSignature fingerprints a tool round by each call's name and
+// arguments and everything in its result that can reach the model: output,
+// error, structured data, images and output files. Two rounds with the same
+// signature asked for the same thing and learned nothing new.
 func toolRoundSignature(calls []types.ToolCall) string {
 	type entry struct {
-		Name    string                 `json:"n"`
-		Args    map[string]interface{} `json:"a"`
-		Success bool                   `json:"s"`
-		Output  string                 `json:"o"`
-		Error   string                 `json:"e"`
+		Name        string                 `json:"n"`
+		Args        map[string]interface{} `json:"a"`
+		Success     bool                   `json:"s"`
+		Output      string                 `json:"o"`
+		Error       string                 `json:"e"`
+		Data        map[string]interface{} `json:"d,omitempty"`
+		Images      []string               `json:"i,omitempty"`
+		OutputFiles []string               `json:"f,omitempty"`
 	}
 	entries := make([]entry, 0, len(calls))
 	for _, tc := range calls {
 		en := entry{Name: tc.Name, Args: tc.Args}
-		if tc.Result != nil {
-			en.Success = tc.Result.Success
-			en.Output = tc.Result.Output
-			en.Error = tc.Result.Error
+		if r := tc.Result; r != nil {
+			en.Success, en.Output, en.Error = r.Success, r.Output, r.Error
+			en.Data, en.Images, en.OutputFiles = r.Data, r.Images, r.OutputFiles
 		}
 		entries = append(entries, en)
 	}
@@ -594,7 +599,9 @@ func toolRoundSignature(calls []types.ToolCall) string {
 	if err != nil {
 		return ""
 	}
-	return string(data)
+	// Images are base64 data URIs; keep only a digest between rounds.
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 // trackRepeatedToolRound records a finished tool round and returns how many
@@ -1387,12 +1394,15 @@ func (e *AgentEngine) runReActIteration(
 	// round, so without this a successful but fruitless call repeats until
 	// MaxIterations, which never comes when iterations are unlimited.
 	if repeats := guards.trackRepeatedToolRound(step.ToolCalls); repeats >= maxRepeatedToolRounds {
-		logger.Warnf(ctx, "[Agent][Round-%d] Detected stuck tool loop: same calls and results repeated %d times, stopping",
+		logger.Warnf(ctx,
+			"[Agent][Round-%d] Detected stuck tool loop: same calls and results repeated %d times, stopping",
 			round, repeats)
 		if e.collaborationOwnsFailure(ctx) {
 			return iterOutcomeBreak, fmt.Errorf("collaboration stopped after repeated tool calls without progress")
 		}
-		e.finishStalledTurn(ctx, state, sessionID, response, false)
+		// The round's text was a preamble to more tool work, so say why the
+		// turn stopped instead of the generic fallback.
+		e.finishStalledTurn(ctx, state, sessionID, &types.ChatResponse{Content: repeatedToolRoundsStoppedAnswer}, false)
 		return iterOutcomeBreak, nil
 	} else if repeats == repeatedToolRoundNoticeAt {
 		logger.Warnf(ctx, "[Agent][Round-%d] Same tool calls and results repeated %d times, notifying model",

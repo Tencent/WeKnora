@@ -79,7 +79,8 @@ func TestExecuteLoop_RepeatedSuccessfulToolCallsStopAtTheGuard(t *testing.T) {
 		"the guard must stop the turn, not MaxIterations")
 	assert.Equal(t, maxRepeatedToolRounds, tool.calls)
 	assert.True(t, state.IsComplete)
-	assert.Equal(t, stalledAnswerFallback, state.FinalAnswer)
+	assert.Equal(t, repeatedToolRoundsStoppedAnswer, state.FinalAnswer,
+		"the user is told why the turn stopped")
 
 	for i, opts := range mock.opts {
 		want := i == repeatedToolRoundNoticeAt
@@ -130,4 +131,45 @@ func TestTrackRepeatedToolRound(t *testing.T) {
 	assert.Equal(t, 1, g.trackRepeatedToolRound(call(b, "x")), "a different result restarts the streak")
 	assert.Equal(t, 0, g.trackRepeatedToolRound(nil), "a round without calls breaks the streak")
 	assert.Equal(t, 1, g.trackRepeatedToolRound(call(b, "x")))
+}
+
+// Output is not the only thing the model sees. Retrieval results ride in
+// Data and screenshots in Images; a change there is progress even when the
+// text output stays the same.
+func TestTrackRepeatedToolRound_ModelVisibleResultFields(t *testing.T) {
+	args := map[string]interface{}{"query": "q"}
+	for _, tc := range []struct {
+		name string
+		with func(r *types.ToolResult, i int)
+	}{
+		{"data", func(r *types.ToolResult, i int) { r.Data = map[string]interface{}{"doc": i} }},
+		{"images", func(r *types.ToolResult, i int) {
+			r.Images = []string{fmt.Sprintf("data:image/png;base64,%d", i)}
+		}},
+		{"output files", func(r *types.ToolResult, i int) { r.OutputFiles = []string{fmt.Sprintf("f%d", i)} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &loopGuards{}
+			for i := 0; i < maxRepeatedToolRounds+1; i++ {
+				r := &types.ToolResult{Success: true, Output: "ok"}
+				tc.with(r, i)
+				got := g.trackRepeatedToolRound([]types.ToolCall{{Name: "search", Args: args, Result: r}})
+				assert.Equal(t, 1, got, "a changed %s is a new result (round %d)", tc.name, i)
+			}
+		})
+	}
+}
+
+// In a round with several calls, one changed call makes the round new.
+func TestTrackRepeatedToolRound_MultipleCalls(t *testing.T) {
+	round := func(second string) []types.ToolCall {
+		return []types.ToolCall{
+			{Name: "a", Args: map[string]interface{}{}, Result: &types.ToolResult{Success: true, Output: "same"}},
+			{Name: "b", Args: map[string]interface{}{}, Result: &types.ToolResult{Success: true, Output: second}},
+		}
+	}
+	g := &loopGuards{}
+	assert.Equal(t, 1, g.trackRepeatedToolRound(round("x")))
+	assert.Equal(t, 2, g.trackRepeatedToolRound(round("x")))
+	assert.Equal(t, 1, g.trackRepeatedToolRound(round("y")), "one changed call restarts the streak")
 }
