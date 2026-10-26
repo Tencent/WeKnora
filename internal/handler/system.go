@@ -1805,7 +1805,8 @@ func (h *SystemHandler) CreateSystemUser(c *gin.Context) {
 	})
 }
 
-// =====================================================================// System Settings (P1)
+// ============================================================================
+// System Settings (P1)
 // ----------------------------------------------------------------------------
 // Endpoints below are mounted under /api/v1/system/admin/settings*, all
 // gated to SystemAdmin via the route group's middleware. Every response
@@ -1813,7 +1814,8 @@ func (h *SystemHandler) CreateSystemUser(c *gin.Context) {
 // project's axios interceptor contract (response.data is unwrapped at the
 // HTTP layer; see frontend/src/utils/request.ts:97). The P0 ListSystemAdmins
 // already follows this; do not break the convention.
-// =====================================================================
+// ============================================================================
+
 // ListSystemSettings godoc
 // @Summary      List all system settings
 // @Description  Return every row in the system_settings table (system-scope,
