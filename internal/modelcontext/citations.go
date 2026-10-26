@@ -199,7 +199,8 @@ func (r *sourceRegistry) registerLabeledReferences(text string) {
 }
 
 // ExpandText converts the private model protocol into the existing public
-// <kb/> / <web/> contract. Unknown handles fail closed and disappear.
+// <kb/> / <web/> contract. Unknown source handles fail closed and disappear.
+// A <ref> tag that does not name a source handle is literal text and stays.
 func (r *sourceRegistry) ExpandText(text string) string {
 	if r == nil || text == "" {
 		return text
@@ -208,16 +209,9 @@ func (r *sourceRegistry) ExpandText(text string) string {
 	// by the model, then create canonical tags solely from registered handles.
 	text = modelKBTagRE.ReplaceAllString(text, "")
 	text = modelWebTagRE.ReplaceAllString(text, "")
-	if !r.citationsEnabled {
-		return refCandidateRE.ReplaceAllString(text, "")
-	}
-	return refCandidateRE.ReplaceAllStringFunc(text, withJSONCitationEscaping(func(tag string) string {
-		match := refTagRE.FindStringSubmatch(tag)
-		if len(match) != 2 {
-			return ""
-		}
-		return r.citationTag(match[1])
-	}))
+	return refCandidateRE.ReplaceAllStringFunc(text, func(tag string) string {
+		return rewriteRefTag(r, tag)
+	})
 }
 
 // citationTag renders the public citation for a handle backed by current
@@ -283,7 +277,7 @@ func (d *citationStreamExpander) Feed(chunk string) string {
 				break
 			}
 			tag := data[:end+1]
-			out.WriteString(d.registry.ExpandText(tag))
+			out.WriteString(rewriteRefTag(d.registry, tag))
 			data = data[end+1:]
 			continue
 		}
@@ -334,9 +328,42 @@ func (d *citationStreamExpander) Flush() string {
 	}
 	pending := d.pending
 	d.pending = ""
-	lower := strings.ToLower(pending)
-	if isSourceTagPending(lower) {
+	if isSourceTagPending(strings.ToLower(pending)) && !keepLiteralRef(pending) {
 		return ""
 	}
-	return d.registry.ExpandText(pending)
+	return rewriteRefTag(d.registry, pending)
+}
+
+// rewriteRefTag expands one citation tag. Tags that do not name a source
+// handle are returned unchanged so a quoted syntax example survives.
+func rewriteRefTag(r *sourceRegistry, tag string) string {
+	return withJSONCitationEscaping(func(decoded string) string {
+		if keepLiteralRef(decoded) {
+			return decoded
+		}
+		if r == nil || !r.citationsEnabled {
+			return ""
+		}
+		match := refTagRE.FindStringSubmatch(decoded)
+		if len(match) != 2 {
+			return ""
+		}
+		return r.citationTag(match[1])
+	})(tag)
+}
+
+var (
+	protocolRefIDRE     = regexp.MustCompile(`(?i)\bid\s*=\s*["']?(?:chunk|url|doc|kb)://`)
+	jsonProtocolRefIDRE = regexp.MustCompile(`(?i)\bid\s*=\s*\\+["']?(?:chunk|url|doc|kb)://`)
+)
+
+func keepLiteralRef(tag string) bool {
+	lower := strings.ToLower(tag)
+	if !strings.HasPrefix(lower, "<ref") {
+		return false
+	}
+	if protocolRefIDRE.MatchString(tag) || jsonProtocolRefIDRE.MatchString(tag) || strings.Contains(tag, "://") {
+		return false
+	}
+	return true
 }
