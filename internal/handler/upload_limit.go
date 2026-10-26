@@ -29,6 +29,17 @@ const skillSourceJSONMaxBytes = 64 << 10
 // memory as the process will surrender.
 const knowledgeBaseJSONMaxBytes = 1 << 20
 
+// hybridSearchJSONMaxBytes caps a hybrid-search body.
+//
+// The body is a query, filters and an optional precomputed `query_embedding`.
+// That vector is the only large field: an 8192-dimension float32 array is about
+// 160 KiB of JSON, so 1 MiB leaves room for the widest embedding model plus a
+// generous filter list while still bounding what one request can allocate.
+// HybridSearch is reachable by any Viewer of the knowledge base, so the cap
+// applies to a much broader audience than the knowledge-base lifecycle routes,
+// which need manage_kbs.
+const hybridSearchJSONMaxBytes = 1 << 20
+
 // limitUploadBody caps the request body before anything parses it.
 //
 // It has to run before FormFile rather than after: ParseMultipartForm buffers

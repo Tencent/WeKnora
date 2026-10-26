@@ -383,8 +383,13 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	}
 
 	// Parse request body
+	limitJSONBody(c, hybridSearchJSONMaxBytes)
 	var req types.SearchParams
 	if err := c.ShouldBindJSON(&req); err != nil {
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(apperrors.NewBadRequestError("request body is too large"))
+			return
+		}
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
