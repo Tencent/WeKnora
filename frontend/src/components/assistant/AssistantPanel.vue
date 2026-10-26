@@ -791,17 +791,32 @@ onUnmounted(() => {
   .assistant-panel.is-open {
     animation: assistant-panel-in var(--app-motion-slow) cubic-bezier(0.16, 1, 0.3, 1);
 
+    &::before,
     &::after {
       content: '';
       position: absolute;
       inset: 0;
       z-index: 1;
+      padding: 2px;
       border-radius: inherit;
       pointer-events: none;
       opacity: 0;
-      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--td-brand-color) 48%, transparent),
-        inset 0 0 20px color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-      animation: assistant-panel-glow calc(var(--app-motion-slow) * 3) ease-out var(--app-motion-instant);
+      background: conic-gradient(from var(--assistant-border-angle),
+        transparent 0deg 260deg,
+        color-mix(in srgb, var(--td-brand-color) 15%, transparent) 300deg,
+        color-mix(in srgb, var(--td-brand-color) 70%, transparent) 340deg,
+        var(--td-brand-color) 355deg,
+        transparent 360deg);
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      animation: assistant-panel-glow calc(var(--app-motion-slow) * 6) linear var(--app-motion-instant);
+    }
+
+    &::before {
+      padding: 6px;
+      filter: blur(4px);
     }
 
     .assistant-panel__header-icon,
@@ -833,8 +848,17 @@ onUnmounted(() => {
 }
 
 @keyframes assistant-panel-glow {
-  0%, 100% { opacity: 0; }
-  25% { opacity: 1; }
+  from {
+    --assistant-border-angle: 0deg;
+    opacity: 0;
+  }
+
+  12%, 80% { opacity: 1; }
+
+  to {
+    --assistant-border-angle: 360deg;
+    opacity: 0;
+  }
 }
 
 @keyframes assistant-panel-in {
@@ -882,6 +906,12 @@ onUnmounted(() => {
 </style>
 
 <style lang="less">
+@property --assistant-border-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
 html.has-assistant-dock {
   .t-drawer:not(.t-drawer--attach):not(.chat-artifacts-drawer),
   .t-dialog__ctx--fixed .t-dialog__mask,
