@@ -15,6 +15,7 @@ import {
   KNOWLEDGE_CHUNK_PAGE_SIZE,
 } from "@/api/knowledge-base/index";
 import { MessagePlugin } from "tdesign-vue-next";
+import { useProtectedImageLifecycle } from '@/composables/useProtectedImageLifecycle';
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
 import { normalizeSpuriousTablePrefixes } from '@/utils/markdownTableNormalize';
 import { ensureLiteralSingleTildeOnGlobalMarked } from '@/utils/markedLiteralTilde';
@@ -541,6 +542,7 @@ const docMarkdownRoot = ref<HTMLElement | null>(null)
 
 const getMarkdownRenderRoot = (): ParentNode | null =>
   docMarkdownRoot.value ?? (mdContentWrap.value as ParentNode | null) ?? null
+useProtectedImageLifecycle(getMarkdownRenderRoot)
 let url = ref('')
 // 视图模式：chunks / merged / preview
 // file 类型默认「预览」，URL / 手动创建 默认「全文」

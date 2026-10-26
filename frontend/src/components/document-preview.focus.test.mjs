@@ -5,6 +5,7 @@ import vm from 'node:vm'
 import ts from 'typescript'
 import { effectScope, nextTick, reactive, shallowRef as ref, watch } from 'vue'
 import { parse, compileTemplate } from '@vue/compiler-sfc'
+import { useProtectedImageLifecycle } from '../composables/useProtectedImageLifecycle.ts'
 
 const source = readFileSync(new URL('./document-preview.vue', import.meta.url), 'utf8')
 const start = source.indexOf('const previewRoot =')
@@ -39,6 +40,7 @@ function setup(t) {
     previewRoot, previewContent, focusPreviewContent, onPreviewFrameLoad,
   })`, {
     ref, watch, nextTick, props, document, docxContainer, htmlViewMode, isFullscreen,
+    useProtectedImageLifecycle,
     getPreviewSourceKey: () => props.sourceKey,
   }))
   return { ...state, props, document, docxContainer, htmlViewMode, isFullscreen, calls, element }

@@ -433,6 +433,7 @@ export function createSafeImage(src: string, alt: string = '', title: string = '
 type ProtectedFileLoadResult =
   | ({ status: 'loaded' } & LoadedProtectedFile)
   | { status: 'missing' }
+  | { status: 'cancelled' }
   | { status: 'failed' };
 
 type HiddenProtectedImage = {
@@ -447,6 +448,8 @@ type ProtectedFileCacheState = {
   missingRequests: Set<string>;
   failures: Map<string, number>;
   inflight: Map<string, Promise<ProtectedFileLoadResult>>;
+  controllers: Map<string, AbortController>;
+  roots: Map<ParentNode, Set<string>>;
   retryGeneration: number;
   imageRequests: WeakMap<HTMLImageElement, string>;
   hiddenImages: WeakMap<HTMLImageElement, HiddenProtectedImage>;
@@ -462,6 +465,8 @@ const protectedFileCacheState = (() => {
     missingRequests: new Set(),
     failures: new Map(),
     inflight: new Map(),
+    controllers: new Map(),
+    roots: new Map(),
     retryGeneration: 0,
     imageRequests: new WeakMap(),
     hiddenImages: new WeakMap(),
@@ -471,6 +476,9 @@ const protectedFileCacheState = (() => {
     __weknoraProtectedFileCacheV4__?: ProtectedFileCacheState;
   };
   scope.__weknoraProtectedFileCacheV4__ ||= fresh();
+  // Upgrade an existing cache during HMR without losing live object URLs.
+  scope.__weknoraProtectedFileCacheV4__.controllers ||= new Map();
+  scope.__weknoraProtectedFileCacheV4__.roots ||= new Map();
   return scope.__weknoraProtectedFileCacheV4__;
 })();
 
@@ -493,6 +501,50 @@ const protectedFileInflight = protectedFileCacheState.inflight;
 const PROTECTED_FILE_RETRY_COOLDOWN_MS = 5000;
 const protectedImageRequests = protectedFileCacheState.imageRequests;
 const hiddenProtectedImages = protectedFileCacheState.hiddenImages;
+
+function releaseUnusedProtectedFile(requestKey: string): void {
+  for (const keys of protectedFileCacheState.roots.values()) {
+    if (keys.has(requestKey)) return;
+  }
+  protectedFileCacheState.controllers.get(requestKey)?.abort();
+  protectedFileCacheState.controllers.delete(requestKey);
+  protectedFileInflight.delete(requestKey);
+  const file = protectedFileBlobCache.get(requestKey);
+  if (file) {
+    URL.revokeObjectURL(file.blobURL);
+    protectedFileBlobCache.delete(requestKey);
+    for (const [source, cached] of protectedFileBySource) {
+      if (cached.blobURL === file.blobURL) protectedFileBySource.delete(source);
+    }
+  }
+  protectedFileMissingRequests.delete(requestKey);
+  protectedFileFailureCache.delete(requestKey);
+}
+
+/** Release a rendering root without invalidating files still used elsewhere. */
+export function releaseProtectedFileImages(root: ParentNode | null | undefined): void {
+  if (!root) return;
+  const keys = protectedFileCacheState.roots.get(root);
+  protectedFileCacheState.roots.delete(root);
+  keys?.forEach(releaseUnusedProtectedFile);
+}
+
+/** Drop authenticated resources when the login session ends. */
+export function clearProtectedFileCache(): void {
+  protectedFileCacheState.roots.clear();
+  const keys = new Set([...protectedFileBlobCache.keys(), ...protectedFileInflight.keys()]);
+  keys.forEach(releaseUnusedProtectedFile);
+  protectedFileBySource.clear();
+  clearProtectedFileFailureCache();
+}
+
+function trackProtectedFileImages(root: ParentNode, keys: Set<string>): void {
+  const previous = protectedFileCacheState.roots.get(root);
+  protectedFileCacheState.roots.set(root, keys);
+  previous?.forEach(key => {
+    if (!keys.has(key)) releaseUnusedProtectedFile(key);
+  });
+}
 
 /**
  * 将 Markdown 里通过 /files 代理的图片，改为用带鉴权 Header 的 fetch 拉取后再显示。
@@ -583,8 +635,9 @@ function ensureProtectedResourceCardClicks(): void {
     const link = target?.closest?.('a.protected-resource-card');
     if (!(link instanceof HTMLAnchorElement)) return;
     if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-    const source = link.dataset.protectedResource || '';
-    const file = protectedFileBySource.get(source);
+    // A source can be loaded through multiple authorization contexts. Use the
+    // clicked card's live URL, not whichever context last populated the source.
+    const file = Array.from(protectedFileBlobCache.values()).find(file => file.blobURL === link.href);
     if (!file) return;
     const preview = new CustomEvent(RESOURCE_PREVIEW_EVENT, {
       detail: file,
@@ -602,6 +655,8 @@ function ensureProtectedResourceCardClicks(): void {
  * 走哪条代理由 {@link resolveProtectedFileAccess} 决定：应用入口注册的默认
  * 上下文（如嵌入应用的 Embed 平面）优先，组件只在同一鉴权平面内用
  * `access` 细化作用域（如知识库）。
+ * Consumers must pair this with useProtectedImageLifecycle (or call
+ * releaseProtectedFileImages when the rendering root is replaced/disposed).
  */
 export async function hydrateProtectedFileImages(
   root: ParentNode | null | undefined,
@@ -610,37 +665,59 @@ export async function hydrateProtectedFileImages(
   if (!root || typeof window === 'undefined') {
     return;
   }
-
-  ensureProtectedResourceCardClicks();
-
-  const images = root.querySelectorAll<HTMLImageElement>(
-    'img[data-protected-src], img[src^="resource://"], img[src^="storage://"], img[src^="local://"], img[src^="minio://"], img[src^="cos://"], img[src^="tos://"], img[src^="s3://"], img[src^="oss://"], img[src^="ks3://"], img[src^="obs://"]',
-  );
-  if (!images.length) {
+  // A queued nextTick callback may run after its component has unmounted.
+  if (root.isConnected === false) {
+    releaseProtectedFileImages(root);
     return;
   }
 
-  const resolvedAccess = resolveProtectedFileAccess(access);
+  ensureProtectedResourceCardClicks();
 
-  await Promise.all(Array.from(images).map(async (img) => {
-    const normalizedSourceURL = normalizeProtectedImageElement(img);
-    const protectedSrc = (img.getAttribute('data-protected-src') || '').trim();
+  const resolvedAccess = resolveProtectedFileAccess(access);
+  const keys = new Set<string>();
+  // Cards can be rendered from a cached source before their new root mounts.
+  // If the previous owner released that URL meanwhile, hydrate it again just
+  // like an image. This also handles a changed authorization context.
+  root.querySelectorAll<HTMLAnchorElement>('a.protected-resource-card[data-protected-resource]').forEach(card => {
+    const source = card.dataset.protectedResource || '';
+    const request = buildProtectedFileRequest(source, resolvedAccess);
+    const key = request ? JSON.stringify([request.url, request.headers]) : '';
+    if (key && protectedFileBlobCache.get(key)?.blobURL === card.getAttribute('href')) {
+      keys.add(key);
+      return;
+    }
+    const img = card.ownerDocument.createElement('img');
+    img.src = PROVIDER_IMAGE_PLACEHOLDER;
+    img.alt = card.textContent || '';
+    img.setAttribute('data-protected-src', source);
+    card.replaceWith(img);
+  });
+  const images = root.querySelectorAll<HTMLImageElement>(
+    'img[data-protected-src], img[src^="resource://"], img[src^="storage://"], img[src^="local://"], img[src^="minio://"], img[src^="cos://"], img[src^="tos://"], img[src^="s3://"], img[src^="oss://"], img[src^="ks3://"], img[src^="obs://"]',
+  );
+  const requests = Array.from(images).map(img => {
+    const sourceURL = protectedImageSource(img);
+    const request = buildProtectedFileRequest(sourceURL, resolvedAccess);
+    return { img, sourceURL, request, requestKey: request ? JSON.stringify([request.url, request.headers]) : '' };
+  });
+  requests.forEach(item => { if (item.request) keys.add(item.requestKey); });
+  trackProtectedFileImages(root, keys);
+
+  await Promise.all(requests.map(async ({ img, sourceURL, request, requestKey }) => {
     const src = (img.getAttribute('src') || '').trim();
-    const sourceURL = normalizedSourceURL || protectedSrc || src;
     if (!sourceURL) {
       return;
     }
     // A null request means this source cannot be fetched under the current
     // access context (not a storage path, or the embed token has not arrived
     // yet). Leave the placeholder so a later pass can retry.
-    const request = buildProtectedFileRequest(sourceURL, resolvedAccess);
     if (!request) {
       img.dataset.authHydrated = '0';
       return;
     }
     const { url: requestURL, headers } = request;
-    const requestKey = JSON.stringify([requestURL, headers]);
-    if (img.dataset.authHydrated === '1' && src.startsWith('blob:') && protectedImageRequests.get(img) === requestKey) {
+    if (img.dataset.authHydrated === '1' && src.startsWith('blob:') && protectedImageRequests.get(img) === requestKey
+      && protectedFileBlobCache.get(requestKey)?.blobURL === src) {
       return;
     }
     protectedImageRequests.set(img, requestKey);
@@ -652,6 +729,7 @@ export async function hydrateProtectedFileImages(
 
     const cachedBlobURL = protectedFileBlobCache.get(requestKey);
     if (cachedBlobURL) {
+      protectedFileBySource.set(sourceURL, cachedBlobURL);
       applyHydratedProtectedImage(root, sourceURL, cachedBlobURL, requestKey);
       return;
     }
@@ -668,6 +746,8 @@ export async function hydrateProtectedFileImages(
     // occurrences stuck on the transparent placeholder forever.
     let loadTask = protectedFileInflight.get(requestKey);
     if (!loadTask) {
+      const controller = new AbortController();
+      protectedFileCacheState.controllers.set(requestKey, controller);
       loadTask = (async (): Promise<ProtectedFileLoadResult> => {
         for (let attempt = 0; ; attempt++) {
           const generation = protectedFileCacheState.retryGeneration;
@@ -676,7 +756,9 @@ export async function hydrateProtectedFileImages(
               method: 'GET',
               headers,
               credentials: 'include',
+              signal: controller.signal,
             });
+            if (controller.signal.aborted) return { status: 'cancelled' };
             if (!resp.ok) {
               if (attempt === 0 && generation !== protectedFileCacheState.retryGeneration) continue;
               if (resp.status === 404) {
@@ -686,27 +768,40 @@ export async function hydrateProtectedFileImages(
               throw new Error(`HTTP ${resp.status}`);
             }
             const blob = await resp.blob();
+            for (const [owner, ownedKeys] of protectedFileCacheState.roots) {
+              if (ownedKeys.has(requestKey) && owner.isConnected === false) releaseProtectedFileImages(owner);
+            }
+            if (controller.signal.aborted) return { status: 'cancelled' };
             const blobURL = URL.createObjectURL(blob);
             const file = { blobURL, blob, fileName: responseFileName(resp.headers.get("Content-Disposition"), sourceURL) };
             protectedFileBlobCache.set(requestKey, file);
             protectedFileFailureCache.delete(requestKey);
             return { status: 'loaded', ...file };
           } catch (error) {
+            if (controller.signal.aborted) return { status: 'cancelled' };
             if (attempt === 0 && generation !== protectedFileCacheState.retryGeneration) continue;
             console.warn('[security] hydrateProtectedFileImages failed:', error);
             protectedFileFailureCache.set(requestKey, Date.now());
             return { status: 'failed' };
           }
         }
-      })().finally(() => protectedFileInflight.delete(requestKey));
+      })().finally(() => {
+        // A released request may finish after a new owner started a retry.
+        if (protectedFileCacheState.controllers.get(requestKey) !== controller) return;
+        protectedFileCacheState.controllers.delete(requestKey);
+        protectedFileInflight.delete(requestKey);
+      });
       protectedFileInflight.set(requestKey, loadTask);
     }
 
     const result = await loadTask;
     // A late response for an old message ID must not remove or overwrite an
     // image that has since been reauthorized under its persisted message ID.
-    if (protectedImageRequests.get(img) !== requestKey) return;
+    if (root.isConnected === false) releaseProtectedFileImages(root);
+    if (protectedFileCacheState.roots.get(root) !== keys
+      || protectedImageRequests.get(img) !== requestKey || result.status === 'cancelled') return;
     if (result.status === 'loaded') {
+      if (protectedFileBlobCache.get(requestKey)?.blobURL !== result.blobURL) return;
       protectedFileBySource.set(sourceURL, result);
       protectedFileMissingRequests.delete(requestKey);
       applyHydratedProtectedImage(root, sourceURL, result, requestKey);
