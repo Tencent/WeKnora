@@ -224,3 +224,52 @@ func TestExecuteLoop_RepeatedFailedCallsGetOneNoticeThenStop(t *testing.T) {
 			"the failed-call guidance already covers this streak (call %d)", i)
 	}
 }
+
+// A parent waiting on a long child task calls wait_agent again and again and
+// gets the same timeout flags back each time, while the child keeps running.
+// That is legitimate waiting, bounded by the collaboration runtime, so the
+// repeated-round guard must neither nudge nor stop it.
+func TestExecuteLoop_RepeatedWaitAgentTimeoutsKeepRunning(t *testing.T) {
+	n := maxRepeatedToolRounds + 4
+	rounds := make([]mockResponse, 0, n+1)
+	for i := 0; i < n; i++ {
+		rounds = append(rounds, toolCallResponse("wait_agent", `{"timeout_ms":30000}`))
+	}
+	rounds = append(rounds, answer("children finished"))
+	mock := &mockChat{responses: rounds}
+	engine := newTestEngine(t, mock, func(cfg *types.AgentConfig) {
+		cfg.MaxIterations = types.UnlimitedMaxIterations
+	})
+	engine.toolRegistry = agenttools.NewToolRegistry()
+	tool := newSequenceTool("wait_agent", `{"interrupted":false,"timed_out":true,"updated":false}`)
+	engine.toolRegistry.RegisterTool(tool)
+
+	state := &types.AgentState{}
+	_, err := engine.executeLoop(context.Background(), state, "q", emptyMessages(), nil, "sess", "msg")
+
+	require.NoError(t, err)
+	assert.Equal(t, n, tool.calls)
+	assert.Equal(t, n+1, mock.callCount)
+	assert.Equal(t, "children finished", state.FinalAnswer)
+	for i, opts := range mock.opts {
+		assert.False(t, hasRepeatedToolNotice(opts), "no notice expected while waiting (call %d)", i)
+	}
+}
+
+// A wait_agent round breaks a repeat streak, even mixed with other calls.
+func TestTrackRepeatedToolRound_WaitAgentBreaksTheStreak(t *testing.T) {
+	shell := types.ToolCall{
+		Name: "shell_exec", Args: map[string]interface{}{"command": "ls"},
+		Result: &types.ToolResult{Success: true},
+	}
+	wait := types.ToolCall{
+		Name: "wait_agent", Args: map[string]interface{}{},
+		Result: &types.ToolResult{Success: true, Output: `{"timed_out":true}`},
+	}
+	g := &loopGuards{}
+	assert.Equal(t, 1, g.trackRepeatedToolRound([]types.ToolCall{shell}))
+	assert.Equal(t, 2, g.trackRepeatedToolRound([]types.ToolCall{shell}))
+	assert.Equal(t, 0, g.trackRepeatedToolRound([]types.ToolCall{wait}))
+	assert.Equal(t, 0, g.trackRepeatedToolRound([]types.ToolCall{shell, wait}))
+	assert.Equal(t, 1, g.trackRepeatedToolRound([]types.ToolCall{shell}), "the streak restarts after waiting")
+}

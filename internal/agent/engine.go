@@ -659,6 +659,16 @@ func toolRoundSignature(calls []types.ToolCall) string {
 // rounds in a row have now produced the same signature. A round that cannot
 // be fingerprinted breaks the streak.
 func (g *loopGuards) trackRepeatedToolRound(calls []types.ToolCall) int {
+	// wait_agent's progress reaches the model outside its result: the runtime
+	// injects child messages separately, and a timeout returns the same flags
+	// every time while children keep running. Its waiting is bounded by the
+	// collaboration runtime, so a round that waits never counts as a repeat.
+	for _, tc := range calls {
+		if tc.Name == "wait_agent" {
+			g.lastToolRound, g.repeatedToolRounds = "", 0
+			return 0
+		}
+	}
 	signature := toolRoundSignature(calls)
 	if signature == "" || len(calls) == 0 {
 		g.lastToolRound, g.repeatedToolRounds = "", 0
