@@ -16,6 +16,9 @@ test('refreshes data source controls after assistant changes and stops on unmoun
     '@/utils/cronHumanize': {},
     '@/composables/useConnectorLabel': { useConnectorLabel: () => ({ connectorLabel: (type: string) => type }) },
     '@/api/datasource': { listDataSources },
+    // DataSourceSettings resolves connector names through this composable; the
+    // fixture has no i18n runtime, so hand it the identity formatter.
+    '@/composables/useConnectorLabel': { useConnectorLabel: () => ({ connectorLabel: (type: string) => type }) },
   }, { kbId: 'kb' })
   await flush()
   listDataSources.mock.resetCalls()
