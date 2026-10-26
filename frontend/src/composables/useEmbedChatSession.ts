@@ -248,7 +248,12 @@ export function useEmbedChatSession(options: {
 
   const sendMsg = async (
     value: string,
-    opts: { webSearchEnabled?: boolean; imageFiles?: File[]; attachmentFiles?: File[] } = {},
+    opts: {
+      webSearchEnabled?: boolean
+      imageFiles?: File[]
+      attachmentFiles?: File[]
+      onPrepared?: () => void
+    } = {},
   ) => {
     stopStream()
     prepareForNewOutgoingMessage()
@@ -291,6 +296,7 @@ export function useEmbedChatSession(options: {
       channel: 'embed',
       created_at: new Date().toISOString(),
     })
+    opts.onPrepared?.()
     postEmbedMessageSent(options.channelId, options.sessionId.value, value)
     relayEmbedWebhookEvent(
       options.channelId,

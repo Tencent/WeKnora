@@ -3,10 +3,12 @@ package docs_test
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
 	docs "github.com/Tencent/WeKnora/docs"
+	"github.com/Tencent/WeKnora/internal/types"
 	"gopkg.in/yaml.v3"
 )
 
@@ -64,6 +66,69 @@ func TestKnowledgeSearchRouteContract(t *testing.T) {
 	}
 }
 
+func TestImagePipelineAgentKeysContract(t *testing.T) {
+	const want = "default.caption_enabled|default.ocr_enabled"
+	field, ok := reflect.TypeOf(types.ImageProcessingConfig{}).FieldByName("ImagePipelineParams")
+	if !ok {
+		t.Fatal("ImagePipelineParams field is missing")
+	}
+	if !strings.Contains(
+		","+field.Tag.Get("extensions")+",",
+		",x-agent-keys="+want+",",
+	) {
+		t.Fatalf("ImagePipelineParams must expose the active switch slots: %s", field.Tag)
+	}
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				Definitions map[string]struct {
+					Properties map[string]struct {
+						AgentKeys string `json:"x-agent-keys" yaml:"x-agent-keys"`
+					} `json:"properties" yaml:"properties"`
+				} `json:"definitions" yaml:"definitions"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatal(err)
+			}
+			got := spec.Definitions["github_com_Tencent_WeKnora_internal_types.ImageProcessingConfig"].
+				Properties["image_pipeline_params"].AgentKeys
+			if got != want {
+				t.Errorf("image_pipeline_params agent keys = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestAutomationAssistantContract(t *testing.T) {
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				Definitions map[string]struct {
+					Properties map[string]any `json:"properties" yaml:"properties"`
+				} `json:"definitions" yaml:"definitions"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{
+				"internal_handler.CreateAutomationRequest",
+				"github_com_Tencent_WeKnora_internal_types.AutomationPatch",
+				"github_com_Tencent_WeKnora_internal_types.Automation",
+			} {
+				properties := spec.Definitions[name].Properties
+				if _, ok := properties["agent_id"]; ok {
+					t.Errorf("%s must not expose executor selection", name)
+				}
+				for _, field := range []string{"instruction", "model_id"} {
+					if _, ok := properties[field]; !ok {
+						t.Errorf("%s must expose %s", name, field)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestReleaseAPIContracts(t *testing.T) {
 	for _, tt := range swaggerDocuments() {
 		t.Run(tt.name, func(t *testing.T) {
@@ -107,6 +172,46 @@ func TestReleaseAPIContracts(t *testing.T) {
 				definition := "github_com_Tencent_WeKnora_internal_application_service." + name
 				if spec.Definitions[definition].Properties["overlay"].Type != "object" {
 					t.Errorf("%s.overlay must be a JSON object", name)
+				}
+			}
+		})
+	}
+}
+
+func TestGraphSearchContract(t *testing.T) {
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				Paths       map[string]map[string]any `json:"paths" yaml:"paths"`
+				Definitions map[string]struct {
+					Properties map[string]any `json:"properties" yaml:"properties"`
+				} `json:"definitions" yaml:"definitions"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatal(err)
+			}
+			methods := spec.Paths["/knowledge-bases/{id}/graph-search"]
+			if methods["post"] == nil || len(methods) != 1 {
+				t.Fatal("graph-search must be documented as a POST-only endpoint")
+			}
+			const prefix = "github_com_Tencent_WeKnora_internal_types."
+			for definition, fields := range map[string][]string{
+				"GraphSearchResult":      {"entities", "relationships", "source_chunks", "meta"},
+				"GraphSearchEntity":      {"id", "knowledge_id", "source_chunk_ids"},
+				"GraphSearchRelation":    {"source_id", "target_id", "source_chunk_ids"},
+				"GraphSearchSourceChunk": {"content_truncated", "title_truncated"},
+				"GraphSearchMeta":        {"truncated", "truncation_reasons"},
+			} {
+				properties := spec.Definitions[prefix+definition].Properties
+				for _, field := range fields {
+					if properties[field] == nil {
+						t.Errorf("%s.%s must be documented", definition, field)
+					}
+				}
+				for _, hidden := range []string{"tenant_id", "knowledge_base_id", "element_id"} {
+					if definition != "GraphSearchResult" && properties[hidden] != nil {
+						t.Errorf("%s leaks internal field %s", definition, hidden)
+					}
 				}
 			}
 		})
@@ -288,5 +393,27 @@ func swaggerInteger(value any) int {
 		return int(number)
 	default:
 		return 0
+	}
+}
+
+func TestNotificationInboxContract(t *testing.T) {
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				Paths map[string]map[string]swaggerOperation `json:"paths" yaml:"paths"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := spec.Paths["/notifications/read"]["delete"]; !ok {
+				t.Fatal("missing clear-read notification endpoint")
+			}
+			for _, parameter := range spec.Paths["/notifications"]["get"].Parameters {
+				if parameter.Name == "cursor" && parameter.In == "query" && parameter.Type == "string" {
+					return
+				}
+			}
+			t.Fatal("notification listing must document its history cursor")
+		})
 	}
 }

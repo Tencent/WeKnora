@@ -24,6 +24,8 @@ const (
 // RunHooks finish the assistant message of a run the reaper or a supersede
 // takes over.
 type RunHooks struct {
+	// RecoverAnswered transfers safe, unconsumed answers to a durable scheduler.
+	RecoverAnswered func(context.Context, *types.AgentPrompt) (bool, error)
 	// Suspended shows a run whose owner disappeared while waiting the way a
 	// run that suspended itself looks: the saved steps, waiting on prompt.
 	Suspended func(ctx context.Context, prompt *types.AgentPrompt, state *types.AgentRunSuspension) error
@@ -61,6 +63,15 @@ func (b *Broker) Reap(ctx context.Context, now time.Time, hooks RunHooks) (int, 
 		return reaped, err
 	}
 	for _, row := range resuming {
+		if row.Status == types.AgentPromptAnswered && hooks.RecoverAnswered != nil {
+			handled, err := hooks.RecoverAnswered(ctx, row)
+			if err != nil {
+				return reaped, err
+			}
+			if handled {
+				continue
+			}
+		}
 		state := b.runState(ctx, row)
 		if state == nil {
 			// An in-memory waiter consumed it; nothing to resume or close.

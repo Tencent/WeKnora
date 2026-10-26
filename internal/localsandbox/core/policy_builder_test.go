@@ -393,3 +393,16 @@ func TestBuildInstallRequiresASkillsRoot(t *testing.T) {
 	_, err := b.BuildInstall(filepath.Join(b.homeDir, ".weknora", "skills", ".versions", "pdf-1"))
 	require.ErrorIs(t, err, ErrInstallDirOutsideSkillsRoot)
 }
+
+func TestJobsDirectoryCannotBecomeAWorkspace(t *testing.T) {
+	home := "/Users/local-test"
+	jobs := filepath.Join(home, ".weknora", "jobs")
+	b := NewPolicyBuilder(home, filepath.Join(home, "Library", "Application Support", "WeKnora Lite"))
+	for _, root := range []string{filepath.Dir(jobs), jobs, filepath.Join(jobs, "sj_0123")} {
+		_, err := b.Build(ModeAuto, Workspace{Root: root})
+		require.Error(t, err, root)
+	}
+	p, err := b.Build(ModeAuto, Workspace{Root: filepath.Join(home, "project")})
+	require.NoError(t, err)
+	require.Contains(t, p.DenyRead, jobs)
+}

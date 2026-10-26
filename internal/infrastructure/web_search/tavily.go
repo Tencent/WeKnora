@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -88,12 +87,12 @@ func (p *TavilyProvider) Search(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		logger.Warnf(ctx, "[WebSearch][Tavily] API returned status %d: %s", resp.StatusCode, string(respBody))
-		return nil, fmt.Errorf("tavily API returned status %d: %s", resp.StatusCode, string(respBody))
+		preview := readErrorPreview(resp.Body)
+		logger.Warnf(ctx, "[WebSearch][Tavily] API returned status %d: %s", resp.StatusCode, preview)
+		return nil, fmt.Errorf("tavily API returned status %d: %s", resp.StatusCode, preview)
 	}
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := readCapped(resp.Body, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}

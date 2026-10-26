@@ -13,29 +13,29 @@ import (
 func TestRegistryOwnsEncodingOrderForSummarySlugs(t *testing.T) {
 	const knowledgeID = "36283d3d-a495-40d2-a13f-e925fc322996"
 	registry := NewRegistry(true)
-	require.Equal(t, "d1", registry.RegisterDocument(knowledgeID))
+	require.Equal(t, "doc://1", registry.RegisterDocument(knowledgeID))
 
 	messages := registry.EncodeMessages([]chat.Message{{
 		Role:    "tool",
 		Content: "[[summary/" + knowledgeID + "|Summary]] document=" + knowledgeID,
 	}})
 	require.Contains(t, messages[0].Content, "[[res://0001|Summary]]")
-	require.Contains(t, messages[0].Content, "document=d1")
+	require.Contains(t, messages[0].Content, "document=doc://1")
 	require.NotContains(t, messages[0].Content, "summary/d1")
 
 	calls := []types.LLMToolCall{{Function: types.FunctionCall{
 		Name:      "wiki_read_source_doc",
-		Arguments: `{"slugs":["res://0001"],"knowledge_id":"d1"}`,
+		Arguments: `{"slugs":["res://0001"],"knowledge_id":"doc://1"}`,
 	}}}
 	registry.DecodeToolCalls(calls)
 	require.JSONEq(t, `{"slugs":["summary/`+knowledgeID+`"],"knowledge_id":"`+knowledgeID+`"}`, calls[0].Function.Arguments)
-	require.JSONEq(t, `{"slugs":["res://0001"],"knowledge_id":"d1"}`, calls[0].ModelArguments)
+	require.JSONEq(t, `{"slugs":["res://0001"],"knowledge_id":"doc://1"}`, calls[0].ModelArguments)
 	require.Equal(t, ArgumentResolutionResolved, calls[0].ArgumentResolution)
 	require.Empty(t, calls[0].UnresolvedHandles)
 	persisted, err := json.Marshal(calls[0])
 	require.NoError(t, err)
 	require.NotContains(t, string(persisted), `"res://0001"`)
-	require.NotContains(t, string(persisted), `"d1"`)
+	require.NotContains(t, string(persisted), `"doc://1"`)
 	require.NotContains(t, string(persisted), ArgumentResolutionResolved)
 }
 
@@ -88,19 +88,18 @@ func TestRegistryAuditsUnresolvedAndPartiallyResolvedToolHandles(t *testing.T) {
 
 	calls := []types.LLMToolCall{{Function: types.FunctionCall{
 		Name:      "knowledge_search",
-		Arguments: `{"knowledge_base_ids":["b1","b99"],"query":"b98","asset":"res://0099"}`,
+		Arguments: `{"knowledge_base_ids":["kb://1","kb://99"],"query":"b98 kb://97","asset":"res://0099"}`,
 	}}}
 	registry.DecodeToolCalls(calls)
 
 	require.JSONEq(t,
-		`{"knowledge_base_ids":["kb-real","b99"],"query":"b98","asset":"res://0099"}`,
+		`{"knowledge_base_ids":["kb-real","kb://99"],"query":"b98 kb://97","asset":"res://0099"}`,
 		calls[0].Function.Arguments,
 	)
 	require.Equal(t, ArgumentResolutionPartiallyResolved, calls[0].ArgumentResolution)
-	require.Equal(t, []string{"b99", "res://0099"}, calls[0].UnresolvedHandles)
-	// Alias-shaped free text is not an ID and must not be reported as a source
-	// resolution failure.
-	require.NotContains(t, calls[0].UnresolvedHandles, "b98")
+	// Scheme-shaped handles are reserved in any text, so an unknown one fails
+	// closed; legacy-shaped prose such as "b98" is not an ID.
+	require.Equal(t, []string{"kb://97", "kb://99", "res://0099"}, calls[0].UnresolvedHandles)
 }
 
 func TestRegistryAuditsUnchangedJSONFormattingAsUnchanged(t *testing.T) {
@@ -117,7 +116,7 @@ func TestRegistryDecodesKnownHandlesEmbeddedInBuiltInSQL(t *testing.T) {
 	calls := []types.LLMToolCall{{
 		Function: types.FunctionCall{
 			Name:      "database_query",
-			Arguments: `{"sql":"SELECT * FROM knowledges WHERE id = 'd1' AND knowledge_base_id = 'b1'"}`,
+			Arguments: `{"sql":"SELECT * FROM knowledges WHERE id = 'doc://1' AND knowledge_base_id = 'kb://1'"}`,
 		},
 	}}
 	registry.DecodeToolCalls(calls)
@@ -128,22 +127,22 @@ func TestRegistryDecodesKnownHandlesEmbeddedInBuiltInSQL(t *testing.T) {
 	require.Equal(t, ArgumentResolutionResolved, calls[0].ArgumentResolution)
 }
 
-func TestRegistryOnlyDecodesQuotedSQLHandlesAndRejectsUnknownOnes(t *testing.T) {
+func TestRegistryDecodesSQLHandlesWithoutTouchingAliasesAndRejectsUnknownOnes(t *testing.T) {
 	registry := NewRegistry(true)
 	registry.RegisterDocument("doc-real")
 
 	calls := []types.LLMToolCall{{
 		Function: types.FunctionCall{
 			Name:      "database_query",
-			Arguments: `{"sql":"SELECT d1.id FROM documents d1 WHERE d1.id = 'd1' AND d1.parent_id = 'd99'"}`,
+			Arguments: `{"sql":"SELECT d1.id FROM documents d1 WHERE d1.id = 'doc://1' AND d1.parent_id = 'doc://99'"}`,
 		},
 	}}
 	registry.DecodeToolCalls(calls)
 	require.JSONEq(t,
-		`{"sql":"SELECT d1.id FROM documents d1 WHERE d1.id = 'doc-real' AND d1.parent_id = 'd99'"}`,
+		`{"sql":"SELECT d1.id FROM documents d1 WHERE d1.id = 'doc-real' AND d1.parent_id = 'doc://99'"}`,
 		calls[0].Function.Arguments,
 	)
-	require.Equal(t, []string{"d99"}, calls[0].UnresolvedHandles)
+	require.Equal(t, []string{"doc://99"}, calls[0].UnresolvedHandles)
 	require.Equal(t, ArgumentResolutionPartiallyResolved, calls[0].ArgumentResolution)
 }
 
@@ -180,11 +179,11 @@ func TestRegistryReplaysStructuredAndPrivateHandlesWithoutAliasDrift(t *testing.
 
 	first := registry.EncodeMessages(messages)
 	require.JSONEq(t,
-		`{"sql":"SELECT * FROM knowledges WHERE id = 'd1' AND knowledge_base_id = 'b1'"}`,
+		`{"sql":"SELECT * FROM knowledges WHERE id = 'doc://1' AND knowledge_base_id = 'kb://1'"}`,
 		first[0].ToolCalls[0].Function.Arguments,
 	)
 	require.JSONEq(t,
-		`{"id":"i1","knowledge_base_id":"b1","suspected_knowledge_ids":["d1"]}`,
+		`{"id":"i1","knowledge_base_id":"kb://1","suspected_knowledge_ids":["doc://1"]}`,
 		first[1].Content,
 	)
 	require.JSONEq(t, `{"issue_id":"i1","status":"resolved"}`, first[2].ToolCalls[0].Function.Arguments)
@@ -201,7 +200,9 @@ func TestRegistryOwnsWikiIssueHandles(t *testing.T) {
 		Success: true,
 		Output:  `[{"id":"issue-uuid","knowledge_base_id":"kb-real","suspected_knowledge_ids":["doc-real"],"slug":"concept/a","status":"pending"}]`,
 	})
-	require.JSONEq(t, `[{"id":"i1","knowledge_base_id":"b1","suspected_knowledge_ids":["d1"],"slug":"concept/a","status":"pending"}]`, modelResult)
+	require.JSONEq(t,
+		`[{"id":"i1","knowledge_base_id":"kb://1","suspected_knowledge_ids":["doc://1"],`+
+			`"slug":"concept/a","status":"pending"}]`, modelResult)
 
 	calls := []types.LLMToolCall{{Function: types.FunctionCall{
 		Name:      "wiki_update_issue",
@@ -265,11 +266,16 @@ func TestRegistryDoesNotApplyBuiltInFieldPoliciesToDynamicTools(t *testing.T) {
 	})
 	calls := []types.LLMToolCall{{Function: types.FunctionCall{
 		Name:      "dynamic_mcp_tool",
-		Arguments: `{"issue_id":"i1","knowledge_id":"d1","url":"w1","sql":"SELECT 'd1'"}`,
+		Arguments: `{"issue_id":"i1","knowledge_id":"doc://1","url":"url://1","sql":"SELECT 'doc://1'"}`,
 	}}}
 	registry.DecodeToolCalls(calls)
-	require.JSONEq(t, `{"issue_id":"i1","knowledge_id":"d1","url":"w1","sql":"SELECT 'd1'"}`, calls[0].Function.Arguments)
-	require.Equal(t, ArgumentResolutionUnchanged, calls[0].ArgumentResolution)
+	// Dynamic tools own no ID fields: every handle becomes its durable text
+	// form, and tool-private iN handles stay opaque.
+	require.JSONEq(t,
+		`{"issue_id":"i1","knowledge_id":"weknora://doc/doc-real","url":"https://example.com",`+
+			`"sql":"SELECT 'weknora://doc/doc-real'"}`,
+		calls[0].Function.Arguments)
+	require.Equal(t, ArgumentResolutionResolved, calls[0].ArgumentResolution)
 	require.Empty(t, calls[0].UnresolvedHandles)
 
 	messages := registry.EncodeMessages([]chat.Message{
@@ -305,7 +311,7 @@ func TestRegistryCompactsKnownIDsInBuiltInValidationErrors(t *testing.T) {
 		Success: false,
 		Error:   "document doc-real belongs to knowledge base kb-real",
 	})
-	require.Equal(t, "Error: document d1 belongs to knowledge base b1", got)
+	require.Equal(t, "Error: document doc://1 belongs to knowledge base kb://1", got)
 }
 
 func TestModelToolResultForTool_failedSkillScriptKeepsStdout(t *testing.T) {
@@ -334,11 +340,11 @@ func TestRegistryCompactsDatabaseQueryIDColumnsForBuiltInFollowUps(t *testing.T)
 			}},
 		},
 	})
-	require.Contains(t, modelOutput, "d1 | b1")
+	require.Contains(t, modelOutput, "doc://1 | kb://1")
 
 	calls := []types.LLMToolCall{{Function: types.FunctionCall{
 		Name:      "wiki_read_source_doc",
-		Arguments: `{"knowledge_id":"d1"}`,
+		Arguments: `{"knowledge_id":"doc://1"}`,
 	}}}
 	registry.DecodeToolCalls(calls)
 	require.JSONEq(t, `{"knowledge_id":"doc-real"}`, calls[0].Function.Arguments)
@@ -359,24 +365,60 @@ func TestRegistryDecodesCanonicalArgumentsForEveryBuiltInReferenceTool(t *testin
 		raw  string
 		want string
 	}{
-		{"knowledge search KB", "knowledge_search", `{"queries":["d1"],"knowledge_base_ids":["b1"]}`, `{"queries":["d1"],"knowledge_base_ids":["kb-real"]}`},
-		{"list document", "list_knowledge_chunks", `{"knowledge_id":"d1"}`, `{"knowledge_id":"doc-real"}`},
-		{"list chunk", "list_knowledge_chunks", `{"chunk_id":"c1"}`, `{"chunk_id":"chunk-real"}`},
-		{"document info", "get_document_info", `{"knowledge_ids":["d1"],"faq_ids":["c1"]}`, `{"knowledge_ids":["doc-real"],"faq_ids":["chunk-real"]}`},
-		{"knowledge graph", "query_knowledge_graph", `{"knowledge_base_ids":["b1"],"query":"topic"}`, `{"knowledge_base_ids":["kb-real"],"query":"topic"}`},
+		{
+			"knowledge search KB", "knowledge_search",
+			`{"queries":["doc://1"],"knowledge_base_ids":["kb://1"]}`,
+			`{"queries":["weknora://doc/doc-real"],"knowledge_base_ids":["kb-real"]}`,
+		},
+		{"list document", "list_knowledge_chunks", `{"knowledge_id":"doc://1"}`, `{"knowledge_id":"doc-real"}`},
+		{"list chunk", "list_knowledge_chunks", `{"chunk_id":"chunk://1"}`, `{"chunk_id":"chunk-real"}`},
+		{
+			"document info", "get_document_info",
+			`{"knowledge_ids":["doc://1"],"faq_ids":["chunk://1"]}`,
+			`{"knowledge_ids":["doc-real"],"faq_ids":["chunk-real"]}`,
+		},
+		{
+			"knowledge graph", "query_knowledge_graph",
+			`{"knowledge_base_ids":["kb://1"],"query":"topic"}`,
+			`{"knowledge_base_ids":["kb-real"],"query":"topic"}`,
+		},
 		{
 			"data analysis SQL", "data_analysis",
-			`{"knowledge_id":"d1","sql":"SELECT COUNT(*) FROM dataset WHERE label = 'd1'"}`,
-			`{"knowledge_id":"doc-real","sql":"SELECT COUNT(*) FROM dataset WHERE label = 'd1'"}`,
+			`{"knowledge_id":"doc://1","sql":"SELECT COUNT(*) FROM dataset WHERE label = 'doc://1'"}`,
+			`{"knowledge_id":"doc-real","sql":"SELECT COUNT(*) FROM dataset WHERE label = 'weknora://doc/doc-real'"}`,
 		},
-		{"data schema", "data_schema", `{"knowledge_id":"d1"}`, `{"knowledge_id":"doc-real"}`},
-		{"database SQL", "database_query", `{"sql":"SELECT * FROM chunks WHERE knowledge_base_id='b1'"}`, `{"sql":"SELECT * FROM chunks WHERE knowledge_base_id='kb-real'"}`},
-		{"web fetch", "web_fetch", `{"items":[{"url":"w1"}]}`, `{"items":[{"url":"https://example.com/page"}]}`},
-		{"wiki source", "wiki_read_source_doc", `{"knowledge_id":"d1"}`, `{"knowledge_id":"doc-real"}`},
-		{"wiki source refs", "wiki_write_page", `{"slug":"res://0001","source_refs":["d1"]}`, `{"slug":"summary/00000000-0000-0000-0000-000000000001","source_refs":["doc-real"]}`},
-		{"wiki suspected refs", "wiki_flag_issue", `{"slug":"concept/a","suspected_knowledge_ids":["d1"]}`, `{"slug":"concept/a","suspected_knowledge_ids":["doc-real"]}`},
-		{"wiki search KB", "wiki_search", `{"queries":["topic"],"knowledge_base_id":"b1"}`, `{"queries":["topic"],"knowledge_base_id":"kb-real"}`},
-		{"wiki issue", "wiki_update_issue", `{"issue_id":"i1","status":"resolved"}`, `{"issue_id":"issue-real","status":"resolved"}`},
+		{"data schema", "data_schema", `{"knowledge_id":"doc://1"}`, `{"knowledge_id":"doc-real"}`},
+		{
+			"database SQL", "database_query",
+			`{"sql":"SELECT * FROM chunks WHERE knowledge_base_id='kb://1'"}`,
+			`{"sql":"SELECT * FROM chunks WHERE knowledge_base_id='kb-real'"}`,
+		},
+		{
+			"web fetch", "web_fetch",
+			`{"items":[{"url":"url://1"}]}`,
+			`{"items":[{"url":"https://example.com/page"}]}`,
+		},
+		{"wiki source", "wiki_read_source_doc", `{"knowledge_id":"doc://1"}`, `{"knowledge_id":"doc-real"}`},
+		{
+			"wiki source refs", "wiki_write_page",
+			`{"slug":"res://0001","source_refs":["doc://1"]}`,
+			`{"slug":"summary/00000000-0000-0000-0000-000000000001","source_refs":["doc-real"]}`,
+		},
+		{
+			"wiki suspected refs", "wiki_flag_issue",
+			`{"slug":"concept/a","suspected_knowledge_ids":["doc://1"]}`,
+			`{"slug":"concept/a","suspected_knowledge_ids":["doc-real"]}`,
+		},
+		{
+			"wiki search KB", "wiki_search",
+			`{"queries":["topic"],"knowledge_base_id":"kb://1"}`,
+			`{"queries":["topic"],"knowledge_base_id":"kb-real"}`,
+		},
+		{
+			"wiki issue", "wiki_update_issue",
+			`{"issue_id":"i1","status":"resolved"}`,
+			`{"issue_id":"issue-real","status":"resolved"}`,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -401,8 +443,8 @@ func TestModelToolResultProtectsSummarySlugBeforeSourceCompaction(t *testing.T) 
 			"<knowledge_id>" + knowledgeID + "</knowledge_id>",
 	})
 	require.Contains(t, got, "[[res://0001|Summary]]")
-	require.Contains(t, got, "<knowledge_base_id>b1</knowledge_base_id>")
-	require.Contains(t, got, "<knowledge_id>d1</knowledge_id>")
+	require.Contains(t, got, "<knowledge_base_id>kb://1</knowledge_base_id>")
+	require.Contains(t, got, "<knowledge_id>doc://1</knowledge_id>")
 	require.NotContains(t, got, "summary/d1")
 }
 
@@ -418,8 +460,8 @@ func TestRegistryStreamDecoderRestoresSplitResourceAndCitationHandles(t *testing
 
 	decoder := registry.StreamDecoder()
 	got := decoder.Feed("image res://0") +
-		decoder.Feed("001 claim <ref id=\"c") +
-		decoder.Feed("1\"/>") + decoder.Flush()
+		decoder.Feed("001 claim <ref id=\"chunk:/") +
+		decoder.Feed("/1\"/>") + decoder.Flush()
 	require.Contains(t, got, "resource://AbCdEfGhIjKlMnOpQrStUv")
 	require.Contains(t, got, `chunk_id="chunk-real"`)
 }
@@ -481,7 +523,7 @@ func TestMCPBridgeKeepsExternalSchemasAndArgumentsOpaque(t *testing.T) {
 		registry.DecodeToolCalls(calls)
 		require.JSONEq(t, raw, calls[0].Function.Arguments)
 		require.Empty(t, calls[0].UnresolvedHandles)
-		schema := `{"input_schema":{"properties":{"knowledge_id":{"const":"d1"}}}}`
+		schema := `{"input_schema":{"properties":{"knowledge_id":{"const":"doc://1"}}}}`
 		require.Equal(
 			t,
 			schema,
@@ -509,27 +551,32 @@ func TestRegistryDecodesReadDocumentIDAgainstBothHandleTables(t *testing.T) {
 	for _, tc := range []struct{ name, tool, raw, want string }{
 		{
 			"read document by dN", "read_document",
-			`{"id":"d1","offset":20}`, `{"id":"doc-real","offset":20}`,
+			`{"id":"doc://1","offset":20}`, `{"id":"doc-real","offset":20}`,
 		},
 		{
 			"read document by cN", "read_document",
-			`{"id":"c1","context":2}`, `{"id":"chunk-real","context":2}`,
+			`{"id":"chunk://1","context":2}`, `{"id":"chunk-real","context":2}`,
 		},
 		{
 			"read document query stays literal", "read_document",
-			`{"id":"d1","query":"d1 c1"}`, `{"id":"doc-real","query":"d1 c1"}`,
+			`{"id":"doc://1","query":"d1 c1"}`, `{"id":"doc-real","query":"d1 c1"}`,
+		},
+		{
+			"read document query decodes handles to durable text", "read_document",
+			`{"id":"doc://1","query":"doc://1 chunk://1"}`,
+			`{"id":"doc-real","query":"weknora://doc/doc-real weknora://chunk/chunk-real"}`,
 		},
 		{
 			"search knowledge KB", "search_knowledge",
-			`{"query":"b1","knowledge_base_ids":["b1"]}`, `{"query":"b1","knowledge_base_ids":["kb-real"]}`,
+			`{"query":"b1","knowledge_base_ids":["kb://1"]}`, `{"query":"b1","knowledge_base_ids":["kb-real"]}`,
 		},
 		{
 			"list documents KB", "list_documents",
-			`{"knowledge_base_id":"b1","keyword":"b1"}`, `{"knowledge_base_id":"kb-real","keyword":"b1"}`,
+			`{"knowledge_base_id":"kb://1","keyword":"b1"}`, `{"knowledge_base_id":"kb-real","keyword":"b1"}`,
 		},
 		{
 			"wiki search KBs", "wiki_search",
-			`{"query":"topic","knowledge_base_ids":["b1"]}`, `{"query":"topic","knowledge_base_ids":["kb-real"]}`,
+			`{"query":"topic","knowledge_base_ids":["kb://1"]}`, `{"query":"topic","knowledge_base_ids":["kb-real"]}`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -540,15 +587,16 @@ func TestRegistryDecodesReadDocumentIDAgainstBothHandleTables(t *testing.T) {
 		})
 	}
 
-	// A bare "id" on a tool without the read_document contract is opaque.
-	calls := []types.LLMToolCall{{Function: types.FunctionCall{Name: "thinking", Arguments: `{"id":"d1"}`}}}
+	// A bare "id" on a tool without the read_document contract is not an ID
+	// field: the handle becomes durable text instead of a bare ID.
+	calls := []types.LLMToolCall{{Function: types.FunctionCall{Name: "thinking", Arguments: `{"id":"doc://1"}`}}}
 	registry.DecodeToolCalls(calls)
-	require.JSONEq(t, `{"id":"d1"}`, calls[0].Function.Arguments)
+	require.JSONEq(t, `{"id":"weknora://doc/doc-real"}`, calls[0].Function.Arguments)
 
-	unknown := []types.LLMToolCall{{Function: types.FunctionCall{Name: "read_document", Arguments: `{"id":"d9"}`}}}
+	unknown := []types.LLMToolCall{{Function: types.FunctionCall{Name: "read_document", Arguments: `{"id":"doc://9"}`}}}
 	registry.DecodeToolCalls(unknown)
 	require.Equal(t, ArgumentResolutionUnresolved, unknown[0].ArgumentResolution)
-	require.Equal(t, []string{"d9"}, unknown[0].UnresolvedHandles)
+	require.Equal(t, []string{"doc://9"}, unknown[0].UnresolvedHandles)
 }
 
 func TestModelOutputRendersReadDocumentHeaderAndNavigation(t *testing.T) {
@@ -572,11 +620,11 @@ func TestModelOutputRendersReadDocumentHeaderAndNavigation(t *testing.T) {
 		},
 	}})
 	require.Contains(t, paged, `<retrieval type="knowledge" mode="deep_read">`)
-	require.Contains(t, paged, `<document id="d1" kb="b1" title="Engine Manual">`)
+	require.Contains(t, paged, `<document id="doc://1" kb="kb://1" title="Engine Manual">`)
 	require.Contains(t, paged, `<info source="File Upload" file_type="pdf" parse_status="completed" chunk_count="12">`)
 	require.Contains(t, paged, `<description>How the engine works</description>`)
 	require.Contains(t, paged, `<metadata>author: Ada; region: EU</metadata>`)
-	require.Contains(t, paged, `<chunk id="c1" index="4" view="full">`)
+	require.Contains(t, paged, `<chunk id="chunk://1" index="4" view="full">`)
 	require.Contains(t, paged, `<pagination next_offset="6" remaining="6" />`)
 	require.NotContains(t, paged, "doc-real")
 
@@ -616,7 +664,7 @@ func TestModelOutputRendersReadDocumentHeaderAndNavigation(t *testing.T) {
 		"document":        map[string]any{"knowledge_id": "doc-real", "title": "Engine Manual", "chunk_count": 12},
 		"chunks":          []map[string]interface{}{},
 	}})
-	require.Contains(t, empty, `<document id="d1" title="Engine Manual">`)
+	require.Contains(t, empty, `<document id="doc://1" title="Engine Manual">`)
 	require.Contains(t, empty, `<matches query="absent" count="0" />`)
 	require.Contains(t, empty, "<hint>No chunk contains every word of the query.")
 }
@@ -638,11 +686,11 @@ func TestModelOutputRendersDocumentListWithPagination(t *testing.T) {
 			{"knowledge_id": "doc-b", "title": "Beta", "file_type": "md", "parse_status": "completed"},
 		},
 	}})
-	require.Contains(t, out, `<documents kb="b1" total="3" page="1" next_page="2">`)
+	require.Contains(t, out, `<documents kb="kb://1" total="3" page="1" next_page="2">`)
 	require.Contains(t, out,
-		`<document id="d1" title="Alpha" file_type="pdf" parse_status="completed" updated_at="2026-03-04">`)
+		`<document id="doc://1" title="Alpha" file_type="pdf" parse_status="completed" updated_at="2026-03-04">`)
 	require.Contains(t, out, `<description>First</description>`)
-	require.Contains(t, out, `<document id="d2" title="Beta"`)
+	require.Contains(t, out, `<document id="doc://2" title="Beta"`)
 	require.NotContains(t, out, "doc-a")
 	require.NotContains(t, out, "kb-real")
 }
@@ -672,7 +720,7 @@ func TestModelOutputReportsSearchModeAndFallbacks(t *testing.T) {
 	})
 	require.Contains(t, fallback, `<retrieval requested_mode="keyword" type="knowledge" mode="semantic">`)
 	require.Contains(t, fallback,
-		`<mode_fallback kb="b1" mode="semantic" reason="FAQ bases are indexed for semantic search only" />`)
+		`<mode_fallback kb="kb://1" mode="semantic" reason="FAQ bases are indexed for semantic search only" />`)
 	require.NotContains(t, fallback, "kb-faq")
 
 	legacy := registry.ModelToolResultForTool("knowledge_search", &types.ToolResult{Success: true, Data: map[string]any{
@@ -703,4 +751,33 @@ func TestDecodeResponseDropsSignatureWhenReasoningIsDecoded(t *testing.T) {
 	}
 	registry.DecodeResponse(untouched)
 	require.Equal(t, "anthropic-messages:sig", untouched.ReasoningSignature)
+}
+
+func TestWebFetchReferencesStayBoundToSuppliedPages(t *testing.T) {
+	registry := NewRegistry(true)
+	registry.RegisterWeb("https://example.com/one?a=1&b=2", "First")
+	messages := []chat.Message{{
+		Role: "tool", Name: "web_search",
+		Content: `<retrieval><page id="url://1" title="First"></page></retrieval>`,
+	}}
+	encoded := registry.EncodeMessages(messages)
+	require.Contains(t, encoded[0].Content, `url="https://example.com/one?a=1&amp;b=2"`)
+	require.Equal(t, encoded[0].Content, registry.EncodeMessages(encoded)[0].Content)
+	calls := []types.LLMToolCall{{Function: types.FunctionCall{
+		Name:      "web_fetch",
+		Arguments: `{"items":[{"url":"url://1"},{"url":"url://2"}]}`,
+	}}}
+	registry.DecodeToolCalls(calls)
+	require.Contains(t, calls[0].Function.Arguments, "https://example.com/one")
+	require.Equal(t, []string{"url://2"}, calls[0].UnresolvedHandles)
+	// Failed results for invented IDs do not allocate them or shift future IDs.
+	failed := registry.ModelToolResultForTool("web_fetch", &types.ToolResult{Data: map[string]interface{}{
+		"display_type": "web_fetch_results",
+		"results": []map[string]interface{}{{
+			"url": "url://2", "status": "failed", "error_code": "unknown_page_reference",
+		}},
+	}})
+	require.Contains(t, failed, `requested_reference="url://2"`)
+	require.NotContains(t, failed, `id="url://2"`)
+	require.Equal(t, "url://2", registry.RegisterWeb("https://example.com/two", "Second"))
 }

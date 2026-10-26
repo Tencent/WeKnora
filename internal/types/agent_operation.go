@@ -46,10 +46,13 @@ type AuditAgentAction struct {
 	SessionID string `json:"session_id,omitempty"`
 	AgentID   string `json:"agent_id,omitempty"`
 	Operation string `json:"operation,omitempty"`
+	// ActingVia is the principal's ActingVia when the agent ran on its own,
+	// e.g. "automation:<id>".
+	ActingVia string `json:"acting_via,omitempty"`
 }
 
 func (a AuditAgentAction) valid() bool {
-	return a.SessionID != "" || a.AgentID != "" || a.Operation != ""
+	return a.SessionID != "" || a.AgentID != "" || a.Operation != "" || a.ActingVia != ""
 }
 
 type auditAgentActionContextKey struct{}
@@ -72,4 +75,16 @@ func AuditAgentActionFromContext(ctx context.Context) (AuditAgentAction, bool) {
 		return AuditAgentAction{}, false
 	}
 	return a, true
+}
+
+// ActingViaFromContext returns what acts for the caller in ctx, or "" when
+// the caller acts in person.
+func ActingViaFromContext(ctx context.Context) string {
+	if a, ok := AuditAgentActionFromContext(ctx); ok && a.ActingVia != "" {
+		return a.ActingVia
+	}
+	if p, ok := PrincipalFromContext(ctx); ok {
+		return p.ActingVia
+	}
+	return ""
 }

@@ -691,7 +691,20 @@ type TenantSandboxConfig struct {
 	// SkillRolloutNextTurn rebuild on the next chat turn. SkillRolloutNewSession
 	// leaves those sandboxes on the previous image; only sessions that start
 	// afterwards boot the new snapshot.
+	// User allocation always keeps existing shared machines, regardless of this setting.
 	SkillRollout string `json:"skill_rollout,omitempty"`
+
+	// AllocationMode decides how a session that has not yet used a sandbox
+	// of this config is placed: "session" (default) gives it a machine of its
+	// own, "user" lets one verified owner's sessions share a machine. A
+	// session never changes mode after its first use; see
+	// internal/sandbox/allocation.
+	AllocationMode string `json:"allocation_mode,omitempty"`
+
+	// UserSandboxEmptyRetentionDays is how long a user machine with no live
+	// session is kept before the reclaim job deletes it. 0 means the default
+	// (7); values above 90 are rejected.
+	UserSandboxEmptyRetentionDays int `json:"user_sandbox_empty_retention_days,omitempty"`
 
 	// Network is the outbound/inbound network policy applied to every sandbox
 	// created from this config — chat sessions, skill installs and deep
@@ -844,14 +857,23 @@ const (
 	SkillRolloutNewSession = "new_session"
 )
 
+const (
+	// SandboxAllocationSession is one sandbox per session.
+	SandboxAllocationSession = "session"
+	// SandboxAllocationUser shares one sandbox across a user's sessions.
+	// allocation.ParseMode reads the same strings.
+	SandboxAllocationUser = "user"
+)
+
 // RebuildsExistingOnSkillChange reports whether an install or removal should
-// mark already-bound sandboxes stale. Unknown values fail toward rebuilding
-// so a corrupted row cannot pin every session on a retired image.
+// mark already-bound sandboxes stale. Shared user machines always keep their
+// current image. Unknown rollout values retain the per-session rebuild default.
 func (c *TenantSandboxConfig) RebuildsExistingOnSkillChange() bool {
 	if c == nil {
 		return true
 	}
-	return strings.TrimSpace(c.SkillRollout) != SkillRolloutNewSession
+	return strings.TrimSpace(c.AllocationMode) != SandboxAllocationUser &&
+		strings.TrimSpace(c.SkillRollout) != SkillRolloutNewSession
 }
 
 // SkillImageConfig is the pointer to the snapshot that carries the skills

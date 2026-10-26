@@ -309,3 +309,54 @@ func TestMergeFallbackWithoutLossRecordsNothing(t *testing.T) {
 		t.Fatalf("fallback input = %d, truncation = %+v", len(got), cm.Truncation)
 	}
 }
+
+type questionLookupKB struct {
+	interfaces.KnowledgeBaseService
+	calls [][]string
+	kbs   []*types.KnowledgeBase
+	err   error
+}
+
+func (s *questionLookupKB) GetKnowledgeBasesByIDsOnly(_ context.Context, ids []string) ([]*types.KnowledgeBase, error) {
+	s.calls = append(s.calls, append([]string(nil), ids...))
+	return s.kbs, s.err
+}
+
+func TestSkipDisabledGeneratedQuestionsLooksUpOnce(t *testing.T) {
+	kb := &questionLookupKB{kbs: []*types.KnowledgeBase{
+		{ID: "off", Type: types.KnowledgeBaseTypeDocument},
+		{
+			ID: "on", Type: types.KnowledgeBaseTypeDocument,
+			QuestionGenerationConfig: &types.QuestionGenerationConfig{Enabled: true},
+		},
+		{ID: "faq", Type: types.KnowledgeBaseTypeFAQ},
+	}}
+	results := []*types.SearchResult{
+		{ID: "a", KnowledgeBaseID: "off"},
+		{ID: "b", KnowledgeBaseID: "on"},
+		{ID: "c", KnowledgeBaseID: "faq"},
+		{ID: "d", KnowledgeBaseID: "off"},
+	}
+	(&PluginRerank{kbService: kb}).skipDisabledGeneratedQuestions(context.Background(), results)
+	if len(kb.calls) != 1 {
+		t.Fatalf("knowledge base lookups = %d, want 1", len(kb.calls))
+	}
+	if len(kb.calls[0]) != 3 {
+		t.Fatalf("looked up %v, want the three distinct knowledge bases", kb.calls[0])
+	}
+	if !results[0].SkipGeneratedQuestions || results[1].SkipGeneratedQuestions ||
+		results[2].SkipGeneratedQuestions || !results[3].SkipGeneratedQuestions {
+		t.Fatalf("skip flags = %v %v %v %v",
+			results[0].SkipGeneratedQuestions, results[1].SkipGeneratedQuestions,
+			results[2].SkipGeneratedQuestions, results[3].SkipGeneratedQuestions)
+	}
+}
+
+func TestSkipDisabledGeneratedQuestionsLeavesFlagsUnsetOnLookupError(t *testing.T) {
+	kb := &questionLookupKB{err: errors.New("db down")}
+	results := []*types.SearchResult{{ID: "a", KnowledgeBaseID: "off"}}
+	(&PluginRerank{kbService: kb}).skipDisabledGeneratedQuestions(context.Background(), results)
+	if results[0].SkipGeneratedQuestions {
+		t.Fatal("a failed knowledge base lookup marked the passage")
+	}
+}

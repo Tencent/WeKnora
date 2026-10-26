@@ -269,6 +269,28 @@ func newAPIError(status int, body []byte) *APIError {
 	return &APIError{StatusCode: status, Body: string(body), Code: extractServerCode(body)}
 }
 
+// maxErrorBodyBytes caps how much of a failed response body the SDK reads.
+//
+// A non-2xx body is copied verbatim into APIError.Body and interpolated into
+// APIError.Error(), which callers log or print. A misconfigured server, a
+// hostile origin, or a proxy serving an HTML error page can make that body
+// arbitrarily large, so the SDK would both hold it in memory and hand the caller
+// an unbounded error string. 1 MiB matches the cap internal/models/api applies
+// to its own error bodies and sits far above any structured error the server
+// emits.
+const maxErrorBodyBytes = 1 << 20
+
+// readErrorBody reads the diagnostic body of a failed response, bounded by
+// maxErrorBodyBytes.
+//
+// Truncating here costs nothing: callers branch on the status code and on
+// APIError.Code, and the body exists only to explain the failure. The read error
+// is dropped, as before, so a broken connection cannot mask the HTTP status.
+func readErrorBody(r io.Reader) []byte {
+	body, _ := io.ReadAll(io.LimitReader(r, maxErrorBodyBytes))
+	return body
+}
+
 // extractServerCode pulls the server's structured error code from a JSON error
 // body ({"code":1003,...}). Returns 0 when the body isn't JSON or carries no code.
 func extractServerCode(body []byte) int {
@@ -286,8 +308,7 @@ func parseResponse(resp *http.Response, target interface{}) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return newAPIError(resp.StatusCode, body)
+		return newAPIError(resp.StatusCode, readErrorBody(resp.Body))
 	}
 
 	if target == nil {

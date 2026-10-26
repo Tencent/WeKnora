@@ -52,7 +52,7 @@
           />
           <div v-if="session.role === 'user'" class="message-row">
             <EmbedUserMessage
-              :content="String(session.content || '')"
+              :content="stripHostContextFromQuery(String(session.content || ''))"
               :mentioned_items="asUnknownArray(session.mentioned_items)"
               :images="asEmbedImages(session.images)"
               :attachments="asEmbedAttachments(session.attachments)"
@@ -144,6 +144,7 @@ import { isAwaitingInput } from '@/composables/useChatStreamHandler'
 import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue'
 import MessageTimestamp from '@/components/chat/MessageTimestamp.vue'
 import { shouldShowConversationTimestamp } from '@/utils/messageTimestamp'
+import { stripHostContextFromQuery } from '@/utils/embedContext'
 import type { MessageSuggestionItem, MessageSuggestionSet } from '@/api/message-suggestion'
 
 provideChatReferencesDrawer()
@@ -343,11 +344,17 @@ const fetchSuggestedQuestions = async () => {
   }
 }
 
-const onSendMsg = (query: string, imageFiles: File[] = [], attachmentFiles: File[] = []) => {
+const onSendMsg = (
+  query: string,
+  imageFiles: File[] = [],
+  attachmentFiles: File[] = [],
+  onPrepared?: () => void,
+) => {
   void sendMsg(query, {
     webSearchEnabled: webSearchEnabled.value,
     imageFiles,
     attachmentFiles,
+    onPrepared,
   })
 }
 

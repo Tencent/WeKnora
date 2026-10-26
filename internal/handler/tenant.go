@@ -100,8 +100,10 @@ type createTenantRequest struct {
 // Pointers so we can distinguish "not sent" from "explicit empty
 // string"; when nil we leave the existing column untouched.
 type updateTenantRequest struct {
-	Name        *string `json:"name"        binding:"omitempty,min=1,max=128"`
-	Description *string `json:"description" binding:"omitempty,max=512"`
+	// New workspace name; cannot be blank, at most 128 characters.
+	Name *string `json:"name" binding:"omitempty,min=1,max=128" extensions:"x-agent"`
+	// New description, at most 512 characters; empty clears it. Omission preserves it.
+	Description *string `json:"description" binding:"omitempty,max=512" extensions:"x-agent"`
 }
 
 type apiPrincipalConfigRequest struct {
@@ -573,7 +575,7 @@ func (h *TenantHandler) GetTenant(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id       path      int           true  "空间ID"
-// @Param        request  body      types.Tenant  true  "空间信息"
+// @Param        request  body      updateTenantRequest  true  "空间名称或描述"
 // @Success      200      {object}  handler.DataResponse{data=dto.TenantResponse}  "更新后的空间"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -604,18 +606,8 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
-
-	// Load the persisted tenant so any column the request omits keeps
-	// its current value through the GORM `Updates(struct)` zero-skip
-	// behaviour (we always pass back the full struct).
-	existing, err := h.service.GetTenantByID(ctx, id)
-	if err != nil {
-		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
-		} else {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to load workspace").WithDetails(err.Error()))
-		}
+	if req.Name == nil && req.Description == nil {
+		_ = c.Error(errors.NewValidationError("name or description is required"))
 		return
 	}
 
@@ -625,15 +617,14 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 			c.Error(errors.NewValidationError("name cannot be blank"))
 			return
 		}
-		existing.Name = trimmed
+		req.Name = &trimmed
 	}
 	if req.Description != nil {
-		existing.Description = strings.TrimSpace(*req.Description)
+		trimmed := strings.TrimSpace(*req.Description)
+		req.Description = &trimmed
 	}
 
-	logger.Infof(ctx, "Updating tenant, ID: %d, Name: %s", id, secutils.SanitizeForLog(existing.Name))
-
-	updatedTenant, err := h.service.UpdateTenant(ctx, existing)
+	updatedTenant, err := h.service.UpdateTenantProfile(ctx, id, req.Name, req.Description)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			logger.Error(ctx, "Failed to update workspace: application error", appErr)

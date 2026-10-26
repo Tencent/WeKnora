@@ -9,6 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -85,7 +86,7 @@ func newRunTool(d *fakeDispatcher, gate approval.BuiltinApproval) *RunOperationT
 func interactiveCtx() context.Context {
 	return WithToolExecContext(context.Background(), &ToolExecContext{
 		SessionID: "s1", UserID: "web_user:u1", ToolCallID: "call-1",
-		EventBus: event.NewEventBus(), Interactive: true,
+		EventBus: event.NewEventBus(), Mode: types.RunModeAttended,
 	})
 }
 
@@ -103,6 +104,7 @@ func TestRunOperationReadProjectsResult(t *testing.T) {
 	res, err := tool.Execute(interactiveCtx(), runArgs("knowledge.get", map[string]any{"knowledge_id": "k1"}))
 	require.NoError(t, err)
 	require.True(t, res.Success, res.Error)
+	assert.Empty(t, res.Data)
 	assert.NotContains(t, res.Output, "local://secret", "undeclared fields never reach the model")
 	assert.Contains(t, res.Output, `"error_message":"encrypted pdf"`)
 	require.Len(t, d.calls, 1)
@@ -382,6 +384,91 @@ func TestRunOperationApprovalNamesTheChange(t *testing.T) {
 	assert.NotContains(t, desc, "k1")
 }
 
+func TestRunOperationAgentApprovals(t *testing.T) {
+	agent := `{"success":true,"data":{"id":"a1","name":"Support","config":{"system_prompt":"Be brief."}}}`
+	d := &fakeDispatcher{responses: map[string]*operations.Response{
+		"GET /api/v1/agents/a1":   {Status: http.StatusOK, Body: []byte(agent)},
+		"POST /api/v1/agents":     {Status: http.StatusCreated, Body: []byte(agent)},
+		"PATCH /api/v1/agents/a1": {Status: http.StatusOK, Body: []byte(agent)},
+		"GET /api/v1/models/m1": {
+			Status: http.StatusOK,
+			Body:   []byte(`{"data":{"id":"m1","name":"qwen3-max","display_name":"Qwen3 Max"}}`),
+		},
+		"GET /api/v1/knowledge-bases/kb1": {Status: http.StatusOK, Body: []byte(`{"data":{"name":"Specs"}}`)},
+	}}
+	gate := &fakeApprover{decision: approval.Decision{Approved: true, PendingID: "p1"}}
+	tool := newRunTool(d, gate)
+
+	res, _ := tool.Execute(interactiveCtx(), runArgs("agent.create", map[string]any{"name": "Release\nnotes"}))
+	require.True(t, res.Success, res.Error)
+	require.Len(t, gate.requests, 1)
+	assert.Equal(t, "创建智能体\nRelease notes", gate.requests[0].Description)
+	assert.Contains(t, res.Output, `"agent_id":"a1"`)
+
+	gate.requests = nil
+	res, _ = tool.Execute(interactiveCtx(), runArgs("agent.update", map[string]any{
+		"agent_id": "a1", "agent_mode": "smart-reasoning", "model_id": "m1",
+		"knowledge_base_ids": []string{"kb1", "kb-gone"},
+		"system_prompt":      "Answer in English.", "web_search_enabled": false,
+	}))
+	require.True(t, res.Success, res.Error)
+	require.Len(t, gate.requests, 1)
+	desc := gate.requests[0].Description
+	assert.Contains(t, desc, "Support")
+	assert.Contains(t, desc, "Mode: smart-reasoning")
+	assert.Contains(t, desc, "Model: Qwen3 Max")
+	assert.Contains(t, desc, "Knowledge bases: Specs, kb-gone", "an unreadable id is shown as is")
+	assert.Contains(t, desc, "System prompt (18 characters): Answer in English.")
+	assert.Contains(t, desc, "Web search: off")
+	assert.JSONEq(t, `{"agent_mode":"smart-reasoning","model_id":"m1","knowledge_bases":["kb1","kb-gone"],`+
+		`"system_prompt":"Answer in English.","web_search_enabled":false}`, string(d.calls[len(d.calls)-1].call.Body))
+}
+
+func TestRunOperationKnowledgeBaseCreateApproval(t *testing.T) {
+	d := &fakeDispatcher{responses: map[string]*operations.Response{
+		"GET /api/v1/models/emb": {
+			Status: http.StatusOK,
+			Body:   []byte(`{"data":{"id":"emb","name":"builtin-embedding","display_name":"builtin-embedding"}}`),
+		},
+		"GET /api/v1/models/sum": {
+			Status: http.StatusOK,
+			Body:   []byte(`{"data":{"id":"sum","name":"qwen","display_name":"Qwen"}}`),
+		},
+		"POST /api/v1/knowledge-bases": {
+			Status: http.StatusOK,
+			Body:   []byte(`{"data":{"id":"kb","name":"助手测试"}}`),
+		},
+	}}
+	gate := &fakeApprover{decision: approval.Decision{Approved: true, PendingID: "p1"}}
+	res, _ := newRunTool(d, gate).Execute(interactiveCtx(), runArgs("knowledge_base.create", map[string]any{
+		"name": "助手测试", "type": "document",
+		"embedding_model_id": "emb", "summary_model_id": "sum",
+		"vlm_model_id": "builtin-vllm", "wiki_enabled": true,
+	}))
+	require.True(t, res.Success, res.Error)
+	require.Len(t, gate.requests, 1)
+	assert.Equal(t,
+		"创建知识库\n助手测试\nType: document\nEmbedding model: builtin-embedding\n"+
+			"Summary model: Qwen\nCaption model: builtin-vllm\nIndexes: wiki on",
+		gate.requests[0].Description)
+}
+
+func TestRunOperationAgentUpdateRefusesTruncatedPrompt(t *testing.T) {
+	long, err := json.Marshal(map[string]any{"data": map[string]any{
+		"id": "a1", "name": "Support", "config": map[string]any{"system_prompt": string(make([]rune, 8001))},
+	}})
+	require.NoError(t, err)
+	d := &fakeDispatcher{responses: map[string]*operations.Response{
+		"GET /api/v1/agents/a1": {Status: http.StatusOK, Body: long},
+	}}
+	gate := &fakeApprover{decision: approval.Decision{Approved: true, PendingID: "p1"}}
+	res, _ := newRunTool(d, gate).Execute(interactiveCtx(), runArgs("agent.update",
+		map[string]any{"agent_id": "a1", "system_prompt": "short"}))
+	assert.False(t, res.Success)
+	assert.Contains(t, res.Error, "truncated")
+	assert.Empty(t, gate.requests)
+}
+
 func TestRunOperationFollowsAccessLevel(t *testing.T) {
 	responses := map[string]*operations.Response{
 		"GET /api/v1/knowledge/k1":          {Status: http.StatusOK, Body: []byte(docBody)},
@@ -448,6 +535,47 @@ func TestRunOperationFollowsAccessLevel(t *testing.T) {
 	})
 }
 
+func TestRunOperationProbesRunWithoutApprovalWithinABudget(t *testing.T) {
+	d := &fakeDispatcher{responses: map[string]*operations.Response{
+		"POST /api/v1/knowledge-bases/kb1/hybrid-search": {
+			Status: http.StatusOK,
+			Body:   []byte(`{"success":true,"data":[{"id":"c1","content":"hello","score":0.5,"match_type":0}]}`),
+		},
+	}}
+	gate := &fakeApprover{decision: approval.Decision{Approved: true, PendingID: "p1"}}
+	tool := NewRunOperationTool(OperationsRuntime{
+		Catalog:    operations.Builtin(),
+		Dispatcher: d,
+		Gate:       gate,
+		Identity:   operations.Identity{UserID: "u1", TenantID: 7},
+		Access:     operations.Access{Level: types.AssistantAccessReadOnly},
+	})
+	search := runArgs("knowledge_base.search", map[string]any{
+		"knowledge_base_id": "kb1", "query_text": "refund policy", "vector_threshold": 0.3,
+	})
+
+	for i := 0; i < maxProbesPerRun; i++ {
+		res, err := tool.Execute(interactiveCtx(), search)
+		require.NoError(t, err)
+		require.True(t, res.Success, res.Error)
+		assert.Empty(t, res.Data, "a probe reports no data change")
+	}
+	assert.Empty(t, gate.requests, "probes never ask, even at read-only")
+	require.Len(t, d.calls, maxProbesPerRun)
+	assert.JSONEq(t, `{"query_text":"refund policy","vector_threshold":0.3}`, string(d.calls[0].call.Body))
+
+	res, err := tool.Execute(interactiveCtx(), search)
+	require.NoError(t, err)
+	assert.False(t, res.Success)
+	assert.Contains(t, res.Error, "probe operations")
+	assert.Len(t, d.calls, maxProbesPerRun, "the call over budget is not dispatched")
+
+	reads := runArgs("knowledge.get", map[string]any{"knowledge_id": "k1"})
+	d.responses["GET /api/v1/knowledge/k1"] = &operations.Response{Status: http.StatusOK, Body: []byte(docBody)}
+	res, _ = tool.Execute(interactiveCtx(), reads)
+	assert.True(t, res.Success, "reads do not count against the probe budget")
+}
+
 func TestRunOperationAutoWriteHonorsResumedAnswer(t *testing.T) {
 	for _, approved := range []bool{false, true} {
 		name := "declined"
@@ -469,7 +597,7 @@ func TestRunOperationAutoWriteHonorsResumedAnswer(t *testing.T) {
 			tool.rt.Access.Level = types.AssistantAccessAutoWrite
 			ctx := interactiveCtx()
 			meta, _ := ToolExecFromContext(ctx)
-			meta.Interactive = false
+			meta.Mode = types.RunModeUnattended
 			meta.Answered = &types.AgentPrompt{Kind: types.AgentPromptKindToolApproval}
 			res, err := tool.Execute(ctx, runArgs("knowledge.reparse", map[string]any{"knowledge_id": "k1"}))
 			require.NoError(t, err)
@@ -483,6 +611,10 @@ func TestRunOperationAutoWriteHonorsResumedAnswer(t *testing.T) {
 			require.True(t, res.Success, res.Error)
 			require.Len(t, d.calls, 1)
 			assert.Equal(t, "/api/v1/knowledge/k2/reparse", d.calls[0].call.Path)
+			assert.Equal(t, map[string]any{
+				"operation": "knowledge.reparse", "area": "knowledge",
+				"ids": map[string][]string{"knowledge_id": {"k2"}},
+			}, res.Data["data_change"])
 			assert.Equal(t, []string{"p1"}, gate.executed)
 		})
 	}
@@ -537,4 +669,121 @@ func TestFindOperationsDescribesMatches(t *testing.T) {
 
 	res, _ = tool.Execute(context.Background(), json.RawMessage(`{"query":"zzz-unmatched"}`))
 	assert.Contains(t, res.Output, "hint")
+
+	res, err = tool.Execute(context.Background(), json.RawMessage(`{"query":"generated files","domain":"artifact"}`))
+	require.NoError(t, err)
+	require.True(t, res.Success)
+	require.NoError(t, json.Unmarshal([]byte(res.Output), &out))
+	require.Len(t, out.Operations, 1)
+	assert.Equal(t, "artifact.list", out.Operations[0].ID)
+}
+
+func TestRunOperationAgentSkillsApproval(t *testing.T) {
+	for _, tc := range []struct {
+		mode, want string
+		names      []string
+	}{
+		{"selected", "Skills: ppt-generator, csv-analysis", []string{"ppt-generator", "csv-analysis"}},
+		{"none", "Skills: (none)", []string{}},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			body := []byte(`{"data":{"id":"a1","name":"Support","config":{}}}`)
+			d := &fakeDispatcher{responses: map[string]*operations.Response{
+				"GET /api/v1/agents/a1":   {Status: http.StatusOK, Body: body},
+				"PATCH /api/v1/agents/a1": {Status: http.StatusOK, Body: body},
+			}}
+			gate := &fakeApprover{decision: approval.Decision{Approved: true, PendingID: "p1"}}
+			res, err := newRunTool(d, gate).Execute(interactiveCtx(), runArgs("agent.update", map[string]any{
+				"agent_id": "a1", "skills_selection_mode": tc.mode, "selected_skills": tc.names,
+			}))
+			require.NoError(t, err)
+			require.True(t, res.Success, res.Error)
+			require.Len(t, gate.requests, 1)
+			assert.Contains(t, gate.requests[0].Description, "Skills scope: "+tc.mode+"\n"+tc.want)
+			require.Len(t, d.calls, 3)
+			for _, call := range d.calls {
+				assert.Equal(t, "/api/v1/agents/a1", call.call.Path, "skill names need no ID lookup")
+			}
+		})
+	}
+}
+
+func TestRunOperationDataChangeDecodedIDs(t *testing.T) {
+	registry := modelcontext.NewRegistry(true)
+	kb := registry.RegisterKnowledgeBase("real-kb")
+	doc := registry.RegisterDocument("real-doc")
+	calls := []types.LLMToolCall{{Function: types.FunctionCall{
+		Name: ToolRunOperation,
+		Arguments: string(runArgs("knowledge.move_to_folder", map[string]any{
+			"knowledge_base_id": kb, "knowledge_ids": []string{doc}, "folder_path": "docs",
+		})),
+	}}}
+	registry.DecodeToolCalls(calls)
+	d := &fakeDispatcher{responses: map[string]*operations.Response{}}
+	op, ok := operations.Builtin().Get("knowledge.move_to_folder")
+	require.True(t, ok)
+	input, err := parseRunOperationInput(json.RawMessage(calls[0].Function.Arguments))
+	require.NoError(t, err)
+	call, err := op.Build(input.Params)
+	require.NoError(t, err)
+	d.responses[call.Method+" "+call.Path] = &operations.Response{
+		Status: http.StatusOK, Body: []byte(`{"success":true}`),
+	}
+	tool := newRunTool(d, nil)
+	tool.rt.Access.Level = types.AssistantAccessAutoWrite
+	result, err := tool.Execute(context.Background(), json.RawMessage(calls[0].Function.Arguments))
+	require.NoError(t, err)
+	require.True(t, result.Success, result.Error)
+	require.Len(t, d.calls, 1)
+	assert.Contains(t, string(d.calls[0].call.Body), "real-kb")
+	assert.Contains(t, string(d.calls[0].call.Body), "real-doc")
+	assert.Equal(t, map[string]any{
+		"operation": op.ID, "area": "knowledge",
+		"ids": map[string][]string{"knowledge_base_id": {"real-kb"}, "knowledge_id": {"real-doc"}},
+	}, result.Data["data_change"])
+	assert.NotContains(t, result.Output, "data_change")
+	assert.NotContains(t, registry.ModelToolResultForTool(ToolRunOperation, result), "data_change")
+}
+
+func TestRunOperationDataChangeCreatedIDsAndFailures(t *testing.T) {
+	for _, status := range []int{http.StatusCreated, http.StatusForbidden, http.StatusInternalServerError} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			d := &fakeDispatcher{responses: map[string]*operations.Response{
+				"POST /api/v1/agents": {Status: status, Body: []byte(`{"data":{"id":"created-agent"}}`)},
+			}}
+			tool := newRunTool(d, nil)
+			tool.rt.Access.Level = types.AssistantAccessAutoWrite
+			result, err := tool.Execute(context.Background(), runArgs("agent.create", map[string]any{"name": "Agent"}))
+			require.NoError(t, err)
+			if status != http.StatusCreated {
+				require.False(t, result.Success)
+				assert.Empty(t, result.Data)
+				return
+			}
+			require.True(t, result.Success, result.Error)
+			assert.Equal(t, map[string]any{
+				"operation": "agent.create", "area": "agent",
+				"ids": map[string][]string{"agent_id": {"created-agent"}},
+			}, result.Data["data_change"])
+		})
+	}
+}
+
+func TestOperationDataChangeSelectsOnlyResourceIDs(t *testing.T) {
+	op, ok := operations.Builtin().Get("knowledge.move")
+	require.True(t, ok)
+	input, err := parseRunOperationInput(runArgs(op.ID, map[string]any{
+		"knowledge_base_id": " destination ", "source_knowledge_base_id": "source",
+		"knowledge_ids": []string{"doc", "doc"}, "mode": "reuse_vectors",
+	}))
+	require.NoError(t, err)
+	_, err = op.Build(input.Params)
+	require.NoError(t, err)
+	change := operationDataChange(op, input.Params, operations.Projected{})
+	assert.Equal(t, map[string][]string{
+		"knowledge_base_id": {"source", "destination"}, "knowledge_id": {"doc"},
+	}, change["ids"])
+	create, ok := operations.Builtin().Get("agent.create")
+	require.True(t, ok)
+	assert.NotContains(t, operationDataChange(create, nil, operations.Projected{}), "ids")
 }

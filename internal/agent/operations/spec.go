@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,6 +43,14 @@ const (
 	// extAgentKeys lists the keys of a free-form object field that are
 	// projected, separated by "|".
 	extAgentKeys = "x-agent-keys"
+	// extAgentDetail limits a response field to operations that return a
+	// single object, so a long field (a prompt, say) does not repeat on
+	// every item of a list.
+	extAgentDetail = "x-agent-detail"
+	// extAgentResponse keeps a field in responses and out of request
+	// parameters. Identifiers and computed counts are projected when the
+	// model reads an object, and are not something it may set on create.
+	extAgentResponse = "x-agent-response"
 )
 
 // agentItems is ItemTarget as written in x-agent:
@@ -61,6 +70,8 @@ type agentOperation struct {
 	Target                string `json:"target"`
 	Label                 string `json:"label"`
 	RequireCompleteTarget bool   `json:"require_complete_target,omitempty"`
+	// LabelParam labels the approval of a creation that has no target.
+	LabelParam string `json:"label_param,omitempty"`
 	// Items also resolves each item of a batch for the approval.
 	Items *agentItems `json:"items,omitempty"`
 	// Root overrides the projected part of the response. By default it is
@@ -72,7 +83,13 @@ type agentOperation struct {
 	CatchAll string `json:"catch_all"`
 	// Role is the lowest workspace role the route accepts, when it differs
 	// from the default for the risk.
-	Role types.TenantRole `json:"role,omitempty"`
+	Role        types.TenantRole `json:"role,omitempty"`
+	SystemAdmin bool             `json:"system_admin,omitempty"`
+	// AlwaysConfirm asks before every call of a write; see Operation.
+	AlwaysConfirm bool `json:"always_confirm,omitempty"`
+	// Method picks one route when the handler's doc lists several (a legacy
+	// GET next to the POST, say); the others stay out of the catalog.
+	Method string `json:"method,omitempty"`
 }
 
 type specDocument struct {
@@ -128,6 +145,9 @@ type specSchema struct {
 	AgentMax      string                 `json:"x-agent-maximum"`
 	AgentMaxBytes string                 `json:"x-agent-max-bytes"`
 	AgentMaxRunes string                 `json:"x-agent-max-runes"`
+	AgentDetail   bool                   `json:"x-agent-detail"`
+	// AgentResponse projects the field and does not accept it as a parameter.
+	AgentResponse bool `json:"x-agent-response"`
 	// AgentRequired makes an API-optional field mandatory for the model.
 	AgentRequired bool `json:"x-agent-required"`
 }
@@ -162,35 +182,57 @@ func FromSpec(document []byte) ([]Operation, error) {
 			if len(sop.Agent) == 0 {
 				continue
 			}
-			op, err := doc.compile(strings.ToUpper(method), path, sop)
+			op, skip, err := doc.compile(strings.ToUpper(method), path, sop)
 			if err != nil {
 				return nil, fmt.Errorf("%s %s: %w", strings.ToUpper(method), path, err)
 			}
-			ops = append(ops, op)
+			if !skip {
+				ops = append(ops, op)
+			}
 		}
 	}
 	return ops, nil
 }
 
-func (doc *specDocument) compile(method, path string, sop specOperation) (Operation, error) {
+// compile builds the operation for one route, or reports skip when the
+// annotation names another of the handler's methods.
+func (doc *specDocument) compile(method, path string, sop specOperation) (Operation, bool, error) {
 	var meta agentOperation
 	dec := json.NewDecoder(bytes.NewReader(sop.Agent))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&meta); err != nil {
-		return Operation{}, fmt.Errorf("%s: %w", extAgent, err)
+		return Operation{}, false, fmt.Errorf("%s: %w", extAgent, err)
 	}
+	if meta.Method != "" {
+		if !slices.Contains(specMethods, strings.ToLower(meta.Method)) {
+			return Operation{}, false, fmt.Errorf("%s: unknown method %q", extAgent, meta.Method)
+		}
+		if !strings.EqualFold(meta.Method, method) {
+			return Operation{}, true, nil
+		}
+	}
+	op, err := doc.compileOperation(method, path, sop, meta)
+	return op, false, err
+}
+
+func (doc *specDocument) compileOperation(
+	method, path string, sop specOperation, meta agentOperation,
+) (Operation, error) {
 	route, err := ginRoute(doc.BasePath, path, meta.CatchAll)
 	if err != nil {
 		return Operation{}, fmt.Errorf("%s: %w", extAgent, err)
 	}
 	op := Operation{
-		ID:          meta.ID,
-		Summary:     strings.TrimSpace(sop.Summary),
-		Description: strings.TrimSpace(sop.Hint),
-		Risk:        meta.Risk,
-		Method:      method,
-		Route:       route,
-		Role:        meta.Role,
+		ID:            meta.ID,
+		Summary:       strings.TrimSpace(sop.Summary),
+		Description:   strings.TrimSpace(sop.Hint),
+		Risk:          meta.Risk,
+		Method:        method,
+		Route:         route,
+		Role:          meta.Role,
+		SystemAdmin:   meta.SystemAdmin,
+		LabelParam:    meta.LabelParam,
+		AlwaysConfirm: meta.AlwaysConfirm,
 	}
 	if op.Description == "" {
 		op.Description = strings.TrimSpace(sop.Description)
@@ -317,6 +359,28 @@ func (doc *specDocument) bodyParams(sp specParameter) ([]Param, error) {
 	var out []Param
 	for _, key := range sortedKeys(obj.Properties) {
 		prop := obj.Properties[key]
+		shape, err := doc.resolve(prop)
+		if err != nil {
+			return nil, err
+		}
+		// An object is not one parameter. Its tagged scalars are, and the
+		// wire key keeps the path so the request nests them again.
+		if shape != nil && shape.Type != "array" && (shape.Type == "object" || len(shape.Properties) > 0) {
+			nested, err := doc.flattenBodyObject(shape, key, sp.Required)
+			if err != nil {
+				return nil, err
+			}
+			if len(nested) > 0 {
+				out = append(out, nested...)
+				continue
+			}
+		}
+		if prop.AgentResponse {
+			if sp.Required && required[key] {
+				return nil, fmt.Errorf("body field %q is required but marked %s", key, extAgentResponse)
+			}
+			continue
+		}
 		name, exposed, err := agentName(prop.Agent, key)
 		if err != nil {
 			return nil, fmt.Errorf("body field %q: %w", key, err)
@@ -331,16 +395,69 @@ func (doc *specDocument) bodyParams(sp specParameter) ([]Param, error) {
 			Name:        name,
 			In:          InBody,
 			Key:         key,
-			Required:    sp.Required && (required[key] || prop.AgentRequired),
+			Required:    (sp.Required && required[key]) || prop.AgentRequired,
 			AllowEmpty:  prop.AgentRequired && !required[key],
 			Description: strings.TrimSpace(prop.Description),
 		}
+		if err := doc.typeParam(&p, shape, prop.AgentMax, prop.AgentMaxBytes); err != nil {
+			return nil, fmt.Errorf("body field %q: %w", key, err)
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// flattenBodyObject turns the tagged scalars inside an object into body
+// parameters. The wire key is the dotted JSON path.
+func (doc *specDocument) flattenBodyObject(obj *specSchema, prefix string, bodyRequired bool) ([]Param, error) {
+	required := map[string]bool{}
+	for _, key := range obj.Required {
+		required[key] = true
+	}
+	var out []Param
+	for _, key := range sortedKeys(obj.Properties) {
+		prop := obj.Properties[key]
+		path := prefix + "." + key
 		shape, err := doc.resolve(prop)
 		if err != nil {
 			return nil, err
 		}
+		if shape != nil && shape.Type != "array" && (shape.Type == "object" || len(shape.Properties) > 0) {
+			nested, err := doc.flattenBodyObject(shape, path, bodyRequired)
+			if err != nil {
+				return nil, err
+			}
+			if len(nested) > 0 {
+				out = append(out, nested...)
+				continue
+			}
+		}
+		if prop.AgentResponse {
+			if bodyRequired && required[key] {
+				return nil, fmt.Errorf("body field %q is required but marked %s", path, extAgentResponse)
+			}
+			continue
+		}
+		name, exposed, err := agentName(prop.Agent, key)
+		if err != nil {
+			return nil, fmt.Errorf("body field %q: %w", path, err)
+		}
+		if !exposed {
+			if bodyRequired && required[key] {
+				return nil, fmt.Errorf("body field %q is required but not exposed with %s", path, extAgent)
+			}
+			continue
+		}
+		p := Param{
+			Name:        name,
+			In:          InBody,
+			Key:         path,
+			Required:    (bodyRequired && required[key]) || prop.AgentRequired,
+			AllowEmpty:  prop.AgentRequired && !required[key],
+			Description: strings.TrimSpace(prop.Description),
+		}
 		if err := doc.typeParam(&p, shape, prop.AgentMax, prop.AgentMaxBytes); err != nil {
-			return nil, fmt.Errorf("body field %q: %w", key, err)
+			return nil, fmt.Errorf("body field %q: %w", path, err)
 		}
 		out = append(out, p)
 	}
@@ -354,6 +471,8 @@ func (doc *specDocument) typeParam(p *Param, shape *specSchema, agentMax, agentM
 		p.Enum = enumStrings(shape.Enum)
 	case "integer":
 		p.Type = TypeInteger
+	case "number":
+		p.Type = TypeNumber
 	case "boolean":
 		p.Type = TypeBoolean
 	case "array":
@@ -505,7 +624,7 @@ func (doc *specDocument) result(responses map[string]specResponse, meta agentOpe
 	if target == nil || target.Type != "object" {
 		return Result{}, fmt.Errorf("response %q is not an object or a list of objects", root)
 	}
-	if out.Fields, err = doc.fields(target, ""); err != nil {
+	if out.Fields, err = doc.fields(target, "", out.List); err != nil {
 		return Result{}, err
 	}
 	if len(out.Fields) == 0 {
@@ -524,7 +643,7 @@ func (doc *specDocument) result(responses map[string]specResponse, meta agentOpe
 		if prefix != "" {
 			metaPrefix = prefix + "."
 		}
-		if out.Meta, err = doc.fields(&envelope, metaPrefix); err != nil {
+		if out.Meta, err = doc.fields(&envelope, metaPrefix, false); err != nil {
 			return Result{}, err
 		}
 	}
@@ -532,8 +651,10 @@ func (doc *specDocument) result(responses map[string]specResponse, meta agentOpe
 }
 
 // fields lists the projected fields of obj. Nested objects marked with
-// x-agent are flattened: their marked fields are named on their own.
-func (doc *specDocument) fields(obj *specSchema, prefix string) ([]Field, error) {
+// x-agent are flattened: their marked fields are named on their own. A list of
+// objects keeps each element's marked fields under the list's name. list
+// drops fields marked x-agent-detail.
+func (doc *specDocument) fields(obj *specSchema, prefix string, list bool) ([]Field, error) {
 	var out []Field
 	for _, key := range sortedKeys(obj.Properties) {
 		raw := obj.Properties[key]
@@ -542,6 +663,12 @@ func (doc *specDocument) fields(obj *specSchema, prefix string) ([]Field, error)
 			return nil, fmt.Errorf("field %q: %w", prefix+key, err)
 		}
 		if !exposed {
+			if raw.AgentDetail {
+				return nil, fmt.Errorf("field %q: %s needs %s", prefix+key, extAgentDetail, extAgent)
+			}
+			continue
+		}
+		if list && raw.AgentDetail {
 			continue
 		}
 		from := prefix + key
@@ -564,9 +691,28 @@ func (doc *specDocument) fields(obj *specSchema, prefix string) ([]Field, error)
 			if err != nil {
 				return nil, err
 			}
+			if items != nil && len(items.Properties) > 0 {
+				if runes > 0 {
+					return nil, fmt.Errorf("field %q: %s applies to strings", from, extAgentMaxRunes)
+				}
+				elem, err := doc.fields(items, "", list)
+				if err != nil {
+					return nil, fmt.Errorf("field %q: %w", from, err)
+				}
+				if len(elem) == 0 {
+					return nil, fmt.Errorf("field %q: list items expose no fields", from)
+				}
+				for _, f := range elem {
+					if len(f.Items) > 0 {
+						return nil, fmt.Errorf("field %q: list items cannot hold lists of objects", from)
+					}
+				}
+				out = append(out, Field{From: from, As: name, Items: elem})
+				continue
+			}
 			if items == nil || !isScalar(items.Type) {
-				return nil, fmt.Errorf("field %q: only lists of scalars are projected; "+
-					"point the operation's root at a list of objects instead", from)
+				return nil, fmt.Errorf("field %q: only lists of scalars or of objects with %s fields are projected",
+					from, extAgent)
 			}
 			if runes > 0 && items.Type != "string" {
 				return nil, fmt.Errorf("field %q: %s applies to strings", from, extAgentMaxRunes)
@@ -579,7 +725,7 @@ func (doc *specDocument) fields(obj *specSchema, prefix string) ([]Field, error)
 			if name != key {
 				return nil, fmt.Errorf("field %q: objects are flattened, so name their fields instead", from)
 			}
-			nested, err := doc.fields(prop, from+".")
+			nested, err := doc.fields(prop, from+".", list)
 			if err != nil {
 				return nil, err
 			}
@@ -590,7 +736,11 @@ func (doc *specDocument) fields(obj *specSchema, prefix string) ([]Field, error)
 		case raw.AgentKeys != "":
 			for _, sub := range strings.Split(raw.AgentKeys, "|") {
 				if sub = strings.TrimSpace(sub); sub != "" {
-					out = append(out, Field{From: from + "." + sub, As: sub})
+					if strings.Contains(sub, ".") {
+						out = append(out, Field{From: from, MapKey: sub, As: sub})
+					} else {
+						out = append(out, Field{From: from + "." + sub, As: sub})
+					}
 				}
 			}
 		default:
@@ -688,6 +838,7 @@ func overlay(base, override *specSchema) *specSchema {
 	if out.AgentKeys == "" {
 		out.AgentKeys = base.AgentKeys
 	}
+	out.AgentDetail = out.AgentDetail || base.AgentDetail
 	return &out
 }
 

@@ -22,6 +22,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/admission"
 	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/stream"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -119,6 +120,10 @@ func calledWithAPIKey(ctx context.Context) bool {
 func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 	imageURLs, imageDescription := extractImageURLsAndOCRText(rc.images)
 	interactive := !calledWithAPIKey(rc.ctx)
+	mode := types.RunModeUnattended
+	if interactive {
+		mode = types.RunModeAttended
+	}
 	req := &types.QARequest{
 		Session:             rc.session,
 		Query:               rc.query,
@@ -145,7 +150,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		// Only a caller that can answer the prompt later may leave the run
 		// suspended; an API-key caller would get a turn with no answer.
 		Suspendable: interactive,
-		Interactive: interactive,
+		Mode:        mode,
 		Resume:      rc.resume,
 	}
 	if rc.steerSink != nil {
@@ -256,6 +261,9 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get session, session ID: %s, error: %v", sessionID, err)
 		return nil, nil, errors.NewNotFoundError("Session not found")
+	}
+	if session.Kind == types.SessionKindAutomation {
+		return nil, nil, errors.NewForbiddenError("automation conversations do not accept manual messages")
 	}
 
 	// Get custom agent if agent_id is provided. Backend resolves shared agent from share relation (no client-provided tenant).
@@ -764,6 +772,9 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 	// borrowed tenant above drives everything else, because DeleteSession tears
 	// that sandbox down from a request that only knows the session's tenant.
 	baseCtx = types.WithSandboxTenantID(baseCtx, reqCtx.session.TenantID)
+	// Attachment analysis and title generation run before the QA service.
+	// Give all asynchronous work the same business conversation identity.
+	baseCtx = types.WithSessionID(baseCtx, reqCtx.session.ID)
 
 	// An agent that opted out of long-term memory has to be opted out of the
 	// write path too, not just recall. The two run from different contexts:
@@ -777,7 +788,21 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 	}
 
 	eventBus := event.NewEventBus()
-	asyncCtx, cancel := context.WithCancel(logger.CloneContext(baseCtx))
+	asyncCtx, cancelCause := context.WithCancelCause(logger.CloneContext(baseCtx))
+	// Detach HTTP cancellation, but keep the turn's lease-loss signal: once
+	// admission is lost another session may rebuild the shared machine.
+	propagateLeaseLoss := func() {
+		if cause := context.Cause(baseCtx); stderrors.Is(cause, admission.ErrLeaseLost) {
+			cancelCause(cause)
+		}
+	}
+	stopLeaseWatch := context.AfterFunc(baseCtx, propagateLeaseLoss)
+	// An already-lost lease must cancel QA before any async work starts.
+	propagateLeaseLoss()
+	cancel := func() {
+		stopLeaseWatch()
+		cancelCause(context.Canceled)
+	}
 
 	streamCtx := &sseStreamContext{
 		eventBus:         eventBus,
@@ -827,6 +852,7 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 		reqCtx.userMessageID,
 		reqCtx.userCreatedAt,
 		reqCtx.assistantMessage,
+		reqCtx.resume,
 	)
 	if reqCtx.resume != nil {
 		h.writeRunResumedEvent(reqCtx.ctx, reqCtx.sessionID, reqCtx.assistantMessage.ID, reqCtx.resume.Prompt.ID)
@@ -853,10 +879,7 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 	// Generate title if needed
 	if generateTitle && reqCtx.session.Title == "" {
 		// Use the same model as the conversation for title generation
-		modelID := ""
-		if reqCtx.customAgent != nil && reqCtx.customAgent.Config.ModelID != "" {
-			modelID = reqCtx.customAgent.Config.ModelID
-		}
+		modelID := reqCtx.titleModelID()
 		logger.Infof(reqCtx.ctx, "Session has no title, starting async title generation, session ID: %s, model: %s", reqCtx.sessionID, modelID)
 		h.sessionService.GenerateTitleAsync(asyncCtx, reqCtx.session, reqCtx.query, modelID, eventBus)
 	}
@@ -1210,23 +1233,23 @@ func (h *Handler) rejectIfSessionRewinding(ctx context.Context, sessionID string
 	return errors.NewInternalServerError(err.Error())
 }
 
-func (h *Handler) holdQATurn(ctx context.Context, reqCtx *qaRequestContext) (func(), bool) {
+func (h *Handler) holdQATurn(ctx context.Context, reqCtx *qaRequestContext) (context.Context, func(), bool) {
 	noop := func() {}
 	if reqCtx == nil {
-		return noop, true
+		return ctx, noop, true
 	}
 	type sessionTurnHolder interface {
-		HoldSandboxTurn(context.Context, string, string) (func(), error)
+		HoldSandboxTurn(context.Context, string, string) (context.Context, func(), error)
 	}
 	holder, ok := h.sessionService.(sessionTurnHolder)
 	if !ok {
-		return noop, true
+		return ctx, noop, true
 	}
 	configID := ""
 	if reqCtx.customAgent != nil {
 		configID = reqCtx.customAgent.Config.SandboxConfigID
 	}
-	release, err := holder.HoldSandboxTurn(ctx, reqCtx.sessionID, configID)
+	turnCtx, release, err := holder.HoldSandboxTurn(ctx, reqCtx.sessionID, configID)
 	if err == nil {
 		// The QA service reads this off the built request and skips its own
 		// hold, so the send path opens and closes the lease exactly once.
@@ -1242,13 +1265,16 @@ func (h *Handler) holdQATurn(ctx context.Context, reqCtx *qaRequestContext) (fun
 		} else {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": reqCtx.sessionID})
 		}
-		return noop, false
+		return ctx, noop, false
+	}
+	if turnCtx == nil {
+		turnCtx = ctx
 	}
 	if release == nil {
 		release = noop
 	}
 	var once sync.Once
-	return func() { once.Do(release) }, true
+	return turnCtx, func() { once.Do(release) }, true
 }
 
 // executeQA is the unified execution flow for both KnowledgeQA and AgentQA modes.
@@ -1290,10 +1316,13 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 		h.supersedeSuspendedRuns(ctx, sessionID)
 	}
 
-	releaseQATurn, held := h.holdQATurn(ctx, reqCtx)
+	ctx, releaseQATurn, held := h.holdQATurn(ctx, reqCtx)
 	if !held {
 		return
 	}
+	// setupSSEStream clones reqCtx.ctx. The turn's admission members have to
+	// be on that context or a detached tool call waits on its own hold.
+	reqCtx.ctx = ctx
 
 	// Agent mode: emit agent query event before message creation
 	if mode == qaModeAgent {
@@ -1412,6 +1441,12 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 			}
 			return nil
 		})
+
+		// A failed pipeline never streams EventAgentFinalAnswer with Done=true,
+		// so the turn would otherwise end with an empty, incomplete assistant
+		// row: the live UI shows the error event, but a refresh renders a blank
+		// bubble and the SSE stream never closes (issue #4145).
+		h.registerQuickAnswerFailureHandler(streamCtx, &completionHandled, reqCtx.session.TenantID)
 	}
 
 	// Execute QA asynchronously
@@ -2023,6 +2058,46 @@ func (h *Handler) completeQuickAnswerTurn(
 	}
 }
 
+// quickAnswerFailureContent is persisted when a pipeline error carries no
+// message, so the failed turn does not save an empty answer.
+const quickAnswerFailureContent = "Failed to generate the answer"
+
+// registerQuickAnswerFailureHandler completes and persists the assistant
+// message when the quick-answer pipeline reports EventError. The empty query
+// keeps the failed turn out of the chat-history index, follow-up suggestions
+// and memory writes — only the visible error text belongs in history.
+func (h *Handler) registerQuickAnswerFailureHandler(
+	streamCtx *sseStreamContext, completionHandled *bool, sessionTenantID uint64,
+) {
+	streamCtx.eventBus.On(event.EventError, func(ctx context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.ErrorData)
+		if !ok || *completionHandled {
+			return nil
+		}
+		*completionHandled = true
+
+		errorContent := strings.TrimSpace(data.Error)
+		if errorContent == "" {
+			errorContent = quickAnswerFailureContent
+		}
+		msg := streamCtx.assistantMessage
+		// Keep any partial answer the stream produced before failing and
+		// append the error, so a reload shows both instead of losing the text.
+		if remaining := strings.TrimSpace(msg.Content); remaining != "" {
+			msg.Content += "\n\n" + errorContent
+		} else {
+			msg.Content = errorContent
+		}
+
+		updateCtx := context.WithValue(
+			context.WithoutCancel(ctx),
+			types.TenantIDContextKey, sessionTenantID,
+		)
+		h.completeQuickAnswerTurn(updateCtx, streamCtx, "", "")
+		return nil
+	})
+}
+
 // sessionTenantInfoContext makes the tenant info match the session owner (the
 // context's tenant here). The chat history KB is read from the tenant info,
 // and a shared agent's run carries the agent workspace's: the receiver's
@@ -2093,6 +2168,7 @@ func (h *Handler) completeAssistantMessage(
 		logger.Errorf(ctx, "Failed to persist assistant message %s: %v", assistantMessage.ID, err)
 		return err
 	}
+	h.ackBackgroundNotices(ctx, assistantMessage)
 
 	// Asynchronously index the Q&A pair into the chat history knowledge base for vector search.
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.

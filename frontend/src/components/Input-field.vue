@@ -2745,8 +2745,12 @@ const handleStop = async () => {
 }
 
 onBeforeRouteUpdate((to, from, next) => {
-  clearvalue()
-  clearPendingUploads()
+  // The route belongs to the page behind an embedded assistant. Its draft
+  // and uploads belong to the assistant session, which the host manages.
+  if (!props.embeddedMode) {
+    clearvalue()
+    clearPendingUploads()
+  }
   next()
 })
 
@@ -2986,7 +2990,9 @@ defineExpose({
               </svg>
             </div>
           </t-tooltip>
+          <slot name="background-work" />
           </template>
+          <slot v-if="embeddedMode" name="background-work" />
 
           <slot name="controls" />
 
@@ -3455,6 +3461,22 @@ const getImgSrc = (url: string) => {
 
   &.is-embedded {
     justify-content: flex-end;
+    flex-wrap: nowrap;
+
+    .control-left {
+      flex-wrap: nowrap;
+    }
+
+    // Let long model names shrink before the fixed controls wrap or move.
+    .model-display {
+      flex-shrink: 1;
+      min-width: 0;
+    }
+
+    .model-selector-trigger {
+      min-width: 0;
+      max-width: 100%;
+    }
   }
 }
 

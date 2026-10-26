@@ -488,7 +488,7 @@ type CreateKnowledgeFromURLRequest struct {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"knowledge.create_from_url","risk":"write","target":"knowledge_base.get","label":"name"}
-// @x-agent-hint "Fetches a public web page or file into the knowledge base and parses it in the background; follow with knowledge.get_parse_progress. Only use a URL the user gave."
+// @x-agent-hint "Imports a user-provided public web page or file URL as a source document; ingests asynchronously. Check knowledge.get_parse_progress."
 // @Router       /knowledge-bases/{id}/knowledge/url [post]
 func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -578,7 +578,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"knowledge.create_manual","risk":"write","target":"knowledge_base.get","label":"name"}
-// @x-agent-hint "Creates a Markdown document. status=draft (the default) keeps it out of search; publish indexes it."
+// @x-agent-hint "Creates a source document from complete Markdown. Set status publish to start asynchronous ingestion; omitted status defaults to draft without indexing. Use draft only when requested. Check knowledge.get_parse_progress."
 // @Router       /knowledge-bases/{id}/knowledge/manual [post]
 func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -2474,12 +2474,14 @@ func (h *KnowledgeHandler) RegenerateKnowledgeSummary(c *gin.Context) {
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string                       true  "知识ID"
+// @Param        id       path      string                       true  "知识ID"  extensions(x-agent=knowledge_id)
 // @Param        request  body      types.ManualKnowledgePayload true  "手工知识内容"
 // @Success      200      {object}  handler.DataResponse{data=types.Knowledge}       "更新后的知识"
 // @Failure      400      {object}  errors.AppError              "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.update_manual","risk":"write","target":"knowledge.get","label":"title"}
+// @x-agent-hint "Replaces the whole Markdown of a document created as manual knowledge. Send the complete content, not a diff. status draft keeps it out of search; publish indexes it. Uploaded files cannot be edited this way."
 // @Router       /knowledge/manual/{id} [put]
 func (h *KnowledgeHandler) UpdateManualKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -2655,22 +2657,76 @@ func (h *KnowledgeHandler) CancelKnowledgeParse(c *gin.Context) {
 	})
 }
 
-type knowledgeTagBatchRequest struct {
-	Updates map[string][]string `json:"updates" binding:"required,min=1"`
-	KBID    string              `json:"kb_id"` // Optional: scope to this KB (validates editor access and uses effective tenant for shared KB)
+// KnowledgeTagBatchRequest sets tags on documents. The editor sends updates;
+// the assistant sends knowledge_ids and tag_ids for one knowledge base.
+type KnowledgeTagBatchRequest struct {
+	// Map of knowledge id to the tag ids that replace its current tags.
+	Updates map[string][]string `json:"updates"`
+	// Knowledge base the documents belong to.
+	KBID string `json:"kb_id" extensions:"x-agent=knowledge_base_id,x-agent-required"`
+	// Documents that receive the same tags. Mutually exclusive with updates.
+	KnowledgeIDs []string `json:"knowledge_ids" extensions:"x-agent,x-agent-required,x-agent-maximum=20"`
+	// Tags to set on every listed document. An empty list clears them.
+	TagIDs []string `json:"tag_ids" extensions:"x-agent,x-agent-required,x-agent-maximum=50"`
+}
+
+const (
+	maxKnowledgeTagBatchDocuments = 20
+	maxKnowledgeTagBatchTags      = 50
+)
+
+// applyKnowledgeTagBatch turns the list form into the updates map the
+// service already stores. An omitted tag_ids with knowledge_ids is refused
+// so a partial body cannot clear tags by accident; an empty list still clears.
+func applyKnowledgeTagBatch(req *KnowledgeTagBatchRequest) error {
+	if len(req.KnowledgeIDs) == 0 {
+		if len(req.Updates) == 0 {
+			return errors.NewBadRequestError("updates is required")
+		}
+		return nil
+	}
+	if len(req.Updates) > 0 {
+		return errors.NewBadRequestError("knowledge_ids and updates cannot both be set")
+	}
+	if req.TagIDs == nil {
+		return errors.NewBadRequestError("tag_ids is required when knowledge_ids is set")
+	}
+	if len(req.KnowledgeIDs) > maxKnowledgeTagBatchDocuments {
+		return errors.NewBadRequestError("at most 20 documents")
+	}
+	if len(req.TagIDs) > maxKnowledgeTagBatchTags {
+		return errors.NewBadRequestError("at most 50 tags")
+	}
+	seen := make(map[string]struct{}, len(req.KnowledgeIDs))
+	updates := make(map[string][]string, len(req.KnowledgeIDs))
+	for _, id := range req.KnowledgeIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return errors.NewBadRequestError("knowledge id cannot be empty")
+		}
+		if _, ok := seen[id]; ok {
+			return errors.NewBadRequestError("duplicate knowledge id")
+		}
+		seen[id] = struct{}{}
+		updates[id] = req.TagIDs
+	}
+	req.Updates = updates
+	return nil
 }
 
 // UpdateKnowledgeTagBatch godoc
 // @Summary      批量更新知识标签
-// @Description  批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的空间解析
+// @Description  批量更新知识条目的标签。传 updates，或传 knowledge_ids 与 tag_ids。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的空间解析
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        request  body      object  true  "标签更新请求（updates 必填，kb_id 可选）"
+// @Param        request  body      handler.KnowledgeTagBatchRequest  true  "标签更新请求"
 // @Success      200      {object}  handler.SuccessResponse  "更新成功"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.set_tags","risk":"write","target":"knowledge_base.get","label":"name","items":{"param":"knowledge_ids","target":"knowledge.get","as":"knowledge_id","label":"title"}}
+// @x-agent-hint "Sets the same tags on up to 20 documents in one knowledge base, replacing the tags they have now. To add or remove one tag, read each document's tags with knowledge.get or knowledge.list first and pass the full resulting list. tag_ids come from knowledge_base.list_tags; an empty tag_ids clears every tag. It does not delete documents."
 // @Router       /knowledge/tags [put]
 func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -2683,10 +2739,14 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 	}
 	ctx = types.WithExecutionTenant(ctx, tenantID)
 
-	var req knowledgeTagBatchRequest
+	var req KnowledgeTagBatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse knowledge tag batch request", err)
 		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		return
+	}
+	if err := applyKnowledgeTagBatch(&req); err != nil {
+		_ = c.Error(err)
 		return
 	}
 	// Resolve effective tenant and the authorized KB scope.

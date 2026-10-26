@@ -177,9 +177,15 @@ func TestFromSpecRejectsBadAnnotations(t *testing.T) {
 			`"strategy": {"allOf": [{"$ref": "#/definitions/types.Strategy"}], "x-agent": true}`,
 			`"strategy": {"allOf": [{"$ref": "#/definitions/types.Strategy"}], "x-agent": "strategy_flags"}`,
 		},
-		"list of objects inside a result": {
+		"list of objects without exposed fields": {
 			`"tags": {"type": "array", "items": {"type": "string"}, "x-agent": true}`,
-			`"tags": {"type": "array", "items": {"$ref": "#/definitions/types.Strategy"}, "x-agent": true}`,
+			`"tags": {"type": "array", "items": {"type": "object", ` +
+				`"properties": {"secret": {"type": "string"}}}, "x-agent": true}`,
+		},
+		"length cap on a list of objects": {
+			`"tags": {"type": "array", "items": {"type": "string"}, "x-agent": true}`,
+			`"tags": {"type": "array", "items": {"$ref": "#/definitions/types.Strategy"}, ` +
+				`"x-agent": true, "x-agent-max-runes": "10"}`,
 		},
 		"nothing exposed": {
 			`"message": {"type": "string", "x-agent": true}`, `"message": {"type": "string"}`,
@@ -209,6 +215,43 @@ func TestFromSpecRejectsBadAnnotations(t *testing.T) {
 	}
 }
 
+func TestFromSpecMethodPicksOneOfTheHandlersRoutes(t *testing.T) {
+	route := func(method string) string {
+		return `"` + method + `": {
+      "summary": "Search",
+      "x-agent": {"id": "kb.search", "risk": "probe", "method": "post"},
+      "parameters": [
+        {"name": "id", "in": "path", "type": "string", "required": true, "description": "KB",
+         "x-agent": "knowledge_base_id"},
+        {"name": "request", "in": "body", "required": true, "schema": {"type": "object", "properties": {
+          "query_text": {"type": "string", "description": "Q", "x-agent": true, "x-agent-required": true},
+          "vector_threshold": {"type": "number", "description": "T", "x-agent": true}
+        }}}
+      ],
+      "responses": {"200": {"schema": {"type": "object", "properties": {
+        "data": {"type": "array", "items": {"type": "object", "properties": {
+          "content": {"type": "string", "x-agent": true}
+        }}}
+      }}}}
+    }`
+	}
+	spec := `{"basePath": "/api/v1", "paths": {"/knowledge-bases/{id}/hybrid-search": {` +
+		route("post") + `, ` + route("get") + `}}}`
+
+	ops, err := FromSpec([]byte(spec))
+	require.NoError(t, err)
+	require.Len(t, ops, 1, "the GET route that shares the doc stays out")
+	assert.Equal(t, http.MethodPost, ops[0].Method)
+	threshold, ok := ops[0].Param("vector_threshold")
+	require.True(t, ok)
+	assert.Equal(t, TypeNumber, threshold.Type)
+	_, err = NewCatalog(ops...)
+	require.NoError(t, err)
+
+	_, err = FromSpec([]byte(strings.ReplaceAll(spec, `"method": "post"`, `"method": "fetch"`)))
+	assert.ErrorContains(t, err, "unknown method")
+}
+
 func TestFromSpecAgentRequired(t *testing.T) {
 	spec := strings.Replace(testSpec,
 		`"description": "S",
@@ -223,6 +266,76 @@ func TestFromSpecAgentRequired(t *testing.T) {
 			assert.True(t, status.Required, "x-agent-required makes an optional param mandatory for the model")
 		}
 	}
+}
+
+func TestFromSpecSkipsResponseOnlyBodyFields(t *testing.T) {
+	spec := `{
+      "paths": {
+        "/api/v1/knowledge-bases": {
+          "post": {
+            "summary": "Create",
+            "parameters": [{"name": "body", "in": "body", "required": true, "schema": {"$ref": "#/definitions/KB"}}],
+            "responses": {"201": {"schema": {"$ref": "#/definitions/KB"}}},
+            "x-agent": {"id": "knowledge_base.create", "risk": "write", "label_param": "name"},
+            "x-agent-hint": "Creates one."
+          }
+        }
+      },
+      "definitions": {
+        "KB": {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "name": {"type": "string", "description": "Name", "x-agent": true},
+            "id": {"type": "string", "description": "ID", "x-agent": "knowledge_base_id", "x-agent-response": true},
+            "indexing_strategy": {
+              "type": "object",
+              "description": "Indexing",
+              "x-agent": true,
+              "x-agent-response": true,
+              "properties": {"vector": {"type": "boolean", "description": "Vector", "x-agent": true}}
+            }
+          }
+        }
+      }
+    }`
+	ops, err := FromSpec([]byte(spec))
+	require.NoError(t, err)
+	require.Len(t, ops, 1)
+	assert.ElementsMatch(t, []string{"name", "vector"}, paramNames(ops[0]))
+	_, ok := ops[0].Param("knowledge_base_id")
+	assert.False(t, ok, "a response-only identifier is not a create parameter")
+	_, ok = ops[0].Param("indexing_strategy")
+	assert.False(t, ok, "the indexing object itself is not a parameter")
+	vector, ok := ops[0].Param("vector")
+	require.True(t, ok)
+	assert.Equal(t, "indexing_strategy.vector", vector.Key)
+	call, err := ops[0].Build(map[string]json.RawMessage{
+		"name":   json.RawMessage(`"产品文档"`),
+		"vector": json.RawMessage(`true`),
+	})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"name":"产品文档","indexing_strategy":{"vector":true}}`, string(call.Body))
+	id, ok := fieldByFrom(ops[0].Result.Fields, "id")
+	require.True(t, ok)
+	assert.Equal(t, "knowledge_base_id", id.As)
+}
+
+func paramNames(op Operation) []string {
+	names := make([]string, 0, len(op.Params))
+	for _, p := range op.Params {
+		names = append(names, p.Name)
+	}
+	return names
+}
+
+func fieldByFrom(fields []Field, from string) (Field, bool) {
+	for _, field := range fields {
+		if field.From == from {
+			return field, true
+		}
+	}
+	return Field{}, false
 }
 
 func TestFromSpecMarksCatchAllSegment(t *testing.T) {
@@ -287,8 +400,16 @@ func TestBuiltinMatchesHandlerAnnotations(t *testing.T) {
 	require.NotEmpty(t, declared)
 
 	built := map[string]agentOperation{}
+	methods := map[string]string{}
 	for _, op := range Builtin().All() {
-		meta := agentOperation{ID: op.ID, Risk: op.Risk}
+		methods[op.ID] = op.Method
+		meta := agentOperation{
+			ID:            op.ID,
+			Risk:          op.Risk,
+			LabelParam:    op.LabelParam,
+			AlwaysConfirm: op.AlwaysConfirm,
+			SystemAdmin:   op.SystemAdmin,
+		}
 		if op.Target != nil {
 			meta.Target, meta.Label = op.Target.Operation, op.Target.Label
 			meta.RequireCompleteTarget = op.Target.RequireComplete
@@ -305,10 +426,54 @@ func TestBuiltinMatchesHandlerAnnotations(t *testing.T) {
 		built[op.ID] = meta
 	}
 	for id, meta := range declared {
-		meta.Root, meta.MaxItems = nil, 0
+		if meta.Method != "" {
+			assert.True(t, strings.EqualFold(meta.Method, methods[id]),
+				"%s names method %s but was built from %s", id, meta.Method, methods[id])
+		}
+		meta.Root, meta.MaxItems, meta.Method = nil, 0, ""
 		declared[id] = meta
 	}
 	assert.Equal(t, declared, built, "docs/swagger.json is stale; run make docs")
+}
+
+func TestFromSpecDropsDetailFieldsFromLists(t *testing.T) {
+	const spec = `{
+	  "basePath": "/api/v1",
+	  "definitions": {
+	    "Agent": {"type": "object", "properties": {
+	      "id": {"type": "string", "x-agent": "agent_id"},
+	      "config": {"type": "object", "x-agent": true, "properties": {
+	        "mode": {"type": "string", "x-agent": true},
+	        "prompt": {"type": "string", "x-agent": true, "x-agent-detail": true}
+	      }}
+	    }}
+	  },
+	  "paths": {
+	    "/agents": {"get": {"summary": "list", "x-agent": {"id": "agent.list", "risk": "read"},
+	      "responses": {"200": {"schema": {"type": "object", "properties": {
+	        "data": {"type": "array", "items": {"$ref": "#/definitions/Agent"}}}}}}}},
+	    "/agents/{id}": {"get": {"summary": "get", "x-agent": {"id": "agent.get", "risk": "read"},
+	      "parameters": [{"name": "id", "in": "path", "type": "string", "required": true,
+	        "description": "d", "x-agent": "agent_id"}],
+	      "responses": {"200": {"schema": {"type": "object", "properties": {
+	        "data": {"$ref": "#/definitions/Agent"}}}}}}}
+	  }
+	}`
+	ops, err := FromSpec([]byte(spec))
+	require.NoError(t, err)
+	fields := map[string][]string{}
+	for _, op := range ops {
+		for _, f := range op.Result.Fields {
+			fields[op.ID] = append(fields[op.ID], f.outputKey())
+		}
+	}
+	assert.ElementsMatch(t, []string{"agent_id", "mode"}, fields["agent.list"])
+	assert.ElementsMatch(t, []string{"agent_id", "mode", "prompt"}, fields["agent.get"])
+
+	const exposed = `"prompt": {"type": "string", "x-agent": true,`
+	unexposed := strings.Replace(spec, exposed, `"prompt": {"type": "string",`, 1)
+	_, err = FromSpec([]byte(unexposed))
+	assert.ErrorContains(t, err, "x-agent-detail needs x-agent")
 }
 
 func TestFromSpecProjectsNestedListMeta(t *testing.T) {
@@ -348,6 +513,56 @@ func TestFromSpecProjectsNestedListMeta(t *testing.T) {
 	require.NoError(t, err)
 	out, _ := json.Marshal(projected)
 	assert.JSONEq(t, `{"data":[{"name":"a"}],"meta":{"total":3}}`, string(out))
+}
+
+func TestFromSpecProjectsListsOfObjects(t *testing.T) {
+	const spec = `{
+	  "basePath": "/api/v1",
+	  "definitions": {
+	    "Tag": {"type": "object", "properties": {
+	      "id": {"type": "string", "x-agent": "tag_id"},
+	      "color": {"type": "string"},
+	      "note": {"type": "string", "x-agent": true, "x-agent-detail": true}
+	    }},
+	    "Doc": {"type": "object", "properties": {
+	      "id": {"type": "string", "x-agent": "knowledge_id"},
+	      "tags": {"type": "array", "x-agent": true, "items": {"$ref": "#/definitions/Tag"}}
+	    }}
+	  },
+	  "paths": {
+	    "/knowledge": {"get": {"summary": "list", "x-agent": {"id": "doc.list", "risk": "read"},
+	      "responses": {"200": {"schema": {"type": "object", "properties": {
+	        "data": {"type": "array", "items": {"$ref": "#/definitions/Doc"}}}}}}}},
+	    "/knowledge/{id}": {"get": {"summary": "get", "x-agent": {"id": "doc.get", "risk": "read"},
+	      "parameters": [{"name": "id", "in": "path", "type": "string", "required": true,
+	        "description": "d", "x-agent": "knowledge_id"}],
+	      "responses": {"200": {"schema": {"type": "object", "properties": {
+	        "data": {"$ref": "#/definitions/Doc"}}}}}}}
+	  }
+	}`
+	ops, err := FromSpec([]byte(spec))
+	require.NoError(t, err)
+	catalog, err := NewCatalog(ops...)
+	require.NoError(t, err)
+	list, _ := catalog.Get("doc.list")
+	tags, ok := fieldByFrom(list.Result.Fields, "tags")
+	require.True(t, ok)
+	assert.Equal(t, []Field{{From: "id", As: "tag_id"}}, tags.Items, "lists drop detail fields of items too")
+	get, _ := catalog.Get("doc.get")
+	tags, _ = fieldByFrom(get.Result.Fields, "tags")
+	assert.Equal(t, []Field{{From: "id", As: "tag_id"}, {From: "note", As: "note"}}, tags.Items)
+
+	nested := strings.Replace(spec, `"color": {"type": "string"},`,
+		`"color": {"type": "array", "x-agent": true, "items": {"type": "object", "properties": {
+		  "hex": {"type": "string", "x-agent": true}}}},`, 1)
+	_, err = FromSpec([]byte(nested))
+	assert.ErrorContains(t, err, "cannot hold lists of objects")
+
+	bare := strings.Replace(spec, `"id": {"type": "string", "x-agent": "tag_id"},`, `"id": {"type": "string"},`, 1)
+	bare = strings.Replace(bare,
+		`"note": {"type": "string", "x-agent": true, "x-agent-detail": true}`, `"note": {"type": "string"}`, 1)
+	_, err = FromSpec([]byte(bare))
+	assert.ErrorContains(t, err, "list items expose no fields")
 }
 
 func TestBuildAllowsDeclaredLongStrings(t *testing.T) {
