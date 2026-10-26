@@ -7,6 +7,7 @@ import { getKnowledgeSpans, reparseKnowledge, cancelKnowledgeParse, getKnowledge
 import {
   groupPostprocessGraphSpans,
   knowledgeSpansPayloadHasTrace,
+  postprocessElapsedMs,
   summarizePostprocessTasks,
   type KnowledgeTraceNode,
 } from '@/utils/knowledgeTrace'
@@ -204,9 +205,20 @@ function formatRelativeTime(ts: number): string {
 
 // A skipped stage did not execute. Its tiny bookkeeping interval is not
 // processing time, so do not present it as (for example) multimodal time.
-function formatSpanDuration(node: SpanNode): string {
+function formatSpanDuration(node: SpanNode, includeChildren = false): string {
   if (node.status === 'skipped' || node.status === 'pending') return '—'
+  if (includeChildren) {
+    const elapsed = postprocessElapsedMs(node, postprocessDisplayNow())
+    if (elapsed !== null) return formatDuration(elapsed)
+  }
   return formatDuration(node.duration_ms)
+}
+
+// A terminal parse can leave a stale running child in the last response.
+// Once polling stops, freeze its displayed elapsed time at that response
+// rather than counting indefinitely without fresh worker evidence.
+function postprocessDisplayNow(): number {
+  return shouldPollNow() ? nowTick.value : (lastFetchedAt.value || nowTick.value)
 }
 
 function isPolling(status?: string): boolean {
@@ -1767,7 +1779,10 @@ const processConfigLines = computed<string[]>(() => {
                     <span class="kp-running-time">{{ formatDuration(liveElapsedMs(row.node)) }}</span>
                   </template>
                   <template v-else>
-                    {{ formatSpanDuration(row.node) }}
+                    <span :title="postprocessElapsedMs(row.node, postprocessDisplayNow()) !== null
+                      ? t('knowledgeStages.detail.includingChildren') : undefined">
+                      {{ formatSpanDuration(row.node, true) }}
+                    </span>
                   </template>
                 </div>
 
@@ -1888,6 +1903,12 @@ const processConfigLines = computed<string[]>(() => {
                         <template v-else>
                           {{ formatSpanDuration(selectedRow.node) }}
                         </template>
+                      </span>
+                    </div>
+                    <div v-if="postprocessElapsedMs(selectedRow.node, postprocessDisplayNow()) !== null" class="kp-kv-row">
+                      <span class="kp-kv-key">{{ t('knowledgeStages.detail.includingChildren') }}</span>
+                      <span class="kp-kv-val kp-mono">
+                        {{ formatDuration(postprocessElapsedMs(selectedRow.node, postprocessDisplayNow()) ?? 0) }}
                       </span>
                     </div>
                     <div v-if="!selectedRow.isRoot && barOffsetMs(selectedRow.node) > 0" class="kp-kv-row">

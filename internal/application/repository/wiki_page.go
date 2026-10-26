@@ -367,12 +367,25 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		query = query.Where("status = ?", req.Status)
 	}
 	if req.Query != "" {
-		// Use PostgreSQL full-text search + ILIKE for aliases
-		query = query.Where(
-			"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
-			req.Query,
-			"%"+req.Query+"%",
-		)
+		pattern := "%" + escapeLikeKeyword(req.Query) + "%"
+		if r.wikiDialect() == "sqlite" {
+			// SQLite does not provide PostgreSQL's full-text functions or casts.
+			// Search the same user-visible fields with a case-insensitive LIKE.
+			query = query.Where(
+				"(LOWER(COALESCE(title, '')) LIKE LOWER(?) ESCAPE ? OR "+
+					"LOWER(COALESCE(content, '')) LIKE LOWER(?) ESCAPE ? OR "+
+					"LOWER(CAST(aliases AS TEXT)) LIKE LOWER(?) ESCAPE ?)",
+				pattern, likeEscapeChar, pattern, likeEscapeChar, pattern, likeEscapeChar,
+			)
+		} else {
+			// Use PostgreSQL full-text search + ILIKE for aliases.
+			query = query.Where(
+				"(to_tsvector('simple', coalesce(title, '') || ' ' || "+
+					"coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR "+
+					"aliases::text ILIKE ? ESCAPE ?)",
+				req.Query, pattern, likeEscapeChar,
+			)
+		}
 	}
 	// Directory filters are pushed to SQL so the DB does the counting and
 	// pagination instead of loading every page of the type into memory. `depth`
