@@ -957,7 +957,8 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledge
 		kbVLMConfig := kb.VLMConfig
 		if vlmCfg.ModelID != kbVLMConfig.ModelID && kbVLMConfig.ModelID != "" && kbVLMConfig.IsEnabled() {
 			logger.Warnf(ctx,
-				"[ImageMultimodal] Failed to resolve document VLM model %s: %v; falling back to knowledge base VLM model %s",
+				"[ImageMultimodal] Failed to resolve document VLM model %s: %v;"+
+					" falling back to knowledge base VLM model %s",
 				vlmCfg.ModelID, err, kbVLMConfig.ModelID)
 			fallbackModel, fallbackErr := s.modelService.GetVLMModel(ctx, kbVLMConfig.ModelID)
 			if fallbackErr != nil {

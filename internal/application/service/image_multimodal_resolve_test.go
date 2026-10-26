@@ -17,7 +17,9 @@ type resolveVLMTestKnowledgeBaseService struct {
 	kb *types.KnowledgeBase
 }
 
-func (s resolveVLMTestKnowledgeBaseService) GetKnowledgeBaseByIDOnly(context.Context, string) (*types.KnowledgeBase, error) {
+func (s resolveVLMTestKnowledgeBaseService) GetKnowledgeBaseByIDOnly(
+	context.Context, string,
+) (*types.KnowledgeBase, error) {
 	return s.kb, nil
 }
 
@@ -48,7 +50,9 @@ func (m resolveVLMTestModel) Predict(context.Context, [][]byte, string) (string,
 	return "", nil
 }
 
-func (m resolveVLMTestModel) PredictWithOptions(context.Context, [][]byte, string, *vlm.PredictOptions) (string, error) {
+func (m resolveVLMTestModel) PredictWithOptions(
+	context.Context, [][]byte, string, *vlm.PredictOptions,
+) (string, error) {
 	return "", nil
 }
 
@@ -111,7 +115,9 @@ func TestResolveVLMReportsDocumentAndFallbackModelErrors(t *testing.T) {
 	}
 
 	_, _, err := svc.resolveVLM(context.Background(), "kb-1", "document-1")
-	if err == nil || !strings.Contains(err.Error(), documentErr.Error()) || !strings.Contains(err.Error(), fallbackErr.Error()) {
+	if err == nil ||
+		!strings.Contains(err.Error(), documentErr.Error()) ||
+		!strings.Contains(err.Error(), fallbackErr.Error()) {
 		t.Fatalf("resolveVLM() error = %v, want both document and fallback errors", err)
 	}
 	if want := []string{"document-model", "kb-model"}; !reflect.DeepEqual(modelService.calls, want) {
