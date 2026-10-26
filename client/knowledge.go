@@ -546,7 +546,7 @@ func (c *Client) OpenKnowledgeFile(ctx context.Context, knowledgeID string) (str
 		return "", nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
+		body := readErrorBody(resp.Body)
 		_ = resp.Body.Close()
 		return "", nil, newAPIError(resp.StatusCode, body)
 	}
@@ -592,7 +592,7 @@ func (c *Client) OpenKnowledgeFilesArchive(ctx context.Context, knowledgeBaseID 
 		return "", nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
+		body := readErrorBody(resp.Body)
 		_ = resp.Body.Close()
 		return "", nil, newAPIError(resp.StatusCode, body)
 	}
