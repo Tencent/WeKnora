@@ -5,6 +5,7 @@
 package modelcontext
 
 import (
+	"encoding/json"
 	"fmt"
 	"html"
 	"regexp"
@@ -189,13 +190,29 @@ func (r *sourceRegistry) ExpandText(text string) string {
 	if !r.citationsEnabled {
 		return refCandidateRE.ReplaceAllString(text, "")
 	}
-	return refCandidateRE.ReplaceAllStringFunc(text, func(tag string) string {
-		match := refTagRE.FindStringSubmatch(tag)
-		if len(match) != 2 {
-			return ""
-		}
+	return refCandidateRE.ReplaceAllStringFunc(text, r.expandCitationTag)
+}
+
+// expandCitationTag accepts the native protocol both in prose and as a JSON
+// string fragment. Decode only the candidate tag, then re-escape its canonical
+// replacement so surrounding JSON, whitespace and streaming remain untouched.
+func (r *sourceRegistry) expandCitationTag(tag string) string {
+	if match := refTagRE.FindStringSubmatch(tag); len(match) == 2 {
 		return r.citationTag(match[1])
-	})
+	}
+	var decoded string
+	if err := json.Unmarshal([]byte(`"`+tag+`"`), &decoded); err != nil {
+		return ""
+	}
+	match := refTagRE.FindStringSubmatch(decoded)
+	if len(match) != 2 {
+		return ""
+	}
+	// Marshal a string rather than splicing unescaped attribute quotes or
+	// control characters into the enclosing JSON string. Evidence checks are
+	// identical to prose citations, including when citations are disabled.
+	encoded, _ := json.Marshal(r.citationTag(match[1]))
+	return string(encoded[1 : len(encoded)-1])
 }
 
 // citationTag renders the public citation for a handle backed by current
@@ -261,9 +278,7 @@ func (d *citationStreamExpander) Feed(chunk string) string {
 				break
 			}
 			tag := data[:end+1]
-			if refTagRE.MatchString(tag) {
-				out.WriteString(d.registry.ExpandText(tag))
-			}
+			out.WriteString(d.registry.expandCitationTag(tag))
 			data = data[end+1:]
 			continue
 		}
