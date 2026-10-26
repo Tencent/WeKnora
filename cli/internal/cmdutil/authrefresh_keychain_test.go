@@ -21,18 +21,18 @@ type failingStore struct {
 	deleteErr error
 }
 
-func (f *failingStore) Get(profile, key string) (string, error) {
+func (f *failingStore) Get(_, _ string) (string, error) {
 	return f.getValue, f.getErr
 }
 
-func (f *failingStore) Set(profile, key, value string) error {
+func (f *failingStore) Set(_ string, key, value string) error {
 	f.sets = append(f.sets, [2]string{key, value})
 	return nil
 }
 
-func (f *failingStore) Delete(profile, key string) error { return f.deleteErr }
+func (f *failingStore) Delete(_, _ string) error { return f.deleteErr }
 
-func (f *failingStore) Ref(profile, key string) string { return "" }
+func (f *failingStore) Ref(_, _ string) string { return "" }
 
 type stubRefresher struct {
 	called   bool
@@ -41,7 +41,7 @@ type stubRefresher struct {
 	err      error
 }
 
-func (s *stubRefresher) RefreshToken(ctx context.Context, refreshToken string) (*sdk.RefreshTokenResponse, error) {
+func (s *stubRefresher) RefreshToken(_ context.Context, refreshToken string) (*sdk.RefreshTokenResponse, error) {
 	s.called = true
 	s.gotToken = refreshToken
 	return s.resp, s.err
