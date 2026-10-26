@@ -563,6 +563,55 @@ type loopGuards struct {
 	// consecutiveLength counts rounds in a row that the provider cut off at
 	// the completion-token cap.
 	consecutiveLength int
+	// lastToolRound fingerprints the previous tool round (calls and results)
+	// and repeatedToolRounds counts how many rounds in a row matched it.
+	lastToolRound      string
+	repeatedToolRounds int
+}
+
+// toolRoundSignature fingerprints a tool round by each call's name,
+// arguments, success flag and output. Two rounds with the same signature
+// asked for the same thing and learned nothing new.
+func toolRoundSignature(calls []types.ToolCall) string {
+	type entry struct {
+		Name    string                 `json:"n"`
+		Args    map[string]interface{} `json:"a"`
+		Success bool                   `json:"s"`
+		Output  string                 `json:"o"`
+		Error   string                 `json:"e"`
+	}
+	entries := make([]entry, 0, len(calls))
+	for _, tc := range calls {
+		en := entry{Name: tc.Name, Args: tc.Args}
+		if tc.Result != nil {
+			en.Success = tc.Result.Success
+			en.Output = tc.Result.Output
+			en.Error = tc.Result.Error
+		}
+		entries = append(entries, en)
+	}
+	data, err := json.Marshal(entries)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// trackRepeatedToolRound records a finished tool round and returns how many
+// rounds in a row have now produced the same signature. A round that cannot
+// be fingerprinted breaks the streak.
+func (g *loopGuards) trackRepeatedToolRound(calls []types.ToolCall) int {
+	signature := toolRoundSignature(calls)
+	if signature == "" || len(calls) == 0 {
+		g.lastToolRound, g.repeatedToolRounds = "", 0
+		return 0
+	}
+	if signature == g.lastToolRound {
+		g.repeatedToolRounds++
+	} else {
+		g.lastToolRound, g.repeatedToolRounds = signature, 1
+	}
+	return g.repeatedToolRounds
 }
 
 // closeAnswerStream emits the Done:true marker for an answer that is actually
@@ -1018,6 +1067,7 @@ func (e *AgentEngine) runReActIteration(
 	// round, which used to land in the else branch and reset the counter, so
 	// the guard could never fire on the one shape that needs it most (#3446).
 	if len(response.ToolCalls) == 0 {
+		guards.lastToolRound, guards.repeatedToolRounds = "", 0
 		if guards.sawPlainRound && response.Content == guards.lastResponseContent {
 			guards.consecutiveSameContent++
 		} else {
@@ -1331,6 +1381,25 @@ func (e *AgentEngine) runReActIteration(
 	state.RoundSteps = append(state.RoundSteps, step)
 	*messagesPtr = e.appendToolResults(*messagesPtr, step)
 	*messagesPtr = e.appendToolImages(ctx, *messagesPtr, step)
+
+	// Detect stuck tool loops: rounds that re-run the same calls and get the
+	// same results back. The plain-round guard above resets on every tool
+	// round, so without this a successful but fruitless call repeats until
+	// MaxIterations, which never comes when iterations are unlimited.
+	if repeats := guards.trackRepeatedToolRound(step.ToolCalls); repeats >= maxRepeatedToolRounds {
+		logger.Warnf(ctx, "[Agent][Round-%d] Detected stuck tool loop: same calls and results repeated %d times, stopping",
+			round, repeats)
+		if e.collaborationOwnsFailure(ctx) {
+			return iterOutcomeBreak, fmt.Errorf("collaboration stopped after repeated tool calls without progress")
+		}
+		e.finishStalledTurn(ctx, state, sessionID, response, false)
+		return iterOutcomeBreak, nil
+	} else if repeats == repeatedToolRoundNoticeAt {
+		logger.Warnf(ctx, "[Agent][Round-%d] Same tool calls and results repeated %d times, notifying model",
+			round, repeats)
+		guards.pendingRuntimeNotice = repeatedToolRoundNotice
+	}
+
 	common.PipelineInfo(ctx, "Agent", "round_end", map[string]interface{}{
 		"iteration":   state.CurrentRound,
 		"round":       round,
