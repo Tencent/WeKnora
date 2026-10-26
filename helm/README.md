@@ -146,11 +146,10 @@ helm install weknora ./helm \
 
 The chart-created data-files PVC uses `ReadWriteOnce` (RWO). RWO allows several
 Pods to mount the volume on the same node; it does not provide shared writable
-access across nodes. With a single-node-attach volume, the default rolling update
-(`maxSurge: 1`, `maxUnavailable: 0`) can leave a replacement Pod waiting for the
-old Pod's attachment to be released. `Recreate` terminates the old Pods before
-starting replacements during an upgrade, so **App upgrades have downtime**;
-volume detach/attach can still take time. This strategy does not make RWO storage
+access across nodes. When `app.strategy.type` is omitted, the chart detects this
+single-writer storage and defaults to `Recreate`, which terminates the old Pods
+before starting replacements. **App upgrades have downtime**; volume
+detach/attach can still take time. This strategy does not make RWO storage
 suitable for multiple App replicas across nodes. See Kubernetes documentation on
 [access modes](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#access-modes)
 and [Deployment strategies](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy).
@@ -252,7 +251,7 @@ pre-existing Service name does not automatically transfer its ownership to Helm.
 |-----------|-------------|---------|
 | `app.enabled` | Enable backend | `true` |
 | `app.replicaCount` | Number of replicas | `1` |
-| `app.strategy.type` | App update strategy: `RollingUpdate` or `Recreate` | `RollingUpdate` |
+| `app.strategy.type` | App update strategy: `RollingUpdate` or `Recreate`; empty selects `Recreate` for persistent non-RWX data-files storage and `RollingUpdate` otherwise | `""` |
 | `app.strategy.rollingUpdate.maxSurge` | Extra Pods during rolling updates (integer or percentage); ignored with `Recreate` | `1` |
 | `app.strategy.rollingUpdate.maxUnavailable` | Unavailable Pods during rolling updates (integer or percentage); ignored with `Recreate` | `0` |
 | `app.image.repository` | Image repository | `wechatopenai/weknora-app` |
@@ -260,6 +259,14 @@ pre-existing Service name does not automatically transfer its ownership to Helm.
 | `app.resources` | Resource limits | See values.yaml |
 | `app.env` | Environment variables | See values.yaml |
 | `app.extraEnv` | Additional env vars | `[]` |
+
+### Data Files Storage
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `dataFiles.persistence.enabled` | Create or mount persistent uploaded-file storage | `true` |
+| `dataFiles.persistence.accessModes` | Access modes for a chart-created data-files PVC; `ReadWriteMany` permits rolling App updates | `[ReadWriteOnce]` |
+| `dataFiles.persistence.existingClaim` | Use a pre-provisioned PVC instead of creating one | `""` |
 
 ### Frontend
 
