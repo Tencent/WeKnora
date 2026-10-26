@@ -242,7 +242,6 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "commit_id=$COMMIT_ID" >> $GITHUB_OUTPUT
           echo "build_time=$BUILD_TIME" >> $GITHUB_OUTPUT
-          echo "go_version=$GO_VERSION" >> $GITHUB_OUTPUT
           
           platform=${{ matrix.platform }}
           echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
@@ -261,7 +260,6 @@ jobs:
             ${{ format('VERSION_ARG={0}', steps.version.outputs.version) }}
             ${{ format('COMMIT_ID_ARG={0}', steps.version.outputs.commit_id) }}
             ${{ format('BUILD_TIME_ARG={0}', steps.version.outputs.build_time) }}
-            ${{ format('GO_VERSION_ARG={0}', steps.version.outputs.go_version) }}
             WITH_ANYDOC=1
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-app
