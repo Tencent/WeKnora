@@ -18,6 +18,7 @@ export type AssistantPageId =
   | 'agent_editor'
   | 'settings_models'
   | 'mcp_services'
+  | 'settings'
   | 'chat'
 
 /** What the user has open, as published by the pages that know it. */
@@ -174,7 +175,7 @@ export function toPageContextPayload(context: AssistantPageContext): PageContext
 function contextKey(context: AssistantPageContext | null): string {
   if (!context) return ''
   return [
-    context.page, context.agentId, context.knowledgeBaseId, context.knowledgeId, context.wikiSlug,
+    context.page, context.section, context.agentId, context.knowledgeBaseId, context.knowledgeId, context.wikiSlug,
     context.modelId, context.mcpServiceId, context.messageId,
   ].map(part => part || '').join('|')
 }

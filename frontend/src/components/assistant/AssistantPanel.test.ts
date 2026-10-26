@@ -96,7 +96,7 @@ async function fixture(
   })
   const component = evaluate(panelScript, {
     vue,
-    'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
+    'vue-i18n': { useI18n: () => ({ t: (key: string) => key, te: () => true }) },
     'vue-router': { useRoute: () => route },
     'tdesign-vue-next': {
       MessagePlugin: { error: (message: string) => errors.push(message) },
@@ -204,12 +204,13 @@ test('welcome descriptions and questions change with pages and toolbox tabs with
       ['knowledgeBaseDetail', {}, 'knowledgeBase', ['knowledgeTopics', 'recentActivity', 'knowledgeGaps']],
       ['artifactLibrary', {}, 'artifacts', ['artifactRecent', 'artifactSources', 'artifactCreate']],
       ['agentList', {}, 'agents', ['agents', 'agentCreate', 'agentChoose']],
+      ['organizationList', {}, 'organizations', ['organizationShared', 'organizationJoin', 'organizationCreate']],
       ['automationList', {}, 'automation', ['automationIdeas', 'automationCreate', 'automationOverview']],
       ['automationList', { automationId: 'weekly' }, 'automation', ['automationSummary', 'automationSchedule', 'automationImprove']],
       ['toolbox', { section: 'skills' }, 'skills', ['skillFind', 'skillAdd', 'skillUse']],
       ['toolbox', { section: 'mcp' }, 'mcp', ['mcpFind', 'mcpSetup', 'mcpExamples']],
       ['toolbox', { section: 'browserconnection' }, 'browser', ['browserConnect', 'browserTasks', 'browserReconnect']],
-      ['chat', {}, 'chat', ['chatSummary', 'chatOpenQuestions', 'chatTodos']],
+      ['chat', {}, 'chat', ['chatSummary', 'chatCheck', 'chatFollowup']],
     ]
     for (const [name, params, intro, expected] of pages) {
       f.route.name = name
@@ -249,11 +250,13 @@ test('open resources and dialogs have their own welcome content and return to pa
       [{ knowledgeBaseId: 'kb', knowledgeId: 'document' }, 'welcomeDescriptions.document', ['documentSummary', 'documentSteps', 'documentFaq']],
       [{ knowledgeBaseId: 'kb', section: 'faq' }, 'welcomeDescriptions.faq', ['faqCoverage', 'faqDuplicates', 'faqImprove']],
       [{ knowledgeBaseId: 'kb' }, 'welcomeDescriptions.knowledgeBase', ['knowledgeTopics', 'recentActivity', 'knowledgeGaps']],
-      [{ page: 'chat', chatSessionId: 'chat' }, 'welcomeDescriptions.chat', ['chatSummary', 'chatOpenQuestions', 'chatTodos']],
+      [{ page: 'chat', chatSessionId: 'chat' }, 'welcomeDescriptions.chat', ['chatSummary', 'chatCheck', 'chatFollowup']],
+      [{ page: 'settings', section: 'members' }, 'settingsPages.members.description', ['settingsPages.members.q1', 'settingsPages.members.q2', 'settingsPages.members.q3']],
+      [{ page: 'settings', section: 'integration-im' }, 'settingsPages.integration-im.description', ['settingsPages.integration-im.q1', 'settingsPages.integration-im.q2', 'settingsPages.integration-im.q3']],
       [{ chatSessionId: 'chat', messageId: 'answer' }, 'welcomeDescriptions.message', ['messageSources', 'messageCheck', 'messageReuse']],
     ]
     const questions = () => f.findAll(node => node.props.class === 'assistant-starter')
-      .map(node => node.text?.replace('assistant.starters.', ''))
+      .map(node => node.text?.replace(/^assistant\.(starters\.)?/, ''))
     const description = () => f.findAll(node => node.props.class === 'assistant-welcome-desc')[0]?.text
     for (const [context, intro, expected] of cases) {
       f.assistant.publishPageContext(owner, context)
@@ -272,6 +275,25 @@ test('open resources and dialogs have their own welcome content and return to pa
     assert.deepEqual(questions(), ['agentConfig', 'agentModel', 'agentKnowledge'], 'an open agent takes precedence over the underlying MCP tab')
     assert.equal(description(), 'assistant.agentWelcomeDesc')
     assert.equal(f.sent.length, 0)
+  } finally { f.close() }
+})
+
+test('each settings section has its own welcome questions', async () => {
+  const f = await fixture()
+  try {
+    f.assistant.open()
+    const owner = Symbol('settings')
+    const questions = () => f.findAll(node => node.props.class === 'assistant-starter')
+      .map(node => node.text?.replace(/^assistant\.(starters\.)?/, ''))
+    for (const section of ['general', 'members', 'sandbox', 'websearch', 'integration-api', 'runtime-queues', 'system-global-users']) {
+      f.assistant.publishPageContext(owner, { page: 'settings', section })
+      await flush()
+      assert.deepEqual(questions(), [
+        `settingsPages.${section}.q1`,
+        `settingsPages.${section}.q2`,
+        `settingsPages.${section}.q3`,
+      ], section)
+    }
   } finally { f.close() }
 })
 

@@ -196,7 +196,7 @@ import {
 import { removeSession, SESSION_MUTATION_EVENT, type SessionMutationDetail } from '@/components/sessionMutations'
 import type { PageContextPayload } from '@/api/chat/streame'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const route = useRoute()
 const childTabs = createChildAgentTabs()
 provide(childAgentTabsKey, childTabs)
@@ -270,6 +270,14 @@ const initialMessage = ref<{
 const initialQuery = computed(() => initialMessage.value?.sessionId === assistant.sessionId
   ? initialMessage.value.query : '')
 
+function settingsWelcome(section: string) {
+  const key = te(`assistant.settingsPages.${section}.q1`) ? section : 'fallback'
+  return {
+    description: t(`assistant.settingsPages.${key}.description`),
+    starters: [t(`assistant.settingsPages.${key}.q1`), t(`assistant.settingsPages.${key}.q2`), t(`assistant.settingsPages.${key}.q3`)],
+  }
+}
+
 const welcomeContent = computed(() => {
   const general = {
     description: t('assistant.welcomeDesc'),
@@ -298,6 +306,12 @@ const welcomeContent = computed(() => {
     description: t('assistant.welcomeDescriptions.mcp'),
     starters: [t('assistant.starters.mcpFind'), t('assistant.starters.mcpSetup'), t('assistant.starters.mcpExamples')],
   }
+  if (c?.page === 'settings') return settingsWelcome(c.section || 'fallback')
+  if (route.name === 'settings') {
+    const section = typeof route.query.section === 'string' ? route.query.section : 'general'
+    const panel = typeof route.query.panel === 'string' ? route.query.panel : ''
+    return settingsWelcome(section === 'system-global' && panel ? `system-global-${panel}` : section)
+  }
   if (c?.agentId) return {
     description: t('assistant.agentWelcomeDesc'),
     starters: [t('assistant.starters.agentConfig'), t('assistant.starters.agentModel'), t('assistant.starters.agentKnowledge')],
@@ -316,7 +330,7 @@ const welcomeContent = computed(() => {
   }
   if (c?.page === 'chat') return {
     description: t('assistant.welcomeDescriptions.chat'),
-    starters: [t('assistant.starters.chatSummary'), t('assistant.starters.chatOpenQuestions'), t('assistant.starters.chatTodos')],
+    starters: [t('assistant.starters.chatSummary'), t('assistant.starters.chatCheck'), t('assistant.starters.chatFollowup')],
   }
   if (c?.knowledgeBaseId || route.name === 'knowledgeBaseDetail') return {
     description: t('assistant.welcomeDescriptions.knowledgeBase'),
@@ -333,6 +347,10 @@ const welcomeContent = computed(() => {
   if (route.name === 'agentList') return {
     description: t('assistant.welcomeDescriptions.agents'),
     starters: [t('assistant.starters.agents'), t('assistant.starters.agentCreate'), t('assistant.starters.agentChoose')],
+  }
+  if (route.name === 'organizationList') return {
+    description: t('assistant.welcomeDescriptions.organizations'),
+    starters: [t('assistant.starters.organizationShared'), t('assistant.starters.organizationJoin'), t('assistant.starters.organizationCreate')],
   }
   if (route.name === 'automationList') return {
     description: t('assistant.welcomeDescriptions.automation'),
@@ -356,7 +374,7 @@ const welcomeContent = computed(() => {
   }
   if (route.name === 'chat') return {
     description: t('assistant.welcomeDescriptions.chat'),
-    starters: [t('assistant.starters.chatSummary'), t('assistant.starters.chatOpenQuestions'), t('assistant.starters.chatTodos')],
+    starters: [t('assistant.starters.chatSummary'), t('assistant.starters.chatCheck'), t('assistant.starters.chatFollowup')],
   }
   return general
 })

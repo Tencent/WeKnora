@@ -208,6 +208,7 @@ import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useModalShell } from '@/composables/useModalShell'
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import SettingsModalShell from '@/components/SettingsModalShell.vue'
 import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import SystemInfo from './SystemInfo.vue'
@@ -484,6 +485,15 @@ const handleSubMenuClick = (parentKey: string, childKey: string) => {
 // 控制弹窗显示
 const visible = computed(() => {
   return route.path === '/platform/settings' || uiStore.showSettingsModal
+})
+
+useAssistantPageContext(() => {
+  if (!visible.value) return null
+  const panel = typeof route.query.panel === 'string' ? route.query.panel : ''
+  const section = currentSection.value === 'system-global' && panel
+    ? `system-global-${panel}`
+    : currentSection.value
+  return { page: 'settings', section }
 })
 
 // 关闭弹窗
