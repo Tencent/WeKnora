@@ -21,7 +21,11 @@ const (
 	// over a minute on slow endpoints, so this is intentionally generous and
 	// can be raised further via VLM_HTTP_TIMEOUT_SECONDS.
 	defaultTimeout = 180 * time.Second
-	defaultMaxToks = 5000
+	// defaultMaxToks is the OCR output budget when the model row sets none.
+	// A dense page (table of contents, formulas, large tables) can need well
+	// over 5000 tokens, and reasoning models spend part of the budget on
+	// thinking, so a truncated page would otherwise be dropped (issue #4692).
+	defaultMaxToks = 16384
 	defaultTemp    = float32(0.1)
 )
 
@@ -46,6 +50,7 @@ type RemoteAPIVLM struct {
 	modelID     string
 	chat        chat.Chat
 	temperature float64
+	maxTokens   int
 }
 
 // NewRemoteAPIVLM creates a remote-API backed VLM instance.
@@ -66,6 +71,8 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 			temp = f
 		}
 	}
+
+	maxTokens := vlmMaxTokens(extra["max_tokens"], config.MaxOutputTokens)
 
 	client, err := chat.NewRemoteChat(&chat.ChatConfig{
 		Source:        types.ModelSourceRemote,
@@ -88,7 +95,21 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 		modelID:     config.ModelID,
 		chat:        client,
 		temperature: temp,
+		maxTokens:   maxTokens,
 	}, nil
+}
+
+// vlmMaxTokens resolves the output budget for one VLM call. An explicit
+// extra_config "max_tokens" wins; otherwise the default applies, capped at the
+// model's declared max_output_tokens so the provider never rejects the request.
+func vlmMaxTokens(raw string, modelLimit int) int {
+	if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && n > 0 {
+		return n
+	}
+	if modelLimit > 0 {
+		return min(defaultMaxToks, modelLimit)
+	}
+	return defaultMaxToks
 }
 
 // Predict sends images with a text prompt through the chat client.
@@ -122,7 +143,7 @@ func (v *RemoteAPIVLM) PredictWithOptions(
 
 	chatOpts := &chat.ChatOptions{
 		Temperature: v.temperature,
-		MaxTokens:   defaultMaxToks,
+		MaxTokens:   v.maxTokens,
 	}
 	// Only an explicit preference is forwarded. The protocol layer skips the
 	// thinking fields entirely when nobody asked for a level, which is what
@@ -141,7 +162,7 @@ func (v *RemoteAPIVLM) PredictWithOptions(
 	if resp.FinishReason == "length" {
 		// Non-empty partial output is still incomplete and must not be indexed
 		// as successful OCR. Returning an error also marks the model trace failed.
-		return "", fmt.Errorf("%w at %d tokens (finish_reason=length)", ErrTruncatedCompletion, defaultMaxToks)
+		return "", fmt.Errorf("%w at %d tokens (finish_reason=length)", ErrTruncatedCompletion, v.maxTokens)
 	}
 	logger.Infof(ctx, "[VLM] response received, len=%d", len(content))
 	return content, nil
