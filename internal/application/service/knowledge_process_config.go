@@ -86,6 +86,11 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	if overrides.QuestionGenerationConfig != nil {
 		base := eff.QuestionGenerationConfig
 		eff.QuestionGenerationConfig = *overrides.QuestionGenerationConfig
+		if strings.TrimSpace(eff.QuestionGenerationConfig.ModelID) == "" {
+			eff.QuestionGenerationConfig.ModelID = base.ModelID
+		} else {
+			eff.QuestionGenerationConfig.ModelID = strings.TrimSpace(eff.QuestionGenerationConfig.ModelID)
+		}
 		if eff.QuestionGenerationConfig.CustomInstructions == "" {
 			eff.QuestionGenerationConfig.CustomInstructions = base.CustomInstructions
 		}
@@ -289,10 +294,18 @@ func reparseFileTypes(k *types.Knowledge) []string {
 }
 
 func defaultQuestionGenerationConfig(kb *types.KnowledgeBase) types.QuestionGenerationConfig {
-	if kb == nil || kb.QuestionGenerationConfig == nil {
-		return types.QuestionGenerationConfig{}
+	var config types.QuestionGenerationConfig
+	if kb == nil {
+		return config
 	}
-	return *kb.QuestionGenerationConfig
+	if kb.QuestionGenerationConfig != nil {
+		config = *kb.QuestionGenerationConfig
+	}
+	config.ModelID = strings.TrimSpace(config.ModelID)
+	if config.ModelID == "" {
+		config.ModelID = strings.TrimSpace(kb.SummaryModelID)
+	}
+	return config
 }
 
 func derefExtractConfig(cfg *types.ExtractConfig) types.ExtractConfig {

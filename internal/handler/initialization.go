@@ -143,9 +143,10 @@ type KBModelConfigRequest struct {
 
 	// 问题生成配置
 	QuestionGeneration struct {
-		Enabled            bool   `json:"enabled"`
-		QuestionCount      int    `json:"questionCount"`
-		CustomInstructions string `json:"customInstructions"`
+		ModelID            *string `json:"modelId,omitempty"`
+		Enabled            bool    `json:"enabled"`
+		QuestionCount      int     `json:"questionCount"`
+		CustomInstructions string  `json:"customInstructions"`
 	} `json:"questionGeneration"`
 }
 
@@ -256,6 +257,14 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		return
 	}
 	ownWorkspace, err := kbSettingsAccess(c, kb)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+
+	questionModelID, err := h.resolveQuestionGenerationModel(
+		ctx, req.QuestionGeneration.ModelID, kb.QuestionGenerationConfig,
+	)
 	if err != nil {
 		_ = c.Error(err)
 		return
@@ -427,12 +436,14 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 			questionCount = 10
 		}
 		kb.QuestionGenerationConfig = &types.QuestionGenerationConfig{
+			ModelID:            questionModelID,
 			Enabled:            true,
 			QuestionCount:      questionCount,
 			CustomInstructions: strings.TrimSpace(req.QuestionGeneration.CustomInstructions),
 		}
 	} else {
 		kb.QuestionGenerationConfig = &types.QuestionGenerationConfig{
+			ModelID:            questionModelID,
 			Enabled:            false,
 			CustomInstructions: strings.TrimSpace(req.QuestionGeneration.CustomInstructions),
 		}
@@ -1742,6 +1753,7 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 		config["questionGeneration"] = map[string]interface{}{
 			"enabled":            kb.QuestionGenerationConfig.Enabled,
 			"questionCount":      kb.QuestionGenerationConfig.QuestionCount,
+			"modelId":            kb.QuestionGenerationConfig.ModelID,
 			"customInstructions": kb.QuestionGenerationConfig.CustomInstructions,
 		}
 	} else {

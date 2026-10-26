@@ -4226,6 +4226,9 @@ export default {
       title: 'Advanced Settings',
       description: 'Configure question generation and other advanced features',
       questionGeneration: {
+        modelLabel: 'Question Generation Model',
+        modelDescription: 'Leave empty to use the knowledge-base summary model.',
+        modelPlaceholder: 'Select a question generation model',
         label: 'AI Question Generation',
         description: 'Generate related questions for each chunk using LLM during document parsing to improve retrieval recall. Enabling this will increase document parsing time.',
         countLabel: 'Question Count',
@@ -5803,6 +5806,7 @@ export default {
         bindings: {
           embedding_model: 'Embedding model',
           summary_model: 'Summary model',
+          question_model: 'Question generation model',
           image_processing_model: 'Image processing model',
           vlm_model: 'Vision model',
           asr_model: 'Speech recognition model',

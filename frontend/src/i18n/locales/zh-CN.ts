@@ -3320,6 +3320,7 @@ export default {
       bindings: {
         embedding_model: 'Embedding 模型',
         summary_model: '摘要模型',
+          question_model: '问题生成模型',
         image_processing_model: '图片处理模型',
         vlm_model: '视觉理解模型',
         asr_model: '语音识别模型',
@@ -4926,6 +4927,9 @@ export default {
         placeholder: '例如：这是销售订单表，金额单位为元，status 字段使用公司内部状态码…'
       },
       questionGeneration: {
+        modelLabel: '问题生成模型',
+        modelDescription: '留空时使用知识库摘要模型。',
+        modelPlaceholder: '请选择问题生成模型',
         label: 'AI 问题生成',
         description: '解析文档时调用大模型为每个分块生成相关问题，提高检索召回率。启用后会增加文档解析耗时。',
         countLabel: '生成问题数量',

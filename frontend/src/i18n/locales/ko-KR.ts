@@ -3318,6 +3318,7 @@ export default {
       bindings: {
         embedding_model: 'Embedding 모델',
         summary_model: '요약 모델',
+          question_model: '질문 생성 모델',
         image_processing_model: '이미지 처리 모델',
         vlm_model: '비전 모델',
         asr_model: '음성 인식 모델',
@@ -4925,6 +4926,9 @@ export default {
         placeholder: '예: 판매 주문 테이블이며 금액 단위와 내부 상태 코드를 설명…'
       },
       questionGeneration: {
+        modelLabel: '질문 생성 모델',
+        modelDescription: '비워 두면 지식 베이스 요약 모델을 사용합니다.',
+        modelPlaceholder: '질문 생성 모델 선택',
         label: 'AI 질문 생성',
         description: '문서 파싱 시 대규모 모델을 호출하여 각 청크에 대한 관련 질문을 생성하여 검색 재현율을 향상시킵니다. 활성화하면 문서 파싱 시간이 증가합니다.',
         countLabel: '생성 질문 수',

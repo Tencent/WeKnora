@@ -4226,6 +4226,9 @@ export default {
       title: '詳細設定',
       description: '質問生成やその他の高度な機能を設定します',
       questionGeneration: {
+        modelLabel: '質問生成モデル',
+        modelDescription: '未選択の場合はナレッジベースの要約モデルを使用します。',
+        modelPlaceholder: '質問生成モデルを選択',
         label: 'AI質問生成',
         description: 'ドキュメント解析時にLLMで各チャンクの関連質問を生成し、検索のリコールを向上させます。有効にするとドキュメントの解析時間が長くなります。',
         countLabel: '質問数',
@@ -5803,6 +5806,7 @@ export default {
         bindings: {
           embedding_model: '埋め込みモデル',
           summary_model: '要約モデル',
+          question_model: '質問生成モデル',
           image_processing_model: '画像処理モデル',
           vlm_model: '視覚モデル',
           asr_model: '音声認識モデル',

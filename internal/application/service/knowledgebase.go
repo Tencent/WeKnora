@@ -168,6 +168,14 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 		return nil, err
 	}
 
+	if kb.QuestionGenerationConfig != nil {
+		id, err := ValidateQuestionGenerationModel(ctx, s.modelService, kb.QuestionGenerationConfig.ModelID)
+		if err != nil {
+			return nil, err
+		}
+		kb.QuestionGenerationConfig.ModelID = id
+	}
+
 	logger.Infof(ctx, "Creating knowledge base, ID: %s, tenant ID: %d, name: %s", kb.ID, kb.TenantID, kb.Name)
 
 	if err := s.repo.CreateKnowledgeBase(ctx, kb); err != nil {
@@ -693,7 +701,12 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 			changedFields = append(changedFields, "asr_config")
 		}
 		if config.QuestionGenerationConfig != nil {
-			kb.QuestionGenerationConfig = config.QuestionGenerationConfig
+			next := *config.QuestionGenerationConfig
+			next.ModelID, err = ValidateQuestionGenerationModel(ctx, s.modelService, next.ModelID)
+			if err != nil {
+				return nil, err
+			}
+			kb.QuestionGenerationConfig = &next
 			changedFields = append(changedFields, "question_generation_config")
 		}
 	}

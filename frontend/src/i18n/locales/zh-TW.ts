@@ -3320,6 +3320,7 @@ export default {
       bindings: {
         embedding_model: 'Embedding 模型',
         summary_model: '摘要模型',
+          question_model: '問題生成模型',
         image_processing_model: '圖片處理模型',
         vlm_model: '視覺理解模型',
         asr_model: '語音辨識模型',
@@ -4926,6 +4927,9 @@ export default {
         placeholder: '例如：這是銷售訂單表，金額單位為元，status 欄位使用公司內部狀態碼…'
       },
       questionGeneration: {
+        modelLabel: '問題生成模型',
+        modelDescription: '留空時使用知識庫的摘要模型。',
+        modelPlaceholder: '選擇問題生成模型',
         label: 'AI 問題生成',
         description: '解析文件時呼叫大型語言模型為每個切塊生成相關問題，提高檢索召回率。啟用後會增加文件解析耗時。',
         countLabel: '生成問題數量',
