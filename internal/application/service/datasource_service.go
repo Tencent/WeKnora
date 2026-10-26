@@ -1216,16 +1216,11 @@ func (s *DataSourceService) processSyncStreaming(
 	resultJSON, _ := result.ToJSON()
 	if err := allFetchedItemsFailedError(result); err != nil {
 		logger.Errorf(ctx, "streaming sync failed while processing fetched items: %v", err)
-		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused)
-		return err
+		return s.failStreamingSync(ctx, ds, syncLog, result, resultJSON, nextCursor, wasPaused, err)
 	}
 
 	// Persist the final cursor for the next incremental sync.
-	if nextCursor != nil {
-		if cursorJSON, cerr := nextCursor.ToJSON(); cerr == nil {
-			ds.LastSyncCursor = cursorJSON
-		}
-	}
+	persistStreamCursor(ds, nextCursor)
 	ds.LastSyncAt = timePtr(time.Now().UTC())
 
 	// Surface per-document failures as a partial sync (not silent success), so
@@ -1254,6 +1249,40 @@ func (s *DataSourceService) processSyncStreaming(
 	logger.Infof(ctx, "streaming sync completed: ds=%s created=%d updated=%d deleted=%d skipped=%d failed=%d",
 		payload.DataSourceID, result.Created, result.Updated, result.Deleted, result.Skipped, result.Failed)
 	return nil
+}
+
+// persistStreamCursor records the connector cursor a stream run produced. The
+// cursor only advances nodes that were fetched or deliberately skipped, so
+// persisting it on a failed round keeps that progress without skipping the
+// nodes whose fetch failed (#4712).
+func persistStreamCursor(ds *types.DataSource, cursor *types.SyncCursor) {
+	if ds == nil || cursor == nil {
+		return
+	}
+	cursorJSON, err := cursor.ToJSON()
+	if err != nil {
+		return
+	}
+	ds.LastSyncCursor = cursorJSON
+}
+
+// failStreamingSync finalizes a streaming round whose fetched items all failed.
+// The cursor is still persisted: the round's skipped and successfully fetched
+// nodes must not be re-fetched just because the remaining items failed.
+func (s *DataSourceService) failStreamingSync(
+	ctx context.Context,
+	ds *types.DataSource,
+	syncLog *types.SyncLog,
+	result *types.SyncResult,
+	resultJSON types.JSON,
+	nextCursor *types.SyncCursor,
+	wasPaused bool,
+	cause error,
+) error {
+	persistStreamCursor(ds, nextCursor)
+	s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON,
+		types.SyncLogStatusFailed, cause.Error(), wasPaused)
+	return cause
 }
 
 func (s *DataSourceService) updateSyncRunResult(

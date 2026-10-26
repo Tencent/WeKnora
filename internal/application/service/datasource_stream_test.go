@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -202,4 +203,28 @@ func TestStreamingFetchUsesFullStreamBaseline(t *testing.T) {
 	if !plain.streamCalled {
 		t.Fatal("plain streaming connector must keep FetchStream on force-full")
 	}
+}
+
+// A round whose fetched items all failed must still persist the cursor it
+// earned from the nodes it skipped or fetched successfully; otherwise the next
+// incremental run starts from the old snapshot and re-fetches the whole tree
+// (#4712).
+func TestFailStreamingSyncPersistsCursorProgress(t *testing.T) {
+	dsRepo := &recordingDSRepo{}
+	syncLogRepo := &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{}}
+	svc := &DataSourceService{dsRepo: dsRepo, syncLogRepo: syncLogRepo}
+	ds := &types.DataSource{ID: "ds-1"}
+	syncLog := &types.SyncLog{ID: "log-1", Status: types.SyncLogStatusRunning}
+	syncLogRepo.logs[syncLog.ID] = syncLog
+	next := &types.SyncCursor{ConnectorCursor: map[string]interface{}{
+		"space_node_times": map[string]map[string]string{"space1": {"nt1": "100"}},
+	}}
+	result := &types.SyncResult{Total: 2, Failed: 2}
+	cause := errors.New("all fetched items failed during sync (2/2)")
+
+	err := svc.failStreamingSync(context.Background(), ds, syncLog, result, nil, next, false, cause)
+	require.ErrorIs(t, err, cause)
+	require.Len(t, dsRepo.updated, 1, "the failed round must persist the data source")
+	assert.Contains(t, string(dsRepo.updated[0].LastSyncCursor), "nt1")
+	assert.Equal(t, types.SyncLogStatusFailed, syncLog.Status)
 }
