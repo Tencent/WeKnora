@@ -8336,6 +8336,8 @@ export default {
       countHint: '當前目錄 {direct} 個文件，含子目錄共 {total} 個',
       filteredCount: '比對 {count} 個文件',
       title: '目錄',
+      folderSection: '資料夾',
+      documentSection: '文件',
       rootRow: '根目錄',
       rootRowTip: '知識庫根目錄，未歸入子資料夾的文件在此',
       folderCardCount: '{count} 個文件',

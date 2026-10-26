@@ -945,6 +945,8 @@ export default {
       countHint: 'このフォルダ内 {direct} 件、サブフォルダを含めて {total} 件',
       filteredCount: '{count} 件一致',
       title: 'フォルダ',
+      folderSection: 'フォルダ',
+      documentSection: 'ドキュメント',
       rootRow: 'ルート',
       rootRowTip: 'ナレッジベースのルート。サブフォルダに属さないドキュメントはここに置かれます',
       folderCardCount: '{count}件のドキュメント',

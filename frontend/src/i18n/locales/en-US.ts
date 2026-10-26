@@ -945,6 +945,8 @@ export default {
       countHint: '{direct} documents in this folder; {total} including subfolders',
       filteredCount: '{count} matching documents',
       title: 'Folders',
+      folderSection: 'Folders',
+      documentSection: 'Documents',
       rootRow: 'Root',
       rootRowTip: 'Knowledge base root; documents not in a subfolder live here',
       folderCardCount: '{count} document | {count} documents',

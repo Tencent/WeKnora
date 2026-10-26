@@ -8335,6 +8335,8 @@ export default {
       countHint: '현재 폴더 문서 {direct}개, 하위 폴더 포함 {total}개',
       filteredCount: '일치하는 문서 {count}개',
       title: '폴더',
+      folderSection: '폴더',
+      documentSection: '문서',
       rootRow: '루트',
       rootRowTip: '지식 베이스 루트 디렉터리, 하위 폴더에 없는 문서가 여기에 있습니다',
       folderCardCount: '문서 {count}개',

@@ -8336,6 +8336,8 @@ export default {
       countHint: '当前目录 {direct} 个文档，含子目录共 {total} 个',
       filteredCount: '匹配 {count} 个文档',
       title: '目录',
+      folderSection: '文件夹',
+      documentSection: '文档',
       rootRow: '根目录',
       rootRowTip: '知识库根目录，未归入子文件夹的文档在此',
       folderCardCount: '{count} 个文档',

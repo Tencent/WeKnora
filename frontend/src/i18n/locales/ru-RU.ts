@@ -8335,6 +8335,8 @@ export default {
       countHint: 'В этой папке: {direct}, с подпапками: {total}',
       filteredCount: 'Найдено документов: {count}',
       title: 'Папки',
+      folderSection: 'Папки',
+      documentSection: 'Документы',
       rootRow: 'Корень',
       rootRowTip: 'Корневая папка базы знаний; документы без подпапки находятся здесь',
       folderCardCount: 'Документов: {count}',
