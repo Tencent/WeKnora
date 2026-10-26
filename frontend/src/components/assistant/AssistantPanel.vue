@@ -2,14 +2,16 @@
   <!-- Floating panels must escape the app root's stacking context to sit above body-attached drawers. -->
   <Teleport to="body" :disabled="effectiveLayout === 'docked'">
   <!-- Hidden with a class, not v-if, so a reply keeps streaming while closed. -->
-  <aside class="assistant-panel" :class="[`is-${effectiveLayout}`, { 'is-open': assistant.visible, 'is-resizing': resizing }]"
-    :style="{ width: `${panelWidth}px` }" role="complementary" :aria-label="assistantName"
+  <aside ref="panelElement" class="assistant-panel"
+    :class="[`is-${effectiveLayout}`, { 'is-open': assistant.visible, 'is-resizing': resizing, 'is-dragging': dragging }]"
+    :style="[{ width: `${panelWidth}px` }, effectiveLayout === 'floating' ? positionStyle : {}]" role="complementary" :aria-label="assistantName"
     :aria-hidden="!assistant.visible">
     <PanelResizeHandle edge="left" :label="t('assistant.resize')" :value="panelWidth"
       :min="ASSISTANT_PANEL_MIN_WIDTH" :max="ASSISTANT_PANEL_MAX_WIDTH"
       @start="startResize" @resize="resize" @end="resizing = false" />
 
-    <header class="assistant-panel__header">
+    <header class="assistant-panel__header" @pointerdown="startPanelDrag" @pointermove="moveDrag"
+      @pointerup="stopDrag" @pointercancel="stopDrag" @lostpointercapture="stopDrag">
       <ChildAgentTabBar header-mode :tabs="childTabs.tabs.value"
         :active-id="childTabs.activeId.value" :attention="childTabs.attention.value"
         @select="selectConversationTab" @close="childTabs.close">
@@ -153,6 +155,7 @@ import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import ChatView from '@/views/chat/index.vue'
 import ChildAgentTabBar from '@/views/chat/components/ChildAgentTabBar.vue'
 import { createChildAgentTabs, childAgentTabsKey } from '@/composables/useChildAgentTabs'
+import { useFloatingPreviewDrag } from '@/composables/useFloatingPreviewDrag'
 import InputField from '@/components/Input-field.vue'
 import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
 import ResourceIcon from '@/components/icons/ResourceIcon.vue'
@@ -196,6 +199,15 @@ const onViewportResize = () => { viewportWidth.value = window.innerWidth }
 const canDock = computed(() => viewportWidth.value >= DOCK_MIN_VIEWPORT)
 const effectiveLayout = computed(() => assistant.layout === 'docked' && canDock.value ? 'docked' : 'floating')
 const docked = computed(() => assistant.visible && effectiveLayout.value === 'docked')
+const panelElement = ref<HTMLElement | null>(null)
+const { positionStyle, dragging, startDrag, moveDrag, stopDrag } = useFloatingPreviewDrag(
+  computed(() => assistant.visible && effectiveLayout.value === 'floating' ? panelElement.value : null), 'viewport',
+)
+
+function startPanelDrag(event: PointerEvent) {
+  if (effectiveLayout.value !== 'floating' || (event.target as Element).closest('button, a, input, select, textarea, [role="button"], [role="tab"]')) return
+  startDrag(event)
+}
 
 const panelWidth = computed(() => {
   const room = effectiveLayout.value === 'docked'
@@ -482,14 +494,25 @@ onUnmounted(() => {
   // Above document/model drawers (2100/2300), below confirmation dialogs (2500).
   &.is-floating {
     position: fixed;
-    top: 12px;
     right: 12px;
     bottom: 12px;
+    height: min(720px, calc(100% - 24px));
+    max-width: calc(100% - 24px);
     z-index: 2400;
     border: 1px solid var(--td-component-stroke);
     border-radius: var(--app-radius-lg);
     box-shadow: var(--td-shadow-3);
     overflow: hidden;
+
+    .assistant-panel__header {
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+    }
+
+    &.is-dragging .assistant-panel__header {
+      cursor: grabbing;
+    }
   }
 
   &.is-resizing {
@@ -768,6 +791,19 @@ onUnmounted(() => {
   .assistant-panel.is-open {
     animation: assistant-panel-in var(--app-motion-slow) cubic-bezier(0.16, 1, 0.3, 1);
 
+    &::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      border-radius: inherit;
+      pointer-events: none;
+      opacity: 0;
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--td-brand-color) 48%, transparent),
+        inset 0 0 20px color-mix(in srgb, var(--td-brand-color) 12%, transparent);
+      animation: assistant-panel-glow calc(var(--app-motion-slow) * 3) ease-out var(--app-motion-instant);
+    }
+
     .assistant-panel__header-icon,
     .assistant-welcome-icon {
       animation: assistant-icon-in calc(var(--app-motion-base) + var(--app-motion-slow)) ease-out backwards;
@@ -794,6 +830,11 @@ onUnmounted(() => {
       animation-delay: var(--app-motion-base);
     }
   }
+}
+
+@keyframes assistant-panel-glow {
+  0%, 100% { opacity: 0; }
+  25% { opacity: 1; }
 }
 
 @keyframes assistant-panel-in {

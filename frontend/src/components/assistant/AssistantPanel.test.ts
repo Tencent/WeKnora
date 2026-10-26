@@ -15,6 +15,7 @@ const panelScript = compileScript(descriptor, { id: 'assistant-panel-test', inli
 const storeScript = readFileSync(new URL('../../stores/assistant.ts', import.meta.url), 'utf8')
 const groupingScript = readFileSync(new URL('../sessionGrouping.ts', import.meta.url), 'utf8')
 const assistantApiScript = readFileSync(new URL('../../api/assistant.ts', import.meta.url), 'utf8')
+const dragScript = readFileSync(new URL('../../composables/useFloatingPreviewDrag.ts', import.meta.url), 'utf8')
 
 function evaluate(source: string, dependencies: Record<string, unknown>, globals = {}) {
   const exports: any = {}
@@ -87,6 +88,11 @@ async function fixture(
       return () => null
     },
   })
+  const viewport = { innerWidth: 1440, innerHeight: 1000, addEventListener() {}, removeEventListener() {} }
+  const floatingDrag = evaluate(dragScript, { vue }, {
+    window: viewport,
+    ResizeObserver: class { observe() {} disconnect() {} },
+  })
   const component = evaluate(panelScript, {
     vue,
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
@@ -97,6 +103,7 @@ async function fixture(
     '@/views/chat/index.vue': ChatView,
     '@/views/chat/components/ChildAgentTabBar.vue': emptyComponent,
     '@/composables/useChildAgentTabs': childAgentTabs,
+    '@/composables/useFloatingPreviewDrag': floatingDrag,
     '@/components/Input-field.vue': emptyComponent,
     '@/components/PanelResizeHandle.vue': emptyComponent,
     '@/components/icons/ResourceIcon.vue': emptyComponent,
@@ -127,7 +134,7 @@ async function fixture(
         deleted.push(id)
       },
     },
-  }, { window: { innerWidth: 1440, addEventListener() {}, removeEventListener() {} } }).default
+  }, { window: viewport }).default
   type HostNode = { children: HostNode[]; parent?: HostNode; tag?: string; props: Record<string, any>; style: Record<string, any>; text?: string }
   const node = (tag?: string): HostNode => ({ children: [], tag, props: {}, style: {} })
   const remove = (child: HostNode) => {
@@ -206,6 +213,63 @@ test('floating panels escape the app root without remounting the conversation', 
     f.assistant.setLayout('docked')
     await flush()
     assert.equal(panel.parent?.tag, 'app-root')
+    assert.equal(f.mounted.length, 1)
+    assert.equal(f.sent.length, 1)
+  } finally { f.close() }
+})
+
+test('the floating header moves the panel without intercepting controls or remounting the conversation', async () => {
+  const f = await fixture()
+  try {
+    f.assistant.open({ query: 'Keep this conversation running' })
+    await flush()
+    const panel = f.findAll(node => node.tag === 'aside')[0]
+    const header = f.findAll(node => node.tag === 'header')[0]
+    Object.defineProperties(panel, {
+      offsetWidth: { get: () => parseFloat(panel.props.style.width) },
+      offsetHeight: { value: 720 },
+      offsetLeft: { get: () => 1440 - parseFloat(panel.props.style.width) - parseFloat(panel.props.style.right || '12') },
+      offsetTop: { get: () => parseFloat(panel.props.style.top || '268') },
+      getBoundingClientRect: { value: () => ({ width: parseFloat(panel.props.style.width) }) },
+    })
+    let captured: number | null = null
+    Object.assign(header, {
+      setPointerCapture: (id: number) => { captured = id },
+      hasPointerCapture: (id: number) => captured === id,
+      releasePointerCapture: () => { captured = null },
+    })
+    const pointer = (clientX: number, clientY: number, control = false) => ({
+      clientX, clientY, pointerId: 1, isPrimary: true, button: 0,
+      currentTarget: header, target: { closest: () => control ? {} : null }, preventDefault() {},
+    })
+    header.props.onPointerdown(pointer(1000, 280))
+    assert.equal(captured, null, 'docked headers cannot drag')
+    f.assistant.setLayout('floating')
+    await flush()
+    header.props.onPointerdown(pointer(1000, 280, true))
+    assert.equal(captured, null, 'buttons and conversation tabs retain their normal interactions')
+    header.props.onPointerdown(pointer(1000, 280))
+    header.props.onPointermove(pointer(800, 180))
+    await flush()
+    assert.equal(captured, 1)
+    assert.match(panel.props.class, /is-dragging/)
+    assert.equal(panel.props.style.right, '212px')
+    assert.equal(panel.props.style.top, '168px')
+    header.props.onPointerup(pointer(800, 180))
+    await flush()
+    assert.equal(captured, null)
+    assert.doesNotMatch(panel.props.class, /is-dragging/)
+
+    f.assistant.close()
+    await flush()
+    f.assistant.open()
+    await flush()
+    assert.equal(panel.props.style.right, '212px')
+    assert.equal(panel.props.style.top, '168px')
+    f.assistant.setLayout('docked')
+    await flush()
+    assert.equal(panel.props.style.right, undefined)
+    assert.equal(panel.props.style.top, undefined)
     assert.equal(f.mounted.length, 1)
     assert.equal(f.sent.length, 1)
   } finally { f.close() }
