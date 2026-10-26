@@ -47,6 +47,15 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	chunkMap := make(map[string]*types.Chunk, len(allChunks))
 	for _, chunk := range allChunks {
 		chunkMap[chunk.ID] = chunk
+		// Wiki chunks have already passed the same KB permission checks as
+		// document chunks. Their parent is a WikiPage, not a knowledge row.
+		if chunk.ChunkType == types.ChunkTypeWikiPage {
+			knowledgeMap[chunk.KnowledgeID] = &types.Knowledge{
+				ID: chunk.KnowledgeID, TenantID: chunk.TenantID,
+				KnowledgeBaseID: chunk.KnowledgeBaseID, Title: chunk.ContextHeader,
+				Type: "wiki", Source: "wiki", Metadata: chunk.Metadata,
+			}
+		}
 	}
 
 	if !skipEnrichment {
@@ -381,7 +390,7 @@ func (s *knowledgeBaseService) isSearchableChunk(chunk *types.Chunk) bool {
 		return false
 	}
 	return slices.Contains([]types.ChunkType{
-		types.ChunkTypeText, types.ChunkTypeSummary,
+		types.ChunkTypeText, types.ChunkTypeSummary, types.ChunkTypeWikiPage,
 		types.ChunkTypeTableColumn, types.ChunkTypeTableSummary,
 		types.ChunkTypeFAQ,
 		types.ChunkTypeImageOCR, types.ChunkTypeImageCaption, types.ChunkTypeImageVector,

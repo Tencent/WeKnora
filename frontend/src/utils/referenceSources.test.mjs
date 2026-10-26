@@ -6,6 +6,8 @@ import {
   getDomainFromUrl,
   normalizeReferenceUrl,
   resolveReferenceHighlightKey,
+  resolveReferenceSource,
+  referenceSourceRoute,
 } from './referenceSources.ts'
 
 test('buildReferenceList separates web and document references', () => {
@@ -186,4 +188,37 @@ test('formatReferenceSnippet strips markdown noise from preview text', async () 
 
 test('getDomainFromUrl strips www prefix', () => {
   assert.equal(getDomainFromUrl('https://www.example.com/x'), 'example.com')
+})
+
+
+test('Wiki citations and drawer cards retain their real page navigation target', () => {
+  const refs = [{
+    id: 'wiki-chunk', knowledge_id: 'derived-index-scope', knowledge_base_id: 'wiki-kb',
+    knowledge_title: 'Wiki synthesis', knowledge_source: 'wiki', chunk_type: 'wiki_page',
+    metadata: { wiki_slug: 'concept/synthesis', wiki_page_id: 'real-wiki-page' },
+  }]
+  const source = resolveReferenceSource(refs, { chunkId: 'wiki-chunk', openSource: true })
+  assert.equal(source?.wikiSlug, 'concept/synthesis')
+  assert.equal(source?.wikiPageId, 'real-wiki-page')
+  const card = buildReferenceList(refs)[0]
+  assert.equal(card.wikiSlug, source.wikiSlug)
+  assert.equal(card.wikiPageId, source.wikiPageId)
+  assert.equal(card.knowledgeSource, 'wiki')
+})
+
+
+test('Wiki citation and card links open the Wiki browser rather than a nonexistent document', () => {
+  const wiki = { knowledgeId: 'derived-scope', knowledgeBaseId: 'wiki-kb',
+    knowledgeSource: 'wiki', chunkType: 'wiki_page', wikiSlug: 'concept/a b?中文', wikiPageId: 'page-id' }
+  const expected = { path: '/platform/knowledge-bases/wiki-kb', query: { tab: 'graph', slug: wiki.wikiSlug } }
+  assert.deepEqual(referenceSourceRoute(wiki), expected)
+  assert.equal(referenceSourceRoute({ ...wiki, wikiSlug: undefined }), null)
+  assert.equal(referenceSourceRoute({ ...wiki, knowledgeBaseId: undefined }), null)
+  assert.deepEqual(referenceSourceRoute({ knowledgeId: 'real-doc', knowledgeBaseId: 'kb' }),
+    { path: '/platform/knowledge-bases/kb', query: { knowledge_id: 'real-doc' } })
+})
+
+
+test('document cards without an ID retain their knowledge-base navigation', () => {
+  assert.deepEqual(referenceSourceRoute({ knowledgeBaseId: 'kb' }), { path: '/platform/knowledge-bases/kb', query: {} })
 })

@@ -574,6 +574,25 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	config *types.KnowledgeBaseConfig,
 	vlmConfig *types.VLMConfig,
 ) (*types.KnowledgeBase, error) {
+	// Model validation, the chunk-count guard and configuration persistence
+	// share the publisher's KB lock. Even updates omitting model settings save
+	// the loaded model ID. Acquire it before reading configuration so
+	// replacement's temporary empty-chunk interval cannot allow a model change.
+	if id != "" && s.wikiRepo != nil {
+		var result *types.KnowledgeBase
+		err := s.wikiRepo.WithPageWriteLock(ctx, id, "", func() error {
+			var err error
+			result, err = s.updateKnowledgeBase(ctx, id, name, description, config, vlmConfig)
+			return err
+		})
+		return result, err
+	}
+	return s.updateKnowledgeBase(ctx, id, name, description, config, vlmConfig)
+}
+
+func (s *knowledgeBaseService) updateKnowledgeBase(ctx context.Context,
+	id, name, description string, config *types.KnowledgeBaseConfig, vlmConfig *types.VLMConfig,
+) (*types.KnowledgeBase, error) {
 	if id == "" {
 		logger.Error(ctx, "Knowledge base ID is empty")
 		return nil, errors.New("knowledge base ID cannot be empty")
@@ -785,6 +804,17 @@ func (s *knowledgeBaseService) rejectEmbeddingModelChange(
 	}
 	if total > 0 {
 		return apperrors.NewBadRequestError("知识库中已有文件，无法修改Embedding模型")
+	}
+	// Wiki vectors use derived scopes rather than knowledge rows. They must
+	// keep the same embedding model until their retrieval artifacts are removed.
+	if s.chunkRepo != nil {
+		count, err := s.chunkRepo.CountChunksByKnowledgeBaseID(ctx, kb.TenantID, kb.ID)
+		if err != nil {
+			return err
+		}
+		if count > 0 {
+			return apperrors.NewBadRequestError("知识库中已有检索分块，无法修改Embedding模型")
+		}
 	}
 	return nil
 }
@@ -1054,11 +1084,14 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 	// Set tenant context for downstream services
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
 	defer func() {
-		// Wiki rows are independent of the vector engine. Run this on every
-		// return path — including SkipRetry — with its own timeout so a slow
-		// Redis queue scan cannot starve the SQL deletes.
+		// Remove wiki retrieval artifacts before their SQL rows on every return
+		// path. A store failure must preserve page identities for a later retry.
+		// Keep a separate timeout so queue scans cannot starve this cleanup.
 		wikiCtx, cancelWiki := context.WithTimeout(context.WithoutCancel(ctx), kbTaskCleanupTimeout)
-		wikiErr := s.cleanupWikiForKnowledgeBase(wikiCtx, tenantID, kbID)
+		wikiErr := s.cleanupWikiPageIndexes(wikiCtx, payload)
+		if wikiErr == nil {
+			wikiErr = s.cleanupWikiForKnowledgeBase(wikiCtx, tenantID, kbID)
+		}
 		cancelWiki()
 		if wikiErr != nil {
 			logger.Warnf(ctx, "Failed to clean wiki data for KB %s: %v", kbID, wikiErr)
