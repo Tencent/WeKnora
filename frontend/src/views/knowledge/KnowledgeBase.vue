@@ -96,10 +96,13 @@ const kbLoading = ref(false);
 const docListLoading = ref(true);
 const isFAQ = computed(() => (kbInfo.value?.type || '') === 'faq');
 const isWiki = computed(() => !!kbInfo.value?.indexing_strategy?.wiki_enabled);
+const canPreloadWiki = computed(() => isWiki.value && String(kbInfo.value?.id || '') === kbId.value);
 const validTabs = ['documents', 'wiki', 'graph', 'gallery'] as const
 type KbTab = typeof validTabs[number]
 const initTab = validTabs.includes(route.query.tab as any) ? (route.query.tab as KbTab) : 'documents'
 const activeKbTab = ref<KbTab>(initTab);
+const keepWikiBrowserMounted = ref(initTab === 'wiki' || initTab === 'graph')
+const lastWikiView = ref<'wiki' | 'graph'>(initTab === 'graph' ? 'graph' : 'wiki')
 
 // Wiki 状态用于面包屑上的索引中指示。父组件自行拉取，避免依赖 WikiBrowser 挂载状态
 // （用户切到"文档" tab 时 WikiBrowser 会卸载，这里仍需持续反映后台索引进度）。
@@ -1173,6 +1176,16 @@ const loadKnowledgeList = async () => {
 // 监听路由参数变化，重新获取知识库内容
 // Sync activeKbTab to URL query so it survives page refresh
 watch(activeKbTab, (tab) => {
+  if (tab === 'wiki' || tab === 'graph') {
+    keepWikiBrowserMounted.value = true
+    lastWikiView.value = tab
+  } else if (tab === 'gallery') {
+    // Preload on Gallery so the first switch to Wiki can reuse loaded data.
+    keepWikiBrowserMounted.value = canPreloadWiki.value
+  } else if (tab === 'documents') {
+    // Release the hidden browser when returning to the document list.
+    keepWikiBrowserMounted.value = false
+  }
   const query = { ...route.query }
   if (tab === 'documents') {
     delete query.tab
@@ -1182,8 +1195,17 @@ watch(activeKbTab, (tab) => {
   router.replace({ query })
 })
 
+watch(canPreloadWiki, (enabled) => {
+  // If the KB opened directly on Gallery, start loading Wiki data in the
+  // background as soon as its metadata confirms Wiki is enabled.
+  if (activeKbTab.value === 'gallery') {
+    keepWikiBrowserMounted.value = enabled
+  }
+})
+
 watch(() => kbId.value, (newKbId, oldKbId) => {
   if (!newKbId) {
+    keepWikiBrowserMounted.value = false
     kbInfo.value = null;
     cardList.value = [];
     total.value = 0;
@@ -1192,6 +1214,8 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
   if (newKbId === oldKbId && kbInfo.value) return;
 
   if (newKbId !== oldKbId) {
+    keepWikiBrowserMounted.value = activeKbTab.value === 'wiki' || activeKbTab.value === 'graph'
+    lastWikiView.value = activeKbTab.value === 'graph' ? 'graph' : 'wiki'
     clearTraceAvailabilityCache();
     cardList.value = [];
     total.value = 0;
@@ -2457,8 +2481,8 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
       </div>
 
       <!-- Wiki Browser / Graph (shown when wiki or graph tab is active) -->
-      <div v-if="isWiki && (activeKbTab === 'wiki' || activeKbTab === 'graph')" class="wiki-main-area">
-        <WikiBrowser v-if="kbId" :knowledge-base-id="kbId" :view="activeKbTab === 'graph' ? 'graph' : 'browser'"
+      <div v-if="canPreloadWiki && keepWikiBrowserMounted && kbId" v-show="activeKbTab === 'wiki' || activeKbTab === 'graph'" class="wiki-main-area">
+        <WikiBrowser :key="kbId" :knowledge-base-id="kbId" :view="lastWikiView === 'graph' ? 'graph' : 'browser'"
           :can-edit="canEdit" @open-source-doc="openSourceDoc" @status-change="onWikiStatusChange"
           @view-graph="onViewWikiInGraph" />
       </div>

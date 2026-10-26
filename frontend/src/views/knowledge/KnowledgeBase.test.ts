@@ -73,6 +73,38 @@ test('refreshes files and folders for the open KB and ignores unrelated areas an
   assert.equal(f.hook.getCardDetails.mock.callCount(), 0)
 })
 
+test('preloads Wiki from Gallery and keeps it alive across Gallery switches', async t => {
+  const f = await setup(t)
+  f.vm.kbInfo = { id: 'kb', type: 'document', indexing_strategy: { wiki_enabled: true } }
+
+  f.vm.activeKbTab = 'gallery'
+  await flush()
+  assert.equal(f.vm.keepWikiBrowserMounted, true)
+  assert.equal(f.vm.lastWikiView, 'wiki')
+
+  f.vm.activeKbTab = 'wiki'
+  await flush()
+  assert.equal(f.vm.keepWikiBrowserMounted, true)
+
+  f.vm.activeKbTab = 'gallery'
+  await flush()
+  assert.equal(f.vm.keepWikiBrowserMounted, true)
+  assert.equal(f.vm.lastWikiView, 'wiki')
+
+  f.vm.activeKbTab = 'graph'
+  await flush()
+  assert.equal(f.vm.keepWikiBrowserMounted, true)
+  assert.equal(f.vm.lastWikiView, 'graph')
+
+  f.vm.activeKbTab = 'gallery'
+  await flush()
+  assert.equal(f.vm.keepWikiBrowserMounted, true)
+
+  f.vm.activeKbTab = 'documents'
+  await flush()
+  assert.equal(f.vm.keepWikiBrowserMounted, false)
+})
+
 test('reloads KB metadata with force without adding file requests beyond the existing loader', async t => {
   const f = await setup(t)
   await f.vm.loadKnowledgeBaseInfo('kb', true)

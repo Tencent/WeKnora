@@ -2947,9 +2947,26 @@ async function loadPages() {
         openIndexView()
       }
     }
+    browserPagesLoaded = true
+    browserPagesDirty = false
   } finally {
     loading.value = false
   }
+}
+
+let browserPagesLoaded = false
+let browserPagesDirty = false
+let browserPagesLoading: Promise<void> | null = null
+
+function ensureBrowserPagesLoaded(): Promise<void> {
+  if (browserPagesLoaded && !browserPagesDirty) return Promise.resolve()
+  if (!browserPagesLoading) {
+    const pending = loadPages().finally(() => {
+      if (browserPagesLoading === pending) browserPagesLoading = null
+    })
+    browserPagesLoading = pending
+  }
+  return browserPagesLoading
 }
 
 let statsTimer: ReturnType<typeof setInterval> | null = null
@@ -2979,7 +2996,11 @@ async function loadStats() {
       // If completed, clear timer and reload pages once to get new content
       clearInterval(statsTimer)
       statsTimer = null
-      loadPages()
+      if (props.view === 'browser') {
+        loadPages()
+      } else {
+        browserPagesDirty = true
+      }
       // Also refresh the currently opened page (right panel) so users see updated content
       refreshSelectedPage()
       // If currently viewing the graph, reload it as well so new nodes/edges show up
@@ -5080,6 +5101,7 @@ watch(() => props.view, (v) => {
   if (v === 'graph') {
     loadGraph()
   } else if (v === 'browser') {
+    void ensureBrowserPagesLoaded()
     nextTick(async () => {
       if (readerBodyRef.value && renderedContent.value) {
         await hydrateProtectedFileImages(readerBodyRef.value, kbFileAccess.value)
@@ -5102,16 +5124,23 @@ watch(() => route.query.slug, (newSlug) => {
 
 useAssistantDataChange((changes) => {
   if (!changes.some(change => change.ids.knowledgeBaseIds.includes(props.knowledgeBaseId))) return
-  void loadPages()
+  if (props.view === 'browser') {
+    void loadPages()
+  } else {
+    browserPagesDirty = true
+  }
   void refreshSelectedPage()
   void loadStats()
   if (showGlobalIssuesDrawer.value) void loadGlobalIssues()
 }, { areas: ['wiki'] })
 
 onMounted(() => {
-  loadPages()
   loadStats()
-  if (props.view === 'graph') loadGraph()
+  if (props.view === 'graph') {
+    loadGraph()
+  } else {
+    void ensureBrowserPagesLoaded()
+  }
 })
 
 onUnmounted(() => {
