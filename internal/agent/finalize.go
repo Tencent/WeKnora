@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -48,11 +49,64 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	answerDoneEmitted := false
 	splitter := agenttools.NewThinkStreamSplitter()
 
-	budget := e.clampCompletionBudgetToContext(
-		e.tokenEstimator.EstimateMessages(
-			append(append([]chat.Message(nil), messages...), chat.Message{Role: "system", Content: runtimeNotice}),
-		),
+	// Defensive filter: only emit answer content, skip thinking chunks. Shared
+	// across the initial attempt and the overflow retry so both stream into the
+	// same answer event.
+	emitChunk := func(chunk *types.StreamResponse, fullContent string) {
+		if chunk.ResponseType == types.ResponseTypeThinking {
+			return
+		}
+		_, answerContent := splitter.Feed(chunk.Content)
+		if splitter.TakeAnswerReset() {
+			_ = e.eventBus.Emit(
+				ctx,
+				event.Event{
+					ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
+					Data: event.AgentFinalAnswerData{Replace: true},
+				},
+			)
+		}
+		if chunk.Done {
+			_, tail := splitter.Flush()
+			answerContent += tail
+		}
+		if answerContent != "" {
+			logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(answerContent))
+			e.eventBus.Emit(ctx, event.Event{
+				ID:        answerID,
+				Type:      event.EventAgentFinalAnswer,
+				SessionID: sessionID,
+				Data: event.AgentFinalAnswerData{
+					Content: answerContent,
+					Done:    chunk.Done,
+				},
+			})
+			if chunk.Done {
+				answerDoneEmitted = true
+			}
+		}
+	}
+
+	inputTokens := e.tokenEstimator.EstimateMessages(
+		append(append([]chat.Message(nil), messages...), chat.Message{Role: "system", Content: runtimeNotice}),
 	)
+	// Final synthesis is often the largest request of the turn. If the input
+	// already fills (or exceeds) the window there is no room for any answer, so
+	// shrinking the completion budget to 1 cannot make the request valid — the
+	// provider rejects it outright. Reject up front instead of sending a request
+	// that is guaranteed to fail, so the caller can see the failure.
+	if e.config != nil && e.config.MaxContextTokens > 0 &&
+		inputTokens+contextSafetyTokens >= e.config.MaxContextTokens {
+		err := fmt.Errorf("final synthesis input exceeds the context window (%d >= %d tokens)",
+			inputTokens+contextSafetyTokens, e.config.MaxContextTokens)
+		logger.Errorf(ctx, "[Agent][FinalAnswer] %v", err)
+		common.PipelineError(ctx, "Agent", "final_answer_input_too_large", map[string]interface{}{
+			"session_id": sessionID,
+			"error":      err.Error(),
+		})
+		return err
+	}
+	budget := e.clampCompletionBudgetToContext(inputTokens)
 	llmResult, err := e.streamLLMToEventBus(
 		ctx,
 		messages,
@@ -63,41 +117,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 			PromptCacheKey:      sessionID,
 			ToolChoice:          "none",
 		}, // Thinking disabled for final answer synthesis
-		func(chunk *types.StreamResponse, fullContent string) {
-			// Defensive filter: only emit answer content, skip thinking chunks
-			if chunk.ResponseType == types.ResponseTypeThinking {
-				return
-			}
-			_, answerContent := splitter.Feed(chunk.Content)
-			if splitter.TakeAnswerReset() {
-				_ = e.eventBus.Emit(
-					ctx,
-					event.Event{
-						ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
-						Data: event.AgentFinalAnswerData{Replace: true},
-					},
-				)
-			}
-			if chunk.Done {
-				_, tail := splitter.Flush()
-				answerContent += tail
-			}
-			if answerContent != "" {
-				logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(answerContent))
-				e.eventBus.Emit(ctx, event.Event{
-					ID:        answerID,
-					Type:      event.EventAgentFinalAnswer,
-					SessionID: sessionID,
-					Data: event.AgentFinalAnswerData{
-						Content: answerContent,
-						Done:    chunk.Done,
-					},
-				})
-				if chunk.Done {
-					answerDoneEmitted = true
-				}
-			}
-		},
+		emitChunk,
 	)
 	if err != nil {
 		logger.Errorf(ctx, "[Agent][FinalAnswer] Final answer generation failed: %v", err)
@@ -152,10 +172,11 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 }
 
 // handleMaxIterations generates a final answer when the agent loop exhausted all iterations
-// without the LLM producing a natural stop. It marks state.IsComplete = true.
+// without the LLM producing a natural stop. It marks state.IsComplete = true, and returns the
+// synthesis error (if any) so the caller can surface a failure instead of silently completing.
 func (e *AgentEngine) handleMaxIterations(
 	ctx context.Context, query string, state *types.AgentState, sessionID string, messages []chat.Message,
-) {
+) error {
 	logger.Info(ctx, "Reached max iterations, generating final answer")
 	common.PipelineWarn(ctx, "Agent", "max_iterations_reached", map[string]interface{}{
 		"iterations": state.CurrentRound,
@@ -169,8 +190,11 @@ func (e *AgentEngine) handleMaxIterations(
 			"error": err.Error(),
 		})
 		state.FinalAnswer = "Sorry, I was unable to generate a complete answer."
+		state.IsComplete = true
+		return err
 	}
 	state.IsComplete = true
+	return nil
 }
 
 // emitCompletionEvent emits the EventAgentComplete event with execution summary.
