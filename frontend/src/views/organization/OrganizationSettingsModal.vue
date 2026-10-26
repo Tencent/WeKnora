@@ -359,6 +359,7 @@
                           <t-select v-model="selectedTenantId"
                             :placeholder="$t('organization.addMember.searchTenantPlaceholder')" filterable
                             :filter="() => true" :loading="tenantSearchLoading" @search="handleTenantSearch"
+                            @input-change="handleTenantInputChange" @clear="handleTenantInputChange('')"
                             clearable :options="tenantSearchOptions" />
                           <p class="field-hint">{{ $t('organization.addMember.searchTenantHint') }}</p>
                         </div>
@@ -829,6 +830,7 @@ const addMemberSubmitting = ref(false)
 const tenantSearchLoading = ref(false)
 const tenantSearchResults = ref<TenantInviteCandidate[]>([])
 const selectedTenantId = ref<number | null>(null)
+const selectedTenantCandidate = ref<TenantInviteCandidate | null>(null)
 const addMemberRole = ref<'admin' | 'editor' | 'viewer'>('viewer')
 
 const formData = ref({
@@ -1551,31 +1553,73 @@ const handleSubmitUpgrade = async () => {
 }
 
 // 添加成员：按完整空间 ID 查询。
+const TENANT_SEARCH_DEBOUNCE_MS = 300
+const TENANT_SEARCH_LIMIT = 10
+const TENANT_ID_PATTERN = /^[1-9]\d*$/
 let tenantSearchTimer: ReturnType<typeof setTimeout> | null = null
-const handleTenantSearch = (query: string) => {
-  if (tenantSearchTimer) {
+let tenantSearchGeneration = 0
+let tenantSearchInput = ''
+
+// 防抖只能取消未发出的查询；输入或视图变化时，也要让已发出的请求失效。
+const invalidateTenantSearch = () => {
+  tenantSearchGeneration += 1
+  if (tenantSearchTimer !== null) {
     clearTimeout(tenantSearchTimer)
+    tenantSearchTimer = null
   }
+  tenantSearchResults.value = []
+  tenantSearchLoading.value = false
+}
+
+// TDesign 的 search 事件自带防抖，必须在即时输入事件中作废旧请求，不能等它触发。
+const handleTenantInputChange = (query: string) => {
+  tenantSearchInput = query.trim()
+  invalidateTenantSearch()
+}
+
+const handleTenantSearch = (query: string) => {
   const workspaceID = query.trim()
-  if (!/^[1-9]\d*$/.test(workspaceID)) {
-    tenantSearchResults.value = []
+  // 保留 search 事件以启用远程搜索，但丢弃清空、改输或关闭弹窗之前排队的回调。
+  if (workspaceID !== tenantSearchInput) return
+  invalidateTenantSearch()
+  const orgId = props.orgId
+  if (!TENANT_ID_PATTERN.test(workspaceID) || !orgId || !props.visible || !addMemberPopupVisible.value) {
     return
   }
+  const generation = tenantSearchGeneration
+  // 同一个 ID 可能被再次查询，不能只比较输入值；成功、失败和收尾都属于同一代查询。
+  const isCurrentSearch = () => generation === tenantSearchGeneration
+    && props.orgId === orgId && props.visible && addMemberPopupVisible.value
+
   tenantSearchTimer = setTimeout(async () => {
-    if (!props.orgId) return
+    tenantSearchTimer = null
+    if (!isCurrentSearch()) return
     tenantSearchLoading.value = true
     try {
-      const res = await searchTenantsForInvite(props.orgId, workspaceID, 10)
-      if (res.success && res.data) {
+      const res = await searchTenantsForInvite(orgId, workspaceID, TENANT_SEARCH_LIMIT)
+      if (isCurrentSearch() && res.success && res.data) {
         tenantSearchResults.value = res.data
       }
     } catch (error) {
-      console.error('Failed to search tenants:', error)
+      if (isCurrentSearch()) {
+        console.error('Failed to search tenants:', error)
+      }
     } finally {
-      tenantSearchLoading.value = false
+      if (isCurrentSearch()) {
+        tenantSearchLoading.value = false
+      }
     }
-  }, 300)
+  }, TENANT_SEARCH_DEBOUNCE_MS)
 }
+
+// 重开下拉框会清空搜索输入，但已选项仍有效；提交信息不能依赖临时搜索列表。
+watch([selectedTenantId, tenantSearchResults], ([tenantId, candidates], [previousTenantId]) => {
+  const candidate = candidates.find((item) => item.tenant_id === tenantId)
+  // 同一 ID 的新结果也要更新代表信息；仅清空搜索列表时保留选择，改选或清除选择时重置。
+  if (candidate || tenantId !== previousTenantId) {
+    selectedTenantCandidate.value = candidate ?? null
+  }
+}, { flush: 'sync' })
 
 // 添加成员：把选中的空间拉入空间。后端要求 tenant_id；representative_user_id
 // 仅做展示/审计用，所以把搜索结果中代表用户也一并带上。
@@ -1584,7 +1628,7 @@ const handleAddMember = async () => {
 
   const candidate = tenantSearchResults.value.find(
     (c) => c.tenant_id === selectedTenantId.value
-  )
+  ) ?? selectedTenantCandidate.value
 
   addMemberSubmitting.value = true
   try {
@@ -1610,9 +1654,9 @@ const handleAddMember = async () => {
 
 // 重置添加成员弹窗
 const resetAddMemberDialog = () => {
+  handleTenantInputChange('')
   selectedTenantId.value = null
   addMemberRole.value = 'viewer'
-  tenantSearchResults.value = []
 }
 
 const copyInviteCode = async () => {
@@ -1833,15 +1877,22 @@ watch(currentSection, (section) => {
   }
 })
 
+// 同步失效，避免同一轮事件中关闭重开或切回原组织时，旧响应仍被当成当前结果。
+watch([() => props.visible, () => props.orgId], () => {
+  addMemberPopupVisible.value = false
+  resetAddMemberDialog()
+}, { flush: 'sync' })
+
 onBeforeUnmount(() => {
   unlockBackgroundScroll()
+  resetAddMemberDialog()
 })
 
 watch(addMemberPopupVisible, (visible) => {
   if (!visible) {
     resetAddMemberDialog()
   }
-})
+}, { flush: 'sync' })
 </script>
 
 <style scoped lang="less">
