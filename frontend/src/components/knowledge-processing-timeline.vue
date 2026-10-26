@@ -2,6 +2,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import AssistantActionButton from '@/components/assistant/AssistantActionButton.vue'
 import { copyWithToast } from '@/utils/clipboard'
 import { getKnowledgeSpans, reparseKnowledge, cancelKnowledgeParse, getKnowledgeDetails } from '@/api/knowledge-base/index'
 import {
@@ -1707,8 +1708,11 @@ const processConfigLines = computed<string[]>(() => {
             <div v-if="localizedErrorSuggestion(data.last_error.error_code)" class="kp-err-hint">
               {{ localizedErrorSuggestion(data.last_error.error_code) }}
             </div>
-            <div v-if="data.parse_status === 'failed'" class="kp-err-actions">
-              <button type="button" class="kp-err-btn" @click="onRetry">
+            <div class="kp-err-actions">
+              <AssistantActionButton :label="t('assistant.actions.diagnose')"
+                :query="t('assistant.prompts.documentFailure', { title: docTitle || knowledgeId, id: knowledgeId })"
+                :selection="{ field: errorHeadline, text: [data.last_error.error_code, data.last_error.error_message].filter(Boolean).join('\n') }" />
+              <button v-if="data.parse_status === 'failed'" type="button" class="kp-err-btn" @click="onRetry">
                 <t-icon name="refresh" size="14px" />
                 <span>{{ t('knowledgeStages.retry') }}</span>
               </button>
@@ -3058,6 +3062,7 @@ const processConfigLines = computed<string[]>(() => {
 
 .kp-err-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
   margin-top: 10px;
 }

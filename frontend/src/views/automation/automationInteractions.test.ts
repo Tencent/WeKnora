@@ -19,11 +19,11 @@ const automation = {
   carry_last_result: false, misfire_policy: 'skip', overlap_policy: 'skip', notify_on_success: false,
 }
 
-function setup(t: TestContext, file: string, api: Record<string, unknown>, props: Record<string, unknown>) {
+function setup(t: TestContext, file: string, api: Record<string, unknown>, props: Record<string, unknown>, translate = (key: string, _params?: unknown) => key) {
   const f = fixture(t)
   const url = new URL(file, import.meta.url)
   const page = f.component(url, {
-    'vue-i18n': { useI18n: () => ({ t: (key: string) => key, locale: vue.ref('en-US') }) },
+    'vue-i18n': { useI18n: () => ({ t: translate, locale: vue.ref('en-US') }) },
     'vue-router': { useRoute: () => ({ params: {}, query: {} }), useRouter: () => ({ replace() {}, push() {} }) },
     'tdesign-vue-next': { MessagePlugin: { success() {}, error() {}, warning() {} } },
     '@/api/automation': api,
@@ -54,6 +54,25 @@ function nodes(node: any): any[] {
     : children && typeof children === 'object'
       ? Object.values(children).flatMap(slot => typeof slot === 'function' ? nodes(slot()) : []) : [])]
 }
+
+test('run analysis targets the chosen run and compares only earlier successful runs', async t => {
+  const { vm } = setup(t, './AutomationDetail.vue', {}, { visible: false, automation },
+    (key, params) => JSON.stringify({ key, params }))
+  const run = { id: 'chosen', status: 'succeeded', scheduled_at: '2026-10-26T12:00:00Z', session_id: 'session', assistant_message_id: 'answer' }
+  vm.runs = [
+    { ...run, id: 'newer', scheduled_at: '2026-10-27T12:00:00Z' },
+    run,
+    { ...run, id: 'failed', status: 'failed', scheduled_at: '2026-10-25T12:00:00Z' },
+    { ...run, id: 'previous', scheduled_at: '2026-10-24T12:00:00Z' },
+  ]
+  const actions = vm.runAssistantActions(run)
+  const summary = JSON.parse(actions[0].query).params
+  assert.deepEqual(JSON.parse(summary.source), { automation_id: automation.id, run_id: 'chosen', session_id: 'session', message_id: 'answer' })
+  assert.deepEqual(JSON.parse(JSON.parse(actions[1].query).params.ids), ['previous'])
+  assert.equal(actions[1].disabled, false)
+  vm.runs = [run]
+  assert.equal(vm.runAssistantActions(run)[1].disabled, true)
+})
 
 test('assistant mutations refresh the automation list and open detail without replacing an editor draft', async t => {
   let items = [{ ...automation }]

@@ -97,6 +97,13 @@ export interface AssistantOpenRequest {
   focus?: Pick<AssistantPageContext, 'wikiIssueIds'>
 }
 
+export interface AssistantContextAction {
+  key: string
+  label: string
+  query: string
+  disabled?: boolean
+}
+
 const SESSION_KEY_PREFIX = 'weknora:assistant-session'
 const VISIBLE_KEY_PREFIX = 'weknora:assistant-visible'
 const MODEL_KEY_PREFIX = 'weknora:assistant-model'
@@ -187,6 +194,8 @@ export const useAssistantStore = defineStore('assistant', () => {
   const visible = ref(false)
   const sessionId = ref('')
   const pendingRequest = ref<AssistantOpenRequest | null>(null)
+  const actionSuggestions = shallowRef<{ label: string; actions: AssistantContextAction[] } | null>(null)
+  const clearActionSuggestions = () => { actionSuggestions.value = null }
   // Publishers in mount order, so a nested page (Wiki) refines its parent (KB).
   const layers = shallowReactive(new Map<symbol, Partial<AssistantPageContext>>())
   const dismissedKey = ref('')
@@ -228,11 +237,14 @@ export const useAssistantStore = defineStore('assistant', () => {
   })
   // Whether the assistant may read and fill the page beside it.
   const pageAccess = ref(true)
+  // Suggestions belong to the page or dialog from which the assistant was opened.
+  watch([attachKey, pageAccess], clearActionSuggestions, { flush: 'sync' })
   const effectiveAccessLevel = computed(() => capAssistantAccessLevel(accessLevel.value, accessCeiling.value))
   /** The workspace's name for the assistant; empty means the default. */
   const displayName = computed(() => workspaceConfig.value?.display_name?.trim() || '')
 
   const restore = () => {
+    clearActionSuggestions()
     try {
       sessionId.value = sessionStorage.getItem(storageKey(SESSION_KEY_PREFIX)) || ''
       visible.value = sessionStorage.getItem(storageKey(VISIBLE_KEY_PREFIX)) === '1'
@@ -286,6 +298,7 @@ export const useAssistantStore = defineStore('assistant', () => {
     }
   }
   const setSession = (id: string) => {
+    clearActionSuggestions()
     sessionId.value = id
     try {
       if (id) sessionStorage.setItem(storageKey(SESSION_KEY_PREFIX), id)
@@ -387,12 +400,14 @@ export const useAssistantStore = defineStore('assistant', () => {
   let queuedSeq = 0
   /** Asks in the open conversation, or starts one when there is none. */
   const ask = (query: string) => {
+    clearActionSuggestions()
     if (!sessionId.value) {
       open({ query })
+      focusComposer()
       return
     }
     queuedMessage.value = { id: ++queuedSeq, query }
-    setVisible(true)
+    focusComposer()
   }
   const takeQueuedMessage = () => {
     const message = queuedMessage.value
@@ -404,6 +419,17 @@ export const useAssistantStore = defineStore('assistant', () => {
   const focusComposer = () => {
     setVisible(true)
     focusRequest.value++
+  }
+
+  const showActionSuggestions = (suggestions: { label: string; actions: AssistantContextAction[] }) => {
+    if (!pageAccess.value) return
+    actionSuggestions.value = suggestions
+    focusComposer()
+  }
+  const askSuggestedAction = (key: string) => {
+    const action = actionSuggestions.value?.actions.find(item => item.key === key)
+    if (!action || action.disabled || !pageAccess.value) return
+    ask(action.query)
   }
 
   const pageDraft = ref<AssistantPageDraft | null>(null)
@@ -427,6 +453,7 @@ export const useAssistantStore = defineStore('assistant', () => {
     layers.delete(owner)
   }
   const dismissPageContext = () => {
+    clearActionSuggestions()
     dismissedKey.value = attachKey.value
   }
   const restorePageContext = () => {
@@ -447,6 +474,10 @@ export const useAssistantStore = defineStore('assistant', () => {
     layout,
     width,
     pendingRequest,
+    actionSuggestions,
+    showActionSuggestions,
+    askSuggestedAction,
+    clearActionSuggestions,
     pageContext,
     contextAttached,
     pageTitle,

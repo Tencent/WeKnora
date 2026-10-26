@@ -48,6 +48,7 @@ import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
 import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
+import AssistantActionsButton from '@/components/assistant/AssistantActionsButton.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import KbFolderTree from './components/KbFolderTree.vue';
 import BatchTagDialog from './components/BatchTagDialog.vue';
@@ -484,6 +485,17 @@ watch(viewMode, (v) => {
 // Multi-select state — shared between grid and list views.
 // Vue 3.5 tracks Set#add/delete natively, so direct mutation is reactive.
 const selectedIds = ref<Set<string>>(new Set());
+const selectedDocumentAssistantActions = computed(() => {
+  const scope = { kb: kbId.value, ids: JSON.stringify([...selectedIds.value]) };
+  return [
+    { key: 'summarize', label: t('assistant.actions.summarizeSelected'), query: t('assistant.prompts.summarizeDocuments', scope) },
+    { key: 'compare', label: t('assistant.actions.compareDocuments'), query: t('assistant.prompts.compareDocuments', scope), disabled: selectedIds.value.size < 2 },
+    ...(canMutateKnowledge.value ? [
+      { key: 'tags', label: t('assistant.actions.suggestTags'), query: t('assistant.prompts.tagDocuments', scope) },
+      { key: 'folders', label: t('assistant.actions.organizeDocuments'), query: t('assistant.prompts.organizeDocuments', scope) },
+    ] : []),
+  ];
+});
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
 const batchReparsing = ref(false);
@@ -2737,7 +2749,13 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                   :show-move-to-folder="canEdit" :folder-options="folderOptions"
                   @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
                   @batch-tag="handleBatchTag" @download="handleBatchDownload" @select-loaded="toggleSelectAll(true)"
-                  @move-to-folder="(path: string) => moveKnowledgeIntoFolder(Array.from(selectedIds), path)" />
+                  @move-to-folder="(path: string) => moveKnowledgeIntoFolder(Array.from(selectedIds), path)">
+                  <template #assistant>
+                    <AssistantActionsButton v-if="selectedIds.size" :label="$t('assistant.actions.processSelected')"
+                      :actions="selectedDocumentAssistantActions"
+                      :disabled="batchDeleting || batchReparsing || batchTagging || batchDownloading" />
+                  </template>
+                </DocumentBatchBar>
               </div>
             </div>
           </div>

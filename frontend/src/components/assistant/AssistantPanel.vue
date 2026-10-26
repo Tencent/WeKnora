@@ -1,4 +1,6 @@
 <template>
+  <!-- Floating panels must escape the app root's stacking context to sit above body-attached drawers. -->
+  <Teleport to="body" :disabled="effectiveLayout === 'docked'">
   <!-- Hidden with a class, not v-if, so a reply keeps streaming while closed. -->
   <aside class="assistant-panel" :class="[`is-${effectiveLayout}`, { 'is-open': assistant.visible, 'is-resizing': resizing }]"
     :style="{ width: `${panelWidth}px` }" role="complementary" :aria-label="assistantName"
@@ -12,7 +14,7 @@
         :active-id="childTabs.activeId.value" :attention="childTabs.attention.value"
         @select="selectConversationTab" @close="childTabs.close">
         <template #parent>
-          <span class="assistant-panel__header-icon" aria-hidden="true"><t-icon name="compass" /></span>
+          <span class="assistant-panel__header-icon" aria-hidden="true"><ResourceIcon type="assistant" :size="16" /></span>
           <span class="assistant-panel__title">{{ assistantName }}</span>
         </template>
       </ChildAgentTabBar>
@@ -66,6 +68,20 @@
         <t-loading v-else-if="historyLoading" size="small" />
       </div>
       <div v-show="!showHistory" class="assistant-panel__conversation">
+        <section v-if="assistant.actionSuggestions && assistant.sessionId" class="assistant-suggestions"
+          :aria-label="assistant.actionSuggestions.label">
+          <div class="assistant-suggestions__header">
+            <h3>{{ assistant.actionSuggestions.label }}</h3>
+            <button type="button" class="assistant-panel__action" :aria-label="t('common.close')"
+              @click="assistant.clearActionSuggestions()"><t-icon name="close" size="14px" /></button>
+          </div>
+          <p>{{ t('assistant.chooseAction') }}</p>
+          <div class="assistant-starters">
+            <button v-for="action in assistant.actionSuggestions.actions" :key="action.key" type="button"
+              class="assistant-starter" :disabled="starting || action.disabled"
+              @click="assistant.askSuggestedAction(action.key)">{{ action.label }}</button>
+          </div>
+        </section>
         <ChatView v-if="assistant.sessionId && readySessionId === assistant.sessionId"
           :key="assistant.sessionId" :session_id="assistant.sessionId"
           :agent-id="BUILTIN_WEKNORA_ASSISTANT_ID" :embedded-mode="true" :initial-query="initialQuery"
@@ -92,11 +108,16 @@
         <div v-else class="assistant-welcome">
           <div class="assistant-welcome-body">
             <div class="assistant-welcome-icon">
-              <t-icon name="compass" size="22px" />
+              <ResourceIcon type="assistant" :size="22" />
             </div>
-            <h3 class="assistant-welcome-title">{{ t('assistant.welcomeTitle') }}</h3>
-            <p class="assistant-welcome-desc">{{ welcomeDescription }}</p>
-            <div class="assistant-starters">
+            <h3 class="assistant-welcome-title">{{ assistant.actionSuggestions?.label || t('assistant.welcomeTitle') }}</h3>
+            <p class="assistant-welcome-desc">{{ assistant.actionSuggestions ? t('assistant.chooseAction') : welcomeDescription }}</p>
+            <div v-if="assistant.actionSuggestions" class="assistant-starters">
+              <button v-for="action in assistant.actionSuggestions.actions" :key="action.key" type="button"
+                class="assistant-starter" :disabled="starting || action.disabled"
+                @click="assistant.askSuggestedAction(action.key)">{{ action.label }}</button>
+            </div>
+            <div v-else class="assistant-starters">
               <button v-for="starter in starters" :key="starter" type="button" class="assistant-starter"
                 :disabled="starting" @click="startConversation(starter)">
                 {{ starter }}
@@ -122,6 +143,7 @@
       </div>
     </div>
   </aside>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -133,6 +155,7 @@ import ChildAgentTabBar from '@/views/chat/components/ChildAgentTabBar.vue'
 import { createChildAgentTabs, childAgentTabsKey } from '@/composables/useChildAgentTabs'
 import InputField from '@/components/Input-field.vue'
 import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
+import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import AssistantContextMenu from './AssistantContextMenu.vue'
 import AssistantSelectionChip from './AssistantSelectionChip.vue'
 import AssistantAccessPicker from './AssistantAccessPicker.vue'
@@ -238,6 +261,7 @@ const starters = computed(() => {
 // Page context is a hint, not an explicit retrieval selection. The backend
 // validates it against the agent's scope; only user selections narrow that scope.
 const hostScope = () => {
+  assistant.clearActionSuggestions()
   const context = assistant.contextAttached ? assistant.pageContext : null
   const title = assistant.contextAttached ? assistant.pageTitle : ''
   const view = assistant.contextAttached ? assistant.pageView : ''
@@ -261,8 +285,10 @@ const hostScope = () => {
 
 const welcomeInput = ref<{ focusInput?: () => void } | null>(null)
 watch(() => assistant.focusRequest, () => {
+  showHistory.value = false
+  childTabs.select('')
   if (!assistant.sessionId) welcomeInput.value?.focusInput?.()
-})
+}, { flush: 'post' })
 
 async function startConversation(query: string, focus?: AssistantOpenRequest['focus']) {
   const text = query.trim()
@@ -453,13 +479,13 @@ onUnmounted(() => {
     border-left: 1px solid var(--td-component-stroke);
   }
 
-  // Above page drawers (1500), below dialogs and the settings shell; no mask.
+  // Above document/model drawers (2100/2300), below confirmation dialogs (2500).
   &.is-floating {
     position: fixed;
     top: 12px;
     right: 12px;
     bottom: 12px;
-    z-index: 1600;
+    z-index: 2400;
     border: 1px solid var(--td-component-stroke);
     border-radius: var(--app-radius-lg);
     box-shadow: var(--td-shadow-3);
@@ -715,8 +741,40 @@ onUnmounted(() => {
   }
 }
 
+.assistant-suggestions {
+  flex-shrink: 0;
+  padding: 16px;
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  &__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+
+    h3 {
+      margin: 0;
+      font-size: var(--app-text-base);
+      font-weight: 500;
+      color: var(--td-text-color-primary);
+    }
+  }
+
+  p {
+    margin: 4px 0 0;
+    font-size: var(--app-text-sm);
+    line-height: 1.6;
+    color: var(--td-text-color-secondary);
+  }
+
+  .assistant-starters {
+    justify-content: flex-start;
+  }
+}
+
 // Same inset as the composer inside a conversation.
 .assistant-welcome-composer {
+  margin-top: auto;
   flex-shrink: 0;
   padding: 12px 16px max(8px, env(safe-area-inset-bottom));
 }

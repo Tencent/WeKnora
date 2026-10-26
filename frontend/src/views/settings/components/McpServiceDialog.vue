@@ -1,6 +1,7 @@
 <template>
   <SettingDrawer
     :visible="dialogVisible"
+    :z-index="2300"
     :title="mode === 'add' ? t('mcpServiceDialog.addTitle') : t('mcpServiceDialog.editTitle')"
     class="mcp-drawer"
     icon="tools"

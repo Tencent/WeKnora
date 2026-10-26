@@ -4,7 +4,7 @@ import * as vue from 'vue'
 import * as stall from '../../utils/knowledgeProcessingStall.ts'
 import { change, fixture, flush } from '../../test-utils/vueFixture.ts'
 
-async function setup(t: TestContext) {
+async function setup(t: TestContext, translate = (key: string, _params?: unknown) => key) {
   const f = fixture(t)
   const route = vue.reactive({ params: { kbId: 'kb' }, query: {} })
   const hook = {
@@ -24,7 +24,7 @@ async function setup(t: TestContext) {
   }))
   const page = f.component(new URL('./KnowledgeBase.vue', import.meta.url), {
     'vue-router': { useRoute: () => route, useRouter: () => ({ replace() {} }) },
-    'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
+    'vue-i18n': { useI18n: () => ({ t: translate }) },
     'tdesign-vue-next': { MessagePlugin: { success() {}, error() {}, info() {}, warning() {} } },
     '@/hooks/useKnowledgeBase': () => hook,
     '@/stores/ui': { useUIStore: () => ({ clearSelectedTagIds() {} }) },
@@ -38,7 +38,8 @@ async function setup(t: TestContext) {
     '@/stores/uploadTasks': { useUploadTasksStore: () => ({}) },
     '@/hooks/useMarqueeSelect': { useMarqueeSelect: () => ({}) },
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
-    '@/utils/kbPermission': {}, '@/utils/knowledgeDeletion': { waitForKnowledgeDeletion }, '@/utils/knowledgeTrace': {},
+    '@/utils/kbPermission': { permissionCanEditKB: () => true, permissionCanManageKB: () => true },
+    '@/utils/knowledgeDeletion': { waitForKnowledgeDeletion }, '@/utils/knowledgeTrace': {},
     '@/utils/knowledgeProcessingStall': stall, '@/api/wiki': {}, '@/api/knowledge-base': {},
     '@/api/knowledge-base/index': {
       listKnowledgeFolders, listKnowledgeTags: async () => ({ data: { data: [], total: 0 } }),
@@ -56,6 +57,23 @@ async function setup(t: TestContext) {
     settleDeletion: () => settle(),
   }
 }
+
+test('batch assistant actions include only explicitly selected IDs and disable single-document comparison', async t => {
+  const f = await setup(t, (key, params) => JSON.stringify({ key, params }))
+  f.hook.cardList.value = ['selected-a', 'selected-b', 'unselected'].map(id => ({ id, parse_status: 'completed' }))
+  await flush()
+  f.vm.selectedIds = new Set(['selected-a', 'selected-b'])
+  const actions = f.vm.selectedDocumentAssistantActions
+  for (const action of actions) {
+    const params = JSON.parse(action.query).params
+    assert.equal(params.kb, 'kb')
+    assert.deepEqual(JSON.parse(params.ids), ['selected-a', 'selected-b'])
+  }
+  assert.equal(actions.find((action: any) => action.key === 'compare').disabled, false)
+  f.vm.selectedIds = new Set(['selected-a'])
+  assert.equal(f.vm.selectedDocumentAssistantActions.find((action: any) => action.key === 'compare').disabled, true)
+  assert.deepEqual(JSON.parse(JSON.parse(actions[0].query).params.ids), ['selected-a', 'selected-b'])
+})
 
 test('refreshes files and folders for the open KB and ignores unrelated areas and KBs', async t => {
   const f = await setup(t)

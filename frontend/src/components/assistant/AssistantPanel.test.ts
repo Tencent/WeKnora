@@ -99,6 +99,7 @@ async function fixture(
     '@/composables/useChildAgentTabs': childAgentTabs,
     '@/components/Input-field.vue': emptyComponent,
     '@/components/PanelResizeHandle.vue': emptyComponent,
+    '@/components/icons/ResourceIcon.vue': emptyComponent,
     './AssistantContextMenu.vue': emptyComponent,
     './AssistantSelectionChip.vue': emptyComponent,
     './AssistantAccessPicker.vue': emptyComponent,
@@ -126,7 +127,7 @@ async function fixture(
         deleted.push(id)
       },
     },
-  }, { window: { addEventListener() {}, removeEventListener() {} } }).default
+  }, { window: { innerWidth: 1440, addEventListener() {}, removeEventListener() {} } }).default
   type HostNode = { children: HostNode[]; parent?: HostNode; tag?: string; props: Record<string, any>; style: Record<string, any>; text?: string }
   const node = (tag?: string): HostNode => ({ children: [], tag, props: {}, style: {} })
   const remove = (child: HostNode) => {
@@ -145,6 +146,7 @@ async function fixture(
     patchProp(node, key, _prev, next) { node.props[key] = next },
     parentNode: child => child.parent ?? null,
     nextSibling: child => child.parent?.children[child.parent.children.indexOf(child) + 1] ?? null,
+    querySelector: selector => selector === 'body' ? body : null,
   })
   const app = renderer.createApp(component)
   app.use(storeRoot)
@@ -153,7 +155,10 @@ async function fixture(
   app.component('t-loading', emptyComponent)
   app.component('t-tooltip', vue.defineComponent({ inheritAttrs: false, setup: (_, { slots }) => () => slots.default?.() }))
   app.component('t-button', vue.defineComponent({ setup: (_, { slots }) => () => vue.h('button', slots.default?.()) }))
-  const root = node()
+  const body = node('body')
+  const root = node('app-root')
+  root.parent = body
+  body.children.push(root)
   app.mount(root)
   const findAll = (predicate: (node: HostNode) => boolean): HostNode[] => {
     const found: HostNode[] = []
@@ -161,7 +166,7 @@ async function fixture(
       if (predicate(node)) found.push(node)
       node.children.forEach(walk)
     }
-    walk(root)
+    walk(body)
     return found
   }
   const click = async (label: string) => {
@@ -185,6 +190,99 @@ test('layout and width persist, with the width kept within bounds', async () => 
     f.assistant.setWidth(12)
     assert.equal(f.assistant.width, 360)
     assert.equal(f.localStorage.getItem('weknora:assistant-width'), '360')
+  } finally { f.close() }
+})
+
+test('floating panels escape the app root without remounting the conversation', async () => {
+  const f = await fixture()
+  try {
+    f.assistant.open({ query: 'Explain this connection error' })
+    await flush()
+    const panel = f.findAll(node => node.tag === 'aside')[0]
+    assert.equal(panel.parent?.tag, 'app-root')
+    f.assistant.setLayout('floating')
+    await flush()
+    assert.equal(panel.parent?.tag, 'body')
+    f.assistant.setLayout('docked')
+    await flush()
+    assert.equal(panel.parent?.tag, 'app-root')
+    assert.equal(f.mounted.length, 1)
+    assert.equal(f.sent.length, 1)
+  } finally { f.close() }
+})
+
+for (const existing of [false, true]) {
+  test(`contextual actions open inside the ${existing ? 'existing conversation' : 'welcome panel'} and send only on selection`, async () => {
+    let creations = 0
+    const f = await fixture(async () => { creations++; return { data: { id: 'new-session' } } })
+    try {
+      if (existing) f.assistant.setSession('ongoing-session')
+      f.assistant.publishPageContext(Symbol(), { knowledgeBaseId: 'kb-a', knowledgeId: 'document-a' })
+      f.assistant.setPageSelection({ text: 'Selected content', field: 'Document' })
+      await flush()
+      const mounts = f.mounted.length
+      await f.click('assistant.history')
+      f.assistant.showActionSuggestions({ label: 'Read this document', actions: [
+        { key: 'summary', label: 'Summarize', query: 'Summarize document-a' },
+        { key: 'compare', label: 'Compare', query: 'Compare documents', disabled: true },
+      ] })
+      await flush()
+      assert.equal(f.assistant.visible, true)
+      assert.equal(creations, 0, 'opening actions must not create a conversation or send a prompt')
+      assert.equal(f.sent.length, 0)
+      assert.equal(f.mounted.length, mounts, 'existing conversations stay mounted')
+      assert.equal(f.findAll(node => node.props.class === 'assistant-history').length, 0)
+      const buttons = f.findAll(node => node.tag === 'button')
+      const summary = buttons.find(node => node.text === 'Summarize')
+      const compare = buttons.find(node => node.text === 'Compare')
+      assert.ok(summary)
+      assert.equal(compare?.props.disabled, true)
+      f.assistant.askSuggestedAction('compare')
+      f.assistant.askSuggestedAction('missing')
+      assert.equal(f.assistant.queuedMessage, null)
+      assert.equal(creations, 0)
+      summary.props.onClick()
+      await flush()
+      assert.equal(f.assistant.actionSuggestions, null)
+      if (existing) {
+        assert.equal(f.assistant.sessionId, 'ongoing-session')
+        assert.equal(f.assistant.queuedMessage.query, 'Summarize document-a')
+        assert.equal(creations, 0)
+      } else {
+        assert.equal(creations, 1)
+        assert.equal(f.sent[0].query, 'Summarize document-a')
+        assert.equal(f.sent[0].scope.pageContext.knowledge_id, 'document-a')
+        assert.equal(f.sent[0].scope.pageContext.selection.text, 'Selected content')
+      }
+    } finally { f.close() }
+  })
+}
+
+test('contextual actions expire when their page, conversation, workspace or access changes', async () => {
+  const f = await fixture()
+  try {
+    const owner = Symbol()
+    f.assistant.publishPageContext(owner, { knowledgeBaseId: 'kb-a', knowledgeId: 'document-a' })
+    const suggest = () => f.assistant.showActionSuggestions({ label: 'Document actions', actions: [
+      { key: 'summary', label: 'Summarize', query: 'Summarize document-a' },
+    ] })
+    for (const change of [
+      () => f.assistant.publishPageContext(owner, { knowledgeBaseId: 'kb-a', knowledgeId: 'document-b' }),
+      () => f.assistant.setPageView('Another dialog'),
+      () => f.assistant.dismissPageContext(),
+      () => f.assistant.startNewConversation(),
+      () => f.assistant.setSession('another-session'),
+      () => { f.auth.effectiveTenantId = 2 },
+      () => f.assistant.setPageAccess(false),
+    ]) {
+      suggest()
+      assert.ok(f.assistant.actionSuggestions)
+      change()
+      await flush()
+      assert.equal(f.assistant.actionSuggestions, null)
+    }
+    suggest()
+    assert.equal(f.assistant.actionSuggestions, null, 'page access must be enabled')
   } finally { f.close() }
 })
 
