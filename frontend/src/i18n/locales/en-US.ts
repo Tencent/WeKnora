@@ -3514,6 +3514,7 @@ export default {
         emptyHint: 'Images in your documents appear here once parsing finishes',
         emptyFiltered: 'No images match these filters',
         imageLoadError: 'Image failed to load',
+        unsupportedFormat: '{format} format cannot be previewed in this browser',
         noCaption: 'No caption',
         noOcr: 'No text recognized',
         caption: 'Image description',

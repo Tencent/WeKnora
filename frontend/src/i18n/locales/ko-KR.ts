@@ -4601,6 +4601,7 @@ export default {
         emptyHint: '문서 속 이미지는 파싱이 끝나면 여기에 표시됩니다',
         emptyFiltered: '조건에 맞는 이미지가 없습니다',
         imageLoadError: '이미지를 불러오지 못했습니다',
+        unsupportedFormat: '{format} 형식은 브라우저에서 미리 볼 수 없습니다',
         noCaption: '설명 없음',
         noOcr: '인식된 텍스트 없음',
         caption: '이미지 설명',

@@ -5,6 +5,7 @@ import vm from 'node:vm'
 import ts from 'typescript'
 import * as vue from 'vue'
 import type { ImageAsset, ImageListParams, ImageListResult } from '@/api/image-gallery'
+import { unsupportedGalleryFormat } from './galleryImageFormat.ts'
 
 // Exercise the component's actual loading and viewer logic with deferred API
 // responses so races and retries are deterministic, without a live backend.
@@ -12,10 +13,10 @@ const source = readFileSync(new URL('./ImageGallery.vue', import.meta.url), 'utf
   .split('<script setup lang="ts">')[1].split('</script>')[0]
 const compiled = ts.transpileModule(`${source}\nexport {
   items, page, total, loading, error, keyword, hasMore, viewerIndex, viewerOpen,
-  reload, loadMore, openViewer, onViewerLoadMore, initGallery,
+  reload, loadMore, openViewer, onViewerLoadMore, initGallery, fetchBlobUrl, imageError,
 }`, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 
-function setup() {
+function setup(options: { mime?: string } = {}) {
   const calls: Array<{
     kb: string; params: ImageListParams
     resolve: (value: ImageListResult) => void; reject: (reason: Error) => void
@@ -31,12 +32,14 @@ function setup() {
       fetchGalleryConfig: async () => ({ attributes: [], attribute_sources: [], mode: 'all', status: {} }),
     },
     '@/api/auth': { updateMyPreferences: async () => {} },
-    './galleryImageSrc': { galleryImageRequest: () => null },
+    './galleryImageSrc': { galleryImageRequest: () => options.mime ? { url: '/file', headers: {} } : null },
+    './galleryImageFormat': { unsupportedGalleryFormat },
   }
   const state: any = {}
   vm.runInNewContext(compiled, {
     exports: state, defineProps: () => props, defineEmits: () => () => {},
     setTimeout, clearTimeout, URL, console, Error,
+    fetch: async () => new Response(new Blob(['image'], { type: options.mime })),
     require: (id: string) => {
       assert.ok(id in modules, `unexpected import ${id}`)
       return modules[id]
@@ -64,6 +67,20 @@ test('scroll appends unique images, serializes requests, and stops at the total'
   assert.deepEqual(ids(), ['a', 'b', 'c'])
   assert.equal(state.hasMore.value, false)
   assert.equal(await state.loadMore(), false)
+})
+
+test('opaque resource errors show the served Office format', async () => {
+  const { state } = setup({ mime: 'image/emf' })
+  const image = { url: 'resource://opaque-id' } as ImageAsset
+  await state.fetchBlobUrl(image.url)
+  assert.equal(state.imageError(image), 'knowledgeEditor.wikiBrowser.gallery.unsupportedFormat')
+})
+
+test('PNG responses override an old metafile extension when reporting errors', async () => {
+  const { state } = setup({ mime: 'image/png' })
+  const image = { url: 'local://diagram.emf' } as ImageAsset
+  await state.fetchBlobUrl(image.url)
+  assert.equal(state.imageError(image), 'knowledgeEditor.wikiBrowser.gallery.imageLoadError')
 })
 
 test('append failures retain cards and retry the same page', async () => {
