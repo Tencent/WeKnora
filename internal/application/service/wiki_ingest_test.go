@@ -324,6 +324,43 @@ func TestUnmaskImageURLsDropsUnknownPlaceholders(t *testing.T) {
 	}
 }
 
+// The synthesis model sometimes rewrites wkimg:0010 with another separator
+// (a slash in #4294). The digits still identify the image, so the token must
+// be restored — or dropped when the index is unknown — instead of reaching
+// storage as a broken image link.
+func TestUnmaskImageURLsNormalisesPlaceholderSeparators(t *testing.T) {
+	const page1 = "minio://kb/exports/page_1.jpg"
+	const page10 = "minio://kb/exports/page_10.jpg"
+	urlMap := map[string]string{
+		"wkimg:0001": page1,
+		"wkimg:0010": page10,
+	}
+
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"slash", "![p](wkimg/0010)", "![p](" + page10 + ")"},
+		{"underscore", "![p](wkimg_0001)", "![p](" + page1 + ")"},
+		{"dash", "![p](wkimg-0001)", "![p](" + page1 + ")"},
+		{"space", "![p](wkimg 0001)", "![p](" + page1 + ")"},
+		{"full width colon", "![p](wkimg：0010)", "![p](" + page10 + ")"},
+		{"uppercase", "![p](WKIMG:0001)", "![p](" + page1 + ")"},
+		{"outside markdown", "see wkimg/0010 here", "see " + page10 + " here"},
+		{"unknown index", "![p](wkimg/9999)", ""},
+		{"non placeholder url", "![p](https://example.com/wkimg.png)", "![p](https://example.com/wkimg.png)"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := unmaskImageURLs(tc.input, urlMap); got != tc.want {
+				t.Fatalf("unmaskImageURLs(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGenerateWithTemplateMasksImageURLsBeforeLLM(t *testing.T) {
 	const realURL = "minio://kb/10000/exports/4135-aaaa-bbbb-cccc/page_1.jpg"
 	model := &templateCaptureChatModel{

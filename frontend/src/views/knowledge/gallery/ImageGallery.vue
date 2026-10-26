@@ -53,7 +53,7 @@ let scrollObserver: ResizeObserver | undefined
 
 // Source-document restriction (the "filter by document" picker). An empty
 // array means every document of the KB; otherwise only images whose owning
-// document is listed are fetched. Committed by the picker dialog.
+// document is listed are fetched. Edited from the toolbar's source panel.
 const sourceDocIds = ref<string[]>([])
 const sourcePickerVisible = ref(false)
 
@@ -114,6 +114,12 @@ const blobByRawUrl = new Map<string, string>()
 // Fetches in flight, so the grid and the viewer asking for the same image at
 // once share one request.
 const inflight = new Map<string, Promise<string>>()
+let imageRequests = new AbortController()
+
+function abortImageRequests(): void {
+  imageRequests.abort()
+  inflight.clear()
+}
 
 /** Revoke every cached object URL whose raw URL is not in keep. */
 function releaseBlobs(keep: Set<string> = new Set()): void {
@@ -124,13 +130,17 @@ function releaseBlobs(keep: Set<string> = new Set()): void {
   }
 }
 
-async function fetchBlobUrl(rawUrl: string): Promise<string> {
+async function fetchBlobUrl(rawUrl: string, signal: AbortSignal): Promise<string> {
   const req = galleryImageRequest(rawUrl, props.knowledgeBaseId)
   if (!req) return rawUrl
   try {
-    const resp = await fetch(req.url, { headers: req.headers })
-    if (!resp.ok) return rawUrl
-    const objectUrl = URL.createObjectURL(await resp.blob())
+    const resp = await fetch(req.url, { headers: req.headers, signal })
+    if (!resp.ok || signal.aborted) return rawUrl
+    const blob = await resp.blob()
+    // Cancellation can race with a completed body read. Never create a URL
+    // after this query's cleanup, even if the response ignored the abort.
+    if (signal.aborted) return rawUrl
+    const objectUrl = URL.createObjectURL(blob)
     blobByRawUrl.set(rawUrl, objectUrl)
     return objectUrl
   } catch {
@@ -139,11 +149,15 @@ async function fetchBlobUrl(rawUrl: string): Promise<string> {
 }
 
 function resolveImageSrc(rawUrl: string): Promise<string> {
+  if (imageRequests.signal.aborted) return Promise.resolve(rawUrl)
   const cached = blobByRawUrl.get(rawUrl)
   if (cached) return Promise.resolve(cached)
   let pending = inflight.get(rawUrl)
   if (!pending) {
-    pending = fetchBlobUrl(rawUrl).finally(() => inflight.delete(rawUrl))
+    pending = fetchBlobUrl(rawUrl, imageRequests.signal).finally(() => {
+      // A newer query may already have started the same URL's replacement.
+      if (inflight.get(rawUrl) === pending) inflight.delete(rawUrl)
+    })
     inflight.set(rawUrl, pending)
   }
   return pending
@@ -365,15 +379,18 @@ function clearFilters(): void {
 
 /** The empty state's way back: forget the keyword and source documents as well. */
 function clearAll(): void {
+  if (sourceTimer) clearTimeout(sourceTimer)
   keyword.value = ''
   sourceDocIds.value = []
   clearFilters()
 }
 
-/** Committed by the source picker: restrict the listing to these documents. */
-function onSourceDocsConfirm(ids: string[]): void {
+/** Ticked in the source panel: restrict the listing to these documents. */
+let sourceTimer: ReturnType<typeof setTimeout> | undefined
+function onSourceDocsChange(ids: string[]): void {
   sourceDocIds.value = ids
-  reload()
+  if (sourceTimer) clearTimeout(sourceTimer)
+  sourceTimer = setTimeout(() => reload(), 300)
 }
 
 // ---------------------------------------------------------------------------
@@ -490,6 +507,8 @@ function loadMore(): Promise<boolean> {
 
 function resetResults() {
   listToken++
+  abortImageRequests()
+  imageRequests = new AbortController()
   viewerOpen.value = false
   items.value = []
   total.value = 0
@@ -576,9 +595,11 @@ function sourceLabel(img: ImageAsset): string {
 // ---------------------------------------------------------------------------
 onBeforeUnmount(() => {
   if (searchTimer) clearTimeout(searchTimer)
+  if (sourceTimer) clearTimeout(sourceTimer)
   // Orphan any in-flight listing so it cannot map new blobs after unmount.
   listToken++
   initToken++
+  abortImageRequests()
   cardObserver?.disconnect()
   scrollObserver?.disconnect()
   releaseBlobs()
@@ -597,6 +618,7 @@ async function initGallery() {
   const token = ++initToken
   resetResults()
   if (searchTimer) clearTimeout(searchTimer)
+  if (sourceTimer) clearTimeout(sourceTimer)
   error.value = ''
   keyword.value = ''
   sortBy.value = ''
@@ -674,16 +696,32 @@ watch(
           <template #prefix-icon><t-icon name="search" size="16px" /></template>
         </t-input>
 
-        <button
-          type="button"
-          class="ig-tool-btn"
-          :class="{ active: sourcePickerVisible || sourceDocIds.length > 0 }"
-          @click="sourcePickerVisible = true"
+        <t-popup
+          v-model:visible="sourcePickerVisible"
+          trigger="click"
+          placement="bottom-right"
+          overlay-class-name="gallery-toolbar-popup"
+          :overlay-inner-style="{ padding: 0 }"
         >
-          <t-icon name="file" size="16px" />
-          {{ t(`${NS}.sourceFilter`) }}
-          <span v-if="sourceDocIds.length" class="ig-tool-btn__count">{{ sourceDocIds.length }}</span>
-        </button>
+          <button
+            type="button"
+            class="ig-tool-btn"
+            :class="{ active: sourcePickerVisible || sourceDocIds.length > 0 }"
+            :aria-expanded="sourcePickerVisible"
+          >
+            <t-icon name="file" size="16px" />
+            {{ t(`${NS}.sourceFilter`) }}
+            <span v-if="sourceDocIds.length" class="ig-tool-btn__count">{{ sourceDocIds.length }}</span>
+          </button>
+          <template #content>
+            <GallerySourcePicker
+              :kb-id="props.knowledgeBaseId"
+              :visible="sourcePickerVisible"
+              :selected="sourceDocIds"
+              @update:selected="onSourceDocsChange"
+            />
+          </template>
+        </t-popup>
 
         <t-popup
           v-model:visible="filterPanelVisible"
@@ -890,7 +928,7 @@ watch(
                 {{ img.caption || t(`${NS}.noCaption`) }}
               </div>
               <div class="ig-card__source" :title="sourceLabel(img)">
-                <t-icon name="file" size="12px" />
+                <t-icon name="file" size="14px" />
                 <span>{{ sourceLabel(img) }}</span>
               </div>
             </div>
@@ -921,14 +959,6 @@ watch(
       @load-more="onViewerLoadMore"
       @close="closeViewer"
       @open-source="onOpenSource"
-    />
-
-    <GallerySourcePicker
-      :kb-id="props.knowledgeBaseId"
-      :visible="sourcePickerVisible"
-      :selected="sourceDocIds"
-      @update:visible="(v: boolean) => (sourcePickerVisible = v)"
-      @confirm="onSourceDocsConfirm"
     />
   </div>
 </template>
@@ -1384,6 +1414,8 @@ watch(
     min-width: 0;
     color: var(--td-text-color-placeholder);
     font-size: var(--app-text-sm);
+
+    .t-icon { flex-shrink: 0; }
 
     span {
       min-width: 0;

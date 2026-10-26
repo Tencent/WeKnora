@@ -18,10 +18,16 @@ spec:
     matchLabels:
       {{- include "weknora.componentSelectorLabels" (dict "component" "app" "context" .) | nindent 6 }}
   strategy:
-    type: RollingUpdate
+    {{- $strategy := .Values.app.strategy | default dict }}
+    {{- $strategyType := $strategy.type | default "RollingUpdate" }}
+    {{- if not (has $strategyType (list "RollingUpdate" "Recreate")) }}
+    {{- fail "app.strategy.type must be RollingUpdate or Recreate" }}
+    {{- end }}
+    type: {{ $strategyType }}
+    {{- if eq $strategyType "RollingUpdate" }}
     rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+      {{- toYaml ($strategy.rollingUpdate | default (dict "maxSurge" 1 "maxUnavailable" 0)) | nindent 6 }}
+    {{- end }}
   template:
     metadata:
       labels:

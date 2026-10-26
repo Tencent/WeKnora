@@ -6,6 +6,7 @@ from PIL import Image
 from docreader.parser.pdf_parser import (
     PDFParser,
     _classify_page,
+    _encode_rendered_page_images,
     _filter_reading_columns,
     _group_lines,
     _is_artifact_column,
@@ -53,6 +54,22 @@ class ClassifyPageTest(unittest.TestCase):
     def test_blank_page_is_text(self):
         # No image, no text -> not rendered as an image.
         self.assertEqual(_classify_page(0.0, 0), "text")
+
+
+class RenderedPageEncodingTest(unittest.TestCase):
+    def test_encoding_releases_raw_pages_as_it_builds_response_images(self):
+        rendered = {1: b"page-two", 0: b"page-one"}
+
+        encoded = _encode_rendered_page_images(rendered, "scan")
+
+        self.assertEqual(rendered, {})
+        self.assertEqual(
+            encoded,
+            {
+                "images/scan_page_1.jpg": "cGFnZS1vbmU=",
+                "images/scan_page_2.jpg": "cGFnZS10d28=",
+            },
+        )
 
 
 class StripRepeatingLinesTest(unittest.TestCase):

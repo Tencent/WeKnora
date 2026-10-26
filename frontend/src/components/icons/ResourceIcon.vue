@@ -9,9 +9,10 @@ import agentIcon from '@/assets/img/agent.svg'
 import artifactIcon from '@/assets/img/artifact.svg'
 import organizationIcon from '@/assets/img/organization.svg'
 import toolboxIcon from '@/assets/img/toolbox.svg'
+import automationIcon from '@/assets/img/automation.svg'
 
 const props = withDefaults(defineProps<{
-  type: 'knowledge' | 'agent' | 'artifact' | 'organization' | 'toolbox'
+  type: 'knowledge' | 'agent' | 'artifact' | 'organization' | 'toolbox' | 'automation'
   size?: number
 }>(), { size: 20 })
 
@@ -22,6 +23,7 @@ const icons = {
   artifact: artifactIcon,
   organization: organizationIcon,
   toolbox: toolboxIcon,
+  automation: automationIcon,
 }
 const iconStyle = computed(() => ({
   width: `${props.size}px`,

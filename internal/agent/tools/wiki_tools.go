@@ -268,6 +268,21 @@ const (
 	wikiScopedSearchMaxFetch  = 100
 )
 
+// WikiPageInScope applies the same source-document and tag restrictions used
+// by Wiki reads to page metadata surfaced outside the tool execution path.
+func WikiPageInScope(
+	ctx context.Context, page *types.WikiPage, scope WikiScope, knowledgeService interfaces.KnowledgeService,
+) (bool, error) {
+	if page == nil || (page.KnowledgeBaseID != "" && page.KnowledgeBaseID != scope.KnowledgeBaseID) {
+		return false, nil
+	}
+	var fetchTags knowledgeTagsFetcher
+	if knowledgeService != nil {
+		fetchTags = knowledgeService.GetKnowledgeTags
+	}
+	return pagePassesWikiScope(ctx, page, scope, fetchTags)
+}
+
 func pagePassesWikiScope(
 	ctx context.Context,
 	page *types.WikiPage,
@@ -778,7 +793,7 @@ func NewWikiSearchTool(
     "knowledge_base_ids": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Optional bN knowledge-base handles to restrict the search"
+      "description": "Optional kb://N knowledge-base handles to restrict the search"
     },
     "limit": {
       "type": "integer",

@@ -107,7 +107,7 @@ function serviceState(service: NonNullable<OperationsStatus['services']>[number]
   margin: 24px 0;
   padding: 24px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: var(--app-radius-lg, 14px);
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-primary);
 }
@@ -117,13 +117,13 @@ h3 { margin: 6px 0 0; font-size: var(--app-text-3xl); font-weight: 600; }
 h4 { margin: 0 0 12px; font-size: var(--app-text-base); }
 .sample { font-size: var(--app-text-sm); color: var(--td-text-color-secondary); font-variant-numeric: tabular-nums; }
 .capacity-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.capacity { padding: 18px; background: var(--td-bg-color-container); border: 1px solid var(--td-component-stroke); border-radius: var(--app-radius-md, 10px); }
+.capacity { padding: 18px; background: var(--td-bg-color-container); border: 1px solid var(--td-component-stroke); border-radius: var(--app-radius-md); }
 .capacity > span { font-size: var(--app-text-sm); color: var(--td-text-color-secondary); }
 .capacity strong { display: block; margin: 12px 0; font-size: var(--app-text-4xl); font-weight: 600; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
 .capacity p { margin: 5px 0 0; font-size: var(--app-text-xs); color: var(--td-text-color-secondary); }
 .primary { background: var(--td-brand-color); border-color: var(--td-brand-color); color: var(--td-text-color-anti); }
 .primary > span, .primary p { color: var(--td-text-color-anti); }
-.meter { height: 4px; background: var(--td-bg-color-secondarycontainer); border-radius: 3px; overflow: hidden; }
+.meter { height: 4px; background: var(--td-bg-color-secondarycontainer); border-radius: var(--app-radius-pill); overflow: hidden; }
 .meter i { display: block; height: 100%; background: var(--td-success-color); }
 .notice { margin: 16px 0 0; font-size: var(--app-text-md); color: var(--td-text-color-secondary); }
 .warning { color: var(--td-warning-color); }
@@ -134,7 +134,7 @@ h4 { margin: 0 0 12px; font-size: var(--app-text-base); }
 .detail-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--td-component-stroke); font-size: var(--app-text-sm); }
 .detail-row b { font-weight: 500; overflow-wrap: anywhere; }
 .detail-row small { display: block; margin-top: 5px; color: var(--td-text-color-secondary); font-size: var(--app-text-xs); }
-.badge { flex-shrink: 0; padding: 4px 7px; background: var(--td-success-color-light); border-radius: 4px; color: var(--td-success-color); font-size: var(--app-text-xs); }
+.badge { flex-shrink: 0; padding: 4px 7px; background: var(--td-success-color-light); border-radius: var(--app-radius-xs); color: var(--td-success-color); font-size: var(--app-text-xs); }
 .badge.warning { background: var(--td-warning-color-light); color: var(--td-warning-color); }
 .service-section { grid-column: 1 / -1; }
 .service-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }

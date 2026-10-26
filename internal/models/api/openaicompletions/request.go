@@ -198,9 +198,16 @@ const metadataReasoningDetails = "reasoning_details"
 // the encoded JSON is alphabetical, which keeps golden tests stable.
 func (c *Client) buildBody(messages []api.Message, opts *api.Options, stream bool) (map[string]any, error) {
 	s := c.cfg.Settings
+	wireMessages := c.convertMessages(messages)
+	if opts != nil && opts.RuntimeNotice != "" {
+		wireMessages = append(
+			wireMessages,
+			c.convertMessages([]api.Message{{Role: "system", Content: opts.RuntimeNotice}})...,
+		)
+	}
 	body := map[string]any{
 		"model":    c.cfg.Endpoint.Model,
-		"messages": c.convertMessages(messages),
+		"messages": wireMessages,
 	}
 	if stream {
 		body["stream"] = true

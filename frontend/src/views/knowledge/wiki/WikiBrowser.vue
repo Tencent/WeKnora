@@ -746,13 +746,6 @@
       </div>
     </t-drawer>
 
-    <!-- Fix Chat Drawer -->
-    <t-drawer v-model:visible="showFixDrawer" :header="$t('knowledgeEditor.wikiBrowser.fixAssistantTitle')" size="700px"
-      :footer="false" class="wiki-fix-drawer">
-      <ChatView v-if="showFixDrawer" :session_id="currentFixSessionId" agentId="builtin-wiki-fixer"
-        :kbIds="[props.knowledgeBaseId]" :embeddedMode="true" />
-    </t-drawer>
-
     <!-- Revision history drawer -->
     <WikiRevisionDrawer v-model:visible="showRevisionDrawer" :kb-id="props.knowledgeBaseId"
       :slug="selectedPage?.slug || ''" :current-page="selectedPage" :can-edit="props.canEdit"
@@ -819,9 +812,9 @@
 </template>
 
 <script setup lang="ts">
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import { ref, computed, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useMenuStore } from '@/stores/menu'
 import { useSettingsStore } from '@/stores/settings'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
@@ -840,8 +833,8 @@ import {
 import { resolveWikiBacklinkTitle } from './wikiBacklinkTitles'
 import { buildGraphLayout, graphNodeRadius, stepGraphLayout, visibleGraphLabels, graphPointBounds, initialGraphViewport, graphClusterOutline, graphLandmarkTitle, type GraphBounds, type GraphCluster } from './wikiGraphLayout'
 import { getKnowledgeDetails } from '@/api/knowledge-base'
-import { createSessions } from '@/api/chat'
-import ChatView from '@/views/chat/index.vue'
+import { useAssistantStore } from '@/stores/assistant'
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import {
   listWikiPages,
   listWikiFolders,
@@ -870,7 +863,7 @@ import {
 
 const router = useRouter()
 const route = useRoute()
-const menuStore = useMenuStore()
+const assistant = useAssistantStore()
 const settingsStore = useSettingsStore()
 
 ensureLiteralSingleTildeOnGlobalMarked()
@@ -1011,10 +1004,19 @@ const activeSystemView = ref<'' | 'index'>('')
 const searchResults = ref<WikiPage[] | null>(null)
 const pageIssues = ref<WikiPageIssue[]>([])
 const showIssuesBox = ref(false)
-const showFixDrawer = ref(false)
+useAssistantPageContext(() => {
+  const page = selectedPage.value
+  if (!page) return null
+  return {
+    page: 'wiki',
+    knowledgeBaseId: props.knowledgeBaseId,
+    wikiSlug: page.slug,
+    wikiTitle: page.title,
+    wikiIssueIds: pageIssues.value.map(issue => issue.id),
+  }
+})
 const showGlobalIssuesDrawer = ref(false)
 const globalIssues = ref<WikiPageIssue[]>([])
-const currentFixSessionId = ref('')
 const stats = ref<WikiStats | null>(null)
 const graphData = ref<WikiGraphData | null>(null)
 const searchQuery = ref('')
@@ -1059,16 +1061,18 @@ const GRAPH_OVERVIEW_LIMIT = 500
 const GRAPH_EGO_LIMIT = 500
 const GRAPH_EGO_DEFAULT_DEPTH = 1
 
-watch(showGlobalIssuesDrawer, async (val) => {
-  if (val) {
-    try {
-      const res = await listWikiIssues(props.knowledgeBaseId, '', 'pending')
-      globalIssues.value = (res as any).data || res as any || []
-    } catch (e) {
-      console.error('Failed to load global wiki issues:', e)
-      globalIssues.value = []
-    }
+async function loadGlobalIssues() {
+  try {
+    const res = await listWikiIssues(props.knowledgeBaseId, '', 'pending')
+    globalIssues.value = (res as any).data || res as any || []
+  } catch (e) {
+    console.error('Failed to load global wiki issues:', e)
+    globalIssues.value = []
   }
+}
+
+watch(showGlobalIssuesDrawer, (val) => {
+  if (val) void loadGlobalIssues()
 })
 
 async function navigateToSlugAndFix(slug: string) {
@@ -3700,57 +3704,30 @@ async function handleIssueIgnore(issueId: string) {
   }
 }
 
-async function startFixSession(prompt: string) {
-  try {
-    const res = await createSessions({})
-    if (res && (res as any).data && (res as any).data.id) {
-      const sessionId = (res as any).data.id
-      const now = new Date().toISOString()
-
-      menuStore.updataMenuChildren({
-        title: t('knowledgeEditor.wikiBrowser.fixAssistantTitle'),
-        path: `chat/${sessionId}`,
-        id: sessionId,
-        isMore: false,
-        isNoTitle: true,
-        created_at: now,
-        updated_at: now
-      })
-
-      menuStore.changeIsFirstSession(true)
-      menuStore.changeFirstQuery(prompt, [], '', [])
-
-      currentFixSessionId.value = sessionId
-      showFixDrawer.value = true
-      showIssuesBox.value = false // Hide issues box
-    } else {
-      MessagePlugin.error(t('knowledgeEditor.wikiBrowser.fixStartError'))
-    }
-  } catch (e) {
-    console.error('Failed to create fix session', e)
-    MessagePlugin.error(t('knowledgeEditor.wikiBrowser.fixStartError'))
-  }
-}
-
 function triggerFixIssue(issue: WikiPageIssue) {
   if (!selectedPage.value) return
-  const prompt = t('knowledgeEditor.wikiBrowser.issueFixPromptSingle', {
-    slug: selectedPage.value.slug,
-    id: issue.id
+  showIssuesBox.value = false
+  assistant.open({
+    query: t('knowledgeEditor.wikiBrowser.issueFixPromptSingle', { description: issue.description }),
+    focus: { wikiIssueIds: [issue.id] },
   })
-  startFixSession(prompt)
 }
 
 function triggerAutoFix() {
   if (!selectedPage.value || pageIssues.value.length === 0) return
-  let prompt = t('knowledgeEditor.wikiBrowser.issueFixPromptAutoStart', { slug: selectedPage.value.slug }) + '\n\n'
-
-  pageIssues.value.forEach((issue, idx) => {
-    prompt += `${idx + 1}. Issue ID: ${issue.id}\n`
+  showIssuesBox.value = false
+  assistant.open({
+    query: t('knowledgeEditor.wikiBrowser.issueFixPromptAll', { count: pageIssues.value.length }),
+    focus: { wikiIssueIds: pageIssues.value.map(issue => issue.id) },
   })
-
-  startFixSession(prompt)
 }
+
+// The assistant may have rewritten the page or resolved its issues.
+watch(() => assistant.visible, (visible, wasVisible) => {
+  if (!wasVisible || visible || editingPage.value) return
+  void refreshSelectedPage()
+  void loadStats()
+})
 
 async function doSearch() {
   if (!searchQuery.value.trim()) {
@@ -4258,7 +4235,6 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     text.setAttribute('font-size', '11')
     text.setAttribute('fill', 'var(--td-text-color-secondary)')
     text.setAttribute('pointer-events', 'none')
-    text.style.transition = 'opacity 0.2s' // Smooth fade in/out
     text.style.textShadow = '0 1px 3px var(--td-bg-color-container), 0 -1px 3px var(--td-bg-color-container), 1px 0 3px var(--td-bg-color-container), -1px 0 3px var(--td-bg-color-container)'
     text.textContent = n.title.length > 14 ? n.title.substring(0, 14) + '…' : n.title
     g.appendChild(text)
@@ -4440,6 +4416,9 @@ function renderGraph(opts: RenderGraphOpts = {}) {
 
   // Measure after all DOM writes to avoid forcing a layout for every node.
   for (const { text, node } of nodeEls) node.labelWidth = text.getComputedTextLength() || node.labelWidth
+  // Hide only after every measurement, keeping reads and writes separate.
+  // The first label pass reveals only the collision-filtered set.
+  for (const { text } of nodeEls) text.style.display = 'none'
 
   // Pan & zoom on SVG background
   const centerNode = nodeMap.get(graphCenter.value)
@@ -4603,13 +4582,26 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
   let panning = false
   let panStartX = 0, panStartY = 0
   let dragStartX = 0, dragStartY = 0
+  let labelFrame = 0
+  let labelScale: number | undefined
+
+  function scheduleLabelsUpdate() {
+    if (labelFrame) return
+    labelFrame = requestAnimationFrame(() => {
+      labelFrame = 0
+      updateLabelsVisibility()
+    })
+  }
 
   function applyTransform() {
     rootG.setAttribute('transform', `translate(${translateX},${translateY}) scale(${scale})`)
-    updateLabelsVisibility()
+    // Translation does not change screen-space label collisions or contours.
+    // Keep the viewport immediate, but coalesce zoom/layout/hover work per frame.
+    if (scale !== labelScale) scheduleLabelsUpdate()
   }
 
   function updateLabelsVisibility() {
+    labelScale = scale
     // Arrowheads shrink to specks around every node when zoomed out.
     rootG.classList.toggle('hide-edge-markers', scale < 0.8)
     const markersVisible = showArrows.value && scale >= 0.8
@@ -4624,8 +4616,9 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
     // Hide labels when zoomed out too much or hide less important labels
     // We only want to show labels for important nodes (high link count) when zoomed out
     for (const { text, top } of graphSectionEls) {
-      text.setAttribute('font-size', String(13 / scale))
-      text.setAttribute('y', String(top - 12 / scale))
+      const fontSize = String(13 / scale), y = String(top - 12 / scale)
+      if (text.getAttribute('font-size') !== fontSize) text.setAttribute('font-size', fontSize)
+      if (text.getAttribute('y') !== y) text.setAttribute('y', y)
     }
     const positionsBySlug = new Map(graphNodes.map(n => [n.slug, n]))
     for (const contour of graphContourEls) {
@@ -4648,7 +4641,6 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
       const outside = graphFocusedSlugs.size > 0 && !graphFocusedSlugs.has(cluster.representative)
       group.classList.toggle('is-outside-focus', outside)
       const shown = !!anchor && (outside ? anchorSlug === cluster.anchors[0] : scale < 1.2)
-      group.style.display = shown ? '' : 'none'
       if (!shown || !anchor) return []
       const labelX = anchor.x
       const labelY = anchor.y + graphNodeRadius(anchor.linkCount) + 18 / scale
@@ -4659,12 +4651,8 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
         left: x - labelWidth / 2 - 8, right: x + labelWidth / 2 + 8, top: y - 16, bottom: y + 5 }]
     })
     const captionedSlugs = new Set(groupLabels.map(label => label.slug.slice('anchor:'.length)))
-    const candidates = graphNodeElsRef.flatMap(({ text, node }) => {
+    const candidates = graphNodeElsRef.flatMap(({ node }) => {
       const required = node.slug === graphSelectedSlug.value || node.slug === graphHighlightSlug.value
-      // Keep text legible in screen pixels. At overview scale show a few
-      // landmarks; zooming in reveals the individual page labels.
-      text.setAttribute('font-size', String(12 / scale))
-      text.setAttribute('dy', String(graphNodeRadius(node.linkCount) + 16 / scale))
       // The representative caption replaces its ordinary label at overview
       // scales, including hover/selection, so the page name appears only once.
       if (captionedSlugs.has(node.slug)) return []
@@ -4682,13 +4670,23 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
     const visible = visibleGraphLabels([...groupLabels, ...candidates])
     for (const { group, anchorSlug } of graphClusterEls) {
       const shown = visible.has(`anchor:${anchorSlug}`)
-      group.style.visibility = shown ? 'visible' : 'hidden'
-      group.setAttribute('tabindex', shown ? '0' : '-1')
+      const display = shown ? '' : 'none', tabIndex = shown ? '0' : '-1'
+      if (group.style.display !== display) group.style.display = display
+      if (group.getAttribute('tabindex') !== tabIndex) group.setAttribute('tabindex', tabIndex)
     }
-    for (const { text, node } of graphNodeElsRef) text.style.opacity = visible.has(node.slug) ? '1' : '0'
-
+    for (const { text, node } of graphNodeElsRef) {
+      const shown = visible.has(node.slug)
+      const display = shown ? '' : 'none'
+      if (text.style.display !== display) text.style.display = display
+      if (!shown) continue
+      // Only visible labels need screen-pixel sizing. Check attributes so
+      // hover/layout refreshes at the same zoom do not trigger SVG layout.
+      const fontSize = String(12 / scale), dy = String(graphNodeRadius(node.linkCount) + 16 / scale)
+      if (text.getAttribute('font-size') !== fontSize) text.setAttribute('font-size', fontSize)
+      if (text.getAttribute('dy') !== dy) text.setAttribute('dy', dy)
+    }
   }
-  refreshGraphLabels = updateLabelsVisibility
+  refreshGraphLabels = scheduleLabelsUpdate
 
   // Export methods for programmatic pan/zoom
   let animId = 0
@@ -4786,6 +4784,7 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
   window.addEventListener('keydown', onKeyDown)
   disposeGraphPanZoom = () => {
     cancelAnimationFrame(animId)
+    cancelAnimationFrame(labelFrame)
     window.removeEventListener('mousemove', onMouseMove)
     window.removeEventListener('mouseup', onMouseUp)
     window.removeEventListener('keydown', onKeyDown)
@@ -5100,6 +5099,14 @@ watch(() => route.query.slug, (newSlug) => {
     }
   }
 })
+
+useAssistantDataChange((changes) => {
+  if (!changes.some(change => change.ids.knowledgeBaseIds.includes(props.knowledgeBaseId))) return
+  void loadPages()
+  void refreshSelectedPage()
+  void loadStats()
+  if (showGlobalIssuesDrawer.value) void loadGlobalIssues()
+}, { areas: ['wiki'] })
 
 onMounted(() => {
   loadPages()
@@ -7008,44 +7015,4 @@ span.graph-focus-name {
 }
 </style>
 
-<style lang="less">
-/* Fix Embedded Chat UI (unscoped because drawer attaches to body) */
-.wiki-fix-drawer {
-  .t-drawer__body {
-    padding: 20px !important;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    overflow: hidden;
-  }
-
-  .chat {
-    max-width: 100% !important;
-    min-width: 100% !important;
-    padding: 0 !important;
-    height: 100% !important;
-    flex: 1 !important;
-    border-radius: 0 !important;
-  }
-
-  .chat_scroll_box {
-    padding: 0 !important;
-  }
-
-  .chat>.input-container {
-    padding: 16px 0 0 0 !important;
-    box-sizing: border-box;
-    width: 100% !important;
-    max-width: 100% !important;
-    margin: 0 !important;
-    overflow-x: hidden;
-  }
-
-  .msg_list {
-    max-width: 100% !important;
-    padding-bottom: 0 !important;
-    margin: 0 !important;
-  }
-}
-</style>
 <style lang="less" src="@/components/css/wiki-graph-drawer.less"></style>

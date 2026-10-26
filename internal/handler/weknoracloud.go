@@ -3,9 +3,13 @@ package handler
 import (
 	"net/http"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 )
+
+// Keeps types imported so swag can resolve WeKnoraCloudStatusResult.
+var _ types.WeKnoraCloudStatusResult
 
 // WeKnoraCloudHandler 处理 WeKnoraCloud 凭证管理
 type WeKnoraCloudHandler struct {
@@ -32,7 +36,7 @@ type weKnoraCloudCredentialsRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      map[string]interface{}  true  "{app_id, app_secret}"
-// @Success      200      {object}  map[string]interface{}  "success: true"
+// @Success      200      {object}  handler.MessageResponse  "success: true"
 // @Failure      400      {object}  map[string]interface{}  "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -60,7 +64,7 @@ func (h *WeKnoraCloudHandler) SaveCredentials(c *gin.Context) {
 // @Description  检查当前空间的 WeKnoraCloud 凭证是否完好；needs_reinit=true 表示需要重新保存
 // @Tags         WeKnoraCloud
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "凭证状态"
+// @Success      200  {object}  types.WeKnoraCloudStatusResult  "凭证状态"
 // @Failure      500  {object}  map[string]interface{}  "服务器错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth

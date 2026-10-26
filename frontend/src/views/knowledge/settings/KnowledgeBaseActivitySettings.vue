@@ -166,6 +166,9 @@
                   <span v-if="activityAPIKeyName(row)" class="audit-actor-key">
                     {{ actorAPIKeyLabel(row) }}
                   </span>
+                  <span v-if="activityViaAssistant(row)" class="audit-actor-key">
+                    {{ t('knowledgeEditor.activity.viaAssistant') }}
+                  </span>
                 </div>
               </template>
               <template #outcome="{ row }">
@@ -523,10 +526,14 @@ function actorAPIKeyLabel(entry: KnowledgeBaseActivity): string {
 function actorLabel(entry: KnowledgeBaseActivity): string {
   const person = actorPersonLabel(entry)
   const keyName = activityAPIKeyName(entry)
-  if (keyName) {
-    return t('knowledgeEditor.activity.actorWithAPIKey', { actor: person, name: keyName })
-  }
-  return person
+  const label = keyName
+    ? t('knowledgeEditor.activity.actorWithAPIKey', { actor: person, name: keyName })
+    : person
+  return activityViaAssistant(entry) ? `${label} · ${t('knowledgeEditor.activity.viaAssistant')}` : label
+}
+
+function activityViaAssistant(entry: KnowledgeBaseActivity): boolean {
+  return details(entry).via === 'agent'
 }
 
 function activityAPIKeyName(entry: KnowledgeBaseActivity): string {
@@ -655,6 +662,21 @@ function identifierFields(entry: KnowledgeBaseActivity): DetailField[] {
       key: 'apiKeyId',
       label: t('knowledgeEditor.activity.expanded.apiKeyId'),
       value: keyId,
+    })
+  }
+  const value = details(entry)
+  if (value.via === 'agent' && value.agent_session_id) {
+    fields.push({
+      key: 'agentSessionId',
+      label: t('knowledgeEditor.activity.expanded.agentSessionId'),
+      value: String(value.agent_session_id),
+    })
+  }
+  if (value.via === 'agent' && value.agent_operation) {
+    fields.push({
+      key: 'agentOperation',
+      label: t('knowledgeEditor.activity.expanded.agentOperation'),
+      value: String(value.agent_operation),
     })
   }
   return fields

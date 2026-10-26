@@ -194,7 +194,15 @@ func addCacheControlToMessageContent(msg map[string]any, marker *CacheControlMar
 // AttachSessionAffinityHeaders sets the sticky-routing headers OpenAI-style
 // gateways use to keep one conversation on one cache shard.
 func AttachSessionAffinityHeaders(req *http.Request, sessionID string) {
-	if req == nil || sessionID == "" {
+	if req == nil {
+		return
+	}
+	// Gateways may prefer these headers over X-Conversation-ID. Keep them
+	// on the business session even when the caller uses a different cache key.
+	if businessSessionID, ok := types.SessionIDFromContext(req.Context()); ok {
+		sessionID = businessSessionID
+	}
+	if sessionID == "" {
 		return
 	}
 	req.Header.Set("session_id", sessionID)

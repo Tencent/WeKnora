@@ -2185,6 +2185,75 @@
             "add_special_tokens": true
           }
         }
+      },
+      {
+        "id": "tencent/WeMM-Embedding-2B",
+        "match": "*/WeMM-Embedding-2B",
+        "type": "Embedding",
+        "name": "WeMM-Embedding-2B",
+        "aliases": [
+          "WeMM-Embedding-2B"
+        ],
+        "input": [
+          "text",
+          "image"
+        ],
+        "dimension": 2048,
+        "source": "https://huggingface.co/tencent/WeMM-Embedding-2B",
+        "compat": {
+          "api": "openai-embeddings",
+          "image_format": "messages",
+          "text_as_messages": true,
+          "batch_messages": true,
+          "accepts_truncate_prompt_tokens": false,
+          "max_image_batch_size": 5
+        }
+      },
+      {
+        "id": "tencent/WeMM-Embedding-4B",
+        "match": "*/WeMM-Embedding-4B",
+        "type": "Embedding",
+        "name": "WeMM-Embedding-4B",
+        "aliases": [
+          "WeMM-Embedding-4B"
+        ],
+        "input": [
+          "text",
+          "image"
+        ],
+        "dimension": 2560,
+        "source": "https://huggingface.co/tencent/WeMM-Embedding-4B",
+        "compat": {
+          "api": "openai-embeddings",
+          "image_format": "messages",
+          "text_as_messages": true,
+          "batch_messages": true,
+          "accepts_truncate_prompt_tokens": false,
+          "max_image_batch_size": 5
+        }
+      },
+      {
+        "id": "tencent/WeMM-Embedding-9B",
+        "match": "*/WeMM-Embedding-9B",
+        "type": "Embedding",
+        "name": "WeMM-Embedding-9B",
+        "aliases": [
+          "WeMM-Embedding-9B"
+        ],
+        "input": [
+          "text",
+          "image"
+        ],
+        "dimension": 4096,
+        "source": "https://huggingface.co/tencent/WeMM-Embedding-9B",
+        "compat": {
+          "api": "openai-embeddings",
+          "image_format": "messages",
+          "text_as_messages": true,
+          "batch_messages": true,
+          "accepts_truncate_prompt_tokens": false,
+          "max_image_batch_size": 5
+        }
       }
     ],
     "gpustack": [],

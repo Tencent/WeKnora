@@ -279,6 +279,12 @@ func (c *Client) BuildRequestBody(messages []api.Message, opts *api.Options, str
 		// entries were system messages legitimately produces no turns.
 		converted = []message{}
 	}
+	// Anthropic has no in-sequence instruction role. Keep the marked runtime
+	// notice in a trailing input turn, after the existing cache breakpoint;
+	// never move transient recovery text into the stable system prefix.
+	if opts != nil && opts.RuntimeNotice != "" {
+		converted = append(converted, message{Role: "user", Content: opts.RuntimeNotice})
+	}
 	body["messages"] = converted
 
 	if plan.body != nil {
@@ -521,7 +527,7 @@ func mapStopReason(reason string, toolCalls int, incomplete bool) string {
 	switch {
 	case incomplete, reason == "":
 		return types.FinishReasonIncomplete
-	case reason == "max_tokens":
+	case reason == "max_tokens", reason == "model_context_window_exceeded":
 		return "length"
 	case reason == "tool_use" || (toolCalls > 0 && reason == "end_turn"):
 		return "tool_calls"

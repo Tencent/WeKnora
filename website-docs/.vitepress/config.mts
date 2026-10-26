@@ -1,11 +1,24 @@
 import { readFileSync, readdirSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { defineConfig, type DefaultTheme } from 'vitepress'
 import { withMermaid } from 'vitepress-plugin-mermaid'
 import './theme-config.d.ts'
 import { repoVersionLabel } from './version'
+import { readScreenshotSizes } from './screenshot-sizes.mjs'
 
 const root = resolve(import.meta.dirname, '..')
+const require = createRequire(import.meta.url)
+
+/** 当前安装能解析到该模块时返回 true。缺失的包不能写进 optimizeDeps.include。 */
+function installedDep(id: string): boolean {
+  try {
+    require.resolve(id)
+    return true
+  } catch {
+    return false
+  }
+}
 
 const sections: { dir: string; label: string; newestFirst?: boolean }[] = [
   { dir: '01-getting-started', label: '快速开始' },
@@ -121,6 +134,7 @@ export default withMermaid(
       nav: [],
 
       weknoraVersion: repoVersionLabel,
+      weknoraScreenshotSizes: readScreenshotSizes(resolve(root, 'public/screenshots')),
 
       sidebar,
 
@@ -176,6 +190,16 @@ export default withMermaid(
       footer: {
         message: `基于 WeKnora ${repoVersionLabel} 源码整理 · MIT License`,
         copyright: '© Tencent WeKnora',
+      },
+    },
+
+    // mermaid >= 11.17 会动态 import UMD 包 fastdom。Vite 启动时扫不到这次导入，
+    // 浏览器直接加载原始 fastdom.js，报 does not provide an export named 'default'
+    //（vitepress-plugin-mermaid#98）。只在能解析到这两个包时才预构建：lockfile 里的
+    // mermaid 11.16.0 没有 fastdom，无条件 include 会报 Failed to resolve dependency。
+    vite: {
+      optimizeDeps: {
+        include: ['fastdom', 'fastdom/extensions/fastdom-promised.js'].filter(installedDep),
       },
     },
 

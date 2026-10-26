@@ -728,6 +728,26 @@
           <t-radio value="new_session">{{ $t('settings.sandbox.skillRolloutNewSession') }}</t-radio>
         </t-radio-group>
       </section>
+
+      <section v-if="currentStepKey === 'runtime'" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.allocationMode') }}</h4>
+        <p class="section-help section-help--under-title">{{ $t('settings.sandbox.allocationModeHint') }}</p>
+        <t-radio-group v-model="allocationMode" class="allocation-mode-group">
+          <t-radio value="session">{{ $t('settings.sandbox.allocationModeSession') }}</t-radio>
+          <t-radio value="user" :disabled="!userAllocationSupported && allocationMode !== 'user'">
+            {{ $t('settings.sandbox.allocationModeUser') }}
+          </t-radio>
+        </t-radio-group>
+        <p v-if="!userAllocationSupported" class="section-help">{{ $t('settings.sandbox.allocationModeUnavailable') }}</p>
+        <template v-if="allocationMode === 'user'">
+          <div ref="userAllocationPanelRef">
+          <t-form-item :label="$t('settings.sandbox.userSandboxRetentionDays')">
+            <t-input-number v-model="userSandboxRetentionDays" :min="1" :max="90" :step="1" />
+          </t-form-item>
+          <p class="section-help">{{ $t('settings.sandbox.userSandboxRetentionHint') }}</p>
+          </div>
+        </template>
+      </section>
     </t-form>
 
     <div
@@ -805,6 +825,11 @@ const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const dockerBackendEnabled = computed(() =>
   deploymentCapabilities.isSupported('settings.sandbox.docker'),
 )
+// isSupported reads isDeploymentCapabilitySupported with the loaded map.
+// User allocation fails closed until the deployment reports it as supported.
+const userAllocationSupported = computed(() =>
+  deploymentCapabilities.isSupported('settings.sandbox.user_allocation'),
+)
 
 // The backend echoes stored secrets as this placeholder. It never leaves the
 // form as visible text: inputs stay empty and say "configured", and the
@@ -852,6 +877,20 @@ const docker = reactive<SandboxDockerConfig>({})
 const storedSecrets = reactive({ cube: false, e2b: false })
 const envRows = ref<{ key: string; value: string; stored?: boolean }[]>([])
 const skillRollout = ref<'next_turn' | 'new_session'>('next_turn')
+const allocationMode = ref<'session' | 'user'>('session')
+const userAllocationPanelRef = ref<HTMLElement | null>(null)
+
+// The retention field is rendered below the fold. Selecting shared mode
+// grows the form; without a scroll the admin can save and never see it.
+watch(allocationMode, (mode, previous) => {
+  if (mode !== 'user' || previous === 'user') return
+  void nextTick(() => {
+    requestAnimationFrame(() => {
+      userAllocationPanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'end', inline: 'nearest' })
+    })
+  })
+})
+const userSandboxRetentionDays = ref<number>(7)
 // Both defaults are the zero value on the server too: egress allowed, inbound
 // requiring the per-sandbox credential. Inbound is not editable in this form.
 const denyEgressByDefault = ref(false)
@@ -1173,6 +1212,10 @@ function reset() {
     isMaskedSecret(value) ? { key, value: '', stored: true } : { key, value }
   ))
   skillRollout.value = cfg.skill_rollout === 'new_session' ? 'new_session' : 'next_turn'
+  allocationMode.value = cfg.allocation_mode === 'user' ? 'user' : 'session'
+  // Stored 0 means "use the default". The merge treats 0 as omitted, so the
+  // editor shows and sends 7 when the admin wants that default.
+  userSandboxRetentionDays.value = cfg.user_sandbox_empty_retention_days || 7
   const net = cfg.network || {}
   denyEgressByDefault.value = net.deny_egress_by_default === true
   allowOutRows.value = [...(net.allow_out || [])]
@@ -1548,6 +1591,9 @@ function collectPayload(): SandboxConfig {
     desktop_enabled: collectedDesktopEnabled(),
     env_vars: envVars,
     skill_rollout: skillRollout.value,
+    allocation_mode: allocationMode.value,
+    user_sandbox_empty_retention_days:
+      allocationMode.value === 'user' ? (userSandboxRetentionDays.value || 7) : undefined,
     network: collectNetworkPolicy(),
   }
   // Send only the selected backend's block so an unused one cannot fail
@@ -2422,7 +2468,8 @@ onUnmounted(stopTemplatePolling)
   text-align: center;
 }
 
-.skill-rollout-group {
+.skill-rollout-group,
+.allocation-mode-group {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
