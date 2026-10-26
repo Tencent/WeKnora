@@ -16,7 +16,11 @@ func TestInMemoryFileHeaderFilenameRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
-			defer f.Close()
+			defer func() {
+				if err := f.Close(); err != nil {
+					t.Errorf("Close: %v", err)
+				}
+			}()
 			got, err := io.ReadAll(f)
 			if err != nil {
 				t.Fatalf("ReadAll: %v", err)
