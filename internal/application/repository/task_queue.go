@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
@@ -29,6 +30,9 @@ func NewTaskPendingOpsRepository(db *gorm.DB) interfaces.TaskPendingOpsRepositor
 func (r *taskPendingOpsRepository) Enqueue(ctx context.Context, op *types.TaskPendingOp) error {
 	if err := preparePendingOp(op); err != nil {
 		return err
+	}
+	if r.db.Name() == "mysql" && op.EnqueuedAt.IsZero() {
+		op.EnqueuedAt = time.Now()
 	}
 	return r.db.WithContext(ctx).Create(op).Error
 }
@@ -72,11 +76,14 @@ func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
 	}
 	accepted := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if tx.Name() == "mysql" && op.EnqueuedAt.IsZero() {
+			op.EnqueuedAt = time.Now()
+		}
 		query := tx.Model(&types.KnowledgeBase{}).
 			Select("id").
 			Where("id = ? AND tenant_id = ?", op.ScopeID, op.TenantID)
 		dialector := tx.Dialector
-		if dialector.Name() == "postgres" {
+		if dialector.Name() == "postgres" || dialector.Name() == "mysql" {
 			query = query.Clauses(clause.Locking{Strength: "SHARE"})
 		}
 		var kb types.KnowledgeBase
@@ -149,10 +156,13 @@ func (r *taskPendingOpsRepository) SeedKnowledgeFinalizingWithPendingOp(
 
 	promoted := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if tx.Name() == "mysql" && op.EnqueuedAt.IsZero() {
+			op.EnqueuedAt = time.Now()
+		}
 		query := tx.Model(&types.KnowledgeBase{}).
 			Select("id").
 			Where("id = ? AND tenant_id = ?", op.ScopeID, op.TenantID)
-		if tx.Dialector.Name() == "postgres" {
+		if tx.Name() == "postgres" || tx.Name() == "mysql" {
 			query = query.Clauses(clause.Locking{Strength: "SHARE"})
 		}
 		var kb types.KnowledgeBase
@@ -271,7 +281,7 @@ func (r *taskPendingOpsRepository) ClaimBatch(
 	}
 	now := time.Now()
 	var claimed []*types.TaskPendingOp
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := r.queueTransaction(ctx, taskType, scope, scopeID, func(tx *gorm.DB) error {
 		// 1. Pick up to `limit` distinct dedup_keys to claim: least-failed
 		//    first, oldest first within the same fail_count. A failed op keeps
 		//    its original id AND its original position, so ordering purely by
@@ -281,7 +291,7 @@ func (r *taskPendingOpsRepository) ClaimBatch(
 		//    Keys with a fresh claim are excluded WHOLESALE so a late sibling
 		//    of an in-flight document never gets claimed on its own.
 		var keys []string
-		if tx.Dialector.Name() == "postgres" {
+		if tx.Name() == "postgres" {
 			// Lock the anchor (least-failed, earliest eligible) row of each
 			// key with SKIP LOCKED so concurrent claimers get disjoint KEY
 			// sets, then map the locked anchors back to their dedup_keys. The
@@ -410,10 +420,32 @@ func (r *taskPendingOpsRepository) DrainUnclaimedAndRelease(
 		return nil, errors.New("task pending ops: task_type, scope, scope_id and op are required")
 	}
 	var keys []string
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := r.queueTransaction(ctx, taskType, scope, scopeID, func(tx *gorm.DB) error {
 		var removed []string
-		if err := tx.Raw(
-			`DELETE FROM task_pending_ops
+		if tx.Name() == "mysql" {
+			fresh := tx.Model(&types.TaskPendingOp{}).Select("dedup_key").
+				Where("task_type = ? AND scope = ? AND scope_id = ? AND claimed_at >= ?",
+					taskType, scope, scopeID, staleBefore)
+			var rows []types.TaskPendingOp
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("task_type = ? AND scope = ? AND scope_id = ? AND op = ?", taskType, scope, scopeID, op).
+				Where("claimed_at IS NULL OR claimed_at < ?", staleBefore).
+				Where("dedup_key NOT IN (?)", fresh).Find(&rows).Error; err != nil {
+				return err
+			}
+			ids := make([]int64, 0, len(rows))
+			for _, row := range rows {
+				ids = append(ids, row.ID)
+				removed = append(removed, row.DedupKey)
+			}
+			if len(ids) > 0 {
+				if err := tx.Where("id IN ?", ids).Delete(&types.TaskPendingOp{}).Error; err != nil {
+					return err
+				}
+			}
+		} else {
+			if err := tx.Raw(
+				`DELETE FROM task_pending_ops
 			WHERE task_type = ? AND scope = ? AND scope_id = ? AND op = ?
 				AND (claimed_at IS NULL OR claimed_at < ?)
 				AND dedup_key NOT IN (
@@ -421,10 +453,11 @@ func (r *taskPendingOpsRepository) DrainUnclaimedAndRelease(
 					WHERE task_type = ? AND scope = ? AND scope_id = ? AND claimed_at >= ?
 				)
 			RETURNING dedup_key`,
-			taskType, scope, scopeID, op, staleBefore,
-			taskType, scope, scopeID, staleBefore,
-		).Scan(&removed).Error; err != nil {
-			return err
+				taskType, scope, scopeID, op, staleBefore,
+				taskType, scope, scopeID, staleBefore,
+			).Scan(&removed).Error; err != nil {
+				return err
+			}
 		}
 		seen := make(map[string]struct{}, len(removed))
 		for _, key := range removed {
@@ -453,6 +486,22 @@ func (r *taskPendingOpsRepository) DrainUnclaimedAndRelease(
 // A missing row returns (0, nil): the caller's ID may have been removed
 // by a concurrent DeleteByIDs (e.g. dead-letter path), which is benign.
 func (r *taskPendingOpsRepository) IncrFailCount(ctx context.Context, id int64) (int, error) {
+	if r.db.Name() == "mysql" {
+		var count int
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var row types.TaskPendingOp
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "fail_count").
+				Where("id = ?", id).Take(&row).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return nil
+				}
+				return err
+			}
+			count = row.FailCount + 1
+			return tx.Model(&types.TaskPendingOp{}).Where("id = ?", id).Update("fail_count", count).Error
+		})
+		return count, err
+	}
 	var newCount int
 	err := r.db.WithContext(ctx).Raw(
 		`UPDATE task_pending_ops SET fail_count = fail_count + 1 WHERE id = ? RETURNING fail_count`,
@@ -462,6 +511,25 @@ func (r *taskPendingOpsRepository) IncrFailCount(ctx context.Context, id int64) 
 		return 0, err
 	}
 	return newCount, nil
+}
+
+// queueTransaction serializes the short claim/drain transactions for one MySQL
+// lane. Processing runs after commit, so workers still consume disjoint batches
+// concurrently. A stable lane row avoids changing per-document anchor rows when
+// a lower-failure sibling is enqueued while another worker is claiming its key.
+func (r *taskPendingOpsRepository) queueTransaction(
+	ctx context.Context, taskType, scope, scopeID string, fn func(*gorm.DB) error,
+) error {
+	if r.db.Name() != "mysql" {
+		return r.db.WithContext(ctx).Transaction(fn)
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("INSERT INTO task_queue_lanes (task_type, scope, scope_id) VALUES (?, ?, ?) "+
+			"ON DUPLICATE KEY UPDATE scope_id = VALUES(scope_id)", taskType, scope, scopeID).Error; err != nil {
+			return err
+		}
+		return fn(tx)
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 }
 
 // PendingCount returns how many rows are currently queued for the

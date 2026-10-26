@@ -52,6 +52,15 @@ func (t *KnowledgeTag) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// AfterCreate reads the secondary auto-increment key on MySQL, which cannot
+// return it alongside the UUID primary key through INSERT ... RETURNING.
+func (t *KnowledgeTag) AfterCreate(tx *gorm.DB) error {
+	if tx.Name() != "mysql" {
+		return nil
+	}
+	return tx.Model(&KnowledgeTag{}).Select("seq_id").Where("id = ?", t.ID).Scan(&t.SeqID).Error
+}
+
 // KnowledgeTagWithStats represents tag information along with usage statistics.
 type KnowledgeTagWithStats struct {
 	KnowledgeTag

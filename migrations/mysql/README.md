@@ -1,27 +1,14 @@
-# migrations/mysql —— 未接线的 MySQL 建表脚本
+# MySQL 业务元数据迁移
 
-⚠️ **这里的 SQL 不会被任何代码或脚本执行。MySQL 目前不是 WeKnora 的主库选项。**
+`DB_DRIVER=mysql` 使用本目录的 golang-migrate 版本化迁移。MySQL 存储业务元数据；知识检索使用外部检索引擎，PostgreSQL 的 pgvector、ParadeDB 索引不会在这里创建。
 
-## 现状
+当前 `000000_init` 是尚未发布的空库基线，按 upstream/main `e28c68cf552cc1aba2fc923a73b0ab23a33bcb55`、PostgreSQL `000133` 的最终结构整理，覆盖 134 个 PostgreSQL up 迁移文件。`coverage.json` 记录每个源文件的 SHA-256 及对应结构、索引或空库无需执行的数据修复。
 
-`internal/container/container.go` 的 `initDatabase()` 中，`DB_DRIVER` 的 switch 只有两个分支：
+- `000000_init.up.sql` 创建表、索引、种子和约束；`down.sql` 删除这些对象。
+- 软删除、非空 token、协作活动状态的部分唯一约束使用可空生成列实现；普通部分索引使用包含过滤列的普通索引实现，索引内可能包含 PostgreSQL 排除的行。
+- 业务时间使用 `DATETIME(6)`；连接必须使用 UTC。已有数据的历史回填不会在空库重放。
+- 本基线不承担旧 MySQL 数据库的升级；后续已发布的 schema 变更应新增递增版本，不能修改已发布迁移。
 
-| `DB_DRIVER` | 迁移来源 |
-| --- | --- |
-| `postgres` | `migrations/versioned/`（golang-migrate 增量迁移） |
-| `sqlite` | `migrations/sqlite/`（golang-migrate 增量迁移，Lite 模式） |
+实际数据库验证使用 `mysqlintegration` 构建标签和 `WEKNORA_MYSQL_TEST_DSN`，通过正式迁移创建独立测试库，不使用 `AutoMigrate`。覆盖测试会核对 PostgreSQL 文件清单及哈希；新增源迁移时必须审查并更新基线对应效果。
 
-其余取值一律返回 `unsupported database driver`，因此配置 `DB_DRIVER=mysql` 会导致服务启动失败。
-
-本目录下的 `00-init-db.sql` 是一份一次性建表脚本，覆盖 10 张核心表（`tenants`、`models`、`knowledge_bases`、`knowledges`、`sessions`、`messages`、`message_suggestion_sets`、`message_suggestion_events`、`chunks`、`chunk_revisions`）。它会在有人改动这些基础表时被顺带更新，但**没有任何 Go 代码、Makefile 目标或 compose 配置引用它**。
-
-## 要真正支持 MySQL 还差什么
-
-仅有这份建表脚本是不够的——它只对应初始 schema，缺少与 `migrations/versioned/`（Postgres 侧已有 100+ 个增量迁移）对等的增量迁移集。完整接线至少需要：
-
-1. 在 `initDatabase()` 中增加 `case "mysql"`，接上 `gorm.io/driver/mysql` 与 golang-migrate 的 MySQL DSN；
-2. 建立 `migrations/mysql/` 的增量迁移序列，并与 `versioned/` 的 schema 演进保持同步；
-3. 处理 Postgres 专有用法（`JSONB`、数组类型、`ON CONFLICT`、ParadeDB 的 BM25 索引等）在 MySQL 侧的等价实现或降级方案；
-4. 明确向量检索的落地方式——MySQL 本身不提供向量索引，需要依赖外部向量库（`RETRIEVE_DRIVER`）。
-
-相关讨论见 [#1418](https://github.com/Tencent/WeKnora/issues/1418)。在上述工作完成之前，请勿在文档或配置注释中声称支持 `DB_DRIVER=mysql`。
+配置和检索限制见 [MySQL 数据库说明](../../docs/mysql-database.md)。

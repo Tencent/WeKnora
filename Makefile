@@ -8,6 +8,7 @@ help:
 	@echo "  build             构建应用"
 	@echo "  run               运行应用"
 	@echo "  test              运行测试"
+	@echo "  test-mysql        使用可丢弃 MySQL 实例验证迁移、业务查询与并发"
 	@echo "  anydoc-lib        构建 anydoc 静态库（需要 Rust 工具链）"
 	@echo "  build-anydoc      构建带 anydoc 解析引擎的应用"
 	@echo "  clean             清理构建文件"
@@ -111,6 +112,12 @@ run: build
 # Run tests
 test:
 	go test -v ./...
+
+.PHONY: test-mysql
+MYSQL_TEST_TAGS ?= mysqlintegration
+test-mysql:
+	@test -n "$$WEKNORA_MYSQL_TEST_DSN" || (echo "WEKNORA_MYSQL_TEST_DSN must name a disposable test database"; exit 1)
+	go test -tags '$(MYSQL_TEST_TAGS)' ./internal/database ./internal/application/repository ./internal/application/service ./internal/container ./internal/agent/collaboration ./internal/browserskill -run MySQL -count=1 -timeout=20m
 
 # Generate reviewed metadata + protocol overrides, then verify every model.
 .PHONY: model-catalog-generate model-catalog-check

@@ -91,7 +91,39 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 		}
 
 		// SeqID=0 is skipped by GORM automatically (autoIncrement tag).
-		return tx.Table("chunks").Select("*").CreateInBatches(rows, createChunksBatchSize).Error
+		if err := tx.Table("chunks").Select("*").CreateInBatches(rows, createChunksBatchSize).Error; err != nil {
+			return err
+		}
+		if tx.Name() == "mysql" {
+			// MySQL returns one insert ID, not a RETURNING row per chunk, and
+			// the UUID is GORM's prioritized primary field. Read the DB-assigned
+			// secondary sequence by UUID rather than assuming contiguous IDs.
+			ids := make([]string, len(chunks))
+			for i, chunk := range chunks {
+				ids[i] = chunk.ID
+			}
+			sequences := make(map[string]int64, len(chunks))
+			// Bound read parameters as well as INSERT parameters; a document
+			// can contain more UUIDs than one prepared statement permits.
+			for start := 0; start < len(ids); start += updateByIDsBatchSize {
+				end := min(start+updateByIDsBatchSize, len(ids))
+				var rows []struct {
+					ID    string
+					SeqID int64
+				}
+				if err := tx.Model(&types.Chunk{}).Select("id", "seq_id").
+					Where("id IN ?", ids[start:end]).Find(&rows).Error; err != nil {
+					return err
+				}
+				for _, row := range rows {
+					sequences[row.ID] = row.SeqID
+				}
+			}
+			for _, chunk := range chunks {
+				chunk.SeqID = sequences[chunk.ID]
+			}
+		}
+		return nil
 	})
 }
 

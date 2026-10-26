@@ -23,6 +23,19 @@ Windows installers place them next to the installed executable.
   [Go module proxy](https://proxy.golang.org/github.com/go-sql-driver/mysql/@v/v1.10.0.zip)
   and [upstream repository](https://github.com/go-sql-driver/mysql/tree/v1.10.0).
 
+## GORM MySQL Driver
+
+- Component: `gorm.io/driver/mysql`, version `v1.6.0`.
+- Used by the backend to store business metadata in MySQL through GORM.
+- License: MIT License, reproduced in
+  [`licenses/gorm-mysql-MIT.txt`](licenses/gorm-mysql-MIT.txt).
+- Copyright: Copyright (c) 2013-NOW Jinzhu <wosmvp@gmail.com>.
+- Modifications by WeKnora: none.
+- Source: [Go module proxy](https://proxy.golang.org/gorm.io/driver/mysql/@v/v1.6.0.zip)
+  and [upstream repository](https://github.com/go-gorm/mysql/tree/v1.6.0).
+- This GORM adapter uses `github.com/go-sql-driver/mysql`; that component's
+  MPL-2.0 notice and corresponding source are provided separately above.
+
 ## go-m1cpu
 
 - Component: `github.com/shoenig/go-m1cpu`, version `v0.1.6`.

@@ -170,7 +170,7 @@ func (s *vectorStoreService) UpdateStore(ctx context.Context, store *types.Vecto
 //     defer/recover so a panic in UnregisterByStoreID surfaces as a
 //     structured warning instead of silently leaking the stale engine.
 //
-// Race window remaining:
+// Binding race on PostgreSQL/SQLite:
 //
 //	A narrow window exists between CreateKnowledgeBase's binding check and
 //	the INSERT — a KB can be created against a store that is simultaneously
@@ -178,6 +178,8 @@ func (s *vectorStoreService) UpdateStore(ctx context.Context, store *types.Vecto
 //	the ErrVectorStoreForbidden / NotFound sentinel; the KB response view
 //	surfaces the condition through vector_store_status="unavailable" so the
 //	UI can guide recovery (admin tool / rebind / KB recreation).
+//	MySQL KB writes lock the same parent row inside their transaction, so
+//	deletion and binding serialize there.
 //
 // Multi-replica registry staleness:
 //
@@ -189,10 +191,10 @@ func (s *vectorStoreService) DeleteStore(ctx context.Context, tenantID uint64, i
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// tx inherits ctx from WithContext above; no need to re-attach.
 
-		// 1. Lock the store row (PG row-level X-lock; skipped on SQLite).
+		// 1. Lock the store row (PostgreSQL/MySQL; skipped on SQLite).
 		var store types.VectorStore
 		q := tx.Where("id = ? AND tenant_id = ?", id, tenantID)
-		if s.isPostgres(tx) {
+		if s.supportsRowLocks(tx) {
 			q = q.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := q.First(&store).Error; err != nil {
@@ -247,11 +249,11 @@ func (s *vectorStoreService) unregisterSafely(ctx context.Context, storeID strin
 	}
 }
 
-// isPostgres reports whether the active GORM dialector is PostgreSQL.
+// supportsRowLocks reports whether the dialector supports SELECT FOR UPDATE.
 // Used to gate dialect-specific clauses (e.g., SELECT FOR UPDATE) that
 // SQLite would either ignore (recent versions) or fail to compile on.
-func (s *vectorStoreService) isPostgres(db *gorm.DB) bool {
-	return db != nil && db.Dialector != nil && db.Dialector.Name() == "postgres"
+func (s *vectorStoreService) supportsRowLocks(db *gorm.DB) bool {
+	return db != nil && db.Dialector != nil && (db.Name() == "postgres" || db.Name() == "mysql")
 }
 
 // SaveDetectedVersion updates the connection_config.version for a stored vector store.

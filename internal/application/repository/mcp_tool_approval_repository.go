@@ -132,12 +132,16 @@ func (r *MCPToolApprovalRepository) UpsertPolicy(
 	}
 	if patch.ObservedRisk != nil {
 		observed = *patch.ObservedRisk
+		incomingRisk := "excluded.observed_risk"
+		if r.db.Name() == "mysql" {
+			incomingRisk = "VALUES(observed_risk)"
+		}
 		// Compare in the statement itself: a concurrent lower observation
 		// read before this one landed must not overwrite it.
 		updates["observed_risk"] = gorm.Expr(
-			"CASE WHEN " + riskRankSQL("excluded.observed_risk") + " > " +
+			"CASE WHEN " + riskRankSQL(incomingRisk) + " > " +
 				riskRankSQL("mcp_tool_approvals.observed_risk") +
-				" THEN excluded.observed_risk ELSE mcp_tool_approvals.observed_risk END")
+				" THEN " + incomingRisk + " ELSE mcp_tool_approvals.observed_risk END")
 	}
 
 	row := map[string]interface{}{

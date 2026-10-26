@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -437,8 +438,14 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 	switch params.Type {
 	case "file":
 		if params.DataSourceID != "" && params.ExternalID != "" {
-			query = query.Where("metadata->>'datasource_id' = ? AND metadata->>'external_id' = ?",
-				params.DataSourceID, params.ExternalID)
+			if r.db.Name() == "mysql" {
+				query = query.Where("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.datasource_id')) = ? AND "+
+					"JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.external_id')) = ?",
+					params.DataSourceID, params.ExternalID)
+			} else {
+				query = query.Where("metadata->>'datasource_id' = ? AND metadata->>'external_id' = ?",
+					params.DataSourceID, params.ExternalID)
+			}
 		}
 		// File content is only a duplicate within the same file type. This keeps
 		// same-content documents with distinct formats (for example, .md and
@@ -839,7 +846,6 @@ func (r *knowledgeRepository) CountKnowledgeByStatus(
 // Only returns documents from document-type knowledge bases (excludes FAQ)
 // Returns (results, hasMore, error)
 // FindByMetadataKey finds a knowledge item by a key-value pair in the metadata JSON column.
-// Uses Postgres jsonb operator: metadata->>'key' = 'value'.
 func (r *knowledgeRepository) FindByMetadataKey(
 	ctx context.Context,
 	tenantID uint64,
@@ -848,10 +854,15 @@ func (r *knowledgeRepository) FindByMetadataKey(
 	value string,
 ) (*types.Knowledge, error) {
 	var knowledge types.Knowledge
-	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
-		Where("metadata->>? = ?", key, value).
-		First(&knowledge).Error
+	query := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID)
+	if r.db.Name() == "mysql" {
+		encodedKey, _ := json.Marshal(key)
+		query = query.Where("JSON_UNQUOTE(JSON_EXTRACT(metadata, ?)) = ?", "$."+string(encodedKey), value)
+	} else {
+		query = query.Where("metadata->>? = ?", key, value)
+	}
+	err := query.First(&knowledge).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -886,9 +897,16 @@ func (r *knowledgeRepository) FindByMetadataKeyPrefix(
 	// prefix and drives the index. The explicit ESCAPE '\' keeps backslash-escaped
 	// wildcards (e.g. \_) literal on both PostgreSQL and SQLite.
 	keyExpr := "metadata->>'" + strings.ReplaceAll(key, "'", "''") + "'"
+	var args []any
+	if r.db.Name() == "mysql" {
+		encodedKey, _ := json.Marshal(key)
+		keyExpr = "JSON_UNQUOTE(JSON_EXTRACT(metadata, ?))"
+		args = append(args, "$."+string(encodedKey))
+	}
+	args = append(args, escaped+"%", likeEscapeChar)
 	err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
-		Where(keyExpr+" LIKE ? ESCAPE ?", escaped+"%", `\`).
+		Where(keyExpr+" LIKE ? ESCAPE ?", args...).
 		Find(&items).Error
 	if err != nil {
 		return nil, err
@@ -904,10 +922,15 @@ func (r *knowledgeRepository) FindByDataSourceExternalID(
 	kbID, dataSourceID, externalID string,
 ) (*types.Knowledge, error) {
 	var knowledge types.Knowledge
-	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
-		Where("metadata->>'datasource_id' = ? AND metadata->>'external_id' = ?", dataSourceID, externalID).
-		First(&knowledge).Error
+	query := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID)
+	if r.db.Name() == "mysql" {
+		query = query.Where("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.datasource_id')) = ? AND "+
+			"JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.external_id')) = ?", dataSourceID, externalID)
+	} else {
+		query = query.Where("metadata->>'datasource_id' = ? AND metadata->>'external_id' = ?", dataSourceID, externalID)
+	}
+	err := query.First(&knowledge).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil

@@ -1,0 +1,143 @@
+# Standalone MySQL deployment. Requires Docker Compose >= 2.24.
+# Build this branch first; upstream release images do not include this change.
+services:
+  frontend:
+    extends:
+      file: docker-compose.yml
+      service: frontend
+    container_name: WeKnora-mysql-frontend
+    image: weknora-ui:mysql-local
+  docreader:
+    extends:
+      file: docker-compose.yml
+      service: docreader
+    container_name: WeKnora-mysql-docreader
+    image: weknora-docreader:mysql-local
+  redis:
+    extends:
+      file: docker-compose.yml
+      service: redis
+    container_name: WeKnora-mysql-redis
+  qdrant:
+    image: qdrant/qdrant:v1.16.2
+    container_name: WeKnora-mysql-qdrant
+    ports:
+    - ${QDRANT_REST_PORT:-6333}:6333
+    - ${QDRANT_PORT:-6334}:6334
+    volumes:
+    - qdrant_data:/qdrant/storage
+    networks:
+    - WeKnora-network
+    restart: unless-stopped
+  app:
+    image: weknora-app:mysql-local
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app
+      args:
+        APK_MIRROR_ARG: ${APK_MIRROR_ARG:-}
+        WITH_ANYDOC: ${WITH_ANYDOC:-1}
+    container_name: WeKnora-mysql-app
+    ports:
+    - ${APP_PORT:-8080}:8080
+    volumes:
+    - data-files:/data/files
+    - docreader-tmp:/tmp/docreader:ro
+    - ./config/config.yaml:/app/config/config.yaml:ro
+    env_file:
+    - path: .env.mysql
+      required: false
+    environment:
+      DB_DRIVER: mysql
+      DB_HOST: mysql
+      DB_PORT: '3306'
+      DB_USER: ${DB_USER:-weknora}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-WeKnora}
+      DB_MYSQL_TLS: ${DB_MYSQL_TLS:-false}
+      DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-5s}
+      DB_READ_TIMEOUT: ${DB_READ_TIMEOUT:-30s}
+      DB_WRITE_TIMEOUT: ${DB_WRITE_TIMEOUT:-30s}
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
+      AUTO_RECOVER_DIRTY: 'false'
+      RETRIEVE_DRIVER: ${RETRIEVE_DRIVER:-qdrant}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: '6334'
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-weknora_embeddings}
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+      REDIS_DB: '0'
+      STREAM_MANAGER_TYPE: ${STREAM_MANAGER_TYPE:-redis}
+      STORAGE_TYPE: ${STORAGE_TYPE:-local}
+      LOCAL_STORAGE_BASE_DIR: /data/files
+      DOCREADER_ADDR: docreader:50051
+      DOCREADER_TRANSPORT: grpc
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      SYSTEM_AES_KEY: ${SYSTEM_AES_KEY:?set a stable 32-byte SYSTEM_AES_KEY}
+      SSRF_WHITELIST_EXTRA: ${SSRF_WHITELIST_EXTRA:-qdrant}
+      WEKNORA_SANDBOX_DOCKER_ENABLED: ${WEKNORA_SANDBOX_DOCKER_ENABLED:-false}
+      GIN_MODE: ${GIN_MODE:-release}
+      TZ: UTC
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      OLLAMA_OPTIONAL: ${OLLAMA_OPTIONAL:-true}
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8080/health
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      docreader:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    networks:
+    - WeKnora-network
+    restart: unless-stopped
+    extra_hosts:
+    - host.docker.internal:host-gateway
+  mysql:
+    image: mysql:8.4.8
+    container_name: WeKnora-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME:-WeKnora}
+      MYSQL_USER: ${DB_USER:-weknora}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+    command:
+    - --character-set-server=utf8mb4
+    - --collation-server=utf8mb4_0900_bin
+    - --default-time-zone=+00:00
+    # Allow the database-scoped application account to create migration triggers.
+    - --log-bin-trust-function-creators=1
+    - --sql-mode=STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION,ONLY_FULL_GROUP_BY,NO_ZERO_DATE,NO_ZERO_IN_DATE
+    volumes:
+    - mysql-data:/var/lib/mysql
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - MYSQL_PWD="$${MYSQL_ROOT_PASSWORD}" mysql -h 127.0.0.1 -uroot -e "SELECT 1"
+        >/dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+    - WeKnora-network
+    restart: unless-stopped
+networks:
+  WeKnora-network:
+    driver: bridge
+volumes:
+  mysql-data: {}
+  data-files: {}
+  docreader-tmp: {}
+  qdrant_data: {}

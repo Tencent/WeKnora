@@ -151,7 +151,7 @@ func (r *userRepository) DeleteUser(ctx context.Context, id string) error {
 // row that is already soft-deleted is still held for the re-read; its sessions
 // are retired and the call returns nil.
 func (r *userRepository) DeleteUserRetiringSessions(ctx context.Context, id string, at time.Time) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return sandboxTransaction(r.db.WithContext(ctx), func(tx *gorm.DB) error {
 		err := lockLiveWebUser(tx, id)
 		if err != nil && !errors.Is(err, errWebUserDeleted) {
 			return err
@@ -363,9 +363,13 @@ func (r *userRepository) RevokeSystemAdmin(ctx context.Context, userID, actorID 
 func (r *userRepository) SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error) {
 	var users []*types.User
 	searchPattern := "%" + query + "%"
+	searchExpr := "username ILIKE ? OR email ILIKE ?"
+	if r.db.Name() == "mysql" {
+		searchExpr = "LOWER(username) LIKE LOWER(?) OR LOWER(email) LIKE LOWER(?)"
+	}
 
 	dbQuery := r.db.WithContext(ctx).
-		Where("username ILIKE ? OR email ILIKE ?", searchPattern, searchPattern).
+		Where(searchExpr, searchPattern, searchPattern).
 		Where("is_active = ?", true).
 		Order("username ASC")
 

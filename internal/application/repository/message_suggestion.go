@@ -7,6 +7,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -67,9 +68,21 @@ func (r *messageSuggestionRepository) AcquireGeneration(
 	candidate.LeaseUntil = &leaseUntil
 	candidate.Questions = types.SuggestionItems{}
 
-	result := r.db.WithContext(ctx).
-		Clauses(clause.OnConflict{DoNothing: true}).
-		Create(candidate)
+	insert := r.db.WithContext(ctx)
+	if r.db.Name() != "mysql" {
+		insert = insert.Clauses(clause.OnConflict{DoNothing: true})
+	}
+	result := insert.Create(candidate)
+	if r.db.Name() == "mysql" && result.Error != nil {
+		// With clientFoundRows, MySQL's id=id conflict update reports 1 for
+		// both a new row and a cache hit. A plain INSERT distinguishes ownership.
+		var duplicate *mysql.MySQLError
+		if errors.Is(result.Error, gorm.ErrDuplicatedKey) ||
+			(errors.As(result.Error, &duplicate) && duplicate.Number == 1062) {
+			result.Error = nil
+			result.RowsAffected = 0
+		}
+	}
 	if result.Error != nil {
 		return nil, false, result.Error
 	}

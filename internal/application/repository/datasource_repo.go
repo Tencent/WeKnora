@@ -393,7 +393,13 @@ func (r *DataSourceRepository) PatchSyncSettings(
 			values[field] = ds.Config
 			// Config includes credentials and connector settings. Refuse to replace
 			// them if another request changed them while selection was being edited.
-			query = query.Where("config = ?", expectedConfig)
+			if r.db.Name() == "mysql" {
+				// MySQL compares a bound string to a JSON string value unless
+				// it is explicitly parsed as the expected JSON document.
+				query = query.Where("config = CAST(? AS JSON)", expectedConfig)
+			} else {
+				query = query.Where("config = ?", expectedConfig)
+			}
 		default:
 			return errors.New("unsupported sync setting")
 		}

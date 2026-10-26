@@ -43,6 +43,9 @@ func (r *wikiPageRepository) wikiDialect() string {
 }
 
 func (r *wikiPageRepository) wikiCategoryRankOrder() string {
+	if r.wikiDialect() == "mysql" {
+		return "CASE WHEN COALESCE(JSON_LENGTH(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	}
 	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
 		return "CASE WHEN COALESCE(json_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
 	}
@@ -86,10 +89,20 @@ func (r *wikiPageRepository) applyWikiPageListOrder(query *gorm.DB, sortBy, sort
 }
 
 func (r *wikiPageRepository) wikiEmptyInLinksPredicate() string {
+	if r.wikiDialect() == "mysql" {
+		return "(in_links IS NULL OR JSON_LENGTH(in_links) = 0)"
+	}
 	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
 		return "(in_links IS NULL OR json_array_length(in_links) = 0)"
 	}
 	return "(in_links IS NULL OR in_links = '[]'::JSONB)"
+}
+
+func (r *wikiPageRepository) wikiSourceRefPredicate() string {
+	if r.wikiDialect() == "mysql" {
+		return "JSON_CONTAINS(source_refs, ?) OR CAST(source_refs AS CHAR) LIKE ? ESCAPE ?"
+	}
+	return "source_refs @> ?::jsonb OR source_refs::text LIKE ? ESCAPE ?"
 }
 
 // Create inserts a new wiki page record
@@ -367,12 +380,20 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		query = query.Where("status = ?", req.Status)
 	}
 	if req.Query != "" {
-		// Use PostgreSQL full-text search + ILIKE for aliases
-		query = query.Where(
-			"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
-			req.Query,
-			"%"+req.Query+"%",
-		)
+		if r.wikiDialect() == "mysql" {
+			pattern := "%" + escapeLikePattern(req.Query) + "%"
+			query = query.Where("(LOWER(title) LIKE LOWER(?) ESCAPE ? OR LOWER(content) LIKE LOWER(?) ESCAPE ? OR "+
+				"LOWER(CAST(aliases AS CHAR)) LIKE LOWER(?) ESCAPE ?)",
+				pattern, likeEscapeChar, pattern, likeEscapeChar, pattern, likeEscapeChar)
+		} else {
+			// Use PostgreSQL full-text search + ILIKE for aliases
+			query = query.Where(
+				"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) "+
+					"@@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
+				req.Query,
+				"%"+req.Query+"%",
+			)
+		}
 	}
 	// Directory filters are pushed to SQL so the DB does the counting and
 	// pagination instead of loading every page of the type into memory. `depth`
@@ -398,6 +419,8 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 				// a BLOB never compares equal to a TEXT bind, so compare the
 				// text form instead.
 				query = query.Where("CAST(category_path AS TEXT) = ?", string(encoded))
+			case "mysql":
+				query = query.Where("category_path = CAST(? AS JSON)", string(encoded))
 			default:
 				query = query.Where("category_path = ?", string(encoded))
 			}
@@ -525,10 +548,11 @@ func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, s
 
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
+		Where("knowledge_base_id = ? AND ("+r.wikiSourceRefPredicate()+")",
 			kbID,
 			string(needle),
 			likePattern,
+			likeEscapeChar,
 		).
 		Find(&pages).Error; err != nil {
 		return nil, err
@@ -563,10 +587,11 @@ func (r *wikiPageRepository) ListSlugsBySourceRef(ctx context.Context, kbID stri
 	var slugs []string
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
+		Where("knowledge_base_id = ? AND ("+r.wikiSourceRefPredicate()+")",
 			kbID,
 			string(needle),
 			likePattern,
+			likeEscapeChar,
 		).
 		Pluck("slug", &slugs).Error; err != nil {
 		return nil, err
@@ -733,7 +758,7 @@ func (r *wikiPageRepository) DeleteFolder(ctx context.Context, kbID string, id s
 	// Keep the emptiness test in the same SQL statement as the soft delete.
 	// A page move or child-folder create can race the service's earlier checks;
 	// a check-then-delete sequence would otherwise leave a dangling folder_id.
-	result := r.db.WithContext(ctx).Exec(`
+	query := `
 UPDATE wiki_folders
 SET deleted_at = ?
 WHERE knowledge_base_id = ? AND id = ? AND deleted_at IS NULL
@@ -744,7 +769,25 @@ WHERE knowledge_base_id = ? AND id = ? AND deleted_at IS NULL
   AND NOT EXISTS (
     SELECT 1 FROM wiki_folders AS child
     WHERE child.knowledge_base_id = ? AND child.parent_id = ? AND child.deleted_at IS NULL
-  )`, time.Now(), kbID, id, kbID, id, kbID, id)
+  )`
+	args := []any{time.Now(), kbID, id, kbID, id, kbID, id}
+	if r.wikiDialect() == "mysql" {
+		// MySQL forbids reading the update target in a subquery. Anti-joins
+		// preserve the emptiness guard in the same statement as the update.
+		query = `
+UPDATE wiki_folders AS folder
+LEFT JOIN wiki_pages AS page
+  ON page.knowledge_base_id = folder.knowledge_base_id
+  AND page.folder_id = folder.id AND page.deleted_at IS NULL
+LEFT JOIN wiki_folders AS child
+  ON child.knowledge_base_id = folder.knowledge_base_id
+  AND child.parent_id = folder.id AND child.deleted_at IS NULL
+SET folder.deleted_at = ?
+WHERE folder.knowledge_base_id = ? AND folder.id = ? AND folder.deleted_at IS NULL
+  AND page.id IS NULL AND child.id IS NULL`
+		args = args[:3]
+	}
+	result := r.db.WithContext(ctx).Exec(query, args...)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -864,7 +907,11 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if err != nil {
 			return nil, fmt.Errorf("marshal kid needle: %w", err)
 		}
-		clauses = append(clauses, "source_refs @> ?::jsonb")
+		containment := "source_refs @> ?::jsonb"
+		if r.wikiDialect() == "mysql" {
+			containment = "JSON_CONTAINS(source_refs, ?)"
+		}
+		clauses = append(clauses, containment)
 		args = append(args, string(needle))
 
 		prefix, err := json.Marshal(kid + "|")
@@ -875,8 +922,12 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
 			prefixStr = prefixStr[:len(prefixStr)-1]
 		}
-		clauses = append(clauses, "source_refs::text LIKE ?")
-		args = append(args, "%"+escapeLikePattern(prefixStr)+"%")
+		text := "source_refs::text"
+		if r.wikiDialect() == "mysql" {
+			text = "CAST(source_refs AS CHAR)"
+		}
+		clauses = append(clauses, text+" LIKE ? ESCAPE ?")
+		args = append(args, "%"+escapeLikePattern(prefixStr)+"%", likeEscapeChar)
 	}
 	if len(clauses) == 0 {
 		return nil, nil
@@ -1071,6 +1122,22 @@ func (r *wikiPageRepository) FindSimilarPages(
 	}
 
 	var rows []types.WikiPageLite
+	if r.wikiDialect() == "mysql" {
+		err := r.db.WithContext(ctx).Model(&types.WikiPage{}).
+			Select("slug, title, page_type, status, aliases, out_links").
+			Where("knowledge_base_id = ? AND page_type IN ? AND status <> ?",
+				kbID, pageTypes, types.WikiPageStatusArchived).
+			Where("LOWER(title) LIKE ? ESCAPE ?", "%"+escapeLikePattern(q)+"%", likeEscapeChar).
+			Order("updated_at DESC, slug ASC").Limit(limit).Scan(&rows).Error
+		if err != nil {
+			return nil, err
+		}
+		out := make([]*types.WikiPageLite, len(rows))
+		for i := range rows {
+			out[i] = &rows[i]
+		}
+		return out, nil
+	}
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
 		Select("slug, title, page_type, status, aliases, out_links, similarity(lower(title), ?) AS sim", q).
@@ -1191,6 +1258,9 @@ func wikiTrigramJaccard(left, right map[string]struct{}) float64 {
 }
 
 func wikiNormalizedTitleSQL(db *gorm.DB) string {
+	if db != nil && db.Name() == "mysql" {
+		return "REGEXP_REPLACE(LOWER(title), '[[:space:]]+', '')"
+	}
 	if db != nil && db.Dialector != nil && db.Dialector.Name() == "sqlite" {
 		// SQLite has no POSIX [[:space:]]. Strip the common separators that
 		// model formatting drift actually produces; callers still re-check
@@ -1461,7 +1531,7 @@ func wikiSearchMatchArgs(pattern, escape string, withEscape bool, copies int) []
 func (r *wikiPageRepository) wikiSearchMatchOp() (op string, withEscape bool) {
 	// SQLite / Lite (desktop single-binary) has no POSIX ~*; LIKE matches
 	// a literal substring. Postgres production keeps ~*.
-	if r.wikiDialect() == "sqlite" {
+	if r.wikiDialect() == "sqlite" || r.wikiDialect() == "mysql" {
 		return "LIKE", true
 	}
 	return "~*", false
@@ -1490,7 +1560,13 @@ func (r *wikiPageRepository) SearchAcross(
 		pattern = "%" + escapeLikePattern(query) + "%"
 	}
 	pred := func(column string) string {
+		if r.wikiDialect() == "mysql" {
+			column = "LOWER(" + column + ")"
+		}
 		return wikiSearchPredicate(column, op, withEscape)
+	}
+	if r.wikiDialect() == "mysql" {
+		pattern = strings.ToLower(pattern)
 	}
 	rankExpr := "CASE " +
 		"WHEN " + pred("title") + " THEN 4 " +

@@ -3,11 +3,13 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrKnowledgeBaseNotFound = errors.New("knowledge base not found")
@@ -24,7 +26,38 @@ func NewKnowledgeBaseRepository(db *gorm.DB) interfaces.KnowledgeBaseRepository 
 
 // CreateKnowledgeBase creates a new knowledge base
 func (r *knowledgeBaseRepository) CreateKnowledgeBase(ctx context.Context, kb *types.KnowledgeBase) error {
+	if r.db.Name() == "mysql" {
+		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := lockMySQLKnowledgeBaseParents(tx, kb); err != nil {
+				return err
+			}
+			return tx.Create(kb).Error
+		})
+	}
 	return r.db.WithContext(ctx).Create(kb).Error
+}
+
+// The MySQL binding check and write share the parent row locks used by
+// resource deletion. Validation performed before this transaction can race
+// with a concurrent soft delete and cannot establish a durable binding.
+func lockMySQLKnowledgeBaseParents(tx *gorm.DB, kb *types.KnowledgeBase) error {
+	if kb.VectorStoreID != nil && *kb.VectorStoreID != "" && !types.IsEnvStoreID(*kb.VectorStoreID) {
+		var store types.VectorStore
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").
+			Where("id = ? AND tenant_id = ?", *kb.VectorStoreID, kb.TenantID).First(&store).Error; err != nil {
+			return fmt.Errorf("knowledge base vector store binding: %w", err)
+		}
+	}
+	if kb.StorageBackendID != nil && *kb.StorageBackendID != "" {
+		var backend types.StorageBackend
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").
+			Where("id = ? AND tenant_id = ? AND status = ?",
+				*kb.StorageBackendID, kb.TenantID, types.StorageBackendStatusActive).
+			First(&backend).Error; err != nil {
+			return fmt.Errorf("knowledge base storage backend binding: %w", err)
+		}
+	}
+	return nil
 }
 
 // GetKnowledgeBaseByID gets a knowledge base by id (no tenant scope; caller must enforce isolation where needed)
@@ -169,6 +202,14 @@ func (r *knowledgeBaseRepository) ListUserKBPinIDs(
 
 // UpdateKnowledgeBase updates a knowledge base
 func (r *knowledgeBaseRepository) UpdateKnowledgeBase(ctx context.Context, kb *types.KnowledgeBase) error {
+	if r.db.Name() == "mysql" {
+		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := lockMySQLKnowledgeBaseParents(tx, kb); err != nil {
+				return err
+			}
+			return tx.Save(kb).Error
+		})
+	}
 	return r.db.WithContext(ctx).Save(kb).Error
 }
 

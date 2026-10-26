@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -76,7 +77,6 @@ func (r *organizationRepository) ListByTenantID(ctx context.Context, tenantID ui
 		Where("otm.tenant_id = ?", tenantID).
 		Order("organizations.created_at DESC").
 		Find(&orgs).Error
-
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +93,13 @@ func (r *organizationRepository) ListSearchable(ctx context.Context, query strin
 	if query != "" {
 		pattern := "%" + query + "%"
 		// 支持按名称、描述或空间 ID 搜索，便于区分同名空间
-		q = q.Where("name ILIKE ? OR description ILIKE ? OR id::text ILIKE ?", pattern, pattern, pattern)
+		if r.db.Name() == "mysql" {
+			pattern = strings.ToLower(pattern)
+			q = q.Where("LOWER(name) LIKE ? OR LOWER(description) LIKE ? OR LOWER(id) LIKE ?",
+				pattern, pattern, pattern)
+		} else {
+			q = q.Where("name ILIKE ? OR description ILIKE ? OR id::text ILIKE ?", pattern, pattern, pattern)
+		}
 	}
 	err := q.Order("created_at DESC").Limit(limit).Find(&orgs).Error
 	if err != nil {
@@ -197,7 +203,6 @@ func (r *organizationRepository) ListTenantMembers(ctx context.Context, orgID st
 		Where("organization_id = ?", orgID).
 		Order("created_at ASC").
 		Find(&members).Error
-
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +218,6 @@ func (r *organizationRepository) GetTenantMember(ctx context.Context, orgID stri
 	err := r.db.WithContext(ctx).
 		Where("organization_id = ? AND tenant_id = ?", orgID, tenantID).
 		First(&member).Error
-
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrOrgMemberNotFound
