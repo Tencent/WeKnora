@@ -949,3 +949,35 @@ func TestSearchAcross_SQLiteLikeEscapesWildcards(t *testing.T) {
 	require.Len(t, pages, 1)
 	assert.Equal(t, literalUnderscore.ID, pages[0].ID)
 }
+
+func TestWikiTitleTrigramsWordBoundaries(t *testing.T) {
+	for _, tt := range []struct{ name, left, right string }{
+		{"punctuation", "a-b", "a b"},
+		{"word order", "a b", "b a"},
+		{"repeated whitespace", "a\t  b", "a b"},
+		{"unicode words", "甲-乙", "甲 乙"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, wikiTitleTrigrams(tt.left), wikiTitleTrigrams(tt.right))
+			assert.Equal(t, 1.0, wikiTrigramJaccard(wikiTitleTrigrams(tt.left), wikiTitleTrigrams(tt.right)))
+		})
+	}
+	assert.Empty(t, wikiTitleTrigrams("--- !!!"))
+	assert.Equal(t, map[string]struct{}{
+		"  f": {}, " fo": {}, "foo": {}, "oo ": {},
+		"  b": {}, " ba": {}, "bar": {}, "ar ": {},
+	}, wikiTitleTrigrams("foo|bar"))
+}
+
+func TestFindSimilarPagesSQLitePunctuationVariants(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	page := makeWikiPage("kb-a", "entity/a-b", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	page.Title = "A-B"
+	require.NoError(t, repo.Create(context.Background(), page))
+
+	pages, err := repo.FindSimilarPages(context.Background(), "kb-a", "A B", nil, 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 1)
+	assert.Equal(t, page.Slug, pages[0].Slug)
+}

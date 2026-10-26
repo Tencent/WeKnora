@@ -82,6 +82,33 @@ func TestPPTXVectorMediaDetection(t *testing.T) {
 	}
 }
 
+func TestAnydocReaderDoesNotRoutePPTMToMarkitdown(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		fileType string
+		fileName string
+	}{
+		{"explicit type", "pptm", "slides.pptm"},
+		{"explicit type takes precedence", "pptm", "slides.pptx"},
+		{"normalized explicit type", ".PPTM", "slides.pptm"},
+		{"inferred type", "", "slides.pptm"},
+		{"inferred uppercase type", "", "slides.PPTM"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fallback := &stubDocReader{}
+			// The synthetic archive may fail native conversion, but PPTM must
+			// stay on anydoc: docreader does not support this file type.
+			_, _ = NewAnydocReader(nil, fallback).Read(context.Background(), &types.ReadRequest{
+				FileName: tc.fileName, FileType: tc.fileType,
+				FileContent: presentationArchive(t, "ppt/media/chart.emf"),
+			})
+			if fallback.got != nil {
+				t.Fatal("PPTM input incorrectly routed to MarkItDown")
+			}
+		})
+	}
+}
+
 func TestAnydocReaderPPTXVectorFallbackFailures(t *testing.T) {
 	sentinel := errors.New("docreader failed")
 	for _, tc := range []struct {
