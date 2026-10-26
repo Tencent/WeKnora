@@ -797,7 +797,7 @@ onUnmounted(() => {
       position: absolute;
       inset: 0;
       z-index: 1;
-      padding: 2px;
+      padding: 1px;
       border-radius: inherit;
       pointer-events: none;
       opacity: 0;
@@ -815,8 +815,8 @@ onUnmounted(() => {
     }
 
     &::before {
-      padding: 6px;
-      filter: blur(4px);
+      padding: 4px;
+      filter: blur(3px);
     }
 
     .assistant-panel__header-icon,
@@ -853,7 +853,7 @@ onUnmounted(() => {
     opacity: 0;
   }
 
-  12%, 80% { opacity: 1; }
+  12%, 80% { opacity: 0.65; }
 
   to {
     --assistant-border-angle: 360deg;
