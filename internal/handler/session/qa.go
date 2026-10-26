@@ -1016,12 +1016,13 @@ func knowledgeSearchOptions(request *SearchKnowledgeRequest) (*types.KnowledgeSe
 		return nil, err
 	}
 	return &types.KnowledgeSearchOptions{
-		VectorThreshold:      request.VectorThreshold,
-		KeywordThreshold:     request.KeywordThreshold,
-		MatchCount:           request.MatchCount,
-		DisableKeywordsMatch: request.DisableKeywordsMatch,
-		DisableVectorMatch:   request.DisableVectorMatch,
-		Rerank:               request.Rerank,
+		VectorThreshold:       request.VectorThreshold,
+		KeywordThreshold:      request.KeywordThreshold,
+		MatchCount:            request.MatchCount,
+		DisableKeywordsMatch:  request.DisableKeywordsMatch,
+		DisableVectorMatch:    request.DisableVectorMatch,
+		ParentSlotAggregation: request.ParentSlotAggregation,
+		Rerank:                request.Rerank,
 	}, nil
 }
 

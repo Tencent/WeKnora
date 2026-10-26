@@ -114,12 +114,15 @@ type SearchKnowledgeRequest struct {
 	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // Optional scoped tag mentions
 
 	// Optional overrides of the tenant retrieval config. Omitted fields keep it.
-	VectorThreshold      *float64             `json:"vector_threshold,omitempty"`       // Minimum vector similarity
-	KeywordThreshold     *float64             `json:"keyword_threshold,omitempty"`      // Minimum keyword score
-	MatchCount           int                  `json:"match_count,omitempty"`            // Number of results to return
-	DisableKeywordsMatch bool                 `json:"disable_keywords_match,omitempty"` // Vector recall only
-	DisableVectorMatch   bool                 `json:"disable_vector_match,omitempty"`   // Keyword recall only
-	Rerank               *types.RerankOptions `json:"rerank,omitempty"`                 // Rerank override
+	VectorThreshold      *float64 `json:"vector_threshold,omitempty"`       // Minimum vector similarity
+	KeywordThreshold     *float64 `json:"keyword_threshold,omitempty"`      // Minimum keyword score
+	MatchCount           int      `json:"match_count,omitempty"`            // Number of results to return
+	DisableKeywordsMatch bool     `json:"disable_keywords_match,omitempty"` // Vector recall only
+	DisableVectorMatch   bool     `json:"disable_vector_match,omitempty"`   // Keyword recall only
+	// ParentSlotAggregation gives one top-k slot to all hits sharing a parent
+	// chunk, returning the parent body with the matched child ids.
+	ParentSlotAggregation bool                 `json:"parent_slot_aggregation,omitempty"`
+	Rerank                *types.RerankOptions `json:"rerank,omitempty"` // Rerank override
 }
 
 // StopSessionRequest represents the stop session request
