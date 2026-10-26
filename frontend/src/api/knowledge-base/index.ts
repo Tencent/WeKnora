@@ -920,10 +920,15 @@ export function knowledgeSemanticSearch(data: {
   return post('/api/v1/knowledge-search', data);
 }
 
-export function batchReparseKnowledge(kbId: string, ids: string[], processConfig?: KnowledgeProcessOverrides) {
+export function batchReparseKnowledge(kbId: string, ids: string[], processConfig?: KnowledgeProcessOverrides, idempotencyKey = createBatchReparseIdempotencyKey()) {
   return post(`/api/v1/knowledge/batch-reparse`, {
     kb_id: kbId,
     ids,
     process_config: processConfig,
-  });
+  }, { headers: { 'Idempotency-Key': idempotencyKey } });
+}
+
+function createBatchReparseIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  return `batch-reparse-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }

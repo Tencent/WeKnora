@@ -4836,6 +4836,14 @@ func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *a
 
 	ctx, ids, err := s.reparseTaskScope(ctx, payload)
 	if err != nil || len(ids) == 0 {
+		if payload.SubmissionID != "" {
+			// The handler's authorization snapshot can become stale after a move
+			// or delete. Do not strand its receipt in queued, which would block a
+			// future request indefinitely; retain only a bounded safe failure.
+			if stateErr := s.FailReparseSubmissionScope(ctx, payload.SubmissionID); stateErr != nil {
+				logger.Errorf(ctx, "mark reparse submission scope failure: %v", stateErr)
+			}
+		}
 		return err
 	}
 
@@ -4847,13 +4855,55 @@ func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *a
 
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+	if payload.SubmissionID != "" {
+		if err := s.MarkReparseSubmissionProcessing(ctx, payload.SubmissionID); err != nil {
+			return err
+		}
+	}
 
 	outcome, err := runKnowledgeListReparseSubmissions(ids, func(id string) error {
+		if payload.BatchID != "" && payload.SubmissionID != "" {
+			// Persist the claim before invoking the destructive reparse. A task
+			// retry that sees submitting is deliberately not replayed: the first
+			// worker may have crossed the destructive boundary before it died.
+			claim, claimErr := s.ClaimReparseMember(ctx, payload.BatchID, id, payload.SubmissionID)
+			if claimErr != nil {
+				return claimErr
+			}
+			switch claim {
+			case "claimed":
+				// Proceed below.
+			case "submitted":
+				return nil
+			case "submitting", "handoff_unknown":
+				return fmt.Errorf("%w: reparse member handoff requires review", asynq.SkipRetry)
+			default:
+				return fmt.Errorf("%w: reparse member is not dispatchable", asynq.SkipRetry)
+			}
+		}
 		_, err := s.ReparseKnowledge(ctx, id, payload.ProcessConfig)
+		if payload.BatchID != "" && payload.SubmissionID != "" {
+			state, text := "submitted", ""
+			// Do not put an upstream error in durable status: it can contain an
+			// endpoint, request details, or credentials. Logs retain diagnostics.
+			if err != nil {
+				state, text = "failed", "reparse_failed"
+			}
+			recordErr := s.RecordReparseMember(ctx, payload.BatchID, id, state, text)
+			if recordErr != nil && err == nil {
+				err = recordErr
+			}
+		}
 		return err
 	})
 	logger.Infof(ctx, "Knowledge list reparse task finished: %d submitted, %d failed",
 		outcome.Submitted, outcome.Failed)
+	if payload.SubmissionID != "" {
+		stateErr := s.CompleteReparseSubmission(ctx, payload.SubmissionID, err == nil)
+		if stateErr != nil && err == nil {
+			return stateErr
+		}
+	}
 	return err
 }
 

@@ -209,7 +209,8 @@ type QueueStat struct {
 	Retry     int `json:"retry" extensions:"x-agent"`
 	Archived  int `json:"archived" extensions:"x-agent"`
 	Completed int `json:"completed" extensions:"x-agent"`
-	// Processed / Failed are today's counters (reset daily).
+	// Processed / Failed count today's executions, including retries (reset daily).
+	// Successful executions are max(Processed-Failed, 0), not completed documents.
 	Processed int `json:"processed" extensions:"x-agent"`
 	Failed    int `json:"failed" extensions:"x-agent"`
 	// Paused reports whether the queue is paused (tasks not consumed).
@@ -459,6 +460,8 @@ type KnowledgeListReparsePayload struct {
 	KnowledgeIDs    []string                   `json:"knowledge_ids"`
 	ProcessConfig   *KnowledgeProcessOverrides `json:"process_config,omitempty"`
 	Initiator       TaskInitiator              `json:"initiator,omitempty"`
+	BatchID         string                     `json:"batch_id,omitempty"`
+	SubmissionID    string                     `json:"submission_id,omitempty"`
 }
 
 // KnowledgeMovePayload represents the knowledge move task payload

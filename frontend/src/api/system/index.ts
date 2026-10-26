@@ -649,6 +649,82 @@ export interface RuntimeQueuesResponse {
   timestamp: number
 }
 
+export type ReparseBatchMode = 'managed' | 'tracking_only'
+export type ReparseBatchMemberState = 'waiting_start' | 'queued' | 'processing' | 'finalizing' | 'completed' | 'failed' | 'cancelled' | 'missing' | 'submission_failed' | 'unknown'
+
+export interface ReparseBatchCounts {
+  waiting_start: number
+  queued: number
+  processing: number
+  finalizing: number
+  completed: number
+  failed: number
+  cancelled: number
+  missing: number
+  submission_failed: number
+  unknown: number
+}
+
+export interface ReparseBatchSummaryCounts {
+  none: number
+  pending: number
+  processing: number
+  completed: number
+  failed: number
+  unknown: number
+}
+
+export interface ReparseBatch {
+  id: string
+  kb_id: string
+  mode: ReparseBatchMode
+  name?: string
+  total: number
+  counts: ReparseBatchCounts
+  summary_counts: ReparseBatchSummaryCounts
+  created_at: string
+  updated_at: string
+}
+
+export interface ReparseBatchMember {
+  knowledge_id: string
+  title?: string
+  state: ReparseBatchMemberState
+  parse_status?: string
+  summary_status?: string
+  submission_error?: string
+}
+
+export interface ReparseBatchPage<T> {
+  items: T[]
+  total: number
+  page: number
+  page_size: number
+}
+
+type WrappedResponse<T> = T | { success: boolean; data: T }
+
+function unwrapReparseResponse<T>(response: WrappedResponse<T>): T {
+  return response && typeof response === 'object' && 'data' in response
+    ? (response as { data: T }).data
+    : response as T
+}
+
+export async function listReparseBatches(params: { kb_id?: string; page?: number; page_size?: number } = {}): Promise<ReparseBatchPage<ReparseBatch>> {
+  return unwrapReparseResponse(await get<WrappedResponse<ReparseBatchPage<ReparseBatch>>>('/api/v1/knowledge/reparse-batches', { params }))
+}
+
+export async function getReparseBatch(id: string): Promise<ReparseBatch> {
+  return unwrapReparseResponse(await get<WrappedResponse<ReparseBatch>>(`/api/v1/knowledge/reparse-batches/${encodeURIComponent(id)}`))
+}
+
+export async function listReparseBatchMembers(
+  id: string,
+  params: { page?: number; page_size?: number; state?: ReparseBatchMemberState } = {},
+): Promise<ReparseBatchPage<ReparseBatchMember>> {
+  return unwrapReparseResponse(await get<WrappedResponse<ReparseBatchPage<ReparseBatchMember>>>(`/api/v1/knowledge/reparse-batches/${encodeURIComponent(id)}/items`, { params }))
+}
+
 export type RuntimeTaskState = 'pending' | 'active' | 'scheduled' | 'retry' | 'archived' | 'completed'
 export type RuntimeTaskAction = 'cancel' | 'run_now' | 'delete'
 

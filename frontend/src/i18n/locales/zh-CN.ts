@@ -4656,7 +4656,7 @@ export default {
         unavailable: '当前部署未启用 Redis / asynq 队列（Lite 模式），无队列可展示。',
         empty: '暂无队列数据',
         detailsTitle: '队列明细',
-        detailsDescription: '各处理通道的实时负载与等待情况。“最终失败”表示任务超过重试上限，已停止自动执行。',
+        detailsDescription: '各处理通道的实时负载与等待情况。“历史失败归档”表示任务超过重试上限后保留的历史记录，不是当前积压。',
         poolsTitle: 'Worker 池',
         poolsDescription: '各阶段拥有保底容量，核心解析与内容富化还可借用共享弹性池。',
         perInstance: '卡片主值为集群运行中/容量',
@@ -4753,7 +4753,7 @@ export default {
             pending: '排队中',
             scheduled: '定时执行',
             retry: '重试中',
-            archived: '最终失败',
+            archived: '历史失败归档',
             completed: '已完成'
           },
           taskTypes: {
@@ -4782,6 +4782,14 @@ export default {
           title: '{count} 个任务待处理',
           description: '点击下方表中红色「最终失败」数字查看原因，修复后可手动重试。'
         },
+        history: { title: '保留的队列历史', description: '{archived} 条历史失败归档 · {completed} 条保留的成功记录；它们是历史记录，不是当前任务。' },
+        reparse: {
+          title: '重新解析批次', description: '追踪批次会保留固定成员。文档当前业务状态独立刷新，后续重新解析可能改变组内计数。', kbFilter: '按知识库 ID 筛选', empty: '没有已追踪的重新解析批次', loadError: '加载重新解析批次失败', frozenTotal: '{count} 条记录', previous: '上一页', next: '下一页', allStates: '全部状态', stateFilter: '按成员状态筛选', membersTitle: '批次成员 · {name}', membersDescription: "成员在登记时固定，进度跟随文档当前解析状态。完成比例为已完成文档数 / 总成员数，失败和取消不计入完成；摘要状态单独统计。后续重建会改变当前进度。", membersEmpty: '没有符合该状态的成员', membersLoadError: '加载批次成员失败',
+          modes: { managed: "托管提交", tracking_only: "仅追踪" }, columns: { batch: '批次', knowledgeBase: '知识库', mode: '模式', completed: '完成 / 总数', successRatio: "完成比例", currentState: '当前状态' },
+          members: { columns: { document: '文档', batchState: '批次状态', parseState: '解析状态', summaryState: '摘要状态', error: '提交错误' } },
+          summary: { none: "无摘要", completed: "已完成", unknown: "未知", pending: '待处理', processing: '处理中', failed: '失败' },
+          states: { waiting_start: '等待开始', queued: '已排队', processing: '处理中', finalizing: '收尾中', completed: '已完成', failed: '失败', cancelled: '已取消', missing: '缺失', submission_failed: '提交失败', unknown: '未知' }
+        },
         status: {
           working: '处理中',
           waiting: '等待中',
@@ -4796,8 +4804,10 @@ export default {
           pending: '排队',
           scheduled: '定时',
           retry: '重试',
-          archived: '最终失败',
-          completed: '已完成',
+          todaySuccess: '今日成功',
+          todayFailedAttempts: '今日失败尝试',
+          archived: '历史失败归档',
+          completed: '保留的成功记录',
           latency: '最早等待',
           status: '状态'
         },
@@ -4805,8 +4815,11 @@ export default {
           title: '运行概览',
           active: '运行中',
           pending: '排队中',
+          scheduled: '定时',
           retry: '重试中',
-          archived: '最终失败'
+          todaySuccess: '今日成功',
+          todayFailedAttempts: '今日失败尝试',
+          dailyFormula: "今日成功 = max(今日 processed − 今日 failed, 0)。两项均为当日任务执行次数，包含重试，不是完成的文档数；每日重置。"
         },
         pools: {
           core: '核心解析',

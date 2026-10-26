@@ -4797,6 +4797,11 @@ export default {
           title: '{count}件の失敗したタスクに対応が必要です',
           description: '下の表で赤い「失敗」の件数を開くと原因を確認できます。原因を解消してから再試行してください。'
         },
+        history: { title: '保持されたキュー履歴', description: '過去の失敗アーカイブ {archived}件・保持された完了レコード {completed}件。現在の作業ではなく履歴です。' },
+        reparse: {
+          title: '再解析バッチ', description: '追跡グループは固定メンバーを保持します。現在のドキュメント業務状態は別に更新されるため、その後の再解析でグループ数が変わることがあります。', kbFilter: 'ナレッジベースIDで絞り込み', empty: '追跡中の再解析バッチはありません', loadError: '再解析バッチの読み込みに失敗しました', frozenTotal: '{count}件のレコード', previous: '前へ', next: '次へ', allStates: 'すべての状態', stateFilter: 'メンバー状態で絞り込み', membersTitle: 'バッチメンバー · {name}', membersDescription: '登録時のメンバーは固定され、進捗は現在のドキュメント解析状態に従います。完了率は完了数 / 全メンバー数で、失敗と取消は完了に含みません。要約状態は別集計です。後の再構築で進捗は変わります。', membersEmpty: 'この状態のメンバーはいません', membersLoadError: 'バッチメンバーの読み込みに失敗しました',
+          modes: { managed: '管理対象の送信', tracking_only: '追跡のみ' }, columns: { batch: 'バッチ', knowledgeBase: 'ナレッジベース', mode: 'モード', completed: '完了 / 合計', successRatio: '完了率', currentState: '現在の状態' }, members: { columns: { document: 'ドキュメント', batchState: 'バッチ状態', parseState: '解析状態', summaryState: '要約状態', error: '送信エラー' } }, summary: { none: '要約なし', completed: '完了', unknown: '不明', pending: '保留', processing: '処理中', failed: '失敗' }, states: { waiting_start: '開始待ち', queued: 'キュー済み', processing: '処理中', finalizing: '最終処理中', completed: '完了', failed: '失敗', cancelled: '取消', missing: '欠落', submission_failed: '送信失敗', unknown: '不明' }
+        },
         tasks: {
           title: 'タスクの詳細 · {queue}',
           description: 'すべてのタスク状態を確認できます。予約済みと再試行のタスクは次回実行が早い順、その他の状態は新しい順に表示されます。',
