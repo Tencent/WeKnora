@@ -188,77 +188,88 @@ async function fixture(
   return { workspaceChanged: () => workspaceChanged?.(), workspaceRefreshes: () => workspaceRefreshes, route, auth, assistant, mounted, sent, menuEntries, sessionStorage, localStorage, findAll, click, listCalls, deleted, dialogs, errors, close: () => app.unmount() }
 }
 
-test('welcome questions change with pages and toolbox tabs without starting a conversation', async () => {
+test('welcome descriptions and questions change with pages and toolbox tabs without starting a conversation', async () => {
   const f = await fixture()
   try {
     f.assistant.open()
     await flush()
     const questions = () => f.findAll(node => node.props.class === 'assistant-starter')
       .map(node => node.text?.replace('assistant.starters.', ''))
+    const description = () => f.findAll(node => node.props.class === 'assistant-welcome-desc')[0]?.text
     const general = ['releaseHighlights', 'gettingStarted', 'workflow']
     assert.deepEqual(questions(), general)
-    const pages: Array<[string, Record<string, string>, string[]]> = [
-      ['knowledgeBaseList', {}, ['knowledgeOverview', 'knowledgeType', 'knowledgeOrganize']],
-      ['agentList', {}, ['agents', 'agentCreate', 'agentChoose']],
-      ['automationList', {}, ['automationIdeas', 'automationCreate', 'automationOverview']],
-      ['automationList', { automationId: 'weekly' }, ['automationSummary', 'automationSchedule', 'automationImprove']],
-      ['toolbox', { section: 'skills' }, ['skillFind', 'skillAdd', 'skillUse']],
-      ['toolbox', { section: 'mcp' }, ['mcpFind', 'mcpSetup', 'mcpExamples']],
-      ['toolbox', { section: 'browserconnection' }, ['browserConnect', 'browserTasks', 'browserSafety']],
-      ['chat', {}, ['chatSummary', 'chatOpenQuestions', 'chatTodos']],
+    assert.equal(description(), 'assistant.welcomeDesc')
+    const pages: Array<[string, Record<string, string>, string, string[]]> = [
+      ['knowledgeBaseList', {}, 'knowledgeBases', ['knowledgeOverview', 'knowledgeType', 'knowledgeOrganize']],
+      ['knowledgeBaseDetail', {}, 'knowledgeBase', ['knowledgeTopics', 'recentActivity', 'knowledgeGaps']],
+      ['agentList', {}, 'agents', ['agents', 'agentCreate', 'agentChoose']],
+      ['automationList', {}, 'automation', ['automationIdeas', 'automationCreate', 'automationOverview']],
+      ['automationList', { automationId: 'weekly' }, 'automation', ['automationSummary', 'automationSchedule', 'automationImprove']],
+      ['toolbox', { section: 'skills' }, 'skills', ['skillFind', 'skillAdd', 'skillUse']],
+      ['toolbox', { section: 'mcp' }, 'mcp', ['mcpFind', 'mcpSetup', 'mcpExamples']],
+      ['toolbox', { section: 'browserconnection' }, 'browser', ['browserConnect', 'browserTasks', 'browserSafety']],
+      ['chat', {}, 'chat', ['chatSummary', 'chatOpenQuestions', 'chatTodos']],
     ]
-    for (const [name, params, expected] of pages) {
+    for (const [name, params, intro, expected] of pages) {
       f.route.name = name
       f.route.params = params
       f.assistant.setPageTitle(`${name}/${params.section || params.automationId || ''}`)
       await flush()
       assert.deepEqual(questions(), expected, `questions for ${name}/${JSON.stringify(params)}`)
+      assert.equal(description(), `assistant.welcomeDescriptions.${intro}`)
     }
     f.assistant.dismissPageContext()
     await flush()
     assert.deepEqual(questions(), general, 'dismissed page context does not influence suggestions')
+    assert.equal(description(), 'assistant.welcomeDesc', 'dismissed page context does not influence the introduction')
     f.assistant.restorePageContext()
     f.assistant.setPageAccess(false)
     await flush()
     assert.deepEqual(questions(), general, 'page access off also disables route-based suggestions')
+    assert.equal(description(), 'assistant.welcomeDesc', 'page access off also disables the contextual introduction')
     assert.equal(f.mounted.length, 0)
     assert.equal(f.sent.length, 0)
   } finally { f.close() }
 })
 
-test('open resources and dialogs have their own questions and return to page suggestions when closed', async () => {
+test('open resources and dialogs have their own welcome content and return to page content when closed', async () => {
   const f = await fixture()
   try {
     f.route.name = 'agentList'
     f.assistant.setPageTitle('Agents')
     const owner = Symbol('open-resource')
-    const cases: Array<[Record<string, string>, string[]]> = [
-      [{ page: 'settings_models', modelId: 'model' }, ['modelFit', 'modelCheck', 'modelUsage']],
-      [{ page: 'settings_models' }, ['modelSetup', 'modelTypes', 'modelUsage']],
-      [{ page: 'mcp_services', mcpServiceId: 'mcp' }, ['mcpTools', 'mcpUsage', 'mcpCheck']],
-      [{ page: 'mcp_services' }, ['mcpFind', 'mcpSetup', 'mcpExamples']],
-      [{ agentId: 'agent' }, ['agentConfig', 'agentModel', 'agentKnowledge']],
-      [{ knowledgeBaseId: 'kb', wikiSlug: 'page' }, ['wikiSummary', 'wikiSources', 'wikiIssues']],
-      [{ knowledgeBaseId: 'kb', knowledgeId: 'document' }, ['documentSummary', 'documentSteps', 'documentFaq']],
-      [{ knowledgeBaseId: 'kb', section: 'faq' }, ['faqCoverage', 'faqDuplicates', 'faqImprove']],
-      [{ knowledgeBaseId: 'kb' }, ['knowledgeTopics', 'recentActivity', 'knowledgeGaps']],
-      [{ chatSessionId: 'chat', messageId: 'answer' }, ['messageSources', 'messageCheck', 'messageReuse']],
+    const cases: Array<[Record<string, string>, string, string[]]> = [
+      [{ page: 'settings_models', modelId: 'model' }, 'welcomeDescriptions.model', ['modelFit', 'modelCheck', 'modelUsage']],
+      [{ page: 'settings_models' }, 'welcomeDescriptions.model', ['modelSetup', 'modelTypes', 'modelUsage']],
+      [{ page: 'mcp_services', mcpServiceId: 'mcp' }, 'welcomeDescriptions.mcp', ['mcpTools', 'mcpUsage', 'mcpCheck']],
+      [{ page: 'mcp_services' }, 'welcomeDescriptions.mcp', ['mcpFind', 'mcpSetup', 'mcpExamples']],
+      [{ agentId: 'agent' }, 'agentWelcomeDesc', ['agentConfig', 'agentModel', 'agentKnowledge']],
+      [{ knowledgeBaseId: 'kb', wikiSlug: 'page' }, 'welcomeDescriptions.wiki', ['wikiSummary', 'wikiSources', 'wikiIssues']],
+      [{ knowledgeBaseId: 'kb', knowledgeId: 'document' }, 'welcomeDescriptions.document', ['documentSummary', 'documentSteps', 'documentFaq']],
+      [{ knowledgeBaseId: 'kb', section: 'faq' }, 'welcomeDescriptions.faq', ['faqCoverage', 'faqDuplicates', 'faqImprove']],
+      [{ knowledgeBaseId: 'kb' }, 'welcomeDescriptions.knowledgeBase', ['knowledgeTopics', 'recentActivity', 'knowledgeGaps']],
+      [{ page: 'chat', chatSessionId: 'chat' }, 'welcomeDescriptions.chat', ['chatSummary', 'chatOpenQuestions', 'chatTodos']],
+      [{ chatSessionId: 'chat', messageId: 'answer' }, 'welcomeDescriptions.message', ['messageSources', 'messageCheck', 'messageReuse']],
     ]
     const questions = () => f.findAll(node => node.props.class === 'assistant-starter')
       .map(node => node.text?.replace('assistant.starters.', ''))
-    for (const [context, expected] of cases) {
+    const description = () => f.findAll(node => node.props.class === 'assistant-welcome-desc')[0]?.text
+    for (const [context, intro, expected] of cases) {
       f.assistant.publishPageContext(owner, context)
       await flush()
       assert.deepEqual(questions(), expected, `questions for ${JSON.stringify(context)}`)
+      assert.equal(description(), `assistant.${intro}`)
     }
     f.assistant.retractPageContext(owner)
     await flush()
     assert.deepEqual(questions(), ['agents', 'agentCreate', 'agentChoose'])
+    assert.equal(description(), 'assistant.welcomeDescriptions.agents')
     f.route.name = 'toolbox'
     f.route.params = { section: 'mcp' }
     f.assistant.publishPageContext(owner, { agentId: 'agent' })
     await flush()
     assert.deepEqual(questions(), ['agentConfig', 'agentModel', 'agentKnowledge'], 'an open agent takes precedence over the underlying MCP tab')
+    assert.equal(description(), 'assistant.agentWelcomeDesc')
     assert.equal(f.sent.length, 0)
   } finally { f.close() }
 })
