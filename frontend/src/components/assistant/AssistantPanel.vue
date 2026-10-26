@@ -490,10 +490,6 @@ onUnmounted(() => {
     border-radius: var(--app-radius-lg);
     box-shadow: var(--td-shadow-3);
     overflow: hidden;
-
-    &.is-open {
-      animation: assistant-panel-in var(--app-motion-base) cubic-bezier(0.22, 0.61, 0.36, 1);
-    }
   }
 
   &.is-resizing {
@@ -502,18 +498,6 @@ onUnmounted(() => {
     .assistant-panel__body {
       pointer-events: none;
     }
-  }
-}
-
-@keyframes assistant-panel-in {
-  from {
-    opacity: 0;
-    transform: translateX(16px);
-  }
-
-  to {
-    opacity: 1;
-    transform: none;
   }
 }
 
@@ -777,6 +761,82 @@ onUnmounted(() => {
   margin-top: auto;
   flex-shrink: 0;
   padding: 12px 16px max(8px, env(safe-area-inset-bottom));
+}
+
+// Opening only changes presentation; the mounted conversation keeps streaming.
+@media (prefers-reduced-motion: no-preference) {
+  .assistant-panel.is-open {
+    animation: assistant-panel-in var(--app-motion-slow) cubic-bezier(0.16, 1, 0.3, 1);
+
+    .assistant-panel__header-icon,
+    .assistant-welcome-icon {
+      animation: assistant-icon-in calc(var(--app-motion-base) + var(--app-motion-slow)) ease-out backwards;
+    }
+
+    .assistant-welcome-icon {
+      animation-delay: var(--app-motion-instant);
+    }
+
+    .assistant-welcome-title,
+    .assistant-welcome-desc,
+    .assistant-welcome-body > .assistant-starters,
+    .assistant-welcome-composer,
+    .assistant-suggestions {
+      animation: assistant-content-in var(--app-motion-slow) cubic-bezier(0.16, 1, 0.3, 1) backwards;
+      animation-delay: var(--app-motion-instant);
+    }
+
+    .assistant-welcome-desc {
+      animation-delay: var(--app-motion-fast);
+    }
+
+    .assistant-welcome-body > .assistant-starters {
+      animation-delay: var(--app-motion-base);
+    }
+  }
+}
+
+@keyframes assistant-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes assistant-content-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes assistant-icon-in {
+  from {
+    opacity: 0;
+    transform: scale(0.88);
+  }
+
+  45% {
+    opacity: 1;
+    transform: scale(1.04);
+    box-shadow: 0 0 16px color-mix(in srgb, var(--td-brand-color) 22%, transparent);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+    box-shadow: none;
+  }
 }
 </style>
 
