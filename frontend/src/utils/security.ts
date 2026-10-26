@@ -635,8 +635,9 @@ function ensureProtectedResourceCardClicks(): void {
     const link = target?.closest?.('a.protected-resource-card');
     if (!(link instanceof HTMLAnchorElement)) return;
     if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-    const source = link.dataset.protectedResource || '';
-    const file = protectedFileBySource.get(source);
+    // A source can be loaded through multiple authorization contexts. Use the
+    // clicked card's live URL, not whichever context last populated the source.
+    const file = Array.from(protectedFileBlobCache.values()).find(file => file.blobURL === link.href);
     if (!file) return;
     const preview = new CustomEvent(RESOURCE_PREVIEW_EVENT, {
       detail: file,

@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import { clearProtectedFileCache, clearProtectedFileFailureCache, hydrateProtectedFileImages, protectProviderImageSrcInHTML, releaseProtectedFileImages } from './security.ts'
-import { effectScope, nextTick, shallowRef } from 'vue'
+import { effectScope, nextTick, shallowRef, watch, ref } from 'vue'
+import { readFileSync } from 'node:fs'
+import vm from 'node:vm'
+import ts from 'typescript'
+import { setImmediate } from 'node:timers/promises'
 import { useProtectedImageLifecycle } from '../composables/useProtectedImageLifecycle.ts'
 import { responseFileName } from './protectedResource.ts'
 import { applyFinalArtifactContent } from './finalArtifactContent.ts'
@@ -442,4 +446,101 @@ test('detached owners are discarded before a late response allocates a Blob URL'
   finish(pngResponse())
   await pending
   assert.equal(create.mock.callCount(), 0)
+})
+
+
+test('preview clicks resolve the live card URL across message contexts', async t => {
+  hydrationEnvironment(t)
+  let click!: (event: any) => void
+  let preview: any
+  Object.assign((globalThis as any).window, {
+    addEventListener: (_name: string, handler: any) => { click = handler },
+    dispatchEvent: (event: any) => { preview = event.detail; return false },
+  })
+  const oldAnchor = (globalThis as any).HTMLAnchorElement
+  const oldCustomEvent = (globalThis as any).CustomEvent
+  ;(globalThis as any).HTMLAnchorElement = Object
+  ;(globalThis as any).CustomEvent = class { detail: any; constructor(_type: string, options: any) { this.detail = options.detail } }
+  t.after(() => {
+    ;(globalThis as any).HTMLAnchorElement = oldAnchor
+    ;(globalThis as any).CustomEvent = oldCustomEvent
+  })
+  globalThis.fetch = async () => new Response(new Blob(['document'], { type: 'text/plain' }))
+  const first = imageRoot('local://2/exports/shared-context.txt')
+  const second = imageRoot('local://2/exports/shared-context.txt')
+  await hydrateProtectedFileImages(first.root, messageAccess)
+  await hydrateProtectedFileImages(second.root, { ...messageAccess, messageId: 'second' })
+  const firstURL = first.root.replacement.href
+  const event = () => ({
+    target: { closest: () => first.root.replacement },
+    preventDefault() {}, stopPropagation() {},
+  })
+  click(event())
+  assert.equal(preview?.blobURL, firstURL, 'the first card must preview its own authorized file')
+  releaseProtectedFileImages(second.root)
+  preview = undefined
+  click(event())
+  assert.equal(preview?.blobURL, firstURL, 'releasing another context must preserve the preview')
+})
+
+test('document Markdown root owns resources until it is replaced or disposed', async t => {
+  hydrationEnvironment(t)
+  const source = readFileSync(new URL('../components/doc-content.vue', import.meta.url), 'utf8')
+  const setup = source.slice(source.indexOf('const docMarkdownRoot ='), source.indexOf("let url = ref('')", source.indexOf('const docMarkdownRoot =')))
+  const code = ts.transpileModule(setup + '\n;({ docMarkdownRoot, getMarkdownRenderRoot })', {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText
+  const scope = effectScope()
+  t.after(() => scope.stop())
+  const state = scope.run(() => vm.runInNewContext(code, { ref: shallowRef, mdContentWrap: shallowRef(null), useProtectedImageLifecycle }))
+  const image = imageRoot('local://2/exports/doc-root.png')
+  state.docMarkdownRoot.value = image.root
+  await nextTick()
+  globalThis.fetch = async () => pngResponse()
+  const revoke = t.mock.method(URL, 'revokeObjectURL')
+  await hydrateProtectedFileImages(state.getMarkdownRenderRoot(), messageAccess)
+  const url = image.img.src
+  state.docMarkdownRoot.value = null
+  await nextTick()
+  assert.deepEqual(revoke.mock.calls.map(call => call.arguments[0]), [url])
+})
+
+test('Wiki drawer rehydrates unchanged Markdown after its body remounts', async t => {
+  hydrationEnvironment(t)
+  const source = readFileSync(new URL('../views/chat/components/AgentStreamDisplay.vue', import.meta.url), 'utf8')
+  const start = source.indexOf('\nwatch(', source.indexOf('const wikiDrawerContent ='))
+  const snippet = source.slice(start, source.indexOf('const openWikiDrawer =', start))
+  const code = ts.transpileModule(snippet, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText
+  const body = shallowRef<ParentNode | null>(null)
+  const content = ref('')
+  const scope = effectScope()
+  t.after(() => scope.stop())
+  const tasks: Promise<void>[] = []
+  scope.run(() => {
+    useProtectedImageLifecycle(() => body.value)
+    vm.runInNewContext(code, { watch, nextTick, wikiDrawerContent: content, wikiDrawerBodyRef: body,
+      protectedFileAccess: ref(messageAccess), hydrateProtectedFileImages: (...args: Parameters<typeof hydrateProtectedFileImages>) => {
+        const task = hydrateProtectedFileImages(...args); tasks.push(task); return task
+      } })
+  })
+  let calls = 0
+  globalThis.fetch = async () => { calls++; return pngResponse() }
+  const first = imageRoot('local://2/exports/wiki-remount.png')
+  body.value = first.root
+  content.value = 'unchanged Markdown'
+  await nextTick()
+  await setImmediate()
+  await Promise.all(tasks)
+  assert.match(first.img.src, /^blob:/)
+  body.value = null
+  await nextTick()
+  const second = imageRoot('local://2/exports/wiki-remount.png')
+  body.value = second.root
+  await nextTick()
+  await setImmediate()
+  await Promise.all(tasks)
+  assert.match(second.img.src, /^blob:/)
+  assert.equal(calls, 2)
 })

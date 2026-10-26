@@ -1051,7 +1051,7 @@ const wikiDrawerContent = computed(() => {
   return sanitizeMarkdownHTML(wrapChatMarkdownTables(html));
 });
 
-watch(wikiDrawerContent, async () => {
+watch([wikiDrawerContent, wikiDrawerBodyRef], async () => {
   await nextTick();
   if (wikiDrawerBodyRef.value) {
     await hydrateProtectedFileImages(wikiDrawerBodyRef.value, protectedFileAccess.value);
