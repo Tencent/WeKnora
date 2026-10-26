@@ -15,15 +15,15 @@ func TestLiteralRefTextSurvivesCitationExpansion(t *testing.T) {
 		want     string
 	}{
 		{
-			name: "unregistered legacy id",
+			name: "unregistered legacy id stays non-citable",
 			in:   `引用标签的写法是 <ref id="c1"/>。`,
-			want: `引用标签的写法是 <ref id="c1"/>。`,
+			want: `引用标签的写法是 。`,
 		},
 		{
-			name:     "registered chunk does not capture a non-handle id",
+			name:     "registered legacy id still expands",
 			register: true,
 			in:       `引用标签的写法是 <ref id="c1"/>。`,
-			want:     `引用标签的写法是 <ref id="c1"/>。`,
+			want:     `引用标签的写法是 <kb doc="Doc" chunk_id="chunk-1" />。`,
 		},
 		{
 			name: "weknora attribute",
@@ -36,10 +36,10 @@ func TestLiteralRefTextSurvivesCitationExpansion(t *testing.T) {
 			want: `引用标签的写法是 <ref arbitrary text>。`,
 		},
 		{
-			name:     "inline code keeps a literal tag",
+			name:     "inline code keeps a non-handle tag",
 			register: true,
-			in:       "写法是 `<ref id=\"c1\"/>`。",
-			want:     "写法是 `<ref id=\"c1\"/>`。",
+			in:       "写法是 `<ref id=\"example\"/>`。",
+			want:     "写法是 `<ref id=\"example\"/>`。",
 		},
 		{
 			name:     "fenced code keeps a literal tag",
@@ -85,7 +85,7 @@ func TestLiteralRefTextSurvivesCitationExpansion(t *testing.T) {
 
 func TestLiteralRefSplitAcrossChunks(t *testing.T) {
 	registry := newSourceRegistry()
-	text := `写法是 <ref weknora_id="c1"/>，以及 <ref id="c1"/>。`
+	text := `写法是 <ref weknora_id="c1"/>，以及 <ref id="example"/>。`
 	for split := 0; split <= len(text); split++ {
 		decoder := newCitationStreamExpander(registry)
 		got := decoder.Feed(text[:split]) + decoder.Feed(text[split:]) + decoder.Flush()
@@ -96,7 +96,7 @@ func TestLiteralRefSplitAcrossChunks(t *testing.T) {
 func TestFencedRefSplitAcrossChunksStaysLiteral(t *testing.T) {
 	registry := newSourceRegistry()
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-1", DocumentTitle: "Doc"})
-	text := "```html\n<ref id=\"c1\"/>\n```"
+	text := "```html\n<ref id=\"example\"/>\n```"
 	for split := 0; split <= len(text); split++ {
 		decoder := newCitationStreamExpander(registry)
 		got := decoder.Feed(text[:split]) + decoder.Feed(text[split:]) + decoder.Flush()
@@ -107,8 +107,10 @@ func TestFencedRefSplitAcrossChunksStaysLiteral(t *testing.T) {
 func TestDisabledCitationsStillDropProtocolRefs(t *testing.T) {
 	registry := newSourceRegistry(false)
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-1", DocumentTitle: "Doc"})
-	require.Equal(t, "literal <ref id=\"c1\"/> done",
-		registry.ExpandText("literal <ref id=\"c1\"/> done"))
+	require.Equal(t, "literal <ref weknora_id=\"c1\"/> done",
+		registry.ExpandText("literal <ref weknora_id=\"c1\"/> done"))
+	require.Equal(t, "legacy  done",
+		registry.ExpandText("legacy <ref id=\"c1\"/> done"))
 	require.Equal(t, "protocol  done",
 		registry.ExpandText("protocol <ref id=\"chunk://1\"/> done"))
 }

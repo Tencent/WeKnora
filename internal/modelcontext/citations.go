@@ -353,17 +353,38 @@ func rewriteRefTag(r *sourceRegistry, tag string) string {
 }
 
 var (
-	protocolRefIDRE     = regexp.MustCompile(`(?i)\bid\s*=\s*["']?(?:chunk|url|doc|kb)://`)
-	jsonProtocolRefIDRE = regexp.MustCompile(`(?i)\bid\s*=\s*\\+["']?(?:chunk|url|doc|kb)://`)
+	refIDAttrRE       = regexp.MustCompile(`(?i)\bid\s*=\s*"([^"]*)"`)
+	refIDAttrSingleRE = regexp.MustCompile(`(?i)\bid\s*=\s*'([^']*)'`)
 )
 
+// keepLiteralRef reports a <ref> tag that is not a citation. c1/w1 are the
+// legacy spellings of chunk://1 and url://1, so they stay on the citation path.
 func keepLiteralRef(tag string) bool {
-	lower := strings.ToLower(tag)
-	if !strings.HasPrefix(lower, "<ref") {
+	if !strings.HasPrefix(strings.ToLower(tag), "<ref") {
 		return false
 	}
-	if protocolRefIDRE.MatchString(tag) || jsonProtocolRefIDRE.MatchString(tag) || strings.Contains(tag, "://") {
+	// A scheme inside the tag is a citation attempt, even when the markup is
+	// nested or only partly decoded. Leaving it in place lets the handle pass
+	// rewrite the token and break the surrounding text.
+	if strings.Contains(tag, "://") {
+		return false
+	}
+	id, ok := citedRefID(tag)
+	if !ok {
+		return true
+	}
+	if id == "" || canonicalSourceHandle(id) != "" {
 		return false
 	}
 	return true
+}
+
+func citedRefID(tag string) (string, bool) {
+	if match := refIDAttrRE.FindStringSubmatch(tag); len(match) == 2 {
+		return html.UnescapeString(match[1]), true
+	}
+	if match := refIDAttrSingleRE.FindStringSubmatch(tag); len(match) == 2 {
+		return html.UnescapeString(match[1]), true
+	}
+	return "", false
 }
