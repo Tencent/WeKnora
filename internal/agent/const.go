@@ -74,6 +74,14 @@ const (
 	// calls allowed before the model is asked to switch tools or strategies.
 	maxConsecutiveFailedToolCalls = 3
 
+	// maxConsecutiveIdenticalToolCalls bounds identical *successful* calls that
+	// produced no observable output. A command that ran cleanly (success=true)
+	// but returned nothing is indistinguishable from "ran but found nothing":
+	// the model keeps re-issuing the same call, which makes no progress and can
+	// grow the prompt without bound. After this many repeats the model is nudged
+	// once; after twice this many the turn is stopped.
+	maxConsecutiveIdenticalToolCalls = 3
+
 	// maxConsecutiveLengthRounds is how many rounds in a row may be cut off at
 	// the completion-token cap before the loop gives up. A truncated answer
 	// already ends the turn (analyzeResponse Case 2), so reaching this limit

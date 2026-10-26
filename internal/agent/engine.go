@@ -567,6 +567,13 @@ type loopGuards struct {
 	failedToolCallSignature    string
 	consecutiveFailedToolCalls int
 	failedToolCallNudged       bool
+	// identicalToolCallSignature and consecutiveIdenticalToolCalls track
+	// identical *successful* calls that produced no observable output, which is
+	// the "success without progress" case #4334's failed-only guard misses.
+	// A single guidance message is sent per streak, then the turn is stopped.
+	identicalToolCallSignature    string
+	consecutiveIdenticalToolCalls int
+	identicalToolCallNudged       bool
 }
 
 // recordFailedToolCall tracks consecutive failures of the same model-facing
@@ -604,6 +611,54 @@ func (g *loopGuards) resetFailedToolCallStreak() {
 	g.failedToolCallSignature = ""
 	g.consecutiveFailedToolCalls = 0
 	g.failedToolCallNudged = false
+}
+
+// recordIdenticalToolCall tracks consecutive identical *successful* calls that
+// returned no observable output. A successful call with empty output is
+// "success without progress": the command ran (exit 0) but produced nothing the
+// model can act on, so re-issuing the exact same call cannot help. After
+// maxConsecutiveIdenticalToolCalls repeats it asks the model to change approach
+// once; after twice that it signals the turn should stop.
+//
+// It only covers successful calls so it does not double-report the failed-call
+// streak handled by recordFailedToolCall.
+func (g *loopGuards) recordIdenticalToolCall(call types.ToolCall) (count int, shouldNudge bool, shouldStop bool) {
+	if call.Result == nil || !call.Result.Success || strings.TrimSpace(call.Result.Output) != "" {
+		g.resetIdenticalToolCallStreak()
+		return 0, false, false
+	}
+	if call.Name == "" {
+		g.resetIdenticalToolCallStreak()
+		return 0, false, false
+	}
+	args, err := json.Marshal(call.Args)
+	if err != nil {
+		g.resetIdenticalToolCallStreak()
+		return 0, false, false
+	}
+	signature := call.Name + "\x00" + string(args)
+	if signature != g.identicalToolCallSignature {
+		g.identicalToolCallSignature = signature
+		g.consecutiveIdenticalToolCalls = 1
+		g.identicalToolCallNudged = false
+		return 1, false, false
+	}
+	g.consecutiveIdenticalToolCalls++
+	count = g.consecutiveIdenticalToolCalls
+	if count >= maxConsecutiveIdenticalToolCalls*2 {
+		return count, false, true
+	}
+	if count >= maxConsecutiveIdenticalToolCalls && !g.identicalToolCallNudged {
+		g.identicalToolCallNudged = true
+		return count, true, false
+	}
+	return count, false, false
+}
+
+func (g *loopGuards) resetIdenticalToolCallStreak() {
+	g.identicalToolCallSignature = ""
+	g.consecutiveIdenticalToolCalls = 0
+	g.identicalToolCallNudged = false
 }
 
 // closeAnswerStream emits the Done:true marker for an answer that is actually
@@ -1371,13 +1426,24 @@ func (e *AgentEngine) runReActIteration(
 
 	// 4. Observe: Add tool results to messages and write to context
 	var (
-		failedToolName     string
-		failedToolAttempts int
+		failedToolName          string
+		failedToolAttempts      int
+		identicalToolName       string
+		identicalToolCount      int
+		identicalToolShouldStop bool
 	)
 	for _, toolCall := range step.ToolCalls {
 		if name, attempts, shouldNudge := guards.recordFailedToolCall(toolCall); shouldNudge {
 			failedToolName = name
 			failedToolAttempts = attempts
+		}
+		if count, shouldNudge, shouldStop := guards.recordIdenticalToolCall(toolCall); shouldStop {
+			identicalToolName = toolCall.Name
+			identicalToolCount = count
+			identicalToolShouldStop = true
+		} else if shouldNudge {
+			identicalToolName = toolCall.Name
+			identicalToolCount = count
 		}
 	}
 
@@ -1392,6 +1458,26 @@ func (e *AgentEngine) runReActIteration(
 				"Do not call it again with those arguments. Switch to a different tool "+
 				"or use another approach to complete the task.",
 			failedToolName, failedToolAttempts,
+		)
+		*messagesPtr = append(*messagesPtr, chat.Message{Role: "user", Content: guidance})
+	}
+	if identicalToolShouldStop {
+		logger.Warnf(ctx, "[Agent][Round-%d] Detected stuck loop: successful call to %q "+
+			"repeated %d times with no output, stopping", round, identicalToolName, identicalToolCount)
+		if e.collaborationOwnsFailure(ctx) {
+			return iterOutcomeBreak, fmt.Errorf("collaboration stopped after identical successful calls without progress")
+		}
+		e.finishStalledTurn(ctx, state, sessionID, response, false)
+		return iterOutcomeBreak, nil
+	}
+	if identicalToolName != "" {
+		logger.Warnf(ctx, "[Agent][Round-%d] Successful call to %q repeated %d times with no "+
+			"output; asking the model to change strategy", round, identicalToolName, identicalToolCount)
+		guidance := fmt.Sprintf(
+			"The tool %q has succeeded %d consecutive times with identical arguments but "+
+				"returned no output, so it is not making progress. Do not call it again with "+
+				"those arguments. Change your approach, or answer with what you have found so far.",
+			identicalToolName, identicalToolCount,
 		)
 		*messagesPtr = append(*messagesPtr, chat.Message{Role: "user", Content: guidance})
 	}
