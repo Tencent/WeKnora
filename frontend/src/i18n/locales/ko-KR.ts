@@ -2870,6 +2870,7 @@ export default {
     chooseAction: "기능을 선택하거나 원하는 작업을 입력하세요.",
     create: {
       agentTitle: "자연어로 에이전트 만들기",
+      agentAction: "어시스턴트로 만들기",
       agentHint: "누구를 위해 어떤 일을 해야 하는지 설명하면 어시스턴트가 리소스를 선택하고 생성합니다.",
       agentPlaceholder: "예: 제품 지식 베이스로 질문에 답하고 출처를 제시하며 정보가 없으면 알려주는 고객 지원 에이전트.",
       automationTitle: "어시스턴트로 작업 만들기",

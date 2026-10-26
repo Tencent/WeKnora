@@ -49,9 +49,9 @@ const props = defineProps<{
   /** Every folder of the knowledge base, for the "move to folder" picker. */
   folderOptions?: FolderOption[];
   /**
-   * Direct sub-folders of the folder being browsed. They lead the grid, the way
-   * a file manager shows folders before files. Filtering searches the subtree
-   * for documents, so the caller passes an empty list.
+   * Direct sub-folders of the folder being browsed, shown as chips above
+   * the document cards when the sidebar tree is collapsed. Filtering
+   * searches the subtree for documents, so the caller passes an empty list.
    */
   subFolders?: FolderEntry[];
   /**
@@ -334,35 +334,26 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
 
 <template>
   <div class="doc-card-view">
+    <nav v-if="subFolderCards.length" class="doc-folder-strip" :aria-label="t('knowledgeBase.folderTree.title')">
+      <button
+        v-for="folder in subFolderCards"
+        :key="`folder:${folder.path}`"
+        type="button"
+        class="doc-folder-tile"
+        :data-folder-path="folder.path"
+        :title="folder.path"
+        @click="onOpenFolder(folder.path)"
+      >
+        <t-icon name="folder" class="doc-folder-tile__icon" size="16px" />
+        <span class="doc-folder-tile__name">{{ folder.name }}</span>
+        <span class="doc-folder-tile__count"
+          :title="t('knowledgeBase.folderTree.countHint', { direct: folder.document_count, total: folder.total_count })">
+          {{ t('knowledgeBase.folderTree.folderCardCount', { count: folder.total_count }) }}
+        </span>
+      </button>
+    </nav>
 
     <div class="doc-card-list doc-card-list-animated">
-    <div
-      v-for="folder in subFolderCards"
-      :key="`folder:${folder.path}`"
-      class="knowledge-card folder-card"
-      :data-folder-path="folder.path"
-      role="button"
-      tabindex="0"
-      @click="onOpenFolder(folder.path)"
-      @keydown.enter="onOpenFolder(folder.path)"
-    >
-      <div class="card-content">
-        <div class="card-content-nav">
-          <div class="card-file-icon folder-card-icon">
-            <t-icon name="folder" size="28px" />
-          </div>
-          <span class="card-content-title folder-card-title" :title="folder.path">{{ folder.name }}</span>
-        </div>
-        <div class="card-preview">
-          <div class="card-content-txt folder-card-count"
-            :title="t('knowledgeBase.folderTree.countHint', { direct: folder.document_count, total: folder.total_count })">
-            <t-icon name="file" size="12px" />
-            <span>{{ t('knowledgeBase.folderTree.folderCardCount', { count: folder.total_count }) }}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <div
       class="knowledge-card"
       :class="{ 'is-selected': selectedIds.has(item.id), 'batch-mode': batchMode }"
@@ -695,6 +686,63 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   padding-top: 12px;
 }
 
+.doc-folder-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.doc-folder-tile {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(280px, 100%);
+  height: 32px;
+  padding: 0 10px 0 8px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-container);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--app-motion-base) ease, background-color var(--app-motion-base) ease;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--app-focus-border);
+    outline-offset: 2px;
+  }
+}
+
+.doc-folder-tile__icon {
+  flex-shrink: 0;
+  color: var(--td-text-color-secondary);
+}
+
+.doc-folder-tile__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--td-text-color-primary);
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.doc-folder-tile__count {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-xs);
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
 .doc-card-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
@@ -714,13 +762,14 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   cursor: pointer;
-  transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease;
+  transition: background-color var(--app-motion-base) ease;
   &:hover {
-    border-color: var(--app-selection-border);
-    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.035);
+    background: var(--td-bg-color-container-hover);
   }
 
-  &.is-selected { border-color: var(--app-selection-border); background: var(--td-bg-color-container); box-shadow: none; }
+  &.is-selected {
+    background: var(--app-selection-bg);
+  }
 
   .card-content { min-width: 0; }
   .card-content-nav { display: flex; align-items: flex-start; gap: 7px; height: 36px; margin-bottom: 4px; }
@@ -828,24 +877,6 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     .t-icon { flex-shrink: 0; }
   }
 
-  /* A folder card uses the same shell as a document card, so the grid rhythm
-     and the hover treatment stay identical; only its body is folder-specific. */
-  &.folder-card {
-    .folder-card-icon {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--td-warning-color);
-    }
-    .folder-card-title { cursor: pointer; }
-    .folder-card-count {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      color: var(--td-text-color-placeholder);
-      .t-icon { flex-shrink: 0; }
-    }
-  }
 }
 
 .card-tags {

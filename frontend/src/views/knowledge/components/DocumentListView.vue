@@ -294,13 +294,17 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
 
         <div class="cell cell-name" role="cell">
           <span class="folder-row-icon" aria-hidden="true">
-            <t-icon name="folder" size="26px" />
+            <t-icon name="folder" size="18px" />
           </span>
           <div class="row-file-text">
             <div class="row-title-line">
               <button type="button" class="row-file-name" :title="folder.path"
                 @click.stop="openFolder(folder)">{{ folder.name }}</button>
             </div>
+            <span class="row-file-meta"
+              :title="t('knowledgeBase.folderTree.countHint', { direct: folder.document_count, total: folder.total_count })">
+              {{ t('knowledgeBase.folderTree.folderCardCount', { count: folder.total_count }) }}
+            </span>
           </div>
         </div>
 
@@ -583,13 +587,13 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
 }
 
 .folder-row-icon {
-  flex: 0 0 32px;
-  width: 32px;
-  height: 38px;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 31px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--td-warning-color);
+  color: var(--td-text-color-secondary);
 }
 
 .cell {

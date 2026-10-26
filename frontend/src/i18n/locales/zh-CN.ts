@@ -2872,6 +2872,7 @@ export default {
     chooseAction: "选择一个功能，或直接输入你的需求。",
     create: {
       agentTitle: "用自然语言创建智能体",
+      agentAction: "用助手创建",
       agentHint: "说说它为谁服务、需要完成什么，助手会帮你选择资源并创建。",
       agentPlaceholder: "例如：创建一个产品客服助手，根据产品知识库回答使用问题，回答附上来源，找不到答案时说明原因。",
       automationTitle: "用助手创建任务",

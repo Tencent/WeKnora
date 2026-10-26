@@ -2872,6 +2872,7 @@ export default {
     chooseAction: "選擇一項功能，或直接輸入你的需求。",
     create: {
       agentTitle: "用自然語言建立智慧體",
+      agentAction: "用助手建立",
       agentHint: "說說它為誰服務、需要完成什麼，助手會協助選擇資源並建立。",
       agentPlaceholder: "例如：建立產品客服智慧體，根據產品知識庫回答使用問題，附上來源，找不到答案時說明原因。",
       automationTitle: "用助手建立任務",
