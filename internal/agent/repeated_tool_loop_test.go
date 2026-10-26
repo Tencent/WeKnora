@@ -147,6 +147,10 @@ func TestTrackRepeatedToolRound_ModelVisibleResultFields(t *testing.T) {
 			r.Images = []string{fmt.Sprintf("data:image/png;base64,%d", i)}
 		}},
 		{"output files", func(r *types.ToolResult, i int) { r.OutputFiles = []string{fmt.Sprintf("f%d", i)} }},
+		{"image descriptions", func(r *types.ToolResult, i int) {
+			r.Images = []string{"data:image/png;base64,same"}
+			r.ImageDescriptions = []string{fmt.Sprintf("description %d", i)}
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g := &loopGuards{}
@@ -172,4 +176,20 @@ func TestTrackRepeatedToolRound_MultipleCalls(t *testing.T) {
 	assert.Equal(t, 1, g.trackRepeatedToolRound(round("x")))
 	assert.Equal(t, 2, g.trackRepeatedToolRound(round("x")))
 	assert.Equal(t, 1, g.trackRepeatedToolRound(round("y")), "one changed call restarts the streak")
+}
+
+// A nil OutputFiles (not inspected) and an empty one (inspected, none found)
+// tell the model different things, so they are different results.
+func TestTrackRepeatedToolRound_OutputFilesNilVersusEmpty(t *testing.T) {
+	round := func(files []string) []types.ToolCall {
+		return []types.ToolCall{{
+			Name:   "shell_exec",
+			Args:   map[string]interface{}{},
+			Result: &types.ToolResult{Success: true, OutputFiles: files},
+		}}
+	}
+	g := &loopGuards{}
+	assert.Equal(t, 1, g.trackRepeatedToolRound(round(nil)))
+	assert.Equal(t, 1, g.trackRepeatedToolRound(round([]string{})), "empty is not the same as nil")
+	assert.Equal(t, 2, g.trackRepeatedToolRound(round([]string{})))
 }

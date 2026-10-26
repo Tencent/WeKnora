@@ -573,18 +573,25 @@ type loopGuards struct {
 
 // toolRoundSignature fingerprints a tool round by each call's name and
 // arguments and everything in its result that can reach the model: output,
-// error, structured data, images and output files. Two rounds with the same
+// error, structured data, images or their descriptions, and output files. Two rounds with the same
 // signature asked for the same thing and learned nothing new.
 func toolRoundSignature(calls []types.ToolCall) string {
 	type entry struct {
-		Name        string                 `json:"n"`
-		Args        map[string]interface{} `json:"a"`
-		Success     bool                   `json:"s"`
-		Output      string                 `json:"o"`
-		Error       string                 `json:"e"`
-		Data        map[string]interface{} `json:"d,omitempty"`
-		Images      []string               `json:"i,omitempty"`
-		OutputFiles []string               `json:"f,omitempty"`
+		Name    string                 `json:"n"`
+		Args    map[string]interface{} `json:"a"`
+		Success bool                   `json:"s"`
+		Output  string                 `json:"o"`
+		Error   string                 `json:"e"`
+		Data    map[string]interface{} `json:"d,omitempty"`
+		Images  []string               `json:"i,omitempty"`
+		// ImageDescriptions, ImageDetail and ImageFocus reach a model that
+		// cannot view Images, in place of the images themselves.
+		ImageDescriptions []string `json:"id,omitempty"`
+		ImageDetail       string   `json:"idt,omitempty"`
+		ImageFocus        string   `json:"ifc,omitempty"`
+		// No omitempty: nil (not inspected) and empty (inspected, none found)
+		// render differently to the model.
+		OutputFiles []string `json:"f"`
 	}
 	entries := make([]entry, 0, len(calls))
 	for _, tc := range calls {
@@ -592,6 +599,7 @@ func toolRoundSignature(calls []types.ToolCall) string {
 		if r := tc.Result; r != nil {
 			en.Success, en.Output, en.Error = r.Success, r.Output, r.Error
 			en.Data, en.Images, en.OutputFiles = r.Data, r.Images, r.OutputFiles
+			en.ImageDescriptions, en.ImageDetail, en.ImageFocus = r.ImageDescriptions, r.ImageDetail, r.ImageFocus
 		}
 		entries = append(entries, en)
 	}
