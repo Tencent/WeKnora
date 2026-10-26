@@ -263,6 +263,23 @@ func (r *taskPendingOpsRepository) ClaimBatch(
 	limit int,
 	staleBefore time.Time,
 ) ([]*types.TaskPendingOp, error) {
+	return r.claimBatch(ctx, taskType, scope, scopeID, limit, staleBefore, "")
+}
+
+// ClaimKnowledge uses the same anchor locks as automatic batches so a manual
+// request cannot race an in-flight sibling operation for the same document.
+func (r *taskPendingOpsRepository) ClaimKnowledge(
+	ctx context.Context, taskType, scope, scopeID, knowledgeID string, staleBefore time.Time,
+) ([]*types.TaskPendingOp, error) {
+	if knowledgeID == "" {
+		return nil, errors.New("task pending ops: knowledge_id is required")
+	}
+	return r.claimBatch(ctx, taskType, scope, scopeID, 1, staleBefore, knowledgeID)
+}
+
+func (r *taskPendingOpsRepository) claimBatch(
+	ctx context.Context, taskType, scope, scopeID string, limit int, staleBefore time.Time, knowledgeID string,
+) ([]*types.TaskPendingOp, error) {
 	if limit <= 0 {
 		limit = 1
 	}
@@ -294,6 +311,7 @@ WHERE id IN (
 		SELECT id, ROW_NUMBER() OVER (PARTITION BY dedup_key ORDER BY fail_count ASC, id ASC) AS rn
 		FROM task_pending_ops
 		WHERE task_type = ? AND scope = ? AND scope_id = ?
+			AND (? = '' OR dedup_key = ?)
 			AND (claimed_at IS NULL OR claimed_at < ?)
 			AND dedup_key NOT IN (
 				SELECT dedup_key FROM task_pending_ops
@@ -306,7 +324,7 @@ ORDER BY fail_count ASC, id ASC
 LIMIT ?
 FOR UPDATE SKIP LOCKED`
 			if err := tx.Raw(anchorSQL,
-				taskType, scope, scopeID, staleBefore,
+				taskType, scope, scopeID, knowledgeID, knowledgeID, staleBefore,
 				taskType, scope, scopeID, staleBefore,
 				limit).
 				Scan(&keys).Error; err != nil {
@@ -319,6 +337,7 @@ FOR UPDATE SKIP LOCKED`
 				Where("claimed_at IS NOT NULL AND claimed_at >= ?", staleBefore)
 			if err := tx.Model(&types.TaskPendingOp{}).
 				Where("task_type = ? AND scope = ? AND scope_id = ?", taskType, scope, scopeID).
+				Where("? = '' OR dedup_key = ?", knowledgeID, knowledgeID).
 				Where("(claimed_at IS NULL OR claimed_at < ?)", staleBefore).
 				Where("dedup_key NOT IN (?)", freshKeys).
 				Group("dedup_key").

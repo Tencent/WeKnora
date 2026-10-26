@@ -315,6 +315,10 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		exitStatus = "invalid_payload"
 		return fmt.Errorf("wiki ingest: unmarshal payload: %w", err)
 	}
+	if !validWikiStartKnowledgeID(payload.KnowledgeID) {
+		exitStatus = "invalid_payload"
+		return errors.New("wiki ingest: invalid selected knowledge ID")
+	}
 
 	defer func() {
 		if p := recover(); p != nil {
@@ -447,11 +451,23 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	defer releaseSlot()
 
 	// Standard mode claims rows (marks claimed_at, disjoint across concurrent
-	// batches); Lite mode peeks under its in-process lock.
+	// batches); ordinary Lite batches peek under their in-process lock.
+	// A selected-document trigger claims that whole dedup key in either mode.
 	var pendingOps []WikiPendingOp
 	var peekedIDs []int64
 	var loadErr error
-	if s.redisClient != nil {
+	if payload.KnowledgeID != "" {
+		claimer, ok := s.pendingRepo.(interfaces.TaskPendingOpsKnowledgeClaimer)
+		if !ok {
+			return errors.New("wiki ingest: selected document claims are unavailable")
+		}
+		rows, err := claimer.ClaimKnowledge(ctx, wikiTaskType, wikiTaskScope, payload.KnowledgeBaseID,
+			payload.KnowledgeID, time.Now().Add(-wikiClaimStaleAfter))
+		loadErr = err
+		if err == nil {
+			pendingOps, peekedIDs = s.decodePendingRows(ctx, rows)
+		}
+	} else if s.redisClient != nil {
 		pendingOps, peekedIDs, loadErr = s.claimPendingList(ctx, payload.KnowledgeBaseID, batchSize)
 	} else {
 		pendingOps, peekedIDs, loadErr = s.peekPendingList(ctx, payload.KnowledgeBaseID, batchSize)
@@ -497,10 +513,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// wikiClaimStaleAfter (~90m). On the normal path claimsSettled flips true
 	// once the rows reach their terminal state, making this a no-op. Uses a
 	// bounded detached cleanup context because ctx may already be cancelled on
-	// the timeout path. Lite mode peeks without claiming, so there is nothing
-	// to release.
+	// the timeout path. Ordinary Lite batches peek without claiming.
 	claimsSettled := false
-	if s.redisClient != nil && len(peekedIDs) > 0 {
+	if (s.redisClient != nil || payload.KnowledgeID != "") && len(peekedIDs) > 0 {
 		defer func() {
 			if claimsSettled {
 				return
@@ -1036,6 +1051,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		logger.Warnf(ctx, "wiki ingest: KB %s hit upstream rate limiting, backing off follow-up to %s", payload.KnowledgeBaseID, followUpDelay)
 	}
 	followCtx, followCancel := wikiIngestCleanupContext(ctx)
+	// Follow-up fan-out returns to the ordinary backlog after this selected
+	// document has settled; it must not keep re-arming the consumed key.
+	payload.KnowledgeID = ""
 	followUpScheduled = s.scheduleFollowUp(followCtx, payload, followUpDelay, batchSize, maxInflight, rateLimited)
 	followCancel()
 	return nil

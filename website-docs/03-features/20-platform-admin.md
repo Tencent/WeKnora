@@ -38,7 +38,7 @@
 | --- | --- | --- |
 | 系统设置 | 全局运行时开关（注册模式、空间策略、并发、SSRF 白名单等），按设置项的生效规则应用，见下方设置表 | `GET/PUT/DELETE /system/admin/settings[/:key]` |
 | 模型目录 | 查看目录模型及其来源，编辑、添加模型或用 JSON 批量修改（保存即生效），按版本历史恢复；详见[模型目录管理](06-models.md#系统管理员维护模型目录) | `/system/admin/model-catalog*` |
-| 任务队列 | 查看 asynq 各队列实时积压、逐个任务的重试/归档/删除、批量清空归档任务；Lite 模式返回 `available=false` | `/system/admin/runtime/queues*` |
+| 任务队列 | 查看队列积压、逐个任务操作与归档；按资料查看入库/Wiki 进度及失败历史，单份或限量批量启动已有 Wiki 待办。Lite 模式仍可读取资料进度 | `/system/admin/runtime/queues*`、`/system/admin/runtime/documents*` |
 | 平台 API Key | 面向控制面自动化的 platform 作用域 Key，能力包括 `system_tenants_read/manage`、`system_settings_read/manage`、`system_runtime_read/manage`、`system_audit_read` | `/system/admin/api-keys` |
 | 系统审计日志 | `tenant_id = 0` 的平台级事件（改设置、提升/撤销管理员、队列操作等）。空间级审计接口按 tenant 过滤，看不到这些行 | `GET /system/admin/audit-log` |
 
@@ -46,6 +46,16 @@
 
 - **重置用户密码**（`POST /system/admin/users/reset-password`）：替换目标用户的本地密码并吊销其全部会话。**不能给自己重置**——自助改密码仍要求提供旧密码；
 - **批量套用默认存储配额**（`POST /system/admin/tenants/apply-default-storage-quota`）：把当前的默认配额写到所有已存在的空间上。该操作更新已有空间的配额数据。
+
+### 按资料查看进度与启动 Wiki
+
+「任务队列」中的资料进度视图支持搜索资料标题、文件名和知识库名，并按未完成、失败或已完成筛选。入库状态与 Wiki 状态分别展示；详情仅显示当前处理轮次的阶段元数据，以及最近 50 条原始失败记录（每条错误预览最多 2048 字符）。恢复成功后历史记录仍保留，历史失败数量不代表当前状态。资料正文、任务载荷和阶段输入输出不在此视图中返回。
+
+存在可领取 Wiki 待办、已完成主要入库阶段且已启用 Wiki 的资料，可点击「立即整理」。批量启动接受 1–100 份，沿当前搜索范围优先安排等待最久的资料；已被 Worker 领取的资料会跳过。重复请求使用稳定任务 ID 去重。返回的数量表示队列已接收，Wiki 完成进度需继续观察。
+
+启动沿用现有 Worker、知识库并发和模型限制；原待办内容、重试次数和失败归档保留。没有可启动待办的失败资料仍需通过现有资料重试流程处理。批量数量限制本次安排的资料数，自动 Worker 会继续处理其他积压。队列部分不可用时，提示会包含已接收数量，可刷新后再次操作。
+
+该视图属于系统管理员的运行元数据权限；平台 API Key 分别要求 `system_runtime_read` 和 `system_runtime_manage`。资料进度直接读取数据库，在 Lite 模式及 Redis Inspector 不可用时仍可查看。
 
 ### 管理平台用户
 

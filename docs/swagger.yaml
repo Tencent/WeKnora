@@ -166,6 +166,109 @@ definitions:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.EnvVarView'
         type: array
     type: object
+  github_com_Tencent_WeKnora_internal_application_service.DocumentFailure:
+    properties:
+      fail_count:
+        type: integer
+      failed_at:
+        type: string
+      id:
+        type: integer
+      last_error:
+        type: string
+      task_type:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_application_service.DocumentProgress:
+    properties:
+      attempt:
+        type: integer
+      can_start:
+        type: boolean
+      failure_count:
+        type: integer
+      id:
+        type: string
+      ingestion_status:
+        type: string
+      knowledge_base_id:
+        type: string
+      knowledge_base_name:
+        type: string
+      parse_status:
+        type: string
+      stages:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentStageProgress'
+        type: array
+      tenant_id:
+        type: integer
+      title:
+        type: string
+      updated_at:
+        type: string
+      wiki_pending:
+        type: integer
+      wiki_retries:
+        type: integer
+      wiki_status:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_application_service.DocumentProgressDetail:
+    properties:
+      document:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentProgress'
+      failures:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentFailure'
+        type: array
+      has_more_failures:
+        type: boolean
+    type: object
+  github_com_Tencent_WeKnora_internal_application_service.DocumentProgressResponse:
+    properties:
+      documents:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentProgress'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_application_service.DocumentStageProgress:
+    properties:
+      error_code:
+        type: string
+      finished_at:
+        type: string
+      name:
+        type: string
+      status:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_application_service.DocumentWikiStartRequest:
+    properties:
+      count:
+        type: integer
+      knowledge_base_id:
+        type: string
+      knowledge_id:
+        type: string
+      search:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_application_service.DocumentWikiStartResult:
+    properties:
+      already_queued:
+        type: integer
+      requested:
+        type: integer
+      started:
+        type: integer
+    type: object
   github_com_Tencent_WeKnora_internal_application_service.EnvVarView:
     properties:
       description:
@@ -27460,6 +27563,147 @@ paths:
             additionalProperties: true
             type: object
       summary: Revoke system administrator privileges from a user
+      tags:
+      - System Admin
+  /system/admin/runtime/documents:
+    get:
+      description: SystemAdmin metadata view with separate current attempts and historical
+        failures. No raw payloads.
+      parameters:
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 25
+        description: Page size, at most 100
+        in: query
+        name: page_size
+        type: integer
+      - default: unfinished
+        description: Document filter
+        enum:
+        - all
+        - unfinished
+        - failed
+        - completed
+        in: query
+        name: status
+        type: string
+      - description: Knowledge-base ID
+        in: query
+        name: kb_id
+        type: string
+      - description: Title, filename or knowledge-base search, at most 200 characters
+        in: query
+        name: search
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentProgressResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - Bearer: []
+      summary: List document ingestion and durable Wiki progress
+      tags:
+      - System Admin
+  /system/admin/runtime/documents/wiki-start:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Schedules up to 100 eligible documents, oldest first, under existing worker claims and limits.
+        Ingestion and failure history are retained. Partial handoff errors include accepted counts.
+      parameters:
+      - description: One knowledge ID or a bounded count and optional filters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentWikiStartRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentWikiStartResult'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentWikiStartResult'
+              type: object
+      security:
+      - Bearer: []
+      summary: Request immediate Wiki work for existing durable document operations
+      tags:
+      - System Admin
+  /system/admin/runtime/documents/{knowledge_id}:
+    get:
+      description: Returns up to 50 original failures with bounded error previews.
+        Excludes bodies and task payloads.
+      parameters:
+      - description: Knowledge ID
+        in: path
+        name: knowledge_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentProgressDetail'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - Bearer: []
+      summary: Read a document's current stages and historical failures
       tags:
       - System Admin
   /system/admin/runtime/queues:

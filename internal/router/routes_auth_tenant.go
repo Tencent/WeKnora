@@ -336,6 +336,14 @@ func RegisterSystemAdminRoutes(
 		g.apiKeyRoute(adminRoutes, http.MethodGet, "/runtime/queues",
 			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeRead, types.APIKeyCapabilitySystemRuntimeManage),
 			handler.GetRuntimeQueues)
+		g.apiKeyRoute(adminRoutes, http.MethodGet, "/runtime/documents",
+			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeRead, types.APIKeyCapabilitySystemRuntimeManage),
+			handler.ListDocumentProgress)
+		g.apiKeyRoute(adminRoutes, http.MethodGet, "/runtime/documents/:knowledge_id",
+			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeRead, types.APIKeyCapabilitySystemRuntimeManage),
+			handler.GetDocumentProgress)
+		g.apiKeyRoute(adminRoutes, http.MethodPost, "/runtime/documents/wiki-start",
+			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeManage), handler.StartDocumentWiki)
 		g.apiKeyRoute(adminRoutes, http.MethodGet, "/runtime/queues/:queue/tasks",
 			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeRead, types.APIKeyCapabilitySystemRuntimeManage),
 			handler.ListRuntimeTasks)
