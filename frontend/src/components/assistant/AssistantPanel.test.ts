@@ -89,6 +89,7 @@ async function fixture(
     },
   })
   const viewport = { innerWidth: 1440, innerHeight: 1000, addEventListener() {}, removeEventListener() {} }
+  const route = vue.reactive({ name: '', params: {} as Record<string, string> })
   const floatingDrag = evaluate(dragScript, { vue }, {
     window: viewport,
     ResizeObserver: class { observe() {} disconnect() {} },
@@ -96,6 +97,7 @@ async function fixture(
   const component = evaluate(panelScript, {
     vue,
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
+    'vue-router': { useRoute: () => route },
     'tdesign-vue-next': {
       MessagePlugin: { error: (message: string) => errors.push(message) },
       DialogPlugin: { confirm: (options: any) => { dialogs.push(options); return { destroy() {} } } },
@@ -183,8 +185,98 @@ async function fixture(
     await flush()
   }
   await flush()
-  return { workspaceChanged: () => workspaceChanged?.(), workspaceRefreshes: () => workspaceRefreshes, auth, assistant, mounted, sent, menuEntries, sessionStorage, localStorage, findAll, click, listCalls, deleted, dialogs, errors, close: () => app.unmount() }
+  return { workspaceChanged: () => workspaceChanged?.(), workspaceRefreshes: () => workspaceRefreshes, route, auth, assistant, mounted, sent, menuEntries, sessionStorage, localStorage, findAll, click, listCalls, deleted, dialogs, errors, close: () => app.unmount() }
 }
+
+test('welcome questions change with pages and toolbox tabs without starting a conversation', async () => {
+  const f = await fixture()
+  try {
+    f.assistant.open()
+    await flush()
+    const questions = () => f.findAll(node => node.props.class === 'assistant-starter')
+      .map(node => node.text?.replace('assistant.starters.', ''))
+    const general = ['releaseHighlights', 'gettingStarted', 'workflow']
+    assert.deepEqual(questions(), general)
+    const pages: Array<[string, Record<string, string>, string[]]> = [
+      ['knowledgeBaseList', {}, ['knowledgeOverview', 'knowledgeType', 'knowledgeOrganize']],
+      ['agentList', {}, ['agents', 'agentCreate', 'agentChoose']],
+      ['automationList', {}, ['automationIdeas', 'automationCreate', 'automationOverview']],
+      ['automationList', { automationId: 'weekly' }, ['automationSummary', 'automationSchedule', 'automationImprove']],
+      ['toolbox', { section: 'skills' }, ['skillFind', 'skillAdd', 'skillUse']],
+      ['toolbox', { section: 'mcp' }, ['mcpFind', 'mcpSetup', 'mcpExamples']],
+      ['toolbox', { section: 'browserconnection' }, ['browserConnect', 'browserTasks', 'browserSafety']],
+      ['chat', {}, ['chatSummary', 'chatOpenQuestions', 'chatTodos']],
+    ]
+    for (const [name, params, expected] of pages) {
+      f.route.name = name
+      f.route.params = params
+      f.assistant.setPageTitle(`${name}/${params.section || params.automationId || ''}`)
+      await flush()
+      assert.deepEqual(questions(), expected, `questions for ${name}/${JSON.stringify(params)}`)
+    }
+    f.assistant.dismissPageContext()
+    await flush()
+    assert.deepEqual(questions(), general, 'dismissed page context does not influence suggestions')
+    f.assistant.restorePageContext()
+    f.assistant.setPageAccess(false)
+    await flush()
+    assert.deepEqual(questions(), general, 'page access off also disables route-based suggestions')
+    assert.equal(f.mounted.length, 0)
+    assert.equal(f.sent.length, 0)
+  } finally { f.close() }
+})
+
+test('open resources and dialogs have their own questions and return to page suggestions when closed', async () => {
+  const f = await fixture()
+  try {
+    f.route.name = 'agentList'
+    f.assistant.setPageTitle('Agents')
+    const owner = Symbol('open-resource')
+    const cases: Array<[Record<string, string>, string[]]> = [
+      [{ page: 'settings_models', modelId: 'model' }, ['modelFit', 'modelCheck', 'modelUsage']],
+      [{ page: 'settings_models' }, ['modelSetup', 'modelTypes', 'modelUsage']],
+      [{ page: 'mcp_services', mcpServiceId: 'mcp' }, ['mcpTools', 'mcpUsage', 'mcpCheck']],
+      [{ page: 'mcp_services' }, ['mcpFind', 'mcpSetup', 'mcpExamples']],
+      [{ agentId: 'agent' }, ['agentConfig', 'agentModel', 'agentKnowledge']],
+      [{ knowledgeBaseId: 'kb', wikiSlug: 'page' }, ['wikiSummary', 'wikiSources', 'wikiIssues']],
+      [{ knowledgeBaseId: 'kb', knowledgeId: 'document' }, ['documentSummary', 'documentSteps', 'documentFaq']],
+      [{ knowledgeBaseId: 'kb', section: 'faq' }, ['faqCoverage', 'faqDuplicates', 'faqImprove']],
+      [{ knowledgeBaseId: 'kb' }, ['knowledgeTopics', 'recentActivity', 'knowledgeGaps']],
+      [{ chatSessionId: 'chat', messageId: 'answer' }, ['messageSources', 'messageCheck', 'messageReuse']],
+    ]
+    const questions = () => f.findAll(node => node.props.class === 'assistant-starter')
+      .map(node => node.text?.replace('assistant.starters.', ''))
+    for (const [context, expected] of cases) {
+      f.assistant.publishPageContext(owner, context)
+      await flush()
+      assert.deepEqual(questions(), expected, `questions for ${JSON.stringify(context)}`)
+    }
+    f.assistant.retractPageContext(owner)
+    await flush()
+    assert.deepEqual(questions(), ['agents', 'agentCreate', 'agentChoose'])
+    f.route.name = 'toolbox'
+    f.route.params = { section: 'mcp' }
+    f.assistant.publishPageContext(owner, { agentId: 'agent' })
+    await flush()
+    assert.deepEqual(questions(), ['agentConfig', 'agentModel', 'agentKnowledge'], 'an open agent takes precedence over the underlying MCP tab')
+    assert.equal(f.sent.length, 0)
+  } finally { f.close() }
+})
+
+test('the current-version question starts one conversation only when selected', async () => {
+  const f = await fixture()
+  try {
+    f.assistant.open()
+    await flush()
+    assert.equal(f.sent.length, 0)
+    const question = f.findAll(node => node.text === 'assistant.starters.releaseHighlights')[0]
+    assert.ok(question)
+    question.props.onClick()
+    await flush()
+    assert.equal(f.sent.length, 1)
+    assert.equal(f.sent[0].query, 'assistant.starters.releaseHighlights')
+  } finally { f.close() }
+})
 
 test('layout and width persist, with the width kept within bounds', async () => {
   const f = await fixture()

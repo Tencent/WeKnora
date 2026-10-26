@@ -14,6 +14,7 @@ const ROUTE_TITLE_KEYS: Record<string, string> = {
   home: 'menu.knowledgeBase',
   artifactLibrary: 'menu.artifacts',
   agentList: 'menu.agents',
+  automationList: 'menu.automations',
   toolbox: 'toolbox.title',
   globalCreatChat: 'menu.newChat',
   kbCreatChat: 'menu.newChat',
