@@ -48,7 +48,6 @@ services:
         - VERSION_ARG=${VERSION_ARG:-}
         - COMMIT_ID_ARG=${COMMIT_ID_ARG:-}
         - BUILD_TIME_ARG=${BUILD_TIME_ARG:-}
-        - GO_VERSION_ARG=${GO_VERSION_ARG:-}
     container_name: WeKnora-app
     ports:
       - "${APP_PORT:-8080}:8080"
@@ -429,6 +428,8 @@ services:
 
   docreader:
     image: wechatopenai/weknora-docreader:${WEKNORA_VERSION:-latest}
+    # start_all.sh supplies these when building from source; direct Compose
+    # builds can set them explicitly to identify the resulting image.
     build:
       context: .
       dockerfile: docker/Dockerfile.docreader
@@ -436,6 +437,8 @@ services:
         - APT_MIRROR=${APT_MIRROR:-}
         - PLAYWRIGHT_DOWNLOAD_HOST=${PLAYWRIGHT_DOWNLOAD_HOST:-}
         - PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST=${PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST:-}
+        - VERSION_ARG=${DOCREADER_VERSION:-unknown}
+        - COMMIT_ID_ARG=${DOCREADER_COMMIT_ID:-unknown}
     container_name: WeKnora-docreader
     # docreader gRPC ships without auth/TLS and is only consumed by the app
     # container over the WeKnora-network (DOCREADER_ADDR defaults to

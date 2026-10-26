@@ -4672,6 +4672,8 @@ export default {
     buildTimeDescription: 'システムがビルドされた日時',
     goVersionLabel: 'Goバージョン',
     goVersionDescription: 'バックエンドが使用しているGo言語のバージョン',
+    docreaderVersionLabel: 'Docreaderバージョン',
+    docreaderVersionDescription: '現在の文書解析サービス（weknora-docreader）のビルドバージョン',
     startedAtLabel: 'サービス起動日時',
     startedAtDescription: '現在のバックエンドプロセスが最後に起動した日時',
     uptimeLabel: '稼働時間',

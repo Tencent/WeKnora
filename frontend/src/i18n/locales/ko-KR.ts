@@ -4335,6 +4335,8 @@ export default {
     buildTimeDescription: '시스템이 빌드된 시간',
     goVersionLabel: 'Go 버전',
     goVersionDescription: '백엔드에서 사용하는 Go 언어 버전',
+    docreaderVersionLabel: 'Docreader 버전',
+    docreaderVersionDescription: '현재 문서 분석 서비스(weknora-docreader)의 빌드 버전',
     startedAtLabel: '서비스 시작 시각',
     startedAtDescription: '현재 백엔드 프로세스가 마지막으로 시작된 시각',
     uptimeLabel: '가동 시간',

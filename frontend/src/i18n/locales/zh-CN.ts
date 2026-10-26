@@ -4337,6 +4337,8 @@ export default {
     buildTimeDescription: '系统构建的时间',
     goVersionLabel: 'Go 版本',
     goVersionDescription: '后端使用的 Go 语言版本',
+    docreaderVersionLabel: 'Docreader 版本',
+    docreaderVersionDescription: '当前文档解析服务（weknora-docreader）的构建版本号',
     startedAtLabel: '服务启动时间',
     startedAtDescription: '当前后端进程最近一次启动的时刻',
     uptimeLabel: '运行时长',

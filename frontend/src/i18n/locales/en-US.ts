@@ -4672,6 +4672,8 @@ export default {
     buildTimeDescription: 'Time when the system was built',
     goVersionLabel: 'Go Version',
     goVersionDescription: 'Go language version used by the backend',
+    docreaderVersionLabel: 'Docreader Version',
+    docreaderVersionDescription: 'Build version of the current document parsing service (weknora-docreader)',
     startedAtLabel: 'Service started at',
     startedAtDescription: 'When the current backend process last started',
     uptimeLabel: 'Uptime',

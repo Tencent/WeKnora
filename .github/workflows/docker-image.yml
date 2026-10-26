@@ -77,6 +77,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Prepare version info
+        id: version
+        run: |
+          eval "$(./scripts/get_version.sh env)"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "commit_id=$COMMIT_ID" >> $GITHUB_OUTPUT
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -99,6 +106,9 @@ jobs:
           platforms: linux/amd64,linux/arm64
           file: docker/Dockerfile.docreader
           context: .
+          build-args: |
+            VERSION_ARG=${{ steps.version.outputs.version }}
+            COMMIT_ID_ARG=${{ steps.version.outputs.commit_id }}
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha,scope=build-docreader

@@ -156,6 +156,9 @@ build_docreader_image() {
     log_info "构建文档读取器镜像 (weknora-docreader)..."
     
     cd "$PROJECT_ROOT"
+
+    # 与 app 镜像使用同一份 VERSION 和 Git 提交信息。
+    get_version_info
     
     docker build \
         --platform $PLATFORM \
@@ -164,6 +167,8 @@ build_docreader_image() {
         --build-arg APT_MIRROR="${APT_MIRROR:-}" \
         --build-arg PLAYWRIGHT_DOWNLOAD_HOST="${PLAYWRIGHT_DOWNLOAD_HOST:-}" \
         --build-arg PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST="${PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST:-}" \
+        --build-arg VERSION_ARG="$VERSION" \
+        --build-arg COMMIT_ID_ARG="$COMMIT_ID" \
         -f docker/Dockerfile.docreader \
         -t wechatopenai/weknora-docreader:latest \
         .

@@ -4335,6 +4335,8 @@ export default {
     buildTimeDescription: 'Время, когда система была собрана',
     goVersionLabel: 'Версия Go',
     goVersionDescription: 'Версия языка Go, используемая backend',
+    docreaderVersionLabel: 'Версия Docreader',
+    docreaderVersionDescription: 'Версия сборки текущего сервиса обработки документов (weknora-docreader)',
     startedAtLabel: 'Время запуска сервиса',
     startedAtDescription: 'Момент последнего запуска текущего процесса backend',
     uptimeLabel: 'Время работы',
