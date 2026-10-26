@@ -5,6 +5,7 @@
 package modelcontext
 
 import (
+	"encoding/json"
 	"fmt"
 	"html"
 	"regexp"
@@ -109,7 +110,7 @@ func (r *sourceRegistry) CompactPublicCitations(text string, evidence bool) stri
 	if r == nil || text == "" {
 		return text
 	}
-	text = publicKBTagRE.ReplaceAllStringFunc(text, func(tag string) string {
+	text = publicKBTagRE.ReplaceAllStringFunc(text, withJSONCitationEscaping(func(tag string) string {
 		chunkID := publicAttr(chunkAttrRE, tag)
 		if chunkID == "" {
 			return tag
@@ -120,15 +121,34 @@ func (r *sourceRegistry) CompactPublicCitations(text string, evidence bool) stri
 			DocumentTitle:   publicAttr(docAttrRE, tag),
 		}, evidence)
 		return `<ref id="` + handle + `"/>`
-	})
-	return publicWebTagRE.ReplaceAllStringFunc(text, func(tag string) string {
+	}))
+	return publicWebTagRE.ReplaceAllStringFunc(text, withJSONCitationEscaping(func(tag string) string {
 		rawURL := publicAttr(urlAttrRE, tag)
 		if rawURL == "" {
 			return tag
 		}
 		handle := r.registerWeb(rawURL, publicAttr(titleAttrRE, tag), evidence)
 		return `<ref id="` + handle + `"/>`
-	})
+	}))
+}
+
+// withJSONCitationEscaping preserves one layer of JSON string escaping around a citation.
+func withJSONCitationEscaping(rewrite func(string) string) func(string) string {
+	return func(tag string) string {
+		if !jsonCitationTagRE.MatchString(tag) {
+			return rewrite(tag)
+		}
+		var decoded string
+		if err := json.Unmarshal([]byte(`"`+tag+`"`), &decoded); err != nil {
+			return ""
+		}
+		var encoded strings.Builder
+		encoder := json.NewEncoder(&encoded)
+		// Keep angle brackets visible to the citation scanner when this output is replayed.
+		encoder.SetEscapeHTML(false)
+		_ = encoder.Encode(rewrite(decoded))
+		return encoded.String()[1 : encoded.Len()-2] // Remove the JSON quotes and encoder newline.
+	}
 }
 
 func publicAttr(expression *regexp.Regexp, tag string) string {
@@ -145,6 +165,8 @@ var (
 	modelKBTagRE   = regexp.MustCompile(`(?is)<kb(?:\s|$)[^>]*(?:>|$)`)
 	modelWebTagRE  = regexp.MustCompile(`(?is)<web(?:\s|$)[^>]*(?:>|$)`)
 )
+
+var jsonCitationTagRE = regexp.MustCompile(`(?i)^<(?:ref|kb|web)\s+[a-z_]+\s*=\s*\\"`)
 
 var (
 	documentAttrRE    = regexp.MustCompile(`(?i)\bknowledge_id\s*=\s*"([^"]+)"`)
@@ -189,13 +211,13 @@ func (r *sourceRegistry) ExpandText(text string) string {
 	if !r.citationsEnabled {
 		return refCandidateRE.ReplaceAllString(text, "")
 	}
-	return refCandidateRE.ReplaceAllStringFunc(text, func(tag string) string {
+	return refCandidateRE.ReplaceAllStringFunc(text, withJSONCitationEscaping(func(tag string) string {
 		match := refTagRE.FindStringSubmatch(tag)
 		if len(match) != 2 {
 			return ""
 		}
 		return r.citationTag(match[1])
-	})
+	}))
 }
 
 // citationTag renders the public citation for a handle backed by current
@@ -261,9 +283,7 @@ func (d *citationStreamExpander) Feed(chunk string) string {
 				break
 			}
 			tag := data[:end+1]
-			if refTagRE.MatchString(tag) {
-				out.WriteString(d.registry.ExpandText(tag))
-			}
+			out.WriteString(d.registry.ExpandText(tag))
 			data = data[end+1:]
 			continue
 		}

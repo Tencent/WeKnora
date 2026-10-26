@@ -2539,8 +2539,8 @@ func (s *TenantSkillService) markConfigSandboxesStale(
 				configID, err)
 		} else if entity != nil && !entity.Config.RebuildsExistingOnSkillChange() {
 			logger.Infof(markCtx,
-				"[skill] config %s skill_rollout=%s; leaving live sandboxes on the previous image",
-				configID, types.SkillRolloutNewSession)
+				"[skill] config %s keeps existing sandboxes on the previous image after skill changes",
+				configID)
 			return
 		}
 	}

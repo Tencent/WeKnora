@@ -38,7 +38,7 @@ func (t *sequenceTool) Execute(context.Context, json.RawMessage) (*types.ToolRes
 	return &types.ToolResult{Success: true, Output: out}, nil
 }
 
-func toolRound(name, args string) mockResponse {
+func toolCallResponse(name, args string) mockResponse {
 	return mockResponse{chunks: []types.StreamResponse{{
 		ResponseType: types.ResponseTypeAnswer,
 		ToolCalls: []types.LLMToolCall{{
@@ -61,7 +61,7 @@ func hasRepeatedToolNotice(opts *chat.ChatOptions) bool {
 func TestExecuteLoop_RepeatedSuccessfulToolCallsStopAtTheGuard(t *testing.T) {
 	rounds := make([]mockResponse, maxRepeatedToolRounds)
 	for i := range rounds {
-		rounds[i] = toolRound("shell_exec", `{"command":"grep -n x f | awk 'NR>10'"}`)
+		rounds[i] = toolCallResponse("shell_exec", `{"command":"grep -n x f | awk 'NR>10'"}`)
 	}
 	mock := &mockChat{responses: rounds}
 	engine := newTestEngine(t, mock, func(cfg *types.AgentConfig) {
@@ -95,7 +95,7 @@ func TestExecuteLoop_RepeatedCallsWithChangingResultsKeepRunning(t *testing.T) {
 	rounds := make([]mockResponse, 0, n+1)
 	outputs := make([]string, 0, n)
 	for i := 0; i < n; i++ {
-		rounds = append(rounds, toolRound("probe", `{}`))
+		rounds = append(rounds, toolCallResponse("probe", `{}`))
 		outputs = append(outputs, fmt.Sprintf("progress %d", i))
 	}
 	rounds = append(rounds, answer("done"))
@@ -192,4 +192,35 @@ func TestTrackRepeatedToolRound_OutputFilesNilVersusEmpty(t *testing.T) {
 	assert.Equal(t, 1, g.trackRepeatedToolRound(round(nil)))
 	assert.Equal(t, 1, g.trackRepeatedToolRound(round([]string{})), "empty is not the same as nil")
 	assert.Equal(t, 2, g.trackRepeatedToolRound(round([]string{})))
+}
+
+// An identical failing call trips both guards. The failed-call guidance from
+// #4334 speaks at the 3rd attempt, so the repeated-round notice stays quiet
+// there; if the model still does not change course, the turn stops at the
+// hard limit instead of running forever.
+func TestExecuteLoop_RepeatedFailedCallsGetOneNoticeThenStop(t *testing.T) {
+	rounds := make([]mockResponse, maxRepeatedToolRounds)
+	for i := range rounds {
+		rounds[i] = failedToolResponse(fmt.Sprintf("call-%d", i))
+	}
+	mock := &mockChat{responses: rounds}
+	engine := newTestEngine(t, mock, func(cfg *types.AgentConfig) {
+		cfg.MaxIterations = types.UnlimitedMaxIterations
+	})
+	tool := &alwaysFailingTool{BaseTool: agenttools.NewBaseTool(
+		"failing_browser", "always fails in this test", json.RawMessage(`{"type":"object"}`),
+	)}
+	engine.toolRegistry = agenttools.NewToolRegistry()
+	engine.toolRegistry.RegisterTool(tool)
+
+	state := &types.AgentState{}
+	_, err := engine.executeLoop(context.Background(), state, "q", emptyMessages(), nil, "sess", "msg")
+
+	require.NoError(t, err)
+	assert.Equal(t, maxRepeatedToolRounds, tool.calls)
+	assert.Equal(t, repeatedToolRoundsStoppedAnswer, state.FinalAnswer)
+	for i, opts := range mock.opts {
+		assert.False(t, hasRepeatedToolNotice(opts),
+			"the failed-call guidance already covers this streak (call %d)", i)
+	}
 }

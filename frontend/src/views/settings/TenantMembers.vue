@@ -500,7 +500,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
@@ -565,11 +565,15 @@ const searchQuery = ref('')
 const activeListTab = ref('members')
 /** 已应用到服务端筛选的检索词（相对输入框防抖） */
 const memberSearchQ = ref('')
+const MEMBER_SEARCH_DEBOUNCE_MS = 320
+const DEFAULT_MEMBERS_PAGE_SIZE = 20
 let memberSearchDebounceTimer: number | undefined
+let membersRequestSeq = 0
+let membersDisposed = false
 
 const membersTotal = ref(0)
 const membersPage = ref(1)
-const membersPageSize = ref(20)
+const membersPageSize = ref(DEFAULT_MEMBERS_PAGE_SIZE)
 
 const invitationsTotal = ref(0)
 const invitationsPage = ref(1)
@@ -795,26 +799,66 @@ function rememberMembersForAudit(rows: TenantMember[]) {
   }
 }
 
+/** 取消尚未发送的成员搜索；已发出的请求由序号校验丢弃迟到响应。 */
+function cancelMemberSearchDebounce() {
+  window.clearTimeout(memberSearchDebounceTimer)
+  memberSearchDebounceTimer = undefined
+}
+
+/** 输入或空间变化后，立即清除不再属于当前视图的列表状态。 */
+function invalidateMembersRequest() {
+  membersRequestSeq += 1
+  cancelMemberSearchDebounce()
+  members.value = []
+  membersTotal.value = 0
+  error.value = ''
+  loading.value = false
+}
+
+/** 仅当前空间、检索词和分页对应的请求可以更新成员列表。 */
 async function loadMembers() {
-  if (!activeTenantId.value) {
-    return
+  const tenantId = activeTenantId.value
+  if (membersDisposed || !tenantId) return
+
+  const rawQuery = searchQuery.value
+  const query = rawQuery.trim()
+  // 重试或分页恰好遇到防抖时，直接应用最新输入，避免再补发一次旧条件查询。
+  if (memberSearchDebounceTimer !== undefined || memberSearchQ.value !== query) {
+    membersPage.value = 1
   }
+  cancelMemberSearchDebounce()
+  memberSearchQ.value = query
+  const requestSeq = ++membersRequestSeq
+  const page = membersPage.value
+  const pageSize = membersPageSize.value
+  const ownsRequest = () => !membersDisposed
+    && requestSeq === membersRequestSeq
+    && tenantId === activeTenantId.value
+    && rawQuery === searchQuery.value
+    && query === memberSearchQ.value
+  // 分页组件可能先更新 v-model，下一拍才触发 change；这段间隙也不能接收旧响应。
+  const matchesRequest = () => ownsRequest()
+    && page === membersPage.value
+    && pageSize === membersPageSize.value
+  let responseAccepted = false
+
   loading.value = true
   error.value = ''
   try {
-    const resp = await listMembers(activeTenantId.value, {
-      page: membersPage.value,
-      page_size: membersPageSize.value,
-      q: memberSearchQ.value || undefined,
+    const resp = await listMembers(tenantId, {
+      page,
+      page_size: pageSize,
+      q: query || undefined,
     })
+    if (!matchesRequest()) return
+    responseAccepted = true
     if (resp.success && resp.data) {
       const total = resp.data.total ?? 0
-      const ps = resp.data.page_size ?? membersPageSize.value
+      const ps = resp.data.page_size ?? pageSize
       const safePs = Math.max(1, ps)
       const maxPage = Math.max(1, Math.ceil(total / safePs))
-      if (membersPage.value > maxPage) {
+      if (page > maxPage) {
         membersPage.value = maxPage
-        loading.value = false
         await loadMembers()
         return
       }
@@ -831,9 +875,14 @@ async function loadMembers() {
       error.value = resp.message || t('tenantMember.errors.generic')
     }
   } catch (err: any) {
+    if (!matchesRequest()) return
+    responseAccepted = true
     error.value = err?.message || t('tenantMember.errors.generic')
   } finally {
-    loading.value = false
+    // 已接收的响应可以校正分页；旧请求或页码回退前的父请求不能结束新请求的 loading。
+    if (ownsRequest() && (responseAccepted || matchesRequest())) {
+      loading.value = false
+    }
   }
 }
 
@@ -842,13 +891,22 @@ function onMembersPageChange() {
 }
 
 watch(searchQuery, () => {
-  if (!activeTenantId.value) return
-  window.clearTimeout(memberSearchDebounceTimer)
+  // 同一拍内清空再输入同词也要使旧查询失效，不能等防抖结束才递增序号。
+  invalidateMembersRequest()
+  if (membersDisposed || !activeTenantId.value) return
+  const scheduledSeq = membersRequestSeq
   memberSearchDebounceTimer = window.setTimeout(() => {
+    if (membersDisposed || scheduledSeq !== membersRequestSeq) return
+    memberSearchDebounceTimer = undefined
     memberSearchQ.value = searchQuery.value.trim()
     membersPage.value = 1
-    loadMembers()
-  }, 320)
+    void loadMembers()
+  }, MEMBER_SEARCH_DEBOUNCE_MS)
+}, { flush: 'sync' })
+
+onBeforeUnmount(() => {
+  membersDisposed = true
+  invalidateMembersRequest()
 })
 
 // ---- Pending invitations ------------------------------------------------
@@ -1440,17 +1498,29 @@ async function removeRow(row: TenantMember) {
 watch(
   activeTenantId,
   (id) => {
+    invalidateMembersRequest()
+    searchQuery.value = ''
+    memberSearchQ.value = ''
+    // 重置输入也会触发同步 watcher，取消它新建的防抖，交由本次空间加载处理。
+    cancelMemberSearchDebounce()
+    membersPage.value = 1
+    membersPageSize.value = DEFAULT_MEMBERS_PAGE_SIZE
+    for (const userId of Object.keys(memberDisplayByUserId)) {
+      delete memberDisplayByUserId[userId]
+    }
+    if (id) void loadMembers()
+  },
+  { immediate: true, flush: 'sync' },
+)
+
+// 邀请列表保留原有调度时序，等待同一拍的空间与角色信息全部更新后再判断权限。
+watch(
+  activeTenantId,
+  (id) => {
     if (id) {
-      searchQuery.value = ''
-      memberSearchQ.value = ''
-      window.clearTimeout(memberSearchDebounceTimer)
-      membersPage.value = 1
       invitationsPage.value = 1
-      membersPageSize.value = 20
       invitationsPageSize.value = 20
-      membersTotal.value = 0
       invitationsTotal.value = 0
-      loadMembers()
       loadInvitations()
     }
   },

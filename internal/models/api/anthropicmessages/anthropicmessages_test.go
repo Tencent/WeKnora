@@ -103,7 +103,7 @@ func TestBuildRequestBody_AdaptiveEffort(t *testing.T) {
 	})
 	out := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
 		&api.Options{ReasoningEffort: api.ReasoningXHigh}, false)
-	assert.Equal(t, map[string]any{"type": "adaptive"}, out["thinking"])
+	assert.Equal(t, map[string]any{"type": "adaptive", "display": "summarized"}, out["thinking"])
 	assert.Equal(t, map[string]any{"effort": "max"}, out["output_config"])
 	assert.Equal(t, float64(4096), out["max_tokens"])
 
@@ -128,7 +128,7 @@ func TestBuildRequestBody_ThinkingOffType(t *testing.T) {
 
 	on := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
 		&api.Options{ReasoningEffort: api.ReasoningHigh}, false)
-	assert.Equal(t, map[string]any{"type": "adaptive"}, on["thinking"])
+	assert.Equal(t, map[string]any{"type": "adaptive", "display": "summarized"}, on["thinking"])
 }
 
 func TestBuildRequestBody_NoThinkingKeepsSampling(t *testing.T) {
