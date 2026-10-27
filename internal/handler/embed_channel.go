@@ -224,7 +224,12 @@ func (h *EmbedChannelHandler) UpdateEmbedChannel(c *gin.Context) {
 			return
 		}
 	}
-	originsJSON, _ := json.Marshal(req.AllowedOrigins)
+	// json.Marshal(nil) yields "null", which the service would store and read
+	// back as an empty allowlist that denies every origin. Leave it nil.
+	var originsJSON []byte
+	if req.AllowedOrigins != nil {
+		originsJSON, _ = json.Marshal(req.AllowedOrigins)
+	}
 	update := &types.EmbedChannel{
 		Name:               req.Name,
 		AllowedOrigins:     originsJSON,

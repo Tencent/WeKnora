@@ -8,7 +8,7 @@ import (
 
 // WebSearchProviderRepository defines the repository interface for web search provider CRUD
 type WebSearchProviderRepository interface {
-	// Create creates a new web search provider
+	// Create creates a new web search provider, replacing the tenant default atomically when requested.
 	Create(ctx context.Context, provider *types.WebSearchProviderEntity) error
 	// GetByID retrieves a web search provider by ID within a tenant scope
 	GetByID(ctx context.Context, tenantID uint64, id string) (*types.WebSearchProviderEntity, error)
@@ -16,14 +16,12 @@ type WebSearchProviderRepository interface {
 	GetDefault(ctx context.Context, tenantID uint64) (*types.WebSearchProviderEntity, error)
 	// List lists all web search providers for a tenant
 	List(ctx context.Context, tenantID uint64) ([]*types.WebSearchProviderEntity, error)
-	// Update updates a web search provider
+	// Update updates a web search provider, replacing the tenant default atomically when requested.
 	Update(ctx context.Context, provider *types.WebSearchProviderEntity) error
 	// PatchSettings updates only explicitly selected display/default fields.
 	PatchSettings(ctx context.Context, provider *types.WebSearchProviderEntity, fields []string) error
 	// Delete deletes a web search provider (soft delete)
 	Delete(ctx context.Context, tenantID uint64, id string) error
-	// ClearDefault clears the default flag for all providers of a tenant, optionally excluding one
-	ClearDefault(ctx context.Context, tenantID uint64, excludeID string) error
 }
 
 // WebSearchProviderService defines the service interface for web search provider management.

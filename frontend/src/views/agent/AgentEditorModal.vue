@@ -198,19 +198,27 @@
             </div>
             <div class="setting-control setting-control-full" style="position: relative;">
               <!-- Agent模式：统一提示词（使用 {{web_search_status}} 占位符动态控制行为） -->
-              <div v-if="isAgentMode" class="textarea-with-template">
+              <div v-if="isAgentMode" class="textarea-with-template textarea-with-assistant">
                 <t-textarea ref="promptTextareaRef" v-model="formData.config.system_prompt"
                   :placeholder="systemPromptPlaceholder" :autosize="{ minRows: 10, maxRows: 25 }"
                   @input="handlePromptInput" class="system-prompt-textarea" />
+                <AssistantActionButton class="prompt-assistant-action"
+                  :label="$t(formData.config.system_prompt?.trim() ? 'assistant.actions.refinePrompt' : 'assistant.actions.writePrompt')"
+                  :query="$t(formData.config.system_prompt?.trim() ? 'assistant.prompts.refinePrompt' : 'assistant.prompts.writePrompt')"
+                  :selection="{ field: $t('agent.editor.systemPrompt'), text: formData.config.system_prompt || '' }" />
                 <PromptTemplateSelector type="agentSystemPrompt" position="corner"
                   :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
                   @reset-default="handleAgentSystemPromptResetDefault" />
               </div>
               <!-- 普通模式：单个提示词 -->
-              <div v-else class="textarea-with-template">
+              <div v-else class="textarea-with-template textarea-with-assistant">
                 <t-textarea ref="promptTextareaRef" v-model="formData.config.system_prompt"
                   :placeholder="systemPromptPlaceholder" :autosize="{ minRows: 10, maxRows: 25 }"
                   @input="handlePromptInput" class="system-prompt-textarea" />
+                <AssistantActionButton class="prompt-assistant-action"
+                  :label="$t(formData.config.system_prompt?.trim() ? 'assistant.actions.refinePrompt' : 'assistant.actions.writePrompt')"
+                  :query="$t(formData.config.system_prompt?.trim() ? 'assistant.prompts.refinePrompt' : 'assistant.prompts.writePrompt')"
+                  :selection="{ field: $t('agent.editor.systemPrompt'), text: formData.config.system_prompt || '' }" />
                 <PromptTemplateSelector type="systemPrompt" position="corner"
                   :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
                   @reset-default="handleSystemPromptTemplateSelect" />
@@ -1879,6 +1887,7 @@ import { MessagePlugin } from 'tdesign-vue-next';
 import { useModalShell } from '@/composables/useModalShell'
 import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import SettingsModalShell from '@/components/SettingsModalShell.vue'
+import AssistantActionButton from '@/components/assistant/AssistantActionButton.vue'
 import {
   createAgent,
   updateAgent,
@@ -6392,6 +6401,18 @@ const handleSave = async () => {
 .textarea-with-template {
   position: relative;
   width: 100%;
+}
+
+.textarea-with-assistant {
+  .prompt-assistant-action {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+  }
+
+  :deep(.t-textarea__inner) {
+    padding-bottom: 44px;
+  }
 }
 
 .intent-prompts-editor {

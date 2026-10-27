@@ -152,11 +152,18 @@ func minerUV1JobTerminal(status string) bool {
 
 // detectMinerUProtocol probes GET /v1/health. MinerU 4.0 answers 200 (or 503
 // while models are still preloading); older servers have no such route and
-// answer 404/405.
-func detectMinerUProtocol(ctx context.Context, client *http.Client, endpoint string) (minerUProtocol, error) {
+// answer 404/405. When the service sits behind an authenticating API gateway
+// or reverse proxy, the configured apiKey is attached as Authorization: Bearer.
+func detectMinerUProtocol(
+	ctx context.Context, client *http.Client, endpoint, apiKey string,
+) (minerUProtocol, error) {
+	endpoint = strings.TrimRight(endpoint, "/")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/v1/health", nil)
 	if err != nil {
 		return minerUProtocolLegacy, fmt.Errorf("create health request: %w", err)
+	}
+	if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -175,6 +182,15 @@ func detectMinerUProtocol(ctx context.Context, client *http.Client, endpoint str
 				truncateForLog(string(body), 300))
 		}
 		return minerUProtocolV1, nil
+	case http.StatusUnauthorized:
+		if apiKey == "" {
+			return minerUProtocolV1, fmt.Errorf("MinerU service requires authentication, please configure API key")
+		}
+		if msg := minerUV1ErrorMessage(body); msg != "" {
+			return minerUProtocolV1, fmt.Errorf("MinerU authentication failed (status 401): %s", msg)
+		}
+		return minerUProtocolV1, fmt.Errorf("MinerU /v1/health status 401: %s",
+			truncateForLog(string(body), 300))
 	case http.StatusNotFound, http.StatusMethodNotAllowed:
 		return minerUProtocolLegacy, nil
 	default:

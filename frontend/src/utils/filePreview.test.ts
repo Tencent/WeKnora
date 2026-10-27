@@ -5,6 +5,7 @@ import {
   getHighlightLang,
   getPreviewMimeType,
   isKnownPreviewableExt,
+  isValidUTF8,
   prettyPrintJson,
   resolveFilePreviewExt,
   resolvePreviewKind,
@@ -64,11 +65,73 @@ test('sniffPreview rejects NUL-containing binaries', () => {
   assert.equal(sniffPreview(Uint8Array.from([0x00, 0x01, 0x02, 0x03])).kind, 'unsupported')
 })
 
+test('isValidUTF8 rejects invalid scalar encodings so GBK CSV can fall back', () => {
+  // GBK for "蜡,1": accepting C0 AF as UTF-8 produces replacement characters.
+  const csv = Uint8Array.from([0xC0, 0xAF, 0x2C, 0x31])
+  assert.equal(isValidUTF8(csv), false)
+  assert.equal(new TextDecoder('gbk').decode(csv), '蜡,1')
+  for (const bytes of [
+    [0xC1, 0xBF], [0xE0, 0x80, 0xAF], [0xED, 0xA0, 0x80],
+    [0xF0, 0x80, 0x80, 0xAF], [0xF4, 0x90, 0x80, 0x80],
+    [0xF5, 0x80, 0x80, 0x80], [0x80],
+  ]) {
+    assert.equal(isValidUTF8(Uint8Array.from(bytes)), false, String(bytes))
+    assert.equal(sniffPreview(Uint8Array.from(bytes)).kind, 'unsupported', String(bytes))
+  }
+})
+
+test('isValidUTF8 only tolerates valid incomplete prefixes when requested', () => {
+  for (const bytes of [[0xC2], [0xE4, 0xB8], [0xF0, 0x9F, 0x98]]) {
+    assert.equal(isValidUTF8(Uint8Array.from(bytes)), false)
+    assert.equal(isValidUTF8(Uint8Array.from(bytes), true), true)
+  }
+  for (const bytes of [[0xC0], [0xF5], [0xE4, 0x41], [0xE0, 0x80], [0xED, 0xA0], [0xF4, 0x90]]) {
+    assert.equal(isValidUTF8(Uint8Array.from(bytes), true), false, String(bytes))
+  }
+})
+
+test('isValidUTF8 accepts valid Unicode including scalar boundaries', () => {
+  for (const text of ['', 'ASCII', '中文😀', '\u0080\u07FF\u0800\uD7FF\uE000\uFFFF', '\u{10000}\u{10FFFF}']) {
+    const bytes = new TextEncoder().encode(text)
+    assert.equal(isValidUTF8(bytes), true)
+    assert.equal(isValidUTF8(bytes, true), true)
+  }
+})
+
 test('pretty-print helpers only rewrite canonical JSON documents', () => {
   assert.equal(shouldPrettyPrintJson('json'), true)
   assert.equal(shouldPrettyPrintJson('jsonl'), false)
   assert.equal(prettyPrintJson('{"a":1}'), '{\n  "a": 1\n}')
   assert.equal(prettyPrintJson('not json'), 'not json')
+})
+
+test('JSON preview preserves numeric literals instead of rounding or replacing them', () => {
+  for (const number of [
+    '9007199254740993', '-9007199254740993', '9223372036854775807',
+    '0.1234567890123456789012345', '1e400', '1e-400', '-0', '1.2300',
+  ]) {
+    assert.equal(prettyPrintJson(`{"value":${number}}`), `{\n  "value": ${number}\n}`, number)
+  }
+})
+
+test('JSON preview formats nested containers without rewriting string contents', () => {
+  // Strings containing JSON punctuation and escaped quotes are indivisible tokens.
+  const ordinary = '{"items":[1,{"text":"a, b: [c] {d}","empty":[]}],"object":{},"ok":true,"nil":null}'
+  assert.equal(prettyPrintJson(ordinary), JSON.stringify(JSON.parse(ordinary), null, 2))
+  const escaped = String.raw`{"text":"comma, colon: quote\" slash\\ newline\n","id":9007199254740993}`
+  assert.equal(prettyPrintJson(escaped), String.raw`{
+  "text": "comma, colon: quote\" slash\\ newline\n",
+  "id": 9007199254740993
+}`)
+})
+
+test('JSON preview preserves top-level values and leaves invalid JSON unchanged', () => {
+  for (const value of ['9007199254740993', '1e400', '-0', 'null', 'true', '"text"', '[]', '{}']) {
+    assert.equal(prettyPrintJson(`  ${value}\n`), value)
+  }
+  for (const value of ['  {"id":01}', '{"id":1,}', '{"id":NaN}', '{"unfinished":', '  \n']) {
+    assert.equal(prettyPrintJson(value), value)
+  }
 })
 
 test('mime and highlight maps cover skill-generated html/csv', () => {

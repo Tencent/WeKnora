@@ -41,6 +41,14 @@ services:
       args:
         - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
         - WITH_ANYDOC=${WITH_ANYDOC:-1}
+        # Build metadata shown on the system-info page. start_all.sh injects
+        # these from git and the VERSION file; with a plain `docker compose
+        # build` leave them unset (version falls back to the VERSION file,
+        # the rest to "unknown").
+        - VERSION_ARG=${VERSION_ARG:-}
+        - COMMIT_ID_ARG=${COMMIT_ID_ARG:-}
+        - BUILD_TIME_ARG=${BUILD_TIME_ARG:-}
+        - GO_VERSION_ARG=${GO_VERSION_ARG:-}
     container_name: WeKnora-app
     ports:
       - "${APP_PORT:-8080}:8080"
@@ -83,8 +91,8 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-debug}
       # 日志文件路径（留空则只输出 stdout）；LLM_DEBUG_LOG 开启时同目录写 llm_debug.log
       - LOG_PATH=${LOG_PATH:-}
-      # 自定义日志格式模板（留空用内置默认格式）
-      - LOG_FORMAT=${LOG_FORMAT:-}
+      # 自定义日志格式模板，必须包含 %msg；显式留空用默认格式，未设置时兼容旧变量
+      - WEKNORA_LOG_FORMAT=${WEKNORA_LOG_FORMAT-${LOG_FORMAT:-}}
       # LLM 调试日志：true 写 LOG_PATH 同目录 llm_debug.log，或指定路径；留空关闭
       - LLM_DEBUG_LOG=${LLM_DEBUG_LOG:-false}
       # ========== 运行时基础 ==========
@@ -275,6 +283,8 @@ services:
       - BATCH_EMBED_SIZE=${BATCH_EMBED_SIZE:-}
       # VLM 单次 HTTP 请求超时（秒，默认 180）
       - VLM_HTTP_TIMEOUT_SECONDS=${VLM_HTTP_TIMEOUT_SECONDS:-}
+      # VLM 单次请求的补全 token 预算（默认 5000）
+      - VLM_MAX_TOKENS=${VLM_MAX_TOKENS:-}
       # LLM 流原始转储（排查上下文问题；1 启用，默认目录 ~/.weknora/investigate/llm-stream）
       - WEKNORA_LLM_STREAM_RAW_DUMP=${WEKNORA_LLM_STREAM_RAW_DUMP:-}
       - WEKNORA_LLM_STREAM_RAW_DUMP_DIR=${WEKNORA_LLM_STREAM_RAW_DUMP_DIR:-}
@@ -336,7 +346,7 @@ services:
       - WEKNORA_PADDLEOCR_VL_TIMEOUT=${WEKNORA_PADDLEOCR_VL_TIMEOUT:-}
       # 自建 MinerU 单次解析超时（Go duration，默认 1000s）
       - WEKNORA_MINERU_TIMEOUT=${WEKNORA_MINERU_TIMEOUT:-}
-      # MinerU 云端轮询解析结果的最长时间（Go duration，默认 600s）
+      # MinerU 云端每个批次/分片轮询解析结果的最长时间（Go duration，默认 30m）
       - WEKNORA_MINERU_CLOUD_TIMEOUT=${WEKNORA_MINERU_CLOUD_TIMEOUT:-}
       # PaddleOCR-VL 云端轮询解析结果的最长时间（Go duration，默认 600s）
       - WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT=${WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT:-}
@@ -467,6 +477,7 @@ services:
       - DOCREADER_PREPROCESS_MEMORY_MB=${DOCREADER_PREPROCESS_MEMORY_MB:-2048}
       - DOCREADER_PREPROCESS_MAX_PIXELS=${DOCREADER_PREPROCESS_MAX_PIXELS:-16000000}
       - DOCREADER_PREPROCESS_MAX_EDGE=${DOCREADER_PREPROCESS_MAX_EDGE:-2000}
+      - DOCREADER_PREPROCESS_PROBE_EDGE=${DOCREADER_PREPROCESS_PROBE_EDGE:-2000}
       # ========== 解析通用 ==========
       - DOCREADER_DOCX_MAX_PAGES=${DOCREADER_DOCX_MAX_PAGES:-0}
       - DOCREADER_MARKITDOWN_MAX_WORKERS=${DOCREADER_MARKITDOWN_MAX_WORKERS:-1}

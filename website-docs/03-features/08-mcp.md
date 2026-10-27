@@ -3,7 +3,7 @@
 MCP 用于智能体与外部工具之间的连接。WeKnora 支持接入外部 MCP 服务，也提供独立 MCP Server 供其他客户端调用：
 
 1. **WeKnora 作为 MCP 客户端**：在「工具箱 → MCP服务」中接入任意外部 MCP server（SSE / Streamable HTTP），其工具通过目录按需加载，供 Agent 在对话中调用。支持 API Key / Bearer / OAuth 2.0（含动态客户端注册与 PKCE，也可填写预注册客户端；支持以 JWT Bearer 断言代用户获取 token）三种认证策略、按工具粒度的启停与人工审批，以及会话内（in-conversation）OAuth 授权。
-2. **WeKnora 作为 MCP Server**：在「设置 → 发布集成 → MCP Server」中为当前空间创建一个或多个 MCP 端点，每个端点有独立的令牌、知识库范围和工具清单，Claude Desktop、Cursor、Claude Code、VS Code Copilot 等 MCP 客户端通过 Streamable HTTP 直接连接，无需额外部署进程。仓库 `mcp-server/` 目录下的 Python 服务是旧方案，已标记弃用。
+2. **WeKnora 作为 MCP Server**：在「设置 → 发布集成 → MCP Server」中为当前空间创建一个或多个 MCP 端点，每个端点有独立的令牌、知识库范围和工具清单，支持 Streamable HTTP 和 Bearer 请求头的客户端可直接连接，无需额外部署桥接进程；具体配置方式见下方说明。仓库 `mcp-server/` 目录下的 Python 服务是旧方案，已标记弃用。
 
 接入外部服务可扩展 WeKnora 智能体的工具；运行 WeKnora MCP Server 可让外部客户端使用知识库检索、问答和管理能力。
 
@@ -33,14 +33,16 @@ MCP 管理页支持按服务名称和卡片显示的用途说明搜索。搜索�
 
 ## 供外部客户端调用
 
-在「设置 → 发布集成 → MCP Server」新建端点：填写名称、选择可访问的知识库（留空为全部）、勾选要暴露的工具，并按需指定 `ask` 使用的默认 Agent（留空时使用内置快速问答）和每分钟调用上限（默认 60 次）。创建后会一次性展示令牌和地址 `/mcp/<endpoint_id>`，页面同时给出 Cursor / VS Code / Claude Desktop 的 `mcpServers` 配置、Claude Code 的一行命令，以及仅支持 stdio 的客户端通过 `mcp-remote` 桥接的写法。
+在「设置 → 发布集成 → MCP Server」新建端点：填写名称、选择可访问的知识库（留空为全部）、勾选要暴露的工具，并按需指定 `ask` 使用的默认 Agent（留空时使用内置快速问答）和每分钟调用上限（默认 60 次）。创建后会一次性展示令牌和地址 `/mcp/<endpoint_id>`，页面给出 Cursor 可用的 `mcpServers` JSON、VS Code 专用的 `servers` JSON、Claude Code 的一行命令，以及 STDIO 备用配置。将 VS Code 选项卡中的 JSON 写入工作区的 `.vscode/mcp.json`；若已有配置，请将对应条目合并到现有 `servers` 对象中，保留其他服务。该配置使用 `type: "http"`、端点 URL 和 `Authorization` 请求头，无需桥接进程。Claude Desktop 需在自定义连接器中填写可访问的 HTTPS 地址，并在可用时选择「无需登录」和 Request headers；该请求头功能为有限开放的测试版，并非所有组织都可用。
+
+仅支持 stdio，或无法使用原生 HTTP/Bearer 配置的客户端，可使用固定版本 `mcp-remote@0.15.1`。STDIO 示例在 `args` 中保留字面量 `Authorization:${WEKNORA_MCP_AUTH}`，完整的 `Bearer <token>` 填入对应服务的 `env.WEKNORA_MCP_AUTH`，避免将令牌直接写入命令参数。令牌仍保存在客户端配置中，请按凭证妥善管理。
 
 使用自定义反向代理时，除 `/api/` 外，还需将 `/mcp/` 原路径转发到 WeKnora 后端，保留 `Authorization` 和 MCP 协议头，并关闭响应缓冲、为长连接设置足够的读写超时。仓库自带的 Nginx、Vite 开发及预览配置已包含该代理，可直接使用网站域名连接，无需另行暴露后端 8080 端口。
 
 <Screenshot
   src="/screenshots/mcp-server-endpoint.png"
   caption="发布集成 → MCP Server：端点创建完成后的地址、令牌与客户端配置"
-  hint="新建端点后的结果页：一次性令牌与 /mcp/<endpoint_id> 地址、Cursor / Claude Desktop 的 mcpServers 配置与 Claude Code 命令；背景可见端点的知识库范围与四组工具勾选。" />
+  hint="新建端点后的结果页：一次性令牌与 /mcp/<endpoint_id> 地址、客户端配置与 Claude Code 命令；背景可见端点的知识库范围与四组工具勾选。" />
 
 一个空间可以创建多个端点。例如给客服团队一个只开检索和问答、只看两个知识库的端点，给内容团队另一个开了写入工具的端点。令牌可随时轮换，端点可随时停用，删除端点后使用它的客户端立即断开。
 
@@ -52,6 +54,24 @@ MCP 管理页支持按服务名称和卡片显示的用途说明搜索。搜索�
 | 问答 | `ask` | 只运行端点配置的默认 Agent（客户端不能自选 Agent；未配置时使用内置快速问答），服务端自动建会话，返回带引用的完整回答和 `session_id`，续聊时传回即可；不开启联网搜索 |
 | Wiki | `wiki_search`、`wiki_read_page`、`wiki_index` | 只对开启了 Wiki 的知识库生效；`wiki_search` 的 `query` 保持原有的正则语义（大小写不敏感），不是合法正则的文本按字面匹配；`regex=false` 强制字面匹配，`regex=true` 要求合法正则 |
 | 写入 | `add_document`、`update_document`、`delete_document` | 默认关闭；支持 Markdown 文本或 URL 导入 |
+
+`search_knowledge` 可通过可选的 `knowledge_ids` 字符串数组限定文档范围，三种 `mode` 均支持。先用 `list_documents` 或搜索结果取得真实文档 ID，再传入这些 ID；文档过滤在召回和候选数截断之前生效，同库其他文档不会参与此次检索。省略该参数时沿用整库检索。传入时数组必须非空，且不能包含空白 ID；ID 两端空白会被去除，重复 ID 自动去重。
+
+若同时传入 `knowledge_base_ids`，每个文档都必须属于所选知识库；仅检索这些文档，不会额外搜索所选库里的其他文档。不存在的文档、越权文档、与知识库选择冲突的文档或没有向量/关键词索引的文档都会返回错误，整次调用不会退回整库检索。共享知识库沿用端点授权和所属空间校验。
+
+例如，假设 `list_documents` 已返回 `doc-a` 和 `doc-b`，`tools/call` 的参数可以写为：
+
+```json
+{
+  "name": "search_knowledge",
+  "arguments": {
+    "query": "合同价格",
+    "mode": "hybrid",
+    "knowledge_ids": ["doc-a", "doc-b"],
+    "limit": 10
+  }
+}
+```
 
 `search_knowledge` 的结构化结果 `results[].chunk_type` 和文本结果的 `chunk_type` 属性保留命中片段的原始类型，例如 `text`、`summary`、`image_ocr`、`image_caption` 或 `image_vector`。空字符串表示类型未知，不能据此认定为原文；客户端可据类型决定是否补读文档正文。
 
@@ -73,7 +93,7 @@ MCP 管理页支持按服务名称和卡片显示的用途说明搜索。搜索�
 |---|---|---|
 | 代码位置 | `internal/mcp/` + handler/service/repository + `internal/agent/tools/` | `internal/mcpserver/` + `internal/middleware/mcp_endpoint_auth.go` + `internal/handler/mcp_endpoint.go` |
 | 协议库 | `github.com/mark3labs/mcp-go`（client） | `github.com/mark3labs/mcp-go`（server，Streamable HTTP，无状态模式） |
-| 传输 | SSE、Streamable HTTP（stdio 因安全禁用） | Streamable HTTP；stdio 客户端用 `mcp-remote` 桥接 |
+| 传输 | SSE、Streamable HTTP（stdio 因安全禁用） | Streamable HTTP；无法使用原生 HTTP/Bearer 时，可用 `mcp-remote@0.15.1` 作为 STDIO 备用配置 |
 | 认证 | API Key / Bearer / OAuth 2.0（DCR + PKCE，token AES 加密、按 principal 隔离） | 入站 `Authorization: Bearer mcp_…`，每个端点独立令牌（SHA-256 存储，可轮换） |
 | 安全控制 | 工具级人工审批、SSRF 校验、不可信输出前缀、DTO 级密钥隔离 | 端点级工具白名单（列表与调用双重校验）、知识库范围、每分钟限流、令牌只展示一次 |
 | 消费者 | WeKnora Agent（对话中自动调用） | Claude Desktop / Cursor / Claude Code / VS Code Copilot 等任意 MCP 客户端 |

@@ -264,7 +264,7 @@ func (r *messageRepository) UpdateMessage(ctx context.Context, message *types.Me
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&types.Message{}).Where(
 			"id = ? AND session_id = ?", message.ID, message.SessionID,
-		).Updates(message).Error; err != nil {
+		).Omit("context_checkpoint").Updates(message).Error; err != nil {
 			return err
 		}
 		// Updates skips zero values; written on its own so a resumed or
@@ -311,6 +311,9 @@ func (r *messageRepository) DeleteMessagesFrom(
 		}
 		if len(deleted) == 0 {
 			return nil
+		}
+		if err := invalidateDependentCheckpoints(tx, deleted[0]); err != nil {
+			return err
 		}
 		return scope().Delete(&types.Message{}).Error
 	})

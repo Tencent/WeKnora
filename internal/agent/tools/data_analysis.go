@@ -37,9 +37,9 @@ var dataAnalysisTool = BaseTool{
 		"the single table \"" + DataAnalysisTableName + "\"; write SQL against that table name and never put " +
 		"the document ID inside the SQL. For Excel files with multiple sheets, non-empty sheets are loaded into " +
 		"the same table and the source sheet name is exposed as a '__sheet_name' column so you can " +
-		"filter/aggregate per sheet. Only the .xlsx container is readable: a legacy binary .xls must be " +
-		"re-saved as .xlsx (or exported as .csv) before it can be analysed. If the user's question requires " +
-		"data statistics, convert the question into SQL and execute it.",
+		"filter/aggregate per sheet. A legacy binary .xls is converted to .xlsx before it is read; " +
+		"if that conversion fails, re-save the workbook as .xlsx or export the sheet as .csv. " +
+		"If the user's question requires data statistics, convert the question into SQL and execute it.",
 	schema: utils.GenerateSchema[DataAnalysisInput](),
 }
 
@@ -51,9 +51,9 @@ const excelSheetNameColumn = "__sheet_name"
 // .xls workbooks start with ("D0 CF 11 E0 A1 B1 1A E1").
 //
 // DuckDB's excel extension only reads the ZIP-based OOXML container
-// (.xlsx/.xlsm), so a genuine .xls has to be rejected up front: handed to
-// read_xlsx it fails with the opaque "No xl/workbook.xml found in xlsx file",
-// which says nothing about the real cause or what to do about it.
+// (.xlsx/.xlsm). A genuine .xls is converted before read_xlsx; if that
+// conversion fails, the caller gets an actionable error instead of
+// "No xl/workbook.xml found in xlsx file".
 var legacyXLSMagic = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
 
 // hasLegacyXLSContainer reports whether path holds an OLE2 compound document,
@@ -77,10 +77,9 @@ func hasLegacyXLSContainer(path string) bool {
 	return bytes.Equal(head, legacyXLSMagic)
 }
 
-// errLegacyBinaryXLS is the actionable failure returned for a binary .xls
-// workbook. The data analysis tool cannot read it, and silently reporting an
-// empty table (or leaking DuckDB's xlsx-internals error) leaves the model
-// guessing; naming the conversion to perform is what the caller can act on.
+// errLegacyBinaryXLS is returned when a binary .xls workbook cannot be
+// converted to .xlsx. Naming the conversion the caller can still do beats
+// DuckDB's "No xl/workbook.xml found in xlsx file".
 func errLegacyBinaryXLS() error {
 	return fmt.Errorf(
 		"legacy binary .xls workbooks are not supported by data analysis: " +
@@ -592,23 +591,27 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 // Note: requires the DuckDB 'excel' extension (for read_xlsx) and the
 // 'spatial' extension (for st_read_meta used to enumerate sheets).
 //
-// Binary BIFF .xls workbooks are rejected with an actionable error before
-// DuckDB is touched: the excel extension only reads the ZIP-based OOXML
-// container, so a real .xls would otherwise surface as "No xl/workbook.xml
-// found in xlsx file".
+// Binary BIFF .xls workbooks are converted to a temporary .xlsx before DuckDB
+// is touched. The excel extension only reads the ZIP-based OOXML container, so
+// a real .xls would otherwise surface as "No xl/workbook.xml found in xlsx
+// file". A workbook that cannot be converted returns an actionable error.
 func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, tableName string) (*TableSchema, error) {
 	logger.Infof(ctx, "[Tool][DataAnalysis] Loading Excel file '%s' into table '%s' for session %s", filename, tableName, t.sessionID)
 
-	if hasLegacyXLSContainer(filename) {
-		logger.Warnf(ctx,
-			"[Tool][DataAnalysis] Rejecting legacy binary .xls workbook '%s' (session=%s): "+
-				"DuckDB can only read the ZIP-based .xlsx container",
-			filename, t.sessionID,
-		)
-		return nil, errLegacyBinaryXLS()
-	}
-
 	if !t.loadedTables[tableName] {
+		if hasLegacyXLSContainer(filename) {
+			prepared, cleanup, err := prepareExcelForDuckDB(filename)
+			if err != nil {
+				logger.Warnf(ctx,
+					"[Tool][DataAnalysis] Could not convert legacy binary .xls workbook '%s' (session=%s): %v",
+					filename, t.sessionID, err,
+				)
+				return nil, errLegacyBinaryXLS()
+			}
+			defer cleanup()
+			filename = prepared
+		}
+
 		t.recordCreatedTable(tableName)
 		sheetNames, enumErr := t.listExcelSheets(ctx, filename)
 		if enumErr != nil {

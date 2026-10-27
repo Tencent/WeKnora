@@ -36,7 +36,7 @@ def process_image(image, limits):
     import numpy as np
     from PIL import Image, UnidentifiedImageError
 
-    from docreader.parser.image_preprocess import preprocess
+    from docreader.parser.image_preprocess import preprocess, warp_ordered
     from docreader.proto.docreader_pb2 import PreprocessImageResponse
 
     try:
@@ -56,11 +56,20 @@ def process_image(image, limits):
         height, width = bgr.shape[:2]
         if width * height > limits.max_pixels:
             return PreprocessImageResponse(fallback_needed=True, status="image_too_large")
-        scale = min(1.0, limits.max_edge / max(width, height))
-        if scale < 1:
-            bgr = cv2.resize(bgr, (max(1, round(width * scale)), max(1, round(height * scale))),
-                             interpolation=cv2.INTER_AREA)
-        out = preprocess(bgr)
+
+        # Detection only needs a probe: RapidOCR caps its own detector at 2000,
+        # so a probe at that size loses no localisation. The crop, however, must
+        # come from the ORIGINAL bytes — cropping the probe would scale every
+        # glyph by the probe ratio (a 500px block would come back at 250px).
+        probe = bgr
+        probe_scale = min(1.0, limits.probe_edge / max(width, height))
+        if probe_scale < 1:
+            probe = cv2.resize(
+                bgr,
+                (max(1, round(width * probe_scale)), max(1, round(height * probe_scale))),
+                interpolation=cv2.INTER_AREA,
+            )
+        out = preprocess(probe)
         fields = dict(
             theta=float(out.get("theta") or 0), residual=float(out.get("residual") or 0),
             n_boxes=int(out.get("n_boxes") or 0), n_kept=int(out.get("n_kept") or 0),
@@ -71,7 +80,27 @@ def process_image(image, limits):
                 fallback_needed=True, status=str(out.get("status", "unknown")), **fields)
         if fields["residual"] > 2:
             return PreprocessImageResponse(fallback_needed=True, status="low_quality", **fields)
-        ok, encoded = cv2.imencode(".jpg", out["rect"], [cv2.IMWRITE_JPEG_QUALITY, 92])
+        if probe is bgr:
+            rect = out["rect"]  # the crop already came from the original
+        else:
+            # `quad_input` is the content quad in probe coordinates, already
+            # ordered and padded; scale it back and crop the original image.
+            factor = np.array([width / probe.shape[1], height / probe.shape[0]], "float32")
+            quad = np.asarray(out["quad_input"], "float32").reshape(4, 2) * factor
+            rect = warp_ordered(bgr, quad)
+            if fields["flip"]:
+                rect = cv2.rotate(rect, cv2.ROTATE_180)
+        # The edge limit applies to the CROP, not to the source page: a small
+        # text block keeps its pixels even when the page around it is huge.
+        crop_scale = min(1.0, limits.max_edge / max(rect.shape[:2]))
+        if crop_scale < 1:
+            rect = cv2.resize(
+                rect,
+                (max(1, round(rect.shape[1] * crop_scale)),
+                 max(1, round(rect.shape[0] * crop_scale))),
+                interpolation=cv2.INTER_AREA,
+            )
+        ok, encoded = cv2.imencode(".jpg", rect, [cv2.IMWRITE_JPEG_QUALITY, 92])
         if not ok:
             return PreprocessImageResponse(fallback_needed=True, status="encode_failed", **fields)
         return PreprocessImageResponse(image=encoded.tobytes(), status="ok", **fields)

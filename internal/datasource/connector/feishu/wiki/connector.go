@@ -284,7 +284,7 @@ func (o *wikiOps) spaceDirPrefix(ctx context.Context, client *core.Client, space
 
 func (o *wikiOps) List(ctx context.Context, client *core.Client, resourceID string) ([]core.WikiNode, error, error) {
 	spaceID, nodeToken := parseWikiResourceID(resourceID)
-	nodes, err := client.ListWikiNodesRecursiveFrom(ctx, spaceID, nodeToken)
+	nodes, err := client.ListWikiNodesWithShortcuts(ctx, spaceID, nodeToken)
 	if err != nil {
 		var partial *core.PartialWikiNodeListError
 		if !errors.As(err, &partial) {
@@ -344,6 +344,9 @@ func (o *wikiOps) Fetch(
 	ctx context.Context, client *core.Client, n core.WikiNode, resourceID string,
 ) ([]*types.FetchedItem, error) {
 	spaceID, _ := parseWikiResourceID(resourceID)
+	if n.SpaceID != "" {
+		spaceID = n.SpaceID
+	}
 	items, err := fetchNodeContent(ctx, client, n, spaceID, resourceID, o.region, o.parseMode)
 	if err != nil {
 		return nil, err
@@ -387,6 +390,10 @@ func (o *wikiOps) EncodeCursor(times map[string]map[string]string, lastSync time
 func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, resourceID string, failures []core.WikiNodeListFailure) []types.FetchedItem {
 	for _, failure := range failures {
 		node := failure.Node
+		nodeSpaceID := node.SpaceID
+		if nodeSpaceID == "" {
+			nodeSpaceID = spaceID
+		}
 		title := node.Title
 		if title == "" {
 			title = node.NodeToken
@@ -398,7 +405,7 @@ func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, r
 			Metadata: core.FeishuErrorItemMeta(failure.Err, map[string]string{
 				"channel":       types.ChannelFeishu,
 				"node_token":    node.NodeToken,
-				"space_id":      spaceID,
+				"space_id":      nodeSpaceID,
 				"failure_stage": "list_children",
 			}),
 		})

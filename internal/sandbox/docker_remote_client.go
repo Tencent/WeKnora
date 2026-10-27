@@ -47,6 +47,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
@@ -1048,13 +1049,30 @@ func (c *DockerRemoteClient) dockerFileOpFailed(
 	}
 }
 
-// containerVanished reports whether the Engine confirms the container is
-// gone (404). A transport or daemon error returns false — only a confirmed
-// disappearance may reclassify, keeping unknown errors on the safe side of
-// CanReplaceRemoteBinding's allow-list.
+// containerVanished reports whether the Engine confirms the container can no
+// longer run this filesystem op. A 404 means the idle sweep already removed
+// it. exited, dead, and removing mean the sweep stopped it and has not
+// finished deleting it yet: exec then dies with a non-zero status while
+// inspect still succeeds, which used to stay InvalidRequest and block the
+// rebind (#4336). A transport or daemon error returns false — only a
+// confirmed disappearance may reclassify, keeping unknown errors on the safe
+// side of CanReplaceRemoteBinding's allow-list. paused and created stay
+// put so a container that can be resumed is not replaced.
 func (c *DockerRemoteClient) containerVanished(ctx context.Context, id, op string) bool {
-	_, err := c.api.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
-	return err != nil && IsRemoteNotFound(dockerError(op, err))
+	inspected, err := c.api.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+	if err != nil {
+		return IsRemoteNotFound(dockerError(op, err))
+	}
+	state := inspected.Container.State
+	if state == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(string(state.Status))) {
+	case "exited", "dead", "removing":
+		return true
+	default:
+		return false
+	}
 }
 
 // MakeDir creates a directory (and its parents) inside the sandbox.
@@ -1334,12 +1352,18 @@ func dockerEnvSlice(env map[string]string) []string {
 }
 
 // firstNonEmptyLine trims a command's stderr down to something a user-facing
-// error can carry.
+// error can carry. The byte cap keeps one runaway line out of the error, and
+// the trailing partial rune (if the cap lands inside a multi-byte character)
+// is dropped so the surfaced message stays valid UTF-8.
 func firstNonEmptyLine(output string) string {
 	for _, line := range strings.Split(output, "\n") {
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
 			if len(trimmed) > 200 {
-				return trimmed[:200] + "…"
+				cut := trimmed[:200]
+				for len(cut) > 0 && !utf8.ValidString(cut) {
+					cut = cut[:len(cut)-1]
+				}
+				return cut + "…"
 			}
 			return trimmed
 		}

@@ -1,6 +1,10 @@
 package docparser
 
-import "testing"
+import (
+	"encoding/csv"
+	"strings"
+	"testing"
+)
 
 func TestCSVToMarkdown(t *testing.T) {
 	cases := []struct {
@@ -66,4 +70,71 @@ func TestCSVToMarkdown(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCSVToMarkdownRejectsExcessivePadding(t *testing.T) {
+	// 20,000 one-column rows plus one 20,000-column row: 80 KB of input
+	// whose table would be padded into over a gigabyte of mostly-empty
+	// cells. The budget must reject it before any of that is rendered.
+	var in strings.Builder
+	in.WriteString(strings.Repeat("x\n", 20000))
+	in.WriteString(strings.Repeat(",", 19999))
+	in.WriteString("x\n")
+
+	md, err := csvToMarkdown([]byte(in.String()))
+	if err == nil {
+		t.Fatalf("csvToMarkdown rendered %d bytes, want a size-limit error", len(md))
+	}
+	if md != "" {
+		t.Errorf("csvToMarkdown on rejection returned %d bytes of output, want none", len(md))
+	}
+	if !strings.Contains(err.Error(), "would render") || !strings.Contains(err.Error(), "limit") {
+		t.Errorf("csvToMarkdown error %q does not name the rendered size and the limit", err)
+	}
+}
+
+func TestCSVMarkdownSizeMatchesRender(t *testing.T) {
+	// Cells chosen to exercise every csvCellReplacer escape: a pipe, a
+	// backslash before it, a quoted newline, and a lone carriage return.
+	in := "a|b,\"x\\|y\nz\",w\r\n1,p|q,\"lone\rcr\"\n"
+
+	records, width := parseCSVForBudget(t, in)
+	contentBytes := 0
+	for _, record := range records {
+		for _, cell := range record {
+			contentBytes += len(csvCellReplacer.Replace(cell))
+		}
+	}
+	projected, err := csvMarkdownSize(len(records), width, contentBytes, maxCSVMarkdownBytes)
+	if err != nil {
+		t.Fatalf("csvMarkdownSize: %v", err)
+	}
+
+	md, err := csvToMarkdown([]byte(in))
+	if err != nil {
+		t.Fatalf("csvToMarkdown(%q) error: %v", in, err)
+	}
+	if len(md) != projected {
+		t.Errorf("csvMarkdownSize = %d, rendered table is %d bytes", projected, len(md))
+	}
+}
+
+// parseCSVForBudget re-parses input with the same reader settings
+// csvToMarkdown uses, so the projection can be checked against a real
+// render.
+func parseCSVForBudget(t *testing.T, in string) ([][]string, int) {
+	t.Helper()
+	reader := csv.NewReader(strings.NewReader(in))
+	reader.LazyQuotes = true
+	reader.TrimLeadingSpace = true
+	reader.FieldsPerRecord = -1
+	records, err := reader.ReadAll()
+	if err != nil {
+		t.Fatalf("parseCSVForBudget(%q) error: %v", in, err)
+	}
+	width := 0
+	for _, record := range records {
+		width = max(width, len(record))
+	}
+	return records, width
 }

@@ -17,12 +17,14 @@ import {
 import { MessagePlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
 import { normalizeSpuriousTablePrefixes } from '@/utils/markdownTableNormalize';
+import { stripDuplicateLeadingH1 } from '@/utils/markdownTitleDedupe';
 import { ensureLiteralSingleTildeOnGlobalMarked } from '@/utils/markedLiteralTilde';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { diffWikiLines, type WikiDiffLine } from '@/utils/wikiLineDiff';
 import { useI18n } from 'vue-i18n';
 import { useAuthStore } from '@/stores/auth';
 import { useAssistantStore } from '@/stores/assistant';
+import AssistantActionsButton from '@/components/assistant/AssistantActionsButton.vue';
 import DocumentPreview from '@/components/document-preview.vue';
 import DocumentFileIcon from '@/views/knowledge/components/DocumentFileIcon.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
@@ -243,6 +245,14 @@ mermaid.initialize({
 const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "canDownloadKB", "parse_status", "kbId"]);
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted", "summaryStateChange"]);
 const assistant = useAssistantStore();
+const readingAssistantActions = computed(() => {
+  const source = JSON.stringify({ knowledge_base_id: props.kbId, knowledge_id: props.details?.id });
+  return [
+    { key: 'summary', label: t('assistant.actions.readSummary'), query: t('assistant.prompts.readSummary', { source }) },
+    { key: 'steps', label: t('assistant.actions.readSteps'), query: t('assistant.prompts.readSteps', { source }) },
+    { key: 'faq', label: t('assistant.actions.extractFaq'), query: t('assistant.prompts.extractFaq', { source }) },
+  ];
+});
 
 const applySummaryState = (summaryStatus?: string, description?: string) => {
   if (typeof summaryStatus === 'string' && summaryStatus) {
@@ -914,6 +924,9 @@ const processMarkdown = (markdownText) => {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&amp;/g, '&');
+
+  // 抽屉标题已经显示条目名，正文第一行的同名 H1 会重复；仅在同名时剥掉。
+  processedText = stripDuplicateLeadingH1(processedText, [props.details?.title]);
 
   // 处理被 <p> 包裹的表格行，转换为正常的表格行，并在前后补空行
   processedText = processedText.replace(/<p>\s*(\|[\s\S]*?\|)\s*<\/p>/gi, '\n$1\n');
@@ -1605,12 +1618,9 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
                 <t-icon name="chart-line" size="16px" />
               </template>
             </t-button>
-            <t-button v-if="details.id" class="header-action-btn" size="small" variant="text" shape="square"
-              theme="default" :title="$t('assistant.askAboutDocument', { name: assistant.displayName || $t('assistant.title') })" @click="assistant.open()">
-              <template #icon>
-                <t-icon name="compass" size="16px" />
-              </template>
-            </t-button>
+            <AssistantActionsButton v-if="details.id" icon-only
+              :label="$t('assistant.askAboutDocument', { name: assistant.displayName || $t('assistant.title') })"
+              :actions="readingAssistantActions" />
           </div>
         </div>
       </template>
@@ -1864,7 +1874,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
             </div>
             <template v-else>
               <div v-if="!mergedContent" class="no_content">{{ $t('common.noData') }}</div>
-              <div v-else class="md-content" v-html="processMarkdown(mergedContent)"></div>
+              <div v-else class="md-content doc-merged-content" v-html="processMarkdown(mergedContent)"></div>
             </template>
           </div>
 

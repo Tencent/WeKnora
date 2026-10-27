@@ -4,7 +4,9 @@
 package chunker
 
 import (
+	"cmp"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -183,17 +185,14 @@ func protectedSpans(text string) []span {
 		return nil
 	}
 
-	// Sort by start, then by length descending
-	for i := 1; i < len(all); i++ {
-		for j := i; j > 0; j-- {
-			if all[j].start < all[j-1].start ||
-				(all[j].start == all[j-1].start && (all[j].end-all[j].start) > (all[j-1].end-all[j-1].start)) {
-				all[j], all[j-1] = all[j-1], all[j]
-			} else {
-				break
-			}
+	// Matches are grouped by pattern, not document position. Avoid quadratic
+	// insertion sorting when a long document interleaves different patterns.
+	slices.SortFunc(all, func(a, b match) int {
+		if a.start != b.start {
+			return cmp.Compare(a.start, b.start)
 		}
-	}
+		return cmp.Compare(b.end, a.end)
+	})
 
 	// Remove overlaps
 	var result []span

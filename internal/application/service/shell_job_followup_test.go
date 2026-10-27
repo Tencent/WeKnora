@@ -28,10 +28,15 @@ func TestShellJobHeartbeatRefreshesProvidersWhileReadsAndAnotherProviderBlock(t 
 			interfaces.BackgroundActivity{ID: id, Kind: "shell"}, time.Minute, 0))
 	}
 	refreshed := make(chan string, 100)
-	svc.remoteRead = func(ctx context.Context, _ interfaces.SessionRef, _ []string, _ map[string]string) (
+	readStarted := make(chan struct{}, len(refs))
+	releaseRead := make(chan struct{})
+	svc.remoteRead = func(_ context.Context, _ interfaces.SessionRef, _ []string, _ map[string]string) (
 		[]sandbox.ShellJobSnapshot, map[string]error,
 	) {
-		<-ctx.Done()
+		readStarted <- struct{}{}
+		// Maintenance reads detach from sweep cancellation. Release this fake
+		// explicitly, just as the real remote exec has its own bounded lifetime.
+		<-releaseRead
 		return nil, nil
 	}
 	providerBlocked := make(chan struct{})
@@ -50,6 +55,8 @@ func TestShellJobHeartbeatRefreshesProvidersWhileReadsAndAnotherProviderBlock(t 
 	})
 	// A sweep cannot reach renewRunning while waiting for this session lock.
 	locked, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	releaseLock := func() { releaseOnce.Do(func() { close(release) }) }
 	lockDone := make(chan error, 1)
 	go func() {
 		lockDone <- index.WithSessionLock(context.Background(), refs[0], func(context.Context) error {
@@ -63,7 +70,8 @@ func TestShellJobHeartbeatRefreshesProvidersWhileReadsAndAnotherProviderBlock(t 
 	done := make(chan error, 1)
 	t.Cleanup(func() {
 		cancel()
-		close(release)
+		close(releaseRead)
+		releaseLock()
 		require.NoError(t, <-lockDone)
 		select {
 		case <-done:
@@ -83,6 +91,25 @@ func TestShellJobHeartbeatRefreshesProvidersWhileReadsAndAnotherProviderBlock(t 
 			require.Equal(t, refs[1].SessionID, sid)
 		case <-time.After(time.Second):
 			t.Fatal("one slow provider starved another session's TTL refresh")
+		}
+	}
+	// The map of claimed sessions has no stable order. Ensure the sweep has
+	// reached a blocked read even when it selected the locked session first.
+	releaseLock()
+	select {
+	case <-readStarted:
+	case <-time.After(time.Second):
+		t.Fatal("sweep never entered remote read")
+	}
+	for len(refreshed) > 0 {
+		<-refreshed
+	}
+	for range 2 {
+		select {
+		case sid := <-refreshed:
+			require.Equal(t, refs[1].SessionID, sid)
+		case <-time.After(time.Second):
+			t.Fatal("blocked read starved another session's TTL refresh")
 		}
 	}
 }
