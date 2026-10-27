@@ -158,6 +158,17 @@
                 </div>
             </div>
             <div ref="composerElement" class="chat_composer">
+                <div v-if="composerApprovals.length" class="host-approval-pop">
+                    <HostApprovalCard v-for="approval in composerApprovals" :key="approval.pending_id"
+                        :pending-id="approval.pending_id"
+                        :host="approval.host || { reason: approval.kind === 'host_command' ? 'delete' : '' }"
+                        :timeout-seconds="approval.timeout_seconds"
+                        :requested-at="approval.requested_at"
+                        :resolved="approval.resolved"
+                        :approved="approval.approved"
+                        :resolve-reason="approval.resolve_reason"
+                        :resolve-scope="approval.resolve_scope" />
+                </div>
                 <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
                     <transition name="scroll-btn-fade">
                         <div v-show="userHasScrolledUp" class="scroll-to-bottom-btn" @click="onClickScrollToBottom">
@@ -228,6 +239,12 @@ import { storeToRefs } from 'pinia';
 import { inject, ref, onMounted, onBeforeMount, onUnmounted, nextTick, watch, reactive, computed, provide } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import InputField from '../../components/Input-field.vue';
+import HostApprovalCard from './components/HostApprovalCard.vue';
+import {
+    clearComposerApproval,
+    isHostApprovalEvent,
+    pendingComposerApprovals,
+} from './components/hostApproval';
 import botmsg from './components/botmsg.vue';
 import usermsg from './components/usermsg.vue';
 import { getMessageList, getSession, forkSession, rewindSession } from "@/api/chat/index";
@@ -500,6 +517,10 @@ const FORK_PREFILL_KEY = 'weknora:fork-prefill'
 let forkInFlight = false
 const rewindInFlight = ref(false)
 const rewindLockSessionId = ref('')
+const composerApprovals = computed(() =>
+    pendingComposerApprovals.value.filter((item) => item && !item.resolved && isHostApprovalEvent(item))
+)
+
 const composerLocked = computed(() =>
     isAutomationSession.value || (rewindInFlight.value && String(session_id.value || '') === rewindLockSessionId.value)
 )
@@ -704,6 +725,16 @@ const currentAssistantMessageId = ref(''); // 当前正在生成的 assistant me
 // continue-stream always fails even though the answer is coming — recover by polling
 // instead of erroring. Web/api replies are left on the original error path.
 const isAttachingImStream = ref(false);
+
+// A session change drops the stack; continue-stream replay adds back the
+// cards that are still waiting. Clearing on every isReplying change hid a
+// card that replay had just restored.
+watch(session_id, () => {
+    clearComposerApproval();
+});
+watch(isReplying, (replying) => {
+    if (!replying) clearComposerApproval();
+});
 let recoverPollTimer = null;
 // True while polling to recover an in-flight IM reply we couldn't stream. Drives
 // the same "generating" typing indicator the normal reply path shows, so the wait
@@ -1955,6 +1986,7 @@ onUnmounted(() => {
     window.removeEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
     if (recoverPollTimer) { clearTimeout(recoverPollTimer); recoverPollTimer = null; }
     backgroundPoller.dispose();
+    clearComposerApproval();
 });
 // An embedded view outlives the page behind it: a route change must not stop
 // its stream or restore the main chat's defaults.
@@ -2146,6 +2178,14 @@ onBeforeRouteUpdate((to, from, next) => {
         content: '';
         flex: 0 0 var(--chat-composer-height, 0px);
     }
+}
+
+.host-approval-pop {
+    width: 100%;
+    max-width: 800px;
+    margin: 0 auto 8px;
+    padding: 0 16px;
+    box-sizing: border-box;
 }
 
 .chat_composer {
