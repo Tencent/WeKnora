@@ -80,6 +80,14 @@ type createMemberAccountRequest struct {
 	Role     types.TenantRole `json:"role"     binding:"required"`
 }
 
+// resetMemberPasswordRequest is the JSON body for
+// POST /tenants/:id/members/:user_id/reset-password. The caller supplies the
+// new password directly (Q3：管理员自填密码，不强制首次登录改密). The value is
+// never logged, echoed back, or written into audit details.
+type resetMemberPasswordRequest struct {
+	NewPassword string `json:"new_password" binding:"required"`
+}
+
 // parseTenantIDFromPath reads :id from the gin route and validates it as
 // a tenant ID. Returning (0, false) means we already wrote the error to
 // the gin context and the caller should `return` immediately.
@@ -423,6 +431,103 @@ func addMemberAndRespond(
 		return
 	}
 	writeAddMemberSuccess(c, user, member)
+}
+
+// ResetMemberPassword godoc
+// @Summary      重置成员密码
+// @Description  工作区 Owner（系统管理员按 Owner 处理）可重置 admin/contributor/viewer 的密码，
+// @Description  Admin 只能重置 contributor/viewer；不能重置与自己同级或更高级的成员，也不能重置本人。
+// @Description  成功后旧密码立即失效，该用户所有已签发 token 被吊销。
+// @Tags         空间成员
+// @Accept       json
+// @Produce      json
+// @Param        id        path  string                     true  "空间 ID"
+// @Param        user_id   path  string                     true  "用户 ID"
+// @Param        request   body  resetMemberPasswordRequest  true  "新密码"
+// @Success      200  {object}  map[string]interface{}  "已重置（响应不含密码）"
+// @Failure      400  {object}  map[string]interface{}  "参数或密码不合规 / 重置本人"
+// @Failure      403  {object}  map[string]interface{}  "角色越权"
+// @Failure      404  {object}  map[string]interface{}  "目标不是本空间成员"
+// @Failure      500  {object}  map[string]interface{}  "内部错误"
+// @Security     Bearer
+// @Router       /tenants/{id}/members/{user_id}/reset-password [post]
+func (h *TenantMemberHandler) ResetMemberPassword(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenantID, ok := parseTenantIDFromPath(c)
+	if !ok {
+		return
+	}
+	targetUserID := strings.TrimSpace(c.Param("user_id"))
+	if targetUserID == "" {
+		c.Error(apperrors.NewValidationError("user_id is required"))
+		return
+	}
+
+	var req resetMemberPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("invalid request body").WithDetails(err.Error()))
+		return
+	}
+	// 密码刻意不做 trim：与 Register / AdminResetPassword 一致，按原字节校验并哈希。
+
+	// 本人走「修改密码」接口（需要旧密码），管理端重置不允许作用于自己。
+	callerID, _ := types.UserIDFromContext(ctx)
+	if callerID != "" && callerID == targetUserID {
+		c.Error(apperrors.NewValidationError(
+			"cannot reset your own password; use the change-password endpoint"))
+		return
+	}
+
+	// 先确认目标确实是当前空间的 active 成员，才能拿到目标角色做矩阵判定。
+	member, err := h.memberService.GetMembership(ctx, targetUserID, tenantID)
+	if err != nil {
+		logger.Errorf(ctx, "GetMembership failed: user=%s tenant=%d err=%v",
+			targetUserID, tenantID, err)
+		c.Error(apperrors.NewInternalServerError("failed to look up membership").WithDetails(err.Error()))
+		return
+	}
+	if member == nil {
+		c.Error(apperrors.NewNotFoundError("membership not found"))
+		return
+	}
+
+	// 系统管理员按 owner 处理（D4）；其余调用者取当前活动空间里的角色。
+	actorRole := types.CallerFromContext(ctx).Role
+	if types.IsSystemAdminFromContext(ctx) {
+		actorRole = types.TenantRoleOwner
+	}
+	if !service.CanResetRole(actorRole, member.Role) {
+		logger.Warnf(ctx, "ResetMemberPassword denied: actor_role=%s target_role=%s tenant=%d",
+			actorRole, member.Role, tenantID)
+		c.Error(apperrors.NewForbiddenError("your role cannot reset this member's password"))
+		return
+	}
+
+	// AdminResetPassword 内部已做密码策略校验，并吊销该用户全部 token。
+	// 失败分支不记录密码，只记目标 ID 与错误。
+	if err := h.userService.AdminResetPassword(ctx, targetUserID, req.NewPassword); err != nil {
+		if service.IsPasswordPolicyError(err) {
+			c.Error(apperrors.NewValidationError("password does not meet the password policy"))
+			return
+		}
+		logger.Errorf(ctx, "AdminResetPassword failed: user=%s tenant=%d err=%v",
+			targetUserID, tenantID, err)
+		c.Error(apperrors.NewInternalServerError("failed to reset member password"))
+		return
+	}
+
+	// 审计通过 member service 现有 emitAudit 通道发出；details 不含密码。
+	// 用窄接口做可选断言，避免给 TenantMemberService 接口新增方法而破坏
+	// 既有实现/测试替身。
+	if auditor, ok := h.memberService.(interfaces.MemberPasswordResetAuditor); ok {
+		auditor.AuditMemberPasswordReset(ctx, tenantID, targetUserID, member.Role)
+	} else {
+		logger.Warnf(ctx,
+			"member service does not implement MemberPasswordResetAuditor; audit row skipped: tenant=%d user=%s",
+			tenantID, targetUserID)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
 // UpdateMemberRole godoc

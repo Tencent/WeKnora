@@ -52,3 +52,16 @@ type TenantMemberService interface {
 	// "cannot remove the last active Owner" invariant.
 	RemoveMember(ctx context.Context, userID string, tenantID uint64) error
 }
+
+// MemberPasswordResetAuditor is optionally implemented by TenantMemberService
+// implementations that can persist the rbac.member_password_reset audit row.
+//
+// It is a separate interface on purpose: adding the method to
+// TenantMemberService would break every existing implementation/fake that
+// lists the interface methods explicitly (the middleware role tests, for
+// example). Handlers type-assert to this narrower interface after a
+// successful password reset; the audit is best-effort, matching emitAudit's
+// existing semantics.
+type MemberPasswordResetAuditor interface {
+	AuditMemberPasswordReset(ctx context.Context, tenantID uint64, targetUserID string, targetRole types.TenantRole)
+}
