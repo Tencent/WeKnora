@@ -218,8 +218,8 @@ defineExpose({ refresh: load })
   line-height: 18px;
 }
 .wiki-recovery-drawer {
-  font-family: var(--td-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif);
-  font-size: 14px;
+  font-family: var(--td-font-family);
+  font-size: var(--app-text-base);
   line-height: 22px;
 }
 .recovery-panel { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
@@ -231,7 +231,7 @@ defineExpose({ refresh: load })
   border-radius: var(--td-radius-default);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 20px;
 }
 .recovery-intro .t-icon { flex-shrink: 0; margin-top: 2px; }
@@ -250,8 +250,8 @@ defineExpose({ refresh: load })
 .recovery-document-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .recovery-title { min-width: 0; padding: 0; height: auto; font-weight: 500; text-align: left; }
 .recovery-title :deep(.t-button__text) { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.recovery-source-status { margin-top: 6px; color: var(--td-text-color-secondary); font-size: 13px; }
-.recovery-error { margin-top: 12px; color: var(--td-error-color); font-size: 13px; }
+.recovery-source-status { margin-top: 6px; color: var(--td-text-color-secondary); font-size: var(--app-text-md); }
+.recovery-error { margin-top: 12px; color: var(--td-error-color); font-size: var(--app-text-md); }
 .recovery-error summary { cursor: pointer; line-height: 22px; }
 .recovery-error pre {
   margin: 8px 0 0;
@@ -267,7 +267,7 @@ defineExpose({ refresh: load })
 }
 .recovery-document-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .recovery-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 240px; color: var(--td-text-color-disabled); }
-.recovery-empty p { margin: 0; color: var(--td-text-color-secondary); font-size: 14px; line-height: 22px; }
+.recovery-empty p { margin: 0; color: var(--td-text-color-secondary); font-size: var(--app-text-base); line-height: 22px; }
 .recovery-pagination { padding-top: 4px; }
 @media (max-width: 720px) {
   .recovery-batch-actions { margin-left: 0; }
