@@ -184,7 +184,7 @@ func (g *pgRepository) createHNSWIndex(dimension int) error {
 			AND pg_get_indexdef(indexrelid) LIKE ?
 			AND pg_get_indexdef(indexrelid) LIKE '%halfvec_cosine_ops%'
 			AND (indpred IS NULL OR pg_get_expr(indpred, indrelid) = ?)
-			FROM pg_index WHERE indexrelid = to_regclass(?)`,
+			FROM pg_index WHERE indexrelid = to_regclass(?) AND indrelid = 'embeddings'::regclass`,
 			fmt.Sprintf("%%halfvec(%d)%%", dimension), predicate, name).Scan(&valid)
 		if result.Error != nil {
 			return fmt.Errorf("could not verify %s: %w", name, result.Error)
