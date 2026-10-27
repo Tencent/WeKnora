@@ -122,3 +122,29 @@ func TestMCPOAuthRepositoryRefreshLeaseHasSingleOwner(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, second)
 }
+
+func TestMCPOAuthRepositoryStoresTokenTimesInUTC(t *testing.T) {
+	repo := newMCPOAuthTestRepo(t)
+	ctx := context.Background()
+	// Expiries are computed from the process clock, which runs in the
+	// deployment's local zone rather than UTC.
+	local := time.FixedZone("UTC+9", 9*60*60)
+	expiresAt := time.Date(2026, 10, 12, 21, 3, 32, 0, local)
+	principal := types.Principal{Type: types.PrincipalAPIExternalUser, ID: "7:external-u1"}
+
+	require.NoError(t, repo.SaveTokenForPrincipal(ctx, &types.MCPOAuthToken{
+		TenantID:      7,
+		PrincipalType: principal.Type,
+		PrincipalID:   principal.ID,
+		ServiceID:     "svc1",
+		AccessToken:   "token",
+		TokenType:     "Bearer",
+		ExpiresAt:     expiresAt,
+	}))
+
+	loaded, err := repo.GetTokenForPrincipal(ctx, 7, principal, "svc1")
+	require.NoError(t, err)
+	require.True(t, loaded.ExpiresAt.Equal(expiresAt), "expiry %s, want %s", loaded.ExpiresAt, expiresAt)
+	require.Equal(t, time.UTC, loaded.ExpiresAt.Location())
+	require.Equal(t, time.UTC, loaded.UpdatedAt.Location())
+}

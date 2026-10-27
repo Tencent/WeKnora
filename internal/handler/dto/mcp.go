@@ -23,19 +23,19 @@ import (
 // "configured / not configured" badge without an additional round-trip.
 type MCPServiceResponse struct {
 	UsageInstructions string                   `json:"usage_instructions"`
-	ID                string                   `json:"id"`
+	ID                string                   `json:"id" extensions:"x-agent=mcp_service_id"`
 	TenantID          uint64                   `json:"tenant_id"`
-	Name              string                   `json:"name"`
-	Description       string                   `json:"description"`
-	Enabled           bool                     `json:"enabled"`
-	TransportType     types.MCPTransportType   `json:"transport_type"`
+	Name              string                   `json:"name" extensions:"x-agent"`
+	Description       string                   `json:"description" extensions:"x-agent"`
+	Enabled           bool                     `json:"enabled" extensions:"x-agent"`
+	TransportType     types.MCPTransportType   `json:"transport_type" extensions:"x-agent"`
 	URL               *string                  `json:"url,omitempty"`
 	Headers           types.MCPHeaders         `json:"headers,omitempty"`
-	AuthConfig        *MCPAuthConfigResponse   `json:"auth_config,omitempty"`
+	AuthConfig        *MCPAuthConfigResponse   `json:"auth_config,omitempty" extensions:"x-agent"`
 	AdvancedConfig    *types.MCPAdvancedConfig `json:"advanced_config,omitempty"`
 	StdioConfig       *types.MCPStdioConfig    `json:"stdio_config,omitempty"`
 	EnvVars           types.MCPEnvVars         `json:"env_vars,omitempty"`
-	IsBuiltin         bool                     `json:"is_builtin"`
+	IsBuiltin         bool                     `json:"is_builtin" extensions:"x-agent"`
 	CreatedAt         time.Time                `json:"created_at"`
 	UpdatedAt         time.Time                `json:"updated_at"`
 	// Credentials is the per-field "configured?" map. Embedded on the main
@@ -56,16 +56,18 @@ type MCPCatalogSummary struct {
 	SyncedAt  time.Time `json:"synced_at"`
 }
 
-// MCPAuthConfigResponse intentionally has no APIKey or Token fields. Their
-// presence is signalled via MCPServiceResponse.Credentials. AuthType, Scopes
-// and AuthServerMetadataURL are non-secret OAuth configuration and are safe to
-// echo back so the UI can render the current strategy.
+// MCPAuthConfigResponse intentionally has no APIKey, Token or ClientSecret
+// fields. Their presence is signalled via MCPServiceResponse.Credentials.
+// AuthType, Scopes, AuthServerMetadataURL and ClientID are non-secret OAuth
+// configuration and are safe to echo back so the UI can render the current
+// strategy.
 type MCPAuthConfigResponse struct {
-	AuthType              types.MCPAuthType `json:"auth_type,omitempty"`
+	AuthType              types.MCPAuthType `json:"auth_type,omitempty" extensions:"x-agent"`
 	APIKeyHeader          string            `json:"api_key_header,omitempty"`
 	CustomHeaders         map[string]string `json:"custom_headers,omitempty"`
 	Scopes                []string          `json:"scopes,omitempty"`
 	AuthServerMetadataURL string            `json:"auth_server_metadata_url,omitempty"`
+	ClientID              string            `json:"client_id,omitempty"`
 }
 
 // CredentialFieldMetadata reports whether a credential field has a value
@@ -116,6 +118,7 @@ func NewMCPServiceResponse(ctx context.Context, svc *types.MCPService) *MCPServi
 			CustomHeaders:         svc.AuthConfig.CustomHeaders,
 			Scopes:                svc.AuthConfig.Scopes,
 			AuthServerMetadataURL: svc.AuthConfig.AuthServerMetadataURL,
+			ClientID:              svc.AuthConfig.ClientID,
 		}
 		if !includeDetail {
 			auth.CustomHeaders = nil
@@ -132,8 +135,9 @@ func NewMCPServiceResponse(ctx context.Context, svc *types.MCPService) *MCPServi
 		resp.AuthConfig = nil
 	} else {
 		resp.Credentials = map[string]CredentialFieldMetadata{
-			"api_key": {Configured: svc.AuthConfig != nil && svc.AuthConfig.APIKey != ""},
-			"token":   {Configured: svc.AuthConfig != nil && svc.AuthConfig.Token != ""},
+			"api_key":       {Configured: svc.AuthConfig != nil && svc.AuthConfig.APIKey != ""},
+			"token":         {Configured: svc.AuthConfig != nil && svc.AuthConfig.Token != ""},
+			"client_secret": {Configured: svc.AuthConfig != nil && svc.AuthConfig.ClientSecret != ""},
 		}
 	}
 	return resp

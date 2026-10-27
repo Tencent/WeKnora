@@ -9,6 +9,7 @@ import DocumentActionMenu from './DocumentActionMenu.vue';
 import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
 import { shownStall } from '@/utils/knowledgeProcessingStall';
+import type { FolderEntry } from '../folderTree';
 
 interface KnowledgeCard {
   id: string;
@@ -48,6 +49,12 @@ const props = defineProps<{
   /** Every folder of the knowledge base, for the "move to folder" picker. */
   folderOptions?: FolderOption[];
   /**
+   * Direct sub-folders of the folder being browsed. They lead the grid, the way
+   * a file manager shows folders before files. Filtering searches the subtree
+   * for documents, so the caller passes an empty list.
+   */
+  subFolders?: FolderEntry[];
+  /**
    * Replace the updated-at line with the card's folder. Only meaningful when
    * the grid spans several folders, i.e. while filtering.
    */
@@ -78,6 +85,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const tagEditorId = ref<string | null>(null);
+const subFolderCards = computed(() => props.subFolders || []);
 const cardSummaries = computed(() => new Map(props.items.map(item => [item.id, formatReferenceSnippet(item.description)])));
 
 // Which row's action popup is currently showing the folder picker. Kept local so
@@ -328,6 +336,33 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   <div class="doc-card-view">
 
     <div class="doc-card-list doc-card-list-animated">
+    <div
+      v-for="folder in subFolderCards"
+      :key="`folder:${folder.path}`"
+      class="knowledge-card folder-card"
+      :data-folder-path="folder.path"
+      role="button"
+      tabindex="0"
+      @click="onOpenFolder(folder.path)"
+      @keydown.enter="onOpenFolder(folder.path)"
+    >
+      <div class="card-content">
+        <div class="card-content-nav">
+          <div class="card-file-icon folder-card-icon">
+            <t-icon name="folder" size="28px" />
+          </div>
+          <span class="card-content-title folder-card-title" :title="folder.path">{{ folder.name }}</span>
+        </div>
+        <div class="card-preview">
+          <div class="card-content-txt folder-card-count"
+            :title="t('knowledgeBase.folderTree.countHint', { direct: folder.document_count, total: folder.total_count })">
+            <t-icon name="file" size="12px" />
+            <span>{{ t('knowledgeBase.folderTree.folderCardCount', { count: folder.total_count }) }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div
       class="knowledge-card"
       :class="{ 'is-selected': selectedIds.has(item.id), 'batch-mode': batchMode }"
@@ -791,6 +826,25 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     &:hover { color: var(--td-brand-color); }
     span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .t-icon { flex-shrink: 0; }
+  }
+
+  /* A folder card uses the same shell as a document card, so the grid rhythm
+     and the hover treatment stay identical; only its body is folder-specific. */
+  &.folder-card {
+    .folder-card-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--td-warning-color);
+    }
+    .folder-card-title { cursor: pointer; }
+    .folder-card-count {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      color: var(--td-text-color-placeholder);
+      .t-icon { flex-shrink: 0; }
+    }
   }
 }
 

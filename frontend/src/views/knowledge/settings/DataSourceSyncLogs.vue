@@ -2,6 +2,7 @@
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getSyncLogs, type SyncLog, type SyncItemError } from '@/api/datasource'
+import AssistantActionButton from '@/components/assistant/AssistantActionButton.vue'
 
 const props = defineProps<{
   dataSourceId: string
@@ -285,6 +286,23 @@ const groupedLogs = computed(() => {
                 <div v-else-if="log.error_message" class="tl-error">
                   {{ log.error_message }}
                 </div>
+                <AssistantActionButton
+                  v-if="log.status === 'failed' || log.status === 'partial' || log.items_failed > 0"
+                  :label="t('assistant.actions.diagnose')"
+                  :query="t('assistant.prompts.syncFailure', { source: props.dataSourceName || props.dataSourceId, id: props.dataSourceId, log: log.id })"
+                  :selection="{
+                    field: t('datasource.syncHistory'),
+                    text: JSON.stringify({
+                      data_source_id: props.dataSourceId,
+                      sync_log_id: log.id,
+                      status: log.status,
+                      started_at: log.started_at,
+                      items_total: log.items_total,
+                      items_failed: log.items_failed,
+                      error_message: log.error_message.slice(0, 1000),
+                      error_samples: failedItems(log).slice(0, 5).map(e => formatSyncError(e).slice(0, 300)),
+                    }, null, 2),
+                  }" />
 
                 <!-- Per-item failures: which documents failed and why.
                      The true count is items_failed (a bounded int); result.errors

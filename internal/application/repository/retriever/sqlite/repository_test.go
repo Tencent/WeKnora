@@ -115,6 +115,39 @@ func TestVectorRetrieveFiltersBeforeTopK(t *testing.T) {
 	}
 }
 
+func TestVectorRetrieveDropsGeneratedQuestionsBeforeTopK(t *testing.T) {
+	repository := newSQLiteRetrieverTestRepository(t)
+	const chunkID = "chunk-body"
+	body := sqliteTestIndex(chunkID, "kb-off", "knowledge-1", "", true)
+	body.SourceID = chunkID
+	body.Content = "month end close steps"
+	question := sqliteTestIndex(chunkID, "kb-off", "knowledge-1", "", true)
+	question.SourceID = chunkID + "-q1"
+	question.Content = "how do I close the books"
+	other := sqliteTestIndex("other", "kb-on", "knowledge-2", "", true)
+	other.SourceID = "other-q1"
+	other.Content = "question in a knowledge base that still generates questions"
+
+	saveSQLiteTestVector(t, repository, question, []float32{1, 0})
+	saveSQLiteTestVector(t, repository, body, []float32{0.2, 0.8})
+	saveSQLiteTestVector(t, repository, other, []float32{0.9, 0.1})
+
+	results, err := repository.vectorRetrieve(context.Background(), types.RetrieveParams{
+		Embedding:                     []float32{1, 0},
+		KnowledgeBaseIDs:              []string{"kb-off", "kb-on"},
+		ExcludeGeneratedQuestionKBIDs: []string{"kb-off"},
+		TopK:                          2,
+		RetrieverType:                 types.VectorRetrieverType,
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	got := make([]string, 0, len(results[0].Results))
+	for _, hit := range results[0].Results {
+		got = append(got, hit.SourceID)
+	}
+	assert.ElementsMatch(t, []string{chunkID, "other-q1"}, got)
+}
+
 func TestVectorRetrieveZeroThresholdDoesNotFilter(t *testing.T) {
 	repository := newSQLiteRetrieverTestRepository(t)
 	saveSQLiteTestVector(t, repository,

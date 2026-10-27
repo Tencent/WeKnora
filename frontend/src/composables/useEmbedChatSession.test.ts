@@ -6,6 +6,7 @@ import vm from 'node:vm'
 import ts from 'typescript'
 import * as vue from 'vue'
 import * as historyPagination from '../utils/historyPagination.ts'
+import * as suspendedRun from '../utils/suspendedRun.ts'
 import type { useEmbedChatSession as EmbedChatSession } from './useEmbedChatSession.ts'
 
 const require = createRequire(import.meta.url)
@@ -48,6 +49,7 @@ test('embedded history remains retryable after a transient page failure', async 
       if (id === 'vue') return { ...vue, onMounted: (callback: () => void) => callback(), onUnmounted: () => {} }
       if (id === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
       if (id === '@/utils/historyPagination') return historyPagination
+      if (id === '@/utils/suspendedRun') return suspendedRun
       if (id === '@/utils/embedToast') return { embedToast: () => {} }
       if (id === '@/utils/embedContext') return { buildQueryWithHostContext: (value: string) => value }
       if (id === '@/utils/embedFile') return { fileToDataURI: async () => '' }

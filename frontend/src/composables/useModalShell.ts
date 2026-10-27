@@ -1,6 +1,7 @@
 import { onBeforeUnmount, onMounted } from 'vue'
 import { DialogPlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { registerUnsavedChanges } from '@/utils/unsavedChanges'
 
 /**
  * 全屏"设置类"弹窗（Settings / AgentEditor / OrganizationSettings / KnowledgeBaseEditor）
@@ -102,8 +103,15 @@ export function useModalShell(options: ModalShellOptions) {
     requestClose()
   }
 
-  onMounted(() => window.addEventListener('keydown', onKeydown))
-  onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+  let unregister: (() => void) | null = null
+  onMounted(() => {
+    window.addEventListener('keydown', onKeydown)
+    unregister = registerUnsavedChanges(() => options.visible() && isDirty())
+  })
+  onBeforeUnmount(() => {
+    window.removeEventListener('keydown', onKeydown)
+    unregister?.()
+  })
 
   return { requestClose, markClean, isDirty }
 }

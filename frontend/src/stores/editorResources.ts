@@ -19,7 +19,7 @@ import {
   type SkillCatalogItem,
   type SkillInfo,
 } from '@/api/skill'
-import { getAgentTypePresets, getPlaceholders, type AgentTypePreset, type PlaceholdersResponse } from '@/api/agent'
+import { getAgentTools, getAgentTypePresets, getPlaceholders, type AgentToolCatalog, type AgentTypePreset, type PlaceholdersResponse } from '@/api/agent'
 import { getTenantRetrievalConfig } from '@/api/retrieval'
 import { isStorageConfigDenied } from './storageEngineAccess'
 import { createCachedResource } from './resourceCache'
@@ -51,6 +51,7 @@ type EditorResourceKey =
   | 'skills'
   | 'skillCatalog'
   | 'agentTypePresets'
+  | 'agentTools'
   | 'promptTemplates'
   | 'placeholders'
   | 'tenantRetrievalConfig'
@@ -73,6 +74,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
   const skillsConfigId = ref('')
   const skillCatalog = ref<SkillCatalogItem[]>([])
   const agentTypePresets = ref<AgentTypePreset[]>([])
+  const agentTools = ref<AgentToolCatalog | null>(null)
   const promptTemplates = ref<PromptTemplatesConfig | null>(null)
   const placeholders = ref<PlaceholdersResponse | null>(null)
   const tenantRetrievalConfig = ref<Record<string, unknown> | null>(null)
@@ -173,6 +175,16 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     },
   )
 
+  const agentToolsResource = createCachedResource(
+    async () => {
+      const res: any = await getAgentTools()
+      return res?.data && Array.isArray(res.data.tools) ? (res.data as AgentToolCatalog) : null
+    },
+    (catalog) => {
+      agentTools.value = catalog
+    },
+  )
+
   const promptTemplatesResource = createCachedResource(
     async () => {
       const tmplRes = await getPromptTemplates()
@@ -229,6 +241,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     skills: skillsResource,
     skillCatalog: skillCatalogResource,
     agentTypePresets: agentTypePresetsResource,
+    agentTools: agentToolsResource,
     promptTemplates: promptTemplatesResource,
     placeholders: placeholdersResource,
     tenantRetrievalConfig: tenantRetrievalConfigResource,
@@ -282,6 +295,10 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     return agentTypePresetsResource.ensure(force)
   }
 
+  async function ensureAgentTools(force = false): Promise<void> {
+    return agentToolsResource.ensure(force)
+  }
+
   async function ensurePromptTemplates(force = false): Promise<void> {
     return promptTemplatesResource.ensure(force)
   }
@@ -309,6 +326,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
       // are this workspace's too.
       ensureMcpServices(undefined, force),
       ensureAgentTypePresets(force),
+      ensureAgentTools(force),
       ensurePromptTemplates(force),
       ensureStorageEngine(force),
       ensurePlaceholders(force),
@@ -331,6 +349,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
       skillsRequestScope = { key: '', configId: '' }
       skillCatalog.value = []
       agentTypePresets.value = []
+      agentTools.value = null
       promptTemplates.value = null
       placeholders.value = null
       tenantRetrievalConfig.value = null
@@ -350,6 +369,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     skillsAvailable,
     skillCatalog,
     agentTypePresets,
+    agentTools,
     promptTemplates,
     placeholders,
     tenantRetrievalConfig,
@@ -361,6 +381,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     ensureSkills,
     ensureSkillCatalog,
     ensureAgentTypePresets,
+    ensureAgentTools,
     ensurePromptTemplates,
     ensurePlaceholders,
     ensureTenantRetrievalConfig,

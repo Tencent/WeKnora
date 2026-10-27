@@ -29,16 +29,13 @@ const (
 // collected results span >1 engine type, the normalizer rescales vector
 // scores into [0, 1] before fusion.
 //
-// Failure policy: all-or-nothing for store-level failures. The first group
-// error fails the whole search and cancels siblings via errgroup, matching the
-// existing single-store behavior — chat/agent callers already treat "search
-// failed" as abort. A retrieve call that returns results *and* an error is a
-// different case: CompositeRetrieveEngine only does that when individual result
-// sets carry a partial failure (RetrieveResult.Error), i.e. some collections
-// answered and some did not. Those results are kept and the failure is logged
-// at WARN by retainPartialResults; failing the whole search would throw away
-// evidence that was retrieved successfully. A future PR can extract a
-// MergePolicy interface (open/closed) to push partial results further up.
+// Failure policy: a store group that fails without results fails the whole
+// search and cancels siblings via errgroup. A retrieve call may return results
+// alongside an error when one retriever leg or collection fails but another
+// succeeds. Those results are kept and the failure is logged at WARN by
+// retainPartialResults; failing the whole search would throw away evidence that
+// was retrieved successfully. A future PR can extract a MergePolicy interface
+// (open/closed) to push partial results further up.
 //
 // Fast path: len(groups) == 1 → returns the single engine's Retrieve
 // directly with zero fan-out overhead. This is the dominant case today
@@ -160,15 +157,13 @@ func retrieveGroup(ctx context.Context, g *storeGroup) ([]*types.RetrieveResult,
 
 // retainPartialResults keeps results that arrive together with an error.
 //
-// CompositeRetrieveEngine returns a non-nil error alongside results only when
-// individual result sets carry a partial failure (RetrieveResult.Error): some
-// collections of the store answered, others did not. Dropping the results would
-// turn a degraded store into a total search failure and lose the evidence that
-// was retrieved; returning them without a trace would let callers treat an
-// incomplete answer as complete. So the failure is logged at WARN — this is the
-// closest consumer that still knows the store group — and the results are
-// returned with a nil error, leaving the all-or-nothing policy for store-level
-// failures untouched (those come back with no results, so err stays fatal).
+// CompositeRetrieveEngine returns a non-nil error alongside results when a
+// retriever leg or collection fails but other retrievals succeed. Dropping the
+// results would turn a degraded store into a total search failure and lose the
+// evidence that was retrieved; returning them without a trace would let callers
+// treat an incomplete answer as complete. So the failure is logged at WARN —
+// this is the closest consumer that still knows the store group — and the
+// results are returned with a nil error. Failures with no results remain fatal.
 func retainPartialResults(
 	ctx context.Context, g *storeGroup, res []*types.RetrieveResult, err error,
 ) ([]*types.RetrieveResult, error) {

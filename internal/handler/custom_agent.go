@@ -8,11 +8,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -36,8 +38,10 @@ type CustomAgentHandler struct {
 	userService interfaces.UserService
 	// sandboxConfigs validates an agent's sandbox backend selection. Optional —
 	// nil in partially-wired unit tests, where the selection is left unchecked.
-	sandboxConfigs sandboxConfigLookup
-	desktop        bool
+	sandboxConfigs     sandboxConfigLookup
+	usableSkills       usableSkillLister
+	webSearchProviders interfaces.WebSearchProviderRepository
+	desktop            bool
 }
 
 // NewCustomAgentHandler creates a new custom agent handler instance
@@ -48,23 +52,146 @@ func NewCustomAgentHandler(
 	userService interfaces.UserService,
 	sandboxConfigs *service.TenantSandboxConfigService,
 	host service.HostSandboxManager,
+	usableSkills *service.TenantSkillService,
+	webSearchProviders interfaces.WebSearchProviderRepository,
 ) *CustomAgentHandler {
 	return &CustomAgentHandler{
-		service:        service,
-		imService:      imService,
-		disabledRepo:   disabledRepo,
-		userService:    userService,
-		sandboxConfigs: sandboxConfigs,
-		desktop:        host.Desktop,
+		service:            service,
+		imService:          imService,
+		disabledRepo:       disabledRepo,
+		userService:        userService,
+		sandboxConfigs:     sandboxConfigs,
+		usableSkills:       usableSkills,
+		webSearchProviders: webSearchProviders,
+		desktop:            host.Desktop,
 	}
 }
 
 // CreateAgentRequest defines the request body for creating an agent
 type CreateAgentRequest struct {
-	Name        string                  `json:"name" binding:"required"`
-	Description string                  `json:"description"`
+	// Agent name
+	Name string `json:"name" binding:"required" extensions:"x-agent"`
+	// What the agent is for
+	Description string                  `json:"description" extensions:"x-agent"`
 	Avatar      string                  `json:"avatar"`
 	Config      types.CustomAgentConfig `json:"config"`
+}
+
+// PatchAgentRequest changes only the fields it carries; everything else in
+// the agent, its config included, is kept. The editor saves with PUT, which
+// replaces the whole config; this is for callers that change one setting.
+type PatchAgentRequest struct {
+	// Agent name
+	Name *string `json:"name" extensions:"x-agent"`
+	// What the agent is for
+	Description *string `json:"description" extensions:"x-agent"`
+	// Running mode: quick-answer is RAG; smart-reasoning calls tools, MCP and skills
+	AgentMode *string `json:"agent_mode" enums:"quick-answer,smart-reasoning" extensions:"x-agent"`
+	// The whole system prompt
+	SystemPrompt *string `json:"system_prompt" extensions:"x-agent,x-agent-max-bytes=32000"`
+	// Chat model the agent answers with
+	ModelID *string `json:"model_id" extensions:"x-agent"`
+	// Knowledge bases searched: all, selected (knowledge_bases) or none
+	KBSelectionMode *string `json:"kb_selection_mode" enums:"all,selected,none" extensions:"x-agent"`
+	// Selected knowledge bases, replacing the current ones; without
+	// kb_selection_mode it also switches the mode to selected
+	KnowledgeBases *[]string `json:"knowledge_bases" extensions:"x-agent=knowledge_base_ids,x-agent-maximum=50"`
+	// MCP services used: all, selected (mcp_services) or none
+	MCPSelectionMode *string `json:"mcp_selection_mode" enums:"all,selected,none" extensions:"x-agent"`
+	// Selected MCP services, replacing the current ones; without
+	// mcp_selection_mode it also switches the mode to selected
+	MCPServices *[]string `json:"mcp_services" extensions:"x-agent=mcp_service_ids,x-agent-maximum=50"`
+	// Skills used: all, selected (selected_skills) or none
+	SkillsSelectionMode *string `json:"skills_selection_mode" enums:"all,selected,none" extensions:"x-agent"`
+	// Selected skill names, replacing the current ones; without
+	// skills_selection_mode it also switches the mode to selected
+	SelectedSkills *[]string `json:"selected_skills" extensions:"x-agent,x-agent-maximum=50"`
+	// Whether the agent may search the web
+	WebSearchEnabled *bool `json:"web_search_enabled" extensions:"x-agent"`
+	// Empty follows the workspace default; changing the provider does not enable search.
+	WebSearchProviderID *string `json:"web_search_provider_id" extensions:"x-agent"`
+	// Whether earlier turns are kept in the conversation context
+	MultiTurnEnabled *bool `json:"multi_turn_enabled" extensions:"x-agent"`
+}
+
+// apply overlays the request onto an agent's current state, as an update
+// request that keeps the avatar.
+func (p PatchAgentRequest) apply(agent *types.CustomAgent) UpdateAgentRequest {
+	req := UpdateAgentRequest{Name: agent.Name, Description: agent.Description, Config: agent.Config}
+	if p.Name != nil {
+		req.Name = *p.Name
+	}
+	if p.Description != nil {
+		req.Description = *p.Description
+	}
+	cfg := &req.Config
+	if p.AgentMode != nil {
+		cfg.AgentMode = strings.TrimSpace(*p.AgentMode)
+	}
+	if p.SystemPrompt != nil {
+		cfg.SystemPrompt = *p.SystemPrompt
+	}
+	if p.ModelID != nil {
+		cfg.ModelID = *p.ModelID
+	}
+	if p.KnowledgeBases != nil {
+		cfg.KnowledgeBases = append([]string{}, *p.KnowledgeBases...)
+		cfg.KBSelectionMode = "selected"
+	}
+	if p.KBSelectionMode != nil {
+		cfg.KBSelectionMode = *p.KBSelectionMode
+	}
+	if p.MCPServices != nil {
+		cfg.MCPServices = append([]string{}, *p.MCPServices...)
+		cfg.MCPSelectionMode = "selected"
+	}
+	if p.MCPSelectionMode != nil {
+		cfg.MCPSelectionMode = *p.MCPSelectionMode
+	}
+	if p.SelectedSkills != nil {
+		cfg.SelectedSkills = append([]string{}, *p.SelectedSkills...)
+		cfg.SkillsSelectionMode = "selected"
+	}
+	if p.SkillsSelectionMode != nil {
+		cfg.SkillsSelectionMode = *p.SkillsSelectionMode
+	}
+	if p.SelectedSkills != nil || p.SkillsSelectionMode != nil {
+		if cfg.SkillsSelectionMode == "all" || cfg.SkillsSelectionMode == "none" {
+			cfg.SelectedSkills = []string{}
+		}
+	}
+	if p.WebSearchEnabled != nil {
+		cfg.WebSearchEnabled = *p.WebSearchEnabled
+	}
+	if p.WebSearchProviderID != nil {
+		cfg.WebSearchProviderID = *p.WebSearchProviderID
+	}
+	if p.MultiTurnEnabled != nil {
+		cfg.MultiTurnEnabled = *p.MultiTurnEnabled
+	}
+	return req
+}
+
+func validAgentMode(mode *string) bool {
+	if mode == nil {
+		return true
+	}
+	switch strings.TrimSpace(*mode) {
+	case types.AgentModeQuickAnswer, types.AgentModeSmartReasoning:
+		return true
+	}
+	return false
+}
+
+func validSelectionMode(mode *string) bool {
+	if mode == nil {
+		return true
+	}
+	switch *mode {
+	case "all", "selected", "none":
+		return true
+	}
+	return false
 }
 
 // UpdateAgentRequest defines the request body for updating an agent
@@ -86,10 +213,12 @@ type UpdateAgentRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      CreateAgentRequest  true  "智能体信息"
-// @Success      201      {object}  map[string]interface{}  "创建的智能体"
+// @Success      201      {object}  handler.AgentWriteResponse  "创建的智能体"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"agent.create","risk":"write","label_param":"name"}
+// @x-agent-hint "Creates a smart-reasoning agent with default settings, owned by the user. It can call MCP services and skills. Configure it afterwards with agent.update."
 // @Router       /agents [post]
 func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -115,6 +244,11 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 		_ = c.Error(err)
 		return
 	}
+	toolWarnings, err := checkAgentAllowedTools(nil, &req.Config)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
 
 	// Build agent object
 	agent := &types.CustomAgent{
@@ -123,7 +257,7 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 		Avatar:      req.Avatar,
 		Config:      req.Config,
 	}
-	agent.EnsureDefaults()
+	agent.EnsureCreationDefaults()
 	// The DB column (varchar(64)) has no application-level guard, so an
 	// oversized avatar used to reach postgres and come back as a raw driver
 	// 500. Reject it here with a 400 that names the limit.
@@ -157,10 +291,14 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 
 	logger.Infof(ctx, "Custom agent created successfully, ID: %s, name: %s",
 		secutils.SanitizeForLog(createdAgent.ID), secutils.SanitizeForLog(createdAgent.Name))
-	c.JSON(http.StatusCreated, gin.H{
+	resp := gin.H{
 		"success": true,
 		"data":    createdAgent,
-	})
+	}
+	if toolWarnings != nil {
+		resp["allowed_tools_warnings"] = toolWarnings
+	}
+	c.JSON(http.StatusCreated, resp)
 }
 
 // GetAgent godoc
@@ -169,12 +307,14 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "智能体ID"
-// @Success      200  {object}  map[string]interface{}  "智能体详情"
+// @Param        id   path      string  true  "智能体ID"  extensions(x-agent=agent_id)
+// @Success      200  {object}  handler.DataResponse{data=types.CustomAgent}  "智能体详情"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      404  {object}  errors.AppError         "智能体不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"agent.get","risk":"read"}
+// @x-agent-hint "Returns an agent's settings, including its full system prompt, tools and MCP and skill scope."
 // @Router       /agents/{id} [get]
 func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -220,10 +360,13 @@ func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "智能体列表"
+// @Param        creator  query  string  false  "创建者过滤，仅 mine 与 others 生效"  Enums(mine, others)  extensions(x-agent)
+// @Success      200  {object}  handler.ListAgentsResponse  "智能体列表"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"agent.list","risk":"read","max_items":200}
+// @x-agent-hint "Lists the workspace's agents, built-in ones included. Built-in agents are shared by everyone; only an admin can change them."
 // @Router       /agents [get]
 func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -347,7 +490,7 @@ func enrichAgentCreatorNames(ctx context.Context, userSvc interfaces.UserService
 // @Produce      json
 // @Param        id       path      string              true  "智能体ID"
 // @Param        request  body      UpdateAgentRequest  true  "更新请求"
-// @Success      200      {object}  map[string]interface{}  "更新后的智能体"
+// @Success      200      {object}  handler.AgentWriteResponse  "更新后的智能体"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      403      {object}  errors.AppError         "无法修改内置智能体"
 // @Security     Bearer
@@ -373,6 +516,139 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
+	h.saveAgentUpdate(c, id, req)
+}
+
+// PatchAgent godoc
+// @Summary      部分更新智能体
+// @Description  只修改请求中出现的字段，其余配置保持不变。
+// @Description  支持名称、描述、运行模式、系统提示词、对话模型、知识库、MCP、技能范围、联网搜索、多轮对话。
+// @Description  agent_mode 取 quick-answer 或 smart-reasoning。MCP 与技能只在 smart-reasoning 下运行，切到该模式会打开多轮对话。
+// @Description  传 knowledge_bases、mcp_services 或 selected_skills 而不传对应模式时，切换为 selected。
+// @Description  技能模式 all/none 清空技能列表；启用技能须先在编辑器选择沙箱，selected 名称须可用，否则返回 400。
+// @Tags         智能体
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string             true  "智能体ID"  extensions(x-agent=agent_id)
+// @Param        request  body      PatchAgentRequest  true  "要修改的字段"
+// @Success      200      {object}  handler.AgentWriteResponse  "更新后的智能体"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Failure      403      {object}  errors.AppError         "无权修改该智能体"
+// @Failure      404      {object}  errors.AppError         "智能体不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"agent.update","risk":"write","target":"agent.get","label":"name","require_complete_target":true}
+// @x-agent-hint "Changes the listed settings of an agent; a field left out is kept. agent_mode is quick-answer or smart-reasoning; MCP services and skills only run in smart-reasoning, and switching to it turns multi-turn on. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model), knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. Take web_search_provider_id from web_search_provider.list; an empty value follows the workspace default, and selecting a provider does not change web_search_enabled. Take skill names exactly from skill.list with the agent's sandbox_config_id. knowledge_base_ids, mcp_service_ids or selected_skills alone also switch that scope to selected."
+// @Router       /agents/{id} [patch]
+func (h *CustomAgentHandler) PatchAgent(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		_ = c.Error(errors.NewBadRequestError("Agent ID cannot be empty"))
+		return
+	}
+	var patch PatchAgentRequest
+	if err := c.ShouldBindJSON(&patch); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		_ = c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	if !validAgentMode(patch.AgentMode) {
+		_ = c.Error(errors.NewBadRequestError("agent_mode must be quick-answer or smart-reasoning"))
+		return
+	}
+	if !validSelectionMode(patch.KBSelectionMode) || !validSelectionMode(patch.MCPSelectionMode) ||
+		!validSelectionMode(patch.SkillsSelectionMode) {
+		_ = c.Error(errors.NewBadRequestError("selection mode must be all, selected or none"))
+		return
+	}
+	existing, err := h.service.GetAgentByID(ctx, id)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"agent_id": id})
+		if err == service.ErrAgentNotFound {
+			_ = c.Error(errors.NewNotFoundError("Agent not found"))
+			return
+		}
+		_ = c.Error(errors.NewInternalServerError("Failed to update agent"))
+		return
+	}
+	if patch.WebSearchProviderID != nil && *patch.WebSearchProviderID != "" {
+		if h.webSearchProviders == nil {
+			_ = c.Error(errors.NewServiceUnavailableError("Search provider lookup unavailable"))
+			return
+		}
+		provider, lookupErr := h.webSearchProviders.GetByID(ctx, existing.TenantID, *patch.WebSearchProviderID)
+		if lookupErr != nil {
+			_ = c.Error(errors.NewInternalServerError("Could not look up search provider"))
+			return
+		}
+		if provider == nil {
+			_ = c.Error(errors.NewBadRequestError("Search provider not found in this workspace"))
+			return
+		}
+	}
+	req := patch.apply(existing)
+	if patch.SelectedSkills != nil && len(*patch.SelectedSkills) > 50 {
+		_ = c.Error(errors.NewBadRequestError("selected_skills must contain at most 50 names"))
+		return
+	}
+	skillTarget := req.Config.SandboxConfigID
+	if h.desktop {
+		// Lite agents store no sandbox config; their skills run on the host.
+		skillTarget = sandbox.HostSkillTargetID
+	}
+	// Skills already saved are not re-checked: a skill uninstalled since must
+	// not block an unrelated change such as a rename.
+	if patch.SkillsSelectionMode != nil || patch.SelectedSkills != nil {
+		if (req.Config.SkillsSelectionMode == "all" || req.Config.SkillsSelectionMode == "selected") &&
+			skillTarget == "" {
+			_ = c.Error(errors.NewBadRequestError("Choose a sandbox in the agent editor before selecting skills"))
+			return
+		}
+		if err := h.validateAgentSkillNames(ctx, req.Config, skillTarget); err != nil {
+			_ = c.Error(err)
+			return
+		}
+	}
+	h.saveAgentUpdate(c, id, req)
+}
+
+func (h *CustomAgentHandler) validateAgentSkillNames(
+	ctx context.Context, cfg types.CustomAgentConfig, skillTarget string,
+) error {
+	if cfg.SkillsSelectionMode != "selected" || len(cfg.SelectedSkills) == 0 {
+		return nil
+	}
+	if h.usableSkills == nil {
+		return errors.NewInternalServerError("Failed to verify selected skills")
+	}
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return errors.NewUnauthorizedError("Missing workspace context")
+	}
+	usable := map[string]bool{}
+	for _, skill := range h.usableSkills.ListUsableSkills(ctx, tenantID, skillTarget) {
+		if skill != nil {
+			usable[skill.Name] = true
+		}
+	}
+	var unknown []string
+	for _, name := range cfg.SelectedSkills {
+		if !usable[name] {
+			unknown = append(unknown, name)
+		}
+	}
+	if len(unknown) > 0 {
+		return errors.NewBadRequestError("Unknown or unavailable skills: " + strings.Join(unknown, ", "))
+	}
+	return nil
+}
+
+// saveAgentUpdate validates and stores a full update of agent id, for both
+// PUT and PATCH.
+func (h *CustomAgentHandler) saveAgentUpdate(c *gin.Context, id string, req UpdateAgentRequest) {
+	ctx := c.Request.Context()
 	if err := authorizeAgentKnowledgeScope(ctx, req.Config); err != nil {
 		c.Error(err)
 		return
@@ -382,6 +658,22 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		return
 	}
 	if err := normalizeAgentReasoningEffort(&req.Config); err != nil {
+		_ = c.Error(err)
+		return
+	}
+	// Names already stored are kept, so the stored list is needed first.
+	existing, err := h.service.GetAgentByID(ctx, id)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"agent_id": id})
+		if err == service.ErrAgentNotFound {
+			_ = c.Error(errors.NewNotFoundError("Agent not found"))
+			return
+		}
+		_ = c.Error(errors.NewInternalServerError("Failed to update agent"))
+		return
+	}
+	toolWarnings, err := checkAgentAllowedTools(existing.Config.AllowedTools, &req.Config)
+	if err != nil {
 		_ = c.Error(err)
 		return
 	}
@@ -441,10 +733,14 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Custom agent updated successfully, ID: %s", secutils.SanitizeForLog(id))
-	c.JSON(http.StatusOK, gin.H{
+	resp := gin.H{
 		"success": true,
 		"data":    updatedAgent,
-	})
+	}
+	if toolWarnings != nil {
+		resp["allowed_tools_warnings"] = toolWarnings
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // DeleteAgent godoc
@@ -453,13 +749,15 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "智能体ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Param        id   path      string  true  "智能体ID"  extensions(x-agent=agent_id)
+// @Success      200  {object}  handler.MessageResponse  "删除成功"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      403  {object}  errors.AppError         "无法删除内置智能体"
 // @Failure      404  {object}  errors.AppError         "智能体不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"agent.delete","risk":"destructive","target":"agent.get","label":"name"}
+// @x-agent-hint "Deletes an agent and its IM channels. Cannot be undone; built-in agents cannot be deleted."
 // @Router       /agents/{id} [delete]
 func (h *CustomAgentHandler) DeleteAgent(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -524,12 +822,14 @@ func (h *CustomAgentHandler) DeleteAgent(c *gin.Context) {
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "智能体ID"
-// @Success      201  {object}  map[string]interface{}  "复制成功"
+// @Param        id   path      string  true  "智能体ID"  extensions(x-agent=agent_id)
+// @Success      201  {object}  handler.DataResponse{data=types.CustomAgent}  "复制成功"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      404  {object}  errors.AppError         "智能体不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"agent.copy","risk":"write","target":"agent.get","label":"name"}
+// @x-agent-hint "Copies an agent, settings included; the copy belongs to the user."
 // @Router       /agents/{id}/copy [post]
 func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -600,7 +900,7 @@ func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "占位符定义"
+// @Success      200  {object}  handler.DataResponse{data=handler.PlaceholderGroups}  "占位符定义"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /agents/placeholders [get]
@@ -626,7 +926,7 @@ func (h *CustomAgentHandler) GetPlaceholders(c *gin.Context) {
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "预设列表"
+// @Success      200  {object}  handler.DataResponse{data=[]types.AgentTypePresetEntry}  "预设列表"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /agents/type-presets [get]
@@ -636,6 +936,23 @@ func (h *CustomAgentHandler) GetAgentTypePresets(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    presets,
+	})
+}
+
+// GetAgentTools godoc
+// @Summary      获取智能体可选工具
+// @Description  返回编辑器可勾选的内置工具（含分组和知识库能力要求）、工具列表未设置时生效的默认工具，以及由开关控制、写入工具列表也不生效的工具
+// @Tags         智能体
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  handler.DataResponse{data=tools.AgentToolCatalog}  "工具目录"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /agents/tools [get]
+func (h *CustomAgentHandler) GetAgentTools(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    tools.BuildAgentToolCatalog(),
 	})
 }
 
@@ -650,7 +967,7 @@ func (h *CustomAgentHandler) GetAgentTypePresets(c *gin.Context) {
 // @Param        knowledge_ids       query     string  false  "知识ID列表（逗号分隔），限定到具体文档"
 // @Param        tag_scopes          query     string  false  "带知识库归属的标签范围（JSON）"
 // @Param        limit               query     int     false  "返回数量上限（未传时使用智能体配置的开场问题数量，最大30）"
-// @Success      200                 {object}  map[string]interface{}  "推荐问题列表"
+// @Success      200                 {object}  handler.DataResponse{data=handler.SuggestedQuestionsData}  "推荐问题列表"
 // @Failure      400                 {object}  errors.AppError         "请求参数错误"
 // @Failure      404                 {object}  errors.AppError         "智能体不存在"
 // @Security     Bearer

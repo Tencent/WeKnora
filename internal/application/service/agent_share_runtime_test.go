@@ -43,8 +43,6 @@ func (r *sharedAgentWebSearchRepo) Update(context.Context, *types.WebSearchProvi
 
 func (r *sharedAgentWebSearchRepo) Delete(context.Context, uint64, string) error { return nil }
 
-func (r *sharedAgentWebSearchRepo) ClearDefault(context.Context, uint64, string) error { return nil }
-
 func TestSharedAgentWebSearchReadyUsesSourceWorkspace(t *testing.T) {
 	repo := &sharedAgentWebSearchRepo{
 		explicit: &types.WebSearchProviderEntity{ID: "source-provider", TenantID: 42},
@@ -151,4 +149,8 @@ func TestSharedAgentInfoLeavesCustomAgentName(t *testing.T) {
 	}, types.OrgRoleViewer, map[string]bool{})
 	require.Equal(t, "Mine", info.Agent.Name)
 	require.Equal(t, "keep me", info.Agent.Description)
+}
+
+func (*sharedAgentWebSearchRepo) PatchSettings(context.Context, *types.WebSearchProviderEntity, []string) error {
+	panic("unexpected PatchSettings call")
 }

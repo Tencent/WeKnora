@@ -264,12 +264,14 @@ func TestSteerFollowUpHandoffKeepsSessionLiveAcrossPreviousClear(t *testing.T) {
 	prev := &qaRequestContext{
 		sessionID: "sess-1",
 		session:   &types.Session{ID: "sess-1"},
+		resume:    &types.AgentResume{Snapshot: []byte(`{"version":1}`)},
 	}
 	streamCtx := &sseStreamContext{assistantMessage: &types.Message{ID: "assist-A"}}
 
 	followUp, ok := h.claimNextSteerFollowUp(ctx, prev, streamCtx)
 	require.True(t, ok)
 	require.NotNil(t, followUp)
+	require.Nil(t, followUp.buildQARequest().Resume)
 	assert.Equal(t, "do this next", followUp.query)
 	assert.Equal(t, "do this next", msgs.byID[followUp.userMessageID].Content)
 	require.NotEmpty(t, followUp.assistantMessage.ID)
