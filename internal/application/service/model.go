@@ -341,6 +341,20 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 		model.ManagedBy = ""
 	}
 
+	if existingModel != nil &&
+		(existingModel.Type == types.ModelTypeEmbedding || model.Type == types.ModelTypeEmbedding) &&
+		existingModel.Parameters.EmbeddingParameters.Dimension != model.Parameters.EmbeddingParameters.Dimension &&
+		s.kbRepo != nil {
+		kbCount, err := s.kbRepo.CountByModelID(ctx, tenantID, model.ID)
+		if err != nil {
+			return fmt.Errorf("check embedding model usage before changing dimension: %w", err)
+		}
+		if kbCount > 0 {
+			return apperrors.NewBadRequestError(
+				"embedding model dimension cannot be changed while it is referenced by a knowledge base")
+		}
+	}
+
 	// Update model in repository
 	err = s.repo.Update(ctx, model)
 	if err != nil {
