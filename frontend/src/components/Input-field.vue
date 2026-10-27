@@ -56,6 +56,7 @@ import { formatLocalizedList } from '@/utils/format-list';
 import { SKILL_ICON, type MentionItem, type MentionItemType, type MentionRequestItem } from '@/types/mention';
 import { toolboxLocation } from '@/config/toolbox';
 import { supportedLevels, levelLabelKey, levelFromLegacy, clampLevel, type ReasoningLevel } from '@/utils/reasoningEffort';
+import { customAgentStreamMode } from '@/utils/agent-mode';
 
 const route = useRoute();
 const router = useRouter();
@@ -919,15 +920,37 @@ const loadWebSearchConfig = async (force = false) => {
   }
 };
 
+// 选中的自定义智能体可能刚在编辑页改过运行模式。对话页回到前台时列表会刷新，
+// 但 isAgentEnabled 只在“选择智能体”那一刻同步过，仍是旧值，请求因而走错管线
+// （#4803）。列表刷新后按智能体当前配置纠正一次。
+const syncSelectedAgentModeFromConfig = () => {
+  if (props.embeddedMode) return;
+  const agent = selectedAgent.value;
+  // 列表尚未加载时 selectedAgent 会回退到快速问答占位对象，不能用它推断模式。
+  if (!agent || agent.id !== selectedAgentId.value) return;
+  const shouldEnable = customAgentStreamMode(selectedAgentId.value, agent.config);
+  if (shouldEnable === null || shouldEnable === settingsStore.isAgentEnabled) return;
+  settingsStore.toggleAgent(shouldEnable);
+};
+
 // 加载智能体列表（我的 + 共享，供选中态与就绪检查用）
 const loadAgents = async (force = false) => {
   try {
     await chatResources.ensureAgents(force);
     ensureSelectedAgentNotDisabled();
+    syncSelectedAgentModeFromConfig();
   } catch (error) {
     console.error('Failed to load agents:', error);
   }
 };
+
+// 会话恢复会按 last_request_state 覆盖 isAgentEnabled，可能把它改回编辑前的旧值；
+// 选中智能体变化时也要重新对齐。挂载后的首次同步由 loadAgents 完成，这里兜住
+// 之后任何一次漂移。
+watch(
+  () => [selectedAgentId.value, currentAgentConfig.value?.agent_mode, settingsStore.isAgentEnabled] as const,
+  () => syncSelectedAgentModeFromConfig(),
+);
 
 // 默认选中的 builtin（builtin-quick-answer）也可能被当前空间管理员停用。
 // 列表加载完后做一次纠偏：若当前选中的是本空间停用的 agent（仅限「我的/builtin」，
