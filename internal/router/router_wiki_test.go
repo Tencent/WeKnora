@@ -122,6 +122,7 @@ func TestWikiReadRoutesDenyCrossTenantKB(t *testing.T) {
 		"/api/v1/knowledgebase/kb-victim/wiki/index",
 		"/api/v1/knowledgebase/kb-victim/wiki/graph",
 		"/api/v1/knowledgebase/kb-victim/wiki/stats",
+		"/api/v1/knowledgebase/kb-victim/wiki/documents",
 		"/api/v1/knowledgebase/kb-victim/wiki/search?q=test",
 		"/api/v1/knowledgebase/kb-victim/wiki/lint",
 		"/api/v1/knowledgebase/kb-victim/wiki/issues",
@@ -196,6 +197,7 @@ func TestWikiWriteRoutesDenyOutOfScopeAPIKeyKB(t *testing.T) {
 		{http.MethodPost, "/api/v1/knowledgebase/kb-other/wiki/folders"},
 		{http.MethodPost, "/api/v1/knowledgebase/kb-other/wiki/rebuild-links"},
 		{http.MethodPost, "/api/v1/knowledgebase/kb-other/wiki/auto-fix"},
+		{http.MethodPost, "/api/v1/knowledgebase/kb-other/wiki/retry"},
 		{http.MethodPut, "/api/v1/knowledgebase/kb-other/wiki/issues/1/status"},
 		{http.MethodPost, "/api/v1/knowledgebase/kb-other/wiki/revert"},
 	}
@@ -209,4 +211,17 @@ func TestWikiWriteRoutesDenyOutOfScopeAPIKeyKB(t *testing.T) {
 			require.Equal(t, http.StatusForbidden, rec.Code, "body=%s", rec.Body.String())
 		})
 	}
+}
+
+func TestWikiRetryRouteDeniesViewer(t *testing.T) {
+	engine := newKBRouteTestEngine(t, 1, tenantKBLookupFixture(), nil, func(r *gin.RouterGroup, guards *rbacGuards) {
+		guards.wikiKBCreator = func(*gin.Context) (string, error) { return "", nil }
+		RegisterWikiPageRoutes(r, &handler.WikiPageHandler{}, guards)
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/knowledgebase/kb-allowed/wiki/retry",
+		strings.NewReader(`{"knowledge_ids":["doc"]}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	require.Equal(t, http.StatusForbidden, response.Code)
 }

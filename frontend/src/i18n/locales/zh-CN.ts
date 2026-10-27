@@ -1,4 +1,27 @@
 export default {
+  wikiRecovery: {
+    "failureDetails": "失败详情 · {count} 次",
+    "selectPage": "选择本页失败文档",
+    "documents": "文档 Wiki 构建结果",
+    "description": "原文入库与 Wiki 构建分别展示。重试 Wiki 会复用现有分块、索引和页面。",
+    "refresh": "刷新",
+    "retrySelected": "重试选中文档（{count}）",
+    "sourceStatus": "原文入库",
+    "relatedPages": "关联 Wiki 页面",
+    "retry": "重试 Wiki",
+    "empty": "当前筛选下暂无文档",
+    "noPages": "暂无关联 Wiki 页面",
+    "failed": "Wiki 构建失败",
+    "all": "全部文档",
+    "pending": "等待构建",
+    "running": "构建中",
+    "completed": "构建完成",
+    "skipped": "已跳过",
+    "not_started": "待开始",
+    "loadFailed": "加载 Wiki 构建结果失败",
+    "retryFailed": "重试 Wiki 失败",
+    "queued": "已将 {count} 份文档加入 Wiki 构建队列"
+},
   modelCatalog: {
     "title": "模型目录",
     "description": "模型目录决定添加模型时可选的模型列表，以及上下文窗口、是否支持思考等默认参数。在这里修改后，所有空间立即生效。",

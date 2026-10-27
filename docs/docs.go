@@ -10552,6 +10552,69 @@ const docTemplate = `{
                 }
             }
         },
+        "/knowledgebase/{kb_id}/wiki/documents": {
+            "get": {
+                "description": "Source ingestion and Wiki results are reported separately.\nFilter failed to locate recoverable Wiki dead letters.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "List source document Wiki results",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "failed",
+                            "pending",
+                            "running",
+                            "completed",
+                            "skipped",
+                            "not_started"
+                        ],
+                        "type": "string",
+                        "description": "Wiki status",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (1-100)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiDocumentList"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
         "/knowledgebase/{kb_id}/wiki/folders": {
             "get": {
                 "security": [
@@ -11189,6 +11252,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Source document ID",
+                        "name": "source_ref",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Full-text search",
                         "name": "query",
                         "in": "query"
@@ -11499,6 +11568,55 @@ const docTemplate = `{
                     "target": "knowledge_base.get"
                 },
                 "x-agent-hint": "Use when wiki.lint reports link problems that do not match the page content."
+            }
+        },
+        "/knowledgebase/{kb_id}/wiki/retry": {
+            "post": {
+                "description": "Restores up to 100 failed documents and schedules the existing Wiki worker.\nDuplicate requests reuse pending work. Chunks, indexes, and existing Wiki pages are retained.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Retry failed Wiki operations without reparsing source documents",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Source document IDs",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.WikiRetryRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.WikiRetryResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ]
             }
         },
         "/knowledgebase/{kb_id}/wiki/revert": {
@@ -36396,6 +36514,46 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.WikiDocument": {
+            "type": "object",
+            "properties": {
+                "fail_count": {
+                    "type": "integer"
+                },
+                "knowledge_id": {
+                    "type": "string"
+                },
+                "last_error": {
+                    "type": "string"
+                },
+                "parse_status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "wiki_status": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiDocumentList": {
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiDocument"
+                    }
+                },
+                "failed_total": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.WikiExtractionGranularity": {
             "type": "string",
             "enum": [
@@ -41489,6 +41647,25 @@ const docTemplate = `{
                 "message": {
                     "type": "string",
                     "x-agent": true
+                }
+            }
+        },
+        "internal_handler.WikiRetryRequest": {
+            "type": "object",
+            "properties": {
+                "knowledge_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_handler.WikiRetryResponse": {
+            "type": "object",
+            "properties": {
+                "requeued": {
+                    "type": "integer"
                 }
             }
         },

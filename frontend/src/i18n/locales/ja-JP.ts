@@ -1,4 +1,27 @@
 export default {
+  wikiRecovery: {
+    "failureDetails": "失敗の詳細 · {count} 回",
+    "selectPage": "Select failed documents on this page",
+    "documents": "Document Wiki results",
+    "description": "Source ingestion and Wiki construction have separate results. Retry Wiki reuses existing chunks, indexes and pages.",
+    "refresh": "Refresh",
+    "retrySelected": "Retry selected ({count})",
+    "sourceStatus": "Source ingestion",
+    "relatedPages": "Related Wiki pages",
+    "retry": "Retry Wiki",
+    "empty": "No matching documents",
+    "noPages": "No associated Wiki pages",
+    "failed": "Wiki failed",
+    "all": "All documents",
+    "pending": "Queued",
+    "running": "Building",
+    "completed": "Completed",
+    "skipped": "Skipped",
+    "not_started": "Not started",
+    "loadFailed": "Could not load Wiki results",
+    "retryFailed": "Could not retry Wiki",
+    "queued": "Queued {count} documents for Wiki construction"
+},
   modelCatalog: {
     "title": "モデルカタログ",
     "description": "モデルカタログは、モデル追加時に選べるモデル一覧と、コンテキスト長や思考対応などの既定値を定義します。ここでの変更はすべてのワークスペースに即時反映されます。",
