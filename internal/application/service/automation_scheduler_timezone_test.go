@@ -107,7 +107,12 @@ func TestAutomationDueTaskStillClaimsUnderUTCClock(t *testing.T) {
 
 	runs := f.runs(t, a.ID)
 	require.Len(t, runs, 1)
-	require.Contains(t, []string{types.AutomationRunQueued, types.AutomationRunRunning}, runs[0].Status)
+	// tick starts the executor asynchronously, so the run may already have
+	// completed before it is read. Check the settled result instead.
+	run := f.settleRun(t, runs[0].ID)
+	require.Equal(t, types.AutomationRunSucceeded, run.Status)
+	require.True(t, run.ScheduledAt.Equal(due))
+	require.Len(t, f.runs(t, a.ID), 1)
 	reloaded := f.reload(t, a.ID)
 	require.False(t, reloaded.Enabled)
 	require.Nil(t, reloaded.NextRunAt)
