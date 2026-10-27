@@ -18,7 +18,10 @@ func TestConvertPageHTMLPreservesTables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"## 说明", "表格之前", "表格之间", "表格之后", "| 接口返回", "code=7001", "<table", "第一行", "第二行", "<li>甲</li>"} {
+	for _, want := range []string{
+		"## 说明", "表格之前", "表格之间", "表格之后", "| 接口返回",
+		"code=7001", "<table", "第一行", "第二行", "<li>甲</li>",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in converted page:\n%s", want, got)
 		}
