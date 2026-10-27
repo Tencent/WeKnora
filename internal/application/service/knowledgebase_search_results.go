@@ -98,6 +98,7 @@ type chunkIndex struct {
 	knowledgeIDs    []string
 	chunkIDs        []string
 	scores          map[string]float64
+	vectorScores    map[string]float64
 	matchTypes      map[string]types.MatchType
 	matchedContents map[string]string
 	processedIDs    map[string]bool // tracks all IDs (chunk + enrichment) to avoid duplicates
@@ -108,6 +109,7 @@ type chunkIndex struct {
 func (s *knowledgeBaseService) buildChunkIndex(chunks []*types.IndexWithScore) *chunkIndex {
 	idx := &chunkIndex{
 		scores:          make(map[string]float64, len(chunks)),
+		vectorScores:    make(map[string]float64, len(chunks)),
 		matchTypes:      make(map[string]types.MatchType, len(chunks)),
 		matchedContents: make(map[string]string, len(chunks)),
 		processedIDs:    make(map[string]bool, len(chunks)*2),
@@ -121,6 +123,7 @@ func (s *knowledgeBaseService) buildChunkIndex(chunks []*types.IndexWithScore) *
 		}
 		idx.chunkIDs = append(idx.chunkIDs, chunk.ChunkID)
 		idx.scores[chunk.ChunkID] = chunk.Score
+		idx.vectorScores[chunk.ChunkID] = chunk.VectorScore
 		idx.matchTypes[chunk.ChunkID] = chunk.MatchType
 		idx.matchedContents[chunk.ChunkID] = chunk.Content
 	}
@@ -243,7 +246,10 @@ func (s *knowledgeBaseService) assembleSearchResults(
 		if knowledge, ok := knowledgeMap[chunk.KnowledgeID]; ok {
 			matchType := idx.matchTypes[chunk.ID]
 			matchedContent := idx.matchedContents[chunk.ID]
-			searchResults = append(searchResults, s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent))
+			result := s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent)
+			result.VectorScore = idx.vectorScores[chunk.ID]
+			searchutil.CaptureImageEvidence(result)
+			searchResults = append(searchResults, result)
 			addedChunkIDs[chunk.ID] = true
 		} else {
 			logger.Warnf(ctx, "Knowledge not found for chunk: %s, knowledge_id: %s", chunk.ID, chunk.KnowledgeID)

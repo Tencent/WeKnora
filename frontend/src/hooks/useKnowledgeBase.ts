@@ -37,6 +37,7 @@ export default function (knowledgeBaseId?: string) {
     tags: [] as Array<{ id: string; name: string; color?: string }>,
   });
   let knowledgeListGeneration = 0;
+  let detailRequestGeneration = 0;
   let chunkRequestGeneration = 0;
   let activeKnowledgeId = '';
   const getKnowled = (
@@ -90,6 +91,7 @@ export default function (knowledgeBaseId?: string) {
     }
   };
   const getCardDetails = (item: any) => {
+    const requestGeneration = ++detailRequestGeneration;
     activeKnowledgeId = item.id;
     chunkRequestGeneration++;
     Object.assign(details, {
@@ -111,6 +113,7 @@ export default function (knowledgeBaseId?: string) {
     });
     getKnowledgeDetails(item.id)
       .then((result: any) => {
+        if (requestGeneration !== detailRequestGeneration || activeKnowledgeId !== item.id) return;
         if (result.success && result.data) {
           const { data } = result;
           Object.assign(details, {

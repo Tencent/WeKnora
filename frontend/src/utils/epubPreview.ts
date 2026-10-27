@@ -24,7 +24,13 @@ const IMAGE_MIME: Record<string, string> = {
 
 /** Resolve `href` against the directory of `base` inside the archive. */
 export function resolveEpubPath(base: string, href: string): string {
-  const clean = decodeURIComponent(href.split('#')[0].split('?')[0])
+  let clean = href.split('#')[0]!.split('?')[0]!
+  try {
+    clean = decodeURIComponent(clean)
+  } catch {
+    // Some archives contain literal percent signs or malformed escapes.
+    // Try the original ZIP path rather than aborting the entire preview.
+  }
   if (clean.startsWith('/')) return clean.slice(1)
   const parts = base.split('/').slice(0, -1)
   for (const seg of clean.split('/')) {
@@ -82,32 +88,45 @@ export async function renderEpubPreview(data: ArrayBuffer): Promise<EpubPreview>
     return url
   }
 
-  const sections: string[] = []
-  for (let i = 0; i < spine.length; i++) {
-    const path = spine[i]
-    if (!path) continue
-    const text = await zip.file(path)?.async('string')
-    if (!text) continue
-    const doc = parseChapter(text)
-    const body = doc.body || doc.documentElement
-    for (const img of Array.from(body.querySelectorAll('img'))) {
-      const src = img.getAttribute('src')
-      img.setAttribute('src', src ? await imageUrl(resolveEpubPath(path, src)) : '')
-    }
-    for (const image of byLocalName(body as Element, 'image')) {
-      const href = image.getAttribute('href') || image.getAttribute('xlink:href')
-      if (href) {
-        const url = await imageUrl(resolveEpubPath(path, href))
-        image.setAttribute('href', url)
-        image.removeAttribute('xlink:href')
-      }
-    }
-    // Chapter links point inside the archive; keep the text, drop the target.
-    for (const a of Array.from(body.querySelectorAll('a[href]'))) {
-      const href = a.getAttribute('href') || ''
-      if (!/^https?:/i.test(href)) a.removeAttribute('href')
-    }
-    sections.push(`<section class="epub-section" data-epub-section="${i + 1}">${body.innerHTML}</section>`)
+  // Inline images already contain their bytes; they are not ZIP entries.
+  // The caller still sanitizes the rendered HTML before inserting it.
+  const resolveImageUrl = (chapter: string, source: string): Promise<string> => {
+    if (/^data:image\//i.test(source.trim())) return Promise.resolve(source)
+    return imageUrl(resolveEpubPath(chapter, source))
   }
-  return { html: sections.join('\n'), objectUrls }
+
+  try {
+    const sections: string[] = []
+    for (let i = 0; i < spine.length; i++) {
+      const path = spine[i]
+      if (!path) continue
+      const text = await zip.file(path)?.async('string')
+      if (!text) continue
+      const doc = parseChapter(text)
+      const body = doc.body || doc.documentElement
+      for (const img of Array.from(body.querySelectorAll('img'))) {
+        const src = img.getAttribute('src')
+        img.setAttribute('src', src ? await resolveImageUrl(path, src) : '')
+      }
+      for (const image of byLocalName(body as Element, 'image')) {
+        const href = image.getAttribute('href') || image.getAttribute('xlink:href')
+        if (href) {
+          const url = await resolveImageUrl(path, href)
+          image.setAttribute('href', url)
+          image.removeAttribute('xlink:href')
+        }
+      }
+      // Chapter links point inside the archive; keep the text, drop the target.
+      for (const a of Array.from(body.querySelectorAll('a[href]'))) {
+        const href = a.getAttribute('href') || ''
+        if (!/^https?:/i.test(href)) a.removeAttribute('href')
+      }
+      sections.push(`<section class="epub-section" data-epub-section="${i + 1}">${body.innerHTML}</section>`)
+    }
+    return { html: sections.join('\n'), objectUrls }
+  } catch (error) {
+    // On success the caller owns these URLs; on failure it never receives them.
+    objectUrls.forEach(url => URL.revokeObjectURL(url))
+    throw error
+  }
 }

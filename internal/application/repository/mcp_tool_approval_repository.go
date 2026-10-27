@@ -36,6 +36,23 @@ func (r *MCPToolApprovalRepository) ListByService(ctx context.Context, tenantID 
 	return rows, nil
 }
 
+// Get returns the stored policy of a tool, or nil when it has none.
+func (r *MCPToolApprovalRepository) Get(
+	ctx context.Context, tenantID uint64, serviceID, toolName string,
+) (*types.MCPToolApproval, error) {
+	var row types.MCPToolApproval
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND service_id = ? AND tool_name = ?", tenantID, serviceID, toolName).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get mcp tool policy: %w", err)
+	}
+	return &row, nil
+}
+
 // IsRequired returns true when a row exists with require_approval = true.
 func (r *MCPToolApprovalRepository) IsRequired(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
 	var row types.MCPToolApproval
@@ -69,7 +86,15 @@ func (r *MCPToolApprovalRepository) IsEnabled(ctx context.Context, tenantID uint
 	return row.Enabled, nil
 }
 
+// riskRankSQL ranks a risk column as policy.Risk.Above does; unknown and
+// empty risks rank lowest.
+func riskRankSQL(column string) string {
+	return "(CASE " + column +
+		" WHEN 'read' THEN 1 WHEN 'probe' THEN 2 WHEN 'write' THEN 3 WHEN 'destructive' THEN 4 ELSE 0 END)"
+}
+
 // UpsertPolicy creates or updates only the supplied policy columns.
+// ObservedRisk only ever raises the stored value.
 // Concurrent patches of different fields cannot clobber each other because
 // ON CONFLICT updates omit unchanged columns. A first insert uses
 // require_approval=false and enabled=true for any field the patch omits.
@@ -79,8 +104,8 @@ func (r *MCPToolApprovalRepository) UpsertPolicy(
 	if serviceID == "" || toolName == "" {
 		return errors.New("service_id and tool_name are required")
 	}
-	if patch.RequireApproval == nil && patch.Enabled == nil {
-		return errors.New("require_approval or enabled is required")
+	if patch.RequireApproval == nil && patch.Enabled == nil && patch.Risk == nil && patch.ObservedRisk == nil {
+		return errors.New("an MCP tool policy field is required")
 	}
 
 	now := time.Now()
@@ -100,6 +125,20 @@ func (r *MCPToolApprovalRepository) UpsertPolicy(
 	if patch.Enabled != nil {
 		updates["enabled"] = *patch.Enabled
 	}
+	risk, observed := "", ""
+	if patch.Risk != nil {
+		risk = *patch.Risk
+		updates["risk"] = risk
+	}
+	if patch.ObservedRisk != nil {
+		observed = *patch.ObservedRisk
+		// Compare in the statement itself: a concurrent lower observation
+		// read before this one landed must not overwrite it.
+		updates["observed_risk"] = gorm.Expr(
+			"CASE WHEN " + riskRankSQL("excluded.observed_risk") + " > " +
+				riskRankSQL("mcp_tool_approvals.observed_risk") +
+				" THEN excluded.observed_risk ELSE mcp_tool_approvals.observed_risk END")
+	}
 
 	row := map[string]interface{}{
 		"id":               uuid.New().String(),
@@ -108,6 +147,8 @@ func (r *MCPToolApprovalRepository) UpsertPolicy(
 		"tool_name":        toolName,
 		"require_approval": requireApproval,
 		"enabled":          enabled,
+		"risk":             risk,
+		"observed_risk":    observed,
 		"created_at":       now,
 		"updated_at":       now,
 	}

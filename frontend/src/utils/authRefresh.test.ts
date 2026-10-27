@@ -112,6 +112,97 @@ test('a failed refresh clears the newly irrelevant session and redirects', async
   assert.equal(location.href, '/login')
 })
 
+async function settleRefreshes(promises: Promise<string>[]) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      Promise.allSettled(promises),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('refresh callers did not settle')), 1000)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+test('a storage read failure releases the refresh lock for a later call', async () => {
+  const { store, location } = installBrowser()
+  store.weknora_refresh_token = 'rt-1'
+  const storageError = new DOMException('Storage access denied', 'SecurityError')
+  const getItem = localStorage.getItem
+  localStorage.getItem = () => { throw storageError }
+  let calls = 0
+  const refresh = async () => {
+    calls += 1
+    return { success: true, data: { token: 'fresh', refreshToken: 'rt-2' } }
+  }
+
+  await assert.rejects(refreshAccessTokenShared({ refresh }), error => error === storageError)
+  assert.equal(calls, 0)
+  assert.equal(location.href, '/login')
+
+  localStorage.getItem = getItem
+  store.weknora_refresh_token = 'rt-retry'
+  const [retry] = await settleRefreshes([refreshAccessTokenShared({ refresh })])
+  assert.deepEqual(retry, { status: 'fulfilled', value: 'fresh' })
+  assert.equal(calls, 1)
+})
+
+test('cleanup failure still rejects every queued caller and attempts the other keys', async () => {
+  const { store, location } = installBrowser()
+  store.weknora_refresh_token = 'rt-1'
+  store.weknora_token = 'expired'
+  store.weknora_selected_tenant_id = '9'
+  const removeItem = localStorage.removeItem
+  localStorage.removeItem = (key: string) => {
+    if (key === 'weknora_token') throw new DOMException('Storage access denied', 'SecurityError')
+    removeItem(key)
+  }
+  let fail!: (error: Error) => void
+  const pending = new Promise<never>((_, reject) => { fail = reject })
+  const refreshError = new Error('refresh provider failed')
+  const first = refreshAccessTokenShared({ refresh: () => pending })
+  const second = refreshAccessTokenShared({ refresh: () => pending })
+  const settled = settleRefreshes([first, second])
+  fail(refreshError)
+
+  for (const result of await settled) {
+    assert.deepEqual(result, { status: 'rejected', reason: refreshError })
+  }
+  assert.equal(store.weknora_selected_tenant_id, undefined)
+  assert.equal(location.href, '/login')
+
+  localStorage.removeItem = removeItem
+  store.weknora_refresh_token = 'rt-retry'
+  const [retry] = await settleRefreshes([refreshAccessTokenShared({
+    refresh: async () => ({ success: true, data: { token: 'fresh', refreshToken: 'rt-2' } }),
+  })])
+  assert.deepEqual(retry, { status: 'fulfilled', value: 'fresh' })
+})
+
+test('blocked token writes and cleanup reject queued callers instead of returning an unpersisted token', async () => {
+  const { store, location } = installBrowser()
+  store.weknora_refresh_token = 'rt-1'
+  const storageError = new DOMException('Storage quota exceeded', 'QuotaExceededError')
+  localStorage.setItem = () => { throw storageError }
+  localStorage.removeItem = () => { throw new DOMException('Storage access denied', 'SecurityError') }
+  let release!: (result: { success: boolean; data: { token: string; refreshToken: string } }) => void
+  const pending = new Promise<{ success: boolean; data: { token: string; refreshToken: string } }>(
+    resolve => { release = resolve },
+  )
+  const first = refreshAccessTokenShared({ refresh: () => pending })
+  const second = refreshAccessTokenShared({ refresh: () => pending })
+  const settled = settleRefreshes([first, second])
+  release({ success: true, data: { token: 'unpersisted', refreshToken: 'rt-2' } })
+
+  for (const result of await settled) {
+    assert.deepEqual(result, { status: 'rejected', reason: storageError })
+  }
+  assert.equal(location.href, '/login')
+  assert.equal(store.weknora_token, undefined)
+})
+
 test('runStreamWithAuthRetry refreshes once and replays with the new token', async () => {
   installBrowser()
   const tokens: string[] = []

@@ -37,7 +37,7 @@ func pipelineError(ctx context.Context, stage, action string, fields map[string]
 func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 	chatManage *types.ChatManage,
 ) (chat.Chat, *chat.ChatOptions, error) {
-	chatModel, err := modelService.GetChatModel(ctx, chatManage.ChatModelID)
+	chatModel, err := modelService.GetChatModel(chatManage.ChatModelContext(ctx), chatManage.ChatModelID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get chat model: %v", err)
 		return nil, nil, err
@@ -94,8 +94,10 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 	// Add current user message. Only include images when the chat model supports
 	// vision; non-vision models rely on the text description in UserContent.
 	userMsg := chat.Message{Role: "user", Content: chatManage.UserContent}
-	if chatManage.ChatModelSupportsVision && len(chatManage.Images) > 0 {
-		userMsg.Images = chatManage.Images
+	if chatManage.ChatModelSupportsVision && len(chatManage.Images)+len(chatManage.ContextImages) > 0 {
+		// The user's own images first, then the retrieved ones the content
+		// says are attached.
+		userMsg.Images = append(slices.Clone(chatManage.Images), chatManage.ContextImages...)
 	}
 	chatMessages = append(chatMessages, userMsg)
 

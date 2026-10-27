@@ -90,3 +90,21 @@ func TestSummarizeSearchResults_sortsByScore(t *testing.T) {
 		t.Fatalf("unexpected hits: %#v", hits)
 	}
 }
+
+func TestRetrievalPreviewsPreserveImageSourceAndRawVectorScore(t *testing.T) {
+	out := SummarizeRetrieveOutput([]*types.RetrieveResult{{
+		RetrieverType: types.VectorRetrieverType,
+		Results: []*types.IndexWithScore{{
+			ChunkID: "image", SourceType: types.ImageSourceType, Score: 0.7, VectorScore: 0.2688,
+		}},
+	}})
+	hit := out["top_hits"].([]map[string]interface{})[0]
+	if hit["source_type"] != types.ImageSourceType || hit["vector_score"] != "0.2688" || hit["score"] != "0.7000" {
+		t.Fatalf("image identity/raw score lost: %#v", hit)
+	}
+	groups := out["top_hits_by_retriever"].([]map[string]interface{})
+	groupHit := groups[0]["top_hits"].([]map[string]interface{})[0]
+	if groupHit["source_type"] != types.ImageSourceType || groupHit["vector_score"] != "0.2688" {
+		t.Fatalf("per-retriever image identity/raw score lost: %#v", groupHit)
+	}
+}

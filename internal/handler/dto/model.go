@@ -177,27 +177,26 @@ func HasAllSecretExtras(provider, baseURL string, extra map[string]string) bool 
 // stripped along with every other field that could leak how a particular
 // tenant configured the upstream provider.
 type ModelResponse struct {
-	ID          string             `json:"id"`
+	ID          string             `json:"id" extensions:"x-agent=model_id"`
 	TenantID    uint64             `json:"tenant_id"`
-	Name        string             `json:"name"`
-	DisplayName string             `json:"display_name"`
-	Type        types.ModelType    `json:"type"`
-	Source      types.ModelSource  `json:"source"`
-	Description string             `json:"description"`
-	Parameters  ModelParametersDTO `json:"parameters"`
-	IsDefault   bool               `json:"is_default"`
-	IsBuiltin   bool               `json:"is_builtin"`
-	Status      types.ModelStatus  `json:"status"`
+	Name        string             `json:"name" extensions:"x-agent"`
+	DisplayName string             `json:"display_name" extensions:"x-agent"`
+	Type        types.ModelType    `json:"type" extensions:"x-agent"`
+	Source      types.ModelSource  `json:"source" extensions:"x-agent"`
+	Description string             `json:"description" extensions:"x-agent"`
+	Parameters  ModelParametersDTO `json:"parameters" extensions:"x-agent"`
+	IsDefault   bool               `json:"is_default" extensions:"x-agent"`
+	IsBuiltin   bool               `json:"is_builtin" extensions:"x-agent"`
+	Status      types.ModelStatus  `json:"status" extensions:"x-agent"`
 	CreatedAt   time.Time          `json:"created_at"`
 	UpdatedAt   time.Time          `json:"updated_at"`
 	// Per-field "configured?" map. Omitted for builtin models unless the
 	// caller is a system administrator. See MCPServiceResponse.Credentials.
 	Credentials map[string]CredentialFieldMetadata `json:"credentials,omitempty"`
 	// Capabilities is the catalog view of the model. Chat models get the
-	// protocol, thinking levels and context window; embedding models get the
-	// input modalities, which decide whether images can be embedded in the
-	// same space as text.
-	Capabilities *modelruntime.Capabilities `json:"capabilities,omitempty"`
+	// protocol, thinking levels and context window; embedding and rerank
+	// models get input modalities, including support for image input.
+	Capabilities *modelruntime.Capabilities `json:"capabilities,omitempty" extensions:"x-agent,x-agent-detail"`
 }
 
 // ModelParametersDTO carries every parameter field EXCEPT the two secret
@@ -205,12 +204,14 @@ type ModelResponse struct {
 // identifier the WeKnora Cloud frontend renders. CustomHeaders is also kept
 // (structural metadata, not a credential).
 type ModelParametersDTO struct {
-	BaseURL             string                    `json:"base_url"`
+	// BaseURL is empty for callers who may not view integration detail, and
+	// for builtin models; see NewModelResponse.
+	BaseURL             string                    `json:"base_url" extensions:"x-agent"`
 	InterfaceType       string                    `json:"interface_type"`
 	EmbeddingParameters types.EmbeddingParameters `json:"embedding_parameters"`
 	ParameterSize       string                    `json:"parameter_size"`
-	Provider            string                    `json:"provider"`
-	ExtraConfig         map[string]string         `json:"extra_config,omitempty"`
+	Provider            string                    `json:"provider" extensions:"x-agent"`
+	ExtraConfig         map[string]string         `json:"extra_config,omitempty" extensions:"x-agent,x-agent-detail,x-agent-keys=remote_model_name"`
 	CustomHeaders       map[string]string         `json:"custom_headers,omitempty"`
 	SupportsVision      bool                      `json:"supports_vision"`
 	ContextWindow       int                       `json:"context_window,omitempty"`
@@ -311,7 +312,7 @@ func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 	}
 	var caps *modelruntime.Capabilities
 	switch m.Type {
-	case types.ModelTypeKnowledgeQA, types.ModelTypeVLLM, types.ModelTypeEmbedding:
+	case types.ModelTypeKnowledgeQA, types.ModelTypeVLLM, types.ModelTypeEmbedding, types.ModelTypeRerank:
 		if resolved, err := modelruntime.Resolve(modelruntime.Ref{
 			Provider: m.Parameters.Provider, Model: m.Name, BaseURL: m.Parameters.BaseURL,
 			ModelType: m.Type, Extra: m.Parameters.ExtraConfig, Override: m.Parameters.Spec,

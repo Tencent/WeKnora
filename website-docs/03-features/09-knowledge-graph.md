@@ -21,7 +21,7 @@
 | `NEO4J_USERNAME` | string | `neo4j` | 用户名 |
 | `NEO4J_PASSWORD` | string | `password` | 密码 |
 
-`initNeo4jClient` 启动时最多重试 30 次（间隔 2s）建立并验证连接；未启用时返回 `nil` driver，此时 `Neo4jRepository` 的所有方法降级为 no-op（日志 `NOT SUPPORT RETRIEVE GRAPH`）。`GET /system` 信息接口通过 `getGraphDatabaseEngine()` 报告 `"Neo4j"` 或 `"Not Enabled"`（`internal/handler/system.go`）。
+`initNeo4jClient` 启动时最多重试 30 次（间隔 2s）建立并验证连接；未启用时返回 `nil` driver，此时原有构建、删除及内部 `SearchNode` 路径降级为 no-op（日志 `NOT SUPPORT RETRIEVE GRAPH`）。独立公共查询接口则明确返回 503，不把未配置后端伪装成“没有匹配”。`GET /system` 信息接口通过 `getGraphDatabaseEngine()` 报告 `"Neo4j"` 或 `"Not Enabled"`（`internal/handler/system.go`）。
 
 docker-compose 的 `neo4j` 服务预装 APOC：`NEO4JLABS_PLUGINS=["apoc"]`（图谱写入依赖 `apoc.merge.node` / `apoc.merge.relationship`，删除依赖 `apoc.periodic.iterate`）。
 
@@ -131,6 +131,12 @@ SET node.chunks = apoc.coll.union(node.chunks, row.chunks)
 
 Agent 模式则提供 `query_knowledge_graph` 工具（`internal/agent/tools/query_knowledge_graph.go`）：校验各知识库是否配置了图谱（`ExtractConfig.Nodes/Relations` 非空），并发对多库执行检索、按 chunk 去重排序，输出中附带各库的图谱配置状态（实体类型 / 关系类型清单）；未配置图谱的库回落为普通混合检索结果。该工具的能力要求是 `all_of: [graph]`，并且只有当 Agent 作用域内存在启用图谱的知识库时才会提供给模型——`agent_service.go` 装配工具白名单时会把它从没有图谱库的作用域中移除，避免模型反复调用一个只能返回退化结果的工具。
 
+## 独立 JSON 查询
+
+外部应用可使用 `POST /api/v1/knowledge-bases/{id}/graph-search`，按区分大小写的实体名子串读取实体、定向关系及有效来源分块。它是单 KB 的只读接口，不调用模型、不修改默认问答/检索管线，亦不是可执行任意 Cypher 的入口。
+
+该接口使用独立的有界读取契约：保留无关系实体，返回结果/候选/字段截断标记，并在输出属性与关系前验证完整来源。删除或禁用任一引用分块会使相关实体与关系被保守省略。权限、请求参数、响应字段和上限见 [graph-search API](../04-api/02-api-knowledge.md#graph-search)。
+
 ## 流程图
 
 ### 构建流程
@@ -168,5 +174,5 @@ flowchart TD
 ## 可视化
 
 - **Mermaid 图生成**：`internal/application/service/graph.go` 的 `graphBuilder` 是 `types.GraphBuilder` 接口的内存版实现（LLM 抽实体 → 抽关系 → PMI×0.6 + Strength×0.4 计算关系权重并归一到 1-10 → 计算实体度数 → 构建 chunk 关联图），其 `generateKnowledgeGraphDiagram` 用 DFS 找连通分量并输出 Mermaid `graph TD` 子图（高频实体高亮、强度 >7 的关系用粗箭头）。注意：`NewGraphBuilder` 目前没有被容器装配调用（仓库内无其他引用），属于独立/遗留的图构建与可视化实现；生成的 Mermaid 图输出到日志。
-- **对外 API**：知识图谱本身没有专门的可视化 REST 端点；`query_knowledge_graph` 工具的结构化输出（`graph_configs`、结果列表）供 Agent 前端渲染。`GET /wiki/graph`（`wikiHandler.GetGraph`）是 Wiki 功能自己的图接口，与本文的实体关系图谱无关。
+- **对外 API**：`POST /knowledge-bases/{id}/graph-search` 提供独立 JSON 数据，可用于外部可视化，不包含新的内置可视化页面；`query_knowledge_graph` 仍是 Agent 自己的工具输出。`GET /wiki/graph`（`wikiHandler.GetGraph`）是 Wiki 功能自己的图接口，与本文的实体关系图谱无关。
 - **prompt 模板**：`config/prompt_templates/graph_extraction.yaml` 提供 `default_extract_entities` 等模板（实体类型枚举 Person/Organization/Location/... 与 JSON 输出协议），经 `internal/config/config.go` 的 `extract_entities_prompt_id` / `extract_relationships_prompt_id` 解析进 `Conversation.ExtractEntitiesPrompt` / `ExtractRelationshipsPrompt`，供上述内存版 `graphBuilder` 使用；生产异步抽取路径使用的是 `config.yaml` 中 `extract.extract_graph` / `extract.extract_entity` 模板（`ExtractManagerConfig`）。

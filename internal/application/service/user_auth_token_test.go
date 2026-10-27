@@ -126,7 +126,7 @@ func newAuthTestUserService(tokenRepo *stubAuthTokenRepo) *userService {
 	return &userService{
 		userRepo: &stubUserRepoForAuth{
 			users: map[string]*types.User{
-				"user-1": {ID: "user-1", TenantID: 1},
+				"user-1": {ID: "user-1", TenantID: 1, IsActive: true},
 			},
 		},
 		tokenRepo: tokenRepo,
@@ -406,5 +406,25 @@ func TestGetAccessTokenLookupsRedactJWT(t *testing.T) {
 	}
 	if byID.ID != "tok-1" || byID.Token != "" {
 		t.Fatalf("GetAccessTokenByID = %+v, want id tok-1 with redacted token", byID)
+	}
+}
+
+func (s *stubUserRepoForAuth) SetUserActive(context.Context, string, string, bool) (*types.User, error) {
+	panic("unexpected SetUserActive call")
+}
+
+func TestValidateTokenRejectsDisabledAccount(t *testing.T) {
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+	user := svc.userRepo.(*stubUserRepoForAuth).users["user-1"]
+	access := signTestJWT(jwt.MapClaims{"user_id": user.ID, "type": "access", "exp": time.Now().Add(time.Hour).Unix()})
+	tokenRepo.tokens[access] = &types.AuthToken{UserID: user.ID, Token: access, TokenType: "access_token"}
+	if _, _, err := svc.ValidateToken(context.Background(), access); err != nil {
+		t.Fatalf("active account rejected: %v", err)
+	}
+	user.IsActive = false
+	_, _, err := svc.ValidateToken(context.Background(), access)
+	if err == nil || err.Error() != "account is disabled" {
+		t.Fatalf("disabled account with unrevoked token: got %v", err)
 	}
 }

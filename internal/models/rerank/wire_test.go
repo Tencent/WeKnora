@@ -2,6 +2,7 @@ package rerank
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -72,7 +73,13 @@ func texts(v any) []string {
 		case string:
 			out = append(out, d)
 		case map[string]any: // NIM passages, Volcengine datas
-			if text, ok := d["text"].(string); ok {
+			if image, ok := d["image"].(string); ok {
+				// An image scores by its decoded size, so a test can tell
+				// which image a score belongs to.
+				_, encoded, _ := strings.Cut(image, ";base64,")
+				raw, _ := base64.StdEncoding.DecodeString(encoded)
+				out = append(out, strings.Repeat("i", len(raw)))
+			} else if text, ok := d["text"].(string); ok {
 				out = append(out, text)
 			} else {
 				out = append(out, d["content"].(string))
@@ -205,6 +212,16 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 			name: "jina echoes documents", provider: "jina", model: "jina-reranker-v3", base: "/v1",
 			wantPath: "/v1/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
 			wantBody: cohere("jina-reranker-v3", three, map[string]any{"return_documents": true}),
+		},
+		{
+			name: "cohere v2", provider: "cohere", model: "rerank-v4.0-pro", base: "/v2",
+			wantPath: "/v2/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: cohere("rerank-v4.0-pro", three, nil),
+		},
+		{
+			name: "cohere full endpoint", provider: "cohere", model: "rerank-v3.5", base: "/v2/rerank",
+			wantPath: "/v2/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: cohere("rerank-v3.5", three, nil),
 		},
 		{
 			name: "zhipu on its full rerank URL", provider: "zhipu", model: "rerank", base: "/api/paas/v4/rerank",

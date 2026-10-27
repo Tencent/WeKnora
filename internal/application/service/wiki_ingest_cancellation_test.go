@@ -56,7 +56,7 @@ func TestWikiReducePreservesLookupFailures(t *testing.T) {
 			svc := &wikiIngestService{knowledgeSvc: &wikiKnowledgeLookupStub{
 				lookup: func(context.Context, string) (*types.Knowledge, error) { return nil, lookupErr },
 			}}
-			changed, _, _, err := svc.reduceSlugUpdates(context.Background(), nil, "kb-1", "entity/example",
+			changed, _, _, _, err := svc.reduceSlugUpdates(context.Background(), nil, "kb-1", "entity/example",
 				[]SlugUpdate{{Slug: "entity/example", Type: "entity", KnowledgeID: "k-1"}}, 7, nil, nil)
 			require.ErrorIs(t, err, lookupErr)
 			assert.False(t, changed)
@@ -160,6 +160,12 @@ func (wikiLookupModelService) GetChatModel(context.Context, string) (chat.Chat, 
 type wikiLookupEmptyChunks struct{ interfaces.ChunkRepository }
 
 func (wikiLookupEmptyChunks) ListChunksByKnowledgeID(context.Context, uint64, string) ([]*types.Chunk, error) {
+	return nil, nil
+}
+
+func (wikiLookupEmptyChunks) ListChunksByKnowledgeIDAndTypes(
+	context.Context, uint64, string, []types.ChunkType,
+) ([]*types.Chunk, error) {
 	return nil, nil
 }
 

@@ -31,6 +31,19 @@ func (r *resourceRepository) GetByID(ctx context.Context, id string) (*types.Sto
 	return &resource, err
 }
 
+func (r *resourceRepository) BindStorageBackend(
+	ctx context.Context, id, backendID string,
+) (*types.StoredResource, error) {
+	err := r.db.WithContext(ctx).Model(&types.StoredResource{}).
+		Where("id = ? AND state = ? AND (storage_backend_id = '' OR storage_backend_id IS NULL)",
+			id, types.ResourceStateActive).
+		Update("storage_backend_id", backendID).Error
+	if err != nil {
+		return nil, err
+	}
+	return r.GetByID(ctx, id)
+}
+
 func (r *resourceRepository) GetByHandle(ctx context.Context, handle string) (*types.StoredResource, error) {
 	var resource types.StoredResource
 	err := r.db.WithContext(ctx).
@@ -62,6 +75,32 @@ func (r *resourceRepository) GetByTenantLocation(
 	return &resource, err
 }
 
+// GetActiveByContentHash resolves identical bytes already registered under any
+// physical location. The content hash is not unique — duplicates written before
+// this lookup existed may share it — so the oldest live row is returned to keep
+// the choice stable between calls.
+func (r *resourceRepository) GetActiveByContentHash(
+	ctx context.Context,
+	tenantID uint64,
+	contentHash string,
+) (*types.StoredResource, error) {
+	var resource types.StoredResource
+	err := r.db.WithContext(ctx).
+		Where(
+			"tenant_id = ? AND content_hash = ? AND content_hash <> '' "+
+				"AND state = ? AND deleted_at IS NULL",
+			tenantID,
+			contentHash,
+			types.ResourceStateActive,
+		).
+		Order("created_at ASC, id ASC").
+		First(&resource).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &resource, err
+}
+
 func (r *resourceRepository) MarkDeleted(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Model(&types.StoredResource{}).Where("id = ?", id).
 		Updates(map[string]interface{}{"state": types.ResourceStateDeleted, "deleted_at": time.Now()}).Error
@@ -86,6 +125,22 @@ func (r *resourceRepository) CountBindings(ctx context.Context, resourceID strin
 		Where("resource_id = ?", resourceID).
 		Count(&count).Error
 	return count, err
+}
+
+func (r *resourceRepository) ListHandlesByOwner(
+	ctx context.Context, ownerType string, ownerIDs, relations []string,
+) ([]string, error) {
+	if ownerType == "" || len(ownerIDs) == 0 || len(relations) == 0 {
+		return nil, nil
+	}
+	var handles []string
+	err := r.db.WithContext(ctx).
+		Table("resource_bindings AS b").
+		Joins("JOIN resources AS r ON r.id = b.resource_id AND r.state = ?", types.ResourceStateActive).
+		Where("b.owner_type = ? AND b.owner_id IN ? AND b.relation IN ?", ownerType, ownerIDs, relations).
+		Distinct("r.handle").
+		Pluck("r.handle", &handles).Error
+	return handles, err
 }
 
 func (r *resourceRepository) CreateGrant(ctx context.Context, grant *types.ResourceAccessGrant) error {

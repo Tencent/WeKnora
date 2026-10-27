@@ -43,7 +43,7 @@ flowchart TB
 - **源码编译**：Go 1.26（见 `docker/Dockerfile.app` builder 阶段 `golang:1.26-bookworm`）、CGO（依赖 `libsqlite3-dev`）、Node.js + npm（前端）、Python 3.10 + uv（docreader）。
 - **Kubernetes**：>= 1.25.0（`helm/Chart.yaml`）。
 
-Compose 默认 ParadeDB `v0.22.6-pg17` 的 x86 CPU 基线为 `x86-64-v2`（包括 SSE4.2、POPCNT），不再强制要求 AVX2。这不代表所有 ARM CPU 或其他可选服务均兼容。
+Compose 默认 ParadeDB 镜像自 `v0.22.6-pg17` 起 x86 CPU 基线为 `x86-64-v2`（包括 SSE4.2、POPCNT），不再强制要求 AVX2；更高镜像版本的基线以 ParadeDB 官方发布说明为准。这不代表所有 ARM CPU 或其他可选服务均兼容。
 
 ## 一、Docker Compose 标准部署（docker-compose.yml）
 
@@ -74,7 +74,7 @@ docker compose ps                 # 等所有服务变成 healthy/running
 > 如果数据库仍为 ParadeDB `v0.22.2-pg17`，先按 [ParadeDB 升级说明](06-paradedb-upgrade.md) 停止写入、备份、保留数据卷更换镜像并完成 `pg_search` 扩展升级，再恢复应用。仅替换镜像不会更新已有数据库的扩展 SQL；迁移 `000099` 会处理 WeKnora 库中符合条件的 `0.22.2–0.22.5`，其他数据库仍需单独检查。
 
 ```bash
-# 在 .env 中将 WEKNORA_VERSION 设为目标版本（如 0.7.0），或保持 latest
+# 在 .env 中将 WEKNORA_VERSION 设为目标版本（如 0.8.3），或保持 latest
 docker compose pull
 docker compose up -d
 ```
@@ -88,7 +88,7 @@ docker compose up -d
 | `frontend` | `wechatopenai/weknora-ui:${WEKNORA_VERSION:-latest}` | `${FRONTEND_PORT:-80}:80` | app（healthy） | Nginx 托管 SPA 并反代到 app；`APP_HOST`/`APP_BACKEND_PORT`/`APP_SCHEME` 可指向远程后端 |
 | `app` | `wechatopenai/weknora-app` | `${APP_PORT:-8080}:8080` | postgres（healthy）、redis、docreader（healthy） | Go 后端；挂载 `./config/config.yaml`、`data-files` 卷；健康检查 `GET /health` |
 | `docreader` | `wechatopenai/weknora-docreader` | 仅 `expose: 50051`（不发布到宿主机） | — | 文档解析 gRPC 服务；健康检查 `grpc_health_probe`；与 app 共享 `docreader-tmp` 卷传递图片 |
-| `postgres` | `paradedb/paradedb:v0.22.6-pg17` | 不映射宿主端口 | — | ParadeDB = PostgreSQL 17 + BM25/向量扩展，默认检索引擎 |
+| `postgres` | `paradedb/paradedb:v0.25.11-pg17` | 不映射宿主端口 | — | ParadeDB = PostgreSQL 17 + BM25/向量扩展，默认检索引擎 |
 | `redis` | `redis:7.0-alpine` | 不映射宿主端口 | — | `--appendonly yes --requirepass ${REDIS_PASSWORD}` |
 
 ### 可选服务与 profiles
@@ -133,7 +133,7 @@ make dev-logs / dev-status / dev-stop / dev-restart
 | Dockerfile | 产物镜像 | 要点 |
 | --- | --- | --- |
 | `docker/Dockerfile.app` | `wechatopenai/weknora-app` | 三阶段：先构建 BrowserSkill 的 `bsk` 与配套 Chrome 扩展（装入 `/opt/weknora/browserskill/`，见[本机浏览器](../05-clients/09-local-browser.md)）；再用 `golang:1.26-bookworm` 编译（`make build-prod`，默认 `WITH_ANYDOC=1` 链接进程内 office 解析引擎，注入版本信息，预下载 DuckDB 扩展 `cmd/download/duckdb`）→ `debian:12.12-slim` 运行层（含 `migrate` 迁移工具、python3/node/uvx（供 stdio MCP 使用）、ffmpeg（ASR）、gosu 降权，以及第三方许可证文本）。入口 `scripts/docker-entrypoint.sh`：修复挂载目录属主；若挂载了 docker.sock，按 socket GID 把 appuser 加入对应组（compose `group_add` 在 gosu 后无效），再以 appuser 运行 `./WeKnora`。`EXPOSE 8080` |
-| `docker/Dockerfile.docreader` | `wechatopenai/weknora-docreader` | Python 3.10 + uv 依赖锁定；生成 protobuf；运行层安装 LibreOffice、OpenJDK 17、antiword、Playwright（webkit）与 `grpc_health_probe`。轻量版不含 PaddleOCR。`EXPOSE 50051`。支持 `APT_MIRROR` 构建参数 |
+| `docker/Dockerfile.docreader` | `wechatopenai/weknora-docreader` | Python 3.10 + uv 依赖锁定；生成 protobuf；运行层安装 LibreOffice、OpenJDK 17、antiword、Playwright（webkit）与 `grpc_health_probe`。轻量版不含 PaddleOCR。`EXPOSE 50051`。支持 `APT_MIRROR`、`PLAYWRIGHT_DOWNLOAD_HOST` 和 `PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST` 构建参数 |
 | `docker/Dockerfile.odl-hybrid` | `weknora-odl-hybrid:local` | 安装 `opendataloader-pdf[hybrid]`（Docling），监听 5002，默认 `--no-ocr`；仅本地构建不发布 |
 | `docker/Dockerfile.sandbox` | `wechatopenai/weknora-sandbox` | Agent 会话沙箱镜像。基础环境为 Python 3.12-slim + Node 20 + uv/pnpm，默认 `root` 执行，保留 `user`(UID 1000) 供显式选择。默认构建目标 `sandbox` 供 Docker 后端使用；另有 `cube`（含 Cube envd）、`desktop` / `desktop-cube`（带图形桌面）等目标，见[沙箱部署](../06-development/04-sandbox-deployment.md) |
 | `frontend/Dockerfile` | `wechatopenai/weknora-ui` | 两阶段：digest 锁定的 `node:24-bookworm-slim`（`$BUILDPLATFORM`，避免多架构 CI 用 QEMU 跑 Vite）内 `npm ci` + `npm run build`（`VITE_IS_DOCKER` / `VITE_FRONTEND_COMMIT`），可选 `NPM_REGISTRY` / `NODE_MAX_OLD_SPACE_SIZE`；运行层为按 digest 固定的 `nginx:1.30.3-alpine`（兼容 CentOS 7 旧内核）。无需宿主机预构建 `dist/` |
@@ -147,6 +147,16 @@ make docker-build-app
 make docker-build-docreader
 make docker-build-frontend
 ```
+
+docreader 在国内或企业内网构建时，可同时切换 APT 和 Playwright 制品源：
+
+```bash
+APT_MIRROR=https://your-apt-mirror.example.com \
+PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST=https://your-playwright-mirror.example.com \
+./scripts/build_images.sh --docreader
+```
+
+`APT_MIRROR` 需传入保留 `/debian` 和 `/debian-security` 路径结构的镜像站根地址；Playwright 制品源需保留官方制品的路径结构。仅配置 WebKit 时优先使用 `PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST`，它的优先级高于通用的 `PLAYWRIGHT_DOWNLOAD_HOST`。
 
 ## 四、Makefile 部署相关目标速查
 
@@ -175,12 +185,12 @@ make docker-build-frontend
 | `scripts/build_images.sh` | 构建镜像并注入版本（git tag / commit / build time），支持跨架构 |
 | `scripts/build_frontend_dist.sh` | 宿主机构建前端静态产物 `frontend/dist`（Lite / 桌面打包等非 Docker 场景；UI 镜像改由 Dockerfile 多阶段构建） |
 | `scripts/migrate.sh` | golang-migrate 封装 |
-| `scripts/docker-entrypoint.sh` | app 容器入口（属主修复 + docker.sock GID 补组 + gosu 降权） |
+| `scripts/docker-entrypoint.sh` | app 容器入口（属主修复 + 在不修改 socket 权限的前提下按可读写 GID 补组 + gosu 降权，兼容 Docker Desktop 的 `root:root 0660` 映射） |
 | `scripts/package-lite.sh` / `package-mac-app.sh` | Lite tarball / macOS .app 打包 |
 
 ## 六、Helm 部署（helm/）
 
-`helm/Chart.yaml`：apiVersion v2，chart 名 `weknora`，appVersion 跟随版本（如 v0.8.2），要求 Kubernetes >= 1.25.0。
+`helm/Chart.yaml`：apiVersion v2，chart 名 `weknora`，appVersion 跟随版本（如 v0.8.3），要求 Kubernetes >= 1.25.0。
 
 Chart 内包含五个组件：`app`（`wechatopenai/weknora-app`）、`frontend`（`wechatopenai/weknora-ui`）、`docreader`、`postgresql`（ParadeDB 镜像，chart 默认 `paradedb/paradedb:v0.18.9-pg17`，与 Compose 的版本不同）、`redis`（`redis:7-alpine`），并可选启用 `minio` 与 `neo4j`。
 
@@ -272,6 +282,22 @@ cd docreader && uv sync --locked && bash scripts/generate_proto.sh && uv run -m 
 ```
 
 配置文件查找顺序（`internal/config/config.go` 的 `LoadConfig`）：当前目录 → `./config` → `$HOME/.appname` → `/etc/appname/`，文件名 `config.yaml`。
+
+### 标准版可选托管前端
+
+标准版默认仅提供 API，前端由独立服务提供。若希望由同一个标准版进程提供 Web UI，可显式设置 `WEKNORA_WEB_DIR`，指向已构建的前端目录；该目录必须包含 `index.html`。未设置该变量时保持默认行为，目录不存在或缺少 `index.html` 时也不会启用前端托管。
+
+以下命令从仓库根目录执行，要求已安装 Go 1.26、CGO 所需工具与依赖、Node.js 和 npm，并已提供标准版所需的数据库、Redis、存储、模型服务及所用解析服务等配置与依赖：
+
+```bash
+(cd frontend && npm ci && npm run build)
+make build-prod
+SERVER_HOST=127.0.0.1 WEKNORA_WEB_DIR="$PWD/frontend/dist" ./WeKnora
+```
+
+启动后通过 `http://127.0.0.1:8080` 访问（使用默认 `SERVER_PORT` 时）。`WEKNORA_WEB_DIR` 目录仅应包含前端构建产物，不要放入数据、配置或密钥；其中的文件会作为静态资源提供。已注册的后端路由（包括 `/mcp/` 端点）优先于静态文件和 SPA 回退，现有 API 的认证与授权规则保持不变。
+
+此选项可省去独立前端服务，不会替代数据库、Redis 等后端依赖。需要 SQLite + 内存队列的最小化无 Docker 部署时，请参考现有的 [Lite 运行时](#_7-1-lite-运行时-零外部依赖)。
 
 ## 常见部署拓扑
 

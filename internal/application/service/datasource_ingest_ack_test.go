@@ -86,15 +86,6 @@ func TestStreamIngestAcknowledgementPreservesSoftOutcomes(t *testing.T) {
 			createErr: &types.DuplicateKnowledgeError{Message: "duplicate"},
 			skipped:   1,
 		},
-		{
-			name: "embedded image",
-			item: types.FetchedItem{
-				Content: []byte("image"), FileName: "image.png",
-				Metadata: map[string]string{"embedded_image": "true"},
-			},
-			createErr: errors.New("no VLM"),
-			skipped:   1,
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -152,4 +143,23 @@ func TestStreamIngestFailureIndependentOfErrorSampleLimit(t *testing.T) {
 	require.ErrorIs(t, handler.Checkpoint(context.Background(), ingestAckCursor(2)), failure)
 	assert.Len(t, result.Errors, maxSyncResultErrors)
 	assert.Equal(t, 1, result.Failed)
+}
+
+func TestStreamEmbeddedImageFailureRetainsCursor(t *testing.T) {
+	h := newIngestAckHarness(t, true)
+	failure := errors.New("image storage unavailable")
+	h.svc.knowledgeService = &sweepFakeKS{repo: &deletionLookupKnowledgeRepo{}, createErr: failure}
+	result := &types.SyncResult{}
+	handler := newStreamHandler(h.svc, h.ds, result, h.syncLogRepo.logs[h.syncLogID])
+	item := types.FetchedItem{
+		Content: []byte("image"), FileName: "image.png",
+		Metadata: map[string]string{"embedded_image": "true"},
+	}
+	require.ErrorIs(t, handler.Emit(context.Background(), item), failure)
+	require.ErrorIs(t, handler.Checkpoint(context.Background(), ingestAckCursor(1)), failure)
+	require.Equal(t, 1, result.Failed)
+	require.Zero(t, result.Skipped)
+	cursor, err := h.ds.ParseSyncCursor()
+	require.NoError(t, err)
+	require.Zero(t, ingestAckOffset(cursor))
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,60 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+func TestMatchesCollectionName(t *testing.T) {
+	tests := []struct {
+		name       string
+		base       string
+		collection string
+		want       bool
+	}{
+		{"minimum dimension", "embeddings", "embeddings_1", true},
+		{"typical dimension", "weknora_embeddings", "weknora_embeddings_768", true},
+		{"custom base", "team_42_vectors", "team_42_vectors_1536", true},
+		{"base ending in underscore", "vectors_", "vectors__768", true},
+		{"longer base", "vectors", "vectors_extra_768", false},
+		{"backup collection", "weknora_embeddings", "weknora_embeddings_backup_768", false},
+		{"backup suffix", "vectors", "vectors_768_backup", false},
+		{"missing separator", "vectors", "vectors768", false},
+		{"missing dimension", "vectors", "vectors_", false},
+		{"base only", "vectors", "vectors", false},
+		{"short name", "vectors", "vec", false},
+		{"empty name", "vectors", "", false},
+		{"different base", "vectors", "other_768", false},
+		{"case mismatch", "vectors", "Vectors_768", false},
+		{"zero dimension", "vectors", "vectors_0", false},
+		{"negative dimension", "vectors", "vectors_-768", false},
+		{"explicit plus", "vectors", "vectors_+768", false},
+		{"leading zero", "vectors", "vectors_0768", false},
+		{"fraction", "vectors", "vectors_7.68", false},
+		{"non decimal", "vectors", "vectors_0x300", false},
+		{"leading space", "vectors", "vectors_ 768", false},
+		{"trailing space", "vectors", "vectors_768 ", false},
+		{"unicode digits", "vectors", "vectors_７６８", false},
+		{"overflow", "vectors", "vectors_999999999999999999999999999999999", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &qdrantRepository{collectionBaseName: tt.base}
+			if got := repo.matchesCollectionName(tt.collection); got != tt.want {
+				t.Errorf("matchesCollectionName(%q) = %v, want %v", tt.collection, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchesGeneratedCollectionNames(t *testing.T) {
+	repo := &qdrantRepository{collectionBaseName: "custom_vectors"}
+	for _, dimension := range []int{1, 384, 768, 1536, int(^uint(0) >> 1)} {
+		t.Run(strconv.Itoa(dimension), func(t *testing.T) {
+			name := repo.getCollectionName(dimension)
+			if !repo.matchesCollectionName(name) {
+				t.Errorf("generated collection name %q was rejected", name)
+			}
+		})
+	}
+}
 
 func TestNewQdrantValueMapSanitizesInvalidUTF8AndNUL(t *testing.T) {
 	malformed := "prefix" + string([]byte{0xff}) + "\x00suffix"
@@ -760,5 +815,322 @@ func TestKeywordsRetrieveWarnsWhenNoCollectionMatchesBaseName(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "No keyword matches found") {
 		t.Fatal("a search that never ran must not be logged as a search that found no matches")
+	}
+}
+
+func TestBatchSaveRejectsMissingEmbeddings(t *testing.T) {
+	indices := []*types.IndexInfo{
+		{SourceID: "source-1", ChunkID: "chunk-1"},
+		{SourceID: "source-2", ChunkID: "chunk-2"},
+	}
+	for _, tt := range []struct {
+		name       string
+		indices    []*types.IndexInfo
+		params     map[string]any
+		wantError  string
+		wantPoints int
+	}{
+		{name: "empty input"},
+		{name: "missing parameters", indices: indices, wantError: "chunk-1"},
+		{name: "missing embedding map", indices: indices, params: map[string]any{}, wantError: "chunk-1"},
+		{
+			name: "wrong embedding map type", indices: indices,
+			params: map[string]any{fieldEmbedding: "invalid"}, wantError: "chunk-1",
+		},
+		{
+			name: "empty vectors", indices: indices,
+			params:    map[string]any{fieldEmbedding: map[string][]float32{"source-1": {}, "source-2": nil}},
+			wantError: "chunk-1",
+		},
+		{
+			name: "missing later vector", indices: indices,
+			params:    map[string]any{fieldEmbedding: map[string][]float32{"source-1": {1, 2}}},
+			wantError: "chunk-2",
+		},
+		{
+			name: "valid batch", indices: indices,
+			params:     map[string]any{fieldEmbedding: map[string][]float32{"source-1": {1, 2}, "source-2": {3, 4}}},
+			wantPoints: 2,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var saved int
+			client := newInterceptedQdrantClient(t, func(
+				_ context.Context, method string, req, _ any, _ *grpc.ClientConn,
+				_ grpc.UnaryInvoker, _ ...grpc.CallOption,
+			) error {
+				if tt.wantPoints == 0 {
+					t.Errorf("unexpected RPC %s", method)
+				}
+				request, ok := req.(*qdrant.UpsertPoints)
+				if !ok {
+					return fmt.Errorf("unexpected RPC %s", method)
+				}
+				saved += len(request.GetPoints())
+				return nil
+			})
+			repo := &qdrantRepository{client: client, collectionBaseName: "vectors"}
+			repo.initializedCollections.Store(2, true)
+			err := repo.BatchSave(context.Background(), tt.indices, tt.params)
+			if tt.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+					t.Errorf("expected error identifying %s, got %v", tt.wantError, err)
+				}
+			} else if err != nil {
+				t.Errorf("BatchSave: %v", err)
+			}
+			if saved != tt.wantPoints {
+				t.Errorf("saved %d points, want %d", saved, tt.wantPoints)
+			}
+		})
+	}
+}
+
+func TestPointWritesWaitForApplication(t *testing.T) {
+	indices := make([]*types.IndexInfo, 101)
+	embeddings := make(map[string][]float32, len(indices))
+	for i := range indices {
+		id := fmt.Sprintf("chunk-%d", i)
+		indices[i] = &types.IndexInfo{SourceID: id, ChunkID: id, IsEnabled: true}
+		embeddings[id] = []float32{0.1, 0.2, 0.3, 0.4}
+	}
+	params := map[string]any{fieldEmbedding: embeddings}
+	chunkMap := make(map[string]string, 65)
+	for i := range 65 {
+		chunkMap[fmt.Sprintf("chunk-%d", i)] = fmt.Sprintf("target-%d", i)
+	}
+	operations := []struct {
+		name   string
+		writes int
+		run    func(context.Context, *qdrantRepository) error
+	}{
+		{"save", 1, func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.Save(ctx, indices[0], params)
+		}},
+		{"batch save", 2, func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.BatchSave(ctx, indices, params)
+		}},
+		{"copy", 2, func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.CopyIndices(ctx, "kb-src", map[string]string{"know-1": "know-2"},
+				chunkMap, "kb-dst", 4, types.KnowledgeBaseTypeDocument)
+		}},
+		{"enable and disable", 2, func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.BatchUpdateChunkEnabledStatus(ctx, map[string]bool{"on": true, "off": false})
+		}},
+		{"tags", 2, func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.BatchUpdateChunkTagID(ctx, map[string]string{"one": "tag-a", "two": "tag-b"})
+		}},
+		{"move", 1, func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.MoveKnowledgeIndices(ctx, "kb-src", "kb-dst", "know-1", nil, 4, "doc")
+		}},
+	}
+	for _, operation := range deleteOperations() {
+		operations = append(operations, struct {
+			name   string
+			writes int
+			run    func(context.Context, *qdrantRepository) error
+		}{operation.name, 1, operation.run})
+	}
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			for _, outcome := range []struct {
+				name string
+				err  error
+			}{
+				{"completed", nil},
+				{"application failure", status.Error(codes.Internal, "failed to apply write")},
+				{"timeout", context.DeadlineExceeded},
+			} {
+				t.Run(outcome.name, func(t *testing.T) {
+					server := &copyTestServer{}
+					for i := range 65 {
+						server.source = append(server.source, copyTestSourcePoint(i))
+					}
+					applied, acknowledged := 0, 0
+					client := newInterceptedQdrantClient(t, func(
+						_ context.Context, method string, req, reply any, _ *grpc.ClientConn,
+						_ grpc.UnaryInvoker, _ ...grpc.CallOption,
+					) error {
+						var wait bool
+						switch request := req.(type) {
+						case *qdrant.ListCollectionsRequest:
+							reply.(*qdrant.ListCollectionsResponse).Collections = []*qdrant.CollectionDescription{
+								{Name: "vectors_4"},
+							}
+							return nil
+						case *qdrant.ScrollPoints:
+							response := reply.(*qdrant.ScrollResponse)
+							response.Result, response.NextPageOffset = server.page(request)
+							return nil
+						case *qdrant.UpsertPoints:
+							wait = request.GetWait()
+						case *qdrant.DeletePoints:
+							wait = request.GetWait()
+						case *qdrant.SetPayloadPoints:
+							wait = request.GetWait()
+						default:
+							return fmt.Errorf("unexpected RPC %s", method)
+						}
+						// An asynchronous write can be acknowledged before it is applied,
+						// even if application will fail. Only waiting exposes that failure.
+						response := reply.(*qdrant.PointsOperationResponse)
+						if !wait {
+							acknowledged++
+							response.Result = &qdrant.UpdateResult{Status: qdrant.UpdateStatus_Acknowledged}
+							return nil
+						}
+						if outcome.err != nil {
+							return outcome.err
+						}
+						applied++
+						response.Result = &qdrant.UpdateResult{Status: qdrant.UpdateStatus_Completed}
+						return nil
+					})
+					repo := &qdrantRepository{client: client, collectionBaseName: "vectors"}
+					repo.initializedCollections.Store(4, true)
+					repo.initializedCollections.Store(1024, true)
+					err := operation.run(context.Background(), repo)
+					if !errors.Is(err, outcome.err) {
+						t.Fatalf("got error %v, want %v", err, outcome.err)
+					}
+					if acknowledged != 0 {
+						t.Fatalf("returned with %d writes acknowledged but not applied", acknowledged)
+					}
+					if outcome.err == nil && applied != operation.writes {
+						t.Fatalf("applied %d writes before return, want %d", applied, operation.writes)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestCopyIndicesPagesWithoutDuplicates(t *testing.T) {
+	for _, total := range []int{0, 1, 63, 64, 65, 128, 130, 200} {
+		t.Run(fmt.Sprintf("%d points", total), func(t *testing.T) {
+			chunkMap := make(map[string]string, total)
+			for i := range total {
+				chunkMap[fmt.Sprintf("chunk-%d", i)] = fmt.Sprintf("target-chunk-%d", i)
+			}
+
+			var copied []string
+			client := newInterceptedQdrantClient(t, func(
+				_ context.Context, method string, req, reply any, _ *grpc.ClientConn,
+				_ grpc.UnaryInvoker, _ ...grpc.CallOption,
+			) error {
+				switch request := req.(type) {
+				case *qdrant.ScrollPoints:
+					start := 0
+					if offset := request.GetOffset(); offset != nil {
+						start = int(offset.GetNum())
+					}
+					end := min(start+int(request.GetLimit()), total)
+					response := reply.(*qdrant.ScrollResponse)
+					for i := start; i < end; i++ {
+						chunkID := fmt.Sprintf("chunk-%d", i)
+						response.Result = append(response.Result, &qdrant.RetrievedPoint{
+							Id: qdrant.NewIDNum(uint64(i)),
+							Payload: newQdrantValueMap(map[string]any{
+								fieldChunkID:     chunkID,
+								fieldSourceID:    chunkID,
+								fieldKnowledgeID: "knowledge-src",
+							}),
+							Vectors: &qdrant.VectorsOutput{VectorsOptions: &qdrant.VectorsOutput_Vector{
+								Vector: &qdrant.VectorOutput{Vector: &qdrant.VectorOutput_Dense{
+									Dense: &qdrant.DenseVector{Data: []float32{1, 2}},
+								}},
+							}},
+						})
+					}
+					if end < total {
+						response.NextPageOffset = qdrant.NewIDNum(uint64(end))
+					}
+					return nil
+				case *qdrant.UpsertPoints:
+					for _, point := range request.GetPoints() {
+						copied = append(copied, point.GetPayload()[fieldChunkID].GetStringValue())
+					}
+					return nil
+				default:
+					return fmt.Errorf("unexpected RPC %s", method)
+				}
+			})
+			repo := &qdrantRepository{client: client, collectionBaseName: "vectors"}
+			repo.initializedCollections.Store(2, true)
+
+			err := repo.CopyIndices(context.Background(), "kb-src",
+				map[string]string{"knowledge-src": "knowledge-dst"}, chunkMap,
+				"kb-dst", 2, types.KnowledgeBaseTypeDocument)
+			if err != nil {
+				t.Fatalf("CopyIndices: %v", err)
+			}
+
+			if len(copied) != total {
+				t.Fatalf("copied %d points, want %d", len(copied), total)
+			}
+			slices.Sort(copied)
+			if dup := len(copied) - len(slices.Compact(copied)); dup != 0 {
+				t.Fatalf("copied %d duplicate points", dup)
+			}
+		})
+	}
+}
+
+// newEnsureCollectionTestRepository answers the existence probe with "missing"
+// and CreateCollection with createErr, recording the payload indexes created.
+func newEnsureCollectionTestRepository(t *testing.T, createErr error) (*qdrantRepository, *[]string) {
+	t.Helper()
+	var indexed []string
+	client := newInterceptedQdrantClient(t, func(
+		_ context.Context, method string, req, reply any, _ *grpc.ClientConn,
+		_ grpc.UnaryInvoker, _ ...grpc.CallOption,
+	) error {
+		switch request := req.(type) {
+		case *qdrant.CollectionExistsRequest:
+			reply.(*qdrant.CollectionExistsResponse).Result = &qdrant.CollectionExists{Exists: false}
+			return nil
+		case *qdrant.CreateCollection:
+			return createErr
+		case *qdrant.CreateFieldIndexCollection:
+			indexed = append(indexed, request.GetFieldName())
+			return nil
+		default:
+			return fmt.Errorf("unexpected RPC %s", method)
+		}
+	})
+	return &qdrantRepository{client: client, collectionBaseName: "vectors"}, &indexed
+}
+
+// Several workers write the first batches of a new dimension at once, so the
+// create can lose to another worker. That must not fail the write: the
+// collection exists, and its payload indexes are still ensured.
+func TestEnsureCollectionAcceptsConcurrentCreate(t *testing.T) {
+	repo, indexed := newEnsureCollectionTestRepository(t,
+		status.Error(codes.AlreadyExists, "Wrong input: Collection `vectors_1024` already exists!"))
+
+	if err := repo.ensureCollection(context.Background(), 1024); err != nil {
+		t.Fatalf("ensureCollection after losing the create race: %v", err)
+	}
+	if _, ok := repo.initializedCollections.Load(1024); !ok {
+		t.Fatal("dimension must be cached once the collection is known to exist")
+	}
+	want := []string{fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldSourceID, fieldIsEnabled, fieldContent}
+	if !slices.Equal(*indexed, want) {
+		t.Fatalf("payload indexes = %v, want %v", *indexed, want)
+	}
+}
+
+func TestEnsureCollectionReturnsOtherCreateErrors(t *testing.T) {
+	repo, indexed := newEnsureCollectionTestRepository(t, status.Error(codes.Unavailable, "qdrant down"))
+
+	err := repo.ensureCollection(context.Background(), 1024)
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("ensureCollection error = %v, want the Unavailable create error", err)
+	}
+	if _, ok := repo.initializedCollections.Load(1024); ok {
+		t.Fatal("a failed create must not cache the dimension")
+	}
+	if len(*indexed) != 0 {
+		t.Fatalf("no payload index should be created after a failed create, got %v", *indexed)
 	}
 }

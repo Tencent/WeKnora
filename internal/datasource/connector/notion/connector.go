@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -148,7 +149,10 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 	for _, resourceID := range resourceIDs {
 		page, err := client.GetPage(ctx, resourceID)
 		if err == nil {
-			pageItems, _ := c.fetchPage(ctx, client, page, visited)
+			pageItems, _, err := c.fetchPage(ctx, client, page, visited)
+			if err != nil {
+				return nil, err
+			}
 			allItems = append(allItems, pageItems...)
 			continue
 		}
@@ -268,7 +272,10 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 				newEditTimes[rid] = rt
 			}
 		} else {
-			items, truncated := c.fetchPage(ctx, client, pg, fetchVisited)
+			items, truncated, err := c.fetchPage(ctx, client, pg, fetchVisited)
+			if err != nil {
+				return nil, nil, err
+			}
 			queryTruncated = queryTruncated || truncated
 			changedItems = append(changedItems, items...)
 		}
@@ -334,19 +341,20 @@ func buildCursor(editTimes map[string]time.Time) *types.SyncCursor {
 // If page is nil, it will be fetched from the API.
 // The second result reports whether any query issued for this page (including
 // child databases) was truncated at a vendor limit.
+// A page block fetch error aborts the round without acknowledging its edit time.
 func (c *Connector) fetchPage(
 	ctx context.Context, client *notionClient, page *notionPage, visited map[string]bool,
-) ([]types.FetchedItem, bool) {
+) ([]types.FetchedItem, bool, error) {
 	if page == nil {
-		return nil, false
+		return nil, false, nil
 	}
 	if visited[page.ID] {
-		return nil, false
+		return nil, false, nil
 	}
 	visited[page.ID] = true
 
 	if page.InTrash {
-		return nil, false
+		return nil, false, nil
 	}
 
 	// Database records store content in properties, not blocks — delegate to
@@ -362,18 +370,19 @@ func (c *Connector) fetchPage(
 		}
 		propNames := extractPropertySchema(*page)
 		if item := c.buildRecordItem(ctx, client, *page, propNames, dbTitle); item != nil {
-			return []types.FetchedItem{*item}, false
+			return []types.FetchedItem{*item}, false, nil
 		}
-		return nil, false
+		return nil, false, nil
 	}
 
 	blocks, err := client.GetBlockChildrenAll(ctx, page.ID)
 	if err != nil {
-		logger.Warnf(ctx, "[Notion] failed to get blocks for page %s: %v", page.ID, err)
-		return nil, false
+		return nil, false, fmt.Errorf("get blocks for notion page %s: %w", page.ID, err)
 	}
 
-	resolveFileUploads(ctx, client, blocks)
+	if err := resolveFileUploads(ctx, client, blocks); err != nil {
+		return nil, false, fmt.Errorf("resolve file uploads for notion page %s: %w", page.ID, err)
+	}
 
 	markdown, attachmentList := BlocksToMarkdown(blocks)
 	// A successfully cleared page still exists. Keep its title as content so
@@ -419,8 +428,11 @@ func (c *Connector) fetchPage(
 		}
 		data, err := client.DownloadFile(ctx, att.URL)
 		if err != nil {
-			logger.Warnf(ctx, "[Notion] failed to download attachment %s: %v", att.FileName, err)
-			continue
+			// The page cannot be stored completely: acknowledging its edit time
+			// here would drop the attachment until a full re-sync. Abort the
+			// round like a block fetch failure so the page is retried.
+			return nil, false, fmt.Errorf("%w: download attachment %s for notion page %s: %w",
+				datasource.ErrFetchFailed, att.FileName, page.ID, err)
 		}
 		items = append(items, types.FetchedItem{
 			ExternalID:       fmt.Sprintf("%s:%s", page.ID, att.FileName),
@@ -445,7 +457,10 @@ func (c *Connector) fetchPage(
 				logger.Warnf(ctx, "[Notion] failed to get child page %s: %v", block.ID, err)
 				continue
 			}
-			childItems, childTruncated := c.fetchPage(ctx, client, childPage, visited)
+			childItems, childTruncated, err := c.fetchPage(ctx, client, childPage, visited)
+			if err != nil {
+				return nil, truncated || childTruncated, err
+			}
 			truncated = truncated || childTruncated
 			items = append(items, childItems...)
 		case "child_database":
@@ -455,7 +470,7 @@ func (c *Connector) fetchPage(
 		}
 	}
 
-	return items, truncated
+	return items, truncated, nil
 }
 
 // fetchDatabase syncs each database record as an individual knowledge item (full sync).
@@ -623,7 +638,12 @@ func (c *Connector) buildRecordItem(ctx context.Context, client *notionClient, r
 	if err != nil {
 		logger.Warnf(ctx, "[Notion] failed to get blocks for record %s: %v", record.ID, err)
 	} else if len(blocks) > 0 {
-		resolveFileUploads(ctx, client, blocks)
+		// Database records are ingested through their properties: their block
+		// files are not downloaded as attachments, so resolution here stays
+		// best-effort (matching the GetBlockChildrenAll handling above).
+		if err := resolveFileUploads(ctx, client, blocks); err != nil {
+			logger.Warnf(ctx, "[Notion] failed to resolve file uploads for record %s: %v", record.ID, err)
+		}
 		markdown, _ := BlocksToMarkdown(blocks)
 		if strings.TrimSpace(markdown) != "" {
 			content.WriteString("\n" + markdown)
@@ -711,7 +731,9 @@ func (c *Connector) buildDatabaseItem(ctx context.Context, client *notionClient,
 		// Fetch blocks for the record, in case it has page content
 		blocks, err := client.GetBlockChildrenAll(ctx, record.ID)
 		if err == nil && len(blocks) > 0 {
-			resolveFileUploads(ctx, client, blocks)
+			if resolveErr := resolveFileUploads(ctx, client, blocks); resolveErr != nil {
+				logger.Warnf(ctx, "[Notion] failed to resolve file uploads for record %s: %v", record.ID, resolveErr)
+			}
 			markdown, _ := BlocksToMarkdown(blocks)
 			if strings.TrimSpace(markdown) != "" {
 				extraContent.WriteString("\n## " + recordTitle + " 内容\n\n" + markdown + "\n")
@@ -818,7 +840,9 @@ func (c *Connector) discoverAllResources(
 // resolveFileUploads walks the block tree and resolves file_upload type files
 // by re-fetching the block to get a temporary download URL.
 // This mutates blocks in place, replacing file_upload RawContent with resolved URLs.
-func resolveFileUploads(ctx context.Context, client *notionClient, blocks []notionBlock) {
+// A resolution failure is returned: an unresolved file_upload leaves the file URL
+// empty, which silently drops the file the same way a failed download does.
+func resolveFileUploads(ctx context.Context, client *notionClient, blocks []notionBlock) error {
 	for i := range blocks {
 		if isFileBlock(blocks[i].Type) && blocks[i].RawContent != nil {
 			var file notionFile
@@ -826,16 +850,19 @@ func resolveFileUploads(ctx context.Context, client *notionClient, blocks []noti
 			if file.GetFileUploadID() != "" {
 				resolved, err := client.ResolveBlock(ctx, blocks[i].ID)
 				if err != nil {
-					logger.Warnf(ctx, "[Notion] failed to resolve file_upload in block %s: %v", blocks[i].ID, err)
-					continue
+					return fmt.Errorf("%w: resolve file upload in block %s: %w",
+						datasource.ErrFetchFailed, blocks[i].ID, err)
 				}
 				blocks[i].RawContent = resolved.RawContent
 			}
 		}
 		if len(blocks[i].Children) > 0 {
-			resolveFileUploads(ctx, client, blocks[i].Children)
+			if err := resolveFileUploads(ctx, client, blocks[i].Children); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func isFileBlock(blockType string) bool {

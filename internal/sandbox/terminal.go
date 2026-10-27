@@ -70,6 +70,8 @@ type RemoteTerminalSession interface {
 	Output() <-chan RemoteTerminalEvent
 
 	// PID is the remote shell's process ID, when the provider exposes one.
+	// It doubles as the reattach handle: 0 means a reconnect cannot resume
+	// this shell and the browser must not redial on its own.
 	PID() uint32
 
 	// Write feeds raw bytes (keystrokes) into the PTY.
@@ -78,9 +80,11 @@ type RemoteTerminalSession interface {
 	// Resize changes the PTY window size.
 	Resize(ctx context.Context, cols, rows uint32) error
 
-	// Close disconnects WeKnora from the PTY without killing the remote
-	// process: the shell stays in the sandbox so a provider-native
-	// reconnect can re-attach. Safe to call more than once.
+	// Close disconnects WeKnora from the PTY. A backend that can re-attach
+	// (Cube/E2B, via envd) leaves the remote shell running so a reconnect
+	// resumes it; a backend that cannot (Docker) terminates it, because the
+	// disconnect would otherwise strand the shell and its jobs. Safe to call
+	// more than once.
 	Close() error
 }
 

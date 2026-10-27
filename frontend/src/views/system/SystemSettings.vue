@@ -5,11 +5,9 @@
     the route also has meta.requiresSystemAdmin so non-admins never
     reach this component (see frontend/src/router/index.ts).
 
-    Visual contract: matches the canonical Settings-modal pane skeleton
-    (`.section-header` + `.settings-group` + `.setting-row` /
-    `.setting-info` / `.setting-control`) used by GeneralSettings,
-    OllamaSettings, etc. Avoid bespoke layout here; the modal already
-    constrains width and padding via `.content-wrapper--full`.
+    Layout follows the outer Toolbox page: header action, contextual
+    description, and an icon tabbar with the user search alongside it.
+    The settings modal supplies the outer width and padding.
 
     UI principle: every control auto-persists, no Save button. The
     commit signal differs by control type so the user isn't surprised
@@ -24,8 +22,6 @@
                                                  @change on every digit).
       - SSRF whitelist (string_list)          → controlled tag-input +
                                                  per-tag inline popconfirm.
-      - System admins                         → tag-input @change with
-                                                 inline popconfirm per delta.
 
     auth.registration_mode triggers an
     inline t-popconfirm (same as Reset / bulk-apply) before persisting;
@@ -35,12 +31,17 @@
     <div class="section-header">
       <div class="section-header__titlewrap">
         <h2>{{ t('system.globalSettings.title') }}</h2>
+        <div id="system-users-actions" />
+      </div>
+      <div class="section-description">
+        <p>{{ activeSectionDescription }}</p>
         <t-popup placement="bottom-start" trigger="hover" :overlay-inner-style="{ maxWidth: '420px' }">
           <button type="button" class="hint-trigger" :aria-label="t('system.globalSettings.priorityHint.disclosure')">
             <t-icon name="info-circle" size="16px" />
           </button>
           <template #content>
             <div class="hint-popover">
+              <p class="hint-popover__scope">{{ t('system.globalSettings.description') }}</p>
               <p class="hint-popover__title">{{ t('system.globalSettings.priorityHint.disclosure') }}</p>
               <ul class="hint-popover__list">
                 <li>{{ t('system.globalSettings.priorityHint.tier1') }}</li>
@@ -50,10 +51,10 @@
             </div>
           </template>
         </t-popup>
+        <span v-if="activeSettingsSection === 'runtime'" class="section-description__note">
+          {{ t('system.globalSettings.sections.runtime.restartHint') }}
+        </span>
       </div>
-      <p class="section-description">
-        {{ t('system.globalSettings.description') }}
-      </p>
     </div>
 
     <div v-if="loading && settings.length === 0" class="loading-state">
@@ -66,112 +67,27 @@
     </div>
 
     <template v-else>
-      <t-tabs v-model="activeSettingsSection" class="settings-section-tabs">
-        <t-tab-panel value="access" :label="sectionTabLabel('access')" />
-        <t-tab-panel value="tenant" :label="sectionTabLabel('tenant')" />
-        <t-tab-panel value="runtime" :label="sectionTabLabel('runtime')" />
-        <t-tab-panel value="security" :label="sectionTabLabel('security')" />
-        <t-tab-panel v-if="hasUnknownSettings" value="other" :label="sectionTabLabel('other')" />
-      </t-tabs>
-
-      <section class="settings-section-panel" :aria-label="activeSectionTitle">
-        <div class="settings-section-intro"
-          :class="{ 'settings-section-intro--runtime': activeSettingsSection === 'runtime' }">
-          <p>{{ activeSectionDescription }}</p>
-          <t-tag v-if="activeSettingsSection === 'runtime'" theme="warning" variant="light" size="small">
-            {{ t('system.globalSettings.sections.runtime.restartHint') }}
-          </t-tag>
+      <div class="settings-tabbar">
+        <div class="settings-tabs" role="tablist" :aria-label="t('system.globalSettings.title')">
+          <button v-for="tab in sectionTabs" :id="`system-settings-tab-${tab.key}`" :key="tab.key"
+            type="button" role="tab" class="settings-tab" :data-section="tab.key"
+            :aria-selected="activeSettingsSection === tab.key" :tabindex="activeSettingsSection === tab.key ? 0 : -1"
+            :aria-controls="tab.key === 'users' ? 'system-settings-users' : 'system-settings-values'"
+            @click="showPanel(tab.key)" @keydown="onTabKeydown($event, tab.key)">
+            <t-icon :name="tab.icon" size="16px" />
+            <span>{{ tab.label }}</span>
+          </button>
         </div>
+        <div id="system-users-toolbar" class="settings-toolbar" v-show="activeSettingsSection === 'users'" />
+      </div>
 
-        <div v-if="activeSettingsSection === 'runtime'" class="runtime-table-header" aria-hidden="true">
-          <span>{{ t('system.globalSettings.runtimeTable.setting') }}</span>
-          <span>{{ t('system.globalSettings.runtimeTable.value') }}</span>
-        </div>
+      <UserManagement id="system-settings-users" role="tabpanel" aria-labelledby="system-settings-tab-users"
+        v-show="activeSettingsSection === 'users'" :active="activeSettingsSection === 'users'"
+        @announced="saveAnnouncement = $event" />
 
-        <div class="settings-group" :class="{ 'settings-group--runtime': activeSettingsSection === 'runtime' }">
-          <!--
-        System-admins management. Visually identical to SSRF whitelist
-        (a tag-input with one entry per email). NOT a system_setting
-        row — it's backed by the user table via promote/revoke APIs.
-        We sit it at the top because changing who can edit this page
-        is structurally more important than tweaking any value below.
-        Self-edit safety: the current user is excluded from the visible
-        tags (they can't revoke themselves anyway, and showing a tag
-        that can't be removed is worse than not showing it).
-      -->
-          <div v-if="activeSettingsSection === 'access'" class="setting-row setting-row--admin">
-            <div class="setting-info">
-              <div class="setting-label">
-                <span>{{ t('system.globalSettings.admins.label') }}</span>
-                <t-tag theme="danger" variant="light" size="small" class="setting-badge">
-                  {{ t('system.globalSettings.badgeHighRisk') }}
-                </t-tag>
-              </div>
-              <p class="desc">{{ t('system.globalSettings.admins.description') }}</p>
-            </div>
-            <div class="setting-control">
-              <div class="setting-control-row">
-                <t-popconfirm v-model:visible="adminPopconfirm.visible" :content="adminPopconfirm.content"
-                  :theme="adminPopconfirm.theme" :confirm-btn="adminPopconfirm.confirmBtn"
-                  :cancel-btn="t('system.globalSettings.confirm.cancelBtn')"
-                  :popup-props="PROGRAMMATIC_POPCONFIRM_PROPS" placement="left" @confirm="adminPopconfirm.finish(true)"
-                  @cancel="adminPopconfirm.finish(false)" @visible-change="adminPopconfirm.onVisibleChange">
-                  <div class="setting-control-anchor">
-                    <t-tag-input v-model="adminEmails" :placeholder="t('system.globalSettings.admins.placeholder')"
-                      :aria-label="t('system.globalSettings.admins.label')" :disabled="adminBusy"
-                      class="setting-input setting-input--wide" clearable @change="onAdminsChange" />
-                  </div>
-                </t-popconfirm>
-                <div v-if="adminBusy" class="setting-save-state" role="status">
-                  <t-loading size="small" />
-                  <span>{{ t('system.globalSettings.saving') }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Keep the reset request and its submit lock alive across tab changes. -->
-          <div v-show="activeSettingsSection === 'access'" class="setting-row setting-row--password-reset">
-            <div class="setting-info">
-              <div class="setting-label">
-                <span>{{ t('system.globalSettings.passwordReset.label') }}</span>
-                <t-tag theme="danger" variant="light" size="small" class="setting-badge">
-                  {{ t('system.globalSettings.badgeHighRisk') }}
-                </t-tag>
-              </div>
-              <p class="desc">{{ t('system.globalSettings.passwordReset.description') }}</p>
-            </div>
-            <div class="setting-control">
-              <ResetPasswordDialog v-model:visible="passwordResetVisible" :active="activeSettingsSection === 'access'"
-                @announced="saveAnnouncement = $event">
-                <t-button theme="danger" variant="text" class="password-reset-trigger">
-                  <template #icon><t-icon name="lock-on" /></template>
-                  {{ t('system.globalSettings.passwordReset.action') }}
-                </t-button>
-              </ResetPasswordDialog>
-            </div>
-          </div>
-
-          <div v-if="activeSettingsSection === 'access'" class="setting-row setting-row--create-user">
-            <div class="setting-info">
-              <div class="setting-label">
-                <span>{{ t('system.globalSettings.createUser.label') }}</span>
-                <t-tag theme="danger" variant="light" size="small" class="setting-badge">
-                  {{ t('system.globalSettings.badgeHighRisk') }}
-                </t-tag>
-              </div>
-              <p class="desc">{{ t('system.globalSettings.createUser.description') }}</p>
-            </div>
-            <div class="setting-control">
-              <CreateUserDialog v-model:visible="createUserVisible" @announced="saveAnnouncement = $event">
-                <t-button theme="primary" variant="text" class="create-user-trigger">
-                  <template #icon><t-icon name="user-add" /></template>
-                  {{ t('system.globalSettings.createUser.action') }}
-                </t-button>
-              </CreateUserDialog>
-            </div>
-          </div>
-
+      <section id="system-settings-values" v-show="activeSettingsSection !== 'users'" role="tabpanel"
+        class="settings-section-panel" :aria-labelledby="`system-settings-tab-${activeSettingsSection}`">
+        <div class="settings-group">
           <div v-for="item in activeSectionSettings" :key="item.key" class="setting-row">
             <div class="setting-info">
               <div class="setting-label">
@@ -326,6 +242,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import {
@@ -333,23 +250,18 @@ import {
   updateSystemSetting,
   resetSystemSetting,
   applyDefaultStorageQuotaToAllTenants,
-  listSystemAdmins,
-  promoteUserToSystemAdmin,
-  revokeSystemAdmin,
   type SystemSettingItem,
 } from '@/api/system'
-import CreateUserDialog from './CreateUserDialog.vue'
-import ResetPasswordDialog from './ResetPasswordDialog.vue'
-import { useAuthStore } from '@/stores/auth'
+import UserManagement from './UserManagement.vue'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { PASSWORD_SPECIAL_CHARS } from '@/utils/passwordPolicy'
 import { isSettingValueDirty, resolveCurrentSetting } from './systemSettingsEdit'
 
-const authStore = useAuthStore()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
-const currentUserId = computed(() => authStore.currentUserId)
 
 const { t, tm, te, locale } = useI18n()
+const route = useRoute()
+const router = useRouter()
 
 // Friendly labels per key live in i18n (system.globalSettings.keyLabels.*).
 // Adding a new entry there must accompany every new key registered in
@@ -447,7 +359,6 @@ function createInlinePopconfirm() {
 }
 
 const ssrfPopconfirm = createInlinePopconfirm()
-const adminPopconfirm = createInlinePopconfirm()
 const highRiskPopconfirm = createInlinePopconfirm()
 
 // Friendly labels for enum options live in i18n
@@ -467,13 +378,13 @@ const savedKey = ref<string | null>(null)
 const saveAnnouncement = ref('')
 let savedKeyTimer: ReturnType<typeof setTimeout> | null = null
 
-type SettingsSection = 'access' | 'tenant' | 'runtime' | 'security' | 'other'
+type SettingsSection = 'users' | 'access' | 'tenant' | 'runtime' | 'security' | 'other'
 
 // Product-oriented order, rather than the registry's alphabetical key order.
 // Unknown/out-of-band rows remain visible in a conditional "Other" tab so the
 // backend's diagnostic contract is preserved when a deployment contains an
 // unexpected key.
-const SETTINGS_SECTION_KEYS: Record<Exclude<SettingsSection, 'other'>, readonly string[]> = {
+const SETTINGS_SECTION_KEYS: Record<Exclude<SettingsSection, 'other' | 'users'>, readonly string[]> = {
   access: [
     'auth.registration_mode',
     'auth.complex_password_enabled',
@@ -504,33 +415,80 @@ const settingsByKey = computed<Map<string, SystemSettingItem>>(() => new Map(set
 const unknownSettings = computed(() => settings.value.filter((item) => !knownSettingKeys.has(item.key)))
 const hasUnknownSettings = computed(() => unknownSettings.value.length > 0)
 
+const sectionTabs = computed(() => {
+  const tabs: { key: SettingsSection; icon: string; label: string }[] = [
+    { key: 'access', icon: 'lock-on', label: t('system.globalSettings.sections.access.title') },
+    { key: 'users', icon: 'usergroup', label: t('system.globalSettings.userList.rowLabel') },
+    { key: 'tenant', icon: 'folder', label: t('system.globalSettings.sections.tenant.title') },
+    { key: 'runtime', icon: 'server', label: t('system.globalSettings.sections.runtime.title') },
+    { key: 'security', icon: 'secured', label: t('system.globalSettings.sections.security.title') },
+  ]
+  if (hasUnknownSettings.value) tabs.push({ key: 'other', icon: 'ellipsis', label: t('system.globalSettings.sections.other.title') })
+  return tabs
+})
+
+const PANEL_KEYS: readonly SettingsSection[] = ['access', 'users', 'tenant', 'runtime', 'security', 'other']
+
+function panelFromQuery(): SettingsSection | null {
+  const raw = Array.isArray(route.query.panel) ? route.query.panel[0] : route.query.panel
+  return typeof raw === 'string' && (PANEL_KEYS as readonly string[]).includes(raw) ? raw as SettingsSection : null
+}
+
+/** Follows ?panel= so a navigated link can open a tab other than the first. */
+function applyRoutePanel() {
+  const panel = panelFromQuery()
+  if (!panel || panel === activeSettingsSection.value) return
+  if (panel === 'other' && !hasUnknownSettings.value) return
+  activeSettingsSection.value = panel
+}
+
+function showPanel(key: SettingsSection) {
+  activeSettingsSection.value = key
+  if (route.path !== '/platform/settings' || route.query.section !== 'system-global') return
+  if (route.query.panel === key) return
+  void router.replace({ path: route.path, query: { ...route.query, panel: key } })
+}
+
+function onTabKeydown(event: KeyboardEvent, key: SettingsSection) {
+  const tabs = sectionTabs.value
+  const index = tabs.findIndex(tab => tab.key === key)
+  let next: number
+  switch (event.key) {
+    case 'ArrowRight': next = (index + 1) % tabs.length; break
+    case 'ArrowLeft': next = (index - 1 + tabs.length) % tabs.length; break
+    case 'Home': next = 0; break
+    case 'End': next = tabs.length - 1; break
+    default: return
+  }
+  event.preventDefault()
+  showPanel(tabs[next]!.key)
+  const tablist = (event.currentTarget as HTMLElement).parentElement
+  tablist?.querySelector<HTMLButtonElement>(`[data-section="${activeSettingsSection.value}"]`)?.focus()
+}
+
+watch(() => route.query.panel, applyRoutePanel, { immediate: true })
+
 watch(hasUnknownSettings, (hasUnknown) => {
   if (!hasUnknown && activeSettingsSection.value === 'other') {
-    activeSettingsSection.value = 'access'
+    showPanel('access')
+    return
   }
+  applyRoutePanel()
 })
 
 const activeSectionSettings = computed(() => {
+  if (activeSettingsSection.value === 'users') return []
   if (activeSettingsSection.value === 'other') return unknownSettings.value
   return SETTINGS_SECTION_KEYS[activeSettingsSection.value]
     .map((key) => settingsByKey.value.get(key))
     .filter((item): item is SystemSettingItem => Boolean(item))
 })
 
-const activeSectionTitle = computed(() =>
-  t(`system.globalSettings.sections.${activeSettingsSection.value}.title`),
-)
 const activeSectionDescription = computed(() =>
-  t(`system.globalSettings.sections.${activeSettingsSection.value}.description`),
+  activeSettingsSection.value === 'users' ? t('system.globalSettings.userList.rowDesc')
+    : t(`system.globalSettings.sections.${activeSettingsSection.value}.description`),
 )
 
-
-function sectionTabLabel(section: SettingsSection): string {
-  const count = section === 'other'
-    ? unknownSettings.value.length
-    : SETTINGS_SECTION_KEYS[section].filter((key) => settingsByKey.value.has(key)).length + (section === 'access' ? 2 : 0)
-  return t(`system.globalSettings.sections.${section}.tab`, { count })
-}
 
 function markSettingSaved(item: SystemSettingItem) {
   savedKey.value = item.key
@@ -543,25 +501,6 @@ function markSettingSaved(item: SystemSettingItem) {
     savedKeyTimer = null
   }, 2000)
 }
-
-// Admin management state. We keep two parallel structures:
-//   - adminEmails: the v-model bound to the t-tag-input (excludes
-//     current user; that's the visible source of truth).
-//   - adminEmailToId: email → user UUID, populated from the list
-//     endpoint. Needed because revoke takes a UUID, not an email.
-// Both reset on every reload to avoid stale entries persisting after
-// a peer SystemAdmin makes a change. adminBusy disables the input and
-// shows the row spinner only while promote/revoke API calls are in
-// flight — not while the inline popconfirm is waiting for a click.
-const adminEmails = ref<string[]>([])
-const adminEmailToId = ref<Record<string, string>>({})
-const adminBusy = ref(false)
-
-// Access-row popups each live in their own dialog component
-// (CreateUserDialog.vue / ResetPasswordDialog.vue, same Access row);
-// only their visibility is owned here.
-const passwordResetVisible = ref(false)
-const createUserVisible = ref(false)
 
 // Guards ssrf.whitelist while an async confirm roundtrip is in flight.
 const listConfirmBusyKey = ref<string | null>(null)
@@ -985,129 +924,8 @@ async function persistSetting(item: SystemSettingItem) {
   }
 }
 
-// loadAdmins refreshes the admin tag list + the email→id lookup
-// table. We exclude the current user from the visible list so the
-// "you can't revoke yourself" rule has nothing to enforce in the UI
-// (the backend rejects it too, but hiding the tag is friendlier).
-async function loadAdmins() {
-  try {
-    const resp = await listSystemAdmins({ limit: 200 })
-    const map: Record<string, string> = {}
-    const emails: string[] = []
-    for (const u of resp.admins ?? []) {
-      // Empty emails would collapse to a single tag "" that can't be
-      // round-tripped to a user_id; skip them. Same defensive stance
-      // as resolveMaxOwnedTenantsPerUser on the backend.
-      if (!u.email) continue
-      map[u.email] = u.id
-      if (u.id !== currentUserId.value) {
-        emails.push(u.email)
-      }
-    }
-    adminEmailToId.value = map
-    adminEmails.value = emails
-  } catch (err: any) {
-    const msg = err?.message || t('system.globalSettings.admins.loadFailed')
-    MessagePlugin.error(msg)
-  }
-}
-
-function confirmAdminChange(action: 'promote' | 'revoke', email: string): Promise<boolean> {
-  const base = `system.globalSettings.admins.confirm.${action}`
-  return adminPopconfirm.ask({
-    content: globalSettingsText(`${base}.body`, { email }),
-    theme: action === 'revoke' ? 'danger' : 'warning',
-    confirmBtn: {
-      content: globalSettingsText(`${base}.confirmBtn`),
-      theme: action === 'revoke' ? 'danger' : 'primary',
-    },
-  })
-}
-
-// onAdminsChange diffs the new tag list against the canonical state
-// and dispatches one promote / revoke per delta. Failures roll back
-// the whole tag list to the server-side truth — this is simpler than
-// trying to undo individual ops, and the network/error case for batch
-// edits is rare enough that a full reload doesn't surprise anyone.
-async function onAdminsChange(next: string[]) {
-  if (adminBusy.value) return
-
-  // Snapshot of what's currently authoritative — the email→id map's
-  // keys, minus the current user. Anything in `next` that's not here
-  // is an addition; anything here that's not in `next` is a removal.
-  const authoritative = new Set<string>()
-  for (const email of Object.keys(adminEmailToId.value)) {
-    if (adminEmailToId.value[email] !== currentUserId.value) {
-      authoritative.add(email)
-    }
-  }
-  const nextSet = new Set(next.map((e) => e.trim()).filter(Boolean))
-
-  // Drop the user-typed entry to canonical lowercase/trim before we
-  // diff. We don't lowercase server-returned emails because the
-  // backend stores the original case; matching against the map's keys
-  // happens with the as-typed value, which is what the user sees.
-  const added: string[] = []
-  for (const email of nextSet) {
-    if (!authoritative.has(email)) added.push(email)
-  }
-  const removed: string[] = []
-  for (const email of authoritative) {
-    if (!nextSet.has(email)) removed.push(email)
-  }
-
-  if (added.length === 0 && removed.length === 0) return
-
-  // Confirm before any privilege change (no loading spinner yet — the
-  // popconfirm is the only UI; adminBusy is reserved for API roundtrips).
-  for (const email of added) {
-    const ok = await confirmAdminChange('promote', email)
-    if (!ok) {
-      await loadAdmins()
-      return
-    }
-  }
-  for (const email of removed) {
-    const userId = adminEmailToId.value[email]
-    if (!userId) continue
-    const ok = await confirmAdminChange('revoke', email)
-    if (!ok) {
-      await loadAdmins()
-      return
-    }
-  }
-
-  adminBusy.value = true
-  let applied = 0
-  try {
-    for (const email of added) {
-      await promoteUserToSystemAdmin({ email })
-      applied++
-    }
-    for (const email of removed) {
-      const userId = adminEmailToId.value[email]
-      if (!userId) continue
-      await revokeSystemAdmin(userId)
-      applied++
-    }
-    await loadAdmins()
-    if (applied > 0) {
-      saveAnnouncement.value = t('system.globalSettings.admins.saveSuccess')
-      MessagePlugin.success(t('system.globalSettings.admins.saveSuccess'))
-    }
-  } catch (err: any) {
-    const msg = err?.message || t('system.globalSettings.admins.saveFailed')
-    saveAnnouncement.value = msg
-    MessagePlugin.error(msg)
-    await loadAdmins()
-  } finally {
-    adminBusy.value = false
-  }
-}
-
 onMounted(() => {
   loadSettings()
-  loadAdmins()
 })
 
 onUnmounted(() => {
@@ -1120,8 +938,10 @@ onUnmounted(() => {
 
 .system-settings {
   width: 100%;
+  container-type: inline-size;
 }
 
+// Use the same title styling as the other settings pages.
 .section-header {
   .settings-section-header();
 }
@@ -1129,7 +949,28 @@ onUnmounted(() => {
 .section-header__titlewrap {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: var(--app-space-4);
+  padding-right: 28px;
+}
+
+.section-description {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
+  margin: 0;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-base);
+  line-height: 20px;
+
+  p { margin: 0; }
+}
+
+.section-description__note {
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-sm);
+  margin-left: 8px;
 }
 
 .hint-trigger {
@@ -1156,6 +997,13 @@ onUnmounted(() => {
   gap: 8px;
 }
 
+.hint-popover__scope {
+  margin: 0 0 4px;
+  font-size: var(--app-text-sm);
+  line-height: 1.6;
+  color: var(--td-text-color-secondary);
+}
+
 .hint-popover__title {
   margin: 0;
   color: var(--td-text-color-primary);
@@ -1176,94 +1024,72 @@ onUnmounted(() => {
   }
 }
 
-.settings-section-tabs {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  margin: 0 0 18px;
-  background: var(--td-bg-color-container);
-  box-shadow: 0 1px 0 var(--td-component-stroke);
-
-  &:deep(.t-tabs__nav-item) {
-    font-weight: 500;
-  }
-}
-
-.settings-section-panel {
-  min-width: 0;
-}
-
-.settings-section-intro {
+// Search sits in the tabbar, while the primary action belongs to the header.
+.settings-tabbar {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  align-items: center;
   gap: 16px;
-  padding: 0 0 12px;
   border-bottom: 1px solid var(--td-component-stroke);
-
-  p {
-    margin: 0;
-    font-size: var(--app-text-md);
-    line-height: 1.5;
-    color: var(--td-text-color-secondary);
-  }
+  margin-bottom: var(--app-space-4);
 }
 
-.settings-section-intro--runtime {
-  border-bottom: none;
-}
-
-.runtime-table-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
+.settings-tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   gap: 24px;
-  padding: 10px 16px;
-  font-size: var(--app-text-sm);
-  font-weight: 500;
-  color: var(--td-text-color-secondary);
-  background: var(--td-bg-color-secondarycontainer);
-  border: 1px solid var(--td-component-stroke);
-  border-bottom: none;
-  border-radius: 8px 8px 0 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
 
-  span:last-child {
-    text-align: right;
+.settings-toolbar { flex-shrink: 0; }
+
+.settings-tab {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font: inherit;
+  font-size: var(--app-text-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--app-motion-fast) ease;
+
+  &::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    border-radius: var(--app-radius-pill);
+    background: transparent;
+  }
+  &:hover { color: var(--td-text-color-primary); }
+  &[aria-selected='true'] {
+    color: var(--td-text-color-primary);
+    > .t-icon { color: var(--td-brand-color); }
+    &::after { background: var(--td-brand-color); }
+  }
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: -2px;
+    border-radius: var(--app-radius-sm);
   }
 }
 
-.settings-group--runtime {
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 0 0 8px 8px;
-  overflow: hidden;
+.settings-section-panel { min-width: 0; }
 
-  .setting-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 280px;
-    gap: 24px;
-    padding: 14px 16px;
-  }
-
-  .setting-info {
-    max-width: none;
-    padding-right: 0;
-  }
-
-  .setting-label {
-    font-size: var(--app-text-base);
-  }
-
-  .desc {
-    max-width: 620px;
-    font-size: var(--app-text-sm);
-  }
-
-  .setting-control {
-    min-width: 0;
-  }
-
-  .setting-input {
-    width: 210px;
-  }
+@container (max-width: 900px) {
+  .settings-tabbar { flex-wrap: wrap; gap: 0; }
+  .settings-tabs { flex-basis: 100%; }
+  .settings-toolbar { width: 100%; padding: 8px 0; }
 }
 
 .sr-only {
@@ -1299,7 +1125,7 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-// Anchor wrapper for inline t-popconfirm on inputs (SSRF / admins /
+// Anchor wrapper for inline t-popconfirm on inputs (SSRF /
 // high-risk select). Popconfirm attaches to this box so the bubble
 // appears beside the control, not a full-screen modal.
 .setting-control-anchor {
@@ -1318,13 +1144,7 @@ onUnmounted(() => {
   font-size: var(--app-text-md);
 }
 
-// Skeleton mirrors GeneralSettings.vue 1:1 so the two panes feel like
-// they came from the same hand. Values that diverge intentionally:
-//   - .setting-label is a flex container (vs General's plain <label>)
-//     because we render badges inline with the title; identical font /
-//     spacing otherwise.
-//   - .desc has a max-width so long backend descriptions don't push
-//     the control off the canvas in narrow viewports.
+// All settings tabs share one description/control grid.
 .settings-group {
   display: flex;
   flex-direction: column;
@@ -1333,10 +1153,18 @@ onUnmounted(() => {
 
 .setting-row {
   .setting-row();
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 32px;
+  padding: 24px 0;
+
+  &:first-child { padding-top: 0; }
 }
 
 .setting-info {
   .setting-info();
+  max-width: none;
+  padding-right: 0;
 }
 
 .setting-label {
@@ -1359,8 +1187,8 @@ onUnmounted(() => {
   font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   margin: 0;
-  line-height: 1.5;
-  max-width: 480px;
+  line-height: 1.65;
+  max-width: 600px;
 }
 
 .setting-meta {
@@ -1371,6 +1199,7 @@ onUnmounted(() => {
 
 .setting-control {
   .setting-control();
+  min-width: 0;
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
@@ -1388,14 +1217,6 @@ onUnmounted(() => {
   justify-content: flex-end;
 }
 
-.setting-saving {
-  // Pin width so the row layout doesn't reflow when the spinner
-  // appears / disappears mid-save.
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
 .setting-input {
   width: 240px;
 }
@@ -1404,57 +1225,9 @@ onUnmounted(() => {
   width: 320px;
 }
 
-.password-reset-trigger,
-.create-user-trigger {
-  min-width: 112px;
-  height: 32px;
-  padding: 0 12px;
-  border: 1px solid transparent;
-  border-radius: var(--app-radius-sm);
-}
-
-.password-reset-trigger {
-  color: var(--td-error-color);
-  background: var(--td-error-color-light);
-
-  &:hover {
-    color: var(--td-error-color-hover);
-    background: var(--td-error-color-light-hover);
-    border-color: var(--td-error-color-focus);
-  }
-
-  &:active {
-    color: var(--td-error-color-active);
-    background: var(--td-error-color-focus);
-  }
-}
-
 @media (max-width: 860px) {
-  .settings-section-intro {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .runtime-table-header {
-    display: none;
-  }
-
-  .settings-group--runtime {
-    border-radius: var(--app-radius-md);
-
-    .setting-row {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    .setting-input {
-      width: 100%;
-    }
-  }
-
   .setting-row {
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
     gap: 12px;
   }
 

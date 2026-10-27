@@ -64,3 +64,13 @@ test('image-heavy steps recover exact instructions around font arrows and page g
   assert.ok(r.targets.some(t => t.quote?.includes('申请选修')))
   assert.ok(r.targets.every(t => !t.quote?.includes('额外说明')))
 })
+
+
+test('table cell spans include original combining marks after canonical matching', () => {
+  const page = 'Maths Cafe\u0301\nPhysics Andre\u0301\nHistory Chloe\u0301\nBiology Renee\u0301'
+  const scope = '|Maths Physics History Biology|Café André Chloé Reneé|'
+  const hits = findTableSource([page], scope)
+  assert.equal(hits.length, 8)
+  assert.ok(hits.some(hit => hit.quote === 'Cafe\u0301'))
+  for (const hit of hits) assert.equal(page.slice(hit.start, hit.end), hit.quote)
+})

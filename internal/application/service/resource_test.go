@@ -123,6 +123,36 @@ func TestResourceCatalogReleaseUnknownReference(t *testing.T) {
 	require.Error(t, err, "an owner is required to release a claim")
 }
 
+func TestResourceCatalogListReferencesByOwner(t *testing.T) {
+	catalog, _ := newResourceCatalogForTest(t)
+	ctx := context.Background()
+	first, err := catalog.Register(ctx, 7, "local://7/exports/a.png", interfaces.ResourceRegistration{})
+	require.NoError(t, err)
+	second, err := catalog.Register(ctx, 7, "local://7/exports/b.png", interfaces.ResourceRegistration{})
+	require.NoError(t, err)
+	require.NoError(t, catalog.Bind(ctx, first, types.ResourceOwnerKnowledge, "kn-1", types.ResourceRelationAttachment))
+	require.NoError(t, catalog.Bind(
+		ctx, second, types.ResourceOwnerKnowledge, "kn-1", types.ResourceRelationExtractedImage))
+	require.NoError(t, catalog.Bind(ctx, first, types.ResourceOwnerKnowledge, "kn-2", types.ResourceRelationAttachment))
+
+	source, err := catalog.Register(ctx, 7, "local://7/docs/source.pdf", interfaces.ResourceRegistration{})
+	require.NoError(t, err)
+	require.NoError(t, catalog.Bind(
+		ctx, source, types.ResourceOwnerKnowledge, "kn-1", types.ResourceRelationSourceFile))
+
+	refs, err := catalog.ListReferencesByOwner(ctx, types.ResourceOwnerKnowledge, "kn-1")
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{first, second}, refs)
+
+	refs, err = catalog.ListReferencesByOwner(ctx, types.ResourceOwnerKnowledge, "kn-1", "kn-2")
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{first, second}, refs)
+
+	refs, err = catalog.ListReferencesByOwner(ctx, types.ResourceOwnerKnowledge)
+	require.NoError(t, err)
+	require.Empty(t, refs)
+}
+
 // Rendering one answer resolves the same image many times, and re-reading a
 // message history resolves it again on every call. Each resolution used to
 // insert a capability row; a live one must be reused instead.
@@ -215,4 +245,51 @@ func TestResourceCatalogRejectsUnsupportedPhysicalPath(t *testing.T) {
 	catalog, _ := newResourceCatalogForTest(t)
 	_, err := catalog.Register(context.Background(), 7, "https://example.com/a.png", interfaces.ResourceRegistration{})
 	require.ErrorContains(t, err, "unsupported provider")
+}
+
+// Register deduplicates by physical location only. Content is a second identity
+// the extractor needs: the same image pulled from two pages is written to two
+// paths, and only the payload hash can tell that it is one stored object.
+func TestResourceCatalogReuseByContentHashIsScopedToTenant(t *testing.T) {
+	catalog, _ := newResourceCatalogForTest(t)
+	ctx := context.Background()
+	ref, err := catalog.Register(ctx, 7, "local://7/exports/a.png", interfaces.ResourceRegistration{
+		Kind:        "image",
+		ContentHash: "hash-a",
+	})
+	require.NoError(t, err)
+
+	reused, ok, err := catalog.ReuseByContentHash(ctx, 7, "hash-a")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, ref, reused)
+
+	for label, tenantID := range map[string]uint64{"other tenant": 8, "zero tenant": 0} {
+		reused, ok, err = catalog.ReuseByContentHash(ctx, tenantID, "hash-a")
+		require.NoError(t, err, label)
+		require.Falsef(t, ok, "case %s", label)
+		require.Emptyf(t, reused, "case %s", label)
+	}
+
+	_, ok, err = catalog.ReuseByContentHash(ctx, 7, "hash-missing")
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+// A temporary resource is scratch storage that its owner may delete at any
+// time; aliasing a long-lived reference onto it would let that cleanup remove
+// bytes the reusable caller still serves.
+func TestResourceCatalogReuseByContentHashSkipsTemporaryResources(t *testing.T) {
+	catalog, _ := newResourceCatalogForTest(t)
+	ctx := context.Background()
+	_, err := catalog.Register(ctx, 7, "local://7/tmp/a.png", interfaces.ResourceRegistration{
+		Kind:        "image",
+		ContentHash: "hash-temp",
+		Temporary:   true,
+	})
+	require.NoError(t, err)
+
+	_, ok, err := catalog.ReuseByContentHash(ctx, 7, "hash-temp")
+	require.NoError(t, err)
+	require.False(t, ok)
 }

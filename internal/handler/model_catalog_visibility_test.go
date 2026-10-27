@@ -8,9 +8,73 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/models/providers"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 )
+
+func TestAliyunMultimodalEmbeddingsAreSelectable(t *testing.T) {
+	vendor, ok := modelruntime.Get(providers.AliyunID)
+	if !ok {
+		t.Fatal("Aliyun provider is not registered")
+	}
+	entries := providerDTO(vendor, types.ModelTypeEmbedding, true).Models
+	for id, dimension := range map[string]int{
+		"qwen3-vl-embedding":            2560,
+		"qwen2.5-vl-embedding":          1024,
+		"tongyi-embedding-vision-flash": 768,
+		"multimodal-embedding-v1":       1024,
+	} {
+		t.Run(id, func(t *testing.T) {
+			var found bool
+			for _, entry := range entries {
+				if entry.ID == id {
+					found = true
+					if entry.Dimension != dimension || entry.Type != "embedding" {
+						t.Errorf("unexpected picker metadata: %+v", entry)
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("%s is missing from the model picker", id)
+			}
+			resolved, err := modelruntime.Resolve(modelruntime.Ref{
+				Provider: providers.AliyunID, Model: id, ModelType: types.ModelTypeEmbedding,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolved.EmbeddingAPI != api.EmbeddingDashScope {
+				t.Errorf("model must keep the native DashScope protocol, got %s", resolved.EmbeddingAPI)
+			}
+		})
+	}
+}
+
+func TestProviderDTOIncludesEffectiveDefaultURLs(t *testing.T) {
+	for _, vendor := range modelruntime.List() {
+		t.Run(vendor.ID, func(t *testing.T) {
+			got := providerDTO(vendor, types.ModelTypeASR, true)
+			for _, kind := range vendor.ModelTypes {
+				want := vendor.GetDefaultURL(kind)
+				if got.DefaultURLs[modelTypeToFrontend(kind)] != want {
+					t.Errorf("%s default URL = %q, want runtime default %q",
+						kind, got.DefaultURLs[modelTypeToFrontend(kind)], want)
+				}
+			}
+			if vendor.ID == providers.ZhipuID {
+				if got.DefaultURLs["asr"] != providers.ZhipuBaseURL {
+					t.Errorf("Zhipu ASR must prefill its own endpoint, got %q", got.DefaultURLs["asr"])
+				}
+				if len(got.Models) != 1 || got.Models[0].ID != "glm-asr-2512" {
+					t.Errorf("unexpected Zhipu ASR models: %+v", got.Models)
+				}
+			}
+		})
+	}
+}
 
 // listProvidersAs drives the real handler with one tenant role.
 func listProvidersAs(t *testing.T, role types.TenantRole) []map[string]any {

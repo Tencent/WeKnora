@@ -54,7 +54,7 @@ r.GET("/health", func(c *gin.Context) {
 
 - 底层为**私有** logrus 实例（`appLogger`，避免外部依赖改写全局 logrus 导致日志丢失），自定义 `CustomFormatter`。
 - 默认单行格式：`LEVEL[时间戳] [request_id 字段...] caller | message`，caller 为 `文件:行[函数名]`（`addCaller`）。
-- 可通过 `LOG_FORMAT` 环境变量提供模板，占位符：`%d`=时间、`%level`=级别、`%thread`=goroutine ID（仅模板引用时才取，避免每条日志跑 `runtime.Stack`）、`%logger`=caller、`%traceId`=request_id、`%msg`=消息+结构化字段。单趟 `strings.NewReplacer` 替换避免二次替换问题。
+- 可通过 `WEKNORA_LOG_FORMAT` 环境变量提供模板，占位符：`%d`=时间、`%level`=级别、`%thread`=goroutine ID（仅模板引用时才取，避免每条日志跑 `runtime.Stack`）、`%logger`=caller、`%traceId`=request_id、`%msg`=消息+结构化字段。单趟 `strings.NewReplacer` 替换避免二次替换问题。非空模板必须包含 `%msg`，否则输出警告并使用默认格式；`json` 不是受支持的格式关键字。新变量未设置时兼容旧 `LOG_FORMAT`（提示弃用），显式设为空则使用默认格式并禁用旧变量回退。
 - 级别由 `LOG_LEVEL` 控制（`debug`/`info`/`warn`/`error`/`fatal`，未设置或非法时**默认 debug**）。
 - 颜色：stdout 是终端时启用 ANSI 颜色；非终端（Docker 采集）禁用；写文件时 `ansiStripWriter` 剥离 ANSI 序列保持纯文本。
 - 结构化字段 API：`logger.WithField(ctx, k, v)` / `WithFields` 把带字段的 entry 存进 context（`types.LoggerContextKey`），后续 `logger.Infof(ctx, ...)` 自动携带；`WarnWithFields` 专用于审计相关事件（跨租户探测、不变量破坏），便于日志聚合器按 tenant/资源索引。
@@ -135,6 +135,23 @@ flowchart LR
     F --> G["AsynqMiddleware<br/>Span: asynq.document:process"]
     G --> H["Generation: embedding / vlm / chat"]
 ```
+
+#### 检索调用与诊断记录
+
+`embedding.embed`、`retrieve`、`rerank` 分别记录 query 向量计算、实际检索阶段和重排模型调用的耗时。以 `diagnostics.` 开头的节点只记录已有结果的统计和筛选判定，不会额外发起检索或模型请求，也不应当作独立调用统计。
+
+| 诊断节点 | 含义 |
+| --- | --- |
+| `diagnostics.retrieval.vector.result_pool.initial` | 向量检索首次返回的结果池 |
+| `diagnostics.retrieval.keywords.result_pool.initial` | 关键词检索首次返回的结果池 |
+| `diagnostics.retrieval.<vector/keywords>.result_pool.refill` | 补充检索返回的结果池，仅在实际发生补充检索时出现 |
+| `diagnostics.retrieval.<vector/keywords>.filter_decision` | 应用过滤前的结果池及保留/淘汰判定 |
+| `diagnostics.retrieval.fusion.candidate_selection` | 融合后按候选数量上限截断的判定 |
+| `diagnostics.rerank.selection` | 重排后的保留/淘汰判定 |
+
+这些结果池包含文本、摘要、图片描述、OCR 和原图向量等符合查询范围的记录，并非只检索图片。总数统计覆盖全部候选，`image_samples` 只抽样展示原图向量命中；metadata 中用 `observation_kind=diagnostic` 和 `sample_scope=image_vectors` 标明用途。没有补充检索时，`result_pool.initial` 和 `filter_decision` 的样本可能相同，表示同一批数据在两个阶段被观察。
+
+命名调整只影响新产生的追踪；历史记录保留原来的 `retrieval.image_*` 和 `rerank.selection` 名称。按节点名称过滤的仪表盘或查询需同步调整。
 
 #### 每轮用量、调用用途与缓存
 

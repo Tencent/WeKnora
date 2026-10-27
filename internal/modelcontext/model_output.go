@@ -58,7 +58,8 @@ func (r *sourceRegistry) ModelOutput(result *types.ToolResult) string {
 		return annotateGraphResult(
 			r.modelKnowledgeOutput("graph", mapsValue(result.Data["results"]), result.Output), result.Data)
 	case "web_search_results":
-		return r.modelWebSearchOutput(mapsValue(result.Data["results"]), result.Output)
+		return annotateWebSearchNotes(
+			r.modelWebSearchOutput(mapsValue(result.Data["results"]), result.Output), result.Data)
 	case "database_query":
 		return r.modelDatabaseQueryOutput(mapsValue(result.Data["rows"]), result.Output)
 	default:
@@ -337,29 +338,48 @@ func annotateGraphResult(output string, data map[string]interface{}) string {
 // graphTruncationNote states inside the model's view the caps the graph query
 // tool hit. shownRelations is how many relations that view carries; the tool
 // reports the totals under relations_total / graph_chunks_total /
-// query_terms_total. It returns "" when nothing was dropped, so a complete
-// result stays clean.
+// query_terms_total. A validation-limit marker also travels independently of
+// those counts, including when no valid evidence was found.
 func graphTruncationNote(data map[string]interface{}, shownRelations int) string {
 	totalRelations := intValue(data, "relations_total")
 	totalChunks := intValue(data, "graph_chunks_total")
 	fetchedChunks := totalChunks - intValue(data, "graph_chunks_omitted")
 	totalTerms := intValue(data, "query_terms_total")
-	if totalRelations <= shownRelations && totalChunks <= fetchedChunks && totalTerms <= 0 {
+	validationLimited := boolValue(data, "graph_validation_truncated")
+	if !validationLimited && totalRelations <= shownRelations && totalChunks <= fetchedChunks && totalTerms <= 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("  <graph_truncated")
-	if totalRelations > shownRelations {
-		fmt.Fprintf(&b, " relations_shown=\"%d\" relations_total=\"%d\"", shownRelations, totalRelations)
+	if validationLimited {
+		fmt.Fprintf(&b, " validation_stopped=\"true\" candidates_validated_total=\"%d\" validation_limit_per_kb=\"%d\"",
+			intValue(data, "graph_candidates_validated_total"), intValue(data, "graph_validation_limit_per_kb"))
 	}
-	if totalChunks > fetchedChunks {
-		fmt.Fprintf(&b, " chunks_fetched=\"%d\" chunks_total=\"%d\"", fetchedChunks, totalChunks)
+	if totalRelations > shownRelations || validationLimited {
+		totalAttribute := "relations_total"
+		if boolValue(data, "relations_total_is_lower_bound") {
+			totalAttribute = "relations_total_at_least"
+		}
+		fmt.Fprintf(&b, " relations_shown=\"%d\" %s=\"%d\"", shownRelations, totalAttribute, totalRelations)
+	}
+	if totalChunks > fetchedChunks || validationLimited {
+		totalAttribute := "chunks_total"
+		if boolValue(data, "graph_chunks_total_is_lower_bound") {
+			totalAttribute = "chunks_total_at_least"
+		}
+		fmt.Fprintf(&b, " chunks_fetched=\"%d\" %s=\"%d\"", fetchedChunks, totalAttribute, totalChunks)
 	}
 	if totalTerms > 0 {
 		fmt.Fprintf(&b, " terms_shown=\"%d\" terms_total=\"%d\"",
 			totalTerms-intValue(data, "query_terms_omitted"), totalTerms)
 	}
 	b.WriteString(">This graph query stopped at a result cap, so it is not the complete picture: ")
+	if validationLimited {
+		fmt.Fprintf(&b, "evidence validation stopped at %d candidates per knowledge base; "+
+			"some candidate evidence was not checked. Found at least %d valid in-scope evidence chunks "+
+			"and at least %d supported relations. ",
+			intValue(data, "graph_validation_limit_per_kb"), totalChunks, totalRelations)
+	}
 	if totalRelations > shownRelations {
 		b.WriteString("the relations listed are a subset of these entities' relations, ")
 	}
@@ -377,12 +397,21 @@ func graphTruncationNote(data map[string]interface{}, shownRelations int) string
 // annotateSearchNotes tells the model what a search result does not show:
 // how many lower-ranked results were left out to fit the tool output budget
 // (so it narrows the query or lowers the limit instead of concluding nothing
-// else matched), and which knowledge bases could not be searched (so a
-// failure is not read as an absence of evidence).
+// else matched), how much of the ranked candidate pool the rendered passages
+// stand for, and which knowledge bases could not be searched (so a failure is
+// not read as an absence of evidence).
 func annotateSearchNotes(output string, data map[string]interface{}) string {
 	omitted := intValue(data, "omitted_for_budget")
 	failures := stringSliceValue(data["partial_failures"])
-	if (omitted <= 0 && len(failures) == 0) || !strings.HasSuffix(output, "</retrieval>") {
+	// retrieval_candidates is the candidate pool of the first ranked-filter
+	// stage that dropped anything (rerank, merge or FILTER_TOP_K), not the
+	// number of matches in the knowledge base, which retrieval never computes
+	// at that depth; retrieval_shown is how many knowledge passages this view
+	// renders out of that pool. Both count passages.
+	shown := intValue(data, "retrieval_shown")
+	candidates := intValue(data, "retrieval_candidates")
+	truncated := shown > 0 && candidates > shown
+	if (omitted <= 0 && len(failures) == 0 && !truncated) || !strings.HasSuffix(output, "</retrieval>") {
 		return output
 	}
 	var b strings.Builder
@@ -390,11 +419,42 @@ func annotateSearchNotes(output string, data map[string]interface{}) string {
 		fmt.Fprintf(&b, "  <omitted count=\"%d\" reason=\"output_budget\">Lower-ranked results were left out to "+
 			"fit the output size. Narrow the query or lower limit to see them.</omitted>\n", omitted)
 	}
+	if truncated {
+		// The caveat is conditional on purpose: a truncated view is the norm
+		// for a ranked retrieval, so an unconditional "the answer may be
+		// incomplete" would add a disclaimer to ordinary factual answers that
+		// the subset does not affect. Only counting and exhaustive-list
+		// questions have to report the scope of what was read.
+		fmt.Fprintf(&b, "  <subset shown=\"%d\" candidates=\"%d\">If the question asks for a count or an "+
+			"exhaustive list, state that the provided context contains only the top %d of %d candidate "+
+			"passages at this filtering stage, and do not treat these passage counts as the requested "+
+			"total; otherwise answer normally without adding a disclaimer solely because of this "+
+			"truncation.</subset>\n", shown, candidates, shown, candidates)
+	}
 	for _, failure := range failures {
 		fmt.Fprintf(&b, "  <partial_failure>%s — these knowledge bases were not searched.</partial_failure>\n",
 			escapeText(failure))
 	}
 	return strings.TrimSuffix(output, "</retrieval>") + b.String() + "</retrieval>"
+}
+
+// annotateWebSearchNotes restates a clamped count inside the retrieval block.
+// web_search also writes the note into ToolResult.Output, but once there is at
+// least one row the model only sees this rendered view, so the note has to
+// travel in Data — the same reason annotateSearchNotes reads Data, not Output.
+func annotateWebSearchNotes(output string, data map[string]interface{}) string {
+	if !boolValue(data, "count_clamped") || !strings.HasSuffix(output, "</retrieval>") {
+		return output
+	}
+	requested := intValue(data, "count_requested")
+	maximum := intValue(data, "count_maximum")
+	if requested < 1 || maximum < 1 {
+		return output
+	}
+	note := fmt.Sprintf("  <count_clamped requested=\"%d\" maximum=\"%d\">The requested count is "+
+		"outside 1-%d and was clamped to %d. Ask for a value in range, or omit count to use the "+
+		"maximum.</count_clamped>\n", requested, maximum, maximum, maximum)
+	return strings.TrimSuffix(output, "</retrieval>") + note + "</retrieval>"
 }
 
 func viewForRow(row map[string]interface{}, mode string) string {
@@ -438,7 +498,7 @@ func (r *sourceRegistry) modelKnowledgeChunksOutput(data map[string]interface{},
 			fmt.Fprintf(&b, "    <matches query=\"%s\" count=\"0\" />\n", escapeAttr(query))
 			b.WriteString("    <hint>No chunk contains every word of the query. Retry with fewer or different " +
 				"words (the document's own language and terms), or read a chunk from search_knowledge " +
-				"results with id=cN and context.</hint>\n")
+				"results with id=chunk://N and context.</hint>\n")
 		}
 		b.WriteString("  </document>\n</retrieval>")
 		return b.String()
@@ -703,7 +763,13 @@ func (r *sourceRegistry) modelWebFetchOutput(rows []map[string]interface{}, fall
 		if status == "" {
 			status = "success"
 		}
-		fmt.Fprintf(&b, "  <page id=\"%s\" status=\"%s\"", handle, escapeAttr(status))
+		if handle == "" {
+			// Unknown references must not become page IDs: a later real page may
+			// legitimately receive that ID in this registry.
+			fmt.Fprintf(&b, "  <page requested_reference=\"%s\" status=\"%s\"", escapeAttr(rawURL), escapeAttr(status))
+		} else {
+			fmt.Fprintf(&b, "  <page id=\"%s\" status=\"%s\"", escapeAttr(handle), escapeAttr(status))
+		}
 		if title != "" {
 			fmt.Fprintf(&b, " title=\"%s\"", escapeAttr(title))
 		}

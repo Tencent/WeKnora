@@ -40,10 +40,11 @@ func newMCPAuthTestEngine(svc *fakeMCPEndpointService, capture *map[string]any) 
 		tenantID, _ := types.TenantIDFromContext(ctx)
 		principal, _ := types.PrincipalFromContext(ctx)
 		*capture = map[string]any{
-			"endpoint":  ep,
-			"scope":     scope,
-			"tenant":    tenantID,
-			"principal": principal,
+			"endpoint":   ep,
+			"scope":      scope,
+			"tenant":     tenantID,
+			"principal":  principal,
+			"authSource": types.PrincipalAuthSourceFromContext(ctx),
 		}
 		c.Status(http.StatusNoContent)
 	})
@@ -83,6 +84,9 @@ func TestMCPEndpointAuthAttachesScopeAndPrincipal(t *testing.T) {
 	principal := captured["principal"].(types.Principal)
 	if principal.Type != types.PrincipalMCPEndpoint || principal.ID != "42:ep-1" {
 		t.Fatalf("principal = %+v", principal)
+	}
+	if got, _ := captured["authSource"].(string); got != types.AuthSourceMCPEndpoint {
+		t.Fatalf("auth source = %q", got)
 	}
 }
 
