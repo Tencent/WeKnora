@@ -1465,7 +1465,9 @@ func (e *AgentEngine) runReActIteration(
 		logger.Warnf(ctx, "[Agent][Round-%d] Detected stuck loop: successful call to %q "+
 			"repeated %d times with no output, stopping", round, identicalToolName, identicalToolCount)
 		if e.collaborationOwnsFailure(ctx) {
-			return iterOutcomeBreak, fmt.Errorf("collaboration stopped after identical successful calls without progress")
+			return iterOutcomeBreak, fmt.Errorf(
+				"collaboration stopped after identical successful calls without progress",
+			)
 		}
 		e.finishStalledTurn(ctx, state, sessionID, response, false)
 		return iterOutcomeBreak, nil
